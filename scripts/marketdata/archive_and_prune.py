@@ -28,7 +28,7 @@ COMPOSE = ['/opt/homebrew/bin/docker', 'compose', '-f', os.path.join(HOME, 'code
 
 # table -> (timestamp column, default days to keep hot)
 ARCHIVABLE = {
-    'tushare_raw_records':           ('available_at', 180),
+    'tushare_raw_records':           ('available_at', 90),
     'intraday_quote_observations':   ('observed_at', 90),
     # The table stores the causal observation clock as ``observed_at``;
     # ``captured_at`` was a stale name and made this archive path fail before
