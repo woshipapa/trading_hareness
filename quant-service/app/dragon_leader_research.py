@@ -119,13 +119,15 @@ def dragon_leader_score(item: dict[str, Any], *, market: dict[str, Any]) -> dict
 
     available_score = market_score + leader_score + components["theme_strength"]["score"] + chip_score - risk_penalty
     available_max = 8.0 + 20.0 + 15.0 + 20.0
+    evidence_max = 8.0 + 20.0 + (15.0 if components["theme_strength"]["status"] == "observed" else 0.0) + (20.0 if components["chip_structure"]["status"] == "observed" else 0.0)
     return {
         "model_version": SCORE_MODEL_VERSION,
         "status": "partial_shadow",
         "live_effect": "none",
         "score": round(max(0.0, available_score), 2),
         "max_available_score": available_max,
-        "coverage_ratio": round((8.0 + 20.0 + (15.0 if components["theme_strength"]["status"] == "observed" else 0.0) + (20.0 if components["chip_structure"]["status"] == "observed" else 0.0)) / 78.0, 3),
+        "coverage_ratio": round(evidence_max / 90.0, 3),
+        "score_scale": "available_components_only; not comparable to a complete 0-100 live score",
         "components": components,
         "reasons": reasons,
         "risk_flags": risk_flags,
