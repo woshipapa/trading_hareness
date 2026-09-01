@@ -2,10 +2,28 @@ from __future__ import annotations
 
 import unittest
 
-from app.dragon_leader_research import enrich_dragon_leader_watches, rank_dragon_leader_candidates
+from app.dragon_leader_research import dragon_leader_score, enrich_dragon_leader_watches, rank_dragon_leader_candidates
 
 
 class DragonLeaderResearchTests(unittest.TestCase):
+    def test_score_shadow_exposes_components_and_stays_non_live(self) -> None:
+        item = {
+            "ts_code": "000001.SZ", "board_count": 3, "status": "T字板",
+            "limit_context": {"turnover_rate": 18.0},
+            "daily_features": {"volume_multiple_5d": 1.8},
+            "board_context": {"exact_member_mapping": True, "flow_percentile": 0.9},
+            "lhb_context": {"institution_net_buy": -1_000_000},
+            "dragon_leader_watch": {"leader_rank": 1, "theme_context": {
+                "observable_limit_up_count": 4, "observable_multi_board_count": 2,
+            }},
+        }
+        score = dragon_leader_score(item, market={"highest_observed_streak": 3, "observable_multi_board_count": 3})
+        self.assertEqual(score["status"], "partial_shadow")
+        self.assertEqual(score["live_effect"], "none")
+        self.assertIsNone(score["components"]["intraday_confirmation"]["score"])
+        self.assertIn("lhb_institution_net_sell", score["risk_flags"])
+        self.assertGreater(score["score"], 0)
+
     def test_theme_ladder_is_a_manual_review_not_an_order(self) -> None:
         items = [
             {

@@ -1,0 +1,24 @@
+# /etc/systemd/system/itougu-neican.service
+[Unit]
+Description=爱投顾内参 → 飞书 轮询 (A股交易时段, 每15s)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/itougu-neican.env
+WorkingDirectory=/opt/itougu-neican
+ExecStart=/usr/bin/python3 /opt/itougu-neican/itougu_neican_relay.py --loop --interval 15 --trading-hours-only
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StateDirectory=itougu-neican
+ReadWritePaths=/var/lib/itougu-neican
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
