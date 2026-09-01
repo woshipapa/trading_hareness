@@ -63,6 +63,31 @@ class IntradaySurgeContextServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_evidence["provider_status"], "completed")
         self.assertEqual(second_evidence["provider_status"], "cached")
 
+    async def test_quote_anomaly_priority_precedes_capped_passive_basket(self):
+        calls: list[str] = []
+
+        async def fetch(symbol: str):
+            calls.append(symbol)
+            return [{"time": "10:00", "close": 1}]
+
+        async def open_capabilities(_provider, _capabilities):
+            return set()
+
+        async def run_database(action, *args, **_kwargs):
+            return action(*args)
+
+        features, evidence = await capture(
+            [{"symbol": "000001.SZ", "metadata": {}}, {"symbol": "300364.SZ", "metadata": {}}],
+            priority_symbols=["300364.SZ"], mapped_peers=None, cache={}, max_symbols=lambda: 1,
+            open_capabilities=open_capabilities, capability="tencent_intraday_minute", fetch_minutes=fetch,
+            minute_features=lambda rows, **_kwargs: {"latest": rows[-1]}, persist_health=lambda *_args: None,
+            run_database=run_database, safe_error=lambda value, _limit: value,
+            handled_errors=(asyncio.TimeoutError, ValueError),
+        )
+        self.assertEqual(calls, ["300364.SZ"])
+        self.assertEqual(list(features), ["300364.SZ"])
+        self.assertEqual(evidence["priority"]["quote_anomaly_symbols"], ["300364.SZ"])
+
 
 if __name__ == "__main__":
     unittest.main()
