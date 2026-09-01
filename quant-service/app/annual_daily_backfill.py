@@ -99,6 +99,12 @@ CORE_DAILY_SPECS = (
     ApiSpec("stock_st", "primary", legal_empty=True, promote="stock_st", fallback_provider_name="super_sdk"),
 )
 
+# Dated suspension/ST cross-sections remain available for an explicitly
+# requested study, but are outside the current daily repair scope.  Keeping
+# them opt-in avoids spending provider quota on data the active strategies do
+# not consume.
+OPTIONAL_STATUS_API_NAMES = frozenset({"suspend_d", "stock_st"})
+
 SECTOR_EVENT_SPECS = (
     ApiSpec("moneyflow_ind_ths", "super_sdk", 50, promote="industry_flow"),
     ApiSpec("moneyflow_cnt_ths", "super_sdk", 300, promote="concept_flow"),
@@ -638,7 +644,7 @@ PROMOTERS: dict[str, Callable[..., None]] = {
 class AnnualDailyBackfill:
     def __init__(
         self, database: Database, start_date: date, end_date: date, *, include_sector_events: bool = True,
-        include_index: bool = True,
+        include_index: bool = True, include_status_controls: bool = False,
     ) -> None:
         validate_range(start_date, end_date)
         self.db = database
@@ -646,6 +652,7 @@ class AnnualDailyBackfill:
         self.end_date = end_date
         self.include_sector_events = bool(include_sector_events)
         self.include_index = bool(include_index)
+        self.include_status_controls = bool(include_status_controls)
         self.providers = provider_configs()
         self.failures: list[dict[str, Any]] = []
         self.counts: dict[str, int] = {}
@@ -656,6 +663,12 @@ class AnnualDailyBackfill:
         # dead proxy from adding a timeout per day while preserving the normal
         # live preference for Super GET in a fresh batch.
         self._batch_suppressed_candidates: dict[tuple[str, str], str] = {}
+
+    def _core_specs(self) -> tuple[ApiSpec, ...]:
+        """Apply the explicit status-control scope to the daily lane."""
+        if self.include_status_controls:
+            return CORE_DAILY_SPECS
+        return tuple(spec for spec in CORE_DAILY_SPECS if spec.api_name not in OPTIONAL_STATUS_API_NAMES)
 
     def _prepare_run(self, provider_key: str, api_name: str, params: dict[str, Any], day: date | None) -> tuple[str, bool]:
         key = request_key(provider_key, api_name, params)
@@ -940,23 +953,22 @@ class AnnualDailyBackfill:
         return days
 
     async def core_lane(self, days: list[date]) -> None:
+        specs = self._core_specs()
         for index, day in enumerate(days, start=1):
             self._enforce_hot_storage_budget()
             stamp = day.strftime("%Y%m%d")
             # City/Super SDK accepts three mixed full-market requests per
-            # observed rolling window.  Split the five independent control
-            # cross-sections into 3+2: it avoids a reset on ``stk_limit`` and
-            # ``suspend_d`` without slowing realtime routes or re-fetching a
-            # day whose cross-sections were already checkpointed.
+            # observed rolling window. Status controls are only included when
+            # explicitly opted in and cannot consume repair quota by default.
             first_results = await asyncio.gather(*(
                 self.fetch_one(spec, {"trade_date": stamp}, day=day)
-                for spec in CORE_DAILY_SPECS[:3]
+                for spec in specs[:3]
             ))
             if any(result != "skipped" for result in first_results):
                 await asyncio.sleep(HISTORICAL_SUPER_SDK_GROUP_COOLDOWN_SECONDS)
             await asyncio.gather(*(
                 self.fetch_one(spec, {"trade_date": stamp}, day=day)
-                for spec in CORE_DAILY_SPECS[3:]
+                for spec in specs[3:]
             ))
             if index == 1 or index % 10 == 0 or index == len(days):
                 print(json.dumps({"lane": "core", "day": str(day), "progress": f"{index}/{len(days)}", "failures": len(self.failures)}), flush=True)
@@ -1182,7 +1194,7 @@ class AnnualDailyBackfill:
         original receipt timestamp remains recoverable as ``ingested_at`` on
         the facts being reprojected.
         """
-        specs = (*CORE_DAILY_SPECS, *SECTOR_EVENT_SPECS, ApiSpec("index_daily", "primary", promote="index_daily"))
+        specs = (*self._core_specs(), *SECTOR_EVENT_SPECS, ApiSpec("index_daily", "primary", promote="index_daily"))
         api_names = [item.api_name for item in specs]
         with self.db.transaction() as connection:
             day_rows = connection.execute(
@@ -1256,7 +1268,8 @@ class AnnualDailyBackfill:
             if self.include_sector_events:
                 lanes.append(self.sector_lane(days))
             await asyncio.gather(*lanes)
-        self.reconcile_suspensions()
+        if self.include_status_controls:
+            self.reconcile_suspensions()
         sector_promotions = (
             self.promote_stored_sector_flows()
             if self.include_sector_events else {"status": "explicitly_skipped_for_this_range"}
@@ -1283,6 +1296,7 @@ class AnnualDailyBackfill:
             "reproject_only": reproject_only, "reprojected_row_counts": reprojection_counts,
             "sector_events": "included" if self.include_sector_events else "explicitly_skipped_for_this_range",
             "index_daily": "included" if self.include_index else "explicitly_skipped_for_this_range",
+            "status_controls": "included" if self.include_status_controls else "explicitly_skipped_for_this_range",
             "coverage": dict(coverage), "market_aggregates": market_aggregates,
             "universe_membership": universe_membership,
             "sector_promotions": sector_promotions,
@@ -1312,6 +1326,10 @@ def parser() -> argparse.ArgumentParser:
         "--skip-index", action="store_true",
         help="skip index_daily for a targeted daily/control-plane repair without altering existing index evidence",
     )
+    command.add_argument(
+        "--include-status-controls", action="store_true",
+        help="opt in to dated suspend_d and stock_st evidence; omitted for the current daily repair scope",
+    )
     return command
 
 
@@ -1327,7 +1345,7 @@ async def async_main() -> int:
     try:
         result = await AnnualDailyBackfill(
             database, args.start_date, args.end_date, include_sector_events=not args.skip_sector_events,
-            include_index=not args.skip_index,
+            include_index=not args.skip_index, include_status_controls=args.include_status_controls,
         ).run(
             reproject_only=args.reproject_only,
         )
@@ -1346,7 +1364,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "ApiSpec", "AnnualDailyBackfill", "CORE_DAILY_SPECS", "SECTOR_EVENT_SPECS",
+    "ApiSpec", "AnnualDailyBackfill", "CORE_DAILY_SPECS", "OPTIONAL_STATUS_API_NAMES", "SECTOR_EVENT_SPECS",
     "HISTORICAL_BACKFILL_CONFIRMATION", "INDEX_CODES", "request_key", "valid_rows",
     "validate_historical_backfill_confirmation", "validate_range",
 ]

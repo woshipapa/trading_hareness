@@ -38,6 +38,15 @@ runtime configuration and ownership, not a long-lived server branch: releases
 publish a Git SHA and image/source provenance through the loopback health
 endpoints, while secret environment files remain outside version control.
 
+The edge Feishu adapter also runs a separate Baidu market-archive lane. Every
+30 seconds it reads the latest all-A Level-1 and strategy snapshots, commits an
+idempotent job to the PostgreSQL archive ledger, and returns to the polling
+cadence. A bounded uploader drains that ledger independently with leases,
+retries and per-object paths under the Baidu research root. Cloud I/O cannot
+hold the quant collector's provider/database executor or suppress a later
+snapshot read; a non-zero queue is visible through
+`/api/baidu-pan/market-archive/status` and is drained after transient failures.
+
 `quant-service/app/main.py` is the composition root.  It owns application
 lifespan, dependency assembly and router registration.  New behaviour belongs
 in a focused module, then is injected from `main.py`; production modules must

@@ -147,7 +147,12 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 	const intervalMs = Math.max(10, Math.min(300, Number(intervalSeconds) || 30)) * 1000;
 	const archiveRoot = text(rootPath, DEFAULT_ROOT).replace(/\/$/, '') || DEFAULT_ROOT;
 	const enabledFlag = Boolean(enabled && baiduPan && ledger?.enqueueBaiduPanArchive && baseUrl);
-	let running = false;
+	// Polling and uploading are separate activities. A slow cloud upload must
+	// never suppress the next latest-snapshot read; the ledger is the durable
+	// hand-off between the two lanes.
+	let pollRunning = false;
+	let drainRunning = false;
+	let drainPromise = null;
 	let lastPollAt = null;
 	let lastSuccessAt = null;
 	let lastError = null;
@@ -209,19 +214,27 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 	}
 
 	async function drain() {
-		if (!enabledFlag || running) return;
-		running = true;
-		try {
-			const jobs = await ledger.claimBaiduPanArchives({ workerId: 'baidu-pan-market-archive', limit: 16, leaseSeconds: 300 });
-			for (const job of jobs) {
-				try { await uploadJob(job); }
-				catch (error) { await ledger.failBaiduPanArchive(job.archive_id, { errorMessage: String(error?.message ?? error), retryable: true }); logger.warn(`百度网盘研究快照归档失败：${error?.message ?? error}`); }
+		if (!enabledFlag) return;
+		if (drainPromise) return drainPromise;
+		drainRunning = true;
+		drainPromise = (async () => {
+			try {
+				const jobs = await ledger.claimBaiduPanArchives({ workerId: 'baidu-pan-market-archive', limit: 16, leaseSeconds: 300 });
+				for (const job of jobs) {
+					try { await uploadJob(job); }
+					catch (error) { await ledger.failBaiduPanArchive(job.archive_id, { errorMessage: String(error?.message ?? error), retryable: true }); logger.warn(`百度网盘研究快照归档失败：${error?.message ?? error}`); }
+				}
+			} finally {
+				drainRunning = false;
+				drainPromise = null;
 			}
-		} finally { running = false; }
+		})();
+		return drainPromise;
 	}
 
 	async function poll() {
-		if (!enabledFlag || running) return;
+		if (!enabledFlag || pollRunning) return;
+		pollRunning = true;
 		lastPollAt = new Date().toISOString();
 		try {
 			const results = await Promise.all(SNAPSHOT_SPECS.map(async (spec) => ({ spec, body: await fetchJson(spec.path) })));
@@ -235,7 +248,13 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 		} catch (error) {
 			lastError = String(error?.message ?? error).slice(0, 420);
 			logger.warn(`百度网盘研究快照轮询失败：${lastError}`);
-		} finally { await drain(); }
+		} finally {
+			pollRunning = false;
+			// Do not make the polling cadence wait on Baidu I/O. A later poll
+			// (or this best-effort kick) continues draining the durable queue if
+			// the current upload batch is still in flight.
+			void drain().catch((error) => logger.warn(`百度网盘研究快照排空失败：${error?.message ?? error}`));
+		}
 	}
 
 	return {
@@ -243,7 +262,19 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 		intervalMs,
 		poll,
 		drain,
-		status: async () => ({ enabled: enabledFlag, running, interval_seconds: intervalMs / 1000, last_poll_at: lastPollAt, last_success_at: lastSuccessAt, last_error: lastError, archived_in_process: archivedInProcess, queue: ledger.baiduPanArchiveStatus ? await ledger.baiduPanArchiveStatus() : null, root_path: archiveRoot }),
+		status: async () => ({
+			enabled: enabledFlag,
+			running: pollRunning || drainRunning,
+			poll_running: pollRunning,
+			drain_running: drainRunning,
+			interval_seconds: intervalMs / 1000,
+			last_poll_at: lastPollAt,
+			last_success_at: lastSuccessAt,
+			last_error: lastError,
+			archived_in_process: archivedInProcess,
+			queue: ledger.baiduPanArchiveStatus ? await ledger.baiduPanArchiveStatus() : null,
+			root_path: archiveRoot,
+		}),
 	};
 }
 

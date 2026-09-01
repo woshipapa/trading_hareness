@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.annual_daily_backfill import (
     CORE_DAILY_SPECS,
+    AnnualDailyBackfill,
     HISTORICAL_BACKFILL_CONFIRMATION,
     HISTORICAL_DAILY_AVAILABILITY_BASIS,
     SECTOR_EVENT_SPECS,
@@ -21,6 +22,16 @@ from app.universe_history import rebuild_historical_membership_from_canonical
 
 
 class AnnualDailyBackfillTests(unittest.TestCase):
+    def test_status_controls_are_opt_in_for_current_daily_repair_scope(self):
+        job = AnnualDailyBackfill(object(), date(2026, 8, 1), date(2026, 8, 1))
+        self.assertNotIn("suspend_d", {spec.api_name for spec in job._core_specs()})
+        self.assertNotIn("stock_st", {spec.api_name for spec in job._core_specs()})
+        opted_in = AnnualDailyBackfill(
+            object(), date(2026, 8, 1), date(2026, 8, 1), include_status_controls=True,
+        )
+        self.assertIn("suspend_d", {spec.api_name for spec in opted_in._core_specs()})
+        self.assertIn("stock_st", {spec.api_name for spec in opted_in._core_specs()})
+
     def test_scope_contains_no_minute_or_realtime_api(self):
         api_names = {spec.api_name for spec in (*CORE_DAILY_SPECS, *SECTOR_EVENT_SPECS)}
         self.assertFalse(any("min" in name or name.startswith("rt_") for name in api_names))

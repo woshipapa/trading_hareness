@@ -30,6 +30,7 @@ test('archives latest watchlist and leader evidence asynchronously with idempote
 	};
 	const archive = createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl: 'http://quant', enabled: true, fetchImpl, rootPath: '/archive' });
 	await archive.poll();
+	await archive.drain();
 	assert.equal(completed.length, 2);
 	assert.equal(uploaded.length, 2);
 	assert.ok(uploaded.some((path) => path.includes('/watchlist/')));
