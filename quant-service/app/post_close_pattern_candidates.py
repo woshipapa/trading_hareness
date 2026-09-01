@@ -13,7 +13,8 @@ from .dragon_leader_research import enrich_dragon_leader_watches
 def select_candidates(
     as_of_date: date, max_symbols: int, per_cohort: int,
     limit_rows: list[dict[str, Any]], step_rows: list[dict[str, Any]],
-    prior_limit_rows: list[dict[str, Any]], daily_rows: list[dict[str, Any]],
+    prior_limit_rows: list[dict[str, Any]], control_rows: list[dict[str, Any]],
+    daily_rows: list[dict[str, Any]],
     boards: dict[str, dict[str, Any]], lhb_by_symbol: dict[str, dict[str, Any]],
     focus_symbols: list[str] | None, *,
     limit_daily_features: Callable[[list[dict[str, Any]]], dict[str, Any]],
@@ -104,6 +105,7 @@ def select_candidates(
             selection_reasons.append(f"龙虎榜机构{direction}{abs(float(lhb_context.get('institution_net_buy') or 0)) / 10_000:.0f}万")
         items.append({"symbol": symbol, "name": raw.get("name"), "cohorts": cohorts, "board_context": board,
                       "limit_context": {**raw, "provider_key": stored.get("provider_key"), "streak_count": streak,
+                                        "sample_role": "positive_limit_pool",
                                         "continuation_watch": continuation,
                                         "preopen_context": prior_context.get(symbol),
                                         "preopen_limit_pool_rank": (prior_context.get(symbol) or {}).get("preopen_limit_pool_rank"),
@@ -152,9 +154,76 @@ def select_candidates(
                 seen.add(item["symbol"])
             if len(selected) >= max_symbols:
                 break
+    def number(value: Any) -> float | None:
+        try:
+            return float(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    def limit_bucket(daily: dict[str, Any]) -> int | None:
+        value = number(daily.get("limit_pct"))
+        return int(round(value)) if value is not None and value > 0 else None
+
+    controls_by_bucket: dict[int | None, list[dict[str, Any]]] = {}
+    for raw in control_rows:
+        control = dict(raw)
+        symbol = str(control.get("symbol") or "").upper()
+        daily = limit_daily_features(grouped.get(symbol, []))
+        if not symbol or daily.get("status") != "completed":
+            continue
+        controls_by_bucket.setdefault(limit_bucket(daily), []).append({
+            "symbol": symbol, "name": control.get("name"), "daily_features": daily,
+            "limit_gap_pct": number(control.get("limit_gap_pct")),
+            "selected_provider": control.get("selected_provider"),
+        })
+    for controls in controls_by_bucket.values():
+        controls.sort(key=lambda item: (float(item.get("limit_gap_pct") or 10_000), item["symbol"]))
+
+    selected_controls: list[dict[str, Any]] = []
+    used_controls: set[str] = set()
+    control_budget = min(len(control_rows), max(0, int(max_symbols)) * 2)
+    for positive in selected:
+        if len(selected_controls) >= control_budget:
+            break
+        bucket = limit_bucket(positive["daily_features"])
+        matches = [*controls_by_bucket.get(bucket, []), *controls_by_bucket.get(None, [])]
+        for control in matches:
+            if control["symbol"] in used_controls:
+                continue
+            used_controls.add(control["symbol"])
+            gap = control.get("limit_gap_pct")
+            selected_controls.append({
+                "symbol": control["symbol"], "name": control.get("name"),
+                "primary_cohort": "matched_near_limit_control",
+                "cohorts": ["matched_near_limit_control"],
+                "board_context": {"status": "not_required_for_negative_control", "exact_member_mapping": False},
+                "limit_context": {
+                    "sample_role": "matched_near_limit_control", "matched_to_symbol": positive["symbol"],
+                    "match_basis": {"limit_ratio_bucket_pct": bucket,
+                                    "limit_gap_pct": round(gap, 4) if gap is not None else None,
+                                    "selection": "same-day non-limit close nearest to its own limit price"},
+                    "source": "canonical_bars_daily", "provider_key": control.get("selected_provider"),
+                },
+                "daily_features": control["daily_features"],
+                "selection_score": round(-(gap or 0), 4),
+                "risk_flags": ["matched_negative_control", "not_limit_up", "not_a_candidate"],
+            })
+            matched = sum(item["limit_context"].get("matched_to_symbol") == positive["symbol"] for item in selected_controls)
+            if len(selected_controls) >= control_budget or matched >= 2:
+                break
+
     return {"status": "completed" if selected else "blocked", "as_of_date": str(as_of_date),
-            "limit_pool_rows": len(limit_rows), "limit_step_rows": len(step_rows), "candidates": selected,
-            "cohort_counts": {cohort: sum(cohort in item["cohorts"] for item in items) for cohort in cohort_order},
+            "limit_pool_rows": len(limit_rows), "limit_step_rows": len(step_rows),
+            "candidates": [*selected, *selected_controls],
+            "sample_role_counts": {"positive_limit_pool": len(selected), "matched_near_limit_control": len(selected_controls)},
+            "control_coverage": {
+                "status": "completed" if len(selected_controls) >= min(control_budget, len(selected) * 2) else "partial",
+                "available_near_limit_controls": sum(len(value) for value in controls_by_bucket.values()),
+                "selected_controls": len(selected_controls), "target_controls": min(control_budget, len(selected) * 2),
+                "notice": "negative controls are research-only and never enter candidate or recommendation paths",
+            },
+            "cohort_counts": {**{cohort: sum(cohort in item["cohorts"] for item in items) for cohort in cohort_order},
+                              "matched_near_limit_control": len(selected_controls)},
             "dragon_leader_market_context": leader_market_context}
 
 

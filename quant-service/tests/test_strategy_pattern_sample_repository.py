@@ -30,6 +30,7 @@ class StrategyPatternSampleRepositoryTests(unittest.TestCase):
                     Result(rows=[{"row_data": {"ts_code": "000001.SZ", "nums": 2}, "available_at": "a"}]),
                     Result(row={"prior_date": "20260814"}),
                     Result(rows=[{"row_data": {"ts_code": "000001.SZ", "limit_type": "涨停池"}}]),
+                    Result(rows=[]),
                     Result(rows=[{"symbol": "000001.SZ", "trading_date": date(2026, 8, 17), "close": 10.0}]),
                 ])
 
@@ -43,13 +44,13 @@ class StrategyPatternSampleRepositoryTests(unittest.TestCase):
 
         database = Database()
         inputs = load_strategy_pattern_sample_inputs(database, date(2026, 8, 17))
-        self.assertEqual(len(database.calls), 5)
+        self.assertEqual(len(database.calls), 6)
         self.assertEqual(inputs.limit_rows[0]["provider_key"], "super")
         self.assertEqual(inputs.step_rows, [{"ts_code": "000001.SZ", "nums": 2}])
         self.assertEqual(inputs.prior_limit_rows, [{"ts_code": "000001.SZ", "limit_type": "涨停池"}])
         self.assertEqual(inputs.daily_rows[0]["close"], 10.0)
         self.assertEqual(database.calls[0][1], ("20260817",))
-        self.assertEqual(database.calls[4][1], (["000001.SZ"], date(2026, 8, 17), date(2026, 6, 18)))
+        self.assertEqual(database.calls[5][1], (["000001.SZ"], date(2026, 8, 17), date(2026, 6, 18)))
 
     def test_no_same_day_pool_checks_event_projection_then_skips_daily_query(self) -> None:
         class Result:
@@ -66,8 +67,7 @@ class StrategyPatternSampleRepositoryTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
                 self.results = iter([
-                    Result(), Result(), Result(row=None),
-                    Result(), Result(row=None),
+                    Result(), Result(), Result(row=None), Result(), Result(), Result(row=None),
                 ])
 
             @contextmanager
@@ -83,7 +83,7 @@ class StrategyPatternSampleRepositoryTests(unittest.TestCase):
         self.assertEqual(inputs.limit_rows, [])
         self.assertEqual(inputs.prior_limit_rows, [])
         self.assertEqual(inputs.daily_rows, [])
-        self.assertEqual(len(database.calls), 5)
+        self.assertEqual(len(database.calls), 6)
         self.assertIn("quant.market_events", database.calls[3][0])
 
     def test_persist_replaces_one_bounded_run_without_fetching_or_reranking(self) -> None:

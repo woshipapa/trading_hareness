@@ -1,9 +1,12 @@
 # Shared peer runtime
 
-This deployment keeps the authoritative trading database on the owner's
-`G:\StockPlatform` disk while allowing one reviewed collaborator to run the
-same research code in an isolated Docker environment. It does not expose a
-broker trading path and it does not copy the LonghuVIP upstream credential.
+This deployment keeps the authoritative trading database in the owner's
+current PostgreSQL/edge runtime while allowing one reviewed collaborator to
+run the same research code in an isolated Docker environment. Baidu Netdisk
+is the current immutable cold-storage tier; the Windows `G:\StockPlatform`
+layout from the migration proposal is a candidate import/migration source,
+not a second source of truth. It does not expose a broker trading path and it
+does not copy the LonghuVIP upstream credential.
 
 ## Topology
 
@@ -48,12 +51,16 @@ lightServer root privileges.
 
 ## Ownership and writer policy
 
-- `G:\StockPlatform\data\postgresql16` is the only authoritative quant store.
+- The deployed PostgreSQL/edge runtime is the only authoritative quant store;
+  Baidu Netdisk is L3 cold evidence and is never queried by live decisions.
 - The owner's local collector is the only scheduled market-data writer by
   default. `PEER_BACKGROUND_TASKS_ENABLED=false` prevents duplicate scans.
-- The peer role inherits the application's database privileges and may run
-  explicit research/migrations. Access can be revoked by disabling the role or
-  removing the SSH key.
+- The peer role is read-only on the owner's `quant` schema (SELECT/USAGE only)
+  and may not inherit `quant_app` or run production migrations. The peer reads
+  licensed Longhu evidence through the authenticated gateway and remains a
+  read-only dashboard/replay consumer. Any future research write-store must be
+  provisioned as a separate database before enabling it. Access can be revoked
+  by disabling the role or removing the SSH key.
 - Peer credentials are long-lived static credentials: the SSH key, database
   password, shared read/write API keys, and n8n encryption key have no scheduled
   rotation or automatic expiry. Rotate them only after suspected disclosure,

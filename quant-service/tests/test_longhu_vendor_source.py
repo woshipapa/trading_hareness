@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 
 from app.longhu_vendor_source import (
     MAX_PAGE_SIZE,
@@ -14,10 +14,18 @@ from app.longhu_vendor_source import (
     parse_stock_snapshot_payload,
     parse_tencent_quote_text,
     safe_page_size,
+    market_today,
 )
 
 
 class LonghuVendorSourceTests(unittest.TestCase):
+    def test_market_today_uses_shanghai_exchange_clock(self):
+        # 16:30 UTC is already the next calendar date in Shanghai.
+        self.assertEqual(
+            market_today(datetime(2026, 9, 1, 16, 30, tzinfo=timezone.utc)),
+            date(2026, 9, 2),
+        )
+
     def test_safe_page_size_never_exceeds_vendor_hard_limit(self):
         self.assertEqual(safe_page_size(1), 1)
         self.assertEqual(safe_page_size(300), MAX_PAGE_SIZE)

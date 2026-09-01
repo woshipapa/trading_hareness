@@ -6,6 +6,12 @@
 decision-product host.  `stock-brain` is a migration source, not a library to
 embed wholesale.
 
+The migration does not change the active storage boundary: PostgreSQL remains
+the hot/canonical store and the existing Baidu Netdisk archive remains the L3
+immutable cold tier. Any Windows/G-drive export is imported into a candidate
+or staging area, verified, and promoted only through the platform archive
+contract; it is not an alternative live source of truth.
+
 The old action-card orchestration, dependency cascade and scheduler state are
 not migrated.  Their production history did not meet the live delivery
 acceptance threshold.  Only durable facts, evidence, user constraints and

@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from .limit_continuation_research import continuation_watch, rank_continuation_candidates
 from .dragon_leader_research import enrich_dragon_leader_watches, rank_dragon_leader_candidates
+from .limit_event_fallback import event_body, event_step_record
 from .runtime_executors import run_database_blocking
 
 
@@ -32,9 +33,24 @@ async def latest_strategy_pattern_mining(
         pool_records = await result.fetchall()
         result = await connection.execute("SELECT DISTINCT ON(row_data->>'ts_code') row_data,provider_key,available_at FROM quant.tushare_raw_records WHERE api_name='limit_step' AND row_data->>'trade_date'=%s ORDER BY row_data->>'ts_code',available_at DESC", (stamp,))
         ladder_records = await result.fetchall()
-        result = await connection.execute("SELECT DISTINCT ON(symbol) symbol,body,source,available_at FROM quant.market_events WHERE event_type='limit_up_pool' AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s ORDER BY symbol,created_at DESC", (run["as_of_date"],))
+        result = await connection.execute("SELECT DISTINCT ON(symbol) symbol,body,source,event_type,available_at FROM quant.market_events WHERE event_type='limit_up_pool' AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s ORDER BY symbol,created_at DESC", (run["as_of_date"],))
         eastmoney_records = await result.fetchall()
-        union = merge_limit_pool_sources_fn([dict(record) for record in pool_records], [dict(record) for record in eastmoney_records])
+        result = await connection.execute("SELECT DISTINCT ON(symbol) symbol,body,source,available_at FROM quant.market_events WHERE event_type='limit_chain' AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s ORDER BY symbol,created_at DESC", (run["as_of_date"],))
+        chain_event_records = await result.fetchall()
+        chain_board_counts = {
+            str(item["row_data"]["ts_code"]): int(item["row_data"]["nums"])
+            for item in (event_step_record(dict(record), trade_date=run["as_of_date"]) for record in chain_event_records)
+        }
+        event_pool_records = []
+        for record in eastmoney_records:
+            value = dict(record)
+            body = event_body(value)
+            board_num = chain_board_counts.get(str(value.get("symbol") or "").upper())
+            if board_num is not None:
+                body["连板数"] = board_num
+            value["body"] = body
+            event_pool_records.append(value)
+        union = merge_limit_pool_sources_fn([dict(record) for record in pool_records], event_pool_records)
         pool = [{**item, "board_count": limit_board_count_fn(item.get("tag"))} for item in union["items"]]
         pool.sort(key=lambda item: (-int(item.get("board_count") or 0), -float(item.get("limit_amount") or 0), str(item.get("ts_code") or "")))
         symbols = [str(item.get("ts_code") or "") for item in pool]
@@ -59,6 +75,9 @@ async def latest_strategy_pattern_mining(
     for symbol, context in pool_by_symbol.items():
         if int(context.get("board_count") or 0) >= 2:
             ladder_by_symbol[symbol] = {**context, "nums": int(context.get("board_count") or 0), "ladder_sources": ["tushare_limit_list_ths_tag"]}
+    if not ladder_records:
+        ladder_records = [event_step_record(dict(record), trade_date=run["as_of_date"])
+                          for record in chain_event_records]
     for record in ladder_records:
         item = strategy_json_safe_fn(dict(record["row_data"] or {})); symbol = str(item.get("ts_code") or ""); context = pool_by_symbol.get(symbol, {})
         ladder_by_symbol[symbol] = {**context, **item, "provider_key": record["provider_key"], "available_at": record["available_at"], "tag": context.get("tag") or item.get("tag"), "status": context.get("status"), "price": context.get("price"), "pct_chg": context.get("pct_chg"), "turnover_rate": context.get("turnover_rate"), "open_num": context.get("open_num"), "limit_amount": context.get("limit_amount"), "lu_desc": context.get("lu_desc"), "volume_multiple_5d": context.get("volume_multiple_5d"), "volume_multiple_20d": context.get("volume_multiple_20d"), "board_context": context.get("board_context"), "lhb_context": context.get("lhb_context"), "ladder_sources": list(dict.fromkeys([*(ladder_by_symbol.get(symbol, {}).get("ladder_sources") or []), "tushare_limit_step"]))}
@@ -70,7 +89,7 @@ async def latest_strategy_pattern_mining(
     samples = [dict(row) for row in rows]
     return {"run": run, "limit_pool": limit_pool, "limit_ladder": limit_ladder,
             "continuation_candidates": continuation_candidates, "dragon_leader_candidates": dragon_leader_candidates,
-            "dragon_leader_market_context": dragon_leader_market_context, "pool_coverage": union["coverage"], "picks": [item for item in samples if (item.get("limit_context") or {}).get("review_tier") != "research_sample"][:10], "samples": samples, "notice": "地天板、龙头、连板和首板均为盘后研究样本；实时阶段仍需点时量价、板块联动与承接确认。"}
+            "dragon_leader_market_context": dragon_leader_market_context, "pool_coverage": union["coverage"], "picks": [item for item in samples if (item.get("limit_context") or {}).get("sample_role") != "matched_near_limit_control" and (item.get("limit_context") or {}).get("review_tier") != "research_sample"][:10], "samples": samples, "notice": "地天板、龙头、连板和首板均为盘后研究样本；实时阶段仍需点时量价、板块联动与承接确认。"}
 
 
 __all__ = ["latest_strategy_pattern_mining"]
