@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import os
 import unittest
 from datetime import date, datetime, timezone
+from unittest.mock import patch
 
 from app.longhu_vendor_source import (
     MAX_PAGE_SIZE,
     LonghuVendorConfig,
     LonghuVendorSource,
     SharedLonghuReadSource,
+    configured,
+    intraday_source,
     normalize_stock_symbol,
     parse_industry_stock_row,
     parse_stock_minute_payload,
@@ -19,6 +23,38 @@ from app.longhu_vendor_source import (
 
 
 class LonghuVendorSourceTests(unittest.TestCase):
+    def test_local_runtime_does_not_fall_back_to_direct_vendor_credentials(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            LonghuVendorConfig,
+            "load",
+            return_value=LonghuVendorConfig(token="t", user_id="u", device_id="d"),
+        ):
+            self.assertFalse(configured())
+            with self.assertRaisesRegex(ValueError, "SSH-forwarded gateway"):
+                intraday_source()
+
+    def test_owner_runtime_may_explicitly_enable_direct_vendor_source(self):
+        with patch.dict(os.environ, {"QUANT_LONGHU_DIRECT_ENABLED": "true"}, clear=True), patch.object(
+            LonghuVendorConfig,
+            "load",
+            return_value=LonghuVendorConfig(token="t", user_id="u", device_id="d"),
+        ):
+            self.assertTrue(configured())
+            self.assertIsInstance(intraday_source(), LonghuVendorSource)
+
+    def test_shared_gateway_always_wins_over_owner_direct_flag(self):
+        with patch.dict(
+            os.environ,
+            {
+                "QUANT_SHARED_READ_API_BASE_URL": "http://127.0.0.1:15681",
+                "QUANT_SHARED_READ_API_KEY": "read-key",
+                "QUANT_LONGHU_DIRECT_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            self.assertTrue(configured())
+            self.assertIsInstance(intraday_source(), SharedLonghuReadSource)
+
     def test_market_today_uses_shanghai_exchange_clock(self):
         # 16:30 UTC is already the next calendar date in Shanghai.
         self.assertEqual(

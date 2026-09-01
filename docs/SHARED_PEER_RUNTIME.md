@@ -79,6 +79,35 @@ lightServer root privileges.
   logical reads in the adapter. Explicit quote baskets are independently
   bounded by `QUANT_LONGHU_INTRADAY_MAX_SYMBOLS`.
 
+## Local Longhu transport boundary
+
+The local workstation is a gateway consumer. It calls only the normalized
+`/licensed/longhu/quotes` and `/licensed/longhu/minutes/{symbol}` routes through
+an SSH-forwarded owner endpoint; the owner service is the only process that
+stores Longhu credentials and calls the vendor API. A local
+`longhu_vendor.json` is ignored unless the owner process explicitly sets
+`QUANT_LONGHU_DIRECT_ENABLED=true`. The local default is `false`, so a missing
+tunnel fails closed instead of silently making a direct vendor request.
+
+On the workstation, start the bounded tunnel in a separate process. The
+values below are deployment secrets and are never committed:
+
+```bash
+export LONGHU_SSH_HOST=owner.example
+export LONGHU_SSH_USER=stockpeer
+export LONGHU_SSH_KEY_PATH=/path/to/longhu-owner-ed25519
+export LONGHU_REMOTE_PORT=15681
+export LONGHU_LOCAL_PORT=15681
+scripts/shared-peer/start-local-longhu-tunnel.sh
+```
+
+Set `QUANT_SHARED_READ_API_BASE_URL=http://host.docker.internal:15681` and the
+separately provisioned `QUANT_SHARED_READ_API_KEY` in the ignored local `.env`,
+then recreate `quant-research`. Docker Desktop resolves
+`host.docker.internal` to the host-side SSH listener; the SSH `-L` bind is
+loopback-only. Only normalized rows and source health cross the tunnel; vendor
+tokens and raw Longhu requests stay on the owner host.
+
 ## Owner bootstrap
 
 Run from an elevated PowerShell only for the one-time server account setup:

@@ -237,6 +237,10 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:${QUANT_PORT:-5681}:8000"
+    # The local workstation reaches the licensed owner through an SSH tunnel
+    # bound on the host; this container never contacts Longhu directly.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       PGHOST: postgres
       PGPORT: 5432
@@ -276,6 +280,8 @@ services:
       # code only sees the normalized adapter and never embeds the token.
       QUANT_LONGHU_CONFIG_PATH: /run/secrets/longhu_vendor.json
       QUANT_LONGHU_INTRADAY_MAX_SYMBOLS: ${QUANT_LONGHU_INTRADAY_MAX_SYMBOLS:-24}
+      QUANT_LONGHU_DIRECT_ENABLED: ${QUANT_LONGHU_DIRECT_ENABLED:-false}
+      QUANT_SHARED_READ_API_BASE_URL: ${QUANT_SHARED_READ_API_BASE_URL:-}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:-}
       TUSHARE_PRIMARY_TOKEN: ${TUSHARE_PRIMARY_TOKEN:-}
       TUSHARE_PRIMARY_API_URL: ${TUSHARE_PRIMARY_API_URL:-}

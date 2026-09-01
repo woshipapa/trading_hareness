@@ -49,6 +49,9 @@ services:
       QUANT_WRITE_API_KEY: ${PEER_QUANT_WRITE_API_KEY:?Set PEER_QUANT_WRITE_API_KEY}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:?Set QUANT_SHARED_READ_API_KEY}
       QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      # The peer is a gateway consumer; only the licensed owner host may use
+      # the direct Longhu adapter.
+      QUANT_LONGHU_DIRECT_ENABLED: "false"
       NO_PROXY: "*"
       TZ: Asia/Shanghai
     volumes:

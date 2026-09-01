@@ -192,10 +192,20 @@ class LonghuVendorConfig:
 
 
 def configured(path: str | Path | None = None) -> bool:
+    """Return whether this runtime has a permitted Longhu transport.
+
+    Workstations consume the owner's normalized gateway. A local vendor
+    credential file is ignored unless this process is explicitly running on
+    the licensed owner host with direct access enabled.
+    """
     if os.getenv("QUANT_SHARED_READ_API_BASE_URL", "").strip() and os.getenv(
         "QUANT_SHARED_READ_API_KEY", ""
     ).strip():
         return True
+    if os.getenv("QUANT_LONGHU_DIRECT_ENABLED", "false").strip().lower() not in {
+        "1", "true", "yes", "on"
+    }:
+        return False
     try:
         LonghuVendorConfig.load(path)
         return True
@@ -283,12 +293,23 @@ class SharedLonghuReadSource:
 
 
 def intraday_source() -> LonghuIntradaySource:
-    """Prefer the shared gateway only when both endpoint and key are present."""
+    """Return the shared gateway, or an explicitly owner-enabled source.
+
+    Direct vendor access is opt-in for the licensed owner service and is not a
+    fallback for a workstation whose SSH/shared gateway is unavailable.
+    """
     if os.getenv("QUANT_SHARED_READ_API_BASE_URL", "").strip() and os.getenv(
         "QUANT_SHARED_READ_API_KEY", ""
     ).strip():
         return SharedLonghuReadSource()
-    return LonghuVendorSource()
+    if os.getenv("QUANT_LONGHU_DIRECT_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }:
+        return LonghuVendorSource()
+    raise ValueError(
+        "Longhu direct access is disabled; configure QUANT_SHARED_READ_API_BASE_URL "
+        "and QUANT_SHARED_READ_API_KEY for the SSH-forwarded gateway"
+    )
 
 
 def parse_industry_stock_row(row: Any, trade_date: date, plate_id: str) -> dict[str, Any] | None:
