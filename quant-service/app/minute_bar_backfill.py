@@ -171,7 +171,7 @@ def persist_minute_rows(connection: Any, rows: list[dict[str, Any]], available_a
                ON CONFLICT(symbol,bar_time,source_name) DO UPDATE SET
                  open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
                  volume=EXCLUDED.volume,amount=EXCLUDED.amount,
-                 source_available_at=EXCLUDED.source_available_at,
+                 source_available_at=COALESCE(EXCLUDED.source_available_at, quant.market_bars_minute.source_available_at),
                  available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
             (row["symbol"], row["bar_time"], row["open"], row["high"], row["low"], row["close"],
              row["volume"], row["amount"], SOURCE_NAME, import_id, row.get("source_available_at"), available_at,
