@@ -6,6 +6,48 @@ For the verified current workflow, service topology, automatic startup behavior,
 
 The local research service and the future server deployment path are documented in [DEPLOYMENT.md](DEPLOYMENT.md). The complete analyst-channel quant research design and phased acceptance plan are in [docs/QUANT_RESEARCH_IMPLEMENTATION_PLAN.md](docs/QUANT_RESEARCH_IMPLEMENTATION_PLAN.md). The default Compose stack remains local-only; the separate server composition exposes only TLS reverse-proxy endpoints.
 
+The Windows `stock-brain` cutover, facts-only import boundary, actual-portfolio
+contracts and personal decision dashboard are documented in
+[docs/STOCK_BRAIN_MIGRATION.md](docs/STOCK_BRAIN_MIGRATION.md). The migration
+never exposes a broker order path and does not import legacy action-card plans.
+
+The optional collaborator runtime—G-drive PostgreSQL authority, loopback-only
+SSH relay, rootless Docker boundary, Longhu licensed-read gateway, candidate
+migration and rollback—is documented in
+[docs/SHARED_PEER_RUNTIME.md](docs/SHARED_PEER_RUNTIME.md).
+
+## Windows stock platform runtime
+
+The migrated stock platform is code in this repository but keeps all large,
+authoritative state on the local 12 TB data disk:
+
+```text
+G:\StockPlatform\
+  config\runtime.env
+  data\postgresql16\
+  data\imports\
+  data\raw\
+  runtime\postgresql-16.15\
+```
+
+PostgreSQL listens on `127.0.0.1:55432` only.  Do not move its cluster, raw
+evidence or bulk imports into the checkout, a Git history or the lightServer.
+The lightServer may host a static UI and authenticated reverse proxy, while the
+G-drive database remains authoritative.
+
+The local runtime is kept healthy by `scripts/windows/start-stock-dashboard.ps1`.
+It rejects non-`G:` platform roots, starts the database/API/adapter without visible
+terminals, and maintains a loopback-only reverse tunnel to LightServer. The
+server hosts only versioned frontend assets and an HTTPS reverse proxy; it never
+stores the authoritative portfolio or market database.
+
+The quant API defaults to `http://127.0.0.1:5681`.  The personal decision page
+separates the settled market review, exact CITIC holdings, qualified conditional
+buys and the human-readable research audit.  No route places, modifies or
+cancels broker orders.  See
+[docs/STOCK_BRAIN_MIGRATION.md](docs/STOCK_BRAIN_MIGRATION.md) for the contracts,
+endpoints and live cutover acceptance criteria.
+
 ## Start
 
 ```bash

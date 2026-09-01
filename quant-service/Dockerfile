@@ -3,13 +3,18 @@ FROM python:3.12-slim
 ARG APP_GIT_SHA=unknown
 ARG APP_RELEASE=unknown
 ARG APP_BUILD_CREATED_AT=unknown
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_DEFAULT_TIMEOUT=120
+ARG PIP_RETRIES=8
 
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 COPY quant-service/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+    --timeout "${PIP_DEFAULT_TIMEOUT}" --retries "${PIP_RETRIES}" \
+    -r requirements.txt
 
 COPY quant-service/app ./app
 COPY quant-service/tests ./tests
