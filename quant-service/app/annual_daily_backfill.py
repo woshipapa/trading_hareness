@@ -960,6 +960,9 @@ class AnnualDailyBackfill:
             # City/Super SDK accepts three mixed full-market requests per
             # observed rolling window. Status controls are only included when
             # explicitly opted in and cannot consume repair quota by default.
+            # The two bounded groups retain the historical CORE_DAILY_SPECS[:3]
+            # / CORE_DAILY_SPECS[3:] burst boundary for compatibility with
+            # the provider-rate audit.
             first_results = await asyncio.gather(*(
                 self.fetch_one(spec, {"trade_date": stamp}, day=day)
                 for spec in specs[:3]
