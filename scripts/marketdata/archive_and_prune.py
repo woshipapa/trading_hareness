@@ -20,7 +20,10 @@ import pan_client as pc
 HOME = os.path.expanduser('~')
 ROOT = os.path.join(HOME, 'marketdata')
 CATALOG = os.path.join(ROOT, 'catalog', 'catalog.duckdb')
-PAN_ROOT = '/apps/股票paper存储/evidence-archive'
+# Use a dated/run-specific root for new exports when pruning. This avoids
+# treating a same-named historical parquet as proof for regenerated source
+# identities. Existing callers retain the old default path.
+PAN_ROOT = os.getenv('BAIDU_PAN_EVIDENCE_ARCHIVE_ROOT', '/apps/股票paper存储/evidence-archive').rstrip('/')
 COMPOSE = ['/opt/homebrew/bin/docker', 'compose', '-f', os.path.join(HOME, 'codebase/n8n/compose.yaml')]
 
 # table -> (timestamp column, default days to keep hot)
@@ -67,7 +70,10 @@ def main() -> int:
 
     tscol, default_days = ARCHIVABLE[args.table]
     keep = args.keep_days if args.keep_days is not None else default_days
-    cutoff = date.today() + timedelta(days=1) if '--archive-only' in sys.argv else date.today() - timedelta(days=keep)
+    # ``--archive-only`` means “do not delete”, not “export the whole table”.
+    # The previous argv-based special case silently selected every row, which
+    # could create multi-gigabyte duplicate archives during a dry migration.
+    cutoff = date.today() - timedelta(days=keep)
 
     total = int(psql(f"SELECT count(*) FROM quant.{args.table}"))
     old = int(psql(f"SELECT count(*) FROM quant.{args.table} WHERE {tscol} < DATE '{cutoff}'"))

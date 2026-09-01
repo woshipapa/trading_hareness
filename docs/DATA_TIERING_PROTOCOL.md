@@ -50,7 +50,7 @@ catalog(`~/marketdata/catalog/catalog.duckdb` 的 `partitions` 表)是 L3 的
 | 数据 | 产生 | L0(47) | L1(本地) | L3 | 保留依据 |
 |---|---|---|---|---|---|
 | 观察池 + 因子快照 | PUT watchlist 时 45 天 hydration | ✅ 工作集 | ✅ 系统记录 | — | 小而热,永久 |
-| 30s 全 A 横截面 → `intraday_quote_observations` | 腾讯,每 30s | 活动窗口 | **365d** | ✅ 年度归档 | 盘中证据主体 |
+| 30s 全 A 横截面 → `intraday_quote_observations` | 腾讯,每 30s | 活动窗口 | **90d** | ✅ 年度归档 | 盘中证据主体 |
 | `intraday_rule_input_snapshots` | 每次规则评估 | 活动窗口 | **120d** | 年度归档 | 回放规则输入；以 `observed_at` 分区 |
 | `intraday_signal_events` | 触发时 | 活动窗口 | **365d** | 年度归档 | 成熟度统计 |
 | rt_min 复核(≤4 只/轮) | 超级 Tushare | 活动窗口 | 365d | — | 原始分钟证据 |

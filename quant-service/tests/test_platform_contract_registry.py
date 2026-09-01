@@ -87,6 +87,13 @@ class PlatformContractRegistryTests(unittest.TestCase):
         self.assertEqual(by_key["intraday_rule_input_snapshots"]["replay_role"], "exact_rule_replay")
         self.assertEqual(by_key["automation_runs"]["replay_role"], "execution_audit_only")
 
+    def test_local_retention_matches_archive_prune_policy(self) -> None:
+        by_key = {item["key"]: item for item in data_product_contract_catalog()}
+        self.assertEqual(by_key["raw_market_observations"]["local_hot_window_days"], 180)
+        self.assertEqual(by_key["tushare_raw_records"]["local_hot_window_days"], 90)
+        self.assertEqual(by_key["intraday_quote_observations"]["local_hot_window_days"], 90)
+        self.assertEqual(by_key["intraday_rule_input_snapshots"]["local_hot_window_days"], 120)
+
     def test_runtime_strategy_versions_must_match_every_declared_contract(self) -> None:
         versions = {
             item["key"]: item["model_version"]

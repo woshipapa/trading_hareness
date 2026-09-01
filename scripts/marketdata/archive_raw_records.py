@@ -21,7 +21,14 @@ HOME = os.path.expanduser('~')
 ROOT = os.path.join(HOME, 'marketdata')
 CATALOG = os.path.join(ROOT, 'catalog', 'catalog.duckdb')
 OUTDIR = os.path.join(ROOT, 'parquet', 'tushare_raw_records')
-PAN_ROOT = '/apps/股票paper存储/evidence-archive/tushare_raw_records'
+# A run-specific prefix prevents a fresh archive from colliding with an older
+# catalog partition whose row identities may have been regenerated upstream.
+# The default remains the historical path for compatibility; operators doing a
+# destructive prune should always set an explicit dated prefix.
+PAN_ROOT = os.getenv(
+    'BAIDU_PAN_TUSHARE_RAW_ARCHIVE_ROOT',
+    '/apps/股票paper存储/evidence-archive/tushare_raw_records',
+).rstrip('/')
 COMPOSE = ['/opt/homebrew/bin/docker', 'compose', '-f', os.path.join(HOME, 'codebase/n8n/compose.yaml')]
 TABLE = 'quant.tushare_raw_records'
 
