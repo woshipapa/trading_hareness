@@ -123,6 +123,7 @@ from .intraday_quote_normalization import (
     annotate_flow_percentiles as annotate_intraday_flow_percentiles_pure,
     exchange_time_status as intraday_quote_exchange_time_status_pure,
     merge_eastmoney_watch_flows as merge_intraday_eastmoney_watch_flows_pure,
+    merge_longhu_watch_quotes as merge_intraday_longhu_watch_quotes_pure,
     merge_sina_watch_quotes as merge_intraday_sina_watch_quotes_pure,
     merge_watch_quote_prices as merge_intraday_watch_quote_prices_pure,
     observation_source as intraday_quote_observation_source_pure,
@@ -297,6 +298,8 @@ from .market_regimes import (
     strategy_market_state as pure_strategy_market_state,
     strategy_rank as pure_strategy_rank,
 )
+from .strategy_index_sync import sync_index_context as sync_index_context_isolated
+from .settled_limit_pool_repository import persist_settled_limit_pool
 from .free_market_providers import (
     FreeProviderError,
     cninfo_announcements,
@@ -307,6 +310,7 @@ from .free_market_providers import (
     sina_quote,
     sina_quotes,
     tencent_daily,
+    tencent_index_daily,
     tencent_intraday_minutes,
     tencent_order_book_quotes,
 )
@@ -482,6 +486,7 @@ from .stock_study_readiness_repository import (
 )
 from .intraday_status_read_model import IntradayStatusDependencies, intraday_services_status_payload as read_intraday_services_status_payload, intraday_services_status_payload_async as read_intraday_services_status_payload_async
 from .routers.provider_status import build_provider_status_router
+from .routers.longhu_reads import build_longhu_reads_router
 from .routers.research_readiness import build_research_readiness_router
 from .routers.intraday_status import build_intraday_status_router
 from .routers.analyst_reads import build_analyst_reads_router
@@ -514,6 +519,7 @@ from .routers.event_reads import build_event_reads_router
 from .routers.strategy_reads import build_strategy_reads_router
 from .routers.paper_reads import build_paper_reads_router
 from .routers.paper_actions import build_paper_actions_router
+from .routers.personal_decisions import PersonalDecisionDependencies, build_personal_decisions_router
 from .routers.analyst_prompt_lab import build_analyst_prompt_lab_router
 from .routers.strategy_pattern_reads import build_strategy_pattern_reads_router
 from .routers.ten_day_leader_rotation_reads import build_ten_day_leader_rotation_reads_router
@@ -626,12 +632,19 @@ from .tushare_daily_sync import sync as sync_tushare_isolated
 from .baostock_daily_sync import fetch_rows as fetch_baostock_rows_isolated, sync as sync_baostock_isolated
 from .market_universe_sync import sync as sync_market_universe_isolated
 from .full_market_daily_sync import sync as sync_full_market_daily_isolated
+from .longhu_market_service import sync as sync_longhu_full_market_close
+from .longhu_market_repository import persisted_close_context as read_longhu_close_context
+from .longhu_vendor_source import (
+    configured as longhu_vendor_configured,
+    intraday_source as longhu_intraday_source,
+)
 from .full_market_daily_controls_sync import sync as sync_full_market_daily_controls_isolated
 from .minute_bar_session_backfill import (
     backfill_session as backfill_minute_session,
     session_symbols as session_minute_symbols,
 )
 from .earnings_calendar_sync import sync as sync_earnings_calendar_isolated
+from .stock_money_flow_sync import persist_flow_rows as persist_stock_money_flow_rows
 from .stock_money_flow_sync import sync as sync_stock_money_flow_isolated
 from .disclosure_day_watch import MODEL_VERSION as DISCLOSURE_DAY_WATCH_MODEL_VERSION
 from .limit_up_continuation import MODEL_VERSION as LIMIT_UP_CONTINUATION_MODEL_VERSION
@@ -667,6 +680,13 @@ from .telemetry import (
 from .runtime_executors import ExecutorSaturatedError, run_akshare_blocking, run_database_blocking, runtime_executor_status, shutdown_runtime_executors
 from .l2_research_gate import evaluate_l2_incremental_value
 from .l2_research_repository import latest_l2_evaluation, persist_l2_evaluation
+from .personal_decision_repository import persist_broker_snapshot, persist_trade_plan
+from .async_personal_decision_repository import (
+    latest_broker_snapshot,
+    latest_decision_research,
+    latest_personal_decision_brief,
+)
+from .decision_research_service import refresh_decision_research_and_plans
 from .provider_rate_limits import provider_request_spacing_seconds, reserve_provider_rate_limit_slot
 from .runtime_leases import (
     POST_CLOSE_REFRESH_LEASE_KEY,
@@ -1435,6 +1455,14 @@ async def sync_market_universe_legacy(request: MarketUniverseSyncRequest) -> dic
 
 async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by the isolated universe synchronizer."""
+    if request.provider == "auto" and longhu_vendor_configured():
+        result = await sync_longhu_full_market_close(
+            cn_today(), db=db, run_public_blocking=run_akshare_blocking,
+            run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
+            persist_flow_rows=persist_stock_money_flow_rows,
+        )
+        return {**result, "universe_key": request.universe_key,
+                "members": int(result.get("daily_rows") or result.get("imported") or 0)}
     return await sync_market_universe_isolated(
         request,
         provider_candidates=provider_candidates,
@@ -1460,6 +1488,12 @@ async def sync_full_market_daily_legacy(request: FullMarketDailySyncRequest) -> 
 
 async def sync_full_market_daily(request: FullMarketDailySyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by isolated full-market sync."""
+    if request.provider == "auto" and longhu_vendor_configured():
+        return await sync_longhu_full_market_close(
+            request.trade_date or cn_today(), db=db, run_public_blocking=run_akshare_blocking,
+            run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
+            persist_flow_rows=persist_stock_money_flow_rows,
+        )
     return await sync_full_market_daily_isolated(
         request,
         provider_candidates=provider_candidates,
@@ -1519,6 +1553,39 @@ def full_market_daily_control_status() -> dict[str, Any]:
 
 async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
     """Fill same-date adjustment, limit and suspension controls after daily sync."""
+    if longhu_vendor_configured():
+        def longhu_control_status() -> dict[str, Any] | None:
+            with db.transaction() as connection:
+                row = connection.execute(
+                    """WITH daily AS (
+                           SELECT count(*)::int AS rows FROM quant.canonical_bars_daily
+                            WHERE trading_date=%s AND selected_provider='longhuvip_composite'
+                         ), factors AS (
+                           SELECT count(DISTINCT symbol)::int AS rows FROM quant.daily_adjustment_factors
+                            WHERE trading_date=%s AND provider='longhuvip_composite'
+                         ), limits AS (
+                           SELECT count(DISTINCT symbol)::int AS rows FROM quant.daily_trade_limits
+                            WHERE trading_date=%s AND provider='longhuvip_composite'
+                         ) SELECT daily.rows AS daily_rows,factors.rows AS factor_rows,
+                                  limits.rows AS limit_rows FROM daily,factors,limits""",
+                    (trade_date, trade_date, trade_date),
+                ).fetchone()
+            daily_rows = int((row or {}).get("daily_rows") or 0)
+            factor_rows = int((row or {}).get("factor_rows") or 0)
+            limit_rows = int((row or {}).get("limit_rows") or 0)
+            if daily_rows >= 3500 and factor_rows >= math.ceil(daily_rows * 0.95) and limit_rows >= math.ceil(daily_rows * 0.95):
+                return {
+                    "status": "completed", "trade_date": str(trade_date),
+                    "provider": "longhuvip_composite", "expected_daily_rows": daily_rows,
+                    "rows": {"adj_factor": factor_rows, "stk_limit": limit_rows, "suspend_d": 0},
+                    "quality_note": (
+                        "adj_factor is same-day identity only; limits are board-rule derived and retain IPO/resumption warnings"
+                    ),
+                }
+            return None
+        ready = await run_database_blocking(longhu_control_status)
+        if ready:
+            return ready
     return await sync_full_market_daily_controls_isolated(
         trade_date,
         expected_daily_rows=full_market_daily_row_count,
@@ -1768,6 +1835,7 @@ INTRADAY_ALERT_MAX_ATTEMPTS = 3
 # This process-local cache contains only the current explicit watch/peer
 # basket.  Entries expire quickly and are pruned in ``intraday_tencent_surge_context``.
 _intraday_tencent_minute_cache: dict[str, tuple[float, dict[str, Any] | None, str | None]] = {}
+_intraday_longhu_minute_cache: dict[str, tuple[float, dict[str, Any] | None, str | None]] = {}
 INTRADAY_ALL_A_SNAPSHOT_TTL_SECONDS = 30.0
 
 
@@ -1808,6 +1876,13 @@ async def intraday_all_a_snapshot() -> tuple[list[dict[str, Any]], dict[str, Any
 def merge_intraday_watch_quote_prices(quotes: dict[str, dict[str, Any]], depth_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Overlay fresh batched watch prices without inventing flow fields."""
     return merge_intraday_watch_quote_prices_pure(quotes, depth_rows, number=intraday_number)
+
+
+def merge_intraday_longhu_watch_quotes(
+    quotes: dict[str, dict[str, Any]], rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Prefer a valid licensed quote without changing unrelated flow fields."""
+    return merge_intraday_longhu_watch_quotes_pure(quotes, rows, number=intraday_number)
 
 
 def merge_intraday_sina_watch_quotes(quotes: dict[str, dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -2508,6 +2583,44 @@ def intraday_minute_profile_max_symbols() -> int:
         return 40
 
 
+def intraday_longhu_max_symbols() -> int:
+    """Bound licensed per-security calls independently from the watch capacity."""
+    try:
+        return max(1, min(60, int(os.getenv("QUANT_LONGHU_INTRADAY_MAX_SYMBOLS", "24"))))
+    except ValueError:
+        return 24
+
+
+async def intraday_longhu_watch_quotes(
+    symbols: list[str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not longhu_vendor_configured():
+        return [], {"status": "disabled", "requested": len(symbols), "reason": "longhu_not_configured"}
+
+    def fetch() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        return longhu_intraday_source().watch_quotes(symbols, max_symbols=intraday_longhu_max_symbols())
+
+    return await run_akshare_blocking(fetch, timeout_seconds=8)
+
+
+async def shared_longhu_quotes(
+    symbols: list[str], max_symbols: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Gateway boundary for a caller-authenticated logical batch."""
+    return await run_akshare_blocking(
+        lambda: longhu_intraday_source().watch_quotes(symbols, max_symbols=max_symbols),
+        timeout_seconds=30,
+    )
+
+
+async def intraday_longhu_minutes(symbol: str) -> list[dict[str, Any]]:
+    if not longhu_vendor_configured():
+        raise RuntimeError("longhu_not_configured")
+    return await run_akshare_blocking(
+        lambda: longhu_intraday_source().stock_minutes(symbol), timeout_seconds=7,
+    )
+
+
 def intraday_watch_priority_key(row: dict[str, Any]) -> tuple[int, int, str]:
     """Keep the small verified-minute budget on explicitly enabled research watches."""
     metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
@@ -2769,8 +2882,11 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
             watch_quote_errors=(httpx.HTTPError, FreeProviderError, ValueError),
             watch_flow_reference_errors=(psycopg.Error, ExecutorSaturatedError, ValueError),
             all_a_snapshot_errors=(FuyaoProviderError, ValueError),
+            licensed_watch_quotes=intraday_longhu_watch_quotes,
+            merge_licensed_prices=merge_intraday_longhu_watch_quotes,
+            licensed_quote_errors=(Exception,),
         ),
-        surge_context=intraday_tencent_surge_context, peer_context=intraday_peer_context,
+        surge_context=intraday_surge_context, peer_context=intraday_peer_context,
         watch_priority_key=intraday_watch_priority_key,
         realtime_validation_slice=intraday_realtime_validation_slice,
         tushare_minutes=intraday_tushare_minutes,
@@ -3283,22 +3399,58 @@ strategy_index_regime = pure_strategy_index_regime
 
 
 async def sync_strategy_index_context(as_of_date: date) -> dict[str, Any]:
-    """Persist bounded close-daily index context through the non-realtime primary route."""
-    start_date = as_of_date - timedelta(days=45)
-    requests = [TushareFetchRequest(
-        api_name="index_daily", provider="primary",
-        params={"ts_code": symbol, "start_date": start_date.strftime("%Y%m%d"),
-                "end_date": as_of_date.strftime("%Y%m%d")}, max_rows=60, force_refresh=True,
-    ) for symbol in STRATEGY_INDEX_SYMBOLS]
-    results = await asyncio.gather(*(fetch_tushare_catalog(request) for request in requests), return_exceptions=True)
-    completed, errors = [], {}
-    for symbol, result in zip(STRATEGY_INDEX_SYMBOLS, results, strict=True):
-        if isinstance(result, Exception):
-            errors[symbol] = str(result)[:240]
-        else:
-            completed.append(symbol)
-    return {"status": "completed" if not errors else "partial", "completed": completed, "errors": errors,
-            "source": "tushare_primary index_daily; close-daily context only"}
+    """Persist close-daily index context with a labelled public fallback."""
+    return await sync_index_context_isolated(
+        as_of_date, STRATEGY_INDEX_SYMBOLS,
+        prefer_public=longhu_vendor_configured(),
+        primary_request=lambda symbol, start, end: TushareFetchRequest(
+            api_name="index_daily", provider="primary",
+            params={"ts_code": symbol, "start_date": start.strftime("%Y%m%d"),
+                    "end_date": end.strftime("%Y%m%d")},
+            max_rows=60, force_refresh=True,
+        ),
+        fetch_primary=fetch_tushare_catalog,
+        fetch_public=eastmoney_daily,
+        persist_public=persist_free_daily,
+        run_database=run_database_blocking,
+        fetch_secondary=tencent_index_daily,
+    )
+
+
+async def intraday_surge_context(
+    watches: list[dict[str, Any]], *, mapped_peers: dict[str, dict[str, Any]] | None = None,
+    priority_symbols: list[str] | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Use licensed minute paths first and retain Tencent as an automatic fallback."""
+    licensed_features: dict[str, dict[str, Any]] = {}
+    licensed_status: dict[str, Any] = {
+        "provider_status": "disabled", "provider": "longhuvip", "reason": "longhu_not_configured",
+    }
+    if longhu_vendor_configured():
+        licensed_features, licensed_status = await capture_intraday_surge_context(
+            watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols,
+            cache=_intraday_longhu_minute_cache, max_symbols=intraday_minute_profile_max_symbols,
+            open_capabilities=open_provider_capabilities, capability="intraday_minute",
+            fetch_minutes=intraday_longhu_minutes, minute_features=intraday_minute_features,
+            persist_health=lambda *_args: None, run_database=run_database_blocking,
+            safe_error=safe_error_detail, handled_errors=(Exception,),
+            provider_key="longhuvip", feature_source="longhuvip_minute",
+            check_provider_circuit=False,
+        )
+    fallback_features, fallback_status = await intraday_tencent_surge_context(
+        watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols,
+    )
+    return {**fallback_features, **licensed_features}, {
+        "provider_status": (
+            "completed" if licensed_features else str(fallback_status.get("provider_status") or "failed")
+        ),
+        "primary": licensed_status,
+        "fallback": fallback_status,
+        "completed": sorted(set(fallback_features) | set(licensed_features)),
+        "licensed_completed": sorted(licensed_features),
+        "fallback_completed": sorted(set(fallback_features) - set(licensed_features)),
+        "policy": "longhuvip_primary_tencent_fallback",
+    }
 
 
 def analyst_execution_context(connection: Any, as_of_date: date, observed_at: datetime | None = None) -> dict[str, Any]:
@@ -3716,7 +3868,9 @@ async def _post_close_core_symbols(limit: int) -> list[str]:
 def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
     """Compose the local-only boundaries of the post-close application service."""
     return PostCloseRefreshDependencies(
-        database=db, china_today=cn_today, provider_configs=provider_configs, run_database=run_database_blocking,
+        database=db, china_today=cn_today, longhu_configured=longhu_vendor_configured,
+        longhu_close_context=lambda trade_date: read_longhu_close_context(db, trade_date),
+        provider_configs=provider_configs, run_database=run_database_blocking,
         reconcile_stale_fetch_runs=reconcile_stale_fetch_runs, reprocess_remote_reports=reprocess_remote_reports,
         sync_market_universe=sync_market_universe, sync_full_market_daily=sync_full_market_daily,
         sync_strategy_index_context=sync_strategy_index_context, build_market_snapshot=build_market_snapshot,
@@ -3724,12 +3878,14 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         sync_ths_industry_flow=sync_ths_industry_moneyflow, sync_ths_concept_flow=sync_ths_concept_signals,
         rebuild_market_flow_features=rebuild_stored_market_flow_features,
         refresh_pattern_sources=refresh_strategy_pattern_sources, run_pattern_mining=run_strategy_pattern_mining,
+        persist_settled_limit_pool=persist_settled_limit_pool,
         sync_daily_controls=sync_full_market_daily_controls, sync_cninfo_announcements=sync_cninfo_announcements,
         run_board_report=run_intraday_board_report, run_strategy_decision=run_strategy_decision,
         persist_close_review=_persist_close_review, recompute_outcomes=recompute_outcomes,
         recompute_intraday_outcomes=recompute_analyst_intraday_outcomes_for_date,
         recompute_scorecards=recompute_scorecards, rebuild_analyst_research=rebuild_analyst_research_for_date,
         run_post_close_strategy=run_post_close_strategy, persist_watchlist_main_wave=persist_watchlist_main_wave_research,
+        refresh_decision_research=refresh_decision_research_and_plans,
         build_research_snapshot=build_snapshot, run_orchestrator=run_post_close_refresh_orchestrated,
         record_stage=record_stage_with_receipt, lease_key=POST_CLOSE_REFRESH_LEASE_KEY,
         lease_seconds=post_close_refresh_lease_seconds, acquire_lease=acquire_runtime_lease,
@@ -4125,6 +4281,12 @@ async def executor_saturated_response(_: Request, __: ExecutorSaturatedError) ->
 
 
 app.include_router(build_provider_status_router(db, provider_status, free_provider_status, async_database=async_db))
+app.include_router(build_longhu_reads_router(
+    configured=longhu_vendor_configured,
+    shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
+    quotes=shared_longhu_quotes,
+    minutes=intraday_longhu_minutes,
+))
 app.include_router(build_research_readiness_router(
     db, historical_estimate_from_db, feature_readiness_state, historical_replay_readiness, async_db,
 ))
@@ -4169,6 +4331,15 @@ app.include_router(build_l2_research_router(L2ResearchDependencies(
 app.include_router(build_strategy_reads_router(db, STRATEGY_DECISION_MODEL_VERSION, async_db, cn_today=cn_today))
 app.include_router(build_paper_reads_router(db, async_db))
 app.include_router(build_paper_actions_router(db, configure_paper_account, accept_paper_decision))
+app.include_router(build_personal_decisions_router(PersonalDecisionDependencies(
+    database=db,
+    async_database=async_db,
+    persist_snapshot=persist_broker_snapshot,
+    persist_plan=persist_trade_plan,
+    latest_snapshot=latest_broker_snapshot,
+    latest_brief=latest_personal_decision_brief,
+    latest_research=latest_decision_research,
+)))
 app.include_router(build_analyst_prompt_lab_router(
     db, materialize_prompt_candidates, label_prompt_candidate, evaluate_prompt_variant,
     materialize_intraday_analyst_outcomes, async_database=async_db,
