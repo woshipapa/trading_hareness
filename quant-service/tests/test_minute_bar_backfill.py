@@ -17,6 +17,7 @@ from app.minute_bar_backfill import (
     in_session,
     limit_up_symbols,
     normalize_minute_rows,
+    parse_source_available_at,
     parse_trade_time,
     persist_minute_rows,
     reconcile_against_daily,
@@ -112,6 +113,13 @@ class NormalizeMinuteRowTests(unittest.TestCase):
         self.assertEqual(normalize_minute_rows(self.symbol, [
             _bar(self.symbol, "2026-08-25 09:30:00", close=0.0),
         ]), [])
+
+    def test_explicit_source_clock_is_preserved_and_normalized_to_utc(self):
+        rows = normalize_minute_rows(self.symbol, [_bar(
+            self.symbol, "2026-08-25 09:30:00", source_available_at="2026-08-25T01:30:02+00:00",
+        )])
+        self.assertEqual(rows[0]["source_available_at"], datetime(2026, 8, 25, 1, 30, 2, tzinfo=timezone.utc))
+        self.assertIsNone(parse_source_available_at("not-a-clock"))
 
 
 class BackfillOrchestrationTests(unittest.TestCase):

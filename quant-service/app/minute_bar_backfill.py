@@ -78,6 +78,22 @@ def parse_trade_time(value: Any) -> datetime | None:
     return None
 
 
+def parse_source_available_at(value: Any) -> datetime | None:
+    """Parse an explicit provider availability clock without inventing one."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def normalize_minute_rows(symbol: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Collapse the upstream rows into one in-session bar per minute.
 
@@ -110,6 +126,9 @@ def normalize_minute_rows(symbol: str, rows: list[dict[str, Any]]) -> list[dict[
             "open": _number(row.get("open")), "high": _number(row.get("high")),
             "low": _number(row.get("low")), "close": close,
             "volume": _number(row.get("vol")), "amount": _number(row.get("amount")),
+            "source_available_at": parse_source_available_at(
+                row.get("source_available_at") or row.get("provider_available_at") or row.get("received_at")
+            ),
             "raw": dict(row),
         })
     return [by_minute[key][1] for key in sorted(by_minute)]
@@ -146,15 +165,16 @@ def persist_minute_rows(connection: Any, rows: list[dict[str, Any]], available_a
         connection.execute(
             """INSERT INTO quant.market_bars_minute(
                     symbol,bar_time,open,high,low,close,volume,amount,source_name,
-                    import_id,available_at,raw)
-               SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                    import_id,source_available_at,available_at,raw)
+               SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
                 WHERE EXISTS(SELECT 1 FROM quant.instruments WHERE symbol=%s)
                ON CONFLICT(symbol,bar_time,source_name) DO UPDATE SET
                  open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
                  volume=EXCLUDED.volume,amount=EXCLUDED.amount,
+                 source_available_at=EXCLUDED.source_available_at,
                  available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
             (row["symbol"], row["bar_time"], row["open"], row["high"], row["low"], row["close"],
-             row["volume"], row["amount"], SOURCE_NAME, import_id, available_at,
+             row["volume"], row["amount"], SOURCE_NAME, import_id, row.get("source_available_at"), available_at,
              Json(row["raw"]), row["symbol"]),
         )
     return len(rows)
@@ -256,6 +276,6 @@ async def backfill_symbol_session(
 __all__ = [
     "CN_TZ", "FULL_SESSION_BARS", "MINUTE_API", "SOURCE_NAME",
     "backfill_symbol_session", "ensure_import_record", "in_session", "limit_up_symbols",
-    "normalize_minute_rows", "parse_trade_time", "persist_minute_rows",
+    "normalize_minute_rows", "parse_source_available_at", "parse_trade_time", "persist_minute_rows",
     "reconcile_against_daily",
 ]
