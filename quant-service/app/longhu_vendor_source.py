@@ -34,6 +34,13 @@ USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 14; V2178A Build/UP1A.231005.007)"
 MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
+def direct_access_enabled() -> bool:
+    """Whether this process is the licensed owner-side vendor adapter."""
+    return os.getenv("QUANT_LONGHU_DIRECT_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
 def market_today(now: datetime | None = None) -> date:
     """Return today's exchange date independently of the host timezone."""
     instant = now or datetime.now(timezone.utc)
@@ -202,9 +209,7 @@ def configured(path: str | Path | None = None) -> bool:
         "QUANT_SHARED_READ_API_KEY", ""
     ).strip():
         return True
-    if os.getenv("QUANT_LONGHU_DIRECT_ENABLED", "false").strip().lower() not in {
-        "1", "true", "yes", "on"
-    }:
+    if not direct_access_enabled():
         return False
     try:
         LonghuVendorConfig.load(path)
@@ -302,9 +307,7 @@ def intraday_source() -> LonghuIntradaySource:
         "QUANT_SHARED_READ_API_KEY", ""
     ).strip():
         return SharedLonghuReadSource()
-    if os.getenv("QUANT_LONGHU_DIRECT_ENABLED", "false").strip().lower() in {
-        "1", "true", "yes", "on"
-    }:
+    if direct_access_enabled():
         return LonghuVendorSource()
     raise ValueError(
         "Longhu direct access is disabled; configure QUANT_SHARED_READ_API_BASE_URL "
@@ -633,5 +636,5 @@ __all__ = [
     "LonghuVendorSource", "SharedLonghuReadSource", "intraday_source",
     "MAX_PAGE_SIZE", "MAX_TENCENT_BATCH_SIZE", "configured", "normalize_stock_symbol",
     "parse_industry_stock_row", "parse_stock_minute_payload", "parse_stock_snapshot_payload",
-    "parse_tencent_quote_text", "safe_page_size", "market_today",
+    "parse_tencent_quote_text", "safe_page_size", "market_today", "direct_access_enabled",
 ]

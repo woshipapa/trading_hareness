@@ -11,11 +11,20 @@ from psycopg.types.json import Json
 
 from .longhu_market_repository import persist_full_market_close, persist_settled_trade_calendar
 from .longhu_market_sync import PROVIDER_KEY, merge_cross_section
-from .longhu_vendor_source import LonghuVendorSource
+from .longhu_vendor_source import LonghuVendorSource, direct_access_enabled
 
 
 MINIMUM_ROWS = 3_500
 MINIMUM_COVERAGE = 0.95
+
+
+def owner_longhu_source_factory() -> LonghuVendorSource:
+    """Construct the direct adapter only inside the licensed owner runtime."""
+    if not direct_access_enabled():
+        raise RuntimeError(
+            "Longhu full-market vendor sync is owner-only; use the shared gateway from a peer"
+        )
+    return LonghuVendorSource()
 
 
 async def sync(
@@ -26,7 +35,7 @@ async def sync(
     run_database_blocking: Callable[..., Awaitable[Any]],
     persist_rows: Callable[..., int],
     persist_flow_rows: Callable[..., int],
-    source_factory: Callable[[], LonghuVendorSource] = LonghuVendorSource,
+    source_factory: Callable[[], LonghuVendorSource] = owner_longhu_source_factory,
     force: bool = False,
 ) -> dict[str, Any]:
     request_key = hashlib.sha256(json.dumps({

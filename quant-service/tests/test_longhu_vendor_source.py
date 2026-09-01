@@ -11,6 +11,7 @@ from app.longhu_vendor_source import (
     LonghuVendorSource,
     SharedLonghuReadSource,
     configured,
+    direct_access_enabled,
     intraday_source,
     normalize_stock_symbol,
     parse_industry_stock_row,
@@ -40,6 +41,7 @@ class LonghuVendorSourceTests(unittest.TestCase):
             return_value=LonghuVendorConfig(token="t", user_id="u", device_id="d"),
         ):
             self.assertTrue(configured())
+            self.assertTrue(direct_access_enabled())
             self.assertIsInstance(intraday_source(), LonghuVendorSource)
 
     def test_shared_gateway_always_wins_over_owner_direct_flag(self):
