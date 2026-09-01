@@ -12,6 +12,7 @@ from typing import Any
 
 MODEL_VERSION = "dragon-leader-v1"
 SCORE_MODEL_VERSION = "dragon-leader-score-v1"
+PLAYBOOK_VERSION = "dragon-leader-playbook-v1"
 
 
 def _number(value: Any) -> float | None:
@@ -41,6 +42,89 @@ def _leader_sort_key(item: dict[str, Any]) -> tuple[float, float, float, str]:
     )
 
 
+def leader_market_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Derive available sentiment metrics without inventing missing data."""
+    heights = [_streak(item) for item in items if _streak(item) > 0]
+    current = {_symbol(item) for item in items if _symbol(item)}
+    previous = [(item.get("limit_context") or {}).get("preopen_context") for item in items]
+    previous = [item for item in previous if isinstance(item, dict) and _symbol(item)]
+    previous_symbols = {_symbol(item) for item in previous}
+    previous_by_symbol = {_symbol(item): item for item in previous}
+    promotion_pairs = []
+    for item in items:
+        previous_item = previous_by_symbol.get(_symbol(item))
+        previous_streak = _streak(previous_item) if previous_item else 0
+        current_streak = _streak(item)
+        if previous_item and previous_streak and current_streak:
+            promotion_pairs.append(current_streak > previous_streak)
+    promoted = sum(promotion_pairs) / len(promotion_pairs) if promotion_pairs else None
+    repair_values = [(item.get("limit_context") or {}).get("repair_confirmed") for item in items]
+    repair_values = [value for value in repair_values if isinstance(value, bool)]
+    repair = sum(repair_values) / len(repair_values) if repair_values else None
+    high_items = [item for item in items if _streak(item) >= 3]
+    outcome_changes = [_number((item.get("limit_context") or {}).get("next_session_pct_chg")) for item in high_items]
+    outcome_changes = [value for value in outcome_changes if value is not None]
+    negative = sum(value < -5 for value in outcome_changes) / len(outcome_changes) if outcome_changes else None
+    return {"highest_board_count": max(heights, default=None), "promotion_rate": round(promoted, 4) if promoted is not None else None, "high_level_negative_feedback_rate": round(negative, 4) if negative is not None else None, "board_repair_rate": round(repair, 4) if repair is not None else None, "sample_counts": {"current_limit_up": len(current), "previous_limit_up": len(previous_symbols), "promotion_pairs": len(promotion_pairs), "high_level": len(high_items), "repair_observed": len(repair_values), "negative_feedback_observed": len(outcome_changes)}, "quality": "observed" if all(value is not None for value in (promoted, negative, repair)) else "partial", "missing": [name for name, value in (("promotion_rate", promoted), ("high_level_negative_feedback_rate", negative), ("board_repair_rate", repair)) if value is None], "notice": "晋级率按同一代码前一交易日板数与当日板数比较；修复率需要完整开板事件，负反馈需要次日结算；缺失时保持 null。"}
+
+
+def leader_playbook(item: dict[str, Any]) -> dict[str, Any]:
+    """Classify three research playbooks; all remain descriptive-only."""
+    streak = _streak(item)
+    turnover = _number((item.get("limit_context") or {}).get("turnover_rate"))
+    volume_multiple = _number((item.get("daily_features") or {}).get("volume_multiple_5d"))
+    leader = item.get("dragon_leader_watch") or {}
+    weak_divergence = turnover is not None and volume_multiple is not None and turnover >= 5 and volume_multiple >= 1.0
+    return {"model_version": PLAYBOOK_VERSION, "status": "partial_shadow", "live_effect": "none", "plans": [
+        {"strategy_key": "leader_2_to_3_selection", "eligible": streak == 2, "status": "research_candidate" if streak == 2 else "not_applicable", "missing": ["next_session_auction", "first_15m_volume_speed", "theme_relative_strength"]},
+        {"strategy_key": "same_ladder_card_position", "eligible": streak >= 2 and leader.get("leader_rank") is not None, "status": "research_candidate" if streak >= 2 and leader.get("leader_rank") is not None else "not_applicable", "missing": ["expected_gap", "auction_surprise", "relative_strength"]},
+        {"strategy_key": "high_level_volume_weak_divergence", "eligible": streak >= 4 and weak_divergence, "status": "research_candidate" if streak >= 4 and weak_divergence else "not_applicable", "missing": ["break_count", "break_duration", "reseal_latency"]},
+    ], "next_session_confirmation_schema": next_session_confirmation(),
+        "notice": "三套龙头策略只生成回放候选；未通过独立交易日/样本门禁，不进入实时阈值。"}
+
+
+def seal_quality(item: dict[str, Any]) -> dict[str, Any]:
+    """Score observed seal/break evidence without treating missing fields as zero."""
+    context = item.get("limit_context") or {}
+    fields = {
+        "first_seal_time": context.get("first_seal_time"),
+        "break_count": _number(context.get("break_count")),
+        "break_duration_minutes": _number(context.get("break_duration_minutes")),
+        "reseal_latency_minutes": _number(context.get("reseal_latency_minutes")),
+        "close_seal_ratio": _number(context.get("close_seal_ratio")),
+    }
+    observed = [name for name, value in fields.items() if value is not None]
+    if not observed:
+        return {"status": "not_observed", "score": None, "max_score": 10.0, "missing": list(fields), "live_effect": "none"}
+    score = 0.0
+    if fields["first_seal_time"]:
+        text = str(fields["first_seal_time"])
+        score += 2.0 if text[:5] <= "10:00" else 1.0 if text[:5] <= "11:00" else 0.0
+    if fields["break_count"] is not None:
+        score += max(0.0, 3.0 - min(3.0, fields["break_count"]))
+    if fields["break_duration_minutes"] is not None:
+        score += 2.0 if fields["break_duration_minutes"] <= 10 else 1.0 if fields["break_duration_minutes"] <= 20 else 0.0
+    if fields["reseal_latency_minutes"] is not None:
+        score += 2.0 if fields["reseal_latency_minutes"] <= 5 else 1.0 if fields["reseal_latency_minutes"] <= 15 else 0.0
+    if fields["close_seal_ratio"] is not None:
+        score += min(1.0, max(0.0, fields["close_seal_ratio"]))
+    return {"status": "partial" if len(observed) < len(fields) else "observed", "score": round(min(10.0, score), 2), "max_score": 10.0, "fields": fields, "missing": [name for name in fields if name not in observed], "live_effect": "none"}
+
+
+def next_session_confirmation(
+    *, auction_gap_pct: float | None = None, expected_gap_pct: float | None = None,
+    first_15m_amount_ratio: float | None = None, theme_relative_strength_pct: float | None = None,
+) -> dict[str, Any]:
+    """Evaluate next-session evidence as a research confirmation card."""
+    values = {"auction_gap_pct": auction_gap_pct, "expected_gap_pct": expected_gap_pct, "first_15m_amount_ratio": first_15m_amount_ratio, "theme_relative_strength_pct": theme_relative_strength_pct}
+    missing = [name for name, value in values.items() if value is None]
+    if missing:
+        return {"status": "not_observed", "confirmed": False, "missing": missing, "live_effect": "none", "notice": "竞价/开盘证据不完整，不能确认龙头强弱。"}
+    surprise = float(auction_gap_pct) - float(expected_gap_pct)
+    confirmed = surprise >= 0 and float(first_15m_amount_ratio) >= 0.10 and float(theme_relative_strength_pct) >= 0
+    return {"status": "confirmed" if confirmed else "rejected", "confirmed": confirmed, "auction_surprise_pct": round(surprise, 4), "first_15m_amount_ratio": first_15m_amount_ratio, "theme_relative_strength_pct": theme_relative_strength_pct, "live_effect": "none", "notice": "仅用于次日研究复核，不构成交易指令。"}
+
+
 def dragon_leader_score(item: dict[str, Any], *, market: dict[str, Any]) -> dict[str, Any]:
     """Build a transparent, post-close leader score shadow.
 
@@ -63,10 +147,13 @@ def dragon_leader_score(item: dict[str, Any], *, market: dict[str, Any]) -> dict
     # The available post-close market proxy is deliberately capped below the
     # full M=20 definition; promotion/repair/negative-feedback inputs are not
     # inferred when the corresponding pool is absent.
+    sentiment = market.get("sentiment_metrics") if isinstance(market.get("sentiment_metrics"), dict) else {}
     market_score = min(8.0, float(highest) if highest else 0.0)
-    components["market_sentiment"] = {"score": market_score, "max_score": 8.0, "status": "partial", "missing": [
-        "promotion_rate", "high_level_negative_feedback", "board_repair_rate",
-    ]}
+    if sentiment.get("promotion_rate") is not None and float(sentiment["promotion_rate"]) >= 0.4:
+        market_score += 1.0
+    if sentiment.get("high_level_negative_feedback_rate") is not None and float(sentiment["high_level_negative_feedback_rate"]) > 0.3:
+        market_score -= 1.0
+    components["market_sentiment"] = {"score": round(max(0.0, min(8.0, market_score)), 2), "max_score": 8.0, "status": sentiment.get("quality", "partial"), "metrics": sentiment, "missing": sentiment.get("missing") or ["promotion_rate", "high_level_negative_feedback", "board_repair_rate"]}
 
     if leader_rank == 1:
         leader_score = 20.0
@@ -102,6 +189,7 @@ def dragon_leader_score(item: dict[str, Any], *, market: dict[str, Any]) -> dict
 
     components["intraday_confirmation"] = {"score": None, "max_score": 15.0, "status": "not_observed",
                                             "missing": ["opening_auction", "first_minutes_acceptance", "theme_relative_strength"]}
+    components["seal_quality"] = seal_quality(item)
 
     risk_penalty = 0.0
     risk_flags: list[str] = []
@@ -117,7 +205,8 @@ def dragon_leader_score(item: dict[str, Any], *, market: dict[str, Any]) -> dict
         risk_flags.append("lhb_institution_net_sell")
     components["risk_penalty"] = {"score": round(risk_penalty, 2), "max_penalty": 10.0, "status": "observed"}
 
-    available_score = market_score + leader_score + components["theme_strength"]["score"] + chip_score - risk_penalty
+    market_component_score = float(components["market_sentiment"]["score"])
+    available_score = market_component_score + leader_score + components["theme_strength"]["score"] + chip_score - risk_penalty
     available_max = 8.0 + 20.0 + 15.0 + 20.0
     evidence_max = 8.0 + 20.0 + (15.0 if components["theme_strength"]["status"] == "observed" else 0.0) + (20.0 if components["chip_structure"]["status"] == "observed" else 0.0)
     return {
@@ -167,6 +256,7 @@ def enrich_dragon_leader_watches(items: list[dict[str, Any]]) -> dict[str, Any]:
         ],
         "interpretation": "仅描述已落库涨停池中的梯队广度；不能替代涨跌停、炸板率和全市场实时情绪。",
     }
+    market["sentiment_metrics"] = leader_market_metrics(observable)
     leader_ranks = {_symbol(item): rank for rank, item in enumerate(ladders, start=1)}
     themes: dict[str, list[dict[str, Any]]] = {}
     for item in observable:
@@ -231,6 +321,7 @@ def enrich_dragon_leader_watches(items: list[dict[str, Any]]) -> dict[str, Any]:
             "interpretation": "龙头仅是已观察梯队中的相对位置；需在下一交易日以可成交性和实时承接证伪或确认。",
         }
         item["dragon_leader_watch"]["score_shadow"] = dragon_leader_score(item, market=market)
+        item["dragon_leader_watch"]["playbook"] = leader_playbook(item)
     return market
 
 
@@ -245,4 +336,9 @@ def rank_dragon_leader_candidates(items: list[dict[str, Any]]) -> list[dict[str,
             for rank, item in enumerate(eligible, start=1)]
 
 
-__all__ = ["MODEL_VERSION", "SCORE_MODEL_VERSION", "dragon_leader_score", "enrich_dragon_leader_watches", "rank_dragon_leader_candidates"]
+__all__ = [
+    "MODEL_VERSION", "PLAYBOOK_VERSION", "SCORE_MODEL_VERSION",
+    "dragon_leader_score", "enrich_dragon_leader_watches",
+    "leader_market_metrics", "leader_playbook", "next_session_confirmation",
+    "rank_dragon_leader_candidates", "seal_quality",
+]

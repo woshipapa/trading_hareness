@@ -2,10 +2,61 @@ from __future__ import annotations
 
 import unittest
 
-from app.dragon_leader_research import dragon_leader_score, enrich_dragon_leader_watches, rank_dragon_leader_candidates
+from app.dragon_leader_research import (
+    dragon_leader_score,
+    enrich_dragon_leader_watches,
+    leader_market_metrics,
+    leader_playbook,
+    next_session_confirmation,
+    rank_dragon_leader_candidates,
+    seal_quality,
+)
 
 
 class DragonLeaderResearchTests(unittest.TestCase):
+    def test_market_metrics_fail_closed_when_prior_and_repair_evidence_missing(self) -> None:
+        result = leader_market_metrics([{"ts_code": "000001.SZ", "board_count": 3}])
+        self.assertEqual(result["highest_board_count"], 3)
+        self.assertEqual(result["quality"], "partial")
+        self.assertIsNone(result["promotion_rate"])
+        self.assertIn("board_repair_rate", result["missing"])
+
+    def test_playbook_classification_is_research_only(self) -> None:
+        result = leader_playbook({"ts_code": "000001.SZ", "board_count": 4,
+                                  "limit_context": {"turnover_rate": 12},
+                                  "daily_features": {"volume_multiple_5d": 1.4},
+                                  "dragon_leader_watch": {"leader_rank": 1}})
+        self.assertEqual(result["status"], "partial_shadow")
+        self.assertEqual(result["live_effect"], "none")
+        self.assertTrue(result["plans"][2]["eligible"])
+        self.assertEqual(result["next_session_confirmation_schema"]["status"], "not_observed")
+
+    def test_seal_quality_fails_closed_when_book_events_are_missing(self) -> None:
+        result = seal_quality({"ts_code": "000001.SZ", "limit_context": {}})
+        self.assertEqual(result["status"], "not_observed")
+        self.assertIsNone(result["score"])
+        self.assertEqual(result["live_effect"], "none")
+
+    def test_seal_quality_scores_only_observed_fields(self) -> None:
+        result = seal_quality({"limit_context": {
+            "first_seal_time": "09:35:00", "break_count": 1,
+            "break_duration_minutes": 4, "reseal_latency_minutes": 3,
+        }})
+        self.assertEqual(result["status"], "partial")
+        self.assertGreater(result["score"], 0)
+        self.assertIn("close_seal_ratio", result["missing"])
+
+    def test_next_session_confirmation_requires_complete_evidence(self) -> None:
+        missing = next_session_confirmation(auction_gap_pct=3.0, expected_gap_pct=2.0)
+        self.assertFalse(missing["confirmed"])
+        self.assertEqual(missing["status"], "not_observed")
+        confirmed = next_session_confirmation(
+            auction_gap_pct=3.0, expected_gap_pct=2.0,
+            first_15m_amount_ratio=0.15, theme_relative_strength_pct=1.2,
+        )
+        self.assertTrue(confirmed["confirmed"])
+        self.assertEqual(confirmed["status"], "confirmed")
+
     def test_score_shadow_exposes_components_and_stays_non_live(self) -> None:
         item = {
             "ts_code": "000001.SZ", "board_count": 3, "status": "T字板",

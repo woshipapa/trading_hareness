@@ -986,7 +986,8 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertFalse(post_close_strategy_retry_window(__import__("datetime").datetime(2026, 8, 10, 18, 54, tzinfo=china)))
         self.assertTrue(post_close_strategy_retry_window(__import__("datetime").datetime(2026, 8, 10, 18, 55, tzinfo=china)))
         self.assertTrue(post_close_strategy_retry_window(__import__("datetime").datetime(2026, 8, 10, 20, 29, 59, tzinfo=china)))
-        self.assertFalse(post_close_strategy_retry_window(__import__("datetime").datetime(2026, 8, 10, 20, 30, tzinfo=china)))
+        self.assertTrue(post_close_strategy_retry_window(__import__("datetime").datetime(2026, 8, 10, 20, 30, tzinfo=china)))
+        self.assertFalse(post_close_strategy_retry_window(__import__("datetime").datetime(2026, 8, 10, 22, 0, tzinfo=china)))
 
     def test_intraday_board_curve_deduplicates_one_board_per_minute(self):
         rows = [
