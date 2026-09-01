@@ -300,6 +300,12 @@ def execute(
     target = TARGETS.get(target_key)
     if target is None:
         raise ValueError(f"unknown stock API target: {target_key}")
+    if batch_param and str(batch_param).strip().lower() in SENSITIVE_QUERY_KEYS:
+        # ``batch`` is caller-controlled and is applied after normal params
+        # are cleaned. Rejecting credential names here prevents a peer from
+        # smuggling a Token/UserID/DeviceID value that would override the
+        # owner-injected credentials below.
+        raise ValueError("batch parameter cannot target an owner credential")
     resolved_path = _path(target, path)
     sanitized = _clean_params(params)
     requests_to_make = _physical_requests(

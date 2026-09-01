@@ -227,6 +227,8 @@ class LonghuIntradaySource(Protocol):
         self, symbols: Iterable[str], *, max_symbols: int = 24,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]: ...
 
+    def stock_quote(self, symbol: str) -> dict[str, Any]: ...
+
     def stock_minutes(self, symbol: str) -> list[dict[str, Any]]: ...
 
     def raw_call(self, request: Mapping[str, Any]) -> dict[str, Any]: ...
@@ -242,13 +244,17 @@ class SharedLonghuReadSource:
 
     def __init__(
         self, base_url: str | None = None, read_key: str | None = None,
-        *, timeout_seconds: float = 30.0,
+        *, timeout_seconds: float = 30.0, stock_api_timeout_seconds: float = 600.0,
     ) -> None:
         self.base_url = str(base_url or os.getenv("QUANT_SHARED_READ_API_BASE_URL") or "").rstrip("/")
         self.read_key = str(read_key or os.getenv("QUANT_SHARED_READ_API_KEY") or "").strip()
         if not self.base_url or not self.read_key:
             raise ValueError("shared Longhu base URL and read key are required")
         self.timeout_seconds = max(1.0, float(timeout_seconds))
+        # The generic stock API may fan one logical request into multiple
+        # physical calls. Keep its transport budget aligned with the public
+        # 600-second call boundary instead of the 30-second compatibility GET.
+        self.stock_api_timeout_seconds = max(self.timeout_seconds, float(stock_api_timeout_seconds))
         self._session = requests.Session()
         self._session.trust_env = False
         self._session.headers.update({"X-Quant-Read-Key": self.read_key, "Accept": "application/json"})
@@ -265,13 +271,45 @@ class SharedLonghuReadSource:
 
     def _post(self, path: str, *, payload: Mapping[str, Any]) -> dict[str, Any]:
         response = self._session.post(
-            f"{self.base_url}{path}", json=dict(payload), timeout=max(180.0, self.timeout_seconds),
+            f"{self.base_url}{path}", json=dict(payload), timeout=self.stock_api_timeout_seconds,
         )
         response.raise_for_status()
         result = response.json()
         if not isinstance(result, dict):
             raise TypeError("shared stock API response must be an object")
         return result
+
+    @staticmethod
+    def _single_payload(result: Mapping[str, Any], *, action: str) -> dict[str, Any]:
+        """Extract one documented-call payload without hiding partial pages.
+
+        The gateway deliberately returns the raw response under ``pages``.  A
+        single-security quote/minute call must produce exactly one page; if the
+        owner returns a malformed or multi-page response, fail closed instead
+        of silently parsing only the first page.
+        """
+        if not isinstance(result, Mapping):
+            raise TypeError(f"shared Longhu {action} response envelope must be an object")
+        pages = result.get("pages")
+        if not isinstance(pages, list) or len(pages) != 1:
+            raise RuntimeError(f"shared Longhu {action} returned an unexpected page count")
+        page = pages[0]
+        payload = page.get("payload") if isinstance(page, Mapping) else None
+        if not isinstance(payload, dict):
+            raise TypeError(f"shared Longhu {action} payload must be an object")
+        errcode = payload.get("errcode")
+        if errcode not in (None, "", 0, "0"):
+            raise RuntimeError(f"Longhu {action} returned errcode={errcode}")
+        return payload
+
+    def _call_single(self, *, target: str, action: str, controller: str,
+                     params: Mapping[str, Any]) -> dict[str, Any]:
+        request = {
+            "target": target,
+            "path": "/w1/api/index.php",
+            "params": {"a": action, "c": controller, **dict(params)},
+        }
+        return self._single_payload(self.raw_call(request), action=action)
 
     def watch_quotes(
         self, symbols: Iterable[str], *, max_symbols: int = 24,
@@ -300,12 +338,35 @@ class SharedLonghuReadSource:
             "transport": "shared_gateway",
         }
 
+    def stock_quote(self, symbol: str) -> dict[str, Any]:
+        """Fetch one quote through the complete owner-gateway contract.
+
+        Unlike the normalized batch route, this preserves the documented
+        ``GetStockPanKou`` request/response path and its exchange timestamp.
+        """
+        code = _stock_code(symbol)
+        if not code:
+            raise ValueError(f"unsupported Longhu stock symbol: {symbol}")
+        payload = self._call_single(
+            target="longhu_quote", action="GetStockPanKou", controller="StockL2Data",
+            params={"apiv": "w41", "StockID": code},
+        )
+        parsed = parse_stock_snapshot_payload(payload, symbol)
+        if parsed is None:
+            raise RuntimeError(f"Longhu quote missing or mismatched for {code}")
+        return parsed
+
     def stock_minutes(self, symbol: str) -> list[dict[str, Any]]:
         normalized = normalize_stock_symbol(symbol)
         if not normalized:
             raise ValueError(f"unsupported Longhu stock symbol: {symbol}")
-        payload = self._get(f"/licensed/longhu/minutes/{normalized}")
-        rows = [row for row in payload.get("rows") or [] if isinstance(row, dict)]
+        code = _stock_code(normalized)
+        assert code is not None
+        payload = self._call_single(
+            target="longhu_quote", action="GetStockTrendIncremental", controller="StockL2Data",
+            params={"apiv": "w41", "Type": 1, "StockID": code},
+        )
+        rows = parse_stock_minute_payload(payload, normalized)
         if not rows:
             raise RuntimeError(f"shared Longhu minute returned no rows for {normalized}")
         return rows
@@ -447,9 +508,13 @@ class LonghuVendorSource:
         code = _stock_code(symbol)
         if not code:
             raise ValueError(f"unsupported Longhu stock symbol: {symbol}")
-        payload = self._json(
-            "https://apphwhq.longhuvip.com/w1/api/index.php",
-            {"a": "GetStockPanKou", "c": "StockL2Data", "apiv": "w41", "StockID": code},
+        payload = self._single_raw_call_payload(
+            {
+                "target": "longhu_quote",
+                "path": "/w1/api/index.php",
+                "params": {"a": "GetStockPanKou", "c": "StockL2Data", "apiv": "w41", "StockID": code},
+            },
+            action="GetStockPanKou",
         )
         parsed = parse_stock_snapshot_payload(payload, symbol)
         if parsed is None:
@@ -491,17 +556,38 @@ class LonghuVendorSource:
         code = _stock_code(symbol)
         if not code:
             raise ValueError(f"unsupported Longhu stock symbol: {symbol}")
-        payload = self._json(
-            "https://apphwhq.longhuvip.com/w1/api/index.php",
+        payload = self._single_raw_call_payload(
             {
-                "a": "GetStockTrendIncremental", "c": "StockL2Data", "apiv": "w41",
-                "Type": 1, "StockID": code,
+                "target": "longhu_quote",
+                "path": "/w1/api/index.php",
+                "params": {
+                    "a": "GetStockTrendIncremental", "c": "StockL2Data", "apiv": "w41",
+                    "Type": 1, "StockID": code,
+                },
             },
+            action="GetStockTrendIncremental",
         )
         rows = parse_stock_minute_payload(payload, symbol)
         if not rows:
             raise RuntimeError(f"Longhu minute returned no rows for {code}")
         return rows
+
+    def _single_raw_call_payload(self, request: Mapping[str, Any], *, action: str) -> dict[str, Any]:
+        """Extract one page from the same generic contract used by peers."""
+        result = self.raw_call(request)
+        if not isinstance(result, Mapping):
+            raise TypeError(f"Longhu {action} response envelope must be an object")
+        pages = result.get("pages")
+        if not isinstance(pages, list) or len(pages) != 1:
+            raise RuntimeError(f"Longhu {action} returned an unexpected page count")
+        page = pages[0]
+        payload = page.get("payload") if isinstance(page, Mapping) else None
+        if not isinstance(payload, dict):
+            raise TypeError(f"Longhu {action} payload must be an object")
+        errcode = payload.get("errcode")
+        if errcode not in (None, "", 0, "0"):
+            raise RuntimeError(f"Longhu {action} returned errcode={errcode}")
+        return payload
 
     def industry_plate_catalog(self) -> list[dict[str, Any]]:
         url = "https://apphq.longhuvip.com/w1/api/index.php"

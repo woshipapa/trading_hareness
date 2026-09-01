@@ -141,6 +141,24 @@ def test_external_target_does_not_receive_owner_credentials():
     assert "DeviceID" not in params
 
 
+def test_batch_cannot_override_owner_credentials():
+    session = Session()
+    try:
+        execute(
+            session=session,
+            config=Config(),
+            target_key="longhu_quote",
+            path=None,
+            params={"a": "GetStockPanKou", "c": "StockL2Data"},
+            batch_param=" token ",
+            batch_values=["caller-token"],
+        )
+    except ValueError as error:
+        assert "owner credential" in str(error)
+    else:
+        raise AssertionError("batch credential override was accepted")
+
+
 def test_only_registered_hosts_are_callable_and_path_traversal_is_rejected():
     session = Session()
     try:

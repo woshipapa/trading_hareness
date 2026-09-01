@@ -493,6 +493,23 @@ GET /licensed/longhu/minutes/600664.SH
 - `volume_lot`、`amount`、`cumulative_volume_lot`
 - `cumulative_segment`、`is_complete`、`source`
 
+### 13.1 本地 Longhu provider 的路由选择
+
+本地 `LonghuIntradaySource` 不保存供应商凭据，也不在共享网关不可用时
+直连 Longhu。批量观察池继续使用上面的兼容行情 GET，以一次网关请求完成
+有界篮子的并发抓取；需要单股原始能力时，`stock_quote` 与
+`stock_minutes` 使用完整的 `POST /licensed/stock-api/call` 契约：
+
+- `GetStockPanKou` → `target=longhu_quote`、`c=StockL2Data`、`apiv=w41`；
+- `GetStockTrendIncremental` → 同一 target/controller、`apiv=w41`、`Type=1`；
+- 网关返回必须恰好一个 `pages[].payload` 对象，且 `errcode` 不得为非零，
+  否则 provider 失败关闭，不把 HTTP 200 当作业务成功；
+- 通用调用的传输预算为 600 秒，覆盖网关的 300 条物理分批；兼容 GET
+  仍使用较短的实时观察预算。
+
+这样既保持观察池的低开销批量路径，也让分钟和单股盘口使用 PR #1 的完整、
+可审计原始请求；两条路径都保留交易所时间戳和供应商来源标签。
+
 ## 14. 错误处理
 
 | 状态 | 原因 | 处理 |

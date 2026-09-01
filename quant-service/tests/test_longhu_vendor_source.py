@@ -189,7 +189,83 @@ class LonghuVendorSourceTests(unittest.TestCase):
         self.assertEqual(result["calls"], 3)
         self.assertEqual(calls[0][0], "http://owner.test/licensed/stock-api/call")
         self.assertEqual(calls[0][1]["params"]["st"], 650)
-        self.assertGreaterEqual(calls[0][2], 180.0)
+        self.assertEqual(calls[0][2], 600.0)
+
+    def test_shared_stock_quote_uses_documented_gateway_call_and_keeps_timestamp(self):
+        source = SharedLonghuReadSource("http://owner.test", "read-key")
+        calls = []
+
+        def post(payload):
+            calls.append(payload)
+            return {
+                "target": "longhu_quote", "calls": 1,
+                "pages": [{"payload": {
+                    "code": "600664", "name": "哈药股份", "day": "20260901", "preclose_px": 9.29,
+                    "real": {"last_px": 9.49, "time": "145901", "open_px": 9.30},
+                }}],
+            }
+
+        source.raw_call = post
+        row = source.stock_quote("600664.SH")
+        self.assertEqual(row["trade_time"], "20260901145901")
+        self.assertEqual(calls[0]["path"], "/w1/api/index.php")
+        self.assertEqual(calls[0]["target"], "longhu_quote")
+        self.assertEqual(calls[0]["params"]["a"], "GetStockPanKou")
+        self.assertEqual(calls[0]["params"]["c"], "StockL2Data")
+        self.assertEqual(calls[0]["params"]["StockID"], "600664")
+
+    def test_shared_stock_minutes_uses_documented_gateway_call(self):
+        source = SharedLonghuReadSource("http://owner.test", "read-key")
+        calls = []
+
+        def post(payload):
+            calls.append(payload)
+            return {
+                "target": "longhu_quote", "calls": 1,
+                "pages": [{"payload": {"trend": [["09:30", 10.0, 10.0, 100]]}}],
+            }
+
+        source.raw_call = post
+        rows = source.stock_minutes("600664.SH")
+        self.assertEqual(rows[0]["symbol"], "600664.SH")
+        self.assertEqual(calls[0]["params"]["a"], "GetStockTrendIncremental")
+        self.assertEqual(calls[0]["params"]["Type"], 1)
+        self.assertEqual(calls[0]["params"]["StockID"], "600664")
+
+    def test_shared_documented_call_fails_closed_on_error_or_partial_pages(self):
+        source = SharedLonghuReadSource("http://owner.test", "read-key")
+        source.raw_call = lambda _request: {
+            "target": "longhu_quote", "calls": 1,
+            "pages": [{"payload": {"errcode": "401", "msg": "unauthorized"}}],
+        }
+        with self.assertRaisesRegex(RuntimeError, "errcode=401"):
+            source.stock_quote("600664.SH")
+
+        source.raw_call = lambda _request: {
+            "target": "longhu_quote", "calls": 2,
+            "pages": [{"payload": {}}, {"payload": {}}],
+        }
+        with self.assertRaisesRegex(RuntimeError, "unexpected page count"):
+            source.stock_quote("600664.SH")
+
+    def test_owner_stock_quote_uses_the_same_generic_call_contract(self):
+        source = LonghuVendorSource(LonghuVendorConfig(token="t", user_id="u", device_id="d"))
+        calls = []
+
+        def raw_call(request):
+            calls.append(request)
+            return {
+                "target": "longhu_quote", "calls": 1,
+                "pages": [{"payload": {
+                    "code": "600664", "day": "20260901", "preclose_px": 9.29,
+                    "real": {"last_px": 9.49, "time": "145901"},
+                }}],
+            }
+
+        source.raw_call = raw_call
+        self.assertEqual(source.stock_quote("600664.SH")["price"], 9.49)
+        self.assertEqual(calls[0]["target"], "longhu_quote")
+        self.assertEqual(calls[0]["params"]["a"], "GetStockPanKou")
 
     def test_plate_list_paginates_larger_logical_reads_in_300_row_batches(self):
         source = LonghuVendorSource(LonghuVendorConfig(token="t", user_id="u", device_id="d"))
