@@ -8,6 +8,10 @@ layout from the migration proposal is a candidate import/migration source,
 not a second source of truth. It does not expose a broker trading path and it
 does not copy the LonghuVIP upstream credential.
 
+The complete peer-facing stock-data contract, including all documented
+actions and automatic 300-record physical batching, is in
+[`SHARED_STOCK_DATA_API.md`](SHARED_STOCK_DATA_API.md).
+
 ## Topology
 
 ```mermaid
