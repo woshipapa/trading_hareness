@@ -58,20 +58,30 @@ def migration_command() -> list[str]:
     return [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"]
 
 
+def migrations_enabled() -> bool:
+    """Allow read-only peer profiles to start without owner DB DDL access."""
+    return os.getenv("QUANT_SKIP_MIGRATIONS", "false").strip().lower() not in {
+        "1", "true", "yes", "on",
+    }
+
+
 def main(argv: list[str]) -> None:
     if not argv:
         raise SystemExit("usage: entrypoint.py <service command>")
 
-    connection = database_connection()
-    try:
-        acquire_migration_lock(connection)
-        print("applying versioned quant schema migrations", flush=True)
-        subprocess.run(migration_command(), check=True)
-    finally:
+    if migrations_enabled():
+        connection = database_connection()
         try:
-            release_migration_lock(connection)
+            acquire_migration_lock(connection)
+            print("applying versioned quant schema migrations", flush=True)
+            subprocess.run(migration_command(), check=True)
         finally:
-            connection.close()
+            try:
+                release_migration_lock(connection)
+            finally:
+                connection.close()
+    else:
+        print("skipping quant schema migrations (read-only peer profile)", flush=True)
 
     os.execvp(argv[0], argv)
 

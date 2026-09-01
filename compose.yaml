@@ -276,6 +276,9 @@ services:
       # code only sees the normalized adapter and never embeds the token.
       QUANT_LONGHU_CONFIG_PATH: /run/secrets/longhu_vendor.json
       QUANT_LONGHU_INTRADAY_MAX_SYMBOLS: ${QUANT_LONGHU_INTRADAY_MAX_SYMBOLS:-24}
+      # Longhu is an intraday/research supplement.  Full-market close
+      # promotion is opt-in and never replaces Tushare controls by default.
+      QUANT_LONGHU_FULL_MARKET_ENABLED: ${QUANT_LONGHU_FULL_MARKET_ENABLED:-false}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:-}
       TUSHARE_PRIMARY_TOKEN: ${TUSHARE_PRIMARY_TOKEN:-}
       TUSHARE_PRIMARY_API_URL: ${TUSHARE_PRIMARY_API_URL:-}

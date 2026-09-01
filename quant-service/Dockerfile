@@ -21,7 +21,10 @@ COPY quant-service/tests ./tests
 COPY quant-service/alembic.ini ./alembic.ini
 COPY quant-service/migrations ./migrations
 COPY quant-service/entrypoint.py ./entrypoint.py
+COPY quant-service/run_server.py ./run_server.py
+COPY quant-service/database_bootstrap.py ./database_bootstrap.py
 COPY scripts/audit-fuyao-capabilities.py ./tools/audit-fuyao-capabilities.py
+COPY scripts/import-stock-brain-portfolio.py /scripts/import-stock-brain-portfolio.py
 
 ENV APP_GIT_SHA=${APP_GIT_SHA} \
     APP_RELEASE=${APP_RELEASE} \

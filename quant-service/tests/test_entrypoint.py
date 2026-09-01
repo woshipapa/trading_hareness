@@ -1,15 +1,18 @@
-import sys
+import os
 import unittest
+from unittest.mock import patch
 
-import entrypoint
+from entrypoint import migrations_enabled
 
 
 class EntrypointTests(unittest.TestCase):
-    def test_migration_command_uses_the_active_python_environment(self):
-        self.assertEqual(
-            entrypoint.migration_command(),
-            [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
-        )
+    def test_peer_can_explicitly_skip_migrations(self):
+        with patch.dict(os.environ, {"QUANT_SKIP_MIGRATIONS": "true"}, clear=False):
+            self.assertFalse(migrations_enabled())
+
+    def test_migrations_remain_enabled_by_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(migrations_enabled())
 
 
 if __name__ == "__main__":

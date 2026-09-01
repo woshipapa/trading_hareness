@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-import json
 from typing import Any
 
 from psycopg.types.json import Json
+
+from .limit_event_fallback import event_limit_record, event_step_record
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class StrategyPatternSampleInputs:
     limit_rows: list[dict[str, Any]]
     step_rows: list[dict[str, Any]]
     prior_limit_rows: list[dict[str, Any]]
+    control_rows: list[dict[str, Any]]
     daily_rows: list[dict[str, Any]]
 
 
@@ -28,6 +30,17 @@ def _event_limit_rows(connection: Any, as_of_date: date) -> tuple[list[dict[str,
             ORDER BY symbol,available_at DESC""",
         (as_of_date,),
     ).fetchall()
+    chain = connection.execute(
+        """SELECT DISTINCT ON(symbol) symbol,body,source,available_at
+             FROM quant.market_events
+            WHERE event_type='limit_chain'
+              AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s
+            ORDER BY symbol,available_at DESC""", (as_of_date,),
+    ).fetchall()
+    chain_by_symbol = {
+        str(item["row_data"]["ts_code"]): int(item["row_data"]["nums"])
+        for item in (event_step_record(dict(row), trade_date=as_of_date) for row in chain)
+    }
     prior_row = connection.execute(
         """SELECT max((occurred_at AT TIME ZONE 'Asia/Shanghai')::date) AS prior_date
              FROM quant.market_events
@@ -45,33 +58,12 @@ def _event_limit_rows(connection: Any, as_of_date: date) -> tuple[list[dict[str,
         (prior_date,),
     ).fetchall() if prior_date else []
 
-    def project(row: dict[str, Any], day: date) -> dict[str, Any]:
-        try:
-            raw = json.loads(row.get("body") or "{}")
-        except (TypeError, ValueError):
-            raw = {}
-        return {
-            **raw,
-            "ts_code": str(raw.get("ts_code") or row["symbol"]).upper(),
-            "trade_date": day.strftime("%Y%m%d"),
-            "limit_type": "涨停池",
-            "status": raw.get("status") or "收盘封板",
-            "provider_key": row.get("source"),
-        }
-
-    current_projected = [project(dict(row), as_of_date) for row in current]
-    prior_projected = [project(dict(row), prior_date) for row in prior] if prior_date else []
-    prior_symbols = {row["ts_code"] for row in prior_projected}
-    step_rows = [
-        {"ts_code": row["ts_code"], "trade_date": row["trade_date"],
-         "nums": 2 if row["ts_code"] in prior_symbols else 1,
-         "derivation": "persisted_close_limit_intersection"}
-        for row in current_projected
-    ]
-    wrapped = [
-        {"row_data": row, "provider_key": row.get("provider_key"), "available_at": None}
-        for row in current_projected
-    ]
+    wrapped = [event_limit_record(dict(row), trade_date=as_of_date,
+                                  board_num=chain_by_symbol.get(str(row.get("symbol") or "").upper(), 1))
+               for row in current]
+    prior_projected = [event_limit_record(dict(row), trade_date=prior_date)
+                       ["row_data"] for row in prior] if prior_date else []
+    step_rows = [event_step_record(dict(row), trade_date=as_of_date)["row_data"] for row in chain]
     return wrapped, step_rows, prior_projected
 
 
@@ -108,7 +100,32 @@ def load_strategy_pattern_sample_inputs(database: Any, as_of_date: date) -> Stra
         ).fetchall() if prior_stamp else []
         if not limit_rows:
             limit_rows, step_rows, prior_limit_rows = _event_limit_rows(connection, as_of_date)
-        symbols = [str(row["row_data"].get("ts_code") or "").upper() for row in limit_rows]
+        if not step_rows and limit_rows:
+            chain_rows = connection.execute(
+                """SELECT DISTINCT ON(symbol) symbol,body,source,available_at
+                     FROM quant.market_events
+                    WHERE event_type='limit_chain'
+                      AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s
+                    ORDER BY symbol,available_at DESC""", (as_of_date,),
+            ).fetchall()
+            step_rows = [event_step_record(dict(row), trade_date=as_of_date)["row_data"] for row in chain_rows]
+        positive_symbols = [str(row["row_data"].get("ts_code") or "").upper() for row in limit_rows]
+        control_rows = connection.execute(
+            """SELECT b.symbol,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,b.volume,b.amount,
+                      b.is_suspended,b.limit_up,b.limit_down,b.selected_provider,b.available_at,
+                      ((b.limit_up-b.close)/NULLIF(b.pre_close,0))*100 AS limit_gap_pct,
+                      ((b.limit_up/b.pre_close)-1)*100 AS limit_pct
+                 FROM quant.canonical_bars_daily b
+                WHERE b.trading_date=%s AND b.pre_close>0 AND b.limit_up>b.pre_close
+                  AND b.limit_up<=b.pre_close*1.31 AND b.close<b.limit_up
+                  AND b.close/b.limit_up>=0.94 AND b.is_suspended=false
+                  AND NOT (b.symbol=ANY(%s))
+                ORDER BY ((b.limit_up-b.close)/NULLIF(b.pre_close,0)),b.symbol
+                LIMIT 600""",
+            (as_of_date, positive_symbols),
+        ).fetchall() if positive_symbols else []
+        symbols = [*positive_symbols, *(str(row["symbol"] or "").upper() for row in control_rows)]
+        symbols = list(dict.fromkeys(symbol for symbol in symbols if symbol))
         daily_rows = connection.execute(
             """WITH ranked AS (
                    SELECT b.*,row_number() OVER(PARTITION BY b.symbol ORDER BY b.trading_date DESC) rn
@@ -121,6 +138,7 @@ def load_strategy_pattern_sample_inputs(database: Any, as_of_date: date) -> Stra
         limit_rows=[dict(row) for row in limit_rows],
         step_rows=[dict(row.get("row_data") or row) for row in step_rows],
         prior_limit_rows=[dict(row.get("row_data") or row) for row in prior_limit_rows],
+        control_rows=[dict(row) for row in control_rows],
         daily_rows=[dict(row) for row in daily_rows],
     )
 

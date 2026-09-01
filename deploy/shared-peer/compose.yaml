@@ -41,6 +41,9 @@ services:
       PGPASSWORD: ${PEER_DB_PASSWORD:?Set PEER_DB_PASSWORD}
       QUANT_DATA_DIR: /var/lib/quant
       QUANT_LEGACY_SCHEMA_BOOTSTRAP: "false"
+      # The owner database role is read-only; schema migrations belong to the
+      # owner release pipeline and must never run from the peer container.
+      QUANT_SKIP_MIGRATIONS: "true"
       QUANT_BACKGROUND_TASKS_ENABLED: ${PEER_BACKGROUND_TASKS_ENABLED:-false}
       QUANT_RUNTIME_PROFILE: research
       QUANT_WRITE_API_KEY: ${PEER_QUANT_WRITE_API_KEY:?Set PEER_QUANT_WRITE_API_KEY}

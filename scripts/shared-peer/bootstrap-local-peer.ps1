@@ -66,8 +66,16 @@ BEGIN
   END IF;
 END
 `$peer`$;
-GRANT quant_app TO $PeerRole;
+-- The peer is a read-only research consumer of the owner's canonical store.
+-- It receives the licensed Longhu rows through the authenticated gateway and
+-- must not inherit the application's write role or run production migrations.
+REVOKE quant_app FROM $PeerRole;
+ALTER ROLE $PeerRole NOINHERIT;
 GRANT CONNECT ON DATABASE $($runtime.PGDATABASE) TO $PeerRole;
+GRANT USAGE ON SCHEMA quant TO $PeerRole;
+GRANT SELECT ON ALL TABLES IN SCHEMA quant TO $PeerRole;
+ALTER DEFAULT PRIVILEGES FOR ROLE $($runtime.PGUSER) IN SCHEMA quant
+  GRANT SELECT ON TABLES TO $PeerRole;
 "@
     & $psql -v ON_ERROR_STOP=1 -h $runtime.PGHOST -p $runtime.PGPORT `
         -U $runtime.PGADMINUSER -d $runtime.PGDATABASE -c $roleSql | Out-Null

@@ -14,7 +14,10 @@ def board_count(tag: Any) -> int:
     if text == "首板":
         return 1
     matched = re.search(r"(\d+)天(\d+)板", text)
-    return int(matched.group(2)) if matched else 0
+    if matched:
+        return int(matched.group(2))
+    compact = re.fullmatch(r"(\d+)连板", text)
+    return int(compact.group(1)) if compact else 0
 
 
 def limit_daily_features(bars: list[dict[str, Any]], *, number: Callable[[Any], float | None],

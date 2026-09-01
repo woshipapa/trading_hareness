@@ -1455,7 +1455,7 @@ async def sync_market_universe_legacy(request: MarketUniverseSyncRequest) -> dic
 
 async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by the isolated universe synchronizer."""
-    if request.provider == "auto" and longhu_vendor_configured():
+    if request.provider == "auto" and longhu_full_market_enabled():
         result = await sync_longhu_full_market_close(
             cn_today(), db=db, run_public_blocking=run_akshare_blocking,
             run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
@@ -1488,7 +1488,7 @@ async def sync_full_market_daily_legacy(request: FullMarketDailySyncRequest) -> 
 
 async def sync_full_market_daily(request: FullMarketDailySyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by isolated full-market sync."""
-    if request.provider == "auto" and longhu_vendor_configured():
+    if request.provider == "auto" and longhu_full_market_enabled():
         return await sync_longhu_full_market_close(
             request.trade_date or cn_today(), db=db, run_public_blocking=run_akshare_blocking,
             run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
@@ -1553,39 +1553,6 @@ def full_market_daily_control_status() -> dict[str, Any]:
 
 async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
     """Fill same-date adjustment, limit and suspension controls after daily sync."""
-    if longhu_vendor_configured():
-        def longhu_control_status() -> dict[str, Any] | None:
-            with db.transaction() as connection:
-                row = connection.execute(
-                    """WITH daily AS (
-                           SELECT count(*)::int AS rows FROM quant.canonical_bars_daily
-                            WHERE trading_date=%s AND selected_provider='longhuvip_composite'
-                         ), factors AS (
-                           SELECT count(DISTINCT symbol)::int AS rows FROM quant.daily_adjustment_factors
-                            WHERE trading_date=%s AND provider='longhuvip_composite'
-                         ), limits AS (
-                           SELECT count(DISTINCT symbol)::int AS rows FROM quant.daily_trade_limits
-                            WHERE trading_date=%s AND provider='longhuvip_composite'
-                         ) SELECT daily.rows AS daily_rows,factors.rows AS factor_rows,
-                                  limits.rows AS limit_rows FROM daily,factors,limits""",
-                    (trade_date, trade_date, trade_date),
-                ).fetchone()
-            daily_rows = int((row or {}).get("daily_rows") or 0)
-            factor_rows = int((row or {}).get("factor_rows") or 0)
-            limit_rows = int((row or {}).get("limit_rows") or 0)
-            if daily_rows >= 3500 and factor_rows >= math.ceil(daily_rows * 0.95) and limit_rows >= math.ceil(daily_rows * 0.95):
-                return {
-                    "status": "completed", "trade_date": str(trade_date),
-                    "provider": "longhuvip_composite", "expected_daily_rows": daily_rows,
-                    "rows": {"adj_factor": factor_rows, "stk_limit": limit_rows, "suspend_d": 0},
-                    "quality_note": (
-                        "adj_factor is same-day identity only; limits are board-rule derived and retain IPO/resumption warnings"
-                    ),
-                }
-            return None
-        ready = await run_database_blocking(longhu_control_status)
-        if ready:
-            return ready
     return await sync_full_market_daily_controls_isolated(
         trade_date,
         expected_daily_rows=full_market_daily_row_count,
@@ -2264,7 +2231,7 @@ def run_ten_day_leader_rotation(request: TenDayLeaderRotationRunRequest) -> dict
     return run_ten_day_leader_rotation_isolated(request, _ten_day_leader_rotation_dependencies())
 
 
-STRATEGY_PATTERN_MODEL_VERSION = "post-close-limit-lift-pattern-v6"
+STRATEGY_PATTERN_MODEL_VERSION = "post-close-limit-lift-pattern-v7"
 TENCENT_INTRADAY_MINUTE_CAPABILITY = "intraday_minute"
 LOCAL_CAPACITY_HTTP_DETAIL = "local processing capacity is temporarily saturated; retry shortly"
 
@@ -2340,7 +2307,7 @@ def strategy_pattern_sample_candidates(as_of_date: date, max_symbols: int, per_c
     inputs = load_strategy_pattern_sample_inputs(db, as_of_date)
     return pure_post_close_pattern_candidates(
         as_of_date, max_symbols, per_cohort, inputs.limit_rows,
-        inputs.step_rows, inputs.prior_limit_rows,
+        inputs.step_rows, inputs.prior_limit_rows, inputs.control_rows,
         inputs.daily_rows, post_close_exact_board_context(as_of_date),
         post_close_tushare_lhb_context(as_of_date), focus_symbols,
         limit_daily_features=post_close_limit_daily_features, board_count=limit_board_count,
@@ -2589,6 +2556,19 @@ def intraday_longhu_max_symbols() -> int:
         return max(1, min(60, int(os.getenv("QUANT_LONGHU_INTRADAY_MAX_SYMBOLS", "24"))))
     except ValueError:
         return 24
+
+
+def longhu_full_market_enabled() -> bool:
+    """Keep the licensed close cross-section opt-in and supplementary.
+
+    Longhu is an additional evidence provider.  It must not silently replace
+    the Tushare daily/control plane merely because credentials are mounted;
+    enabling this path is an explicit operator decision after a coverage and
+    control-quality review.
+    """
+    return os.getenv("QUANT_LONGHU_FULL_MARKET_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 
 async def intraday_longhu_watch_quotes(

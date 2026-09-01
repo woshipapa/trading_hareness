@@ -100,16 +100,29 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
     for item in samples:
         for tag in item["intraday_pattern"].get("pattern_tags", []):
             pattern_counts[str(tag)] = pattern_counts.get(str(tag), 0) + 1
-    picks = [item for item in samples if item.get("limit_context", {}).get("review_tier") != "research_sample"][:10]
+    picks = [item for item in samples
+             if item.get("limit_context", {}).get("sample_role") != "matched_near_limit_control"
+             and item.get("limit_context", {}).get("review_tier") != "research_sample"][:10]
     summary = {
         "selected": len(samples), "picks": len(picks), "minute_completed": len(samples) - len(failed),
         "minute_failed": len(failed), "cohort_counts": selection.get("cohort_counts", {}),
         "pattern_counts": pattern_counts, "limit_pool_rows": selection.get("limit_pool_rows", 0),
         "limit_step_rows": selection.get("limit_step_rows", 0),
+        "sample_role_counts": selection.get("sample_role_counts", {}),
+        "control_coverage": selection.get("control_coverage", {}),
+        "input_provenance": {
+            "limit_pool": "market_events_fallback" if any(
+                bool(item.get("limit_context", {}).get("source_fallback")) for item in samples
+                if item.get("limit_context", {}).get("sample_role") == "positive_limit_pool"
+            ) else "tushare_or_merged",
+            "minute": "tencent_free_bounded_replay",
+            "controls": "canonical_bars_daily_near_limit_non_sealed",
+        },
         "dragon_leader_market_context": selection.get("dragon_leader_market_context", {}),
     }
     source_status = {
         "daily": "canonical_bars_daily", "limit_sources": limit_sources,
+        "input_provenance": summary["input_provenance"],
         "minute": {
             "provider": "tencent_free", "status": "circuit_open" if minute_circuit_open else status,
             "completed": len(samples) - len(failed),

@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from psycopg.types.json import Json
 
-from .longhu_market_sync import MergedCrossSection, PROVIDER_KEY, build_control_rows
+from .longhu_market_sync import MergedCrossSection, PROVIDER_KEY
 from .universe_history import sync_universe_membership_history
 
 
@@ -75,7 +75,6 @@ def persist_full_market_close(
         "exchange": row["ts_code"].split(".")[1],
         "industry": None,
     } for row in merged.daily_rows]
-    controls = build_control_rows(merged.daily_rows)
     calendar_rows = persist_settled_trade_calendar(connection, trade_date, observed_at)
     normalized = {
         "stock_basic": persist_rows(
@@ -86,12 +85,6 @@ def persist_full_market_close(
         ),
         "daily_basic": persist_rows(
             connection, "daily_basic", request_key + ":daily_basic", merged.fundamental_rows, PROVIDER_KEY, observed_at,
-        ),
-        "adj_factor": persist_rows(
-            connection, "adj_factor", request_key + ":adj_factor", controls["adj_factor"], PROVIDER_KEY, observed_at,
-        ),
-        "stk_limit": persist_rows(
-            connection, "stk_limit", request_key + ":stk_limit", controls["stk_limit"], PROVIDER_KEY, observed_at,
         ),
     }
     symbols = [row["ts_code"] for row in merged.daily_rows]
@@ -181,8 +174,14 @@ def persist_full_market_close(
             "flow_rows": flow_count, "quote_rows": quote_count, "board_rows": len(board_rows),
             "source_health": source_health, "close_conflicts": list(merged.close_conflicts[:20]),
             "control_semantics": {
-                "adj_factor": "same_day_identity_only",
-                "stk_limit": "derived_from_preclose_board_rule_with_exception_warning",
+                # Longhu does not provide verified corporate-action or
+                # exchange-limit control rows.  Never promote identity or
+                # board-rule estimates into the canonical control tables;
+                # those remain the responsibility of the Tushare control
+                # synchronizer.  The raw vendor rows above retain pre-close
+                # and board context for research/audit only.
+                "adj_factor": "not_promoted;_tushare_control_plane_only",
+                "stk_limit": "not_promoted;_tushare_control_plane_only",
                 "trade_calendar": "observed_open_from_coverage_gated_settled_close",
             },
         }), request_key),

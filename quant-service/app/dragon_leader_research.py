@@ -25,7 +25,11 @@ def _number(value: Any) -> float | None:
 
 def _streak(item: dict[str, Any]) -> int:
     watch = item.get("continuation_watch") or {}
-    return int(watch.get("streak_count") or item.get("board_count") or item.get("streak_count") or 0)
+    context = item.get("limit_context") or {}
+    nested = context.get("continuation_watch") or {}
+    return int(watch.get("streak_count") or nested.get("streak_count")
+               or item.get("board_count") or context.get("board_count")
+               or item.get("streak_count") or context.get("streak_count") or 0)
 
 
 def _symbol(item: dict[str, Any]) -> str:

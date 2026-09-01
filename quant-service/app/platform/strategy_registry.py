@@ -84,7 +84,7 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "prior-session limit-up names proposed as an intraday watchlist universe",
     ),
     "post_close_limit_lift_pattern": StrategyContract(
-        "post_close_limit_lift_pattern", "post-close-limit-lift-pattern-v6", "app/strategy_pattern_mining_service.py",
+        "post_close_limit_lift_pattern", "post-close-limit-lift-pattern-v7", "app/strategy_pattern_mining_service.py",
         "post-close-limit-lift-pattern-v1", ("strategy_pattern_runs", "strategy_pattern_samples"),
         "research", "research_enabled", "none", "bounded post-close minute-pattern discovery and replay evidence",
     ),

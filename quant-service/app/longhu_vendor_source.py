@@ -18,9 +18,10 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -30,6 +31,15 @@ MAX_TENCENT_BATCH_SIZE = 80
 FLOW_CONVENTION = "longhuvip_zs_stocklist_main_net_field13"
 DEFAULT_CONFIG_PATH = Path.home() / ".stock-brain" / "longhu_vendor.json"
 USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 14; V2178A Build/UP1A.231005.007)"
+MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def market_today(now: datetime | None = None) -> date:
+    """Return today's exchange date independently of the host timezone."""
+    instant = now or datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(MARKET_TIMEZONE).date()
 
 
 def safe_page_size(value: int) -> int:
@@ -504,7 +514,12 @@ class LonghuVendorSource:
         self, trade_date: date, *, plate_ids: Iterable[str] | None = None,
     ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
         plates = list(plate_ids) if plate_ids is not None else self.industry_plates()
-        today = date.today()
+        # Provider selection is exchange-date based.  ``date.today()`` follows
+        # the container timezone (which may be UTC or the operator's laptop),
+        # so use the single market-clock contract used by the rest of the
+        # service.  This prevents a just-after-midnight UTC request from
+        # accidentally using the live endpoint for the prior Shanghai session.
+        today = market_today()
         live = trade_date == today
         by_symbol: dict[str, dict[str, Any]] = {}
         conflicts: list[dict[str, Any]] = []
@@ -597,5 +612,5 @@ __all__ = [
     "LonghuVendorSource", "SharedLonghuReadSource", "intraday_source",
     "MAX_PAGE_SIZE", "MAX_TENCENT_BATCH_SIZE", "configured", "normalize_stock_symbol",
     "parse_industry_stock_row", "parse_stock_minute_payload", "parse_stock_snapshot_payload",
-    "parse_tencent_quote_text", "safe_page_size",
+    "parse_tencent_quote_text", "safe_page_size", "market_today",
 ]

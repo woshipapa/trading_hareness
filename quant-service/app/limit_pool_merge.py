@@ -26,6 +26,7 @@ def merge_limit_pool_sources(
     merged: dict[str, dict[str, Any]] = {}
     ths_symbols: set[str] = set()
     eastmoney_symbols: set[str] = set()
+    market_event_symbols: set[str] = set()
     for stored in ths_rows:
         raw = dict(stored.get("row_data") or stored)
         symbol = str(raw.get("ts_code") or "").upper()
@@ -42,6 +43,11 @@ def merge_limit_pool_sources(
         if not _SYMBOL.fullmatch(symbol):
             continue
         eastmoney_symbols.add(symbol)
+        event_type = str(stored.get("event_type") or "")
+        source_name = str(stored.get("source") or "")
+        is_market_event = event_type == "limit_up_pool" or source_name.startswith("fuyao")
+        if is_market_event:
+            market_event_symbols.add(symbol)
         body = stored.get("body") or {}
         if isinstance(body, str):
             try:
@@ -50,6 +56,7 @@ def merge_limit_pool_sources(
                 body = {}
         raw = dict(body) if isinstance(body, dict) else {}
         board_count = int(number(raw.get("连板数")) or 1)
+        source_tag = f"market_events:{source_name or 'unknown'}" if is_market_event else "eastmoney_stock_zt_pool_em"
         eastmoney = {
             "ts_code": symbol, "name": raw.get("名称"), "limit_type": "涨停池",
             "pct_chg": number(raw.get("涨跌幅")), "price": number(raw.get("最新价")),
@@ -58,13 +65,15 @@ def merge_limit_pool_sources(
             "last_time": raw.get("最后封板时间"), "open_num": number(raw.get("炸板次数")),
             "tag": "首板" if board_count <= 1 else f"{board_count}连板",
             "lu_desc": raw.get("所属行业"), "provider_key": stored.get("source") or "akshare",
-            "available_at": stored.get("available_at"), "sources": ["eastmoney_stock_zt_pool_em"],
+            "available_at": stored.get("available_at"),
+            "sources": [source_tag],
+            "source_fallback": is_market_event,
         }
         if symbol in merged:
             for key, value in eastmoney.items():
                 if key not in {"provider_key", "available_at", "sources"} and merged[symbol].get(key) in {None, ""} and value not in {None, ""}:
                     merged[symbol][key] = value
-            merged[symbol]["sources"] = [*merged[symbol].get("sources", []), "eastmoney_stock_zt_pool_em"]
+            merged[symbol]["sources"] = [*merged[symbol].get("sources", []), source_tag]
             merged[symbol]["eastmoney_evidence"] = json_safe(eastmoney)
         else:
             merged[symbol] = eastmoney
@@ -72,7 +81,11 @@ def merge_limit_pool_sources(
     return {
         "items": list(merged.values()),
         "coverage": {
-            "status": "two_source_union" if ths_symbols and eastmoney_symbols else "single_source_only",
+            "status": (
+                "two_source_union" if ths_symbols and eastmoney_symbols
+                else "market_event_fallback" if market_event_symbols and not ths_symbols
+                else "single_source_only"
+            ),
             "union_count": len(union_symbols), "intersection_count": len(ths_symbols & eastmoney_symbols),
             "tushare_count": len(ths_symbols), "eastmoney_count": len(eastmoney_symbols),
             "tushare_only": sorted(ths_symbols - eastmoney_symbols),
