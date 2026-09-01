@@ -632,7 +632,6 @@ from .tushare_daily_sync import sync as sync_tushare_isolated
 from .baostock_daily_sync import fetch_rows as fetch_baostock_rows_isolated, sync as sync_baostock_isolated
 from .market_universe_sync import sync as sync_market_universe_isolated
 from .full_market_daily_sync import sync as sync_full_market_daily_isolated
-from .longhu_market_service import sync as sync_longhu_full_market_close
 from .longhu_market_repository import persisted_close_context as read_longhu_close_context
 from .longhu_vendor_source import (
     configured as longhu_vendor_configured,
@@ -644,7 +643,6 @@ from .minute_bar_session_backfill import (
     session_symbols as session_minute_symbols,
 )
 from .earnings_calendar_sync import sync as sync_earnings_calendar_isolated
-from .stock_money_flow_sync import persist_flow_rows as persist_stock_money_flow_rows
 from .stock_money_flow_sync import sync as sync_stock_money_flow_isolated
 from .disclosure_day_watch import MODEL_VERSION as DISCLOSURE_DAY_WATCH_MODEL_VERSION
 from .limit_up_continuation import MODEL_VERSION as LIMIT_UP_CONTINUATION_MODEL_VERSION
@@ -2559,13 +2557,7 @@ def intraday_longhu_max_symbols() -> int:
 
 
 def longhu_full_market_enabled() -> bool:
-    """Keep the licensed close cross-section opt-in and supplementary.
-
-    Longhu is an additional evidence provider.  It must not silently replace
-    the Tushare daily/control plane merely because credentials are mounted;
-    enabling this path is an explicit operator decision after a coverage and
-    control-quality review.
-    """
+    """Keep the licensed close cross-section opt-in and supplementary."""
     return os.getenv("QUANT_LONGHU_FULL_MARKET_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
     }

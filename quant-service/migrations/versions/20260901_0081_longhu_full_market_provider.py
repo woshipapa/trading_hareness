@@ -29,11 +29,14 @@ def upgrade() -> None:
         INSERT INTO quant.provider_capabilities(
           provider_key,capability,market,priority,enabled,rate_limit_per_minute)
         VALUES
-          ('longhuvip_composite','daily','cn',25,true,120),
-          ('longhuvip_composite','daily_all_a','cn',25,true,120),
-          ('longhuvip_composite','daily_basic','cn',25,true,120),
-          ('longhuvip_composite','stock_money_flow','cn',25,true,120),
-          ('longhuvip_composite','realtime_quote','cn',25,true,120)
+          -- The vendor's quota is not independently verified in this
+          -- migration. Keep a conservative control-plane budget; the
+          -- adapter's bounded basket is the actual runtime guard.
+          ('longhuvip_composite','daily','cn',25,true,30),
+          ('longhuvip_composite','daily_all_a','cn',25,true,30),
+          ('longhuvip_composite','daily_basic','cn',25,true,30),
+          ('longhuvip_composite','stock_money_flow','cn',25,true,30),
+          ('longhuvip_composite','realtime_quote','cn',25,true,30)
         ON CONFLICT(provider_key,capability,market) DO UPDATE SET
           priority=EXCLUDED.priority,enabled=true,
           rate_limit_per_minute=EXCLUDED.rate_limit_per_minute;
