@@ -71,6 +71,10 @@ lightServer root privileges.
   n8n instances must not share one n8n application schema.
 - Longhu reads go through `/licensed/longhu/*` with a dedicated read key. The
   upstream token and device identity stay on the owner's machine.
+- The Longhu full-market close synchronizer is retained as a staging/research
+  adapter only. It is not wired into the automatic `provider=auto` daily path;
+  Tushare remains the canonical daily/control source until a separate
+  verified-control promotion is approved.
 - List endpoints cap each physical vendor page at 300 and paginate larger
   logical reads in the adapter. Explicit quote baskets are independently
   bounded by `QUANT_LONGHU_INTRADAY_MAX_SYMBOLS`.
