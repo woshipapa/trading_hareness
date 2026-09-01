@@ -436,6 +436,16 @@ class DailyStrategySummaryReceiptSqlIntegrationTests(unittest.TestCase):
                     (self.exchange_date,),
                 )
                 self.assertTrue(terminal_for_exchange_date(connection, self.exchange_date))
+                connection.execute(
+                    "UPDATE quant.strategy_day_summaries SET payload=%s WHERE exchange_date=%s",
+                    (Json({"post_close": {"status": "blocked"}}), self.exchange_date),
+                )
+                self.assertFalse(terminal_for_exchange_date(connection, self.exchange_date))
+                connection.execute(
+                    "UPDATE quant.strategy_day_summaries SET payload=%s WHERE exchange_date=%s",
+                    (Json({"post_close": {"status": "completed"}}), self.exchange_date),
+                )
+                self.assertTrue(terminal_for_exchange_date(connection, self.exchange_date))
         finally:
             self._cleanup()
 

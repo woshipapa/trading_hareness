@@ -27,7 +27,10 @@ COMPOSE = ['/opt/homebrew/bin/docker', 'compose', '-f', os.path.join(HOME, 'code
 ARCHIVABLE = {
     'tushare_raw_records':           ('available_at', 180),
     'intraday_quote_observations':   ('observed_at', 90),
-    'intraday_rule_input_snapshots': ('captured_at', 90),
+    # The table stores the causal observation clock as ``observed_at``;
+    # ``captured_at`` was a stale name and made this archive path fail before
+    # it could even select a row.
+    'intraday_rule_input_snapshots': ('observed_at', 120),
     'raw_market_observations':       ('available_at', 180),
     # Minute bars are the scarcest evidence the intraday rules replay against,
     # so they are archived for durability rather than to reclaim space.

@@ -67,10 +67,20 @@ def build_daily_strategy_summary(database: Any, exchange_date: date, *, readines
 
 
 def terminal_for_exchange_date(connection: Any, exchange_date: date) -> bool:
-    """Whether the persisted day summary is a restart-safe terminal receipt."""
+    """Whether the persisted day summary is a restart-safe terminal receipt.
+
+    ``suppressed`` only describes the delivery channel (the dashboard owns the
+    summary; Feishu does not). A summary whose post-close candidate stage was
+    blocked is therefore still retryable: late daily bars may make that stage
+    complete later in the same evening.
+    """
     row = connection.execute(
         """SELECT 1 FROM quant.strategy_day_summaries
              WHERE exchange_date=%s AND delivery_status=ANY(%s)
+               AND NOT (
+                   delivery_status='suppressed'
+                   AND COALESCE(payload->'post_close'->>'status','')='blocked'
+               )
              LIMIT 1""",
         (exchange_date, ["sent", "disabled", "suppressed"]),
     ).fetchone()

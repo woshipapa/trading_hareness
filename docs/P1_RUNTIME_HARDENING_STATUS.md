@@ -60,7 +60,7 @@
 - 未被专项流程消费的本地执行器饱和现由 FastAPI 统一映射为 HTTP 503（明确提示可短暂重试），不会退化为未分类 500；AKShare 多接口探针会将该状态保存为当前 capability 的局部失败，继续保留其余步骤的独立结果。
 - Alembic 已建立 `20260811_0001` 的现有 schema 基线，并已升级至当前 head `20260815_0031`。后续迁移创建运行租约、前复权隔离、提醒与板块轮动 outbox、共享 provider 限流、纸面研究、Prompt Lab、策略消融和存储治理等边界。租约逻辑已移至 `app/runtime_leases.py`，健康接口展示该租约是否活跃与到期时间。服务镜像在启动 `uvicorn` 前会以 PostgreSQL advisory lock 执行 `alembic upgrade head`；多副本不会并发迁移，等待上限默认 60 秒，已到 head 时为幂等检查且不触发任何市场源。
 - 盘中确认提醒现包含上海时区观测时间与可选的公开研究台决策卡链接；投递先落本地 outbox，失败消息在后续扫描中有界重试，只有成功回执才进入冷却统计。连续三次失败会被本地持久化并令状态台降级；由于同一飞书通道在中断时不能真正“带外通知”，首次恢复的正常投递会补发一条明确的恢复回执，且其投递结果也可审计。状态页显示待重试数、真实连续失败数、未解决故障或已发送恢复回执。
-- 日终研究摘要在开市日 19:15–19:30 汇总已落库的盘中信号、结算、盘后候选和数据门禁，失败最多重试 3 次且不重新访问行情源；摘要通道的配置、上次投递和失败状态均显示在前端实时服务面板。
+- 日终研究摘要在开市日 19:15–22:00 汇总已落库的盘中信号、结算、盘后候选和数据门禁，失败最多重试 3 次且不重新访问行情源；若摘要先以 `suppressed + post_close=blocked` 落库，晚发布日线后仍会同日重建；摘要通道的配置、上次投递和失败状态均显示在前端实时服务面板。
 - 盘中/日终状态面板所需的 PostgreSQL 查询已移至 `app/intraday_runtime_status.py` 的只读仓储边界；该模块没有 provider client、调度或写入逻辑，因此前端刷新不会额外请求行情，也为后续 native async repository 迁移保留了明确切口。
 - `/api/v1/intraday/services/status` 的 HTTP 装配已移至 `app/routers/intraday_status.py`；主服务只注入状态计算函数。OpenAPI、URL 和前端响应契约保持不变，实测仍返回九项运行服务。
 - 已归档分析师报告、结构化观点、文本因子和人工复核队列的五个 GET 路由已移至 `app/routers/analyst_reads.py`，SQL 读取收敛至 `app/analyst_read_model.py`。该 read model 只读取本地已提取文字与证据摘要，不会请求远端图片、视频或其他媒体；报告导入、重处理和人工批准仍保持独立写路径。
@@ -157,7 +157,7 @@
 - 2026-08-22：盘中扫描的生产持久化事务边界收敛至 `app/intraday_scan_signal_persistence.py`。该适配层独占并一次性打开本地事务，再委托既有输入冻结、候选生成与事件持久化；FastAPI composition 不再自行管理该边界。新增回归确认一轮扫描只进入/退出一次事务，不改变任何策略阈值、provider 调用或飞书投递。重建后的全量回归为 701 项通过，开盘前只读预检通过。
 - 2026-08-22：应用启动/关闭顺序收敛至 `app/application_lifecycle.py`。数据库、受限 HTTP client、目录登记和带租约后台任务依次启动；关闭时反向停止 task、共享快照、执行器、HTTP client 和数据库。若启动中途失败，只释放已经成功取得的本地资源，绝不启动后台循环或遗留连接/限频注册；关闭任一步异常也继续尝试后续资源，并不覆盖原始启动/运行异常。纯本地回归锁定完整顺序、禁用 legacy bootstrap 时不得迁移、HTTP client 启动失败回滚及清理错误隔离；重建后的全量回归为 705 项通过，开盘前只读预检通过。
 - 2026-08-22：午盘/收盘复盘与盘后策略常驻 runner 的生产装配移至 `app/strategy_runtime_runners.py`。它继续使用已有 scheduler 的 checkpoint、同交易日 completion receipt、重试窗口和数据库执行器超时（10/30/60/90 秒）；不含 provider client、策略阈值或 FastAPI。新增纯本地回归锁定复盘操作/超时与盘后同日期 `run_recorded` 回执；重建后的全量回归为 707 项通过，开盘前只读预检通过。
-- 2026-08-22：日终研究摘要的生产装配移至 `app/daily_strategy_summary_runtime.py`。它只将摘要写成 `suppressed` 前端回执，继续使用同交易日 terminal receipt 与既有 19:15–19:30 scheduler，绝不形成第二条飞书投递路径。新增纯本地回归锁定 suppression、摘要 JSON/文本和 terminal 的 10 秒数据库边界；重建后的全量回归为 709 项通过，开盘前只读预检通过。
+- 2026-08-22：日终研究摘要的生产装配移至 `app/daily_strategy_summary_runtime.py`。它只将摘要写成 `suppressed` 前端回执，继续使用同交易日 terminal receipt 与 19:15–22:00 scheduler，绝不形成第二条飞书投递路径；`suppressed + post_close=blocked` 不再被误判为不可重建。新增纯本地回归锁定 suppression、摘要 JSON/文本和 terminal 的 10 秒数据库边界。
 - 2026-08-22：一秒级 Super GET `rt_k` 交叉确认的观察池读取、原始证据清理和 loop 装配移至 `app/intraday_fast_quote_runtime.py`。仍固定显式观察池上限、优先级轮转、特别时段 1 秒/最多 20 在途任务、存储保护与仅清理 `tushare_super_get_rt_k` 的 7 日证据；不改变 provider 请求、主风险扫描或提醒条件。新增本地回归锁定容量、排序、节奏和清理范围；重建后的全量回归为 710 项通过，开盘前只读预检通过。
 - 2026-08-22：收盘窗口分钟画像的观察池读取与 loop 装配移至 `app/intraday_minute_profile_runtime.py`。调度器仍严格只在 14:55–15:00 尝试、当日 completed/partial/blocked 不重复，短暂失败仍可在窗口内重试；适配器只经有界数据库执行器读取最多 40 只显式观察股并按既有优先级排序，不改变腾讯分钟调用、捕获结果或存储门禁。新增本地回归锁定 30 秒节奏、容量、排序和事务边界；重建后的全量 discovery 回归为 711 项通过，开盘前只读预检通过。
 - 2026-08-22：腾讯五档盘口循环的观察池读取、按源清理和 loop 装配移至 `app/intraday_order_book_runtime.py`。仍沿用既有能力熔断、3 秒受限节奏、最多 40 只观察股、存储门禁及只清理 `tencent_order_book` 的保留期；不改变单边封单证据、15 秒同日快照门禁、OFI 聚合或信号阈值。新增本地回归锁定容量、顺序、节奏和清理范围；重建后的全量 discovery 回归为 712 项通过，开盘前只读预检通过。

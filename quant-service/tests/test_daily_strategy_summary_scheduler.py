@@ -54,7 +54,7 @@ class DailyStrategySummarySchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def test_outside_window_does_not_touch_database_callbacks(self):
         dependencies, calls = self._dependencies()
         done = await daily_strategy_summary_scheduler_step(
-            set(), dependencies, local=datetime(2026, 8, 14, 19, 30, tzinfo=CN),
+            set(), dependencies, local=datetime(2026, 8, 14, 22, 0, tzinfo=CN),
         )
         self.assertFalse(done)
         self.assertEqual(calls, [])

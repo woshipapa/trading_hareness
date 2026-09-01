@@ -24,3 +24,13 @@ class DailyStrategySummaryServiceTests(unittest.TestCase):
         self.assertIn("delivery_status=ANY", complete.sql)
         self.assertEqual(complete.params[1], ["sent", "disabled", "suppressed"])
         self.assertFalse(terminal_for_exchange_date(Connection(None), date(2026, 8, 21)))
+
+    def test_suppressed_summary_with_blocked_post_close_is_retryable(self):
+        class Connection:
+            def execute(self, sql, params):
+                self.sql, self.params = sql, params
+                return _Result(None)
+
+        connection = Connection()
+        self.assertFalse(terminal_for_exchange_date(connection, date(2026, 8, 21)))
+        self.assertIn("post_close", connection.sql)

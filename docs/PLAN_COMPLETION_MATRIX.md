@@ -33,7 +33,7 @@
 | n8n 孤儿执行审计收口 | 已完成 | `scripts/reconcile-stale-n8n-executions.sh` 只标记超过 10 分钟仍为 `running` 的记录为 `crashed`，绝不删除执行证据；LaunchAgent 每 15 分钟运行一次。无候选时脚本不再创建备份目录，避免运行日志/审计目录无界累积 |
 | 盘后一键刷新跨进程恢复回执 | 已完成 | `post-close-refresh:{stage}:{trade_date}` 通过唯一 `automation_runs` 回执恢复：完成阶段不重跑且返回 `resumed_from_receipt`，partial/blocked/failed 才重试同一行；真实 PostgreSQL JSONB、终态时间戳与 partial 重开均有契约测试。阶段装配已独立至 `post_close_refresh_service.py`，控制面缺失会阻断依赖策略但不阻断独立证据阶段 |
 | 午盘/收盘复盘重启恢复 | 已完成 | `strategy_review_runs` 的同交易日/session 且 `report.status=completed` 作为 durable checkpoint receipt；重启后检查点不重复刷新行情、结算或评分，未完成记录仍在原两分钟窗口内重试 |
-| 日终研究摘要重启恢复 | 已完成 | `strategy_day_summaries` 的 `sent`/`disabled`/`suppressed` 是终态回执，重启后不重建摘要；`pending`/`failed` 仍在原 19:15–19:30 窗口重试，且不向飞书推送候选池 |
+| 日终研究摘要重启恢复 | 已完成 | `strategy_day_summaries` 的 `sent`/`disabled`/`suppressed` 是终态回执，重启后不重建摘要；但 `suppressed + post_close=blocked` 会在 19:15–22:00 同日窗口继续重试，避免晚发布日线留下旧 blocked 摘要；不向飞书推送候选池 |
 | 常驻循环锁与生命周期可观测性 | 已完成 | durable `runtime_leases` 继续作为跨进程持锁真源；背景循环的 acquire/renew/release 均在原生 async 池执行，保留仅过期可接管及 holder 限定的原子 SQL，避免其与同步仓储争用 4 槽执行器。`/health.runtime_loops` 增加本进程 worker 的 running/waiting/lease-lost/backoff/error 生命周期状态，解释未启动/交接/异常退出而不把它冒充为业务心跳，也不记录 provider payload 或凭据。应用生命周期以唯一标签注册命名 task，关闭时统一取消并等待，重复 loop label 在启动前 fail-closed |
 | 存储/备份/恢复前校验 | 已完成 | 总研究空间**硬上限** 40 GiB、日频 P2 证据热库**硬上限** 36 GiB（为受限历史保留 4 GiB artifact 余量）；存储测量和 60 秒准入缓存已收敛至 `research_storage_admission.py`。80% 预警、90% 仅暂停非必要高频采集，观察池风险/提醒不受影响。每日 PostgreSQL/workflow 备份除 14 天保留和同日去重外，另有 8 GiB 容量上限；创建 staging 前会按最近一份完整日备份的实测体积预留空间，只会回收严格命名的旧完成日备份。开盘预检同时校验该容量、`pg_restore -l` manifest 和 workflow JSON |
 | 纸面组合展示与风险阻断 | 已完成 | 前端展示净值、总/净暴露、回撤、可卖量、板块暴露和风险事件；成员按观察日点时映射；新 entry 受日亏/回撤/集中度限制 |

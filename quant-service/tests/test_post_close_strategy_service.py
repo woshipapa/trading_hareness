@@ -83,7 +83,11 @@ class PostCloseStrategyServiceTests(unittest.TestCase):
         self.assertFalse(retry_window(datetime(2026, 8, 14, 18, 54, tzinfo=china)))
         self.assertTrue(retry_window(datetime(2026, 8, 14, 18, 55, tzinfo=china)))
         self.assertTrue(retry_window(datetime(2026, 8, 14, 20, 29, 59, tzinfo=china)))
-        self.assertFalse(retry_window(datetime(2026, 8, 14, 20, 30, tzinfo=china)))
+        # A delayed provider can publish the full daily cross-section after
+        # the first evening attempt. Keep the same-date retry window open
+        # long enough to consume that late evidence without crossing midnight.
+        self.assertTrue(retry_window(datetime(2026, 8, 14, 21, 59, 59, tzinfo=china)))
+        self.assertFalse(retry_window(datetime(2026, 8, 14, 22, 0, tzinfo=china)))
 
 
 if __name__ == "__main__":

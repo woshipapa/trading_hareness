@@ -125,9 +125,15 @@ def run(
 
 
 def retry_window(value: datetime) -> bool:
-    """Allow retries only in the same Shanghai post-close evening window."""
+    """Allow same-date retries through the evening provider catch-up window.
+
+    Full-market daily data is sometimes published after the initial 18:55
+    attempt. Keeping retries open until 22:00 lets a later successful daily
+    sync unblock the candidate screen while still preventing a date rollover
+    from being mistaken for the requested exchange date.
+    """
     local = value.astimezone(ZoneInfo("Asia/Shanghai"))
-    return time(18, 55) <= local.time() < time(20, 30)
+    return time(18, 55) <= local.time() < time(22, 0)
 
 
 def completed_for_date(database: Any, as_of_date: date, *, model_version: str) -> bool:

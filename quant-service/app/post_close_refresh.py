@@ -158,7 +158,7 @@ async def run_refresh(
         controls = stages.get("core_daily_controls", {"status": "blocked"})
         controls_ready = controls.get("status") in {"completed", "unchanged"}
         retry_hint = (
-            "收盘日线尚未发布时，可稍后再次点击；自动盘后任务也会在18:55-19:10重试策略筛选。"
+            "收盘日线尚未发布时，可稍后再次点击；自动盘后任务会在18:55-22:00的同一交易日窗口内重试策略筛选。"
             if not daily_ready else
             "日线控制面尚未完整，依赖复权、涨跌停或停牌字段的策略阶段已阻断；可稍后重试。"
             if not controls_ready else None

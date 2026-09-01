@@ -59,7 +59,7 @@ async def run_daily_strategy_summary(
 async def run_daily_strategy_summary_loop(
     dependencies: DailyStrategySummaryRuntimeDependencies,
 ) -> None:
-    """Run the existing 19:15--19:30 scheduler with durable local receipts."""
+    """Run the 19:15--22:00 same-date scheduler with durable local receipts."""
     async def terminal_for_date(exchange_date: date) -> bool:
         def load() -> bool:
             with dependencies.database.transaction() as connection:

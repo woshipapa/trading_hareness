@@ -23,7 +23,9 @@ class DailyStrategySummarySchedulerDependencies:
 
 
 def in_summary_window(local: datetime) -> bool:
-    return time(19, 15) <= local.time() < time(19, 30)
+    # Keep the dashboard receipt retryable while delayed daily bars are still
+    # allowed to unblock the same-date post-close strategy (through 22:00).
+    return time(19, 15) <= local.time() < time(22, 0)
 
 
 async def daily_strategy_summary_scheduler_step(
