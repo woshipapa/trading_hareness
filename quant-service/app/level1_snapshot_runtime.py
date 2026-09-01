@@ -22,7 +22,13 @@ async def capture_level1_snapshot(
 ) -> dict[str, Any]:
     """Capture one all-A snapshot, returning a secret-free health result."""
     observed_at = now or datetime.now(timezone.utc)
-    if not await session_open(observed_at):
+    # Some application session adapters return ``(active, reason)`` while the
+    # collector contract historically accepted a bare bool.  Normalize both
+    # forms here so a false tuple cannot be treated as truthy and accidentally
+    # trigger a provider request outside the exchange session.
+    session_result = await session_open(observed_at)
+    active = bool(session_result[0]) if isinstance(session_result, tuple) else bool(session_result)
+    if not active:
         return {"status": "outside_session", "received": 0, "stored": 0}
     rows, metadata = await fetch_snapshot()
     payloads: list[dict[str, Any]] = []

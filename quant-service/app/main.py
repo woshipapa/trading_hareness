@@ -3152,10 +3152,14 @@ async def all_a_level1_snapshot_capture_loop() -> None:
         )
 
     async def capture() -> dict[str, Any]:
+        async def session_open(now: datetime) -> bool:
+            active, _reason = await realtime_market_session_async(now=now)
+            return active
+
         return await capture_level1_snapshot(
             fetch_snapshot=fuyao_all_a_snapshot_rows,
             persist=persist,
-            session_open=lambda now: realtime_market_session_async(now=now),
+            session_open=session_open,
         )
 
     await run_level1_snapshot_loop(interval_seconds=60, capture=capture)

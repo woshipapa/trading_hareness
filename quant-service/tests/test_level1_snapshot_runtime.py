@@ -44,6 +44,22 @@ class Level1SnapshotRuntimeTests(unittest.TestCase):
         ))
         self.assertEqual(result["status"], "outside_session")
 
+    def test_capture_fails_closed_when_session_adapter_returns_reason_tuple(self):
+        async def open_session(_now):
+            return False, "outside SSE continuous auction sessions"
+
+        async def fail_fetch():
+            raise AssertionError("must not call provider outside session")
+
+        async def persist(*_args):
+            raise AssertionError("must not write outside session")
+
+        result = asyncio.run(capture_level1_snapshot(
+            fetch_snapshot=fail_fetch, persist=persist, session_open=open_session,
+            now=datetime(2026, 8, 31, 9, 0, tzinfo=timezone.utc),
+        ))
+        self.assertEqual(result["status"], "outside_session")
+
 
 if __name__ == "__main__":
     unittest.main()
