@@ -100,12 +100,12 @@ values below are deployment secrets and are never committed:
 export LONGHU_SSH_HOST=owner.example
 export LONGHU_SSH_USER=stockpeer
 export LONGHU_SSH_KEY_PATH=/path/to/longhu-owner-ed25519
-export LONGHU_REMOTE_PORT=15681
-export LONGHU_LOCAL_PORT=15681
+export LONGHU_REMOTE_PORT=15682
+export LONGHU_LOCAL_PORT=15682
 scripts/shared-peer/start-local-longhu-tunnel.sh
 ```
 
-Set `QUANT_SHARED_READ_API_BASE_URL=http://host.docker.internal:15681` and the
+Set `QUANT_SHARED_READ_API_BASE_URL=http://host.docker.internal:15682` and the
 separately provisioned `QUANT_SHARED_READ_API_KEY` in the ignored local `.env`,
 then recreate `quant-research`. Docker Desktop resolves
 `host.docker.internal` to the host-side SSH listener; the SSH `-L` bind is

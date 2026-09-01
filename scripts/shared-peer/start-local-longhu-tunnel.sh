@@ -5,8 +5,8 @@ set -euo pipefail
 : "${LONGHU_SSH_USER:?Set LONGHU_SSH_USER in the shell environment}"
 : "${LONGHU_SSH_KEY_PATH:?Set LONGHU_SSH_KEY_PATH in the shell environment}"
 
-local_port="${LONGHU_LOCAL_PORT:-15681}"
-remote_port="${LONGHU_REMOTE_PORT:-15681}"
+local_port="${LONGHU_LOCAL_PORT:-15682}"
+remote_port="${LONGHU_REMOTE_PORT:-15682}"
 ssh_port="${LONGHU_SSH_PORT:-22}"
 
 exec ssh -NT \
