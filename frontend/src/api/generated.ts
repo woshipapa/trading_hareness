@@ -608,6 +608,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/l2/evaluations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record */
+        post: operations["record_api_v1_research_l2_evaluations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/l2/evaluations/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Latest */
+        get: operations["latest_api_v1_research_l2_evaluations_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/strategy/decisions/latest": {
         parameters: {
             query?: never;
@@ -3322,6 +3356,48 @@ export interface components {
             };
         };
         /**
+         * L2IncrementalEvaluationRequest
+         * @description Submit licensed/offline L2 evidence without opening a live data path.
+         */
+        L2IncrementalEvaluationRequest: {
+            /**
+             * Source Kind
+             * @default licensed_level2_offline
+             * @constant
+             */
+            source_kind: "licensed_level2_offline";
+            /**
+             * Algorithm Version
+             * @default l2-gate-v1
+             */
+            algorithm_version: string;
+            /**
+             * Minimum Samples
+             * @default 200
+             */
+            minimum_samples: number;
+            /** Rows */
+            rows: components["schemas"]["L2PairedObservation"][];
+            /** Evidence Window Start */
+            evidence_window_start?: string | null;
+            /** Evidence Window End */
+            evidence_window_end?: string | null;
+        };
+        /**
+         * L2PairedObservation
+         * @description One matched research-only Level-1 versus Level-2 observation.
+         */
+        L2PairedObservation: {
+            /** Baseline Score */
+            baseline_score: number;
+            /** L2 Score */
+            l2_score: number;
+            /** Outcome */
+            outcome: number;
+            /** L2 Algorithm Version */
+            l2_algorithm_version: string;
+        };
+        /**
          * MarketFlowFeatureRebuildRequest
          * @description Bounded local-evidence rebuild; it never authorizes provider history.
          */
@@ -5100,6 +5176,63 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_api_v1_research_l2_evaluations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["L2IncrementalEvaluationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_api_v1_research_l2_evaluations_latest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
