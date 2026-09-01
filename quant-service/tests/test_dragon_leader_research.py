@@ -75,6 +75,24 @@ class DragonLeaderResearchTests(unittest.TestCase):
         self.assertIn("lhb_institution_net_sell", score["risk_flags"])
         self.assertGreater(score["score"], 0)
 
+    def test_nested_limit_context_streak_is_used_by_score_and_market_context(self) -> None:
+        items = [{
+            "ts_code": "000001.SZ",
+            "limit_context": {
+                "streak_count": 4,
+                "continuation_watch": {"eligible": True, "streak_count": 4, "seal_to_float": 0.03},
+            },
+            "board_context": {},
+        }]
+        market = enrich_dragon_leader_watches(items)
+        self.assertEqual(market["highest_observed_streak"], 4)
+        self.assertEqual(market["observable_multi_board_count"], 1)
+        self.assertEqual(items[0]["dragon_leader_watch"]["streak_count"], 4)
+
+    def test_compact_continuation_tag_is_counted(self) -> None:
+        from app.post_close_limit_features import board_count
+        self.assertEqual(board_count("6连板"), 6)
+
     def test_theme_ladder_is_a_manual_review_not_an_order(self) -> None:
         items = [
             {

@@ -69,12 +69,17 @@ availability fields.
 大致为 15–40GB（实际以列宽和供应商字段为准），百度网盘容量足够；这
 些增长只增加回放覆盖，不改变任何实盘阈值。
 
-2026-09-01 的现场盘点：`market_bars_minute` 为 696,739 行/1,301 只
-股票/56 个交易日，`ten_day_leader_rotation_intraday_observations` 为
-17,240 行/177 只股票/7 个交易日；最新 `strategy_pattern_runs` 是
-2026-08-25 且状态 `blocked`。因此当前龙头评分只能作为 `partial_shadow`，
-不能宣称已经完成龙头策略验证。下一次回填应优先补齐全量涨停池、集合竞价、
-开板/回封事件和候选+对照分钟路径，而不是继续扩大盘口 Level-2。
+2026-09-01 的现场盘点：`market_bars_minute` 为 713,752 行/1,301 只
+股票/60 个交易日，`ten_day_leader_rotation_intraday_observations` 为
+17,240 行/177 只股票/7 个交易日。刚刚重跑的
+`strategy_pattern_runs` 已完成：20 个正样本 + 40 个同涨跌停比例的近阈值
+未封板对照，60/60 分钟路径成功；涨停池 86 条、连板链 244 条，当前高度
+6 板。P3 的 60 日窗口已满足，但分钟数据仍没有供应商显式
+`source_available_at`，所以 P2/P3 晋级门禁仍保持阻断。输入仍来自
+`market_events` 的显式 fallback，封单/主题/次日结果缺失，
+因此龙头评分仍只能作为 `partial_shadow`，不能宣称已经完成策略验证。
+下一次回填仍优先补齐全量涨停池、集合竞价、开板/回封事件和候选+对照分钟
+路径，而不是继续扩大盘口 Level-2。
 
 分层调整为：L0 只保留原始响应和当日工作集；L1 保留全 A 日线/控制面、
 精确 PIT 成员和紧凑 gold 结果；L2 保存候选与匹配对照的 Zstandard

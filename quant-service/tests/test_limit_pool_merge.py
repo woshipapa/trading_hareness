@@ -37,6 +37,17 @@ class LimitPoolMergeTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["ts_code"], "000001.SZ")
         self.assertEqual(result["items"][0]["tag"], "首板")
 
+    def test_market_event_fallback_keeps_provider_provenance(self) -> None:
+        result = merge_limit_pool_sources(
+            [], [{"symbol": "000001.SZ", "event_type": "limit_up_pool", "source": "fuyao_derived",
+                  "body": {"名称": "事件源", "涨跌幅": 10.0}}],
+            json_safe=lambda value: value,
+            number=lambda value: float(value) if value not in (None, "") else None,
+        )
+        self.assertEqual(result["coverage"]["status"], "market_event_fallback")
+        self.assertEqual(result["items"][0]["sources"], ["market_events:fuyao_derived"])
+        self.assertTrue(result["items"][0]["source_fallback"])
+
 
 if __name__ == "__main__":
     unittest.main()
