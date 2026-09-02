@@ -68,7 +68,7 @@ test('raw overflow uploads a bounded batch before acknowledging the cursor', asy
 	const archive = createBaiduPanMarketArchive({
 		baiduPan, ledger, quantServiceUrl: 'http://quant', quantWriteApiKey: 'write-key',
 		rawOverflowEnabled: true, enabled: false, rawCapabilities: ['realtime_quote'],
-		fetchImpl, rootPath: '/archive', rawRootPath: '/raw', rawBatchRows: 10, intervalSeconds: 30,
+		fetchImpl, rootPath: '/archive', rawRootPath: '/raw', rawBatchRows: 10, rawBatchesPerDrain: 1, intervalSeconds: 30,
 	});
 	await archive.poll();
 	await archive.drainRawOverflow();
