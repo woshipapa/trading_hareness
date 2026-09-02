@@ -266,7 +266,7 @@ class LonghuIntradaySource(Protocol):
     """Small contract shared by the local licensed and remote gateway clients."""
 
     def watch_quotes(
-        self, symbols: Iterable[str], *, max_symbols: int = 24,
+        self, symbols: Iterable[str], *, max_symbols: int = MAX_PAGE_SIZE,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]: ...
 
     def stock_quote(self, symbol: str) -> dict[str, Any]: ...
@@ -354,7 +354,7 @@ class SharedLonghuReadSource:
         return self._single_payload(self.raw_call(request), action=action)
 
     def watch_quotes(
-        self, symbols: Iterable[str], *, max_symbols: int = 24,
+        self, symbols: Iterable[str], *, max_symbols: int = MAX_PAGE_SIZE,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         limit = max(1, min(MAX_PAGE_SIZE, int(max_symbols)))
         ordered = list(dict.fromkeys(
@@ -563,7 +563,7 @@ class LonghuVendorSource:
             raise RuntimeError(f"Longhu quote missing or mismatched for {code}")
         return parsed
 
-    def watch_quotes(self, symbols: Iterable[str], *, max_symbols: int = 24) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def watch_quotes(self, symbols: Iterable[str], *, max_symbols: int = MAX_PAGE_SIZE) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Fetch a bounded explicit watch basket; never widen to an all-A scan."""
         limit = max(1, min(MAX_PAGE_SIZE, int(max_symbols)))
         ordered = list(dict.fromkeys(
