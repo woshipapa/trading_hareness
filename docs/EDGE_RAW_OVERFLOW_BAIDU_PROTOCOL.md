@@ -125,6 +125,8 @@ state
   `raw_archive_batches`、内部鉴权 API、keyset 分页和 ACK 后精确前缀清理。
 - P2（已完成代码、待生产演练）：Feishu adapter 已复用同一百度 OAuth、单并发
   raw worker、gzip JSONL、有界上传和失败重试；状态已接入 `/health` 和研究台。
+  本地 compose 与 edge relay compose 均已声明 raw lane 开关、allowlist 和根路径，
+  但默认值保持关闭，避免仅更新镜像就意外开始上传。
 - P3（未启用）：需要在非交易时段用测试 stream 做一次真实百度上传、下载校验、
   ACK/offset 重启恢复演练，再将两个环境开关切到 `true`。
 
