@@ -806,6 +806,11 @@ async def nonessential_high_frequency_capture_allowed() -> tuple[bool, dict[str,
     return await _research_storage_admission.optional_high_frequency_allowed()
 
 
+async def core_intraday_evidence_capture_allowed() -> tuple[bool, dict[str, Any]]:
+    """Use the explicit bounded-evidence override for board/minute captures."""
+    return await _research_storage_admission.core_intraday_evidence_allowed()
+
+
 # The one-click post-close refresh has several write-heavy, ordered phases.
 # A durable PostgreSQL lease serializes browser clicks and separate service
 # instances without relying on one process's asyncio state.
@@ -3064,7 +3069,7 @@ async def intraday_board_flow_curve_loop() -> None:
     """Capture once per SSE board-observation minute without catch-up bursts."""
     await run_intraday_board_curve_runtime_loop(IntradayBoardCurveRuntimeDependencies(
         database=db, run_database=run_database_blocking, board_session=intraday_board_curve_session_async,
-        storage_allowed=nonessential_high_frequency_capture_allowed, capture=capture_intraday_board_flow_curve,
+        storage_allowed=core_intraday_evidence_capture_allowed, capture=capture_intraday_board_flow_curve,
         curve_retention_days=intraday_board_curve_retention_days,
         rotation_retention_days=intraday_board_rotation_retention_days,
         run_loop=intraday_board_curve_runner.run_loop,
@@ -3265,7 +3270,7 @@ async def intraday_minute_profile_capture_loop() -> None:
     await run_intraday_minute_profile_runtime_loop(IntradayMinuteProfileRuntimeDependencies(
         database=db, run_database=run_database_blocking,
         max_symbols=intraday_minute_profile_max_symbols, watch_priority_key=intraday_watch_priority_key,
-        calendar_open=sse_calendar_open_async, storage_allowed=nonessential_high_frequency_capture_allowed,
+        calendar_open=sse_calendar_open_async, storage_allowed=core_intraday_evidence_capture_allowed,
         capture=capture_intraday_minute_sessions, run_loop=intraday_minute_profile_runner.run_loop,
     ))
 

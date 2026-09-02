@@ -1757,7 +1757,11 @@ class AsyncDatabase:
         self._pool_settings = dict(source._pool_settings)
         try:
             async_min = max(1, min(4, int(os.getenv("QUANT_ASYNC_READ_POOL_MIN_SIZE", "1"))))
-            async_max = max(async_min, min(8, int(os.getenv("QUANT_ASYNC_READ_POOL_MAX_SIZE", "4"))))
+            # Eight connections keep dashboard reads and the seven edge lease
+            # heartbeats from starving one another during the trading session.
+            # The upper bound remains deliberately small for the single-node
+            # deployment.
+            async_max = max(async_min, min(8, int(os.getenv("QUANT_ASYNC_READ_POOL_MAX_SIZE", "8"))))
         except ValueError:
             async_min, async_max = 1, 4
         self._pool_settings["min_size"] = async_min

@@ -69,5 +69,24 @@ class ResearchStorageAdmission:
             status = cached[1]
         return bool(status.get("allow_nonessential_high_frequency", True)), status
 
+    async def core_intraday_evidence_allowed(self) -> tuple[bool, dict[str, Any]]:
+        """Keep bounded board/minute evidence alive at the optional stop gate.
+
+        Board-flow curves and the close-window minute profile are small,
+        strategy-context datasets; they must not disappear merely because the
+        raw high-frequency lane reached its storage watermark.  The operator
+        still has to opt in explicitly so a constrained edge remains fail
+        closed by default.
+        """
+        allowed, status = await self.optional_high_frequency_allowed()
+        enabled = str(os.getenv("QUANT_CORE_INTRADAY_CAPTURE_AT_STOP", "false")).strip().lower() in {
+            "1", "true", "yes", "on",
+        }
+        if not allowed and enabled:
+            override = dict(status)
+            override["capture_policy"] = "core_intraday_evidence_allowed_at_storage_stop"
+            return True, override
+        return allowed, status
+
 
 __all__ = ["ResearchStorageAdmission", "governance"]

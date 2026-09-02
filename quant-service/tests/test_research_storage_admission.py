@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.research_storage_admission import ResearchStorageAdmission, governance
 
@@ -50,3 +50,11 @@ class ResearchStorageAdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["managed"]["used_bytes"], 300)
         self.assertEqual(result["state"], "healthy")
         self.assertTrue(result["allow_nonessential_high_frequency"])
+
+    async def test_core_intraday_evidence_can_explicitly_survive_optional_stop(self) -> None:
+        status = {"allow_nonessential_high_frequency": False, "state": "stop_nonessential_high_frequency"}
+        admission = ResearchStorageAdmission(lambda: status, AsyncMock(return_value=status), cache_seconds=60)
+        with patch.dict("os.environ", {"QUANT_CORE_INTRADAY_CAPTURE_AT_STOP": "true"}, clear=False):
+            allowed, detail = await admission.core_intraday_evidence_allowed()
+        self.assertTrue(allowed)
+        self.assertEqual(detail["capture_policy"], "core_intraday_evidence_allowed_at_storage_stop")
