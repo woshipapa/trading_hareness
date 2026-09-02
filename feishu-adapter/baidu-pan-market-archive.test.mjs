@@ -50,7 +50,7 @@ test('raw overflow uploads a bounded batch before acknowledging the cursor', asy
 			const chunks = [];
 			for await (const chunk of input.readable) chunks.push(Buffer.from(chunk));
 			uploaded.push({ path: input.remotePath, bytes: Buffer.concat(chunks) });
-			return { path: input.remotePath, fsId: 'raw-1' };
+			return { path: input.remotePath, fsId: 123456789 };
 		},
 	};
 	const fetchImpl = async (url, options = {}) => {
@@ -76,6 +76,8 @@ test('raw overflow uploads a bounded batch before acknowledging the cursor', asy
 	assert.equal(uploaded[0].bytes[0], 0x1f); // gzip magic byte
 	assert.ok(requests.some((item) => item.url.includes('/internal/raw-overflow/ack')));
 	assert.ok(requests.some((item) => item.url.includes('/internal/raw-overflow/next') && item.url.endsWith('limit=10')));
+	const ack = requests.find((item) => item.url.includes('/internal/raw-overflow/ack'));
+	assert.equal(JSON.parse(ack.options.body).remote_fs_id, '123456789');
 	assert.equal((await archive.status()).raw_overflow.batches_in_process, 1);
 	assert.equal(requests.find((item) => item.url.includes('/internal/raw-overflow/next')).options.headers['X-Quant-Write-Key'], 'write-key');
 });

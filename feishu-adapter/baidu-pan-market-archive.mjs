@@ -296,7 +296,8 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 						batch_id: batchId, stream_key: streamKey, before_offset: batch.before_offset ?? null,
 						first_offset: batch.first_offset, last_offset: batch.last_offset,
 						row_count: Number(batch.row_count) || batch.rows.length, compressed_bytes: content.length,
-						sha256, remote_path: result.path ?? remotePath, remote_fs_id: result.fsId ?? null,
+						sha256, remote_path: result.path == null ? remotePath : String(result.path),
+						remote_fs_id: result.fsId == null ? null : String(result.fsId),
 					}),
 				});
 				rawBatchesInProcess += 1;
