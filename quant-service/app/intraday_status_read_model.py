@@ -170,7 +170,9 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
                      "main_flow_semantics": "not_provided_by_fuyao; Eastmoney flow stays separately source-labelled"},
         ),
         runtime_item(
-            key="longhu_order_book", label="Longhu 主盘口（腾讯交叉/兜底）", role="十档盘口、QI、OFI 近似、内外盘差分与区间 VWAP 的研究证据",
+            # Keep the historical UI key for API compatibility; the label and
+            # details identify Longhu as the current primary source.
+            key="tencent_order_book", label="Longhu 主盘口（腾讯交叉/兜底）", role="十档盘口、QI、OFI 近似、内外盘差分与区间 VWAP 的研究证据",
             configured=os.getenv("INTRADAY_ORDER_BOOK_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             expected_active=session_active, last_observed_at=order_book_quote.get("last_observed_at"), max_age_seconds=12.0,
             cadence="显式观察池批量每 3 秒", health_row=order_book_health,

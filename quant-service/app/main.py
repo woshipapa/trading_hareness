@@ -496,7 +496,7 @@ from .routers.analyst_action_outcomes import build_analyst_action_outcomes_route
 from .routers.analyst_skill_reads import build_analyst_skill_reads_router
 from .routers.analyst_research_reads import build_analyst_research_reads_router
 from .routers.automation_reads import build_automation_reads_router
-from .security import licensed_stock_read_allowed, remote_archive_sync_bearer_allowed, write_access_allowed
+from .security import licensed_stock_read_allowed, raw_overflow_archive_allowed, remote_archive_sync_bearer_allowed, write_access_allowed
 from .automation_run_repository import run_recorded
 from .daily_strategy_summary_service import (
     build_daily_strategy_summary as build_daily_strategy_summary_projection,
@@ -678,6 +678,8 @@ from .telemetry import (
     provider_shared_rate_limit_wait_seconds,
 )
 from .runtime_executors import ExecutorSaturatedError, run_akshare_blocking, run_database_blocking, runtime_executor_status, shutdown_runtime_executors
+from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
+from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
 from .l2_research_gate import evaluate_l2_incremental_value
 from .l2_research_repository import latest_l2_evaluation, persist_l2_evaluation
 from .personal_decision_repository import persist_broker_snapshot, persist_trade_plan
@@ -4411,6 +4413,16 @@ app.include_router(build_market_result_reads_router(
     lambda: historical_estimate_from_db(HistoricalCoverageEstimateRequest(years=3, include_minute=False)),
     offline_data_root, analyst_scorecard_readiness, async_db,
 ))
+app.include_router(build_raw_overflow_router(RawOverflowDependencies(
+    database=db,
+    config=RawOverflowConfig.from_env,
+    status=raw_overflow_status,
+    next_batch=next_raw_overflow_batch,
+    acknowledge=acknowledge_raw_overflow,
+    failure=record_raw_overflow_failure,
+    run_database_blocking=run_database_blocking,
+    configured_key=lambda: os.getenv("QUANT_WRITE_API_KEY", ""),
+)))
 
 
 @app.middleware("http")
@@ -4424,6 +4436,7 @@ async def require_quant_write_key(request: Request, call_next: Any) -> Any:
         not write_access_allowed(request.method, supplied_key, configured_key)
         and not remote_archive_sync_bearer_allowed(request)
         and not licensed_read
+        and not raw_overflow_archive_allowed(request, configured_key)
     ):
         return JSONResponse(status_code=401, content={"detail": "valid X-Quant-Write-Key is required for write operations"})
     return await call_next(request)
@@ -4472,6 +4485,7 @@ def _health_payload() -> dict[str, Any]:
             live_session_acceptance_status=read_live_session_acceptance,
             release_metadata=release_metadata,
             post_close_runtime_status=post_close_refresh_runtime.status,
+            raw_overflow_status=raw_overflow_status,
     ))
 
 

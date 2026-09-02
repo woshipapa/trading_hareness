@@ -1,7 +1,11 @@
 import { Readable } from 'node:stream';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 
 const DEFAULT_ROOT = '/apps/股票paper存储/market-realtime';
 const MAX_SNAPSHOT_BYTES = 12 * 1024 * 1024;
+const MAX_RAW_BATCH_BYTES = 256 * 1024 * 1024;
+const DEFAULT_RAW_CAPABILITIES = ['a_share_prices_snapshot', 'realtime_quote', 'order_book_quote', 'rt_k', 'rt_min', 'rt_min_daily'];
 
 function latestTimestamp(values) {
 	return values
@@ -138,15 +142,24 @@ function safeSegment(value, fallback = 'unknown') {
 	return normalized || fallback;
 }
 
+function stableBatchId(streamKey, firstOffset, lastOffset, sha256) {
+	const hex = createHash('sha256').update(`${streamKey}|${firstOffset?.effective_at ?? ''}|${firstOffset?.observation_id ?? ''}|${lastOffset?.effective_at ?? ''}|${lastOffset?.observation_id ?? ''}|${sha256}`).digest('hex');
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 function archivePath(root, bucket, observedAt, filename) {
 	return `${root.replace(/\/$/, '')}/${safeSegment(bucket)}/${exchangeDate(observedAt)}/${hourPart(observedAt)}/${filename}`;
 }
 
-export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl, enabled = false, intervalSeconds = 30, rootPath = DEFAULT_ROOT, fetchImpl = fetch, logger = console }) {
+export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl, quantWriteApiKey = '', enabled = false, rawOverflowEnabled = false, rawCapabilities = DEFAULT_RAW_CAPABILITIES, intervalSeconds = 30, rootPath = DEFAULT_ROOT, rawRootPath = `${DEFAULT_ROOT}/raw-overflow`, fetchImpl = fetch, logger = console }) {
 	const baseUrl = text(quantServiceUrl).replace(/\/$/, '');
 	const intervalMs = Math.max(10, Math.min(300, Number(intervalSeconds) || 30)) * 1000;
 	const archiveRoot = text(rootPath, DEFAULT_ROOT).replace(/\/$/, '') || DEFAULT_ROOT;
-	const enabledFlag = Boolean(enabled && baiduPan && ledger?.enqueueBaiduPanArchive && baseUrl);
+	const rawArchiveRoot = text(rawRootPath, `${DEFAULT_ROOT}/raw-overflow`).replace(/\/$/, '') || `${DEFAULT_ROOT}/raw-overflow`;
+	const snapshotsEnabled = Boolean(enabled && baiduPan && ledger?.enqueueBaiduPanArchive && baseUrl);
+	const rawStreams = [...new Set((Array.isArray(rawCapabilities) ? rawCapabilities : String(rawCapabilities || '').split(',')).map((value) => text(value)).filter(Boolean))].slice(0, 20);
+	const rawEnabled = Boolean(rawOverflowEnabled && baiduPan && baseUrl && text(quantWriteApiKey) && rawStreams.length);
+	const enabledFlag = snapshotsEnabled || rawEnabled;
 	// Polling and uploading are separate activities. A slow cloud upload must
 	// never suppress the next latest-snapshot read; the ledger is the durable
 	// hand-off between the two lanes.
@@ -157,6 +170,13 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 	let lastSuccessAt = null;
 	let lastError = null;
 	let archivedInProcess = 0;
+	let rawDrainRunning = false;
+	let rawDrainPromise = null;
+	let rawStreamIndex = 0;
+	let rawBatchesInProcess = 0;
+	let rawRowsInProcess = 0;
+	let rawLastSuccessAt = null;
+	let rawLastError = null;
 	const directoryCache = new Set();
 
 	async function fetchJson(path) {
@@ -164,6 +184,18 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 		let body;
 		try { body = await response.json(); } catch { throw new Error(`量化服务归档读取返回无效 JSON（HTTP ${response.status}）`); }
 		if (!response.ok) throw new Error(`量化服务归档读取失败（HTTP ${response.status}）`);
+		return body;
+	}
+
+	async function fetchRaw(path, options = {}) {
+		const response = await fetchImpl(`${baseUrl}${path}`, {
+			...options,
+			headers: { accept: 'application/json', 'X-Quant-Write-Key': text(quantWriteApiKey), ...(options.headers ?? {}) },
+			signal: options.signal ?? AbortSignal.timeout(30_000),
+		});
+		let body;
+		try { body = await response.json(); } catch { throw new Error(`原始溢出归档接口返回无效 JSON（HTTP ${response.status}）`); }
+		if (!response.ok) throw new Error(`原始溢出归档接口失败（HTTP ${response.status}）`);
 		return body;
 	}
 
@@ -214,7 +246,7 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 	}
 
 	async function drain() {
-		if (!enabledFlag) return;
+		if (!snapshotsEnabled) return;
 		if (drainPromise) return drainPromise;
 		drainRunning = true;
 		drainPromise = (async () => {
@@ -232,18 +264,70 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 		return drainPromise;
 	}
 
+	async function drainRawOverflow() {
+		if (!rawEnabled) return;
+		if (rawDrainPromise) return rawDrainPromise;
+		rawDrainRunning = true;
+		rawDrainPromise = (async () => {
+			const capability = rawStreams[rawStreamIndex++ % rawStreams.length];
+			const streamKey = `raw_market_observations:${capability}`;
+			try {
+				const batch = await fetchRaw(`/api/v1/internal/raw-overflow/next?stream_key=${encodeURIComponent(streamKey)}&limit=500`);
+				if (batch?.status !== 'ready' || !Array.isArray(batch.rows) || !batch.rows.length) return;
+				const lines = batch.rows.map((row) => JSON.stringify(row)).join('\n') + '\n';
+				const content = gzipSync(Buffer.from(lines, 'utf8'));
+				if (content.length <= 0 || content.length > MAX_RAW_BATCH_BYTES) throw new Error(`原始溢出批次超过 ${Math.floor(MAX_RAW_BATCH_BYTES / 1024 / 1024)} MiB 上限`);
+				const sha256 = createHash('sha256').update(content).digest('hex');
+				const observedAt = batch.last_offset?.effective_at ?? new Date().toISOString();
+				// The ID/path is content-addressed. If the upload succeeds but the
+				// ACK response is lost, a retry reuses the same remote object and
+				// idempotency key instead of leaking a duplicate Baidu file.
+				const batchId = stableBatchId(streamKey, batch.first_offset, batch.last_offset, sha256);
+				const filename = `batch-${batchId}-${sha256.slice(0, 12)}.jsonl.gz`;
+				const directory = `${rawArchiveRoot}/${safeSegment(capability, 'unknown')}/${exchangeDate(observedAt)}/${hourPart(observedAt)}`;
+				await ensureDirectory(directory);
+				const remotePath = `${directory}/${filename}`;
+				const result = await baiduPan.uploadReadable({ readable: Readable.from([content]), fileName: filename, size: content.length, remotePath });
+				await fetchRaw('/api/v1/internal/raw-overflow/ack', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({
+						batch_id: batchId, stream_key: streamKey, before_offset: batch.before_offset ?? null,
+						first_offset: batch.first_offset, last_offset: batch.last_offset,
+						row_count: Number(batch.row_count) || batch.rows.length, compressed_bytes: content.length,
+						sha256, remote_path: result.path ?? remotePath, remote_fs_id: result.fsId ?? null,
+					}),
+				});
+				rawBatchesInProcess += 1;
+				rawRowsInProcess += Number(batch.row_count) || batch.rows.length;
+				rawLastSuccessAt = new Date().toISOString();
+				rawLastError = null;
+			} catch (error) {
+				rawLastError = String(error?.message ?? error).slice(0, 420);
+				try { await fetchRaw('/api/v1/internal/raw-overflow/failure', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stream_key, error: rawLastError }) }); } catch { /* preserve original error */ }
+				logger.warn(`百度网盘原始溢出批次归档失败：${rawLastError}`);
+			} finally {
+				rawDrainRunning = false;
+				rawDrainPromise = null;
+			}
+		})();
+		return rawDrainPromise;
+	}
+
 	async function poll() {
 		if (!enabledFlag || pollRunning) return;
 		pollRunning = true;
 		lastPollAt = new Date().toISOString();
 		try {
-			const results = await Promise.all(SNAPSHOT_SPECS.map(async (spec) => ({ spec, body: await fetchJson(spec.path) })));
-			for (const { spec, body } of results) {
-				const identity = text(spec.identity(body));
-				if (!identity) continue;
-				await enqueueSnapshot(spec.bucket, identity, spec.observedAt(body), { source: spec.source, data: body });
+			if (snapshotsEnabled) {
+				const results = await Promise.all(SNAPSHOT_SPECS.map(async (spec) => ({ spec, body: await fetchJson(spec.path) })));
+				for (const { spec, body } of results) {
+					const identity = text(spec.identity(body));
+					if (!identity) continue;
+					await enqueueSnapshot(spec.bucket, identity, spec.observedAt(body), { source: spec.source, data: body });
+				}
 			}
-			lastSuccessAt = new Date().toISOString();
+			if (snapshotsEnabled) lastSuccessAt = new Date().toISOString();
 			lastError = null;
 		} catch (error) {
 			lastError = String(error?.message ?? error).slice(0, 420);
@@ -254,6 +338,7 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 			// (or this best-effort kick) continues draining the durable queue if
 			// the current upload batch is still in flight.
 			void drain().catch((error) => logger.warn(`百度网盘研究快照排空失败：${error?.message ?? error}`));
+			void drainRawOverflow().catch((error) => logger.warn(`百度网盘原始溢出排空失败：${error?.message ?? error}`));
 		}
 	}
 
@@ -262,9 +347,10 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 		intervalMs,
 		poll,
 		drain,
+		drainRawOverflow,
 		status: async () => ({
 			enabled: enabledFlag,
-			running: pollRunning || drainRunning,
+			running: pollRunning || drainRunning || rawDrainRunning,
 			poll_running: pollRunning,
 			drain_running: drainRunning,
 			interval_seconds: intervalMs / 1000,
@@ -272,6 +358,12 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 			last_success_at: lastSuccessAt,
 			last_error: lastError,
 			archived_in_process: archivedInProcess,
+			raw_overflow: {
+				enabled: rawEnabled, running: rawDrainRunning, capabilities: rawStreams,
+				last_success_at: rawLastSuccessAt, last_error: rawLastError,
+				batches_in_process: rawBatchesInProcess, rows_in_process: rawRowsInProcess,
+				max_batch_bytes: MAX_RAW_BATCH_BYTES, root_path: rawArchiveRoot,
+			},
 			queue: ledger.baiduPanArchiveStatus ? await ledger.baiduPanArchiveStatus() : null,
 			root_path: archiveRoot,
 		}),

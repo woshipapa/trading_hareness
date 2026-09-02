@@ -34,18 +34,29 @@ def licensed_stock_read_allowed(request: Request, configured_key: str | None) ->
     return bool(expected and supplied) and secrets.compare_digest(supplied, expected)
 
 
+def raw_overflow_archive_allowed(request: Request, configured_key: str | None) -> bool:
+    """Authorize the adapter-only raw archive hand-off on every verb."""
+    if not request.url.path.startswith("/api/v1/internal/raw-overflow/"):
+        return False
+    expected = str(configured_key or "").strip()
+    supplied = request.headers.get("X-Quant-Write-Key", "").strip()
+    return bool(expected and supplied) and secrets.compare_digest(supplied, expected)
+
+
 def security_context() -> dict[str, Any]:
     return {
         "write_methods": ["POST", "PUT", "PATCH", "DELETE"],
         "header": "X-Quant-Write-Key",
         "remote_sync_exception": "/api/v1/remote-archive/sync",
         "licensed_read_post_exception": "/licensed/stock-api/call",
+        "raw_overflow_archive_exception": "/api/v1/internal/raw-overflow/*",
         "secret_values_exposed": False,
     }
 
 
 __all__ = [
     "licensed_stock_read_allowed",
+    "raw_overflow_archive_allowed",
     "remote_archive_sync_bearer_allowed",
     "security_context",
     "write_access_allowed",

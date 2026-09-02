@@ -135,10 +135,13 @@ const baiduPan = createBaiduPanStorage({
 	sliceBytes: Number(process.env.BAIDU_PAN_SLICE_BYTES ?? 4 * 1024 * 1024),
 });
 const baiduPanMarketArchive = createBaiduPanMarketArchive({
-	baiduPan, ledger, quantServiceUrl,
+	baiduPan, ledger, quantServiceUrl, quantWriteApiKey,
 	enabled: String(process.env.BAIDU_PAN_MARKET_ARCHIVE_ENABLED ?? 'false').toLowerCase() === 'true',
+	rawOverflowEnabled: String(process.env.BAIDU_PAN_RAW_OVERFLOW_ENABLED ?? 'false').toLowerCase() === 'true',
+	rawCapabilities: String(process.env.BAIDU_PAN_RAW_OVERFLOW_CAPABILITIES ?? 'a_share_prices_snapshot,realtime_quote,order_book_quote,rt_k,rt_min,rt_min_daily').split(','),
 	intervalSeconds: Number(process.env.BAIDU_PAN_MARKET_ARCHIVE_INTERVAL_SECONDS ?? 30),
 	rootPath: String(process.env.BAIDU_PAN_MARKET_ARCHIVE_ROOT_PATH ?? '/apps/股票paper存储/market-realtime').trim(),
+	rawRootPath: String(process.env.BAIDU_PAN_RAW_OVERFLOW_ROOT_PATH ?? '/apps/股票paper存储/quant-lake/v1/raw-overflow').trim(),
 });
 const feishuUserOauth = createFeishuUserOauth({
 	appId, appSecret, ledger, redirectUri: String(process.env.FEISHU_USER_OAUTH_REDIRECT_URI ?? 'http://localhost:8080/callback').trim(),

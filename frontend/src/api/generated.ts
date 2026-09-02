@@ -1677,6 +1677,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/internal/raw-overflow/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Raw Overflow Status */
+        get: operations["raw_overflow_status_api_v1_internal_raw_overflow_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/internal/raw-overflow/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Raw Overflow Next */
+        get: operations["raw_overflow_next_api_v1_internal_raw_overflow_next_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/internal/raw-overflow/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Raw Overflow Ack */
+        post: operations["raw_overflow_ack_api_v1_internal_raw_overflow_ack_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/internal/raw-overflow/failure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Raw Overflow Failure */
+        post: operations["raw_overflow_failure_api_v1_internal_raw_overflow_failure_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intraday/services/status": {
         parameters: {
             query?: never;
@@ -3826,6 +3894,40 @@ export interface components {
             lower: number | string;
             /** Upper */
             upper: number | string;
+        };
+        /** RawOverflowAckRequest */
+        RawOverflowAckRequest: {
+            /** Batch Id */
+            batch_id: string;
+            /** Stream Key */
+            stream_key: string;
+            before_offset?: components["schemas"]["RawOverflowOffset"] | null;
+            first_offset: components["schemas"]["RawOverflowOffset"];
+            last_offset: components["schemas"]["RawOverflowOffset"];
+            /** Row Count */
+            row_count: number;
+            /** Compressed Bytes */
+            compressed_bytes: number;
+            /** Sha256 */
+            sha256: string;
+            /** Remote Path */
+            remote_path?: string | null;
+            /** Remote Fs Id */
+            remote_fs_id?: string | null;
+        };
+        /** RawOverflowFailureRequest */
+        RawOverflowFailureRequest: {
+            /** Stream Key */
+            stream_key: string;
+            /** Error */
+            error: string;
+        };
+        /** RawOverflowOffset */
+        RawOverflowOffset: {
+            /** Effective At */
+            effective_at: string;
+            /** Observation Id */
+            observation_id: string;
         };
         /** RealtimeProbeRequest */
         RealtimeProbeRequest: {
@@ -7360,6 +7462,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    raw_overflow_status_api_v1_internal_raw_overflow_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    raw_overflow_next_api_v1_internal_raw_overflow_next_get: {
+        parameters: {
+            query: {
+                stream_key: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    raw_overflow_ack_api_v1_internal_raw_overflow_ack_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RawOverflowAckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    raw_overflow_failure_api_v1_internal_raw_overflow_failure_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RawOverflowFailureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
