@@ -1,7 +1,8 @@
 # Edge raw 溢出归档协议
 
 状态：协议、边缘 keyset 批次 API、ACK/offset ledger 和适配器单并发上传 lane
-已实现；默认关闭，待完成端到端演练后启用。现有 latest-snapshot lane 不受影响。
+已实现；edge 已完成非交易时段演练并启用实时 allowlist。现有 latest-snapshot lane
+不受影响。百度对象仍不进入实时策略读取路径。
 
 ## 目标
 
@@ -106,7 +107,7 @@ state
 校验且早于热窗口的精确前缀。非 allowlist 的日线/研究原始数据仍保持本地，避免
 误把历史大表一次性送入冷存储。
 
-## 启用前验收
+## 启用与持续验收
 
 1. 模拟磁盘告警，确认行情扫描仍按周期完成；
 2. 模拟百度超时，确认队列重试且内存/spool 有界；
@@ -116,22 +117,27 @@ state
 6. 通过运行状态接口展示 `normal/cloud_overflow/critical`、队列深度、offset、
    最近成功和最近失败。
 
-在上述验收完成前，`cloud_overflow` 只允许以观测/演练模式运行，不得改变现有
-采集写入和策略可用性语义。
+启用后仍必须持续检查上述指标；任何 ACK、校验或容量异常都不得改变实时策略
+可用性语义，必要时自动回到 `critical` 并停止非必要 raw 写入。
 
 ## 实施进度（2026-09-02）
 
 - P1（已完成）：`raw_overflow_policy.py`、`raw_archive_offsets`/
   `raw_archive_batches`、内部鉴权 API、keyset 分页和 ACK 后精确前缀清理。
-- P2（已完成代码、待生产演练）：Feishu adapter 已复用同一百度 OAuth、单并发
+- P2（已完成）：Feishu adapter 已复用同一百度 OAuth、单并发
   raw worker、gzip JSONL、有界上传和失败重试；状态已接入 `/health` 和研究台。
-  本地 compose 与 edge relay compose 均已声明 raw lane 开关、allowlist 和根路径，
-  但默认值保持关闭，避免仅更新镜像就意外开始上传。
-- P3（未启用）：需要在非交易时段用测试 stream 做一次真实百度上传、下载校验、
-  ACK/offset 重启恢复演练，再将两个环境开关切到 `true`。
+  本地 compose 与 edge relay compose 均已声明 raw lane 开关、allowlist 和根路径。
+- P3（已启用）：edge 已完成真实百度上传与 ACK/offset 验证，adapter 使用不可变
+  release `edge-2026.09.02-raw-overflow-r3`（源码提交 `ef8cb15`），默认每批 100
+  行、每轮最多 4 批；最近观测为 73 个已验证批次、0 个失败。归档 worker 保持
+  单并发并持续受健康门禁监控。
 
-启用前的具体开关为 `QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED=true`（量化服务）和
+生产开关为 `QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED=true`（量化服务）和
 `BAIDU_PAN_RAW_OVERFLOW_ENABLED=true`（适配器）。两者必须同时开启；任一关闭时
 批次接口只返回 `disabled`，不会触碰 raw 数据。生产启用应先把
 `QUANT_RAW_OVERFLOW_CAPABILITIES` 限定为实时 allowlist，观察队列/磁盘至少一个
 交易日后再评估是否扩展到其他证据流。
+
+2026-09-02 edge 运维记录：systemd journal 历史日志约 3.4 GiB、旧归档日志约
+1.2 GiB，已压缩保留而非删除，文件系统可用空间恢复到约 9.0 GB；未执行
+`VACUUM FULL`、未删除数据库或实时策略证据。
