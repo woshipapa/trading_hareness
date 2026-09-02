@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wechat_sqlcipher import decrypt_base, apply_wal, load_key, fingerprint, zstd_decode
 import itougu_neican_relay as NEICAN
+import itougu_public_article_relay as PUBLIC_ARTICLE
 
 GH = "gh_6569bb074cc9"
 TABLE = "Msg_" + hashlib.md5(GH.encode()).hexdigest()
@@ -110,6 +111,7 @@ def main():
 
     cursor = 0 if args.forward_existing else max_local_id()
     print(f"初始游标 local_id={cursor}", flush=True)
+    last_pending_retry = 0.0
 
     while True:
         try:
@@ -124,12 +126,21 @@ def main():
                 wal_fp = cur_wal
                 new, cursor = read_new(cursor)
                 for lid, url in new:
-                    tag = " [内参]" if "internalReference" in url else ""
+                    tag = " [内参]" if "internalReference" in url else " [文章]" if "/circle/article/detail" in url else ""
                     print(f"新卡片 local_id={lid}{tag} url={url[:80]}", flush=True)
                     if "internalReference" in url:
                         n = NEICAN.trigger_from_push(GH, url, verbose=True)
                         if n:
                             print(f"  → 已发飞书 {n} 条", flush=True)
+                    elif "/circle/article/detail" in url:
+                        n = PUBLIC_ARTICLE.trigger_from_push(GH, url, verbose=True, delivery_label="database")
+                        if n:
+                            print(f"  → 已发飞书 {n} 条", flush=True)
+            # Only retry IDs that were already observed in this table; this
+            # accommodates article publication lag without adding broad scans.
+            if time.monotonic() - last_pending_retry >= 15:
+                PUBLIC_ARTICLE.retry_pending(verbose=True, delivery_label="database")
+                last_pending_retry = time.monotonic()
         except Exception as e:
             print(f"tick 异常(忽略): {type(e).__name__}: {e}", flush=True)
         if args.once:

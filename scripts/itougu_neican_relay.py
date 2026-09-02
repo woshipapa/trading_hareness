@@ -31,6 +31,9 @@ AUTH_FILE = Path(os.environ.get("ITOUGU_AUTH_FILE", "/Users/papa/codebase/wechat
 ENV_FILE = Path(os.environ.get("ITOUGU_ENV_FILE", "/Users/papa/codebase/n8n/.env"))
 STATE_FILE = Path(os.environ.get("ITOUGU_STATE_FILE", "/Users/papa/codebase/n8n/state/itougu-neican.json"))
 CHAT_IDS = [c for c in os.environ.get("ITOUGU_CHAT_IDS", "oc_570aeb3bbfb11fa2be66b25ca4568aad").split(",") if c.strip()]
+# Optional product-specific fan-out.  It lets the dedicated 擒龙 group stay
+# focused while the general public-account group continues to receive both.
+QINLONG_CHAT_IDS = [c for c in os.environ.get("ITOUGU_QINLONG_CHAT_IDS", "").split(",") if c.strip()]
 API_BASE = "https://group-api.itougu.com"
 PFX = "/teach-product/internalReference"
 SUCCESS = 20000
@@ -40,6 +43,15 @@ WATCH = {
     "1806593447818383361": "尾盘掘金内参",
     "1661993558510538753": "猎场擒龙内参",
 }
+
+
+def chat_ids_for_product(business_id, override=None):
+    """Return the configured destinations for one internal-reference product."""
+    if override is not None:
+        return override
+    if business_id == "1661993558510538753" and QINLONG_CHAT_IDS:
+        return QINLONG_CHAT_IDS
+    return CHAT_IDS
 
 _feishu_token = {"value": "", "expires_at": 0.0}
 _tag_re = re.compile(r"<[^>]+>")
@@ -137,10 +149,14 @@ def report_line(it):
     return " ".join(bits)
 
 
-def format_item(name, it):
+def format_item(name, it, delivery_label=""):
     when = it.get("publishTime") or it.get("createTime") or ""
     who = item_consultant(it)
     title = "%s · %s" % (name, who) if who else name
+    if delivery_label:
+        # Keep the delivery-path marker terse.  It is an operational label,
+        # not a disclosure of credentials, endpoints, or listener details.
+        title = "[%s] %s" % (delivery_label, title)
     lines = ["🕐 %s" % when]
     trade = trade_line(it)
     if trade:
@@ -236,9 +252,9 @@ def save_state(state):
 
 
 # ---------------- 核心：取增量并发送 ----------------
-def deliver_new(products=None, chat_ids=None, dry_run=False, bootstrap=False, verbose=True):
+def deliver_new(products=None, chat_ids=None, dry_run=False, bootstrap=False, verbose=True, delivery_label=""):
     products = products or WATCH
-    chat_ids = chat_ids or CHAT_IDS
+    chat_ids = chat_ids or None
     headers = load_headers()
     state = load_state()
     total_sent = 0
@@ -259,12 +275,12 @@ def deliver_new(products=None, chat_ids=None, dry_run=False, bootstrap=False, ve
             continue
         for it in new:
             aid = str(it.get("appendContentId"))
-            title, text = format_item(name, it)
+            title, text = format_item(name, it, delivery_label=delivery_label)
             if dry_run:
                 if verbose:
                     print("── DRY [%s] %s\n%s\n" % (name, title, text[:400]), flush=True)
             else:
-                for cid in chat_ids:
+                for cid in chat_ids_for_product(bid, override=chat_ids):
                     send_feishu(cid, title, text, aid)
                 total_sent += 1
                 if verbose:
@@ -284,7 +300,7 @@ def trigger_from_push(username, article_url, verbose=False):
         pid = m.group(1) if m else None
         if not pid or pid not in WATCH:
             return 0            # 只处理目标内参的推送，其它内参卡片忽略
-        return deliver_new(products={pid: WATCH[pid]}, verbose=verbose)
+        return deliver_new(products={pid: WATCH[pid]}, verbose=verbose, delivery_label="database")
     except Exception as e:
         if verbose:
             print("itougu trigger 失败(忽略): %s" % e, flush=True)
@@ -332,14 +348,16 @@ def main():
         while True:
             if not args.trading_hours_only or in_trading_hours():
                 try:
-                    deliver_new(products=prods, dry_run=args.dry_run)
+                    deliver_new(products=prods, dry_run=args.dry_run,
+                                delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
                 except Exception as e:
                     print("轮询异常(忽略): %s" % e, flush=True)
             time.sleep(args.interval)
     else:
         if args.trading_hours_only and not in_trading_hours():
             return 0   # 非交易时段静默跳过（避免定时任务日志刷屏）
-        n = deliver_new(products=prods, dry_run=args.dry_run)
+        n = deliver_new(products=prods, dry_run=args.dry_run,
+                        delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
         if n:
             print("完成，发送 %d 条" % n, flush=True)
     return 0

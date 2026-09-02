@@ -57,7 +57,13 @@ TASKS = [
     dict(name="itougu-table-watch", kind="daemon",
          args=[PY, os.path.join(N8N, "scripts/itougu_table_watch.py"), "--interval", "1.5"],
          cwd=N8N, out=os.path.join(N8N, "logs/itougu-table-watch.log"),
-         err=os.path.join(N8N, "logs/itougu-table-watch.err.log"), env={"PATH": PATH_ENV}),
+         err=os.path.join(N8N, "logs/itougu-table-watch.err.log"), env={
+             "PATH": PATH_ENV,
+             # Preserve the existing public-account sink and fan out this
+             # independent database watcher to the dedicated internal-note group.
+             "ITOUGU_CHAT_IDS": "oc_570aeb3bbfb11fa2be66b25ca4568aad",
+             "ITOUGU_QINLONG_CHAT_IDS": "oc_570aeb3bbfb11fa2be66b25ca4568aad,oc_cf156f51d085e2c51bd66fda198b88a0",
+         }),
     # ---- 定时 interval (原 StartInterval, RunAtLoad) ----
     dict(name="paperkb.arxiv", kind="interval", interval=1800, run_at_load=True,
          args=[PY, os.path.join(PKB, "jobs.py"), "arxiv"],
