@@ -7,6 +7,12 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
+// Baidu's create/superfile endpoints can take longer than the adapter's
+// ordinary 30-second HTTP budget for 100+ MiB evidence files.  This helper is
+// an isolated archive process, so extend only its request signals.
+const defaultTimeout = AbortSignal.timeout.bind(AbortSignal);
+AbortSignal.timeout = (milliseconds) => defaultTimeout(Math.max(Number(milliseconds) || 0, 120_000));
+
 const [{ createLedger }, { createBaiduPanStorage }] = await Promise.all([
 	import('/app/ledger.mjs'),
 	import('/app/baidu-pan-storage.mjs'),
