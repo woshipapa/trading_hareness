@@ -13,7 +13,25 @@ PKLOG = os.path.join(HOME, "Library/Logs/paper-kb")
 SUP_LOG = os.path.join(N8N, "logs/svc-supervisor.log")
 
 PATH_ENV = "/Users/papa/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-RELAY_TOKEN = "0b792727c64ae18a498c96b80279928535034faf87397632138574f6c7bced7f"
+def _load_env_secret(name):
+    """从进程环境或 n8n/.env(已 gitignore) 读密钥，避免硬编码入库。"""
+    v = os.environ.get(name)
+    if v:
+        return v
+    try:
+        for line in open(os.path.join(N8N, ".env"), encoding="utf-8"):
+            line = line.strip()
+            if line.startswith(name + "="):
+                val = line.split("=", 1)[1].strip()
+                if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+                    val = val[1:-1]
+                return val
+    except OSError:
+        pass
+    return ""
+
+
+RELAY_TOKEN = _load_env_secret("RELAY_TOKEN")
 
 TASKS = [
     # ---- 常驻 daemon (原 KeepAlive) ----
