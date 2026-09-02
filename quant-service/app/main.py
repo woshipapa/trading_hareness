@@ -2573,7 +2573,7 @@ async def intraday_longhu_watch_quotes(
     def fetch() -> tuple[list[dict[str, Any]], dict[str, Any]]:
         return longhu_intraday_source().watch_quotes(symbols, max_symbols=intraday_longhu_max_symbols())
 
-    return await run_akshare_blocking(fetch, timeout_seconds=8)
+    return await run_akshare_blocking(fetch, timeout_seconds=15)
 
 
 async def intraday_longhu_order_book_quotes(

@@ -92,7 +92,9 @@ class WatchQuoteCaptureDependencies:
         [dict[str, dict[str, Any]], list[dict[str, Any]]], Any
     ] | None = None
     licensed_quote_errors: tuple[type[Exception], ...] = ()
-    licensed_quote_timeout_seconds: float = 4.0
+    # The shared Longhu gateway may fan out a bounded watch basket on the
+    # owner side.  Four seconds caused false "unavailable" states at the open.
+    licensed_quote_timeout_seconds: float = 12.0
 
 
 async def _apply_derived_flow_metrics(
