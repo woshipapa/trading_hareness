@@ -80,8 +80,9 @@ lightServer root privileges.
   Tushare remains the canonical daily/control source until a separate
   verified-control promotion is approved.
 - List endpoints cap each physical vendor page at 300 and paginate larger
-  logical reads in the adapter. Explicit quote baskets are independently
-  bounded by `QUANT_LONGHU_INTRADAY_MAX_SYMBOLS`.
+  logical reads in the adapter. Explicit quote baskets use the configured
+  watchlist by default; `QUANT_LONGHU_INTRADAY_MAX_SYMBOLS` is only an optional
+  operational lower bound and cannot exceed the remote 300-row page limit.
 
 ## Local Longhu transport boundary
 

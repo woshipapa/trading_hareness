@@ -279,7 +279,9 @@ services:
       # Licensed Longhu credentials remain in an ignored host file.  Business
       # code only sees the normalized adapter and never embeds the token.
       QUANT_LONGHU_CONFIG_PATH: /run/secrets/longhu_vendor.json
-      QUANT_LONGHU_INTRADAY_MAX_SYMBOLS: ${QUANT_LONGHU_INTRADAY_MAX_SYMBOLS:-24}
+      # Do not truncate the configured watchlist locally; the adapter enforces
+      # Longhu's verified physical page limit (300).
+      QUANT_LONGHU_INTRADAY_MAX_SYMBOLS: ${QUANT_LONGHU_INTRADAY_MAX_SYMBOLS:-300}
       QUANT_LONGHU_DIRECT_ENABLED: ${QUANT_LONGHU_DIRECT_ENABLED:-false}
       QUANT_SHARED_READ_API_BASE_URL: ${QUANT_SHARED_READ_API_BASE_URL:-}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:-}

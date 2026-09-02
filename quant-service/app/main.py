@@ -635,6 +635,7 @@ from .market_universe_sync import sync as sync_market_universe_isolated
 from .full_market_daily_sync import sync as sync_full_market_daily_isolated
 from .longhu_market_repository import persisted_close_context as read_longhu_close_context
 from .longhu_vendor_source import (
+    MAX_PAGE_SIZE as LONGHU_MAX_PAGE_SIZE,
     configured as longhu_vendor_configured,
     intraday_source as longhu_intraday_source,
 )
@@ -2550,11 +2551,19 @@ def intraday_minute_profile_max_symbols() -> int:
 
 
 def intraday_longhu_max_symbols() -> int:
-    """Bound licensed per-security calls independently from the watch capacity."""
+    """Use the watch basket without an arbitrary local 24/60-symbol cap.
+
+    The only remaining bound is Longhu's verified physical gateway page size.
+    An explicit environment value can still lower the request for operational
+    throttling, but the default must not silently truncate the watchlist.
+    """
     try:
-        return max(1, min(60, int(os.getenv("QUANT_LONGHU_INTRADAY_MAX_SYMBOLS", "24"))))
+        configured_limit = int(
+            os.getenv("QUANT_LONGHU_INTRADAY_MAX_SYMBOLS", str(LONGHU_MAX_PAGE_SIZE))
+        )
+        return max(1, min(LONGHU_MAX_PAGE_SIZE, configured_limit))
     except ValueError:
-        return 24
+        return LONGHU_MAX_PAGE_SIZE
 
 
 def longhu_full_market_enabled() -> bool:
