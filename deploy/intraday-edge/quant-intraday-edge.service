@@ -10,6 +10,8 @@ User=quant_edge
 Group=quant_edge
 WorkingDirectory=/opt/quant-intraday-edge/current/quant-service
 EnvironmentFile=/etc/quant-intraday-edge.env
+# Optional shared gateway credentials/configuration stay outside the release.
+EnvironmentFile=-/etc/quant-intraday-edge/shared-gateway.env
 EnvironmentFile=-/etc/quant-intraday-edge.release.env
 ExecStart=/opt/quant-intraday-edge/.venv/bin/python entrypoint.py /opt/quant-intraday-edge/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 18110 --workers 1
 Restart=always
