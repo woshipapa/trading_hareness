@@ -151,13 +151,14 @@ function archivePath(root, bucket, observedAt, filename) {
 	return `${root.replace(/\/$/, '')}/${safeSegment(bucket)}/${exchangeDate(observedAt)}/${hourPart(observedAt)}/${filename}`;
 }
 
-export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl, quantWriteApiKey = '', enabled = false, rawOverflowEnabled = false, rawCapabilities = DEFAULT_RAW_CAPABILITIES, intervalSeconds = 30, rootPath = DEFAULT_ROOT, rawRootPath = `${DEFAULT_ROOT}/raw-overflow`, fetchImpl = fetch, logger = console }) {
+export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl, quantWriteApiKey = '', enabled = false, rawOverflowEnabled = false, rawCapabilities = DEFAULT_RAW_CAPABILITIES, rawBatchRows = 100, intervalSeconds = 30, rootPath = DEFAULT_ROOT, rawRootPath = `${DEFAULT_ROOT}/raw-overflow`, fetchImpl = fetch, logger = console }) {
 	const baseUrl = text(quantServiceUrl).replace(/\/$/, '');
 	const intervalMs = Math.max(10, Math.min(300, Number(intervalSeconds) || 30)) * 1000;
 	const archiveRoot = text(rootPath, DEFAULT_ROOT).replace(/\/$/, '') || DEFAULT_ROOT;
 	const rawArchiveRoot = text(rawRootPath, `${DEFAULT_ROOT}/raw-overflow`).replace(/\/$/, '') || `${DEFAULT_ROOT}/raw-overflow`;
 	const snapshotsEnabled = Boolean(enabled && baiduPan && ledger?.enqueueBaiduPanArchive && baseUrl);
 	const rawStreams = [...new Set((Array.isArray(rawCapabilities) ? rawCapabilities : String(rawCapabilities || '').split(',')).map((value) => text(value)).filter(Boolean))].slice(0, 20);
+	const rawBatchLimit = Math.max(1, Math.min(500, Number(rawBatchRows) || 100));
 	const rawEnabled = Boolean(rawOverflowEnabled && baiduPan && baseUrl && text(quantWriteApiKey) && rawStreams.length);
 	const enabledFlag = snapshotsEnabled || rawEnabled;
 	// Polling and uploading are separate activities. A slow cloud upload must
@@ -272,7 +273,7 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 			const capability = rawStreams[rawStreamIndex++ % rawStreams.length];
 			const streamKey = `raw_market_observations:${capability}`;
 			try {
-				const batch = await fetchRaw(`/api/v1/internal/raw-overflow/next?stream_key=${encodeURIComponent(streamKey)}&limit=500`);
+				const batch = await fetchRaw(`/api/v1/internal/raw-overflow/next?stream_key=${encodeURIComponent(streamKey)}&limit=${rawBatchLimit}`);
 				if (batch?.status !== 'ready' || !Array.isArray(batch.rows) || !batch.rows.length) return;
 				const lines = batch.rows.map((row) => JSON.stringify(row)).join('\n') + '\n';
 				const content = gzipSync(Buffer.from(lines, 'utf8'));
@@ -358,8 +359,9 @@ export function createBaiduPanMarketArchive({ baiduPan, ledger, quantServiceUrl,
 			last_success_at: lastSuccessAt,
 			last_error: lastError,
 			archived_in_process: archivedInProcess,
-			raw_overflow: {
-				enabled: rawEnabled, running: rawDrainRunning, capabilities: rawStreams,
+				raw_overflow: {
+					enabled: rawEnabled, running: rawDrainRunning, capabilities: rawStreams,
+					batch_rows: rawBatchLimit,
 				last_success_at: rawLastSuccessAt, last_error: rawLastError,
 				batches_in_process: rawBatchesInProcess, rows_in_process: rawRowsInProcess,
 				max_batch_bytes: MAX_RAW_BATCH_BYTES, root_path: rawArchiveRoot,

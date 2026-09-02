@@ -68,13 +68,14 @@ test('raw overflow uploads a bounded batch before acknowledging the cursor', asy
 	const archive = createBaiduPanMarketArchive({
 		baiduPan, ledger, quantServiceUrl: 'http://quant', quantWriteApiKey: 'write-key',
 		rawOverflowEnabled: true, enabled: false, rawCapabilities: ['realtime_quote'],
-		fetchImpl, rootPath: '/archive', rawRootPath: '/raw', intervalSeconds: 30,
+		fetchImpl, rootPath: '/archive', rawRootPath: '/raw', rawBatchRows: 10, intervalSeconds: 30,
 	});
 	await archive.poll();
 	await archive.drainRawOverflow();
 	assert.equal(uploaded.length, 1);
 	assert.equal(uploaded[0].bytes[0], 0x1f); // gzip magic byte
 	assert.ok(requests.some((item) => item.url.includes('/internal/raw-overflow/ack')));
+	assert.ok(requests.some((item) => item.url.includes('/internal/raw-overflow/next') && item.url.endsWith('limit=10')));
 	assert.equal((await archive.status()).raw_overflow.batches_in_process, 1);
 	assert.equal(requests.find((item) => item.url.includes('/internal/raw-overflow/next')).options.headers['X-Quant-Write-Key'], 'write-key');
 });

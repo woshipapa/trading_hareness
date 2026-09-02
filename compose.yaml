@@ -213,6 +213,7 @@ services:
       # edge dry-run/ACK checks pass; it never enters the live decision path.
       BAIDU_PAN_RAW_OVERFLOW_ENABLED: ${BAIDU_PAN_RAW_OVERFLOW_ENABLED:-false}
       BAIDU_PAN_RAW_OVERFLOW_CAPABILITIES: ${BAIDU_PAN_RAW_OVERFLOW_CAPABILITIES:-a_share_prices_snapshot,realtime_quote,order_book_quote,rt_k,rt_min,rt_min_daily}
+      BAIDU_PAN_RAW_OVERFLOW_BATCH_ROWS: ${BAIDU_PAN_RAW_OVERFLOW_BATCH_ROWS:-100}
       BAIDU_PAN_RAW_OVERFLOW_ROOT_PATH: ${BAIDU_PAN_RAW_OVERFLOW_ROOT_PATH:-/apps/股票paper存储/quant-lake/v1/raw-overflow}
       FEISHU_WORKBENCH_WIKI_SPACE_ID: ${FEISHU_WORKBENCH_WIKI_SPACE_ID:-}
       FEISHU_WORKBENCH_WIKI_PARENT_NODE_TOKEN: ${FEISHU_WORKBENCH_WIKI_PARENT_NODE_TOKEN:-}
