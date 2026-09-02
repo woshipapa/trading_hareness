@@ -2576,6 +2576,46 @@ async def intraday_longhu_watch_quotes(
     return await run_akshare_blocking(fetch, timeout_seconds=8)
 
 
+async def intraday_longhu_order_book_quotes(
+    symbols: list[str], *, max_symbols: int = 40,
+) -> list[dict[str, Any]]:
+    """Flatten Longhu's verified ``GetStockPanKou`` ten-level book."""
+    rows, _status = await intraday_longhu_watch_quotes(symbols[:max_symbols])
+    flattened: list[dict[str, Any]] = []
+    for row in rows:
+        book = row.get("order_book") if isinstance(row.get("order_book"), dict) else None
+        if not book:
+            continue
+        flattened.append({
+            "ts_code": row.get("ts_code"), "name": row.get("name"),
+            "price": row.get("price"), "pre_close": row.get("pre_close"),
+            "cumulative_volume_lot": row.get("volume"), "cumulative_amount": row.get("amount"),
+            "bids": book.get("bids") or [], "asks": book.get("asks") or [],
+            "one_sided_book": book.get("one_sided_book"), "book_side": book.get("book_side"),
+            "seal_volume_lot": book.get("seal_volume_lot"), "trade_time": row.get("trade_time"),
+            "source": "longhu_order_book",
+        })
+    return flattened
+
+
+async def intraday_primary_order_book_quotes(
+    symbols: list[str], *, max_symbols: int = 40,
+) -> list[dict[str, Any]]:
+    """Use Longhu depth first and fill missing symbols from Tencent."""
+    selected = list(dict.fromkeys(symbols))[:max_symbols]
+    try:
+        longhu_rows = await intraday_longhu_order_book_quotes(selected, max_symbols=max_symbols)
+    except Exception:
+        # Licensed source failures must not stop the bounded public fallback.
+        longhu_rows = []
+    present = {str(row.get("ts_code") or "") for row in longhu_rows}
+    missing = [symbol for symbol in selected if symbol not in present]
+    if not missing:
+        return longhu_rows
+    tencent_rows = await tencent_order_book_quotes(missing, max_symbols=len(missing))
+    return [*longhu_rows, *tencent_rows]
+
+
 async def shared_longhu_quotes(
     symbols: list[str], max_symbols: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -2647,7 +2687,7 @@ async def capture_intraday_order_book_snapshot(symbols: list[str]) -> dict[str, 
     """Capture one pooled, bounded depth snapshot for the explicit watchlist."""
     return await order_book_service.capture_snapshot(
         symbols, max_symbols_value=intraday_order_book_max_symbols(),
-        fetch_quotes=tencent_order_book_quotes,
+        fetch_quotes=intraday_primary_order_book_quotes,
         persist=persist_intraday_order_book_observations,
         persist_error=persist_intraday_order_book_failure,
         run_database=run_database_blocking,

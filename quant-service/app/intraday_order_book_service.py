@@ -64,6 +64,7 @@ def persist_observations(
             """SELECT DISTINCT ON(symbol) symbol,observed_at,raw
                  FROM quant.intraday_quote_observations
                 WHERE symbol=ANY(%s) AND source_name='tencent_order_book'
+                  AND source_name IN ('longhu_order_book','tencent_order_book')
                   AND observed_at>=%s AND observed_at<%s
                 ORDER BY symbol,observed_at DESC""",
             (symbols, session_start, observed_at),
@@ -87,8 +88,9 @@ def persist_observations(
                 features["delta_status"] = "stale_previous"
             raw = {**row, "order_book_features": features}
             pct_change = ((float(row["price"]) / float(row["pre_close"])) - 1) * 100 if row.get("pre_close") else None
-            value_placeholders.append("(NULL,%s,%s,'tencent_order_book',%s,%s,NULL,NULL,NULL,%s)")
-            params.extend([symbol, observed_at, row.get("price"), pct_change, Json(json_safe(raw))])
+            source_name = "longhu_order_book" if str(row.get("source") or "") == "longhu_order_book" else "tencent_order_book"
+            value_placeholders.append("(NULL,%s,%s,%s,%s,%s,NULL,NULL,NULL,%s)")
+            params.extend([symbol, observed_at, source_name, row.get("price"), pct_change, Json(json_safe(raw))])
         if value_placeholders:
             inserted = connection.execute(
                 """INSERT INTO quant.intraday_quote_observations(
@@ -98,7 +100,8 @@ def persist_observations(
                 params,
             )
             stored = inserted.rowcount
-        record_success(connection, "tencent_free", "order_book_quote", stored, latency_ms)
+        provider_key = "longhuvip" if any(str(row.get("source") or "") == "longhu_order_book" for row in rows) else "tencent_free"
+        record_success(connection, provider_key, "order_book_quote", stored, latency_ms)
     return stored
 
 
@@ -131,7 +134,7 @@ async def capture_snapshot(
         return {
             "status": "completed" if rows else "empty", "requested": len(selected), "received": len(rows),
             "stored": stored, "observed_at": observed_at.isoformat(), "latency_ms": latency_ms,
-            "source": "tencent_single_quote_order_book",
+            "source": "longhu_primary_tencent_fallback_order_book",
         }
     except handled_errors as error:
         latency_ms = round((asyncio.get_running_loop().time() - started_at) * 1000)

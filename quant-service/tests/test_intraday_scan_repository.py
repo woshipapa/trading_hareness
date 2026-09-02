@@ -95,7 +95,7 @@ class IntradayScanRepositoryTests(unittest.TestCase):
         self.assertEqual(state.candidate_sector_keys, {"000001.SZ": ["pcb"]})
         self.assertEqual(state.snapshot_payload, {"equity": 99.0, "drawdown": -0.02})
         order_book_sql, order_book_params = connection.calls[0]
-        self.assertIn("source_name='tencent_order_book'", order_book_sql)
+        self.assertIn("source_name IN ('longhu_order_book','tencent_order_book')", order_book_sql)
         self.assertEqual(order_book_params[1], datetime(2026, 8, 17, 1, 0, tzinfo=timezone.utc))
         membership_sql, membership_params = connection.calls[2]
         self.assertIn("effective_from<=", membership_sql)

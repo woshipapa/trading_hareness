@@ -134,8 +134,8 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
     scan_observed_at = latest_completed_scan["observed_at"] if latest_completed_scan else None
     fuyao_quote = quotes.get("fuyao_ths", {})
     fuyao_health = most_recent_health(("fuyao_ths",), ("realtime_quote",))
-    order_book_quote = quotes.get("tencent_order_book", {})
-    order_book_health = most_recent_health(("tencent_free",), ("order_book_quote",))
+    order_book_quote = quotes.get("longhu_order_book") or quotes.get("tencent_order_book", {})
+    order_book_health = most_recent_health(("longhuvip", "tencent_free"), ("order_book_quote",))
     fast_quote = quotes.get("tushare_super_get_rt_k", {})
     rt_k_raw = raw.get("rt_k", {})
     fast_observed_at = fast_quote.get("last_observed_at") or rt_k_raw.get("last_observed_at")
@@ -170,7 +170,7 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
                      "main_flow_semantics": "not_provided_by_fuyao; Eastmoney flow stays separately source-labelled"},
         ),
         runtime_item(
-            key="tencent_order_book", label="腾讯观察池五档盘口", role="QI、OFI 近似、内外盘差分与区间 VWAP 的研究证据",
+            key="longhu_order_book", label="Longhu 主盘口（腾讯交叉/兜底）", role="十档盘口、QI、OFI 近似、内外盘差分与区间 VWAP 的研究证据",
             configured=os.getenv("INTRADAY_ORDER_BOOK_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             expected_active=session_active, last_observed_at=order_book_quote.get("last_observed_at"), max_age_seconds=12.0,
             cadence="显式观察池批量每 3 秒", health_row=order_book_health,
@@ -178,7 +178,7 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
                      "enabled_watch_count": int(watch_row["enabled"] or 0),
                      "max_symbols": deps.order_book_max_symbols(),
                      "uncovered_watch_count": max(0, int(watch_row["enabled"] or 0) - deps.order_book_max_symbols()),
-                     "scope": "单个腾讯批量请求覆盖观察池；特征仅观测，不改变触发阈值"},
+                     "scope": "Longhu 主源；腾讯在 Longhu 缺失或失败时补齐，特征仅观测，不改变触发阈值"},
             startup_grace_seconds=20.0,
         ),
         runtime_item(

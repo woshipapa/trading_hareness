@@ -17,6 +17,7 @@ from app.longhu_vendor_source import (
     parse_industry_stock_row,
     parse_stock_minute_payload,
     parse_stock_snapshot_payload,
+    parse_longhu_order_book,
     parse_tencent_quote_text,
     safe_page_size,
     market_today,
@@ -120,6 +121,17 @@ class LonghuVendorSourceTests(unittest.TestCase):
         self.assertEqual(parsed["ts_code"], "600664.SH")
         self.assertEqual(parsed["trade_time"], "20260901145901")
         self.assertEqual(parsed["price"], 9.49)
+
+    def test_longhu_order_book_normalizes_ten_levels_and_one_sided_books(self):
+        parsed = parse_longhu_order_book({
+            "b1": [11.9, 200], "b2": [11.89, 2051], "b10": [0, 0],
+            "s1": [0, 0], "s2": [0, 0], "totalb": 2251, "totals": 0,
+        })
+        self.assertEqual(parsed["book_side"], "bid_only")
+        self.assertTrue(parsed["one_sided_book"])
+        self.assertEqual(parsed["bids"][1], {"price": 11.89, "size": 2051.0})
+        self.assertEqual(parsed["asks"], [])
+        self.assertEqual(parsed["seal_volume_lot"], 200.0)
 
     def test_stock_minutes_are_normalized_for_existing_feature_engine(self):
         rows = parse_stock_minute_payload({

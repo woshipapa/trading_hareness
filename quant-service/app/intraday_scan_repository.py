@@ -113,7 +113,7 @@ def load_intraday_scan_local_state(
     """
     order_book_rows = connection.execute(
         """SELECT symbol,observed_at,raw FROM quant.intraday_quote_observations
-             WHERE symbol=ANY(%s) AND source_name='tencent_order_book'
+             WHERE symbol=ANY(%s) AND source_name IN ('longhu_order_book','tencent_order_book')
                AND observed_at>=%s AND observed_at<%s
              ORDER BY symbol,observed_at DESC""",
         (selected_symbols, max(session_start, observed_at - timedelta(minutes=5)), observed_at),

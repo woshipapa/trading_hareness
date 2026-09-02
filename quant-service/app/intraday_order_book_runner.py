@@ -35,9 +35,11 @@ async def run_iteration(
     active, _ = await realtime_session()
     if not active:
         return pruned_on, interval
-    if "order_book_quote" in await open_capabilities("tencent_free", ["order_book_quote"]):
-        # A protected source must not be retried at the normal 3-second depth
-        # cadence.  This stays local and does not mutate provider health.
+    longhu_open = "order_book_quote" in await open_capabilities("longhuvip", ["order_book_quote"])
+    tencent_open = "order_book_quote" in await open_capabilities("tencent_free", ["order_book_quote"])
+    if longhu_open and tencent_open:
+        # Do not hammer a pair of open circuits; the next retry remains
+        # bounded and the capture path stays fail-closed.
         return pruned_on, max(15.0, interval)
 
     symbols = await load_symbols()

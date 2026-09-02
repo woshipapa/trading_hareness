@@ -106,6 +106,7 @@ def parse_stock_snapshot_payload(payload: Mapping[str, Any], symbol: str) -> dic
         return None
     day = "".join(character for character in str(payload.get("day") or "") if character.isdigit())[:8]
     quote_time = "".join(character for character in str(real.get("time") or "") if character.isdigit())[:6]
+    order_book = parse_longhu_order_book(payload.get("weituo"))
     return {
         "ts_code": normalized,
         "name": str(payload.get("name") or normalized),
@@ -124,7 +125,48 @@ def parse_stock_snapshot_payload(payload: Mapping[str, Any], symbol: str) -> dic
         "pb": _number(real.get("dyn_pb_rate")),
         "trade_date": day or None,
         "trade_time": f"{day}{quote_time}" if len(day) == 8 and len(quote_time) == 6 else None,
+        "order_book": order_book,
         "raw": {"provider": "longhuvip", "action": "GetStockPanKou"},
+    }
+
+
+def parse_longhu_order_book(value: Any) -> dict[str, Any] | None:
+    """Normalize Longhu's ``weituo`` ten-level book without inventing trades.
+
+    Longhu uses ``b1..b10``/``s1..s10`` for price and size.  Empty sides are
+    retained because a one-sided limit book is meaningful evidence.  The
+    result is intentionally source-labelled and remains research evidence;
+    it is not treated as exchange-level order-cancellation data.
+    """
+    if not isinstance(value, Mapping):
+        return None
+
+    def levels(prefix: str) -> list[dict[str, float]]:
+        result: list[dict[str, float]] = []
+        for index in range(1, 11):
+            raw_level = value.get(f"{prefix}{index}")
+            if not isinstance(raw_level, (list, tuple)) or len(raw_level) < 2:
+                continue
+            price = _number(raw_level[0])
+            size = _number(raw_level[1])
+            if price is None or price <= 0 or size is None or size < 0:
+                continue
+            result.append({"price": price, "size": size})
+        return result
+
+    bids, asks = levels("b"), levels("s")
+    if not bids and not asks:
+        return None
+    side = "bid_only" if bids and not asks else "ask_only" if asks and not bids else "two_sided"
+    return {
+        "bids": bids,
+        "asks": asks,
+        "book_side": side,
+        "one_sided_book": side != "two_sided",
+        "seal_volume_lot": bids[0]["size"] if side == "bid_only" else asks[0]["size"] if side == "ask_only" else None,
+        "total_bid_lot": _number(value.get("totalb")),
+        "total_ask_lot": _number(value.get("totals")),
+        "source": "longhuvip:GetStockPanKou",
     }
 
 
