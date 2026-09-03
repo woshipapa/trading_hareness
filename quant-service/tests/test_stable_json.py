@@ -25,6 +25,7 @@ APP = pathlib.Path(__file__).resolve().parent.parent / "app"
 SCAN_PATH_MODULES = (
     "intraday_signal_event_persistence.py",
     "intraday_scan_signal_persistence.py",
+    "intraday_minute_capture_actions.py",
     "board_rotation_repository.py",
     "board_flow_capture_actions.py",
 )

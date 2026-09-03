@@ -8,7 +8,7 @@ import re
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
-from psycopg.types.json import Json
+from .stable_json import tolerant_json
 
 
 class IntradayMinuteCaptureActions:
@@ -91,7 +91,7 @@ class IntradayMinuteCaptureActions:
                                        close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
                                        available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
                                 (symbol, trading_date, bucket, row["bar_time"], row["open"], row["high"], row["low"], row["close"],
-                                 row["volume"], row["amount"], datetime.now(timezone.utc), Json(row["raw"])),
+                                 row["volume"], row["amount"], datetime.now(timezone.utc), tolerant_json(row["raw"])),
                             )
                             stored += 1
                         except (ValueError, TypeError) as validation_error:
