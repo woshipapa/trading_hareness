@@ -16,6 +16,8 @@ import uuid
 
 from psycopg.types.json import Json
 
+from .stable_json import tolerant_json
+
 from .provider_health import record_provider_failure
 from .tushare_providers import safe_error_detail
 from .sector_membership_repository import point_in_time_membership_predicate
@@ -232,8 +234,8 @@ def persist_intraday_scan_terminal(
                 observed_at,
                 status,
                 Json(requested_symbols),
-                Json(source_status),
-                Json(summary),
+                tolerant_json(source_status),
+                tolerant_json(summary),
             ),
         )
 
