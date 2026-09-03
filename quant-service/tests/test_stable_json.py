@@ -27,6 +27,7 @@ SCAN_PATH_MODULES = (
     "intraday_scan_signal_persistence.py",
     "intraday_minute_capture_actions.py",
     "intraday_scan_repository.py",
+    "board_stock_mining_repository.py",
     "board_rotation_repository.py",
     "board_flow_capture_actions.py",
 )

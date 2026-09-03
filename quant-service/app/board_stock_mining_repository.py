@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from psycopg.types.json import Json
+from .stable_json import tolerant_json
 
 
 def persist_board_stock_mining_run(
@@ -25,7 +25,7 @@ def persist_board_stock_mining_run(
                observed_at=EXCLUDED.observed_at,status=EXCLUDED.status,
                coverage=EXCLUDED.coverage,summary=EXCLUDED.summary
            RETURNING mining_run_id""",
-        (board_report_id, observed_at, Json(coverage), Json(summary)),
+        (board_report_id, observed_at, tolerant_json(coverage), tolerant_json(summary)),
     ).fetchone()
     mining_run_id = row["mining_run_id"]
     connection.execute("DELETE FROM quant.intraday_board_stock_mining_candidates WHERE mining_run_id=%s", (mining_run_id,))
@@ -40,6 +40,6 @@ def persist_board_stock_mining_run(
              candidate.get("name"), candidate["taxonomy_key"], candidate["sector_key"], candidate["label"], candidate["score"],
              candidate.get("board_net_inflow"), candidate.get("board_change_pct"), candidate.get("main_net_inflow"),
              candidate.get("volume_ratio"), candidate.get("turnover_rate"), candidate.get("pct_change"),
-             Json(candidate.get("evidence") or {}), Json(candidate.get("risk_flags") or [])),
+             tolerant_json(candidate.get("evidence") or {}), tolerant_json(candidate.get("risk_flags") or [])),
         )
     return str(mining_run_id)
