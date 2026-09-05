@@ -1138,8 +1138,10 @@ class AnnualDailyBackfill:
                 """WITH stock_bars AS (
                        SELECT trading_date,close,pre_close,amount,volume,available_at,
                               CASE WHEN pre_close>0 THEN (close/pre_close-1)*100 END AS change_pct
-                         FROM quant.canonical_bars_daily
+                        FROM quant.canonical_bars_daily
                         WHERE trading_date BETWEEN %s AND %s
+                          AND quality_status='fresh'
+                          AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                           AND symbol ~ '^(?:(?:60[0135]|68[89])[0-9]{3}\\.SH|(?:000|001|002|003|300|301)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$'
                      ), aggregate AS (
                        SELECT trading_date,count(*)::integer AS stock_count,

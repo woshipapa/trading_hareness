@@ -155,6 +155,9 @@ class AnnualDailyBackfillTests(unittest.TestCase):
         self.assertIn("total_amount_kcny", source)
         self.assertIn("total_volume_lots", source)
         self.assertIn("canonical_daily_multi_provider", source)
+        aggregate = source[source.index("def materialize_daily_market_aggregates"):source.index("def rebuild_sector_features")]
+        self.assertIn("quality_status='fresh'", aggregate)
+        self.assertIn("available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')", aggregate)
         self.assertNotIn("rt_min", source)
 
     def test_bulk_daily_projection_applies_the_same_amount_unit_quarantine_before_commit(self):
