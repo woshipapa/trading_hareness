@@ -172,6 +172,7 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                       'point_in_time' AS adjustment_quality,
                       coalesce(industry_history.sector_key,'UNKNOWN') AS industry,
                       CASE WHEN industry_history.sector_key IS NULL THEN 'missing' ELSE 'point_in_time' END AS industry_quality,
+                      CASE WHEN fundamental.symbol IS NULL THEN 'missing' ELSE 'point_in_time' END AS fundamental_quality,
                       CASE WHEN fundamental.total_mv>0 THEN ln(fundamental.total_mv::double precision) END AS log_market_cap
                  FROM quant.canonical_bars_daily bar
                  JOIN calendar ON calendar.trading_date=bar.trading_date
@@ -203,9 +204,19 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                                  member.known_at DESC,member.effective_from DESC,member.sector_key
                         LIMIT 1
                  ) industry_history ON TRUE
-                 LEFT JOIN quant.daily_fundamentals fundamental
-                   ON fundamental.symbol=bar.symbol AND fundamental.trading_date=bar.trading_date
+                 LEFT JOIN LATERAL (
+                       SELECT basic.symbol,basic.total_mv,basic.provider
+                         FROM quant.daily_fundamentals basic
+                        WHERE basic.symbol=bar.symbol
+                          AND basic.trading_date=bar.trading_date
+                          AND basic.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                        ORDER BY basic.available_at DESC,
+                                 CASE WHEN basic.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                                 basic.provider
+                        LIMIT 1
+                 ) fundamental ON TRUE
                 WHERE adjustment_history.adj_factor>0 AND bar.close>0
+                  AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                   AND (instrument.list_date IS NULL OR instrument.list_date<=bar.trading_date)
                   AND (instrument.delist_date IS NULL OR instrument.delist_date>=bar.trading_date)
            ), returns AS (
@@ -247,7 +258,9 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                   count(*) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_rows,
                   count(DISTINCT trading_date) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_days,
                   count(*) FILTER(WHERE adjustment_quality='point_in_time')::int adjustment_pit_rows,
-                  count(DISTINCT trading_date) FILTER(WHERE adjustment_quality='point_in_time')::int adjustment_pit_days
+                  count(DISTINCT trading_date) FILTER(WHERE adjustment_quality='point_in_time')::int adjustment_pit_days,
+                  count(*) FILTER(WHERE fundamental_quality='point_in_time')::int fundamental_pit_rows,
+                  count(DISTINCT trading_date) FILTER(WHERE fundamental_quality='point_in_time')::int fundamental_pit_days
              FROM factor_sql_panel"""
     ).fetchone()
     return dict(row or {})
@@ -417,6 +430,10 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
                 "required_point_in_time_industry_history": True,
                 "point_in_time_industry_rows": int(panel.get("industry_pit_rows") or 0),
                 "point_in_time_industry_days": int(panel.get("industry_pit_days") or 0),
+                "point_in_time_adjustment_rows": int(panel.get("adjustment_pit_rows") or 0),
+                "point_in_time_adjustment_days": int(panel.get("adjustment_pit_days") or 0),
+                "point_in_time_fundamental_rows": int(panel.get("fundamental_pit_rows") or 0),
+                "point_in_time_fundamental_days": int(panel.get("fundamental_pit_days") or 0),
                 "excluded_unknown_industry_rows": max(
                     0, int(panel.get("rows") or 0) - int(panel.get("industry_pit_rows") or 0)
                 ),
@@ -448,6 +465,8 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
                 "forward_return": "same symbol on exact SSE trading-calendar horizon",
                 "history_continuity": "all lookback and forward windows require consecutive SSE trading indexes",
                 "industry_quality": "point-in-time membership selected by known_at; UNKNOWN rows remain in the panel but are excluded from factor calculations",
+                "adjustment_quality": "one adjustment factor selected by available_at before the trading-session boundary; final current adj_factor values are not used",
+                "fundamental_quality": "one daily fundamentals row selected by available_at before the trading-session boundary; provider duplicates cannot multiply panel rows",
             },
             "note": "Research artifact only; no execution fill or live threshold update.",
         },
@@ -605,6 +624,10 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
             "required_point_in_time_industry_history": True,
             "point_in_time_industry_rows": int(panel.get("industry_pit_rows") or 0),
             "point_in_time_industry_days": int(panel.get("industry_pit_days") or 0),
+            "point_in_time_adjustment_rows": int(panel.get("adjustment_pit_rows") or 0),
+            "point_in_time_adjustment_days": int(panel.get("adjustment_pit_days") or 0),
+            "point_in_time_fundamental_rows": int(panel.get("fundamental_pit_rows") or 0),
+            "point_in_time_fundamental_days": int(panel.get("fundamental_pit_days") or 0),
             "excluded_unknown_industry_rows": max(
                 0, int(panel.get("rows") or 0) - int(panel.get("industry_pit_rows") or 0)
             ),
@@ -622,6 +645,8 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
             "blocked": ["missing_exact_calendar_bar", "suspended", "limit_up_entry", "limit_down_exit", "missing_provider_limit"],
             "factor_preprocessing": "daily winsorized, point-in-time industry and size neutralized, z-scored",
             "industry_quality": "point-in-time membership selected by known_at; UNKNOWN rows remain in the panel but are excluded from factor calculations",
+            "adjustment_quality": "one adjustment factor selected by available_at before the trading-session boundary; final current adj_factor values are not used",
+            "fundamental_quality": "one daily fundamentals row selected by available_at before the trading-session boundary; provider duplicates cannot multiply panel rows",
         },
     }
     status = "completed" if len(period_rows) >= 20 and trade_count >= 20 else "insufficient_history"
