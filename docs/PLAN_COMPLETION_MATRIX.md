@@ -1,6 +1,6 @@
 # 量化与分析师联合系统计划完成矩阵
 
-更新时间：2026-08-23。本文是四份主计划的当前状态索引，不把历史数据、回放样本或统计晋级缺口伪装成完成。
+更新时间：2026-09-05。本文是四份主计划的当前状态索引，不把历史数据、回放样本或统计晋级缺口伪装成完成。
 
 ## 状态定义
 
@@ -72,7 +72,15 @@
 
 ## 当前验收证据
 
-- quant-service：当前构建后的全量 **734** 项 Python discovery 回归通过。除历史的 v2 规则输入、policy/risk gate 与作者时点回放边界外，新增覆盖观察池报价的直连/兜底边界、扫描总编排的闭市零外呼和确认投递、单事务信号证据顺序与生产事务边界、服务启动失败回滚及逐项关闭隔离、复盘/盘后同日回执 runner、日终 suppressed 摘要、一秒级 Super GET、收盘分钟画像、腾讯盘口及板块曲线 runtime 装配、扫描前的板块/秒级交叉确认、观察池/精确成员、个股 outbox pending/due 与轮动 suppression、THS 概念成员补全 flow/progress、日线同步与盘后核心 basket 输入、背景循环 runtime lease、涨停联动 research runtime/精确关系、熔断状态与生产日历 async 预读、THS/东财精确成员批次失败隔离、概念目录不可用时成员恢复 fail-closed、概念/涨停池精确代码 join，以及原生异步自动化回执、市场资金流、板块/概念/精确成员、涨停联动、Prompt Lab、已落库分析师市场复盘、有界市场评测、分钟时间轴、分析师研究状态、归档总览/游标、提供者目录/能力/健康、PIT 文本因子、路由 async 边界、真实 `upsert_bar` SQL 集成、单股窗口/claim 就绪度、决策卡、板块曲线/复盘/轮动/挖掘、分析师操作回放/outcome、技能/研究/归档证据读取，以及本地研究窗口/因子拒绝、快照控制面阻断、Tushare ledger 缓存/取消、研究维护、远端 claim 唯一成绩单来源、原生 async 同步健康、观察池维护、研究存储准入、生命周期 task、统一交易日日历状态、盘后形态样本仓储、分钟挖掘与盘后一键刷新装配边界，以及单股研究公共源探针的熔断先行和有界证据写入、显式核心池同日控制面同步。
+### 2026-09-05 当前复核
+
+- 工程回归：挂载当前源码执行 quant-service **1,370/1,370** 项 Python discovery 通过；Feishu adapter **72/72** 通过；前端 `api:check`、`typecheck`、production build、OpenAPI contract 和 architecture check 均通过。当前提交与 `origin/main` 同为 `8792822`。
+- 运行态：quant-research、PostgreSQL、Feishu adapter、gateway 和 n8n 容器均健康；`/health` 返回 `ok`，异步池可用，5 个后台租约均在续租，存储约占总预算 46.3%、热库约占 51.0%。运行镜像的 build metadata 尚未注入 git SHA/release，且当前容器未重建为本轮最新源码；挂载源码测试通过不等于线上容器已加载最新提交。
+- 当前研究门禁：最新交易日（2026-09-04）日线控制面仅 13/5,556 个点时全 A 标的，覆盖率 0.23%，状态为 `blocked`；涨跌停控制行仍为 0。`ths_industry` 点时成员当前无可用历史行，离线分钟 `source_available_at` 仍为 0，未来盘中 v2 快照尚未积累满 60 个交易日，因此 P2/P3 研究验证不能启动。
+- 性能余项：`/api/v1/data-readiness/replay` 在 15 秒预算内未返回；执行计划显示其仍会扫描大体量 canonical bars/fundamentals。需要先做有界增量物化或索引优化，再把 readiness 端点纳入运行态验收。
+- 结论：P0 数据语义、P1 运行工程和研究证据账本已基本完成；P2 历史数据地基、分钟价格路径回放、P3 样本外统计门禁、Prompt Lab 金标晋级和 RL/challenger 仍未完成。所有研究输出继续保持 `live_effect=none`。WeChat 监听脚本当前存在工作树未提交改动，未纳入本次量化链路验收。
+
+- quant-service：历史 734 项回归记录对应 2026-08-23 快照；当前数量和本次复核结果见上方 2026-09-05 条目。除历史的 v2 规则输入、policy/risk gate 与作者时点回放边界外，新增覆盖观察池报价的直连/兜底边界、扫描总编排的闭市零外呼和确认投递、单事务信号证据顺序与生产事务边界、服务启动失败回滚及逐项关闭隔离、复盘/盘后同日回执 runner、日终 suppressed 摘要、一秒级 Super GET、收盘分钟画像、腾讯盘口及板块曲线 runtime 装配、扫描前的板块/秒级交叉确认、观察池/精确成员、个股 outbox pending/due 与轮动 suppression、THS 概念成员补全 flow/progress、日线同步与盘后核心 basket 输入、背景循环 runtime lease、涨停联动 research runtime/精确关系、熔断状态与生产日历 async 预读、THS/东财精确成员批次失败隔离、概念目录不可用时成员恢复 fail-closed、概念/涨停池精确代码 join，以及原生异步自动化回执、市场资金流、板块/概念/精确成员、涨停联动、Prompt Lab、已落库分析师市场复盘、有界市场评测、分钟时间轴、分析师研究状态、归档总览/游标、提供者目录/能力/健康、PIT 文本因子、路由 async 边界、真实 `upsert_bar` SQL 集成、单股窗口/claim 就绪度、决策卡、板块曲线/复盘/轮动/挖掘、分析师操作回放/outcome、技能/研究/归档证据读取，以及本地研究窗口/因子拒绝、快照控制面阻断、Tushare ledger 缓存/取消、研究维护、远端 claim 唯一成绩单来源、原生 async 同步健康、观察池维护、研究存储准入、生命周期 task、统一交易日日历状态、盘后形态样本仓储、分钟挖掘与盘后一键刷新装配边界，以及单股研究公共源探针的熔断先行和有界证据写入、显式核心池同日控制面同步。
 - frontend：2026-08-22 已重新执行 `npm run api:check`、`vue-tsc --noEmit` 与 Vite production build，均通过；概念成员卡现在区分有效精确映射覆盖和同日同步回执，避免显示层掩盖证据差异。生成 API 类型仍与 OpenAPI 一致。构建仅保留 charts/element-plus 大于 500 kB 的优化警告，不影响功能或接口契约。
 - 开盘预检：compose、数据库迁移 `20260822_0055`、必需后台租约、共享 provider pacing、30s/10s/1s/60s 节奏、飞书、当前发布版分析师文字同步以及可恢复备份均通过；预检是只读的，不请求市场 provider 或发送提醒。
 - 最近提交：见当前仓库最新提交；本轮未改变策略阈值、live 权重或历史数据范围。所有新增拆分均保持既有 provider、数据库事务和告警边界。
