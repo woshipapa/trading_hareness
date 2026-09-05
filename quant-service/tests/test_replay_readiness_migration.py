@@ -13,6 +13,11 @@ class ReplayReadinessMigrationTest(unittest.TestCase):
         self.assertIn("daily_trade_limits_pit_lookup_idx", source)
         self.assertIn("available_at DESC", source)
 
+    def test_readiness_query_has_a_bounded_statement_timeout(self):
+        source = (Path(__file__).parents[1] / "app" / "replay_readiness.py").read_text()
+        self.assertIn("READINESS_STATEMENT_TIMEOUT_MS = 8000", source)
+        self.assertIn("SET LOCAL statement_timeout", source)
+
 
 if __name__ == "__main__":
     unittest.main()

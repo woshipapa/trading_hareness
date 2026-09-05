@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .replay_readiness import PIT_DAILY_COVERAGE_CTE, replay_readiness_payload
+from .replay_readiness import PIT_DAILY_COVERAGE_CTE, READINESS_STATEMENT_TIMEOUT_MS, replay_readiness_payload
 from .research_capacity import feature_readiness_projection, historical_capacity_plan
 
 
@@ -45,8 +45,10 @@ async def feature_readiness(async_database: Any) -> dict[str, Any]:
 async def replay_readiness(async_database: Any) -> dict[str, Any]:
     """Read bounded replay gates using the native async connection."""
     async with async_database.transaction() as connection:
-        result = await connection.execute(
-            f"""{PIT_DAILY_COVERAGE_CTE}
+        try:
+            result = await connection.execute(
+                f"""SET LOCAL statement_timeout = '{READINESS_STATEMENT_TIMEOUT_MS}ms';
+                {PIT_DAILY_COVERAGE_CTE}
                 SELECT
                   (SELECT min(trading_date) FROM daily_dates) first_daily_date,
                   (SELECT max(trading_date) FROM daily_dates) latest_daily_date,
@@ -73,8 +75,10 @@ async def replay_readiness(async_database: Any) -> dict[str, Any]:
                     WHERE state IN ('confirmed','alerted')) confirmed_signal_events,
                   (SELECT count(DISTINCT signal_event_id)::int FROM quant.intraday_signal_outcomes
                     WHERE status='matured') matured_signal_events"""
-        )
-        row = await result.fetchone()
+            )
+            row = await result.fetchone()
+        except Exception:
+            return replay_readiness_payload({"readiness_query_status": "timeout"})
     return replay_readiness_payload(dict(row or {}))
 
 

@@ -19,6 +19,7 @@ P2_MIN_FULL_CROSS_SECTION_DAYS = 720
 P2_MIN_DAILY_CALENDAR_SPAN_DAYS = 1090
 P3_MIN_REPLAY_DAYS = 60
 P3_MIN_SIGNAL_EVENTS = 200
+READINESS_STATEMENT_TIMEOUT_MS = 8000
 
 
 # A historical "full cross-section" is relative to the membership that was
@@ -167,8 +168,10 @@ def _as_date(value: Any) -> date | None:
 def historical_replay_readiness(database: Any) -> dict[str, Any]:
     """Read bounded local coverage metrics for P2/P3 admission."""
     with database.transaction() as connection:
-        row = connection.execute(
-            f"""{PIT_DAILY_COVERAGE_CTE}
+        try:
+            row = connection.execute(
+                f"""SET LOCAL statement_timeout = '{READINESS_STATEMENT_TIMEOUT_MS}ms';
+                {PIT_DAILY_COVERAGE_CTE}
                 SELECT
                   (SELECT min(trading_date) FROM daily_dates) first_daily_date,
                   (SELECT max(trading_date) FROM daily_dates) latest_daily_date,
@@ -195,11 +198,16 @@ def historical_replay_readiness(database: Any) -> dict[str, Any]:
                     WHERE state IN ('confirmed','alerted')) confirmed_signal_events,
                   (SELECT count(DISTINCT signal_event_id)::int FROM quant.intraday_signal_outcomes
                     WHERE status='matured') matured_signal_events"""
-        ).fetchone()
+            ).fetchone()
+        except Exception:
+            # A control-plane timeout must remain a fast, explicit blocker.
+            # Never hold a pool slot indefinitely or turn an incomplete read
+            # into an apparently healthy research gate.
+            return replay_readiness_payload({"readiness_query_status": "timeout"})
     return replay_readiness_payload(dict(row or {}))
 
 
 __all__ = [
     "P2_MIN_FULL_CROSS_SECTION_DAYS", "P2_MIN_DAILY_CALENDAR_SPAN_DAYS", "P3_MIN_REPLAY_DAYS", "P3_MIN_SIGNAL_EVENTS",
-    "PIT_DAILY_COVERAGE_CTE", "historical_replay_readiness", "replay_readiness_payload",
+    "PIT_DAILY_COVERAGE_CTE", "READINESS_STATEMENT_TIMEOUT_MS", "historical_replay_readiness", "replay_readiness_payload",
 ]
