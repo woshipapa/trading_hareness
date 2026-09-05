@@ -177,7 +177,9 @@ def rebuild_analyst_opinions(
 def _next_dates(connection: Any, after_date: date, horizon: int, as_of_date: date) -> tuple[date | None, date | None]:
     rows = connection.execute(
         """SELECT trading_date FROM quant.canonical_bars_daily WHERE symbol='000001.SH' AND trading_date>%s
-             AND trading_date<=%s ORDER BY trading_date LIMIT %s""", (after_date, as_of_date, horizon)
+             AND trading_date<=%s AND quality_status='fresh'
+             AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+             ORDER BY trading_date LIMIT %s""", (after_date, as_of_date, horizon)
     ).fetchall()
     if len(rows) < horizon:
         return (date(rows[0]["trading_date"].year, rows[0]["trading_date"].month, rows[0]["trading_date"].day) if rows else None, None)
@@ -194,8 +196,8 @@ def _basket_symbols(connection: Any, opinion: dict[str, Any]) -> list[str]:
              JOIN quant.sector_membership_history m ON m.taxonomy_key=a.taxonomy_key AND m.sector_key=a.sector_key
             WHERE a.theme_key=%s AND a.status='approved'
               AND m.effective_from<=%s AND (m.effective_to IS NULL OR m.effective_to>=%s)
-              AND m.available_at<=%s""",
-        (opinion["subject_key"], opinion["opinion_date"], opinion["opinion_date"], opinion["available_at"]),
+              AND m.available_at<=%s AND m.known_at<=%s""",
+        (opinion["subject_key"], opinion["opinion_date"], opinion["opinion_date"], opinion["available_at"], opinion["available_at"]),
     ).fetchall()
     return [str(row["symbol"]) for row in rows]
 
@@ -207,6 +209,9 @@ def _basket_return(connection: Any, symbols: list[str], entry_date: date, exit_d
         """SELECT e.symbol,e.close AS entry_close,x.close AS exit_close
              FROM quant.canonical_bars_daily e JOIN quant.canonical_bars_daily x ON x.symbol=e.symbol
             WHERE e.symbol=ANY(%s) AND e.trading_date=%s AND x.trading_date=%s
+              AND e.quality_status='fresh' AND x.quality_status='fresh'
+              AND e.available_at < ((e.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+              AND x.available_at < ((x.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
               AND e.close IS NOT NULL AND x.close IS NOT NULL""", (symbols, entry_date, exit_date)
     ).fetchall()
     returns = [_number(row["exit_close"]) / _number(row["entry_close"]) - 1 for row in rows if _number(row["entry_close"]) > 0]
@@ -222,6 +227,8 @@ def _basket_volatility(connection: Any, symbols: list[str], entry_date: date, ex
                  SELECT symbol,trading_date,close,lag(close) OVER (PARTITION BY symbol ORDER BY trading_date) previous_close
                    FROM quant.canonical_bars_daily
                   WHERE symbol=ANY(%s) AND trading_date BETWEEN %s - interval '7 days' AND %s
+                    AND quality_status='fresh'
+                    AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
              )
              SELECT trading_date,avg(close / NULLIF(previous_close,0) - 1) AS basket_return
                FROM prices WHERE trading_date>=%s AND previous_close IS NOT NULL
@@ -246,6 +253,7 @@ def _industry_size_benchmark_return(connection: Any, opinion: dict[str, Any], en
     target = connection.execute(
         """SELECT i.industry,f.circ_mv FROM quant.instruments i
              LEFT JOIN quant.daily_fundamentals f ON f.symbol=i.symbol AND f.trading_date=%s
+               AND f.available_at < ((f.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
             WHERE i.symbol=%s""", (entry_date, opinion["subject_key"])
     ).fetchone()
     if not target or not target["industry"] or target["circ_mv"] is None:
@@ -254,6 +262,7 @@ def _industry_size_benchmark_return(connection: Any, opinion: dict[str, Any], en
         """WITH candidate AS (
                  SELECT i.symbol,f.circ_mv,ntile(3) OVER (ORDER BY f.circ_mv) size_bucket
                    FROM quant.instruments i JOIN quant.daily_fundamentals f ON f.symbol=i.symbol AND f.trading_date=%s
+                    AND f.available_at < ((f.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                   WHERE i.industry=%s AND f.circ_mv IS NOT NULL
              ), target_bucket AS (
                  SELECT size_bucket FROM candidate WHERE symbol=%s
@@ -262,7 +271,10 @@ def _industry_size_benchmark_return(connection: Any, opinion: dict[str, Any], en
                FROM candidate c JOIN target_bucket t ON t.size_bucket=c.size_bucket
                JOIN quant.canonical_bars_daily e ON e.symbol=c.symbol AND e.trading_date=%s
                JOIN quant.canonical_bars_daily x ON x.symbol=c.symbol AND x.trading_date=%s
-              WHERE c.symbol<>%s AND e.close IS NOT NULL AND x.close IS NOT NULL""",
+              WHERE c.symbol<>%s AND e.quality_status='fresh' AND x.quality_status='fresh'
+                AND e.available_at < ((e.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                AND x.available_at < ((x.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                AND e.close IS NOT NULL AND x.close IS NOT NULL""",
         (entry_date, target["industry"], opinion["subject_key"], entry_date, exit_date, opinion["subject_key"]),
     ).fetchall()
     values = [_number(row["exit_close"]) / _number(row["entry_close"]) - 1 for row in peers if _number(row["entry_close"]) > 0]
@@ -604,7 +616,9 @@ def _market_regimes(connection: Any, dates: set[date]) -> dict[date, str]:
         return {}
     rows = connection.execute(
         """SELECT trading_date,close FROM quant.canonical_bars_daily WHERE symbol='000001.SH'
-             AND trading_date<=%s ORDER BY trading_date""", (max(dates),)
+             AND trading_date<=%s AND quality_status='fresh'
+             AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+             ORDER BY trading_date""", (max(dates),)
     ).fetchall()
     closes = [(row["trading_date"], _number(row["close"])) for row in rows if _number(row["close"]) > 0]
     result: dict[date, str] = {}
