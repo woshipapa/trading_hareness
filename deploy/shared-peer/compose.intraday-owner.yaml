@@ -19,6 +19,11 @@ services:
       # tunnel can be enabled later without changing the strategy runtime.
       QUANT_FEISHU_DIRECT_ENABLED: ${PEER_FEISHU_DIRECT_ENABLED:-false}
       INTRADAY_SCAN_INTERVAL_SECONDS: ${PEER_INTRADAY_SCAN_INTERVAL_SECONDS:-30}
+      # The transferred pool currently contains 81 enabled symbols.  Keep the
+      # explicit pool admission at the audited hard ceiling so the scanner
+      # fails closed only above 100, while fast/depth/minute captures continue
+      # to rotate through their smaller provider-sized batches below.
+      INTRADAY_WATCHLIST_MAX_SYMBOLS: ${PEER_WATCHLIST_MAX_SYMBOLS:-100}
       INTRADAY_SUPER_GET_FAST_INTERVAL_SECONDS: ${PEER_SUPER_GET_FAST_INTERVAL_SECONDS:-2}
       INTRADAY_SUPER_GET_FAST_MAX_IN_FLIGHT: ${PEER_SUPER_GET_FAST_MAX_IN_FLIGHT:-6}
       INTRADAY_SUPER_GET_FAST_MAX_SYMBOLS: ${PEER_SUPER_GET_FAST_MAX_SYMBOLS:-36}
@@ -33,4 +38,3 @@ services:
       QUANT_RUNTIME_MIN_FREE_BYTES: ${PEER_RUNTIME_MIN_FREE_BYTES:-2147483648}
       QUANT_RUNTIME_WARNING_FREE_BYTES: ${PEER_RUNTIME_WARNING_FREE_BYTES:-4294967296}
       QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED: "false"
-

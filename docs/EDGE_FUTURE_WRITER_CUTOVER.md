@@ -45,6 +45,16 @@ deploy/shared-peer/compose.intraday-owner.yaml
 `quant-intraday-edge.service` 已停止，edge 的 n8n、飞书 relay 容器仍健康。
 目标机处于周末 standby，下一交易日进入实际采集窗口。
 
+观察池控制配置已在切换后单独对账：edge 与 owner 均为 82 条、81 条启用，
+symbol/启用状态哈希一致。同步脚本只传观察池控制字段，不传行情、信号或历史
+证据，也不会触发逐票历史 hydration。目标显式观察池上限设为 100；盘口、秒级
+和分钟剖面仍按 provider-sized rotation 批次运行。
+
+edge 的量化 systemd unit 及其 daily、live-acceptance、materialize timers 已
+disable；edge 保留 n8n/Feishu relay。relay 与 n8n 的 `QUANT_SERVICE_URL` 已
+切到 edge 本地的 `15682` owner API 隧道，并使用 owner API 写密钥。目标镜像已
+写入 release `owner-intraday-20260905` 与提交标识，便于审计。
+
 ## Feishu
 
 edge47 的群监听、interactive 卡片转发、分析师同步和投递 ledger 保持运行。
