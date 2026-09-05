@@ -172,5 +172,15 @@ class ResearchExperimentServiceTests(unittest.TestCase):
 
         build_snapshot(payload, _deps(database))
 
+        manifest_query, manifest_params = next(
+            (sql, params) for sql, params in statements
+            if "SELECT (SELECT count(*)::int FROM quant.canonical_bars_daily" in sql
+        )
+        self.assertIn("trading_date<=%s AND available_at<=%s", manifest_query)
+        self.assertIn("basic.available_at<=%s", manifest_query)
+        self.assertIn("limits.available_at<=%s", manifest_query)
+        self.assertIn("calendar_date=%s AND available_at<=%s", manifest_query)
+        self.assertEqual(len(manifest_params), 15)
+        self.assertEqual(manifest_params[1], exchange_day_end(date(2026, 8, 21)))
         snapshot_insert = next(params for sql, params in statements if "INSERT INTO quant.data_snapshots" in sql)
         self.assertEqual(snapshot_insert[2], exchange_day_end(date(2026, 8, 21)))

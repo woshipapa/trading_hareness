@@ -208,27 +208,33 @@ def build_snapshot(payload: Any, deps: ResearchExperimentDependencies) -> dict[s
     cutoff = deps.as_utc(availability_cutoff(as_of, requested_cutoff))
     with deps.database.transaction() as connection:
         manifest_row = connection.execute(
-            """SELECT (SELECT count(*)::int FROM quant.canonical_bars_daily WHERE trading_date<=%s) bars,
+            """SELECT (SELECT count(*)::int FROM quant.canonical_bars_daily
+                               WHERE trading_date<=%s AND available_at<=%s) bars,
                       (SELECT count(*)::int FROM quant.remote_reports WHERE remote_updated_at<=%s) remote_reports,
-                      (SELECT count(*)::int FROM quant.canonical_bars_daily WHERE symbol='000300.SH' AND trading_date<=%s) benchmark_bars,
+                      (SELECT count(*)::int FROM quant.canonical_bars_daily
+                        WHERE symbol='000300.SH' AND trading_date<=%s AND available_at<=%s) benchmark_bars,
                       (SELECT count(DISTINCT symbol)::int FROM quant.canonical_bars_daily
-                        WHERE trading_date=%s
+                        WHERE trading_date=%s AND available_at<=%s
                           AND symbol ~ '^(?:(?:60[0135]|68[0-9])[0-9]{3}\\.SH|(?:000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$') equity_symbols,
                       (SELECT count(DISTINCT basic.symbol)::int
                          FROM quant.canonical_bars_daily bar
                          JOIN quant.daily_fundamentals basic
                            ON basic.symbol=bar.symbol AND basic.trading_date=bar.trading_date
-                        WHERE bar.trading_date=%s
+                          AND basic.available_at<=%s
+                        WHERE bar.trading_date=%s AND bar.available_at<=%s
                           AND bar.symbol ~ '^(?:(?:60[0135]|68[0-9])[0-9]{3}\\.SH|(?:000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$') fundamental_symbols,
                       (SELECT count(DISTINCT limits.symbol)::int
                          FROM quant.canonical_bars_daily bar
                          JOIN quant.daily_trade_limits limits
                            ON limits.symbol=bar.symbol AND limits.trading_date=bar.trading_date
-                        WHERE bar.trading_date=%s
+                          AND limits.available_at<=%s
+                        WHERE bar.trading_date=%s AND bar.available_at<=%s
                           AND bar.symbol ~ '^(?:(?:60[0135]|68[0-9])[0-9]{3}\\.SH|(?:000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$') limit_symbols,
-                      (SELECT is_open FROM quant.market_trade_calendar WHERE exchange='SSE' AND calendar_date=%s) exchange_open,
+                      (SELECT is_open FROM quant.market_trade_calendar
+                        WHERE exchange='SSE' AND calendar_date=%s AND available_at<=%s) exchange_open,
                       (SELECT count(*)::int FROM quant.data_quality_issues WHERE resolved_at IS NULL AND severity IN ('error','blocking')) blocking_issues""",
-            (as_of, cutoff, as_of, as_of, as_of, as_of, as_of),
+            (as_of, cutoff, cutoff, as_of, cutoff, as_of, cutoff, cutoff,
+             as_of, cutoff, cutoff, as_of, cutoff, as_of, cutoff),
         ).fetchone()
         manifest = dict(manifest_row or {})
         manifest.update({
@@ -236,7 +242,7 @@ def build_snapshot(payload: Any, deps: ResearchExperimentDependencies) -> dict[s
             "as_of_date": as_of.isoformat(),
             "knowledge_cutoff": cutoff.isoformat(),
             "code_sha": os.environ.get("APP_GIT_SHA") or "unknown",
-            "data_schema_version": "feature-availability-cutoff-v1",
+            "data_schema_version": "feature-availability-cutoff-v2",
         })
         complete_equity_controls = (
             manifest["equity_symbols"] > 0
