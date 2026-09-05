@@ -111,6 +111,12 @@ class FactorSqlLabTests(unittest.TestCase):
         self.assertFalse(_point_in_time_industry_ready({"rows": 10, "industry_pit_rows": 9}))
         self.assertFalse(_point_in_time_industry_ready({"rows": 0, "industry_pit_rows": 0}))
 
+    def test_factor_score_candidates_exclude_unknown_industry_rows(self):
+        connection = RecordingConnection()
+        _materialize_factor_scores(connection, "momentum_20d", date(2026, 1, 1), date(2026, 3, 1))
+        score_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_factor_scores" in sql)
+        self.assertIn("signal.industry_quality='point_in_time'", score_sql)
+
     def test_factor_standardization_does_not_select_on_future_outcome(self):
         connection = RecordingConnection()
         _materialize_factor_scores(connection, "momentum_20d", date(2026, 1, 1), date(2026, 3, 1))

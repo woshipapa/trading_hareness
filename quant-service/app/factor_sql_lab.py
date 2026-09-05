@@ -246,8 +246,9 @@ def _materialize_factor_scores(connection: Any, factor_key: str, start_date: dat
             WITH candidate AS (
                 SELECT signal.symbol,signal.trading_date,signal.industry,signal.log_market_cap,
                        signal.{column}::double precision AS raw_factor
-                  FROM factor_sql_panel signal
+                 FROM factor_sql_panel signal
                  WHERE signal.trading_date BETWEEN %s AND %s
+                   AND signal.industry_quality='point_in_time'
                    AND signal.{column} IS NOT NULL
                    AND NOT coalesce(signal.is_suspended,false)
             ), bounds AS (
@@ -401,6 +402,9 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
                 "required_point_in_time_industry_history": True,
                 "point_in_time_industry_rows": int(panel.get("industry_pit_rows") or 0),
                 "point_in_time_industry_days": int(panel.get("industry_pit_days") or 0),
+                "excluded_unknown_industry_rows": max(
+                    0, int(panel.get("rows") or 0) - int(panel.get("industry_pit_rows") or 0)
+                ),
                 "blockers": [
                     *_formal_history_blockers(history),
                     *( ["point_in_time_industry_history_missing"] if not point_in_time_industry_ready else [] ),
@@ -428,7 +432,7 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
                 "standardization": "daily cross-sectional z-score",
                 "forward_return": "same symbol on exact SSE trading-calendar horizon",
                 "history_continuity": "all lookback and forward windows require consecutive SSE trading indexes",
-                "industry_quality": "point-in-time membership selected by known_at; UNKNOWN is retained when no historical membership was available",
+                "industry_quality": "point-in-time membership selected by known_at; UNKNOWN rows remain in the panel but are excluded from factor calculations",
             },
             "note": "Research artifact only; no execution fill or live threshold update.",
         },
@@ -586,6 +590,9 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
             "required_point_in_time_industry_history": True,
             "point_in_time_industry_rows": int(panel.get("industry_pit_rows") or 0),
             "point_in_time_industry_days": int(panel.get("industry_pit_days") or 0),
+            "excluded_unknown_industry_rows": max(
+                0, int(panel.get("rows") or 0) - int(panel.get("industry_pit_rows") or 0)
+            ),
             "blockers": [
                 *_formal_history_blockers(history),
                 *( ["point_in_time_industry_history_missing"] if not point_in_time_industry_ready else [] ),
@@ -599,7 +606,7 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
             "non_overlapping_periods": True, "single_side_cost_bps": cost_bps,
             "blocked": ["missing_exact_calendar_bar", "suspended", "limit_up_entry", "limit_down_exit", "missing_provider_limit"],
             "factor_preprocessing": "daily winsorized, point-in-time industry and size neutralized, z-scored",
-            "industry_quality": "point-in-time membership selected by known_at; UNKNOWN is retained when no historical membership was available",
+            "industry_quality": "point-in-time membership selected by known_at; UNKNOWN rows remain in the panel but are excluded from factor calculations",
         },
     }
     status = "completed" if len(period_rows) >= 20 and trade_count >= 20 else "insufficient_history"
