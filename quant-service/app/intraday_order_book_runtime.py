@@ -1,4 +1,4 @@
-"""Application adapter for bounded Tencent order-book observation.
+"""Application adapter for bounded Longhu-first order-book observation.
 
 The loop engine keeps exchange-session, capability and cadence policy.  This
 adapter owns only bounded local watchlist reads and the source-scoped evidence
@@ -65,7 +65,8 @@ async def run_intraday_order_book_runtime_loop(
             with dependencies.database.transaction() as connection:
                 connection.execute(
                     "DELETE FROM quant.intraday_quote_observations "
-                    "WHERE source_name='tencent_order_book' AND observed_at<%s",
+                    "WHERE source_name IN ('longhu_order_book','tencent_order_book') "
+                    "AND observed_at<%s",
                     (cutoff,),
                 )
 

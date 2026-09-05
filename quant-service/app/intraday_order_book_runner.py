@@ -1,4 +1,4 @@
-"""Runtime loop for bounded Tencent order-book observation.
+"""Runtime loop for bounded Longhu-first order-book observation.
 
 Provider decoding/persistence belongs to ``intraday_order_book_service``.  This
 module only coordinates session gates, local storage policy and daily pruning,
@@ -35,11 +35,12 @@ async def run_iteration(
     active, _ = await realtime_session()
     if not active:
         return pruned_on, interval
-    longhu_open = "order_book_quote" in await open_capabilities("longhuvip", ["order_book_quote"])
-    tencent_open = "order_book_quote" in await open_capabilities("tencent_free", ["order_book_quote"])
-    if longhu_open and tencent_open:
-        # Do not hammer a pair of open circuits; the next retry remains
-        # bounded and the capture path stays fail-closed.
+    longhu_circuit_open = "order_book_quote" in await open_capabilities("longhuvip", ["order_book_quote"])
+    tencent_circuit_open = "order_book_quote" in await open_capabilities("tencent_free", ["order_book_quote"])
+    if longhu_circuit_open and tencent_circuit_open:
+        # Only skip when both the Longhu primary and Tencent fallback are
+        # unavailable.  A Tencent circuit must never suppress a healthy
+        # Longhu capture (and vice versa).
         return pruned_on, max(15.0, interval)
 
     symbols = await load_symbols()

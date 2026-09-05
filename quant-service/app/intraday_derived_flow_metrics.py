@@ -135,8 +135,11 @@ def apply_derived_watch_flow_metrics(
     sources: dict[str, dict[str, str]] = {}
     for symbol, quote in quotes.items():
         metrics = derived.get(symbol) or {}
+        native = {field for field, source in (quote.get("flow_metric_sources") or {}).items()
+                  if source == "longhuvip_watch_quote" and quote.get(field) is not None}
+        derived_source = "longhuvip_volume_derived" if quote.get("volume_source") == "longhuvip_watch_quote" else "fuyao_ths_derived"
         labels = {
-            field: "fuyao_ths_derived" if field in metrics
+            field: "longhuvip_watch_quote" if field in native else derived_source if field in metrics
             else "eastmoney_watch_flow" if quote.get(field) is not None
             else "unavailable"
             for field in DERIVED_FLOW_FIELDS
@@ -145,6 +148,8 @@ def apply_derived_watch_flow_metrics(
             "eastmoney_watch_flow" if quote.get("main_net_inflow") is not None else "unavailable"
         )
         for field, value in metrics.items():
+            if field in native:
+                continue
             quote[f"{field}_eastmoney_observed"] = quote.get(field)
             quote[field] = value
         quote["flow_metric_sources"] = labels

@@ -16,6 +16,7 @@ from app.longhu_vendor_source import (
     normalize_stock_symbol,
     parse_industry_stock_row,
     parse_stock_minute_payload,
+    current_session_minute_rows,
     parse_stock_snapshot_payload,
     parse_longhu_order_book,
     parse_tencent_quote_text,
@@ -146,6 +147,37 @@ class LonghuVendorSourceTests(unittest.TestCase):
         self.assertEqual(rows[2]["cumulative_segment"], 1)
         self.assertFalse(rows[-1]["is_complete"])
 
+    def test_stock_minutes_keep_exchange_date_when_vendor_supplies_it(self):
+        rows = parse_stock_minute_payload({
+            "day": "20260901",
+            "trend": [["09:30", 10.0, 10.0, 100]],
+        }, "600664.SH")
+        self.assertEqual(rows[0]["trade_date"], "20260901")
+        self.assertEqual(rows[0]["trade_time"], "2026-09-01 09:30:00")
+
+    def test_current_session_minute_rows_reject_prior_exchange_date(self):
+        with self.assertRaisesRegex(RuntimeError, "stale or span"):
+            current_session_minute_rows(
+                [{"trade_date": "20260831", "time": "09:30"}],
+                observed_at=datetime(2026, 9, 1, 1, 30, tzinfo=timezone.utc),
+            )
+        self.assertEqual(
+            current_session_minute_rows(
+                [{"trade_date": "20260901", "time": "09:30"}],
+                observed_at=datetime(2026, 9, 1, 1, 30, tzinfo=timezone.utc),
+            )[0]["trade_date"],
+            "20260901",
+        )
+
+    def test_shared_stock_minutes_rejects_rows_without_exchange_date(self):
+        source = SharedLonghuReadSource("http://owner.test", "read-key")
+        source.raw_call = lambda _request: {
+            "target": "longhu_quote", "calls": 1,
+            "pages": [{"payload": {"trend": [["09:30", 10.0, 10.0, 100]]}}],
+        }
+        with self.assertRaisesRegex(RuntimeError, "missing exchange date"):
+            source.stock_minutes("600664.SH")
+
     def test_shared_gateway_enforces_logical_cap_and_preserves_status(self):
         source = SharedLonghuReadSource("http://owner.test", "read-key")
 
@@ -234,7 +266,7 @@ class LonghuVendorSourceTests(unittest.TestCase):
             calls.append(payload)
             return {
                 "target": "longhu_quote", "calls": 1,
-                "pages": [{"payload": {"trend": [["09:30", 10.0, 10.0, 100]]}}],
+                "pages": [{"payload": {"day": "20260901", "trend": [["09:30", 10.0, 10.0, 100]]}}],
             }
 
         source.raw_call = post

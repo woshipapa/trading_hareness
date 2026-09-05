@@ -58,18 +58,31 @@ def persist_observations(
     previous_cutoff = observed_at - timedelta(seconds=15)
     china_observed_at = observed_at.astimezone(ZoneInfo("Asia/Shanghai"))
     session_start = china_observed_at.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-    symbols = sorted({str(row.get("ts_code") or "") for row in rows if re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", str(row.get("ts_code") or ""))})
+    source_rows: list[tuple[str, str]] = []
+    for row in rows:
+        symbol = str(row.get("ts_code") or "")
+        if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol):
+            continue
+        source_name = "longhu_order_book" if str(row.get("source") or "") == "longhu_order_book" else "tencent_order_book"
+        source_rows.append((symbol, source_name))
+    source_pairs = sorted(set(source_rows))
     with database.transaction() as connection:
         previous_rows = connection.execute(
-            """SELECT DISTINCT ON(symbol) symbol,observed_at,raw
-                 FROM quant.intraday_quote_observations
-                WHERE symbol=ANY(%s) AND source_name='tencent_order_book'
-                  AND source_name IN ('longhu_order_book','tencent_order_book')
-                  AND observed_at>=%s AND observed_at<%s
-                ORDER BY symbol,observed_at DESC""",
-            (symbols, session_start, observed_at),
-        ).fetchall() if symbols else []
-        previous_by_symbol = {str(item["symbol"]): dict(item) for item in previous_rows}
+            """SELECT DISTINCT ON(o.symbol,o.source_name) o.symbol,o.source_name,o.observed_at,o.raw
+                 FROM quant.intraday_quote_observations o
+                JOIN unnest(%s::text[],%s::text[]) AS wanted(symbol,source_name)
+                  ON wanted.symbol=o.symbol AND wanted.source_name=o.source_name
+                WHERE o.observed_at>=%s AND o.observed_at<%s
+                ORDER BY o.symbol,o.source_name,o.observed_at DESC""",
+            ([symbol for symbol, _source in source_pairs], [source for _symbol, source in source_pairs], session_start, observed_at),
+        ).fetchall() if source_pairs else []
+        # A fallback frame must never become the previous frame for a primary
+        # Longhu quote (or vice versa).  OFI is source-specific evidence, so a
+        # provider switch starts a fresh delta window by design.
+        previous_by_source = {
+            (str(item["symbol"]), str(item["source_name"])): dict(item)
+            for item in previous_rows
+        }
         # One batched multi-row INSERT instead of one round trip per symbol:
         # this loop runs every 3s for up to 40 symbols, so a per-row INSERT
         # was ~19,000 individual statements/day for this table alone.
@@ -79,7 +92,8 @@ def persist_observations(
             symbol = str(row.get("ts_code") or "")
             if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol):
                 continue
-            previous = previous_by_symbol.get(symbol)
+            source_name = "longhu_order_book" if str(row.get("source") or "") == "longhu_order_book" else "tencent_order_book"
+            previous = previous_by_source.get((symbol, source_name))
             previous_is_fresh = bool(previous and previous["observed_at"] >= previous_cutoff)
             features = order_book_observation(
                 row, dict(previous["raw"] or {}) if previous_is_fresh else None,
@@ -88,7 +102,6 @@ def persist_observations(
                 features["delta_status"] = "stale_previous"
             raw = {**row, "order_book_features": features}
             pct_change = ((float(row["price"]) / float(row["pre_close"])) - 1) * 100 if row.get("pre_close") else None
-            source_name = "longhu_order_book" if str(row.get("source") or "") == "longhu_order_book" else "tencent_order_book"
             value_placeholders.append("(NULL,%s,%s,%s,%s,%s,NULL,NULL,NULL,%s)")
             params.extend([symbol, observed_at, source_name, row.get("price"), pct_change, Json(json_safe(raw))])
         if value_placeholders:

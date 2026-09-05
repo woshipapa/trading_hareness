@@ -10,9 +10,48 @@ from app.intraday_derived_flow_metrics import (
 )
 from app.intraday_watch_quote_capture import WatchQuoteCaptureDependencies, capture_watch_quotes
 from app.runtime_executors import ExecutorSaturatedError
+from app.intraday_quote_normalization import (
+    exchange_time_status, merge_longhu_watch_quotes, merge_watch_quote_prices, merge_sina_watch_quotes,
+)
 
 
 class WatchQuoteCaptureTests(unittest.TestCase):
+    def test_real_mergers_keep_fresh_fallback_when_longhu_is_stale_or_missing(self):
+        async def all_a():
+            return [], {"status": "unavailable"}
+
+        async def public(*args, **kwargs):
+            return [{"ts_code": "000001.SZ", "price": 10, "trade_time": "20260907093009"}]
+
+        async def licensed(*args):
+            return ([{"ts_code": "000001.SZ", "price": 99, "trade_time": "20260904150000"},
+                     {"ts_code": "000002.SZ", "price": 20, "trade_time": "20260907093009"}],
+                    {"status": "completed"})
+
+        async def sina(symbols):
+            self.assertEqual(symbols, ["000002.SZ"])
+            return [{"ts_code": "000002.SZ", "close": 19, "trade_time": "20260907093009"}]
+
+        async def empty(*args, **kwargs):
+            return []
+
+        number = lambda v: float(v) if v is not None else None
+        dependencies = dataclasses.replace(self.dependencies(
+            all_a_snapshot=all_a, tencent_watch_quotes=public, sina_quotes=sina,
+            eastmoney_watch_flows=empty, calls=[],
+        ), licensed_watch_quotes=licensed, quote_freshness=exchange_time_status,
+            merge_watch_prices=lambda q, r: merge_watch_quote_prices(q, r, number=number),
+            merge_sina_prices=lambda q, r: merge_sina_watch_quotes(q, r, number=number),
+            merge_licensed_prices=lambda q, r: merge_longhu_watch_quotes(q, r, number=number))
+        capture = asyncio.run(capture_watch_quotes(
+            ["000001.SZ", "000002.SZ"], datetime(2026, 9, 7, 1, 30, 10, tzinfo=timezone.utc), 20, dependencies,
+        ))
+        self.assertEqual(capture.quotes["000001.SZ"]["price"], 10)
+        self.assertEqual(capture.quotes["000002.SZ"]["price"], 20)
+        self.assertEqual(capture.quotes["000002.SZ"]["price_source"], "longhuvip_watch_quote")
+        self.assertEqual(capture.licensed_watch_status["rejected_symbols"], {"000001.SZ": "stale_timestamp"})
+        self.assertEqual(capture.licensed_watch_status["fallback_symbols"], ["000001.SZ"])
+
     @staticmethod
     def dependencies(*, all_a_snapshot, tencent_watch_quotes, sina_quotes, eastmoney_watch_flows, calls,
                      watch_flow_reference=None, derive_flow_metrics=None, volume_fallback=None):

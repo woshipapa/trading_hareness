@@ -7,6 +7,7 @@ from app.intraday_quote_normalization import (
     annotate_flow_percentiles,
     exchange_time_status,
     merge_eastmoney_watch_flows,
+    merge_longhu_watch_quotes,
     merge_sina_watch_quotes,
     merge_watch_quote_prices,
     observation_source,
@@ -22,6 +23,20 @@ def number(value: object) -> float | None:
 
 
 class IntradayQuoteNormalizationTests(unittest.TestCase):
+    def test_longhu_lots_convert_to_strategy_shares_without_relabeling_flow(self) -> None:
+        quotes = {"000001.SZ": {"main_net_inflow": 12, "volume": 1, "raw": {}}}
+        merge_longhu_watch_quotes(quotes, [{
+            "ts_code": "000001.SZ", "price": 10, "volume": 4489587,
+            "amount": 3667423872, "turnover_rate": 8.2, "volume_ratio": 2.1,
+        }], number=number)
+        quote = quotes["000001.SZ"]
+        self.assertEqual(quote["volume"], 448958700)
+        self.assertEqual(quote["volume_unit"], "shares")
+        self.assertEqual(quote["raw"]["longhu_watch_quote"]["volume"], 4489587)
+        self.assertEqual(quote["amount"], 3667423872)
+        self.assertEqual(quote["main_net_inflow"], 12)
+        self.assertEqual(quote["flow_metric_sources"]["volume_ratio"], "longhuvip_watch_quote")
+
     def test_dedicated_watch_price_overlays_cross_section_without_dropping_flow(self) -> None:
         quotes = {"000001.SZ": {"symbol": "000001.SZ", "main_net_inflow": 8.0, "raw": {"all_a": True}}}
         merge_watch_quote_prices(quotes, [{"ts_code": "000001.SZ", "price": "10.2", "pre_close": "10", "trade_time": "20260817093005"}], number=number)

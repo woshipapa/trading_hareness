@@ -170,26 +170,71 @@ def parse_longhu_order_book(value: Any) -> dict[str, Any] | None:
     }
 
 
-def parse_stock_minute_payload(payload: Mapping[str, Any], symbol: str) -> list[dict[str, Any]]:
-    """Normalize per-minute Longhu rows without inventing Level-2 semantics."""
+def _valid_trade_date(value: Any) -> str | None:
+    """Return an exchange date only when the vendor supplied a real YYYYMMDD."""
+    digits = "".join(character for character in str(value or "") if character.isdigit())
+    candidate = digits[:8]
+    if len(candidate) != 8:
+        return None
+    try:
+        datetime.strptime(candidate, "%Y%m%d")
+    except ValueError:
+        return None
+    return candidate
+
+
+def _minute_clock(value: Any) -> tuple[str | None, str | None]:
+    """Extract HHMM and (when embedded) YYYYMMDD from a vendor time token."""
+    text = str(value or "").strip()
+    compact = "".join(character for character in text if character.isdigit())
+    embedded_date = _valid_trade_date(compact[:8]) if len(compact) >= 8 else None
+    if embedded_date and len(compact) >= 12:
+        clock = compact[8:12]
+    else:
+        match = re.search(r"(?<!\d)([01]\d|2[0-3])[:]?([0-5]\d)(?!\d)", text)
+        clock = f"{match.group(1)}{match.group(2)}" if match else None
+    return clock if clock and re.fullmatch(r"\d{4}", clock) else None, embedded_date
+
+
+def parse_stock_minute_payload(
+    payload: Mapping[str, Any], symbol: str, *, require_trade_date: bool = False,
+) -> list[dict[str, Any]]:
+    """Normalize per-minute Longhu rows without inventing Level-2 semantics.
+
+    ``GetStockTrendIncremental`` commonly returns ``HH:MM`` only.  Such rows
+    remain useful for offline shape inspection, but the live source methods
+    request ``require_trade_date=True`` so a previous-session response cannot
+    silently enter the current-session feature path.
+    """
     normalized = normalize_stock_symbol(symbol)
     if not normalized:
         return []
+    payload_date = None
+    for key in ("trade_date", "trading_date", "day", "date"):
+        payload_date = _valid_trade_date(payload.get(key))
+        if payload_date:
+            break
     rows: list[dict[str, Any]] = []
     cumulative_volume = 0.0
     for raw in payload.get("trend") or []:
         if not isinstance(raw, list) or len(raw) < 4:
             continue
-        minute = str(raw[0] or "").replace(":", "")[:4]
+        minute, embedded_date = _minute_clock(raw[0])
+        trade_date = embedded_date or payload_date
         price = _number(raw[1])
         volume_lot = max(0.0, _number(raw[3]) or 0.0)
-        if not re.fullmatch(r"\d{4}", minute) or price is None or price <= 0:
+        if minute is None or price is None or price <= 0:
             continue
         cumulative_volume += volume_lot
         average_price = _number(raw[2])
         rows.append({
             "symbol": normalized,
             "time": minute,
+            "trade_date": trade_date,
+            "trade_time": (
+                f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]} "
+                f"{minute[:2]}:{minute[2:]}:00"
+            ) if trade_date else None,
             "close": price,
             "vwap": average_price,
             "volume_lot": volume_lot,
@@ -202,7 +247,31 @@ def parse_stock_minute_payload(payload: Mapping[str, Any], symbol: str) -> list[
         })
     if rows:
         rows[-1]["is_complete"] = False
+    if require_trade_date and rows and any(not row.get("trade_date") for row in rows):
+        raise RuntimeError("Longhu minute rows missing exchange date")
+    if require_trade_date and not rows:
+        raise RuntimeError("Longhu minute returned no dated rows")
     return rows
+
+
+def current_session_minute_rows(
+    rows: Iterable[Mapping[str, Any]], *, observed_at: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Fail closed unless every Longhu row belongs to the exchange session.
+
+    The vendor's trend endpoint can return a perfectly valid-looking prior
+    session when its cache lags.  It must never be relabelled as today.  The
+    caller may pass its scan timestamp for deterministic replay tests.
+    """
+    expected = market_today(observed_at)
+    expected_text = expected.strftime("%Y%m%d")
+    materialized = [dict(row) for row in rows if isinstance(row, Mapping)]
+    if not materialized:
+        return []
+    dates = {str(row.get("trade_date") or "") for row in materialized}
+    if dates != {expected_text}:
+        raise RuntimeError("Longhu minute rows are stale or span multiple exchange dates")
+    return materialized
 
 
 @dataclass(frozen=True)
@@ -408,7 +477,7 @@ class SharedLonghuReadSource:
             target="longhu_quote", action="GetStockTrendIncremental", controller="StockL2Data",
             params={"apiv": "w41", "Type": 1, "StockID": code},
         )
-        rows = parse_stock_minute_payload(payload, normalized)
+        rows = parse_stock_minute_payload(payload, normalized, require_trade_date=True)
         if not rows:
             raise RuntimeError(f"shared Longhu minute returned no rows for {normalized}")
         return rows
@@ -609,7 +678,7 @@ class LonghuVendorSource:
             },
             action="GetStockTrendIncremental",
         )
-        rows = parse_stock_minute_payload(payload, symbol)
+        rows = parse_stock_minute_payload(payload, symbol, require_trade_date=True)
         if not rows:
             raise RuntimeError(f"Longhu minute returned no rows for {code}")
         return rows
@@ -795,6 +864,6 @@ __all__ = [
     "DEFAULT_CONFIG_PATH", "FLOW_CONVENTION", "LonghuIntradaySource", "LonghuVendorConfig",
     "LonghuVendorSource", "SharedLonghuReadSource", "intraday_source",
     "MAX_PAGE_SIZE", "MAX_TENCENT_BATCH_SIZE", "configured", "normalize_stock_symbol",
-    "parse_industry_stock_row", "parse_stock_minute_payload", "parse_stock_snapshot_payload",
+    "current_session_minute_rows", "parse_industry_stock_row", "parse_stock_minute_payload", "parse_stock_snapshot_payload",
     "parse_tencent_quote_text", "safe_page_size", "market_today", "direct_access_enabled",
 ]

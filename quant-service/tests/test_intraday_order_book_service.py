@@ -80,6 +80,126 @@ class IntradayOrderBookServiceTests(unittest.TestCase):
         self.assertNotIn("httpx", source)
         self.assertIn("def persist_observations", source)
 
+    def test_previous_frames_are_selected_per_source_for_mixed_batch(self) -> None:
+        """Longhu and Tencent frames must never share an OFI predecessor."""
+        class Result:
+            def __init__(self, rows=None, rowcount=0):
+                self._rows = rows or []
+                self.rowcount = rowcount
+
+            def fetchall(self):
+                return self._rows
+
+        class Connection:
+            def __init__(self, previous):
+                self.previous = previous
+                self.queries = []
+                self.insert_params = []
+
+            def execute(self, query, params=()):
+                self.queries.append((query, params))
+                if query.lstrip().startswith("SELECT DISTINCT"):
+                    return Result(self.previous)
+                self.insert_params.append(params)
+                return Result(rowcount=2)
+
+        class Database:
+            def __init__(self, connection):
+                self.connection = connection
+
+            def transaction(self):
+                class Transaction:
+                    def __enter__(_self):
+                        return self.connection
+
+                    def __exit__(_self, *_args):
+                        return False
+
+                return Transaction()
+
+        observed_at = datetime(2026, 9, 5, 2, 0, tzinfo=timezone.utc)
+        prior_time = observed_at - timedelta(seconds=3)
+        previous_longhu = {
+            "symbol": "000001.SZ", "source_name": "longhu_order_book", "observed_at": prior_time,
+            "raw": {"bids": [{"price": 10, "size": 100}], "asks": [{"price": 10.1, "size": 100}],
+                     "cumulative_volume_lot": 1000, "cumulative_amount": 100000},
+        }
+        previous_tencent = {
+            "symbol": "600000.SH", "source_name": "tencent_order_book", "observed_at": prior_time,
+            "raw": {"bids": [{"price": 10, "size": 100}], "asks": [{"price": 10.1, "size": 100}],
+                     "cumulative_volume_lot": 1000, "cumulative_amount": 100000},
+        }
+        connection = Connection([previous_longhu, previous_tencent])
+        database = Database(connection)
+        rows = [
+            {"ts_code": "000001.SZ", "source": "longhu_order_book", "price": 10.0, "pre_close": 10.0,
+             "bids": [{"price": 10, "size": 120}], "asks": [{"price": 10.1, "size": 90}],
+             "cumulative_volume_lot": 1010, "cumulative_amount": 101000},
+            {"ts_code": "600000.SH", "source": "tencent_order_book", "price": 10.0, "pre_close": 10.0,
+             "bids": [{"price": 10, "size": 120}], "asks": [{"price": 10.1, "size": 90}],
+             "cumulative_volume_lot": 1010, "cumulative_amount": 101000},
+        ]
+        stored = persist_observations(
+            database, observed_at, rows, 10, json_safe=lambda value: value,
+            record_success=lambda *_args: None,
+        )
+        self.assertEqual(stored, 2)
+        select_query, select_params = connection.queries[0]
+        self.assertIn("JOIN unnest(%s::text[],%s::text[])", select_query)
+        self.assertEqual(select_params[0], ["000001.SZ", "600000.SH"])
+        self.assertEqual(select_params[1], ["longhu_order_book", "tencent_order_book"])
+        params = connection.insert_params[0]
+        longhu_raw = params[5].obj
+        tencent_raw = params[11].obj
+        self.assertEqual(longhu_raw["order_book_features"]["delta_status"], "ready")
+        self.assertEqual(tencent_raw["order_book_features"]["delta_status"], "ready")
+
+    def test_source_switch_starts_a_fresh_delta_window(self) -> None:
+        class Result:
+            rowcount = 1
+
+            def __init__(self, rows=None):
+                self.rows = rows or []
+
+            def fetchall(self):
+                return self.rows
+
+        class Connection:
+            def __init__(self):
+                self.insert_params = None
+
+            def execute(self, query, params=()):
+                if query.lstrip().startswith("SELECT DISTINCT"):
+                    return Result([{
+                        "symbol": "000001.SZ", "source_name": "longhu_order_book",
+                        "observed_at": datetime(2026, 9, 5, 1, 59, 57, tzinfo=timezone.utc),
+                        "raw": {"bids": [{"price": 10, "size": 100}], "asks": [{"price": 10.1, "size": 100}],
+                                "cumulative_volume_lot": 1000, "cumulative_amount": 100000},
+                    }])
+                self.insert_params = params
+                return Result()
+
+        class Database:
+            def __init__(self):
+                self.connection = Connection()
+
+            def transaction(self):
+                class Transaction:
+                    def __enter__(_self): return self.connection
+                    def __exit__(_self, *_args): return False
+                return Transaction()
+
+        database = Database()
+        persist_observations(
+            database, datetime(2026, 9, 5, 2, 0, tzinfo=timezone.utc),
+            [{"ts_code": "000001.SZ", "source": "tencent_order_book", "price": 10.0, "pre_close": 10.0,
+              "bids": [{"price": 10, "size": 120}], "asks": [{"price": 10.1, "size": 90}],
+              "cumulative_volume_lot": 1010, "cumulative_amount": 101000}],
+            10, json_safe=lambda value: value, record_success=lambda *_args: None,
+        )
+        features = database.connection.insert_params[5].obj["order_book_features"]
+        self.assertEqual(features["delta_status"], "first_snapshot")
+
 
 @unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
 class BatchedPersistenceSqlIntegrationTests(unittest.TestCase):

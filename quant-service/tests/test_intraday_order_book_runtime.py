@@ -77,7 +77,7 @@ class IntradayOrderBookRuntimeTests(unittest.TestCase):
         delete_query, delete_params = database.connection.executed[1]
         self.assertIn("intraday_watchlists", select_query)
         self.assertEqual(select_params, (40,))
-        self.assertIn("source_name='tencent_order_book'", delete_query)
+        self.assertIn("source_name IN ('longhu_order_book','tencent_order_book')", delete_query)
         self.assertEqual(delete_params, (datetime(2026, 8, 15, 7, tzinfo=timezone.utc),))
 
     def test_watchlist_reload_is_throttled_across_ticks(self) -> None:
@@ -113,6 +113,36 @@ class IntradayOrderBookRuntimeTests(unittest.TestCase):
             retention_days=lambda: 7, run_loop=run_loop,
         )))
         self.assertEqual(calls.count("load_watches"), 1, "second call within the refresh window must reuse the cache")
+
+    def test_retention_prunes_both_longhu_and_tencent_depth(self) -> None:
+        database = _Database([])
+
+        async def run_database(operation, *args, **kwargs):
+            return operation(*args)
+
+        async def realtime_session():
+            return True, "continuous_auction"
+
+        async def open_capabilities(*_):
+            return set()
+
+        async def storage_allowed():
+            return False, {"state": "full"}
+
+        async def capture(_):
+            raise AssertionError("storage guard should skip capture")
+
+        async def run_loop(**kwargs):
+            await kwargs["prune_before"](datetime(2026, 8, 22, 7, tzinfo=timezone.utc), 7)
+
+        asyncio.run(run_intraday_order_book_runtime_loop(IntradayOrderBookRuntimeDependencies(
+            database=database, run_database=run_database, max_symbols=lambda: 40,
+            realtime_session=realtime_session, open_capabilities=open_capabilities,
+            storage_allowed=storage_allowed, capture=capture, interval_seconds=lambda: 3.0,
+            retention_days=lambda: 7, run_loop=run_loop,
+        )))
+        delete_query, _ = database.connection.executed[0]
+        self.assertIn("source_name IN ('longhu_order_book','tencent_order_book')", delete_query)
 
 
 if __name__ == "__main__":

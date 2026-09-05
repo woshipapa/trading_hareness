@@ -40,10 +40,20 @@ def merge_longhu_watch_quotes(
             "price_trade_date": row.get("trade_date"),
             "price_trade_time": row.get("trade_time"),
         })
-        for key in ("volume", "amount", "turnover_rate", "volume_ratio"):
+        # GetStockPanKou total_amount is lots (100 shares), whereas the
+        # watch derivation contract is shares. Keep vendor units in raw/depth.
+        volume_lot = number(row.get("volume"))
+        if volume_lot is not None and volume_lot >= 0:
+            existing.update({"volume": volume_lot * 100, "volume_unit": "shares",
+                             "volume_source": "longhuvip_watch_quote"})
+        labels = dict(existing.get("flow_metric_sources") or {})
+        for key in ("amount", "turnover_rate", "volume_ratio"):
             value = number(row.get(key))
             if value is not None:
                 existing[key] = value
+                if key != "amount":
+                    labels[key] = "longhuvip_watch_quote"
+        existing["flow_metric_sources"] = labels
         existing["raw"] = {
             **(existing.get("raw") if isinstance(existing.get("raw"), dict) else {}),
             "longhu_watch_quote": row,

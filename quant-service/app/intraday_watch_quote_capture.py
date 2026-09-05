@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
 
 from .platform.evidence_contracts import materialize_evidence_status
+from .intraday_price_priority import fresh_price_rows
 
 
 async def _batched_provider_fetch(
@@ -143,15 +144,25 @@ async def _apply_derived_flow_metrics(
     sources = dependencies.apply_derived_flow_metrics(quotes, derived)
     divergence = dependencies.derived_flow_divergence(quotes, derived)
     field_counts = {
-        field: sum(1 for labels in sources.values() if labels.get(field) == "fuyao_ths_derived")
+        field: sum(1 for labels in sources.values() if labels.get(field) in {"fuyao_ths_derived", "longhuvip_volume_derived"})
         for field in ("volume_ratio", "turnover_rate")
     }
     return materialize_evidence_status(
         "fuyao_ths_derived_watch_flow",
         {"status": "fresh" if derived else "unavailable", "age_seconds": 0.0,
-         "source": "fuyao_ths_all_a_snapshot_volume_with_local_float_shares",
+         "source": "source_labeled_volume_with_local_float_shares",
          "reference_symbols": len(reference), "derived_symbols": len(derived),
          "derived_field_symbols": field_counts,
+         "longhu_derived_field_symbols": {
+             field: sum(1 for labels in sources.values() if labels.get(field) == "longhuvip_volume_derived")
+             for field in ("volume_ratio", "turnover_rate")
+         },
+         "native_longhu_field_symbols": {
+             field: sum(1 for labels in sources.values() if labels.get(field) == "longhuvip_watch_quote")
+             for field in ("volume_ratio", "turnover_rate")
+         },
+         "volume_sources": sorted({str(quote.get("volume_source") or "fuyao_ths_all_a_snapshot")
+                                   for quote in quotes.values() if quote.get("volume") is not None}),
          "main_net_inflow_source": "eastmoney_watch_flow_only_no_licensed_equivalent",
          "volume_fallback_symbols": len(volume_fallback),
          "volume_fallback_error": fallback_error,
@@ -191,15 +202,27 @@ async def capture_watch_quotes(
     )
     if licensed_task is not None:
         licensed_task.add_done_callback(dependencies.consume_background_exception)
+    # Tencent remains an independent cross-check, not the preferred price.
+    # Start it in parallel so a slow public source cannot delay Longhu's call.
+    public_task = asyncio.create_task(_batched_provider_fetch(
+        dependencies.tencent_watch_quotes, symbols, batch_size=40,
+    ))
+    public_task.add_done_callback(dependencies.consume_background_exception)
     try:
-        fresh_watch_rows = await _batched_provider_fetch(
-            dependencies.tencent_watch_quotes, symbols, batch_size=40,
-        )
-    except dependencies.watch_quote_errors:
+        fresh_watch_rows = await asyncio.wait_for(asyncio.shield(public_task), timeout=3.0)
+    except (asyncio.TimeoutError, *dependencies.watch_quote_errors):
         fresh_watch_rows = []
+    # Non-empty is not the same as complete or fresh. Fill gaps per symbol.
+    accepted_public, _public_rejected = fresh_price_rows(
+        fresh_watch_rows, symbols=symbols, merge=dependencies.merge_watch_prices,
+        freshness=dependencies.quote_freshness, observed_at=observed_at,
+        max_age_seconds=quote_timestamp_slo_seconds,
+    )
+    public_symbols = {str(row.get("ts_code") or row.get("symbol") or "") for row in accepted_public}
+    missing_public = [symbol for symbol in symbols if symbol not in public_symbols]
     try:
-        sina_watch_rows = await dependencies.sina_quotes(symbols) if not fresh_watch_rows else []
-    except dependencies.watch_quote_errors:
+        sina_watch_rows = await asyncio.wait_for(dependencies.sina_quotes(missing_public), timeout=3.0) if missing_public else []
+    except (asyncio.TimeoutError, *dependencies.watch_quote_errors):
         sina_watch_rows = []
     try:
         all_a_rows, all_a_snapshot_status = await asyncio.wait_for(asyncio.shield(all_a_task), timeout=2.0)
@@ -236,8 +259,24 @@ async def capture_watch_quotes(
             for row in eastmoney_watch_flow_rows if str(row.get("ts_code") or "") in quotes
         }
         dependencies.annotate_flow_provenance(eastmoney_quotes, eastmoney_watch_flow_status)
-    dependencies.merge_watch_prices(quotes, fresh_watch_rows)
-    dependencies.merge_sina_prices(quotes, sina_watch_rows)
+    evaluated_at = observed_at + timedelta(seconds=max(0.0, dependencies.now() - started_at))
+    accepted_public, _public_rejected = fresh_price_rows(
+        fresh_watch_rows, symbols=symbols, merge=dependencies.merge_watch_prices,
+        freshness=dependencies.quote_freshness, observed_at=evaluated_at,
+        max_age_seconds=quote_timestamp_slo_seconds,
+    )
+    dependencies.merge_watch_prices(quotes, accepted_public)
+    accepted_sina, _sina_rejected = fresh_price_rows(
+        sina_watch_rows, symbols=missing_public, merge=dependencies.merge_sina_prices,
+        freshness=dependencies.quote_freshness, observed_at=evaluated_at,
+        max_age_seconds=quote_timestamp_slo_seconds,
+    )
+    for row in accepted_sina:
+        symbol = str(row.get("ts_code") or row.get("symbol") or "")
+        if symbol in quotes:
+            # A stale all-A context price must not suppress a fresh fallback.
+            quotes[symbol].pop("price", None)
+    dependencies.merge_sina_prices(quotes, accepted_sina)
     licensed_watch_rows: list[dict[str, Any]] = []
     licensed_watch_status = materialize_evidence_status(
         "longhuvip_watch_quote", {"status": "disabled", "requested": len(symbols)},
@@ -245,7 +284,8 @@ async def capture_watch_quotes(
     if licensed_task is not None:
         try:
             licensed_watch_rows, raw_licensed_status = await asyncio.wait_for(
-                asyncio.shield(licensed_task), timeout=dependencies.licensed_quote_timeout_seconds,
+                asyncio.shield(licensed_task), timeout=max(0.001, dependencies.licensed_quote_timeout_seconds
+                    - max(0.0, dependencies.now() - started_at)),
             )
         except (asyncio.TimeoutError, *dependencies.licensed_quote_errors) as error:
             licensed_watch_status = materialize_evidence_status(
@@ -258,7 +298,18 @@ async def capture_watch_quotes(
                 "longhuvip_watch_quote", raw_licensed_status,
             )
             if dependencies.merge_licensed_prices is not None:
-                dependencies.merge_licensed_prices(quotes, licensed_watch_rows)
+                evaluated_at = observed_at + timedelta(seconds=max(0.0, dependencies.now() - started_at))
+                accepted, rejected = fresh_price_rows(
+                    licensed_watch_rows, symbols=symbols, merge=dependencies.merge_licensed_prices,
+                    freshness=dependencies.quote_freshness, observed_at=evaluated_at,
+                    max_age_seconds=quote_timestamp_slo_seconds,
+                )
+                dependencies.merge_licensed_prices(quotes, accepted)
+                licensed_watch_status.update({
+                    "priority": "primary_when_fresh", "eligible_symbols": len(accepted),
+                    "rejected_symbols": rejected,
+                    "fallback_symbols": sorted(set(symbols) - {str(r.get("ts_code") or r.get("symbol")) for r in accepted}),
+                })
     # Deliberately after the price merges: when the all-A snapshot fails
     # outright these merges are what put the watch basket into ``quotes`` at
     # all, and without them the volume fallback would have nothing to attach to.
@@ -267,7 +318,7 @@ async def capture_watch_quotes(
     )
     for quote in quotes.values():
         quote["price_freshness"] = dependencies.quote_freshness(
-            quote, observed_at, quote_timestamp_slo_seconds,
+            quote, evaluated_at, quote_timestamp_slo_seconds,
         )
     return WatchQuoteCapture(
         quotes=quotes, all_a_rows=all_a_rows, all_a_snapshot_status=all_a_snapshot_status,

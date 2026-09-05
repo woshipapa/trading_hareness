@@ -2626,19 +2626,12 @@ async def intraday_longhu_order_book_quotes(
 async def intraday_primary_order_book_quotes(
     symbols: list[str], *, max_symbols: int = 40,
 ) -> list[dict[str, Any]]:
-    """Use Longhu depth first and fill missing symbols from Tencent."""
-    selected = list(dict.fromkeys(symbols))[:max_symbols]
-    try:
-        longhu_rows = await intraday_longhu_order_book_quotes(selected, max_symbols=max_symbols)
-    except Exception:
-        # Licensed source failures must not stop the bounded public fallback.
-        longhu_rows = []
-    present = {str(row.get("ts_code") or "") for row in longhu_rows}
-    missing = [symbol for symbol in selected if symbol not in present]
-    if not missing:
-        return longhu_rows
-    tencent_rows = await tencent_order_book_quotes(missing, max_symbols=len(missing))
-    return [*longhu_rows, *tencent_rows]
+    """Compose timestamp-gated Longhu depth with independent Tencent fallback."""
+    from .intraday_price_priority import primary_order_books
+    return await primary_order_books(
+        symbols, max_symbols=max_symbols,
+        licensed=intraday_longhu_order_book_quotes, fallback=tencent_order_book_quotes,
+    )
 
 
 async def shared_longhu_quotes(
@@ -2654,9 +2647,11 @@ async def shared_longhu_quotes(
 async def intraday_longhu_minutes(symbol: str) -> list[dict[str, Any]]:
     if not longhu_vendor_configured():
         raise RuntimeError("longhu_not_configured")
-    return await run_akshare_blocking(
+    from .longhu_vendor_source import current_session_minute_rows
+    rows = await run_akshare_blocking(
         lambda: longhu_intraday_source().stock_minutes(symbol), timeout_seconds=7,
     )
+    return current_session_minute_rows(rows, observed_at=datetime.now(timezone.utc))
 
 
 async def shared_stock_api_call(request: dict[str, Any]) -> dict[str, Any]:
@@ -2733,10 +2728,15 @@ async def intraday_order_book_loop() -> None:
 
 
 async def capture_intraday_minute_sessions(symbols: list[str]) -> dict[str, Any]:
+    from .intraday_minute_capture_actions import fetch_longhu_first_minute_rows
     return await _intraday_minute_capture_actions.capture(
         symbols,
         realtime_session=realtime_market_session_async,
         fetch_minutes=tencent_intraday_minutes,
+        fetch_minutes_with_source=lambda symbol: fetch_longhu_first_minute_rows(
+            symbol, observed_at=datetime.now(timezone.utc),
+            longhu_fetch=intraday_longhu_minutes, fallback_fetch=tencent_intraday_minutes,
+        ),
         run_database=run_database_blocking,
         parse_minute=offline_minute_row,
         ensure_instrument=ensure_offline_instrument,

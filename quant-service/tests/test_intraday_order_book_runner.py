@@ -79,6 +79,42 @@ class IntradayOrderBookRunnerTests(unittest.TestCase):
             ("capture", ["000001.SZ", "600000.SH"]),
         ])
 
+    def test_tencent_circuit_open_does_not_block_longhu_primary_capture(self) -> None:
+        now = datetime(2026, 8, 21, 2, tzinfo=timezone.utc)
+
+        async def check():
+            observed: list[object] = []
+
+            async def realtime_session():
+                return True, "open"
+
+            async def open_capabilities(provider, _capabilities):
+                # The return set contains capabilities whose circuit is open.
+                return {"order_book_quote"} if provider == "tencent_free" else set()
+
+            async def load_symbols():
+                return ["000001.SZ"]
+
+            async def prune_before(*_args):
+                observed.append("prune")
+
+            async def storage_allowed():
+                return True, {"state": "ok"}
+
+            async def capture(symbols):
+                observed.append(("capture", symbols))
+                return {"status": "completed", "source": "longhu_primary_tencent_fallback_order_book"}
+
+            return await run_iteration(
+                None, realtime_session=realtime_session, open_capabilities=open_capabilities,
+                load_symbols=load_symbols, prune_before=prune_before, storage_allowed=storage_allowed,
+                capture=capture, interval_seconds=lambda: 3.0, retention_days=lambda: 7,
+                now_utc=lambda: now,
+            )
+
+        state = asyncio.run(check())
+        self.assertEqual(state, (date(2026, 8, 21), 3.0))
+
     def test_runner_has_no_main_or_http_client_dependency(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "app" / "intraday_order_book_runner.py").read_text(encoding="utf-8")
         self.assertNotIn("from .main", source)

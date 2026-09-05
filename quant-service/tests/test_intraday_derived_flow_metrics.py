@@ -93,6 +93,15 @@ class DeriveWatchFlowMetricTests(unittest.TestCase):
 
 
 class ApplyAndDivergenceTests(unittest.TestCase):
+    def test_longhu_native_metrics_win_and_missing_fields_are_source_labeled(self):
+        quotes = {"000001.SZ": {"volume_ratio": 2.5, "volume_source": "longhuvip_watch_quote",
+                  "flow_metric_sources": {"volume_ratio": "longhuvip_watch_quote"}}}
+        sources = apply_derived_watch_flow_metrics(quotes, {"000001.SZ": {"volume_ratio": 2.0, "turnover_rate": 3.0}})
+        self.assertEqual(quotes["000001.SZ"]["volume_ratio"], 2.5)
+        self.assertEqual(sources["000001.SZ"]["volume_ratio"], "longhuvip_watch_quote")
+        self.assertEqual(sources["000001.SZ"]["turnover_rate"], "longhuvip_volume_derived")
+        self.assertIsNone(quotes["000001.SZ"].get("volume_ratio_eastmoney_observed"))
+
     def test_derived_values_replace_eastmoney_and_retain_the_observed_value(self):
         quotes = {"000001.SZ": {"volume_ratio": 1.9, "turnover_rate": 2.05, "main_net_inflow": 12.0}}
         sources = apply_derived_watch_flow_metrics(

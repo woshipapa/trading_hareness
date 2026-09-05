@@ -47,8 +47,10 @@ deploy/shared-peer/compose.intraday-owner.yaml
 
 观察池控制配置已在切换后单独对账：edge 与 owner 均为 82 条、81 条启用，
 symbol/启用状态哈希一致。同步脚本只传观察池控制字段，不传行情、信号或历史
-证据，也不会触发逐票历史 hydration。目标显式观察池上限设为 100；盘口、秒级
-和分钟剖面仍按 provider-sized rotation 批次运行。
+证据，也不会触发逐票历史 hydration。目标显式观察池上限设为 100；盘口与分钟
+剖面按配置的高优先级子集采集，不是全池同时覆盖；秒级校验对所选子集轮询。
+2026-09-05 复查发现远端遗漏上限配置，已纳入 Longhu 主源修复部署验收；
+具体来源边界见 [实时源优先级](OWNER_REALTIME_PROVIDER_PRIORITY.md)。
 
 edge 的量化 systemd unit 及其 daily、live-acceptance、materialize timers 已
 disable；edge 保留 n8n/Feishu relay。relay 与 n8n 的 `QUANT_SERVICE_URL` 已
