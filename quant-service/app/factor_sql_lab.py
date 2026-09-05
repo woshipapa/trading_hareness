@@ -67,6 +67,13 @@ def _formal_history_blockers(history: dict[str, int]) -> list[str]:
     ]
 
 
+def _point_in_time_industry_ready(panel: dict[str, Any]) -> bool:
+    """Require every panel row to have an industry known by that date."""
+    rows = int(panel.get("rows") or 0)
+    pit_rows = int(panel.get("industry_pit_rows") or 0)
+    return rows > 0 and pit_rows == rows
+
+
 def _average(values: Iterable[float | None]) -> float | None:
     clean = [float(value) for value in values if value is not None and math.isfinite(float(value))]
     return mean(clean) if clean else None
@@ -161,7 +168,8 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                       bar.limit_up::double precision AS limit_up,
                       bar.limit_down::double precision AS limit_down,
                       bar.volume::double precision AS volume,bar.is_suspended,
-                      coalesce(nullif(instrument.industry,''),'UNKNOWN') AS industry,
+                      coalesce(industry_history.sector_key,'UNKNOWN') AS industry,
+                      CASE WHEN industry_history.sector_key IS NULL THEN 'missing' ELSE 'point_in_time' END AS industry_quality,
                       CASE WHEN fundamental.total_mv>0 THEN ln(fundamental.total_mv::double precision) END AS log_market_cap
                  FROM quant.canonical_bars_daily bar
                  JOIN calendar ON calendar.trading_date=bar.trading_date
@@ -170,6 +178,18 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                   AND membership.effective_from<=bar.trading_date
                   AND (membership.effective_to IS NULL OR membership.effective_to>=bar.trading_date)
                  JOIN quant.instruments instrument ON instrument.symbol=bar.symbol
+                 LEFT JOIN LATERAL (
+                       SELECT member.sector_key
+                         FROM quant.sector_membership_history member
+                        WHERE member.symbol=bar.symbol
+                          AND member.taxonomy_key IN ('ths_industry','ths_index_i')
+                          AND member.effective_from<=bar.trading_date
+                          AND (member.effective_to IS NULL OR member.effective_to>=bar.trading_date)
+                          AND member.known_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                        ORDER BY CASE WHEN member.taxonomy_key='ths_industry' THEN 0 ELSE 1 END,
+                                 member.known_at DESC,member.effective_from DESC,member.sector_key
+                        LIMIT 1
+                 ) industry_history ON TRUE
                  LEFT JOIN quant.daily_fundamentals fundamental
                    ON fundamental.symbol=bar.symbol AND fundamental.trading_date=bar.trading_date
                 WHERE bar.adj_factor>0 AND bar.close>0
@@ -210,7 +230,10 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
     connection.execute("CREATE INDEX factor_sql_panel_date_idx ON factor_sql_panel(trading_date)")
     connection.execute("ANALYZE factor_sql_panel")
     row = connection.execute(
-        "SELECT count(*)::int rows,count(DISTINCT symbol)::int symbols,count(DISTINCT trading_date)::int days FROM factor_sql_panel"
+        """SELECT count(*)::int rows,count(DISTINCT symbol)::int symbols,count(DISTINCT trading_date)::int days,
+                  count(*) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_rows,
+                  count(DISTINCT trading_date) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_days
+             FROM factor_sql_panel"""
     ).fetchone()
     return dict(row or {})
 
@@ -353,7 +376,7 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
               AND effective_from<=%s AND effective_to>=%s""",
         (universe_key, end_date, start_date),
     ).fetchone()["count"]
-    point_in_time_industry_ready = False
+    point_in_time_industry_ready = _point_in_time_industry_ready(panel)
     promotion_ready = not _formal_history_blockers(history) and point_in_time_industry_ready
     status = "completed" if len(daily) >= 20 and observations >= 50 else "insufficient_history"
     return {
@@ -376,6 +399,8 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
                 "required_calendar_span_days": MIN_FORMAL_HISTORY_CALENDAR_SPAN_DAYS,
                 "point_in_time_industry_history_ready": point_in_time_industry_ready,
                 "required_point_in_time_industry_history": True,
+                "point_in_time_industry_rows": int(panel.get("industry_pit_rows") or 0),
+                "point_in_time_industry_days": int(panel.get("industry_pit_days") or 0),
                 "blockers": [
                     *_formal_history_blockers(history),
                     *( ["point_in_time_industry_history_missing"] if not point_in_time_industry_ready else [] ),
@@ -399,11 +424,11 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
             },
             "preprocessing": {
                 "winsorization": "daily 1st/99th percentile",
-                "neutralization": "within-current-industry linear residual against point-in-time log daily total market value",
+                "neutralization": "within point-in-time industry membership linear residual against point-in-time log daily total market value",
                 "standardization": "daily cross-sectional z-score",
                 "forward_return": "same symbol on exact SSE trading-calendar horizon",
                 "history_continuity": "all lookback and forward windows require consecutive SSE trading indexes",
-                "industry_quality": "current classification; formal promotion requires a point-in-time industry history",
+                "industry_quality": "point-in-time membership selected by known_at; UNKNOWN is retained when no historical membership was available",
             },
             "note": "Research artifact only; no execution fill or live threshold update.",
         },
@@ -540,7 +565,7 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
     annualized_volatility = return_std * math.sqrt(252 / rebalance_days) if return_std else None
     annualized_return = equity ** (252 / max(1, len(period_rows) * rebalance_days)) - 1 if period_rows else None
     history = _formal_history_metrics(connection, start_date, end_date)
-    point_in_time_industry_ready = False
+    point_in_time_industry_ready = _point_in_time_industry_ready(panel)
     promotion_ready = not _formal_history_blockers(history) and point_in_time_industry_ready
     metrics = {
         "total_return": equity - 1 if period_rows else None,
@@ -559,6 +584,8 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
             "required_calendar_span_days": MIN_FORMAL_HISTORY_CALENDAR_SPAN_DAYS,
             "point_in_time_industry_history_ready": point_in_time_industry_ready,
             "required_point_in_time_industry_history": True,
+            "point_in_time_industry_rows": int(panel.get("industry_pit_rows") or 0),
+            "point_in_time_industry_days": int(panel.get("industry_pit_days") or 0),
             "blockers": [
                 *_formal_history_blockers(history),
                 *( ["point_in_time_industry_history_missing"] if not point_in_time_industry_ready else [] ),
@@ -571,8 +598,8 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
             "exit": f"signal trading index + {exit_lag}; never same-day as entry",
             "non_overlapping_periods": True, "single_side_cost_bps": cost_bps,
             "blocked": ["missing_exact_calendar_bar", "suspended", "limit_up_entry", "limit_down_exit", "missing_provider_limit"],
-            "factor_preprocessing": "daily winsorized, current-industry and point-in-time size neutralized, z-scored",
-            "industry_quality": "current classification; formal promotion requires point-in-time industry history",
+            "factor_preprocessing": "daily winsorized, point-in-time industry and size neutralized, z-scored",
+            "industry_quality": "point-in-time membership selected by known_at; UNKNOWN is retained when no historical membership was available",
         },
     }
     status = "completed" if len(period_rows) >= 20 and trade_count >= 20 else "insufficient_history"
