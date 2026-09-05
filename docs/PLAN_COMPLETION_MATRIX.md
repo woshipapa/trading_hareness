@@ -75,7 +75,7 @@
 
 ### 2026-09-05 当前复核
 
-- 工程回归：挂载当前源码执行 quant-service **1,372/1,372** 项 Python discovery 通过；Feishu adapter **72/72** 通过；前端 `api:check`、`typecheck`、production build、OpenAPI contract 和 architecture check 均通过。复核时提交与 `origin/main` 同步（记录提交 `85f0f9e`）。
+- 工程回归：挂载当前源码执行 quant-service **1,373/1,373** 项 Python discovery 通过；Feishu adapter **72/72** 通过；前端 `api:check`、`typecheck`、production build、OpenAPI contract 和 architecture check 均通过。复核时提交与 `origin/main` 同步（代码提交 `85f0f9e`，当前文档提交随后更新）。
 - 运行态：quant-research、PostgreSQL、Feishu adapter、gateway 和 n8n 容器均健康；`/health` 返回 `ok`，build metadata 已为 `85f0f9e/local-20260905-r2`，异步池可用，5 个后台租约均在续租，存储约占总预算 46.3%、热库约占 51.0%。数据库迁移 head 为 `20260905_0093`。
 - 当前研究门禁：最新交易日（2026-09-04）日线控制面仅 13/5,556 个点时全 A 标的，覆盖率 0.23%，状态为 `blocked`；涨跌停控制行仍为 0。`ths_industry` 点时成员当前无可用历史行，离线分钟 `source_available_at` 仍为 0，未来盘中 v2 快照尚未积累满 60 个交易日，因此 P2/P3 研究验证不能启动。
 - WeChat→Feishu：adapter `/health` 虽为 `ok`，但 `/api/group-relay/status` 当前为 `disabled`；5 个 source 最近轮询均停在 2026-08-31，delivery outbox 有 256 条积压（2 failed、7 paused）。安强文字导入最近为 completed，其余媒体导入仍有 `upload_part`/远端 HTTP 500 失败；必须恢复 worker、清理积压并取得一条新的本地接收、远端归档、下游同步闭环回执，才能标记全链路完成。
