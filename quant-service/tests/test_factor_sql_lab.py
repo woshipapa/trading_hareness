@@ -102,9 +102,12 @@ class FactorSqlLabTests(unittest.TestCase):
         self.assertIn("instrument.delist_date IS NULL OR instrument.delist_date>=bar.trading_date", create_sql)
         self.assertIn("sector_membership_history", create_sql)
         self.assertIn("member.known_at", create_sql)
+        self.assertIn("daily_adjustment_factors", create_sql)
+        self.assertIn("adjustment.available_at", create_sql)
+        self.assertNotIn("bar.adj_factor", create_sql)
         self.assertNotIn("instrument.industry", create_sql)
         self.assertIn("trading_index-index_20d_ago=20", create_sql)
-        self.assertIn("bar.close*bar.adj_factor", create_sql)
+        self.assertIn("bar.close*adjustment_history.adj_factor", create_sql)
 
     def test_industry_gate_fails_closed_when_any_panel_row_is_unknown(self):
         self.assertTrue(_point_in_time_industry_ready({"rows": 10, "industry_pit_rows": 10}))

@@ -19,11 +19,11 @@ from .research_run_repository import finish_research_run, start_research_run
 
 FACTOR_INPUT_DATASETS = (
     "canonical_bars_daily", "market_trade_calendar", "universe_membership_history",
-    "instruments", "sector_membership_history", "daily_fundamentals", "factor_registry",
+    "instruments", "sector_membership_history", "daily_adjustment_factors", "daily_fundamentals", "factor_registry",
 )
 STRATEGY_INPUT_DATASETS = (
     "canonical_bars_daily", "market_trade_calendar", "universe_membership_history",
-    "instruments", "sector_membership_history", "daily_fundamentals", "strategy_registry",
+    "instruments", "sector_membership_history", "daily_adjustment_factors", "daily_fundamentals", "strategy_registry",
 )
 
 

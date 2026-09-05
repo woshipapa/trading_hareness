@@ -159,15 +159,17 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                   AND calendar_date BETWEEN %s AND %s
            ), source AS (
                SELECT bar.symbol,bar.trading_date,calendar.trading_index,
-                      (bar.open*bar.adj_factor)::double precision AS adjusted_open,
-                      (bar.high*bar.adj_factor)::double precision AS adjusted_high,
-                      (bar.low*bar.adj_factor)::double precision AS adjusted_low,
-                      (bar.close*bar.adj_factor)::double precision AS adjusted_close,
+                      (bar.open*adjustment_history.adj_factor)::double precision AS adjusted_open,
+                      (bar.high*adjustment_history.adj_factor)::double precision AS adjusted_high,
+                      (bar.low*adjustment_history.adj_factor)::double precision AS adjusted_low,
+                      (bar.close*adjustment_history.adj_factor)::double precision AS adjusted_close,
                       bar.open::double precision AS raw_open,
                       bar.close::double precision AS raw_close,
                       bar.limit_up::double precision AS limit_up,
                       bar.limit_down::double precision AS limit_down,
                       bar.volume::double precision AS volume,bar.is_suspended,
+                      adjustment_history.adj_factor::double precision AS point_in_time_adj_factor,
+                      'point_in_time' AS adjustment_quality,
                       coalesce(industry_history.sector_key,'UNKNOWN') AS industry,
                       CASE WHEN industry_history.sector_key IS NULL THEN 'missing' ELSE 'point_in_time' END AS industry_quality,
                       CASE WHEN fundamental.total_mv>0 THEN ln(fundamental.total_mv::double precision) END AS log_market_cap
@@ -178,6 +180,17 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                   AND membership.effective_from<=bar.trading_date
                   AND (membership.effective_to IS NULL OR membership.effective_to>=bar.trading_date)
                  JOIN quant.instruments instrument ON instrument.symbol=bar.symbol
+                 JOIN LATERAL (
+                       SELECT adjustment.adj_factor,adjustment.provider
+                         FROM quant.daily_adjustment_factors adjustment
+                        WHERE adjustment.symbol=bar.symbol
+                          AND adjustment.trading_date=bar.trading_date
+                          AND adjustment.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                        ORDER BY adjustment.available_at DESC,
+                                 CASE WHEN adjustment.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                                 adjustment.provider
+                        LIMIT 1
+                 ) adjustment_history ON TRUE
                  LEFT JOIN LATERAL (
                        SELECT member.sector_key
                          FROM quant.sector_membership_history member
@@ -192,7 +205,7 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                  ) industry_history ON TRUE
                  LEFT JOIN quant.daily_fundamentals fundamental
                    ON fundamental.symbol=bar.symbol AND fundamental.trading_date=bar.trading_date
-                WHERE bar.adj_factor>0 AND bar.close>0
+                WHERE adjustment_history.adj_factor>0 AND bar.close>0
                   AND (instrument.list_date IS NULL OR instrument.list_date<=bar.trading_date)
                   AND (instrument.delist_date IS NULL OR instrument.delist_date>=bar.trading_date)
            ), returns AS (
@@ -232,7 +245,9 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
     row = connection.execute(
         """SELECT count(*)::int rows,count(DISTINCT symbol)::int symbols,count(DISTINCT trading_date)::int days,
                   count(*) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_rows,
-                  count(DISTINCT trading_date) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_days
+                  count(DISTINCT trading_date) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_days,
+                  count(*) FILTER(WHERE adjustment_quality='point_in_time')::int adjustment_pit_rows,
+                  count(DISTINCT trading_date) FILTER(WHERE adjustment_quality='point_in_time')::int adjustment_pit_days
              FROM factor_sql_panel"""
     ).fetchone()
     return dict(row or {})
