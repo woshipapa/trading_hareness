@@ -130,6 +130,7 @@ class ReplayReadinessRepositoryTests(unittest.TestCase):
         self.assertIn("fundamentals.available_at", sql)
         self.assertIn("limits.available_at", sql)
         self.assertIn("bars.available_at", sql)
+        self.assertIn("quality_status='fresh'", sql)
         self.assertEqual(
             payload["coverage_definition"],
             "point_in_time_all_a_membership_with_daily_bars_fundamentals_and_trade_limits_at_80pct_min_1000",

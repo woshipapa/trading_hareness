@@ -217,6 +217,7 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                  ) fundamental ON TRUE
                 WHERE adjustment_history.adj_factor>0 AND bar.close>0
                   AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                  AND bar.quality_status='fresh'
                   AND (instrument.list_date IS NULL OR instrument.list_date<=bar.trading_date)
                   AND (instrument.delist_date IS NULL OR instrument.delist_date>=bar.trading_date)
            ), returns AS (

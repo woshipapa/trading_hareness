@@ -31,6 +31,7 @@ PIT_DAILY_COVERAGE_CTE = """WITH daily_dates AS (
          FROM quant.canonical_bars_daily
          WHERE symbol<>'000300.SH'
            AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+           AND quality_status='fresh'
     ), expected_universe AS (
         SELECT dates.trading_date,count(DISTINCT membership.symbol)::int AS expected_symbols
           FROM daily_dates dates
@@ -53,6 +54,7 @@ PIT_DAILY_COVERAGE_CTE = """WITH daily_dates AS (
            AND limits.available_at < ((bars.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
          WHERE bars.symbol<>'000300.SH'
            AND bars.available_at < ((bars.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+           AND bars.quality_status='fresh'
          GROUP BY bars.trading_date
     ), full_dates AS (
         SELECT controls.trading_date,controls.bar_symbols,controls.fundamental_symbols,

@@ -68,6 +68,7 @@ class ResearchExperimentServiceTests(unittest.TestCase):
         self.assertEqual(start, date(2025, 1, 2))
         self.assertEqual(end, date(2026, 8, 21))
         self.assertIn("universe_membership_history", str(connection.execute.call_args.args[0]))
+        self.assertIn("quality_status='fresh'", str(connection.execute.call_args.args[0]))
 
     def test_factor_evaluation_rejects_unknown_factor_before_running_sql_engine(self) -> None:
         connection = MagicMock()
@@ -177,6 +178,7 @@ class ResearchExperimentServiceTests(unittest.TestCase):
             if "SELECT (SELECT count(*)::int FROM quant.canonical_bars_daily" in sql
         )
         self.assertIn("trading_date<=%s AND available_at<=%s", manifest_query)
+        self.assertIn("quality_status='fresh'", manifest_query)
         self.assertIn("basic.available_at<=%s", manifest_query)
         self.assertIn("limits.available_at<=%s", manifest_query)
         self.assertIn("calendar_date=%s AND available_at<=%s", manifest_query)

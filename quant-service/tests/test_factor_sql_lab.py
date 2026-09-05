@@ -106,6 +106,7 @@ class FactorSqlLabTests(unittest.TestCase):
         self.assertIn("adjustment.available_at", create_sql)
         self.assertNotIn("bar.adj_factor", create_sql)
         self.assertIn("bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')", create_sql)
+        self.assertIn("bar.quality_status='fresh'", create_sql)
         self.assertIn("daily_fundamentals basic", create_sql)
         self.assertIn("basic.available_at", create_sql)
         self.assertNotIn("LEFT JOIN quant.daily_fundamentals fundamental", create_sql)

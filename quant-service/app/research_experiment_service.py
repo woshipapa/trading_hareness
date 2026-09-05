@@ -51,7 +51,8 @@ def research_window(
         """SELECT min(b.trading_date) earliest,max(b.trading_date) latest FROM quant.canonical_bars_daily b
            JOIN quant.universe_membership_history membership ON membership.symbol=b.symbol
             AND membership.universe_key=%s AND membership.effective_from<=b.trading_date
-            AND (membership.effective_to IS NULL OR membership.effective_to>=b.trading_date)""",
+            AND (membership.effective_to IS NULL OR membership.effective_to>=b.trading_date)
+           WHERE b.quality_status='fresh'""",
         (universe_key,),
     ).fetchone()
     if not bounds or not bounds["latest"]:
@@ -209,26 +210,27 @@ def build_snapshot(payload: Any, deps: ResearchExperimentDependencies) -> dict[s
     with deps.database.transaction() as connection:
         manifest_row = connection.execute(
             """SELECT (SELECT count(*)::int FROM quant.canonical_bars_daily
-                               WHERE trading_date<=%s AND available_at<=%s) bars,
+                               WHERE trading_date<=%s AND available_at<=%s AND quality_status='fresh') bars,
                       (SELECT count(*)::int FROM quant.remote_reports WHERE remote_updated_at<=%s) remote_reports,
                       (SELECT count(*)::int FROM quant.canonical_bars_daily
-                        WHERE symbol='000300.SH' AND trading_date<=%s AND available_at<=%s) benchmark_bars,
+                        WHERE symbol='000300.SH' AND trading_date<=%s AND available_at<=%s
+                          AND quality_status='fresh') benchmark_bars,
                       (SELECT count(DISTINCT symbol)::int FROM quant.canonical_bars_daily
-                        WHERE trading_date=%s AND available_at<=%s
+                        WHERE trading_date=%s AND available_at<=%s AND quality_status='fresh'
                           AND symbol ~ '^(?:(?:60[0135]|68[0-9])[0-9]{3}\\.SH|(?:000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$') equity_symbols,
                       (SELECT count(DISTINCT basic.symbol)::int
                          FROM quant.canonical_bars_daily bar
                          JOIN quant.daily_fundamentals basic
                            ON basic.symbol=bar.symbol AND basic.trading_date=bar.trading_date
                           AND basic.available_at<=%s
-                        WHERE bar.trading_date=%s AND bar.available_at<=%s
+                        WHERE bar.trading_date=%s AND bar.available_at<=%s AND bar.quality_status='fresh'
                           AND bar.symbol ~ '^(?:(?:60[0135]|68[0-9])[0-9]{3}\\.SH|(?:000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$') fundamental_symbols,
                       (SELECT count(DISTINCT limits.symbol)::int
                          FROM quant.canonical_bars_daily bar
                          JOIN quant.daily_trade_limits limits
                            ON limits.symbol=bar.symbol AND limits.trading_date=bar.trading_date
                           AND limits.available_at<=%s
-                        WHERE bar.trading_date=%s AND bar.available_at<=%s
+                        WHERE bar.trading_date=%s AND bar.available_at<=%s AND bar.quality_status='fresh'
                           AND bar.symbol ~ '^(?:(?:60[0135]|68[0-9])[0-9]{3}\\.SH|(?:000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$') limit_symbols,
                       (SELECT is_open FROM quant.market_trade_calendar
                         WHERE exchange='SSE' AND calendar_date=%s AND available_at<=%s) exchange_open,
