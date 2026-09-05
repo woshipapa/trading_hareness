@@ -92,6 +92,10 @@ class AnnualDailyBackfillTests(unittest.TestCase):
         ], date(2026, 8, 14))
         self.assertEqual(rows, [{"ts_code": "600000.SH", "trade_date": "20260814"}])
 
+    def test_stock_cross_section_accepts_new_302_shenzhen_codes(self):
+        rows = valid_rows("daily", [{"ts_code": "302132.SZ", "trade_date": "20260902"}], date(2026, 9, 2))
+        self.assertEqual(rows, [{"ts_code": "302132.SZ", "trade_date": "20260902"}])
+
     def test_stock_st_is_dated_cross_section_not_current_instrument_projection(self):
         rows = valid_rows("stock_st", [
             {"ts_code": "600000.SH", "trade_date": "20260814"},

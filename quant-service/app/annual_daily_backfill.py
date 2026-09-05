@@ -40,7 +40,7 @@ from .universe_history import rebuild_historical_membership_from_canonical
 # six-digit securities.  Keep the canonical full-A path to listed-share code
 # families while retaining every supplier row in the raw evidence table.
 STOCK_CODE = re.compile(
-    r"^(?:(?:60[0135]|68[89])\d{3}\.SH|(?:000|001|002|003|300|301)\d{3}\.SZ|[489]\d{5}\.BJ)$"
+    r"^(?:(?:60[0135]|68[89])\d{3}\.SH|(?:000|001|002|003|300|301|302)\d{3}\.SZ|[489]\d{5}\.BJ)$"
 )
 INDEX_CODES = (
     "000001.SH", "399001.SZ", "399006.SZ", "000300.SH",
