@@ -37,6 +37,21 @@ class ResearchRunReadTests(unittest.TestCase):
         self.assertIn("experiment_type=%s AND status=%s", sql)
         self.assertEqual(params, ("factor_evaluation", "completed", 200))
 
+    def test_result_projections_select_the_research_run_link(self):
+        from app.research_catalog_read_model import factor_evaluations, strategy_experiments
+
+        connection = MagicMock()
+        connection.execute.return_value.fetchall.return_value = []
+        database = MagicMock()
+        database.transaction.return_value.__enter__.return_value = connection
+
+        factor_evaluations(database, "core", 5)
+        strategy_experiments(database, "core", 5)
+
+        sqls = [call.args[0] for call in connection.execute.call_args_list]
+        self.assertIn("e.research_run_id", sqls[0])
+        self.assertIn("e.research_run_id", sqls[1])
+
     def test_detail_returns_lineage_and_missing_run_is_explicit(self):
         connection = MagicMock()
         connection.execute.side_effect = [

@@ -96,9 +96,9 @@ def evaluate_factors(payload: Any, deps: ResearchExperimentDependencies) -> dict
                 factor_key = str(result["factor_key"])
                 row = connection.execute(
                     """INSERT INTO quant.factor_evaluations(factor_key,universe_key,start_date,end_date,horizon_days,engine,status,observations,
-                        cross_section_days,metrics,artifact) VALUES(%s,%s,%s,%s,%s,'native_factor_sql_v2',%s,%s,%s,%s,%s) RETURNING evaluation_id""",
+                        cross_section_days,metrics,artifact,research_run_id) VALUES(%s,%s,%s,%s,%s,'native_factor_sql_v2',%s,%s,%s,%s,%s,%s) RETURNING evaluation_id""",
                     (factor_key, payload.universe_key, start, end, payload.horizon_days, result["status"], result["observations"],
-                     result["cross_section_days"], deps.json_value(result["metrics"]), deps.json_value(result["artifact"])),
+                     result["cross_section_days"], deps.json_value(result["metrics"]), deps.json_value(result["artifact"]), research_run_id),
                 ).fetchone()
                 result["evaluation_id"] = str(row["evaluation_id"])
                 results.append(result)
@@ -152,10 +152,10 @@ def backtest_strategy(payload: Any, deps: ResearchExperimentDependencies) -> dic
             result = {}
         if pending_error is None:
             row = connection.execute(
-                """INSERT INTO quant.strategy_experiments(strategy_key,universe_key,start_date,end_date,status,parameters,metrics,equity_curve,trades)
-                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING strategy_experiment_id""",
+                """INSERT INTO quant.strategy_experiments(strategy_key,universe_key,start_date,end_date,status,parameters,metrics,equity_curve,trades,research_run_id)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING strategy_experiment_id""",
                 (payload.strategy_key, payload.universe_key, start, end, result["status"], deps.json_value(result["parameters"]),
-                 deps.json_value(result["metrics"]), deps.json_value(result["equity_curve"]), deps.json_value(result["trades"])),
+                 deps.json_value(result["metrics"]), deps.json_value(result["equity_curve"]), deps.json_value(result["trades"]), research_run_id),
             ).fetchone()
             result["strategy_experiment_id"] = str(row["strategy_experiment_id"])
             result["research_run_id"] = str(research_run_id)

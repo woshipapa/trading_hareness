@@ -99,6 +99,11 @@ class ResearchExperimentServiceTests(unittest.TestCase):
 
         self.assertRegex(result["research_run_id"], r"^[0-9a-f-]{36}$")
         self.assertEqual(len(result["output_digest"]), 64)
+        factor_insert = next(
+            call for call in connection.execute.call_args_list
+            if "INSERT INTO quant.factor_evaluations" in str(call.args[0])
+        )
+        self.assertEqual(factor_insert.args[1][-1], UUID(result["research_run_id"]))
         evaluator.assert_called_once()
 
     def test_snapshot_keeps_missing_daily_controls_blocked(self) -> None:

@@ -47,7 +47,7 @@ async def factor_registry(async_database: Any) -> dict[str, Any]:
 async def factor_evaluations(async_database: Any, universe_key: str, limit: int) -> dict[str, Any]:
     async with async_database.transaction() as conn:
         result = await conn.execute(
-            """SELECT e.evaluation_id,e.factor_key,f.label,e.universe_key,e.start_date,e.end_date,e.horizon_days,e.engine,e.status,
+            """SELECT e.evaluation_id,e.research_run_id,e.factor_key,f.label,e.universe_key,e.start_date,e.end_date,e.horizon_days,e.engine,e.status,
                       e.observations,e.cross_section_days,e.metrics,e.artifact,e.created_at
                FROM quant.factor_evaluations e JOIN quant.factor_registry f ON f.factor_key=e.factor_key
                WHERE e.universe_key=%s ORDER BY e.created_at DESC,e.factor_key LIMIT %s""",
@@ -66,7 +66,7 @@ async def strategy_registry(async_database: Any) -> dict[str, Any]:
 async def strategy_experiments(async_database: Any, universe_key: str, limit: int) -> dict[str, Any]:
     async with async_database.transaction() as conn:
         result = await conn.execute(
-            """SELECT e.strategy_experiment_id,e.strategy_key,s.label,e.universe_key,e.start_date,e.end_date,e.status,e.parameters,
+            """SELECT e.strategy_experiment_id,e.research_run_id,e.strategy_key,s.label,e.universe_key,e.start_date,e.end_date,e.status,e.parameters,
                       e.metrics,e.equity_curve,e.trades,e.created_at
                FROM quant.strategy_experiments e JOIN quant.strategy_registry s ON s.strategy_key=e.strategy_key
                WHERE e.universe_key=%s ORDER BY e.created_at DESC LIMIT %s""",
