@@ -28,7 +28,7 @@ docker compose --env-file .env \
 ```bash
 docker compose ... ps
 curl -s http://127.0.0.1:15683/health
-curl -s http://127.0.0.1:15683/api/research/intraday/services/status
+curl -s http://127.0.0.1:15683/api/v1/intraday/services/status
 ```
 
 周末只应看到 `standby`，交易日应分别看到 research 租约：
