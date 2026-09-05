@@ -1550,7 +1550,8 @@ def full_market_daily_row_count(trade_date: date) -> int:
                        ON membership.universe_key='all_a' AND membership.symbol=bar.symbol
                       AND membership.effective_from<=%s
                       AND (membership.effective_to IS NULL OR membership.effective_to>=%s)
-                    WHERE bar.trading_date=%s AND bar.quality_status IN ('fresh','partial')
+                    WHERE bar.trading_date=%s AND bar.quality_status='fresh'
+                      AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                ) SELECT expected_rows,actual_rows FROM expected CROSS JOIN actual""",
             (trade_date, trade_date, trade_date, trade_date, trade_date),
         ).fetchone()

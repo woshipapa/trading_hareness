@@ -1,10 +1,17 @@
 import unittest
 from datetime import date
+from pathlib import Path
 
 from app.daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload
 
 
 class DailyControlPlaneTests(unittest.TestCase):
+    def test_main_control_resolver_uses_the_same_fresh_bar_gate(self):
+        source = Path("app/main.py").read_text(encoding="utf-8")
+        resolver = source[source.index("def full_market_daily_row_count"):source.index("def full_market_daily_control_status")]
+        self.assertIn("bar.quality_status='fresh'", resolver)
+        self.assertIn("bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')", resolver)
+
     def test_index_rows_do_not_participate_in_equity_control_gate(self):
         self.assertIn("universe_key='all_a'", EQUITY_DAILY_CONTROL_STATUS_SQL)
         self.assertIn("expected_daily_rows", EQUITY_DAILY_CONTROL_STATUS_SQL)
