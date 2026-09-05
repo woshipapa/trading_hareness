@@ -370,7 +370,14 @@ def research_from_rows_v2(rows: Iterable[dict[str, Any]], start_date: date, end_
 def run_watchlist_main_wave_v2_research(connection: Any, end_date: date | None = None) -> dict[str, Any]:
     latest = connection.execute(
         """SELECT max(b.trading_date) AS latest FROM quant.canonical_bars_daily b
-             JOIN quant.intraday_watchlists w ON w.symbol=b.symbol AND w.enabled"""
+             JOIN quant.intraday_watchlists w ON w.symbol=b.symbol AND w.enabled
+            WHERE b.quality_status='fresh'
+              AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+              AND EXISTS (
+                    SELECT 1 FROM quant.daily_adjustment_factors factor
+                     WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                       AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+              )"""
     ).fetchone()
     selected_end = (
         min(end_date, latest["latest"]) if end_date and latest and latest["latest"]
@@ -384,13 +391,26 @@ def run_watchlist_main_wave_v2_research(connection: Any, end_date: date | None =
         }
     start_date = selected_end - timedelta(days=365)
     rows = connection.execute(
-        """SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,b.adj_factor,
+        """SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,
+                  pit_adjustment.adj_factor,
                   b.is_suspended,b.limit_up,b.limit_down
              FROM quant.canonical_bars_daily b
              JOIN quant.intraday_watchlists w ON w.symbol=b.symbol AND w.enabled
              LEFT JOIN quant.instruments i ON i.symbol=b.symbol
+             LEFT JOIN LATERAL (
+                   SELECT factor.adj_factor
+                     FROM quant.daily_adjustment_factors factor
+                    WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                      AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                    ORDER BY factor.available_at DESC,
+                             CASE WHEN factor.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                             factor.provider
+                    LIMIT 1
+             ) pit_adjustment ON TRUE
             WHERE b.trading_date BETWEEN %s AND %s
-              AND b.quality_status IN ('fresh','partial')
+              AND b.quality_status='fresh'
+              AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+              AND pit_adjustment.adj_factor IS NOT NULL
             ORDER BY b.symbol,b.trading_date""",
         (start_date, selected_end),
     ).fetchall()

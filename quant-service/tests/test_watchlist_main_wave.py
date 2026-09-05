@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, timedelta
+from pathlib import Path
 
 from app.watchlist_main_wave import (
     FEATURE_KEYS,
@@ -17,6 +18,17 @@ from app.watchlist_main_wave import (
 
 
 class WatchlistMainWaveTests(unittest.TestCase):
+    def test_research_sql_uses_fresh_bars_and_point_in_time_adjustments(self) -> None:
+        for relative in (
+            "app/watchlist_main_wave.py",
+            "app/watchlist_main_wave_v2.py",
+            "app/watchlist_countertrend_rebound.py",
+        ):
+            source = Path(relative).read_text(encoding="utf-8")
+            self.assertIn("quality_status='fresh'", source, relative)
+            self.assertIn("available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')", source, relative)
+            self.assertIn("daily_adjustment_factors", source, relative)
+
     def test_chronological_split_embargo_separates_future_labels(self) -> None:
         start = date(2026, 1, 1)
         examples = [
