@@ -80,3 +80,57 @@ async def data_quality_issues(async_database: Any, limit: int) -> dict[str, Any]
         result = await conn.execute("SELECT * FROM quant.data_quality_issues WHERE resolved_at IS NULL ORDER BY created_at DESC LIMIT %s", (_limit(limit, 500),))
         rows = await result.fetchall()
     return {"items": rows}
+
+
+async def research_runs(
+    async_database: Any,
+    experiment_type: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List reproducible research runs through the read-only async pool."""
+    conditions: list[str] = []
+    values: list[Any] = []
+    if experiment_type:
+        conditions.append("experiment_type=%s")
+        values.append(experiment_type)
+    if status:
+        conditions.append("status=%s")
+        values.append(status)
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    values.append(_limit(limit, 200))
+    async with async_database.transaction() as conn:
+        result = await conn.execute(
+            """SELECT research_run_id,experiment_type,strategy_key,strategy_version,universe_key,
+                      start_date,end_date,knowledge_cutoff,data_manifest_id,code_sha,data_schema_version,
+                      parameters,status,output_digest,error_message,started_at,finished_at,created_at
+                 FROM quant.research_experiment_runs"""
+            + where + " ORDER BY started_at DESC LIMIT %s",
+            tuple(values),
+        )
+        rows = await result.fetchall()
+    return {"items": rows, "research_only": True, "live_effect": "none"}
+
+
+async def research_run(async_database: Any, research_run_id: Any) -> dict[str, Any]:
+    """Return one run and its input/output lineage edges."""
+    async with async_database.transaction() as conn:
+        result = await conn.execute(
+            """SELECT research_run_id,experiment_type,strategy_key,strategy_version,universe_key,
+                      start_date,end_date,knowledge_cutoff,data_manifest_id,code_sha,data_schema_version,
+                      parameters,status,output_digest,error_message,started_at,finished_at,created_at
+                 FROM quant.research_experiment_runs WHERE research_run_id=%s""",
+            (research_run_id,),
+        )
+        run = await result.fetchone()
+        if not run:
+            return {"run": None, "lineage": [], "research_only": True, "live_effect": "none"}
+        result = await conn.execute(
+            """SELECT lineage_id,research_run_id,direction,dataset_key,dataset_version,
+                      content_sha256,metadata,created_at
+                 FROM quant.research_lineage_edges
+                WHERE research_run_id=%s ORDER BY direction,dataset_key,created_at""",
+            (research_run_id,),
+        )
+        lineage = await result.fetchall()
+    return {"run": run, "lineage": lineage, "research_only": True, "live_effect": "none"}

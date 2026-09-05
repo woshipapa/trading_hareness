@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from uuid import UUID
 
 from .. import research_catalog_read_model as read_model
 from .. import async_research_catalog_read_repository as async_read_model
@@ -40,5 +41,18 @@ def build_research_catalog_reads_router(database: Any, async_database: Any | Non
     @router.get("/api/v1/data-quality/issues")
     async def quality_issues(limit: int = 100) -> dict[str, Any]:
         return await async_read_model.data_quality_issues(async_database, limit) if async_database else read_model.data_quality_issues(database, limit)
+
+    @router.get("/api/v1/research/runs")
+    async def research_run_history(
+        experiment_type: str | None = None, status: str | None = None, limit: int = 50,
+    ) -> dict[str, Any]:
+        return await async_read_model.research_runs(async_database, experiment_type, status, limit) if async_database else read_model.research_runs(database, experiment_type, status, limit)
+
+    @router.get("/api/v1/research/runs/{research_run_id}")
+    async def research_run_detail(research_run_id: UUID) -> dict[str, Any]:
+        payload = await async_read_model.research_run(async_database, research_run_id) if async_database else read_model.research_run(database, research_run_id)
+        if payload["run"] is None:
+            raise HTTPException(status_code=404, detail="research run not found")
+        return payload
 
     return router

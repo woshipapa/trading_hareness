@@ -4834,6 +4834,16 @@ def data_quality_issues(limit: int = 100) -> dict[str, Any]:
     return research_catalog_reads.data_quality_issues(db, limit)
 
 
+def research_runs(experiment_type: str | None = None, status: str | None = None, limit: int = 50) -> dict[str, Any]:
+    """Compatibility export for the reproducible research-run projection."""
+    return research_catalog_reads.research_runs(db, experiment_type, status, limit)
+
+
+def research_run(research_run_id: uuid.UUID) -> dict[str, Any]:
+    """Compatibility export for one research-run lineage projection."""
+    return research_catalog_reads.research_run(db, research_run_id)
+
+
 def build_snapshot(payload: SnapshotRequest) -> dict[str, Any]:
     return build_snapshot_isolated(payload, _research_experiment_dependencies())
 

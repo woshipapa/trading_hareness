@@ -9,8 +9,13 @@ const required = [
   '/api/v1/automation/runs',
   '/api/v1/analyst-research/reviews/latest',
   '/api/v1/analyst-research/reviews/run',
+  '/api/v1/research/runs',
+  '/api/v1/research/runs/{research_run_id}',
 ];
 const missing = required.filter((path) => !spec.paths?.[path]);
 if (missing.length) throw new Error(`missing API paths: ${missing.join(', ')}`);
 if (!spec.paths['/api/v1/analyst-research/reviews/run'].post) throw new Error('review run is not POST');
+for (const path of ['/api/v1/research/runs', '/api/v1/research/runs/{research_run_id}']) {
+  if (!spec.paths[path].get) throw new Error(`${path} is not GET`);
+}
 console.log(`API contract verified: ${required.length} paths, ${Object.keys(spec.paths).length} total`);

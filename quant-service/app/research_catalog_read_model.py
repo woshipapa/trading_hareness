@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 
+def _limit(value: int, maximum: int) -> int:
+    return max(1, min(int(value), maximum))
+
+
 def universe_members(database: Any, universe_key: str) -> dict[str, Any]:
     with database.transaction() as connection:
         rows = connection.execute(
@@ -84,7 +88,58 @@ def data_quality_issues(database: Any, limit: int) -> dict[str, Any]:
     return {"items": rows}
 
 
+def research_runs(
+    database: Any,
+    experiment_type: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List reproducible research runs without exposing any write boundary."""
+    conditions: list[str] = []
+    values: list[Any] = []
+    if experiment_type:
+        conditions.append("experiment_type=%s")
+        values.append(experiment_type)
+    if status:
+        conditions.append("status=%s")
+        values.append(status)
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    values.append(_limit(limit, 200))
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT research_run_id,experiment_type,strategy_key,strategy_version,universe_key,
+                      start_date,end_date,knowledge_cutoff,data_manifest_id,code_sha,data_schema_version,
+                      parameters,status,output_digest,error_message,started_at,finished_at,created_at
+                 FROM quant.research_experiment_runs"""
+            + where + " ORDER BY started_at DESC LIMIT %s",
+            tuple(values),
+        ).fetchall()
+    return {"items": rows, "research_only": True, "live_effect": "none"}
+
+
+def research_run(database: Any, research_run_id: Any) -> dict[str, Any]:
+    """Return one run and its input/output lineage edges."""
+    with database.transaction() as connection:
+        run = connection.execute(
+            """SELECT research_run_id,experiment_type,strategy_key,strategy_version,universe_key,
+                      start_date,end_date,knowledge_cutoff,data_manifest_id,code_sha,data_schema_version,
+                      parameters,status,output_digest,error_message,started_at,finished_at,created_at
+                 FROM quant.research_experiment_runs WHERE research_run_id=%s""",
+            (research_run_id,),
+        ).fetchone()
+        if not run:
+            return {"run": None, "lineage": [], "research_only": True, "live_effect": "none"}
+        lineage = connection.execute(
+            """SELECT lineage_id,research_run_id,direction,dataset_key,dataset_version,
+                      content_sha256,metadata,created_at
+                 FROM quant.research_lineage_edges
+                WHERE research_run_id=%s ORDER BY direction,dataset_key,created_at""",
+            (research_run_id,),
+        ).fetchall()
+    return {"run": run, "lineage": lineage, "research_only": True, "live_effect": "none"}
+
+
 __all__ = [
     "data_quality_issues", "factor_evaluations", "factor_registry", "latest_features",
-    "strategy_experiments", "strategy_registry", "universe_members",
+    "research_run", "research_runs", "strategy_experiments", "strategy_registry", "universe_members",
 ]

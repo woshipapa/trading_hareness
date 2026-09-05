@@ -1211,6 +1211,7 @@ const researchPaths = new Map([
 	['/api/research/analyst-research/reviews', '/api/v1/analyst-research/reviews'],
 	['/api/research/analyst-research/reviews/latest', '/api/v1/analyst-research/reviews/latest'],
 	['/api/research/analyst-research/reviews/run', '/api/v1/analyst-research/reviews/run'],
+	['/api/research/research-runs', '/api/v1/research/runs'],
 	['/api/research/agent/context', '/api/v1/agent/context'],
 	['/api/research/automation/runs', '/api/v1/automation/runs'],
 	['/api/research/analyst-prompt-lab/status', '/api/v1/analyst-prompt-lab/status'],
@@ -1296,6 +1297,14 @@ const dashboard = createServer((request, response) => {
 	const researchPath = researchPaths.get(url.pathname);
 	if (researchPath && request.method === 'GET') {
 		void proxyResearch(researchPath, url.search, response).catch((error) => {
+			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
+		});
+		return;
+	}
+	const researchRunDetail = /^\/api\/research\/research-runs\/([0-9a-f-]{36})$/i.exec(url.pathname);
+	if (researchRunDetail && request.method === 'GET') {
+		void proxyResearch(`/api/v1/research/runs/${researchRunDetail[1]}`, url.search, response).catch((error) => {
 			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
 		});
