@@ -409,7 +409,18 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
     latest = connection.execute(
         """SELECT max(b.trading_date) AS latest FROM quant.canonical_bars_daily b
              JOIN quant.intraday_watchlists w ON w.symbol=b.symbol AND w.enabled
-             JOIN quant.instruments i ON i.symbol=b.symbol
+             JOIN LATERAL (
+                   SELECT membership.sector_key
+                     FROM quant.sector_membership_history membership
+                    WHERE membership.taxonomy_key='ths_industry'
+                      AND membership.symbol=b.symbol
+                      AND membership.effective_from<=b.trading_date
+                      AND (membership.effective_to IS NULL OR membership.effective_to>=b.trading_date)
+                      AND membership.known_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                      AND membership.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                    ORDER BY membership.known_at DESC,membership.effective_from DESC,membership.sector_key
+                    LIMIT 1
+             ) industry_membership ON industry_membership.sector_key=ANY(%s)
             WHERE b.quality_status='fresh'
               AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
               AND i.industry=ANY(%s)
@@ -426,17 +437,30 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
     if selected_end is None:
         return {
             "status": "insufficient_history", "strategy_key": STRATEGY_KEY,
-            "parameters": {}, "metrics": {"reason": "technology_watchlist_has_no_daily_bars"},
+            "parameters": {},
+            "metrics": {"reason": "technology_watchlist_has_no_point_in_time_industry_membership_or_daily_bars"},
             "equity_curve": [], "trades": [],
         }
     start_date = selected_end - timedelta(days=365)
     raw_bars = connection.execute(
-        """SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,
+            """SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,
                   pit_adjustment.adj_factor,
                   b.is_suspended,b.limit_up,b.limit_down
              FROM quant.canonical_bars_daily b
              JOIN quant.intraday_watchlists w ON w.symbol=b.symbol AND w.enabled
              JOIN quant.instruments i ON i.symbol=b.symbol
+             JOIN LATERAL (
+                   SELECT membership.sector_key
+                     FROM quant.sector_membership_history membership
+                    WHERE membership.taxonomy_key='ths_industry'
+                      AND membership.symbol=b.symbol
+                      AND membership.effective_from<=b.trading_date
+                      AND (membership.effective_to IS NULL OR membership.effective_to>=b.trading_date)
+                      AND membership.known_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                      AND membership.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                    ORDER BY membership.known_at DESC,membership.effective_from DESC,membership.sector_key
+                    LIMIT 1
+             ) industry_membership ON industry_membership.sector_key=ANY(%s)
              LEFT JOIN LATERAL (
                    SELECT factor.adj_factor
                      FROM quant.daily_adjustment_factors factor
@@ -451,9 +475,8 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
               AND b.quality_status='fresh'
               AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
               AND pit_adjustment.adj_factor IS NOT NULL
-              AND i.industry=ANY(%s)
             ORDER BY b.symbol,b.trading_date""",
-        (start_date, selected_end, list(TECH_INDUSTRIES)),
+        (list(TECH_INDUSTRIES), start_date, selected_end),
     ).fetchall()
     market_rows = connection.execute(
         """SELECT trading_date,stock_count,advancers,decliners,unchanged,median_change_pct,

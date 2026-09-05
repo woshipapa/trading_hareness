@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, timedelta
+from pathlib import Path
 
 from app.watchlist_countertrend_rebound import (
     build_rebound_examples,
@@ -34,6 +35,14 @@ def context(**overrides: float) -> dict[str, float]:
 
 
 class CountertrendReboundTests(unittest.TestCase):
+    def test_research_requires_point_in_time_industry_membership(self) -> None:
+        source = Path("app/watchlist_countertrend_rebound.py").read_text(encoding="utf-8")
+        self.assertIn("taxonomy_key='ths_industry'", source)
+        self.assertIn("membership.known_at <", source)
+        self.assertIn("membership.available_at <", source)
+        self.assertIn("technology_watchlist_has_no_point_in_time_industry_membership_or_daily_bars", source)
+        self.assertNotIn("i.industry=ANY(%s)", source)
+
     def test_panic_probe_and_confirmation_are_distinct(self) -> None:
         panic = rebound_state(
             features(return_1d=0.0, return_3d=-0.10, ma5_gap=-0.08),
