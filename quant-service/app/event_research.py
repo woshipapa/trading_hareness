@@ -53,6 +53,8 @@ def research_limit_up_continuation(connection: Any, start_date: date, end_date: 
                   lag(limit_up) OVER (PARTITION BY symbol ORDER BY trading_date) prev_limit_up
                 FROM quant.canonical_bars_daily
                 WHERE trading_date BETWEEN %s::date - 10 AND %s
+                  AND quality_status='fresh'
+                  AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
              ), hits AS (
                 SELECT symbol,trading_date,close,limit_up,
                   prev_close IS NOT NULL AND prev_limit_up IS NOT NULL AND prev_close>=prev_limit_up*0.999 AS prev_was_limit_up
@@ -64,7 +66,10 @@ def research_limit_up_continuation(connection: Any, start_date: date, end_date: 
                   FROM hits h
                   JOIN LATERAL (
                     SELECT open,close,pre_close,limit_up,is_suspended FROM quant.canonical_bars_daily b
-                     WHERE b.symbol=h.symbol AND b.trading_date>h.trading_date ORDER BY b.trading_date LIMIT 1
+                     WHERE b.symbol=h.symbol AND b.trading_date>h.trading_date
+                       AND b.quality_status='fresh'
+                       AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                     ORDER BY b.trading_date LIMIT 1
                   ) n ON true
                  WHERE n.open>0 AND n.pre_close>0
              )
@@ -103,22 +108,33 @@ def research_daily_volume_surge(connection: Any, start_date: date, end_date: dat
     for horizon in horizons:
         rows = connection.execute(
             """WITH signal AS (
-                SELECT f.symbol,f.trading_date
+                SELECT DISTINCT ON (f.symbol,f.trading_date) f.symbol,f.trading_date
                   FROM quant.daily_fundamentals f
-                 WHERE f.trading_date BETWEEN %s AND %s AND f.volume_ratio>=2.5 AND f.turnover_rate>=5.0
+                 WHERE f.trading_date BETWEEN %s AND %s
+                   AND f.available_at < ((f.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                   AND f.volume_ratio>=2.5 AND f.turnover_rate>=5.0
+                 ORDER BY f.symbol,f.trading_date,f.available_at DESC,
+                          CASE WHEN f.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                          f.provider
              ), priced AS (
                 SELECT s.symbol,s.trading_date,
                   (SELECT b.trading_date FROM quant.canonical_bars_daily b WHERE b.symbol=s.symbol AND b.trading_date>s.trading_date
+                     AND b.quality_status='fresh'
+                     AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                      ORDER BY b.trading_date LIMIT 1) entry_date
                 FROM signal s
              ), entered AS (
                 SELECT p.*,e.open entry_price,e.is_suspended entry_is_suspended,e.limit_up entry_limit_up
                   FROM priced p JOIN quant.canonical_bars_daily e ON e.symbol=p.symbol AND e.trading_date=p.entry_date
+                   AND e.quality_status='fresh'
+                   AND e.available_at < ((e.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
              ), exited AS (
                 SELECT en.*, x.close exit_close
                   FROM entered en
                   JOIN LATERAL (
                     SELECT close FROM quant.canonical_bars_daily b WHERE b.symbol=en.symbol AND b.trading_date>=en.entry_date
+                     AND b.quality_status='fresh'
+                     AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                      ORDER BY b.trading_date OFFSET %s LIMIT 1
                   ) x ON true
                  WHERE NOT en.entry_is_suspended AND (en.entry_limit_up IS NULL OR en.entry_price<en.entry_limit_up*0.999)
@@ -154,6 +170,8 @@ def research_short_term_reversal(connection: Any, start_date: date, end_date: da
                   is_suspended
                 FROM quant.canonical_bars_daily
                 WHERE trading_date BETWEEN %s AND %s
+                  AND quality_status='fresh'
+                  AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
              ), scored AS (
                 SELECT *, close/prior_close-1 trailing_return, forward_close/close-1 forward_return
                   FROM panel WHERE prior_close>0 AND forward_close IS NOT NULL AND NOT is_suspended
@@ -197,7 +215,9 @@ def research_sector_flow_reversal_stock_level(connection: Any, start_date: date,
         f"""WITH signal AS (
                 SELECT f.taxonomy_key,f.sector_key,f.trading_date,f.transition
                   FROM quant.sector_flow_daily_features f
-                 WHERE f.trading_date BETWEEN %s AND %s AND f.transition IN ('reversal_in','reversal_out')
+                 WHERE f.trading_date BETWEEN %s AND %s
+                   AND f.available_at < ((f.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                   AND f.transition IN ('reversal_in','reversal_out')
              ), members AS (
                 SELECT s.transition,s.trading_date,m.symbol
                   FROM signal s JOIN quant.sector_membership_history m
@@ -206,16 +226,22 @@ def research_sector_flow_reversal_stock_level(connection: Any, start_date: date,
              ), priced AS (
                 SELECT me.transition,me.symbol,me.trading_date,
                   (SELECT b.trading_date FROM quant.canonical_bars_daily b WHERE b.symbol=me.symbol AND b.trading_date>me.trading_date
+                     AND b.quality_status='fresh'
+                     AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                      ORDER BY b.trading_date LIMIT 1) entry_date
                 FROM members me
              ), entered AS (
                 SELECT p.*,e.open entry_price,e.is_suspended entry_is_suspended,e.limit_up entry_limit_up,e.limit_down entry_limit_down
                   FROM priced p JOIN quant.canonical_bars_daily e ON e.symbol=p.symbol AND e.trading_date=p.entry_date
+                   AND e.quality_status='fresh'
+                   AND e.available_at < ((e.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
              ), exited AS (
                 SELECT en.*, x.close exit_close
                   FROM entered en
                   JOIN LATERAL (
                     SELECT close FROM quant.canonical_bars_daily b WHERE b.symbol=en.symbol AND b.trading_date>=en.entry_date
+                     AND b.quality_status='fresh'
+                     AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                      ORDER BY b.trading_date OFFSET %s LIMIT 1
                   ) x ON true
                  WHERE NOT en.entry_is_suspended AND (en.entry_limit_up IS NULL OR en.entry_price<en.entry_limit_up*0.999)
@@ -273,12 +299,16 @@ def research_post_close_backtest(connection: Any, start_date: date, end_date: da
 
     trading_dates = [row["trading_date"] for row in connection.execute(
         """SELECT DISTINCT trading_date FROM quant.canonical_bars_daily
-             WHERE trading_date BETWEEN %s AND %s ORDER BY trading_date""",
+             WHERE trading_date BETWEEN %s AND %s AND quality_status='fresh'
+               AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+             ORDER BY trading_date""",
         (start_date, end_date),
     ).fetchall()]
     sampled_dates = trading_dates[::max(1, sample_every_n_days)]
     all_symbols = sorted(row["symbol"] for row in connection.execute(
-        "SELECT DISTINCT symbol FROM quant.canonical_bars_daily WHERE trading_date BETWEEN %s AND %s",
+        """SELECT DISTINCT symbol FROM quant.canonical_bars_daily
+             WHERE trading_date BETWEEN %s AND %s AND quality_status='fresh'
+               AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')""",
         (start_date, end_date),
     ).fetchall())
     symbol_batches = [all_symbols[index:index + SYMBOL_BATCH_SIZE] for index in range(0, len(all_symbols), SYMBOL_BATCH_SIZE)]
@@ -291,6 +321,8 @@ def research_post_close_backtest(connection: Any, start_date: date, end_date: da
                 """SELECT symbol,trading_date,open,high,low,close,volume,amount,adj_factor,is_suspended,limit_up,limit_down
                      FROM quant.canonical_bars_daily
                     WHERE symbol=ANY(%s) AND trading_date<=%s AND trading_date>%s::date - (%s+15)
+                      AND quality_status='fresh'
+                      AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     ORDER BY symbol,trading_date""",
                 (batch, as_of, as_of, lookback_days),
             ).fetchall()
@@ -302,13 +334,17 @@ def research_post_close_backtest(connection: Any, start_date: date, end_date: da
             day_had_data = True
             entry_rows = {str(row["symbol"]): dict(row) for row in connection.execute(
                 """SELECT DISTINCT ON (symbol) symbol,open,is_suspended,limit_up FROM quant.canonical_bars_daily
-                     WHERE symbol=ANY(%s) AND trading_date>%s ORDER BY symbol,trading_date""",
+                     WHERE symbol=ANY(%s) AND trading_date>%s AND quality_status='fresh'
+                       AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                     ORDER BY symbol,trading_date""",
                 (batch, as_of),
             ).fetchall()}
             exit_rows_by_symbol = {str(row["symbol"]): row for row in connection.execute(
                 """SELECT symbol,close FROM (
                        SELECT symbol,close,row_number() OVER (PARTITION BY symbol ORDER BY trading_date) rn
-                         FROM quant.canonical_bars_daily WHERE symbol=ANY(%s) AND trading_date>%s
+                         FROM quant.canonical_bars_daily
+                        WHERE symbol=ANY(%s) AND trading_date>%s AND quality_status='fresh'
+                          AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                    ) ranked WHERE rn=%s""",
                 (batch, as_of, horizon_days),
             ).fetchall()}
