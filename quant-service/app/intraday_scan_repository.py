@@ -14,8 +14,6 @@ from datetime import date, datetime, timedelta
 from typing import Any
 import uuid
 
-from psycopg.types.json import Json
-
 from .stable_json import tolerant_json
 
 from .provider_health import record_provider_failure
@@ -233,7 +231,7 @@ def persist_intraday_scan_terminal(
                 scan_id,
                 observed_at,
                 status,
-                Json(requested_symbols),
+                tolerant_json(requested_symbols),
                 tolerant_json(source_status),
                 tolerant_json(summary),
             ),
