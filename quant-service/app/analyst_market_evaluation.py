@@ -15,6 +15,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .analyst_calibration import chronological_calibration
+from .point_in_time import exchange_day_end
 
 
 CN = ZoneInfo("Asia/Shanghai")
@@ -433,6 +434,9 @@ def analyst_market_evaluation(database: Any, start_date: date | None = None, end
     start = start_date or (end - timedelta(days=14))
     if end < start or (end - start).days > 62:
         raise ValueError("evaluation window must be ordered and no longer than 62 days")
+    # A retrospective review must use only opinions and market evidence that
+    # were available by the end of the evaluated Shanghai session.
+    knowledge_cutoff = exchange_day_end(end)
     with database.transaction() as connection:
         observations = [dict(row) for row in connection.execute(
             """SELECT analyst_id,source_kind,strategy_available_at,scope,action,direction,status,subject_key,subject_label
@@ -442,13 +446,17 @@ def analyst_market_evaluation(database: Any, start_date: date | None = None, end
         opinions = [dict(row) for row in connection.execute(
             """SELECT remote_analyst_id,opinion_date,scope,subject_key,direction,strength,factor_status
                  FROM quant.analyst_opinions
-                WHERE opinion_date BETWEEN %s AND %s AND (%s::text IS NULL OR remote_analyst_id=%s)""", (start, end, analyst_id, analyst_id)).fetchall()]
+                WHERE opinion_date BETWEEN %s AND %s AND available_at<=%s
+                  AND (%s::text IS NULL OR remote_analyst_id=%s)""",
+            (start, end, knowledge_cutoff, analyst_id, analyst_id)).fetchall()]
         outcomes = [dict(row) for row in connection.execute(
             """SELECT o.opinion_id,p.remote_analyst_id,p.opinion_date,p.scope,p.subject_key,
                             p.direction * p.strength * p.explicitness score,
                             o.status,o.directional_return,o.residual_return,o.horizon_days
                  FROM quant.analyst_opinion_outcomes o JOIN quant.analyst_opinions p ON p.opinion_id=o.opinion_id
-                WHERE p.opinion_date BETWEEN %s AND %s AND (%s::text IS NULL OR p.remote_analyst_id=%s)""", (start, end, analyst_id, analyst_id)).fetchall()]
+                WHERE p.opinion_date BETWEEN %s AND %s AND p.available_at<=%s
+                  AND (%s::text IS NULL OR p.remote_analyst_id=%s)""",
+            (start, end, knowledge_cutoff, analyst_id, analyst_id)).fetchall()]
         intraday_outcomes = [dict(row) for row in connection.execute(
             """SELECT io.observation_id,ob.analyst_id,ob.scope,ob.subject_key,ob.action,ob.direction,
                           io.horizon_minutes,io.status,io.directional_return,io.settlement
@@ -466,12 +474,16 @@ def analyst_market_evaluation(database: Any, start_date: date | None = None, end
                             amount_change_pct,advancer_ratio
                  FROM quant.market_flow_feature_snapshots
                 WHERE exchange_date BETWEEN %s AND %s AND cadence IN ('close','midday')
-                ORDER BY exchange_date,CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC""", (start, end)).fetchall()]
+                  AND status='ready' AND observed_at<=%s
+                ORDER BY exchange_date,CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC""",
+            (start, end, knowledge_cutoff)).fetchall()]
         sector_days = [dict(row) for row in connection.execute(
             """SELECT feature.sector_key,sector.label,feature.net_amount,feature.lhb_negative_count,feature.trading_date
-                 FROM quant.sector_flow_daily_features feature JOIN quant.sectors sector
+                FROM quant.sector_flow_daily_features feature JOIN quant.sectors sector
                    ON sector.taxonomy_key=feature.taxonomy_key AND sector.sector_key=feature.sector_key
-                WHERE feature.taxonomy_key='ths_concept_flow' AND trading_date BETWEEN %s AND %s""", (start, end)).fetchall()]
+                WHERE feature.taxonomy_key='ths_concept_flow' AND trading_date BETWEEN %s AND %s
+                  AND feature.status='ready' AND feature.available_at<=%s""",
+            (start, end, knowledge_cutoff)).fetchall()]
         theme_board_map = {
             str(row["theme_key"]): str(row["sector_key"])
             for row in connection.execute(

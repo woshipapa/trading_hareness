@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from .analyst_market_evaluation import analyst_market_evaluation
 from .automation_run_repository import start_run, finish_run, fail_run
+from .point_in_time import exchange_day_end
 
 CN = ZoneInfo("Asia/Shanghai")
 METHODOLOGY_VERSION = "analyst-market-review-v1"
@@ -51,6 +52,7 @@ def _period(cadence: str, as_of: date) -> tuple[date, date]:
 
 def _market_points(database: Any, start: date, end: date, evaluation: dict[str, Any]) -> list[dict[str, Any]]:
     timeline = {str(row.get("date")): row for row in evaluation.get("timeline", [])}
+    knowledge_cutoff = exchange_day_end(end)
     with database.transaction() as connection:
         aggregates = [dict(row) for row in connection.execute(
             """SELECT trading_date,stock_count,advancers,decliners,unchanged,
@@ -62,7 +64,9 @@ def _market_points(database: Any, start: date, end: date, evaluation: dict[str, 
                       concept_positive_ratio,concept_mean_change_pct,amount_change_pct,advancer_ratio
                  FROM quant.market_flow_feature_snapshots
                 WHERE exchange_date BETWEEN %s AND %s AND cadence IN ('close','midday')
-                ORDER BY exchange_date,CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC""", (start, end)).fetchall()]
+                  AND status='ready' AND observed_at<=%s
+                ORDER BY exchange_date,CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC""",
+            (start, end, knowledge_cutoff)).fetchall()]
     agg = {str(row["trading_date"]): row for row in aggregates}
     flow = {str(row["exchange_date"]): row for row in flow_rows}
     dates = sorted(set(agg) | set(flow) | set(timeline))

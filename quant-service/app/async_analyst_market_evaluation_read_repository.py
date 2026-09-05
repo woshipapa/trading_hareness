@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from .analyst_market_evaluation import CN, summarize_evaluation
+from .point_in_time import exchange_day_end
 
 
 async def market_evaluation(
@@ -19,6 +20,7 @@ async def market_evaluation(
     start = start_date or (end - timedelta(days=14))
     if end < start or (end - start).days > 62:
         raise ValueError("evaluation window must be ordered and no longer than 62 days")
+    knowledge_cutoff = exchange_day_end(end)
     async with async_database.transaction() as connection:
         observations_result = await connection.execute(
             """SELECT analyst_id,source_kind,strategy_available_at,scope,action,direction,status,subject_key,subject_label
@@ -29,16 +31,18 @@ async def market_evaluation(
         opinions_result = await connection.execute(
             """SELECT remote_analyst_id,opinion_date,scope,subject_key,direction,strength,factor_status
                  FROM quant.analyst_opinions
-                WHERE opinion_date BETWEEN %s AND %s AND (%s::text IS NULL OR remote_analyst_id=%s)""",
-            (start, end, analyst_id, analyst_id),
+                WHERE opinion_date BETWEEN %s AND %s AND available_at<=%s
+                  AND (%s::text IS NULL OR remote_analyst_id=%s)""",
+            (start, end, knowledge_cutoff, analyst_id, analyst_id),
         )
         outcomes_result = await connection.execute(
             """SELECT o.opinion_id,p.remote_analyst_id,p.opinion_date,p.scope,p.subject_key,
                             p.direction * p.strength * p.explicitness score,
                             o.status,o.directional_return,o.residual_return,o.horizon_days
                  FROM quant.analyst_opinion_outcomes o JOIN quant.analyst_opinions p ON p.opinion_id=o.opinion_id
-                WHERE p.opinion_date BETWEEN %s AND %s AND (%s::text IS NULL OR p.remote_analyst_id=%s)""",
-            (start, end, analyst_id, analyst_id),
+                WHERE p.opinion_date BETWEEN %s AND %s AND p.available_at<=%s
+                  AND (%s::text IS NULL OR p.remote_analyst_id=%s)""",
+            (start, end, knowledge_cutoff, analyst_id, analyst_id),
         )
         intraday_result = await connection.execute(
             """SELECT io.observation_id,ob.analyst_id,ob.scope,ob.subject_key,ob.action,ob.direction,
@@ -59,13 +63,17 @@ async def market_evaluation(
                             amount_change_pct,advancer_ratio
                  FROM quant.market_flow_feature_snapshots
                 WHERE exchange_date BETWEEN %s AND %s AND cadence IN ('close','midday')
-                ORDER BY exchange_date,CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC""", (start, end),
+                  AND status='ready' AND observed_at<=%s
+                ORDER BY exchange_date,CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC""",
+            (start, end, knowledge_cutoff),
         )
         sector_days_result = await connection.execute(
             """SELECT feature.sector_key,sector.label,feature.net_amount,feature.lhb_negative_count,feature.trading_date
                  FROM quant.sector_flow_daily_features feature JOIN quant.sectors sector
                    ON sector.taxonomy_key=feature.taxonomy_key AND sector.sector_key=feature.sector_key
-                WHERE feature.taxonomy_key='ths_concept_flow' AND trading_date BETWEEN %s AND %s""", (start, end),
+                WHERE feature.taxonomy_key='ths_concept_flow' AND trading_date BETWEEN %s AND %s
+                  AND feature.status='ready' AND feature.available_at<=%s""",
+            (start, end, knowledge_cutoff),
         )
         aliases_result = await connection.execute(
             """SELECT theme_key,sector_key
