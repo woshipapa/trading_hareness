@@ -1,0 +1,36 @@
+services:
+  quant-research:
+    # This override is intentionally inert unless the operator sets
+    # PEER_BACKGROUND_TASKS_ENABLED=true and PEER_RUNTIME_PROFILE=intraday_edge.
+    # It keeps the existing peer compose file usable for research/shadow runs.
+    env_file:
+      - ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+    environment:
+      QUANT_BACKGROUND_TASKS_ENABLED: ${PEER_BACKGROUND_TASKS_ENABLED:-false}
+      QUANT_RUNTIME_PROFILE: ${PEER_RUNTIME_PROFILE:-research}
+      QUANT_SKIP_MIGRATIONS: "true"
+      QUANT_LEGACY_SCHEMA_BOOTSTRAP: "false"
+      # Longhu credentials remain on the owner API.  The writer consumes only
+      # the normalized gateway through db-tunnel:5681.
+      QUANT_LONGHU_DIRECT_ENABLED: "false"
+      QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      # Feishu delivery is opt-in.  The next-session cutover may enable the
+      # direct path while edge retains group listening/forwarding; a relay
+      # tunnel can be enabled later without changing the strategy runtime.
+      QUANT_FEISHU_DIRECT_ENABLED: ${PEER_FEISHU_DIRECT_ENABLED:-false}
+      INTRADAY_SCAN_INTERVAL_SECONDS: ${PEER_INTRADAY_SCAN_INTERVAL_SECONDS:-30}
+      INTRADAY_SUPER_GET_FAST_INTERVAL_SECONDS: ${PEER_SUPER_GET_FAST_INTERVAL_SECONDS:-2}
+      INTRADAY_SUPER_GET_FAST_MAX_IN_FLIGHT: ${PEER_SUPER_GET_FAST_MAX_IN_FLIGHT:-6}
+      INTRADAY_SUPER_GET_FAST_MAX_SYMBOLS: ${PEER_SUPER_GET_FAST_MAX_SYMBOLS:-36}
+      INTRADAY_ORDER_BOOK_ENABLED: ${PEER_ORDER_BOOK_ENABLED:-true}
+      INTRADAY_ORDER_BOOK_INTERVAL_SECONDS: ${PEER_ORDER_BOOK_INTERVAL_SECONDS:-5}
+      INTRADAY_ORDER_BOOK_MAX_SYMBOLS: ${PEER_ORDER_BOOK_MAX_SYMBOLS:-36}
+      INTRADAY_MINUTE_PROFILE_CAPTURE_ENABLED: ${PEER_MINUTE_PROFILE_CAPTURE_ENABLED:-true}
+      INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS: ${PEER_MINUTE_PROFILE_MAX_SYMBOLS:-36}
+      INTRADAY_BOARD_CURVE_ENABLED: ${PEER_BOARD_CURVE_ENABLED:-true}
+      # Keep the low-memory target bounded; raw evidence remains in owner PG.
+      QUANT_RUNTIME_MAX_MEMORY_RATIO: ${PEER_RUNTIME_MAX_MEMORY_RATIO:-0.80}
+      QUANT_RUNTIME_MIN_FREE_BYTES: ${PEER_RUNTIME_MIN_FREE_BYTES:-2147483648}
+      QUANT_RUNTIME_WARNING_FREE_BYTES: ${PEER_RUNTIME_WARNING_FREE_BYTES:-4294967296}
+      QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED: "false"
+

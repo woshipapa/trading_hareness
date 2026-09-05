@@ -1,0 +1,58 @@
+# Edge → owner future-writer cutover
+
+状态：已切换（2026-09-05，非交易时段）。历史数据不迁移；edge47 的
+`quant_intraday_edge` 保留为历史证据库。下一个交易日开始，新的盘中
+evidence、signals 和 outcomes 由 Longhu peer runtime 写入 owner
+`trading_hareness`（G: 12T）。
+
+## 运行边界
+
+```text
+edge47: Feishu listener/adapter + n8n + analyst relay + delivery ledger
+Longhu host: quant-service intraday_edge + provider polling + strategy scans
+owner G: PostgreSQL trading_hareness (唯一新数据写入库)
+```
+
+历史 edge 库不删除、不回灌、不参与新 writer 的实时决策。跨库历史分析仍走
+显式 archive/evidence 导入流程。
+
+## 预热
+
+在 Longhu 主机的 shared-peer 目录准备私有 provider 文件（0600）：
+
+```bash
+deploy/shared-peer/compose.yaml
+deploy/shared-peer/compose.intraday-owner.yaml
+```
+
+覆盖文件默认 `PEER_RUNTIME_PROFILE=research`、
+`PEER_BACKGROUND_TASKS_ENABLED=false`，不会抢占 edge lease。
+
+## 切换窗口（已执行）
+
+已在非交易时段执行：
+
+1. 检查 owner PostgreSQL 隧道连续查询、schema revision 和磁盘水位。
+2. 停止 edge `quant-intraday-edge.service`，确认所有 `background_loop:*` lease 已释放。
+3. 在 Longhu 主机设置 `PEER_RUNTIME_PROFILE=intraday_edge`、
+   `PEER_BACKGROUND_TASKS_ENABLED=true`，重建 `quant-research`。
+4. 检查 `/health`、`/api/v1/intraday/services/status` 和唯一 writer lease。
+5. 开盘前只做 provider/健康冒烟，不触发历史回填。
+6. 交易日首日保持观察，不调整策略阈值。
+
+验收结果：目标容器使用当前代码启动，owner schema 已完成增量 Alembic
+迁移；`/health` 为 `ok`，唯一 writer leases 在 owner 库生成；edge
+`quant-intraday-edge.service` 已停止，edge 的 n8n、飞书 relay 容器仍健康。
+目标机处于周末 standby，下一交易日进入实际采集窗口。
+
+## Feishu
+
+edge47 的群监听、interactive 卡片转发、分析师同步和投递 ledger 保持运行。
+策略提醒优先使用目标机的直接 Feishu 配置；如启用 edge relay，必须通过独立
+SSH 隧道和 `X-Quant-Alert-Token`，不得开放公网端口。
+
+## 回滚
+
+关闭 Longhu writer，恢复 edge service 和原 `intraday_edge` 连接配置；owner
+新增数据保留，不执行反向删除。只有连续多个交易日验证通过后，才考虑清理
+edge 上的实时进程和旧容器，历史库继续保留。
