@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock
+from uuid import UUID
 
 from fastapi import HTTPException
 
@@ -72,6 +73,33 @@ class ResearchExperimentServiceTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 422)
         evaluator.assert_not_called()
+
+    def test_factor_evaluation_returns_the_research_run_identity(self) -> None:
+        connection = MagicMock()
+        evaluation_row = MagicMock(fetchone=MagicMock(return_value={"evaluation_id": UUID(int=1)}))
+        connection.execute.side_effect = [
+            MagicMock(fetchone=MagicMock(return_value={
+                "earliest": date(2025, 1, 2), "latest": date(2026, 8, 21),
+            })),
+            MagicMock(fetchall=MagicMock(return_value=[{"factor_key": "momentum_20d"}])),
+            MagicMock(), MagicMock(), MagicMock(), MagicMock(), evaluation_row,
+            MagicMock(), MagicMock(),
+        ]
+        database = MagicMock()
+        database.transaction.return_value = _Transaction(connection.execute)
+        evaluator = MagicMock(return_value=[{
+            "factor_key": "momentum_20d", "status": "completed", "observations": 50,
+            "cross_section_days": 20, "metrics": {}, "artifact": {},
+        }])
+        payload = SimpleNamespace(
+            universe_key="core", start_date=None, end_date=None, factor_keys=["momentum_20d"], horizon_days=5,
+        )
+
+        result = evaluate_factors(payload, _deps(database, evaluate_factor_set=evaluator))
+
+        self.assertRegex(result["research_run_id"], r"^[0-9a-f-]{36}$")
+        self.assertEqual(len(result["output_digest"]), 64)
+        evaluator.assert_called_once()
 
     def test_snapshot_keeps_missing_daily_controls_blocked(self) -> None:
         manifest = {

@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from .point_in_time import availability_cutoff, exchange_day_end
 from .research_manifest import MANIFEST_VERSION, manifest_digest, snapshot_key as research_snapshot_key
+from .research_run_repository import finish_research_run, start_research_run
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ def research_window(
 
 
 def evaluate_factors(payload: Any, deps: ResearchExperimentDependencies) -> dict[str, Any]:
+    pending_error: Exception | None = None
     with deps.database.transaction() as connection:
         start, end = research_window(
             connection, payload.universe_key, payload.start_date, payload.end_date,
@@ -66,28 +68,54 @@ def evaluate_factors(payload: Any, deps: ResearchExperimentDependencies) -> dict
         unknown = sorted(set(requested) - enabled)
         if unknown:
             raise deps.http_exception(status_code=422, detail=f"unknown or disabled factors: {', '.join(unknown)}")
+        knowledge_cutoff = deps.as_utc(exchange_day_end(end))
+        research_run_id = start_research_run(
+            connection,
+            experiment_type="factor_evaluation",
+            universe_key=payload.universe_key,
+            start_date=start,
+            end_date=end,
+            knowledge_cutoff=knowledge_cutoff,
+            parameters={"factor_keys": requested, "horizon_days": payload.horizon_days},
+            input_datasets=("canonical_bars_daily", "universe_membership_history", "factor_registry"),
+            data_schema_version="factor-evaluation-v1",
+            json_value=deps.json_value,
+        )
         try:
             evaluated = deps.evaluate_factor_set(connection, requested, payload.universe_key, start, end, payload.horizon_days)
         except ValueError as error:
-            raise deps.http_exception(status_code=422, detail=str(error)) from error
-        results = []
-        for result in evaluated:
-            factor_key = str(result["factor_key"])
-            row = connection.execute(
-                """INSERT INTO quant.factor_evaluations(factor_key,universe_key,start_date,end_date,horizon_days,engine,status,observations,
-                    cross_section_days,metrics,artifact) VALUES(%s,%s,%s,%s,%s,'native_factor_sql_v2',%s,%s,%s,%s,%s) RETURNING evaluation_id""",
-                (factor_key, payload.universe_key, start, end, payload.horizon_days, result["status"], result["observations"],
-                 result["cross_section_days"], deps.json_value(result["metrics"]), deps.json_value(result["artifact"])),
-            ).fetchone()
-            result["evaluation_id"] = str(row["evaluation_id"])
-            results.append(result)
-    return {"universe_key": payload.universe_key, "start_date": str(start), "end_date": str(end), "results": results}
+            # Finish before leaving the transaction.  The exception is raised
+            # only after the transaction commits, otherwise PostgreSQL would
+            # roll the failed-run evidence back with the request.
+            finish_research_run(connection, research_run_id, status="failed", error_message=str(error)[:1000], json_value=deps.json_value)
+            pending_error = deps.http_exception(status_code=422, detail=str(error))
+            evaluated = []
+        if pending_error is None:
+            results = []
+            for result in evaluated:
+                factor_key = str(result["factor_key"])
+                row = connection.execute(
+                    """INSERT INTO quant.factor_evaluations(factor_key,universe_key,start_date,end_date,horizon_days,engine,status,observations,
+                        cross_section_days,metrics,artifact) VALUES(%s,%s,%s,%s,%s,'native_factor_sql_v2',%s,%s,%s,%s,%s) RETURNING evaluation_id""",
+                    (factor_key, payload.universe_key, start, end, payload.horizon_days, result["status"], result["observations"],
+                     result["cross_section_days"], deps.json_value(result["metrics"]), deps.json_value(result["artifact"])),
+                ).fetchone()
+                result["evaluation_id"] = str(row["evaluation_id"])
+                results.append(result)
+            output_digest = finish_research_run(
+                connection, research_run_id, status="completed", output={"results": results}, json_value=deps.json_value,
+            )
+    if pending_error is not None:
+        raise pending_error
+    return {"research_run_id": str(research_run_id), "output_digest": output_digest,
+            "universe_key": payload.universe_key, "start_date": str(start), "end_date": str(end), "results": results}
 
 
 def backtest_strategy(payload: Any, deps: ResearchExperimentDependencies) -> dict[str, Any]:
+    pending_error: Exception | None = None
     with deps.database.transaction() as connection:
         registry = connection.execute(
-            "SELECT strategy_key,configuration FROM quant.strategy_registry WHERE strategy_key=%s AND status<>'disabled'",
+            "SELECT strategy_key,version,configuration FROM quant.strategy_registry WHERE strategy_key=%s AND status<>'disabled'",
             (payload.strategy_key,),
         ).fetchone()
         if not registry:
@@ -101,17 +129,41 @@ def backtest_strategy(payload: Any, deps: ResearchExperimentDependencies) -> dic
             "hold_days": payload.hold_days, "top_n": payload.top_n,
             "total_cost_bps": payload.total_cost_bps, "factors": payload.factors,
         }
+        knowledge_cutoff = deps.as_utc(exchange_day_end(end))
+        research_run_id = start_research_run(
+            connection,
+            experiment_type="strategy_backtest",
+            strategy_key=payload.strategy_key,
+            strategy_version=str(registry.get("version") or "unknown"),
+            universe_key=payload.universe_key,
+            start_date=start,
+            end_date=end,
+            knowledge_cutoff=knowledge_cutoff,
+            parameters=parameters,
+            input_datasets=("canonical_bars_daily", "universe_membership_history", "strategy_registry"),
+            data_schema_version="strategy-backtest-v1",
+            json_value=deps.json_value,
+        )
         try:
             result = deps.run_multi_factor_strategy(connection, payload.universe_key, start, end, parameters)
         except ValueError as error:
-            raise deps.http_exception(status_code=422, detail=str(error)) from error
-        row = connection.execute(
-            """INSERT INTO quant.strategy_experiments(strategy_key,universe_key,start_date,end_date,status,parameters,metrics,equity_curve,trades)
-               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING strategy_experiment_id""",
-            (payload.strategy_key, payload.universe_key, start, end, result["status"], deps.json_value(result["parameters"]),
-             deps.json_value(result["metrics"]), deps.json_value(result["equity_curve"]), deps.json_value(result["trades"])),
-        ).fetchone()
-    result["strategy_experiment_id"] = str(row["strategy_experiment_id"])
+            finish_research_run(connection, research_run_id, status="failed", error_message=str(error)[:1000], json_value=deps.json_value)
+            pending_error = deps.http_exception(status_code=422, detail=str(error))
+            result = {}
+        if pending_error is None:
+            row = connection.execute(
+                """INSERT INTO quant.strategy_experiments(strategy_key,universe_key,start_date,end_date,status,parameters,metrics,equity_curve,trades)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING strategy_experiment_id""",
+                (payload.strategy_key, payload.universe_key, start, end, result["status"], deps.json_value(result["parameters"]),
+                 deps.json_value(result["metrics"]), deps.json_value(result["equity_curve"]), deps.json_value(result["trades"])),
+            ).fetchone()
+            result["strategy_experiment_id"] = str(row["strategy_experiment_id"])
+            result["research_run_id"] = str(research_run_id)
+            result["output_digest"] = finish_research_run(
+                connection, research_run_id, status="completed", output=result, json_value=deps.json_value,
+            )
+    if pending_error is not None:
+        raise pending_error
     return result
 
 

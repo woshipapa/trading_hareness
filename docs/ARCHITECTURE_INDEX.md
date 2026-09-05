@@ -9,9 +9,9 @@
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
 | `main.py` top-level functions | 438 |
-| Python modules under `app/` | 403 |
+| Python modules under `app/` | 404 |
 | HTTP router modules | 42 |
-| Alembic migrations | 86 |
+| Alembic migrations | 87 |
 | Frontend source files | 37 |
 
 ## Domain naming inventory
@@ -30,7 +30,7 @@ New behaviour should be owned by an existing domain package/owner.
 | `ten` | 11 |
 | `board` | 9 |
 | `limit` | 9 |
-| `research` | 7 |
+| `research` | 8 |
 | `tushare` | 7 |
 | `daily` | 6 |
 | `provider` | 6 |
