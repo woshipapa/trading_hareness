@@ -488,6 +488,7 @@ from .intraday_status_read_model import IntradayStatusDependencies, intraday_ser
 from .routers.provider_status import build_provider_status_router
 from .routers.longhu_reads import build_longhu_reads_router
 from .routers.licensed_stock_api import build_licensed_stock_api_router
+from .routers.longhu_capabilities import build_longhu_capabilities_router
 from .routers.research_readiness import build_research_readiness_router
 from .routers.intraday_status import build_intraday_status_router
 from .routers.analyst_reads import build_analyst_reads_router
@@ -4335,6 +4336,11 @@ app.include_router(build_longhu_reads_router(
     minutes=intraday_longhu_minutes,
 ))
 app.include_router(build_licensed_stock_api_router(
+    configured=longhu_vendor_configured,
+    shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
+    call=shared_stock_api_call,
+))
+app.include_router(build_longhu_capabilities_router(
     configured=longhu_vendor_configured,
     shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
     call=shared_stock_api_call,

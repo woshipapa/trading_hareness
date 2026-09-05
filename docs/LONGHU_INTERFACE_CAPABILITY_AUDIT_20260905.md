@@ -11,6 +11,13 @@ owner 的 Longhu shared gateway 当前不是只有报价和分钟线，而是一
 - 认证：`X-Quant-Read-Key`
 - peer 只拿规范化网关响应；Longhu token、UserID、DeviceID 留在 owner 侧
 
+研究能力入口（本次接入）：
+
+- `GET /api/v1/research/longhu/catalog`
+- `POST /api/v1/research/longhu/probe`
+- 同样要求 `X-Quant-Read-Key`；probe 只返回请求投影、页数、errcode、字段 shape 和摘要哈希，不回显行情行或凭据。
+- 返回固定的 `research_only=true`、`replay_only=true`、`live_effect=none` 标记，因此不能被误接入实时交易/阈值路径。
+
 ## 目标与能力面
 
 | 目标 | 上游域名 | 已注册能力 | 研究用途 |
@@ -77,4 +84,5 @@ owner 的 Longhu shared gateway 当前不是只有报价和分钟线，而是一
 - 做 walk-forward 与 purged event study：Longhu 盘中视图、Tushare 收盘视图、东财资金流视图分别建模，再测试增量信息量。
 - 所有新因子先进入 shadow/replay，达到样本量、覆盖率、稳定性和样本外门禁后才考虑任何策略 promotion；不直接改变 live threshold。
 
-本审计没有修改数据库和策略逻辑；它只验证了 owner gateway 的真实能力面，为下一步解码和证据化接入提供清单。
+本次接入新增 `quant-service/app/longhu_capability_probe.py` 与
+`quant-service/app/routers/longhu_capabilities.py`，并在 `main.py` 注册上述研究入口；没有修改数据库和策略逻辑。它把 owner gateway 的真实能力面变成可供自动化巡检和论文数据准备使用的安全结构摘要，为下一步解码和证据化接入提供清单。
