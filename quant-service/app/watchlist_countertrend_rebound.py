@@ -423,7 +423,6 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
              ) industry_membership ON industry_membership.sector_key=ANY(%s)
             WHERE b.quality_status='fresh'
               AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-              AND i.industry=ANY(%s)
               AND EXISTS (
                     SELECT 1 FROM quant.daily_adjustment_factors factor
                      WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
