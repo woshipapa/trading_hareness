@@ -6,6 +6,9 @@ from datetime import date, timedelta
 from typing import Any, Callable
 
 
+LEARNING_WINDOW_LIMIT = 10_000
+
+
 def build_daily_strategy_summary(database: Any, exchange_date: date, *, readiness: Callable[[Any], Any],
                                  json_safe: Callable[[Any], Any], policy_review: Callable[..., Any]) -> dict[str, Any]:
     with database.transaction() as connection:
@@ -29,7 +32,7 @@ def build_daily_strategy_summary(database: Any, exchange_date: date, *, readines
                  LEFT JOIN quant.intraday_signal_outcomes o
                    ON o.signal_event_id=s.signal_event_id AND o.horizon_key='30m'
                 WHERE s.state='alerted' AND s.signal_type IN ('entry','watch','reduce','exit')
-                ORDER BY s.observed_at""",
+                ORDER BY s.observed_at DESC LIMIT %s""", (LEARNING_WINDOW_LIMIT + 1,),
         ).fetchall()
         post_close_run = connection.execute(
             """SELECT run_id,status,summary FROM quant.post_close_strategy_runs
@@ -51,7 +54,17 @@ def build_daily_strategy_summary(database: Any, exchange_date: date, *, readines
     outcome_counts: dict[str, dict[str, int]] = {}
     for row in outcome_rows:
         outcome_counts.setdefault(str(row["horizon_key"]), {})[str(row["status"])] = int(row["count"] or 0)
+    learning_truncated = len(learning_rows) > LEARNING_WINDOW_LIMIT
+    learning_rows = list(reversed(learning_rows[:LEARNING_WINDOW_LIMIT]))
     learning_input = [{**json_safe(dict(row)), "exchange_date": str(exchange_date)} for row in learning_rows]
+    policy_learning = policy_review(learning_input, focus_exchange_date=str(exchange_date))
+    policy_learning["source_window"] = {
+        "limit": LEARNING_WINDOW_LIMIT,
+        "rows": len(learning_input),
+        "truncated": learning_truncated,
+        "ordering": "latest_first_query_replayed_oldest_first",
+        "notice": "离线策略复盘使用有界信号窗口；完整信号与结果仍保留在本地账本，可按窗口重算。",
+    }
     return {
         "exchange_date": str(exchange_date), "signal_counts": signal_counts,
         "outcome_counts": outcome_counts,
@@ -62,7 +75,7 @@ def build_daily_strategy_summary(database: Any, exchange_date: date, *, readines
         },
         "close_review": json_safe(dict(close_review)) if close_review else None,
         "readiness": readiness_result,
-        "offline_policy_learning": policy_review(learning_input, focus_exchange_date=str(exchange_date)),
+        "offline_policy_learning": policy_learning,
     }
 
 
@@ -87,4 +100,4 @@ def terminal_for_exchange_date(connection: Any, exchange_date: date) -> bool:
     return row is not None
 
 
-__all__ = ["build_daily_strategy_summary", "terminal_for_exchange_date"]
+__all__ = ["LEARNING_WINDOW_LIMIT", "build_daily_strategy_summary", "terminal_for_exchange_date"]
