@@ -99,4 +99,5 @@ services:
 
 volumes:
   peer_quant_data:
+  peer_quant_research_data:
   peer_n8n_data:

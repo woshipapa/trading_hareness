@@ -9,7 +9,7 @@ evidence、signals 和 outcomes 由 Longhu peer runtime 写入 owner
 
 ```text
 edge47: Feishu listener/adapter + n8n + analyst relay + delivery ledger
-Longhu host: quant-service intraday_edge + provider polling + strategy scans
+Longhu host: quant-service intraday_edge + research/post-close scheduler + provider polling + strategy scans
 owner G: PostgreSQL trading_hareness (唯一新数据写入库)
 ```
 
@@ -44,6 +44,26 @@ deploy/shared-peer/compose.intraday-owner.yaml
 迁移；`/health` 为 `ok`，唯一 writer leases 在 owner 库生成；edge
 `quant-intraday-edge.service` 已停止，edge 的 n8n、飞书 relay 容器仍健康。
 目标机处于周末 standby，下一交易日进入实际采集窗口。
+
+## 研究/盘后调度迁移（2026-09-05）
+
+edge 上的盘后研究代码此前随镜像存在，但 `intraday_edge` profile 会主动关闭
+`strategy_review`、`post_close_strategy`、`ten_day_leader_rotation` 和
+`daily_strategy_summary` 等 research loop。现增加 owner 上的
+`quant-research-scheduler` 独立容器：
+
+```text
+quant-research              QUANT_RUNTIME_PROFILE=intraday_edge
+  └─ 实时采集、观察池扫描、研究提醒（7 个 intraday leases）
+
+quant-research-scheduler    QUANT_RUNTIME_PROFILE=research
+  └─ 午盘/收盘 review、盘后候选、十日龙头、日终摘要（独立 research leases）
+```
+
+两个容器共享 owner PostgreSQL，但租约标签不同；research worker 不会获取
+实时采集租约，也不启用 Feishu 直发。成员回填默认关闭，需单独启用并设批量上限。
+edge 的历史实时证据不迁移，仍作为历史库保留；研究任务读取 owner 当前可用的
+证据，并通过同日期幂等键重启安全地补跑。
 
 观察池控制配置已在切换后单独对账：edge 与 owner 均为 82 条、81 条启用，
 symbol/启用状态哈希一致。同步脚本只传观察池控制字段，不传行情、信号或历史
