@@ -32,6 +32,43 @@ def _dataset_digest(direction: str, dataset_key: str, dataset_version: str) -> s
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+def _manifest_lineage(connection: Any, manifest_id: str | None) -> tuple[str | None, dict[str, Any]]:
+    """Resolve the immutable snapshot digest used by a run's input edges.
+
+    Legacy callers may start a run before a snapshot exists, so the fallback
+    remains deterministic.  When a manifest is supplied, the edge carries the
+    actual stored content hash and enough provenance to audit its partition
+    counts/ranges instead of hashing only a dataset name and schema version.
+    """
+    if not manifest_id:
+        return None, {}
+    row = connection.execute(
+        """SELECT snapshot_key,content_sha256,manifest,manifest_version,code_sha,data_schema_version
+             FROM quant.data_snapshots WHERE snapshot_key=%s""",
+        (manifest_id,),
+    ).fetchone()
+    if not row:
+        return None, {"manifest_id": manifest_id, "manifest_lookup": "missing"}
+    payload = dict(row)
+    digest = str(payload.get("content_sha256") or "")
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        return None, {"manifest_id": manifest_id, "manifest_lookup": "invalid_digest"}
+    manifest = payload.get("manifest")
+    summary: dict[str, Any] = {
+        "manifest_id": payload.get("snapshot_key") or manifest_id,
+        "manifest_version": payload.get("manifest_version"),
+        "code_sha": payload.get("code_sha"),
+        "data_schema_version": payload.get("data_schema_version"),
+        "manifest_content_sha256": digest,
+    }
+    if isinstance(manifest, dict):
+        for key in ("as_of_date", "knowledge_cutoff", "equity_symbols", "benchmark_bars",
+                    "fundamental_symbols", "limit_symbols", "blocking_issues"):
+            if key in manifest:
+                summary[key] = manifest[key]
+    return digest, summary
+
+
 def _require_aware(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("research run knowledge cutoff must be timezone-aware")
@@ -61,6 +98,7 @@ def start_research_run(
     run_id = uuid4()
     resolved_code_sha = code_sha or os.environ.get("APP_GIT_SHA") or "unknown"
     encode_json = json_value or (lambda value: value)
+    manifest_digest_value, manifest_metadata = _manifest_lineage(connection, data_manifest_id)
     connection.execute(
         """INSERT INTO quant.research_experiment_runs(
                    research_run_id,experiment_type,strategy_key,strategy_version,universe_key,
@@ -72,12 +110,15 @@ def start_research_run(
     )
     for dataset_key in dict.fromkeys(str(item) for item in input_datasets):
         dataset_version = data_schema_version
+        content_digest = manifest_digest_value or _dataset_digest("input", dataset_key, dataset_version)
+        metadata = {"manifest_id": data_manifest_id, "code_sha": resolved_code_sha}
+        if manifest_metadata:
+            metadata.update(manifest_metadata)
         connection.execute(
             """INSERT INTO quant.research_lineage_edges(
                        research_run_id,direction,dataset_key,dataset_version,content_sha256,metadata)
                    VALUES(%s,'input',%s,%s,%s,%s)""",
-            (run_id, dataset_key, dataset_version, _dataset_digest("input", dataset_key, dataset_version),
-             encode_json({"manifest_id": data_manifest_id, "code_sha": resolved_code_sha})),
+            (run_id, dataset_key, dataset_version, content_digest, encode_json(metadata)),
         )
     return run_id
 

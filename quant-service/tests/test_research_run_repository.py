@@ -65,6 +65,29 @@ class ResearchRunRepositoryTests(unittest.TestCase):
         self.assertEqual(params[1], digest)
         self.assertEqual(params[-1], run_id)
 
+    def test_manifest_backed_run_uses_real_snapshot_content_digest(self):
+        connection = MagicMock()
+        connection.execute.return_value.fetchone.return_value = {
+            "snapshot_key": "snapshot-1",
+            "content_sha256": "a" * 64,
+            "manifest": {"as_of_date": "2026-08-27", "equity_symbols": 5500},
+            "manifest_version": "research-manifest-v2",
+            "code_sha": "code-sha",
+            "data_schema_version": "feature-availability-cutoff-v2",
+        }
+        start_research_run(
+            connection,
+            experiment_type="factor_evaluation",
+            universe_key="core",
+            start_date=date(2025, 1, 2), end_date=date(2026, 8, 27),
+            knowledge_cutoff=datetime(2026, 8, 27, 8, tzinfo=timezone.utc),
+            parameters={}, input_datasets=("canonical_bars_daily",), data_manifest_id="snapshot-1",
+        )
+        edge_sql, edge_params = connection.execute.call_args_list[-1].args
+        self.assertIn("research_lineage_edges", edge_sql)
+        self.assertEqual(edge_params[3], "a" * 64)
+        self.assertEqual(edge_params[4]["manifest_content_sha256"], "a" * 64)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
