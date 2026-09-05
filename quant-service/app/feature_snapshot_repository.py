@@ -38,9 +38,28 @@ def materialize_feature_snapshot(
 ) -> dict[str, Any]:
     cutoff = availability_cutoff(as_of_date, knowledge_cutoff)
     members = connection.execute(
-        """SELECT m.symbol,i.name,i.industry,i.is_st FROM quant.universe_members m
-           JOIN quant.instruments i ON i.symbol=m.symbol
-           WHERE m.universe_key=%s AND m.enabled ORDER BY m.priority,m.symbol""", (universe_key,)
+        """SELECT DISTINCT ON (membership.symbol)
+                      membership.symbol,i.name,i.is_st,
+                      coalesce(sector_history.sector_key,'UNKNOWN') AS industry
+             FROM quant.universe_membership_history membership
+             JOIN quant.instruments i ON i.symbol=membership.symbol
+             LEFT JOIN LATERAL (
+                   SELECT member.sector_key
+                     FROM quant.sector_membership_history member
+                    WHERE member.symbol=membership.symbol
+                      AND member.taxonomy_key IN ('ths_industry','ths_index_i')
+                      AND member.effective_from<=%s
+                      AND (member.effective_to IS NULL OR member.effective_to>=%s)
+                      AND member.known_at<%s
+                    ORDER BY CASE WHEN member.taxonomy_key='ths_industry' THEN 0 ELSE 1 END,
+                             member.known_at DESC,member.effective_from DESC,member.sector_key
+                    LIMIT 1
+             ) sector_history ON TRUE
+            WHERE membership.universe_key=%s
+              AND membership.effective_from<=%s
+              AND (membership.effective_to IS NULL OR membership.effective_to>=%s)
+            ORDER BY membership.symbol,membership.priority,membership.effective_from DESC""",
+        (as_of_date, as_of_date, cutoff, universe_key, as_of_date, as_of_date),
     ).fetchall()
     if not members:
         raise ValueError(f"universe {universe_key} has no enabled symbols")
@@ -50,9 +69,23 @@ def materialize_feature_snapshot(
     for member in members:
         symbol = str(member["symbol"])
         bars = list(reversed(connection.execute(
-            """SELECT trading_date,close,high,low,volume,amount,adj_factor,is_suspended,limit_up,limit_down,selected_provider
-               FROM quant.canonical_bars_daily WHERE symbol=%s AND trading_date<=%s
-               ORDER BY trading_date DESC LIMIT 60""", (symbol, as_of_date)
+            """SELECT bar.trading_date,bar.close,bar.high,bar.low,bar.volume,bar.amount,
+                      adjustment_history.adj_factor,bar.is_suspended,bar.limit_up,bar.limit_down,bar.selected_provider
+                 FROM quant.canonical_bars_daily bar
+                 JOIN LATERAL (
+                       SELECT adjustment.adj_factor,adjustment.provider
+                         FROM quant.daily_adjustment_factors adjustment
+                        WHERE adjustment.symbol=bar.symbol
+                          AND adjustment.trading_date=bar.trading_date
+                          AND adjustment.available_at<((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                        ORDER BY adjustment.available_at DESC,
+                                 CASE WHEN adjustment.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                                 adjustment.provider
+                        LIMIT 1
+                 ) adjustment_history ON TRUE
+                WHERE bar.symbol=%s AND bar.trading_date<=%s
+                  AND bar.available_at<=%s AND adjustment_history.adj_factor>0
+                ORDER BY bar.trading_date DESC LIMIT 60""", (symbol, as_of_date, cutoff)
         ).fetchall()))
         flags: list[str] = []
         if len(bars) < 21:
@@ -98,7 +131,8 @@ def materialize_feature_snapshot(
                         "volume_ratio": volume_ratio, "selected_provider": latest["selected_provider"]}
         fundamental = connection.execute(
             """SELECT turnover_rate,volume_ratio,pe,pb,total_mv,circ_mv FROM quant.daily_fundamentals
-               WHERE symbol=%s AND trading_date<=%s ORDER BY trading_date DESC LIMIT 1""", (symbol, as_of_date)
+               WHERE symbol=%s AND trading_date<=%s AND available_at<=%s
+               ORDER BY trading_date DESC,available_at DESC LIMIT 1""", (symbol, as_of_date, cutoff)
         ).fetchone()
         if fundamental:
             features["fundamentals"] = {key: number(fundamental[key]) for key in fundamental.keys()}

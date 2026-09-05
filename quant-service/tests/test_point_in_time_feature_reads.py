@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import unittest
 
 from app.feature_read_repository import analyst_feature, latest_tushare_row
+from app.feature_snapshot_repository import materialize_feature_snapshot
 from app.feature_snapshot_runtime import FeatureSnapshotRuntime, FeatureSnapshotRuntimeDependencies
 from app.point_in_time import availability_cutoff, exchange_day_end
 
@@ -20,6 +21,41 @@ CN_TZ = ZoneInfo("Asia/Shanghai")
 
 
 class AvailabilityAwareFeatureReadTests(unittest.TestCase):
+    def test_feature_snapshot_market_and_fundamental_reads_use_the_cutoff(self):
+        class Result:
+            def fetchall(self):
+                return []
+
+            def fetchone(self):
+                return None
+
+        class Connection:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params=()):
+                self.calls.append((str(sql), params))
+                if "FROM quant.universe_membership_history" in str(sql):
+                    return type("Members", (), {"fetchall": lambda _self: [{"symbol": "000001.SZ", "name": "Test", "industry": "Tech", "is_st": False}]})()
+                if "FROM quant.canonical_bars_daily" in str(sql):
+                    return type("Bars", (), {"fetchall": lambda _self: []})()
+                return Result()
+
+        connection = Connection()
+        cutoff = datetime(2026, 8, 27, 10, 15, tzinfo=CN_TZ)
+        materialize_feature_snapshot(
+            connection, date(2026, 8, 27), "core", feature_version="pit-test", knowledge_cutoff=cutoff,
+            number=float, market_regime=lambda *_: "neutral",
+            analyst_text_factor_summary=lambda *_: {"market": {}},
+            latest_tushare_row=lambda *_: None, analyst_feature=lambda *_: {},
+        )
+
+        bar_sql, bar_params = next(item for item in connection.calls if "FROM quant.canonical_bars_daily" in item[0])
+        fundamental_sql, fundamental_params = next(item for item in connection.calls if "FROM quant.daily_fundamentals" in item[0])
+        self.assertIn("bar.available_at<=%s", bar_sql)
+        self.assertEqual(bar_params[-1], cutoff)
+        self.assertIn("available_at<=%s", fundamental_sql)
+        self.assertEqual(fundamental_params[-1], cutoff)
     def test_daily_cutoff_is_the_end_of_the_exchange_day_in_shanghai(self):
         cutoff = availability_cutoff(date(2026, 8, 27))
 

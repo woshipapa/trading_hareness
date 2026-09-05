@@ -142,7 +142,7 @@ class WriteAuthenticationMiddlewareTests(unittest.TestCase):
                 self.bars_descending = list(reversed(ascending))
 
             def execute(self, sql, _params):
-                if "FROM quant.universe_members" in sql:
+                if "FROM quant.universe_membership_history" in sql:
                     return Result(rows=[{"symbol": "000001.SZ", "name": "Test", "industry": "Test", "is_st": False}])
                 if "FROM quant.canonical_bars_daily" in sql:
                     return Result(rows=self.bars_descending)
