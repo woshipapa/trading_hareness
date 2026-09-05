@@ -23,12 +23,14 @@ def latest_full_market_date(database: Any, minimum_full_market_symbols: int) -> 
         row = connection.execute(
             """WITH dates AS (
                    SELECT DISTINCT trading_date FROM quant.canonical_bars_daily
-                    WHERE quality_status IN ('fresh','partial')
+                    WHERE quality_status='fresh'
+                      AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                ), expected AS (
                    SELECT dates.trading_date,count(DISTINCT member.symbol)::int AS expected_symbols
                      FROM dates JOIN quant.universe_membership_history member
                        ON member.universe_key='all_a' AND member.effective_from<=dates.trading_date
                       AND (member.effective_to IS NULL OR member.effective_to>=dates.trading_date)
+                      AND member.known_at < ((dates.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     GROUP BY dates.trading_date
                ), covered AS (
                    SELECT bar.trading_date,count(DISTINCT bar.symbol)::int AS adjusted_symbols
@@ -37,7 +39,8 @@ def latest_full_market_date(database: Any, minimum_full_market_symbols: int) -> 
                        ON member.universe_key='all_a' AND member.symbol=bar.symbol
                       AND member.effective_from<=bar.trading_date
                       AND (member.effective_to IS NULL OR member.effective_to>=bar.trading_date)
-                    WHERE bar.quality_status IN ('fresh','partial') AND bar.adj_factor IS NOT NULL
+                    WHERE bar.quality_status='fresh' AND bar.adj_factor IS NOT NULL
+                      AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     GROUP BY bar.trading_date
                ) SELECT expected.trading_date
                      FROM expected JOIN covered USING(trading_date)
@@ -57,19 +60,22 @@ def load_ten_day_ranking_inputs(database: Any, as_of_date: date) -> TenDayRankin
                    SELECT DISTINCT symbol FROM quant.universe_membership_history
                     WHERE universe_key='all_a' AND effective_from<=%s
                       AND (effective_to IS NULL OR effective_to>=%s)
+                      AND known_at < ((%s::date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                ) SELECT count(DISTINCT active.symbol)::int AS expected_daily_symbols,
                       count(DISTINCT bar.symbol) FILTER (WHERE bar.adj_factor IS NOT NULL)::int AS daily_symbols,
                       max(bar.available_at) AS strategy_available_at
                  FROM active LEFT JOIN quant.canonical_bars_daily bar
-                   ON bar.symbol=active.symbol AND bar.trading_date=%s
-                  AND bar.quality_status IN ('fresh','partial')""",
-            (as_of_date, as_of_date, as_of_date),
+                 ON bar.symbol=active.symbol AND bar.trading_date=%s
+                  AND bar.quality_status='fresh'
+                  AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')""",
+            (as_of_date, as_of_date, as_of_date, as_of_date),
         ).fetchone()
         rows = connection.execute(
             """WITH active AS (
                    SELECT DISTINCT symbol FROM quant.universe_membership_history
                     WHERE universe_key='all_a' AND effective_from<=%s
                       AND (effective_to IS NULL OR effective_to>=%s)
+                      AND known_at < ((%s::date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                ), ranked AS (
                    SELECT bar.symbol,instrument.name,bar.trading_date,bar.open,bar.high,bar.low,
                           bar.close,bar.pre_close,bar.volume,bar.amount,bar.adj_factor,
@@ -78,11 +84,12 @@ def load_ten_day_ranking_inputs(database: Any, as_of_date: date) -> TenDayRankin
                      FROM quant.canonical_bars_daily bar JOIN active USING(symbol)
                      LEFT JOIN quant.instruments instrument ON instrument.symbol=bar.symbol
                     WHERE bar.trading_date<=%s AND bar.trading_date>=%s
-                      AND bar.quality_status IN ('fresh','partial')
+                      AND bar.quality_status='fresh'
+                      AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                ) SELECT symbol,name,trading_date,open,high,low,close,pre_close,volume,amount,
                         adj_factor,is_suspended,limit_up,limit_down,available_at
                    FROM ranked WHERE rn<=11 ORDER BY symbol,trading_date""",
-            (as_of_date, as_of_date, as_of_date, as_of_date - timedelta(days=45)),
+            (as_of_date, as_of_date, as_of_date, as_of_date, as_of_date - timedelta(days=45)),
         ).fetchall()
     daily_rows = [dict(row) for row in rows]
     timestamps = [row.get("available_at") for row in daily_rows if row.get("available_at") is not None]
