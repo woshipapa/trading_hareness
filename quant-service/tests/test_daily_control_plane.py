@@ -8,6 +8,8 @@ class DailyControlPlaneTests(unittest.TestCase):
     def test_index_rows_do_not_participate_in_equity_control_gate(self):
         self.assertIn("universe_key='all_a'", EQUITY_DAILY_CONTROL_STATUS_SQL)
         self.assertIn("expected_daily_rows", EQUITY_DAILY_CONTROL_STATUS_SQL)
+        self.assertIn("quality_status='fresh'", EQUITY_DAILY_CONTROL_STATUS_SQL)
+        self.assertIn("available_at <", EQUITY_DAILY_CONTROL_STATUS_SQL)
         payload = status_payload({
             "trading_date": date(2026, 8, 21), "expected_daily_rows": 5_000,
             "daily_rows": 4_950, "adjustment_rows": 4_950, "limit_rows": 4_950,

@@ -17,11 +17,13 @@ MINIMUM_ALL_A_COVERAGE_RATIO = 0.95
 
 EQUITY_DAILY_CONTROL_STATUS_SQL = """WITH latest AS (
        SELECT max(trading_date) AS trading_date FROM quant.canonical_bars_daily
+        WHERE quality_status='fresh'
+          AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
    ), expected AS (
        SELECT latest.trading_date,count(DISTINCT membership.symbol)::int AS expected_daily_rows
          FROM latest
          LEFT JOIN quant.universe_membership_history membership
-           ON membership.universe_key='all_a'
+          ON membership.universe_key='all_a'
           AND membership.effective_from<=latest.trading_date
           AND (membership.effective_to IS NULL OR membership.effective_to>=latest.trading_date)
         GROUP BY latest.trading_date
@@ -30,9 +32,10 @@ EQUITY_DAILY_CONTROL_STATUS_SQL = """WITH latest AS (
        count(DISTINCT bar.symbol) FILTER (WHERE bar.adj_factor IS NOT NULL)::int AS adjustment_rows,
        count(DISTINCT bar.symbol) FILTER (WHERE bar.limit_up IS NOT NULL AND bar.limit_down IS NOT NULL)::int AS limit_rows
      FROM expected
-     LEFT JOIN quant.canonical_bars_daily bar
+       LEFT JOIN quant.canonical_bars_daily bar
        ON bar.trading_date=expected.trading_date
-      AND bar.quality_status IN ('fresh','partial')
+      AND bar.quality_status='fresh'
+      AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
      LEFT JOIN quant.universe_membership_history membership
        ON membership.universe_key='all_a' AND membership.symbol=bar.symbol
       AND membership.effective_from<=expected.trading_date
