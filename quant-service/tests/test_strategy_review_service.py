@@ -20,7 +20,11 @@ class _Result:
 
 
 class _Connection:
+    def __init__(self):
+        self.calls = []
+
     def execute(self, statement, params=()):
+        self.calls.append((statement, params))
         if "FROM quant.market_events" in statement or "FROM quant.canonical_bars_daily" in statement:
             return _Result(rows=[])
         return _Result({
@@ -33,8 +37,9 @@ class _Connection:
 
 class StrategyReviewServiceTests(unittest.TestCase):
     def test_projection_is_read_only_when_persistence_is_disabled(self):
+        connection = _Connection()
         review = build(
-            _Connection(),
+            connection,
             StrategyReviewRequest(session="close", as_of_date=date(2026, 8, 21), persist=False),
             market_state=lambda items: ("mixed", {"items": len(items)}),
             index_breadth_context=lambda *args: {"quality_flags": []},
@@ -45,6 +50,11 @@ class StrategyReviewServiceTests(unittest.TestCase):
         self.assertEqual(review["market_state"], "mixed")
         self.assertNotIn("review_key", review)
         self.assertEqual(review["data_boundary"]["automation"], "no broker order submission")
+        daily_query = next(sql for sql, _params in connection.calls if "FROM quant.canonical_bars_daily" in sql)
+        daily_params = next(params for sql, params in connection.calls if "FROM quant.canonical_bars_daily" in sql)
+        self.assertIn("b.available_at<=%s", daily_query)
+        self.assertIn("b.quality_status='fresh'", daily_query)
+        self.assertEqual(daily_params[1], datetime(2026, 8, 21, 7, 30, tzinfo=timezone.utc))
 
     def test_completed_checkpoint_requires_completed_persisted_report(self):
         class Connection:

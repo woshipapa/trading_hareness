@@ -67,13 +67,15 @@ def build(
                  FROM quant.canonical_bars_daily b
             LEFT JOIN quant.instruments i ON i.symbol=b.symbol
                 WHERE b.trading_date=%s
+                  AND b.available_at<=%s
+                  AND b.quality_status='fresh'
                   AND (
                     b.symbol ~ '^(600|601|603|605|688|689|900)[0-9]{3}\\.SH$'
                     OR b.symbol ~ '^(000|001|002|003|300|301)[0-9]{3}\\.SZ$'
                     OR b.symbol ~ '^[489][0-9]{5}\\.BJ$'
                   )
                 ORDER BY b.amount DESC NULLS LAST""",
-        (as_of_date,),
+        (as_of_date, observed_at),
     ).fetchall()
     lhb_raw_rows = connection.execute(
         """SELECT api_name,row_data,provider_key,available_at

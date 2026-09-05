@@ -32,6 +32,7 @@ def index_breadth_context(
     index = connection.execute(
         """SELECT trading_date,close,pre_close,available_at FROM quant.canonical_bars_daily
              WHERE symbol='000300.SH' AND trading_date<=%s AND available_at<=%s
+               AND quality_status='fresh'
              ORDER BY trading_date DESC LIMIT 1""",
         (as_of_date, observed_at),
     ).fetchone()

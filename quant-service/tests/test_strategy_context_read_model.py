@@ -81,6 +81,7 @@ class StrategyContextReadModelTests(unittest.TestCase):
         self.assertEqual(result["index"]["change_pct"], 11.1111)
         self.assertIn("saved_snapshot", result["quality_flags"])
         self.assertTrue(all(self.observed_at in params for _sql, params in self.connection.calls[:3]))
+        self.assertIn("quality_status='fresh'", self.connection.calls[1][0])
 
     def test_event_and_lhb_contexts_group_saved_rows_by_symbol(self):
         events = event_context(self.database, ["000001.SZ"], self.observed_at)
