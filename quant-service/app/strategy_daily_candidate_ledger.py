@@ -26,6 +26,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from .liquidity_screen import liquidity_eligibility, median_daily_amount_by_symbol
+from .point_in_time import exchange_day_end
 
 POST_CLOSE_STRATEGY_KEYS = {
     "base_ready_30d": "post_close_base_ready",
@@ -52,8 +53,9 @@ def _liquidity_context(connection: Any, symbols: list[str], as_of_date: date) ->
     instruments = {str(row["symbol"]): dict(row) for row in instrument_rows}
     latest_bar_rows = connection.execute(
         """SELECT DISTINCT ON (symbol) symbol,close,is_suspended FROM quant.canonical_bars_daily
-             WHERE symbol=ANY(%s) AND trading_date<=%s ORDER BY symbol,trading_date DESC""",
-        (symbols, as_of_date),
+             WHERE symbol=ANY(%s) AND trading_date<=%s AND available_at<=%s AND quality_status='fresh'
+             ORDER BY symbol,trading_date DESC""",
+        (symbols, as_of_date, exchange_day_end(as_of_date)),
     ).fetchall()
     latest_bars = {str(row["symbol"]): dict(row) for row in latest_bar_rows}
     context: dict[str, dict[str, Any]] = {}

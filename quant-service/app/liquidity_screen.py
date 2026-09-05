@@ -20,6 +20,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from .point_in_time import exchange_day_end
+
 MINIMUM_MEDIAN_DAILY_AMOUNT = 30_000_000  # 20-day median turnover value, yuan
 MINIMUM_PRICE = 3.0
 MINIMUM_LISTING_AGE_DAYS = 60
@@ -65,11 +67,12 @@ def median_daily_amount_by_symbol(connection: Any, symbols: list[str], as_of_dat
              FROM (
                SELECT symbol, amount, row_number() OVER (PARTITION BY symbol ORDER BY trading_date DESC) AS rn
                  FROM quant.canonical_bars_daily
-                WHERE symbol=ANY(%s) AND trading_date<=%s AND amount IS NOT NULL
+                WHERE symbol=ANY(%s) AND trading_date<=%s
+                  AND available_at<=%s AND quality_status='fresh' AND amount IS NOT NULL
              ) recent
             WHERE rn<=%s
             GROUP BY symbol""",
-        (symbols, as_of_date, window_days),
+        (symbols, as_of_date, exchange_day_end(as_of_date), window_days),
     ).fetchall()
     return {str(row["symbol"]): (float(row["median_amount_yuan"]) if row["median_amount_yuan"] is not None else None) for row in rows}
 

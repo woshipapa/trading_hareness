@@ -14,6 +14,7 @@ from app.liquidity_screen import (
     liquidity_eligibility,
     median_daily_amount_by_symbol,
 )
+from app.point_in_time import exchange_day_end
 
 
 class LiquidityScreenTests(unittest.TestCase):
@@ -53,6 +54,26 @@ class LiquidityScreenTests(unittest.TestCase):
         kwargs["list_date"] = self.as_of - timedelta(days=MINIMUM_LISTING_AGE_DAYS)
         eligible, flags = liquidity_eligibility(**kwargs)
         self.assertTrue(eligible)
+
+    def test_median_query_uses_fresh_bars_known_by_exchange_day_end(self) -> None:
+        class Result:
+            def fetchall(self):
+                return []
+
+        class Connection:
+            def __init__(self):
+                self.sql = None
+                self.params = None
+
+            def execute(self, sql, params):
+                self.sql, self.params = str(sql), params
+                return Result()
+
+        connection = Connection()
+        self.assertEqual(median_daily_amount_by_symbol(connection, ['000001.SZ'], self.as_of), {})
+        self.assertIn("available_at<=%s", connection.sql)
+        self.assertIn("quality_status='fresh'", connection.sql)
+        self.assertEqual(connection.params[2], exchange_day_end(self.as_of))
 
 
 @unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
