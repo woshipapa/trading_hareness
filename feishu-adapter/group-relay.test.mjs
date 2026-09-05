@@ -3,13 +3,22 @@ import test from 'node:test';
 import { Readable } from 'node:stream';
 import { createGroupRelay } from './group-relay.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], canWrite = null } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map();
 	const sent = [];
 	const updated = [];
+	let failedTarget = false;
 	const ledger = {
-		relayRetryQueue: async () => [],
+		relayRetryQueue: async () => {
+			if (!retryFailed) return [];
+			const failed = [...saved.entries()].find(([, value]) => value.status === 'failed');
+			if (!failed) return [];
+			const [sourceMessageId, value] = failed;
+			return [{ ...value, source_message_id: sourceMessageId, source_key: value.sourceKey, source_chat_id: value.sourceChatId,
+				source_create_time: value.sourceCreateTime, target_chat_id: value.targetChatId, route_tag: value.routeTag,
+				target_message_ids: value.targetMessageIds ?? [] }];
+	},
 		portableInteractiveSummaryUpgradeQueue: async () => [],
 		markPortableSummaryVersion: async (id, version) => saved.set(id, { ...saved.get(id), portableSummaryVersion: version }),
 		relaySourceState: async (key) => sourceStates.get(key) ?? null,
@@ -18,15 +27,21 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		skipRelayMessage: async (record) => saved.set(record.sourceMessageId, { ...record, status: 'skipped_bootstrap' }),
 		filterRelayMessage: async (record, reason) => saved.set(record.sourceMessageId, { ...saved.get(record.sourceMessageId), ...record, status: 'filtered_system', errorMessage: reason }),
 		claimRelayMessage: async (record) => {
-			if (saved.has(record.sourceMessageId)) return null;
-			const claimed = { ...record, status: 'processing' }; saved.set(record.sourceMessageId, claimed); return claimed;
+			const sourceMessageId = record.sourceMessageId ?? record.source_message_id;
+			const existing = saved.get(sourceMessageId);
+			if (existing && existing.status !== 'failed') return null;
+			const claimed = { ...existing, ...record, sourceMessageId, status: 'processing', target_message_ids: existing?.targetMessageIds ?? existing?.target_message_ids ?? [] };
+			saved.set(sourceMessageId, claimed); return claimed;
 		},
-		markRelayMessage: async (id, update) => saved.set(id, { ...saved.get(id), ...update }),
+		markRelayMessage: async (id, update) => saved.set(id, { ...saved.get(id), ...update, target_message_ids: update.targetMessageIds ?? saved.get(id)?.target_message_ids ?? [] }),
 		updateRelaySourceMessage: async (id, update) => { const next = { ...saved.get(id), ...update }; saved.set(id, next); return next; },
 	};
 	const larkClient = {
 		im: { v1: {
-			message: { create: async ({ data }) => { sent.push(data); return { data: { message_id: `om_target_${sent.length}` } }; }, update: async (payload) => { updated.push(payload); return { code: 0, data: {} }; } },
+			message: { create: async ({ data }) => {
+				if (data.receive_id === failTargetChatId && !failedTarget) { failedTarget = true; throw new Error(`target unavailable: ${data.receive_id}`); }
+				sent.push(data); return { data: { message_id: `om_target_${sent.length}` } };
+			}, update: async (payload) => { updated.push(payload); return { code: 0, data: {} }; } },
 			image: { create: async () => { if (imageError) throw imageError; return imageResponse; } },
 			file: { create: async () => ({ file_key: 'file_target' }) },
 		} },
@@ -79,6 +94,23 @@ test('a route-specific target fans one source message out to the summary and ded
 		{ targetChatId: 'oc_summary', messageId: 'om_target_1' },
 		{ targetChatId: 'oc_liwei_forward', messageId: 'om_target_2' },
 	]);
+});
+
+test('a partial fan-out keeps successful target IDs so retry only needs the failed target', async () => {
+	const message = { message_id: 'om_partial_1', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: 'partial update' }) } };
+	const { relay, sent, saved } = createHarness([message], { targetChatIds: ['oc_liwei_forward'], failTargetChatId: 'oc_liwei_forward', retryFailed: true });
+	await relay.tick();
+	assert.equal(sent.length, 1);
+	assert.equal(saved.get('om_partial_1').status, 'failed');
+	assert.deepEqual(saved.get('om_partial_1').targetMessageIds, [{ targetChatId: 'oc_summary', messageId: 'om_target_1' }]);
+	assert.match(saved.get('om_partial_1').errorMessage, /oc_liwei_forward/);
+	await relay.tick();
+	assert.equal(sent.length, 2);
+	assert.deepEqual(saved.get('om_partial_1').targetMessageIds, [
+		{ targetChatId: 'oc_summary', messageId: 'om_target_1' },
+		{ targetChatId: 'oc_liwei_forward', messageId: 'om_target_2' },
+	]);
+	assert.equal(saved.get('om_partial_1').status, 'sent');
 });
 
 test('image accepts the SDK nested response shape and reports a missing upload scope safely', async () => {

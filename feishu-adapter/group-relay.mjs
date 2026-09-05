@@ -335,12 +335,34 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		throw new RelayUnsupportedError(`暂不支持的飞书消息类型：${message.msg_type ?? 'unknown'}`);
 	}
 
-	async function relayOne(message, source) {
+	function priorTargetMessages(record) {
+		const values = Array.isArray(record?.target_message_ids)
+			? record.target_message_ids
+			: (Array.isArray(record?.targetMessageIds) ? record.targetMessageIds : []);
+		return values.map((entry) => {
+			if (typeof entry === 'string') return { targetChatId: null, messageId: entry };
+			return { targetChatId: entry?.targetChatId ?? entry?.target_chat_id ?? null, messageId: entry?.messageId ?? entry?.message_id ?? null };
+		}).filter((entry) => entry.messageId);
+	}
+
+	async function relayOne(message, source, record = null) {
 		const payload = await relayPayload(message, source);
-		return Promise.all(source.targetChatIds.map(async (targetChatId) => ({
+		const completed = priorTargetMessages(record);
+		const completedTargets = new Set(completed.map((entry) => entry.targetChatId).filter(Boolean));
+		const pendingTargets = source.targetChatIds.filter((targetChatId) => !completedTargets.has(targetChatId));
+		const results = await Promise.allSettled(pendingTargets.map(async (targetChatId) => ({
 			targetChatId,
 			messageId: await sendMessage({ targetChatId, messageId: message.message_id, ...payload }),
 		})));
+		const targetMessageIds = [
+			...completed,
+			...results.filter((result) => result.status === 'fulfilled').map((result) => result.value),
+		];
+		const failures = results.map((result, index) => result.status === 'rejected' ? ({
+			targetChatId: pendingTargets[index],
+			errorMessage: result.reason instanceof Error ? result.reason.message : String(result.reason),
+		}) : null).filter(Boolean);
+		return { targetMessageIds, failures };
 	}
 
 	async function updateRelayedMessage(message, source, record) {
@@ -360,10 +382,16 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		return true;
 	}
 
-	async function processClaimed(message, source) {
+	async function processClaimed(message, source, claimedRecord = null) {
 		try {
-			const targetMessageIds = await relayOne(message, source);
-			await ledger.markRelayMessage(message.message_id, { status: 'sent', targetMessageIds, errorMessage: null });
+			const delivery = await relayOne(message, source, claimedRecord);
+			if (delivery.failures.length) {
+				const errorMessage = delivery.failures.map((failure) => `${failure.targetChatId}: ${failure.errorMessage}`).join('; ');
+				await ledger.markRelayMessage(message.message_id, { status: 'failed', targetMessageIds: delivery.targetMessageIds, errorMessage });
+				logger.error(`群消息部分转发失败：${source.key} ${message.message_id}：${errorMessage}`);
+				return;
+			}
+			await ledger.markRelayMessage(message.message_id, { status: 'sent', targetMessageIds: delivery.targetMessageIds, errorMessage: null });
 			if (message.msg_type === 'interactive') await ledger.markPortableSummaryVersion?.(message.message_id, 'interactive-text-summary-v1');
 			// The relay contract is one source message -> one summary bubble.  An
 			// action card is useful, but is deliberately opt-in so it never splits
@@ -404,7 +432,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				...record, sourceChatId: source.resolvedChatId, targetChatId: source.targetChatId, targetChatIds: source.targetChatIds,
 				routeTag: source.tag, message: sourceFromRecord(record),
 			});
-			if (claimed) await processClaimed(sourceFromRecord(record), source);
+			if (claimed) await processClaimed(sourceFromRecord(record), source, claimed);
 		}
 	}
 
@@ -489,7 +517,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 					continue;
 				}
 				const claimed = await ledger.claimRelayMessage(record);
-				if (claimed) await processClaimed(message, source);
+				if (claimed) await processClaimed(message, source, claimed);
 			}
 			if (!result.data?.has_more) break;
 			pageToken = result.data?.page_token;
