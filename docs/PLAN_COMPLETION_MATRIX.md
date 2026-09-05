@@ -68,6 +68,7 @@
 | 报告/消息差量同步、`received_at`、版本和文字证据 | 已完成 | 不下载远端图片、音视频或媒体 URL；报告与消息支路独立 |
 | 分析师观点 outcome 与专家画像 | 研究中 | 当前成熟 outcome/eligible 样本不足，权重保持零 |
 | Prompt Lab champion/challenger | 研究中（未晋级） | 11,313 个候选已物化；按上海可用日做时间外留出，但金标为 0，无法比较/晋级 |
+| Qlib/LightGBM/LEAN 独立训练与模型注册 | 未开始 | 当前只有框架目录和规则/SQL 探索性引擎；缺少不可变特征导出、训练 worker、OOF 预测、完整 trial registry、模型回滚和跨框架 benchmark |
 | RL / contextual bandit | 暂停 | 只能在 Phase 0–5 通过后离线 challenger，不得改 live champion |
 
 ## 当前验收证据
@@ -83,7 +84,7 @@
 
 - quant-service：历史 734 项回归记录对应 2026-08-23 快照；当前数量和本次复核结果见上方 2026-09-05 条目。除历史的 v2 规则输入、policy/risk gate 与作者时点回放边界外，新增覆盖观察池报价的直连/兜底边界、扫描总编排的闭市零外呼和确认投递、单事务信号证据顺序与生产事务边界、服务启动失败回滚及逐项关闭隔离、复盘/盘后同日回执 runner、日终 suppressed 摘要、一秒级 Super GET、收盘分钟画像、腾讯盘口及板块曲线 runtime 装配、扫描前的板块/秒级交叉确认、观察池/精确成员、个股 outbox pending/due 与轮动 suppression、THS 概念成员补全 flow/progress、日线同步与盘后核心 basket 输入、背景循环 runtime lease、涨停联动 research runtime/精确关系、熔断状态与生产日历 async 预读、THS/东财精确成员批次失败隔离、概念目录不可用时成员恢复 fail-closed、概念/涨停池精确代码 join，以及原生异步自动化回执、市场资金流、板块/概念/精确成员、涨停联动、Prompt Lab、已落库分析师市场复盘、有界市场评测、分钟时间轴、分析师研究状态、归档总览/游标、提供者目录/能力/健康、PIT 文本因子、路由 async 边界、真实 `upsert_bar` SQL 集成、单股窗口/claim 就绪度、决策卡、板块曲线/复盘/轮动/挖掘、分析师操作回放/outcome、技能/研究/归档证据读取，以及本地研究窗口/因子拒绝、快照控制面阻断、Tushare ledger 缓存/取消、研究维护、远端 claim 唯一成绩单来源、原生 async 同步健康、观察池维护、研究存储准入、生命周期 task、统一交易日日历状态、盘后形态样本仓储、分钟挖掘与盘后一键刷新装配边界，以及单股研究公共源探针的熔断先行和有界证据写入、显式核心池同日控制面同步。
 - frontend：2026-08-22 已重新执行 `npm run api:check`、`vue-tsc --noEmit` 与 Vite production build，均通过；概念成员卡现在区分有效精确映射覆盖和同日同步回执，避免显示层掩盖证据差异。生成 API 类型仍与 OpenAPI 一致。构建仅保留 charts/element-plus 大于 500 kB 的优化警告，不影响功能或接口契约。
-- 开盘预检：compose、数据库迁移 `20260822_0055`、必需后台租约、共享 provider pacing、30s/10s/1s/60s 节奏、飞书、当前发布版分析师文字同步以及可恢复备份均通过；预检是只读的，不请求市场 provider 或发送提醒。
+- 开盘预检：compose、数据库迁移（当前 head 为 `20260905_0092`）、必需后台租约、共享 provider pacing、30s/10s/1s/60s 节奏、飞书、当前发布版分析师文字同步以及可恢复备份均通过；预检是只读的，不请求市场 provider 或发送提醒。
 - 最近提交：见当前仓库最新提交；本轮未改变策略阈值、live 权重或历史数据范围。所有新增拆分均保持既有 provider、数据库事务和告警边界。
 - 策略实现提交均已推送到 `origin/main`；工作树中可能并行存在未纳入本轮策略提交的前端/飞书适配改动，提交时必须按文件路径精确暂存，避免将凭据或未验收改动混入。
 
@@ -99,7 +100,7 @@
 ## 2026-08-16 收口记录
 
 - 运行态复核：所有服务容器健康；实时服务在非连续竞价时正确 `standby`，并保留 36 只启用观察股的 30 秒/特别窗口 10 秒/盘口 3 秒/板块曲线 60 秒节奏。主 Tushare 明确标为无实时能力；Super SDK 与 Super GET 均按已验证协议分工，代理连接池和 Super GET 线程内 `requests.Session` 复用已启用。
-- 存储治理复核：量化 schema 13.39 GB，占 40 GiB 总研究预算 31.2%、28 GiB 热库预算 44.5%；7 天盘口与秒级交叉确认、60 天板块曲线/轮动、90 天分钟剖面及 60–120 天（默认 90）规则输入/观察池报价均有留存边界。未删除原始证据，也未启动历史回填。
+- 存储治理复核（2026-08-16 历史快照）：量化 schema 13.39 GB，占当时 40 GiB 总研究预算 31.2%、28 GiB 热库预算 44.5%；当前热库上限已统一为 36 GiB，当前容量见 2026-09-05 运行态条目。7 天盘口与秒级交叉确认、60 天板块曲线/轮动、90 天分钟剖面及 60–120 天（默认 90）规则输入/观察池报价均有留存边界。未删除原始证据，也未启动历史回填。
 - 订单簿数据只作为 `attribution_only`：`qi5`、窗口聚合 order-flow proxy、封单侵蚀等已入 SignalSpec 证据引用；不改变实时评分、阈值或提醒资格。
 - 盘中规则输入回放已升级为 `intraday-rule-input-replay-v2`：新扫描冻结市场状态、Super/Tencent 交叉确认、纸面仓位与组合风险上下文，回放可调用同一纯函数 policy/risk gate；旧 v1 快照明确标记为 `core-only`，不会伪装成完整门禁回放。当前 2026-08-17 已存 3,996 条快照均来自 v2 部署前，故本次回放的 `policy_replayable_snapshots=0`；下一交易时段才会产生可验证的 v2 样本。
 - 分析师链复核：报告与消息流各自拥有持久 cursor 与 45 天 liveness receipt；当前 active/published 版本一致，2026-08-22 的服务端文字-only completed receipt 已使 `/analyst-research/sync-health` 返回 `verified_recent_execution`。n8n 历史 execution 行仍可能保留旧错误，健康页刻意以当前 workflow ID 的可审计同步回执而非旧 CLI/执行行判定，不把二者混同。
