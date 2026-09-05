@@ -12,6 +12,7 @@ from app.research_experiment_service import (
     ResearchExperimentDependencies,
     build_snapshot,
     evaluate_factors,
+    latest_data_manifest_id,
     research_window,
 )
 from app.point_in_time import exchange_day_end
@@ -43,6 +44,19 @@ def _deps(database: MagicMock, **overrides):
 
 
 class ResearchExperimentServiceTests(unittest.TestCase):
+    def test_latest_manifest_prefers_ready_snapshot_at_the_cutoff(self):
+        connection = MagicMock()
+        connection.execute.return_value.fetchone.return_value = {"snapshot_key": "snapshot-2026-08-21"}
+
+        manifest_id = latest_data_manifest_id(
+            connection, date(2026, 8, 21), datetime(2026, 8, 21, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(manifest_id, "snapshot-2026-08-21")
+        sql, params = connection.execute.call_args.args
+        self.assertIn("status IN ('ready','blocked')", sql)
+        self.assertEqual(params[0], date(2026, 8, 21))
+
     def test_research_window_keeps_persisted_point_in_time_bounds(self) -> None:
         connection = MagicMock()
         connection.execute.return_value.fetchone.return_value = {
@@ -82,8 +96,9 @@ class ResearchExperimentServiceTests(unittest.TestCase):
                 "earliest": date(2025, 1, 2), "latest": date(2026, 8, 21),
             })),
             MagicMock(fetchall=MagicMock(return_value=[{"factor_key": "momentum_20d"}])),
-            MagicMock(), MagicMock(), MagicMock(), MagicMock(), evaluation_row,
-            MagicMock(), MagicMock(),
+            MagicMock(fetchone=MagicMock(return_value=None)), MagicMock(), MagicMock(), MagicMock(), MagicMock(),
+            MagicMock(), MagicMock(), MagicMock(), evaluation_row,
+            MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(),
         ]
         database = MagicMock()
         database.transaction.return_value = _Transaction(connection.execute)
@@ -99,6 +114,11 @@ class ResearchExperimentServiceTests(unittest.TestCase):
 
         self.assertRegex(result["research_run_id"], r"^[0-9a-f-]{36}$")
         self.assertEqual(len(result["output_digest"]), 64)
+        self.assertIsNone(result["data_manifest_id"])
+        self.assertTrue(any(
+            len(call.args) > 1 and "sector_membership_history" in str(call.args[1])
+            for call in connection.execute.call_args_list
+        ))
         factor_insert = next(
             call for call in connection.execute.call_args_list
             if "INSERT INTO quant.factor_evaluations" in str(call.args[0])

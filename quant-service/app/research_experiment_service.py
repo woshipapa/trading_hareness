@@ -17,6 +17,16 @@ from .research_manifest import MANIFEST_VERSION, manifest_digest, snapshot_key a
 from .research_run_repository import finish_research_run, start_research_run
 
 
+FACTOR_INPUT_DATASETS = (
+    "canonical_bars_daily", "market_trade_calendar", "universe_membership_history",
+    "instruments", "sector_membership_history", "daily_fundamentals", "factor_registry",
+)
+STRATEGY_INPUT_DATASETS = (
+    "canonical_bars_daily", "market_trade_calendar", "universe_membership_history",
+    "instruments", "sector_membership_history", "daily_fundamentals", "strategy_registry",
+)
+
+
 @dataclass(frozen=True)
 class ResearchExperimentDependencies:
     database: Any
@@ -53,6 +63,23 @@ def research_window(
     return start, end
 
 
+def latest_data_manifest_id(connection: Any, as_of_date: date, knowledge_cutoff: datetime) -> str | None:
+    """Resolve the latest non-building manifest covering an experiment end date."""
+    row = connection.execute(
+        """SELECT snapshot_key
+              FROM quant.data_snapshots
+             WHERE as_of_date=%s AND knowledge_cutoff<=%s AND status IN ('ready','blocked')
+             ORDER BY CASE status WHEN 'ready' THEN 0 ELSE 1 END,
+                      knowledge_cutoff DESC,created_at DESC
+             LIMIT 1""",
+        (as_of_date, knowledge_cutoff),
+    ).fetchone()
+    if not row:
+        return None
+    value = row["snapshot_key"]
+    return str(value) if value else None
+
+
 def evaluate_factors(payload: Any, deps: ResearchExperimentDependencies) -> dict[str, Any]:
     pending_error: Exception | None = None
     with deps.database.transaction() as connection:
@@ -69,6 +96,7 @@ def evaluate_factors(payload: Any, deps: ResearchExperimentDependencies) -> dict
         if unknown:
             raise deps.http_exception(status_code=422, detail=f"unknown or disabled factors: {', '.join(unknown)}")
         knowledge_cutoff = deps.as_utc(exchange_day_end(end))
+        data_manifest_id = latest_data_manifest_id(connection, end, knowledge_cutoff)
         research_run_id = start_research_run(
             connection,
             experiment_type="factor_evaluation",
@@ -77,7 +105,8 @@ def evaluate_factors(payload: Any, deps: ResearchExperimentDependencies) -> dict
             end_date=end,
             knowledge_cutoff=knowledge_cutoff,
             parameters={"factor_keys": requested, "horizon_days": payload.horizon_days},
-            input_datasets=("canonical_bars_daily", "universe_membership_history", "factor_registry"),
+            data_manifest_id=data_manifest_id,
+            input_datasets=FACTOR_INPUT_DATASETS,
             data_schema_version="factor-evaluation-v1",
             json_value=deps.json_value,
         )
@@ -103,11 +132,13 @@ def evaluate_factors(payload: Any, deps: ResearchExperimentDependencies) -> dict
                 result["evaluation_id"] = str(row["evaluation_id"])
                 results.append(result)
             output_digest = finish_research_run(
-                connection, research_run_id, status="completed", output={"results": results}, json_value=deps.json_value,
+                connection, research_run_id, status="completed",
+                output={"results": results, "data_manifest_id": data_manifest_id}, json_value=deps.json_value,
             )
     if pending_error is not None:
         raise pending_error
     return {"research_run_id": str(research_run_id), "output_digest": output_digest,
+            "data_manifest_id": data_manifest_id,
             "universe_key": payload.universe_key, "start_date": str(start), "end_date": str(end), "results": results}
 
 
@@ -130,6 +161,7 @@ def backtest_strategy(payload: Any, deps: ResearchExperimentDependencies) -> dic
             "total_cost_bps": payload.total_cost_bps, "factors": payload.factors,
         }
         knowledge_cutoff = deps.as_utc(exchange_day_end(end))
+        data_manifest_id = latest_data_manifest_id(connection, end, knowledge_cutoff)
         research_run_id = start_research_run(
             connection,
             experiment_type="strategy_backtest",
@@ -140,7 +172,8 @@ def backtest_strategy(payload: Any, deps: ResearchExperimentDependencies) -> dic
             end_date=end,
             knowledge_cutoff=knowledge_cutoff,
             parameters=parameters,
-            input_datasets=("canonical_bars_daily", "universe_membership_history", "strategy_registry"),
+            data_manifest_id=data_manifest_id,
+            input_datasets=STRATEGY_INPUT_DATASETS,
             data_schema_version="strategy-backtest-v1",
             json_value=deps.json_value,
         )
@@ -159,6 +192,7 @@ def backtest_strategy(payload: Any, deps: ResearchExperimentDependencies) -> dic
             ).fetchone()
             result["strategy_experiment_id"] = str(row["strategy_experiment_id"])
             result["research_run_id"] = str(research_run_id)
+            result["data_manifest_id"] = data_manifest_id
             result["output_digest"] = finish_research_run(
                 connection, research_run_id, status="completed", output=result, json_value=deps.json_value,
             )
@@ -223,4 +257,7 @@ def build_snapshot(payload: Any, deps: ResearchExperimentDependencies) -> dict[s
             "status": status, "manifest_sha256": content_sha256, "manifest": manifest}
 
 
-__all__ = ["ResearchExperimentDependencies", "backtest_strategy", "build_snapshot", "evaluate_factors", "research_window"]
+__all__ = [
+    "FACTOR_INPUT_DATASETS", "STRATEGY_INPUT_DATASETS", "ResearchExperimentDependencies",
+    "backtest_strategy", "build_snapshot", "evaluate_factors", "latest_data_manifest_id", "research_window",
+]
