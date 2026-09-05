@@ -74,7 +74,7 @@
 
 ### 2026-09-05 当前复核
 
-- 工程回归：挂载当前源码执行 quant-service **1,370/1,370** 项 Python discovery 通过；Feishu adapter **72/72** 通过；前端 `api:check`、`typecheck`、production build、OpenAPI contract 和 architecture check 均通过。当前提交与 `origin/main` 同为 `8792822`。
+- 工程回归：挂载当前源码执行 quant-service **1,370/1,370** 项 Python discovery 通过；Feishu adapter **72/72** 通过；前端 `api:check`、`typecheck`、production build、OpenAPI contract 和 architecture check 均通过。复核时提交与 `origin/main` 同步（记录提交 `8e4e32d`）。
 - 运行态：quant-research、PostgreSQL、Feishu adapter、gateway 和 n8n 容器均健康；`/health` 返回 `ok`，异步池可用，5 个后台租约均在续租，存储约占总预算 46.3%、热库约占 51.0%。运行镜像的 build metadata 尚未注入 git SHA/release，且当前容器未重建为本轮最新源码；挂载源码测试通过不等于线上容器已加载最新提交。
 - 当前研究门禁：最新交易日（2026-09-04）日线控制面仅 13/5,556 个点时全 A 标的，覆盖率 0.23%，状态为 `blocked`；涨跌停控制行仍为 0。`ths_industry` 点时成员当前无可用历史行，离线分钟 `source_available_at` 仍为 0，未来盘中 v2 快照尚未积累满 60 个交易日，因此 P2/P3 研究验证不能启动。
 - 性能余项：`/api/v1/data-readiness/replay` 在 15 秒预算内未返回；执行计划显示其仍会扫描大体量 canonical bars/fundamentals。需要先做有界增量物化或索引优化，再把 readiness 端点纳入运行态验收。
