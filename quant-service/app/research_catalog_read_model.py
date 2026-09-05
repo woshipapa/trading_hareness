@@ -88,6 +88,21 @@ def data_quality_issues(database: Any, limit: int) -> dict[str, Any]:
     return {"items": rows}
 
 
+def latest_strategy_day_summary(database: Any, exchange_date: Any | None = None) -> dict[str, Any]:
+    """Return the latest persisted daily learning receipt, without triggering work."""
+    where = " WHERE exchange_date=%s" if exchange_date is not None else ""
+    params = (exchange_date,) if exchange_date is not None else ()
+    with database.transaction() as connection:
+        row = connection.execute(
+            """SELECT exchange_date,payload,message_text,delivery_status,attempt_count,
+                      sent_at,error_message,created_at,updated_at
+                 FROM quant.strategy_day_summaries"""
+            + where + " ORDER BY exchange_date DESC LIMIT 1",
+            params,
+        ).fetchone()
+    return {"summary": row, "research_only": True, "live_effect": "none"}
+
+
 def research_runs(
     database: Any,
     experiment_type: str | None = None,
@@ -141,5 +156,6 @@ def research_run(database: Any, research_run_id: Any) -> dict[str, Any]:
 
 __all__ = [
     "data_quality_issues", "factor_evaluations", "factor_registry", "latest_features",
-    "research_run", "research_runs", "strategy_experiments", "strategy_registry", "universe_members",
+    "latest_strategy_day_summary", "research_run", "research_runs", "strategy_experiments",
+    "strategy_registry", "universe_members",
 ]

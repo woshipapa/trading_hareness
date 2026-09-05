@@ -77,6 +77,20 @@ export default defineComponent({
     </el-table>
     <el-empty v-if="!researchRuns.length" description="尚无因子/回测运行台账" :image-size="64" />
   </el-card>
+  <el-card shadow="never" header="最近日终学习摘要" class="section-gap">
+    <el-alert title="摘要只读取已保存的盘中信号、成熟结果、盘后候选和离线策略学习；缺失或未达到样本门槛时保持研究阻断，不自动改参数。" type="info" :closable="false" show-icon/>
+    <template v-if="dailyStrategySummary">
+      <el-descriptions :column="mobileLayout ? 1 : 5" border size="small" class="section-gap">
+        <el-descriptions-item label="交易日">{{ dailyStrategySummary.exchange_date }}</el-descriptions-item>
+        <el-descriptions-item label="投递状态">{{ dailyStrategySummary.delivery_status }}</el-descriptions-item>
+        <el-descriptions-item label="提醒数">{{ dailyStrategySummary.payload.signal_counts?.alerted ?? 0 }}</el-descriptions-item>
+        <el-descriptions-item label="成熟结果">{{ JSON.stringify(dailyStrategySummary.payload.outcome_counts ?? {}) }}</el-descriptions-item>
+        <el-descriptions-item label="策略门禁">{{ dailyStrategySummary.payload.offline_policy_learning?.validation_gate?.status ?? '未生成' }}</el-descriptions-item>
+      </el-descriptions>
+      <el-text type="info">盘后候选：{{ dailyStrategySummary.payload.post_close?.status ?? '缺失' }} · {{ dailyStrategySummary.payload.post_close?.reason ?? '无附加说明' }}</el-text>
+    </template>
+    <el-empty v-else description="尚无日终学习摘要；完成一次盘后日终管线后会在此显示。" :image-size="64" />
+  </el-card>
   <el-card shadow="never" header="运行与历史验证 Readiness">
     <el-alert :title="overview.feature_readiness?.decision_ready ? '运行基线：核心决策数据已通过当前门槛' : `运行基线阻塞：${(overview.feature_readiness?.blockers ?? []).join(', ') || '未知'}`" :type="overview.feature_readiness?.decision_ready ? 'success' : 'warning'" :closable="false" show-icon/>
     <el-alert class="section-gap" :title="replayReadiness.status === 'ready' ? '历史验证：P2 数据基础与 P3 回放门槛均已满足' : '历史验证：尚未达到回放/策略验证门槛；不会被运行基线的绿色状态掩盖。'" :type="replayReadiness.status === 'ready' ? 'success' : 'warning'" :closable="false" show-icon/>

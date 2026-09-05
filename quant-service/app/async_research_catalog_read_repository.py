@@ -82,6 +82,22 @@ async def data_quality_issues(async_database: Any, limit: int) -> dict[str, Any]
     return {"items": rows}
 
 
+async def latest_strategy_day_summary(async_database: Any, exchange_date: Any | None = None) -> dict[str, Any]:
+    """Return the latest persisted daily learning receipt through the read pool."""
+    where = " WHERE exchange_date=%s" if exchange_date is not None else ""
+    params = (exchange_date,) if exchange_date is not None else ()
+    async with async_database.transaction() as conn:
+        result = await conn.execute(
+            """SELECT exchange_date,payload,message_text,delivery_status,attempt_count,
+                      sent_at,error_message,created_at,updated_at
+                 FROM quant.strategy_day_summaries"""
+            + where + " ORDER BY exchange_date DESC LIMIT 1",
+            params,
+        )
+        row = await result.fetchone()
+    return {"summary": row, "research_only": True, "live_effect": "none"}
+
+
 async def research_runs(
     async_database: Any,
     experiment_type: str | None = None,

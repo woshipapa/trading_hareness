@@ -1212,6 +1212,7 @@ const researchPaths = new Map([
 	['/api/research/analyst-research/reviews/latest', '/api/v1/analyst-research/reviews/latest'],
 	['/api/research/analyst-research/reviews/run', '/api/v1/analyst-research/reviews/run'],
 	['/api/research/research-runs', '/api/v1/research/runs'],
+	['/api/research/strategy/daily-summary/latest', '/api/v1/strategy/daily-summary/latest'],
 	['/api/research/agent/context', '/api/v1/agent/context'],
 	['/api/research/automation/runs', '/api/v1/automation/runs'],
 	['/api/research/analyst-prompt-lab/status', '/api/v1/analyst-prompt-lab/status'],

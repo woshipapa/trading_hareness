@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -41,6 +42,10 @@ def build_research_catalog_reads_router(database: Any, async_database: Any | Non
     @router.get("/api/v1/data-quality/issues")
     async def quality_issues(limit: int = 100) -> dict[str, Any]:
         return await async_read_model.data_quality_issues(async_database, limit) if async_database else read_model.data_quality_issues(database, limit)
+
+    @router.get("/api/v1/strategy/daily-summary/latest")
+    async def latest_daily_summary(exchange_date: date | None = None) -> dict[str, Any]:
+        return await async_read_model.latest_strategy_day_summary(async_database, exchange_date) if async_database else read_model.latest_strategy_day_summary(database, exchange_date)
 
     @router.get("/api/v1/research/runs")
     async def research_run_history(

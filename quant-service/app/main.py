@@ -4834,6 +4834,11 @@ def data_quality_issues(limit: int = 100) -> dict[str, Any]:
     return research_catalog_reads.data_quality_issues(db, limit)
 
 
+def latest_strategy_day_summary(exchange_date: date | None = None) -> dict[str, Any]:
+    """Compatibility export for the daily research-learning receipt."""
+    return research_catalog_reads.latest_strategy_day_summary(db, exchange_date)
+
+
 def research_runs(experiment_type: str | None = None, status: str | None = None, limit: int = 50) -> dict[str, Any]:
     """Compatibility export for the reproducible research-run projection."""
     return research_catalog_reads.research_runs(db, experiment_type, status, limit)

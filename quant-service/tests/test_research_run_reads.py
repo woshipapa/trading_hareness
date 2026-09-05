@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 from app.async_research_catalog_read_repository import research_run as async_research_run
 from app.async_research_catalog_read_repository import research_runs as async_research_runs
 from app.research_catalog_read_model import research_run, research_runs
+from app.research_catalog_read_model import latest_strategy_day_summary
 from app.routers.research_catalog_reads import build_research_catalog_reads_router
 
 
@@ -52,6 +54,20 @@ class ResearchRunReadTests(unittest.TestCase):
         self.assertIn("e.research_run_id", sqls[0])
         self.assertIn("e.research_run_id", sqls[1])
 
+    def test_latest_daily_summary_is_a_read_only_learning_receipt(self):
+        connection = MagicMock()
+        connection.execute.return_value.fetchone.return_value = {
+            "exchange_date": date(2026, 8, 21), "payload": {"readiness": {"decision_ready": False}},
+        }
+        database = MagicMock()
+        database.transaction.return_value.__enter__.return_value = connection
+
+        payload = latest_strategy_day_summary(database, date(2026, 8, 21))
+
+        self.assertEqual(payload["summary"]["exchange_date"], date(2026, 8, 21))
+        self.assertTrue(payload["research_only"])
+        self.assertEqual(connection.execute.call_args.args[1], (date(2026, 8, 21),))
+
     def test_detail_returns_lineage_and_missing_run_is_explicit(self):
         connection = MagicMock()
         connection.execute.side_effect = [
@@ -77,6 +93,7 @@ class ResearchRunReadTests(unittest.TestCase):
         methods_by_path = {route.path: route.methods for route in router.routes}
         self.assertEqual(methods_by_path["/api/v1/research/runs"], {"GET"})
         self.assertEqual(methods_by_path["/api/v1/research/runs/{research_run_id}"], {"GET"})
+        self.assertEqual(methods_by_path["/api/v1/strategy/daily-summary/latest"], {"GET"})
 
 
 class AsyncResearchRunReadTests(unittest.IsolatedAsyncioTestCase):
@@ -99,6 +116,21 @@ class AsyncResearchRunReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail["run"]["status"], "completed")
         self.assertEqual(connection.execute.await_count, 3)
         self.assertEqual(connection.execute.await_args_list[0].args[1], ("completed", 1))
+
+    async def test_async_latest_daily_summary_uses_read_pool(self):
+        from app.async_research_catalog_read_repository import latest_strategy_day_summary as async_latest_summary
+
+        connection = MagicMock()
+        result = MagicMock()
+        result.fetchone = AsyncMock(return_value={"exchange_date": date(2026, 8, 21)})
+        connection.execute = AsyncMock(return_value=result)
+        database = MagicMock()
+        database.transaction.return_value = _AsyncTransaction(connection)
+
+        payload = await async_latest_summary(database)
+
+        self.assertEqual(payload["summary"]["exchange_date"], date(2026, 8, 21))
+        self.assertEqual(connection.execute.await_args.args[1], ())
 
 
 if __name__ == "__main__":  # pragma: no cover

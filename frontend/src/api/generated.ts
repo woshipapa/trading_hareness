@@ -1371,6 +1371,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategy/daily-summary/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Latest Daily Summary */
+        get: operations["latest_daily_summary_api_v1_strategy_daily_summary_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/runs": {
         parameters: {
             query?: never;
@@ -6910,6 +6927,39 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_daily_summary_api_v1_strategy_daily_summary_latest_get: {
+        parameters: {
+            query?: {
+                exchange_date?: string | null;
             };
             header?: never;
             path?: never;
