@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Callable
+
+from .point_in_time import availability_cutoff
 
 
 def market_regime(connection: Any, as_of_date: date, number: Callable[[Any], float]) -> str:
@@ -16,26 +18,42 @@ def market_regime(connection: Any, as_of_date: date, number: Callable[[Any], flo
     return "risk_on" if number(rows[0]["close"]) >= number(rows[-1]["close"]) else "risk_off"
 
 
-def latest_tushare_row(connection: Any, api_name: str, symbol: str, as_of_date: date) -> dict[str, Any] | None:
-    """Read persisted raw evidence; never call a provider."""
+def latest_tushare_row(
+    connection: Any, api_name: str, symbol: str, as_of_date: date,
+    available_before: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Read persisted raw evidence visible at the decision cutoff.
+
+    ``trade_date`` is the observation's exchange date; ``available_at`` is the
+    provider/local availability clock.  Both constraints are required for a
+    point-in-time read.  The optional argument keeps older daily callers
+    source-compatible while defaulting them to the end of the exchange day.
+    """
+    cutoff = availability_cutoff(as_of_date, available_before)
     rows = connection.execute(
         """SELECT row_data FROM quant.tushare_raw_records
            WHERE api_name=%s AND row_data->>'ts_code'=%s
              AND coalesce(row_data->>'trade_date','')<=%s
+             AND available_at<=%s
            ORDER BY coalesce(row_data->>'trade_date','') DESC,available_at DESC LIMIT 1""",
-        (api_name, symbol, as_of_date.strftime("%Y%m%d")),
+        (api_name, symbol, as_of_date.strftime("%Y%m%d"), cutoff),
     ).fetchall()
     return dict(rows[0]["row_data"]) if rows else None
 
 
-def analyst_feature(connection: Any, symbol: str, as_of_date: date, number: Callable[[Any], float]) -> dict[str, Any]:
+def analyst_feature(
+    connection: Any, symbol: str, as_of_date: date, number: Callable[[Any], float],
+    available_before: datetime | None = None,
+) -> dict[str, Any]:
+    """Read eligible analyst observations at a precise availability cutoff."""
+    cutoff = availability_cutoff(as_of_date, available_before)
     rows = connection.execute(
         """SELECT o.analyst_id AS remote_analyst_id,o.direction,o.strength,o.confidence AS extraction_confidence,
                   o.horizon_days,left(o.evidence_span,220) evidence
            FROM quant.analyst_observations o
            WHERE o.scope='stock' AND o.subject_key=%s AND o.status='eligible'
-             AND (o.strategy_available_at AT TIME ZONE 'Asia/Shanghai')::date<=%s
-           ORDER BY o.strategy_available_at DESC,o.created_at DESC LIMIT 50""", (symbol, as_of_date)
+             AND o.strategy_available_at<=%s
+           ORDER BY o.strategy_available_at DESC,o.created_at DESC LIMIT 50""", (symbol, cutoff)
     ).fetchall()
     if not rows:
         return {"consensus": 0.0, "claim_count": 0, "analyst_skill": 0.5, "evidence": [],
@@ -52,4 +70,3 @@ def analyst_feature(connection: Any, symbol: str, as_of_date: date, number: Call
                           "strength": number(row["strength"]), "horizon_days": row["horizon_days"],
                           "evidence": row["evidence"]}
                          for row in rows[:8]]}
-

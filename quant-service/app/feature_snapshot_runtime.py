@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 
@@ -20,9 +20,9 @@ class FeatureSnapshotRuntimeDependencies:
     feature_version: str
     number: Callable[[Any], float]
     market_regime: Callable[[Any, date], str]
-    analyst_text_factor_summary: Callable[[Any, date], dict[str, Any]]
-    latest_tushare_row: Callable[[Any, str, str, date], dict[str, Any] | None]
-    analyst_feature: Callable[[Any, str, date], dict[str, Any]]
+    analyst_text_factor_summary: Callable[..., dict[str, Any]]
+    latest_tushare_row: Callable[..., dict[str, Any] | None]
+    analyst_feature: Callable[..., dict[str, Any]]
 
 
 class FeatureSnapshotRuntime:
@@ -31,7 +31,9 @@ class FeatureSnapshotRuntime:
     def __init__(self, dependencies: FeatureSnapshotRuntimeDependencies) -> None:
         self._dependencies = dependencies
 
-    def build(self, as_of_date: date, universe_key: str) -> dict[str, Any]:
+    def build(
+        self, as_of_date: date, universe_key: str, *, knowledge_cutoff: datetime | None = None,
+    ) -> dict[str, Any]:
         dependencies = self._dependencies
         with dependencies.database.transaction() as connection:
             return dependencies.materialize(
@@ -39,6 +41,7 @@ class FeatureSnapshotRuntime:
                 as_of_date,
                 universe_key,
                 feature_version=dependencies.feature_version,
+                knowledge_cutoff=knowledge_cutoff,
                 number=dependencies.number,
                 market_regime=dependencies.market_regime,
                 analyst_text_factor_summary=dependencies.analyst_text_factor_summary,

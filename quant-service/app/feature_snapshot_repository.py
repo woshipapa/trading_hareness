@@ -3,22 +3,40 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date
+import inspect
+from datetime import date, datetime
 from statistics import mean
 from typing import Any, Callable
 
 from .stable_json import stable_dumps, stable_json
+from .point_in_time import availability_cutoff
 
 from .research_prices import adjusted_bars
 
 
+def _call_with_cutoff(callback: Callable[..., Any], *args: Any, cutoff: datetime) -> Any:
+    """Pass the cutoff to new ports while keeping old test/recovery ports valid."""
+
+    try:
+        parameters = inspect.signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        parameters = ()
+    accepts_keyword = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD or parameter.name == "available_before"
+        for parameter in parameters
+    )
+    return callback(*args, available_before=cutoff) if accepts_keyword else callback(*args)
+
+
 def materialize_feature_snapshot(
     connection: Any, as_of_date: date, universe_key: str, *, feature_version: str,
+    knowledge_cutoff: datetime | None = None,
     number: Callable[[Any], float], market_regime: Callable[[Any, date], str],
-    analyst_text_factor_summary: Callable[[Any, date], dict[str, Any]],
-    latest_tushare_row: Callable[[Any, str, str, date], dict[str, Any] | None],
-    analyst_feature: Callable[[Any, str, date], dict[str, Any]],
+    analyst_text_factor_summary: Callable[..., dict[str, Any]],
+    latest_tushare_row: Callable[..., dict[str, Any] | None],
+    analyst_feature: Callable[..., dict[str, Any]],
 ) -> dict[str, Any]:
+    cutoff = availability_cutoff(as_of_date, knowledge_cutoff)
     members = connection.execute(
         """SELECT m.symbol,i.name,i.industry,i.is_st FROM quant.universe_members m
            JOIN quant.instruments i ON i.symbol=m.symbol
@@ -27,7 +45,7 @@ def materialize_feature_snapshot(
     if not members:
         raise ValueError(f"universe {universe_key} has no enabled symbols")
     regime = market_regime(connection, as_of_date)
-    analyst_context = analyst_text_factor_summary(connection, as_of_date)
+    analyst_context = _call_with_cutoff(analyst_text_factor_summary, connection, as_of_date, cutoff=cutoff)
     items: list[dict[str, Any]] = []
     for member in members:
         symbol = str(member["symbol"])
@@ -86,32 +104,35 @@ def materialize_feature_snapshot(
             features["fundamentals"] = {key: number(fundamental[key]) for key in fundamental.keys()}
         else:
             flags.append("missing_fundamentals")
-        moneyflow = latest_tushare_row(connection, "moneyflow_dc", symbol, as_of_date)
+        moneyflow = _call_with_cutoff(latest_tushare_row, connection, "moneyflow_dc", symbol, as_of_date, cutoff=cutoff)
         if moneyflow:
             features["moneyflow_dc"] = {"trade_date": moneyflow.get("trade_date"), "net_amount": number(moneyflow.get("net_amount")),
                                          "net_amount_rate": number(moneyflow.get("net_amount_rate")), "buy_elg_amount": number(moneyflow.get("buy_elg_amount")),
                                          "buy_sm_amount": number(moneyflow.get("buy_sm_amount"))}
         else:
             flags.append("missing_moneyflow_dc")
-        standard_flow = latest_tushare_row(connection, "moneyflow", symbol, as_of_date)
+        standard_flow = _call_with_cutoff(latest_tushare_row, connection, "moneyflow", symbol, as_of_date, cutoff=cutoff)
         if standard_flow:
             features["moneyflow"] = {"trade_date": standard_flow.get("trade_date"), "net_mf_amount": number(standard_flow.get("net_mf_amount")),
                                       "net_mf_vol": number(standard_flow.get("net_mf_vol"))}
-        features["analyst"] = analyst_feature(connection, symbol, as_of_date)
+        features["analyst"] = _call_with_cutoff(analyst_feature, connection, symbol, as_of_date, cutoff=cutoff)
         features["analyst_market_context"] = analyst_context["market"]
         features["market_regime"] = regime
         items.append({"symbol": symbol, "features": features, "quality_flags": sorted(set(flags))})
     stable = stable_dumps(items)
-    snapshot_key = hashlib.sha256(f"{feature_version}:{universe_key}:{as_of_date}:{stable}".encode()).hexdigest()
+    snapshot_key = hashlib.sha256(
+        f"{feature_version}:{universe_key}:{as_of_date}:{cutoff.isoformat()}:{stable}".encode()
+    ).hexdigest()
     for item in items:
         connection.execute(
-            """INSERT INTO quant.feature_snapshots(snapshot_key,symbol,as_of_date,feature_version,features,quality_flags)
-               VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(snapshot_key,symbol,feature_version) DO NOTHING""",
-            (snapshot_key, item["symbol"], as_of_date, feature_version,
+            """INSERT INTO quant.feature_snapshots(snapshot_key,symbol,as_of_date,feature_version,knowledge_cutoff,features,quality_flags)
+               VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(snapshot_key,symbol,feature_version) DO NOTHING""",
+            (snapshot_key, item["symbol"], as_of_date, feature_version, cutoff,
              stable_json(item["features"]), stable_json(item["quality_flags"])),
         )
     return {"snapshot_key": snapshot_key, "as_of_date": str(as_of_date), "universe_key": universe_key,
-            "feature_version": feature_version, "market_regime": regime, "items": items}
+            "feature_version": feature_version, "knowledge_cutoff": cutoff.isoformat(),
+            "market_regime": regime, "items": items}
 
 
 __all__ = ["materialize_feature_snapshot"]

@@ -19,9 +19,9 @@ def universe_members(database: Any, universe_key: str) -> dict[str, Any]:
 def latest_features(database: Any, universe_key: str, limit: int) -> dict[str, Any]:
     with database.transaction() as connection:
         snapshot = connection.execute(
-            """SELECT f.snapshot_key,f.as_of_date,f.feature_version,max(f.created_at) created_at
+            """SELECT f.snapshot_key,f.as_of_date,f.feature_version,f.knowledge_cutoff,max(f.created_at) created_at
                FROM quant.feature_snapshots f JOIN quant.universe_members m ON m.symbol=f.symbol
-               WHERE m.universe_key=%s GROUP BY f.snapshot_key,f.as_of_date,f.feature_version
+               WHERE m.universe_key=%s GROUP BY f.snapshot_key,f.as_of_date,f.feature_version,f.knowledge_cutoff
                ORDER BY created_at DESC LIMIT 1""",
             (universe_key,),
         ).fetchone()

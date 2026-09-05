@@ -1030,12 +1030,18 @@ def market_regime(connection: Any, as_of_date: date) -> str:
     return read_market_regime(connection, as_of_date, number)
 
 
-def latest_tushare_row(connection: Any, api_name: str, symbol: str, as_of_date: date) -> dict[str, Any] | None:
-    return read_latest_tushare_row(connection, api_name, symbol, as_of_date)
+def latest_tushare_row(
+    connection: Any, api_name: str, symbol: str, as_of_date: date,
+    available_before: datetime | None = None,
+) -> dict[str, Any] | None:
+    return read_latest_tushare_row(connection, api_name, symbol, as_of_date, available_before)
 
 
-def analyst_feature(connection: Any, symbol: str, as_of_date: date) -> dict[str, Any]:
-    return read_analyst_feature(connection, symbol, as_of_date, number)
+def analyst_feature(
+    connection: Any, symbol: str, as_of_date: date,
+    available_before: datetime | None = None,
+) -> dict[str, Any]:
+    return read_analyst_feature(connection, symbol, as_of_date, number, available_before)
 
 
 def analyst_text_factor_summary(connection: Any, as_of_date: date, lookback_days: int = 7,
@@ -1048,7 +1054,9 @@ def analyst_text_factor_summary(connection: Any, as_of_date: date, lookback_days
     )
 
 
-def build_feature_snapshot(as_of_date: date, universe_key: str = "core") -> dict[str, Any]:
+def build_feature_snapshot(
+    as_of_date: date, universe_key: str = "core", knowledge_cutoff: datetime | None = None,
+) -> dict[str, Any]:
     """Materialize deterministic, source-labelled features for the active universe."""
     try:
         return FeatureSnapshotRuntime(FeatureSnapshotRuntimeDependencies(
@@ -1060,7 +1068,7 @@ def build_feature_snapshot(as_of_date: date, universe_key: str = "core") -> dict
             analyst_text_factor_summary=analyst_text_factor_summary,
             latest_tushare_row=latest_tushare_row,
             analyst_feature=analyst_feature,
-        )).build(as_of_date, universe_key)
+        )).build(as_of_date, universe_key, knowledge_cutoff=knowledge_cutoff)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

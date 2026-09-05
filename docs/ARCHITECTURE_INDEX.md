@@ -8,10 +8,10 @@
 | Item | Current value |
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
-| `main.py` top-level functions | 433 |
-| Python modules under `app/` | 395 |
-| HTTP router modules | 40 |
-| Alembic migrations | 83 |
+| `main.py` top-level functions | 438 |
+| Python modules under `app/` | 402 |
+| HTTP router modules | 42 |
+| Alembic migrations | 85 |
 | Frontend source files | 37 |
 
 ## Domain naming inventory
@@ -29,7 +29,7 @@ New behaviour should be owned by an existing domain package/owner.
 | `post` | 13 |
 | `ten` | 11 |
 | `board` | 9 |
-| `limit` | 8 |
+| `limit` | 9 |
 | `tushare` | 7 |
 | `daily` | 6 |
 | `provider` | 6 |
@@ -60,6 +60,7 @@ New behaviour should be owned by an existing domain package/owner.
 - `routers/intraday_outcome_reads.py`
 - `routers/intraday_status.py`
 - `routers/l2_research.py`
+- `routers/licensed_stock_api.py`
 - `routers/limit_linkage_mining_reads.py`
 - `routers/longhu_reads.py`
 - `routers/market_actions.py`
@@ -70,6 +71,7 @@ New behaviour should be owned by an existing domain package/owner.
 - `routers/personal_decisions.py`
 - `routers/provider_actions.py`
 - `routers/provider_status.py`
+- `routers/raw_overflow.py`
 - `routers/research_actions.py`
 - `routers/research_catalog_reads.py`
 - `routers/research_readiness.py`
