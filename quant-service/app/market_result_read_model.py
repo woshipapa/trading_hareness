@@ -55,7 +55,7 @@ def research_overview(
                       (SELECT count(*)::int FROM quant.data_quality_issues WHERE resolved_at IS NULL) quality_issues"""
         ).fetchone()
         last_snapshot = connection.execute(
-            "SELECT snapshot_key,as_of_date,knowledge_cutoff,status,manifest,finalized_at FROM quant.data_snapshots ORDER BY created_at DESC LIMIT 1"
+            "SELECT snapshot_key,as_of_date,knowledge_cutoff,status,manifest_version,code_sha,data_schema_version,manifest,finalized_at FROM quant.data_snapshots ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
         latest_run = connection.execute(
             "SELECT run_id,as_of_date,model_version,market_regime,source_status,created_at FROM quant.recommendation_runs ORDER BY created_at DESC LIMIT 1"

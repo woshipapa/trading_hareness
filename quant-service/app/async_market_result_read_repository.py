@@ -180,7 +180,7 @@ async def research_overview(async_database: Any, history_estimate: dict[str, Any
                       (SELECT count(*)::int FROM quant.fetch_runs WHERE status='running' AND coalesce(started_at,created_at)<now()-interval '90 minutes') stale_fetch_runs,
                       (SELECT count(*)::int FROM quant.data_quality_issues WHERE resolved_at IS NULL) quality_issues""")
         counts = await result.fetchone()
-        result = await conn.execute("SELECT snapshot_key,as_of_date,knowledge_cutoff,status,manifest,finalized_at FROM quant.data_snapshots ORDER BY created_at DESC LIMIT 1")
+        result = await conn.execute("SELECT snapshot_key,as_of_date,knowledge_cutoff,status,manifest_version,code_sha,data_schema_version,manifest,finalized_at FROM quant.data_snapshots ORDER BY created_at DESC LIMIT 1")
         last_snapshot = await result.fetchone()
         result = await conn.execute("SELECT run_id,as_of_date,model_version,market_regime,source_status,created_at FROM quant.recommendation_runs ORDER BY created_at DESC LIMIT 1")
         latest_run = await result.fetchone()

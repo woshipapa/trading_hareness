@@ -7,10 +7,13 @@ or promote analyst weights.
 
 from __future__ import annotations
 
-import hashlib
+import os
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
+
+from .point_in_time import availability_cutoff, exchange_day_end
+from .research_manifest import MANIFEST_VERSION, manifest_digest, snapshot_key as research_snapshot_key
 
 
 @dataclass(frozen=True)
@@ -115,9 +118,10 @@ def backtest_strategy(payload: Any, deps: ResearchExperimentDependencies) -> dic
 def build_snapshot(payload: Any, deps: ResearchExperimentDependencies) -> dict[str, Any]:
     """Persist a data-quality manifest; a blocked manifest is never "ready"."""
     as_of = payload.as_of_date or deps.china_today()
-    cutoff = deps.as_utc(payload.knowledge_cutoff) if payload.knowledge_cutoff else datetime.now(timezone.utc)
+    requested_cutoff = payload.knowledge_cutoff or exchange_day_end(as_of)
+    cutoff = deps.as_utc(availability_cutoff(as_of, requested_cutoff))
     with deps.database.transaction() as connection:
-        manifest = connection.execute(
+        manifest_row = connection.execute(
             """SELECT (SELECT count(*)::int FROM quant.canonical_bars_daily WHERE trading_date<=%s) bars,
                       (SELECT count(*)::int FROM quant.remote_reports WHERE remote_updated_at<=%s) remote_reports,
                       (SELECT count(*)::int FROM quant.canonical_bars_daily WHERE symbol='000300.SH' AND trading_date<=%s) benchmark_bars,
@@ -140,20 +144,31 @@ def build_snapshot(payload: Any, deps: ResearchExperimentDependencies) -> dict[s
                       (SELECT count(*)::int FROM quant.data_quality_issues WHERE resolved_at IS NULL AND severity IN ('error','blocking')) blocking_issues""",
             (as_of, cutoff, as_of, as_of, as_of, as_of, as_of),
         ).fetchone()
+        manifest = dict(manifest_row or {})
+        manifest.update({
+            "manifest_version": MANIFEST_VERSION,
+            "as_of_date": as_of.isoformat(),
+            "knowledge_cutoff": cutoff.isoformat(),
+            "code_sha": os.environ.get("APP_GIT_SHA") or "unknown",
+            "data_schema_version": "feature-availability-cutoff-v1",
+        })
         complete_equity_controls = (
             manifest["equity_symbols"] > 0
             and manifest["fundamental_symbols"] >= manifest["equity_symbols"]
             and manifest["limit_symbols"] >= manifest["equity_symbols"]
         )
         status = "ready" if not manifest["blocking_issues"] and manifest["benchmark_bars"] and manifest["exchange_open"] and complete_equity_controls else "blocked"
-        snapshot_key = hashlib.sha256(f"{as_of}:{cutoff.isoformat()}:{manifest['bars']}:{manifest['remote_reports']}".encode()).hexdigest()
+        content_sha256 = manifest_digest(manifest)
+        snapshot_key = research_snapshot_key(as_of, cutoff, content_sha256)
         connection.execute(
-            """INSERT INTO quant.data_snapshots(snapshot_key,as_of_date,knowledge_cutoff,status,manifest,content_sha256,finalized_at)
-               VALUES(%s,%s,%s,%s,%s,%s,CASE WHEN %s='ready' THEN now() ELSE null END)
+            """INSERT INTO quant.data_snapshots(snapshot_key,as_of_date,knowledge_cutoff,status,manifest_version,code_sha,data_schema_version,manifest,content_sha256,finalized_at)
+               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s='ready' THEN now() ELSE null END)
                ON CONFLICT(snapshot_key) DO NOTHING""",
-            (snapshot_key, as_of, cutoff, status, deps.json_value(manifest), snapshot_key, status),
+            (snapshot_key, as_of, cutoff, status, MANIFEST_VERSION, manifest["code_sha"], manifest["data_schema_version"],
+             deps.json_value(manifest), content_sha256, status),
         )
-    return {"snapshot_key": snapshot_key, "as_of_date": str(as_of), "knowledge_cutoff": cutoff, "status": status, "manifest": manifest}
+    return {"snapshot_key": snapshot_key, "as_of_date": str(as_of), "knowledge_cutoff": cutoff,
+            "status": status, "manifest_sha256": content_sha256, "manifest": manifest}
 
 
 __all__ = ["ResearchExperimentDependencies", "backtest_strategy", "build_snapshot", "evaluate_factors", "research_window"]

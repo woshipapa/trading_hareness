@@ -13,6 +13,7 @@ from app.research_experiment_service import (
     evaluate_factors,
     research_window,
 )
+from app.point_in_time import exchange_day_end
 
 
 class _Transaction:
@@ -97,3 +98,26 @@ class ResearchExperimentServiceTests(unittest.TestCase):
         inserts = [params for sql, params in statements if "INSERT INTO quant.data_snapshots" in sql]
         self.assertEqual(len(inserts), 1)
         self.assertEqual(inserts[0][3], "blocked")
+
+    def test_snapshot_without_cutoff_uses_the_exchange_day_end(self) -> None:
+        manifest = {
+            "bars": 10, "remote_reports": 2, "benchmark_bars": 1, "equity_symbols": 2,
+            "fundamental_symbols": 2, "limit_symbols": 2, "exchange_open": True, "blocking_issues": 0,
+        }
+
+        statements = []
+
+        def execute(sql, params=()):
+            statements.append((str(sql), params))
+            if "SELECT (SELECT count(*)::int FROM quant.canonical_bars_daily" in str(sql):
+                return MagicMock(fetchone=MagicMock(return_value=manifest))
+            return MagicMock()
+
+        database = MagicMock()
+        database.transaction.return_value = _Transaction(execute)
+        payload = SimpleNamespace(as_of_date=date(2026, 8, 21), knowledge_cutoff=None)
+
+        build_snapshot(payload, _deps(database))
+
+        snapshot_insert = next(params for sql, params in statements if "INSERT INTO quant.data_snapshots" in sql)
+        self.assertEqual(snapshot_insert[2], exchange_day_end(date(2026, 8, 21)))
