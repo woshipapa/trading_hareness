@@ -37,7 +37,7 @@ Longhu 对当前系统有两类确定增强：
 
 ## 可检验的盘后增强
 
-每日收盘后在独立 `longhu_capability_evidence` 或等价 raw evidence 中保存：
+每日收盘后以 `longhu_supplemental_evidence` 数据产品名义写入现有 `raw_market_observations`，保存：
 
 - 市场宽度：涨跌家数、涨停/跌停、炸板、封板率、连板高度和情绪分位数。
 - 板块扩散：成员覆盖、上涨占比、涨停扩散、top-k 集中度、leader-lag。

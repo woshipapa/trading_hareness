@@ -27,7 +27,7 @@ POST_CLOSE_STAGE_ORDER = (
     "stale_fetch_runs", "analyst_text", "all_a_universe", "full_market_daily", "core_daily_controls", "index_context",
     "close_market_snapshot", "akshare_supplements", "ths_industry_flow", "ths_concept_flow_and_limit_strength",
     "market_flow_features", "limit_ladder", "limit_lift_pattern_mining", "cninfo_announcements",
-    "board_review", "close_strategy_decision", "close_review", "analyst_outcomes", "analyst_intraday_outcomes",
+    "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
     "watchlist_main_wave", "research_snapshot",
 )
@@ -57,6 +57,7 @@ POST_CLOSE_STAGE_DEPENDENCIES = {
     "post_close_strategy": ("core_daily_controls",),
     "watchlist_main_wave": ("core_daily_controls",),
     "research_snapshot": ("core_daily_controls",),
+    "longhu_supplemental_evidence": ("full_market_daily", "core_daily_controls"),
     "decision_research_closure": ("post_close_strategy", "core_daily_controls"),
 }
 
@@ -107,6 +108,7 @@ class PostCloseRefreshDependencies:
     release_lease: Callable[..., Any]
     safe_error_detail: Callable[[str, int], str]
     json_safe: Callable[[Any], Any]
+    longhu_supplemental_sync: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -209,6 +211,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             )
         ),
         "close_review": lambda: dependencies.run_database(dependencies.persist_close_review, trade_date),
+        "longhu_supplemental_evidence": (
+            lambda: dependencies.longhu_supplemental_sync(trade_date)
+            if dependencies.longhu_supplemental_sync is not None and longhu_mode
+            else {"status": "skipped", "reason": "Longhu supplemental capture is disabled or not configured", "research_only": True}
+        ),
         "analyst_outcomes": lambda: dependencies.run_database(
             dependencies.recompute_outcomes, trade_date, timeout_seconds=300,
         ),

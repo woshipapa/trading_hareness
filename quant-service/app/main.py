@@ -635,6 +635,7 @@ from .baostock_daily_sync import fetch_rows as fetch_baostock_rows_isolated, syn
 from .market_universe_sync import sync as sync_market_universe_isolated
 from .full_market_daily_sync import sync as sync_full_market_daily_isolated
 from .longhu_market_repository import persisted_close_context as read_longhu_close_context
+from .longhu_supplemental_service import sync as sync_longhu_supplemental_isolated
 from .longhu_vendor_source import (
     MAX_PAGE_SIZE as LONGHU_MAX_PAGE_SIZE,
     configured as longhu_vendor_configured,
@@ -2590,6 +2591,19 @@ def longhu_full_market_enabled() -> bool:
     }
 
 
+async def sync_longhu_supplemental_evidence(trade_date: date) -> dict[str, Any]:
+    """Capture bounded Longhu research supplements after the close."""
+    async def persist(provider: str, capability: str, rows: list[dict[str, Any]]) -> int:
+        return await run_database_blocking(
+            persist_public_observations, provider, capability, rows, timeout_seconds=90,
+        )
+
+    return await sync_longhu_supplemental_isolated(
+        trade_date, run_public_blocking=run_akshare_blocking,
+        persist=persist, source_factory=longhu_intraday_source,
+    )
+
+
 async def intraday_longhu_watch_quotes(
     symbols: list[str],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -3939,6 +3953,7 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         lease_seconds=post_close_refresh_lease_seconds, acquire_lease=acquire_runtime_lease,
         renew_lease=renew_runtime_lease, release_lease=release_runtime_lease,
         safe_error_detail=safe_error_detail, json_safe=strategy_json_safe,
+        longhu_supplemental_sync=sync_longhu_supplemental_evidence,
     )
 
 
