@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from ..licensed_stock_api import UpstreamStockApiError, catalog
 from ..longhu_capability_probe import sanitized_request, summarize_result
+from ..runtime_executors import run_database_blocking
 from .licensed_stock_api import StockApiCall
 
 
@@ -18,6 +19,7 @@ def build_longhu_capabilities_router(
     configured: Callable[[], bool],
     shared_read_key: Callable[[], str],
     call: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+    schema_profile: Callable[[], dict[str, Any]] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1/research/longhu", tags=["longhu-research"])
 
@@ -58,6 +60,16 @@ def build_longhu_capabilities_router(
             "request": sanitized_request(request_payload),
             "observation": summarize_result(result),
         }
+
+    @router.get("/schema-profile")
+    async def observed_schema_profile(
+        x_quant_read_key: str | None = Header(default=None, alias="X-Quant-Read-Key"),
+    ) -> dict[str, Any]:
+        """Expose field paths/types only after the licensed read boundary."""
+        authorize(x_quant_read_key)
+        if schema_profile is None:
+            raise HTTPException(status_code=503, detail="Longhu schema evidence projection is disabled")
+        return await run_database_blocking(schema_profile)
 
     return router
 

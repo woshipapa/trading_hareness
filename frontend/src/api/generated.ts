@@ -174,6 +174,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/longhu/schema-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Observed Schema Profile
+         * @description Expose field paths/types only after the licensed read boundary.
+         */
+        get: operations["observed_schema_profile_api_v1_research_longhu_schema_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/longhu/replay-readiness": {
         parameters: {
             query?: never;
@@ -4933,6 +4953,39 @@ export interface operations {
                 "application/json": components["schemas"]["StockApiCall"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    observed_schema_profile_api_v1_research_longhu_schema_profile_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Quant-Read-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

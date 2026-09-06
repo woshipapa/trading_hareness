@@ -639,6 +639,7 @@ from .full_market_daily_sync import sync as sync_full_market_daily_isolated
 from .longhu_market_repository import persisted_close_context as read_longhu_close_context
 from .longhu_supplemental_service import sync as sync_longhu_supplemental_isolated
 from .longhu_replay_read_repository import readiness as longhu_replay_readiness
+from .longhu_schema_profile_repository import schema_profile as longhu_schema_profile
 from .longhu_vendor_source import (
     MAX_PAGE_SIZE as LONGHU_MAX_PAGE_SIZE,
     configured as longhu_vendor_configured,
@@ -4371,6 +4372,7 @@ app.include_router(build_longhu_capabilities_router(
     configured=longhu_vendor_configured,
     shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
     call=shared_stock_api_call,
+    schema_profile=lambda: longhu_schema_profile(db),
 ))
 app.include_router(build_longhu_replay_reads_router(
     readiness=lambda: longhu_replay_readiness(db),

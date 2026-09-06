@@ -63,6 +63,8 @@ Longhu 对当前系统有两类确定增强：
 
 当前服务通过 `GET /api/v1/research/longhu/replay-readiness` 只读报告上述合约覆盖：每个交易日必须完整收齐市场宽度、涨停表现、历史竞价、文章及主题接口，才计入 30/60/90 日窗口；walk-forward 固定为 60 个训练 session、5 个 embargo session、20 个测试 session。该接口不请求供应商、不反填缺口，也不代表字段语义、成本或策略 promotion 已通过。
 
+通过认证的 `GET /api/v1/research/longhu/schema-profile` 可查看已落库 payload 的字段路径与原始类型（不返回字段值）。每个合约在人工确认字段含义、单位、发布时钟、缺失语义和跨交易日稳定性前均为 `schema_review_status=unreviewed` 与 `factor_eligible=false`；它是字段字典工作台，不是模型输入。
+
 交易日上午 09:25–09:30（上海时钟）还会单独保存 `MorningBiddingList` 竞价原始事件；它有网关接收时间和 `research_only/replay_only/live_effect=none` 标记，失败只记录降级结果并等待下一次采样，绝不以旧竞价数据补当前窗口。
 
 当前本地库的盘口历史仍以 Tencent 为主，Longhu rows 需要在 owner 端按交易日确认后再宣称覆盖；缺失时回退基线并保留故障原因，不补零、不借用邻日数据。
