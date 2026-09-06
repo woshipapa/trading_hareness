@@ -73,6 +73,13 @@
 
 ## 当前验收证据
 
+### 2026-09-06 当前复核
+
+- 工程回归：quant-service 容器内 Python discovery **1,419/1,419** 通过；新增离线模型基线和不可变特征导出合同的 4 项测试均通过。`git diff --check`、OpenAPI contract（7 paths/178 operations）、前端 `api:generate`、`api:check`、`typecheck` 和 production build 均通过。
+- 运行态：数据库迁移 head 为 `20260906_0094`；`/health` 返回 `ok`，研究存储约占热库预算 52.1%，服务容器健康。`/api/v1/research/models` 当前为空，符合尚无合格真实 artifact 的预期；`/api/v1/research/longhu/replay-readiness` 为 `accumulating`，已观察/完整交易日均为 0，未进入训练或回放门禁。
+- 新增研究边界：`research_feature_export.py` 只接受已物化的点时特征/标签表，强制合同版本、唯一 `symbol×exchange_date`、有限数值、可用时间先后关系，并返回不可变 SHA-256 数据快照；`research_model_training.py` 仅消费该类离线表执行 60 日训练/5 日 embargo/20 日 OOF 基线，任何结果继续 `research_only/replay_only/live_effect=none`。
+- 仍未完成：真实不可变特征批量导出 worker、真实训练/trial 执行、跨框架 benchmark、Longhu 10 合同的 60 个完整交易日、分钟来源可用时钟与价格路径回放、P3 统计门禁和 Prompt Lab 金标晋级。缺失数据或外部资源时保持 fail-closed，不自动恢复第三年历史任务。
+
 ### 2026-09-05 当前复核
 
 - 工程回归：挂载当前源码执行 quant-service **1,373/1,373** 项 Python discovery 通过；Feishu adapter **72/72** 通过；前端 `api:check`、`typecheck`、production build、OpenAPI contract 和 architecture check 均通过。复核时提交与 `origin/main` 同步（代码提交 `85f0f9e`，当前文档提交随后更新）。
