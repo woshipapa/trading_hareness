@@ -68,7 +68,7 @@
 | 报告/消息差量同步、`received_at`、版本和文字证据 | 已完成 | 不下载远端图片、音视频或媒体 URL；报告与消息支路独立 |
 | 分析师观点 outcome 与专家画像 | 研究中 | 当前成熟 outcome/eligible 样本不足，权重保持零 |
 | Prompt Lab champion/challenger | 研究中（未晋级） | 11,313 个候选已物化；按上海可用日做时间外留出，但金标为 0，无法比较/晋级 |
-| Qlib/LightGBM/LEAN 独立训练与模型注册 | 未开始 | 当前只有框架目录和规则/SQL 探索性引擎；缺少不可变特征导出、训练 worker、OOF 预测、完整 trial registry、模型回滚和跨框架 benchmark |
+| Qlib/LightGBM/LEAN 独立训练与模型注册 | 注册门槛已完成；训练未开始 | 新增 `research_model_registry` 迁移、只读 `/api/v1/research/models` 与 artifact/快照/样本门禁；仍缺不可变特征导出、训练 worker、OOF 预测、完整 trial 执行和跨框架 benchmark，任何登记都保持 `live_effect=none` |
 | RL / contextual bandit | 暂停 | 只能在 Phase 0–5 通过后离线 challenger，不得改 live champion |
 
 ## 当前验收证据

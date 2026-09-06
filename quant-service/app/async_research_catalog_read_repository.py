@@ -63,6 +63,20 @@ async def strategy_registry(async_database: Any) -> dict[str, Any]:
     return {"items": rows}
 
 
+async def model_registry(async_database: Any) -> dict[str, Any]:
+    """List offline model artifact registrations through the read pool."""
+    async with async_database.transaction() as conn:
+        result = await conn.execute(
+            """SELECT model_id,model_key,model_family,model_version,framework,artifact_uri,
+                      artifact_sha256,data_snapshot_key,feature_contract_version,label_contract_version,
+                      status,trial_count,independent_days,sample_count,metrics,metadata,approved_by,
+                      approved_at,created_at
+                 FROM quant.research_model_registry ORDER BY created_at DESC,model_key"""
+        )
+        rows = await result.fetchall()
+    return {"items": rows, "research_only": True, "live_effect": "none"}
+
+
 async def strategy_experiments(async_database: Any, universe_key: str, limit: int) -> dict[str, Any]:
     async with async_database.transaction() as conn:
         result = await conn.execute(

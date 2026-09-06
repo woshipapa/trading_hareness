@@ -110,6 +110,7 @@ _PRODUCTS = (
     _product("xiaojie_leader_flow_observations", "research", "trading_date+first_seen_at", ("model_version", "exchange_date", "mode"), local_tier="hot", local_hot_window_days=365, replay_role="analyst_playbook_replay", description="point-in-time Xiaojie leader-flow classifications"),
     _product("strategy_experiments", "research", "created_at", ("strategy_key", "created_year"), local_tier="hot", local_hot_window_days=None, replay_role="walk_forward_trial_ledger", description="all tried variants and out-of-sample metrics"),
     _product("strategy_reviews", "outcomes", "exchange_date+observed_at", ("strategy_key", "review_year"), local_tier="hot", local_hot_window_days=None, replay_role="strategy_calibration_review", description="logical strategy review projection backed by strategy_review_runs"),
+    _product("research_model_registry", "research", "created_at", ("model_family", "model_version"), archive_format="jsonl_zstd", local_tier="warm", local_hot_window_days=None, replay_role="offline_model_lineage", description="offline model artifact metadata, immutable data snapshot and validation status; never a live model source"),
     _product("strategy_day_summaries", "outcomes", "exchange_date", ("exchange_year",), local_tier="hot", local_hot_window_days=None, replay_role="daily_strategy_attribution", description="daily cross-strategy summary"),
 
     # Analyst observations stay shadow inputs. Both source time and

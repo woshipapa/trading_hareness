@@ -67,6 +67,19 @@ def strategy_registry(database: Any) -> dict[str, Any]:
     return {"items": rows}
 
 
+def model_registry(database: Any) -> dict[str, Any]:
+    """List offline model artifact registrations without loading artifacts."""
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT model_id,model_key,model_family,model_version,framework,artifact_uri,
+                      artifact_sha256,data_snapshot_key,feature_contract_version,label_contract_version,
+                      status,trial_count,independent_days,sample_count,metrics,metadata,approved_by,
+                      approved_at,created_at
+                 FROM quant.research_model_registry ORDER BY created_at DESC,model_key"""
+        ).fetchall()
+    return {"items": rows, "research_only": True, "live_effect": "none"}
+
+
 def strategy_experiments(database: Any, universe_key: str, limit: int) -> dict[str, Any]:
     with database.transaction() as connection:
         rows = connection.execute(
@@ -157,5 +170,5 @@ def research_run(database: Any, research_run_id: Any) -> dict[str, Any]:
 __all__ = [
     "data_quality_issues", "factor_evaluations", "factor_registry", "latest_features",
     "latest_strategy_day_summary", "research_run", "research_runs", "strategy_experiments",
-    "strategy_registry", "universe_members",
+    "strategy_registry", "model_registry", "universe_members",
 ]
