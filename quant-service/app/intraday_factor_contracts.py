@@ -49,10 +49,10 @@ FACTOR_SPECS: dict[str, FactorSpec] = {
     ),
     "order_book_proxy": FactorSpec(
         factor_key="order_book_proxy", version="v1", frequency="quote",
-        inputs=("tencent_order_book.bid_ask_levels",), availability_clock="quote_observed_at", minimum_history=2,
+        inputs=("source_qualified_order_book.bid_ask_levels",), availability_clock="quote_observed_at", minimum_history=2,
         quality_flags=("order_book_missing", "one_sided_book"),
         live_use="attribution_only",
-        description="Snapshot imbalance/erosion proxy, not true event-level OFI or VPIN.",
+        description="Source-qualified snapshot imbalance/erosion proxy, not true event-level OFI or VPIN.",
     ),
     "daily_rebound_state": FactorSpec(
         factor_key="daily_rebound_state", version="v1", frequency="daily",

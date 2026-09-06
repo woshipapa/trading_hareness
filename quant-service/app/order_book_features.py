@@ -37,6 +37,9 @@ def _weighted_depth(levels: list[dict[str, float] | None]) -> float:
 
 def order_book_observation(current: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
     """Compute positional QI and top-of-book OFI without a trade claim."""
+    source_name = str(current.get("source") or current.get("source_name") or "tencent_order_book")
+    if source_name not in {"longhu_order_book", "tencent_order_book"}:
+        source_name = "tencent_order_book"
     bids, asks = _levels(current.get("bids")), _levels(current.get("asks"))
     bid1, ask1 = _first_valid(bids), _first_valid(asks)
     if bid1 is None and ask1 is None:
@@ -51,13 +54,14 @@ def order_book_observation(current: dict[str, Any], previous: dict[str, Any] | N
     book_side = "bid_only" if bid1 and not ask1 else "ask_only" if ask1 and not bid1 else "two_sided"
     result: dict[str, Any] = {
         "status": "observed", "one_sided_book": one_sided, "book_side": book_side,
+        "source_name": source_name,
         "qi1": round(qi1, 6) if qi1 is not None else None,
         "qi5": round(qi5, 6) if qi5 is not None else None,
         "bid_depth_lot": round(bid_weighted, 4), "ask_depth_lot": round(ask_weighted, 4),
         "seal_volume_lot": bid1["size"] if book_side == "bid_only" else ask1["size"] if book_side == "ask_only" else None,
         "book_spread": round(ask1["price"] - bid1["price"], 6) if bid1 and ask1 else None,
         "book_mid": round((ask1["price"] + bid1["price"]) / 2, 6) if bid1 and ask1 else None,
-        "feature_version": "tencent-order-book-observation-v2",
+        "feature_version": "source-aware-order-book-observation-v3",
     }
     if not previous:
         return {**result, "delta_status": "first_snapshot"}
@@ -104,8 +108,14 @@ def aggregate_order_book_observations(rows: list[dict[str, Any]], observed_at: d
     ordered = sorted((row for row in rows if isinstance(row.get("observed_at"), datetime)
                       and isinstance(row.get("raw"), dict)), key=lambda row: row["observed_at"], reverse=True)
     latest = dict(ordered[0]["raw"].get("order_book_features") or {}) if ordered else {}
+    source_names = sorted({
+        str((row.get("raw") or {}).get("order_book_features", {}).get("source_name") or row.get("source_name") or "unknown")
+        for row in ordered
+    })
     result: dict[str, Any] = {"status": "missing", "latest_features": latest,
-                              "feature_version": "tencent-order-book-aggregate-v1"}
+                              "feature_version": "source-aware-order-book-aggregate-v2",
+                              "source_names": source_names,
+                              "source_name": latest.get("source_name") if latest else None}
     for label, seconds in (("30s", 30), ("1m", 60), ("5m", 300)):
         cutoff = observed_at - timedelta(seconds=seconds)
         features = [dict(row["raw"].get("order_book_features") or {}) for row in ordered if row["observed_at"] >= cutoff]

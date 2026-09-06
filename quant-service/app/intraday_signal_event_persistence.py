@@ -116,7 +116,10 @@ def persist_generated_signals(
             connection, signal, observed_at, state, symbol=symbol,
         )
         signal["conditions"] = {**signal["conditions"], "episode": episode or {"state": "not_applicable"}}
+        book_source = str(order_book_feature.get("source_name") or "tencent_order_book") if isinstance(order_book_feature, dict) else "tencent_order_book"
+        book_key = "longhu_order_book" if book_source == "longhu_order_book" else "tencent_order_book"
         evidence = {
+            "quote": quote, book_key: order_book_feature, "order_book_source": book_source,
             "tencent": quote, "tencent_order_book": order_book_feature, "tencent_minute": minute_feature,
             "peer_context": peer_context, "tushare_rt_min": tushare_minute,
             "tushare_rt_k_fast": fast_confirmation, "daily_factors": daily_factors,

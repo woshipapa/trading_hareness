@@ -86,8 +86,10 @@ def _evidence_refs(conditions: dict[str, Any], observed_at: datetime) -> tuple[E
         quality = "attribution_only"
         if isinstance(age, (int, float)) and age > 15:
             quality = "stale_attribution_only"
+        source_name = str(order_book.get("source_name") or "tencent_order_book")
+        source_label = "longhu_order_book_snapshot" if source_name == "longhu_order_book" else "tencent_order_book_snapshot"
         refs.append(EvidenceRef(
-            source="tencent_order_book_snapshot", observed_at=observed_at, available_at=observed_at,
+            source=source_label, observed_at=observed_at, available_at=observed_at,
             fields=("qi5", "ofi_30s", "ofi_1m", "seal_erosion_ratio_5m", "book_spread"),
             quality=quality,
         ))

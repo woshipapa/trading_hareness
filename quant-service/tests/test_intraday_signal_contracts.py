@@ -50,6 +50,21 @@ class IntradaySignalContractTests(unittest.TestCase):
         self.assertIsNone(contract["horizon_key"])
         self.assertEqual(contract["invalidation_codes"], ["quote_evidence_unavailable"])
 
+    def test_longhu_order_book_keeps_provider_attribution(self) -> None:
+        contract = signal_contract({
+            "symbol": "000001.SZ", "signal_key": "000001.SZ:watch:licensed-book",
+            "signal_type": "watch", "score": 50, "risk_flags": [],
+            "conditions": {
+                "order_book_proxy": {"status": "observed", "source_name": "longhu_order_book",
+                                     "latest_age_seconds": 2},
+                "policy_gate": {"quote_source": "longhuvip_watch_quote"},
+            },
+        }, datetime(2026, 8, 17, 2, tzinfo=timezone.utc))
+        self.assertEqual(
+            next(item for item in contract["evidence"] if "order_book" in item["source"])["source"],
+            "longhu_order_book_snapshot",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
