@@ -37,7 +37,7 @@ Longhu 对当前系统有两类确定增强：
 
 ## 可检验的盘后增强
 
-每日收盘后以 `longhu_supplemental_evidence` 数据产品名义写入现有 `raw_market_observations`，保存：
+每日收盘后以 `longhu_supplemental_evidence` 数据产品名义写入现有 `raw_market_observations`。当前固定采集市场涨跌、情绪计数、板块复盘、当日涨停表现、历史竞价、两类涨停表现的五个 `PidType` 分组、快讯列表和 Longhu 主题列表；历史竞价、历史涨停、快讯和主题均带 `next_session_only=true`。当前只保存带来源、接口、交易日、网关接收时间和原始 payload 的证据行；以下字段均是字段字典验证后的候选派生，尚未写入策略：
 
 - 市场宽度：涨跌家数、涨停/跌停、炸板、封板率、连板高度和情绪分位数。
 - 板块扩散：成员覆盖、上涨占比、涨停扩散、top-k 集中度、leader-lag。
@@ -60,5 +60,9 @@ Longhu 对当前系统有两类确定增强：
 1. P0：来源归因、单位、交易日、freshness 和 schema fixtures；把竞价和市场情绪 raw evidence 纳入盘后 stage receipt。
 2. P1：构造盘口压力、封板生命周期、情绪 regime、板块扩散和 LHB 注意力标签，全部标为 `research_only/replay_only/live_effect=none`。
 3. P2：固定 30/60/90 个交易日 replay，做 purged walk-forward 与成本检验；只有 promotion record、覆盖率、样本量、样本外稳定性均满足门禁时，才讨论策略层消费。
+
+当前服务通过 `GET /api/v1/research/longhu/replay-readiness` 只读报告上述合约覆盖：每个交易日必须完整收齐市场宽度、涨停表现、历史竞价、文章及主题接口，才计入 30/60/90 日窗口；walk-forward 固定为 60 个训练 session、5 个 embargo session、20 个测试 session。该接口不请求供应商、不反填缺口，也不代表字段语义、成本或策略 promotion 已通过。
+
+交易日上午 09:25–09:30（上海时钟）还会单独保存 `MorningBiddingList` 竞价原始事件；它有网关接收时间和 `research_only/replay_only/live_effect=none` 标记，失败只记录降级结果并等待下一次采样，绝不以旧竞价数据补当前窗口。
 
 当前本地库的盘口历史仍以 Tencent 为主，Longhu rows 需要在 owner 端按交易日确认后再宣称覆盖；缺失时回退基线并保留故障原因，不补零、不借用邻日数据。

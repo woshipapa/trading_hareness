@@ -47,6 +47,7 @@ class StrategyReviewServiceTests(unittest.TestCase):
             json_safe=lambda value: value,
         )
         self.assertEqual(review["status"], "completed")
+        self.assertEqual(review["longhu_next_session_context"]["status"], "empty")
         self.assertEqual(review["market_state"], "mixed")
         self.assertNotIn("review_key", review)
         self.assertEqual(review["data_boundary"]["automation"], "no broker order submission")
@@ -55,6 +56,8 @@ class StrategyReviewServiceTests(unittest.TestCase):
         self.assertIn("b.available_at<=%s", daily_query)
         self.assertIn("b.quality_status='fresh'", daily_query)
         self.assertEqual(daily_params[1], datetime(2026, 8, 21, 7, 30, tzinfo=timezone.utc))
+        longhu_query = next(sql for sql, _params in connection.calls if "raw_market_observations" in sql)
+        self.assertIn("::date<%s", longhu_query)
 
     def test_completed_checkpoint_requires_completed_persisted_report(self):
         class Connection:

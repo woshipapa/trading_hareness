@@ -382,6 +382,7 @@ from .intraday_schedule import (
 )
 from .intraday_monitor_service import run_intraday_monitor_loop
 from .market_event_capture import capture as capture_market_events
+from .longhu_auction_capture import capture as capture_longhu_morning_auction
 from .market_event_runtime import run_market_event_capture_loop
 from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapshot_loop
 from .intraday_fast_quote_service import cross_source_confirmation, run_intraday_fast_quote_loop
@@ -489,6 +490,7 @@ from .routers.provider_status import build_provider_status_router
 from .routers.longhu_reads import build_longhu_reads_router
 from .routers.licensed_stock_api import build_licensed_stock_api_router
 from .routers.longhu_capabilities import build_longhu_capabilities_router
+from .routers.longhu_replay_reads import build_longhu_replay_reads_router
 from .routers.research_readiness import build_research_readiness_router
 from .routers.intraday_status import build_intraday_status_router
 from .routers.analyst_reads import build_analyst_reads_router
@@ -636,6 +638,7 @@ from .market_universe_sync import sync as sync_market_universe_isolated
 from .full_market_daily_sync import sync as sync_full_market_daily_isolated
 from .longhu_market_repository import persisted_close_context as read_longhu_close_context
 from .longhu_supplemental_service import sync as sync_longhu_supplemental_isolated
+from .longhu_replay_read_repository import readiness as longhu_replay_readiness
 from .longhu_vendor_source import (
     MAX_PAGE_SIZE as LONGHU_MAX_PAGE_SIZE,
     configured as longhu_vendor_configured,
@@ -3315,10 +3318,19 @@ async def market_event_capture_loop() -> None:
     async def all_symbols() -> Sequence[str]:
         return await run_database_blocking(lambda: _market_snapshot_actions.universe_symbols("all_a"), timeout_seconds=15)
 
+    async def longhu_auction(observed_at: datetime) -> dict[str, Any]:
+        if not longhu_vendor_configured():
+            return {"status": "skipped", "reason": "longhu_not_configured", "stored": 0}
+
+        async def call(request: dict[str, Any]) -> dict[str, Any]:
+            return await shared_stock_api_call(request)
+
+        return await capture_longhu_morning_auction(observed_at, call=call, persist=persist)
+
     await run_market_event_capture_loop(
         interval_seconds=60, capture=lambda observed_at, **kwargs: capture_market_events(
             observed_at, fetch=fetch, persist=persist, **kwargs,
-        ), session_open=open_session, symbols=all_symbols,
+        ), capture_longhu_auction=longhu_auction, session_open=open_session, symbols=all_symbols,
     )
 
 
@@ -4359,6 +4371,9 @@ app.include_router(build_longhu_capabilities_router(
     configured=longhu_vendor_configured,
     shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
     call=shared_stock_api_call,
+))
+app.include_router(build_longhu_replay_reads_router(
+    readiness=lambda: longhu_replay_readiness(db),
 ))
 app.include_router(build_research_readiness_router(
     db, historical_estimate_from_db, feature_readiness_state, historical_replay_readiness, async_db,

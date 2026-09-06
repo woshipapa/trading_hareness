@@ -38,18 +38,26 @@ def strict_symbol(value: Any) -> str | None:
 
 
 def _row_symbol(row: Any) -> str | None:
-    if not isinstance(row, Mapping):
-        return None
-    for key in ("ts_code", "symbol", "code", "StockID", "stock_id", "thscode"):
-        symbol = strict_symbol(row.get(key))
-        if symbol:
-            return symbol
+    if isinstance(row, Mapping):
+        for key in ("ts_code", "symbol", "code", "StockID", "stock_id", "thscode"):
+            symbol = strict_symbol(row.get(key))
+            if symbol:
+                return symbol
+    # Several documented Longhu list endpoints use positional rows.  A strict
+    # symbol parser over the first fields is less speculative than assigning
+    # numeric columns a meaning, while still preserving symbol attribution.
+    if isinstance(row, (list, tuple)):
+        for value in row[:4]:
+            symbol = strict_symbol(value)
+            if symbol:
+                return symbol
     return None
 
 
 def normalize_payload(
     *, target: str, action: str, controller: str | None, payload: Mapping[str, Any],
-    trade_date: date, observed_at: datetime,
+    trade_date: date, observed_at: datetime, availability_basis: str = "owner_gateway_receipt_post_close",
+    next_session_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Create raw evidence rows with explicit clocks and semantic boundaries."""
     rows = payload_rows(payload)
@@ -65,7 +73,8 @@ def normalize_payload(
             "exchange_date": trade_date.isoformat(),
             "observed_at": observed_at.isoformat(),
             "available_at": observed_at.isoformat(),
-            "availability_basis": "owner_gateway_receipt_post_close",
+            "availability_basis": availability_basis,
+            "next_session_only": next_session_only,
             "research_only": True,
             "replay_only": True,
             "live_effect": "none",
@@ -75,4 +84,35 @@ def normalize_payload(
     return result
 
 
-__all__ = ["normalize_payload", "payload_rows", "strict_symbol"]
+def next_session_context(rows: list[Mapping[str, Any]], current_date: date) -> dict[str, Any]:
+    """Summarize only supplemental evidence from earlier exchange dates."""
+    grouped: dict[str, dict[str, Any]] = {}
+    rejected_same_day = 0
+    for row in rows:
+        payload = row.get("payload") if isinstance(row.get("payload"), Mapping) else row
+        exchange_date = str(payload.get("exchange_date") or "")
+        try:
+            source_date = date.fromisoformat(exchange_date)
+        except ValueError:
+            continue
+        if source_date >= current_date:
+            rejected_same_day += 1
+            continue
+        capability = str(row.get("capability") or payload.get("capability") or "longhu:unknown")
+        item = grouped.setdefault(capability, {"rows": 0, "symbols": [], "latest_available_at": None})
+        item["rows"] += 1
+        symbol = strict_symbol(row.get("symbol") or payload.get("ts_code"))
+        if symbol and len(item["symbols"]) < 50 and symbol not in item["symbols"]:
+            item["symbols"].append(symbol)
+        available_at = row.get("available_at")
+        if available_at is not None:
+            item["latest_available_at"] = str(available_at)
+    return {
+        "status": "available" if grouped else "empty",
+        "next_session_only": True,
+        "capabilities": grouped,
+        "rejected_same_day_rows": rejected_same_day,
+    }
+
+
+__all__ = ["next_session_context", "normalize_payload", "payload_rows", "strict_symbol"]

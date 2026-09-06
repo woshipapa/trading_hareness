@@ -24,11 +24,13 @@ async def run_market_event_capture_loop(
     *,
     interval_seconds: int,
     capture: Callable[..., Awaitable[dict[str, Any]]],
+    capture_longhu_auction: Callable[[datetime], Awaitable[dict[str, Any]]] | None = None,
     session_open: Callable[[datetime], Awaitable[bool]],
     symbols: Callable[[], Awaitable[Sequence[str]]],
     log: Callable[[str], None] = print,
 ) -> None:
     last_auction_date: str | None = None
+    last_longhu_auction_date: str | None = None
     while True:
         now = datetime.now(timezone.utc)
         active, auction_window = event_capture_window(now)
@@ -42,6 +44,12 @@ async def run_market_event_capture_loop(
                 )
                 if include_auction and result.get("auction", {}).get("received", 0) > 0:
                     last_auction_date = local_date
+                if capture_longhu_auction and time(9, 25) <= now.astimezone(CN_TZ).time() <= time(9, 30) and last_longhu_auction_date != local_date:
+                    longhu_result = await capture_longhu_auction(now)
+                    if longhu_result.get("status") == "completed":
+                        last_longhu_auction_date = local_date
+                    elif longhu_result.get("status") not in {"completed", "skipped"}:
+                        log(f"Longhu morning-auction evidence degraded: {str(longhu_result)[:500]}")
                 if result.get("status") not in {"completed", "empty"}:
                     log(f"market event evidence capture degraded: {str(result)[:500]}")
             except Exception as error:  # noqa: BLE001 - next cadence retries

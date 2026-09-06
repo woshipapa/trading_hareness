@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from psycopg.types.json import Json
 
 from .post_close_evidence import lhb_context
+from .longhu_research_features import next_session_context
 from .short_term_review import build_short_term_review
 
 
@@ -89,6 +90,18 @@ def build(
         [dict(item) for item in lhb_raw_rows],
         number=_number,
     )
+    longhu_rows = connection.execute(
+        """SELECT capability,symbol,available_at,payload
+             FROM quant.raw_market_observations
+            WHERE provider_key='longhuvip'
+              AND payload->>'next_session_only'='true'
+              AND coalesce(payload->>'exchange_date','') ~ '^\\d{4}-\\d{2}-\\d{2}$'
+              AND nullif(payload->>'exchange_date','')::date<%s
+              AND available_at<=%s
+            ORDER BY available_at DESC LIMIT 2000""",
+        (as_of_date, observed_at),
+    ).fetchall()
+    longhu_next_session = next_session_context([dict(item) for item in longhu_rows], as_of_date)
     short_term_review = build_short_term_review(
         event_rows=[dict(item) for item in event_rows],
         daily_rows=[dict(item) for item in daily_rows],
@@ -102,6 +115,7 @@ def build(
         "market_state": current_market_state, "market_state_metrics": state_metrics,
         "index_breadth_context": breadth, "board_flow": board_summary, "analyst_context": analyst,
         "short_term_review": short_term_review,
+        "longhu_next_session_context": longhu_next_session,
         "playbook": {
             "entry": "only research candidates aligned with market state, board flow and two-scan price/volume confirmation",
             "exit": "hard stop first; then reduce on confirmed price/VWAP and flow reversal",
@@ -115,6 +129,7 @@ def build(
             },
             "index_breadth": "saved Tencent all-A breadth plus point-in-time SSE/CSI300/SZSE/ChiNext close-daily context",
             "lhb": "saved Tushare top_list/top_inst rows when available; absence is reported, never inferred",
+            "longhu_next_session": "saved Longhu historical limit, auction and article evidence from earlier exchange dates only",
             "analyst": "text-only reports available no later than observed_at",
             "automation": "no broker order submission",
         },
