@@ -50,7 +50,15 @@ def extract_audio(url: str, output: Path, *, max_seconds: int, max_bytes: int) -
         "-t", str(max_seconds), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
         "-fs", str(max_bytes), "-f", "wav", str(output), "-y",
     ]
-    subprocess.run(command, check=True, timeout=max_seconds + 120)
+    # FFmpeg's protocol whitelist rejects the synthetic ``httpproxy`` scheme
+    # used by some shell environments.  Direct access is the safe default for
+    # the allowlisted media host; operators behind a required proxy can opt in
+    # with FFMPEG_USE_PROXY=1.
+    env = os.environ.copy()
+    if os.environ.get("FFMPEG_USE_PROXY", "").lower() not in {"1", "true", "yes"}:
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            env.pop(key, None)
+    subprocess.run(command, check=True, timeout=max_seconds + 120, env=env)
     if not output.is_file() or output.stat().st_size <= 44:
         raise RuntimeError("ffmpeg produced no audio")
     if output.stat().st_size > max_bytes:
