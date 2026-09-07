@@ -53,12 +53,13 @@ WATCH = {
 def chat_ids_for_product(business_id, override=None):
     """Return the configured destinations for one internal-reference product."""
     if override is not None:
-        return override
+        return list(dict.fromkeys(override))
+    destinations = list(CHAT_IDS)
     if business_id == "1661993558510538753" and QINLONG_CHAT_IDS:
-        return QINLONG_CHAT_IDS
+        destinations.extend(QINLONG_CHAT_IDS)
     if business_id == "1806593447818383361" and JUEJIN_CHAT_IDS:
-        return JUEJIN_CHAT_IDS
-    return CHAT_IDS
+        destinations.extend(JUEJIN_CHAT_IDS)
+    return list(dict.fromkeys(destinations))
 
 
 def article_chat_ids():
