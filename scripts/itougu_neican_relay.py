@@ -162,6 +162,28 @@ def report_line(it):
     return " ".join(bits)
 
 
+def video_line(it):
+    """Return a text-only link for an attached Itougu replay video.
+
+    The API has used both an object and a JSON-encoded string for ``videoInfo``
+    across product versions.  We intentionally forward only the public URL
+    and title; the relay never downloads or proxies the media bytes.
+    """
+    info = it.get("videoInfo") or it.get("video_info")
+    if isinstance(info, str):
+        try:
+            info = json.loads(info)
+        except (TypeError, json.JSONDecodeError):
+            info = None
+    if not isinstance(info, dict):
+        return ""
+    url = str(info.get("videoUrl") or info.get("videoURL") or info.get("url") or "").strip()
+    if not url or not re.match(r"^https?://", url, re.IGNORECASE):
+        return ""
+    title = str(info.get("videoName") or info.get("name") or "复盘视频").strip()
+    return "〔复盘视频〕%s：%s" % (title, url)
+
+
 def format_item(name, it, delivery_label=""):
     when = it.get("publishTime") or it.get("createTime") or ""
     who = item_consultant(it)
@@ -177,6 +199,9 @@ def format_item(name, it, delivery_label=""):
     body = html2text(it.get("content"))
     if body:
         lines.append(body)
+    video = video_line(it)
+    if video:
+        lines.append(video)
     report = report_line(it)
     if report:
         lines.append(report)
