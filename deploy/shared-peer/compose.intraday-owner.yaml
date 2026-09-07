@@ -14,6 +14,11 @@ services:
       # the normalized gateway through db-tunnel:5681.
       QUANT_LONGHU_DIRECT_ENABLED: "false"
       QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      # Dashboard/read-model polling and intraday evidence loops share the
+      # bounded synchronous repository bridge. Keep it below the database
+      # connection budget, but leave enough slots for the owner watcher pool.
+      QUANT_DB_BLOCKING_MAX_WORKERS: ${PEER_DB_BLOCKING_MAX_WORKERS:-8}
+      QUANT_DB_BLOCKING_MAX_QUEUE: ${PEER_DB_BLOCKING_MAX_QUEUE:-16}
       # Feishu delivery is opt-in.  The next-session cutover may enable the
       # direct path while edge retains group listening/forwarding; a relay
       # tunnel can be enabled later without changing the strategy runtime.
@@ -66,6 +71,8 @@ services:
       QUANT_WRITE_API_KEY: ${PEER_QUANT_WRITE_API_KEY:?Set PEER_QUANT_WRITE_API_KEY}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:?Set QUANT_SHARED_READ_API_KEY}
       QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      QUANT_DB_BLOCKING_MAX_WORKERS: ${PEER_RESEARCH_DB_BLOCKING_MAX_WORKERS:-4}
+      QUANT_DB_BLOCKING_MAX_QUEUE: ${PEER_RESEARCH_DB_BLOCKING_MAX_QUEUE:-16}
       QUANT_LONGHU_DIRECT_ENABLED: "false"
       QUANT_FEISHU_DIRECT_ENABLED: "false"
       STRATEGY_REVIEW_AUTOMATION_ENABLED: ${PEER_STRATEGY_REVIEW_AUTOMATION_ENABLED:-true}
