@@ -354,6 +354,12 @@ def in_trading_hours():
     return (9 * 60 + 30 <= hm <= 11 * 60 + 30) or (13 * 60 <= hm <= 15 * 60)  # A股上午/下午
 
 
+def is_after_close():
+    """Whether Shanghai time is on a weekday at/after the 15:00 close."""
+    now = datetime.now(CST)
+    return now.weekday() < 5 and now.hour * 60 + now.minute >= 15 * 60
+
+
 def main():
     ap = argparse.ArgumentParser(description="爱投顾内参 → 飞书 中继")
     ap.add_argument("--once", action="store_true", help="拉一次增量并发送")
@@ -361,7 +367,10 @@ def main():
     ap.add_argument("--interval", type=float, default=90, help="轮询间隔秒（默认90）")
     ap.add_argument("--dry-run", action="store_true", help="只打印不发送")
     ap.add_argument("--bootstrap", action="store_true", help="把当前所有内参标记为已读（不发送），首次部署用")
-    ap.add_argument("--trading-hours-only", action="store_true", help="仅交易时段轮询")
+    ap.add_argument("--trading-hours-only", action="store_true",
+                    help="盘中高频轮询，上海时间收盘后保留低频轮询")
+    ap.add_argument("--off-hours-interval", type=float, default=600,
+                    help="非盘中轮询间隔秒（默认600，即10分钟）")
     ap.add_argument("--product", action="append", help="只处理指定 productId")
     args = ap.parse_args()
 
@@ -374,7 +383,11 @@ def main():
         print("itougu 内参兵底轮询启动 interval=%ss" % args.interval, flush=True)
         ensure_baseline(prods)
         while True:
-            if not args.trading_hours_only or in_trading_hours():
+            trading = in_trading_hours()
+            # Keep the remote API safety net alive after the Shanghai close,
+            # but avoid restoring any local WeChat-table listener path.
+            allowed = (not args.trading_hours_only) or trading or is_after_close()
+            if allowed:
                 try:
                     deliver_new(products=prods, dry_run=args.dry_run,
                                 delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
@@ -384,7 +397,7 @@ def main():
                         poll_public_views(verbose=True, delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
                 except Exception as e:
                     print("轮询异常(忽略): %s" % e, flush=True)
-            time.sleep(args.interval)
+            time.sleep(args.interval if trading else max(30, args.off_hours_interval))
     else:
         if args.trading_hours_only and not in_trading_hours():
             return 0   # 非交易时段静默跳过（避免定时任务日志刷屏）
