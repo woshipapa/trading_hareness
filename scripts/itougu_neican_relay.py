@@ -34,6 +34,11 @@ CHAT_IDS = [c for c in os.environ.get("ITOUGU_CHAT_IDS", "oc_570aeb3bbfb11fa2be6
 # Optional product-specific fan-out.  It lets the dedicated 擒龙 group stay
 # focused while the general public-account group continues to receive both.
 QINLONG_CHAT_IDS = [c for c in os.environ.get("ITOUGU_QINLONG_CHAT_IDS", "").split(",") if c.strip()]
+# Product-specific fan-out for 尾盘掘金内参. Keep the general sink as the
+# default so existing deployments remain backward compatible.
+JUEJIN_CHAT_IDS = [c for c in os.environ.get("ITOUGU_JUEJIN_CHAT_IDS", "").split(",") if c.strip()]
+# Additional destinations for both public-account article feeds.
+ARTICLE_CHAT_IDS = [c for c in os.environ.get("ITOUGU_ARTICLE_CHAT_IDS", "").split(",") if c.strip()]
 API_BASE = "https://group-api.itougu.com"
 PFX = "/teach-product/internalReference"
 SUCCESS = 20000
@@ -51,7 +56,14 @@ def chat_ids_for_product(business_id, override=None):
         return override
     if business_id == "1661993558510538753" and QINLONG_CHAT_IDS:
         return QINLONG_CHAT_IDS
+    if business_id == "1806593447818383361" and JUEJIN_CHAT_IDS:
+        return JUEJIN_CHAT_IDS
     return CHAT_IDS
+
+
+def article_chat_ids():
+    """Return general plus explicitly registered public-article destinations."""
+    return list(dict.fromkeys([*CHAT_IDS, *ARTICLE_CHAT_IDS]))
 
 _feishu_token = {"value": "", "expires_at": 0.0}
 _tag_re = re.compile(r"<[^>]+>")
@@ -318,6 +330,22 @@ def ensure_baseline(products):
         print("建立基线失败(忽略，下轮再试): %s" % e, flush=True)
 
 
+def poll_public_views(verbose=False, delivery_label="poll"):
+    """Poll the Itougu 研习社 view API without reading any WeChat table.
+
+    The import is lazy because the public-article module reuses this module's
+    auth and Feishu helpers.  Keeping it here makes the systemd poller the
+    single API-driven path after the local SQLite/WAL watcher is disabled.
+    """
+    try:
+        import itougu_public_article_relay as public_relay
+        return int(public_relay.poll_views(verbose=verbose, delivery_label=delivery_label) or 0)
+    except Exception as exc:
+        if verbose:
+            print("研习社公开观点轮询失败(忽略): %s" % exc, flush=True)
+        return 0
+
+
 def in_trading_hours():
     now = datetime.now(CST)
     if now.weekday() >= 5:          # 周末
@@ -350,6 +378,10 @@ def main():
                 try:
                     deliver_new(products=prods, dry_run=args.dry_run,
                                 delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
+                    # 研习社盘中观点走同一 Itougu API 的 view/list，绝不读
+                    # 本地微信表；尾盘掘金/猎场擒龙仍走 appendContent/list。
+                    if not args.dry_run:
+                        poll_public_views(verbose=True, delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
                 except Exception as e:
                     print("轮询异常(忽略): %s" % e, flush=True)
             time.sleep(args.interval)

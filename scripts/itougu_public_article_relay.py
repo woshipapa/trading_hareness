@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """爱投顾公开圈子文章 → 飞书。
 
-只由本地微信卡片监听触发：对文章 ID 调 article/view 拉正文（需认证，复用内参同一 token），
-再以圈子 ID 白名单确认来源（尾盘掘金/研习社）。
+文章由本地微信卡片触发，对文章 ID 调 article/view 拉正文；研习社盘中观点由
+view/list 轮询补齐。两者都以圈子 ID 白名单确认来源并发送到同一组飞书出口。
 """
 import json
 import os
@@ -11,22 +11,29 @@ import re
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 import itougu_neican_relay as NEICAN
 
 API_BASE = "https://group-api.itougu.com"
 ARTICLE_VIEW = "/teach-community/article/view"
+VIEW_LIST = "/teach-community/view/list"
 SUCCESS = 20000
 TARGET_CIRCLES = {
     "1806590848897601536": "尾盘掘金",
     "1661937625084334080": "研习社",
+    # 主力行为学的公开文章会从同一张爱投顾公众号表推送；其
+    # article/view 返回的真实圈子 ID 为 1661566330475778048。
+    "1661566330475778048": "主力行为学",
 }
+_default_state_dir = Path(os.environ.get("ITOUGU_STATE_FILE", "/Users/papa/codebase/n8n/state/itougu-neican.json")).parent
 STATE_FILE = Path(os.environ.get(
     "ITOUGU_PUBLIC_ARTICLE_STATE_FILE",
-    "/Users/papa/codebase/n8n/state/itougu-public-articles.json",
+    str(_default_state_dir / "itougu-public-articles.json"),
 ))
 _article_id_re = re.compile(r"[?&]articleId=(\d+)")
+_circle_id_re = re.compile(r"[?&]circleId=(\d+)")
 
 
 _HEADERS = {"cache": None}
@@ -58,6 +65,13 @@ def public_call(path, body):
 
 def fetch_article(article_id):
     return public_call(ARTICLE_VIEW, {"articleId": str(article_id)})
+
+
+def fetch_views(circle_id, page_size=30):
+    """Fetch the viewpoint stream behind circle/enter update cards."""
+    return (public_call(VIEW_LIST, {
+        "circleId": str(circle_id), "pageNum": 1, "pageSize": page_size,
+    }).get("rows") or [])
 
 
 def load_state():
@@ -92,7 +106,21 @@ def format_article(circle_name, article, article_url, delivery_label):
     body = NEICAN.html2text(article.get("content") or "")
     if body:
         lines.append(body)
-    lines.append("原文：%s" % article_url)
+    # 飞书展示只保留标题和正文；原文 URL 不放进群消息。
+    return title, "\n\n".join(lines)
+
+
+def format_view(circle_name, view, circle_id, delivery_label):
+    title = "%s · 观点" % circle_name
+    if delivery_label:
+        title = "[%s] %s" % (delivery_label, title)
+    lines = []
+    when = view.get("publicTime") or view.get("createTime") or ""
+    if when:
+        lines.append("🕐 %s" % when)
+    body = NEICAN.html2text(view.get("content") or "")
+    if body:
+        lines.append(body)
     return title, "\n\n".join(lines)
 
 
@@ -137,7 +165,7 @@ def _process(article_id, article_url, state, verbose, delivery_label):
         return "done"
     title, text = format_article(circle_name, article, article_url, delivery_label)
     try:
-        for chat_id in NEICAN.CHAT_IDS:
+        for chat_id in NEICAN.article_chat_ids():
             NEICAN.send_feishu(chat_id, title, text, "public-article:%s" % article_id)
     except Exception as exc:
         if verbose:
@@ -169,8 +197,18 @@ def trigger_from_push(username, article_url, verbose=False, delivery_label="data
     return 1 if outcome == "sent" else 0
 
 
+def trigger_from_circle_push(username, circle_url, verbose=False, delivery_label="database"):
+    """Handle a circle/enter card using the small-table event as trigger."""
+    if username != NEICAN.GH or "/circle/enter" not in (circle_url or ""):
+        return 0
+    match = _circle_id_re.search(circle_url)
+    if not match or match.group(1) != "1661937625084334080":
+        return 0
+    return poll_views(verbose=verbose, delivery_label=delivery_label)
+
+
 def retry_pending(verbose=False, delivery_label="database"):
-    """Retry only IDs seen by the WeChat listener; no catalogue polling."""
+    """Retry only article IDs seen by the WeChat listener."""
     state = load_state()
     now = time.time()
     changed = False
@@ -193,3 +231,51 @@ def retry_pending(verbose=False, delivery_label="database"):
     if changed:
         save_state(state)
     return int(sent)
+
+
+def poll_views(verbose=False, delivery_label="poll"):
+    """Poll the viewpoint stream for circles that emit circle/enter cards."""
+    state = load_state()
+    seen = set(state.setdefault("view_seen", []))
+    sent = 0
+    changed = False
+    for circle_id, circle_name in TARGET_CIRCLES.items():
+        # Only 研习社 currently emits the intraday circle/enter updates we
+        # need; article cards for all TARGET_CIRCLES remain event-driven.
+        if circle_id != "1661937625084334080":
+            continue
+        try:
+            rows = fetch_views(circle_id)
+        except Exception as exc:
+            if verbose:
+                print("公开观点轮询失败(忽略): %s" % exc, flush=True)
+            continue
+        for view in rows:
+            view_id = str(view.get("viewId") or "")
+            if not view_id or view_id in seen:
+                continue
+            # Do not replay the historical first page on first activation;
+            # do include today's intraday backlog so the new listener catches
+            # updates that arrived before deployment.
+            when = str(view.get("publicTime") or view.get("createTime") or "")
+            if not when.startswith(datetime.now(NEICAN.CST).strftime("%Y-%m-%d")):
+                seen.add(view_id)
+                changed = True
+                continue
+            title, text = format_view(circle_name, view, circle_id, delivery_label)
+            try:
+                for chat_id in NEICAN.article_chat_ids():
+                    NEICAN.send_feishu(chat_id, title, text, "public-view:%s" % view_id)
+            except Exception as exc:
+                if verbose:
+                    print("公开观点飞书发送失败(忽略): %s" % exc, flush=True)
+                continue
+            seen.add(view_id)
+            changed = True
+            sent += 1
+            if verbose:
+                print("✅ 已发飞书 [公开观点] %s (%s)" % (title, view_id), flush=True)
+    if changed:
+        state["view_seen"] = list(seen)[-1000:]
+        save_state(state)
+    return sent
