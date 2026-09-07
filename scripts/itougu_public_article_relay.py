@@ -272,6 +272,7 @@ def poll_views(verbose=False, delivery_label="poll"):
     """Poll the viewpoint stream for circles that emit circle/enter cards."""
     state = load_state()
     seen = set(state.setdefault("view_seen", []))
+    article_seen = set(state.setdefault("article_seen", []))
     sent = 0
     changed = False
     for circle_id, circle_name in TARGET_CIRCLES.items():
@@ -289,7 +290,8 @@ def poll_views(verbose=False, delivery_label="poll"):
             continue
         for view in rows:
             view_id = str(view.get("viewId") or "")
-            if not view_id or view_id in seen:
+            article_id = view_article_id(view) if circle_id == MAIN_BEHAVIOR_CIRCLE_ID else ""
+            if not view_id or (view_id in seen and (not article_id or article_id in article_seen)):
                 continue
             # Do not replay the historical first page on first activation;
             # do include today's intraday backlog so the new listener catches
@@ -299,7 +301,6 @@ def poll_views(verbose=False, delivery_label="poll"):
                 seen.add(view_id)
                 changed = True
                 continue
-            article_id = view_article_id(view) if circle_id == MAIN_BEHAVIOR_CIRCLE_ID else ""
             if article_id:
                 try:
                     article = fetch_article(article_id)
@@ -322,11 +323,14 @@ def poll_views(verbose=False, delivery_label="poll"):
                     print("公开观点飞书发送失败(忽略): %s" % exc, flush=True)
                 continue
             seen.add(view_id)
+            if article_id:
+                article_seen.add(article_id)
             changed = True
             sent += 1
             if verbose:
                 print("✅ 已发飞书 [公开观点] %s (%s)" % (title, view_id), flush=True)
     if changed:
         state["view_seen"] = list(seen)[-1000:]
+        state["article_seen"] = list(article_seen)[-1000:]
         save_state(state)
     return sent
