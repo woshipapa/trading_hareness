@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """爱投顾公开圈子文章 → 飞书。
 
-文章由本地微信卡片触发，对文章 ID 调 article/view 拉正文；研习社盘中观点由
+文章由本地微信卡片触发，对文章 ID 调 article/view 拉正文；公开观点流由
 view/list 轮询补齐。两者都以圈子 ID 白名单确认来源并发送到同一组飞书出口。
 """
 import json
@@ -34,6 +34,8 @@ STATE_FILE = Path(os.environ.get(
 ))
 _article_id_re = re.compile(r"[?&]articleId=(\d+)")
 _circle_id_re = re.compile(r"[?&]circleId=(\d+)")
+_article_id_json_re = re.compile(r"(?:^|[\"'])articleId(?:[\"']\s*:\s*|=)(\d+)")
+MAIN_BEHAVIOR_CIRCLE_ID = "1661566330475778048"
 
 
 _HEADERS = {"cache": None}
@@ -122,6 +124,39 @@ def format_view(circle_name, view, circle_id, delivery_label):
     if body:
         lines.append(body)
     return title, "\n\n".join(lines)
+
+
+def view_article_id(view):
+    """Extract an article id from a public-circle view payload, if present."""
+    for key in ("articleId", "article_id"):
+        value = view.get(key)
+        if value:
+            return str(value)
+    for key in ("content", "referContent"):
+        value = view.get(key)
+        if isinstance(value, dict):
+            for nested in ("articleId", "article_id"):
+                if value.get(nested):
+                    return str(value[nested])
+        if not isinstance(value, str):
+            continue
+        try:
+            payload = json.loads(value)
+            if isinstance(payload, dict):
+                for nested in ("articleId", "article_id"):
+                    if payload.get(nested):
+                        return str(payload[nested])
+        except (TypeError, ValueError):
+            match = _article_id_json_re.search(value)
+            if match:
+                return match.group(1)
+    return ""
+
+
+def after_close():
+    """Return true only after 15:00 Asia/Shanghai on a weekday."""
+    now = datetime.now(NEICAN.CST)
+    return now.weekday() < 5 and now.hour * 60 + now.minute >= 15 * 60
 
 
 def _retry_delay(attempts):
@@ -240,9 +275,11 @@ def poll_views(verbose=False, delivery_label="poll"):
     sent = 0
     changed = False
     for circle_id, circle_name in TARGET_CIRCLES.items():
-        # Only 研习社 currently emits the intraday circle/enter updates we
-        # need; article cards for all TARGET_CIRCLES remain event-driven.
-        if circle_id != "1661937625084334080":
+        # The endpoint is available for all registered public circles.  Keep
+        # the whitelist explicit so adding a new source cannot broaden the
+        # polling scope accidentally.
+        # 主力行为学只在沪市收盘后轮询，避免盘中把文章预告当成策略输入。
+        if circle_id == MAIN_BEHAVIOR_CIRCLE_ID and not after_close():
             continue
         try:
             rows = fetch_views(circle_id)
@@ -262,7 +299,21 @@ def poll_views(verbose=False, delivery_label="poll"):
                 seen.add(view_id)
                 changed = True
                 continue
-            title, text = format_view(circle_name, view, circle_id, delivery_label)
+            article_id = view_article_id(view) if circle_id == MAIN_BEHAVIOR_CIRCLE_ID else ""
+            if article_id:
+                try:
+                    article = fetch_article(article_id)
+                except (OSError, ValueError, urllib.error.URLError) as exc:
+                    if verbose:
+                        print("主力行为学文章读取失败(忽略): %s" % exc, flush=True)
+                    continue
+                if article.get("isExist") != 1 or not str(article.get("content") or "").strip():
+                    if verbose:
+                        print("主力行为学文章暂不可用：articleId=%s" % article_id, flush=True)
+                    continue
+                title, text = format_article(circle_name, article, "", delivery_label)
+            else:
+                title, text = format_view(circle_name, view, circle_id, delivery_label)
             try:
                 for chat_id in NEICAN.article_chat_ids():
                     NEICAN.send_feishu(chat_id, title, text, "public-view:%s" % view_id)
