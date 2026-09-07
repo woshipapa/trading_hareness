@@ -279,6 +279,8 @@ def poll_views(verbose=False, delivery_label="poll"):
         # The endpoint is available for all registered public circles.  Keep
         # the whitelist explicit so adding a new source cannot broaden the
         # polling scope accidentally.
+        if circle_id not in {"1661937625084334080", MAIN_BEHAVIOR_CIRCLE_ID}:
+            continue
         # 主力行为学只在沪市收盘后轮询，避免盘中把文章预告当成策略输入。
         if circle_id == MAIN_BEHAVIOR_CIRCLE_ID and not after_close():
             continue
