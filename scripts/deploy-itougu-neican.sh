@@ -2,9 +2,9 @@
 # Deploy the Itougu internal-reference relay onto the edge poller host.
 # Default mode is read-only planning; --apply installs and restarts the service.
 #
-# Only the relay module is shipped. The systemd unit, the auth file and the
-# public-article relay stay as deployed, so this never reverts an unrelated
-# hot fix living beside it.
+# Only the two relay modules are shipped. The systemd unit and the auth file
+# stay as deployed. Both modules are contract-checked before install, so a
+# revision that drops a helper the poller or the report needs cannot land.
 set -euo pipefail
 
 usage() {
@@ -24,7 +24,7 @@ edge_key="${ITOUGU_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
 edge_root="${ITOUGU_EDGE_ROOT:-/opt/itougu-neican}"
 github_repository="${ITOUGU_EDGE_GITHUB_REPOSITORY:-woshipapa/trading_hareness}"
 github_branch="${ITOUGU_EDGE_GITHUB_BRANCH:-main}"
-release_paths=(scripts/itougu_neican_relay.py scripts/test_itougu_poll_schedule.py scripts/deploy-itougu-neican.sh)
+release_paths=(scripts/itougu_neican_relay.py scripts/itougu_public_article_relay.py scripts/test_itougu_poll_schedule.py scripts/deploy-itougu-neican.sh)
 
 for command in git ssh; do command -v "$command" >/dev/null || { echo "missing required command: $command" >&2; exit 127; }; done
 [[ -r "$edge_key" ]] || { echo "edge SSH key is not readable: $edge_key" >&2; exit 2; }
@@ -34,7 +34,7 @@ for command in git ssh; do command -v "$command" >/dev/null || { echo "missing r
 release_sha="$(git -C "$source_root" rev-parse --verify "${release_ref}^{commit}")"
 archive_url="https://codeload.github.com/$github_repository/tar.gz/$release_sha"
 
-python3 -m unittest discover -s "$source_root/scripts" -p 'test_itougu_poll_schedule.py' -q
+python3 -m unittest discover -s "$source_root/scripts" -p 'test_itougu_*.py' -q
 
 for path in "${release_paths[@]}"; do
   git -C "$source_root" diff --quiet --ignore-submodules -- "$path" || {
@@ -71,9 +71,12 @@ case "$temp_dir" in /tmp/itougu-neican-release.*) ;; *) exit 1 ;; esac
 trap 'rm -rf -- "$temp_dir"' EXIT
 
 curl --fail --location --silent --show-error --retry 3 "$archive_url" \
-  | tar -xz -C "$temp_dir" --strip-components=1 --wildcards '*/scripts/itougu_neican_relay.py'
+  | tar -xz -C "$temp_dir" --strip-components=1 --wildcards \
+      '*/scripts/itougu_neican_relay.py' '*/scripts/itougu_public_article_relay.py'
 candidate="$temp_dir/scripts/itougu_neican_relay.py"
+candidate_articles="$temp_dir/scripts/itougu_public_article_relay.py"
 test -f "$candidate"
+test -f "$candidate_articles"
 
 # Contract checks run against the candidate before anything is installed:
 # the midday window is the change being shipped, and the report deployed
@@ -88,6 +91,12 @@ missing = [n for n in ("load_headers", "itougu_call", "send_feishu", "feishu_tok
            if not hasattr(relay, n)]
 if missing:
     raise SystemExit("candidate relay drops helpers used by the report: %s" % ", ".join(missing))
+
+import itougu_public_article_relay as articles
+missing = [n for n in ("poll_views", "trigger_from_push", "retry_pending")
+           if not hasattr(articles, n)]
+if missing:
+    raise SystemExit("candidate article relay drops helpers: %s" % ", ".join(missing))
 
 midday = datetime(2026, 9, 8, 12, 0, tzinfo=relay.CST)          # 周二午休
 session = datetime(2026, 9, 8, 10, 0, tzinfo=relay.CST)
@@ -106,8 +115,11 @@ set +a
 PYTHONDONTWRITEBYTECODE=1 python3 "$candidate" --once --dry-run >/dev/null
 echo "candidate dry-run ok"
 
-install -m 0600 "$edge_root/itougu_neican_relay.py" "$edge_root/itougu_neican_relay.py.before-$release_sha"
+for module in itougu_neican_relay.py itougu_public_article_relay.py; do
+  install -m 0600 "$edge_root/$module" "$edge_root/$module.before-$release_sha"
+done
 install -m 0755 "$candidate" "$edge_root/itougu_neican_relay.py"
+install -m 0755 "$candidate_articles" "$edge_root/itougu_public_article_relay.py"
 systemctl restart itougu-neican.service
 sleep 3
 systemctl is-active --quiet itougu-neican.service || { echo "relay failed to come back" >&2; exit 1; }
@@ -118,13 +130,15 @@ import sys
 from datetime import datetime
 sys.path.insert(0, sys.argv[1])
 import itougu_neican_relay as relay
+import itougu_public_article_relay as articles
 now = datetime(2026, 9, 8, 12, 30, tzinfo=relay.CST)
 should_poll, sleep_seconds = relay.poll_plan(now, interval=15, off_hours_interval=600)
 assert should_poll and sleep_seconds == 15, (should_poll, sleep_seconds)
+assert callable(articles.poll_views)
 print("installed relay polls the midday break every %.0fs" % sleep_seconds)
 PY
 journalctl -u itougu-neican.service -n 5 --no-pager -o cat
-printf 'installed relay %s (backup: itougu_neican_relay.py.before-%s)\n' "$release_sha" "$release_sha"
+printf 'installed relay + article relay %s (backups: *.before-%s)\n' "$release_sha" "$release_sha"
 REMOTE
 
 printf 'edge relay deploy applied: %s\n' "$release_sha"
