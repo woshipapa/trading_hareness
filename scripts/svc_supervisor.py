@@ -45,12 +45,15 @@ TASKS = [
                "-N","-L","127.0.0.1:18300:127.0.0.1:18300","root@47.114.113.152"],
          cwd=HOME, out=os.path.join(N8N,"logs/feishu-tunnel.log"),
          err=os.path.join(N8N,"logs/feishu-tunnel.log"), env={}),
-    # SQLite/WAL 事件监听是爱投顾的低延迟主链路；edge API 轮询仍作为
-    # 15 秒兜底。它只读取一张业务表，媒体/正文发送仍走同一套幂等出口。
-    dict(name="itougu-table-watch", kind="daemon",
-         args=[PY, os.path.join(N8N, "scripts/itougu_table_watch.py"), "--interval", "1.5"],
-         cwd=N8N, out=os.path.join(N8N, "logs/itougu-table-watch.log"),
-         err=os.path.join(N8N, "logs/itougu-table-watch.log"), env={"PYTHONUNBUFFERED": "1"}),
+    # 专表监听（SQLite/WAL 事件）当前停用：本地不再跑这条低延迟链路，爱投顾
+    # 三个来源全部由 edge 的 API 轮询覆盖（含 11:30-13:00 午休窗口）。默认不启动，
+    # 需要恢复本地监听时设 ITOUGU_TABLE_WATCH=1 再重启 supervisor。
+    *([
+        dict(name="itougu-table-watch", kind="daemon",
+             args=[PY, os.path.join(N8N, "scripts/itougu_table_watch.py"), "--interval", "1.5"],
+             cwd=N8N, out=os.path.join(N8N, "logs/itougu-table-watch.log"),
+             err=os.path.join(N8N, "logs/itougu-table-watch.log"), env={"PYTHONUNBUFFERED": "1"}),
+    ] if os.environ.get("ITOUGU_TABLE_WATCH") == "1" else []),
     # ---- 定时 interval (原 StartInterval, RunAtLoad) ----
     dict(name="paperkb.arxiv", kind="interval", interval=1800, run_at_load=True,
          args=[PY, os.path.join(PKB, "jobs.py"), "arxiv"],
