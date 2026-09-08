@@ -11,10 +11,13 @@
 凭据：itougu 用 wechat-export-macos/itougu_auth.json 里的长效 token；飞书用 n8n/.env 的 APP_ID/SECRET。
 """
 import argparse
+import hashlib
 import html
+import hmac
 import json
 import os
 import re
+import secrets
 import sys
 import time
 import uuid
@@ -61,6 +64,11 @@ WATCH = {
 # The dedicated product groups receive a provenance/disclosure line at both
 # ends of the forwarded body.  The shared 公众号同步群 remains unchanged.
 PRODUCT_NOTICE = "认真一手咸鱼店铺：餐厅焦糖味的momo，其他都是二手转发。"
+MAX_FEISHU_TEXT_CHARS = 28000
+WATERMARK_SECRET_FILE = Path(os.environ.get(
+    "ITOUGU_WATERMARK_SECRET_FILE", str(STATE_FILE.with_name(STATE_FILE.name + ".watermark-secret"))))
+_watermark_secret_lock = threading.Lock()
+_watermark_secret_value = None
 
 
 def chat_ids_for_product(business_id, override=None):
@@ -97,18 +105,79 @@ def dedicated_chat_ids_for_product(business_id, override=None):
     return list(dict.fromkeys(chat_id for chat_id in configured if chat_id not in shared))
 
 
-def wrap_product_message(text):
-    """Add the requested prefix and suffix to a dedicated-group message body."""
-    return "%s\n\n%s\n\n%s" % (PRODUCT_NOTICE, str(text or ""), PRODUCT_NOTICE)
+def wrap_product_message(text, watermark_id=None):
+    """Add the requested notice and, when supplied, a visible dynamic marker."""
+    body = str(text or "")
+    if watermark_id:
+        marker = "【动态水印 %s】" % watermark_id
+        return "%s\n\n%s\n\n%s\n\n%s\n\n%s" % (
+            marker, PRODUCT_NOTICE, body, PRODUCT_NOTICE, marker)
+    return "%s\n\n%s\n\n%s" % (PRODUCT_NOTICE, body, PRODUCT_NOTICE)
 
 
-def message_for_destination(chat_id, text):
+def _watermark_secret():
+    """Load or create a per-install HMAC key without exposing it in logs."""
+    configured = os.environ.get("ITOUGU_WATERMARK_SECRET", "").strip()
+    if configured:
+        return configured.encode("utf-8")
+    global _watermark_secret_value
+    with _watermark_secret_lock:
+        if _watermark_secret_value:
+            return _watermark_secret_value
+        try:
+            value = WATERMARK_SECRET_FILE.read_bytes().strip()
+        except (FileNotFoundError, OSError):
+            value = b""
+        if not value:
+            value = secrets.token_bytes(32)
+            WATERMARK_SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                fd = os.open(str(WATERMARK_SECRET_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                value = WATERMARK_SECRET_FILE.read_bytes().strip()
+            else:
+                try:
+                    os.write(fd, value)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        _watermark_secret_value = value
+        return value
+
+
+def watermark_id(chat_id, text, dedup_seed=""):
+    """Return a stable, destination-specific short marker for one delivery."""
+    content_hash = hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()
+    payload = "v1|%s|%s|%s" % (str(chat_id or "").strip(), str(dedup_seed or ""), content_hash)
+    digest = hmac.new(_watermark_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+    return "W1-%s" % digest
+
+
+def message_chunks_for_destination(chat_id, text, dedup_seed=""):
+    """Split text while keeping a complete dynamic marker on every chunk."""
+    body = str(text or "")
+    normalized = str(chat_id or "").strip()
+    dedicated = normalized in {
+        dedicated_id
+        for business_id in WATCH
+        for dedicated_id in dedicated_chat_ids_for_product(business_id)
+    }
+    if not dedicated:
+        return [body[i:i + MAX_FEISHU_TEXT_CHARS] for i in range(0, len(body), MAX_FEISHU_TEXT_CHARS)] or [""]
+    marker = watermark_id(normalized, body, dedup_seed)
+    available = max(1, MAX_FEISHU_TEXT_CHARS - len(wrap_product_message("", marker)))
+    return [wrap_product_message(body[i:i + available], marker)
+            for i in range(0, len(body), available)] or [wrap_product_message("", marker)]
+
+
+def message_for_destination(chat_id, text, dedup_seed=""):
     """Apply the product notice only at the two named product-group exits."""
     normalized = str(chat_id or "").strip()
     product_destinations = set()
     for business_id in WATCH:
         product_destinations.update(dedicated_chat_ids_for_product(business_id))
-    return wrap_product_message(text) if normalized in product_destinations else text
+    return (wrap_product_message(text, watermark_id(normalized, text, dedup_seed))
+            if normalized in product_destinations else text)
 
 
 def article_chat_ids():
@@ -372,9 +441,8 @@ def feishu_token():
 
 
 def send_feishu(chat_id, title, text, dedup_seed):
-    text = message_for_destination(chat_id, text)
     token = feishu_token()
-    chunks = [text[i:i + 28000] for i in range(0, len(text), 28000)] or [""]
+    chunks = message_chunks_for_destination(chat_id, text, dedup_seed)
     for idx, chunk in enumerate(chunks):
         t = title if idx == 0 else "%s（续 %d/%d）" % (title, idx + 1, len(chunks))
         content = {"zh_cn": {"title": t[:120], "content": [[{"tag": "text", "text": chunk}]]}}

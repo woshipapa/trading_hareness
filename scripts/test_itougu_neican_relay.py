@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import unittest
@@ -36,6 +37,8 @@ class ItouguRelayTests(unittest.TestCase):
 
     def test_message_notice_is_selected_by_final_destination(self):
         originals = relay.CHAT_IDS, relay.JUEJIN_CHAT_IDS, relay.QINLONG_CHAT_IDS
+        old_secret = os.environ.get("ITOUGU_WATERMARK_SECRET")
+        os.environ["ITOUGU_WATERMARK_SECRET"] = "unit-test-watermark-secret"
         relay.CHAT_IDS = ["shared"]
         relay.JUEJIN_CHAT_IDS = ["juejin-only"]
         relay.QINLONG_CHAT_IDS = ["qinlong-only"]
@@ -45,6 +48,49 @@ class ItouguRelayTests(unittest.TestCase):
             self.assertEqual(relay.message_for_destination("qinlong-only", "正文").count(relay.PRODUCT_NOTICE), 2)
         finally:
             relay.CHAT_IDS, relay.JUEJIN_CHAT_IDS, relay.QINLONG_CHAT_IDS = originals
+            if old_secret is None:
+                os.environ.pop("ITOUGU_WATERMARK_SECRET", None)
+            else:
+                os.environ["ITOUGU_WATERMARK_SECRET"] = old_secret
+
+    def test_dynamic_watermark_is_stable_per_message_and_destination(self):
+        old_secret = os.environ.get("ITOUGU_WATERMARK_SECRET")
+        os.environ["ITOUGU_WATERMARK_SECRET"] = "unit-test-watermark-secret"
+        try:
+            first = relay.watermark_id("juejin-only", "正文", "append-1")
+            same = relay.watermark_id("juejin-only", "正文", "append-1")
+            other_chat = relay.watermark_id("qinlong-only", "正文", "append-1")
+            other_message = relay.watermark_id("juejin-only", "正文", "append-2")
+            self.assertRegex(first, r"^W1-[0-9a-f]{16}$")
+            self.assertEqual(first, same)
+            self.assertNotEqual(first, other_chat)
+            self.assertNotEqual(first, other_message)
+        finally:
+            if old_secret is None:
+                os.environ.pop("ITOUGU_WATERMARK_SECRET", None)
+            else:
+                os.environ["ITOUGU_WATERMARK_SECRET"] = old_secret
+
+    def test_every_dedicated_chunk_keeps_dynamic_watermark(self):
+        old_secret = os.environ.get("ITOUGU_WATERMARK_SECRET")
+        old_chat_ids = relay.CHAT_IDS
+        old_juejin = relay.JUEJIN_CHAT_IDS
+        os.environ["ITOUGU_WATERMARK_SECRET"] = "unit-test-watermark-secret"
+        relay.CHAT_IDS = ["shared"]
+        relay.JUEJIN_CHAT_IDS = ["juejin-only"]
+        try:
+            chunks = relay.message_chunks_for_destination(
+                "juejin-only", "x" * (relay.MAX_FEISHU_TEXT_CHARS + 1), "append-1")
+            self.assertEqual(len(chunks), 2)
+            self.assertTrue(all(chunk.count("动态水印 W1-") == 2 for chunk in chunks))
+            self.assertTrue(all(len(chunk) <= relay.MAX_FEISHU_TEXT_CHARS for chunk in chunks))
+        finally:
+            relay.CHAT_IDS = old_chat_ids
+            relay.JUEJIN_CHAT_IDS = old_juejin
+            if old_secret is None:
+                os.environ.pop("ITOUGU_WATERMARK_SECRET", None)
+            else:
+                os.environ["ITOUGU_WATERMARK_SECRET"] = old_secret
 
     def test_delivery_fans_out_to_shared_and_named_destination(self):
         originals = {
