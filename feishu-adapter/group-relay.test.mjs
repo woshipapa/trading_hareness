@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Readable } from 'node:stream';
+import { performance } from 'node:perf_hooks';
 import { createGroupRelay } from './group-relay.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3 } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map();
 	const sent = [];
@@ -24,6 +25,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		relaySourceState: async (key) => sourceStates.get(key) ?? null,
 		saveRelaySourceCursor: async ({ sourceKey, chatId, cursorCreateTime }) => sourceStates.set(sourceKey, { chat_id: chatId, cursor_create_time: cursorCreateTime }),
 		getRelayMessage: async (id) => saved.get(id) ?? null,
+		getRelayMessages: async (ids) => ids.map((id) => saved.get(id)).filter(Boolean),
 		skipRelayMessage: async (record) => saved.set(record.sourceMessageId, { ...record, status: 'skipped_bootstrap' }),
 		filterRelayMessage: async (record, reason) => saved.set(record.sourceMessageId, { ...saved.get(record.sourceMessageId), ...record, status: 'filtered_system', errorMessage: reason }),
 		claimRelayMessage: async (record) => {
@@ -47,7 +49,10 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		} },
 	};
 	const sourceApi = {
-		messageList: async () => ({ data: { items: messages, has_more: false } }),
+		messageList: async () => {
+			if (messageListDelayMs) await new Promise((resolve) => setTimeout(resolve, messageListDelayMs));
+			return { data: { items: messages, has_more: false } };
+		},
 		messageResourceGet: async ({ fileKey }) => ({
 			headers: { 'content-type': fileKey.startsWith('img') ? 'image/png' : 'video/mp4', 'content-disposition': `attachment; filename=${fileKey}.bin`, 'content-length': '5' },
 			getReadableStream: () => Readable.from([Buffer.from('bytes')]),
@@ -57,8 +62,8 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		larkClient, sourceApi, ledger, workbench: { publishActionCard: async () => { throw new Error('action card should be off by default'); } }, logger: { info() {}, error() {}, warn() {} },
 		canWrite,
 		config: {
-			enabled: true, targetChatId: 'oc_summary', intervalSeconds: 10, historyLookbackSeconds: 300, overlapSeconds: 30,
-			bootstrapMode: 'forward_existing', sources: [{ key: 'anqiang', tag: 'anqiang', chatId: 'oc_source', chatName: '马安强 (1)', targetChatIds }],
+			enabled: true, targetChatId: 'oc_summary', intervalSeconds: 10, sourceConcurrency, historyLookbackSeconds: 300, overlapSeconds: 30,
+			bootstrapMode: 'forward_existing', sources: sources ?? [{ key: 'anqiang', tag: 'anqiang', chatId: 'oc_source', chatName: '马安强 (1)', targetChatIds }],
 		},
 	});
 	return { relay, sent, updated, saved };
@@ -71,6 +76,16 @@ test('a fenced relay observes no source messages and never sends', async () => {
 	assert.equal(sent.length, 0);
 	assert.equal(relay.status().writer_state, 'fenced');
 	assert.match(relay.status().last_tick_error, /relay 写入权归属/);
+});
+
+test('independent source groups are polled with bounded concurrency', async () => {
+	const sources = Array.from({ length: 3 }, (_, index) => ({ key: `source-${index}`, tag: `source-${index}`, chatId: `oc_source_${index}`, chatName: `source-${index}`, targetChatIds: [] }));
+	const { relay } = createHarness([], { sources, messageListDelayMs: 100, sourceConcurrency: 3 });
+	const started = performance.now();
+	await relay.tick();
+	const elapsed = performance.now() - started;
+	assert.ok(elapsed < 240, `expected concurrent polling, took ${elapsed.toFixed(1)}ms`);
+	assert.equal(relay.status().source_concurrency, 3);
 });
 
 test('image is relayed once as one tagged rich-text bubble and source ID is deduplicated', async () => {

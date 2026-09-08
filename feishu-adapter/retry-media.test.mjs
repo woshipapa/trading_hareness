@@ -4,8 +4,9 @@ import { shouldRedownloadRetryMedia } from './retry-media.mjs';
 
 const event = { message: { message_id: 'om_source' } };
 
-test('always re-downloads a Feishu resource before retrying it', () => {
-	assert.equal(shouldRedownloadRetryMedia({ expectedResourceCount: 1, event }), true);
+test('reuses an intact local resource before retrying it', () => {
+	assert.equal(shouldRedownloadRetryMedia({ expectedResourceCount: 1, event, localResourcesAvailable: true }), false);
+	assert.equal(shouldRedownloadRetryMedia({ expectedResourceCount: 1, event, localResourcesAvailable: false }), true);
 });
 
 test('does not try to redownload manual or text-only retries', () => {

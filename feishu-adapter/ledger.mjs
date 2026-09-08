@@ -78,11 +78,28 @@ export function createLedger(connectionString) {
 				CREATE TABLE IF NOT EXISTS feishu_user_oauth_tokens (token_key text PRIMARY KEY, access_ciphertext text NOT NULL, refresh_ciphertext text NOT NULL, access_expires_at timestamptz NOT NULL, refresh_expires_at timestamptz NOT NULL, scopes text NOT NULL DEFAULT '', updated_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS baidu_pan_oauth_tokens (token_key text PRIMARY KEY, access_ciphertext text NOT NULL, refresh_ciphertext text NOT NULL, access_expires_at timestamptz NOT NULL, refresh_expires_at timestamptz NOT NULL, scopes text NOT NULL DEFAULT '', updated_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS baidu_pan_archive_jobs (archive_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), archive_key text NOT NULL UNIQUE, bucket text NOT NULL, observed_at timestamptz NOT NULL, exchange_date date NOT NULL, payload jsonb NOT NULL DEFAULT '{}'::jsonb, status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','processing','completed','retryable_failed','failed')), attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0), available_at timestamptz NOT NULL DEFAULT now(), lease_owner text, lease_expires_at timestamptz, remote_path text, remote_fs_id text, last_error text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+				CREATE TABLE IF NOT EXISTS paper_kb_deliveries (
+					event_id text PRIMARY KEY,
+					target_chat_id text NOT NULL,
+					content_sha256 text NOT NULL,
+					status text NOT NULL DEFAULT 'sending' CHECK (status IN ('sending','sent','failed','blocked')),
+					attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+					message_id text,
+					last_error text,
+					lease_owner text,
+					lease_expires_at timestamptz,
+					remote_receipt jsonb NOT NULL DEFAULT '{}'::jsonb,
+					archive_status text NOT NULL DEFAULT 'not_applicable',
+					downstream_status text NOT NULL DEFAULT 'not_applicable',
+					created_at timestamptz NOT NULL DEFAULT now(),
+					updated_at timestamptz NOT NULL DEFAULT now()
+				);
 				CREATE INDEX IF NOT EXISTS feishu_group_relay_messages_status_idx ON feishu_group_relay_messages(status, updated_at);
 				CREATE INDEX IF NOT EXISTS feishu_group_relay_actions_message_idx ON feishu_group_relay_actions(source_message_id, created_at DESC);
 				CREATE INDEX IF NOT EXISTS ingestion_jobs_status_idx ON ingestion_jobs(status, updated_at);
 				CREATE INDEX IF NOT EXISTS ingestion_delivery_outbox_ready_idx ON ingestion_delivery_outbox(status, available_at, created_at);
 				CREATE INDEX IF NOT EXISTS baidu_pan_archive_jobs_ready_idx ON baidu_pan_archive_jobs(status, available_at, created_at);
+				CREATE INDEX IF NOT EXISTS paper_kb_deliveries_status_idx ON paper_kb_deliveries(status, updated_at);
 				ALTER TABLE ingestion_assets DROP CONSTRAINT IF EXISTS ingestion_assets_content_sha256_key;
 				ALTER TABLE feishu_group_relay_messages ADD COLUMN IF NOT EXISTS action_card_message_id text;
 				ALTER TABLE feishu_group_relay_messages ADD COLUMN IF NOT EXISTS workflow_state text NOT NULL DEFAULT 'new';
@@ -95,6 +112,9 @@ export function createLedger(connectionString) {
 				ALTER TABLE feishu_group_relay_messages ADD COLUMN IF NOT EXISTS target_chat_ids jsonb NOT NULL DEFAULT '[]'::jsonb;
 			ALTER TABLE feishu_group_relay_messages ADD COLUMN IF NOT EXISTS intelligence jsonb NOT NULL DEFAULT '{}'::jsonb;
 			ALTER TABLE feishu_summary_listener_state ADD COLUMN IF NOT EXISTS last_source_create_time bigint;
+			ALTER TABLE paper_kb_deliveries ADD COLUMN IF NOT EXISTS remote_receipt jsonb NOT NULL DEFAULT '{}'::jsonb;
+			ALTER TABLE paper_kb_deliveries ADD COLUMN IF NOT EXISTS archive_status text NOT NULL DEFAULT 'not_applicable';
+			ALTER TABLE paper_kb_deliveries ADD COLUMN IF NOT EXISTS downstream_status text NOT NULL DEFAULT 'not_applicable';
 				CREATE INDEX IF NOT EXISTS ingestion_assets_sha256_idx ON ingestion_assets(content_sha256);
 			`);
 			for (const route of registry.routes ?? []) {
@@ -164,6 +184,60 @@ export function createLedger(connectionString) {
 		async baiduPanArchiveStatus() {
 			const { rows } = await pool.query(`SELECT count(*) FILTER (WHERE status IN ('queued','processing','retryable_failed'))::int AS queue_depth,count(*) FILTER (WHERE status='completed')::int AS completed,count(*) FILTER (WHERE status='retryable_failed')::int AS retryable_failed,count(*) FILTER (WHERE status='failed')::int AS failed,max(updated_at) AS last_updated_at,max(updated_at) FILTER (WHERE status='completed') AS last_completed_at FROM baidu_pan_archive_jobs`);
 			return rows[0] ?? { queue_depth: 0, completed: 0, retryable_failed: 0, failed: 0, last_updated_at: null, last_completed_at: null };
+		},
+		async claimPaperKbDelivery({ eventId, targetChatId, contentSha256, owner = 'paper-kb', leaseSeconds = 300 }) {
+			const client = await pool.connect();
+			try {
+				await client.query('BEGIN');
+				const inserted = await client.query(`INSERT INTO paper_kb_deliveries(event_id,target_chat_id,content_sha256,status,attempt_count,lease_owner,lease_expires_at)
+					VALUES($1,$2,$3,'sending',1,$4,now()+($5 * interval '1 second'))
+					ON CONFLICT(event_id) DO NOTHING RETURNING *`, [String(eventId), String(targetChatId), String(contentSha256), String(owner), Math.max(30, Math.min(1800, Number(leaseSeconds) || 300))]);
+				if (inserted.rows[0]) {
+					await client.query('COMMIT');
+					return { claimed: true, duplicate: false, row: inserted.rows[0] };
+				}
+			const current = await client.query('SELECT * FROM paper_kb_deliveries WHERE event_id=$1 FOR UPDATE', [String(eventId)]);
+			const row = current.rows[0];
+			if (!row) throw new Error('paper-kb delivery disappeared during claim');
+			if (String(row.target_chat_id) !== String(targetChatId)
+				|| String(row.content_sha256) !== String(contentSha256)) {
+				await client.query('COMMIT');
+				return { claimed: false, conflict: true, row };
+			}
+			if (row.status === 'sent') {
+					await client.query('COMMIT');
+					return { claimed: false, duplicate: true, row };
+				}
+				if (row.status === 'blocked') {
+					await client.query('COMMIT');
+					return { claimed: false, blocked: true, row };
+				}
+				const leaseExpired = row.status !== 'sending' || !row.lease_expires_at || new Date(row.lease_expires_at).getTime() <= Date.now();
+				if (!leaseExpired) {
+					await client.query('COMMIT');
+					return { claimed: false, inFlight: true, row };
+				}
+				const updated = await client.query(`UPDATE paper_kb_deliveries SET target_chat_id=$2,content_sha256=$3,status='sending',attempt_count=attempt_count+1,lease_owner=$4,lease_expires_at=now()+($5 * interval '1 second'),last_error=null,updated_at=now() WHERE event_id=$1 RETURNING *`, [String(eventId), String(targetChatId), String(contentSha256), String(owner), Math.max(30, Math.min(1800, Number(leaseSeconds) || 300))]);
+				await client.query('COMMIT');
+				return { claimed: true, duplicate: false, row: updated.rows[0] };
+			} catch (error) {
+				await client.query('ROLLBACK').catch(() => {});
+				throw error;
+			} finally { client.release(); }
+		},
+		async completePaperKbDelivery(eventId, { status = 'sent', messageId = null, errorMessage = null, remoteReceipt = {} } = {}) {
+			const allowed = new Set(['sent', 'failed', 'blocked']);
+			if (!allowed.has(status)) throw new Error(`invalid paper-kb delivery status: ${status}`);
+			const { rows } = await pool.query(`UPDATE paper_kb_deliveries SET status=$2,message_id=$3,last_error=$4,remote_receipt=$5,lease_owner=null,lease_expires_at=null,updated_at=now() WHERE event_id=$1 RETURNING *`, [String(eventId), status, messageId ? String(messageId) : null, errorMessage ? String(errorMessage).slice(0, 1000) : null, remoteReceipt ?? {}]);
+			return rows[0] ?? null;
+		},
+		async paperKbDeliveryStatus(eventId = '') {
+			if (String(eventId).trim()) {
+				const { rows } = await pool.query(`SELECT event_id,target_chat_id,content_sha256,status,attempt_count,message_id,last_error,lease_owner,lease_expires_at,remote_receipt,archive_status,downstream_status,created_at,updated_at FROM paper_kb_deliveries WHERE event_id=$1`, [String(eventId).trim()]);
+				return rows;
+			}
+			const { rows } = await pool.query(`SELECT status,count(*)::int AS count,max(updated_at) AS last_updated_at FROM paper_kb_deliveries GROUP BY status ORDER BY status`);
+			return rows;
 		},
 		async relayWriterFence(writerId) {
 			if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(String(writerId ?? ''))) throw new Error('relay writer ID 格式无效');
@@ -243,6 +317,15 @@ export function createLedger(connectionString) {
 				LEFT JOIN feishu_group_relay_routes route ON route.source_key=message.source_key
 				WHERE message.source_message_id=$1`, [sourceMessageId]);
 			return rows[0] ?? null;
+		},
+		async getRelayMessages(sourceMessageIds = []) {
+			const ids = [...new Set(sourceMessageIds.map((value) => String(value ?? '').trim()).filter(Boolean))];
+			if (!ids.length) return [];
+			const { rows } = await pool.query(`SELECT message.*, route.chat_name AS source_chat_name
+				FROM feishu_group_relay_messages message
+				LEFT JOIN feishu_group_relay_routes route ON route.source_key=message.source_key
+				WHERE message.source_message_id = ANY($1::text[])`, [ids]);
+			return rows;
 		},
 		async getRelayMessageByActionCard(actionCardMessageId) {
 			const { rows } = await pool.query(`SELECT message.*, route.chat_name AS source_chat_name
@@ -373,10 +456,13 @@ export function createLedger(connectionString) {
 			const boundedLimit = Math.max(1, Math.min(20, Number(limit) || 5));
 			const boundedLease = Math.max(30, Math.min(1800, Number(leaseSeconds) || 300));
 			const { rows } = await pool.query(`WITH candidates AS (
-					SELECT delivery_id FROM ingestion_delivery_outbox
-					WHERE (status IN ('queued','retryable_failed') AND available_at <= now())
-						OR (status='processing' AND lease_expires_at < now())
-					ORDER BY available_at,created_at
+					SELECT delivery.delivery_id FROM ingestion_delivery_outbox delivery
+					WHERE (delivery.status IN ('queued','retryable_failed') AND delivery.available_at <= now())
+						OR (delivery.status='processing' AND delivery.lease_expires_at < now())
+					-- Text-only analyst messages are latency-sensitive.  Prefer them
+					-- over media jobs waiting on a slow remote workflow; the media
+					-- rows remain durable and are retried after the text backlog drains.
+					ORDER BY CASE WHEN NOT EXISTS (SELECT 1 FROM ingestion_assets asset WHERE asset.job_id=delivery.job_id) THEN 0 ELSE 1 END, delivery.available_at,delivery.created_at
 					FOR UPDATE SKIP LOCKED LIMIT $2
 				) UPDATE ingestion_delivery_outbox outbox
 				SET status='processing',attempt_count=outbox.attempt_count+1,lease_owner=$1,lease_expires_at=now()+($3 * interval '1 second'),updated_at=now()

@@ -54,3 +54,6 @@ coverage/
 .claude/
 .idea/
 .vscode/
+
+# 凭据地图（含凭据架构，本地存档勿提交）
+docs/凭据地图.md

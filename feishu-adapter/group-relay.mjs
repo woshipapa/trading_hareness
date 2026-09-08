@@ -1,8 +1,31 @@
 import { createHash } from 'node:crypto';
 import { isSystemMessage } from './message-filter.mjs';
+import { blockedMessageReason } from './content-filter.mjs';
 
 const DEFAULT_HISTORY_LOOKBACK_SECONDS = 5 * 60;
 const MAX_HISTORY_PAGES = 20;
+
+// Source groups are independent, but messages within one source must remain
+// ordered so its durable cursor can advance monotonically.  Keep the fan-out
+// bounded instead of using an unbounded Promise.all: this lowers end-to-end
+// latency when several analyst groups are active while respecting Feishu API
+// pressure and the small edge host.
+async function mapWithConcurrency(items, limit, worker) {
+	const values = Array.from(items);
+	if (!values.length) return [];
+	const results = new Array(values.length);
+	let nextIndex = 0;
+	const workerCount = Math.min(Math.max(1, Number(limit) || 1), values.length);
+	async function run() {
+		while (true) {
+			const index = nextIndex++;
+			if (index >= values.length) return;
+			results[index] = await worker(values[index], index);
+		}
+	}
+	await Promise.all(Array.from({ length: workerCount }, () => run()));
+	return results;
+}
 const MAX_SOURCE_FILE_BYTES = 30 * 1024 * 1024;
 const MAX_SOURCE_IMAGE_BYTES = 10 * 1024 * 1024;
 
@@ -197,6 +220,7 @@ function uploadErrorMessage(resource, error) {
 
 export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = null, config, canWrite = null, logger = console }) {
 	let running = false;
+	const sourceConcurrency = Math.max(1, Math.min(8, Number(config.sourceConcurrency) || 3));
 	let lastUnavailableLogAt = 0;
 	let lastTickStartedAt = null;
 	let lastTickCompletedAt = null;
@@ -474,7 +498,15 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				sort_type: 'ByCreateTimeAsc', page_size: 50, with_sender_name: true, ...(pageToken ? { page_token: pageToken } : {}),
 			});
 			if (result.code && result.code !== 0) throw new Error(`读取源群 ${source.key} 历史消息失败：${result.msg ?? result.code}`);
-			for (const message of result.data?.items ?? []) {
+			const pageMessages = result.data?.items ?? [];
+			const existingById = new Map();
+			if (ledger.getRelayMessages) {
+				for (const row of await ledger.getRelayMessages(pageMessages.map((message) => message?.message_id))) {
+					const rowId = row?.source_message_id ?? row?.sourceMessageId;
+					if (rowId) existingById.set(String(rowId), row);
+				}
+			}
+			for (const message of pageMessages) {
 				if (!message?.message_id) continue;
 				const createTime = asCreateTimeMs(message.create_time, now);
 				newestCreateTime = Math.max(newestCreateTime, createTime);
@@ -489,7 +521,14 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 					await ledger.filterRelayMessage(record, '系统消息已过滤（如入群、退群或群设置变更）');
 					continue;
 				}
-				const existing = await ledger.getRelayMessage(message.message_id);
+				const blockedReason = blockedMessageReason(message);
+				if (blockedReason) {
+					await ledger.filterRelayMessage(record, blockedReason);
+					continue;
+				}
+				const existing = ledger.getRelayMessages
+					? existingById.get(String(message.message_id)) ?? null
+					: await ledger.getRelayMessage(message.message_id);
 				if (bootstrap && config.bootstrapMode === 'skip_existing') {
 					await ledger.skipRelayMessage(record);
 					continue;
@@ -574,9 +613,13 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				if (!available.some((item) => item.key === source.key)) sourceRuntime.set(source.key, { state: 'unavailable', last_success_at: null, last_error: '未找到或不可读取源群', last_reconciled_at: sourceRuntime.get(source.key)?.last_reconciled_at ?? null });
 			}
 			const sourcesByKey = new Map(available.map((source) => [source.key, source]));
-			await retryFailed(sourcesByKey);
-			await upgradePortableInteractiveSummaries(sourcesByKey);
-			for (const source of available) {
+			// These queues touch disjoint ledger records. Run their bounded work in
+			// parallel so a portable-card upgrade cannot delay a fresh source poll.
+			await Promise.all([
+				retryFailed(sourcesByKey),
+				upgradePortableInteractiveSummaries(sourcesByKey),
+			]);
+			await mapWithConcurrency(available, sourceConcurrency, async (source) => {
 				try {
 					await pollSource(source);
 					sourceRuntime.set(source.key, { ...sourceRuntime.get(source.key), state: 'healthy', last_success_at: new Date().toISOString(), last_error: null });
@@ -585,7 +628,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 					sourceRuntime.set(source.key, { ...sourceRuntime.get(source.key), state: 'error', last_success_at: sourceRuntime.get(source.key)?.last_success_at ?? null, last_error: message });
 					logger.error(`群消息转发轮询失败：${source.key}：${message}`);
 				}
-			}
+			});
 		} catch (error) {
 			lastTickError = error instanceof Error ? error.message : String(error);
 			logger.error(`群消息转发轮询失败：${lastTickError}`);
@@ -599,7 +642,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		tick,
 		status: () => ({
 			running, last_tick_started_at: lastTickStartedAt, last_tick_completed_at: lastTickCompletedAt, last_tick_error: lastTickError,
-			writer_state: writerState,
+			writer_state: writerState, source_concurrency: sourceConcurrency,
 			sources: [...sourceDefinitions.values()].map((source) => ({ key: source.key, tag: source.tag, chat_name: source.chatName ?? source.key, ...(sourceRuntime.get(source.key) ?? { state: 'starting', last_success_at: null, last_error: null }) })),
 		}),
 	};

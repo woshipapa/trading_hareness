@@ -1,3 +1,5 @@
+import { blockedMessageReason } from './content-filter.mjs';
+
 const MAX_HISTORY_PAGES = 20;
 
 function asCreateTimeMs(value, fallback = Date.now()) {
@@ -105,7 +107,14 @@ export function createSummaryListener({ sourceApi, ledger, processMessage, confi
 						ignoredCount += 1;
 						continue;
 					}
-					const outcome = await processMessage(normalizeMessage(item, config.chatId, config.sourceLabel));
+					const normalized = normalizeMessage(item, config.chatId, config.sourceLabel);
+					const blockedReason = blockedMessageReason(normalized.message);
+					if (blockedReason) {
+						ignoredCount += 1;
+						logger.info(`汇总群消息已过滤：${item.message_id} ${blockedReason}`);
+						continue;
+					}
+					const outcome = await processMessage(normalized);
 					if (outcome?.ignored) ignoredCount += 1;
 					else if (outcome?.duplicate) duplicateCount += 1;
 					else processedCount += 1;

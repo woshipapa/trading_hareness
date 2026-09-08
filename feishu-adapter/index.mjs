@@ -16,6 +16,7 @@ import { createFeishuWorkbench } from './feishu-workbench.mjs';
 import { createBaiduPanStorage } from './baidu-pan-storage.mjs';
 import { createBaiduPanMarketArchive } from './baidu-pan-market-archive.mjs';
 import { isSystemRelayPlaceholder } from './message-filter.mjs';
+import { blockedMessageReason } from './content-filter.mjs';
 import { extractImportContent, isValidDateTime } from './message-time.mjs';
 import { hasImportableTaggedPayload } from './summary-ingestion-filter.mjs';
 import { isOperatorPausedIngestion } from './ingestion-health.mjs';
@@ -41,6 +42,10 @@ const quantServiceUrl = String(process.env.QUANT_SERVICE_URL ?? '').replace(/\/$
 const quantWriteApiKey = String(process.env.QUANT_WRITE_API_KEY ?? '');
 const quantAlertWebhookToken = String(process.env.QUANT_ALERT_WEBHOOK_TOKEN ?? '');
 const feishuAlertReceiveId = String(process.env.FEISHU_ALERT_RECEIVE_ID ?? '').trim();
+// Paper-KB has a separate outbound contract.  Falling back to the quant-alert
+// route would silently post a reading report into the market-alert group.
+const paperKbAlertWebhookToken = String(process.env.PAPER_KB_ALERT_WEBHOOK_TOKEN || quantAlertWebhookToken).trim();
+const paperKbAlertReceiveId = String(process.env.PAPER_KB_FEISHU_CHAT_ID ?? '').trim();
 // paper-kb: `收录 <arXiv ids>` in the reading group triggers ingestion through n8n.
 const paperIngestWebhook = String(process.env.PAPER_KB_INGEST_WEBHOOK ?? '').trim();
 const paperIngestChatId = String(process.env.PAPER_KB_FEISHU_CHAT_ID ?? '').trim();
@@ -73,6 +78,7 @@ const larkLogger = {
 };
 const larkClient = new Lark.Client({ appId, appSecret, domain: Lark.Domain.Feishu, logger: larkLogger });
 const recentEvents = [];
+const paperKbQueues = new Map();
 const eventStreams = new Set();
 const maxRecentEvents = 200;
 const workbenchEventHandlers = new Map([
@@ -152,6 +158,10 @@ const groupRelayIntervalSeconds = Number(process.env.FEISHU_GROUP_RELAY_INTERVAL
 if (!Number.isFinite(groupRelayIntervalSeconds) || groupRelayIntervalSeconds < 10 || groupRelayIntervalSeconds > 30) {
 	throw new Error('FEISHU_GROUP_RELAY_INTERVAL_SECONDS must be between 10 and 30');
 }
+const groupRelaySourceConcurrency = Number(process.env.FEISHU_GROUP_RELAY_SOURCE_CONCURRENCY ?? 3);
+if (!Number.isFinite(groupRelaySourceConcurrency) || groupRelaySourceConcurrency < 1 || groupRelaySourceConcurrency > 8) {
+	throw new Error('FEISHU_GROUP_RELAY_SOURCE_CONCURRENCY must be between 1 and 8');
+}
 const groupRelayHistoryLookbackSeconds = Number(process.env.FEISHU_GROUP_RELAY_HISTORY_LOOKBACK_SECONDS ?? 300);
 if (!Number.isFinite(groupRelayHistoryLookbackSeconds) || groupRelayHistoryLookbackSeconds < 60 || groupRelayHistoryLookbackSeconds > 3600) {
 	throw new Error('FEISHU_GROUP_RELAY_HISTORY_LOOKBACK_SECONDS must be between 60 and 3600');
@@ -164,6 +174,7 @@ const groupRelayConfig = {
 	enabled: String(process.env.FEISHU_GROUP_RELAY_ENABLED ?? 'true').toLowerCase() !== 'false',
 	targetChatId: String(process.env.FEISHU_GROUP_RELAY_TARGET_CHAT_ID ?? '').trim(),
 	intervalSeconds: groupRelayIntervalSeconds,
+	sourceConcurrency: Math.floor(groupRelaySourceConcurrency),
 	actionCardsEnabled: String(process.env.FEISHU_GROUP_RELAY_ACTION_CARDS_ENABLED ?? 'false').toLowerCase() === 'true',
 	historyLookbackSeconds: groupRelayHistoryLookbackSeconds,
 	overlapSeconds: Math.min(120, Math.max(30, Math.floor(groupRelayIntervalSeconds * 3))),
@@ -285,16 +296,19 @@ const runDeliveryQueue = singleFlight(async () => {
 				? { content: payload.import_content ?? '', content_date: payload.content_date, content_time: payload.content_time }
 				: extractImportContent(payload.message_text, { referenceTime: payload.receivedAt });
 			const originalResources = Array.isArray(payload.resources) ? payload.resources : [];
-			const replayResources = (queued.resources ?? []).map(({ asset, parts }) => ({
+				const replayResources = (queued.resources ?? []).map(({ asset, parts }) => ({
 				asset_id: asset.asset_id, property: `replay_${asset.ordinal}`, filename: filenameForMediaType(asset.filename, asset.media_type), media_type: asset.media_type,
 				declared_bytes: Number(asset.declared_bytes), content_sha256: asset.content_sha256,
 				path: asset.storage_path, remote_upload_id: asset.remote_upload_id,
 				last_modified: Number(originalResources[Number(asset.ordinal)]?.last_modified ?? Date.now()), part_size: uploadPartBytes,
-				part_count: parts.length, parts: parts.map((part) => ({ part_index: Number(part.part_index), property: `replay_${asset.ordinal}_part_${part.part_index}`, bytes: Number(part.bytes), sha256: part.sha256, uploaded: Boolean(part.uploaded), remote_status: part.remote_status })),
-			}));
-			const redownloadMedia = Number(delivery.attempt_count) > 1 && shouldRedownloadRetryMedia({
-				expectedResourceCount: originalResources.length, event: payload.event,
-			});
+					part_count: parts.length, parts: parts.map((part) => ({ part_index: Number(part.part_index), property: `replay_${asset.ordinal}_part_${part.part_index}`, bytes: Number(part.bytes), sha256: part.sha256, uploaded: Boolean(part.uploaded), remote_status: part.remote_status })),
+				}));
+				const localResourcesAvailable = originalResources.length > 0
+					&& replayResources.length === originalResources.length
+					&& replayResources.every((resource) => resource.path && existsSync(resource.path));
+				const redownloadMedia = Number(delivery.attempt_count) > 1 && shouldRedownloadRetryMedia({
+					expectedResourceCount: originalResources.length, event: payload.event, localResourcesAvailable,
+				});
 			const deliveryResources = redownloadMedia
 				? await downloadMedia(payload.event, feishuUserOauth.sourceApi)
 				: replayResources;
@@ -813,6 +827,75 @@ async function handleQuantAlert(request, response) {
 		console.error(`盘中提醒投递失败：${error instanceof Error ? error.message : String(error)}`);
 		response.writeHead(502, { 'content-type': 'application/json' });
 		response.end(JSON.stringify({ status: 'failed', message: 'Feishu alert delivery failed' }));
+	}
+}
+
+async function handlePaperKbAlert(request, response) {
+	if (!paperKbAlertWebhookToken || request.headers['x-paper-kb-token'] !== paperKbAlertWebhookToken) {
+		response.writeHead(401, { 'content-type': 'application/json' });
+		response.end(JSON.stringify({ status: 'unauthorized' }));
+		return;
+	}
+	if (!/^oc_[A-Za-z0-9]+$/.test(paperKbAlertReceiveId)) {
+		response.writeHead(503, { 'content-type': 'application/json' });
+		response.end(JSON.stringify({ status: 'disabled', reason: 'PAPER_KB_FEISHU_CHAT_ID is not a verified chat id' }));
+		return;
+	}
+	try {
+		let payload;
+		try { payload = await readJsonBody(request, 16 * 1024); }
+		catch (error) {
+			response.writeHead(400, { 'content-type': 'application/json' });
+			response.end(JSON.stringify({ status: 'invalid_request', message: error instanceof Error ? error.message : String(error) }));
+			return;
+		}
+		const text = String(payload?.text ?? '').trim();
+		const idempotencyKey = String(payload?.idempotency_key ?? '').trim();
+		const targetChatId = String(payload?.chat_id ?? paperKbAlertReceiveId).trim();
+		if (!text) { response.writeHead(400, { 'content-type': 'application/json' }); response.end(JSON.stringify({ status: 'invalid_request', message: 'paper-kb text is required' })); return; }
+		if (text.length > 3500) { response.writeHead(400, { 'content-type': 'application/json' }); response.end(JSON.stringify({ status: 'invalid_request', message: 'paper-kb text exceeds 3500 characters' })); return; }
+		if (!/^[A-Za-z0-9:_-]{8,200}$/.test(idempotencyKey)) { response.writeHead(400, { 'content-type': 'application/json' }); response.end(JSON.stringify({ status: 'invalid_request', message: 'paper-kb idempotency_key is required' })); return; }
+		if (targetChatId !== paperKbAlertReceiveId) { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ status: 'forbidden', message: 'paper-kb target chat is not allowlisted' })); return; }
+		const contentSha256 = createHash('sha256').update(text, 'utf8').digest('hex');
+		if (payload?.content_sha256 && String(payload.content_sha256) !== contentSha256) { response.writeHead(400, { 'content-type': 'application/json' }); response.end(JSON.stringify({ status: 'invalid_request', message: 'paper-kb content_sha256 mismatch' })); return; }
+		const previous = paperKbQueues.get(targetChatId) ?? Promise.resolve();
+		const current = previous.catch(() => {}).then(async () => {
+			let claimed = false;
+			const claim = await ledger.claimPaperKbDelivery({ eventId: idempotencyKey, targetChatId, contentSha256, owner: `paper-kb-${process.pid}` });
+			if (claim.conflict) return { status: 'conflict', chat_id: targetChatId, event_id: idempotencyKey, error: 'idempotency key is already bound to different content or target' };
+			if (claim.duplicate) return { status: 'duplicate', chat_id: targetChatId, message_id: claim.row.message_id, event_id: idempotencyKey, verification: { feishu: 'receipt', archive: claim.row.archive_status, downstream: claim.row.downstream_status } };
+			if (claim.blocked) return { status: 'blocked', chat_id: targetChatId, event_id: idempotencyKey, error: claim.row.last_error };
+			if (claim.inFlight) return { status: 'in-flight', chat_id: targetChatId, event_id: idempotencyKey };
+			claimed = true;
+			try {
+				const result = await larkClient.im.v1.message.create({
+					params: { receive_id_type: 'chat_id' },
+					data: { receive_id: targetChatId, msg_type: 'text', content: JSON.stringify({ text }), uuid: idempotencyKey },
+				});
+				const messageId = result?.data?.message_id ?? null;
+				if (!messageId) throw new Error('Feishu did not return message_id');
+				await ledger.completePaperKbDelivery(idempotencyKey, {
+					status: 'sent', messageId,
+					remoteReceipt: { message_id: messageId, chat_id: targetChatId, received_at: new Date().toISOString() },
+				});
+				return { status: 'sent', chat_id: targetChatId, message_id: messageId, event_id: idempotencyKey, verification: { feishu: 'receipt', archive: 'not_applicable', downstream: 'not_applicable' } };
+			} catch (error) {
+				if (claimed) await ledger.completePaperKbDelivery(idempotencyKey, { status: 'failed', errorMessage: error instanceof Error ? error.message : String(error) });
+				throw error;
+			}
+		});
+		paperKbQueues.set(targetChatId, current);
+		try {
+			const result = await current;
+			response.writeHead(result.status === 'failed' ? 502 : result.status === 'conflict' ? 409 : result.status === 'in-flight' ? 202 : 200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify(result));
+		} finally {
+			if (paperKbQueues.get(targetChatId) === current) paperKbQueues.delete(targetChatId);
+		}
+	} catch (error) {
+		console.error(`Paper-KB 学习提醒投递失败：${error instanceof Error ? error.message : String(error)}`);
+		response.writeHead(502, { 'content-type': 'application/json' });
+		response.end(JSON.stringify({ status: 'failed', message: 'Paper-KB Feishu delivery failed' }));
 	}
 }
 
@@ -1624,24 +1707,39 @@ const dashboard = createServer((request, response) => {
 	// API paths must never fall through to the SPA.  A missing API route used to
 	// return index.html (200), which surfaced in the dashboard as the misleading
 	// "Unexpected token '<'" JSON parse error instead of an actionable 404.
-	if (url.pathname.startsWith('/api/')) {
+	if (url.pathname.startsWith('/api/') && !(url.pathname === '/api/paper-kb-deliveries' && request.method === 'GET')) {
 		response.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({ status: 'not_found', message: `未知 API：${url.pathname}` }));
 		return;
 	}
-	if (frontendMode === 'spa' && request.method === 'GET' && !['/health', '/events', '/metrics', '/jobs', '/analysis/jobs'].includes(url.pathname)) {
+	if (frontendMode === 'spa' && request.method === 'GET' && !['/health', '/events', '/metrics', '/jobs', '/analysis/jobs', '/api/paper-kb-deliveries'].includes(url.pathname)) {
 		const requested = url.pathname === '/relay' ? 'index.html' : url.pathname.slice(1);
 		const assetPath = join(frontendDist, requested.includes('.') ? requested : 'index.html');
 		try { const body = readFileSync(assetPath); const type = assetPath.endsWith('.js') ? 'text/javascript' : assetPath.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8'; response.writeHead(200, { 'content-type': type, 'cache-control': assetPath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable' }); response.end(body); } catch { response.writeHead(404).end(); }
 		return;
 	}
-	if (url.pathname === '/health') {
+if (url.pathname === '/health') {
 		response.writeHead(200, { 'content-type': 'application/json' });
-		response.end(JSON.stringify({ status: 'ok', events: recentEvents.length, quant_alert_configured: Boolean(quantAlertWebhookToken && feishuAlertReceiveId), build: releaseMetadata() }));
+		response.end(JSON.stringify({ status: 'ok', events: recentEvents.length,
+			quant_alert_configured: Boolean(quantAlertWebhookToken && feishuAlertReceiveId),
+			paper_kb_alert_configured: Boolean(paperKbAlertWebhookToken && /^oc_[A-Za-z0-9]+$/.test(paperKbAlertReceiveId)),
+			build: releaseMetadata() }));
 		return;
 	}
 	if (url.pathname === '/internal/quant-alert' && request.method === 'POST') {
 		void handleQuantAlert(request, response);
+		return;
+	}
+	if (url.pathname === '/internal/paper-kb-alert' && request.method === 'POST') {
+		void handlePaperKbAlert(request, response);
+		return;
+	}
+	if (url.pathname === '/api/paper-kb-deliveries' && request.method === 'GET') {
+		const eventId = String(url.searchParams.get('event_id') ?? '').trim().slice(0, 200);
+		void ledger.paperKbDeliveryStatus(eventId).then((rows) => {
+			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ deliveries: rows, ...(eventId ? { event_id: eventId } : {}) }));
+		}).catch((error) => response.writeHead(503).end(JSON.stringify({ status: 'error', message: String(error) })));
 		return;
 	}
 	if (url.pathname === '/internal/feishu-user-oauth' && request.method === 'POST') {
@@ -2072,6 +2170,11 @@ async function processFeishuEvent(data) {
 	const eventId = data?.event_id ?? 'unknown';
 	console.info(`Forwarding im.message.receive_v1 event ${eventId} to n8n`);
 	addEvent(data);
+	const blockedReason = blockedMessageReason(data?.message);
+	if (blockedReason) {
+		updateEvent(eventId, { n8n_status: `关键词过滤：${blockedReason}` });
+		return { ignored: true, reason: 'blocked_message_keyword', filter_reason: blockedReason };
+	}
 	// Binding a private alert group is an adapter control command.  It must not
 	// be interpreted as analyst research content or require an ingestion route.
 	if (isQuantAlertBindingCommand(data)) {
