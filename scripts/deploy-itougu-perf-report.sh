@@ -86,7 +86,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 - "$edge_root" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import itougu_neican_relay as relay
-required = ("load_headers", "itougu_call", "send_feishu_many", "feishu_token")
+required = ("load_headers", "itougu_call", "send_feishu", "feishu_token")
 missing = [name for name in required if not hasattr(relay, name)]
 if missing:
     raise SystemExit("deployed relay is missing required helpers: %s" % ", ".join(missing))

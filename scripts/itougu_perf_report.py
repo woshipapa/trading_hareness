@@ -395,6 +395,29 @@ def position_line(position, quotes):
     return "%s　收盘 %s　浮动 %s" % (head, fmt_price(quote["last"]), fmt_pct(change))
 
 
+def deliver_to_chats(chat_ids, title, text, dedup_seed, sender=None):
+    """Send one report to every destination, reporting all failures together.
+
+    A report has one or two destinations, so this stays sequential on purpose.
+    It depends only on the relay's long-stable single-chat sender, which keeps
+    the report deployable against whichever relay revision the edge runs.
+    """
+    destinations = list(dict.fromkeys(str(c).strip() for c in (chat_ids or []) if str(c).strip()))
+    if not destinations:
+        return []
+    sender = sender or (lambda chat_id, *rest: _relay().send_feishu(chat_id, *rest))
+    delivered, failures = [], []
+    for chat_id in destinations:
+        try:
+            sender(chat_id, title, text, dedup_seed)
+            delivered.append(chat_id)
+        except Exception as exc:                               # noqa: BLE001 - one group must not block the rest
+            failures.append("%s: %s" % (chat_id, exc))
+    if failures:
+        raise RuntimeError("；".join(failures))
+    return delivered
+
+
 def summarize(closed):
     returns = [c["return_pct"] for c in closed or []]
     if not returns:
@@ -536,7 +559,7 @@ def run_report(kind, product_id, product_name, chat_ids, report_date, state,
         if not chat_ids and not dry_run and verbose:
             print("未配置目标群（ITOUGU_PERF_TARGETS），只打印不发送", flush=True)
         return 0
-    _relay().send_feishu_many(chat_ids, title, text, "perf:%s" % key)
+    deliver_to_chats(chat_ids, title, text, "perf:%s" % key)
     mark_sent(state, key)
     if verbose:
         print("✅ 已发飞书 %s → %s" % (key, ",".join(chat_ids)), flush=True)

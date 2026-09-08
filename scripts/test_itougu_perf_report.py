@@ -211,6 +211,31 @@ class ReportShapeTests(unittest.TestCase):
         self.assertAlmostEqual(stats["avg_pct"], 5.09, places=2)
 
 
+class DeliveryTests(unittest.TestCase):
+    def test_every_destination_is_attempted_and_deduped(self):
+        sent = []
+        delivered = perf.deliver_to_chats(["chat-a", "chat-a", "chat-b"], "t", "body", "seed",
+                                          sender=lambda *args: sent.append(args[0]))
+        self.assertEqual(sent, ["chat-a", "chat-b"])
+        self.assertEqual(delivered, ["chat-a", "chat-b"])
+
+    def test_one_failing_group_does_not_stop_the_others_but_still_raises(self):
+        sent = []
+
+        def sender(chat_id, *rest):
+            if chat_id == "chat-a":
+                raise RuntimeError("boom")
+            sent.append(chat_id)
+
+        with self.assertRaises(RuntimeError) as caught:
+            perf.deliver_to_chats(["chat-a", "chat-b"], "t", "body", "seed", sender=sender)
+        self.assertEqual(sent, ["chat-b"])
+        self.assertIn("chat-a", str(caught.exception))
+
+    def test_no_destination_is_a_no_op_rather_than_an_error(self):
+        self.assertEqual(perf.deliver_to_chats([], "t", "body", "seed", sender=None), [])
+
+
 class LedgerStateTests(unittest.TestCase):
     def test_merge_keeps_history_when_upstream_window_rolls_off(self):
         older = perf.extract_trades([item("1", "2026-08-31 13:17", name="电广传媒", code="000917",
