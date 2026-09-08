@@ -23,6 +23,7 @@ import { isOperatorPausedIngestion } from './ingestion-health.mjs';
 import { shouldSkipMessageForward } from './message-idempotency.mjs';
 import { shouldRedownloadRetryMedia } from './retry-media.mjs';
 import { parsePaperIngestIds } from './paper-ingest-command.mjs';
+import { cardPayload } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { personalDecisionResearchPaths } from './personal-decision-routes.mjs';
 import Busboy from 'busboy';
@@ -176,6 +177,9 @@ const groupRelayConfig = {
 	intervalSeconds: groupRelayIntervalSeconds,
 	sourceConcurrency: Math.floor(groupRelaySourceConcurrency),
 	actionCardsEnabled: String(process.env.FEISHU_GROUP_RELAY_ACTION_CARDS_ENABLED ?? 'false').toLowerCase() === 'true',
+	// Outbound messages are card JSON 2.0; set to false to fall back to the
+	// text/post bubbles the relay sent before 2026-09-08.
+	outboundCard: String(process.env.FEISHU_GROUP_RELAY_OUTBOUND_CARD ?? 'true').toLowerCase() !== 'false',
 	historyLookbackSeconds: groupRelayHistoryLookbackSeconds,
 	overlapSeconds: Math.min(120, Math.max(30, Math.floor(groupRelayIntervalSeconds * 3))),
 	reconcileEverySeconds: Math.max(3600, Number(process.env.FEISHU_GROUP_RELAY_RECONCILE_SECONDS ?? 21_600)),
@@ -192,6 +196,7 @@ const groupRelayConfig = {
 };
 const wechatGroupRelayConfig = {
 	enabled: String(process.env.WECHAT_GROUP_RELAY_ENABLED ?? 'false').toLowerCase() === 'true',
+	outboundCard: String(process.env.FEISHU_GROUP_RELAY_OUTBOUND_CARD ?? 'true').toLowerCase() !== 'false',
 	sourceKey: String(process.env.WECHAT_GROUP_RELAY_SOURCE_KEY ?? 'wechat_xiaolan').trim() || 'wechat_xiaolan',
 	sourceChatId: String(process.env.WECHAT_GROUP_RELAY_SOURCE_CHAT_ID ?? '50136408612@chatroom').trim(),
 	routeTag: String(process.env.WECHAT_GROUP_RELAY_ROUTE_TAG ?? 'xiaolan').trim() || 'xiaolan',
@@ -425,6 +430,9 @@ function extractPostPayload(content) {
 function extractMessagePayload(message) {
 	const content = parseContent(message?.content);
 	if (message?.message_type === 'post') return extractPostPayload(content);
+	// A relayed card (and any card read with card_msg_content_type=
+	// user_card_content) carries its route tag as the first line of its text.
+	if (message?.message_type === 'interactive') return cardPayload(content);
 	const resources = [];
 	if (content.image_key) resources.push({ key: content.image_key, resource_type: 'image' });
 	if (content.file_key) resources.push({ key: content.file_key, resource_type: 'file' });
@@ -608,11 +616,22 @@ async function downloadMedia(data, messageResourceApi = null) {
 				});
 			}
 		} catch (error) {
+			// An image inside a relayed card was uploaded by this app, so the
+			// image endpoint can serve it even where the message-resource
+			// endpoint will not address a card element.
+			if (message.message_type === 'interactive' && resource.resource_type === 'image' && larkClient?.im?.v1?.image?.get) {
+				try {
+					response = await larkClient.im.v1.image.get({ path: { image_key: resource.key } });
+				} catch (fallbackError) {
+					throw new Error(`卡片图片读取失败：${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+				}
+			} else {
 			if (messageResourceApi) throw new Error(`汇总群媒体读取失败：${error instanceof Error ? error.message : String(error)}`);
 			if (error?.response?.status === 400) {
 				throw new Error('飞书媒体下载被拒绝：请在开放平台申请并发布 im:message:readonly 权限');
 			}
 			throw new Error(`飞书媒体下载失败（HTTP ${error?.response?.status ?? '未知'}）`);
+			}
 		}
 		const headerType = String(response.headers?.['content-type'] ?? '').split(';')[0];
 		const fallbackName = filenameFromHeaders(response.headers, `${resource.resource_type}-${resource.key}.bin`);

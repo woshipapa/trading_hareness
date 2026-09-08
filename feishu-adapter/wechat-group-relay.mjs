@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { buildRelayCard } from './card-content.mjs';
 
 function deterministicUuid(sourceMessageId, targetChatId) {
 	const value = createHash('sha256').update(`wechat-group-relay:${sourceMessageId}:${targetChatId}`).digest('hex');
@@ -113,18 +114,25 @@ export function createWeChatGroupRelay({ larkClient, ledger, config, logger = co
 		if (!claimed) return { status: 'duplicate', source_message_id: input.sourceMessageId };
 		try {
 			let result;
-			let msgType = 'text';
-			let content = { text: taggedText(input.routeTag, bodyText) };
-			if (media.length) {
-				const uploaded = [];
-				for (const item of media) {
-					const image = await larkClient.im.v1.image.create({ data: { image_type: 'message', image: Buffer.from(String(item.data_base64), 'base64') } });
-					const imageKey = image?.image_key ?? image?.data?.image_key;
-					if (!imageKey) throw new Error('飞书图片上传未返回 image_key');
-					uploaded.push(imageKey);
-				}
+			const uploaded = [];
+			for (const item of media) {
+				const image = await larkClient.im.v1.image.create({ data: { image_type: 'message', image: Buffer.from(String(item.data_base64), 'base64') } });
+				const imageKey = image?.image_key ?? image?.data?.image_key;
+				if (!imageKey) throw new Error('飞书图片上传未返回 image_key');
+				uploaded.push(imageKey);
+			}
+			let msgType;
+			let content;
+			if (config.outboundCard !== false) {
+				// Card JSON 2.0 outbound, same as the Feishu group relay.
+				msgType = 'interactive';
+				content = buildRelayCard({ tag: input.routeTag, text: bodyText, imageKeys: uploaded });
+			} else if (uploaded.length) {
 				msgType = 'post';
 				content = { zh_cn: { title: '', content: [[{ tag: 'text', text: `#${input.routeTag}` }], [{ tag: 'text', text: bodyText }], ...uploaded.map((imageKey) => [{ tag: 'img', image_key: imageKey }]) ] } };
+			} else {
+				msgType = 'text';
+				content = { text: taggedText(input.routeTag, bodyText) };
 			}
 			result = await larkClient.im.v1.message.create({
 				params: { receive_id_type: 'chat_id' },

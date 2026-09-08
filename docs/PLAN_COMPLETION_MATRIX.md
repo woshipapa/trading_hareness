@@ -87,6 +87,9 @@
 - 根因：该群 bot 改发**卡片 JSON 2.0**（`schema:"2.0"`，单个 `markdown` 元素）。默认 `im/v1/messages` 读取只能降级成 1.0 结构，2.0 无法降级，返回固定文案 `请升级至最新版本客户端，以查看内容` + 已删除的公共 image_key；当日 7 张卡片全部如此，列表/详情接口、tenant/user 令牌、5 种客户端版本头均无差别。官方文档：`card_msg_content_type=user_card_content` 返回发送时原始卡片 JSON。实测该参数在列表与详情接口均生效，7 张卡片解出与客户端一致的交易观点全文。
 - 修复（adapter `3b462e0` + 本次）：两处 `messageList` 加 `card_msg_content_type=user_card_content`；文本提取器覆盖 2.0 的 `lark_md`/`div.text`/`header.title`；资源收集识别 `img_key` 并按现有图片路径上传后以 `post` 转发；升级横幅文案被过滤，全部不可得时明确提示"卡片内容无法通过接口获取"。`portable_summary_version` 保持不变，已投递消息不重发、不改写。Feishu adapter 回归 **85/85**。
 - 验收：edge 部署 `edge-2026.09.08-card-image-relay` 及本次镜像后，以新到达的 2.0 卡片在汇总群出现 `#anqiang` 正文（而非升级横幅）为闭环回执。
+- 部署回执：`edge-2026.09.08-card-v2`（adapter `07a7aad`）已于 09-08 21:2x 在 edge 生效（GHCR 某 blob 自边缘 TLS 超时，改为本机拉取→`docker save`→边缘 `docker load` 后完成）；容器内两处 `messageList` 均带 `card_msg_content_type`，健康校验 `07a7aad/edge-2026.09.08-card-v2`。
+- 出口升级（同批）：所有出口（汇总群 `oc_523b…` 即尾盘掘金/擒龙内参目标群、`#liuzi`→`oc_606d…`、`#liwei`→`oc_903e…`、`#anqiang`→`oc_392b…`，以及微信中继 `#xiaolan`）改为发送**卡片 JSON 2.0**：`plain_text` div 首行为 `#tag`（保持汇总群入口按首行标签路由的契约），图片以 `img_key` 元素携带；含视频/文件的富文本保持 `post`，文件/媒体/云归档投递不变；源消息编辑通过卡片 `patch` 原位更新。`FEISHU_GROUP_RELAY_OUTBOUND_CARD=false` 回退到旧格式。汇总群入口 `extractMessagePayload` 新增 `interactive` 分支（共享 `card-content.mjs` 走读器），卡片内图片在消息资源接口不可用时回退到本 app 的 `images` 接口读取。
+- 顺带修复：workbench 编辑同步把 `target_message_ids[0]`（`{targetChatId, messageId}` 对象）当作 message_id 传给 PUT，导致每次源消息编辑都报 `Invalid ids: [[object Object]]`（400）；撤回路径同样归一化。Feishu adapter 回归 **100/100**。
 
 ### 2026-09-05 当前复核
 

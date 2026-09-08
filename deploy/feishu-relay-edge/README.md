@@ -146,3 +146,25 @@ with the user OAuth client (the tenant token cannot read external groups):
 ```js
 await oauth.userRequest(`/im/v1/messages/${messageId}`, { params: { card_msg_content_type: 'user_card_content' } });
 ```
+
+## Outbound format: card JSON 2.0
+
+Since 2026-09-08 every relayed message — text, rich text with images, direct
+images, and cards — is sent to its target groups as a **card JSON 2.0**
+(`msg_type: interactive`) built by `feishu-adapter/card-content.mjs`:
+
+- a `plain_text` div whose content begins with the route tag on its own line
+  (`#anqiang\n…`), so text arrives exactly as typed and the summary-group
+  ingestion, which routes on a leading `#tag`, reads a card the same way it
+  read the bubble it replaces;
+- one `img` element per image, keyed by the `img_key` the adapter uploaded.
+
+Rich text carrying a video or file stays a `post` (a card cannot embed
+either), and native file/media/archive deliveries are unchanged. An edited
+source updates the delivered card in place through the card `patch` API
+rather than sending a second bubble.
+
+`FEISHU_GROUP_RELAY_OUTBOUND_CARD=false` restores the pre-09-08 text/post
+shape for both the Feishu group relay and the WeChat relay; nothing already
+delivered is re-sent either way, because the card path uses its own
+deterministic message uuid.

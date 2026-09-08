@@ -546,14 +546,18 @@ export function createFeishuWorkbench({ appId, appSecret, larkClient, ledger, us
 	async function syncSourceChange(record, { deleted = false, originalSynced = false } = {}) {
 		if (!record) return null;
 		if (deleted) {
-			const targetIds = [...new Set([...(Array.isArray(record.target_message_ids) ? record.target_message_ids : []), record.action_card_message_id].filter(Boolean))];
+			const targetIds = [...new Set([...(Array.isArray(record.target_message_ids) ? record.target_message_ids : []).map((entry) => (typeof entry === 'string' ? entry : (entry?.messageId ?? entry?.message_id))), record.action_card_message_id].filter(Boolean))];
 			if (!targetIds.length) return record;
 			for (const messageId of targetIds) {
 				await tenantRequest(`/im/v1/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' }).catch((error) => logger.warn(`撤回汇总群同步消息失败：${error.message}`));
 			}
 			return ledger.updateRelayWorkflow(record.source_message_id, { workflowState: 'recalled', workflowNote: '源群消息已撤回，汇总群副本已同步撤回', actorOpenId: null, action: 'source_recalled' });
 		}
-		const targetMessageId = Array.isArray(record.target_message_ids) ? record.target_message_ids[0] : null;
+		// The ledger stores each target as {targetChatId, messageId}; older rows
+		// hold a bare id.  Passing the object through produced a 400 with
+		// "Invalid ids: [[object Object]]" on every source edit.
+		const firstTarget = Array.isArray(record.target_message_ids) ? record.target_message_ids[0] : null;
+		const targetMessageId = typeof firstTarget === 'string' ? firstTarget : (firstTarget?.messageId ?? firstTarget?.message_id ?? null);
 		if (!originalSynced && record.message?.msg_type === 'text' && targetMessageId) {
 			await tenantRequest(`/im/v1/messages/${encodeURIComponent(targetMessageId)}`, { method: 'PUT', body: { msg_type: 'text', content: JSON.stringify({ text: taggedText(record.route_tag, messagePlainText(record.message)) }) } }).catch((error) => logger.warn(`同步源文本编辑失败：${error.message}`));
 		}

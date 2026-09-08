@@ -5,7 +5,7 @@ import { createWeChatGroupRelay, validateWeChatRelayPayload } from './wechat-gro
 function harness() {
 	const saved = new Map();
 	const sent = [];
-	const config = { sourceKey: 'wechat_xiaolan', sourceChatId: '50136408612@chatroom', routeTag: 'xiaolan', targetChatId: 'oc_summary', maxTextLength: 3500 };
+	const config = { sourceKey: 'wechat_xiaolan', sourceChatId: '50136408612@chatroom', routeTag: 'xiaolan', targetChatId: 'oc_summary', maxTextLength: 3500, outboundCard: false };
 	const ledger = {
 		claimRelayMessage: async (record) => {
 			if (saved.has(record.sourceMessageId)) return null;
@@ -62,4 +62,18 @@ test('backfill (older day) message prepends explicit YYYY-MM-DD HH:mm', async ()
 	await relay.process({ source_message_id: 'wx-old', source_chat_id: h.config.sourceChatId, source_create_time: 1_700_000_000, sender: 'wxid_a', text: '看盘' });
 	const text = JSON.parse(h.sent[0].content).text;
 	assert.ok(/^#xiaolan\n2023-11-15 06:13\n/.test(text), '补传消息应在正文开头带原始日期时间');
+});
+
+
+test('with outbound cards on, a WeChat message lands as a 2.0 card led by #xiaolan', async () => {
+	const h = harness();
+	h.config.outboundCard = true;
+	const relay = createWeChatGroupRelay({ ...h, logger: { info() {}, error() {} } });
+	const result = await relay.process({ source_message_id: 'wx-card-1', source_chat_id: h.config.sourceChatId, source_create_time: 1_700_000_000, sender: 'wxid_a', text: '看盘', media: [{ media_type: 'image/jpeg', data_base64: Buffer.from('jpeg').toString('base64') }] });
+	assert.equal(result.status, 'sent');
+	assert.equal(h.sent[0].msg_type, 'interactive');
+	const card = JSON.parse(h.sent[0].content);
+	assert.equal(card.schema, '2.0');
+	assert.match(card.body.elements[0].text.content, /^#xiaolan\n/);
+	assert.equal(card.body.elements[1].img_key, 'img_target');
 });

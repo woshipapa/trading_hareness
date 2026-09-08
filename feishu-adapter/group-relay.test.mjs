@@ -4,11 +4,12 @@ import { Readable } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { createGroupRelay } from './group-relay.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [] } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map();
 	const sent = [];
 	const updated = [];
+	const patched = [];
 	let failedTarget = false;
 	const ledger = {
 		relayRetryQueue: async () => {
@@ -43,7 +44,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			message: { create: async ({ data }) => {
 				if (data.receive_id === failTargetChatId && !failedTarget) { failedTarget = true; throw new Error(`target unavailable: ${data.receive_id}`); }
 				sent.push(data); return { data: { message_id: `om_target_${sent.length}` } };
-			}, update: async (payload) => { updated.push(payload); return { code: 0, data: {} }; } },
+			}, update: async (payload) => { updated.push(payload); return { code: 0, data: {} }; }, patch: async (payload) => { patched.push(payload); return { code: 0, data: {} }; } },
 			image: { create: async () => { if (imageError) throw imageError; return imageResponse; } },
 			file: { create: async () => ({ file_key: 'file_target' }) },
 		} },
@@ -69,11 +70,11 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		larkClient, sourceApi, ledger, workbench: { publishActionCard: async () => { throw new Error('action card should be off by default'); } }, logger: { info() {}, error() {}, warn() {} },
 		canWrite,
 		config: {
-			enabled: true, targetChatId: 'oc_summary', intervalSeconds: 10, sourceConcurrency, historyLookbackSeconds: 300, overlapSeconds: 30,
+			enabled: true, targetChatId: 'oc_summary', intervalSeconds: 10, sourceConcurrency, historyLookbackSeconds: 300, overlapSeconds: 30, outboundCard,
 			bootstrapMode: 'forward_existing', sources: sources ?? [{ key: 'anqiang', tag: 'anqiang', chatId: 'oc_source', chatName: '马安强 (1)', targetChatIds }],
 		},
 	});
-	return { relay, sent, updated, saved, listCalls };
+	return { relay, sent, updated, patched, saved, listCalls };
 }
 
 test('a fenced relay observes no source messages and never sends', async () => {
@@ -349,4 +350,74 @@ test('a card JSON 2.0 header, div and image are all carried', async () => {
 	assert.deepEqual(JSON.parse(sent[0].content).zh_cn.content, [
 		[{ tag: 'text', text: '#anqiang' }], [{ tag: 'text', text: '9.8 收盘' }], [{ tag: 'text', text: '创业板小阴调整' }], [{ tag: 'img', image_key: 'img_target' }],
 	]);
+});
+
+
+// --- outbound card JSON 2.0 ---------------------------------------------------
+// From 2026-09-08 the relay speaks card JSON 2.0 to every target group.  The
+// legacy text/post shape stays behind FEISHU_GROUP_RELAY_OUTBOUND_CARD=false,
+// which is what the harness default above exercises.
+
+function cardTextOf(sent) {
+	const card = JSON.parse(sent.content);
+	assert.equal(card.schema, '2.0');
+	return card.body.elements[0].text.content;
+}
+
+test('a text source relays as a 2.0 card led by the route tag', async () => {
+	const message = { message_id: 'om_c_text', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '致尚在190左右接回。' }) } };
+	const { relay, sent } = createHarness([message], { outboundCard: true });
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'interactive');
+	assert.equal(cardTextOf(sent[0]), '#anqiang\n致尚在190左右接回。');
+});
+
+test('rich text with images relays as a card carrying the re-uploaded images', async () => {
+	const message = { message_id: 'om_c_post', msg_type: 'post', create_time: String(Date.now()), body: { content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'text', text: '收盘复盘' }], [{ tag: 'img', image_key: 'img_src' }]] } }) } };
+	const { relay, sent } = createHarness([message], { outboundCard: true });
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'interactive');
+	const card = JSON.parse(sent[0].content);
+	assert.equal(card.body.elements[0].text.content, '#anqiang\n收盘复盘');
+	assert.deepEqual(card.body.elements[1], { tag: 'img', img_key: 'img_target', alt: { tag: 'plain_text', content: '' } });
+});
+
+test('rich text carrying a video stays a post, since a card cannot embed it', async () => {
+	const message = { message_id: 'om_c_video', msg_type: 'post', create_time: String(Date.now()), body: { content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'text', text: '回放' }], [{ tag: 'media', file_key: 'file_src' }]] } }) } };
+	const { relay, sent } = createHarness([message], { outboundCard: true });
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'post');
+});
+
+test('a source 2.0 card relays as an outbound 2.0 card with the same text', async () => {
+	const message = { message_id: 'om_c_card', msg_type: 'interactive', create_time: String(Date.now()), body: { content: JSON.stringify(CARD_2_0_TRADING_NOTE) } };
+	const { relay, sent } = createHarness([message], { outboundCard: true });
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'interactive');
+	assert.equal(cardTextOf(sent[0]), '#anqiang\n长光华X回到了8月17日高点了，跑赢指数到320左右目标完成，考虑先出局，等几天在接回。致尚在190左右接回。');
+});
+
+test('a direct image message relays as a card holding the image', async () => {
+	const message = { message_id: 'om_c_img', msg_type: 'image', create_time: String(Date.now()), body: { content: JSON.stringify({ image_key: 'img_src' }) } };
+	const { relay, sent } = createHarness([message], { outboundCard: true });
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'interactive');
+	const card = JSON.parse(sent[0].content);
+	assert.equal(card.body.elements[0].text.content, '#anqiang');
+	assert.equal(card.body.elements[1].img_key, 'img_target');
+});
+
+test('an edited source updates the delivered card in place through patch, not update', async () => {
+	const message = { message_id: 'om_c_edit', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '第一版' }) } };
+	const { relay, sent, updated, patched } = createHarness([message], { outboundCard: true });
+	await relay.tick();
+	assert.equal(sent.length, 1);
+	message.updated = true;
+	message.update_time = String(Date.now() + 1000);
+	message.body.content = JSON.stringify({ text: '修订版' });
+	await relay.tick();
+	assert.equal(sent.length, 1, 'an edit must not send a second bubble');
+	assert.equal(updated.length, 0);
+	assert.equal(patched.length, 1);
+	assert.equal(JSON.parse(patched[0].data.content).body.elements[0].text.content, '#anqiang\n修订版');
 });

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { buildRelayCard, cardImageKeys, cardText } from './card-content.mjs';
 import { isSystemMessage } from './message-filter.mjs';
 import { blockedMessageReason } from './content-filter.mjs';
 
@@ -57,58 +58,6 @@ function deterministicUuid(messageId, component, targetChatId) {
 function messageText(content) {
 	const value = parseJson(content, { raw: String(content ?? '') });
 	return typeof value.text === 'string' ? value.text : typeof value.raw === 'string' ? value.raw : '';
-}
-
-// Feishu renders a card its message API cannot express as this fixed banner
-// plus an image key whose resource is already deleted.  It is a client-version
-// notice, never analyst content, so it must never reach the target group
-// dressed as the card's text.
-const CARD_UNAVAILABLE_NOTICES = new Set([
-	'请升级至最新版本客户端，以查看内容',
-	'请升级至最新版本客户端以查看内容',
-]);
-
-function interactiveCardText(content) {
-	const card = typeof content === 'string' ? parseJson(content, { raw: content }) : content;
-	const chunks = [];
-	const append = (value) => {
-		if (typeof value !== 'string') return;
-		const text = value.trim();
-		if (text && !CARD_UNAVAILABLE_NOTICES.has(text) && !chunks.includes(text)) chunks.push(text);
-	};
-	const walk = (value) => {
-		if (Array.isArray(value)) {
-			for (const item of value) walk(item);
-			return;
-		}
-		if (!value || typeof value !== 'object') return;
-		const tag = String(value.tag ?? '').toLowerCase();
-		if (tag === 'text' || tag === 'markdown' || tag === 'plain_text' || tag === 'lark_md') {
-			append(value.text ?? value.content);
-			return;
-		}
-		if (tag === 'a') {
-			append(value.text ?? value.content);
-			append(value.href ?? value.url);
-			return;
-		}
-		if (tag === 'button') {
-			append(typeof value.text === 'object' ? value.text?.content : value.text ?? value.content);
-			append(value.url ?? value.multi_url?.url ?? value.action?.url);
-			return;
-		}
-		if (tag === 'img') {
-			append(typeof value.alt === 'object' ? value.alt?.content : value.alt);
-			return;
-		}
-		if (Object.hasOwn(value, 'title')) append(typeof value.title === 'object' ? value.title?.content : value.title);
-		// A 2.0 div carries its text as an object ({tag, content}); walking it as
-		// a child lets the text branch above pick it up.  A string text is not
-		// an object, so this never double-appends a 1.0 text element.
-		for (const key of ['header', 'body', 'elements', 'columns', 'fields', 'content', 'content_v2', 'note', 'text']) walk(value[key]);
-	};
-	walk(card);
-	return chunks.join('\n');
 }
 
 function taggedText(tag, text = '') {
@@ -265,6 +214,14 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		return sources;
 	}
 
+	// Outbound card JSON 2.0.  The tag leads the card text, so the summary
+	// ingestion routes a relayed card by the same "#tag" it reads off a text
+	// bubble; the component name changes so the deterministic uuid does too,
+	// and nothing already delivered is re-sent.
+	function cardPayloadFor(source, text, imageKeys = []) {
+		return { component: 'card-v2', msgType: 'interactive', content: buildRelayCard({ tag: source.tag, text, imageKeys }) };
+	}
+
 	async function sendMessage({ targetChatId, messageId, component, msgType, content }) {
 		const result = await larkClient.im.v1.message.create({
 			params: { receive_id_type: 'chat_id' },
@@ -327,6 +284,9 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			}
 			replacements[resource.kind].set(resource.key, uploaded.key);
 		}
+		if (config.outboundCard !== false && resources.every((resource) => resource.kind === 'image')) {
+			return cardPayloadFor(source, cardText(sourceContent), [...replacements.image.values()]);
+		}
 		const content = prependTagToPost(rewritePostResourceKeys(sourceContent, replacements), source.tag);
 		return { component: 'post', msgType: 'post', content };
 	}
@@ -341,6 +301,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		}
 		if (message.msg_type !== 'media' || uploaded.kind !== 'file') {
 			if (uploaded.kind === 'image') {
+				if (config.outboundCard !== false) return cardPayloadFor(source, '', [uploaded.key]);
 				return { component: 'image-post', msgType: 'post', content: { zh_cn: { title: '', content: [[{ tag: 'text', text: `#${source.tag}` }], [{ tag: 'img', image_key: uploaded.key }]] } } };
 			}
 			return { component: 'file', msgType: 'file', content: { file_key: uploaded.key, file_name: taggedFilename(source.tag, uploaded.filename) } };
@@ -353,14 +314,14 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 
 	async function relayInteractiveContent(message, source) {
 		const card = parseJson(message?.body?.content, { raw: String(message?.body?.content ?? '') });
-		const summary = interactiveCardText(card).slice(0, 3_000);
+		const summary = cardText(card).slice(0, 3_000);
 		// A card can carry its real content as an image, which the text walk
 		// cannot see.  Relay those the way rich text already does, so the
 		// content arrives instead of a caption describing it.
 		const images = [];
 		let unreachable = 0;
-		for (const resource of collectPostResources(card)) {
-			if (resource.kind !== 'image' || images.some((item) => item.key === resource.key)) continue;
+		for (const resource of cardImageKeys(card).map((key) => ({ key, kind: 'image' }))) {
+			if (images.some((item) => item.key === resource.key)) continue;
 			try {
 				const uploaded = await downloadAndUpload(message, resource);
 				if (uploaded.kind === 'image') images.push({ key: uploaded.key });
@@ -370,6 +331,9 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				unreachable += 1;
 				logger.warn(`互动卡片图片无法转发：${source.key} ${message.message_id} ${resource.key}：${error instanceof Error ? error.message : String(error)}`);
 			}
+		}
+		if (config.outboundCard !== false && (images.length || summary)) {
+			return cardPayloadFor(source, summary, images.map((image) => image.key));
 		}
 		if (images.length) {
 			const lines = summary ? summary.split('\n').filter((line) => line.trim()).map((line) => [{ tag: 'text', text: line }]) : [];
@@ -395,6 +359,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		const directResource = resourceFromDirectMessage(message);
 		if (directResource) return relayDirectResourceContent(message, source, directResource);
 		if (message.msg_type === 'text') {
+			if (config.outboundCard !== false) return cardPayloadFor(source, messageText(message?.body?.content));
 			return { component: 'text', msgType: 'text', content: { text: taggedText(source.tag, messageText(message?.body?.content)) } };
 		}
 		// Card components and callback values are tenant-bound, but their human
@@ -443,13 +408,17 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		const targetMessages = Array.isArray(targetIds) ? targetIds : [];
 		if (!targetMessages.length) return false;
 		const payload = await relayPayload(message, source);
-		if (!['text', 'post'].includes(payload.msgType)) return false;
+		if (!['text', 'post', 'interactive'].includes(payload.msgType)) return false;
 		await Promise.all(targetMessages.map(async (entry) => {
 			const targetMessageId = typeof entry === 'string' ? entry : entry?.messageId;
 			if (!targetMessageId) return;
-			const result = await larkClient.im.v1.message.update({
-				path: { message_id: targetMessageId }, data: { msg_type: payload.msgType, content: JSON.stringify(payload.content) },
-			});
+			// A card is edited through patch; text and rich text through update.
+			// A card cannot replace a text bubble in place, so an edit that
+			// changes shape is reported as unsynced and the workbench path
+			// keeps the bubble's text current instead.
+			const result = payload.msgType === 'interactive'
+				? await larkClient.im.v1.message.patch({ path: { message_id: targetMessageId }, data: { content: JSON.stringify(payload.content) } })
+				: await larkClient.im.v1.message.update({ path: { message_id: targetMessageId }, data: { msg_type: payload.msgType, content: JSON.stringify(payload.content) } });
 			if (result?.code && result.code !== 0) throw new Error(`更新目标群消息失败：${result.msg ?? result.code}`);
 		}));
 		return true;
