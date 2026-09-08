@@ -90,6 +90,7 @@
 - 部署回执：`edge-2026.09.08-card-v2`（adapter `07a7aad`）已于 09-08 21:2x 在 edge 生效（GHCR 某 blob 自边缘 TLS 超时，改为本机拉取→`docker save`→边缘 `docker load` 后完成）；容器内两处 `messageList` 均带 `card_msg_content_type`，健康校验 `07a7aad/edge-2026.09.08-card-v2`。
 - 出口升级（同批）：所有出口（汇总群 `oc_523b…` 即尾盘掘金/擒龙内参目标群、`#liuzi`→`oc_606d…`、`#liwei`→`oc_903e…`、`#anqiang`→`oc_392b…`，以及微信中继 `#xiaolan`）改为发送**卡片 JSON 2.0**：`plain_text` div 首行为 `#tag`（保持汇总群入口按首行标签路由的契约），图片以 `img_key` 元素携带；含视频/文件的富文本保持 `post`，文件/媒体/云归档投递不变；源消息编辑通过卡片 `patch` 原位更新。`FEISHU_GROUP_RELAY_OUTBOUND_CARD=false` 回退到旧格式。汇总群入口 `extractMessagePayload` 新增 `interactive` 分支（共享 `card-content.mjs` 走读器），卡片内图片在消息资源接口不可用时回退到本 app 的 `images` 接口读取。
 - 顺带修复：workbench 编辑同步把 `target_message_ids[0]`（`{targetChatId, messageId}` 对象）当作 message_id 传给 PUT，导致每次源消息编辑都报 `Invalid ids: [[object Object]]`（400）；撤回路径同样归一化。Feishu adapter 回归 **100/100**。
+- 上线回执（a0e144b，`edge-2026.09.08-card-v2-outbound`）：GHCR 拉取再次在同一 blob 上超时，走本地 `docker save | ssh docker load` 后 apply，health `ok a0e144b`；顺手清掉 `ef8cb15` 旧镜像（edge 磁盘 12G 可用、内存可用 1.5G，adapter 常驻 58MB）。上线后日志暴露一个真实问题：源消息编辑时对**升级前**投递的文本/富文本气泡用卡片 `patch` → 飞书 400（`同步源消息编辑失败`×3）。修复：账本目标条目记录投递时的 `msgType`，编辑按目标原有形态重建载荷（无记录的旧条目走 text/post `update`，卡片条目走 `patch`）；回归 **104/104**，新增 Dockerfile 模块清单测试防再次漏 COPY。
 
 ### 2026-09-05 当前复核
 

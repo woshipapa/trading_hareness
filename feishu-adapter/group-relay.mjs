@@ -218,6 +218,14 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 	// ingestion routes a relayed card by the same "#tag" it reads off a text
 	// bubble; the component name changes so the deterministic uuid does too,
 	// and nothing already delivered is re-sent.
+	// An edit must keep the shape of the bubble it edits: a card cannot
+	// patch a text or rich-text message, nor the reverse.  Builders take the
+	// decision from the options so an edit to a pre-card target still builds
+	// the legacy text/post payload.
+	function wantsCard(options) {
+		return options?.card ?? config.outboundCard !== false;
+	}
+
 	function cardPayloadFor(source, text, imageKeys = []) {
 		return { component: 'card-v2', msgType: 'interactive', content: buildRelayCard({ tag: source.tag, text, imageKeys }) };
 	}
@@ -272,7 +280,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		return { kind: 'file', key: fileKey, filename };
 	}
 
-	async function relayPostContent(message, source) {
+	async function relayPostContent(message, source, options) {
 		const sourceContent = parseJson(message?.body?.content);
 		const resources = collectPostResources(sourceContent);
 		const replacements = { image: new Map(), file: new Map() };
@@ -284,14 +292,14 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			}
 			replacements[resource.kind].set(resource.key, uploaded.key);
 		}
-		if (config.outboundCard !== false && resources.every((resource) => resource.kind === 'image')) {
+		if (wantsCard(options) && resources.every((resource) => resource.kind === 'image')) {
 			return cardPayloadFor(source, cardText(sourceContent), [...replacements.image.values()]);
 		}
 		const content = prependTagToPost(rewritePostResourceKeys(sourceContent, replacements), source.tag);
 		return { component: 'post', msgType: 'post', content };
 	}
 
-	async function relayDirectResourceContent(message, source, descriptor) {
+	async function relayDirectResourceContent(message, source, descriptor, options) {
 		const uploaded = await downloadAndUpload(message, descriptor);
 		if (uploaded.kind === 'drive') {
 			return { component: 'drive-archive', msgType: 'text', content: { text: taggedText(source.tag, `大文件已归档至配置的飞书云空间文件夹：${uploaded.filename}\n文件 token：${uploaded.fileToken}`) } };
@@ -301,7 +309,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		}
 		if (message.msg_type !== 'media' || uploaded.kind !== 'file') {
 			if (uploaded.kind === 'image') {
-				if (config.outboundCard !== false) return cardPayloadFor(source, '', [uploaded.key]);
+				if (wantsCard(options)) return cardPayloadFor(source, '', [uploaded.key]);
 				return { component: 'image-post', msgType: 'post', content: { zh_cn: { title: '', content: [[{ tag: 'text', text: `#${source.tag}` }], [{ tag: 'img', image_key: uploaded.key }]] } } };
 			}
 			return { component: 'file', msgType: 'file', content: { file_key: uploaded.key, file_name: taggedFilename(source.tag, uploaded.filename) } };
@@ -312,7 +320,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		};
 	}
 
-	async function relayInteractiveContent(message, source) {
+	async function relayInteractiveContent(message, source, options) {
 		const card = parseJson(message?.body?.content, { raw: String(message?.body?.content ?? '') });
 		const summary = cardText(card).slice(0, 3_000);
 		// A card can carry its real content as an image, which the text walk
@@ -332,7 +340,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				logger.warn(`互动卡片图片无法转发：${source.key} ${message.message_id} ${resource.key}：${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
-		if (config.outboundCard !== false && (images.length || summary)) {
+		if (wantsCard(options) && (images.length || summary)) {
 			return cardPayloadFor(source, summary, images.map((image) => image.key));
 		}
 		if (images.length) {
@@ -353,20 +361,20 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		return { component: 'interactive-text-summary-v1', msgType: 'text', content: { text: taggedText(source.tag, `[interactive]\n${body}`) } };
 	}
 
-	async function relayPayload(message, source) {
+	async function relayPayload(message, source, options) {
 		if (!message?.message_id) throw new RelayUnsupportedError('源消息没有 message_id');
-		if (message.msg_type === 'post') return relayPostContent(message, source);
+		if (message.msg_type === 'post') return relayPostContent(message, source, options);
 		const directResource = resourceFromDirectMessage(message);
-		if (directResource) return relayDirectResourceContent(message, source, directResource);
+		if (directResource) return relayDirectResourceContent(message, source, directResource, options);
 		if (message.msg_type === 'text') {
-			if (config.outboundCard !== false) return cardPayloadFor(source, messageText(message?.body?.content));
+			if (wantsCard(options)) return cardPayloadFor(source, messageText(message?.body?.content));
 			return { component: 'text', msgType: 'text', content: { text: taggedText(source.tag, messageText(message?.body?.content)) } };
 		}
 		// Card components and callback values are tenant-bound, but their human
 		// readable text and outbound URLs are portable.  Preserve those in a
 		// normal text message so every configured source group has the same relay
 		// behavior without copying unusable actions or resource keys.
-		if (message.msg_type === 'interactive') return relayInteractiveContent(message, source);
+		if (message.msg_type === 'interactive') return relayInteractiveContent(message, source, options);
 		if (['sticker', 'share_chat', 'share_user', 'merge_forward', 'audio', 'system'].includes(message.msg_type)) {
 			return { component: 'portable-summary', msgType: 'text', content: { text: taggedText(source.tag, `[${message.msg_type}]　${messageText(message?.body?.content).slice(0, 3_000) || '此消息类型无法跨租户保持原组件。'}`) } };
 		}
@@ -378,8 +386,8 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			? record.target_message_ids
 			: (Array.isArray(record?.targetMessageIds) ? record.targetMessageIds : []);
 		return values.map((entry) => {
-			if (typeof entry === 'string') return { targetChatId: null, messageId: entry };
-			return { targetChatId: entry?.targetChatId ?? entry?.target_chat_id ?? null, messageId: entry?.messageId ?? entry?.message_id ?? null };
+			if (typeof entry === 'string') return { targetChatId: null, messageId: entry, msgType: null };
+			return { targetChatId: entry?.targetChatId ?? entry?.target_chat_id ?? null, messageId: entry?.messageId ?? entry?.message_id ?? null, msgType: entry?.msgType ?? entry?.msg_type ?? null };
 		}).filter((entry) => entry.messageId);
 	}
 
@@ -391,6 +399,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		const results = await Promise.allSettled(pendingTargets.map(async (targetChatId) => ({
 			targetChatId,
 			messageId: await sendMessage({ targetChatId, messageId: message.message_id, ...payload }),
+			msgType: payload.msgType,
 		})));
 		const targetMessageIds = [
 			...completed,
@@ -404,24 +413,27 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 	}
 
 	async function updateRelayedMessage(message, source, record) {
-		const targetIds = Array.isArray(record?.target_message_ids) ? record.target_message_ids : record?.targetMessageIds;
-		const targetMessages = Array.isArray(targetIds) ? targetIds : [];
+		const targetMessages = priorTargetMessages(record);
 		if (!targetMessages.length) return false;
-		const payload = await relayPayload(message, source);
-		if (!['text', 'post', 'interactive'].includes(payload.msgType)) return false;
-		await Promise.all(targetMessages.map(async (entry) => {
-			const targetMessageId = typeof entry === 'string' ? entry : entry?.messageId;
-			if (!targetMessageId) return;
-			// A card is edited through patch; text and rich text through update.
-			// A card cannot replace a text bubble in place, so an edit that
-			// changes shape is reported as unsynced and the workbench path
-			// keeps the bubble's text current instead.
+		// Targets delivered before the card upgrade have no recorded msg_type
+		// and were text or rich text; only a target recorded as a card is
+		// patched as a card.  Both payloads are built at most once.
+		const payloads = new Map();
+		const payloadFor = async (card) => {
+			if (!payloads.has(card)) payloads.set(card, relayPayload(message, source, { card }));
+			return payloads.get(card);
+		};
+		let synced = false;
+		await Promise.all(targetMessages.map(async ({ messageId: targetMessageId, msgType }) => {
+			const payload = await payloadFor(msgType === 'interactive');
+			if (!['text', 'post', 'interactive'].includes(payload.msgType)) return;
 			const result = payload.msgType === 'interactive'
 				? await larkClient.im.v1.message.patch({ path: { message_id: targetMessageId }, data: { content: JSON.stringify(payload.content) } })
 				: await larkClient.im.v1.message.update({ path: { message_id: targetMessageId }, data: { msg_type: payload.msgType, content: JSON.stringify(payload.content) } });
 			if (result?.code && result.code !== 0) throw new Error(`更新目标群消息失败：${result.msg ?? result.code}`);
+			synced = true;
 		}));
-		return true;
+		return synced;
 	}
 
 	async function processClaimed(message, source, claimedRecord = null) {

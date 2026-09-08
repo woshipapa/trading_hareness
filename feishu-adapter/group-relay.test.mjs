@@ -104,7 +104,7 @@ test('image is relayed once as one tagged rich-text bubble and source ID is dedu
 	assert.equal(sent.length, 1);
 	assert.equal(sent[0].msg_type, 'post');
 	assert.deepEqual(JSON.parse(sent[0].content), { zh_cn: { title: '', content: [[{ tag: 'text', text: '#anqiang' }], [{ tag: 'img', image_key: 'img_target' }]] } });
-	assert.deepEqual(saved.get('om_image_1').targetMessageIds, [{ targetChatId: 'oc_summary', messageId: 'om_target_1' }]);
+	assert.deepEqual(saved.get('om_image_1').targetMessageIds, [{ targetChatId: 'oc_summary', messageId: 'om_target_1', msgType: 'post' }]);
 });
 
 test('a route-specific target fans one source message out to the summary and dedicated group', async () => {
@@ -114,8 +114,8 @@ test('a route-specific target fans one source message out to the summary and ded
 	assert.equal(sent.length, 2);
 	assert.deepEqual(sent.map((item) => item.receive_id), ['oc_summary', 'oc_liwei_forward']);
 	assert.deepEqual(saved.get('om_fanout_1').targetMessageIds, [
-		{ targetChatId: 'oc_summary', messageId: 'om_target_1' },
-		{ targetChatId: 'oc_liwei_forward', messageId: 'om_target_2' },
+		{ targetChatId: 'oc_summary', messageId: 'om_target_1', msgType: 'text' },
+		{ targetChatId: 'oc_liwei_forward', messageId: 'om_target_2', msgType: 'text' },
 	]);
 });
 
@@ -125,13 +125,13 @@ test('a partial fan-out keeps successful target IDs so retry only needs the fail
 	await relay.tick();
 	assert.equal(sent.length, 1);
 	assert.equal(saved.get('om_partial_1').status, 'failed');
-	assert.deepEqual(saved.get('om_partial_1').targetMessageIds, [{ targetChatId: 'oc_summary', messageId: 'om_target_1' }]);
+	assert.deepEqual(saved.get('om_partial_1').targetMessageIds, [{ targetChatId: 'oc_summary', messageId: 'om_target_1', msgType: 'text' }]);
 	assert.match(saved.get('om_partial_1').errorMessage, /oc_liwei_forward/);
 	await relay.tick();
 	assert.equal(sent.length, 2);
 	assert.deepEqual(saved.get('om_partial_1').targetMessageIds, [
-		{ targetChatId: 'oc_summary', messageId: 'om_target_1' },
-		{ targetChatId: 'oc_liwei_forward', messageId: 'om_target_2' },
+		{ targetChatId: 'oc_summary', messageId: 'om_target_1', msgType: 'text' },
+		{ targetChatId: 'oc_liwei_forward', messageId: 'om_target_2', msgType: 'text' },
 	]);
 	assert.equal(saved.get('om_partial_1').status, 'sent');
 });
@@ -420,4 +420,30 @@ test('an edited source updates the delivered card in place through patch, not up
 	assert.equal(updated.length, 0);
 	assert.equal(patched.length, 1);
 	assert.equal(JSON.parse(patched[0].data.content).body.elements[0].text.content, '#anqiang\n修订版');
+});
+
+test('an edit to a target delivered before the card upgrade keeps it a text bubble', async () => {
+	const message = { message_id: 'om_legacy_edit', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '第一版' }) } };
+	const { relay, sent, updated, patched, saved } = createHarness([message], { outboundCard: true });
+	await relay.tick();
+	assert.equal(sent.length, 1);
+	// A pre-upgrade ledger row: the target entry carries no msgType.
+	const record = saved.get('om_legacy_edit');
+	record.target_message_ids = record.targetMessageIds.map(({ targetChatId, messageId }) => ({ targetChatId, messageId }));
+	record.targetMessageIds = record.target_message_ids;
+	message.updated = true;
+	message.body.content = JSON.stringify({ text: '修订版' });
+	message.update_time = String(Date.now() + 1000);
+	await relay.tick();
+	assert.equal(patched.length, 0);
+	assert.equal(updated.length, 1);
+	assert.equal(updated[0].data.msg_type, 'text');
+	assert.equal(JSON.parse(updated[0].data.content).text, '#anqiang\n修订版');
+});
+
+test('a delivered target records the msg_type it was sent as', async () => {
+	const message = { message_id: 'om_shape', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '内容' }) } };
+	const { relay, saved } = createHarness([message], { outboundCard: true });
+	await relay.tick();
+	assert.equal(saved.get('om_shape').targetMessageIds[0].msgType, 'interactive');
 });

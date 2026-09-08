@@ -162,7 +162,11 @@ images, and cards — is sent to its target groups as a **card JSON 2.0**
 Rich text carrying a video or file stays a `post` (a card cannot embed
 either), and native file/media/archive deliveries are unchanged. An edited
 source updates the delivered card in place through the card `patch` API
-rather than sending a second bubble.
+rather than sending a second bubble. Each ledger target entry records the
+`msgType` it was delivered as; an edit rebuilds the payload in that same
+shape, so a text/post bubble delivered before the upgrade (no recorded
+`msgType`) is still edited through `update` as text/post — a card cannot
+patch a text bubble (Feishu answers 400).
 
 `FEISHU_GROUP_RELAY_OUTBOUND_CARD=false` restores the pre-09-08 text/post
 shape for both the Feishu group relay and the WeChat relay; nothing already
