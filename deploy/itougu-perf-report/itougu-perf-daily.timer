@@ -1,0 +1,13 @@
+# /etc/systemd/system/itougu-perf-daily.timer
+[Unit]
+Description=每个交易日收盘后 30 分钟发一次内参操作与收益日报
+
+[Timer]
+# 15:00 收盘，留 30 分钟给行情收盘价落定；非交易日由脚本自身按上证指数日期跳过。
+OnCalendar=Mon..Fri *-*-* 15:30:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=60
+Unit=itougu-perf-daily.service
+
+[Install]
+WantedBy=timers.target
