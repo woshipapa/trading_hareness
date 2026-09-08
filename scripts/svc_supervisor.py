@@ -80,6 +80,12 @@ TASKS = [
          args=["/bin/bash", os.path.join(PKB, "backup_sqlite.sh")],
          cwd=PKB, out=os.path.join(PKLOG, "backup.log"), err=os.path.join(PKLOG, "backup.log"),
          env={"PATH": PATH_ENV}),
+    # 引用触发发现：每周扫一次 workspace collections 里的种子论文，谁新引用了
+    # 它们就推到 Feishu（幂等，见过的 citer 不重复报）。周三上午，避开周二的 S2 周报。
+    dict(name="paperkb.citation-watch", kind="calendar", weekday=3, hour=9, minute=30,
+         args=[PY, os.path.join(PKB, "citation_watch.py"), "--notify"],
+         cwd=PKB, out=os.path.join(PKLOG, "citation-watch.log"), err=os.path.join(PKLOG, "citation-watch.log"),
+         env={"PATH": PATH_ENV}, catch_up_hours=36),
     # ---- 观察池自动化:本地是唯一真源,edge 是扫描方 ----
     # sync 每 5 分钟推差异到 edge(diff 后才 PUT,避免无谓触发 45 天 hydration);
     # refresh 每 30 分钟触发,脚本内按沪时窗口+当日标记自行决定是否真正执行。
