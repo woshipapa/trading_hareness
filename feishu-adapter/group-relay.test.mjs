@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { createGroupRelay } from './group-relay.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3 } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [] } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map();
 	const sent = [];
@@ -53,10 +53,15 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			if (messageListDelayMs) await new Promise((resolve) => setTimeout(resolve, messageListDelayMs));
 			return { data: { items: messages, has_more: false } };
 		},
-		messageResourceGet: async ({ fileKey }) => ({
+		messageResourceGet: async ({ fileKey }) => {
+			// A card frequently carries an image key whose resource the sender's
+			// own client renders but the API has already dropped.
+			if (resourceErrorKeys.includes(fileKey)) throw new Error(`读取飞书消息资源失败（HTTP 400）：14005 Resource Has Been Deleted`);
+			return ({
 			headers: { 'content-type': fileKey.startsWith('img') ? 'image/png' : 'video/mp4', 'content-disposition': `attachment; filename=${fileKey}.bin`, 'content-length': '5' },
 			getReadableStream: () => Readable.from([Buffer.from('bytes')]),
-		}),
+		});
+		},
 	};
 	const relay = createGroupRelay({
 		larkClient, sourceApi, ledger, workbench: { publishActionCard: async () => { throw new Error('action card should be off by default'); } }, logger: { info() {}, error() {}, warn() {} },
@@ -233,4 +238,65 @@ test('an edited interactive card updates the original portable summary instead o
 	await relay.tick();
 	assert.equal(sent.length, 1);
 	assert.deepEqual(updated[0], { path: { message_id: 'om_target_1' }, data: { msg_type: 'text', content: JSON.stringify({ text: '#anqiang\n[interactive]\n修订后的卡片正文\n查看详情\nhttps://example.test/detail' }) } });
+});
+
+test('a card carrying its content as an image relays the image, not a caption about it', async () => {
+	// The #anqiang training-camp group posts cards whose payload is an image;
+	// walking the card for text alone forwarded a bubble with no content.
+	const message = {
+		message_id: 'om_card_image_1', msg_type: 'interactive', create_time: String(Date.now()),
+		body: { content: JSON.stringify({ title: null, elements: [[{ tag: 'img', image_key: 'img_card_body' }, { tag: 'text', text: '9-8 复盘' }]] }) },
+	};
+	const { relay, sent } = createHarness([message]);
+	await relay.tick();
+	assert.equal(sent.length, 1);
+	assert.equal(sent[0].msg_type, 'post');
+	assert.deepEqual(JSON.parse(sent[0].content), {
+		zh_cn: { title: '', content: [[{ tag: 'text', text: '#anqiang' }], [{ tag: 'text', text: '9-8 复盘' }], [{ tag: 'img', image_key: 'img_target' }]] },
+	});
+});
+
+test('the client-upgrade banner never reaches the target group as card text', async () => {
+	// Feishu returns this fixed notice for cards its message API cannot express.
+	// Relaying it verbatim produced bubbles that read like analyst content.
+	const message = {
+		message_id: 'om_card_banner_1', msg_type: 'interactive', create_time: String(Date.now()),
+		body: { content: JSON.stringify({ title: null, elements: [[{ tag: 'img', image_key: 'img_card_body' }, { tag: 'text', text: '请升级至最新版本客户端，以查看内容' }, { tag: 'text', text: '' }]] }) },
+	};
+	const { relay, sent } = createHarness([message]);
+	await relay.tick();
+	const content = JSON.parse(sent[0].content);
+	assert.equal(sent[0].msg_type, 'post');
+	assert.equal(JSON.stringify(content).includes('请升级至最新版本客户端'), false);
+	assert.deepEqual(content.zh_cn.content, [[{ tag: 'text', text: '#anqiang' }], [{ tag: 'img', image_key: 'img_target' }]]);
+});
+
+test('a card whose image resource is already deleted says so instead of forwarding the banner', async () => {
+	// The live #anqiang case on 2026-09-08: banner text plus an image key the
+	// API answers with 14005 Resource Has Been Deleted.  Nothing is relayable,
+	// and the reader needs to know that rather than receive a upgrade notice.
+	const message = {
+		message_id: 'om_card_dead_1', msg_type: 'interactive', create_time: String(Date.now()),
+		body: { content: JSON.stringify({ title: null, elements: [[{ tag: 'img', image_key: 'img_dead' }, { tag: 'text', text: '请升级至最新版本客户端，以查看内容' }, { tag: 'text', text: '' }]] }) },
+	};
+	const { relay, sent } = createHarness([message], { resourceErrorKeys: ['img_dead'] });
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'text');
+	const { text } = JSON.parse(sent[0].content);
+	assert.equal(text.includes('请升级至最新版本客户端'), false);
+	assert.match(text, /^#anqiang\n\[interactive\]\n卡片内容无法通过接口获取（1 张图片资源已失效）/);
+});
+
+test('a text-only card keeps its existing portable summary shape', async () => {
+	// The baidu-pan share cards this group sent until 2026-09-06 must relay
+	// unchanged, so widening card support cannot regress the working case.
+	const message = {
+		message_id: 'om_card_text_1', msg_type: 'interactive', create_time: String(Date.now()),
+		body: { content: JSON.stringify({ title: null, elements: [[{ tag: 'text', text: '9-6 19:39:27\n通过百度网盘分享的文件' }, { tag: 'a', href: 'https://pan.baidu.com/s/example', text: 'https://pan.baidu.com/s/example' }]] }) },
+	};
+	const { relay, sent, saved } = createHarness([message]);
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'text');
+	assert.deepEqual(JSON.parse(sent[0].content), { text: '#anqiang\n[interactive]\n9-6 19:39:27\n通过百度网盘分享的文件\nhttps://pan.baidu.com/s/example' });
+	assert.equal(saved.get('om_card_text_1').portableSummaryVersion, 'interactive-text-summary-v1');
 });

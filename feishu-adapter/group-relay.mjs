@@ -59,13 +59,22 @@ function messageText(content) {
 	return typeof value.text === 'string' ? value.text : typeof value.raw === 'string' ? value.raw : '';
 }
 
+// Feishu renders a card its message API cannot express as this fixed banner
+// plus an image key whose resource is already deleted.  It is a client-version
+// notice, never analyst content, so it must never reach the target group
+// dressed as the card's text.
+const CARD_UNAVAILABLE_NOTICES = new Set([
+	'请升级至最新版本客户端，以查看内容',
+	'请升级至最新版本客户端以查看内容',
+]);
+
 function interactiveCardText(content) {
 	const card = typeof content === 'string' ? parseJson(content, { raw: content }) : content;
 	const chunks = [];
 	const append = (value) => {
 		if (typeof value !== 'string') return;
 		const text = value.trim();
-		if (text && !chunks.includes(text)) chunks.push(text);
+		if (text && !CARD_UNAVAILABLE_NOTICES.has(text) && !chunks.includes(text)) chunks.push(text);
 	};
 	const walk = (value) => {
 		if (Array.isArray(value)) {
@@ -337,6 +346,44 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		};
 	}
 
+	async function relayInteractiveContent(message, source) {
+		const card = parseJson(message?.body?.content, { raw: String(message?.body?.content ?? '') });
+		const summary = interactiveCardText(card).slice(0, 3_000);
+		// A card can carry its real content as an image, which the text walk
+		// cannot see.  Relay those the way rich text already does, so the
+		// content arrives instead of a caption describing it.
+		const images = [];
+		let unreachable = 0;
+		for (const resource of collectPostResources(card)) {
+			if (resource.kind !== 'image' || images.some((item) => item.key === resource.key)) continue;
+			try {
+				const uploaded = await downloadAndUpload(message, resource);
+				if (uploaded.kind === 'image') images.push({ key: uploaded.key });
+			} catch (error) {
+				// A card image is routinely a stale key the sender's own client
+				// renders locally; losing it must never cost the card's text.
+				unreachable += 1;
+				logger.warn(`互动卡片图片无法转发：${source.key} ${message.message_id} ${resource.key}：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		if (images.length) {
+			const lines = summary ? summary.split('\n').filter((line) => line.trim()).map((line) => [{ tag: 'text', text: line }]) : [];
+			return {
+				component: 'interactive-card-post',
+				msgType: 'post',
+				content: { zh_cn: { title: '', content: [[{ tag: 'text', text: `#${source.tag}` }], ...lines, ...images.map((image) => [{ tag: 'img', image_key: image.key }])] } },
+			};
+		}
+		// Nothing survived: say so plainly rather than forwarding the banner.
+		// The reader needs to know a card arrived and where to read it, which a
+		// bare "no text" note does not tell them.
+		const body = summary
+			|| (unreachable
+				? `卡片内容无法通过接口获取（${unreachable} 张图片资源已失效），请在源群查看原卡片。`
+				: '卡片未提供可转发文字内容。');
+		return { component: 'interactive-text-summary-v1', msgType: 'text', content: { text: taggedText(source.tag, `[interactive]\n${body}`) } };
+	}
+
 	async function relayPayload(message, source) {
 		if (!message?.message_id) throw new RelayUnsupportedError('源消息没有 message_id');
 		if (message.msg_type === 'post') return relayPostContent(message, source);
@@ -349,10 +396,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		// readable text and outbound URLs are portable.  Preserve those in a
 		// normal text message so every configured source group has the same relay
 		// behavior without copying unusable actions or resource keys.
-		if (message.msg_type === 'interactive') {
-			const summary = interactiveCardText(message?.body?.content).slice(0, 3_000);
-			return { component: 'interactive-text-summary-v1', msgType: 'text', content: { text: taggedText(source.tag, `[interactive]\n${summary || '卡片未提供可转发文字内容。'}`) } };
-		}
+		if (message.msg_type === 'interactive') return relayInteractiveContent(message, source);
 		if (['sticker', 'share_chat', 'share_user', 'merge_forward', 'audio', 'system'].includes(message.msg_type)) {
 			return { component: 'portable-summary', msgType: 'text', content: { text: taggedText(source.tag, `[${message.msg_type}]　${messageText(message?.body?.content).slice(0, 3_000) || '此消息类型无法跨租户保持原组件。'}`) } };
 		}
