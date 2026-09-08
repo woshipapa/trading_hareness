@@ -34,6 +34,18 @@ class ItouguRelayTests(unittest.TestCase):
         )
         self.assertEqual(wrapped, expected)
 
+    def test_message_notice_is_selected_by_final_destination(self):
+        originals = relay.CHAT_IDS, relay.JUEJIN_CHAT_IDS, relay.QINLONG_CHAT_IDS
+        relay.CHAT_IDS = ["shared"]
+        relay.JUEJIN_CHAT_IDS = ["juejin-only"]
+        relay.QINLONG_CHAT_IDS = ["qinlong-only"]
+        try:
+            self.assertEqual(relay.message_for_destination("shared", "正文"), "正文")
+            self.assertEqual(relay.message_for_destination("juejin-only", "正文").count(relay.PRODUCT_NOTICE), 2)
+            self.assertEqual(relay.message_for_destination("qinlong-only", "正文").count(relay.PRODUCT_NOTICE), 2)
+        finally:
+            relay.CHAT_IDS, relay.JUEJIN_CHAT_IDS, relay.QINLONG_CHAT_IDS = originals
+
     def test_delivery_wraps_only_named_product_destinations(self):
         originals = {
             "chat_ids": relay.CHAT_IDS,
@@ -67,10 +79,9 @@ class ItouguRelayTests(unittest.TestCase):
                 calls.clear()
                 relay._deliver_new_unlocked(
                     products={business_id: relay.WATCH[business_id]}, verbose=False)
-                self.assertEqual([call[0] for call in calls], [["shared"], [dedicated_id]])
+                self.assertEqual([call[0] for call in calls], [["shared", dedicated_id]])
                 self.assertNotIn(relay.PRODUCT_NOTICE, calls[0][2])
-                self.assertEqual(calls[1][2].count(relay.PRODUCT_NOTICE), 2)
-                self.assertIn("正文内容", calls[1][2])
+                self.assertIn("正文内容", calls[0][2])
         finally:
             relay.CHAT_IDS = originals["chat_ids"]
             relay.JUEJIN_CHAT_IDS = originals["juejin"]

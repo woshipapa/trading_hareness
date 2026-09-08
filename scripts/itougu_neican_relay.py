@@ -102,6 +102,15 @@ def wrap_product_message(text):
     return "%s\n\n%s\n\n%s" % (PRODUCT_NOTICE, str(text or ""), PRODUCT_NOTICE)
 
 
+def message_for_destination(chat_id, text):
+    """Apply the product notice only at the two named product-group exits."""
+    normalized = str(chat_id or "").strip()
+    product_destinations = set()
+    for business_id in WATCH:
+        product_destinations.update(dedicated_chat_ids_for_product(business_id))
+    return wrap_product_message(text) if normalized in product_destinations else text
+
+
 def article_chat_ids():
     """Return general plus explicitly registered public-article destinations."""
     if TEST_CHAT_IDS:
@@ -363,6 +372,7 @@ def feishu_token():
 
 
 def send_feishu(chat_id, title, text, dedup_seed):
+    text = message_for_destination(chat_id, text)
     token = feishu_token()
     chunks = [text[i:i + 28000] for i in range(0, len(text), 28000)] or [""]
     for idx, chunk in enumerate(chunks):
@@ -471,8 +481,6 @@ def _deliver_new_unlocked(products=None, chat_ids=None, dry_run=False, bootstrap
             title, text = format_item(name, it, delivery_label=delivery_label)
             destinations = chat_ids_for_product(bid, override=chat_ids)
             dedicated_destinations = dedicated_chat_ids_for_product(bid, override=chat_ids)
-            dedicated_set = set(dedicated_destinations)
-            shared_destinations = [chat_id for chat_id in destinations if chat_id not in dedicated_set]
             if dry_run:
                 if verbose:
                     print("── DRY [%s] %s\n%s\n" % (name, title, text[:400]), flush=True)
@@ -480,14 +488,10 @@ def _deliver_new_unlocked(products=None, chat_ids=None, dry_run=False, bootstrap
                         print("── DRY [%s 专属出口] %s\n%s\n" % (
                             name, title, wrap_product_message(text)[:400]), flush=True)
             else:
-                # Keep the shared 公众号同步群 byte-for-byte unchanged while
-                # adding the requested provenance notice only to the named
-                # product groups. Both sends use the same per-chat UUID seed,
-                # so retries remain idempotent across local and edge relays.
-                if shared_destinations:
-                    send_feishu_many(shared_destinations, title, text, aid)
-                if dedicated_destinations:
-                    send_feishu_many(dedicated_destinations, title, wrap_product_message(text), aid)
+                # The final sender applies the notice by destination, keeping
+                # the shared 公众号同步群 unchanged while covering every
+                # message type that uses a named product-group exit.
+                send_feishu_many(destinations, title, text, aid)
                 total_sent += 1
                 if verbose:
                     print("✅ 已发飞书 [%s] %s (%s)" % (name, title, aid), flush=True)
