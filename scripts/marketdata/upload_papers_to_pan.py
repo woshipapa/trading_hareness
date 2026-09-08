@@ -23,7 +23,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,16 +33,12 @@ import pan_client as pc
 
 SOURCE_ROOT = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs/papers"
 PAN_ROOT = "/apps/股票paper存储/papers"
-DELAY_SECONDS = float(os.environ.get("PAN_UPLOAD_DELAY", "0.5"))
+WORKERS = int(os.environ.get("PAN_UPLOAD_WORKERS", "6"))
 MAX_FILE_RETRIES = 3
-
-_dir_cache: dict[str, dict[str, int]] = {}  # pan dir -> {filename: size}
 
 
 def existing_in_dir(pan_dir: str) -> dict[str, int]:
-    """Filenames already in a Pan directory, name -> size, listed once and cached."""
-    if pan_dir in _dir_cache:
-        return _dir_cache[pan_dir]
+    """Filenames already in a Pan directory, name -> size."""
     listing: dict[str, int] = {}
     start = 0
     while True:
@@ -56,7 +54,6 @@ def existing_in_dir(pan_dir: str) -> dict[str, int]:
         if len(items) < 1000:
             break
         start += 1000
-    _dir_cache[pan_dir] = listing
     return listing
 
 
@@ -74,11 +71,25 @@ def iter_files(root: Path, pdf_only: bool):
         yield path
 
 
+def upload_one(local: Path, pan_path: str) -> None:
+    last_error: Exception | None = None
+    for attempt in range(MAX_FILE_RETRIES):
+        try:
+            pc.upload(str(local), pan_path)
+            return
+        except Exception as exc:  # noqa: BLE001 - retried
+            last_error = exc
+            if attempt < MAX_FILE_RETRIES - 1:
+                time.sleep(2 ** attempt)
+    raise last_error  # type: ignore[misc]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--venue", help="only this top-level folder, e.g. 'MICRO 2025'")
     ap.add_argument("--root", type=Path, default=SOURCE_ROOT, help=argparse.SUPPRESS)
     ap.add_argument("--pdf-only", action="store_true", help="skip the index json/md files")
+    ap.add_argument("--workers", type=int, default=WORKERS, help=f"concurrent uploads (default {WORKERS})")
     ap.add_argument("--limit", type=int, default=0, help="stop after N uploads (0 = no limit)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -91,55 +102,61 @@ def main() -> int:
     files = list(iter_files(root, args.pdf_only))
     total_bytes = sum(f.stat().st_size for f in files)
     print(f"source: {root}")
-    print(f"{len(files)} file(s), {total_bytes / 2**30:.2f} GiB -> {PAN_ROOT}/")
+    print(f"{len(files)} file(s), {total_bytes / 2**30:.2f} GiB -> {PAN_ROOT}/ ({args.workers} workers)")
 
-    uploaded = skipped = failed = 0
-    uploaded_bytes = 0
+    # Resolve which files are missing BEFORE uploading: list each destination
+    # directory once (sequential, race-free), so the concurrent phase never
+    # lists a directory it is also writing into.
+    by_dir: dict[str, list[Path]] = {}
+    for local in files:
+        by_dir.setdefault(os.path.dirname(pan_path_for(local)), []).append(local)
+    missing: list[tuple[Path, str]] = []
+    skipped = 0
+    for pan_dir in sorted(by_dir):
+        present = existing_in_dir(pan_dir)
+        for local in by_dir[pan_dir]:
+            name = os.path.basename(pan_path_for(local))
+            if present.get(name) == local.stat().st_size:
+                skipped += 1
+            else:
+                missing.append((local, pan_path_for(local)))
+    print(f"already present: {skipped}; to upload: {len(missing)}")
+    if args.limit:
+        missing = missing[: args.limit]
+    if args.dry_run:
+        for _, pan_path in missing[:8]:
+            print(f"  would upload: {pan_path}")
+        print(f"\ndone: would upload {len(missing)}, skipped {skipped}")
+        return 0
+
+    lock = threading.Lock()
+    state = {"done": 0, "failed": 0, "bytes": 0}
     started = time.time()
-    for index, local in enumerate(files, 1):
-        pan_path = pan_path_for(local)
-        pan_dir = os.path.dirname(pan_path)
-        size = local.stat().st_size
-        name = os.path.basename(pan_path)
 
-        if existing_in_dir(pan_dir).get(name) == size:
-            skipped += 1
-            continue
-        if args.dry_run:
-            if uploaded < 8:
-                print(f"  would upload: {pan_path}")
-            uploaded += 1
-            continue
+    def work(item: tuple[Path, str]) -> None:
+        local, pan_path = item
+        try:
+            upload_one(local, pan_path)
+        except Exception as exc:  # noqa: BLE001
+            with lock:
+                state["failed"] += 1
+            print(f"  ! FAILED {pan_path}: {str(exc)[:140]}", file=sys.stderr)
+            return
+        with lock:
+            state["done"] += 1
+            state["bytes"] += local.stat().st_size
+            done = state["done"]
+        if done % 50 == 0:
+            rate = state["bytes"] / max(1e-9, time.time() - started) / 2**20
+            print(f"  uploaded {done}/{len(missing)}, failed {state['failed']}  ({rate:.1f} MiB/s)")
 
-        last_error: Exception | None = None
-        for attempt in range(MAX_FILE_RETRIES):
-            try:
-                pc.upload(str(local), pan_path)
-                _dir_cache.setdefault(pan_dir, {})[name] = size  # keep cache in sync for resume
-                last_error = None
-                break
-            except Exception as exc:  # noqa: BLE001 - retried
-                last_error = exc
-                if attempt < MAX_FILE_RETRIES - 1:
-                    time.sleep(2 ** attempt)
-        if last_error is not None:
-            failed += 1
-            print(f"  ! FAILED {pan_path}: {str(last_error)[:140]}", file=sys.stderr)
-        else:
-            uploaded += 1
-            uploaded_bytes += size
-            if uploaded % 25 == 0 or size > 20 * 2**20:
-                rate = uploaded_bytes / max(1e-9, time.time() - started) / 2**20
-                print(f"  [{index}/{len(files)}] uploaded {uploaded}, skipped {skipped}, "
-                      f"failed {failed}  ({rate:.1f} MiB/s)")
-            time.sleep(DELAY_SECONDS)
-        if args.limit and uploaded >= args.limit:
-            print(f"  reached --limit {args.limit}")
-            break
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+        futures = [pool.submit(work, item) for item in missing]
+        for _ in as_completed(futures):
+            pass
 
-    verb = "would upload" if args.dry_run else "uploaded"
-    print(f"\ndone: {verb} {uploaded}, skipped {skipped} (already present), failed {failed}")
-    return 1 if failed else 0
+    print(f"\ndone: uploaded {state['done']}, skipped {skipped} (already present), failed {state['failed']}")
+    return 1 if state["failed"] else 0
 
 
 if __name__ == "__main__":
