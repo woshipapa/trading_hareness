@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { createGroupRelay } from './group-relay.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map();
 	const sent = [];
@@ -44,7 +44,10 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			message: { create: async ({ data }) => {
 				if (data.receive_id === failTargetChatId && !failedTarget) { failedTarget = true; throw new Error(`target unavailable: ${data.receive_id}`); }
 				sent.push(data); return { data: { message_id: `om_target_${sent.length}` } };
-			}, update: async (payload) => { updated.push(payload); return { code: 0, data: {} }; }, patch: async (payload) => { patched.push(payload); return { code: 0, data: {} }; } },
+			}, update: async (payload) => {
+				if (payload.path.message_id === failUpdateMessageId) { const error = new Error('Request failed with status code 400'); error.response = { data: { code: 230011, msg: 'message has been recalled' } }; throw error; }
+				updated.push(payload); return { code: 0, data: {} };
+			}, patch: async (payload) => { patched.push(payload); return { code: 0, data: {} }; } },
 			image: { create: async () => { if (imageError) throw imageError; return imageResponse; } },
 			file: { create: async () => ({ file_key: 'file_target' }) },
 		} },
@@ -67,7 +70,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		},
 	};
 	const relay = createGroupRelay({
-		larkClient, sourceApi, ledger, workbench: { publishActionCard: async () => { throw new Error('action card should be off by default'); } }, logger: { info() {}, error() {}, warn() {} },
+		larkClient, sourceApi, ledger, workbench: { publishActionCard: async () => { throw new Error('action card should be off by default'); } }, logger: { info() {}, error() {}, warn() {}, ...(logger ?? {}) },
 		canWrite,
 		config: {
 			enabled: true, targetChatId: 'oc_summary', intervalSeconds: 10, sourceConcurrency, historyLookbackSeconds: 300, overlapSeconds: 30, outboundCard,
@@ -446,4 +449,22 @@ test('a delivered target records the msg_type it was sent as', async () => {
 	const { relay, saved } = createHarness([message], { outboundCard: true });
 	await relay.tick();
 	assert.equal(saved.get('om_shape').targetMessageIds[0].msgType, 'interactive');
+});
+
+test('an edit still reaches the other targets when one delivered bubble was recalled', async () => {
+	const message = { message_id: 'om_recalled_target', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '第一版' }) } };
+	const warnings = [];
+	const { relay, sent, updated, saved } = createHarness([message], { targetChatIds: ['oc_liwei_forward'], failUpdateMessageId: 'om_target_2', logger: { warn: (line) => warnings.push(line) } });
+	await relay.tick();
+	assert.equal(sent.length, 2);
+	message.updated = true;
+	message.update_time = String(Date.now() + 1000);
+	message.body.content = JSON.stringify({ text: '修订版' });
+	await relay.tick();
+	assert.equal(sent.length, 2, 'an edit must not send a second bubble');
+	assert.equal(updated.length, 1);
+	assert.equal(updated[0].path.message_id, 'om_target_1');
+	assert.equal(saved.get('om_recalled_target').status, 'sent');
+	assert.ok(warnings.some((line) => line.includes('om_target_2') && line.includes('230011')), warnings.join('\n'));
+	assert.ok(!warnings.some((line) => line.includes('同步源消息编辑失败')), warnings.join('\n'));
 });

@@ -167,6 +167,14 @@ function sourceFromRecord(record) {
 	return typeof record.message === 'string' ? parseJson(record.message) : record.message;
 }
 
+// Axios hides the Feishu error body behind "status code 400"; the code and
+// message are what an operator needs, never the request or its headers.
+function feishuErrorMessage(error) {
+	const payload = error?.response?.data;
+	const detail = String(payload?.msg ?? error?.message ?? error ?? '未知错误');
+	return payload?.code ? `${detail}（飞书错误 ${payload.code}）` : detail;
+}
+
 function uploadErrorMessage(resource, error) {
 	const payload = error?.response?.data;
 	const apiMessage = String(payload?.msg ?? '');
@@ -423,17 +431,22 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			if (!payloads.has(card)) payloads.set(card, relayPayload(message, source, { card }));
 			return payloads.get(card);
 		};
-		let synced = false;
-		await Promise.all(targetMessages.map(async ({ messageId: targetMessageId, msgType }) => {
+		// One target that can no longer be edited (recalled in its group, for
+		// instance) must not stop the edit reaching the others, so every target
+		// is attempted and only a total failure is raised.
+		const results = await Promise.allSettled(targetMessages.map(async ({ messageId: targetMessageId, msgType }) => {
 			const payload = await payloadFor(msgType === 'interactive');
-			if (!['text', 'post', 'interactive'].includes(payload.msgType)) return;
+			if (!['text', 'post', 'interactive'].includes(payload.msgType)) return false;
 			const result = payload.msgType === 'interactive'
 				? await larkClient.im.v1.message.patch({ path: { message_id: targetMessageId }, data: { content: JSON.stringify(payload.content) } })
 				: await larkClient.im.v1.message.update({ path: { message_id: targetMessageId }, data: { msg_type: payload.msgType, content: JSON.stringify(payload.content) } });
 			if (result?.code && result.code !== 0) throw new Error(`更新目标群消息失败：${result.msg ?? result.code}`);
-			synced = true;
+			return true;
 		}));
-		return synced;
+		const failures = results.map((result, index) => result.status === 'rejected' ? `${targetMessages[index].messageId}：${feishuErrorMessage(result.reason)}` : null).filter(Boolean);
+		if (failures.length === results.length) throw new Error(failures.join('; '));
+		for (const failure of failures) logger.warn(`目标消息编辑未同步：${source.key} ${message.message_id} ${failure}`);
+		return results.some((result) => result.status === 'fulfilled' && result.value === true);
 	}
 
 	async function processClaimed(message, source, claimedRecord = null) {
