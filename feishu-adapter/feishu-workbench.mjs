@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { buildRelayCard } from './card-content.mjs';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
 const TENANT_TOKEN_PATH = '/auth/v3/tenant_access_token/internal';
@@ -553,13 +554,22 @@ export function createFeishuWorkbench({ appId, appSecret, larkClient, ledger, us
 			}
 			return ledger.updateRelayWorkflow(record.source_message_id, { workflowState: 'recalled', workflowNote: '源群消息已撤回，汇总群副本已同步撤回', actorOpenId: null, action: 'source_recalled' });
 		}
-		// The ledger stores each target as {targetChatId, messageId}; older rows
-		// hold a bare id.  Passing the object through produced a 400 with
-		// "Invalid ids: [[object Object]]" on every source edit.
+		// The ledger stores each target as {targetChatId, messageId, msgType};
+		// older rows hold a bare id with no msgType.  Passing the object
+		// through as an id produced a 400 with "Invalid ids: [[object
+		// Object]]" on every source edit; separately, PUTting plain text over
+		// a target that was actually delivered as a card 400s the same way
+		// group-relay's own edit path did before it learned each target's
+		// shape.  This path only runs once that path has already failed for
+		// every target, so it must not repeat the same mistake.
 		const firstTarget = Array.isArray(record.target_message_ids) ? record.target_message_ids[0] : null;
 		const targetMessageId = typeof firstTarget === 'string' ? firstTarget : (firstTarget?.messageId ?? firstTarget?.message_id ?? null);
+		const targetMsgType = typeof firstTarget === 'string' ? null : (firstTarget?.msgType ?? firstTarget?.msg_type ?? null);
 		if (!originalSynced && record.message?.msg_type === 'text' && targetMessageId) {
-			await tenantRequest(`/im/v1/messages/${encodeURIComponent(targetMessageId)}`, { method: 'PUT', body: { msg_type: 'text', content: JSON.stringify({ text: taggedText(record.route_tag, messagePlainText(record.message)) }) } }).catch((error) => logger.warn(`同步源文本编辑失败：${error.message}`));
+			const sync = targetMsgType === 'interactive'
+				? tenantRequest(`/im/v1/messages/${encodeURIComponent(targetMessageId)}`, { method: 'PATCH', body: { content: JSON.stringify(buildRelayCard({ tag: record.route_tag, text: messagePlainText(record.message) })) } })
+				: tenantRequest(`/im/v1/messages/${encodeURIComponent(targetMessageId)}`, { method: 'PUT', body: { msg_type: 'text', content: JSON.stringify({ text: taggedText(record.route_tag, messagePlainText(record.message)) }) } });
+			await sync.catch((error) => logger.warn(`同步源文本编辑失败：${error.message}`));
 		}
 		await updateActionCard(record).catch((error) => logger.warn(`同步源消息编辑到行动卡片失败：${error.message}`));
 		await replyToAction(record, `#${record.route_tag} 源群消息已编辑；行动卡片中的原始消息已更新。`).catch((error) => logger.warn(`通知源消息编辑失败：${error.message}`));

@@ -174,3 +174,43 @@ test('urgent action resolves the OAuth user and declares open_id addressing', as
 	assert.match(urgentUrl, /user_id_type=open_id/);
 	assert.deepEqual(urgentBody, { user_id_list: ['ou_current'] });
 });
+
+test('a text-source edit sync falls back to patching the card when the target was delivered as one', async () => {
+	const requests = [];
+	const fetchImpl = async (url, init) => {
+		if (url.includes('/auth/v3/tenant_access_token/internal')) return new Response(JSON.stringify({ code: 0, tenant_access_token: 'tenant', expire: 7200 }));
+		requests.push({ url, method: init.method, body: JSON.parse(init.body) });
+		return new Response(JSON.stringify({ code: 0, data: {} }));
+	};
+	const workbench = createFeishuWorkbench({ appId: 'app', appSecret: 'secret', larkClient: {}, ledger: {}, fetchImpl });
+	const record = {
+		source_message_id: 'om_1', route_tag: 'anqiang', action_card_message_id: null,
+		message: { msg_type: 'text', body: { content: JSON.stringify({ text: '修订版' }) } },
+		target_message_ids: [{ targetChatId: 'oc_target', messageId: 'om_target_1', msgType: 'interactive' }],
+	};
+	await workbench.syncSourceChange(record, { deleted: false, originalSynced: false });
+	const patched = requests.find((request) => request.url.includes('om_target_1'));
+	assert.equal(patched.method, 'PATCH');
+	const card = JSON.parse(patched.body.content);
+	assert.equal(card.schema, '2.0');
+	assert.equal(card.body.elements[0].text.content, '#anqiang\n修订版');
+});
+
+test('a text-source edit sync still PUTs plain text for a target with no recorded card shape', async () => {
+	const requests = [];
+	const fetchImpl = async (url, init) => {
+		if (url.includes('/auth/v3/tenant_access_token/internal')) return new Response(JSON.stringify({ code: 0, tenant_access_token: 'tenant', expire: 7200 }));
+		requests.push({ url, method: init.method, body: JSON.parse(init.body) });
+		return new Response(JSON.stringify({ code: 0, data: {} }));
+	};
+	const workbench = createFeishuWorkbench({ appId: 'app', appSecret: 'secret', larkClient: {}, ledger: {}, fetchImpl });
+	const record = {
+		source_message_id: 'om_2', route_tag: 'liwei', action_card_message_id: null,
+		message: { msg_type: 'text', body: { content: JSON.stringify({ text: '修订版' }) } },
+		target_message_ids: [{ targetChatId: 'oc_target', messageId: 'om_target_2' }],
+	};
+	await workbench.syncSourceChange(record, { deleted: false, originalSynced: false });
+	const updated = requests.find((request) => request.url.includes('om_target_2'));
+	assert.equal(updated.method, 'PUT');
+	assert.deepEqual(updated.body, { msg_type: 'text', content: JSON.stringify({ text: '#liwei\n修订版' }) });
+});
