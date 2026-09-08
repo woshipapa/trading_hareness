@@ -355,6 +355,7 @@ def deliver_new(products=None, chat_ids=None, dry_run=False, bootstrap=False, ve
             continue
         for it in new:
             aid = str(it.get("appendContentId"))
+            enqueue_video_task(it, name, state)
             title, text = format_item(name, it, delivery_label=delivery_label)
             if dry_run:
                 if verbose:
@@ -399,7 +400,7 @@ def ensure_baseline(products):
 
 
 def poll_public_views(verbose=False, delivery_label="poll"):
-    """Poll the Itougu 研习社 view API without reading any WeChat table.
+    """Poll registered Itougu public-circle view APIs without WeChat tables.
 
     The import is lazy because the public-article module reuses this module's
     auth and Feishu helpers.  Keeping it here makes the systemd poller the
@@ -414,18 +415,52 @@ def poll_public_views(verbose=False, delivery_label="poll"):
         return 0
 
 
-def in_trading_hours():
-    now = datetime.now(CST)
+MORNING = (9 * 60 + 30, 11 * 60 + 30)   # A股上午
+AFTERNOON = (13 * 60, 15 * 60)          # A股下午
+
+
+def _minutes(now):
+    return now.hour * 60 + now.minute
+
+
+def in_trading_hours(now=None):
+    now = now or datetime.now(CST)
     if now.weekday() >= 5:          # 周末
         return False
-    hm = now.hour * 60 + now.minute
-    return (9 * 60 + 30 <= hm <= 11 * 60 + 30) or (13 * 60 <= hm <= 15 * 60)  # A股上午/下午
+    hm = _minutes(now)
+    return MORNING[0] <= hm <= MORNING[1] or AFTERNOON[0] <= hm <= AFTERNOON[1]
 
 
-def is_after_close():
+def in_midday_break(now=None):
+    """A股午间休市 11:30-13:00。
+
+    交易所不开，但内参与公开圈子照发（复盘、次日计划、观点），所以这一段必须
+    继续拉取，否则午休期间发布的内容要等到 13:00 才会被看见。
+    """
+    now = now or datetime.now(CST)
+    if now.weekday() >= 5:
+        return False
+    return MORNING[1] < _minutes(now) < AFTERNOON[0]
+
+
+def is_after_close(now=None):
     """Whether Shanghai time is on a weekday at/after the 15:00 close."""
-    now = datetime.now(CST)
-    return now.weekday() < 5 and now.hour * 60 + now.minute >= 15 * 60
+    now = now or datetime.now(CST)
+    return now.weekday() < 5 and _minutes(now) >= AFTERNOON[1]
+
+
+def poll_plan(now, interval, off_hours_interval, midday_interval=None, trading_hours_only=True):
+    """Decide whether this tick polls, and how long to sleep afterwards.
+
+    Kept pure so the window boundaries are testable without waiting for a
+    session. 盘中与午休同速，收盘后降速，开盘前与周末在 --trading-hours-only 下静默。
+    """
+    if in_trading_hours(now):
+        return True, max(5.0, float(interval))
+    if in_midday_break(now):
+        return True, max(5.0, float(midday_interval if midday_interval else interval))
+    slow = max(30.0, float(off_hours_interval))
+    return (not trading_hours_only) or is_after_close(now), slow
 
 
 def main():
@@ -436,9 +471,11 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="只打印不发送")
     ap.add_argument("--bootstrap", action="store_true", help="把当前所有内参标记为已读（不发送），首次部署用")
     ap.add_argument("--trading-hours-only", action="store_true",
-                    help="盘中高频轮询，上海时间收盘后保留低频轮询")
+                    help="盘中与午休高频轮询，上海时间收盘后保留低频轮询")
     ap.add_argument("--off-hours-interval", type=float, default=600,
-                    help="非盘中轮询间隔秒（默认600，即10分钟）")
+                    help="收盘后轮询间隔秒（默认600，即10分钟）")
+    ap.add_argument("--midday-interval", type=float, default=None,
+                    help="午间休市(11:30-13:00)轮询间隔秒，默认与 --interval 相同")
     ap.add_argument("--product", action="append", help="只处理指定 productId")
     args = ap.parse_args()
 
@@ -451,24 +488,32 @@ def main():
         print("itougu 内参兵底轮询启动 interval=%ss" % args.interval, flush=True)
         ensure_baseline(prods)
         while True:
-            trading = in_trading_hours()
-            # Keep the remote API safety net alive after the Shanghai close,
-            # but avoid restoring any local WeChat-table listener path.
-            allowed = (not args.trading_hours_only) or trading or is_after_close()
-            if allowed:
+            # Keep the remote API safety net alive across the midday break and
+            # after the Shanghai close, but avoid restoring any local
+            # WeChat-table listener path.
+            should_poll, sleep_seconds = poll_plan(
+                datetime.now(CST), interval=args.interval,
+                off_hours_interval=args.off_hours_interval,
+                midday_interval=args.midday_interval,
+                trading_hours_only=args.trading_hours_only)
+            if should_poll:
                 try:
                     deliver_new(products=prods, dry_run=args.dry_run,
                                 delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
-                    # 研习社盘中观点走同一 Itougu API 的 view/list，绝不读
-                    # 本地微信表；尾盘掘金/猎场擒龙仍走 appendContent/list。
+                    # 已登记公开圈子走同一 Itougu API 的 view/list，绝不读
+                    # 本地微信表；付费内参仍走 appendContent/list。
                     if not args.dry_run:
                         poll_public_views(verbose=True, delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
                 except Exception as e:
                     print("轮询异常(忽略): %s" % e, flush=True)
-            time.sleep(args.interval if trading else max(30, args.off_hours_interval))
+            time.sleep(sleep_seconds)
     else:
-        if args.trading_hours_only and not in_trading_hours():
-            return 0   # 非交易时段静默跳过（避免定时任务日志刷屏）
+        should_poll, _ = poll_plan(datetime.now(CST), interval=args.interval,
+                                   off_hours_interval=args.off_hours_interval,
+                                   midday_interval=args.midday_interval,
+                                   trading_hours_only=args.trading_hours_only)
+        if not should_poll:
+            return 0   # 非监听时段静默跳过（避免定时任务日志刷屏）
         n = deliver_new(products=prods, dry_run=args.dry_run,
                         delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
         if n:
