@@ -7,3 +7,11 @@ assert.match(source, /trading-hareness-feishu-adapter:\$\{release_sha\}/);
 assert.match(source, /RELAY_EDGE_IMAGE_PULL_TIMEOUT_SECONDS:-300/);
 assert.match(source, /timeout "\$\{pull_timeout_seconds\}s" docker pull/);
 console.log('relay release resolves abbreviated SHAs to immutable image tags');
+
+// GHCR blob delivery to the edge host has stalled mid-pull more than once;
+// a release must recover on its own instead of needing a manual local
+// pull + `docker save | ssh docker load` every time it happens.
+assert.match(source, /if ! "\$\{ssh_command\[@\]\}" "\$edge_host" bash -s -- "\$image_ref" "\$pull_timeout_seconds"/);
+assert.match(source, /docker save "\$image_ref" \| gzip -1 \| "\$\{ssh_command\[@\]\}" "\$edge_host" 'gunzip \| docker load'/);
+assert.match(source, /docker image inspect "\$image_ref" >\/dev\/null/);
+console.log('a stalled edge-side pull falls back to a local pull and ssh transfer automatically');

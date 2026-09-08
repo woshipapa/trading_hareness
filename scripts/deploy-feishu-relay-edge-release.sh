@@ -51,8 +51,25 @@ if [[ "$apply" != true ]]; then
   exit 0
 fi
 
+# GHCR blob delivery straight to this edge host has repeatedly stalled mid
+# layer (TLS handshake timeouts on one blob) while the same image pulls fine
+# from a normal workstation. Rather than hand-fixing that every release,
+# attempt the pull on the edge first and, only if it fails or times out,
+# pull here and ship the image over the SSH connection we already trust.
+if ! "${ssh_command[@]}" "$edge_host" bash -s -- "$image_ref" "$pull_timeout_seconds" <<'REMOTE_PULL'
+set -euo pipefail
+image_ref="$1"
+pull_timeout_seconds="$2"
+timeout "${pull_timeout_seconds}s" docker pull "$image_ref"
+REMOTE_PULL
+then
+  echo "edge-side pull of $image_ref failed or timed out; pulling locally and transferring over ssh instead" >&2
+  docker pull "$image_ref"
+  docker save "$image_ref" | gzip -1 | "${ssh_command[@]}" "$edge_host" 'gunzip | docker load'
+fi
+
 "${ssh_command[@]}" "$edge_host" bash -s -- \
-  "$edge_dir" "$runtime_env" "$secrets_env" "$image_ref" "$release_sha" "$release_label" "$built_at" "$pull_timeout_seconds" <<'REMOTE'
+  "$edge_dir" "$runtime_env" "$secrets_env" "$image_ref" "$release_sha" "$release_label" "$built_at" <<'REMOTE'
 set -euo pipefail
 edge_dir="$1"
 runtime_env="$2"
@@ -61,11 +78,12 @@ image_ref="$4"
 release_sha="$5"
 release_label="$6"
 built_at="$7"
-pull_timeout_seconds="$8"
 
 test -f "$runtime_env"
 test -f "$secrets_env"
-timeout "${pull_timeout_seconds}s" docker pull "$image_ref"
+# The image was already pulled or loaded above; a live check here just
+# fails fast with a clear message if that step silently produced nothing.
+docker image inspect "$image_ref" >/dev/null
 update_env() {
   key="$1"
   value="$2"

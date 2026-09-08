@@ -92,6 +92,7 @@
 - 顺带修复：workbench 编辑同步把 `target_message_ids[0]`（`{targetChatId, messageId}` 对象）当作 message_id 传给 PUT，导致每次源消息编辑都报 `Invalid ids: [[object Object]]`（400）；撤回路径同样归一化。Feishu adapter 回归 **100/100**。
 - 上线回执（a0e144b，`edge-2026.09.08-card-v2-outbound`）：GHCR 拉取再次在同一 blob 上超时，走本地 `docker save | ssh docker load` 后 apply，health `ok a0e144b`；顺手清掉 `ef8cb15` 旧镜像（edge 磁盘 12G 可用、内存可用 1.5G，adapter 常驻 58MB）。上线后日志暴露一个真实问题：源消息编辑时对**升级前**投递的文本/富文本气泡用卡片 `patch` → 飞书 400（`同步源消息编辑失败`×3）。修复：账本目标条目记录投递时的 `msgType`，编辑按目标原有形态重建载荷（无记录的旧条目走 text/post `update`，卡片条目走 `patch`）；回归 **104/104**，新增 Dockerfile 模块清单测试防再次漏 COPY。
 - 第二个上线回执（d095dad → 再修）：剩下的一条 400 是 `#anqiang` 的专属出口群目标气泡已被撤回（`deleted:true`），编辑一个已撤回消息必然 400，而 `Promise.all` 让它拖垮了汇总群那条本已成功的同步，并让 workbench 兜底再 PUT 一次。改为逐目标 `allSettled`：任一目标成功即算已同步，失败目标单独记 warn 并带飞书错误码/msg（axios 只给 "status code 400"），全部失败才抛。回归 **105/105**。
+- 部署链路提效：`deploy-feishu-relay-edge-release.sh` 的 GHCR 拉取本次又超时了一次（同一个 blob）；改成脚本自愈——先在 edge 上尝试拉取，失败/超时才自动回退到本地拉取再 `docker save | ssh | docker load`，不用再手动介入。另加 `scripts/hotfix-feishu-relay-edge.sh`：跑测试→rsync 源码到 edge→在 edge 本地 `docker compose build`（复用已有 layer 缓存，`npm install` 层缓存命中时几秒完成，未命中约 1 分钟；`node:22-alpine` 已一次性缓存到 edge 避免 Docker Hub 连接问题）→重启→校验健康，全程不碰 GHCR，不用再为每个小改动走一遍构建镜像+传输 edge 的完整流程。这是未追踪的临时构建（`release:"hotfix"`），验证完必须提交+打 tag+等 CI 发正式镜像后用发布脚本切回去；已实测两轮真实 apply（含撤回 dirty 状态）并把 edge 切回 `e73026a` 收尾。
 
 ### 2026-09-05 当前复核
 

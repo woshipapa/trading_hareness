@@ -80,6 +80,46 @@ to return `401`, `403`, or `405`; a timeout or unexpected response restarts only
 `stock-reports-import.service`. It neither creates an import batch nor touches
 the durable relay ledger.
 
+### GHCR pulls from the edge stall — the release script now recovers on its own
+
+Docker Hub / GHCR blob delivery straight to `47.114.113.152` has repeatedly
+stalled mid-layer (TLS handshake timeout on one blob) while the same image
+pulls fine from a workstation. `deploy-feishu-relay-edge-release.sh` no longer
+needs a manual rescue for this: it first tries the pull on the edge, and only
+if that fails or times out does it pull the image locally and ship it over the
+same SSH connection (`docker save | gzip -1 | ssh … docker load`) before
+applying the release. Nothing to do differently — just run `--apply` and it
+falls back automatically.
+
+### Iterating on a small change without a CI + GHCR round trip
+
+A one-line fix does not need a commit, a tag, a wait on `release-edge-images.yml`,
+and an image pull/transfer just to try it. `scripts/hotfix-feishu-relay-edge.sh`
+runs the adapter test suite, rsyncs the working tree's `feishu-adapter/`
+source (plus `config/source-registry.json` and `frontend/dist`) straight to
+the edge, and builds the image there with `docker compose build` — using the
+layer cache that is already warm from the last real release, so only the
+`npm install` layer is ever slow, and even that is a self-contained rebuild
+with no registry involved once `node:22-alpine` is cached locally on the edge
+(a one-time `docker save | ssh … docker load`, already done). Typical repeat
+runs finish in seconds; a cache miss on `npm install` costs about a minute —
+either way it beats waiting on CI and rescuing a stuck GHCR pull.
+
+This is deliberately **not** a tracked release: the health endpoint reports
+`"release":"hotfix"` and a synthetic (or `null`, once `release-metadata.mjs`
+rejects the non-hex string) `git_sha`, and nothing here touches GHCR,
+`runtime.env`'s `FEISHU_ADAPTER_IMAGE`, or `PLAN_COMPLETION_MATRIX.md`. Once a
+hotfix build is verified, commit the change, tag an `edge-*.*` release, wait
+for CI to publish the GHCR image, and run
+`deploy-feishu-relay-edge-release.sh` so the edge goes back to a pinned,
+auditable image with a real commit SHA in its health provenance. Never leave
+the edge running an untracked hotfix build long-term.
+
+```bash
+scripts/hotfix-feishu-relay-edge.sh          # dry run: tests + rsync preview only
+scripts/hotfix-feishu-relay-edge.sh --apply  # syncs, builds and restarts on the edge
+```
+
 ## Deterministic emergency failover to the workstation
 
 From the repository root, run:
