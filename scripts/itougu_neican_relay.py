@@ -58,6 +58,10 @@ WATCH = {
     "1661993558510538753": "猎场擒龙内参",
 }
 
+# The dedicated product groups receive a provenance/disclosure line at both
+# ends of the forwarded body.  The shared 公众号同步群 remains unchanged.
+PRODUCT_NOTICE = "认真一手咸鱼店铺：餐厅焦糖味的momo，其他都是二手转发。"
+
 
 def chat_ids_for_product(business_id, override=None):
     """Return the configured destinations for one internal-reference product."""
@@ -71,6 +75,31 @@ def chat_ids_for_product(business_id, override=None):
     if business_id == "1806593447818383361" and JUEJIN_CHAT_IDS:
         destinations.extend(JUEJIN_CHAT_IDS)
     return list(dict.fromkeys(destinations))
+
+
+def dedicated_chat_ids_for_product(business_id, override=None):
+    """Return only product-specific destinations, excluding the shared sink.
+
+    Explicit test destinations must never receive production fan-out or the
+    product notice.  A product-specific environment value may include the
+    shared destination for backwards compatibility; remove it here so the
+    shared group gets the unmodified body exactly once.
+    """
+    if override is not None or TEST_CHAT_IDS:
+        return []
+    if business_id == "1661993558510538753":
+        configured = QINLONG_CHAT_IDS
+    elif business_id == "1806593447818383361":
+        configured = JUEJIN_CHAT_IDS
+    else:
+        configured = []
+    shared = set(CHAT_IDS)
+    return list(dict.fromkeys(chat_id for chat_id in configured if chat_id not in shared))
+
+
+def wrap_product_message(text):
+    """Add the requested prefix and suffix to a dedicated-group message body."""
+    return "%s\n\n%s\n\n%s" % (PRODUCT_NOTICE, str(text or ""), PRODUCT_NOTICE)
 
 
 def article_chat_ids():
@@ -440,11 +469,25 @@ def _deliver_new_unlocked(products=None, chat_ids=None, dry_run=False, bootstrap
             aid = str(it.get("appendContentId"))
             enqueue_video_task(it, name, state)
             title, text = format_item(name, it, delivery_label=delivery_label)
+            destinations = chat_ids_for_product(bid, override=chat_ids)
+            dedicated_destinations = dedicated_chat_ids_for_product(bid, override=chat_ids)
+            dedicated_set = set(dedicated_destinations)
+            shared_destinations = [chat_id for chat_id in destinations if chat_id not in dedicated_set]
             if dry_run:
                 if verbose:
                     print("── DRY [%s] %s\n%s\n" % (name, title, text[:400]), flush=True)
+                    if dedicated_destinations:
+                        print("── DRY [%s 专属出口] %s\n%s\n" % (
+                            name, title, wrap_product_message(text)[:400]), flush=True)
             else:
-                send_feishu_many(chat_ids_for_product(bid, override=chat_ids), title, text, aid)
+                # Keep the shared 公众号同步群 byte-for-byte unchanged while
+                # adding the requested provenance notice only to the named
+                # product groups. Both sends use the same per-chat UUID seed,
+                # so retries remain idempotent across local and edge relays.
+                if shared_destinations:
+                    send_feishu_many(shared_destinations, title, text, aid)
+                if dedicated_destinations:
+                    send_feishu_many(dedicated_destinations, title, wrap_product_message(text), aid)
                 total_sent += 1
                 if verbose:
                     print("✅ 已发飞书 [%s] %s (%s)" % (name, title, aid), flush=True)

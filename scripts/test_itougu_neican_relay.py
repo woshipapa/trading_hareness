@@ -8,6 +8,79 @@ import itougu_neican_relay as relay
 
 
 class ItouguRelayTests(unittest.TestCase):
+    def test_dedicated_chat_ids_exclude_shared_destination(self):
+        original_chat_ids = relay.CHAT_IDS
+        original_juejin = relay.JUEJIN_CHAT_IDS
+        original_qinlong = relay.QINLONG_CHAT_IDS
+        relay.CHAT_IDS = ["shared"]
+        relay.JUEJIN_CHAT_IDS = ["shared", "juejin-only"]
+        relay.QINLONG_CHAT_IDS = ["shared", "qinlong-only"]
+        try:
+            self.assertEqual(relay.dedicated_chat_ids_for_product("1806593447818383361"), ["juejin-only"])
+            self.assertEqual(relay.dedicated_chat_ids_for_product("1661993558510538753"), ["qinlong-only"])
+            self.assertEqual(relay.dedicated_chat_ids_for_product("unknown"), [])
+        finally:
+            relay.CHAT_IDS = original_chat_ids
+            relay.JUEJIN_CHAT_IDS = original_juejin
+            relay.QINLONG_CHAT_IDS = original_qinlong
+
+    def test_product_notice_wraps_message_with_exact_prefix_and_suffix(self):
+        body = "正文内容"
+        wrapped = relay.wrap_product_message(body)
+        expected = "%s\n\n%s\n\n%s" % (
+            relay.PRODUCT_NOTICE,
+            body,
+            relay.PRODUCT_NOTICE,
+        )
+        self.assertEqual(wrapped, expected)
+
+    def test_delivery_wraps_only_named_product_destinations(self):
+        originals = {
+            "chat_ids": relay.CHAT_IDS,
+            "juejin": relay.JUEJIN_CHAT_IDS,
+            "qinlong": relay.QINLONG_CHAT_IDS,
+            "load_headers": relay.load_headers,
+            "fetch_append": relay.fetch_append,
+            "load_state": relay.load_state,
+            "save_state": relay.save_state,
+            "send_feishu_many": relay.send_feishu_many,
+        }
+        relay.CHAT_IDS = ["shared"]
+        relay.JUEJIN_CHAT_IDS = ["juejin-only"]
+        relay.QINLONG_CHAT_IDS = ["qinlong-only"]
+        relay.load_headers = lambda: {}
+        relay.fetch_append = lambda business_id, headers: [{
+            "appendContentId": "a1",
+            "publishTime": "2026-09-08 15:00:00",
+            "content": "<p>正文内容</p>",
+        }]
+        relay.load_state = lambda: {"seen": {}}
+        relay.save_state = lambda state: None
+        calls = []
+        relay.send_feishu_many = lambda chat_ids, title, text, dedup_seed: calls.append(
+            (list(chat_ids), title, text, dedup_seed))
+        try:
+            for business_id, dedicated_id in (
+                ("1806593447818383361", "juejin-only"),
+                ("1661993558510538753", "qinlong-only"),
+            ):
+                calls.clear()
+                relay._deliver_new_unlocked(
+                    products={business_id: relay.WATCH[business_id]}, verbose=False)
+                self.assertEqual([call[0] for call in calls], [["shared"], [dedicated_id]])
+                self.assertNotIn(relay.PRODUCT_NOTICE, calls[0][2])
+                self.assertEqual(calls[1][2].count(relay.PRODUCT_NOTICE), 2)
+                self.assertIn("正文内容", calls[1][2])
+        finally:
+            relay.CHAT_IDS = originals["chat_ids"]
+            relay.JUEJIN_CHAT_IDS = originals["juejin"]
+            relay.QINLONG_CHAT_IDS = originals["qinlong"]
+            relay.load_headers = originals["load_headers"]
+            relay.fetch_append = originals["fetch_append"]
+            relay.load_state = originals["load_state"]
+            relay.save_state = originals["save_state"]
+            relay.send_feishu_many = originals["send_feishu_many"]
+
     def test_public_sync_test_override_never_includes_product_specific_chat(self):
         product = next(iter(relay.WATCH))
         self.assertEqual(relay.chat_ids_for_product(product, override=["public-sync"]), ["public-sync"])

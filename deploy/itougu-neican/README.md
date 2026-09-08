@@ -4,6 +4,8 @@
 有新增就发飞书「公众号同步群」；尾盘掘金内参同时发「尾盘掘金内参更新1」。与本机专表监听(itougu-table-watch)重叠无妨——飞书按
 appendContentId 的 uuid 幂等去重，不会重复。
 
+两个产品的专属出口会在正文首尾各加一行「认真一手咸鱼店铺：餐厅焦糖味的momo，其他都是二手转发。」；公众号同步群仍接收未修改的原文。
+
 测试边界：只验证公众号同步群时，显式设置 `ITOUGU_CHAT_IDS` 为该群，并清空
 `ITOUGU_JUEJIN_CHAT_IDS`、`ITOUGU_ARTICLE_CHAT_IDS`；不要把测试流量导向尾盘掘金内参更新1。
 也可以为测试进程设置 `ITOUGU_TEST_CHAT_IDS`；该变量会覆盖所有产品专用出口，测试结束后必须清空。
