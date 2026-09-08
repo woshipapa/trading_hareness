@@ -92,9 +92,12 @@ export function createSummaryListener({ sourceApi, ledger, processMessage, confi
 			let newestCreateTime = now;
 			let newestSourceCreateTime = Number(state?.last_source_create_time) || 0;
 			for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+				// user_card_content: a card JSON 2.0 message is otherwise rendered
+				// into a fixed "upgrade your client" banner (see group-relay.mjs).
 				const result = await sourceApi.messageList({
 					container_id_type: 'chat', container_id: config.chatId, start_time: asEpochSeconds(from),
-					sort_type: 'ByCreateTimeAsc', page_size: 50, with_sender_name: true, ...(pageToken ? { page_token: pageToken } : {}),
+					sort_type: 'ByCreateTimeAsc', page_size: 50, with_sender_name: true, card_msg_content_type: 'user_card_content',
+					...(pageToken ? { page_token: pageToken } : {}),
 				});
 				if (result.code && result.code !== 0) throw new Error(`读取汇总群历史消息失败：${result.msg ?? result.code}`);
 				for (const item of result.data?.items ?? []) {

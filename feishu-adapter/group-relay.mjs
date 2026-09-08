@@ -83,7 +83,7 @@ function interactiveCardText(content) {
 		}
 		if (!value || typeof value !== 'object') return;
 		const tag = String(value.tag ?? '').toLowerCase();
-		if (tag === 'text' || tag === 'markdown' || tag === 'plain_text') {
+		if (tag === 'text' || tag === 'markdown' || tag === 'plain_text' || tag === 'lark_md') {
 			append(value.text ?? value.content);
 			return;
 		}
@@ -102,7 +102,10 @@ function interactiveCardText(content) {
 			return;
 		}
 		if (Object.hasOwn(value, 'title')) append(typeof value.title === 'object' ? value.title?.content : value.title);
-		for (const key of ['header', 'body', 'elements', 'columns', 'fields', 'content', 'content_v2', 'note']) walk(value[key]);
+		// A 2.0 div carries its text as an object ({tag, content}); walking it as
+		// a child lets the text branch above pick it up.  A string text is not
+		// an object, so this never double-appends a 1.0 text element.
+		for (const key of ['header', 'body', 'elements', 'columns', 'fields', 'content', 'content_v2', 'note', 'text']) walk(value[key]);
 	};
 	walk(card);
 	return chunks.join('\n');
@@ -159,6 +162,8 @@ function collectPostResources(value, found = []) {
 	}
 	if (!value || typeof value !== 'object') return found;
 	if (typeof value.image_key === 'string') found.push({ key: value.image_key, kind: 'image' });
+	// Card JSON 2.0 names the same resource img_key.
+	if (typeof value.img_key === 'string') found.push({ key: value.img_key, kind: 'image' });
 	if (typeof value.file_key === 'string') found.push({ key: value.file_key, kind: 'file' });
 	for (const child of Object.values(value)) collectPostResources(child, found);
 	return found;
@@ -169,7 +174,7 @@ function rewritePostResourceKeys(value, replacements) {
 	if (!value || typeof value !== 'object') return value;
 	const output = {};
 	for (const [key, child] of Object.entries(value)) {
-		if (key === 'image_key' && replacements.image.has(child)) output[key] = replacements.image.get(child);
+		if ((key === 'image_key' || key === 'img_key') && replacements.image.has(child)) output[key] = replacements.image.get(child);
 		else if (key === 'file_key' && replacements.file.has(child)) output[key] = replacements.file.get(child);
 		else output[key] = rewritePostResourceKeys(child, replacements);
 	}
@@ -537,9 +542,15 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		let pageToken;
 		let newestCreateTime = now;
 		for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+			// Without card_msg_content_type the API renders a card into its legacy
+			// 1.0 shape, and a card JSON 2.0 message - which it cannot downgrade -
+			// comes back as a fixed "upgrade your client" banner plus a dead image
+			// key.  user_card_content returns the JSON the sender actually posted,
+			// which is the only form that carries a 2.0 card's text at all.
 			const result = await sourceApi.messageList({
 				container_id_type: 'chat', container_id: source.resolvedChatId, start_time: asEpochSeconds(from),
-				sort_type: 'ByCreateTimeAsc', page_size: 50, with_sender_name: true, ...(pageToken ? { page_token: pageToken } : {}),
+				sort_type: 'ByCreateTimeAsc', page_size: 50, with_sender_name: true, card_msg_content_type: 'user_card_content',
+				...(pageToken ? { page_token: pageToken } : {}),
 			});
 			if (result.code && result.code !== 0) throw new Error(`读取源群 ${source.key} 历史消息失败：${result.msg ?? result.code}`);
 			const pageMessages = result.data?.items ?? [];

@@ -80,6 +80,14 @@
 - 新增研究边界：`research_feature_export.py` 只接受已物化的点时特征/标签表，强制合同版本、唯一 `symbol×exchange_date`、有限数值、可用时间先后关系，并返回不可变 SHA-256 数据快照；`research_model_training.py` 仅消费该类离线表执行 60 日训练/5 日 embargo/20 日 OOF 基线，任何结果继续 `research_only/replay_only/live_effect=none`。
 - 仍未完成：真实不可变特征批量导出 worker、真实训练/trial 执行、跨框架 benchmark、Longhu 10 合同的 60 个完整交易日、分钟来源可用时钟与价格路径回放、P3 统计门禁和 Prompt Lab 金标晋级。缺失数据或外部资源时保持 fail-closed，不自动恢复第三年历史任务。
 
+### 2026-09-08 飞书群转发：卡片 2.0 接入
+
+- 链路位置更正：飞书群历史转发（group-relay）现由远端 edge `47.114.113.152` 上的 `feishu-relay-edge-adapter` 持有写权（宿主 PostgreSQL `n8n_relay`），本地 adapter 的 `FEISHU_GROUP_RELAY_ENABLED=false`、本地游标停在 2026-08-31 是搬迁后的预期状态，不是故障；09-05 条目里"5 个 source 轮询停在 08-31"描述的是本地陈旧账本。edge 上 5 条路由当日均有新消息（xiaojie/xiaolan/liuzi/quanneng/liwei，08 日最新到 20:14）。
+- `#anqiang` 路由于 09-08 由「马安强(1)」（OAuth 用户已被移出，`Bot/User can NOT be out of the chat`）切换到「安强训练营1（50）」，切换当日 5 条 `skipped_bootstrap` 为换群引导跳过的正常行为。
+- 根因：该群 bot 改发**卡片 JSON 2.0**（`schema:"2.0"`，单个 `markdown` 元素）。默认 `im/v1/messages` 读取只能降级成 1.0 结构，2.0 无法降级，返回固定文案 `请升级至最新版本客户端，以查看内容` + 已删除的公共 image_key；当日 7 张卡片全部如此，列表/详情接口、tenant/user 令牌、5 种客户端版本头均无差别。官方文档：`card_msg_content_type=user_card_content` 返回发送时原始卡片 JSON。实测该参数在列表与详情接口均生效，7 张卡片解出与客户端一致的交易观点全文。
+- 修复（adapter `3b462e0` + 本次）：两处 `messageList` 加 `card_msg_content_type=user_card_content`；文本提取器覆盖 2.0 的 `lark_md`/`div.text`/`header.title`；资源收集识别 `img_key` 并按现有图片路径上传后以 `post` 转发；升级横幅文案被过滤，全部不可得时明确提示"卡片内容无法通过接口获取"。`portable_summary_version` 保持不变，已投递消息不重发、不改写。Feishu adapter 回归 **85/85**。
+- 验收：edge 部署 `edge-2026.09.08-card-image-relay` 及本次镜像后，以新到达的 2.0 卡片在汇总群出现 `#anqiang` 正文（而非升级横幅）为闭环回执。
+
 ### 2026-09-05 当前复核
 
 - 工程回归：挂载当前源码执行 quant-service **1,373/1,373** 项 Python discovery 通过；Feishu adapter **72/72** 通过；前端 `api:check`、`typecheck`、production build、OpenAPI contract 和 architecture check 均通过。复核时提交与 `origin/main` 同步（代码提交 `85f0f9e`，当前文档提交随后更新）。

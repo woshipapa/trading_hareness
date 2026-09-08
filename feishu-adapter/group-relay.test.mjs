@@ -48,8 +48,10 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			file: { create: async () => ({ file_key: 'file_target' }) },
 		} },
 	};
+	const listCalls = [];
 	const sourceApi = {
-		messageList: async () => {
+		messageList: async (params) => {
+			listCalls.push(params);
 			if (messageListDelayMs) await new Promise((resolve) => setTimeout(resolve, messageListDelayMs));
 			return { data: { items: messages, has_more: false } };
 		},
@@ -71,7 +73,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			bootstrapMode: 'forward_existing', sources: sources ?? [{ key: 'anqiang', tag: 'anqiang', chatId: 'oc_source', chatName: '马安强 (1)', targetChatIds }],
 		},
 	});
-	return { relay, sent, updated, saved };
+	return { relay, sent, updated, saved, listCalls };
 }
 
 test('a fenced relay observes no source messages and never sends', async () => {
@@ -299,4 +301,52 @@ test('a text-only card keeps its existing portable summary shape', async () => {
 	assert.equal(sent[0].msg_type, 'text');
 	assert.deepEqual(JSON.parse(sent[0].content), { text: '#anqiang\n[interactive]\n9-6 19:39:27\n通过百度网盘分享的文件\nhttps://pan.baidu.com/s/example' });
 	assert.equal(saved.get('om_card_text_1').portableSummaryVersion, 'interactive-text-summary-v1');
+});
+
+
+// --- card JSON 2.0 -----------------------------------------------------------
+// The #anqiang bot moved to 2.0 cards on 2026-09-08.  Read without
+// card_msg_content_type=user_card_content, the API renders every one as
+// "请升级至最新版本客户端，以查看内容" plus a deleted image key.
+
+const CARD_2_0_TRADING_NOTE = {
+	schema: '2.0', config: { enable_forward_interaction: false, streaming_mode: false },
+	body: { direction: 'vertical', padding: '12px 12px 12px 12px', elements: [
+		{ tag: 'markdown', element_id: '_2', content: '长光华X回到了8月17日高点了，跑赢指数到320左右目标完成，考虑先出局，等几天在接回。致尚在190左右接回。' },
+	] },
+};
+
+test('the source poll asks the API for the card JSON the sender posted', async () => {
+	const { relay, listCalls } = createHarness([]);
+	await relay.tick();
+	assert.ok(listCalls.length >= 1);
+	for (const params of listCalls) assert.equal(params.card_msg_content_type, 'user_card_content');
+});
+
+test('a card JSON 2.0 markdown body relays as its text', async () => {
+	// The live 10:25 card from 安强训练营1 on 2026-09-08, verbatim.
+	const message = { message_id: 'om_card_v2_1', msg_type: 'interactive', create_time: String(Date.now()), body: { content: JSON.stringify(CARD_2_0_TRADING_NOTE) } };
+	const { relay, sent } = createHarness([message]);
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'text');
+	assert.deepEqual(JSON.parse(sent[0].content), { text: '#anqiang\n[interactive]\n长光华X回到了8月17日高点了，跑赢指数到320左右目标完成，考虑先出局，等几天在接回。致尚在190左右接回。' });
+});
+
+test('a card JSON 2.0 header, div and image are all carried', async () => {
+	// 2.0 names the image resource img_key and wraps a div's text in an object;
+	// both were invisible to a walker written for 1.0 element shapes.
+	const card = {
+		schema: '2.0', header: { title: { tag: 'plain_text', content: '9.8 收盘' } },
+		body: { elements: [
+			{ tag: 'div', text: { tag: 'lark_md', content: '创业板小阴调整' } },
+			{ tag: 'img', img_key: 'img_v2_body', alt: { tag: 'plain_text', content: '' } },
+		] },
+	};
+	const message = { message_id: 'om_card_v2_2', msg_type: 'interactive', create_time: String(Date.now()), body: { content: JSON.stringify(card) } };
+	const { relay, sent } = createHarness([message]);
+	await relay.tick();
+	assert.equal(sent[0].msg_type, 'post');
+	assert.deepEqual(JSON.parse(sent[0].content).zh_cn.content, [
+		[{ tag: 'text', text: '#anqiang' }], [{ tag: 'text', text: '9.8 收盘' }], [{ tag: 'text', text: '创业板小阴调整' }], [{ tag: 'img', image_key: 'img_target' }],
+	]);
 });

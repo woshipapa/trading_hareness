@@ -112,3 +112,37 @@ It fences local polling first, copies the full ledger, outbox and retry-media
 back to the edge, increments the edge writer generation, then enables only the
 edge pollers. It is intentionally not automatic: a network partition must not
 be allowed to create two group-history writers.
+
+## Card messages (`msg_type: interactive`)
+
+Feishu renders a card into a legacy 1.0 `{title, elements}` shape when the
+message is read back through the API. A **card JSON 2.0** message (`schema:
+"2.0"`, body of `markdown` / `div` / `img` elements) cannot be downgraded, so
+the default read returns a fixed banner — `请升级至最新版本客户端，以查看内容` —
+plus one shared image key whose resource is already deleted. Relayed as-is,
+that banner reads like analyst content and carries none. The `#anqiang` bot
+switched to 2.0 cards on 2026-09-08, the day the route moved to
+安强训练营1（50）; every card that day arrived as the banner.
+
+Both pollers therefore read messages with
+`card_msg_content_type=user_card_content`, which returns the JSON the sender
+actually posted (1.0 or 2.0; `schema` tells them apart). The relay then:
+
+- walks `text` / `markdown` / `plain_text` / `lark_md` elements, `header.title`,
+  `div.text` objects and `a` / `button` links into the portable text summary;
+- collects `image_key` (1.0) and `img_key` (2.0) resources, uploads each to the
+  target tenant through the existing image path, and relays a `post` carrying
+  the card's text and images — a card image the API refuses is counted and
+  skipped rather than failing the message;
+- drops the upgrade banner before it can be mistaken for the card, and when
+  nothing survives says `卡片内容无法通过接口获取…请在源群查看原卡片` instead.
+
+The `portable_summary_version` string is unchanged on purpose: bumping it would
+queue every already-delivered card for an in-place rewrite.
+
+To check what the API returns for one card, run inside the adapter container
+with the user OAuth client (the tenant token cannot read external groups):
+
+```js
+await oauth.userRequest(`/im/v1/messages/${messageId}`, { params: { card_msg_content_type: 'user_card_content' } });
+```
