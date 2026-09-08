@@ -30,6 +30,7 @@ GH = "gh_6569bb074cc9"                       # 爱投顾公众号
 AUTH_FILE = Path(os.environ.get("ITOUGU_AUTH_FILE", "/Users/papa/codebase/wechat-export-macos/itougu_auth.json"))
 ENV_FILE = Path(os.environ.get("ITOUGU_ENV_FILE", "/Users/papa/codebase/n8n/.env"))
 STATE_FILE = Path(os.environ.get("ITOUGU_STATE_FILE", "/Users/papa/codebase/n8n/state/itougu-neican.json"))
+VIDEO_QUEUE_FILE = Path(os.environ.get("ITOUGU_VIDEO_QUEUE_FILE", str(STATE_FILE.with_name("video-tasks.jsonl"))))
 CHAT_IDS = [c for c in os.environ.get("ITOUGU_CHAT_IDS", "oc_570aeb3bbfb11fa2be66b25ca4568aad").split(",") if c.strip()]
 # Optional product-specific fan-out.  It lets the dedicated 擒龙 group stay
 # focused while the general public-account group continues to receive both.
@@ -182,6 +183,47 @@ def video_line(it):
         return ""
     title = str(info.get("videoName") or info.get("name") or "复盘视频").strip()
     return "〔复盘视频〕%s：%s" % (title, url)
+
+
+def video_task(it, product_name):
+    """Build a small, secret-free task for the owner media worker."""
+    info = it.get("videoInfo") or it.get("video_info")
+    if isinstance(info, str):
+        try:
+            info = json.loads(info)
+        except (TypeError, json.JSONDecodeError):
+            info = None
+    if not isinstance(info, dict):
+        return None
+    url = str(info.get("videoUrl") or info.get("videoURL") or info.get("url") or "").strip()
+    if not url or not re.match(r"^https://voss\.itougu\.com/", url, re.IGNORECASE):
+        return None
+    return {
+        "task_key": "itougu-video:%s" % str(it.get("appendContentId") or url),
+        "append_content_id": str(it.get("appendContentId") or ""),
+        "product": product_name,
+        "published_at": it.get("publishTime") or it.get("createTime") or "",
+        "video_name": str(info.get("videoName") or info.get("name") or "复盘视频"),
+        "video_id": str(it.get("videoId") or info.get("videoId") or ""),
+        "url": url,
+    }
+
+
+def enqueue_video_task(it, product_name, state):
+    """Persist one idempotent task without fetching media bytes."""
+    task = video_task(it, product_name)
+    if not task:
+        return False
+    queued = state.setdefault("video_enqueued", {})
+    if task["task_key"] in queued:
+        return False
+    VIDEO_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with VIDEO_QUEUE_FILE.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(task, ensure_ascii=False, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    queued[task["task_key"]] = {"queued_at": datetime.now(timezone.utc).isoformat(), "url": task["url"]}
+    return True
 
 
 def format_item(name, it, delivery_label=""):
