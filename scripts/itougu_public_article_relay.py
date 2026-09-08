@@ -36,6 +36,8 @@ _article_id_re = re.compile(r"[?&]articleId=(\d+)")
 _circle_id_re = re.compile(r"[?&]circleId=(\d+)")
 _article_id_json_re = re.compile(r"(?:^|[\"'])articleId(?:[\"']\s*:\s*|=)(\d+)")
 MAIN_BEHAVIOR_CIRCLE_ID = "1661566330475778048"
+MAIN_BEHAVIOR_MAX_ITEMS_PER_DIGEST = 12
+MAIN_BEHAVIOR_MAX_DIGEST_CHARS = 24_000
 
 
 _HEADERS = {"cache": None}
@@ -126,6 +128,40 @@ def format_view(circle_name, view, circle_id, delivery_label):
     return title, "\n\n".join(lines)
 
 
+def build_main_behavior_digest(items, delivery_label="poll"):
+    """Build one bounded low-priority digest for 主力行为学观点.
+
+    This stream is useful for after-close research but is noisy and can contain
+    many short updates.  A single digest keeps it from occupying the Feishu
+    send path one message at a time.  The caller marks only included IDs as
+    seen after the digest is delivered, so an oversized remainder is retried
+    on the next poll without data loss.
+    """
+    selected = []
+    size = 0
+    for item in list(items)[:MAIN_BEHAVIOR_MAX_ITEMS_PER_DIGEST]:
+        view_id = str(item.get("view_id") or "")
+        title = str(item.get("title") or "主力行为学观点").strip()
+        body = str(item.get("text") or "").strip()
+        if not view_id or not body:
+            continue
+        block = "\n".join([f"【{title}】", body])
+        extra = len(block) + (2 if selected else 0)
+        if selected and size + extra > MAIN_BEHAVIOR_MAX_DIGEST_CHARS:
+            break
+        selected.append({"view_id": view_id, "block": block})
+        size += extra
+    if not selected:
+        return None
+    heading = "[%s] 主力行为学 · 观点摘要" % delivery_label if delivery_label else "主力行为学 · 观点摘要"
+    text = "\n\n".join(item["block"] for item in selected)
+    return {
+        "title": heading,
+        "text": text,
+        "view_ids": [item["view_id"] for item in selected],
+    }
+
+
 def view_article_id(view):
     """Extract an article id from a public-circle view payload, if present."""
     for key in ("articleId", "article_id"):
@@ -200,8 +236,7 @@ def _process(article_id, article_url, state, verbose, delivery_label):
         return "done"
     title, text = format_article(circle_name, article, article_url, delivery_label)
     try:
-        for chat_id in NEICAN.article_chat_ids():
-            NEICAN.send_feishu(chat_id, title, text, "public-article:%s" % article_id)
+        NEICAN.send_feishu_many(NEICAN.article_chat_ids(), title, text, "public-article:%s" % article_id)
     except Exception as exc:
         if verbose:
             print("公开文章飞书发送失败(忽略): %s" % exc, flush=True)
@@ -275,6 +310,8 @@ def poll_views(verbose=False, delivery_label="poll"):
     article_seen = set(state.setdefault("article_seen", []))
     sent = 0
     changed = False
+    main_behavior_items = []
+    active_circles = []
     for circle_id, circle_name in TARGET_CIRCLES.items():
         # The endpoint is available for all registered public circles.  Keep
         # the whitelist explicit so adding a new source cannot broaden the
@@ -284,15 +321,42 @@ def poll_views(verbose=False, delivery_label="poll"):
         # 主力行为学只在沪市收盘后轮询，避免盘中把文章预告当成策略输入。
         if circle_id == MAIN_BEHAVIOR_CIRCLE_ID and not after_close():
             continue
+        active_circles.append((circle_id, circle_name))
+
+    def fetch_circle(target):
         try:
-            rows = fetch_views(circle_id)
+            return fetch_views(target[0])
         except Exception as exc:
+            return exc
+
+    fetched_circles = {}
+    for target, result in NEICAN.parallel_fetch(active_circles, fetch_circle, max_workers=2):
+        if isinstance(result, Exception):
             if verbose:
-                print("公开观点轮询失败(忽略): %s" % exc, flush=True)
+                print("公开观点轮询失败(忽略): %s" % result, flush=True)
             continue
+        fetched_circles[target[0]] = result
+
+    for circle_id, circle_name in active_circles:
+        rows = fetched_circles.get(circle_id, [])
+        article_targets = list(dict.fromkeys(
+            article_id for article_id in (view_article_id(view) for view in rows) if article_id
+        ))
+
+        def fetch_article_safe(article_id):
+            try:
+                return fetch_article(article_id)
+            except Exception as exc:
+                return exc
+
+        article_cache = dict(NEICAN.parallel_fetch(article_targets, fetch_article_safe, max_workers=4))
         for view in rows:
             view_id = str(view.get("viewId") or "")
-            article_id = view_article_id(view) if circle_id == MAIN_BEHAVIOR_CIRCLE_ID else ""
+            # Public view rows may contain only a JSON article stub (as in
+            # 研习社's ``subtype=1`` rows).  Resolve every allowlisted circle
+            # through article/view so the relay never forwards the stub in
+            # place of the article body.
+            article_id = view_article_id(view)
             if not view_id or (view_id in seen and (not article_id or article_id in article_seen)):
                 continue
             # Do not replay the historical first page on first activation;
@@ -304,22 +368,34 @@ def poll_views(verbose=False, delivery_label="poll"):
                 changed = True
                 continue
             if article_id:
-                try:
-                    article = fetch_article(article_id)
-                except (OSError, ValueError, urllib.error.URLError) as exc:
+                article = article_cache.get(article_id)
+                if isinstance(article, Exception):
                     if verbose:
-                        print("主力行为学文章读取失败(忽略): %s" % exc, flush=True)
+                        print("公开文章读取失败(忽略): %s" % article, flush=True)
                     continue
                 if article.get("isExist") != 1 or not str(article.get("content") or "").strip():
                     if verbose:
-                        print("主力行为学文章暂不可用：articleId=%s" % article_id, flush=True)
+                        print("公开文章暂不可用：articleId=%s circleId=%s" % (article_id, circle_id), flush=True)
                     continue
-                title, text = format_article(circle_name, article, "", delivery_label)
+                article_circle_id = str(article.get("circleId") or "")
+                resolved_name = TARGET_CIRCLES.get(article_circle_id)
+                if not resolved_name or article_circle_id != circle_id:
+                    if verbose:
+                        print("公开文章跳过：圈子不匹配 articleId=%s circleId=%s expected=%s" %
+                              (article_id, article_circle_id or "-", circle_id), flush=True)
+                    continue
+                title, text = format_article(resolved_name, article, "", delivery_label)
             else:
                 title, text = format_view(circle_name, view, circle_id, delivery_label)
+            if circle_id == MAIN_BEHAVIOR_CIRCLE_ID:
+                # Main-behavior research is deliberately low priority and is
+                # delivered as one bounded digest after the close.  It must
+                # never monopolize the per-message Feishu path used by the
+                # intraday analyst feeds.
+                main_behavior_items.append({"view_id": view_id, "title": title, "text": text, "article_id": article_id})
+                continue
             try:
-                for chat_id in NEICAN.article_chat_ids():
-                    NEICAN.send_feishu(chat_id, title, text, "public-view:%s" % view_id)
+                NEICAN.send_feishu_many(NEICAN.article_chat_ids(), title, text, "public-view:%s" % view_id)
             except Exception as exc:
                 if verbose:
                     print("公开观点飞书发送失败(忽略): %s" % exc, flush=True)
@@ -331,6 +407,25 @@ def poll_views(verbose=False, delivery_label="poll"):
             sent += 1
             if verbose:
                 print("✅ 已发飞书 [公开观点] %s (%s)" % (title, view_id), flush=True)
+    digest = build_main_behavior_digest(main_behavior_items, delivery_label=delivery_label)
+    if digest:
+        try:
+            NEICAN.send_feishu_many(NEICAN.article_chat_ids(), digest["title"], digest["text"], "public-view-digest:%s" % ":".join(digest["view_ids"]))
+        except Exception as exc:
+            if verbose:
+                print("主力行为学摘要飞书发送失败(忽略): %s" % exc, flush=True)
+        else:
+            included = set(digest["view_ids"])
+            for item in main_behavior_items:
+                if item["view_id"] not in included:
+                    continue
+                seen.add(item["view_id"])
+                if item.get("article_id"):
+                    article_seen.add(item["article_id"])
+            changed = True
+            sent += 1
+            if verbose:
+                print("✅ 已发飞书 [主力行为学摘要] %d 条观点" % len(included), flush=True)
     if changed:
         state["view_seen"] = list(seen)[-1000:]
         state["article_seen"] = list(article_seen)[-1000:]

@@ -20,6 +20,10 @@ import time
 import uuid
 import urllib.request
 import urllib.error
+import threading
+from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
+import fcntl
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -32,6 +36,10 @@ ENV_FILE = Path(os.environ.get("ITOUGU_ENV_FILE", "/Users/papa/codebase/n8n/.env
 STATE_FILE = Path(os.environ.get("ITOUGU_STATE_FILE", "/Users/papa/codebase/n8n/state/itougu-neican.json"))
 VIDEO_QUEUE_FILE = Path(os.environ.get("ITOUGU_VIDEO_QUEUE_FILE", str(STATE_FILE.with_name("video-tasks.jsonl"))))
 CHAT_IDS = [c for c in os.environ.get("ITOUGU_CHAT_IDS", "oc_570aeb3bbfb11fa2be66b25ca4568aad").split(",") if c.strip()]
+# A process-local safety override for smoke tests.  When set, it wins over
+# every product-specific fan-out (including Juejin and article destinations),
+# so a test cannot accidentally reach a dedicated analyst group.
+TEST_CHAT_IDS = [c for c in os.environ.get("ITOUGU_TEST_CHAT_IDS", "").split(",") if c.strip()]
 # Optional product-specific fan-out.  It lets the dedicated 擒龙 group stay
 # focused while the general public-account group continues to receive both.
 QINLONG_CHAT_IDS = [c for c in os.environ.get("ITOUGU_QINLONG_CHAT_IDS", "").split(",") if c.strip()]
@@ -55,6 +63,8 @@ def chat_ids_for_product(business_id, override=None):
     """Return the configured destinations for one internal-reference product."""
     if override is not None:
         return list(dict.fromkeys(override))
+    if TEST_CHAT_IDS:
+        return list(dict.fromkeys(TEST_CHAT_IDS))
     destinations = list(CHAT_IDS)
     if business_id == "1661993558510538753" and QINLONG_CHAT_IDS:
         destinations.extend(QINLONG_CHAT_IDS)
@@ -65,10 +75,16 @@ def chat_ids_for_product(business_id, override=None):
 
 def article_chat_ids():
     """Return general plus explicitly registered public-article destinations."""
+    if TEST_CHAT_IDS:
+        return list(dict.fromkeys(TEST_CHAT_IDS))
     return list(dict.fromkeys([*CHAT_IDS, *ARTICLE_CHAT_IDS]))
 
 _feishu_token = {"value": "", "expires_at": 0.0}
 _tag_re = re.compile(r"<[^>]+>")
+_fetch_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="itougu-fetch")
+_delivery_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="itougu-send")
+_feishu_token_lock = threading.Lock()
+_deliver_lock = threading.RLock()
 
 
 # ---------------- itougu ----------------
@@ -106,6 +122,29 @@ def fetch_meta(business_id, headers):
 def fetch_append(business_id, headers, page_size=30):
     j = itougu_call(PFX + "/appendContent/list", {"businessProductId": business_id, "pageNo": 1, "pageSize": page_size}, headers)
     return (j.get("data") or {}).get("listResult") or []
+
+
+def parallel_fetch(items, fetcher, max_workers=4):
+    """Fetch independent upstream resources concurrently, preserving item order.
+
+    Only the network-bound fetch is parallelized.  Callers process and send the
+    returned records serially so source ordering and durable dedupe state remain
+    deterministic.  The shared bounded executor avoids creating a thread pool
+    on every 15-second poll.
+    """
+    values = list(items)
+    if len(values) <= 1:
+        return [(values[0], fetcher(values[0]))] if values else []
+    workers = max(1, min(int(max_workers or 1), len(values), 4))
+    # Submit remaining values while retaining a hard upper bound on in-flight
+    # requests.  The simple batches make the limit explicit and avoid an
+    # unbounded queue when a future caller supplies many products/circles.
+    results = []
+    for offset in range(0, len(values), workers):
+        batch = values[offset:offset + workers]
+        futures = [(value, _fetch_executor.submit(fetcher, value)) for value in batch]
+        results.extend((value, future.result()) for value, future in futures)
+    return results
 
 
 def html2text(s):
@@ -275,22 +314,23 @@ def load_feishu_env():
 
 
 def feishu_token():
-    now = time.time()
-    if _feishu_token["value"] and _feishu_token["expires_at"] > now + 60:
+    with _feishu_token_lock:
+        now = time.time()
+        if _feishu_token["value"] and _feishu_token["expires_at"] > now + 60:
+            return _feishu_token["value"]
+        load_feishu_env()
+        app_id, secret = os.environ.get("FEISHU_APP_ID", ""), os.environ.get("FEISHU_APP_SECRET", "")
+        if not app_id or not secret:
+            raise RuntimeError("缺少 FEISHU_APP_ID / FEISHU_APP_SECRET")
+        body = json.dumps({"app_id": app_id, "app_secret": secret}).encode()
+        req = urllib.request.Request("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                                     data=body, method="POST", headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            res = json.loads(r.read().decode("utf-8"))
+        if res.get("code") not in (None, 0) or not res.get("tenant_access_token"):
+            raise RuntimeError("飞书 token 失败: %s" % res.get("msg"))
+        _feishu_token.update(value=res["tenant_access_token"], expires_at=now + max(60, int(res.get("expire", 7200))))
         return _feishu_token["value"]
-    load_feishu_env()
-    app_id, secret = os.environ.get("FEISHU_APP_ID", ""), os.environ.get("FEISHU_APP_SECRET", "")
-    if not app_id or not secret:
-        raise RuntimeError("缺少 FEISHU_APP_ID / FEISHU_APP_SECRET")
-    body = json.dumps({"app_id": app_id, "app_secret": secret}).encode()
-    req = urllib.request.Request("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-                                 data=body, method="POST", headers={"content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        res = json.loads(r.read().decode("utf-8"))
-    if res.get("code") not in (None, 0) or not res.get("tenant_access_token"):
-        raise RuntimeError("飞书 token 失败: %s" % res.get("msg"))
-    _feishu_token.update(value=res["tenant_access_token"], expires_at=now + max(60, int(res.get("expire", 7200))))
-    return _feishu_token["value"]
 
 
 def send_feishu(chat_id, title, text, dedup_seed):
@@ -313,6 +353,22 @@ def send_feishu(chat_id, title, text, dedup_seed):
             raise RuntimeError("飞书发送失败: code=%s msg=%s" % (res.get("code"), res.get("msg")))
 
 
+def send_feishu_many(chat_ids, title, text, dedup_seed):
+    """Fan out one immutable message to a bounded set of chats concurrently."""
+    destinations = list(dict.fromkeys(str(chat_id).strip() for chat_id in chat_ids if str(chat_id).strip()))
+    if not destinations:
+        return
+    futures = [(chat_id, _delivery_executor.submit(send_feishu, chat_id, title, text, dedup_seed)) for chat_id in destinations[:4]]
+    failures = []
+    for chat_id, future in futures:
+        try:
+            future.result()
+        except Exception as exc:
+            failures.append("%s: %s" % (chat_id, exc))
+    if failures:
+        raise RuntimeError("；".join(failures))
+
+
 # ---------------- state ----------------
 def load_state():
     try:
@@ -331,20 +387,47 @@ def save_state(state):
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+@contextmanager
+def state_file_lock():
+    """Serialize local and fallback pollers sharing the JSON dedupe state."""
+    lock_path = STATE_FILE.with_name(STATE_FILE.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 # ---------------- 核心：取增量并发送 ----------------
-def deliver_new(products=None, chat_ids=None, dry_run=False, bootstrap=False, verbose=True, delivery_label=""):
+def _deliver_new_unlocked(products=None, chat_ids=None, dry_run=False, bootstrap=False, verbose=True, delivery_label=""):
     products = products or WATCH
     chat_ids = chat_ids or None
     headers = load_headers()
     state = load_state()
     total_sent = 0
-    for bid, name in products.items():
+    fetched = {}
+    fetch_errors = {}
+    # Product endpoints are independent. Fetch them concurrently, then handle
+    # each product in declaration order so messages within a product remain
+    # oldest-to-newest and state writes stay deterministic.
+    def fetch_one(bid):
         try:
-            items = fetch_append(bid, headers)
-        except Exception as e:
+            return {"items": fetch_append(bid, headers)}
+        except Exception as exc:
+            return {"error": exc}
+    for bid, result in parallel_fetch(list(products), fetch_one, max_workers=4):
+        if result.get("error") is not None:
+            fetch_errors[bid] = result["error"]
+        else:
+            fetched[bid] = result.get("items", [])
+    for bid, name in products.items():
+        if bid in fetch_errors:
             if verbose:
-                print("[%s] 拉取失败: %s" % (name, e), flush=True)
+                print("[%s] 拉取失败: %s" % (name, fetch_errors[bid]), flush=True)
             continue
+        items = fetched.get(bid, [])
         seen = set(state["seen"].get(bid, []))
         new = [it for it in items if str(it.get("appendContentId")) not in seen]
         new.reverse()   # 旧→新 顺序发
@@ -355,13 +438,13 @@ def deliver_new(products=None, chat_ids=None, dry_run=False, bootstrap=False, ve
             continue
         for it in new:
             aid = str(it.get("appendContentId"))
+            enqueue_video_task(it, name, state)
             title, text = format_item(name, it, delivery_label=delivery_label)
             if dry_run:
                 if verbose:
                     print("── DRY [%s] %s\n%s\n" % (name, title, text[:400]), flush=True)
             else:
-                for cid in chat_ids_for_product(bid, override=chat_ids):
-                    send_feishu(cid, title, text, aid)
+                send_feishu_many(chat_ids_for_product(bid, override=chat_ids), title, text, aid)
                 total_sent += 1
                 if verbose:
                     print("✅ 已发飞书 [%s] %s (%s)" % (name, title, aid), flush=True)
@@ -369,6 +452,13 @@ def deliver_new(products=None, chat_ids=None, dry_run=False, bootstrap=False, ve
     if not dry_run:
         save_state(state)
     return total_sent
+
+
+def deliver_new(products=None, chat_ids=None, dry_run=False, bootstrap=False, verbose=True, delivery_label=""):
+    """Fetch and deliver incrementally under a process/file-wide state lock."""
+    with _deliver_lock, state_file_lock():
+        return _deliver_new_unlocked(products=products, chat_ids=chat_ids, dry_run=dry_run,
+                                     bootstrap=bootstrap, verbose=verbose, delivery_label=delivery_label)
 
 
 def trigger_from_push(username, article_url, verbose=False):
@@ -399,7 +489,7 @@ def ensure_baseline(products):
 
 
 def poll_public_views(verbose=False, delivery_label="poll"):
-    """Poll the Itougu 研习社 view API without reading any WeChat table.
+    """Poll registered Itougu public-circle view APIs without WeChat tables.
 
     The import is lazy because the public-article module reuses this module's
     auth and Feishu helpers.  Keeping it here makes the systemd poller the
@@ -414,18 +504,52 @@ def poll_public_views(verbose=False, delivery_label="poll"):
         return 0
 
 
-def in_trading_hours():
-    now = datetime.now(CST)
+MORNING = (9 * 60 + 30, 11 * 60 + 30)   # A股上午
+AFTERNOON = (13 * 60, 15 * 60)          # A股下午
+
+
+def _minutes(now):
+    return now.hour * 60 + now.minute
+
+
+def in_trading_hours(now=None):
+    now = now or datetime.now(CST)
     if now.weekday() >= 5:          # 周末
         return False
-    hm = now.hour * 60 + now.minute
-    return (9 * 60 + 30 <= hm <= 11 * 60 + 30) or (13 * 60 <= hm <= 15 * 60)  # A股上午/下午
+    hm = _minutes(now)
+    return MORNING[0] <= hm <= MORNING[1] or AFTERNOON[0] <= hm <= AFTERNOON[1]
 
 
-def is_after_close():
+def in_midday_break(now=None):
+    """A股午间休市 11:30-13:00。
+
+    交易所不开，但内参与公开圈子照发（复盘、次日计划、观点），所以这一段必须
+    继续拉取，否则午休期间发布的内容要等到 13:00 才会被看见。
+    """
+    now = now or datetime.now(CST)
+    if now.weekday() >= 5:
+        return False
+    return MORNING[1] < _minutes(now) < AFTERNOON[0]
+
+
+def is_after_close(now=None):
     """Whether Shanghai time is on a weekday at/after the 15:00 close."""
-    now = datetime.now(CST)
-    return now.weekday() < 5 and now.hour * 60 + now.minute >= 15 * 60
+    now = now or datetime.now(CST)
+    return now.weekday() < 5 and _minutes(now) >= AFTERNOON[1]
+
+
+def poll_plan(now, interval, off_hours_interval, midday_interval=None, trading_hours_only=True):
+    """Decide whether this tick polls, and how long to sleep afterwards.
+
+    Kept pure so the window boundaries are testable without waiting for a
+    session. 盘中与午休同速，收盘后降速，开盘前与周末在 --trading-hours-only 下静默。
+    """
+    if in_trading_hours(now):
+        return True, max(5.0, float(interval))
+    if in_midday_break(now):
+        return True, max(5.0, float(midday_interval if midday_interval else interval))
+    slow = max(30.0, float(off_hours_interval))
+    return (not trading_hours_only) or is_after_close(now), slow
 
 
 def main():
@@ -436,9 +560,11 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="只打印不发送")
     ap.add_argument("--bootstrap", action="store_true", help="把当前所有内参标记为已读（不发送），首次部署用")
     ap.add_argument("--trading-hours-only", action="store_true",
-                    help="盘中高频轮询，上海时间收盘后保留低频轮询")
+                    help="盘中与午休高频轮询，上海时间收盘后保留低频轮询")
     ap.add_argument("--off-hours-interval", type=float, default=600,
-                    help="非盘中轮询间隔秒（默认600，即10分钟）")
+                    help="收盘后轮询间隔秒（默认600，即10分钟）")
+    ap.add_argument("--midday-interval", type=float, default=None,
+                    help="午间休市(11:30-13:00)轮询间隔秒，默认与 --interval 相同")
     ap.add_argument("--product", action="append", help="只处理指定 productId")
     args = ap.parse_args()
 
@@ -451,24 +577,32 @@ def main():
         print("itougu 内参兵底轮询启动 interval=%ss" % args.interval, flush=True)
         ensure_baseline(prods)
         while True:
-            trading = in_trading_hours()
-            # Keep the remote API safety net alive after the Shanghai close,
-            # but avoid restoring any local WeChat-table listener path.
-            allowed = (not args.trading_hours_only) or trading or is_after_close()
-            if allowed:
+            # Keep the remote API safety net alive across the midday break and
+            # after the Shanghai close, but avoid restoring any local
+            # WeChat-table listener path.
+            should_poll, sleep_seconds = poll_plan(
+                datetime.now(CST), interval=args.interval,
+                off_hours_interval=args.off_hours_interval,
+                midday_interval=args.midday_interval,
+                trading_hours_only=args.trading_hours_only)
+            if should_poll:
                 try:
                     deliver_new(products=prods, dry_run=args.dry_run,
                                 delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
-                    # 研习社盘中观点走同一 Itougu API 的 view/list，绝不读
-                    # 本地微信表；尾盘掘金/猎场擒龙仍走 appendContent/list。
+                    # 已登记公开圈子走同一 Itougu API 的 view/list，绝不读
+                    # 本地微信表；付费内参仍走 appendContent/list。
                     if not args.dry_run:
                         poll_public_views(verbose=True, delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
                 except Exception as e:
                     print("轮询异常(忽略): %s" % e, flush=True)
-            time.sleep(args.interval if trading else max(30, args.off_hours_interval))
+            time.sleep(sleep_seconds)
     else:
-        if args.trading_hours_only and not in_trading_hours():
-            return 0   # 非交易时段静默跳过（避免定时任务日志刷屏）
+        should_poll, _ = poll_plan(datetime.now(CST), interval=args.interval,
+                                   off_hours_interval=args.off_hours_interval,
+                                   midday_interval=args.midday_interval,
+                                   trading_hours_only=args.trading_hours_only)
+        if not should_poll:
+            return 0   # 非监听时段静默跳过（避免定时任务日志刷屏）
         n = deliver_new(products=prods, dry_run=args.dry_run,
                         delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
         if n:

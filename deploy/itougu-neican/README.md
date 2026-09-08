@@ -1,8 +1,13 @@
 # 爱投顾内参 → 飞书 轮询（远端 47 部署）
 
 盘中(A股 9:30-11:30 / 13:00-15:00, 周一~周五)每 15s 直连 itougu API 拉两个内参的追加内容，
-有新增就发飞书「公众号同步群」。与本机专表监听(itougu-table-watch)重叠无妨——飞书按
+有新增就发飞书「公众号同步群」；尾盘掘金内参同时发「尾盘掘金内参更新1」。与本机专表监听(itougu-table-watch)重叠无妨——飞书按
 appendContentId 的 uuid 幂等去重，不会重复。
+
+测试边界：只验证公众号同步群时，显式设置 `ITOUGU_CHAT_IDS` 为该群，并清空
+`ITOUGU_JUEJIN_CHAT_IDS`、`ITOUGU_ARTICLE_CHAT_IDS`；不要把测试流量导向尾盘掘金内参更新1。
+也可以为测试进程设置 `ITOUGU_TEST_CHAT_IDS`；该变量会覆盖所有产品专用出口，测试结束后必须清空。
+生产环境仍可按产品配置专用群。网络拉取和群 fan-out 使用有界并发，单个来源失败不会阻塞其它来源。
 
 ## 部署步骤（在 47 上，root）
 1. mkdir -p /opt/itougu-neican

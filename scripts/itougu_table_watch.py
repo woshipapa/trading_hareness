@@ -136,11 +136,31 @@ def main():
                         n = PUBLIC_ARTICLE.trigger_from_push(GH, url, verbose=True, delivery_label="database")
                         if n:
                             print(f"  → 已发飞书 {n} 条", flush=True)
+                    elif "/circle/enter" in url:
+                        n = PUBLIC_ARTICLE.trigger_from_circle_push(GH, url, verbose=True, delivery_label="database")
+                        if n:
+                            print(f"  → 已发飞书 {n} 条", flush=True)
             # Only retry IDs that were already observed in this table; this
             # accommodates article publication lag without adding broad scans.
             if time.monotonic() - last_pending_retry >= 15:
                 PUBLIC_ARTICLE.retry_pending(verbose=True, delivery_label="database")
+                # 研习社盘中更新使用 circle/enter 卡片，没有 articleId；
+                # 从观点流轮询补齐这类更新，出口与公众号文章相同。
+                PUBLIC_ARTICLE.poll_views(verbose=True, delivery_label="poll")
                 last_pending_retry = time.monotonic()
+        except sqlite3.DatabaseError as e:
+            # A partially copied/decrypted snapshot can become unreadable when
+            # the WeChat base/WAL rotates. Rebuild from the source DB before
+            # the supervisor has to restart the process; the durable relay
+            # state keeps already delivered messages idempotent.
+            print(f"专表快照损坏，重建后重试: {e}", flush=True)
+            try:
+                key, salt = rebuild_base()
+                apply_wal_inplace(key, salt)
+                base_fp = fingerprint([DB])
+                wal_fp = fingerprint([WAL])
+            except Exception as recover_error:
+                print(f"专表快照重建失败: {type(recover_error).__name__}: {recover_error}", flush=True)
         except Exception as e:
             print(f"tick 异常(忽略): {type(e).__name__}: {e}", flush=True)
         if args.once:
