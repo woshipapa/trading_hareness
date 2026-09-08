@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "default": {
+    "kind": "hold",
+    "label": "公众号待配置"
+  },
+  "accounts": {
+    "gh_926c397be7d3": {
+      "sinks": [
+        {
+          "kind": "analyst",
+          "tag": "anqiang"
+        },
+        {
+          "kind": "feishu",
+          "chat_id": "oc_570aeb3bbfb11fa2be66b25ca4568aad",
+          "name": "公众号同步群"
+        },
+        {
+          "kind": "feishu",
+          "chat_id": "oc_392b9a177d3539c35b8fc090d890ff0c",
+          "name": "anqiang分享群1"
+        }
+      ]
+    },
+    "gh_5d502986b132": {
+      "sinks": [
+        {
+          "kind": "feishu",
+          "chat_id": "oc_570aeb3bbfb11fa2be66b25ca4568aad",
+          "name": "公众号同步群"
+        }
+      ]
+    },
+    "gh_bf407391be32": {
+      "sinks": [
+        {
+          "kind": "feishu",
+          "chat_id": "oc_570aeb3bbfb11fa2be66b25ca4568aad",
+          "name": "公众号同步群"
+        }
+      ]
+    },
+    "gh_7f865f3064e5": {
+      "sinks": [
+        {
+          "kind": "feishu",
+          "chat_id": "oc_570aeb3bbfb11fa2be66b25ca4568aad",
+          "name": "公众号同步群"
+        }
+      ]
+    }
+  }
+}
