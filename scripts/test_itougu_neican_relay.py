@@ -46,7 +46,7 @@ class ItouguRelayTests(unittest.TestCase):
         finally:
             relay.CHAT_IDS, relay.JUEJIN_CHAT_IDS, relay.QINLONG_CHAT_IDS = originals
 
-    def test_delivery_wraps_only_named_product_destinations(self):
+    def test_delivery_fans_out_to_shared_and_named_destination(self):
         originals = {
             "chat_ids": relay.CHAT_IDS,
             "juejin": relay.JUEJIN_CHAT_IDS,
