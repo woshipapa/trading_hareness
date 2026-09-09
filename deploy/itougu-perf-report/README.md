@@ -37,7 +37,7 @@ scripts/deploy-itougu-perf-report.sh <git-sha-or-tag> --apply
 
 ## 配置（`/etc/itougu-perf-report.env`, 0600）
 
-见 `itougu-perf-report.env.example`。目标群用
+见 `itougu-perf-report.env.example`。当前约定是尾盘掘金收益日报/周报发送到分析师发送汇总群，不发送到尾盘掘金专属群；目标群用
 `ITOUGU_PERF_TARGETS=<businessProductId>=<chat_id>[,<chat_id>][;<productId>=<chat_id>]` 配置；
 没有配任何目标群时脚本只打印不发送（fail closed）。
 

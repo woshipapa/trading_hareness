@@ -39,6 +39,12 @@ class TargetParsingTests(unittest.TestCase):
     def test_empty_spec_yields_no_targets(self):
         self.assertEqual(perf.parse_targets(""), {})
 
+    def test_tailpan_can_route_to_summary_without_its_product_group(self):
+        parsed = perf.parse_targets(
+            "1806593447818383361=oc_summary;1661993558510538753=oc_qinlong")
+        self.assertEqual(parsed["1806593447818383361"], ["oc_summary"])
+        self.assertNotIn("oc_qinlong", parsed["1806593447818383361"])
+
 
 class TradeExtractionTests(unittest.TestCase):
     def test_reads_both_object_and_json_string_details_and_sorts_oldest_first(self):
