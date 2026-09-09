@@ -80,6 +80,9 @@ _watermark_secret_lock = threading.Lock()
 _watermark_secret_value = None
 _watermark_image_lock = threading.Lock()
 _watermark_image_keys = {}
+_product_font_lock = threading.Lock()
+_product_fonts = None
+_product_fonts_path = None
 
 
 def chat_ids_for_product(business_id, override=None):
@@ -218,9 +221,17 @@ def render_product_image(title, text, watermark_id_value):
         raise RuntimeError("图片正文渲染依赖 Pillow 未安装") from exc
     if not WATERMARK_FONT_FILE.is_file():
         raise RuntimeError("图片正文渲染缺少中文字库: %s" % WATERMARK_FONT_FILE)
-    body_font = ImageFont.truetype(str(WATERMARK_FONT_FILE), 34, index=0)
-    label_font = ImageFont.truetype(str(WATERMARK_FONT_FILE), 23, index=0)
-    logo_font = ImageFont.truetype(str(WATERMARK_FONT_FILE), 58, index=0)
+    global _product_fonts, _product_fonts_path
+    with _product_font_lock:
+        font_path = str(WATERMARK_FONT_FILE)
+        if _product_fonts is None or _product_fonts_path != font_path:
+            _product_fonts = (
+                ImageFont.truetype(font_path, 34, index=0),
+                ImageFont.truetype(font_path, 23, index=0),
+                ImageFont.truetype(font_path, 58, index=0),
+            )
+            _product_fonts_path = font_path
+        body_font, label_font, logo_font = _product_fonts
     width = 1600
     padding = 72
     line_height = 52
@@ -250,7 +261,7 @@ def render_product_image(title, text, watermark_id_value):
             overlay_draw.text((col + row // 3, row), mark, font=label_font, fill=(170, 35, 35, 34))
     rendered = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
     output = io.BytesIO()
-    rendered.save(output, format="PNG", optimize=True)
+    rendered.save(output, format="PNG", compress_level=3)
     return output.getvalue()
 
 
