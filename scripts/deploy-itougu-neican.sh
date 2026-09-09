@@ -2,8 +2,9 @@
 # Deploy the Itougu internal-reference relay onto the edge poller host.
 # Default mode is read-only planning; --apply installs and restarts the service.
 #
-# Only the two relay modules are shipped. The systemd unit and the auth file
-# stay as deployed. Both modules are contract-checked before install, so a
+# Only the two relay modules and their static watermark asset are shipped. The
+# systemd unit and the auth file stay as deployed. Both modules are
+# contract-checked before install, so a
 # revision that drops a helper the poller or the report needs cannot land.
 set -euo pipefail
 
@@ -24,7 +25,7 @@ edge_key="${ITOUGU_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
 edge_root="${ITOUGU_EDGE_ROOT:-/opt/itougu-neican}"
 github_repository="${ITOUGU_EDGE_GITHUB_REPOSITORY:-woshipapa/trading_hareness}"
 github_branch="${ITOUGU_EDGE_GITHUB_BRANCH:-main}"
-release_paths=(scripts/itougu_neican_relay.py scripts/itougu_public_article_relay.py scripts/test_itougu_poll_schedule.py scripts/deploy-itougu-neican.sh)
+release_paths=(scripts/itougu_neican_relay.py scripts/itougu_public_article_relay.py scripts/itougu-momo-watermark.png scripts/test_itougu_poll_schedule.py scripts/deploy-itougu-neican.sh)
 
 for command in git ssh; do command -v "$command" >/dev/null || { echo "missing required command: $command" >&2; exit 127; }; done
 [[ -r "$edge_key" ]] || { echo "edge SSH key is not readable: $edge_key" >&2; exit 2; }
@@ -72,11 +73,13 @@ trap 'rm -rf -- "$temp_dir"' EXIT
 
 curl --fail --location --silent --show-error --retry 3 "$archive_url" \
   | tar -xz -C "$temp_dir" --strip-components=1 --wildcards \
-      '*/scripts/itougu_neican_relay.py' '*/scripts/itougu_public_article_relay.py'
+      '*/scripts/itougu_neican_relay.py' '*/scripts/itougu_public_article_relay.py' '*/scripts/itougu-momo-watermark.png'
 candidate="$temp_dir/scripts/itougu_neican_relay.py"
 candidate_articles="$temp_dir/scripts/itougu_public_article_relay.py"
+candidate_watermark="$temp_dir/scripts/itougu-momo-watermark.png"
 test -f "$candidate"
 test -f "$candidate_articles"
+test -s "$candidate_watermark"
 
 # Contract checks run against the candidate before anything is installed:
 # the midday window is the change being shipped, and the report deployed
@@ -95,6 +98,7 @@ card = relay.build_product_card("contract", "body")
 assert card.get("schema") == "2.0", "product relay must emit Card JSON 2.0"
 assert card.get("config", {}).get("enable_forward_interaction") is False, "forward interaction must stay disabled"
 assert card.get("body", {}).get("elements"), "product card body must contain an element"
+assert relay.WATERMARK_IMAGE_FILE.name == "itougu-momo-watermark.png", "candidate must use the shipped watermark asset"
 
 import itougu_public_article_relay as articles
 missing = [n for n in ("poll_views", "trigger_from_push", "retry_pending")
@@ -119,11 +123,14 @@ set +a
 PYTHONDONTWRITEBYTECODE=1 python3 "$candidate" --once --dry-run >/dev/null
 echo "candidate dry-run ok"
 
-for module in itougu_neican_relay.py itougu_public_article_relay.py; do
-  install -m 0600 "$edge_root/$module" "$edge_root/$module.before-$release_sha"
+for module in itougu_neican_relay.py itougu_public_article_relay.py itougu-momo-watermark.png; do
+  if [[ -e "$edge_root/$module" ]]; then
+    install -m 0600 "$edge_root/$module" "$edge_root/$module.before-$release_sha"
+  fi
 done
 install -m 0755 "$candidate" "$edge_root/itougu_neican_relay.py"
 install -m 0755 "$candidate_articles" "$edge_root/itougu_public_article_relay.py"
+install -m 0644 "$candidate_watermark" "$edge_root/itougu-momo-watermark.png"
 systemctl restart itougu-neican.service
 sleep 3
 systemctl is-active --quiet itougu-neican.service || { echo "relay failed to come back" >&2; exit 1; }

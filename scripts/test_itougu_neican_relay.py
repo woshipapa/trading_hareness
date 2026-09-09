@@ -10,6 +10,11 @@ import itougu_neican_relay as relay
 
 
 class ItouguRelayTests(unittest.TestCase):
+    def test_static_watermark_asset_is_a_nonempty_png(self):
+        payload = relay.WATERMARK_IMAGE_FILE.read_bytes()
+        self.assertTrue(payload.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertGreater(len(payload), 1024)
+
     def test_dedicated_chat_ids_exclude_shared_destination(self):
         original_chat_ids = relay.CHAT_IDS
         original_juejin = relay.JUEJIN_CHAT_IDS
@@ -64,6 +69,15 @@ class ItouguRelayTests(unittest.TestCase):
         self.assertEqual(card["body"]["elements"][0]["text"]["tag"], "plain_text")
         self.assertIn("动态水印 W1-1234567890abcdef", card["body"]["elements"][0]["text"]["content"])
 
+    def test_product_card_can_carry_the_static_image_watermark(self):
+        card = relay.build_product_card("尾盘掘金内参", "正文", image_key="img_watermark", image_alt="momo W1-demo")
+        self.assertEqual(card["body"]["elements"][0], {
+            "tag": "img",
+            "img_key": "img_watermark",
+            "alt": {"tag": "plain_text", "content": "momo W1-demo"},
+        })
+        self.assertEqual(card["body"]["elements"][1]["tag"], "div")
+
     def test_send_uses_card_v2_only_for_dedicated_product_group(self):
         originals = {
             "chat_ids": relay.CHAT_IDS,
@@ -71,6 +85,7 @@ class ItouguRelayTests(unittest.TestCase):
             "qinlong": relay.QINLONG_CHAT_IDS,
             "token": relay.feishu_token,
             "urlopen": relay.urllib.request.urlopen,
+            "image_key": relay._watermark_image_key,
         }
         relay.CHAT_IDS = ["shared"]
         relay.JUEJIN_CHAT_IDS = ["juejin-only"]
@@ -78,6 +93,9 @@ class ItouguRelayTests(unittest.TestCase):
         calls = []
 
         class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
             def __enter__(self):
                 return self
 
@@ -85,14 +103,17 @@ class ItouguRelayTests(unittest.TestCase):
                 return False
 
             def read(self):
-                return b'{"code":0}'
+                return self.payload
 
         def fake_urlopen(request, timeout=20):
+            if request.full_url.endswith("/im/v1/images"):
+                return Response(b'{"code":0,"data":{"image_key":"img_watermark"}}')
             calls.append(json.loads(request.data.decode("utf-8")))
-            return Response()
+            return Response(b'{"code":0}')
 
         relay.feishu_token = lambda: "unit-token"
         relay.urllib.request.urlopen = fake_urlopen
+        relay._watermark_image_key = None
         try:
             relay.send_feishu("juejin-only", "尾盘掘金内参", "正文", "append-1")
             relay.send_feishu("shared", "尾盘掘金内参", "正文", "append-1")
@@ -102,8 +123,12 @@ class ItouguRelayTests(unittest.TestCase):
             relay.QINLONG_CHAT_IDS = originals["qinlong"]
             relay.feishu_token = originals["token"]
             relay.urllib.request.urlopen = originals["urlopen"]
+            relay._watermark_image_key = originals["image_key"]
         self.assertEqual(calls[0]["msg_type"], "interactive")
-        self.assertEqual(json.loads(calls[0]["content"])["schema"], "2.0")
+        card = json.loads(calls[0]["content"])
+        self.assertEqual(card["schema"], "2.0")
+        self.assertEqual(card["body"]["elements"][0]["img_key"], "img_watermark")
+        self.assertIn("momo W1-", card["body"]["elements"][0]["alt"]["content"])
         self.assertEqual(calls[1]["msg_type"], "post")
 
     def test_dynamic_watermark_is_stable_per_message_and_destination(self):

@@ -67,8 +67,12 @@ PRODUCT_NOTICE = "认真一手咸鱼店铺：餐厅焦糖味的momo，其他都�
 MAX_FEISHU_TEXT_CHARS = 28000
 WATERMARK_SECRET_FILE = Path(os.environ.get(
     "ITOUGU_WATERMARK_SECRET_FILE", str(STATE_FILE.with_name(STATE_FILE.name + ".watermark-secret"))))
+WATERMARK_IMAGE_FILE = Path(os.environ.get(
+    "ITOUGU_WATERMARK_IMAGE_FILE", str(Path(__file__).with_name("itougu-momo-watermark.png"))))
 _watermark_secret_lock = threading.Lock()
 _watermark_secret_value = None
+_watermark_image_lock = threading.Lock()
+_watermark_image_key = None
 
 
 def chat_ids_for_product(business_id, override=None):
@@ -125,15 +129,23 @@ def is_dedicated_destination(chat_id):
     }
 
 
-def build_product_card(title, text):
+def build_product_card(title, text, image_key=None, image_alt=""):
     """Build the card JSON 2.0 shape used by the adapter's relay path."""
+    elements = []
+    if image_key:
+        elements.append({
+            "tag": "img",
+            "img_key": str(image_key),
+            "alt": {"tag": "plain_text", "content": str(image_alt or "")[:200]},
+        })
+    elements.append({"tag": "div", "text": {"tag": "plain_text", "content": str(text or "")}})
     return {
         "schema": "2.0",
         "config": {"wide_screen_mode": True, "enable_forward_interaction": False},
         "header": {"title": {"tag": "plain_text", "content": str(title or "")[:120]}},
         "body": {
             "direction": "vertical",
-            "elements": [{"tag": "div", "text": {"tag": "plain_text", "content": str(text or "")}}],
+            "elements": elements,
         },
     }
 
@@ -174,6 +186,48 @@ def watermark_id(chat_id, text, dedup_seed=""):
     payload = "v1|%s|%s|%s" % (str(chat_id or "").strip(), str(dedup_seed or ""), content_hash)
     digest = hmac.new(_watermark_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
     return "W1-%s" % digest
+
+
+def _upload_watermark_image(token):
+    """Upload the static tiled watermark once per process and cache its image key."""
+    global _watermark_image_key
+    with _watermark_image_lock:
+        if _watermark_image_key:
+            return _watermark_image_key
+        try:
+            image = WATERMARK_IMAGE_FILE.read_bytes()
+        except OSError as exc:
+            raise RuntimeError("缺少图片水印素材: %s" % WATERMARK_IMAGE_FILE) from exc
+        if not image or len(image) > 10 * 1024 * 1024:
+            raise RuntimeError("图片水印素材大小无效: %s" % WATERMARK_IMAGE_FILE)
+        boundary = ("----itougu-watermark-%s" % uuid.uuid4().hex).encode("ascii")
+        body = b"".join((
+            b"--" + boundary + b"\r\n"
+            b'Content-Disposition: form-data; name="image_type"\r\n\r\n'
+            b"message\r\n",
+            b"--" + boundary + b"\r\n"
+            b'Content-Disposition: form-data; name="image"; filename="itougu-momo-watermark.png"\r\n'
+            b"Content-Type: image/png\r\n\r\n" + image + b"\r\n",
+            b"--" + boundary + b"--\r\n",
+        ))
+        req = urllib.request.Request(
+            "https://open.feishu.cn/open-apis/im/v1/images",
+            data=body,
+            method="POST",
+            headers={
+                "content-type": "multipart/form-data; boundary=" + boundary.decode("ascii"),
+                "authorization": "Bearer " + token,
+            },
+        )
+        with urllib.request.urlopen(req, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        if result.get("code") not in (None, 0):
+            raise RuntimeError("飞书图片水印上传失败: code=%s msg=%s" % (result.get("code"), result.get("msg")))
+        image_key = result.get("image_key") or result.get("data", {}).get("image_key")
+        if not image_key:
+            raise RuntimeError("飞书图片水印上传未返回 image_key")
+        _watermark_image_key = str(image_key)
+        return _watermark_image_key
 
 
 def message_chunks_for_destination(chat_id, text, dedup_seed=""):
@@ -460,11 +514,19 @@ def send_feishu(chat_id, title, text, dedup_seed):
     token = feishu_token()
     chunks = message_chunks_for_destination(chat_id, text, dedup_seed)
     dedicated = is_dedicated_destination(chat_id)
+    image_key = None
+    marker = watermark_id(chat_id, text, dedup_seed) if dedicated else ""
+    if dedicated:
+        try:
+            image_key = _upload_watermark_image(token)
+        except Exception as exc:
+            # Keep delivery available if the optional image scope/resource is temporarily unavailable.
+            print("专属群图片水印不可用，回退纯文本卡片: %s" % exc, file=sys.stderr)
     for idx, chunk in enumerate(chunks):
         t = title if idx == 0 else "%s（续 %d/%d）" % (title, idx + 1, len(chunks))
         if dedicated:
             msg_type = "interactive"
-            content = build_product_card(t, chunk)
+            content = build_product_card(t, chunk, image_key=image_key, image_alt="momo %s" % marker)
         else:
             msg_type = "post"
             content = {"zh_cn": {"title": t[:120], "content": [[{"tag": "text", "text": chunk}]]}}
