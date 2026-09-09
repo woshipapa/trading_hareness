@@ -74,9 +74,16 @@ _DEFAULT_WATERMARK_FONTS = (
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/System/Library/Fonts/Hiragino Sans GB.ttc",
 )
+_DEFAULT_EMOJI_FONTS = (
+    "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+    "/System/Library/Fonts/Apple Color Emoji.ttc",
+)
 WATERMARK_FONT_FILE = Path(os.environ.get(
     "ITOUGU_WATERMARK_FONT_FILE",
     next((path for path in _DEFAULT_WATERMARK_FONTS if Path(path).is_file()), _DEFAULT_WATERMARK_FONTS[0])))
+EMOJI_FONT_FILE = Path(os.environ.get(
+    "ITOUGU_EMOJI_FONT_FILE",
+    next((path for path in _DEFAULT_EMOJI_FONTS if Path(path).is_file()), _DEFAULT_EMOJI_FONTS[0])))
 _watermark_secret_lock = threading.Lock()
 _watermark_secret_value = None
 _watermark_image_lock = threading.Lock()
@@ -84,6 +91,10 @@ _watermark_image_keys = {}
 _product_font_lock = threading.Lock()
 _product_fonts = None
 _product_fonts_path = None
+_emoji_font_lock = threading.Lock()
+_emoji_font = None
+_emoji_font_path = None
+_emoji_font_size = None
 
 
 def chat_ids_for_product(business_id, override=None):
@@ -205,6 +216,147 @@ def contains_external_link(text):
     return bool(EXTERNAL_LINK_RE.search(str(text or "")))
 
 
+_DYNAMIC_WATERMARK_LINE_RE = re.compile(r"^【动态水印 W1-[0-9a-f]{16}】$")
+
+
+def image_body_text(text):
+    """Remove relay-only outer wrappers before putting a body into the PNG.
+
+    The dedicated text path keeps both the notice and the dynamic marker as
+    selectable text.  The image already carries the shop attribution in its
+    header and a tiled dynamic fingerprint, so repeating those wrapper lines
+    inside the raster wastes vertical space and makes the body harder to read.
+    Only exact outer lines are removed; identical wording in the actual body
+    is preserved.
+    """
+    parts = str(text or "").split("\n\n")
+    while parts and (parts[0] == PRODUCT_NOTICE or _DYNAMIC_WATERMARK_LINE_RE.fullmatch(parts[0])):
+        parts.pop(0)
+    while parts and (parts[-1] == PRODUCT_NOTICE or _DYNAMIC_WATERMARK_LINE_RE.fullmatch(parts[-1])):
+        parts.pop()
+    return "\n\n".join(parts)
+
+
+def _is_emoji_codepoint(codepoint):
+    """Recognise the emoji/symbol ranges used by Itougu message templates."""
+    return (
+        0x1F000 <= codepoint <= 0x1FAFF
+        or 0x2600 <= codepoint <= 0x27BF
+        or 0x2300 <= codepoint <= 0x23FF
+    )
+
+
+def _is_emoji_modifier(codepoint):
+    return (
+        0xFE00 <= codepoint <= 0xFE0F
+        or 0x1F3FB <= codepoint <= 0x1F3FF
+        or codepoint == 0x20E3
+    )
+
+
+def _split_emoji_runs(text):
+    """Split text into ordinary and emoji runs without breaking ZWJ glyphs."""
+    runs = []
+    current = []
+    current_is_emoji = None
+    index = 0
+    value = str(text or "")
+
+    def flush():
+        nonlocal current
+        if current:
+            runs.append(("".join(current), bool(current_is_emoji)))
+            current = []
+
+    while index < len(value):
+        char = value[index]
+        codepoint = ord(char)
+        is_emoji = _is_emoji_codepoint(codepoint)
+        if is_emoji:
+            if current_is_emoji is not True:
+                flush()
+                current_is_emoji = True
+            current.append(char)
+            index += 1
+            # Keep variation selectors, skin-tone modifiers, keycap marks and
+            # a following ZWJ emoji in the same raster run.
+            while index < len(value):
+                next_codepoint = ord(value[index])
+                if _is_emoji_modifier(next_codepoint):
+                    current.append(value[index])
+                    index += 1
+                    continue
+                if next_codepoint == 0x200D and index + 1 < len(value):
+                    joined = ord(value[index + 1])
+                    if _is_emoji_codepoint(joined):
+                        current.extend((value[index], value[index + 1]))
+                        index += 2
+                        continue
+                break
+            continue
+        if current_is_emoji is not False:
+            flush()
+            current_is_emoji = False
+        current.append(char)
+        index += 1
+    flush()
+    return runs
+
+
+def _load_emoji_font(ImageFont):
+    """Load the native bitmap strike for the configured colour emoji font."""
+    global _emoji_font, _emoji_font_path, _emoji_font_size
+    font_path = str(EMOJI_FONT_FILE)
+    with _emoji_font_lock:
+        if _emoji_font_path == font_path:
+            return _emoji_font, _emoji_font_size
+        _emoji_font = None
+        _emoji_font_size = None
+        _emoji_font_path = font_path
+        if not EMOJI_FONT_FILE.is_file():
+            return None, None
+        # Noto Color Emoji exposes a single 109px bitmap strike; Apple Color
+        # Emoji accepts arbitrary sizes, so try the native strike first and
+        # then the normal body/label sizes as a portable fallback.
+        for size in (109, 34, 23, 58):
+            try:
+                _emoji_font = ImageFont.truetype(font_path, size, index=0)
+            except OSError:
+                continue
+            _emoji_font_size = size
+            break
+        return _emoji_font, _emoji_font_size
+
+
+def _draw_text_with_emoji(image, draw, xy, text, primary_font, emoji_font_info, fill):
+    """Draw text with colour emoji tiles scaled to the surrounding font size."""
+    from PIL import Image, ImageDraw
+
+    x, y = float(xy[0]), float(xy[1])
+    emoji_font, emoji_native_size = emoji_font_info
+    target_size = max(1, int(getattr(primary_font, "size", 34)))
+    for run, is_emoji in _split_emoji_runs(text):
+        if not is_emoji or emoji_font is None or not emoji_native_size:
+            draw.text((round(x), round(y)), run, font=primary_font, fill=fill)
+            x += float(draw.textlength(run, font=primary_font))
+            continue
+        bbox = emoji_font.getbbox(run)
+        source_width = max(1, int(bbox[2] - bbox[0]))
+        source_height = max(1, int(bbox[3] - bbox[1]))
+        pad = 8
+        tile = Image.new("RGBA", (source_width + pad * 2, source_height + pad * 2), (0, 0, 0, 0))
+        tile_draw = ImageDraw.Draw(tile)
+        tile_draw.text((pad - bbox[0], pad - bbox[1]), run, font=emoji_font,
+                       embedded_color=True)
+        scale = target_size / float(emoji_native_size)
+        if scale != 1.0:
+            resampling = getattr(Image, "Resampling", Image).LANCZOS
+            tile = tile.resize((max(1, round(tile.width * scale)),
+                                max(1, round(tile.height * scale))), resampling)
+        image.paste(tile, (round(x), round(y)), tile)
+        x += source_width * scale
+
+
 def _wrap_image_text(text, font, max_width):
     """Wrap CJK/Latin text with a bounded-cost, conservative character width."""
     # CJK glyphs are approximately one font-size wide.  Avoid measuring every
@@ -238,6 +390,7 @@ def render_product_image(title, text, watermark_id_value):
             )
             _product_fonts_path = font_path
         body_font, label_font, logo_font = _product_fonts
+    emoji_font_info = _load_emoji_font(ImageFont)
     width = 1600
     padding = 72
     line_height = 52
@@ -249,12 +402,13 @@ def render_product_image(title, text, watermark_id_value):
     image = Image.new("RGB", (width, height), "#fbfbfb")
     draw = ImageDraw.Draw(image)
     draw.rectangle((0, 0, width, 112), fill="#c9362c")
-    draw.text((padding, 24), "momo", font=logo_font, fill="#ffffff")
-    draw.text((330, 39), "%s · 专属图片正文" % str(title or "")[:70], font=label_font, fill="#ffffff")
-    draw.text((padding, 140), "认真一手咸鱼店铺：餐厅焦糖味的momo", font=label_font, fill="#777777")
+    _draw_text_with_emoji(image, draw, (padding, 24), "momo", logo_font, emoji_font_info, "#ffffff")
+    _draw_text_with_emoji(
+        image, draw, (330, 39), "%s · 专属图片正文" % str(title or "")[:70],
+        label_font, emoji_font_info, "#ffffff")
     y = 185
     for line in lines:
-        draw.text((padding, y), line, font=body_font, fill="#202124")
+        _draw_text_with_emoji(image, draw, (padding, y), line, body_font, emoji_font_info, "#202124")
         y += line_height
 
     # Low-opacity diagonal marks are repeated over the complete raster so
@@ -264,7 +418,9 @@ def render_product_image(title, text, watermark_id_value):
     mark = "momo · %s" % watermark_id_value
     for row in range(-height, height + width, 118):
         for col in range(-width, width * 2, 520):
-            overlay_draw.text((col + row // 3, row), mark, font=label_font, fill=(170, 35, 35, 34))
+            _draw_text_with_emoji(
+                overlay, overlay_draw, (col + row // 3, row), mark,
+                label_font, emoji_font_info, (170, 35, 35, 34))
     rendered = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
     output = io.BytesIO()
     rendered.save(output, format="PNG", compress_level=3)
@@ -610,7 +766,7 @@ def send_feishu(chat_id, title, text, dedup_seed):
             # Dedicated non-link groups carry the complete body only inside the raster.
             # Keeping raw text out of the card prevents an OAuth reader from
             # extracting a clean, watermark-free copy with a regex.
-            image = render_product_image(t, chunk, marker)
+            image = render_product_image(t, image_body_text(chunk), marker)
             image_key = _upload_product_image(token, image)
             content = build_product_card(t, None, image_key=image_key, image_alt="momo %s" % marker)
         elif dedicated:

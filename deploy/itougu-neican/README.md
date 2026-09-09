@@ -16,7 +16,7 @@ appendContentId 的 uuid 幂等去重，不会重复。
 
 ## 部署步骤（在 47 上，root）
 1. mkdir -p /opt/itougu-neican
-2. 安装图片正文渲染依赖：`apt-get update && apt-get install -y --no-install-recommends python3-pil fonts-noto-cjk`
+2. 安装图片正文渲染依赖：`apt-get update && apt-get install -y --no-install-recommends python3-pil fonts-noto-cjk fonts-noto-color-emoji`
 3. 拷贝：scripts/itougu_neican_relay.py → /opt/itougu-neican/
         本地 itougu_auth.json → /opt/itougu-neican/itougu_auth.json  (chmod 600)
 4. cp itougu-neican.env.example /etc/itougu-neican.env  (填 FEISHU_APP_ID/SECRET, chmod 600)

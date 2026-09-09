@@ -79,6 +79,18 @@ class ItouguRelayTests(unittest.TestCase):
         self.assertTrue(relay.contains_external_link("晚盘入口 www.example.com"))
         self.assertFalse(relay.contains_external_link("推荐股票：示例股份"))
 
+    def test_image_body_removes_only_outer_notice_and_marker_lines(self):
+        wrapped = relay.wrap_product_message("🟢 推荐股票", "W1-0123456789abcdef")
+        self.assertEqual(relay.image_body_text(wrapped), "🟢 推荐股票")
+        body_with_notice = "正文\n\n%s\n\n结尾" % relay.PRODUCT_NOTICE
+        self.assertEqual(relay.image_body_text(body_with_notice), body_with_notice)
+
+    def test_emoji_runs_keep_symbols_and_zwj_sequences_together(self):
+        self.assertEqual(
+            relay._split_emoji_runs("时间 🕐 状态 🟢👨‍💻"),
+            [("时间 ", False), ("🕐", True), (" 状态 ", False), ("🟢👨‍💻", True)],
+        )
+
     @unittest.skipUnless(importlib.util.find_spec("PIL"), "Pillow is provisioned on edge, not required on every dev host")
     def test_rendered_product_image_contains_the_full_body_and_fingerprint(self):
         font_candidates = (
@@ -154,6 +166,7 @@ class ItouguRelayTests(unittest.TestCase):
         self.assertNotIn("正文", json.dumps(card, ensure_ascii=False))
         self.assertEqual(calls[1]["msg_type"], "post")
         self.assertEqual(len(render_calls), 1)
+        self.assertEqual(render_calls[0][1], "正文")
         link_card = json.loads(calls[2]["content"])
         self.assertEqual(calls[2]["msg_type"], "interactive")
         self.assertEqual(link_card["body"]["elements"][0]["tag"], "div")
