@@ -74,6 +74,16 @@ class ItouguRelayTests(unittest.TestCase):
         })
         self.assertEqual(len(card["body"]["elements"]), 1)
 
+    def test_link_post_uses_explicit_clickable_anchor(self):
+        post = relay.build_link_post("午盘链接", "请打开 https://example.com/detail?id=1。")
+        elements = post["zh_cn"]["content"][0]
+        self.assertEqual(elements[0], {"tag": "text", "text": "请打开 "})
+        self.assertEqual(elements[1], {
+            "tag": "a", "text": "https://example.com/detail?id=1",
+            "href": "https://example.com/detail?id=1",
+        })
+        self.assertEqual(elements[2], {"tag": "text", "text": "。"})
+
     def test_external_links_are_classified_as_text_messages(self):
         self.assertTrue(relay.contains_external_link("午盘链接 https://example.com/detail?id=1"))
         self.assertTrue(relay.contains_external_link("晚盘入口 www.example.com"))
@@ -171,10 +181,12 @@ class ItouguRelayTests(unittest.TestCase):
         self.assertEqual(calls[1]["msg_type"], "post")
         self.assertEqual(len(render_calls), 1)
         self.assertEqual(render_calls[0][1], "正文")
-        link_card = json.loads(calls[2]["content"])
-        self.assertEqual(calls[2]["msg_type"], "interactive")
-        self.assertEqual(link_card["body"]["elements"][0]["tag"], "div")
-        self.assertIn("https://example.com/detail", link_card["body"]["elements"][0]["text"]["content"])
+        link_post = json.loads(calls[2]["content"])
+        self.assertEqual(calls[2]["msg_type"], "post")
+        link_elements = link_post["zh_cn"]["content"][0]
+        link_anchor = next(element for element in link_elements if element.get("tag") == "a")
+        self.assertEqual(link_anchor["href"], "https://example.com/detail")
+        self.assertNotIn('"schema": "2.0"', calls[2]["content"])
 
     def test_dynamic_watermark_is_stable_per_message_and_destination(self):
         old_secret = os.environ.get("ITOUGU_WATERMARK_SECRET")

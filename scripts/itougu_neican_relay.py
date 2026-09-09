@@ -176,6 +176,33 @@ def build_product_card(title, text=None, image_key=None, image_alt=""):
     }
 
 
+def build_link_post(title, text):
+    """Build a native post so Feishu renders external URLs as clickable links."""
+    body = str(text or "")
+    elements = []
+    cursor = 0
+    for match in EXTERNAL_LINK_RE.finditer(body):
+        if match.start() > cursor:
+            elements.append({"tag": "text", "text": body[cursor:match.start()]})
+        raw_url = match.group(0)
+        url = raw_url.rstrip(".,;:!?)]}，。；：！？）》】")
+        if url:
+            href = url if re.match(r"^https?://", url, re.IGNORECASE) else "https://" + url
+            elements.append({"tag": "a", "text": url, "href": href})
+            cursor = match.start() + len(url)
+        else:
+            elements.append({"tag": "text", "text": raw_url})
+            cursor = match.end()
+        if cursor < match.end():
+            elements.append({"tag": "text", "text": body[cursor:match.end()]})
+            cursor = match.end()
+    if cursor < len(body):
+        elements.append({"tag": "text", "text": body[cursor:]})
+    if not elements:
+        elements = [{"tag": "text", "text": body}]
+    return {"zh_cn": {"title": str(title or "")[:120], "content": [elements]}}
+
+
 def _watermark_secret():
     """Load or create a per-install HMAC key without exposing it in logs."""
     configured = os.environ.get("ITOUGU_WATERMARK_SECRET", "").strip()
@@ -776,12 +803,13 @@ def send_feishu(chat_id, title, text, dedup_seed):
             image_key = _upload_product_image(token, image)
             content = build_product_card(t, None, image_key=image_key, image_alt="momo %s" % marker)
         elif dedicated:
-            # Link-bearing notices remain selectable text so users can open/copy URLs.
-            msg_type = "interactive"
-            content = build_product_card(t, chunk)
+            # Link-bearing notices use a native post: Card 2.0 plain_text does
+            # not consistently turn URL-looking text into a clickable link.
+            msg_type = "post"
+            content = build_link_post(t, chunk)
         else:
             msg_type = "post"
-            content = {"zh_cn": {"title": t[:120], "content": [[{"tag": "text", "text": chunk}]]}}
+            content = build_link_post(t, chunk)
         body = json.dumps({
             "receive_id": chat_id, "msg_type": msg_type,
             "content": json.dumps(content, ensure_ascii=False),
