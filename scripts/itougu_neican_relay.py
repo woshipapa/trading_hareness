@@ -115,6 +115,29 @@ def wrap_product_message(text, watermark_id=None):
     return "%s\n\n%s\n\n%s" % (PRODUCT_NOTICE, body, PRODUCT_NOTICE)
 
 
+def is_dedicated_destination(chat_id):
+    """Whether a chat is one of the two product-specific Feishu exits."""
+    normalized = str(chat_id or "").strip()
+    return normalized in {
+        dedicated_id
+        for business_id in WATCH
+        for dedicated_id in dedicated_chat_ids_for_product(business_id)
+    }
+
+
+def build_product_card(title, text):
+    """Build the card JSON 2.0 shape used by the adapter's relay path."""
+    return {
+        "schema": "2.0",
+        "config": {"wide_screen_mode": True, "enable_forward_interaction": False},
+        "header": {"title": {"tag": "plain_text", "content": str(title or "")[:120]}},
+        "body": {
+            "direction": "vertical",
+            "elements": [{"tag": "div", "text": {"tag": "plain_text", "content": str(text or "")}}],
+        },
+    }
+
+
 def _watermark_secret():
     """Load or create a per-install HMAC key without exposing it in logs."""
     configured = os.environ.get("ITOUGU_WATERMARK_SECRET", "").strip()
@@ -157,11 +180,7 @@ def message_chunks_for_destination(chat_id, text, dedup_seed=""):
     """Split text while keeping a complete dynamic marker on every chunk."""
     body = str(text or "")
     normalized = str(chat_id or "").strip()
-    dedicated = normalized in {
-        dedicated_id
-        for business_id in WATCH
-        for dedicated_id in dedicated_chat_ids_for_product(business_id)
-    }
+    dedicated = is_dedicated_destination(normalized)
     if not dedicated:
         return [body[i:i + MAX_FEISHU_TEXT_CHARS] for i in range(0, len(body), MAX_FEISHU_TEXT_CHARS)] or [""]
     marker = watermark_id(normalized, body, dedup_seed)
@@ -173,11 +192,8 @@ def message_chunks_for_destination(chat_id, text, dedup_seed=""):
 def message_for_destination(chat_id, text, dedup_seed=""):
     """Apply the product notice only at the two named product-group exits."""
     normalized = str(chat_id or "").strip()
-    product_destinations = set()
-    for business_id in WATCH:
-        product_destinations.update(dedicated_chat_ids_for_product(business_id))
     return (wrap_product_message(text, watermark_id(normalized, text, dedup_seed))
-            if normalized in product_destinations else text)
+            if is_dedicated_destination(normalized) else text)
 
 
 def article_chat_ids():
@@ -443,11 +459,17 @@ def feishu_token():
 def send_feishu(chat_id, title, text, dedup_seed):
     token = feishu_token()
     chunks = message_chunks_for_destination(chat_id, text, dedup_seed)
+    dedicated = is_dedicated_destination(chat_id)
     for idx, chunk in enumerate(chunks):
         t = title if idx == 0 else "%s（续 %d/%d）" % (title, idx + 1, len(chunks))
-        content = {"zh_cn": {"title": t[:120], "content": [[{"tag": "text", "text": chunk}]]}}
+        if dedicated:
+            msg_type = "interactive"
+            content = build_product_card(t, chunk)
+        else:
+            msg_type = "post"
+            content = {"zh_cn": {"title": t[:120], "content": [[{"tag": "text", "text": chunk}]]}}
         body = json.dumps({
-            "receive_id": chat_id, "msg_type": "post",
+            "receive_id": chat_id, "msg_type": msg_type,
             "content": json.dumps(content, ensure_ascii=False),
             "uuid": str(uuid.uuid5(uuid.NAMESPACE_URL, "itougu-neican:%s:%s:%d" % (dedup_seed, chat_id, idx))),
         }, ensure_ascii=False).encode()

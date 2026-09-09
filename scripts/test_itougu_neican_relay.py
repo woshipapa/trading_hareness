@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import time
 import unittest
@@ -52,6 +53,58 @@ class ItouguRelayTests(unittest.TestCase):
                 os.environ.pop("ITOUGU_WATERMARK_SECRET", None)
             else:
                 os.environ["ITOUGU_WATERMARK_SECRET"] = old_secret
+
+    def test_product_card_uses_adapter_compatible_schema_2(self):
+        card = relay.build_product_card("尾盘掘金内参 · 续 2/2", "正文\n动态水印 W1-1234567890abcdef")
+        self.assertEqual(card["schema"], "2.0")
+        self.assertFalse(card["config"]["enable_forward_interaction"])
+        self.assertEqual(card["header"]["title"]["tag"], "plain_text")
+        self.assertEqual(card["body"]["direction"], "vertical")
+        self.assertEqual(card["body"]["elements"][0]["tag"], "div")
+        self.assertEqual(card["body"]["elements"][0]["text"]["tag"], "plain_text")
+        self.assertIn("动态水印 W1-1234567890abcdef", card["body"]["elements"][0]["text"]["content"])
+
+    def test_send_uses_card_v2_only_for_dedicated_product_group(self):
+        originals = {
+            "chat_ids": relay.CHAT_IDS,
+            "juejin": relay.JUEJIN_CHAT_IDS,
+            "qinlong": relay.QINLONG_CHAT_IDS,
+            "token": relay.feishu_token,
+            "urlopen": relay.urllib.request.urlopen,
+        }
+        relay.CHAT_IDS = ["shared"]
+        relay.JUEJIN_CHAT_IDS = ["juejin-only"]
+        relay.QINLONG_CHAT_IDS = []
+        calls = []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"code":0}'
+
+        def fake_urlopen(request, timeout=20):
+            calls.append(json.loads(request.data.decode("utf-8")))
+            return Response()
+
+        relay.feishu_token = lambda: "unit-token"
+        relay.urllib.request.urlopen = fake_urlopen
+        try:
+            relay.send_feishu("juejin-only", "尾盘掘金内参", "正文", "append-1")
+            relay.send_feishu("shared", "尾盘掘金内参", "正文", "append-1")
+        finally:
+            relay.CHAT_IDS = originals["chat_ids"]
+            relay.JUEJIN_CHAT_IDS = originals["juejin"]
+            relay.QINLONG_CHAT_IDS = originals["qinlong"]
+            relay.feishu_token = originals["token"]
+            relay.urllib.request.urlopen = originals["urlopen"]
+        self.assertEqual(calls[0]["msg_type"], "interactive")
+        self.assertEqual(json.loads(calls[0]["content"])["schema"], "2.0")
+        self.assertEqual(calls[1]["msg_type"], "post")
 
     def test_dynamic_watermark_is_stable_per_message_and_destination(self):
         old_secret = os.environ.get("ITOUGU_WATERMARK_SECRET")

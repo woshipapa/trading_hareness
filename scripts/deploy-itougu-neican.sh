@@ -91,6 +91,10 @@ missing = [n for n in ("load_headers", "itougu_call", "send_feishu", "feishu_tok
            if not hasattr(relay, n)]
 if missing:
     raise SystemExit("candidate relay drops helpers used by the report: %s" % ", ".join(missing))
+card = relay.build_product_card("contract", "body")
+assert card.get("schema") == "2.0", "product relay must emit Card JSON 2.0"
+assert card.get("config", {}).get("enable_forward_interaction") is False, "forward interaction must stay disabled"
+assert card.get("body", {}).get("elements"), "product card body must contain an element"
 
 import itougu_public_article_relay as articles
 missing = [n for n in ("poll_views", "trigger_from_push", "retry_pending")
