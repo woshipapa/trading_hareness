@@ -74,6 +74,11 @@ class ItouguRelayTests(unittest.TestCase):
         })
         self.assertEqual(len(card["body"]["elements"]), 1)
 
+    def test_external_links_are_classified_as_text_messages(self):
+        self.assertTrue(relay.contains_external_link("午盘链接 https://example.com/detail?id=1"))
+        self.assertTrue(relay.contains_external_link("晚盘入口 www.example.com"))
+        self.assertFalse(relay.contains_external_link("推荐股票：示例股份"))
+
     @unittest.skipUnless(importlib.util.find_spec("PIL"), "Pillow is provisioned on edge, not required on every dev host")
     def test_rendered_product_image_contains_the_full_body_and_fingerprint(self):
         font_candidates = (
@@ -106,6 +111,7 @@ class ItouguRelayTests(unittest.TestCase):
         relay.JUEJIN_CHAT_IDS = ["juejin-only"]
         relay.QINLONG_CHAT_IDS = []
         calls = []
+        render_calls = []
 
         class Response:
             def __init__(self, payload):
@@ -126,11 +132,12 @@ class ItouguRelayTests(unittest.TestCase):
 
         relay.feishu_token = lambda: "unit-token"
         relay.urllib.request.urlopen = fake_urlopen
-        relay.render_product_image = lambda title, text, marker: b"\x89PNG\r\n\x1a\nunit-image"
+        relay.render_product_image = lambda title, text, marker: (render_calls.append((title, text, marker)) or b"\x89PNG\r\n\x1a\nunit-image")
         relay._upload_product_image = lambda token, image: "img_watermark"
         try:
             relay.send_feishu("juejin-only", "尾盘掘金内参", "正文", "append-1")
             relay.send_feishu("shared", "尾盘掘金内参", "正文", "append-1")
+            relay.send_feishu("juejin-only", "午盘链接", "请打开 https://example.com/detail", "append-link")
         finally:
             relay.CHAT_IDS = originals["chat_ids"]
             relay.JUEJIN_CHAT_IDS = originals["juejin"]
@@ -146,6 +153,11 @@ class ItouguRelayTests(unittest.TestCase):
         self.assertIn("momo W1-", card["body"]["elements"][0]["alt"]["content"])
         self.assertNotIn("正文", json.dumps(card, ensure_ascii=False))
         self.assertEqual(calls[1]["msg_type"], "post")
+        self.assertEqual(len(render_calls), 1)
+        link_card = json.loads(calls[2]["content"])
+        self.assertEqual(calls[2]["msg_type"], "interactive")
+        self.assertEqual(link_card["body"]["elements"][0]["tag"], "div")
+        self.assertIn("https://example.com/detail", link_card["body"]["elements"][0]["text"]["content"])
 
     def test_dynamic_watermark_is_stable_per_message_and_destination(self):
         old_secret = os.environ.get("ITOUGU_WATERMARK_SECRET")

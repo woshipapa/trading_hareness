@@ -67,6 +67,7 @@ WATCH = {
 PRODUCT_NOTICE = "认真一手咸鱼店铺：餐厅焦糖味的momo，其他都是二手转发。"
 MAX_FEISHU_TEXT_CHARS = 28000
 MAX_PRODUCT_IMAGE_CHARS = 5000
+EXTERNAL_LINK_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
 WATERMARK_SECRET_FILE = Path(os.environ.get(
     "ITOUGU_WATERMARK_SECRET_FILE", str(STATE_FILE.with_name(STATE_FILE.name + ".watermark-secret"))))
 _DEFAULT_WATERMARK_FONTS = (
@@ -199,6 +200,11 @@ def watermark_id(chat_id, text, dedup_seed=""):
     return "W1-%s" % digest
 
 
+def contains_external_link(text):
+    """Link-bearing midday/evening notices stay selectable text for usability."""
+    return bool(EXTERNAL_LINK_RE.search(str(text or "")))
+
+
 def _wrap_image_text(text, font, max_width):
     """Wrap CJK/Latin text with a bounded-cost, conservative character width."""
     # CJK glyphs are approximately one font-size wide.  Avoid measuring every
@@ -313,6 +319,11 @@ def message_chunks_for_destination(chat_id, text, dedup_seed=""):
     if not dedicated:
         return [body[i:i + MAX_FEISHU_TEXT_CHARS] for i in range(0, len(body), MAX_FEISHU_TEXT_CHARS)] or [""]
     marker = watermark_id(normalized, body, dedup_seed)
+    if contains_external_link(body):
+        overhead = len(wrap_product_message("", marker))
+        available = max(1, MAX_FEISHU_TEXT_CHARS - overhead)
+        return [wrap_product_message(body[i:i + available], marker)
+                for i in range(0, len(body), available)] or [wrap_product_message("", marker)]
     overhead = len(wrap_product_message("", marker))
     available = max(1, min(MAX_PRODUCT_IMAGE_CHARS - overhead, MAX_FEISHU_TEXT_CHARS - overhead))
     return [wrap_product_message(body[i:i + available], marker)
@@ -591,16 +602,21 @@ def send_feishu(chat_id, title, text, dedup_seed):
     chunks = message_chunks_for_destination(chat_id, text, dedup_seed)
     dedicated = is_dedicated_destination(chat_id)
     marker = watermark_id(chat_id, text, dedup_seed) if dedicated else ""
+    image_body = dedicated and not contains_external_link(title) and not contains_external_link(text)
     for idx, chunk in enumerate(chunks):
         t = title if idx == 0 else "%s（续 %d/%d）" % (title, idx + 1, len(chunks))
-        if dedicated:
+        if image_body:
             msg_type = "interactive"
-            # Dedicated groups carry the complete body only inside the raster.
+            # Dedicated non-link groups carry the complete body only inside the raster.
             # Keeping raw text out of the card prevents an OAuth reader from
             # extracting a clean, watermark-free copy with a regex.
             image = render_product_image(t, chunk, marker)
             image_key = _upload_product_image(token, image)
             content = build_product_card(t, None, image_key=image_key, image_alt="momo %s" % marker)
+        elif dedicated:
+            # Link-bearing notices remain selectable text so users can open/copy URLs.
+            msg_type = "interactive"
+            content = build_product_card(t, chunk)
         else:
             msg_type = "post"
             content = {"zh_cn": {"title": t[:120], "content": [[{"tag": "text", "text": chunk}]]}}
