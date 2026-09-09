@@ -65,6 +65,9 @@ WATCH = {
 # The dedicated product groups receive a provenance/disclosure line at both
 # ends of the forwarded body.  The shared 公众号同步群 remains unchanged.
 PRODUCT_NOTICE = "认真一手咸鱼店铺：餐厅焦糖味的momo，其他都是二手转发。"
+# The raster carries one standalone shop watermark.  It is deliberately not
+# the selectable-body notice above, so the image has no repeated prefix/suffix.
+IMAGE_SHOP_WATERMARK = "咸鱼店铺：餐厅焦糖味的momo"
 MAX_FEISHU_TEXT_CHARS = 28000
 MAX_PRODUCT_IMAGE_CHARS = 5000
 EXTERNAL_LINK_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
@@ -406,6 +409,9 @@ def render_product_image(title, text, watermark_id_value):
     _draw_text_with_emoji(
         image, draw, (330, 39), "%s · 专属图片正文" % str(title or "")[:70],
         label_font, emoji_font_info, "#ffffff")
+    _draw_text_with_emoji(
+        image, draw, (padding, 140), IMAGE_SHOP_WATERMARK,
+        label_font, emoji_font_info, "#777777")
     y = 185
     for line in lines:
         _draw_text_with_emoji(image, draw, (padding, y), line, body_font, emoji_font_info, "#202124")

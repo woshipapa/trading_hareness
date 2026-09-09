@@ -102,6 +102,7 @@ except ImportError as exc:
     raise SystemExit("candidate requires Pillow for image-only product cards") from exc
 assert relay.WATERMARK_FONT_FILE.is_file(), "candidate requires a CJK font for image-only product cards"
 assert relay.EMOJI_FONT_FILE.is_file(), "candidate requires a colour emoji font for image-only product cards"
+assert relay.IMAGE_SHOP_WATERMARK == "咸鱼店铺：餐厅焦糖味的momo", "candidate must carry the standalone shop watermark"
 import time
 started = time.perf_counter()
 rendered = relay.render_product_image("contract", "🕐 🟢 🔴 📊 📄\n正文" * 300, "W1-contract")

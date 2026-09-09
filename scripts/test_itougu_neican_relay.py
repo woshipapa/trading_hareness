@@ -85,6 +85,10 @@ class ItouguRelayTests(unittest.TestCase):
         body_with_notice = "正文\n\n%s\n\n结尾" % relay.PRODUCT_NOTICE
         self.assertEqual(relay.image_body_text(body_with_notice), body_with_notice)
 
+    def test_image_shop_watermark_is_standalone(self):
+        self.assertEqual(relay.IMAGE_SHOP_WATERMARK, "咸鱼店铺：餐厅焦糖味的momo")
+        self.assertNotIn(relay.PRODUCT_NOTICE, relay.IMAGE_SHOP_WATERMARK)
+
     def test_emoji_runs_keep_symbols_and_zwj_sequences_together(self):
         self.assertEqual(
             relay._split_emoji_runs("时间 🕐 状态 🟢👨‍💻"),
