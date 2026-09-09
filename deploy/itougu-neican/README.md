@@ -7,7 +7,7 @@ appendContentId 的 uuid 幂等去重，不会重复。
 两个产品的专属出口会在正文首尾各加一行「认真一手咸鱼店铺：餐厅焦糖味的momo，其他都是二手转发。」；公众号同步群仍接收未修改的原文。
 专属出口还会显示形如 `【动态水印 W1-xxxxxxxxxxxxxxxx】` 的消息级编号；同一条消息在不同专属群编号不同，长消息的每个分片都会带编号。编号由本机/edge 的 0600 HMAC 密钥生成，不记录密钥本身。
 尾盘掘金内参和擒龙内参的专属出口使用飞书 Card JSON 2.0（`interactive`）；共享公众号同步群仍使用原 `post` 格式。
-专属卡片还附带平铺 PNG 图片水印（店铺名 + `momo` 标识）；图片上传失败时自动回退为原有纯文本卡片，保证消息不中断。
+专属卡片将完整正文渲染为带平铺指纹的 PNG 图片（店铺名 + `momo` + 每消息动态水印）；Card JSON 只保留图片 key，不暴露原始正文。图片渲染或上传失败时专属消息会失败并等待重试，不降级为可被 OAuth 直接读取的纯文本。
 
 测试边界：只验证公众号同步群时，显式设置 `ITOUGU_CHAT_IDS` 为该群，并清空
 `ITOUGU_JUEJIN_CHAT_IDS`、`ITOUGU_ARTICLE_CHAT_IDS`；不要把测试流量导向尾盘掘金内参更新1。
@@ -16,12 +16,13 @@ appendContentId 的 uuid 幂等去重，不会重复。
 
 ## 部署步骤（在 47 上，root）
 1. mkdir -p /opt/itougu-neican
-2. 拷贝：scripts/itougu_neican_relay.py → /opt/itougu-neican/
+2. 安装图片正文渲染依赖：`apt-get update && apt-get install -y --no-install-recommends python3-pil fonts-noto-cjk`
+3. 拷贝：scripts/itougu_neican_relay.py → /opt/itougu-neican/
         本地 itougu_auth.json → /opt/itougu-neican/itougu_auth.json  (chmod 600)
-3. cp itougu-neican.env.example /etc/itougu-neican.env  (填 FEISHU_APP_ID/SECRET, chmod 600)
-4. cp itougu-neican.service /etc/systemd/system/
-5. 首次去重基线（不发历史）：
+4. cp itougu-neican.env.example /etc/itougu-neican.env  (填 FEISHU_APP_ID/SECRET, chmod 600)
+5. cp itougu-neican.service /etc/systemd/system/
+6. 首次去重基线（不发历史）：
    ITOUGU_AUTH_FILE=/opt/itougu-neican/itougu_auth.json ITOUGU_STATE_FILE=/var/lib/itougu-neican/state.json \
    FEISHU_APP_ID=... FEISHU_APP_SECRET=... python3 /opt/itougu-neican/itougu_neican_relay.py --bootstrap
-6. systemctl daemon-reload && systemctl enable --now itougu-neican
-7. 验证：systemctl status itougu-neican;  journalctl -u itougu-neican -f
+7. systemctl daemon-reload && systemctl enable --now itougu-neican
+8. 验证：systemctl status itougu-neican;  journalctl -u itougu-neican -f
