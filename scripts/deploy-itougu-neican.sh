@@ -33,6 +33,15 @@ for command in git ssh; do command -v "$command" >/dev/null || { echo "missing r
 
 release_sha="$(git -C "$source_root" rev-parse --verify "${release_ref}^{commit}")"
 archive_url="https://codeload.github.com/$github_repository/tar.gz/$release_sha"
+# codeload returns 404 (not 403) to an unauthenticated request against a
+# private repository, indistinguishable from "no such commit" unless you
+# already know the repo is private. Reuse the operator's own gh/GH_TOKEN
+# credential for this one-shot fetch; nothing is written to disk or logged
+# on the edge host, and a public repo works the same with no token at all.
+github_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+if [[ -z "$github_token" ]] && command -v gh >/dev/null 2>&1; then
+  github_token="$(gh auth token 2>/dev/null || true)"
+fi
 
 python3 -m unittest discover -s "$source_root/scripts" -p 'test_itougu_*.py' -q
 
@@ -62,17 +71,20 @@ if [[ "$apply" != true ]]; then
   exit 0
 fi
 
-"${ssh_command[@]}" "$edge_host" "bash -s -- '$release_sha' '$archive_url' '$edge_root'" <<'REMOTE'
+"${ssh_command[@]}" "$edge_host" "bash -s -- '$release_sha' '$archive_url' '$edge_root' '$github_token'" <<'REMOTE'
 set -euo pipefail
-release_sha="$1"; archive_url="$2"; edge_root="$3"
+release_sha="$1"; archive_url="$2"; edge_root="$3"; github_token="${4:-}"
 
 temp_dir="$(mktemp -d /tmp/itougu-neican-release.XXXXXX)"
 case "$temp_dir" in /tmp/itougu-neican-release.*) ;; *) exit 1 ;; esac
 trap 'rm -rf -- "$temp_dir"' EXIT
 
-curl --fail --location --silent --show-error --retry 3 "$archive_url" \
+curl_auth=()
+[[ -n "$github_token" ]] && curl_auth=(-H "Authorization: Bearer $github_token")
+curl --fail --location --silent --show-error --retry 3 "${curl_auth[@]}" "$archive_url" \
   | tar -xz -C "$temp_dir" --strip-components=1 --wildcards \
       '*/scripts/itougu_neican_relay.py' '*/scripts/itougu_public_article_relay.py'
+unset github_token curl_auth
 candidate="$temp_dir/scripts/itougu_neican_relay.py"
 candidate_articles="$temp_dir/scripts/itougu_public_article_relay.py"
 test -f "$candidate"
