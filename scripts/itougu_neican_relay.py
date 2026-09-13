@@ -786,6 +786,63 @@ def feishu_token():
         return _feishu_token["value"]
 
 
+_feishu_webhook_map_lock = threading.Lock()
+_feishu_webhook_map_value = None
+_feishu_webhook_map_raw = None
+
+
+def _feishu_webhook_map():
+    """Parse ITOUGU_FEISHU_WEBHOOKS ("chat_id=url;chat_id2=url2") once per value.
+
+    Re-parses only when the env var text itself changes, so a config reload
+    (env re-read at process start) never needs a code change.
+    """
+    raw = os.environ.get("ITOUGU_FEISHU_WEBHOOKS", "")
+    global _feishu_webhook_map_value, _feishu_webhook_map_raw
+    with _feishu_webhook_map_lock:
+        if raw == _feishu_webhook_map_raw and _feishu_webhook_map_value is not None:
+            return _feishu_webhook_map_value
+        mapping = {}
+        for pair in raw.split(";"):
+            pair = pair.strip()
+            if not pair or "=" not in pair:
+                continue
+            chat_id, url = pair.split("=", 1)
+            chat_id, url = chat_id.strip(), url.strip()
+            if chat_id and url:
+                mapping[chat_id] = url
+        _feishu_webhook_map_value, _feishu_webhook_map_raw = mapping, raw
+        return mapping
+
+
+def _feishu_webhook_url(chat_id):
+    return _feishu_webhook_map().get(str(chat_id or "").strip())
+
+
+def _post_via_feishu_webhook(url, msg_type, content):
+    """Send through a custom-bot webhook instead of the tenant API.
+
+    Webhook calls do not count against the tenant's monthly API quota, but
+    the payload shape differs from im/v1/messages: an interactive card is a
+    top-level "card" object (not a JSON-string "content"), and there is no
+    "uuid" field, so a retried send after a timed-out response can duplicate
+    (acceptable for a periodic report/notice; im/v1/messages is still used
+    everywhere idempotency matters more than quota).
+    """
+    if msg_type == "interactive":
+        body = {"msg_type": "interactive", "card": content}
+    elif msg_type == "post":
+        body = {"msg_type": "post", "content": {"post": content}}
+    else:
+        raise RuntimeError("webhook 发送暂不支持的消息类型：%s" % msg_type)
+    req = urllib.request.Request(url, data=json.dumps(body, ensure_ascii=False).encode(),
+                                  method="POST", headers={"content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        res = json.loads(r.read().decode("utf-8"))
+    if res.get("code") not in (None, 0):
+        raise RuntimeError("飞书 webhook 发送失败: code=%s msg=%s" % (res.get("code"), res.get("msg")))
+
+
 def send_feishu(chat_id, title, text, dedup_seed):
     token = feishu_token()
     chunks = message_chunks_for_destination(chat_id, text, dedup_seed)
@@ -810,6 +867,10 @@ def send_feishu(chat_id, title, text, dedup_seed):
         else:
             msg_type = "post"
             content = build_link_post(t, chunk)
+        webhook_url = _feishu_webhook_url(chat_id)
+        if webhook_url:
+            _post_via_feishu_webhook(webhook_url, msg_type, content)
+            continue
         body = json.dumps({
             "receive_id": chat_id, "msg_type": msg_type,
             "content": json.dumps(content, ensure_ascii=False),
