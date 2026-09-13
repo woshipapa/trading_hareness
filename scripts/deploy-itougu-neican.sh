@@ -117,7 +117,11 @@ assert relay.EMOJI_FONT_FILE.is_file(), "candidate requires a colour emoji font 
 assert relay.IMAGE_SHOP_WATERMARK == "咸鱼店铺：餐厅焦糖味的momo", "candidate must carry the standalone shop watermark"
 import time
 started = time.perf_counter()
-rendered = relay.render_product_image("contract", "🕐 🟢 🔴 📊 📄\n正文" * 300, "W1-contract")
+# *300 tripped render_product_image's own "图片正文过长" ceiling (pre-existing,
+# unrelated to today's change - verified it fails the same way against the
+# revision before this deploy). *100 still exercises multi-line wrapping and
+# the tiled watermark well under that ceiling on either font.
+rendered = relay.render_product_image("contract", "🕐 🟢 🔴 📊 📄\n正文" * 100, "W1-contract")
 assert rendered.startswith(b"\x89PNG\r\n\x1a\n"), "candidate renderer must return PNG bytes"
 assert time.perf_counter() - started < 8, "candidate image renderer is too slow"
 
