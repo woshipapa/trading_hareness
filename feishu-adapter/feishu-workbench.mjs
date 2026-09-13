@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { buildRelayCard } from './card-content.mjs';
+import { isWebhookSentinel } from './group-relay.mjs';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
 const TENANT_TOKEN_PATH = '/auth/v3/tenant_access_token/internal';
@@ -547,7 +548,10 @@ export function createFeishuWorkbench({ appId, appSecret, larkClient, ledger, us
 	async function syncSourceChange(record, { deleted = false, originalSynced = false } = {}) {
 		if (!record) return null;
 		if (deleted) {
-			const targetIds = [...new Set([...(Array.isArray(record.target_message_ids) ? record.target_message_ids : []).map((entry) => (typeof entry === 'string' ? entry : (entry?.messageId ?? entry?.message_id))), record.action_card_message_id].filter(Boolean))];
+			// A webhook-delivered copy has no application message_id to recall
+			// (see group-relay.mjs's WEBHOOK_SENT_PREFIX); skip it rather than
+			// issue a DELETE that can only fail against a bogus id.
+			const targetIds = [...new Set([...(Array.isArray(record.target_message_ids) ? record.target_message_ids : []).map((entry) => (typeof entry === 'string' ? entry : (entry?.messageId ?? entry?.message_id))), record.action_card_message_id].filter((id) => id && !isWebhookSentinel(id)))];
 			if (!targetIds.length) return record;
 			for (const messageId of targetIds) {
 				await tenantRequest(`/im/v1/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' }).catch((error) => logger.warn(`撤回汇总群同步消息失败：${error.message}`));
@@ -565,7 +569,7 @@ export function createFeishuWorkbench({ appId, appSecret, larkClient, ledger, us
 		const firstTarget = Array.isArray(record.target_message_ids) ? record.target_message_ids[0] : null;
 		const targetMessageId = typeof firstTarget === 'string' ? firstTarget : (firstTarget?.messageId ?? firstTarget?.message_id ?? null);
 		const targetMsgType = typeof firstTarget === 'string' ? null : (firstTarget?.msgType ?? firstTarget?.msg_type ?? null);
-		if (!originalSynced && record.message?.msg_type === 'text' && targetMessageId) {
+		if (!originalSynced && record.message?.msg_type === 'text' && targetMessageId && !isWebhookSentinel(targetMessageId)) {
 			const sync = targetMsgType === 'interactive'
 				? tenantRequest(`/im/v1/messages/${encodeURIComponent(targetMessageId)}`, { method: 'PATCH', body: { content: JSON.stringify(buildRelayCard({ tag: record.route_tag, text: messagePlainText(record.message) })) } })
 				: tenantRequest(`/im/v1/messages/${encodeURIComponent(targetMessageId)}`, { method: 'PUT', body: { msg_type: 'text', content: JSON.stringify({ text: taggedText(record.route_tag, messagePlainText(record.message)) }) } });

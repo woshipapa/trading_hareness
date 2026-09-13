@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { createGroupRelay } from './group-relay.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map();
 	const sent = [];
@@ -75,6 +75,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		config: {
 			enabled: true, targetChatId: 'oc_summary', intervalSeconds: 10, sourceConcurrency, historyLookbackSeconds: 300, overlapSeconds: 30, outboundCard,
 			bootstrapMode: 'forward_existing', sources: sources ?? [{ key: 'anqiang', tag: 'anqiang', chatId: 'oc_source', chatName: '马安强 (1)', targetChatIds }],
+			webhooksByChatId: webhooksByChatId ? new Map(Object.entries(webhooksByChatId)) : undefined,
 		},
 	});
 	return { relay, sent, updated, patched, saved, listCalls };
@@ -467,4 +468,97 @@ test('an edit still reaches the other targets when one delivered bubble was reca
 	assert.equal(saved.get('om_recalled_target').status, 'sent');
 	assert.ok(warnings.some((line) => line.includes('om_target_2') && line.includes('230011')), warnings.join('\n'));
 	assert.ok(!warnings.some((line) => line.includes('同步源消息编辑失败')), warnings.join('\n'));
+});
+
+function withFetchMock(handler, run) {
+	const original = globalThis.fetch;
+	const calls = [];
+	globalThis.fetch = async (url, options) => {
+		calls.push({ url, body: JSON.parse(options.body) });
+		return handler(url, options);
+	};
+	return run(calls).finally(() => { globalThis.fetch = original; });
+}
+
+test('a webhook-configured target is delivered through the webhook, not the tenant API', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = { message_id: 'om_webhook_1', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: 'liwei update' }) } };
+			const { relay, sent, saved } = createHarness([message], {
+				targetChatIds: ['oc_liwei_forward'],
+				webhooksByChatId: { oc_liwei_forward: 'https://open.feishu.cn/open-apis/bot/v2/hook/fake' },
+			});
+			await relay.tick();
+			// The summary group still goes through the tenant API; only the
+			// webhook-configured target is diverted.
+			assert.equal(sent.length, 1);
+			assert.equal(sent[0].receive_id, 'oc_summary');
+			assert.equal(webhookCalls.length, 1);
+			assert.equal(webhookCalls[0].url, 'https://open.feishu.cn/open-apis/bot/v2/hook/fake');
+			assert.deepEqual(webhookCalls[0].body, { msg_type: 'text', content: { text: '#anqiang\nliwei update' } });
+			const targets = saved.get('om_webhook_1').targetMessageIds;
+			const webhookTarget = targets.find((entry) => entry.targetChatId === 'oc_liwei_forward');
+			assert.match(webhookTarget.messageId, /^webhook-sent:oc_liwei_forward:\d+$/);
+			assert.equal(saved.get('om_webhook_1').status, 'sent');
+		},
+	);
+});
+
+test('a webhook target that already succeeded is not resent when another target is retried', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = { message_id: 'om_webhook_retry', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: 'x' }) } };
+			const { relay, saved } = createHarness([message], {
+				targetChatIds: ['oc_liwei_forward'],
+				webhooksByChatId: { oc_liwei_forward: 'https://x/hook' },
+				failTargetChatId: 'oc_summary', retryFailed: true,
+			});
+			await relay.tick();
+			assert.equal(webhookCalls.length, 1);
+			assert.equal(saved.get('om_webhook_retry').status, 'failed');
+			await relay.tick();
+			assert.equal(webhookCalls.length, 1, 'the already-succeeded webhook target must not be re-sent on retry');
+			assert.equal(saved.get('om_webhook_retry').status, 'sent');
+		},
+	);
+});
+
+test('an edit skips a webhook-delivered target but still updates the tenant-API target', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = { message_id: 'om_webhook_edit', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '第一版' }) } };
+			const { relay, updated } = createHarness([message], {
+				targetChatIds: ['oc_liwei_forward'],
+				webhooksByChatId: { oc_liwei_forward: 'https://x/hook' },
+			});
+			await relay.tick();
+			assert.equal(webhookCalls.length, 1);
+			message.updated = true;
+			message.update_time = String(Date.now() + 1000);
+			message.body.content = JSON.stringify({ text: '修订版' });
+			await relay.tick();
+			assert.equal(webhookCalls.length, 1, 'an edit must not re-post to the webhook target');
+			assert.equal(updated.length, 1);
+			assert.equal(updated[0].path.message_id, 'om_target_1');
+		},
+	);
+});
+
+test('a message type the webhook cannot carry still uses the tenant API even when a webhook is configured', async () => {
+	await withFetchMock(
+		() => { throw new Error('must not call the webhook for a file message'); },
+		async (webhookCalls) => {
+			const message = { message_id: 'om_webhook_file', msg_type: 'file', create_time: String(Date.now()), body: { content: JSON.stringify({ file_key: 'file_source', file_name: 'source.pdf' }) } };
+			const { relay, sent } = createHarness([message], {
+				targetChatIds: ['oc_liwei_forward'],
+				webhooksByChatId: { oc_liwei_forward: 'https://x/hook' },
+			});
+			await relay.tick();
+			assert.equal(webhookCalls.length, 0);
+			assert.equal(sent.length, 2, 'both the summary group and the webhook-configured target fall back to the tenant API');
+		},
+	);
 });

@@ -26,6 +26,7 @@ import { parsePaperIngestIds } from './paper-ingest-command.mjs';
 import { cardPayload } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { personalDecisionResearchPaths } from './personal-decision-routes.mjs';
+import { normalizeLarkAgentXMessage } from './larkagentx-ingress.mjs';
 import Busboy from 'busboy';
 
 const required = ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'N8N_TEXT_WEBHOOK_URL', 'N8N_MEDIA_PART_WEBHOOK_URL', 'N8N_MEDIA_FINALIZE_WEBHOOK_URL'];
@@ -52,6 +53,7 @@ const paperIngestWebhook = String(process.env.PAPER_KB_INGEST_WEBHOOK ?? '').tri
 const paperIngestChatId = String(process.env.PAPER_KB_FEISHU_CHAT_ID ?? '').trim();
 const paperSearchWebhook = String(process.env.PAPER_KB_SEARCH_WEBHOOK ?? '').trim();
 const paperFeedbackWebhook = String(process.env.PAPER_KB_FEEDBACK_WEBHOOK ?? '').trim();
+const larkAgentXIngressToken = String(process.env.LARKX_BRIDGE_TOKEN ?? '').trim();
 const feishuAlertReceiveIdType = String(process.env.FEISHU_ALERT_RECEIVE_ID_TYPE ?? 'chat_id').trim();
 const supportedAlertReceiveIdTypes = new Set(['chat_id', 'open_id', 'user_id', 'union_id']);
 if (!supportedAlertReceiveIdTypes.has(feishuAlertReceiveIdType)) {
@@ -171,8 +173,23 @@ const groupRelayBootstrapMode = String(process.env.FEISHU_GROUP_RELAY_BOOTSTRAP_
 if (!['skip_existing', 'forward_existing'].includes(groupRelayBootstrapMode)) {
 	throw new Error('FEISHU_GROUP_RELAY_BOOTSTRAP_MODE must be skip_existing or forward_existing');
 }
+// "chat_id=url;chat_id2=url2" — a target configured here is delivered
+// through a custom-bot webhook (no monthly API quota cost) instead of
+// im/v1/messages, at the cost of edit/recall sync for that one target
+// (see group-relay.mjs's WEBHOOK_SENT_PREFIX). Same format as the Python
+// relays' ITOUGU_FEISHU_WEBHOOKS / WECHAT_BIZ_FEISHU_WEBHOOKS.
+const groupRelayWebhooksByChatId = new Map(
+	String(process.env.FEISHU_GROUP_RELAY_WEBHOOKS ?? '')
+		.split(';')
+		.map((pair) => pair.trim())
+		.filter(Boolean)
+		.map((pair) => pair.split('=').map((part) => part.trim()))
+		.filter(([chatId, url]) => chatId && url)
+		.map(([chatId, ...rest]) => [chatId, rest.join('=')]),
+);
 const groupRelayConfig = {
 	enabled: String(process.env.FEISHU_GROUP_RELAY_ENABLED ?? 'true').toLowerCase() !== 'false',
+	webhooksByChatId: groupRelayWebhooksByChatId,
 	targetChatId: String(process.env.FEISHU_GROUP_RELAY_TARGET_CHAT_ID ?? '').trim(),
 	intervalSeconds: groupRelayIntervalSeconds,
 	sourceConcurrency: Math.floor(groupRelaySourceConcurrency),
@@ -1032,6 +1049,35 @@ async function handleManualRelay(request, response) {
 	}
 }
 
+async function handleLarkAgentXInbound(request, response) {
+	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
+		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'unauthorized' }));
+		return;
+	}
+	try {
+		const input = await readJsonBody(request, 64 * 1024);
+		const data = normalizeLarkAgentXMessage(input);
+		addEvent(data);
+		updateEvent(data.event_id, { n8n_status: 'LarkAgentX 消息转发中' });
+		const result = await forwardToN8n(data, {
+			source: 'larkagentx', sourceLabel: data.source_label,
+			messageText: JSON.parse(data.message.content).text,
+			receivedAt: new Date().toISOString(),
+		});
+		updateEvent(data.event_id, {
+			n8n_status: result?.duplicate ? '重复已跳过' : '已接收，处理中',
+			target_status: result?.duplicate ? '本地幂等去重，未重复请求远端' : null,
+		});
+		response.writeHead(202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: result?.duplicate ? 'duplicate' : 'accepted', message_id: data.message.message_id, job_id: result?.jobId ?? null }));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message }));
+	}
+}
+
 async function renderMetrics() {
 	const [rows, summary] = await Promise.all([ledger.metrics(), ledger.observability()]);
 	const lines = ['# HELP ingestion_jobs Number of durable ingestion jobs by status and stage', '# TYPE ingestion_jobs gauge'];
@@ -1824,6 +1870,10 @@ if (url.pathname === '/health') {
 	}
 	if (url.pathname === '/manual-relay' && request.method === 'POST') {
 		void handleManualRelay(request, response);
+		return;
+	}
+	if (url.pathname === '/internal/larkagentx/inbound' && request.method === 'POST') {
+		void handleLarkAgentXInbound(request, response);
 		return;
 	}
 	if (url.pathname === '/wechat-group-relay' && request.method === 'POST') {

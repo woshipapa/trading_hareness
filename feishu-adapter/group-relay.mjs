@@ -32,6 +32,33 @@ const MAX_SOURCE_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export class RelayUnsupportedError extends Error {}
 
+// A custom-bot webhook send has no application-owned message_id, so it can
+// never be patched or recalled through im/v1/messages. This sentinel is
+// stored in place of a real id: truthy (so a completed webhook fan-out is
+// never re-attempted on retry, unlike a genuine failure) but recognizably
+// not a Feishu id, so the edit/recall paths know to skip it instead of
+// calling the tenant API with a bogus id.
+export const WEBHOOK_SENT_PREFIX = 'webhook-sent:';
+export function isWebhookSentinel(id) {
+	return typeof id === 'string' && id.startsWith(WEBHOOK_SENT_PREFIX);
+}
+// Message types a custom-bot webhook can carry. "file" has no webhook
+// equivalent (a custom bot cannot receive an uploaded file_key the way a
+// tenant-API message can), so a target configured with a webhook still
+// falls back to the tenant API for that one message.
+const WEBHOOK_CAPABLE_MSG_TYPES = new Set(['text', 'post', 'interactive']);
+
+async function postViaWebhook(url, msgType, content) {
+	const body = msgType === 'interactive'
+		? { msg_type: 'interactive', card: content }
+		: msgType === 'post'
+			? { msg_type: 'post', content: { post: content } }
+			: { msg_type: 'text', content };
+	const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+	const result = await response.json().catch(() => ({}));
+	if (!response.ok || (result?.code && result.code !== 0)) throw new Error(`飞书 webhook 发送失败：${result?.msg ?? result?.code ?? response.status}`);
+}
+
 function parseJson(value, fallback = {}) {
 	try { return JSON.parse(value ?? '{}'); } catch { return fallback; }
 }
@@ -239,6 +266,14 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 	}
 
 	async function sendMessage({ targetChatId, messageId, component, msgType, content }) {
+		const webhookUrl = config.webhooksByChatId?.get(targetChatId);
+		if (webhookUrl && WEBHOOK_CAPABLE_MSG_TYPES.has(msgType)) {
+			await postViaWebhook(webhookUrl, msgType, content);
+			// No uuid/idempotency on this path (webhooks take no such field): a
+			// retried send after a timed-out response can duplicate. Acceptable
+			// for a destination that opted out of edit/recall sync for quota.
+			return `${WEBHOOK_SENT_PREFIX}${targetChatId}:${Date.now()}`;
+		}
 		const result = await larkClient.im.v1.message.create({
 			params: { receive_id_type: 'chat_id' },
 			data: { receive_id: targetChatId, msg_type: msgType, content: JSON.stringify(content), uuid: deterministicUuid(messageId, component, targetChatId) },
@@ -435,6 +470,10 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		// instance) must not stop the edit reaching the others, so every target
 		// is attempted and only a total failure is raised.
 		const results = await Promise.allSettled(targetMessages.map(async ({ messageId: targetMessageId, msgType }) => {
+			// A webhook-delivered copy has no application message_id to patch;
+			// treat it the same as an unsupported msg_type: a no-op, not a
+			// failure, so it never blocks the edit from reaching real targets.
+			if (isWebhookSentinel(targetMessageId)) return false;
 			const payload = await payloadFor(msgType === 'interactive');
 			if (!['text', 'post', 'interactive'].includes(payload.msgType)) return false;
 			const result = payload.msgType === 'interactive'
