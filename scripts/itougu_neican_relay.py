@@ -507,14 +507,13 @@ def message_chunks_for_destination(chat_id, text, dedup_seed=""):
     dedicated = is_dedicated_destination(normalized)
     if not dedicated:
         return [body[i:i + MAX_FEISHU_TEXT_CHARS] for i in range(0, len(body), MAX_FEISHU_TEXT_CHARS)] or [""]
+    # MAX_PRODUCT_IMAGE_CHARS no longer applies: dedicated destinations always
+    # send plain post/text now (send_feishu dropped the image-card path), so
+    # every chunk can use the full text budget instead of the tighter size
+    # that used to keep a rendered image legible.
     marker = watermark_id(normalized, body, dedup_seed)
-    if contains_external_link(body):
-        overhead = len(wrap_product_message("", marker))
-        available = max(1, MAX_FEISHU_TEXT_CHARS - overhead)
-        return [wrap_product_message(body[i:i + available], marker)
-                for i in range(0, len(body), available)] or [wrap_product_message("", marker)]
     overhead = len(wrap_product_message("", marker))
-    available = max(1, min(MAX_PRODUCT_IMAGE_CHARS - overhead, MAX_FEISHU_TEXT_CHARS - overhead))
+    available = max(1, MAX_FEISHU_TEXT_CHARS - overhead)
     return [wrap_product_message(body[i:i + available], marker)
             for i in range(0, len(body), available)] or [wrap_product_message("", marker)]
 
@@ -844,29 +843,17 @@ def _post_via_feishu_webhook(url, msg_type, content):
 
 
 def send_feishu(chat_id, title, text, dedup_seed):
+    # 2026-09: dedicated destinations (擒龙内参/尾盘掘金) no longer render a
+    # watermarked image card — always send plain post/text now. render_product_image /
+    # build_product_card / watermark_id stay defined (the edge deploy contract
+    # check in deploy-itougu-neican.sh still exercises them directly) but are
+    # no longer called from here.
     token = feishu_token()
     chunks = message_chunks_for_destination(chat_id, text, dedup_seed)
-    dedicated = is_dedicated_destination(chat_id)
-    marker = watermark_id(chat_id, text, dedup_seed) if dedicated else ""
-    image_body = dedicated and not contains_external_link(title) and not contains_external_link(text)
     for idx, chunk in enumerate(chunks):
         t = title if idx == 0 else "%s（续 %d/%d）" % (title, idx + 1, len(chunks))
-        if image_body:
-            msg_type = "interactive"
-            # Dedicated non-link groups carry the complete body only inside the raster.
-            # Keeping raw text out of the card prevents an OAuth reader from
-            # extracting a clean, watermark-free copy with a regex.
-            image = render_product_image(t, image_body_text(chunk), marker)
-            image_key = _upload_product_image(token, image)
-            content = build_product_card(t, None, image_key=image_key, image_alt="momo %s" % marker)
-        elif dedicated:
-            # Link-bearing notices use a native post: Card 2.0 plain_text does
-            # not consistently turn URL-looking text into a clickable link.
-            msg_type = "post"
-            content = build_link_post(t, chunk)
-        else:
-            msg_type = "post"
-            content = build_link_post(t, chunk)
+        msg_type = "post"
+        content = build_link_post(t, chunk)
         webhook_url = _feishu_webhook_url(chat_id)
         if webhook_url:
             _post_via_feishu_webhook(webhook_url, msg_type, content)
