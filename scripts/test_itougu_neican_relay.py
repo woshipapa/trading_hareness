@@ -123,7 +123,10 @@ class ItouguRelayTests(unittest.TestCase):
         self.assertTrue(image.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(len(image), 1024)
 
-    def test_send_uses_card_v2_only_for_dedicated_product_group(self):
+    def test_send_no_longer_renders_image_cards_for_dedicated_groups(self):
+        """2026-09: dedicated destinations dropped the watermarked image card;
+        every destination now sends plain post/text, and the image
+        rendering/upload machinery is never invoked from send_feishu."""
         originals = {
             "chat_ids": relay.CHAT_IDS,
             "juejin": relay.JUEJIN_CHAT_IDS,
@@ -172,21 +175,15 @@ class ItouguRelayTests(unittest.TestCase):
             relay.urllib.request.urlopen = originals["urlopen"]
             relay.render_product_image = originals["render"]
             relay._upload_product_image = originals["upload"]
-        self.assertEqual(calls[0]["msg_type"], "interactive")
-        card = json.loads(calls[0]["content"])
-        self.assertEqual(card["schema"], "2.0")
-        self.assertEqual(card["body"]["elements"][0]["img_key"], "img_watermark")
-        self.assertIn("momo W1-", card["body"]["elements"][0]["alt"]["content"])
-        self.assertNotIn("正文", json.dumps(card, ensure_ascii=False))
-        self.assertEqual(calls[1]["msg_type"], "post")
-        self.assertEqual(len(render_calls), 1)
-        self.assertEqual(render_calls[0][1], "正文")
+        self.assertEqual([call["msg_type"] for call in calls], ["post", "post", "post"])
+        self.assertEqual(render_calls, [])
+        dedicated_post = json.loads(calls[0]["content"])
+        dedicated_elements = dedicated_post["zh_cn"]["content"][0]
+        self.assertIn("正文", "".join(e.get("text", "") for e in dedicated_elements))
         link_post = json.loads(calls[2]["content"])
-        self.assertEqual(calls[2]["msg_type"], "post")
         link_elements = link_post["zh_cn"]["content"][0]
         link_anchor = next(element for element in link_elements if element.get("tag") == "a")
         self.assertEqual(link_anchor["href"], "https://example.com/detail")
-        self.assertNotIn('"schema": "2.0"', calls[2]["content"])
 
     def test_dynamic_watermark_is_stable_per_message_and_destination(self):
         old_secret = os.environ.get("ITOUGU_WATERMARK_SECRET")
@@ -214,11 +211,14 @@ class ItouguRelayTests(unittest.TestCase):
         relay.CHAT_IDS = ["shared"]
         relay.JUEJIN_CHAT_IDS = ["juejin-only"]
         try:
+            # 2026-09: dedicated destinations no longer render an image, so
+            # chunking uses the full text budget (MAX_FEISHU_TEXT_CHARS), not
+            # the tighter size that used to keep a rendered image legible.
             chunks = relay.message_chunks_for_destination(
-                "juejin-only", "x" * (relay.MAX_PRODUCT_IMAGE_CHARS + 1), "append-1")
+                "juejin-only", "x" * (relay.MAX_FEISHU_TEXT_CHARS + 1), "append-1")
             self.assertEqual(len(chunks), 2)
             self.assertTrue(all(chunk.count("动态水印 W1-") == 2 for chunk in chunks))
-            self.assertTrue(all(len(chunk) <= relay.MAX_PRODUCT_IMAGE_CHARS for chunk in chunks))
+            self.assertTrue(all(len(chunk) <= relay.MAX_FEISHU_TEXT_CHARS for chunk in chunks))
         finally:
             relay.CHAT_IDS = old_chat_ids
             relay.JUEJIN_CHAT_IDS = old_juejin
