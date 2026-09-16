@@ -21,6 +21,7 @@ class LarkAgentXRecoveryTests(unittest.IsolatedAsyncioTestCase):
 		instance.websocket_attempt_count = attempts
 		instance.websocket_state = "connecting"
 		instance._recovery_in_flight = False
+		instance.startup_recovery_count = 0
 		instance.reconnect_recovery_count = 0
 		instance.recovery_reasons = []
 
@@ -31,13 +32,13 @@ class LarkAgentXRecoveryTests(unittest.IsolatedAsyncioTestCase):
 		instance.recover_gap = recover
 		return instance
 
-	async def test_first_connection_does_not_backfill(self):
+	async def test_first_connection_repairs_bounded_startup_gap(self):
 		instance = self.make_bridge(1)
 		instance.on_websocket_connected()
 		await asyncio.sleep(0)
 		self.assertEqual(instance.websocket_state, "connected")
-		self.assertEqual(instance.reconnect_recovery_count, 0)
-		self.assertEqual(instance.recovery_reasons, [])
+		self.assertEqual(instance.startup_recovery_count, 1)
+		self.assertEqual(instance.recovery_reasons, ["larkagentx_websocket_startup"])
 
 	async def test_reconnect_schedules_bounded_history_repair(self):
 		instance = self.make_bridge(2)

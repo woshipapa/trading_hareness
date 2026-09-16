@@ -308,6 +308,7 @@ class Bridge:
 		self.groups_skipped = 0
 		self.last_protocol_telemetry = None
 		self.recovery_count = 0
+		self.startup_recovery_count = 0
 		self.reconnect_recovery_count = 0
 		self.last_recovery_at = None
 		self.last_recovery_reason = None
@@ -377,13 +378,19 @@ class Bridge:
 	def on_websocket_connected(self) -> None:
 		"""Mark the socket healthy at handshake time, before the first event."""
 		self.websocket_state = "connected"
-		# The first connection starts from a clean process state.  Any later
-		# connection may hide events emitted while the socket was down, even if
-		# no protobuf error was observed, so reconcile the bounded history gap.
-		if self.websocket_attempt_count > 1 and not self._recovery_in_flight:
+		# Both process startup and later reconnects may hide events emitted while
+		# the socket was down. The official repair path is ledger-idempotent, so a
+		# bounded reconciliation is safer than assuming the first connection has
+		# no preceding gap.
+		if not self._recovery_in_flight:
 			self._recovery_in_flight = True
-			self.reconnect_recovery_count += 1
-			asyncio.create_task(self.recover_gap("larkagentx_websocket_reconnect"))
+			if self.websocket_attempt_count == 1:
+				self.startup_recovery_count += 1
+				reason = "larkagentx_websocket_startup"
+			else:
+				self.reconnect_recovery_count += 1
+				reason = "larkagentx_websocket_reconnect"
+			asyncio.create_task(self.recover_gap(reason))
 
 	def health(self) -> dict[str, Any]:
 		return {
@@ -415,6 +422,7 @@ class Bridge:
 			"last_protocol_telemetry": self.last_protocol_telemetry,
 			"last_decode_error_at": self.last_decode_error_at,
 			"recovery_count": self.recovery_count,
+			"startup_recovery_count": self.startup_recovery_count,
 			"reconnect_recovery_count": self.reconnect_recovery_count,
 			"last_recovery_at": self.last_recovery_at,
 			"last_recovery_reason": self.last_recovery_reason,
