@@ -105,8 +105,9 @@ Itougu 轮询服务使用独立的持久化环境 `/etc/itougu-neican.env`，不
 | `fc9eac4` | WebSocket 重连后触发 600 秒幂等缺口补读 | recovery 测试通过 |
 | `a662b33` | 进程首次启动也执行有限历史补读 | edge 实测 `completed`, `sent=0`, `failed=0` |
 | `21fa57f` | 增加随机扩展字段、嵌套 group 和边界 fuzz 回放 | 6 项协议测试通过 |
+| `eb5bad7` | 容错 parser 只恢复部分 entity 时自动触发官方补读 | recovery 10 项通过 |
 
-当前 edge 最后一次 overlay 发布为 `hotfix-20260916T085306Z-a662b336c6d0-dirty-12788`；bridge WebSocket 已连接，`decode_error_count=0`，`decode_fallback_count=0`，启动补读已完成，补读窗口为 600 秒。`dirty` 只表示工作树仍有其他未纳入本轮的历史改动，不代表本轮 LarkAgentX 提交未记录。
+当前 edge 最后一次 overlay 发布为 `hotfix-20260916T090503Z-eb5bad76c1df-dirty-2690`；bridge WebSocket 已连接，`decode_error_count=0`，`decode_fallback_count=0`，启动补读已完成，补读窗口为 600 秒。`dirty` 只表示工作树仍有其他未纳入本轮的历史改动，不代表本轮 LarkAgentX 提交未记录。
 # 2026-09-14 OAuth 补读身份修复
 
 补读路由必须读取 `relayRoutes()` 返回的 `chatId`，不能读数据库字段名 `chat_id` 后回落到 WebSocket 数字群 ID。WebSocket 数字消息 ID 与官方 `om_` ID 不做相等比较。
