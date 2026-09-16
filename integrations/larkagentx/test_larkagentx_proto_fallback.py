@@ -7,9 +7,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 try:
 	import bridge
-	from proto_wire import tolerant_websocket_decode_with_meta
+	from proto_wire import tolerant_websocket_decode, tolerant_websocket_decode_with_meta
 except ModuleNotFoundError as error:  # The workstation does not carry the supervisor venv.
 	bridge = None
+	tolerant_websocket_decode = None
 	tolerant_websocket_decode_with_meta = None
 	BRIDGE_IMPORT_ERROR = error
 else:
@@ -53,7 +54,7 @@ class LarkAgentXProtoFallbackTests(unittest.TestCase):
 		frame = bfield(8, packet)
 
 		with patch.object(bridge.decoders, "decode_message_content", return_value=("synthetic", None)):
-			meta, messages = bridge.tolerant_websocket_decode(frame)
+			meta, messages = tolerant_websocket_decode(frame)
 
 		self.assertEqual(meta["cmd"], 6)
 		self.assertEqual(len(messages), 1)
@@ -77,7 +78,7 @@ class LarkAgentXProtoFallbackTests(unittest.TestCase):
 		frame = bfield(8, packet)
 
 		with patch.object(bridge.decoders, "decode_message_content", return_value=("synthetic", None)):
-			meta, messages = bridge.tolerant_websocket_decode(frame)
+			meta, messages = tolerant_websocket_decode(frame)
 
 		self.assertEqual(meta["cmd"], 6)
 		self.assertEqual(messages[0]["msg_id"], "group-msg")
