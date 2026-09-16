@@ -188,10 +188,14 @@ def _tolerant_entity_message(raw: bytes, telemetry: dict[str, Any]) -> dict[str,
 	message.setdefault("msg_type", 0)
 	message.setdefault("chat_type", 0)
 	content_bytes = message.get("content_bytes", b"")
+	content_status = "decoded"
 	try:
 		summary, content_data = decoders.decode_message_content(message["msg_type"], content_bytes)
 	except Exception as error:
 		summary, content_data = f"[{decoders.MSG_TYPE_NAMES.get(message['msg_type'], message['msg_type'])}消息解析失败: {error}]", None
+		content_status = "unsupported"
+	if message["msg_type"] not in decoders.MSG_TYPE_NAMES:
+		content_status = "unsupported"
 	chat_type = int(message.get("chat_type", 0))
 	root_id = message.get("root_id", "")
 	thread_id = message.get("thread_id", "")
@@ -222,6 +226,7 @@ def _tolerant_entity_message(raw: bytes, telemetry: dict[str, Any]) -> dict[str,
 		"update_time": message.get("update_time"),
 		"content": summary,
 		"content_data": content_data,
+		"content_status": content_status,
 	}
 
 
