@@ -308,7 +308,9 @@ class Bridge:
 		self.groups_skipped = 0
 		self.last_protocol_telemetry = None
 		self.recovery_count = 0
+		self.reconnect_recovery_count = 0
 		self.last_recovery_at = None
+		self.last_recovery_reason = None
 		self.last_recovery_result = None
 		try:
 			configured_gap_seconds = int(os.environ.get("LARKX_GAP_REPAIR_SECONDS", str(DEFAULT_GAP_REPAIR_SECONDS)))
@@ -375,6 +377,13 @@ class Bridge:
 	def on_websocket_connected(self) -> None:
 		"""Mark the socket healthy at handshake time, before the first event."""
 		self.websocket_state = "connected"
+		# The first connection starts from a clean process state.  Any later
+		# connection may hide events emitted while the socket was down, even if
+		# no protobuf error was observed, so reconcile the bounded history gap.
+		if self.websocket_attempt_count > 1 and not self._recovery_in_flight:
+			self._recovery_in_flight = True
+			self.reconnect_recovery_count += 1
+			asyncio.create_task(self.recover_gap("larkagentx_websocket_reconnect"))
 
 	def health(self) -> dict[str, Any]:
 		return {
@@ -406,7 +415,9 @@ class Bridge:
 			"last_protocol_telemetry": self.last_protocol_telemetry,
 			"last_decode_error_at": self.last_decode_error_at,
 			"recovery_count": self.recovery_count,
+			"reconnect_recovery_count": self.reconnect_recovery_count,
 			"last_recovery_at": self.last_recovery_at,
+			"last_recovery_reason": self.last_recovery_reason,
 			"last_recovery_result": self.last_recovery_result,
 			"gap_repair_seconds": self.gap_repair_seconds,
 			"last_observed_chat_id": self.last_observed_chat_id or None,
@@ -430,7 +441,7 @@ class Bridge:
 		if self._recovery_in_flight or (last and (datetime.now(timezone.utc) - last).total_seconds() < 30):
 			return
 		self._recovery_in_flight = True
-		asyncio.create_task(self.recover_gap())
+		asyncio.create_task(self.recover_gap("larkagentx_websocket_decode_error"))
 
 	def on_decode_fallback(self, error: Exception, frame_bytes: int, message_count: int, telemetry: dict[str, Any] | None = None) -> None:
 		"""Record a schema-tolerant recovery without starting OAuth backfill."""
@@ -462,23 +473,25 @@ class Bridge:
 			(telemetry or {}).get("groups_skipped", 0), error,
 		)
 
-	async def recover_gap(self) -> None:
+	async def recover_gap(self, reason: str) -> None:
 		try:
 			now_ms = int(time.time() * 1000)
 			gap_url = self.ingress_url.rsplit('/', 1)[0] + '/gap-repair'
 			payload = {
 				"from_time": now_ms - self.gap_repair_seconds * 1000,
 				"to_time": now_ms,
-				"reason": "larkagentx_websocket_decode_error",
+				"reason": reason,
 				"source_chat_ids": sorted(self.websocket_chat_ids),
 			}
 			result = await asyncio.to_thread(post_json, gap_url, self.token, payload)
 			self.recovery_count += 1
 			self.last_recovery_at = datetime.now(timezone.utc).isoformat()
-			self.last_recovery_result = {"status": result.get("status"), "sent": result.get("sent", 0), "deduplicated": result.get("deduplicated", 0), "failed": result.get("failed", 0)}
+			self.last_recovery_reason = reason
+			self.last_recovery_result = {"status": result.get("status"), "reason": reason, "sent": result.get("sent", 0), "deduplicated": result.get("deduplicated", 0), "failed": result.get("failed", 0)}
 			LOG.info("WebSocket 解码异常后的缺口补读完成：%s", self.last_recovery_result)
 		except Exception as recovery_error:
-			self.last_recovery_result = {"status": "error", "message": str(recovery_error)[:240]}
+			self.last_recovery_reason = reason
+			self.last_recovery_result = {"status": "error", "reason": reason, "message": str(recovery_error)[:240]}
 			LOG.warning("WebSocket 解码异常后的缺口补读失败：%s", recovery_error)
 		finally:
 			self._recovery_in_flight = False
