@@ -1,5 +1,6 @@
 import sys
 import unittest
+import random
 from pathlib import Path
 from unittest.mock import patch
 
@@ -130,6 +131,39 @@ class LarkAgentXProtoFallbackTests(unittest.TestCase):
 		self.assertTrue(telemetry["partial"])
 		self.assertEqual(len(telemetry["entry_errors"]), 1)
 		self.assertEqual(telemetry["entry_errors"][0]["layer"], "entity")
+
+	def test_random_valid_extensions_do_not_break_message_recovery(self):
+		for seed in range(64):
+			rng = random.Random(seed)
+			unknown_packet = bfield(rng.choice([70, 71, 72, 73]), f"packet-{seed}".encode())
+			unknown_entity = vfield(rng.choice([70, 71, 72, 73]), rng.randrange(0, 1 << 20))
+			entity = (
+				bfield(1, f"fuzz-{seed}".encode())
+				+ vfield(2, 1)
+				+ bfield(3, b"synthetic-user")
+				+ unknown_entity
+				+ bfield(10, b"7661209668907207659")
+				+ vfield(46, 2)
+			)
+			entry = bfield(1, b"entry") + bfield(2, entity)
+			push = bfield(1, entry)
+			packet = bfield(1, f"fuzz-sid-{seed}".encode()) + unknown_packet + vfield(3, 6) + bfield(5, push)
+			frame = bfield(8, packet)
+
+			with patch.object(bridge.decoders, "decode_message_content", return_value=("synthetic", None)):
+				_, messages, telemetry = tolerant_websocket_decode_with_meta(frame)
+
+			self.assertEqual([message["msg_id"] for message in messages], [f"fuzz-{seed}"])
+			self.assertGreaterEqual(len(telemetry["unknown_fields"]), 2)
+
+	def test_rejects_excessive_nested_groups(self):
+		raw = b""
+		for field in range(1, 18):
+			raw += vfield((field << 3) | 3, 0)
+		for field in range(17, 0, -1):
+			raw += vfield((field << 3) | 4, 0)
+		with self.assertRaises(ValueError):
+			tolerant_websocket_decode_with_meta(raw)
 
 
 if __name__ == "__main__":
