@@ -106,6 +106,30 @@ class LarkAgentXProtoFallbackTests(unittest.TestCase):
 		self.assertEqual(len(telemetry["field_fingerprint"]), 16)
 		self.assertNotIn("opaque-metadata", telemetry["field_fingerprint"])
 
+	def test_isolates_one_bad_entry_and_keeps_later_message(self):
+		bad_entity = bfield(1, b"bad-msg") + b"\x80"
+		bad_entry = bfield(1, b"bad-entry") + bfield(2, bad_entity)
+		good_entity = (
+			bfield(1, b"good-msg")
+			+ vfield(2, 1)
+			+ bfield(3, b"synthetic-user")
+			+ bfield(10, b"7661209668907207659")
+			+ vfield(46, 2)
+		)
+		good_entry = bfield(1, b"good-entry") + bfield(2, good_entity)
+		push = bfield(1, bad_entry) + bfield(1, good_entry)
+		packet = bfield(1, b"partial-sid") + vfield(3, 6) + bfield(5, push)
+		frame = bfield(8, packet)
+
+		with patch.object(bridge.decoders, "decode_message_content", return_value=("synthetic", None)):
+			meta, messages, telemetry = tolerant_websocket_decode_with_meta(frame)
+
+		self.assertEqual(meta["cmd"], 6)
+		self.assertEqual([message["msg_id"] for message in messages], ["good-msg"])
+		self.assertTrue(telemetry["partial"])
+		self.assertEqual(len(telemetry["entry_errors"]), 1)
+		self.assertEqual(telemetry["entry_errors"][0]["layer"], "entity")
+
 
 if __name__ == "__main__":
 	unittest.main()

@@ -23,6 +23,17 @@ EXPECTED_FIELDS = {
 	"entity": {1, 2, 3, 4, 5, 8, 9, 10, 12, 13, 14, 20, 24, 46},
 }
 
+EXPECTED_WIRES = {
+	"frame": {8: {2}},
+	"packet": {1: {2}, 3: {0}, 5: {2}},
+	"push": {1: {2}},
+	"entry": {1: {2}, 2: {2}},
+	"entity": {
+		1: {2}, 2: {0}, 3: {2}, 4: {0}, 5: {2}, 8: {2}, 9: {2},
+		10: {2}, 12: {2}, 13: {0}, 14: {0}, 20: {2}, 24: {2}, 46: {0},
+	},
+}
+
 
 class TolerantProtoError(ValueError):
 	"""A malformed wire payload with enough context for safe recovery."""
@@ -55,7 +66,9 @@ class TolerantProtoError(ValueError):
 def new_telemetry() -> dict[str, Any]:
 	return {
 		"unknown_fields": {},
+		"wire_mismatches": {},
 		"groups_skipped": 0,
+		"entry_errors": [],
 		"field_signatures": [],
 	}
 
@@ -66,6 +79,10 @@ def _record_field(telemetry: dict[str, Any], layer: str, field_number: int, wire
 		key = f"{layer}:{field_number}:{wire_type}"
 		unknown = telemetry["unknown_fields"]
 		unknown[key] = int(unknown.get(key, 0)) + 1
+	elif wire_type not in EXPECTED_WIRES.get(layer, {}).get(field_number, set()):
+		key = f"{layer}:{field_number}:{wire_type}"
+		mismatches = telemetry["wire_mismatches"]
+		mismatches[key] = int(mismatches.get(key, 0)) + 1
 
 
 def _read_proto_varint(raw: bytes, offset: int, *, layer: str) -> tuple[int, int]:
@@ -213,19 +230,27 @@ def _tolerant_push_messages(raw: bytes, telemetry: dict[str, Any]) -> list[dict[
 	for field_number, wire_type, entry_raw in _read_proto_fields(raw, "push", telemetry):
 		if field_number != 1 or wire_type != 2:
 			continue
-		entry = _read_proto_fields(entry_raw, "entry", telemetry)
-		message_raw = _first_proto_field(entry, 2, 2)
-		if not isinstance(message_raw, bytes):
-			continue
-		message = _tolerant_entity_message(message_raw, telemetry)
-		if message.get("msg_id"):
-			messages.append(message)
+		try:
+			entry = _read_proto_fields(entry_raw, "entry", telemetry)
+			message_raw = _first_proto_field(entry, 2, 2)
+			if not isinstance(message_raw, bytes):
+				telemetry["entry_errors"].append({"layer": "entry", "message": "missing message payload"})
+				continue
+			message = _tolerant_entity_message(message_raw, telemetry)
+			if message.get("msg_id"):
+				messages.append(message)
+		except TolerantProtoError as error:
+			# A length-delimited entry has already been isolated by the push
+			# parser.  Keep later entries usable and send this one to repair.
+			if len(telemetry["entry_errors"]) < 32:
+				telemetry["entry_errors"].append(error.telemetry())
 	return messages
 
 
 def _finalize_telemetry(telemetry: dict[str, Any]) -> dict[str, Any]:
 	signatures = telemetry.pop("field_signatures", [])
 	telemetry["field_fingerprint"] = hashlib.sha256("|".join(signatures).encode("ascii")).hexdigest()[:16] if signatures else None
+	telemetry["partial"] = bool(telemetry.get("entry_errors"))
 	return telemetry
 
 

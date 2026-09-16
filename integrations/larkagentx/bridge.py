@@ -473,6 +473,9 @@ class Bridge:
 		self.decode_fallback_count = 0
 		self.last_decode_fallback_at = None
 		self.unknown_field_count = 0
+		self.wire_mismatch_count = 0
+		self.partial_frame_count = 0
+		self.partial_entry_error_count = 0
 		self.groups_skipped = 0
 		self.last_protocol_telemetry = None
 		self.recovery_count = 0
@@ -567,6 +570,9 @@ class Bridge:
 			"decode_fallback_count": self.decode_fallback_count,
 			"last_decode_fallback_at": self.last_decode_fallback_at,
 			"unknown_field_count": self.unknown_field_count,
+			"wire_mismatch_count": self.wire_mismatch_count,
+			"partial_frame_count": self.partial_frame_count,
+			"partial_entry_error_count": self.partial_entry_error_count,
 			"groups_skipped": self.groups_skipped,
 			"last_protocol_telemetry": self.last_protocol_telemetry,
 			"last_decode_error_at": self.last_decode_error_at,
@@ -604,10 +610,18 @@ class Bridge:
 		if telemetry:
 			unknown_fields = telemetry.get("unknown_fields") or {}
 			self.unknown_field_count += sum(int(value) for value in unknown_fields.values())
+			wire_mismatches = telemetry.get("wire_mismatches") or {}
+			self.wire_mismatch_count += sum(int(value) for value in wire_mismatches.values())
+			entry_errors = telemetry.get("entry_errors") or []
+			self.partial_frame_count += int(bool(telemetry.get("partial")))
+			self.partial_entry_error_count += len(entry_errors)
 			self.groups_skipped += int(telemetry.get("groups_skipped") or 0)
 			self.last_protocol_telemetry = {
 				"field_fingerprint": telemetry.get("field_fingerprint"),
 				"unknown_fields": dict(unknown_fields),
+				"wire_mismatches": dict(wire_mismatches),
+				"entry_errors": list(entry_errors),
+				"partial": bool(telemetry.get("partial")),
 				"groups_skipped": int(telemetry.get("groups_skipped") or 0),
 				"at": self.last_decode_fallback_at,
 			}
