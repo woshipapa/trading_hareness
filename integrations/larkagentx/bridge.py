@@ -310,6 +310,7 @@ class Bridge:
 		self.recovery_count = 0
 		self.startup_recovery_count = 0
 		self.reconnect_recovery_count = 0
+		self.partial_recovery_count = 0
 		self.last_recovery_at = None
 		self.last_recovery_reason = None
 		self.last_recovery_result = None
@@ -424,6 +425,7 @@ class Bridge:
 			"recovery_count": self.recovery_count,
 			"startup_recovery_count": self.startup_recovery_count,
 			"reconnect_recovery_count": self.reconnect_recovery_count,
+			"partial_recovery_count": self.partial_recovery_count,
 			"last_recovery_at": self.last_recovery_at,
 			"last_recovery_reason": self.last_recovery_reason,
 			"last_recovery_result": self.last_recovery_result,
@@ -473,13 +475,17 @@ class Bridge:
 				"groups_skipped": int(telemetry.get("groups_skipped") or 0),
 				"at": self.last_decode_fallback_at,
 			}
-		LOG.warning(
+			LOG.warning(
 			"protobuf 主解码失败，已用容错 envelope 解码 frame_bytes=%d messages=%d fingerprint=%s unknown=%s groups=%s error=%s",
 			frame_bytes, message_count,
 			(telemetry or {}).get("field_fingerprint"),
 			(telemetry or {}).get("unknown_fields"),
-			(telemetry or {}).get("groups_skipped", 0), error,
-		)
+				(telemetry or {}).get("groups_skipped", 0), error,
+			)
+		if telemetry and telemetry.get("partial") and not self._recovery_in_flight:
+			self._recovery_in_flight = True
+			self.partial_recovery_count += 1
+			asyncio.create_task(self.recover_gap("larkagentx_partial_frame"))
 
 	async def recover_gap(self, reason: str) -> None:
 		try:

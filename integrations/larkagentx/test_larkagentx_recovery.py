@@ -23,6 +23,15 @@ class LarkAgentXRecoveryTests(unittest.IsolatedAsyncioTestCase):
 		instance._recovery_in_flight = False
 		instance.startup_recovery_count = 0
 		instance.reconnect_recovery_count = 0
+		instance.partial_recovery_count = 0
+		instance.decode_fallback_count = 0
+		instance.last_decode_fallback_at = None
+		instance.unknown_field_count = 0
+		instance.wire_mismatch_count = 0
+		instance.partial_frame_count = 0
+		instance.partial_entry_error_count = 0
+		instance.groups_skipped = 0
+		instance.last_protocol_telemetry = None
 		instance.recovery_reasons = []
 
 		async def recover(reason):
@@ -54,6 +63,18 @@ class LarkAgentXRecoveryTests(unittest.IsolatedAsyncioTestCase):
 		await asyncio.sleep(0)
 		self.assertEqual(instance.reconnect_recovery_count, 0)
 		self.assertEqual(instance.recovery_reasons, [])
+
+	async def test_partial_frame_triggers_official_repair(self):
+		instance = self.make_bridge(1)
+		instance.on_decode_fallback(
+			ValueError("generated schema rejected frame"),
+			128,
+			1,
+			{"partial": True, "unknown_fields": {}, "wire_mismatches": {}, "entry_errors": [{"layer": "entity"}], "groups_skipped": 0, "field_fingerprint": "deadbeefdeadbeef"},
+		)
+		await asyncio.sleep(0)
+		self.assertEqual(instance.partial_recovery_count, 1)
+		self.assertEqual(instance.recovery_reasons, ["larkagentx_partial_frame"])
 
 
 if __name__ == "__main__":
