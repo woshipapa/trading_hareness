@@ -11,13 +11,21 @@ test -r /run/secrets/peer_ssh_key
 test -r /run/secrets/known_hosts
 install -m 0600 /run/secrets/peer_ssh_key /tmp/peer_ssh_key
 
-exec ssh -NT \
+# PEER_SSH_HOST is sometimes a routing-internal address that moves
+# independently of known_hosts' stable public identity; PEER_SSH_HOST_KEY_ALIAS
+# tells ssh which known_hosts entry actually applies. Optional: omitted
+# entirely when unset, so PEER_SSH_HOST being the stable address is unaffected.
+set -- -NT \
   -o BatchMode=yes \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \
   -o StrictHostKeyChecking=yes \
-  -o UserKnownHostsFile=/run/secrets/known_hosts \
+  -o UserKnownHostsFile=/run/secrets/known_hosts
+if [ -n "${PEER_SSH_HOST_KEY_ALIAS:-}" ]; then
+  set -- "$@" -o "HostKeyAlias=${PEER_SSH_HOST_KEY_ALIAS}"
+fi
+exec ssh "$@" \
   -i /tmp/peer_ssh_key \
   -p "${PEER_SSH_PORT}" \
   -L "127.0.0.1:5432:127.0.0.1:${REMOTE_DB_PORT}" \

@@ -12,6 +12,12 @@ services:
       PEER_SSH_USER: ${PEER_SSH_USER:-stockpeer}
       REMOTE_DB_PORT: ${REMOTE_DB_PORT:-15432}
       REMOTE_API_PORT: ${REMOTE_API_PORT:-15681}
+      # PEER_SSH_HOST may be a routing-internal address (VPN/overlay IP) that
+      # moves independently of the owner host's identity. known_hosts is keyed
+      # to the stable public alias, so StrictHostKeyChecking against the
+      # internal address failed closed the moment a fresh connection (rather
+      # than a long-lived cached one) was required. See .env.example.
+      PEER_SSH_HOST_KEY_ALIAS: ${PEER_SSH_HOST_KEY_ALIAS:-}
     volumes:
       - ${PEER_SSH_KEY_PATH:?Set PEER_SSH_KEY_PATH}:/run/secrets/peer_ssh_key:ro
       - ${PEER_KNOWN_HOSTS_PATH:?Set PEER_KNOWN_HOSTS_PATH}:/run/secrets/known_hosts:ro
