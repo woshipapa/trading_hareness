@@ -197,6 +197,139 @@ class _Connection:
         return type("Result", (), {"fetchall": lambda _self: list(rows)})()
 
 
+class PayloadShapeTests(unittest.TestCase):
+    """Every status answers with the same keys, so consumers need no guard."""
+
+    KEYS = {"status", "reason", "basis", "seed_trade_date", "price", "macd", "kdj", "degraded", "live_effect"}
+
+    def test_a_completed_reading_carries_the_declared_keys(self):
+        from app.intraday_technical_indicators import realtime_indicators
+
+        result = realtime_indicators(
+            FACTOR_20260915, price=47.15, prior_sessions=PRIOR_SESSIONS,
+            session_high=47.5, session_low=46.0)
+        self.assertEqual(set(result), self.KEYS)
+        self.assertEqual(result["status"], "completed")
+        self.assertIsNone(result["reason"])
+
+    def test_a_missing_seed_carries_the_same_keys(self):
+        from app.intraday_technical_indicators import realtime_indicators
+
+        result = realtime_indicators(None, price=47.15)
+        self.assertEqual(set(result), self.KEYS)
+        self.assertEqual(result["degraded"], ["macd", "kdj"])
+        self.assertIsNotNone(result["reason"])
+
+    def test_a_missing_price_carries_the_same_keys(self):
+        from app.intraday_technical_indicators import realtime_indicators
+
+        result = realtime_indicators(FACTOR_20260915, price=None)
+        self.assertEqual(set(result), self.KEYS)
+        self.assertEqual(result["status"], "price_unavailable")
+        self.assertEqual(result["degraded"], ["macd", "kdj"])
+
+    def test_a_row_carrying_no_factor_reports_why(self):
+        from app.intraday_technical_indicators import realtime_indicators
+
+        # The gateway's VCP payload reaches here whenever it is the only row.
+        result = realtime_indicators({"ts_code": "600176.SH", "vcp_score": 60.0}, price=47.15)
+        self.assertEqual(set(result), self.KEYS)
+        self.assertEqual(result["status"], "seed_unavailable")
+        self.assertIn("no usable factor", result["reason"])
+
+
+class BatchedReaderTests(unittest.TestCase):
+    """The live scan reads the whole basket at once, not once per symbol."""
+
+    def _connection(self):
+        return _Connection(
+            factor_rows=[
+                {"symbol": "600176.SH", "row_data": FACTOR_20260915},
+                {"symbol": "002015.SZ", "row_data": FACTOR_20260915},
+            ],
+            bar_rows=[
+                {"symbol": symbol, "trading_date": bar["trading_date"], "high": bar["high"], "low": bar["low"]}
+                for symbol in ("002015.SZ", "600176.SH")
+                for bar in PRIOR_SESSIONS
+            ],
+        )
+
+    def test_the_basket_seed_read_rejects_rows_carrying_no_seed(self):
+        from datetime import date
+
+        from app.intraday_technical_indicators import latest_factor_rows_by_symbol
+
+        connection = self._connection()
+        seeds = latest_factor_rows_by_symbol(
+            ["600176.SH", "002015.SZ"], connection, before_trading_date=date(2026, 9, 16))
+        statement, values = connection.calls[0]
+        self.assertIn("DISTINCT ON (row_data->>'ts_code')", statement)
+        self.assertIn("row_data ?| %s::text[]", statement)
+        self.assertEqual(values, (["002015.SZ", "600176.SH"], "20260916", ["expma_12_bfq", "kdj_k_bfq"]))
+        self.assertEqual(sorted(seeds), ["002015.SZ", "600176.SH"])
+
+    def test_the_basket_is_read_once_rather_than_once_per_symbol(self):
+        from datetime import date
+
+        from app.intraday_technical_indicators import realtime_indicators_by_symbol
+
+        connection = self._connection()
+        quotes = {
+            "600176.SH": {"price": 47.15, "session_high": 47.5, "session_low": 46.0},
+            "002015.SZ": {"price": 16.09, "session_high": 16.3, "session_low": 16.07},
+        }
+        readings = realtime_indicators_by_symbol(quotes, connection, trading_date=date(2026, 9, 16))
+        self.assertEqual(len(connection.calls), 2)
+        self.assertEqual(sorted(readings), ["002015.SZ", "600176.SH"])
+        for symbol, reading in readings.items():
+            self.assertEqual(reading["symbol"], symbol)
+            self.assertEqual(reading["status"], "completed")
+            self.assertEqual(reading["degraded"], [])
+
+    def test_the_batched_reading_matches_the_single_symbol_reading(self):
+        from datetime import date
+
+        from app.intraday_technical_indicators import (
+            realtime_indicators_by_symbol, symbol_realtime_indicators,
+        )
+
+        quote = {"price": 47.15, "session_high": 47.5, "session_low": 46.0}
+        # One symbol only: the fake replays its canned rows whatever the query
+        # asks for, so the basket's rows must match the basket under test.
+        connection = _Connection(
+            factor_rows=[{"symbol": "600176.SH", "row_data": FACTOR_20260915}],
+            bar_rows=[{"symbol": "600176.SH", "trading_date": bar["trading_date"],
+                       "high": bar["high"], "low": bar["low"]} for bar in PRIOR_SESSIONS],
+        )
+        batched = realtime_indicators_by_symbol(
+            {"600176.SH": quote}, connection, trading_date=date(2026, 9, 16))["600176.SH"]
+        single = symbol_realtime_indicators(
+            "600176.SH", _Connection(), price=quote["price"], session_high=quote["session_high"],
+            session_low=quote["session_low"], trading_date=date(2026, 9, 16))
+        self.assertEqual(batched, single)
+
+    def test_a_symbol_without_a_seed_still_gets_an_entry(self):
+        from datetime import date
+
+        from app.intraday_technical_indicators import realtime_indicators_by_symbol
+
+        # "no reading" and "not scanned" must stay distinguishable downstream.
+        connection = _Connection(factor_rows=[], bar_rows=[])
+        readings = realtime_indicators_by_symbol(
+            {"600176.SH": {"price": 47.15, "session_high": 47.5, "session_low": 46.0}},
+            connection, trading_date=date(2026, 9, 16))
+        self.assertEqual(readings["600176.SH"]["status"], "seed_unavailable")
+
+    def test_an_empty_basket_reads_nothing(self):
+        from datetime import date
+
+        from app.intraday_technical_indicators import realtime_indicators_by_symbol
+
+        connection = _Connection()
+        self.assertEqual(realtime_indicators_by_symbol({}, connection, trading_date=date(2026, 9, 16)), {})
+        self.assertEqual(connection.calls, [])
+
+
 class SeedReaderTests(unittest.TestCase):
     def test_the_seed_excludes_the_live_session(self):
         from datetime import date

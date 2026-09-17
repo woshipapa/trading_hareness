@@ -190,29 +190,41 @@ def realtime_indicators(
 
     Degrades per indicator rather than as a whole: a KDJ window short of nine
     sessions must not suppress a MACD reading that needs no window at all.
+
+    Every path returns the same keys.  A payload whose shape follows its own
+    status forces each consumer to guess which fields exist this time, and the
+    scan aggregates these across the whole basket where most entries are the
+    unavailable ones.
     """
     _require_basis(basis)
+
+    def reading(status: str, *, reason: str | None = None,
+                macd: dict[str, Any] | None = None, kdj: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "status": status,
+            "reason": reason,
+            "basis": basis,
+            "seed_trade_date": (macd or kdj or {}).get("seed_trade_date"),
+            "price": _number(price),
+            "macd": macd,
+            "kdj": kdj,
+            "degraded": [name for name, value in (("macd", macd), ("kdj", kdj)) if value is None],
+            "live_effect": "none",
+        }
+
     if not factor_row:
-        return {"status": "seed_unavailable", "reason": "no published factor row", "basis": basis}
+        return reading("seed_unavailable", reason="no published factor row")
     if _number(price) is None:
-        return {"status": "price_unavailable", "reason": "live price is not numeric", "basis": basis}
+        return reading("price_unavailable", reason="live price is not numeric")
     macd = advance_macd(macd_seed(factor_row, basis=basis), price)
     bounds = kdj_window_bounds(prior_sessions, session_high=session_high, session_low=session_low)
     kdj = advance_kdj(
         kdj_seed(factor_row, basis=basis), price=price,
         window_high=bounds[0] if bounds else None, window_low=bounds[1] if bounds else None,
     ) if bounds else None
-    seed_date = (macd or kdj or {}).get("seed_trade_date")
-    return {
-        "status": "completed" if (macd or kdj) else "seed_unavailable",
-        "basis": basis,
-        "seed_trade_date": seed_date,
-        "price": _number(price),
-        "macd": macd,
-        "kdj": kdj,
-        "degraded": [name for name, value in (("macd", macd), ("kdj", kdj)) if value is None],
-        "live_effect": "none",
-    }
+    if macd is None and kdj is None:
+        return reading("seed_unavailable", reason="the published row carries no usable factor")
+    return reading("completed", macd=macd, kdj=kdj)
 
 
 def seed_factor_keys(basis: str = "bfq") -> list[str]:
@@ -273,6 +285,99 @@ def prior_session_bars(symbol: str, connection: Any, *, before_trading_date: Any
     return [dict(row) for row in reversed(rows)]
 
 
+def latest_factor_rows_by_symbol(
+    symbols: Iterable[str], connection: Any, *, before_trading_date: Any,
+    known_at: Any = None, basis: str = "bfq",
+) -> dict[str, dict[str, Any]]:
+    """One seed per symbol for a whole watch basket in a single read.
+
+    The live scan runs every 10-30 seconds over the full basket, so the
+    per-symbol reader's ``LIMIT 1`` would become one round trip per symbol per
+    scan.  ``DISTINCT ON`` applies the same ordering - and the same rejection of
+    rows carrying no seed - once across the basket.
+    """
+    requested = sorted({str(symbol) for symbol in symbols if str(symbol)})
+    cutoff = _trade_date_key(before_trading_date)
+    if not requested or cutoff is None:
+        return {}
+    clause = " AND available_at<=%s" if known_at is not None else ""
+    arguments: tuple[Any, ...] = (requested, cutoff, seed_factor_keys(basis))
+    if known_at is not None:
+        arguments = (requested, cutoff, known_at, seed_factor_keys(basis))
+    rows = connection.execute(
+        f"""SELECT DISTINCT ON (row_data->>'ts_code')
+                   row_data->>'ts_code' AS symbol, row_data
+              FROM quant.tushare_raw_records
+             WHERE api_name='stk_factor_pro' AND row_data->>'ts_code'=ANY(%s)
+               AND row_data->>'trade_date' < %s{clause}
+               AND row_data ?| %s::text[]
+             ORDER BY row_data->>'ts_code', row_data->>'trade_date' DESC, available_at DESC""",
+        arguments,
+    ).fetchall()
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        payload = dict(row)
+        row_data = payload.get("row_data")
+        if row_data:
+            result[str(payload.get("symbol"))] = dict(row_data)
+    return result
+
+
+def prior_session_bars_by_symbol(
+    symbols: Iterable[str], connection: Any, *, before_trading_date: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    """The RSV window's completed sessions for a whole basket, oldest first."""
+    requested = sorted({str(symbol) for symbol in symbols if str(symbol)})
+    if not requested:
+        return {}
+    rows = connection.execute(
+        """WITH ranked AS (
+               SELECT symbol,trading_date,high,low,
+                      row_number() OVER(PARTITION BY symbol ORDER BY trading_date DESC) AS row_number
+                 FROM quant.canonical_bars_daily
+                WHERE symbol=ANY(%s) AND trading_date<%s AND is_suspended=false
+           )
+           SELECT symbol,trading_date,high,low FROM ranked
+            WHERE row_number<=%s ORDER BY symbol,trading_date ASC""",
+        (requested, before_trading_date, KDJ_WINDOW_SESSIONS - 1),
+    ).fetchall()
+    # Pre-seeded so a symbol with no bars still answers, and appended through
+    # setdefault so an unexpected symbol cannot raise on the live scan path.
+    grouped: dict[str, list[dict[str, Any]]] = {symbol: [] for symbol in requested}
+    for row in rows:
+        payload = dict(row)
+        grouped.setdefault(str(payload.pop("symbol")), []).append(payload)
+    return grouped
+
+
+def realtime_indicators_by_symbol(
+    quotes: Mapping[str, Mapping[str, Any]], connection: Any, *,
+    trading_date: Any, basis: str = "bfq", known_at: Any = None,
+) -> dict[str, dict[str, Any]]:
+    """Live readings for a watch basket from two reads, not two per symbol.
+
+    ``quotes`` maps each symbol to its running ``price``, ``session_high`` and
+    ``session_low``.  Symbols whose seed is missing still get an entry, because
+    a caller needs to tell "no reading" apart from "symbol not scanned".
+    """
+    _require_basis(basis)
+    symbols = sorted({str(symbol) for symbol in quotes if str(symbol)})
+    if not symbols:
+        return {}
+    seeds = latest_factor_rows_by_symbol(
+        symbols, connection, before_trading_date=trading_date, known_at=known_at, basis=basis)
+    bars = prior_session_bars_by_symbol(symbols, connection, before_trading_date=trading_date)
+    result: dict[str, dict[str, Any]] = {}
+    for symbol in symbols:
+        quote = quotes.get(symbol) or {}
+        reading = realtime_indicators(
+            seeds.get(symbol), price=quote.get("price"), prior_sessions=bars.get(symbol, ()),
+            session_high=quote.get("session_high"), session_low=quote.get("session_low"), basis=basis,
+        )
+        result[symbol] = {"symbol": symbol, "trading_date": str(trading_date), **reading}
+    return result
+
+
 def symbol_realtime_indicators(
     symbol: str, connection: Any, *,
     price: Any, session_high: Any, session_low: Any, trading_date: Any,
@@ -302,6 +407,7 @@ __all__ = [
     "ADJUSTMENT_BASES", "KDJ_SMOOTHING_PERIODS", "KDJ_WINDOW_SESSIONS",
     "MACD_FAST_PERIODS", "MACD_SIGNAL_PERIODS", "MACD_SLOW_PERIODS",
     "advance_kdj", "advance_macd", "kdj_seed", "kdj_window_bounds",
-    "latest_factor_row", "macd_seed", "prior_session_bars",
-    "realtime_indicators", "seed_factor_keys", "symbol_realtime_indicators",
+    "latest_factor_row", "latest_factor_rows_by_symbol", "macd_seed",
+    "prior_session_bars", "prior_session_bars_by_symbol", "realtime_indicators",
+    "realtime_indicators_by_symbol", "seed_factor_keys", "symbol_realtime_indicators",
 ]
