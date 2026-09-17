@@ -136,20 +136,37 @@ for pair in "db-tunnel:$TUNNEL" "quant-research:$MAIN" "quant-research-scheduler
   fi
 done
 
-# --- verify -----------------------------------------------------------------
-if [ "$MODE" = preopen ]; then
-  main_health=$(health_json "$MAIN_PORT")
-  if [ -z "$main_health" ]; then
-    problem "main service /health did not answer on $MAIN_PORT"
-  else
-    read -r pool_size waiting <<<"$(printf '%s' "$main_health" | python3 -c '
+# --- the async pool, in every mode ------------------------------------------
+# Checked here rather than under preopen because a stalled pool is invisible to
+# Docker on any build whose health probe only pings the sync pool: the
+# container reports healthy while every collector fails. Reading the counters
+# directly is what notices it within one heal interval.
+for port_pair in "$MAIN_PORT:quant-research:$MAIN" "$SCHEDULER_PORT:quant-research-scheduler:$SCHEDULER"; do
+  port=${port_pair%%:*}; rest=${port_pair#*:}; service=${rest%%:*}; name=${rest##*:}
+  body=$(health_json "$port")
+  if [ -z "$body" ]; then
+    # Already reported above if the container itself is down; a running
+    # container that will not answer is its own problem.
+    [ "$(container_state "$name")" = running ] && {
+      problem "$name is running but /health did not answer on $port"
+      restart_service "$service" "$name"
+    }
+    continue
+  fi
+  read -r pool_size waiting <<<"$(printf '%s' "$body" | python3 -c '
 import json, sys
 pool = json.load(sys.stdin).get("async_database_pool") or {}
 print(pool.get("pool_size", -1), pool.get("waiting", -1))
 ' 2>/dev/null || echo "-1 -1")"
-    [ "$pool_size" = "0" ] && [ "$waiting" != "0" ] && problem "async pool holds no connections while $waiting requests wait"
-    [ "$pool_size" = "-1" ] && problem "main service /health did not report an async pool"
+  if [ "$pool_size" = "0" ] && [ "$waiting" != "0" ] && [ "$waiting" != "-1" ]; then
+    problem "$name: async pool holds no connections while $waiting requests wait"
+    restart_service "$service" "$name"
   fi
+done
+
+# --- verify -----------------------------------------------------------------
+if [ "$MODE" = preopen ]; then
+  [ -n "$(health_json "$MAIN_PORT")" ] || problem "main service /health did not answer on $MAIN_PORT"
 
   actual_profile=$(docker inspect "$MAIN" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
     | sed -n 's/^QUANT_RUNTIME_PROFILE=//p')
@@ -157,8 +174,6 @@ print(pool.get("pool_size", -1), pool.get("waiting", -1))
   # healthy, with every intraday collector silently switched off.
   [ "$actual_profile" = "$EXPECTED_MAIN_PROFILE" ] \
     || problem "main container runs profile '${actual_profile:-unset}', expected '$EXPECTED_MAIN_PROFILE' - intraday collection is off"
-
-  [ -n "$(health_json "$SCHEDULER_PORT")" ] || problem "scheduler /health did not answer on $SCHEDULER_PORT"
 
   watchlist=$(docker exec "$MAIN" python -c '
 import os, psycopg
