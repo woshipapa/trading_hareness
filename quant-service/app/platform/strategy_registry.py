@@ -89,11 +89,14 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "research", "research_enabled", "none", "bounded post-close minute-pattern discovery and replay evidence",
     ),
     "xiaojie_leader_flow": StrategyContract(
-        "xiaojie_leader_flow", "xiaojie-leader-flow-v1", "app/xiaojie_leader_flow.py",
+        "xiaojie_leader_flow", "xiaojie-leader-flow-v2", "app/xiaojie_leader_flow.py",
         "xiaojie-leader-flow-input-v1",
         ("intraday_quote_observations", "intraday_scan_runs", "strategy_pattern_samples", "analyst_observations"),
         "research", "shadow", "none",
-        "point-in-time, research-only quantification of the 小杰夜报 leader/divergence/return-flow playbook",
+        "point-in-time, research-only quantification of the 小杰夜报 leader/divergence/return-flow playbook; "
+        "v2 adds a daily-bar overheat gate (distance from MA20, pre-signal 5-day run-up, sector day return/net "
+        "inflow, stock-vs-sector divergence) scoped to the 潜龙出海_swing fallback mode only, calibrated from a "
+        "23-observation \"小杰交流\" event study (2026-08-26 to 09-16)",
     ),
 }
 
