@@ -1,0 +1,14 @@
+[Unit]
+Description=Restart unhealthy peer containers every two minutes
+
+[Timer]
+# Two minutes is short enough that a session loses one scan rather than an
+# afternoon, and long enough that the 600s restart cooldown still governs how
+# often any one container can be bounced.
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=peer-session-guard@heal.service
+
+[Install]
+WantedBy=timers.target

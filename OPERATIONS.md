@@ -248,8 +248,17 @@ docker compose ps
 # 日常启动或恢复；保留已有数据
 docker compose up -d
 
-# 修改 feishu-adapter 代码或 Compose 后，重建该适配器
+# 本机修改 feishu-adapter 代码或 Compose 后，重建本机适配器
 docker compose up -d --build feishu-adapter
+
+# 47 上的 adapter/LarkAgentX bug 修复：复用已有 image 和 supervisor venv，走版本化源码覆盖层
+bash scripts/hotfix-feishu-relay-edge.sh --apply
+# 覆盖层版本与应急回滚
+bash scripts/hotfix-feishu-relay-edge.sh --list
+bash scripts/hotfix-feishu-relay-edge.sh --rollback <release-id> --apply
+
+# 只有依赖、Node/Python 运行时或基础镜像变化时，才走不可变 image release
+# scripts/deploy-feishu-relay-edge-release.sh <git-sha> <release-label> --apply
 
 # 查看飞书连接和转发日志
 docker compose logs -f feishu-adapter
@@ -289,6 +298,40 @@ brew services list | rg '^colima\\s'
 3. 页面没有消息，查看 `docker compose logs -f feishu-adapter` 是否有 `ws client ready`、`Forwarding im.message.receive_v1`；没有则检查飞书长连接、事件订阅、应用版本发布和机器人是否在群内。
 4. n8n 的执行记录可以在编辑器的 Executions 页面查看；也可从适配器日志确认它已将事件 POST 给 n8n。
 5. 开机后服务没有出现，先运行 `colima start`，再执行 `docker compose up -d`，并检查 `/Users/papa/Library/Logs/n8n-compose-launchd.log`。
+
+## peer 盘中抓取的每日保障
+
+47.110.79.189 上每天开盘前必须可用的三个容器（`db-tunnel`、`quant-research`、
+`quant-research-scheduler`）由 `scripts/peer-session-guard.sh` 看守，通过
+`systemd --user` 定时器运行：
+
+| 定时器 | 频率 | 行为 |
+| --- | --- | --- |
+| `peer-session-guard-heal.timer` | 每 2 分钟 | 重启 exited/unhealthy 的容器；自愈成功不告警 |
+| `peer-session-guard-preopen.timer` | 周一至周五 08:40、09:10 | 先自愈，再核验就绪，**无论成败都在失败时发飞书** |
+
+为什么需要它：Docker 只会把容器标成 unhealthy，**从不重启**。2026-09-17 一个卡死的
+服务因此空转了 45 分钟无人知晓。
+
+preopen 额外核验的项目里，有一条是别处看不出来的：主容器的
+`QUANT_RUNTIME_PROFILE` 必须是 `intraday_edge`。只用 `compose.yaml`（漏掉
+`compose.intraday-owner.yaml`）重新部署会把它悄悄降级成 `research`，容器照样
+healthy，但**所有盘中采集都停了**。
+
+```bash
+# 在 peer 上手动执行
+set -a; . ~/trading_hareness/deploy/shared-peer/intraday-secrets.env; set +a
+~/trading_hareness/scripts/peer-session-guard.sh preopen
+
+# 验证告警通道本身（会往告警群发一条明确标记的测试消息）
+~/trading_hareness/scripts/peer-session-guard.sh selftest
+
+systemctl --user list-timers | rg peer-session-guard
+journalctl --user -u 'peer-session-guard@*' --since today
+```
+
+单元文件在 `deploy/shared-peer/systemd/`，安装到 `~/.config/systemd/user/`；脚本随
+release tarball 下发，`~/trading_hareness` 是指向当前 release 的软链。
 
 ## 关键文件
 

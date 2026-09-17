@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify peer intraday readiness before the session opens
+
+[Timer]
+# 08:40 leaves time to fix what the heal pass cannot; 09:10 is the last honest
+# moment to say the session will start without collection. Both report, so a
+# silent morning means the peer was actually checked and was ready.
+OnCalendar=Mon..Fri 08:40 Asia/Shanghai
+OnCalendar=Mon..Fri 09:10 Asia/Shanghai
+Persistent=false
+AccuracySec=30s
+Unit=peer-session-guard@preopen.service
+
+[Install]
+WantedBy=timers.target

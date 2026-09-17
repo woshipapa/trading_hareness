@@ -1,0 +1,20 @@
+[Unit]
+# Docker never restarts a container it has marked unhealthy, so without this
+# unit an unhealthy peer stays unhealthy until somebody looks. %i is the guard
+# mode: "heal" or "preopen".
+Description=Peer intraday collection guard (%i)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+# Rootless Docker's socket lives under the user runtime directory; a user unit
+# has no inherited DOCKER_HOST, and without it every docker call fails silently
+# and the guard would report a perfectly healthy peer as missing.
+Environment=DOCKER_HOST=unix://%t/docker.sock
+# Feishu credentials for the alert path. Optional-prefixed so a host that has
+# not placed them yet still gets the healing half of the guard.
+EnvironmentFile=-%h/trading_hareness/deploy/shared-peer/intraday-secrets.env
+ExecStart=%h/trading_hareness/scripts/peer-session-guard.sh %i
+# The guard's own exit code is the signal; systemd should not restart it.
+TimeoutStartSec=600
