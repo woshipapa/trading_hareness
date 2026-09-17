@@ -4181,13 +4181,18 @@ async def sync_tushare_daily_core(as_of_date: date, requested_symbols: list[str]
 
 
 def _start_async_pool_watchdog() -> dict[str, asyncio.Task[None]]:
-    """Start pool upkeep before, and independently of, any leased loop.
+    """Start pool upkeep alongside, but independently of, the leased loops.
 
-    Not a leased task and not gated on ``background_tasks_enabled``: the lease
-    it would renew runs through the very pool this loop repairs, and a process
-    that only serves reads still needs the pool to come back after a tunnel
-    drop.  It is returned in the same mapping so shutdown cancels it with
-    everything else.
+    Not a leased task: the lease it would renew runs through the very pool
+    this loop repairs, so a pool failure would kill the one loop whose job is
+    to fix it.  It also ignores the runtime profile, because the pool belongs
+    to no profile and the research process needs it back as much as the edge
+    collector does.  It is returned in the same mapping so shutdown cancels it
+    with everything else.
+
+    It does follow ``background_tasks_enabled``: a preflight instance owns no
+    loops at all, has nothing holding the pool open, and must stay free of
+    background tasks.
     """
     return {
         "async_pool_watchdog": asyncio.create_task(
@@ -4204,9 +4209,9 @@ def _start_async_pool_watchdog() -> dict[str, asyncio.Task[None]]:
 
 def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
     """Create the uniquely-labelled leased runtime loops after local startup."""
-    watchdog = _start_async_pool_watchdog()
     if not background_tasks_enabled():
-        return watchdog
+        return {}
+    watchdog = _start_async_pool_watchdog()
     interval_seconds = intraday_scan_interval_seconds()
     lease_holder_id = uuid.uuid4()
     lease_seconds = background_loop_lease_seconds()
