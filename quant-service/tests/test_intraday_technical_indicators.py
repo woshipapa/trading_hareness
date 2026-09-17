@@ -209,7 +209,7 @@ class SeedReaderTests(unittest.TestCase):
         # Seeding from the live session's own factors and then advancing with
         # that session's price would count it twice, and look plausible.
         self.assertIn("row_data->>'trade_date' < %s", statement)
-        self.assertEqual(values, ("600176.SH", "20260916"))
+        self.assertEqual(values, ("600176.SH", "20260916", ["expma_12_bfq", "kdj_k_bfq"]))
 
     def test_a_replay_cutoff_hides_rows_published_later(self):
         from datetime import date, datetime, timezone
@@ -221,7 +221,31 @@ class SeedReaderTests(unittest.TestCase):
         latest_factor_row("600176.SH", connection, before_trading_date=date(2026, 9, 16), known_at=known_at)
         statement, values = connection.calls[0]
         self.assertIn("available_at<=%s", statement)
-        self.assertEqual(values[-1], known_at)
+        # Order matters: the cutoff binds before the seed-key array.
+        self.assertEqual(values, ("600176.SH", "20260916", known_at, ["expma_12_bfq", "kdj_k_bfq"]))
+
+    def test_a_row_without_seed_factors_cannot_shadow_a_usable_one(self):
+        from datetime import date
+
+        from app.intraday_technical_indicators import latest_factor_row
+
+        # The gateway has served a VCP breakout payload under this api_name.
+        # Such a row is newer than the real seed and would otherwise win the
+        # ORDER BY, leaving the symbol with no indicators at all.
+        connection = _Connection()
+        latest_factor_row("600176.SH", connection, before_trading_date=date(2026, 9, 17))
+        statement, values = connection.calls[0]
+        self.assertIn("row_data ?| %s::text[]", statement)
+        self.assertEqual(values[-1], ["expma_12_bfq", "kdj_k_bfq"])
+
+    def test_the_seed_keys_follow_the_requested_basis(self):
+        from datetime import date
+
+        from app.intraday_technical_indicators import latest_factor_row
+
+        connection = _Connection()
+        latest_factor_row("600176.SH", connection, before_trading_date=date(2026, 9, 17), basis="hfq")
+        self.assertEqual(connection.calls[0][1][-1], ["expma_12_hfq", "kdj_k_hfq"])
 
     def test_no_stored_factor_row_yields_no_seed(self):
         from datetime import date

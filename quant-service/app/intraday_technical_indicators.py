@@ -215,26 +215,44 @@ def realtime_indicators(
     }
 
 
+def seed_factor_keys(basis: str = "bfq") -> list[str]:
+    """The keys a row must carry before it can seed anything at all."""
+    _require_basis(basis)
+    return [f"expma_12_{basis}", f"kdj_k_{basis}"]
+
+
 def latest_factor_row(
-    symbol: str, connection: Any, *, before_trading_date: Any, known_at: Any = None,
+    symbol: str, connection: Any, *, before_trading_date: Any,
+    known_at: Any = None, basis: str = "bfq",
 ) -> dict[str, Any] | None:
-    """Read the newest published factor row strictly before the live session.
+    """Read the newest usable factor row strictly before the live session.
 
     ``before_trading_date`` is not an optimisation.  Once the vendor publishes
     the live session's own factors that evening, seeding from them and then
     advancing with that same session's price would count the session twice, and
     the result still looks plausible.  ``known_at`` keeps a replay honest by
     hiding rows that had not been fetched yet at the simulated moment.
+
+    Newest is not enough on its own.  On 2026-09-17 the ProMax GET gateway
+    answered ``stk_factor_pro`` for six symbols with a VCP breakout payload
+    (``vcp_score``, ``pivot_high_60d``) carrying no factor at all, and stored it
+    under this same ``api_name``.  Taking the newest row unconditionally lets
+    one such row shadow the good row sitting directly behind it, and the symbol
+    then reports ``seed_unavailable`` despite holding a perfectly usable seed.
+    Requiring the seed keys in the query skips the impostor instead.
     """
     cutoff = _trade_date_key(before_trading_date)
     if cutoff is None:
         return None
     clause = " AND available_at<=%s" if known_at is not None else ""
-    arguments: tuple[Any, ...] = (symbol, cutoff) + ((known_at,) if known_at is not None else ())
+    arguments: tuple[Any, ...] = (symbol, cutoff, seed_factor_keys(basis))
+    if known_at is not None:
+        arguments = (symbol, cutoff, known_at, seed_factor_keys(basis))
     rows = connection.execute(
         f"""SELECT row_data FROM quant.tushare_raw_records
              WHERE api_name='stk_factor_pro' AND row_data->>'ts_code'=%s
                AND row_data->>'trade_date' < %s{clause}
+               AND row_data ?| %s::text[]
              ORDER BY row_data->>'trade_date' DESC, available_at DESC LIMIT 1""",
         arguments,
     ).fetchall()
@@ -261,7 +279,8 @@ def symbol_realtime_indicators(
     basis: str = "bfq", known_at: Any = None,
 ) -> dict[str, Any]:
     """Compose one symbol's live reading from a caller-owned transaction."""
-    factor_row = latest_factor_row(symbol, connection, before_trading_date=trading_date, known_at=known_at)
+    factor_row = latest_factor_row(
+        symbol, connection, before_trading_date=trading_date, known_at=known_at, basis=basis)
     result = realtime_indicators(
         factor_row, price=price, prior_sessions=prior_session_bars(symbol, connection, before_trading_date=trading_date),
         session_high=session_high, session_low=session_low, basis=basis,
@@ -284,5 +303,5 @@ __all__ = [
     "MACD_FAST_PERIODS", "MACD_SIGNAL_PERIODS", "MACD_SLOW_PERIODS",
     "advance_kdj", "advance_macd", "kdj_seed", "kdj_window_bounds",
     "latest_factor_row", "macd_seed", "prior_session_bars",
-    "realtime_indicators", "symbol_realtime_indicators",
+    "realtime_indicators", "seed_factor_keys", "symbol_realtime_indicators",
 ]
