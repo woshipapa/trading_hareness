@@ -11,7 +11,31 @@ from zoneinfo import ZoneInfo
 
 
 class DatabaseUnavailableError(RuntimeError):
-    """The synchronous health probe could not reach the local repository."""
+    """A health probe could not reach the local repository."""
+
+
+def async_pool_stall_reason(pool: dict[str, Any] | None) -> str | None:
+    """Name the async pool's wedged state, or return None when it is usable.
+
+    The sync ping alone cannot see this.  Twice on 2026-09-17 the db-tunnel
+    dropped its forwarded connections, the sync pool reconnected, and the async
+    pool did not: it sat at ``pool_size`` 0 with a full 64-deep waiting queue
+    for three quarters of an hour while every async route failed and the
+    container still reported healthy, because ``ping`` never touches it.
+
+    Holding no connections at all *while* callers are queued is what makes this
+    specific.  A pool that is merely saturated carries its connections and
+    reports ``pool_size`` at ``max_size``, and a pool still filling on startup
+    has nobody waiting on it.
+    """
+    if not pool or not pool.get("open"):
+        return None
+    if int(pool.get("pool_size") or 0) > 0 or int(pool.get("waiting") or 0) <= 0:
+        return None
+    return (
+        f"async pool holds no connections while {pool.get('waiting')} requests wait "
+        f"(min_size={pool.get('min_size')}, max_size={pool.get('max_size')})"
+    )
 
 
 @dataclass(frozen=True)
@@ -86,6 +110,10 @@ def health_payload(deps: HealthDependencies) -> dict[str, Any]:
         deps.database.ping()
     except Exception as error:  # noqa: BLE001 - endpoint translates to an HTTP health failure
         raise DatabaseUnavailableError(str(error)) from error
+    async_pool = deps.async_database_pool_status() if deps.async_database_pool_status else None
+    stalled = async_pool_stall_reason(async_pool)
+    if stalled is not None:
+        raise DatabaseUnavailableError(stalled)
     local_now = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
     session_active, session_reason = deps.realtime_market_session()
     board_session_active, board_session_reason = deps.board_curve_session()
@@ -116,7 +144,7 @@ def health_payload(deps: HealthDependencies) -> dict[str, Any]:
     return {
         "status": "ok", "service": "quant-research", "database_pool": pool,
         "build": deps.release_metadata() if deps.release_metadata else {},
-        "async_database_pool": deps.async_database_pool_status() if deps.async_database_pool_status else None,
+        "async_database_pool": async_pool,
         "resources": resources,
         "runtime_leases": {
             "background_loop_lease_seconds": loop_lease_seconds,
@@ -161,6 +189,6 @@ def health_payload(deps: HealthDependencies) -> dict[str, Any]:
 
 
 __all__ = [
-    "DatabaseUnavailableError", "HealthDependencies", "health_payload",
+    "DatabaseUnavailableError", "HealthDependencies", "async_pool_stall_reason", "health_payload",
     "runtime_loops_with_lease_heartbeats",
 ]
