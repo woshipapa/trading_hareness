@@ -148,6 +148,34 @@ def build_peer_contexts(
     return contexts
 
 
+async def _market_wide_research(
+    scan_id: Any, observed_at: Any, *, quote_timestamp_slo_seconds: float,
+    dependencies: "IntradayWatchlistScanDependencies",
+) -> dict[str, Any]:
+    """Run the half of a scan that never depended on the observation pool.
+
+    The all-A snapshot takes no symbol list, so this is the same cross-section
+    and the same evaluation the full scan performs - it simply does not need a
+    watch basket to exist first.
+    """
+    quote_capture = await dependencies.capture_quotes([], observed_at, quote_timestamp_slo_seconds)
+    xiaojie: dict[str, Any] = {"status": "disabled"}
+    if dependencies.xiaojie_leader_flow is not None:
+        try:
+            xiaojie = await dependencies.xiaojie_leader_flow(
+                scan_id=scan_id, observed_at=observed_at, all_a_rows=quote_capture.all_a_rows,
+            )
+        except Exception as error:  # noqa: BLE001 - never fail the scan over research
+            xiaojie = {"status": "degraded", "reason": str(error)[:240]}
+    return {
+        "xiaojie": xiaojie,
+        "source_status": {
+            "all_a_snapshot": quote_capture.all_a_snapshot_status,
+            "xiaojie_leader_flow": xiaojie,
+        },
+    }
+
+
 async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDependencies) -> dict[str, Any]:
     """Run one scan without owning database transactions or provider clients."""
     observed_at = dependencies.now_utc()
@@ -174,13 +202,23 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     await dependencies.prune_rule_inputs(observed_at)
     retry_summary = await dependencies.retry_pending_alerts()
     if not watches:
+        # An empty observation pool means there is nothing to *watch*, not that
+        # there is nothing to research. Leader-flow reads the all-A
+        # cross-section, which is fetched without reference to the pool and is
+        # where its candidates come from, so returning here used to silence the
+        # market-wide strategy for the whole session whenever the pool was
+        # cleared - the one moment its recommendations matter most.
+        market_only = await _market_wide_research(
+            scan_id, observed_at, quote_timestamp_slo_seconds=45.0, dependencies=dependencies,
+        )
         await dependencies.persist_terminal(
             scan_id, observed_at, "completed", list(request.symbols),
-            {"tencent": "skipped"}, {"watched": 0},
+            {"tencent": "skipped", **market_only["source_status"]}, {"watched": 0},
         )
         return {
             "status": "completed", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(), "alerts": [],
-            "notice": "没有启用的观察/持仓标的；先通过 watchlists API 显式添加。",
+            "xiaojie_leader_flow": market_only["xiaojie"],
+            "notice": "观察池为空：全市场策略研究照常运行，逐票盯盘需要先通过 watchlists API 添加标的。",
         }
 
     membership_rows = await dependencies.load_exact_memberships(selected_symbols, observed_at)

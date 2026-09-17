@@ -170,6 +170,86 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
         values.update(overrides)
         return IntradayWatchlistScanDependencies(**values)
 
+    def test_an_empty_pool_still_runs_the_market_wide_strategy(self):
+        # Clearing the observation pool must not silence leader-flow: its
+        # candidates come from the all-A cross-section, which is fetched
+        # without reference to the pool.
+        observed_at = datetime(2026, 9, 18, 1, 35, tzinfo=timezone.utc)
+        seen = {}
+
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return []
+
+        async def capture(symbols, _observed, _slo):
+            seen["capture_symbols"] = symbols
+            return SimpleNamespace(
+                quotes={}, all_a_rows=[{"symbol": "600176.SH"}, {"symbol": "000636.SZ"}],
+                all_a_snapshot_status={"status": "fresh", "cross_sectional": True},
+            )
+
+        async def leader_flow(*, scan_id, observed_at, all_a_rows):
+            seen["leader_rows"] = all_a_rows
+            return {"status": "completed", "alerted": ["600176.SH"]}
+
+        async def terminal(*args):
+            seen["terminal"] = args
+
+        dependencies = self.dependencies(
+            now_utc=lambda: observed_at, realtime_session=session, load_watches=watches,
+            capture_quotes=capture, xiaojie_leader_flow=leader_flow, persist_terminal=terminal,
+        )
+        result = asyncio.run(run_watchlist_scan(self.request(), dependencies))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["alerts"], [])
+        self.assertEqual(seen["capture_symbols"], [])
+        self.assertEqual(len(seen["leader_rows"]), 2)
+        self.assertEqual(result["xiaojie_leader_flow"], {"status": "completed", "alerted": ["600176.SH"]})
+        # The evidence has to reach the persisted run, not just the response.
+        self.assertEqual(seen["terminal"][4]["xiaojie_leader_flow"]["status"], "completed")
+
+    def test_an_empty_pool_survives_a_failing_market_wide_strategy(self):
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return []
+
+        async def capture(_symbols, _observed, _slo):
+            return SimpleNamespace(quotes={}, all_a_rows=[{"symbol": "600176.SH"}],
+                                   all_a_snapshot_status={"status": "fresh"})
+
+        async def leader_flow(**_kwargs):
+            raise RuntimeError("upstream cross-section rejected")
+
+        dependencies = self.dependencies(
+            realtime_session=session, load_watches=watches,
+            capture_quotes=capture, xiaojie_leader_flow=leader_flow,
+        )
+        result = asyncio.run(run_watchlist_scan(self.request(), dependencies))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["xiaojie_leader_flow"]["status"], "degraded")
+
+    def test_an_empty_pool_without_the_strategy_configured_is_still_a_clean_scan(self):
+        async def session():
+            return True, "continuous auction"
+
+        async def watches(_):
+            return []
+
+        async def capture(_symbols, _observed, _slo):
+            return SimpleNamespace(quotes={}, all_a_rows=[], all_a_snapshot_status={"status": "unavailable"})
+
+        dependencies = self.dependencies(
+            realtime_session=session, load_watches=watches, capture_quotes=capture,
+        )
+        result = asyncio.run(run_watchlist_scan(self.request(), dependencies))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["xiaojie_leader_flow"], {"status": "disabled"})
+
     def test_peer_contexts_keep_only_exact_and_configured_valid_symbols(self):
         contexts = build_peer_contexts(
             [{"symbol": "000001.SZ", "metadata": {"upside_research": {"enabled": True, "peer_symbols": ["000002.SZ", "bad"]}}}],

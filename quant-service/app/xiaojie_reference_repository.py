@@ -23,6 +23,15 @@ from .sector_membership_repository import point_in_time_membership_predicate
 LOOKBACK_SESSIONS = 20
 MA_SESSIONS = 5
 
+#: The session's limit prices are a full-market cross-section of ~5,700 rows.
+#: The only source that still serves it rejects the whole set in one response
+#: ("response is too large; use a smaller limit or paginate"), so it is read in
+#: pages. 2,000 is under the REST adapter's own 3,000 cap and was measured
+#: returning the complete market in three pages.
+TRADE_LIMIT_PAGE_SIZE = 2000
+TRADE_LIMIT_MAX_ROWS = 12000
+TRADE_LIMIT_MAX_PAGES = 8
+
 
 def trade_limits(connection: Any, trading_date: date) -> dict[str, float]:
     """Upper limit price per symbol for the session being scanned.
@@ -57,7 +66,18 @@ async def ensure_session_trade_limits(
     existing = await read_limits(trading_date)
     if existing:
         return {"status": "already_present", "symbols": len(existing), "limits": existing}
-    call = await call_tushare_api("stk_limit", {"trade_date": trading_date.strftime("%Y%m%d")}, None, "auto")
+    # Paginated, and required to reach a terminal page. Asking for the whole
+    # cross-section at once is refused outright by the one source that still
+    # serves it, which left the strategy blocked for a full session on
+    # 2026-09-17. Accepting a short read instead would be worse than failing:
+    # a symbol with no limit price can never register as sealed at the board,
+    # so a partial table turns unavailable evidence into a tradeable-looking
+    # signal. 2026-09-16 stored exactly such a partial - 2,359 of ~5,700.
+    call = await call_tushare_api(
+        "stk_limit", {"trade_date": trading_date.strftime("%Y%m%d")}, None, "auto",
+        paginate=True, page_size=TRADE_LIMIT_PAGE_SIZE, max_rows=TRADE_LIMIT_MAX_ROWS,
+        max_pages=TRADE_LIMIT_MAX_PAGES, require_complete=True,
+    )
     rows = [row for row in call.rows if str(row.get("ts_code") or "").strip()]
     if not rows:
         return {"status": "unavailable", "symbols": 0, "limits": {}}

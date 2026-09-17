@@ -209,19 +209,36 @@ if [ "$MODE" = preopen ]; then
   [ "$actual_profile" = "$EXPECTED_MAIN_PROFILE" ] \
     || problem "main container runs profile '${actual_profile:-unset}', expected '$EXPECTED_MAIN_PROFILE' - intraday collection is off"
 
-  watchlist=$(docker exec "$MAIN" python -c '
+  # The observation pool being empty is a valid state: leader-flow reads the
+  # all-A cross-section, not the pool. What must be true is that the strategy
+  # can actually evaluate - which needs the session's limit prices and an
+  # alert transport that will carry a recommendation somewhere.
+  reachable=$(docker exec "$MAIN" python -c '
 import os, psycopg
 conn = psycopg.connect(host=os.environ["PGHOST"], port=os.environ["PGPORT"], dbname=os.environ["PGDATABASE"],
                        user=os.environ["PGUSER"], password=os.environ["PGPASSWORD"])
 with conn.cursor() as cur:
     cur.execute("SELECT count(*) FROM quant.intraday_watchlists WHERE enabled")
-    print(cur.fetchone()[0])
+    watched = cur.fetchone()[0]
+    cur.execute("""SELECT count(*) FROM quant.daily_trade_limits
+                    WHERE trading_date = (now() AT TIME ZONE %s)::date""", ("Asia/Shanghai",))
+    limits = cur.fetchone()[0]
+print(f"{watched} {limits}")
 ' 2>/dev/null)
-  case "$watchlist" in
-    ''|*[!0-9]*) problem "could not read the intraday watchlist through the tunnel" ;;
-    0) problem "the intraday watchlist is empty; nothing would be scanned" ;;
-    *) note "watchlist: $watchlist symbols" ;;
+  case "$reachable" in
+    ''|*[!0-9\ ]*) problem "could not read the scan preconditions through the tunnel" ;;
+    *) note "observation pool: ${reachable%% *} symbols; today's limit prices: ${reachable##* } rows" ;;
   esac
+
+  # A strategy that cannot deliver is the same as no strategy. The peer ran a
+  # whole session on 2026-09-17 with no transport named at all, so every alert
+  # it would have produced resolved to "disabled" and reached nobody.
+  transports=$(docker inspect "$MAIN" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+    | grep -cE '^(QUANT_ALERT_FEISHU_WEBHOOK_URL|QUANT_ALERT_WEBHOOK_URL)=.+' || true)
+  direct=$(docker inspect "$MAIN" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+    | grep -cE '^QUANT_FEISHU_DIRECT_ENABLED=(1|true|yes|on)$' || true)
+  [ "$((transports + direct))" -gt 0 ] \
+    || problem "no alert transport is configured; strategy recommendations would be produced and dropped"
 fi
 
 # --- report -----------------------------------------------------------------
