@@ -69,6 +69,7 @@ class HealthDependencies:
     set_db_pool_gauge: Callable[[dict[str, Any]], None]
     set_open_circuit_gauge: Callable[[int], None]
     async_database_pool_status: Callable[[], dict[str, Any]] | None = None
+    async_pool_watchdog_status: Callable[[], dict[str, Any]] | None = None
     research_storage_governance: Callable[[Any], dict[str, Any]] | None = None
     background_loop_status: Callable[[], dict[str, dict[str, Any]]] | None = None
     runtime_task_contracts: Callable[[], list[dict[str, Any]]] | None = None
@@ -113,7 +114,13 @@ def health_payload(deps: HealthDependencies) -> dict[str, Any]:
     async_pool = deps.async_database_pool_status() if deps.async_database_pool_status else None
     stalled = async_pool_stall_reason(async_pool)
     if stalled is not None:
-        raise DatabaseUnavailableError(stalled)
+        watchdog = deps.async_pool_watchdog_status() if deps.async_pool_watchdog_status else {}
+        pending = watchdog.get("confirmations_before_recovery")
+        seen = watchdog.get("consecutive_stalls")
+        raise DatabaseUnavailableError(
+            f"{stalled}; watchdog has seen this {seen} of {pending} times before replacing the pool"
+            if pending is not None else stalled
+        )
     local_now = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
     session_active, session_reason = deps.realtime_market_session()
     board_session_active, board_session_reason = deps.board_curve_session()
@@ -145,6 +152,7 @@ def health_payload(deps: HealthDependencies) -> dict[str, Any]:
         "status": "ok", "service": "quant-research", "database_pool": pool,
         "build": deps.release_metadata() if deps.release_metadata else {},
         "async_database_pool": async_pool,
+        "async_pool_watchdog": deps.async_pool_watchdog_status() if deps.async_pool_watchdog_status else {},
         "resources": resources,
         "runtime_leases": {
             "background_loop_lease_seconds": loop_lease_seconds,

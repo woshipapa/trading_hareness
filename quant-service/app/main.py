@@ -472,6 +472,7 @@ from .runtime_resources import (
 )
 from .edge_evidence_transfer import read_live_session_acceptance
 from .research_storage_admission import ResearchStorageAdmission, governance as research_storage_governance_isolated
+from .async_pool_watchdog import AsyncPoolWatchdogState, watchdog_loop as async_pool_watchdog_loop
 from .health_read_model import DatabaseUnavailableError, HealthDependencies, health_payload as read_health_payload
 from .release_metadata import release_metadata
 from .replay_readiness import historical_replay_readiness
@@ -645,6 +646,7 @@ from .longhu_vendor_source import (
     configured as longhu_vendor_configured,
     intraday_source as longhu_intraday_source,
 )
+from .longhu_limits import intraday_longhu_max_symbols
 from .full_market_daily_controls_sync import sync as sync_full_market_daily_controls_isolated
 from .minute_bar_session_backfill import (
     backfill_session as backfill_minute_session,
@@ -2572,22 +2574,6 @@ def intraday_minute_profile_max_symbols() -> int:
         return 40
 
 
-def intraday_longhu_max_symbols() -> int:
-    """Use the watch basket without an arbitrary local 24/60-symbol cap.
-
-    The only remaining bound is Longhu's verified physical gateway page size.
-    An explicit environment value can still lower the request for operational
-    throttling, but the default must not silently truncate the watchlist.
-    """
-    try:
-        configured_limit = int(
-            os.getenv("QUANT_LONGHU_INTRADAY_MAX_SYMBOLS", str(LONGHU_MAX_PAGE_SIZE))
-        )
-        return max(1, min(LONGHU_MAX_PAGE_SIZE, configured_limit))
-    except ValueError:
-        return LONGHU_MAX_PAGE_SIZE
-
-
 def longhu_full_market_enabled() -> bool:
     """Keep the licensed close cross-section opt-in and supplementary."""
     return os.getenv("QUANT_LONGHU_FULL_MARKET_ENABLED", "false").strip().lower() in {
@@ -4194,10 +4180,33 @@ async def sync_tushare_daily_core(as_of_date: date, requested_symbols: list[str]
     )
 
 
+def _start_async_pool_watchdog() -> dict[str, asyncio.Task[None]]:
+    """Start pool upkeep before, and independently of, any leased loop.
+
+    Not a leased task and not gated on ``background_tasks_enabled``: the lease
+    it would renew runs through the very pool this loop repairs, and a process
+    that only serves reads still needs the pool to come back after a tunnel
+    drop.  It is returned in the same mapping so shutdown cancels it with
+    everything else.
+    """
+    return {
+        "async_pool_watchdog": asyncio.create_task(
+            supervise_loop(
+                "async_pool_watchdog",
+                lambda: async_pool_watchdog_loop(
+                    async_pool_watchdog_state, async_db.pool_status, async_db.replace_pool),
+                on_state=background_loop_registry.mark,
+            ),
+            name="background-loop:async_pool_watchdog",
+        ),
+    }
+
+
 def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
     """Create the uniquely-labelled leased runtime loops after local startup."""
+    watchdog = _start_async_pool_watchdog()
     if not background_tasks_enabled():
-        return {}
+        return watchdog
     interval_seconds = intraday_scan_interval_seconds()
     lease_holder_id = uuid.uuid4()
     lease_seconds = background_loop_lease_seconds()
@@ -4242,10 +4251,13 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
         },
     )
     validate_runtime_task_specs(specs)
-    return start_leased_background_tasks(
-        apply_background_runtime_profile(specs),
-        leased_background_loop,
-    )
+    return {
+        **watchdog,
+        **start_leased_background_tasks(
+            apply_background_runtime_profile(specs),
+            leased_background_loop,
+        ),
+    }
 
 
 def _verify_strategy_runtime_contracts() -> None:
@@ -4310,6 +4322,7 @@ _METRICS_CONTROL_PLANE_REFRESH_SECONDS = 5.0
 _metrics_control_plane_lock = threading.Lock()
 _metrics_control_plane_refreshed_at = 0.0
 background_loop_registry = LoopRuntimeRegistry()
+async_pool_watchdog_state = AsyncPoolWatchdogState()
 
 
 def refresh_metrics_control_plane(*, now: float | None = None) -> bool:
@@ -4512,6 +4525,7 @@ def _health_payload() -> dict[str, Any]:
             provider_request_reservation_status=provider_request_reservation_status,
             runtime_executor_status=runtime_executor_status, super_get_executor_status=super_get_executor_status,
             async_database_pool_status=async_db.pool_status,
+            async_pool_watchdog_status=async_pool_watchdog_state.snapshot,
             provider_status=provider_status, free_provider_status=free_provider_status,
             realtime_market_session=realtime_market_session, board_curve_session=intraday_board_curve_session,
             scan_interval_seconds=intraday_scan_interval_seconds,

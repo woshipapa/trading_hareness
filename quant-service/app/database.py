@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager, contextmanager
 from typing import AsyncIterator, Iterator, Mapping
@@ -1645,6 +1646,11 @@ ON CONFLICT(framework_key) DO NOTHING;
 """
 
 
+#: A queue this deep already means the pool cannot keep up; beyond it callers
+#: are rejected outright rather than waiting behind work that will time out.
+ASYNC_POOL_MAX_WAITING = 64
+
+
 def pool_settings(environ: Mapping[str, str] | None = None) -> dict[str, int]:
     """Bounded, process-local settings for synchronous repository access."""
     env = os.environ if environ is None else environ
@@ -1682,7 +1688,7 @@ class Database:
         self._pool = ConnectionPool(
             conninfo="", kwargs=self._connect_kwargs, open=False,
             min_size=self._pool_settings["min_size"], max_size=self._pool_settings["max_size"],
-            timeout=self._pool_settings["timeout_seconds"], max_waiting=64,
+            timeout=self._pool_settings["timeout_seconds"], max_waiting=ASYNC_POOL_MAX_WAITING,
         )
         self._opened = False
 
@@ -1766,12 +1772,22 @@ class AsyncDatabase:
             async_min, async_max = 1, 4
         self._pool_settings["min_size"] = async_min
         self._pool_settings["max_size"] = async_max
-        self._pool = AsyncConnectionPool(
+        self._pool = self._new_pool()
+        self._opened = False
+        self._closing: set[asyncio.Future[None]] = set()
+
+    def _new_pool(self) -> AsyncConnectionPool:
+        return AsyncConnectionPool(
             conninfo="", kwargs=self._connect_kwargs, open=False,
             min_size=self._pool_settings["min_size"], max_size=self._pool_settings["max_size"],
-            timeout=self._pool_settings["timeout_seconds"], max_waiting=64,
+            timeout=self._pool_settings["timeout_seconds"], max_waiting=ASYNC_POOL_MAX_WAITING,
+            # Every connection reaches Postgres through an SSH tunnel that can
+            # drop the whole forward at once, which leaves the pool holding
+            # connections that look fine and fail on first use. Verifying on
+            # acquisition costs one round trip and turns that into a
+            # transparent replacement instead of a failed read.
+            check=AsyncConnectionPool.check_connection,
         )
-        self._opened = False
 
     async def open(self) -> None:
         if not self._opened:
@@ -1782,6 +1798,31 @@ class AsyncDatabase:
         if self._opened:
             await self._pool.close()
             self._opened = False
+
+    async def replace_pool(self) -> None:
+        """Swap in a fresh pool, leaving the old one to be torn down separately.
+
+        This exists because a pool that holds no connections cannot recover on
+        its own.  ``getconn`` raises ``TooManyRequests`` *before* it considers
+        growing the pool, so once the waiting queue is full a busy service
+        keeps it full and the growth path is never reached again.  ``check()``
+        cannot break the deadlock either: with no connections left there is
+        nothing for it to verify.  Only a new pool releases the queued callers
+        and starts connecting again.
+
+        Closing the old pool is teardown, not recovery.  It still has callers
+        queued against it, and awaiting its close here would let the pool being
+        discarded hold up the pool that replaces it - which is the one thing
+        this method exists to prevent.  It is therefore closed in the
+        background, under a timeout, and never blocks the new pool's opening.
+        """
+        previous, self._pool = self._pool, self._new_pool()
+        self._opened = False
+        closing = asyncio.ensure_future(_close_pool_quietly(previous))
+        # Hold a reference: a bare task can be garbage collected mid-flight.
+        self._closing.add(closing)
+        closing.add_done_callback(self._closing.discard)
+        await self.open()
 
     def pool_status(self) -> dict[str, int | bool]:
         stats = self._pool.get_stats()
@@ -1804,3 +1845,12 @@ class AsyncDatabase:
     async def ping(self) -> None:
         async with self.transaction() as connection:
             await connection.execute("SELECT 1")
+
+
+async def _close_pool_quietly(pool: AsyncConnectionPool, timeout_seconds: float = 10.0) -> None:
+    """Discard a replaced pool without letting its teardown fail or hang."""
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            await pool.close()
+    except Exception:  # noqa: BLE001 - the pool is being discarded either way
+        pass
