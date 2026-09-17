@@ -318,12 +318,17 @@ preopen 额外核验的项目里，有一条是别处看不出来的：主容器
 `compose.intraday-owner.yaml`）重新部署会把它悄悄降级成 `research`，容器照样
 healthy，但**所有盘中采集都停了**。
 
+告警发到**盘中股票提醒群**的自定义机器人 webhook，由 peer 上
+`deploy/shared-peer/intraday-secrets.env` 里的 `PEER_GUARD_FEISHU_WEBHOOK` 提供
+（webhook URL 等同凭据，不进仓库）。webhook 不可用时自动回退到应用凭据，
+所以轮换 webhook 不会把告警静音。
+
 ```bash
 # 在 peer 上手动执行
 set -a; . ~/trading_hareness/deploy/shared-peer/intraday-secrets.env; set +a
 ~/trading_hareness/scripts/peer-session-guard.sh preopen
 
-# 验证告警通道本身（会往告警群发一条明确标记的测试消息）
+# 验证告警通道本身（会往盘中股票提醒群发一条明确标记的测试消息）
 ~/trading_hareness/scripts/peer-session-guard.sh selftest
 
 systemctl --user list-timers | rg peer-session-guard

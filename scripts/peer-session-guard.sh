@@ -11,9 +11,11 @@
 #   selftest - send one clearly-marked test message, so the alert path is known
 #              to work before it is needed rather than after
 #
-# Alerts go straight to Feishu with the app credentials, deliberately not
-# through the quant service: the thing being checked is the thing that would
-# have to deliver the message.
+# Alerts go straight to Feishu, deliberately not through the quant service: the
+# thing being checked is the thing that would otherwise have to deliver the
+# message. PEER_GUARD_FEISHU_WEBHOOK (a custom-bot hook for 盘中股票提醒群) is
+# the normal path; the app credentials remain a fallback for when the hook is
+# rotated or revoked, so a rotation cannot silence the alarm.
 set -uo pipefail
 
 MODE="${1:-heal}"
@@ -90,22 +92,54 @@ restart_service() {
 
 health_json() { curl -fsS -m 15 "http://127.0.0.1:$1/health" 2>/dev/null; }
 
-alert() {
+text_payload() {
+  python3 -c '
+import json, sys
+print(json.dumps({"msg_type": "text", "content": {"text": sys.argv[1]}}, ensure_ascii=False))
+' "$1"
+}
+
+alert_via_webhook() {
+  local text=$1 response
+  [ -n "${PEER_GUARD_FEISHU_WEBHOOK:-}" ] || return 1
+  response=$(curl -fsS -m 15 -X POST "$PEER_GUARD_FEISHU_WEBHOOK" \
+    -H 'Content-Type: application/json' -d "$(text_payload "$text")" 2>/dev/null) || return 1
+  # The hook answers 200 with a body even when it rejects the message - a
+  # missing keyword or a bad signature shows up only in "code".
+  printf '%s' "$response" | python3 -c '
+import json, sys
+body = json.load(sys.stdin)
+sys.exit(0 if body.get("code", 0) == 0 else 1)
+' 2>/dev/null || { note "webhook rejected the message: $(printf '%s' "$response" | head -c 200)"; return 1; }
+}
+
+alert_via_app_credentials() {
   local text=$1 token
-  [ -n "${FEISHU_APP_ID:-}" ] && [ -n "${FEISHU_APP_SECRET:-}" ] && [ -n "${FEISHU_ALERT_RECEIVE_ID:-}" ] || {
-    note "no Feishu credentials in the environment; alert not sent"; return 1; }
+  [ -n "${FEISHU_APP_ID:-}" ] && [ -n "${FEISHU_APP_SECRET:-}" ] && [ -n "${FEISHU_ALERT_RECEIVE_ID:-}" ] || return 1
   token=$(curl -fsS -m 15 -X POST https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal \
     -H 'Content-Type: application/json' \
     -d "{\"app_id\":\"$FEISHU_APP_ID\",\"app_secret\":\"$FEISHU_APP_SECRET\"}" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tenant_access_token",""))' 2>/dev/null)
-  [ -n "$token" ] || { note "could not obtain a Feishu token; alert not sent"; return 1; }
+  [ -n "$token" ] || return 1
   curl -fsS -m 15 -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${FEISHU_ALERT_RECEIVE_ID_TYPE:-chat_id}" \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
     -d "$(python3 -c '
 import json, sys
 print(json.dumps({"receive_id": sys.argv[1], "msg_type": "text",
                   "content": json.dumps({"text": sys.argv[2]}, ensure_ascii=False)}, ensure_ascii=False))
-' "$FEISHU_ALERT_RECEIVE_ID" "$text")" >/dev/null && note "alert sent"
+' "$FEISHU_ALERT_RECEIVE_ID" "$text")" >/dev/null
+}
+
+alert() {
+  local text=$1
+  if alert_via_webhook "$text"; then
+    note "alert sent via webhook"; return 0
+  fi
+  if alert_via_app_credentials "$text"; then
+    note "alert sent via app credentials (webhook unavailable)"; return 0
+  fi
+  note "ALERT NOT DELIVERED - no working Feishu channel"
+  return 1
 }
 
 if [ "$MODE" = selftest ]; then
