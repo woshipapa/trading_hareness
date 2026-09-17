@@ -5,24 +5,16 @@ It runs the `intraday_edge` background profile on a loopback-only FastAPI
 process and keeps the local workstation in the complementary `research`
 profile. It never submits orders.
 
-The target host uses its existing PostgreSQL instance and a dedicated
-`quant_intraday_edge` database. The service is bounded by systemd to 1.4 GB
-memory; source, virtualenv, database and logs should remain below 5 GB. The
-daily timer refreshes only the current trade date after the A-share close.
-The materialization timer builds the next-session ten-day shadow pool at
-18:55/19:15/19:35 CST; repeated calls are idempotent and remain research-only.
+The historical edge collector and its `quant_intraday_edge` database were
+archived and retired after the owner cutover. The edge host now keeps only the
+Feishu relay; the active quant API is the owner endpoint reached through the
+15682 SSH tunnel. The old systemd units and evidence puller remain documented
+for recovery only and must not be enabled as a live writer.
 
-The workstation pulls retained evidence through a dedicated restricted SSH
-key and `scripts/pull-intraday-edge-evidence.sh`. The forced remote command can
-only emit the allowlisted JSONL evidence tables. New edge releases append a
-profile-gated change journal and the workstation persists its last imported
-sequence; each pull replays a bounded tail before advancing that sequence, so
-normal short transaction/connection interruptions are idempotently recovered.
-Older releases fall back once to a bounded 30-day snapshot bootstrap. Imports
-are transactional, upsert mutable evidence, and never copy runtime leases,
-alert deliveries, recommendations, credentials or order state. A local launch
-agent calls the script every two minutes; when the Mac is off, the remote
-database simply retains the evidence for the next pull.
+The historical evidence pull path is retained only for recovery and is no
+longer scheduled. `scripts/pull-intraday-edge-evidence.sh` must not be loaded by
+LaunchAgent because the retired edge database is intentionally absent. Current
+research reads come from the owner API path.
 
 The puller records its latest local attempt separately from the evidence
 cursor. A failed pull therefore appears as a visible warning with its last

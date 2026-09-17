@@ -12,6 +12,8 @@
   <string>/Users/papa/codebase/n8n</string>
   <key>RunAtLoad</key>
   <true/>
+  <key>Disabled</key>
+  <true/>
   <key>StartInterval</key>
   <integer>120</integer>
   <key>ProcessType</key>
