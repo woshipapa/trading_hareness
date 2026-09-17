@@ -89,6 +89,63 @@ class XiaojieLeaderFlowTests(unittest.TestCase):
         self.assertEqual(result["portfolio_policy"]["long_term_dca"]["parts_min"], 10)
         self.assertEqual(result["portfolio_policy"]["long_term_dca"]["buy_on_drawdown_pct"], [5.0, 10.0])
 
+    def _qianlong_swing_snapshot(self, **overrides):
+        # Falls through every more specific mode (no re-seal, no reverse-wrap
+        # confirmation, no VWAP pullback, no right-side/icepoint/oversold/
+        # supplement/ETF fields) to land on the 潜龙出海_swing catch-all.
+        return self._snapshot(
+            prior_one_word_board=False,
+            limit_up_return_flow=False,
+            breakout_or_reverse_wrap=True,
+            **overrides,
+        )
+
+    def test_qianlong_swing_with_no_overheat_flags_keeps_normal_position(self):
+        result = evaluate_snapshot(self._qianlong_swing_snapshot(
+            distance_from_ma20_pct=5.0, pre_signal_5d_return_pct=2.0,
+            sector_day_return_pct=0.5, sector_net_inflow_rate_pct=1.0,
+            stock_vs_sector_divergence_pct=4.0,
+        ))
+        self.assertEqual(result["mode"], "潜龙出海_swing")
+        self.assertEqual(result["decision"], "research_candidate")
+        self.assertEqual(result["qianlong_swing_overheat"]["count"], 0)
+        self.assertEqual(result["position"]["target_fraction"], 0.10)
+
+    def test_qianlong_swing_fields_absent_do_not_change_existing_behavior(self):
+        result = evaluate_snapshot(self._qianlong_swing_snapshot())
+        self.assertEqual(result["mode"], "潜龙出海_swing")
+        self.assertEqual(result["decision"], "research_candidate")
+        self.assertEqual(result["qianlong_swing_overheat"], {"flags": [], "count": 0})
+        self.assertEqual(result["position"]["target_fraction"], 0.10)
+
+    def test_qianlong_swing_one_overheat_flag_downgrades_to_high_risk_fraction(self):
+        result = evaluate_snapshot(self._qianlong_swing_snapshot(distance_from_ma20_pct=20.0))
+        self.assertEqual(result["mode"], "潜龙出海_swing")
+        self.assertEqual(result["decision"], "research_candidate")
+        self.assertEqual(result["qianlong_swing_overheat"]["count"], 1)
+        self.assertIn("qianlong_swing_extended_above_ma20", result["risk_flags"])
+        self.assertEqual(result["position"]["target_fraction"], 0.05)
+
+    def test_qianlong_swing_three_overheat_flags_blocks_entirely(self):
+        result = evaluate_snapshot(self._qianlong_swing_snapshot(
+            distance_from_ma20_pct=20.0, pre_signal_5d_return_pct=15.0,
+            sector_day_return_pct=3.0, sector_net_inflow_rate_pct=5.0,
+            stock_vs_sector_divergence_pct=0.0,
+        ))
+        self.assertEqual(result["decision"], "no_trade")
+        self.assertEqual(result["position"]["target_fraction"], 0.0)
+        self.assertGreaterEqual(result["qianlong_swing_overheat"]["count"], 3)
+
+    def test_qianlong_swing_overheat_does_not_apply_outside_its_own_mode(self):
+        result = evaluate_snapshot(self._snapshot(
+            prior_one_word_board=False, limit_up_return_flow=False,
+            leader_pullback_to_vwap=True, main_sector_present=True,
+            distance_from_ma20_pct=50.0, pre_signal_5d_return_pct=50.0,
+        ))
+        self.assertEqual(result["mode"], "leader_pullback")
+        self.assertEqual(result["qianlong_swing_overheat"], {"flags": [], "count": 0})
+        self.assertEqual(result["position"]["target_fraction"], 0.20)
+
 
 if __name__ == "__main__":
     unittest.main()

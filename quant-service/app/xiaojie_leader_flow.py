@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-MODEL_VERSION = "xiaojie-leader-flow-v1"
+MODEL_VERSION = "xiaojie-leader-flow-v2"
 INPUT_CONTRACT = "xiaojie-leader-flow-input-v1"
 
 # These are preregistered research defaults, not promoted trading parameters.
@@ -49,6 +49,24 @@ DEFAULT_PARAMETERS: dict[str, Any] = {
     "left_side_trial_fraction": 0.05,
     "oversold_rebound_fraction": 0.05,
     "staged_entry_initial_fraction": 0.50,
+    # 潜龙出海_swing is the mode's own catch-all fallback (breakout_or_reverse_wrap
+    # with no more specific pattern matched), so it had no daily-bar overheat
+    # gate of its own. A same-session event study of 23 "小杰交流" 潜龙出海
+    # confirmations (2026-08-26 to 2026-09-16, source-registry tag `xiaojie`)
+    # found the single largest effect sizes were board-level, not candlestick:
+    # sector_day_return_pct (Cohen's d=1.43) and sector_net_inflow_rate_pct
+    # (d=1.04) beat distance_from_ma20_pct (d=0.60) and pre_signal_5d_return_pct
+    # (d=0.48), which both beat volume_ratio and close-in-range (d~0). A 4-flag
+    # count built from these thresholds separated a 28.6% (0 flags, n=7) from a
+    # 75.0% (>=1 flag, n=16) subsequent-decline rate on close-to-close returns
+    # through the next 1/3/5/10 sessions. Numbers are directional (n=23, one
+    # 3-week window); see qianlong_swing_overheat_flag_count below for the
+    # graduated response this backs.
+    "qianlong_swing_ma20_distance_max_pct": 15.0,
+    "qianlong_swing_pre_run_5d_max_pct": 10.0,
+    "qianlong_swing_sector_return_hot_pct": 1.5,
+    "qianlong_swing_sector_net_inflow_hot_pct": 3.0,
+    "qianlong_swing_divergence_min_pct": 2.0,
     "long_term_dca_parts_min": 10,
     "long_term_dca_parts_max": 20,
     "long_term_dca_drawdown_min_pct": 5.0,
@@ -146,6 +164,36 @@ def _market_gate(snapshot: Mapping[str, Any], params: Mapping[str, Any]) -> dict
     }
 
 
+def _qianlong_swing_overheat(snapshot: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    """Daily-bar overheat check for the 潜龙出海_swing fallback mode only.
+
+    The other modes each carry their own playbook-stated gate (e.g. a
+    confirmed re-seal, a VWAP hold).  潜龙出海_swing is the catch-all for
+    "breakout or reverse-wrap, nothing more specific matched", so it had
+    nothing of its own.  Any field that is absent (indicator pipeline has not
+    populated it yet) contributes no flag rather than blocking - this must
+    degrade to today's behaviour when the daily-bar/sector-flow snapshot
+    fields are not supplied.
+    """
+    ma20_distance = _number(snapshot.get("distance_from_ma20_pct"))
+    pre_run_5d = _number(snapshot.get("pre_signal_5d_return_pct"))
+    sector_return = _number(snapshot.get("sector_day_return_pct"))
+    sector_inflow = _number(snapshot.get("sector_net_inflow_rate_pct"))
+    divergence = _number(snapshot.get("stock_vs_sector_divergence_pct"))
+    flags: list[str] = []
+    if ma20_distance is not None and ma20_distance > float(params["qianlong_swing_ma20_distance_max_pct"]):
+        flags.append("qianlong_swing_extended_above_ma20")
+    if pre_run_5d is not None and pre_run_5d > float(params["qianlong_swing_pre_run_5d_max_pct"]):
+        flags.append("qianlong_swing_pre_run_extended")
+    if (sector_return is not None and sector_inflow is not None
+            and sector_return > float(params["qianlong_swing_sector_return_hot_pct"])
+            and sector_inflow > float(params["qianlong_swing_sector_net_inflow_hot_pct"])):
+        flags.append("qianlong_swing_sector_already_hot")
+    if divergence is not None and divergence < float(params["qianlong_swing_divergence_min_pct"]):
+        flags.append("qianlong_swing_no_relative_strength")
+    return {"flags": flags, "count": len(flags)}
+
+
 def _mode(snapshot: Mapping[str, Any], params: Mapping[str, Any]) -> str | None:
     if _flag(snapshot, "limit_up_return_flow") and _flag(snapshot, "re_seal_confirmed") and _flag(snapshot, "prior_one_word_board"):
         return "one_word_return_flow"
@@ -221,6 +269,10 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
     high_risk = selected_mode in {"one_word_return_flow", "reverse_wrap"}
     if high_risk:
         risk_flags.append("high_risk_mode")
+    qianlong_overheat = (
+        _qianlong_swing_overheat(snapshot, params) if selected_mode == "潜龙出海_swing" else {"flags": [], "count": 0}
+    )
+    risk_flags.extend(qianlong_overheat["flags"])
     if selected_mode is None:
         reasons.append("没有可复现的买点形态")
     elif selected_mode == "one_word_return_flow":
@@ -241,6 +293,8 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
         reasons.append("主龙头未破坏，板块补涨候选进入轮动")
     elif selected_mode == "etf_trend":
         reasons.append("ETF/低波动资产趋势支撑有效")
+    elif qianlong_overheat["count"] > 0:
+        reasons.append(f"潜龙出海突破/反包，但命中{qianlong_overheat['count']}项过热信号，仅作降级波段研究")
     else:
         reasons.append("潜龙出海突破/反包，仅作波段研究")
 
@@ -257,11 +311,19 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
     left_side_without_cushion = selected_mode == "icepoint_left_trial" and (_number(snapshot.get("profit_cushion_pct")) or 0) <= 0
     if left_side_without_cushion:
         risk_flags.append("left_side_without_profit_cushion")
+    # Graduated on the event-study dose-response above rather than a single
+    # cutoff: 0 flags saw a 28.6% subsequent-decline rate (n=7, close enough to
+    # a coin flip to still fund at the normal fraction), 1-2 flags saw
+    # 66.7-71.4% (n=13, downgraded to the same small fraction as the other
+    # high-risk modes rather than funded normally), and 3 flags saw 100%
+    # (n=3, small but unanimous - blocked outright rather than sized down).
+    qianlong_overheat_high_risk = selected_mode == "潜龙出海_swing" and qianlong_overheat["count"] >= 1
+    qianlong_overheat_blocked = selected_mode == "潜龙出海_swing" and qianlong_overheat["count"] >= 3
     hard_block = (
         not market["ok"] or not market["complete"]
         or (_flag(snapshot, "is_back_row") and not follows_a_leader)
         or _flag(snapshot, "futures_stock_both_rising") or not sector_core or not leader_gate_ok or selected_mode is None
-        or left_side_without_cushion
+        or left_side_without_cushion or qianlong_overheat_blocked
     )
     decision = "no_trade" if hard_block else "research_candidate"
     if decision == "no_trade":
@@ -270,6 +332,8 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
         position_fraction = float(params["left_side_trial_fraction"])
     elif selected_mode in {"oversold_rebound", "supplement_rotation"}:
         position_fraction = float(params["oversold_rebound_fraction"])
+    elif qianlong_overheat_high_risk:
+        position_fraction = float(params["high_risk_position_fraction"])
     elif high_risk:
         position_fraction = float(params["high_risk_position_fraction"])
     elif selected_mode == "etf_trend":
@@ -322,6 +386,7 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
         "decision": decision,
         "mode": selected_mode,
         "market_gate": market,
+        "qianlong_swing_overheat": qianlong_overheat,
         "position": {
             "target_fraction": round(position_fraction, 4),
             "staged_entry": staged_entry,
