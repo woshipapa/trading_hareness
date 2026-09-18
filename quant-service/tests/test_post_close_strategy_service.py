@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+import re
+
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock
@@ -91,6 +93,65 @@ class PostCloseStrategyServiceTests(unittest.TestCase):
         # long enough to consume that late evidence without crossing midnight.
         self.assertTrue(retry_window(datetime(2026, 8, 14, 21, 59, 59, tzinfo=china)))
         self.assertFalse(retry_window(datetime(2026, 8, 14, 22, 0, tzinfo=china)))
+
+
+class PostCloseStructureSourceTests(unittest.TestCase):
+    """Where the structure window comes from, and what it refuses to scale by.
+
+    The screen used to read a separately imported front-adjusted artifact.  On
+    2026-09-18 that artifact's newest bar was 2026-09-01, so the ranked bases
+    described a shape up to seventeen sessions old while the run reported
+    itself complete.  These pin the window to the tables the platform writes
+    every session.
+    """
+
+    def _statement(self) -> tuple[str, tuple]:
+        database = MagicMock()
+        connection = MagicMock()
+        database.transaction.return_value.__enter__.return_value = connection
+        coverage_result = MagicMock()
+        coverage_result.fetchone.return_value = {"symbols": 2}
+        rows_result = MagicMock()
+        rows_result.fetchall.return_value = []
+        connection.execute.side_effect = [coverage_result, rows_result]
+        candidates(
+            database, date(2026, 9, 18), 20, 2, board_context=lambda value: {},
+            screen=MagicMock(return_value={"status": "completed", "candidates": []}),
+            daily_base_structure=lambda values: {}, forming_structure=lambda values: {},
+            fresh_start_structure=lambda values: {},
+        )
+        statement, parameters = connection.execute.call_args_list[1].args
+        return re.sub(r"\s+", " ", statement), parameters
+
+    def test_the_window_is_read_from_the_daily_bars_the_platform_maintains(self):
+        statement, _parameters = self._statement()
+        self.assertIn("FROM quant.canonical_bars_daily b", statement)
+        self.assertIn("JOIN factors f ON f.symbol=b.symbol", statement)
+
+    def test_the_hand_imported_adjusted_artifact_is_no_longer_a_dependency(self):
+        statement, _parameters = self._statement()
+        self.assertNotIn("research_adjusted_bars_daily", statement)
+        self.assertNotIn("stock_brain_tencent_qfq", statement)
+
+    def test_a_same_day_identity_factor_can_never_scale_the_window(self):
+        # The licensed close path stores adj_factor=1 as an honest placeholder
+        # for a corporate-action history it does not claim.  A window scaled by
+        # it would look adjusted while ignoring every split inside it.
+        statement, _parameters = self._statement()
+        self.assertIn("quant.daily_adjustment_factors", statement)
+        self.assertIn("'same_day_identity_only'", statement)
+        self.assertIn("IS DISTINCT FROM", statement)
+
+    def test_the_real_factor_is_handed_to_the_adjustment_rather_than_a_constant(self):
+        statement, _parameters = self._statement()
+        self.assertIn("f.adj_factor", statement)
+        self.assertNotIn("1::numeric AS adj_factor", statement)
+
+    def test_every_date_bound_is_the_same_seventy_day_window(self):
+        statement, parameters = self._statement()
+        as_of, start = date(2026, 9, 18), date(2026, 9, 18) - timedelta(days=70)
+        self.assertEqual(parameters, (as_of, as_of, as_of, start, as_of, as_of, start))
+        self.assertIn("rn<=30", statement)
 
 
 if __name__ == "__main__":

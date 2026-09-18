@@ -29,7 +29,25 @@ def candidates(
     forming_structure: Callable[[list[dict[str, Any]]], dict[str, Any]],
     fresh_start_structure: Callable[[list[dict[str, Any]]], dict[str, Any]],
 ) -> dict[str, Any]:
-    """Screen only already-persisted bars and exact point-in-time mappings."""
+    """Screen only already-persisted bars and exact point-in-time mappings.
+
+    The structure window is built from the daily bars this platform maintains
+    every session, adjusted by the factor table it maintains with them, rather
+    than from a separately imported front-adjusted artifact.  That artifact was
+    written by hand: on 2026-09-18 its newest bar was 2026-09-01, so the day's
+    ranked "base" candidates described a shape up to seventeen sessions old -
+    the second-ranked name had fallen 13% since the last bar the screen could
+    see, and nothing in the output said so.  A source that only moves when a
+    person remembers to move it cannot carry a daily screen.
+
+    The adjustment itself is unchanged and still happens in ``adjusted_bars``:
+    this hands it the real cumulative factor instead of the constant 1 the
+    pre-adjusted artifact required.  Same-day identity factors are excluded by
+    the semantics their writer records, because the licensed close path stores
+    ``adj_factor=1`` as an honest placeholder for a corporate-action history it
+    does not claim to have, and a window silently scaled by it would look
+    perfectly adjusted while ignoring every split in it.
+    """
     with database.transaction() as connection:
         coverage = connection.execute(
             """SELECT count(DISTINCT symbol)::int AS symbols
@@ -50,23 +68,32 @@ def candidates(
                      FROM quant.stock_money_flow_daily
                     WHERE trading_date=%s AND source='longhuvip_main_net'
                     ORDER BY symbol,available_at DESC
+               ), factors AS (
+                   SELECT DISTINCT ON (symbol,trading_date) symbol,trading_date,adj_factor
+                     FROM quant.daily_adjustment_factors
+                    WHERE trading_date<=%s AND trading_date>=%s
+                      AND adj_factor IS NOT NULL AND adj_factor>0
+                      AND raw->>'factor_semantics' IS DISTINCT FROM 'same_day_identity_only'
+                    ORDER BY symbol,trading_date,available_at DESC
                ), ranked AS (
-                   SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,1::numeric AS adj_factor,i.name,
+                   SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,f.adj_factor,i.name,
                           close_day.amount,basic.row_data->>'turnover_rate' AS turnover_rate,
                           basic.row_data->>'volume_ratio' AS volume_ratio,basic.row_data->>'pe' AS pe,
                           basic.row_data->>'pb' AS pb,flow.net_amount AS main_net_amount,
                           row_number() OVER (PARTITION BY b.symbol ORDER BY b.trading_date DESC) AS rn
-                     FROM quant.research_adjusted_bars_daily b LEFT JOIN quant.instruments i ON i.symbol=b.symbol
+                     FROM quant.canonical_bars_daily b
+                     JOIN factors f ON f.symbol=b.symbol AND f.trading_date=b.trading_date
+                     LEFT JOIN quant.instruments i ON i.symbol=b.symbol
                      LEFT JOIN quant.canonical_bars_daily close_day
                        ON close_day.symbol=b.symbol AND close_day.trading_date=%s
                      LEFT JOIN latest_basic basic ON basic.symbol=b.symbol
                      LEFT JOIN latest_flow flow ON flow.symbol=b.symbol
-                    WHERE b.adjustment_basis='qfq' AND b.provider='stock_brain_tencent_qfq'
-                      AND b.trading_date<=%s AND b.trading_date>=%s
+                    WHERE b.trading_date<=%s AND b.trading_date>=%s
                  ) SELECT symbol,trading_date,high,low,close,volume,adj_factor,name
                          ,amount,turnover_rate,volume_ratio,pe,pb,main_net_amount
                     FROM ranked WHERE rn<=30 ORDER BY symbol,trading_date""",
-            (as_of_date, as_of_date, as_of_date, as_of_date, as_of_date - timedelta(days=70)),
+            (as_of_date, as_of_date, as_of_date, as_of_date - timedelta(days=70),
+             as_of_date, as_of_date, as_of_date - timedelta(days=70)),
         ).fetchall()
     return screen(
         as_of_date, limit, minimum_full_market_symbols, int(coverage["symbols"] or 0),
