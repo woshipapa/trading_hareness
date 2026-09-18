@@ -29,7 +29,7 @@ class _Database:
 class BoardFlowLicensedFirstTests(unittest.TestCase):
     """Industry flow is a paid contract; the public feed is the fallback."""
 
-    def _capture(self, *, licensed, akshare_kinds=None):
+    def _capture(self, *, licensed, akshare_kinds=None, drill=None):
         seen = {"akshare": [], "persisted": None}
 
         async def run_database(action, *args, **kwargs):
@@ -67,6 +67,7 @@ class BoardFlowLicensedFirstTests(unittest.TestCase):
             evaluate_rotation=lambda *_args: [],
             retry_rotation_deliveries=retry_rotation_deliveries,
             licensed_industry_flow=licensed_flow,
+            drill_candidates=drill,
         ))
         return result, seen
 
@@ -99,6 +100,29 @@ class BoardFlowLicensedFirstTests(unittest.TestCase):
         result, seen = self._capture(licensed=[])
         self.assertIn("industry", seen["akshare"])
         self.assertEqual(result["source_status"]["industry_licensed"]["status"], "empty")
+
+    def test_the_drill_result_is_recorded_beside_the_snapshot(self):
+        async def drill(events):
+            return {"status": "completed", "boards": len(events), "candidates": [{"symbol": "002156.SZ"}]}
+
+        result, _seen = self._capture(licensed=LICENSED, drill=drill)
+        self.assertEqual(result["stock_drill"]["status"], "completed")
+        self.assertEqual(result["source_status"]["stock_drill"]["candidates"][0]["symbol"], "002156.SZ")
+
+    def test_a_failing_drill_does_not_end_the_capture(self):
+        # Board flow is the primary evidence here; research riding on it must
+        # never be able to cost the session its flow curve.
+        async def drill(_events):
+            raise RuntimeError("membership unavailable")
+
+        result, _seen = self._capture(licensed=LICENSED, drill=drill)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["stock_drill"]["status"], "failed")
+
+    def test_no_drill_configured_leaves_the_capture_untouched(self):
+        result, _seen = self._capture(licensed=LICENSED)
+        self.assertEqual(result["stock_drill"], {"status": "disabled"})
+        self.assertNotIn("stock_drill", result["source_status"])
 
     def test_without_a_licensed_source_the_behaviour_is_unchanged(self):
         result, seen = self._capture(licensed=None)

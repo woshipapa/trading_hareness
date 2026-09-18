@@ -3068,6 +3068,45 @@ async def intraday_longhu_industry_board_flow() -> list[dict[str, Any]]:
     return board_flow_items(rows)
 
 
+async def drill_intraday_board_stock_candidates(
+    rotation_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Name the members driving each moving board. Computes only; sends nothing.
+
+    Membership is read for the session being scanned, so it obeys the same
+    point-in-time rule as every other reference: a map learned after the open
+    cannot inform the session it opened into.
+    """
+    from .board_flow_drill import attach_names, drill_board_events
+    from .xiaojie_reference_repository import instrument_names, sector_membership
+
+    events = [event for event in rotation_events
+              if str(event.get("taxonomy_key") or "") == "longhu_ths_industry"]
+    if not events:
+        return {"status": "idle", "reason": "no licensed board crossed its threshold", "candidates": []}
+    trading_date = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date()
+
+    def reference() -> tuple[dict[str, set[str]], dict[str, str]]:
+        with db.transaction() as connection:
+            return sector_membership(connection, trading_date), instrument_names(connection)
+
+    membership, names = await run_database_blocking(reference, timeout_seconds=120)
+    if not membership:
+        return {"status": "blocked", "reason": "no sector membership is known for this session",
+                "boards": len(events), "candidates": []}
+    rows, _status = await intraday_all_a_snapshot()
+    quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
+    drilled = drill_board_events(events, membership, quotes)
+    return {
+        "status": "completed",
+        "boards": len(events),
+        "boards_drilled": drilled["boards_drilled"],
+        "boards_without_membership": drilled["boards_without_membership"],
+        "candidates": attach_names(drilled["candidates"], names),
+        "decision_eligible": False,
+    }
+
+
 async def capture_intraday_board_flow_curve() -> dict[str, Any]:
     """Capture one flow point, preferring the licensed industry ranking."""
     return await _board_flow_capture_actions.capture(
@@ -3079,6 +3118,7 @@ async def capture_intraday_board_flow_curve() -> dict[str, Any]:
         evaluate_rotation=evaluate_intraday_board_rotation_events,
         retry_rotation_deliveries=retry_pending_board_rotation_alerts,
         licensed_industry_flow=intraday_longhu_industry_board_flow,
+        drill_candidates=drill_intraday_board_stock_candidates,
     )
 
 

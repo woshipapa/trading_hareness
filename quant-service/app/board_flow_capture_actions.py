@@ -45,6 +45,7 @@ class BoardFlowCaptureActions:
         evaluate_rotation: Callable[[datetime, datetime], list[dict[str, Any]]],
         retry_rotation_deliveries: Callable[[], Awaitable[dict[str, int]]],
         licensed_industry_flow: Callable[[], Awaitable[list[dict[str, Any]]]] | None = None,
+        drill_candidates: Callable[[list[dict[str, Any]]], Awaitable[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
         """Append one industry/concept point; no stock-level joins or alerts."""
         observed_at = datetime.now(timezone.utc)
@@ -173,12 +174,35 @@ class BoardFlowCaptureActions:
                 )
 
         await run_database(persist_snapshot)
+
+        def persist_drill() -> None:
+            with self._database.transaction() as connection:
+                connection.execute(
+                    """UPDATE quant.intraday_board_flow_snapshots
+                          SET source_status = source_status || %s::jsonb
+                        WHERE snapshot_minute = %s""",
+                    (tolerant_json({"stock_drill": source_status.get("stock_drill")}), snapshot_minute),
+                )
+
         market_flow_feature = await run_database(
             persist_feature, self._database, snapshot_minute, observed_at,
         )
         rotation_events = await run_database(evaluate_rotation, snapshot_minute, observed_at)
+        # Compute-only: the drill turns a moving board into the members driving
+        # it and records them beside the snapshot. Nothing is delivered from
+        # here - what to send, and how often, is the delivery selection's
+        # decision, made separately and under its own budget.
+        drill: dict[str, Any] = {"status": "disabled"}
+        if drill_candidates is not None:
+            try:
+                drill = await drill_candidates(rotation_events)
+            except Exception as error:  # noqa: BLE001 - research must not end the capture
+                drill = {"status": "failed", "reason": safe_error_detail(str(error), 300)}
+            source_status["stock_drill"] = drill
         retry_summary = await retry_rotation_deliveries()
         # Rotation evidence belongs to the frontend only, never chat delivery.
+        if drill_candidates is not None:
+            await run_database(persist_drill)
         rotation_deliveries = [
             {
                 "rotation_event_id": str(event["rotation_event_id"]),
@@ -193,6 +217,7 @@ class BoardFlowCaptureActions:
             # see how many boards were stored but not whether the licensed
             # contract or the public fallback produced them.
             "providers": dict(payload["providers"]), "source_status": source_status,
+            "stock_drill": source_status.get("stock_drill", {"status": "disabled"}),
             "capacity_blocks": capacity_blocks, "market_flow_feature": market_flow_feature,
             "rotation": {"confirmed": len(rotation_events), "deliveries": rotation_deliveries, "retry": retry_summary},
             "latency_ms": round((asyncio.get_running_loop().time() - started_at) * 1000),
