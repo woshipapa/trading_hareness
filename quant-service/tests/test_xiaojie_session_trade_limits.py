@@ -53,7 +53,8 @@ class EnsureSessionTradeLimitsTests(unittest.TestCase):
     def test_the_cross_section_is_requested_in_pages_and_must_be_complete(self):
         # Asking for the whole market in one response is refused by the only
         # source that still serves it, and a short read is worse than none.
-        _result, seen = self._run(rows=[{"ts_code": "600176.SH", "up_limit": "51.0"}])
+        _result, seen = self._run(rows=[{"ts_code": "600176.SH", "up_limit": "51.0"},
+                                        {"ts_code": "000001.SZ", "up_limit": "12.0"}])
         self.assertEqual(seen["call"]["api_name"], "stk_limit")
         self.assertEqual(seen["call"]["params"], {"trade_date": "20260918"})
         self.assertTrue(seen["call"]["paginate"])
@@ -69,17 +70,35 @@ class EnsureSessionTradeLimitsTests(unittest.TestCase):
         self.assertGreaterEqual(TRADE_LIMIT_MAX_PAGES * TRADE_LIMIT_PAGE_SIZE, TRADE_LIMIT_MAX_ROWS)
 
     def test_a_full_market_cross_section_is_persisted_and_read_back(self):
-        rows = [{"ts_code": f"{600000 + index}.SH", "up_limit": "10.0"} for index in range(5644)]
+        rows = ([{"ts_code": f"{600000 + index}.SH", "up_limit": "10.0"} for index in range(2320)]
+                + [{"ts_code": f"{index:06d}.SZ", "up_limit": "10.0"} for index in range(2939)])
         result, seen = self._run(rows=rows)
         self.assertEqual(result["status"], "fetched")
-        self.assertEqual(result["symbols"], 5644)
+        self.assertEqual(result["symbols"], 5259)
         self.assertEqual(result["provider"], "tushare_backup")
         self.assertEqual(seen["persisted"][0], TRADING_DATE)
 
     def test_rows_without_a_symbol_are_not_persisted(self):
-        rows = [{"ts_code": "600176.SH", "up_limit": "51.0"}, {"ts_code": "  ", "up_limit": "1.0"}]
+        rows = [{"ts_code": "600176.SH", "up_limit": "51.0"},
+                {"ts_code": "000001.SZ", "up_limit": "12.0"}, {"ts_code": "  ", "up_limit": "1.0"}]
         _result, seen = self._run(rows=rows)
-        self.assertEqual(len(seen["persisted"][1]), 1)
+        self.assertEqual(len(seen["persisted"][1]), 2)
+
+    def test_a_single_exchange_cross_section_is_rejected_unpersisted(self):
+        # 2026-09-18: the first page returned 1,999 Shanghai rows against a
+        # 2,000-row request, the loop read that as the terminal page, and the
+        # session ran on a limit table with no Shenzhen names at all.
+        rows = [{"ts_code": f"{600000 + index}.SH", "up_limit": "10.0"} for index in range(1999)]
+        result, seen = self._run(rows=rows)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIn("SZ", result["reason"])
+        self.assertNotIn("persisted", seen)
+
+    def test_a_cross_section_spanning_both_exchanges_is_accepted(self):
+        rows = ([{"ts_code": f"{600000 + index}.SH", "up_limit": "10.0"} for index in range(1200)]
+                + [{"ts_code": f"{index:06d}.SZ", "up_limit": "10.0"} for index in range(1200)])
+        result, _seen = self._run(rows=rows)
+        self.assertEqual(result["status"], "fetched")
 
     def test_an_empty_response_reports_unavailable_rather_than_persisting(self):
         result, seen = self._run(rows=[])

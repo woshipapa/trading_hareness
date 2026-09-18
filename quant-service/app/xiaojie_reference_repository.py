@@ -32,6 +32,17 @@ TRADE_LIMIT_PAGE_SIZE = 2000
 TRADE_LIMIT_MAX_ROWS = 12000
 TRADE_LIMIT_MAX_PAGES = 8
 
+#: Any complete A-share cross-section spans both main exchanges. The check is
+#: structural rather than a row count, so it does not drift as the market grows.
+#:
+#: It is needed because a terminal page is inferred from a page shorter than
+#: the page size, and the provider returns rows ordered by exchange. On
+#: 2026-09-18 the first page came back with 1,999 Shanghai rows against a
+#: 2,000-row request, the loop read that as the end of the data, and the
+#: session ran on a limit table holding one exchange - which silently makes
+#: every Shenzhen name unable to register as sealed at its board.
+TRADE_LIMIT_REQUIRED_EXCHANGES = frozenset({"SH", "SZ"})
+
 
 def trade_limits(connection: Any, trading_date: date) -> dict[str, float]:
     """Upper limit price per symbol for the session being scanned.
@@ -81,6 +92,18 @@ async def ensure_session_trade_limits(
     rows = [row for row in call.rows if str(row.get("ts_code") or "").strip()]
     if not rows:
         return {"status": "unavailable", "symbols": 0, "limits": {}}
+    exchanges = {str(row["ts_code"]).strip().upper()[-2:] for row in rows}
+    missing = TRADE_LIMIT_REQUIRED_EXCHANGES - exchanges
+    if missing:
+        # Left unpersisted on purpose: the table staying empty for the date is
+        # what makes the next scan retry, where a partial would have been
+        # cached for the whole session.
+        return {
+            "status": "incomplete", "symbols": 0, "limits": {},
+            "reason": (f"limit cross-section covers only {sorted(exchanges)}; "
+                       f"missing {sorted(missing)} after {len(rows)} rows"),
+            "provider": call.provider.key,
+        }
     stored = await persist_limits(trading_date, rows)
     limits = await read_limits(trading_date)
     return {"status": "fetched", "symbols": len(limits), "stored": stored,

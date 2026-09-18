@@ -32,13 +32,26 @@ async def sync(
     record_provider_failure: Callable[..., Any],
     record_provider_api_capability: Callable[..., Any],
 ) -> dict[str, Any]:
-    """Refresh ``all_a`` from one bounded stock_basic response."""
+    """Refresh ``all_a`` from the complete paginated stock_basic cross-section.
+
+    ``stock_basic`` for list_status=L is ~5,600 rows, and asking for it in one
+    response is refused: the peer's stock_basic_all_a capability had never
+    recorded a success, which is why every row in ``quant.instruments`` carried
+    a null ``list_date``.  That null is not cosmetic - the market volume
+    baseline discriminates index series from listed names by exactly that
+    column, so with none of them dated the baseline was null, the index volume
+    ratio was null, and the leader-flow market gate rejected all 250 pool
+    members for incomplete fields.
+    """
     candidates = provider_candidates("stock_basic", request.provider)
     if not candidates:
         return {"status": "blocked", "reason": "no configured provider supports stock_basic", "universe_key": request.universe_key}
     exchange_date = cn_date()
     params = {"exchange": "", "list_status": "L"}
     fields = "ts_code,symbol,name,area,industry,market,list_date,delist_date,exchange,is_hs"
+    # Under the REST adapter's own 3,000 cap, and wide enough that the whole
+    # active universe lands in three pages.
+    page_size, max_rows, max_pages = 2000, 12000, 8
     request_key = hashlib.sha256(json.dumps({"capability": "stock_basic_all_a", "date": str(exchange_date), "provider": request.provider}, sort_keys=True).encode()).hexdigest()
 
     def prepare_run() -> dict[str, Any] | None:
@@ -60,7 +73,11 @@ async def sync(
         return unchanged
     provider_started_at = asyncio.get_running_loop().time()
     try:
-        result = await call_tushare_api("stock_basic", params, fields, request.provider)
+        result = await call_tushare_api(
+            "stock_basic", params, fields, request.provider,
+            paginate=True, page_size=page_size, max_rows=max_rows,
+            max_pages=max_pages, require_complete=True,
+        )
         rows = result.rows
         if looks_like_response_header(rows):
             raise provider_call_error("provider returned a header row instead of market reference data")
