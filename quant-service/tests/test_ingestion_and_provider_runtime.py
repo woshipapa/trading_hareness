@@ -405,7 +405,7 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
 
     def test_minute_board_capture_records_local_capacity_without_provider_failure(self):
         async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(side_effect=[None, {"status": "insufficient", "state": "insufficient"}, []])
+            blocking = AsyncMock(side_effect=[None, {"status": "insufficient", "state": "insufficient"}, [], None])
             with patch("app.main.open_provider_capabilities", new=AsyncMock(return_value=set())), \
                  patch("app.main.run_akshare_blocking", new=AsyncMock(side_effect=ExecutorSaturatedError("public_source blocking executor is saturated"))), \
                  patch("app.main.run_database_blocking", new=blocking), \
@@ -417,9 +417,14 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["capacity_blocks"], 2)
         self.assertEqual(result["circuit_skips"], 0)
+        # persist_drill follows the rotation evaluation: the drill records its
+        # result beside the snapshot even when, as here, it had no licensed
+        # board to work on and did not read anything.
         self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
-            "persist_snapshot", "persist_intraday_market_flow_feature", "evaluate_intraday_board_rotation_events",
+            "persist_snapshot", "persist_intraday_market_flow_feature",
+            "evaluate_intraday_board_rotation_events", "persist_drill",
         ])
+        self.assertEqual(result["stock_drill"]["status"], "idle")
 
     def test_ths_industry_moneyflow_uses_database_executor_for_rows_and_persistence(self):
         outcome = {"status": "completed", "request_key": "industry", "provider": "tushare_super_sdk"}
