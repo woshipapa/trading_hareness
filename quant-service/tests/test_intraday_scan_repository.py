@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 import unittest
 from unittest.mock import MagicMock
 
+from app.datasources.catalog import NON_SECTOR_GROUPS, NON_SECTOR_LABEL_PATTERN
 from app.intraday_scan_repository import (
     first_eac_breakout_events,
     load_intraday_scan_local_state,
@@ -100,7 +101,10 @@ class IntradayScanRepositoryTests(unittest.TestCase):
         membership_sql, membership_params = connection.calls[2]
         self.assertIn("effective_from<=", membership_sql)
         self.assertEqual(membership_params[1:], (date(2026, 8, 17), date(2026, 8, 17), date(2026, 8, 17),
-                                                 ["ths_concept_flow", "ths_index_n", "ths_industry"]))
+                                                 ["ths_concept_flow", "ths_index_n", "ths_industry"],
+                                                 list(NON_SECTOR_GROUPS), NON_SECTOR_LABEL_PATTERN))
+        self.assertIn("NOT (member.sector_key = ANY(%s))", membership_sql)
+        self.assertEqual(membership_sql.count("%s"), len(membership_params))
 
     def test_signal_state_batches_per_key_reads_and_preserves_alert_payload(self) -> None:
         class Result:

@@ -7,6 +7,7 @@ from app.ashare_reality import price_limit_state
 from app.paper_execution_service import configure_paper_account
 from app.strategy_ablation import ablation_scores
 from app.paper_portfolio import paper_risk_gate
+from app.datasources.catalog import NON_SECTOR_GROUPS, NON_SECTOR_LABEL_PATTERN
 from app.strategy_contracts import EvidenceRef, SignalSpec, contract_payload
 
 
@@ -141,7 +142,12 @@ class PaperExecutionTests(unittest.TestCase):
         )
         membership_sql, params = connection.calls[0]
         self.assertIn("effective_from<=%s", membership_sql)
-        self.assertEqual(params, (datetime(2026, 8, 14).date(), datetime(2026, 8, 14).date(), datetime(2026, 8, 14).date()))
+        day = datetime(2026, 8, 14).date()
+        # Held exposure buckets are read exactly as a candidate's sectors are.
+        self.assertEqual(params, (day, day, day, ["ths_concept_flow", "ths_index_n", "ths_industry"],
+                                  list(NON_SECTOR_GROUPS), NON_SECTOR_LABEL_PATTERN))
+        self.assertIn("NOT (m.sector_key = ANY(%s))", membership_sql)
+        self.assertEqual(membership_sql.count("%s"), len(params))
 
 
 class RoundTripCostPercentTests(unittest.TestCase):

@@ -40,7 +40,7 @@ class IntradayResearchRuleTests(unittest.TestCase):
         self.assertEqual(
             intraday_signal_attribution("000001.SZ:watch:test", "watch", {}, evidence),
             isolated_signal_attribution("000001.SZ:watch:test", "watch", {}, evidence,
-                                        number=pure_intraday_number, signal_model_version="watchlist-confirmation-v7"),
+                                        number=pure_intraday_number, signal_model_version="watchlist-confirmation-v8"),
         )
         watch = {"symbol": "000001.SZ", "entry_price": None, "available_quantity": 0, "alert_on_entry": True, "alert_on_exit": True}
         quote = {"price": 10.2, "pct_change": 2.0, "volume_ratio": 2.0, "turnover_rate": 4.0, "main_net_inflow": 100, "main_flow_percentile": 0.95}
@@ -48,7 +48,7 @@ class IntradayResearchRuleTests(unittest.TestCase):
             intraday_signal_rules(watch, quote, {"price": 10.1}),
             isolated_signal_rules(watch, quote, {"price": 10.1}, number=pure_intraday_number,
                                    upside_assessment_fn=lambda q, d, m, p: isolated_upside_assessment(q, d, m, p, number=pure_intraday_number, eac_window=pure_eac_window),
-                                   model_version="watchlist-confirmation-v7"),
+                                   model_version="watchlist-confirmation-v8"),
         )
         items = [{"signal_event_id": "s1", "status": "matured", "raw_return": 0.01,
                   "maximum_favorable_excursion": 0.02, "maximum_adverse_excursion": -0.005,

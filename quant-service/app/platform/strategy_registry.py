@@ -27,7 +27,7 @@ class StrategyContract:
 
 STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
     "intraday_watchlist_confirmation": StrategyContract(
-        "intraday_watchlist_confirmation", "watchlist-confirmation-v7", "app/intraday_signal_rules.py",
+        "intraday_watchlist_confirmation", "watchlist-confirmation-v8", "app/intraday_signal_rules.py",
         "intraday-rule-input-v2", ("intraday_scan_runs", "intraday_rule_input_snapshots", "intraday_signal_events"),
         "intraday_edge", "shadow", "none", "bounded watchlist price/minute/peer confirmation research",
     ),
@@ -52,7 +52,7 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "research", "shadow", "none", "causal countertrend rebound research and intraday acceptance evidence",
     ),
     "ten_day_leader_rotation_shadow": StrategyContract(
-        "ten_day_leader_rotation_shadow", "ten-day-leader-vwap-coordination-shadow-v1", "app/ten_day_leader_rotation_research.py",
+        "ten_day_leader_rotation_shadow", "ten-day-leader-vwap-coordination-shadow-v2", "app/ten_day_leader_rotation_research.py",
         "ten-day-leader-rotation-v1", ("ten_day_leader_rotation_runs", "ten_day_leader_rotation_candidates", "ten_day_leader_rotation_intraday_observations"),
         "research", "shadow", "none", "post-close leader coordination pool with next-session observation",
     ),

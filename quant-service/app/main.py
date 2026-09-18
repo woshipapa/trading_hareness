@@ -1872,7 +1872,7 @@ async def intraday_sector_report(request: IntradaySectorReportRequest) -> dict[s
     return {"observed_at": datetime.now(timezone.utc).isoformat(), **result}
 
 
-INTRADAY_SIGNAL_MODEL_VERSION = "watchlist-confirmation-v7"
+INTRADAY_SIGNAL_MODEL_VERSION = "watchlist-confirmation-v8"
 INTRADAY_CONFIRMATION_WINDOW = timedelta(minutes=5)
 INTRADAY_ALERT_COOLDOWN = timedelta(minutes=10)
 INTRADAY_ALERT_MAX_ATTEMPTS = 3

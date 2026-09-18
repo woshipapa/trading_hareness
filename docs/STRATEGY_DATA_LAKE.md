@@ -50,7 +50,7 @@ availability fields.
 ## 龙头研究的数据规模与分层预算
 
 当前的 `dragon-leader-score-v1`（涨停/连板/地天板盘后影子评分）和
-`ten-day-leader-vwap-coordination-shadow-v1`（十日榜、板块外力、VWAP
+`ten-day-leader-vwap-coordination-shadow-v2`（十日榜、板块外力、VWAP
 盘中确认）共享以下输入闭包。评分可以在证据不完整时返回
 `partial_shadow`，但不能把缺失字段当作零分：
 

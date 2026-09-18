@@ -27,7 +27,8 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         Need("quote.order_book", False, "OFI and seal depth on the priority subset"),
         Need("bars.minute", purpose="minute confirmation and profile"),
         Need("quote.all_a_snapshot", purpose="exact-peer breadth"),
-        Need("sector.membership", purpose="exact peer sets",
+        Need("sector.membership", purpose="exact peer sets and paper sector exposure; qualification lists "
+                                            "(catalog.NON_SECTOR_GROUPS) are not sectors",
              taxonomies=("ths_concept_flow", "ths_index_n", "ths_industry")),
         Need("limits.prices", purpose="limit-aware rules"),
         Need("flow.watch_intraday", False, "research-only flow confirmation"),
@@ -42,7 +43,8 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
     _needs(
         "ten_day_leader_rotation_shadow",
         Need("bars.daily"), Need("limits.limit_up_pool", purpose="leader universe"),
-        Need("sector.membership"), Need("bars.minute", False, "VWAP coordination observation"),
+        Need("sector.membership", purpose="intraday peers via the watchlist loader, same exclusions"),
+        Need("bars.minute", False, "VWAP coordination observation"),
     ),
     _needs(
         "post_close_base_candidates",

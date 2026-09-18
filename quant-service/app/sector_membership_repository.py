@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json
 
+from .datasources.catalog import NON_SECTOR_GROUPS, NON_SECTOR_LABEL_PATTERN
+
 
 PROVIDER_INTERVAL = "provider_interval"
 OBSERVED_SNAPSHOT = "observed_snapshot"
@@ -61,6 +63,22 @@ def point_in_time_membership_predicate(
         f"({alias}.effective_to IS NULL OR {alias}.effective_to>={date_parameter}) AND "
         f"{alias}.effective_from_basis IN ('{PROVIDER_INTERVAL}','{OBSERVED_SNAPSHOT}') AND "
         f"{alias}.known_at <= {cutoff}"
+    )
+
+
+def sector_group_predicate(alias: str = "member") -> tuple[str, tuple[Any, ...]]:
+    """SQL (and its parameters) that keeps only groups that are sectors.
+
+    Drops the qualification lists the catalog names -- 融资融券, index
+    constituents, reporting-period lists -- by key, and by label for the ones
+    THS mints later.  Use it wherever a shared group is read as "these names
+    move together": peer sets and sector exposure.
+    """
+    return (
+        f"NOT ({alias}.sector_key = ANY(%s)) AND NOT EXISTS ("
+        f"SELECT 1 FROM quant.sectors non_sector WHERE non_sector.taxonomy_key={alias}.taxonomy_key "
+        f"AND non_sector.sector_key={alias}.sector_key AND non_sector.label ~ %s)",
+        (list(NON_SECTOR_GROUPS), NON_SECTOR_LABEL_PATTERN),
     )
 
 
@@ -213,5 +231,5 @@ def persist_observed_snapshot_batched(
 __all__ = [
     "LEGACY_UNBOUNDED", "OBSERVED_SNAPSHOT", "PROVIDER_INTERVAL", "membership_interval",
     "observed_exchange_date", "persist_observed_snapshot", "persist_observed_snapshot_batched",
-    "persist_ths_snapshot", "point_in_time_membership_predicate",
+    "persist_ths_snapshot", "point_in_time_membership_predicate", "sector_group_predicate",
 ]

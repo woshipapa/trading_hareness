@@ -5,12 +5,14 @@ import unittest
 from pathlib import Path
 
 from app.datasources.catalog import (
-    BINDINGS, CAPABILITIES, SOURCES, bindings_for, catalog_document, evidence_locations, validate_catalog,
+    BINDINGS, CAPABILITIES, NON_SECTOR_GROUPS, NON_SECTOR_LABEL_PATTERN, SOURCES, bindings_for, catalog_document,
+    evidence_locations, validate_catalog,
 )
 from app.datasources.contracts import RESOLVABLE_STATES, RETIRED, UNSUPPORTED
 from app.datasources.resolver import CapabilityResolver, CapabilityUnavailable
 from app.platform.strategy_data_needs import STRATEGY_DATA_NEEDS, strategy_data_needs_catalog
 from app.platform.strategy_registry import STRATEGY_CONTRACTS
+from app.sector_membership_repository import sector_group_predicate
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = SERVICE_ROOT.parent
@@ -62,6 +64,41 @@ class CatalogTests(unittest.TestCase):
         self.assertIn(UNSUPPORTED, {provider["status"] for provider in snapshot["providers"]})
         self.assertNotIn(RETIRED, {provider["status"] for capability in document["capabilities"]
                                    for provider in capability["providers"]})
+
+
+class NonSectorGroupTests(unittest.TestCase):
+    """Qualification lists never stand in for a sector (2026-09-18 labels)."""
+
+    #: Kept on purpose: members share a driver, so they trade together.
+    SECTORS = ("国企改革", "央企国企改革", "中字头股票", "参股券商", "国家大基金持股", "ST板块",
+               "新股与次新股", "注册制次新股", "摘帽", "股权转让(并购重组)", "芯片概念", "智能电网", "人民币贬值受益",
+               "粤港澳大湾区", "5G", "6G概念", "3D打印", "PM2.5", "AI PC")
+    #: Lists THS mints later and that no key names yet.
+    FUTURE_LISTS = ("2026三季报预增", "2026年报预增", "2027一季报预减", "中证1000成份股", "深证100成份股",
+                    "同花顺红利50", "同花顺AI指数", "转融券标的", "港股通(深)")
+
+    def test_keys_are_ths_codes_with_labels(self):
+        for key, label in NON_SECTOR_GROUPS.items():
+            self.assertRegex(key, r"^88\d{4}\.TI$")
+            self.assertTrue(label.strip(), key)
+
+    def test_pattern_catches_future_lists_and_spares_sectors(self):
+        pattern = re.compile(NON_SECTOR_LABEL_PATTERN)
+        for label in self.FUTURE_LISTS:
+            self.assertRegex(label, pattern)
+        for label in self.SECTORS:
+            self.assertIsNone(pattern.search(label), label)
+        self.assertFalse(set(NON_SECTOR_GROUPS.values()) & set(self.SECTORS))
+
+    def test_predicate_binds_one_parameter_per_placeholder(self):
+        sql, parameters = sector_group_predicate("m")
+        self.assertEqual(sql.count("%s"), len(parameters))
+        self.assertIn("m.sector_key", sql)
+        self.assertNotIn("member.", sql)
+        self.assertEqual(parameters, (list(NON_SECTOR_GROUPS), NON_SECTOR_LABEL_PATTERN))
+
+    def test_document_publishes_the_list(self):
+        self.assertEqual(catalog_document()["non_sector_groups"]["keys"]["885338.TI"], "融资融券")
 
 
 class StrategyNeedsTests(unittest.TestCase):

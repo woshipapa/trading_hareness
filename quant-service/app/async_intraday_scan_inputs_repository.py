@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .platform.strategy_data_needs import strategy_taxonomies
-from .sector_membership_repository import point_in_time_membership_predicate
+from .sector_membership_repository import point_in_time_membership_predicate, sector_group_predicate
 
 
 async def watchlists(
@@ -64,14 +64,15 @@ async def exact_memberships(
         return []
     local_trade_date = observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date()
     membership_predicate = point_in_time_membership_predicate("member", known_at_cutoff_sql="%s")
+    sector_predicate, sector_parameters = sector_group_predicate("member")
     async with async_database.transaction() as connection:
         result = await connection.execute(
             f"""SELECT taxonomy_key,sector_key,symbol
                  FROM quant.sector_membership_history member
                 WHERE symbol=ANY(%s) AND {membership_predicate}
-                  AND taxonomy_key=ANY(%s)""",
+                  AND taxonomy_key=ANY(%s) AND {sector_predicate}""",
             (symbols, local_trade_date, local_trade_date, observed_at,
-             list(strategy_taxonomies("intraday_watchlist_confirmation"))),
+             list(strategy_taxonomies("intraday_watchlist_confirmation")), *sector_parameters),
         )
         rows = await result.fetchall()
     return [dict(row) for row in rows]

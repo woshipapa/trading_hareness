@@ -20,7 +20,7 @@ from .contracts import (
 )
 
 
-CATALOG_VERSION: Final = "datasource-catalog-v1"
+CATALOG_VERSION: Final = "datasource-catalog-v2"
 
 _TUSHARE_RISK = "共享限频池；全市场截面需分页；超级 GET 网关偶发返回错数据集并按参数缓存"
 _EASTMONEY_RISK = "按出口 IP 限流/反爬；push2 clist 全市场在 owner 出口被断连（2026-09-18）"
@@ -441,6 +441,30 @@ TAXONOMIES: Final[dict[str, Taxonomy]] = {item.key: item for item in (
     Taxonomy("fuyao_ths_region", "fuyao_ths", "ths_region", DECLARED, 50, "33 个地域"),
 )}
 
+#: Groups in the THS concept tables whose membership is a qualification, not a
+#: shared business or policy driver: trading access, index inclusion, THS's own
+#: curated index products, a yield screen, a certification (专精特新, every
+#: industry), a rescue-fund holding and reporting-period lists.  Two names in 融资融券 (3,915 members on 2026-09-18)
+#: have no reason to move together, yet a rule that takes every group for a
+#: sector pairs them -- it made each name on a five-name watchlist the
+#: "same-sector peer" of the other four.  Clusters that do trade together stay
+#: sectors: ST板块, 次新股, 摘帽, 国企改革, 中字头股票, 参股券商, 国家大基金持股.
+#: Keys are the verified THS codes; the pattern (valid as a PostgreSQL ARE and
+#: as a Python ``re``) catches the lists THS mints each period or product.
+NON_SECTOR_GROUPS: Final[dict[str, str]] = {
+    "885338.TI": "融资融券", "885694.TI": "深股通", "885520.TI": "沪股通",
+    "883300.TI": "沪深300样本股", "883301.TI": "上证50样本股", "883302.TI": "上证180成份股",
+    "883303.TI": "上证380成份股", "883304.TI": "中证500成份股",
+    "885916.TI": "同花顺漂亮100", "886045.TI": "同花顺中特估100", "886075.TI": "同花顺出海50",
+    "886096.TI": "同花顺新质50", "886082.TI": "同花顺果指数",
+    "886072.TI": "高股息精选", "885929.TI": "专精特新", "885663.TI": "证金持股",
+    "886109.TI": "2026一季报预增", "886110.TI": "2026中报预增",
+}
+NON_SECTOR_LABEL_PATTERN: Final[str] = (
+    r"^(融资融券|转融券|深股通|沪股通|港股通)|(成份股|样本股)$|^同花顺.+(\d+|指数)$"
+    r"|^\d{4}.*报(预增|预减|预亏|预盈|扭亏)$"
+)
+
 _STATE_RANK: Final = {LIVE_VERIFIED: 0, DECLARED: 1, DORMANT: 2}
 
 
@@ -571,11 +595,14 @@ def catalog_document() -> dict[str, Any]:
         } for capability in sorted(CAPABILITIES.values(), key=lambda item: item.key)],
         "retired": [{"source": item.source, "capability": item.capability, "notes": item.notes}
                     for item in BINDINGS if item.status == RETIRED],
+        "non_sector_groups": {"keys": dict(sorted(NON_SECTOR_GROUPS.items())),
+                              "label_pattern": NON_SECTOR_LABEL_PATTERN},
     }
 
 
 __all__ = [
-    "BINDINGS", "CAPABILITIES", "CATALOG_VERSION", "EXCHANGE_TIMESTAMPED_QUOTE_LABELS", "RULE_USABLE_FLOW_LABELS",
+    "BINDINGS", "CAPABILITIES", "CATALOG_VERSION", "EXCHANGE_TIMESTAMPED_QUOTE_LABELS", "NON_SECTOR_GROUPS",
+    "NON_SECTOR_LABEL_PATTERN", "RULE_USABLE_FLOW_LABELS",
     "SOURCES", "SOURCE_LABELS", "TAXONOMIES", "bindings_for", "capabilities_of", "catalog_document",
     "evidence_locations", "primary_source", "primary_store_value", "store_values", "taxonomies_for",
     "validate_catalog",

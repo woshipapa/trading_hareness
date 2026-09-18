@@ -19,7 +19,7 @@ import math
 from typing import Any
 
 
-MODEL_VERSION = "ten-day-leader-vwap-coordination-shadow-v1"
+MODEL_VERSION = "ten-day-leader-vwap-coordination-shadow-v2"
 TOP_RANK_LIMIT = 30
 BOARD_EXPANSION_MIN_PCT = {"main": 5.0, "growth": 10.0, "bj": 15.0}
 SUPPORTIVE_CYCLE_STATES = {"attack_incubating", "attack_accelerating", "repair", "handoff"}
