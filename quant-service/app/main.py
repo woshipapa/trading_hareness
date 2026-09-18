@@ -639,6 +639,11 @@ from .baostock_daily_sync import fetch_rows as fetch_baostock_rows_isolated, syn
 from .market_universe_sync import sync as sync_market_universe_isolated
 from .full_market_daily_sync import sync as sync_full_market_daily_isolated
 from .longhu_market_repository import persisted_close_context as read_longhu_close_context
+from .longhu_market_service import (
+    owner_longhu_source_factory,
+    sync as sync_longhu_full_market_close,
+)
+from .longhu_shared_full_market import shared_longhu_source_factory
 from .longhu_supplemental_service import sync as sync_longhu_supplemental_isolated
 from .longhu_replay_read_repository import readiness as longhu_replay_readiness
 from .longhu_schema_profile_repository import schema_profile as longhu_schema_profile
@@ -653,7 +658,10 @@ from .minute_bar_session_backfill import (
     session_symbols as session_minute_symbols,
 )
 from .earnings_calendar_sync import sync as sync_earnings_calendar_isolated
-from .stock_money_flow_sync import sync as sync_stock_money_flow_isolated
+from .stock_money_flow_sync import (
+    persist_flow_rows as persist_stock_money_flow_rows,
+    sync as sync_stock_money_flow_isolated,
+)
 from .disclosure_day_watch import MODEL_VERSION as DISCLOSURE_DAY_WATCH_MODEL_VERSION
 from .limit_up_continuation import MODEL_VERSION as LIMIT_UP_CONTINUATION_MODEL_VERSION
 from .core_daily_control_sync import CoreDailyControlDependencies, sync as sync_core_daily_controls_isolated
@@ -2626,8 +2634,6 @@ def longhu_full_market_source_factory() -> Callable[[], Any]:
     gateway, which is what the owner-only adapter's own refusal tells it to do.
     Choosing here keeps one enabling flag with one meaning on both hosts.
     """
-    from .longhu_market_service import owner_longhu_source_factory
-    from .longhu_shared_full_market import shared_longhu_source_factory
     from .longhu_vendor_source import direct_access_enabled
 
     return owner_longhu_source_factory if direct_access_enabled() else shared_longhu_source_factory

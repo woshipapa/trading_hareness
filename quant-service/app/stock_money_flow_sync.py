@@ -86,8 +86,17 @@ def normalize_flow_rows(api_name: str, rows: list[dict[str, Any]], trade_date: d
 
 def persist_flow_rows(connection: Any, rows: list[dict[str, Any]], provider: str,
                       available_at: datetime) -> int:
-    for row in rows:
-        connection.execute(
+    """Store one session's flow cross-section in a single batched statement.
+
+    A full-market day is ~5,300 rows and the owner database is an SSH tunnel
+    away at 52ms per round trip, so a statement per row spent four and a half
+    minutes here alone.  The statement, its guard against an unknown instrument
+    and its conflict resolution are unchanged; only the grouping differs.
+    """
+    if not rows:
+        return 0
+    with connection.cursor() as cursor:
+        cursor.executemany(
             """INSERT INTO quant.stock_money_flow_daily(
                     symbol,trading_date,source,provider,net_amount,net_amount_rate,
                     buy_elg_amount,buy_lg_amount,buy_md_amount,buy_sm_amount,available_at,raw)
@@ -99,10 +108,10 @@ def persist_flow_rows(connection: Any, rows: list[dict[str, Any]], provider: str
                  buy_lg_amount=EXCLUDED.buy_lg_amount,buy_md_amount=EXCLUDED.buy_md_amount,
                  buy_sm_amount=EXCLUDED.buy_sm_amount,available_at=EXCLUDED.available_at,
                  raw=EXCLUDED.raw""",
-            (row["symbol"], row["trading_date"], row["source"], provider, row["net_amount"],
-             row["net_amount_rate"], row["buy_elg_amount"], row["buy_lg_amount"],
-             row["buy_md_amount"], row["buy_sm_amount"], available_at, Json(row["raw"]),
-             row["symbol"]),
+            [(row["symbol"], row["trading_date"], row["source"], provider, row["net_amount"],
+              row["net_amount_rate"], row["buy_elg_amount"], row["buy_lg_amount"],
+              row["buy_md_amount"], row["buy_sm_amount"], available_at, Json(row["raw"]),
+              row["symbol"]) for row in rows],
         )
     return len(rows)
 

@@ -156,5 +156,42 @@ class FullMarketTransportSelectionTests(unittest.TestCase):
             self.assertIs(main.longhu_full_market_source_factory(), owner_longhu_source_factory)
 
 
+class LicensedClosePathWiringTests(unittest.TestCase):
+    """The enabled path must be reachable, not merely written.
+
+    ``sync_longhu_full_market_close`` was called in two places and imported in
+    none.  The flag that reaches those branches defaults to off, so the module
+    imported cleanly and the route raised NameError the first time anyone
+    turned the licensed close on - in production, on the first attempt.
+    """
+
+    def test_every_name_the_enabled_branch_calls_actually_resolves(self):
+        import app.main as main
+
+        self.assertTrue(callable(main.sync_longhu_full_market_close))
+        self.assertTrue(callable(main.owner_longhu_source_factory))
+        self.assertTrue(callable(main.shared_longhu_source_factory))
+
+    def test_the_full_market_route_hands_the_gateway_factory_to_the_licensed_sync(self):
+        import asyncio
+
+        import app.main as main
+        from app.longhu_shared_full_market import shared_longhu_source_factory
+        from app.request_models import FullMarketDailySyncRequest
+
+        async def fake_sync(trade_date, **kwargs):
+            return {"status": "completed", "trade_date": str(trade_date),
+                    "source_factory": kwargs["source_factory"]}
+
+        with patch("app.main.longhu_full_market_enabled", return_value=True), \
+             patch("app.longhu_vendor_source.direct_access_enabled", return_value=False), \
+             patch("app.main.sync_longhu_full_market_close", new=fake_sync):
+            result = asyncio.run(main.sync_full_market_daily(
+                FullMarketDailySyncRequest(provider="auto", trade_date=TRADE_DATE),
+            ))
+        self.assertEqual(result["status"], "completed")
+        self.assertIs(result["source_factory"], shared_longhu_source_factory)
+
+
 if __name__ == "__main__":
     unittest.main()

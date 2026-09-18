@@ -75,9 +75,28 @@ class NormalizeFlowRowTests(unittest.TestCase):
 class SyncCoverageGateTests(unittest.TestCase):
     trade_date = date(2026, 8, 25)
 
+    class _FakeCursor:
+        """The batched write path groups by statement, so record each row."""
+
+        def __init__(self, connection):
+            self._connection = connection
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def executemany(self, statement, parameters, returning=False):
+            for item in parameters:
+                self._connection.statements.append((statement, tuple(item)))
+
     class _FakeConnection:
         def __init__(self):
             self.statements = []
+
+        def cursor(self):
+            return SyncCoverageGateTests._FakeCursor(self)
 
         def execute(self, statement, params=None):
             self.statements.append((statement, params))
