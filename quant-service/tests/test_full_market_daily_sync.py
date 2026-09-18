@@ -37,8 +37,11 @@ class FullMarketDailySyncTests(unittest.IsolatedAsyncioTestCase):
                 for index in range(1, count + 1)
             ]
 
-        async def call(_api, _params, _fields, preference):
+        pagination: list[dict[str, object]] = []
+
+        async def call(_api, _params, _fields, preference, **kwargs):
             attempted.append(preference)
+            pagination.append(kwargs)
             provider = super_get if preference == "super_get" else primary
             return SimpleNamespace(
                 provider=provider, rows=rows(2 if preference == "super_get" else 5),
@@ -62,6 +65,9 @@ class FullMarketDailySyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempted, ["super_get", "primary"])
         self.assertEqual(rejected, [("tushare_super_get", "daily returned 2 valid A-share rows; expected at least 5")])
         self.assertEqual(database_timeouts, [None, 180])
+        # The cross-section is ~5,400 rows and is refused in one response.
+        self.assertTrue(all(item["paginate"] for item in pagination))
+        self.assertTrue(all(item["require_complete"] for item in pagination))
 
     async def test_minimum_row_gate_participates_in_idempotency_key(self):
         class Connection:

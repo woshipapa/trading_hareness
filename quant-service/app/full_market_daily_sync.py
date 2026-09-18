@@ -12,6 +12,17 @@ from typing import Any, Awaitable, Callable
 from psycopg.types.json import Json
 
 
+#: One session's all-A daily bars are ~5,400 rows, and asking for them in a
+#: single response is refused: the REST backup answers "413 Request Entity Too
+#: Large" and the ProMax gateway rate-limits. Paged, the same request returns
+#: the complete cross-section - which is what a 30-day base screen needs and
+#: could not get, leaving the post-close lane returning zero candidates for
+#: four sessions running.
+DAILY_PAGE_SIZE = 2000
+DAILY_MAX_ROWS = 12000
+DAILY_MAX_PAGES = 8
+
+
 async def sync(
     request: Any,
     *,
@@ -75,6 +86,8 @@ async def sync(
                 candidate_result = await call_tushare_api(
                     "daily", {"trade_date": trade_date.strftime("%Y%m%d")},
                     "ts_code,trade_date,open,high,low,close,pre_close,vol,amount", candidate.name,
+                    paginate=True, page_size=DAILY_PAGE_SIZE, max_rows=DAILY_MAX_ROWS,
+                    max_pages=DAILY_MAX_PAGES, require_complete=True,
                 )
             except executor_saturated_error:
                 raise
