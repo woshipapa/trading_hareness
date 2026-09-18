@@ -338,6 +338,30 @@ journalctl --user -u 'peer-session-guard@*' --since today
 单元文件在 `deploy/shared-peer/systemd/`，安装到 `~/.config/systemd/user/`；脚本随
 release tarball 下发，`~/trading_hareness` 是指向当前 release 的软链。
 
+### 板块成分(策略的硬前提)
+
+`quant.sector_membership_history` 为空时,潜龙出海的**每一只**候选都会被判
+`sector_core_unconfirmed` 而全部 `no_trade`——管道再健康也一条推荐都不会出。
+
+概念成分走 Tushare `ths_member`,逐板块 + 6 次/分限频,要几小时。**Longhu 是能一次
+性给全的授权源**:104 个行业板块,每个板块一次网关调用返回完整成分,约 10 分钟灌完
+5300+ 只。
+
+```bash
+# 在 peer 上刷新(收盘后或 08:59 之前)
+docker cp scripts/fill-longhu-sector-membership.py \
+    trading-hareness-peer-quant-research-1:/tmp/fill.py
+docker exec trading-hareness-peer-quant-research-1 python /tmp/fill.py
+```
+
+**时点纪律**:成分行以 `known_at=now` 落库,而策略只接受"本场开盘 08:59:59 之前就已
+知"的成分。所以**盘中刷新对当场无效,下一场才生效**——这是刻意的防未来函数规则,不要
+绕过它。
+
+选哪个 taxonomy 按**覆盖度**决定(`SECTOR_TAXONOMY_PREFERENCE`),不是"非空即用":
+一张只有一个板块的残缺成分表和空表一样会让所有候选失格。实际用了哪个来源记录在
+session reference 的 `membership_taxonomy` 上。
+
 ## 关键文件
 
 - [`compose.yaml`](compose.yaml)：容器、网络端口、持久卷与环境变量映射。
