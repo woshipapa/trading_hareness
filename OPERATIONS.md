@@ -338,6 +338,28 @@ journalctl --user -u 'peer-session-guard@*' --since today
 单元文件在 `deploy/shared-peer/systemd/`，安装到 `~/.config/systemd/user/`；脚本随
 release tarball 下发，`~/trading_hareness` 是指向当前 release 的软链。
 
+### 日线历史深度(盘后选股的硬前提)
+
+盘后 30 天底部筛选需要 30 个交易日的全市场日线。此前全市场覆盖只有约两周深度、
+只有 32 只票有 ≥30 个交易日,所以 `base_ready_30d` 恒为 0、`returned` 恒为 0,
+**连续四个交易日一只票都选不出来**——不是没有合格的票,是没有可判断的历史。
+
+根因和 `stk_limit`/`stock_basic`/`stk_factor_pro` 是同一个:全市场截面被一次性整包
+请求,REST 备份源答 `413`,ProMax 网关限频。已改为分页。
+
+```bash
+# 在 peer 上补历史(默认回溯 40 个交易日,已完整的日期自动跳过)
+~/trading_hareness/scripts/backfill-full-market-daily.sh 40
+```
+
+**必须收盘后跑**。这个同步和实时采集共用一个 6 次/分的 provider,盘中抢不过,
+请求会返回 `shared provider rate-limit queue is full`。已配置
+`peer-daily-backfill.timer` 在**周一至周五 15:40** 自动执行(收盘后、且在盘后刷新
+窗口之后)。
+
+交易日取自 `quant.market_trade_calendar`,不按工作日推算——节假日当成交易日去拉会
+返回空,和拉取失败长得一模一样。该表按交易所分行,所以取日期要 `DISTINCT`。
+
 ### 板块成分(策略的硬前提)
 
 `quant.sector_membership_history` 为空时,潜龙出海的**每一只**候选都会被判

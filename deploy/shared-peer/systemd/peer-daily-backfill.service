@@ -1,0 +1,15 @@
+[Unit]
+# The post-close screens need depth the live path never built: full-market
+# coverage reached back about two weeks and only 32 symbols carried 30
+# sessions, so the 30-day base screen returned nothing for four sessions.
+Description=Deepen the all-A daily history for the post-close screens
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+Environment=DOCKER_HOST=unix://%t/docker.sock
+ExecStart=%h/trading_hareness/scripts/backfill-full-market-daily.sh 40
+# Forty sessions at roughly a minute each, plus deferrals when the shared
+# provider queue is busy.
+TimeoutStartSec=5400
