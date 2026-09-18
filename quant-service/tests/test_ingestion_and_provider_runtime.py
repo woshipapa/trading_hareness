@@ -146,12 +146,13 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
             DailyBar(symbol="000001.SZ", trading_date=date(2026, 8, 11), close=Decimal("11"), source="tushare_super_get"),
         ]
         with patch("app.main.db.transaction", return_value=transaction) as transaction_factory, \
-             patch("app.main.upsert_bar") as upsert:
+             patch("app.main.upsert_daily_bars", return_value=len(bars)) as upsert:
             stored = persist_daily_bar_batch(bars)
         self.assertEqual(stored, 2)
         transaction_factory.assert_called_once_with()
-        self.assertEqual(upsert.call_count, 2)
-        self.assertTrue(all(call.args[0] is connection for call in upsert.call_args_list))
+        # The response is one evidence unit, so it is also one batched write:
+        # a statement per bar costs a tunnel round trip per bar.
+        upsert.assert_called_once_with(connection, bars)
 
     def test_baostock_daily_sync_checks_its_ledger_in_database_executor(self):
         unchanged = {"status": "unchanged", "trade_date": "2026-08-11", "imported": 1, "request_key": "cached"}

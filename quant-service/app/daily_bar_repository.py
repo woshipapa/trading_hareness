@@ -228,8 +228,182 @@ def upsert_daily_bar(connection: Any, bar: DailyBar) -> None:
         connection.execute("UPDATE quant.canonical_bars_daily SET source_observation_ids=%s,canonicalized_at=now() WHERE symbol=%s AND trading_date=%s", (source_ids, bar.symbol, bar.trading_date))
 
 
+def _unique_key_rounds(bars: list[DailyBar]) -> list[list[DailyBar]]:
+    """Split a batch so no round repeats a (symbol, trading_date).
+
+    The per-bar path reads ``canonical_bars_daily`` back between writes, so a
+    repeated key sees its own earlier write.  A batch reads once up front, so a
+    repeat inside one round would silently arbitrate against stale state.
+    Rounds keep arrival order and are applied in sequence, which reproduces the
+    sequential outcome exactly.
+    """
+    rounds: list[list[DailyBar]] = []
+    seen: list[set[tuple[str, date]]] = []
+    for bar in bars:
+        key = (bar.symbol, bar.trading_date)
+        for index, keys in enumerate(seen):
+            if key not in keys:
+                keys.add(key)
+                rounds[index].append(bar)
+                break
+        else:
+            seen.append({key})
+            rounds.append([bar])
+    return rounds
+
+
+def _upsert_daily_bar_round(connection: Any, bars: list[DailyBar]) -> None:
+    """Apply one round of distinct bars as a handful of batched statements."""
+    prepared = []
+    for bar in bars:
+        mismatch = daily_amount_unit_mismatch(
+            source=bar.source, amount=bar.amount, volume=bar.volume, close=bar.close,
+        )
+        prepared.append((bar, mismatch, None if mismatch else bar.amount))
+
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            """INSERT INTO quant.instruments(symbol,exchange,name,industry,is_st,source)
+               VALUES(%s,%s,%s,%s,coalesce(%s,false),%s)
+               ON CONFLICT(symbol) DO UPDATE SET exchange=EXCLUDED.exchange,
+                  name=coalesce(EXCLUDED.name,quant.instruments.name),
+                  industry=coalesce(EXCLUDED.industry,quant.instruments.industry),
+                  is_st=CASE WHEN %s::boolean IS NULL THEN quant.instruments.is_st ELSE EXCLUDED.is_st END,
+                  source=EXCLUDED.source, updated_at=now()""",
+            [(bar.symbol, exchange_for(bar.symbol), bar.name, bar.industry, bar.is_st, bar.source, bar.is_st)
+             for bar, _mismatch, _amount in prepared],
+        )
+        cursor.executemany(
+            """INSERT INTO quant.market_bars_daily(symbol,trading_date,open,high,low,close,pre_close,volume,amount,adj_factor,is_suspended,limit_up,limit_down,source,available_at)
+               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,coalesce(%s,false),%s,%s,%s,%s)
+               ON CONFLICT(symbol,trading_date) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
+                 close=EXCLUDED.close,pre_close=EXCLUDED.pre_close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
+                 adj_factor=coalesce(EXCLUDED.adj_factor,quant.market_bars_daily.adj_factor),
+                 is_suspended=CASE WHEN %s::boolean IS NULL THEN quant.market_bars_daily.is_suspended ELSE EXCLUDED.is_suspended END,
+                 limit_up=coalesce(EXCLUDED.limit_up,quant.market_bars_daily.limit_up),
+                 limit_down=coalesce(EXCLUDED.limit_down,quant.market_bars_daily.limit_down),source=EXCLUDED.source,available_at=EXCLUDED.available_at""",
+            [(bar.symbol, bar.trading_date, bar.open, bar.high, bar.low, bar.close, bar.pre_close, bar.volume,
+              amount, bar.adj_factor, bar.is_suspended, bar.limit_up, bar.limit_down, bar.source,
+              as_utc(bar.available_at), bar.is_suspended)
+             for bar, _mismatch, amount in prepared],
+        )
+
+        observation_rows = []
+        for bar, _mismatch, _amount in prepared:
+            normalized = bar.model_dump(mode="json")
+            observation_rows.append((
+                bar.source, bar.symbol,
+                datetime.combine(bar.trading_date, datetime.min.time(), tzinfo=timezone.utc),
+                as_utc(bar.available_at),
+                hashlib.sha256(repr(sorted(normalized.items())).encode("utf-8")).hexdigest(),
+                Json(normalized), Json(normalized),
+            ))
+        cursor.executemany(
+            """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
+               VALUES(%s,'daily_bar','cn',%s,%s,%s,%s,%s,%s)
+               ON CONFLICT(provider_key,capability,market,symbol,effective_at,payload_sha256) DO UPDATE SET available_at=EXCLUDED.available_at
+               RETURNING observation_id""",
+            observation_rows, returning=True,
+        )
+        # One result set per parameter row, counted rather than trusted: a
+        # driver double whose ``nextset`` never reports exhaustion would
+        # otherwise spin forever collecting rows.
+        observation_ids: list[Any] = []
+        for position in range(len(observation_rows)):
+            row = cursor.fetchone()
+            observation_ids.append(row["observation_id"] if row else None)
+            if position + 1 < len(observation_rows) and not cursor.nextset():
+                break
+        observation_ids.extend([None] * (len(observation_rows) - len(observation_ids)))
+
+    existing_by_key = {
+        (row["symbol"], row["trading_date"]): row
+        for row in connection.execute(
+            """SELECT symbol,trading_date,close,selected_provider,source_observation_ids
+                 FROM quant.canonical_bars_daily
+                WHERE (symbol,trading_date) IN (SELECT * FROM unnest(%s::text[],%s::date[]))""",
+            ([bar.symbol for bar, _m, _a in prepared], [bar.trading_date for bar, _m, _a in prepared]),
+        ).fetchall()
+    }
+
+    conflict_issues, replacements, retentions = [], [], []
+    for (bar, mismatch, amount), observation_id in zip(prepared, observation_ids):
+        if mismatch:
+            _record_daily_amount_unit_issue(connection, bar)
+        existing = existing_by_key.get((bar.symbol, bar.trading_date))
+        if existing and existing["close"] and abs(Decimal(existing["close"]) - bar.close) > Decimal("0.001"):
+            conflict_issues.append((bar.symbol, bar.trading_date, Json({
+                "existing_provider": existing["selected_provider"], "existing_close": str(existing["close"]),
+                "incoming_provider": bar.source, "incoming_close": str(bar.close),
+            })))
+        replace = existing is None or provider_priority(bar.source) <= provider_priority(str(existing["selected_provider"]))
+        selected_provider = bar.source if replace else str(existing["selected_provider"])
+        source_ids = ([str(observation_id)] if not existing
+                      else [str(value) for value in (existing["source_observation_ids"] or [])] + [str(observation_id)])
+        if replace:
+            replacements.append((
+                bar.symbol, bar.trading_date, bar.open, bar.high, bar.low, bar.close, bar.pre_close, bar.volume,
+                amount, bar.adj_factor, bar.is_suspended, bar.limit_up, bar.limit_down, selected_provider,
+                source_ids, "partial" if mismatch else "fresh", as_utc(bar.available_at), bar.is_suspended,
+            ))
+        else:
+            retentions.append((source_ids, bar.symbol, bar.trading_date))
+
+    with connection.cursor() as cursor:
+        if conflict_issues:
+            cursor.executemany(
+                """INSERT INTO quant.data_quality_issues(capability,symbol,trading_date,severity,code,message,details)
+                   VALUES('daily_bar',%s,%s,'warning','provider_close_conflict','daily close differs across providers',%s)""",
+                conflict_issues,
+            )
+        if replacements:
+            cursor.executemany(
+                """INSERT INTO quant.canonical_bars_daily(symbol,trading_date,open,high,low,close,pre_close,volume,amount,adj_factor,is_suspended,limit_up,limit_down,
+                     selected_provider,source_observation_ids,quality_status,available_at)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,coalesce(%s,false),%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT(symbol,trading_date) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
+                     pre_close=EXCLUDED.pre_close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
+                     adj_factor=coalesce(EXCLUDED.adj_factor,quant.canonical_bars_daily.adj_factor),
+                     is_suspended=CASE WHEN %s::boolean IS NULL THEN quant.canonical_bars_daily.is_suspended ELSE EXCLUDED.is_suspended END,
+                     limit_up=coalesce(EXCLUDED.limit_up,quant.canonical_bars_daily.limit_up),
+                     limit_down=coalesce(EXCLUDED.limit_down,quant.canonical_bars_daily.limit_down),selected_provider=EXCLUDED.selected_provider,
+                     source_observation_ids=EXCLUDED.source_observation_ids,quality_status=EXCLUDED.quality_status,available_at=EXCLUDED.available_at,canonicalized_at=now()""",
+                replacements,
+            )
+        if retentions:
+            cursor.executemany(
+                "UPDATE quant.canonical_bars_daily SET source_observation_ids=%s,canonicalized_at=now() WHERE symbol=%s AND trading_date=%s",
+                retentions,
+            )
+
+
+def upsert_daily_bars(connection: Any, bars: list[DailyBar]) -> int:
+    """Persist many daily bars with the per-bar contract and far fewer round trips.
+
+    ``upsert_daily_bar`` issues five statements per bar.  The owner database is
+    an SSH tunnel away at 52ms per round trip, so a full-market cross-section of
+    5,547 bars spent about twenty-four minutes here - the reason the post-close
+    sync could never finish inside its persistence budget.
+
+    Every statement, arbitration rule and evidence row is the one the per-bar
+    path writes; only the grouping differs.  Front-adjusted rows are rejected
+    before anything is written rather than after the bars ahead of them, which
+    is the same observable outcome because the caller owns the transaction and
+    it is aborted either way.
+    """
+    if not bars:
+        return 0
+    for bar in bars:
+        if bar.source == "tencent_free":
+            raise ValueError("tencent_free front-adjusted daily rows are raw research evidence only")
+    for round_bars in _unique_key_rounds(bars):
+        _upsert_daily_bar_round(connection, round_bars)
+    return len(bars)
+
+
 __all__ = [
     "TUSHARE_DAILY_AMOUNT_RATIO_MAX", "TUSHARE_DAILY_AMOUNT_RATIO_MIN",
     "TUSHARE_DAILY_AMOUNT_SOURCES", "daily_amount_unit_mismatch", "exchange_for",
-    "provider_priority", "quarantine_tushare_daily_amount_mismatches", "upsert_daily_bar",
+    "provider_priority", "quarantine_tushare_daily_amount_mismatches",
+    "upsert_daily_bar", "upsert_daily_bars",
 ]

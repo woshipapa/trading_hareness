@@ -61,7 +61,7 @@ from .async_provider_circuit_repository import open_provider_keys as read_async_
 from .async_market_session_repository import realtime_market_session as read_async_realtime_market_session
 from .async_market_session_repository import sse_calendar_open as read_async_sse_calendar_open
 from .async_market_session_repository import sse_calendar_status as read_async_sse_calendar_status
-from .daily_bar_repository import exchange_for, provider_priority, upsert_daily_bar
+from .daily_bar_repository import exchange_for, provider_priority, upsert_daily_bar, upsert_daily_bars
 from .sector_membership_repository import (
     persist_observed_snapshot as persist_observed_sector_snapshot,
     persist_ths_snapshot as persist_ths_sector_snapshot,
@@ -979,9 +979,7 @@ def persist_daily_bar_batch(bars: list[DailyBar]) -> int:
     if not bars:
         return 0
     with db.transaction() as connection:
-        for bar in bars:
-            upsert_bar(connection, bar)
-    return len(bars)
+        return upsert_daily_bars(connection, bars)
 
 
 def recompute_scorecards_legacy(as_of_date: date | None = None) -> dict[str, Any]:
@@ -1388,6 +1386,23 @@ def ensure_tushare_instrument(connection: Any, symbol: str) -> None:
     )
 
 
+def ensure_tushare_instruments(connection: Any, symbols: list[str]) -> None:
+    """Same placeholder rows as the per-symbol call, in one batched statement.
+
+    The insert is ``ON CONFLICT DO NOTHING``, so it is idempotent and order
+    independent; grouping it changes nothing but the number of round trips,
+    which a full-market cross-section pays 5,500 of.
+    """
+    distinct = list(dict.fromkeys(symbols))
+    if not distinct:
+        return
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'tushare') ON CONFLICT(symbol) DO NOTHING",
+            [(symbol, exchange_for(symbol)) for symbol in distinct],
+        )
+
+
 def offline_data_root() -> Path:
     """Return the sole directory from which offline imports may be read."""
     return offline_minute_import_service.data_root()
@@ -1455,6 +1470,7 @@ def normalize_tushare_rows(connection: Any, api_name: str, rows: list[dict[str, 
         is_st_security_name=is_st_security_name, ensure_instrument=ensure_tushare_instrument,
         upsert_bar=upsert_bar, daily_bar_type=DailyBar, decimal_or_none=decimal_or_none,
         safe_error_detail=safe_error_detail, provider_key=provider_key,
+        upsert_bars=upsert_daily_bars, ensure_instruments=ensure_tushare_instruments,
     )
 
 def persist_tushare_rows(connection: Any, api_name: str, request_key: str, rows: list[dict[str, Any]],

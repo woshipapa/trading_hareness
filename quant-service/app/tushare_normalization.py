@@ -9,6 +9,79 @@ import re
 from psycopg.types.json import Json
 
 
+def _record_normalization_failure(connection: Any, api_name: str, error: Exception,
+                                  row: dict[str, Any],
+                                  safe_error_detail: Callable[[str, int], str]) -> None:
+    connection.execute(
+        """INSERT INTO quant.data_quality_issues(capability,severity,code,message,details)
+               VALUES(%s,'warning','tushare_normalization_failed',%s,%s)""",
+        (api_name, safe_error_detail(str(error), 500), Json({"row": row})),
+    )
+
+
+def _normalize_daily_rows(
+    connection: Any, api_name: str, rows: list[dict[str, Any]], available_at: datetime, *,
+    date_parser: Callable[[Any], Any],
+    ensure_instrument: Callable[[Any, str], None],
+    ensure_instruments: Callable[[Any, list[str]], None],
+    upsert_bar: Callable[[Any, Any], None],
+    upsert_bars: Callable[[Any, list[Any]], int],
+    daily_bar_type: Callable[..., Any],
+    decimal_or_none: Callable[[Any], Any],
+    safe_error_detail: Callable[[str, int], str],
+    provider_key: str,
+) -> int:
+    """Promote a whole daily cross-section in batches instead of row by row.
+
+    A full-market day is ~5,500 rows and the per-row contract costs six
+    statements each.  Against the owner database, which is an SSH tunnel away
+    at 52ms per round trip, that is close to half an hour of pure waiting and
+    the post-close sync never finished inside its persistence budget.
+
+    Row *parsing* keeps its per-row isolation: a malformed row is still
+    recorded as a warning and skipped while its neighbours proceed.  Only the
+    writes are grouped, inside a savepoint, and if the grouped write fails the
+    rows are replayed one at a time so the batch cannot turn one rejected bar
+    into a lost cross-section.
+    """
+    prepared: list[tuple[dict[str, Any], Any]] = []
+    for row in rows:
+        try:
+            symbol = str(row.get("ts_code") or "").upper()
+            trading_date = date_parser(row.get("trade_date"))
+            if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol) or not trading_date:
+                raise ValueError(f"{api_name} row needs ts_code and trade_date")
+            prepared.append((row, daily_bar_type(
+                symbol=symbol, trading_date=trading_date,
+                open=decimal_or_none(row.get("open")), high=decimal_or_none(row.get("high")),
+                low=decimal_or_none(row.get("low")), close=decimal_or_none(row.get("close")),
+                pre_close=decimal_or_none(row.get("pre_close")), volume=decimal_or_none(row.get("vol")),
+                amount=decimal_or_none(row.get("amount")), source=provider_key, available_at=available_at,
+            )))
+        except Exception as error:  # noqa: BLE001 - one bad row is a warning, not a failed sync
+            _record_normalization_failure(connection, api_name, error, row, safe_error_detail)
+    if not prepared:
+        return 0
+    try:
+        # A savepoint: a rejected batch must not poison the caller's
+        # transaction before the per-row replay can record what went wrong.
+        with connection.transaction():
+            ensure_instruments(connection, [bar.symbol for _row, bar in prepared])
+            upsert_bars(connection, [bar for _row, bar in prepared])
+        return len(prepared)
+    except Exception:  # noqa: BLE001 - the replay below reports the real cause per row
+        pass
+    normalized = 0
+    for row, bar in prepared:
+        try:
+            ensure_instrument(connection, bar.symbol)
+            upsert_bar(connection, bar)
+            normalized += 1
+        except Exception as error:  # noqa: BLE001 - matches the per-row contract
+            _record_normalization_failure(connection, api_name, error, row, safe_error_detail)
+    return normalized
+
+
 def normalize_rows(
     connection: Any, api_name: str, rows: list[dict[str, Any]], available_at: datetime,
     *,
@@ -18,10 +91,20 @@ def normalize_rows(
     upsert_bar: Callable[[Any, Any], None], daily_bar_type: Callable[..., Any],
     decimal_or_none: Callable[[Any], Any], safe_error_detail: Callable[[str, int], str],
     provider_key: str = "tushare",
+    upsert_bars: Callable[[Any, list[Any]], int] | None = None,
+    ensure_instruments: Callable[[Any, list[str]], None] | None = None,
 ) -> int:
     """Promote a deterministic subset of raw rows; preserve row-level warnings."""
     if api_name not in core_apis:
         return 0
+    if api_name in {"daily", "index_daily"} and upsert_bars is not None and ensure_instruments is not None:
+        return _normalize_daily_rows(
+            connection, api_name, rows, available_at, date_parser=date_parser,
+            ensure_instrument=ensure_instrument, ensure_instruments=ensure_instruments,
+            upsert_bar=upsert_bar, upsert_bars=upsert_bars, daily_bar_type=daily_bar_type,
+            decimal_or_none=decimal_or_none, safe_error_detail=safe_error_detail,
+            provider_key=provider_key,
+        )
     normalized = 0
     for row in rows:
         try:
