@@ -474,6 +474,7 @@ from .edge_evidence_transfer import read_live_session_acceptance
 from .research_storage_admission import ResearchStorageAdmission, governance as research_storage_governance_isolated
 from .async_pool_watchdog import AsyncPoolWatchdogState, watchdog_loop as async_pool_watchdog_loop
 from .health_read_model import DatabaseUnavailableError, HealthDependencies, health_payload as read_health_payload
+from .paper_order_bridge import STAGE as PAPER_AUTO_STAGE
 from .release_metadata import release_metadata
 from .replay_readiness import historical_replay_readiness
 from . import research_capacity
@@ -3097,14 +3098,98 @@ async def drill_intraday_board_stock_candidates(
     rows, _status = await intraday_all_a_snapshot()
     quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
     drilled = drill_board_events(events, membership, quotes)
+    candidates = attach_names(drilled["candidates"], names)
+    paper = await run_paper_auto_execution(candidates, quotes)
     return {
         "status": "completed",
         "boards": len(events),
         "boards_drilled": drilled["boards_drilled"],
         "boards_without_membership": drilled["boards_without_membership"],
-        "candidates": attach_names(drilled["candidates"], names),
+        "candidates": candidates,
+        "paper": paper,
         "decision_eligible": False,
     }
+
+
+def paper_auto_execution_enabled() -> bool:
+    """Opt-in: the ledger only moves when the operator has said it should."""
+    return os.getenv("QUANT_PAPER_AUTO_EXECUTION_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+async def run_paper_auto_execution(
+    candidates: list[dict[str, Any]], quotes: dict[str, Any],
+) -> dict[str, Any]:
+    """Confirm the shortlist, plan against the ledger, and place the orders.
+
+    Large-order confirmation runs only on what delivery selection kept, because
+    it costs one gateway call per name. Everything below it - sizing, exits,
+    tradability - already belongs to the strategy and the ledger.
+    """
+    if not paper_auto_execution_enabled():
+        return {"status": "disabled", "reason": "QUANT_PAPER_AUTO_EXECUTION_ENABLED is not set"}
+    if not candidates:
+        return {"status": "idle", "reason": "no candidates this pass"}
+    from .board_flow_drill import select_for_delivery
+    from .large_order_confirmation import confirm_candidates
+    from .paper_auto_execution import plan_paper_orders
+    from .paper_order_bridge import execute_plan
+    from .paper_execution import persist_paper_decision
+    from .paper_execution_service import accept_paper_decision
+    from .longhu_vendor_source import intraday_source
+
+    def already_delivered() -> list[str]:
+        with db.transaction() as connection:
+            rows = connection.execute(
+                """SELECT DISTINCT signal_key FROM quant.intraday_signal_events
+                    WHERE stage=%s AND observed_at::date
+                          = (now() AT TIME ZONE 'Asia/Shanghai')::date""",
+                (PAPER_AUTO_STAGE,),
+            ).fetchall()
+            return [str(dict(row)["signal_key"]) for row in rows]
+
+    delivered = await run_database_blocking(already_delivered, timeout_seconds=60)
+    chosen = select_for_delivery(candidates, delivered)
+    if not chosen["selected"]:
+        return {"status": "idle", "reason": "nothing new within the session budget",
+                "suppressed_repeat": chosen["suppressed_repeat"]}
+    source = intraday_source()
+    confirmed = await run_akshare_blocking(
+        lambda: confirm_candidates(chosen["selected"], source.raw_call), timeout_seconds=90)
+
+    def read_account() -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
+        with db.transaction() as connection:
+            account = connection.execute(
+                "SELECT cash FROM quant.paper_accounts WHERE account_key='default'").fetchone()
+            positions = connection.execute(
+                "SELECT symbol,quantity,sellable_quantity,average_cost FROM quant.paper_positions"
+            ).fetchall()
+            return (dict(account) if account else None,
+                    {str(dict(row)["symbol"]): dict(row) for row in positions})
+
+    account, positions = await run_database_blocking(read_account, timeout_seconds=60)
+    if account is None:
+        return {"status": "blocked", "reason": "no paper account is configured"}
+    cash = float(account["cash"])
+    plan = plan_paper_orders(confirmed, positions, quotes,
+                             equity=PAPER_ACCOUNT_EQUITY, cash=cash)
+    if not plan["buys"] and not plan["sells"]:
+        return {"status": "no_orders", "skipped": plan["skipped"][:4], "cash": cash}
+    observed_at = datetime.now(timezone.utc)
+
+    def place() -> dict[str, Any]:
+        with db.transaction() as connection:
+            return execute_plan(
+                connection, plan, observed_at,
+                persist_decision=persist_paper_decision,
+                accept_decision=accept_paper_decision,
+                json_safe=strategy_json_safe,
+            )
+
+    placed = await run_database_blocking(place, timeout_seconds=180)
+    return {"status": "executed", "plan": {"buys": plan["buys"], "sells": plan["sells"]},
+            "placed": placed, "cash_before": cash}
 
 
 async def capture_intraday_board_flow_curve() -> dict[str, Any]:
@@ -4389,6 +4474,10 @@ _METRICS_CONTROL_PLANE_REFRESH_SECONDS = 5.0
 _metrics_control_plane_lock = threading.Lock()
 _metrics_control_plane_refreshed_at = 0.0
 background_loop_registry = LoopRuntimeRegistry()
+#: The simulated account's reference equity for position sizing. Fixed rather
+#: than mark-to-market so one good day cannot quietly enlarge every later
+#: position and flatter the strategy being measured.
+PAPER_ACCOUNT_EQUITY = 1_000_000.0
 async_pool_watchdog_state = AsyncPoolWatchdogState()
 
 
