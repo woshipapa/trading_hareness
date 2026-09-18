@@ -1459,16 +1459,35 @@ def normalize_tushare_rows(connection: Any, api_name: str, rows: list[dict[str, 
 
 def persist_tushare_rows(connection: Any, api_name: str, request_key: str, rows: list[dict[str, Any]],
                          provider_key: str, available_at: datetime) -> int:
-    """Persist raw API evidence before promoting the supported canonical subset."""
-    for index, row in enumerate(rows):
-        serialized = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
-        connection.execute(
-            """INSERT INTO quant.tushare_raw_records(provider_key,api_name,request_key,record_index,record_key,content_sha256,row_data,available_at)
-               VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
-               ON CONFLICT(provider_key,api_name,record_key,content_sha256) DO UPDATE SET available_at=EXCLUDED.available_at,request_key=EXCLUDED.request_key""",
-            (provider_key, api_name, request_key, index, tushare_record_key(row, request_key, index),
-             hashlib.sha256(serialized.encode()).hexdigest(), Json(row), available_at),
-        )
+    """Persist raw API evidence before promoting the supported canonical subset.
+
+    The evidence rows are sent as one batched statement rather than one
+    statement per row.  The owner database is reached over an SSH tunnel that
+    measures 52ms per round trip, so a full-market cross-section of 5,547 rows
+    spent nearly five minutes here purely waiting on the network - the server
+    sat in ``ClientRead`` for all of it - which alone approaches the
+    180-second persistence budget before normalisation has even begun.
+
+    ``executemany`` pipelines the batch on libpq 14+, and keeps one statement
+    per row on the wire, so rows that collide on the conflict key still resolve
+    in arrival order rather than raising the "cannot affect row a second time"
+    that a single multi-row VALUES would.
+    """
+    parameters = [
+        (provider_key, api_name, request_key, index, tushare_record_key(row, request_key, index),
+         hashlib.sha256(
+             json.dumps(row, ensure_ascii=False, sort_keys=True, default=str).encode(),
+         ).hexdigest(), Json(row), available_at)
+        for index, row in enumerate(rows)
+    ]
+    if parameters:
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """INSERT INTO quant.tushare_raw_records(provider_key,api_name,request_key,record_index,record_key,content_sha256,row_data,available_at)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT(provider_key,api_name,record_key,content_sha256) DO UPDATE SET available_at=EXCLUDED.available_at,request_key=EXCLUDED.request_key""",
+                parameters,
+            )
     return normalize_tushare_rows(connection, api_name, rows, available_at, provider_key)
 
 
