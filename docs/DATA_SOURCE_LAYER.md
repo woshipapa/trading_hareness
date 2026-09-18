@@ -1,0 +1,201 @@
+# 数据源层（app/datasources）
+
+更新：2026-09-18。所有“实测”均指从 owner peer（47.110.79.189）出口、收盘后的只读探测与不落库干跑。
+
+## 1. 目标与边界
+
+数据源层把**每一个上游**（持牌网关、官方免费 API、公开网页、非官方协议、本地文件、自算）收在一个独立包里，
+对外只暴露一套**能力（capability）词汇**。策略声明“我要 `limits.limit_up_pool`、`sector.membership`”，
+由目录决定谁来供、按什么顺序回退、存在哪里——策略里不再出现供应商名。
+
+三条硬规则（`tests/test_datasource_boundaries.py` 强制）：
+
+1. `app/datasources/**` 只能引用传输/持久化/租约基础设施（`http_clients`、`public_market_repository`、
+   `provider_health`、`runtime_leases`、`database`、`fuyao_provider` 等），**不能**引用策略、规则、路由或 `main.py`。
+2. 策略代码不能 import `app.datasources.sources.*` / `collectors.*`，只能用能力（目录、解析器、存储位置）。
+3. `contracts.py` / `catalog.py` 是纯声明，无 I/O，任何人（API、agent、部署脚本、测试）都能直接读。
+
+## 2. 包结构
+
+```text
+app/datasources/
+  contracts.py    Capability / DataSource / Binding / CapabilityRequirement 类型
+  catalog.py      所有数据源 × 能力 × 绑定（优先级、实测状态、历史深度、限额、落库位置）
+  resolver.py     能力 → 数据：按目录优先级 + 健康门控 + 失败/空结果回退，结果带来源证明
+  bindings.py     把本包适配器绑到能力上（统一每个能力的参数约定）
+  http.py         有界重试的公开传输 + A 股代码规范化（拒绝指数/基金/板块代码）
+  sources/        一个上游一个模块，只做 fetch + normalize
+  derived/        自算指标（纯函数）：market_sentiment、tick_flow
+  collectors/     采集编排：intraday（常驻）、post_close（盘后归档）
+  storage.py      采集器需要的几个只读查询
+  runtime.py      依赖装配 + 租约循环（进程内与独立部署共用）
+  __main__.py     python -m app.datasources catalog | validate | collect
+app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口径（不写供应商）
+```
+
+## 3. 能力目录（节选，全量用 `python -m app.datasources catalog`）
+
+状态：`live_verified`（owner 运行时已有健康记录/落库证据）> `declared`（已探测、未经盘中验证）>
+`dormant`（已实现但无定时调用）；`unsupported`（上游拒绝，保留以便复测）与 `retired`（主动下线）不参与解析。
+
+| 能力 | 解析顺序（状态） | 说明 |
+|---|---|---|
+| `quote.all_a_snapshot` | fuyao_ths(LV) | owner 规则：Longhu 行业截面/观察池报价不冒充全 A；东财 clist 在 owner 出口被断连（unsupported） |
+| `quote.watch_snapshot` | longhuvip(LV) → tencent_free(LV) → sina_free(LV) | 仅 longhu/腾讯带交易所时间戳可进决策 |
+| `quote.order_book` | longhuvip 十档(LV) → tencent 五档(LV) | |
+| `quote.valuation` | fuyao 估值(D) → tushare daily_basic(LV) | 盘后全 A 5553 只/15.7 秒 |
+| `bars.daily` | tushare 主源/超级GET/备用(LV)、longhu 合成(LV)、fuyao 10 年导出(D)、通达信本地 .day(D)、baostock/东财/akshare(dormant) | 开盘啦个股 K 线（旧系统 id=7，恒空）**retired** |
+| `bars.minute` | longhuvip(LV) → tushare rt_min(LV) → 通达信本地 .lc1/.lc5(D) → 腾讯(LV) | fuyao 无分钟 K |
+| `ticks.session` | tdx_public(D) → tencent_free(D) | 通达信历史分笔与 pytdx 逐笔一致；方向与腾讯逐分钟 100% 对上 |
+| `auction.history_0925` | tdx_public(D) | 历史每日 09:25 竞价成交 + 09:15-09:25 虚拟撮合曲线 |
+| `auction.open/close_snapshot`、`auction.short_term_benchmark` | fuyao、longhu 早盘 | |
+| `limits.limit_up_pool` / `broken_pool` / `limit_down_pool` / `ladder` | fuyao(LV/D) → eastmoney_ztb(D) | |
+| `limits.seal_detail` | eastmoney_ztb(D) | 首/末封时间、封板资金、炸板次数、几天几板 |
+| `limits.previous_limit_up` / `strong_pool` / `sub_new_pool` | eastmoney_ztb(D) | 东财只保留近期，每日归档 |
+| `limits.anomaly_tape` | eastmoney_ztb(D) | 盘口异动，当日 7469 条/10 类 |
+| `limits.stock_anomaly_reason` | fuyao(D) | AI 生成原因摘要，只作解释 |
+| `sector.membership` | longhu 行业(LV)、tushare ths_member(LV)、**fuyao 概念/行业/地域(D)** | fuyao 848 个同花顺指数，几分钟灌完 |
+| `sector.index_quote` / `sector.anomaly` / `sector.flow_curve` | fuyao / eastmoney_ztb / eastmoney_free(LV) | |
+| `flow.stock_daily` / `flow.watch_intraday` / `flow.tick_derived` | longhu 合成、tushare / 东财 / 自算分笔 | 自算为 L1 成交额阈值估算，非 L2 |
+| `lhb.daily` / `lhb.seat_statistics` | tushare(LV) → fuyao(D) → akshare(dormant) | 席位→游资映射无官方来源 |
+| `attention.*` | 同花顺热榜/飙升榜/热榜历史（fuyao）、东财人气/飙升/个股一年历史 | 同花顺热榜无历史，只能从现在快照；东财可回填一年 |
+| `news.flash` | 财联社(A/B/C 等级) → 金十(important) → 东财 7x24 → 同花顺 | 只挂供应商自带的关联个股，不从正文猜 |
+| `events.investor_qa` | 巨潮互动易、上证e互动 | 以“回答公开时间”为事件时间 |
+| `events.*`（解禁/增减持/股东户数/大宗/业绩预告/快报/回购/新股） | eastmoney_datacenter(D)，业绩类另有 tushare(LV) | 可得时间 = 东财入库时钟与采集时刻取早，绝不用仅日期的公告日 |
+| `fundamentals.capital_changes` | tdx_public(D) → eastmoney_datacenter(D) | 历次股本变动，流通股本按日可读，无需逐只积累 |
+| `fundamentals.margin` | eastmoney_datacenter(D) | 市场汇总默认开；个股明细默认关（约 4000 行/日） |
+| `fund.nav` | fuyao(D) → 天天基金(D) | QDII 晚 1-2 天，按净值日生效、按采集时刻可得 |
+| `derived.market_sentiment` | 自算（盘中 5 分钟 + 收盘） | 见第 5 节 |
+
+## 4. 策略怎么用
+
+```python
+from app.datasources import CapabilityResolver, evidence_locations
+from app.datasources.bindings import register_package_sources
+
+resolver = register_package_sources(CapabilityResolver(), fuyao_fetch=fuyao_fetch)
+result = await resolver.fetch("limits.limit_up_pool", trade_date=today)
+result.rows, result.source, result.is_fallback, result.provenance()
+
+# 读已落库证据时，用目录给出的位置而不是写死 source='fuyao_ths'：
+evidence_locations("limits.limit_up_pool")
+# [{'source': 'fuyao_ths', 'table': 'market_events', 'filter': {'event_type': 'limit_up_pool'}}, ...]
+```
+
+新策略先在 `app/platform/strategy_data_needs.py` 登记所需能力（板块类需求同时登记口径）；测试会校验每个必需能力
+至少有一个可解析的来源。需要换源/加源时只改 `catalog.py` 与 `bindings.py`，策略不动。
+
+读库时同样不写供应商：`store_values(capability, table, column)` / `primary_store_value(...)` 给出该能力在某表上的
+来源过滤值（按优先级），`strategy_taxonomies(strategy)` 给出口径，`SOURCE_LABELS` 给出标签属性。
+
+### 策略侧解耦（2026-09-18 完成）
+
+审计出的 7 处供应商耦合全部迁完，`tests/test_datasource_boundaries.py::test_strategy_code_names_no_vendor`
+禁止策略模块里再出现任何源键或来源标签字符串。
+
+| 位置 | 原来 | 现在 | 行为 |
+|---|---|---|---|
+| `intraday_signal_rules` 开盘跳空观察 | `price_source == 'tencent_batched_watch_quote'` | 目录标签属性 `exchange_timestamped`（腾讯、Longhu） | **变**：Longhu 报价也可触发，模型 v6→v7 |
+| 同上 量能标签 | `!= 'fuyao_ths_derived'` | 目录标签属性 `rule_usable_flow` | 不变（Longhu 标签暂不可用，见下） |
+| 同上 入场键名 | `fuyao_minute_breadth_v1` 等 | `minute_breadth_v1`、`no_public_main_flow` | 仅改名（随 v7） |
+| `intraday_scan_preparation` | 记 `fuyao_ths` 健康 | 记目录中 `quote.all_a_snapshot` 的主来源 | 不变 |
+| 扫描链路 | `tushare_minutes` 依赖 | `realtime_minutes`（实现仍由组合根注入） | 不变；信号证据键 `tushare_rt_min`→`realtime_minute` |
+| `post_close_strategy_service` | 直读 `tushare_raw_records` daily_basic、`source='longhuvip_main_net'` | 读 canonical `daily_fundamentals`（按目录优先级）；资金流来源由目录给出 | 不变（owner 库 9-16/9-17 逐行比对一致） |
+| `watchlist_countertrend_rebound` | 复权因子优先两个 tushare 源；`taxonomy_key='ths_industry'` | 目录来源顺序；策略登记的口径 | 不变（仅同一 available_at 的平局次序可能不同） |
+| `strategy_pattern_mining_service` | 分钟回放写死腾讯 | 组合根注入 `minute_source` | 不变 |
+| `xiaojie_reference_repository` | `call_tushare_api('stk_limit',…)`；口径优先级写死 | `limits.prices` 适配器（分页契约在 `sources/tushare_limits.py`）；口径来自策略登记 | 不变 |
+| 盘中扫描同业集合（两处仓库查询） | `('ths_concept_flow','ths_index_n','ths_industry')` | 策略登记的口径 | 不变 |
+
+口径是**策略参数**：`CapabilityRequirement.taxonomies` 记录该策略基于哪几个板块口径校准，测试要求它们在口径表里且为
+`live_verified`。fuyao 概念/行业口径是 `declared`，入库后也不会被任何策略自动选中，需先在口径表升级并给策略升版本。
+
+v7 回放对比（owner 库冻结输入，v6 规则 vs v7 规则）：随机 1,279 条 0 差异；开盘窗口 10 条候选 0 差异——
+因为这些 Longhu 报价在开盘窗口的新鲜度全是 `invalid_timestamp`（见下），v7 的放开要配合时钟修复才会生效。
+
+### 验证中发现并修复的两个数据问题
+
+1. **Longhu 上午报价时间戳全部无效**：供应商时钟是不补零整数（09:30:14.237 → `93014237`），归一化截前 6 位得到
+   `930142`（93 点），导致每天 09:30–10:00 的 Longhu 报价都被判 `invalid_timestamp`、退回备用源。
+   修复两处：源头 `longhu_vendor_source.py`（owner 网关侧，需 owner 更新后生效）；消费侧
+   `intraday_quote_normalization.exchange_time_status` 对“小时>23”的 6 位时间做无歧义还原（peer 部署即生效）。
+2. **规则冻结输入缺 `flow_metric_sources`**：线上规则按标签把某些量能字段置 0，冻结给回放的输入却丢了标签，
+   回放会用上线上没用的值。已加入冻结字段（旧快照无该键，回放行为不变）。
+
+待查（未改）：9-16/9-17 有一批行标为 `longhuvip`、原始数据却是腾讯盘口、量比约 0.03；报价合并路径查清前，
+Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
+
+## 5. 自算层（derived.market_sentiment）
+
+输入：fuyao 涨停/炸板/跌停池（翻页取全）、fuyao 全 A 快照、东财“昨日涨停”池（自带昨日连板数）、
+上一交易日收盘读数（量能基准）、可选的同花顺概念行情与成分。输出：
+
+- 涨停/跌停/炸板家数、封板率、炸板率；连板天梯分布与断层；
+- **分层晋级率**：1→2、2→3、3→4、4+，以及总体；
+- **昨涨停今日表现**：溢价（均值）、红盘率、中位数，分全体/首板/连板；
+- 涨跌分布（>7、5-7、3-5、0-3、平、-3-0 …、按板块涨跌幅限制判定的价格涨跌停数）；
+- 全 A 成交额与较前一日变化；
+- 概念强度分 = 0.4·z(指数涨幅) + 0.4·z(成分内涨停数) + 0.2·z(成分红盘率)，权重是声明值、未拟合。
+
+口径公开、可复算；**与开盘啦私有情绪分数值不会一致**，也不是交易信号。2026-09-18 收盘读数：
+涨停 77、炸板 25、封板率 75.5%、天梯 1 板 65 / 2 板 8 / 3 板 2 / 4 板 2、1→2 晋级 8/38。
+
+## 6. 调度与部署
+
+| 任务（租约键 `background_loop:<label>`） | 归属 profile | 内容 |
+|---|---|---|
+| `market_event_capture`（已有，扩展） | intraday_edge | fuyao 池子每分钟（翻页）、跌停池、热榜/飙升榜 10 分钟、异动 5 分钟、09:26 竞价基准 |
+| `public_evidence_capture`（新） | intraday_edge | 快讯 90 秒（夜间 10 分钟）、互动问答 10 分钟、盘口异动 3 分钟、东财人气/飙升 10 分钟、板块异动 15 分钟、情绪 5 分钟 |
+| `post_close_public_archive`（新） | research | 15:10 东财六池/异动汇总/收盘情绪 → 15:20 热榜历史 → 17:30 龙虎榜 → 18:00 datacenter → 18:10 两融 → 18:30 估值与 848 指数 → 19:00 观察池分笔 → 19:30 股本变迁；失败每 10 分钟重试到 23:30 |
+
+开关：`PUBLIC_EVIDENCE_CAPTURE_ENABLED`、`POST_CLOSE_PUBLIC_ARCHIVE_ENABLED`（整体），
+`PUBLIC_EVIDENCE_<源>_ENABLED`、`PUBLIC_ARCHIVE_<任务>_ENABLED`（单项），
+`PUBLIC_ARCHIVE_MARGIN_DETAIL_ENABLED`（两融明细，默认关），`PUBLIC_ARCHIVE_MAX_TICK_SYMBOLS`（默认 60），
+`TDX_HQ_HOSTS`（通达信主站列表）。
+
+两种部署形态：
+
+1. **进程内（默认）**：随 quant 服务启动，按 runtime profile 分配到 47 的 intraday_edge 与 research 两个容器。
+2. **独立容器**：同一镜像运行 `python -m app.datasources collect`，只需 `PG*` 环境变量与（可选）fuyao key。
+   与服务使用**同一租约键**，谁持有租约谁写，另一方等待，不会双写；需要彻底切走时在服务上关掉两个总开关。
+
+不引入新依赖：通达信协议为标准库实现（pytdx 只有 sdist 且依赖 cryptography，进不了 peer 的离线 wheelhouse）。
+
+## 7. 运维命令
+
+```bash
+python -m app.datasources validate                 # 目录一致性
+python -m app.datasources catalog --capability limits.limit_up_pool
+python ../scripts/probe-public-sources.py          # 全部公开源只读探测（在要测的出口上跑）
+python ../scripts/fill-fuyao-ths-membership.py --tags cn_concept,industry[,region] [--dry-run]
+python ../scripts/backfill-eastmoney-hot-rank-history.py [--symbols ...]
+python ../scripts/tdx-local-export.py --vipdoc <通达信>/vipdoc --out <offline 目录> --kinds 1m
+PYTHONPATH=<pytdx 解包> python ../scripts/verify-tdx-protocol.py   # 与 pytdx 逐行比对
+```
+
+迁移 `20260918_0095` 登记新 provider/能力/路由（peer 以 `QUANT_SKIP_MIGRATIONS=true` 运行，需在 owner 侧执行）；
+未执行时采集照常，只是 provider 目录页少这些条目。
+
+## 8. 本次顺带修复的现存问题（均有测试）
+
+| 问题 | 影响 | 修复 |
+|---|---|---|
+| fuyao 涨停/炸板池默认分页 50，只取第一页 | 9-18 实有 77-87 只涨停，库里每分钟封顶 50 只 | 按 size=200 翻页取全 |
+| fuyao `thscodes` 上限 100，采集按 500 分批；一个指数/退市代码使整批失败 | 收盘竞价 9-18 只落 70 只（仅尾批成功） | 100 一批、先过滤成 A 股、按报错剔除坏代码重试；竞价 universe 改用 fuyao 自身在市代码表 |
+| 复盘按**行数**数涨停/跌停（fuyao 每分钟一行） | 涨停家数被放大到上千，`risk_off` 判定失真 | 按 symbol 去重取最新；天梯读 `continue_day_cnt`；方法版本 v2→v3 |
+| `persist_market_events`/`persist_public_observations` 逐行写（52ms 往返） | 每分钟池子写入约 10 秒 | 改 `executemany` 批量，语义不变 |
+| 东财盘口异动接口只认类型列表第一个 | 若按列表请求只拿到“火箭发射” | 每类型单独请求 |
+
+## 9. 与原表的对照
+
+| 原表来源 | 结论 |
+|---|---|
+| 开盘啦 longhuvip | 保留为授权主源（盘口/分钟/行业/竞价）；个股 K 线（id=7）下线 |
+| 乘风（含 kpl_archive 榜单） | 不在本平台；其日 K、集合竞价、指数、同花顺热榜、龙虎榜、概念成分由 fuyao 对应能力整体替代 |
+| 通达信客户端 .day/.lc1/.lc5 | `tdx_local`：owner 工作站 CLI 导出到离线导入契约；GPJY 财务包未解析（后续项） |
+| pytdx | `tdx_public`：历史分笔 + 除权除息可用；实时行情与 K 线命令已被公开主站关闭 |
+| 腾讯 qt / fqkline / 分笔 | 观察池报价、五档、分钟、当日分笔 |
+| 东财 push2 / datacenter / 天天基金 | 板块资金流（已有）+ 涨停板专题、盘口异动、人气榜、datacenter 事件、两融、基金净值（新增）；clist 全市场在 owner 出口被断连 |
+| 同花顺事件 + 问财 | 未接：问财需登录态且有反爬；由 fuyao 热榜/飙升榜/异动原因覆盖“抢手名单”类需求 |
+| 金十快讯 | 已接，不含 VIP |
+| 同花顺官方 API（fuyao） | 59 条路由白名单，已采：全 A 快照、池子、天梯、竞价、热榜、飙升榜、异动、龙虎榜、估值、848 指数行情与成分；按“现在免费、以后未必”对待，关键能力均有第二来源 |
+| 东财人气榜、巨潮/上证 e 互动、财联社 | 均已接入 |

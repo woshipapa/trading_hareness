@@ -105,7 +105,14 @@ def parse_stock_snapshot_payload(payload: Mapping[str, Any], symbol: str) -> dic
     if not normalized or not code or _stock_code(payload.get("code")) != code or price is None or price <= 0:
         return None
     day = "".join(character for character in str(payload.get("day") or "") if character.isdigit())[:8]
-    quote_time = "".join(character for character in str(real.get("time") or "") if character.isdigit())[:6]
+    # The vendor clock is an unpadded integer, HHMMSS or HHMMSSmmm: 14:59:01
+    # arrives as "145901000" but 09:30:14.237 as "93014237".  Cutting six
+    # digits off the unpadded form read "930142" as hour 93, and every morning
+    # quote before 10:00 was classified invalid_timestamp (seen 2026-09-17).
+    clock = "".join(character for character in str(real.get("time") or "") if character.isdigit())
+    if len(clock) in (5, 8):
+        clock = "0" + clock
+    quote_time = clock[:6]
     order_book = parse_longhu_order_book(payload.get("weituo"))
     return {
         "ts_code": normalized,

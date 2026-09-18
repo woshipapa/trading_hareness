@@ -57,26 +57,71 @@ def persist_free_quotes(database: Any, provider: str, quotes: list[dict[str, Any
     return accepted
 
 
+def _observation_symbol(value: Any) -> str | None:
+    symbol = str(value or "").upper() or None
+    return symbol if symbol and re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol) else None
+
+
 def persist_public_observations(database: Any, provider: str, capability: str,
                                 rows: list[dict[str, Any]], symbol: str | None = None) -> int:
-    """Persist public aggregate rows as raw evidence without canonical promotion."""
+    """Persist public aggregate rows as raw evidence without canonical promotion.
+
+    One ``executemany`` per batch: the owner database is 52ms away over the
+    tunnel, and a 5,500-row cross-section written row by row spent minutes
+    waiting on the network.  The statement per row is unchanged.
+    """
     observed_at = datetime.now(timezone.utc)
-    accepted = 0
+    parameters = []
+    for index, row in enumerate(rows):
+        row_symbol = _observation_symbol(row.get("ts_code") or symbol)
+        payload = {**row, "provider_key": provider, "capability": capability, "record_index": index}
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        parameters.append((provider, capability, row_symbol, observed_at, observed_at,
+                           hashlib.sha256(serialized.encode()).hexdigest(), Json(payload), Json(payload)))
+    if not parameters:
+        return 0
     with database.transaction() as connection:
-        for index, row in enumerate(rows):
-            row_symbol = str(row.get("ts_code") or symbol or "").upper() or None
-            if row_symbol and not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", row_symbol):
-                row_symbol = None
-            payload = {**row, "provider_key": provider, "capability": capability, "record_index": index}
-            serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-            connection.execute(
+        with connection.cursor() as cursor:
+            cursor.executemany(
                 """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
                    VALUES(%s,%s,'cn',%s,%s,%s,%s,%s,%s)
                    ON CONFLICT(provider_key,capability,market,symbol,effective_at,payload_sha256) DO UPDATE SET available_at=EXCLUDED.available_at""",
-                (provider, capability, row_symbol, observed_at, observed_at, hashlib.sha256(serialized.encode()).hexdigest(), Json(payload), Json(payload)),
+                parameters,
             )
-            accepted += 1
-    return accepted
+    return len(parameters)
+
+
+def persist_timed_observations(database: Any, provider: str, capability: str,
+                               rows: list[dict[str, Any]]) -> int:
+    """Persist observations that carry their own ``effective_at``/``available_at``.
+
+    For immutable published facts -- a news flash, a settled ranking, a NAV --
+    the first capture is the point-in-time truth, so a repeat capture of the
+    same payload is ignored rather than moving ``available_at`` later.  The
+    two clocks are removed from the stored payload so an identical fact seen
+    twice hashes identically.
+    """
+    parameters = []
+    fallback = datetime.now(timezone.utc)
+    for row in rows:
+        payload = {key: value for key, value in row.items() if key not in {"effective_at", "available_at"}}
+        effective = as_utc(datetime.fromisoformat(str(row["effective_at"]))) if row.get("effective_at") else fallback
+        available = as_utc(datetime.fromisoformat(str(row["available_at"]))) if row.get("available_at") else fallback
+        payload.update({"provider_key": provider, "capability": capability})
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        parameters.append((provider, capability, _observation_symbol(row.get("ts_code")), effective, available,
+                           hashlib.sha256(serialized.encode()).hexdigest(), Json(payload), Json(payload)))
+    if not parameters:
+        return 0
+    with database.transaction() as connection:
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
+                   VALUES(%s,%s,'cn',%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT(provider_key,capability,market,symbol,effective_at,payload_sha256) DO NOTHING""",
+                parameters,
+            )
+    return len(parameters)
 
 
 def persist_free_daily(
@@ -127,33 +172,46 @@ def persist_free_daily(
 
 
 def persist_market_events(database: Any, provider: str, rows: list[dict[str, Any]]) -> int:
-    """Store public event evidence without making it a hard trading signal."""
-    stored = 0
+    """Store public event evidence without making it a hard trading signal.
+
+    Rows are validated in Python and written with three batched statements
+    (instruments, identity-keyed events, content-keyed events) instead of two
+    statements per row -- the per-row form cost ~100ms a row over the owner
+    tunnel.  Each statement still executes once per row, so a key repeated
+    within one batch resolves through ``ON CONFLICT`` in arrival order.
+    """
+    instruments: dict[str, tuple[str, str, str]] = {}
+    keyed, content_keyed = [], []
+    for row in rows:
+        symbol = str(row.get("ts_code") or "").upper()
+        title = str(row.get("title") or row.get("short_title") or "").strip()
+        url = str(row.get("url") or "").strip() or None
+        if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol) or not title:
+            continue
+        published_at = as_utc(datetime.fromisoformat(str(row["published_at"]))) if row.get("published_at") else datetime.now(timezone.utc)
+        payload = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
+        content_sha256 = hashlib.sha256(payload.encode()).hexdigest()
+        event_type = str(row.get("event_type") or "announcement")
+        occurred_date = published_at.astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+        identity_key = str(row.get("event_identity_key") or "").strip() or market_event_identity_key(
+            provider, event_type, symbol, occurred_date,
+        )
+        instruments.setdefault(symbol, (symbol, exchange_for(symbol), provider))
+        values = (
+            uuid.uuid4(), symbol, event_type, published_at, published_at, provider, title,
+            json.dumps(row.get("raw") or row, ensure_ascii=False, default=str), url, content_sha256, identity_key,
+        )
+        (keyed if identity_key is not None else content_keyed).append(values)
+    if not keyed and not content_keyed:
+        return 0
     with database.transaction() as connection:
-        for row in rows:
-            symbol = str(row.get("ts_code") or "").upper()
-            title = str(row.get("title") or row.get("short_title") or "").strip()
-            url = str(row.get("url") or "").strip() or None
-            if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol) or not title:
-                continue
-            published_at = as_utc(datetime.fromisoformat(str(row["published_at"]))) if row.get("published_at") else datetime.now(timezone.utc)
-            payload = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
-            content_sha256 = hashlib.sha256(payload.encode()).hexdigest()
-            event_type = str(row.get("event_type") or "announcement")
-            occurred_date = published_at.astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
-            identity_key = str(row.get("event_identity_key") or "").strip() or market_event_identity_key(
-                provider, event_type, symbol, occurred_date,
-            )
-            connection.execute(
+        with connection.cursor() as cursor:
+            cursor.executemany(
                 "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,%s) ON CONFLICT(symbol) DO NOTHING",
-                (symbol, exchange_for(symbol), provider),
+                list(instruments.values()),
             )
-            values = (
-                uuid.uuid4(), symbol, event_type, published_at, published_at, provider, title,
-                json.dumps(row.get("raw") or row, ensure_ascii=False, default=str), url, content_sha256, identity_key,
-            )
-            if identity_key is not None:
-                connection.execute(
+            if keyed:
+                cursor.executemany(
                     """INSERT INTO quant.market_events(
                            event_id,symbol,event_type,occurred_at,available_at,source,title,body,url,content_sha256,event_identity_key)
                        VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
@@ -161,20 +219,19 @@ def persist_market_events(database: Any, provider: str, rows: list[dict[str, Any
                          available_at=LEAST(quant.market_events.available_at,EXCLUDED.available_at),
                          title=EXCLUDED.title,body=EXCLUDED.body,url=EXCLUDED.url,
                          content_sha256=EXCLUDED.content_sha256""",
-                    values,
+                    keyed,
                 )
-            else:
-                connection.execute(
+            if content_keyed:
+                cursor.executemany(
                     """INSERT INTO quant.market_events(
                            event_id,symbol,event_type,occurred_at,available_at,source,title,body,url,content_sha256,event_identity_key)
                        VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                        ON CONFLICT(content_sha256) DO UPDATE SET
                          available_at=LEAST(quant.market_events.available_at,EXCLUDED.available_at),
                          title=EXCLUDED.title,body=EXCLUDED.body,url=EXCLUDED.url""",
-                    values,
+                    content_keyed,
                 )
-            stored += 1
-    return stored
+    return len(keyed) + len(content_keyed)
 
 
 def recent_market_events(database: Any, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -189,5 +246,5 @@ def recent_market_events(database: Any, symbol: str, limit: int = 20) -> list[di
 
 __all__ = [
     "persist_free_daily", "persist_free_quote", "persist_free_quotes", "persist_market_events",
-    "persist_public_observations", "recent_market_events",
+    "persist_public_observations", "persist_timed_observations", "recent_market_events",
 ]

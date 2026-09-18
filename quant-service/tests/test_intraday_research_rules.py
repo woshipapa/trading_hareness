@@ -40,7 +40,7 @@ class IntradayResearchRuleTests(unittest.TestCase):
         self.assertEqual(
             intraday_signal_attribution("000001.SZ:watch:test", "watch", {}, evidence),
             isolated_signal_attribution("000001.SZ:watch:test", "watch", {}, evidence,
-                                        number=pure_intraday_number, signal_model_version="watchlist-confirmation-v6"),
+                                        number=pure_intraday_number, signal_model_version="watchlist-confirmation-v7"),
         )
         watch = {"symbol": "000001.SZ", "entry_price": None, "available_quantity": 0, "alert_on_entry": True, "alert_on_exit": True}
         quote = {"price": 10.2, "pct_change": 2.0, "volume_ratio": 2.0, "turnover_rate": 4.0, "main_net_inflow": 100, "main_flow_percentile": 0.95}
@@ -48,7 +48,7 @@ class IntradayResearchRuleTests(unittest.TestCase):
             intraday_signal_rules(watch, quote, {"price": 10.1}),
             isolated_signal_rules(watch, quote, {"price": 10.1}, number=pure_intraday_number,
                                    upside_assessment_fn=lambda q, d, m, p: isolated_upside_assessment(q, d, m, p, number=pure_intraday_number, eac_window=pure_eac_window),
-                                   model_version="watchlist-confirmation-v6"),
+                                   model_version="watchlist-confirmation-v7"),
         )
         items = [{"signal_event_id": "s1", "status": "matured", "raw_return": 0.01,
                   "maximum_favorable_excursion": 0.02, "maximum_adverse_excursion": -0.005,
@@ -80,7 +80,7 @@ class IntradayResearchRuleTests(unittest.TestCase):
         signals = intraday_signal_rules(watch, quote, previous, None, feature, {"available_peer_count": 0})
         self.assertEqual(signals[0]["signal_key"], "000001.SZ:watch:green_reclaim_research_v1")
 
-    def test_fuyao_minute_breadth_entry_replaces_missing_public_flow_fields(self):
+    def test_minute_breadth_entry_replaces_missing_public_flow_fields(self):
         watch = {
             "symbol": "000001.SZ", "available_quantity": 0, "entry_price": None,
             "alert_on_entry": True, "alert_on_exit": True,
@@ -96,14 +96,14 @@ class IntradayResearchRuleTests(unittest.TestCase):
         }
         peers = {"available_peer_count": 3, "confirming_peer_count": 2, "confirming_breadth": 0.67}
         signals = intraday_signal_rules(watch, quote, {"price": 10.3}, None, minute, peers)
-        entry = next(item for item in signals if item["signal_key"] == "000001.SZ:entry:fuyao_minute_breadth_v1")
+        entry = next(item for item in signals if item["signal_key"] == "000001.SZ:entry:minute_breadth_v1")
         self.assertTrue(entry["independent_confirmation"])
-        self.assertEqual(entry["conditions"]["flow_confirmation"], "not_required_fuyao_no_flow_semantics")
+        self.assertEqual(entry["conditions"]["flow_confirmation"], "not_required_no_public_flow_semantics")
         suppressed = intraday_signal_rules(
             watch, quote, {"price": 10.3}, None, minute,
             {"available_peer_count": 3, "confirming_peer_count": 1, "confirming_breadth": 0.33},
         )
-        self.assertFalse(any(item["signal_key"].endswith(":entry:fuyao_minute_breadth_v1") for item in suppressed))
+        self.assertFalse(any(item["signal_key"].endswith(":entry:minute_breadth_v1") for item in suppressed))
 
     def test_eastmoney_watch_flow_is_evidence_only_and_cannot_reenable_legacy_entry(self):
         watch = {"symbol": "000001.SZ", "available_quantity": 0, "entry_price": None,
@@ -120,9 +120,9 @@ class IntradayResearchRuleTests(unittest.TestCase):
         peers = {"available_peer_count": 3, "confirming_peer_count": 2, "confirming_breadth": 0.67}
         signals = intraday_signal_rules(watch, quote, {"price": 10.3}, None, minute, peers)
         self.assertFalse(any(item["signal_key"] == "000001.SZ:entry:intraday-v1" for item in signals))
-        entry = next(item for item in signals if item["signal_key"] == "000001.SZ:entry:fuyao_minute_breadth_v1")
-        self.assertEqual(entry["conditions"]["flow_confirmation"], "eastmoney_watch_flow_observed_research_only")
-        self.assertIn("eastmoney_watch_flow_research_confirmation_only", entry["risk_flags"])
+        entry = next(item for item in signals if item["signal_key"] == "000001.SZ:entry:minute_breadth_v1")
+        self.assertEqual(entry["conditions"]["flow_confirmation"], "bounded_watch_flow_observed_research_only")
+        self.assertIn("bounded_watch_flow_research_confirmation_only", entry["risk_flags"])
 
     def test_upside_breakout_research_requires_causal_high_volume_vwap_and_flow(self):
         rows = []
@@ -297,7 +297,7 @@ class PerFieldFlowTrustTests(unittest.TestCase):
         self.assertEqual(anomaly["conditions"]["volume_ratio_gate"], 2.5)
         self.assertEqual(anomaly["conditions"]["turnover_rate_gate"], 5.0)
 
-    # Minute/peer inputs that satisfy the fuyao_minute_breadth entry, which is
+    # Minute/peer inputs that satisfy the minute_breadth entry, which is
     # the only rule that fires when every public flow field is research-only -
     # without them a fully zeroed quote produces no signal to inspect at all.
     minute = {"return_1m_pct": 0.9, "return_3m_pct": 1.8,
@@ -308,8 +308,17 @@ class PerFieldFlowTrustTests(unittest.TestCase):
         quote = self._quote({"volume_ratio": "eastmoney_watch_flow", "turnover_rate": "eastmoney_watch_flow",
                              "main_net_inflow": "eastmoney_watch_flow"})
         signals = intraday_signal_rules(self.watch, quote, {"price": 10.3}, None, self.minute, self.peers)
-        entry = next(item for item in signals if item["signal_key"] == "000001.SZ:entry:fuyao_minute_breadth_v1")
+        entry = next(item for item in signals if item["signal_key"] == "000001.SZ:entry:minute_breadth_v1")
         self.assertEqual(entry["conditions"]["data_availability"]["missing_public_flow_fields"],
+                         ["volume_ratio", "turnover_rate", "main_net_inflow"])
+        self.assertFalse(any(item["signal_key"] == "000001.SZ:watch:volume_anomaly" for item in signals))
+
+    def test_longhu_flow_labels_stay_research_only_until_the_catalog_says_otherwise(self):
+        quote = self._quote({"volume_ratio": "longhuvip_watch_quote", "turnover_rate": "longhuvip_volume_derived",
+                             "main_net_inflow": "unavailable"}, main_net_inflow=None)
+        signals = intraday_signal_rules(self.watch, quote, {"price": 10.3}, None, self.minute, self.peers)
+        availability = signals[0]["conditions"]["data_availability"]
+        self.assertEqual(availability["missing_public_flow_fields"],
                          ["volume_ratio", "turnover_rate", "main_net_inflow"])
         self.assertFalse(any(item["signal_key"] == "000001.SZ:watch:volume_anomaly" for item in signals))
 
@@ -317,12 +326,12 @@ class PerFieldFlowTrustTests(unittest.TestCase):
         quote = self._quote({})
         del quote["flow_metric_sources"]
         signals = intraday_signal_rules(self.watch, quote, {"price": 10.3}, None, self.minute, self.peers)
-        entry = next(item for item in signals if item["signal_key"] == "000001.SZ:entry:fuyao_minute_breadth_v1")
+        entry = next(item for item in signals if item["signal_key"] == "000001.SZ:entry:minute_breadth_v1")
         availability = entry["conditions"]["data_availability"]
         self.assertEqual(availability["missing_public_flow_fields"],
                          ["volume_ratio", "turnover_rate", "main_net_inflow"])
         self.assertIsNone(availability["flow_metric_sources"])
-        self.assertTrue(availability["eastmoney_watch_flow_observed_research_only"])
+        self.assertTrue(availability["bounded_watch_flow_observed_research_only"])
 
     def test_a_fully_research_only_quote_with_no_minute_evidence_fires_nothing(self):
         """Documents the state this change fixes: every flow rule is dead."""

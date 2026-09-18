@@ -72,6 +72,7 @@ from .public_market_repository import (
     persist_free_quotes as _persist_free_quotes,
     persist_market_events as _persist_market_events,
     persist_public_observations as _persist_public_observations,
+    persist_timed_observations as _persist_timed_observations,
     recent_market_events as _recent_market_events,
 )
 from .factor_sql_lab import evaluate_factor_set, run_multi_factor_strategy_sql
@@ -385,6 +386,8 @@ from .market_event_capture import capture as capture_market_events
 from .longhu_auction_capture import capture as capture_longhu_morning_auction
 from .market_event_runtime import run_market_event_capture_loop
 from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapshot_loop
+from .datasources import runtime as datasource_runtime
+from .datasources.sources.tushare_limits import fetch_limit_cross_section as fetch_tushare_limit_cross_section
 from .intraday_fast_quote_service import cross_source_confirmation, run_intraday_fast_quote_loop
 from .intraday_fast_quote_runtime import (
     IntradayFastQuoteRuntimeDependencies,
@@ -964,6 +967,11 @@ def persist_public_observations(provider: str, capability: str, rows: list[dict[
 def persist_market_events(provider: str, rows: list[dict[str, Any]]) -> int:
     """Compatibility entrypoint for the public-evidence repository."""
     return _persist_market_events(db, provider, rows)
+
+
+def persist_timed_observations(provider: str, capability: str, rows: list[dict[str, Any]]) -> int:
+    """Entrypoint for observations that carry their own effective/available clocks."""
+    return _persist_timed_observations(db, provider, capability, rows)
 
 
 def recent_market_events(symbol: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -1864,7 +1872,7 @@ async def intraday_sector_report(request: IntradaySectorReportRequest) -> dict[s
     return {"observed_at": datetime.now(timezone.utc).isoformat(), **result}
 
 
-INTRADAY_SIGNAL_MODEL_VERSION = "watchlist-confirmation-v6"
+INTRADAY_SIGNAL_MODEL_VERSION = "watchlist-confirmation-v7"
 INTRADAY_CONFIRMATION_WINDOW = timedelta(minutes=5)
 INTRADAY_ALERT_COOLDOWN = timedelta(minutes=10)
 INTRADAY_ALERT_MAX_ATTEMPTS = 3
@@ -2015,7 +2023,8 @@ async def _xiaojie_session_context(trading_date: date) -> dict[str, Any]:
     # Limit prices are published pre-open but only land in the table after the
     # close, so intraday they must be provisioned before anything reads them.
     await ensure_xiaojie_session_trade_limits(
-        trading_date, read_limits=read_limits, call_tushare_api=call_tushare_api,
+        trading_date, read_limits=read_limits,
+        fetch_limit_cross_section=lambda day: fetch_tushare_limit_cross_section(call_tushare_api, day),
         persist_limits=persist_limits,
     )
     reference = await run_database_blocking(
@@ -2417,7 +2426,8 @@ def _strategy_pattern_mining_dependencies() -> StrategyPatternMiningDependencies
         latest_date=latest_strategy_pattern_date, refresh_sources=refresh_strategy_pattern_sources,
         sample_candidates=strategy_pattern_sample_candidates,
         open_provider_capabilities=open_provider_capabilities,
-        minute_capability=TENCENT_INTRADAY_MINUTE_CAPABILITY, fetch_minutes=tencent_intraday_minutes,
+        minute_capability=TENCENT_INTRADAY_MINUTE_CAPABILITY, minute_source="tencent_free",
+        fetch_minutes=tencent_intraday_minutes,
         intraday_pattern=intraday_limit_lift_pattern, review_score=strategy_pattern_review_score,
         persist_minute_health=persist_tencent_intraday_minute_health, persist_run=persist_strategy_pattern_run,
         run_database=run_database_blocking, model_version=STRATEGY_PATTERN_MODEL_VERSION,
@@ -2926,14 +2936,14 @@ def _intraday_scan_persistence_runtime_instance() -> IntradayScanPersistenceRunt
 def persist_intraday_scan_signals(scan_id: uuid.UUID, observed_at: datetime, selected_symbols: list[str],
                                   source_status: dict[str, Any], watches: list[dict[str, Any]],
                                   quotes: dict[str, dict[str, Any]], all_a_rows: list[dict[str, Any]],
-                                  quote_latency_ms: int, tushare_minutes: dict[str, dict[str, Any]],
+                                  quote_latency_ms: int, realtime_minutes: dict[str, dict[str, Any]],
                                   surge_features: dict[str, dict[str, Any]],
                                   peer_contexts: dict[str, dict[str, Any]],
                                   fast_confirmations: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Compatibility callback for the watchlist scan service."""
     return _intraday_scan_persistence_runtime_instance().persist(
         scan_id, observed_at, selected_symbols, source_status, watches, quotes, all_a_rows,
-        quote_latency_ms, tushare_minutes, surge_features, peer_contexts, fast_confirmations,
+        quote_latency_ms, realtime_minutes, surge_features, peer_contexts, fast_confirmations,
     )
 
 
@@ -3000,7 +3010,7 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
         surge_context=intraday_surge_context, peer_context=intraday_peer_context,
         watch_priority_key=intraday_watch_priority_key,
         realtime_validation_slice=intraday_realtime_validation_slice,
-        tushare_minutes=intraday_tushare_minutes,
+        realtime_minutes=intraday_tushare_minutes,
         fast_confirmations=latest_intraday_fast_quote_confirmations,
         board_cache_evidence=intraday_board_cache_evidence,
         build_source_status=build_scan_source_status,
@@ -3508,7 +3518,19 @@ async def market_event_capture_loop() -> None:
         return active
 
     async def all_symbols() -> Sequence[str]:
+        # Fuyao rejects a whole 100-code batch for one delisted or index code,
+        # so its own live code list is the auction universe; the local
+        # universe is only the fallback.
+        try:
+            rows, _meta = await fuyao_all_a_snapshot_rows()
+            if rows:
+                return [str(row["symbol"]) for row in rows]
+        except Exception as error:  # noqa: BLE001 - fall back to the local universe
+            print(f"Fuyao code list unavailable for the auction capture: {str(error)[:200]}")
         return await run_database_blocking(lambda: _market_snapshot_actions.universe_symbols("all_a"), timeout_seconds=15)
+
+    async def persist_observations(provider: str, capability: str, rows: list[dict[str, Any]]) -> int:
+        return await run_database_blocking(persist_timed_observations, provider, capability, rows, timeout_seconds=60)
 
     async def longhu_auction(observed_at: datetime) -> dict[str, Any]:
         if not longhu_vendor_configured():
@@ -3519,11 +3541,47 @@ async def market_event_capture_loop() -> None:
 
         return await capture_longhu_morning_auction(observed_at, call=call, persist=persist)
 
+    attention_state: dict[str, Any] = {}
     await run_market_event_capture_loop(
         interval_seconds=60, capture=lambda observed_at, **kwargs: capture_market_events(
-            observed_at, fetch=fetch, persist=persist, **kwargs,
+            observed_at, fetch=fetch, persist=persist, persist_observations=persist_observations,
+            state=attention_state, **kwargs,
         ), capture_longhu_auction=longhu_auction, session_open=open_session, symbols=all_symbols,
     )
+
+
+def _datasource_collector_deps() -> Any:
+    """Production adapters for the data-source collectors (see app.datasources.runtime)."""
+    from .fuyao_provider import configured as fuyao_configured
+    from .fuyao_provider import fetch as fetch_fuyao
+
+    has_fuyao = fuyao_configured()
+    return datasource_runtime.build_collector_deps(
+        db, run_blocking=run_database_blocking,
+        fuyao_fetch=fetch_fuyao if has_fuyao else None,
+        fuyao_snapshot=fuyao_all_a_snapshot_rows if has_fuyao else None,
+    )
+
+
+def _datasource_loops() -> dict[str, Callable[[], Any]]:
+    async def session_open(now: datetime) -> bool:
+        active, _reason = await realtime_market_session_async(now=now)
+        return active
+
+    collector = _datasource_collector_deps()
+    archive = datasource_runtime.build_archive_deps(db, collector, run_blocking=run_database_blocking)
+    return datasource_runtime.collector_loops(collector, archive, session_open=session_open,
+                                              trading_day=sse_calendar_open_async)
+
+
+async def public_evidence_capture_loop() -> None:
+    """News, investor Q&A, the anomaly tape, rankings and live sentiment."""
+    await _datasource_loops()["public_evidence_capture"]()
+
+
+async def post_close_public_archive_loop() -> None:
+    """Archive the short-lived and post-close public evidence once per session."""
+    await _datasource_loops()["post_close_public_archive"]()
 
 
 async def all_a_level1_snapshot_capture_loop() -> None:
@@ -4447,6 +4505,8 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "board_flow_curve": intraday_board_curve_enabled(),
             "market_event_capture": os.getenv("MARKET_EVENT_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "all_a_level1_snapshot": os.getenv("ALL_A_LEVEL1_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "public_evidence_capture": os.getenv("PUBLIC_EVIDENCE_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "post_close_public_archive": os.getenv("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
         },
         loops={
             "intraday_monitor": lambda: intraday_monitor_loop(interval_seconds),
@@ -4458,6 +4518,8 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "board_flow_curve": intraday_board_flow_curve_loop,
             "market_event_capture": market_event_capture_loop,
             "all_a_level1_snapshot": all_a_level1_snapshot_capture_loop,
+            "public_evidence_capture": public_evidence_capture_loop,
+            "post_close_public_archive": post_close_public_archive_loop,
         },
     )
     validate_runtime_task_specs(specs)

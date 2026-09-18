@@ -10,6 +10,7 @@ from datetime import time as _time
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from .datasources.catalog import EXCHANGE_TIMESTAMPED_QUOTE_LABELS, RULE_USABLE_FLOW_LABELS
 from .strategy_thresholds import (
     MAX_ENTRY_INTRADAY_GAIN_PCT,
     STANDARD_ENTRY_MIN_INTRADAY_GAIN_PCT,
@@ -48,7 +49,7 @@ def signal_rules(watch: dict[str, Any], quote: dict[str, Any] | None,
     if not quote or quote.get("price") is None:
         return [{"signal_key": f"{symbol}:data_issue:{model_version}", "signal_type": "data_issue",
                  "severity": "warning", "score": 0, "hard": False,
-                 "conditions": {"quote_available": False}, "risk_flags": ["missing_tencent_quote"]}]
+                 "conditions": {"quote_available": False}, "risk_flags": ["missing_watch_quote"]}]
     price = float(quote["price"])
     pct_change = float(quote.get("pct_change") or 0)
     volume_ratio_value = number(quote.get("volume_ratio"))
@@ -77,22 +78,21 @@ def signal_rules(watch: dict[str, Any], quote: dict[str, Any] | None,
     # universe. Keep it in evidence while treating it as unavailable for all
     # legacy flow/ranking rules.
     #
-    # ``flow_metric_sources`` refines that per field.  volume_ratio and
-    # turnover_rate can be derived from the licensed all-A snapshot's own
-    # cumulative volume plus locally persisted float shares, which is a
-    # cross-sectional definition rather than a bounded-basket observation, so
-    # a field labelled ``fuyao_ths_derived`` is usable on its own terms.  Every
-    # other label - including main_net_inflow, which no licensed route
-    # supplies - stays research-only exactly as before.  Snapshots frozen
-    # before this labelling existed carry no labels and keep the original
-    # all-or-nothing behaviour, so replayed evidence is unaffected.
+    # ``flow_metric_sources`` refines that per field.  Whether a label may
+    # feed a rule is a property recorded in the data-source catalog
+    # (``RULE_USABLE_FLOW_LABELS``), not a vendor name compared here: today
+    # only the cross-sectional derivation from the all-A snapshot qualifies.
+    # Every other label - including main_net_inflow, which no licensed route
+    # supplies - stays research-only.  Snapshots frozen before this labelling
+    # existed carry no labels and keep the original all-or-nothing behaviour,
+    # so replayed evidence is unaffected.
     flow_metric_sources = (
         quote.get("flow_metric_sources") if isinstance(quote.get("flow_metric_sources"), dict) else {}
     )
     if flow_metric_sources:
         research_only_fields = {
             name for name in public_flow_values
-            if str(flow_metric_sources.get(name) or "") != "fuyao_ths_derived"
+            if str(flow_metric_sources.get(name) or "") not in RULE_USABLE_FLOW_LABELS
         }
     else:
         research_only_fields = set(public_flow_values) if bounded_watch_flow_only else set()
@@ -112,7 +112,7 @@ def signal_rules(watch: dict[str, Any], quote: dict[str, Any] | None,
               "data_availability": {"missing_public_flow_fields": missing_public_fields,
                                     "public_flow_available": not missing_public_fields,
                                     "flow_metric_sources": flow_metric_sources or None,
-                                    "eastmoney_watch_flow_observed_research_only": bounded_watch_flow_only},
+                                    "bounded_watch_flow_observed_research_only": bounded_watch_flow_only},
               "daily_factors": daily_factors or {"status": "not_available"},
               "minute_features": minute_features or {"status": "not_available"},
               "peer_context": peer_context or {"status": "not_available"}}
@@ -125,13 +125,16 @@ def signal_rules(watch: dict[str, Any], quote: dict[str, Any] | None,
                         "risk_flags": ["hard_stop_triggered", "manual_review_required",
                                        *( [] if sellable else ["no_confirmed_sellable_quantity_risk_alert_only"])]})
     # A material opening gap can finish before six causal minute bars exist.
-    # Record a research watch on a fresh direct quote, then leave every later
-    # entry upgrade to the normal minute/flow confirmation rules.
+    # Record a research watch on a fresh, exchange-timestamped watch quote --
+    # whichever source served it -- then leave every later entry upgrade to
+    # the normal minute/flow confirmation rules.  (v6 compared the label with
+    # Tencent's alone, so once Longhu became the primary watch quote this
+    # watch could no longer fire.)
     freshness = quote.get("price_freshness") if isinstance(quote.get("price_freshness"), dict) else {}
     opening_gap_watch = (
         opening_gap_window and not holding and bool(watch.get("alert_on_entry"))
         and 3.0 <= pct_change <= MAX_ENTRY_INTRADAY_GAIN_PCT
-        and str(quote.get("price_source") or "") == "tencent_batched_watch_quote"
+        and str(quote.get("price_source") or "") in EXCHANGE_TIMESTAMPED_QUOTE_LABELS
         and str(freshness.get("status") or "") == "fresh"
     )
     if opening_gap_watch and not signals:
@@ -309,15 +312,15 @@ def signal_rules(watch: dict[str, Any], quote: dict[str, Any] | None,
                         "score": min(90, round(45 + pct_change * 4 + turnover_rate, 2)), "hard": False,
                         "conditions": {**common, "price_extension": "pct_ge_6_turnover_ge_12_flow_top_5pct"},
                         "risk_flags": ["abnormal_price_extension", "requires_second_scan_confirmation", "not_an_entry_instruction", "manual_review_required"]})
-    # Fuyao's all-A snapshot is deliberately price/volume/turnover-only: it
-    # does not claim an exchange-grade main-flow field, and it does not expose
-    # the legacy rolling volume-ratio/turnover pair.  Missing values must not
+    # The all-A snapshot is deliberately price/volume/turnover-only: it does
+    # not claim an exchange-grade main-flow field, and it does not expose the
+    # legacy rolling volume-ratio/turnover pair.  Missing values must not
     # quietly become zero and freeze every entry forever.  When that public
     # flow contract is absent, replace it with independently captured minute
     # expansion plus exact point-in-time peer breadth.  This is still a
     # research candidate requiring a second scan, never an order instruction.
     legacy_public_entry_inputs_available = not missing_public_fields
-    fuyao_minute_breadth_entry = (
+    minute_breadth_entry = (
         not legacy_public_entry_inputs_available and not holding
         and bool(watch.get("alert_on_entry"))
         and STANDARD_ENTRY_MIN_INTRADAY_GAIN_PCT <= pct_change <= MAX_ENTRY_INTRADAY_GAIN_PCT
@@ -328,18 +331,18 @@ def signal_rules(watch: dict[str, Any], quote: dict[str, Any] | None,
         and above_vwap_pct is not None and 0 <= above_vwap_pct <= 5.5
         and available_peers >= 2 and confirming_peers >= 2 and peer_breadth >= 0.66
     )
-    if fuyao_minute_breadth_entry and not signals:
-        signals.append({"signal_key": f"{symbol}:entry:fuyao_minute_breadth_v1", "signal_type": "entry",
+    if minute_breadth_entry and not signals:
+        signals.append({"signal_key": f"{symbol}:entry:minute_breadth_v1", "signal_type": "entry",
                         "severity": "info", "score": min(92, round(
                             52 + min(minute_volume_multiple, 8) * 3 + peer_breadth * 12, 2,
                         )), "hard": False, "independent_confirmation": True,
-                        "conditions": {**common, "setup": "fuyao_minute_price_volume_plus_exact_peer_breadth",
-                                       "flow_confirmation": ("eastmoney_watch_flow_observed_research_only"
-                                                             if bounded_watch_flow_only else "not_required_fuyao_no_flow_semantics"),
+                        "conditions": {**common, "setup": "minute_price_volume_plus_exact_peer_breadth",
+                                       "flow_confirmation": ("bounded_watch_flow_observed_research_only"
+                                                             if bounded_watch_flow_only else "not_required_no_public_flow_semantics"),
                                        "price_confirmation": "direct_watch_quote_above_previous_scan"},
-                        "risk_flags": ["fuyao_no_public_main_flow", "minute_volume_proxy",
+                        "risk_flags": ["no_public_main_flow", "minute_volume_proxy",
                         "independent_peer_confirmation", "requires_second_scan_confirmation",
-                                       *( ["eastmoney_watch_flow_research_confirmation_only"] if bounded_watch_flow_only else []),
+                                       *( ["bounded_watch_flow_research_confirmation_only"] if bounded_watch_flow_only else []),
                                        "manual_review_required", "no_automatic_order"]})
     entry_session_ok = True
     if entry_session_windows is not None:

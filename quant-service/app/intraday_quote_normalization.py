@@ -145,6 +145,21 @@ def observation_source(quote: dict[str, Any] | None) -> str:
     return "unknown_realtime_source"
 
 
+def _repair_unpadded_clock(stamp: str) -> str:
+    """Undo the gateway's truncation of an unpadded morning clock.
+
+    The Longhu vendor clock is an unpadded integer (09:30:14.237 arrives as
+    "93014237"), and gateways built before the source fix kept its first six
+    digits, "930142".  In a trading session the first digit is 9 and the
+    second a minute tens digit (0-5), so the "hour" is always 90-95 -- never
+    a real hour -- which makes the repair unambiguous: HHMMSS = "0" + the
+    first five digits.  Any stamp with a valid hour is returned unchanged.
+    """
+    if len(stamp) == 14 and stamp[8:10].isdigit() and int(stamp[8:10]) > 23:
+        return f"{stamp[:8]}0{stamp[8:13]}"
+    return stamp
+
+
 def exchange_time_status(quote: dict[str, Any] | None, observed_at: datetime, max_age_seconds: float) -> dict[str, Any]:
     """Classify an upstream price timestamp against one Shanghai-clock SLO."""
     payload = quote or {}
@@ -156,6 +171,7 @@ def exchange_time_status(quote: dict[str, Any] | None, observed_at: datetime, ma
         candidate = f"{date_part}{compact[:6]}"
     else:
         return {"status": "missing_timestamp", "max_age_seconds": max_age_seconds}
+    candidate = _repair_unpadded_clock(candidate)
     try:
         exchange_at = datetime.strptime(candidate, "%Y%m%d%H%M%S").replace(tzinfo=ZoneInfo("Asia/Shanghai"))
     except ValueError:

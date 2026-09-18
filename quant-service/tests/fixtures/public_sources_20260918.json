@@ -1,0 +1,2368 @@
+{
+ "em_zt": {
+  "rc": 0,
+  "rt": 110,
+  "svr": 183632177,
+  "lt": 2,
+  "full": 0,
+  "data": {
+   "tc": 78,
+   "qdate": 20260918,
+   "pool": [
+    {
+     "c": "001376",
+     "m": 0,
+     "n": "百通能源",
+     "p": 12660,
+     "zdp": 9.991312026977539,
+     "amount": 147380124,
+     "ltsz": 2721777362.58,
+     "tshare": 6185676000.0,
+     "hs": 5.414848804473877,
+     "lbc": 1,
+     "fbt": 92500,
+     "lbt": 92500,
+     "fund": 106626318,
+     "zbc": 0,
+     "hybk": "电力",
+     "zttj": {
+      "days": 1,
+      "ct": 1
+     }
+    },
+    {
+     "c": "002453",
+     "m": 0,
+     "n": "华软科技",
+     "p": 5340,
+     "zdp": 10.103093147277832,
+     "amount": 446859296,
+     "ltsz": 3434161892.52,
+     "tshare": 4338040420.8,
+     "hs": 13.440363883972168,
+     "lbc": 2,
+     "fbt": 92500,
+     "lbt": 104115,
+     "fund": 39242575,
+     "zbc": 1,
+     "hybk": "化学制品",
+     "zttj": {
+      "days": 2,
+      "ct": 2
+     }
+    }
+   ]
+  }
+ },
+ "em_yzt": {
+  "rc": 0,
+  "rt": 117,
+  "svr": 183632177,
+  "lt": 2,
+  "full": 0,
+  "data": {
+   "tc": 47,
+   "qdate": 20260918,
+   "pool": [
+    {
+     "c": "000504",
+     "m": 0,
+     "n": "南华生物",
+     "p": 10010,
+     "ztp": 10010,
+     "zdp": 10.0,
+     "amount": 187856694,
+     "ltsz": 3294515203.98,
+     "tshare": 3303531271.04,
+     "hs": 5.747257232666016,
+     "zf": 4.94505500793457,
+     "zs": 0.0,
+     "yfbt": 102142,
+     "ylbc": 1,
+     "hybk": "医疗服务",
+     "zttj": {
+      "days": 2,
+      "ct": 2
+     }
+    },
+    {
+     "c": "000868",
+     "m": 0,
+     "n": "安凯客车",
+     "p": 3990,
+     "ztp": 4470,
+     "zdp": -1.7241379022598267,
+     "amount": 397032816,
+     "ltsz": 3748660800.15,
+     "tshare": 3748663796.6400003,
+     "hs": 10.368658065795898,
+     "zf": 6.157635688781738,
+     "zs": 0.0,
+     "yfbt": 94751,
+     "ylbc": 1,
+     "hybk": "商用车",
+     "zttj": {
+      "days": 2,
+      "ct": 1
+     }
+    }
+   ]
+  }
+ },
+ "em_qs": {
+  "rc": 0,
+  "rt": 112,
+  "svr": 183632177,
+  "lt": 2,
+  "full": 0,
+  "data": {
+   "tc": 191,
+   "qdate": 20260918,
+   "pool": [
+    {
+     "c": "688292",
+     "m": 1,
+     "n": "浩瀚深度",
+     "p": 23020,
+     "ztp": 23020,
+     "ztf": "1",
+     "zdp": 20.020854949951172,
+     "amount": 236030039,
+     "ltsz": 3645238892.02,
+     "tshare": 3645238892.02,
+     "hs": 6.8113250732421875,
+     "nh": 1,
+     "cc": 1,
+     "lb": 1.6630990505218506,
+     "zs": 0.0,
+     "zttj": {
+      "days": 1,
+      "ct": 1
+     },
+     "hybk": "计算机设"
+    },
+    {
+     "c": "301390",
+     "m": 0,
+     "n": "经纬股份",
+     "p": 54000,
+     "ztp": 54000,
+     "ztf": "1",
+     "zdp": 20.0,
+     "amount": 238877748,
+     "ltsz": 2649033720.0,
+     "tshare": 3240000000.0,
+     "hs": 9.017542839050293,
+     "nh": 1,
+     "cc": 3,
+     "lb": 2.7711970806121826,
+     "zs": 0.0,
+     "zttj": {
+      "days": 2,
+      "ct": 2
+     },
+     "hybk": "工程咨询"
+    }
+   ]
+  }
+ },
+ "em_cx": {
+  "rc": 0,
+  "rt": 113,
+  "svr": 183632177,
+  "lt": 2,
+  "full": 0,
+  "data": {
+   "tc": 162,
+   "qdate": 20260918,
+   "pool": [
+    {
+     "c": "601091",
+     "m": 1,
+     "n": "C沈鼓",
+     "p": 57770,
+     "ztp": 1000000000,
+     "ztf": "0",
+     "zdp": 177.74038696289062,
+     "amount": 4816769792,
+     "ltsz": 12198897024.140001,
+     "tshare": 179664849739.84,
+     "hs": 89.08139038085938,
+     "ods": 2,
+     "od": 20260917,
+     "ipod": 20260917,
+     "o": 1,
+     "nh": 0,
+     "zttj": {
+      "days": 0,
+      "ct": 0
+     },
+     "hybk": "通用设备"
+    },
+    {
+     "c": "688837",
+     "m": 1,
+     "n": "C信诺维",
+     "p": 55600,
+     "ztp": 1000000000,
+     "ztf": "0",
+     "zdp": 34.461910247802734,
+     "amount": 1907383888,
+     "ltsz": 2701825621.6,
+     "tshare": 24213188844.8,
+     "hs": 78.20922088623047,
+     "ods": 3,
+     "od": 20260916,
+     "ipod": 20260916,
+     "o": 1,
+     "nh": 0,
+     "zttj": {
+      "days": 0,
+      "ct": 0
+     },
+     "hybk": "化学制药"
+    }
+   ]
+  }
+ },
+ "em_zb": {
+  "rc": 0,
+  "rt": 114,
+  "svr": 183632177,
+  "lt": 2,
+  "full": 0,
+  "data": {
+   "tc": 25,
+   "qdate": 20260918,
+   "pool": [
+    {
+     "c": "002080",
+     "m": 0,
+     "n": "中材科技",
+     "p": 60220,
+     "ztp": 64560,
+     "zdp": 2.6069176197052,
+     "amount": 6872577280,
+     "ltsz": 101056602228.48,
+     "tshare": 101056602228.48,
+     "hs": 6.7050981521606445,
+     "fbt": 92500,
+     "zbc": 1,
+     "zf": 11.518146514892578,
+     "zs": 0.0,
+     "zttj": {
+      "days": 0,
+      "ct": 0
+     },
+     "hybk": "玻璃玻纤"
+    },
+    {
+     "c": "003026",
+     "m": 0,
+     "n": "中晶科技",
+     "p": 37200,
+     "ztp": 40700,
+     "zdp": 0.5405405759811401,
+     "amount": 2225844624,
+     "ltsz": 5362784736.0,
+     "tshare": 7052348100.000001,
+     "hs": 39.654319763183594,
+     "fbt": 92500,
+     "zbc": 3,
+     "zf": 10.675675392150879,
+     "zs": 0.0,
+     "zttj": {
+      "days": 4,
+      "ct": 3
+     },
+     "hybk": "半导体"
+    }
+   ]
+  }
+ },
+ "em_dt_old": {
+  "rc": 0,
+  "rt": 111,
+  "svr": 183632177,
+  "lt": 2,
+  "full": 0,
+  "data": {
+   "tc": 16,
+   "qdate": 20260918,
+   "pool": [
+    {
+     "c": "001366",
+     "m": 0,
+     "n": "播恩集团",
+     "p": 13050,
+     "zdp": -10.0,
+     "amount": 303514048,
+     "ltsz": 2096874000.0,
+     "tshare": 2096874000.0,
+     "pe": 103.01688385009766,
+     "hs": 14.174070358276367,
+     "fund": 1396350,
+     "lbt": 150000,
+     "fba": 12257758,
+     "days": 1,
+     "oc": 2,
+     "hybk": "饲料"
+    },
+    {
+     "c": "002678",
+     "m": 0,
+     "n": "珠江钢琴",
+     "p": 4660,
+     "zdp": -10.038609504699707,
+     "amount": 143048131,
+     "ltsz": 6326296927.68,
+     "tshare": 6329772691.2,
+     "pe": -25.109724044799805,
+     "hs": 2.16015887260437,
+     "fund": 8886620,
+     "lbt": 141406,
+     "fba": 43945198,
+     "days": 1,
+     "oc": 9,
+     "hybk": "文娱用品"
+    }
+   ]
+  }
+ },
+ "em_bk_changes": {
+  "rc": 0,
+  "rt": 104,
+  "svr": 183632177,
+  "lt": 2,
+  "full": 0,
+  "data": {
+   "dt": 20260918150000,
+   "tc": 1003,
+   "allbk": [
+    {
+     "c": "BK0596",
+     "m": 90,
+     "n": "融资融券",
+     "u": "1.73",
+     "zjl": 3834957.824,
+     "ct": 8666,
+     "ms": {
+      "c": "601091",
+      "m": 1,
+      "n": "C沈鼓",
+      "t": 8193
+     },
+     "ydl": [
+      {
+       "t": 8201,
+       "ct": 1756
+      },
+      {
+       "t": 8193,
+       "ct": 1570
+      }
+     ]
+    },
+    {
+     "c": "BK0804",
+     "m": 90,
+     "n": "深股通",
+     "u": "1.61",
+     "zjl": 2455706.8288,
+     "ct": 4223,
+     "ms": {
+      "c": "301583",
+      "m": 0,
+      "n": "托伦斯",
+      "t": 8193
+     },
+     "ydl": [
+      {
+       "t": 8201,
+       "ct": 746
+      },
+      {
+       "t": 8193,
+       "ct": 691
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "em_hot": {
+  "globalId": "786e4c21-70dc-435a-93bb-38",
+  "message": "OK",
+  "status": 0,
+  "code": 0,
+  "data": [
+   {
+    "sc": "SH601091",
+    "rk": 1,
+    "rc": 0,
+    "hisRc": 0
+   },
+   {
+    "sc": "SZ002185",
+    "rk": 2,
+    "rc": 0,
+    "hisRc": 112
+   }
+  ],
+  "stack": null
+ },
+ "em_hot_up": {
+  "globalId": "786e4c21-70dc-435a-93bb-38",
+  "message": "OK",
+  "status": 0,
+  "code": 0,
+  "data": [
+   {
+    "sc": "SZ001238",
+    "rk": 176,
+    "hrc": 4543,
+    "hrcrk": 1
+   },
+   {
+    "sc": "SH600261",
+    "rk": 111,
+    "hrc": 4347,
+    "hrcrk": 2
+   }
+  ],
+  "stack": null
+ },
+ "em_hot_his": {
+  "globalId": "786e4c21-70dc-435a-93bb-38",
+  "message": "OK",
+  "status": 0,
+  "code": 0,
+  "data": [
+   {
+    "calcTime": "2025-09-18",
+    "rank": 764
+   },
+   {
+    "calcTime": "2025-09-19",
+    "rank": 672
+   }
+  ],
+  "stack": null
+ },
+ "dc_lift": {
+  "version": "d8d13faf5d1558a096776cb3d6cb1d2b",
+  "result": {
+   "pages": 54,
+   "data": [
+    {
+     "SECUCODE": "603270.SH",
+     "SECURITY_CODE": "603270",
+     "FREE_DATE": "2026-09-18 00:00:00",
+     "BATCH_HOLDER_NUM": 1,
+     "CURRENT_FREE_SHARES": 3300,
+     "LIFT_MARKET_CAP": 121539,
+     "FREE_SHARES_TYPE": "首发原股东限售股份",
+     "B20_ADJCHRATE": 31.55427335,
+     "A20_ADJCHRATE": 0.96,
+     "FREE_SHARES": 10371.6667,
+     "NON_FREE_SHARES": 11539,
+     "FREE_RATIO": 0.318174512877,
+     "MARKET_TYPE": "sh",
+     "SECURITY_NAME_ABBR": "金帝股份",
+     "NEW": 36.83,
+     "TOTAL_RATIO": 0.150611574042,
+     "ABLE_FREE_SHARES": 3300,
+     "ALIFT_MARKET_CAP": 121539,
+     "TRADE_MARKET_CODE": "069001001001",
+     "EUTIME": "2026-09-14 18:13:49",
+     "SECURITY_TYPE_CODE": "058001001",
+     "LISTING_STATE": "0",
+     "IS_NEW": "1",
+     "TOTALSHARES_RATIO": 0.150611574042
+    },
+    {
+     "SECUCODE": "600817.SH",
+     "SECURITY_CODE": "600817",
+     "FREE_DATE": "2026-09-18 00:00:00",
+     "BATCH_HOLDER_NUM": 2,
+     "CURRENT_FREE_SHARES": 23.5,
+     "LIFT_MARKET_CAP": 228.89,
+     "FREE_SHARES_TYPE": "股权激励限售股份",
+     "B20_ADJCHRATE": 0.60687169,
+     "A20_ADJCHRATE": 2.63,
+     "FREE_SHARES": 52972.6846,
+     "NON_FREE_SHARES": 234,
+     "FREE_RATIO": 0.000443624864,
+     "MARKET_TYPE": "sh",
+     "SECURITY_NAME_ABBR": "宇通重工",
+     "NEW": 9.74,
+     "TOTAL_RATIO": 0.000441673827,
+     "ABLE_FREE_SHARES": 23.5,
+     "ALIFT_MARKET_CAP": 228.89,
+     "TRADE_MARKET_CODE": "069001001001",
+     "EUTIME": "2026-09-14 18:16:38",
+     "SECURITY_TYPE_CODE": "058001001",
+     "LISTING_STATE": "0",
+     "IS_NEW": "1",
+     "TOTALSHARES_RATIO": 0.000441673827
+    }
+   ],
+   "count": 162
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "dc_holdernum": {
+  "version": "bbd0f9724294987090dc959c1998c8e1",
+  "result": {
+   "pages": 1854,
+   "data": [
+    {
+     "SECURITY_CODE": "301598",
+     "SECUCODE": "301598.SZ",
+     "SECURITY_NAME_ABBR": "博科测试",
+     "HOLDER_NUM": 7828,
+     "PRE_HOLDER_NUM": 8418,
+     "HOLDER_NUM_CHANGE": -590,
+     "HOLDER_NUM_RATIO": -7.008790686624,
+     "INTERVAL_CHRATE": -4.77004941,
+     "END_DATE": "2026-09-10 00:00:00",
+     "PRE_END_DATE": "2026-08-31 00:00:00",
+     "PRE_E_DATE": "08/31",
+     "AVG_MARKET_CAP": 377023.485504599,
+     "AVG_HOLD_NUM": 7523.9170924885,
+     "TOTAL_MARKET_CAP": 2951339844.53,
+     "TOTAL_A_SHARES": 58897223,
+     "HOLD_NOTICE_DATE": "2026-09-18 00:00:00",
+     "HOLD_N_DATE": "09/18",
+     "CHANGE_SHARES": 0,
+     "CHANGE_REASON": null,
+     "CLOSE_PRICE": 50.11,
+     "TRADE_MARKET_CODE": "069001002002",
+     "ORG_CODE": "10528520",
+     "SECURITY_TYPE_CODE": "058001001"
+    },
+    {
+     "SECURITY_CODE": "300658",
+     "SECUCODE": "300658.SZ",
+     "SECURITY_NAME_ABBR": "延江股份",
+     "HOLDER_NUM": 16999,
+     "PRE_HOLDER_NUM": 17738,
+     "HOLDER_NUM_CHANGE": -739,
+     "HOLDER_NUM_RATIO": -4.166196865487,
+     "INTERVAL_CHRATE": -12.24846894,
+     "END_DATE": "2026-09-10 00:00:00",
+     "PRE_END_DATE": "2026-06-30 00:00:00",
+     "PRE_E_DATE": "06/30",
+     "AVG_MARKET_CAP": 196342.371501265,
+     "AVG_HOLD_NUM": 19575.5106182717,
+     "TOTAL_MARKET_CAP": 3337623973.15,
+     "TOTAL_A_SHARES": 332764105,
+     "HOLD_NOTICE_DATE": "2026-09-18 00:00:00",
+     "HOLD_N_DATE": "09/18",
+     "CHANGE_SHARES": 0,
+     "CHANGE_REASON": null,
+     "CLOSE_PRICE": 10.03,
+     "TRADE_MARKET_CODE": "069001002002",
+     "ORG_CODE": "10506152",
+     "SECURITY_TYPE_CODE": "058001001"
+    }
+   ],
+   "count": 5561
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "dc_holder_trade": {
+  "version": "3978f4e994bdaa8e491b92a2a9d5543a",
+  "result": {
+   "pages": 48863,
+   "data": [
+    {
+     "CHANGE_NUM": 1345.89,
+     "NOTICE_DATE": "2026-09-19 00:00:00",
+     "SECURITY_CODE": "600866",
+     "HOLDER_NAME": "宁夏伊品投资集团有限公司",
+     "AFTER_CHANGE_RATE": 0.810058490907,
+     "CHANGE_NUM_SYMBOL": -1345.89,
+     "CHANGE_RATE": -0.9756,
+     "END_DATE": "2026-09-17 00:00:00",
+     "CLOSE_PRICE": 4.06,
+     "AFTER_HOLDER_NUM": 8307.3729,
+     "HOLD_RATIO": 5,
+     "TRADE_AVERAGE_PRICE": null,
+     "FREE_SHARES_RATIO": 5,
+     "FREE_SHARES": 8307.3729,
+     "TRADE_DATE": "2026-09-17 00:00:00",
+     "SECURITY_NAME_ABBR": "星湖科技",
+     "DIRECTION": "减持",
+     "EITIME": "2026-09-18 21:28:16",
+     "CHANGE_FREE_RATIO": 0.81,
+     "START_DATE": "2026-09-15 00:00:00",
+     "REAL_PRICE": null,
+     "NEWEST_PRICE": null,
+     "CHANGE_RATE_QUOTES": null,
+     "MARKET": "二级市场"
+    },
+    {
+     "CHANGE_NUM": 11.4898,
+     "NOTICE_DATE": "2026-09-19 00:00:00",
+     "SECURITY_CODE": "688025",
+     "HOLDER_NAME": "厦门市同聚同源咨询管理合伙企业(有限合伙)",
+     "AFTER_CHANGE_RATE": 0.120882375057,
+     "CHANGE_NUM_SYMBOL": -11.4898,
+     "CHANGE_RATE": -2.1042,
+     "END_DATE": "2026-09-17 00:00:00",
+     "CLOSE_PRICE": 435,
+     "AFTER_HOLDER_NUM": 1236.2144,
+     "HOLD_RATIO": 13.01,
+     "TRADE_AVERAGE_PRICE": null,
+     "FREE_SHARES_RATIO": null,
+     "FREE_SHARES": null,
+     "TRADE_DATE": "2026-09-17 00:00:00",
+     "SECURITY_NAME_ABBR": "杰普特",
+     "DIRECTION": "减持",
+     "EITIME": "2026-09-18 20:01:38",
+     "CHANGE_FREE_RATIO": 0.12,
+     "START_DATE": "2026-09-17 00:00:00",
+     "REAL_PRICE": null,
+     "NEWEST_PRICE": null,
+     "CHANGE_RATE_QUOTES": null,
+     "MARKET": "二级市场"
+    }
+   ],
+   "count": 146587
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "dc_block": {
+  "version": "16a296a0553fc2b2a7f5228868c79083",
+  "result": {
+   "pages": 28,
+   "data": [
+    {
+     "SECUCODE": "688825.SH",
+     "SECURITY_INNER_CODE": "1004526176",
+     "SECURITY_CODE": "688825",
+     "SECURITY_NAME_ABBR": "长鑫科技",
+     "SECURITY_TYPE": "EQA",
+     "TRADE_DATE": "2026-09-17 00:00:00",
+     "DEAL_PRICE": 53.47,
+     "PREMIUM_RATIO": 0,
+     "DEAL_VOLUME": 6100000,
+     "DEAL_AMT": 326167000,
+     "BUYER_NAME": "机构专用",
+     "SELLER_NAME": "高盛(中国)证券有限责任公司上海浦东新区世纪大道证券营业部",
+     "SECURITY_TYPE_CODE": "1",
+     "DAILY_RANK": 1,
+     "CLOSE_PRICE": 53.47,
+     "TRADE_UNIT": "4",
+     "TURNOVER_RATE": 0.135464073025,
+     "CHANGE_RATE": -2.9583,
+     "CHANGE_RATE_1DAYS": 3.87132972,
+     "CHANGE_RATE_5DAYS": null,
+     "BUYER_CODE": "0",
+     "SELLER_CODE": "10000399618",
+     "PREMIUM_TURNOVER": 0,
+     "DISCOUNT_TURNOVER": 0,
+     "UNLIMITED_A_SHARES": 4503038971,
+     "TRADE_MARKET_OLD": "CNSESH",
+     "SECURITY_TYPE_WEB": "1",
+     "CHANGE_RATE_10DAYS": null,
+     "CHANGE_RATE_20DAYS": null,
+     "TRADE_MARKET_CODE": "069001001006",
+     "IS_SYSDATE": 0,
+     "FREE_SHARES_RATIO": 0.135464073025,
+     "TOTAL_SHARES_RATIO": 0.008985904038,
+     "INDEX_CLOSE": 3875.6044,
+     "PRE_CLOSE_PRICE": 55.1,
+     "TOTAL_SHARES": 67884099077,
+     "DISCOUNT_RATIO": -2.958257713249,
+     "QUOTES_CODE": "688825.1"
+    },
+    {
+     "SECUCODE": "300201.SZ",
+     "SECURITY_INNER_CODE": "1000009074",
+     "SECURITY_CODE": "300201",
+     "SECURITY_NAME_ABBR": "海伦哲",
+     "SECURITY_TYPE": "EQA",
+     "TRADE_DATE": "2026-09-17 00:00:00",
+     "DEAL_PRICE": 10.25,
+     "PREMIUM_RATIO": -0.185861795075,
+     "DEAL_VOLUME": 8800000,
+     "DEAL_AMT": 90200000,
+     "BUYER_NAME": "华泰证券股份有限公司深圳平安金融中心证券营业部",
+     "SELLER_NAME": "中信证券股份有限公司深圳分公司",
+     "SECURITY_TYPE_CODE": "1",
+     "DAILY_RANK": 1,
+     "CLOSE_PRICE": 12.59,
+     "TRADE_UNIT": "4",
+     "TURNOVER_RATE": 0.713788209028,
+     "CHANGE_RATE": -1.7174,
+     "CHANGE_RATE_1DAYS": 4.92454329,
+     "CHANGE_RATE_5DAYS": null,
+     "BUYER_CODE": "10046450",
+     "SELLER_CODE": "10492423",
+     "PREMIUM_TURNOVER": 0,
+     "DISCOUNT_TURNOVER": 90200000,
+     "UNLIMITED_A_SHARES": 1003717365,
+     "TRADE_MARKET_OLD": "CNSESZ",
+     "SECURITY_TYPE_WEB": "1",
+     "CHANGE_RATE_10DAYS": null,
+     "CHANGE_RATE_20DAYS": null,
+     "TRADE_MARKET_CODE": "069001002002",
+     "IS_SYSDATE": 0,
+     "FREE_SHARES_RATIO": 0.876740834308,
+     "TOTAL_SHARES_RATIO": 0.872112953192,
+     "INDEX_CLOSE": 3298.3101,
+     "PRE_CLOSE_PRICE": 12.81,
+     "TOTAL_SHARES": 1009043607,
+     "DISCOUNT_RATIO": -19.984387197502,
+     "QUOTES_CODE": "300201.0"
+    }
+   ],
+   "count": 82
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "dc_forecast": {
+  "version": "cb4764390af6fb172e21ec2a41e9c4ab",
+  "result": {
+   "pages": 36,
+   "data": [
+    {
+     "SECUCODE": "300497.SZ",
+     "SECURITY_CODE": "300497",
+     "SECURITY_NAME_ABBR": "富祥股份",
+     "ORG_CODE": "10156299",
+     "NOTICE_DATE": "2026-09-18 00:00:00",
+     "REPORT_DATE": "2026-09-30 00:00:00",
+     "PREDICT_FINANCE_CODE": "004",
+     "PREDICT_FINANCE": "归属于上市公司股东的净利润",
+     "PREDICT_AMT_LOWER": 350000000,
+     "PREDICT_AMT_UPPER": 430000000,
+     "ADD_AMP_LOWER": 658,
+     "ADD_AMP_UPPER": 785,
+     "PREDICT_CONTENT": "预计2026年1-9月归属于上市公司股东的净利润盈利:35,000万元至43,000万元,同比上年增长:658%至785%。",
+     "CHANGE_REASON_EXPLAIN": "2026年前三季度公司新能源锂电池电解液添加剂产品销售量价齐增，推动公司业绩大幅增长且扭亏为盈。新能源业务已成为公司业绩增长的核心引擎。此外，公司医药制造业务稳健发展，持续推进市场拓展及降本增效工作，重点攻关关键中间体跨领域应用，多个主导产品全球市占率连续多年位于第一梯队。生物制造微生物蛋白业务商业化进程提速，打开长期成长空间。公司核心产品未冉®蛋白作为新食品原料已于2025年11月通过国家卫健委审批，成为我国首个获批的丝状真菌蛋白。截至目前，未冉®蛋白已可准入包括欧美发达国家及中国在内的全球近三十个国家，标志着产品安全性及合规性获得国内外权威认可，为未冉®蛋白产品通行于全球更广泛的消费市场奠",
+     "PREDICT_TYPE": "扭亏",
+     "PREYEAR_SAME_PERIOD": -62751500,
+     "TRADE_MARKET": "深交所创业板",
+     "TRADE_MARKET_CODE": "069001002002",
+     "SECURITY_TYPE": "A股",
+     "SECURITY_TYPE_CODE": "058001001",
+     "INCREASE_JZ": 721.5,
+     "FORECAST_JZ": 390000000,
+     "FORECAST_STATE": "increase",
+     "IS_LATEST": "T",
+     "PREDICT_RATIO_LOWER": 49.511621606846,
+     "PREDICT_RATIO_UPPER": 118.627339553489,
+     "PREDICT_HBMEAN": 0.840694805802
+    },
+    {
+     "SECUCODE": "300497.SZ",
+     "SECURITY_CODE": "300497",
+     "SECURITY_NAME_ABBR": "富祥股份",
+     "ORG_CODE": "10156299",
+     "NOTICE_DATE": "2026-09-18 00:00:00",
+     "REPORT_DATE": "2026-09-30 00:00:00",
+     "PREDICT_FINANCE_CODE": "005",
+     "PREDICT_FINANCE": "扣除非经常性损益后的净利润",
+     "PREDICT_AMT_LOWER": 320000000,
+     "PREDICT_AMT_UPPER": 400000000,
+     "ADD_AMP_LOWER": 459.58,
+     "ADD_AMP_UPPER": 549.47,
+     "PREDICT_CONTENT": "预计2026年1-9月扣除非经常性损益后的净利润盈利:32,000万元至40,000万元。",
+     "CHANGE_REASON_EXPLAIN": "2026年前三季度公司新能源锂电池电解液添加剂产品销售量价齐增，推动公司业绩大幅增长且扭亏为盈。新能源业务已成为公司业绩增长的核心引擎。此外，公司医药制造业务稳健发展，持续推进市场拓展及降本增效工作，重点攻关关键中间体跨领域应用，多个主导产品全球市占率连续多年位于第一梯队。生物制造微生物蛋白业务商业化进程提速，打开长期成长空间。公司核心产品未冉®蛋白作为新食品原料已于2025年11月通过国家卫健委审批，成为我国首个获批的丝状真菌蛋白。截至目前，未冉®蛋白已可准入包括欧美发达国家及中国在内的全球近三十个国家，标志着产品安全性及合规性获得国内外权威认可，为未冉®蛋白产品通行于全球更广泛的消费市场奠",
+     "PREDICT_TYPE": "扭亏",
+     "PREYEAR_SAME_PERIOD": -88993600,
+     "TRADE_MARKET": "深交所创业板",
+     "TRADE_MARKET_CODE": "069001002002",
+     "SECURITY_TYPE": "A股",
+     "SECURITY_TYPE_CODE": "058001001",
+     "INCREASE_JZ": 504.525,
+     "FORECAST_JZ": 360000000,
+     "FORECAST_STATE": "increase",
+     "IS_LATEST": "T",
+     "PREDICT_RATIO_LOWER": 25.727778178997,
+     "PREDICT_RATIO_UPPER": 95.251246624726,
+     "PREDICT_HBMEAN": 0.604895124019
+    }
+   ],
+   "count": 108
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "dc_express": {
+  "version": "2a81431d9ae1f079bae6dbc24e4715be",
+  "result": {
+   "pages": 22,
+   "data": [
+    {
+     "SECURITY_CODE": "300124",
+     "SECURITY_NAME_ABBR": "汇川技术",
+     "TRADE_MARKET": "深交所创业板",
+     "TRADE_MARKET_CODE": "069001002002",
+     "SECURITY_TYPE": "A股",
+     "SECURITY_TYPE_CODE": "058001001",
+     "UPDATE_DATE": "2026-08-24 00:00:00",
+     "REPORT_DATE": "2026-06-30 00:00:00",
+     "BASIC_EPS": 1.04,
+     "TOTAL_OPERATE_INCOME": 24675251000,
+     "TOTAL_OPERATE_INCOME_SQ": 20509357800,
+     "PARENT_NETPROFIT": 2809924100,
+     "PARENT_NETPROFIT_SQ": 2968778000,
+     "PARENT_BVPS": 13.59,
+     "WEIGHTAVG_ROE": 7.69,
+     "YSTZ": 20.312158189566,
+     "JLRTBZCL": -5.350817743866,
+     "DJDYSHZ": 43.268338674539,
+     "DJDJLHZ": 77.2629046421,
+     "PUBLISHNAME": "自动化设备",
+     "ORG_CODE": "10129026",
+     "NOTICE_DATE": "2026-08-24 00:00:00",
+     "QDATE": "2026Q2",
+     "DATATYPE": "2026年 半年报",
+     "MARKET": "0202",
+     "ISNEW": "1",
+     "EITIME": "2026-08-24 19:12:35",
+     "SECUCODE": "300124.SZ"
+    },
+    {
+     "SECURITY_CODE": "600007",
+     "SECURITY_NAME_ABBR": "中国国贸",
+     "TRADE_MARKET": "上交所主板",
+     "TRADE_MARKET_CODE": "069001001001",
+     "SECURITY_TYPE": "A股",
+     "SECURITY_TYPE_CODE": "058001001",
+     "UPDATE_DATE": "2026-08-22 00:00:00",
+     "REPORT_DATE": "2026-06-30 00:00:00",
+     "BASIC_EPS": 0.63,
+     "TOTAL_OPERATE_INCOME": 1815970000,
+     "TOTAL_OPERATE_INCOME_SQ": 1889650000,
+     "PARENT_NETPROFIT": 633460000,
+     "PARENT_NETPROFIT_SQ": 632370000,
+     "PARENT_BVPS": 9.24,
+     "WEIGHTAVG_ROE": 6.53,
+     "YSTZ": -3.899134760405,
+     "JLRTBZCL": 0.172367443111,
+     "DJDYSHZ": 1.678691659306,
+     "DJDJLHZ": 7.3422697592,
+     "PUBLISHNAME": "房地产开发",
+     "ORG_CODE": "10002258",
+     "NOTICE_DATE": "2026-08-22 00:00:00",
+     "QDATE": "2026Q2",
+     "DATATYPE": "2026年 半年报",
+     "MARKET": "0101",
+     "ISNEW": "1",
+     "EITIME": "2026-08-21 15:33:34",
+     "SECUCODE": "600007.SH"
+    }
+   ],
+   "count": 64
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "dc_repurchase": {
+  "version": "a282581f4c937f8ab1116af4df27d4ca",
+  "result": {
+   "pages": 1839,
+   "data": [
+    {
+     "REPURAMOUNTLIMIT": 100000000,
+     "REPURAMOUNTLOWER": 50000000,
+     "REPURCODE": "16578",
+     "REPURENDDATE": "2027-09-18 00:00:00",
+     "REPURNUMCAP": 3194800,
+     "REPURNUMLOWER": 1597500,
+     "REPUROBJECTIVE": "基于对公司未来发展前景的信心和对公司价值的高度认可,为了维护广大股东权益,增强投资者对公司的投资信心,在综合考虑公司的经营状况、财务状况和股票二级市场表现后,公司拟使用自有资金和/或自筹资金以集中竞价交易方式回购公司部分社会公众股份,作为后续实施股权激励或员工持股计划的储备股份来源。",
+     "REPURPRICECAP": 31.3,
+     "REPURPRICELOWER": null,
+     "REPURPROGRESS": "001",
+     "REPURSTARTDATE": "2026-09-18 00:00:00",
+     "DIM_SCODE": "300808",
+     "SECURITYSHORTNAME": "久量股份",
+     "SHARETYPE": "流通A股",
+     "SHMRSLTNOTICEDATE": null,
+     "UPDATEDATE": "2026-09-19 00:00:00",
+     "FINISHDATE": null,
+     "COMPANYCODE": "10947276",
+     "DIM_DATE": "2026-09-19 00:00:00",
+     "REMARK": "2026.09.19公告\r\n回购期限为自公司董事会审议通过回购股份方案之日起12月内",
+     "REPURADVANCEDATE": null,
+     "DIM_TRADEDATE": "2026-09-18 00:00:00",
+     "NEWPRICE": 22.66,
+     "AGSZBHXS": 2694264414.82,
+     "ZSZ": 3625600000,
+     "CPRICE": 22.66,
+     "REPORTDATE": null,
+     "DIM_SCODE2": null,
+     "COMPANYCODE2": null,
+     "DIM_DATE3": null,
+     "NOTICEDATE": null,
+     "REMARK2": null,
+     "REPURAMOUNT": null,
+     "DIM_UCODE": null,
+     "REPURNUM": null,
+     "REPURPRICECAP1": null,
+     "REPURPRICELOWER1": null,
+     "ZSZXX": 0.9984375,
+     "ZSZSX": 1.99675,
+     "LTSZXX": 1.34357080177,
+     "LTSZSX": 2.686973394363,
+     "ZJJG": 31.3,
+     "ZJSL": 2396150,
+     "ZJJE": 75000000,
+     "ZJSZBL": 1.49759375,
+     "MARKET": "2",
+     "ZJLTBL": 2.015272098066,
+     "LBRQ": "2026-09-18 00:00:00",
+     "SFFHSP": "1",
+     "ZGJ": 31.3,
+     "ZDJ": null,
+     "SLSX": 3194800,
+     "SLXX": 1597500,
+     "JESX": 100000000,
+     "JEXX": 50000000,
+     "EDATE": null,
+     "UPD": "2026-09-19 00:00:00",
+     "BZ": "2026.09.19公告\r\n回购期限为自公司董事会审议通过回购股份方案之日起12月内",
+     "JHJG_VAG": 31.3,
+     "JHSL_VAG": 2396150,
+     "JHJE_VAG": 75000000,
+     "HGJG_VAG": null,
+     "RCHANGE1DCP": 14.8691,
+     "RCHANGE20DCP_CP": null,
+     "RCHANGE20DC_CP": null,
+     "RCHANGE20DC": null,
+     "RCHANGE20DCP": null,
+     "SECUCODE": "300808.SZ"
+    },
+    {
+     "REPURAMOUNTLIMIT": 60000000,
+     "REPURAMOUNTLOWER": 30000000,
+     "REPURCODE": "16566",
+     "REPURENDDATE": "2027-03-13 00:00:00",
+     "REPURNUMCAP": 2582900,
+     "REPURNUMLOWER": 1291400,
+     "REPUROBJECTIVE": "基于对公司未来发展前景的信心以及对公司价值的高度认可,为维护广大投资者的利益,增强投资者信心,同时完善公司长效激励机制,充分调动公司管理人员、核心骨干的积极性,提高团队凝聚力和竞争力,有效推动公司的长远发展,公司拟使用自有资金以集中竞价方式回购公司股份,回购的公司股份拟用于员工持股计划或股权激励。",
+     "REPURPRICECAP": 23.23,
+     "REPURPRICELOWER": null,
+     "REPURPROGRESS": "004",
+     "REPURSTARTDATE": "2026-09-14 00:00:00",
+     "DIM_SCODE": "688360",
+     "SECURITYSHORTNAME": "德马科技",
+     "SHARETYPE": "流通A股",
+     "SHMRSLTNOTICEDATE": null,
+     "UPDATEDATE": "2026-09-19 00:00:00",
+     "FINISHDATE": null,
+     "COMPANYCODE": "10399546",
+     "DIM_DATE": "2026-09-15 00:00:00",
+     "REMARK": "2026.09.15公告\r\n自董事会审议通过回购股份方案之日起6个月内",
+     "REPURADVANCEDATE": null,
+     "DIM_TRADEDATE": "2026-09-14 00:00:00",
+     "NEWPRICE": 15,
+     "AGSZBHXS": 3687164424.66,
+     "ZSZ": 3687164424.66,
+     "CPRICE": 13.98,
+     "REPORTDATE": null,
+     "DIM_SCODE2": null,
+     "COMPANYCODE2": "10399546",
+     "DIM_DATE3": "2026-09-18 00:00:00",
+     "NOTICEDATE": "2026-09-19 00:00:00",
+     "REMARK2": null,
+     "REPURAMOUNT": 5572871.12,
+     "DIM_UCODE": "16566",
+     "REPURNUM": 376299,
+     "REPURPRICECAP1": 15,
+     "REPURPRICELOWER1": 14.55,
+     "ZSZXX": 0.489638375746,
+     "ZSZSX": 0.979314666807,
+     "LTSZXX": 0.489638375746,
+     "LTSZSX": 0.979314666807,
+     "ZJJG": 14.775,
+     "ZJSL": 376299,
+     "ZJJE": 5572871.12,
+     "ZJSZBL": 0.734476521277,
+     "MARKET": "3",
+     "ZJLTBL": 0.734476521277,
+     "LBRQ": "2026-09-14 00:00:00",
+     "SFFHSP": "1",
+     "ZGJ": 15,
+     "ZDJ": 14.55,
+     "SLSX": 376299,
+     "SLXX": 376299,
+     "JESX": 5572871.12,
+     "JEXX": 5572871.12,
+     "EDATE": null,
+     "UPD": "2026-09-19 00:00:00",
+     "BZ": "2026.09.15公告\r\n自董事会审议通过回购股份方案之日起6个月内",
+     "JHJG_VAG": 23.23,
+     "JHSL_VAG": 1937150,
+     "JHJE_VAG": 45000000,
+     "HGJG_VAG": 14.775,
+     "RCHANGE1DCP": -2.6481,
+     "RCHANGE20DCP_CP": null,
+     "RCHANGE20DC_CP": null,
+     "RCHANGE20DC": null,
+     "RCHANGE20DCP": -17.032640949555,
+     "SECUCODE": "688360.SH"
+    }
+   ],
+   "count": 5516
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "dc_ipo": {
+  "version": "6263eb752e36ad5678199fc088d61344",
+  "result": {
+   "pages": 1879,
+   "data": [
+    {
+     "SECUCODE": "301569.SZ",
+     "SECURITY_CODE": "301569",
+     "APPLY_CODE": "301569",
+     "APPLY_DATE": "2026-09-28 00:00:00",
+     "LISTING_DATE": null,
+     "TRADE_MARKET": "深圳证券交易所",
+     "MARKET_TYPE_NEW": "深交所其他",
+     "BALLOT_PAY_DATE": "2026-09-30 00:00:00",
+     "ASSIGN_DATE": "2026-09-29 00:00:00",
+     "ONLINE_ISSUE_DATE": "2026-09-28 00:00:00",
+     "OFFLINE_PLACING__DATE": "2026-09-28 00:00:00",
+     "BALLOT_NUM_DATE": "2026-09-30 00:00:00",
+     "ISSUE_PRICE": null,
+     "PREDICT_ISSUE_PRICE": 0,
+     "PREDICT_ISSUE_PRICE1": 0,
+     "PREDICT_ISSUE_PRICE2": 0,
+     "ISSUE_NUM": 13373.9563,
+     "ONLINE_ISSUE_NUM": 18723500,
+     "ONLINE_APPLY_UPPER": 18500,
+     "AFTER_ISSUE_PE": null,
+     "PREDICT_ISSUE_PE": null,
+     "PREDICT_PE": null,
+     "INDUSTRY_PE_RATIO": null,
+     "INDUSTRY_PE": 27.22,
+     "ONLINE_ISSUE_LWR": null,
+     "TOTAL_RAISE_FUNDS": null,
+     "ISSUE_WAY": "战略配售,网下询价配售,网上定价发行,市值申购,保荐机构参与配售,高管员工参与配售",
+     "INDUSTRY_CODE": null,
+     "OFFLINE_VAP_RATIO": null,
+     "OFFLINE_VAS_MULTIPLE": null,
+     "ONLINE_VA_NUM": null,
+     "OFFLINE_VAP_OBJECT": null,
+     "ONLINE_VA_SHARES": null,
+     "OFFLINE_VATS": null,
+     "OFFLINE_PLACING_UPPER": 74894195,
+     "BALLOT_NUM": null,
+     "TOTAL_APPLY_NUM": null,
+     "INITIAL_MULTIPLE": null,
+     "OFFLINE_PLACING_NUM": 74894195,
+     "TOP_APPLY_MARKETCAP": 18.5,
+     "MZYQ_PAY_FUND": null,
+     "INDUSTRY_NAME": null,
+     "MARKET_CAP_CONFIRMDATE": "T-2日(T:申购日)",
+     "OPEN_PRICE": null,
+     "CLOSE_PRICE": null,
+     "TURNOVERRATE": null,
+     "LD_CLOSE_CHANGE": null,
+     "LD_OPEN_PREMIUM": null,
+     "LD_HIGH_CHANG": null,
+     "OPEN_AVERAGE_PRICE": null,
+     "OPEN_DATE": null,
+     "BVPS": 2.8773,
+     "SECURITY_NAME": "联亚药业",
+     "TOTAL_CHANGE": null,
+     "PROFIT": null,
+     "CONTINUOUS_1WORD_NUM": "待上市",
+     "MARKET_TYPE": "非科创板",
+     "LIMIT_UP_PRICE": null,
+     "ORG_TYPE": "非银行股",
+     "TRADE_MARKET_CODE": "069001002002",
+     "CHANGE_RATE": null,
+     "LATELY_PRICE": null,
+     "CHANGE": null,
+     "IS_BALLOT_NUM": 0,
+     "PE_TTM": null,
+     "OPEN_CHANGERATE": null,
+     "SECURITY_TYPE_CODE": "058001001",
+     "CONTINUOUS_N1WORD_NUM": "待上市",
+     "SECURITY_INNER_CODE": "1004292257",
+     "KB_TRADE_DATE": null,
+     "AVERAGE_PRICE": null,
+     "PREDICT_PE_THREE": 22.99,
+     "MARKET": "深交所创业板",
+     "ONLINE_APPLY_PRICE": null,
+     "ONLINE_FUND_UPPER": null,
+     "FREECAP_AVG_LOWER": 10000000,
+     "OFFLINE_EP_OBJECT": null,
+     "INFO_CODE": "AN202607101826872309",
+     "START_DATE": "2026-09-30 00:00:00",
+     "MAIN_BUSINESS": "复杂药物制剂的研发、生产和销售",
+     "EACHBALLOT_SHARES": "500",
+     "UP_DATE": "2026-09-18 00:00:00",
+     "PREDICT_ONAPPLY_UPPER": 18500,
+     "PREDICT_ONFUND_UPPER": 185000,
+     "PAR_VALUE": 1,
+     "ORIG_TRANSFER_NUM": null,
+     "FREECAP_AVG_DATE": "2026-09-18 00:00:00",
+     "PAGE_PREDICT_PRICE1": null,
+     "PAGE_PREDICT_PRICE2": null,
+     "PAGE_PREDICT_PRICE3": null,
+     "PAGE_PREDICT_PE1": null,
+     "PAGE_PREDICT_PE2": null,
+     "PAGE_PREDICT_PE3": null,
+     "LD_AVERAGE_PRICE": null,
+     "IS_VALID": "1",
+     "APPLY_DATE_NUM": 10,
+     "INDUSTRY_PE_NEW": 27.22,
+     "CONTINUOUS_1WORD_PX": null,
+     "TOTAL_ISSUE_NUM": 13373.96,
+     "ONLINE_ES_MULTIPLE": null,
+     "ISSUE_WAY_EXPLAIN": "本次发行采用向参与战略配售的投资者定向配售、网下向符合条件的投资者询价配售和网上向持有深圳市场非限售A股股份和非限售存托凭证市值的社会公众投资者定价发行相结合的方式进行",
+     "PRICE_WAY": null,
+     "RESULT_NOTICE_DATE": null,
+     "SELECT_LISTING_DATE": null,
+     "ONLINE_PAY_DATE": null,
+     "ONLINE_REFUND_DATE": null,
+     "IS_BEIJING": 0,
+     "PER_SHARES_INCOME": null,
+     "ONLINE_ISSUE_RATIO": null,
+     "OFFFLINE_INITIAL_MULTIPLE": null,
+     "NEWEST_PRICE": "-",
+     "ORG_CODE": "10259962",
+     "TYPE": "001",
+     "AMPLITUDE": null,
+     "REVIEW_DATE": "2026-07-09 00:00:00",
+     "PREDICT_RAISE_FUNDS": 9.5,
+     "TOTAL_SHARES": 891597091,
+     "RECOMMEND_ORG": "中国国际金融股份有限公司",
+     "UNDERWRITER_ORG": "中国国际金融股份有限公司",
+     "SECURITY_NAME_FULL": "南通联亚药业股份有限公司",
+     "ISSUE_STATE": "1",
+     "NETFLOWIN": null,
+     "IPO_YIELD": null,
+     "FREEZE_FUND": null,
+     "BOARD_CODE": null,
+     "IS_REGISTRATION": "1",
+     "TRADE_MARKET_CST": "0202",
+     "CURRENT_ONEWORD_NUM": null,
+     "IS_UNOPEN": 0,
+     "CONTINUOUS_ONEWORD_NUM": null,
+     "OD_HIGH_CHANGE": null,
+     "SUSPENSION_STATE": null,
+     "REGISTERED_TYPE": "2",
+     "IS_1YEAR": 1,
+     "IS_CALENDAR_DATA": "1",
+     "SECURITY_NAME_ABBR": "联亚药业",
+     "OFFLINE_VATS_NONUNIT": null,
+     "ONLINE_VASHARES_NONUNIT": null,
+     "ENQUIRY_SHARE_NUM": null,
+     "IS_RISKWARNING": 0,
+     "NETSUMFINA": null,
+     "DEC_SUMFINA": 9.5,
+     "TNEW_PRICE": null,
+     "TCHANGE_RATE": null,
+     "IS_REGISTRATION_NEW": "1",
+     "IS_PROFIT": "0",
+     "STAR_SIGN": "3",
+     "ONLINE_APPLY_LOWER": null,
+     "APPLY_AMT_UPPER": null,
+     "OFFFLINE_INITIAL_MULTIPLE_BJ": null,
+     "IS_1YEAR_APPLY": 1
+    },
+    {
+     "SECUCODE": "301660.SZ",
+     "SECURITY_CODE": "301660",
+     "APPLY_CODE": "301660",
+     "APPLY_DATE": "2026-09-24 00:00:00",
+     "LISTING_DATE": null,
+     "TRADE_MARKET": "深圳证券交易所",
+     "MARKET_TYPE_NEW": "深交所其他",
+     "BALLOT_PAY_DATE": "2026-09-29 00:00:00",
+     "ASSIGN_DATE": "2026-09-28 00:00:00",
+     "ONLINE_ISSUE_DATE": "2026-09-24 00:00:00",
+     "OFFLINE_PLACING__DATE": "2026-09-24 00:00:00",
+     "BALLOT_NUM_DATE": "2026-09-29 00:00:00",
+     "ISSUE_PRICE": null,
+     "PREDICT_ISSUE_PRICE": 0,
+     "PREDICT_ISSUE_PRICE1": 0,
+     "PREDICT_ISSUE_PRICE2": 0,
+     "ISSUE_NUM": 51264.6,
+     "ONLINE_ISSUE_NUM": 51263000,
+     "ONLINE_APPLY_UPPER": 128000,
+     "AFTER_ISSUE_PE": null,
+     "PREDICT_ISSUE_PE": null,
+     "PREDICT_PE": null,
+     "INDUSTRY_PE_RATIO": null,
+     "INDUSTRY_PE": 73.18,
+     "ONLINE_ISSUE_LWR": null,
+     "TOTAL_RAISE_FUNDS": null,
+     "ISSUE_WAY": "战略配售,网下询价配售,网上定价发行,市值申购,保荐机构参与配售,高管员工参与配售",
+     "INDUSTRY_CODE": null,
+     "OFFLINE_VAP_RATIO": null,
+     "OFFLINE_VAS_MULTIPLE": null,
+     "ONLINE_VA_NUM": null,
+     "OFFLINE_VAP_OBJECT": null,
+     "ONLINE_VA_SHARES": null,
+     "OFFLINE_VATS": null,
+     "OFFLINE_PLACING_UPPER": 205060000,
+     "BALLOT_NUM": null,
+     "TOTAL_APPLY_NUM": null,
+     "INITIAL_MULTIPLE": null,
+     "OFFLINE_PLACING_NUM": 205060000,
+     "TOP_APPLY_MARKETCAP": 128,
+     "MZYQ_PAY_FUND": null,
+     "INDUSTRY_NAME": null,
+     "MARKET_CAP_CONFIRMDATE": "T-2日(T:申购日)",
+     "OPEN_PRICE": null,
+     "CLOSE_PRICE": null,
+     "TURNOVERRATE": null,
+     "LD_CLOSE_CHANGE": null,
+     "LD_OPEN_PREMIUM": null,
+     "LD_HIGH_CHANG": null,
+     "OPEN_AVERAGE_PRICE": null,
+     "OPEN_DATE": null,
+     "BVPS": 0.7121,
+     "SECURITY_NAME": "粤芯半导体",
+     "TOTAL_CHANGE": null,
+     "PROFIT": null,
+     "CONTINUOUS_1WORD_NUM": "待上市",
+     "MARKET_TYPE": "非科创板",
+     "LIMIT_UP_PRICE": null,
+     "ORG_TYPE": "非银行股",
+     "TRADE_MARKET_CODE": "069001002002",
+     "CHANGE_RATE": null,
+     "LATELY_PRICE": null,
+     "CHANGE": null,
+     "IS_BALLOT_NUM": 0,
+     "PE_TTM": null,
+     "OPEN_CHANGERATE": null,
+     "SECURITY_TYPE_CODE": "058001001",
+     "CONTINUOUS_N1WORD_NUM": "待上市",
+     "SECURITY_INNER_CODE": "1004514694",
+     "KB_TRADE_DATE": null,
+     "AVERAGE_PRICE": null,
+     "PREDICT_PE_THREE": 22.99,
+     "MARKET": "深交所创业板",
+     "ONLINE_APPLY_PRICE": null,
+     "ONLINE_FUND_UPPER": null,
+     "FREECAP_AVG_LOWER": 10000000,
+     "OFFLINE_EP_OBJECT": null,
+     "INFO_CODE": "AN202606181823663675",
+     "START_DATE": "2026-09-29 00:00:00",
+     "MAIN_BUSINESS": "特色工艺晶圆代工为核心商业模式,服务芯片设计公司和终端客户,主要客户涵盖境内外多家一流半导体行业设计公司。公司具备集成电路、功率器件等产品的工艺研发与制造能力,产品应用领域覆盖消费电子、工业控制、汽车电子和人工智能等",
+     "EACHBALLOT_SHARES": "500",
+     "UP_DATE": "2026-09-18 00:00:00",
+     "PREDICT_ONAPPLY_UPPER": 51000,
+     "PREDICT_ONFUND_UPPER": 510000,
+     "PAR_VALUE": 1,
+     "ORIG_TRANSFER_NUM": null,
+     "FREECAP_AVG_DATE": "2026-09-16 00:00:00",
+     "PAGE_PREDICT_PRICE1": null,
+     "PAGE_PREDICT_PRICE2": null,
+     "PAGE_PREDICT_PRICE3": null,
+     "PAGE_PREDICT_PE1": null,
+     "PAGE_PREDICT_PE2": null,
+     "PAGE_PREDICT_PE3": null,
+     "LD_AVERAGE_PRICE": null,
+     "IS_VALID": "1",
+     "APPLY_DATE_NUM": 6,
+     "INDUSTRY_PE_NEW": 73.18,
+     "CONTINUOUS_1WORD_PX": null,
+     "TOTAL_ISSUE_NUM": 51264.6,
+     "ONLINE_ES_MULTIPLE": null,
+     "ISSUE_WAY_EXPLAIN": "本次发行采用向参与战略配售的投资者定向配售、网下向符合条件的投资者询价配售与网上向持有深圳市场非限售A股股份和非限售存托凭证市值的社会公众投资者定价发行相结合的方式进行",
+     "PRICE_WAY": null,
+     "RESULT_NOTICE_DATE": null,
+     "SELECT_LISTING_DATE": null,
+     "ONLINE_PAY_DATE": null,
+     "ONLINE_REFUND_DATE": null,
+     "IS_BEIJING": 0,
+     "PER_SHARES_INCOME": null,
+     "ONLINE_ISSUE_RATIO": null,
+     "OFFFLINE_INITIAL_MULTIPLE": null,
+     "NEWEST_PRICE": "-",
+     "ORG_CODE": "10000205589",
+     "TYPE": "001",
+     "AMPLITUDE": null,
+     "REVIEW_DATE": "2026-06-15 00:00:00",
+     "PREDICT_RAISE_FUNDS": 75,
+     "TOTAL_SHARES": 2878237397,
+     "RECOMMEND_ORG": "广发证券股份有限公司",
+     "UNDERWRITER_ORG": "广发证券股份有限公司,国泰海通证券股份有限公司",
+     "SECURITY_NAME_FULL": "粤芯半导体技术股份有限公司",
+     "ISSUE_STATE": "1",
+     "NETFLOWIN": null,
+     "IPO_YIELD": null,
+     "FREEZE_FUND": null,
+     "BOARD_CODE": "1036",
+     "IS_REGISTRATION": "1",
+     "TRADE_MARKET_CST": "0202",
+     "CURRENT_ONEWORD_NUM": null,
+     "IS_UNOPEN": 0,
+     "CONTINUOUS_ONEWORD_NUM": null,
+     "OD_HIGH_CHANGE": null,
+     "SUSPENSION_STATE": null,
+     "REGISTERED_TYPE": "2",
+     "IS_1YEAR": 1,
+     "IS_CALENDAR_DATA": "1",
+     "SECURITY_NAME_ABBR": "粤芯半导体",
+     "OFFLINE_VATS_NONUNIT": null,
+     "ONLINE_VASHARES_NONUNIT": null,
+     "ENQUIRY_SHARE_NUM": null,
+     "IS_RISKWARNING": 0,
+     "NETSUMFINA": null,
+     "DEC_SUMFINA": 75,
+     "TNEW_PRICE": null,
+     "TCHANGE_RATE": null,
+     "IS_REGISTRATION_NEW": "1",
+     "IS_PROFIT": "1",
+     "STAR_SIGN": "3",
+     "ONLINE_APPLY_LOWER": null,
+     "APPLY_AMT_UPPER": null,
+     "OFFFLINE_INITIAL_MULTIPLE_BJ": null,
+     "IS_1YEAR_APPLY": 1
+    }
+   ],
+   "count": 5635
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "dc_margin_market": {
+  "version": "cb798e8746abf00a242979280869cc57",
+  "result": {
+   "pages": 1334,
+   "data": [
+    {
+     "DIM_DATE": "2026-09-17 00:00:00",
+     "NEW": 4460.1557,
+     "ZDF": -0.448915,
+     "LTSZ": 98255646605950.81,
+     "ZDF3D": -0.444778,
+     "ZDF5D": -1.939897,
+     "ZDF10D": -2.030118,
+     "RZYE": 2609863623661,
+     "RZYEZB": 2.656197,
+     "RZMRE": 162132099285,
+     "RZMRE3D": 466622386418,
+     "RZMRE5D": 756745098704,
+     "RZMRE10D": 1561341805193,
+     "RZCHE": 159807964998,
+     "RZCHE3D": 454414455587,
+     "RZCHE5D": 764070460407,
+     "RZCHE10D": 1579001915091,
+     "RZJME": 2324134306,
+     "RZJME3D": 12148766163,
+     "RZJME5D": -7384526358,
+     "RZJME10D": -17719274671,
+     "RQYE": 29234374391,
+     "RQYL": 4316846031,
+     "RQCHL": 76716623,
+     "RQCHL3D": 258783483,
+     "RQCHL5D": 420147876,
+     "RQCHL10D": 872887490,
+     "RQMCL": 79294834,
+     "RQMCL3D": 233425411,
+     "RQMCL5D": 445555864,
+     "RQMCL10D": 856659606,
+     "RQJMG": 2578211,
+     "RQJMG3D": -25358072,
+     "RQJMG5D": 25407988,
+     "RQJMG10D": -16227884,
+     "RZRQYE": 2639097998052,
+     "RZRQYECZ": 2580629249270
+    },
+    {
+     "DIM_DATE": "2026-09-16 00:00:00",
+     "NEW": 4480.2683,
+     "ZDF": 0.679277,
+     "LTSZ": 98575313489467.72,
+     "ZDF3D": -0.662662,
+     "ZDF5D": -2.019228,
+     "ZDF10D": -1.488308,
+     "RZYE": 2607539489374,
+     "RZYEZB": 2.645226,
+     "RZMRE": 169491288649,
+     "RZMRE3D": 434740831106,
+     "RZMRE5D": 730923835745,
+     "RZMRE10D": 1548591461848,
+     "RZCHE": 160239216373,
+     "RZCHE3D": 429796040279,
+     "RZCHE5D": 742787378617,
+     "RZCHE10D": 1572613413242,
+     "RZJME": 9252072324,
+     "RZJME3D": 4885626171,
+     "RZJME5D": -11922707587,
+     "RZJME10D": -24081116227,
+     "RQYE": 29261418839,
+     "RQYL": 4314267820,
+     "RQCHL": 107135735,
+     "RQCHL3D": 258926957,
+     "RQCHL5D": 405249109,
+     "RQCHL10D": 911182816,
+     "RQMCL": 73889256,
+     "RQMCL3D": 249067088,
+     "RQMCL5D": 444633050,
+     "RQMCL10D": 858775242,
+     "RQJMG": -33246479,
+     "RQJMG3D": -9859869,
+     "RQJMG5D": 39383941,
+     "RQJMG10D": -52407574,
+     "RZRQYE": 2636800908213,
+     "RZRQYECZ": 2578278070535
+    }
+   ],
+   "count": 4002
+  },
+  "success": true,
+  "message": "ok",
+  "code": 0
+ },
+ "em_fast": {
+  "req_trace": "1789738621137",
+  "code": "1",
+  "message": "success",
+  "data": {
+   "sortEnd": "1789735749005123",
+   "index": 1,
+   "total": 5000,
+   "size": 20,
+   "fastNewsList": [
+    {
+     "summary": "美联储鲍曼表示，美联储将在\"未来几周\"敲定改革方案，使银行压力测试更加透明和可问责。",
+     "code": "202609183878850788",
+     "titleColor": 0,
+     "realSort": "1789738420050788",
+     "showTime": "2026-09-18 21:33:40",
+     "title": "美联储鲍曼：美联储将在“未来几周”敲定改革方案",
+     "share": 0,
+     "pinglun_Num": 0,
+     "stockList": [
+      "0.161121",
+      "1.515290"
+     ],
+     "image": []
+    },
+    {
+     "summary": "英国国债扩大跌势；2年期收益率上升10个基点至4.84%。",
+     "code": "202609183878852661",
+     "titleColor": 0,
+     "realSort": "1789738404052661",
+     "showTime": "2026-09-18 21:33:24",
+     "title": "英国国债扩大跌势；2年期收益率上升10个基点至4.84%",
+     "share": 0,
+     "pinglun_Num": 0,
+     "stockList": [],
+     "image": []
+    }
+   ]
+  }
+ },
+ "irm_search": {
+  "pageNo": 1,
+  "pageSize": 10,
+  "totalRecord": 59145,
+  "totalPage": 5915,
+  "results": [
+   {
+    "esId": "11_2361402871604994048",
+    "indexId": "2361402871604994048",
+    "contentType": 11,
+    "trade": [
+     "信息传输、软件和信息技术服务业"
+    ],
+    "mainContent": "请问本月20日股东人数。",
+    "stockCode": "300188",
+    "secid": "9900017110",
+    "companyShortName": "国投智能",
+    "companyLogo": "S300188/images/300188.gif",
+    "boardType": [
+     "012015"
+    ],
+    "pubDate": "1789639476000",
+    "updateDate": "1789737303000",
+    "author": "89240806853967872",
+    "authorName": "irm1270858",
+    "pubClient": "1",
+    "attachedId": "2362243044517502976",
+    "attachedContent": "您好，截至 2026 年 9 月 18 日收盘，公司的股东总户数为 42,617 户，感谢您的关注与支持。",
+    "attachedAuthor": "国投智能",
+    "attachedPubDate": "1789737285000",
+    "score": 0.0,
+    "topStatus": 0,
+    "praiseCount": 0,
+    "praiseStatus": false,
+    "favoriteStatus": false,
+    "attentionCompany": false,
+    "isCheck": "1",
+    "qaStatus": 2,
+    "packageDate": "22分钟前",
+    "remindStatus": false,
+    "interviewLive": false
+   },
+   {
+    "esId": "11_2361163863998279680",
+    "indexId": "2361163863998279680",
+    "contentType": 11,
+    "trade": [
+     "制造业"
+    ],
+    "mainContent": "咱们跟运宏的进展是不是太慢了？参考下同行：金洲管道刚给液冷子公司增资了6.8亿元，挺猛的，东莞骅兴那边液冷产品线扩建提前了，这个月（2026年9月）就投产试生产了，一期目标产值10亿元，2027年底产能要冲到20亿元，长期规划是投30-40亿元搞3年10倍增长。",
+    "stockCode": "300976",
+    "secid": "gfbj0836633",
+    "companyShortName": "达瑞电子",
+    "companyLogo": "S300976/images/300976.gif",
+    "boardType": [
+     "012015"
+    ],
+    "pubDate": "1789611652000",
+    "updateDate": "1789736283000",
+    "author": "91966161171775488",
+    "authorName": "irm1332837",
+    "pubClient": "6",
+    "attachedId": "2362234410291060736",
+    "attachedContent": "尊敬的投资者，您好！公司正有序推进东莞运宏股权收购交割及投后整合管理工作。在此基础上，公司正充分发挥自身大客户开发与服务优势，重点推动核心客户的拓展。公司将结合公司实际情况和客户订单需求，统筹规划液冷新产能扩建。感谢您的建议和关注。",
+    "attachedAuthor": "达瑞电子",
+    "attachedPubDate": "1789736279000",
+    "score": 0.0,
+    "topStatus": 0,
+    "praiseCount": 0,
+    "praiseStatus": false,
+    "favoriteStatus": false,
+    "attentionCompany": false,
+    "isCheck": "1",
+    "qaStatus": 2,
+    "packageDate": "39分钟前",
+    "remindStatus": false,
+    "interviewLive": false
+   }
+  ],
+  "count": true
+ },
+ "ttfund_lsjz": {
+  "Data": {
+   "LSJZList": [
+    {
+     "FSRQ": "2026-09-18",
+     "DWJZ": "0.5283",
+     "LJJZ": "2.2444",
+     "SDATE": null,
+     "ACTUALSYI": "",
+     "NAVTYPE": "1",
+     "JZZZL": "0.27",
+     "SGZT": "限制大额申购",
+     "SHZT": "开放赎回",
+     "FHFCZ": "",
+     "FHFCZ10": "",
+     "FHFCBZ": "",
+     "DTYPE": null,
+     "FHSP": ""
+    },
+    {
+     "FSRQ": "2026-09-17",
+     "DWJZ": "0.5269",
+     "LJJZ": "2.2430",
+     "SDATE": null,
+     "ACTUALSYI": "",
+     "NAVTYPE": "1",
+     "JZZZL": "-0.19",
+     "SGZT": "限制大额申购",
+     "SHZT": "开放赎回",
+     "FHFCZ": "",
+     "FHFCZ10": "",
+     "FHFCBZ": "",
+     "DTYPE": null,
+     "FHSP": ""
+    }
+   ],
+   "FundType": "001",
+   "SYType": null,
+   "isNewType": false,
+   "Feature": "020,050,051,054"
+  },
+  "ErrCode": 0,
+  "ErrMsg": null,
+  "TotalCount": 2757,
+  "Expansion": null,
+  "PageSize": 3,
+  "PageIndex": 1
+ },
+ "em_changes": {
+  "rc": 0,
+  "rt": 105,
+  "svr": 183632177,
+  "lt": 2,
+  "full": 0,
+  "data": {
+   "tc": 2391,
+   "allstock": [
+    {
+     "tm": 145542,
+     "c": "603950",
+     "m": 1,
+     "n": "长源东谷",
+     "t": 8201,
+     "i": "0.096623,60.72000,0.096623"
+    },
+    {
+     "tm": 145525,
+     "c": "301008",
+     "m": 0,
+     "n": "宏昌科技",
+     "t": 8201,
+     "i": "0.068059,45.51000,0.068059"
+    },
+    {
+     "tm": 145234,
+     "c": "301008",
+     "m": 0,
+     "n": "宏昌科技",
+     "t": 8201,
+     "i": "0.060784,45.20000,0.060784"
+    }
+   ]
+  }
+ },
+ "cls_roll": {
+  "errno": 0,
+  "data": {
+   "roll_data": [
+    {
+     "author_extends": "",
+     "assocFastFact": {
+      "fid": 0,
+      "fast_fact_content": "",
+      "article_id": 0,
+      "article_title": "",
+      "imgs": "",
+      "slogan": ""
+     },
+     "depth_extends": "null",
+     "deny_comment": 0,
+     "level": "C",
+     "reading_num": 33961,
+     "content": "【宁德时代：9月18日斥资4.56亿元回购151.26万股A股】财联社9月18日电，宁德时代发布公告，于2026年9月18日斥资人民币4.56亿元回购151.26万股A股。",
+     "in_roll": 1,
+     "recommend": 0,
+     "confirmed": 0,
+     "jpush": 0,
+     "img": "",
+     "user_id": 183,
+     "is_top": 0,
+     "brief": "【宁德时代：9月18日斥资4.56亿元回购151.26万股A股】财联社9月18日电，宁德时代发布公告，于2026年9月18日斥资人民币4.56亿元回购151.26万股A股。",
+     "id": 2487501,
+     "ctime": 1789736171,
+     "type": -1,
+     "title": "宁德时代：9月18日斥资4.56亿元回购151.26万股A股",
+     "bold": 0,
+     "sort_score": 1789736171,
+     "comment_num": 0,
+     "modified_time": 1789736849,
+     "status": 1,
+     "collection": 0,
+     "has_img": 0,
+     "category": "",
+     "shareurl": "https://api3.cls.cn/share/article/2487501?os=web&sv=8.4.6&app=CailianpressWeb",
+     "share_img": "https://img.cls.cn/share/roll.png",
+     "share_num": 26,
+     "sub_titles": [],
+     "tags": [],
+     "imgs": [],
+     "images": [],
+     "explain_num": -1,
+     "stock_list": [
+      {
+       "rise_range_has_null": -0.0077,
+       "RiseRange": -0.77,
+       "name": "宁德时代",
+       "StockID": "sz300750",
+       "schema": "cailianshe://stock_detail?stock_id=sz300750",
+       "status": "L",
+       "last": 301.95,
+       "is_stib": false
+      }
+     ],
+     "is_ad": 0,
+     "ad": {
+      "id": 0,
+      "title": "",
+      "img": "",
+      "url": "",
+      "monitorUrl": "",
+      "video_url": "",
+      "adTag": "",
+      "fullScreen": 0,
+      "type": 0
+     },
+     "subjects": [],
+     "audio_url": [
+      "https://image.cls.cn/admin/20260918/210729YbHorgQRdWHZ.mp3"
+     ],
+     "author": "",
+     "plate_list": [],
+     "assocArticleUrl": "",
+     "assocVideoTitle": "",
+     "assocVideoUrl": "",
+     "assocCreditRating": [],
+     "invest_calendar": {
+      "id": 0,
+      "data_id": 0,
+      "r_id": "",
+      "type": 0,
+      "calendar_time": "",
+      "setting_time": "",
+      "event": null,
+      "economic": null,
+      "short_latents": null
+     },
+     "share_content": "",
+     "gray_share": 0,
+     "comment_recommand": null,
+     "timeline": null,
+     "is_fad": 0,
+     "disclaimer": ""
+    },
+    {
+     "author_extends": "",
+     "assocFastFact": {
+      "fid": 0,
+      "fast_fact_content": "",
+      "article_id": 0,
+      "article_title": "",
+      "imgs": "",
+      "slogan": ""
+     },
+     "depth_extends": "null",
+     "deny_comment": 0,
+     "level": "B",
+     "reading_num": 7423,
+     "content": "【美股三大股指开盘涨跌不一】财联社9月18日电，美股三大股指开盘涨跌不一，道琼斯指数跌0.14%，标普500指数涨0.12%，纳斯达克综合指数涨0.42%。谷歌开盘上涨2.8%。奈飞下跌超过6%，富国银行将该股评级从'中性'下调至'减持'，目标价从80美元下调至57美元。",
+     "in_roll": 1,
+     "recommend": 1,
+     "confirmed": 0,
+     "jpush": 0,
+     "img": "",
+     "user_id": 87,
+     "is_top": 0,
+     "brief": "【美股三大股指开盘涨跌不一】美股三大股指开盘涨跌不一，道琼斯指数跌0.14%，标普500指数涨0.12%，纳斯达克综合指数涨0.42%。谷歌开盘上涨2.8%。奈飞下跌超过6%，富国银行将该股评级从'中性'下调至'减持'，目标价从80美元下调至57美元。",
+     "id": 2487526,
+     "ctime": 1789738244,
+     "type": -1,
+     "title": "美股三大股指开盘涨跌不一",
+     "bold": 0,
+     "sort_score": 1789738244,
+     "comment_num": 0,
+     "modified_time": 1789738256,
+     "status": 1,
+     "collection": 0,
+     "has_img": 0,
+     "category": "",
+     "shareurl": "https://api3.cls.cn/share/article/2487526?os=web&sv=8.4.6&app=CailianpressWeb",
+     "share_img": "https://img.cls.cn/share/roll.png",
+     "share_num": 19,
+     "sub_titles": [],
+     "tags": [],
+     "imgs": [],
+     "images": [],
+     "explain_num": -1,
+     "stock_list": [],
+     "is_ad": 0,
+     "ad": {
+      "id": 0,
+      "title": "",
+      "img": "",
+      "url": "",
+      "monitorUrl": "",
+      "video_url": "",
+      "adTag": "",
+      "fullScreen": 0,
+      "type": 0
+     },
+     "subjects": [
+      {
+       "article_id": 2487526,
+       "subject_id": 1556,
+       "subject_name": "环球市场情报",
+       "subject_img": "",
+       "subject_description": "",
+       "category_id": 0,
+       "attention_num": 170176,
+       "is_attention": false,
+       "is_reporter_subject": false,
+       "plate_id": 0,
+       "channel": "cls"
+      },
+      {
+       "article_id": 2487526,
+       "subject_id": 1098,
+       "subject_name": "美股动态",
+       "subject_img": "",
+       "subject_description": "",
+       "category_id": 0,
+       "attention_num": 68795,
+       "is_attention": false,
+       "is_reporter_subject": false,
+       "plate_id": 0,
+       "channel": "cls"
+      }
+     ],
+     "audio_url": [
+      "https://image.cls.cn/admin/20260918/213056L5ninu0nj1j0.mp3"
+     ],
+     "author": "",
+     "plate_list": [],
+     "assocArticleUrl": "",
+     "assocVideoTitle": "",
+     "assocVideoUrl": "",
+     "assocCreditRating": [],
+     "invest_calendar": {
+      "id": 0,
+      "data_id": 0,
+      "r_id": "",
+      "type": 0,
+      "calendar_time": "",
+      "setting_time": "",
+      "event": null,
+      "economic": null,
+      "short_latents": null
+     },
+     "share_content": "",
+     "gray_share": 0,
+     "comment_recommand": null,
+     "timeline": null,
+     "is_fad": 0,
+     "disclaimer": ""
+    },
+    {
+     "author_extends": "",
+     "assocFastFact": {
+      "fid": 0,
+      "fast_fact_content": "",
+      "article_id": 0,
+      "article_title": "",
+      "imgs": "",
+      "slogan": ""
+     },
+     "depth_extends": "null",
+     "deny_comment": 0,
+     "level": "C",
+     "reading_num": 3653,
+     "content": "【美股加密货币概念股盘初普涨】财联社9月18日电，美股加密货币概念股盘初普涨，Circle、Strategy涨超5%，Coinbase、MARA Holdings、Bitmine、Cipher涨超4%，Robinhood涨超2%。",
+     "in_roll": 1,
+     "recommend": 0,
+     "confirmed": 0,
+     "jpush": 0,
+     "img": "",
+     "user_id": 639,
+     "is_top": 0,
+     "brief": "【美股加密货币概念股盘初普涨】财联社9月18日电，美股加密货币概念股盘初普涨，Circle、Strategy涨超5%，Coinbase、MARA Holdings、Bitmine、Cipher涨超4%，Robinhood涨超2%。",
+     "id": 2487533,
+     "ctime": 1789738612,
+     "type": -1,
+     "title": "美股加密货币概念股盘初普涨",
+     "bold": 0,
+     "sort_score": 1789738612,
+     "comment_num": 0,
+     "modified_time": 1789738612,
+     "status": 1,
+     "collection": 0,
+     "has_img": 0,
+     "category": "",
+     "shareurl": "https://api3.cls.cn/share/article/2487533?os=web&sv=8.4.6&app=CailianpressWeb",
+     "share_img": "https://img.cls.cn/share/roll.png",
+     "share_num": 0,
+     "sub_titles": [],
+     "tags": [],
+     "imgs": [],
+     "images": [],
+     "explain_num": -1,
+     "stock_list": [],
+     "is_ad": 0,
+     "ad": {
+      "id": 0,
+      "title": "",
+      "img": "",
+      "url": "",
+      "monitorUrl": "",
+      "video_url": "",
+      "adTag": "",
+      "fullScreen": 0,
+      "type": 0
+     },
+     "subjects": [
+      {
+       "article_id": 2487533,
+       "subject_id": 1098,
+       "subject_name": "美股动态",
+       "subject_img": "",
+       "subject_description": "",
+       "category_id": 0,
+       "attention_num": 68795,
+       "is_attention": false,
+       "is_reporter_subject": false,
+       "plate_id": 0,
+       "channel": "cls"
+      }
+     ],
+     "audio_url": [
+      "https://image.cls.cn/admin/20260918/213652W4gYOGmupOoz.mp3"
+     ],
+     "author": "",
+     "plate_list": [],
+     "assocArticleUrl": "",
+     "assocVideoTitle": "",
+     "assocVideoUrl": "",
+     "assocCreditRating": [],
+     "invest_calendar": {
+      "id": 0,
+      "data_id": 0,
+      "r_id": "",
+      "type": 0,
+      "calendar_time": "",
+      "setting_time": "",
+      "event": null,
+      "economic": null,
+      "short_latents": null
+     },
+     "share_content": "",
+     "gray_share": 0,
+     "comment_recommand": null,
+     "timeline": null,
+     "is_fad": 0,
+     "disclaimer": ""
+    }
+   ]
+  }
+ },
+ "jin10": {
+  "status": 200,
+  "data": [
+   {
+    "channel": [
+     1,
+     3
+    ],
+    "data": {
+     "content": "美股开盘，道指跌0.1%，标普500指数跌0.1%，纳指涨0.3%。明星科技股涨跌不一，谷歌(GOOG.O)涨2.5%，英特尔(INTC.O)涨1.3%，SK海力士(SKHY.O)涨0.4%，奈飞(NFLX.O)跌6%。康宁(GLW.N)上涨3.2%，公司宣布对以日元计价的显示玻璃基板产品实施15%及以上的价格调整。运动品牌昂跑涨3%，昂跑从耐克签下法国足球巨星姆巴佩。",
+     "exclusive_to": [],
+     "pic": "",
+     "source": "",
+     "source_link": "",
+     "title": ""
+    },
+    "extras": {
+     "ad": false
+    },
+    "id": "20260918213101143800",
+    "important": 1,
+    "kinds": [
+     {
+      "cids": [
+       17958
+      ],
+      "id": 17952
+     },
+     {
+      "cids": [
+       17536,
+       17537,
+       17538
+      ],
+      "id": 17535
+     },
+     {
+      "cids": [
+       17538,
+       18662,
+       2253
+      ],
+      "id": 16
+     }
+    ],
+    "remark": [],
+    "tags": [],
+    "time": "2026-09-18 21:31:01",
+    "type": 0,
+    "voice_status": "ready",
+    "voices": null
+   },
+   {
+    "channel": [
+     1
+    ],
+    "data": {
+     "content": "法国5年期信用违约掉期（CDS）飙升至41.5个基点，为2025年4月以来最高水平。",
+     "exclusive_to": [],
+     "pic": "",
+     "source": "",
+     "source_link": "",
+     "title": ""
+    },
+    "extras": {
+     "ad": false
+    },
+    "id": "20260918213638634800",
+    "important": 0,
+    "kinds": [
+     {
+      "cids": [
+       16273
+      ],
+      "id": 29
+     },
+     {
+      "cids": [
+       17953,
+       17958
+      ],
+      "id": 17952
+     }
+    ],
+    "remark": [],
+    "tags": [],
+    "time": "2026-09-18 21:36:38",
+    "type": 0,
+    "voice_status": "ready",
+    "voices": null
+   }
+  ]
+ },
+ "ths_news": {
+  "code": "200",
+  "data": {
+   "list": [
+    {
+     "id": "5206267",
+     "seq": "680077033",
+     "title": "美股开盘：美股三大指数涨跌不一",
+     "digest": "美股三大指数涨跌不一，标普500指数涨0.13%，道指跌0.1%，纳指涨0.4%。大型科技股方面，谷歌A涨2.78%。中概股方面，哔哩哔哩涨2.74%，阿里巴巴涨2.67%，理想汽车涨2.26%，蔚来涨2.21%，小鹏集团涨2.08%，携程涨1.36%。",
+     "url": "https://news.10jqka.com.cn/20260918/c680077033.shtml",
+     "appUrl": "https://news.10jqka.com.cn/m680077033/",
+     "shareUrl": "https://news.10jqka.com.cn/tapp/news/share/680077033/",
+     "color": "2",
+     "tag": "美股,A股",
+     "tags": [
+      {
+       "id": "21107",
+       "name": "美股"
+      },
+      {
+       "id": "21103",
+       "name": "A股"
+      }
+     ],
+     "ctime": "1789738240",
+     "rtime": "1789738240",
+     "source": "",
+     "picUrl": "",
+     "nature": "0",
+     "stock": [
+      {
+       "name": "理想汽车",
+       "stockCode": "LI",
+       "stockMarket": "185"
+      },
+      {
+       "name": "携程",
+       "stockCode": "TCOM",
+       "stockMarket": "185"
+      },
+      {
+       "name": "谷歌A",
+       "stockCode": "GOOGL",
+       "stockMarket": "185"
+      },
+      {
+       "name": "蔚来",
+       "stockCode": "NIO",
+       "stockMarket": "169"
+      },
+      {
+       "name": "小鹏集团",
+       "stockCode": "XPEV",
+       "stockMarket": "169"
+      },
+      {
+       "name": "哔哩哔哩",
+       "stockCode": "BILI",
+       "stockMarket": "185"
+      }
+     ],
+     "field": [],
+     "short": "美股三大指数涨跌不一，标普500指数涨0.13%，道指跌0.1%，纳指涨0.4%。大型科技股方面，谷歌A涨2.78%。中概股方面，哔哩哔哩涨2.74%，阿里巴巴涨2.67%，理想汽车涨2.26%，蔚来涨2.21%，小鹏集团涨2.08%，携程涨1.36%。",
+     "import": "3",
+     "tagInfo": []
+    },
+    {
+     "id": "5206187",
+     "seq": "680076877",
+     "title": "芝诺机器人完成数亿元种子轮融资",
+     "digest": "近日，杭州芝诺未来技术有限责任公司（芝诺机器人）完成数亿元种子轮融资，本轮投资方为舜宇光学、沐曦股份、中网银新、赛意产业基金、和利资本。芝诺机器人成立于2025年，是一家以基础模型为核心的物理智能公司，致力于打造可靠灵巧的机器人系统，已发布协作智能基础模型Zeno-1。根据财联社创投通—执中数据，以2026年9月为预测基准时间，后续2年的融资预测概率为82.37%。（科创板日报）",
+     "url": "https://news.10jqka.com.cn/20260918/c680076877.shtml",
+     "appUrl": "https://news.10jqka.com.cn/m680076877/",
+     "shareUrl": "https://news.10jqka.com.cn/tapp/news/share/680076877/",
+     "color": "1",
+     "tag": "美股,港股,A股",
+     "tags": [
+      {
+       "id": "21107",
+       "name": "美股"
+      },
+      {
+       "id": "21105",
+       "name": "港股"
+      },
+      {
+       "id": "21103",
+       "name": "A股"
+      }
+     ],
+     "ctime": "1789737587",
+     "rtime": "1789737587",
+     "source": "",
+     "picUrl": "",
+     "nature": "0",
+     "stock": [],
+     "field": [],
+     "short": "近日，杭州芝诺未来技术有限责任公司（芝诺机器人）完成数亿元种子轮融资，本轮投资方为舜宇光学、沐曦股份、中网银新、赛意产业基金、和利资本。芝诺机器人成立于2025年，是一家以基础模型为核心的物理智能公司，致力于打造可靠灵巧的机器人系统，已发布协作智能基础模型Zeno-1。根据财联社创投通—执中数据，以2026年9月为预测基准时间，后续2年的融资预测概率为82.37%。（科创板日报）",
+     "import": "0",
+     "tagInfo": [
+      {
+       "id": "50000544",
+       "name": "机器人概念",
+       "score": "0.804",
+       "type": "0"
+      },
+      {
+       "id": "50013508",
+       "name": "融资",
+       "score": "0.804",
+       "type": "1"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "fy_lhb": {
+  "timestamp": 1789574400000,
+  "board_type": "all",
+  "trade_date": "2026-09-17",
+  "count": 58,
+  "stock_count": 53,
+  "stock_items": [
+   {
+    "thscode": "601086.SH",
+    "ticker": "601086",
+    "name": "国芳集团",
+    "concept_list": [
+     {
+      "name": "参股券商"
+     },
+     {
+      "name": "西部大开发"
+     }
+    ],
+    "change": 0.002059,
+    "net_value": 12599059.02,
+    "net_rate": 0.00763129,
+    "hot_rank": 1,
+    "buy_value": 112179750.0,
+    "sell_value": 99580690.98,
+    "range_days": 1,
+    "hot_money_net_value": -2185780.98
+   },
+   {
+    "thscode": "600127.SH",
+    "ticker": "600127",
+    "name": "金健米业",
+    "concept_list": [
+     {
+      "name": "乳业"
+     },
+     {
+      "name": "玉米"
+     }
+    ],
+    "change": 0.099662,
+    "net_value": 215363530.68,
+    "net_rate": 0.09073764,
+    "hot_rank": 2,
+    "buy_value": 465896012.93,
+    "sell_value": 250532482.25,
+    "limit_reason": "粮油食品+粮食储备+健康食品",
+    "range_days": 1,
+    "hot_money_net_value": -17657808.15
+   }
+  ],
+  "hot_money_items": []
+ },
+ "fy_bench": {
+  "timestamp": 1789738639957,
+  "item": [
+   {
+    "thscode": "600127.SH",
+    "ticker": "600127",
+    "name": "金健米业",
+    "auction_pct": -0.9217,
+    "tags": [
+     "粮油加工",
+     "玉米"
+    ]
+   },
+   {
+    "thscode": "000981.SZ",
+    "ticker": "000981",
+    "name": "山子高科",
+    "auction_pct": 2.99,
+    "tags": [
+     "底盘与发动机系统",
+     "汽车拆解概念"
+    ]
+   }
+  ],
+  "date": "2026-09-18",
+  "date_ms": 1789660800000
+ },
+ "fy_anomaly": {
+  "timestamp": 1789714815499,
+  "item": [
+   {
+    "stock_name": "*ST英飞",
+    "analysis_content": "1、据同花顺iFinD数据，公司此前20个交易日累计上涨40.23%，短线获利回吐压力增加。 \n2、据2026年9月17日消息，公司签署重整投资协议并引入重整投资人，相关预期阶段性落地，叠加昨日涨停，今日出现利好兑现。 \n3、据2026年5月20日业绩说明会，公司2025年实现营业收入4.95亿元，归母净利润亏损2.90亿元，盈利修复仍需时间。\n\n（免责声明：本内容由AI技术搜集公开信息总结生成，仅供参考，不构成投资建议，以上市公司公告为准）",
+    "keyword_list": [
+     "此前涨幅较大",
+     "重整投资协议签署"
+    ],
+    "thscode": "002528.SZ",
+    "tag_name": "跌停"
+   },
+   {
+    "stock_name": "内蒙新华",
+    "analysis_content": "1、据2026年9月9日投资者关系活动记录表，公司明确以教育服务、文化消费和现代物流为核心，向综合文化服务商转型，提供阅读空间设计、阅读活动策划及阅读课程开发等服务。\n2、据2026年4月10日年度报告，公司以出版物发行为核心主业，服务教育事业、文化产业和广大消费者。\n3、据2026年8月26日公告，公司上半年教材销售码洋同比增长12.18%，教材营业收入同比增长7.88%。\n\n（免责声明：本内容由AI技术搜集公开信息总结生成，仅供参考，不构成投资建议，以上市公司公告为准）",
+    "keyword_list": [
+     "出版发行",
+     "教育服务"
+    ],
+    "thscode": "603230.SH",
+    "tag_name": "涨停"
+   }
+  ]
+ },
+ "fy_hot_hour": {
+  "timestamp": 1789738612008,
+  "item": [
+   {
+    "thscode": "601091.SH",
+    "ticker": "601091",
+    "name": "沈鼓集团",
+    "rank": 1,
+    "heat": "624884.0",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "000993.SZ",
+    "ticker": "000993",
+    "name": "闽东电力",
+    "rank": 2,
+    "heat": "382502.0",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   }
+  ]
+ },
+ "fy_index_snap": {
+  "timestamp": 1789738642000,
+  "total": 2,
+  "item": [
+   {
+    "thscode": "885431.TI",
+    "ticker": "885431",
+    "volume": 22202505000,
+    "turnover": 519951330000,
+    "last_price": 4574.466,
+    "price_change": 68.04,
+    "price_change_ratio_pct": 1.509844,
+    "open_price": 4542.189,
+    "high_price": 4579.697,
+    "low_price": 4536.843,
+    "prev_price": 4506.426
+   },
+   {
+    "thscode": "881101.TI",
+    "ticker": "881101",
+    "volume": 2060928700,
+    "turnover": 16018515000,
+    "last_price": 4786.427,
+    "price_change": 0.609,
+    "price_change_ratio_pct": 0.012725,
+    "open_price": 4660.593,
+    "high_price": 4832.258,
+    "low_price": 4660.593,
+    "prev_price": 4785.818
+   }
+  ]
+ },
+ "fy_val": {
+  "timestamp": 1789738643000,
+  "total": 1,
+  "item": [
+   {
+    "thscode": "600519.SH",
+    "ticker": "600519",
+    "name": "贵州茅台",
+    "pe_ttm": 19.297871,
+    "pe_mrq": 17.650637,
+    "pb_mrq": 6.254647,
+    "ps_ttm": 9.071325,
+    "pcf_ttm": 13.195492
+   }
+  ]
+ },
+ "fy_constituents": {
+  "timestamp": 1789738642255,
+  "item": [
+   {
+    "thscode": "000009.SZ",
+    "ticker": "000009",
+    "name": "中国宝安"
+   },
+   {
+    "thscode": "000021.SZ",
+    "ticker": "000021",
+    "name": "深科技"
+   }
+  ]
+ },
+ "fy_index_all": {
+  "timestamp": 1789738641661,
+  "item": [
+   {
+    "thscode": "885431.TI",
+    "name": "新能源汽车"
+   },
+   {
+    "thscode": "885566.TI",
+    "name": "大飞机"
+   }
+  ]
+ },
+ "sse_feeds_html": "\n\n\n\n\t\n\t\n\t\t\n\t\t\n\t\t\t\n\t\t\t<div class=\"m_feed_item\" id=\"item-1764220\">\n\t\t\t\t<div class=\"m_feed_line\"></div>\n\t\t\t\t<div class=\"m_feed_detail m_qa_detail\">\n\t\t\t\t\t<div class=\"m_feed_face\">\n\t\t\t\t\t\t<a rel=\"face\" uid=\"316274\" \n\t\t\t\t\t\t\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\thref=\"user.do?uid=316274\" title=\"投资者_1758102630475\"\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t alt=\"\">\n\t\t\t\t\t\t<img title=\"投资者_1758102630475\" alt=\"\" width=\"40\" height=\"40\" src=\"https://sns.sseinfo.com/resources/images/avatar/investor/big.png\"></a>\n\t\t\t\t\t\t<p>投资者_1758102630475</p>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"m_feed_cnt \">\n\t\t\t\t\t\t\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<div class=\"m_feed_info\">\n\t\t\t\t\t\t\t\t\t<div class=\"ask_ico index_ico\" width=\"25\" height=\"25\"></div>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t<div class=\"m_feed_txt\" id=\"m_feed_txt-1764220\">\n\t\t\t\t\t\t\t\t\t<a href='user.do?uid=333126' >:泰金新能(688813)</a>请问二季度新签订单总额及主要客户？\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\n\t\t\t\t\t\t\n\t\t\t\t\t\t<div class=\"m_feed_media\">\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"m_feed_func\">\n\t\t\t\t\t\t\t<div class=\"m_feed_from\">\n\t\t\t\t\t\t\t\t<span>2026年07月06日 08:55</span>\n\t\t\t\t\t\t\t\t<em>来自</em>\n\t\t\t\t\t\t\t\t\n\n\n\n\t\n\t\n\t\n\t\t\n\t\t\t\n\t\t\t\t<a href=\"javascript:;\">网站</a>\n\t\t\t\n\t\t\t\t\t\t\n\t\t\t\n\t\t\t\n\t\t\t\n\t\t\t\n            \n\t\t\n\t\n\n\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t\t\n\t\t\t\t<div class=\"m_feed_detail m_qa\">\n\t\t\t\t\t<div class=\"a_tit\"><em class=\"S_line1_c\">◆</em><span class=\"S_bg5_c\">◆</span></div>\n\t\t\t\t\t\n\t\t\t\t\t<div class=\"m_feed_face\">\n\t\t\t\t\t\t<a class=\"ansface\" rel=\"tag\" uid=\"333126\" href=\"user.do?uid=333126\" title=\"泰金新能\"><img title=\"泰金新能\" alt=\"泰金新能\" width=\"30\" height=\"30\" src=\"https://sns.sseinfo.com/resources/images/avatar/company/688813.png\"></a>\n\t\t\t\t\t\t<p>泰金新能</p>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"m_feed_cnt\">\n\t\t\t\t\t\t<div class=\"m_feed_info\">\n\t\t\t\t\t\t\t<div class=\"index_ico answer_ico\"></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"m_feed_txt\" id=\"m_feed_txt-1764220\">\n\t\t\t\t\t\t\t尊敬的投资者您好，公司上半年新签订单11.08亿元，截至期末在手订单32.91亿元，具体情况请参见《2026年半年度报告》&quot;经营情况的讨论与分析&quot;部分。\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"m_feed_media\">\n\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"m_feed_func top10\" style=\"margin-left: 70px;\">\n\t\t\t\t\t\t\t<div class=\"m_feed_handle\">\n\t\t\t\t\t\t\t\t<a href=\"javascript:love(1764220);\" id=\"love-1764220\"><em  ></em></a>\n\t\t\t\t\t\t\t\t<i class=\"m_txt\">|</i>\n\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<a href=\"javascript:favorite(1764220);\" id=\"favorite-1764220\">收藏 </a>\n\t\t\t\t\t\t\t\t<i class=\"m_txt\">|</i>\n\t\t\t\t\t\t\t\t<a href=\"javascript:comment(1764220);\">评论<span id=\"totalNum_1764220\"></span></a>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t<!--下架分享插件\n\t\t\t\t\t\t\t<div class=\"m_feed_share\">\n\t\t\t\t\t\t\t\t<i class=\"index_ico weibo_ico\" rel=\"sina-1764220\" onclick=\"toWeiBo('sina', '投资者_1758102630475', 1764220);\"></i>\n\t\t\t\t\t\t\t\t<i class=\"index_ico qq_ico\" rel=\"tx-1764220\" onclick=\"toWeiBo('tencent', '投资者_1758102630475', 1764220);\"></i>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t-->\n\t\t\t\t\t\t\t<div class=\"m_feed_from\" style=\"padding-left: 35px;\">\n\t\t\t\t\t\t\t\t<span>3小时前</span>\n\t\t\t\t\t\t\t\t<em>来自</em>\n\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t<a href=\"javascript:;\">网站</a>\n\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t<div class=\"m_feed_type\" id=\"love_list_1764220\" style=\"display: none;\">\n\t\t\t\t\t\t\t<div class=\"feed_quote\">\n\t\t\t\t\t\t\t<div class=\"q_tit l_p\"><em class=\"S_line1_c S_line1_c1\">◆</em>\n\t\t\t\t\t\t\t<span class=\"S_bg4_c S_bg4_c1\">◆</span></div>\n\t\t\t\t\t\t\t<div class=\"q_con\"><a href=\"javascript:pleaseLogin();\">请登录后再点赞！</a> \n\t\t\t\t\t\t\t</div><div class=\"q_btm\"></div>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t<div class=\"m_feed_type\" id=\"favorite_list_1764220\" style=\"display: none;\">\n\t\t\t\t\t\t\t\t<div class=\"feed_quote\">\n\t\t\t\t\t\t\t\t<div class=\"q_tit l_f\"><em class=\"S_line1_c S_line1_c1\">◆</em>\n\t\t\t\t\t\t\t\t<span class=\"S_bg4_c S_bg4_c1\">◆</span></div>\n\t\t\t\t\t\t\t\t<div class=\"q_con\"><a href=\"javascript:pleaseLogin();\">请登录后再收藏！</a> \n\t\t\t\t\t\t\t\t</div><div class=\"q_btm\"></div>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t<div class=\"m_feed_comments\" id=\"comment_list_1764220\"></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t\t\n\t\t\n\t\t\t\n\t\t\t<div class=\"m_feed_item\" id=\"item-1785117\">\n\t\t\t\t<div class=\"m_feed_line\"></div>\n\t\t\t\t<div class=\"m_feed_detail m_qa_detail\">\n\t\t\t\t\t<div class=\"m_feed_face\">\n\t\t\t\t\t\t<a rel=\"face\" uid=\"299457\" \n\t\t\t\t\t\t\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\thref=\"user.do?uid=299457\" title=\"投资者_1733368779369\"\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t alt=\"\">\n\t\t\t\t\t\t<img title=\"投资者_1733368779369\" alt=\"\" width=\"40\" height=\"40\" src=\"https://sns.sseinfo.com/resources/images/avatar/202412/299457.png\"></a>\n\t\t\t\t\t\t<p>投资者_1733368779369</p>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"m_feed_cnt \">\n\t\t\t\t\t\t\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<div class=\"m_feed_info\">\n\t\t\t\t\t\t\t\t\t<div class=\"ask_ico index_ico\" width=\"25\" height=\"25\"></div>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t<div class=\"m_feed_txt\" id=\"m_feed_txt-1785117\">\n\t\t\t\t\t\t\t\t\t<a href='user.do?uid=487' >:亨通光电(600487)</a>您好！公司应加大海外业务拓展，欧洲、东南亚、中东、澳洲都在积极的建设能源及AI基础设施，应积极落地相关的订单！谢谢！\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t\n\t\t\t\t\t\t\n\t\t\t\t\t\t<div class=\"m_feed_media\">\n\t\t\t\t\t\t\t\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"m_feed_func\">\n\t\t\t\t\t\t\t<div class=\"m_feed_from\">\n\t\t\t\t\t\t\t\t<span>2026年09月01日 14:01</span>\n\t\t\t\t\t\t\t\t<em>来自</em>\n\t\t\t\t\t\t\t\t\n\n\n\n\t\n\t\n\t\n\t\t\n\t\t\t\n\t\t\t\t<a href=\"javascript:;\">网站</a>\n\t\t\t\n\t\t\t\t\t\t\n\t\t\t\n\t\t\t\n\t\t\t\n\t\t\t\n            \n\t\t\n\t\n\n\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t\t\n\t\t\t\t<div class=\"m_feed_detail m_qa\">\n\t\t\t\t\t<div class=\"a_tit\"><em class=\"S_line1_c\">◆</em><span class=\"S_bg5_c\">◆</span></div>\n\t\t\t\t\t\n\t\t\t\t\t<div class=\"m_feed_face\">\n\t\t\t\t\t\t<a class=\"ansface\" rel=\"tag\" uid=\"487\" href=\"user.do?uid=487\" title=\"亨通光电\"><img title=\"亨通光电\" alt=\"亨通光电\" width=\"30\" height=\"30\" src=\"https://sns.sseinfo.com/resources/images/avatar/company/600487.png\"></a>\n\t\t\t\t\t\t<p>亨通光电</p>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"m_feed_cnt\">\n\t\t\t\t\t\t<div class=\"m_feed_info\">\n\t\t\t\t\t\t\t<div class=\"index_ico answer_ico\"></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"m_feed_txt\" id=\"m_feed_txt-1785117\">\n\t\t\t\t\t\t\t尊敬的投资者，您好。公司将结合自身竞争优势，持续推进各板块全球化业务布局。感谢您的关注和建议！\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"m_feed_media\">\n\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"m_feed_func top10\" style=\"margin-left: 70px;\">\n\t\t\t\t\t\t\t<div class=\"m_feed_handle\">\n\t\t\t\t\t\t\t\t<a href=\"javascript:love(1785117);\" id=\"love-1785117\"><em  ></em></a>\n\t\t\t\t\t\t\t\t<i class=\"m_txt\">|</i>\n\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t<a href=\"javascript:favorite(1785117);\" id=\"favorite-1785117\">收藏 </a>\n\t\t\t\t\t\t\t\t<i class=\"m_txt\">|</i>\n\t\t\t\t\t\t\t\t<a href=\"javascript:comment(1785117);\">评论<span id=\"totalNum_1785117\"></span></a>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t<!--下架分享插件\n\t\t\t\t\t\t\t<div class=\"m_feed_share\">\n\t\t\t\t\t\t\t\t<i class=\"index_ico weibo_ico\" rel=\"sina-1785117\" onclick=\"toWeiBo('sina', '投资者_1733368779369', 1785117);\"></i>\n\t\t\t\t\t\t\t\t<i class=\"index_ico qq_ico\" rel=\"tx-1785117\" onclick=\"toWeiBo('tencent', '投资者_1733368779369', 1785117);\"></i>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t-->\n\t\t\t\t\t\t\t<div class=\"m_feed_from\" style=\"padding-left: 35px;\">\n\t\t\t\t\t\t\t\t<span>3小时前</span>\n\t\t\t\t\t\t\t\t<em>来自</em>\n\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\t\t<a href=\"javascript:;\">网站</a>\n\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t\t\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t<div class=\"m_feed_type\" id=\"love_list_1785117\" style=\"display: none;\">\n\t\t\t\t\t\t\t<div class=\"feed_quote\">\n\t\t\t\t\t\t\t<div class=\"q_tit l_p\"><em class=\"S_line1_c S_line1_c1\">◆</em>\n\t\t\t\t\t\t\t<span class=\"S_bg4_c S_bg4_c1\">◆</span></div>\n\t\t\t\t\t\t\t<div class=\"q_con\"><a href=\"javascript:pleaseLogin();\">请登录后再点赞！</a> \n\t\t\t\t\t\t\t</div><div class=\"q_btm\"></div>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t<div class=\"m_feed_type\" id=\"favorite_list_1785117\" style=\"display: none;\">\n\t\t\t\t\t\t\t\t<div class=\"feed_quote\">\n\t\t\t\t\t\t\t\t<div class=\"q_tit l_f\"><em class=\"S_line1_c S_line1_c1\">◆</em>\n\t\t\t\t\t\t\t\t<span class=\"S_bg4_c S_bg4_c1\">◆</span></div>\n\t\t\t\t\t\t\t\t<div class=\"q_con\"><a href=\"javascript:pleaseLogin();\">请登录后再收藏！</a> \n\t\t\t\t\t\t\t\t</div><div class=\"q_btm\"></div>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t<div class=\"m_feed_comments\" id=\"comment_list_1785117\"></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t\t\n\t\t\n\t\t\t\n\t\t\t",
+ "tencent_tick": "v_detail_data_sz000001=[0,\"0/09:25:00/11.59/0.01/3739/4333501/B|1/09:30:00/11.58/-0.01/3498/4046230/S|2/09:30:03/11.58/0.00/2491/2884647/B|3/09:30:06/11.59/0.01/1708/1978814/B|4/09:30:09/11.58/-0.01/1300/1506614/S|5/09:30:12/11.58/0.00/382/442500/B|6/09:30:15/11.58/0.00/523/606324/S|7/09:30:18/11.58/0.00/208/240914/S|8/09:30:21/11.58/0.00/1323/1532041/S|9/09:30:24/11.58/0.00/822/951834/B|10/09:30:27/11.57/-0.01/176/203700/S|11/09:30:30/11.58/0.01/185/214217/M|12/09:30:33/11.57/-0.01/501/580027/S|13/09:30:36/11.58/0.01/304/351860/B|14/09:30:39/11.58/0.00/101/116867/B|15/09:30:42/11.58/0.00/818/947504/B\"]"
+}

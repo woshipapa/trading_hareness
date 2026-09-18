@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json
 
+from .datasources.catalog import primary_store_value, store_values
+
 
 def candidates(
     database: Any,
@@ -59,14 +61,16 @@ def candidates(
         ).fetchone()
         rows = connection.execute(
             """WITH latest_basic AS (
-                   SELECT DISTINCT ON (row_data->>'ts_code') row_data->>'ts_code' AS symbol,row_data
-                     FROM quant.tushare_raw_records
-                    WHERE api_name='daily_basic' AND row_data->>'trade_date'=to_char(%s::date,'YYYYMMDD')
-                    ORDER BY row_data->>'ts_code',available_at DESC
+                   SELECT DISTINCT ON (symbol) symbol,
+                          turnover_rate::text AS turnover_rate,volume_ratio::text AS volume_ratio,
+                          pe::text AS pe,pb::text AS pb
+                     FROM quant.daily_fundamentals
+                    WHERE trading_date=%s
+                    ORDER BY symbol,array_position(%s::text[],provider) NULLS LAST,available_at DESC
                ), latest_flow AS (
                    SELECT DISTINCT ON (symbol) symbol,net_amount
                      FROM quant.stock_money_flow_daily
-                    WHERE trading_date=%s AND source='longhuvip_main_net'
+                    WHERE trading_date=%s AND source=%s
                     ORDER BY symbol,available_at DESC
                ), factors AS (
                    SELECT DISTINCT ON (symbol,trading_date) symbol,trading_date,adj_factor
@@ -77,9 +81,8 @@ def candidates(
                     ORDER BY symbol,trading_date,available_at DESC
                ), ranked AS (
                    SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,f.adj_factor,i.name,
-                          close_day.amount,basic.row_data->>'turnover_rate' AS turnover_rate,
-                          basic.row_data->>'volume_ratio' AS volume_ratio,basic.row_data->>'pe' AS pe,
-                          basic.row_data->>'pb' AS pb,flow.net_amount AS main_net_amount,
+                          close_day.amount,basic.turnover_rate,basic.volume_ratio,basic.pe,basic.pb,
+                          flow.net_amount AS main_net_amount,
                           row_number() OVER (PARTITION BY b.symbol ORDER BY b.trading_date DESC) AS rn
                      FROM quant.canonical_bars_daily b
                      JOIN factors f ON f.symbol=b.symbol AND f.trading_date=b.trading_date
@@ -92,7 +95,9 @@ def candidates(
                  ) SELECT symbol,trading_date,high,low,close,volume,adj_factor,name
                          ,amount,turnover_rate,volume_ratio,pe,pb,main_net_amount
                     FROM ranked WHERE rn<=30 ORDER BY symbol,trading_date""",
-            (as_of_date, as_of_date, as_of_date, as_of_date - timedelta(days=70),
+            (as_of_date, list(store_values("fundamentals.daily_basic", "daily_fundamentals", "provider")),
+             as_of_date, primary_store_value("flow.stock_daily", "stock_money_flow_daily", "source"),
+             as_of_date, as_of_date - timedelta(days=70),
              as_of_date, as_of_date, as_of_date - timedelta(days=70)),
         ).fetchall()
     return screen(

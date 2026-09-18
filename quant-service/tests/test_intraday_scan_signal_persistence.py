@@ -78,7 +78,7 @@ class IntradayScanSignalPersistenceTests(unittest.TestCase):
             ),
             scan_id=uuid.uuid4(), observed_at=observed_at, selected_symbols=["000001.SZ"],
             source_status={}, watches=[{"symbol": "000001.SZ"}], quotes={}, all_a_rows=[],
-            quote_latency_ms=0, tushare_minutes={}, surge_features={}, peer_contexts={}, fast_confirmations={},
+            quote_latency_ms=0, realtime_minutes={}, surge_features={}, peer_contexts={}, fast_confirmations={},
         )
         self.assertEqual(result, [])
         self.assertEqual((database.entered, database.exited), (1, 1))
@@ -139,7 +139,7 @@ class IntradayScanSignalPersistenceTests(unittest.TestCase):
             connection, scan_id=uuid.uuid4(), observed_at=observed_at, selected_symbols=["000001.SZ"],
             source_status={"tencent": {"status": "completed"}}, watches=[{"symbol": "000001.SZ"}],
             quotes={"000001.SZ": {"price": 10.0, "price_source": "tencent_watch_batch", "raw": {"close": 10}}},
-            all_a_rows=[], quote_latency_ms=12, tushare_minutes={"000001.SZ": {"rows": []}},
+            all_a_rows=[], quote_latency_ms=12, realtime_minutes={"000001.SZ": {"rows": []}},
             surge_features={}, peer_contexts={"000001.SZ": {"peer_count": 1}}, fast_confirmations={},
             confirmation_window=300, signal_model_version="v1", factor_contract_version="v2", dependencies=dependencies,
         )

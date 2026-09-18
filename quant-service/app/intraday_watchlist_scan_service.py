@@ -9,6 +9,8 @@ import re
 from typing import Any
 import uuid
 
+from .platform.strategy_data_needs import strategy_taxonomies
+
 
 def quote_volume_anomaly_symbols(
     watches: list[dict[str, Any]], quotes: dict[str, dict[str, Any]],
@@ -97,7 +99,7 @@ class IntradayWatchlistScanDependencies:
     peer_context: Callable[[list[str], dict[str, dict[str, Any]]], dict[str, Any]]
     watch_priority_key: Callable[[dict[str, Any]], Any]
     realtime_validation_slice: Callable[[list[str], int, int], tuple[list[str], int]]
-    tushare_minutes: Callable[[list[str]], Awaitable[dict[str, dict[str, Any]]]]
+    realtime_minutes: Callable[[list[str]], Awaitable[dict[str, dict[str, Any]]]]
     fast_confirmations: Callable[[list[str], dict[str, dict[str, Any]], datetime], Awaitable[dict[str, dict[str, Any]]]]
     board_cache_evidence: Callable[[datetime], Awaitable[dict[str, Any]]]
     build_source_status: Callable[..., dict[str, Any]]
@@ -237,7 +239,7 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     surge_source["exact_watchlist_peer_mapping"] = {
         "status": "completed", "membership_rows": len(membership_rows),
         "symbols_with_mapped_peers": sum(bool(item.get("peer_symbols")) for item in mapped_peer_groups.values()),
-        "taxonomy_scope": ["ths_concept_flow", "ths_index_n", "ths_industry"],
+        "taxonomy_scope": list(strategy_taxonomies("intraday_watchlist_confirmation")),
         "notice": "仅以同一 taxonomy_key + sector_key 的观察池成员确认；不按名称猜板块关联。",
     }
     peer_contexts = build_peer_contexts(watches, mapped_peer_groups, surge_features, dependencies.peer_context)
@@ -251,7 +253,7 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     priority_symbols = inject_anomaly_rotation_priority(
         priority_symbols, anomaly_symbols, request.realtime_validation_limit,
     )
-    tushare_minutes = await dependencies.tushare_minutes(priority_symbols) if priority_symbols else {}
+    realtime_minutes = await dependencies.realtime_minutes(priority_symbols) if priority_symbols else {}
     fast_confirmations = await dependencies.fast_confirmations(selected_symbols, quote_capture.quotes, observed_at)
     board_cache_evidence = await dependencies.board_cache_evidence(observed_at)
     source_status = dependencies.build_source_status(
@@ -270,13 +272,13 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         priority_symbols=priority_symbols, rotation_pool_size=len(ordered_priority_symbols),
         rotation_start_offset=(request.realtime_validation_offset % len(ordered_priority_symbols)
                                if ordered_priority_symbols else 0),
-        next_rotation_offset=next_realtime_validation_offset, tushare_minutes=tushare_minutes,
+        next_rotation_offset=next_realtime_validation_offset, realtime_minutes=realtime_minutes,
         fast_confirmations=fast_confirmations, board_cache_evidence=board_cache_evidence,
         quote_timestamp_slo_seconds=quote_timestamp_slo_seconds,
     )
     signals = await dependencies.persist_signals(
         scan_id, observed_at, selected_symbols, source_status, watches, quote_capture.quotes,
-        quote_capture.all_a_rows, quote_capture.latency_ms, tushare_minutes, surge_features,
+        quote_capture.all_a_rows, quote_capture.latency_ms, realtime_minutes, surge_features,
         peer_contexts, fast_confirmations,
     )
     shadow_observation: dict[str, Any] = {"status": "standby", "reason": "awaiting_next_minute_rotation"}

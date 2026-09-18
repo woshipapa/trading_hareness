@@ -81,7 +81,18 @@ def free_provider_status() -> list[dict[str, str | bool]]:
          "protocol": "x_api_key", "canonical_promotion": False},
         {"name": "xinhua_finance", "provider_key": "xinhua_finance", "label": "新华财经机构数据/API 流",
          "configured": xinhua_url and xinhua_credential, "protocol": "contract_required"},
+        *({"name": source.key, "provider_key": source.key, "label": source.label, "configured": True,
+           "protocol": source.protocol, "canonical_promotion": False, "decision_eligible": False}
+          for source in package_public_sources()),
     ]
+
+
+def package_public_sources() -> list[Any]:
+    """Token-free sources implemented in ``app.datasources`` (from its catalog)."""
+    from .datasources.catalog import SOURCES  # noqa: PLC0415 - keep module import light
+
+    return [source for source in SOURCES.values()
+            if source.module.startswith("app/datasources/sources/") and source.license != "local_files"]
 
 
 def eastmoney_secid(symbol: str) -> str:

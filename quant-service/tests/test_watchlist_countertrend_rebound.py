@@ -37,7 +37,8 @@ def context(**overrides: float) -> dict[str, float]:
 class CountertrendReboundTests(unittest.TestCase):
     def test_research_requires_point_in_time_industry_membership(self) -> None:
         source = Path("app/watchlist_countertrend_rebound.py").read_text(encoding="utf-8")
-        self.assertIn("taxonomy_key='ths_industry'", source)
+        self.assertIn("membership.taxonomy_key=%s", source)
+        self.assertIn('strategy_taxonomies("countertrend_rebound_shadow")', source)
         self.assertIn("membership.known_at <", source)
         self.assertIn("membership.available_at <", source)
         self.assertIn("technology_watchlist_has_no_point_in_time_industry_membership_or_daily_bars", source)

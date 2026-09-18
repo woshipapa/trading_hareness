@@ -1464,7 +1464,13 @@ INSERT INTO quant.providers(provider_key,label) VALUES
     ('akshare','AKShare'), ('baostock','BaoStock'),
     ('eastmoney_free','东方财富公开行情'), ('tencent_free','腾讯财经公开日线'), ('sina_free','新浪财经公开报价'),
     ('cninfo_free','巨潮资讯公开公告'), ('fuyao_ths','同花顺 Fuyao 数据服务'),
-    ('remote_archive','远端市场复盘档案 API')
+    ('remote_archive','远端市场复盘档案 API'),
+    ('eastmoney_ztb','东方财富涨停板专题与盘口异动'), ('eastmoney_hot_rank','东方财富股吧人气榜'),
+    ('eastmoney_datacenter','东方财富数据中心（解禁/股东/大宗/业绩/回购/两融）'),
+    ('cls_telegraph','财联社电报'), ('jin10_flash','金十快讯'), ('eastmoney_flash','东方财富 7x24 快讯'),
+    ('ths_flash','同花顺快讯'), ('cninfo_irm','巨潮互动易'), ('sse_einteract','上证e互动'),
+    ('tdx_public','通达信公开行情主站（历史分笔/除权除息）'), ('ttfund','天天基金净值'),
+    ('derived_market_sentiment','自算短线情绪指标'), ('derived_tick_flow','自算分笔资金流')
 ON CONFLICT(provider_key) DO NOTHING;
 
 UPDATE quant.providers SET enabled=false,updated_at=now()

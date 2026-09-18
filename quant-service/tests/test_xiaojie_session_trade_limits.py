@@ -3,12 +3,13 @@ import unittest
 from datetime import date
 from types import SimpleNamespace
 
-from app.xiaojie_reference_repository import (
+from app.datasources.sources.tushare_limits import (
     TRADE_LIMIT_MAX_PAGES,
     TRADE_LIMIT_MAX_ROWS,
     TRADE_LIMIT_PAGE_SIZE,
-    ensure_session_trade_limits,
+    fetch_limit_cross_section,
 )
+from app.xiaojie_reference_repository import ensure_session_trade_limits
 
 TRADING_DATE = date(2026, 9, 18)
 
@@ -41,7 +42,8 @@ class EnsureSessionTradeLimitsTests(unittest.TestCase):
 
         result = asyncio.run(ensure_session_trade_limits(
             TRADING_DATE, read_limits=read_limits,
-            call_tushare_api=call_tushare_api, persist_limits=persist_limits,
+            fetch_limit_cross_section=lambda day: fetch_limit_cross_section(call_tushare_api, day),
+            persist_limits=persist_limits,
         ))
         return result, seen
 

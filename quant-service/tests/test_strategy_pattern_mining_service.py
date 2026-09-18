@@ -30,7 +30,7 @@ class StrategyPatternMiningServiceTests(unittest.IsolatedAsyncioTestCase):
         return StrategyPatternMiningDependencies(
             latest_date=latest_date, refresh_sources=no_refresh, sample_candidates=candidates,
             open_provider_capabilities=capabilities, minute_capability="intraday_minute",
-            fetch_minutes=fetch_minutes,
+            minute_source="tencent_free", fetch_minutes=fetch_minutes,
             intraday_pattern=lambda _rows, _daily: {"status": "completed", "pattern_tags": []},
             review_score=lambda _item, _pattern, _flags: {"review_score": 0, "review_tier": "research_sample"},
             persist_minute_health=no_health, persist_run=persist_run, run_database=run_database,

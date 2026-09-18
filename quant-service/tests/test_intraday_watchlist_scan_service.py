@@ -53,7 +53,7 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
         dependencies = self.dependencies(
             realtime_session=session, load_watches=watches, persist_terminal=terminal,
             prune_rule_inputs=unexpected, retry_pending_alerts=unexpected, load_exact_memberships=unexpected,
-            capture_quotes=unexpected, surge_context=unexpected, tushare_minutes=unexpected,
+            capture_quotes=unexpected, surge_context=unexpected, realtime_minutes=unexpected,
             fast_confirmations=unexpected, board_cache_evidence=unexpected, persist_signals=unexpected,
             deliver_alert=unexpected,
         )
@@ -130,7 +130,7 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
             prune_rule_inputs=prune, retry_pending_alerts=retry, load_exact_memberships=memberships,
             mapped_peers=lambda _symbols, _rows: {"000001.SZ": {"peer_symbols": ["000003.SZ"], "groups": ["c1"]}},
             high_frequency_window=lambda _: True, capture_quotes=capture, surge_context=surge,
-            peer_context=lambda peers, _features: {"peer_symbols": peers}, tushare_minutes=minutes,
+            peer_context=lambda peers, _features: {"peer_symbols": peers}, realtime_minutes=minutes,
             fast_confirmations=confirmations, board_cache_evidence=board,
             build_source_status=lambda **kwargs: {"direct": len(kwargs["fresh_watch_rows"])},
             persist_signals=persist, deliver_alert=deliver,
@@ -158,7 +158,7 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
             "high_frequency_window": lambda _: False, "capture_quotes": default_async,
             "surge_context": default_async, "peer_context": lambda *_: {}, "watch_priority_key": lambda row: row["symbol"],
             "realtime_validation_slice": lambda symbols, offset, limit: (symbols[offset:offset + limit], offset + limit),
-            "tushare_minutes": default_async, "fast_confirmations": default_async,
+            "realtime_minutes": default_async, "fast_confirmations": default_async,
             "board_cache_evidence": default_async, "build_source_status": lambda **_: {},
             "persist_signals": default_async, "shadow_pool": default_async,
             "shadow_rotation_due": lambda _: False, "shadow_rotation_slice": lambda *_: ([], 0),

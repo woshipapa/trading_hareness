@@ -54,7 +54,7 @@ class IntradaySignalEventPersistenceTests(unittest.TestCase):
             watch={"symbol": "000001.SZ"}, quote={"price": 11.2}, daily_factors={"status": "ready"},
             minute_feature={"time": "10:30"}, peer_context={"peer_count": 3}, market_context={"state": "neutral"},
             fast_confirmation={"status": "matched"}, order_book_feature={"qi5": 0.2},
-            tushare_minute={"latest": {"time": "10:30"}}, paper_position=None,
+            realtime_minute={"latest": {"time": "10:30"}}, paper_position=None,
             portfolio_snapshot={"drawdown": 0.01}, candidate_sector_keys=("885001.TI",),
             probability_profiles={}, generated_signals=[{
                 "signal_key": "000001.SZ:entry:test", "signal_type": "entry", "severity": "warning",
@@ -85,7 +85,7 @@ class IntradaySignalEventPersistenceTests(unittest.TestCase):
         result = persist_generated_signals(
             connection, scan_id=uuid.uuid4(), observed_at=datetime(2026, 8, 22, tzinfo=timezone.utc),
             symbol="000001.SZ", watch={}, quote=None, daily_factors={}, minute_feature=None, peer_context=None,
-            market_context={}, fast_confirmation={"status": "mismatch"}, order_book_feature={}, tushare_minute=None,
+            market_context={}, fast_confirmation={"status": "mismatch"}, order_book_feature={}, realtime_minute=None,
             paper_position=None, portfolio_snapshot={}, candidate_sector_keys=(), probability_profiles={},
             generated_signals=[{"signal_key": "key", "signal_type": "watch", "severity": "info", "score": 1,
                                 "conditions": {}, "risk_flags": []}],

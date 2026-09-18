@@ -159,8 +159,59 @@ def persist_observed_snapshot(
     return stored
 
 
+def persist_observed_snapshot_batched(
+    connection: Any,
+    taxonomy_key: str,
+    sector_key: str,
+    members: dict[str, dict[str, Any]],
+    provider_key: str,
+    observed_at: datetime,
+    *,
+    instrument_source: str,
+) -> int:
+    """:func:`persist_observed_snapshot` in three round trips per sector.
+
+    Same statements and interval semantics, sent with ``executemany``: over
+    the 52ms owner tunnel the per-member form costs two round trips per
+    member, which is hours for a full concept taxonomy.  ``members`` maps a
+    symbol to its raw provider row (``name`` feeds the instrument label).
+    """
+    if not members:
+        return 0
+    effective_from = observed_exchange_date(observed_at)
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            """INSERT INTO quant.instruments(symbol,exchange,name,source) VALUES(%s,%s,%s,%s)
+               ON CONFLICT(symbol) DO NOTHING""",
+            [(symbol, symbol.rsplit(".", 1)[-1], str(row.get("name") or "").strip() or None, instrument_source)
+             for symbol, row in members.items()],
+        )
+        cursor.executemany(
+            """INSERT INTO quant.sector_membership_history(
+                   taxonomy_key,sector_key,symbol,effective_from,effective_to,provider_key,
+                   available_at,known_at,effective_from_basis,effective_to_basis,raw
+               ) VALUES(%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT(taxonomy_key,sector_key,symbol,effective_from) DO UPDATE
+                 SET effective_to=NULL,provider_key=EXCLUDED.provider_key,
+                     available_at=EXCLUDED.available_at,known_at=EXCLUDED.known_at,
+                     effective_from_basis=EXCLUDED.effective_from_basis,
+                     effective_to_basis=EXCLUDED.effective_to_basis,raw=EXCLUDED.raw""",
+            [(taxonomy_key, sector_key, symbol, effective_from, provider_key, observed_at, observed_at,
+              OBSERVED_SNAPSHOT, OBSERVED_SNAPSHOT, Json(row)) for symbol, row in members.items()],
+        )
+    connection.execute(
+        """UPDATE quant.sector_membership_history
+              SET effective_to=%s,available_at=%s,known_at=%s,effective_to_basis=%s
+            WHERE taxonomy_key=%s AND sector_key=%s AND provider_key=%s AND effective_to IS NULL
+              AND effective_from<%s AND NOT symbol = ANY(%s)""",
+        (effective_from - timedelta(days=1), observed_at, observed_at, OBSERVED_SNAPSHOT,
+         taxonomy_key, sector_key, provider_key, effective_from, list(members)),
+    )
+    return len(members)
+
+
 __all__ = [
     "LEGACY_UNBOUNDED", "OBSERVED_SNAPSHOT", "PROVIDER_INTERVAL", "membership_interval",
-    "observed_exchange_date", "persist_observed_snapshot", "persist_ths_snapshot",
-    "point_in_time_membership_predicate",
+    "observed_exchange_date", "persist_observed_snapshot", "persist_observed_snapshot_batched",
+    "persist_ths_snapshot", "point_in_time_membership_predicate",
 ]

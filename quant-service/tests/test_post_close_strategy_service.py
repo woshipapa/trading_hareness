@@ -150,7 +150,12 @@ class PostCloseStructureSourceTests(unittest.TestCase):
     def test_every_date_bound_is_the_same_seventy_day_window(self):
         statement, parameters = self._statement()
         as_of, start = date(2026, 9, 18), date(2026, 9, 18) - timedelta(days=70)
-        self.assertEqual(parameters, (as_of, as_of, as_of, start, as_of, as_of, start))
+        # daily_basic providers and the flow source now come from the catalog;
+        # they resolve to exactly what the query used to spell out.
+        self.assertEqual(parameters, (as_of, ["tushare_super_get", "longhuvip_composite"], as_of,
+                                      "longhuvip_main_net", as_of, start, as_of, as_of, start))
+        self.assertIn("quant.daily_fundamentals", statement)
+        self.assertNotIn("tushare_raw_records", statement)
         self.assertIn("rn<=30", statement)
 
 

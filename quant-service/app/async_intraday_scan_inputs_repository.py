@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .platform.strategy_data_needs import strategy_taxonomies
 from .sector_membership_repository import point_in_time_membership_predicate
 
 
@@ -68,8 +69,9 @@ async def exact_memberships(
             f"""SELECT taxonomy_key,sector_key,symbol
                  FROM quant.sector_membership_history member
                 WHERE symbol=ANY(%s) AND {membership_predicate}
-                  AND taxonomy_key IN ('ths_concept_flow','ths_index_n','ths_industry')""",
-            (symbols, local_trade_date, local_trade_date, observed_at),
+                  AND taxonomy_key=ANY(%s)""",
+            (symbols, local_trade_date, local_trade_date, observed_at,
+             list(strategy_taxonomies("intraday_watchlist_confirmation"))),
         )
         rows = await result.fetchall()
     return [dict(row) for row in rows]

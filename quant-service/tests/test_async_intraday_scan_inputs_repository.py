@@ -63,8 +63,10 @@ class AsyncIntradayScanInputsRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(all_params, (41,))
         self.assertIn("symbol=ANY", requested_query)
         self.assertEqual(requested_params, (["000001.SZ"],))
-        self.assertIn("taxonomy_key IN", member_query)
+        self.assertIn("taxonomy_key=ANY(%s)", member_query)
         self.assertEqual(member_params[0], ["000001.SZ"])
+        # the strategy's declared taxonomies, identical to the literal they replaced
+        self.assertEqual(member_params[-1], ["ths_concept_flow", "ths_index_n", "ths_industry"])
 
     async def test_enabled_watch_read_uses_exact_capture_limit_without_overflow_row(self) -> None:
         database = _Database()

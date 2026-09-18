@@ -18,6 +18,7 @@ from .stable_json import tolerant_json
 
 from .provider_health import record_provider_failure
 from .tushare_providers import safe_error_detail
+from .platform.strategy_data_needs import strategy_taxonomies
 from .sector_membership_repository import point_in_time_membership_predicate
 
 
@@ -132,8 +133,9 @@ def load_intraday_scan_local_state(
     sector_rows = connection.execute(
         f"""SELECT symbol,sector_key FROM quant.sector_membership_history member
             WHERE symbol=ANY(%s) AND {membership_predicate}
-              AND taxonomy_key IN ('ths_concept_flow','ths_index_n','ths_industry')""",
-        (selected_symbols, local_trade_date, local_trade_date, local_trade_date),
+              AND taxonomy_key=ANY(%s)""",
+        (selected_symbols, local_trade_date, local_trade_date, local_trade_date,
+         list(strategy_taxonomies("intraday_watchlist_confirmation"))),
     ).fetchall() if selected_symbols else []
     candidate_sector_keys: dict[str, list[str]] = {}
     for row in sector_rows:

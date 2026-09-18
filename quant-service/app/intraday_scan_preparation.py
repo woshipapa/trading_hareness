@@ -9,6 +9,8 @@ import uuid
 
 from psycopg.types.json import Json
 
+from .datasources.catalog import primary_source
+
 
 @dataclass(frozen=True)
 class IntradayScanPreparedInputs:
@@ -62,7 +64,7 @@ def prepare_intraday_scan_inputs(
     quotes: dict[str, dict[str, Any]],
     all_a_rows: list[dict[str, Any]],
     quote_latency_ms: int,
-    tushare_minutes: dict[str, dict[str, Any]],
+    realtime_minutes: dict[str, dict[str, Any]],
     surge_features: dict[str, dict[str, Any]],
     confirmation_window: timedelta,
     dependencies: IntradayScanPreparationDependencies,
@@ -74,11 +76,14 @@ def prepare_intraday_scan_inputs(
     """
     local_trade_date = observed_at.astimezone(timezone(timedelta(hours=8))).date()
     dependencies.roll_positions_sellable(connection, trading_date=local_trade_date)
+    # The all-A snapshot's health belongs to whichever source the catalog
+    # names for the capability, not to a vendor spelled out here.
+    all_a_source = primary_source("quote.all_a_snapshot")
     if all_a_rows:
-        dependencies.record_provider_success(connection, "fuyao_ths", "realtime_quote", len(all_a_rows), quote_latency_ms)
+        dependencies.record_provider_success(connection, all_a_source, "realtime_quote", len(all_a_rows), quote_latency_ms)
     else:
         dependencies.record_provider_failure(
-            connection, "fuyao_ths", "realtime_quote", "all-A Fuyao snapshot unavailable during watch scan", quote_latency_ms,
+            connection, all_a_source, "realtime_quote", "all-A snapshot unavailable during watch scan", quote_latency_ms,
         )
     connection.execute(
         """INSERT INTO quant.intraday_scan_runs(scan_id,observed_at,status,requested_symbols,source_status,summary)
@@ -105,7 +110,7 @@ def prepare_intraday_scan_inputs(
     dependencies.clear_stale_episodes(connection, selected_symbols, observed_at)
     market_contexts = dependencies.market_context_batch(connection, [(observed_at, symbol) for symbol in selected_symbols])
     raw_minute_features_by_symbol = {
-        symbol: (tushare_minutes.get(symbol) or {}).get("feature") or surge_features.get(symbol)
+        symbol: (realtime_minutes.get(symbol) or {}).get("feature") or surge_features.get(symbol)
         for symbol in selected_symbols
     }
     minute_volume_profiles_by_symbol = dependencies.minute_volume_profiles(

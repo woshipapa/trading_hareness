@@ -15,7 +15,9 @@ from datetime import date, timedelta
 import math
 from typing import Any, Iterable
 
+from .datasources.catalog import store_values
 from .intraday_decision_context import shrunk_probability
+from .platform.strategy_data_needs import strategy_taxonomies
 from .strategy_thresholds import MAX_ENTRY_INTRADAY_GAIN_PCT
 from .watchlist_main_wave import FEATURE_KEYS, LOOKBACK_DAYS, _feature_row, normalize_bars
 
@@ -412,7 +414,7 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
              JOIN LATERAL (
                    SELECT membership.sector_key
                      FROM quant.sector_membership_history membership
-                    WHERE membership.taxonomy_key='ths_industry'
+                    WHERE membership.taxonomy_key=%s
                       AND membership.symbol=b.symbol
                       AND membership.effective_from<=b.trading_date
                       AND (membership.effective_to IS NULL OR membership.effective_to>=b.trading_date)
@@ -427,7 +429,7 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
                     SELECT 1 FROM quant.daily_adjustment_factors factor
                      WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
                        AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-              )""", (list(TECH_INDUSTRIES),),
+              )""", (strategy_taxonomies("countertrend_rebound_shadow")[0], list(TECH_INDUSTRIES)),
     ).fetchone()
     selected_end = (
         min(end_date, latest["latest"]) if end_date and latest and latest["latest"]
@@ -451,7 +453,7 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
              JOIN LATERAL (
                    SELECT membership.sector_key
                      FROM quant.sector_membership_history membership
-                    WHERE membership.taxonomy_key='ths_industry'
+                    WHERE membership.taxonomy_key=%s
                       AND membership.symbol=b.symbol
                       AND membership.effective_from<=b.trading_date
                       AND (membership.effective_to IS NULL OR membership.effective_to>=b.trading_date)
@@ -466,7 +468,7 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
                     WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
                       AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     ORDER BY factor.available_at DESC,
-                             CASE WHEN factor.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                             array_position(%s::text[],factor.provider) NULLS LAST,
                              factor.provider
                     LIMIT 1
              ) pit_adjustment ON TRUE
@@ -475,7 +477,8 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
               AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
               AND pit_adjustment.adj_factor IS NOT NULL
             ORDER BY b.symbol,b.trading_date""",
-        (list(TECH_INDUSTRIES), start_date, selected_end),
+        (strategy_taxonomies("countertrend_rebound_shadow")[0], list(TECH_INDUSTRIES),
+         list(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")), start_date, selected_end),
     ).fetchall()
     market_rows = connection.execute(
         """SELECT trading_date,stock_count,advancers,decliners,unchanged,median_change_pct,

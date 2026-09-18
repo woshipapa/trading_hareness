@@ -18,7 +18,7 @@ class IntradayScanSourceStatusTests(unittest.TestCase):
             derived_flow_status={"status": "fresh", "derived_symbols": 2},
             all_a_snapshot_status={"status": "cached", "age_seconds": 12}, surge_source={"provider_status": "completed"},
             priority_symbols=["000001.SZ"], rotation_pool_size=2, rotation_start_offset=1, next_rotation_offset=0,
-            tushare_minutes={"000001.SZ": {"source": {"status": "completed"}}},
+            realtime_minutes={"000001.SZ": {"source": {"status": "completed"}}},
             fast_confirmations={"000001.SZ": {"status": "confirmed"}, "000002.SZ": {"status": "stale"}},
             board_cache_evidence={"status": "cached"}, quote_timestamp_slo_seconds=20.0,
         )
@@ -40,7 +40,7 @@ class IntradayScanSourceStatusTests(unittest.TestCase):
             eastmoney_watch_flow_status={"status": "fresh", "scope": "explicit_watchlist_only"},
             derived_flow_status={"status": "unavailable"},
             surge_source={}, priority_symbols=[], rotation_pool_size=1, rotation_start_offset=0, next_rotation_offset=0,
-            tushare_minutes={}, fast_confirmations={}, board_cache_evidence={}, quote_timestamp_slo_seconds=45.0,
+            realtime_minutes={}, fast_confirmations={}, board_cache_evidence={}, quote_timestamp_slo_seconds=45.0,
         )
         self.assertEqual(status["tencent_watch"]["status"], "unavailable")
         self.assertEqual(status["eastmoney_watch_flow"]["status"], "completed")

@@ -23,7 +23,7 @@ def build_scan_source_status(
     rotation_pool_size: int,
     rotation_start_offset: int,
     next_rotation_offset: int,
-    tushare_minutes: dict[str, dict[str, Any]],
+    realtime_minutes: dict[str, dict[str, Any]],
     fast_confirmations: dict[str, dict[str, Any]],
     board_cache_evidence: dict[str, Any],
     quote_timestamp_slo_seconds: float,
@@ -99,7 +99,7 @@ def build_scan_source_status(
         "tencent_minute_context": surge_source,
         "tushare_rt_min": {
             "requested": priority_symbols,
-            "items": {symbol: item["source"] for symbol, item in tushare_minutes.items()},
+            "items": {symbol: item["source"] for symbol, item in realtime_minutes.items()},
             "rotation_pool_size": rotation_pool_size,
             "rotation_start_offset": rotation_start_offset,
             "next_rotation_offset": next_rotation_offset,

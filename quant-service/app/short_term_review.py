@@ -37,7 +37,25 @@ def _body(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _event_rows(rows: list[dict[str, Any]], event_type: str) -> list[dict[str, Any]]:
-    return [row for row in rows if str(row.get("event_type") or "") == event_type]
+    """One row per symbol -- the latest -- for ``event_type``.
+
+    The Fuyao pools are stored once per observed minute, so a symbol sealed
+    all afternoon has hundreds of rows; counting rows turned ~80 limit-ups
+    into thousands.  Input is ordered by ``occurred_at``, so the last row per
+    symbol is the latest observation.
+    """
+    latest: dict[str, dict[str, Any]] = {}
+    unkeyed: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row.get("event_type") or "") != event_type:
+            continue
+        symbol = str(row.get("symbol") or "")
+        if symbol:
+            latest.pop(symbol, None)
+            latest[symbol] = row
+        else:
+            unkeyed.append(row)
+    return [*latest.values(), *unkeyed]
 
 
 def _event_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -116,7 +134,7 @@ def _ladder(limit_ups: list[dict[str, Any]]) -> dict[str, Any]:
     symbols_by_height: dict[int, list[dict[str, Any]]] = {}
     for row in limit_ups:
         payload = _event_payload(row)
-        value = _limit_value(payload, "连板数", "board_count", "昨日连板数")
+        value = _limit_value(payload, "连板数", "board_count", "continue_day_cnt", "昨日连板数")
         height = int(value) if value is not None and value >= 1 else 1
         counts[height] += 1
         symbols_by_height.setdefault(height, []).append({"symbol": row.get("symbol"), "name": payload.get("名称") or payload.get("name")})
@@ -355,7 +373,7 @@ def build_short_term_review(
     return {
         "status": "completed" if event_rows or daily_rows or board_summary else "partial",
         "observed_at": observed_at,
-        "methodology": "short-term-review-v2",
+        "methodology": "short-term-review-v3",
         "market_emotion": emotion,
         "ladder": ladder,
         "sector_structure": sectors,

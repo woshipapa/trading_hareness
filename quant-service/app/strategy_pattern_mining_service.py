@@ -17,6 +17,9 @@ class StrategyPatternMiningDependencies:
     sample_candidates: Callable[[date, int, int, list[str] | None], dict[str, Any]]
     open_provider_capabilities: Callable[[str, list[str]], Awaitable[set[str]]]
     minute_capability: str
+    #: Catalog source serving ``fetch_minutes`` (the composition root binds
+    #: both; this module only reports and gates on it).
+    minute_source: str
     fetch_minutes: Callable[[str], Awaitable[list[dict[str, Any]]]]
     intraday_pattern: Callable[[list[dict[str, Any]], dict[str, Any]], dict[str, Any]]
     review_score: Callable[[dict[str, Any], dict[str, Any], list[str]], dict[str, Any]]
@@ -33,8 +36,8 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
     """Build bounded replay evidence from already-selected post-close samples.
 
     This is research-only: it neither imports historical data nor changes live
-    thresholds.  The sole network callback is the bounded Tencent minute tape
-    supplied by the composition root.
+    thresholds.  The sole network callback is the bounded minute tape the
+    composition root binds, together with the catalog source that serves it.
     """
     latest = await dependencies.run_database(dependencies.latest_date)
     as_of_date = request.as_of_date or latest
@@ -46,8 +49,9 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
     )
     candidates = selection.get("candidates", [])
     minute_circuit_open = bool(candidates) and dependencies.minute_capability in await dependencies.open_provider_capabilities(
-        "tencent_free", [dependencies.minute_capability],
+        dependencies.minute_source, [dependencies.minute_capability],
     )
+    minute_label = f"{dependencies.minute_source}_minute"
     semaphore = asyncio.Semaphore(max(1, dependencies.max_in_flight))
 
     async def replay(item: dict[str, Any]) -> dict[str, Any]:
@@ -63,12 +67,12 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
             review = dependencies.review_score(item, pattern, risk_flags)
             return {
                 **item, "limit_context": {**item["limit_context"], **review},
-                "intraday_pattern": pattern, "minute_source": "tencent_free_minute", "risk_flags": risk_flags,
+                "intraday_pattern": pattern, "minute_source": minute_label, "risk_flags": risk_flags,
             }
         except dependencies.handled_errors as error:
             return {
                 **item, "intraday_pattern": {"status": "failed", "error": str(error)[:240], "curve": []},
-                "minute_source": "tencent_free_minute", "risk_flags": [*item["risk_flags"], "minute_replay_failed"],
+                "minute_source": minute_label, "risk_flags": [*item["risk_flags"], "minute_replay_failed"],
             }
 
     if minute_circuit_open:
@@ -77,7 +81,7 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
             "intraday_pattern": {
                 "status": "blocked", "error": "provider health circuit is open; upstream request skipped", "curve": [],
             },
-            "minute_source": "tencent_free_minute", "risk_flags": [*item["risk_flags"], "minute_replay_circuit_open"],
+            "minute_source": minute_label, "risk_flags": [*item["risk_flags"], "minute_replay_circuit_open"],
         } for item in candidates]
     else:
         started_at = asyncio.get_running_loop().time()
@@ -115,7 +119,7 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
                 bool(item.get("limit_context", {}).get("source_fallback")) for item in samples
                 if item.get("limit_context", {}).get("sample_role") == "positive_limit_pool"
             ) else "tushare_or_merged",
-            "minute": "tencent_free_bounded_replay",
+            "minute": f"{dependencies.minute_source}_bounded_replay",
             "controls": "canonical_bars_daily_near_limit_non_sealed",
         },
         "dragon_leader_market_context": selection.get("dragon_leader_market_context", {}),
@@ -124,7 +128,7 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
         "daily": "canonical_bars_daily", "limit_sources": limit_sources,
         "input_provenance": summary["input_provenance"],
         "minute": {
-            "provider": "tencent_free", "status": "circuit_open" if minute_circuit_open else status,
+            "provider": dependencies.minute_source, "status": "circuit_open" if minute_circuit_open else status,
             "completed": len(samples) - len(failed),
             "failed": {item["symbol"]: item["intraday_pattern"].get("error") for item in failed},
         },

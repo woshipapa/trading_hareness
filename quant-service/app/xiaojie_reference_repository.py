@@ -17,6 +17,7 @@ from typing import Any, Awaitable, Callable
 
 from psycopg.types.json import Json
 
+from .platform.strategy_data_needs import strategy_taxonomies
 from .sector_membership_repository import point_in_time_membership_predicate
 
 #: Sessions used for the breakout high and the recent-behaviour counters.
@@ -24,13 +25,9 @@ LOOKBACK_SESSIONS = 20
 MA_SESSIONS = 5
 
 #: The session's limit prices are a full-market cross-section of ~5,700 rows.
-#: The only source that still serves it rejects the whole set in one response
-#: ("response is too large; use a smaller limit or paginate"), so it is read in
-#: pages. 2,000 is under the REST adapter's own 3,000 cap and was measured
-#: returning the complete market in three pages.
-TRADE_LIMIT_PAGE_SIZE = 2000
-TRADE_LIMIT_MAX_ROWS = 12000
-TRADE_LIMIT_MAX_PAGES = 8
+#: How a source pages that set is its own contract (see
+#: ``app/datasources/sources/tushare_limits.py``); this module only checks the
+#: result.
 
 #: Any complete A-share cross-section spans both main exchanges. The check is
 #: structural rather than a row count, so it does not drift as the market grows.
@@ -62,7 +59,7 @@ def trade_limits(connection: Any, trading_date: date) -> dict[str, float]:
 async def ensure_session_trade_limits(
     trading_date: date, *,
     read_limits: Callable[[date], Awaitable[dict[str, float]]],
-    call_tushare_api: Callable[..., Awaitable[Any]],
+    fetch_limit_cross_section: Callable[[date], Awaitable[tuple[list[dict[str, Any]], str]]],
     persist_limits: Callable[[date, list[dict[str, Any]]], Awaitable[int]],
 ) -> dict[str, Any]:
     """Guarantee the session's limit prices exist before the first scan needs them.
@@ -71,25 +68,17 @@ async def ensure_session_trade_limits(
     but ``daily_trade_limits`` is only written by the post-close control sync -
     so intraday the table holds every session except the one being traded.
     Any board-state indicator would silently see no limits at all.  When the
-    row set for the date is missing, it is fetched once and persisted, after
-    which every later scan reads it from the database.
+    row set for the date is missing, it is fetched once through the
+    ``limits.prices`` capability and persisted, after which every later scan
+    reads it from the database.  How the source pages and proves completeness
+    is the source adapter's contract; this guard only refuses a cross-section
+    that does not span both exchanges.
     """
     existing = await read_limits(trading_date)
     if existing:
         return {"status": "already_present", "symbols": len(existing), "limits": existing}
-    # Paginated, and required to reach a terminal page. Asking for the whole
-    # cross-section at once is refused outright by the one source that still
-    # serves it, which left the strategy blocked for a full session on
-    # 2026-09-17. Accepting a short read instead would be worse than failing:
-    # a symbol with no limit price can never register as sealed at the board,
-    # so a partial table turns unavailable evidence into a tradeable-looking
-    # signal. 2026-09-16 stored exactly such a partial - 2,359 of ~5,700.
-    call = await call_tushare_api(
-        "stk_limit", {"trade_date": trading_date.strftime("%Y%m%d")}, None, "auto",
-        paginate=True, page_size=TRADE_LIMIT_PAGE_SIZE, max_rows=TRADE_LIMIT_MAX_ROWS,
-        max_pages=TRADE_LIMIT_MAX_PAGES, require_complete=True,
-    )
-    rows = [row for row in call.rows if str(row.get("ts_code") or "").strip()]
+    rows, provider_key = await fetch_limit_cross_section(trading_date)
+    rows = [row for row in rows if str(row.get("ts_code") or "").strip()]
     if not rows:
         return {"status": "unavailable", "symbols": 0, "limits": {}}
     exchanges = {str(row["ts_code"]).strip().upper()[-2:] for row in rows}
@@ -102,12 +91,12 @@ async def ensure_session_trade_limits(
             "status": "incomplete", "symbols": 0, "limits": {},
             "reason": (f"limit cross-section covers only {sorted(exchanges)}; "
                        f"missing {sorted(missing)} after {len(rows)} rows"),
-            "provider": call.provider.key,
+            "provider": provider_key,
         }
     stored = await persist_limits(trading_date, rows)
     limits = await read_limits(trading_date)
     return {"status": "fetched", "symbols": len(limits), "stored": stored,
-            "provider": call.provider.key, "limits": limits}
+            "provider": provider_key, "limits": limits}
 
 
 def persist_trade_limit_rows(connection: Any, trading_date: date, rows: list[dict[str, Any]],
@@ -154,7 +143,9 @@ def persist_trade_limit_rows(connection: Any, trading_date: date, rows: list[dic
 #: the one-board map, leaving every pool member ``sector_core_unconfirmed``
 #: just as an empty table did.  A partial sector map is not a smaller answer,
 #: it is a wrong one.
-SECTOR_TAXONOMY_PREFERENCE = ("ths_concept_flow", "longhu_ths_industry")
+#: Which taxonomies are candidates is this strategy's declared data need
+#: (``app/platform/strategy_data_needs.py``), not a vendor list kept here.
+SECTOR_TAXONOMY_PREFERENCE = strategy_taxonomies("xiaojie_leader_flow")
 
 
 def membership_for_taxonomy(connection: Any, trading_date: date,

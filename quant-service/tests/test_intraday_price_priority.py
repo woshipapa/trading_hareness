@@ -54,3 +54,21 @@ class PricePriorityTests(unittest.IsolatedAsyncioTestCase):
             fallback=AsyncMock(return_value=[row(), row("000002.SZ", "20260904150000")]), now=lambda: NOW,
         )
         self.assertEqual([r["ts_code"] for r in rows], ["000001.SZ"])
+
+
+class TruncatedMorningClockTests(unittest.TestCase):
+    """2026-09-17: every Longhu quote before 10:00 was ``invalid_timestamp``."""
+
+    observed = datetime(2026, 9, 17, 1, 30, 20, tzinfo=timezone.utc)   # 09:30:20 Shanghai
+
+    def test_gateway_truncated_morning_clock_is_repaired(self):
+        status = exchange_time_status({"price_trade_date": "20260917", "price_trade_time": "20260917930142"},
+                                      self.observed, 20)
+        self.assertEqual(status["status"], "fresh")
+        self.assertEqual(status["observed_trade_time"], "2026-09-17T09:30:14+08:00")
+
+    def test_valid_clocks_are_untouched(self):
+        for stamp, expected in (("20260917093014", "2026-09-17T09:30:14+08:00"),
+                                ("20260917145951", "2026-09-17T14:59:51+08:00")):
+            status = exchange_time_status({"price_trade_time": stamp}, self.observed, 1e9)
+            self.assertEqual(status["observed_trade_time"], expected)

@@ -45,8 +45,26 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
     ),
     "market_event_capture": RuntimeTaskContract(
         "market_event_capture", "intraday_edge", "60s during market observation windows",
-        ("a_share_auction_snapshot", "a_share_limit_up_pool", "a_share_limit_break_pool", "a_share_limit_up_ladder"),
-        ("market_events",), "all-A auction, limit-pool and limit-chain evidence capture", 180,
+        ("a_share_auction_snapshot", "a_share_limit_up_pool", "a_share_limit_break_pool", "a_share_limit_down_pool",
+         "a_share_limit_up_ladder", "a_share_hot_stock_list", "a_share_skyrocket_list",
+         "a_share_anomaly_analysis_list", "a_share_auction_short_term_benchmark"),
+        ("market_events", "raw_market_observations"),
+        "all-A auction, limit-pool, limit-chain and THS attention evidence capture", 180,
+    ),
+    "public_evidence_capture": RuntimeTaskContract(
+        "public_evidence_capture", "intraday_edge", "30s tick; per-source 90s-15min cadences",
+        ("news_flash", "investor_qa", "stock_change", "hot_rank_popularity", "hot_rank_surge",
+         "board_change_snapshot", "market_sentiment_snapshot"),
+        ("market_events", "raw_market_observations"),
+        "token-free news, investor Q&A, anomaly tape, attention ranks and self-computed sentiment", 900,
+    ),
+    "post_close_public_archive": RuntimeTaskContract(
+        "post_close_public_archive", "research", "once per trading day, 15:10-23:30 windows",
+        ("limit_pool", "stock_change_daily_summary", "market_sentiment_close", "a_share_hot_stock_list_history",
+         "a_share_dragon_tiger_list", "eastmoney_datacenter", "margin_market", "a_share_valuations_snapshot",
+         "ths_index_prices_snapshot", "tick_flow_daily", "capital_changes"),
+        ("market_events", "raw_market_observations"),
+        "archive short-lived and post-close public evidence (pools, LHB, corporate events, ticks)",
     ),
     "all_a_level1_snapshot": RuntimeTaskContract(
         "all_a_level1_snapshot", "intraday_edge", "60s during market session",

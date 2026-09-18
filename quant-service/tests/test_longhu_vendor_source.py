@@ -123,6 +123,17 @@ class LonghuVendorSourceTests(unittest.TestCase):
         self.assertEqual(parsed["trade_time"], "20260901145901")
         self.assertEqual(parsed["price"], 9.49)
 
+    def test_morning_clock_without_leading_zero_is_padded(self):
+        # 09:30:14.237 arrives as "93014237"; the first six digits read
+        # "930142" (hour 93) and every quote before 10:00 was invalid.
+        for vendor_time, expected in (("93014237", "20260917093014"), ("93014", "20260917093014"),
+                                      ("145901000", "20260917145901"), ("145901", "20260917145901")):
+            parsed = parse_stock_snapshot_payload({
+                "code": "600664", "name": "哈药股份", "day": "20260917", "preclose_px": 9.29,
+                "real": {"last_px": 9.49, "time": vendor_time},
+            }, "600664.SH")
+            self.assertEqual(parsed["trade_time"], expected, vendor_time)
+
     def test_longhu_order_book_normalizes_ten_levels_and_one_sided_books(self):
         parsed = parse_longhu_order_book({
             "b1": [11.9, 200], "b2": [11.89, 2051], "b10": [0, 0],

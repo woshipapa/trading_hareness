@@ -27,6 +27,10 @@ _WATCH_FIELDS = (
 _QUOTE_FIELDS = (
     "symbol", "price", "pct_change", "volume_ratio", "turnover_rate", "main_net_inflow",
     "main_flow_percentile", "price_source", "price_freshness",
+    # The live rule decides per field whether a flow value may be used from
+    # these labels; without them a replay silently used values the live scan
+    # had zeroed.  Older snapshots lack the key and replay as before.
+    "flow_metric_sources",
 )
 _PREVIOUS_QUOTE_FIELDS = ("symbol", "source_name", "price", "pct_change", "observed_at")
 _MARKET_CONTEXT_FIELDS = ("status", "market_state", "board_snapshot_age_seconds")

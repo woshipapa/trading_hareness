@@ -16,6 +16,7 @@ def build_specs(*, interval_seconds: int, enabled: dict[str, bool], loops: dict[
             "all_board_member_backfill", "minute_profile_capture", "tencent_order_book", "board_flow_curve",
             "market_event_capture",
             "all_a_level1_snapshot",
+            "public_evidence_capture", "post_close_public_archive",
     )
     # Keep the pure catalog helper backwards-compatible for external callers
     # that inject the pre-0076 loop set; the production composition supplies

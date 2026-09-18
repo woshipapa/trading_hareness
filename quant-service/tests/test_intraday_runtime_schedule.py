@@ -34,6 +34,17 @@ class IntradayRuntimeScheduleTests(unittest.TestCase):
         self.assertEqual(signals[0]["signal_type"], "watch")
         self.assertIn("watch_only_not_entry", signals[0]["risk_flags"])
 
+    def test_opening_gap_accepts_any_exchange_timestamped_watch_quote(self):
+        # v6 compared the label with Tencent's only, so a Longhu-served quote
+        # (the owner's primary since 2026-09-05) could never open this watch.
+        watch = {"symbol": "600176.SH", "available_quantity": 0, "alert_on_entry": True, "alert_on_exit": True}
+        base = {"symbol": "600176.SH", "price": 43.20, "pct_change": 4.2, "price_freshness": {"status": "fresh"},
+                "_scan_observed_at": datetime(2026, 8, 17, 1, 32, tzinfo=timezone.utc)}
+        longhu = intraday_signal_rules(watch, {**base, "price_source": "longhuvip_watch_quote"}, None)
+        self.assertEqual(longhu[0]["signal_key"], "600176.SH:watch:opening_gap_continuation_v1")
+        sina = intraday_signal_rules(watch, {**base, "price_source": "sina_batched_watch_quote"}, None)
+        self.assertFalse(any(item["signal_key"].endswith("opening_gap_continuation_v1") for item in sina))
+
     def test_intraday_minute_context_includes_unconfigured_explicit_watches(self):
         watches = [{"symbol": "000001.SZ", "metadata": {}}, {"symbol": "000002.SZ", "metadata": {}}]
         rows = [

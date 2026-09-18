@@ -1,0 +1,206 @@
+"""The data-source catalog, the resolver and the strategy capability needs."""
+
+import re
+import unittest
+from pathlib import Path
+
+from app.datasources.catalog import (
+    BINDINGS, CAPABILITIES, SOURCES, bindings_for, catalog_document, evidence_locations, validate_catalog,
+)
+from app.datasources.contracts import RESOLVABLE_STATES, RETIRED, UNSUPPORTED
+from app.datasources.resolver import CapabilityResolver, CapabilityUnavailable
+from app.platform.strategy_data_needs import STRATEGY_DATA_NEEDS, strategy_data_needs_catalog
+from app.platform.strategy_registry import STRATEGY_CONTRACTS
+
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = SERVICE_ROOT.parent
+
+
+class CatalogTests(unittest.TestCase):
+    def test_catalog_is_internally_consistent(self):
+        self.assertEqual(validate_catalog(), [])
+
+    def test_every_adapter_and_module_exists(self):
+        for binding in BINDINGS:
+            if binding.adapter:
+                path = binding.adapter.split(":", 1)[0]
+                if path.startswith("scripts/"):
+                    if not (REPO_ROOT / "quant-service").is_dir():
+                        continue   # outside the repository checkout (service image)
+                    root = REPO_ROOT
+                else:
+                    root = SERVICE_ROOT
+                self.assertTrue((root / path).is_file(), f"{binding.source}->{binding.capability}: {path}")
+        for source in SOURCES.values():
+            self.assertTrue((SERVICE_ROOT / source.module).is_file(), source.module)
+
+    def test_credentials_are_names_never_values(self):
+        for source in SOURCES.values():
+            for name in source.credential_env:
+                self.assertRegex(name, r"^[A-Z][A-Z0-9_]+$")
+
+    def test_resolution_order_and_exclusions(self):
+        order = [binding.source for binding in bindings_for("limits.limit_up_pool")]
+        self.assertEqual(order[0], "fuyao_ths")
+        self.assertNotIn("longhuvip", [binding.source for binding in bindings_for("bars.daily")])   # retired K-line
+        self.assertNotIn("eastmoney_free", [binding.source for binding in bindings_for("quote.all_a_snapshot")])
+        self.assertTrue(all(binding.status in RESOLVABLE_STATES for capability in CAPABILITIES
+                            for binding in bindings_for(capability)))
+
+    def test_evidence_locations_replace_hard_coded_vendor_filters(self):
+        locations = evidence_locations("limits.limit_up_pool")
+        self.assertEqual(locations[0], {"source": "fuyao_ths", "table": "market_events",
+                                        "filter": {"event_type": "limit_up_pool"}})
+        self.assertIn({"source": "eastmoney_ztb", "table": "raw_market_observations",
+                       "filter": {"capability": "limit_pool_limit_up"}}, locations)
+
+    def test_document_lists_retired_and_unsupported_separately(self):
+        document = catalog_document()
+        self.assertIn({"source": "longhuvip", "capability": "bars.daily",
+                       "notes": "个股日K 接口（旧系统 id=7）恒空，下线；日K 走 longhuvip_composite"}, document["retired"])
+        snapshot = next(item for item in document["capabilities"] if item["key"] == "quote.all_a_snapshot")
+        self.assertIn(UNSUPPORTED, {provider["status"] for provider in snapshot["providers"]})
+        self.assertNotIn(RETIRED, {provider["status"] for capability in document["capabilities"]
+                                   for provider in capability["providers"]})
+
+
+class StrategyNeedsTests(unittest.TestCase):
+    def test_every_strategy_states_resolvable_capabilities(self):
+        self.assertEqual(set(STRATEGY_DATA_NEEDS), set(STRATEGY_CONTRACTS))
+        for strategy, needs in STRATEGY_DATA_NEEDS.items():
+            self.assertTrue(needs.needs, strategy)
+            for need in needs.needs:
+                self.assertIn(need.capability, CAPABILITIES, f"{strategy}: {need.capability}")
+                if need.required:
+                    self.assertTrue(bindings_for(need.capability), f"{strategy} needs {need.capability}")
+
+    def test_needs_never_name_a_vendor(self):
+        vendors = set(SOURCES)
+        for item in strategy_data_needs_catalog():
+            for need in item["needs"]:
+                self.assertFalse(any(vendor in need["capability"] for vendor in vendors))
+
+    def test_legacy_couplings_point_at_real_lines(self):
+        for needs in STRATEGY_DATA_NEEDS.values():
+            for coupling in needs.legacy_couplings:
+                match = re.match(r"^(app/[\w/]+\.py):(\d+) ", coupling)
+                self.assertIsNotNone(match, coupling)
+                lines = (SERVICE_ROOT / match.group(1)).read_text(encoding="utf-8").splitlines()
+                self.assertLessEqual(int(match.group(2)), len(lines), coupling)
+
+
+class MigrationPinTests(unittest.TestCase):
+    """What the catalog resolves to must equal what strategy code used to say."""
+
+    def test_taxonomies_equal_the_literals_they_replaced(self):
+        from app.datasources.catalog import TAXONOMIES
+        from app.platform.strategy_data_needs import strategy_taxonomies
+
+        self.assertEqual(strategy_taxonomies("xiaojie_leader_flow"), ("ths_concept_flow", "longhu_ths_industry"))
+        self.assertEqual(strategy_taxonomies("intraday_watchlist_confirmation"),
+                         ("ths_concept_flow", "ths_index_n", "ths_industry"))
+        self.assertEqual(strategy_taxonomies("countertrend_rebound_shadow"), ("ths_industry",))
+        for needs in STRATEGY_DATA_NEEDS.values():
+            for need in needs.needs:
+                for key in need.taxonomies:
+                    self.assertEqual(TAXONOMIES[key].status, "live_verified", key)
+
+    def test_label_properties_and_store_order(self):
+        from app.datasources.catalog import (
+            EXCHANGE_TIMESTAMPED_QUOTE_LABELS, RULE_USABLE_FLOW_LABELS, primary_source, primary_store_value,
+            store_values, taxonomies_for,
+        )
+
+        self.assertEqual(EXCHANGE_TIMESTAMPED_QUOTE_LABELS, {"tencent_batched_watch_quote", "longhuvip_watch_quote"})
+        self.assertEqual(RULE_USABLE_FLOW_LABELS, {"fuyao_ths_derived"})
+        self.assertEqual(primary_source("quote.all_a_snapshot"), "fuyao_ths")
+        self.assertEqual(primary_store_value("flow.stock_daily", "stock_money_flow_daily", "source"), "longhuvip_main_net")
+        self.assertEqual(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")[:2],
+                         ("tushare_primary", "tushare_super_sdk"))
+        self.assertEqual(store_values("fundamentals.daily_basic", "daily_fundamentals", "provider"),
+                         ("tushare_super_get", "longhuvip_composite"))
+        self.assertNotIn("fuyao_ths_concept", taxonomies_for(["ths_concept"]))       # declared, not proven
+        self.assertIn("fuyao_ths_concept", taxonomies_for(["ths_concept"], min_status="declared"))
+
+
+class ResolverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_priority_fallback_and_provenance(self):
+        resolver = CapabilityResolver()
+
+        async def broken(**_params):
+            raise RuntimeError("upstream down")
+
+        async def backup(**params):
+            return [{"symbol": "000001.SZ", "day": params["trade_date"]}]
+
+        resolver.bind("fuyao_ths", "limits.limit_up_pool", broken)
+        resolver.bind("eastmoney_ztb", "limits.limit_up_pool", backup)
+        result = await resolver.fetch("limits.limit_up_pool", trade_date="2026-09-18")
+        self.assertEqual(result.source, "eastmoney_ztb")
+        self.assertTrue(result.is_fallback)
+        self.assertEqual([attempt["status"] for attempt in result.attempts], ["failed", "completed"])
+        self.assertEqual(result.provenance()["capability"], "limits.limit_up_pool")
+
+    async def test_empty_falls_through_unless_accepted(self):
+        resolver = CapabilityResolver()
+
+        async def empty(**_params):
+            return []
+
+        resolver.bind("fuyao_ths", "limits.limit_down_pool", empty)
+        with self.assertRaises(CapabilityUnavailable) as raised:
+            await resolver.fetch("limits.limit_down_pool", trade_date="2026-09-18")
+        self.assertEqual(raised.exception.attempts[0]["status"], "empty")
+        result = await resolver.fetch("limits.limit_down_pool", accept_empty=True, trade_date="2026-09-18")
+        self.assertEqual(result.rows, [])
+
+    async def test_health_gate_and_source_restriction(self):
+        async def gate(source, _capability):
+            return source != "fuyao_ths"
+
+        resolver = CapabilityResolver(health_gate=gate)
+
+        async def rows(**_params):
+            return [1]
+
+        resolver.bind("fuyao_ths", "limits.broken_pool", rows)
+        resolver.bind("eastmoney_ztb", "limits.broken_pool", rows)
+        result = await resolver.fetch("limits.broken_pool", trade_date="d")
+        self.assertEqual(result.source, "eastmoney_ztb")
+        self.assertEqual(result.attempts[0], {"source": "fuyao_ths", "status": "circuit_open"})
+        with self.assertRaises(CapabilityUnavailable):
+            await resolver.fetch("limits.broken_pool", sources=["fuyao_ths"], trade_date="d")
+
+    def test_bind_rejects_uncatalogued_or_refused_sources(self):
+        resolver = CapabilityResolver()
+
+        async def rows(**_params):
+            return [1]
+
+        with self.assertRaises(ValueError):
+            resolver.bind("fuyao_ths", "no.such_capability", rows)
+        with self.assertRaises(ValueError):
+            resolver.bind("sina_free", "limits.limit_up_pool", rows)
+        with self.assertRaises(ValueError):
+            resolver.bind("eastmoney_free", "quote.all_a_snapshot", rows)   # unsupported
+        with self.assertRaises(ValueError):
+            resolver.bind("longhuvip", "bars.daily", rows)                  # retired
+
+    def test_package_bindings_cover_their_catalog_entries(self):
+        from app.datasources.bindings import register_package_sources
+
+        async def fuyao(_route, _params):
+            return {}
+
+        resolver = register_package_sources(CapabilityResolver(), fuyao_fetch=fuyao)
+        package_sources = {key for key, source in SOURCES.items() if source.module.startswith("app/datasources/sources/")
+                           and source.license != "local_files"}
+        for binding in BINDINGS:
+            if binding.source in package_sources and binding.status in RESOLVABLE_STATES and binding.adapter \
+                    and not binding.adapter.startswith(("app/datasources/collectors/", "scripts/")):
+                self.assertIn(binding.source, resolver.bound_sources(binding.capability),
+                              f"{binding.source}->{binding.capability} has no implementation bound")
+
+
+if __name__ == "__main__":
+    unittest.main()

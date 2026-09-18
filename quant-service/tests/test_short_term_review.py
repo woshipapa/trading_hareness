@@ -23,7 +23,7 @@ class ShortTermReviewTests(unittest.TestCase):
             observed_at="2026-08-21T08:00:00+00:00",
             tushare_lhb_context={"000001.SZ": {"institution_records": 2, "institution_net_buy": 100.5}},
         )
-        self.assertEqual(result["methodology"], "short-term-review-v2")
+        self.assertEqual(result["methodology"], "short-term-review-v3")
         self.assertEqual(result["market_emotion"]["limit_up_count"], 1)
         self.assertEqual(result["market_emotion"]["previous_limit_positive_count"], 1)
         self.assertEqual(result["ladder"]["highest_board_count"], 2)

@@ -46,7 +46,7 @@ def persist_generated_signals(
     market_context: dict[str, Any],
     fast_confirmation: dict[str, Any],
     order_book_feature: dict[str, Any],
-    tushare_minute: dict[str, Any] | None,
+    realtime_minute: dict[str, Any] | None,
     paper_position: dict[str, Any] | None,
     portfolio_snapshot: dict[str, Any],
     candidate_sector_keys: tuple[str, ...] | list[str],
@@ -121,7 +121,7 @@ def persist_generated_signals(
         evidence = {
             "quote": quote, book_key: order_book_feature, "order_book_source": book_source,
             "tencent": quote, "tencent_order_book": order_book_feature, "tencent_minute": minute_feature,
-            "peer_context": peer_context, "tushare_rt_min": tushare_minute,
+            "peer_context": peer_context, "realtime_minute": realtime_minute,
             "tushare_rt_k_fast": fast_confirmation, "daily_factors": daily_factors,
             "market_context": market_context,
         }
@@ -162,7 +162,7 @@ def persist_generated_signals(
         persisted.append({
             "signal_event_id": event["signal_event_id"], "symbol": symbol, "state": state,
             **signal, "observed_at": observed_at, "quote": quote,
-            "minute": (tushare_minute or {}).get("latest"),
+            "minute": (realtime_minute or {}).get("latest"),
             "fast_quote_confirmation": fast_confirmation, "watch": watch,
         })
     return persisted
