@@ -106,3 +106,76 @@ class DrillBoardEventsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeliverySelectionTests(unittest.TestCase):
+    """The same leader re-qualifies every minute its board stays hot."""
+
+    @staticmethod
+    def _candidate(symbol, sector="881121", direction="inflow"):
+        return {"symbol": symbol, "taxonomy_key": "longhu_ths_industry",
+                "sector_key": sector, "direction": direction}
+
+    def test_a_finding_already_sent_is_not_sent_again(self):
+        from app.board_flow_drill import delivery_key, select_for_delivery
+        first = self._candidate("002156.SZ")
+        result = select_for_delivery([first], [delivery_key(first)])
+        self.assertEqual(result["selected"], [])
+        self.assertEqual(result["suppressed_repeat"], 1)
+
+    def test_the_same_name_in_another_board_is_a_separate_finding(self):
+        from app.board_flow_drill import delivery_key, select_for_delivery
+        first = self._candidate("002156.SZ", sector="881121")
+        other = self._candidate("002156.SZ", sector="881270")
+        result = select_for_delivery([other], [delivery_key(first)])
+        self.assertEqual(len(result["selected"]), 1)
+
+    def test_a_reversal_of_direction_is_a_separate_finding(self):
+        from app.board_flow_drill import delivery_key, select_for_delivery
+        inflow = self._candidate("002156.SZ")
+        outflow = self._candidate("002156.SZ", direction="outflow")
+        result = select_for_delivery([outflow], [delivery_key(inflow)])
+        self.assertEqual(len(result["selected"]), 1)
+
+    def test_one_pass_cannot_exceed_its_own_budget(self):
+        from app.board_flow_drill import select_for_delivery
+        picks = [self._candidate(f"{600000 + i}.SH") for i in range(10)]
+        self.assertEqual(len(select_for_delivery(picks, [], max_per_pass=3)["selected"]), 3)
+
+    def test_the_session_budget_is_derived_from_what_was_already_sent(self):
+        # A restart must not hand out a fresh allowance.
+        from app.board_flow_drill import select_for_delivery
+        picks = [self._candidate(f"{600000 + i}.SH") for i in range(10)]
+        sent = [f"{600100 + i}.SH:longhu_ths_industry:881121:inflow" for i in range(23)]
+        result = select_for_delivery(picks, sent, max_per_pass=3, max_per_session=24)
+        self.assertEqual(len(result["selected"]), 1)
+        self.assertEqual(result["remaining_after"], 0)
+
+    def test_an_exhausted_session_sends_nothing_more(self):
+        from app.board_flow_drill import select_for_delivery
+        sent = [f"{600100 + i}.SH:longhu_ths_industry:881121:inflow" for i in range(24)]
+        result = select_for_delivery([self._candidate("002156.SZ")], sent, max_per_session=24)
+        self.assertEqual(result["selected"], [])
+
+    def test_each_selected_finding_carries_its_key(self):
+        from app.board_flow_drill import select_for_delivery
+        selected = select_for_delivery([self._candidate("002156.SZ")], [])["selected"]
+        self.assertEqual(selected[0]["delivery_key"], "002156.SZ:longhu_ths_industry:881121:inflow")
+
+
+class AttachNamesTests(unittest.TestCase):
+    def test_a_missing_name_is_resolved_from_the_instrument_table(self):
+        from app.board_flow_drill import attach_names
+        resolved = attach_names([{"symbol": "002156.SZ", "name": None}], {"002156.SZ": "通富微电"})
+        self.assertEqual(resolved[0]["name"], "通富微电")
+
+    def test_a_name_already_present_is_kept(self):
+        from app.board_flow_drill import attach_names
+        resolved = attach_names([{"symbol": "002156.SZ", "name": "通富微电"}], {"002156.SZ": "别的"})
+        self.assertEqual(resolved[0]["name"], "通富微电")
+
+    def test_an_unresolvable_symbol_falls_back_to_its_code(self):
+        # A six-digit code is a poor label but an honest one; inventing a name
+        # would be worse.
+        from app.board_flow_drill import attach_names
+        self.assertEqual(attach_names([{"symbol": "002156.SZ"}], {})[0]["name"], "002156.SZ")

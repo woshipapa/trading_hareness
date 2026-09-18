@@ -29,6 +29,12 @@ MIN_RELATIVE_STRENGTH_PCT = 0.5
 #: A name with no turnover cannot be said to have received flow at all.
 MIN_TURNOVER = 0.0
 
+#: Delivery bounds, mirroring the leader-flow alert budget. The flow curve
+#: produces a snapshot every minute and a single minute can yield a dozen
+#: names, so without these one afternoon would be several hundred messages.
+MAX_DELIVERED_PER_PASS = 3
+MAX_DELIVERED_PER_SESSION = 24
+
 
 def _number(value: Any) -> float | None:
     try:
@@ -152,7 +158,71 @@ def drill_board_events(
     }
 
 
+def delivery_key(candidate: Mapping[str, Any]) -> str:
+    """One name, in one board, in one direction, is one finding."""
+    return ":".join((
+        str(candidate.get("symbol") or ""),
+        str(candidate.get("taxonomy_key") or ""),
+        str(candidate.get("sector_key") or ""),
+        str(candidate.get("direction") or ""),
+    ))
+
+
+def attach_names(candidates: Iterable[Mapping[str, Any]],
+                 names: Mapping[str, str]) -> list[dict[str, Any]]:
+    """Fill in instrument names the cross-section does not carry.
+
+    The all-A snapshot returns symbol, price, change and turnover but no name,
+    so a delivered message would otherwise be a list of six-digit codes.
+    """
+    resolved: list[dict[str, Any]] = []
+    for candidate in candidates:
+        item = dict(candidate)
+        symbol = str(item.get("symbol") or "")
+        item["name"] = item.get("name") or names.get(symbol) or symbol
+        resolved.append(item)
+    return resolved
+
+
+def select_for_delivery(
+    candidates: Iterable[Mapping[str, Any]],
+    already_delivered: Iterable[str],
+    *,
+    max_per_pass: int = MAX_DELIVERED_PER_PASS,
+    max_per_session: int = MAX_DELIVERED_PER_SESSION,
+) -> dict[str, Any]:
+    """Pick what is worth sending, once per finding and within the budget.
+
+    Repetition is the failure mode to avoid: the same leader keeps qualifying
+    minute after minute while its board stays hot, and re-sending it says
+    nothing new. The remaining budget is derived from what the session already
+    delivered, so a restart cannot hand out a fresh allowance.
+    """
+    seen = set(already_delivered)
+    remaining = max(0, min(max_per_pass, max_per_session - len(seen)))
+    selected: list[dict[str, Any]] = []
+    suppressed_repeat = 0
+    for candidate in candidates:
+        key = delivery_key(candidate)
+        if key in seen:
+            suppressed_repeat += 1
+            continue
+        if len(selected) >= remaining:
+            break
+        seen.add(key)
+        selected.append({**dict(candidate), "delivery_key": key})
+    return {
+        "selected": selected,
+        "suppressed_repeat": suppressed_repeat,
+        "session_delivered": len(set(already_delivered)),
+        "session_budget": max_per_session,
+        "remaining_after": max(0, max_per_session - len(seen)),
+    }
+
+
 __all__ = [
+    "MAX_DELIVERED_PER_PASS", "MAX_DELIVERED_PER_SESSION",
     "MAX_PER_BOARD", "MIN_RELATIVE_STRENGTH_PCT",
-    "board_members", "drill_board_event", "drill_board_events",
+    "attach_names", "board_members", "delivery_key",
+    "drill_board_event", "drill_board_events", "select_for_delivery",
 ]
