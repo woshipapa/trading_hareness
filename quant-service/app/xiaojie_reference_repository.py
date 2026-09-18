@@ -18,7 +18,7 @@ from typing import Any, Awaitable, Callable
 from psycopg.types.json import Json
 
 from .platform.strategy_data_needs import strategy_taxonomies
-from .sector_membership_repository import point_in_time_membership_predicate
+from .sector_membership_repository import point_in_time_membership_predicate, sector_group_predicate
 
 #: Sessions used for the breakout high and the recent-behaviour counters.
 LOOKBACK_SESSIONS = 20
@@ -150,14 +150,20 @@ SECTOR_TAXONOMY_PREFERENCE = strategy_taxonomies("xiaojie_leader_flow")
 
 def membership_for_taxonomy(connection: Any, trading_date: date,
                             taxonomy_key: str) -> dict[str, set[str]]:
-    """Point-in-time membership for exactly one taxonomy."""
+    """Point-in-time membership for exactly one taxonomy, sectors only.
+
+    A qualification list is not a sector.  The concept taxonomy this falls back
+    to carries 融资融券 with 3,915 members, and a name's move minus "everything
+    margin-eligible" measures the market, not a sector rotation.
+    """
+    sector_only, sector_parameters = sector_group_predicate("member")
     membership_predicate = point_in_time_membership_predicate(
         "member", known_at_cutoff_sql="((%s::date + time '08:59:59') AT TIME ZONE 'Asia/Shanghai')",
     )
     rows = connection.execute(
         f"""SELECT symbol, sector_key FROM quant.sector_membership_history member
-            WHERE taxonomy_key=%s AND {membership_predicate}""",
-        (taxonomy_key, trading_date, trading_date, trading_date),
+            WHERE taxonomy_key=%s AND {sector_only} AND {membership_predicate}""",
+        (taxonomy_key, *sector_parameters, trading_date, trading_date, trading_date),
     ).fetchall()
     membership: dict[str, set[str]] = {}
     for row in rows:

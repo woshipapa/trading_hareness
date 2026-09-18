@@ -18,10 +18,14 @@ class _Connection:
     def __init__(self, by_taxonomy):
         self.by_taxonomy = by_taxonomy
         self.asked: list[str] = []
+        self.statements: list[str] = []
+        self.parameters: list[tuple] = []
 
-    def execute(self, _statement, parameters=None):
+    def execute(self, statement, parameters=None):
         taxonomy = parameters[0] if parameters else None
         self.asked.append(taxonomy)
+        self.statements.append(statement)
+        self.parameters.append(parameters or ())
         rows = [{"symbol": symbol, "sector_key": sector}
                 for symbol, sectors in self.by_taxonomy.get(taxonomy, {}).items()
                 for sector in sectors]
@@ -93,6 +97,29 @@ class SectorTaxonomySelectionTests(unittest.TestCase):
     def test_the_floor_sits_below_a_full_market_and_above_a_stub(self):
         self.assertLess(MINIMUM_TAXONOMY_COVERAGE, 5000)
         self.assertGreater(MINIMUM_TAXONOMY_COVERAGE, 500)
+
+
+class SectorOnlyMembershipTests(unittest.TestCase):
+    """A qualification list is not a sector, on the fallback path too.
+
+    The concept taxonomy leader-flow falls back to carries 融资融券 with 3,915
+    members.  Subtracting "everything margin-eligible" from a name's move
+    measures the market, not a sector rotation, so the same exclusion the peer
+    and exposure reads use applies here.
+    """
+
+    def test_the_membership_read_excludes_the_catalogued_non_sectors(self):
+        from app.datasources.catalog import NON_SECTOR_GROUPS
+        from app.xiaojie_reference_repository import membership_for_taxonomy
+
+        connection = _Connection({"ths_concept_flow": _map(10, 2, "con")})
+        membership_for_taxonomy(connection, TRADING_DATE, "ths_concept_flow")
+        statement = connection.statements[0]
+        self.assertIn("non_sector", statement)
+        self.assertIn("sector_key = ANY", statement)
+        # The keys travel as a parameter, so the catalog stays the one source.
+        self.assertIn(list(NON_SECTOR_GROUPS), [list(value) for value in connection.parameters[0]
+                                                if isinstance(value, list)])
 
 
 if __name__ == "__main__":
