@@ -172,8 +172,8 @@ python ../scripts/tdx-local-export.py --vipdoc <通达信>/vipdoc --out <offline
 PYTHONPATH=<pytdx 解包> python ../scripts/verify-tdx-protocol.py   # 与 pytdx 逐行比对
 ```
 
-迁移 `20260918_0095` 登记新 provider/能力/路由（peer 以 `QUANT_SKIP_MIGRATIONS=true` 运行，需在 owner 侧执行）；
-未执行时采集照常，只是 provider 目录页少这些条目。
+迁移 `20260918_ds0001`（owner 库已记录一条本仓库没有的 0095–0105 迁移线，故用不占序号的 ID）登记新 provider/能力/路由。
+2026-09-18 已在 owner 库直接执行其幂等插入（13 个 provider / 18 条能力 / 33 条路由），未改 alembic_version；两条迁移线合并时再补合并迁移。
 
 ## 8. 本次顺带修复的现存问题（均有测试）
 

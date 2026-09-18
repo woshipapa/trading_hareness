@@ -1,7 +1,12 @@
 """Register the token-free public evidence sources and their capabilities.
 
-Revision ID: 20260918_0095
+Revision ID: 20260918_ds0001
 Revises: 20260906_0094
+
+The revision id is deliberately outside the numeric sequence: the owner
+database already records 20260918_0105 from a lineage not in this
+repository, so a numbered id here could collide with it.  The operations are
+idempotent (ON CONFLICT), so applying them ahead of the merge is harmless.
 
 Every source below was probed from the owner peer on 2026-09-18 after the
 close (reachability and payload shape).  They stay ``declared`` research
@@ -14,7 +19,7 @@ for the reference pytdx client.
 from alembic import op
 
 
-revision = "20260918_0095"
+revision = "20260918_ds0001"
 down_revision = "20260906_0094"
 branch_labels = None
 depends_on = None
