@@ -138,8 +138,28 @@ def persist_trade_limit_rows(connection: Any, trading_date: date, rows: list[dic
     return stored
 
 
-def sector_membership(connection: Any, trading_date: date,
-                      taxonomy_key: str = "ths_concept_flow") -> dict[str, set[str]]:
+#: Sector taxonomies the session may draw its map from, best coverage wins and
+#: ties break toward the earlier entry.
+#:
+#: Concept flow leads because it is the definition the strategy was written
+#: against.  Longhu's industry taxonomy follows because it is the licensed
+#: source that can actually answer at full breadth: concept membership is
+#: filled one board at a time through a rate-limited Tushare route, while
+#: Longhu returns all 104 industry boards through the owner gateway in
+#: minutes.
+#:
+#: Coverage decides rather than mere presence.  On 2026-09-18 the concept
+#: taxonomy held exactly one board - 278 symbols from an interrupted backfill -
+#: against Longhu's 5,315, and "first non-empty" would have handed the strategy
+#: the one-board map, leaving every pool member ``sector_core_unconfirmed``
+#: just as an empty table did.  A partial sector map is not a smaller answer,
+#: it is a wrong one.
+SECTOR_TAXONOMY_PREFERENCE = ("ths_concept_flow", "longhu_ths_industry")
+
+
+def membership_for_taxonomy(connection: Any, trading_date: date,
+                            taxonomy_key: str) -> dict[str, set[str]]:
+    """Point-in-time membership for exactly one taxonomy."""
     membership_predicate = point_in_time_membership_predicate(
         "member", known_at_cutoff_sql="((%s::date + time '08:59:59') AT TIME ZONE 'Asia/Shanghai')",
     )
@@ -152,6 +172,39 @@ def sector_membership(connection: Any, trading_date: date,
     for row in rows:
         membership.setdefault(str(row["symbol"]), set()).add(str(row["sector_key"]))
     return membership
+
+
+def _best_membership(connection: Any, trading_date: date) -> tuple[str | None, dict[str, set[str]]]:
+    """The widest sector map available for the session, and where it came from."""
+    best_key: str | None = None
+    best: dict[str, set[str]] = {}
+    for candidate in SECTOR_TAXONOMY_PREFERENCE:
+        membership = membership_for_taxonomy(connection, trading_date, candidate)
+        if len(membership) > len(best):
+            best_key, best = candidate, membership
+    return best_key, best
+
+
+def sector_membership(connection: Any, trading_date: date,
+                      taxonomy_key: str | None = None) -> dict[str, set[str]]:
+    """The session's sector map, from whichever taxonomy covers the most names.
+
+    An explicit ``taxonomy_key`` pins the read to that one taxonomy and does
+    not consider any other, so a caller that needs a specific vendor's
+    definition still gets exactly it - or nothing.
+    """
+    if taxonomy_key is not None:
+        return membership_for_taxonomy(connection, trading_date, taxonomy_key)
+    return _best_membership(connection, trading_date)[1]
+
+
+def sector_membership_taxonomy(connection: Any, trading_date: date) -> str | None:
+    """Name the taxonomy the session's membership actually came from.
+
+    Recorded alongside the membership so a later review of a candidate can see
+    which vendor's sector definition confirmed it, rather than inferring it.
+    """
+    return _best_membership(connection, trading_date)[0]
 
 
 def candidate_references(connection: Any, trading_date: date) -> dict[str, dict[str, Any]]:
@@ -277,6 +330,7 @@ def load_session_reference(connection: Any, trading_date: date) -> dict[str, Any
         "trading_date": trading_date,
         "limits": trade_limits(connection, trading_date),
         "membership": sector_membership(connection, trading_date),
+        "membership_taxonomy": sector_membership_taxonomy(connection, trading_date),
         "references": candidate_references(connection, trading_date),
         "market_volume_baseline": market_volume_baseline(connection, trading_date),
         "names": instrument_names(connection),
@@ -284,7 +338,9 @@ def load_session_reference(connection: Any, trading_date: date) -> dict[str, Any
 
 
 __all__ = [
-    "LOOKBACK_SESSIONS", "MA_SESSIONS", "candidate_references", "ensure_session_trade_limits",
-    "instrument_names", "load_session_reference", "persist_trade_limit_rows",
-    "market_volume_baseline", "sector_membership", "trade_limits",
+    "LOOKBACK_SESSIONS", "MA_SESSIONS", "SECTOR_TAXONOMY_PREFERENCE",
+    "candidate_references", "ensure_session_trade_limits",
+    "instrument_names", "load_session_reference", "membership_for_taxonomy",
+    "persist_trade_limit_rows", "market_volume_baseline", "sector_membership",
+    "sector_membership_taxonomy", "trade_limits",
 ]
