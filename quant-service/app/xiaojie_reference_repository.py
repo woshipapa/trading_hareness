@@ -165,15 +165,36 @@ def membership_for_taxonomy(connection: Any, trading_date: date,
     return membership
 
 
+#: Below this a taxonomy is treated as not yet loaded rather than as a choice.
+#: ths_concept_flow held 278 symbols for months while longhu_ths_industry held
+#: 5,315, and preferring the wider map was the only sensible rule then.
+MINIMUM_TAXONOMY_COVERAGE = 3_000
+
+
 def _best_membership(connection: Any, trading_date: date) -> tuple[str | None, dict[str, set[str]]]:
-    """The widest sector map available for the session, and where it came from."""
-    best_key: str | None = None
-    best: dict[str, set[str]] = {}
+    """The session's sector map: the declared order, skipping any not yet loaded.
+
+    Selection used to be by coverage alone, which was right while only one
+    taxonomy held anything.  Once both were populated it began choosing between
+    maps that are not interchangeable: for 2026-09-21 ths_concept_flow covered
+    5,569 names at 23.6 memberships each against longhu_ths_industry's 5,315 at
+    1.2.  A 254-name lead would have swapped "the stock's industry" for
+    twenty-three concepts, and leader-flow's whole question - is this name
+    leading its sector - has no answer when the name has twenty-three sectors.
+
+    So the declared order carries the intent and coverage only rejects a
+    taxonomy nothing has filled in yet.  A session where none clears the floor
+    still gets the widest available rather than nothing at all.
+    """
+    widest_key: str | None = None
+    widest: dict[str, set[str]] = {}
     for candidate in SECTOR_TAXONOMY_PREFERENCE:
         membership = membership_for_taxonomy(connection, trading_date, candidate)
-        if len(membership) > len(best):
-            best_key, best = candidate, membership
-    return best_key, best
+        if len(membership) >= MINIMUM_TAXONOMY_COVERAGE:
+            return candidate, membership
+        if len(membership) > len(widest):
+            widest_key, widest = candidate, membership
+    return widest_key, widest
 
 
 def sector_membership(connection: Any, trading_date: date,
@@ -329,7 +350,7 @@ def load_session_reference(connection: Any, trading_date: date) -> dict[str, Any
 
 
 __all__ = [
-    "LOOKBACK_SESSIONS", "MA_SESSIONS", "SECTOR_TAXONOMY_PREFERENCE",
+    "LOOKBACK_SESSIONS", "MA_SESSIONS", "MINIMUM_TAXONOMY_COVERAGE", "SECTOR_TAXONOMY_PREFERENCE",
     "candidate_references", "ensure_session_trade_limits",
     "instrument_names", "load_session_reference", "membership_for_taxonomy",
     "persist_trade_limit_rows", "market_volume_baseline", "sector_membership",

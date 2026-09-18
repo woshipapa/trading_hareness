@@ -64,8 +64,11 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
     _needs(
         "xiaojie_leader_flow",
         Need("quote.all_a_snapshot", purpose="all-A cross-section"), Need("limits.prices", purpose="blocked without today's limits"),
-        Need("sector.membership", purpose="sector core confirmation; widest coverage wins",
-             taxonomies=("ths_concept_flow", "longhu_ths_industry")),
+        # Order, not coverage: an industry map gives a name one sector, a
+        # concept map gives it twenty-three, and "is this name leading its
+        # sector" only has an answer under the first.
+        Need("sector.membership", purpose="sector core confirmation; first loaded taxonomy in order wins",
+             taxonomies=("longhu_ths_industry", "ths_concept_flow")),
         Need("bars.daily", purpose="MA20/overheat gate"),
     ),
 )}

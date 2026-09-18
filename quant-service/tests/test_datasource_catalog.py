@@ -96,7 +96,9 @@ class MigrationPinTests(unittest.TestCase):
         from app.datasources.catalog import TAXONOMIES
         from app.platform.strategy_data_needs import strategy_taxonomies
 
-        self.assertEqual(strategy_taxonomies("xiaojie_leader_flow"), ("ths_concept_flow", "longhu_ths_industry"))
+        # Reordered 2026-09-18 after the membership load filled both maps:
+        # coverage then favoured 23.6 concepts per stock over one industry.
+        self.assertEqual(strategy_taxonomies("xiaojie_leader_flow"), ("longhu_ths_industry", "ths_concept_flow"))
         self.assertEqual(strategy_taxonomies("intraday_watchlist_confirmation"),
                          ("ths_concept_flow", "ths_index_n", "ths_industry"))
         self.assertEqual(strategy_taxonomies("countertrend_rebound_shadow"), ("ths_industry",))

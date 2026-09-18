@@ -30,12 +30,15 @@ class SectorMembershipPreferenceTests(unittest.TestCase):
     read falls through to whichever taxonomy can actually answer."""
 
     def test_equal_coverage_keeps_the_leading_taxonomy(self):
+        # The leading taxonomy is the industry map since 2026-09-18: a concept
+        # map answers "which sectors" with twenty-three, and leader-flow asks
+        # whether a name leads one.
         connection = _Connection({
             "ths_concept_flow": [("600176.SH", "885556.TI")],
             "longhu_ths_industry": [("600176.SH", "881121")],
         })
         self.assertEqual(sector_membership(connection, TRADING_DATE),
-                         {"600176.SH": {"885556.TI"}})
+                         {"600176.SH": {"881121"}})
 
     def test_the_longhu_industry_taxonomy_answers_when_concept_is_empty(self):
         connection = _Connection({"longhu_ths_industry": [("600176.SH", "881121")]})
