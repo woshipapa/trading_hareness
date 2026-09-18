@@ -2609,10 +2609,11 @@ async def intraday_longhu_order_book_quotes(
     symbols: list[str], *, max_symbols: int = 40,
 ) -> list[dict[str, Any]]:
     """Flatten Longhu's verified ``GetStockPanKou`` ten-level book."""
+    from .intraday_price_priority import order_book_from_row
     rows, _status = await intraday_longhu_watch_quotes(symbols[:max_symbols])
     flattened: list[dict[str, Any]] = []
     for row in rows:
-        book = row.get("order_book") if isinstance(row.get("order_book"), dict) else None
+        book = order_book_from_row(row)
         if not book:
             continue
         flattened.append({

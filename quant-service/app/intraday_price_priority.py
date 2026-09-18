@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 from .intraday_quote_normalization import exchange_time_status
 
@@ -78,3 +78,33 @@ async def primary_order_books(
             return primary
         raise
     return [*primary, *public]
+
+
+def order_book_from_row(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Read the ten-level book from either shape the licensed source returns.
+
+    The single-symbol quote nests it under ``order_book``; the batched watch
+    call puts ``bids``/``asks`` at the row's top level and has no such key.
+    Reading only the nested shape silently discarded every batched row, so the
+    order-book loop found nothing licensed and ran the whole session on the
+    Tencent fallback while the licensed levels were sitting in the response.
+    """
+    nested = row.get("order_book")
+    if isinstance(nested, Mapping) and (nested.get("bids") or nested.get("asks")):
+        return dict(nested)
+    bids = [dict(level) for level in (row.get("bids") or []) if isinstance(level, Mapping)]
+    asks = [dict(level) for level in (row.get("asks") or []) if isinstance(level, Mapping)]
+    if not bids and not asks:
+        return None
+    # Derived exactly as the nested shape derives them, so a consumer cannot
+    # tell which call produced the book.
+    side = "bid_only" if bids and not asks else "ask_only" if asks and not bids else "two_sided"
+    return {
+        "bids": bids, "asks": asks, "book_side": side,
+        "one_sided_book": side != "two_sided",
+        "seal_volume_lot": (bids[0].get("size") if side == "bid_only"
+                            else asks[0].get("size") if side == "ask_only" else None),
+        "total_bid_lot": row.get("total_bid_lot"),
+        "total_ask_lot": row.get("total_ask_lot"),
+        "source": "longhuvip:GetStockPanKou",
+    }
