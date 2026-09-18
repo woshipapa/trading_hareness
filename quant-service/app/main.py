@@ -642,7 +642,6 @@ from .longhu_supplemental_service import sync as sync_longhu_supplemental_isolat
 from .longhu_replay_read_repository import readiness as longhu_replay_readiness
 from .longhu_schema_profile_repository import schema_profile as longhu_schema_profile
 from .longhu_vendor_source import (
-    MAX_PAGE_SIZE as LONGHU_MAX_PAGE_SIZE,
     configured as longhu_vendor_configured,
     intraday_source as longhu_intraday_source,
 )
@@ -3047,8 +3046,29 @@ def intraday_board_flow_curve_items(kind: str, flows: list[dict[str, Any]]) -> l
     return items
 
 
+async def intraday_longhu_industry_board_flow() -> list[dict[str, Any]]:
+    """One licensed ranking pass over every industry board, newest first."""
+    if not longhu_vendor_configured():
+        raise RuntimeError("longhu_not_configured")
+    from .longhu_board_flow import board_flow_items, gateway_rows
+    from .longhu_sector_membership import CATALOG_MAX_PAGES, catalog_request
+
+    rows: list[Any] = []
+    offset = 0
+    for _ in range(CATALOG_MAX_PAGES):
+        payload = await shared_stock_api_call(catalog_request(offset))
+        page = gateway_rows(payload)
+        if not page:
+            break
+        rows.extend(page)
+        # The endpoint returns eight boards however many are requested, so the
+        # cursor advances by what arrived rather than by the size asked for.
+        offset += len(page)
+    return board_flow_items(rows)
+
+
 async def capture_intraday_board_flow_curve() -> dict[str, Any]:
-    """Capture one same-source flow point through the isolated action service."""
+    """Capture one flow point, preferring the licensed industry ranking."""
     return await _board_flow_capture_actions.capture(
         run_database=run_database_blocking,
         run_akshare=run_akshare_blocking,
@@ -3057,6 +3077,7 @@ async def capture_intraday_board_flow_curve() -> dict[str, Any]:
         persist_feature=persist_intraday_market_flow_feature,
         evaluate_rotation=evaluate_intraday_board_rotation_events,
         retry_rotation_deliveries=retry_pending_board_rotation_alerts,
+        licensed_industry_flow=intraday_longhu_industry_board_flow,
     )
 
 
