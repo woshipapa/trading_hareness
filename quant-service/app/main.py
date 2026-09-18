@@ -15,7 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 from statistics import mean, median
 from time import monotonic
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -1518,6 +1518,7 @@ async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, 
             cn_today(), db=db, run_public_blocking=run_akshare_blocking,
             run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
             persist_flow_rows=persist_stock_money_flow_rows,
+            source_factory=longhu_full_market_source_factory(),
         )
         return {**result, "universe_key": request.universe_key,
                 "members": int(result.get("daily_rows") or result.get("imported") or 0)}
@@ -1551,6 +1552,7 @@ async def sync_full_market_daily(request: FullMarketDailySyncRequest) -> dict[st
             request.trade_date or cn_today(), db=db, run_public_blocking=run_akshare_blocking,
             run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
             persist_flow_rows=persist_stock_money_flow_rows,
+            source_factory=longhu_full_market_source_factory(),
         )
     return await sync_full_market_daily_isolated(
         request,
@@ -2614,6 +2616,21 @@ def longhu_full_market_enabled() -> bool:
     return os.getenv("QUANT_LONGHU_FULL_MARKET_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
     }
+
+
+def longhu_full_market_source_factory() -> Callable[[], Any]:
+    """Pick the transport this host is actually entitled to use.
+
+    The owner holds the vendor credential and talks to Longhu directly.  A peer
+    never sees that credential and reaches the same actions through the owner's
+    gateway, which is what the owner-only adapter's own refusal tells it to do.
+    Choosing here keeps one enabling flag with one meaning on both hosts.
+    """
+    from .longhu_market_service import owner_longhu_source_factory
+    from .longhu_shared_full_market import shared_longhu_source_factory
+    from .longhu_vendor_source import direct_access_enabled
+
+    return owner_longhu_source_factory if direct_access_enabled() else shared_longhu_source_factory
 
 
 async def sync_longhu_supplemental_evidence(trade_date: date) -> dict[str, Any]:
