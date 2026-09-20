@@ -32,6 +32,11 @@ if [[ "${name}" != "${archive_root}" ]]; then
   # named n8n, so normalize only the top-level archive component here.
   tar_transform=(-s "/^${name}/${archive_root}/")
 fi
+# macOS may materialize AppleDouble ``._*`` sidecar files and extended
+# attributes while walking a checkout.  They are not source files; carrying
+# them into a Linux release can make UTF-8 source tests read binary sidecars
+# and produces noisy tar warnings during activation.
+export COPYFILE_DISABLE=1
 tar -czf "${output_archive}" -C "${parent}" \
   "${tar_transform[@]}" \
   --exclude="${name}/.git" \
@@ -45,6 +50,9 @@ tar -czf "${output_archive}" -C "${parent}" \
   --exclude="${name}/logs" \
   --exclude="${name}/artifacts" \
   --exclude="${name}/.pytest_cache" \
+  --exclude="${name}/._*" \
+  --exclude="${name}/*/._*" \
+  --exclude="${name}/**/._*" \
   --exclude="${name}/**/__pycache__" \
   --exclude="${name}/**/*.pyc" \
   "${name}"
@@ -62,5 +70,8 @@ for path in "${required[@]}"; do
     fi
   done
   (( found == 0 )) || { echo "archive verification failed: ${path}" >&2; exit 1; }
+done
+for entry in "${archive_entries[@]}"; do
+  [[ "${entry}" != *"/._"* ]] || { echo "archive verification failed: AppleDouble sidecar ${entry}" >&2; exit 1; }
 done
 printf 'archive=%s\nroot=%s\nrequired_paths=%s\n' "${output_archive}" "${repo_root}" "${#required[@]}"
