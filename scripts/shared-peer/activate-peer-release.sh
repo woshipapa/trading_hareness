@@ -12,7 +12,8 @@ wheelhouse_target="${release_root}/wheelhouse"
 current_repo="${peer_home}/trading_hareness"
 current_wheelhouse="${peer_home}/wheelhouse"
 saved_env="$(mktemp)"
-trap 'rm -f "${saved_env}"' EXIT
+saved_intraday_secrets="$(mktemp)"
+trap 'rm -f "${saved_env}" "${saved_intraday_secrets}"' EXIT
 
 test -r "${repo_archive}"
 test -r "${wheelhouse_archive}"
@@ -21,6 +22,11 @@ tar -tf "${wheelhouse_archive}" >/dev/null
 
 if [[ -f "${current_repo}/deploy/shared-peer/.env" ]]; then
   install -m 0600 "${current_repo}/deploy/shared-peer/.env" "${saved_env}"
+fi
+if [[ -f "${current_repo}/deploy/shared-peer/intraday-secrets.env" ]]; then
+  install -m 0600 \
+    "${current_repo}/deploy/shared-peer/intraday-secrets.env" \
+    "${saved_intraday_secrets}"
 fi
 
 install -d -m 0755 "${release_store}" "${release_root}"
@@ -133,6 +139,15 @@ test -f "${wheelhouse_target}/SHA256SUMS"
 
 if [[ -s "${saved_env}" ]]; then
   install -m 0600 "${saved_env}" "${repo_target}/deploy/shared-peer/.env"
+fi
+# The intraday provider and alert credentials live outside version control but
+# are part of the peer runtime.  Preserve them across the immutable source
+# switch just like .env; dropping this file leaves collection running while
+# silently disabling Feishu delivery and licensed provider fallbacks.
+if [[ -s "${saved_intraday_secrets}" ]]; then
+  install -m 0600 \
+    "${saved_intraday_secrets}" \
+    "${repo_target}/deploy/shared-peer/intraday-secrets.env"
 fi
 # Environment bundles are commonly produced on the Windows owner host. Strip
 # CRLF before Linux shells source the file; otherwise a trailing CR can become

@@ -94,6 +94,9 @@ class ActivatePeerReleaseTests(unittest.TestCase):
         self.assertIn('set_env_if_placeholder PEER_EXPECTED_RELEASE', source)
         self.assertIn('app_release=', source)
         self.assertIn('APP_BUILD_CREATED_AT', source)
+        self.assertIn('saved_intraday_secrets=', source)
+        self.assertIn('deploy/shared-peer/intraday-secrets.env', source)
+        self.assertIn('"${saved_intraday_secrets}"', source)
 
     def test_scheduler_release_carries_explicit_owner_cutover_policy(self) -> None:
         compose = (SCRIPT.parents[2] / "deploy" / "shared-peer" / "compose.intraday-owner.yaml").read_text(encoding="utf-8")
