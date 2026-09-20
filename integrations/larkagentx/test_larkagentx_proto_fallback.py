@@ -1,6 +1,8 @@
 import sys
 import unittest
 import random
+import gzip
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
 	import bridge
 	from proto_wire import tolerant_websocket_decode, tolerant_websocket_decode_with_meta
+	from proto_wire import decode_primary_websocket
+	from larkx.proto import proto_pb2 as P
 except ModuleNotFoundError as error:  # The workstation does not carry the supervisor venv.
 	bridge = None
 	tolerant_websocket_decode = None
@@ -164,6 +168,28 @@ class LarkAgentXProtoFallbackTests(unittest.TestCase):
 			raw += vfield((field << 3) | 4, 0)
 		with self.assertRaises(ValueError):
 			tolerant_websocket_decode_with_meta(raw)
+
+	def test_decodes_gzip_payload_encoding(self):
+		entity = bfield(1, b"gzip-msg") + vfield(2, 1) + bfield(3, b"synthetic-user") + bfield(10, b"7661209668907207659") + vfield(46, 2)
+		entry = bfield(1, b"entry") + bfield(2, entity)
+		push = bfield(1, entry)
+		packet = P.Packet(sid="gzip-sid", cmd=6, payload=gzip.compress(push))
+		frame = P.Frame(payloadEncoding="gzip", payload=packet.SerializeToString())
+		with patch.object(bridge.decoders, "decode_message_content", return_value=("synthetic", None)):
+			decoded_packet, messages = decode_primary_websocket(frame.SerializeToString())
+		self.assertEqual(decoded_packet["cmd"], 6)
+		self.assertEqual([message["msg_id"] for message in messages], ["gzip-msg"])
+
+	def test_accepts_json_dispatch_control_frame_without_packet_parse(self):
+		frame = P.Frame(
+			payloadEncoding="json",
+			payloadType="dispatch.command.DispatchCommandPayload",
+			payload=json.dumps({"command": 400, "command_id": "opaque", "body": {}, "ext": {}}).encode(),
+		)
+		packet, messages = decode_primary_websocket(frame.SerializeToString())
+		self.assertEqual(packet["transport"], "json")
+		self.assertEqual(packet["json_command"], 400)
+		self.assertEqual(messages, [])
 
 
 if __name__ == "__main__":

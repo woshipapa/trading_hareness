@@ -17,7 +17,7 @@ HTTP /send
 LarkAgentX 私有网关发送文本
 ```
 
-它默认不会接管官方机器人发送、卡片、图片或文件流程。LarkAgentX 当前只验证了个人账号文本发送，因此桥接服务要求监听会话和发送会话都显式配置白名单。适配器接受消息后才写入现有 ledger；桥接到适配器之间的短暂网络故障最多自动重试三次，仍失败时只记录错误，不会伪造已接收状态。
+它不替换目标群的 webhook 发送，而是把个人会话的实时接收交给适配器。当前已验证文本、完整卡片、独立图片，以及 post 富文本图片的私有 protobuf 解密链路。适配器接受消息后才写入现有 ledger；桥接到适配器之间的短暂网络故障最多自动重试三次，仍失败时只记录错误，不会伪造已接收状态。
 
 ## 本机试运行
 
@@ -25,12 +25,10 @@ LarkAgentX 私有网关发送文本
 
 ```bash
 cd /private/tmp/larkagentx-audit
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e .
 export LARKX_HOME=/Users/papa/.larkx
-lark auth qr
-lark auth check
+/Users/papa/.venvs/svc/bin/python -m pip install -e .
+/Users/papa/.venvs/svc/bin/lark auth qr
+/Users/papa/.venvs/svc/bin/lark auth check
 ```
 
 然后在 `/Users/papa/codebase/n8n` 目录运行桥接服务。令牌通过交互式环境注入，不能提交到仓库：
@@ -42,8 +40,17 @@ export LARKX_BRIDGE_TOKEN='从安全运行环境注入'
 export LARKX_INGRESS_URL='http://127.0.0.1:5680/internal/larkagentx/inbound'
 export LARKX_LISTEN_CHAT_IDS='oc_...'
 export LARKX_SEND_CHAT_IDS='oc_...'
-python3 integrations/larkagentx/bridge.py
+/Users/papa/.venvs/svc/bin/python integrations/larkagentx/bridge.py
 ```
+
+群实时转发部署在 47 时，`bridge.py` 只负责 LarkAgentX WebSocket 到本地适配器的实时入口；它会对 `LARKX_LISTEN_CHAT_IDS` 做白名单过滤。适配器继续复用现有 relay ledger、过滤和目标群 fan-out。路由格式是 `personal_web_chat_id=source_key`，例如：
+
+```text
+LARKX_GROUP_RELAY_ENABLED=true
+LARKX_GROUP_RELAY_ROUTES=7661209668907207659=anqiang;7667390477875858612=liwei
+```
+
+适配器入口为 `/internal/larkagentx/group-relay`，由 `x-larkagentx-token` 保护。文本、完整卡片、独立图片和带有完整解密参数的 post 图片直接进入 relay；bridge 在 WebSocket 事件进入 JSON 前解析 `RichTextElement.property` 中的 `img_v3` key、32 字节 AES key 和 12 字节 nonce。适配器通过 LarkAgentX cookie 下载密文，在本地完成 AES-256-GCM 解密，再复用现有 webhook/API 发送。文件、缺少完整卡片内容或缺少媒体解密参数的事件仍会作为实时触发器进入精确官方 OAuth 补读。systemd 环境中应使用统一 supervisor venv 的 `/opt/supervisor/.venv/bin/python`，凭证放在受限权限的 `LARKX_HOME`，不要提交到仓库。
 
 发送文本需要携带相同的桥接令牌：
 
@@ -56,4 +63,22 @@ curl -X POST http://127.0.0.1:8090/send \
 
 只有 `LARKX_LISTEN_CHAT_IDS` 和 `LARKX_SEND_CHAT_IDS` 中的会话会被处理。个人账号发出的回显消息会被桥接层丢弃，避免自动回复回环。
 
+bridge 在投递到 adapter 之前会把规范化事件写入 `LARKX_EVENT_SPOOL_DB`（SQLite，目录 0700、文件 0600），并使用递增 sequence、连续 drain cursor、lease、失败重试和启动后回放处理进程崩溃或 adapter 暂时不可用。事件 payload 有 512 KiB 上限，不保存 Cookie 或原始 protobuf frame；adapter 仍以 `message_id`/relay ledger 负责最终幂等。`LARKX_PROFILE` 会隔离凭证、spool 和 owner lock，适合在同一主机上运行不同会话，但每个 profile 仍只允许一个 WebSocket bridge。
+
+bridge 启动时取得 `LARKX_OWNER_LOCK_PATH` 的 Unix exclusive lock；第二个实例会 fail closed，不会形成两个个人 WebSocket 消费者。health 会公开 profile、owner lock、spool pending/failed、回放次数和最近错误，但不会输出 Cookie、token 或事件原文。
+
 监听消息正文需要以当前 `source-registry.json` 中已注册的路由标签开头，例如 `#liwei`；这是现有 n8n 导入链的必要路由条件。
+
+47 上的小范围修复统一通过仓库根目录的
+`scripts/hotfix-feishu-relay-edge.sh --apply` 发布。它会把 adapter、前端、
+路由表和本目录中的 bridge Python 文件放进同一个版本化覆盖层；adapter
+容器复用原有 image，bridge 复用 `/opt/supervisor/.venv`，两者都不触发
+image 构建或依赖安装。systemd 只固定执行
+`/opt/larkagentx/bridge-entrypoint.sh`，入口根据覆盖层的 `current` 原子
+指针选择代码，登录 cookie、token 和 `LARKX_HOME` 不随源码上传。需要回退
+时使用 `scripts/hotfix-feishu-relay-edge.sh --rollback <release-id> --apply`；
+只有 Node、Python 依赖或基础运行时变化才走正式运行时发布。
+
+bridge health 在刚重启且尚未收到下一条消息时可能显示
+`websocket.state=connecting`；这是上游客户端没有 on-open 回调的状态语义，
+服务进程、健康接口和后续消息接收仍分别由发布检查与运行时统计核验。

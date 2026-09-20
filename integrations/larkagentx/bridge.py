@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 import threading
 import time
 from datetime import datetime, timezone
@@ -31,16 +32,70 @@ from larkx.auth import AuthExpired, LarkAuth
 from larkx.client import LarkClient
 from larkx.proto import decoders
 from larkagentx_image_property import extract_rich_text_image_resource
-from proto_wire import tolerant_websocket_decode_with_meta
+from proto_wire import decode_primary_websocket, tolerant_websocket_decode_with_meta
+from event_spool import EventSpool
+from owner_lock import OwnerLock, profile_storage_paths
 
 
 LOG = logging.getLogger("larkagentx-bridge")
 MAX_BODY_BYTES = 64 * 1024
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
+MAX_FORENSIC_FRAME_BYTES = 2 * 1024 * 1024
+MAX_FORENSIC_FILES = 8
+DEFAULT_SPOOL_REPLAY_SECONDS = 30
 IMAGE_CDN_BASE_URL = "https://s1-imfile.feishucdn.com"
 DEFAULT_GAP_REPAIR_SECONDS = 600
 MIN_GAP_REPAIR_SECONDS = 120
 MAX_GAP_REPAIR_SECONDS = 1800
+
+
+class ProtocolForensics:
+	"""Bounded, local-only capture of malformed WebSocket frames.
+
+	The frame may contain private message material, so this is deliberately not
+	logged or sent to the adapter.  It is only enabled for the exception path,
+	kept under a 0700 directory, and rotated by count/size.
+	"""
+
+	def __init__(self, path: str | os.PathLike[str]) -> None:
+		self.path = Path(path).expanduser()
+		self.enabled = True
+		try:
+			self.path.mkdir(parents=True, exist_ok=True, mode=0o700)
+			os.chmod(self.path, 0o700)
+		except OSError as error:
+			self.enabled = False
+			LOG.warning("protocol forensic capture disabled: %s", error)
+
+	def capture(self, raw: bytes, error: Exception) -> dict[str, Any] | None:
+		if not self.enabled or not isinstance(raw, (bytes, bytearray)):
+			return None
+		if len(raw) > MAX_FORENSIC_FRAME_BYTES:
+			return {"captured": False, "reason": "frame_too_large", "bytes": len(raw)}
+		digest = hashlib.sha256(raw).hexdigest()
+		stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+		base = self.path / f"{stamp}-{digest[:16]}"
+		try:
+			frame_path = base.with_suffix(".bin")
+			meta_path = base.with_suffix(".json")
+			frame_path.write_bytes(bytes(raw))
+			os.chmod(frame_path, 0o600)
+			meta_path.write_text(json.dumps({
+				"captured_at": datetime.now(timezone.utc).isoformat(),
+				"length": len(raw),
+				"sha256": digest,
+				"error": str(error)[:240],
+				"error_type": type(error).__name__,
+			}, ensure_ascii=False) + "\n", encoding="utf-8")
+			os.chmod(meta_path, 0o600)
+			files = sorted(self.path.glob("*.bin"), key=lambda item: item.stat().st_mtime, reverse=True)
+			for old in files[MAX_FORENSIC_FILES:]:
+				old.unlink(missing_ok=True)
+				old.with_suffix(".json").unlink(missing_ok=True)
+			return {"captured": True, "path": str(frame_path), "length": len(raw), "sha256": digest[:16]}
+		except OSError as capture_error:
+			LOG.warning("protocol forensic capture failed: %s", capture_error)
+			return {"captured": False, "reason": "write_failed"}
 
 
 class RecoveringLarkClient(LarkClient):
@@ -75,8 +130,7 @@ class RecoveringLarkClient(LarkClient):
 						used_fallback = False
 						proto_meta = None
 						try:
-							_, packet = decoders.parse_ws_frame(raw)
-							messages = decoders.decode_push_messages(raw) if packet.get('cmd') == 6 else []
+							packet, messages = decode_primary_websocket(raw)
 						except Exception as primary_error:
 							packet, messages, proto_meta = tolerant_websocket_decode_with_meta(raw)
 							used_fallback = True
@@ -94,10 +148,10 @@ class RecoveringLarkClient(LarkClient):
 					except Exception as error:
 						if self.on_decode_error:
 							try:
-								self.on_decode_error(error)
+								self.on_decode_error(error, raw)
 							except Exception:
 								pass
-						logging.getLogger("larkagentx-bridge").warning("跳过无法恢复的 WebSocket 帧 len=%d sha256=%s: %s", len(raw), hashlib.sha256(raw).hexdigest()[:16], error)
+						logging.getLogger("larkagentx-bridge").warning("跳过无法恢复的 WebSocket 帧 len=%d sha256=%s type=%s: %s", len(raw), hashlib.sha256(raw).hexdigest()[:16], type(error).__name__, error)
 			finally:
 				heartbeat_task.cancel()
 
@@ -296,9 +350,22 @@ class Bridge:
 			raise RuntimeError("LARKX_LISTEN_CHAT_IDS must contain at least one chat ID")
 		if not self.send_chats:
 			raise RuntimeError("LARKX_SEND_CHAT_IDS must contain at least one chat ID")
-		self.auth = LarkAuth()
+		self.profile = os.environ.get("LARKX_PROFILE", "default").strip() or "default"
+		larkx_home = Path(os.environ.get("LARKX_HOME", "~/.larkx")).expanduser()
+		auth_path, default_spool_path, default_owner_path = profile_storage_paths(larkx_home, self.profile)
+		auth_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+		spool_path = os.environ.get("LARKX_EVENT_SPOOL_DB", str(default_spool_path))
+		self.event_spool = EventSpool(spool_path)
+		self.owner_lock = OwnerLock(os.environ.get("LARKX_OWNER_LOCK_PATH", str(default_owner_path)))
+		self.owner_lock.acquire()
+		self.auth_path = auth_path
+		forensic_path = os.environ.get("LARKX_PROTOCOL_FORENSICS_DIR", str(auth_path.parent / "protocol-forensics"))
+		self.protocol_forensics = ProtocolForensics(forensic_path)
+		self.auth = LarkAuth(path=auth_path)
 		self.decode_error_count = 0
 		self.last_decode_error_at = None
+		self.last_decode_error = None
+		self.last_forensic_capture = None
 		self.decode_fallback_count = 0
 		self.last_decode_fallback_at = None
 		self.unknown_field_count = 0
@@ -353,6 +420,12 @@ class Bridge:
 		self.websocket_attempt_count = 0
 		self.websocket_state = "starting"
 		self.last_websocket_attempt_at = None
+		self.spool_replay_seconds = max(5, min(300, int(os.environ.get("LARKX_SPOOL_REPLAY_SECONDS", str(DEFAULT_SPOOL_REPLAY_SECONDS)))))
+		self.spool_replay_count = 0
+		self.spool_replay_error_count = 0
+		self.last_spool_replay_at = None
+		self.last_spool_replay_error = None
+		self._spool_active: set[str] = set()
 		self.mapping_check_at = None
 		self.mapping_check_error = None
 		# Do not delay WebSocket startup on gateway probes. Mapping validation is
@@ -399,6 +472,10 @@ class Bridge:
 			"component": "larkagentx-bridge",
 			"runtime_source": os.environ.get("LARKX_BRIDGE_SOURCE_MODE", "base"),
 			"release": os.environ.get("LARKX_BRIDGE_RELEASE") or None,
+			"profile": self.profile,
+			"auth_path": str(self.auth_path),
+			"owner_lock": {"held": bool(self.owner_lock.held), "path": str(self.owner_lock.path)},
+			"event_spool": {**self.event_spool.stats(), "path": str(self.event_spool.path), "replay_seconds": self.spool_replay_seconds, "replay_count": self.spool_replay_count, "replay_error_count": self.spool_replay_error_count, "last_replay_at": self.last_spool_replay_at, "last_error": self.last_spool_replay_error},
 			"listen_chat_count": len(self.listen_chats),
 			"listen_chat_ids": sorted(self.listen_chats),
 			"websocket_chat_ids": sorted(self.websocket_chat_ids),
@@ -422,6 +499,9 @@ class Bridge:
 			"groups_skipped": self.groups_skipped,
 			"last_protocol_telemetry": self.last_protocol_telemetry,
 			"last_decode_error_at": self.last_decode_error_at,
+			"last_decode_error": self.last_decode_error,
+			"protocol_forensics": {"enabled": self.protocol_forensics.enabled, "path": str(self.protocol_forensics.path)},
+			"last_forensic_capture": self.last_forensic_capture,
 			"recovery_count": self.recovery_count,
 			"startup_recovery_count": self.startup_recovery_count,
 			"reconnect_recovery_count": self.reconnect_recovery_count,
@@ -441,9 +521,16 @@ class Bridge:
 			"user_id": self.auth.user_id or None,
 		}
 
-	def on_decode_error(self, error: Exception) -> None:
+	def on_decode_error(self, error: Exception, raw: bytes | None = None) -> None:
 		self.decode_error_count += 1
 		self.last_decode_error_at = datetime.now(timezone.utc).isoformat()
+		self.last_decode_error = {
+			"type": type(error).__name__,
+			"message": str(error)[:240],
+			"telemetry": error.telemetry() if hasattr(error, "telemetry") else None,
+		}
+		if raw is not None:
+			self.last_forensic_capture = self.protocol_forensics.capture(raw, error)
 		# A malformed protobuf frame can be followed by several fragments. Keep
 		# recovery bounded so this remains an exception path rather than OAuth
 		# polling in disguise.
@@ -590,11 +677,25 @@ class Bridge:
 			if embedded:
 				payload["_larkagentx_images"] = embedded
 		payload["source_label"] = os.environ.get("LARKX_SOURCE_LABEL", "LarkAgentX 个人会话")
+		event_id = f"larkagentx:{chat_id}:{message_id}"
+		try:
+			spool_state = await asyncio.to_thread(self.event_spool.enqueue, event_id, payload)
+			if spool_state == "delivered":
+				return
+			claim_state = await asyncio.to_thread(self.event_spool.claim, event_id)
+			if claim_state in {"delivered", "in_flight"}:
+				return
+		except Exception as error:
+			self.failed_count += 1
+			stats["failed_count"] += 1
+			LOG.error("inbound event spool failed message_id=%s: %s", message_id, error)
+			return
 		try:
 			last_error: Exception | None = None
 			for attempt in range(1, 4):
 				try:
 					result = await asyncio.to_thread(post_json, self.ingress_url, self.token, payload)
+					await asyncio.to_thread(self.event_spool.mark_delivered, event_id)
 					self.forwarded_count += 1
 					stats["forwarded_count"] += 1
 					stats["last_forwarded_at"] = datetime.now(timezone.utc).isoformat()
@@ -607,27 +708,67 @@ class Bridge:
 						await asyncio.sleep(attempt)
 			raise last_error or RuntimeError("inbound delivery failed")
 		except Exception as error:
+			await asyncio.to_thread(self.event_spool.mark_failed, event_id, str(error), retry_after=min(300, 10 * max(1, self.retry_count)))
 			self.failed_count += 1
 			stats["failed_count"] += 1
 			LOG.error("inbound delivery failed message_id=%s: %s", message_id, error)
 
-	async def listen_forever(self) -> None:
+	async def replay_spool_once(self) -> int:
+		"""Replay queued/expired events; adapter-side ledger remains idempotent."""
+		replayed = 0
+		for event in await asyncio.to_thread(self.event_spool.due, 20):
+			event_id = str(event["event_id"])
+			if event_id in self._spool_active:
+				continue
+			self._spool_active.add(event_id)
+			try:
+				claim_state = await asyncio.to_thread(self.event_spool.claim, event_id)
+				if claim_state in {"delivered", "in_flight"}:
+					continue
+				await asyncio.to_thread(post_json, self.ingress_url, self.token, event["payload"])
+				await asyncio.to_thread(self.event_spool.mark_delivered, event_id)
+				replayed += 1
+				self.spool_replay_count += 1
+			except Exception as error:
+				self.spool_replay_error_count += 1
+				self.last_spool_replay_error = str(error)[:240]
+				await asyncio.to_thread(self.event_spool.mark_failed, event_id, str(error), retry_after=30)
+			finally:
+				self._spool_active.discard(event_id)
+		self.last_spool_replay_at = datetime.now(timezone.utc).isoformat()
+		return replayed
+
+	async def replay_spool_forever(self) -> None:
 		while True:
 			try:
-				self.websocket_attempt_count += 1
-				self.websocket_state = "connecting"
-				self.last_websocket_attempt_at = datetime.now(timezone.utc).isoformat()
-				await self.client.connect_websocket(self.on_message)
-				self.websocket_state = "ended"
-				LOG.warning("LarkAgentX websocket ended; reconnecting in 10 seconds")
-			except AuthExpired:
-				self.websocket_state = "auth_expired"
-				LOG.error("LarkAgentX credentials expired; run lark auth qr or lark auth import")
-				raise
+				await self.replay_spool_once()
 			except Exception as error:
-				self.websocket_state = "error"
-				LOG.warning("LarkAgentX websocket failed: %s; reconnecting in 10 seconds", error)
-			await asyncio.sleep(10)
+				self.spool_replay_error_count += 1
+				self.last_spool_replay_error = str(error)[:240]
+			await asyncio.sleep(self.spool_replay_seconds)
+
+	async def listen_forever(self) -> None:
+		spool_task = asyncio.create_task(self.replay_spool_forever())
+		try:
+			while True:
+				try:
+					self.websocket_attempt_count += 1
+					self.websocket_state = "connecting"
+					self.last_websocket_attempt_at = datetime.now(timezone.utc).isoformat()
+					await self.client.connect_websocket(self.on_message)
+					self.websocket_state = "ended"
+					LOG.warning("LarkAgentX websocket ended; reconnecting in 10 seconds")
+				except AuthExpired:
+					self.websocket_state = "auth_expired"
+					LOG.error("LarkAgentX credentials expired; run lark auth qr or lark auth import")
+					raise
+				except Exception as error:
+					self.websocket_state = "error"
+					LOG.warning("LarkAgentX websocket failed: %s; reconnecting in 10 seconds", error)
+				await asyncio.sleep(10)
+		finally:
+			spool_task.cancel()
+			await asyncio.gather(spool_task, return_exceptions=True)
 
 
 def serve_http(bridge: Bridge) -> ThreadingHTTPServer:
@@ -648,6 +789,8 @@ def main() -> None:
 		asyncio.run(bridge.listen_forever())
 	finally:
 		server.shutdown()
+		bridge.owner_lock.release()
+		bridge.event_spool.close()
 
 
 if __name__ == "__main__":

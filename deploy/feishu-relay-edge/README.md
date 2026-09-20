@@ -91,34 +91,51 @@ same SSH connection (`docker save | gzip -1 | ssh … docker load`) before
 applying the release. Nothing to do differently — just run `--apply` and it
 falls back automatically.
 
-### Iterating on a small change without a CI + GHCR round trip
+### Iterating on a small change without rebuilding an image
 
-A one-line fix does not need a commit, a tag, a wait on `release-edge-images.yml`,
-and an image pull/transfer just to try it. `scripts/hotfix-feishu-relay-edge.sh`
-runs the adapter test suite, rsyncs the working tree's `feishu-adapter/`
-source (plus `config/source-registry.json` and `frontend/dist`) straight to
-the edge, and builds the image there with `docker compose build` — using the
-layer cache that is already warm from the last real release, so only the
-`npm install` layer is ever slow, and even that is a self-contained rebuild
-with no registry involved once `node:22-alpine` is cached locally on the edge
-(a one-time `docker save | ssh … docker load`, already done). Typical repeat
-runs finish in seconds; a cache miss on `npm install` costs about a minute —
-either way it beats waiting on CI and rescuing a stuck GHCR pull.
+The fast path separates dependencies from application source. The edge keeps
+the last verified adapter image (including Node and `node_modules`) and mounts
+`/opt/feishu-relay-edge/hotfix` read-only at `/app/hotfix`. Each hotfix is
+uploaded to `hotfix/releases/<release-id>/`; adapter syntax, JSON, Python
+syntax/import and dependency manifest checks run there before
+`hotfix/current` is switched atomically. The container is then recreated with
+`--no-build --pull never`, so an adapter, frontend or LarkAgentX bridge fix
+does not contact Docker Hub/GHCR and does not rebuild an image. The deployer
+records the running image digest and refuses the activation if it changes
+during the hotfix.
 
-This is deliberately **not** a tracked release: the health endpoint reports
-`"release":"hotfix"` and a synthetic (or `null`, once `release-metadata.mjs`
-rejects the non-hex string) `git_sha`, and nothing here touches GHCR,
-`runtime.env`'s `FEISHU_ADAPTER_IMAGE`, or `PLAN_COMPLETION_MATRIX.md`. Once a
-hotfix build is verified, commit the change, tag an `edge-*.*` release, wait
-for CI to publish the GHCR image, and run
-`deploy-feishu-relay-edge-release.sh` so the edge goes back to a pinned,
-auditable image with a real commit SHA in its health provenance. Never leave
-the edge running an untracked hotfix build long-term.
+The overlay includes the adapter modules, `frontend/dist`,
+`source-registry.json`, and the bridge modules under `integrations/larkagentx`.
+The bridge's systemd unit is changed once to use a stable entrypoint; every
+later update stages a new release, changes the same `current` pointer and
+restarts the service.
+Credentials, cookies and the LarkAgentX login state remain in the existing
+受限 environment/state paths and never enter the release directory. The
+deployer deliberately does not run npm or install Python packages. If
+`feishu-adapter/package.json`, the Node runtime, the supervisor venv or a
+base-image requirement changes, the hotfix script stops before activation;
+publish the corresponding immutable runtime release for that change. The
+active overlay is health-checked together with the WebSocket bridge and the
+webhook keyword coverage endpoint, and the last five overlays are retained for
+rollback. A failed health check restores the previous pointer automatically.
+The bridge health field may remain `connecting` immediately after a restart:
+the upstream client has no on-open callback and changes it to `connected` after
+the first decoded event; the deploy gate also requires the enabled systemd
+process and a live health response.
 
 ```bash
-scripts/hotfix-feishu-relay-edge.sh          # dry run: tests + rsync preview only
-scripts/hotfix-feishu-relay-edge.sh --apply  # syncs, builds and restarts on the edge
+scripts/hotfix-feishu-relay-edge.sh                         # tests + plan
+scripts/hotfix-feishu-relay-edge.sh --apply                 # fast source update
+scripts/hotfix-feishu-relay-edge.sh --list                  # retained versions
+scripts/hotfix-feishu-relay-edge.sh --rollback <release-id> --apply
 ```
+
+This remains an untracked runtime until the fix is committed and released.
+`deploy-feishu-relay-edge-release.sh` now sets
+`FEISHU_ADAPTER_HOTFIX_ENABLED=false` before starting the pinned image, which
+prevents an old overlay from shadowing a normal release. The health endpoint
+reports the base commit SHA plus a `hotfix-...` release label while the overlay
+is active, making the running source distinguishable from an immutable image.
 
 ## Deterministic emergency failover to the workstation
 

@@ -49,6 +49,12 @@ dist/
 .vite/
 coverage/
 
+# Source-overlay runtime releases are staged outside version control.
+hotfix/*
+!hotfix/.gitkeep
+deploy/feishu-relay-edge/hotfix/*
+!deploy/feishu-relay-edge/hotfix/.gitkeep
+
 # OS/editor noise
 .DS_Store
 .claude/

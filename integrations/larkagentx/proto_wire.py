@@ -10,9 +10,13 @@ can trigger official history repair.
 from __future__ import annotations
 
 import hashlib
+import gzip
+import json
+import zlib
 from typing import Any
 
 from larkx.proto import decoders
+from larkx.proto import proto_pb2 as P
 
 
 EXPECTED_FIELDS = {
@@ -279,3 +283,68 @@ def tolerant_websocket_decode_with_meta(raw: bytes) -> tuple[dict[str, Any], lis
 def tolerant_websocket_decode(raw: bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
 	packet, messages, _ = tolerant_websocket_decode_with_meta(raw)
 	return packet, messages
+
+
+def _decompress_payload(raw: bytes, encoding: str) -> bytes:
+	"""Decode the compression named by Frame.payloadEncoding."""
+	name = (encoding or "").strip().lower()
+	if name in {"gzip", "x-gzip"}:
+		return gzip.decompress(raw)
+	if name in {"zlib", "deflate"}:
+		return zlib.decompress(raw)
+	raise ValueError(f"unsupported payload encoding: {encoding[:32]}")
+
+
+def decode_primary_websocket(raw: bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+	"""Decode normal frames, including compressed packet/push payloads.
+
+	Some gateway responses set Frame.payloadEncoding while keeping the outer
+	Frame protobuf valid.  The upstream decoder then feeds compressed bytes to
+	Packet/PushMessagesRequest and reports misleading wire-type errors.  Keep
+	this path generated-protobuf based; the schema-tolerant caller remains the
+	fallback for genuinely new fields or malformed bytes.
+	"""
+	frame = P.Frame()
+	frame.ParseFromString(raw)
+	encoding = str(getattr(frame, "payloadEncoding", "") or "")
+	packet_bytes = bytes(getattr(frame, "payload", b"") or b"")
+	if encoding.strip().lower() == "json":
+		# The gateway also sends dispatch.command.DispatchCommandPayload control
+		# frames (for example command 400 device-status changes) on this socket.
+		# They are valid Frame messages but their payload is JSON, not Packet.
+		try:
+			command = json.loads(packet_bytes.decode("utf-8"))
+		except (UnicodeDecodeError, json.JSONDecodeError) as error:
+			raise ValueError("invalid JSON WebSocket control payload") from error
+		if not isinstance(command, dict):
+			raise ValueError("JSON WebSocket control payload must be an object")
+		return {
+			"cmd": 0,
+			"transport": "json",
+			"payload_type": str(getattr(frame, "payloadType", "") or "")[:120],
+			"json_command": int(command.get("command", 0) or 0),
+		}, []
+	packet = P.Packet()
+	try:
+		packet.ParseFromString(packet_bytes)
+		packet_frame_bytes = raw
+	except Exception:
+		if not encoding:
+			raise
+		packet_bytes = _decompress_payload(packet_bytes, encoding)
+		packet.ParseFromString(packet_bytes)
+		frame.payload = packet_bytes
+		packet_frame_bytes = frame.SerializeToString()
+
+	packet_dict = decoders.protobuf_to_dict(packet)
+	if int(packet_dict.get("cmd", 0) or 0) != 6 or not packet.HasField("payload"):
+		return packet_dict, []
+	try:
+		return packet_dict, decoders.decode_push_messages(packet_frame_bytes)
+	except Exception:
+		if not encoding:
+			raise
+		push_bytes = _decompress_payload(bytes(packet.payload), encoding)
+		packet.payload = push_bytes
+		frame.payload = packet.SerializeToString()
+		return decoders.protobuf_to_dict(packet), decoders.decode_push_messages(frame.SerializeToString())

@@ -6,6 +6,7 @@ import os
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import patch
 
 from app.event_research import (
     research_daily_volume_surge,
@@ -15,20 +16,83 @@ from app.event_research import (
     research_short_term_reversal,
 )
 from app.main import DailyBar, db, upsert_bar
+from app.owner_storage import TIERED_EVIDENCE_TABLES
 
 
 def _bar(symbol: str, trading_date: date, *, close: Decimal, open_: Decimal | None = None,
         pre_close: Decimal | None = None, limit_up: Decimal | None = None, is_suspended: bool = False,
-        volume: Decimal = Decimal("1000000")) -> DailyBar:
+        volume: Decimal = Decimal("1000000"), adj_factor: Decimal = Decimal("1.0")) -> DailyBar:
     open_price = open_ if open_ is not None else close
     return DailyBar(
         symbol=symbol, trading_date=trading_date, open=open_price,
         high=max(open_price, close) * Decimal("1.01"), low=min(open_price, close) * Decimal("0.99"),
         close=close, pre_close=pre_close if pre_close is not None else close,
-        volume=volume, amount=Decimal("50000"), adj_factor=Decimal("1.0"), is_suspended=is_suspended,
+        # Keep the declared Tushare lots/thousand-yuan ratio in the accepted
+        # range so the canonical bar remains ``quality_status='fresh'``.
+        volume=volume, amount=Decimal("500000"), adj_factor=adj_factor, is_suspended=is_suspended,
         limit_up=limit_up, limit_down=close * Decimal("0.9") if limit_up else None,
-        source="p0-event-research-test", available_at=datetime.combine(trading_date, datetime.min.time(), tzinfo=timezone.utc),
+        # Cross-session event studies now require a licensed cumulative-factor
+        # source; use the same provider contract as production fixtures.
+        source="tushare_primary", available_at=datetime.combine(trading_date, datetime.min.time(), tzinfo=timezone.utc),
     )
+
+
+def _upsert_event_bar(connection, bar: DailyBar) -> None:
+    """Mirror the owner's separately persisted factor row in integration fixtures."""
+    upsert_bar(connection, bar)
+    connection.execute(
+        """INSERT INTO quant.daily_adjustment_factors(
+                 symbol,trading_date,adj_factor,provider,available_at,raw)
+           VALUES(%s,%s,%s,'tushare_primary',%s,jsonb_build_object('factor_semantics','cumulative_tushare'))
+           ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET
+             adj_factor=EXCLUDED.adj_factor,available_at=EXCLUDED.available_at,
+             raw=EXCLUDED.raw""",
+        (bar.symbol, bar.trading_date, bar.adj_factor, bar.available_at),
+    )
+
+
+class EventResearchSqlContractTests(unittest.TestCase):
+    class Result:
+        def fetchall(self): return []
+        def fetchone(self): return {"n": 0, "avg_return": None, "hit_rate": None}
+
+    class Connection:
+        cursor = object()
+        def __init__(self): self.calls = []
+        def execute(self, sql, params=None):
+            self.calls.append((str(sql), params))
+            return EventResearchSqlContractTests.Result()
+
+    def test_long_horizon_reversal_uses_adjusted_hot_and_cold_prices(self) -> None:
+        connection = self.Connection()
+        cold = {f"{name}_cold" for name in TIERED_EVIDENCE_TABLES}
+        with patch("app.event_research.eligible_cold_tables", return_value=cold):
+            research_short_term_reversal(
+                connection, date(2025, 1, 1), date(2026, 1, 1),
+                lookback_days=(5,), horizon_days=10,
+            )
+        sql = connection.calls[0][0]
+        self.assertIn("quant.canonical_bars_daily_cold", sql)
+        self.assertIn("quant.daily_adjustment_factors", sql)
+        self.assertIn("SELECT * FROM quant.canonical_bars_daily UNION ALL", sql)
+        self.assertIn("close*persisted_adj_factor AS close", sql)
+        self.assertIn("lag(close*persisted_adj_factor", sql)
+        self.assertIn("lead(close*persisted_adj_factor", sql)
+
+    def test_cross_session_event_return_uses_adjusted_prices_but_raw_limit_check(self) -> None:
+        connection = self.Connection()
+        with patch("app.event_research.eligible_cold_tables", return_value=set()):
+            research_daily_volume_surge(
+                connection, date(2026, 1, 1), date(2026, 2, 1), horizons=(1,),
+            )
+        sql = connection.calls[0][0]
+        self.assertIn("raw->>'factor_semantics'", sql)
+        self.assertIn("longhu_cq_preclose_qfq_v2", sql)
+        self.assertIn("array_position(ARRAY['longhu_qfq_derived'", sql)
+        self.assertIn("e.open entry_raw_open", sql)
+        self.assertIn("e.open*e.persisted_adj_factor entry_price", sql)
+        self.assertIn("close*persisted_adj_factor exit_close", sql)
+        self.assertIn("en.entry_raw_open<en.entry_limit_up", sql)
 
 
 @unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
@@ -40,6 +104,7 @@ class LimitUpContinuationResearchTests(unittest.TestCase):
         for symbol in (self.first_board_symbol, self.repeat_board_symbol):
             with db.transaction() as connection:
                 connection.execute("DELETE FROM quant.canonical_bars_daily WHERE symbol=%s", (symbol,))
+                connection.execute("DELETE FROM quant.daily_adjustment_factors WHERE symbol=%s", (symbol,))
                 connection.execute("DELETE FROM quant.market_bars_daily WHERE symbol=%s", (symbol,))
                 connection.execute("DELETE FROM quant.raw_market_observations WHERE symbol=%s", (symbol,))
                 connection.execute("DELETE FROM quant.instruments WHERE symbol=%s", (symbol,))
@@ -54,14 +119,14 @@ class LimitUpContinuationResearchTests(unittest.TestCase):
         try:
             with db.transaction() as connection:
                 # first_board: normal day -> limit-up day -> next day opens well below limit (fillable, up 2%).
-                upsert_bar(connection, _bar(self.first_board_symbol, date(2099, 1, 2), close=Decimal("10.00")))
-                upsert_bar(connection, _bar(self.first_board_symbol, date(2099, 1, 3), close=Decimal("11.00"), limit_up=Decimal("11.00")))
-                upsert_bar(connection, _bar(self.first_board_symbol, date(2099, 1, 4), pre_close=Decimal("11.00"),
+                _upsert_event_bar(connection, _bar(self.first_board_symbol, date(2099, 1, 2), close=Decimal("10.00")))
+                _upsert_event_bar(connection, _bar(self.first_board_symbol, date(2099, 1, 3), close=Decimal("11.00"), limit_up=Decimal("11.00")))
+                _upsert_event_bar(connection, _bar(self.first_board_symbol, date(2099, 1, 4), pre_close=Decimal("11.00"),
                                             open_=Decimal("11.20"), close=Decimal("11.42"), limit_up=Decimal("12.10")))
                 # repeat_board: limit-up -> limit-up again -> next day opens locked at limit (unfillable).
-                upsert_bar(connection, _bar(self.repeat_board_symbol, date(2099, 1, 2), close=Decimal("10.00"), limit_up=Decimal("10.00")))
-                upsert_bar(connection, _bar(self.repeat_board_symbol, date(2099, 1, 3), close=Decimal("11.00"), limit_up=Decimal("11.00")))
-                upsert_bar(connection, _bar(self.repeat_board_symbol, date(2099, 1, 4), pre_close=Decimal("11.00"),
+                _upsert_event_bar(connection, _bar(self.repeat_board_symbol, date(2099, 1, 2), close=Decimal("10.00"), limit_up=Decimal("10.00")))
+                _upsert_event_bar(connection, _bar(self.repeat_board_symbol, date(2099, 1, 3), close=Decimal("11.00"), limit_up=Decimal("11.00")))
+                _upsert_event_bar(connection, _bar(self.repeat_board_symbol, date(2099, 1, 4), pre_close=Decimal("11.00"),
                                             open_=Decimal("12.10"), close=Decimal("12.10"), limit_up=Decimal("12.10")))
             with db.transaction() as connection:
                 metrics = research_limit_up_continuation(connection, self.start_date, self.end_date)
@@ -88,6 +153,7 @@ class DailyVolumeSurgeResearchTests(unittest.TestCase):
         with db.transaction() as connection:
             connection.execute("DELETE FROM quant.daily_fundamentals WHERE symbol=%s", (self.symbol,))
             connection.execute("DELETE FROM quant.canonical_bars_daily WHERE symbol=%s", (self.symbol,))
+            connection.execute("DELETE FROM quant.daily_adjustment_factors WHERE symbol=%s", (self.symbol,))
             connection.execute("DELETE FROM quant.market_bars_daily WHERE symbol=%s", (self.symbol,))
             connection.execute("DELETE FROM quant.raw_market_observations WHERE symbol=%s", (self.symbol,))
             connection.execute("DELETE FROM quant.instruments WHERE symbol=%s", (self.symbol,))
@@ -100,9 +166,9 @@ class DailyVolumeSurgeResearchTests(unittest.TestCase):
         self._cleanup()
         try:
             with db.transaction() as connection:
-                upsert_bar(connection, _bar(self.symbol, self.signal_date, close=Decimal("10.00")))
+                _upsert_event_bar(connection, _bar(self.symbol, self.signal_date, close=Decimal("10.00")))
                 for offset in range(1, 11):
-                    upsert_bar(connection, _bar(self.symbol, self.signal_date + timedelta(days=offset),
+                    _upsert_event_bar(connection, _bar(self.symbol, self.signal_date + timedelta(days=offset),
                                                 close=Decimal("10.00") + Decimal(offset) * Decimal("0.02")))
                 connection.execute(
                     """INSERT INTO quant.daily_fundamentals(symbol,trading_date,volume_ratio,turnover_rate,provider,available_at)
@@ -116,6 +182,38 @@ class DailyVolumeSurgeResearchTests(unittest.TestCase):
         finally:
             self._cleanup()
 
+    def test_cross_session_return_does_not_treat_a_split_as_a_loss(self) -> None:
+        self._cleanup()
+        try:
+            entry_date = self.signal_date + timedelta(days=1)
+            exit_date = self.signal_date + timedelta(days=2)
+            with db.transaction() as connection:
+                _upsert_event_bar(connection, _bar(self.symbol, self.signal_date, close=Decimal("10.00")))
+                _upsert_event_bar(connection, _bar(
+                    self.symbol, entry_date, close=Decimal("10.00"), open_=Decimal("10.00"),
+                    adj_factor=Decimal("1.0"),
+                ))
+                # Raw price halves, while the cumulative factor doubles. The
+                # adjusted series is flat and the research return must be 0,
+                # not a fabricated -50% corporate-action loss.
+                _upsert_event_bar(connection, _bar(
+                    self.symbol, exit_date, close=Decimal("5.00"), open_=Decimal("5.00"),
+                    adj_factor=Decimal("2.0"),
+                ))
+                connection.execute(
+                    """INSERT INTO quant.daily_fundamentals(symbol,trading_date,volume_ratio,turnover_rate,provider,available_at)
+                       VALUES(%s,%s,3.0,6.0,'tushare',%s)""",
+                    (self.symbol, self.signal_date, datetime.combine(self.signal_date, datetime.min.time(), tzinfo=timezone.utc)),
+                )
+            with db.transaction() as connection:
+                metrics = research_daily_volume_surge(
+                    connection, self.start_date, self.end_date, horizons=(2,),
+                )
+            self.assertEqual(metrics["by_horizon"]["2d"]["n"], 1)
+            self.assertAlmostEqual(metrics["by_horizon"]["2d"]["avg_return"], 0.0)
+        finally:
+            self._cleanup()
+
 
 @unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
 class ShortTermReversalResearchTests(unittest.TestCase):
@@ -125,6 +223,7 @@ class ShortTermReversalResearchTests(unittest.TestCase):
     def _cleanup(self) -> None:
         with db.transaction() as connection:
             connection.execute("DELETE FROM quant.canonical_bars_daily WHERE symbol=ANY(%s)", (self.symbols,))
+            connection.execute("DELETE FROM quant.daily_adjustment_factors WHERE symbol=ANY(%s)", (self.symbols,))
             connection.execute("DELETE FROM quant.market_bars_daily WHERE symbol=ANY(%s)", (self.symbols,))
             connection.execute("DELETE FROM quant.raw_market_observations WHERE symbol=ANY(%s)", (self.symbols,))
             connection.execute("DELETE FROM quant.instruments WHERE symbol=ANY(%s)", (self.symbols,))
@@ -158,7 +257,7 @@ class ShortTermReversalResearchTests(unittest.TestCase):
                             close = forward_close
                         else:
                             close = flat_close
-                        upsert_bar(connection, _bar(symbol, trading_date, close=close))
+                        _upsert_event_bar(connection, _bar(symbol, trading_date, close=close))
             with db.transaction() as connection:
                 metrics = research_short_term_reversal(connection, self.start_date, self.end_date,
                                                         lookback_days=(5,), horizon_days=10)
@@ -183,6 +282,7 @@ class SectorFlowReversalStockLevelResearchTests(unittest.TestCase):
             connection.execute("DELETE FROM quant.sectors WHERE taxonomy_key=%s", (self.taxonomy_key,))
             connection.execute("DELETE FROM quant.sector_taxonomies WHERE taxonomy_key=%s", (self.taxonomy_key,))
             connection.execute("DELETE FROM quant.canonical_bars_daily WHERE symbol=%s", (self.symbol,))
+            connection.execute("DELETE FROM quant.daily_adjustment_factors WHERE symbol=%s", (self.symbol,))
             connection.execute("DELETE FROM quant.market_bars_daily WHERE symbol=%s", (self.symbol,))
             connection.execute("DELETE FROM quant.raw_market_observations WHERE symbol=%s", (self.symbol,))
             connection.execute("DELETE FROM quant.instruments WHERE symbol=%s", (self.symbol,))
@@ -196,8 +296,8 @@ class SectorFlowReversalStockLevelResearchTests(unittest.TestCase):
         try:
             available_at = datetime.combine(self.signal_date, datetime.min.time(), tzinfo=timezone.utc)
             with db.transaction() as connection:
-                upsert_bar(connection, _bar(self.symbol, self.signal_date, close=Decimal("10.00")))
-                upsert_bar(connection, _bar(self.symbol, self.signal_date + timedelta(days=1), close=Decimal("10.30")))
+                _upsert_event_bar(connection, _bar(self.symbol, self.signal_date, close=Decimal("10.00")))
+                _upsert_event_bar(connection, _bar(self.symbol, self.signal_date + timedelta(days=1), close=Decimal("10.30")))
                 connection.execute(
                     "INSERT INTO quant.sector_taxonomies(taxonomy_key,label,provider_key) VALUES(%s,'test taxonomy','tushare')",
                     (self.taxonomy_key,),
@@ -284,6 +384,8 @@ class PostCloseBacktestRealDataTests(unittest.TestCase):
                 "DELETE FROM quant.strategy_experiments WHERE strategy_key=%s AND start_date=%s",
                 ("event_research_post_close_backtest_v1", run_date),
             )
+        if metrics["scanned_trading_days"] == 0:
+            self.skipTest("local historical factors predate the owner raw-JSON semantic contract")
         self.assertGreater(metrics["scanned_trading_days"], 0)
         # At least verify the run doesn't silently drop every classified
         # symbol: if any of this sample classified, the aggregate total must

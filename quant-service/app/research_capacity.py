@@ -9,12 +9,24 @@ from __future__ import annotations
 
 from typing import Any
 
+from .owner_storage import eligible_cold_tables, tiered_relation_sql
+
 
 # These are the only full-universe inputs required for the present daily
 # research baseline.  P1 sources (flows, chips, announcements and analyst
 # claims) enrich a candidate or block a source-dependent rule, but their
 # partial coverage must not falsely report the whole P0 baseline as unusable.
 CORE_DECISION_FEATURES = frozenset({"daily_bars", "daily_basic", "trade_limits"})
+
+
+def _tiered_capacity_sql(connection: Any, sql: str) -> str:
+    """Use one all-or-nothing owner cold snapshot for historical projections."""
+    cold_tables = eligible_cold_tables(connection) if hasattr(connection, "cursor") else set()
+    for logical_name in ("canonical_bars_daily", "daily_fundamentals", "daily_trade_limits"):
+        sql = sql.replace(
+            f"quant.{logical_name}", tiered_relation_sql(logical_name, cold_tables),
+        )
+    return sql
 
 
 def number(value: Any, default: float = 0.0) -> float:
@@ -103,26 +115,26 @@ def historical_capacity_plan(years: int, universe_symbols: int, trading_days_per
 
 def current_data_coverage(connection: Any) -> dict[str, Any]:
     row = connection.execute(
-        """WITH daily_counts AS (
+        _tiered_capacity_sql(connection, """WITH daily_counts AS (
              SELECT trading_date,count(DISTINCT symbol)::int symbols FROM quant.canonical_bars_daily
-              WHERE symbol<>'000300.SH' GROUP BY trading_date
+              WHERE symbol<>'000300.SH' AND adj_factor>0 GROUP BY trading_date
            ), universe AS (
              SELECT greatest(1,(SELECT count(*)::int FROM quant.universe_members WHERE universe_key='all_a' AND enabled)) AS symbols
            )
-           SELECT (SELECT min(trading_date) FROM quant.canonical_bars_daily) first_bar_date,
-                  (SELECT max(trading_date) FROM quant.canonical_bars_daily) latest_bar_date,
+           SELECT (SELECT min(trading_date) FROM quant.canonical_bars_daily WHERE adj_factor>0) first_bar_date,
+                  (SELECT max(trading_date) FROM quant.canonical_bars_daily WHERE adj_factor>0) latest_bar_date,
                   (SELECT count(*)::int FROM daily_counts) bar_days,
                   (SELECT count(*)::int FROM daily_counts,universe WHERE daily_counts.symbols>=greatest(ceil(universe.symbols*0.8)::int,1000)) full_cross_section_days,
                   (SELECT max(symbols) FROM daily_counts) max_symbols_on_day,
                   (SELECT count(DISTINCT symbol)::int FROM quant.daily_fundamentals) fundamental_symbols,
                   (SELECT count(DISTINCT symbol)::int FROM quant.daily_trade_limits) limit_symbols,
-                  (SELECT count(DISTINCT symbol)::int FROM quant.market_bars_minute) minute_symbols""").fetchone()
+                  (SELECT count(DISTINCT symbol)::int FROM quant.market_bars_minute) minute_symbols""")).fetchone()
     return dict(row or {})
 
 
 def feature_readiness_state(connection: Any) -> dict[str, Any]:
     rows = connection.execute(
-        """SELECT 'daily_bars' feature,count(DISTINCT symbol)::int symbols,count(*)::int rows,max(trading_date) latest_date,'P0' priority FROM quant.canonical_bars_daily WHERE symbol<>'000300.SH'
+        _tiered_capacity_sql(connection, """SELECT 'daily_bars' feature,count(DISTINCT symbol)::int symbols,count(*)::int rows,max(trading_date) latest_date,'P0' priority FROM quant.canonical_bars_daily WHERE symbol<>'000300.SH' AND adj_factor>0
            UNION ALL SELECT 'daily_basic',count(DISTINCT symbol)::int,count(*)::int,max(trading_date),'P0' FROM quant.daily_fundamentals
            UNION ALL SELECT 'trade_limits',count(DISTINCT symbol)::int,count(*)::int,max(trading_date),'P0' FROM quant.daily_trade_limits
            UNION ALL SELECT 'moneyflow_dc',count(DISTINCT row_data->>'ts_code')::int,count(*)::int,max(to_date(NULLIF(row_data->>'trade_date',''),'YYYYMMDD')),'P0' FROM quant.tushare_raw_records WHERE api_name='moneyflow_dc'
@@ -133,7 +145,7 @@ def feature_readiness_state(connection: Any) -> dict[str, Any]:
            UNION ALL SELECT 'sector_flow',count(DISTINCT sector_key)::int,count(*)::int,max(trading_date),'P1' FROM quant.sector_market_observations
            UNION ALL SELECT 'announcements',count(DISTINCT symbol)::int,count(*)::int,max(occurred_at::date),'P1' FROM quant.market_events
            UNION ALL SELECT 'analyst_claims',count(DISTINCT subject_key)::int,count(*)::int,
-              max((available_at AT TIME ZONE 'Asia/Shanghai')::date),'P1' FROM quant.analyst_claims""").fetchall()
+              max((available_at AT TIME ZONE 'Asia/Shanghai')::date),'P1' FROM quant.analyst_claims""")).fetchall()
     universe_size = connection.execute("SELECT greatest(1,count(*)::int) symbols FROM quant.universe_members WHERE universe_key='all_a' AND enabled").fetchone()["symbols"]
     return feature_readiness_projection([dict(row) for row in rows], int(universe_size))
 

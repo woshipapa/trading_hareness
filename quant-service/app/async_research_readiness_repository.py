@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from .replay_readiness import PIT_DAILY_COVERAGE_CTE, READINESS_STATEMENT_TIMEOUT_MS, replay_readiness_payload
+from .replay_readiness import (
+    AUXILIARY_REPLAY_METRICS_SQL, DIRECT_DAILY_METRICS_SQL,
+    READINESS_STATEMENT_TIMEOUT_MS, replay_readiness_payload,
+)
+from .replay_readiness_coverage import MATERIALIZED_DAILY_METRICS_SQL
 from .research_capacity import feature_readiness_projection, historical_capacity_plan
+from .research_framework_readiness import enrich_framework_rows
 
 
 async def frameworks(async_database: Any) -> dict[str, Any]:
@@ -14,7 +20,11 @@ async def frameworks(async_database: Any) -> dict[str, Any]:
             "SELECT framework_key,label,role,integration_mode,status,license_note,prerequisites,metadata,updated_at FROM quant.research_frameworks ORDER BY framework_key"
         )
         rows = await result.fetchall()
-    return {"items": rows}
+    return {
+        "items": enrich_framework_rows([dict(row) for row in rows]),
+        "research_only": True,
+        "live_effect": "none",
+    }
 
 
 async def feature_readiness(async_database: Any) -> dict[str, Any]:
@@ -23,7 +33,7 @@ async def feature_readiness(async_database: Any) -> dict[str, Any]:
         # the synchronous compatibility path; this projection mirrors its
         # query so dashboard reads never borrow that connection.
         result = await connection.execute(
-            """SELECT 'daily_bars' feature,count(DISTINCT symbol)::int symbols,count(*)::int rows,max(trading_date) latest_date,'P0' priority FROM quant.canonical_bars_daily WHERE symbol<>'000300.SH'
+            """SELECT 'daily_bars' feature,count(DISTINCT symbol)::int symbols,count(*)::int rows,max(trading_date) latest_date,'P0' priority FROM quant.canonical_bars_daily WHERE symbol<>'000300.SH' AND adj_factor>0
                UNION ALL SELECT 'daily_basic',count(DISTINCT symbol)::int,count(*)::int,max(trading_date),'P0' FROM quant.daily_fundamentals
                UNION ALL SELECT 'trade_limits',count(DISTINCT symbol)::int,count(*)::int,max(trading_date),'P0' FROM quant.daily_trade_limits
                UNION ALL SELECT 'moneyflow_dc',count(DISTINCT row_data->>'ts_code')::int,count(*)::int,max(to_date(NULLIF(row_data->>'trade_date',''),'YYYYMMDD')),'P0' FROM quant.tushare_raw_records WHERE api_name='moneyflow_dc'
@@ -46,40 +56,31 @@ async def replay_readiness(async_database: Any) -> dict[str, Any]:
     """Read bounded replay gates using the native async connection."""
     async with async_database.transaction() as connection:
         try:
+            await connection.execute(f"SET LOCAL statement_timeout = '{READINESS_STATEMENT_TIMEOUT_MS}ms'")
             result = await connection.execute(
-                f"""SET LOCAL statement_timeout = '{READINESS_STATEMENT_TIMEOUT_MS}ms';
-                {PIT_DAILY_COVERAGE_CTE}
-                SELECT
-                  (SELECT min(trading_date) FROM daily_dates) first_daily_date,
-                  (SELECT max(trading_date) FROM daily_dates) latest_daily_date,
-                  (SELECT min(trading_date) FROM full_dates) first_full_cross_section_date,
-                  (SELECT max(trading_date) FROM full_dates) latest_full_cross_section_date,
-                  (SELECT count(*)::int FROM full_dates) full_cross_section_days,
-                  (SELECT count(*)::int FROM daily_dates) daily_bar_days,
-                  (SELECT count(*)::int FROM expected_universe) point_in_time_universe_days,
-                  (SELECT count(*)::int FROM daily_dates dates
-                    WHERE NOT EXISTS (SELECT 1 FROM expected_universe universe
-                                      WHERE universe.trading_date=dates.trading_date)) missing_point_in_time_universe_days,
-                  (SELECT count(DISTINCT (bar_time AT TIME ZONE 'Asia/Shanghai')::date)::int
-                     FROM quant.market_bars_minute) offline_minute_trading_days,
-                  (SELECT count(DISTINCT symbol)::int FROM quant.market_bars_minute) offline_minute_symbols,
-                  (SELECT count(*)::int FROM quant.market_bars_minute) offline_minute_bars,
-                  (SELECT count(*)::int FROM quant.market_bars_minute WHERE source_available_at IS NOT NULL) offline_minute_source_clock_bars,
-                  (SELECT count(DISTINCT (source_available_at AT TIME ZONE 'Asia/Shanghai')::date)::int
-                     FROM quant.market_bars_minute WHERE source_available_at IS NOT NULL) offline_minute_source_clock_days,
-                  (SELECT count(DISTINCT (observed_at AT TIME ZONE 'Asia/Shanghai')::date)::int
-                     FROM quant.intraday_rule_input_snapshots) forward_rule_input_days,
-                  (SELECT count(*)::int FROM quant.intraday_rule_input_snapshots) forward_rule_input_rows,
-                  (SELECT count(*)::int FROM quant.offline_imports WHERE status IN ('completed','partial')) completed_offline_imports,
-                  (SELECT count(*)::int FROM quant.intraday_signal_events
-                    WHERE state IN ('confirmed','alerted')) confirmed_signal_events,
-                  (SELECT count(DISTINCT signal_event_id)::int FROM quant.intraday_signal_outcomes
-                    WHERE status='matured') matured_signal_events"""
+                "SELECT to_regclass('quant.replay_readiness_daily_coverage') AS value"
             )
-            row = await result.fetchone()
-        except Exception:
-            return replay_readiness_payload({"readiness_query_status": "timeout"})
-    return replay_readiness_payload(dict(row or {}))
+            table = await result.fetchone()
+            daily: dict[str, Any] = {}
+            table_value = table.get("value") if isinstance(table, Mapping) else None
+            if table_value is not None:
+                result = await connection.execute(MATERIALIZED_DAILY_METRICS_SQL)
+                daily = dict(await result.fetchone() or {})
+                if int(daily.get("daily_bar_days") or 0) <= 0:
+                    # Never turn a stale projection into a full historical
+                    # scan on an async dashboard connection.  The bounded
+                    # refresh job must rebuild the current coverage contract.
+                    return replay_readiness_payload({"readiness_query_status": "coverage_stale"})
+            else:
+                result = await connection.execute(DIRECT_DAILY_METRICS_SQL)
+                daily = dict(await result.fetchone() or {})
+            result = await connection.execute(AUXILIARY_REPLAY_METRICS_SQL)
+            auxiliary = dict(await result.fetchone() or {})
+            metrics = {**daily, **auxiliary, "readiness_query_status": "ok"}
+        except Exception as error:
+            status = "timeout" if type(error).__name__ in {"QueryCanceled", "QueryCanceledError"} else "error"
+            return replay_readiness_payload({"readiness_query_status": status})
+    return replay_readiness_payload(metrics)
 
 
 async def historical_estimate(async_database: Any, request: Any) -> dict[str, Any]:
@@ -108,13 +109,13 @@ async def historical_estimate(async_database: Any, request: Any) -> dict[str, An
         coverage_result = await connection.execute(
             """WITH daily_counts AS (
                  SELECT trading_date,count(DISTINCT symbol)::int symbols
-                   FROM quant.canonical_bars_daily WHERE symbol<>'000300.SH' GROUP BY trading_date
+                   FROM quant.canonical_bars_daily WHERE symbol<>'000300.SH' AND adj_factor>0 GROUP BY trading_date
                ), universe AS (
                  SELECT greatest(1,(SELECT count(*)::int FROM quant.universe_members
                                     WHERE universe_key='all_a' AND enabled)) AS symbols
                )
-               SELECT (SELECT min(trading_date) FROM quant.canonical_bars_daily) first_bar_date,
-                      (SELECT max(trading_date) FROM quant.canonical_bars_daily) latest_bar_date,
+               SELECT (SELECT min(trading_date) FROM quant.canonical_bars_daily WHERE adj_factor>0) first_bar_date,
+                      (SELECT max(trading_date) FROM quant.canonical_bars_daily WHERE adj_factor>0) latest_bar_date,
                       (SELECT count(*)::int FROM daily_counts) bar_days,
                       (SELECT count(*)::int FROM daily_counts,universe
                         WHERE daily_counts.symbols>=greatest(ceil(universe.symbols*0.8)::int,1000)) full_cross_section_days,

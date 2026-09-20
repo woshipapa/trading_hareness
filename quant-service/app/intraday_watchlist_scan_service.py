@@ -9,6 +9,7 @@ import re
 from typing import Any
 import uuid
 
+from .intraday_features import strongest_group_peer_context
 from .platform.strategy_data_needs import strategy_taxonomies
 
 
@@ -123,7 +124,12 @@ def build_peer_contexts(
     surge_features: dict[str, dict[str, Any]],
     peer_context: Callable[[list[str], dict[str, dict[str, Any]]], dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """Join explicit configured peers with exact point-in-time memberships."""
+    """Score configured peers and each exact point-in-time membership group.
+
+    ``peer_context`` measures one group; the context a rule reads is the
+    strongest single group (``strongest_group_peer_context``), never the union
+    of every sector a name happens to share with the basket.
+    """
     contexts: dict[str, dict[str, Any]] = {}
     for watch in watches:
         symbol = str(watch["symbol"]).upper()
@@ -140,9 +146,12 @@ def build_peer_contexts(
             if re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", str(value).upper()) and str(value).upper() != symbol
         ]
         mapped = mapped_peer_groups.get(symbol) or {"peer_symbols": [], "groups": []}
-        peers = sorted(set(configured_peers) | set(mapped.get("peer_symbols") or []))
+        # Peers a watch names itself are one declared sector of their own.
+        groups = [{"taxonomy_key": "configured", "sector_key": "watch_metadata",
+                   "peer_symbols": sorted(set(configured_peers))}] if configured_peers else []
+        groups.extend(group for group in mapped.get("groups") or [] if isinstance(group, dict))
         contexts[symbol] = {
-            **peer_context(peers, surge_features),
+            **strongest_group_peer_context(groups, surge_features, group_context=peer_context),
             "configured_peer_symbols": sorted(set(configured_peers)),
             "mapped_peer_symbols": list(mapped.get("peer_symbols") or []),
             "exact_membership_groups": list(mapped.get("groups") or []),

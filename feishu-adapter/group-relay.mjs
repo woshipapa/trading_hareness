@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createDecipheriv, createHash } from 'node:crypto';
 import { buildRelayCard, cardImageKeys, cardText } from './card-content.mjs';
 import { isSystemMessage } from './message-filter.mjs';
 import { blockedMessageReason } from './content-filter.mjs';
@@ -47,6 +47,48 @@ export function isWebhookSentinel(id) {
 // tenant-API message can), so a target configured with a webhook still
 // falls back to the tenant API for that one message.
 const WEBHOOK_CAPABLE_MSG_TYPES = new Set(['text', 'post', 'interactive']);
+const XIANYU_BYPASS_SOURCES = new Set(['relay_132c18eb3486455b8d63f3012ba0c720', 'relay_4595b5c48596444bbd552a56052ac5d4']);
+
+function sourceFilterOptions(source) {
+	return XIANYU_BYPASS_SOURCES.has(String(source?.key ?? '')) ? { skipKeywords: ['咸鱼'] } : {};
+}
+
+function webhookContentWithKeyword(msgType, content, keyword) {
+	const normalizedKeyword = String(keyword ?? '').trim();
+	if (!normalizedKeyword) return content;
+	const output = cloneJson(content);
+	if (msgType === 'text') {
+		if (typeof output?.text === 'string' && output.text.includes(normalizedKeyword)) return output;
+		if (output && typeof output === 'object') output.text = `${String(output.text ?? '').trim()}\n${normalizedKeyword}`.trim();
+		return output;
+	}
+	if (msgType === 'post') {
+		const locales = Object.values(output ?? {}).filter((value) => value && typeof value === 'object' && Array.isArray(value.content));
+		for (const locale of locales) {
+			const alreadyPresent = locale.content.some((line) => Array.isArray(line) && line.some((item) => String(item?.text ?? '').includes(normalizedKeyword)));
+			if (!alreadyPresent) locale.content.push([{ tag: 'text', text: normalizedKeyword }]);
+		}
+		return output;
+	}
+	if (msgType === 'interactive') {
+		const elements = output?.body?.elements ?? output?.elements;
+		if (Array.isArray(elements) && !JSON.stringify(elements).includes(normalizedKeyword)) {
+			elements.push({ tag: 'div', text: { tag: 'plain_text', content: normalizedKeyword } });
+		}
+		return output;
+	}
+	return output;
+}
+
+function interactiveWebhookPostContent(content, keyword) {
+	const text = cardText(content);
+	const lines = [];
+	const normalizedKeyword = String(keyword ?? '').trim();
+	if (text && text !== normalizedKeyword) lines.push([{ tag: 'text', text }]);
+	for (const imageKey of cardImageKeys(content)) lines.push([{ tag: 'img', image_key: imageKey }]);
+	if (normalizedKeyword) lines.push([{ tag: 'text', text: normalizedKeyword }]);
+	return { zh_cn: { title: '', content: lines } };
+}
 
 async function postViaWebhook(url, msgType, content) {
 	const body = msgType === 'interactive'
@@ -131,16 +173,48 @@ async function readableToBuffer(readable, maxBytes) {
 	return Buffer.concat(chunks, bytes);
 }
 
+function looksLikeImage(bytes) {
+	return bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))
+		|| bytes.subarray(0, 8).equals(Buffer.from('\x89PNG\r\n\x1a\n', 'binary'))
+		|| (bytes.length >= 12 && bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP')
+		|| bytes.subarray(0, 6).toString() === 'GIF87a'
+		|| bytes.subarray(0, 6).toString() === 'GIF89a';
+}
+
+function decryptLarkAgentXImage(bytes, resource) {
+	if (looksLikeImage(bytes)) return bytes;
+	const key = Buffer.from(String(resource?.key_hex ?? ''), 'hex');
+	const iv = Buffer.from(String(resource?.iv_hex ?? ''), 'hex');
+	if (key.length !== 32 || iv.length !== 12 || bytes.length < 16) throw new RelayUnsupportedError('LarkAgentX 图片缺少有效 AES-GCM 参数');
+	const decipher = createDecipheriv('aes-256-gcm', key, iv);
+	decipher.setAuthTag(bytes.subarray(-16));
+	return Buffer.concat([decipher.update(bytes.subarray(0, -16)), decipher.final()]);
+}
+
 function collectPostResources(value, found = []) {
 	if (Array.isArray(value)) {
 		for (const item of value) collectPostResources(item, found);
 		return found;
 	}
 	if (!value || typeof value !== 'object') return found;
-	if (typeof value.image_key === 'string') found.push({ key: value.image_key, kind: 'image' });
+	function addResource(resource) {
+		const existing = found.find((item) => item.key === resource.key && item.kind === resource.kind);
+		if (!existing) {
+			found.push(resource);
+			return;
+		}
+		// A normalized post may contain the same image key once in the visible
+		// content and once in a resource walk. Keep the LarkAgentX descriptor if
+		// either occurrence has it, otherwise the relay falls back to OAuth.
+		if (!existing.larkagentx && resource.larkagentx) existing.larkagentx = resource.larkagentx;
+	}
+	const larkagentx = value.larkagentx_resource && typeof value.larkagentx_resource === 'object'
+		? value.larkagentx_resource
+		: null;
+	if (typeof value.image_key === 'string') addResource({ key: value.image_key, kind: 'image', larkagentx });
 	// Card JSON 2.0 names the same resource img_key.
-	if (typeof value.img_key === 'string') found.push({ key: value.img_key, kind: 'image' });
-	if (typeof value.file_key === 'string') found.push({ key: value.file_key, kind: 'file' });
+	if (typeof value.img_key === 'string') addResource({ key: value.img_key, kind: 'image', larkagentx });
+	if (typeof value.file_key === 'string') addResource({ key: value.file_key, kind: 'file' });
 	for (const child of Object.values(value)) collectPostResources(child, found);
 	return found;
 }
@@ -185,13 +259,42 @@ function prependTagToPost(content, tag) {
 
 function resourceFromDirectMessage(message) {
 	const content = parseJson(message?.body?.content);
-	if (typeof content.image_key === 'string') return { key: content.image_key, kind: 'image' };
+	if (typeof content.image_key === 'string') return { key: content.image_key, kind: 'image', larkagentx: content.larkagentx_resource ?? null };
 	if (typeof content.file_key === 'string') return { key: content.file_key, kind: 'file' };
 	return null;
 }
 
 function sourceFromRecord(record) {
 	return typeof record.message === 'string' ? parseJson(record.message) : record.message;
+}
+
+function normalizedComparableText(value) {
+	return String(value ?? '').replace(/\s+/gu, ' ').trim();
+}
+
+function relayContentFingerprint(message) {
+	const type = String(message?.msg_type ?? '').trim().toLowerCase();
+	const body = parseJson(message?.body?.content, { raw: String(message?.body?.content ?? '') });
+	if (type === 'interactive') {
+		return JSON.stringify({ type, text: normalizedComparableText(cardText(body)), images: cardImageKeys(body).sort() });
+	}
+	if (type === 'text' || type === 'system') return JSON.stringify({ type, text: normalizedComparableText(messageText(message?.body?.content)) });
+	if (type === 'image') return JSON.stringify({ type, image: body?.image_key ?? body?.imageKey ?? '' });
+	if (type === 'post') {
+		// The WebSocket rich-text decoder adds larkagentx AES metadata while the
+		// official message API adds dimensions/content_v2.  Those transport
+		// fields are different for the same source post, so compare only the
+		// portable text and resource keys.
+		return JSON.stringify({ type, text: normalizedComparableText(cardText(body)), images: cardImageKeys(body).sort() });
+	}
+	return JSON.stringify({ type, body });
+}
+
+function relayMessagesEquivalent(left, right) {
+	const leftTime = asCreateTimeMs(left?.source_create_time ?? left?.sourceCreateTime ?? left?.create_time, 0);
+	const rightTime = asCreateTimeMs(right?.source_create_time ?? right?.sourceCreateTime ?? right?.create_time, 0);
+	if (!leftTime || !rightTime || Math.abs(leftTime - rightTime) > 3_000) return false;
+	return relayContentFingerprint(left?.message ?? left) === relayContentFingerprint(right?.message ?? right);
 }
 
 // Axios hides the Feishu error body behind "status code 400"; the code and
@@ -268,7 +371,24 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 	async function sendMessage({ targetChatId, messageId, component, msgType, content }) {
 		const webhookUrl = config.webhooksByChatId?.get(targetChatId);
 		if (webhookUrl && WEBHOOK_CAPABLE_MSG_TYPES.has(msgType)) {
-			await postViaWebhook(webhookUrl, msgType, content);
+			const webhookKeyword = config.webhookKeywordsByChatId?.get(targetChatId);
+			// Feishu custom-bot keyword validation does not inspect Card 2.0
+			// `plain_text` elements. When a keyword is configured, send the
+			// portable card text as a keyword-prefixed text bubble so the bot
+			// accepts it. Targets without keyword validation keep the rich card.
+			const interactiveImages = msgType === 'interactive' ? cardImageKeys(content) : [];
+			// A keyword-validated bot cannot inspect Card 2.0 plain_text nodes.
+			// When the card also contains images, use a rich-text post so the
+			// keyword remains visible and the uploaded image keys remain usable.
+			const webhookMsgType = msgType === 'interactive' && webhookKeyword
+				? (interactiveImages.length ? 'post' : 'text')
+				: msgType;
+			const webhookContent = webhookMsgType === 'post' && msgType === 'interactive'
+				? interactiveWebhookPostContent(content, webhookKeyword)
+				: webhookMsgType === 'text' && msgType === 'interactive'
+					? { text: cardText(content) || '[interactive] 卡片未提供可转发文字内容。' }
+					: content;
+			await postViaWebhook(webhookUrl, webhookMsgType, webhookContentWithKeyword(webhookMsgType, webhookContent, webhookKeyword));
 			// No uuid/idempotency on this path (webhooks take no such field): a
 			// retried send after a timed-out response can duplicate. Acceptable
 			// for a destination that opted out of edit/recall sync for quota.
@@ -286,7 +406,24 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 	async function downloadAndUpload(message, descriptor) {
 		let response;
 		try {
-			response = await sourceApi.messageResourceGet({ messageId: message.message_id, fileKey: descriptor.key, type: descriptor.kind });
+			if (descriptor.larkagentx && config.larkAgentXResourceUrl) {
+				const url = new URL(config.larkAgentXResourceUrl);
+				for (const [key, value] of Object.entries(descriptor.larkagentx)) {
+					if (value !== null && value !== undefined && String(value).trim()) url.searchParams.set(key, String(value));
+				}
+				const fetched = await fetch(url, { headers: { 'x-larkagentx-token': String(config.larkAgentXToken ?? '') } });
+				if (!fetched.ok || !fetched.body) throw new Error(`LarkAgentX 图片资源 HTTP ${fetched.status}`);
+				response = {
+					headers: {
+						'content-type': fetched.headers.get('content-type') ?? 'application/octet-stream',
+						'content-length': fetched.headers.get('content-length') ?? '',
+						'content-disposition': fetched.headers.get('content-disposition') ?? '',
+					},
+					getReadableStream: () => fetched.body,
+				};
+			} else {
+				response = await sourceApi.messageResourceGet({ messageId: message.message_id, fileKey: descriptor.key, type: descriptor.kind });
+			}
 		} catch (error) {
 			throw new Error(`无法读取源消息资源 ${descriptor.key}：${error?.response?.status ?? error?.message ?? 'unknown'}`);
 		}
@@ -298,7 +435,8 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			const archived = await workbench.uploadToCloud({ readable: response.getReadableStream(), fileName: filename, size: declaredBytes });
 			return { ...archived, contentType };
 		}
-		const bytes = await readableToBuffer(response.getReadableStream(), MAX_SOURCE_FILE_BYTES);
+		let bytes = await readableToBuffer(response.getReadableStream(), MAX_SOURCE_FILE_BYTES);
+		if (descriptor.larkagentx && descriptor.kind === 'image') bytes = decryptLarkAgentXImage(bytes, descriptor.larkagentx);
 		if (descriptor.kind === 'image' && bytes.length <= MAX_SOURCE_IMAGE_BYTES) {
 			let uploaded;
 			try {
@@ -493,7 +631,11 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			const delivery = await relayOne(message, source, claimedRecord);
 			if (delivery.failures.length) {
 				const errorMessage = delivery.failures.map((failure) => `${failure.targetChatId}: ${failure.errorMessage}`).join('; ');
-				await ledger.markRelayMessage(message.message_id, { status: 'failed', targetMessageIds: delivery.targetMessageIds, errorMessage });
+				// A custom-bot keyword rejection is configuration state, not a
+				// transient delivery failure. Retrying it on every poll (and again
+				// after a recall) created the papa-bot duplicate loop.
+				const permanent = /Key Words Not Found/i.test(errorMessage);
+				await ledger.markRelayMessage(message.message_id, { status: permanent ? 'filtered_system' : 'failed', targetMessageIds: delivery.targetMessageIds, errorMessage });
 				logger.error(`群消息部分转发失败：${source.key} ${message.message_id}：${errorMessage}`);
 				return;
 			}
@@ -514,6 +656,125 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			});
 			logger.error(`群消息转发${unsupported ? '不支持' : '失败'}：${source.key} ${message.message_id}：${error instanceof Error ? error.message : String(error)}`);
 		}
+	}
+
+	async function processInbound(message, source) {
+		if (!message?.message_id) throw new RelayUnsupportedError('实时源消息没有 message_id');
+		if (!source?.key || !source?.resolvedChatId) throw new Error('实时源消息缺少已映射的 source 或 chat_id');
+		if (source.targetChatIds.includes(source.resolvedChatId)) {
+			throw new Error(`源群 ${source.key} 与目标群相同，拒绝实时转发以避免循环`);
+		}
+		const now = Date.now();
+		const sourceCreateTime = asCreateTimeMs(message.create_time, now);
+		const record = {
+			sourceMessageId: message.message_id,
+			sourceKey: source.key,
+			sourceChatId: source.resolvedChatId,
+			sourceCreateTime,
+			sourceUpdateTime: message.update_time ? asCreateTimeMs(message.update_time, sourceCreateTime) : null,
+			targetChatId: source.targetChatId,
+			targetChatIds: source.targetChatIds,
+			routeTag: source.tag,
+			message,
+		};
+		if (isSystemMessage(message)) {
+			await ledger.filterRelayMessage(record, '系统消息已过滤（LarkAgentX 实时入口）');
+			return { status: 'filtered', message_id: message.message_id };
+		}
+		const blockedReason = blockedMessageReason(message, sourceFilterOptions(source));
+		if (blockedReason) {
+			await ledger.filterRelayMessage(record, blockedReason);
+			return { status: 'filtered', message_id: message.message_id };
+		}
+		const existing = await ledger.getRelayMessage(message.message_id);
+		if (existing?.status === 'sent' || existing?.status === 'skipped_bootstrap' || existing?.status === 'filtered_system') {
+			return { status: 'duplicate', message_id: message.message_id };
+		}
+		if (ledger.relayMessagesBySourceWindow) {
+			const equivalents = await ledger.relayMessagesBySourceWindow(source.key, sourceCreateTime - 3_000, sourceCreateTime + 3_000);
+			const equivalent = equivalents.find((row) => row.source_message_id !== message.message_id
+				&& ['sent', 'skipped_bootstrap', 'filtered_system'].includes(row.status)
+				&& relayMessagesEquivalent(row, record));
+			if (equivalent) return { status: 'duplicate', message_id: message.message_id, equivalent_message_id: equivalent.source_message_id };
+		}
+		const claimed = await ledger.claimRelayMessage(record);
+		if (!claimed) return { status: 'in_flight', message_id: message.message_id };
+		await processClaimed(message, source, claimed);
+		const saved = await ledger.getRelayMessage(message.message_id);
+		return { status: saved?.status ?? 'processing', message_id: message.message_id, target_message_ids: saved?.target_message_ids ?? [] };
+	}
+
+	async function repairFromOfficial({ fromCreateTime, toCreateTime, sourceKeys = [] } = {}) {
+		const from = asCreateTimeMs(fromCreateTime, Date.now() - 120_000);
+		const to = Math.max(from, asCreateTimeMs(toCreateTime, Date.now()));
+		if (to - from > 24 * 60 * 60_000) throw new Error('补读窗口不能超过 24 小时');
+		const requested = new Set((Array.isArray(sourceKeys) ? sourceKeys : []).map((value) => String(value ?? '').trim()).filter(Boolean));
+		const configured = await configuredSources();
+		const selected = configured.filter((source) => source.enabled !== false && (!requested.size || requested.has(source.key)));
+		const totals = { from, to, sources: [], fetched: 0, sent: 0, deduplicated: 0, filtered: 0, failed: 0 };
+		await mapWithConcurrency(selected, sourceConcurrency, async (configuredSource) => {
+			const source = await resolveSource(configuredSource);
+			if (!source) {
+				totals.sources.push({ key: configuredSource.key, state: 'unavailable', fetched: 0, sent: 0, deduplicated: 0, filtered: 0, failed: 1 });
+				totals.failed += 1;
+				return;
+			}
+			const stats = { key: source.key, state: 'ok', fetched: 0, sent: 0, deduplicated: 0, filtered: 0, failed: 0, message_ids: [] };
+			try {
+				// Do not advance the requested repair window to the latest sent row.
+				// A WebSocket gap can occur before a later message that did arrive;
+				// advancing past that later row would permanently hide the missed
+				// message. Per-message IDs plus the bounded source-window equivalence
+				// check below provide idempotency without losing earlier history.
+				const effectiveFrom = from;
+				let pageToken;
+				for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+					const result = await sourceApi.messageList({
+						container_id_type: 'chat', container_id: source.resolvedChatId,
+						start_time: asEpochSeconds(effectiveFrom), end_time: asEpochSeconds(to),
+						sort_type: 'ByCreateTimeAsc', page_size: 50, with_sender_name: true,
+						card_msg_content_type: 'user_card_content', ...(pageToken ? { page_token: pageToken } : {}),
+					});
+					if (result.code && result.code !== 0) throw new Error(`读取源群 ${source.key} 历史消息失败：${result.msg ?? result.code}`);
+					for (const message of result.data?.items ?? []) {
+						if (!message?.message_id) continue;
+						const createTime = asCreateTimeMs(message.create_time, 0);
+						if (createTime < effectiveFrom || createTime > to) continue;
+						stats.fetched += 1;
+						const record = {
+							sourceMessageId: message.message_id, sourceKey: source.key, sourceChatId: source.resolvedChatId,
+							sourceCreateTime: createTime, sourceUpdateTime: message.update_time ? asCreateTimeMs(message.update_time, createTime) : null,
+							targetChatId: source.targetChatId, targetChatIds: source.targetChatIds, routeTag: source.tag, message,
+						};
+						if (isSystemMessage(message)) { stats.filtered += 1; await ledger.filterRelayMessage(record, '系统消息已过滤（官方补读回测）'); continue; }
+						const blockedReason = blockedMessageReason(message, sourceFilterOptions(source));
+						if (blockedReason) { stats.filtered += 1; await ledger.filterRelayMessage(record, blockedReason); continue; }
+						const existing = await ledger.getRelayMessage(message.message_id);
+						if (existing?.status === 'sent' || existing?.status === 'skipped_bootstrap' || existing?.status === 'filtered_system') { stats.deduplicated += 1; continue; }
+						const equivalents = ledger.relayMessagesBySourceWindow
+							? await ledger.relayMessagesBySourceWindow(source.key, createTime - 3_000, createTime + 3_000) : [];
+						if (equivalents.some((row) => row.source_message_id !== message.message_id
+							&& ['sent', 'skipped_bootstrap', 'filtered_system'].includes(row.status)
+							&& relayMessagesEquivalent(row, record))) { stats.deduplicated += 1; continue; }
+						const claimed = await ledger.claimRelayMessage(record);
+						if (!claimed) { stats.deduplicated += 1; continue; }
+						await processClaimed(message, source, claimed);
+						const saved = await ledger.getRelayMessage(message.message_id);
+						if (saved?.status === 'sent') stats.sent += 1;
+						else stats.failed += 1;
+						stats.message_ids.push({ id: message.message_id, status: saved?.status ?? 'unknown' });
+					}
+					if (!result.data?.has_more || !result.data?.page_token) break;
+					pageToken = result.data.page_token;
+				}
+			} catch (error) {
+				stats.state = 'error'; stats.failed += 1;
+				logger.error(`群消息官方补读失败：${source.key}：${error instanceof Error ? error.message : String(error)}`);
+			}
+			totals.sources.push(stats);
+			totals.fetched += stats.fetched; totals.sent += stats.sent; totals.deduplicated += stats.deduplicated; totals.filtered += stats.filtered; totals.failed += stats.failed;
+		});
+		return totals;
 	}
 
 	async function resolveSource(source) {
@@ -609,7 +870,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 					await ledger.filterRelayMessage(record, '系统消息已过滤（如入群、退群或群设置变更）');
 					continue;
 				}
-				const blockedReason = blockedMessageReason(message);
+				const blockedReason = blockedMessageReason(message, sourceFilterOptions(source));
 				if (blockedReason) {
 					await ledger.filterRelayMessage(record, blockedReason);
 					continue;
@@ -728,6 +989,8 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 
 	return {
 		tick,
+		processInbound,
+		repairFromOfficial,
 		status: () => ({
 			running, last_tick_started_at: lastTickStartedAt, last_tick_completed_at: lastTickCompletedAt, last_tick_error: lastTickError,
 			writer_state: writerState, source_concurrency: sourceConcurrency,

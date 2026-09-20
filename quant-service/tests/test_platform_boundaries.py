@@ -774,6 +774,7 @@ class PlatformBoundaryTests(unittest.TestCase):
         self.assertEqual(methods_by_path["/api/v1/providers/tushare/catalog"], {"GET"})
         self.assertEqual(methods_by_path["/api/v1/providers/capabilities"], {"GET"})
         self.assertEqual(methods_by_path["/api/v1/providers/health"], {"GET"})
+        self.assertEqual(methods_by_path["/api/v1/providers/realtime-health"], {"GET"})
 
     def test_strategy_pattern_read_model_and_router_are_local_get_only(self):
         connection = MagicMock()
@@ -828,6 +829,10 @@ class PlatformBoundaryTests(unittest.TestCase):
         availability_gate = next(item for item in unclocked_minutes["gates"]
                                  if item["key"] == "p2_offline_minute_availability_clock")
         self.assertEqual(availability_gate["status"], "insufficient")
+        self.assertEqual(availability_gate["required"], P3_MIN_REPLAY_DAYS)
+        replay_gate = next(item for item in unclocked_minutes["gates"]
+                           if item["key"] == "p3_replay_window")
+        self.assertEqual(replay_gate["observed"], 0)
         self.assertFalse(unclocked_minutes["p2_data_foundation_ready"])
 
         ready = replay_readiness_payload({

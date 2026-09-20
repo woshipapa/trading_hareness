@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .adjustment_factor_semantics import COMPLETE_FACTOR_SEMANTICS, COMPLETE_FACTOR_PROVIDERS
+
 
 ADJUSTMENT_MISSING_FLAG = "adj_factor_missing"
 CORPORATE_ACTION_UNRESOLVED_FLAG = "corporate_action_unresolved"
@@ -22,6 +24,27 @@ def number(value: Any) -> float | None:
         return None
 
 
+def research_price_eligible(row: dict[str, Any]) -> bool:
+    """Return whether a stored bar carries an eligible adjustment contract.
+
+    Older pure-function callers may provide only ``adj_factor``; those rows
+    remain usable for compatibility tests.  Database projections that expose
+    the owner semantic columns are fail-closed: a positive number is not
+    enough when the row is pending, retired, or marked as a non-cumulative
+    identity factor.
+    """
+    if "adjustment_state" in row and row.get("adjustment_state") != "complete":
+        return False
+    if "factor_semantics" in row and row.get("factor_semantics") != COMPLETE_FACTOR_SEMANTICS:
+        return False
+    provider = row.get("factor_provider")
+    if provider is None and "provider" in row:
+        provider = row.get("provider")
+    if provider is not None and str(provider) not in COMPLETE_FACTOR_PROVIDERS:
+        return False
+    return True
+
+
 def adjusted_value(row: dict[str, Any], field: str = "close") -> float | None:
     """Return a strict same-day adjusted research value.
 
@@ -31,7 +54,7 @@ def adjusted_value(row: dict[str, Any], field: str = "close") -> float | None:
     """
     raw = number(row.get(field))
     factor = number(row.get("adj_factor"))
-    if raw is None or factor is None or factor <= 0:
+    if not research_price_eligible(row) or raw is None or factor is None or factor <= 0:
         return None
     return raw * factor
 
@@ -50,7 +73,7 @@ def adjusted_bars(rows: list[dict[str, Any]], *, fields: tuple[str, ...] = ("ope
     for row in rows:
         item = dict(row)
         factor = number(item.get("adj_factor"))
-        if factor is None or factor <= 0:
+        if not research_price_eligible(item) or factor is None or factor <= 0:
             return None, [ADJUSTMENT_MISSING_FLAG]
         for field in fields:
             raw = number(item.get(field))
@@ -74,4 +97,5 @@ __all__ = [
     "adjusted_bars",
     "adjusted_value",
     "number",
+    "research_price_eligible",
 ]

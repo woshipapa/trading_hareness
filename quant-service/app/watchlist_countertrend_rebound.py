@@ -16,6 +16,7 @@ import math
 from typing import Any, Iterable
 
 from .datasources.catalog import store_values
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 from .intraday_decision_context import shrunk_probability
 from .platform.strategy_data_needs import strategy_taxonomies
 from .strategy_thresholds import MAX_ENTRY_INTRADAY_GAIN_PCT
@@ -408,8 +409,9 @@ def research_from_rows(
 
 
 def run_countertrend_rebound_research(connection: Any, end_date: date | None = None) -> dict[str, Any]:
+    factor_semantics_sql = persisted_factor_semantics_sql("factor")
     latest = connection.execute(
-        """SELECT max(b.trading_date) AS latest FROM quant.canonical_bars_daily b
+        f"""SELECT max(b.trading_date) AS latest FROM quant.canonical_bars_daily b
              JOIN quant.intraday_watchlists w ON w.symbol=b.symbol AND w.enabled
              JOIN LATERAL (
                    SELECT membership.sector_key
@@ -428,8 +430,12 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
               AND EXISTS (
                     SELECT 1 FROM quant.daily_adjustment_factors factor
                      WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                       AND factor.provider = ANY(%s::text[])
+                       AND factor.adj_factor>0
+                       AND {factor_semantics_sql}
                        AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-              )""", (strategy_taxonomies("countertrend_rebound_shadow")[0], list(TECH_INDUSTRIES)),
+              )""", (strategy_taxonomies("countertrend_rebound_shadow")[0], list(TECH_INDUSTRIES),
+                         list(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider"))),
     ).fetchone()
     selected_end = (
         min(end_date, latest["latest"]) if end_date and latest and latest["latest"]
@@ -444,7 +450,7 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
         }
     start_date = selected_end - timedelta(days=365)
     raw_bars = connection.execute(
-            """SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,
+            f"""SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,
                   pit_adjustment.adj_factor,
                   b.is_suspended,b.limit_up,b.limit_down
              FROM quant.canonical_bars_daily b
@@ -465,10 +471,13 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
              LEFT JOIN LATERAL (
                    SELECT factor.adj_factor
                      FROM quant.daily_adjustment_factors factor
-                    WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                   WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                      AND factor.provider = ANY(%s::text[])
+                      AND factor.adj_factor>0
+                      AND {factor_semantics_sql}
                       AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                    ORDER BY factor.available_at DESC,
-                             array_position(%s::text[],factor.provider) NULLS LAST,
+                    ORDER BY array_position(%s::text[],factor.provider) NULLS LAST,
+                             factor.available_at DESC,
                              factor.provider
                     LIMIT 1
              ) pit_adjustment ON TRUE
@@ -478,7 +487,9 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
               AND pit_adjustment.adj_factor IS NOT NULL
             ORDER BY b.symbol,b.trading_date""",
         (strategy_taxonomies("countertrend_rebound_shadow")[0], list(TECH_INDUSTRIES),
-         list(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")), start_date, selected_end),
+         list(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")),
+         list(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")),
+         start_date, selected_end),
     ).fetchall()
     market_rows = connection.execute(
         """SELECT trading_date,stock_count,advancers,decliners,unchanged,median_change_pct,

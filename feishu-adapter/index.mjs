@@ -26,7 +26,10 @@ import { parsePaperIngestIds } from './paper-ingest-command.mjs';
 import { cardPayload } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { personalDecisionResearchPaths } from './personal-decision-routes.mjs';
-import { normalizeLarkAgentXMessage } from './larkagentx-ingress.mjs';
+import { splitUtf8Text } from './media-chunks.mjs';
+import { isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage } from './larkagentx-ingress.mjs';
+import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
+import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import Busboy from 'busboy';
 
 const required = ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'N8N_TEXT_WEBHOOK_URL', 'N8N_MEDIA_PART_WEBHOOK_URL', 'N8N_MEDIA_FINALIZE_WEBHOOK_URL'];
@@ -54,6 +57,19 @@ const paperIngestChatId = String(process.env.PAPER_KB_FEISHU_CHAT_ID ?? '').trim
 const paperSearchWebhook = String(process.env.PAPER_KB_SEARCH_WEBHOOK ?? '').trim();
 const paperFeedbackWebhook = String(process.env.PAPER_KB_FEEDBACK_WEBHOOK ?? '').trim();
 const larkAgentXIngressToken = String(process.env.LARKX_BRIDGE_TOKEN ?? '').trim();
+const larkAgentXResourceUrl = String(process.env.LARKX_BRIDGE_RESOURCE_URL ?? '').trim();
+const larkAgentXGroupRelayEnabled = String(process.env.LARKX_GROUP_RELAY_ENABLED ?? 'false').toLowerCase() === 'true';
+const larkAgentXGroupRelayRoutes = new Map(
+	String(process.env.LARKX_GROUP_RELAY_ROUTES ?? '')
+		.split(';')
+		.map((pair) => pair.trim())
+		.filter(Boolean)
+		.map((pair) => {
+			const separator = pair.indexOf('=');
+			return separator > 0 ? [pair.slice(0, separator).trim(), pair.slice(separator + 1).trim()] : ['', ''];
+		})
+		.filter(([sourceKey, chatId]) => sourceKey && chatId),
+);
 const feishuAlertReceiveIdType = String(process.env.FEISHU_ALERT_RECEIVE_ID_TYPE ?? 'chat_id').trim();
 const supportedAlertReceiveIdTypes = new Set(['chat_id', 'open_id', 'user_id', 'union_id']);
 if (!supportedAlertReceiveIdTypes.has(feishuAlertReceiveIdType)) {
@@ -178,18 +194,14 @@ if (!['skip_existing', 'forward_existing'].includes(groupRelayBootstrapMode)) {
 // im/v1/messages, at the cost of edit/recall sync for that one target
 // (see group-relay.mjs's WEBHOOK_SENT_PREFIX). Same format as the Python
 // relays' ITOUGU_FEISHU_WEBHOOKS / WECHAT_BIZ_FEISHU_WEBHOOKS.
-const groupRelayWebhooksByChatId = new Map(
-	String(process.env.FEISHU_GROUP_RELAY_WEBHOOKS ?? '')
-		.split(';')
-		.map((pair) => pair.trim())
-		.filter(Boolean)
-		.map((pair) => pair.split('=').map((part) => part.trim()))
-		.filter(([chatId, url]) => chatId && url)
-		.map(([chatId, ...rest]) => [chatId, rest.join('=')]),
-);
+const groupRelayWebhooksByChatId = parseRelayMap(process.env.FEISHU_GROUP_RELAY_WEBHOOKS);
+const groupRelayWebhookKeywordsByChatId = parseRelayMap(process.env.FEISHU_GROUP_RELAY_WEBHOOK_KEYWORDS);
 const groupRelayConfig = {
 	enabled: String(process.env.FEISHU_GROUP_RELAY_ENABLED ?? 'true').toLowerCase() !== 'false',
 	webhooksByChatId: groupRelayWebhooksByChatId,
+	webhookKeywordsByChatId: groupRelayWebhookKeywordsByChatId,
+	larkAgentXResourceUrl,
+	larkAgentXToken: larkAgentXIngressToken,
 	targetChatId: String(process.env.FEISHU_GROUP_RELAY_TARGET_CHAT_ID ?? '').trim(),
 	intervalSeconds: groupRelayIntervalSeconds,
 	sourceConcurrency: Math.floor(groupRelaySourceConcurrency),
@@ -1078,6 +1090,77 @@ async function handleLarkAgentXInbound(request, response) {
 	}
 }
 
+async function handleLarkAgentXGroupRelayInbound(request, response) {
+	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
+		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'unauthorized' }));
+		return;
+	}
+	if (!larkAgentXGroupRelayEnabled) {
+		response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'disabled' }));
+		return;
+	}
+	try {
+		const input = await readJsonBody(request, 64 * 1024);
+		const chatId = String(input?.chat_id ?? '').trim();
+		const sourceKey = larkAgentXGroupRelayRoutes.get(chatId);
+		if (!sourceKey) throw new Error(`未配置 LarkAgentX 源群：${chatId || 'unknown'}`);
+		const source = (await ledger.relayRoutes()).find((route) => route.key === sourceKey);
+		if (!source) throw new Error(`未找到实时源路由：${sourceKey}`);
+		if (source.enabled === false) {
+			response.writeHead(202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ status: 'filtered', reason: '实时源路由已停用', source_key: sourceKey, chat_id: chatId }));
+			return;
+		}
+		const targetChatIds = [...new Set([groupRelayConfig.targetChatId, ...(source.targetChatIds ?? [])].map((value) => String(value ?? '').trim()).filter(Boolean))];
+		if (!targetChatIds.length) throw new Error(`实时源路由没有目标群：${sourceKey}`);
+		const message = isDirectLarkAgentXRelayType(input)
+			? normalizeLarkAgentXRelayMessage(input)
+			// LarkAgentX's personal WebSocket uses its numeric chat id, while
+			// the user OAuth message API resolves the same group by its official
+			// oc_ chat id retained in the relay route.
+			: await readLarkAgentXBackfill(input, source, { sourceApi: feishuUserOauth.sourceApi });
+		const resolvedChatId = message.oauth_chat_id || chatId;
+		const result = await groupRelay.processInbound({ ...message, source_chat_id: resolvedChatId }, { ...source, resolvedChatId, targetChatIds, targetChatId: targetChatIds[0] });
+		response.writeHead(result.status === 'sent' ? 201 : 202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ ...result, source_key: sourceKey, chat_id: chatId }));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`LarkAgentX 群 relay 失败：${message}`);
+		response.writeHead(Number(error?.statusCode) || 400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message }));
+	}
+}
+
+async function handleLarkAgentXGapRepair(request, response) {
+	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
+		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'unauthorized' }));
+		return;
+	}
+	try {
+		const input = await readJsonBody(request, 16 * 1024);
+		const explicitSourceKeys = Array.isArray(input?.source_keys)
+			? input.source_keys.map((value) => String(value ?? '').trim()).filter(Boolean)
+			: [];
+		const sourceKeys = explicitSourceKeys.length
+			? explicitSourceKeys
+			: (Array.isArray(input?.source_chat_ids) ? input.source_chat_ids
+				.map((value) => larkAgentXGroupRelayRoutes.get(String(value ?? '').trim()))
+				.filter(Boolean) : []);
+		if (!sourceKeys.length) throw new Error('缺口补读必须指定 source_keys 或已映射的 source_chat_ids');
+		const result = await groupRelay.repairFromOfficial({ fromCreateTime: input?.from_time, toCreateTime: input?.to_time, sourceKeys });
+		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'completed', ...result }));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`LarkAgentX 缺口补读失败：${message}`);
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message }));
+	}
+}
+
 async function renderMetrics() {
 	const [rows, summary] = await Promise.all([ledger.metrics(), ledger.observability()]);
 	const lines = ['# HELP ingestion_jobs Number of durable ingestion jobs by status and stage', '# TYPE ingestion_jobs gauge'];
@@ -1190,6 +1273,7 @@ async function groupRelayDashboardStatus() {
 		interval_seconds: groupRelayConfig.intervalSeconds, stale_after_seconds: staleAfterSeconds,
 		user_oauth_configured: Boolean(oauth.configured), target_configured: Boolean(groupRelayConfig.targetChatId),
 		user_oauth_scope_audit: oauth.scope_audit ?? null,
+		webhook_config: webhookConfigStatus(groupRelayWebhooksByChatId, groupRelayWebhookKeywordsByChatId),
 		delivery_verified: sources.filter((source) => source.enabled).every((source) => source.delivery_state === 'verified'),
 		last_tick_started_at: runtime.last_tick_started_at, last_tick_completed_at: runtime.last_tick_completed_at,
 		last_tick_error: runtime.last_tick_error,
@@ -1788,6 +1872,7 @@ if (url.pathname === '/health') {
 		response.end(JSON.stringify({ status: 'ok', events: recentEvents.length,
 			quant_alert_configured: Boolean(quantAlertWebhookToken && feishuAlertReceiveId),
 			paper_kb_alert_configured: Boolean(paperKbAlertWebhookToken && /^oc_[A-Za-z0-9]+$/.test(paperKbAlertReceiveId)),
+			runtime_source: process.env.FEISHU_ADAPTER_SOURCE_MODE === 'source-overlay' ? 'source-overlay' : 'image',
 			build: releaseMetadata() }));
 		return;
 	}
@@ -1874,6 +1959,14 @@ if (url.pathname === '/health') {
 	}
 	if (url.pathname === '/internal/larkagentx/inbound' && request.method === 'POST') {
 		void handleLarkAgentXInbound(request, response);
+		return;
+	}
+	if (url.pathname === '/internal/larkagentx/group-relay' && request.method === 'POST') {
+		void handleLarkAgentXGroupRelayInbound(request, response);
+		return;
+	}
+	if (url.pathname === '/internal/larkagentx/gap-repair' && request.method === 'POST') {
+		void handleLarkAgentXGapRepair(request, response);
 		return;
 	}
 	if (url.pathname === '/wechat-group-relay' && request.method === 'POST') {
@@ -2010,6 +2103,10 @@ async function dispatchToN8n(data, manual = null) {
 	// protocol remains idempotent through its per-message batch/item/upload keys.
 	await ledger.updateJob(job.job_id, { status: resources.length ? 'uploading' : 'queued', stage: resources.length ? 'uploading_parts' : 'creating_text', attempt_count: Number(job.attempt_count ?? 0) + 1 });
 	const assetIds = [];
+	const messageItemKey = payload.event?.message?.message_id
+		? `i_${String(payload.event.message.message_id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 52).padEnd(24, '0')}`
+		: `i_${randomUUID().replace(/-/g, '')}`;
+	const textChunks = splitUtf8Text(importContent.content, { baseKey: messageItemKey });
 	for (const [ordinal, resource] of resources.entries()) assetIds.push(await ledger.recordAsset(job.job_id, ordinal, resource));
 	const totalBytes = resources.reduce((sum, resource) => sum + resource.declared_bytes, 0);
 	if (resources.length) {
@@ -2028,7 +2125,7 @@ async function dispatchToN8n(data, manual = null) {
 					topic_key: payload.topic_key,
 					publisher_key: payload.publisher_key,
 					batch_key: payload.event?.message?.message_id ? `b_${String(payload.event.message.message_id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 52).padEnd(24, '0')}` : `b_${randomUUID().replace(/-/g, '')}`,
-					item_key: payload.event?.message?.message_id ? `i_${String(payload.event.message.message_id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 52).padEnd(24, '0')}` : `i_${randomUUID().replace(/-/g, '')}`,
+					item_key: messageItemKey,
 					media_upload_key: `${payload.event?.message?.message_id ? `u_${String(payload.event.message.message_id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 52).padEnd(24, '0')}` : `u_${randomUUID().replace(/-/g, '')}`}_${resources.indexOf(resource) + 1}`,
 					media_filename: resource.filename,
 					media_type: resource.media_type,
@@ -2039,8 +2136,11 @@ async function dispatchToN8n(data, manual = null) {
 					upload_id: lastUpload?.upload_id ?? resource.remote_upload_id ?? '',
 					part_index: String(partIndex),
 					part_sha256: manifest.sha256,
-					content: importContent.content,
-					content_sha256: payload.text_content_sha256 ?? '',
+					// The archive API limits one text item to 1 MiB. Send the complete
+					// pre-hashed chunk manifest; n8n writes each chunk into this batch.
+					content: textChunks[0]?.content ?? '',
+					content_sha256: textChunks[0]?.content_sha256 ?? '',
+					content_chunks: JSON.stringify(textChunks),
 					content_date: importContent.content_date,
 					content_time: importContent.content_time,
 					source_label: payload.source_label ?? (payload.source === 'manual-relay' ? '本机手动投递' : '飞书机器人'),

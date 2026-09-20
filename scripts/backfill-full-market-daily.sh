@@ -6,16 +6,31 @@
 # walks back one trading day at a time and stops as soon as a day is already
 # complete, so a second run costs almost nothing.
 #
-# Run it after the close. The sync shares a 6-requests-per-minute provider with
-# the live collectors, and during a session it loses that race - the request
-# comes back "shared provider rate-limit queue is full".
+# Run it in the owner's 04:00-08:00 batch window through the research
+# scheduler. The scheduler is pinned to db-tunnel:5433; the intraday service
+# and its 5432 lane are never used for historical writes.
 set -uo pipefail
 
 DAYS="${1:-40}"
 MIN_ROWS="${BACKFILL_MIN_ROWS:-5000}"
 PAUSE="${BACKFILL_PAUSE_SECONDS:-12}"
-CONTAINER=trading-hareness-peer-quant-research-1
-PORT="${PEER_QUANT_PORT:-15682}"
+CONTAINER=trading-hareness-peer-quant-research-scheduler-1
+PORT="${PEER_RESEARCH_QUANT_PORT:-15683}"
+
+if ! python3 - <<'PY'
+from datetime import datetime
+from zoneinfo import ZoneInfo
+hour = datetime.now(ZoneInfo("Asia/Shanghai")).hour
+raise SystemExit(0 if 4 <= hour < 8 else 1)
+PY
+then
+  printf 'batch backfill is restricted to 04:00-08:00 Asia/Shanghai\n' >&2
+  exit 2
+fi
+
+lane=$(docker inspect "$CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null || true)
+printf '%s\n' "$lane" | grep -qx 'PGHOST=db-tunnel' || { printf 'scheduler is not on db-tunnel\n' >&2; exit 2; }
+printf '%s\n' "$lane" | grep -qx 'PGPORT=5433' || { printf 'scheduler is not on batch port 5433\n' >&2; exit 2; }
 
 KEY=$(docker inspect "$CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' \
   | grep '^QUANT_WRITE_API_KEY=' | cut -d= -f2-)

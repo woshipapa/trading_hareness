@@ -47,6 +47,41 @@ class TaskInventoryTests(unittest.TestCase):
         names = [t["name"] for t in module.TASKS]
         self.assertEqual(len(names), len(set(names)))
 
+    def test_paper_source_snapshot_task_is_bounded_and_non_mutating(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None)
+        task = next(item for item in module.TASKS if item["name"] == "paperkb.sources")
+        self.assertEqual(task["kind"], "daily")
+        self.assertIn("datacite", task["args"])
+        repository = next(item for item in module.TASKS if item["name"] == "paperkb.repository-sources")
+        self.assertEqual(repository["kind"], "daily")
+        self.assertIn("europe_pmc", repository["args"])
+        self.assertIn("zenodo", repository["args"])
+        digest = next(item for item in module.TASKS if item["name"] == "paperkb.supplemental-digest")
+        self.assertEqual(digest["kind"], "daily")
+        self.assertIn("supplemental_digest.py", digest["args"][1])
+        self.assertIn("--notify", digest["args"])
+
+    def test_local_scholar_alerts_are_opt_in(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None, PAPER_KB_SCHOLAR_ALERT_DIR=None)
+        self.assertNotIn("paperkb.scholar-alerts", [t["name"] for t in module.TASKS])
+        module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None,
+                              PAPER_KB_SCHOLAR_ALERT_DIR="/tmp/scholar-alerts")
+        task = next(item for item in module.TASKS if item["name"] == "paperkb.scholar-alerts")
+        self.assertIn("/tmp/scholar-alerts", task["args"])
+
+    def test_s2_children_receive_optional_provider_credentials_at_runtime(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None,
+                              OPENALEX_API_KEY="openalex-test-only",
+                              OPENCITATIONS_ACCESS_TOKEN="opencitations-test-only",
+                              PAPER_KB_OPENALEX_ENABLED="true",
+                              PAPER_KB_OPENCITATIONS_ENABLED="false")
+        for name in ("paperkb.s2", "paperkb.s2-recovery", "paperkb.citation-watch"):
+            task = next(item for item in module.TASKS if item["name"] == name)
+            self.assertEqual(task["env"]["OPENALEX_API_KEY"], "openalex-test-only")
+            self.assertEqual(task["env"]["OPENCITATIONS_ACCESS_TOKEN"], "opencitations-test-only")
+            self.assertEqual(task["env"]["PAPER_KB_OPENALEX_ENABLED"], "true")
+            self.assertEqual(task["env"]["PAPER_KB_OPENCITATIONS_ENABLED"], "false")
+
 
 if __name__ == "__main__":
     unittest.main()

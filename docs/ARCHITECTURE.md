@@ -38,6 +38,27 @@ runtime configuration and ownership, not a long-lived server branch: releases
 publish a Git SHA and image/source provenance through the loopback health
 endpoints, while secret environment files remain outside version control.
 
+The opt-in `research-worker` profile is a one-shot daily model laboratory, not
+an API or scheduler replica. It receives only PostgreSQL and the bounded quant
+artifact volume, runs with a read-only root filesystem, 4 GiB memory and 2 CPU
+limits, and has no provider, Feishu or broker credentials. Its output is an
+immutable point-in-time dataset, several embargoed OOF trial receipts and a
+`draft`/`trained`/`rejected` registry row with `live_effect=none`; the online
+service never loads these artifacts.
+
+The edge adapter separates the slow-changing runtime from fast bug iteration.
+The verified image owns Node and `node_modules`; adapter JavaScript, frontend
+assets, routing configuration and the LarkAgentX Python bridge are staged under
+the retained `/opt/feishu-relay-edge/hotfix/releases/` tree. The adapter reads
+its source through a read-only mount, while the bridge's stable systemd
+entrypoint follows the same atomic `current` symlink. The candidate is checked
+with the image's Node runtime and the supervisor venv's Python runtime before
+activation. The hotfix deployer uses `docker compose up --no-build --pull
+never`, restarts both processes, checks the adapter, WebSocket bridge and
+webhook configuration health, keeps a bounded rollback window, and restores
+the previous pointer on failure. Dependency, Node, Python environment or
+base-image changes must use their immutable runtime release path.
+
 The edge Feishu adapter also runs a separate Baidu market-archive lane. Every
 30 seconds it reads the latest all-A Level-1 and strategy snapshots, commits an
 idempotent job to the PostgreSQL archive ledger, and returns to the polling
@@ -59,11 +80,15 @@ not import `app.main`.
 | HTTP request validation | `app/routers/` | Router functions validate and delegate; no provider crawling in a read route. |
 | Provider transport | `app/*provider*.py`, `app/http_clients.py` | Reuse lifecycle clients and record availability. |
 | Evidence semantics | `app/platform/evidence_contracts.py` | Every normalized source declares provider, capability, scope, coverage semantics and decision eligibility before strategies consume it. |
-| Data placement and replay | `app/platform/data_product_registry.py` | Every strategy/runtime dataset declares time semantics, local tier, immutable cloud format, partition keys and replay role. Cloud copies never become direct decision inputs. |
+| Data placement and replay | `app/platform/data_product_registry.py` | Every strategy/runtime dataset declares time semantics, local tier, immutable cloud format, partition keys, replay role and owner hot/cold policy. The five 365-day split products must match `owner_storage.TIERED_EVIDENCE_TABLES`; cloud copies never become direct decision inputs. |
+| Owner storage compatibility | `app/owner_storage.py`, `docs/OWNER_DATABASE_STORAGE.md` | Read-only detection of tablespace, all `_cold` twins, hot/cold schema parity, legacy-table placement and factor semantics; partial cutovers never enter research unions and peer never runs owner DDL. |
+| Instrument registry writes | `app/instrument_registry.py` | Sort/deduplicate symbols and use one `unnest` upsert so concurrent owner writers acquire locks in the same order. |
+| Adjustment-factor semantics | `app/adjustment_factor_semantics.py` | Only positive cumulative factors from the explicit Longhu-derived or licensed Tushare allow-list are research-eligible; identity placeholders are retired and missing factors fail closed. |
 | Persistent projections | `app/*_repository.py`, `app/*_read_model.py` | Bound result sets; async dashboard reads use `AsyncDatabase`. |
 | Timing and recovery | `app/*_scheduler.py`, `app/runtime_tasks.py`, `app/*_runtime.py` | Durable leases, idempotent run keys and explicit retry windows; runtime adapters bind scan I/O and lease ports without embedding transactional closures in the ASGI root. |
 | Runtime ownership | `app/platform/runtime_task_registry.py` | Each leased task declares one owner profile, expected cadence, upstream capabilities and retained evidence datasets; startup rejects an undeclared or missing task factory. |
 | Rules and research | `app/*_rules.py`, `app/*_research.py` | Keep inputs/outputs explicit and test without HTTP or database state. |
+| Offline model training | `app/research_model_training_worker.py`, `app/research_model_training.py` | One-shot, resource-limited, immutable artifacts and append-only trials only; no provider fetch, online load or automatic promotion. |
 | Strategy contracts | `app/platform/strategy_registry.py` | Every strategy declares its model/input contract, runtime owner, retained evidence and `live_effect=none`; startup rejects missing or mismatched materialized model versions. |
 | Schema | `migrations/versions/` | New production schema changes use Alembic only. |
 | Legacy bootstrap | `app/database.py` | Disabled by default; only an explicit recovery operator may enable it. |

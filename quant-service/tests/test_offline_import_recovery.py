@@ -9,10 +9,14 @@ from types import SimpleNamespace
 
 from app.main import db, offline_import_recovery_action, offline_minute_import_stale_seconds
 from app.numeric_utils import decimal_or_none
-from app.offline_minute_import_service import import_csv, sha256_file
+from app.offline_minute_import_service import import_csv, sha256_file, source_available_at
 
 
 class OfflineMinuteImportRecoveryTests(unittest.TestCase):
+    def test_local_available_at_is_not_accepted_as_source_clock(self) -> None:
+        self.assertIsNone(source_available_at({"available_at": "2026-08-25T01:30:02+00:00"}))
+        self.assertIsNotNone(source_available_at({"upstream_available_at": "2026-08-25T01:30:02+00:00"}))
+
     def test_terminal_files_are_not_reimported_and_failures_can_resume(self) -> None:
         now = datetime(2026, 8, 22, 8, 0, tzinfo=timezone.utc)
         self.assertEqual(offline_import_recovery_action(None, now=now, stale_seconds=900), "create")

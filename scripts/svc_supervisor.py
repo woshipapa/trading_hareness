@@ -31,7 +31,28 @@ def _load_env_secret(name):
     return ""
 
 
+def _paper_provider_env():
+    """Pass optional paper-provider credentials only to Paper-KB children.
+
+    The supervisor itself never logs these values.  Empty values are omitted so
+    provider code can distinguish an unavailable credential from an explicitly
+    configured one.
+    """
+    env = {"PATH": PATH_ENV}
+    for name in (
+        "OPENALEX_API_KEY", "OPENCITATIONS_ACCESS_TOKEN",
+        "PAPER_KB_OPENALEX_ENABLED", "PAPER_KB_OPENCITATIONS_ENABLED",
+        "CORE_API_KEY", "HF_TOKEN", "HUGGINGFACE_TOKEN", "UNPAYWALL_EMAIL",
+        "S2_API_KEY", "S2_API_KEYS", "PAPER_KB_SCHOLAR_ALERT_DIR",
+    ):
+        value = _load_env_secret(name)
+        if value:
+            env[name] = value
+    return env
+
+
 RELAY_TOKEN = _load_env_secret("RELAY_TOKEN")
+SCHOLAR_ALERT_DIR = _load_env_secret("PAPER_KB_SCHOLAR_ALERT_DIR")
 
 TASKS = [
     # ---- 常驻 daemon (原 KeepAlive) ----
@@ -59,6 +80,50 @@ TASKS = [
          args=[PY, os.path.join(PKB, "jobs.py"), "arxiv"],
          cwd=PKB, out=os.path.join(PKLOG, "arxiv.log"), err=os.path.join(PKLOG, "arxiv.log"),
          env={"PATH": PATH_ENV}),
+    # Optional discovery supplements write replayable snapshots only; they do
+    # not mutate the corpus or replace the arXiv daily lane.  DataCite is
+    # public and bounded.  Hugging Face is enabled only when a runtime token is
+    # actually present, because its API may require authentication.
+    dict(name="paperkb.sources", kind="daily", hour=11, minute=0, run_at_load=False,
+         args=[PY, os.path.join(PKB, "source_refresh.py"), "--source", "datacite",
+               "--query", "large language model mixture of experts distributed systems",
+               "--limit", "50"],
+         cwd=PKB, out=os.path.join(PKLOG, "sources.log"), err=os.path.join(PKLOG, "sources.log"),
+         env={"PATH": PATH_ENV}),
+    dict(name="paperkb.repository-sources", kind="daily", hour=11, minute=10, run_at_load=False,
+         args=[PY, os.path.join(PKB, "source_refresh.py"), "--source", "europe_pmc",
+               "--source", "zenodo", "--query",
+               "large language model mixture of experts distributed systems", "--limit", "25"],
+         cwd=PKB, out=os.path.join(PKLOG, "repository-sources.log"),
+         err=os.path.join(PKLOG, "repository-sources.log"), env={"PATH": PATH_ENV}),
+    *([dict(name="paperkb.repository-sources-core", kind="daily", hour=11, minute=20, run_at_load=False,
+            args=[PY, os.path.join(PKB, "source_refresh.py"), "--source", "core", "--limit", "25"],
+            cwd=PKB, out=os.path.join(PKLOG, "repository-sources-core.log"),
+            err=os.path.join(PKLOG, "repository-sources-core.log"),
+            env={"PATH": PATH_ENV, "CORE_API_KEY": _load_env_secret("CORE_API_KEY")})]
+      if _load_env_secret("CORE_API_KEY") else []),
+    *([dict(name="paperkb.sources-hf", kind="daily", hour=11, minute=10, run_at_load=False,
+            args=[PY, os.path.join(PKB, "source_refresh.py"), "--source", "huggingface_daily", "--limit", "50"],
+            cwd=PKB, out=os.path.join(PKLOG, "sources-hf.log"), err=os.path.join(PKLOG, "sources-hf.log"),
+            env={"PATH": PATH_ENV, "HF_TOKEN": (_load_env_secret("HF_TOKEN") or _load_env_secret("HUGGINGFACE_TOKEN"))})]
+      if (_load_env_secret("HF_TOKEN") or _load_env_secret("HUGGINGFACE_TOKEN")) else []),
+    *([dict(name="paperkb.scholar-alerts", kind="daily", hour=11, minute=15, run_at_load=False,
+            args=[PY, os.path.join(PKB, "source_refresh.py"), "--source", "scholar_alerts",
+                  "--query", SCHOLAR_ALERT_DIR, "--limit", "100"],
+            cwd=PKB, out=os.path.join(PKLOG, "scholar-alerts.log"),
+            err=os.path.join(PKLOG, "scholar-alerts.log"), env={"PATH": PATH_ENV})]
+      if SCHOLAR_ALERT_DIR else []),
+    dict(name="paperkb.supplemental-digest", kind="daily", hour=11, minute=30, run_at_load=False,
+         args=[PY, os.path.join(PKB, "supplemental_digest.py"), "--limit", "20", "--notify"],
+         cwd=PKB, out=os.path.join(PKLOG, "supplemental-digest.log"),
+         err=os.path.join(PKLOG, "supplemental-digest.log"), env={"PATH": PATH_ENV}),
+    # One bounded canary audit after the snapshot pulls.  It covers every
+    # registered provider/interface, reports not_run/not_configured explicitly,
+    # and sends the persisted capability matrix through the durable job path.
+    dict(name="paperkb.source-health", kind="daily", hour=11, minute=45, run_at_load=True,
+         args=[PY, os.path.join(PKB, "jobs.py"), "source-health"],
+         cwd=PKB, out=os.path.join(PKLOG, "source-health.log"),
+         err=os.path.join(PKLOG, "source-health.log"), env=_paper_provider_env()),
     dict(name="paperkb.refresh", kind="interval", interval=120, run_at_load=True,
          args=[PY, os.path.join(PKB, "kb_refresh.py")],
          cwd=PKB, out=os.path.join(PKLOG, "refresh.log"), err=os.path.join(PKLOG, "refresh.log"), env={}),
@@ -72,7 +137,7 @@ TASKS = [
     dict(name="paperkb.s2-recovery", kind="daily", hour=12, minute=15, run_at_load=True,
          args=[PY, os.path.join(PKB, "jobs.py"), "s2-weekly"],
          cwd=PKB, out=os.path.join(PKLOG, "s2-recovery.log"), err=os.path.join(PKLOG, "s2-recovery.log"),
-         env={"PATH": PATH_ENV}),
+         env=_paper_provider_env()),
     # workspace.db/citations.db/search.db/learning_delivery.db 记录着 FSRS 复习
     # 历史、collections、引用反馈标签——PDF 有 iCloud，这些数据库此前没有任何
     # 备份路径。sqlite3 .backup + gzip 到 iCloud，见 backup_sqlite.sh。
@@ -85,7 +150,7 @@ TASKS = [
     dict(name="paperkb.citation-watch", kind="calendar", weekday=3, hour=9, minute=30,
          args=[PY, os.path.join(PKB, "citation_watch.py"), "--notify"],
          cwd=PKB, out=os.path.join(PKLOG, "citation-watch.log"), err=os.path.join(PKLOG, "citation-watch.log"),
-         env={"PATH": PATH_ENV}, catch_up_hours=36),
+         env=_paper_provider_env(), catch_up_hours=36),
     # ---- 观察池自动化:本地是唯一真源,edge 是扫描方 ----
     # sync 每 5 分钟推差异到 edge(diff 后才 PUT,避免无谓触发 45 天 hydration);
     # refresh 每 30 分钟触发,脚本内按沪时窗口+当日标记自行决定是否真正执行。
@@ -105,7 +170,7 @@ TASKS = [
     dict(name="paperkb.s2", kind="calendar", weekday=2, hour=10, minute=15,
          args=[PY, os.path.join(PKB, "jobs.py"), "s2-weekly"],
          cwd=PKB, out=os.path.join(PKLOG, "s2.log"), err=os.path.join(PKLOG, "s2.log"),
-         env={"PATH": PATH_ENV}, catch_up_hours=36),
+         env=_paper_provider_env(), catch_up_hours=36),
 ]
 
 _shutdown = threading.Event()

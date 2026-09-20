@@ -4,16 +4,24 @@ services:
     # PEER_BACKGROUND_TASKS_ENABLED=true and PEER_RUNTIME_PROFILE=intraday_edge.
     # It keeps the existing peer compose file usable for research/shadow runs.
     env_file:
-      - ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+      - path: ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+        required: false
     environment:
+      QUANT_APPLICATION_NAME: peer-quant-research
+      PEER_OWNER_CONTRACT_MODE: ${PEER_OWNER_CONTRACT_MODE:-report_only}
+      PEER_OWNER_CONTRACT_RECEIPT_PATH: /var/lib/quant/owner-peer-contract.json
       QUANT_BACKGROUND_TASKS_ENABLED: ${PEER_BACKGROUND_TASKS_ENABLED:-false}
       QUANT_RUNTIME_PROFILE: ${PEER_RUNTIME_PROFILE:-research}
       QUANT_SKIP_MIGRATIONS: "true"
+      PEER_REQUIRE_OWNER_SEMANTICS: "true"
       QUANT_LEGACY_SCHEMA_BOOTSTRAP: "false"
       # Longhu credentials remain on the owner API.  The writer consumes only
       # the normalized gateway through db-tunnel:5681.
       QUANT_LONGHU_DIRECT_ENABLED: "false"
       QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      # The owner gateway accepts up to 300 Longhu quote symbols per logical
+      # request. Keep the env-file default from silently reducing this to 24.
+      QUANT_LONGHU_INTRADAY_MAX_SYMBOLS: ${PEER_LONGHU_INTRADAY_MAX_SYMBOLS:-300}
       # Dashboard/read-model polling and intraday evidence loops share the
       # bounded synchronous repository bridge. Keep it below the database
       # connection budget, but leave enough slots for the owner watcher pool.
@@ -48,21 +56,48 @@ services:
   # collection tasks.  Keeping this as a second container avoids changing the
   # single-writer realtime process into a broad ``full`` profile.
   quant-research-scheduler:
-    image: trading-hareness-peer-quant-research:latest
+    # Build the scheduler from the same immutable source/image as the main
+    # peer service.  A scheduler-only image reference would let a release
+    # switch the source symlink while post-close jobs kept running old factor
+    # and instrument code.
+    build:
+      context: ../..
+      dockerfile: quant-service/Dockerfile.peer
+      additional_contexts:
+        wheelhouse: ${PEER_WHEELHOUSE_PATH:?Set PEER_WHEELHOUSE_PATH}
+      args:
+        APP_GIT_SHA: ${PEER_APP_GIT_SHA:-unknown}
+        APP_RELEASE: ${PEER_APP_RELEASE:-unknown}
+        APP_BUILD_CREATED_AT: ${PEER_APP_BUILD_CREATED_AT:-unknown}
+    image: ${PEER_QUANT_IMAGE:-trading-hareness-peer-quant-research:latest}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "5"}
     depends_on:
       db-tunnel:
         condition: service_healthy
     ports:
       - "127.0.0.1:${PEER_RESEARCH_QUANT_PORT:-15683}:8000"
     env_file:
-      - ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+      - path: ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+        required: false
     environment:
-      PGHOST: db-tunnel
-      PGPORT: 5432
+      # Batch/backfill/COPY work uses the owner's independent 15433 reverse,
+      # exposed by the normal peer db-tunnel as 5433. Intraday remains on the
+      # separate quant-research service at db-tunnel:5432.
+      PGHOST: ${PEER_RESEARCH_DB_HOST:-db-tunnel}
+      # All post-close/backfill/COPY work uses the independent bulk tunnel;
+      # intraday quant-research remains on db-tunnel:5432.
+      PGPORT: ${PEER_RESEARCH_DB_PORT:-5433}
       PGDATABASE: ${PEER_QUANT_DATABASE:-trading_hareness}
       PGUSER: ${PEER_DB_USER:-stock_peer}
       PGPASSWORD: ${PEER_DB_PASSWORD:?Set PEER_DB_PASSWORD}
+      # Keep the operator's intent visible inside the scheduler.  ``auto``
+      # still infers the guard from db-tunnel:5433; an explicit true is
+      # useful in a preflight; migration execution remains disabled.
+      PEER_REQUIRE_OWNER_CUTOVER: ${PEER_REQUIRE_OWNER_CUTOVER:-auto}
+      PEER_REQUIRE_OWNER_SEMANTICS: "true"
       QUANT_DATA_DIR: /var/lib/quant-research
       QUANT_LEGACY_SCHEMA_BOOTSTRAP: "false"
       QUANT_SKIP_MIGRATIONS: "true"
@@ -71,6 +106,9 @@ services:
       QUANT_WRITE_API_KEY: ${PEER_QUANT_WRITE_API_KEY:?Set PEER_QUANT_WRITE_API_KEY}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:?Set QUANT_SHARED_READ_API_KEY}
       QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      QUANT_APPLICATION_NAME: peer-quant-research-scheduler
+      PEER_OWNER_CONTRACT_MODE: ${PEER_OWNER_CONTRACT_MODE:-report_only}
+      PEER_OWNER_CONTRACT_RECEIPT_PATH: /var/lib/quant-research/owner-peer-contract.json
       QUANT_DB_BLOCKING_MAX_WORKERS: ${PEER_RESEARCH_DB_BLOCKING_MAX_WORKERS:-4}
       QUANT_DB_BLOCKING_MAX_QUEUE: ${PEER_RESEARCH_DB_BLOCKING_MAX_QUEUE:-16}
       QUANT_LONGHU_DIRECT_ENABLED: "false"

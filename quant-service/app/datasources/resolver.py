@@ -15,12 +15,16 @@ contract, so a consumer can never mistake a fallback for the primary.
 from __future__ import annotations
 
 import time
+import hashlib
+import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from .catalog import CAPABILITIES, bindings_for
-from .contracts import RETIRED, UNSUPPORTED, Binding, Capability
+from .contracts import (
+    RETIRED, UNSUPPORTED, Binding, Capability, CapabilityEvidence, CapabilityRequest, QualityReceipt,
+)
 
 
 Fetcher = Callable[..., Awaitable[Any]]
@@ -43,14 +47,34 @@ class CapabilityResult:
     rows: Any
     binding: Binding
     attempts: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    request: CapabilityRequest | None = None
+    quality: QualityReceipt | None = None
 
     @property
     def is_fallback(self) -> bool:
         return any(attempt["source"] != self.source for attempt in self.attempts)
 
     def provenance(self) -> dict[str, Any]:
+        quality: dict[str, Any] | None = None
+        if self.quality is not None:
+            quality = {
+                "status": self.quality.status,
+                "row_count": self.quality.row_count,
+                "coverage": self.quality.coverage,
+                "effective_at_min": self.quality.effective_at_min.isoformat()
+                if self.quality.effective_at_min else None,
+                "effective_at_max": self.quality.effective_at_max.isoformat()
+                if self.quality.effective_at_max else None,
+                "available_at_min": self.quality.available_at_min.isoformat()
+                if self.quality.available_at_min else None,
+                "available_at_max": self.quality.available_at_max.isoformat()
+                if self.quality.available_at_max else None,
+                "response_hash": self.quality.response_hash,
+                "warnings": list(self.quality.warnings),
+            }
         return {"capability": self.capability.key, "source": self.source, "status": self.binding.status,
                 "decision_eligible": self.binding.decision_eligible, "fallback": self.is_fallback,
+                "purpose": self.request.purpose if self.request else "research", "quality": quality,
                 "attempts": list(self.attempts)}
 
 
@@ -61,6 +85,79 @@ def _row_count(rows: Any) -> int | None:
         return len(rows)
     except TypeError:
         return None
+
+
+def _unpack_evidence(value: Any) -> tuple[Any, CapabilityEvidence]:
+    if isinstance(value, CapabilityEvidence):
+        return value.rows, value
+    return value, CapabilityEvidence(rows=value)
+
+
+def _response_hash(rows: Any) -> str | None:
+    try:
+        payload = json.dumps(rows, sort_keys=True, ensure_ascii=False, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):
+        try:
+            payload = repr(rows)
+        except Exception:  # noqa: BLE001 - provenance must never break a source read
+            return None
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _quality_receipt(rows: Any, envelope: CapabilityEvidence, request: CapabilityRequest) -> QualityReceipt:
+    count = _row_count(rows)
+    warnings = list(envelope.warnings)
+    if envelope.coverage is not None and not 0 <= envelope.coverage <= 1:
+        warnings.append("coverage_out_of_range")
+    if request.required_fields and count:
+        missing: set[str] = set()
+        candidates = rows if isinstance(rows, (list, tuple)) else []
+        for row in candidates:
+            if not isinstance(row, dict):
+                missing.update(request.required_fields)
+                continue
+            missing.update(field for field in request.required_fields if field not in row)
+        if missing:
+            warnings.append("missing_required_fields:" + ",".join(sorted(missing)))
+
+    status = "complete"
+    if count is None:
+        status = "invalid"
+        warnings.append("row_count_unavailable")
+    elif count == 0:
+        status = "empty"
+    elif request.required_fields and any(item.startswith("missing_required_fields:") for item in warnings):
+        status = "invalid"
+    elif envelope.coverage is not None and not 0 <= envelope.coverage <= 1:
+        status = "invalid"
+    elif envelope.coverage is not None and envelope.coverage < 1:
+        status = "partial"
+
+    if request.max_age_seconds is not None:
+        if request.as_of is None or envelope.available_at_max is None:
+            status = "invalid"
+            warnings.append("freshness_clock_missing")
+        else:
+            try:
+                age = (request.as_of - envelope.available_at_max).total_seconds()
+                if age > request.max_age_seconds:
+                    status = "stale"
+                    warnings.append(f"age_seconds={int(age)}")
+            except TypeError:
+                status = "invalid"
+                warnings.append("incompatible_clock_timezone")
+
+    return QualityReceipt(
+        status=status,
+        row_count=count,
+        coverage=envelope.coverage,
+        effective_at_min=envelope.effective_at_min,
+        effective_at_max=envelope.effective_at_max,
+        available_at_min=envelope.available_at_min,
+        available_at_max=envelope.available_at_max,
+        response_hash=_response_hash(rows),
+        warnings=tuple(warnings),
+    )
 
 
 class CapabilityResolver:
@@ -89,10 +186,15 @@ class CapabilityResolver:
                  "bound": (item.source, capability) in self._fetchers} for item in bindings_for(capability)]
 
     async def fetch(self, capability: str, *, sources: Sequence[str] | None = None,
-                    accept_empty: bool = False, **params: Any) -> CapabilityResult:
+                    accept_empty: bool = False, request: CapabilityRequest | None = None,
+                    **params: Any) -> CapabilityResult:
         """First source (in catalog order, optionally restricted) that answers."""
         if capability not in CAPABILITIES:
             raise ValueError(f"unknown capability {capability}")
+        policy = request or CapabilityRequest(capability=capability, allow_empty=accept_empty)
+        if policy.capability != capability:
+            raise ValueError(f"request capability {policy.capability} does not match {capability}")
+        allow_empty = accept_empty or policy.allow_empty
         allowed = set(sources) if sources is not None else None
         attempts: list[dict[str, Any]] = []
         for binding in bindings_for(capability):
@@ -101,23 +203,51 @@ class CapabilityResolver:
             fetcher = self._fetchers.get((binding.source, capability))
             if fetcher is None:
                 continue
+            if policy.require_live_verified and binding.status != "live_verified":
+                attempts.append({"source": binding.source, "status": "not_live_verified"})
+                continue
+            if policy.require_decision_eligible and not binding.decision_eligible:
+                attempts.append({"source": binding.source, "status": "not_decision_eligible"})
+                continue
             if self._health_gate is not None and not await self._health_gate(binding.source, capability):
                 attempts.append({"source": binding.source, "status": "circuit_open"})
                 continue
             started = time.monotonic()
             try:
-                rows = await fetcher(**params)
+                raw = await fetcher(**params)
             except Exception as error:  # noqa: BLE001 - fall through to the next source
                 attempts.append({"source": binding.source, "status": "failed", "error": str(error)[:200],
                                  "ms": int((time.monotonic() - started) * 1000)})
                 continue
+            rows, envelope = _unpack_evidence(raw)
             count = _row_count(rows)
-            attempts.append({"source": binding.source, "status": "completed", "rows": count,
+            quality = _quality_receipt(rows, envelope, policy)
+            valid = quality.status not in {"invalid", "stale", "conflicted"}
+            if policy.purpose in {"replay", "shadow"} and quality.status == "partial":
+                valid = False
+                quality = QualityReceipt(**{**quality.__dict__,
+                                            "warnings": (*quality.warnings, f"purpose_requires_complete={policy.purpose}")})
+            if count is None or (count < policy.min_rows and not (count == 0 and allow_empty)):
+                valid = False
+                if quality.status == "complete":
+                    quality = QualityReceipt(**{**quality.__dict__, "status": "invalid",
+                                                "warnings": (*quality.warnings, f"min_rows={policy.min_rows}")})
+            if policy.min_coverage is not None and (quality.coverage is None or quality.coverage < policy.min_coverage):
+                valid = False
+                if quality.status not in {"invalid", "stale"}:
+                    quality = QualityReceipt(**{**quality.__dict__, "status": "partial",
+                                                "warnings": (*quality.warnings, f"min_coverage={policy.min_coverage}")})
+            attempt_status = "completed" if quality.status == "complete" else quality.status
+            attempts.append({"source": binding.source, "status": attempt_status, "rows": count,
+                             "quality": quality.status, "response_hash": quality.response_hash,
+                             "warnings": list(quality.warnings),
                              "ms": int((time.monotonic() - started) * 1000)})
-            if count == 0 and not accept_empty:
+            if count == 0 and not allow_empty:
                 attempts[-1]["status"] = "empty"
                 continue
-            return CapabilityResult(CAPABILITIES[capability], binding.source, rows, binding, tuple(attempts))
+            if not valid:
+                continue
+            return CapabilityResult(CAPABILITIES[capability], binding.source, rows, binding, tuple(attempts), policy, quality)
         raise CapabilityUnavailable(capability, attempts)
 
 

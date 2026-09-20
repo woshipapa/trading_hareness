@@ -50,6 +50,17 @@ class AnnualDailyBackfillTests(unittest.TestCase):
             self.assertEqual(by_api[api_name].provider_names, ("super_sdk", "primary"))
         self.assertEqual(by_api["daily_basic"].provider_names, ("super_get", "super_sdk", "primary"))
 
+    def test_historical_factor_backfill_only_promotes_positive_allowlisted_factors(self):
+        source = Path("app/annual_daily_backfill.py").read_text(encoding="utf-8")
+        persist_section = source[source.index("def _persist_adj_factor"):source.index("def _persist_daily_basic")]
+        self.assertIn("COMPLETE_FACTOR_PROVIDERS", persist_section)
+        self.assertIn("cannot provide cumulative adjustment factors", persist_section)
+        self.assertIn("available_at,raw", persist_section)
+        self.assertIn("factor_semantics", persist_section)
+        self.assertIn("(?:[eE][-+]?[0-9]+)?$", persist_section)
+        self.assertIn("nullif(row_data->>'adj_factor','')::numeric > 0", persist_section)
+        self.assertIn("nullif(stage.row_data->>'adj_factor','')::numeric > 0", persist_section)
+
     def test_completed_day_is_shared_across_provider_routes(self):
         source = Path("app/annual_daily_backfill.py").read_text(encoding="utf-8")
         self.assertIn("def _completed_equivalent_exists", source)
@@ -164,6 +175,13 @@ class AnnualDailyBackfillTests(unittest.TestCase):
         self.assertIn("available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')", aggregate)
         self.assertNotIn("rt_min", source)
 
+    def test_backfill_refreshes_durable_readiness_projection_after_membership(self):
+        source = Path("app/annual_daily_backfill.py").read_text(encoding="utf-8")
+        membership = source.index("rebuild_historical_membership_from_canonical")
+        coverage = source.index("refresh_daily_coverage", membership)
+        self.assertGreater(coverage, membership)
+        self.assertIn('"readiness_coverage": readiness_coverage', source)
+
     def test_bulk_daily_projection_applies_the_same_amount_unit_quarantine_before_commit(self):
         source = Path("app/annual_daily_backfill.py").read_text(encoding="utf-8")
         self.assertIn("quarantine_tushare_daily_amount_mismatches", source)
@@ -250,6 +268,27 @@ class AnnualDailyBackfillTests(unittest.TestCase):
         self.assertIn("annual_daily_backfill_pit_inferred_delisting", projection_sql)
         self.assertIn("supplier_delist_date_or_last_bar", projection_sql)
         self.assertIn("current_active_snapshot", projection_sql)
+
+    def test_historical_universe_projection_bridges_to_authoritative_open_intervals(self):
+        class Result:
+            def __init__(self, rowcount): self.rowcount = rowcount
+
+        class Connection:
+            def __init__(self): self.calls = []
+            def execute(self, sql, params):
+                self.calls.append((sql, params))
+                return Result(1)
+
+        connection = Connection()
+        rebuild_historical_membership_from_canonical(connection)
+        delete_sql, delete_params = connection.calls[0]
+        projection_sql, projection_params = connection.calls[-1]
+        self.assertIn("annual_daily_backfill_pit_bridge_to_authoritative", delete_params[1])
+        self.assertIn("authoritative_open AS", projection_sql)
+        self.assertIn("base.authoritative_from-1", projection_sql)
+        self.assertIn("day_before_authoritative_snapshot", projection_sql)
+        self.assertEqual(projection_params[0], "all_a")
+        self.assertIn("annual_daily_backfill_pit_bridge_to_authoritative", projection_params[1])
 
 
 if __name__ == "__main__":

@@ -93,6 +93,8 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
                "app/datasources/derived/tick_flow.py"),
     DataSource("derived_sentiment_cycle", "日K 自算情绪周期", "local computation", "derived", "derived", "free",
                "app/sentiment_cycle_daily.py"),
+    DataSource("longhu_qfq_derived", "开盘啦前复权 K 线推算累计因子", "owner close-maintenance job", "derived", "derived", "free",
+               "app/longhu_shared_full_market.py", risks="owner 04:30 task；仅接受已落库并带 available_at 的累计因子，不在 peer 侧重新推算"),
 )}
 
 
@@ -119,7 +121,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
          "open:yuan high low close pre_close volume:lots amount", "effective=交易日; available=入库时刻"),
     _cap("bars.daily_adjusted", "复权日K（研究）", "daily", "per_symbol", "open:yuan close adj_basis", "effective=交易日"),
     _cap("bars.minute", "分钟K", "intraday", "watchlist", "bar_time open:yuan close volume:shares amount:yuan",
-         "effective=bar_time; available=source_available_at（离线文件取文件修改时间）"),
+         "effective=bar_time; available=explicit source_available_at only（本地入库时间不可替代）"),
     _cap("bars.index_daily", "指数日K", "daily", "market", "open close volume amount", "effective=交易日"),
     _cap("bars.adjustment_factor", "复权因子", "daily", "all_a", "adj_factor", "effective=交易日"),
     # ticks
@@ -264,8 +266,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/tushare_providers.py", notes="代理 407 时不可用"),
     _bind("tushare_super_get", "bars.adjustment_factor", 15, LIVE_VERIFIED, "daily_adjustment_factors:provider=tushare_super_get",
           "app/tushare_providers.py"),
+    _bind("longhu_qfq_derived", "bars.adjustment_factor", 8, LIVE_VERIFIED,
+          "daily_adjustment_factors:provider=longhu_qfq_derived", "app/longhu_shared_full_market.py:owner_factor_task",
+          notes="owner 由 Longhu 前复权 K 线推算；provider 不是原始 Longhu 行情标签，peer 不得直接调用"),
     _bind("longhuvip_composite", "bars.adjustment_factor", 90, DORMANT, "daily_adjustment_factors:provider=longhuvip_composite",
-          "app/longhu_shared_full_market.py", notes="仅当日 adj_factor=1 占位（factor_semantics=same_day_identity_only），不是复权史"),
+          "app/longhu_shared_full_market.py", notes="不再写入累计 adj_factor；同日恒等值不能进入研究价格"),
     _bind("fuyao_ths", "bars.adjustment_factor", 20, DECLARED, None, "app/fuyao_catalog.py:a_share_adjustment_factors"),
     # ticks
     _bind("tdx_public", "ticks.session", 20, DECLARED, _RAW + "tick_flow_daily (summaries)",

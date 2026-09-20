@@ -1,6 +1,6 @@
 # 量化与分析师联合系统计划完成矩阵
 
-更新时间：2026-09-05。本文是四份主计划的当前状态索引，不把历史数据、回放样本或统计晋级缺口伪装成完成。
+更新时间：2026-09-20。本文是四份主计划的当前状态索引，不把历史数据、回放样本或统计晋级缺口伪装成完成。
 
 ## 状态定义
 
@@ -9,11 +9,28 @@
 - **暂停**：需要用户明确授权或外部资源，当前不执行。
 - **工程余项**：不改变策略结论的工程加固，允许继续渐进推进。
 
+## 2026-09-20 owner clarification and peer handoff
+
+The older evidence entries below describe the peer's pre-upgrade read-back and
+are historical, not the current owner claim. Owner production remains on
+`20260919_0106` with the real runtime contract exposed by
+`GET /api/v1/peer/contract`; owner release announcements are published through
+`quant.owner_deploy_events`. The peer source now validates only the two actual
+bar/factor projections, reads factor semantics from `daily_adjustment_factors.raw`,
+uses report-only contract mode for the first restart, and exposes the owner's
+deployment notice in `/health.owner_deploy`. It no longer blocks on the
+nonexistent semantic/cold/index objects described by the superseded prose
+handoff. Owner, not this workstation, performs the remote peer release and
+runtime acceptance; no owner migration is run from peer.
+Recommendation generation now carries the owner `multi-source-feature-v4`
+contract through a same-session close gate: a prior-date bar remains auditable
+but cannot become a `research_candidate` for the requested date.
+
 ## P0 数据与因果正确性
 
 | 项目 | 状态 | 当前证据 |
 | --- | --- | --- |
-| 复权研究价与原始执行价分离 | 已完成止血 | `app/research_prices.py`；生产特征、盘后结构和 factor lab 使用 `research_*`；缺因子显式阻断 |
+| 复权研究价与原始执行价分离 | 已完成止血 | `app/research_prices.py`；生产特征、盘后结构、factor lab、训练和 watchlist 策略统一要求持久化 `adjustment_state=complete` + cumulative-factor semantics；owner 的 `longhu_qfq_derived` 与 Tushare checkpoint 均须显式 allow-list，缺因子或语义不完整显式阻断 |
 | ST、停牌、涨跌停和时区门禁 | 已完成 | `P0_DATA_CORRECTNESS_STATUS.md`；四种涨跌停规则、上海日期和 `upsert_bar` SQL 回归。实时 `live_policy` 与纸面成交共用 `ashare_reality.price_limit_state`：优先精确 `stk_limit`，缺位才按主板/创业科创/北交/ST 的正确价格带兜底 |
 | 实时市场/数据/纸面风险 gate | 已完成 | `app/live_policy.py`、`app/paper_portfolio.py`；risk-off、质量、T+1、日亏、回撤、单票和板块集中度均可解释阻断 |
 | 盘后同日完成语义 | 已完成 | latest-attempt/latest-completed 分离及回归测试 |
@@ -36,6 +53,8 @@
 | 日终研究摘要重启恢复 | 已完成 | `strategy_day_summaries` 的 `sent`/`disabled`/`suppressed` 是终态回执，重启后不重建摘要；但 `suppressed + post_close=blocked` 会在 19:15–22:00 同日窗口继续重试，避免晚发布日线留下旧 blocked 摘要；不向飞书推送候选池 |
 | 常驻循环锁与生命周期可观测性 | 已完成 | durable `runtime_leases` 继续作为跨进程持锁真源；背景循环的 acquire/renew/release 均在原生 async 池执行，保留仅过期可接管及 holder 限定的原子 SQL，避免其与同步仓储争用 4 槽执行器。`/health.runtime_loops` 增加本进程 worker 的 running/waiting/lease-lost/backoff/error 生命周期状态，解释未启动/交接/异常退出而不把它冒充为业务心跳，也不记录 provider payload 或凭据。应用生命周期以唯一标签注册命名 task，关闭时统一取消并等待，重复 loop label 在启动前 fail-closed |
 | 存储/备份/恢复前校验 | 已完成 | 总研究空间**硬上限** 40 GiB、日频 P2 证据热库**硬上限** 36 GiB（为受限历史保留 4 GiB artifact 余量）；存储测量和 60 秒准入缓存已收敛至 `research_storage_admission.py`。80% 预警、90% 仅暂停非必要高频采集，观察池风险/提醒不受影响。每日 PostgreSQL/workflow 备份除 14 天保留和同日去重外，另有 8 GiB 容量上限；创建 staging 前会按最近一份完整日备份的实测体积预留空间，只会回收严格命名的旧完成日备份。开盘预检同时校验该容量、`pg_restore -l` manifest 和 workflow JSON |
+| owner 数据库、双通道与运行时 schema | 代码已按 owner 2026-09-20 clarification 对齐，待本轮 peer 重启验收 | peer 只读验证 `trading_hareness`、lineage `20260919_0106`、`canonical_bars_daily` 的实际 bar 列，以及 `daily_adjustment_factors.raw`。`adjustment_state` 是计算值，不是列；因子语义从 raw JSON 读取；owner 冷层为证据表，peer 不依赖市场数据 `_cold` 或 owner storage-tiers API。5432 盘中、5433 批量窗口仍保持。 |
+| owner 因子控制面不再回源 Tushare | 已完成代码合同；待 owner/peer 运行验收 | `app/owner_factor_repository.py` 从 owner 已落库的 Longhu/允许 checkpoint 因子读取同日控制截面；`full_market_daily_controls_sync.py` 和显式 core 控制路径不再调用 Tushare `adj_factor`，缺少 95% 点时覆盖即阻断；其余 `daily_basic`、`stk_limit`、`suspend_d` 控制仍独立走原有 provider。 |
 | 纸面组合展示与风险阻断 | 已完成 | 前端展示净值、总/净暴露、回撤、可卖量、板块暴露和风险事件；成员按观察日点时映射；新 entry 受日亏/回撤/集中度限制 |
 | 策略族级健康/漂移投影 | 已完成（研究监控） | `/api/v1/strategy/health` 按策略族聚合事件和去重 episode；仅显示门禁/运营建议，不调阈值、不变更分析师权重 |
 | 版本化 FactorSpec 与 episode 契约 | 已完成（证据/shadow） | `strategy_contracts.py` / `intraday_factor_contracts.py`；每个已登记盘中因子携带版本、输入、时钟、质量门禁、训练/推理许可和弃用日期。当前 `training_permitted=false`，只能进证据和归因，不能接入实时评分 |
@@ -52,13 +71,13 @@
 
 | 项目 | 状态 | 准入条件 |
 | --- | --- | --- |
-| 三年日线、复权、停牌、涨跌停与日频板块/龙虎榜证据 | 日线 P2 已暂停；板块/龙虎榜历史待独立覆盖审计 | 截至 2026-08-17，`daily`、`adj_factor`、`daily_basic`、`stk_limit`、`suspend_d` 有 505 个完整全市场横截面日，覆盖 2023-08-15 至 2026-08-14（1,095 个日历日）。为优先保护盘中观察，第三年历史任务已暂停且仅保留完成检查点；不得由服务或 n8n 自动恢复。还差 215 个完整日频截面，且仍缺带供应商 `source_available_at` 的离线分钟证据。每条日频事实保留 `ingested_at`，策略 `available_at` 明确标为 `assumed_eod_1700_asia_shanghai_v1`，不是供应商发布时间。历史行业/概念资金流、龙虎榜和指数仍不因缺失而伪报完成。 |
+| 三年日线、复权、停牌、涨跌停与日频板块/龙虎榜证据 | 复权语义变更后覆盖投影待重建；P2 暂停；分钟来源时钟仍阻断整体 P2 | 旧投影曾报告 737 个完整横截面日，但它没有排除 `adjustment_state` 未完成的 bars，不能作为当前门禁证据。服务现在按新的 coverage definition 过滤旧投影，发现陈旧时快速返回 `coverage_stale`，等待 bounded refresh；重建后才重新评估 720 日/1,090 日门槛。物化表仍只是一日一行的可重建投影，以 canonical、daily_basic、trade_limits 和 PIT membership 为真源。47 peer 所连 owner 库只保留近期控制面，不能代替本地历史研究库。 |
 | 因子研究的点时成分与内存边界 | 已完成逻辑地基 | SQL 因子面板按 `universe_membership_history`、上市/退市日期过滤；兼容 Python 引擎仅允许不超过 250 个成分的诊断，广义全 A 在读取前 fail-closed，必须走数据库内的有界 SQL 引擎。当前历史覆盖尚未回填，故不能将该地基误作完整历史验证 |
-| 历史分钟回放 | 因果时间合同已完成；价格路径回放暂停 | 本地分钟行现区分 `bar_time`（K 线收盘时刻）、`source_available_at`（供应商记录的可用时刻）和本地 `available_at`（导入时刻）。没有前者的文件不得进入回放；`offline_minute_bar` 只构造按来源可用时间排序的确定性事件，不会伪造同刻报价/板块/因子输入或重跑价格规则。仍需具备来源可用时钟的本地文件或明确回填授权，以及复用 live `SignalSpec` 的完整冻结证据包 |
+| 历史分钟回放 | 因果时间合同已完成；价格路径回放继续暂停 | 本地已有 858,514 根、1,533 只标的、66 个交易日的分钟线和 3,625 个完成导入，但 `source_available_at` 为 0；其中仅 8 日是同日抓取，其余为事后补拉。readiness 现要求至少 60 日的来源时钟位于 `bar_time..bar_time+10m`，并按 K 线交易日计数，不能用文件导入日凑门槛。`bar_time`、供应商时钟和本地 `available_at` 继续严格分离。新增分钟回填回执会逐批报告 `explicit_source_clock_bars`、`causally_clocked_bars` 和 `missing_source_clock_bars`；`stk_mins` 没有明确供应商时钟时不补写、不晋级。 |
 | 未来盘中规则回放证据 | 已完成采证与一致性重放基础，验证未开始 | `intraday_rule_input_snapshots` 的 v2 合同冻结核心规则与同刻 policy/risk gate 输入；旧 v1 仅兼容 core-only。`/api/v1/strategies/intraday/replay-recorded-inputs` 无 provider、历史导入、阈值拟合或订单能力，并明确排除 event state、执行和收益结论。数据有 60–120 天有界留存，只从上线后的真实扫描累积，不改变既有事件、不可替代获授权的历史分钟数据或完整市场横截面 |
 | 本地已录制信号事件生命周期 replay | 已完成（非价格回测） | `/api/v1/strategies/intraday/replay-recorded-events` 只读 `intraday_signal_events`；按 availability 时钟写入幂等 `input_hash`/`trace_hash`，不请求 provider、不拉历史、不拟合阈值、不生成订单 |
 | T+1/涨跌停/停牌/费用/滑点回放撮合 | 基础契约已完成，验证暂停 | `ashare_reality.py` 是实时风险、纸面成交和未来回放共用的整手、T+1、停牌、不同板块/ST 涨跌停、佣金/印花税/滑点及 non-fill 纯模型；尚无获授权历史路径，故不运行历史撮合或把它当策略验证 |
-| purged walk-forward、embargo、DSR/PBO | 暂停 | 至少 60 aligned days、200 独立成熟信号、每 cohort 30 条 |
+| purged walk-forward、embargo、DSR/PBO | 暂停 | 日线/分钟日期交集已达 66 日，confirmed 信号 385、matured outcome 247；但全部分钟线缺 `source_available_at`，所以这些数量不能绕过 P2 来源时钟门禁。每 cohort 30 条仍需在可准入事件上复核。 |
 | 盘中阈值重校准 | 禁止启动 | P3 样本门禁通过且样本外胜出规则基线 |
 
 ## 分析师与模型演化
@@ -68,17 +87,66 @@
 | 报告/消息差量同步、`received_at`、版本和文字证据 | 已完成 | 不下载远端图片、音视频或媒体 URL；报告与消息支路独立 |
 | 分析师观点 outcome 与专家画像 | 研究中 | 当前成熟 outcome/eligible 样本不足，权重保持零 |
 | Prompt Lab champion/challenger | 研究中（未晋级） | 11,313 个候选已物化；按上海可用日做时间外留出，但金标为 0，无法比较/晋级 |
-| Qlib/LightGBM/LEAN 独立训练与模型注册 | 基线训练/OOF 合同与不可变导出已完成；真实训练待数据 | 新增 `research_model_registry` 迁移、只读 `/api/v1/research/models`、确定性 `research_model_training.py`（60 日训练/5 日 embargo/20 日测试）和 `research_feature_export.py`（合同版本、点时可用性、去重、SHA-256 快照）；仍缺真实训练 worker、完整 trial 执行和跨框架 benchmark，任何登记都保持 `live_effect=none` |
+| Qlib/LightGBM/LEAN 独立训练与模型注册 | 原生日频 CPU 基线已真实运行；跨框架验证未完成，现有就绪投影 fail-closed | `research_model_training_worker.py` 在 4 GiB/2 CPU 独立 profile 中完成点时导出、代码/数据/artifact SHA-256、3 个预登记 OOF trial 与 append-only trial 账本。本地真实运行 42,592 样本/703 日，最佳 ROC AUC 0.5164，但 log-loss 0.7094 劣于常数 0.7026，故模型登记为 `rejected`、`live_effect=none`。`research_framework_readiness.py` 和 `/api/v1/research-frameworks` 现在明确区分可选依赖、点时数据门槛、适配器状态与 benchmark 是否执行；完整 Alpha158/LightGBM/Qlib/LEAN benchmark 仍缺，不能晋级。 |
 | RL / contextual bandit | 暂停 | 只能在 Phase 0–5 通过后离线 challenger，不得改 live champion |
 
 ## 当前验收证据
+
+### 2026-09-19 owner handoff 后当前会话重检（历史，非当前远端状态）
+
+> 本节中的远端 peer 回执是上一轮会话的历史快照。2026-09-20 owner
+> clarification 已明确取消 materialized semantic columns、市场 `_cold` 孪生表和
+> guard-index 依赖；本工作树已将启动门与读 SQL 改为实际 runtime contract，但新的
+> peer 重启/远端回读必须重新执行后才能把“运行态”标为完成。
+
+- 当前工作树与 `origin/main` 同为 `590e0167b137a62efdb41d5ec8852c518a7d05b1`；owner 提供的生产版本为 `20260919T160546-6f7da042db5d-clean`，不是仓库的 peer 分支，故以交接文档作为 owner 侧权威版本，不把本地 HEAD 冒充生产发布。
+- 上一轮记录曾显示远端切换到 `20260919T000300Z-peer-owner-handoff`；owner 2026-09-20 已将其回滚为最后一个跑通的 `20260919T044218Z-owner-cutover-preflight`，并报告四个容器 healthy。上一轮的归档/wheel 校验与双 lane 回读不能替代这次重新发布后的验收。
+- owner 报告的当前远端状态是 `db-tunnel` 与 `db-batch-tunnel` healthy、5432/5433 均可用；本工作区没有对远端容器做重启，故不把该报告冒充为本会话实测。
+- 旧 release 曾因把交接文档中的控制面板值误当成 owner 列而 fail-closed；该启动门已改为只检查实际 bar/factor 列、raw JSON 语义和数据库 lineage。peer 不执行 owner DDL。
+- 新 release 仍需要由 owner 重新启动两个应用容器，再做 `/health`、owner contract、权限、lineage、发布公告和真实 deadlock 验收；owner 不需要为此改表。
+- owner 当前 `stock_peer` 角色的 15 分钟 statement timeout / 5 分钟 idle transaction timeout 以及历史 deadlock 计数仍需在 peer 新版本上线后重新读取；历史累计 deadlocks=4 不能提前宣称已经消失。
+- 上一份旧 release verifier 回执曾显示真实 5433 lane 上的 `stock_peer` 仍有 `INHERIT`、`quant` schema CREATE、canonical 表 DML、父角色成员关系和可写 relation；这不是新 owner handoff 后的当前权限证明，必须在新 release 上重新执行。`bootstrap-local-peer.ps1` 已改为撤销全部父角色成员关系、显式设置 `NOINHERIT`、把 database/schema/quant 对象 ownership 转回 owner admin、撤销 database/schema/table/sequence/function/procedure 权限、再授予 USAGE+SELECT，并在执行后要求 membership count、全 schema 可写 relation/sequence 数量与可执行 SECURITY DEFINER 数量都归零。
+- 复权门禁升级后，旧的 `replay_readiness_daily_coverage` 仍是上一版定义；同步和异步回放读取都会过滤它并在约 0.4 秒内返回 `readiness_query_status=coverage_stale`，不会从 dashboard GET 触发全历史扫描。必须先由 bounded refresh 重建当前定义，再重新发布 P2 计数。
+- owner 的数据守卫是 owner 进程内 SQL（`identity_factor_leak_sql`、`factor_value_mismatch_sql`），不是 peer 必须存在的索引；peer 只在读取因子时使用 raw JSON 语义和正数/可用时间门禁。
+- 上一次工作树重建后的 quant-service discovery 为 `1831/1831`，shared-peer/scripts 为 `100/100`（1 项环境跳过）；OpenAPI contract 为 `8 paths / 180 total`，前端 `api:check`、typecheck 和 production build 均通过。该证据只证明历史工作树，不替代远端 release 验收。
+- 2026-09-20 owner-clarification 适配后的本地定向回归、owner contract gate、发布公告投影和 shared-peer verifier 均通过；远端应用容器尚未在本会话重启。
+- （已被 2026-09-20 owner clarification 取代）旧版本地 registry 曾将市场表声明为 365 天 hot + `_cold`；这只保留给本地研究库实验，不是 owner 生产启动门。peer 生产读路径不 union owner 市场 `_cold`，只读 owner 实际授予的热表/因子表并在缺失时 fail-closed。
+- 全市场事件研究同样绑定一次原子 hot+cold 布局快照；短期反转、量能事件、板块反转与盘后结构的跨 session 收益改用 `raw price × cumulative factor`（当前 owner 来源为 `longhu_qfq_derived`，licensed Tushare 仅作 checkpoint），涨跌停可成交性仍使用交易所 raw price。真实 PostgreSQL 增加了“原价减半、累计因子翻倍，研究收益必须为 0 而非 -50%”的公司行动回归。
+- 继续重检策略读路径后，观察池日因子和全市场事件研究都改为从 `daily_adjustment_factors` 做点时 provider 优先选择；canonical bar 的 `adj_factor` 不再单独构成研究价格来源。缺少完整、正数、可用时间合规的 owner 因子时，研究因子与跨日收益均 fail-closed。
+- 历史容量/覆盖投影也已改为读取同一原子 hot+cold 家族，避免分层作业开始搬迁后看板把最早日期、完整横截面天数和 fundamentals/limit 覆盖误报为骤降；它只改变证据读取范围，不放宽任何 readiness 阈值。
+
+### 2026-09-20 owner 机器契约与 peer 静默失败修复（当前工作树）
+
+- peer 启动门已改为调用 owner 只读 `/api/v1/peer/contract`；默认 `report_only` 写入本地 receipt，只有下一次启动且已有 receipt 后 `PEER_OWNER_CONTRACT_MODE=block` 才会真正阻断。不存在的 `adjustment_state`/`factor_semantics`/`retired_at` 列、行情 `_cold` 孪生表、guard index 与 `storage-tiers` 接口不再作为 owner 契约断言。
+- 因子研究 SQL 接受 owner 实际 `raw->>'factor_semantics'='corporate_action_cumulative'`，保留历史标签兼容；身份因子仍退役，缺行仍 fail-closed。修复 `owner_storage._row_value` 对 tuple tablespace 的索引错误。
+- raw-overflow allowlist 纳入 `daily_bar`，`next/ack/failure` 的 4xx、数据库异常现在带 stream/batch 上下文日志；HTTP 4xx/5xx 与同步/异步数据库语句均记录 ERROR/WARNING（SQL 与有界参数）。连接增加 `application_name`，compose 全部 peer 容器加入 `json-file` 50m×5 轮转。
+- 发布归档新增完整性门：`compose.yaml`、`OPERATIONS.md`、`frontend/`、`workflows/`、`certs/`、systemd 依赖脚本缺一不可；新增 `package-peer-release.sh`，排除 state/backups/logs 等运行数据后一次性校验归档内容，避免再次出现 `203/EXEC`。
+- 写入申报已补为 [`PEER_WRITE_DECLARATION.md`](PEER_WRITE_DECLARATION.md)，覆盖 runtime lease、provider/fetch ledger、原始/日线/因子/板块/intraday/research 证据表和批量窗口约束。
+- 当前工作树的 owner contract、owner deployment notice、instrument lock retry、shared-peer verifier 定向回归通过；scripts verifier **15 项通过**；OpenAPI **8 paths/180 operations**；前端 typecheck/build/api:check 通过；shared-peer compose config 在注入必需密钥占位值后通过。尚未在本会话重启远端 peer 容器或声称 owner 线上 deadlock 已消失。
+
+### 2026-09-19 owner 存储与隧道兼容（历史交接回执，已被 2026-09-20 口径取代）
+
+- 交接文档记录远端 active source `20260919T044218Z-owner-cutover-preflight` 曾运行；本次已通过 direct SSH 和真实 5433 lane 重新读取，active symlink 仍指向该版本，batch listener/container 可用，但新 cutover verifier 仍为 blocked。历史的 1,788/1,788 与 provider catalog 0 问题只能视为旧 release 回执，不能替代当前工作树或新 release 验收。
+- 旧回执中关于五张 `_cold`、四态列、`retired_at`、guard indexes 以及 `ds0004/ds0005` 的判断均已作废；owner 不会为 peer 执行这些 DDL。当前 peer 只检查实际 bar/factor 列、`raw` 语义和 owner lineage，仍保持 `QUANT_SKIP_MIGRATIONS=true`。
+- `verify-owner-cutover.py --stage lane` 当前已通过 listener、batch container 和真实 SQL 回读，但因 owner `partial_cutover` 仍返回 blocked；`--stage complete` 还明确看到 scheduler 为 `PGHOST=db-tunnel/PGPORT=5432`。scheduler 继续使用旧通道且 `QUANT_SKIP_MIGRATIONS=true`，没有提前切换。
+- 新增 API/session lane 与 5433 batch lane 的 `database_name + quant.alembic_version` lineage 对账；即使两边端口都 healthy、也必须证明指向同一个 owner 数据库后才可通过 lane gate。
+- 下一版 immutable peer release 的激活脚本已增加双通道发布门：缺少 batch-capable SSH entrypoint、`compose.intraday-owner.yaml`、owner verifier 或 batch helper 的归档会在切换 symlink 前拒绝；当前运行中的旧 release 不做原地覆盖。
+- session guard 已修复为批量通道未启用时不误报；当 scheduler 切到 5433、批量容器已存在或显式配置 required 后，才把它升级为必须自愈的依赖。远端 systemd heal 回执恢复为 success/0。
+
+### 2026-09-18 数据地基与控制面复核
+
+- 修复 readiness 将 `SET LOCAL` 与查询拼成一条 psycopg 多语句而被误报为 timeout 的问题；新增 `replay_readiness_daily_coverage` 一日一行物化投影，并在年度回填、历史成员重建和同日 controls 刷新后更新。旧投影曾有 749 日/737 个完整横截面日，但复权语义门禁升级后必须重建，不能继续沿用。
+- 当前本地 gate：复权覆盖投影 `coverage_stale`（故 P2/P3 fail-closed），offline imports 3625/1，confirmed signal 385/200；分钟原始日期虽有 66 日，但 P2/P3 只承认 0/60 个因果时钟日。成熟 outcome 为 247，前向规则输入为 12 个交易日、211,327 行。
+- 不能用 858,514 根分钟线的本地 `available_at` 补写供应商时钟：714,858 根来自事后历史回填，只有 143,656 根分布在 8 个同日抓取交易日。任何 purged walk-forward、DSR/PBO、阈值重校准和模型 promotion 继续 fail closed，`live_effect=none`。
+- `research_model_registry` 在旧 owner schema 缺失时现在返回显式 `registry_status=schema_unavailable`，不再产生 HTTP 500；这不是用空结果伪装迁移完成，owner 迁移仍必须由 owner release lineage 执行。
+- 本地独立 worker 已产生首个真实不可变训练快照和 3 条 trial 记录；选中候选未战胜常数 log-loss 基线，已 fail-closed 标记为 `rejected`。worker 默认 64 个哈希固定标的是经过 4 GiB 硬限制实测的审计样本，不将其宣传为完整全市场或跨框架训练。
 
 ### 2026-09-06 当前复核
 
 - 工程回归：quant-service 容器内 Python discovery **1,419/1,419** 通过；新增离线模型基线和不可变特征导出合同的 4 项测试均通过。`git diff --check`、OpenAPI contract（7 paths/178 operations）、前端 `api:generate`、`api:check`、`typecheck` 和 production build 均通过。
 - 运行态：数据库迁移 head 为 `20260906_0094`；`/health` 返回 `ok`，研究存储约占热库预算 52.1%，服务容器健康。`/api/v1/research/models` 当前为空，符合尚无合格真实 artifact 的预期；`/api/v1/research/longhu/replay-readiness` 为 `accumulating`，已观察/完整交易日均为 0，未进入训练或回放门禁。
 - 新增研究边界：`research_feature_export.py` 只接受已物化的点时特征/标签表，强制合同版本、唯一 `symbol×exchange_date`、有限数值、可用时间先后关系，并返回不可变 SHA-256 数据快照；`research_model_training.py` 仅消费该类离线表执行 60 日训练/5 日 embargo/20 日 OOF 基线，任何结果继续 `research_only/replay_only/live_effect=none`。
-- 仍未完成：真实不可变特征批量导出 worker、真实训练/trial 执行、跨框架 benchmark、Longhu 10 合同的 60 个完整交易日、分钟来源可用时钟与价格路径回放、P3 统计门禁和 Prompt Lab 金标晋级。缺失数据或外部资源时保持 fail-closed，不自动恢复第三年历史任务。
+- 仍未完成：跨框架 benchmark、Longhu 10 合同的 60 个完整交易日、分钟来源可用时钟与价格路径回放、P3 统计门禁和 Prompt Lab 金标晋级。缺失数据或外部资源时保持 fail-closed，不自动启动模型晋级或 RL。
 
 ### 2026-09-08 飞书群转发：卡片 2.0 接入
 
@@ -92,7 +160,7 @@
 - 顺带修复：workbench 编辑同步把 `target_message_ids[0]`（`{targetChatId, messageId}` 对象）当作 message_id 传给 PUT，导致每次源消息编辑都报 `Invalid ids: [[object Object]]`（400）；撤回路径同样归一化。Feishu adapter 回归 **100/100**。
 - 上线回执（a0e144b，`edge-2026.09.08-card-v2-outbound`）：GHCR 拉取再次在同一 blob 上超时，走本地 `docker save | ssh docker load` 后 apply，health `ok a0e144b`；顺手清掉 `ef8cb15` 旧镜像（edge 磁盘 12G 可用、内存可用 1.5G，adapter 常驻 58MB）。上线后日志暴露一个真实问题：源消息编辑时对**升级前**投递的文本/富文本气泡用卡片 `patch` → 飞书 400（`同步源消息编辑失败`×3）。修复：账本目标条目记录投递时的 `msgType`，编辑按目标原有形态重建载荷（无记录的旧条目走 text/post `update`，卡片条目走 `patch`）；回归 **104/104**，新增 Dockerfile 模块清单测试防再次漏 COPY。
 - 第二个上线回执（d095dad → 再修）：剩下的一条 400 是 `#anqiang` 的专属出口群目标气泡已被撤回（`deleted:true`），编辑一个已撤回消息必然 400，而 `Promise.all` 让它拖垮了汇总群那条本已成功的同步，并让 workbench 兜底再 PUT 一次。改为逐目标 `allSettled`：任一目标成功即算已同步，失败目标单独记 warn 并带飞书错误码/msg（axios 只给 "status code 400"），全部失败才抛。回归 **105/105**。
-- 部署链路提效：`deploy-feishu-relay-edge-release.sh` 的 GHCR 拉取本次又超时了一次（同一个 blob）；改成脚本自愈——先在 edge 上尝试拉取，失败/超时才自动回退到本地拉取再 `docker save | ssh | docker load`，不用再手动介入。另加 `scripts/hotfix-feishu-relay-edge.sh`：跑测试→rsync 源码到 edge→在 edge 本地 `docker compose build`（复用已有 layer 缓存，`npm install` 层缓存命中时几秒完成，未命中约 1 分钟；`node:22-alpine` 已一次性缓存到 edge 避免 Docker Hub 连接问题）→重启→校验健康，全程不碰 GHCR，不用再为每个小改动走一遍构建镜像+传输 edge 的完整流程。这是未追踪的临时构建（`release:"hotfix"`），验证完必须提交+打 tag+等 CI 发正式镜像后用发布脚本切回去；已实测两轮真实 apply（含撤回 dirty 状态）并把 edge 切回 `e73026a` 收尾。
+- 部署链路提效：`deploy-feishu-relay-edge-release.sh` 保留 edge 拉取失败时的本地 `docker save | ssh | docker load` 自愈；`scripts/hotfix-feishu-relay-edge.sh` 改为“测试→版本化 adapter/前端/LarkAgentX bridge 源码覆盖层上传→远端 Node/Python/依赖清单校验→原子切换→`docker compose up --no-build --pull never`”，重复修 bug 不再构建或拉取 image。覆盖层保留最近 5 个版本，健康失败自动回滚；`package.json`、Node、supervisor venv 或基础镜像变化会拒绝快速路径并要求走对应的不可变运行时发布。正式 adapter release 会显式关闭容器覆盖层，避免旧源码遮蔽新镜像。
 
 ### 2026-09-05 当前复核
 

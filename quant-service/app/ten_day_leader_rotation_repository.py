@@ -39,7 +39,16 @@ def latest_full_market_date(database: Any, minimum_full_market_symbols: int) -> 
                        ON member.universe_key='all_a' AND member.symbol=bar.symbol
                       AND member.effective_from<=bar.trading_date
                       AND (member.effective_to IS NULL OR member.effective_to>=bar.trading_date)
-                    WHERE bar.quality_status='fresh' AND bar.adj_factor IS NOT NULL
+                     WHERE bar.quality_status='fresh' AND bar.adj_factor>0
+                       AND EXISTS (
+                           SELECT 1 FROM quant.daily_adjustment_factors factor
+                            WHERE factor.symbol=bar.symbol AND factor.trading_date=bar.trading_date
+                              AND factor.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
+                              AND factor.adj_factor>0
+                              AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
+                                   OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                              AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                       )
                       AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     GROUP BY bar.trading_date
                ) SELECT expected.trading_date
@@ -62,7 +71,15 @@ def load_ten_day_ranking_inputs(database: Any, as_of_date: date) -> TenDayRankin
                       AND (effective_to IS NULL OR effective_to>=%s)
                       AND known_at < ((%s::date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                ) SELECT count(DISTINCT active.symbol)::int AS expected_daily_symbols,
-                      count(DISTINCT bar.symbol) FILTER (WHERE bar.adj_factor IS NOT NULL)::int AS daily_symbols,
+                      count(DISTINCT bar.symbol) FILTER (WHERE bar.adj_factor>0 AND EXISTS (
+                          SELECT 1 FROM quant.daily_adjustment_factors factor
+                           WHERE factor.symbol=bar.symbol AND factor.trading_date=bar.trading_date
+                             AND factor.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
+                             AND factor.adj_factor>0
+                             AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
+                                  OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                             AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                      ))::int AS daily_symbols,
                       max(bar.available_at) AS strategy_available_at
                  FROM active LEFT JOIN quant.canonical_bars_daily bar
                  ON bar.symbol=active.symbol AND bar.trading_date=%s
@@ -85,6 +102,16 @@ def load_ten_day_ranking_inputs(database: Any, as_of_date: date) -> TenDayRankin
                      LEFT JOIN quant.instruments instrument ON instrument.symbol=bar.symbol
                     WHERE bar.trading_date<=%s AND bar.trading_date>=%s
                       AND bar.quality_status='fresh'
+                      AND bar.adj_factor>0
+                      AND EXISTS (
+                          SELECT 1 FROM quant.daily_adjustment_factors factor
+                           WHERE factor.symbol=bar.symbol AND factor.trading_date=bar.trading_date
+                             AND factor.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
+                             AND factor.adj_factor>0
+                             AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
+                                  OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                             AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                      )
                       AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                ) SELECT symbol,name,trading_date,open,high,low,close,pre_close,volume,amount,
                         adj_factor,is_suspended,limit_up,limit_down,available_at

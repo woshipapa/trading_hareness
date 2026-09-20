@@ -1,11 +1,31 @@
 # 数据分层协议(Data Tiering Protocol)
 
-状态:已实施并实测(2026-08-31)。本文是四层存储的放置规范:哪类数据放哪层、
+状态:本地四层协议已实施并实测(2026-08-31)；owner Windows 热/冷切换契约见
+`OWNER_DATABASE_STORAGE.md`（2026-09-19）。本文是四层存储的放置规范:哪类数据放哪层、
 保留多久、怎么流动。所有延迟与容量数字来自本机实测,不是估计。
 
 适用范围:`intraday_edge`(47)与 `research`(本地工作站)两个 profile 的全部
 行情、证据与研究数据。分析师文本/媒体归档(47 stock-reports :18081)自成体系,
 不在本协议内。
+
+## Owner PostgreSQL cutover (2026-09-19)
+
+Owner 的 PostgreSQL 热目录为 `F:\StockPlatformDB\postgresql16`。2026-09-20
+owner clarification 明确：冷层只承载证据/审计表，peer 不依赖市场数据的
+`_cold` 孪生表；`legacy_source_records` 仍在 owner 的 `stock_cold` 表空间。
+peer 不执行 DDL/迁移/分层/备份，本地 `/api/v1/research/storage-tiers` 只报告
+实际运行时 schema 与 lineage，不代表 owner 侧存在同名接口。
+
+访问分两条互不重启的 SSH 通道：盘中 `db-tunnel:5432`，批量 COPY/回填/备份/全量
+回放走同一个 `db-tunnel:5433` forward（owner reverse `15433 -> 55432`）。兼容性的
+`db-batch-tunnel` sidecar 不作为默认 scheduler 路由。任何研究窗口都要
+保留 `available_at`/`strategy_available_at`，冷表只是行的物理位置变化，不能改变
+点时语义。
+
+机器合同位于 `app/platform/data_product_registry.py`，但这些本地数据产品
+声明不再作为 owner 生产启动门。peer 运行时只校验
+`canonical_bars_daily` 与 `daily_adjustment_factors` 的真实列，因子语义从
+`raw->>'factor_semantics'` 或 Longhu method 计算；缺因子行即缺失并 fail-closed。
 
 ## 1. 四层定义
 
@@ -70,9 +90,9 @@ L1 超窗 →(年度分区归档脚本)→ L3。journal 是投递日志,本地�
 
 | 数据 | L1 | L2 | L3 | 消费方 |
 |---|---|---|---|---|
-| `canonical_bars_daily`(3 年/280 万行) | ✅ 全量(服务) | ✅ 年度分区 + **by_symbol 5662 只** | ✅ 双布局备份 | limit_up_continuation、全部日线因子 |
+| `canonical_bars_daily`(3 年/280 万行) | owner NVMe 保留 365 天，旧行在 `_cold`；独立本地 research profile 可保留全量 | ✅ 年度分区 + **by_symbol 5662 只** | ✅ 双布局备份 | limit_up_continuation、全部日线因子 |
 | `market_bars_minute`(56 天/47 万行,持续回填) | ✅ 全量,**不删**(最稀缺证据) | 按需导出 | ✅ 备份(20.5MB) | 分钟形态挖掘、ten_day VWAP、回放引擎 |
-| `daily_fundamentals` / `trade_limits` / `adj_factor` | ✅ 全量 | ✅ 年度分区 | ✅ | 控制平面、涨跌停判定 |
+| `daily_fundamentals` / `trade_limits` / `adj_factor` / `security_suspensions` | owner NVMe 保留 365 天，旧行与 bars 原子进入各自 `_cold` | ✅ 年度分区 | ✅ | 控制平面、涨跌停/停牌判定、复权研究 |
 | `tushare_raw_records`(raw blob) | **仅 90d**(217 万行) | — | ✅ 全历史 50 分区 | 42 处读多取最新;历史仅审计/重派生 |
 | `raw_market_observations`(raw blob) | **仅 180d**(135 万行) | — | ✅ 全历史 4 分区 | 同上 |
 | 龙虎榜/涨停列表/moneyflow | ✅ 全量(上游即上限) | 按需 | — | xiaojie、龙头轮动 |
@@ -100,8 +120,9 @@ L1 超窗 →(年度分区归档脚本)→ L3。journal 是投递日志,本地�
 
 | 作业 | 现状 | 工具 |
 |---|---|---|
-| L0→L1 journal pull | launchd 每 120s | `scripts/pull-intraday-edge-evidence.sh` |
+| L0→L1 journal pull | owner API 路径；旧 edge pull 已退役 | `scripts/pull-intraday-edge-evidence.sh`（仅历史兼容，不应安装 LaunchAgent） |
 | 盘后管线 | launchd 每 30min(沪时门禁) | `scripts/run-post-close-pipeline.sh` |
+| owner 热→冷分层 | owner 每日 06:00；peer 只验收、绝不执行 | `trading-hareness-storage-tiers` + `/api/v1/research/storage-tiers` |
 | L1→L2 日线导出 | 手动/待例行化 | `scripts/marketdata/export_pg_to_parquet.py` |
 | L1→L3 证据归档 | 手动/待例行化 | `archive_and_prune.py`(--archive-only / --apply)、`archive_raw_records.py` |
 | L2→L3 上传 | 手动 | `upload_parquet_to_pan.py`、`upload_by_symbol.py`(并发) |

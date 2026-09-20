@@ -10,6 +10,7 @@ from app.factor_sql_lab import (
     _materialize_evaluation_rows, _materialize_factor_scores,
     _point_in_time_industry_ready, _split_rows, evaluable_factor_keys, prepare_factor_panel, run_multi_factor_strategy_sql,
 )
+from app.owner_storage import TIERED_EVIDENCE_TABLES
 
 
 class RecordingResult:
@@ -113,6 +114,17 @@ class FactorSqlLabTests(unittest.TestCase):
         self.assertNotIn("instrument.industry", create_sql)
         self.assertIn("trading_index-index_20d_ago=20", create_sql)
         self.assertIn("bar.close*adjustment_history.adj_factor", create_sql)
+
+    def test_panel_uses_atomic_owner_cold_relations_after_cutover(self):
+        connection = RecordingConnection()
+        connection.cursor = object()
+        cold = {f"{name}_cold" for name in TIERED_EVIDENCE_TABLES}
+        with patch("app.factor_sql_lab.eligible_cold_tables", return_value=cold):
+            prepare_factor_panel(connection, "all_a", date(2025, 1, 1), date(2026, 3, 1), 5)
+        create_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_panel" in sql)
+        for relation in ("canonical_bars_daily", "daily_adjustment_factors", "daily_fundamentals"):
+            self.assertIn(f"quant.{relation}_cold", create_sql)
+            self.assertIn(f"SELECT * FROM quant.{relation} UNION ALL", create_sql)
 
     def test_industry_gate_fails_closed_when_any_panel_row_is_unknown(self):
         self.assertTrue(_point_in_time_industry_ready({"rows": 10, "industry_pit_rows": 10}))

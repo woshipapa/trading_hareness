@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import UUID
 
-from app.raw_overflow_archive import RawOverflowConfig, next_batch, stream_key
+from app.raw_overflow_archive import DEFAULT_CAPABILITIES, RawOverflowConfig, capability_from_stream, next_batch, stream_key
 
 
 class _Connection:
@@ -52,6 +52,10 @@ class _Database:
 
 
 class RawOverflowArchiveTests(unittest.TestCase):
+    def test_daily_bar_stream_is_an_explicit_owner_allowlist_capability(self):
+        config = RawOverflowConfig(enabled=True, capabilities=DEFAULT_CAPABILITIES)
+        self.assertEqual(capability_from_stream("raw_market_observations:daily_bar", config), "daily_bar")
+
     def test_next_batch_is_keyset_bounded_and_token_free(self):
         old = os.environ.get("QUANT_HOT_DATABASE_SOFT_BYTES")
         os.environ["QUANT_HOT_DATABASE_SOFT_BYTES"] = str(1024 * 1024 * 1024)

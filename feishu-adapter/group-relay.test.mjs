@@ -3,8 +3,9 @@ import test from 'node:test';
 import { Readable } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { createGroupRelay } from './group-relay.mjs';
+import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null, webhookKeywordsByChatId = null, larkAgentXResourceUrl = '', larkAgentXToken = '' } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map();
 	const sent = [];
@@ -27,6 +28,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		saveRelaySourceCursor: async ({ sourceKey, chatId, cursorCreateTime }) => sourceStates.set(sourceKey, { chat_id: chatId, cursor_create_time: cursorCreateTime }),
 		getRelayMessage: async (id) => saved.get(id) ?? null,
 		getRelayMessages: async (ids) => ids.map((id) => saved.get(id)).filter(Boolean),
+		relayMessagesBySourceWindow: async (sourceKey, from, to) => [...saved.values()].filter((row) => row.sourceKey === sourceKey && row.sourceCreateTime >= from && row.sourceCreateTime <= to),
 		skipRelayMessage: async (record) => saved.set(record.sourceMessageId, { ...record, status: 'skipped_bootstrap' }),
 		filterRelayMessage: async (record, reason) => saved.set(record.sourceMessageId, { ...saved.get(record.sourceMessageId), ...record, status: 'filtered_system', errorMessage: reason }),
 		claimRelayMessage: async (record) => {
@@ -53,13 +55,15 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 		} },
 	};
 	const listCalls = [];
+	const resourceCalls = [];
 	const sourceApi = {
 		messageList: async (params) => {
 			listCalls.push(params);
 			if (messageListDelayMs) await new Promise((resolve) => setTimeout(resolve, messageListDelayMs));
 			return { data: { items: messages, has_more: false } };
 		},
-		messageResourceGet: async ({ fileKey }) => {
+		messageResourceGet: async ({ fileKey, messageId }) => {
+			resourceCalls.push({ fileKey, messageId });
 			// A card frequently carries an image key whose resource the sender's
 			// own client renders but the API has already dropped.
 			if (resourceErrorKeys.includes(fileKey)) throw new Error(`读取飞书消息资源失败（HTTP 400）：14005 Resource Has Been Deleted`);
@@ -76,10 +80,27 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			enabled: true, targetChatId: 'oc_summary', intervalSeconds: 10, sourceConcurrency, historyLookbackSeconds: 300, overlapSeconds: 30, outboundCard,
 			bootstrapMode: 'forward_existing', sources: sources ?? [{ key: 'anqiang', tag: 'anqiang', chatId: 'oc_source', chatName: '马安强 (1)', targetChatIds }],
 			webhooksByChatId: webhooksByChatId ? new Map(Object.entries(webhooksByChatId)) : undefined,
+			webhookKeywordsByChatId: webhookKeywordsByChatId ? new Map(Object.entries(webhookKeywordsByChatId)) : undefined,
+			larkAgentXResourceUrl, larkAgentXToken,
 		},
 	});
-	return { relay, sent, updated, patched, saved, listCalls };
+	return { relay, sent, updated, patched, saved, listCalls, resourceCalls };
 }
+
+test('OAuth backfill keeps the official resource ID and deduplicates subsequent OAuth polling', async () => {
+	const stamp = Date.now();
+	const official = { message_id: 'om_backfill', chat_id: 'oc_source', msg_type: 'image', create_time: String(stamp), body: { content: '{"image_key":"img_source"}' } };
+	const input = { msg_id: '7685299326167305463', chat_id: '7684122107030031634', msg_type_name: 'IMAGE', create_time: stamp, content_data: { imageV2: { imageKey: 'img_source' } } };
+	const message = await readLarkAgentXBackfill(input, { chatId: 'oc_source' }, { sourceApi: { messageList: async () => ({ data: { items: [official] } }) }, logger: { info() {} } });
+	const { relay, sent, saved, resourceCalls } = createHarness([official]);
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: message.oauth_chat_id, targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	assert.equal((await relay.processInbound(message, source)).status, 'sent');
+	assert.equal((await relay.processInbound(message, source)).status, 'duplicate');
+	await relay.tick();
+	assert.equal(sent.length, 1);
+	assert.deepEqual(resourceCalls, [{ messageId: 'om_backfill', fileKey: 'img_source' }]);
+	assert.equal(saved.get('om_backfill').message.larkagentx_origin.message_id, input.msg_id);
+});
 
 test('a fenced relay observes no source messages and never sends', async () => {
 	const message = { message_id: 'om_fenced', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: 'must not send' }) } };
@@ -88,6 +109,77 @@ test('a fenced relay observes no source messages and never sends', async () => {
 	assert.equal(sent.length, 0);
 	assert.equal(relay.status().writer_state, 'fenced');
 	assert.match(relay.status().last_tick_error, /relay 写入权归属/);
+});
+
+test('a LarkAgentX source message uses the existing relay ledger and fan-out', async () => {
+	const { relay, sent, saved } = createHarness([]);
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: '767_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	const message = { message_id: 'larkx_live_1', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '实时内容' }) } };
+	const first = await relay.processInbound(message, source);
+	assert.equal(first.status, 'sent');
+	assert.equal(sent.length, 1);
+	assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n实时内容');
+	assert.equal(saved.get('larkx_live_1').status, 'sent');
+	const duplicate = await relay.processInbound(message, source);
+	assert.equal(duplicate.status, 'duplicate');
+	assert.equal(sent.length, 1);
+});
+
+test('a WebSocket ID and an official ID for the same source content are cross-deduplicated', async () => {
+	const stamp = Date.now();
+	const official = { message_id: 'om_official_same', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify(CARD_2_0_TRADING_NOTE) } };
+	const live = { message_id: '768_ws_same', msg_type: 'interactive', create_time: String(stamp + 500), body: { content: JSON.stringify(CARD_2_0_TRADING_NOTE) } };
+	const { relay, sent } = createHarness([]);
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: '767_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	assert.equal((await relay.processInbound(official, source)).status, 'sent');
+	assert.equal((await relay.processInbound(live, source)).status, 'duplicate');
+	assert.equal(sent.length, 1);
+});
+
+test('a WebSocket post image and official post image ignore transport metadata when deduplicating', async () => {
+	const stamp = Date.now();
+	const wsMessage = {
+		message_id: '768_post_image', msg_type: 'post', create_time: String(stamp),
+		body: { content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'text', text: 'same post' }, { tag: 'img', image_key: 'img_same', larkagentx_resource: { image_id: 'img_same', key_hex: 'redacted', iv_hex: 'redacted' } }]] } }) },
+	};
+	const officialMessage = {
+		message_id: 'om_post_image', msg_type: 'post', create_time: String(stamp + 700),
+		body: { content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'text', text: 'same post' }, { tag: 'img', image_key: 'img_same', width: 1290, height: 2796 }]], content_v2: [[{ tag: 'text', text: 'same post' }, { tag: 'img', image_key: 'img_same', width: 1290, height: 2796 }]] } }) },
+	};
+	const { relay, sent, saved } = createHarness([officialMessage, wsMessage]);
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: '767_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	saved.set(wsMessage.message_id, { sourceMessageId: wsMessage.message_id, sourceKey: source.key, sourceCreateTime: stamp, status: 'sent', message: wsMessage });
+	const result = await relay.repairFromOfficial({ fromCreateTime: stamp - 1000, toCreateTime: stamp + 2000, sourceKeys: ['anqiang'] });
+	assert.equal(result.sent, 0);
+	assert.equal(result.deduplicated, 2);
+	assert.equal(sent.length, 0);
+});
+
+test('official gap repair forwards a missed interactive card and does not resend it', async () => {
+	const stamp = Date.now();
+	const missed = { message_id: 'om_gap_card', chat_id: 'oc_source', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '最新安强内容' }] } }) } };
+	const { relay, sent, saved } = createHarness([missed]);
+	const first = await relay.repairFromOfficial({ fromCreateTime: stamp - 1000, toCreateTime: stamp + 1000, sourceKeys: ['anqiang'] });
+	assert.equal(first.sent, 1);
+	assert.equal(first.deduplicated, 0);
+	assert.equal(saved.get('om_gap_card').status, 'sent');
+	const second = await relay.repairFromOfficial({ fromCreateTime: stamp - 1000, toCreateTime: stamp + 1000, sourceKeys: ['anqiang'] });
+	assert.equal(second.sent, 0);
+	assert.equal(second.deduplicated, 1);
+	assert.equal(sent.length, 1);
+});
+
+test('official gap repair does not skip a missed message before a later sent row', async () => {
+	const stamp = Date.now();
+	const missed = { message_id: 'om_gap_before_later', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '窗口前半段漏收消息' }] } }) } };
+	const later = { message_id: 'om_later_sent', msg_type: 'text', create_time: String(stamp + 5000), body: { content: JSON.stringify({ text: '后续已发送消息' }) } };
+	const { relay, sent, saved } = createHarness([missed, later]);
+	saved.set(later.message_id, { sourceMessageId: later.message_id, sourceKey: 'anqiang', sourceChatId: 'oc_source', sourceCreateTime: stamp + 5000, status: 'sent', message: later, targetMessageIds: [] });
+	const result = await relay.repairFromOfficial({ fromCreateTime: stamp - 1000, toCreateTime: stamp + 6000, sourceKeys: ['anqiang'] });
+	assert.equal(result.sent, 1);
+	assert.equal(result.deduplicated, 1);
+	assert.equal(saved.get(missed.message_id).status, 'sent');
+	assert.equal(sent.length, 1);
 });
 
 test('independent source groups are polled with bounded concurrency', async () => {
@@ -356,6 +448,49 @@ test('a card JSON 2.0 header, div and image are all carried', async () => {
 	]);
 });
 
+test('an LarkAgentX interactive schema 2.0 card unwraps property content before webhook delivery', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const card = {
+				schema: '2.0',
+				body: { elements: [{
+					tag: 'column_set',
+					property: { columns: [{
+						tag: 'column',
+						property: { elements: [{
+							tag: 'markdown',
+							property: { elements: [{ tag: 'plain_text', property: { content: '请升级至最新版本客户端，以查看内容' } }] },
+						}, {
+							tag: 'div',
+							property: { text: { tag: 'plain_text', property: {} } },
+						}] },
+					}] },
+				}] },
+				newBody: { tag: 'body', property: { elements: [{
+					tag: 'markdown',
+					property: { elements: [{ tag: 'plain_text', property: { content: '安强 interactive 2.0 正文' } }] },
+				}] } },
+				source: 'json',
+			};
+			const message = { message_id: 'om_anqiang_internal_card', msg_type: 'interactive', create_time: String(Date.now()), body: { content: JSON.stringify(card) } };
+			const { relay, sent } = createHarness([message], {
+				targetChatIds: ['oc_anqiang_forward'],
+				webhooksByChatId: { oc_summary: 'https://x/summary-hook', oc_anqiang_forward: 'https://x/anqiang-hook' },
+				webhookKeywordsByChatId: { oc_summary: '汇总', oc_anqiang_forward: 'anqiang' },
+			});
+			await relay.tick();
+			assert.equal(sent.length, 0);
+			assert.equal(webhookCalls.length, 2);
+			const anqiangCall = webhookCalls.find((call) => call.url === 'https://x/anqiang-hook');
+			assert.equal(anqiangCall.body.msg_type, 'text');
+			assert.equal(anqiangCall.body.content.text, '#anqiang\n[interactive]\n安强 interactive 2.0 正文');
+			assert.equal(anqiangCall.body.content.text.includes('anqiang'), true);
+			assert.equal(anqiangCall.body.content.text.includes('请升级至最新版本客户端'), false);
+		},
+	);
+});
+
 
 // --- outbound card JSON 2.0 ---------------------------------------------------
 // From 2026-09-08 the relay speaks card JSON 2.0 to every target group.  The
@@ -474,7 +609,7 @@ function withFetchMock(handler, run) {
 	const original = globalThis.fetch;
 	const calls = [];
 	globalThis.fetch = async (url, options) => {
-		calls.push({ url, body: JSON.parse(options.body) });
+		calls.push({ url, body: options?.body ? JSON.parse(options.body) : null });
 		return handler(url, options);
 	};
 	return run(calls).finally(() => { globalThis.fetch = original; });
@@ -501,6 +636,93 @@ test('a webhook-configured target is delivered through the webhook, not the tena
 			const webhookTarget = targets.find((entry) => entry.targetChatId === 'oc_liwei_forward');
 			assert.match(webhookTarget.messageId, /^webhook-sent:oc_liwei_forward:\d+$/);
 			assert.equal(saved.get('om_webhook_1').status, 'sent');
+		},
+	);
+});
+
+test('a webhook target receives its configured keyword without changing other targets', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = { message_id: 'om_webhook_keyword', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '正文' }) } };
+			const { relay, sent } = createHarness([message], {
+				targetChatIds: ['oc_liwei_forward'],
+				webhooksByChatId: { oc_liwei_forward: 'https://x/hook' },
+				webhookKeywordsByChatId: { oc_liwei_forward: '汇总' },
+			});
+			await relay.tick();
+			assert.equal(sent.length, 1);
+			assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n正文');
+			assert.equal(webhookCalls.length, 1);
+			assert.equal(webhookCalls[0].body.content.text, '#anqiang\n正文\n汇总');
+		},
+	);
+});
+
+test('a post image with a LarkAgentX descriptor bypasses OAuth resource lookup', async () => {
+	const png = Buffer.from('\x89PNG\r\n\x1a\n', 'binary');
+	await withFetchMock(
+		(url) => {
+			if (!String(url).startsWith('https://larkagentx.test/resource')) return { ok: true, json: async () => ({ code: 0 }) };
+			return { ok: true, body: Readable.from([png]), headers: new Headers({ 'content-type': 'image/png', 'content-length': String(png.length) }) };
+		},
+		async (fetchCalls) => {
+			const message = {
+				message_id: 'om_post_larkagentx_image', msg_type: 'post', create_time: String(Date.now()),
+				body: { content: JSON.stringify({ zh_cn: { title: '', content: [[{
+					tag: 'img', image_key: 'img_v3_nested', larkagentx_resource: {
+						image_id: 'img_v3_nested', source_id: 'om_larkagentx_image', key_hex: '00'.repeat(32), iv_hex: '11'.repeat(12),
+					},
+				}]] } }) },
+			};
+			const { relay, sent, resourceCalls } = createHarness([message], { larkAgentXResourceUrl: 'https://larkagentx.test/resource', larkAgentXToken: 'test-token' });
+			await relay.tick();
+			assert.equal(resourceCalls.length, 0);
+			assert.equal(sent.length, 1);
+			assert.equal(sent[0].msg_type, 'post');
+			assert.equal(fetchCalls.length, 1);
+			const resourceUrl = new URL(String(fetchCalls[0].url));
+			assert.equal(resourceUrl.searchParams.get('image_id'), 'img_v3_nested');
+			assert.equal(resourceUrl.searchParams.get('source_id'), 'om_larkagentx_image');
+		});
+});
+
+test('a keyword-configured card webhook uses a text fallback because Card 2.0 keyword matching is unsupported', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = { message_id: 'om_webhook_card_keyword', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '卡片正文' }) } };
+			const { relay } = createHarness([message], {
+				targetChatIds: ['oc_liwei_forward'], outboundCard: true,
+				webhooksByChatId: { oc_liwei_forward: 'https://x/hook' },
+				webhookKeywordsByChatId: { oc_liwei_forward: '汇总' },
+			});
+			await relay.tick();
+			assert.equal(webhookCalls.length, 1);
+			assert.equal(webhookCalls[0].body.msg_type, 'text');
+			assert.equal(webhookCalls[0].body.content.text, '#anqiang\n卡片正文\n汇总');
+		},
+	);
+});
+
+test('a keyword-configured card webhook preserves images as a rich-text post', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = { message_id: 'om_webhook_card_image_keyword', msg_type: 'image', create_time: String(Date.now()), body: { content: JSON.stringify({ image_key: 'img_source' }) } };
+			const { relay } = createHarness([message], {
+				targetChatIds: ['oc_liuzi'], outboundCard: true,
+				webhooksByChatId: { oc_liuzi: 'https://x/hook' },
+				webhookKeywordsByChatId: { oc_liuzi: '汇总' },
+			});
+			await relay.tick();
+			assert.equal(webhookCalls.length, 1);
+			assert.equal(webhookCalls[0].body.msg_type, 'post');
+			assert.deepEqual(webhookCalls[0].body.content.post.zh_cn.content, [
+				[{ tag: 'text', text: '#anqiang' }],
+				[{ tag: 'img', image_key: 'img_target' }],
+				[{ tag: 'text', text: '汇总' }],
+			]);
 		},
 	);
 });

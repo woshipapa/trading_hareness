@@ -409,9 +409,15 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(normalize_tushare_rows(connection, "adj_factor", [{"ts_code": "600001.SH", "trade_date": "20260810", "adj_factor": "1.25"}], observed), 1)
         self.assertEqual(normalize_tushare_rows(connection, "stk_limit", [{"ts_code": "600001.SH", "trade_date": "20260810", "up_limit": "11", "down_limit": "9"}], observed), 1)
         sql = "\n".join(statement for statement, _ in connection.calls)
-        self.assertIn("is_st=EXCLUDED.is_st", sql)
+        self.assertIn("is_st=COALESCE(EXCLUDED.is_st", sql)
         self.assertIn("SET is_suspended=true", sql)
         self.assertIn("SET adj_factor=%s", sql)
+        self.assertIn("available_at,raw", sql)
+        factor_params = [params for statement, params in connection.calls if "daily_adjustment_factors" in statement]
+        self.assertEqual(len(factor_params), 1)
+        factor_payload = getattr(factor_params[0][5], "obj", factor_params[0][5])
+        self.assertEqual(factor_payload["factor_semantics"], "cumulative_tushare")
+        self.assertEqual(factor_payload["adjustment_state"], "complete")
         self.assertIn("SET limit_up=%s,limit_down=%s", sql)
 
     def test_daily_suspension_without_resume_date_marks_only_that_day(self):

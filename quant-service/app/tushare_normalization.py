@@ -8,6 +8,9 @@ import re
 
 from psycopg.types.json import Json
 
+from .adjustment_factor_semantics import COMPLETE_FACTOR_SEMANTICS, COMPLETE_FACTOR_PROVIDERS, positive_decimal
+from .instrument_registry import InstrumentRecord, ensure_instruments
+
 
 def _record_normalization_failure(connection: Any, api_name: str, error: Exception,
                                   row: dict[str, Any],
@@ -120,10 +123,14 @@ def normalize_rows(
                 symbol = str(row.get("ts_code") or "").upper()
                 if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol):
                     raise ValueError("stock_basic row has invalid ts_code")
-                connection.execute("""INSERT INTO quant.instruments(symbol,exchange,name,industry,list_date,delist_date,is_st,source)
-                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
-                       ON CONFLICT(symbol) DO UPDATE SET exchange=EXCLUDED.exchange,name=coalesce(EXCLUDED.name,quant.instruments.name), industry=coalesce(EXCLUDED.industry,quant.instruments.industry),list_date=coalesce(EXCLUDED.list_date,quant.instruments.list_date), delist_date=coalesce(EXCLUDED.delist_date,quant.instruments.delist_date),is_st=EXCLUDED.is_st, source=EXCLUDED.source,updated_at=now()""",
-                    (symbol, str(row.get("exchange") or exchange_for(symbol)), row.get("name"), row.get("industry"), date_parser(row.get("list_date")), date_parser(row.get("delist_date")), is_st_security_name(row.get("name")), provider_key))
+                ensure_instruments(connection, [InstrumentRecord(
+                    symbol=symbol,
+                    exchange=str(row.get("exchange") or exchange_for(symbol)),
+                    name=row.get("name"), industry=row.get("industry"),
+                    list_date=date_parser(row.get("list_date")),
+                    delist_date=date_parser(row.get("delist_date")),
+                    is_st=is_st_security_name(row.get("name")), source=provider_key,
+                )], source=provider_key, update_existing=True)
             elif api_name == "suspend_d":
                 symbol = str(row.get("ts_code") or "").upper()
                 suspend_date = date_parser(row.get("trade_date") or row.get("suspend_date"))
@@ -154,11 +161,15 @@ def normalize_rows(
                 if api_name in {"daily", "index_daily"}:
                     upsert_bar(connection, daily_bar_type(symbol=symbol, trading_date=trading_date, open=decimal_or_none(row.get("open")), high=decimal_or_none(row.get("high")), low=decimal_or_none(row.get("low")), close=decimal_or_none(row.get("close")), pre_close=decimal_or_none(row.get("pre_close")), volume=decimal_or_none(row.get("vol")), amount=decimal_or_none(row.get("amount")), source=provider_key, available_at=available_at))
                 elif api_name == "adj_factor":
-                    adj_factor = decimal_or_none(row.get("adj_factor"))
+                    adj_factor = positive_decimal(row.get("adj_factor"))
+                    if provider_key not in COMPLETE_FACTOR_PROVIDERS:
+                        raise ValueError(f"{provider_key} cannot provide cumulative adjustment factors")
                     if adj_factor is None:
                         raise ValueError("adj_factor row has no positive adj_factor")
-                    connection.execute("""INSERT INTO quant.daily_adjustment_factors(symbol,trading_date,adj_factor,provider,available_at,raw) VALUES(%s,%s,%s,%s,%s,%s)
-                           ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET adj_factor=EXCLUDED.adj_factor,available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""", (symbol, trading_date, adj_factor, provider_key, available_at, Json(row)))
+                    factor_raw = {**row, "factor_semantics": COMPLETE_FACTOR_SEMANTICS, "adjustment_state": "complete"}
+                    connection.execute("""INSERT INTO quant.daily_adjustment_factors(symbol,trading_date,adj_factor,provider,available_at,raw)
+                           VALUES(%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET adj_factor=EXCLUDED.adj_factor,available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""", (symbol, trading_date, adj_factor, provider_key, available_at, Json(factor_raw)))
                     connection.execute("UPDATE quant.canonical_bars_daily SET adj_factor=%s,canonicalized_at=now() WHERE symbol=%s AND trading_date=%s", (adj_factor, symbol, trading_date))
                 elif api_name == "daily_basic":
                     connection.execute("""INSERT INTO quant.daily_fundamentals(symbol,trading_date,close,turnover_rate,volume_ratio,pe,pb,total_share,float_share,total_mv,circ_mv,provider,available_at,raw)

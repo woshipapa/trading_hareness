@@ -174,6 +174,10 @@ class IntradayScanRepositoryTests(unittest.TestCase):
         self.assertEqual(factors["600000.SH"]["status"], "completed")
         self.assertGreater(factors["600000.SH"]["latest_daily_close"], factors["000001.SZ"]["latest_daily_close"])
         self.assertIn("row_number() OVER(PARTITION BY b.symbol", connection.execute.call_args.args[0])
+        self.assertIn("b.quality_status='fresh'", connection.execute.call_args.args[0])
+        self.assertIn("AS adjustment_state", connection.execute.call_args.args[0])
+        self.assertIn("quant.daily_adjustment_factors", connection.execute.call_args.args[0])
+        self.assertIn("raw->>'factor_semantics'", connection.execute.call_args.args[0])
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from .analyst_skill_models import rebuild_all_analyst_skill_profiles, rebuild_an
 from .analyst_expert_research import rebuild_analyst_research
 from .analyst_observations import persist_extraction_run, persist_observations_for_evidence
 from .database import Database
+from .instrument_registry import InstrumentRecord, ensure_instruments
 
 
 REMOTE_EXTRACTOR_VERSION = "remote-report-normalizer-v2"
@@ -368,10 +369,14 @@ def _materialize_message_claims(connection: Any, *, evidence_id: Any, analyst_id
                                 body: str, published_at: datetime | None, available_at: datetime) -> int:
     """Only explicit codes and reviewed topic terms may become message claims."""
     direction, strength, confidence = classify_remote_text(body)
+    signals = extract_signals(body)
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(symbol=signal.symbol, exchange=signal.exchange, source="remote-message") for signal in signals],
+        update_existing=False,
+    )
     count = 0
-    for signal in extract_signals(body):
-        connection.execute("INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'remote-message') ON CONFLICT(symbol) DO NOTHING",
-                           (signal.symbol, signal.exchange))
+    for signal in signals:
         _insert_message_claim(connection, evidence_id=evidence_id, analyst_id=analyst_id, message_id=message_id,
                               scope="stock", subject_key=signal.symbol, subject_label=signal.symbol, direction=signal.direction,
                               strength=signal.strength, horizon=signal.horizon_days, confidence=signal.extraction_confidence,
@@ -592,11 +597,13 @@ def import_remote_report(db: Database, report: dict[str, Any], force_reprocess: 
             ).fetchone()
             evidence_count += 1
             direction, strength, confidence = classify_remote_text(body)
-            for signal in extract_signals(body):
-                connection.execute(
-                    "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'remote-report') ON CONFLICT(symbol) DO NOTHING",
-                    (signal.symbol, signal.exchange),
-                )
+            signals = extract_signals(body)
+            ensure_instruments(
+                connection,
+                [InstrumentRecord(symbol=signal.symbol, exchange=signal.exchange, source="remote-report") for signal in signals],
+                update_existing=False,
+            )
+            for signal in signals:
                 claim = connection.execute(
                     """INSERT INTO quant.analyst_claims(evidence_id,remote_analyst_id,scope,subject_key,subject_label,direction,strength,horizon_days,
                          extraction_confidence,extractor_version,published_at,available_at,explicitness,raw)

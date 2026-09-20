@@ -180,7 +180,7 @@ def persist_full_market_close(
                 # those remain the responsibility of the Tushare control
                 # synchronizer.  The raw vendor rows above retain pre-close
                 # and board context for research/audit only.
-                "adj_factor": "not_promoted;_tushare_control_plane_only",
+                "adj_factor": "not_promoted;owner_longhu_qfq_factor_task_only",
                 "stk_limit": "not_promoted;_tushare_control_plane_only",
                 "trade_calendar": "observed_open_from_coverage_gated_settled_close",
             },

@@ -8,6 +8,7 @@ from typing import Any
 
 from psycopg.types.json import Json
 
+from .instrument_registry import InstrumentRecord, ensure_instruments
 from .personal_decision_contracts import BrokerPortfolioSnapshotInput, PersonalTradePlanInput
 
 
@@ -34,13 +35,14 @@ def persist_broker_snapshot(connection: Any, snapshot: BrokerPortfolioSnapshotIn
             raise ImmutableDecisionFactConflict("source_snapshot_key already exists with different content")
         return {"status": "idempotent", "snapshot_id": existing["snapshot_id"], "content_hash": content_hash}
 
-    for position in snapshot.positions:
-        connection.execute(
-            """INSERT INTO quant.instruments(symbol,exchange,name,source)
-               VALUES(%s,%s,%s,%s)
-               ON CONFLICT(symbol) DO UPDATE SET name=COALESCE(NULLIF(EXCLUDED.name,''),quant.instruments.name)""",
-            (position.symbol, position.symbol.rsplit(".", 1)[-1], position.name, snapshot.source),
-        )
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(
+            symbol=position.symbol, exchange=position.symbol.rsplit(".", 1)[-1],
+            name=position.name, source=snapshot.source,
+        ) for position in snapshot.positions],
+        update_existing=True,
+    )
     row = connection.execute(
         """INSERT INTO quant.broker_portfolio_snapshots(
                account_key,source,source_snapshot_key,observed_at,verification,cash,total_asset,
@@ -83,11 +85,13 @@ def persist_trade_plan(connection: Any, plan: PersonalTradePlanInput) -> dict[st
         if str(existing["content_hash"]) != content_hash:
             raise ImmutableDecisionFactConflict("plan_key already exists with different content")
         return {"status": "idempotent", "plan_id": existing["plan_id"], "content_hash": content_hash}
-    connection.execute(
-        """INSERT INTO quant.instruments(symbol,exchange,name,source)
-           VALUES(%s,%s,%s,'personal_trade_plan')
-           ON CONFLICT(symbol) DO UPDATE SET name=COALESCE(NULLIF(EXCLUDED.name,''),quant.instruments.name)""",
-        (plan.symbol, plan.symbol.rsplit(".", 1)[-1], plan.name),
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(
+            symbol=plan.symbol, exchange=plan.symbol.rsplit(".", 1)[-1],
+            name=plan.name, source="personal_trade_plan",
+        )],
+        update_existing=True,
     )
     row = connection.execute(
         """INSERT INTO quant.personal_trade_plans(

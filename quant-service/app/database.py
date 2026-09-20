@@ -1,13 +1,179 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager, contextmanager
-from typing import AsyncIterator, Iterator, Mapping
+from typing import Any, AsyncIterator, Iterator, Mapping
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from psycopg.rows import dict_row
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _redact_sql_value(value: object, depth: int = 0) -> object:
+    if depth > 4:
+        return "<nested>"
+    if isinstance(value, str) and any(token in value.lower() for token in ("access_token", "password", "authorization", "client_secret")):
+        return "<redacted-string>"
+    if isinstance(value, Mapping):
+        return {
+            str(key): "<redacted>" if any(token in str(key).lower() for token in ("password", "token", "secret", "key", "authorization"))
+            else _redact_sql_value(item, depth + 1)
+            for key, item in list(value.items())[:100]
+        }
+    if isinstance(value, (list, tuple)):
+        return type(value)(_redact_sql_value(item, depth + 1) for item in list(value)[:100])
+    return value
+
+
+def _log_sql_value(value: object, limit: int = 2_000) -> str:
+    """Bound and redact SQL parameter logging so errors stay safe and finite."""
+    rendered = repr(_redact_sql_value(value))
+    return rendered if len(rendered) <= limit else rendered[:limit] + "...<truncated>"
+
+
+class _LoggingCursor:
+    def __init__(self, cursor: Any, recorder: "_StatementRecorder") -> None:
+        self._cursor = cursor
+        self._recorder = recorder
+
+    def execute(self, query: object, params: object = None, *args: object, **kwargs: object) -> Any:
+        self._recorder.record(query, params)
+        try:
+            return self._cursor.execute(query, params, *args, **kwargs)
+        except Exception:
+            LOGGER.error("database statement failed sql=%s params=%s", query, _log_sql_value(params), exc_info=True)
+            raise
+
+    def executemany(self, query: object, params_seq: object, *args: object, **kwargs: object) -> Any:
+        self._recorder.record(query, params_seq)
+        try:
+            return self._cursor.executemany(query, params_seq, *args, **kwargs)
+        except Exception:
+            LOGGER.error("database statement batch failed sql=%s params=%s", query, _log_sql_value(params_seq), exc_info=True)
+            raise
+
+    def __enter__(self) -> "_LoggingCursor":
+        self._cursor.__enter__()
+        return self
+
+    def __exit__(self, *args: object) -> Any:
+        return self._cursor.__exit__(*args)
+
+    def __iter__(self) -> Any:
+        return iter(self._cursor)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cursor, name)
+
+
+class _StatementRecorder:
+    def __init__(self) -> None:
+        self.sql: object = None
+        self.params: object = None
+
+    def record(self, query: object, params: object) -> None:
+        self.sql, self.params = query, params
+
+
+class _LoggingConnection:
+    """Transparent sync connection facade that records failed SQL."""
+
+    def __init__(self, connection: Any, recorder: _StatementRecorder) -> None:
+        self._connection = connection
+        self._recorder = recorder
+
+    def execute(self, query: object, params: object = None, *args: object, **kwargs: object) -> Any:
+        self._recorder.record(query, params)
+        try:
+            return self._connection.execute(query, params, *args, **kwargs)
+        except Exception:
+            LOGGER.error("database statement failed sql=%s params=%s", query, _log_sql_value(params), exc_info=True)
+            raise
+
+    def executemany(self, query: object, params_seq: object, *args: object, **kwargs: object) -> Any:
+        self._recorder.record(query, params_seq)
+        try:
+            return self._connection.executemany(query, params_seq, *args, **kwargs)
+        except Exception:
+            LOGGER.error("database statement batch failed sql=%s params=%s", query, _log_sql_value(params_seq), exc_info=True)
+            raise
+
+    def cursor(self, *args: object, **kwargs: object) -> _LoggingCursor:
+        return _LoggingCursor(self._connection.cursor(*args, **kwargs), self._recorder)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
+
+
+class _AsyncLoggingCursor:
+    def __init__(self, cursor: Any, recorder: _StatementRecorder) -> None:
+        self._cursor = cursor
+        self._recorder = recorder
+
+    async def execute(self, query: object, params: object = None, *args: object, **kwargs: object) -> Any:
+        self._recorder.record(query, params)
+        try:
+            return await self._cursor.execute(query, params, *args, **kwargs)
+        except Exception:
+            LOGGER.error("database async statement failed sql=%s params=%s", query, _log_sql_value(params), exc_info=True)
+            raise
+
+    async def executemany(self, query: object, params_seq: object, *args: object, **kwargs: object) -> Any:
+        self._recorder.record(query, params_seq)
+        try:
+            return await self._cursor.executemany(query, params_seq, *args, **kwargs)
+        except Exception:
+            LOGGER.error("database async statement batch failed sql=%s params=%s", query, _log_sql_value(params_seq), exc_info=True)
+            raise
+
+    async def __aenter__(self) -> "_AsyncLoggingCursor":
+        await self._cursor.__aenter__()
+        return self
+
+    async def __aexit__(self, *args: object) -> Any:
+        return await self._cursor.__aexit__(*args)
+
+    def __aiter__(self) -> Any:
+        return self._cursor.__aiter__()
+
+    async def __anext__(self) -> Any:
+        return await self._cursor.__anext__()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cursor, name)
+
+
+class _AsyncLoggingConnection:
+    def __init__(self, connection: Any, recorder: _StatementRecorder) -> None:
+        self._connection = connection
+        self._recorder = recorder
+
+    async def execute(self, query: object, params: object = None, *args: object, **kwargs: object) -> Any:
+        self._recorder.record(query, params)
+        try:
+            return await self._connection.execute(query, params, *args, **kwargs)
+        except Exception:
+            LOGGER.error("database async statement failed sql=%s params=%s", query, _log_sql_value(params), exc_info=True)
+            raise
+
+    async def executemany(self, query: object, params_seq: object, *args: object, **kwargs: object) -> Any:
+        self._recorder.record(query, params_seq)
+        try:
+            return await self._connection.executemany(query, params_seq, *args, **kwargs)
+        except Exception:
+            LOGGER.error("database async statement batch failed sql=%s params=%s", query, _log_sql_value(params_seq), exc_info=True)
+            raise
+
+    def cursor(self, *args: object, **kwargs: object) -> _AsyncLoggingCursor:
+        return _AsyncLoggingCursor(self._connection.cursor(*args, **kwargs), self._recorder)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
 
 
 SCHEMA_SQL = """
@@ -1686,6 +1852,7 @@ class Database:
             "password": os.getenv("PGPASSWORD", ""),
             "row_factory": dict_row,
             "connect_timeout": 8,
+            "application_name": os.getenv("QUANT_APPLICATION_NAME", "quant-research"),
             "options": f"-c app.quant_runtime_profile={runtime_profile}",
         }
         self._pool_settings = pool_settings()
@@ -1723,8 +1890,18 @@ class Database:
     def transaction(self) -> Iterator[psycopg.Connection]:
         self.open()
         with self._pool.connection() as connection:
-            with connection.transaction():
-                yield connection
+            recorder = _StatementRecorder()
+            try:
+                with connection.transaction():
+                    yield _LoggingConnection(connection, recorder)
+            except Exception:
+                LOGGER.error(
+                    "database transaction failed sql=%s params=%s",
+                    recorder.sql,
+                    _log_sql_value(recorder.params),
+                    exc_info=True,
+                )
+                raise
 
     def migrate(self) -> None:
         """Legacy bootstrap only; new schema changes belong to Alembic."""
@@ -1845,8 +2022,18 @@ class AsyncDatabase:
     async def transaction(self) -> AsyncIterator[psycopg.AsyncConnection]:
         await self.open()
         async with self._pool.connection() as connection:
-            async with connection.transaction():
-                yield connection
+            recorder = _StatementRecorder()
+            try:
+                async with connection.transaction():
+                    yield _AsyncLoggingConnection(connection, recorder)
+            except Exception:
+                LOGGER.error(
+                    "database async transaction failed sql=%s params=%s",
+                    recorder.sql,
+                    _log_sql_value(recorder.params),
+                    exc_info=True,
+                )
+                raise
 
     async def ping(self) -> None:
         async with self.transaction() as connection:

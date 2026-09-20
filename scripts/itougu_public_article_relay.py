@@ -6,6 +6,7 @@
 view/list 轮询补齐。两者都以圈子 ID 白名单确认来源并发送到同一组飞书出口。
 """
 import json
+import hashlib
 import os
 import re
 import time
@@ -93,7 +94,18 @@ def load_state():
 def save_state(state):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     state["seen"] = state["seen"][-1000:]
+    state["view_content_seen"] = state.get("view_content_seen", [])[-1000:]
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def view_content_key(view, article_id=""):
+    """Return a stable fallback key when view/list changes its row ID."""
+    if article_id:
+        return "article:%s" % article_id
+    body = str(view.get("content") or "").strip()
+    if not body:
+        return ""
+    return "body:%s" % hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 def format_article(circle_name, article, article_url, delivery_label):
@@ -255,7 +267,8 @@ def trigger_from_push(username, article_url, verbose=False, delivery_label="data
         return 0
     article_id = match.group(1)
     state = load_state()
-    if article_id in set(state["seen"]):
+    article_seen = set(state.setdefault("article_seen", []))
+    if article_id in set(state["seen"]) or article_id in article_seen:
         return 0
     outcome = _process(article_id, article_url, state, verbose, delivery_label)
     if outcome == "pending":
@@ -263,6 +276,7 @@ def trigger_from_push(username, article_url, verbose=False, delivery_label="data
     else:
         state["pending"].pop(article_id, None)
         state["seen"].append(article_id)
+        state["article_seen"].append(article_id)
     save_state(state)
     return 1 if outcome == "sent" else 0
 
@@ -297,6 +311,7 @@ def retry_pending(verbose=False, delivery_label="database"):
         else:
             state["pending"].pop(article_id, None)
             state["seen"].append(article_id)
+            state.setdefault("article_seen", []).append(article_id)
             sent += outcome == "sent"
     if changed:
         save_state(state)
@@ -308,6 +323,7 @@ def poll_views(verbose=False, delivery_label="poll"):
     state = load_state()
     seen = set(state.setdefault("view_seen", []))
     article_seen = set(state.setdefault("article_seen", []))
+    content_seen = set(state.setdefault("view_content_seen", []))
     sent = 0
     changed = False
     main_behavior_items = []
@@ -357,7 +373,29 @@ def poll_views(verbose=False, delivery_label="poll"):
             # through article/view so the relay never forwards the stub in
             # place of the article body.
             article_id = view_article_id(view)
-            if not view_id or (view_id in seen and (not article_id or article_id in article_seen)):
+            content_key = view_content_key(view, article_id)
+            if not view_id:
+                continue
+            if article_id and article_id in article_seen:
+                seen.add(view_id)
+                if content_key:
+                    content_seen.add(content_key)
+                changed = True
+                continue
+            if view_id in seen:
+                # Backfill fingerprints for rows that were seen before the
+                # content based guard was introduced.  This is state-only:
+                # an already delivered row is never sent again.
+                if content_key and content_key not in content_seen:
+                    content_seen.add(content_key)
+                    changed = True
+                continue
+            # Some public-circle responses have emitted a new viewId for the
+            # same body.  Message IDs in the downstream Feishu history are
+            # therefore different even though the analyst sees a duplicate.
+            if content_key and content_key in content_seen:
+                seen.add(view_id)
+                changed = True
                 continue
             # Do not replay the historical first page on first activation;
             # do include today's intraday backlog so the new listener catches
@@ -403,6 +441,8 @@ def poll_views(verbose=False, delivery_label="poll"):
             seen.add(view_id)
             if article_id:
                 article_seen.add(article_id)
+            if content_key:
+                content_seen.add(content_key)
             changed = True
             sent += 1
             if verbose:
@@ -422,6 +462,9 @@ def poll_views(verbose=False, delivery_label="poll"):
                 seen.add(item["view_id"])
                 if item.get("article_id"):
                     article_seen.add(item["article_id"])
+                content_key = view_content_key({"content": item.get("text", "")}, item.get("article_id", ""))
+                if content_key:
+                    content_seen.add(content_key)
             changed = True
             sent += 1
             if verbose:
@@ -429,5 +472,6 @@ def poll_views(verbose=False, delivery_label="poll"):
     if changed:
         state["view_seen"] = list(seen)[-1000:]
         state["article_seen"] = list(article_seen)[-1000:]
+        state["view_content_seen"] = list(content_seen)[-1000:]
         save_state(state)
     return sent

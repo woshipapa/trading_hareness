@@ -8,6 +8,8 @@ from typing import Any, Callable
 from fastapi import HTTPException
 from psycopg.types.json import Json
 
+from .instrument_registry import InstrumentRecord, ensure_instruments
+
 
 def review_claim(
     review_id: Any,
@@ -43,9 +45,10 @@ def review_claim(
             symbol = (payload.symbol or item["suggested_symbol"] or "").upper()
             if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol):
                 raise HTTPException(status_code=422, detail="approving a stock claim requires a Tushare symbol")
-            connection.execute(
-                "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'claim-review') ON CONFLICT(symbol) DO NOTHING",
-                (symbol, exchange_for(symbol)),
+            ensure_instruments(
+                connection,
+                [InstrumentRecord(symbol=symbol, exchange=exchange_for(symbol), source="claim-review")],
+                update_existing=False,
             )
             connection.execute(
                 """INSERT INTO quant.analyst_claims(evidence_id,remote_analyst_id,scope,subject_key,subject_label,direction,strength,

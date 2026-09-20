@@ -1,26 +1,81 @@
-"""Full-market event/cross-sectional research over the now ~512-day canonical history.
+"""Full-market event/cross-sectional research over the owner tiered history.
 
 Every finding in docs/*RESEARCH*.md before this was either a single-digit
 sample count (the countertrend-rebound "10/10 hit" was two calendar days) or
 a hand-run one-off query never persisted anywhere queryable. These five
-studies run against the whole ingested canonical_bars_daily history (not a
+studies run against the whole eligible hot+cold canonical history (not a
 36-symbol watchlist), persist into quant.strategy_experiments alongside the
 existing shadow-strategy research, and are re-runnable rather than static
 prose. None of them changes a live threshold, a strategy's live_effect or an
 analyst weight; they are descriptive_only evidence for the promotion
 registries this codebase already requires before anything can go live.
+Cross-session returns use ``raw price * cumulative factor`` from the explicit
+Longhu-derived or licensed Tushare provider allow-list; exchange limit checks
+deliberately remain on raw prices.
 """
 
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
+from .owner_storage import TIERED_EVIDENCE_TABLES, eligible_cold_tables, tiered_relation_sql
 from .sector_membership_repository import point_in_time_membership_predicate
 
 from psycopg.types.json import Json
 
 BENCHMARK_SYMBOL = "000300.SH"
+
+# ``daily_adjustment_factors`` is the owner-maintained semantic source for
+# adjusted research prices.  Keep this list in SQL as well as in
+# ``owner_factor_repository`` because these studies run as one bounded query
+# against the hot+cold snapshot and must not fall back to the bar-side factor.
+_FACTOR_PROVIDERS_SQL = "ARRAY['longhu_qfq_derived','tushare','tushare_primary','tushare_backup','tushare_super','tushare_super_get','tushare_super_sdk']::text[]"
+
+
+def _factorized_bars_cte() -> str:
+    """Return CTEs exposing only bars with a PIT, licensed factor.
+
+    The owner stores the Longhu-derived series using the historical
+    ``cumulative_tushare`` shape label for schema compatibility.  Provider
+    precedence is intentionally before availability: a newer Tushare
+    checkpoint must not displace the owner's Longhu row.
+    """
+    return f"""eligible_bars AS NOT MATERIALIZED (
+                SELECT bar.*,factor.adj_factor AS persisted_adj_factor
+                  FROM quant.canonical_bars_daily bar
+                  JOIN LATERAL (
+                       SELECT item.adj_factor
+                         FROM quant.daily_adjustment_factors item
+                        WHERE item.symbol=bar.symbol
+                          AND item.trading_date=bar.trading_date
+                          AND item.provider=ANY({_FACTOR_PROVIDERS_SQL})
+                          AND ((item.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
+                               OR (item.provider='longhu_qfq_derived' AND item.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                          AND item.adj_factor>0
+                          AND item.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                        ORDER BY array_position({_FACTOR_PROVIDERS_SQL},item.provider) NULLS LAST,
+                                 item.available_at DESC,item.provider
+                        LIMIT 1
+                  ) factor ON TRUE
+                 WHERE bar.quality_status='fresh'
+                   AND bar.adj_factor>0
+                   AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+             )"""
+
+
+def _tiered_sql_builder(connection: Any) -> Callable[[str], str]:
+    """Bind one atomic owner-layout snapshot to an entire research study."""
+    cold_tables = eligible_cold_tables(connection) if hasattr(connection, "cursor") else set()
+
+    def build(sql: str) -> str:
+        for logical_name in TIERED_EVIDENCE_TABLES:
+            sql = sql.replace(
+                f"quant.{logical_name}", tiered_relation_sql(logical_name, cold_tables),
+            )
+        return sql
+
+    return build
 
 
 def _persist_experiment(connection: Any, strategy_key: str, start_date: date, end_date: date,
@@ -42,8 +97,9 @@ def _round(value: Any, digits: int = 4) -> float | None:
 
 def research_limit_up_continuation(connection: Any, start_date: date, end_date: date) -> dict[str, Any]:
     """Next-session behavior after a limit-up close, split by first-board vs repeat and by whether the next open is fillable."""
+    tiered_sql = _tiered_sql_builder(connection)
     rows = connection.execute(
-        """WITH all_bars AS (
+        tiered_sql("""WITH all_bars AS (
                 -- lag() must see every prior trading day (including ones with no
                 -- limit_up value) or "previous day was also limit-up" silently
                 -- compares against the previous *limit-up-eligible* day instead
@@ -54,6 +110,7 @@ def research_limit_up_continuation(connection: Any, start_date: date, end_date: 
                 FROM quant.canonical_bars_daily
                 WHERE trading_date BETWEEN %s::date - 10 AND %s
                   AND quality_status='fresh'
+                  AND adj_factor>0
                   AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
              ), hits AS (
                 SELECT symbol,trading_date,close,limit_up,
@@ -68,6 +125,7 @@ def research_limit_up_continuation(connection: Any, start_date: date, end_date: 
                     SELECT open,close,pre_close,limit_up,is_suspended FROM quant.canonical_bars_daily b
                      WHERE b.symbol=h.symbol AND b.trading_date>h.trading_date
                        AND b.quality_status='fresh'
+                       AND b.adj_factor>0
                        AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                      ORDER BY b.trading_date LIMIT 1
                   ) n ON true
@@ -79,7 +137,7 @@ def research_limit_up_continuation(connection: Any, start_date: date, end_date: 
                avg(nx_close/open-1) FILTER (WHERE open<nx_limit_up*0.999) avg_open_to_close,
                avg((nx_close>open)::int) FILTER (WHERE open<nx_limit_up*0.999) hit_open_to_close,
                avg((nx_close>=nx_limit_up*0.999)::int) pct_re_limit
-             FROM next_session GROUP BY prev_was_limit_up""",
+             FROM next_session GROUP BY prev_was_limit_up"""),
         (start_date, end_date, start_date, end_date),
     ).fetchall()
     cohorts = {}
@@ -104,10 +162,11 @@ def research_limit_up_continuation(connection: Any, start_date: date, end_date: 
 def research_daily_volume_surge(connection: Any, start_date: date, end_date: date,
                                 horizons: tuple[int, ...] = (1, 3, 5, 10)) -> dict[str, Any]:
     """volume_ratio>=2.5 and turnover_rate>=5.0 on day T (the intraday volume_anomaly thresholds, at daily frequency)."""
+    tiered_sql = _tiered_sql_builder(connection)
     horizon_metrics: dict[str, Any] = {}
     for horizon in horizons:
         rows = connection.execute(
-            """WITH signal AS (
+            tiered_sql(f"""WITH {_factorized_bars_cte()}, signal AS (
                 SELECT DISTINCT ON (f.symbol,f.trading_date) f.symbol,f.trading_date
                   FROM quant.daily_fundamentals f
                  WHERE f.trading_date BETWEEN %s AND %s
@@ -118,29 +177,24 @@ def research_daily_volume_surge(connection: Any, start_date: date, end_date: dat
                           f.provider
              ), priced AS (
                 SELECT s.symbol,s.trading_date,
-                  (SELECT b.trading_date FROM quant.canonical_bars_daily b WHERE b.symbol=s.symbol AND b.trading_date>s.trading_date
-                     AND b.quality_status='fresh'
-                     AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                  (SELECT b.trading_date FROM eligible_bars b WHERE b.symbol=s.symbol AND b.trading_date>s.trading_date
                      ORDER BY b.trading_date LIMIT 1) entry_date
                 FROM signal s
              ), entered AS (
-                SELECT p.*,e.open entry_price,e.is_suspended entry_is_suspended,e.limit_up entry_limit_up
-                  FROM priced p JOIN quant.canonical_bars_daily e ON e.symbol=p.symbol AND e.trading_date=p.entry_date
-                   AND e.quality_status='fresh'
-                   AND e.available_at < ((e.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                SELECT p.*,e.open entry_raw_open,e.open*e.persisted_adj_factor entry_price,
+                       e.is_suspended entry_is_suspended,e.limit_up entry_limit_up
+                  FROM priced p JOIN eligible_bars e ON e.symbol=p.symbol AND e.trading_date=p.entry_date
              ), exited AS (
-                SELECT en.*, x.close exit_close
+                SELECT en.*, x.exit_close
                   FROM entered en
                   JOIN LATERAL (
-                    SELECT close FROM quant.canonical_bars_daily b WHERE b.symbol=en.symbol AND b.trading_date>=en.entry_date
-                     AND b.quality_status='fresh'
-                     AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                    SELECT close*persisted_adj_factor exit_close FROM eligible_bars b WHERE b.symbol=en.symbol AND b.trading_date>=en.entry_date
                      ORDER BY b.trading_date OFFSET %s LIMIT 1
                   ) x ON true
-                 WHERE NOT en.entry_is_suspended AND (en.entry_limit_up IS NULL OR en.entry_price<en.entry_limit_up*0.999)
+                 WHERE NOT en.entry_is_suspended AND (en.entry_limit_up IS NULL OR en.entry_raw_open<en.entry_limit_up*0.999)
              )
              SELECT count(*) n, avg(exit_close/entry_price-1) avg_return, avg((exit_close>entry_price)::int) hit_rate
-               FROM exited""",
+               FROM exited"""),
             (start_date, end_date, horizon - 1),
         ).fetchone()
         horizon_metrics[f"{horizon}d"] = {"n": rows["n"], "avg_return": _round(rows["avg_return"]), "hit_rate": _round(rows["hit_rate"])}
@@ -160,18 +214,17 @@ def research_daily_volume_surge(connection: Any, start_date: date, end_date: dat
 def research_short_term_reversal(connection: Any, start_date: date, end_date: date,
                                  lookback_days: tuple[int, ...] = (5, 10, 20), horizon_days: int = 10) -> dict[str, Any]:
     """Decile forward return by trailing return; a negative decile-1-minus-decile-10 spread confirms reversal, not momentum."""
+    tiered_sql = _tiered_sql_builder(connection)
     lookback_metrics: dict[str, Any] = {}
     for lookback in lookback_days:
         rows = connection.execute(
-            """WITH panel AS (
-                SELECT symbol,trading_date,close,
-                  lag(close,%s) OVER (PARTITION BY symbol ORDER BY trading_date) prior_close,
-                  lead(close,%s) OVER (PARTITION BY symbol ORDER BY trading_date) forward_close,
+            tiered_sql(f"""WITH {_factorized_bars_cte()}, panel AS (
+                SELECT symbol,trading_date,close*persisted_adj_factor AS close,
+                  lag(close*persisted_adj_factor,%s) OVER (PARTITION BY symbol ORDER BY trading_date) prior_close,
+                  lead(close*persisted_adj_factor,%s) OVER (PARTITION BY symbol ORDER BY trading_date) forward_close,
                   is_suspended
-                FROM quant.canonical_bars_daily
+                FROM eligible_bars
                 WHERE trading_date BETWEEN %s AND %s
-                  AND quality_status='fresh'
-                  AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
              ), scored AS (
                 SELECT *, close/prior_close-1 trailing_return, forward_close/close-1 forward_return
                   FROM panel WHERE prior_close>0 AND forward_close IS NOT NULL AND NOT is_suspended
@@ -180,7 +233,7 @@ def research_short_term_reversal(connection: Any, start_date: date, end_date: da
                   FROM scored
              )
              SELECT decile, count(*) n, avg(forward_return) avg_forward_return
-               FROM ranked GROUP BY decile ORDER BY decile""",
+               FROM ranked GROUP BY decile ORDER BY decile"""),
             (lookback, horizon_days, start_date, end_date),
         ).fetchall()
         deciles = {int(row["decile"]): {"n": row["n"], "avg_forward_return": _round(row["avg_forward_return"])} for row in rows}
@@ -210,9 +263,10 @@ def research_short_term_reversal(connection: Any, start_date: date, end_date: da
 def research_sector_flow_reversal_stock_level(connection: Any, start_date: date, end_date: date,
                                               horizon_days: int = 1) -> dict[str, Any]:
     """Member-stock forward return using only as-known-at membership evidence."""
+    tiered_sql = _tiered_sql_builder(connection)
     membership_predicate = point_in_time_membership_predicate("m", "s.trading_date")
     rows = connection.execute(
-        f"""WITH signal AS (
+        tiered_sql(f"""WITH {_factorized_bars_cte()}, signal AS (
                 SELECT f.taxonomy_key,f.sector_key,f.trading_date,f.transition
                   FROM quant.sector_flow_daily_features f
                  WHERE f.trading_date BETWEEN %s AND %s
@@ -225,30 +279,25 @@ def research_sector_flow_reversal_stock_level(connection: Any, start_date: date,
                     AND {membership_predicate}
              ), priced AS (
                 SELECT me.transition,me.symbol,me.trading_date,
-                  (SELECT b.trading_date FROM quant.canonical_bars_daily b WHERE b.symbol=me.symbol AND b.trading_date>me.trading_date
-                     AND b.quality_status='fresh'
-                     AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                  (SELECT b.trading_date FROM eligible_bars b WHERE b.symbol=me.symbol AND b.trading_date>me.trading_date
                      ORDER BY b.trading_date LIMIT 1) entry_date
                 FROM members me
              ), entered AS (
-                SELECT p.*,e.open entry_price,e.is_suspended entry_is_suspended,e.limit_up entry_limit_up,e.limit_down entry_limit_down
-                  FROM priced p JOIN quant.canonical_bars_daily e ON e.symbol=p.symbol AND e.trading_date=p.entry_date
-                   AND e.quality_status='fresh'
-                   AND e.available_at < ((e.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                SELECT p.*,e.open entry_raw_open,e.open*e.persisted_adj_factor entry_price,
+                       e.is_suspended entry_is_suspended,e.limit_up entry_limit_up,e.limit_down entry_limit_down
+                  FROM priced p JOIN eligible_bars e ON e.symbol=p.symbol AND e.trading_date=p.entry_date
              ), exited AS (
-                SELECT en.*, x.close exit_close
+                SELECT en.*, x.exit_close
                   FROM entered en
                   JOIN LATERAL (
-                    SELECT close FROM quant.canonical_bars_daily b WHERE b.symbol=en.symbol AND b.trading_date>=en.entry_date
-                     AND b.quality_status='fresh'
-                     AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                    SELECT close*persisted_adj_factor exit_close FROM eligible_bars b WHERE b.symbol=en.symbol AND b.trading_date>=en.entry_date
                      ORDER BY b.trading_date OFFSET %s LIMIT 1
                   ) x ON true
-                 WHERE NOT en.entry_is_suspended AND (en.entry_limit_up IS NULL OR en.entry_price<en.entry_limit_up*0.999)
+                 WHERE NOT en.entry_is_suspended AND (en.entry_limit_up IS NULL OR en.entry_raw_open<en.entry_limit_up*0.999)
              )
              SELECT transition, count(*) n, count(DISTINCT symbol) symbols, count(DISTINCT trading_date) event_days,
                avg(exit_close/entry_price-1) avg_return, avg((exit_close>entry_price)::int) hit_rate
-             FROM exited GROUP BY transition""",
+             FROM exited GROUP BY transition"""),
         (start_date, end_date, horizon_days - 1),
     ).fetchall()
     cohorts = {row["transition"]: {"n": row["n"], "distinct_symbols": row["symbols"], "distinct_event_days": row["event_days"],
@@ -289,6 +338,7 @@ def research_post_close_backtest(connection: Any, start_date: date, end_date: da
     for an exhaustive (slow) run.
     """
     from .post_close_structures import daily_base_structure, post_close_forming_structure, post_close_fresh_start_structure
+    tiered_sql = _tiered_sql_builder(connection)
 
     # This VM runs with a small fixed memory budget shared by Postgres and
     # every other service container. Fetching all ~5,600 symbols' bars for
@@ -298,17 +348,15 @@ def research_post_close_backtest(connection: Any, start_date: date, end_date: da
     SYMBOL_BATCH_SIZE = 400
 
     trading_dates = [row["trading_date"] for row in connection.execute(
-        """SELECT DISTINCT trading_date FROM quant.canonical_bars_daily
-             WHERE trading_date BETWEEN %s AND %s AND quality_status='fresh'
-               AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-             ORDER BY trading_date""",
+        tiered_sql(f"""WITH {_factorized_bars_cte()} SELECT DISTINCT trading_date FROM eligible_bars
+             WHERE trading_date BETWEEN %s AND %s
+             ORDER BY trading_date"""),
         (start_date, end_date),
     ).fetchall()]
     sampled_dates = trading_dates[::max(1, sample_every_n_days)]
     all_symbols = sorted(row["symbol"] for row in connection.execute(
-        """SELECT DISTINCT symbol FROM quant.canonical_bars_daily
-             WHERE trading_date BETWEEN %s AND %s AND quality_status='fresh'
-               AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')""",
+        tiered_sql(f"""WITH {_factorized_bars_cte()} SELECT DISTINCT symbol FROM eligible_bars
+             WHERE trading_date BETWEEN %s AND %s"""),
         (start_date, end_date),
     ).fetchall())
     symbol_batches = [all_symbols[index:index + SYMBOL_BATCH_SIZE] for index in range(0, len(all_symbols), SYMBOL_BATCH_SIZE)]
@@ -318,13 +366,15 @@ def research_post_close_backtest(connection: Any, start_date: date, end_date: da
         day_had_data = False
         for batch in symbol_batches:
             rows = connection.execute(
-                """SELECT symbol,trading_date,open,high,low,close,volume,amount,adj_factor,is_suspended,limit_up,limit_down
-                     FROM quant.canonical_bars_daily
-                    WHERE symbol=ANY(%s) AND trading_date<=%s AND trading_date>%s::date - (%s+15)
-                      AND quality_status='fresh'
-                      AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                    ORDER BY symbol,trading_date""",
-                (batch, as_of, as_of, lookback_days),
+                tiered_sql(f"""WITH {_factorized_bars_cte()} SELECT symbol,trading_date,open,high,low,close,volume,amount,persisted_adj_factor AS adj_factor,
+                         CASE WHEN persisted_adj_factor>0 THEN 'complete' ELSE 'absent' END AS adjustment_state,
+                         is_suspended,limit_up,limit_down
+                     FROM eligible_bars
+                    WHERE symbol=ANY(%s)
+                      AND trading_date>%s::date - (%s+15)
+                      AND trading_date<=%s::date + (%s*3+10)
+                    ORDER BY symbol,trading_date"""),
+                (batch, as_of, lookback_days, as_of, horizon_days),
             ).fetchall()
             grouped: dict[str, list[dict[str, Any]]] = {}
             for row in rows:
@@ -332,41 +382,29 @@ def research_post_close_backtest(connection: Any, start_date: date, end_date: da
             if not grouped:
                 continue
             day_had_data = True
-            entry_rows = {str(row["symbol"]): dict(row) for row in connection.execute(
-                """SELECT DISTINCT ON (symbol) symbol,open,is_suspended,limit_up FROM quant.canonical_bars_daily
-                     WHERE symbol=ANY(%s) AND trading_date>%s AND quality_status='fresh'
-                       AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                     ORDER BY symbol,trading_date""",
-                (batch, as_of),
-            ).fetchall()}
-            exit_rows_by_symbol = {str(row["symbol"]): row for row in connection.execute(
-                """SELECT symbol,close FROM (
-                       SELECT symbol,close,row_number() OVER (PARTITION BY symbol ORDER BY trading_date) rn
-                         FROM quant.canonical_bars_daily
-                        WHERE symbol=ANY(%s) AND trading_date>%s AND quality_status='fresh'
-                          AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                   ) ranked WHERE rn=%s""",
-                (batch, as_of, horizon_days),
-            ).fetchall()}
             for symbol, bars in grouped.items():
-                if bars[-1]["trading_date"] != as_of:
+                historical = [bar for bar in bars if bar["trading_date"] <= as_of]
+                if not historical or historical[-1]["trading_date"] != as_of:
                     continue
                 candidate_types: list[str] = []
-                if len(bars) >= 30 and daily_base_structure(bars[-30:]).get("status") == "ready":
+                if len(historical) >= 30 and daily_base_structure(historical[-30:]).get("status") == "ready":
                     candidate_types.append("base_ready_30d")
-                elif len(bars) >= 15 and post_close_forming_structure(bars).get("status") == "forming":
+                elif len(historical) >= 15 and post_close_forming_structure(historical).get("status") == "forming":
                     candidate_types.append("base_forming_15d")
-                if len(bars) >= 15 and post_close_fresh_start_structure(bars).get("status") == "started":
+                if len(historical) >= 15 and post_close_fresh_start_structure(historical).get("status") == "started":
                     candidate_types.append("fresh_start_15d")
                 if not candidate_types:
                     continue
-                entry = entry_rows.get(symbol)
-                exit_row = exit_rows_by_symbol.get(symbol)
+                future = [bar for bar in bars if bar["trading_date"] > as_of]
+                entry = future[0] if future else None
+                exit_row = future[horizon_days - 1] if len(future) >= horizon_days else None
                 if entry is None or exit_row is None or entry["is_suspended"]:
                     continue
                 if entry["limit_up"] and float(entry["open"]) >= float(entry["limit_up"]) * 0.999:
                     continue
-                candidate_return = float(exit_row["close"]) / float(entry["open"]) - 1
+                if entry["open"] is None or entry["adj_factor"] is None or exit_row["close"] is None or exit_row["adj_factor"] is None:
+                    continue
+                candidate_return = (float(exit_row["close"]) * float(exit_row["adj_factor"])) / (float(entry["open"]) * float(entry["adj_factor"])) - 1
                 for candidate_type in candidate_types:
                     outcomes_by_type[candidate_type].append(candidate_return)
         if day_had_data:

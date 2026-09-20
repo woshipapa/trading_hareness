@@ -70,7 +70,12 @@ PRODUCT_NOTICE = "认真一手咸鱼店铺：餐厅焦糖味的momo，其他都�
 IMAGE_SHOP_WATERMARK = "咸鱼店铺：餐厅焦糖味的momo"
 MAX_FEISHU_TEXT_CHARS = 28000
 MAX_PRODUCT_IMAGE_CHARS = 5000
-EXTERNAL_LINK_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+# Stop at JSON/HTML quoting as well as whitespace.  Itougu video metadata can
+# be embedded inline as JSON, where an m3u8 URL is immediately followed by
+# `","videoName"...`; treating the whole non-whitespace run as the URL makes
+# Feishu render all following metadata as part of the hyperlink.
+EXTERNAL_LINK_RE = re.compile(r"(?:https?://|www\.)[^\s\"'<>]+", re.IGNORECASE)
+VIDEO_URL_RE = re.compile(r"https?://[^\s\"'<>\\]+?\.m3u8", re.IGNORECASE)
 WATERMARK_SECRET_FILE = Path(os.environ.get(
     "ITOUGU_WATERMARK_SECRET_FILE", str(STATE_FILE.with_name(STATE_FILE.name + ".watermark-secret"))))
 _DEFAULT_WATERMARK_FONTS = (
@@ -186,6 +191,11 @@ def build_link_post(title, text):
             elements.append({"tag": "text", "text": body[cursor:match.start()]})
         raw_url = match.group(0)
         url = raw_url.rstrip(".,;:!?)]}，。；：！？）》】")
+        # Inline Itougu metadata may continue with `videoId` after the URL.
+        # Keep the media hyperlink bounded at the playlist suffix.
+        m3u8_end = url.lower().find(".m3u8")
+        if m3u8_end >= 0:
+            url = url[:m3u8_end + len(".m3u8")]
         if url:
             href = url if re.match(r"^https?://", url, re.IGNORECASE) else "https://" + url
             elements.append({"tag": "a", "text": url, "href": href})
@@ -654,6 +664,53 @@ def report_line(it):
     return " ".join(bits)
 
 
+def _video_url_and_info(it):
+    """Find Itougu video metadata across old and new response shapes."""
+    candidates = []
+    for key in ("videoInfo", "video_info"):
+        if it.get(key) is not None:
+            candidates.append(it.get(key))
+    # Newer responses sometimes flatten video metadata at item level.
+    candidates.append(it)
+    for key in ("content", "contentHtml", "content_html", "body", "text", "description"):
+        value = it.get(key)
+        if isinstance(value, str):
+            candidates.append(value)
+
+    info = {}
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            normalized = candidate.replace(r"\/", "/")
+            try:
+                decoded = json.loads(normalized)
+            except (TypeError, json.JSONDecodeError):
+                decoded = None
+            if isinstance(decoded, dict):
+                candidates.append(decoded)
+            match = VIDEO_URL_RE.search(normalized)
+            if match and "url" not in info:
+                info["url"] = match.group(0)
+            continue
+        if not isinstance(candidate, dict):
+            continue
+        for key in ("videoUrl", "videoURL", "url"):
+            value = candidate.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized = value.replace(r"\/", "/").strip()
+                match = VIDEO_URL_RE.search(normalized)
+                if match:
+                    info["url"] = match.group(0)
+                    break
+        for key in ("videoName", "video_name", "name"):
+            if candidate.get(key) and "name" not in info:
+                info["name"] = str(candidate[key]).strip()
+        if candidate.get("videoId") and "video_id" not in info:
+            info["video_id"] = str(candidate["videoId"])
+        if info.get("url"):
+            return info
+    return info
+
+
 def video_line(it):
     """Return a text-only link for an attached Itougu replay video.
 
@@ -661,32 +718,20 @@ def video_line(it):
     across product versions.  We intentionally forward only the public URL
     and title; the relay never downloads or proxies the media bytes.
     """
-    info = it.get("videoInfo") or it.get("video_info")
-    if isinstance(info, str):
-        try:
-            info = json.loads(info)
-        except (TypeError, json.JSONDecodeError):
-            info = None
-    if not isinstance(info, dict):
+    info = _video_url_and_info(it)
+    if not info.get("url"):
         return ""
-    url = str(info.get("videoUrl") or info.get("videoURL") or info.get("url") or "").strip()
-    if not url or not re.match(r"^https?://", url, re.IGNORECASE):
-        return ""
-    title = str(info.get("videoName") or info.get("name") or "复盘视频").strip()
+    url = info["url"]
+    title = info.get("name") or str(it.get("videoName") or "复盘视频").strip()
     return "〔复盘视频〕%s：%s" % (title, url)
 
 
 def video_task(it, product_name):
     """Build a small, secret-free task for the owner media worker."""
-    info = it.get("videoInfo") or it.get("video_info")
-    if isinstance(info, str):
-        try:
-            info = json.loads(info)
-        except (TypeError, json.JSONDecodeError):
-            info = None
-    if not isinstance(info, dict):
+    info = _video_url_and_info(it)
+    if not info.get("url"):
         return None
-    url = str(info.get("videoUrl") or info.get("videoURL") or info.get("url") or "").strip()
+    url = info["url"]
     if not url or not re.match(r"^https://voss\.itougu\.com/", url, re.IGNORECASE):
         return None
     return {
@@ -694,8 +739,8 @@ def video_task(it, product_name):
         "append_content_id": str(it.get("appendContentId") or ""),
         "product": product_name,
         "published_at": it.get("publishTime") or it.get("createTime") or "",
-        "video_name": str(info.get("videoName") or info.get("name") or "复盘视频"),
-        "video_id": str(it.get("videoId") or info.get("videoId") or ""),
+        "video_name": str(info.get("name") or it.get("videoName") or "复盘视频"),
+        "video_id": str(it.get("videoId") or info.get("video_id") or ""),
         "url": url,
     }
 
@@ -788,6 +833,9 @@ def feishu_token():
 _feishu_webhook_map_lock = threading.Lock()
 _feishu_webhook_map_value = None
 _feishu_webhook_map_raw = None
+_feishu_webhook_keyword_map_lock = threading.Lock()
+_feishu_webhook_keyword_map_value = None
+_feishu_webhook_keyword_map_raw = None
 
 
 def _feishu_webhook_map():
@@ -816,6 +864,47 @@ def _feishu_webhook_map():
 
 def _feishu_webhook_url(chat_id):
     return _feishu_webhook_map().get(str(chat_id or "").strip())
+
+
+def _feishu_webhook_keyword_map():
+    """Parse optional per-target webhook keywords."""
+    raw = os.environ.get("ITOUGU_FEISHU_WEBHOOK_KEYWORDS", "")
+    global _feishu_webhook_keyword_map_value, _feishu_webhook_keyword_map_raw
+    with _feishu_webhook_keyword_map_lock:
+        if raw == _feishu_webhook_keyword_map_raw and _feishu_webhook_keyword_map_value is not None:
+            return _feishu_webhook_keyword_map_value
+        mapping = {}
+        for pair in raw.split(";"):
+            pair = pair.strip()
+            if not pair or "=" not in pair:
+                continue
+            chat_id, keyword = pair.split("=", 1)
+            chat_id, keyword = chat_id.strip(), keyword.strip()
+            if chat_id and keyword:
+                mapping[chat_id] = keyword
+        _feishu_webhook_keyword_map_value, _feishu_webhook_keyword_map_raw = mapping, raw
+        return mapping
+
+
+def _webhook_content_with_keyword(msg_type, content, chat_id):
+    """Put a target's custom-bot keyword into the visible webhook payload."""
+    keyword = _feishu_webhook_keyword_map().get(str(chat_id or "").strip())
+    if not keyword:
+        return content
+    output = json.loads(json.dumps(content, ensure_ascii=False))
+    if msg_type == "post":
+        for locale in output.values() if isinstance(output, dict) else []:
+            if not isinstance(locale, dict) or not isinstance(locale.get("content"), list):
+                continue
+            if any(keyword in str(item.get("text", "")) for row in locale["content"] if isinstance(row, list) for item in row if isinstance(item, dict)):
+                continue
+            locale["title"] = "%s · %s" % (keyword, locale.get("title", "")) if locale.get("title") else keyword
+        return output
+    if msg_type == "interactive":
+        elements = output.get("body", {}).get("elements") if isinstance(output, dict) else None
+        if isinstance(elements, list) and keyword not in json.dumps(elements, ensure_ascii=False):
+            elements.insert(0, {"tag": "div", "text": {"tag": "plain_text", "content": keyword}})
+    return output
 
 
 def _post_via_feishu_webhook(url, msg_type, content):
@@ -848,7 +937,6 @@ def send_feishu(chat_id, title, text, dedup_seed):
     # build_product_card / watermark_id stay defined (the edge deploy contract
     # check in deploy-itougu-neican.sh still exercises them directly) but are
     # no longer called from here.
-    token = feishu_token()
     chunks = message_chunks_for_destination(chat_id, text, dedup_seed)
     for idx, chunk in enumerate(chunks):
         t = title if idx == 0 else "%s（续 %d/%d）" % (title, idx + 1, len(chunks))
@@ -856,8 +944,9 @@ def send_feishu(chat_id, title, text, dedup_seed):
         content = build_link_post(t, chunk)
         webhook_url = _feishu_webhook_url(chat_id)
         if webhook_url:
-            _post_via_feishu_webhook(webhook_url, msg_type, content)
+            _post_via_feishu_webhook(webhook_url, msg_type, _webhook_content_with_keyword(msg_type, content, chat_id))
             continue
+        token = feishu_token()
         body = json.dumps({
             "receive_id": chat_id, "msg_type": msg_type,
             "content": json.dumps(content, ensure_ascii=False),

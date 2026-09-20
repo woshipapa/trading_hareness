@@ -20,6 +20,7 @@ from psycopg.types.json import Json
 
 from .analysis import as_utc
 from .daily_bar_repository import exchange_for
+from .instrument_registry import InstrumentRecord, ensure_instruments
 from .market_flow_features import market_event_identity_key
 
 
@@ -205,11 +206,13 @@ def persist_market_events(database: Any, provider: str, rows: list[dict[str, Any
     if not keyed and not content_keyed:
         return 0
     with database.transaction() as connection:
+        ensure_instruments(
+            connection,
+            [InstrumentRecord(symbol=symbol, exchange=exchange, source=instrument_source)
+             for symbol, exchange, instrument_source in instruments.values()],
+            source=provider,
+        )
         with connection.cursor() as cursor:
-            cursor.executemany(
-                "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,%s) ON CONFLICT(symbol) DO NOTHING",
-                list(instruments.values()),
-            )
             if keyed:
                 cursor.executemany(
                     """INSERT INTO quant.market_events(

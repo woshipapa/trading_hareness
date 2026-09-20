@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from psycopg.types.json import Json
 
 from .datasources.catalog import NON_SECTOR_GROUPS, NON_SECTOR_LABEL_PATTERN
+from .instrument_registry import InstrumentRecord, ensure_instruments
 
 
 PROVIDER_INTERVAL = "provider_interval"
@@ -95,14 +96,21 @@ def persist_ths_snapshot(
 ) -> int:
     """Store one complete THS constituent response with explicit time basis."""
     active_members: set[str] = set()
+    instrument_rows: list[InstrumentRecord] = []
+    parsed_rows: list[tuple[dict[str, Any], str, date, date | None, str, str]] = []
     for row in rows:
         symbol = str(row.get("con_code") or "").upper()
         if len(symbol) != 9 or symbol[6:] not in {".SH", ".SZ", ".BJ"} or not symbol[:6].isdigit():
             continue
-        ensure_instrument(connection, symbol)
         effective_from, effective_to, from_basis, to_basis = membership_interval(
             row, observed_at, parse_date=parse_date,
         )
+        instrument_rows.append(InstrumentRecord(
+            symbol=symbol, exchange=symbol.rsplit(".", 1)[-1], source=provider_key,
+        ))
+        parsed_rows.append((row, symbol, effective_from, effective_to, from_basis, to_basis))
+    ensure_instruments(connection, instrument_rows, source=provider_key)
+    for row, symbol, effective_from, effective_to, from_basis, to_basis in parsed_rows:
         connection.execute(
             """INSERT INTO quant.sector_membership_history(
                    taxonomy_key,sector_key,symbol,effective_from,effective_to,provider_key,
@@ -145,11 +153,22 @@ def persist_observed_snapshot(
     members: set[str] = set()
     stored = 0
     effective_from = observed_exchange_date(observed_at)
+    parsed_rows: list[tuple[dict[str, Any], str]] = []
     for row in rows:
         symbol = member_symbol(row)
         if not symbol:
             continue
-        ensure_instrument(connection, symbol, row)
+        parsed_rows.append((row, symbol))
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(
+            symbol=symbol, exchange=symbol.rsplit(".", 1)[-1],
+            name=str(row.get("名称") or row.get("name") or "").strip() or None,
+            source=provider_key,
+        ) for row, symbol in parsed_rows],
+        source=provider_key, update_existing=True,
+    )
+    for row, symbol in parsed_rows:
         connection.execute(
             """INSERT INTO quant.sector_membership_history(
                    taxonomy_key,sector_key,symbol,effective_from,effective_to,provider_key,
@@ -197,13 +216,16 @@ def persist_observed_snapshot_batched(
     if not members:
         return 0
     effective_from = observed_exchange_date(observed_at)
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(
+            symbol=symbol, exchange=symbol.rsplit(".", 1)[-1],
+            name=str(row.get("name") or "").strip() or None,
+            source=instrument_source,
+        ) for symbol, row in members.items()],
+        source=instrument_source,
+    )
     with connection.cursor() as cursor:
-        cursor.executemany(
-            """INSERT INTO quant.instruments(symbol,exchange,name,source) VALUES(%s,%s,%s,%s)
-               ON CONFLICT(symbol) DO NOTHING""",
-            [(symbol, symbol.rsplit(".", 1)[-1], str(row.get("name") or "").strip() or None, instrument_source)
-             for symbol, row in members.items()],
-        )
         cursor.executemany(
             """INSERT INTO quant.sector_membership_history(
                    taxonomy_key,sector_key,symbol,effective_from,effective_to,provider_key,

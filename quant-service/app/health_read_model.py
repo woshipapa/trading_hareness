@@ -79,6 +79,8 @@ class HealthDependencies:
     release_metadata: Callable[[], dict[str, str | None]] | None = None
     post_close_runtime_status: Callable[[], dict[str, Any]] | None = None
     raw_overflow_status: Callable[[Any], dict[str, Any]] | None = None
+    owner_storage_status: Callable[[Any], dict[str, Any]] | None = None
+    owner_deploy_status: Callable[[Any], dict[str, Any]] | None = None
 
 
 def runtime_loops_with_lease_heartbeats(
@@ -142,6 +144,8 @@ def health_payload(deps: HealthDependencies) -> dict[str, Any]:
                  WHERE lease_key LIKE 'background_loop:%' AND expires_at > now()
                  ORDER BY lease_key"""
         ).fetchall()
+        owner_storage = deps.owner_storage_status(connection) if deps.owner_storage_status else None
+        owner_deploy = deps.owner_deploy_status(connection) if deps.owner_deploy_status else None
     deps.set_open_circuit_gauge(int(open_circuits))
     resources = deps.resource_status(deps.data_directory())
     if deps.research_storage_governance is not None:
@@ -154,6 +158,8 @@ def health_payload(deps: HealthDependencies) -> dict[str, Any]:
         "async_database_pool": async_pool,
         "async_pool_watchdog": deps.async_pool_watchdog_status() if deps.async_pool_watchdog_status else {},
         "resources": resources,
+        "owner_storage": owner_storage,
+        "owner_deploy": owner_deploy,
         "runtime_leases": {
             "background_loop_lease_seconds": loop_lease_seconds,
             "post_close_refresh": {

@@ -91,6 +91,31 @@ Itougu 轮询服务使用独立的持久化环境 `/etc/itougu-neican.env`，不
 
 不直接 cherry-pick 或部署 PR #18，不替换 47 上当前已验证的 `larkx` WebSocket 客户端。PR 的独立图片解密思路已兼容移植；post 富文本则额外从 `RichTextElement.property` 提取密钥并走同一资源桥。对于缺少完整参数的消息，仍保留 OAuth 精确补读作为安全兜底。
 
+## 2026-09-16 P0/P1 借鉴增强
+
+本轮将 `feishu-user-plugin` 的事件日志/消费游标和
+`feishu-message-2API` 的 Profile 隔离思路落到 bridge，而不是继续依赖进程内
+重试：
+
+- `integrations/larkagentx/event_spool.py` 使用本地 SQLite 保存规范化事件，
+  入站 HTTP 之前先落盘；事件有递增 sequence、连续 drain cursor、
+  `queued/processing/delivered/failed` 状态、lease、有限重试和启动后回放。
+  单条 payload 上限 512 KiB，目录/文件权限为 0700/0600，不保存 Cookie 或
+  原始 protobuf frame。
+- `integrations/larkagentx/owner_lock.py` 为每个 Profile 提供 Unix exclusive
+  owner lock，同一凭证目录只能有一个 bridge 持有个人 WebSocket；第二实例
+  fail-closed，不会形成两个消费者。
+- `LARKX_PROFILE` 将 credentials、event spool 和 owner lock 分到独立目录；
+  health 公开 profile、owner、pending/failed、回放次数和最近错误，仍不输出
+  token、Cookie 或事件原文。
+- WebSocket 仍由当前 LarkAgentX 主客户端负责，官方 OAuth 缺口补读仍是 P1
+  恢复路径；spool 回放只重投已经成功解码的事件，最终重复判断仍由 adapter
+  relay ledger 完成。
+
+新增测试覆盖 SQLite 事件幂等、lease/replay、payload 上限、Profile 路径隔离
+和 owner 排他锁；hotfix overlay 的 AST/import/file gate 也会检查新模块，避免
+只上传 `bridge.py` 而漏掉依赖。
+
 ## 2026-09-16 执行记录
 
 本轮按“协议兼容 → 消息隔离 → 内容 fail-closed → 恢复 → 发布验证”的顺序执行；每一步均独立提交：

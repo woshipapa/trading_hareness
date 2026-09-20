@@ -10,6 +10,8 @@ from uuid import UUID
 import psycopg
 from psycopg.types.json import Jsonb
 
+from .instrument_registry import InstrumentRecord, ensure_instruments
+
 
 class LegacyStockBrainRepository:
     def __init__(self) -> None:
@@ -20,6 +22,7 @@ class LegacyStockBrainRepository:
             user=os.getenv("PGUSER", "quant_app"),
             password=os.getenv("PGPASSWORD", ""),
             connect_timeout=10,
+            application_name=os.getenv("QUANT_APPLICATION_NAME", "peer-legacy-stock-brain"),
             autocommit=True,
         )
 
@@ -143,20 +146,14 @@ class LegacyStockBrainRepository:
     def upsert_instruments(cursor: psycopg.Cursor, rows: Sequence[Mapping[str, Any]]) -> None:
         if not rows:
             return
-        deduped = {row["symbol"]: row for row in rows if row.get("symbol")}
-        cursor.execute("""CREATE TEMP TABLE IF NOT EXISTS stock_brain_instrument_stage(
-            symbol text,exchange text,name text,source text
-        ) ON COMMIT DELETE ROWS""")
-        cursor.execute("TRUNCATE stock_brain_instrument_stage")
-        with cursor.copy("COPY stock_brain_instrument_stage(symbol,exchange,name,source) FROM STDIN") as copy:
-            for row in deduped.values():
-                copy.write_row((row["symbol"], row["exchange"], row.get("name"), row.get("source", "stock-brain")))
-        cursor.execute("""INSERT INTO quant.instruments(symbol,exchange,name,source)
-            SELECT symbol,exchange,name,source FROM stock_brain_instrument_stage
-            ON CONFLICT(symbol) DO UPDATE SET
-                exchange=CASE WHEN quant.instruments.exchange IN ('','UNKNOWN')
-                              THEN excluded.exchange ELSE quant.instruments.exchange END,
-                name=coalesce(NULLIF(excluded.name,''),quant.instruments.name),updated_at=now()""")
+        ensure_instruments(
+            cursor,
+            [InstrumentRecord(
+                symbol=str(row["symbol"]).strip().upper(), exchange=str(row["exchange"]).strip().upper(),
+                name=row.get("name"), source=str(row.get("source") or "stock-brain"),
+            ) for row in rows if row.get("symbol")],
+            update_existing=True,
+        )
 
     @staticmethod
     def upsert_money_flows(cursor: psycopg.Cursor, rows: Sequence[Mapping[str, Any]]) -> None:

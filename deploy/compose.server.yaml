@@ -120,6 +120,35 @@ services:
       retries: 8
       start_period: 15s
 
+  quant-research-worker:
+    image: n8n-quant-research:server
+    profiles: ["research-worker"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "app.research_model_training_worker"]
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: n8n
+      PGUSER: n8n
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      QUANT_DATA_DIR: /var/lib/quant
+      QUANT_BACKGROUND_TASKS_ENABLED: "false"
+      QUANT_RUNTIME_PROFILE: research
+    volumes:
+      - quant_data:/var/lib/quant
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 4g
+    cpus: 2.0
+    pids_limit: 256
+
   # Stable internal caller address. Its sole backend file can be validated and
   # hot-reloaded after a no-lease preflight instance has passed health checks.
   quant-research-gateway:

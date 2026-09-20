@@ -16,6 +16,18 @@ test('filters interactive card text before media or relay work', () => {
 	assert.match(blockedMessageReason(message), /扫码|联系客服/);
 });
 
+test('filters promotional text inside LarkAgentX schema 2.0 property wrappers', () => {
+	const message = {
+		msg_type: 'interactive',
+		body: { content: JSON.stringify({
+			body: { elements: [{ tag: 'markdown', property: { elements: [{ tag: 'plain_text', property: { content: '请加微信领取资料' } }] } }] },
+			newBody: { tag: 'body', property: { elements: [] } },
+		}) },
+	};
+	assert.equal(messageFilterText(message), '请加微信领取资料');
+	assert.match(blockedMessageReason(message), /加微信/);
+});
+
 test('does not filter ordinary analyst content', () => {
 	assert.equal(blockedMessageReason({ msg_type: 'text', body: { content: JSON.stringify({ text: '#anqiang\n今日指数缩量震荡' }) } }), null);
 });

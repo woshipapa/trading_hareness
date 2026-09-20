@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -32,6 +33,27 @@ class PublicArticleRelayTests(unittest.TestCase):
         self.assertIn("观点一", digest["text"])
         self.assertIn("观点二", digest["text"])
 
+    def test_view_content_key_is_stable_when_view_id_changes(self):
+        first = {"viewId": "v1", "content": "同一条公开观点"}
+        second = {"viewId": "v2", "content": "同一条公开观点"}
+        self.assertEqual(relay.view_content_key(first), relay.view_content_key(second))
+
+    def test_same_article_with_new_view_id_is_sent_once(self):
+        today = relay.datetime.now(relay.NEICAN.CST).strftime("%Y-%m-%d")
+        rows = [
+            {"viewId": "v1", "articleId": "a1", "publicTime": today + " 09:00:00"},
+            {"viewId": "v2", "articleId": "a1", "publicTime": today + " 09:00:01"},
+        ]
+        article = {"isExist": 1, "circleId": "1661937625084334080", "title": "同一文章", "content": "正文"}
+        with mock.patch.object(relay, "STATE_FILE", Path(self.id().replace(".", "_") + ".json")), \
+             mock.patch.object(relay, "fetch_views", return_value=rows), \
+             mock.patch.object(relay, "fetch_article", return_value=article), \
+             mock.patch.object(relay.NEICAN, "send_feishu_many") as send:
+            try:
+                self.assertEqual(relay.poll_views(), 1)
+                send.assert_called_once()
+            finally:
+                Path(relay.STATE_FILE).unlink(missing_ok=True)
 
 if __name__ == "__main__":
     unittest.main()

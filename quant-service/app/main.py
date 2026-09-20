@@ -3,6 +3,7 @@ import asyncio
 import functools
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -56,12 +57,14 @@ from .analysis import as_utc
 from .capability_registry import api_capability
 from .database import AsyncDatabase, Database
 from .daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload as daily_control_plane_status_payload
+from .owner_factor_repository import read_persisted_factor_controls, read_persisted_factor_window
 from .async_provider_circuit_repository import open_capabilities as read_async_open_provider_capabilities
 from .async_provider_circuit_repository import open_provider_keys as read_async_open_provider_keys
 from .async_market_session_repository import realtime_market_session as read_async_realtime_market_session
 from .async_market_session_repository import sse_calendar_open as read_async_sse_calendar_open
 from .async_market_session_repository import sse_calendar_status as read_async_sse_calendar_status
 from .daily_bar_repository import exchange_for, provider_priority, upsert_daily_bar, upsert_daily_bars
+from .instrument_registry import InstrumentRecord, ensure_instrument as ensure_registry_instrument, ensure_instruments as ensure_registry_instruments
 from .sector_membership_repository import (
     persist_observed_snapshot as persist_observed_sector_snapshot,
     persist_ths_snapshot as persist_ths_sector_snapshot,
@@ -475,6 +478,8 @@ from .runtime_resources import (
 )
 from .edge_evidence_transfer import read_live_session_acceptance
 from .research_storage_admission import ResearchStorageAdmission, governance as research_storage_governance_isolated
+from .owner_storage import owner_runtime_schema_status
+from .owner_deploy_events import owner_deploy_status
 from .async_pool_watchdog import AsyncPoolWatchdogState, watchdog_loop as async_pool_watchdog_loop
 from .health_read_model import DatabaseUnavailableError, HealthDependencies, health_payload as read_health_payload
 from .paper_order_bridge import STAGE as PAPER_AUTO_STAGE
@@ -492,6 +497,7 @@ from .stock_study_readiness_repository import (
 )
 from .intraday_status_read_model import IntradayStatusDependencies, intraday_services_status_payload as read_intraday_services_status_payload, intraday_services_status_payload_async as read_intraday_services_status_payload_async
 from .routers.provider_status import build_provider_status_router
+from .routers.owner_storage import build_owner_storage_router
 from .routers.longhu_reads import build_longhu_reads_router
 from .routers.licensed_stock_api import build_licensed_stock_api_router
 from .routers.longhu_capabilities import build_longhu_capabilities_router
@@ -789,6 +795,9 @@ from .tushare_providers import (
 from .universe_history import sync_universe_membership_history
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 db = Database()
 async_db = AsyncDatabase(db)
 _remote_archive_actions = RemoteArchiveActions(
@@ -1006,7 +1015,11 @@ def recompute_scorecards(as_of_date: date | None = None) -> dict[str, Any]:
     return recompute_scorecards_isolated(as_of_date, cn_today=cn_today, db=db, readiness=analyst_scorecard_readiness)
 
 
-FEATURE_VERSION = "multi-source-feature-v3"
+# Owner release 20260919T160546 switched recommendation snapshots to the
+# current-session close contract.  The snapshot repository already reads the
+# latest point-in-time bar at ``as_of_date``; keep the version explicit so old
+# v3 snapshots are never silently mixed with the new recommendation model.
+FEATURE_VERSION = "multi-source-feature-v4"
 MODEL_VERSION = "multi-source-direction-v1"
 ANALYST_TEXT_FACTOR_VERSION = DEFAULT_FACTOR_VERSION
 
@@ -1395,28 +1408,20 @@ def tushare_date(value: Any) -> date | None:
     return None
 
 
-def ensure_tushare_instrument(connection: Any, symbol: str) -> None:
-    connection.execute(
-        "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'tushare') ON CONFLICT(symbol) DO NOTHING",
-        (symbol, exchange_for(symbol)),
-    )
+def ensure_tushare_instrument(connection: Any, symbol: str, *, source: str = "tushare",
+                              update_existing: bool = False) -> None:
+    ensure_registry_instrument(connection, symbol, source=source, update_existing=update_existing)
 
 
-def ensure_tushare_instruments(connection: Any, symbols: list[str]) -> None:
+def ensure_tushare_instruments(connection: Any, symbols: list[str], *, source: str = "tushare",
+                               update_existing: bool = False) -> None:
     """Same placeholder rows as the per-symbol call, in one batched statement.
 
     The insert is ``ON CONFLICT DO NOTHING``, so it is idempotent and order
     independent; grouping it changes nothing but the number of round trips,
     which a full-market cross-section pays 5,500 of.
     """
-    distinct = list(dict.fromkeys(symbols))
-    if not distinct:
-        return
-    with connection.cursor() as cursor:
-        cursor.executemany(
-            "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'tushare') ON CONFLICT(symbol) DO NOTHING",
-            [(symbol, exchange_for(symbol)) for symbol in distinct],
-        )
+    ensure_registry_instruments(connection, symbols, source=source, update_existing=update_existing)
 
 
 def offline_data_root() -> Path:
@@ -1629,7 +1634,12 @@ def full_market_daily_control_status() -> dict[str, Any]:
 
 
 async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
-    """Fill same-date adjustment, limit and suspension controls after daily sync."""
+    """Fill same-date controls using the owner's persisted factor task output."""
+    async def persisted_factors(as_of: date, _expected_rows: int) -> Any:
+        return await run_database_blocking(
+            lambda: _read_persisted_factor_controls(as_of), timeout_seconds=30,
+        )
+
     return await sync_full_market_daily_controls_isolated(
         trade_date,
         expected_daily_rows=full_market_daily_row_count,
@@ -1644,7 +1654,13 @@ async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
         record_provider_success=record_provider_success,
         record_provider_failure=record_provider_failure,
         record_provider_api_capability=record_provider_api_capability,
+        read_persisted_factor_controls=persisted_factors,
     )
+
+
+def _read_persisted_factor_controls(trade_date: date) -> dict[str, Any]:
+    with db.transaction() as connection:
+        return read_persisted_factor_controls(connection, trade_date)
 
 
 def upsert_sector_taxonomy(connection: Any, taxonomy_key: str, label: str, provider_key: str, metadata: dict[str, Any]) -> None:
@@ -1695,11 +1711,11 @@ def persist_eastmoney_sector_members(connection: Any, taxonomy_key: str, sector_
                                      available_at: datetime) -> int:
     """Persist a current-snapshot response with its real observation date."""
     def ensure_instrument(connection: Any, symbol: str, row: dict[str, Any]) -> None:
-        connection.execute(
-            "INSERT INTO quant.instruments(symbol,exchange,name,source) VALUES(%s,%s,%s,'akshare') "
-            "ON CONFLICT(symbol) DO UPDATE SET name=coalesce(EXCLUDED.name,quant.instruments.name),updated_at=now()",
-            (symbol, exchange_for(symbol), str(row.get("名称") or row.get("name") or "").strip() or None),
-        )
+        ensure_registry_instruments(connection, [InstrumentRecord(
+            symbol=symbol, exchange=exchange_for(symbol),
+            name=str(row.get("名称") or row.get("name") or "").strip() or None,
+            source="akshare",
+        )], update_existing=True)
 
     return persist_observed_sector_snapshot(
         connection, taxonomy_key, sector_key, rows, "akshare", available_at,
@@ -2508,19 +2524,29 @@ WATCHLIST_FACTOR_MODEL_VERSION = "qlib-lean-watchlist-v1"
 
 
 async def hydrate_watchlist_history(watchlist_id: uuid.UUID, symbol: str) -> dict[str, Any]:
-    """Fetch bounded history on pool registration and persist factor evidence."""
+    """Fetch bounded history while reading factors from the owner projection."""
     end_date = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     start_date = end_date - timedelta(days=45)
     dated = {"ts_code": symbol, "start_date": start_date.strftime("%Y%m%d"), "end_date": end_date.strftime("%Y%m%d")}
     daily_result = await sync_tushare(TushareSyncRequest(symbols=[symbol], start_date=start_date, end_date=end_date))
     supplemental = await asyncio.gather(
-        stock_study_fetch("watchlist_adj_factor", TushareFetchRequest(api_name="adj_factor", params=dated, max_rows=60)),
         stock_study_fetch("watchlist_daily_basic", TushareFetchRequest(api_name="daily_basic", params=dated, max_rows=60)),
         stock_study_fetch("watchlist_moneyflow", TushareFetchRequest(api_name="moneyflow", params=dated, max_rows=60)),
         stock_study_fetch("watchlist_moneyflow_dc", TushareFetchRequest(api_name="moneyflow_dc", params=dated, max_rows=60)),
     )
-    source_status = {"daily": daily_result, **{item[0]["source"]: item[0] for item in supplemental}}
     factors = await run_database_blocking(watchlist_daily_factors, symbol)
+    source_status = {
+        "daily": daily_result,
+        "owner_persisted_adjustment_factor": {
+            "source": "owner persisted adjustment factor",
+            "api_name": "adj_factor",
+            "provider": "owner_persisted_adjustment_factor",
+            "status": "completed" if factors.get("factor_ready") else "blocked",
+            "received": int(factors.get("bar_count") or 0),
+            "stored": 0,
+        },
+        **{item[0]["source"]: item[0] for item in supplemental},
+    }
     daily_ok = daily_result.get("status") in {"completed", "partial", "unchanged"} and int(factors.get("bar_count") or 0) >= 21
     supplemental_ok = sum(1 for item, _ in supplemental if item.get("status") in {"completed", "partial", "unchanged"})
     status = "completed" if daily_ok and supplemental_ok >= 2 else "partial" if daily_ok else "failed"
@@ -4414,6 +4440,12 @@ def stock_study_claims(symbol: str) -> tuple[list[dict[str, Any]], dict[str, Any
 
 
 async def build_stock_study(symbol: str, request: StockStudyRequest) -> dict[str, Any]:
+    async def persisted_factors(stock: str, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        def read() -> list[dict[str, Any]]:
+            with db.transaction() as connection:
+                return read_persisted_factor_window(connection, stock, start_date, end_date)
+        return await run_database_blocking(read, timeout_seconds=30)
+
     return await build_stock_study_isolated(
         symbol, request,
         StockStudyDependencies(
@@ -4427,18 +4459,35 @@ async def build_stock_study(symbol: str, request: StockStudyRequest) -> dict[str
             persist_announcement_health=persist_announcement_provider_health, technical_summary=technical_summary,
             analyst_claims=stock_study_claims, recent_events=recent_market_events,
             window_readiness=stock_window_readiness, latest_row=latest_study_row,
+            read_persisted_factors=persisted_factors,
         ),
     )
 
 
 async def sync_tushare_daily_core(as_of_date: date, requested_symbols: list[str] | None = None) -> dict[str, Any]:
     """Compatibility adapter for explicit-symbol, same-day controls only."""
+    async def persisted_factors(day: date, symbols: list[str]) -> dict[str, Any]:
+        def read() -> dict[str, Any]:
+            with db.transaction() as connection:
+                payload = read_persisted_factor_controls(connection, day, symbols)
+            rows = payload["rows"]
+            return {
+                "api_name": "adj_factor",
+                "status": "completed" if len(rows) == len(symbols) else "blocked",
+                "source": payload["source"],
+                "providers": payload["providers"],
+                "rows": rows,
+                "symbols": symbols,
+            }
+        return await run_database_blocking(read, timeout_seconds=30)
+
     return await sync_core_daily_controls_isolated(
         as_of_date, requested_symbols,
         CoreDailyControlDependencies(
             resolve_symbols=resolve_sync_symbols_async,
             fetch_catalog=fetch_tushare_catalog,
             request=TushareFetchRequest,
+            read_persisted_factors=persisted_factors,
         ),
     )
 
@@ -4646,6 +4695,7 @@ async def executor_saturated_response(_: Request, __: ExecutorSaturatedError) ->
 
 
 app.include_router(build_provider_status_router(db, provider_status, free_provider_status, async_database=async_db))
+app.include_router(build_owner_storage_router(db, run_database_blocking))
 app.include_router(build_longhu_reads_router(
     configured=longhu_vendor_configured,
     shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
@@ -4773,14 +4823,24 @@ async def require_quant_write_key(request: Request, call_next: Any) -> Any:
     licensed_read = licensed_stock_read_allowed(
         request, os.getenv("QUANT_SHARED_READ_API_KEY", ""),
     )
-    if (
-        not write_access_allowed(request.method, supplied_key, configured_key)
-        and not remote_archive_sync_bearer_allowed(request)
-        and not licensed_read
-        and not raw_overflow_archive_allowed(request, configured_key)
-    ):
-        return JSONResponse(status_code=401, content={"detail": "valid X-Quant-Write-Key is required for write operations"})
-    return await call_next(request)
+    try:
+        if (
+            not write_access_allowed(request.method, supplied_key, configured_key)
+            and not remote_archive_sync_bearer_allowed(request)
+            and not licensed_read
+            and not raw_overflow_archive_allowed(request, configured_key)
+        ):
+            response = JSONResponse(status_code=401, content={"detail": "valid X-Quant-Write-Key is required for write operations"})
+        else:
+            response = await call_next(request)
+    except Exception:  # noqa: BLE001 - make otherwise silent 500s durable
+        LOGGER.exception("http request failed method=%s path=%s", request.method, request.url.path)
+        raise
+    if response.status_code >= 500:
+        LOGGER.error("http response error method=%s path=%s status=%s", request.method, request.url.path, response.status_code)
+    elif response.status_code >= 400:
+        LOGGER.warning("http client error method=%s path=%s status=%s", request.method, request.url.path, response.status_code)
+    return response
 
 
 def _health_payload() -> dict[str, Any]:
@@ -4828,7 +4888,9 @@ def _health_payload() -> dict[str, Any]:
             release_metadata=release_metadata,
             post_close_runtime_status=post_close_refresh_runtime.status,
             raw_overflow_status=raw_overflow_status,
-    ))
+            owner_storage_status=owner_runtime_schema_status,
+            owner_deploy_status=owner_deploy_status,
+        ))
 
 
 def _metrics_response() -> Response:

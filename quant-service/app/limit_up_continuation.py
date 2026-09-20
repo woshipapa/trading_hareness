@@ -68,8 +68,10 @@ def prior_session_limit_ups(connection: Any, as_of_date: date) -> list[dict[str,
     """
     rows = connection.execute(
         """WITH latest AS (
-             SELECT max(trading_date) AS trading_date FROM quant.canonical_bars_daily
+           SELECT max(trading_date) AS trading_date FROM quant.canonical_bars_daily
               WHERE trading_date <= %s AND volume > 0
+                AND quality_status='fresh'
+                AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
            )
            SELECT b.symbol, b.trading_date, b.close, b.limit_up, b.open, b.high, b.low,
                   b.volume, b.amount,
@@ -77,10 +79,14 @@ def prior_session_limit_ups(connection: Any, as_of_date: date) -> list[dict[str,
                   (SELECT count(*) FROM quant.canonical_bars_daily p
                     WHERE p.symbol = b.symbol AND p.trading_date <= b.trading_date
                       AND p.trading_date > b.trading_date - INTERVAL '20 days'
+                      AND p.quality_status='fresh'
+                      AND p.available_at < ((p.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                       AND p.limit_up IS NOT NULL AND p.close >= p.limit_up - 0.005
                   ) AS limit_ups_20d
              FROM quant.canonical_bars_daily b JOIN latest ON latest.trading_date = b.trading_date
             WHERE b.limit_up IS NOT NULL AND b.volume > 0
+              AND b.quality_status='fresh'
+              AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
               AND NOT coalesce(b.is_suspended, false)
               AND b.close >= b.limit_up - 0.005
             ORDER BY b.symbol""",

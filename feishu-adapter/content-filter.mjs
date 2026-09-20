@@ -24,7 +24,7 @@ function walkText(value, chunks) {
 	if (!value || typeof value !== 'object') return;
 	for (const [key, child] of Object.entries(value)) {
 		if (['text', 'title', 'content', 'markdown', 'plain_text', 'alt', 'href', 'url', 'name'].includes(key)) walkText(child, chunks);
-		else if (['header', 'body', 'elements', 'columns', 'fields', 'content_v2', 'note'].includes(key)) walkText(child, chunks);
+		else if (['header', 'body', 'newBody', 'elements', 'columns', 'fields', 'content_v2', 'note', 'property', 'markdownElements'].includes(key)) walkText(child, chunks);
 	}
 }
 
@@ -34,12 +34,14 @@ export function messageFilterText(message) {
 	return chunks.join('\n');
 }
 
-export function blockedMessageReason(message, { keywords = process.env.FEISHU_MESSAGE_BLOCK_KEYWORDS } = {}) {
+export function blockedMessageReason(message, { keywords = process.env.FEISHU_MESSAGE_BLOCK_KEYWORDS, skipKeywords = [] } = {}) {
 	const original = messageFilterText(message);
 	const normalized = normalizeFilterText(original);
 	if (!normalized) return null;
+	const skipped = new Set(skipKeywords.map((keyword) => normalizeFilterText(keyword)).filter(Boolean));
 	for (const keyword of parseKeywords(keywords)) {
 		const normalizedKeyword = normalizeFilterText(keyword);
+		if (skipped.has(normalizedKeyword)) continue;
 		if (normalizedKeyword && normalized.includes(normalizedKeyword)) return `命中过滤关键词：${keyword}`;
 	}
 	return null;

@@ -540,6 +540,7 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
 
         result, blocking = asyncio.run(check())
         self.assertEqual(result["status"], "completed")
+        self.assertIn("owner_persisted_adjustment_factor", result["source_status"])
         self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
             "watchlist_daily_factors", "persist_factor_snapshot",
         ])

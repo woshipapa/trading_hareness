@@ -29,7 +29,16 @@ EQUITY_DAILY_CONTROL_STATUS_SQL = """WITH latest AS (
         GROUP BY latest.trading_date
    ) SELECT expected.trading_date,expected.expected_daily_rows,
        count(DISTINCT bar.symbol)::int AS daily_rows,
-       count(DISTINCT bar.symbol) FILTER (WHERE bar.adj_factor IS NOT NULL)::int AS adjustment_rows,
+       count(DISTINCT bar.symbol) FILTER (WHERE EXISTS (
+           SELECT 1 FROM quant.daily_adjustment_factors factor
+            WHERE factor.symbol=bar.symbol
+              AND factor.trading_date=bar.trading_date
+              AND factor.adj_factor>0
+              AND factor.provider IN ('longhu_qfq_derived','tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup')
+              AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
+                   OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+              AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+       ))::int AS adjustment_rows,
        count(DISTINCT bar.symbol) FILTER (WHERE bar.limit_up IS NOT NULL AND bar.limit_down IS NOT NULL)::int AS limit_rows
      FROM expected
        LEFT JOIN quant.canonical_bars_daily bar

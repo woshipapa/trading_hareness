@@ -31,7 +31,7 @@ services:
       N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "900"
       N8N_RUNNERS_AUTH_TOKEN: ${N8N_ENCRYPTION_KEY}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
-      QUANT_SERVICE_URL: http://127.0.0.1:18110
+      QUANT_SERVICE_URL: ${QUANT_SERVICE_URL:-http://127.0.0.1:15682}
       QUANT_WRITE_API_KEY: ${QUANT_WRITE_API_KEY}
       REMOTE_ANALYST_ARCHIVE_BASE_URL: ${REMOTE_ANALYST_ARCHIVE_BASE_URL:-}
       TZ: Asia/Shanghai
@@ -86,7 +86,7 @@ services:
       INGESTION_RECONCILE_SECONDS: ${INGESTION_RECONCILE_SECONDS:-300}
       INGESTION_LEDGER_RETENTION_DAYS: ${INGESTION_LEDGER_RETENTION_DAYS:-90}
       INGESTION_MAX_FILE_BYTES: ${INGESTION_MAX_FILE_BYTES:-524288000}
-      QUANT_SERVICE_URL: http://127.0.0.1:18110
+      QUANT_SERVICE_URL: ${QUANT_SERVICE_URL:-http://127.0.0.1:15682}
       QUANT_WRITE_API_KEY: ${QUANT_WRITE_API_KEY}
       QUANT_ALERT_WEBHOOK_TOKEN: ${QUANT_ALERT_WEBHOOK_TOKEN:-}
       FEISHU_ALERT_RECEIVE_ID: ${FEISHU_ALERT_RECEIVE_ID:-}
@@ -110,6 +110,7 @@ services:
       FEISHU_GROUP_RELAY_XIAOJIE_CHAT_ID: ${FEISHU_GROUP_RELAY_XIAOJIE_CHAT_ID:-}
       FEISHU_GROUP_RELAY_XIAOJIE_CHAT_NAME: ${FEISHU_GROUP_RELAY_XIAOJIE_CHAT_NAME:-小杰夜报～}
       FEISHU_GROUP_RELAY_WEBHOOKS: ${FEISHU_GROUP_RELAY_WEBHOOKS:-}
+      FEISHU_GROUP_RELAY_WEBHOOK_KEYWORDS: ${FEISHU_GROUP_RELAY_WEBHOOK_KEYWORDS:-}
       WECHAT_GROUP_RELAY_ENABLED: ${WECHAT_GROUP_RELAY_ENABLED:-false}
       WECHAT_GROUP_RELAY_SOURCE_KEY: ${WECHAT_GROUP_RELAY_SOURCE_KEY:-wechat_xiaolan}
       WECHAT_GROUP_RELAY_SOURCE_CHAT_ID: ${WECHAT_GROUP_RELAY_SOURCE_CHAT_ID:-50136408612@chatroom}
@@ -123,6 +124,9 @@ services:
       FEISHU_SUMMARY_LISTENER_BOOTSTRAP_MODE: ${FEISHU_SUMMARY_LISTENER_BOOTSTRAP_MODE:-forward_existing}
       FEISHU_USER_OAUTH_REDIRECT_URI: ${FEISHU_USER_OAUTH_REDIRECT_URI:-http://localhost:8080/callback}
       LARKX_BRIDGE_TOKEN: ${LARKX_BRIDGE_TOKEN:-}
+      LARKX_BRIDGE_RESOURCE_URL: ${LARKX_BRIDGE_RESOURCE_URL:-http://127.0.0.1:8090/resource}
+      LARKX_GROUP_RELAY_ENABLED: ${LARKX_GROUP_RELAY_ENABLED:-false}
+      LARKX_GROUP_RELAY_ROUTES: ${LARKX_GROUP_RELAY_ROUTES:-}
       FEISHU_WORKBENCH_PUBLIC_BASE_URL: ${FEISHU_WORKBENCH_PUBLIC_BASE_URL:-}
       FEISHU_WORKBENCH_DRIVE_FOLDER_TOKEN: ${FEISHU_WORKBENCH_DRIVE_FOLDER_TOKEN:-}
       FEISHU_WORKBENCH_DRIVE_MAX_FILE_BYTES: ${FEISHU_WORKBENCH_DRIVE_MAX_FILE_BYTES:-524288000}
@@ -149,9 +153,30 @@ services:
       FEISHU_WORKBENCH_WIKI_SPACE_ID: ${FEISHU_WORKBENCH_WIKI_SPACE_ID:-}
       FEISHU_WORKBENCH_WIKI_PARENT_NODE_TOKEN: ${FEISHU_WORKBENCH_WIKI_PARENT_NODE_TOKEN:-}
       FEISHU_WORKBENCH_TASKLIST_GUID: ${FEISHU_WORKBENCH_TASKLIST_GUID:-}
+      # The adapter source overlay is mounted from the edge host and selected
+      # by the entry command below. The same release also carries the
+      # LarkAgentX bridge source for its systemd service. Keep this disabled
+      # for immutable image releases; the hotfix script enables it only after
+      # staging and checks.
+      FEISHU_ADAPTER_HOTFIX_ENABLED: ${FEISHU_ADAPTER_HOTFIX_ENABLED:-false}
+      APP_GIT_SHA: ${APP_GIT_SHA:-unknown}
+      APP_RELEASE: ${APP_RELEASE:-unknown}
+      APP_BUILD_CREATED_AT: ${APP_BUILD_CREATED_AT:-unknown}
       TZ: Asia/Shanghai
+    command:
+      - sh
+      - -c
+      - >-
+        if [ "$$FEISHU_ADAPTER_HOTFIX_ENABLED" = "true" ] && [ -f
+        /app/hotfix/current/adapter/index.mjs ]; then export
+        FRONTEND_DIST=/app/hotfix/current/frontend-dist; export
+        SOURCE_REGISTRY_FILE=/app/hotfix/current/source-registry.json; export
+        FEISHU_ADAPTER_SOURCE_MODE=source-overlay; exec node
+        /app/hotfix/current/adapter/index.mjs; fi; export
+        FEISHU_ADAPTER_SOURCE_MODE=image; exec node /app/index.mjs
     volumes:
       - ./adapter-ingestion:/var/lib/adapter-ingestion
+      - ${FEISHU_ADAPTER_HOTFIX_DIR:-./hotfix}:/app/hotfix:ro
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:18300/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s

@@ -84,6 +84,34 @@ class ItouguRelayTests(unittest.TestCase):
         })
         self.assertEqual(elements[2], {"tag": "text", "text": "。"})
 
+    def test_inline_video_json_link_stops_at_m3u8(self):
+        body = ('{"publishTime":"2026-09-14 12:21:30",'
+                '"videoUrl":"https://voss.itougu.com/video/demo.m3u8",'
+                '"videoName":"【午盘分析】-9月14日","videoId":"2099346824640024576"}')
+        elements = relay.build_link_post("尾盘掘金", body)["zh_cn"]["content"][0]
+        anchor = next(item for item in elements if item.get("tag") == "a")
+        self.assertEqual(anchor["text"], "https://voss.itougu.com/video/demo.m3u8")
+        self.assertEqual(anchor["href"], "https://voss.itougu.com/video/demo.m3u8")
+        self.assertIn('"videoName"', "".join(item.get("text", "") for item in elements if item.get("tag") == "text"))
+
+    def test_video_metadata_is_extracted_from_flat_or_escaped_payload(self):
+        item = {
+            "content": r'{"videoUrl":"https:\/\/voss.itougu.com\/video\/demo.m3u8?token=x","videoName":"午盘分析","videoId":"id-after-url"}'
+        }
+        self.assertEqual(
+            relay.video_line(item),
+            "〔复盘视频〕午盘分析：https://voss.itougu.com/video/demo.m3u8",
+        )
+        self.assertNotIn("id-after-url", relay.video_line(item))
+
+    def test_flat_video_url_is_used_by_video_task(self):
+        task = relay.video_task({
+            "videoUrl": "https://voss.itougu.com/video/flat.m3u8?x=1",
+            "videoName": "午盘分析",
+            "videoId": "flat-id",
+        }, "尾盘掘金内参")
+        self.assertEqual(task["url"], "https://voss.itougu.com/video/flat.m3u8")
+
     def test_external_links_are_classified_as_text_messages(self):
         self.assertTrue(relay.contains_external_link("午盘链接 https://example.com/detail?id=1"))
         self.assertTrue(relay.contains_external_link("晚盘入口 www.example.com"))

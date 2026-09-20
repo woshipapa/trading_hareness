@@ -327,6 +327,17 @@ export function createLedger(connectionString) {
 				WHERE message.source_message_id = ANY($1::text[])`, [ids]);
 			return rows;
 		},
+		async relayMessagesBySourceWindow(sourceKey, fromCreateTime, toCreateTime, limit = 2000) {
+			const from = Math.max(0, Number(fromCreateTime) || 0);
+			const to = Math.max(from, Number(toCreateTime) || from);
+			const boundedLimit = Math.max(1, Math.min(5000, Number(limit) || 2000));
+			const { rows } = await pool.query(`SELECT message.*, route.chat_name AS source_chat_name
+				FROM feishu_group_relay_messages message
+				LEFT JOIN feishu_group_relay_routes route ON route.source_key=message.source_key
+				WHERE message.source_key=$1 AND message.source_create_time BETWEEN $2 AND $3
+				ORDER BY message.source_create_time ASC LIMIT $4`, [String(sourceKey), from, to, boundedLimit]);
+			return rows;
+		},
 		async getRelayMessageByActionCard(actionCardMessageId) {
 			const { rows } = await pool.query(`SELECT message.*, route.chat_name AS source_chat_name
 				FROM feishu_group_relay_messages message
@@ -359,7 +370,7 @@ export function createLedger(connectionString) {
 			const result = await pool.query(`SELECT message.*, route.chat_name AS source_chat_name FROM feishu_group_relay_messages message LEFT JOIN feishu_group_relay_routes route ON route.source_key=message.source_key WHERE message.source_message_id=$1`, [sourceMessageId]);
 			return result.rows[0] ?? null;
 		},
-		async relayRetryQueue(limit = 20) { const { rows } = await pool.query(`SELECT * FROM feishu_group_relay_messages WHERE status='failed' AND updated_at <= now() - interval '10 seconds' * power(2, least(greatest(attempt_count - 1, 0), 5)) ORDER BY updated_at ASC LIMIT $1`, [Math.max(1, Math.min(100, Number(limit) || 20))]); return rows; },
+		async relayRetryQueue(limit = 20) { const { rows } = await pool.query(`SELECT * FROM feishu_group_relay_messages WHERE status='failed' AND coalesce(source_deleted, false)=false AND updated_at <= now() - interval '10 seconds' * power(2, least(greatest(attempt_count - 1, 0), 5)) ORDER BY updated_at ASC LIMIT $1`, [Math.max(1, Math.min(100, Number(limit) || 20))]); return rows; },
 		async portableInteractiveSummaryUpgradeQueue(limit = 20) {
 			const { rows } = await pool.query(`SELECT * FROM feishu_group_relay_messages
 				WHERE status='sent' AND message->>'msg_type'='interactive'

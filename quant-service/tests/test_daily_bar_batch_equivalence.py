@@ -5,7 +5,7 @@ import unittest
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from app.daily_bar_repository import upsert_daily_bar, upsert_daily_bars
+from app.daily_bar_repository import persisted_adjustment_state, upsert_daily_bar, upsert_daily_bars
 from app.request_models import DailyBar
 
 AVAILABLE_AT = datetime(2026, 9, 18, 7, 0, tzinfo=timezone.utc)
@@ -107,7 +107,13 @@ class DailyBarBatchEquivalenceTests(unittest.TestCase):
             upsert_daily_bar(sequential, bar)
         batched = _Connection(existing)
         upsert_daily_bars(batched, bars)
-        return sorted(map(repr, sequential.writes)), sorted(map(repr, batched.writes))
+        # The owner-facing instrument statement is intentionally one sorted
+        # ``unnest`` batch now; compare the bar/evidence semantics here rather
+        # than requiring the old row-wise transport shape.
+        def without_instrument(rows):
+            return [row for row in rows if "quant.instruments" not in row[0]
+                    and not row[0].startswith(("SAVEPOINT ", "SET LOCAL lock_timeout", "ROLLBACK TO SAVEPOINT", "RELEASE SAVEPOINT"))]
+        return sorted(map(repr, without_instrument(sequential.writes))), sorted(map(repr, without_instrument(batched.writes)))
 
     def test_a_plain_cross_section_writes_exactly_the_same_rows(self):
         bars = [_bar("600176.SH", "51.0"), _bar("000001.SZ", "12.0"), _bar("300750.SZ", "180.5")]
@@ -154,6 +160,17 @@ class DailyBarBatchEquivalenceTests(unittest.TestCase):
         connection = _Connection()
         self.assertEqual(upsert_daily_bars(connection, []), 0)
         self.assertEqual(connection.writes, [])
+
+    def test_bar_adjustment_state_requires_a_licensed_source(self):
+        self.assertEqual(
+            persisted_adjustment_state(_bar("600176.SH", "51.0", adj_factor=Decimal("1.25"))),
+            "complete",
+        )
+        self.assertEqual(
+            persisted_adjustment_state(_bar("600176.SH", "51.0", source="longhuvip_composite", adj_factor=Decimal("1.25"))),
+            "pending",
+        )
+        self.assertEqual(persisted_adjustment_state(_bar("600176.SH", "51.0")), "absent")
 
 
 if __name__ == "__main__":

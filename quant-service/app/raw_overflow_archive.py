@@ -30,6 +30,10 @@ DEFAULT_CAPABILITIES = (
     "rt_k",
     "rt_min",
     "rt_min_daily",
+    # The owner error report uses this canonical raw-observation stream for
+    # historical daily bars.  It is evidence archival only, never a strategy
+    # input, and must be explicitly allowlisted like the intraday streams.
+    "daily_bar",
 )
 DEFAULT_STREAM_PREFIX = "raw_market_observations:"
 

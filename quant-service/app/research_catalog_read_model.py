@@ -70,6 +70,14 @@ def strategy_registry(database: Any) -> dict[str, Any]:
 def model_registry(database: Any) -> dict[str, Any]:
     """List offline model artifact registrations without loading artifacts."""
     with database.transaction() as connection:
+        table = connection.execute(
+            "SELECT to_regclass('quant.research_model_registry') AS value"
+        ).fetchone()
+        if not table or table.get("value") is None:
+            return {
+                "items": [], "research_only": True, "live_effect": "none",
+                "registry_status": "schema_unavailable",
+            }
         rows = connection.execute(
             """SELECT model_id,model_key,model_family,model_version,framework,artifact_uri,
                       artifact_sha256,data_snapshot_key,feature_contract_version,label_contract_version,
@@ -77,7 +85,10 @@ def model_registry(database: Any) -> dict[str, Any]:
                       approved_at,created_at
                  FROM quant.research_model_registry ORDER BY created_at DESC,model_key"""
         ).fetchall()
-    return {"items": rows, "research_only": True, "live_effect": "none"}
+    return {
+        "items": rows, "research_only": True, "live_effect": "none",
+        "registry_status": "available",
+    }
 
 
 def strategy_experiments(database: Any, universe_key: str, limit: int) -> dict[str, Any]:

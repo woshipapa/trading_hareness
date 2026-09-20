@@ -376,6 +376,10 @@ def run_watchlist_main_wave_v2_research(connection: Any, end_date: date | None =
               AND EXISTS (
                     SELECT 1 FROM quant.daily_adjustment_factors factor
                      WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                       AND factor.provider IN ('longhu_qfq_derived','tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup')
+                       AND factor.adj_factor>0
+                       AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
+                            OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
                        AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
               )"""
     ).fetchone()
@@ -400,10 +404,17 @@ def run_watchlist_main_wave_v2_research(connection: Any, end_date: date | None =
              LEFT JOIN LATERAL (
                    SELECT factor.adj_factor
                      FROM quant.daily_adjustment_factors factor
-                    WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                   WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                      AND factor.provider IN ('longhu_qfq_derived','tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup')
+                      AND factor.adj_factor>0
+                      AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
+                           OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
                       AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                    ORDER BY factor.available_at DESC,
-                             CASE WHEN factor.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                    -- Prefer the owner-derived factor source before a newer
+                    -- peer checkpoint, keeping factor semantics deterministic.
+                    ORDER BY CASE WHEN factor.provider='longhu_qfq_derived' THEN 0
+                                  WHEN factor.provider IN ('tushare_primary','tushare_super_sdk') THEN 1 ELSE 2 END,
+                             factor.available_at DESC,
                              factor.provider
                     LIMIT 1
              ) pit_adjustment ON TRUE

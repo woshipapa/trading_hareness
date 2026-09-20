@@ -14,6 +14,8 @@ from typing import Any, Iterable
 
 from .replay_readiness import P2_MIN_DAILY_CALENDAR_SPAN_DAYS, P2_MIN_FULL_CROSS_SECTION_DAYS
 from .backtest_execution_rules import a_share_exit_lag
+from .owner_storage import eligible_cold_tables, tiered_relation_sql
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
 SQL_FACTOR_COLUMNS = {
@@ -149,8 +151,8 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                          horizon_days: int) -> dict[str, Any]:
     """Create one transaction-scoped panel shared by every requested factor."""
     connection.execute("DROP TABLE IF EXISTS factor_sql_panel")
-    connection.execute(
-        """CREATE TEMP TABLE factor_sql_panel ON COMMIT DROP AS
+    factor_semantics_sql = persisted_factor_semantics_sql("adjustment")
+    panel_sql = f"""CREATE TEMP TABLE factor_sql_panel ON COMMIT DROP AS
            WITH calendar AS (
                SELECT calendar_date AS trading_date,
                       row_number() OVER(ORDER BY calendar_date)::int AS trading_index
@@ -186,9 +188,12 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                          FROM quant.daily_adjustment_factors adjustment
                         WHERE adjustment.symbol=bar.symbol
                           AND adjustment.trading_date=bar.trading_date
+                          AND adjustment.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
+                          AND {factor_semantics_sql}
                           AND adjustment.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                        ORDER BY adjustment.available_at DESC,
-                                 CASE WHEN adjustment.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                        ORDER BY CASE WHEN adjustment.provider='longhu_qfq_derived' THEN 0
+                                      WHEN adjustment.provider IN ('tushare_primary','tushare_super_sdk') THEN 1 ELSE 2 END,
+                                 adjustment.available_at DESC,
                                  adjustment.provider
                         LIMIT 1
                  ) adjustment_history ON TRUE
@@ -248,7 +253,14 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                       CASE WHEN adjusted_high>adjusted_low
                            THEN (adjusted_close-adjusted_low)/(adjusted_high-adjusted_low) END AS intraday_strength
                  FROM returns
-           ) SELECT * FROM features""",
+           ) SELECT * FROM features"""
+    cold_tables = eligible_cold_tables(connection) if hasattr(connection, "cursor") else set()
+    for logical_name in ("canonical_bars_daily", "daily_adjustment_factors", "daily_fundamentals"):
+        panel_sql = panel_sql.replace(
+            f"quant.{logical_name}", tiered_relation_sql(logical_name, cold_tables),
+        )
+    connection.execute(
+        panel_sql,
         (start_date - timedelta(days=120), end_date + timedelta(days=max(120, horizon_days * 3)), universe_key),
     )
     connection.execute("CREATE INDEX factor_sql_panel_symbol_index_idx ON factor_sql_panel(symbol,trading_index)")

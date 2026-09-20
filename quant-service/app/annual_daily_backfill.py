@@ -23,14 +23,17 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json, Jsonb
 
 from .database import Database
+from .adjustment_factor_semantics import COMPLETE_FACTOR_PROVIDERS
 from .daily_bar_repository import quarantine_tushare_daily_amount_mismatches
+from .instrument_registry import InstrumentRecord, ensure_instruments
 from .runtime_resources import DEFAULT_HOT_DATABASE_SOFT_BYTES, bounded_storage_budget_bytes
+from .replay_readiness_coverage import refresh_daily_coverage
 from .sector_flow_repository import rebuild_sector_flow_daily_features
 from .tushare_providers import ProviderCallError, call_provider, provider_configs, safe_error_detail
 from .universe_history import rebuild_historical_membership_from_canonical
@@ -222,34 +225,37 @@ def _persist_raw(
     )
 
 
-def _persist_instruments_from_stage(connection: Any, provider_key: str) -> None:
-    connection.execute(
-        """INSERT INTO quant.instruments(symbol,exchange,source)
-           SELECT DISTINCT upper(row_data->>'ts_code'),
+def _row_value(row: Any, key: str, index: int) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(key)
+    return row[index]
+
+
+def _persist_instruments_from_stage(connection: Any, provider_key: str, *, index_mode: bool = False) -> None:
+    """Materialize stage symbols through the shared sorted instrument writer."""
+    pattern = r"^\d{6}\.(SH|SZ)$" if index_mode else r"^\d{6}\.(SH|SZ|BJ)$"
+    rows = connection.execute(
+        f"""SELECT DISTINCT upper(row_data->>'ts_code') AS symbol,
                   CASE right(upper(row_data->>'ts_code'),2)
-                    WHEN 'SH' THEN 'SSE' WHEN 'SZ' THEN 'SZSE' ELSE 'BSE' END,
-                  %s
+                    WHEN 'SH' THEN 'SH' WHEN 'SZ' THEN 'SZ' ELSE 'BJ' END AS exchange
              FROM annual_daily_stage
-            WHERE upper(row_data->>'ts_code') ~ '^\\d{6}\\.(SH|SZ|BJ)$'
-           ON CONFLICT(symbol) DO NOTHING""",
-        (provider_key,),
+            WHERE upper(row_data->>'ts_code') ~ '{pattern}'
+            ORDER BY 1""",
+    ).fetchall()
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(
+            symbol=str(_row_value(row, "symbol", 0)),
+            exchange=str(_row_value(row, "exchange", 1)),
+            source=provider_key,
+        ) for row in rows],
+        update_existing=False,
     )
 
 
 def _persist_daily(connection: Any, provider_key: str, available_at: datetime, ingested_at: datetime,
-                   availability_basis: str, *, index_mode: bool = False) -> None:
-    if index_mode:
-        connection.execute(
-            """INSERT INTO quant.instruments(symbol,exchange,source)
-               SELECT DISTINCT upper(row_data->>'ts_code'),
-                      CASE right(upper(row_data->>'ts_code'),2) WHEN 'SH' THEN 'SSE' ELSE 'SZSE' END,%s
-                 FROM annual_daily_stage
-                WHERE upper(row_data->>'ts_code') ~ '^\\d{6}\\.(SH|SZ)$'
-               ON CONFLICT(symbol) DO NOTHING""",
-            (provider_key,),
-        )
-    else:
-        _persist_instruments_from_stage(connection, provider_key)
+    availability_basis: str, *, index_mode: bool = False) -> None:
+    _persist_instruments_from_stage(connection, provider_key, index_mode=index_mode)
     capability = "index_daily" if index_mode else "daily"
     connection.execute(
         """WITH stage AS (
@@ -356,6 +362,8 @@ def _persist_daily(connection: Any, provider_key: str, available_at: datetime, i
 
 def _persist_adj_factor(connection: Any, provider_key: str, available_at: datetime, _ingested_at: datetime,
                         _availability_basis: str) -> None:
+    if provider_key not in COMPLETE_FACTOR_PROVIDERS:
+        raise ValueError(f"{provider_key} cannot provide cumulative adjustment factors")
     _persist_instruments_from_stage(connection, provider_key)
     connection.execute(
         """WITH stage AS (
@@ -364,8 +372,12 @@ def _persist_adj_factor(connection: Any, provider_key: str, available_at: dateti
                 ORDER BY upper(row_data->>'ts_code'),row_data->>'trade_date',record_index DESC
            ) INSERT INTO quant.daily_adjustment_factors(symbol,trading_date,adj_factor,provider,available_at,raw)
            SELECT upper(row_data->>'ts_code'),to_date(row_data->>'trade_date','YYYYMMDD'),
-                  nullif(row_data->>'adj_factor','')::numeric,%s,%s,row_data
-             FROM stage WHERE nullif(row_data->>'adj_factor','') IS NOT NULL
+                  nullif(row_data->>'adj_factor','')::numeric,%s,%s,
+                  row_data || jsonb_build_object('factor_semantics','cumulative_tushare','adjustment_state','complete')
+             FROM stage
+            WHERE nullif(row_data->>'adj_factor','') IS NOT NULL
+              AND nullif(row_data->>'adj_factor','') ~ '^[+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?$'
+              AND nullif(row_data->>'adj_factor','')::numeric > 0
            ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET
              adj_factor=EXCLUDED.adj_factor,available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
         (provider_key, available_at),
@@ -379,7 +391,9 @@ def _persist_adj_factor(connection: Any, provider_key: str, available_at: dateti
                ) UPDATE quant.{table} bar SET adj_factor=nullif(stage.row_data->>'adj_factor','')::numeric
                   FROM stage
                  WHERE bar.symbol=upper(stage.row_data->>'ts_code')
-                   AND bar.trading_date=to_date(stage.row_data->>'trade_date','YYYYMMDD')"""
+                   AND bar.trading_date=to_date(stage.row_data->>'trade_date','YYYYMMDD')
+                   AND nullif(stage.row_data->>'adj_factor','') ~ '^[+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?$'
+                   AND nullif(stage.row_data->>'adj_factor','')::numeric > 0"""
         )
 
 
@@ -494,25 +508,29 @@ def _persist_trade_calendar(connection: Any, provider_key: str, available_at: da
 
 
 def _persist_stock_basic(connection: Any, provider_key: str, available_at: datetime) -> None:
-    connection.execute(
-        """INSERT INTO quant.instruments(symbol,exchange,name,industry,list_date,delist_date,is_st,source)
-           SELECT upper(row_data->>'ts_code'),
+    rows = connection.execute(
+        """SELECT upper(row_data->>'ts_code') AS symbol,
                   coalesce(nullif(row_data->>'exchange',''),
                     CASE right(upper(row_data->>'ts_code'),2)
-                      WHEN 'SH' THEN 'SSE' WHEN 'SZ' THEN 'SZSE' ELSE 'BSE' END),
-                  nullif(row_data->>'name',''),nullif(row_data->>'industry',''),
-                  CASE WHEN row_data->>'list_date' ~ '^\\d{8}$' THEN to_date(row_data->>'list_date','YYYYMMDD') END,
-                  CASE WHEN row_data->>'delist_date' ~ '^\\d{8}$' THEN to_date(row_data->>'delist_date','YYYYMMDD') END,
-                  coalesce(row_data->>'name','') ~* '(^|\\*)ST',%s
+                      WHEN 'SH' THEN 'SH' WHEN 'SZ' THEN 'SZ' ELSE 'BJ' END) AS exchange,
+                  nullif(row_data->>'name','') AS name,
+                  nullif(row_data->>'industry','') AS industry,
+                  CASE WHEN row_data->>'list_date' ~ '^\\d{8}$' THEN to_date(row_data->>'list_date','YYYYMMDD') END AS list_date,
+                  CASE WHEN row_data->>'delist_date' ~ '^\\d{8}$' THEN to_date(row_data->>'delist_date','YYYYMMDD') END AS delist_date,
+                  coalesce(row_data->>'name','') ~* '(^|\\*)ST' AS is_st
              FROM annual_daily_stage
             WHERE upper(row_data->>'ts_code') ~ '^\\d{6}\\.(SH|SZ|BJ)$'
-           ON CONFLICT(symbol) DO UPDATE SET
-             exchange=EXCLUDED.exchange,name=coalesce(EXCLUDED.name,quant.instruments.name),
-             industry=coalesce(EXCLUDED.industry,quant.instruments.industry),
-             list_date=coalesce(EXCLUDED.list_date,quant.instruments.list_date),
-             delist_date=coalesce(EXCLUDED.delist_date,quant.instruments.delist_date),
-             is_st=EXCLUDED.is_st,source=EXCLUDED.source,updated_at=now()""",
-        (provider_key,),
+            ORDER BY 1""",
+    ).fetchall()
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(
+            symbol=str(_row_value(row, "symbol", 0)), exchange=str(_row_value(row, "exchange", 1)),
+            name=_row_value(row, "name", 2), industry=_row_value(row, "industry", 3),
+            list_date=_row_value(row, "list_date", 4), delist_date=_row_value(row, "delist_date", 5),
+            is_st=_row_value(row, "is_st", 6), source=provider_key,
+        ) for row in rows],
+        update_existing=True,
     )
     # Keep the three stock_basic list-status cross-sections as immutable
     # evidence.  ``quant.instruments`` is intentionally only the current
@@ -1035,13 +1053,18 @@ class AnnualDailyBackfill:
                           FROM (
                               SELECT DISTINCT ON(symbol,trading_date)
                                      symbol,trading_date,adj_factor
-                                FROM quant.daily_adjustment_factors
+                               FROM quant.daily_adjustment_factors
                                WHERE trading_date BETWEEN %s AND %s
+                                 AND adj_factor>0
+                                 AND ((raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
+                                      OR (provider='longhu_qfq_derived' AND raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                                 AND provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
                                ORDER BY symbol,trading_date,
                                         CASE provider
-                                          WHEN 'tushare_super_sdk' THEN 0
-                                          WHEN 'tushare_super_get' THEN 1
-                                          WHEN 'tushare_primary' THEN 2
+                                          WHEN 'longhu_qfq_derived' THEN 0
+                                          WHEN 'tushare_super_sdk' THEN 1
+                                          WHEN 'tushare_super_get' THEN 2
+                                          WHEN 'tushare_primary' THEN 3
                                           ELSE 9 END,
                                         available_at DESC
                           ) factor
@@ -1282,13 +1305,14 @@ class AnnualDailyBackfill:
         market_aggregates = self.materialize_daily_market_aggregates()
         with self.db.transaction() as connection:
             universe_membership = rebuild_historical_membership_from_canonical(connection, "all_a")
+            readiness_coverage = refresh_daily_coverage(connection, self.start_date, self.end_date)
         feature_result = self.rebuild_sector_features()
         with self.db.transaction() as connection:
             coverage = connection.execute(
                 """SELECT
                      count(*) FILTER (WHERE trading_date BETWEEN %s AND %s)::bigint daily_rows,
                      count(DISTINCT trading_date) FILTER (WHERE trading_date BETWEEN %s AND %s)::int daily_days,
-                     count(*) FILTER (WHERE trading_date BETWEEN %s AND %s AND adj_factor IS NOT NULL)::bigint adjusted_rows,
+                     count(*) FILTER (WHERE trading_date BETWEEN %s AND %s AND adj_factor>0)::bigint adjusted_rows,
                      count(*) FILTER (WHERE trading_date BETWEEN %s AND %s AND limit_up IS NOT NULL)::bigint limited_rows
                    FROM quant.canonical_bars_daily""",
                 (self.start_date, self.end_date, self.start_date, self.end_date,
@@ -1304,6 +1328,7 @@ class AnnualDailyBackfill:
             "status_controls": "included" if self.include_status_controls else "explicitly_skipped_for_this_range",
             "coverage": dict(coverage), "market_aggregates": market_aggregates,
             "universe_membership": universe_membership,
+            "readiness_coverage": readiness_coverage,
             "sector_promotions": sector_promotions,
             "sector_features": feature_result,
             "failure_count": len(self.failures), "failures": self.failures[:50],

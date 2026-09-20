@@ -118,7 +118,6 @@ def _limit_ratio(symbol: str, name: str) -> tuple[Decimal, str]:
 def build_control_rows(daily_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Build transparent same-day controls without claiming corporate-action history."""
     limits: list[dict[str, Any]] = []
-    factors: list[dict[str, Any]] = []
     for row in daily_rows:
         symbol, name = str(row["ts_code"]), str(row.get("name") or "")
         pre_close = _decimal(row.get("pre_close"))
@@ -133,12 +132,12 @@ def build_control_rows(daily_rows: list[dict[str, Any]]) -> dict[str, list[dict[
             "derivation": "preclose_times_board_limit_ratio", "board_rule": rule,
             "exception_warning": "IPO/resumption/no-limit exceptions are not inferred",
         })
-        factors.append({
-            "ts_code": symbol, "trade_date": row["trade_date"], "adj_factor": "1",
-            "factor_semantics": "same_day_identity_only",
-            "warning": "not a historical corporate-action adjustment factor",
-        })
-    return {"stk_limit": limits, "adj_factor": factors}
+    # Longhu/Tencent close data has no corporate-action history.  It may derive
+    # a same-day limit price, but writing ``adj_factor=1`` would make a missing
+    # split/dividend history look complete to research consumers.  The licensed
+    # The owner's Longhu qfq factor-maintenance task owns this table instead;
+    # this close-data adapter must never invent an identity factor.
+    return {"stk_limit": limits, "adj_factor": []}
 
 
 __all__ = [

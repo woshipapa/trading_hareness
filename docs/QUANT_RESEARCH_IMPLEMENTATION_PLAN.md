@@ -4,6 +4,12 @@
 范围：A 股日频研究、盘后生成次日候选池；不接券商下单，不承诺收益  
 参考快照：`/Users/papa/codebase/trading/README.md`
 
+口径更新（2026-09-19）：本文件中的 provider 表是初始方案基线，不再是
+owner 生产合同。owner 当前生产版本将累计复权因子改为
+`longhu_qfq_derived`（开盘啦前复权 K 线推算）；Tushare 复权因子仅可作为
+已落库、显式允许的检查点。生产控制面、单股研究和 watchlist hydration
+统一读取 owner 持久化因子投影，详见 `docs/OWNER_DATABASE_STORAGE.md`。
+
 ## 1. 目标与产品边界
 
 当前系统已经能把飞书、手动网页以及不同分析师频道的文字、图片、音频和视频可靠归档，并在 `quant-research` 中形成基础分析师信号。下一阶段不是再造一个通用行情站，而是建立独有的“观点资产化”链路：

@@ -4,6 +4,24 @@ import { buildRelayCard, cardImageKeys, cardPayload, cardText } from './card-con
 
 const V2 = { schema: '2.0', body: { elements: [{ tag: 'markdown', content: '长光华X回到了8月17日高点' }] } };
 
+const LARKAGENTX_INTERNAL_V2 = {
+	schema: '2.0',
+	body: { elements: [{
+		tag: 'column_set',
+		property: { columns: [{
+			tag: 'column',
+			property: { elements: [
+				{ tag: 'markdown', property: { elements: [{ tag: 'plain_text', property: { content: '请升级至最新版本客户端，以查看内容' } }] } },
+				{ tag: 'div', property: { text: { tag: 'plain_text', property: {} } } },
+			] },
+		}] },
+	}] },
+	newBody: { tag: 'body', property: { elements: [{
+		tag: 'markdown',
+		property: { elements: [{ tag: 'plain_text', property: { content: '安强卡片里的真实教学内容' } }] },
+	}] } },
+};
+
 test('reads a legacy 1.0 card', () => {
 	const card = { title: null, elements: [[{ tag: 'text', text: '通过网盘分享的文件\n链接:' }, { tag: 'a', href: 'https://pan.baidu.com/s/x', text: 'https://pan.baidu.com/s/x' }]] };
 	assert.equal(cardText(card), '通过网盘分享的文件\n链接:\nhttps://pan.baidu.com/s/x');
@@ -16,6 +34,18 @@ test('reads a card JSON 2.0 markdown body', () => {
 test('reads 2.0 header title, div text objects and lark_md', () => {
 	const card = { schema: '2.0', header: { title: { tag: 'plain_text', content: '9.8 收盘' } }, body: { elements: [{ tag: 'div', text: { tag: 'lark_md', content: '创业板小阴调整' } }] } };
 	assert.equal(cardText(card), '9.8 收盘\n创业板小阴调整');
+});
+
+test('reads LarkAgentX internal schema 2.0 property wrappers and newBody', () => {
+	assert.equal(cardText(LARKAGENTX_INTERNAL_V2), '安强卡片里的真实教学内容');
+	// imageID values in this representation are element ids, not CDN keys;
+	// they must not cause a bogus resource download.
+	const withElementImage = { ...LARKAGENTX_INTERNAL_V2, body: { elements: [{ tag: 'img', property: { imageID: '16' } }] } };
+	assert.deepEqual(cardImageKeys(withElementImage), []);
+});
+
+test('keeps an image-like internal imageID when it is a real resource key', () => {
+	assert.deepEqual(cardImageKeys({ body: { elements: [{ tag: 'img', property: { imageID: 'img_v3_card_asset' } }] } }), ['img_v3_card_asset']);
 });
 
 test('drops the client-upgrade banner and keeps nothing else from it', () => {

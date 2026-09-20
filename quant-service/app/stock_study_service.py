@@ -37,6 +37,7 @@ class StockStudyDependencies:
     recent_events: Callable[[str, int], list[dict[str, Any]]]
     window_readiness: Callable[[str, date, date], dict[str, Any]]
     latest_row: Callable[[list[dict[str, Any]]], dict[str, Any] | None]
+    read_persisted_factors: Callable[[str, date, date], Awaitable[list[dict[str, Any]]]] | None = None
 
 
 def _market_date(as_of: date) -> date:
@@ -53,7 +54,6 @@ def _tushare_fetches(symbol: str, start: str, end: str, request: Any) -> list[tu
         ("主 Tushare 日线", request(api_name="daily", provider="primary", params=dated, fields="ts_code,trade_date,open,high,low,close,pre_close,vol,amount", max_rows=60)),
         ("超级源日线", request(api_name="daily", provider="super", params=dated, fields="ts_code,trade_date,open,high,low,close,pre_close,vol,amount", max_rows=60)),
         ("REST 备用基础信息", request(api_name="stock_basic", provider="backup", params={"ts_code": symbol, "limit": 3}, max_rows=3)),
-        ("复权因子", request(api_name="adj_factor", params=dated, max_rows=60)),
         ("每日估值指标", request(api_name="daily_basic", params=dated, max_rows=60)),
         ("涨跌停价格", request(api_name="stk_limit", params=dated, max_rows=60)),
         ("个股资金流", request(api_name="moneyflow", params=dated, max_rows=60)),
@@ -73,6 +73,10 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
     start_date = market_date - timedelta(days=calendar_span)
     start, end = start_date.strftime("%Y%m%d"), market_date.strftime("%Y%m%d")
     fetches = _tushare_fetches(symbol, start, end, deps.tushare_request)
+    persisted_factor_rows = (
+        await deps.read_persisted_factors(symbol, start_date, market_date)
+        if deps.read_persisted_factors is not None else []
+    )
     realtime_active, realtime_reason = await deps.realtime_market_session()
     if realtime_active:
         fetches.extend([
@@ -90,6 +94,13 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
         deps.free_fetch("新浪财经公开报价", "sina_free", "realtime_quote", lambda: deps.sina_quote(symbol), symbol),
     )
     sources = [result[0] for result in results]
+    sources.append({
+        "source": "owner persisted adjustment factor",
+        "api_name": "adj_factor",
+        "provider": "owner_persisted_adjustment_factor",
+        "status": "completed" if persisted_factor_rows else "missing",
+        "received": len(persisted_factor_rows), "stored": 0,
+    })
     if not realtime_active:
         sources.extend([
             {"source": "主源实时分钟", "api_name": "rt_min", "provider": "primary", "status": "skipped", "received": 0, "stored": 0, "error": realtime_reason},
@@ -142,7 +153,7 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
             "daily_bars": daily_rows[-45:], "latest_realtime": deps.latest_row(data.get("主源实时分钟", []) or data.get("超级源实时分钟", [])),
             "eastmoney_quote": free_data["东方财富公开报价"], "eastmoney_daily_bars": free_data["东方财富公开日线"],
             "akshare_daily_bars": free_data["AKShare公开日线"], "tencent_daily_bars": free_data["腾讯财经公开日线"],
-            "sina_quote": free_data["新浪财经公开报价"], "latest_adj_factor": deps.latest_row(data["复权因子"]),
+            "sina_quote": free_data["新浪财经公开报价"], "latest_adj_factor": deps.latest_row(persisted_factor_rows),
             "latest_limit": deps.latest_row(data["涨跌停价格"]), "latest_daily_basic": deps.latest_row(data["每日估值指标"]),
             "latest_moneyflow": deps.latest_row(data["个股资金流"]), "latest_ths_moneyflow": deps.latest_row(data["同花顺个股资金流"]),
             "latest_dc_moneyflow": deps.latest_row(data["东财个股资金流"]), "latest_chip": deps.latest_row(data["筹码及胜率"]),

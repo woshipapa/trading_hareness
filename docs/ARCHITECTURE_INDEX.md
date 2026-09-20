@@ -8,10 +8,10 @@
 | Item | Current value |
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
-| `main.py` top-level functions | 441 |
-| Python modules under `app/` | 404 |
-| HTTP router modules | 42 |
-| Alembic migrations | 92 |
+| `main.py` top-level functions | 453 |
+| Python modules under `app/` | 465 |
+| HTTP router modules | 45 |
+| Alembic migrations | 99 |
 | Frontend source files | 37 |
 
 ## Domain naming inventory
@@ -21,24 +21,24 @@ New behaviour should be owned by an existing domain package/owner.
 
 | Domain prefix | Top-level modules |
 |---|---:|
-| `intraday` | 64 |
-| `async` | 41 |
+| `intraday` | 66 |
+| `async` | 42 |
 | `strategy` | 19 |
 | `analyst` | 17 |
+| `longhu` | 16 |
 | `market` | 13 |
 | `post` | 13 |
+| `research` | 13 |
 | `ten` | 11 |
-| `board` | 9 |
+| `board` | 10 |
 | `limit` | 9 |
-| `research` | 8 |
 | `tushare` | 7 |
 | `daily` | 6 |
+| `paper` | 6 |
 | `provider` | 6 |
 | `watchlist` | 6 |
 | `runtime` | 5 |
 | `sector` | 5 |
-| `stock` | 5 |
-| `xiaojie` | 5 |
 
 ## Router entrypoints
 
@@ -62,10 +62,13 @@ New behaviour should be owned by an existing domain package/owner.
 - `routers/l2_research.py`
 - `routers/licensed_stock_api.py`
 - `routers/limit_linkage_mining_reads.py`
+- `routers/longhu_capabilities.py`
 - `routers/longhu_reads.py`
+- `routers/longhu_replay_reads.py`
 - `routers/market_actions.py`
 - `routers/market_flow_reads.py`
 - `routers/market_result_reads.py`
+- `routers/owner_storage.py`
 - `routers/paper_actions.py`
 - `routers/paper_reads.py`
 - `routers/personal_decisions.py`

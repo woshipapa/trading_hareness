@@ -17,6 +17,8 @@ from typing import Any
 from psycopg.types.json import Json
 
 from .analysis import as_utc
+from .adjustment_factor_semantics import COMPLETE_FACTOR_PROVIDERS, positive_decimal
+from .instrument_registry import InstrumentRecord, ensure_instruments
 from .request_models import DailyBar
 
 
@@ -47,6 +49,13 @@ def provider_priority(provider: str) -> int:
         "tencent_index_free": 45,
         "akshare": 50, "tencent_free": 50, "sina_free": 55, "manual": 90,
     }.get(provider, 80)
+
+
+def persisted_adjustment_state(bar: DailyBar) -> str:
+    """Derive the bar-side state without promoting an unlicensed factor."""
+    if positive_decimal(bar.adj_factor) is None:
+        return "absent"
+    return "complete" if bar.source in COMPLETE_FACTOR_PROVIDERS else "pending"
 
 
 def daily_amount_unit_mismatch(*, source: str, amount: Decimal | None,
@@ -159,16 +168,10 @@ def upsert_daily_bar(connection: Any, bar: DailyBar) -> None:
         source=bar.source, amount=bar.amount, volume=bar.volume, close=bar.close,
     )
     promoted_amount = None if amount_mismatch else bar.amount
-    connection.execute(
-        """INSERT INTO quant.instruments(symbol,exchange,name,industry,is_st,source)
-           VALUES(%s,%s,%s,%s,coalesce(%s,false),%s)
-           ON CONFLICT(symbol) DO UPDATE SET exchange=EXCLUDED.exchange,
-              name=coalesce(EXCLUDED.name,quant.instruments.name),
-              industry=coalesce(EXCLUDED.industry,quant.instruments.industry),
-              is_st=CASE WHEN %s::boolean IS NULL THEN quant.instruments.is_st ELSE EXCLUDED.is_st END,
-              source=EXCLUDED.source, updated_at=now()""",
-        (bar.symbol, exchange_for(bar.symbol), bar.name, bar.industry, bar.is_st, bar.source, bar.is_st),
-    )
+    ensure_instruments(connection, [InstrumentRecord(
+        symbol=bar.symbol, exchange=exchange_for(bar.symbol), name=bar.name,
+        industry=bar.industry, is_st=bar.is_st, source=bar.source,
+    )], update_existing=True)
     connection.execute(
         """INSERT INTO quant.market_bars_daily(symbol,trading_date,open,high,low,close,pre_close,volume,amount,adj_factor,is_suspended,limit_up,limit_down,source,available_at)
            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,coalesce(%s,false),%s,%s,%s,%s)
@@ -221,8 +224,7 @@ def upsert_daily_bar(connection: Any, bar: DailyBar) -> None:
                  source_observation_ids=EXCLUDED.source_observation_ids,quality_status=EXCLUDED.quality_status,available_at=EXCLUDED.available_at,canonicalized_at=now()""",
              (bar.symbol, bar.trading_date, bar.open, bar.high, bar.low, bar.close, bar.pre_close, bar.volume, promoted_amount, bar.adj_factor,
               bar.is_suspended, bar.limit_up, bar.limit_down, selected_provider, source_ids,
-              "partial" if amount_mismatch else "fresh", as_utc(bar.available_at),
-              bar.is_suspended),
+              "partial" if amount_mismatch else "fresh", as_utc(bar.available_at), bar.is_suspended),
         )
     else:
         connection.execute("UPDATE quant.canonical_bars_daily SET source_observation_ids=%s,canonicalized_at=now() WHERE symbol=%s AND trading_date=%s", (source_ids, bar.symbol, bar.trading_date))
@@ -261,18 +263,12 @@ def _upsert_daily_bar_round(connection: Any, bars: list[DailyBar]) -> None:
         )
         prepared.append((bar, mismatch, None if mismatch else bar.amount))
 
+    ensure_instruments(connection, [InstrumentRecord(
+        symbol=bar.symbol, exchange=exchange_for(bar.symbol), name=bar.name,
+        industry=bar.industry, is_st=bar.is_st, source=bar.source,
+    ) for bar, _mismatch, _amount in prepared], update_existing=True)
+
     with connection.cursor() as cursor:
-        cursor.executemany(
-            """INSERT INTO quant.instruments(symbol,exchange,name,industry,is_st,source)
-               VALUES(%s,%s,%s,%s,coalesce(%s,false),%s)
-               ON CONFLICT(symbol) DO UPDATE SET exchange=EXCLUDED.exchange,
-                  name=coalesce(EXCLUDED.name,quant.instruments.name),
-                  industry=coalesce(EXCLUDED.industry,quant.instruments.industry),
-                  is_st=CASE WHEN %s::boolean IS NULL THEN quant.instruments.is_st ELSE EXCLUDED.is_st END,
-                  source=EXCLUDED.source, updated_at=now()""",
-            [(bar.symbol, exchange_for(bar.symbol), bar.name, bar.industry, bar.is_st, bar.source, bar.is_st)
-             for bar, _mismatch, _amount in prepared],
-        )
         cursor.executemany(
             """INSERT INTO quant.market_bars_daily(symbol,trading_date,open,high,low,close,pre_close,volume,amount,adj_factor,is_suspended,limit_up,limit_down,source,available_at)
                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,coalesce(%s,false),%s,%s,%s,%s)
@@ -404,6 +400,6 @@ def upsert_daily_bars(connection: Any, bars: list[DailyBar]) -> int:
 __all__ = [
     "TUSHARE_DAILY_AMOUNT_RATIO_MAX", "TUSHARE_DAILY_AMOUNT_RATIO_MIN",
     "TUSHARE_DAILY_AMOUNT_SOURCES", "daily_amount_unit_mismatch", "exchange_for",
-    "provider_priority", "quarantine_tushare_daily_amount_mismatches",
+    "persisted_adjustment_state", "provider_priority", "quarantine_tushare_daily_amount_mismatches",
     "upsert_daily_bar", "upsert_daily_bars",
 ]

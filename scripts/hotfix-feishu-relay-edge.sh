@@ -223,7 +223,9 @@ fi
 }
 python3 - "$repo_root/integrations/larkagentx/bridge.py" \
   "$repo_root/integrations/larkagentx/larkagentx_image_property.py" \
-  "$repo_root/integrations/larkagentx/proto_wire.py" <<'PY'
+  "$repo_root/integrations/larkagentx/proto_wire.py" \
+  "$repo_root/integrations/larkagentx/event_spool.py" \
+  "$repo_root/integrations/larkagentx/owner_lock.py" <<'PY'
 import ast
 import pathlib
 import sys
@@ -284,6 +286,8 @@ test -f "$stage_dir/frontend-dist/index.html"
 test -f "$stage_dir/bridge/bridge.py"
 test -f "$stage_dir/bridge/larkagentx_image_property.py"
 test -f "$stage_dir/bridge/proto_wire.py"
+test -f "$stage_dir/bridge/event_spool.py"
+test -f "$stage_dir/bridge/owner_lock.py"
 test -x "$stage_dir/ops/larkagentx-bridge-entrypoint.sh"
 test -f "$stage_dir/ops/larkagentx-group-relay-hotfix.conf"
 
@@ -357,6 +361,8 @@ test -f "$upload_dir/frontend-dist/index.html"
 test -f "$upload_dir/bridge/bridge.py"
 test -f "$upload_dir/bridge/larkagentx_image_property.py"
 test -f "$upload_dir/bridge/proto_wire.py"
+test -f "$upload_dir/bridge/event_spool.py"
+test -f "$upload_dir/bridge/owner_lock.py"
 test -x "$upload_dir/ops/larkagentx-bridge-entrypoint.sh"
 test -f "$upload_dir/ops/larkagentx-group-relay-hotfix.conf"
 test -f "$upload_dir/.base-git-sha"
@@ -379,7 +385,7 @@ docker run --rm --pull never -v "$upload_dir:/overlay:ro" --entrypoint sh "$base
   'set -eu; for file in /overlay/adapter/*.mjs; do node --check "$file"; done; node -e "JSON.parse(require(\"node:fs\").readFileSync(process.argv[1], \"utf8\"))" /overlay/source-registry.json'
 bridge_python=/opt/supervisor/.venv/bin/python
 test -x "$bridge_python"
-PYTHONDONTWRITEBYTECODE=1 "$bridge_python" - "$upload_dir/bridge/bridge.py" "$upload_dir/bridge/larkagentx_image_property.py" "$upload_dir/bridge/proto_wire.py" <<'PY'
+PYTHONDONTWRITEBYTECODE=1 "$bridge_python" - "$upload_dir/bridge/bridge.py" "$upload_dir/bridge/larkagentx_image_property.py" "$upload_dir/bridge/proto_wire.py" "$upload_dir/bridge/event_spool.py" "$upload_dir/bridge/owner_lock.py" <<'PY'
 import ast
 import pathlib
 import sys
@@ -389,7 +395,9 @@ for name in sys.argv[1:]:
 PY
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$upload_dir/bridge" "$bridge_python" - <<'PY'
 import bridge
+import event_spool
 import larkagentx_image_property
+import owner_lock
 import proto_wire
 PY
 grep -Eq '^[0-9a-fA-F]{7,64}$' "$upload_dir/.base-git-sha"
@@ -554,6 +562,8 @@ if ! test -f "$hotfix_root/current/adapter/index.mjs" \
   || ! docker exec "$container_name" test -f /app/hotfix/current/adapter/index.mjs \
   || ! test -f "$hotfix_root/current/bridge/bridge.py" \
   || ! test -f "$hotfix_root/current/bridge/proto_wire.py" \
+  || ! test -f "$hotfix_root/current/bridge/event_spool.py" \
+  || ! test -f "$hotfix_root/current/bridge/owner_lock.py" \
   || ! test -r /opt/larkagentx/bridge-entrypoint.sh; then
   restore_previous
   restart_adapter >/dev/null || true

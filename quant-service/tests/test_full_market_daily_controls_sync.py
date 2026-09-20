@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 from pydantic import ValidationError
@@ -11,6 +12,18 @@ from app.request_models import FullMarketDailyControlsSyncRequest
 
 
 class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
+    def test_bar_factor_mirror_requires_complete_positive_cumulative_tushare_factor(self):
+        source = Path("app/full_market_daily_controls_sync.py").read_text(encoding="utf-8")
+        mirror_section = source[source.index("UPDATE quant.market_bars_daily"):source.index("UPDATE quant.market_bars_daily bar SET limit_up")]
+        self.assertTrue(
+            "raw->>'factor_semantics'" in mirror_section
+            or "persisted_factor_semantics_sql" in source,
+        )
+        self.assertIn("factor.adj_factor>0", mirror_section)
+        self.assertIn("factor.provider=ANY(%s::text[])", mirror_section)
+        self.assertIn("factor.available_at<", mirror_section)
+        self.assertIn("array_position", mirror_section)
+
     def test_repair_contract_requires_one_explicit_trade_date(self):
         self.assertEqual(
             FullMarketDailyControlsSyncRequest(trade_date="2026-08-18").trade_date,
@@ -61,9 +74,14 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
         statements: list[str] = []
         database_timeouts: list[int | None] = []
 
+        class Result:
+            rowcount = 1
+            def fetchone(self): return {"full_cross_section_days": 1}
+
         class Connection:
             def execute(self, statement, *_args):
                 statements.append(" ".join(statement.split()))
+                return Result()
 
         class Database:
             def transaction(self):
@@ -101,6 +119,58 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(database_timeouts, [None, CONTROL_PERSIST_TIMEOUT_SECONDS])
         self.assertIn("UPDATE quant.canonical_bars_daily SET is_suspended=false,canonicalized_at=now() WHERE trading_date=%s", statements)
         self.assertIn("UPDATE quant.market_bars_daily SET is_suspended=false WHERE trading_date=%s", statements)
+        self.assertTrue(any("replay_readiness_daily_coverage" in statement for statement in statements))
+
+    async def test_persisted_owner_factors_replace_tushare_factor_request(self):
+        trade_date = date(2026, 8, 21)
+        requested: list[str] = []
+        persisted_calls: list[tuple[date, int]] = []
+
+        class Result:
+            rowcount = 1
+            def fetchone(self): return {"full_cross_section_days": 1}
+
+        class Connection:
+            def execute(self, *_args): return Result()
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self): return Connection()
+                    def __exit__(self, *_args): return False
+                return Context()
+
+        async def run_db(action, *args, **_kwargs):
+            return action(*args)
+
+        async def fetch(api_name, _params, _fields, _provider):
+            requested.append(api_name)
+            return SimpleNamespace(
+                rows=[{"ts_code": "000001.SZ", "trade_date": "20260821"}],
+                provider=SimpleNamespace(key="tushare_primary"), failed_providers=(),
+            )
+
+        async def persisted(day, expected):
+            persisted_calls.append((day, expected))
+            return {"rows": [{"ts_code": "000001.SZ", "trade_date": "20260821", "adj_factor": "1.2"}]}
+
+        def parse(value):
+            text = str(value)
+            return date.fromisoformat(f"{text[:4]}-{text[4:6]}-{text[6:8]}")
+
+        result = await sync(
+            trade_date, expected_daily_rows=lambda _day: 1, call_tushare_api=fetch, parse_date=parse,
+            persist_tushare_rows=lambda *_args: 1, persist_blocked=lambda *_args: None,
+            run_database_blocking=run_db, db=Database(), safe_error_detail=lambda value, _limit: value,
+            executor_saturated_error=RuntimeError, record_provider_success=lambda *_args: None,
+            record_provider_failure=lambda *_args: None,
+            record_provider_api_capability=lambda *_args, **_kwargs: None,
+            read_persisted_factor_controls=persisted,
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(persisted_calls, [(trade_date, 1)])
+        self.assertEqual(requested, ["daily_basic", "stk_limit", "suspend_d"])
+        self.assertEqual(result["providers"]["adj_factor"], "owner_persisted_adjustment_factor")
 
 
 if __name__ == "__main__":

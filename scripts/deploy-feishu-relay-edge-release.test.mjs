@@ -14,4 +14,5 @@ console.log('relay release resolves abbreviated SHAs to immutable image tags');
 assert.match(source, /if ! "\$\{ssh_command\[@\]\}" "\$edge_host" bash -s -- "\$image_ref" "\$pull_timeout_seconds"/);
 assert.match(source, /docker save "\$image_ref" \| gzip -1 \| "\$\{ssh_command\[@\]\}" "\$edge_host" 'gunzip \| docker load'/);
 assert.match(source, /docker image inspect "\$image_ref" >\/dev\/null/);
+assert.match(source, /update_env FEISHU_ADAPTER_HOTFIX_ENABLED false/);
 console.log('a stalled edge-side pull falls back to a local pull and ssh transfer automatically');

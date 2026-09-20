@@ -14,6 +14,8 @@ class FeishuWebhookRoutingTests(unittest.TestCase):
         # The module-level parse cache must not leak between tests.
         relay._feishu_webhook_map_value = None
         relay._feishu_webhook_map_raw = None
+        relay._feishu_webhook_keyword_map_value = None
+        relay._feishu_webhook_keyword_map_raw = None
 
     def test_webhook_map_parses_semicolon_separated_pairs(self):
         with mock.patch.dict("os.environ", {"ITOUGU_FEISHU_WEBHOOKS": " oc_a = https://x/a ; oc_b=https://x/b"}):
@@ -26,6 +28,12 @@ class FeishuWebhookRoutingTests(unittest.TestCase):
             self.assertEqual(relay._feishu_webhook_url("oc_a"), "https://x/a")
         with mock.patch.dict("os.environ", {"ITOUGU_FEISHU_WEBHOOKS": "oc_a=https://x/a-v2"}):
             self.assertEqual(relay._feishu_webhook_url("oc_a"), "https://x/a-v2")
+
+    def test_webhook_keyword_map_puts_keyword_in_target_post_title(self):
+        with mock.patch.dict("os.environ", {"ITOUGU_FEISHU_WEBHOOK_KEYWORDS": "oc_a=汇总;oc_b=尾盘掘金"}):
+            content = relay._webhook_content_with_keyword(
+                "post", {"zh_cn": {"title": "标题", "content": [[]]}}, "oc_a")
+        self.assertEqual(content["zh_cn"]["title"], "汇总 · 标题")
 
     def test_post_via_webhook_shapes_interactive_card_at_top_level(self):
         captured = {}
@@ -103,12 +111,25 @@ class FeishuWebhookRoutingTests(unittest.TestCase):
             raise AssertionError("must not call the tenant API when a webhook is configured")
 
         with mock.patch.dict("os.environ", {"ITOUGU_FEISHU_WEBHOOKS": "oc_cf156f51d085e2c51bd66fda198b88a0=https://x/hook"}), \
-             mock.patch.object(relay, "feishu_token", lambda: "tok"), \
+             mock.patch.object(relay, "feishu_token", lambda: (_ for _ in ()).throw(AssertionError("webhook must not fetch tenant token"))), \
              mock.patch.object(relay, "is_dedicated_destination", lambda chat_id: False), \
              mock.patch.object(relay, "_post_via_feishu_webhook", fake_post_via_webhook), \
              mock.patch.object(relay.urllib.request, "urlopen", fake_urlopen):
             relay.send_feishu("oc_cf156f51d085e2c51bd66fda198b88a0", "title", "body text", "dedup-seed")
         self.assertEqual(calls, {"webhook": 1, "tenant_api": 0})
+
+    def test_send_feishu_adds_target_keyword_to_webhook_payload(self):
+        captured = {}
+
+        def fake_post_via_webhook(url, msg_type, content):
+            captured.update(url=url, msg_type=msg_type, content=content)
+
+        with mock.patch.dict("os.environ", {
+            "ITOUGU_FEISHU_WEBHOOKS": "oc_summary=https://x/hook",
+            "ITOUGU_FEISHU_WEBHOOK_KEYWORDS": "oc_summary=汇总",
+        }), mock.patch.object(relay, "_post_via_feishu_webhook", fake_post_via_webhook):
+            relay.send_feishu("oc_summary", "尾盘掘金内参", "正文", "append-1")
+        self.assertEqual(captured["content"]["zh_cn"]["title"], "汇总 · 尾盘掘金内参")
 
 
 if __name__ == "__main__":

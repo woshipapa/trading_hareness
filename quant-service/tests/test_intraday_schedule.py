@@ -10,8 +10,11 @@ from app.intraday_schedule import INTRADAY_WATCHLIST_MAX_SYMBOLS, intraday_watch
 
 class IntradayScheduleCapacityTests(unittest.TestCase):
     def test_watchlist_overflow_blocks_instead_of_silently_truncating(self) -> None:
-        within = intraday_watchlist_capacity(INTRADAY_WATCHLIST_MAX_SYMBOLS)
-        overflow = intraday_watchlist_capacity(INTRADAY_WATCHLIST_MAX_SYMBOLS + 1)
+        # The owner overlay may explicitly configure a larger pool.  This
+        # regression asserts the audited default contract, so pass it
+        # explicitly instead of inheriting the deployment environment.
+        within = intraday_watchlist_capacity(INTRADAY_WATCHLIST_MAX_SYMBOLS, max_symbols=INTRADAY_WATCHLIST_MAX_SYMBOLS)
+        overflow = intraday_watchlist_capacity(INTRADAY_WATCHLIST_MAX_SYMBOLS + 1, max_symbols=INTRADAY_WATCHLIST_MAX_SYMBOLS)
 
         self.assertFalse(within["blocked"])
         self.assertTrue(overflow["blocked"])

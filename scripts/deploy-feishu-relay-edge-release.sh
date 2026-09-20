@@ -98,6 +98,7 @@ update_env() {
   rm -f "$temp"
 }
 update_env FEISHU_ADAPTER_IMAGE "$image_ref"
+update_env FEISHU_ADAPTER_HOTFIX_ENABLED false
 update_env APP_GIT_SHA "$release_sha"
 update_env APP_RELEASE "$release_label"
 update_env APP_BUILD_CREATED_AT "$built_at"
