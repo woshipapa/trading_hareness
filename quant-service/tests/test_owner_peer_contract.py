@@ -34,6 +34,29 @@ class OwnerPeerContractTests(unittest.TestCase):
         self.assertEqual(validate_contract(CONTRACT), [])
         self.assertIn("missing_alembic_head", validate_contract({"objects": []}))
 
+    def test_contract_accepts_owner_v2_derived_rule_map(self):
+        payload = dict(CONTRACT)
+        payload["derived_rules"] = {
+            "adjustment_factor_usable": {
+                "sql_predicate": "factor.provider LIKE 'tushare%' AND factor.raw->>'superseded_at' IS NULL",
+            }
+        }
+        self.assertEqual(validate_contract(payload), [])
+
+        with tempfile.TemporaryDirectory() as directory:
+            env = {
+                "PEER_OWNER_CONTRACT_MODE": "report_only",
+                "PEER_OWNER_CONTRACT_RECEIPT_PATH": str(Path(directory) / "receipt.json"),
+                "QUANT_SHARED_READ_API_BASE_URL": "http://owner:5681",
+                "QUANT_SHARED_READ_API_KEY": "redacted-test-key",
+            }
+            with patch("app.owner_peer_contract.requests.get") as get:
+                get.return_value.raise_for_status.return_value = None
+                get.return_value.json.return_value = payload
+                verify_owner_peer_contract(required=True, environ=env)
+            receipt = json.loads(Path(env["PEER_OWNER_CONTRACT_RECEIPT_PATH"]).read_text())
+            self.assertEqual(receipt["derived_rule_names"], ["adjustment_factor_usable"])
+
     def test_report_only_writes_receipt_but_does_not_block_first_run(self):
         with tempfile.TemporaryDirectory() as directory:
             env = {

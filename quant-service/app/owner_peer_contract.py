@@ -31,6 +31,31 @@ REQUIRED_OBJECT_COLUMNS = {
 }
 
 
+def _derived_rule_items(raw: Any) -> list[tuple[str, Mapping[str, Any]]]:
+    """Normalize the owner's v2 rule map and the original list draft.
+
+    The published peer-contract-v2 envelope emits ``derived_rules`` as a map
+    keyed by rule name.  Early local fixtures used a list of objects, so keep
+    accepting that shape for backwards-compatible tests and staged rollouts,
+    but always validate and persist one normalized representation.
+    """
+    if isinstance(raw, Mapping):
+        return [
+            (str(key), value)
+            for key, value in raw.items()
+            if isinstance(value, Mapping)
+        ]
+    if isinstance(raw, list):
+        items: list[tuple[str, Mapping[str, Any]]] = []
+        for value in raw:
+            if not isinstance(value, Mapping):
+                continue
+            name = str(value.get("name") or value.get("key") or value.get("id") or value.get("rule_id") or "")
+            items.append((name, value))
+        return items
+    return []
+
+
 class OwnerPeerContractError(RuntimeError):
     """Raised when a blocking owner-contract check cannot pass."""
 
@@ -104,14 +129,12 @@ def validate_contract(payload: Any) -> list[str]:
     if not isinstance(enums, Mapping) or not factor_values_ok:
         issues.append("missing_factor_semantics_enumeration")
     derived_rules = payload.get("derived_rules")
-    if not isinstance(derived_rules, list):
+    if not isinstance(derived_rules, (list, Mapping)):
         issues.append("missing_derived_rules")
     else:
         usable_rule = None
-        for rule in derived_rules:
-            if not isinstance(rule, Mapping):
-                continue
-            name = str(rule.get("name") or rule.get("key") or rule.get("id") or rule.get("rule_id") or "").strip()
+        for key, rule in _derived_rule_items(derived_rules):
+            name = str(rule.get("name") or rule.get("key") or rule.get("id") or rule.get("rule_id") or key).strip()
             if name == "adjustment_factor_usable":
                 usable_rule = rule
                 break
@@ -120,7 +143,7 @@ def validate_contract(payload: Any) -> list[str]:
         else:
             expression = " ".join(
                 str(usable_rule.get(field) or "")
-                for field in ("sql", "expression", "predicate", "rule", "expression_sql", "description")
+                for field in ("sql", "sql_predicate", "expression", "predicate", "rule", "expression_sql", "description")
             )
             if not expression.strip():
                 issues.append("derived_rule:adjustment_factor_usable:missing_expression")
@@ -161,9 +184,9 @@ def _write_receipt(path: Path, payload: Mapping[str, Any]) -> None:
         "contract_version": payload.get("contract_version"),
         "alembic_head": payload.get("alembic_head"),
         "derived_rule_names": sorted(
-            str(rule.get("name") or rule.get("key") or rule.get("id") or rule.get("rule_id"))
-            for rule in payload.get("derived_rules", [])
-            if isinstance(rule, Mapping) and (rule.get("name") or rule.get("key") or rule.get("id") or rule.get("rule_id"))
+            name
+            for name, rule in _derived_rule_items(payload.get("derived_rules"))
+            if name or rule.get("name") or rule.get("key") or rule.get("id") or rule.get("rule_id")
         ),
         "object_names": sorted(
             str(obj.get("name")) for obj in payload.get("objects", [])
