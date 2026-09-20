@@ -1002,6 +1002,33 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["capability"], "daily_bar")
         self.assertEqual(blocking.await_args.args[0].__name__, "persist_akshare_probe_result")
 
+    def test_akshare_probe_allows_board_taxonomy_its_measured_runtime_budget(self):
+        async def check() -> tuple[dict[str, object], AsyncMock]:
+            source_executor = AsyncMock(return_value=[])
+            disabled = {
+                "include_market_summary": False, "include_lhb": False, "include_strong_pool": False,
+                "include_supplements": True, "include_board_taxonomy": True,
+                "include_moneyflow": False, "include_limit_pools": False,
+                "include_lhb_supplements": False, "include_block_trades": False,
+                "include_corporate_risk": False, "include_analyst_heat": False,
+                "include_index_fund": False,
+            }
+            with patch("app.main.run_akshare_blocking", new=source_executor), \
+                 patch("app.main.run_database_blocking", new=AsyncMock(return_value=0)), \
+                 patch("app.main.open_provider_capabilities", new=AsyncMock(return_value=set())):
+                result = await akshare_probe(AkShareProbeRequest(**disabled))
+            return result, source_executor
+
+        result, source_executor = asyncio.run(check())
+        self.assertEqual(
+            [item["capability"] for item in result["results"]],
+            ["daily_bar", "market_breadth", "board_taxonomy"],
+        )
+        self.assertEqual(
+            [call.kwargs["timeout_seconds"] for call in source_executor.await_args_list],
+            [45, 45, 90],
+        )
+
     def test_akshare_probe_skips_the_upstream_when_capability_circuit_is_open(self):
         async def check() -> tuple[dict[str, object], AsyncMock]:
             source_executor = AsyncMock()
