@@ -15,7 +15,7 @@ import re
 from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable
 
-from .adjustment_factor_semantics import COMPLETE_FACTOR_PROVIDERS, persisted_factor_semantics_sql
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 from .owner_factor_repository import FACTOR_PROVIDER_ORDER
 from .replay_readiness_coverage import refresh_daily_coverage
 
@@ -141,7 +141,6 @@ async def sync(
                              FROM quant.daily_adjustment_factors factor
                             WHERE factor.trading_date=bar.trading_date
                               AND factor.symbol=bar.symbol
-                              AND factor.provider=ANY(%s::text[])
                               AND {persisted_factor_semantics_sql('factor')}
                               AND factor.adj_factor>0
                               AND factor.available_at<((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
@@ -151,7 +150,7 @@ async def sync(
                             LIMIT 1
                      ) selected_factor
                     WHERE bar.trading_date=%s""",
-                (list(COMPLETE_FACTOR_PROVIDERS), list(FACTOR_PROVIDER_ORDER), trade_date),
+                (list(FACTOR_PROVIDER_ORDER), trade_date),
             )
             connection.execute(
                 """UPDATE quant.market_bars_daily bar SET limit_up=limits.limit_up,limit_down=limits.limit_down

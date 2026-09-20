@@ -20,6 +20,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from psycopg.types.json import Json
 
 from .database import Database
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 from .owner_storage import eligible_cold_tables, tiered_relation_sql
 from .research_feature_export import export_training_table
 from .research_manifest import canonical_json, manifest_digest
@@ -54,7 +55,7 @@ DEFAULT_SAMPLE_SYMBOLS = 64
 LABEL_HORIZON_DAYS = 5
 
 
-TRAINING_ROWS_SQL = """
+TRAINING_ROWS_SQL = f"""
 WITH calendar AS (
     SELECT calendar_date AS trading_date,
            row_number() OVER (ORDER BY calendar_date)::int AS trading_index
@@ -93,9 +94,7 @@ WITH calendar AS (
           SELECT item.adj_factor,item.available_at
             FROM quant.daily_adjustment_factors item
            WHERE item.symbol=bar.symbol AND item.trading_date=bar.trading_date
-             AND item.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
-             AND ((item.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
-                  OR (item.provider='longhu_qfq_derived' AND item.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+             AND {persisted_factor_semantics_sql('item')}
              AND item.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
            ORDER BY CASE WHEN item.provider='longhu_qfq_derived' THEN 0
                          WHEN item.provider IN ('tushare_primary','tushare_super_sdk') THEN 1 ELSE 2 END,

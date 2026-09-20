@@ -161,6 +161,7 @@ class IntradayScanRepositoryTests(unittest.TestCase):
                 rows.append({
                     "symbol": symbol, "trading_date": date(2026, 7, day), "high": close * 1.02,
                     "low": close * 0.98, "close": close, "volume": 1000 + day, "adj_factor": 1.0,
+                    "factor_provider": "tushare_primary", "factor_raw": {},
                     "is_suspended": False, "limit_up": close * 1.1, "limit_down": close * 0.9, "is_st": False,
                 })
         connection = MagicMock()

@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 from psycopg.types.json import Json, Jsonb
 
 from .database import Database
-from .adjustment_factor_semantics import COMPLETE_FACTOR_PROVIDERS
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 from .daily_bar_repository import quarantine_tushare_daily_amount_mismatches
 from .instrument_registry import InstrumentRecord, ensure_instruments
 from .runtime_resources import DEFAULT_HOT_DATABASE_SOFT_BYTES, bounded_storage_budget_bytes
@@ -362,7 +362,7 @@ def _persist_daily(connection: Any, provider_key: str, available_at: datetime, i
 
 def _persist_adj_factor(connection: Any, provider_key: str, available_at: datetime, _ingested_at: datetime,
                         _availability_basis: str) -> None:
-    if provider_key not in COMPLETE_FACTOR_PROVIDERS:
+    if not provider_key.startswith("tushare") and provider_key != "longhu_qfq_derived":
         raise ValueError(f"{provider_key} cannot provide cumulative adjustment factors")
     _persist_instruments_from_stage(connection, provider_key)
     connection.execute(
@@ -373,7 +373,7 @@ def _persist_adj_factor(connection: Any, provider_key: str, available_at: dateti
            ) INSERT INTO quant.daily_adjustment_factors(symbol,trading_date,adj_factor,provider,available_at,raw)
            SELECT upper(row_data->>'ts_code'),to_date(row_data->>'trade_date','YYYYMMDD'),
                   nullif(row_data->>'adj_factor','')::numeric,%s,%s,
-                  row_data || jsonb_build_object('factor_semantics','cumulative_tushare','adjustment_state','complete')
+                  row_data || jsonb_build_object('factor_semantics','corporate_action_cumulative','adjustment_state','complete')
              FROM stage
             WHERE nullif(row_data->>'adj_factor','') IS NOT NULL
               AND nullif(row_data->>'adj_factor','') ~ '^[+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?$'
@@ -1053,12 +1053,10 @@ class AnnualDailyBackfill:
                           FROM (
                               SELECT DISTINCT ON(symbol,trading_date)
                                      symbol,trading_date,adj_factor
-                               FROM quant.daily_adjustment_factors
-                               WHERE trading_date BETWEEN %s AND %s
-                                 AND adj_factor>0
-                                 AND ((raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
-                                      OR (provider='longhu_qfq_derived' AND raw->>'method'='longhu_cq_preclose_qfq_v2'))
-                                 AND provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
+                               FROM quant.daily_adjustment_factors factor
+                               WHERE factor.trading_date BETWEEN %s AND %s
+                                 AND factor.adj_factor>0
+                                 AND {persisted_factor_semantics_sql('factor')}
                                ORDER BY symbol,trading_date,
                                         CASE provider
                                           WHEN 'longhu_qfq_derived' THEN 0

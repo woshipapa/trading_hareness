@@ -188,7 +188,6 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                          FROM quant.daily_adjustment_factors adjustment
                         WHERE adjustment.symbol=bar.symbol
                           AND adjustment.trading_date=bar.trading_date
-                          AND adjustment.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
                           AND {factor_semantics_sql}
                           AND adjustment.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                         ORDER BY CASE WHEN adjustment.provider='longhu_qfq_derived' THEN 0

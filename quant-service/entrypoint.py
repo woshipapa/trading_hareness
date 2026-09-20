@@ -104,16 +104,23 @@ def validate_owner_cutover_status(status: dict[str, object]) -> None:
 
 
 def validate_owner_semantics_status(status: dict[str, object]) -> None:
-    """Reject a peer release that cannot read the owner runtime schema."""
+    """Validate only the owner runtime projection, never proposed schema.
+
+    Owner v2 keeps factor semantics in ``raw`` and has no guard indexes.  The
+    machine-readable contract is the startup authority; this compatibility
+    validator accepts its non-blocking diagnostic shape for older callers.
+    """
     semantics = status.get("adjustment_semantics") or {}
-    legacy_ready = (
+    guard_status = (semantics.get("guard_indexes") or {}).get("status")
+    data_guard_status = (semantics.get("data_guard") or {}).get("status")
+    contract_ready = (
         semantics.get("ready") is True
-        and (semantics.get("guard_indexes") or {}).get("status") == "ready"
-        and (semantics.get("data_guard") or {}).get("status") == "ready"
+        and guard_status in {None, "ready", "not_applicable"}
+        and data_guard_status in {None, "ready", "not_applicable"}
     )
     compatible = (
         status.get("status") == "owner_compatible" and status.get("schema_ready") is True
-    ) or legacy_ready
+    ) or contract_ready
     if not compatible:
         issues = status.get("issues") or ["owner_runtime_schema_not_ready"]
         raise RuntimeError(

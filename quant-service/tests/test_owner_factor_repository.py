@@ -27,9 +27,9 @@ class OwnerFactorRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["providers"], ["longhu_qfq_derived"])
         self.assertEqual(payload["rows"][0]["ts_code"], "000001.SZ")
         self.assertIn("raw->>'factor_semantics'", statements[0])
-        self.assertIn("longhu_cq_preclose_qfq_v2", statements[0])
+        self.assertIn("corporate_action_cumulative", statements[0])
         self.assertIn("available_at<", statements[0])
-        self.assertIn("ANY(%s::text[])", statements[0])
+        self.assertNotIn("provider=ANY(%s::text[])", statements[0])
 
     def test_symbol_filter_is_available_for_explicit_core_controls(self):
         seen: list[tuple[object, ...]] = []

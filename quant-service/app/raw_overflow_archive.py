@@ -64,7 +64,11 @@ class RawOverflowConfig:
             item.strip() for item in str(env.get("QUANT_RAW_OVERFLOW_CAPABILITIES", "") or "").split(",")
             if item.strip()
         )
-        capabilities = configured or DEFAULT_CAPABILITIES
+        # ``daily_bar`` is the canonical owner hand-off stream.  Older peer
+        # env files omitted it, while the scheduler already polled it; keep
+        # that rollout mismatch from becoming a repeated 400 loop.  Operators
+        # can still disable the archive with QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED.
+        capabilities = tuple(dict.fromkeys((*configured, "daily_bar"))) if configured else DEFAULT_CAPABILITIES
         warning = _bounded_float(env.get("QUANT_RAW_OVERFLOW_WARNING_RATIO"), 0.80, 0.50, 0.98)
         stop = _bounded_float(env.get("QUANT_RAW_OVERFLOW_STOP_RATIO"), 0.90, warning, 0.99)
         return cls(

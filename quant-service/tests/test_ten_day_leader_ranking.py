@@ -22,6 +22,8 @@ class TenDayLeaderRankingTests(unittest.TestCase):
                 "pre_close": values[index - 1] if index else value,
                 "volume": 1000 + index,
                 "adj_factor": 1,
+                "provider": "tushare_primary",
+                "raw": {},
                 "limit_up": value if index == 10 else value * 1.1,
                 "is_suspended": False,
                 "available_at": datetime(2026, 8, 13, 8, index, tzinfo=timezone.utc),

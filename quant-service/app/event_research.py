@@ -9,9 +9,10 @@ existing shadow-strategy research, and are re-runnable rather than static
 prose. None of them changes a live threshold, a strategy's live_effect or an
 analyst weight; they are descriptive_only evidence for the promotion
 registries this codebase already requires before anything can go live.
-Cross-session returns use ``raw price * cumulative factor`` from the explicit
-Longhu-derived or licensed Tushare provider allow-list; exchange limit checks
-deliberately remain on raw prices.
+Cross-session returns use ``raw price * cumulative factor`` from the owner
+``peer-contract-v2`` derived rule; a missing Tushare semantic key is valid,
+while superseded rows and non-priceable providers are excluded. Exchange
+limit checks deliberately remain on raw prices.
 """
 
 from __future__ import annotations
@@ -23,11 +24,12 @@ from .owner_storage import TIERED_EVIDENCE_TABLES, eligible_cold_tables, tiered_
 from .sector_membership_repository import point_in_time_membership_predicate
 
 from psycopg.types.json import Json
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 BENCHMARK_SYMBOL = "000300.SH"
 
 # ``daily_adjustment_factors`` is the owner-maintained semantic source for
-# adjusted research prices.  Keep this list in SQL as well as in
+# adjusted research prices.  Keep provider precedence in SQL as well as in
 # ``owner_factor_repository`` because these studies run as one bounded query
 # against the hot+cold snapshot and must not fall back to the bar-side factor.
 _FACTOR_PROVIDERS_SQL = "ARRAY['longhu_qfq_derived','tushare','tushare_primary','tushare_backup','tushare_super','tushare_super_get','tushare_super_sdk']::text[]"
@@ -36,11 +38,10 @@ _FACTOR_PROVIDERS_SQL = "ARRAY['longhu_qfq_derived','tushare','tushare_primary',
 def _factorized_bars_cte() -> str:
     """Return CTEs exposing only bars with a PIT, licensed factor.
 
-    The owner stores the Longhu-derived series using the historical
-    ``cumulative_tushare`` shape label for schema compatibility.  Provider
-    precedence is intentionally before availability: a newer Tushare
+    Provider precedence is intentionally before availability: a newer Tushare
     checkpoint must not displace the owner's Longhu row.
     """
+    factor_semantics_sql = persisted_factor_semantics_sql("item")
     return f"""eligible_bars AS NOT MATERIALIZED (
                 SELECT bar.*,factor.adj_factor AS persisted_adj_factor
                   FROM quant.canonical_bars_daily bar
@@ -49,9 +50,7 @@ def _factorized_bars_cte() -> str:
                          FROM quant.daily_adjustment_factors item
                         WHERE item.symbol=bar.symbol
                           AND item.trading_date=bar.trading_date
-                          AND item.provider=ANY({_FACTOR_PROVIDERS_SQL})
-                          AND ((item.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
-                               OR (item.provider='longhu_qfq_derived' AND item.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                          AND {factor_semantics_sql}
                           AND item.adj_factor>0
                           AND item.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                         ORDER BY array_position({_FACTOR_PROVIDERS_SQL},item.provider) NULLS LAST,

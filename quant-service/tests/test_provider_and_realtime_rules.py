@@ -416,7 +416,7 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         factor_params = [params for statement, params in connection.calls if "daily_adjustment_factors" in statement]
         self.assertEqual(len(factor_params), 1)
         factor_payload = getattr(factor_params[0][5], "obj", factor_params[0][5])
-        self.assertEqual(factor_payload["factor_semantics"], "cumulative_tushare")
+        self.assertEqual(factor_payload["factor_semantics"], "corporate_action_cumulative")
         self.assertEqual(factor_payload["adjustment_state"], "complete")
         self.assertIn("SET limit_up=%s,limit_down=%s", sql)
 
@@ -443,8 +443,8 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(update[1], ("600001.SH", date(2026, 8, 10)))
 
     def test_adjustment_factor_removes_ex_right_price_jump_from_factor_returns(self):
-        bars = [{"close": 10.0, "adj_factor": 1.0} for _ in range(5)]
-        bars.append({"close": 5.0, "adj_factor": 2.0})
+        bars = [{"close": 10.0, "adj_factor": 1.0, "provider": "tushare_primary", "raw": {}} for _ in range(5)]
+        bars.append({"close": 5.0, "adj_factor": 2.0, "provider": "tushare_primary", "raw": {}})
         self.assertEqual(factor_at(bars, 5, "momentum_5d"), 0.0)
         self.assertEqual(factor_at(bars, 5, "sma_gap_20d"), None)
 

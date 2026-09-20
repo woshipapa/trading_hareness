@@ -146,7 +146,6 @@ def load_universe_bars(connection: Any, universe_key: str, start_date: date, end
                  SELECT factor.adj_factor,factor.provider,factor.raw
                    FROM quant.daily_adjustment_factors factor
                   WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
-                    AND factor.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
                     AND {factor_semantics_sql}
                     AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                   ORDER BY CASE WHEN factor.provider='longhu_qfq_derived' THEN 0

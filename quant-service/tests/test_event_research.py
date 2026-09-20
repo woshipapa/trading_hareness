@@ -43,7 +43,7 @@ def _upsert_event_bar(connection, bar: DailyBar) -> None:
     connection.execute(
         """INSERT INTO quant.daily_adjustment_factors(
                  symbol,trading_date,adj_factor,provider,available_at,raw)
-           VALUES(%s,%s,%s,'tushare_primary',%s,jsonb_build_object('factor_semantics','cumulative_tushare'))
+           VALUES(%s,%s,%s,'tushare_primary',%s,jsonb_build_object('factor_semantics','corporate_action_cumulative'))
            ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET
              adj_factor=EXCLUDED.adj_factor,available_at=EXCLUDED.available_at,
              raw=EXCLUDED.raw""",
@@ -87,7 +87,7 @@ class EventResearchSqlContractTests(unittest.TestCase):
             )
         sql = connection.calls[0][0]
         self.assertIn("raw->>'factor_semantics'", sql)
-        self.assertIn("longhu_cq_preclose_qfq_v2", sql)
+        self.assertIn("corporate_action_cumulative", sql)
         self.assertIn("array_position(ARRAY['longhu_qfq_derived'", sql)
         self.assertIn("e.open entry_raw_open", sql)
         self.assertIn("e.open*e.persisted_adj_factor entry_price", sql)

@@ -18,6 +18,7 @@ from typing import Any, Iterable
 import numpy as np
 
 from .strategy_thresholds import MAX_ENTRY_INTRADAY_GAIN_PCT
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
 MODEL_VERSION = "watchlist-main-wave-logit-v1"
@@ -399,18 +400,17 @@ def research_from_rows(rows: Iterable[dict[str, Any]], start_date: date, end_dat
 
 
 def run_watchlist_main_wave_research(connection: Any, end_date: date | None = None) -> dict[str, Any]:
+    factor_sql = persisted_factor_semantics_sql("factor")
     latest = connection.execute(
-        """SELECT max(b.trading_date) AS latest FROM quant.canonical_bars_daily b
+        f"""SELECT max(b.trading_date) AS latest FROM quant.canonical_bars_daily b
              JOIN quant.intraday_watchlists w ON w.symbol=b.symbol AND w.enabled
             WHERE b.quality_status='fresh'
               AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
               AND EXISTS (
                     SELECT 1 FROM quant.daily_adjustment_factors factor
                      WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
-                       AND factor.provider IN ('longhu_qfq_derived','tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup')
                        AND factor.adj_factor>0
-                       AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
-                            OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                       AND {factor_sql}
                        AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
               )"""
     ).fetchone()
@@ -420,7 +420,7 @@ def run_watchlist_main_wave_research(connection: Any, end_date: date | None = No
                 "metrics": {"reason": "watchlist_has_no_daily_bars"}, "parameters": {}, "equity_curve": [], "trades": []}
     start_date = selected_end - timedelta(days=365)
     rows = connection.execute(
-        """SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,
+        f"""SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,
                   pit_adjustment.adj_factor,
                   b.is_suspended,b.limit_up,b.limit_down
              FROM quant.canonical_bars_daily b
@@ -430,10 +430,8 @@ def run_watchlist_main_wave_research(connection: Any, end_date: date | None = No
                    SELECT factor.adj_factor
                      FROM quant.daily_adjustment_factors factor
                    WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
-                      AND factor.provider IN ('longhu_qfq_derived','tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup')
                       AND factor.adj_factor>0
-                      AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
-                           OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                      AND {factor_sql}
                       AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     -- Longhu is the owner-authoritative factor source.  A
                     -- later peer checkpoint must not silently win merely

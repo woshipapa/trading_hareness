@@ -14,13 +14,15 @@ from app.owner_peer_contract import (
 
 
 CONTRACT = {
-    "alembic_head": "20260919_0106",
+    "contract_version": "peer-contract-v2",
+    "alembic_head": "20260920_0107",
     "objects": [
         {"name": "quant.canonical_bars_daily", "columns": ["symbol", "trading_date", "adj_factor", "available_at", "quality_status"]},
         {"name": "quant.daily_adjustment_factors", "columns": ["symbol", "trading_date", "adj_factor", "provider", "available_at", "raw"]},
     ],
     "cold_tier": {"tables": ["quant.legacy_source_records"], "peer_readable": False},
     "enumerations": {"factor_semantics": ["corporate_action_cumulative", "same_day_identity_only"]},
+    "derived_rules": [{"name": "adjustment_factor_usable", "sql": "provider LIKE 'tushare%' AND raw->>'superseded_at' IS NULL"}],
     "not_provided": [],
     "endpoints": [],
     "rules": [],
@@ -44,7 +46,7 @@ class OwnerPeerContractTests(unittest.TestCase):
                 get.return_value.raise_for_status.return_value = None
                 get.return_value.json.return_value = CONTRACT
                 result = verify_owner_peer_contract(required=True, environ=env)
-            self.assertEqual(result["alembic_head"], "20260919_0106")
+            self.assertEqual(result["alembic_head"], "20260920_0107")
             self.assertEqual(json.loads(Path(env["PEER_OWNER_CONTRACT_RECEIPT_PATH"]).read_text())["status"], "passed")
 
     def test_block_mode_needs_a_prior_receipt(self):

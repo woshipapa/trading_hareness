@@ -52,6 +52,13 @@ class _Database:
 
 
 class RawOverflowArchiveTests(unittest.TestCase):
+    def test_legacy_env_allowlist_keeps_canonical_daily_bar_stream(self):
+        config = RawOverflowConfig.from_env({
+            "QUANT_RAW_OVERFLOW_CAPABILITIES": "realtime_quote,rt_min",
+            "QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED": "false",
+        })
+        self.assertEqual(capability_from_stream("raw_market_observations:daily_bar", config), "daily_bar")
+
     def test_daily_bar_stream_is_an_explicit_owner_allowlist_capability(self):
         config = RawOverflowConfig(enabled=True, capabilities=DEFAULT_CAPABILITIES)
         self.assertEqual(capability_from_stream("raw_market_observations:daily_bar", config), "daily_bar")

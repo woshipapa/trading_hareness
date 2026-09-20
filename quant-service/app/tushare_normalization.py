@@ -8,7 +8,7 @@ import re
 
 from psycopg.types.json import Json
 
-from .adjustment_factor_semantics import COMPLETE_FACTOR_SEMANTICS, COMPLETE_FACTOR_PROVIDERS, positive_decimal
+from .adjustment_factor_semantics import COMPLETE_FACTOR_SEMANTICS, positive_decimal
 from .instrument_registry import InstrumentRecord, ensure_instruments
 
 
@@ -162,7 +162,7 @@ def normalize_rows(
                     upsert_bar(connection, daily_bar_type(symbol=symbol, trading_date=trading_date, open=decimal_or_none(row.get("open")), high=decimal_or_none(row.get("high")), low=decimal_or_none(row.get("low")), close=decimal_or_none(row.get("close")), pre_close=decimal_or_none(row.get("pre_close")), volume=decimal_or_none(row.get("vol")), amount=decimal_or_none(row.get("amount")), source=provider_key, available_at=available_at))
                 elif api_name == "adj_factor":
                     adj_factor = positive_decimal(row.get("adj_factor"))
-                    if provider_key not in COMPLETE_FACTOR_PROVIDERS:
+                    if not provider_key.startswith("tushare") and provider_key != "longhu_qfq_derived":
                         raise ValueError(f"{provider_key} cannot provide cumulative adjustment factors")
                     if adj_factor is None:
                         raise ValueError("adj_factor row has no positive adj_factor")

@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 from psycopg.types.json import Json
 
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
+
 
 @dataclass(frozen=True)
 class TenDayRankingInputs:
@@ -21,7 +23,7 @@ def latest_full_market_date(database: Any, minimum_full_market_symbols: int) -> 
     """Resolve the latest point-in-time all-A cross-section meeting both gates."""
     with database.transaction() as connection:
         row = connection.execute(
-            """WITH dates AS (
+            f"""WITH dates AS (
                    SELECT DISTINCT trading_date FROM quant.canonical_bars_daily
                     WHERE quality_status='fresh'
                       AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
@@ -43,10 +45,8 @@ def latest_full_market_date(database: Any, minimum_full_market_symbols: int) -> 
                        AND EXISTS (
                            SELECT 1 FROM quant.daily_adjustment_factors factor
                             WHERE factor.symbol=bar.symbol AND factor.trading_date=bar.trading_date
-                              AND factor.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
                               AND factor.adj_factor>0
-                              AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
-                                   OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                              AND {persisted_factor_semantics_sql('factor')}
                               AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                        )
                       AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
@@ -65,7 +65,7 @@ def load_ten_day_ranking_inputs(database: Any, as_of_date: date) -> TenDayRankin
     """Load an exact universe snapshot and at most eleven stored bars per symbol."""
     with database.transaction() as connection:
         coverage = connection.execute(
-            """WITH active AS (
+            f"""WITH active AS (
                    SELECT DISTINCT symbol FROM quant.universe_membership_history
                     WHERE universe_key='all_a' AND effective_from<=%s
                       AND (effective_to IS NULL OR effective_to>=%s)
@@ -74,10 +74,8 @@ def load_ten_day_ranking_inputs(database: Any, as_of_date: date) -> TenDayRankin
                       count(DISTINCT bar.symbol) FILTER (WHERE bar.adj_factor>0 AND EXISTS (
                           SELECT 1 FROM quant.daily_adjustment_factors factor
                            WHERE factor.symbol=bar.symbol AND factor.trading_date=bar.trading_date
-                             AND factor.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
                              AND factor.adj_factor>0
-                             AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
-                                  OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                             AND {persisted_factor_semantics_sql('factor')}
                              AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                       ))::int AS daily_symbols,
                       max(bar.available_at) AS strategy_available_at
@@ -88,7 +86,7 @@ def load_ten_day_ranking_inputs(database: Any, as_of_date: date) -> TenDayRankin
             (as_of_date, as_of_date, as_of_date, as_of_date),
         ).fetchone()
         rows = connection.execute(
-            """WITH active AS (
+            f"""WITH active AS (
                    SELECT DISTINCT symbol FROM quant.universe_membership_history
                     WHERE universe_key='all_a' AND effective_from<=%s
                       AND (effective_to IS NULL OR effective_to>=%s)
@@ -106,10 +104,8 @@ def load_ten_day_ranking_inputs(database: Any, as_of_date: date) -> TenDayRankin
                       AND EXISTS (
                           SELECT 1 FROM quant.daily_adjustment_factors factor
                            WHERE factor.symbol=bar.symbol AND factor.trading_date=bar.trading_date
-                             AND factor.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
                              AND factor.adj_factor>0
-                             AND ((factor.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived')
-                                  OR (factor.provider='longhu_qfq_derived' AND factor.raw->>'method'='longhu_cq_preclose_qfq_v2'))
+                             AND {persisted_factor_semantics_sql('factor')}
                              AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                       )
                       AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')

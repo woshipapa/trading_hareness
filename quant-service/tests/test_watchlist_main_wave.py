@@ -32,14 +32,14 @@ class WatchlistMainWaveTests(unittest.TestCase):
     def test_research_sql_allows_owner_longhu_factors_but_rejects_unknown_providers(self) -> None:
         for relative in ("app/watchlist_main_wave.py", "app/watchlist_main_wave_v2.py"):
             source = Path(relative).read_text(encoding="utf-8")
-            self.assertIn("factor.provider IN ('longhu_qfq_derived'", source, relative)
+            self.assertIn("persisted_factor_semantics_sql", source, relative)
             self.assertLess(
                 source.index("ORDER BY CASE WHEN factor.provider='longhu_qfq_derived'"),
                 source.index("factor.available_at DESC"),
                 relative,
             )
         source = Path("app/watchlist_countertrend_rebound.py").read_text(encoding="utf-8")
-        self.assertIn("factor.provider = ANY(%s::text[])", source)
+        self.assertIn("persisted_factor_semantics_sql", source)
         self.assertIn('store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")', source)
         self.assertLess(source.index("ORDER BY array_position(%s::text[],factor.provider)"),
                         source.index("factor.available_at DESC"))

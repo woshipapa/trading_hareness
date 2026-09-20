@@ -61,6 +61,8 @@ def validate_contract(payload: Any) -> list[str]:
     issues: list[str] = []
     if not isinstance(payload, Mapping):
         return ["payload_not_object"]
+    if str(payload.get("contract_version") or "").strip() != "peer-contract-v2":
+        issues.append("unsupported_contract_version")
     if not str(payload.get("alembic_head") or "").strip():
         issues.append("missing_alembic_head")
     objects = payload.get("objects")
@@ -95,8 +97,33 @@ def validate_contract(payload: Any) -> list[str]:
     if not isinstance(cold, Mapping) or not isinstance(cold.get("tables"), list):
         issues.append("missing_cold_tier")
     enums = payload.get("enumerations")
-    if not isinstance(enums, Mapping) or not isinstance(enums.get("factor_semantics"), list):
+    factor_enum = enums.get("factor_semantics") if isinstance(enums, Mapping) else None
+    factor_values_ok = isinstance(factor_enum, list) or (
+        isinstance(factor_enum, Mapping) and isinstance(factor_enum.get("values"), list)
+    )
+    if not isinstance(enums, Mapping) or not factor_values_ok:
         issues.append("missing_factor_semantics_enumeration")
+    derived_rules = payload.get("derived_rules")
+    if not isinstance(derived_rules, list):
+        issues.append("missing_derived_rules")
+    else:
+        usable_rule = None
+        for rule in derived_rules:
+            if not isinstance(rule, Mapping):
+                continue
+            name = str(rule.get("name") or rule.get("key") or rule.get("id") or rule.get("rule_id") or "").strip()
+            if name == "adjustment_factor_usable":
+                usable_rule = rule
+                break
+        if usable_rule is None:
+            issues.append("missing_derived_rule:adjustment_factor_usable")
+        else:
+            expression = " ".join(
+                str(usable_rule.get(field) or "")
+                for field in ("sql", "expression", "predicate", "rule", "expression_sql", "description")
+            )
+            if not expression.strip():
+                issues.append("derived_rule:adjustment_factor_usable:missing_expression")
     for key in ("not_provided", "endpoints", "rules"):
         if key in payload and not isinstance(payload[key], list):
             issues.append(f"{key}_not_list")
@@ -131,7 +158,13 @@ def _write_receipt(path: Path, payload: Mapping[str, Any]) -> None:
     receipt = {
         "status": "passed",
         "passed_at": datetime.now(timezone.utc).isoformat(),
+        "contract_version": payload.get("contract_version"),
         "alembic_head": payload.get("alembic_head"),
+        "derived_rule_names": sorted(
+            str(rule.get("name") or rule.get("key") or rule.get("id") or rule.get("rule_id"))
+            for rule in payload.get("derived_rules", [])
+            if isinstance(rule, Mapping) and (rule.get("name") or rule.get("key") or rule.get("id") or rule.get("rule_id"))
+        ),
         "object_names": sorted(
             str(obj.get("name")) for obj in payload.get("objects", [])
             if isinstance(obj, Mapping) and obj.get("name")
@@ -152,7 +185,12 @@ def _receipt_passed(path: Path) -> bool:
     try:
         with path.open(encoding="utf-8") as handle:
             receipt = json.load(handle)
-        return receipt.get("status") == "passed" and bool(receipt.get("passed_at"))
+        return (
+            receipt.get("status") == "passed"
+            and bool(receipt.get("passed_at"))
+            and receipt.get("contract_version") == "peer-contract-v2"
+            and "adjustment_factor_usable" in (receipt.get("derived_rule_names") or [])
+        )
     except (OSError, ValueError, AttributeError):
         return False
 

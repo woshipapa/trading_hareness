@@ -80,19 +80,20 @@ def candidates(
                       AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     ORDER BY symbol,available_at DESC
                ), factors AS (
-                   SELECT DISTINCT ON (factor.symbol,factor.trading_date) factor.symbol,factor.trading_date,factor.adj_factor
+                   SELECT DISTINCT ON (factor.symbol,factor.trading_date) factor.symbol,factor.trading_date,
+                          factor.adj_factor,factor.provider AS factor_provider,factor.raw AS factor_raw
                      FROM quant.daily_adjustment_factors factor
                     WHERE factor.trading_date<=%s AND factor.trading_date>=%s
                       AND factor.adj_factor IS NOT NULL AND factor.adj_factor>0
                       AND {factor_semantics_sql}
                       AND factor.raw->>'factor_semantics' IS DISTINCT FROM 'same_day_identity_only'
-                      AND factor.provider=ANY(%s::text[])
                       AND factor.available_at < ((factor.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     ORDER BY factor.symbol,factor.trading_date,
                              array_position(%s::text[],factor.provider) NULLS LAST,
                              factor.available_at DESC
                ), ranked AS (
-                   SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,f.adj_factor,i.name,
+                   SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,f.adj_factor,
+                          f.factor_provider,f.factor_raw,i.name,
                           close_day.amount,basic.turnover_rate,basic.volume_ratio,basic.pe,basic.pb,
                           flow.net_amount AS main_net_amount,
                           row_number() OVER (PARTITION BY b.symbol ORDER BY b.trading_date DESC) AS rn
@@ -114,7 +115,7 @@ def candidates(
             (as_of_date, list(store_values("fundamentals.daily_basic", "daily_fundamentals", "provider")),
              as_of_date, primary_store_value("flow.stock_daily", "stock_money_flow_daily", "source"),
              as_of_date, as_of_date - timedelta(days=70),
-             list(FACTOR_PROVIDER_ORDER), list(FACTOR_PROVIDER_ORDER),
+             list(FACTOR_PROVIDER_ORDER),
              as_of_date, as_of_date, as_of_date - timedelta(days=70)),
         ).fetchall()
     return screen(

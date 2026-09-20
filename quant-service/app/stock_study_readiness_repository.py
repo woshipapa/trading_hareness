@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from .adjustment_factor_semantics import COMPLETE_FACTOR_PROVIDERS, persisted_factor_semantics_sql
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
 _SPECS = (
@@ -50,10 +50,9 @@ def stock_window_readiness(database: Any, symbol: str, start_date: date, end_dat
                     f"""SELECT count(DISTINCT trading_date)::int rows,max(trading_date) latest_date
                          FROM quant.daily_adjustment_factors
                         WHERE symbol=%s AND trading_date BETWEEN %s AND %s
-                          AND provider=ANY(%s::text[])
                           AND {persisted_factor_semantics_sql('factor')}
                           AND adj_factor>0 AND available_at<=now()""",
-                    (symbol, start_date, end_date, list(COMPLETE_FACTOR_PROVIDERS)),
+                    (symbol, start_date, end_date),
                 ).fetchone()
                 rows, latest_date = int(row["rows"] or 0), row["latest_date"]
             elif table is not None:

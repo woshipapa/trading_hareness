@@ -430,12 +430,10 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
               AND EXISTS (
                     SELECT 1 FROM quant.daily_adjustment_factors factor
                      WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
-                       AND factor.provider = ANY(%s::text[])
                        AND factor.adj_factor>0
                        AND {factor_semantics_sql}
                        AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-              )""", (strategy_taxonomies("countertrend_rebound_shadow")[0], list(TECH_INDUSTRIES),
-                         list(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider"))),
+              )""", (strategy_taxonomies("countertrend_rebound_shadow")[0], list(TECH_INDUSTRIES)),
     ).fetchone()
     selected_end = (
         min(end_date, latest["latest"]) if end_date and latest and latest["latest"]
@@ -452,6 +450,8 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
     raw_bars = connection.execute(
             f"""SELECT b.symbol,i.name,b.trading_date,b.open,b.high,b.low,b.close,b.volume,b.amount,
                   pit_adjustment.adj_factor,
+                  pit_adjustment.provider AS factor_provider,
+                  pit_adjustment.raw AS factor_raw,
                   b.is_suspended,b.limit_up,b.limit_down
              FROM quant.canonical_bars_daily b
              JOIN quant.intraday_watchlists w ON w.symbol=b.symbol AND w.enabled
@@ -470,9 +470,9 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
              ) industry_membership ON industry_membership.sector_key=ANY(%s)
              LEFT JOIN LATERAL (
                    SELECT factor.adj_factor
+                          ,factor.provider,factor.raw
                      FROM quant.daily_adjustment_factors factor
                    WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
-                      AND factor.provider = ANY(%s::text[])
                       AND factor.adj_factor>0
                       AND {factor_semantics_sql}
                       AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
@@ -487,7 +487,6 @@ def run_countertrend_rebound_research(connection: Any, end_date: date | None = N
               AND pit_adjustment.adj_factor IS NOT NULL
             ORDER BY b.symbol,b.trading_date""",
         (strategy_taxonomies("countertrend_rebound_shadow")[0], list(TECH_INDUSTRIES),
-         list(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")),
          list(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")),
          start_date, selected_end),
     ).fetchall()

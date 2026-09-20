@@ -9,7 +9,8 @@ class PostCloseAndAlertRuleTests(unittest.TestCase):
         for index in range(15):
             close = 10.0 + (index % 3) * 0.05
             bars.append({"high": close + 0.08, "low": close - 0.08, "close": close,
-                         "volume": 100 if index < 12 else 60, "adj_factor": 1.0})
+                         "volume": 100 if index < 12 else 60, "adj_factor": 1.0,
+                         "provider": "tushare_primary", "raw": {}})
         forming = post_close_forming_structure(bars)
         self.assertIn(forming["status"], {"forming", "not_ready"})
         self.assertEqual(forming["bar_count"], 15)
@@ -25,7 +26,8 @@ class PostCloseAndAlertRuleTests(unittest.TestCase):
         self.assertGreaterEqual(started["metrics"]["volume_multiple_5d"], 1.5)
 
     def test_post_close_structures_refuse_mixed_adjustment_basis(self):
-        bars = [{"high": 10.2, "low": 9.8, "close": 10.0, "volume": 100, "adj_factor": 1.0}
+        bars = [{"high": 10.2, "low": 9.8, "close": 10.0, "volume": 100, "adj_factor": 1.0,
+                 "provider": "tushare_primary", "raw": {}}
                 for _ in range(30)]
         bars[-1].pop("adj_factor")
         result = daily_base_structure(bars)

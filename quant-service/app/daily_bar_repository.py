@@ -17,7 +17,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from .analysis import as_utc
-from .adjustment_factor_semantics import COMPLETE_FACTOR_PROVIDERS, positive_decimal
+from .adjustment_factor_semantics import positive_decimal
 from .instrument_registry import InstrumentRecord, ensure_instruments
 from .request_models import DailyBar
 
@@ -55,7 +55,8 @@ def persisted_adjustment_state(bar: DailyBar) -> str:
     """Derive the bar-side state without promoting an unlicensed factor."""
     if positive_decimal(bar.adj_factor) is None:
         return "absent"
-    return "complete" if bar.source in COMPLETE_FACTOR_PROVIDERS else "pending"
+    source = str(bar.source or "")
+    return "complete" if source.startswith("tushare") or source == "longhu_qfq_derived" else "pending"
 
 
 def daily_amount_unit_mismatch(*, source: str, amount: Decimal | None,

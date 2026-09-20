@@ -53,7 +53,7 @@ class AnnualDailyBackfillTests(unittest.TestCase):
     def test_historical_factor_backfill_only_promotes_positive_allowlisted_factors(self):
         source = Path("app/annual_daily_backfill.py").read_text(encoding="utf-8")
         persist_section = source[source.index("def _persist_adj_factor"):source.index("def _persist_daily_basic")]
-        self.assertIn("COMPLETE_FACTOR_PROVIDERS", persist_section)
+        self.assertIn("provider_key.startswith(\"tushare\")", persist_section)
         self.assertIn("cannot provide cumulative adjustment factors", persist_section)
         self.assertIn("available_at,raw", persist_section)
         self.assertIn("factor_semantics", persist_section)

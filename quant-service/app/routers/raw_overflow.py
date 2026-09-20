@@ -72,7 +72,7 @@ def build_raw_overflow_router(deps: RawOverflowDependencies) -> APIRouter:
                 partial(deps.next_batch, deps.database, stream=stream_key, limit=limit, config=deps.config()), timeout_seconds=30,
             )
         except ValueError as error:
-            LOGGER.warning("raw overflow next rejected stream=%s limit=%s error=%s", stream_key, limit, error)
+            LOGGER.error("raw overflow next rejected stream=%s limit=%s error=%s", stream_key, limit, error, exc_info=True)
             raise HTTPException(status_code=400, detail=str(error)) from error
         except Exception as error:  # noqa: BLE001 - boundary must expose durable evidence
             LOGGER.exception("raw overflow next database failure stream=%s limit=%s", stream_key, limit)
@@ -86,7 +86,7 @@ def build_raw_overflow_router(deps: RawOverflowDependencies) -> APIRouter:
                 partial(deps.acknowledge, deps.database, payload=payload.model_dump(mode="json"), config=deps.config()), timeout_seconds=30,
             )
         except ValueError as error:
-            LOGGER.warning("raw overflow ack rejected stream=%s batch=%s error=%s", payload.stream_key, payload.batch_id, error)
+            LOGGER.error("raw overflow ack rejected stream=%s batch=%s error=%s", payload.stream_key, payload.batch_id, error, exc_info=True)
             raise HTTPException(status_code=409, detail=str(error)) from error
         except Exception as error:  # noqa: BLE001
             LOGGER.exception("raw overflow ack database failure stream=%s batch=%s", payload.stream_key, payload.batch_id)
@@ -100,7 +100,7 @@ def build_raw_overflow_router(deps: RawOverflowDependencies) -> APIRouter:
                 partial(deps.failure, deps.database, payload=payload.model_dump(mode="json"), config=deps.config()), timeout_seconds=20,
             )
         except ValueError as error:
-            LOGGER.warning("raw overflow failure report rejected stream=%s error=%s", payload.stream_key, error)
+            LOGGER.error("raw overflow failure report rejected stream=%s error=%s", payload.stream_key, error, exc_info=True)
             raise HTTPException(status_code=400, detail=str(error)) from error
         except Exception as error:  # noqa: BLE001
             LOGGER.exception("raw overflow failure report database failure stream=%s", payload.stream_key)

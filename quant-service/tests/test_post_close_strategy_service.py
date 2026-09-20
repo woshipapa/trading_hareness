@@ -158,7 +158,6 @@ class PostCloseStructureSourceTests(unittest.TestCase):
         self.assertEqual(parameters, (as_of, ["tushare_super_get", "longhuvip_composite"], as_of,
                                       "longhuvip_main_net", as_of, start,
                                       ["longhu_qfq_derived", "tushare", "tushare_primary", "tushare_backup", "tushare_super", "tushare_super_get", "tushare_super_sdk"],
-                                      ["longhu_qfq_derived", "tushare", "tushare_primary", "tushare_backup", "tushare_super", "tushare_super_get", "tushare_super_sdk"],
                                       as_of, as_of, start))
         self.assertIn("quant.daily_fundamentals", statement)
         self.assertNotIn("tushare_raw_records", statement)

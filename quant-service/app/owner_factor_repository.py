@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from .adjustment_factor_semantics import COMPLETE_FACTOR_PROVIDERS, persisted_factor_semantics_sql
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
 FACTOR_PROVIDER_ORDER = (
@@ -36,9 +36,9 @@ def read_persisted_factor_controls(
     parameters: tuple[Any, ...]
     if symbols is not None:
         symbol_clause = " AND bar.symbol=ANY(%s::text[])"
-        parameters = (list(COMPLETE_FACTOR_PROVIDERS), list(FACTOR_PROVIDER_ORDER), trade_date, list(symbols))
+        parameters = (list(FACTOR_PROVIDER_ORDER), trade_date, list(symbols))
     else:
-        parameters = (list(COMPLETE_FACTOR_PROVIDERS), list(FACTOR_PROVIDER_ORDER), trade_date)
+        parameters = (list(FACTOR_PROVIDER_ORDER), trade_date)
     factor_semantics_sql = persisted_factor_semantics_sql("item")
     rows = connection.execute(
         f"""SELECT bar.symbol AS ts_code,
@@ -57,7 +57,6 @@ def read_persisted_factor_controls(
                          FROM quant.daily_adjustment_factors item
                         WHERE item.symbol=bar.symbol
                           AND item.trading_date=bar.trading_date
-                          AND item.provider=ANY(%s::text[])
                           AND {factor_semantics_sql}
                           AND item.adj_factor>0
                           AND item.available_at<((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
@@ -93,16 +92,15 @@ def read_persisted_factor_window(
                       factor.raw->>'factor_semantics' AS factor_semantics,
                       CASE WHEN {factor_semantics_sql} THEN 'complete' ELSE 'pending' END AS adjustment_state,
                       factor.available_at
-                 FROM quant.daily_adjustment_factors factor
+                FROM quant.daily_adjustment_factors factor
                 WHERE factor.symbol=%s AND factor.trading_date BETWEEN %s AND %s
-                  AND factor.provider=ANY(%s::text[])
                   AND {factor_semantics_sql}
                   AND factor.adj_factor>0
                   AND factor.available_at<((factor.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                 ORDER BY factor.trading_date,
                          array_position(%s::text[],factor.provider) NULLS LAST,
                          factor.available_at DESC,factor.provider""",
-        (symbol, start_date, end_date, list(COMPLETE_FACTOR_PROVIDERS), list(FACTOR_PROVIDER_ORDER)),
+        (symbol, start_date, end_date, list(FACTOR_PROVIDER_ORDER)),
     ).fetchall()
     # The table's primary key is provider-specific, so multiple checkpoints
     # can otherwise leak into the on-demand projection. Keep the first row

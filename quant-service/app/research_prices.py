@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .adjustment_factor_semantics import COMPLETE_FACTOR_SEMANTICS, COMPLETE_FACTOR_PROVIDERS
+from .adjustment_factor_semantics import factor_usable
 
 
 ADJUSTMENT_MISSING_FLAG = "adj_factor_missing"
@@ -27,22 +27,17 @@ def number(value: Any) -> float | None:
 def research_price_eligible(row: dict[str, Any]) -> bool:
     """Return whether a stored bar carries an eligible adjustment contract.
 
-    Older pure-function callers may provide only ``adj_factor``; those rows
-    remain usable for compatibility tests.  Database projections that expose
-    the owner semantic columns are fail-closed: a positive number is not
-    enough when the row is pending, retired, or marked as a non-cumulative
-    identity factor.
+    Owner v2 requires provider provenance, the raw semantic rule and an
+    unsuperseded row.  The function accepts both direct factor projections
+    (``provider``/``raw``) and bar projections (``factor_provider``/
+    ``factor_raw``); a bare positive number is deliberately not enough.
     """
-    if "adjustment_state" in row and row.get("adjustment_state") != "complete":
-        return False
-    if "factor_semantics" in row and row.get("factor_semantics") != COMPLETE_FACTOR_SEMANTICS:
-        return False
-    provider = row.get("factor_provider")
-    if provider is None and "provider" in row:
-        provider = row.get("provider")
-    if provider is not None and str(provider) not in COMPLETE_FACTOR_PROVIDERS:
-        return False
-    return True
+    factor = dict(row)
+    if factor.get("provider") is None and factor.get("factor_provider") is not None:
+        factor["provider"] = factor.get("factor_provider")
+    if factor.get("raw") is None and factor.get("factor_raw") is not None:
+        factor["raw"] = factor.get("factor_raw")
+    return factor_usable(factor)
 
 
 def adjusted_value(row: dict[str, Any], field: str = "close") -> float | None:

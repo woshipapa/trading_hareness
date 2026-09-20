@@ -558,6 +558,7 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
                 return [{
                     "trading_date": date(2026, 7, day), "high": 10.5 + day / 10,
                     "low": 9.5 + day / 10, "close": 10 + day / 10, "volume": 1000 + day, "adj_factor": 1.0,
+                    "provider": "tushare_primary", "raw": {},
                 } for day in range(1, 26)]
 
         class VolumeConnection:

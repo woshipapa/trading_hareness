@@ -4,9 +4,9 @@ from app.research_prices import adjusted_bars, adjusted_value, research_price_el
 
 
 class ResearchPriceContractTests(unittest.TestCase):
-    def test_legacy_in_memory_row_remains_compatible(self):
-        self.assertTrue(research_price_eligible({"close": 10, "adj_factor": 1}))
-        self.assertEqual(adjusted_value({"close": 10, "adj_factor": 1}), 10)
+    def test_bare_positive_factor_without_owner_provenance_fails_closed(self):
+        self.assertFalse(research_price_eligible({"close": 10, "adj_factor": 1}))
+        self.assertIsNone(adjusted_value({"close": 10, "adj_factor": 1}))
 
     def test_pending_or_identity_rows_fail_closed(self):
         for row in (
@@ -21,8 +21,8 @@ class ResearchPriceContractTests(unittest.TestCase):
     def test_complete_cumulative_tushare_row_is_eligible(self):
         row = {
             "close": 10, "adj_factor": 1.2,
-            "adjustment_state": "complete", "factor_semantics": "cumulative_tushare",
-            "factor_provider": "tushare_primary",
+            "adjustment_state": "complete", "factor_provider": "tushare_primary",
+            "factor_raw": {},
         }
         self.assertTrue(research_price_eligible(row))
         self.assertEqual(adjusted_value(row), 12)

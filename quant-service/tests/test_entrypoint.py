@@ -62,15 +62,14 @@ class EntrypointTests(unittest.TestCase):
             },
         })
 
-    def test_missing_guard_indexes_are_rejected_even_when_rows_are_clean(self):
-        with self.assertRaisesRegex(RuntimeError, "owner runtime schema"):
-            validate_owner_semantics_status({
-                "adjustment_semantics": {
-                    "ready": True,
-                    "guard_indexes": {"status": "blocked", "missing": ["canonical_bars_daily_semantic_guard_idx"]},
-                    "data_guard": {"status": "ready"},
-                },
-            })
+    def test_owner_v2_does_not_require_guard_indexes(self):
+        validate_owner_semantics_status({
+            "adjustment_semantics": {
+                "ready": True,
+                "guard_indexes": {"status": "not_applicable"},
+                "data_guard": {"status": "not_applicable"},
+            },
+        })
 
     def test_non_layered_status_is_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "owner runtime schema"):

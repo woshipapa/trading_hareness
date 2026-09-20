@@ -75,6 +75,7 @@ def materialize_feature_snapshot(
                       CASE WHEN adjustment_history.adj_factor>0 THEN 'complete' ELSE 'absent' END AS adjustment_state,
                       adjustment_history.adj_factor,
                       adjustment_history.provider AS factor_provider,
+                      adjustment_history.raw AS factor_raw,
                       adjustment_history.raw->>'factor_semantics' AS factor_semantics,
                       bar.is_suspended,bar.limit_up,bar.limit_down,bar.selected_provider
                  FROM quant.canonical_bars_daily bar
@@ -83,7 +84,6 @@ def materialize_feature_snapshot(
                          FROM quant.daily_adjustment_factors adjustment
                         WHERE adjustment.symbol=bar.symbol
                           AND adjustment.trading_date=bar.trading_date
-                          AND adjustment.provider IN ('tushare','tushare_primary','tushare_super_get','tushare_super_sdk','tushare_super','tushare_backup','longhu_qfq_derived')
                           AND {factor_semantics_sql}
                           AND adjustment.available_at<=%s
                           AND adjustment.available_at<((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')

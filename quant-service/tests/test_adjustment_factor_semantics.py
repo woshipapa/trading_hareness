@@ -6,6 +6,7 @@ from app.adjustment_factor_semantics import (
     COMPLETE_FACTOR_SEMANTICS,
     IDENTITY_FACTOR_SEMANTICS,
     adjustment_state,
+    factor_usable,
     normalize_factor_row,
     research_factor_eligible,
 )
@@ -27,6 +28,22 @@ class AdjustmentFactorSemanticsTests(unittest.TestCase):
         self.assertEqual(row["factor_semantics"], COMPLETE_FACTOR_SEMANTICS)
         self.assertEqual(adjustment_state(row), "complete")
         self.assertTrue(research_factor_eligible(row))
+
+    def test_tushare_factor_without_semantic_json_key_is_complete(self):
+        row = {"adj_factor": "1.25", "provider": "tushare_primary", "raw": {}}
+        self.assertTrue(factor_usable(row))
+        self.assertEqual(adjustment_state(row), "complete")
+
+    def test_superseded_factor_is_not_priceable(self):
+        row = {"adj_factor": "5.0878", "provider": "tushare_primary",
+               "raw": {"superseded_at": "2026-09-20T00:00:00Z"}}
+        self.assertFalse(factor_usable(row))
+        self.assertEqual(adjustment_state(row), "retired")
+
+    def test_legacy_cumulative_tushare_label_is_not_owner_v2_usable(self):
+        row = {"adj_factor": "1.25", "provider": "tushare_primary",
+               "raw": {"factor_semantics": "cumulative_tushare"}}
+        self.assertFalse(factor_usable(row))
 
     def test_owner_longhu_qfq_factor_is_complete(self):
         row = normalize_factor_row({"adj_factor": "1.0878", "trade_date": "20260918"}, provider="longhu_qfq_derived")
@@ -67,17 +84,13 @@ class AdjustmentFactorSemanticsTests(unittest.TestCase):
                 name,
             )
             self.assertTrue(
-                "longhu_cq_preclose_qfq_v2" in source
+                "corporate_action_cumulative" in source
                 or "persisted_factor_semantics_sql" in source,
                 name,
             )
             self.assertNotIn("COALESCE(factor.raw->>'factor_semantics','cumulative_tushare')", source, name)
             if name in {"watchlist_countertrend_rebound.py", "post_close_strategy_service.py"}:
-                self.assertTrue(
-                    "factor.provider=ANY(%s::text[])" in source
-                    or "factor.provider = ANY(%s::text[])" in source,
-                    name,
-                )
+                self.assertIn("persisted_factor_semantics_sql", source, name)
             else:
                 self.assertIn("longhu_qfq_derived", source, name)
 

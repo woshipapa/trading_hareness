@@ -14,7 +14,8 @@ class FactorLabTests(unittest.TestCase):
     def setUp(self):
         self.bars = [
             {"close": 10 + index * 0.2, "high": 10.3 + index * 0.2, "low": 9.8 + index * 0.2,
-             "volume": 100 + index, "adj_factor": 1.0}
+             "volume": 100 + index, "adj_factor": 1.0,
+             "provider": "tushare_primary", "raw": {}}
             for index in range(25)
         ]
 
@@ -115,11 +116,11 @@ class FactorLabTests(unittest.TestCase):
         def bars(first_close: float, second_open: float, third_close: float):
             return [
                 {"trading_date": signal_day, "open": first_close, "close": first_close,
-                 "pre_close": first_close, "adj_factor": 1.0, "is_suspended": False, "is_st": False},
+                 "pre_close": first_close, "adj_factor": 1.0, "provider": "tushare_primary", "raw": {}, "is_suspended": False, "is_st": False},
                 {"trading_date": entry_day, "open": second_open, "close": second_open,
-                 "pre_close": first_close, "adj_factor": 1.0, "is_suspended": False, "is_st": False},
+                 "pre_close": first_close, "adj_factor": 1.0, "provider": "tushare_primary", "raw": {}, "is_suspended": False, "is_st": False},
                 {"trading_date": exit_day, "open": third_close, "close": third_close,
-                 "pre_close": second_open, "adj_factor": 1.0, "is_suspended": False, "is_st": False},
+                 "pre_close": second_open, "adj_factor": 1.0, "provider": "tushare_primary", "raw": {}, "is_suspended": False, "is_st": False},
             ]
 
         panel = {

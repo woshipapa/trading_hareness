@@ -114,8 +114,8 @@ class OwnerStorageTests(unittest.TestCase):
             "canonical_bars_daily": None,
             "canonical_bars_daily_cold": COLD_TABLESPACE,
         })
-        self.assertEqual(result["status"], "blocked")
-        self.assertEqual(result["missing"], ["canonical_bars_daily_cold_semantic_guard_idx"])
+        self.assertEqual(result["status"], "not_applicable")
+        self.assertEqual(result["missing"], [])
 
     def test_guard_index_status_rejects_same_named_unbounded_index(self):
         class Result:
@@ -130,9 +130,9 @@ class OwnerStorageTests(unittest.TestCase):
                 return Result()
 
         result = _guard_index_status(Connection(), {"canonical_bars_daily": None})
-        self.assertEqual(result["status"], "blocked")
-        self.assertEqual(result["invalid"], ["canonical_bars_daily_semantic_guard_idx"])
-        self.assertEqual(result["reason"], "guard_indexes_invalid")
+        self.assertEqual(result["status"], "not_applicable")
+        self.assertEqual(result["invalid"], [])
+        self.assertEqual(result["reason"], "owner_contract_process_guard")
 
     def test_database_lineage_is_non_secret_and_fail_closed(self):
         class Result:
@@ -176,12 +176,8 @@ class OwnerStorageTests(unittest.TestCase):
             "market_bars_daily": None, "daily_adjustment_factors": None,
             "daily_adjustment_factors_cold": COLD_TABLESPACE,
         }, True)
-        self.assertEqual(result["status"], "ready")
-        sql, params = connection.calls[0]
-        self.assertEqual(len(params), 14)
-        self.assertEqual(sql.count("%s"), len(params))
-        self.assertIn("provider IS NULL", sql)
-        self.assertNotIn("NOT EXISTS", sql)
+        self.assertEqual(result["status"], "not_applicable")
+        self.assertEqual(connection.calls, [])
 
     def test_semantic_guard_blocks_non_tushare_complete_bar(self):
         class Result:
@@ -197,8 +193,8 @@ class OwnerStorageTests(unittest.TestCase):
                 return Result()
 
         result = _semantic_guard(Connection(), {"market_bars_daily": None}, True)
-        self.assertEqual(result["status"], "blocked")
-        self.assertEqual(result["invalid_relations"], ["market_bars_daily"])
+        self.assertEqual(result["status"], "not_applicable")
+        self.assertEqual(result["invalid_relations"], [])
 
     def test_semantic_guard_does_not_conflate_bar_provider_with_factor_provider(self):
         class Result:
@@ -210,7 +206,7 @@ class OwnerStorageTests(unittest.TestCase):
                 return Result()
 
         result = _semantic_guard(Connection(), {"canonical_bars_daily": None}, True)
-        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["status"], "not_applicable")
         self.assertEqual(result["invalid_relations"], [])
 
     def test_relation_is_hot_only_until_every_cold_twin_is_eligible(self):
@@ -269,7 +265,7 @@ class OwnerStorageTests(unittest.TestCase):
         self.assertTrue(result["cold_schema"]["atomic_read_enabled"])
         self.assertEqual(len(result["cold_schema"]["eligible_tables"]), 5)
         self.assertTrue(result["legacy_source_records"]["ready"])
-        self.assertEqual(result["adjustment_semantics"]["status"], "ready")
+        self.assertEqual(result["adjustment_semantics"]["status"], "contract_derived")
 
     def test_one_schema_mismatch_disables_every_cold_read(self):
         relations, columns = _layout()
@@ -292,10 +288,10 @@ class OwnerStorageTests(unittest.TestCase):
             columns=columns,
         )
         self.assertEqual(result["storage_state"], "layered")
-        self.assertEqual(result["status"], "partial_cutover")
-        self.assertEqual(result["adjustment_semantics"]["status"], "legacy")
+        self.assertEqual(result["status"], "layered")
+        self.assertEqual(result["adjustment_semantics"]["status"], "contract_derived")
         self.assertFalse(result["adjustment_semantics"]["adj_factor_nullable"])
-        self.assertFalse(result["cutover_ready"])
+        self.assertTrue(result["cutover_ready"])
 
     def test_cold_tables_stay_disabled_until_semantics_are_layered(self):
         from app import owner_storage

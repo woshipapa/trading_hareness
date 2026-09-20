@@ -1,13 +1,11 @@
 """Point-in-time corporate-action factor semantics.
 
-The owner now derives the cumulative series from Longhu 前复权 K-lines and
-stores it as ``provider='longhu_qfq_derived'``.  Tushare rows remain accepted
-as explicitly licensed checkpoint evidence on the peer.  Owner production
-uses ``corporate_action_cumulative`` in ``raw.factor_semantics``; the older
-``cumulative_tushare`` label remains accepted for historical rows.
-A same-day identity value (usually ``1``) is useful for a close-control
-payload but is not a historical corporate-action factor and must never be
-promoted into the research price path.
+The owner publishes the factor contract as a machine-readable derived rule.
+The important subtlety is that a missing ``raw.factor_semantics`` key is valid
+for legacy Tushare rows: the provider itself supplies the cumulative-series
+meaning.  Conversely, a superseded row is never priceable, even when its
+provider and numeric value look valid.  Keep this predicate in one module so
+SQL readers and Python projections cannot drift apart.
 """
 
 from __future__ import annotations
@@ -17,7 +15,7 @@ from typing import Any, Mapping
 
 
 ADJUSTMENT_STATES = ("complete", "pending", "retired", "absent")
-COMPLETE_FACTOR_SEMANTICS = "cumulative_tushare"
+COMPLETE_FACTOR_SEMANTICS = "corporate_action_cumulative"
 IDENTITY_FACTOR_SEMANTICS = "same_day_identity_only"
 TUSHARE_FACTOR_PROVIDERS = frozenset({
     "tushare", "tushare_primary", "tushare_super_get", "tushare_super_sdk",
@@ -31,20 +29,25 @@ COMPLETE_FACTOR_PROVIDERS = TUSHARE_FACTOR_PROVIDERS | LONGHU_FACTOR_PROVIDERS
 
 
 def persisted_factor_semantics_sql(alias: str = "factor") -> str:
-    """SQL predicate for the owner's actual factor schema.
+    """Return the owner v2 semantic/provider predicate.
 
-    Owner production stores semantic metadata inside ``raw`` JSON rather than
-    materializing ``factor_semantics``/``adjustment_state`` columns.  The
-    Longhu close task identifies its cumulative series by method; legacy
-    Tushare checkpoints retain the historical cumulative label.
+    This intentionally does *not* require the JSON key to be present.  Owner
+    production has millions of valid Tushare rows without that key.  The
+    separate ``persisted_factor_eligible_sql`` adds the positive-value guard;
+    the superseded-row guard belongs here because every semantic read must
+    exclude rows explicitly replaced by a later correction.
     """
 
     if not alias or not alias.replace("_", "").isalnum():
         raise ValueError("invalid SQL alias")
     return (
-        f"(({alias}.raw->>'factor_semantics') IN ('corporate_action_cumulative','cumulative_tushare','cumulative','longhu_qfq_derived') "
+        f"({alias}.raw->>'superseded_at' IS NULL AND "
+        # psycopg uses percent signs for placeholders; ``%%`` is sent to
+        # PostgreSQL as the literal ``%`` in the LIKE pattern.
+        f"(({alias}.provider LIKE 'tushare%%' "
+        f"AND coalesce({alias}.raw->>'factor_semantics','') IN ('','corporate_action_cumulative')) "
         f"OR ({alias}.provider='longhu_qfq_derived' "
-        f"AND {alias}.raw->>'method'='longhu_cq_preclose_qfq_v2'))"
+        f"AND coalesce({alias}.raw->>'factor_semantics','')='corporate_action_cumulative')))"
     )
 
 
@@ -58,10 +61,8 @@ def persisted_factor_eligible_sql(alias: str = "factor") -> str:
     """
     if not alias or not alias.replace("_", "").isalnum():
         raise ValueError("invalid SQL alias")
-    providers = ",".join(repr(provider) for provider in sorted(COMPLETE_FACTOR_PROVIDERS))
     return (
-        f"({alias}.adj_factor>0 AND {alias}.provider IN ({providers}) "
-        f"AND {persisted_factor_semantics_sql(alias)})"
+        f"({alias}.adj_factor>0 AND {persisted_factor_semantics_sql(alias)})"
     )
 
 
@@ -86,16 +87,39 @@ def factor_semantics(row: Mapping[str, Any] | None, *, provider: str | None = No
     if explicit == IDENTITY_FACTOR_SEMANTICS:
         return IDENTITY_FACTOR_SEMANTICS
     source = str(row.get("provider") or provider or "").strip()
-    if source and source not in COMPLETE_FACTOR_PROVIDERS:
-        # Do not let a caller-supplied ``cumulative_tushare`` label override
-        # the provider allow-list.  Unknown provenance is audit evidence only.
+    if source and not _provider_is_allowed(source):
         return "unknown"
-    method = str(raw.get("method") or "").strip()
-    if source == LONGHU_QFQ_FACTOR_PROVIDER and method == "longhu_cq_preclose_qfq_v2":
+    if _semantic_provider_match(source, explicit):
         return COMPLETE_FACTOR_SEMANTICS
-    if explicit in {"corporate_action_cumulative", "cumulative", "cumulative_tushare"}:
-        return COMPLETE_FACTOR_SEMANTICS
-    return explicit or COMPLETE_FACTOR_SEMANTICS
+    return explicit or "unknown"
+
+
+def _provider_is_allowed(provider: str) -> bool:
+    """Mirror ``provider LIKE 'tushare%'`` plus the owner-derived provider."""
+    return provider.startswith("tushare") or provider == LONGHU_QFQ_FACTOR_PROVIDER
+
+
+def _semantic_provider_match(provider: str, semantic: str) -> bool:
+    if provider.startswith("tushare"):
+        return semantic in {"", COMPLETE_FACTOR_SEMANTICS}
+    return provider == LONGHU_QFQ_FACTOR_PROVIDER and semantic == COMPLETE_FACTOR_SEMANTICS
+
+
+def factor_usable(row: Mapping[str, Any] | None, *, provider: str | None = None) -> bool:
+    """Evaluate the owner's ``derived_rules.adjustment_factor_usable`` rule."""
+    if not row or positive_decimal(row.get("adj_factor")) is None:
+        return False
+    raw = row.get("raw")
+    if not isinstance(raw, Mapping):
+        raw = {}
+    superseded = raw.get("superseded_at")
+    if superseded is None:
+        superseded = row.get("superseded_at")
+    if superseded is not None:
+        return False
+    source = str(row.get("provider") or provider or "").strip()
+    semantic = str(row.get("factor_semantics") or raw.get("factor_semantics") or "").strip()
+    return _semantic_provider_match(source, semantic)
 
 
 def adjustment_state(row: Mapping[str, Any] | None, *, provider: str | None = None) -> str:
@@ -108,6 +132,9 @@ def adjustment_state(row: Mapping[str, Any] | None, *, provider: str | None = No
     explicit = str(row.get("adjustment_state") or raw.get("adjustment_state") or "").strip()
     if explicit in {"pending", "retired", "absent"}:
         return explicit
+    raw = row.get("raw") if isinstance(row.get("raw"), Mapping) else {}
+    if raw.get("superseded_at") is not None or row.get("superseded_at") is not None:
+        return "retired"
     semantics = factor_semantics(row, provider=provider)
     if semantics == IDENTITY_FACTOR_SEMANTICS:
         return "retired"
@@ -120,17 +147,13 @@ def adjustment_state(row: Mapping[str, Any] | None, *, provider: str | None = No
 
 def research_factor_eligible(row: Mapping[str, Any] | None, *, provider: str | None = None) -> bool:
     """Whether a row may enter an adjusted research-price calculation."""
-    return (
-        adjustment_state(row, provider=provider) == "complete"
-        and factor_semantics(row, provider=provider) == COMPLETE_FACTOR_SEMANTICS
-        and positive_decimal(row.get("adj_factor") if row else None) is not None
-    )
+    return factor_usable(row, provider=provider)
 
 
 def normalize_factor_row(row: Mapping[str, Any], *, provider: str) -> dict[str, Any]:
     """Validate/annotate a provider row without inventing a factor."""
     factor = positive_decimal(row.get("adj_factor"))
-    if provider not in COMPLETE_FACTOR_PROVIDERS:
+    if not _provider_is_allowed(provider):
         raise ValueError(f"provider {provider!r} is not licensed for cumulative adjustment factors")
     if factor is None:
         raise ValueError("adj_factor must be a positive cumulative factor")
@@ -146,7 +169,7 @@ def normalize_factor_row(row: Mapping[str, Any], *, provider: str) -> dict[str, 
 __all__ = [
     "ADJUSTMENT_STATES", "COMPLETE_FACTOR_SEMANTICS", "IDENTITY_FACTOR_SEMANTICS",
     "TUSHARE_FACTOR_PROVIDERS", "LONGHU_QFQ_FACTOR_PROVIDER", "LONGHU_FACTOR_PROVIDERS",
-    "COMPLETE_FACTOR_PROVIDERS", "adjustment_state", "factor_semantics",
+    "COMPLETE_FACTOR_PROVIDERS", "adjustment_state", "factor_semantics", "factor_usable",
     "normalize_factor_row", "persisted_factor_eligible_sql", "persisted_factor_semantics_sql",
     "positive_decimal", "research_factor_eligible",
 ]

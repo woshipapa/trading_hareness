@@ -20,7 +20,7 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
             or "persisted_factor_semantics_sql" in source,
         )
         self.assertIn("factor.adj_factor>0", mirror_section)
-        self.assertIn("factor.provider=ANY(%s::text[])", mirror_section)
+        self.assertIn("persisted_factor_semantics_sql", source)
         self.assertIn("factor.available_at<", mirror_section)
         self.assertIn("array_position", mirror_section)
 

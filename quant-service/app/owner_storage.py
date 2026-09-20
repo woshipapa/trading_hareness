@@ -14,7 +14,6 @@ but are not a production startup prerequisite.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -32,11 +31,10 @@ COMPLETE_FACTOR_PROVIDERS = (
     "tushare", "tushare_primary", "tushare_super_get", "tushare_super_sdk",
     "tushare_super", "tushare_backup", "longhu_qfq_derived",
 )
-SEMANTIC_REQUIRED_COLUMNS = {
-    "canonical_bars_daily": ("adjustment_state",),
-    "market_bars_daily": ("adjustment_state",),
-    "daily_adjustment_factors": ("adjustment_state", "factor_semantics", "retired_at"),
-}
+# Kept as an empty compatibility export for older local diagnostics.  Owner
+# v2 does not materialize these fields; the machine-readable peer contract and
+# its derived factor rule are the only supported semantic assertions.
+SEMANTIC_REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {}
 
 # This is the owner 20260919_0106 contract observed on the production lane.
 # Keep this list deliberately small: adding a column here is a compatibility
@@ -115,54 +113,19 @@ def _semantic_guard(
     relation_tablespaces: Mapping[str, str | None],
     semantic_ready: bool,
 ) -> dict[str, Any]:
-    """Read-only zero-violation guard for rows marked research-complete."""
+    """Deprecated compatibility hook; owner semantics are contract-derived.
+
+    The former implementation queried proposed ``adjustment_state`` columns
+    and guard indexes that do not exist in owner production.  Keep the helper
+    callable for old local tooling, but never make those fictional objects a
+    readiness prerequisite.
+    """
     if not semantic_ready:
         return {"status": "not_evaluated", "invalid_relations": [], "reason": "semantic_columns_missing"}
-    relations = []
-    for logical_name in ("canonical_bars_daily", "market_bars_daily", "daily_adjustment_factors"):
-        for relation in (logical_name, f"{logical_name}_cold"):
-            if relation in relation_tablespaces:
-                relations.append((logical_name, relation))
-    if not relations:
-        return {"status": "error", "invalid_relations": [], "reason": "semantic_relations_missing"}
-    provider_sql = ",".join("%s" for _ in COMPLETE_FACTOR_PROVIDERS)
-    expressions = []
-    for logical_name, relation in relations:
-        if logical_name == "daily_adjustment_factors":
-            condition = (
-                "adjustment_state='complete' AND "
-                "(factor_semantics IS DISTINCT FROM 'cumulative_tushare' OR adj_factor IS NULL OR adj_factor<=0 "
-                f"OR provider IS NULL OR provider NOT IN ({provider_sql}))"
-            )
-        else:
-            # A bar's ``source``/``selected_provider`` identifies the price
-            # observation, not the provider of its corporate-action factor.
-            # Owner maintenance may legitimately pair an AkShare/Tencent bar
-            # with a separately verified Tushare factor.  Do not correlate
-            # millions of bars with the factor table in a health probe; the
-            # factor relations below independently enforce the licensed
-            # provider and semantic contract.
-            condition = "adjustment_state='complete' AND (adj_factor IS NULL OR adj_factor<=0)"
-        expressions.append(
-            f"EXISTS (SELECT 1 FROM quant.{relation} WHERE {condition}) AS \"{relation}\""
-        )
-    parameters = tuple(
-        provider for logical_name, _relation in relations if logical_name == "daily_adjustment_factors"
-        for provider in COMPLETE_FACTOR_PROVIDERS
-    )
-    try:
-        row = connection.execute("SELECT " + ",".join(expressions), parameters).fetchone()
-    except Exception as error:  # fail closed without turning health into a write path
-        return {"status": "error", "invalid_relations": [], "reason": f"guard_query_failed:{type(error).__name__}"}
-    invalid = []
-    for index, (_logical_name, relation) in enumerate(relations):
-        value = _row_value(row, relation, index) if row else False
-        if bool(value):
-            invalid.append(relation)
     return {
-        "status": "ready" if not invalid else "blocked",
-        "invalid_relations": invalid,
-        "reason": None if not invalid else "complete_rows_violate_factor_contract",
+        "status": "not_applicable",
+        "invalid_relations": [],
+        "reason": "owner_contract_derived_rule",
     }
 
 
@@ -170,86 +133,11 @@ def _guard_index_status(
     connection: Any,
     relation_tablespaces: Mapping[str, str | None],
 ) -> dict[str, Any]:
-    """Check the cheap invalid-row indexes before running the guard query."""
-    relations = [
-        relation
-        for logical_name in ("canonical_bars_daily", "market_bars_daily", "daily_adjustment_factors")
-        for relation in (logical_name, f"{logical_name}_cold")
-        if relation in relation_tablespaces
-    ]
-    expected = [f"{relation}_semantic_guard_idx" for relation in relations]
-    if not expected:
-        return {"status": "error", "expected": [], "missing": [], "reason": "semantic_relations_missing"}
-    try:
-        rows = connection.execute(
-            """SELECT indexname,indexdef FROM pg_indexes
-                WHERE schemaname='quant' AND indexname=ANY(%s)""",
-            (expected,),
-        ).fetchall()
-    except Exception as error:  # diagnostics must remain read-only and fail closed
-        return {
-            "status": "error", "expected": expected, "missing": expected,
-            "reason": f"guard_index_query_failed:{type(error).__name__}",
-        }
-    definitions = {
-        str(_row_value(row, "indexname", 0)): str(_row_value(row, "indexdef", 1) or "")
-        for row in rows
-    }
-    present = set(definitions)
-    missing = sorted(set(expected) - present)
-    invalid = sorted(
-        index_name for index_name, definition in definitions.items()
-        if not _guard_index_definition_valid(index_name, definition)
-    )
+    """Return a non-blocking marker; owner has no semantic guard indexes."""
     return {
-        "status": "ready" if not missing and not invalid else "blocked",
-        "expected": expected,
-        "present": sorted(present),
-        "missing": missing,
-        "invalid": invalid,
-        "reason": (
-            None if not missing and not invalid
-            else "guard_indexes_missing" if missing
-            else "guard_indexes_invalid"
-        ),
+        "status": "not_applicable", "expected": [], "present": [],
+        "missing": [], "invalid": [], "reason": "owner_contract_process_guard",
     }
-
-
-def _guard_index_definition_valid(index_name: str, definition: str) -> bool:
-    """Ensure a same-named index really bounds the invalid-row probe.
-
-    ``CREATE INDEX IF NOT EXISTS`` is intentionally idempotent, but PostgreSQL
-    does not compare definitions when an index with that name already exists.
-    Checking the predicate here prevents a malformed or stale replacement from
-    making the health endpoint claim the cheap guard path is available while
-    the query planner still has to scan the full history.
-    """
-    normalized = re.sub(r"\s+", " ", definition.lower()).strip()
-    relation = index_name.removesuffix("_semantic_guard_idx")
-    required = (
-        f"on quant.{relation} ",
-        "where ",
-        "adjustment_state",
-        "'complete'",
-        "adj_factor",
-    )
-    if not all(token in normalized for token in required):
-        return False
-    is_factor_relation = relation == "daily_adjustment_factors" or (
-        relation.startswith("daily_adjustment_factors_") and relation.endswith("_cold")
-    )
-    if is_factor_relation:
-        provider_exclusion = (
-            "not in" in normalized
-            or "<> all" in normalized
-            or "!= all" in normalized
-            or "not (provider = any" in normalized
-        )
-        return (
-            all(token in normalized for token in ("factor_semantics", "cumulative_tushare", "provider", "longhu_qfq_derived"))
-            and provider_exclusion
-        )
-    return "is null" in normalized and "<=" in normalized
 
 
 def _row_value(row: Any, key: str, index: int = 0) -> Any:
@@ -396,40 +284,25 @@ def classify_owner_layout(
         table_name: {str(row["column_name"]): row for row in table_columns}
         for table_name, table_columns in columns.items()
     }
+    # The owner stores semantic metadata in ``daily_adjustment_factors.raw``;
+    # adjustment_state/factor_semantics/retired_at columns and guard indexes
+    # are deliberately not part of the peer contract.
     semantic_missing: dict[str, list[str]] = {}
-    semantic_seen = 0
-    for table_name, required in SEMANTIC_REQUIRED_COLUMNS.items():
-        available = column_lookup.get(table_name, {})
-        missing = [column_name for column_name in required if column_name not in available]
-        semantic_seen += len(required) - len(missing)
-        if missing:
-            semantic_missing[table_name] = missing
     factor_columns = column_lookup.get("daily_adjustment_factors", {})
     factor_nullable = factor_columns.get("adj_factor", {}).get("is_nullable") == "YES"
-    semantic_issues = [
-        f"{table_name}:missing:{column_name}"
-        for table_name, missing in semantic_missing.items()
-        for column_name in missing
-    ]
-    if not factor_nullable:
-        semantic_issues.append("daily_adjustment_factors:adj_factor_not_nullable")
-    semantic_ready = not semantic_missing and factor_nullable
+    semantic_issues: list[str] = []
+    semantic_ready = True
     semantic_guard = {
         "status": "not_evaluated",
         "invalid_relations": [],
         "reason": "catalog_only_projection",
     }
-    semantic_state = (
-        "ready" if semantic_ready
-        else "legacy" if semantic_seen == 0
-        else "partial"
-    )
-    issues.extend(f"adjustment_semantics:{issue}" for issue in semantic_issues)
+    semantic_state = "contract_derived"
 
     cutover_ready = storage_ready and semantic_ready
     overall_state = (
         "layered" if cutover_ready
-        else "legacy_hot_only" if storage_state == "legacy_hot_only" and semantic_state == "legacy"
+        else "legacy_hot_only" if storage_state == "legacy_hot_only"
         else "partial_cutover"
     )
     hot_names = [*TIERED_EVIDENCE_TABLES, LEGACY_COLD_RELATION]
@@ -458,7 +331,7 @@ def classify_owner_layout(
         "adjustment_semantics": {
             "status": semantic_state,
             "ready": semantic_ready,
-            "required_columns": SEMANTIC_REQUIRED_COLUMNS,
+            "required_columns": {},
             "missing_columns": semantic_missing,
             "adj_factor_nullable": factor_nullable,
             "issues": semantic_issues,
@@ -506,15 +379,15 @@ def _catalog_snapshot(connection: Any) -> dict[str, Any]:
     semantic["guard_indexes"] = guard_indexes
     guard = (
         _semantic_guard(connection, relation_tablespaces, True)
-        if semantic["ready"] is True and guard_indexes["status"] == "ready"
+        if semantic["ready"] is True
         else {
-            "status": "error" if semantic["ready"] is True else "not_evaluated",
+            "status": "not_evaluated",
             "invalid_relations": [],
-            "reason": guard_indexes.get("reason") if semantic["ready"] is True else "semantic_columns_missing",
+            "reason": "owner_contract_not_loaded",
         }
     )
     semantic["data_guard"] = guard
-    if semantic["ready"] is True and guard["status"] != "ready":
+    if semantic["ready"] is True and guard["status"] in {"error", "blocked"}:
         semantic["ready"] = False
         semantic["status"] = "partial"
         semantic["issues"] = [*semantic.get("issues", []), "data_guard:nonzero_or_unavailable"]
