@@ -24,7 +24,16 @@ done
 
 parent="$(dirname "${repo_root}")"
 name="$(basename "${repo_root}")"
+archive_root="trading_hareness"
+tar_transform=()
+if [[ "${name}" != "${archive_root}" ]]; then
+  # The activation helper always extracts into a release directory whose
+  # repository child is named trading_hareness.  Local checkouts are often
+  # named n8n, so normalize only the top-level archive component here.
+  tar_transform=(-s "/^${name}/${archive_root}/")
+fi
 tar -czf "${output_archive}" -C "${parent}" \
+  "${tar_transform[@]}" \
   --exclude="${name}/.git" \
   --exclude="${name}/.env" \
   --exclude="${name}/*/.env" \
@@ -47,7 +56,7 @@ done < <(tar -tzf "${output_archive}")
 for path in "${required[@]}"; do
   found=1
   for entry in "${archive_entries[@]}"; do
-    if [[ "${entry}" == "${name}/${path}" || "${entry}" == "${name}/${path}/" || "${entry}" == "${name}/${path}/"* ]]; then
+    if [[ "${entry}" == "${archive_root}/${path}" || "${entry}" == "${archive_root}/${path}/" || "${entry}" == "${archive_root}/${path}/"* ]]; then
       found=0
       break
     fi
