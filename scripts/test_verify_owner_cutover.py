@@ -63,14 +63,11 @@ class OwnerCutoverVerifierTests(unittest.TestCase):
         self.assertIn("role_no_bypassrls", source)
         self.assertIn("statement_timeout_15m", source)
         self.assertIn("idle_transaction_timeout_5m", source)
-        self.assertIn("role_noinherit", source)
-        self.assertIn("no_role_memberships", source)
+        self.assertIn("role_membership_observed", source)
         self.assertIn("rolinherit", source)
         self.assertIn("role_membership_count", source)
         self.assertIn("role_membership_sample", source)
-        self.assertIn("database_not_owned", source)
         self.assertIn("schema_not_owned", source)
-        self.assertIn("quant_objects_not_owned", source)
         self.assertIn("database_owned", source)
         self.assertIn("schema_owned", source)
         self.assertIn("quant_objects_owned", source)
@@ -81,10 +78,7 @@ class OwnerCutoverVerifierTests(unittest.TestCase):
         self.assertIn("quant_writable_relation_sample", source)
         self.assertIn("quant_writable_sequence_count", source)
         self.assertIn("quant_writable_sequence_sample", source)
-        self.assertIn("no_quant_relation_dml", source)
-        self.assertIn("no_quant_sequence_writes", source)
-        self.assertIn("schema_not_creatable", source)
-        self.assertIn("table_not_insertable", source)
+        self.assertIn("write_capabilities_observed", source)
         self.assertIn("alembic_version_present", source)
         self.assertIn('"requirements": required', source)
 
@@ -100,7 +94,7 @@ class OwnerCutoverVerifierTests(unittest.TestCase):
             api, {"ok": True, "database": "owner", "alembic_version": "v1"}
         )["ok"])
 
-    def test_batch_read_only_requirements_include_noinherit(self) -> None:
+    def test_batch_database_requirements_allow_declared_writes(self) -> None:
         receipt = {
             "database_present": True,
             "canonical_present": True,
@@ -111,31 +105,28 @@ class OwnerCutoverVerifierTests(unittest.TestCase):
             "role_createrole": False,
             "role_replication": False,
             "role_bypassrls": False,
-            "role_inherit": False,
+            "role_inherit": True,
             "statement_timeout_ms": 900_000,
             "idle_transaction_timeout_ms": 300_000,
-            "role_membership_count": 0,
+            "role_membership_count": 1,
             "database_owned": False,
             "schema_owned": False,
             "quant_objects_owned": False,
             "quant_security_definer_executable_count": 0,
-            "quant_writable_relation_count": 0,
-            "quant_writable_sequence_count": 0,
+            "quant_writable_relation_count": 198,
+            "quant_writable_sequence_count": 11,
             "schema_creatable": False,
             "table_insertable": False,
             "table_updatable": False,
             "table_deletable": False,
         }
-        requirements = MODULE.batch_read_only_requirements(receipt)
+        requirements = MODULE.batch_database_requirements(receipt)
         self.assertTrue(all(requirements.values()))
-        receipt["role_inherit"] = True
-        self.assertFalse(MODULE.batch_read_only_requirements(receipt)["role_noinherit"])
-        receipt["role_inherit"] = False
+        receipt["role_membership_count"] = None
+        self.assertFalse(MODULE.batch_database_requirements(receipt)["role_membership_observed"])
+        receipt["role_membership_count"] = 1
         receipt["quant_writable_relation_count"] = 1
-        self.assertFalse(MODULE.batch_read_only_requirements(receipt)["no_quant_relation_dml"])
-        receipt["quant_writable_relation_count"] = 0
-        receipt.pop("quant_objects_owned")
-        self.assertFalse(MODULE.batch_read_only_requirements(receipt)["quant_objects_not_owned"])
+        self.assertTrue(MODULE.batch_database_requirements(receipt)["write_capabilities_observed"])
 
     def test_verifier_requires_non_placeholder_build_provenance(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
