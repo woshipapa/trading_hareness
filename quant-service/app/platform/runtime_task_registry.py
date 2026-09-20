@@ -67,7 +67,7 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         "archive short-lived and post-close public evidence (pools, LHB, corporate events, ticks)",
     ),
     "all_a_level1_snapshot": RuntimeTaskContract(
-        "all_a_level1_snapshot", "intraday_edge", "60s during market session",
+        "all_a_level1_snapshot", "intraday_edge", "60s during evidence observation session from 09:15",
         ("a_share_prices_snapshot",), ("raw_market_observations",),
         "complete all-A Level-1 raw snapshot for width/rank and validation windows", 120,
     ),

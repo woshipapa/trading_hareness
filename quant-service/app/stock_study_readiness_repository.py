@@ -48,7 +48,7 @@ def stock_window_readiness(database: Any, symbol: str, start_date: date, end_dat
             if api_name == "adj_factor":
                 row = connection.execute(
                     f"""SELECT count(DISTINCT trading_date)::int rows,max(trading_date) latest_date
-                         FROM quant.daily_adjustment_factors
+                         FROM quant.daily_adjustment_factors factor
                         WHERE symbol=%s AND trading_date BETWEEN %s AND %s
                           AND {persisted_factor_semantics_sql('factor')}
                           AND adj_factor>0 AND available_at<=now()""",

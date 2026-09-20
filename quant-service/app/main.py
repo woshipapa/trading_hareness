@@ -60,7 +60,10 @@ from .daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload
 from .owner_factor_repository import read_persisted_factor_controls, read_persisted_factor_window
 from .async_provider_circuit_repository import open_capabilities as read_async_open_provider_capabilities
 from .async_provider_circuit_repository import open_provider_keys as read_async_open_provider_keys
-from .async_market_session_repository import realtime_market_session as read_async_realtime_market_session
+from .async_market_session_repository import (
+    market_observation_session as read_async_market_observation_session,
+    realtime_market_session as read_async_realtime_market_session,
+)
 from .async_market_session_repository import sse_calendar_open as read_async_sse_calendar_open
 from .async_market_session_repository import sse_calendar_status as read_async_sse_calendar_status
 from .daily_bar_repository import exchange_for, provider_priority, upsert_daily_bar, upsert_daily_bars
@@ -3540,7 +3543,7 @@ async def market_event_capture_loop() -> None:
         return await run_database_blocking(persist_market_events, provider, rows, timeout_seconds=60)
 
     async def open_session(now: datetime) -> bool:
-        active, _reason = await realtime_market_session_async(now=now)
+        active, _reason = await market_observation_session_async(now=now)
         return active
 
     async def all_symbols() -> Sequence[str]:
@@ -3591,7 +3594,7 @@ def _datasource_collector_deps() -> Any:
 
 def _datasource_loops() -> dict[str, Callable[[], Any]]:
     async def session_open(now: datetime) -> bool:
-        active, _reason = await realtime_market_session_async(now=now)
+        active, _reason = await market_observation_session_async(now=now)
         return active
 
     collector = _datasource_collector_deps()
@@ -3619,7 +3622,7 @@ async def all_a_level1_snapshot_capture_loop() -> None:
 
     async def capture() -> dict[str, Any]:
         async def session_open(now: datetime) -> bool:
-            active, _reason = await realtime_market_session_async(now=now)
+            active, _reason = await market_observation_session_async(now=now)
             return active
 
         return await capture_level1_snapshot(
@@ -4128,6 +4131,10 @@ def realtime_market_session(api_name: str | None = None, now: datetime | None = 
 
 async def realtime_market_session_async(api_name: str | None = None, now: datetime | None = None) -> tuple[bool, str]:
     return await read_async_realtime_market_session(async_db, api_name, now)
+
+
+async def market_observation_session_async(now: datetime | None = None) -> tuple[bool, str]:
+    return await read_async_market_observation_session(async_db, now)
 
 
 def quote_is_for_exchange_date(quote: dict[str, Any], exchange_date: date) -> bool:

@@ -44,6 +44,23 @@ def china_equity_session(now: datetime | None = None) -> tuple[bool, str]:
     return False, "outside SSE continuous auction sessions (09:30-11:30, 13:00-15:00 Asia/Shanghai)"
 
 
+def china_equity_observation_session(now: datetime | None = None) -> tuple[bool, str]:
+    """Return whether exchange-facing evidence collectors may run.
+
+    The observation window deliberately starts with the opening call auction
+    at 09:15.  Strategy confirmation remains gated by
+    :func:`china_equity_session` and therefore cannot turn auction evidence
+    into a continuous-auction entry signal.
+    """
+    local = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("Asia/Shanghai"))
+    current_time = local.time()
+    if local.weekday() >= 5:
+        return False, "SSE is closed on weekends"
+    if time(9, 15) <= current_time <= time(11, 30) or time(13, 0) <= current_time <= time(15, 0):
+        return True, "within SSE evidence observation session"
+    return False, "outside SSE evidence observation sessions (09:15-11:30, 13:00-15:00 Asia/Shanghai)"
+
+
 def china_futures_session(now: datetime | None = None) -> tuple[bool, str]:
     """Conservative daytime guard for the configured CFFEX quote probe."""
     local = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("Asia/Shanghai"))

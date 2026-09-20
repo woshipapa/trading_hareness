@@ -190,6 +190,8 @@ class TushareProvider:
     fallback_credential: str = ""
     min_interval_seconds: float = 0.0
     get_gateway_mode: Literal["legacy", "promax"] = "legacy"
+    fallback_endpoint: str = ""
+    fallback_proxy_url: str = ""
 
     @property
     def configured(self) -> bool:
@@ -468,6 +470,16 @@ def provider_configs(environ: Mapping[str, str] | None = None) -> dict[ProviderN
         super_realtime_fallback_key = (env.get("TUSHARE_SUPER_GET_FALLBACK_API_KEY") or env.get("TUSHARE_SUPER_REALTIME_FALLBACK_API_KEY") or "").strip()
         super_realtime_url = (env.get("TUSHARE_SUPER_GET_API_URL") or env.get("TUSHARE_SUPER_REALTIME_API_URL") or "").strip().rstrip("/")
         super_realtime_proxy_url = (env.get("TUSHARE_SUPER_GET_PROXY_URL") or env.get("TUSHARE_SUPER_REALTIME_PROXY_URL") or "").strip()
+    super_realtime_fallback_url = (
+        env.get("TUSHARE_SUPER_GET_FALLBACK_API_URL")
+        or env.get("TUSHARE_SUPER_REALTIME_FALLBACK_API_URL")
+        or ""
+    ).strip().rstrip("/")
+    super_realtime_fallback_proxy_url = (
+        env.get("TUSHARE_SUPER_GET_FALLBACK_PROXY_URL")
+        or env.get("TUSHARE_SUPER_REALTIME_FALLBACK_PROXY_URL")
+        or ""
+    ).strip()
     backup_key = (env.get("TUSHARE_BACKUP_API_KEY") or "").strip()
     backup_url = (env.get("TUSHARE_BACKUP_API_URL") or "").strip().rstrip("/")
     return {
@@ -483,6 +495,7 @@ def provider_configs(environ: Mapping[str, str] | None = None) -> dict[ProviderN
             "get_x_api_key", super_realtime_proxy_url,
             bounded_rate_limit(env.get("TUSHARE_SUPER_GET_REQUESTS_PER_MINUTE") or env.get("TUSHARE_SUPER_REALTIME_REQUESTS_PER_MINUTE"), 60),
             super_realtime_fallback_key, bounded_interval(env.get("TUSHARE_SUPER_GET_MIN_INTERVAL_SECONDS"), 1.0), super_get_mode,
+            super_realtime_fallback_url, super_realtime_fallback_proxy_url,
         ),
         "backup": TushareProvider("backup", "tushare_backup", "Tushare REST 备用源", backup_url, backup_key, "backup_rest", "", bounded_rate_limit(env.get("TUSHARE_BACKUP_REQUESTS_PER_MINUTE"), 6)),
     }
@@ -627,9 +640,15 @@ async def call_provider(provider: TushareProvider, api_name: str, params: dict[s
     if not provider.supports(api_name):
         raise ProviderCallError(f"{provider.key} does not support {api_name}")
     if provider.uses_super_get(api_name):
-        credentials = [provider.credential]
-        if provider.fallback_credential and provider.fallback_credential != provider.credential:
-            credentials.append(provider.fallback_credential)
+        routes = [(provider.endpoint, provider.credential, provider.proxy_url)]
+        if provider.fallback_credential:
+            fallback_route = (
+                provider.fallback_endpoint or provider.endpoint,
+                provider.fallback_credential,
+                provider.fallback_proxy_url if provider.fallback_endpoint else provider.proxy_url,
+            )
+            if fallback_route not in routes:
+                routes.append(fallback_route)
         realtime_request = api_name in provider.get_realtime_apis
         # A stale realtime request is less useful than a skipped sample, but a
         # single attempt threw away far more than it protected: ProMax answers
@@ -649,7 +668,7 @@ async def call_provider(provider: TushareProvider, api_name: str, params: dict[s
         # as a transport failure.
         request_timeout = 20 if realtime_request and provider.get_gateway_mode == "promax" else 8 if realtime_request else 15
         failures: list[str] = []
-        for credential in credentials:
+        for endpoint, credential, proxy_url in routes:
             for attempt in range(attempts_per_credential):
                 await acquire_provider_request_slot(provider, capability_class="realtime" if realtime_request else "bulk")
                 response_headers: Any | None = None
@@ -669,8 +688,8 @@ async def call_provider(provider: TushareProvider, api_name: str, params: dict[s
 
                     def proxy_http_get() -> requests.Response:
                         return _super_get_http_get(
-                            f"{provider.endpoint}/{api_name}", params=params,
-                            credential=credential, proxy_url=provider.proxy_url, timeout=attempt_timeout,
+                            f"{endpoint}/{api_name}", params=params,
+                            credential=credential, proxy_url=proxy_url, timeout=attempt_timeout,
                         )
 
                     response = await _super_get_executor_boundary.run(
