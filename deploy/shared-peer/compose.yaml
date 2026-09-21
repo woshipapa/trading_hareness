@@ -108,10 +108,19 @@ services:
       # The peer is a gateway consumer; only the licensed owner host may use
       # the direct Longhu adapter.
       QUANT_LONGHU_DIRECT_ENABLED: "false"
+      QUANT_HOTFIX_ENABLED: ${QUANT_HOTFIX_ENABLED:-false}
       NO_PROXY: "*"
       TZ: Asia/Shanghai
     volumes:
       - peer_quant_data:/var/lib/quant
+      - ${QUANT_HOTFIX_HOST_DIR:-./hotfix/quant-service}:/app/hotfix:ro
+    command:
+      - sh
+      - -c
+      - >-
+        if [ "$$QUANT_HOTFIX_ENABLED" = "true" ] && [ -f /app/hotfix/current/app/main.py ]; then
+        export PYTHONPATH=/app/hotfix/current:/app; fi;
+        exec python entrypoint.py uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
       interval: 15s

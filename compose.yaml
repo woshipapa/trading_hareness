@@ -327,6 +327,10 @@ services:
       QUANT_LONGHU_DIRECT_ENABLED: ${QUANT_LONGHU_DIRECT_ENABLED:-false}
       QUANT_SHARED_READ_API_BASE_URL: ${QUANT_SHARED_READ_API_BASE_URL:-}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:-}
+      # Source-only hotfix overlay. Disabled by default and mounted read-only;
+      # dependencies, migrations and the base image still require an immutable
+      # release.
+      QUANT_HOTFIX_ENABLED: ${QUANT_HOTFIX_ENABLED:-false}
       TUSHARE_PRIMARY_TOKEN: ${TUSHARE_PRIMARY_TOKEN:-}
       TUSHARE_PRIMARY_API_URL: ${TUSHARE_PRIMARY_API_URL:-}
       TUSHARE_SUPER_TOKEN: ${TUSHARE_SUPER_TOKEN:-}
@@ -409,6 +413,14 @@ services:
       - quant_data:/var/lib/quant
       - ./certs/market-review-api.pem:/opt/market-review-api.pem:ro
       - ${QUANT_LONGHU_CONFIG_HOST_PATH:-./config/longhu_vendor.example.json}:/run/secrets/longhu_vendor.json:ro
+      - ${QUANT_HOTFIX_HOST_DIR:-./hotfix/quant-service}:/app/hotfix:ro
+    command:
+      - sh
+      - -c
+      - >-
+        if [ "$$QUANT_HOTFIX_ENABLED" = "true" ] && [ -f /app/hotfix/current/app/main.py ]; then
+        export PYTHONPATH=/app/hotfix/current:/app; fi;
+        exec python entrypoint.py uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
       interval: 15s
