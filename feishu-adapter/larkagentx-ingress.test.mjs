@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
+import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 
 test('normalizes an inbound LarkAgentX text message into the adapter event contract', () => {
 	const event = normalizeLarkAgentXMessage({
@@ -47,7 +47,7 @@ test('keeps text and system events direct while keeping cards on realtime path',
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'POST', content: '正文 [图片]', content_data: { richText: { imageIds: ['img_post'] } }, _larkagentx_images: [{ image_id: 'img_post', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }] }), true);
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'POST', content: '正文 [图片]', content_data: { richText: { imageIds: ['element-1'] } }, _larkagentx_images: [{ image_id: 'img_v3_post', source_id: 'element-1', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }] }), true);
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'IMAGE' }), false);
-	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'INTERACTIVE' }), true);
+	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'INTERACTIVE', content: '[interactive] {"schema":"2.0","body":{}}' }), true);
 	assert.equal(normalizeLarkAgentXRelayMessage({ msg_id: 'om_system', msg_type_name: 'SYSTEM', content: 'join' }).msg_type, 'system');
 	assert.equal(normalizeLarkAgentXRelayMessage({ msg_id: 'om_post', msg_type_name: 'POST', content: 'cat post' }).msg_type, 'post');
 	const post = normalizeLarkAgentXRelayMessage({ msg_id: 'om_post_image', msg_type_name: 'POST', content: '[图片]', _larkagentx_images: [{ image_id: 'img_post', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }] });
@@ -121,9 +121,18 @@ test('accepts JSON carried by LarkAgentX openCardContent', () => {
 	assert.deepEqual(JSON.parse(normalizeLarkAgentXRelayMessage(input).body.content), card);
 });
 
-test('keeps incomplete LarkAgentX cards on the realtime path without OAuth', () => {
-	const input = { msg_id: 'om_card_incomplete', msg_type_name: 'CARD', content: '[卡片]', content_data: { cardDesc: '仅摘要' } };
+test('recovers a card JSON suffix carried in the human summary', () => {
+	const card = { schema: '2.0', body: { elements: [{ tag: 'div', text: { tag: 'plain_text', content: 'summary card' } }] } };
+	const input = { msg_id: 'om_card_summary', msg_type_name: 'CARD', content: `[卡片] ${JSON.stringify(card)}` };
+	assert.equal(hasLarkAgentXCardPayload(input), true);
 	assert.equal(isDirectLarkAgentXRelayType(input), true);
+	assert.deepEqual(JSON.parse(normalizeLarkAgentXRelayMessage(input).body.content), card);
+});
+
+test('marks incomplete LarkAgentX cards for the narrow official backfill lane', () => {
+	const input = { msg_id: 'om_card_incomplete', msg_type_name: 'CARD', content: '[卡片]', content_data: { cardDesc: '仅摘要' } };
+	assert.equal(hasLarkAgentXCardPayload(input), false);
+	assert.equal(isDirectLarkAgentXRelayType(input), false);
 	const message = normalizeLarkAgentXRelayMessage(input);
 	assert.equal(message.msg_type, 'text');
 	assert.deepEqual(JSON.parse(message.body.content), { text: '[卡片]' });

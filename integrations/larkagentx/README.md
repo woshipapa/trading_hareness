@@ -52,7 +52,7 @@ LARKX_GROUP_RELAY_ROUTES=7661209668907207659=anqiang;7667390477875858612=liwei
 
 适配器入口为 `/internal/larkagentx/group-relay`，由 `x-larkagentx-token` 保护。文本、完整卡片、独立图片和带有完整解密参数的 post 图片直接进入 relay；bridge 在 WebSocket 事件进入 JSON 前解析 `RichTextElement.property` 中的 `img_v3` key、32 字节 AES key 和 12 字节 nonce。适配器通过 LarkAgentX cookie 下载密文，在本地完成 AES-256-GCM 解密；webhook 目标可直接复用源 `image_key`，从而绕过飞书图片上传额度。汇总群也可以通过 `LARKX_SUMMARY_CHAT_IDS` 和 `LARKX_SUMMARY_INGRESS_URL` 进入同一 WebSocket 事件链。edge 正常运行时关闭官方历史轮询和启动缺口补读：`FEISHU_GROUP_RELAY_ENABLED=false`、`FEISHU_SUMMARY_LISTENER_ENABLED=false`、`LARKX_GAP_REPAIR_ENABLED=false`。缺少媒体解密参数或尚未实现的文件类型会记录为不支持，不能假定官方 OAuth 补读仍然可用。systemd 环境中应使用统一 supervisor venv 的 `/opt/supervisor/.venv/bin/python`，凭证放在受限权限的 `LARKX_HOME`，不要提交到仓库。
 
-仅在显式设置 `LARKX_OFFICIAL_FALLBACK_ENABLED=true` 时才允许恢复旧的官方补读路径；正常 edge 运行保持关闭。
+仅在显式设置 `LARKX_OFFICIAL_FALLBACK_ENABLED=true` 时才允许恢复完整旧的官方补读路径；正常 edge 运行保持关闭。若某些 CARD/INTERACTIVE 的 WebSocket protobuf 只有 `[卡片]` 占位而没有正文，可单独设置 `LARKX_CARD_BACKFILL_ENABLED=true`，只对这类不完整卡片做一次官方补读，不会恢复群轮询。
 
 发送文本需要携带相同的桥接令牌：
 

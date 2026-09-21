@@ -95,6 +95,9 @@ function cardContentFromLarkAgentX(input) {
 		data?.openCardContent,
 		data?.open_card_content,
 	];
+	const summary = String(input?.content ?? '').trim();
+	const summaryJson = summary.match(/^\[(?:卡片|card|interactive)\]\s*([\s\S]+)$/iu)?.[1];
+	if (summaryJson) candidates.push(summaryJson);
 	for (const candidate of candidates) {
 		if (candidate && typeof candidate === 'object') return candidate;
 		if (typeof candidate !== 'string' || !candidate.trim()) continue;
@@ -107,6 +110,10 @@ function cardContentFromLarkAgentX(input) {
 		}
 	}
 	return null;
+}
+
+export function hasLarkAgentXCardPayload(input) {
+	return ['CARD', 'INTERACTIVE'].includes(larkAgentXMessageType(input)) && Boolean(cardContentFromLarkAgentX(input));
 }
 
 function imageKeyFromLarkAgentX(input) {
@@ -184,7 +191,7 @@ export function isDirectLarkAgentXRelayType(input) {
 		// cannot turn the durable spool into an endless retry queue. Complete
 		// cards still retain their native interactive payload below; incomplete
 		// cards are downgraded to a tagged text summary.
-		|| ['CARD', 'INTERACTIVE'].includes(upstreamType);
+		|| hasLarkAgentXCardPayload(input);
 }
 
 export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) {

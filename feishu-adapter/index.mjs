@@ -28,7 +28,7 @@ import { cardPayload } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { personalDecisionResearchPaths } from './personal-decision-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
-import { isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
+import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import Busboy from 'busboy';
@@ -61,6 +61,7 @@ const larkAgentXIngressToken = String(process.env.LARKX_BRIDGE_TOKEN ?? '').trim
 const larkAgentXResourceUrl = String(process.env.LARKX_BRIDGE_RESOURCE_URL ?? '').trim();
 const larkAgentXGroupRelayEnabled = String(process.env.LARKX_GROUP_RELAY_ENABLED ?? 'false').toLowerCase() === 'true';
 const larkAgentXOfficialFallbackEnabled = String(process.env.LARKX_OFFICIAL_FALLBACK_ENABLED ?? 'false').toLowerCase() === 'true';
+const larkAgentXCardBackfillEnabled = String(process.env.LARKX_CARD_BACKFILL_ENABLED ?? 'false').toLowerCase() === 'true';
 const larkAgentXGroupRelayRoutes = new Map(
 	String(process.env.LARKX_GROUP_RELAY_ROUTES ?? '')
 		.split(';')
@@ -1149,9 +1150,11 @@ async function handleLarkAgentXGroupRelayInbound(request, response) {
 		}
 		const targetChatIds = [...new Set([groupRelayConfig.targetChatId, ...(source.targetChatIds ?? [])].map((value) => String(value ?? '').trim()).filter(Boolean))];
 		if (!targetChatIds.length) throw new Error(`实时源路由没有目标群：${sourceKey}`);
+		const cardNeedsBackfill = ['CARD', 'INTERACTIVE'].includes(larkAgentXMessageType(input)) && !hasLarkAgentXCardPayload(input);
+		const allowOfficialFallback = larkAgentXOfficialFallbackEnabled || (larkAgentXCardBackfillEnabled && cardNeedsBackfill);
 		const message = isDirectLarkAgentXRelayType(input)
 			? normalizeLarkAgentXRelayMessage(input)
-			: !larkAgentXOfficialFallbackEnabled
+			: !allowOfficialFallback
 				? normalizeLarkAgentXUnsupportedMessage(input)
 			// LarkAgentX's personal WebSocket uses its numeric chat id, while
 			// the user OAuth message API resolves the same group by its official
@@ -1232,6 +1235,14 @@ async function groupRelayDashboardStatus() {
 	const persistedByKey = new Map(persistedSources.map((source) => [source.source_key, source]));
 	const runtimeByKey = new Map(runtime.sources.map((source) => [source.key, source]));
 	const ingestionByTag = new Map(ingestionSources.map((source) => [source.source_tag, source]));
+	const websocketChatIdsBySource = new Map();
+	for (const [chatId, sourceKey] of larkAgentXGroupRelayRoutes) {
+		// The route map keeps official oc_ aliases for documentation and
+		// deduplication, but only numeric ids are actual LarkAgentX socket ids.
+		if (!/^\d+$/.test(chatId)) continue;
+		if (!websocketChatIdsBySource.has(sourceKey)) websocketChatIdsBySource.set(sourceKey, []);
+		websocketChatIdsBySource.get(sourceKey).push(chatId);
+	}
 	const staleAfterSeconds = Math.max(45, groupRelayConfig.intervalSeconds * 3);
 	const now = Date.now();
 	const sources = routes.map((source) => {
@@ -1240,6 +1251,13 @@ async function groupRelayDashboardStatus() {
 		const lastPolledAt = asIsoString(persisted?.last_polled_at);
 		const pollAgeSeconds = lastPolledAt ? Math.max(0, Math.floor((now - Date.parse(lastPolledAt)) / 1000)) : null;
 		const failedCount = Number(persisted?.failed_count ?? 0);
+		const websocketChatIds = websocketChatIdsBySource.get(source.key) ?? [];
+		const websocketStats = websocketChatIds.map((chatId) => larkagentx.chat_stats?.[chatId]).filter(Boolean);
+		const websocketObservedCount = websocketStats.reduce((sum, value) => sum + Number(value.observed_count ?? 0), 0);
+		const websocketForwardedCount = websocketStats.reduce((sum, value) => sum + Number(value.forwarded_count ?? 0), 0);
+		const websocketFailedCount = websocketStats.reduce((sum, value) => sum + Number(value.failed_count ?? 0), 0);
+		const websocketLastObservedAt = websocketStats.map((value) => asIsoString(value.last_observed_at)).filter(Boolean).sort().at(-1) ?? null;
+		const websocketLastForwardedAt = websocketStats.map((value) => asIsoString(value.last_forwarded_at)).filter(Boolean).sort().at(-1) ?? null;
 		const ingestionRecord = ingestionByTag.get(source.tag) ?? null;
 		const ingestionLastUpdatedAt = asIsoString(ingestionRecord?.last_updated_at);
 		const ingestionAgeSeconds = ingestionLastUpdatedAt ? Math.max(0, Math.floor((now - Date.parse(ingestionLastUpdatedAt)) / 1000)) : null;
@@ -1257,9 +1275,14 @@ async function groupRelayDashboardStatus() {
 		const resolvedError = !activeError && failedCount === 0
 			? persisted?.latest_failure_error ?? ingestionRecord?.latest_failure_error ?? null : null;
 		const resolvedErrorAt = persisted?.latest_failure_at ?? ingestionRecord?.latest_failure_at ?? null;
+		const transport = websocketChatIds.length ? 'larkagentx_websocket' : groupRelayConfig.enabled ? 'oauth_poll' : 'disabled';
 		let state = 'healthy';
-		if (!groupRelayConfig.enabled || source.enabled === false) state = 'disabled';
-		else if (!oauth.configured) state = 'not_configured';
+		if (source.enabled === false || transport === 'disabled') state = 'disabled';
+		else if (transport === 'larkagentx_websocket') {
+			if (larkagentx.status !== 'healthy' || larkagentx.websocket?.state !== 'connected') state = 'unavailable';
+			else if (websocketChatIds.some((chatId) => larkagentx.chat_validation?.[chatId]?.state === 'error')) state = 'degraded';
+			else if (websocketFailedCount > 0 || ingestionFailed) state = 'degraded';
+		} else if (!oauth.configured) state = 'not_configured';
 		else if (oauth.scope_audit?.verified === false) state = 'not_authorized';
 		else if (current?.state === 'error' || current?.state === 'unavailable') state = current.state;
 		else if (!persisted || pollAgeSeconds === null) state = 'starting';
@@ -1267,6 +1290,8 @@ async function groupRelayDashboardStatus() {
 		else if (failedCount > 0 || ingestionFailed) state = 'degraded';
 		return {
 			key: source.key, tag: source.tag, chat_name: source.chatName, source_chat_id: source.chatId ?? null, target_chat_ids: source.targetChatIds ?? [], enabled: source.enabled !== false,
+			transport, websocket_chat_ids: websocketChatIds, websocket_observed_count: websocketObservedCount, websocket_forwarded_count: websocketForwardedCount,
+			websocket_failed_count: websocketFailedCount, websocket_last_observed_at: websocketLastObservedAt, websocket_last_forwarded_at: websocketLastForwardedAt,
 			state, last_polled_at: lastPolledAt, poll_age_seconds: pollAgeSeconds,
 			last_source_message_at: asIsoString(persisted?.last_source_message_at),
 			last_forwarded_at: lastForwardedAt,
@@ -1296,16 +1321,16 @@ async function groupRelayDashboardStatus() {
 		: listenerPollAgeSeconds === null ? 'starting'
 		: listenerPollAgeSeconds > Math.max(45, summaryListenerConfig.intervalSeconds * 3) ? 'delayed'
 		: 'healthy';
-	const overall = !groupRelayConfig.enabled ? 'disabled'
-		: sources.every((source) => source.state === 'healthy') ? 'healthy'
+	const activeSources = sources.filter((source) => source.enabled && source.transport !== 'disabled');
+	const overall = activeSources.length > 0 && activeSources.every((source) => source.state === 'healthy') ? 'healthy'
 		: sources.some((source) => ['error', 'unavailable', 'delayed', 'degraded', 'not_configured', 'not_authorized'].includes(source.state)) ? 'degraded'
 		: 'starting';
-	const combinedOverall = listenerState === 'healthy' && overall === 'healthy' ? 'healthy'
-		: listenerState === 'disabled' && overall === 'disabled' ? 'disabled'
-		: ['error', 'delayed', 'not_configured', 'not_authorized'].includes(listenerState) || overall === 'degraded' ? 'degraded'
-		: 'starting';
+	const realtimeSummaryHealthy = larkagentx.status === 'healthy' && larkagentx.websocket?.state === 'connected' && larkagentx.summary_ingress_configured;
+	const combinedOverall = overall === 'healthy' && realtimeSummaryHealthy ? 'healthy'
+		: overall === 'degraded' || ['error', 'delayed', 'not_configured', 'not_authorized'].includes(listenerState) && listenerState !== 'disabled' ? 'degraded'
+		: overall;
 	return {
-		status: combinedOverall, observed_at: new Date(now).toISOString(), enabled: groupRelayConfig.enabled,
+		status: combinedOverall, observed_at: new Date(now).toISOString(), enabled: groupRelayConfig.enabled, realtime_enabled: larkAgentXGroupRelayEnabled,
 		interval_seconds: groupRelayConfig.intervalSeconds, stale_after_seconds: staleAfterSeconds,
 		user_oauth_configured: Boolean(oauth.configured), target_configured: Boolean(groupRelayConfig.targetChatId),
 		user_oauth_scope_audit: oauth.scope_audit ?? null,
