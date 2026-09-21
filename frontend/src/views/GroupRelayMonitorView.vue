@@ -27,9 +27,38 @@ export default defineComponent({
         <el-descriptions-item label="远端投递队列"><el-tag :type="groupRelayStatus.delivery_outbox?.failed ? 'danger' : groupRelayStatus.delivery_outbox?.depth ? 'warning' : 'success'">待投递 {{ groupRelayStatus.delivery_outbox?.depth ?? 0 }} · 终止失败 {{ groupRelayStatus.delivery_outbox?.failed ?? 0 }}</el-tag><div v-if="groupRelayStatus.delivery_outbox?.paused" class="group-relay-age">按操作暂停 {{ groupRelayStatus.delivery_outbox.paused }}（不自动重试）</div></el-descriptions-item>
         <el-descriptions-item label="汇总群入站"><el-tag :type="groupRelayStateType(groupRelayStatus.summary_listener?.state)">{{ groupRelayStateText(groupRelayStatus.summary_listener?.state) }}</el-tag><div class="group-relay-age">本次运行新交 n8n {{ groupRelayStatus.summary_listener?.processed_count ?? 0 }} · 重复 {{ groupRelayStatus.summary_listener?.duplicate_count ?? 0 }} · 忽略 {{ groupRelayStatus.summary_listener?.ignored_count ?? 0 }}</div><div class="group-relay-age">最近消息 {{ dateText(groupRelayStatus.summary_listener?.last_source_message_at) }}</div><div v-if="groupRelayStatus.summary_listener?.last_error" class="group-relay-age">{{ groupRelayStatus.summary_listener.last_error }}</div></el-descriptions-item>
       </el-descriptions>
-      <el-table :data="groupRelayStatus.sources ?? []" size="small" max-height="360" class="section-gap group-relay-table">
+      <el-card shadow="never" class="section-gap group-relay-status-panel">
+        <template #header><div class="card-header"><span>LarkAgentX WebSocket 监听</span><el-tag :type="larkAgentXStateType(groupRelayStatus.larkagentx?.websocket?.state)">{{ larkAgentXStateText(groupRelayStatus.larkagentx?.websocket?.state) }}</el-tag></div></template>
+        <el-descriptions :column="mobileLayout ? 1 : 6" border size="small">
+          <el-descriptions-item label="连接状态"><el-tag :type="larkAgentXStateType(groupRelayStatus.larkagentx?.status)">{{ larkAgentXStateText(groupRelayStatus.larkagentx?.status) }}</el-tag></el-descriptions-item>
+          <el-descriptions-item label="监听群数">{{ groupRelayStatus.larkagentx?.listen_chat_count ?? 0 }}</el-descriptions-item>
+          <el-descriptions-item label="已接收 / 已转发">{{ groupRelayStatus.larkagentx?.observed_count ?? 0 }} / {{ groupRelayStatus.larkagentx?.forwarded_count ?? 0 }}</el-descriptions-item>
+          <el-descriptions-item label="解码错误"><el-tag :type="groupRelayStatus.larkagentx?.decode_error_count ? 'danger' : 'success'">{{ groupRelayStatus.larkagentx?.decode_error_count ?? 0 }}</el-tag></el-descriptions-item>
+          <el-descriptions-item label="事件队列">待处理 {{ groupRelayStatus.larkagentx?.event_spool?.pending ?? 0 }} · 失败 {{ groupRelayStatus.larkagentx?.event_spool?.failed ?? 0 }}</el-descriptions-item>
+          <el-descriptions-item label="缺口补读">{{ groupRelayStatus.larkagentx?.gap_repair_enabled ? '已启用' : '已关闭' }}</el-descriptions-item>
+        </el-descriptions>
+        <el-table :data="Object.entries(groupRelayStatus.larkagentx?.chat_stats ?? {}).map(([chatId, stats]) => ({ chatId, stats, validation: groupRelayStatus.larkagentx?.chat_validation?.[chatId] }))" size="small" max-height="300" class="section-gap">
+          <el-table-column prop="chatId" label="WebSocket chat_id" min-width="190"/>
+          <el-table-column label="群名/核验" min-width="175"><template #default="{ row }"><div>{{ row.validation?.name || '未返回群名' }}</div><el-tag size="small" :type="larkAgentXStateType(row.validation?.state)">{{ larkAgentXStateText(row.validation?.state) }}</el-tag></template></el-table-column>
+          <el-table-column label="接收 / 转发 / 失败" width="150"><template #default="{ row }">{{ row.stats?.observed_count ?? 0 }} / {{ row.stats?.forwarded_count ?? 0 }} / {{ row.stats?.failed_count ?? 0 }}</template></el-table-column>
+          <el-table-column label="最近消息" min-width="170"><template #default="{ row }"><div>{{ dateText(row.stats?.last_observed_at) }}</div><small class="group-relay-age">{{ row.stats?.last_message_type || '-' }}</small></template></el-table-column>
+          <el-table-column label="最近转发" min-width="170"><template #default="{ row }">{{ dateText(row.stats?.last_forwarded_at) }}</template></el-table-column>
+        </el-table>
+      </el-card>
+      <el-card shadow="never" class="section-gap">
+        <template #header><div class="card-header"><span>Webhook 目标与关键词</span><el-tag :type="groupRelayStatus.webhook_config?.all_webhook_keywords_loaded ? 'success' : 'danger'">{{ groupRelayStatus.webhook_config?.all_webhook_keywords_loaded ? '关键词已全部加载' : '存在未匹配目标' }}</el-tag></div></template>
+        <el-table :data="groupRelayStatus.webhook_config?.keyword_entries ?? []" size="small" max-height="220">
+          <el-table-column prop="chat_id" label="目标 chat_id" min-width="240"/>
+          <el-table-column prop="keyword" label="Webhook keyword" min-width="140"/>
+          <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag size="small" :type="groupRelayStatus.webhook_config?.webhook_chat_ids?.includes(row.chat_id) ? 'success' : 'danger'">{{ groupRelayStatus.webhook_config?.webhook_chat_ids?.includes(row.chat_id) ? 'URL 已加载' : '缺少 URL' }}</el-tag></template></el-table-column>
+        </el-table>
+        <el-alert v-if="(groupRelayStatus.webhook_config?.missing_keyword_chat_ids?.length ?? 0) > 0" class="section-gap" type="error" :closable="false" :title="`缺少关键词：${groupRelayStatus.webhook_config?.missing_keyword_chat_ids?.join('、')}`"/>
+      </el-card>
+      <el-table :data="groupRelayStatus.sources ?? []" size="small" max-height="390" class="section-gap group-relay-table">
         <el-table-column prop="chat_name" label="源群" min-width="190" show-overflow-tooltip/>
+        <el-table-column label="源 chat_id" min-width="190" show-overflow-tooltip><template #default="{ row }">{{ row.source_chat_id || '-' }}</template></el-table-column>
         <el-table-column label="标签" width="110"><template #default="{ row }"><el-tag size="small" effect="plain">#{{ row.tag }}</el-tag></template></el-table-column>
+        <el-table-column label="目标 / keyword" min-width="220"><template #default="{ row }"><div v-for="target in row.target_chat_ids ?? []" :key="target">{{ target }}</div><small v-for="target in row.target_chat_ids ?? []" :key="`${target}-keyword`" class="group-relay-age">#{{ webhookKeyword(target) }}</small></template></el-table-column>
         <el-table-column label="监听状态" width="118"><template #default="{ row }"><el-tag size="small" :type="groupRelayStateType(row.state)">{{ groupRelayStateText(row.state) }}</el-tag></template></el-table-column>
         <el-table-column label="最近成功轮询" min-width="155"><template #default="{ row }"><div>{{ dateText(row.last_polled_at) }}</div><small class="group-relay-age">{{ ageText(row.poll_age_seconds) }} 前</small></template></el-table-column>
         <el-table-column label="最近源消息" min-width="155"><template #default="{ row }"><div>{{ dateText(row.last_source_message_at) }}</div><small class="group-relay-age">{{ groupRelayMessageText(row.last_message_status) }}</small></template></el-table-column>

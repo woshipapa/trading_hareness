@@ -79,6 +79,7 @@ if (!supportedAlertReceiveIdTypes.has(feishuAlertReceiveIdType)) {
 }
 const dashboardPort = Number(process.env.DASHBOARD_PORT ?? 3000);
 const dashboardHost = String(process.env.DASHBOARD_HOST ?? '0.0.0.0').trim() || '0.0.0.0';
+const larkAgentXHealthUrl = String(process.env.LARKX_BRIDGE_HEALTH_URL ?? 'http://127.0.0.1:8090/health').trim();
 const longConnectionEnabled = String(process.env.FEISHU_LONG_CONNECTION_ENABLED ?? 'true').toLowerCase() !== 'false';
 const frontendDist = process.env.FRONTEND_DIST ?? '/app/frontend-dist';
 const frontendMode = process.env.FRONTEND_MODE ?? (existsSync(frontendDist) ? 'spa' : 'legacy');
@@ -1225,7 +1226,7 @@ function asIsoString(value) {
 }
 
 async function groupRelayDashboardStatus() {
-	const [persistedSources, routes, oauth, ingestionSources, writer, delivery] = await Promise.all([ledger.relayStatus(), ledger.relayRoutes(), feishuUserOauth.status(), ledger.ingestionStatusBySource(), ledger.relayWriterStatus(), ledger.observability()]);
+	const [persistedSources, routes, oauth, ingestionSources, writer, delivery, larkagentx] = await Promise.all([ledger.relayStatus(), ledger.relayRoutes(), feishuUserOauth.status(), ledger.ingestionStatusBySource(), ledger.relayWriterStatus(), ledger.observability(), larkAgentXDashboardStatus()]);
 	const runtime = groupRelay.status();
 	const listenerRuntime = summaryListener.status();
 	const persistedByKey = new Map(persistedSources.map((source) => [source.source_key, source]));
@@ -1265,7 +1266,7 @@ async function groupRelayDashboardStatus() {
 		else if (pollAgeSeconds > staleAfterSeconds) state = 'delayed';
 		else if (failedCount > 0 || ingestionFailed) state = 'degraded';
 		return {
-			key: source.key, tag: source.tag, chat_name: source.chatName, target_chat_ids: source.targetChatIds ?? [], enabled: source.enabled !== false,
+			key: source.key, tag: source.tag, chat_name: source.chatName, source_chat_id: source.chatId ?? null, target_chat_ids: source.targetChatIds ?? [], enabled: source.enabled !== false,
 			state, last_polled_at: lastPolledAt, poll_age_seconds: pollAgeSeconds,
 			last_source_message_at: asIsoString(persisted?.last_source_message_at),
 			last_forwarded_at: lastForwardedAt,
@@ -1309,6 +1310,7 @@ async function groupRelayDashboardStatus() {
 		user_oauth_configured: Boolean(oauth.configured), target_configured: Boolean(groupRelayConfig.targetChatId),
 		user_oauth_scope_audit: oauth.scope_audit ?? null,
 		webhook_config: webhookConfigStatus(groupRelayWebhooksByChatId, groupRelayWebhookKeywordsByChatId),
+		larkagentx,
 		delivery_verified: sources.filter((source) => source.enabled).every((source) => source.delivery_state === 'verified'),
 		last_tick_started_at: runtime.last_tick_started_at, last_tick_completed_at: runtime.last_tick_completed_at,
 		last_tick_error: runtime.last_tick_error,
@@ -1330,6 +1332,43 @@ async function groupRelayDashboardStatus() {
 			poll_age_seconds: listenerPollAgeSeconds,
 		},
 	};
+}
+
+async function larkAgentXDashboardStatus() {
+	const unavailable = (message) => ({ status: 'unavailable', observed_at: new Date().toISOString(), message, websocket: { state: 'unavailable' }, listen_chat_count: 0, listen_chat_ids: [], websocket_chat_ids: [], summary_chat_ids: [], summary_ingress_configured: false, gap_repair_enabled: false, chat_validation: {}, chat_stats: {} });
+	if (!larkAgentXHealthUrl) return unavailable('未配置 LarkAgentX health 地址');
+	try {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 1500);
+		let response;
+		try { response = await fetch(larkAgentXHealthUrl, { signal: controller.signal }); } finally { clearTimeout(timer); }
+		if (!response.ok) return unavailable(`LarkAgentX health HTTP ${response.status}`);
+		const raw = await response.json();
+		const validation = Object.fromEntries(Object.entries(raw.chat_validation ?? {}).map(([chatId, value]) => [chatId, {
+			state: value?.state ?? 'unknown', name: value?.name ?? null, checked_at: value?.checked_at ?? null, error: value?.error ?? null,
+		}]));
+		const stats = Object.fromEntries(Object.entries(raw.chat_stats ?? {}).map(([chatId, value]) => [chatId, {
+			allowlisted: value?.allowlisted !== false, observed_count: Number(value?.observed_count ?? 0), self_message_count: Number(value?.self_message_count ?? 0),
+			forwarded_count: Number(value?.forwarded_count ?? 0), failed_count: Number(value?.failed_count ?? 0), last_observed_at: value?.last_observed_at ?? null,
+			last_forwarded_at: value?.last_forwarded_at ?? null, last_message_type: value?.last_message_type ?? null,
+		}]));
+		return {
+			status: raw.status === 'ok' ? 'healthy' : 'degraded', observed_at: new Date().toISOString(), release: raw.release ?? null,
+			websocket: raw.websocket ?? { state: 'unknown' }, listen_chat_count: Number(raw.listen_chat_count ?? 0),
+			listen_chat_ids: Array.isArray(raw.listen_chat_ids) ? raw.listen_chat_ids : [], websocket_chat_ids: Array.isArray(raw.websocket_chat_ids) ? raw.websocket_chat_ids : [],
+			summary_chat_ids: Array.isArray(raw.summary_chat_ids) ? raw.summary_chat_ids : [], summary_ingress_configured: Boolean(raw.summary_ingress_configured),
+			gap_repair_enabled: Boolean(raw.gap_repair_enabled), mapping_check_at: raw.mapping_check_at ?? null, mapping_check_error: raw.mapping_check_error ?? null,
+			observed_count: Number(raw.observed_count ?? 0), forwarded_count: Number(raw.forwarded_count ?? 0), failed_count: Number(raw.failed_count ?? 0),
+			decode_error_count: Number(raw.decode_error_count ?? 0), decode_fallback_count: Number(raw.decode_fallback_count ?? 0), unknown_field_count: Number(raw.unknown_field_count ?? 0),
+			partial_frame_count: Number(raw.partial_frame_count ?? 0), retry_count: Number(raw.retry_count ?? 0), last_observed_chat_id: raw.last_observed_chat_id ?? null,
+			last_observed_message_type: raw.last_observed_message_type ?? null, event_spool: {
+				queued: Number(raw.event_spool?.queued ?? 0), processing: Number(raw.event_spool?.processing ?? 0), pending: Number(raw.event_spool?.pending ?? 0),
+				failed: Number(raw.event_spool?.failed ?? 0), delivered: Number(raw.event_spool?.delivered ?? 0),
+			}, chat_validation: validation, chat_stats: stats,
+		};
+	} catch (error) {
+		return unavailable(error?.name === 'AbortError' ? 'LarkAgentX health 超时' : `LarkAgentX health 不可用：${error?.message ?? error}`);
+	}
 }
 
 function publicRelayRoute(route) {
