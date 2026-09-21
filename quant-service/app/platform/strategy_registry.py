@@ -102,7 +102,7 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
     # (video/text).  The pack is point-in-time (first session whose 09:15 open
     # follows availability); every threshold carries T/D/I provenance.
     "teacher_review_playbooks": StrategyContract(
-        "teacher_review_playbooks", "teacher-review-rules-v1", "app/teacher_review_rules.py",
+        "teacher_review_playbooks", "teacher-review-rules-v2", "app/teacher_review_rules.py",
         "teacher-review-pack-v1",
         ("intraday_rule_input_snapshots", "intraday_signal_events", "raw_market_observations"),
         "intraday_edge", "shadow", "none",

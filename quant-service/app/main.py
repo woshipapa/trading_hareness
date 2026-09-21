@@ -721,6 +721,7 @@ from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_ro
 from .routers.teacher_review import TeacherReviewRouterDependencies, build_teacher_review_router
 from .teacher_review_rules import (
     MODEL_VERSION as TEACHER_REVIEW_MODEL_VERSION,
+    SnapshotTape as TeacherReviewSnapshotTape,
     active_plan as teacher_active_plan,
     teacher_review_signals,
 )
@@ -3064,7 +3065,7 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                     rebound_signal=countertrend_rebound_realtime_signal,
                     rebound_failure_signal=countertrend_rebound_failure_reduce_signal,
                     eac_acceptance=intraday_eac_acceptance_assessment,
-                    teacher_review_signal=teacher_review_signals,
+                    teacher_review_signal=functools.partial(teacher_review_signals, tape=teacher_review_tape),
                 ),
                 load_event_state=load_intraday_signal_event_state,
                 persist_generated_signals=persist_generated_signals,
@@ -3999,14 +4000,17 @@ async def intraday_surge_context(
     licensed_status: dict[str, Any] = {
         "provider_status": "disabled", "provider": "longhuvip", "reason": "longhu_not_configured",
     }
-    # Teacher-review plans read minute VWAP/volume/5-minute return.  They
-    # follow the quote anomalies and bring their own budget, so every other
+    # Teacher-review plans take VWAP/volume/5-minute return from the list-quote
+    # snapshot tape.  Only an operator-set TEACHER_REVIEW_MINUTE_EXTRA adds
+    # per-stock minute requests for them, with its own budget, so every other
     # strategy keeps the minute share it had before.
-    teacher_symbols = teacher_review_minute_symbols(watches, datetime.now(timezone.utc))
+    teacher_extra = teacher_review_minute_extra()
+    teacher_symbols = (teacher_review_minute_symbols(watches, datetime.now(timezone.utc))[:teacher_extra]
+                       if teacher_extra else [])
     priority_symbols = list(dict.fromkeys([*(priority_symbols or []), *teacher_symbols]))
 
     def minute_budget() -> int:
-        return intraday_minute_profile_max_symbols() + min(len(teacher_symbols), TEACHER_REVIEW_MINUTE_EXTRA_MAX)
+        return intraday_minute_profile_max_symbols() + len(teacher_symbols)
 
     async def licensed_context() -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
         if not longhu_vendor_configured():
@@ -4459,7 +4463,18 @@ async def _post_close_core_symbols(limit: int) -> list[str]:
     return await read_async_limited_core_symbols(async_db, limit)
 
 
+# Teacher plans read their minute-style values from the list-quote snapshot
+# tape (one sample per scan), so by default they add no per-stock minute
+# requests.  A positive value restores extra per-stock minute budget for them.
 TEACHER_REVIEW_MINUTE_EXTRA_MAX = 100
+teacher_review_tape = TeacherReviewSnapshotTape()
+
+
+def teacher_review_minute_extra() -> int:
+    try:
+        return max(0, min(TEACHER_REVIEW_MINUTE_EXTRA_MAX, int(os.getenv("TEACHER_REVIEW_MINUTE_EXTRA", "0"))))
+    except ValueError:
+        return 0
 
 
 def teacher_review_minute_symbols(watches: list[dict[str, Any]], observed_at: datetime) -> list[str]:

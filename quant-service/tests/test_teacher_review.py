@@ -17,7 +17,7 @@ from app.intraday_signal_generation import IntradaySignalGenerationDependencies,
 from app.live_policy import live_policy_gate
 from app.teacher_review_plan import bullish_divergence, limit_up_price, parse_longhu_kline, plan_stock
 from app.teacher_review_playbooks import CATALOG, validate_pack
-from app.teacher_review_rules import evaluate, scan_features, teacher_review_signals
+from app.teacher_review_rules import SnapshotTape, evaluate, scan_features, teacher_review_signals
 
 CN = ZoneInfo("Asia/Shanghai")
 FIXTURE = Path(__file__).parent / "fixtures" / "teacher_review_pack_20260921.json"
@@ -186,6 +186,46 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(features["sources"]["surge"], "volume_ratio")
         self.assertTrue(features["not_falling"])
         self.assertEqual(features["sources"]["not_falling"], "previous_scan")
+
+    def test_snapshot_tape_rebuilds_five_minute_return_and_volume_burst(self):
+        tape = SnapshotTape()
+        start = at(9, 30)
+        # 10-second scans: 1000 lots per minute for 8 minutes, then 4000 lots in the last minute.
+        for step in range(0, 55):
+            seconds = step * 10
+            volume = 1000 * seconds / 60 if seconds <= 480 else 8000 + 4000 * (seconds - 480) / 60
+            tape.observe("000001.SZ", start + timedelta(seconds=seconds), 10 + seconds / 600, volume, "longhu")
+        view = tape.features("000001.SZ", start + timedelta(seconds=540))
+        self.assertAlmostEqual(view["return_5m_pct"], (10.9 / 10.4 - 1) * 100, places=3)
+        self.assertAlmostEqual(view["minute_volume_multiple"], 4.0, places=1)
+
+    def test_snapshot_tape_never_differences_volumes_across_sources_or_days(self):
+        tape = SnapshotTape()
+        start = at(9, 30)
+        for step in range(0, 40):
+            source = "longhu" if step % 2 else "tencent"
+            tape.observe("000001.SZ", start + timedelta(seconds=step * 10), 10.0, 100.0 * step * (100 if source == "tencent" else 1), source)
+        # Only the latest sample's source (Longhu, lots) is differenced: a steady 1x, not a 100x unit jump.
+        self.assertAlmostEqual(tape.features("000001.SZ", start + timedelta(seconds=390))["minute_volume_multiple"], 1.0)
+        self.assertEqual(tape.features("000001.SZ", at(9, 31, date(2026, 9, 23))), {})
+        tape.observe("000001.SZ", at(9, 31, date(2026, 9, 23)), 11.0, 10.0, "longhu")
+        self.assertEqual(tape.features("000001.SZ", at(9, 31, date(2026, 9, 23)))["samples"], 1)
+
+    def test_teacher_hook_takes_minute_values_from_the_tape_without_minute_features(self):
+        tape = SnapshotTape()
+        plan = watch("001368.SZ", "prior_high_breakout", {"prior_high": 10.3, "floor_ma": 10}, {"floor_level": 9.5})
+        signals: list[dict] = []
+        for step in range(1, 37):
+            price = round(10.0 + step * 0.01, 2)
+            # 1000 lots a minute for five minutes, then 5000 a minute.
+            lots = 1000 * step / 6 if step <= 30 else 5000 + 5000 * (step - 30) / 6
+            row = quote(price, 9.8, amount=lots * 100 * 10.0, volume_lot=lots, volume_ratio=1.8)
+            signals = teacher_review_signals(plan, row, None, None, at(10, 0) + timedelta(seconds=step * 10), tape=tape)
+        self.assertEqual(signals[0]["signal_key"], "001368.SZ:entry:teacher_review:prior_high_breakout")
+        features = signals[0]["conditions"]["teacher_review"]["features"]
+        self.assertEqual(features["sources"]["surge"], "snapshot_tape")
+        self.assertEqual(features["sources"]["not_falling"], "snapshot_tape")
+        self.assertAlmostEqual(features["tape"]["minute_volume_multiple"], 5.0, places=1)
 
     def test_unfresh_licensed_row_supplies_session_constants(self):
         all_a_only = {"price": 25.0, "pct_change": 3.9, "volume_ratio": None, "raw": {

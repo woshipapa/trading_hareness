@@ -18,11 +18,18 @@ Scan-time approximations of the teacher's minute language (all ``I``):
 5-minute return; 不能往下跌 = 5-minute return ≥ -0.3%; 竞价额 = cumulative
 turnover observed before 09:31; 封板时成交 = cumulative turnover on the scan
 that first sees a sealed bid-only book.
+
+The minute-style values come from :class:`SnapshotTape` -- the list quotes
+every scan already pulls (Longhu basket, Tencent batch, all-A snapshot),
+kept per symbol -- so a plan needs no per-stock minute request.  Per-stock
+minute features, when some other strategy fetched them, still take priority.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections import deque
+from datetime import date, datetime, timedelta
+from statistics import median
 from typing import Any, Callable, Mapping
 from zoneinfo import ZoneInfo
 
@@ -30,7 +37,7 @@ from .teacher_review_playbooks import DEFAULTS, playbook_kind
 from .teacher_review_plan import limit_up_price
 
 _CN_TZ = ZoneInfo("Asia/Shanghai")
-MODEL_VERSION = "teacher-review-rules-v1"
+MODEL_VERSION = "teacher-review-rules-v2"
 
 
 def _num(value: Any) -> float | None:
@@ -79,6 +86,85 @@ REQUIRED_INPUTS: dict[str, tuple[str, ...]] = {
 }
 
 
+class SnapshotTape:
+    """Minute-equivalent values rebuilt from each scan's list quotes.
+
+    One sample per symbol per scan: price and cumulative volume (lots) with
+    the volume's source.  Volumes are differenced only between samples of the
+    same source, because providers use different units.  The tape keeps 31
+    minutes, resets on a new exchange day and lives in process memory: after
+    a restart it is empty and the plan falls back to the previous scan price
+    and the quote's volume ratio until enough samples exist.
+    """
+
+    WINDOW = timedelta(minutes=31)
+    RETURN_SECONDS = 300
+    CURRENT_SECONDS = 60
+    MIN_BASELINE_MINUTES = 5
+
+    def __init__(self) -> None:
+        self._day: date | None = None
+        self._samples: dict[str, deque[tuple[datetime, float, float | None, str | None]]] = {}
+
+    def observe(self, symbol: str, observed_at: datetime, price: float | None,
+                volume_lot: float | None, volume_source: str | None) -> None:
+        if price is None or price <= 0:
+            return
+        day = observed_at.astimezone(_CN_TZ).date()
+        if day != self._day:
+            self._day, self._samples = day, {}
+        ring = self._samples.setdefault(symbol, deque())
+        if ring and observed_at <= ring[-1][0]:
+            return
+        ring.append((observed_at, float(price), volume_lot, volume_source))
+        while observed_at - ring[0][0] > self.WINDOW:
+            ring.popleft()
+
+    def features(self, symbol: str, observed_at: datetime) -> dict[str, Any]:
+        if self._day != observed_at.astimezone(_CN_TZ).date():
+            return {}
+        ring = self._samples.get(symbol)
+        if not ring:
+            return {}
+        latest_at, latest_price, latest_volume, source = ring[-1]
+        result: dict[str, Any] = {"samples": len(ring), "span_seconds": int((latest_at - ring[0][0]).total_seconds())}
+        anchor = None
+        for sample in ring:
+            if (latest_at - sample[0]).total_seconds() < self.RETURN_SECONDS:
+                break
+            anchor = sample
+        if anchor is not None:
+            result["return_5m_pct"] = round((latest_price / anchor[1] - 1) * 100, 4)
+        same = [(at, volume) for at, _price, volume, src in ring if src == source and volume is not None]
+        if latest_volume is None or len(same) < 2:
+            return result
+        start = None
+        for at, volume in same:
+            if (latest_at - at).total_seconds() < self.CURRENT_SECONDS:
+                break
+            start = (at, volume)
+        if start is None or latest_volume < start[1]:
+            return result
+        current = (latest_volume - start[1]) * 60 / (latest_at - start[0]).total_seconds()
+        # Per-minute volumes before the current window: last cumulative value
+        # in each clock minute, differenced and spread over skipped minutes.
+        closes: dict[datetime, float] = {}
+        for at, volume in same:
+            if at <= start[0]:
+                closes[at.replace(second=0, microsecond=0)] = volume
+        minutes = sorted(closes.items())
+        per_minute = [
+            (right - left) / ((later - earlier).total_seconds() / 60)
+            for (earlier, left), (later, right) in zip(minutes, minutes[1:])
+            if right >= left
+        ]
+        if len(per_minute) >= self.MIN_BASELINE_MINUTES:
+            baseline = median(per_minute)
+            if baseline > 0:
+                result["minute_volume_multiple"] = round(current / baseline, 4)
+        return result
+
+
 def _pick(*candidates: tuple[str, Any]) -> tuple[float | None, str | None]:
     for source, value in candidates:
         number = _num(value)
@@ -94,7 +180,8 @@ def _tencent_field(row: Mapping[str, Any], index: int) -> Any:
 
 def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, Any] | None,
                   observed_at: datetime, name: str = "",
-                  previous_quote: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                  previous_quote: Mapping[str, Any] | None = None,
+                  tape: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Collect every value the playbooks read, from whichever scan source has it.
 
     Order: licensed watch quote (Longhu) -> Tencent watch depth quote -> all-A
@@ -152,18 +239,25 @@ def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, An
     sealed = at_limit and (book or {}).get("book_side") == "bid_only" if book else None
     volume_ratio = take("volume_ratio", ("quote", quote.get("volume_ratio")), ("longhu_unfresh", unfresh.get("volume_ratio")))
     turnover = take("turnover_pct", ("quote", quote.get("turnover_rate")), ("longhu_unfresh", unfresh.get("turnover_rate")))
-    multiple = _num(minute.get("minute_volume_multiple"))
-    return_5m = _num(minute.get("return_5m_pct"))
+    tape = tape or {}
+
+    def first(key: str) -> tuple[float | None, str | None]:
+        return next(((value, source) for source, value in (("minute", _num(minute.get(key))),
+                                                           ("snapshot_tape", _num(tape.get(key))))
+                     if value is not None), (None, None))
+
+    multiple, multiple_source = first("minute_volume_multiple")
+    return_5m, return_source = first("return_5m_pct")
     previous_price = _num((previous_quote or {}).get("price"))
     if multiple is not None:
         surge, sources["surge"] = multiple >= DEFAULTS["minute_volume_multiple_min"] or (
-            (volume_ratio or 0) >= DEFAULTS["vol_ratio_min"] and (return_5m or 0) > 0), "minute"
+            (volume_ratio or 0) >= DEFAULTS["vol_ratio_min"] and (return_5m or 0) > 0), multiple_source
     elif volume_ratio is not None:
         surge, sources["surge"] = volume_ratio >= DEFAULTS["vol_ratio_min"] and (vwap is None or price >= vwap), "volume_ratio"
     else:
         surge = None
     if return_5m is not None:
-        not_falling, sources["not_falling"] = return_5m >= DEFAULTS["not_falling_return_5m_min"], "minute"
+        not_falling, sources["not_falling"] = return_5m >= DEFAULTS["not_falling_return_5m_min"], return_source
     elif previous_price:
         not_falling, sources["not_falling"] = price >= previous_price * 0.997, "previous_scan"
     else:
@@ -172,7 +266,7 @@ def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, An
     features = {
         "price": price, "pre_close": pre_close,
         "pct": round((price / pre_close - 1) * 100, 2) if pre_close else pct_quote,
-        "open": opened, "high": high, "low": low, "amount": amount,
+        "open": opened, "high": high, "low": low, "amount": amount, "volume_lot": volume_lot,
         "turnover_pct": turnover, "volume_ratio": volume_ratio,
         "vwap": round(vwap, 4) if vwap else None, "above_vwap": None if vwap is None else price >= vwap,
         "limit_up_price": limit, "sealed": bool(sealed), "book": sources.get("book"),
@@ -328,7 +422,7 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
 def teacher_review_signals(
     watch: Mapping[str, Any], quote: Mapping[str, Any] | None, minute_features: Mapping[str, Any] | None,
     peer_context: Mapping[str, Any] | None, observed_at: datetime,
-    previous_quote: Mapping[str, Any] | None = None,
+    previous_quote: Mapping[str, Any] | None = None, *, tape: SnapshotTape | None = None,
 ) -> list[dict[str, Any]]:
     """Scan hook: entry/invalidation candidates plus an explicit data gap.
 
@@ -359,7 +453,15 @@ def teacher_review_signals(
                  "severity": "warning", "score": 0,
                  "conditions": {"setup": "teacher_review_data_missing",
                                 "teacher_review": {**review_base, "missing": ["price"], "action": "data_missing"}}}]
-    features = scan_features(symbol, quote, minute_features, observed_at, str(plan.get("name") or ""), previous_quote)
+    name = str(plan.get("name") or "")
+    features = scan_features(symbol, quote, minute_features, observed_at, name, previous_quote)
+    if tape is not None:
+        tape.observe(symbol, observed_at, features["price"], features.get("volume_lot"),
+                     features["sources"].get("volume_lot"))
+        tape_view = tape.features(symbol, observed_at)
+        if tape_view:
+            features = scan_features(symbol, quote, minute_features, observed_at, name, previous_quote, tape_view)
+            features["tape"] = tape_view
     missing = missing_inputs(playbook, features)
     result = evaluate(plan, features, peer_context)
     if missing and result["action"] == "entry":
@@ -369,6 +471,8 @@ def teacher_review_signals(
         "price", "pct", "pre_close", "open", "high", "low", "amount", "turnover_pct", "volume_ratio", "vwap",
         "limit_up_price", "sealed", "seal_verified_by_book", "touched_limit", "open_gap_pct", "surge",
         "not_falling", "auction_amount", "clock", "sources")}
+    if features.get("tape"):
+        feature_view["tape"] = features["tape"]
     if result["action"] in {"entry", "invalid"}:
         invalid = result["action"] == "invalid"
         suffix = f":{result['path']}" if result.get("path") else ""
@@ -429,4 +533,5 @@ def teacher_review_alert_lines(signal: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-__all__ = ["MODEL_VERSION", "active_plan", "evaluate", "scan_features", "teacher_review_alert_lines", "teacher_review_signals"]
+__all__ = ["MODEL_VERSION", "SnapshotTape", "active_plan", "evaluate", "scan_features", "teacher_review_alert_lines",
+           "teacher_review_signals"]
