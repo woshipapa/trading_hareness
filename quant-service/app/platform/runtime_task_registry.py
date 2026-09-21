@@ -51,6 +51,13 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         ("market_events", "raw_market_observations"),
         "all-A auction, limit-pool, limit-chain and THS attention evidence capture", 180,
     ),
+    "auction_pulse": RuntimeTaskContract(
+        "auction_pulse", "intraday_edge", "2s during 09:15-09:30 Shanghai opening auction",
+        ("longhu:MorningBiddingList", "longhu:GetBKJJ_W36", "longhu:GetPlateInfo_w38", "longhu:RiseFallAnalysis", "longhu:MoodNumCount"),
+        ("raw_market_observations",),
+        "bounded Longhu auction, sector anomaly, sentiment and money-flow evidence with cooled Feishu alerts",
+        10,
+    ),
     "public_evidence_capture": RuntimeTaskContract(
         "public_evidence_capture", "intraday_edge", "30s tick; per-source 90s-15min cadences",
         ("news_flash", "investor_qa", "stock_change", "hot_rank_popularity", "hot_rank_surge",

@@ -60,6 +60,12 @@ services:
       INTRADAY_MINUTE_PROFILE_CAPTURE_ENABLED: ${PEER_MINUTE_PROFILE_CAPTURE_ENABLED:-true}
       INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS: ${PEER_MINUTE_PROFILE_MAX_SYMBOLS:-36}
       INTRADAY_BOARD_CURVE_ENABLED: ${PEER_BOARD_CURVE_ENABLED:-true}
+      # Opening-auction pulse: 2s evidence cadence, Feishu only on changed
+      # states with a cooldown. It remains research-only and never controls
+      # orders or live thresholds.
+      AUCTION_PULSE_ENABLED: ${PEER_AUCTION_PULSE_ENABLED:-true}
+      AUCTION_PULSE_INTERVAL_SECONDS: ${PEER_AUCTION_PULSE_INTERVAL_SECONDS:-2}
+      AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS: ${PEER_AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS:-30}
       # Keep the low-memory target bounded; raw evidence remains in owner PG.
       QUANT_RUNTIME_MAX_MEMORY_RATIO: ${PEER_RUNTIME_MAX_MEMORY_RATIO:-0.80}
       QUANT_RUNTIME_MIN_FREE_BYTES: ${PEER_RUNTIME_MIN_FREE_BYTES:-2147483648}

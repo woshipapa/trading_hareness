@@ -30,6 +30,7 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         specs = tuple(BackgroundTaskSpec(label, True, AsyncMock()) for label in (
             "intraday_monitor", "super_get_fast_quote", "minute_profile_capture",
             "tencent_order_book", "board_flow_curve", "strategy_review",
+            "auction_pulse",
             "post_close_strategy", "ten_day_leader_rotation", "daily_strategy_summary",
             "ths_member_backfill", "all_board_member_backfill",
         ))
@@ -39,7 +40,7 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(
             {spec.label for spec in profiled if spec.enabled},
             {"intraday_monitor", "super_get_fast_quote", "minute_profile_capture",
-             "tencent_order_book", "board_flow_curve"},
+             "tencent_order_book", "board_flow_curve", "auction_pulse"},
         )
 
     def test_research_profile_excludes_remote_owned_intraday_polling_loops(self):

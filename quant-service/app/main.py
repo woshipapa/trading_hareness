@@ -394,6 +394,8 @@ from .intraday_monitor_service import run_intraday_monitor_loop
 from .market_event_capture import capture as capture_market_events
 from .longhu_auction_capture import capture as capture_longhu_morning_auction
 from .market_event_runtime import run_market_event_capture_loop
+from .auction_pulse import PULSE_REQUESTS, alert_decision, format_alert, summarize_pulse
+from .auction_pulse_runtime import run_auction_pulse_loop
 from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapshot_loop
 from .datasources import runtime as datasource_runtime
 from .datasources.sources.tushare_limits import fetch_limit_cross_section as fetch_tushare_limit_cross_section
@@ -3626,6 +3628,89 @@ async def market_event_capture_loop() -> None:
     )
 
 
+def auction_pulse_enabled() -> bool:
+    return os.getenv("AUCTION_PULSE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def auction_pulse_interval_seconds() -> float:
+    try:
+        return max(1.0, min(30.0, float(os.getenv("AUCTION_PULSE_INTERVAL_SECONDS", "2"))))
+    except (TypeError, ValueError):
+        return 2.0
+
+
+def auction_pulse_alert_cooldown_seconds() -> int:
+    try:
+        return max(5, min(300, int(os.getenv("AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS", "30"))))
+    except (TypeError, ValueError):
+        return 30
+
+
+async def capture_auction_pulse(observed_at: datetime, state: dict[str, Any]) -> dict[str, Any]:
+    """Read Longhu's bounded opening-auction endpoints and emit cooled evidence."""
+    if not longhu_vendor_configured():
+        return {"status": "skipped", "reason": "longhu_not_configured", "stored": 0}
+    envelopes: dict[str, Any] = {}
+
+    async def call_one(spec: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
+        request = {"target": spec["target"], "params": dict(spec["params"])}
+        try:
+            result = await shared_stock_api_call(request)
+            pages = result.get("pages") if isinstance(result, Mapping) else []
+            payloads = [page.get("payload") for page in pages if isinstance(page, Mapping) and isinstance(page.get("payload"), Mapping)]
+            return str(spec["name"]), {"action": spec["action"], "payload": {"pages": payloads}}, None
+        except Exception as error:  # noqa: BLE001 - one source must not hide the others
+            return str(spec["name"]), None, f"{type(error).__name__}: {str(error)[:180]}"
+
+    results = await asyncio.gather(*(call_one(spec) for spec in PULSE_REQUESTS))
+    source_status: dict[str, Any] = {}
+    for name, envelope, error in results:
+        if envelope is not None:
+            envelopes[name] = envelope
+            pages = envelope["payload"].get("pages") or []
+            source_status[name] = {"status": "completed", "action": envelope["action"], "pages": len(pages)}
+        else:
+            source_status[name] = {"status": "failed", "error": error}
+    summary = summarize_pulse(envelopes, observed_at)
+    summary["source_status"] = source_status
+    stored = await run_database_blocking(
+        persist_timed_observations, "longhuvip", "opening_auction_pulse", [{
+            "effective_at": observed_at.isoformat(), "available_at": observed_at.isoformat(),
+            "ts_code": None, "exchange_window": "opening_call_auction", "summary": summary,
+            "source_status": source_status, "research_only": True, "live_effect": "none",
+        }], timeout_seconds=20,
+    )
+    decision = alert_decision(
+        summary, state.get("last_summary"), now=observed_at,
+        last_alert_at=state.get("last_alert_at"), cooldown_seconds=auction_pulse_alert_cooldown_seconds(),
+    )
+    delivery: dict[str, Any] = {"status": "suppressed", "reason": decision["reason"]}
+    if decision["should_send"]:
+        delivery = await post_feishu_alert_text(format_alert(summary))
+        if delivery.get("status") == "sent":
+            state["last_alert_at"] = observed_at
+    state["last_summary"] = summary
+    return {
+        "status": "completed" if envelopes else "partial", "stored": stored,
+        "sources": source_status, "alert": {**decision, "delivery": delivery},
+        "research_only": True, "live_effect": "none",
+    }
+
+
+async def auction_pulse_loop() -> None:
+    state: dict[str, Any] = {"last_summary": None, "last_alert_at": None}
+
+    async def session_open(now: datetime) -> bool:
+        active, _reason = await market_observation_session_async(now=now)
+        return active
+
+    await run_auction_pulse_loop(
+        interval_seconds=auction_pulse_interval_seconds(),
+        capture=lambda observed_at: capture_auction_pulse(observed_at, state),
+        session_open=session_open,
+    )
+
+
 def _datasource_collector_deps() -> Any:
     """Production adapters for the data-source collectors (see app.datasources.runtime)."""
     from .fuyao_provider import configured as fuyao_configured
@@ -4607,6 +4692,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "tencent_order_book": intraday_order_book_enabled() and interval_seconds >= 30,
             "board_flow_curve": intraday_board_curve_enabled(),
             "market_event_capture": os.getenv("MARKET_EVENT_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "auction_pulse": auction_pulse_enabled(),
             "all_a_level1_snapshot": os.getenv("ALL_A_LEVEL1_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "public_evidence_capture": os.getenv("PUBLIC_EVIDENCE_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "post_close_public_archive": os.getenv("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
@@ -4620,6 +4706,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "minute_profile_capture": intraday_minute_profile_capture_loop, "tencent_order_book": intraday_order_book_loop,
             "board_flow_curve": intraday_board_flow_curve_loop,
             "market_event_capture": market_event_capture_loop,
+            "auction_pulse": auction_pulse_loop,
             "all_a_level1_snapshot": all_a_level1_snapshot_capture_loop,
             "public_evidence_capture": public_evidence_capture_loop,
             "post_close_public_archive": post_close_public_archive_loop,

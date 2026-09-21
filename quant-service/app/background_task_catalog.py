@@ -15,6 +15,7 @@ def build_specs(*, interval_seconds: int, enabled: dict[str, bool], loops: dict[
             "ten_day_leader_rotation", "daily_strategy_summary", "ths_member_backfill",
             "all_board_member_backfill", "minute_profile_capture", "tencent_order_book", "board_flow_curve",
             "market_event_capture",
+            "auction_pulse",
             "all_a_level1_snapshot",
             "public_evidence_capture", "post_close_public_archive",
     )
