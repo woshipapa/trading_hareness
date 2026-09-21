@@ -272,6 +272,16 @@ class PipelineIntegrationTests(unittest.TestCase):
         self.assertIn("不构成交易指令", text)
 
 
+class CompositionTests(unittest.TestCase):
+    def test_composition_root_builds_service_dependencies(self):
+        from app import main
+        dependencies = main._teacher_review_dependencies()
+        self.assertIsInstance(dependencies, service.TeacherReviewDependencies)
+        self.assertIsNone(dependencies.hydrate_history)
+        post_close = main._post_close_refresh_dependencies()
+        self.assertIsNotNone(post_close.teacher_review_roll)
+
+
 class ConfluenceTests(unittest.TestCase):
     def test_book_is_scoped_to_one_session_and_rebuilt_from_evidence(self):
         from app.strategy_confluence import ConfluenceBook, teacher_confluence_line, teacher_plans_for_day

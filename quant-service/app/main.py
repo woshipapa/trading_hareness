@@ -719,7 +719,6 @@ from .runtime_executors import ExecutorSaturatedError, run_akshare_blocking, run
 from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
 from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
 from .routers.teacher_review import TeacherReviewRouterDependencies, build_teacher_review_router
-from .teacher_review_plan import parse_longhu_kline as parse_teacher_review_kline
 from .teacher_review_rules import (
     MODEL_VERSION as TEACHER_REVIEW_MODEL_VERSION,
     active_plan as teacher_active_plan,
@@ -4446,29 +4445,9 @@ def teacher_review_enabled() -> bool:
     return os.getenv("TEACHER_REVIEW_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
-async def teacher_review_kline(code: str, count: int, period: str) -> list[dict[str, Any]]:
-    """Forward-adjusted Longhu bars (``d``/``w``/``5``/``30``/``60``); indices use ``SH000001``."""
-    result = await shared_stock_api_call({"target": "longhu_history", "params": {
-        "a": "GetKLineDay_W14", "c": "StockLineData", "apiv": "w40", "PhoneOSNew": "1", "VerSion": "5.19.0.0",
-        "StockID": code, "Type": period, "Is_FS": "1", "st": int(count), "Index": 0,
-    }})
-    pages = result.get("pages") if isinstance(result, Mapping) else []
-    return parse_teacher_review_kline(page.get("payload") for page in pages or [] if isinstance(page, Mapping))
-
-
-async def teacher_review_limit_pool(trade_date: date) -> list[dict[str, Any]]:
-    result = await shared_stock_api_call({"target": "xuangubao", "path": "/api/pool/detail",
-                                          "params": {"pool_name": "limit_up", "date": trade_date.isoformat()}})
-    pages = result.get("pages") if isinstance(result, Mapping) else []
-    payload = (pages[0] or {}).get("payload") if pages else {}
-    rows = payload.get("data") if isinstance(payload, Mapping) else None
-    return [row for row in rows or [] if isinstance(row, Mapping)]
-
-
 def _teacher_review_dependencies() -> TeacherReviewDependencies:
     return TeacherReviewDependencies(
-        database=db, run_database=run_database_blocking, kline=teacher_review_kline,
-        limit_pool=teacher_review_limit_pool, now_utc=lambda: datetime.now(timezone.utc),
+        database=db, run_database=run_database_blocking, now_utc=lambda: datetime.now(timezone.utc),
         send_alert=post_feishu_alert_text, max_symbols=intraday_watchlist_max_symbols,
         exchange_for=exchange_for,
         # Owner PG already carries full-market daily bars; per-symbol Tushare
