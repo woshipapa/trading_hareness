@@ -272,6 +272,16 @@ class PipelineIntegrationTests(unittest.TestCase):
         self.assertIn("不构成交易指令", text)
 
 
+class BarCompletenessTests(unittest.TestCase):
+    def test_a_missing_session_blocks_the_plan_but_a_suspension_or_listing_does_not(self):
+        from app.teacher_review_repository import calendar_gaps
+        sessions = [date(2026, 9, day) for day in (15, 16, 17, 18, 21)]
+        bars_present = {date(2026, 9, 15), date(2026, 9, 18), date(2026, 9, 21)}
+        self.assertEqual(calendar_gaps(bars_present, {date(2026, 9, 16)}, sessions), [date(2026, 9, 17)])
+        self.assertEqual(calendar_gaps(bars_present | {date(2026, 9, 17)}, {date(2026, 9, 16)}, sessions), [])
+        self.assertEqual(calendar_gaps({date(2026, 9, 18), date(2026, 9, 21)}, set(), sessions), [])
+
+
 class CompositionTests(unittest.TestCase):
     def test_composition_root_builds_service_dependencies(self):
         from app import main
@@ -403,6 +413,32 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["session_date"], "2026-09-23")
         self.assertEqual(result["session_index"], 2)
         self.assertNotIn("002285.SZ", fake.applied[0])  # relay valid for one session only
+
+    def test_missing_sessions_are_repaired_through_the_data_plane_then_reread(self):
+        fake, repaired = FakeRepo(self.sessions), []
+        calls = {"n": 0}
+        good = fake.plan_bars
+
+        def flaky_plan_bars(_db, symbols, *, through, limit=260):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {symbol: {"status": "unavailable", "flags": ["bar_gaps:2026-09-18,2026-09-17"]} for symbol in symbols}
+            return good(_db, symbols, through=through, limit=limit)
+
+        async def repair(day):
+            repaired.append(day)
+            return {"status": "completed"}
+
+        deps = self._deps(at(21, 40, date(2026, 9, 21)), [])
+        deps = service.TeacherReviewDependencies(**{**deps.__dict__, "repair_daily": repair})
+        with patch.multiple(service.repo, plan_bars=flaky_plan_bars, minute_period_bars=fake.minute_period_bars):
+            with patch.object(service, "plan_stock", side_effect=lambda stock, rows, divergence=None: {
+                    "levels": {}, "extra": {}, "setup": "", "checklist": []}):
+                plans, failures = asyncio.run(service.build_session_plans(
+                    load_pack(), date(2026, 9, 22), 1, date(2026, 9, 21), deps))
+        self.assertEqual(sorted(repaired, reverse=True), [date(2026, 9, 21), date(2026, 9, 18), date(2026, 9, 17)])
+        self.assertEqual(len(plans), 36)
+        self.assertEqual([item["code"] for item in failures], ["*"])
 
     def test_invalid_pack_is_rejected_without_side_effects(self):
         pack = copy.deepcopy(load_pack())

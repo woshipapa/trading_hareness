@@ -245,6 +245,23 @@ def recent_settlements(database: Any, *, limit: int = 10) -> list[dict[str, Any]
     return [dict(row) for row in rows]
 
 
+#: Sessions whose bars must all be present (or explicitly suspended) before a
+#: plan is frozen; covers MA60, the 20-session platform and prior highs.
+GAP_CHECK_SESSIONS = 60
+
+
+def calendar_gaps(bar_dates: set[date], suspended: set[date], sessions: Iterable[date]) -> list[date]:
+    """Open sessions with neither a usable bar nor a suspension record, newest first.
+
+    Sessions before the stock's first stored bar (a recent listing) are not gaps.
+    """
+    if not bar_dates:
+        return []
+    first = min(bar_dates)
+    return sorted((day for day in sessions if day >= first and day not in bar_dates and day not in suspended),
+                  reverse=True)
+
+
 def plan_bars(database: Any, symbols: Iterable[str], *, through: date, limit: int = 260) -> dict[str, dict[str, Any]]:
     """Adjusted daily bars through ``through`` (inclusive), anchored to its close.
 
@@ -269,23 +286,46 @@ def plan_bars(database: Any, symbols: Iterable[str], *, through: date, limit: in
                              FROM quant.daily_adjustment_factors factor
                             WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
                               AND {factor_sql} AND factor.adj_factor>0
-                              AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                              -- A plan is frozen now for the next session, so a factor
+                              -- is usable once it is known now; a late backfill of an
+                              -- older date is still known before the session opens.
+                              AND factor.available_at<=now()
                             ORDER BY array_position(%s::text[],factor.provider) NULLS LAST,
                                      factor.available_at DESC,factor.provider
                             LIMIT 1
                      ) pit ON TRUE
-                    WHERE b.symbol=ANY(%s) AND b.trading_date<=%s AND b.quality_status='fresh'
+                    WHERE b.symbol=ANY(%s) AND b.trading_date<=%s
+                      -- owner marks many complete OHLC rows 'partial' (a missing
+                      -- auxiliary field); prices are usable, so only require them.
+                      AND b.quality_status IN ('fresh','partial')
+                      AND b.open IS NOT NULL AND b.high IS NOT NULL AND b.low IS NOT NULL AND b.close IS NOT NULL
                       AND b.available_at<=now() AND b.volume>0 AND NOT coalesce(b.is_suspended,false)
                )
                SELECT * FROM ranked WHERE row_number<=%s ORDER BY symbol,trading_date""",
             (list(FACTOR_PROVIDER_ORDER), requested, through, int(limit)),
         ).fetchall()
+        sessions = [row["calendar_date"] for row in connection.execute(
+            """SELECT DISTINCT calendar_date FROM quant.market_trade_calendar
+                WHERE exchange='SSE' AND is_open AND calendar_date<=%s ORDER BY calendar_date DESC LIMIT %s""",
+            (through, GAP_CHECK_SESSIONS),
+        ).fetchall()]
+        suspended = {(str(row["symbol"]), row["trading_date"]) for row in connection.execute(
+            """SELECT symbol,trading_date FROM quant.canonical_bars_daily
+                WHERE symbol=ANY(%s) AND trading_date<=%s AND trading_date>=%s
+                  AND (coalesce(is_suspended,false) OR coalesce(volume,0)=0)""",
+            (requested, through, min(sessions) if sessions else through),
+        ).fetchall()}
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         grouped.setdefault(str(row["symbol"]), []).append(dict(row))
     result: dict[str, dict[str, Any]] = {}
     for symbol in requested:
         raw_rows = grouped.get(symbol) or []
+        gaps = calendar_gaps({row["trading_date"] for row in raw_rows},
+                             {day for sym, day in suspended if sym == symbol}, sessions)
+        if gaps:
+            result[symbol] = {"status": "unavailable", "flags": ["bar_gaps:" + ",".join(str(day) for day in gaps[:5])]}
+            continue
         prepared, flags = adjusted_bars(raw_rows)
         if not raw_rows or prepared is None:
             result[symbol] = {"status": "unavailable", "flags": flags or ["no_bars"]}
@@ -392,7 +432,8 @@ def xiaojie_session_modes(database: Any, trade_date: date) -> dict[str, list[str
 
 
 __all__ = [
-    "PACK_CAPABILITY", "PROVIDER", "SETTLEMENT_CAPABILITY", "SOURCE_TAG", "apply_session_plans", "first_limit_up_times",
+    "GAP_CHECK_SESSIONS", "PACK_CAPABILITY", "PROVIDER", "SETTLEMENT_CAPABILITY", "SOURCE_TAG", "apply_session_plans",
+    "calendar_gaps", "first_limit_up_times",
     "minute_period_bars", "open_sessions", "pack_record", "persist_pack", "persist_settlement", "plan_bars",
     "recent_packs", "recent_settlements", "retire_plans", "session_bars", "session_events", "sessions_between",
     "teacher_watch_rows", "xiaojie_session_modes",

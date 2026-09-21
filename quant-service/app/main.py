@@ -4445,14 +4445,23 @@ def teacher_review_enabled() -> bool:
     return os.getenv("TEACHER_REVIEW_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
+async def teacher_review_repair_daily(trade_date: date) -> dict[str, Any]:
+    """Data-plane repair of one session: daily bars (Longhu full market first), then controls."""
+    bars = await sync_full_market_daily(FullMarketDailySyncRequest(trade_date=trade_date))
+    controls = await sync_full_market_daily_controls(trade_date)
+    return {"bars": {key: bars.get(key) for key in ("status", "provider", "stored", "rows") if key in bars},
+            "controls": {key: controls.get(key) for key in ("status", "stored", "reason") if key in controls}}
+
+
 def _teacher_review_dependencies() -> TeacherReviewDependencies:
     return TeacherReviewDependencies(
         database=db, run_database=run_database_blocking, now_utc=lambda: datetime.now(timezone.utc),
         send_alert=post_feishu_alert_text, max_symbols=intraday_watchlist_max_symbols,
         exchange_for=exchange_for,
         # Owner PG already carries full-market daily bars; per-symbol Tushare
-        # hydration would saturate the shared 6/min provider queue.
-        hydrate_history=None,
+        # hydration would saturate the shared 6/min provider queue.  Missing
+        # sessions are repaired date-wise through the data plane instead.
+        hydrate_history=None, repair_daily=teacher_review_repair_daily,
     )
 
 
@@ -6108,6 +6117,7 @@ app.include_router(build_teacher_review_router(TeacherReviewRouterDependencies(
     settlements=lambda limit: run_database_blocking(
         lambda: teacher_review_repository.recent_settlements(db, limit=limit),
     ),
+    roll=lambda trade_date: roll_teacher_review(trade_date or cn_today(), _teacher_review_dependencies()),
 )))
 app.include_router(build_ten_day_leader_rotation_actions_router(
     TenDayLeaderRotationActionDependencies(run=run_ten_day_leader_rotation_endpoint),

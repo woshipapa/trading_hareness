@@ -49,6 +49,9 @@ class TeacherReviewDependencies:
     max_symbols: Callable[[], int]
     exchange_for: Callable[[str], str]
     hydrate_history: Callable[[Any, str], Awaitable[dict[str, Any]]] | None = None
+    # Data-plane repair of one session's daily bars and controls (Longhu first).
+    repair_daily: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    max_repair_dates: int = 5
     reserve: int = 5
     lookback_days: int = 14
 
@@ -111,8 +114,12 @@ async def build_session_plans(
         {**stock, "_order": order} for order, stock in enumerate(pack["stocks"])
         if playbook_kind(str(stock["playbook"])) != "record" and int(stock["valid_sessions"]) >= session_index
     ]
-    stored = await _db(deps, repo.plan_bars, [ts_code(str(stock["code"])) for stock in stocks],
-                       through=previous_session, timeout_seconds=60)
+    symbols = [ts_code(str(stock["code"])) for stock in stocks]
+    stored = await _db(deps, repo.plan_bars, symbols, through=previous_session, timeout_seconds=60)
+    repair = await _repair_missing_sessions(stored, previous_session, deps)
+    if repair.get("dates"):
+        retry = [symbol for symbol in symbols if not _complete(stored.get(symbol), previous_session)]
+        stored.update(await _db(deps, repo.plan_bars, retry, through=previous_session, timeout_seconds=60))
     plans, failures = [], []
     for stock in stocks:
         code = str(stock["code"])
@@ -146,7 +153,38 @@ async def build_session_plans(
             },
         })
     plans.sort(key=lambda item: item["priority"])
+    if repair.get("dates"):
+        failures.append({"code": "*", "name": "数据面补数", "reason": str(repair)[:300]})
     return plans, failures
+
+
+def _complete(entry: Mapping[str, Any] | None, previous_session: date) -> bool:
+    return bool(entry) and entry.get("status") == "ok" and entry.get("trading_date") == previous_session \
+        and len(entry.get("bars") or []) >= 20
+
+
+async def _repair_missing_sessions(stored: Mapping[str, Mapping[str, Any]], previous_session: date,
+                                   deps: TeacherReviewDependencies) -> dict[str, Any]:
+    """Ask the data plane to fill the sessions whose bars/factors are missing, newest first."""
+    wanted: set[date] = set()
+    for entry in stored.values():
+        if _complete(entry, previous_session):
+            continue
+        for flag in entry.get("flags") or []:
+            if str(flag).startswith("bar_gaps:"):
+                wanted.update(date.fromisoformat(item) for item in str(flag).split(":", 1)[1].split(",") if item)
+        if entry.get("status") != "ok" or entry.get("trading_date") != previous_session:
+            wanted.add(previous_session)
+    if not wanted or deps.repair_daily is None:
+        return {"dates": [], "status": "not_needed" if not wanted else "no_repair_interface"}
+    dates = sorted(wanted, reverse=True)[: deps.max_repair_dates]
+    outcomes = {}
+    for day in dates:
+        try:
+            outcomes[day.isoformat()] = await deps.repair_daily(day)
+        except Exception as error:  # noqa: BLE001 - a failed repair leaves the gap reported
+            outcomes[day.isoformat()] = {"status": "failed", "error": _short(error, 160)}
+    return {"dates": [day.isoformat() for day in dates], "outcomes": outcomes}
 
 
 async def import_pack(pack: dict[str, Any], deps: TeacherReviewDependencies, *, dry_run: bool = False) -> dict[str, Any]:
