@@ -120,7 +120,9 @@ class BlockingExecutorBoundary:
         }
 
 
-public_source_executor_workers = bounded_worker_count("AKSHARE_MAX_WORKERS", 4, 12)
+# Public/licensed reads are network-bound; batched Longhu quote/minute calls
+# hold one slot each, while the other intraday loops share the rest.
+public_source_executor_workers = bounded_worker_count("AKSHARE_MAX_WORKERS", 8, 32)
 public_source_executor = ThreadPoolExecutor(
     max_workers=public_source_executor_workers,
     thread_name_prefix="akshare",
@@ -131,7 +133,7 @@ database_executor = ThreadPoolExecutor(
     thread_name_prefix="quant-db",
 )
 
-public_source_queue_capacity = bounded_queue_size("AKSHARE_MAX_QUEUE", 8)
+public_source_queue_capacity = bounded_queue_size("AKSHARE_MAX_QUEUE", 16)
 database_executor_queue_capacity = bounded_queue_size("QUANT_DB_BLOCKING_MAX_QUEUE", 8)
 public_source_boundary = BlockingExecutorBoundary("public_source", public_source_executor_workers, public_source_queue_capacity)
 database_executor_boundary = BlockingExecutorBoundary("database", database_executor_workers, database_executor_queue_capacity)

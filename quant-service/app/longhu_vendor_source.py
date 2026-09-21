@@ -17,6 +17,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -306,7 +307,7 @@ class LonghuVendorConfig:
             plate_page_size=safe_page_size(int(payload.get("plate_page_size") or 60)),
             timeout_seconds=float(payload.get("timeout_seconds") or 20.0),
             retries=max(1, int(payload.get("retries") or 3)),
-            workers=max(1, min(24, int(payload.get("workers") or 12))),
+            workers=max(1, min(64, int(payload.get("workers") or 12))),
         )
         if not result.token or not result.user_id or not result.device_id or not result.version:
             raise ValueError("Longhu token, user_id, device_id and version are required")
@@ -338,6 +339,58 @@ def configured(path: str | Path | None = None) -> bool:
         return False
 
 
+MINUTE_BATCH_DEADLINE_EXCEEDED = "minute_batch_deadline_exceeded"
+
+
+def minute_batch_workers() -> int:
+    """In-flight minute calls for one basket (at most 300 symbols per basket).
+
+    The trend endpoint takes one ``StockID``, so a basket is a fan-out of
+    single calls.  Through the shared gateway each call occupies one slot of
+    the owner's blocking executor (4 workers + 8 queued by default); measured
+    throughput is flat above 4 in flight and more only turns into 503s that
+    also reject quote and auction reads.  Raise this together with the
+    owner's ``AKSHARE_MAX_WORKERS``.
+    """
+    try:
+        return max(1, min(MAX_PAGE_SIZE, int(os.getenv("LONGHU_MINUTE_BATCH_WORKERS", "4"))))
+    except ValueError:
+        return 4
+
+
+def _minutes_batch(
+    fetch: Any, symbols: Iterable[str], workers: int, deadline_seconds: float | None = None,
+) -> dict[str, list[dict[str, Any]] | str]:
+    """Fan one bounded basket out on a private pool; one symbol's failure is its own entry.
+
+    Results are keyed by the caller's spelling so callers can look symbols up
+    without re-normalizing; unsupported symbols get an error entry.
+    """
+    ordered = list(dict.fromkeys(str(value) for value in symbols if value))[:MAX_PAGE_SIZE]
+    result: dict[str, list[dict[str, Any]] | str] = {
+        symbol: "unsupported Longhu stock symbol" for symbol in ordered if normalize_stock_symbol(symbol) is None
+    }
+    ordered = [symbol for symbol in ordered if symbol not in result]
+    if not ordered:
+        return result
+    pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(ordered))), thread_name_prefix="longhu-minute")
+    futures = {pool.submit(fetch, symbol): symbol for symbol in ordered}
+    try:
+        for future in as_completed(futures, timeout=deadline_seconds):
+            symbol = futures[future]
+            try:
+                result[symbol] = future.result()
+            except Exception as error:  # one symbol must not abort the basket
+                result[symbol] = f"{type(error).__name__}: {str(error)[:200]}"
+    except FuturesTimeoutError:
+        # Return what finished; stragglers are reported, never waited on.
+        for future, symbol in futures.items():
+            result.setdefault(symbol, MINUTE_BATCH_DEADLINE_EXCEEDED)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    return result
+
+
 class LonghuIntradaySource(Protocol):
     """Small contract shared by the local licensed and remote gateway clients."""
 
@@ -348,6 +401,10 @@ class LonghuIntradaySource(Protocol):
     def stock_quote(self, symbol: str) -> dict[str, Any]: ...
 
     def stock_minutes(self, symbol: str) -> list[dict[str, Any]]: ...
+
+    def stock_minutes_batch(
+        self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
+    ) -> dict[str, list[dict[str, Any]] | str]: ...
 
     def raw_call(self, request: Mapping[str, Any]) -> dict[str, Any]: ...
 
@@ -376,6 +433,11 @@ class SharedLonghuReadSource:
         self._session = requests.Session()
         self._session.trust_env = False
         self._session.headers.update({"X-Quant-Read-Key": self.read_key, "Accept": "application/json"})
+        # Batched minute requests run many calls at once; size the keep-alive
+        # pool for them instead of discarding connections above ten.
+        adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=max(16, minute_batch_workers()))
+        self._session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
 
     def _get(self, path: str, *, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
         response = self._session.get(
@@ -488,6 +550,11 @@ class SharedLonghuReadSource:
         if not rows:
             raise RuntimeError(f"shared Longhu minute returned no rows for {normalized}")
         return rows
+
+    def stock_minutes_batch(
+        self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
+    ) -> dict[str, list[dict[str, Any]] | str]:
+        return _minutes_batch(self.stock_minutes, symbols, minute_batch_workers(), deadline_seconds)
 
     def raw_call(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Forward the complete documented call contract to the owner gateway."""
@@ -689,6 +756,13 @@ class LonghuVendorSource:
         if not rows:
             raise RuntimeError(f"Longhu minute returned no rows for {code}")
         return rows
+
+    def stock_minutes_batch(
+        self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
+    ) -> dict[str, list[dict[str, Any]] | str]:
+        return _minutes_batch(
+            self.stock_minutes, symbols, max(self.config.workers, minute_batch_workers()), deadline_seconds,
+        )
 
     def _single_raw_call_payload(self, request: Mapping[str, Any], *, action: str) -> dict[str, Any]:
         """Extract one page from the same generic contract used by peers."""

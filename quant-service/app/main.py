@@ -2755,7 +2755,7 @@ def intraday_minute_profile_retention_days() -> int:
 def intraday_minute_profile_max_symbols() -> int:
     """Bound the close capture without silently reducing the normal pool."""
     try:
-        return max(1, min(40, int(os.getenv("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", "40"))))
+        return max(1, min(100, int(os.getenv("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", "40"))))
     except ValueError:
         return 40
 
@@ -2857,6 +2857,27 @@ async def intraday_longhu_minutes(symbol: str) -> list[dict[str, Any]]:
         lambda: longhu_intraday_source().stock_minutes(symbol), timeout_seconds=7,
     )
     return current_session_minute_rows(rows, observed_at=datetime.now(timezone.utc))
+
+
+async def intraday_longhu_minutes_batch(symbols: list[str]) -> dict[str, Any]:
+    """One executor slot for a whole basket; each symbol keeps the exchange-date guard."""
+    if not longhu_vendor_configured():
+        raise RuntimeError("longhu_not_configured")
+    from .longhu_vendor_source import current_session_minute_rows
+    batch = await run_akshare_blocking(
+        lambda: longhu_intraday_source().stock_minutes_batch(symbols, deadline_seconds=5.5), timeout_seconds=8,
+    )
+    observed_at = datetime.now(timezone.utc)
+    result: dict[str, Any] = {}
+    for symbol, rows in batch.items():
+        if isinstance(rows, list):
+            try:
+                result[symbol] = current_session_minute_rows(rows, observed_at=observed_at)
+            except RuntimeError as error:
+                result[symbol] = str(error)
+        else:
+            result[symbol] = rows
+    return result
 
 
 async def shared_stock_api_call(request: dict[str, Any]) -> dict[str, Any]:
@@ -3998,7 +4019,7 @@ async def intraday_surge_context(
             persist_health=persist_longhu_intraday_minute_health, run_database=run_database_blocking,
             safe_error=safe_error_detail, handled_errors=(Exception,),
             provider_key="longhuvip", feature_source="longhuvip_minute",
-            check_provider_circuit=False,
+            check_provider_circuit=False, fetch_minutes_batch=intraday_longhu_minutes_batch,
         )
 
     # Independent providers: waiting for Longhu before starting Tencent used to
@@ -4438,7 +4459,7 @@ async def _post_close_core_symbols(limit: int) -> list[str]:
     return await read_async_limited_core_symbols(async_db, limit)
 
 
-TEACHER_REVIEW_MINUTE_EXTRA_MAX = 50
+TEACHER_REVIEW_MINUTE_EXTRA_MAX = 100
 
 
 def teacher_review_minute_symbols(watches: list[dict[str, Any]], observed_at: datetime) -> list[str]:

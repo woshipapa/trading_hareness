@@ -292,6 +292,39 @@ class BarCompletenessTests(unittest.TestCase):
 
 
 class CompositionTests(unittest.TestCase):
+    def test_longhu_minute_batch_fans_out_and_isolates_failures(self):
+        from app.longhu_vendor_source import _minutes_batch
+
+        def fetch(symbol):
+            if symbol.startswith("600"):
+                raise RuntimeError("stale")
+            return [{"symbol": symbol}]
+
+        symbols = [f"{index:06d}.SZ" for index in range(1, 320)] + ["600000.SH", "bad", "000001.SZ"]
+        result = _minutes_batch(fetch, symbols, 32)
+        self.assertEqual(len(result), 300)
+        self.assertEqual(result["000001.SZ"], [{"symbol": "000001.SZ"}])
+        self.assertNotIn("600000.SH", result)
+        small = _minutes_batch(fetch, ["600000.SH", "bad", "300476"], 8)
+        self.assertTrue(small["600000.SH"].startswith("RuntimeError"))
+        self.assertEqual(small["bad"], "unsupported Longhu stock symbol")
+        self.assertEqual(small["300476"], [{"symbol": "300476"}])
+
+    def test_longhu_minute_batch_returns_finished_symbols_at_its_deadline(self):
+        import time as _time
+        from app.longhu_vendor_source import _minutes_batch
+
+        def fetch(symbol):
+            if symbol == "000002.SZ":
+                _time.sleep(1.0)
+            return [{"symbol": symbol}]
+
+        started = _time.monotonic()
+        result = _minutes_batch(fetch, ["000001.SZ", "000002.SZ"], 2, deadline_seconds=0.3)
+        self.assertLess(_time.monotonic() - started, 0.8)
+        self.assertEqual(result["000001.SZ"], [{"symbol": "000001.SZ"}])
+        self.assertEqual(result["000002.SZ"], "minute_batch_deadline_exceeded")
+
     def test_composition_root_builds_service_dependencies(self):
         from app import main
         dependencies = main._teacher_review_dependencies()
