@@ -27,8 +27,8 @@
 | 分时均价 | `quote.watch_snapshot` | 列表报价的累计成交额 ÷ 累计成交量（与分时均价同义）；其他策略恰好拉到的分钟线优先 |
 | 分钟放量/5 分钟走势 | `quote.watch_snapshot` | 快照带（每轮扫描的列表报价按股保存 31 分钟）重建；其他策略拉到的分钟线优先；带子不足 5 分钟时回退到量比/上一轮扫描价 |
 | 30/60 分钟两段底背离 | `bars.minute` | Longhu 周期K（`GetKLineDay_W14` Type=30/60，120 根≈15/30 个交易日）；盘前只用前一交易日收盘及以前的K，盘中每分钟刷新一次（含形成中的K）；Longhu 取不到时用已存 `intraday_minute_sessions` 聚合；不足 35 根记“数据不足”，不当作“没有背离” |
-| 竞价额/竞价封单/竞价涨幅 | `auction.open_snapshot` | 09:25 后首轮扫描取 Fuyao `a_share_auction_snapshot`（一次 ≤100 只，定稿后全天复用）；取不到时才用 09:31 前累计成交额近似 |
-| 板块涨停家数 | `limits.limit_up_pool` | 已存 Fuyao 涨停池最新快照（每分钟），按 `limit_up_reason` 关键词归入老师的板块；快照超过 10 分钟视为未知 |
+| 竞价额/竞价封单/竞价涨幅 | `auction.open_snapshot` | 09:25 后首轮扫描取 Fuyao `a_share_auction_snapshot`（一次 ≤100 只）；快照不带日期，只收 `data_status=final` 且昨收等于计划冻结收盘价的行，定稿后全天复用；取不到时才用 09:31 前累计成交额近似 |
+| 板块涨停家数 | `limits.limit_up_pool` | 已存 Fuyao 涨停池最新快照（每分钟）中当前涨停、`limit_up_reason` 命中板块关键词的家数；快照超过 10 分钟视为未知；另记今日峰值，“显著回落” = 峰值达到形成线后跌破峰值一半 |
 | 龙头状态（跟随套利） | `quote.watch_snapshot` | 龙头本身也是老师计划票：取它在同一扫描链路里的最新状态（≤120 秒） |
 | 盘后首封时间 | `limits.limit_up_pool` | 盘中采集的 `market_events`（分钟级） |
 | 交易日 | `reference.trade_calendar` | `market_trade_calendar` |

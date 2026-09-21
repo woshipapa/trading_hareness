@@ -28,7 +28,6 @@ DEFAULTS: Final[dict[str, Any]] = {
     "center_flat_pct": 1.0,          # I: 重心平移 = (高+低)/2 日变动 ≤ 1%
     "auction_proxy_until": "09:31",  # I: 该时刻前的累计成交额视作竞价额（仅在取不到 09:25 竞价快照时）
     "close_confirm_from": "14:50",   # I: “收盘跌破”类失效在该时刻后按当前价确认，之前只提示
-    "sector_check_from": "10:30",    # I: “板块涨停数回落”类失效在该时刻后才判定（涨停家数要时间形成）
 }
 
 # kind: relay = next-session relay, trend = multi-session setup, record = settle only (never watched)

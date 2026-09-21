@@ -4506,8 +4506,8 @@ async def refresh_teacher_auction(watches: list[dict[str, Any]]) -> dict[str, An
         local = observed_at.astimezone(ZoneInfo("Asia/Shanghai"))
         if not (time(9, 25, 5) <= local.time() <= time(15, 0)):
             return {"status": "outside_window"}
-        missing = teacher_market_book.auction_missing(
-            [symbol for symbol, _plan in _teacher_plans_today(watches, observed_at)], observed_at)[:100]
+        plans = dict(_teacher_plans_today(watches, observed_at))
+        missing = teacher_market_book.auction_missing(list(plans), observed_at)[:100]
         if not missing:
             return {"status": "fresh"}
         last = _teacher_auction_attempt.get("at")
@@ -4515,12 +4515,20 @@ async def refresh_teacher_auction(watches: list[dict[str, Any]]) -> dict[str, An
             return {"status": "throttled", "missing": len(missing)}
         _teacher_auction_attempt["at"] = observed_at
         data = await asyncio.wait_for(fetch_fuyao("a_share_auction_snapshot", {"thscodes": ",".join(missing)}), timeout=4)
-        stored = []
+        stored, rejected = [], {}
         for event in normalize_fuyao_auction(data, observed_at):
             raw = event["raw"]
             price = _optional_float(raw.get("auction_price"))
             unmatched = _optional_float(raw.get("auction_unmatched"))
-            final = str(raw.get("data_status") or "") == "final" or local.time() >= time(9, 26)
+            # The snapshot carries no date: it is today's only when it is final and its
+            # pre-close equals the plan's previous close (yesterday's row has the day before).
+            previous_close = _optional_float(((plans.get(event["ts_code"]) or {}).get("levels") or {}).get("close"))
+            pre_close = _optional_float(raw.get("pre_close_price"))
+            if str(raw.get("data_status") or "") != "final" or previous_close is None or pre_close is None \
+                    or abs(pre_close - previous_close) > max(0.011, previous_close * 0.001):
+                rejected[event["ts_code"]] = f"{raw.get('data_status')}:pre_close={pre_close} vs {previous_close}"
+                continue
+            final = True
             teacher_market_book.store_auction(event["ts_code"], observed_at, {
                 "amount": _optional_float(raw.get("auction_amount")), "price": price,
                 "pct": _optional_float(raw.get("auction_pct")), "open": _optional_float(raw.get("open_price")),
@@ -4530,7 +4538,8 @@ async def refresh_teacher_auction(watches: list[dict[str, Any]]) -> dict[str, An
                 "status": raw.get("data_status"), "final": final, "source": "fuyao_auction_0925",
             })
             stored.append(event["ts_code"])
-        return {"status": "completed", "stored": len(stored), "requested": len(missing)}
+        return {"status": "completed" if stored else "not_ready", "stored": len(stored), "requested": len(missing),
+                "rejected": dict(list(rejected.items())[:5]), "rejected_count": len(rejected)}
     except Exception as error:  # noqa: BLE001 - the proxy stays in force; the scan never waits on this
         return {"status": "failed", "error": safe_error_detail(str(error), 200)}
 

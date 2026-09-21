@@ -210,13 +210,14 @@ class TeacherMarketBook:
         self._day: date | None = None
         self._auction: dict[str, dict[str, Any]] = {}
         self._sectors: dict[str, dict[str, Any]] = {}
+        self._sector_peaks: dict[str, int] = {}
         self._sectors_at: datetime | None = None
         self.sector_refreshed_at: datetime | None = None
 
     def _roll(self, observed_at: datetime) -> None:
         day = observed_at.astimezone(_CN_TZ).date()
         if day != self._day:
-            self._day, self._auction, self._sectors = day, {}, {}
+            self._day, self._auction, self._sectors, self._sector_peaks = day, {}, {}, {}
             self._sectors_at = self.sector_refreshed_at = None
 
     def auction_missing(self, symbols: list[str], observed_at: datetime) -> list[str]:
@@ -235,12 +236,19 @@ class TeacherMarketBook:
                       counts: Mapping[str, Mapping[str, Any]]) -> None:
         self._roll(observed_at)
         self._sectors, self._sectors_at, self.sector_refreshed_at = dict(counts), snapshot_at, observed_at
+        for sector, value in counts.items():
+            self._sector_peaks[sector] = max(self._sector_peaks.get(sector, 0), int(value.get("count") or 0))
 
     def sector_counts(self, observed_at: datetime) -> dict[str, int]:
         self._roll(observed_at)
         if self._sectors_at is None or (observed_at - self._sectors_at).total_seconds() > self.SECTOR_MAX_AGE_SECONDS:
             return {}
         return {sector: int(value.get("count") or 0) for sector, value in self._sectors.items()}
+
+    def sector_peaks(self, observed_at: datetime) -> dict[str, int]:
+        """Highest count seen today per sector (the scan samples the pool about once a minute)."""
+        self._roll(observed_at)
+        return dict(self._sector_peaks)
 
 
 class PeriodDivergenceBook:
@@ -525,7 +533,8 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
             sig.append(_sig(f"{sector}板块涨停≥{minimum}（板块形成才做）", sector_count,
                             None if sector_count is None else sector_count >= minimum, "T"))
         elif sector and minimum is not None:
-            sig.append(_sig(f"{sector}板块涨停≥{minimum}（板块未退潮）", sector_count,
+            peak = (f.get("sector_peaks") or {}).get(sector)
+            sig.append(_sig(f"{sector}板块涨停（今日峰值 {peak}，形成线 {minimum}）", sector_count,
                             None if sector_count is None else sector_count >= minimum, "D", gating=False))
         gap = f["open_gap_pct"]
         sig += [_sig("竞价不低开", gap, gap is None or gap >= 0, "I"),
@@ -534,7 +543,9 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
                 _sig("封板中", f["sealed"], f["sealed"], gating=False)]
         invalid = (gap is not None and gap < 0 and f["above_vwap"] is False) or f["price"] < (f["pre_close"] or 0)
         if pb == "relay_race" and sector_count is not None and minimum is not None:
-            invalid = invalid or (sector_count < minimum and f["clock"] >= DEFAULTS["sector_check_from"])
+            # 老师“板块显著回落”：今日已形成（峰值 ≥ 形成线）后，当前涨停数跌破峰值一半。
+            peak = (f.get("sector_peaks") or {}).get(sector) or 0
+            invalid = invalid or (peak >= minimum and sector_count < peak / 2)
     elif pb == "relay_fast_seal":
         gap, amount = f["open_gap_pct"], f["amount"] or 0
         sig += [_sig("竞价不低开", gap, gap is None or gap >= 0, "I"),
@@ -697,6 +708,7 @@ def teacher_review_signals(
             features["auction_amount"] = auction["amount"]
             features["sources"]["auction_amount"] = str(auction.get("source") or "auction_snapshot")
         features["sector_counts"] = market_book.sector_counts(observed_at)
+        features["sector_peaks"] = market_book.sector_peaks(observed_at)
     if features.get("auction_amount") is not None and "auction_amount" not in features["sources"]:
         features["sources"]["auction_amount"] = "proxy:cum_amount_before_0931"
     if divergence_book is not None and playbook == "ma5_reclaim_or_divergence":

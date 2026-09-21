@@ -221,15 +221,20 @@ class PrecisionTests(unittest.TestCase):
         book.store_sectors(at(10, 0), at(9, 59), count_sector_limit_ups(rows, ["大金融", "房地产"]))
         entry = teacher_review_signals(news, strong, minute, None, at(10, 0), market_book=book)
         self.assertEqual(entry[0]["signal_type"], "entry")
-        race = watch("600606.SH", "relay_race", {"sector": "房地产", "sector_min_limit_ups": 5})
+        race = watch("600606.SH", "relay_race", {"sector": "房地产", "sector_min_limit_ups": 4})
         weak = quote(1.7, 1.6, amount=2e8, volume_lot=1.2e6, volume_ratio=2.0)
-        early = evaluate(race["metadata"]["teacher_review"], {**scan_features("600606.SH", weak, minute, at(10, 0)),
-                                                               "sector_counts": book.sector_counts(at(10, 0))})
-        self.assertNotEqual(early["action"], "invalid")
-        book.store_sectors(at(10, 40), at(10, 39), count_sector_limit_ups(rows, ["大金融", "房地产"]))
-        late = evaluate(race["metadata"]["teacher_review"], {**scan_features("600606.SH", weak, minute, at(10, 40)),
-                                                              "sector_counts": book.sector_counts(at(10, 40))})
-        self.assertEqual(late["action"], "invalid")
+
+        def race_at(hour, minute_, count):
+            estate = [{"name": f"地产{i}", "limit_up_reason": "房地产"} for i in range(count)]
+            book.store_sectors(at(hour, minute_), at(hour, minute_), count_sector_limit_ups(estate, ["房地产"]))
+            features = {**scan_features("600606.SH", weak, minute, at(hour, minute_)),
+                        "sector_counts": book.sector_counts(at(hour, minute_)), "sector_peaks": book.sector_peaks(at(hour, minute_))}
+            return evaluate(race["metadata"]["teacher_review"], features)["action"]
+
+        self.assertNotEqual(race_at(10, 30, 1), "invalid")     # not formed yet (9/21 had 1 at 10:30, 8 at close)
+        self.assertNotEqual(race_at(13, 30, 8), "invalid")     # formed
+        self.assertNotEqual(race_at(14, 0, 5), "invalid")      # 5 >= 8/2
+        self.assertEqual(race_at(14, 30, 3), "invalid")        # fell below half of today's peak
 
     def test_stale_sector_counts_are_unknown_not_zero(self):
         book = TeacherMarketBook()
