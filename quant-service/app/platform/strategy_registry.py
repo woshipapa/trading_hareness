@@ -98,6 +98,15 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "inflow, stock-vs-sector divergence) scoped to the 潜龙出海_swing fallback mode only, calibrated from a "
         "23-observation \"小杰交流\" event study (2026-08-26 to 09-16)",
     ),
+    "longhu_multifactor_shadow": StrategyContract(
+        "longhu_multifactor_shadow", "longhu-multifactor-shadow-v1", "app/longhu_multifactor_shadow.py",
+        "longhu-multifactor-v1",
+        ("raw_market_observations", "intraday_quote_observations", "intraday_rule_input_snapshots",
+         "intraday_scan_runs", "strategy_candidates"),
+        "research", "shadow", "none",
+        "Longhu quote/minute/order-book/auction/large-order/board context scorer; "
+        "all outputs remain research-only until point-in-time replay and promotion gates pass",
+    ),
 }
 
 

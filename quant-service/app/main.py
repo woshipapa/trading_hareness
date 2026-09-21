@@ -164,6 +164,7 @@ from .intraday_minute_provider_service import fetch_bounded_minute_context
 from .intraday_surge_context_service import capture as capture_intraday_surge_context
 from .strategy_candidate_ranking import select as select_intraday_candidates
 from .xiaojie_leader_flow import MODEL_VERSION as XIAOJIE_LEADER_FLOW_MODEL_VERSION, evaluate_snapshot as evaluate_xiaojie_leader_flow_snapshot
+from .longhu_multifactor_shadow import MODEL_VERSION as LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION
 from .xiaojie_leader_flow import alert_priority as xiaojie_alert_priority
 from .xiaojie_leader_flow import research_alert_allowed as xiaojie_research_alert_allowed
 from .xiaojie_indicators import evaluate_pool as evaluate_xiaojie_leader_pool
@@ -4641,6 +4642,7 @@ def _verify_strategy_runtime_contracts() -> None:
         "disclosure_day_watch": DISCLOSURE_DAY_WATCH_MODEL_VERSION,
         "limit_up_continuation": LIMIT_UP_CONTINUATION_MODEL_VERSION,
         "xiaojie_leader_flow": XIAOJIE_LEADER_FLOW_MODEL_VERSION,
+        "longhu_multifactor_shadow": LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION,
     })
 
 
