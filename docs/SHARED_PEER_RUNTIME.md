@@ -1,5 +1,11 @@
 # Shared peer runtime
 
+> **Current boundary (2026-09-21):** real-time provider polling, opening-auction
+> observation, strategy scanning, Feishu alert writing and production database
+> writes run on the remote owner/peer host. The local workstation is an analysis
+> client that reads remote evidence through the owner API/SSH tunnel. It must not
+> run a second real-time writer. See [`DEPLOYMENT_BOUNDARIES.md`](DEPLOYMENT_BOUNDARIES.md).
+
 This deployment keeps the authoritative trading database in the owner's
 current PostgreSQL runtime while allowing one reviewed collaborator to run the
 same research code in an isolated Docker environment. The owner hot/cold
@@ -60,8 +66,10 @@ lightServer root privileges.
 
 - The deployed PostgreSQL/edge runtime is the only authoritative quant store;
   Baidu Netdisk is L3 cold evidence and is never queried by live decisions.
-- The owner's local collector is the only scheduled market-data writer by
-  default. `PEER_BACKGROUND_TASKS_ENABLED=false` prevents duplicate scans.
+- The remote owner/peer `intraday_edge` runtime is the only scheduled
+  market-data writer. A local workstation keeps
+  `PEER_BACKGROUND_TASKS_ENABLED=false` (or its local equivalent) and does not
+  acquire production leases.
 - The peer role is intentionally broad on the owner's `quant` schema (the owner
   has elected not to revoke its existing write ACLs), but it may not run
   production migrations. Actual writes are declared in
@@ -98,7 +106,8 @@ lightServer root privileges.
 
 ## Local Longhu transport boundary
 
-The local workstation is a gateway consumer. It calls only the normalized
+The local workstation is a read-only gateway consumer, not a provider polling
+host. It calls only the normalized
 `/licensed/longhu/quotes`, `/licensed/longhu/minutes/{symbol}` and the batched
 `/licensed/longhu/minutes?symbols=` routes through
 an SSH-forwarded owner endpoint; the owner service is the only process that
@@ -121,10 +130,12 @@ scripts/shared-peer/start-local-longhu-tunnel.sh
 
 Set `QUANT_SHARED_READ_API_BASE_URL=http://host.docker.internal:15682` and the
 separately provisioned `QUANT_SHARED_READ_API_KEY` in the ignored local `.env`,
-then recreate `quant-research`. Docker Desktop resolves
+then recreate `quant-research` only when local analysis is needed. Docker Desktop resolves
 `host.docker.internal` to the host-side SSH listener; the SSH `-L` bind is
 loopback-only. Only normalized rows and source health cross the tunnel; vendor
-tokens and raw Longhu requests stay on the owner host.
+tokens and raw Longhu requests stay on the owner host. Closing the workstation
+tunnel does not stop remote collection; it only prevents local analysis from
+reading the owner API until the tunnel is restored.
 
 ## Owner bootstrap
 

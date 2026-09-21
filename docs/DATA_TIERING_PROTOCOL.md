@@ -1,10 +1,16 @@
 # 数据分层协议(Data Tiering Protocol)
 
+> **当前生产边界（2026-09-21）**：实时数据面在远端 owner/peer；本地工作站只
+> 做分析、回放和远端证据读取。本文件中旧的“本地 edge writer / L0”描述仅用于
+> 历史归档和恢复演练，不得据此重新启用本地实时采集。owner 热/冷物理布局以
+> [`OWNER_DATABASE_STORAGE.md`](OWNER_DATABASE_STORAGE.md) 和远端机器契约为准。
+
 状态:本地四层协议已实施并实测(2026-08-31)；owner Windows 热/冷切换契约见
 `OWNER_DATABASE_STORAGE.md`（2026-09-19）。本文是四层存储的放置规范:哪类数据放哪层、
 保留多久、怎么流动。所有延迟与容量数字来自本机实测,不是估计。
 
-适用范围:`intraday_edge`(47)与 `research`(本地工作站)两个 profile 的全部
+适用范围:远端 `intraday_edge`、远端 `research` scheduler，以及本地工作站的
+只读分析/回放缓存。全部
 行情、证据与研究数据。分析师文本/媒体归档(47 stock-reports :18081)自成体系,
 不在本协议内。
 
@@ -31,8 +37,8 @@ peer 不执行 DDL/迁移/分层/备份，本地 `/api/v1/research/storage-tiers
 
 | 层 | 物理位置 | 介质与角色 | 实测延迟 | 容量约束 |
 |---|---|---|---|---|
-| **L0 edge-hot** | 47 PG `quant_intraday_edge` | 实时采集+告警的工作集,**bounded**(retention+存储守卫) | 本机毫秒 | 机器仅 3.4G 内存/40G 盘,**只留活动窗口** |
-| **L1 research-hot** | 本地 Docker PG(`n8n` 库 `quant` schema) | 全历史系统记录(system of record)+ API 服务 | 点查毫秒 | 软上限 36GiB(×1.35 估算系数);**80% 触发告警并暂停非必要采集** |
+| **L0 edge-hot（历史）** | 47 PG `quant_intraday_edge` | 已退役的历史实时工作集，仅供恢复/归档核对 | 本机毫秒 | 不得重新启用为生产 writer |
+| **L1 research-hot（本地分析缓存）** | 本地 Docker PG(`n8n` 库 `quant` schema) | 分析/API/回放缓存，不是生产 system of record | 点查毫秒 | 软上限 36GiB；水位只影响本地分析，不控制远端采集 |
 | **L2 warm** | 本地 `~/marketdata/`(parquet + DuckDB catalog) | 分析/回测工作集,列式扫描 | **26–34ms**(单票全历史) | 本地盘(118G 空闲),按需增长 |
 | **L3 cold** | 百度网盘 12T `/apps/股票paper存储/` | 归档+异地容灾;**parquet 可 Range 就地查询** | 单票预取 **1.9s**;随机 seek ~1s/次 | 12T,当前用 ~5GB |
 
@@ -63,7 +69,12 @@ catalog(`~/marketdata/catalog/catalog.duckdb` 的 `partitions` 表)是 L3 的
 `strategy_available_at` 必须进入每个 parquet 分区;从 L3 回灌的数据凭这些
 字段回放,不引入未来函数。`stated_at` 是复盘证据,永远不是策略可见时间。
 
-## 3. 盘中(intraday_edge)placement
+## 3. 盘中(intraday_edge) placement（当前数据面在远端）
+
+本节的实时数据由远端 owner/peer 的 `intraday_edge` 产生并写入 owner
+PostgreSQL；L0/L1 列只描述证据复制或本地分析缓存，不表示本地工作站运行
+provider 轮询。远端 writer 停止时，本地不得自行接管，必须按 owner 发布/恢复
+流程处理。
 
 盘中唯一策略 `intraday_watchlist_confirmation` 与 5 个实时循环的数据放置:
 

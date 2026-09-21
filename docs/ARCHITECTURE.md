@@ -1,8 +1,15 @@
 # Quant Research Platform Architecture
 
-This is a local market-research platform.  It does not connect to a broker and
-does not submit orders.  Every strategy result is research evidence until its
-separate promotion gate is satisfied.
+> **当前部署边界（2026-09-21）**：远端 owner/peer 是唯一实时数据面、provider
+> 调用面、策略扫描面和生产写入面。本地工作站只做分析、研究、回放和通过
+> `15682` 拉取远端证据；不会启动实时轮询或成为第二个 writer。完整约束见
+> [`DEPLOYMENT_BOUNDARIES.md`](DEPLOYMENT_BOUNDARIES.md)。
+
+This is a market-research platform whose production data plane runs on the
+remote owner/peer host. The local workstation is an analysis and read-through
+client. It does not connect to a broker and does not submit orders. Every
+strategy result is research evidence until its separate promotion gate is
+satisfied.
 
 ## Runtime map
 
@@ -21,17 +28,14 @@ quant-research FastAPI
 ```
 
 The deployable background profiles split this map without changing the HTTP or
-research contracts. `intraday_edge` is the single live-polling and Feishu-alert
-writer for `intraday_monitor`, fast quote, minute profile, order book and board
-flow. `research` owns post-close review and local replay, but never starts those
-five polling loops. The edge keeps a bounded PostgreSQL database and streams an
-allowlisted, monotonically sequenced evidence-change journal back to the
-workstation over a forced-command SSH key. The journal is captured only by an
-`intraday_edge` connection profile, so importing an edge row into the research
-database cannot echo it back into a new export. The importer is transactional
-and deliberately excludes leases, delivery outboxes, recommendations,
-credentials and any order-like state. A workstation outage therefore delays
-analysis visibility without stopping collection or losing retained evidence.
+research contracts. On the remote owner/peer host, `intraday_edge` is the
+single live-polling and Feishu-alert writer for `intraday_monitor`, fast quote,
+minute profile, order book and board flow. The remote `research` scheduler owns
+post-close review and replay, but never starts those five polling loops. The
+local workstation is a read-through analysis client: a workstation outage
+delays analysis visibility without stopping remote collection or losing retained
+evidence. Any older edge-journal or local-writer path is historical recovery
+material, not the current production writer.
 
 Both profiles run the same committed source revision. The distinction is
 runtime configuration and ownership, not a long-lived server branch: releases
@@ -121,8 +125,9 @@ not import `app.main`.
   restores cloud partitions into staging and validates schema, hash, row count
   and point-in-time fields before use; strategies never query cloud objects in
   the live decision path.
-- Network loss keeps local loops alive.  Durable cursors, leases and run keys
-  resume work after recovery without replaying completed work.
+- Workstation/network loss keeps the remote loops authoritative. Durable
+  cursors, leases and run keys resume remote work after recovery without
+  replaying completed work; local analysis catches up through the owner API.
 
 ## Frontend ownership
 

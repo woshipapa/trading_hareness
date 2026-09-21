@@ -1,5 +1,9 @@
 # 全量共享股票数据 API 参考
 
+> **当前运行边界（2026-09-21）**：本 API 的 owner 网关和实时数据采集运行在
+> 远端 owner/peer。工作站通过 SSH 转发的 `15682` 只读拉取标准化证据和健康
+> 状态；工作站不直连上游、不保存 Longhu 凭据，也不启动第二套实时 writer。
+
 > 契约版本：2026-09-01
 >
 > 服务：trading_hareness / Market Research Service

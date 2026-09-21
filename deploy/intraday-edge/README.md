@@ -1,5 +1,12 @@
 # Intraday edge deployment
 
+> **Current boundary (2026-09-21):** this host is not the live market-data
+> writer. The remote owner/peer host owns provider polling, real-time strategy
+> scans, Feishu alerts and production writes. The workstation/edge side only
+> keeps relay or analysis functions and may read the owner API through the
+> `15682` SSH tunnel. The historical recovery units below must not be enabled
+> as a second live collector.
+
 This role is the single writer for live polling and Feishu research alerts.
 It runs the `intraday_edge` background profile on a loopback-only FastAPI
 process and keeps the local workstation in the complementary `research`
