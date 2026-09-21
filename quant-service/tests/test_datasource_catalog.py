@@ -167,6 +167,13 @@ class MigrationPinTests(unittest.TestCase):
         self.assertNotIn("fuyao_ths_concept", taxonomies_for(["ths_concept"]))       # declared, not proven
         self.assertIn("fuyao_ths_concept", taxonomies_for(["ths_concept"], min_status="declared"))
 
+    def test_order_book_storage_declares_real_relation_and_source(self):
+        longhu = [b for b in bindings_for("quote.order_book") if b.source == "longhuvip"][0]
+        tencent = [b for b in bindings_for("quote.order_book") if b.source == "tencent_free"][0]
+        self.assertEqual(longhu.storage, "intraday_quote_observations:source_name=longhu_order_book")
+        self.assertEqual(tencent.storage, "intraday_quote_observations:source_name=tencent_order_book")
+        self.assertNotIn("intraday_order_book_observations", longhu.storage)
+
 
 class ResolverTests(unittest.IsolatedAsyncioTestCase):
     async def test_priority_fallback_and_provenance(self):

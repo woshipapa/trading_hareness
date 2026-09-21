@@ -228,10 +228,15 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/free_market_providers.py", decision_eligible=True),
     _bind("sina_free", "quote.watch_snapshot", 55, LIVE_VERIFIED, "intraday_quote_observations",
           "app/free_market_providers.py", notes="无时间戳契约，仅兜底"),
-    _bind("longhuvip", "quote.order_book", 10, LIVE_VERIFIED, "intraday_order_book_observations", "app/longhu_vendor_source.py",
-          notes="十档"),
-    _bind("tencent_free", "quote.order_book", 50, LIVE_VERIFIED, "intraday_order_book_observations",
-          "app/intraday_order_book_service.py", notes="五档"),
+    # Both providers persist depth observations in the shared quote table.  The
+    # source discriminator is part of the storage contract; there is no
+    # separate intraday_order_book_observations relation.
+    _bind("longhuvip", "quote.order_book", 10, LIVE_VERIFIED,
+          "intraday_quote_observations:source_name=longhu_order_book", "app/longhu_vendor_source.py",
+          notes="十档；source_name=longhu_order_book"),
+    _bind("tencent_free", "quote.order_book", 50, LIVE_VERIFIED,
+          "intraday_quote_observations:source_name=tencent_order_book",
+          "app/intraday_order_book_service.py", notes="五档；source_name=tencent_order_book"),
     _bind("tushare_super_get", "quote.fast_confirmation", 15, LIVE_VERIFIED, "intraday_fast_quotes",
           "app/intraday_fast_quote_service.py", notes="rt_k"),
     _bind("fuyao_ths", "quote.valuation", 12, DECLARED, _RAW + "a_share_valuations_snapshot",
