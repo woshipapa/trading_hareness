@@ -3392,6 +3392,10 @@ def daily_summary_automation_enabled() -> bool:
     return os.getenv("DAILY_SUMMARY_AUTOMATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def daily_summary_feishu_enabled() -> bool:
+    return os.getenv("DAILY_SUMMARY_FEISHU_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def sse_calendar_open(calendar_date: date) -> bool:
     """Compatibility entry point for the isolated persisted SSE gate."""
     return read_sse_calendar_open(db, calendar_date)
@@ -3478,11 +3482,11 @@ def build_daily_strategy_summary(exchange_date: date) -> dict[str, Any]:
 
 
 async def run_daily_strategy_summary(exchange_date: date) -> dict[str, Any]:
-    """Persist the frontend-only daily summary through its runtime adapter."""
+    """Persist and deliver the evidence-only daily summary through its runtime adapter."""
     return await run_daily_strategy_summary_runtime(exchange_date, _daily_strategy_summary_runtime_dependencies())
 
 async def daily_strategy_summary_loop() -> None:
-    """Run the frontend-only daily summary scheduler through its adapter."""
+    """Run the 15:05 Asia/Shanghai daily summary scheduler through its adapter."""
     await run_daily_strategy_summary_runtime_loop(_daily_strategy_summary_runtime_dependencies())
 
 
@@ -3495,6 +3499,7 @@ def _daily_strategy_summary_runtime_dependencies() -> DailyStrategySummaryRuntim
         calendar_open=sse_calendar_open_async,
         now=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")),
         scheduler=daily_strategy_summary_scheduler,
+        post_text=post_feishu_alert_text if daily_summary_feishu_enabled() else None,
     )
 
 

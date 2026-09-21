@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from app.daily_strategy_summary_scheduler import (
     DailyStrategySummarySchedulerDependencies,
     daily_strategy_summary_scheduler_step,
+    in_summary_window,
 )
 
 
@@ -14,6 +15,12 @@ CN = ZoneInfo("Asia/Shanghai")
 
 
 class DailyStrategySummarySchedulerTests(unittest.IsolatedAsyncioTestCase):
+    def test_summary_window_opens_at_1505_shanghai(self):
+        self.assertFalse(in_summary_window(datetime(2026, 8, 14, 15, 4, 59, tzinfo=CN)))
+        self.assertTrue(in_summary_window(datetime(2026, 8, 14, 15, 5, tzinfo=CN)))
+        self.assertTrue(in_summary_window(datetime(2026, 8, 14, 21, 59, tzinfo=CN)))
+        self.assertFalse(in_summary_window(datetime(2026, 8, 14, 22, 0, tzinfo=CN)))
+
     def _dependencies(self, *, terminal: bool = False, status: str = "suppressed"):
         calls: list[str] = []
 

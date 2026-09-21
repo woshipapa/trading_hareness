@@ -59,10 +59,45 @@ class DailyStrategySummaryRuntimeTests(unittest.TestCase):
         self.assertIn("Feishu is reserved", result["reason"])
         self.assertEqual(calls, [("<lambda>", None), ("persist_frontend_only", None)])
         query, params = database.connection.executed[0]
-        self.assertIn("delivery_status='suppressed'", query)
+        self.assertIn("delivery_status=EXCLUDED.delivery_status", query)
         self.assertEqual(params[0], date(2026, 8, 21))
         self.assertEqual(params[1], {"payload": result["summary"]})
         self.assertEqual(params[2], "2026-08-21 https://dashboard.example")
+        self.assertEqual(params[3], "suppressed")
+
+    def test_summary_is_sent_once_through_configured_feishu_transport(self) -> None:
+        database = _Database()
+        delivered = []
+
+        async def run_database(operation, *args, **kwargs):
+            return operation(*args)
+
+        async def post_text(text):
+            delivered.append(text)
+            return {"status": "sent", "transport": "adapter_webhook"}
+
+        async def calendar_open(_):
+            return True
+
+        async def scheduler(_):
+            return None
+
+        dependencies = DailyStrategySummaryRuntimeDependencies(
+            database=database, run_database=run_database,
+            build_summary=lambda exchange_date: {"exchange_date": str(exchange_date)},
+            summary_text=lambda summary, _url: f"close {summary['exchange_date']}",
+            dashboard_url=lambda: None, json_safe=lambda value: value,
+            json_value=lambda value: value, terminal_for_exchange_date=lambda *_: False,
+            calendar_open=calendar_open,
+            now=lambda: datetime(2026, 8, 21, 15, 5, tzinfo=timezone.utc),
+            scheduler=scheduler, post_text=post_text,
+        )
+        result = asyncio.run(run_daily_strategy_summary(date(2026, 8, 21), dependencies))
+
+        self.assertEqual(result["status"], "sent")
+        self.assertEqual(delivered, ["close 2026-08-21"])
+        _query, params = database.connection.executed[0]
+        self.assertEqual(params[3:7], ("sent", "sent", "sent", None))
 
     def test_scheduler_adapter_uses_same_date_terminal_receipt(self) -> None:
         database = _Database()

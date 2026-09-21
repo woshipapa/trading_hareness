@@ -163,6 +163,7 @@ def daily_strategy_summary_text(summary: dict[str, Any], dashboard_url: str | No
     signal_counts = summary.get("signal_counts") or {}
     outcome_counts = summary.get("outcome_counts") or {}
     post_close = summary.get("post_close") or {}
+    close_review = summary.get("close_review") or {}
     readiness = summary.get("readiness") or {}
     learning = summary.get("offline_policy_learning") or {}
     daily_learning = learning.get("daily_review") if isinstance(learning.get("daily_review"), dict) else {}
@@ -181,6 +182,7 @@ def daily_strategy_summary_text(summary: dict[str, Any], dashboard_url: str | No
         f"【日终研究摘要｜{summary.get('exchange_date', '—')}】",
         f"盘中信号：已送达 {signal_counts.get('alerted', 0)}｜待确认 {signal_counts.get('confirmed', 0)}｜抑制去重 {signal_counts.get('suppressed', 0)}。",
         f"信号结算：{outcomes}。",
+        f"收盘状态：{close_review.get('market_state', '—')}｜数据边界：{close_review.get('data_boundary', '—')}。",
         f"盘后候选：{post_close.get('status', 'missing')}｜{candidate_text}。",
         f"数据门禁：{'通过' if readiness.get('decision_ready') else '未通过'}；阻塞项：{blockers}。",
         "策略学习：上下文动作回报离线复盘｜"
