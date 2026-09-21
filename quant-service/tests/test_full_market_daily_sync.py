@@ -28,7 +28,7 @@ class FullMarketDailySyncTests(unittest.IsolatedAsyncioTestCase):
 
         attempted: list[str] = []
         rejected: list[tuple[str, str]] = []
-        super_get = SimpleNamespace(key="tushare_super_get", name="super_get")
+        super_get = SimpleNamespace(key="tushare_super_get", name="super_get", get_gateway_mode="promax")
         primary = SimpleNamespace(key="tushare_primary", name="primary")
 
         def rows(count: int) -> list[dict[str, object]]:
@@ -65,9 +65,10 @@ class FullMarketDailySyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempted, ["super_get", "primary"])
         self.assertEqual(rejected, [("tushare_super_get", "daily returned 2 valid A-share rows; expected at least 5")])
         self.assertEqual(database_timeouts, [None, 180])
-        # The cross-section is ~5,400 rows and is refused in one response.
-        self.assertTrue(all(item["paginate"] for item in pagination))
-        self.assertTrue(all(item["require_complete"] for item in pagination))
+        # ProMax and the primary route use their native single-snapshot
+        # contracts; they must not receive unsupported limit/offset params.
+        self.assertEqual([item["paginate"] for item in pagination], [False, False])
+        self.assertEqual([item["require_complete"] for item in pagination], [False, False])
 
     async def test_minimum_row_gate_participates_in_idempotency_key(self):
         class Connection:
