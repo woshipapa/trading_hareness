@@ -32,7 +32,7 @@ from zoneinfo import ZoneInfo
 
 from . import teacher_review_repository as repo
 from .teacher_review_playbooks import playbook_kind, ts_code, validate_pack
-from .teacher_review_plan import bullish_divergence, plan_stock
+from .teacher_review_plan import DIVERGENCE_MIN_BARS, divergence_status, plan_stock
 from .teacher_review_rules import MODEL_VERSION
 
 _CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -49,6 +49,8 @@ class TeacherReviewDependencies:
     max_symbols: Callable[[], int]
     exchange_for: Callable[[str], str]
     hydrate_history: Callable[[Any, str], Awaitable[dict[str, Any]]] | None = None
+    # Data-plane 30/60-minute K-line history (Longhu ``GetKLineDay_W14``).
+    period_bars: Callable[[str, str], Awaitable[list[dict[str, Any]]]] | None = None
     # Data-plane repair of one session's daily bars and controls (Longhu first).
     repair_daily: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     max_repair_dates: int = 5
@@ -104,6 +106,38 @@ async def _bounded(items: list[Any], worker: Callable[[Any], Awaitable[Any]], li
     return await asyncio.gather(*(run(item) for item in items))
 
 
+def period_bars_through(rows: list[dict[str, Any]], through: date) -> list[dict[str, Any]]:
+    """Data-plane period bars ending on or before ``through`` in ``bullish_divergence`` form."""
+    last = through.strftime("%Y%m%d")
+    return [{"date": str(row["bar_time"]), "open": row["open"], "high": row["high"], "low": row["low"],
+             "close": row["close"]} for row in rows if str(row.get("bar_time") or "")[:8] <= last]
+
+
+async def period_divergence(symbol: str, period: str, through: date, deps: "TeacherReviewDependencies") -> dict[str, Any]:
+    """Pre-session 30/60-minute divergence from the data plane, point-in-time at ``through``.
+
+    Longhu period K-line first (it carries weeks of history); stored minute
+    sessions only when that yields fewer bars.  Too few bars is reported as
+    ``insufficient_bars`` rather than "no divergence".
+    """
+    bars: list[dict[str, Any]] = []
+    source, error = None, None
+    if deps.period_bars is not None:
+        try:
+            bars = period_bars_through(await deps.period_bars(symbol, period), through)
+            source = "longhuvip_kline"
+        except Exception as failure:  # noqa: BLE001 - a missing source degrades to stored minutes
+            error = f"{type(failure).__name__}: {str(failure)[:160]}"
+    if len(bars) < DIVERGENCE_MIN_BARS:
+        stored = await _db(deps, repo.minute_period_bars, symbol, through=through, period=period)
+        if len(stored) > len(bars):
+            bars, source = stored, "intraday_minute_sessions"
+    result = divergence_status(bars, source)
+    if error:
+        result["source_error"] = error
+    return result
+
+
 async def build_session_plans(
     pack: Mapping[str, Any], session: date, session_index: int, previous_session: date,
     deps: TeacherReviewDependencies,
@@ -130,10 +164,8 @@ async def build_session_plans(
             continue
         divergence = None
         if stock["playbook"] == "ma5_reclaim_or_divergence":
-            divergence = {}
-            for period in ("30", "60"):
-                bars = await _db(deps, repo.minute_period_bars, ts_code(code), through=previous_session, period=period)
-                divergence[period] = bullish_divergence(bars)
+            divergence = {period: await period_divergence(ts_code(code), period, previous_session, deps)
+                          for period in ("30", "60")}
         plan = plan_stock(stock, entry["bars"], divergence=divergence)
         plans.append({
             "ts_code": ts_code(code), "name": str(stock.get("name") or code),

@@ -721,7 +721,9 @@ from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_ro
 from .routers.teacher_review import TeacherReviewRouterDependencies, build_teacher_review_router
 from .teacher_review_rules import (
     MODEL_VERSION as TEACHER_REVIEW_MODEL_VERSION,
+    PeriodDivergenceBook as TeacherReviewDivergenceBook,
     SnapshotTape as TeacherReviewSnapshotTape,
+    divergence_plan_symbols as teacher_divergence_plan_symbols,
     active_plan as teacher_active_plan,
     teacher_review_signals,
 )
@@ -3070,7 +3072,8 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                     rebound_signal=countertrend_rebound_realtime_signal,
                     rebound_failure_signal=countertrend_rebound_failure_reduce_signal,
                     eac_acceptance=intraday_eac_acceptance_assessment,
-                    teacher_review_signal=functools.partial(teacher_review_signals, tape=teacher_review_tape),
+                    teacher_review_signal=functools.partial(teacher_review_signals, tape=teacher_review_tape,
+                                                            divergence_book=teacher_divergence_book),
                 ),
                 load_event_state=load_intraday_signal_event_state,
                 persist_generated_signals=persist_generated_signals,
@@ -4033,11 +4036,13 @@ async def intraday_surge_context(
 
     # Independent providers: waiting for Longhu before starting Tencent used to
     # add both deadlines to the first scan of a session.
-    (licensed_features, licensed_status), (fallback_features, fallback_status) = await asyncio.gather(
+    (licensed_features, licensed_status), (fallback_features, fallback_status), divergence_status = await asyncio.gather(
         licensed_context(),
         intraday_tencent_surge_context(
             watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols, max_symbols=minute_budget,
         ),
+        # Teacher 30/60-minute divergence rides the same wait; it never raises.
+        refresh_teacher_divergence(watches),
     )
     return {**fallback_features, **licensed_features}, {
         "provider_status": (
@@ -4049,6 +4054,7 @@ async def intraday_surge_context(
         "licensed_completed": sorted(licensed_features),
         "fallback_completed": sorted(set(fallback_features) - set(licensed_features)),
         "policy": "longhuvip_primary_tencent_fallback",
+        "teacher_divergence": divergence_status,
     }
 
 
@@ -4473,6 +4479,64 @@ async def _post_close_core_symbols(limit: int) -> list[str]:
 # requests.  A positive value restores extra per-stock minute budget for them.
 TEACHER_REVIEW_MINUTE_EXTRA_MAX = 100
 teacher_review_tape = TeacherReviewSnapshotTape()
+teacher_divergence_book = TeacherReviewDivergenceBook()
+TEACHER_DIVERGENCE_MAX_SYMBOLS = 10
+
+
+async def longhu_period_bars(symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]:
+    """Data plane: Longhu 30/60-minute K-line (history plus the forming bar)."""
+    if not longhu_vendor_configured():
+        raise RuntimeError("longhu_not_configured")
+    return await run_akshare_blocking(
+        lambda: longhu_intraday_source().stock_period_bars(symbol, period, count), timeout_seconds=8,
+    )
+
+
+async def refresh_teacher_divergence(watches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Intraday 30/60-minute divergence for today's divergence plans, at most once a minute.
+
+    One blocking-executor slot runs the few K-line reads in sequence under a
+    4-second budget; anything unfinished is retried on the next scan and the
+    rules keep the previous (or pre-session) result meanwhile.  Never raises.
+    """
+    from .teacher_review_plan import divergence_status
+    from .teacher_review_service import period_bars_through
+    try:
+        if not longhu_vendor_configured():
+            return {"status": "disabled"}
+        observed_at = datetime.now(timezone.utc)
+        due = teacher_divergence_book.due(teacher_divergence_plan_symbols(watches, observed_at), observed_at)
+        due = due[:TEACHER_DIVERGENCE_MAX_SYMBOLS]
+        if not due:
+            return {"status": "fresh"}
+
+        def fetch() -> dict[tuple[str, str], Any]:
+            source, deadline, fetched = longhu_intraday_source(), monotonic() + 4.0, {}
+            for symbol in due:
+                for period in ("30", "60"):
+                    if monotonic() > deadline:
+                        return fetched
+                    try:
+                        fetched[(symbol, period)] = source.stock_period_bars(symbol, period, 120)
+                    except Exception as error:  # noqa: BLE001 - one symbol never stops the others
+                        fetched[(symbol, period)] = f"{type(error).__name__}: {str(error)[:160]}"
+            return fetched
+
+        fetched = await run_akshare_blocking(fetch, timeout_seconds=6)
+        today = observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date()
+        refreshed, errors = [], {}
+        for symbol in due:
+            rows = {period: fetched.get((symbol, period)) for period in ("30", "60")}
+            if all(isinstance(value, list) for value in rows.values()):
+                teacher_divergence_book.store(symbol, observed_at, {
+                    period: divergence_status(period_bars_through(value, today), "longhuvip_kline")
+                    for period, value in rows.items()})
+                refreshed.append(symbol)
+            else:
+                errors[symbol] = next((str(value) for value in rows.values() if isinstance(value, str)), "deadline")
+        return {"status": "completed" if not errors else "partial", "refreshed": refreshed, "errors": errors}
+    except Exception as error:  # noqa: BLE001 - a divergence refresh must never block the scan
+        return {"status": "failed", "error": safe_error_detail(str(error), 200)}
 
 
 def teacher_review_minute_extra() -> int:
@@ -4511,6 +4575,7 @@ def _teacher_review_dependencies() -> TeacherReviewDependencies:
         # hydration would saturate the shared 6/min provider queue.  Missing
         # sessions are repaired date-wise through the data plane instead.
         hydrate_history=None, repair_daily=teacher_review_repair_daily,
+        period_bars=longhu_period_bars,
     )
 
 

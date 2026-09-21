@@ -412,3 +412,33 @@ class SharedMinuteBatchTests(unittest.TestCase):
             source.stock_minutes_batch(["000001.SZ"], deadline_seconds=5.5)
         self.assertEqual(self.module._BATCH_MINUTE_ROUTE_MISSING_UNTIL, {})
 
+
+class PeriodKlineTests(unittest.TestCase):
+    def test_period_kline_payload_is_normalized_oldest_first(self):
+        from app.longhu_vendor_source import parse_period_kline_payload
+        payload = {"x": ["202609211500", "202609211030", "bad", "202609211000"],
+                   "y": [[10.2, 10.4, 10.5, 10.1], [10.0, 10.1, 10.2, 9.9], [1, 1, 1, 1], [9.8, 10.0, 10.05, 9.7]],
+                   "vol": [1200, 800, 1, 1000], "bal": [1.2e6, 8e5, 1, 1e6]}
+        rows = parse_period_kline_payload(payload, "603386.SH", "30")
+        self.assertEqual([row["bar_time"] for row in rows], ["202609211000", "202609211030", "202609211500"])
+        self.assertEqual((rows[0]["open"], rows[0]["high"], rows[0]["low"], rows[0]["close"]), (9.8, 10.05, 9.7, 10.0))
+        self.assertEqual(rows[-1]["volume_lot"], 1200)
+
+    def test_shared_period_bars_use_the_documented_history_call(self):
+        source = SharedLonghuReadSource("http://owner.test", "read-key")
+        calls = []
+
+        def post(payload):
+            calls.append(payload)
+            return {"target": "longhu_history", "calls": 1, "pages": [{"payload": {
+                "errcode": "0", "x": ["202609211000"], "y": [[10.0, 10.1, 10.2, 9.9]], "vol": [100], "bal": [1e5]}}]}
+
+        source.raw_call = post
+        rows = source.stock_period_bars("603386.SH", "60", 120)
+        self.assertEqual(rows[0]["period"], "60")
+        self.assertEqual(calls[0]["target"], "longhu_history")
+        self.assertEqual({key: calls[0]["params"][key] for key in ("a", "c", "StockID", "Type", "st")},
+                         {"a": "GetKLineDay_W14", "c": "StockLineData", "StockID": "603386", "Type": "60", "st": 120})
+        with self.assertRaises(ValueError):
+            source.stock_period_bars("603386.SH", "15")
+

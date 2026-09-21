@@ -258,6 +258,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tencent_free", "bars.daily_adjusted", 50, LIVE_VERIFIED, "research_adjusted_bars_daily", "app/free_market_providers.py",
           notes="前复权，研究参考"),
     _bind("longhuvip", "bars.minute", 10, LIVE_VERIFIED, "intraday_minute_sessions", "app/intraday_minute_capture_actions.py",
+          history="30/60 分钟周期K：GetKLineDay_W14 Type=30/60（longhu_vendor_source.stock_period_bars），"
+                  "单页 ≤300 根；120 根≈30 分钟 15 个交易日 / 60 分钟 30 个交易日，含盘中形成中的K",
           notes="日期可验证才用"),
     _bind("tencent_free", "bars.minute", 50, LIVE_VERIFIED, "intraday_minute_sessions", "app/intraday_minute_provider_service.py"),
     _bind("tushare_super_get", "bars.minute", 15, LIVE_VERIFIED, "tushare_raw_records", "app/tushare_providers.py", notes="rt_min"),

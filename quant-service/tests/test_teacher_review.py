@@ -17,7 +17,7 @@ from app.intraday_signal_generation import IntradaySignalGenerationDependencies,
 from app.live_policy import live_policy_gate
 from app.teacher_review_plan import bullish_divergence, limit_up_price, parse_longhu_kline, plan_stock
 from app.teacher_review_playbooks import CATALOG, validate_pack
-from app.teacher_review_rules import SnapshotTape, evaluate, scan_features, teacher_review_signals
+from app.teacher_review_rules import PeriodDivergenceBook, SnapshotTape, evaluate, scan_features, teacher_review_signals
 
 CN = ZoneInfo("Asia/Shanghai")
 FIXTURE = Path(__file__).parent / "fixtures" / "teacher_review_pack_20260921.json"
@@ -107,6 +107,90 @@ class PlanTests(unittest.TestCase):
         closes += [14.1 - 0.12 * i for i in range(16)] + [12.3 + 0.1 * i for i in range(5)]
         rows = [{"date": str(i), "open": c, "close": c, "high": c + 0.05, "low": c - 0.05} for i, c in enumerate(closes)]
         self.assertTrue(bullish_divergence(rows)["found"])
+
+
+def divergence_rows(stamp_day: str = "20260921") -> list[dict]:
+    """Period K-line rows (data-plane form) that end in a two-leg bullish divergence."""
+    closes = [20 - 0.25 * i for i in range(30)] + [12.5 + 0.2 * i for i in range(8)]
+    closes += [14.1 - 0.12 * i for i in range(16)] + [12.3 + 0.1 * i for i in range(5)]
+    return [{"bar_time": f"{stamp_day[:6]}{int(stamp_day[6:]) - (len(closes) - 1 - i) // 8:02d}{1000 + i % 8:04d}",
+             "open": c, "close": c, "high": c + 0.05, "low": c - 0.05} for i, c in enumerate(closes)]
+
+
+class DivergenceTests(unittest.TestCase):
+    def test_too_few_bars_is_not_judgeable_rather_than_no_divergence(self):
+        from app.teacher_review_plan import divergence_status, divergence_summary
+        status = divergence_status([], None)
+        self.assertEqual((status["found"], status["status"], status["bars"]), (False, "insufficient_bars", 0))
+        self.assertEqual(divergence_summary({"30": status, "60": status}), (False, False))
+        self.assertEqual(divergence_summary({"30": False, "60": True}), (True, False))   # v1 plans
+
+    def test_pre_session_divergence_reads_longhu_history_up_to_the_previous_close(self):
+        rows = divergence_rows("20260921") + [{"bar_time": "202609221000", "open": 9.0, "close": 9.0, "high": 9.1, "low": 8.0}]
+        requested = []
+
+        async def period_bars(symbol, period):
+            requested.append((symbol, period))
+            return rows
+
+        async def run_database(action, timeout_seconds=30):
+            return action()
+
+        deps = service.TeacherReviewDependencies(
+            database=None, run_database=run_database, now_utc=lambda: at(21, 0, date(2026, 9, 21)),
+            send_alert=None, max_symbols=lambda: 100, exchange_for=lambda s: s[-2:], period_bars=period_bars)
+        result = asyncio.run(service.period_divergence("603386.SH", "30", date(2026, 9, 21), deps))
+        self.assertEqual(requested, [("603386.SH", "30")])
+        self.assertEqual((result["status"], result["source"], result["found"]), ("ok", "longhuvip_kline", True))
+        self.assertEqual(result["bars"], len(rows) - 1)          # the 09-22 bar is after the cut-off
+        self.assertTrue(result["through"].startswith("20260921"))
+
+    def test_a_failed_longhu_read_falls_back_to_stored_minutes_and_says_so(self):
+        async def period_bars(symbol, period):
+            raise RuntimeError("gateway 503")
+
+        async def run_database(action, timeout_seconds=30):
+            return action()
+
+        deps = service.TeacherReviewDependencies(
+            database=None, run_database=run_database, now_utc=lambda: at(21, 0, date(2026, 9, 21)),
+            send_alert=None, max_symbols=lambda: 100, exchange_for=lambda s: s[-2:], period_bars=period_bars)
+        with patch.object(service.repo, "minute_period_bars", lambda _db, symbol, *, through, period: []):
+            result = asyncio.run(service.period_divergence("603386.SH", "60", date(2026, 9, 21), deps))
+        self.assertEqual(result["status"], "insufficient_bars")
+        self.assertIn("gateway 503", result["source_error"])
+
+    def test_intraday_divergence_opens_path_b_and_an_unjudgeable_one_stays_unknown(self):
+        from app.teacher_review_plan import divergence_status
+        from app.teacher_review_service import period_bars_through
+        params = {"prior_high": 22.11, "support_level": 11.5, "support_ma": 10, "invalid_below": 11.0}
+        plan = watch("603386.SH", "ma5_reclaim_or_divergence", params,
+                     {"a_level": 13.0, "zone": [11.3, 11.7], "divergence_found": False, "divergence_judgeable": False,
+                      "divergence": {"30": {"found": False, "status": "insufficient_bars", "bars": 0}}})
+        in_zone = quote(11.6, 11.8, amount=1e8, volume_lot=86000, volume_ratio=1.0)
+        in_zone["raw"]["longhu_watch_quote"]["low"] = 11.5
+        watching = teacher_review_signals(plan, in_zone, {"vwap": 11.55, "return_5m_pct": 0.1}, None, at(10, 30))
+        self.assertEqual(watching, [])
+        book = PeriodDivergenceBook()
+        live = {period: divergence_status(period_bars_through(divergence_rows("20260922"), date(2026, 9, 22)), "longhuvip_kline")
+                for period in ("30", "60")}
+        book.store("603386.SH", at(10, 29), live)
+        signals = teacher_review_signals(plan, in_zone, {"vwap": 11.55, "return_5m_pct": 0.1}, None, at(10, 30),
+                                         divergence_book=book)
+        self.assertEqual(signals[0]["signal_key"], "603386.SH:entry:teacher_review:ma5_reclaim_or_divergence:B")
+        self.assertIn("divergence_live", signals[0]["conditions"]["teacher_review"]["features"])
+        features = scan_features("603386.SH", in_zone, {"vwap": 11.55}, at(10, 30))
+        unknown = [item for item in evaluate(plan["metadata"]["teacher_review"], features)["signals"]
+                   if item["name"].startswith("B：30/60")]
+        self.assertIsNone(unknown[0]["pass"])
+
+    def test_book_refreshes_at_most_once_a_minute_and_resets_daily(self):
+        book = PeriodDivergenceBook()
+        self.assertEqual(book.due(["A", "B"], at(9, 31)), ["A", "B"])
+        book.store("A", at(9, 31), {"30": {"found": True, "status": "ok"}})
+        self.assertEqual(book.due(["A", "B"], at(9, 31, date(2026, 9, 22)) + timedelta(seconds=30)), ["B"])
+        self.assertEqual(book.due(["A"], at(9, 32, date(2026, 9, 22)) + timedelta(seconds=1)), ["A"])
+        self.assertIsNone(book.get("A", at(9, 31, date(2026, 9, 23))))
 
 
 class RuleTests(unittest.TestCase):

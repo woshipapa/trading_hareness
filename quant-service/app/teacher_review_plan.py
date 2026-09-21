@@ -78,6 +78,36 @@ def bullish_divergence(bars: list[dict[str, Any]], *, lookback: int = 60, swing:
     }
 
 
+DIVERGENCE_MIN_BARS = 35
+
+
+def divergence_status(bars: list[dict[str, Any]], source: str | None) -> dict[str, Any]:
+    """``bullish_divergence`` plus whether it could be judged at all.
+
+    ``status`` is ``ok`` when there were enough bars; ``insufficient_bars``
+    means "not judgeable", which must never read as "no divergence".
+    """
+    result = bullish_divergence(bars) if bars else {"found": False, "reason": "no bars"}
+    return {
+        "found": bool(result.get("found")),
+        "status": "ok" if len(bars) >= DIVERGENCE_MIN_BARS else "insufficient_bars",
+        "bars": len(bars), "source": source, "through": bars[-1]["date"] if bars else None,
+        **{key: result[key] for key in ("low1", "low2", "reason") if key in result},
+    }
+
+
+def divergence_summary(divergence: Mapping[str, Any] | None) -> tuple[bool, bool]:
+    """(found, judgeable) over the periods; tolerates the v1 ``{period: bool}`` form."""
+    found = judgeable = False
+    for value in (divergence or {}).values():
+        if isinstance(value, Mapping):
+            found = found or bool(value.get("found"))
+            judgeable = judgeable or value.get("status") == "ok"
+        elif isinstance(value, bool):
+            found = found or value
+    return found, judgeable
+
+
 def limit_up_price(pre_close: float, code: str, name: str = "") -> float:
     """Exchange-rounded limit price for main/ChiNext/STAR/BSE boards and ST names."""
     digits = str(code)[:6]
@@ -167,9 +197,9 @@ def plan_stock(
         a_level = max(lv["ma5"] or 0, lv["ma10"] or 0)
         anchors = [float(p["support_level"])] + ([lv["ma10"]] if p.get("support_ma") and lv["ma10"] else [])
         zone = [round(min(anchors) * 0.99, 2), round(max(anchors) * 1.01, 2)]
-        found = any(bool(item.get("found")) for item in (divergence or {}).values() if isinstance(item, Mapping))
+        found, judgeable = divergence_summary(divergence)
         extra.update({"a_level": round(a_level, 4), "zone": zone, "divergence_found": found,
-                      "divergence": {key: value.get("found") for key, value in (divergence or {}).items()}})
+                      "divergence_judgeable": judgeable, "divergence": dict(divergence or {})})
         setup = f"收 {lv['close']} vs 短均线 {round(a_level, 2)}；A 目标前高 {p['prior_high']}；B 回踩区 {zone}"
         checklist = [f"A：放量站上 {round(a_level, 2)}（MA5/MA10 较高者）+ 均价上方", f"B：进入 {zone} 且 30/60 分钟两段底背离",
                      f"收盘 < {p['invalid_below']} → 失效"]
@@ -206,4 +236,5 @@ def plan_stock(
     return {"levels": levels, "extra": extra, "setup": setup, "checklist": checklist}
 
 
-__all__ = ["bullish_divergence", "daily_levels", "limit_up_price", "parse_longhu_kline", "plan_stock", "sma"]
+__all__ = ["DIVERGENCE_MIN_BARS", "bullish_divergence", "daily_levels", "divergence_status", "divergence_summary",
+           "limit_up_price", "parse_longhu_kline", "plan_stock", "sma"]

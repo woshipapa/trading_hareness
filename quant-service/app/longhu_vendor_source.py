@@ -204,6 +204,52 @@ def _minute_clock(value: Any) -> tuple[str | None, str | None]:
     return clock if clock and re.fullmatch(r"\d{4}", clock) else None, embedded_date
 
 
+#: ``GetKLineDay_W14`` ``Type`` values for intraday periods (verified live
+#: 2026-09-21: 120 bars reach ~15 sessions at 30 minutes, ~30 at 60 minutes).
+PERIOD_KLINE_TYPES: dict[str, str] = {"30": "30", "60": "60"}
+PERIOD_KLINE_MAX_BARS = MAX_PAGE_SIZE
+
+
+def parse_period_kline_payload(payload: Mapping[str, Any], symbol: str, period: str) -> list[dict[str, Any]]:
+    """Normalize a ``GetKLineDay_W14`` intraday-period payload, oldest first.
+
+    ``x`` holds the bar's end as ``YYYYMMDDHHMM`` (exchange clock) and ``y``
+    ``[open, close, high, low]``; ``vol``/``bal`` are volume in lots and amount.
+    The newest bar can still be forming during the session.
+    """
+    stamps, ohlc = payload.get("x") or [], payload.get("y") or []
+    volumes, amounts = payload.get("vol") or [], payload.get("bal") or []
+    bars: dict[str, dict[str, Any]] = {}
+    for index, stamp in enumerate(stamps):
+        text = str(stamp)
+        if not re.fullmatch(r"\d{12}", text):
+            continue
+        try:
+            opened, closed, high, low = (float(value) for value in ohlc[index][:4])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if min(opened, closed, high, low) <= 0:
+            continue
+        bars[text] = {
+            "symbol": symbol, "period": str(period), "bar_time": text,
+            "open": opened, "high": high, "low": low, "close": closed,
+            "volume_lot": _number(volumes[index]) if index < len(volumes) else None,
+            "amount": _number(amounts[index]) if index < len(amounts) else None,
+        }
+    return [bars[key] for key in sorted(bars)]
+
+
+def _period_kline_params(symbol: str, period: str, count: int) -> dict[str, Any]:
+    if str(period) not in PERIOD_KLINE_TYPES:
+        raise ValueError(f"unsupported Longhu kline period: {period}")
+    code = _stock_code(symbol)
+    if not code:
+        raise ValueError(f"unsupported Longhu stock symbol: {symbol}")
+    return {"a": "GetKLineDay_W14", "c": "StockLineData", "apiv": "w40", "StockID": code,
+            "Type": PERIOD_KLINE_TYPES[str(period)], "Is_FS": "1",
+            "st": max(1, min(PERIOD_KLINE_MAX_BARS, int(count))), "Index": 0}
+
+
 def parse_stock_minute_payload(
     payload: Mapping[str, Any], symbol: str, *, require_trade_date: bool = False,
 ) -> list[dict[str, Any]]:
@@ -413,6 +459,8 @@ class LonghuIntradaySource(Protocol):
         self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
     ) -> dict[str, list[dict[str, Any]] | str]: ...
 
+    def stock_period_bars(self, symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]: ...
+
     def raw_call(self, request: Mapping[str, Any]) -> dict[str, Any]: ...
 
 
@@ -606,6 +654,13 @@ class SharedLonghuReadSource:
             else:
                 result[symbol] = str(errors.get(key) or "minute_batch_missing_symbol")
         return result
+
+    def stock_period_bars(self, symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]:
+        """30/60-minute K-line history (plus the forming bar) through the documented call."""
+        params = _period_kline_params(symbol, period, count)
+        payload = self._call_single(target="longhu_history", action=params.pop("a"),
+                                    controller=params.pop("c"), params=params)
+        return parse_period_kline_payload(payload, normalize_stock_symbol(symbol) or str(symbol), str(period))
 
     def raw_call(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Forward the complete documented call contract to the owner gateway."""
@@ -815,6 +870,15 @@ class LonghuVendorSource:
             self.stock_minutes, symbols, max(self.config.workers, minute_batch_workers()), deadline_seconds,
         )
 
+    def stock_period_bars(self, symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]:
+        """30/60-minute K-line history (plus the forming bar) for one security."""
+        params = _period_kline_params(symbol, period, count)
+        payload = self._single_raw_call_payload(
+            {"target": "longhu_history", "path": "/w1/api/index.php", "params": params},
+            action="GetKLineDay_W14",
+        )
+        return parse_period_kline_payload(payload, normalize_stock_symbol(symbol) or str(symbol), str(period))
+
     def _single_raw_call_payload(self, request: Mapping[str, Any], *, action: str) -> dict[str, Any]:
         """Extract one page from the same generic contract used by peers."""
         result = self.raw_call(request)
@@ -996,6 +1060,7 @@ __all__ = [
     "DEFAULT_CONFIG_PATH", "FLOW_CONVENTION", "LonghuIntradaySource", "LonghuVendorConfig",
     "LonghuVendorSource", "SharedLonghuReadSource", "intraday_source",
     "MAX_PAGE_SIZE", "MAX_TENCENT_BATCH_SIZE", "configured", "normalize_stock_symbol",
-    "current_session_minute_rows", "parse_industry_stock_row", "parse_stock_minute_payload", "parse_stock_snapshot_payload",
+    "current_session_minute_rows", "parse_industry_stock_row", "parse_period_kline_payload",
+    "parse_stock_minute_payload", "parse_stock_snapshot_payload", "PERIOD_KLINE_TYPES",
     "parse_tencent_quote_text", "safe_page_size", "market_today", "direct_access_enabled",
 ]

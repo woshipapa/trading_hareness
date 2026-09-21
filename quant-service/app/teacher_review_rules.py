@@ -34,7 +34,7 @@ from typing import Any, Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from .teacher_review_playbooks import DEFAULTS, playbook_kind
-from .teacher_review_plan import limit_up_price
+from .teacher_review_plan import divergence_summary, limit_up_price
 
 _CN_TZ = ZoneInfo("Asia/Shanghai")
 MODEL_VERSION = "teacher-review-rules-v2"
@@ -163,6 +163,67 @@ class SnapshotTape:
             if baseline > 0:
                 result["minute_volume_multiple"] = round(current / baseline, 4)
         return result
+
+
+class PeriodDivergenceBook:
+    """Today's 30/60-minute divergence per symbol, refreshed during the session.
+
+    The teacher's "回踩到位出现 30/60 分钟两段底背离" usually completes
+    intraday, so the pre-session result alone would miss it.  The scan
+    refreshes the data-plane period K-line (history plus the forming bar) for
+    the few symbols with a divergence plan at most once a minute; the rules
+    read the latest result and fall back to the frozen pre-session one.
+    """
+
+    REFRESH_SECONDS = 60.0
+
+    def __init__(self) -> None:
+        self._day: date | None = None
+        self._entries: dict[str, tuple[datetime, dict[str, Any]]] = {}
+
+    def _roll(self, observed_at: datetime) -> date:
+        day = observed_at.astimezone(_CN_TZ).date()
+        if day != self._day:
+            self._day, self._entries = day, {}
+        return day
+
+    def due(self, symbols: list[str], observed_at: datetime) -> list[str]:
+        self._roll(observed_at)
+        return [symbol for symbol in symbols
+                if symbol not in self._entries
+                or (observed_at - self._entries[symbol][0]).total_seconds() >= self.REFRESH_SECONDS]
+
+    def store(self, symbol: str, observed_at: datetime, divergence: Mapping[str, Any]) -> None:
+        self._roll(observed_at)
+        self._entries[symbol] = (observed_at, dict(divergence))
+
+    def get(self, symbol: str, observed_at: datetime) -> dict[str, Any] | None:
+        if self._day != observed_at.astimezone(_CN_TZ).date():
+            return None
+        entry = self._entries.get(symbol)
+        return {**entry[1], "refreshed_at": entry[0].isoformat()} if entry else None
+
+
+def divergence_plan_symbols(watches: list[Mapping[str, Any]], observed_at: datetime) -> list[str]:
+    """Watches whose plan for this session needs a 30/60-minute divergence."""
+    result = []
+    for watch in watches:
+        plan = active_plan(watch, observed_at)
+        if plan is not None and plan.get("playbook") == "ma5_reclaim_or_divergence":
+            result.append(str(watch["symbol"]).upper())
+    return result
+
+
+def _divergence_text(divergence: Mapping[str, Any] | None) -> str:
+    parts = []
+    for period in ("30", "60"):
+        value = (divergence or {}).get(period)
+        if isinstance(value, bool):
+            parts.append(f"{period}分:{'是' if value else '否'}")
+        elif isinstance(value, Mapping):
+            verdict = ("是" if value.get("found") else "否") if value.get("status") == "ok" else "数据不足"
+            parts.append(f"{period}分:{verdict}({value.get('bars', 0)}根)")
+    return " ".join(parts) or "—"
 
 
 def _pick(*candidates: tuple[str, Any]) -> tuple[float | None, str | None]:
@@ -372,11 +433,20 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
         path_a = _breakout(f, x.get("a_level"), "短均线压制")
         zone = x.get("zone") or [0, 0]
         in_zone = zone[0] <= f["low"] <= zone[1]
-        sig += path_a + [_sig("B：进入回踩区", f"{f['low']} in {zone}", in_zone, "T/I", gating=False),
-                         _sig("B：30/60分钟两段底背离（盘前）", x.get("divergence"), bool(x.get("divergence_found")), "T", gating=False)]
+        sig += path_a + [_sig("B：进入回踩区", f"{f['low']} in {zone}", in_zone, "T/I", gating=False)]
+        live = f.get("divergence_live")
+        frozen_found, frozen_judgeable = x.get("divergence_found"), x.get("divergence_judgeable")
+        if isinstance(live, Mapping):
+            found, judgeable = divergence_summary({key: live.get(key) for key in ("30", "60")})
+            label, shown = "B：30/60分钟两段底背离（盘中）", _divergence_text(live)
+        else:
+            found = bool(frozen_found)
+            judgeable = True if frozen_judgeable is None else bool(frozen_judgeable) or found
+            label, shown = "B：30/60分钟两段底背离（盘前）", _divergence_text(x.get("divergence"))
+        sig.append(_sig(label, shown, found if (judgeable or found) else None, "T", gating=False))
         invalid = f["price"] < float(p["invalid_below"])
         a_ok = all(item["pass"] for item in path_a)
-        b_ok = in_zone and bool(x.get("divergence_found")) and bool(f["above_vwap"])
+        b_ok = in_zone and found and bool(f["above_vwap"])
         path = "A" if a_ok else "B" if b_ok else None
         return {"action": "invalid" if invalid else "entry" if path else "watch", "path": path, "signals": sig}
     elif pb == "trend_continuation":
@@ -423,6 +493,7 @@ def teacher_review_signals(
     watch: Mapping[str, Any], quote: Mapping[str, Any] | None, minute_features: Mapping[str, Any] | None,
     peer_context: Mapping[str, Any] | None, observed_at: datetime,
     previous_quote: Mapping[str, Any] | None = None, *, tape: SnapshotTape | None = None,
+    divergence_book: PeriodDivergenceBook | None = None,
 ) -> list[dict[str, Any]]:
     """Scan hook: entry/invalidation candidates plus an explicit data gap.
 
@@ -462,6 +533,10 @@ def teacher_review_signals(
         if tape_view:
             features = scan_features(symbol, quote, minute_features, observed_at, name, previous_quote, tape_view)
             features["tape"] = tape_view
+    if divergence_book is not None and playbook == "ma5_reclaim_or_divergence":
+        live = divergence_book.get(symbol, observed_at)
+        if live:
+            features["divergence_live"] = live
     missing = missing_inputs(playbook, features)
     result = evaluate(plan, features, peer_context)
     if missing and result["action"] == "entry":
@@ -471,8 +546,9 @@ def teacher_review_signals(
         "price", "pct", "pre_close", "open", "high", "low", "amount", "turnover_pct", "volume_ratio", "vwap",
         "limit_up_price", "sealed", "seal_verified_by_book", "touched_limit", "open_gap_pct", "surge",
         "not_falling", "auction_amount", "clock", "sources")}
-    if features.get("tape"):
-        feature_view["tape"] = features["tape"]
+    for key in ("tape", "divergence_live"):
+        if features.get(key):
+            feature_view[key] = features[key]
     if result["action"] in {"entry", "invalid"}:
         invalid = result["action"] == "invalid"
         suffix = f":{result['path']}" if result.get("path") else ""
@@ -533,5 +609,5 @@ def teacher_review_alert_lines(signal: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-__all__ = ["MODEL_VERSION", "SnapshotTape", "active_plan", "evaluate", "scan_features", "teacher_review_alert_lines",
-           "teacher_review_signals"]
+__all__ = ["MODEL_VERSION", "PeriodDivergenceBook", "SnapshotTape", "active_plan", "divergence_plan_symbols", "evaluate",
+           "scan_features", "teacher_review_alert_lines", "teacher_review_signals"]

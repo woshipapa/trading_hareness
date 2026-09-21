@@ -62,7 +62,7 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         "teacher_review_playbooks",
         Need("quote.watch_snapshot", purpose="per-scan price, turnover, volume ratio and cumulative amount"),
         Need("quote.order_book", False, "sealed bid-only book at the limit price"),
-        Need("bars.minute", False, "minute volume multiple, VWAP and 5-minute return"),
+        Need("bars.minute", False, "30/60-minute two-leg divergence (period K-line history + forming bar)"),
         Need("bars.daily", purpose="pre-session MA/platform/prior-high plan and session settlement"),
         Need("limits.limit_up_pool", False, "post-close forecast settlement (first seal time, plate counts)"),
         Need("reference.trade_calendar", purpose="point-in-time first eligible session"),
