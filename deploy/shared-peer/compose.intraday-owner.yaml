@@ -163,7 +163,8 @@ services:
       - -c
       - >-
         if [ "$$QUANT_HOTFIX_ENABLED" = "true" ] && [ -f /app/hotfix/current/app/main.py ]; then
-        export PYTHONPATH=/app/hotfix/current:/app; fi;
+        export PYTHONPATH=/app/hotfix/current:/app;
+        exec python entrypoint.py uvicorn app.main:app --app-dir /app/hotfix/current --host 0.0.0.0 --port 8000; fi;
         exec python entrypoint.py uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
