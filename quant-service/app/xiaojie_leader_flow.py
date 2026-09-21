@@ -116,6 +116,22 @@ def alert_priority(candidate: Mapping[str, Any]) -> tuple[int, float]:
             rank if rank is not None else 99.0)
 
 
+def research_alert_allowed(candidate: Mapping[str, Any]) -> bool:
+    """Whether a research candidate may consume a Xiaojie alert slot.
+
+    Sealed boards remain excluded from ordinary intraday alerts because there
+    is no longer an actionable entry/承接 observation.  The 潜龙出海 swing
+    mode is explicitly requested as a research reminder, however: a sealed
+    candidate may be notified when it is labelled as research-only and never
+    promoted to an order path.
+    """
+    board = candidate.get("evidence") or {}
+    board = board.get("board") if isinstance(board, Mapping) else {}
+    if not isinstance(board, Mapping) or not board.get("sealed"):
+        return True
+    return str(candidate.get("mode") or "") == "潜龙出海_swing"
+
+
 def _number(value: Any) -> float | None:
     try:
         parsed = float(value)
@@ -415,5 +431,6 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
 
 __all__ = [
     "DEFAULT_PARAMETERS", "EXIT_SEVERITY", "INPUT_CONTRACT", "MODEL_VERSION",
-    "MODE_ALERT_PRIORITY", "UNRANKED_MODE_PRIORITY", "alert_priority", "evaluate_snapshot",
+    "MODE_ALERT_PRIORITY", "UNRANKED_MODE_PRIORITY", "alert_priority", "research_alert_allowed",
+    "evaluate_snapshot",
 ]

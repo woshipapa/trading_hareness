@@ -1,6 +1,6 @@
 import unittest
 
-from app.xiaojie_leader_flow import MODEL_VERSION, evaluate_snapshot
+from app.xiaojie_leader_flow import MODEL_VERSION, evaluate_snapshot, research_alert_allowed
 
 
 class XiaojieLeaderFlowTests(unittest.TestCase):
@@ -145,6 +145,20 @@ class XiaojieLeaderFlowTests(unittest.TestCase):
         self.assertEqual(result["mode"], "leader_pullback")
         self.assertEqual(result["qianlong_swing_overheat"], {"flags": [], "count": 0})
         self.assertEqual(result["position"]["target_fraction"], 0.20)
+
+    def test_sealed_qianlong_candidate_is_allowed_as_research_alert(self):
+        candidate = {
+            "mode": "潜龙出海_swing",
+            "evidence": {"board": {"sealed": True}},
+        }
+        self.assertTrue(research_alert_allowed(candidate))
+
+    def test_sealed_non_qianlong_candidate_stays_out_of_alert_queue(self):
+        candidate = {
+            "mode": "right_side_breakout",
+            "evidence": {"board": {"sealed": True}},
+        }
+        self.assertFalse(research_alert_allowed(candidate))
 
 
 if __name__ == "__main__":

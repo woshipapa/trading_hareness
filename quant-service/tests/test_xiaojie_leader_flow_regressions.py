@@ -261,6 +261,12 @@ class AlertNamesTheStockNotJustItsCodeTests(unittest.TestCase):
     def test_no_names_at_all_degrades_rather_than_raising(self):
         self.assertIn("600127.SH", self._text(self._candidate(), None))
 
+    def test_sealed_qianlong_alert_is_explicitly_research_only(self):
+        candidate = self._candidate("600825.SH")
+        candidate["mode"] = "潜龙出海_swing"
+        text = self._text(candidate, self.names)
+        self.assertIn("封板，仅作研究提醒，不追板", text)
+
     def test_the_body_of_the_alert_is_unchanged(self):
         text = self._text(self._candidate(), self.names)
         for fragment in ("【研究观察·小杰龙头】", "封板", "涨幅 10.00%",

@@ -165,6 +165,7 @@ from .intraday_surge_context_service import capture as capture_intraday_surge_co
 from .strategy_candidate_ranking import select as select_intraday_candidates
 from .xiaojie_leader_flow import MODEL_VERSION as XIAOJIE_LEADER_FLOW_MODEL_VERSION, evaluate_snapshot as evaluate_xiaojie_leader_flow_snapshot
 from .xiaojie_leader_flow import alert_priority as xiaojie_alert_priority
+from .xiaojie_leader_flow import research_alert_allowed as xiaojie_research_alert_allowed
 from .xiaojie_indicators import evaluate_pool as evaluate_xiaojie_leader_pool
 from .xiaojie_indicators import leader_pool as leader_pool_symbols
 from .xiaojie_reference_repository import (
@@ -177,6 +178,7 @@ from .xiaojie_outcome_settlement import settle_session as settle_xiaojie_session
 from .xiaojie_observation_repository import (
     alerted_count as xiaojie_alerted_count, mark_alerted as mark_xiaojie_alerted,
     record_candidates as record_xiaojie_candidates,
+    unalerted_research_candidates as read_unalerted_xiaojie_candidates,
 )
 from . import offline_minute_import_service
 from .intraday_cross_section import SharedAsyncSnapshot
@@ -2088,15 +2090,38 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
             connection, trading_date, observed_at, scan_id, candidates)),
         timeout_seconds=60,
     ) if candidates else []
+    new_candidate_count = len(fresh)
 
-    # A board already locked at the limit cannot be acted on: measured across
-    # 104 observations on 2026-08-27, the 61 found already sealed produced 0
-    # gains, 57 unchanged and 4 losses from the moment they were flagged, while
-    # the 43 found unsealed averaged +0.40%.  They stay recorded as research
-    # evidence but must not consume a scarce alert slot.
-    actionable = [item for item in fresh
-                  if not ((item.get("evidence") or {}).get("board") or {}).get("sealed")]
-    sealed_skipped = len(fresh) - len(actionable)
+    # A policy widening must also reach candidates recorded by an earlier
+    # scan. Only the explicit sealed 潜龙出海 research mode is reread, and
+    # alerted_at makes this idempotent across the 30-second scan loop.
+    pending_qianlong = await run_database_blocking(
+        lambda: _with_connection(lambda connection: read_unalerted_xiaojie_candidates(
+            connection, trading_date, "潜龙出海_swing")),
+        timeout_seconds=30,
+    )
+    known = {(str(item.get("symbol") or ""), str(item.get("mode") or "")) for item in fresh}
+    fresh.extend(
+        item for item in pending_qianlong
+        if (str(item.get("symbol") or ""), str(item.get("mode") or "")) not in known
+    )
+
+    # Ordinary sealed boards remain excluded because there is no longer an
+    # actionable entry/承接 observation.  潜龙出海 is the explicit exception:
+    # the user asked to receive a research reminder even when it is sealed.
+    # The alert text labels it as research-only and this strategy remains at
+    # zero live weight; it never becomes an order candidate.
+    actionable = [item for item in fresh if xiaojie_research_alert_allowed(item)]
+    sealed_skipped = sum(
+        1 for item in fresh
+        if ((item.get("evidence") or {}).get("board") or {}).get("sealed")
+        and not xiaojie_research_alert_allowed(item)
+    )
+    sealed_research_alerts = sum(
+        1 for item in fresh
+        if ((item.get("evidence") or {}).get("board") or {}).get("sealed")
+        and xiaojie_research_alert_allowed(item)
+    )
     # The budget is read from what the table already recorded, so a restart
     # mid-session cannot hand out a fresh allowance.
     sent = await run_database_blocking(
@@ -2156,9 +2181,10 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
         "pool_size": result["pool_size"], "evaluated": result["evaluated"],
         "main_sector_count": result["main_sector_count"],
         "regime": result["regime"],
-        "candidates": len(candidates), "new_candidates": len(fresh), "alerted": len(alerted),
+        "candidates": len(candidates), "new_candidates": new_candidate_count, "alerted": len(alerted),
         "actionable_candidates": len(actionable),
         "sealed_skipped": sealed_skipped,
+        "sealed_research_alerts": sealed_research_alerts,
         "alerts_suppressed_by_cap": max(0, len(actionable) - len(alerted)),
         "alerted_modes": sorted({mode for _symbol, mode in alerted}),
         "alerts_sent_this_session": sent + len(alerted),
@@ -2210,11 +2236,16 @@ def _xiaojie_alert_text(candidate: dict[str, Any], trading_date: date,
     state = "封板" if board.get("sealed") else ("炸板" if board.get("broken") else "近板")
     pct = evidence.get("pct_change")
     label = _xiaojie_alert_name(candidate["symbol"], names)
+    sealed_research_notice = (
+        "封板，仅作研究提醒，不追板；等待开板/承接确认。\n"
+        if board.get("sealed") and candidate.get("mode") == "潜龙出海_swing" else ""
+    )
     return (
         f"【研究观察·小杰龙头】{label} {candidate.get('mode')}\n"
         f"{trading_date} {state} 涨幅 {pct:.2f}%\n" if pct is not None else
         f"【研究观察·小杰龙头】{label} {candidate.get('mode')}\n{trading_date} {state}\n"
     ) + (
+        sealed_research_notice +
         f"研究仓位参考 {(candidate.get('position') or {}).get('target_fraction')}；"
         f"风险标记 {', '.join(candidate.get('risk_flags') or []) or '无'}\n"
         "仅为研究观察，零实盘权重，不构成交易指令。"

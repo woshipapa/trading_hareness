@@ -459,9 +459,25 @@ class AlertBudgetDurabilityTests(unittest.TestCase):
             mark_alerted(connection, self.trading_date, stamp, [(self.symbols[0], "reverse_wrap")])
             self.assertEqual(alerted_count(connection, self.trading_date + timedelta(days=1)), 0)
 
+    def test_unalerted_qianlong_can_be_recovered_after_alert_policy_widening(self):
+        from datetime import datetime, timezone
+        from app.main import db
+        from app.xiaojie_observation_repository import record_candidates, unalerted_research_candidates
+        stamp = datetime(2099, 9, 1, 2, 0, tzinfo=timezone.utc)
+        with db.transaction() as connection:
+            record_candidates(connection, self.trading_date, stamp, None, [{
+                "symbol": self.symbols[0], "mode": "潜龙出海_swing", "decision": "research_candidate",
+                "position": {"target_fraction": 0.1}, "exit": {}, "risk_flags": [],
+                "reasons": ["研究"], "market_gate": {},
+                "evidence": {"board": {"sealed": True}, "candidate_strength_rank": 2},
+            }])
+            rows = unalerted_research_candidates(connection, self.trading_date, "潜龙出海_swing")
+        self.assertEqual([row["symbol"] for row in rows], [self.symbols[0]])
+        self.assertTrue(rows[0]["evidence"]["board"]["sealed"])
+
 
 class SealedBoardsAreNotAlertableTests(unittest.TestCase):
-    """A locked board cannot be acted on, so it must not spend an alert slot.
+    """Only the explicit 潜龙出海 research exception may alert when sealed.
 
     Across 104 observations on 2026-08-27 the 61 found already sealed produced
     0 gains, 57 unchanged and 4 losses from the moment they were flagged; the
@@ -475,8 +491,8 @@ class SealedBoardsAreNotAlertableTests(unittest.TestCase):
 
     @staticmethod
     def _actionable(candidates):
-        return [item for item in candidates
-                if not ((item.get("evidence") or {}).get("board") or {}).get("sealed")]
+        from app.xiaojie_leader_flow import research_alert_allowed
+        return [item for item in candidates if research_alert_allowed(item)]
 
     def test_sealed_candidates_are_filtered_out(self):
         candidates = [self._candidate("A.SZ", True), self._candidate("B.SZ", False)]
@@ -487,6 +503,11 @@ class SealedBoardsAreNotAlertableTests(unittest.TestCase):
 
     def test_an_all_sealed_scan_yields_nothing_to_alert(self):
         self.assertEqual(self._actionable([self._candidate(f"{i}.SZ", True) for i in range(5)]), [])
+
+    def test_sealed_qianlong_is_a_research_alert_exception(self):
+        candidate = self._candidate("Q.SZ", True)
+        candidate["mode"] = "潜龙出海_swing"
+        self.assertEqual([item["symbol"] for item in self._actionable([candidate])], ["Q.SZ"])
 
 
 class PoolBoundReportingTests(unittest.TestCase):
