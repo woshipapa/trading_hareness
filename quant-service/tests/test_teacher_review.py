@@ -17,7 +17,8 @@ from app.intraday_signal_generation import IntradaySignalGenerationDependencies,
 from app.live_policy import live_policy_gate
 from app.teacher_review_plan import bullish_divergence, limit_up_price, parse_longhu_kline, plan_stock
 from app.teacher_review_playbooks import CATALOG, validate_pack
-from app.teacher_review_rules import PeriodDivergenceBook, SnapshotTape, evaluate, scan_features, teacher_review_signals
+from app.teacher_review_rules import (PeriodDivergenceBook, SnapshotTape, TeacherMarketBook, count_sector_limit_ups, evaluate,
+                                      scan_features, teacher_review_signals)
 
 CN = ZoneInfo("Asia/Shanghai")
 FIXTURE = Path(__file__).parent / "fixtures" / "teacher_review_pack_20260921.json"
@@ -191,6 +192,85 @@ class DivergenceTests(unittest.TestCase):
         self.assertEqual(book.due(["A", "B"], at(9, 31, date(2026, 9, 22)) + timedelta(seconds=30)), ["B"])
         self.assertEqual(book.due(["A"], at(9, 32, date(2026, 9, 22)) + timedelta(seconds=1)), ["A"])
         self.assertIsNone(book.get("A", at(9, 31, date(2026, 9, 23))))
+
+
+class PrecisionTests(unittest.TestCase):
+    """v3: today's MA, close-confirmed invalidation, 09:25 auction, sector counts, leader state."""
+
+    def test_today_ma_uses_the_frozen_prefix_and_invalidates_only_at_the_close(self):
+        prefix = {"10": 9 * 20.0, "20": 19 * 19.0}           # yesterday's 9 / 19 closes
+        plan = watch("002913.SZ", "trend_continuation", {"prior_high": 22.0, "hold_ma": 10, "floor_ma": 20},
+                     {"ma_prefix": prefix, "hold_ma": 10, "floor_ma": 20, "hold_level": 99, "floor_level": 99})
+        dip = quote(17.0, 20.0, amount=1e8, volume_lot=5e4)
+        morning = evaluate(plan["metadata"]["teacher_review"], scan_features("002913.SZ", dip, {"vwap": 17.5}, at(10, 0)))
+        self.assertEqual(morning["action"], "watch")          # 17 < MA20 (19.1) but before 14:50: warning only
+        self.assertTrue(any(item["name"].startswith("盘中跌破当日MA20") for item in morning["signals"]))
+        closing = evaluate(plan["metadata"]["teacher_review"], scan_features("002913.SZ", dip, {"vwap": 17.5}, at(14, 51)))
+        self.assertEqual(closing["action"], "invalid")
+        hold = next(item for item in morning["signals"] if item["name"].startswith("持有"))
+        self.assertIn(str(round((9 * 20.0 + 17.0) / 10, 4)), hold["value"])   # today's MA10, not the frozen 99
+
+    def test_news_bet_needs_the_sector_to_form_and_race_quits_when_it_fades(self):
+        book = TeacherMarketBook()
+        news = watch("000532.SZ", "relay_news_conditional", {"sector": "大金融", "sector_min_limit_ups": 3})
+        strong = quote(15.0, 14.26, amount=2e8, volume_lot=1.4e5, volume_ratio=2.0)
+        minute = {"vwap": 14.8, "minute_volume_multiple": 3.0, "return_5m_pct": 0.5}
+        self.assertEqual(teacher_review_signals(news, strong, minute, None, at(10, 0), market_book=book), [])
+        rows = [{"name": name, "limit_up_reason": reason} for name, reason in
+                (("华金资本", "金融+珠海"), ("南华期货", "期货+金融"), ("青岛金王", "数字货币"), ("万科A", "房地产"))]
+        book.store_sectors(at(10, 0), at(9, 59), count_sector_limit_ups(rows, ["大金融", "房地产"]))
+        entry = teacher_review_signals(news, strong, minute, None, at(10, 0), market_book=book)
+        self.assertEqual(entry[0]["signal_type"], "entry")
+        race = watch("600606.SH", "relay_race", {"sector": "房地产", "sector_min_limit_ups": 5})
+        weak = quote(1.7, 1.6, amount=2e8, volume_lot=1.2e6, volume_ratio=2.0)
+        early = evaluate(race["metadata"]["teacher_review"], {**scan_features("600606.SH", weak, minute, at(10, 0)),
+                                                               "sector_counts": book.sector_counts(at(10, 0))})
+        self.assertNotEqual(early["action"], "invalid")
+        book.store_sectors(at(10, 40), at(10, 39), count_sector_limit_ups(rows, ["大金融", "房地产"]))
+        late = evaluate(race["metadata"]["teacher_review"], {**scan_features("600606.SH", weak, minute, at(10, 40)),
+                                                              "sector_counts": book.sector_counts(at(10, 40))})
+        self.assertEqual(late["action"], "invalid")
+
+    def test_stale_sector_counts_are_unknown_not_zero(self):
+        book = TeacherMarketBook()
+        book.store_sectors(at(10, 0), at(9, 40), {"大金融": {"count": 4}})
+        self.assertEqual(book.sector_counts(at(10, 0)), {})
+
+    def test_follower_reads_the_leaders_own_scan_state(self):
+        tape = SnapshotTape()
+        leader = watch("601579.SH", "leader_benchmark_pullback", {"pullback_ma": 5, "trend_floor_ma": 10},
+                       {"pullback_level": 30.0, "floor_level": 27.0})
+        follower = watch("600059.SH", "sympathy_follow", {"leader": "601579", "leader_strong_pct": 5.0, "leader_weak_pct": -3.0,
+                                                          "leader_name": "会稽山"}, {"leader_ts_code": "601579.SH"})
+        minute = {"vwap": 11.6, "minute_volume_multiple": 3.0, "return_5m_pct": 0.4}
+        mine = quote(11.9, 11.48, amount=3e8, volume_lot=2.6e5, volume_ratio=2.0)
+        self.assertEqual(teacher_review_signals(follower, mine, minute, None, at(10, 0), tape=tape), [])
+        teacher_review_signals(leader, quote(39.7, 36.12, amount=5e8, volume_lot=1.3e5, sealed=True), {"vwap": 38.0}, None,
+                               at(10, 0, ), tape=tape)
+        signals = teacher_review_signals(follower, mine, minute, None, at(10, 0) + timedelta(seconds=10), tape=tape)
+        self.assertEqual(signals[0]["signal_type"], "entry")
+        teacher_review_signals(leader, quote(34.9, 36.12, amount=5e8, volume_lot=1.3e5), {"vwap": 35.5}, None,
+                               at(10, 1), tape=tape)
+        quit_ = teacher_review_signals(follower, mine, minute, None, at(10, 1) + timedelta(seconds=10), tape=tape)
+        self.assertTrue(any(item["signal_key"].endswith("teacher_review_invalid:sympathy_follow") for item in quit_))
+
+    def test_one_word_relay_reads_the_0925_auction_snapshot(self):
+        book = TeacherMarketBook()
+        plan = watch("001216.SZ", "relay_one_word", {"auction_amount_min": 5e8, "turnover_max_pct": 12.0, "prior_high": 24.06})
+        sealed = quote(26.47, 24.06, amount=6.2e8, volume_lot=234000, turnover=3.0, sealed=True, opened=26.47)
+        book.store_auction("001216.SZ", at(9, 30), {"amount": 4.1e8, "seal_amount": 3.2e8, "source": "fuyao_auction_0925", "final": True})
+        signals = teacher_review_signals(plan, sealed, {"vwap": 26.47}, None, at(9, 30), market_book=book)
+        self.assertEqual(signals, [])                      # 4.1亿 < 5亿 although the cumulative amount is 6.2亿
+        features = scan_features("001216.SZ", sealed, {"vwap": 26.47}, at(9, 30))
+        self.assertEqual(features["auction_amount"], 6.2e8)   # the proxy the snapshot replaces
+
+    def test_volume_projection_follows_the_stocks_own_curve(self):
+        from app.teacher_review_rules import _session_share
+        profile = {"10:00": 0.34, "10:30": 0.48, "11:00": 0.59, "11:30": 0.65, "13:30": 0.75, "14:00": 0.82, "14:30": 0.90, "15:00": 1.0}
+        self.assertAlmostEqual(_session_share(profile, "10:00", 30), 0.34)
+        self.assertAlmostEqual(_session_share(profile, "10:15", 45), 0.41)
+        self.assertAlmostEqual(_session_share(profile, "12:10", 120), 0.65)
+        self.assertAlmostEqual(_session_share(None, "10:00", 30), 30 / 240)
 
 
 class RuleTests(unittest.TestCase):
@@ -507,7 +587,7 @@ class FakeRepo:
     def recent_packs(self, _db, *, since):
         return list(self.packs)
 
-    def retire_plans(self, _db, *, keep, retired_at):
+    def retire_plans(self, _db, *, keep, retired_at, only_pack_ids=None):
         self.retired.append(sorted(keep))
         return {"disabled": [], "stripped": []}
 
@@ -605,6 +685,25 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(sorted(repaired, reverse=True), [date(2026, 9, 21), date(2026, 9, 18), date(2026, 9, 17)])
         self.assertEqual(len(plans), 36)
         self.assertEqual([item["code"] for item in failures], ["*"])
+
+    def test_a_superseded_pack_is_not_rolled_or_settled(self):
+        fake, alerts = FakeRepo(self.sessions), []
+        old = load_pack()
+        new = {**copy.deepcopy(old), "pack_id": "abcdef0123456789", "supersedes": [old["pack_id"]]}
+        records = [{"pack": old, "available_at": at(20, 0, date(2026, 9, 21))},
+                   {"pack": new, "available_at": at(23, 0, date(2026, 9, 21))}]
+        built = []
+
+        async def fake_build(pack, *args):
+            built.append(pack["pack_id"])
+            return [], []
+
+        with patch.multiple(service.repo, **{name: getattr(fake, name) for name in (
+                "open_sessions", "sessions_between", "apply_session_plans", "retire_plans", "persist_settlement")},
+                recent_packs=lambda _db, since: records):
+            with patch.object(service, "build_session_plans", side_effect=fake_build):
+                asyncio.run(service.roll(date(2026, 9, 21), self._deps(at(16, 5, date(2026, 9, 21)), alerts)))
+        self.assertEqual(built, ["abcdef0123456789"])
 
     def test_invalid_pack_is_rejected_without_side_effects(self):
         pack = copy.deepcopy(load_pack())

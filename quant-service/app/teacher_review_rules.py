@@ -27,6 +27,7 @@ minute features, when some other strategy fetched them, still take priority.
 
 from __future__ import annotations
 
+import re
 from collections import deque
 from datetime import date, datetime, timedelta
 from statistics import median
@@ -37,7 +38,7 @@ from .teacher_review_playbooks import DEFAULTS, playbook_kind
 from .teacher_review_plan import divergence_summary, limit_up_price
 
 _CN_TZ = ZoneInfo("Asia/Shanghai")
-MODEL_VERSION = "teacher-review-rules-v2"
+MODEL_VERSION = "teacher-review-rules-v3"
 
 
 def _num(value: Any) -> float | None:
@@ -105,6 +106,7 @@ class SnapshotTape:
     def __init__(self) -> None:
         self._day: date | None = None
         self._samples: dict[str, deque[tuple[datetime, float, float | None, str | None]]] = {}
+        self._latest: dict[str, tuple[datetime, dict[str, Any]]] = {}
 
     def observe(self, symbol: str, observed_at: datetime, price: float | None,
                 volume_lot: float | None, volume_source: str | None) -> None:
@@ -112,13 +114,25 @@ class SnapshotTape:
             return
         day = observed_at.astimezone(_CN_TZ).date()
         if day != self._day:
-            self._day, self._samples = day, {}
+            self._day, self._samples, self._latest = day, {}, {}
         ring = self._samples.setdefault(symbol, deque())
         if ring and observed_at <= ring[-1][0]:
             return
         ring.append((observed_at, float(price), volume_lot, volume_source))
         while observed_at - ring[0][0] > self.WINDOW:
             ring.popleft()
+
+    def note_latest(self, symbol: str, observed_at: datetime, summary: Mapping[str, Any]) -> None:
+        """Latest per-scan summary of a symbol, for plans that watch another plan's stock."""
+        if observed_at.astimezone(_CN_TZ).date() != self._day:
+            return
+        self._latest[symbol] = (observed_at, dict(summary))
+
+    def latest(self, symbol: str, observed_at: datetime, max_age_seconds: float = 120.0) -> dict[str, Any] | None:
+        entry = self._latest.get(symbol) if self._day == observed_at.astimezone(_CN_TZ).date() else None
+        if not entry or (observed_at - entry[0]).total_seconds() > max_age_seconds:
+            return None
+        return {**entry[1], "observed_at": entry[0].isoformat()}
 
     def features(self, symbol: str, observed_at: datetime) -> dict[str, Any]:
         if self._day != observed_at.astimezone(_CN_TZ).date():
@@ -163,6 +177,70 @@ class SnapshotTape:
             if baseline > 0:
                 result["minute_volume_multiple"] = round(current / baseline, 4)
         return result
+
+
+#: Teacher sector names -> limit-up reason keywords (Fuyao limit-up pool ``limit_up_reason``).
+SECTOR_PATTERNS: dict[str, str] = {
+    "大金融": r"券商|证券|保险|期货|金融|银行|信托|支付|数字货币",
+    "房地产": r"地产|房地产|物业|楼市|住房|城中村|城市更新|REITs|保障房",
+}
+
+
+def count_sector_limit_ups(rows: list[Mapping[str, Any]], sectors: list[str]) -> dict[str, dict[str, Any]]:
+    """Limit-up count per teacher sector from one pool snapshot (reason keyword match)."""
+    result: dict[str, dict[str, Any]] = {}
+    for sector in sectors:
+        pattern = re.compile(SECTOR_PATTERNS.get(sector) or re.escape(sector))
+        names = sorted({str(row.get("name") or row.get("symbol")) for row in rows
+                        if pattern.search(str(row.get("limit_up_reason") or ""))})
+        result[sector] = {"count": len(names), "names": names[:12]}
+    return result
+
+
+class TeacherMarketBook:
+    """Same-day market context the teacher rules read: 09:25 auction and sector limit-up counts.
+
+    The scan refreshes it from the data plane (Fuyao auction snapshot, the
+    stored limit-up pool); process memory, reset per exchange day.
+    """
+
+    SECTOR_MAX_AGE_SECONDS = 600.0
+
+    def __init__(self) -> None:
+        self._day: date | None = None
+        self._auction: dict[str, dict[str, Any]] = {}
+        self._sectors: dict[str, dict[str, Any]] = {}
+        self._sectors_at: datetime | None = None
+        self.sector_refreshed_at: datetime | None = None
+
+    def _roll(self, observed_at: datetime) -> None:
+        day = observed_at.astimezone(_CN_TZ).date()
+        if day != self._day:
+            self._day, self._auction, self._sectors = day, {}, {}
+            self._sectors_at = self.sector_refreshed_at = None
+
+    def auction_missing(self, symbols: list[str], observed_at: datetime) -> list[str]:
+        self._roll(observed_at)
+        return [symbol for symbol in symbols if not (self._auction.get(symbol) or {}).get("final")]
+
+    def store_auction(self, symbol: str, observed_at: datetime, row: Mapping[str, Any]) -> None:
+        self._roll(observed_at)
+        self._auction[symbol] = dict(row)
+
+    def auction(self, symbol: str, observed_at: datetime) -> dict[str, Any] | None:
+        self._roll(observed_at)
+        return self._auction.get(symbol)
+
+    def store_sectors(self, observed_at: datetime, snapshot_at: datetime | None,
+                      counts: Mapping[str, Mapping[str, Any]]) -> None:
+        self._roll(observed_at)
+        self._sectors, self._sectors_at, self.sector_refreshed_at = dict(counts), snapshot_at, observed_at
+
+    def sector_counts(self, observed_at: datetime) -> dict[str, int]:
+        self._roll(observed_at)
+        if self._sectors_at is None or (observed_at - self._sectors_at).total_seconds() > self.SECTOR_MAX_AGE_SECONDS:
+            return {}
+        return {sector: int(value.get("count") or 0) for sector, value in self._sectors.items()}
 
 
 class PeriodDivergenceBook:
@@ -364,6 +442,47 @@ def _breakout(f: dict[str, Any], level: float | None, label: str) -> list[dict[s
     ]
 
 
+def _session_share(profile: Mapping[str, Any] | None, clock: str, elapsed_min: int) -> float:
+    """Share of the day's volume normally traded by ``clock``.
+
+    ``profile`` maps 30-minute bar ends ("10:00" … "15:00") to the stock's own
+    median cumulative share; linear inside a bar.  Without one, time share.
+    """
+    if not profile:
+        return max(elapsed_min, 1) / 240
+    points = [("09:30", 0.0)] + sorted((str(key), float(value)) for key, value in profile.items())
+    def minutes(stamp: str) -> int:
+        hour, minute = int(stamp[:2]), int(stamp[3:5])
+        total = hour * 60 + minute
+        return total - 570 if total <= 690 else 120 + max(0, total - 780)
+    now = minutes(clock) if clock >= "09:30" else 0
+    for (left, share_left), (right, share_right) in zip(points, points[1:]):
+        start, end = minutes(left), minutes(right)
+        if now <= end:
+            fraction = 0.0 if end == start else max(0.0, (now - start) / (end - start))
+            return max(share_left + fraction * (share_right - share_left), 0.02)
+    return 1.0
+
+
+def _live_ma(x: Mapping[str, Any], n: int | None, price: float, frozen: Any = None) -> float | None:
+    """Today's MA_n from the frozen prefix (sum of the previous n-1 closes); frozen level for older plans."""
+    prefix = (x.get("ma_prefix") or {}).get(str(n)) if n else None
+    if prefix is not None:
+        return round((float(prefix) + price) / int(n), 4)
+    value = _num(frozen)
+    return value
+
+
+def _close_breach(f: Mapping[str, Any], breach: bool, label: str, sig: list[dict[str, Any]]) -> bool:
+    """A "收盘跌破" invalidation: only from ``close_confirm_from``; earlier it is a warning line."""
+    if not breach:
+        return False
+    if f["clock"] >= DEFAULTS["close_confirm_from"]:
+        return True
+    sig.append(_sig(f"盘中{label}（{DEFAULTS['close_confirm_from']} 后按收盘确认）", f["price"], False, "T", gating=False))
+    return False
+
+
 def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Return ``{"action": entry|watch|invalid, "path": ..., "signals": [...]}`` for one snapshot."""
     pb, p = str(plan["playbook"]), plan.get("params") or {}
@@ -373,8 +492,11 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
     path = None
     if pb == "relay_one_word":
         auction = f["auction_amount"]
-        sig += [_sig(f"竞价成交额≥{_yi(p['auction_amount_min'])}", auction,
+        seal = (f.get("auction") or {}).get("seal_amount")
+        sig += [_sig(f"竞价成交额≥{_yi(p['auction_amount_min'])}（{f['sources'].get('auction_amount', '—')}）", auction,
                      None if auction is None else auction >= p["auction_amount_min"], "T"),
+                _sig("竞价封单（未匹配买量×价，参考）", None if seal is None else f"{seal / 1e8:.2f}亿", None if seal is None else seal > 0,
+                     "D", gating=False),
                 _sig(f"换手≤{p['turnover_max_pct']:g}%", f["turnover_pct"], (f["turnover_pct"] or 0) <= p["turnover_max_pct"], "T"),
                 _sig("封板中", f["sealed"], f["sealed"]),
                 _sig(f"最高>前高{p['prior_high']}", f["high"], f["high"] > p["prior_high"], "D", gating=False)]
@@ -396,14 +518,23 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
                 _sig("触及涨停（顶一次）", f["high"], f["touched_limit"], "T", gating=False)]
         invalid = f["price"] < (f["pre_close"] or 0)
     elif pb in ("relay_race", "relay_news_conditional"):
+        sector = p.get("sector")
+        sector_count = (f.get("sector_counts") or {}).get(sector) if sector else None
+        minimum = p.get("sector_min_limit_ups")
         if pb == "relay_news_conditional":
-            sig.append(_sig(f"{p['sector']}板块涨停≥{p['sector_min_limit_ups']}（盘后核对）", None, None, "I", gating=False))
+            sig.append(_sig(f"{sector}板块涨停≥{minimum}（板块形成才做）", sector_count,
+                            None if sector_count is None else sector_count >= minimum, "T"))
+        elif sector and minimum is not None:
+            sig.append(_sig(f"{sector}板块涨停≥{minimum}（板块未退潮）", sector_count,
+                            None if sector_count is None else sector_count >= minimum, "D", gating=False))
         gap = f["open_gap_pct"]
         sig += [_sig("竞价不低开", gap, gap is None or gap >= 0, "I"),
                 _sig("分时放量或已封板", f"{f['surge']}/{f['sealed']}", bool(f["surge"]) or f["sealed"], "I"),
                 _sig("均价上方", f["above_vwap"], f["above_vwap"], "I"),
                 _sig("封板中", f["sealed"], f["sealed"], gating=False)]
         invalid = (gap is not None and gap < 0 and f["above_vwap"] is False) or f["price"] < (f["pre_close"] or 0)
+        if pb == "relay_race" and sector_count is not None and minimum is not None:
+            invalid = invalid or (sector_count < minimum and f["clock"] >= DEFAULTS["sector_check_from"])
     elif pb == "relay_fast_seal":
         gap, amount = f["open_gap_pct"], f["amount"] or 0
         sig += [_sig("竞价不低开", gap, gap is None or gap >= 0, "I"),
@@ -415,22 +546,32 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
         sig += [_sig("未涨停追高（<9.5%）", f["pct"], (f["pct"] or 0) < 9.5, "T"),
                 _sig("前一日已回调缩量", x.get("pulled_back"), bool(x.get("pulled_back")), "I"),
                 _sig("再起：量比≥1.5、涨幅≥3%、均价上方", f"{f['volume_ratio']}/{f['pct']}%", restart, "I")]
-        invalid = f["price"] < (x.get("ma10") or 0)
+        ma10 = _live_ma(x, 10, f["price"], x.get("ma10")) or 0
+        invalid = _close_breach(f, f["price"] < ma10, f"跌破当日MA10 {ma10}", sig)
     elif pb == "leader_benchmark_pullback":
-        level, floor = x.get("pullback_level") or 0, x.get("floor_level") or 0
-        sig += [_sig("回踩短均线", f"{f['low']} vs {level}", f["low"] <= level * 1.01, "I"),
-                _sig("守趋势均线", f"{f['price']} vs {floor}", f["price"] >= floor, "I")]
-        invalid = f["price"] < floor
+        level = _live_ma(x, x.get("pullback_ma"), f["price"], x.get("pullback_level")) or 0
+        floor = _live_ma(x, x.get("trend_floor_ma"), f["price"], x.get("floor_level")) or 0
+        sig += [_sig(f"回踩当日MA{x.get('pullback_ma', '')}", f"{f['low']} vs {level}", f["low"] <= level * 1.01, "D"),
+                _sig(f"守当日MA{x.get('trend_floor_ma', '')}", f"{f['price']} vs {floor}", f["price"] >= floor, "D")]
+        invalid = _close_breach(f, f["price"] < floor, f"跌破当日MA{x.get('trend_floor_ma', '')} {floor}", sig)
     elif pb == "sympathy_follow":
-        leader = next((item for item in (peer_context or {}).get("peers") or []
-                       if isinstance(item, Mapping) and str(item.get("symbol")) == x.get("leader_ts_code")), None)
-        strong = None if leader is None else bool(
-            (_num(leader.get("above_vwap_pct")) or 0) > 0 and (_num(leader.get("return_from_open_pct")) or 0) >= 0)
-        sig += [_sig("龙头走强（均价上方且不低于开盘）", None if leader is None else leader.get("price"), strong, "I", gating=False),
+        leader = f.get("leader_latest")
+        strong_pct, weak_pct = float(p["leader_strong_pct"]), float(p["leader_weak_pct"])
+        if isinstance(leader, Mapping):
+            leader_pct = _num(leader.get("pct"))
+            strong = bool(leader.get("sealed")) or ((leader_pct or 0) >= strong_pct and bool(leader.get("above_vwap")))
+            weak = leader_pct is not None and leader_pct <= weak_pct
+            shown = f"{leader.get('pct')}%/封板={leader.get('sealed')}"
+        else:
+            strong = weak = None
+            shown = None
+        sig += [_sig(f"{p.get('leader_name') or '龙头'}强（封板或涨幅≥{strong_pct:g}%且均价上方）", shown, strong, "D"),
                 _sig("分时放量 + 均价上方", f"{f['surge']}/{f['above_vwap']}", bool(f["surge"]) and bool(f["above_vwap"]), "I")]
-        invalid = strong is False and f["price"] < (f["pre_close"] or 0)
+        invalid = bool(weak) or (strong is False and f["price"] < (f["pre_close"] or 0))
     elif pb == "ma5_reclaim_or_divergence":
-        path_a = _breakout(f, x.get("a_level"), "短均线压制")
+        short_mas = [value for value in (_live_ma(x, 5, f["price"]), _live_ma(x, 10, f["price"])) if value]
+        a_level = max(short_mas) if short_mas else x.get("a_level")
+        path_a = _breakout(f, a_level, "当日短均线压制")
         zone = x.get("zone") or [0, 0]
         in_zone = zone[0] <= f["low"] <= zone[1]
         sig += path_a + [_sig("B：进入回踩区", f"{f['low']} in {zone}", in_zone, "T/I", gating=False)]
@@ -444,46 +585,57 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
             judgeable = True if frozen_judgeable is None else bool(frozen_judgeable) or found
             label, shown = "B：30/60分钟两段底背离（盘前）", _divergence_text(x.get("divergence"))
         sig.append(_sig(label, shown, found if (judgeable or found) else None, "T", gating=False))
-        invalid = f["price"] < float(p["invalid_below"])
+        if x.get("invalid_ma"):
+            line = _live_ma(x, x["invalid_ma"], f["price"]) or 0
+            line = round(line * (1 - float(x.get("invalid_buffer_pct", 3.0)) / 100), 3)
+        else:
+            line = float(p["invalid_below"])
+        invalid = _close_breach(f, f["price"] < line and not found, f"跌破 {line} 且无背离", sig)
         a_ok = all(item["pass"] for item in path_a)
         b_ok = in_zone and found and bool(f["above_vwap"])
         path = "A" if a_ok else "B" if b_ok else None
         return {"action": "invalid" if invalid else "entry" if path else "watch", "path": path, "signals": sig}
     elif pb == "trend_continuation":
-        hold = x.get("hold_level") or 0
-        sig += [_sig("持有：价格≥短均线", f"{f['price']} vs {hold}", f["price"] >= hold, "I"),
+        hold = _live_ma(x, x.get("hold_ma"), f["price"], x.get("hold_level")) or 0
+        floor = _live_ma(x, x.get("floor_ma"), f["price"], x.get("floor_level")) or 0
+        sig += [_sig(f"持有：价格≥当日MA{x.get('hold_ma', '')}", f"{f['price']} vs {hold}", f["price"] >= hold, "D"),
                 _sig(f"延续：价格>前高{p['prior_high']}", f["high"], f["high"] > p["prior_high"], "D")]
-        invalid = f["price"] < (x.get("floor_level") or 0)
+        invalid = _close_breach(f, f["price"] < floor, f"跌破当日MA{x.get('floor_ma', '')} {floor}", sig)
     elif pb == "prior_high_breakout":
         sig += _breakout(f, p["prior_high"], "前高")
-        invalid = f["price"] < (x.get("floor_level") or 0)
+        floor = _live_ma(x, x.get("floor_ma"), f["price"], x.get("floor_level")) or 0
+        invalid = _close_breach(f, f["price"] < floor, f"跌破当日MA{x.get('floor_ma', '')} {floor}", sig)
     elif pb == "platform_breakout":
         # 老师：追高是很难的，加自选等回调、走平台；仍在创新高时没有平台可突破。
         sig.append(_sig("已形成平台（高点后整理≥1天）", x.get("days_since_peak"), int(x.get("days_since_peak") or 0) >= 1, "T"))
         sig += _breakout(f, x.get("platform_upper"), "平台上沿")
-        floor = min(x.get("platform_lower") or 0, x.get("ma10") or x.get("platform_lower") or 0)
-        invalid = f["price"] < floor
+        floor_ma = int(x.get("floor_ma") or 10)
+        ma_floor = _live_ma(x, floor_ma, f["price"], x.get(f"ma{floor_ma}") or x.get("ma10"))
+        floor = min(x.get("platform_lower") or 0, ma_floor or x.get("platform_lower") or 0)
+        invalid = _close_breach(f, f["price"] < floor, f"跌破 平台下沿/当日MA{floor_ma} {round(floor, 3)}", sig)
     elif pb == "ma10_second_wave":
-        ma10 = x.get("ma10") or 0
+        ma10 = _live_ma(x, 10, f["price"], x.get("ma10")) or 0
         touched = bool(x.get("touched_ma10")) or f["low"] <= ma10 * (1 + float(p["touch_tol_pct"]) / 100)
         mid = (f["high"] + f["low"]) / 2
         drift = (mid / x["prior_mid"] - 1) * 100 if x.get("prior_mid") else 0.0
         sig += [_sig("已回到10日线", touched, touched, "T"),
                 _sig(f"重心不再下移（≥-{DEFAULTS['center_flat_pct']:g}%）", round(drift, 2), drift >= -DEFAULTS["center_flat_pct"], "I"),
                 _sig("均价上方", f["above_vwap"], f["above_vwap"], "I")]
-        invalid = f["price"] < ma10 * 0.97
+        invalid = _close_breach(f, f["price"] < ma10 * 0.97, f"跌破当日MA10×0.97 {round(ma10 * 0.97, 3)}", sig)
     elif pb == "double_bottom_platform":
         sig += [_sig("颈线上方", f"{f['price']} vs {p['neckline']}", f["price"] >= p["neckline"], "D")]
         sig += _breakout(f, p["platform_high"], "平台高点")
-        invalid = f["price"] < p["neckline"]
+        invalid = _close_breach(f, f["price"] < p["neckline"], f"跌回颈线 {p['neckline']}", sig)
     elif pb == "ma60_reclaim":
-        pace = max(f["session_elapsed_min"], 1) / 240
+        pace = _session_share(p.get("volume_profile"), f["clock"], f["session_elapsed_min"])
         projected = (f["amount"] or 0) / pace
-        ma60, amt20 = x.get("ma60") or 0, x.get("amt20") or 0
-        sig += [_sig("价格>MA60", f"{f['price']} vs {ma60}", f["price"] > ma60, "T"),
-                _sig(f"全天成交（外推）≥{p['amount_mult']:g}×20日均额", round(projected / 1e8, 1),
-                     projected >= float(p["amount_mult"]) * amt20, "I")]
-        invalid = f["price"] < ma60 * 0.97
+        ma60, amt20 = _live_ma(x, 60, f["price"], x.get("ma60")) or 0, x.get("amt20") or 0
+        sig += [_sig("价格>当日MA60", f"{f['price']} vs {ma60}", f["price"] > ma60, "T"),
+                _sig(f"全天成交（按本股分时量能曲线外推）≥{p['amount_mult']:g}×20日均额", round(projected / 1e8, 1),
+                     projected >= float(p["amount_mult"]) * amt20, str(p.get("amount_mult_src") or "I")[:1])]
+        # 老师：收盘连续2日低于 MA60 才算失败；昨日已在 MA60 下方时，今日收盘仍明显在下方即确认。
+        invalid = _close_breach(f, f["price"] < ma60 * 0.97 and bool(x.get("prev_close_below_ma60", True)),
+                                f"收盘第2日低于当日MA60×0.97 {round(ma60 * 0.97, 2)}", sig)
     gating = [item for item in sig if item["gating"]]
     entry = bool(gating) and all(item["pass"] for item in gating)
     return {"action": "invalid" if invalid else "entry" if entry else "watch", "path": path, "signals": sig}
@@ -493,7 +645,7 @@ def teacher_review_signals(
     watch: Mapping[str, Any], quote: Mapping[str, Any] | None, minute_features: Mapping[str, Any] | None,
     peer_context: Mapping[str, Any] | None, observed_at: datetime,
     previous_quote: Mapping[str, Any] | None = None, *, tape: SnapshotTape | None = None,
-    divergence_book: PeriodDivergenceBook | None = None,
+    divergence_book: PeriodDivergenceBook | None = None, market_book: TeacherMarketBook | None = None,
 ) -> list[dict[str, Any]]:
     """Scan hook: entry/invalidation candidates plus an explicit data gap.
 
@@ -533,6 +685,20 @@ def teacher_review_signals(
         if tape_view:
             features = scan_features(symbol, quote, minute_features, observed_at, name, previous_quote, tape_view)
             features["tape"] = tape_view
+    if tape is not None:
+        tape.note_latest(symbol, observed_at, {key: features.get(key) for key in ("price", "pct", "sealed", "above_vwap")})
+        if playbook == "sympathy_follow":
+            leader = str((plan.get("extra") or {}).get("leader_ts_code") or "")
+            features["leader_latest"] = tape.latest(leader, observed_at) if leader else None
+    if market_book is not None:
+        auction = market_book.auction(symbol, observed_at)
+        if auction and auction.get("amount") is not None:
+            features["auction"] = auction
+            features["auction_amount"] = auction["amount"]
+            features["sources"]["auction_amount"] = str(auction.get("source") or "auction_snapshot")
+        features["sector_counts"] = market_book.sector_counts(observed_at)
+    if features.get("auction_amount") is not None and "auction_amount" not in features["sources"]:
+        features["sources"]["auction_amount"] = "proxy:cum_amount_before_0931"
     if divergence_book is not None and playbook == "ma5_reclaim_or_divergence":
         live = divergence_book.get(symbol, observed_at)
         if live:
@@ -546,7 +712,7 @@ def teacher_review_signals(
         "price", "pct", "pre_close", "open", "high", "low", "amount", "turnover_pct", "volume_ratio", "vwap",
         "limit_up_price", "sealed", "seal_verified_by_book", "touched_limit", "open_gap_pct", "surge",
         "not_falling", "auction_amount", "clock", "sources")}
-    for key in ("tape", "divergence_live"):
+    for key in ("tape", "divergence_live", "auction", "sector_counts", "leader_latest"):
         if features.get(key):
             feature_view[key] = features[key]
     if result["action"] in {"entry", "invalid"}:
@@ -609,5 +775,6 @@ def teacher_review_alert_lines(signal: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-__all__ = ["MODEL_VERSION", "PeriodDivergenceBook", "SnapshotTape", "active_plan", "divergence_plan_symbols", "evaluate",
+__all__ = ["MODEL_VERSION", "PeriodDivergenceBook", "SECTOR_PATTERNS", "SnapshotTape", "TeacherMarketBook", "active_plan",
+           "count_sector_limit_ups", "divergence_plan_symbols", "evaluate",
            "scan_features", "teacher_review_alert_lines", "teacher_review_signals"]

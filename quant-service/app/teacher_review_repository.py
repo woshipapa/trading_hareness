@@ -183,8 +183,12 @@ def apply_session_plans(
             "new_rows": new_rows, "max_symbols": max_symbols, "reserve": reserve}
 
 
-def retire_plans(database: Any, *, keep: set[str], retired_at: datetime) -> dict[str, Any]:
-    """Expire teacher plans not in ``keep``: disable our own rows, strip the key from others."""
+def retire_plans(database: Any, *, keep: set[str], retired_at: datetime,
+                 only_pack_ids: set[str] | None = None) -> dict[str, Any]:
+    """Expire teacher plans not in ``keep``: disable our own rows, strip the key from others.
+
+    ``only_pack_ids`` limits it to plans of those packs (a superseded pack).
+    """
     disabled, stripped = [], []
     with database.transaction() as connection:
         rows = connection.execute(
@@ -196,6 +200,8 @@ def retire_plans(database: Any, *, keep: set[str], retired_at: datetime) -> dict
             if symbol in keep:
                 continue
             metadata = dict(row["metadata"] or {})
+            if only_pack_ids is not None and str((metadata.get("teacher_review") or {}).get("pack_id")) not in only_pack_ids:
+                continue
             if metadata.get("source") == SOURCE_TAG:
                 history = dict(metadata.get("teacher_review") or {})
                 history.update({"status": "expired", "expired_at": retired_at.isoformat()})
@@ -377,6 +383,28 @@ def minute_period_bars(database: Any, symbol: str, *, through: date, period: str
     return [buckets[key] for key in sorted(buckets)]
 
 
+def latest_limit_up_pool(database: Any, *, since: datetime) -> tuple[datetime | None, list[dict[str, Any]]]:
+    """The newest stored limit-up pool snapshot (Fuyao, minute cadence) at or after ``since``."""
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """WITH latest AS (
+                   SELECT max(occurred_at) AS at FROM quant.market_events
+                    WHERE event_type='limit_up_pool' AND source='fuyao_ths' AND occurred_at>=%s)
+               SELECT e.symbol,e.body,e.occurred_at FROM quant.market_events e, latest
+                WHERE e.event_type='limit_up_pool' AND e.source='fuyao_ths' AND e.occurred_at=latest.at""",
+            (since,),
+        ).fetchall()
+    result = []
+    for row in rows:
+        try:
+            body = json.loads(row["body"]) if isinstance(row["body"], str) else dict(row["body"] or {})
+        except (TypeError, ValueError):
+            body = {}
+        result.append({"symbol": row["symbol"], "name": body.get("name"), "limit_up_reason": body.get("limit_up_reason"),
+                       "limit_up_time": body.get("limit_up_time")})
+    return (rows[0]["occurred_at"] if rows else None), result
+
+
 def session_bars(database: Any, symbols: Iterable[str], trade_date: date) -> dict[str, dict[str, Any]]:
     """Raw settled bars (execution facts) for one session, including the exact limit price."""
     requested = sorted({str(symbol).upper() for symbol in symbols if str(symbol)})
@@ -436,5 +464,5 @@ __all__ = [
     "calendar_gaps", "first_limit_up_times",
     "minute_period_bars", "open_sessions", "pack_record", "persist_pack", "persist_settlement", "plan_bars",
     "recent_packs", "recent_settlements", "retire_plans", "session_bars", "session_events", "sessions_between",
-    "teacher_watch_rows", "xiaojie_session_modes",
+    "latest_limit_up_pool", "teacher_watch_rows", "xiaojie_session_modes",
 ]

@@ -723,6 +723,8 @@ from .teacher_review_rules import (
     MODEL_VERSION as TEACHER_REVIEW_MODEL_VERSION,
     PeriodDivergenceBook as TeacherReviewDivergenceBook,
     SnapshotTape as TeacherReviewSnapshotTape,
+    TeacherMarketBook,
+    count_sector_limit_ups as teacher_count_sector_limit_ups,
     divergence_plan_symbols as teacher_divergence_plan_symbols,
     active_plan as teacher_active_plan,
     teacher_review_signals,
@@ -3073,7 +3075,8 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                     rebound_failure_signal=countertrend_rebound_failure_reduce_signal,
                     eac_acceptance=intraday_eac_acceptance_assessment,
                     teacher_review_signal=functools.partial(teacher_review_signals, tape=teacher_review_tape,
-                                                            divergence_book=teacher_divergence_book),
+                                                            divergence_book=teacher_divergence_book,
+                                                            market_book=teacher_market_book),
                 ),
                 load_event_state=load_intraday_signal_event_state,
                 persist_generated_signals=persist_generated_signals,
@@ -4041,8 +4044,8 @@ async def intraday_surge_context(
         intraday_tencent_surge_context(
             watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols, max_symbols=minute_budget,
         ),
-        # Teacher 30/60-minute divergence rides the same wait; it never raises.
-        refresh_teacher_divergence(watches),
+        # Teacher context (30/60-minute divergence, 09:25 auction, sector limit-ups) rides the same wait; never raises.
+        refresh_teacher_context(watches),
     )
     return {**fallback_features, **licensed_features}, {
         "provider_status": (
@@ -4054,7 +4057,7 @@ async def intraday_surge_context(
         "licensed_completed": sorted(licensed_features),
         "fallback_completed": sorted(set(fallback_features) - set(licensed_features)),
         "policy": "longhuvip_primary_tencent_fallback",
-        "teacher_divergence": divergence_status,
+        "teacher_context": divergence_status,
     }
 
 
@@ -4481,6 +4484,93 @@ TEACHER_REVIEW_MINUTE_EXTRA_MAX = 100
 teacher_review_tape = TeacherReviewSnapshotTape()
 teacher_divergence_book = TeacherReviewDivergenceBook()
 TEACHER_DIVERGENCE_MAX_SYMBOLS = 10
+teacher_market_book = TeacherMarketBook()
+_teacher_auction_attempt: dict[str, datetime] = {}
+
+
+def _teacher_plans_today(watches: list[dict[str, Any]], observed_at: datetime) -> list[tuple[str, dict[str, Any]]]:
+    return [(str(watch["symbol"]).upper(), plan) for watch in watches
+            if (plan := teacher_active_plan(watch, observed_at)) is not None]
+
+
+async def refresh_teacher_auction(watches: list[dict[str, Any]]) -> dict[str, Any]:
+    """09:25 opening-auction facts for today's teacher plans (data plane: Fuyao auction snapshot).
+
+    One request (<=100 codes) per attempt, at most every 30 s, until the
+    snapshot is final; then the book serves it all day.  Never raises.
+    """
+    from .fuyao_provider import fetch as fetch_fuyao
+    from .market_event_capture import normalize_fuyao_auction
+    try:
+        observed_at = datetime.now(timezone.utc)
+        local = observed_at.astimezone(ZoneInfo("Asia/Shanghai"))
+        if not (time(9, 25, 5) <= local.time() <= time(15, 0)):
+            return {"status": "outside_window"}
+        missing = teacher_market_book.auction_missing(
+            [symbol for symbol, _plan in _teacher_plans_today(watches, observed_at)], observed_at)[:100]
+        if not missing:
+            return {"status": "fresh"}
+        last = _teacher_auction_attempt.get("at")
+        if last is not None and (observed_at - last).total_seconds() < 30:
+            return {"status": "throttled", "missing": len(missing)}
+        _teacher_auction_attempt["at"] = observed_at
+        data = await asyncio.wait_for(fetch_fuyao("a_share_auction_snapshot", {"thscodes": ",".join(missing)}), timeout=4)
+        stored = []
+        for event in normalize_fuyao_auction(data, observed_at):
+            raw = event["raw"]
+            price = _optional_float(raw.get("auction_price"))
+            unmatched = _optional_float(raw.get("auction_unmatched"))
+            final = str(raw.get("data_status") or "") == "final" or local.time() >= time(9, 26)
+            teacher_market_book.store_auction(event["ts_code"], observed_at, {
+                "amount": _optional_float(raw.get("auction_amount")), "price": price,
+                "pct": _optional_float(raw.get("auction_pct")), "open": _optional_float(raw.get("open_price")),
+                "volume_lot": _optional_float(raw.get("auction_volume")),
+                "seal_amount": round(unmatched * 100 * price, 2) if unmatched is not None and price else None,
+                "turnover_pct": _optional_float(raw.get("auction_turnover_pct")),
+                "status": raw.get("data_status"), "final": final, "source": "fuyao_auction_0925",
+            })
+            stored.append(event["ts_code"])
+        return {"status": "completed", "stored": len(stored), "requested": len(missing)}
+    except Exception as error:  # noqa: BLE001 - the proxy stays in force; the scan never waits on this
+        return {"status": "failed", "error": safe_error_detail(str(error), 200)}
+
+
+async def refresh_teacher_sectors(watches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Per-sector limit-up counts for today's teacher plans from the stored limit-up pool (≤ once a minute)."""
+    from .teacher_review_repository import latest_limit_up_pool
+    try:
+        observed_at = datetime.now(timezone.utc)
+        sectors = sorted({str((plan.get("params") or {}).get("sector"))
+                          for _symbol, plan in _teacher_plans_today(watches, observed_at)
+                          if (plan.get("params") or {}).get("sector")})
+        if not sectors:
+            return {"status": "no_sector_plans"}
+        refreshed = teacher_market_book.sector_refreshed_at
+        if refreshed is not None and (observed_at - refreshed).total_seconds() < 60 \
+                and refreshed.astimezone(ZoneInfo("Asia/Shanghai")).date() == observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date():
+            return {"status": "fresh"}
+        day_start = datetime.combine(observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date(), time(0),
+                                     tzinfo=ZoneInfo("Asia/Shanghai"))
+        snapshot_at, rows = await run_database_blocking(
+            lambda: latest_limit_up_pool(db, since=day_start), timeout_seconds=10)
+        counts = teacher_count_sector_limit_ups(rows, sectors)
+        teacher_market_book.store_sectors(observed_at, snapshot_at, counts)
+        return {"status": "completed", "snapshot_at": str(snapshot_at), "counts": {k: v["count"] for k, v in counts.items()}}
+    except Exception as error:  # noqa: BLE001 - an unknown count only keeps the sector gate closed
+        return {"status": "failed", "error": safe_error_detail(str(error), 200)}
+
+
+async def refresh_teacher_context(watches: list[dict[str, Any]]) -> dict[str, Any]:
+    divergence, auction, sectors = await asyncio.gather(
+        refresh_teacher_divergence(watches), refresh_teacher_auction(watches), refresh_teacher_sectors(watches))
+    return {"divergence": divergence, "auction": auction, "sectors": sectors}
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
 
 async def longhu_period_bars(symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]:

@@ -255,6 +255,10 @@ async def import_pack(pack: dict[str, Any], deps: TeacherReviewDependencies, *, 
         )
         summary["watchlist"] = {key: value for key, value in applied.items() if key != "new_rows"}
         summary["history_hydration"] = await _hydrate(applied.get("new_rows") or [], deps)
+        if pack.get("supersedes"):
+            summary["superseded"] = {"packs": list(pack["supersedes"]), **await _db(
+                deps, repo.retire_plans, keep={plan["ts_code"] for plan in plans}, retired_at=deps.now_utc(),
+                only_pack_ids={str(item) for item in pack["supersedes"]}, timeout_seconds=60)}
         summary["status"] = "imported"
     if dry_run:
         summary["status"] = "dry_run"
@@ -342,6 +346,8 @@ def check_forecast(check: Mapping[str, Any], bars: Mapping[str, Mapping[str, Any
 async def roll(trade_date: date, deps: TeacherReviewDependencies) -> dict[str, Any]:
     """Settle ``trade_date`` and prepare plans for the next session (post-close stage)."""
     records = await _db(deps, repo.recent_packs, since=trade_date - timedelta(days=deps.lookback_days))
+    superseded = {str(item) for record in records for item in (record["pack"].get("supersedes") or [])}
+    records = [record for record in records if str(record["pack"].get("pack_id")) not in superseded]
     if not records:
         return {"status": "skipped", "reason": "no recent teacher-review packs", "research_only": True}
     now = deps.now_utc()

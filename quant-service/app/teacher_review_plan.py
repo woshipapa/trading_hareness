@@ -122,6 +122,9 @@ def limit_up_price(pre_close: float, code: str, name: str = "") -> float:
     return float((Decimal(str(pre_close)) * (1 + pct)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
+MA_PERIODS = (5, 10, 20, 60)
+
+
 def daily_levels(bars: list[dict[str, Any]]) -> dict[str, Any]:
     closes = [float(bar["close"]) for bar in bars]
     amounts = [float(bar["amount"]) for bar in bars]
@@ -129,9 +132,13 @@ def daily_levels(bars: list[dict[str, Any]]) -> dict[str, Any]:
     window = bars[-20:]
     peak_index = max(range(len(window)), key=lambda index: window[index]["high"])
     platform = window[peak_index:]
+    trs = [max(bar["high"], prev["close"]) - min(bar["low"], prev["close"]) for prev, bar in zip(bars[:-1], bars[1:])]
     return {
         "date": last["date"], "close": last["close"], "high": last["high"], "low": last["low"],
         "amount": last["amount"],
+        # Sum of the previous n-1 closes: today's MA_n = (prefix + price) / n, exact intraday.
+        "ma_prefix": {str(n): round(sum(closes[-(n - 1):]), 6) for n in MA_PERIODS if len(closes) >= n - 1},
+        "atr14": round(sum(trs[-14:]) / 14, 4) if len(trs) >= 14 else None,
         "ma5": sma(closes, 5), "ma10": sma(closes, 10), "ma20": sma(closes, 20),
         "ma60": sma(closes, 60), "ma250": sma(closes, 250), "amt20": sma(amounts, 20),
         "peak20": window[peak_index]["high"], "peak20_date": window[peak_index]["date"],
@@ -155,7 +162,8 @@ def plan_stock(
     lv = daily_levels(bars)
     p = stock.get("params") or {}
     playbook = str(stock["playbook"])
-    extra: dict[str, Any] = {"limit_up_price": limit_up_price(lv["close"], str(stock["code"]), str(stock.get("name") or ""))}
+    extra: dict[str, Any] = {"limit_up_price": limit_up_price(lv["close"], str(stock["code"]), str(stock.get("name") or "")),
+                             "ma_prefix": lv["ma_prefix"], "atr14": lv["atr14"]}
     setup, checklist = "", []
     if playbook == "relay_one_word":
         setup = f"一字板，收 {lv['close']}，距前高 {p['prior_high']} 差 {round((p['prior_high'] / lv['close'] - 1) * 100, 2)}%"
@@ -184,7 +192,8 @@ def plan_stock(
         checklist = ["涨幅 ≥ 9.5% 不追", "前一日已回调缩量", "再起：量比 ≥ 1.5、涨幅 ≥ 3%、均价上方", f"跌破 MA10={lv['ma10']} → 失效"]
     elif playbook == "leader_benchmark_pullback":
         ma, floor = f"ma{p['pullback_ma']}", f"ma{p['trend_floor_ma']}"
-        extra.update({"pullback_level": lv[ma], "floor_level": lv[floor]})
+        extra.update({"pullback_level": lv[ma], "floor_level": lv[floor],
+                      "pullback_ma": int(p["pullback_ma"]), "trend_floor_ma": int(p["trend_floor_ma"])})
         setup = f"加速龙头（收 {lv['close']}，{ma.upper()} {lv[ma]}，{floor.upper()} {lv[floor]}），不追"
         checklist = [f"回踩 {ma.upper()}（≤{round((lv[ma] or 0) * 1.01, 2)}）且守 {floor.upper()} → 观察", f"跌破 {floor.upper()} → 趋势结束"]
     elif playbook == "sympathy_follow":
@@ -195,30 +204,41 @@ def plan_stock(
         checklist = [f"{leader} 强（涨幅 ≥ {p['leader_strong_pct']:g}% 或封板）", "自身分时放量 + 均价上方", f"{leader} 跌 ≥ {abs(p['leader_weak_pct']):g}% → 失效"]
     elif playbook == "ma5_reclaim_or_divergence":
         a_level = max(lv["ma5"] or 0, lv["ma10"] or 0)
-        anchors = [float(p["support_level"])] + ([lv["ma10"]] if p.get("support_ma") and lv["ma10"] else [])
+        support_ma = lv.get(f"ma{int(p['support_ma'])}") if p.get("support_ma") else None
+        anchors = [float(p["support_level"])] + ([support_ma] if support_ma else [])
         zone = [round(min(anchors) * 0.99, 2), round(max(anchors) * 1.01, 2)]
         found, judgeable = divergence_summary(divergence)
         extra.update({"a_level": round(a_level, 4), "zone": zone, "divergence_found": found,
                       "divergence_judgeable": judgeable, "divergence": dict(divergence or {})})
+        invalid_text = str(p["invalid_below"])
+        if p.get("invalid_ma"):
+            n, buffer = int(p["invalid_ma"]), float(p.get("invalid_buffer_pct", 3.0))
+            extra.update({"invalid_ma": n, "invalid_buffer_pct": buffer})
+            invalid_text = f"当日 MA{n}×{1 - buffer / 100:g}（昨 MA{n}={lv[f'ma{n}']}）"
         setup = f"收 {lv['close']} vs 短均线 {round(a_level, 2)}；A 目标前高 {p['prior_high']}；B 回踩区 {zone}"
-        checklist = [f"A：放量站上 {round(a_level, 2)}（MA5/MA10 较高者）+ 均价上方", f"B：进入 {zone} 且 30/60 分钟两段底背离",
-                     f"收盘 < {p['invalid_below']} → 失效"]
+        checklist = [f"A：放量站上当日 MA5/MA10 较高者（昨 {round(a_level, 2)}）+ 均价上方", f"B：进入 {zone} 且 30/60 分钟两段底背离",
+                     f"收盘 < {invalid_text} 且无背离 → 失效"]
     elif playbook == "trend_continuation":
         hold, floor = f"ma{p.get('hold_ma', 5)}", f"ma{p.get('floor_ma', 10)}"
-        extra.update({"hold_level": lv[hold], "floor_level": lv[floor]})
+        extra.update({"hold_level": lv[hold], "floor_level": lv[floor],
+                      "hold_ma": int(p.get("hold_ma", 5)), "floor_ma": int(p.get("floor_ma", 10))})
         setup = f"收 {lv['close']}，{hold.upper()} {lv[hold]}，前高 {p['prior_high']}"
         checklist = [f"持有：价格 ≥ {hold.upper()}={lv[hold]}", f"延续：价格 > 前高 {p['prior_high']}", f"跌破 {floor.upper()}={lv[floor]} → 失效"]
     elif playbook == "prior_high_breakout":
         floor = f"ma{p.get('floor_ma', 10)}"
-        extra["floor_level"] = lv[floor]
+        extra.update({"floor_level": lv[floor], "floor_ma": int(p.get("floor_ma", 10))})
         setup = f"收 {lv['close']}，距前高 {p['prior_high']} 差 {round((p['prior_high'] / lv['close'] - 1) * 100, 2)}%"
         checklist = [f"带量突破前高 {p['prior_high']} + 均价上方", f"跌破 {floor.upper()}={lv[floor]} → 失效"]
     elif playbook == "platform_breakout":
+        floor_ma = int(p.get("floor_ma", 10))
         extra.update({"platform_upper": lv["platform_upper"], "platform_lower": lv["platform_lower"],
-                      "ma10": lv["ma10"], "days_since_peak": lv["days_since_peak"]})
+                      "ma10": lv["ma10"], "days_since_peak": lv["days_since_peak"], "floor_ma": floor_ma,
+                      f"ma{floor_ma}": lv[f"ma{floor_ma}"]})
         setup = (f"仍在创新高（{lv['peak20']}），等回调走平台" if lv["days_since_peak"] == 0 else
                  f"高点 {lv['peak20']}@{lv['peak20_date'][4:]} 后整理 {lv['days_since_peak']} 天，平台 [{lv['platform_lower']}, {lv['platform_upper']}]")
-        checklist = [f"带量突破平台上沿 {lv['platform_upper']} + 均价上方", f"跌破 {min(lv['platform_lower'], lv['ma10'] or lv['platform_lower'])} → 失效"]
+        floor_level = lv[f"ma{floor_ma}"] or lv["platform_lower"]
+        checklist = [f"带量突破平台上沿 {lv['platform_upper']} + 均价上方",
+                     f"收盘跌破 平台下沿 {lv['platform_lower']} 与当日 MA{floor_ma}（昨 {floor_level}）较低者 → 失效"]
     elif playbook == "ma10_second_wave":
         touched = lv["low"] <= (lv["ma10"] or 0) * (1 + float(p["touch_tol_pct"]) / 100)
         extra.update({"ma10": lv["ma10"], "touched_ma10": touched, "prior_mid": lv["mid"]})
@@ -229,7 +249,8 @@ def plan_stock(
         setup = f"收 {lv['close']} {'>' if lv['close'] > p['neckline'] else '≤'} 颈线 {p['neckline']}"
         checklist = [f"守颈线 {p['neckline']}", f"带量突破 {p['platform_high']}（节奏慢）", "基本面待确认"]
     elif playbook == "ma60_reclaim":
-        extra.update({"ma60": lv["ma60"], "amt20": lv["amt20"]})
+        extra.update({"ma60": lv["ma60"], "amt20": lv["amt20"],
+                      "prev_close_below_ma60": bool(lv["ma60"]) and lv["close"] < lv["ma60"]})
         setup = f"收 {lv['close']} vs MA60 {lv['ma60']}；20日均额 {_yi(lv['amt20'] or 0)}"
         checklist = [f"站上 MA60={lv['ma60']} 且全天成交 ≥ {p['amount_mult']:g}×20日均额", "跌破 MA60×0.97 → 失效"]
     levels = {key: lv[key] for key in ("date", "close", "high", "low", "amount", "ma5", "ma10", "ma20", "ma60")}

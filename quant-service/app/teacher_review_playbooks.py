@@ -26,7 +26,9 @@ DEFAULTS: Final[dict[str, Any]] = {
     "minute_volume_multiple_min": 2.0,  # I: 分时放量 = 当前分钟量 ≥ 2× 近20分钟中位量
     "not_falling_return_5m_min": -0.3,  # I: “不能往下跌” = 5分钟收益 ≥ -0.3%
     "center_flat_pct": 1.0,          # I: 重心平移 = (高+低)/2 日变动 ≤ 1%
-    "auction_proxy_until": "09:31",  # I: 该时刻前的累计成交额视作竞价额
+    "auction_proxy_until": "09:31",  # I: 该时刻前的累计成交额视作竞价额（仅在取不到 09:25 竞价快照时）
+    "close_confirm_from": "14:50",   # I: “收盘跌破”类失效在该时刻后按当前价确认，之前只提示
+    "sector_check_from": "10:30",    # I: “板块涨停数回落”类失效在该时刻后才判定（涨停家数要时间形成）
 }
 
 # kind: relay = next-session relay, trend = multi-session setup, record = settle only (never watched)
@@ -139,6 +141,9 @@ def validate_pack(pack: Any) -> list[str]:
             provenance = str(params.get(f"{name}_src") or "")
             if not provenance or provenance[0] not in "TDI":
                 problems.append(f"{tag}: param {name} needs {name}_src starting with T/D/I")
+        for name in ("hold_ma", "floor_ma", "pullback_ma", "trend_floor_ma", "support_ma", "invalid_ma", "ma"):
+            if name in params and int(params[name]) not in (5, 10, 20, 60):
+                problems.append(f"{tag}: {name} must be one of 5/10/20/60")
         evidence = stock.get("evidence")
         if not isinstance(evidence, list) or not evidence or not all(
             isinstance(item, dict) and item.get("time") and item.get("quote") for item in evidence
@@ -149,6 +154,10 @@ def validate_pack(pack: Any) -> list[str]:
                 raise ValueError
         except (TypeError, ValueError):
             problems.append(f"{tag}: valid_sessions must be ≥ 1")
+    superseded = pack.get("supersedes")
+    if superseded is not None and (not isinstance(superseded, list) or not all(
+            re.fullmatch(r"[0-9a-f]{8,64}", str(item)) for item in superseded)):
+        problems.append("supersedes must be a list of pack ids")
     for forecast in pack.get("forecasts") or []:
         check = forecast.get("check") if isinstance(forecast, dict) else None
         if not isinstance(check, dict) or check.get("kind") not in FORECAST_KINDS:
