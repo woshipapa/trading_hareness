@@ -70,6 +70,7 @@ QUANT_SHARED_READ_API_KEY=<private handoff value>
 | POST | `/licensed/stock-api/call` | 通用全量调用与自动 300 分批 |
 | GET | `/licensed/longhu/quotes` | 兼容接口：标准化批量行情 |
 | GET | `/licensed/longhu/minutes/{symbol}` | 兼容接口：标准化单股分钟线 |
+| GET | `/licensed/longhu/minutes?symbols=` | 兼容接口：一次最多 300 只的当日分钟线（owner 侧并发，占一个线程池槽位） |
 
 Swagger 与 OpenAPI：
 
@@ -492,6 +493,36 @@ GET /licensed/longhu/minutes/600664.SH
 - `symbol`、`time`、`close`、`vwap`
 - `volume_lot`、`amount`、`cumulative_volume_lot`
 - `cumulative_segment`、`is_complete`、`source`
+
+### 批量分钟
+
+```http
+GET /licensed/longhu/minutes?symbols=600664.SH,600487.SH&deadline_seconds=4
+```
+
+Longhu 分时接口 `GetStockTrendIncremental` 只接受单个 `StockID`，因此批量分钟与批量行情一样由 owner
+在自己的供应商线程池里并发（`longhu_vendor.json` 的 `workers`，默认 12），整批只占 owner 阻塞线程池
+的**一个**槽位；peer 不再需要逐只经网关调用（逐只调用时每只占一个槽位，owner 默认 4 线程 + 8 排队，
+16 路以上即 503）。
+
+- `symbols`：最多 300 只，逗号分隔，大小写不敏感；
+- `deadline_seconds`：1–20，默认 5.5。到点仍未返回的票记为 `minute_batch_deadline_exceeded`，不拖住整批；
+- 只返回**当前交易日**的分钟线（与单股兼容接口相同的交易日校验），陈旧会话记为错误；
+- 响应 ≥64 KB 且请求带 `Accept-Encoding: gzip` 时 gzip 压缩（100 只约 2 MB 原始 JSON）。
+
+```json
+{
+  "rows": {"600664.SH": [{"time": "0930", "close": 10.0, "vwap": 10.0, "volume_lot": 1200, "trade_date": "20260922"}]},
+  "errors": {"600487.SH": "minute_batch_deadline_exceeded"},
+  "requested": 2, "completed": 1, "deadline_seconds": 4.0,
+  "session_guard": "current_exchange_session",
+  "source": "longhuvip:GetStockTrendIncremental", "physical_request_limit": 300
+}
+```
+
+peer 的 `SharedLonghuReadSource.stock_minutes_batch` 优先调用此路由（owner 截止时间 = 调用方预算 − 1.5 秒，
+留给隧道传输）；owner 尚未升级（404/405）时自动回退为逐只调用，并在 10 分钟内不再探测；owner 返回 503 等
+其他错误时直接失败，不回退为逐只调用，避免给已饱和的 owner 加压。
 
 ### 13.1 本地 Longhu provider 的路由选择
 

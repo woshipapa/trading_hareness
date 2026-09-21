@@ -2860,13 +2860,18 @@ async def intraday_longhu_minutes(symbol: str) -> list[dict[str, Any]]:
     return current_session_minute_rows(rows, observed_at=datetime.now(timezone.utc))
 
 
-async def intraday_longhu_minutes_batch(symbols: list[str]) -> dict[str, Any]:
-    """One executor slot for a whole basket; each symbol keeps the exchange-date guard."""
+async def intraday_longhu_minutes_batch(symbols: list[str], deadline_seconds: float = 5.5) -> dict[str, Any]:
+    """One executor slot for a whole basket; each symbol keeps the exchange-date guard.
+
+    On the licensed owner this fans out direct vendor calls and also serves
+    ``GET /licensed/longhu/minutes``; on a peer it is one request to that route.
+    """
     if not longhu_vendor_configured():
         raise RuntimeError("longhu_not_configured")
     from .longhu_vendor_source import current_session_minute_rows
     batch = await run_akshare_blocking(
-        lambda: longhu_intraday_source().stock_minutes_batch(symbols, deadline_seconds=5.5), timeout_seconds=8,
+        lambda: longhu_intraday_source().stock_minutes_batch(symbols, deadline_seconds=deadline_seconds),
+        timeout_seconds=deadline_seconds + 2.5,
     )
     observed_at = datetime.now(timezone.utc)
     result: dict[str, Any] = {}
@@ -5003,6 +5008,7 @@ app.include_router(build_longhu_reads_router(
     shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
     quotes=shared_longhu_quotes,
     minutes=intraday_longhu_minutes,
+    minutes_batch=intraday_longhu_minutes_batch,
 ))
 app.include_router(build_licensed_stock_api_router(
     configured=longhu_vendor_configured,

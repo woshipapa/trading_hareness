@@ -340,14 +340,21 @@ def configured(path: str | Path | None = None) -> bool:
 
 
 MINUTE_BATCH_DEADLINE_EXCEEDED = "minute_batch_deadline_exceeded"
+MINUTE_BATCH_DEFAULT_DEADLINE_SECONDS = 5.5
+MINUTE_BATCH_TRANSFER_RESERVE_SECONDS = 1.5
+# Gateways (by base URL) that answered the batch minute route with 404/405,
+# i.e. an owner not yet upgraded; per-symbol calls are used until expiry.
+_BATCH_MINUTE_ROUTE_MISSING_UNTIL: dict[str, float] = {}
+BATCH_MINUTE_ROUTE_RECHECK_SECONDS = 600.0
 
 
 def minute_batch_workers() -> int:
-    """In-flight minute calls for one basket (at most 300 symbols per basket).
+    """In-flight single-symbol minute calls when a basket must be fanned out here.
 
-    The trend endpoint takes one ``StockID``, so a basket is a fan-out of
-    single calls.  Through the shared gateway each call occupies one slot of
-    the owner's blocking executor (4 workers + 8 queued by default); measured
+    The trend endpoint takes one ``StockID``.  An upgraded owner fans a basket
+    out itself behind ``GET /licensed/longhu/minutes`` (one owner slot).  Until
+    then a peer fans out single gateway calls, each occupying one slot of the
+    owner's blocking executor (4 workers + 8 queued by default); measured
     throughput is flat above 4 in flight and more only turns into 503s that
     also reject quote and auction reads.  Raise this together with the
     owner's ``AKSHARE_MAX_WORKERS``.
@@ -554,7 +561,51 @@ class SharedLonghuReadSource:
     def stock_minutes_batch(
         self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
     ) -> dict[str, list[dict[str, Any]] | str]:
-        return _minutes_batch(self.stock_minutes, symbols, minute_batch_workers(), deadline_seconds)
+        """One gateway request for the basket; per-symbol calls only for an old owner."""
+        ordered = list(dict.fromkeys(str(value) for value in symbols if value))[:MAX_PAGE_SIZE]
+        if not ordered:
+            return {}
+        if time.monotonic() >= _BATCH_MINUTE_ROUTE_MISSING_UNTIL.get(self.base_url, 0.0):
+            result = self._gateway_minutes_batch(ordered, deadline_seconds)
+            if result is not None:
+                return result
+            _BATCH_MINUTE_ROUTE_MISSING_UNTIL[self.base_url] = time.monotonic() + BATCH_MINUTE_ROUTE_RECHECK_SECONDS
+        return _minutes_batch(self.stock_minutes, ordered, minute_batch_workers(), deadline_seconds)
+
+    def _gateway_minutes_batch(
+        self, ordered: list[str], deadline_seconds: float | None,
+    ) -> dict[str, list[dict[str, Any]] | str] | None:
+        """Call ``GET /licensed/longhu/minutes``; ``None`` means the owner lacks the route.
+
+        Any other failure (503 saturation, timeout) raises: fanning the same
+        basket out as single calls would only add load to a busy owner.
+        """
+        budget = float(deadline_seconds or MINUTE_BATCH_DEFAULT_DEADLINE_SECONDS)
+        # The owner stops fanning out early enough for the rows to cross the
+        # tunnel within the caller's budget.
+        owner_deadline = max(1.0, min(20.0, budget - MINUTE_BATCH_TRANSFER_RESERVE_SECONDS))
+        wanted = {symbol: symbol.strip().upper() for symbol in ordered}
+        response = self._session.get(
+            f"{self.base_url}/licensed/longhu/minutes",
+            params={"symbols": ",".join(dict.fromkeys(wanted.values())), "deadline_seconds": owner_deadline},
+            timeout=budget + 1.0,
+        )
+        if response.status_code in (404, 405):
+            return None
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise TypeError("shared Longhu minute batch response must be an object")
+        rows = payload.get("rows") if isinstance(payload.get("rows"), dict) else {}
+        errors = payload.get("errors") if isinstance(payload.get("errors"), dict) else {}
+        result: dict[str, list[dict[str, Any]] | str] = {}
+        for symbol, key in wanted.items():
+            value = rows.get(key)
+            if isinstance(value, list):
+                result[symbol] = [dict(row) for row in value if isinstance(row, Mapping)]
+            else:
+                result[symbol] = str(errors.get(key) or "minute_batch_missing_symbol")
+        return result
 
     def raw_call(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Forward the complete documented call contract to the owner gateway."""

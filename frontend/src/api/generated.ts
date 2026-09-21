@@ -126,6 +126,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/licensed/longhu/minutes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Minutes Batch
+         * @description Current-session minute paths for up to 300 symbols in one request.
+         *
+         *     The single-``StockID`` trend calls fan out on the adapter's own
+         *     pool inside one blocking-executor slot, like ``/quotes``.  Symbols
+         *     still unfinished at the deadline come back as
+         *     ``minute_batch_deadline_exceeded`` instead of holding the request.
+         */
+        get: operations["read_minutes_batch_licensed_longhu_minutes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/licensed/longhu/minutes/{symbol}": {
         parameters: {
             query?: never;
@@ -4976,6 +5001,40 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_minutes_batch_licensed_longhu_minutes_get: {
+        parameters: {
+            query: {
+                symbols: string;
+                deadline_seconds?: number;
+            };
+            header?: {
+                "X-Quant-Read-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

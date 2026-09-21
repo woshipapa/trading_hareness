@@ -349,3 +349,66 @@ class LonghuVendorSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, payload: dict | None = None):
+        self.status_code, self._payload = status_code, payload or {}
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"{self.status_code} Server Error")
+
+
+class SharedMinuteBatchTests(unittest.TestCase):
+    def setUp(self):
+        from app import longhu_vendor_source as module
+        self.module = module
+        module._BATCH_MINUTE_ROUTE_MISSING_UNTIL.clear()
+        self.addCleanup(module._BATCH_MINUTE_ROUTE_MISSING_UNTIL.clear)
+
+    def source(self, responses: list, calls: list):
+        source = SharedLonghuReadSource("http://owner.test", "read-key")
+
+        class Session:
+            def get(self, url, params=None, timeout=None):
+                calls.append((url, dict(params or {}), timeout))
+                return responses.pop(0)
+
+        source._session = Session()
+        source.stock_minutes = lambda symbol: [{"symbol": symbol, "single": True}]
+        return source
+
+    def test_one_gateway_request_serves_the_basket_in_the_callers_spelling(self):
+        calls: list = []
+        source = self.source([_FakeResponse(200, {
+            "rows": {"000001.SZ": [{"time": "0930"}]}, "errors": {"600000.SH": "stale"}})], calls)
+        result = source.stock_minutes_batch(["000001.sz", "600000.SH", "000002.SZ"], deadline_seconds=5.5)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][0].endswith("/licensed/longhu/minutes"))
+        self.assertEqual(calls[0][1], {"symbols": "000001.SZ,600000.SH,000002.SZ", "deadline_seconds": 4.0})
+        self.assertEqual(result, {"000001.sz": [{"time": "0930"}], "600000.SH": "stale",
+                                  "000002.SZ": "minute_batch_missing_symbol"})
+
+    def test_an_old_owner_falls_back_to_single_calls_and_is_not_probed_every_scan(self):
+        calls: list = []
+        source = self.source([_FakeResponse(404)], calls)
+        first = source.stock_minutes_batch(["000001.SZ"], deadline_seconds=5.5)
+        second = source.stock_minutes_batch(["000002.SZ"], deadline_seconds=5.5)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(first["000001.SZ"], [{"symbol": "000001.SZ", "single": True}])
+        self.assertEqual(second["000002.SZ"], [{"symbol": "000002.SZ", "single": True}])
+
+    def test_a_saturated_owner_is_not_hit_with_single_calls(self):
+        import requests
+        calls: list = []
+        source = self.source([_FakeResponse(503)], calls)
+        source.stock_minutes = lambda symbol: self.fail("must not fan out against a saturated owner")
+        with self.assertRaises(requests.HTTPError):
+            source.stock_minutes_batch(["000001.SZ"], deadline_seconds=5.5)
+        self.assertEqual(self.module._BATCH_MINUTE_ROUTE_MISSING_UNTIL, {})
+

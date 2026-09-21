@@ -99,7 +99,8 @@ lightServer root privileges.
 ## Local Longhu transport boundary
 
 The local workstation is a gateway consumer. It calls only the normalized
-`/licensed/longhu/quotes` and `/licensed/longhu/minutes/{symbol}` routes through
+`/licensed/longhu/quotes`, `/licensed/longhu/minutes/{symbol}` and the batched
+`/licensed/longhu/minutes?symbols=` routes through
 an SSH-forwarded owner endpoint; the owner service is the only process that
 stores Longhu credentials and calls the vendor API. A local
 `longhu_vendor.json` is ignored unless the owner process explicitly sets
