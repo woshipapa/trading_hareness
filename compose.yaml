@@ -309,6 +309,9 @@ services:
       # full preserves the legacy single-node runtime; production migration
       # assigns research locally and intraday_edge to the always-on collector.
       QUANT_RUNTIME_PROFILE: ${QUANT_RUNTIME_PROFILE:-full}
+      AUCTION_PULSE_ENABLED: ${AUCTION_PULSE_ENABLED:-true}
+      AUCTION_PULSE_INTERVAL_SECONDS: ${AUCTION_PULSE_INTERVAL_SECONDS:-2}
+      AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS: ${AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS:-30}
       POST_CLOSE_REFRESH_LEASE_SECONDS: ${POST_CLOSE_REFRESH_LEASE_SECONDS:-1800}
       AKSHARE_MAX_WORKERS: ${AKSHARE_MAX_WORKERS:-4}
       TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
