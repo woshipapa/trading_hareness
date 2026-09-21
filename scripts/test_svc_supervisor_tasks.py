@@ -1,7 +1,9 @@
 """Supervisor 任务清单的契约：停用的任务不能因为一次重启就自己回来。"""
 import importlib
+import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -69,6 +71,17 @@ class TaskInventoryTests(unittest.TestCase):
         task = next(item for item in module.TASKS if item["name"] == "paperkb.scholar-alerts")
         self.assertIn("/tmp/scholar-alerts", task["args"])
 
+    def test_source_health_audit_runs_after_snapshot_lanes(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None)
+        task = next(item for item in module.TASKS if item["name"] == "paperkb.source-health")
+        self.assertEqual(task["kind"], "daily")
+        self.assertEqual((task["hour"], task["minute"]), (11, 45))
+        self.assertTrue(task["run_at_load"])
+        self.assertEqual(task["env"].get("PAPER_KB_SOURCE_HEALTH_TASK"), "1")
+        self.assertTrue(any(str(value).endswith("jobs.py") for value in task["args"]))
+        self.assertIn("source-health", task["args"])
+        self.assertNotIn("OPENALEX_API_KEY", " ".join(str(value) for value in task["args"]))
+
     def test_s2_children_receive_optional_provider_credentials_at_runtime(self):
         module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None,
                               OPENALEX_API_KEY="openalex-test-only",
@@ -81,6 +94,35 @@ class TaskInventoryTests(unittest.TestCase):
             self.assertEqual(task["env"]["OPENCITATIONS_ACCESS_TOKEN"], "opencitations-test-only")
             self.assertEqual(task["env"]["PAPER_KB_OPENALEX_ENABLED"], "true")
             self.assertEqual(task["env"]["PAPER_KB_OPENCITATIONS_ENABLED"], "false")
+
+    def test_daily_failed_receipt_does_not_suppress_retry(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None)
+        task = next(item for item in module.TASKS if item["name"] == "paperkb.source-health")
+        old_log = module.PKLOG
+        with tempfile.TemporaryDirectory() as directory:
+            module.PKLOG = directory
+            module._daily_mark_run(task, "2026-09-20", status="failed", exit_code=1, duration_s=2.5)
+            marker = json.loads(Path(directory, ".paperkb.source-health.last-run.json").read_text())
+            self.assertEqual(marker["status"], "failed")
+            self.assertEqual(marker["exit_code"], 1)
+            self.assertEqual(module._daily_last_run(task), "")
+            module._daily_mark_run(task, "2026-09-20", status="success", exit_code=0, duration_s=1.0)
+            self.assertEqual(module._daily_last_run(task), "2026-09-20")
+        module.PKLOG = old_log
+
+    def test_calendar_failed_receipt_does_not_suppress_retry(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None)
+        task = next(item for item in module.TASKS if item["name"] == "paperkb.s2")
+        old_log = module.PKLOG
+        with tempfile.TemporaryDirectory() as directory:
+            module.PKLOG = directory
+            module._calendar_mark_run(task, "2026-09-15", status="failed", exit_code=1, duration_s=3.0)
+            marker = json.loads(Path(directory, ".paperkb.s2.last-run.json").read_text())
+            self.assertEqual(marker["status"], "failed")
+            self.assertEqual(module._calendar_last_run(task), "")
+            module._calendar_mark_run(task, "2026-09-15", status="success", exit_code=0, duration_s=1.0)
+            self.assertEqual(module._calendar_last_run(task), "2026-09-15")
+        module.PKLOG = old_log
 
 
 if __name__ == "__main__":

@@ -191,6 +191,62 @@ class LarkAgentXProtoFallbackTests(unittest.TestCase):
 		self.assertEqual(packet["json_command"], 400)
 		self.assertEqual(messages, [])
 
+	def test_recovers_card_json_from_nested_card_payload(self):
+		card = {"schema": "2.0", "body": {"elements": [{"tag": "div", "text": {"tag": "plain_text", "content": "cat card body"}}]}}
+		# universalCardEntity is present in newer CardContent payloads while the
+		# checked-in upstream descriptor only knows it as opaque bytes.
+		card_content = P.CardContent(
+			universalCardEntity=(b"opaque-prefix" + json.dumps(card, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+		).SerializeToString()
+		entity = (
+			bfield(1, b"cat-card-msg")
+			+ vfield(2, 14)
+			+ bfield(3, b"synthetic-user")
+			+ bfield(5, card_content)
+			+ bfield(10, b"7684122107030031634")
+			+ vfield(46, 2)
+		)
+		entry = bfield(1, b"entry") + bfield(2, entity)
+		push = bfield(1, entry)
+		packet = bfield(1, b"cat-card-sid") + vfield(3, 6) + bfield(5, push)
+		frame = bfield(8, packet)
+
+		with patch.object(bridge.decoders, "decode_message_content", return_value=("[卡片]", {})):
+			_, messages, _ = tolerant_websocket_decode_with_meta(frame)
+
+		self.assertEqual(messages[0]["msg_type_name"], "CARD")
+		self.assertEqual(json.loads(messages[0]["content_data"]["jsonCard"]), card)
+		self.assertIn("cat card body", messages[0]["content"])
+
+	def test_primary_card_path_merges_recovered_card_json(self):
+		card = {"schema": "2.0", "body": {"elements": [{"tag": "markdown", "content": "primary card body"}]}}
+		card_content = P.CardContent(
+			universalCardEntity=json.dumps(card, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+		).SerializeToString()
+		entity = (
+			bfield(1, b"primary-card-msg")
+			+ vfield(2, 14)
+			+ bfield(3, b"synthetic-user")
+			+ bfield(5, card_content)
+			+ bfield(10, b"7684122107030031634")
+			+ vfield(46, 2)
+		)
+		entry = bfield(1, b"entry") + bfield(2, entity)
+		push = bfield(1, entry)
+		packet = P.Packet(sid="primary-card-sid", cmd=6, payload=push)
+		frame = P.Frame(payload=packet.SerializeToString()).SerializeToString()
+
+		with patch.object(bridge.decoders, "decode_push_messages", return_value=[{
+			"msg_id": "primary-card-msg",
+			"msg_type_name": "CARD",
+			"content": "[卡片]",
+			"content_data": {},
+		}]):
+			_, messages = decode_primary_websocket(frame)
+
+		self.assertEqual(json.loads(messages[0]["content_data"]["jsonCard"]), card)
+		self.assertIn("primary card body", messages[0]["content"])
+
 
 if __name__ == "__main__":
 	unittest.main()

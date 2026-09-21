@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage } from './larkagentx-ingress.mjs';
+import { isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 
 test('normalizes an inbound LarkAgentX text message into the adapter event contract', () => {
 	const event = normalizeLarkAgentXMessage({
@@ -16,12 +16,27 @@ test('normalizes an inbound LarkAgentX text message into the adapter event contr
 	assert.equal(event.sender.sender_id.open_id, 'ou_sender');
 });
 
+test('normalizes a summary-group WebSocket POST into the n8n event contract', () => {
+	const event = normalizeLarkAgentXSummaryMessage({
+		msg_id: 'om_summary_ws_1', chat_id: 'oc_summary', from_id: 'ou_bot', msg_type_name: 'POST',
+		content: '[富文本] #quanneng [图片]', content_data: { richText: { innerText: '#quanneng 图片' } },
+		_larkagentx_images: [{ image_id: 'img_v3_summary', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }],
+		create_time: 1730000000000,
+	}, { now: () => 1730000001000 });
+	assert.equal(event.event_id, 'larkagentx:summary:oc_summary:om_summary_ws_1');
+	assert.equal(event.source, 'larkagentx-summary');
+	assert.equal(event.message.message_type, 'post');
+	assert.equal(event.message.chat_id, 'oc_summary');
+	const content = JSON.parse(event.message.content);
+	assert.equal(content.zh_cn.content.some((line) => line.some((item) => item.image_key === 'img_v3_summary')), true);
+});
+
 test('fails closed when an inbound message has no stable identity or content', () => {
 	assert.throws(() => normalizeLarkAgentXMessage({ chat_id: 'oc_1', from_id: 'ou_1', content: 'x' }), /message_id/);
 	assert.throws(() => normalizeLarkAgentXMessage({ msg_id: 'om_1', chat_id: 'oc_1', from_id: 'ou_1' }), /文本内容/);
 });
 
-test('keeps text and system events direct while routing cards to official backfill', () => {
+test('keeps text and system events direct while keeping cards on realtime path', () => {
 	assert.equal(larkAgentXMessageType({ msg_type_name: 'TEXT' }), 'TEXT');
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'TEXT' }), true);
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'TEXT', content: '看起来像正文', content_status: 'unsupported' }), false);
@@ -32,7 +47,7 @@ test('keeps text and system events direct while routing cards to official backfi
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'POST', content: '正文 [图片]', content_data: { richText: { imageIds: ['img_post'] } }, _larkagentx_images: [{ image_id: 'img_post', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }] }), true);
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'POST', content: '正文 [图片]', content_data: { richText: { imageIds: ['element-1'] } }, _larkagentx_images: [{ image_id: 'img_v3_post', source_id: 'element-1', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }] }), true);
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'IMAGE' }), false);
-	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'INTERACTIVE' }), false);
+	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'INTERACTIVE' }), true);
 	assert.equal(normalizeLarkAgentXRelayMessage({ msg_id: 'om_system', msg_type_name: 'SYSTEM', content: 'join' }).msg_type, 'system');
 	assert.equal(normalizeLarkAgentXRelayMessage({ msg_id: 'om_post', msg_type_name: 'POST', content: 'cat post' }).msg_type, 'post');
 	const post = normalizeLarkAgentXRelayMessage({ msg_id: 'om_post_image', msg_type_name: 'POST', content: '[图片]', _larkagentx_images: [{ image_id: 'img_post', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }] });
@@ -106,7 +121,16 @@ test('accepts JSON carried by LarkAgentX openCardContent', () => {
 	assert.deepEqual(JSON.parse(normalizeLarkAgentXRelayMessage(input).body.content), card);
 });
 
-test('keeps incomplete LarkAgentX cards on the official backfill path', () => {
-	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'CARD', content_data: { cardDesc: '仅摘要' } }), false);
-	assert.throws(() => normalizeLarkAgentXRelayMessage({ msg_id: 'om_card_incomplete', msg_type_name: 'CARD', content_data: { cardDesc: '仅摘要' } }), /完整 jsonCard/);
+test('keeps incomplete LarkAgentX cards on the realtime path without OAuth', () => {
+	const input = { msg_id: 'om_card_incomplete', msg_type_name: 'CARD', content: '[卡片]', content_data: { cardDesc: '仅摘要' } };
+	assert.equal(isDirectLarkAgentXRelayType(input), true);
+	const message = normalizeLarkAgentXRelayMessage(input);
+	assert.equal(message.msg_type, 'text');
+	assert.deepEqual(JSON.parse(message.body.content), { text: '[卡片]' });
+});
+
+test('downgrades an unsupported WebSocket type without requiring OAuth backfill', () => {
+	const message = normalizeLarkAgentXUnsupportedMessage({ msg_id: 'om_file_unsupported', msg_type_name: 'FILE', content: '[文件] fileKey=file_source' });
+	assert.equal(message.msg_type, 'text');
+	assert.match(JSON.parse(message.body.content).text, /^\[file\]/i);
 });

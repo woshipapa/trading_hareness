@@ -727,6 +727,54 @@ test('a keyword-configured card webhook preserves images as a rich-text post', a
 	);
 });
 
+test('a direct LarkAgentX image uses the source key when every target is webhook-backed', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = {
+				message_id: 'om_webhook_larkagentx_image', msg_type: 'image', create_time: String(Date.now()),
+				body: { content: JSON.stringify({ image_key: 'img_v3_source', larkagentx_resource: { image_id: 'img_v3_source', key_hex: '00'.repeat(32), iv_hex: '11'.repeat(12) } }) },
+			};
+			const quotaError = Object.assign(new Error('Request failed with status code 400'), { response: { data: { code: 99991403, msg: "This month's API call quota has been exceeded" } } });
+			const { relay, sent, saved } = createHarness([message], {
+				targetChatIds: ['oc_liwei_forward'], imageError: quotaError,
+				webhooksByChatId: { oc_summary: 'https://x/summary', oc_liwei_forward: 'https://x/liwei' },
+				webhookKeywordsByChatId: { oc_summary: '汇总', oc_liwei_forward: 'liwei' },
+			});
+			await relay.tick();
+			assert.equal(sent.length, 0, 'the tenant API must not be used when all targets have webhooks');
+			assert.equal(webhookCalls.length, 2);
+			assert.ok(webhookCalls.every((call) => call.body.msg_type === 'post'));
+			assert.ok(webhookCalls.every((call) => JSON.stringify(call.body).includes('img_v3_source')));
+			assert.equal(saved.get(message.message_id).status, 'sent');
+		},
+	);
+});
+
+test('a LarkAgentX post image keeps the source key when every target is webhook-backed', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = {
+				message_id: 'om_webhook_larkagentx_post_image', msg_type: 'post', create_time: String(Date.now()),
+				body: { content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'text', text: 'quanneng 图片' }], [{ tag: 'img', image_key: 'img_v3_post_source', larkagentx_resource: { image_id: 'img_v3_post_source', key_hex: '00'.repeat(32), iv_hex: '11'.repeat(12) } }]] } }) },
+			};
+			const quotaError = Object.assign(new Error('Request failed with status code 400'), { response: { data: { code: 99991403, msg: "This month's API call quota has been exceeded" } } });
+			const { relay, sent, saved } = createHarness([message], {
+				targetChatIds: ['oc_quanneng_forward'], imageError: quotaError,
+				webhooksByChatId: { oc_summary: 'https://x/summary', oc_quanneng_forward: 'https://x/quanneng' },
+				webhookKeywordsByChatId: { oc_summary: '汇总', oc_quanneng_forward: 'quanneng' },
+			});
+			await relay.tick();
+			assert.equal(sent.length, 0, 'the tenant API must not be used for a webhook-backed post image');
+			assert.equal(webhookCalls.length, 2);
+			assert.ok(webhookCalls.every((call) => call.body.msg_type === 'post'));
+			assert.ok(webhookCalls.every((call) => JSON.stringify(call.body).includes('img_v3_post_source')));
+			assert.equal(saved.get(message.message_id).status, 'sent');
+		},
+	);
+});
+
 test('a webhook target that already succeeded is not resent when another target is retried', async () => {
 	await withFetchMock(
 		() => ({ ok: true, json: async () => ({ code: 0 }) }),

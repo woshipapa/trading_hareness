@@ -178,7 +178,13 @@ export function isDirectLarkAgentXRelayType(input) {
 	const upstreamType = larkAgentXMessageType(input);
 	return ((upstreamType === 'POST' ? hasPortablePostContent(input) : DIRECT_RELAY_TYPES.has(upstreamType)) && !isEncryptedImageSummary(input))
 		|| (upstreamType === 'IMAGE' && Boolean(imageKeyFromLarkAgentX(input)) && hasUsableImageResource(input?._larkagentx_image))
-		|| (['CARD', 'INTERACTIVE'].includes(upstreamType) && Boolean(cardContentFromLarkAgentX(input)));
+		// A private WebSocket may expose only the stable CARD type and the
+		// human summary (`[卡片]`) for a card whose JSON body is client-only.
+		// Keep that event on the real-time path so an exhausted OAuth quota
+		// cannot turn the durable spool into an endless retry queue. Complete
+		// cards still retain their native interactive payload below; incomplete
+		// cards are downgraded to a tagged text summary.
+		|| ['CARD', 'INTERACTIVE'].includes(upstreamType);
 }
 
 export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) {
@@ -187,7 +193,17 @@ export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) 
 	const upstreamType = larkAgentXMessageType(input);
 	if (['CARD', 'INTERACTIVE'].includes(upstreamType)) {
 		const card = cardContentFromLarkAgentX(input);
-		if (!card) throw new Error(`LarkAgentX 类型 ${upstreamType} 缺少完整 jsonCard，需要通过官方消息接口补读`);
+		if (!card) {
+			const summary = String(input?.content ?? '').trim() || `[${upstreamType.toLowerCase()}] 卡片内容未随 WebSocket 提供`;
+			return {
+				message_id: messageId,
+				msg_type: 'text',
+				create_time: input?.create_time ?? now(),
+				update_time: input?.update_time ?? null,
+				body: { content: JSON.stringify({ text: summary }) },
+				sender: { sender_id: String(input?.from_id ?? input?.sender_id ?? '') },
+			};
+		}
 		return {
 			message_id: messageId,
 			msg_type: 'interactive',
@@ -271,5 +287,44 @@ export function normalizeLarkAgentXMessage(input, { now = Date.now } = {}) {
 			content: JSON.stringify({ text: content }),
 		},
 		sender: { sender_id: { open_id: senderId }, sender_type: 'user' },
+	};
+}
+
+export function normalizeLarkAgentXSummaryMessage(input, { now = Date.now } = {}) {
+	if (!input || typeof input !== 'object') throw new Error('LarkAgentX 汇总消息必须是 JSON 对象');
+	const relay = normalizeLarkAgentXRelayMessage(input, { now });
+	const chatId = requiredString(input.chat_id, 'chat_id', 128);
+	const createTime = relay.create_time ?? input.create_time ?? now();
+	return {
+		event_id: String(input.event_id ?? `larkagentx:summary:${chatId}:${relay.message_id}`).trim().slice(0, 200),
+		event_type: 'im.message.receive_v1',
+		source: 'larkagentx-summary',
+		source_label: String(input.source_label ?? 'LarkAgentX 汇总群').trim().slice(0, 120),
+		message: {
+			message_id: relay.message_id,
+			chat_id: chatId,
+			chat_type: String(input.chat_type_name ?? input.chat_type ?? 'group').toLowerCase(),
+			message_type: relay.msg_type,
+			content: relay.body.content,
+			create_time: createTime,
+			update_time: relay.update_time ?? input.update_time ?? null,
+			deleted: false,
+		},
+		sender: relay.sender,
+	};
+}
+
+export function normalizeLarkAgentXUnsupportedMessage(input, { now = Date.now } = {}) {
+	if (!input || typeof input !== 'object') throw new Error('LarkAgentX 消息必须是 JSON 对象');
+	const messageId = requiredString(input.msg_id ?? input.message_id, 'message_id', 128);
+	const upstreamType = larkAgentXMessageType(input).toLowerCase();
+	const content = String(input.content ?? '').trim() || `[${upstreamType}] 消息内容未提供可解码正文`;
+	return {
+		message_id: messageId,
+		msg_type: 'text',
+		create_time: input.create_time ?? now(),
+		update_time: input.update_time ?? null,
+		body: { content: JSON.stringify({ text: `[${upstreamType}] ${content}` }) },
+		sender: { sender_id: String(input.from_id ?? input.sender_id ?? '') },
 	};
 }

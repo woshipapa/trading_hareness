@@ -90,6 +90,11 @@ function interactiveWebhookPostContent(content, keyword) {
 	return { zh_cn: { title: '', content: lines } };
 }
 
+function allTargetsUseWebhooks(source, config) {
+	const targets = [...new Set((source?.targetChatIds ?? []).map((value) => String(value ?? '').trim()).filter(Boolean))];
+	return targets.length > 0 && targets.every((targetChatId) => config.webhooksByChatId?.has(targetChatId));
+}
+
 async function postViaWebhook(url, msgType, content) {
 	const body = msgType === 'interactive'
 		? { msg_type: 'interactive', card: content }
@@ -467,6 +472,13 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		const replacements = { image: new Map(), file: new Map() };
 		for (const resource of resources) {
 			if (replacements[resource.kind].has(resource.key)) continue;
+			// Rich-text images carry the same source image_key that a custom bot
+			// webhook can render. Keep it in place when every target is webhook
+			// backed, so an exhausted tenant upload quota does not drop the post.
+			if (resource.kind === 'image' && allTargetsUseWebhooks(source, config)) {
+				replacements.image.set(resource.key, resource.key);
+				continue;
+			}
 			const uploaded = await downloadAndUpload(message, resource);
 			if (resource.kind === 'image' && uploaded.kind !== 'image') {
 				throw new RelayUnsupportedError('超过 10 MiB 的富文本图片不能保留为富文本图片');
@@ -481,6 +493,15 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 	}
 
 	async function relayDirectResourceContent(message, source, descriptor, options) {
+		// A source image key is already addressable by a custom bot webhook. When
+		// every target is webhook-backed, keep that key in the outgoing post and
+		// avoid the tenant image-upload API entirely. This is required when the
+		// monthly im:resource:upload quota is exhausted; tenant-API targets still
+		// use the decrypt-download-upload path below.
+		if (descriptor.kind === 'image' && allTargetsUseWebhooks(source, config)) {
+			if (wantsCard(options)) return cardPayloadFor(source, '', [descriptor.key]);
+			return { component: 'image-webhook-source-key', msgType: 'post', content: { zh_cn: { title: '', content: [[{ tag: 'text', text: `#${source.tag}` }], [{ tag: 'img', image_key: descriptor.key }]] } } };
+		}
 		const uploaded = await downloadAndUpload(message, descriptor);
 		if (uploaded.kind === 'drive') {
 			return { component: 'drive-archive', msgType: 'text', content: { text: taggedText(source.tag, `大文件已归档至配置的飞书云空间文件夹：${uploaded.filename}\n文件 token：${uploaded.fileToken}`) } };

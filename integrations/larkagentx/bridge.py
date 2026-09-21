@@ -34,6 +34,7 @@ from larkx.proto import decoders
 from larkagentx_image_property import extract_rich_text_image_resource
 from proto_wire import decode_primary_websocket, tolerant_websocket_decode_with_meta
 from event_spool import EventSpool
+from history_archive import HistoryArchive
 from owner_lock import OwnerLock, profile_storage_paths
 
 
@@ -320,6 +321,40 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				LOG.warning("image resource request failed: %s", error)
 				self.send_json(400, {"status": "error", "message": str(error)[:240]})
 			return
+		if urlsplit(self.path).path in {"/history/export", "/history/status"}:
+			if not self.authorized():
+				self.send_json(401, {"status": "unauthorized"})
+				return
+			query = parse_qs(urlsplit(self.path).query)
+			chat_id = str((query.get("chat_id") or [""])[0]).strip()
+			if not chat_id or len(chat_id) > 128:
+				self.send_json(400, {"status": "error", "message": "chat_id is required"})
+				return
+			if urlsplit(self.path).path == "/history/status":
+				self.send_json(200, self.bridge.history_archive.stats(chat_id))
+				return
+			try:
+				def number(name: str) -> float | None:
+					value = str((query.get(name) or [""])[0]).strip()
+					return float(value) if value else None
+				rows = self.bridge.history_archive.export_rows(
+					chat_id, from_time=number("from_time"), to_time=number("to_time"),
+					after_sequence=int((query.get("after_sequence") or ["0"])[0] or 0),
+					limit=int((query.get("limit") or ["10000"])[0] or 10000),
+				)
+				body = b"".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n" for row in rows)
+				self.send_response(200)
+				self.send_header("content-type", "application/x-ndjson; charset=utf-8")
+				self.send_header("content-disposition", f'attachment; filename="larkagentx-{chat_id}-history.jsonl"')
+				self.send_header("x-larkagentx-event-count", str(len(rows)))
+				self.send_header("x-larkagentx-next-sequence", str(rows[-1]["sequence"] if rows else (self.bridge.history_archive.stats(chat_id)["latest_sequence"])))
+				self.send_header("content-length", str(len(body)))
+				self.end_headers()
+				self.wfile.write(body)
+			except Exception as error:
+				LOG.warning("history export failed: %s", error)
+				self.send_json(400, {"status": "error", "message": str(error)[:240]})
+			return
 		if self.path != "/health":
 			self.send_json(404, {"status": "not_found"})
 			return
@@ -344,7 +379,11 @@ class Bridge:
 	def __init__(self) -> None:
 		self.token = required_env("LARKX_BRIDGE_TOKEN")
 		self.ingress_url = required_env("LARKX_INGRESS_URL")
-		self.listen_chats = csv_env("LARKX_LISTEN_CHAT_IDS")
+		self.summary_chat_ids = csv_env("LARKX_SUMMARY_CHAT_IDS")
+		self.summary_ingress_url = os.environ.get("LARKX_SUMMARY_INGRESS_URL", "").strip()
+		if self.summary_chat_ids and not self.summary_ingress_url:
+			raise RuntimeError("LARKX_SUMMARY_INGRESS_URL is required when LARKX_SUMMARY_CHAT_IDS is configured")
+		self.listen_chats = csv_env("LARKX_LISTEN_CHAT_IDS") | self.summary_chat_ids
 		self.send_chats = csv_env("LARKX_SEND_CHAT_IDS")
 		if not self.listen_chats:
 			raise RuntimeError("LARKX_LISTEN_CHAT_IDS must contain at least one chat ID")
@@ -356,6 +395,11 @@ class Bridge:
 		auth_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 		spool_path = os.environ.get("LARKX_EVENT_SPOOL_DB", str(default_spool_path))
 		self.event_spool = EventSpool(spool_path)
+		history_path = os.environ.get("LARKX_HISTORY_DB", str(Path(spool_path).with_name("history.db")))
+		self.history_archive = HistoryArchive(history_path)
+		# Preserve events already retained by the spool when this capability is
+		# enabled for the first time; future WebSocket events append below.
+		self.history_archive.append_many(self.event_spool.all_payloads())
 		self.owner_lock = OwnerLock(os.environ.get("LARKX_OWNER_LOCK_PATH", str(default_owner_path)))
 		self.owner_lock.acquire()
 		self.auth_path = auth_path
@@ -386,6 +430,7 @@ class Bridge:
 		except ValueError:
 			configured_gap_seconds = DEFAULT_GAP_REPAIR_SECONDS
 		self.gap_repair_seconds = max(MIN_GAP_REPAIR_SECONDS, min(MAX_GAP_REPAIR_SECONDS, configured_gap_seconds))
+		self.gap_repair_enabled = os.environ.get("LARKX_GAP_REPAIR_ENABLED", "false").strip().lower() == "true"
 		self._recovery_in_flight = False
 		self.client = RecoveringLarkClient(
 			self.auth,
@@ -456,7 +501,7 @@ class Bridge:
 		# the socket was down. The official repair path is ledger-idempotent, so a
 		# bounded reconciliation is safer than assuming the first connection has
 		# no preceding gap.
-		if not self._recovery_in_flight:
+		if self.gap_repair_enabled and not self._recovery_in_flight:
 			self._recovery_in_flight = True
 			if self.websocket_attempt_count == 1:
 				self.startup_recovery_count += 1
@@ -476,6 +521,7 @@ class Bridge:
 			"auth_path": str(self.auth_path),
 			"owner_lock": {"held": bool(self.owner_lock.held), "path": str(self.owner_lock.path)},
 			"event_spool": {**self.event_spool.stats(), "path": str(self.event_spool.path), "replay_seconds": self.spool_replay_seconds, "replay_count": self.spool_replay_count, "replay_error_count": self.spool_replay_error_count, "last_replay_at": self.last_spool_replay_at, "last_error": self.last_spool_replay_error},
+			"history_archive": {**self.history_archive.stats(), "path": str(self.history_archive.path)},
 			"listen_chat_count": len(self.listen_chats),
 			"listen_chat_ids": sorted(self.listen_chats),
 			"websocket_chat_ids": sorted(self.websocket_chat_ids),
@@ -510,6 +556,9 @@ class Bridge:
 			"last_recovery_reason": self.last_recovery_reason,
 			"last_recovery_result": self.last_recovery_result,
 			"gap_repair_seconds": self.gap_repair_seconds,
+			"gap_repair_enabled": self.gap_repair_enabled,
+			"summary_chat_ids": sorted(self.summary_chat_ids),
+			"summary_ingress_configured": bool(self.summary_ingress_url),
 			"last_observed_chat_id": self.last_observed_chat_id or None,
 			"last_observed_message_type": self.last_observed_message_type or None,
 			"websocket": {
@@ -535,7 +584,7 @@ class Bridge:
 		# recovery bounded so this remains an exception path rather than OAuth
 		# polling in disguise.
 		last = datetime.fromisoformat(self.last_recovery_at) if self.last_recovery_at else None
-		if self._recovery_in_flight or (last and (datetime.now(timezone.utc) - last).total_seconds() < 30):
+		if not self.gap_repair_enabled or self._recovery_in_flight or (last and (datetime.now(timezone.utc) - last).total_seconds() < 30):
 			return
 		self._recovery_in_flight = True
 		asyncio.create_task(self.recover_gap("larkagentx_websocket_decode_error"))
@@ -569,7 +618,7 @@ class Bridge:
 			(telemetry or {}).get("unknown_fields"),
 				(telemetry or {}).get("groups_skipped", 0), error,
 			)
-		if telemetry and telemetry.get("partial") and not self._recovery_in_flight:
+		if self.gap_repair_enabled and telemetry and telemetry.get("partial") and not self._recovery_in_flight:
 			self._recovery_in_flight = True
 			self.partial_recovery_count += 1
 			asyncio.create_task(self.recover_gap("larkagentx_partial_frame"))
@@ -596,6 +645,9 @@ class Bridge:
 			LOG.warning("WebSocket 解码异常后的缺口补读失败：%s", recovery_error)
 		finally:
 			self._recovery_in_flight = False
+
+	def ingress_url_for(self, chat_id: str) -> str:
+		return self.summary_ingress_url if chat_id in self.summary_chat_ids else self.ingress_url
 
 	def send(self, payload: dict[str, Any]) -> dict[str, Any]:
 		chat_id = str(payload.get("chat_id", "")).strip()
@@ -678,6 +730,7 @@ class Bridge:
 				payload["_larkagentx_images"] = embedded
 		payload["source_label"] = os.environ.get("LARKX_SOURCE_LABEL", "LarkAgentX 个人会话")
 		event_id = f"larkagentx:{chat_id}:{message_id}"
+		self.history_archive.append(event_id, payload)
 		try:
 			spool_state = await asyncio.to_thread(self.event_spool.enqueue, event_id, payload)
 			if spool_state == "delivered":
@@ -694,7 +747,7 @@ class Bridge:
 			last_error: Exception | None = None
 			for attempt in range(1, 4):
 				try:
-					result = await asyncio.to_thread(post_json, self.ingress_url, self.token, payload)
+					result = await asyncio.to_thread(post_json, self.ingress_url_for(chat_id), self.token, payload)
 					await asyncio.to_thread(self.event_spool.mark_delivered, event_id)
 					self.forwarded_count += 1
 					stats["forwarded_count"] += 1
@@ -725,7 +778,9 @@ class Bridge:
 				claim_state = await asyncio.to_thread(self.event_spool.claim, event_id)
 				if claim_state in {"delivered", "in_flight"}:
 					continue
-				await asyncio.to_thread(post_json, self.ingress_url, self.token, event["payload"])
+				payload = event["payload"]
+				chat_id = str(payload.get("chat_id", "")).strip()
+				await asyncio.to_thread(post_json, self.ingress_url_for(chat_id), self.token, payload)
 				await asyncio.to_thread(self.event_spool.mark_delivered, event_id)
 				replayed += 1
 				self.spool_replay_count += 1

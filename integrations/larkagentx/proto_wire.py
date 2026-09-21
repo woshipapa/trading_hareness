@@ -177,6 +177,96 @@ def _first_proto_field(fields: list[tuple[int, int, Any]], number: int, wire_typ
 	return None
 
 
+def _card_json_object(value: bytes) -> dict[str, Any] | None:
+	"""Find a Card 2.0 object in a length-delimited card field.
+
+	Recent Card 2.0 messages sometimes carry the JSON in a newer nested field
+	(`universalCardEntity`) that the pulled protobuf schema does not know yet.
+	The bytes are still protobuf length-delimited values, so walk only those
+	values and accept JSON objects with card-shaped keys.  This keeps the
+	decoder schema-tolerant without treating arbitrary UTF-8 or image bytes as
+	message text.
+	"""
+	if not isinstance(value, (bytes, bytearray)) or len(value) > 2 * 1024 * 1024:
+		return None
+	raw = bytes(value)
+	for start in (0, raw.find(b'{')):
+		if start < 0:
+			continue
+		try:
+			candidate = json.JSONDecoder().raw_decode(raw[start:].decode("utf-8"))[0]
+		except (UnicodeDecodeError, json.JSONDecodeError):
+			continue
+		if isinstance(candidate, dict) and (
+			"schema" in candidate or "body" in candidate or "newBody" in candidate
+			or "config" in candidate or "header" in candidate
+		):
+			return candidate
+	return None
+
+
+def _find_nested_card_json(raw: bytes, *, depth: int = 0, seen: set[int] | None = None) -> dict[str, Any] | None:
+	"""Extract Card 2.0 JSON from known or newly-added nested protobuf fields."""
+	if depth > 8 or not isinstance(raw, (bytes, bytearray)):
+		return None
+	seen = seen or set()
+	marker = id(raw)
+	if marker in seen:
+		return None
+	seen.add(marker)
+	if card := _card_json_object(bytes(raw)):
+		return card
+	telemetry = new_telemetry()
+	try:
+		fields = _read_proto_fields(bytes(raw), "card", telemetry)
+	except TolerantProtoError:
+		return None
+	for _, wire_type, value in fields:
+		if wire_type != 2 or not isinstance(value, bytes):
+			continue
+		if card := _card_json_object(value):
+			return card
+		if card := _find_nested_card_json(value, depth=depth + 1, seen=seen):
+			return card
+	return None
+
+
+def _enrich_card_content(content_bytes: bytes, content_data: Any) -> tuple[str | None, Any]:
+	"""Recover Card 2.0 JSON hidden in fields unknown to the old proto schema."""
+	if not isinstance(content_data, dict):
+		content_data = {}
+	if content_data.get("jsonCard") or content_data.get("json_card") or content_data.get("openCardContent"):
+		return None, content_data
+	card = _find_nested_card_json(content_bytes)
+	if not card:
+		return None, content_data
+	content_data = dict(content_data)
+	content_data["jsonCard"] = json.dumps(card, ensure_ascii=False, separators=(",", ":"))
+	return "[卡片] " + json.dumps(card, ensure_ascii=False, separators=(",", ":"))[:2000], content_data
+
+
+def _enrich_primary_card_messages(raw: bytes, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+	"""Merge tolerant raw-wire Card 2.0 fields into generated-parser messages."""
+	if not any(str(message.get("msg_type_name", "")).upper() in {"CARD", "INTERACTIVE"} for message in messages):
+		return messages
+	try:
+		_, tolerant_messages, _ = tolerant_websocket_decode_with_meta(raw)
+	except Exception:
+		return messages
+	by_id = {str(message.get("msg_id")): message for message in tolerant_messages if message.get("msg_id")}
+	for message in messages:
+		if str(message.get("msg_type_name", "")).upper() not in {"CARD", "INTERACTIVE"}:
+			continue
+		recovered = by_id.get(str(message.get("msg_id")))
+		if not recovered:
+			continue
+		data = recovered.get("content_data")
+		if isinstance(data, dict) and data.get("jsonCard"):
+			message["content_data"] = data
+			message["content"] = recovered.get("content") or message.get("content")
+	return messages
+
+
 def _tolerant_entity_message(raw: bytes, telemetry: dict[str, Any]) -> dict[str, Any]:
 	fields = _read_proto_fields(raw, "entity", telemetry)
 	strings = {1: "id", 3: "from_id", 8: "root_id", 9: "parent_id", 10: "chat_id", 12: "cid", 20: "thread_id", 24: "channel_id"}
@@ -195,6 +285,12 @@ def _tolerant_entity_message(raw: bytes, telemetry: dict[str, Any]) -> dict[str,
 	content_status = "decoded"
 	try:
 		summary, content_data = decoders.decode_message_content(message["msg_type"], content_bytes)
+		if message["msg_type"] == 14:
+			recovered_summary, recovered_data = _enrich_card_content(content_bytes, content_data)
+			if recovered_data is not content_data:
+				content_data = recovered_data
+				if recovered_summary:
+					summary = recovered_summary
 	except Exception as error:
 		summary, content_data = f"[{decoders.MSG_TYPE_NAMES.get(message['msg_type'], message['msg_type'])}消息解析失败: {error}]", None
 		content_status = "unsupported"
@@ -340,11 +436,11 @@ def decode_primary_websocket(raw: bytes) -> tuple[dict[str, Any], list[dict[str,
 	if int(packet_dict.get("cmd", 0) or 0) != 6 or not packet.HasField("payload"):
 		return packet_dict, []
 	try:
-		return packet_dict, decoders.decode_push_messages(packet_frame_bytes)
+		return packet_dict, _enrich_primary_card_messages(packet_frame_bytes, decoders.decode_push_messages(packet_frame_bytes))
 	except Exception:
 		if not encoding:
 			raise
 		push_bytes = _decompress_payload(bytes(packet.payload), encoding)
 		packet.payload = push_bytes
 		frame.payload = packet.SerializeToString()
-		return decoders.protobuf_to_dict(packet), decoders.decode_push_messages(frame.SerializeToString())
+		return decoders.protobuf_to_dict(packet), _enrich_primary_card_messages(frame.SerializeToString(), decoders.decode_push_messages(frame.SerializeToString()))

@@ -44,7 +44,7 @@
 
 默认配置在 `compose.yaml`，可用 `.env` 覆盖 `FEISHU_GROUP_RELAY_*`。外部源群通过用户 OAuth 读取：授权码或已取得的 refresh token 仅经本机受保护的 `/internal/feishu-user-oauth` 入口一次性保存；access/refresh token 以 AES-GCM 密文持久化在 PostgreSQL，access token 过期前自动滚动刷新。机器人不需要在源外部群内，但授权用户必须可见这些群并具有 `im:chat:readonly`、`im:message` / `im:message.group_msg` 与 `offline_access` 权限。成功和失败状态在 `feishu_group_relay_messages` 表中可审计。
 
-汇总群另有独立的 `FEISHU_SUMMARY_LISTENER_*` 轮询器。它用同一用户 OAuth 每 10 秒读取“分析师发送汇总群”的历史，因此**用户手动发送**和**机器人自动转发**都会被观察；不依赖 `im.message.receive_v1`（该事件不覆盖机器人自己的普通群消息）。只有首行带已登记来源标签的消息才会交给 n8n 和远端导入，未带标签或未知标签的群消息会被安全忽略，不会被错误归因。监听使用汇总群消息 ID 建立 `ingestion_jobs` 幂等键；首次启动默认受控回补最近 1 小时，可用 `FEISHU_SUMMARY_LISTENER_BOOTSTRAP_MODE=skip_existing` 只建立基线。外部源群的媒体资源也由同一用户 OAuth 读取后再上传到汇总群；授权链接必须显式请求 `im:resource`，飞书对资源可见性仍会按消息与授权状态单独校验。
+旧的 `FEISHU_SUMMARY_LISTENER_*` 轮询器只用于人工恢复和历史补齐，不能作为 edge 实时链路。47 上的源群和分析师汇总群由 LarkAgentX 私有 WebSocket 接收，事件进入适配器后继续使用 `ingestion_jobs` 幂等键；`LARKX_SUMMARY_CHAT_IDS` 应包含分析师汇总群，并把 `LARKX_SUMMARY_INGRESS_URL` 指向 `/internal/larkagentx/summary`。edge 正常运行时保持 `FEISHU_GROUP_RELAY_ENABLED=false`、`FEISHU_SUMMARY_LISTENER_ENABLED=false` 和 `LARKX_GAP_REPAIR_ENABLED=false`，避免 OAuth 轮询、官方缺口补读和重复投递。
 
 ### 飞书分析师工作台与协作闭环
 

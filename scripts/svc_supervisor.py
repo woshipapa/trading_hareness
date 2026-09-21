@@ -19,13 +19,14 @@ def _load_env_secret(name):
     if v:
         return v
     try:
-        for line in open(os.path.join(N8N, ".env"), encoding="utf-8"):
-            line = line.strip()
-            if line.startswith(name + "="):
-                val = line.split("=", 1)[1].strip()
-                if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
-                    val = val[1:-1]
-                return val
+        with open(os.path.join(N8N, ".env"), encoding="utf-8") as env_file:
+            for line in env_file:
+                line = line.strip()
+                if line.startswith(name + "="):
+                    val = line.split("=", 1)[1].strip()
+                    if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+                        val = val[1:-1]
+                    return val
     except OSError:
         pass
     return ""
@@ -123,7 +124,8 @@ TASKS = [
     dict(name="paperkb.source-health", kind="daily", hour=11, minute=45, run_at_load=True,
          args=[PY, os.path.join(PKB, "jobs.py"), "source-health"],
          cwd=PKB, out=os.path.join(PKLOG, "source-health.log"),
-         err=os.path.join(PKLOG, "source-health.log"), env=_paper_provider_env()),
+         err=os.path.join(PKLOG, "source-health.log"),
+         env={**_paper_provider_env(), "PAPER_KB_SOURCE_HEALTH_TASK": "1"}),
     dict(name="paperkb.refresh", kind="interval", interval=120, run_at_load=True,
          args=[PY, os.path.join(PKB, "kb_refresh.py")],
          cwd=PKB, out=os.path.join(PKLOG, "refresh.log"), err=os.path.join(PKLOG, "refresh.log"), env={}),
@@ -272,18 +274,32 @@ def _calendar_state_path(t):
 def _calendar_last_run(t):
     try:
         with open(_calendar_state_path(t), encoding='utf-8') as handle:
-            return json.load(handle).get('scheduled_for', '')
+            payload = json.load(handle)
+            status = str(payload.get('status', 'success')).lower()
+            exit_code = payload.get('exit_code', 0)
+            if status not in {'ok', 'success', 'succeeded'}:
+                return ''
+            try:
+                if int(exit_code) != 0:
+                    return ''
+            except (TypeError, ValueError):
+                return ''
+            return payload.get('scheduled_for', '')
     except (OSError, ValueError, TypeError):
         return ''
 
-def _calendar_mark_run(t, scheduled_for):
+def _calendar_mark_run(t, scheduled_for, *, status='success', exit_code=0, duration_s=None):
     path = _calendar_state_path(t)
     tmp = path + '.tmp'
     try:
         os.makedirs(PKLOG, exist_ok=True)
+        receipt = {'scheduled_for': scheduled_for,
+                   'updated_at': datetime.datetime.now().isoformat(),
+                   'status': status, 'exit_code': exit_code}
+        if duration_s is not None:
+            receipt['duration_s'] = round(float(duration_s), 3)
         with open(tmp, 'w', encoding='utf-8') as handle:
-            json.dump({'scheduled_for': scheduled_for,
-                       'updated_at': datetime.datetime.now().isoformat()}, handle)
+            json.dump(receipt, handle)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
@@ -304,8 +320,14 @@ def calendar_loop(t):
             and not _shutdown.is_set()):
         scheduled_for = scheduled.date().isoformat()
         slog(f"run calendar catch-up {t['name']} scheduled_for={scheduled_for}")
-        if run_once(t) == 0:
-            _calendar_mark_run(t, scheduled_for)
+        started = time.monotonic()
+        rc = run_once(t)
+        duration = time.monotonic() - started
+        _calendar_mark_run(
+            t, scheduled_for, status='success' if rc == 0 else 'failed',
+            exit_code=rc, duration_s=duration,
+        )
+        slog(f"calendar catch-up {t['name']} rc={rc} duration={duration:.1f}s")
     while not _shutdown.is_set():
         now = datetime.datetime.now()
         nxt = _next_calendar(now, t["weekday"], t["hour"], t["minute"])
@@ -315,8 +337,14 @@ def calendar_loop(t):
             time.sleep(20)
         if not _shutdown.is_set():
             slog(f"run calendar {t['name']}")
-            if run_once(t) == 0:
-                _calendar_mark_run(t, nxt.date().isoformat())
+            started = time.monotonic()
+            rc = run_once(t)
+            duration = time.monotonic() - started
+            _calendar_mark_run(
+                t, nxt.date().isoformat(), status='success' if rc == 0 else 'failed',
+                exit_code=rc, duration_s=duration,
+            )
+            slog(f"calendar {t['name']} rc={rc} duration={duration:.1f}s")
             time.sleep(61)  # 防同一分钟重复触发
 
 def _daily_state_path(t):
@@ -326,17 +354,38 @@ def _daily_state_path(t):
 def _daily_last_run(t):
     try:
         with open(_daily_state_path(t), encoding='utf-8') as handle:
-            return json.load(handle).get('date', '')
+            payload = json.load(handle)
+            # Older markers only had date/updated_at and are considered a
+            # successful receipt for backwards compatibility.  New failed
+            # receipts deliberately do not suppress catch-up after a restart.
+            status = str(payload.get('status', 'success')).lower()
+            exit_code = payload.get('exit_code', 0)
+            if status not in {'ok', 'success', 'succeeded'}:
+                return ''
+            try:
+                if int(exit_code) != 0:
+                    return ''
+            except (TypeError, ValueError):
+                return ''
+            return payload.get('date', '')
     except (OSError, ValueError, TypeError):
         return ''
 
-def _daily_mark_run(t, date):
+def _daily_mark_run(t, date, *, status='success', exit_code=0, duration_s=None):
     path = _daily_state_path(t)
     tmp = path + '.tmp'
     try:
         os.makedirs(PKLOG, exist_ok=True)
+        receipt = {
+            'date': date,
+            'updated_at': datetime.datetime.now().isoformat(),
+            'status': status,
+            'exit_code': exit_code,
+        }
+        if duration_s is not None:
+            receipt['duration_s'] = round(float(duration_s), 3)
         with open(tmp, 'w', encoding='utf-8') as handle:
-            json.dump({'date': date, 'updated_at': datetime.datetime.now().isoformat()}, handle)
+            json.dump(receipt, handle)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
@@ -354,8 +403,12 @@ def daily_loop(t):
     scheduled = now.replace(hour=t['hour'], minute=t['minute'], second=0, microsecond=0)
     if t.get("run_at_load") and now >= scheduled and _daily_last_run(t) != today and not _shutdown.is_set():
         slog(f"run daily catch-up {t['name']}")
-        if run_once(t) == 0:
-            _daily_mark_run(t, today)
+        started = time.monotonic()
+        rc = run_once(t)
+        duration = time.monotonic() - started
+        status = 'success' if rc == 0 else 'failed'
+        _daily_mark_run(t, today, status=status, exit_code=rc, duration_s=duration)
+        slog(f"daily catch-up {t['name']} rc={rc} duration={duration:.1f}s")
     while not _shutdown.is_set():
         now = datetime.datetime.now()
         nxt = now.replace(hour=t["hour"], minute=t["minute"], second=0, microsecond=0)
@@ -367,8 +420,17 @@ def daily_loop(t):
             time.sleep(20)
         if not _shutdown.is_set():
             slog(f"run daily {t['name']}")
-            if run_once(t) == 0:
-                _daily_mark_run(t, datetime.datetime.now().date().isoformat())
+            started = time.monotonic()
+            rc = run_once(t)
+            duration = time.monotonic() - started
+            _daily_mark_run(
+                t,
+                datetime.datetime.now().date().isoformat(),
+                status='success' if rc == 0 else 'failed',
+                exit_code=rc,
+                duration_s=duration,
+            )
+            slog(f"daily {t['name']} rc={rc} duration={duration:.1f}s")
             time.sleep(61)
 
 def _handle_term(signum, frame):

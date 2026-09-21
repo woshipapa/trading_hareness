@@ -4,6 +4,7 @@ import { readFileSync, mkdirSync, createWriteStream, readdirSync, statSync, exis
 import { open, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
+import { Readable } from 'node:stream';
 import { createLedger } from './ledger.mjs';
 import { releaseMetadata } from './release-metadata.mjs';
 import { endWritable, writeChunk } from './stream-write.mjs';
@@ -27,7 +28,7 @@ import { cardPayload } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { personalDecisionResearchPaths } from './personal-decision-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
-import { isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage } from './larkagentx-ingress.mjs';
+import { isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import Busboy from 'busboy';
@@ -59,6 +60,7 @@ const paperFeedbackWebhook = String(process.env.PAPER_KB_FEEDBACK_WEBHOOK ?? '')
 const larkAgentXIngressToken = String(process.env.LARKX_BRIDGE_TOKEN ?? '').trim();
 const larkAgentXResourceUrl = String(process.env.LARKX_BRIDGE_RESOURCE_URL ?? '').trim();
 const larkAgentXGroupRelayEnabled = String(process.env.LARKX_GROUP_RELAY_ENABLED ?? 'false').toLowerCase() === 'true';
+const larkAgentXOfficialFallbackEnabled = String(process.env.LARKX_OFFICIAL_FALLBACK_ENABLED ?? 'false').toLowerCase() === 'true';
 const larkAgentXGroupRelayRoutes = new Map(
 	String(process.env.LARKX_GROUP_RELAY_ROUTES ?? '')
 		.split(';')
@@ -445,7 +447,7 @@ function extractPostPayload(content) {
 		for (const element of Array.isArray(line) ? line : []) {
 			if (element?.tag === 'text' && typeof element.text === 'string') lineText.push(element.text);
 			if (element?.tag === 'img' && element.image_key) {
-				resources.push({ key: element.image_key, resource_type: 'image' });
+				resources.push({ key: element.image_key, resource_type: 'image', ...(element.larkagentx_resource ? { larkagentx_resource: element.larkagentx_resource } : {}) });
 			}
 			if ((element?.tag === 'media' || element?.tag === 'audio') && element.file_key) {
 				resources.push({ key: element.file_key, resource_type: 'file' });
@@ -463,7 +465,7 @@ function extractMessagePayload(message) {
 	// user_card_content) carries its route tag as the first line of its text.
 	if (message?.message_type === 'interactive') return cardPayload(content);
 	const resources = [];
-	if (content.image_key) resources.push({ key: content.image_key, resource_type: 'image' });
+	if (content.image_key) resources.push({ key: content.image_key, resource_type: 'image', ...(content.larkagentx_resource ? { larkagentx_resource: content.larkagentx_resource } : {}) });
 	if (content.file_key) resources.push({ key: content.file_key, resource_type: 'file' });
 	// Native file messages cannot carry a text paragraph. Group relay preserves
 	// their source route in the filename (`#tag original-file`), so recover it
@@ -634,7 +636,14 @@ async function downloadMedia(data, messageResourceApi = null) {
 	return Promise.all(resources.map(async (resource, index) => {
 		let response;
 		try {
-			if (messageResourceApi) {
+			if (resource.resource_type === 'image' && resource.larkagentx_resource && larkAgentXResourceUrl && larkAgentXIngressToken) {
+				const descriptor = resource.larkagentx_resource;
+				const query = new URLSearchParams({ image_id: String(descriptor.image_id ?? resource.key), key_hex: String(descriptor.key_hex ?? ''), iv_hex: String(descriptor.iv_hex ?? '') });
+				const bridgeResponse = await fetch(`${larkAgentXResourceUrl}?${query.toString()}`, { headers: { 'x-larkagentx-token': larkAgentXIngressToken } });
+				if (!bridgeResponse.ok) throw new Error(`LarkAgentX 图片资源读取失败（HTTP ${bridgeResponse.status}）`);
+				const bytes = Buffer.from(await bridgeResponse.arrayBuffer());
+				response = { headers: { 'content-type': bridgeResponse.headers.get('content-type') ?? 'application/octet-stream' }, getReadableStream: () => Readable.from(bytes) };
+			} else if (messageResourceApi) {
 				response = await messageResourceApi.messageResourceGet({ messageId: message.message_id, fileKey: resource.key, type: resource.resource_type });
 			} else {
 				// Official Feishu message-resource API. It authorizes against the app's
@@ -1090,6 +1099,30 @@ async function handleLarkAgentXInbound(request, response) {
 	}
 }
 
+async function handleLarkAgentXSummaryInbound(request, response) {
+	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
+		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'unauthorized' }));
+		return;
+	}
+	try {
+		const input = await readJsonBody(request, 64 * 1024);
+		if (String(input?.chat_id ?? '').trim() !== summaryListenerConfig.chatId) throw new Error('LarkAgentX 汇总群 chat_id 不匹配');
+		const data = normalizeLarkAgentXSummaryMessage(input);
+		addEvent(data);
+		updateEvent(data.event_id, { n8n_status: 'LarkAgentX 汇总群消息转发中' });
+		const result = await processSummaryGroupMessage(data, { messageResourceApi: null, source: 'larkagentx-summary' });
+		updateEvent(data.event_id, { n8n_status: result?.duplicate ? '重复已跳过' : '已接收，处理中', target_status: result?.duplicate ? '本地幂等去重，未重复请求远端' : null });
+		response.writeHead(result?.ignored ? 202 : 201, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: result?.ignored ? 'ignored' : result?.duplicate ? 'duplicate' : 'accepted', event_id: data.event_id, message_id: data.message.message_id, job_id: result?.jobId ?? null }));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`LarkAgentX 汇总群 relay 失败：${message}`);
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message }));
+	}
+}
+
 async function handleLarkAgentXGroupRelayInbound(request, response) {
 	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
 		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1117,6 +1150,8 @@ async function handleLarkAgentXGroupRelayInbound(request, response) {
 		if (!targetChatIds.length) throw new Error(`实时源路由没有目标群：${sourceKey}`);
 		const message = isDirectLarkAgentXRelayType(input)
 			? normalizeLarkAgentXRelayMessage(input)
+			: !larkAgentXOfficialFallbackEnabled
+				? normalizeLarkAgentXUnsupportedMessage(input)
 			// LarkAgentX's personal WebSocket uses its numeric chat id, while
 			// the user OAuth message API resolves the same group by its official
 			// oc_ chat id retained in the relay route.
@@ -1961,6 +1996,10 @@ if (url.pathname === '/health') {
 		void handleLarkAgentXInbound(request, response);
 		return;
 	}
+	if (url.pathname === '/internal/larkagentx/summary' && request.method === 'POST') {
+		void handleLarkAgentXSummaryInbound(request, response);
+		return;
+	}
 	if (url.pathname === '/internal/larkagentx/group-relay' && request.method === 'POST') {
 		void handleLarkAgentXGroupRelayInbound(request, response);
 		return;
@@ -2218,7 +2257,7 @@ async function dispatchToN8n(data, manual = null) {
 	}
 }
 
-async function processSummaryGroupMessage(data) {
+async function processSummaryGroupMessage(data, options = {}) {
 	const messagePayload = extractMessagePayload(data.message ?? {});
 	const messageText = String(messagePayload.text ?? '').trim();
 	const tag = messageText.match(/^#([a-z0-9-]+)(?=\s|$)/i)?.[1]?.toLowerCase();
@@ -2233,8 +2272,8 @@ async function processSummaryGroupMessage(data) {
 	updateEvent(eventId, { n8n_status: hasMedia ? '汇总群媒体转发中' : '汇总群文字转发中' });
 	try {
 		const result = await forwardToN8n(data, {
-			source: 'summary-group-poll', sourceLabel: data.source_label,
-			messageResourceApi: feishuUserOauth.sourceApi,
+			source: options.source ?? 'summary-group-poll', sourceLabel: data.source_label,
+			messageResourceApi: options.messageResourceApi === undefined ? feishuUserOauth.sourceApi : options.messageResourceApi,
 		});
 		updateEvent(eventId, {
 			n8n_status: result?.duplicate ? '重复已跳过' : '已接收，处理中',

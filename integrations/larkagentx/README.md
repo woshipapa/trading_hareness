@@ -50,7 +50,9 @@ LARKX_GROUP_RELAY_ENABLED=true
 LARKX_GROUP_RELAY_ROUTES=7661209668907207659=anqiang;7667390477875858612=liwei
 ```
 
-适配器入口为 `/internal/larkagentx/group-relay`，由 `x-larkagentx-token` 保护。文本、完整卡片、独立图片和带有完整解密参数的 post 图片直接进入 relay；bridge 在 WebSocket 事件进入 JSON 前解析 `RichTextElement.property` 中的 `img_v3` key、32 字节 AES key 和 12 字节 nonce。适配器通过 LarkAgentX cookie 下载密文，在本地完成 AES-256-GCM 解密，再复用现有 webhook/API 发送。文件、缺少完整卡片内容或缺少媒体解密参数的事件仍会作为实时触发器进入精确官方 OAuth 补读。systemd 环境中应使用统一 supervisor venv 的 `/opt/supervisor/.venv/bin/python`，凭证放在受限权限的 `LARKX_HOME`，不要提交到仓库。
+适配器入口为 `/internal/larkagentx/group-relay`，由 `x-larkagentx-token` 保护。文本、完整卡片、独立图片和带有完整解密参数的 post 图片直接进入 relay；bridge 在 WebSocket 事件进入 JSON 前解析 `RichTextElement.property` 中的 `img_v3` key、32 字节 AES key 和 12 字节 nonce。适配器通过 LarkAgentX cookie 下载密文，在本地完成 AES-256-GCM 解密；webhook 目标可直接复用源 `image_key`，从而绕过飞书图片上传额度。汇总群也可以通过 `LARKX_SUMMARY_CHAT_IDS` 和 `LARKX_SUMMARY_INGRESS_URL` 进入同一 WebSocket 事件链。edge 正常运行时关闭官方历史轮询和启动缺口补读：`FEISHU_GROUP_RELAY_ENABLED=false`、`FEISHU_SUMMARY_LISTENER_ENABLED=false`、`LARKX_GAP_REPAIR_ENABLED=false`。缺少媒体解密参数或尚未实现的文件类型会记录为不支持，不能假定官方 OAuth 补读仍然可用。systemd 环境中应使用统一 supervisor venv 的 `/opt/supervisor/.venv/bin/python`，凭证放在受限权限的 `LARKX_HOME`，不要提交到仓库。
+
+仅在显式设置 `LARKX_OFFICIAL_FALLBACK_ENABLED=true` 时才允许恢复旧的官方补读路径；正常 edge 运行保持关闭。
 
 发送文本需要携带相同的桥接令牌：
 
@@ -64,6 +66,27 @@ curl -X POST http://127.0.0.1:8090/send \
 只有 `LARKX_LISTEN_CHAT_IDS` 和 `LARKX_SEND_CHAT_IDS` 中的会话会被处理。个人账号发出的回显消息会被桥接层丢弃，避免自动回复回环。
 
 bridge 在投递到 adapter 之前会把规范化事件写入 `LARKX_EVENT_SPOOL_DB`（SQLite，目录 0700、文件 0600），并使用递增 sequence、连续 drain cursor、lease、失败重试和启动后回放处理进程崩溃或 adapter 暂时不可用。事件 payload 有 512 KiB 上限，不保存 Cookie 或原始 protobuf frame；adapter 仍以 `message_id`/relay ledger 负责最终幂等。`LARKX_PROFILE` 会隔离凭证、spool 和 owner lock，适合在同一主机上运行不同会话，但每个 profile 仍只允许一个 WebSocket bridge。
+
+bridge 同时维护一个脱敏的 `LARKX_HISTORY_DB`（默认与 spool 同目录的
+`history.db`），用于导出已经收到的 WebSocket 消息和后续增量。它只保存规范化
+JSON，不保存 Cookie、原始 protobuf frame 或图片 AES key/IV。接口同样由桥接令牌
+保护：
+
+```bash
+# 导出指定 WebSocket 群今天的 JSONL
+curl -o cat-history.jsonl \
+  'http://127.0.0.1:8090/history/export?chat_id=7684122107030031634&from_time=<epoch-seconds>' \
+  -H 'x-larkagentx-token: 从安全运行环境注入'
+
+# 以返回文件中的 x-larkagentx-next-sequence 作为下一次增量游标
+curl -o cat-history-increment.jsonl \
+  'http://127.0.0.1:8090/history/export?chat_id=7684122107030031634&after_sequence=<sequence>' \
+  -H 'x-larkagentx-token: 从安全运行环境注入'
+```
+
+WebSocket 是实时、至少一次接收通道，不能回放登录前或断线期间没有收到的群历史；
+要补齐这部分历史，仍需要一次可用的官方历史接口或外部导入。历史接口额度耗尽时，
+导出范围就是 bridge 已经持久化的事件，之后的新消息会继续按 sequence 追加。
 
 bridge 启动时取得 `LARKX_OWNER_LOCK_PATH` 的 Unix exclusive lock；第二个实例会 fail closed，不会形成两个个人 WebSocket 消费者。health 会公开 profile、owner lock、spool pending/failed、回放次数和最近错误，但不会输出 Cookie、token 或事件原文。
 

@@ -24,6 +24,7 @@ class LarkAgentXRecoveryTests(unittest.IsolatedAsyncioTestCase):
 		instance.startup_recovery_count = 0
 		instance.reconnect_recovery_count = 0
 		instance.partial_recovery_count = 0
+		instance.gap_repair_enabled = True
 		instance.decode_fallback_count = 0
 		instance.last_decode_fallback_at = None
 		instance.unknown_field_count = 0
@@ -75,6 +76,14 @@ class LarkAgentXRecoveryTests(unittest.IsolatedAsyncioTestCase):
 		await asyncio.sleep(0)
 		self.assertEqual(instance.partial_recovery_count, 1)
 		self.assertEqual(instance.recovery_reasons, ["larkagentx_partial_frame"])
+
+	async def test_default_disabled_recovery_does_not_schedule_official_repair(self):
+		instance = self.make_bridge(1)
+		instance.gap_repair_enabled = False
+		instance.on_websocket_connected()
+		instance.on_decode_fallback(ValueError("schema"), 128, 1, {"partial": True, "unknown_fields": {}, "wire_mismatches": {}, "entry_errors": [], "groups_skipped": 0, "field_fingerprint": "deadbeefdeadbeef"})
+		await asyncio.sleep(0)
+		self.assertEqual(instance.recovery_reasons, [])
 
 
 if __name__ == "__main__":

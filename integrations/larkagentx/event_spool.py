@@ -170,6 +170,20 @@ class EventSpool:
             result.append({"event_id": row["event_id"], "payload": payload, "status": row["status"], "attempts": int(row["attempts"]), "last_error": row["last_error"], "created_at": row["created_at"]})
         return result
 
+    def all_payloads(self) -> list[tuple[str, dict[str, Any]]]:
+        """Return normalized events for one-time history-archive backfill."""
+        with self._lock:
+            rows = self._db.execute("SELECT event_id,payload_json FROM events ORDER BY sequence").fetchall()
+        result: list[tuple[str, dict[str, Any]]] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                result.append((str(row["event_id"]), payload))
+        return result
+
     def stats(self) -> dict[str, int]:
         with self._lock:
             rows = self._db.execute("SELECT status,count(*) AS count FROM events GROUP BY status").fetchall()
