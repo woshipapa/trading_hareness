@@ -36,6 +36,7 @@ class IntradaySurgeContextServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cache_prevents_second_provider_call(self):
         calls: list[str] = []
+        health: list[tuple[object, ...]] = []
         cache: dict[str, tuple[float, dict[str, object] | None, str | None]] = {}
 
         async def fetch(symbol: str):
@@ -51,7 +52,7 @@ class IntradaySurgeContextServiceTests(unittest.IsolatedAsyncioTestCase):
         kwargs = dict(
             mapped_peers=None, cache=cache, max_symbols=lambda: 20,
             open_capabilities=open_capabilities, capability="tencent_intraday_minute", fetch_minutes=fetch,
-            minute_features=lambda rows, **_kwargs: {"latest": rows[-1]}, persist_health=lambda *_args: None,
+            minute_features=lambda rows, **_kwargs: {"latest": rows[-1]}, persist_health=lambda *args: health.append(args),
             run_database=run_database, safe_error=lambda value, _limit: value,
             handled_errors=(asyncio.TimeoutError, ValueError),
         )
@@ -62,6 +63,8 @@ class IntradaySurgeContextServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, second)
         self.assertEqual(first_evidence["provider_status"], "completed")
         self.assertEqual(second_evidence["provider_status"], "cached")
+        self.assertEqual(len(health), 1)
+        self.assertEqual(health[0][0], 1)
 
     async def test_quote_anomaly_priority_precedes_capped_passive_basket(self):
         calls: list[str] = []

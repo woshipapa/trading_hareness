@@ -2374,14 +2374,24 @@ def is_circuit_open_http_error(error: HTTPException) -> bool:
     return error.status_code == 503 and "circuit-open" in str(error.detail)
 
 
-def persist_tencent_intraday_minute_health(completed: int, errors: list[str], latency_ms: int | None = None) -> None:
+def persist_intraday_minute_health(
+    provider_key: str, completed: int, errors: list[str], latency_ms: int | None = None,
+) -> None:
     """Persist one aggregate minute-tape outcome, never one health row per symbol."""
     with db.transaction() as connection:
         if completed:
-            record_provider_success(connection, "tencent_free", TENCENT_INTRADAY_MINUTE_CAPABILITY, completed, latency_ms)
+            record_provider_success(connection, provider_key, TENCENT_INTRADAY_MINUTE_CAPABILITY, completed, latency_ms)
         elif errors:
-            record_provider_failure(connection, "tencent_free", TENCENT_INTRADAY_MINUTE_CAPABILITY,
+            record_provider_failure(connection, provider_key, TENCENT_INTRADAY_MINUTE_CAPABILITY,
                                     " | ".join(errors)[:500], latency_ms)
+
+
+def persist_tencent_intraday_minute_health(completed: int, errors: list[str], latency_ms: int | None = None) -> None:
+    persist_intraday_minute_health("tencent_free", completed, errors, latency_ms)
+
+
+def persist_longhu_intraday_minute_health(completed: int, errors: list[str], latency_ms: int | None = None) -> None:
+    persist_intraday_minute_health("longhuvip", completed, errors, latency_ms)
 
 
 def limit_board_count(tag: Any) -> int:
@@ -3816,7 +3826,7 @@ async def intraday_surge_context(
             cache=_intraday_longhu_minute_cache, max_symbols=intraday_minute_profile_max_symbols,
             open_capabilities=open_provider_capabilities, capability="intraday_minute",
             fetch_minutes=intraday_longhu_minutes, minute_features=intraday_minute_features,
-            persist_health=lambda *_args: None, run_database=run_database_blocking,
+            persist_health=persist_longhu_intraday_minute_health, run_database=run_database_blocking,
             safe_error=safe_error_detail, handled_errors=(Exception,),
             provider_key="longhuvip", feature_source="longhuvip_minute",
             check_provider_circuit=False,
