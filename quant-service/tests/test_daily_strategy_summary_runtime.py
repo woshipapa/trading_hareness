@@ -57,7 +57,7 @@ class DailyStrategySummaryRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "suppressed")
         self.assertIn("Feishu is reserved", result["reason"])
-        self.assertEqual(calls, [("<lambda>", None), ("persist_frontend_only", None)])
+        self.assertEqual(calls, [("<lambda>", None), ("persist_delivery", None)])
         query, params = database.connection.executed[0]
         self.assertIn("delivery_status=EXCLUDED.delivery_status", query)
         self.assertEqual(params[0], date(2026, 8, 21))
@@ -96,7 +96,9 @@ class DailyStrategySummaryRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "sent")
         self.assertEqual(delivered, ["close 2026-08-21"])
-        _query, params = database.connection.executed[0]
+        self.assertEqual(len(database.connection.executed), 2)
+        self.assertIn("delivery_status='pending'", database.connection.executed[0][0])
+        _query, params = database.connection.executed[1]
         self.assertEqual(params[3:7], ("sent", "sent", "sent", None))
 
     def test_scheduler_adapter_uses_same_date_terminal_receipt(self) -> None:

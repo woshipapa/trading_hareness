@@ -37,16 +37,33 @@ async def run_daily_strategy_summary(
     """Build, persist and optionally deliver one same-date research summary."""
     summary = await dependencies.run_database(dependencies.build_summary, exchange_date)
     text = dependencies.summary_text(summary, dependencies.dashboard_url())
+
+    def persist_pending() -> None:
+        with dependencies.database.transaction() as connection:
+            connection.execute(
+                """INSERT INTO quant.strategy_day_summaries(exchange_date,payload,message_text,delivery_status,
+                           attempt_count,next_attempt_at,sent_at,error_message)
+                   VALUES(%s,%s,%s,'pending',0,NULL,NULL,NULL)
+                   ON CONFLICT(exchange_date) DO UPDATE SET payload=EXCLUDED.payload,
+                       message_text=EXCLUDED.message_text,delivery_status='pending',
+                       next_attempt_at=NULL,error_message=NULL,updated_at=now()""",
+                (exchange_date, dependencies.json_value(dependencies.json_safe(summary)), text),
+            )
+
     if dependencies.post_text is None:
         delivery = {"status": "suppressed", "reason": "Feishu is reserved for watched-stock strategy signals"}
     else:
+        # Write a durable pending receipt before crossing the network boundary.
+        # A restart can therefore retry a summary that was interrupted before
+        # its final delivery status was recorded.
+        await dependencies.run_database(persist_pending)
         delivery = await dependencies.post_text(text)
     delivery_status = str(delivery.get("status") or "failed")
     if delivery_status not in {"sent", "failed", "disabled", "suppressed"}:
         delivery_status = "failed"
     delivery_error = delivery.get("error") or delivery.get("reason")
 
-    def persist_frontend_only() -> None:
+    def persist_delivery() -> None:
         with dependencies.database.transaction() as connection:
             connection.execute(
                 """INSERT INTO quant.strategy_day_summaries(exchange_date,payload,message_text,delivery_status,
@@ -62,7 +79,7 @@ async def run_daily_strategy_summary(
                 (exchange_date, dependencies.json_value(dependencies.json_safe(summary)), text,
                  delivery_status, delivery_status, delivery_status, delivery_error),
             )
-    await dependencies.run_database(persist_frontend_only)
+    await dependencies.run_database(persist_delivery)
     result = {"status": delivery_status, "exchange_date": str(exchange_date), "summary": summary,
               "delivery": {"status": delivery_status}}
     if delivery_error:
