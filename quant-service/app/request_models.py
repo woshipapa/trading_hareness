@@ -225,6 +225,25 @@ class XiaojieLeaderFlowSnapshotRequest(BaseModel):
     trend_support_holds: bool | None = None
 
 
+class TeacherReviewPackImportRequest(BaseModel):
+    """Import one reviewed analyst/teacher pack (schema ``teacher-review-pack/v1``).
+
+    The pack body is validated by ``teacher_review_playbooks.validate_pack``;
+    only its size is bounded here so a malformed pack is reported as a list of
+    problems instead of a generic 422.
+    """
+
+    pack: dict[str, Any]
+    dry_run: bool = False
+
+    @model_validator(mode="after")
+    def bounded(self) -> "TeacherReviewPackImportRequest":
+        stocks = self.pack.get("stocks")
+        if isinstance(stocks, list) and len(stocks) > 120:
+            raise ValueError("a review pack may carry at most 120 stocks")
+        return self
+
+
 class XiaojieLeaderFlowEvaluateRequest(BaseModel):
     """Evaluate the Xiao Jie playbook without any provider or order side effect."""
 

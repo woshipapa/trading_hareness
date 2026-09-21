@@ -3078,6 +3078,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teacher-review/packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Pack */
+        post: operations["import_pack_api_v1_teacher_review_packs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher-review/cohort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cohort */
+        get: operations["cohort_api_v1_teacher_review_cohort_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher-review/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Settlements */
+        get: operations["settlements_api_v1_teacher_review_settlements_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/ten-day-leader-rotation/run": {
         parameters: {
             query?: never;
@@ -4369,6 +4420,25 @@ export interface components {
              * @default true
              */
             persist: boolean;
+        };
+        /**
+         * TeacherReviewPackImportRequest
+         * @description Import one reviewed analyst/teacher pack (schema ``teacher-review-pack/v1``).
+         *
+         *     The pack body is validated by ``teacher_review_playbooks.validate_pack``;
+         *     only its size is bounded here so a malformed pack is reported as a list of
+         *     problems instead of a generic 422.
+         */
+        TeacherReviewPackImportRequest: {
+            /** Pack */
+            pack: {
+                [key: string]: unknown;
+            };
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
         };
         /** TenDayLeaderRotationCandidateResponse */
         TenDayLeaderRotationCandidateResponse: {
@@ -10383,6 +10453,96 @@ export interface operations {
                 "application/json": components["schemas"]["XiaojieLeaderFlowEvaluateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_pack_api_v1_teacher_review_packs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeacherReviewPackImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cohort_api_v1_teacher_review_cohort_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    settlements_api_v1_teacher_review_settlements_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

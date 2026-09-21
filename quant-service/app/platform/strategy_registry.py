@@ -98,6 +98,18 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "inflow, stock-vs-sector divergence) scoped to the 潜龙出海_swing fallback mode only, calibrated from a "
         "23-observation \"小杰交流\" event study (2026-08-26 to 09-16)",
     ),
+    # Per-stock plans distilled from a named analyst's post-close review
+    # (video/text).  The pack is point-in-time (first session whose 09:15 open
+    # follows availability); every threshold carries T/D/I provenance.
+    "teacher_review_playbooks": StrategyContract(
+        "teacher_review_playbooks", "teacher-review-rules-v1", "app/teacher_review_rules.py",
+        "teacher-review-pack-v1",
+        ("intraday_rule_input_snapshots", "intraday_signal_events", "raw_market_observations"),
+        "intraday_edge", "shadow", "none",
+        "research-only quantification of an analyst's next-session plan per stock: relay (auction amount, "
+        "acceleration amount window, first-seal amount) and trend (MA reclaim, platform/prior-high breakout, "
+        "MA10 second wave, MA60 reclaim) playbooks, with post-close forecast settlement",
+    ),
     "longhu_multifactor_shadow": StrategyContract(
         "longhu_multifactor_shadow", "longhu-multifactor-shadow-v1", "app/longhu_multifactor_shadow.py",
         "longhu-multifactor-v1",

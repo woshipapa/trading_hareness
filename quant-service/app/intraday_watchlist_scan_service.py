@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -348,21 +349,31 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         # mutation alone never reaches the database.
         if dependencies.persist_xiaojie_status is not None:
             await dependencies.persist_xiaojie_status(scan_id, xiaojie_observation)
-    alerts: list[dict[str, Any]] = []
-    for signal in signals:
-        if signal["state"] != "confirmed":
-            continue
-        delivery = await dependencies.deliver_alert(
-            signal["signal_event_id"],
-            dependencies.alert_text(
-                signal, signal["watch"], signal["quote"] or {}, signal["minute"],
-                decision_card_url=dependencies.decision_card_url(signal["symbol"]),
-            ),
-        )
-        alerts.append({
-            "signal_event_id": str(signal["signal_event_id"]), "symbol": signal["symbol"],
-            "signal_type": signal["signal_type"], "severity": signal["severity"], "delivery": delivery,
-        })
+    confirmed = [signal for signal in signals if signal["state"] == "confirmed"]
+    # Each delivery persists its outbox row before any network I/O, so sending
+    # concurrently cannot lose an alert; it only stops one slow Feishu call
+    # from delaying every later alert of the same scan.
+    delivery_gate = asyncio.Semaphore(4)
+
+    async def deliver(signal: dict[str, Any]) -> dict[str, Any]:
+        async with delivery_gate:
+            try:
+                return await dependencies.deliver_alert(
+                    signal["signal_event_id"],
+                    dependencies.alert_text(
+                        signal, signal["watch"], signal["quote"] or {}, signal["minute"],
+                        decision_card_url=dependencies.decision_card_url(signal["symbol"]),
+                    ),
+                )
+            except Exception as error:  # noqa: BLE001 - the outbox retry owns recovery
+                return {"status": "failed", "error": str(error)[:240]}
+
+    deliveries = await asyncio.gather(*(deliver(signal) for signal in confirmed))
+    alerts: list[dict[str, Any]] = [
+        {"signal_event_id": str(signal["signal_event_id"]), "symbol": signal["symbol"],
+         "signal_type": signal["signal_type"], "severity": signal["severity"], "delivery": delivery}
+        for signal, delivery in zip(confirmed, deliveries)
+    ]
     return {
         "status": "completed", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(),
         "source_status": source_status,

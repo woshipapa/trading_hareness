@@ -28,6 +28,8 @@
 | `quant.sector_*` | 收盘后板块同步/回填 | 点时板块与成员研究证据 | scheduler；批量 UPSERT |
 | `quant.intraday_*` | 盘中 2–30 秒/分钟；只保留有界窗口 | 行情、板块、规则输入与信号 replay 证据 | API/intraday runtime；INSERT/UPSERT |
 | `quant.watchlist_*` | 盘中扫描、盘后结算 | watchlist 候选、信号、结果 | API、scheduler；INSERT/UPDATE |
+| `quant.raw_market_observations`（`provider_key='teacher_review'`） | 每期复盘导入一次；盘后刷新一次 | 老师复盘策略包与盘后结算存档（`teacher_review_pack` / `teacher_review_settlement`） | API、scheduler；INSERT（按唯一键去重） |
+| `quant.intraday_watchlists`（`metadata.teacher_review`） | 导入与盘后刷新 | 次日计划合并进观察池行；超容量不写入 | API、scheduler；表锁下 INSERT/UPDATE，过期停用自有行 |
 | `quant.raw_archive_offsets` / `quant.raw_archive_batches` | 仅启用 overflow 时；重试安全 | 原始观测离线归档游标与 ACK | archive adapter；事务内 UPDATE/INSERT |
 
 ## 运行约束

@@ -19,6 +19,8 @@ class IntradaySignalGenerationDependencies:
     rebound_signal: Callable[..., dict[str, Any] | None]
     rebound_failure_signal: Callable[..., dict[str, Any] | None]
     eac_acceptance: Callable[..., dict[str, Any]]
+    # Analyst/teacher review plans frozen into ``watch.metadata.teacher_review``.
+    teacher_review_signal: Callable[..., list[dict[str, Any]]] | None = None
 
 
 def generate_intraday_signals(
@@ -39,7 +41,7 @@ def generate_intraday_signals(
     """Create candidates from frozen scan inputs without changing their scores.
 
     State transitions, policy/risk gates, order-book attribution and durable
-    event writes remain in the scanner.  This boundary only keeps the five
+    event writes remain in the scanner.  This boundary only keeps the
     independent candidate families in one deterministic, testable place.
     """
     rule_quote = {**quote, "_scan_observed_at": observed_at} if quote else None
@@ -88,6 +90,10 @@ def generate_intraday_signals(
                 "risk_flags": ["eac_timed_acceptance", "manual_review_required", "no_automatic_order",
                                *acceptance.get("risk_flags", [])],
             })
+    if dependencies.teacher_review_signal is not None:
+        signals.extend(dependencies.teacher_review_signal(
+            watch, quote, minute_features, peer_context, observed_at, previous_quote,
+        ))
     return signals
 
 

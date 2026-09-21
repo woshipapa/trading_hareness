@@ -29,7 +29,7 @@ POST_CLOSE_STAGE_ORDER = (
     "market_flow_features", "limit_ladder", "limit_lift_pattern_mining", "cninfo_announcements",
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
-    "watchlist_main_wave", "research_snapshot",
+    "watchlist_main_wave", "teacher_review_roll", "research_snapshot",
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
@@ -43,6 +43,9 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     # window instead of inheriting the generic ten-second request budget.
     "analyst_outcomes": 300.0,
     "analyst_intraday_outcomes": 180.0,
+    # Settles the session and re-freezes still-valid teacher plans from
+    # bounded Longhu bar requests (two in flight at a time).
+    "teacher_review_roll": 240.0,
 }
 
 POST_CLOSE_STAGE_DEPENDENCIES = {
@@ -59,6 +62,9 @@ POST_CLOSE_STAGE_DEPENDENCIES = {
     "research_snapshot": ("core_daily_controls",),
     "longhu_supplemental_evidence": ("full_market_daily", "core_daily_controls"),
     "decision_research_closure": ("post_close_strategy", "core_daily_controls"),
+    # Settlement and next-session plans read the day's canonical bars and
+    # point-in-time adjustment factors.
+    "teacher_review_roll": ("full_market_daily", "core_daily_controls"),
 }
 
 
@@ -109,6 +115,7 @@ class PostCloseRefreshDependencies:
     safe_error_detail: Callable[[str, int], str]
     json_safe: Callable[[Any], Any]
     longhu_supplemental_sync: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    teacher_review_roll: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -215,6 +222,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             lambda: dependencies.longhu_supplemental_sync(trade_date)
             if dependencies.longhu_supplemental_sync is not None and longhu_mode
             else {"status": "skipped", "reason": "Longhu supplemental capture is disabled or not configured", "research_only": True}
+        ),
+        "teacher_review_roll": (
+            (lambda: dependencies.teacher_review_roll(trade_date))
+            if dependencies.teacher_review_roll is not None
+            else (lambda: {"status": "skipped", "reason": "teacher review disabled", "research_only": True})
         ),
         "analyst_outcomes": lambda: dependencies.run_database(
             dependencies.recompute_outcomes, trade_date, timeout_seconds=300,

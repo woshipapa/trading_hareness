@@ -179,7 +179,11 @@ from .xiaojie_outcome_settlement import settle_session as settle_xiaojie_session
 from .xiaojie_observation_repository import (
     alerted_count as xiaojie_alerted_count, mark_alerted as mark_xiaojie_alerted,
     record_candidates as record_xiaojie_candidates,
+    session_observations as read_xiaojie_session_observations,
     unalerted_research_candidates as read_unalerted_xiaojie_candidates,
+)
+from .strategy_confluence import (
+    ConfluenceBook, teacher_confluence_line, teacher_plans_for_day, xiaojie_confluence_line,
 )
 from . import offline_minute_import_service
 from .intraday_cross_section import SharedAsyncSnapshot
@@ -389,6 +393,7 @@ from .intraday_schedule import (
     intraday_super_get_fast_max_in_flight,
     intraday_super_get_fast_max_symbols,
     intraday_watchlist_capacity,
+    intraday_watchlist_max_symbols,
 )
 from .intraday_monitor_service import run_intraday_monitor_loop
 from .market_event_capture import capture as capture_market_events
@@ -713,6 +718,19 @@ from .telemetry import (
 from .runtime_executors import ExecutorSaturatedError, run_akshare_blocking, run_database_blocking, runtime_executor_status, shutdown_runtime_executors
 from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
 from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
+from .routers.teacher_review import TeacherReviewRouterDependencies, build_teacher_review_router
+from .teacher_review_plan import parse_longhu_kline as parse_teacher_review_kline
+from .teacher_review_rules import (
+    MODEL_VERSION as TEACHER_REVIEW_MODEL_VERSION,
+    active_plan as teacher_active_plan,
+    teacher_review_signals,
+)
+from .teacher_review_service import (
+    TeacherReviewDependencies,
+    import_pack as import_teacher_review_pack,
+    roll as roll_teacher_review,
+)
+from . import teacher_review_repository as teacher_review_repository
 from .l2_research_gate import evaluate_l2_incremental_value
 from .l2_research_repository import latest_l2_evaluation, persist_l2_evaluation
 from .personal_decision_repository import persist_broker_snapshot, persist_trade_plan
@@ -2088,6 +2106,7 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
         market_volume_baseline=reference.get("market_volume_baseline"),
     )
     candidates = result["candidates"]
+    await _refresh_strategy_confluence(trading_date, observed_at, candidates)
     fresh = await run_database_blocking(
         lambda: _with_connection(lambda connection: record_xiaojie_candidates(
             connection, trading_date, observed_at, scan_id, candidates)),
@@ -2145,7 +2164,10 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
                 timeout_seconds=30,
             )
             await deliver_intraday_alert(
-                event_id, _xiaojie_alert_text(candidate, trading_date, reference.get("names")))
+                event_id, _xiaojie_alert_text(
+                    candidate, trading_date, reference.get("names"),
+                    teacher=strategy_confluence.teacher_plan(trading_date, candidate["symbol"]),
+                ))
             alerted.append((candidate["symbol"], str(candidate.get("mode") or "unclassified")))
         except Exception as error:  # noqa: BLE001 - an alert failure must not end the scan
             alert_errors.append(f"{candidate.get('symbol')}: {safe_error_detail(str(error), 160)}")
@@ -2232,8 +2254,44 @@ def _xiaojie_alert_name(symbol: str, names: Mapping[str, str] | None) -> str:
     return f"{name} {symbol}" if name else symbol
 
 
+strategy_confluence = ConfluenceBook()
+TEACHER_CONFLUENCE_REFRESH = timedelta(minutes=5)
+
+
+async def _refresh_strategy_confluence(trading_date: date, observed_at: datetime,
+                                       candidates: list[dict[str, Any]]) -> None:
+    """Keep the cross-strategy book current; failures only drop annotations."""
+    try:
+        if not strategy_confluence.xiaojie_hydrated or strategy_confluence.teacher_refreshed_at is None:
+            rows = await run_database_blocking(
+                lambda: _with_connection(lambda connection: read_xiaojie_session_observations(connection, trading_date)),
+                timeout_seconds=30,
+            )
+            strategy_confluence.hydrate_xiaojie(trading_date, rows)
+        strategy_confluence.note_xiaojie(trading_date, candidates)
+        refreshed = strategy_confluence.teacher_refreshed_at
+        if refreshed is None or observed_at - refreshed >= TEACHER_CONFLUENCE_REFRESH:
+            rows = await run_database_blocking(teacher_review_repository.teacher_watch_rows, db, timeout_seconds=30)
+            strategy_confluence.set_teacher_plans(trading_date, teacher_plans_for_day(rows, trading_date), observed_at)
+    except Exception as error:  # noqa: BLE001 - confluence is an annotation, never a gate
+        print(f"strategy confluence refresh failed: {safe_error_detail(str(error), 200)}")
+
+
+def intraday_alert_text_with_confluence(signal: dict[str, Any], watch: dict[str, Any], quote: dict[str, Any],
+                                        minute_row: dict[str, Any] | None, decision_card_url: str | None = None) -> str:
+    """Watchlist alert text plus same-session 小杰/潜龙出海 confluence for teacher-review plans."""
+    confluence: list[str] = []
+    if str((signal.get("conditions") or {}).get("setup") or "").startswith("teacher_review"):
+        observed = signal.get("observed_at")
+        day = observed.astimezone(ZoneInfo("Asia/Shanghai")).date() if isinstance(observed, datetime) else cn_today()
+        line = xiaojie_confluence_line(strategy_confluence.xiaojie_modes(day, str(signal["symbol"])))
+        confluence = [line] if line else []
+    return intraday_alert_text(signal, watch, quote, minute_row, decision_card_url=decision_card_url,
+                               confluence=confluence)
+
+
 def _xiaojie_alert_text(candidate: dict[str, Any], trading_date: date,
-                        names: Mapping[str, str] | None = None) -> str:
+                        names: Mapping[str, str] | None = None, *, teacher: Mapping[str, Any] | None = None) -> str:
     evidence = candidate.get("evidence") or {}
     board = evidence.get("board") or {}
     state = "封板" if board.get("sealed") else ("炸板" if board.get("broken") else "近板")
@@ -2251,7 +2309,8 @@ def _xiaojie_alert_text(candidate: dict[str, Any], trading_date: date,
         sealed_research_notice +
         f"研究仓位参考 {(candidate.get('position') or {}).get('target_fraction')}；"
         f"风险标记 {', '.join(candidate.get('risk_flags') or []) or '无'}\n"
-        "仅为研究观察，零实盘权重，不构成交易指令。"
+        + (f"{teacher_confluence_line(teacher)}\n" if teacher else "")
+        + "仅为研究观察，零实盘权重，不构成交易指令。"
     )
 
 
@@ -2811,11 +2870,18 @@ async def shared_stock_api_call(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def intraday_watch_priority_key(row: dict[str, Any]) -> tuple[int, int, str]:
-    """Keep the small verified-minute budget on explicitly enabled research watches."""
+    """Keep the small verified-minute budget on explicitly enabled research watches.
+
+    A next-session teacher relay plan (连板接力) reads minute volume and VWAP in
+    the opening minutes, so it follows research watches but precedes plain ones.
+    """
     metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
     research_enabled = any(isinstance(metadata.get(key), dict) and metadata[key].get("enabled")
                            for key in ("surge_strategy", "reversal_research", "upside_research"))
-    return (0 if research_enabled else 1, -int(row.get("available_quantity") or 0), str(row["symbol"]))
+    teacher = metadata.get("teacher_review") if isinstance(metadata.get("teacher_review"), dict) else {}
+    teacher_relay = teacher.get("status", "active") == "active" and teacher.get("kind") == "relay"
+    rank = 0 if research_enabled else 1 if teacher_relay else 2
+    return (rank, -int(row.get("available_quantity") or 0), str(row["symbol"]))
 
 
 def intraday_order_book_enabled() -> bool:
@@ -2894,11 +2960,12 @@ async def capture_intraday_minute_sessions(symbols: list[str]) -> dict[str, Any]
 async def intraday_tencent_surge_context(
     watches: list[dict[str, Any]], *, mapped_peers: dict[str, dict[str, Any]] | None = None,
     priority_symbols: list[str] | None = None,
+    max_symbols: Callable[[], int] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Compatibility entry point backed by the bounded minute-context service."""
     return await capture_intraday_surge_context(
         watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols, cache=_intraday_tencent_minute_cache,
-        max_symbols=intraday_minute_profile_max_symbols,
+        max_symbols=max_symbols or intraday_minute_profile_max_symbols,
         open_capabilities=open_provider_capabilities,
         capability=TENCENT_INTRADAY_MINUTE_CAPABILITY,
         fetch_minutes=tencent_intraday_minutes,
@@ -2977,6 +3044,7 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                     rebound_signal=countertrend_rebound_realtime_signal,
                     rebound_failure_signal=countertrend_rebound_failure_reduce_signal,
                     eac_acceptance=intraday_eac_acceptance_assessment,
+                    teacher_review_signal=teacher_review_signals,
                 ),
                 load_event_state=load_intraday_signal_event_state,
                 persist_generated_signals=persist_generated_signals,
@@ -3106,7 +3174,7 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
         persist_rotation_observations=persist_ten_day_leader_rotation_intraday,
         persist_rotation_scan_status=persist_intraday_rotation_scan_status,
         json_safe=strategy_json_safe,
-        deliver_alert=deliver_intraday_alert, alert_text=intraday_alert_text,
+        deliver_alert=deliver_intraday_alert, alert_text=intraday_alert_text_with_confluence,
         decision_card_url=decision_card_url, run_scan=run_watchlist_scan,
     ))
 
@@ -3911,10 +3979,19 @@ async def intraday_surge_context(
     licensed_status: dict[str, Any] = {
         "provider_status": "disabled", "provider": "longhuvip", "reason": "longhu_not_configured",
     }
+    # Teacher-review plans read minute VWAP/volume/5-minute return.  They
+    # follow the quote anomalies and bring their own budget, so every other
+    # strategy keeps the minute share it had before.
+    teacher_symbols = teacher_review_minute_symbols(watches, datetime.now(timezone.utc))
+    priority_symbols = list(dict.fromkeys([*(priority_symbols or []), *teacher_symbols]))
+
+    def minute_budget() -> int:
+        return intraday_minute_profile_max_symbols() + min(len(teacher_symbols), TEACHER_REVIEW_MINUTE_EXTRA_MAX)
+
     if longhu_vendor_configured():
         licensed_features, licensed_status = await capture_intraday_surge_context(
             watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols,
-            cache=_intraday_longhu_minute_cache, max_symbols=intraday_minute_profile_max_symbols,
+            cache=_intraday_longhu_minute_cache, max_symbols=minute_budget,
             open_capabilities=open_provider_capabilities, capability="intraday_minute",
             fetch_minutes=intraday_longhu_minutes, minute_features=intraday_minute_features,
             persist_health=persist_longhu_intraday_minute_health, run_database=run_database_blocking,
@@ -3923,7 +4000,7 @@ async def intraday_surge_context(
             check_provider_circuit=False,
         )
     fallback_features, fallback_status = await intraday_tencent_surge_context(
-        watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols,
+        watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols, max_symbols=minute_budget,
     )
     return {**fallback_features, **licensed_features}, {
         "provider_status": (
@@ -4354,6 +4431,52 @@ async def _post_close_core_symbols(limit: int) -> list[str]:
     return await read_async_limited_core_symbols(async_db, limit)
 
 
+TEACHER_REVIEW_MINUTE_EXTRA_MAX = 50
+
+
+def teacher_review_minute_symbols(watches: list[dict[str, Any]], observed_at: datetime) -> list[str]:
+    """Watches with a teacher plan for this session, relay plans first."""
+    active = [(watch, teacher_active_plan(watch, observed_at)) for watch in watches]
+    ordered = sorted(((watch, plan) for watch, plan in active if plan is not None),
+                     key=lambda item: (item[1].get("kind") != "relay", str(item[0]["symbol"])))
+    return [str(watch["symbol"]).upper() for watch, _plan in ordered]
+
+
+def teacher_review_enabled() -> bool:
+    return os.getenv("TEACHER_REVIEW_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def teacher_review_kline(code: str, count: int, period: str) -> list[dict[str, Any]]:
+    """Forward-adjusted Longhu bars (``d``/``w``/``5``/``30``/``60``); indices use ``SH000001``."""
+    result = await shared_stock_api_call({"target": "longhu_history", "params": {
+        "a": "GetKLineDay_W14", "c": "StockLineData", "apiv": "w40", "PhoneOSNew": "1", "VerSion": "5.19.0.0",
+        "StockID": code, "Type": period, "Is_FS": "1", "st": int(count), "Index": 0,
+    }})
+    pages = result.get("pages") if isinstance(result, Mapping) else []
+    return parse_teacher_review_kline(page.get("payload") for page in pages or [] if isinstance(page, Mapping))
+
+
+async def teacher_review_limit_pool(trade_date: date) -> list[dict[str, Any]]:
+    result = await shared_stock_api_call({"target": "xuangubao", "path": "/api/pool/detail",
+                                          "params": {"pool_name": "limit_up", "date": trade_date.isoformat()}})
+    pages = result.get("pages") if isinstance(result, Mapping) else []
+    payload = (pages[0] or {}).get("payload") if pages else {}
+    rows = payload.get("data") if isinstance(payload, Mapping) else None
+    return [row for row in rows or [] if isinstance(row, Mapping)]
+
+
+def _teacher_review_dependencies() -> TeacherReviewDependencies:
+    return TeacherReviewDependencies(
+        database=db, run_database=run_database_blocking, kline=teacher_review_kline,
+        limit_pool=teacher_review_limit_pool, now_utc=lambda: datetime.now(timezone.utc),
+        send_alert=post_feishu_alert_text, max_symbols=intraday_watchlist_max_symbols,
+        exchange_for=exchange_for,
+        # Owner PG already carries full-market daily bars; per-symbol Tushare
+        # hydration would saturate the shared 6/min provider queue.
+        hydrate_history=None,
+    )
+
+
 def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
     """Compose the local-only boundaries of the post-close application service."""
     return PostCloseRefreshDependencies(
@@ -4381,6 +4504,10 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         renew_lease=renew_runtime_lease, release_lease=release_runtime_lease,
         safe_error_detail=safe_error_detail, json_safe=strategy_json_safe,
         longhu_supplemental_sync=sync_longhu_supplemental_evidence,
+        teacher_review_roll=(
+            (lambda trade_date: roll_teacher_review(trade_date, _teacher_review_dependencies()))
+            if teacher_review_enabled() else None
+        ),
     )
 
 
@@ -4735,6 +4862,7 @@ def _verify_strategy_runtime_contracts() -> None:
         "limit_up_continuation": LIMIT_UP_CONTINUATION_MODEL_VERSION,
         "xiaojie_leader_flow": XIAOJIE_LEADER_FLOW_MODEL_VERSION,
         "longhu_multifactor_shadow": LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION,
+        "teacher_review_playbooks": TEACHER_REVIEW_MODEL_VERSION,
     })
 
 
@@ -5979,6 +6107,29 @@ app.include_router(build_strategy_actions_router(StrategyActionDependencies(
     daily_pipeline=run_daily_pipeline,
 )))
 app.include_router(build_xiaojie_leader_flow_router(evaluate_xiaojie_leader_flow_snapshot))
+async def teacher_review_cohort() -> dict[str, Any]:
+    rows = await run_database_blocking(teacher_review_repository.teacher_watch_rows, db)
+    since = cn_today() - timedelta(days=14)
+    packs = await run_database_blocking(lambda: teacher_review_repository.recent_packs(db, since=since))
+    return {
+        "watches": [{"symbol": row["symbol"], "label": row["label"], "enabled": row["enabled"],
+                     "plan": (row["metadata"] or {}).get("teacher_review")} for row in rows],
+        "packs": [{"pack_id": item["pack"]["pack_id"], "analyst_id": item["pack"]["analyst"]["analyst_id"],
+                   "review_date": item["pack"]["review_date"], "available_at": str(item["available_at"]),
+                   "stocks": len(item["pack"]["stocks"])} for item in packs],
+    }
+
+
+app.include_router(build_teacher_review_router(TeacherReviewRouterDependencies(
+    enabled=teacher_review_enabled,
+    import_pack=lambda pack, dry_run=False: import_teacher_review_pack(
+        pack, _teacher_review_dependencies(), dry_run=dry_run,
+    ),
+    cohort=teacher_review_cohort,
+    settlements=lambda limit: run_database_blocking(
+        lambda: teacher_review_repository.recent_settlements(db, limit=limit),
+    ),
+)))
 app.include_router(build_ten_day_leader_rotation_actions_router(
     TenDayLeaderRotationActionDependencies(run=run_ten_day_leader_rotation_endpoint),
 ))
