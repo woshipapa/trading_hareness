@@ -3987,8 +3987,10 @@ async def intraday_surge_context(
     def minute_budget() -> int:
         return intraday_minute_profile_max_symbols() + min(len(teacher_symbols), TEACHER_REVIEW_MINUTE_EXTRA_MAX)
 
-    if longhu_vendor_configured():
-        licensed_features, licensed_status = await capture_intraday_surge_context(
+    async def licensed_context() -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+        if not longhu_vendor_configured():
+            return licensed_features, licensed_status
+        return await capture_intraday_surge_context(
             watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols,
             cache=_intraday_longhu_minute_cache, max_symbols=minute_budget,
             open_capabilities=open_provider_capabilities, capability="intraday_minute",
@@ -3998,8 +4000,14 @@ async def intraday_surge_context(
             provider_key="longhuvip", feature_source="longhuvip_minute",
             check_provider_circuit=False,
         )
-    fallback_features, fallback_status = await intraday_tencent_surge_context(
-        watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols, max_symbols=minute_budget,
+
+    # Independent providers: waiting for Longhu before starting Tencent used to
+    # add both deadlines to the first scan of a session.
+    (licensed_features, licensed_status), (fallback_features, fallback_status) = await asyncio.gather(
+        licensed_context(),
+        intraday_tencent_surge_context(
+            watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols, max_symbols=minute_budget,
+        ),
     )
     return {**fallback_features, **licensed_features}, {
         "provider_status": (

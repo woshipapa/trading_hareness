@@ -187,6 +187,15 @@ class RuleTests(unittest.TestCase):
         self.assertTrue(features["not_falling"])
         self.assertEqual(features["sources"]["not_falling"], "previous_scan")
 
+    def test_unfresh_licensed_row_supplies_session_constants(self):
+        all_a_only = {"price": 25.0, "pct_change": 3.9, "volume_ratio": None, "raw": {
+            "longhu_watch_quote_unfresh": {"pre_close": 24.06, "open": 24.5, "volume_ratio": 1.7, "amount": 3e8,
+                                           "volume": 120000, "order_book": {"book_side": "two_sided"}}}}
+        features = scan_features("001216.SZ", all_a_only, None, at(9, 40))
+        self.assertEqual((features["pre_close"], features["open"], features["volume_ratio"]), (24.06, 24.5, 1.7))
+        self.assertEqual(features["sources"]["open"], "longhu_unfresh")
+        self.assertEqual(features["book"], "longhu_unfresh")
+
     def test_missing_vwap_never_invalidates_a_plan(self):
         bare = {"price": 9.0, "pct_change": -1.0, "raw": {}}
         plan = watch("002285.SZ", "relay_acceleration",

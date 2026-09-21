@@ -105,6 +105,7 @@ def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, An
     raw = quote.get("raw") if isinstance(quote.get("raw"), Mapping) else {}
     longhu = raw.get("longhu_watch_quote") if isinstance(raw.get("longhu_watch_quote"), Mapping) else {}
     tencent = raw.get("watch_quote") if isinstance(raw.get("watch_quote"), Mapping) else {}
+    unfresh = raw.get("longhu_watch_quote_unfresh") if isinstance(raw.get("longhu_watch_quote_unfresh"), Mapping) else {}
     minute = minute if isinstance(minute, Mapping) else {}
     price = float(quote["price"])
     pct_quote = _num(quote.get("pct_change"))
@@ -116,20 +117,26 @@ def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, An
             sources[key] = source
         return value
 
-    pre_close = take("pre_close", ("longhu", longhu.get("pre_close")), ("tencent", tencent.get("pre_close")),
+    # pre-close and open are fixed for the session, so an unfresh licensed row is as good as a fresh one.
+    pre_close = take("pre_close", ("longhu", longhu.get("pre_close")), ("longhu_unfresh", unfresh.get("pre_close")),
+                     ("tencent", tencent.get("pre_close")),
                      ("all_a", raw.get("pre_close")), ("all_a", raw.get("preClose")),
                      ("derived_pct", round(price / (1 + pct_quote / 100), 4) if pct_quote is not None else None))
-    opened = take("open", ("longhu", longhu.get("open")), ("tencent", _tencent_field(tencent, 5)),
-                  ("all_a", raw.get("open")))
+    opened = take("open", ("longhu", longhu.get("open")), ("longhu_unfresh", unfresh.get("open")),
+                  ("tencent", _tencent_field(tencent, 5)), ("all_a", raw.get("open")))
     high = take("high", ("longhu", longhu.get("high")), ("tencent", _tencent_field(tencent, 33)),
-                ("all_a", raw.get("high")), ("minute", minute.get("session_high_price")))
+                ("all_a", raw.get("high")), ("minute", minute.get("session_high_price")),
+                ("longhu_unfresh", unfresh.get("high")))
     low = take("low", ("longhu", longhu.get("low")), ("tencent", _tencent_field(tencent, 34)),
-               ("all_a", raw.get("low")), ("minute", minute.get("session_low_price")))
+               ("all_a", raw.get("low")), ("minute", minute.get("session_low_price")),
+               ("longhu_unfresh", unfresh.get("low")))
     high = max(value for value in (high, price) if value is not None)
     low = min(value for value in (low, price) if value is not None)
     amount = take("amount", ("quote", quote.get("amount")), ("longhu", longhu.get("amount")),
-                  ("tencent", tencent.get("cumulative_amount")), ("all_a", raw.get("amount")))
+                  ("tencent", tencent.get("cumulative_amount")), ("all_a", raw.get("amount")),
+                  ("longhu_unfresh", unfresh.get("amount")))
     volume_lot = take("volume_lot", ("longhu", longhu.get("volume")), ("tencent", tencent.get("cumulative_volume_lot")),
+                      ("longhu_unfresh", unfresh.get("volume")),
                       ("quote_shares", (_num(quote.get("volume")) or 0) / 100 or None))
     vwap = take("vwap", ("minute", minute.get("vwap")),
                 ("derived_amount_volume", amount / (volume_lot * 100) if amount and volume_lot else None))
@@ -138,11 +145,13 @@ def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, An
         sources["book"] = "longhu"
     elif tencent.get("book_side"):
         book, sources["book"] = {"book_side": tencent.get("book_side")}, "tencent"
+    elif isinstance(unfresh.get("order_book"), Mapping):
+        book, sources["book"] = unfresh["order_book"], "longhu_unfresh"
     limit = limit_up_price(pre_close, symbol, name) if pre_close else None
     at_limit = bool(limit) and price >= limit - 0.005
     sealed = at_limit and (book or {}).get("book_side") == "bid_only" if book else None
-    volume_ratio = _num(quote.get("volume_ratio"))
-    turnover = _num(quote.get("turnover_rate"))
+    volume_ratio = take("volume_ratio", ("quote", quote.get("volume_ratio")), ("longhu_unfresh", unfresh.get("volume_ratio")))
+    turnover = take("turnover_pct", ("quote", quote.get("turnover_rate")), ("longhu_unfresh", unfresh.get("turnover_rate")))
     multiple = _num(minute.get("minute_volume_multiple"))
     return_5m = _num(minute.get("return_5m_pct"))
     previous_price = _num((previous_quote or {}).get("price"))

@@ -188,6 +188,33 @@ async def _market_wide_research(
     }
 
 
+async def _deliver_confirmed(
+    confirmed: list[dict[str, Any]], dependencies: "IntradayWatchlistScanDependencies",
+) -> list[dict[str, Any]]:
+    """Send confirmed alerts concurrently.
+
+    Each delivery persists its outbox row before any network I/O, so sending
+    concurrently cannot lose an alert; it only stops one slow Feishu call from
+    delaying the others.  Failures are left to the outbox retry.
+    """
+    gate = asyncio.Semaphore(4)
+
+    async def deliver(signal: dict[str, Any]) -> dict[str, Any]:
+        async with gate:
+            try:
+                return await dependencies.deliver_alert(
+                    signal["signal_event_id"],
+                    dependencies.alert_text(
+                        signal, signal["watch"], signal["quote"] or {}, signal["minute"],
+                        decision_card_url=dependencies.decision_card_url(signal["symbol"]),
+                    ),
+                )
+            except Exception as error:  # noqa: BLE001 - the outbox retry owns recovery
+                return {"status": "failed", "error": str(error)[:240]}
+
+    return list(await asyncio.gather(*(deliver(signal) for signal in confirmed)))
+
+
 async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDependencies) -> dict[str, Any]:
     """Run one scan without owning database transactions or provider clients."""
     observed_at = dependencies.now_utc()
@@ -291,6 +318,10 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         quote_capture.all_a_rows, quote_capture.latency_ms, realtime_minutes, surge_features,
         peer_contexts, fast_confirmations,
     )
+    # Deliver confirmed alerts now: the shadow rotation and 小杰 research below
+    # never change these signals, so they must not delay the notification.
+    confirmed = [signal for signal in signals if signal["state"] == "confirmed"]
+    delivery_task = asyncio.create_task(_deliver_confirmed(confirmed, dependencies))
     shadow_observation: dict[str, Any] = {"status": "standby", "reason": "awaiting_next_minute_rotation"}
     if dependencies.shadow_rotation_due(observed_at):
         try:
@@ -349,26 +380,7 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         # mutation alone never reaches the database.
         if dependencies.persist_xiaojie_status is not None:
             await dependencies.persist_xiaojie_status(scan_id, xiaojie_observation)
-    confirmed = [signal for signal in signals if signal["state"] == "confirmed"]
-    # Each delivery persists its outbox row before any network I/O, so sending
-    # concurrently cannot lose an alert; it only stops one slow Feishu call
-    # from delaying every later alert of the same scan.
-    delivery_gate = asyncio.Semaphore(4)
-
-    async def deliver(signal: dict[str, Any]) -> dict[str, Any]:
-        async with delivery_gate:
-            try:
-                return await dependencies.deliver_alert(
-                    signal["signal_event_id"],
-                    dependencies.alert_text(
-                        signal, signal["watch"], signal["quote"] or {}, signal["minute"],
-                        decision_card_url=dependencies.decision_card_url(signal["symbol"]),
-                    ),
-                )
-            except Exception as error:  # noqa: BLE001 - the outbox retry owns recovery
-                return {"status": "failed", "error": str(error)[:240]}
-
-    deliveries = await asyncio.gather(*(deliver(signal) for signal in confirmed))
+    deliveries = await delivery_task
     alerts: list[dict[str, Any]] = [
         {"signal_event_id": str(signal["signal_event_id"]), "symbol": signal["symbol"],
          "signal_type": signal["signal_type"], "severity": signal["severity"], "delivery": delivery}
