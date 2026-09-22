@@ -725,6 +725,12 @@ from .runtime_executors import ExecutorSaturatedError, run_akshare_blocking, run
 from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
 from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
 from .routers.teacher_review import TeacherReviewRouterDependencies, build_teacher_review_router
+from .routers.watch_reviews import WatchReviewRouterDependencies, build_watch_review_router
+from .watch_daily_review import (
+    WatchReviewDependencies,
+    read_reviews as read_watch_reviews,
+    run_watch_daily_review as run_watch_daily_review_service,
+)
 from .teacher_review_rules import (
     MODEL_VERSION as TEACHER_REVIEW_MODEL_VERSION,
     PeriodDivergenceBook as TeacherReviewDivergenceBook,
@@ -4697,6 +4703,22 @@ async def teacher_review_repair_daily(trade_date: date) -> dict[str, Any]:
             "controls": {key: controls.get(key) for key in ("status", "stored", "reason") if key in controls}}
 
 
+def _watch_review_dependencies() -> WatchReviewDependencies:
+    from .teacher_review_repository import plan_bars as teacher_plan_bars
+    from .teacher_review_rules import scan_features as teacher_scan_features
+    return WatchReviewDependencies(
+        database=db, run_database=run_database_blocking, minutes_batch=intraday_longhu_minutes_batch,
+        plan_bars=teacher_plan_bars,
+        quote_features=lambda symbol, quote, observed_at: teacher_scan_features(symbol, quote, None, observed_at),
+        industry_board_flow=intraday_longhu_industry_board_flow,
+    )
+
+
+async def run_watch_daily_review(trade_date: date, persist: bool = True) -> dict[str, Any]:
+    """Post-close review of every watched stock (day, path, industry, history, patterns)."""
+    return await run_watch_daily_review_service(trade_date, _watch_review_dependencies(), persist=persist)
+
+
 def _teacher_review_dependencies() -> TeacherReviewDependencies:
     return TeacherReviewDependencies(
         database=db, run_database=run_database_blocking, now_utc=lambda: datetime.now(timezone.utc),
@@ -4741,6 +4763,7 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
             (lambda trade_date: roll_teacher_review(trade_date, _teacher_review_dependencies()))
             if teacher_review_enabled() else None
         ),
+        watch_daily_review=lambda trade_date: run_watch_daily_review(trade_date),
     )
 
 
@@ -6357,6 +6380,11 @@ async def teacher_review_cohort() -> dict[str, Any]:
     }
 
 
+app.include_router(build_watch_review_router(WatchReviewRouterDependencies(
+    run=lambda trade_date, persist: run_watch_daily_review(trade_date, persist),
+    read=lambda trade_date: run_database_blocking(lambda: read_watch_reviews(db, trade_date), timeout_seconds=30),
+    today=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date(),
+)))
 app.include_router(build_teacher_review_router(TeacherReviewRouterDependencies(
     enabled=teacher_review_enabled,
     import_pack=lambda pack, dry_run=False: import_teacher_review_pack(
