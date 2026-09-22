@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app.intraday_minute_capture_actions import (
-    fetch_longhu_first_minute_rows, minute_row_datetime, minute_storage_source,
+    fetch_longhu_first_minute_rows, minute_row_datetime, minute_storage_source, store_session_minutes,
 )
 
 
@@ -122,3 +122,42 @@ class IntradayMinuteCaptureActionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StoreSessionMinutesTests(unittest.TestCase):
+    def test_whole_sessions_are_upserted_and_other_days_skipped(self) -> None:
+        executed, instruments = [], []
+
+        class Connection:
+            def execute(self, sql, params=None):
+                executed.append((sql, params))
+                return self
+
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self_inner):
+                        return Connection()
+
+                    def __exit__(self_inner, *exc):
+                        return False
+                return Tx()
+
+        def parse(row):
+            local = datetime.fromisoformat(row["datetime"]).replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+            return {"bar_time": local, "open": row["open"], "high": row["high"], "low": row["low"], "close": row["close"],
+                    "volume": row.get("volume_lot"), "amount": row.get("amount"), "raw": row}
+
+        rows = {"000504.SZ": [{"trade_date": "20260922", "time": "0930", "close": 12.11, "volume_lot": 9308},
+                              {"trade_date": "20260922", "time": "1500", "close": 12.11, "volume_lot": 10},
+                              {"trade_date": "20260921", "time": "1500", "close": 11.01}]}
+        report = store_session_minutes(Database(), date(2026, 9, 22), rows, source_name="longhu_intraday_minutes",
+                                       parse_minute=parse, ensure_instrument=lambda connection, symbol: instruments.append(symbol))
+        self.assertEqual(report["stored"], 2)
+        self.assertEqual(report["status"], "partial")                   # the other day's row is reported, not stored
+        self.assertEqual(instruments, ["000504.SZ"])
+        self.assertEqual([params[2] for _, params in executed], ["09:30", "15:00"])
+        self.assertTrue(all("DELETE" not in sql for sql, _ in executed))  # additive: no retention here
+        with self.assertRaises(ValueError):
+            store_session_minutes(Database(), date(2026, 9, 22), rows, source_name="made_up",
+                                  parse_minute=parse, ensure_instrument=lambda *_: None)

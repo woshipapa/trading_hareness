@@ -15,7 +15,15 @@ For each stock on the watchlist this produces one structured, stored record:
   scan resolution, volume-ratio and sector-breadth checkpoints, minute
   volume bursts, when the stock and its peer group peaked, the signal
   timeline, and the tape's own coverage;
+* the 09:25 opening auction from the data plane - matched amount, the
+  unmatched buy/sell volume (a one-word board's seal), auction change %,
+  turnover - accepted only when final, on the day's previous close and at
+  the day's open (the snapshot itself carries no date);
 * the day's signals, and transparent pattern labels.
+
+The same run stores each watched stock's full session of 1-minute bars
+(``intraday_minute_sessions``, Longhu) so later reviews can re-derive
+features from the raw minutes.
 
 Records accumulate day by day so later reviews can mine recurring patterns
 (for example which intraday shapes, sector relations or limit behaviour
@@ -288,6 +296,32 @@ def tape_timeline(entries: list[tuple[str, Mapping[str, Any]]]) -> dict[str, Any
     }
 
 
+def auction_facts(raw: Mapping[str, Any] | None, quote_day: Mapping[str, Any]) -> dict[str, Any]:
+    """The opening auction from the Fuyao snapshot, validated against the day itself."""
+    if not raw:
+        return {"status": "missing"}
+    if str(raw.get("data_status") or "") != "final":
+        return {"status": "not_final", "data_status": raw.get("data_status")}
+    pre_close, opened = _num(quote_day.get("pre_close")), _num(quote_day.get("open"))
+    snapshot_pre_close, price = _num(raw.get("pre_close_price")), _num(raw.get("auction_price"))
+    if pre_close is None or snapshot_pre_close is None or abs(snapshot_pre_close - pre_close) > max(0.011, pre_close * 0.001):
+        return {"status": "rejected", "reason": "pre_close_mismatch", "snapshot_pre_close": snapshot_pre_close,
+                "day_pre_close": pre_close}
+    if opened is not None and price is not None and abs(price - opened) > 0.006:
+        return {"status": "rejected", "reason": "not_at_the_day_open", "auction_price": price, "day_open": opened}
+    unmatched = _num(raw.get("auction_unmatched"))
+    limit_price = _num(quote_day.get("limit_up_price"))
+    return {
+        "status": "ok", "price": price, "pct": _num(raw.get("auction_pct")), "amount": _num(raw.get("auction_amount")),
+        "volume_lot": _num(raw.get("auction_volume")), "turnover_pct": _num(raw.get("auction_turnover_pct")),
+        "volume_ratio": _num(raw.get("auction_volume_ratio")), "vs_yesterday_pct": _num(raw.get("auction_yesterday_ratio_pct")),
+        # unmatched lots: positive = unfilled buy volume (the seal), negative = unfilled sell
+        "unmatched_lot": unmatched,
+        "unmatched_amount": round(unmatched * 100 * price, 2) if unmatched is not None and price else None,
+        "at_limit_up": bool(limit_price and price and price >= limit_price - 0.005),
+    }
+
+
 def pattern_labels(day: Mapping[str, Any], path: Mapping[str, Any], limit: Mapping[str, Any],
                    sector: Mapping[str, Any], history: Mapping[str, Any],
                    tape: Mapping[str, Any] | None = None) -> list[str]:
@@ -346,6 +380,8 @@ def pattern_labels(day: Mapping[str, Any], path: Mapping[str, Any], limit: Mappi
         labels.append("竞价走强" if change > 0 else "竞价走弱")
     if ((tape.get("seal") or {}).get("breaks") or 0) >= 2:
         labels.append("反复炸板")
+    if (day.get("auction") or {}).get("at_limit_up"):
+        labels.append("竞价涨停")
     peer = tape.get("peer_group") or {}
     if peer.get("breadth_peaked_first") and path.get("status") == "ok" and path.get("drawdown_from_high_pct", 0) <= -3:
         labels.append("板块先退潮")
@@ -356,7 +392,8 @@ def review_stock(*, symbol: str, name: str, trade_date: date, quote_day: Mapping
                  minutes: list[Mapping[str, Any]], bars: list[Mapping[str, Any]],
                  limit: Mapping[str, Any], sector: Mapping[str, Any], sector_series: list[tuple[str, float]],
                  signals: list[Mapping[str, Any]], themes: Iterable[str] = (),
-                 tape: list[tuple[str, Mapping[str, Any]]] = ()) -> dict[str, Any]:
+                 tape: list[tuple[str, Mapping[str, Any]]] = (),
+                 auction: Mapping[str, Any] | None = None) -> dict[str, Any]:
     pre_close = _num(quote_day.get("pre_close"))
     opened, high, low, close = (_num(quote_day.get(key)) for key in ("open", "high", "low", "close"))
     limit_price = _num(quote_day.get("limit_up_price"))
@@ -369,6 +406,7 @@ def review_stock(*, symbol: str, name: str, trade_date: date, quote_day: Mapping
         "one_word_board": bool(limit_price and opened and high and low and opened == high == low
                                and abs(opened - limit_price) < 0.006),
     }
+    day["auction"] = auction_facts(auction, quote_day)
     path = intraday_path(minutes, pre_close)
     relation = sector_relation(minutes, pre_close, sector_series, sector.get("label"))
     relation.update({key: sector.get(key) for key in ("taxonomy_key", "sector_key") if sector.get(key)})
@@ -411,7 +449,7 @@ def summarize(reviews: list[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 __all__ = ["REVIEW_CAPABILITY", "REVIEW_PROVIDER", "REVIEW_VERSION", "history_context", "intraday_path",
-           "pattern_labels", "review_stock", "sector_relation", "summarize", "tape_timeline"]
+           "auction_facts", "pattern_labels", "review_stock", "sector_relation", "summarize", "tape_timeline"]
 
 
 # --- data-plane reads and orchestration --------------------------------------
@@ -559,6 +597,11 @@ class WatchReviewDependencies:
     # Industry ranking now (104 boards, one licensed call): the fallback when the
     # minute board snapshots are missing (e.g. paused by the storage guard).
     industry_board_flow: _Callable[[], _Awaitable[list[dict[str, Any]]]] | None = None
+    # symbols -> {symbol: raw Fuyao auction row}; the snapshot has no date, so
+    # it is only asked for on the session's own day.
+    auction_snapshot: _Callable[[list[str]], _Awaitable[dict[str, dict[str, Any]]]] | None = None
+    # (trade_date, {symbol: minute rows}) -> storage report (intraday_minute_sessions)
+    persist_minutes: _Callable[[date, dict[str, list[dict[str, Any]]]], _Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_watch_daily_review(trade_date: date, deps: WatchReviewDependencies, *, persist: bool = True) -> dict[str, Any]:
@@ -569,6 +612,20 @@ async def run_watch_daily_review(trade_date: date, deps: WatchReviewDependencies
     except Exception:  # noqa: BLE001 - a review without the tape keeps everything else
         tape = {}
     minutes = await deps.minutes_batch(symbols) if symbols else {}
+    same_day = trade_date == datetime.now(_CN).date()
+    auctions: dict[str, dict[str, Any]] = {}
+    if same_day and symbols and deps.auction_snapshot is not None:
+        try:
+            auctions = await deps.auction_snapshot(symbols)
+        except Exception:  # noqa: BLE001 - the review records the auction as missing
+            auctions = {}
+    minutes_stored: dict[str, Any] | None = None
+    if persist and same_day and deps.persist_minutes is not None:
+        whole = {symbol: rows for symbol, rows in minutes.items() if isinstance(rows, list) and rows}
+        try:
+            minutes_stored = await deps.persist_minutes(trade_date, whole) if whole else {"status": "empty"}
+        except Exception as error:  # noqa: BLE001 - the review itself is still stored
+            minutes_stored = {"status": "failed", "error": str(error)[:200]}
     bars = await deps.run_database(lambda: deps.plan_bars(deps.database, symbols, through=trade_date, limit=80),
                                    timeout_seconds=90)
     # Before the post-close daily sync today's bar does not exist yet: fall back
@@ -617,7 +674,7 @@ async def run_watch_daily_review(trade_date: date, deps: WatchReviewDependencies
             symbol=symbol, name=name, trade_date=trade_date, quote_day=quote_day, minutes=stock_minutes,
             bars=review_bars, limit=limit, sector=sector,
             sector_series=inputs["boards"].get(key, []) if key else [], signals=inputs["signals"].get(symbol, []),
-            themes=themes, tape=tape.get(symbol, [])))
+            themes=themes, tape=tape.get(symbol, []), auction=auctions.get(symbol)))
         reviews[-1]["history"]["as_of"] = entry.get("as_of") or trade_date.isoformat()
     if deps.industry_board_flow is not None and any(r["sector"].get("status") != "ok" for r in reviews):
         try:
@@ -641,6 +698,8 @@ async def run_watch_daily_review(trade_date: date, deps: WatchReviewDependencies
                             "with_sector_series": sum(1 for r in reviews if r["sector"].get("status") == "ok"),
                             "with_tape": sum(1 for r in reviews if r["tape"].get("status") == "ok"),
                             "tape_scans": max((r["tape"].get("scans") or 0 for r in reviews), default=0),
+                            "with_auction": sum(1 for r in reviews if r["day"]["auction"].get("status") == "ok"),
+                            "minutes_stored": minutes_stored,
                             "board_snapshots": max((len(v) for v in inputs["boards"].values()), default=0)}}
     stored = await deps.run_database(lambda: persist_reviews(deps.database, trade_date, reviews, summary),
                                      timeout_seconds=90) if persist else 0

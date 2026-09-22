@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from app.watch_daily_review import (history_context, intraday_path, pattern_labels, review_stock, sector_relation,
-                                    summarize, tape_timeline)
+from app.watch_daily_review import (auction_facts, history_context, intraday_path, pattern_labels, review_stock,
+                                    sector_relation, summarize, tape_timeline)
 
 
 def minutes(prices: list[float], vwap_lag: float = 0.0) -> list[dict]:
@@ -103,6 +103,26 @@ class TapeTimelineTests(unittest.TestCase):
         self.assertEqual(timeline["volume_bursts"][0]["time"], "09:35")
         self.assertEqual(timeline["signal_first_seen"], {"teacher_review:alerted": "09:40"})
         self.assertEqual(tape_timeline([])["status"], "no_tape")
+
+
+class AuctionFactsTests(unittest.TestCase):
+    RAW = {"data_status": "final", "auction_price": 12.11, "open_price": 12.11, "pre_close_price": 11.01,
+           "auction_pct": 9.9909, "auction_amount": 11271988, "auction_volume": 9308.0, "auction_unmatched": 662632.0,
+           "auction_turnover_pct": 0.2828}
+    DAY = {"pre_close": 11.01, "open": 12.11, "limit_up_price": 12.11}
+
+    def test_a_one_word_seal_is_measured_and_labelled(self):
+        facts = auction_facts(self.RAW, self.DAY)
+        self.assertEqual(facts["status"], "ok")
+        self.assertEqual(facts["unmatched_amount"], round(662632 * 100 * 12.11, 2))
+        self.assertTrue(facts["at_limit_up"])
+        self.assertIn("竞价涨停", pattern_labels({"gap_pct": 10.0, "auction": facts}, {}, {}, {}, {}))
+
+    def test_an_undated_snapshot_from_another_day_is_rejected(self):
+        self.assertEqual(auction_facts({**self.RAW, "pre_close_price": 10.2}, self.DAY)["reason"], "pre_close_mismatch")
+        self.assertEqual(auction_facts({**self.RAW, "auction_price": 11.5}, self.DAY)["reason"], "not_at_the_day_open")
+        self.assertEqual(auction_facts({**self.RAW, "data_status": "not_ready"}, self.DAY)["status"], "not_final")
+        self.assertEqual(auction_facts(None, self.DAY)["status"], "missing")
 
 
 if __name__ == "__main__":

@@ -65,6 +65,20 @@ predicates against `raw`; no owner guard index or cold-table scan is part of
 the startup gate. Missing factor rows remain missing and block adjusted
 research prices.
 
+## Peer tiering policy (2026-09-22)
+
+The peer publishes which of its evidence is needed by same-day live
+computation and how many sessions each stream stays hot:
+`GET /api/v1/research/storage-tiering` (`app/storage_tiering_policy.py`).
+The all-A Level-1 snapshot (~1.5 GB a session, ~95% of raw growth) stays hot
+for 2 sessions; intraday replay evidence for 5; sampled quote/rule-input
+evidence for 10; daily bars, reviews and supplements stay hot. The intended
+transfer is copy-after-close into the owner's cold twin, then delete from hot
+only after the hot window and a verified cold copy (same key and payload
+hash), outside 09:00-15:30 on trading days. The owner runs it; the peer never
+moves rows. The peer's hot budget measures the whole `quant` schema today,
+including relations already on `stock_cold`.
+
 ## Two database lanes
 
 - `5432` (`db-tunnel`) is for intraday/session reads and bounded realtime work.

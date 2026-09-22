@@ -83,12 +83,15 @@ def tape_record(symbol: str, quote: Mapping[str, Any] | None, minute: Mapping[st
         record["m"]["t"] = minute.get("time")
     peer = peer_context if isinstance(peer_context, Mapping) else {}
     if peer:
-        group = peer.get("selected_group")
+        group = peer.get("selected_group") if isinstance(peer.get("selected_group"), Mapping) else {}
+        union = peer.get("union") if isinstance(peer.get("union"), Mapping) else {}
         record["sec"] = {
-            "g": (group.get("group_key") or group.get("label") or group.get("name")) if isinstance(group, Mapping) else group,
-            "gb": _num(peer.get("group_breadth")), "cb": _num(peer.get("confirming_breadth")),
+            "g": group.get("sector_key"), "tx": group.get("taxonomy_key"),
+            # cb: the selected (strongest) peer group; gb: all mapped peer groups
+            "cb": _num(peer.get("confirming_breadth")), "gb": _num(union.get("confirming_breadth")),
             "cp": peer.get("confirming_peer_count"), "ap": peer.get("available_peer_count"),
         }
+        record["sec"] = {key: value for key, value in record["sec"].items() if value is not None}
     if signals:
         record["sig"] = [f"{item.get('signal_type')}:{item.get('state')}:{item.get('signal_key')}" for item in signals][:8]
     return {key: value for key, value in record.items() if value is not None}
@@ -125,7 +128,8 @@ TAPE_FIELDS = {
     "a": "cumulative amount (yuan)", "vw": "session VWAP", "vr": "volume ratio", "to": "turnover %",
     "lim": "limit-up price", "sealed/touched": "sealed now / touched the limit", "src/fresh": "price source and timestamp status",
     "m": "minute indicators r1/r5 (returns), vm (volume multiple), avw (vs VWAP %), rng (range position), ro (from open)",
-    "sec": "sector group g, breadth gb/cb, confirming/available peers cp/ap", "sig": "signals this scan (type:state:key)",
+    "sec": "peer group g (taxonomy tx); confirming breadth cb (that group) and gb (all mapped groups); confirming/available peers cp/ap",
+    "sig": "signals this scan (type:state:key)",
 }
 
 __all__ = ["EvidenceThrottle", "TAPE_CAPABILITY", "TAPE_FIELDS", "TAPE_PROVIDER", "persist_scan_tape", "tape_record"]

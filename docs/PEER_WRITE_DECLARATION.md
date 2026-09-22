@@ -32,6 +32,7 @@
 | `quant.intraday_watchlists`（`metadata.teacher_review`） | 导入与盘后刷新 | 次日计划合并进观察池行；超容量不写入 | API、scheduler；表锁下 INSERT/UPDATE，过期停用自有行 |
 | `quant.raw_market_observations`（`provider_key='quant_scan'`，`capability='watch_scan_tape'`） | 每轮盯盘扫描一行（上午 5 秒） | 全部观察池股票的紧凑逐轮记录（价/高开低/累计量额/均价/量比/换手/封板/分钟指标/板块广度/本轮信号），供复盘与模式归纳 | API；INSERT（按唯一键去重）；原始报价行与规则输入快照改为每股 30 秒抽样、出信号时必存 |
 | `quant.raw_market_observations`（`provider_key='quant_scan'`，`capability='watch_daily_review'`） | 盘后刷新一次（或手动 POST /api/v1/watch-reviews/run） | 观察池每只股票的当日复盘（走势/分时路径/逐轮盯盘记录中的竞价、封板开合、量比与板块广度变化/涨停行为/所属行业关系/近期与历史/信号/模式标签）与当日汇总 | API、scheduler；INSERT（按唯一键去重） |
+| `quant.intraday_minute_sessions`（`source_name='longhu_intraday_minutes'`） | 盘后复盘一次（当日） | 观察池每只股票当日完整 1 分钟线（09:30–15:00），补齐盘末剖面 36 只上限与尾盘分钟 | scheduler；UPSERT（按 symbol/日期/分钟/来源），不做删除 |
 | `quant.raw_archive_offsets` / `quant.raw_archive_batches` | 仅启用 overflow 时；重试安全 | 原始观测离线归档游标与 ACK | archive adapter；事务内 UPDATE/INSERT |
 
 ## 运行约束
@@ -41,6 +42,7 @@
 - `daily_adjustment_factors` 不写恒等占位值；缺失日用“没有因子行”表达。因子能否进入研究价格由 `raw->>'factor_semantics'` 与 provider/正值检查决定。
 - `quant.runtime_leases` 是预期的高频小写入；其余写入应有对应 scheduler/run ledger。异常写入由 owner `/api/v1/peer/errors` 与 peer ERROR 日志双向发现。
 - 本申报不包含 owner 冷层表；`stock_cold` 中的关系是 owner 运维证据，`stock_peer` 不依赖也不写入。
+- 热/冷分层由 owner 执行：peer 只在 `GET /api/v1/research/storage-tiering` 声明哪些证据是当日实时计算所需、各保留几个交易日在热层（`app/storage_tiering_policy.py`）；收盘后复制到冷孪生表、热窗口过后且冷副本校验一致才从热层删除，期间两层重叠。peer 不移动也不删除这些行。
 
 ## 对账输出建议
 

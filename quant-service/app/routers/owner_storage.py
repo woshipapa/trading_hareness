@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter
 
 from ..owner_storage import owner_runtime_schema_status
+from ..storage_tiering_policy import tiering_status
 
 
 def build_owner_storage_router(
@@ -19,7 +20,17 @@ def build_owner_storage_router(
     async def storage_tiers() -> dict[str, Any]:
         return await run_database(lambda: _read(database))
 
+    @router.get("/api/v1/research/storage-tiering")
+    async def storage_tiering() -> dict[str, Any]:
+        """The peer's hot/cold tiering policy for the owner's mover (read only)."""
+        return await run_database(lambda: _tiering(database))
+
     return router
+
+
+def _tiering(database: Any) -> dict[str, Any]:
+    with database.transaction() as connection:
+        return tiering_status(connection)
 
 
 def _read(database: Any) -> dict[str, Any]:

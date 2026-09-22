@@ -4703,6 +4703,26 @@ async def teacher_review_repair_daily(trade_date: date) -> dict[str, Any]:
             "controls": {key: controls.get(key) for key in ("status", "stored", "reason") if key in controls}}
 
 
+async def watch_review_auction_snapshot(symbols: list[str]) -> dict[str, dict[str, Any]]:
+    """Today's 09:25 opening-auction rows for the watchlist (Fuyao, <=100 codes a call)."""
+    from .fuyao_provider import fetch as fetch_fuyao
+    from .market_event_capture import normalize_fuyao_auction
+    rows: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(symbols), 100):
+        data = await asyncio.wait_for(
+            fetch_fuyao("a_share_auction_snapshot", {"thscodes": ",".join(symbols[start:start + 100])}), timeout=8)
+        for event in normalize_fuyao_auction(data, datetime.now(timezone.utc)):
+            rows[event["ts_code"]] = event["raw"]
+    return rows
+
+
+async def watch_review_store_minutes(trade_date: date, rows_by_symbol: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    from .intraday_minute_capture_actions import store_session_minutes
+    return await run_database_blocking(lambda: store_session_minutes(
+        db, trade_date, rows_by_symbol, source_name="longhu_intraday_minutes",
+        parse_minute=offline_minute_row, ensure_instrument=ensure_offline_instrument), timeout_seconds=120)
+
+
 def _watch_review_dependencies() -> WatchReviewDependencies:
     from .teacher_review_repository import plan_bars as teacher_plan_bars
     from .teacher_review_rules import scan_features as teacher_scan_features
@@ -4711,6 +4731,7 @@ def _watch_review_dependencies() -> WatchReviewDependencies:
         plan_bars=teacher_plan_bars,
         quote_features=lambda symbol, quote, observed_at: teacher_scan_features(symbol, quote, None, observed_at),
         industry_board_flow=intraday_longhu_industry_board_flow,
+        auction_snapshot=watch_review_auction_snapshot, persist_minutes=watch_review_store_minutes,
     )
 
 

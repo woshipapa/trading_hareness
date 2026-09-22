@@ -32,14 +32,17 @@ class TapeRecordTests(unittest.TestCase):
                                                                "asks": [], "seal_volume_lot": 1}}}}
         minute = {"price": 26.47, "vwap": 26.47, "return_1m_pct": 0.0, "return_5m_pct": 0.0,
                   "minute_volume_multiple": 0.4, "above_vwap_pct": 0.0, "time": "1130"}
-        peer = {"selected_group": {"group_key": "ths:881101", "label": "家居用品"}, "group_breadth": 0.6,
+        # the live peer-context shape (group_breadth is a per-group list, union covers all groups)
+        peer = {"selected_group": {"sector_key": "881101.TI", "taxonomy_key": "ths_industry", "peer_symbols": ["A"]},
+                "group_breadth": [{"sector_key": "881101.TI", "confirming_breadth": 0.4}],
+                "union": {"confirming_breadth": 0.25, "available_peer_count": 12},
                 "confirming_breadth": 0.4, "confirming_peer_count": 2, "available_peer_count": 5}
         signals = [{"signal_type": "entry", "state": "confirmed", "signal_key": "001216.SZ:entry:teacher_review:relay_one_word"}]
         record = tape_record("001216.SZ", quote, minute, peer, signals, at(0))
         self.assertEqual((record["p"], record["o"], record["pc"], record["v"], record["a"]), (26.47, 26.47, 24.06, 15054.0, 3.98e7))
         self.assertTrue(record["sealed"])
         self.assertEqual(record["m"]["t"], "1130")
-        self.assertEqual(record["sec"]["g"], "ths:881101")
+        self.assertEqual(record["sec"], {"g": "881101.TI", "tx": "ths_industry", "cb": 0.4, "gb": 0.25, "cp": 2, "ap": 5})
         self.assertEqual(record["sig"], ["entry:confirmed:001216.SZ:entry:teacher_review:relay_one_word"])
         self.assertLess(len(str(record)), 800)
 

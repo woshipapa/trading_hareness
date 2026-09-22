@@ -115,6 +115,70 @@ async def fetch_longhu_first_minute_rows(
     }
 
 
+def store_symbol_minutes(connection: Any, symbol: str, rows: list[dict[str, Any]], trading_date: date,
+                         source_name: str, parse_minute: Callable[[dict[str, Any]], dict[str, Any]]) -> tuple[int, str | None]:
+    """Upsert one symbol's session rows; returns (stored, first error)."""
+    stored, first_error = 0, None
+    for raw_row in rows:
+        try:
+            resolved_time = minute_row_datetime(raw_row, trading_date)
+            if resolved_time is None:
+                first_error = first_error or "minute row has missing or stale exchange date"
+                continue
+            # These provider rows expose a close/cumulative profile rather than
+            # guaranteed true minute OHLC.  Keep the existing flat-bar
+            # compatibility shape, but preserve the raw source and provenance.
+            row = parse_minute({
+                **raw_row, "ts_code": symbol,
+                "datetime": resolved_time.isoformat(sep=" "),
+                "open": raw_row.get("close"), "high": raw_row.get("close"), "low": raw_row.get("close"),
+            })
+            local_bar_time = row["bar_time"].astimezone(ZoneInfo("Asia/Shanghai"))
+            if local_bar_time.date() != trading_date:
+                continue
+            bucket = local_bar_time.strftime("%H:%M")
+            connection.execute(
+                """INSERT INTO quant.intraday_minute_sessions(
+                       symbol,trading_date,minute_bucket,bar_time,open,high,low,close,volume,amount,source_name,available_at,raw
+                   ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT(symbol,trading_date,minute_bucket,source_name) DO UPDATE SET
+                       bar_time=EXCLUDED.bar_time,open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
+                       close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
+                       available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
+                (symbol, trading_date, bucket, row["bar_time"], row["open"], row["high"], row["low"], row["close"],
+                 row["volume"], row["amount"], source_name, datetime.now(timezone.utc), tolerant_json(row["raw"])),
+            )
+            stored += 1
+        except (ValueError, TypeError) as validation_error:
+            first_error = first_error or f"invalid minute row: {str(validation_error)[:200]}"
+    return stored, first_error
+
+
+def store_session_minutes(database: Any, trading_date: date, rows_by_symbol: dict[str, list[dict[str, Any]]], *,
+                          source_name: str, parse_minute: Callable[[dict[str, Any]], dict[str, Any]],
+                          ensure_instrument: Callable[[Any, str], None]) -> dict[str, Any]:
+    """Store whole sessions for explicit watch symbols (the post-close review's copy).
+
+    Additive only: rows are upserted by (symbol, date, minute, source) and no
+    retention delete runs here - that stays with the close-window capture.
+    """
+    if source_name not in _SOURCE_NAMES:
+        raise ValueError(f"unknown minute source {source_name}")
+    stored_by_symbol: dict[str, int] = {}
+    errors: dict[str, str] = {}
+    with database.transaction() as connection:
+        for symbol, rows in sorted(rows_by_symbol.items()):
+            ensure_instrument(connection, symbol)
+            stored, error = store_symbol_minutes(connection, symbol, rows, trading_date, source_name, parse_minute)
+            stored_by_symbol[symbol] = stored
+            if error:
+                errors[symbol] = error
+    counts = sorted(stored_by_symbol.values())
+    return {"status": "completed" if counts and not errors else "partial" if counts else "empty",
+            "symbols": len(stored_by_symbol), "stored": sum(counts), "source_name": source_name,
+            "per_symbol_min_max": [counts[0], counts[-1]] if counts else None, "errors": dict(list(errors.items())[:5])}
+
+
 class IntradayMinuteCaptureActions:
     """Persist only current-session minute profiles, never a broad minute archive."""
 
@@ -176,41 +240,9 @@ class IntradayMinuteCaptureActions:
                     source_status[symbol] = source
                     source_name = minute_storage_source(source)
                     ensure_instrument(connection, symbol)
-                    stored = 0
-                    for raw_row in rows:
-                        try:
-                            resolved_time = minute_row_datetime(raw_row, trading_date)
-                            if resolved_time is None:
-                                errors.setdefault(symbol, "minute row has missing or stale exchange date")
-                                continue
-                            minute_clock = resolved_time.strftime("%H:%M")
-                            # These provider rows expose a close/cumulative
-                            # profile rather than guaranteed true minute OHLC.
-                            # Keep the existing flat-bar compatibility shape,
-                            # but preserve the raw source and provenance.
-                            row = parse_minute({
-                                **raw_row, "ts_code": symbol,
-                                "datetime": resolved_time.isoformat(sep=" "),
-                                "open": raw_row.get("close"), "high": raw_row.get("close"), "low": raw_row.get("close"),
-                            })
-                            local_bar_time = row["bar_time"].astimezone(ZoneInfo("Asia/Shanghai"))
-                            if local_bar_time.date() != trading_date:
-                                continue
-                            bucket = local_bar_time.strftime("%H:%M")
-                            connection.execute(
-                                """INSERT INTO quant.intraday_minute_sessions(
-                                       symbol,trading_date,minute_bucket,bar_time,open,high,low,close,volume,amount,source_name,available_at,raw
-                                   ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                                   ON CONFLICT(symbol,trading_date,minute_bucket,source_name) DO UPDATE SET
-                                       bar_time=EXCLUDED.bar_time,open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
-                                       close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
-                                       available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
-                                (symbol, trading_date, bucket, row["bar_time"], row["open"], row["high"], row["low"], row["close"],
-                                 row["volume"], row["amount"], source_name, datetime.now(timezone.utc), tolerant_json(row["raw"])),
-                            )
-                            stored += 1
-                        except (ValueError, TypeError) as validation_error:
-                            errors.setdefault(symbol, f"invalid minute row: {str(validation_error)[:200]}")
+                    stored, error = store_symbol_minutes(connection, symbol, rows, trading_date, source_name, parse_minute)
+                    if error:
+                        errors.setdefault(symbol, error)
                     stored_by_symbol[symbol] = stored
                     connection.execute(
                         """DELETE FROM quant.intraday_minute_sessions

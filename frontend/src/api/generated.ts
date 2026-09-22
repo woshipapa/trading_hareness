@@ -109,6 +109,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/storage-tiering": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Storage Tiering
+         * @description The peer's hot/cold tiering policy for the owner's mover (read only).
+         */
+        get: operations["storage_tiering_api_v1_research_storage_tiering_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/licensed/longhu/quotes": {
         parameters: {
             query?: never;
@@ -5009,6 +5029,28 @@ export interface operations {
         };
     };
     storage_tiers_api_v1_research_storage_tiers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    storage_tiering_api_v1_research_storage_tiering_get: {
         parameters: {
             query?: never;
             header?: never;
