@@ -252,11 +252,14 @@ class TeacherAndLeaderFlowLedgerTests(unittest.TestCase):
             seen = datetime(2099, 2, 3, 2, 0, tzinfo=timezone.utc)
             with db.transaction() as connection:
                 _seed_bars(connection, self.relay_symbol, self.run_date)
-                for mode, count in (("leader_pullback", 3), ("right_side_breakout", 2), ("launch_radar", 5)):
+                for mode, count, decision in (("leader_pullback", 3, "research_candidate"),
+                                              ("right_side_breakout", 2, "research_candidate"),
+                                              ("launch_radar", 5, "launch_watch"),
+                                              ("潜龙出海_swing_gated", 7, "no_trade")):
                     connection.execute(
                         """INSERT INTO quant.xiaojie_leader_flow_observations(trading_date,symbol,mode,model_version,first_seen_at,
-                               last_seen_at,observation_count,decision) VALUES(%s,%s,%s,'test',%s,%s,%s,'research_candidate')""",
-                        (self.run_date, self.relay_symbol, mode, seen, seen, count))
+                               last_seen_at,observation_count,decision) VALUES(%s,%s,%s,'test',%s,%s,%s,%s)""",
+                        (self.run_date, self.relay_symbol, mode, seen, seen, count, decision))
             with db.transaction() as connection:
                 stored = materialize_leader_flow_candidates(connection, self.run_date)
                 rows = {row["strategy_key"]: row for row in connection.execute(
@@ -264,7 +267,7 @@ class TeacherAndLeaderFlowLedgerTests(unittest.TestCase):
                         WHERE as_of_date=%s AND symbol=%s""", (self.run_date, self.relay_symbol)).fetchall()}
             self.assertEqual(stored, 2)
             self.assertEqual(rows["xiaojie_leader_flow"]["evidence"]["modes"], ["leader_pullback", "right_side_breakout"])
-            self.assertEqual(rows["xiaojie_leader_flow"]["raw_score"], 5)
+            self.assertEqual(rows["xiaojie_leader_flow"]["raw_score"], 5)   # the gated shadow row is not a detection
             self.assertEqual(rows["launch_radar"]["raw_score"], 5)
         finally:
             self._cleanup()

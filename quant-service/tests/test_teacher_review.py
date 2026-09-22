@@ -618,7 +618,9 @@ class ConfluenceTests(unittest.TestCase):
     def test_book_is_scoped_to_one_session_and_rebuilt_from_evidence(self):
         from app.strategy_confluence import ConfluenceBook, teacher_confluence_line, teacher_plans_for_day
         book = ConfluenceBook()
-        book.hydrate_xiaojie(date(2026, 9, 22), [{"symbol": "002285.SZ", "mode": "潜龙出海_swing"}])
+        book.hydrate_xiaojie(date(2026, 9, 22), [{"symbol": "002285.SZ", "mode": "潜龙出海_swing"},
+                                                 {"symbol": "002285.SZ", "mode": "潜龙出海_swing_gated",
+                                                  "decision": "no_trade"}])
         book.note_xiaojie(date(2026, 9, 22), [{"symbol": "002285.SZ", "mode": "leader_divergence"}])
         self.assertEqual(book.xiaojie_modes(date(2026, 9, 22), "002285.sz"), ["leader_divergence", "潜龙出海_swing"])
         self.assertEqual(book.xiaojie_modes(date(2026, 9, 23), "002285.SZ"), [])

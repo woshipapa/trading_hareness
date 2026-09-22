@@ -89,14 +89,17 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "research", "research_enabled", "none", "bounded post-close minute-pattern discovery and replay evidence",
     ),
     "xiaojie_leader_flow": StrategyContract(
-        "xiaojie_leader_flow", "xiaojie-leader-flow-v2", "app/xiaojie_leader_flow.py",
-        "xiaojie-leader-flow-input-v1",
+        "xiaojie_leader_flow", "xiaojie-leader-flow-v3", "app/xiaojie_leader_flow.py",
+        "xiaojie-leader-flow-input-v2",
         ("intraday_quote_observations", "intraday_scan_runs", "strategy_pattern_samples", "analyst_observations"),
         "research", "shadow", "none",
         "point-in-time, research-only quantification of the 小杰夜报 leader/divergence/return-flow playbook; "
         "v2 adds a daily-bar overheat gate (distance from MA20, pre-signal 5-day run-up, sector day return/net "
         "inflow, stock-vs-sector divergence) scoped to the 潜龙出海_swing fallback mode only, calibrated from a "
-        "23-observation \"小杰交流\" event study (2026-08-26 to 09-16)",
+        "23-observation \"小杰交流\" event study (2026-08-26 to 09-16); v3 wires those inputs live and adds the "
+        "潜龙 five-evidence contract (MA convergence/box, volume marker K, pullback holding MA5/box top, sector "
+        "main line, profitable fundamentals) distilled from the 小杰交流 replies - missing evidence is no_trade, "
+        "and gated names are settled under their own mode for ablation",
     ),
     # Per-stock plans distilled from a named analyst's post-close review
     # (video/text).  The pack is point-in-time (first session whose 09:15 open

@@ -166,12 +166,14 @@ from .intraday_surge_context_service import capture as capture_intraday_surge_co
 from .strategy_candidate_ranking import select as select_intraday_candidates
 from .xiaojie_leader_flow import MODEL_VERSION as XIAOJIE_LEADER_FLOW_MODEL_VERSION, evaluate_snapshot as evaluate_xiaojie_leader_flow_snapshot
 from .longhu_multifactor_shadow import MODEL_VERSION as LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION
+from .xiaojie_leader_flow import QIANLONG_EVIDENCE_LABELS, QIANLONG_GATED_MODE
 from .xiaojie_leader_flow import alert_priority as xiaojie_alert_priority
 from .xiaojie_leader_flow import research_alert_allowed as xiaojie_research_alert_allowed
 from .xiaojie_indicators import evaluate_pool as evaluate_xiaojie_leader_pool
 from .xiaojie_indicators import leader_pool as leader_pool_symbols
 from .xiaojie_reference_repository import (
     ensure_session_trade_limits as ensure_xiaojie_session_trade_limits,
+    latest_board_flow as read_xiaojie_latest_board_flow,
     load_session_reference as load_xiaojie_session_reference,
     persist_trade_limit_rows as persist_xiaojie_trade_limit_rows,
     trade_limits as read_xiaojie_trade_limits,
@@ -2077,6 +2079,10 @@ _launch_velocity_state: dict[str, Any] = {}
 #: so a restart cannot reset it.
 XIAOJIE_MAX_ALERTS_PER_SCAN = 5
 XIAOJIE_MAX_ALERTS_PER_SESSION = 40
+#: The board-flow loop stores one point a minute; the 30-second xiaojie scan
+#: rereads it at most this often.
+XIAOJIE_BOARD_FLOW_REFRESH_SECONDS = 30.0
+_xiaojie_board_flow: dict[str, Any] = {"trading_date": None, "read_at": 0.0, "value": None}
 
 
 async def _xiaojie_session_context(trading_date: date) -> dict[str, Any]:
@@ -2119,6 +2125,29 @@ def _with_connection(action: Any) -> Any:
         return action(connection)
 
 
+async def _xiaojie_board_flow_point(trading_date: date, observed_at: datetime) -> dict[str, Any]:
+    """The newest stored licensed board-flow point, cached briefly per process.
+
+    A failed read leaves the sector inputs absent for this scan; it never
+    stops the leader-flow pass.
+    """
+    cached = _xiaojie_board_flow
+    now = monotonic()
+    if (cached["value"] is not None and cached["trading_date"] == trading_date
+            and now - cached["read_at"] < XIAOJIE_BOARD_FLOW_REFRESH_SECONDS):
+        return cached["value"]
+    try:
+        value = await run_database_blocking(
+            lambda: _with_connection(lambda connection: read_xiaojie_latest_board_flow(
+                connection, trading_date, observed_at)),
+            timeout_seconds=15,
+        )
+    except Exception as error:  # noqa: BLE001 - sector inputs are optional per scan
+        return {"status": "unavailable", "reason": safe_error_detail(str(error), 160), "boards": {}}
+    cached.update({"trading_date": trading_date, "read_at": now, "value": value})
+    return value
+
+
 async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
                                   all_a_rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Evaluate the leader pool from this scan's own cross-section.
@@ -2134,13 +2163,29 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
     reference = await _xiaojie_session_context(trading_date)
     if not reference.get("limits"):
         return {"status": "blocked", "reason": "session trade limits unavailable"}
+    board_flow = await _xiaojie_board_flow_point(trading_date, observed_at)
     result = evaluate_xiaojie_leader_pool(
         all_a_rows, limits=reference["limits"], membership=reference["membership"],
         references=reference["references"], observed_at=observed_at,
         ma5_break_state=_xiaojie_ma5_break_state,
         market_volume_baseline=reference.get("market_volume_baseline"),
+        sector_flow=board_flow, membership_taxonomy=reference.get("membership_taxonomy"),
     )
     candidates = result["candidates"]
+    # Gated 潜龙 names are settled like any observation so the gate itself can
+    # be scored; their own mode keeps them out of every alert path.
+    gated = [{**item, "mode": QIANLONG_GATED_MODE} for item in result.get("qianlong_gated") or []]
+    gated_status: dict[str, Any] = {"recorded": 0}
+    if gated:
+        try:
+            await run_database_blocking(
+                lambda: _with_connection(lambda connection: record_xiaojie_candidates(
+                    connection, trading_date, observed_at, scan_id, gated)),
+                timeout_seconds=60,
+            )
+            gated_status["recorded"] = len(gated)
+        except Exception as error:  # noqa: BLE001 - shadow evidence must not end the scan
+            gated_status["error"] = safe_error_detail(str(error), 160)
     await _refresh_strategy_confluence(trading_date, observed_at, candidates)
     fresh = await run_database_blocking(
         lambda: _with_connection(lambda connection: record_xiaojie_candidates(
@@ -2242,6 +2287,7 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
         "main_sector_count": result["main_sector_count"],
         "regime": result["regime"],
         "candidates": len(candidates), "new_candidates": new_candidate_count, "alerted": len(alerted),
+        "qianlong_gated": gated_status, "sector_flow": result.get("sector_flow"),
         "actionable_candidates": len(actionable),
         "sealed_skipped": sealed_skipped,
         "sealed_research_alerts": sealed_research_alerts,
@@ -2336,17 +2382,45 @@ def _xiaojie_alert_text(candidate: dict[str, Any], trading_date: date,
         "封板，仅作研究提醒，不追板；等待开板/承接确认。\n"
         if board.get("sealed") and candidate.get("mode") == "潜龙出海_swing" else ""
     )
+    qianlong_line = _qianlong_alert_line(evidence) if candidate.get("mode") == "潜龙出海_swing" else ""
     return (
         f"【研究观察·小杰龙头】{label} {candidate.get('mode')}\n"
         f"{trading_date} {state} 涨幅 {pct:.2f}%\n" if pct is not None else
         f"【研究观察·小杰龙头】{label} {candidate.get('mode')}\n{trading_date} {state}\n"
     ) + (
-        sealed_research_notice +
+        sealed_research_notice + qianlong_line +
         f"研究仓位参考 {(candidate.get('position') or {}).get('target_fraction')}；"
         f"风险标记 {', '.join(candidate.get('risk_flags') or []) or '无'}\n"
         + (f"{teacher_confluence_line(teacher)}\n" if teacher else "")
         + "仅为研究观察，零实盘权重，不构成交易指令。"
     )
+
+
+def _qianlong_alert_line(evidence: Mapping[str, Any]) -> str:
+    """One line of the 潜龙 contract: which evidence held, overheat, and the board."""
+    contract = evidence.get("qianlong_evidence") or {}
+    items = contract.get("evidence") or {}
+    parts: list[str] = []
+    if items:
+        marks = {True: "✓", False: "✗", None: "?"}
+        passed = sum(1 for value in items.values() if value is True)
+        parts.append(f"潜龙证据 {passed}/{len(items)}：" + " ".join(
+            f"{QIANLONG_EVIDENCE_LABELS.get(name, name)}{marks.get(value, '?')}" for name, value in items.items()))
+    overheat = evidence.get("qianlong_swing_overheat") or {}
+    if overheat:
+        text = f"过热 {int(overheat.get('count') or 0)} 项"
+        if overheat.get("missing"):
+            text += f"（缺 {len(overheat['missing'])} 项输入）"
+        parts.append(text)
+    inputs = evidence.get("qianlong_inputs") or {}
+    flow = inputs.get("sector_flow") or {}
+    change, rate = inputs.get("sector_day_return_pct"), inputs.get("sector_net_inflow_rate_pct")
+    if flow.get("label") and change is not None:
+        text = f"板块 {flow['label']} {float(change):+.2f}%"
+        if rate is not None:
+            text += f" 净流入率 {float(rate):+.1f}%"
+        parts.append(text)
+    return ("；".join(parts) + "\n") if parts else ""
 
 
 async def intraday_watch_volume_fallback(symbols: list[str]) -> dict[str, float]:

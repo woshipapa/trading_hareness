@@ -80,7 +80,11 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         # sector" only has an answer under the first.
         Need("sector.membership", purpose="sector core confirmation; first loaded taxonomy in order wins",
              taxonomies=("longhu_ths_industry", "ths_concept_flow")),
-        Need("bars.daily", purpose="MA20/overheat gate"),
+        Need("bars.daily", purpose="MA20/overheat gate; 潜龙 MA convergence, marker K and pressure high"),
+        # Optional for the strategy as a whole, required by one mode: without
+        # them 潜龙出海_swing reads its evidence as incomplete and turns away.
+        Need("sector.flow_curve", False, "潜龙 sector day return and net inflow rate (same taxonomy as membership)"),
+        Need("fundamentals.daily_basic", False, "潜龙 fundamental evidence (profitable PE proxy)"),
     ),
     _needs(
         "launch_radar",

@@ -11,8 +11,8 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-MODEL_VERSION = "xiaojie-leader-flow-v2"
-INPUT_CONTRACT = "xiaojie-leader-flow-input-v1"
+MODEL_VERSION = "xiaojie-leader-flow-v3"
+INPUT_CONTRACT = "xiaojie-leader-flow-input-v2"
 
 # These are preregistered research defaults, not promoted trading parameters.
 # Values which were not stated numerically in the messages remain calibration
@@ -67,6 +67,23 @@ DEFAULT_PARAMETERS: dict[str, Any] = {
     "qianlong_swing_sector_return_hot_pct": 1.5,
     "qianlong_swing_sector_net_inflow_hot_pct": 3.0,
     "qianlong_swing_divergence_min_pct": 2.0,
+    # The 潜龙 five-evidence contract, distilled from the 21 小杰交流 replies
+    # (2026-09-17 to 09-22) that name 潜龙/潜龙出海.  They share one order:
+    # MA convergence or a box, a marker K on volume (or a second volume
+    # reverse-wrap), a pullback that holds MA5 or the box top, sector/main-line
+    # confirmation, and fundamentals that are actually delivering.  Look-alike
+    # shapes without the last one were explicitly refused (跨境通), as were
+    # convergences without a volume marker K (共进股份).  Missing evidence is
+    # not passing evidence: the mode returns no_trade until all five are known
+    # and true.  Thresholds below are preregistered calibration knobs.
+    "qianlong_evidence_required": True,
+    "qianlong_ma_confluence_max_spread_pct": 3.0,
+    "qianlong_box_range_max_pct": 20.0,
+    "qianlong_marker_k_max_sessions_ago": 5,
+    "qianlong_support_band_pct": 1.0,
+    # 前高/箱体上沿/套牢盘 pressure only downgrades the research position; the
+    # replies treat it as "wait or reduce if it cannot break", not an exit.
+    "qianlong_overhead_pressure_band_pct": 3.0,
     "long_term_dca_parts_min": 10,
     "long_term_dca_parts_max": 20,
     "long_term_dca_drawdown_min_pct": 5.0,
@@ -102,6 +119,10 @@ MODE_ALERT_PRIORITY: dict[str, int] = {
 }
 #: Anything unrecognised sorts after every declared mode rather than ahead of it.
 UNRANKED_MODE_PRIORITY = len(MODE_ALERT_PRIORITY)
+#: Observation mode for 潜龙 names only the 潜龙 gates turned away.  Recorded
+#: as ``no_trade`` so the gate can be settled against the names it passed;
+#: never alerted and never a ledger candidate.
+QIANLONG_GATED_MODE = "潜龙出海_swing_gated"
 
 
 def alert_priority(candidate: Mapping[str, Any]) -> tuple[int, float]:
@@ -186,10 +207,10 @@ def _qianlong_swing_overheat(snapshot: Mapping[str, Any], params: Mapping[str, A
     The other modes each carry their own playbook-stated gate (e.g. a
     confirmed re-seal, a VWAP hold).  潜龙出海_swing is the catch-all for
     "breakout or reverse-wrap, nothing more specific matched", so it had
-    nothing of its own.  Any field that is absent (indicator pipeline has not
-    populated it yet) contributes no flag rather than blocking - this must
-    degrade to today's behaviour when the daily-bar/sector-flow snapshot
-    fields are not supplied.
+    nothing of its own.  An absent field raises no flag of its own, but it is
+    listed in ``missing``: the caller treats an incomplete reading as unknown
+    and funds it at the high-risk fraction rather than as a clean zero-flag
+    pass.
     """
     ma20_distance = _number(snapshot.get("distance_from_ma20_pct"))
     pre_run_5d = _number(snapshot.get("pre_signal_5d_return_pct"))
@@ -207,7 +228,100 @@ def _qianlong_swing_overheat(snapshot: Mapping[str, Any], params: Mapping[str, A
         flags.append("qianlong_swing_sector_already_hot")
     if divergence is not None and divergence < float(params["qianlong_swing_divergence_min_pct"]):
         flags.append("qianlong_swing_no_relative_strength")
-    return {"flags": flags, "count": len(flags)}
+    inputs = {"distance_from_ma20_pct": ma20_distance, "pre_signal_5d_return_pct": pre_run_5d,
+              "sector_day_return_pct": sector_return, "sector_net_inflow_rate_pct": sector_inflow,
+              "stock_vs_sector_divergence_pct": divergence}
+    missing = [name for name, value in inputs.items() if value is None]
+    return {"flags": flags, "count": len(flags), "missing": missing, "complete": not missing}
+
+
+#: Chinese labels for the five 潜龙 evidence items, in the replies' own order.
+QIANLONG_EVIDENCE_LABELS: dict[str, str] = {
+    "ma_confluence": "均线收敛/箱体",
+    "breakout_volume": "放量标志K",
+    "pullback_support": "回踩守支撑",
+    "sector_context": "板块主线",
+    "fundamental": "基本面兑现",
+}
+
+
+def _qianlong_evidence(snapshot: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    """The five-evidence contract for 潜龙出海_swing, each item True/False/None.
+
+    None means the inputs to answer it were absent, which is reported as
+    missing rather than read as a pass or a fail.
+    """
+    detail: dict[str, str] = {}
+
+    spread = _number(snapshot.get("ma_spread_min_10d_pct"))
+    box_range = _number(snapshot.get("consolidation_box_range_pct"))
+    converged = spread is not None and spread <= float(params["qianlong_ma_confluence_max_spread_pct"])
+    boxed = box_range is not None and box_range <= float(params["qianlong_box_range_max_pct"])
+    if converged or boxed:
+        ma_confluence: bool | None = True
+        detail["ma_confluence"] = "ma_spread" if converged else "box_range"
+    elif spread is not None and box_range is not None:
+        ma_confluence = False
+    else:
+        ma_confluence = None
+
+    marker_ago = _number(snapshot.get("marker_k_sessions_ago"))
+    recent_marker = marker_ago is not None and 1 <= marker_ago <= float(params["qianlong_marker_k_max_sessions_ago"])
+    today_breakout = _flag(snapshot, "breakout_confirmed")
+    today_wrap = _flag(snapshot, "reverse_wrap_volume_confirmed")
+    if today_breakout or today_wrap or recent_marker:
+        breakout_volume: bool | None = True
+        detail["breakout_volume"] = ("breakout_today" if today_breakout
+                                     else "volume_reverse_wrap_today" if today_wrap
+                                     else f"marker_k_{int(marker_ago)}_sessions_ago")
+    elif _boolean(snapshot.get("daily_history_complete")) is True:
+        breakout_volume = False
+    else:
+        breakout_volume = None
+
+    band = float(params["qianlong_support_band_pct"])
+    if recent_marker:
+        ma5_gap = _number(snapshot.get("signed_distance_from_ma5_pct"))
+        box_gap = _number(snapshot.get("distance_from_box_top_pct"))
+        holds = [gap >= -band for gap in (ma5_gap, box_gap) if gap is not None]
+        pullback_support: bool | None = any(holds) if holds else None
+        detail["pullback_support"] = "ma5_or_box_top_after_marker_k"
+    elif today_breakout or today_wrap:
+        pullback_support = _boolean(snapshot.get("support_or_vwap_holds"))
+        detail["pullback_support"] = "vwap_on_marker_day"
+    elif breakout_volume is False:
+        pullback_support = False
+        detail["pullback_support"] = "no_marker_k"
+    else:
+        pullback_support = None
+
+    in_main = _boolean(snapshot.get("candidate_in_main_sector"))
+    percentile = _number(snapshot.get("sector_strength_percentile"))
+    strong = percentile is not None and percentile >= float(params["sector_strength_percentile_min"])
+    if in_main is True or strong:
+        sector_context: bool | None = True
+    elif percentile is not None and in_main is False:
+        sector_context = False
+    else:
+        sector_context = None
+
+    pe = _number(snapshot.get("fundamental_pe"))
+    fundamental: bool | None = None if pe is None or pe == 0 else pe > 0
+    if pe is not None:
+        detail["fundamental"] = "profitable_pe_proxy"
+
+    overhead = _number(snapshot.get("overhead_high_distance_pct"))
+    pressure = (None if overhead is None
+                else 0 < overhead <= float(params["qianlong_overhead_pressure_band_pct"]))
+
+    evidence = {"ma_confluence": ma_confluence, "breakout_volume": breakout_volume,
+                "pullback_support": pullback_support, "sector_context": sector_context,
+                "fundamental": fundamental}
+    missing = [name for name, value in evidence.items() if value is None]
+    failed = [name for name, value in evidence.items() if value is False]
+    return {"required": bool(params["qianlong_evidence_required"]), "evidence": evidence, "detail": detail,
+            "missing": missing, "failed": failed, "complete": not missing,
+            "passed": not missing and not failed, "overhead_pressure": pressure}
 
 
 def _mode(snapshot: Mapping[str, Any], params: Mapping[str, Any]) -> str | None:
@@ -285,10 +399,32 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
     high_risk = selected_mode in {"one_word_return_flow", "reverse_wrap"}
     if high_risk:
         risk_flags.append("high_risk_mode")
+    is_qianlong = selected_mode == "潜龙出海_swing"
     qianlong_overheat = (
-        _qianlong_swing_overheat(snapshot, params) if selected_mode == "潜龙出海_swing" else {"flags": [], "count": 0}
+        _qianlong_swing_overheat(snapshot, params) if is_qianlong else {"flags": [], "count": 0}
     )
     risk_flags.extend(qianlong_overheat["flags"])
+    qianlong_evidence = _qianlong_evidence(snapshot, params) if is_qianlong else None
+    qianlong_overheat_incomplete = is_qianlong and not qianlong_overheat["complete"]
+    qianlong_pressure = bool(qianlong_evidence and qianlong_evidence["overhead_pressure"])
+    qianlong_evidence_blocked = bool(
+        qianlong_evidence and qianlong_evidence["required"] and not qianlong_evidence["passed"])
+    if qianlong_evidence is not None:
+        if qianlong_evidence["missing"]:
+            risk_flags.append("qianlong_evidence_incomplete")
+            reasons.append("潜龙证据缺失：" + "、".join(
+                QIANLONG_EVIDENCE_LABELS[name] for name in qianlong_evidence["missing"]))
+        if qianlong_evidence["failed"]:
+            risk_flags.append("qianlong_evidence_failed")
+            reasons.append("潜龙证据不成立：" + "、".join(
+                QIANLONG_EVIDENCE_LABELS[name] for name in qianlong_evidence["failed"]))
+    if qianlong_overheat_incomplete:
+        # Absent overheat inputs are unknown, not cool: they no longer count as
+        # a clean zero-flag reading that funds the normal fraction.
+        risk_flags.append("qianlong_overheat_inputs_incomplete")
+    if qianlong_pressure:
+        risk_flags.append("qianlong_overhead_pressure")
+        reasons.append("上方前高/套牢压力在区间内，只降级研究仓位")
     if selected_mode is None:
         reasons.append("没有可复现的买点形态")
     elif selected_mode == "one_word_return_flow":
@@ -333,14 +469,16 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
     # 66.7-71.4% (n=13, downgraded to the same small fraction as the other
     # high-risk modes rather than funded normally), and 3 flags saw 100%
     # (n=3, small but unanimous - blocked outright rather than sized down).
-    qianlong_overheat_high_risk = selected_mode == "潜龙出海_swing" and qianlong_overheat["count"] >= 1
-    qianlong_overheat_blocked = selected_mode == "潜龙出海_swing" and qianlong_overheat["count"] >= 3
-    hard_block = (
+    qianlong_overheat_high_risk = is_qianlong and (
+        qianlong_overheat["count"] >= 1 or qianlong_overheat_incomplete or qianlong_pressure)
+    qianlong_overheat_blocked = is_qianlong and qianlong_overheat["count"] >= 3
+    base_block = (
         not market["ok"] or not market["complete"]
         or (_flag(snapshot, "is_back_row") and not follows_a_leader)
         or _flag(snapshot, "futures_stock_both_rising") or not sector_core or not leader_gate_ok or selected_mode is None
-        or left_side_without_cushion or qianlong_overheat_blocked
+        or left_side_without_cushion
     )
+    hard_block = base_block or qianlong_overheat_blocked or qianlong_evidence_blocked
     decision = "no_trade" if hard_block else "research_candidate"
     if decision == "no_trade":
         position_fraction = 0.0
@@ -403,6 +541,10 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
         "mode": selected_mode,
         "market_gate": market,
         "qianlong_swing_overheat": qianlong_overheat,
+        "qianlong_evidence": qianlong_evidence,
+        # What the decision would have been without the 潜龙-specific gates, so
+        # the names they block can be settled alongside the ones they pass.
+        "decision_without_qianlong_gates": "no_trade" if base_block else "research_candidate",
         "position": {
             "target_fraction": round(position_fraction, 4),
             "staged_entry": staged_entry,
@@ -431,6 +573,6 @@ def evaluate_snapshot(snapshot: Mapping[str, Any], parameters: Mapping[str, Any]
 
 __all__ = [
     "DEFAULT_PARAMETERS", "EXIT_SEVERITY", "INPUT_CONTRACT", "MODEL_VERSION",
-    "MODE_ALERT_PRIORITY", "UNRANKED_MODE_PRIORITY", "alert_priority", "research_alert_allowed",
+    "MODE_ALERT_PRIORITY", "QIANLONG_EVIDENCE_LABELS", "QIANLONG_GATED_MODE", "UNRANKED_MODE_PRIORITY", "alert_priority", "research_alert_allowed",
     "evaluate_snapshot",
 ]

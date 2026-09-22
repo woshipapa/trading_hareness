@@ -267,6 +267,26 @@ class AlertNamesTheStockNotJustItsCodeTests(unittest.TestCase):
         text = self._text(candidate, self.names)
         self.assertIn("封板，仅作研究提醒，不追板", text)
 
+    def test_a_qianlong_alert_shows_its_evidence_overheat_and_board(self):
+        candidate = self._candidate("601811.SH")
+        candidate["mode"] = "潜龙出海_swing"
+        candidate["evidence"].update({
+            "qianlong_evidence": {"evidence": {"ma_confluence": True, "breakout_volume": True,
+                                               "pullback_support": True, "sector_context": True,
+                                               "fundamental": None}},
+            "qianlong_swing_overheat": {"flags": ["qianlong_swing_sector_already_hot"], "count": 1,
+                                        "missing": []},
+            "qianlong_inputs": {"sector_day_return_pct": 3.125, "sector_net_inflow_rate_pct": 6.4,
+                                "sector_flow": {"label": "文化传媒"}},
+        })
+        text = self._text(candidate, self.names)
+        self.assertIn("潜龙证据 4/5：均线收敛/箱体✓ 放量标志K✓ 回踩守支撑✓ 板块主线✓ 基本面兑现?", text)
+        self.assertIn("过热 1 项", text)
+        self.assertIn("板块 文化传媒 +3.12% 净流入率 +6.4%", text)
+
+    def test_other_modes_carry_no_qianlong_line(self):
+        self.assertNotIn("潜龙证据", self._text(self._candidate(), self.names))
+
     def test_the_body_of_the_alert_is_unchanged(self):
         text = self._text(self._candidate(), self.names)
         for fragment in ("【研究观察·小杰龙头】", "封板", "涨幅 10.00%",
