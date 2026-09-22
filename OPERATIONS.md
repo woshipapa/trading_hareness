@@ -113,7 +113,7 @@ docker compose run --rm --no-deps n8n execute --id=remoteArchiveReports123 --raw
 
 监控页通过 Server-Sent Events 实时显示当前适配器进程收到的最近 200 条事件。它显示文本、消息/群聊/发送者 ID、图片或文件 key、完整原始 JSON，以及“已接收 → n8n 执行中/完成/失败 → 目标导入队列状态”。重启 `feishu-adapter` 后该页面的内存记录会清空，不影响 n8n 的执行历史。
 
-本机 relay/monitor 页面由 `frontend/` 中的 Vue 3 + Vite + TypeScript 构建产物提供。relay 使用 multipart，不再把媒体编码为 Base64；浏览器显示上传进度并支持取消。适配器提供 `/api/config`、`/jobs`、`/metrics`，其中 job/asset/part 状态持久化在 PostgreSQL，临时媒体文件存放在 `adapter_ingestion_data` volume，由本地对账定时清理。
+本机量化研究台由根目录 `frontend/` 的 Vue 3 + Vite + TypeScript 构建产物提供；Feishu relay/monitor 页面由 `feishu-relay/dashboard/` 的独立构建产物提供。两者由 adapter 按路径选择并共享同源 API。relay 使用 multipart，不再把媒体编码为 Base64；浏览器显示上传进度并支持取消。适配器提供 `/api/config`、`/jobs`、`/metrics`，其中 job/asset/part 状态持久化在 PostgreSQL，临时媒体文件存放在 `adapter_ingestion_data` volume，由本地对账定时清理。
 
 幂等规则：同一 `event_id` 或 `message_id` 永远复用本地 job；已完成过的相同媒体 SHA256 会标记为 `duplicate_media`，不会再次调用远端 reserve。批次、正文和媒体上传键均为确定性 idempotency key；远端 HTTP 409 会分类为 `remote_conflict`，保留 job 和临时分片供人工检查；只有通过 `POST /api/jobs/{job_id}/retry` 明确重试，才会重新进入本地队列。源群的飞书 `system` 消息（入群、退群、群设置变更）会在转发前标为 `filtered_system`，汇总群的历史 `[system]` 占位消息也不会送入 n8n。
 

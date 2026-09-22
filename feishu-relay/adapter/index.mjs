@@ -31,6 +31,7 @@ import { splitUtf8Text } from './media-chunks.mjs';
 import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
+import { resolveFrontendAssetPath } from './frontend-assets.mjs';
 import Busboy from 'busboy';
 
 const required = ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'N8N_TEXT_WEBHOOK_URL', 'N8N_MEDIA_PART_WEBHOOK_URL', 'N8N_MEDIA_FINALIZE_WEBHOOK_URL'];
@@ -89,6 +90,8 @@ const dashboardHost = String(process.env.DASHBOARD_HOST ?? '0.0.0.0').trim() || 
 const larkAgentXHealthUrl = String(process.env.LARKX_BRIDGE_HEALTH_URL ?? 'http://127.0.0.1:8090/health').trim();
 const longConnectionEnabled = String(process.env.FEISHU_LONG_CONNECTION_ENABLED ?? 'true').toLowerCase() !== 'false';
 const frontendDist = process.env.FRONTEND_DIST ?? '/app/frontend-dist';
+const quantFrontendDistConfigured = process.env.QUANT_FRONTEND_DIST ?? '/app/quant-frontend-dist';
+const quantFrontendDist = existsSync(quantFrontendDistConfigured) ? quantFrontendDistConfigured : '/app/quant-frontend-dist';
 const frontendMode = process.env.FRONTEND_MODE ?? (existsSync(frontendDist) ? 'spa' : 'legacy');
 const itouguStatusFile = String(process.env.ITOUGU_STATUS_FILE ?? '/var/lib/itougu-neican/status.json').trim();
 const itouguControlUrl = String(process.env.ITOUGU_CONTROL_URL ?? 'http://127.0.0.1:18084').trim().replace(/\/$/, '');
@@ -2188,8 +2191,8 @@ const dashboard = createServer((request, response) => {
 		return;
 	}
 	if (frontendMode === 'spa' && request.method === 'GET' && !['/health', '/events', '/metrics', '/jobs', '/analysis/jobs', '/api/paper-kb-deliveries', '/internal/larkagentx/routes'].includes(url.pathname)) {
-		const requested = url.pathname === '/relay' ? 'index.html' : url.pathname.slice(1);
-		const assetPath = join(frontendDist, requested.includes('.') ? requested : 'index.html');
+		const assetPath = resolveFrontendAssetPath(url.pathname, frontendDist, quantFrontendDist);
+		if (!assetPath) { response.writeHead(404).end(); return; }
 		try { const body = readFileSync(assetPath); const type = assetPath.endsWith('.js') ? 'text/javascript' : assetPath.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8'; response.writeHead(200, { 'content-type': type, 'cache-control': assetPath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable' }); response.end(body); } catch { response.writeHead(404).end(); }
 		return;
 	}

@@ -96,9 +96,10 @@ not import `app.main`.
 | Strategy contracts | `app/platform/strategy_registry.py` | Every strategy declares its model/input contract, runtime owner, retained evidence and `live_effect=none`; startup rejects missing or mismatched materialized model versions. |
 | Schema | `migrations/versions/` | New production schema changes use Alembic only. |
 | Legacy bootstrap | `app/database.py` | Disabled by default; only an explicit recovery operator may enable it. |
-| Frontend transport | `frontend/src/api/http.ts` | All JSON responses produce a readable non-JSON proxy error. |
-| Frontend lifecycle | `frontend/src/composables/` | Timers and subscriptions are owned and stopped by the mounting shell. |
-| Frontend feature UI | `frontend/src/components/`, `frontend/src/views/` | New dashboard surfaces must not grow `App.vue`. |
+| Quant frontend | `frontend/src/` | Quant research and personal-decision console only; it has its own Vite build. |
+| Feishu frontend | `feishu-relay/dashboard/src/` | LarkAgentX monitor, relay workbench and manual delivery only; it has its own Vite build. |
+| Frontend transport | `frontend/src/api/http.ts`, `feishu-relay/dashboard/src/api/http.ts` | Each app keeps a typed same-origin JSON boundary and reports non-JSON proxy errors clearly. |
+| Frontend lifecycle | `frontend/src/composables/`, `feishu-relay/dashboard/src/composables/` | Timers and subscriptions are owned and stopped by the mounting shell of each app. |
 
 ## Agent entry sequence
 
@@ -131,15 +132,14 @@ not import `app.main`.
 
 ## Frontend ownership
 
-`frontend/src/App.vue` is the shell only: navigation, lazy view registration
-and shell-owned dialogs. `useDashboardWorkspace.ts` owns cross-domain polling,
-SSE lifecycle and research mutations; feature composables such as
-`useFeishuRelayWorkspace.ts` own their status, CRUD and operation state.
-Feature views receive a scoped typed injection contract where available rather
-than an unbounded dashboard record.
-Research tabs are independently lazy-loaded from
-`frontend/src/views/research/`; relay monitoring and Feishu workbench are their
-own views. New UI must join one of these owners instead of growing App.vue.
+`frontend/src/App.vue` is the quant shell: navigation, lazy research view
+registration and research dialogs. `feishu-relay/dashboard/src/App.vue` is a
+separate Feishu shell and owns relay navigation, WebSocket event status and
+workbench dialogs. The two apps share only the adapter's same-origin HTTP/SSE
+boundary; neither imports the other's UI or composables.
+Research tabs are independently lazy-loaded from `frontend/src/views/research/`;
+Feishu relay views live under `feishu-relay/dashboard/src/views/`. New UI must
+join the owning application instead of crossing the boundary.
 
 The frontend has unit coverage for the JSON transport and timer lifecycle, plus
 a browser smoke test for the mounted research shell. API types remain generated

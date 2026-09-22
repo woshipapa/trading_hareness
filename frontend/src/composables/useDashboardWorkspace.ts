@@ -10,22 +10,15 @@ import { CanvasRenderer } from 'echarts/renderers';
 import type { AnalystMarketReview, AutomationRun } from '../api/analyst-contract';
 import type { components } from '../api/generated';
 import { getJson as getJsonBase, postJson } from '../api/http';
-import { useFeishuRelayWorkspace } from './useFeishuRelayWorkspace';
 import { usePolling } from './usePolling';
 import { resolveInitialDashboardSection, type DashboardSection } from '../dashboard-navigation';
-import {
-  dashboardContextKey,
-  feishuWorkbenchContextKey,
-  groupRelayMonitorContextKey,
-} from '../dashboard-context';
+import { dashboardContextKey } from '../dashboard-context';
 
 
 
 export function useDashboardWorkspace() {
 use([BarChart, CandlestickChart, LineChart, ScatterChart, DataZoomComponent, GridComponent, LegendComponent, MarkPointComponent, TooltipComponent, CanvasRenderer]);
 
-type Route = { tag: string; label: string };
-type EventItem = { event_id: string; received_at: string; message_type?: string; text?: string; source_label?: string; n8n_status?: string; target_status?: string; target_batch_id?: string | null; n8n_error?: string | null };
 type ProviderConfig = { name: string; provider_key: string; label: string; configured: boolean; protocol: string; rate_limit_per_minute?: number; min_interval_seconds?: number; realtime_coverage?: string; realtime_note?: string; realtime_apis?: string[]; super_alias_first_apis?: string[]; get_apis?: string[]; complete_query_apis?: string[]; bounded_only_apis?: string[]; reconciliation_required_apis?: string[] };
 type Availability = 'declared' | 'verified' | 'empty' | 'unsupported' | 'failed' | 'unknown';
 type ProviderObservation = { availability: Availability; verified_at?: string | null; last_checked_at?: string | null; last_row_count?: number | null; last_observation?: string | null };
@@ -157,8 +150,6 @@ const sharedResearchParams = new URLSearchParams(window.location.search);
 const sharedResearchSymbol = (sharedResearchParams.get('symbol') || '').toUpperCase();
 const sharedResearchTab = sharedResearchParams.get('tab');
 const activeResearchTab = ref(sharedResearchTab === 'stock-study' && /^\d{6}\.(SH|SZ|BJ)$/.test(sharedResearchSymbol) ? 'stock-study' : 'overview');
-const routes = ref<Route[]>([]); const events = ref<EventItem[]>([]); const connected = ref(false); const eventFilter = ref('all');
-const relayTag = ref(''); const relaySource = ref(''); const relayText = ref(''); const relayFiles = ref<File[]>([]); const relayDate = ref(''); const relayTime = ref(''); const relayState = ref(''); const relayProgress = ref(0); const relayXhr = ref<XMLHttpRequest | null>(null);
 const loading = ref(false); const researchLoaded = ref(false); const actionLoading = ref(''); const researchError = ref('');
 let researchAbortController: AbortController | null = null;
 let sectionLoadTimer: number | null = null;
@@ -170,13 +161,6 @@ const realtimeProviderHealth = ref<RealtimeProviderHealth>({ items: [] });
 const dailyStrategySummary = ref<DailyStrategySummary | null>(null);
 const replayReadiness = ref<ReplayReadiness>({});
 const realtimeServices = ref<RealtimeServiceStatus>({ items: [] }); const adapterHealth = ref<AdapterHealth>({}); const runtimeHealth = ref<{ resources?: { research_storage?: ResearchStorage }; owner_storage?: OwnerStorageStatus; runtime_tasks?: { raw_overflow_archive?: RawOverflowHealth }; network?: { state?: string; consecutive_failures?: number; last_success_at?: string | null; last_failure_at?: string | null; last_source?: string | null; last_error?: string | null; recovery_count?: number }; runtime_loops?: Record<string, { state?: string; updated_at?: string | null; lease_heartbeat_at?: string | null; lease_expires_at?: string | null; last_error?: string | null }>; optional_background_tasks?: { background_tasks_enabled?: boolean }; daily_control_plane?: { state?: string; trade_date?: string; daily_rows?: number; expected_daily_rows?: number; minimum_required_rows?: number; coverage_ratio?: number; adjustment_rows?: number; limit_rows?: number; reason?: string | null } }>({}); const realtimeLoading = ref(false); const realtimeError = ref('');
-const feishuRelayWorkspace = useFeishuRelayWorkspace();
-const {
-  groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm,
-  feishuWorkbench, feishuWorkbenchMessages, feishuWorkbenchLoading, feishuWorkbenchError, feishuWorkbenchAction, workbenchSearch, workbenchSearchResult, workbenchIntegrationDialog, workbenchIntegration,
-  groupRelayStateType, groupRelayStateText, groupRelayMessageText, oauthAuditLabel, oauthAuditTagType, relayDeliveryLabel, relayDeliveryTagType, ingestionDeliveryLabel, ingestionDeliveryTagType, applicationInspectionLabel, applicationInspectionTagType, targetChatInspectionLabel, targetChatInspectionTagType, capabilityAuthorizationLabel, capabilityAuthorizationTagType,
-  loadGroupRelayStatus, loadFeishuWorkbench, inspectFeishuApplication, workbenchMessageText, workbenchWorkflowText, runWorkbenchAction, searchFeishuMessages, openWorkbenchIntegration, runWorkbenchEndpoint, createWorkbenchDigest, createWorkbenchTab, submitWorkbenchIntegration, openCreateGroupRelayRoute, openEditGroupRelayRoute, saveGroupRelayRoute, setGroupRelayRouteEnabled, deleteGroupRelayRoute,
-} = feishuRelayWorkspace;
 const paperStatus = ref<PaperStatus>({});
 const analystObservations = ref<AnalystObservation[]>([]);
 const strategyFunnel = ref<StrategyFunnel>({});
@@ -198,10 +182,8 @@ const chinaDateTime = (value?: string | null) => value ? new Intl.DateTimeFormat
 const boardFlowTaxonomy = ref<'industry' | 'concept'>('industry'); const boardFlowDate = ref(''); const boardFlowSeries = ref<Record<string, BoardFlowSeries>>({}); const boardFlowSnapshots = ref<BoardFlowSnapshot[]>([]); const boardFlowCursor = ref<string | null>(null); const boardFlowLoading = ref(false); const boardFlowError = ref(''); const boardFlowNotice = ref(''); const boardFlowFocus = ref<string[]>([]); const boardFlowDisplaySlots = ref<string[]>([]); const boardFlowIsExchangeToday = ref(false); const boardRotationEvents = ref<BoardRotationEvent[]>([]); const boardStockMining = ref<BoardStockMining>({}); const limitLinkageMining = ref<LimitLinkageMining>({});
 const marketFlow = ref<MarketFlowResponse>({ trade_date: '', timezone: 'Asia/Shanghai', items: [] }); const marketFlowError = ref('');
 const selectedFactors = ref<string[]>([]); const factorHorizon = ref(5); const backtestForm = ref({ rebalance_days: 5, hold_days: 5, top_n: 20, total_cost_bps: 18 });
-let retryTimer: number | undefined; let retryDelay = 1000; let eventSource: EventSource | undefined;
 const polling = usePolling();
 
-const visibleEvents = computed(() => eventFilter.value === 'all' ? events.value : events.value.filter((item) => item.n8n_status === eventFilter.value));
 const catalogGroups = computed(() => ['all', ...Array.from(new Set((catalog.value.items ?? []).map((item) => item.group)))]);
 const visibleCatalog = computed(() => (catalog.value.items ?? []).filter((item) => (catalogGroup.value === 'all' || item.group === catalogGroup.value) && (!catalogQuery.value || `${item.api_name} ${item.group} ${item.model_role} ${item.request_policy}`.toLowerCase().includes(catalogQuery.value.toLowerCase()))));
 const count = (name: string) => overview.value.counts?.[name] ?? 0;
@@ -465,7 +447,6 @@ const boardFlowChartOption = computed(() => {
   };
 });
 
-async function loadConfig() { const data = await getJson<{ routes?: Route[] }>('/api/config'); routes.value = data.routes ?? []; relayTag.value ||= routes.value[0]?.tag ?? ''; }
 async function loadBoardFlowCurves(reset = false) {
   if (boardFlowLoading.value) return;
   if (reset) { boardFlowSeries.value = {}; boardFlowSnapshots.value = []; boardFlowCursor.value = null; boardFlowFocus.value = []; }
@@ -750,21 +731,8 @@ async function decideReview(item: ClaimReview, status: 'approved' | 'rejected') 
 async function runFactorEvaluation() { await runAction('评估因子', '/api/research/factors/evaluate', { universe_key: 'all_a', factor_keys: selectedFactors.value, horizon_days: factorHorizon.value }); }
 async function runStrategyBacktest() { await runAction('运行A股约束回测', '/api/research/strategies/backtest', { strategy_key: 'multi_factor_rank_v1', universe_key: 'all_a', factors: selectedFactors.value, ...backtestForm.value }); }
 async function runMainWaveResearch() { await runAction('训练观察池主升影子模型', '/api/research/strategy/watchlist-main-wave/run', {}, true); }
-function connectEvents() {
-  eventSource?.close(); eventSource = new EventSource('/events');
-  eventSource.addEventListener('snapshot', (event) => { events.value = JSON.parse((event as MessageEvent).data); connected.value = true; });
-  eventSource.addEventListener('message', (event) => { const item: EventItem = JSON.parse((event as MessageEvent).data); events.value = [item, ...events.value.filter((current) => current.event_id !== item.event_id)].slice(0, 200); connected.value = true; });
-  eventSource.onopen = () => { connected.value = true; retryDelay = 1000; };
-  eventSource.onerror = () => { connected.value = false; eventSource?.close(); if (retryTimer) clearTimeout(retryTimer); retryTimer = window.setTimeout(connectEvents, retryDelay); retryDelay = Math.min(30_000, retryDelay * 2); };
-}
-function addFiles(list: FileList | File[]) { const incoming = Array.from(list); const allowed = incoming.filter((file) => file.size <= 500 * 1024 * 1024); if (allowed.length !== incoming.length) relayState.value = '超过 500 MB 的文件未加入'; relayFiles.value = [...relayFiles.value, ...allowed.filter((file) => !relayFiles.value.some((current) => current.name === file.name && current.size === file.size))]; }
-function submitRelay() {
-  if ((!relayText.value.trim() && !relayFiles.value.length) || !relayTag.value) { relayState.value = '请填写正文或选择媒体，并选择来源'; return; }
-  const form = new FormData(); form.append('tag', relayTag.value); form.append('text', relayText.value.trim()); form.append('source_label', relaySource.value.trim()); if (relayDate.value) form.append('content_date', relayDate.value); if (relayTime.value) form.append('content_time', relayTime.value); relayFiles.value.forEach((file) => form.append('media', file, file.name));
-  const xhr = new XMLHttpRequest(); relayXhr.value = xhr; relayState.value = '上传中'; relayProgress.value = 0; xhr.open('POST', '/manual-relay'); xhr.upload.onprogress = (event) => { if (event.lengthComputable) relayProgress.value = Math.round(event.loaded / event.total * 100); }; xhr.onload = () => { try { const body = JSON.parse(xhr.responseText); if (xhr.status >= 300) throw new Error(body.message); relayState.value = `已接收 ${body.message_id}`; relayText.value = ''; relayFiles.value = []; } catch (error) { relayState.value = `失败：${error instanceof Error ? error.message : String(error)}`; } relayXhr.value = null; }; xhr.onerror = () => { relayState.value = '网络错误'; relayXhr.value = null; }; xhr.send(form);
-}
 function selectActiveSection(value: string) {
-  if (!['research', 'personal', 'monitor', 'workbench', 'relay'].includes(value)) return;
+  if (!['research', 'personal'].includes(value)) return;
   activeSection.value = value as DashboardSection;
 }
 function loadActiveSection() {
@@ -772,10 +740,6 @@ function loadActiveSection() {
     if (!researchLoaded.value && !loading.value) void loadResearch();
     void loadRealtimeServices();
     void loadBoardFlowCurves(true); void loadMarketFlowFeatures(); void loadBoardRotationEvents(); void loadBoardStockMining(); void loadLimitLinkageMining();
-  } else if (activeSection.value === 'monitor') {
-    void loadGroupRelayStatus();
-  } else if (activeSection.value === 'workbench') {
-    void loadFeishuWorkbench();
   }
 }
 function scheduleActiveSectionLoad() {
@@ -789,10 +753,8 @@ function scheduleActiveSectionLoad() {
   }, delay);
 }
 onMounted(() => {
-  mobileMediaQuery.addEventListener('change', syncMobileLayout); loadConfig().catch(() => {}); connectEvents(); scheduleActiveSectionLoad();
+  mobileMediaQuery.addEventListener('change', syncMobileLayout); scheduleActiveSectionLoad();
   polling.every(15_000, () => { if (activeSection.value === 'research') void loadRealtimeServices(); });
-  polling.every(10_000, () => { if (activeSection.value === 'monitor') void loadGroupRelayStatus(); });
-  polling.every(10_000, () => { if (activeSection.value === 'workbench') void loadFeishuWorkbench(); });
   polling.every(60_000, () => {
     if (activeSection.value === 'research' && document.visibilityState === 'visible' && boardFlowIsExchangeToday.value) { void loadBoardFlowCurves(false); void loadMarketFlowFeatures(); void loadBoardRotationEvents(); void loadBoardStockMining(); void loadLimitLinkageMining(); }
   });
@@ -803,10 +765,10 @@ watch(activeSection, (section) => {
   scheduleActiveSectionLoad();
 });
 onBeforeUnmount(() => {
-  mobileMediaQuery.removeEventListener('change', syncMobileLayout); eventSource?.close();
+  mobileMediaQuery.removeEventListener('change', syncMobileLayout);
   if (sectionLoadTimer !== null) window.clearTimeout(sectionLoadTimer);
   researchAbortController?.abort();
-  if (retryTimer) clearTimeout(retryTimer); polling.stop();
+  polling.stop();
 });
 
 const dashboardBindings = {
@@ -820,19 +782,6 @@ const dashboardBindings = {
     sharedResearchSymbol,
     sharedResearchTab,
     activeResearchTab,
-    routes,
-    events,
-    connected,
-    eventFilter,
-    relayTag,
-    relaySource,
-    relayText,
-    relayFiles,
-    relayDate,
-    relayTime,
-    relayState,
-    relayProgress,
-    relayXhr,
     loading,
     actionLoading,
     researchError,
@@ -897,21 +846,6 @@ const dashboardBindings = {
     runtimeHealth,
     realtimeLoading,
     realtimeError,
-    groupRelayStatus,
-    groupRelayLoading,
-    groupRelayError,
-    groupRelayRouteDialog,
-    groupRelayRouteSaving,
-    groupRelayRouteForm,
-    feishuWorkbench,
-    feishuWorkbenchMessages,
-    feishuWorkbenchLoading,
-    feishuWorkbenchError,
-    feishuWorkbenchAction,
-    workbenchSearch,
-    workbenchSearchResult,
-    workbenchIntegrationDialog,
-    workbenchIntegration,
     paperStatus,
     analystObservations,
     strategyFunnel,
@@ -973,11 +907,7 @@ const dashboardBindings = {
     selectedFactors,
     factorHorizon,
     backtestForm,
-    retryTimer,
-    retryDelay,
-    eventSource,
     polling,
-    visibleEvents,
     catalogGroups,
     visibleCatalog,
     count,
@@ -986,9 +916,6 @@ const dashboardBindings = {
     realtimeProviderStateType,
     realtimeStateType,
     realtimeStateText,
-    groupRelayStateType,
-    groupRelayStateText,
-    groupRelayMessageText,
     realtimeDeliveryDetail,
     ageText,
     bytesText,
@@ -1070,7 +997,6 @@ const dashboardBindings = {
     boardRotationStateText,
     boardRotationDeliveryText,
     boardFlowChartOption,
-    loadConfig,
     loadBoardFlowCurves,
     loadMarketFlowFeatures,
     loadBoardRotationEvents,
@@ -1078,35 +1004,6 @@ const dashboardBindings = {
     loadLimitLinkageMining,
     resetBoardFlowCurves,
     loadRealtimeServices,
-    loadGroupRelayStatus,
-    loadFeishuWorkbench,
-    inspectFeishuApplication,
-    workbenchMessageText,
-    workbenchWorkflowText,
-    oauthAuditLabel,
-    oauthAuditTagType,
-    relayDeliveryLabel,
-    relayDeliveryTagType,
-    ingestionDeliveryLabel,
-    ingestionDeliveryTagType,
-    applicationInspectionLabel,
-    applicationInspectionTagType,
-    targetChatInspectionLabel,
-    targetChatInspectionTagType,
-    capabilityAuthorizationLabel,
-    capabilityAuthorizationTagType,
-    runWorkbenchAction,
-    searchFeishuMessages,
-    openWorkbenchIntegration,
-    runWorkbenchEndpoint,
-    createWorkbenchDigest,
-    createWorkbenchTab,
-    submitWorkbenchIntegration,
-    openCreateGroupRelayRoute,
-    openEditGroupRelayRoute,
-    saveGroupRelayRoute,
-    setGroupRelayRouteEnabled,
-    deleteGroupRelayRoute,
     loadResearch,
     runAction,
     runAnalystMarketReview,
@@ -1145,15 +1042,7 @@ const dashboardBindings = {
     runFactorEvaluation,
     runStrategyBacktest,
     runMainWaveResearch,
-    connectEvents,
-    addFiles,
-    submitRelay,
 }
-provide('manual-relay', dashboardBindings);
-provide(feishuWorkbenchContextKey, { ...feishuRelayWorkspace, mobileLayout, dateText });
-provide(groupRelayMonitorContextKey, {
-  ...feishuRelayWorkspace, mobileLayout, eventFilter, visibleEvents, dateText, ageText,
-});
 provide(dashboardContextKey, dashboardBindings);
 return proxyRefs(dashboardBindings);
 }

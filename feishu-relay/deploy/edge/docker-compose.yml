@@ -175,6 +175,7 @@ services:
         if [ "$$FEISHU_ADAPTER_HOTFIX_ENABLED" = "true" ] && [ -f
         /app/hotfix/current/adapter/index.mjs ]; then export
         FRONTEND_DIST=/app/hotfix/current/frontend-dist; export
+        QUANT_FRONTEND_DIST=/app/hotfix/current/quant-frontend-dist; export
         SOURCE_REGISTRY_FILE=/app/hotfix/current/source-registry.json; export
         FEISHU_ADAPTER_SOURCE_MODE=source-overlay; exec node
         /app/hotfix/current/adapter/index.mjs; fi; export

@@ -210,8 +210,8 @@ REMOTE_ROLLBACK
 fi
 
 # The fast path still runs the complete adapter suite and parses the bridge
-# sources before any upload. Build frontend/dist locally; this is a frontend
-# asset build only and never invokes Docker.
+# sources before any upload. Build both independently owned frontends locally;
+# these are asset builds only and never invoke Docker.
 # Rollback intentionally bypasses this local check so an emergency recovery
 # is not blocked by an unrelated workstation worktree failure.
 ( cd "$project_root/adapter" && node --test *.test.mjs ) || {
@@ -219,7 +219,11 @@ fi
 	exit 1
 }
 ( cd "$repo_root/frontend" && npm run build ) || {
-	echo "frontend build failed; nothing was staged" >&2
+	echo "quant frontend build failed; nothing was staged" >&2
+	exit 1
+}
+( cd "$project_root/dashboard" && npm run build ) || {
+	echo "Feishu dashboard build failed; nothing was staged" >&2
 	exit 1
 }
 python3 - "$project_root/bridge/bridge.py" \
@@ -242,7 +246,7 @@ head_sha="$(git -C "$repo_root" rev-parse --verify HEAD)"
 head_short="${head_sha:0:12}"
 dirty_suffix=""
 if ! git -C "$repo_root" diff --quiet --ignore-submodules -- \
-  feishu-relay frontend/dist; then
+  feishu-relay frontend/dist feishu-relay/dashboard/dist; then
   dirty_suffix="-dirty"
 fi
 release_id="hotfix-$(date -u +%Y%m%dT%H%M%SZ)-${head_short}${dirty_suffix}-$RANDOM"
@@ -257,13 +261,14 @@ fi
 stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/feishu-relay-overlay.XXXXXX")"
 cleanup() { rm -rf -- "$stage_dir"; }
 trap cleanup EXIT
-mkdir -p "$stage_dir/adapter" "$stage_dir/frontend-dist" "$stage_dir/bridge" "$stage_dir/ops"
+mkdir -p "$stage_dir/adapter" "$stage_dir/frontend-dist" "$stage_dir/quant-frontend-dist" "$stage_dir/bridge" "$stage_dir/ops"
 
 # package.json is copied for a compatibility check; npm is never run here.
 rsync -a --delete --safe-links \
   --exclude 'node_modules' --exclude '*.test.mjs' --exclude '*.log' \
   "$project_root/adapter/" "$stage_dir/adapter/"
-rsync -a --delete --safe-links "$repo_root/frontend/dist/" "$stage_dir/frontend-dist/"
+rsync -a --delete --safe-links "$project_root/dashboard/dist/" "$stage_dir/frontend-dist/"
+rsync -a --delete --safe-links "$repo_root/frontend/dist/" "$stage_dir/quant-frontend-dist/"
 install -m 0644 "$project_root/config/source-registry.json" "$stage_dir/source-registry.json"
 for bridge_file in "$project_root"/bridge/*.py; do
   bridge_name="$(basename "$bridge_file")"
@@ -281,6 +286,7 @@ test -f "$stage_dir/adapter/package.json"
 test -f "$stage_dir/adapter/index.mjs"
 test -f "$stage_dir/source-registry.json"
 test -f "$stage_dir/frontend-dist/index.html"
+test -f "$stage_dir/quant-frontend-dist/index.html"
 test -f "$stage_dir/bridge/bridge.py"
 test -f "$stage_dir/bridge/larkagentx_image_property.py"
 test -f "$stage_dir/bridge/proto_wire.py"
@@ -356,6 +362,7 @@ test -f "$upload_dir/adapter/index.mjs"
 test -f "$upload_dir/adapter/package.json"
 test -f "$upload_dir/source-registry.json"
 test -f "$upload_dir/frontend-dist/index.html"
+test -f "$upload_dir/quant-frontend-dist/index.html"
 test -f "$upload_dir/bridge/bridge.py"
 test -f "$upload_dir/bridge/larkagentx_image_property.py"
 test -f "$upload_dir/bridge/proto_wire.py"

@@ -104,7 +104,8 @@ does not contact Docker Hub/GHCR and does not rebuild an image. The deployer
 records the running image digest and refuses the activation if it changes
 during the hotfix.
 
-The overlay includes the adapter modules, `frontend/dist`,
+The overlay includes the adapter modules, the standalone Feishu dashboard
+`frontend-dist`, the quant research console `quant-frontend-dist`,
 `feishu-relay/config/source-registry.json`, and the bridge modules under `feishu-relay/bridge`.
 The bridge's systemd unit is changed once to use a stable entrypoint; every
 later update stages a new release, changes the same `current` pointer and

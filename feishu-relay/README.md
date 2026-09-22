@@ -7,6 +7,7 @@ feishu-relay/
 ├── adapter/                 Node.js adapter、relay ledger、媒体和工作台 API
 ├── bridge/                  LarkAgentX WebSocket、protobuf 解码、事件 spool
 ├── config/                  Feishu 来源标签和 analyst 路由注册表
+├── dashboard/               独立 Feishu Vue dashboard（监听、工作台、手动投递）
 ├── deploy/
 │   ├── edge/                47edge compose、Dockerfile、systemd 和 hotfix 配置
 │   ├── itougu-neican/       爱投顾轮询服务配置
@@ -36,6 +37,6 @@ bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --list
 bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --rollback <release-id> --apply
 ```
 
-主项目的 `compose.yaml` 和 `deploy/compose.server.yaml` 使用这里的 adapter Dockerfile；Vue dashboard 仍由主项目构建并作为静态产物注入 adapter。修改 Feishu 代码时以本目录为代码归属，修改 n8n workflow 或量化服务时仍在主项目对应目录维护。
+主项目的 `compose.yaml` 和 `deploy/compose.server.yaml` 使用这里的 adapter Dockerfile；`frontend/` 量化研究台和 `dashboard/` Feishu 工作台分别构建后一起注入 adapter。修改 Feishu 前端时以 `feishu-relay/dashboard/` 为代码归属，修改量化研究台时仍在主项目 `frontend/` 维护。
 
 详细运行说明见 [`docs/SETUP.md`](docs/SETUP.md)、[`deploy/edge/README.md`](deploy/edge/README.md) 和 [`bridge/README.md`](bridge/README.md)。

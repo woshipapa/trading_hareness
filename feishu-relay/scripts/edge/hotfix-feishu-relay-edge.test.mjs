@@ -36,6 +36,8 @@ assert.match(source, /hotfix health verification failed; previous runtime restor
 // It must run the suite before syncing anything untested to the edge.
 assert.match(source, /node --test \*\.test\.mjs/);
 assert.match(source, /npm run build/);
+assert.match(source, /project_root\/dashboard/);
+assert.match(source, /quant-frontend-dist/);
 assert.match(source, /unittest discover/);
 assert.match(compose, /FEISHU_ADAPTER_HOTFIX_ENABLED/);
 assert.match(compose, /:\/app\/hotfix:ro/);

@@ -103,7 +103,7 @@ bridge 启动时取得 `LARKX_OWNER_LOCK_PATH` 的 Unix exclusive lock；第二�
 监听消息正文需要以当前 `source-registry.json` 中已注册的路由标签开头，例如 `#liwei`；这是现有 n8n 导入链的必要路由条件。
 
 47 上的小范围修复统一通过仓库根目录的
-`feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply` 发布。它会把 adapter、前端、
+`feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply` 发布。它会把 adapter、两套前端、
 路由表和本目录中的 bridge Python 文件放进同一个版本化覆盖层；adapter
 容器复用原有 image，bridge 复用 `/opt/supervisor/.venv`，两者都不触发
 image 构建或依赖安装。systemd 只固定执行
