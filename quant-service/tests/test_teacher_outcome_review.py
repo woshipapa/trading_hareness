@@ -99,6 +99,17 @@ class GateReplayTests(unittest.TestCase):
         self.assertEqual(report["evaluated"], 0)
         self.assertIsNone(report["closest"])
 
+    def test_a_missing_input_never_counts_as_an_entry(self):
+        # No minute features and no volume: the live scan cannot price a vwap,
+        # so it downgrades to watch however good the price looks.
+        rows = self.rows([10.2, 10.4, 10.6, 11.5])
+        for row in rows:
+            row["inputs"]["minute_features"] = None
+            row["inputs"]["quote"]["raw"]["watch_quote"].pop("amount")
+        report = gate_replay("000001.SZ", "测试", rows)
+        self.assertEqual(report["entry_scans"], 0)
+        self.assertIn("vwap", [item["name"] for item in report["missing_inputs"]])
+
     def test_an_entry_is_recognised_when_every_gate_passes(self):
         # The 5-minute trend gate needs a baseline, exactly as the live tape does.
         report = gate_replay("000001.SZ", "测试", self.rows([10.2, 10.4, 10.6, 11.5]))
@@ -134,6 +145,21 @@ class ReportTests(unittest.TestCase):
         missed = next(item for item in self.report()["stocks"] if item["outcome"] == "missed")
         self.assertIn("价格>当日MA60", missed["blocked_by"])
         self.assertIn("90.0%", missed["blocked_by"])
+
+    def test_a_replayed_entry_without_a_live_push_is_flagged_as_a_defect(self):
+        replays = {"300476": {"evaluated": 100, "entry_scans": 7, "gates": [],
+                              "closest": {"at": "10:05", "shortfall": 0, "blocked": [], "unknown": []}}}
+        missed = next(item for item in review_stocks(self.packs(), replays) if item["code"] == "300476")
+        self.assertIn("没有推送", missed["blocked_by"])
+        self.assertIn("不是条件太严", missed["blocked_by"])
+
+    def test_a_missing_input_is_reported_as_a_data_gap_not_a_tight_threshold(self):
+        replays = {"300476": {"evaluated": 100, "entry_scans": 0, "gates": [
+            {"name": "均价上方（不能往下跌）", "blocked": 80, "scans": 100, "share": 80.0, "last_value": "x vs None"}],
+            "missing_inputs": [{"name": "vwap", "scans": 80}], "closest": None}}
+        missed = next(item for item in review_stocks(self.packs(), replays) if item["code"] == "300476")
+        self.assertIn("输入缺失：分时均价", missed["blocked_by"])
+        self.assertEqual(missed["data_gap"]["share"], 80.0)
 
     def test_the_feishu_summary_leads_with_results_and_stays_research_only(self):
         text = outcome_text(date(2026, 9, 22), self.report())

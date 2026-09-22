@@ -35,6 +35,7 @@ from .teacher_review_rules import (
     SnapshotTape,
     active_plan,
     evaluate,
+    missing_inputs,
     scan_features,
 )
 
@@ -66,6 +67,12 @@ OUTCOME_LABELS = {
 }
 #: 值得拿出来学的几类，按报告里的先后顺序。
 LEARNING_OUTCOMES = ("hit", "triggered_faded", "missed", "avoid_missed", "invalidated")
+#: 规则要求但当时取不到的输入，报告里用人话说。
+INPUT_LABELS = {
+    "price": "现价", "pre_close": "昨收", "open": "开盘价", "high": "最高", "low": "最低", "amount": "成交额",
+    "turnover_pct": "换手", "volume_ratio": "量比", "vwap": "分时均价", "surge": "分时量能",
+    "not_falling": "5分钟走势", "book": "封板盘口",
+}
 
 
 def _db(deps: Any, action: Callable[..., Any], *args: Any,
@@ -130,6 +137,7 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
     blocked: Counter[str] = Counter()
     unknown: Counter[str] = Counter()
     seen: Counter[str] = Counter()
+    absent: Counter[str] = Counter()
     last_value: dict[str, Any] = {}
     evaluated = entry_scans = quote_gaps = 0
     closest: dict[str, Any] | None = None
@@ -158,9 +166,16 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
             if tape_view:
                 features = scan_features(symbol, quote, minute, observed_at, name, previous, tape_view)
             result = evaluate(plan, features)
+            # The live scan never enters on an incomplete input set; a replay
+            # that skipped this would blame a condition for a data gap.
+            absent_inputs = missing_inputs(str(plan["playbook"]), features)
+            if absent_inputs and result["action"] == "entry":
+                result = {**result, "action": "watch"}
         except Exception:  # noqa: BLE001 - 一次扫描重放不了就跳过，统计照常
             continue
         evaluated += 1
+        for item in absent_inputs:
+            absent[str(item)] += 1
         gating = [item for item in result["signals"] if item.get("gating", True)]
         if not gating:
             continue
@@ -176,13 +191,14 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
                 unknown[label] += 1
         if result["action"] == "entry":
             entry_scans += 1
-        shortfall = len(false_gates) + len(none_gates)
+        shortfall = len(false_gates) + len(none_gates) + (1 if absent_inputs and not (false_gates or none_gates) else 0)
         if closest is None or shortfall < closest["shortfall"]:
             closest = {
                 "shortfall": shortfall, "at": _clock(observed_at), "action": result["action"],
                 "price": features.get("price"), "pct": features.get("pct"),
                 "blocked": [{"name": str(item["name"]), "value": item.get("value")} for item in false_gates],
                 "unknown": [str(item["name"]) for item in none_gates],
+                "missing_inputs": list(absent_inputs),
             }
     gates = [
         {"name": label, "blocked": blocked[label], "scans": seen[label],
@@ -194,14 +210,34 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
         "scans": len(rows), "evaluated": evaluated, "entry_scans": entry_scans, "quote_gaps": quote_gaps,
         "gates": gates, "closest": closest,
         "unknown_gates": [{"name": label, "scans": unknown[label]} for label in sorted(unknown, key=lambda k: -unknown[k])],
+        "missing_inputs": [{"name": label, "scans": absent[label]} for label in sorted(absent, key=lambda k: -absent[k])],
         "rules_version": RULES_VERSION,
     }
 
 
-def _blocker_line(replay: Mapping[str, Any] | None) -> str | None:
-    """一句话说明这只票卡在哪。"""
+def dominant_gap(replay: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """缺失的输入本身就卡住了过半的扫描时，问题在数据，不在阈值。"""
     if not replay or not replay.get("evaluated"):
         return None
+    gaps = replay.get("missing_inputs") or []
+    if not gaps:
+        return None
+    top = max(gaps, key=lambda item: int(item.get("scans") or 0))
+    share = round(int(top["scans"]) / int(replay["evaluated"]) * 100, 1)
+    return {**top, "share": share} if share >= 50 else None
+
+
+def _blocker_line(replay: Mapping[str, Any] | None, *, live_entry: bool = False) -> str | None:
+    """一句话说明这只票卡在哪，并把数据问题和阈值问题分开。"""
+    if not replay or not replay.get("evaluated"):
+        return None
+    if replay.get("entry_scans") and not live_entry:
+        closest = replay.get("closest") or {}
+        return (f"重放显示 {closest.get('at') or '盘中'} 起有 {replay['entry_scans']} 次扫描满足全部条件，"
+                "但盘中没有推送 —— 要查采样间隔、输入缺失或事件确认，不是条件太严")
+    gap = dominant_gap(replay)
+    if gap:
+        return f"输入缺失：{INPUT_LABELS.get(gap['name'], gap['name'])}（全天 {gap['share']}% 的扫描无法判定）"
     gates = replay.get("gates") or []
     if not gates:
         return None
@@ -240,7 +276,8 @@ def review_stocks(packs: Sequence[Mapping[str, Any]],
                                       if stock.get("first_limit_up_at") else None),
                 "invalidated_at": (str(stock.get("invalidated_at"))[11:16] if stock.get("invalidated_at") else None),
                 "xiaojie_modes": ((stock.get("confluence") or {}).get("xiaojie_modes") or []),
-                "blocked_by": _blocker_line(replay),
+                "blocked_by": _blocker_line(replay, live_entry=bool(entry)),
+                "data_gap": dominant_gap(replay),
                 "replay": replay,
             })
     items.sort(key=lambda item: (LEARNING_OUTCOMES.index(item["outcome"]) if item["outcome"] in LEARNING_OUTCOMES
@@ -261,6 +298,8 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     missed_pct: dict[str, list[float]] = defaultdict(list)
     hit_pct: dict[str, list[float]] = defaultdict(list)
     gate_blocks: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    data_gaps: Counter[str] = Counter()
+    unpushed: list[dict[str, Any]] = []
     sessions: list[str] = []
     for report in reports:
         trade_date = str(report.get("trade_date") or "")
@@ -273,7 +312,15 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             value = item.get("opportunity_pct")
             if outcome == "missed" and value is not None:
                 missed_pct[playbook].append(float(value))
-                for gate in ((item.get("replay") or {}).get("gates") or [])[:2]:
+                replay = item.get("replay") or {}
+                if replay.get("entry_scans") and not item.get("entry"):
+                    unpushed.append({"code": item.get("code"), "name": item.get("name"), "date": trade_date,
+                                     "playbook": playbook, "pct": value, "scans": replay["entry_scans"]})
+                    continue
+                if item.get("data_gap"):
+                    data_gaps[str(item["data_gap"]["name"])] += 1
+                    continue
+                for gate in (replay.get("gates") or [])[:2]:
                     gate_blocks[(playbook, str(gate.get("name")))].append(
                         {"code": item.get("code"), "name": item.get("name"), "date": trade_date,
                          "pct": value, "share": gate.get("share")})
@@ -304,6 +351,9 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return {
         "sessions": sorted(set(sessions)), "session_count": len(set(sessions)),
         "playbooks": playbooks, "suggestions": suggestions,
+        "data_gaps": [{"input": INPUT_LABELS.get(name, name), "missed_cases": count}
+                      for name, count in data_gaps.most_common()],
+        "unpushed": unpushed,
     }
 
 
@@ -334,6 +384,12 @@ def outcome_text(trade_date: date, report: Mapping[str, Any]) -> str:
         lines.append(f"△ 老师否定但涨 {item['name']} {item['close_pct']:+.1f}%"
                      f"（{item.get('playbook')}｜{item.get('stance')}）")
     learned = report.get("learning") or {}
+    unpushed = [item for item in (learned.get("unpushed") or []) if item.get("date") == trade_date.isoformat()]
+    if unpushed:
+        lines.append("待查：" + "、".join(f"{item['name']}（重放满足 {item['scans']} 次却没推送）"
+                                          for item in unpushed[:4]))
+    for gap in (learned.get("data_gaps") or [])[:1]:
+        lines.append(f"数据缺口：{gap['input']} 缺失导致 {gap['missed_cases']} 次漏判")
     for suggestion in (learned.get("suggestions") or [])[:2]:
         lines.append(f"学习：{suggestion['note']}（近 {learned.get('session_count', 0)} 份复盘，"
                      f"这些票平均 {suggestion['mean_pct']:+.1f}%）")
@@ -381,6 +437,16 @@ def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
                 f"{row['missed']} | {row['hit_rate_pct'] if row['hit_rate_pct'] is not None else '—'}% | "
                 f"{row['missed_rate_pct'] if row['missed_rate_pct'] is not None else '—'}% | "
                 f"{row['missed_mean_pct'] if row['missed_mean_pct'] is not None else '—'} |")
+        lines.append("")
+    if learned.get("unpushed"):
+        lines += ["## 重放满足条件却没推送（先查这里，不是阈值问题）", ""]
+        for item in learned["unpushed"]:
+            lines.append(f"- {item['date']} {item['name']}（{item['code']}）{item['playbook']}："
+                         f"{item['scans']} 次扫描满足全部条件，当日 {item['pct']:+.1f}%")
+        lines.append("")
+    if learned.get("data_gaps"):
+        lines += ["## 输入缺失导致的漏判", "", "| 缺的输入 | 次数 |", "|---|---|"]
+        lines += [f"| {gap['input']} | {gap['missed_cases']} |" for gap in learned["data_gaps"]]
         lines.append("")
     if learned.get("suggestions"):
         lines += ["## 条件复核建议（只描述计数，改不改由人定）", ""]
