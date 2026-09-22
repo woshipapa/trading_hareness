@@ -4719,6 +4719,16 @@ async def run_watch_daily_review(trade_date: date, persist: bool = True) -> dict
     return await run_watch_daily_review_service(trade_date, _watch_review_dependencies(), persist=persist)
 
 
+async def watch_review_patterns(start: date, end: date, min_count: int = 3) -> dict[str, Any]:
+    """Label -> next-session outcomes and per-stock industry relations across stored reviews."""
+    from .teacher_review_repository import plan_bars as teacher_plan_bars
+    from .watch_review_patterns import WatchPatternDependencies, watch_review_patterns as patterns_service
+    return await patterns_service(start, end, WatchPatternDependencies(
+        database=db, run_database=run_database_blocking, plan_bars=teacher_plan_bars,
+        today=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date(),
+    ), min_count=min_count)
+
+
 def _teacher_review_dependencies() -> TeacherReviewDependencies:
     return TeacherReviewDependencies(
         database=db, run_database=run_database_blocking, now_utc=lambda: datetime.now(timezone.utc),
@@ -6384,6 +6394,7 @@ app.include_router(build_watch_review_router(WatchReviewRouterDependencies(
     run=lambda trade_date, persist: run_watch_daily_review(trade_date, persist),
     read=lambda trade_date: run_database_blocking(lambda: read_watch_reviews(db, trade_date), timeout_seconds=30),
     today=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date(),
+    patterns=watch_review_patterns,
 )))
 app.include_router(build_teacher_review_router(TeacherReviewRouterDependencies(
     enabled=teacher_review_enabled,

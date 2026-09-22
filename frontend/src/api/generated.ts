@@ -3120,6 +3120,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/watch-reviews/patterns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Patterns */
+        get: operations["review_patterns_api_v1_watch_reviews_patterns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/watch-reviews/run": {
         parameters: {
             query?: never;
@@ -10593,6 +10610,41 @@ export interface operations {
         parameters: {
             query?: {
                 trade_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_patterns_api_v1_watch_reviews_patterns_get: {
+        parameters: {
+            query?: {
+                start?: string | null;
+                end?: string | null;
+                min_count?: number;
             };
             header?: never;
             path?: never;
