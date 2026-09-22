@@ -115,6 +115,30 @@ class FactorSqlLabTests(unittest.TestCase):
         self.assertIn("trading_index-index_20d_ago=20", create_sql)
         self.assertIn("bar.close*adjustment_history.adj_factor", create_sql)
 
+    def test_backfill_mode_uses_current_industry_and_turnover_size_and_is_labelled(self):
+        connection = RecordingConnection()
+        panel = prepare_factor_panel(connection, "all_a", date(2023, 9, 1), date(2026, 9, 1), 5, "current_backfill")
+        create_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_panel" in sql)
+        self.assertIn("'longhu_ths_industry','ths_index_i'", create_sql)
+        self.assertIn("member.effective_to IS NULL", create_sql)
+        self.assertNotIn("member.known_at <", create_sql)                    # not point-in-time, by design
+        self.assertIn("'current_backfill' END AS industry_quality", create_sql)
+        self.assertIn("ln(nullif(avg(amount)", create_sql)
+        self.assertEqual(panel["membership_mode"], "current_backfill")
+        connection.calls.clear()
+        _materialize_factor_scores(connection, "momentum_20d", date(2023, 9, 1), date(2026, 9, 1), "current_backfill")
+        score_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_factor_scores" in sql)
+        self.assertIn("signal.industry_quality='current_backfill'", score_sql)
+        with self.assertRaises(ValueError):
+            prepare_factor_panel(connection, "all_a", date(2023, 9, 1), date(2026, 9, 1), 5, "guess")
+
+    def test_strict_mode_keeps_market_value_size(self):
+        connection = RecordingConnection()
+        prepare_factor_panel(connection, "all_a", date(2026, 1, 1), date(2026, 3, 1), 5)
+        create_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_panel" in sql)
+        self.assertIn("log_market_cap_pit AS log_market_cap", create_sql)
+        self.assertNotIn("longhu_ths_industry", create_sql)
+
     def test_panel_uses_atomic_owner_cold_relations_after_cutover(self):
         connection = RecordingConnection()
         connection.cursor = object()

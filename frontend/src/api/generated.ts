@@ -3795,6 +3795,12 @@ export interface components {
              * @enum {integer}
              */
             horizon_days: 1 | 5 | 20 | 60;
+            /**
+             * Membership Mode
+             * @default point_in_time
+             * @enum {string}
+             */
+            membership_mode: "point_in_time" | "current_backfill";
         };
         /** FetchRunReconcileRequest */
         FetchRunReconcileRequest: {

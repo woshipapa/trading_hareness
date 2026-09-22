@@ -450,6 +450,9 @@ class FactorEvaluationRequest(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     horizon_days: Literal[1, 5, 20, 60] = 5
+    # current_backfill: labelled look-ahead research mode (today's industry,
+    # turnover as size) for the history before point-in-time data exists.
+    membership_mode: Literal["point_in_time", "current_backfill"] = "point_in_time"
 
 
 class StrategyBacktestRequest(BaseModel):

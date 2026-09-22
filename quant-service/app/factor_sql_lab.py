@@ -41,6 +41,15 @@ FACTOR_DIRECTIONS = {
 # from being mistaken for three years of history.
 MIN_FORMAL_HISTORY_DAYS = P2_MIN_FULL_CROSS_SECTION_DAYS
 MIN_FORMAL_HISTORY_CALENDAR_SPAN_DAYS = P2_MIN_DAILY_CALENDAR_SPAN_DAYS
+# ``point_in_time`` (default) uses only industry membership and market value
+# known before each date.  The owner started recording both in August 2026,
+# so that mode sees ~6 weeks of a 3-year daily history.  ``current_backfill``
+# is an explicitly labelled research mode for the full history: today's
+# industry membership stands in for the past (look-ahead: classifications
+# rarely change, but it is not point-in-time) and log 20-day average turnover
+# stands in for size.  Its results are never eligible for promotion.
+MEMBERSHIP_MODES = ("point_in_time", "current_backfill")
+_BACKFILL_BLOCKERS = ["industry_membership_backfilled_from_current", "size_proxy_log_20d_average_amount"]
 
 
 def evaluable_factor_keys() -> frozenset[str]:
@@ -147,9 +156,47 @@ def _max_drawdown(equity: list[float]) -> float:
     return drawdown
 
 
+def _industry_join_sql(membership_mode: str) -> tuple[str, str]:
+    """The industry LATERAL join and the quality label its rows carry."""
+    if membership_mode == "current_backfill":
+        return """LEFT JOIN LATERAL (
+                       SELECT member.sector_key
+                         FROM quant.sector_membership_history member
+                        WHERE member.symbol=bar.symbol
+                          AND member.taxonomy_key IN ('longhu_ths_industry','ths_index_i')
+                          AND member.effective_to IS NULL
+                        ORDER BY CASE WHEN member.taxonomy_key='longhu_ths_industry' THEN 0 ELSE 1 END,
+                                 member.known_at DESC,member.sector_key
+                        LIMIT 1
+                 ) industry_history ON TRUE""", "current_backfill"
+    return """LEFT JOIN LATERAL (
+                       SELECT member.sector_key
+                         FROM quant.sector_membership_history member
+                        WHERE member.symbol=bar.symbol
+                          AND member.taxonomy_key IN ('ths_industry','ths_index_i')
+                          AND member.effective_from<=bar.trading_date
+                          AND (member.effective_to IS NULL OR member.effective_to>=bar.trading_date)
+                          AND member.known_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                        ORDER BY CASE WHEN member.taxonomy_key='ths_industry' THEN 0 ELSE 1 END,
+                                 member.known_at DESC,member.effective_from DESC,member.sector_key
+                        LIMIT 1
+                 ) industry_history ON TRUE""", "point_in_time"
+
+
+def _check_membership_mode(membership_mode: str) -> str:
+    if membership_mode not in MEMBERSHIP_MODES:
+        raise ValueError(f"unknown membership mode: {membership_mode}")
+    return membership_mode
+
+
 def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, end_date: date,
-                         horizon_days: int) -> dict[str, Any]:
+                         horizon_days: int, membership_mode: str = "point_in_time") -> dict[str, Any]:
     """Create one transaction-scoped panel shared by every requested factor."""
+    _check_membership_mode(membership_mode)
+    industry_join, industry_label = _industry_join_sql(membership_mode)
+    size_sql = ("log_market_cap_pit" if membership_mode == "point_in_time" else
+                """CASE WHEN count(amount) OVER(PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)=20
+                           THEN ln(nullif(avg(amount) OVER(PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW),0)) END""")
     connection.execute("DROP TABLE IF EXISTS factor_sql_panel")
     factor_semantics_sql = persisted_factor_semantics_sql("adjustment")
     panel_sql = f"""CREATE TEMP TABLE factor_sql_panel ON COMMIT DROP AS
@@ -169,13 +216,13 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                       bar.close::double precision AS raw_close,
                       bar.limit_up::double precision AS limit_up,
                       bar.limit_down::double precision AS limit_down,
-                      bar.volume::double precision AS volume,bar.is_suspended,
+                      bar.volume::double precision AS volume,bar.amount::double precision AS amount,bar.is_suspended,
                       adjustment_history.adj_factor::double precision AS point_in_time_adj_factor,
                       'point_in_time' AS adjustment_quality,
                       coalesce(industry_history.sector_key,'UNKNOWN') AS industry,
-                      CASE WHEN industry_history.sector_key IS NULL THEN 'missing' ELSE 'point_in_time' END AS industry_quality,
+                      CASE WHEN industry_history.sector_key IS NULL THEN 'missing' ELSE '{industry_label}' END AS industry_quality,
                       CASE WHEN fundamental.symbol IS NULL THEN 'missing' ELSE 'point_in_time' END AS fundamental_quality,
-                      CASE WHEN fundamental.total_mv>0 THEN ln(fundamental.total_mv::double precision) END AS log_market_cap
+                      CASE WHEN fundamental.total_mv>0 THEN ln(fundamental.total_mv::double precision) END AS log_market_cap_pit
                  FROM quant.canonical_bars_daily bar
                  JOIN calendar ON calendar.trading_date=bar.trading_date
                  JOIN quant.universe_membership_history membership
@@ -196,18 +243,7 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                                  adjustment.provider
                         LIMIT 1
                  ) adjustment_history ON TRUE
-                 LEFT JOIN LATERAL (
-                       SELECT member.sector_key
-                         FROM quant.sector_membership_history member
-                        WHERE member.symbol=bar.symbol
-                          AND member.taxonomy_key IN ('ths_industry','ths_index_i')
-                          AND member.effective_from<=bar.trading_date
-                          AND (member.effective_to IS NULL OR member.effective_to>=bar.trading_date)
-                          AND member.known_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                        ORDER BY CASE WHEN member.taxonomy_key='ths_industry' THEN 0 ELSE 1 END,
-                                 member.known_at DESC,member.effective_from DESC,member.sector_key
-                        LIMIT 1
-                 ) industry_history ON TRUE
+                 {industry_join}
                  LEFT JOIN LATERAL (
                        SELECT basic.symbol,basic.total_mv,basic.provider
                          FROM quant.daily_fundamentals basic
@@ -250,7 +286,8 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                              AND trading_index-min(trading_index) OVER(PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)=19
                            THEN volume/nullif(avg(volume) OVER(PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW),0) END AS volume_ratio_20d,
                       CASE WHEN adjusted_high>adjusted_low
-                           THEN (adjusted_close-adjusted_low)/(adjusted_high-adjusted_low) END AS intraday_strength
+                           THEN (adjusted_close-adjusted_low)/(adjusted_high-adjusted_low) END AS intraday_strength,
+                      {size_sql} AS log_market_cap
                  FROM returns
            ) SELECT * FROM features"""
     cold_tables = eligible_cold_tables(connection) if hasattr(connection, "cursor") else set()
@@ -269,17 +306,21 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
         """SELECT count(*)::int rows,count(DISTINCT symbol)::int symbols,count(DISTINCT trading_date)::int days,
                   count(*) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_rows,
                   count(DISTINCT trading_date) FILTER(WHERE industry_quality='point_in_time')::int industry_pit_days,
+                  count(*) FILTER(WHERE industry_quality='current_backfill')::int industry_backfill_rows,
                   count(*) FILTER(WHERE adjustment_quality='point_in_time')::int adjustment_pit_rows,
                   count(DISTINCT trading_date) FILTER(WHERE adjustment_quality='point_in_time')::int adjustment_pit_days,
                   count(*) FILTER(WHERE fundamental_quality='point_in_time')::int fundamental_pit_rows,
                   count(DISTINCT trading_date) FILTER(WHERE fundamental_quality='point_in_time')::int fundamental_pit_days
              FROM factor_sql_panel"""
     ).fetchone()
-    return dict(row or {})
+    return {**dict(row or {}), "membership_mode": membership_mode}
 
 
-def _materialize_factor_scores(connection: Any, factor_key: str, start_date: date, end_date: date) -> None:
+def _materialize_factor_scores(connection: Any, factor_key: str, start_date: date, end_date: date,
+                               membership_mode: str = "point_in_time") -> None:
     column = SQL_FACTOR_COLUMNS[factor_key]
+    industry_filter = ("signal.industry_quality='point_in_time'" if membership_mode == "point_in_time"
+                       else "signal.industry_quality='current_backfill'")
     connection.execute("DROP TABLE IF EXISTS factor_sql_factor_scores")
     connection.execute(
         f"""CREATE TEMP TABLE factor_sql_factor_scores ON COMMIT DROP AS
@@ -288,7 +329,7 @@ def _materialize_factor_scores(connection: Any, factor_key: str, start_date: dat
                        signal.{column}::double precision AS raw_factor
                  FROM factor_sql_panel signal
                  WHERE signal.trading_date BETWEEN %s AND %s
-                   AND signal.industry_quality='point_in_time'
+                   AND {industry_filter}
                    AND signal.{column} IS NOT NULL
                    AND NOT coalesce(signal.is_suspended,false)
             ), bounds AS (
@@ -323,8 +364,8 @@ def _materialize_factor_scores(connection: Any, factor_key: str, start_date: dat
 
 
 def _materialize_evaluation_rows(connection: Any, factor_key: str, start_date: date, end_date: date,
-                                 horizon_days: int) -> None:
-    _materialize_factor_scores(connection, factor_key, start_date, end_date)
+                                 horizon_days: int, membership_mode: str = "point_in_time") -> None:
+    _materialize_factor_scores(connection, factor_key, start_date, end_date, membership_mode)
     connection.execute("DROP TABLE IF EXISTS factor_sql_evaluation")
     connection.execute(
         """CREATE TEMP TABLE factor_sql_evaluation ON COMMIT DROP AS
@@ -397,7 +438,8 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
                                end_date: date, horizon_days: int, panel: dict[str, Any]) -> dict[str, Any]:
     if factor_key not in SQL_FACTOR_COLUMNS:
         raise ValueError(f"factor is not supported by sql evaluator: {factor_key}")
-    _materialize_evaluation_rows(connection, factor_key, start_date, end_date, horizon_days)
+    membership_mode = str(panel.get("membership_mode") or "point_in_time")
+    _materialize_evaluation_rows(connection, factor_key, start_date, end_date, horizon_days, membership_mode)
     daily = _factor_daily_rows(connection)
     splits, split_contract = _split_rows(daily, horizon_days)
     split_metrics = {
@@ -449,9 +491,11 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
                 "excluded_unknown_industry_rows": max(
                     0, int(panel.get("rows") or 0) - int(panel.get("industry_pit_rows") or 0)
                 ),
+                "membership_mode": membership_mode,
                 "blockers": [
                     *_formal_history_blockers(history),
                     *( ["point_in_time_industry_history_missing"] if not point_in_time_industry_ready else [] ),
+                    *( _BACKFILL_BLOCKERS if membership_mode == "current_backfill" else [] ),
                 ],
                 "live_strategy_effect": "none",
             },
@@ -476,7 +520,11 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
                 "standardization": "daily cross-sectional z-score",
                 "forward_return": "same symbol on exact SSE trading-calendar horizon",
                 "history_continuity": "all lookback and forward windows require consecutive SSE trading indexes",
-                "industry_quality": "point-in-time membership selected by known_at; UNKNOWN rows remain in the panel but are excluded from factor calculations",
+                "industry_quality": ("point-in-time membership selected by known_at; UNKNOWN rows remain in the panel but are excluded from factor calculations"
+                                     if membership_mode == "point_in_time" else
+                                     "CURRENT Longhu/THS industry (104 groups, THS index fallback) applied to every date - look-ahead research mode"),
+                "size_control": ("point-in-time log daily total market value" if membership_mode == "point_in_time"
+                                 else "log 20-day average turnover amount (market value history is not recorded before 2026-08)"),
                 "adjustment_quality": "one adjustment factor selected by available_at before the trading-session boundary; final current adj_factor values are not used",
                 "fundamental_quality": "one daily fundamentals row selected by available_at before the trading-session boundary; provider duplicates cannot multiply panel rows",
             },
@@ -486,11 +534,11 @@ def evaluate_factor_from_panel(connection: Any, factor_key: str, universe_key: s
 
 
 def evaluate_factor_set(connection: Any, factor_keys: list[str], universe_key: str, start_date: date,
-                        end_date: date, horizon_days: int) -> list[dict[str, Any]]:
+                        end_date: date, horizon_days: int, membership_mode: str = "point_in_time") -> list[dict[str, Any]]:
     unknown = sorted(set(factor_keys) - evaluable_factor_keys())
     if unknown:
         raise ValueError(f"unsupported sql factors: {', '.join(unknown)}")
-    panel = prepare_factor_panel(connection, universe_key, start_date, end_date, horizon_days)
+    panel = prepare_factor_panel(connection, universe_key, start_date, end_date, horizon_days, _check_membership_mode(membership_mode))
     results = [
         evaluate_factor_from_panel(connection, factor_key, universe_key, start_date, end_date, horizon_days, panel)
         for factor_key in factor_keys

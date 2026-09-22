@@ -105,14 +105,16 @@ def evaluate_factors(payload: Any, deps: ResearchExperimentDependencies) -> dict
             start_date=start,
             end_date=end,
             knowledge_cutoff=knowledge_cutoff,
-            parameters={"factor_keys": requested, "horizon_days": payload.horizon_days},
+            parameters={"factor_keys": requested, "horizon_days": payload.horizon_days,
+                        "membership_mode": getattr(payload, "membership_mode", "point_in_time")},
             data_manifest_id=data_manifest_id,
             input_datasets=FACTOR_INPUT_DATASETS,
             data_schema_version="factor-evaluation-v1",
             json_value=deps.json_value,
         )
         try:
-            evaluated = deps.evaluate_factor_set(connection, requested, payload.universe_key, start, end, payload.horizon_days)
+            evaluated = deps.evaluate_factor_set(connection, requested, payload.universe_key, start, end, payload.horizon_days,
+                                                 membership_mode=getattr(payload, "membership_mode", "point_in_time"))
         except ValueError as error:
             # Finish before leaving the transaction.  The exception is raised
             # only after the transaction commits, otherwise PostgreSQL would
