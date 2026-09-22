@@ -38,6 +38,12 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			const claimed = { ...existing, ...record, sourceMessageId, status: 'processing', target_message_ids: existing?.targetMessageIds ?? existing?.target_message_ids ?? [] };
 			saved.set(sourceMessageId, claimed); return claimed;
 		},
+		resetRelayMessageForRetry: async (sourceMessageId, reason) => {
+			const existing = saved.get(sourceMessageId);
+			if (!existing || existing.status !== 'sent') return false;
+			saved.set(sourceMessageId, { ...existing, status: 'failed', targetMessageIds: [], target_message_ids: [], errorMessage: reason });
+			return true;
+		},
 		markRelayMessage: async (id, update) => saved.set(id, { ...saved.get(id), ...update, target_message_ids: update.targetMessageIds ?? saved.get(id)?.target_message_ids ?? [] }),
 		updateRelaySourceMessage: async (id, update) => { const next = { ...saved.get(id), ...update }; saved.set(id, next); return next; },
 	};
@@ -167,6 +173,19 @@ test('official gap repair forwards a missed interactive card and does not resend
 	assert.equal(second.sent, 0);
 	assert.equal(second.deduplicated, 1);
 	assert.equal(sent.length, 1);
+});
+
+test('official gap repair replaces a websocket card placeholder with the full official card', async () => {
+	const stamp = Date.now();
+	const card = { schema: '2.0', body: { elements: [{ tag: 'markdown', content: '书房猫完整卡片' }] } };
+	const official = { message_id: 'om_cat_placeholder', chat_id: 'oc_source', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify(card) } };
+	const { relay, sent, saved } = createHarness([official]);
+	saved.set(official.message_id, { sourceMessageId: official.message_id, sourceKey: 'anqiang', sourceCreateTime: stamp, status: 'sent', message: { msg_type: 'text', body: { content: JSON.stringify({ text: '[card] [卡片]' }) } }, targetMessageIds: [{ targetChatId: 'oc_summary', messageId: 'old', msgType: 'text' }] });
+	const result = await relay.repairFromOfficial({ fromCreateTime: stamp - 1000, toCreateTime: stamp + 1000, sourceKeys: ['anqiang'], forcePlaceholderCards: true });
+	assert.equal(result.sent, 1);
+	assert.equal(result.replaced_placeholders, 1);
+	assert.equal(saved.get(official.message_id).status, 'sent');
+	assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n[interactive]\n书房猫完整卡片');
 });
 
 test('official gap repair does not skip a missed message before a later sent row', async () => {
@@ -655,6 +674,33 @@ test('a webhook target receives its configured keyword without changing other ta
 			assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n正文');
 			assert.equal(webhookCalls.length, 1);
 			assert.equal(webhookCalls[0].body.content.text, '#anqiang\n正文\n汇总');
+		},
+	);
+});
+
+test('a webhook-only interactive card keeps source image keys without tenant upload', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const message = {
+				message_id: 'om_webhook_card_image', msg_type: 'interactive', create_time: String(Date.now()),
+				body: { content: JSON.stringify({ schema: '2.0', body: { elements: [
+					{ tag: 'markdown', content: '安强图片卡片' }, { tag: 'img', img_key: 'img_v3_source_card' },
+				] } }) },
+			};
+			const { relay, sent } = createHarness([message], {
+				webhooksByChatId: { oc_summary: 'https://x/summary-hook' },
+				webhookKeywordsByChatId: { oc_summary: '汇总' },
+			});
+			await relay.tick();
+			assert.equal(sent.length, 0);
+			assert.equal(webhookCalls.length, 1);
+			assert.equal(webhookCalls[0].body.msg_type, 'post');
+			assert.deepEqual(webhookCalls[0].body.content.post.zh_cn.content, [
+				[{ tag: 'text', text: '#anqiang\n安强图片卡片' }],
+				[{ tag: 'img', image_key: 'img_v3_source_card' }],
+				[{ tag: 'text', text: '汇总' }],
+			]);
 		},
 	);
 });

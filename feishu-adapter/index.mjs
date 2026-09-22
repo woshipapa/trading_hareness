@@ -1,7 +1,7 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, mkdirSync, createWriteStream, readdirSync, statSync, existsSync } from 'node:fs';
-import { open, unlink, writeFile } from 'node:fs/promises';
+import { open, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
@@ -62,6 +62,8 @@ const larkAgentXResourceUrl = String(process.env.LARKX_BRIDGE_RESOURCE_URL ?? ''
 const larkAgentXGroupRelayEnabled = String(process.env.LARKX_GROUP_RELAY_ENABLED ?? 'false').toLowerCase() === 'true';
 const larkAgentXOfficialFallbackEnabled = String(process.env.LARKX_OFFICIAL_FALLBACK_ENABLED ?? 'false').toLowerCase() === 'true';
 const larkAgentXCardBackfillEnabled = String(process.env.LARKX_CARD_BACKFILL_ENABLED ?? 'false').toLowerCase() === 'true';
+const larkAgentXCardBackfillTags = new Set(String(process.env.LARKX_CARD_BACKFILL_TAGS ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
+const larkAgentXDynamicRouteDiscoveryEnabled = String(process.env.LARKX_DYNAMIC_ROUTE_DISCOVERY ?? 'false').toLowerCase() === 'true';
 const larkAgentXGroupRelayRoutes = new Map(
 	String(process.env.LARKX_GROUP_RELAY_ROUTES ?? '')
 		.split(';')
@@ -73,6 +75,10 @@ const larkAgentXGroupRelayRoutes = new Map(
 		})
 		.filter(([sourceKey, chatId]) => sourceKey && chatId),
 );
+const larkAgentXDynamicGroupRelayRoutes = new Map();
+function larkAgentXSourceKeyForChat(chatId) {
+	return larkAgentXGroupRelayRoutes.get(chatId) ?? larkAgentXDynamicGroupRelayRoutes.get(chatId);
+}
 const feishuAlertReceiveIdType = String(process.env.FEISHU_ALERT_RECEIVE_ID_TYPE ?? 'chat_id').trim();
 const supportedAlertReceiveIdTypes = new Set(['chat_id', 'open_id', 'user_id', 'union_id']);
 if (!supportedAlertReceiveIdTypes.has(feishuAlertReceiveIdType)) {
@@ -84,6 +90,8 @@ const larkAgentXHealthUrl = String(process.env.LARKX_BRIDGE_HEALTH_URL ?? 'http:
 const longConnectionEnabled = String(process.env.FEISHU_LONG_CONNECTION_ENABLED ?? 'true').toLowerCase() !== 'false';
 const frontendDist = process.env.FRONTEND_DIST ?? '/app/frontend-dist';
 const frontendMode = process.env.FRONTEND_MODE ?? (existsSync(frontendDist) ? 'spa' : 'legacy');
+const itouguStatusFile = String(process.env.ITOUGU_STATUS_FILE ?? '/var/lib/itougu-neican/status.json').trim();
+const itouguControlUrl = String(process.env.ITOUGU_CONTROL_URL ?? 'http://127.0.0.1:18084').trim().replace(/\/$/, '');
 const importTimeZone = process.env.IMPORT_TIME_ZONE ?? 'Asia/Shanghai';
 const remoteUploadPartBytes = 8 * 1024 * 1024;
 const uploadPartBytes = Number(process.env.UPLOAD_PART_BYTES ?? remoteUploadPartBytes);
@@ -104,6 +112,13 @@ const recentEvents = [];
 const paperKbQueues = new Map();
 const eventStreams = new Set();
 const maxRecentEvents = 200;
+const FEISHU_MESSAGE_UUID_MAX = 50;
+function paperKbFeishuUuid(idempotencyKey) {
+	const value = String(idempotencyKey ?? '').trim();
+	if (!value) return undefined;
+	if (value.length <= FEISHU_MESSAGE_UUID_MAX) return value;
+	return `pk-${createHash('sha256').update(value, 'utf8').digest('hex').slice(0, FEISHU_MESSAGE_UUID_MAX - 3)}`;
+}
 const workbenchEventHandlers = new Map([
 	['card.action.trigger', { label: '行动卡片回调', required_for: '可选行动卡片' }],
 	['im.message.reaction.created_v1', { label: '表情协作回调', required_for: '可选行动卡片表情' }],
@@ -929,7 +944,7 @@ async function handlePaperKbAlert(request, response) {
 			try {
 				const result = await larkClient.im.v1.message.create({
 					params: { receive_id_type: 'chat_id' },
-					data: { receive_id: targetChatId, msg_type: 'text', content: JSON.stringify({ text }), uuid: idempotencyKey },
+					data: { receive_id: targetChatId, msg_type: 'text', content: JSON.stringify({ text }), uuid: paperKbFeishuUuid(idempotencyKey) },
 				});
 				const messageId = result?.data?.message_id ?? null;
 				if (!messageId) throw new Error('Feishu did not return message_id');
@@ -1125,6 +1140,22 @@ async function handleLarkAgentXSummaryInbound(request, response) {
 	}
 }
 
+async function handleLarkAgentXRouteCatalog(request, response) {
+	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
+		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'unauthorized' }));
+		return;
+	}
+	try {
+		const routes = await ledger.relayRoutes();
+		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ routes: routes.map((route) => ({ source_key: route.key, source_chat_id: route.chatId, chat_name: route.chatName, tag: route.tag, enabled: route.enabled !== false })) }));
+	} catch (error) {
+		response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
+	}
+}
+
 async function handleLarkAgentXGroupRelayInbound(request, response) {
 	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
 		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1139,10 +1170,14 @@ async function handleLarkAgentXGroupRelayInbound(request, response) {
 	try {
 		const input = await readJsonBody(request, 64 * 1024);
 		const chatId = String(input?.chat_id ?? '').trim();
-		const sourceKey = larkAgentXGroupRelayRoutes.get(chatId);
+		const dynamicRoute = input?._larkagentx_route && typeof input._larkagentx_route === 'object' ? input._larkagentx_route : null;
+		const declaredSourceKey = String(dynamicRoute?.source_key ?? '').trim();
+		const sourceKey = larkAgentXSourceKeyForChat(chatId) ?? declaredSourceKey;
 		if (!sourceKey) throw new Error(`未配置 LarkAgentX 源群：${chatId || 'unknown'}`);
 		const source = (await ledger.relayRoutes()).find((route) => route.key === sourceKey);
 		if (!source) throw new Error(`未找到实时源路由：${sourceKey}`);
+		if (dynamicRoute && source.chatId && String(dynamicRoute.source_chat_id ?? '').trim() !== String(source.chatId)) throw new Error(`LarkAgentX 动态源群映射不匹配：${sourceKey}`);
+		if (declaredSourceKey && !larkAgentXGroupRelayRoutes.has(chatId)) larkAgentXDynamicGroupRelayRoutes.set(chatId, sourceKey);
 		if (source.enabled === false) {
 			response.writeHead(202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ status: 'filtered', reason: '实时源路由已停用', source_key: sourceKey, chat_id: chatId }));
@@ -1151,15 +1186,34 @@ async function handleLarkAgentXGroupRelayInbound(request, response) {
 		const targetChatIds = [...new Set([groupRelayConfig.targetChatId, ...(source.targetChatIds ?? [])].map((value) => String(value ?? '').trim()).filter(Boolean))];
 		if (!targetChatIds.length) throw new Error(`实时源路由没有目标群：${sourceKey}`);
 		const cardNeedsBackfill = ['CARD', 'INTERACTIVE'].includes(larkAgentXMessageType(input)) && !hasLarkAgentXCardPayload(input);
-		const allowOfficialFallback = larkAgentXOfficialFallbackEnabled || (larkAgentXCardBackfillEnabled && cardNeedsBackfill);
-		const message = isDirectLarkAgentXRelayType(input)
-			? normalizeLarkAgentXRelayMessage(input)
-			: !allowOfficialFallback
-				? normalizeLarkAgentXUnsupportedMessage(input)
-			// LarkAgentX's personal WebSocket uses its numeric chat id, while
-			// the user OAuth message API resolves the same group by its official
-			// oc_ chat id retained in the relay route.
-			: await readLarkAgentXBackfill(input, source, { sourceApi: feishuUserOauth.sourceApi });
+		const sourceTag = String(source.tag ?? '').trim().toLowerCase();
+		const cardBackfillScoped = larkAgentXCardBackfillEnabled && (!larkAgentXCardBackfillTags.size || larkAgentXCardBackfillTags.has(sourceTag) || larkAgentXCardBackfillTags.has(String(source.key ?? '').trim().toLowerCase()));
+		const allowOfficialFallback = larkAgentXOfficialFallbackEnabled || (cardBackfillScoped && cardNeedsBackfill);
+		let message;
+		if (isDirectLarkAgentXRelayType(input)) {
+			message = normalizeLarkAgentXRelayMessage(input);
+		} else if (!allowOfficialFallback) {
+			message = normalizeLarkAgentXUnsupportedMessage(input);
+		} else {
+			try {
+				// LarkAgentX's personal WebSocket uses its numeric chat id, while
+				// the user OAuth message API resolves the same group by its official
+				// oc_ chat id retained in the relay route.
+				message = await readLarkAgentXBackfill(input, source, { sourceApi: feishuUserOauth.sourceApi });
+			} catch (error) {
+				// A card with no protobuf body must not disappear merely because the
+				// optional official backfill lane is quota-limited or temporarily
+				// unavailable. Preserve the real-time event as a durable placeholder;
+				// the scoped repair endpoint can upgrade it when the official lane is
+				// available again.
+				if (cardBackfillScoped && cardNeedsBackfill) {
+					console.warn(`LarkAgentX 卡片补读不可用，保留实时占位：${source.key} ${error instanceof Error ? error.message : String(error)}`);
+					message = normalizeLarkAgentXUnsupportedMessage(input);
+				} else {
+					throw error;
+				}
+			}
+		}
 		const resolvedChatId = message.oauth_chat_id || chatId;
 		const result = await groupRelay.processInbound({ ...message, source_chat_id: resolvedChatId }, { ...source, resolvedChatId, targetChatIds, targetChatId: targetChatIds[0] });
 		response.writeHead(result.status === 'sent' ? 201 : 202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1186,10 +1240,10 @@ async function handleLarkAgentXGapRepair(request, response) {
 		const sourceKeys = explicitSourceKeys.length
 			? explicitSourceKeys
 			: (Array.isArray(input?.source_chat_ids) ? input.source_chat_ids
-				.map((value) => larkAgentXGroupRelayRoutes.get(String(value ?? '').trim()))
+			.map((value) => larkAgentXSourceKeyForChat(String(value ?? '').trim()))
 				.filter(Boolean) : []);
 		if (!sourceKeys.length) throw new Error('缺口补读必须指定 source_keys 或已映射的 source_chat_ids');
-		const result = await groupRelay.repairFromOfficial({ fromCreateTime: input?.from_time, toCreateTime: input?.to_time, sourceKeys });
+		const result = await groupRelay.repairFromOfficial({ fromCreateTime: input?.from_time, toCreateTime: input?.to_time, sourceKeys, forcePlaceholderCards: input?.force_placeholder_cards === true });
 		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({ status: 'completed', ...result }));
 	} catch (error) {
@@ -1197,6 +1251,24 @@ async function handleLarkAgentXGapRepair(request, response) {
 		console.error(`LarkAgentX 缺口补读失败：${message}`);
 		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({ status: 'error', message }));
+	}
+}
+
+async function handleLarkAgentXRetryFailed(request, response) {
+	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
+		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'unauthorized' }));
+		return;
+	}
+	try {
+		const input = await readJsonBody(request, 16 * 1024);
+		const sourceKeys = Array.isArray(input?.source_keys) ? input.source_keys : [];
+		const result = await groupRelay.retryFailedNow(sourceKeys);
+		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'ok', ...result }));
+	} catch (error) {
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
 	}
 }
 
@@ -1228,15 +1300,88 @@ function asIsoString(value) {
 	return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
+async function itouguDashboardStatus() {
+	const unavailable = (message) => ({
+		status: 'unavailable', state: 'unavailable', service: 'itougu-neican', observed_at: new Date().toISOString(),
+		updated_at: null, heartbeat_age_seconds: null, message, products: [], product_targets: [],
+		target_chat_ids: [], article_target_chat_ids: [], webhook_config: {},
+	});
+	if (!itouguStatusFile) return unavailable('未配置 Itougu 状态文件');
+	try {
+		const raw = JSON.parse(await readFile(itouguStatusFile, 'utf8'));
+		const updatedAt = asIsoString(raw.updated_at);
+		const heartbeatAgeSeconds = updatedAt ? Math.max(0, Math.floor((Date.now() - Date.parse(updatedAt)) / 1000)) : null;
+		const staleAfterSeconds = Math.max(60, Number(raw.stale_after_seconds ?? 180));
+		const rawState = String(raw.state ?? 'unknown');
+		const state = heartbeatAgeSeconds === null ? 'unavailable'
+			: heartbeatAgeSeconds > staleAfterSeconds ? 'delayed'
+			: ['error', 'starting', 'polling', 'running', 'sleeping'].includes(rawState) ? rawState : 'unknown';
+		const healthy = ['starting', 'polling', 'running', 'sleeping'].includes(state);
+		const products = Array.isArray(raw.products) ? raw.products.map((item) => ({ business_product_id: String(item?.business_product_id ?? ''), name: String(item?.name ?? '') })).filter((item) => item.business_product_id && item.name) : [];
+		const productTargets = Array.isArray(raw.product_targets) ? raw.product_targets.map((item) => ({
+			business_product_id: String(item?.business_product_id ?? ''), name: String(item?.name ?? ''),
+			target_chat_ids: Array.isArray(item?.target_chat_ids) ? item.target_chat_ids.map((value) => String(value)).filter(Boolean) : [],
+			article_target_chat_ids: Array.isArray(item?.article_target_chat_ids) ? item.article_target_chat_ids.map((value) => String(value)).filter(Boolean) : [],
+		})).filter((item) => item.business_product_id && item.name) : [];
+		const keywordEntries = Array.isArray(raw.webhook_config?.keyword_entries) ? raw.webhook_config.keyword_entries.map((item) => ({ chat_id: String(item?.chat_id ?? ''), keyword: String(item?.keyword ?? '') })).filter((item) => item.chat_id && item.keyword) : [];
+		const webhookConfig = {
+			webhook_chat_ids: Array.isArray(raw.webhook_config?.webhook_chat_ids) ? raw.webhook_config.webhook_chat_ids.map((value) => String(value)).filter(Boolean) : [],
+			keyword_chat_ids: Array.isArray(raw.webhook_config?.keyword_chat_ids) ? raw.webhook_config.keyword_chat_ids.map((value) => String(value)).filter(Boolean) : [],
+			keyword_entries: keywordEntries,
+			missing_keyword_chat_ids: Array.isArray(raw.webhook_config?.missing_keyword_chat_ids) ? raw.webhook_config.missing_keyword_chat_ids.map((value) => String(value)).filter(Boolean) : [],
+			all_webhook_keywords_loaded: raw.webhook_config?.all_webhook_keywords_loaded === true,
+		};
+		return {
+			status: healthy ? 'healthy' : state, state, service: 'itougu-neican', observed_at: new Date().toISOString(),
+			updated_at: updatedAt, started_at: asIsoString(raw.started_at), heartbeat_age_seconds: heartbeatAgeSeconds,
+			stale_after_seconds: staleAfterSeconds, message: raw.last_error ?? null,
+			last_poll_started_at: asIsoString(raw.last_poll_started_at), last_poll_completed_at: asIsoString(raw.last_poll_completed_at),
+			last_success_at: asIsoString(raw.last_success_at), last_error: raw.last_error ? String(raw.last_error).slice(0, 500) : null,
+			last_trigger: raw.last_trigger ? String(raw.last_trigger) : null, manual_refresh_count: Number(raw.manual_refresh_count ?? 0),
+			consecutive_error_count: Number(raw.consecutive_error_count ?? 0), poll_count: Number(raw.poll_count ?? 0),
+			failure_count: Number(raw.failure_count ?? 0), sent_count: Number(raw.sent_count ?? 0),
+			interval_seconds: Number(raw.interval_seconds ?? 0), off_hours_interval_seconds: Number(raw.off_hours_interval_seconds ?? 0),
+			midday_interval_seconds: Number(raw.midday_interval_seconds ?? 0), trading_hours_only: raw.trading_hours_only === true,
+			current_window: raw.current_window ? String(raw.current_window) : null, next_poll_in_seconds: Number(raw.next_poll_in_seconds ?? 0),
+			products, product_targets: productTargets,
+			target_chat_ids: Array.isArray(raw.target_chat_ids) ? raw.target_chat_ids.map((value) => String(value)).filter(Boolean) : [],
+			article_target_chat_ids: Array.isArray(raw.article_target_chat_ids) ? raw.article_target_chat_ids.map((value) => String(value)).filter(Boolean) : [],
+			webhook_config: webhookConfig,
+		};
+	} catch (error) {
+		return unavailable(error?.code === 'ENOENT' ? 'Itougu 状态文件尚未生成' : `Itougu 状态不可读：${error?.message ?? error}`);
+	}
+}
+
+let itouguRefreshInFlight = null;
+async function triggerItouguRefresh() {
+	if (itouguRefreshInFlight) return itouguRefreshInFlight;
+	itouguRefreshInFlight = (async () => {
+		let upstream;
+		try {
+			upstream = await fetch(`${itouguControlUrl}/refresh`, {
+				method: 'POST', headers: { accept: 'application/json' }, signal: AbortSignal.timeout(120_000),
+			});
+		} catch (error) {
+			throw new Error(`Itougu 手动刷新接口不可用：${error instanceof Error ? error.message : String(error)}`);
+		}
+		const body = await upstream.text();
+		let payload;
+		try { payload = body ? JSON.parse(body) : {}; } catch { throw new Error('Itougu 手动刷新接口返回了非 JSON 响应'); }
+		return { http_status: upstream.status, payload };
+	})().finally(() => { itouguRefreshInFlight = null; });
+	return itouguRefreshInFlight;
+}
+
 async function groupRelayDashboardStatus() {
-	const [persistedSources, routes, oauth, ingestionSources, writer, delivery, larkagentx] = await Promise.all([ledger.relayStatus(), ledger.relayRoutes(), feishuUserOauth.status(), ledger.ingestionStatusBySource(), ledger.relayWriterStatus(), ledger.observability(), larkAgentXDashboardStatus()]);
+	const [persistedSources, routes, oauth, ingestionSources, writer, delivery, larkagentx, itougu] = await Promise.all([ledger.relayStatus(), ledger.relayRoutes(), feishuUserOauth.status(), ledger.ingestionStatusBySource(), ledger.relayWriterStatus(), ledger.observability(), larkAgentXDashboardStatus(), itouguDashboardStatus()]);
 	const runtime = groupRelay.status();
 	const listenerRuntime = summaryListener.status();
 	const persistedByKey = new Map(persistedSources.map((source) => [source.source_key, source]));
 	const runtimeByKey = new Map(runtime.sources.map((source) => [source.key, source]));
 	const ingestionByTag = new Map(ingestionSources.map((source) => [source.source_tag, source]));
 	const websocketChatIdsBySource = new Map();
-	for (const [chatId, sourceKey] of larkAgentXGroupRelayRoutes) {
+	for (const [chatId, sourceKey] of [...larkAgentXGroupRelayRoutes, ...larkAgentXDynamicGroupRelayRoutes]) {
 		// The route map keeps official oc_ aliases for documentation and
 		// deduplication, but only numeric ids are actual LarkAgentX socket ids.
 		if (!/^\d+$/.test(chatId)) continue;
@@ -1275,9 +1420,10 @@ async function groupRelayDashboardStatus() {
 		const resolvedError = !activeError && failedCount === 0
 			? persisted?.latest_failure_error ?? ingestionRecord?.latest_failure_error ?? null : null;
 		const resolvedErrorAt = persisted?.latest_failure_at ?? ingestionRecord?.latest_failure_at ?? null;
-		const transport = websocketChatIds.length ? 'larkagentx_websocket' : groupRelayConfig.enabled ? 'oauth_poll' : 'disabled';
+		const transport = websocketChatIds.length ? 'larkagentx_websocket' : groupRelayConfig.enabled ? 'oauth_poll' : larkAgentXDynamicRouteDiscoveryEnabled ? 'pending_websocket_discovery' : 'disabled';
 		let state = 'healthy';
 		if (source.enabled === false || transport === 'disabled') state = 'disabled';
+		else if (transport === 'pending_websocket_discovery') state = 'starting';
 		else if (transport === 'larkagentx_websocket') {
 			if (larkagentx.status !== 'healthy' || larkagentx.websocket?.state !== 'connected') state = 'unavailable';
 			else if (websocketChatIds.some((chatId) => larkagentx.chat_validation?.[chatId]?.state === 'error')) state = 'degraded';
@@ -1326,9 +1472,10 @@ async function groupRelayDashboardStatus() {
 		: sources.some((source) => ['error', 'unavailable', 'delayed', 'degraded', 'not_configured', 'not_authorized'].includes(source.state)) ? 'degraded'
 		: 'starting';
 	const realtimeSummaryHealthy = larkagentx.status === 'healthy' && larkagentx.websocket?.state === 'connected' && larkagentx.summary_ingress_configured;
-	const combinedOverall = overall === 'healthy' && realtimeSummaryHealthy ? 'healthy'
+	const itouguHealthy = itougu.status === 'healthy';
+	const combinedOverall = overall === 'healthy' && realtimeSummaryHealthy && itouguHealthy ? 'healthy'
 		: overall === 'degraded' || ['error', 'delayed', 'not_configured', 'not_authorized'].includes(listenerState) && listenerState !== 'disabled' ? 'degraded'
-		: overall;
+		: !itouguHealthy ? 'degraded' : overall;
 	return {
 		status: combinedOverall, observed_at: new Date(now).toISOString(), enabled: groupRelayConfig.enabled, realtime_enabled: larkAgentXGroupRelayEnabled,
 		interval_seconds: groupRelayConfig.intervalSeconds, stale_after_seconds: staleAfterSeconds,
@@ -1336,6 +1483,7 @@ async function groupRelayDashboardStatus() {
 		user_oauth_scope_audit: oauth.scope_audit ?? null,
 		webhook_config: webhookConfigStatus(groupRelayWebhooksByChatId, groupRelayWebhookKeywordsByChatId),
 		larkagentx,
+		itougu,
 		delivery_verified: sources.filter((source) => source.enabled).every((source) => source.delivery_state === 'verified'),
 		last_tick_started_at: runtime.last_tick_started_at, last_tick_completed_at: runtime.last_tick_completed_at,
 		last_tick_error: runtime.last_tick_error,
@@ -1360,7 +1508,7 @@ async function groupRelayDashboardStatus() {
 }
 
 async function larkAgentXDashboardStatus() {
-	const unavailable = (message) => ({ status: 'unavailable', observed_at: new Date().toISOString(), message, websocket: { state: 'unavailable' }, listen_chat_count: 0, listen_chat_ids: [], websocket_chat_ids: [], summary_chat_ids: [], summary_ingress_configured: false, gap_repair_enabled: false, chat_validation: {}, chat_stats: {} });
+	const unavailable = (message) => ({ status: 'unavailable', observed_at: new Date().toISOString(), message, metrics_persisted: false, metrics_source: null, websocket: { state: 'unavailable' }, listen_chat_count: 0, listen_chat_ids: [], websocket_chat_ids: [], summary_chat_ids: [], summary_ingress_configured: false, gap_repair_enabled: false, dynamic_route_discovery: false, route_catalog_count: 0, route_catalog_last_refresh_at: null, route_catalog_error: null, dynamic_routes: {}, chat_validation: {}, chat_stats: {} });
 	if (!larkAgentXHealthUrl) return unavailable('未配置 LarkAgentX health 地址');
 	try {
 		const controller = new AbortController();
@@ -1374,15 +1522,19 @@ async function larkAgentXDashboardStatus() {
 		}]));
 		const stats = Object.fromEntries(Object.entries(raw.chat_stats ?? {}).map(([chatId, value]) => [chatId, {
 			allowlisted: value?.allowlisted !== false, observed_count: Number(value?.observed_count ?? 0), self_message_count: Number(value?.self_message_count ?? 0),
-			forwarded_count: Number(value?.forwarded_count ?? 0), failed_count: Number(value?.failed_count ?? 0), last_observed_at: value?.last_observed_at ?? null,
+			forwarded_count: Number(value?.forwarded_count ?? 0), failed_count: Number(value?.failed_count ?? 0), historical_failed_count: Number(value?.historical_failed_count ?? value?.failed_count ?? 0), last_observed_at: value?.last_observed_at ?? null,
 			last_forwarded_at: value?.last_forwarded_at ?? null, last_message_type: value?.last_message_type ?? null,
 		}]));
 		return {
 			status: raw.status === 'ok' ? 'healthy' : 'degraded', observed_at: new Date().toISOString(), release: raw.release ?? null,
+			metrics_persisted: raw.metrics_persisted === true, metrics_source: raw.metrics_source ?? null,
 			websocket: raw.websocket ?? { state: 'unknown' }, listen_chat_count: Number(raw.listen_chat_count ?? 0),
 			listen_chat_ids: Array.isArray(raw.listen_chat_ids) ? raw.listen_chat_ids : [], websocket_chat_ids: Array.isArray(raw.websocket_chat_ids) ? raw.websocket_chat_ids : [],
 			summary_chat_ids: Array.isArray(raw.summary_chat_ids) ? raw.summary_chat_ids : [], summary_ingress_configured: Boolean(raw.summary_ingress_configured),
-			gap_repair_enabled: Boolean(raw.gap_repair_enabled), mapping_check_at: raw.mapping_check_at ?? null, mapping_check_error: raw.mapping_check_error ?? null,
+			gap_repair_enabled: Boolean(raw.gap_repair_enabled), dynamic_route_discovery: Boolean(raw.dynamic_route_discovery),
+			route_catalog_count: Number(raw.route_catalog_count ?? 0), route_catalog_last_refresh_at: raw.route_catalog_last_refresh_at ?? null,
+			route_catalog_error: raw.route_catalog_error ?? null, dynamic_routes: raw.dynamic_routes && typeof raw.dynamic_routes === 'object' ? raw.dynamic_routes : {},
+			mapping_check_at: raw.mapping_check_at ?? null, mapping_check_error: raw.mapping_check_error ?? null,
 			observed_count: Number(raw.observed_count ?? 0), forwarded_count: Number(raw.forwarded_count ?? 0), failed_count: Number(raw.failed_count ?? 0),
 			decode_error_count: Number(raw.decode_error_count ?? 0), decode_fallback_count: Number(raw.decode_fallback_count ?? 0), unknown_field_count: Number(raw.unknown_field_count ?? 0),
 			partial_frame_count: Number(raw.partial_frame_count ?? 0), retry_count: Number(raw.retry_count ?? 0), last_observed_chat_id: raw.last_observed_chat_id ?? null,
@@ -1393,6 +1545,58 @@ async function larkAgentXDashboardStatus() {
 		};
 	} catch (error) {
 		return unavailable(error?.name === 'AbortError' ? 'LarkAgentX health 超时' : `LarkAgentX health 不可用：${error?.message ?? error}`);
+	}
+}
+
+async function handleLarkAgentXHistoryExport(request, response, url) {
+	const chatId = String(url.searchParams.get('chat_id') ?? '').trim();
+	if (!/^\d{1,64}$/.test(chatId)) {
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: '必须选择有效的 WebSocket 数字 chat_id' }));
+		return;
+	}
+	const days = Number(url.searchParams.get('days') ?? '1');
+	if (![1, 7, 30].includes(days)) {
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: '导出范围只支持最近 1 天、7 天或 30 天' }));
+		return;
+	}
+	if (!larkAgentXIngressToken || !larkAgentXHealthUrl) {
+		response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: 'LarkAgentX 导出服务未配置' }));
+		return;
+	}
+	try {
+		const bridgeUrl = new URL(larkAgentXHealthUrl);
+		bridgeUrl.pathname = '/history/export';
+		bridgeUrl.search = '';
+		bridgeUrl.searchParams.set('chat_id', chatId);
+		bridgeUrl.searchParams.set('from_time', String((Date.now() - days * 24 * 60 * 60 * 1000) / 1000));
+		bridgeUrl.searchParams.set('to_time', String(Date.now() / 1000));
+		bridgeUrl.searchParams.set('limit', '100000');
+		const upstream = await fetch(bridgeUrl, { headers: { 'x-larkagentx-token': larkAgentXIngressToken, accept: 'application/x-ndjson' } });
+		if (!upstream.ok) {
+			const message = (await upstream.text()).slice(0, 500);
+			response.writeHead(upstream.status === 401 ? 502 : upstream.status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ status: 'error', message: `LarkAgentX 历史导出失败：${message || upstream.statusText}` }));
+			return;
+		}
+		const safeFileChatId = chatId.replace(/[^0-9]/g, '');
+		response.writeHead(200, {
+			'content-type': 'application/x-ndjson; charset=utf-8',
+			'content-disposition': `attachment; filename="larkagentx-${safeFileChatId}-last-${days}d.jsonl"`,
+			'cache-control': 'no-store',
+			...(upstream.headers.get('x-larkagentx-event-count') ? { 'x-larkagentx-event-count': upstream.headers.get('x-larkagentx-event-count') } : {}),
+			...(upstream.headers.get('x-larkagentx-next-sequence') ? { 'x-larkagentx-next-sequence': upstream.headers.get('x-larkagentx-next-sequence') } : {}),
+		});
+		if (!upstream.body) {
+			response.end();
+			return;
+		}
+		Readable.fromWeb(upstream.body).pipe(response);
+	} catch (error) {
+		if (!response.headersSent) response.writeHead(502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		if (!response.writableEnded) response.end(JSON.stringify({ status: 'error', message: `LarkAgentX 历史导出不可用：${error instanceof Error ? error.message : String(error)}` }));
 	}
 }
 
@@ -1411,6 +1615,7 @@ async function resolveRelayRouteInput(payload, current = null) {
 	if (!chatName || chatName.length > 120) throw new Error('请填写 1–120 字的源群名称');
 	const tag = relayRouteTag(payload?.tag ?? current?.tag);
 	const enabled = payload?.enabled === undefined ? current?.enabled !== false : payload.enabled !== false;
+	const allowPending = payload?.allow_pending === true;
 	const requestedChatId = String(payload?.chat_id ?? '').trim();
 	if (requestedChatId && !/^oc_[A-Za-z0-9]+$/.test(requestedChatId)) throw new Error('chat_id 格式无效');
 	const rawTargets = payload?.target_chat_ids === undefined ? current?.targetChatIds ?? [] : payload.target_chat_ids;
@@ -1459,14 +1664,22 @@ async function resolveRelayRouteInput(payload, current = null) {
 	}
 	if (!exact.length) {
 		let pageToken = '';
-		for (let page = 0; page < 20; page++) {
-			const result = await feishuUserOauth.sourceApi.chatList({ ...(pageToken ? { page_token: pageToken } : {}) });
-			exact.push(...(result.data?.items ?? []).filter((chat) => chat.name === chatName));
-			if (!result.data?.has_more || !result.data?.page_token || exact.length) break;
-			pageToken = result.data.page_token;
+		try {
+			for (let page = 0; page < 20; page++) {
+				const result = await feishuUserOauth.sourceApi.chatList({ ...(pageToken ? { page_token: pageToken } : {}) });
+				exact.push(...(result.data?.items ?? []).filter((chat) => chat.name === chatName));
+				if (!result.data?.has_more || !result.data?.page_token || exact.length) break;
+				pageToken = result.data.page_token;
+			}
+		} catch (error) {
+			if (allowPending) return { chatId: '', chatName, tag, targetChatIds: uniqueTargetChatIds, enabled };
+			throw error;
 		}
 	}
-	if (!exact.length) throw new Error(`未找到可读取的群“${chatName}”；可填写已知 chat_id 直接注册`);
+	if (!exact.length) {
+		if (allowPending) return { chatId: '', chatName, tag, targetChatIds: uniqueTargetChatIds, enabled };
+		throw new Error(`未找到可读取的群“${chatName}”；可填写已知 chat_id 直接注册`);
+	}
 	if (exact.length > 1) throw new Error(`找到多个同名群“${chatName}”，请填写 chat_id 后再保存`);
 	return { chatId: exact[0].chat_id, chatName: exact[0].name, tag, targetChatIds: uniqueTargetChatIds, enabled };
 }
@@ -1727,6 +1940,20 @@ const dashboard = createServer((request, response) => {
 		});
 		return;
 	}
+	if (url.pathname === '/api/group-relay/larkagentx/history/export' && request.method === 'GET') {
+		void handleLarkAgentXHistoryExport(request, response, url);
+		return;
+	}
+	if (url.pathname === '/api/group-relay/itougu/refresh' && request.method === 'POST') {
+		void triggerItouguRefresh().then(({ http_status, payload }) => {
+			response.writeHead(http_status === 200 ? 200 : http_status === 409 ? 409 : 502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify(payload));
+		}).catch((error) => {
+			response.writeHead(502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
+		});
+		return;
+	}
 	if (url.pathname === '/api/group-relay/routes' && request.method === 'GET') {
 		void ledger.relayRoutes().then((routes) => {
 			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1960,7 +2187,7 @@ const dashboard = createServer((request, response) => {
 		response.end(JSON.stringify({ status: 'not_found', message: `未知 API：${url.pathname}` }));
 		return;
 	}
-	if (frontendMode === 'spa' && request.method === 'GET' && !['/health', '/events', '/metrics', '/jobs', '/analysis/jobs', '/api/paper-kb-deliveries'].includes(url.pathname)) {
+	if (frontendMode === 'spa' && request.method === 'GET' && !['/health', '/events', '/metrics', '/jobs', '/analysis/jobs', '/api/paper-kb-deliveries', '/internal/larkagentx/routes'].includes(url.pathname)) {
 		const requested = url.pathname === '/relay' ? 'index.html' : url.pathname.slice(1);
 		const assetPath = join(frontendDist, requested.includes('.') ? requested : 'index.html');
 		try { const body = readFileSync(assetPath); const type = assetPath.endsWith('.js') ? 'text/javascript' : assetPath.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8'; response.writeHead(200, { 'content-type': type, 'cache-control': assetPath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable' }); response.end(body); } catch { response.writeHead(404).end(); }
@@ -2064,12 +2291,20 @@ if (url.pathname === '/health') {
 		void handleLarkAgentXSummaryInbound(request, response);
 		return;
 	}
+	if (url.pathname === '/internal/larkagentx/routes' && request.method === 'GET') {
+		void handleLarkAgentXRouteCatalog(request, response);
+		return;
+	}
 	if (url.pathname === '/internal/larkagentx/group-relay' && request.method === 'POST') {
 		void handleLarkAgentXGroupRelayInbound(request, response);
 		return;
 	}
 	if (url.pathname === '/internal/larkagentx/gap-repair' && request.method === 'POST') {
 		void handleLarkAgentXGapRepair(request, response);
+		return;
+	}
+	if (url.pathname === '/internal/larkagentx/retry-failed' && request.method === 'POST') {
+		void handleLarkAgentXRetryFailed(request, response);
 		return;
 	}
 	if (url.pathname === '/wechat-group-relay' && request.method === 'POST') {

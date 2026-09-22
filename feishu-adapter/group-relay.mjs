@@ -110,6 +110,13 @@ function parseJson(value, fallback = {}) {
 	try { return JSON.parse(value ?? '{}'); } catch { return fallback; }
 }
 
+function isPlaceholderCardRelay(message) {
+	if (String(message?.msg_type ?? '').trim().toLowerCase() !== 'text') return false;
+	const body = parseJson(message?.body?.content, {});
+	const text = String(body?.text ?? '').trim();
+	return /^\[(?:card|interactive)\]\s+(?:\[卡片\]|卡片内容未随 WebSocket 提供)\s*$/iu.test(text);
+}
+
 function cloneJson(value) {
 	return JSON.parse(JSON.stringify(value ?? {}));
 }
@@ -525,12 +532,19 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 	async function relayInteractiveContent(message, source, options) {
 		const card = parseJson(message?.body?.content, { raw: String(message?.body?.content ?? '') });
 		const summary = cardText(card).slice(0, 3_000);
+		const sourceImageKeys = cardImageKeys(card);
+		// Custom-bot webhooks can render the source image key directly. Keep
+		// interactive-card images on that path when every destination is a
+		// webhook, so a tenant upload quota cannot strip images from the card.
+		if (sourceImageKeys.length && allTargetsUseWebhooks(source, config)) {
+			return cardPayloadFor(source, summary, sourceImageKeys);
+		}
 		// A card can carry its real content as an image, which the text walk
 		// cannot see.  Relay those the way rich text already does, so the
 		// content arrives instead of a caption describing it.
 		const images = [];
 		let unreachable = 0;
-		for (const resource of cardImageKeys(card).map((key) => ({ key, kind: 'image' }))) {
+		for (const resource of sourceImageKeys.map((key) => ({ key, kind: 'image' }))) {
 			if (images.some((item) => item.key === resource.key)) continue;
 			try {
 				const uploaded = await downloadAndUpload(message, resource);
@@ -725,14 +739,14 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		return { status: saved?.status ?? 'processing', message_id: message.message_id, target_message_ids: saved?.target_message_ids ?? [] };
 	}
 
-	async function repairFromOfficial({ fromCreateTime, toCreateTime, sourceKeys = [] } = {}) {
+	async function repairFromOfficial({ fromCreateTime, toCreateTime, sourceKeys = [], forcePlaceholderCards = false } = {}) {
 		const from = asCreateTimeMs(fromCreateTime, Date.now() - 120_000);
 		const to = Math.max(from, asCreateTimeMs(toCreateTime, Date.now()));
 		if (to - from > 24 * 60 * 60_000) throw new Error('补读窗口不能超过 24 小时');
 		const requested = new Set((Array.isArray(sourceKeys) ? sourceKeys : []).map((value) => String(value ?? '').trim()).filter(Boolean));
 		const configured = await configuredSources();
 		const selected = configured.filter((source) => source.enabled !== false && (!requested.size || requested.has(source.key)));
-		const totals = { from, to, sources: [], fetched: 0, sent: 0, deduplicated: 0, filtered: 0, failed: 0 };
+		const totals = { from, to, sources: [], fetched: 0, sent: 0, replaced_placeholders: 0, deduplicated: 0, filtered: 0, failed: 0 };
 		await mapWithConcurrency(selected, sourceConcurrency, async (configuredSource) => {
 			const source = await resolveSource(configuredSource);
 			if (!source) {
@@ -740,7 +754,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				totals.failed += 1;
 				return;
 			}
-			const stats = { key: source.key, state: 'ok', fetched: 0, sent: 0, deduplicated: 0, filtered: 0, failed: 0, message_ids: [] };
+			const stats = { key: source.key, state: 'ok', fetched: 0, sent: 0, replaced_placeholders: 0, deduplicated: 0, filtered: 0, failed: 0, message_ids: [] };
 			try {
 				// Do not advance the requested repair window to the latest sent row.
 				// A WebSocket gap can occur before a later message that did arrive;
@@ -771,12 +785,20 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 						const blockedReason = blockedMessageReason(message, sourceFilterOptions(source));
 						if (blockedReason) { stats.filtered += 1; await ledger.filterRelayMessage(record, blockedReason); continue; }
 						const existing = await ledger.getRelayMessage(message.message_id);
-						if (existing?.status === 'sent' || existing?.status === 'skipped_bootstrap' || existing?.status === 'filtered_system') { stats.deduplicated += 1; continue; }
+						const replacePlaceholder = Boolean(forcePlaceholderCards && existing?.status === 'sent' && isPlaceholderCardRelay(existing.message));
+						if ((existing?.status === 'sent' || existing?.status === 'skipped_bootstrap' || existing?.status === 'filtered_system') && !replacePlaceholder) { stats.deduplicated += 1; continue; }
 						const equivalents = ledger.relayMessagesBySourceWindow
 							? await ledger.relayMessagesBySourceWindow(source.key, createTime - 3_000, createTime + 3_000) : [];
-						if (equivalents.some((row) => row.source_message_id !== message.message_id
+						if (!replacePlaceholder && equivalents.some((row) => row.source_message_id !== message.message_id
 							&& ['sent', 'skipped_bootstrap', 'filtered_system'].includes(row.status)
 							&& relayMessagesEquivalent(row, record))) { stats.deduplicated += 1; continue; }
+						if (replacePlaceholder) {
+							if (!ledger.resetRelayMessageForRetry || !(await ledger.resetRelayMessageForRetry(message.message_id, '卡片占位内容改用官方完整卡片重发'))) {
+								stats.failed += 1;
+								continue;
+							}
+							stats.replaced_placeholders += 1;
+						}
 						const claimed = await ledger.claimRelayMessage(record);
 						if (!claimed) { stats.deduplicated += 1; continue; }
 						await processClaimed(message, source, claimed);
@@ -793,7 +815,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				logger.error(`群消息官方补读失败：${source.key}：${error instanceof Error ? error.message : String(error)}`);
 			}
 			totals.sources.push(stats);
-			totals.fetched += stats.fetched; totals.sent += stats.sent; totals.deduplicated += stats.deduplicated; totals.filtered += stats.filtered; totals.failed += stats.failed;
+			totals.fetched += stats.fetched; totals.sent += stats.sent; totals.replaced_placeholders += stats.replaced_placeholders; totals.deduplicated += stats.deduplicated; totals.filtered += stats.filtered; totals.failed += stats.failed;
 		});
 		return totals;
 	}
@@ -812,16 +834,45 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		return chat?.chat_id ? { ...resolvedSource, resolvedChatId: chat.chat_id } : null;
 	}
 
-	async function retryFailed(sourcesByKey) {
-		for (const record of await ledger.relayRetryQueue(20)) {
+	async function retryFailed(sourcesByKey, sourceKeys = []) {
+		let considered = 0;
+		let retried = 0;
+		let sent = 0;
+		let failed = 0;
+		for (const record of await ledger.relayRetryQueue(sourceKeys.length ? 100 : 20, sourceKeys)) {
+			considered += 1;
 			const source = sourcesByKey.get(record.source_key);
-			if (!source || !source.resolvedChatId || source.resolvedChatId !== record.source_chat_id) continue;
+			if (!source || !source.resolvedChatId) continue;
+			const configuredIds = new Set([String(source.resolvedChatId), String(source.chatId ?? '')].filter(Boolean));
+			// LarkAgentX stores its private numeric chat_id in the relay ledger,
+			// while the route catalog stores the official oc_ id.  The source key
+			// is already selected explicitly here; allow that stable numeric form
+			// for retry instead of silently skipping the failed image.
+			const numericDynamicId = /^\d+$/.test(String(record.source_chat_id ?? '')) && [...configuredIds].some((value) => value.startsWith('oc_'));
+			if (!configuredIds.has(String(record.source_chat_id ?? '')) && !numericDynamicId) continue;
 			const claimed = await ledger.claimRelayMessage({
-				...record, sourceChatId: source.resolvedChatId, targetChatId: source.targetChatId, targetChatIds: source.targetChatIds,
+				...record, sourceChatId: record.source_chat_id ?? source.resolvedChatId, targetChatId: source.targetChatId, targetChatIds: source.targetChatIds,
 				routeTag: source.tag, message: sourceFromRecord(record),
 			});
-			if (claimed) await processClaimed(sourceFromRecord(record), source, claimed);
+			if (claimed) {
+				retried += 1;
+				await processClaimed(sourceFromRecord(record), source, claimed);
+				const saved = await ledger.getRelayMessage(record.source_message_id);
+				if (saved?.status === 'sent') sent += 1;
+				else if (saved?.status === 'failed' || saved?.status === 'unsupported') failed += 1;
+			}
 		}
+		return { considered, retried, sent, failed };
+	}
+
+	async function retryFailedNow(sourceKeys = []) {
+		const requested = new Set((Array.isArray(sourceKeys) ? sourceKeys : []).map((value) => String(value ?? '').trim()).filter(Boolean));
+		const configured = await configuredSources();
+		const selected = configured.filter((source) => source.enabled !== false && (!requested.size || requested.has(source.key)));
+		const resolved = await Promise.all(selected.map((source) => resolveSource(source)));
+		const sourcesByKey = new Map(resolved.filter(Boolean).map((source) => [source.key, source]));
+		const result = await retryFailed(sourcesByKey, [...requested]);
+		return { ...result, source_keys: [...sourcesByKey.keys()] };
 	}
 
 	async function upgradePortableInteractiveSummaries(sourcesByKey) {
@@ -1011,6 +1062,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 	return {
 		tick,
 		processInbound,
+		retryFailedNow,
 		repairFromOfficial,
 		status: () => ({
 			running, last_tick_started_at: lastTickStartedAt, last_tick_completed_at: lastTickCompletedAt, last_tick_error: lastTickError,

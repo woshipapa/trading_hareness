@@ -15,6 +15,7 @@ import os
 import sqlite3
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,21 @@ class EventSpool:
                 event_id TEXT,
                 updated_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS chat_stats (
+                chat_id TEXT PRIMARY KEY,
+                observed_count INTEGER NOT NULL DEFAULT 0,
+                forwarded_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                last_observed_at REAL,
+                last_forwarded_at REAL,
+                last_message_type TEXT
+            );
+            CREATE TABLE IF NOT EXISTS runtime_counters (
+                counter_name TEXT PRIMARY KEY,
+                counter_value INTEGER NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL
+            );
             """
         )
         # The bridge was initially released without a sequence column. Keep the
@@ -68,10 +84,16 @@ class EventSpool:
         if "sequence" not in columns:
             self._db.execute("ALTER TABLE events ADD COLUMN sequence INTEGER")
             self._db.execute("CREATE UNIQUE INDEX IF NOT EXISTS events_sequence_idx ON events(sequence)")
+        chat_stat_columns = {str(row[1]) for row in self._db.execute("PRAGMA table_info(chat_stats)").fetchall()}
+        added_failure_count = "failure_count" not in chat_stat_columns
+        if added_failure_count:
+            self._db.execute("ALTER TABLE chat_stats ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0")
+            self._db.execute("UPDATE chat_stats SET failure_count=failed_count WHERE failure_count=0")
         for row in self._db.execute("SELECT rowid FROM events WHERE sequence IS NULL ORDER BY rowid").fetchall():
             sequence = self._db.execute("SELECT COALESCE(MAX(sequence),0)+1 AS next_sequence FROM events").fetchone()["next_sequence"]
             self._db.execute("UPDATE events SET sequence=? WHERE rowid=?", (int(sequence), int(row[0])))
         self._db.execute("INSERT INTO spool_cursor(cursor_name,sequence,updated_at) VALUES('drain',0,?) ON CONFLICT(cursor_name) DO NOTHING", (self._now(),))
+        self._backfill_chat_stats_locked()
         self._db.commit()
         try:
             os.chmod(self.path, 0o600)
@@ -81,6 +103,96 @@ class EventSpool:
     @staticmethod
     def _now() -> float:
         return time.time()
+
+    @staticmethod
+    def _iso(value: float | None) -> str | None:
+        if value is None:
+            return None
+        return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
+
+    @staticmethod
+    def _payload_meta(payload_json: str) -> tuple[str, str]:
+        try:
+            payload = json.loads(payload_json)
+        except (TypeError, json.JSONDecodeError):
+            return "", "UNKNOWN"
+        if not isinstance(payload, dict):
+            return "", "UNKNOWN"
+        chat_id = str(payload.get("chat_id") or "").strip()
+        message_type = str(payload.get("msg_type_name") or payload.get("msg_type") or "UNKNOWN").strip().upper()
+        return chat_id, message_type or "UNKNOWN"
+
+    def _backfill_chat_stats_locked(self) -> None:
+        """Build the durable projection once for spools created before chat_stats."""
+        existing = self._db.execute("SELECT count(*) AS count FROM chat_stats").fetchone()
+        if existing and int(existing["count"]) > 0:
+            return
+        rows = self._db.execute("SELECT payload_json,status,created_at,delivered_at FROM events ORDER BY sequence").fetchall()
+        aggregates: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            chat_id, message_type = self._payload_meta(row["payload_json"])
+            if not chat_id:
+                continue
+            item = aggregates.setdefault(chat_id, {
+                "observed_count": 0, "forwarded_count": 0, "failed_count": 0, "failure_count": 0,
+                "last_observed_at": None, "last_forwarded_at": None, "last_message_type": None,
+            })
+            item["observed_count"] += 1
+            item["last_observed_at"] = float(row["created_at"])
+            item["last_message_type"] = message_type
+            if str(row["status"]) == "delivered":
+                item["forwarded_count"] += 1
+                item["last_forwarded_at"] = float(row["delivered_at"] or row["created_at"])
+            elif str(row["status"]) == "failed":
+                item["failed_count"] += 1
+                item["failure_count"] += 1
+        for chat_id, item in aggregates.items():
+            self._db.execute(
+                "INSERT INTO chat_stats(chat_id,observed_count,forwarded_count,failed_count,failure_count,last_observed_at,last_forwarded_at,last_message_type) VALUES(?,?,?,?,?,?,?,?)",
+                (chat_id, item["observed_count"], item["forwarded_count"], item["failed_count"], item["failure_count"], item["last_observed_at"], item["last_forwarded_at"], item["last_message_type"]),
+            )
+
+    def _record_observed_locked(self, payload: dict[str, Any], created_at: float) -> None:
+        chat_id = str(payload.get("chat_id") or "").strip()
+        if not chat_id:
+            return
+        message_type = str(payload.get("msg_type_name") or payload.get("msg_type") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        self._db.execute(
+            """
+            INSERT INTO chat_stats(chat_id,observed_count,last_observed_at,last_message_type)
+            VALUES(?,?,?,?)
+            ON CONFLICT(chat_id) DO UPDATE SET
+              observed_count=chat_stats.observed_count+1,
+              last_observed_at=excluded.last_observed_at,
+              last_message_type=excluded.last_message_type
+            """,
+            (chat_id, 1, created_at, message_type),
+        )
+
+    def increment_counter(self, name: str, amount: int = 1) -> int:
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("counter name is empty")
+        now = self._now()
+        with self._lock:
+            self._db.execute(
+                """
+                INSERT INTO runtime_counters(counter_name,counter_value,updated_at)
+                VALUES(?,?,?)
+                ON CONFLICT(counter_name) DO UPDATE SET
+                  counter_value=runtime_counters.counter_value+excluded.counter_value,
+                  updated_at=excluded.updated_at
+                """,
+                (name, int(amount), now),
+            )
+            self._db.commit()
+            row = self._db.execute("SELECT counter_value FROM runtime_counters WHERE counter_name=?", (name,)).fetchone()
+            return int(row["counter_value"] if row else 0)
+
+    def counters(self) -> dict[str, int]:
+        with self._lock:
+            rows = self._db.execute("SELECT counter_name,counter_value FROM runtime_counters").fetchall()
+        return {str(row["counter_name"]): int(row["counter_value"]) for row in rows}
 
     def enqueue(self, event_id: str, payload: dict[str, Any]) -> str:
         event_id = str(event_id).strip()
@@ -92,10 +204,12 @@ class EventSpool:
         now = self._now()
         with self._lock:
             sequence = int(self._db.execute("SELECT COALESCE(MAX(sequence),0)+1 AS next_sequence FROM events").fetchone()["next_sequence"])
-            self._db.execute(
+            cursor = self._db.execute(
                 "INSERT INTO events(sequence,event_id,payload_json,status,available_at,created_at,updated_at) VALUES(?,?,?, 'queued',?,?,?) ON CONFLICT(event_id) DO NOTHING",
                 (sequence, event_id, encoded, now, now, now),
             )
+            if cursor.rowcount > 0:
+                self._record_observed_locked(payload, now)
             self._db.commit()
             row = self._db.execute("SELECT status FROM events WHERE event_id=?", (event_id,)).fetchone()
             return str(row["status"] if row else "queued")
@@ -127,10 +241,18 @@ class EventSpool:
     def mark_delivered(self, event_id: str) -> None:
         now = self._now()
         with self._lock:
+            row = self._db.execute("SELECT status,payload_json FROM events WHERE event_id=?", (event_id,)).fetchone()
             self._db.execute(
                 "UPDATE events SET status='delivered',lease_until=NULL,delivered_at=?,updated_at=? WHERE event_id=?",
                 (now, now, event_id),
             )
+            if row is not None and str(row["status"]) != "delivered":
+                chat_id, _ = self._payload_meta(row["payload_json"])
+                if chat_id:
+                    self._db.execute(
+                        "UPDATE chat_stats SET forwarded_count=forwarded_count+1,failed_count=MAX(0,failed_count-CASE WHEN ?='failed' THEN 1 ELSE 0 END),last_forwarded_at=? WHERE chat_id=?",
+                        (str(row["status"]), now, chat_id),
+                    )
             self._advance_cursor_locked(now)
             self._db.commit()
 
@@ -147,10 +269,15 @@ class EventSpool:
     def mark_failed(self, event_id: str, error: str, *, retry_after: int = 30) -> None:
         now = self._now()
         with self._lock:
+            row = self._db.execute("SELECT status,payload_json FROM events WHERE event_id=?", (event_id,)).fetchone()
             self._db.execute(
                 "UPDATE events SET status='failed',lease_until=NULL,available_at=?,last_error=?,updated_at=? WHERE event_id=?",
                 (now + max(1, min(3600, int(retry_after))), str(error)[:1000], now, event_id),
             )
+            if row is not None and str(row["status"]) != "failed":
+                chat_id, _ = self._payload_meta(row["payload_json"])
+                if chat_id:
+                    self._db.execute("UPDATE chat_stats SET failed_count=failed_count+1,failure_count=failure_count+1 WHERE chat_id=?", (chat_id,))
             self._db.commit()
 
     def due(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -195,6 +322,33 @@ class EventSpool:
             cursor = self._db.execute("SELECT sequence FROM spool_cursor WHERE cursor_name='drain'").fetchone()
             result["drain_cursor"] = int(cursor["sequence"] if cursor else 0)
         return result
+
+    def chat_stats(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT chat_id,observed_count,forwarded_count,failed_count,failure_count,last_observed_at,last_forwarded_at,last_message_type FROM chat_stats ORDER BY chat_id"
+            ).fetchall()
+        return {
+            str(row["chat_id"]): {
+                "allowlisted": True,
+                "observed_count": int(row["observed_count"]),
+                "self_message_count": 0,
+                "forwarded_count": int(row["forwarded_count"]),
+                "failed_count": int(row["failed_count"]),
+                "historical_failed_count": int(row["failure_count"]),
+                "last_observed_at": self._iso(row["last_observed_at"]),
+                "last_forwarded_at": self._iso(row["last_forwarded_at"]),
+                "last_message_type": row["last_message_type"],
+            }
+            for row in rows
+        }
+
+    def chat_summary(self) -> dict[str, int]:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COALESCE(SUM(observed_count),0) AS observed_count, COALESCE(SUM(forwarded_count),0) AS forwarded_count, COALESCE(SUM(failed_count),0) AS failed_count, COALESCE(SUM(failure_count),0) AS historical_failed_count FROM chat_stats"
+            ).fetchone()
+        return {key: int(row[key]) for key in ("observed_count", "forwarded_count", "failed_count", "historical_failed_count")}
 
     def close(self) -> None:
         with self._lock:

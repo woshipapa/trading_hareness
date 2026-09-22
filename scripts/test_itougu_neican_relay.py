@@ -3,6 +3,7 @@ import json
 import importlib.util
 import sys
 import time
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +12,39 @@ import itougu_neican_relay as relay
 
 
 class ItouguRelayTests(unittest.TestCase):
+    def test_status_target_configuration_is_deduplicated_and_keeps_keywords_only(self):
+        result = relay.status_target_configuration(
+            {"1806593447818383361": "尾盘掘金内参", "1661993558510538753": "猎场擒龙内参"},
+            ["summary", "shared"], ["summary", "qinlong"], ["juejin"], ["article"],
+            ["summary", "juejin"], {"summary": "汇总"},
+        )
+        self.assertEqual(result["target_chat_ids"], ["summary", "shared", "juejin", "qinlong", "article"])
+        self.assertEqual(result["product_targets"][0]["target_chat_ids"], ["summary", "shared", "juejin"])
+        self.assertEqual(result["product_targets"][1]["target_chat_ids"], ["summary", "shared", "qinlong"])
+        self.assertEqual(result["webhook_config"]["keyword_entries"], [{"chat_id": "summary", "keyword": "汇总"}])
+        self.assertEqual(result["webhook_config"]["missing_keyword_chat_ids"], ["juejin"])
+        self.assertFalse(result["webhook_config"]["all_webhook_keywords_loaded"])
+
+    def test_monitored_poll_manual_trigger_runs_the_same_delivery_cycle(self):
+        original_status_file = relay.STATUS_FILE
+        original_deliver = relay.deliver_new
+        original_public = relay.poll_public_views
+        with tempfile.TemporaryDirectory() as directory:
+            relay.STATUS_FILE = Path(directory) / "status.json"
+            relay.deliver_new = lambda **_kwargs: 2
+            relay.poll_public_views = lambda **_kwargs: 3
+            try:
+                result = relay._run_monitored_poll({"demo": "演示"}, trigger="manual")
+                payload = json.loads(relay.STATUS_FILE.read_text(encoding="utf-8"))
+            finally:
+                relay.STATUS_FILE = original_status_file
+                relay.deliver_new = original_deliver
+                relay.poll_public_views = original_public
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["sent_count"], 5)
+        self.assertEqual(payload["last_trigger"], "manual")
+        self.assertGreaterEqual(payload["manual_refresh_count"], 1)
+
     def test_dedicated_chat_ids_exclude_shared_destination(self):
         original_chat_ids = relay.CHAT_IDS
         original_juejin = relay.JUEJIN_CHAT_IDS

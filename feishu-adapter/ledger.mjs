@@ -308,6 +308,12 @@ export function createLedger(connectionString) {
 				RETURNING *`, [record.sourceMessageId ?? record.source_message_id, record.sourceKey ?? record.source_key, record.sourceChatId ?? record.source_chat_id, record.sourceCreateTime ?? record.source_create_time, record.targetChatId ?? record.target_chat_id, record.routeTag ?? record.route_tag, record.message, record.sourceUpdateTime ?? record.source_update_time ?? null]);
 			return rows[0] ?? null;
 		},
+		async resetRelayMessageForRetry(sourceMessageId, reason = '需要用官方消息内容重发') {
+			const { rowCount } = await pool.query(`UPDATE feishu_group_relay_messages
+				SET status='failed', target_message_ids='[]'::jsonb, error_message=$2, updated_at=now()
+				WHERE source_message_id=$1 AND status='sent'`, [sourceMessageId, reason]);
+			return rowCount === 1;
+		},
 		async markRelayMessage(sourceMessageId, { status, targetMessageIds = [], errorMessage = null }) {
 			await pool.query(`UPDATE feishu_group_relay_messages SET status=$2,target_message_ids=$3,error_message=$4,forwarded_at=CASE WHEN $2='sent' THEN now() ELSE forwarded_at END,updated_at=now() WHERE source_message_id=$1`, [sourceMessageId, status, JSON.stringify(targetMessageIds), errorMessage]);
 		},
@@ -370,7 +376,14 @@ export function createLedger(connectionString) {
 			const result = await pool.query(`SELECT message.*, route.chat_name AS source_chat_name FROM feishu_group_relay_messages message LEFT JOIN feishu_group_relay_routes route ON route.source_key=message.source_key WHERE message.source_message_id=$1`, [sourceMessageId]);
 			return result.rows[0] ?? null;
 		},
-		async relayRetryQueue(limit = 20) { const { rows } = await pool.query(`SELECT * FROM feishu_group_relay_messages WHERE status='failed' AND coalesce(source_deleted, false)=false AND updated_at <= now() - interval '10 seconds' * power(2, least(greatest(attempt_count - 1, 0), 5)) ORDER BY updated_at ASC LIMIT $1`, [Math.max(1, Math.min(100, Number(limit) || 20))]); return rows; },
+		async relayRetryQueue(limit = 20, sourceKeys = []) {
+			const boundedLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+			const keys = [...new Set((Array.isArray(sourceKeys) ? sourceKeys : []).map((value) => String(value ?? '').trim()).filter(Boolean))];
+			const filter = keys.length ? ` AND source_key = ANY($2::text[])` : '';
+			const params = keys.length ? [boundedLimit, keys] : [boundedLimit];
+			const { rows } = await pool.query(`SELECT * FROM feishu_group_relay_messages WHERE status='failed' AND coalesce(source_deleted, false)=false AND updated_at <= now() - interval '10 seconds' * power(2, least(greatest(attempt_count - 1, 0), 5))${filter} ORDER BY updated_at ASC LIMIT $1`, params);
+			return rows;
+		},
 		async portableInteractiveSummaryUpgradeQueue(limit = 20) {
 			const { rows } = await pool.query(`SELECT * FROM feishu_group_relay_messages
 				WHERE status='sent' AND message->>'msg_type'='interactive'

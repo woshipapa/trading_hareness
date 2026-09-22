@@ -12,9 +12,11 @@ type RelayWriterStatus = { configured_id?: string | null; state?: string; owner_
 type DeliveryOutboxStatus = { depth?: number; failed?: number; paused?: number };
 type WebhookConfigStatus = { webhook_chat_ids?: string[]; keyword_chat_ids?: string[]; keyword_entries?: { chat_id: string; keyword: string }[]; missing_keyword_chat_ids?: string[]; orphan_keyword_chat_ids?: string[]; all_webhook_keywords_loaded?: boolean };
 type LarkAgentXChatValidation = { state?: string; name?: string | null; checked_at?: string | null; error?: string | null };
-type LarkAgentXChatStats = { allowlisted?: boolean; observed_count?: number; self_message_count?: number; forwarded_count?: number; failed_count?: number; last_observed_at?: string | null; last_forwarded_at?: string | null; last_message_type?: string | null };
-type LarkAgentXStatus = { status?: string; observed_at?: string; release?: string | null; websocket?: { state?: string; attempt_count?: number; last_attempt_at?: string | null }; listen_chat_count?: number; listen_chat_ids?: string[]; websocket_chat_ids?: string[]; summary_chat_ids?: string[]; summary_ingress_configured?: boolean; gap_repair_enabled?: boolean; mapping_check_at?: string | null; mapping_check_error?: string | null; observed_count?: number; forwarded_count?: number; failed_count?: number; decode_error_count?: number; decode_fallback_count?: number; unknown_field_count?: number; partial_frame_count?: number; retry_count?: number; last_observed_chat_id?: string | null; last_observed_message_type?: string | null; event_spool?: { queued?: number; processing?: number; pending?: number; failed?: number; delivered?: number }; chat_validation?: Record<string, LarkAgentXChatValidation>; chat_stats?: Record<string, LarkAgentXChatStats> };
-type GroupRelayStatus = { status?: string; observed_at?: string; enabled?: boolean; interval_seconds?: number; stale_after_seconds?: number; user_oauth_configured?: boolean; user_oauth_scope_audit?: OAuthScopeAudit | null; target_configured?: boolean; delivery_verified?: boolean; last_tick_started_at?: string | null; last_tick_completed_at?: string | null; last_tick_error?: string | null; writer?: RelayWriterStatus; delivery_outbox?: DeliveryOutboxStatus; webhook_config?: WebhookConfigStatus; larkagentx?: LarkAgentXStatus; sources?: GroupRelaySourceStatus[]; summary_listener?: SummaryListenerStatus };
+type LarkAgentXChatStats = { allowlisted?: boolean; observed_count?: number; self_message_count?: number; forwarded_count?: number; failed_count?: number; historical_failed_count?: number; last_observed_at?: string | null; last_forwarded_at?: string | null; last_message_type?: string | null };
+type LarkAgentXStatus = { status?: string; observed_at?: string; release?: string | null; metrics_persisted?: boolean; metrics_source?: string | null; websocket?: { state?: string; attempt_count?: number; last_attempt_at?: string | null }; listen_chat_count?: number; listen_chat_ids?: string[]; websocket_chat_ids?: string[]; summary_chat_ids?: string[]; summary_ingress_configured?: boolean; gap_repair_enabled?: boolean; dynamic_route_discovery?: boolean; route_catalog_count?: number; route_catalog_last_refresh_at?: string | null; route_catalog_error?: string | null; dynamic_routes?: Record<string, { source_key?: string; chat_name?: string; source_chat_id?: string }>; mapping_check_at?: string | null; mapping_check_error?: string | null; observed_count?: number; forwarded_count?: number; failed_count?: number; decode_error_count?: number; decode_fallback_count?: number; unknown_field_count?: number; partial_frame_count?: number; retry_count?: number; last_observed_chat_id?: string | null; last_observed_message_type?: string | null; event_spool?: { queued?: number; processing?: number; pending?: number; failed?: number; delivered?: number }; chat_validation?: Record<string, LarkAgentXChatValidation>; chat_stats?: Record<string, LarkAgentXChatStats> };
+type ItouguProductTarget = { business_product_id?: string; name?: string; target_chat_ids?: string[]; article_target_chat_ids?: string[] };
+type ItouguStatus = { status?: string; state?: string; service?: string; observed_at?: string; updated_at?: string | null; started_at?: string | null; heartbeat_age_seconds?: number | null; stale_after_seconds?: number; message?: string | null; last_poll_started_at?: string | null; last_poll_completed_at?: string | null; last_success_at?: string | null; last_error?: string | null; last_trigger?: string | null; manual_refresh_count?: number; consecutive_error_count?: number; poll_count?: number; failure_count?: number; sent_count?: number; interval_seconds?: number; off_hours_interval_seconds?: number; midday_interval_seconds?: number; trading_hours_only?: boolean; current_window?: string | null; next_poll_in_seconds?: number; products?: { business_product_id?: string; name?: string }[]; product_targets?: ItouguProductTarget[]; target_chat_ids?: string[]; article_target_chat_ids?: string[]; webhook_config?: WebhookConfigStatus & { keyword_chat_ids?: string[] } };
+type GroupRelayStatus = { status?: string; observed_at?: string; enabled?: boolean; interval_seconds?: number; stale_after_seconds?: number; user_oauth_configured?: boolean; user_oauth_scope_audit?: OAuthScopeAudit | null; target_configured?: boolean; delivery_verified?: boolean; last_tick_started_at?: string | null; last_tick_completed_at?: string | null; last_tick_error?: string | null; writer?: RelayWriterStatus; delivery_outbox?: DeliveryOutboxStatus; webhook_config?: WebhookConfigStatus; larkagentx?: LarkAgentXStatus; itougu?: ItouguStatus; sources?: GroupRelaySourceStatus[]; summary_listener?: SummaryListenerStatus };
 type GroupRelayRouteForm = { key: string; chat_name: string; chat_id: string; tag: string; target_chat_ids_text: string; target_chat_names_text: string; enabled: boolean };
 type FeishuCapability = { key: string; label: string; category: string; enabled: boolean; configured: boolean; resource_configured?: boolean; implementation_ready?: boolean; authorization_subject?: 'user' | 'tenant'; authorization_status?: 'verified' | 'missing' | 'unknown' | 'awaiting_verification' | 'not_required'; missing_user_scopes?: string[]; missing_tenant_scopes?: string[]; requires: string[]; note: string };
 type FeishuEventSubscription = { event_type: string; label: string; required_for: string; handler_registered: boolean; state: 'received' | 'awaiting_callback'; received_count?: number; last_received_at?: string | null };
@@ -31,6 +33,11 @@ export function useFeishuRelayWorkspace() {
   const groupRelayError = ref('');
   const groupRelayRouteDialog = ref(false);
   const groupRelayRouteSaving = ref(false);
+  const itouguRefreshing = ref(false);
+  // Weekly packets are the normal unit handed to the analysis agent. Users
+  // can still select the shorter/longer windows in the monitor toolbar.
+  const larkHistoryDays = ref<1 | 7 | 30>(7);
+  const larkHistoryExporting = ref('');
   const groupRelayRouteForm = ref<GroupRelayRouteForm>(defaultRouteForm());
   const feishuWorkbench = ref<FeishuWorkbenchStatus>({ capabilities: [] });
   const feishuWorkbenchMessages = ref<FeishuWorkbenchMessage[]>([]);
@@ -61,6 +68,9 @@ export function useFeishuRelayWorkspace() {
   const ingestionDeliveryTagType = (ingestion?: IngestionRouteStatus | null): 'success' | 'warning' | 'danger' | 'info' => ingestion?.state === 'completed' ? 'success' : ingestion?.state === 'stalled' || ingestion?.state === 'failed' ? 'danger' : ingestion?.state === 'processing' ? 'warning' : 'info';
   const larkAgentXStateType = (state?: string): 'success' | 'warning' | 'danger' | 'info' => state === 'connected' || state === 'healthy' || state === 'verified' ? 'success' : state === 'connecting' || state === 'pending' ? 'warning' : state === 'unavailable' || state === 'error' || state === 'degraded' ? 'danger' : 'info';
   const larkAgentXStateText = (state?: string) => ({ connected: 'WebSocket 已连接', connecting: '正在连接', healthy: '正常', verified: 'ID 已核验', pending: '待核验', unavailable: '不可用', error: '错误', degraded: '降级' }[state ?? ''] ?? state ?? '未知');
+  const itouguStateType = (state?: string): 'success' | 'warning' | 'danger' | 'info' => ['healthy', 'running', 'sleeping', 'polling'].includes(state ?? '') ? 'success' : ['starting', 'delayed'].includes(state ?? '') ? 'warning' : ['unavailable', 'error', 'degraded'].includes(state ?? '') ? 'danger' : 'info';
+  const itouguStateText = (state?: string) => ({ healthy: '正常运行', running: '运行中', sleeping: '等待下一轮', polling: '轮询中', starting: '启动中', delayed: '心跳延迟', unavailable: '不可用', error: '轮询错误', degraded: '降级' }[state ?? ''] ?? state ?? '未知');
+  const itouguKeywordText = (status?: ItouguStatus) => status?.webhook_config?.keyword_entries?.map((item) => `${item.chat_id}=${item.keyword}`).join('、') || '无';
   const webhookKeyword = (chatId: string) => groupRelayStatus.value.webhook_config?.keyword_entries?.find((item) => item.chat_id === chatId)?.keyword ?? '未配置';
   const applicationInspectionLabel = (inspection?: FeishuApplicationInspection) => ({ verified: '已读取', missing_inspection_scope: '缺少复核权限', error: '复核失败', not_checked: '未复核' }[inspection?.status ?? 'not_checked'] ?? '未复核');
   const applicationInspectionTagType = (inspection?: FeishuApplicationInspection) => inspection?.status === 'verified' ? 'success' : inspection?.status === 'missing_inspection_scope' || inspection?.status === 'error' ? 'danger' : 'warning';
@@ -74,6 +84,40 @@ export function useFeishuRelayWorkspace() {
     try { groupRelayStatus.value = await groupRelayApi.status<GroupRelayStatus>(); }
     catch (error) { groupRelayError.value = error instanceof Error ? error.message : String(error); }
     finally { groupRelayLoading.value = false; }
+  }
+  async function forceItouguRefresh() {
+    if (itouguRefreshing.value) return;
+    itouguRefreshing.value = true;
+    try {
+      const result = await groupRelayApi.refreshItougu<{ status?: string; sent_count?: number; message?: string }>();
+      const sentCount = result.sent_count == null ? '' : `，本轮发送 ${result.sent_count} 条`;
+      ElMessage.success(`Itougu 已完成一次强制刷新${sentCount}`);
+      await loadGroupRelayStatus();
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      itouguRefreshing.value = false;
+    }
+  }
+  async function exportLarkAgentXHistory(chatId: string) {
+    if (larkHistoryExporting.value) return;
+    larkHistoryExporting.value = chatId;
+    try {
+      const result = await groupRelayApi.exportLarkAgentXHistory(chatId, larkHistoryDays.value);
+      const objectUrl = URL.createObjectURL(result.blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = result.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      ElMessage.success(`已导出最近 ${larkHistoryDays.value} 天消息${result.count ? `，共 ${result.count} 条` : ''}`);
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      larkHistoryExporting.value = '';
+    }
   }
   async function loadFeishuWorkbench() {
     feishuWorkbenchLoading.value = true; feishuWorkbenchError.value = '';
@@ -147,7 +191,7 @@ export function useFeishuRelayWorkspace() {
     const form = groupRelayRouteForm.value; groupRelayRouteSaving.value = true;
     try {
       await groupRelayApi.upsertRoute<{ route: GroupRelaySourceStatus }>(form.key, { chat_name: form.chat_name, chat_id: form.chat_id || undefined, tag: form.tag, target_chat_ids: form.target_chat_ids_text.split(',').map((value) => value.trim()).filter(Boolean), target_chat_names: form.target_chat_names_text.split(',').map((value) => value.trim()).filter(Boolean), enabled: form.enabled });
-      groupRelayRouteDialog.value = false; ElMessage.success(form.key ? '源群配置已更新，将在下一次轮询生效' : '源群已注册，将在下一次轮询建立基线'); await loadGroupRelayStatus();
+      groupRelayRouteDialog.value = false; ElMessage.success(form.key ? '源群配置已更新' : '源群已注册；发送一条新消息后将自动绑定 LarkAgentX WebSocket'); await loadGroupRelayStatus();
     } catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
     finally { groupRelayRouteSaving.value = false; }
   }
@@ -161,9 +205,9 @@ export function useFeishuRelayWorkspace() {
   }
 
   return {
-    groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm,
+    groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryExporting,
     feishuWorkbench, feishuWorkbenchMessages, feishuWorkbenchLoading, feishuWorkbenchError, feishuWorkbenchAction, workbenchSearch, workbenchSearchResult, workbenchIntegrationDialog, workbenchIntegration,
-    groupRelayStateType, groupRelayStateText, groupRelayMessageText, oauthAuditLabel, oauthAuditTagType, relayDeliveryLabel, relayDeliveryTagType, ingestionDeliveryLabel, ingestionDeliveryTagType, larkAgentXStateType, larkAgentXStateText, webhookKeyword, applicationInspectionLabel, applicationInspectionTagType, targetChatInspectionLabel, targetChatInspectionTagType, capabilityAuthorizationLabel, capabilityAuthorizationTagType,
-    loadGroupRelayStatus, loadFeishuWorkbench, inspectFeishuApplication, workbenchMessageText, workbenchWorkflowText, runWorkbenchAction, searchFeishuMessages, openWorkbenchIntegration, runWorkbenchEndpoint, createWorkbenchDigest, createWorkbenchTab, submitWorkbenchIntegration, openCreateGroupRelayRoute, openEditGroupRelayRoute, saveGroupRelayRoute, setGroupRelayRouteEnabled, deleteGroupRelayRoute,
+    groupRelayStateType, groupRelayStateText, groupRelayMessageText, oauthAuditLabel, oauthAuditTagType, relayDeliveryLabel, relayDeliveryTagType, ingestionDeliveryLabel, ingestionDeliveryTagType, larkAgentXStateType, larkAgentXStateText, itouguStateType, itouguStateText, itouguKeywordText, webhookKeyword, applicationInspectionLabel, applicationInspectionTagType, targetChatInspectionLabel, targetChatInspectionTagType, capabilityAuthorizationLabel, capabilityAuthorizationTagType,
+    loadGroupRelayStatus, forceItouguRefresh, exportLarkAgentXHistory, loadFeishuWorkbench, inspectFeishuApplication, workbenchMessageText, workbenchWorkflowText, runWorkbenchAction, searchFeishuMessages, openWorkbenchIntegration, runWorkbenchEndpoint, createWorkbenchDigest, createWorkbenchTab, submitWorkbenchIntegration, openCreateGroupRelayRoute, openEditGroupRelayRoute, saveGroupRelayRoute, setGroupRelayRouteEnabled, deleteGroupRelayRoute,
   };
 }

@@ -57,6 +57,14 @@ SCHOLAR_ALERT_DIR = _load_env_secret("PAPER_KB_SCHOLAR_ALERT_DIR")
 
 TASKS = [
     # ---- 常驻 daemon (原 KeepAlive) ----
+    # Video Understanding Harness: the NiceGUI page and FastAPI backend run in
+    # one process so the supervisor owns the complete local UI/API lifecycle.
+    dict(name="video-harness", kind="daemon",
+         args=[PY, os.path.join(HOME, "codebase/video_understanding_harness/nicegui_app.py")],
+         cwd=os.path.join(HOME, "codebase/video_understanding_harness"),
+         out=os.path.join(HOME, "Library/Logs/video-understanding-harness.log"),
+         err=os.path.join(HOME, "Library/Logs/video-understanding-harness.log"),
+         env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1", "VIDEO_HARNESS_PORT": "8765"}),
     dict(name="paperkb.server", kind="daemon",
          args=[PY, os.path.join(PKB, "kb_server.py"), "--port", "8787"],
          cwd=PKB, out=os.path.join(PKLOG, "server.log"), err=os.path.join(PKLOG, "server.log"), env={}),
@@ -84,7 +92,9 @@ TASKS = [
     # Optional discovery supplements write replayable snapshots only; they do
     # not mutate the corpus or replace the arXiv daily lane.  DataCite is
     # public and bounded.  Hugging Face is enabled only when a runtime token is
-    # actually present, because its API may require authentication.
+    # actually present, because its API may require authentication.  The HF
+    # lane intentionally asks for ``trending`` so supplemental_digest can use
+    # the provider's recommendation signal in its deterministic ranking.
     dict(name="paperkb.sources", kind="daily", hour=11, minute=0, run_at_load=False,
          args=[PY, os.path.join(PKB, "source_refresh.py"), "--source", "datacite",
                "--query", "large language model mixture of experts distributed systems",
@@ -104,7 +114,8 @@ TASKS = [
             env={"PATH": PATH_ENV, "CORE_API_KEY": _load_env_secret("CORE_API_KEY")})]
       if _load_env_secret("CORE_API_KEY") else []),
     *([dict(name="paperkb.sources-hf", kind="daily", hour=11, minute=10, run_at_load=False,
-            args=[PY, os.path.join(PKB, "source_refresh.py"), "--source", "huggingface_daily", "--limit", "50"],
+            args=[PY, os.path.join(PKB, "source_refresh.py"), "--source", "huggingface_daily",
+                  "--sort", "trending", "--limit", "50"],
             cwd=PKB, out=os.path.join(PKLOG, "sources-hf.log"), err=os.path.join(PKLOG, "sources-hf.log"),
             env={"PATH": PATH_ENV, "HF_TOKEN": (_load_env_secret("HF_TOKEN") or _load_env_secret("HUGGINGFACE_TOKEN"))})]
       if (_load_env_secret("HF_TOKEN") or _load_env_secret("HUGGINGFACE_TOKEN")) else []),

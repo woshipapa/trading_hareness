@@ -25,6 +25,7 @@ import uuid
 import urllib.request
 import urllib.error
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
@@ -38,6 +39,9 @@ GH = "gh_6569bb074cc9"                       # 爱投顾公众号
 AUTH_FILE = Path(os.environ.get("ITOUGU_AUTH_FILE", "/Users/papa/codebase/wechat-export-macos/itougu_auth.json"))
 ENV_FILE = Path(os.environ.get("ITOUGU_ENV_FILE", "/Users/papa/codebase/n8n/.env"))
 STATE_FILE = Path(os.environ.get("ITOUGU_STATE_FILE", "/Users/papa/codebase/n8n/state/itougu-neican.json"))
+STATUS_FILE = Path(os.environ.get("ITOUGU_STATUS_FILE", str(STATE_FILE.with_name("status.json"))))
+ITOUGU_CONTROL_HOST = os.environ.get("ITOUGU_CONTROL_HOST", "127.0.0.1")
+ITOUGU_CONTROL_PORT = int(os.environ.get("ITOUGU_CONTROL_PORT", "18084"))
 VIDEO_QUEUE_FILE = Path(os.environ.get("ITOUGU_VIDEO_QUEUE_FILE", str(STATE_FILE.with_name("video-tasks.jsonl"))))
 CHAT_IDS = [c for c in os.environ.get("ITOUGU_CHAT_IDS", "oc_570aeb3bbfb11fa2be66b25ca4568aad").split(",") if c.strip()]
 # A process-local safety override for smoke tests.  When set, it wins over
@@ -1168,6 +1172,186 @@ def poll_plan(now, interval, off_hours_interval, midday_interval=None, trading_h
     return (not trading_hours_only) or is_after_close(now), slow
 
 
+_status_lock = threading.Lock()
+_poll_cycle_lock = threading.Lock()
+_status_payload = {
+    "service": "itougu-neican",
+    "state": "starting",
+    "pid": os.getpid(),
+    "started_at": datetime.now(timezone.utc).isoformat(),
+    "updated_at": None,
+    "last_poll_started_at": None,
+    "last_poll_completed_at": None,
+    "last_success_at": None,
+    "last_trigger": None,
+    "manual_refresh_count": 0,
+    "last_error": None,
+    "consecutive_error_count": 0,
+    "poll_count": 0,
+    "failure_count": 0,
+    "sent_count": 0,
+    "heartbeat_interval_seconds": 60,
+    "stale_after_seconds": 180,
+    "products": [],
+    "product_targets": [],
+    "target_chat_ids": [],
+    "webhook_config": {},
+}
+
+
+def status_target_configuration(products, shared_chat_ids, qinlong_chat_ids,
+                                juejin_chat_ids, article_chat_ids,
+                                webhook_chat_ids, webhook_keywords):
+    """Build the public Itougu target summary without carrying webhook URLs."""
+    product_targets = []
+    all_targets = []
+    for business_id, name in products.items():
+        destinations = list(dict.fromkeys([
+            *shared_chat_ids,
+            *(qinlong_chat_ids if business_id == "1661993558510538753" else []),
+            *(juejin_chat_ids if business_id == "1806593447818383361" else []),
+            *(article_chat_ids if business_id not in ("1661993558510538753", "1806593447818383361") else []),
+        ]))
+        product_targets.append({
+            "business_product_id": str(business_id),
+            "name": str(name),
+            "target_chat_ids": destinations,
+            "article_target_chat_ids": list(dict.fromkeys(str(value) for value in article_chat_ids if str(value).strip())),
+        })
+        all_targets.extend(destinations)
+    all_targets.extend(article_chat_ids)
+    all_targets = list(dict.fromkeys(all_targets))
+    webhook_chat_ids = list(dict.fromkeys(str(value) for value in webhook_chat_ids if str(value).strip()))
+    webhook_keywords = {str(key): str(value) for key, value in webhook_keywords.items() if str(key).strip() and str(value).strip()}
+    missing = sorted(set(webhook_chat_ids) - set(webhook_keywords))
+    return {
+        "target_chat_ids": all_targets,
+        "article_target_chat_ids": list(dict.fromkeys(str(value) for value in article_chat_ids if str(value).strip())),
+        "product_targets": product_targets,
+        "webhook_config": {
+            "webhook_chat_ids": sorted(webhook_chat_ids),
+            "keyword_chat_ids": sorted(webhook_keywords),
+            "keyword_entries": [{"chat_id": key, "keyword": webhook_keywords[key]} for key in sorted(webhook_keywords)],
+            "missing_keyword_chat_ids": missing,
+            "all_webhook_keywords_loaded": not missing,
+        },
+    }
+
+
+def _write_itougu_status(updates=None, increments=None):
+    """Atomically publish a credential-free heartbeat; failures never stop polling."""
+    updates = updates or {}
+    increments = increments or {}
+    with _status_lock:
+        _status_payload.update(updates)
+        for key, value in increments.items():
+            _status_payload[key] = int(_status_payload.get(key, 0)) + int(value)
+        _status_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        payload = dict(_status_payload)
+    try:
+        STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = STATUS_FILE.with_name(".%s.%s.tmp" % (STATUS_FILE.name, os.getpid()))
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, STATUS_FILE)
+    except (OSError, TypeError, ValueError) as exc:
+        print("状态心跳写入失败(忽略): %s" % exc, flush=True)
+
+
+def _poll_window_label(now):
+    if in_trading_hours(now):
+        return "交易时段"
+    if in_midday_break(now):
+        return "午间休市"
+    return "收盘后/非交易时段"
+
+
+def _run_monitored_poll(products, dry_run=False, delivery_label="轮询", trigger="schedule"):
+    if not _poll_cycle_lock.acquire(blocking=False):
+        return {
+            "status": "busy",
+            "message": "Itougu 正在执行上一轮刷新",
+            "sent_count": 0,
+        }
+    started_at = datetime.now(timezone.utc).isoformat()
+    _write_itougu_status({
+        "state": "polling",
+        "last_poll_started_at": started_at,
+        "current_window": _poll_window_label(datetime.now(CST)),
+        "last_error": None,
+        "last_trigger": trigger,
+    })
+    try:
+        sent = deliver_new(products=products, dry_run=dry_run,
+                           delivery_label=delivery_label)
+        public_sent = 0 if dry_run else poll_public_views(verbose=True, delivery_label=delivery_label)
+        completed_at = datetime.now(timezone.utc).isoformat()
+        _write_itougu_status({
+            "state": "running",
+            "last_poll_completed_at": completed_at,
+            "last_success_at": completed_at,
+            "last_error": None,
+            "consecutive_error_count": 0,
+        }, {
+            "poll_count": 1,
+            "sent_count": int(sent or 0) + int(public_sent or 0),
+            "manual_refresh_count": 1 if trigger == "manual" else 0,
+        })
+        return {
+            "status": "ok",
+            "message": "Itougu 刷新完成",
+            "sent_count": int(sent or 0) + int(public_sent or 0),
+            "trigger": trigger,
+            "completed_at": completed_at,
+        }
+    except Exception as exc:
+        _write_itougu_status({
+            "state": "error",
+            "last_poll_completed_at": datetime.now(timezone.utc).isoformat(),
+            "last_error": str(exc)[:500],
+        }, {"poll_count": 1, "failure_count": 1, "consecutive_error_count": 1})
+        print("轮询异常(忽略): %s" % exc, flush=True)
+        return {"status": "error", "message": str(exc)[:500], "sent_count": 0, "trigger": trigger}
+    finally:
+        _poll_cycle_lock.release()
+
+
+class _ItouguControlHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/refresh":
+            self.send_error(404)
+            return
+        result = self.server.run_refresh()
+        body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+        status_code = 409 if result.get("status") == "busy" else 200 if result.get("status") == "ok" else 502
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format, *_args):
+        return
+
+
+class _ItouguControlServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+
+def start_itougu_control_server(products):
+    server = _ItouguControlServer((ITOUGU_CONTROL_HOST, ITOUGU_CONTROL_PORT), _ItouguControlHandler)
+    server.run_refresh = lambda: _run_monitored_poll(
+        products,
+        delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"),
+        trigger="manual",
+    )
+    thread = threading.Thread(target=server.serve_forever, name="itougu-control", daemon=True)
+    thread.start()
+    print("itougu 手动刷新接口启动 host=%s port=%s" % (ITOUGU_CONTROL_HOST, ITOUGU_CONTROL_PORT), flush=True)
+    return server
+
+
 def main():
     ap = argparse.ArgumentParser(description="爱投顾内参 → 飞书 中继")
     ap.add_argument("--once", action="store_true", help="拉一次增量并发送")
@@ -1186,12 +1370,29 @@ def main():
 
     prods = {p: WATCH.get(p, "内参") for p in args.product} if args.product else WATCH
 
+    target_status = status_target_configuration(
+        prods, CHAT_IDS, QINLONG_CHAT_IDS, JUEJIN_CHAT_IDS, ARTICLE_CHAT_IDS,
+        _feishu_webhook_map().keys(), _feishu_webhook_keyword_map())
+    _write_itougu_status({
+        **target_status,
+        "state": "starting",
+        "pid": os.getpid(),
+        "interval_seconds": args.interval,
+        "off_hours_interval_seconds": args.off_hours_interval,
+        "midday_interval_seconds": args.midday_interval if args.midday_interval is not None else args.interval,
+        "trading_hours_only": bool(args.trading_hours_only),
+        "heartbeat_interval_seconds": min(60, max(15, args.interval)),
+        "stale_after_seconds": max(180, min(3600, args.off_hours_interval + 60)),
+        "products": [{"business_product_id": str(bid), "name": name} for bid, name in prods.items()],
+    })
+
     if args.bootstrap:
         deliver_new(products=prods, bootstrap=True)
         return 0
     if args.loop:
         print("itougu 内参兵底轮询启动 interval=%ss" % args.interval, flush=True)
         ensure_baseline(prods)
+        start_itougu_control_server(prods)
         while True:
             # Keep the remote API safety net alive across the midday break and
             # after the Shanghai close, but avoid restoring any local
@@ -1202,15 +1403,15 @@ def main():
                 midday_interval=args.midday_interval,
                 trading_hours_only=args.trading_hours_only)
             if should_poll:
-                try:
-                    deliver_new(products=prods, dry_run=args.dry_run,
-                                delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
-                    # 已登记公开圈子走同一 Itougu API 的 view/list，绝不读
-                    # 本地微信表；付费内参仍走 appendContent/list。
-                    if not args.dry_run:
-                        poll_public_views(verbose=True, delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
-                except Exception as e:
-                    print("轮询异常(忽略): %s" % e, flush=True)
+                _run_monitored_poll(
+                    prods, dry_run=args.dry_run,
+                    delivery_label=os.environ.get("ITOUGU_DELIVERY_LABEL", "轮询"))
+            else:
+                _write_itougu_status({
+                    "state": "sleeping",
+                    "current_window": _poll_window_label(datetime.now(CST)),
+                })
+            _write_itougu_status({"next_poll_in_seconds": sleep_seconds})
             time.sleep(sleep_seconds)
     else:
         should_poll, _ = poll_plan(datetime.now(CST), interval=args.interval,

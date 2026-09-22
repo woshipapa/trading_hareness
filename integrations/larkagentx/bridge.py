@@ -48,6 +48,16 @@ IMAGE_CDN_BASE_URL = "https://s1-imfile.feishucdn.com"
 DEFAULT_GAP_REPAIR_SECONDS = 600
 MIN_GAP_REPAIR_SECONDS = 120
 MAX_GAP_REPAIR_SECONDS = 1800
+DEFAULT_ROUTE_CATALOG_REFRESH_SECONDS = 15
+
+
+def bounded_int_env(name: str, default: int, minimum: int, maximum: int | None = None) -> int:
+	try:
+		value = int(os.environ.get(name, str(default)))
+	except ValueError:
+		value = default
+	value = max(minimum, value)
+	return min(maximum, value) if maximum is not None else value
 
 
 class ProtocolForensics:
@@ -261,7 +271,10 @@ def post_json(url: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
 	try:
 		with urlopen(request, timeout=30) as response:
 			body = response.read(MAX_BODY_BYTES).decode("utf-8", errors="replace")
-		return json.loads(body) if body else {}
+		result = json.loads(body) if body else {}
+		if isinstance(result, dict) and str(result.get("status", "")).strip().lower() == "failed":
+			raise RuntimeError(f"adapter rejected event: {str(result.get('message') or result.get('error') or 'failed')[:240]}")
+		return result
 	except HTTPError as error:
 		body = error.read(MAX_BODY_BYTES).decode("utf-8", errors="replace")
 		raise RuntimeError(f"bridge HTTP {error.code}: {body[:240]}") from error
@@ -379,6 +392,13 @@ class Bridge:
 	def __init__(self) -> None:
 		self.token = required_env("LARKX_BRIDGE_TOKEN")
 		self.ingress_url = required_env("LARKX_INGRESS_URL")
+		self.route_catalog_url = os.environ.get("LARKX_ROUTE_CATALOG_URL", "").strip()
+		self.dynamic_route_discovery = os.environ.get("LARKX_DYNAMIC_ROUTE_DISCOVERY", "false").strip().lower() == "true"
+		self.route_catalog_refresh_seconds = bounded_int_env("LARKX_ROUTE_CATALOG_REFRESH_SECONDS", DEFAULT_ROUTE_CATALOG_REFRESH_SECONDS, 5, 300)
+		self.route_catalog: list[dict[str, str]] = []
+		self.route_catalog_last_refresh_at = None
+		self.route_catalog_error = None
+		self.dynamic_routes: dict[str, dict[str, str]] = {}
 		self.summary_chat_ids = csv_env("LARKX_SUMMARY_CHAT_IDS")
 		self.summary_ingress_url = os.environ.get("LARKX_SUMMARY_INGRESS_URL", "").strip()
 		if self.summary_chat_ids and not self.summary_ingress_url:
@@ -465,7 +485,7 @@ class Bridge:
 		self.websocket_attempt_count = 0
 		self.websocket_state = "starting"
 		self.last_websocket_attempt_at = None
-		self.spool_replay_seconds = max(5, min(300, int(os.environ.get("LARKX_SPOOL_REPLAY_SECONDS", str(DEFAULT_SPOOL_REPLAY_SECONDS)))))
+		self.spool_replay_seconds = bounded_int_env("LARKX_SPOOL_REPLAY_SECONDS", DEFAULT_SPOOL_REPLAY_SECONDS, 5, 300)
 		self.spool_replay_count = 0
 		self.spool_replay_error_count = 0
 		self.last_spool_replay_at = None
@@ -477,7 +497,69 @@ class Bridge:
 		# diagnostic and runs in the background so a slow private gateway cannot
 		# make systemd treat the relay as unhealthy.
 		threading.Thread(target=self.validate_chat_mappings, name="chat-mapping-check", daemon=True).start()
+		if self.dynamic_route_discovery and self.route_catalog_url:
+			threading.Thread(target=self.refresh_route_catalog, name="route-catalog-startup", daemon=True).start()
 		LOG.info("listening to %d allowlisted chat(s): %s", len(self.listen_chats), ",".join(sorted(self.listen_chats)))
+
+	def refresh_route_catalog(self) -> None:
+		if not self.dynamic_route_discovery or not self.route_catalog_url:
+			return
+		try:
+			request = Request(self.route_catalog_url, headers={"accept": "application/json", "x-larkagentx-token": self.token})
+			with urlopen(request, timeout=5) as response:
+				payload = json.loads(response.read(MAX_BODY_BYTES).decode("utf-8"))
+			routes = []
+			for item in payload.get("routes", []) if isinstance(payload, dict) else []:
+				if not isinstance(item, dict) or item.get("enabled") is False:
+					continue
+				source_key = str(item.get("source_key", "")).strip()
+				chat_name = str(item.get("chat_name", "")).strip()
+				chat_id = str(item.get("source_chat_id", "")).strip()
+				# A route may be persisted before OAuth can resolve its oc_ ID
+				# (for example while the tenant quota is exhausted).  Keep it in
+				# the catalog with an empty source_chat_id; the private client can
+				# identify the numeric WebSocket chat by its unique name when the
+				# first event arrives.
+				if source_key and chat_name:
+					routes.append({"source_key": source_key, "chat_name": chat_name, "source_chat_id": chat_id})
+			self.route_catalog = routes
+			self.route_catalog_last_refresh_at = datetime.now(timezone.utc).isoformat()
+			self.route_catalog_error = None
+		except Exception as error:
+			self.route_catalog_error = str(error)[:240]
+
+	async def discover_dynamic_route(self, chat_id: str) -> dict[str, str] | None:
+		if not self.dynamic_route_discovery or not self.route_catalog_url:
+			return None
+		known = self.dynamic_routes.get(chat_id)
+		if known:
+			return known
+		await asyncio.to_thread(self.refresh_route_catalog)
+		catalog = list(self.route_catalog)
+		if not catalog:
+			return None
+		try:
+			info = await asyncio.to_thread(self.client.get_chat_info, chat_id)
+			name = str((info or {}).get("name") or "").strip()
+		except Exception as error:
+			self.route_catalog_error = f"{chat_id}: {error}"[:240]
+			return None
+		matches = [route for route in catalog if route["chat_name"] == name]
+		if len(matches) != 1:
+			if len(matches) > 1:
+				self.route_catalog_error = f"群名重复，拒绝自动绑定：{name}"[:240]
+			return None
+		route = matches[0]
+		self.dynamic_routes[chat_id] = route
+		self.listen_chats.add(chat_id)
+		self.websocket_chat_ids.add(chat_id)
+		self.chat_validation[chat_id] = {"state": "verified", "name": name, "checked_at": datetime.now(timezone.utc).isoformat(), "error": None}
+		self.chat_stats[chat_id] = {
+			"allowlisted": True, "observed_count": 0, "self_message_count": 0, "forwarded_count": 0,
+			"failed_count": 0, "last_observed_at": None, "last_forwarded_at": None, "last_message_type": None,
+		}
+		LOG.info("动态绑定 LarkAgentX 源群 chat_id=%s name=%s source_key=%s", chat_id, name, route["source_key"])
+		return route
 
 	def validate_chat_mappings(self) -> None:
 		"""Resolve numeric WebSocket ids at startup without sending any message."""
@@ -505,13 +587,26 @@ class Bridge:
 			self._recovery_in_flight = True
 			if self.websocket_attempt_count == 1:
 				self.startup_recovery_count += 1
+				self._persist_counter("startup_recovery_count")
 				reason = "larkagentx_websocket_startup"
 			else:
 				self.reconnect_recovery_count += 1
+				self._persist_counter("reconnect_recovery_count")
 				reason = "larkagentx_websocket_reconnect"
 			asyncio.create_task(self.recover_gap(reason))
 
 	def health(self) -> dict[str, Any]:
+		durable_chat_stats = self.event_spool.chat_stats()
+		durable_summary = self.event_spool.chat_summary()
+		durable_counters = self.event_spool.counters()
+		# The event spool is the durable source for message-level metrics. Keep
+		# the live self-message counter from this process, but restore all relay
+		# counters and timestamps after a restart or source-overlay hot deploy.
+		visible_chat_stats = {}
+		for chat_id in sorted(self.chat_stats):
+			value = dict(durable_chat_stats.get(chat_id, self.chat_stats[chat_id]))
+			value["self_message_count"] = self.chat_stats[chat_id].get("self_message_count", 0)
+			visible_chat_stats[chat_id] = value
 		return {
 			"status": "ok",
 			"component": "larkagentx-bridge",
@@ -525,33 +620,41 @@ class Bridge:
 			"listen_chat_count": len(self.listen_chats),
 			"listen_chat_ids": sorted(self.listen_chats),
 			"websocket_chat_ids": sorted(self.websocket_chat_ids),
+			"dynamic_route_discovery": self.dynamic_route_discovery,
+			"route_catalog_count": len(self.route_catalog),
+			"route_catalog_last_refresh_at": self.route_catalog_last_refresh_at,
+			"route_catalog_error": self.route_catalog_error,
+			"dynamic_routes": {chat_id: dict(route) for chat_id, route in sorted(self.dynamic_routes.items())},
 			"chat_validation": {chat_id: dict(value) for chat_id, value in sorted(self.chat_validation.items())},
 			"mapping_check_at": self.mapping_check_at,
 			"mapping_check_error": self.mapping_check_error,
 			"send_chat_count": len(self.send_chats),
-			"observed_count": self.observed_count,
+			"metrics_persisted": True,
+			"metrics_source": "larkagentx_event_spool",
+			"observed_count": durable_summary["observed_count"],
 			"ignored_count": self.ignored_count,
-			"forwarded_count": self.forwarded_count,
+			"forwarded_count": durable_summary["forwarded_count"],
 			"retry_count": self.retry_count,
-			"failed_count": self.failed_count,
+			"failed_count": durable_summary["failed_count"],
+			"historical_failed_count": durable_summary["historical_failed_count"],
 			"self_message_count": self.self_message_count,
-			"decode_error_count": self.decode_error_count,
-			"decode_fallback_count": self.decode_fallback_count,
+			"decode_error_count": durable_counters.get("decode_error_count", self.decode_error_count),
+			"decode_fallback_count": durable_counters.get("decode_fallback_count", self.decode_fallback_count),
 			"last_decode_fallback_at": self.last_decode_fallback_at,
-			"unknown_field_count": self.unknown_field_count,
-			"wire_mismatch_count": self.wire_mismatch_count,
-			"partial_frame_count": self.partial_frame_count,
-			"partial_entry_error_count": self.partial_entry_error_count,
-			"groups_skipped": self.groups_skipped,
+			"unknown_field_count": durable_counters.get("unknown_field_count", self.unknown_field_count),
+			"wire_mismatch_count": durable_counters.get("wire_mismatch_count", self.wire_mismatch_count),
+			"partial_frame_count": durable_counters.get("partial_frame_count", self.partial_frame_count),
+			"partial_entry_error_count": durable_counters.get("partial_entry_error_count", self.partial_entry_error_count),
+			"groups_skipped": durable_counters.get("groups_skipped", self.groups_skipped),
 			"last_protocol_telemetry": self.last_protocol_telemetry,
 			"last_decode_error_at": self.last_decode_error_at,
 			"last_decode_error": self.last_decode_error,
 			"protocol_forensics": {"enabled": self.protocol_forensics.enabled, "path": str(self.protocol_forensics.path)},
 			"last_forensic_capture": self.last_forensic_capture,
-			"recovery_count": self.recovery_count,
-			"startup_recovery_count": self.startup_recovery_count,
-			"reconnect_recovery_count": self.reconnect_recovery_count,
-			"partial_recovery_count": self.partial_recovery_count,
+			"recovery_count": durable_counters.get("recovery_count", self.recovery_count),
+			"startup_recovery_count": durable_counters.get("startup_recovery_count", self.startup_recovery_count),
+			"reconnect_recovery_count": durable_counters.get("reconnect_recovery_count", self.reconnect_recovery_count),
+			"partial_recovery_count": durable_counters.get("partial_recovery_count", self.partial_recovery_count),
 			"last_recovery_at": self.last_recovery_at,
 			"last_recovery_reason": self.last_recovery_reason,
 			"last_recovery_result": self.last_recovery_result,
@@ -566,12 +669,19 @@ class Bridge:
 				"attempt_count": self.websocket_attempt_count,
 				"last_attempt_at": self.last_websocket_attempt_at,
 			},
-			"chat_stats": {chat_id: dict(self.chat_stats[chat_id]) for chat_id in sorted(self.chat_stats)},
+			"chat_stats": visible_chat_stats,
 			"user_id": self.auth.user_id or None,
 		}
 
+	def _persist_counter(self, name: str, amount: int = 1) -> None:
+		try:
+			self.event_spool.increment_counter(name, amount)
+		except Exception as error:
+			LOG.warning("无法持久化运行计数器 %s: %s", name, error)
+
 	def on_decode_error(self, error: Exception, raw: bytes | None = None) -> None:
 		self.decode_error_count += 1
+		self._persist_counter("decode_error_count")
 		self.last_decode_error_at = datetime.now(timezone.utc).isoformat()
 		self.last_decode_error = {
 			"type": type(error).__name__,
@@ -592,16 +702,27 @@ class Bridge:
 	def on_decode_fallback(self, error: Exception, frame_bytes: int, message_count: int, telemetry: dict[str, Any] | None = None) -> None:
 		"""Record a schema-tolerant recovery without starting OAuth backfill."""
 		self.decode_fallback_count += 1
+		self._persist_counter("decode_fallback_count")
 		self.last_decode_fallback_at = datetime.now(timezone.utc).isoformat()
 		if telemetry:
 			unknown_fields = telemetry.get("unknown_fields") or {}
-			self.unknown_field_count += sum(int(value) for value in unknown_fields.values())
+			unknown_field_delta = sum(int(value) for value in unknown_fields.values())
+			self.unknown_field_count += unknown_field_delta
+			self._persist_counter("unknown_field_count", unknown_field_delta)
 			wire_mismatches = telemetry.get("wire_mismatches") or {}
-			self.wire_mismatch_count += sum(int(value) for value in wire_mismatches.values())
+			wire_mismatch_delta = sum(int(value) for value in wire_mismatches.values())
+			self.wire_mismatch_count += wire_mismatch_delta
+			self._persist_counter("wire_mismatch_count", wire_mismatch_delta)
 			entry_errors = telemetry.get("entry_errors") or []
-			self.partial_frame_count += int(bool(telemetry.get("partial")))
-			self.partial_entry_error_count += len(entry_errors)
-			self.groups_skipped += int(telemetry.get("groups_skipped") or 0)
+			partial_delta = int(bool(telemetry.get("partial")))
+			entry_error_delta = len(entry_errors)
+			groups_skipped_delta = int(telemetry.get("groups_skipped") or 0)
+			self.partial_frame_count += partial_delta
+			self.partial_entry_error_count += entry_error_delta
+			self.groups_skipped += groups_skipped_delta
+			self._persist_counter("partial_frame_count", partial_delta)
+			self._persist_counter("partial_entry_error_count", entry_error_delta)
+			self._persist_counter("groups_skipped", groups_skipped_delta)
 			self.last_protocol_telemetry = {
 				"field_fingerprint": telemetry.get("field_fingerprint"),
 				"unknown_fields": dict(unknown_fields),
@@ -621,6 +742,7 @@ class Bridge:
 		if self.gap_repair_enabled and telemetry and telemetry.get("partial") and not self._recovery_in_flight:
 			self._recovery_in_flight = True
 			self.partial_recovery_count += 1
+			self._persist_counter("partial_recovery_count")
 			asyncio.create_task(self.recover_gap("larkagentx_partial_frame"))
 
 	async def recover_gap(self, reason: str) -> None:
@@ -635,6 +757,7 @@ class Bridge:
 			}
 			result = await asyncio.to_thread(post_json, gap_url, self.token, payload)
 			self.recovery_count += 1
+			self._persist_counter("recovery_count")
 			self.last_recovery_at = datetime.now(timezone.utc).isoformat()
 			self.last_recovery_reason = reason
 			self.last_recovery_result = {"status": result.get("status"), "reason": reason, "sent": result.get("sent", 0), "deduplicated": result.get("deduplicated", 0), "failed": result.get("failed", 0)}
@@ -698,9 +821,9 @@ class Bridge:
 		# decoded event is proof that the WebSocket session is receiving data.
 		self.websocket_state = "connected"
 		chat_id = str(message.get("chat_id", ""))
-		if chat_id not in self.listen_chats:
-			self.ignored_count += 1
-			return
+		dynamic_route = self.dynamic_routes.get(chat_id)
+		if chat_id not in self.websocket_chat_ids:
+			dynamic_route = await self.discover_dynamic_route(chat_id)
 		if chat_id not in self.websocket_chat_ids:
 			self.ignored_count += 1
 			return
@@ -721,6 +844,8 @@ class Bridge:
 			stats["failed_count"] += 1
 			return
 		payload = json_safe(dict(message))
+		if dynamic_route:
+			payload["_larkagentx_route"] = dict(dynamic_route)
 		if self.last_observed_message_type in {"IMAGE", "POST"}:
 			image = image_resource_info(message)
 			if image.get("image_id"):
@@ -804,6 +929,7 @@ class Bridge:
 
 	async def listen_forever(self) -> None:
 		spool_task = asyncio.create_task(self.replay_spool_forever())
+		route_catalog_task = asyncio.create_task(self.refresh_route_catalog_forever()) if self.dynamic_route_discovery and self.route_catalog_url else None
 		try:
 			while True:
 				try:
@@ -823,7 +949,17 @@ class Bridge:
 				await asyncio.sleep(10)
 		finally:
 			spool_task.cancel()
-			await asyncio.gather(spool_task, return_exceptions=True)
+			if route_catalog_task:
+				route_catalog_task.cancel()
+			await asyncio.gather(spool_task, *( [route_catalog_task] if route_catalog_task else []), return_exceptions=True)
+
+	async def refresh_route_catalog_forever(self) -> None:
+		while True:
+			try:
+				await asyncio.to_thread(self.refresh_route_catalog)
+			except Exception as error:
+				self.route_catalog_error = str(error)[:240]
+			await asyncio.sleep(self.route_catalog_refresh_seconds)
 
 
 def serve_http(bridge: Bridge) -> ThreadingHTTPServer:

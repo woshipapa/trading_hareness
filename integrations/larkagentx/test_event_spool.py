@@ -60,6 +60,33 @@ class EventSpoolTests(unittest.TestCase):
                 spool.enqueue("large", {"text": "x" * 20_000})
             spool.close()
 
+    def test_chat_metrics_survive_reopen_and_track_delivery_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            payload = {"chat_id": "7667390477875858612", "msg_id": "m1", "msg_type_name": "IMAGE"}
+            spool = EventSpool(path)
+            spool.enqueue("e1", payload)
+            spool.claim("e1")
+            spool.mark_delivered("e1")
+            spool.enqueue("e2", {**payload, "msg_id": "m2"})
+            spool.claim("e2")
+            spool.mark_failed("e2", "temporary")
+            self.assertEqual(spool.chat_summary(), {"observed_count": 2, "forwarded_count": 1, "failed_count": 1, "historical_failed_count": 1})
+            self.assertEqual(spool.chat_stats()["7667390477875858612"]["last_message_type"], "IMAGE")
+            spool.close()
+
+            reopened = EventSpool(path)
+            stats = reopened.chat_stats()["7667390477875858612"]
+            self.assertEqual(stats["observed_count"], 2)
+            self.assertEqual(stats["forwarded_count"], 1)
+            self.assertEqual(stats["failed_count"], 1)
+            reopened.increment_counter("decode_error_count")
+            reopened.close()
+
+            final = EventSpool(path)
+            self.assertEqual(final.counters()["decode_error_count"], 1)
+            final.close()
+
 
 if __name__ == "__main__":
     unittest.main()
