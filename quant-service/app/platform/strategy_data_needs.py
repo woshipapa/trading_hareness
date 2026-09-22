@@ -82,6 +82,22 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
              taxonomies=("longhu_ths_industry", "ths_concept_flow")),
         Need("bars.daily", purpose="MA20/overheat gate"),
     ),
+    _needs(
+        "launch_radar",
+        Need("quote.all_a_snapshot", purpose="cross-section price and cumulative volume per scan"),
+        Need("limits.prices", purpose="limit price for the launch band and sealed anchors"),
+        Need("sector.membership", purpose="a sealed anchor in a shared concept", taxonomies=("ths_concept_flow",)),
+        Need("bars.daily", purpose="the name's own 5-day volume baseline"),
+    ),
+    _needs(
+        "longhu_multifactor_shadow",
+        Need("quote.watch_snapshot", purpose="quote return and volume ratio"),
+        Need("bars.minute", purpose="minute momentum"),
+        Need("quote.order_book", purpose="order-book imbalance"),
+        Need("flow.watch_intraday", False, "large-order net ratio"),
+        Need("sector.flow_curve", False, "board-relative strength"),
+        Need("auction.open_snapshot", False, "opening-auction premium"),
+    ),
 )}
 
 

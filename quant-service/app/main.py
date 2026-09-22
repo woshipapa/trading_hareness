@@ -50,6 +50,7 @@ from .akshare_provider import (
 from .fuyao_provider import FuyaoProviderError, all_a_snapshot_rows as fuyao_all_a_snapshot_rows
 from .limit_up_anchor import live_limit_up_pool_rows
 from .launch_radar import (
+    MODEL_VERSION as LAUNCH_RADAR_MODEL_VERSION,
     evaluate_launch_radar,
     record_launch_observations as record_launch_radar_observations,
 )
@@ -5227,6 +5228,7 @@ def _verify_strategy_runtime_contracts() -> None:
         "xiaojie_leader_flow": XIAOJIE_LEADER_FLOW_MODEL_VERSION,
         "longhu_multifactor_shadow": LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION,
         "teacher_review_playbooks": TEACHER_REVIEW_MODEL_VERSION,
+        "launch_radar": LAUNCH_RADAR_MODEL_VERSION,
     })
 
 

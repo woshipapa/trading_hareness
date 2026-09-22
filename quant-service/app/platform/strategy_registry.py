@@ -110,6 +110,17 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "acceleration amount window, first-seal amount) and trend (MA reclaim, platform/prior-high breakout, "
         "MA10 second wave, MA60 reclaim) playbooks, with post-close forecast settlement",
     ),
+    # Pre-seal "attack" detection that feeds the 小杰 observation table; it had
+    # no contract of its own, so its evidence carried no registered identity.
+    "launch_radar": StrategyContract(
+        "launch_radar", "launch-radar-v1", "app/launch_radar.py",
+        "launch-radar-input-v1",
+        ("intraday_quote_observations", "intraday_scan_runs"),
+        "intraday_edge", "shadow", "none",
+        "research-only pre-limit launch detection: admitted at +5% (warm from +3%) only with a volume burst "
+        "against the name's own 5-day baseline, a sealed anchor in a shared concept and +1.5% within 180 s; "
+        "observations settle with the leader-flow outcomes",
+    ),
     "longhu_multifactor_shadow": StrategyContract(
         "longhu_multifactor_shadow", "longhu-multifactor-shadow-v1", "app/longhu_multifactor_shadow.py",
         "longhu-multifactor-v1",
