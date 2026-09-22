@@ -318,10 +318,12 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         quote_capture.all_a_rows, quote_capture.latency_ms, realtime_minutes, surge_features,
         peer_contexts, fast_confirmations,
     )
-    # Deliver confirmed alerts now: the shadow rotation and 小杰 research below
-    # never change these signals, so they must not delay the notification.
+    # Deliver confirmed alerts before anything else: the shadow rotation and
+    # 小杰 research below never change these signals.  Running them while the
+    # delivery was only scheduled let their work hold the outbox write back by
+    # ~10 s on 2026-09-22; deliveries themselves take well under a second.
     confirmed = [signal for signal in signals if signal["state"] == "confirmed"]
-    delivery_task = asyncio.create_task(_deliver_confirmed(confirmed, dependencies))
+    deliveries = await _deliver_confirmed(confirmed, dependencies)
     shadow_observation: dict[str, Any] = {"status": "standby", "reason": "awaiting_next_minute_rotation"}
     if dependencies.shadow_rotation_due(observed_at):
         try:
@@ -380,7 +382,6 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         # mutation alone never reaches the database.
         if dependencies.persist_xiaojie_status is not None:
             await dependencies.persist_xiaojie_status(scan_id, xiaojie_observation)
-    deliveries = await delivery_task
     alerts: list[dict[str, Any]] = [
         {"signal_event_id": str(signal["signal_event_id"]), "symbol": signal["symbol"],
          "signal_type": signal["signal_type"], "severity": signal["severity"], "delivery": delivery}
