@@ -69,6 +69,10 @@ class CheckReportTests(unittest.TestCase):
         effects = {item["symbol"]: item["effect"] for item in report["overrides"]}
         self.assertEqual(effects, {"002285.SZ": "replace", "600127.SH": "retire"})
         self.assertEqual([item["symbol"] for item in report["carried_unmentioned"]], ["300001.SZ"])
+        own = pool_view([row("002285.SZ", "new", review_date=self.pack["review_date"])])
+        own[0]["pack_id"] = self.pack["pack_id"]
+        rerun = check_report(self.pack, instruments=self.instruments, pool=own, dry_run=None, duplicate=True)
+        self.assertEqual(rerun["overrides"], [])          # its own applied plans are not overrides
 
     def test_unknown_codes_duplicates_and_structure_block_the_import(self):
         broken = copy.deepcopy(self.pack)

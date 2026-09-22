@@ -161,6 +161,8 @@ def check_report(pack: Mapping[str, Any], *, instruments: Mapping[str, str], poo
     mentioned = {ts_code(str(stock.get("code") or "")): stock for stock in stocks}
     overrides, carried_unmentioned = [], []
     for item in pool:
+        if pack.get("pack_id") and item.get("pack_id") == pack.get("pack_id"):
+            continue  # this pack's own plans, already applied
         stock = mentioned.get(item["symbol"])
         if stock is None:
             if item.get("review_date") != pack.get("review_date"):
