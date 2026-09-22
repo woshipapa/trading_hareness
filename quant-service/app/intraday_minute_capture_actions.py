@@ -117,8 +117,14 @@ async def fetch_longhu_first_minute_rows(
 
 def store_symbol_minutes(connection: Any, symbol: str, rows: list[dict[str, Any]], trading_date: date,
                          source_name: str, parse_minute: Callable[[dict[str, Any]], dict[str, Any]]) -> tuple[int, str | None]:
-    """Upsert one symbol's session rows; returns (stored, first error)."""
-    stored, first_error = 0, None
+    """Upsert one symbol's session rows in one batched statement; returns (stored, first error).
+
+    Rows are validated first and written with a single ``executemany``: one
+    INSERT per minute over the ~100 ms tunnel took ~9 s a stock.
+    """
+    first_error = None
+    params: list[tuple[Any, ...]] = []
+    available_at = datetime.now(timezone.utc)
     for raw_row in rows:
         try:
             resolved_time = minute_row_datetime(raw_row, trading_date)
@@ -136,22 +142,23 @@ def store_symbol_minutes(connection: Any, symbol: str, rows: list[dict[str, Any]
             local_bar_time = row["bar_time"].astimezone(ZoneInfo("Asia/Shanghai"))
             if local_bar_time.date() != trading_date:
                 continue
-            bucket = local_bar_time.strftime("%H:%M")
-            connection.execute(
-                """INSERT INTO quant.intraday_minute_sessions(
-                       symbol,trading_date,minute_bucket,bar_time,open,high,low,close,volume,amount,source_name,available_at,raw
-                   ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                   ON CONFLICT(symbol,trading_date,minute_bucket,source_name) DO UPDATE SET
-                       bar_time=EXCLUDED.bar_time,open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
-                       close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
-                       available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
-                (symbol, trading_date, bucket, row["bar_time"], row["open"], row["high"], row["low"], row["close"],
-                 row["volume"], row["amount"], source_name, datetime.now(timezone.utc), tolerant_json(row["raw"])),
-            )
-            stored += 1
+            params.append((symbol, trading_date, local_bar_time.strftime("%H:%M"), row["bar_time"], row["open"], row["high"],
+                           row["low"], row["close"], row["volume"], row["amount"], source_name, available_at,
+                           tolerant_json(row["raw"])))
         except (ValueError, TypeError) as validation_error:
             first_error = first_error or f"invalid minute row: {str(validation_error)[:200]}"
-    return stored, first_error
+    if params:
+        connection.executemany(
+            """INSERT INTO quant.intraday_minute_sessions(
+                   symbol,trading_date,minute_bucket,bar_time,open,high,low,close,volume,amount,source_name,available_at,raw
+               ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT(symbol,trading_date,minute_bucket,source_name) DO UPDATE SET
+                   bar_time=EXCLUDED.bar_time,open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
+                   close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
+                   available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
+            params,
+        )
+    return len(params), first_error
 
 
 def store_session_minutes(database: Any, trading_date: date, rows_by_symbol: dict[str, list[dict[str, Any]]], *,

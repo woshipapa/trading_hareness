@@ -75,6 +75,9 @@ class IntradayMinuteCaptureActionTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
+            def executemany(self, sql, params_seq):
+                self.calls.extend((sql, params) for params in params_seq)
+
             def execute(self, sql, params=()):
                 self.calls.append((sql, params))
 
@@ -126,12 +129,17 @@ if __name__ == "__main__":
 
 class StoreSessionMinutesTests(unittest.TestCase):
     def test_whole_sessions_are_upserted_and_other_days_skipped(self) -> None:
-        executed, instruments = [], []
+        executed, instruments, batches = [], [], []
 
         class Connection:
             def execute(self, sql, params=None):
                 executed.append((sql, params))
                 return self
+
+            def executemany(self, sql, params_seq):
+                for params in params_seq:
+                    executed.append((sql, params))
+                batches.append(len(params_seq))
 
         class Database:
             def transaction(self):
@@ -158,6 +166,7 @@ class StoreSessionMinutesTests(unittest.TestCase):
         self.assertEqual(instruments, ["000504.SZ"])
         self.assertEqual([params[2] for _, params in executed], ["09:30", "15:00"])
         self.assertTrue(all("DELETE" not in sql for sql, _ in executed))  # additive: no retention here
+        self.assertEqual(batches, [2])                                     # one batched write per stock
         with self.assertRaises(ValueError):
             store_session_minutes(Database(), date(2026, 9, 22), rows, source_name="made_up",
                                   parse_minute=parse, ensure_instrument=lambda *_: None)
