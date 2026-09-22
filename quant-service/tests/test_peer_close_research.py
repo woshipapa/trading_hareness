@@ -48,12 +48,13 @@ class RunDueTests(unittest.TestCase):
             recorded.append(name)
             return await action()
 
-        stages = {"teacher_review_roll": broken, "watch_daily_review": ok, "xiaojie_outcomes": ok}
+        stages = {"teacher_review_roll": broken, "teacher_outcome_review": ok,
+                  "watch_daily_review": ok, "xiaojie_outcomes": ok}
         result = asyncio.run(run_due(date(2026, 9, 22), stages=stages, record=record))
         self.assertEqual(recorded, list(STAGES))
         self.assertTrue(result["stages"]["teacher_review_roll"].startswith("failed: provider down"))
         self.assertEqual(result["stages"]["xiaojie_outcomes"], "completed")
-        self.assertEqual(ran, [date(2026, 9, 22)] * 2)
+        self.assertEqual(ran, [date(2026, 9, 22)] * 3)
 
 
 if __name__ == "__main__":

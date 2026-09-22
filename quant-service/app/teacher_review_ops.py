@@ -4,6 +4,7 @@
     python -m app.teacher_review_ops check  --pack -        < pack.json
     python -m app.teacher_review_ops import --pack -        < pack.json
     python -m app.teacher_review_ops status
+    python -m app.teacher_review_ops outcome --date 2026-09-22
 
 Each prints one JSON document on stdout.  ``context``, ``check`` and
 ``status`` only read.  ``import`` goes through the service's own HTTP route,
@@ -33,7 +34,7 @@ from .teacher_review_lifecycle import STATE_LABELS
 from .teacher_review_playbooks import playbook_kind, ts_code, validate_pack
 
 _CN = ZoneInfo("Asia/Shanghai")
-PEER_CLOSE_STAGES = ("teacher_review_roll", "watch_daily_review", "xiaojie_outcomes")
+PEER_CLOSE_STAGES = ("teacher_review_roll", "teacher_outcome_review", "watch_daily_review", "xiaojie_outcomes")
 IMPORT_URL = "http://127.0.0.1:8000/api/v1/teacher-review/packs"
 
 
@@ -233,6 +234,45 @@ async def _dry_run(pack: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+async def _outcome_run(trade_date: date) -> None:
+    """Re-run one session's outcome review in process, without alerting again."""
+    from dataclasses import replace
+    from . import main
+    from .teacher_outcome_review import run as run_outcome_review
+
+    async def run_database(action: Any, timeout_seconds: float = 30) -> Any:
+        return await asyncio.wait_for(asyncio.to_thread(action), timeout=timeout_seconds)
+
+    async def no_alert(_text: str) -> dict[str, Any]:
+        return {"status": "skipped"}
+
+    deps = replace(main._teacher_review_dependencies(), run_database=run_database, send_alert=no_alert,
+                   period_bars=None, repair_daily=None)
+    await run_outcome_review(trade_date, deps, alert=False)
+
+
+def outcome(database: Any, trade_date: date, *, rerun: bool = False) -> dict[str, Any]:
+    """The archived next-day outcome review, re-running it first when asked."""
+    from . import teacher_review_repository as repo
+    from .teacher_outcome_review import outcome_markdown
+
+    def archived() -> dict[str, Any] | None:
+        for item in repo.recent_outcome_reviews(database, limit=20):
+            payload = dict(item.get("payload") or {})
+            if str(payload.get("trade_date")) == trade_date.isoformat():
+                return payload
+        return None
+
+    report = archived()
+    if report is None or rerun:
+        asyncio.run(_outcome_run(trade_date))
+        report = archived()
+    if report is None:
+        return {"status": "missing", "trade_date": trade_date.isoformat(),
+                "reason": "no settlement for this session yet; run the roll first"}
+    return {"status": "ok", "report": report, "markdown": outcome_markdown(trade_date, report)}
+
+
 def check(database: Any, pack: dict[str, Any]) -> dict[str, Any]:
     from . import teacher_review_repository as repo
     codes = [ts_code(str(stock.get("code") or "")) for stock in pack.get("stocks") or [] if isinstance(stock, Mapping)]
@@ -283,6 +323,9 @@ def main() -> None:  # pragma: no cover - operational entry point
     for name in ("check", "import"):
         sub.add_parser(name).add_argument("--pack", required=True, help="path, or - for stdin")
     sub.add_parser("status")
+    outcome_parser = sub.add_parser("outcome")
+    outcome_parser.add_argument("--date", type=date.fromisoformat)
+    outcome_parser.add_argument("--rerun", action="store_true")
     args = parser.parse_args()
 
     def read_pack() -> dict[str, Any]:
@@ -294,6 +337,9 @@ def main() -> None:  # pragma: no cover - operational entry point
         output: Any = {"context": context, "markdown": context_markdown(context)}
     elif args.command == "check":
         output = check(db, read_pack())
+    elif args.command == "outcome":
+        trade_date = args.date or datetime.now(timezone.utc).astimezone(_CN).date()
+        output = outcome(db, trade_date, rerun=bool(args.rerun))
     elif args.command == "import":
         pack = read_pack()
         report = check(db, pack)
@@ -308,4 +354,4 @@ if __name__ == "__main__":  # pragma: no cover
     main()
 
 
-__all__ = ["build_context", "check_report", "context_markdown", "pack_digest", "pool_view"]
+__all__ = ["build_context", "check_report", "context_markdown", "outcome", "pack_digest", "pool_view"]

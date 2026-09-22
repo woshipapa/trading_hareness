@@ -2,12 +2,12 @@
 
 The full post-close refresh (``post_close_refresh_service``) is the owner's:
 its 15681 runs its own pipeline at every close, while the peer's copy is only
-reachable by hand.  Three stages in it belong to the peer alone - the teacher
-plan roll, the watch-list daily review and the 小杰 settlement - so they never
-ran on their own: after 2026-09-22's close the 09-21 teacher pack's plans were
-neither settled nor carried into 09-23.
+reachable by hand.  These stages belong to the peer alone - the teacher plan
+roll, its outcome review, the watch-list daily review and the 小杰 settlement -
+so they never ran on their own: after 2026-09-22's close the 09-21 teacher
+pack's plans were neither settled nor carried into 09-23.
 
-This runs just those three, once per trading date, after the day's bars have
+This runs just those, once per trading date, after the day's bars have
 landed, each behind the same durable receipt the orchestrator would use (a
 completed stage is never repeated).  Before 09:00 it catches up the previous
 session, so a restart overnight does not skip a day; between 09:00 and the
@@ -21,8 +21,10 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-STAGES = ("teacher_review_roll", "watch_daily_review", "xiaojie_outcomes")
-STAGE_TIMEOUT_SECONDS = {"teacher_review_roll": 300.0, "watch_daily_review": 240.0, "xiaojie_outcomes": 150.0}
+#: Order matters: the outcome review reads the settlement the roll just wrote.
+STAGES = ("teacher_review_roll", "teacher_outcome_review", "watch_daily_review", "xiaojie_outcomes")
+STAGE_TIMEOUT_SECONDS = {"teacher_review_roll": 300.0, "teacher_outcome_review": 240.0,
+                         "watch_daily_review": 240.0, "xiaojie_outcomes": 150.0}
 #: The owner's close pipeline has published the day's bars by ~16:05.
 CLOSE_READY_AT = time(16, 15)
 SESSION_GUARD_FROM = time(9, 0)

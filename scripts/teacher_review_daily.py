@@ -13,6 +13,8 @@ docs/TEACHER_REVIEW_DAILY.md for the whole procedure):
         -> JOB_DIR/pack_check_<T>.json            (blocking problems, dry run, overrides)
     teacher_review_daily.py import  JOB_DIR [--pack PATH]
         -> JOB_DIR/import_report_<T>.json + pool_<T>.md
+    teacher_review_daily.py outcome JOB_DIR [--date 2026-09-22] [--rerun]
+        -> JOB_DIR/outcome_<T>.json + .md         (次日复盘：符合预期的、漏掉的大涨、卡在哪一条)
     teacher_review_daily.py status  [JOB_DIR]
 
 <T> is the review (trading) date as YYYYMMDD.  The default pack path is
@@ -90,10 +92,11 @@ def pool_markdown(pool: list[dict], title: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("context", "check", "import", "status"))
+    parser.add_argument("command", choices=("context", "check", "import", "outcome", "status"))
     parser.add_argument("job_dir", nargs="?", type=pathlib.Path)
     parser.add_argument("--date", type=date.fromisoformat, help="review (trading) date, default from the job files")
     parser.add_argument("--pack", type=pathlib.Path)
+    parser.add_argument("--rerun", action="store_true", help="outcome: recompute instead of reading the archive")
     args = parser.parse_args()
 
     if args.command == "status":
@@ -110,6 +113,19 @@ def main() -> None:
     missing = [name for name in REQUIRED_HARNESS_FILES if not (job / name).exists()]
     if missing:
         raise SystemExit(f"harness job is incomplete, missing: {', '.join(missing)}")
+
+    if args.command == "outcome":
+        trade_date = review_date_of(job, args.date)
+        command = ["outcome", f"--date={trade_date.isoformat()}"] + (["--rerun"] if args.rerun else [])
+        result = peer_ops(command, timeout=900)
+        if result.get("status") != "ok":
+            raise SystemExit(f"outcome review unavailable: {result.get('reason') or result.get('status')}")
+        stem = trade_date.strftime("%Y%m%d")
+        write(job / f"outcome_{stem}.json", result["report"])
+        write(job / f"outcome_{stem}.md", result["markdown"])
+        counts = (result["report"] or {}).get("counts") or {}
+        print(json.dumps(counts, ensure_ascii=False, indent=2))
+        return
 
     if args.command == "context":
         trade_date = review_date_of(job, args.date)

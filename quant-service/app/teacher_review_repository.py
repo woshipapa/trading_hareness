@@ -27,10 +27,12 @@ from .adjustment_factor_semantics import persisted_factor_semantics_sql
 from .instrument_registry import InstrumentRecord, ensure_instruments
 from .owner_factor_repository import FACTOR_PROVIDER_ORDER
 from .research_prices import adjusted_bars
+from .teacher_review_playbooks import ts_code
 
 PROVIDER = "teacher_review"
 PACK_CAPABILITY = "teacher_review_pack"
 SETTLEMENT_CAPABILITY = "teacher_review_settlement"
+OUTCOME_CAPABILITY = "teacher_review_outcome"
 SOURCE_TAG = "teacher_review"
 _CN_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -254,6 +256,70 @@ def recent_settlements(database: Any, *, limit: int = 10) -> list[dict[str, Any]
     return [dict(row) for row in rows]
 
 
+def persist_outcome_review(database: Any, session_date: date, report: dict[str, Any], *,
+                           available_at: datetime) -> bool:
+    """One archived learning report per session (see ``teacher_outcome_review``)."""
+    effective = datetime.combine(session_date, time(15, 0), tzinfo=_CN_TZ)
+    with database.transaction() as connection:
+        return _insert_observation(connection, OUTCOME_CAPABILITY, "teacher_review:outcome", effective,
+                                   available_at, report)
+
+
+def recent_outcome_reviews(database: Any, *, limit: int = 20) -> list[dict[str, Any]]:
+    """Newest archived report per session, newest first (a re-run adds a row)."""
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT DISTINCT ON (effective_at) effective_at,available_at,payload
+                 FROM quant.raw_market_observations
+                WHERE provider_key=%s AND capability=%s
+                ORDER BY effective_at DESC,available_at DESC LIMIT %s""",
+            (PROVIDER, OUTCOME_CAPABILITY, max(1, min(int(limit), 60))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+#: One replayed scan every this many seconds is enough to count what blocked a
+#: plan; the live scan samples about twice a minute and each bundle is large.
+REPLAY_BUCKET_SECONDS = 120
+
+
+def rule_input_snapshots(database: Any, codes: Iterable[str], trade_date: date,
+                         *, bucket_seconds: int = REPLAY_BUCKET_SECONDS) -> dict[str, list[dict[str, Any]]]:
+    """Frozen scan inputs for one session, thinned to one row per time bucket.
+
+    Only the fields the teacher rules read are projected: the stored bundle
+    also carries policy, portfolio and market context this replay never
+    touches, and reading all of it for a whole pool would be hundreds of MB.
+    Keys are six-digit codes, matching the settlement payload.
+    """
+    symbols = sorted({ts_code(str(code)) for code in codes if str(code)})
+    if not symbols:
+        return {}
+    start = datetime.combine(trade_date, time(9, 15), tzinfo=_CN_TZ)
+    end = datetime.combine(trade_date, time(15, 5), tzinfo=_CN_TZ)
+    bucket = "to_timestamp(floor(extract(epoch FROM observed_at)/%s)*%s)"
+    with database.transaction() as connection:
+        rows = connection.execute(
+            f"""SELECT DISTINCT ON (symbol, {bucket})
+                       symbol,observed_at,
+                       jsonb_build_object(
+                           'watch', inputs->'watch', 'quote', inputs->'quote',
+                           'previous_quote', inputs->'previous_quote',
+                           'minute_features', inputs->'minute_features') AS inputs
+                  FROM quant.intraday_rule_input_snapshots
+                 WHERE symbol=ANY(%s) AND observed_at>=%s AND observed_at<%s
+                 ORDER BY symbol, {bucket}, observed_at""",
+            (bucket_seconds, bucket_seconds, symbols, start, end, bucket_seconds, bucket_seconds),
+        ).fetchall()
+    result: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        result.setdefault(str(row["symbol"])[:6], []).append(
+            {"observed_at": row["observed_at"], "inputs": row["inputs"]})
+    for items in result.values():
+        items.sort(key=lambda item: item["observed_at"])
+    return result
+
+
 #: Sessions whose bars must all be present (or explicitly suspended) before a
 #: plan is frozen; covers MA60, the 20-session platform and prior highs.
 GAP_CHECK_SESSIONS = 60
@@ -463,9 +529,11 @@ def xiaojie_session_modes(database: Any, trade_date: date) -> dict[str, list[str
 
 
 __all__ = [
-    "GAP_CHECK_SESSIONS", "PACK_CAPABILITY", "PROVIDER", "SETTLEMENT_CAPABILITY", "SOURCE_TAG", "apply_session_plans",
+    "GAP_CHECK_SESSIONS", "OUTCOME_CAPABILITY", "PACK_CAPABILITY", "PROVIDER", "REPLAY_BUCKET_SECONDS",
+    "SETTLEMENT_CAPABILITY", "SOURCE_TAG", "apply_session_plans",
     "calendar_gaps", "first_limit_up_times",
     "minute_period_bars", "open_sessions", "pack_record", "persist_pack", "persist_settlement", "plan_bars",
-    "recent_packs", "recent_settlements", "retire_plans", "session_bars", "session_events", "sessions_between",
+    "persist_outcome_review", "recent_outcome_reviews", "recent_packs", "recent_settlements", "retire_plans",
+    "rule_input_snapshots", "session_bars", "session_events", "sessions_between",
     "latest_limit_up_pool", "teacher_watch_rows", "xiaojie_session_modes",
 ]

@@ -19,6 +19,8 @@ class TeacherReviewRouterDependencies:
     cohort: Callable[[], Awaitable[dict[str, Any]]]
     settlements: Callable[[int], Awaitable[list[dict[str, Any]]]]
     roll: Callable[[date | None], Awaitable[dict[str, Any]]]
+    outcomes: Callable[[int], Awaitable[list[dict[str, Any]]]] | None = None
+    outcome_review: Callable[[date | None], Awaitable[dict[str, Any]]] | None = None
 
 
 def build_teacher_review_router(dependencies: TeacherReviewRouterDependencies) -> APIRouter:
@@ -47,6 +49,22 @@ def build_teacher_review_router(dependencies: TeacherReviewRouterDependencies) -
     @router.get("/api/v1/teacher-review/settlements")
     async def settlements(limit: int = 10) -> dict[str, Any]:
         return {"items": await dependencies.settlements(limit), "live_effect": "none"}
+
+    @router.get("/api/v1/teacher-review/outcomes")
+    async def outcomes(limit: int = 5) -> dict[str, Any]:
+        """Archived next-day outcome reviews: what worked, what was missed and what blocked it."""
+        if dependencies.outcomes is None:
+            raise HTTPException(status_code=503, detail="outcome review is not wired")
+        return {"items": await dependencies.outcomes(limit), "live_effect": "none"}
+
+    @router.post("/api/v1/teacher-review/outcome-review")
+    async def outcome_review(trade_date: date | None = None) -> dict[str, Any]:
+        """Re-run one session's outcome review (idempotent: it re-archives the report)."""
+        if not dependencies.enabled():
+            raise HTTPException(status_code=503, detail="teacher review is disabled (TEACHER_REVIEW_ENABLED)")
+        if dependencies.outcome_review is None:
+            raise HTTPException(status_code=503, detail="outcome review is not wired")
+        return {**await dependencies.outcome_review(trade_date), "live_effect": "none"}
 
     return router
 

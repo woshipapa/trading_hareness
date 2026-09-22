@@ -751,6 +751,7 @@ from .teacher_review_service import (
     import_pack as import_teacher_review_pack,
     roll as roll_teacher_review,
 )
+from .teacher_outcome_review import run as run_teacher_outcome_review
 from . import teacher_review_repository as teacher_review_repository
 from .l2_research_gate import evaluate_l2_incremental_value
 from .l2_research_repository import latest_l2_evaluation, persist_l2_evaluation
@@ -3999,8 +4000,14 @@ async def peer_close_research_loop() -> None:
             return {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
         return await roll_teacher_review(trade_date, _teacher_review_dependencies())
 
+    async def teacher_outcome(trade_date: date) -> dict[str, Any]:
+        if not teacher_review_enabled():
+            return {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
+        return await run_teacher_outcome_review(trade_date, _teacher_review_dependencies())
+
     stages = {
         "teacher_review_roll": teacher_roll,
+        "teacher_outcome_review": teacher_outcome,
         "watch_daily_review": lambda trade_date: run_watch_daily_review(trade_date),
         "xiaojie_outcomes": lambda trade_date: run_database_blocking(
             settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
@@ -6651,6 +6658,12 @@ app.include_router(build_teacher_review_router(TeacherReviewRouterDependencies(
         lambda: teacher_review_repository.recent_settlements(db, limit=limit),
     ),
     roll=lambda trade_date: roll_teacher_review(trade_date or cn_today(), _teacher_review_dependencies()),
+    outcomes=lambda limit: run_database_blocking(
+        lambda: teacher_review_repository.recent_outcome_reviews(db, limit=limit),
+    ),
+    outcome_review=lambda trade_date: run_teacher_outcome_review(
+        trade_date or cn_today(), _teacher_review_dependencies(),
+    ),
 )))
 app.include_router(build_ten_day_leader_rotation_actions_router(
     TenDayLeaderRotationActionDependencies(run=run_ten_day_leader_rotation_endpoint),
