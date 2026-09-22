@@ -124,6 +124,8 @@ class FactorSqlLabTests(unittest.TestCase):
         self.assertNotIn("member.known_at <", create_sql)                    # not point-in-time, by design
         self.assertIn("'current_backfill' END AS industry_quality", create_sql)
         self.assertIn("ln(nullif(avg(amount)", create_sql)
+        self.assertNotIn("bar.available_at <", create_sql)                   # backfilled history is kept
+        self.assertNotIn("adjustment.available_at <", create_sql)
         self.assertEqual(panel["membership_mode"], "current_backfill")
         connection.calls.clear()
         _materialize_factor_scores(connection, "momentum_20d", date(2023, 9, 1), date(2026, 9, 1), "current_backfill")

@@ -49,7 +49,8 @@ MIN_FORMAL_HISTORY_CALENDAR_SPAN_DAYS = P2_MIN_DAILY_CALENDAR_SPAN_DAYS
 # rarely change, but it is not point-in-time) and log 20-day average turnover
 # stands in for size.  Its results are never eligible for promotion.
 MEMBERSHIP_MODES = ("point_in_time", "current_backfill")
-_BACKFILL_BLOCKERS = ["industry_membership_backfilled_from_current", "size_proxy_log_20d_average_amount"]
+_BACKFILL_BLOCKERS = ["industry_membership_backfilled_from_current", "size_proxy_log_20d_average_amount",
+                      "bars_and_adjustments_recorded_after_the_session"]
 
 
 def evaluable_factor_keys() -> frozenset[str]:
@@ -194,6 +195,12 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
     """Create one transaction-scoped panel shared by every requested factor."""
     _check_membership_mode(membership_mode)
     industry_join, industry_label = _industry_join_sql(membership_mode)
+    # Backfilled history was recorded long after each session, so strict
+    # knowledge-time filters would drop it; the research mode keeps it (the
+    # blocker below records that) and still prefers the earliest-recorded row.
+    known_by_session = "((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')"
+    bar_known = f"AND bar.available_at < {known_by_session}" if membership_mode == "point_in_time" else ""
+    adjustment_known = (f"AND adjustment.available_at < {known_by_session}" if membership_mode == "point_in_time" else "")
     size_sql = ("log_market_cap_pit" if membership_mode == "point_in_time" else
                 """CASE WHEN count(amount) OVER(PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)=20
                            THEN ln(nullif(avg(amount) OVER(PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW),0)) END""")
@@ -236,7 +243,7 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                         WHERE adjustment.symbol=bar.symbol
                           AND adjustment.trading_date=bar.trading_date
                           AND {factor_semantics_sql}
-                          AND adjustment.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                          {adjustment_known}
                         ORDER BY CASE WHEN adjustment.provider='longhu_qfq_derived' THEN 0
                                       WHEN adjustment.provider IN ('tushare_primary','tushare_super_sdk') THEN 1 ELSE 2 END,
                                  adjustment.available_at DESC,
@@ -256,7 +263,7 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                         LIMIT 1
                  ) fundamental ON TRUE
                 WHERE adjustment_history.adj_factor>0 AND bar.close>0
-                  AND bar.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                  {bar_known}
                   AND bar.quality_status='fresh'
                   AND (instrument.list_date IS NULL OR instrument.list_date<=bar.trading_date)
                   AND (instrument.delist_date IS NULL OR instrument.delist_date>=bar.trading_date)
