@@ -1305,6 +1305,19 @@ def settle_xiaojie_leader_flow_outcomes(as_of_date: date) -> dict[str, Any]:
         return settle_xiaojie_session(connection, as_of_date)
 
 
+def settle_xiaojie_recent_sessions(as_of_date: date) -> dict[str, Any]:
+    """Post-close: settle the session and refresh the previous one.
+
+    The previous session's next-open/next-close columns can only be filled
+    once today's bars exist; settling is idempotent, so re-running refreshes.
+    """
+    with db.transaction() as connection:
+        previous = connection.execute(
+            """SELECT max(calendar_date) AS d FROM quant.market_trade_calendar
+                WHERE exchange='SSE' AND is_open AND calendar_date<%s""", (as_of_date,)).fetchone()["d"]
+    return {str(day): settle_xiaojie_leader_flow_outcomes(day) for day in (previous, as_of_date) if day is not None}
+
+
 def _read_session_minute_symbols(as_of_date: date) -> dict[str, Any]:
     """Read one session's board + benchmark symbol list off the executor."""
     with db.transaction() as connection:
@@ -4871,6 +4884,8 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
             if teacher_review_enabled() else None
         ),
         watch_daily_review=lambda trade_date: run_watch_daily_review(trade_date),
+        xiaojie_outcomes=lambda trade_date: run_database_blocking(
+            settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
     )
 
 
