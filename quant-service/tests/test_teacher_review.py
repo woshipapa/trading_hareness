@@ -185,12 +185,12 @@ class DivergenceTests(unittest.TestCase):
                    if item["name"].startswith("B：30/60")]
         self.assertIsNone(unknown[0]["pass"])
 
-    def test_book_refreshes_at_most_once_a_minute_and_resets_daily(self):
+    def test_book_refreshes_at_most_every_five_seconds_and_resets_daily(self):
         book = PeriodDivergenceBook()
         self.assertEqual(book.due(["A", "B"], at(9, 31)), ["A", "B"])
         book.store("A", at(9, 31), {"30": {"found": True, "status": "ok"}})
-        self.assertEqual(book.due(["A", "B"], at(9, 31, date(2026, 9, 22)) + timedelta(seconds=30)), ["B"])
-        self.assertEqual(book.due(["A"], at(9, 32, date(2026, 9, 22)) + timedelta(seconds=1)), ["A"])
+        self.assertEqual(book.due(["A", "B"], at(9, 31) + timedelta(seconds=3)), ["B"])
+        self.assertEqual(book.due(["A"], at(9, 31) + timedelta(seconds=5)), ["A"])
         self.assertIsNone(book.get("A", at(9, 31, date(2026, 9, 23))))
 
 
@@ -252,6 +252,20 @@ class PrecisionTests(unittest.TestCase):
         self.assertEqual(len(persisted), 1)                  # 3 consecutive scans over 60 s
         self.assertTrue(persisted[0]["independent_confirmation"])
         self.assertEqual(persisted[0]["conditions"]["teacher_review"]["quote_source"], "fuyao_ths_all_a_snapshot")
+
+    def test_call_auction_is_evidence_only_and_the_final_auction_runs_only_auction_plays(self):
+        from app.intraday_signal_generation import session_phase
+        self.assertEqual(session_phase(at(9, 16)), "call_auction")
+        self.assertEqual(session_phase(at(9, 26)), "auction_final")
+        self.assertEqual(session_phase(at(9, 30)), "continuous")
+        breakout = watch("001368.SZ", "prior_high_breakout", {"prior_high": 33.56, "floor_ma": 10}, {"floor_level": 29.3})
+        strong = quote(33.8, 33.3, amount=2e8, volume_lot=59000, volume_ratio=1.8)
+        minute = {"vwap": 33.5, "return_5m_pct": 0.2}
+        self.assertEqual(teacher_review_signals(breakout, strong, minute, None, at(9, 27)), [])
+        self.assertEqual(len(teacher_review_signals(breakout, strong, minute, None, at(9, 31))), 1)
+        one_word = watch("001216.SZ", "relay_one_word", {"auction_amount_min": 5e8, "turnover_max_pct": 12.0, "prior_high": 24.06})
+        opened_low = quote(23.5, 24.06, amount=2e7, volume_lot=8000, turnover=0.3)
+        self.assertTrue(teacher_review_signals(one_word, opened_low, None, None, at(9, 27)))   # judged on the final auction
 
     def test_stale_sector_counts_are_unknown_not_zero(self):
         book = TeacherMarketBook()

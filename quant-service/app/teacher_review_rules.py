@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 from collections import deque
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from statistics import median
 from typing import Any, Callable, Mapping
 from zoneinfo import ZoneInfo
@@ -38,6 +38,9 @@ from .teacher_review_playbooks import DEFAULTS, playbook_kind
 from .teacher_review_plan import divergence_summary, limit_up_price
 
 _CN_TZ = ZoneInfo("Asia/Shanghai")
+#: Before continuous trading only plays judged on the final 09:25 auction run.
+AUCTION_PLAYBOOKS = frozenset({"relay_one_word"})
+AUCTION_PLAYBOOK_UNTIL = time(9, 30)
 MODEL_VERSION = "teacher-review-rules-v3"
 
 
@@ -280,7 +283,7 @@ class PeriodDivergenceBook:
     read the latest result and fall back to the frozen pre-session one.
     """
 
-    REFRESH_SECONDS = 60.0
+    REFRESH_SECONDS = 5.0
 
     def __init__(self) -> None:
         self._day: date | None = None
@@ -690,6 +693,8 @@ def teacher_review_signals(
         return []
     symbol = str(watch["symbol"]).upper()
     playbook = str(plan["playbook"])
+    if observed_at.astimezone(_CN_TZ).time() < AUCTION_PLAYBOOK_UNTIL and playbook not in AUCTION_PLAYBOOKS:
+        return []
     base = {
         "symbol": symbol, "hard": False, "policy_profile": "teacher_review", "strategy_version": MODEL_VERSION,
         "risk_flags": ["teacher_review_research", "manual_review_required", "no_automatic_order"],

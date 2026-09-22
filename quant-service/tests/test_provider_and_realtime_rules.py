@@ -925,9 +925,16 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertTrue(intraday_high_frequency_window(late_morning))
         self.assertTrue(intraday_high_frequency_window(afternoon_open))
         self.assertTrue(intraday_high_frequency_window(closing_window))
-        self.assertEqual(intraday_effective_scan_interval_seconds(30, high), 10)
-        self.assertEqual(intraday_effective_scan_interval_seconds(30, opening), 10)
-        self.assertEqual(intraday_effective_scan_interval_seconds(30, normal), 30)
+        # The whole morning (09:15-11:30) scans every 5 s; the afternoon keeps
+        # 10 s windows and the 30 s normal cadence.
+        afternoon_normal = __import__("datetime").datetime(2026, 8, 10, 13, 45, tzinfo=china)
+        call_auction = __import__("datetime").datetime(2026, 8, 10, 9, 15, tzinfo=china)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, high), 5)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, opening), 5)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, normal), 5)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, call_auction), 5)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, afternoon_open), 10)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, afternoon_normal), 30)
         self.assertEqual(intraday_effective_scan_interval_seconds(0, high), 0)
         offsets = [0]
         for _ in range(6):
@@ -962,10 +969,13 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(bounded_rotation_pool_size(40, 0.0, 30.0), 40)
         self.assertEqual(intraday_board_refresh_interval_seconds(high), 60)
         self.assertEqual(intraday_board_refresh_interval_seconds(normal), 300)
-        pre_open = __import__("datetime").datetime(2026, 8, 10, 9, 29, 50, tzinfo=china)
+        # The morning window opens with the 09:15 call auction.
+        pre_open = __import__("datetime").datetime(2026, 8, 10, 9, 14, 50, tzinfo=china)
         self.assertEqual(intraday_next_monitor_delay_seconds(30, pre_open), 10.0)
-        one_second_to_open = __import__("datetime").datetime(2026, 8, 10, 9, 29, 59, tzinfo=china)
+        one_second_to_open = __import__("datetime").datetime(2026, 8, 10, 9, 14, 59, tzinfo=china)
         self.assertEqual(intraday_next_monitor_delay_seconds(30, one_second_to_open), 1.0)
+        in_call_auction = __import__("datetime").datetime(2026, 8, 10, 9, 29, 50, tzinfo=china)
+        self.assertEqual(intraday_next_monitor_delay_seconds(30, in_call_auction), 5.0)
         with patch.dict("os.environ", {"INTRADAY_SUPER_GET_FAST_INTERVAL_SECONDS": "1"}):
             self.assertEqual(intraday_super_get_fast_interval_seconds(), 1.0)
         with patch.dict("os.environ", {"INTRADAY_SUPER_GET_FAST_MAX_IN_FLIGHT": "20"}):

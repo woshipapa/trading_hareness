@@ -384,6 +384,7 @@ from .intraday_schedule import (
     intraday_effective_scan_interval_seconds,
     intraday_fast_quote_retention_days,
     intraday_high_frequency_window,
+    intraday_morning_fast_window,
     intraday_next_monitor_delay_seconds,
     intraday_realtime_validation_slice,
     intraday_rule_input_retention_days,
@@ -3149,7 +3150,8 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
         watchlist_capacity=intraday_watchlist_capacity,
         read_watchlists=read_async_intraday_scan_watchlists,
         persist_terminal=persist_intraday_scan_terminal,
-        realtime_session=realtime_market_session_async,
+        # Scans run from the 09:15 call auction (evidence only until 09:25).
+        realtime_session=market_observation_session_async,
         prune_rule_inputs=prune_intraday_rule_input_evidence_if_due,
         retry_pending_alerts=retry_pending_intraday_alerts,
         read_exact_memberships=read_async_exact_watchlist_memberships,
@@ -3609,8 +3611,10 @@ async def intraday_monitor_loop(interval_seconds: int) -> None:
     """Run only during continuous auction with a bounded adaptive cadence."""
     await run_intraday_monitor_loop(
         interval_seconds,
-        realtime_session=realtime_market_session_async,
-        high_frequency_window=intraday_high_frequency_window,
+        realtime_session=market_observation_session_async,
+        # No Tushare minute-validation slice in the 5 s morning window either:
+        # 4 symbols x 12 scans a minute would approach its 60/min budget.
+        high_frequency_window=lambda local: intraday_high_frequency_window(local) or intraday_morning_fast_window(local),
         next_delay_seconds=intraday_next_monitor_delay_seconds,
         make_scan_request=lambda limit, offset: IntradayScanRequest(
             realtime_validation_limit=limit,
@@ -4555,7 +4559,7 @@ async def refresh_teacher_sectors(watches: list[dict[str, Any]]) -> dict[str, An
         if not sectors:
             return {"status": "no_sector_plans"}
         refreshed = teacher_market_book.sector_refreshed_at
-        if refreshed is not None and (observed_at - refreshed).total_seconds() < 60 \
+        if refreshed is not None and (observed_at - refreshed).total_seconds() < 5 \
                 and refreshed.astimezone(ZoneInfo("Asia/Shanghai")).date() == observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date():
             return {"status": "fresh"}
         day_start = datetime.combine(observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date(), time(0),
