@@ -147,6 +147,42 @@ class ReportTests(unittest.TestCase):
         self.assertIn(OUTCOME_LABELS["avoid_missed"], page)
 
 
+class SnapshotQueryTests(unittest.TestCase):
+    """PostgreSQL requires DISTINCT ON to match the leading ORDER BY exactly."""
+
+    def query(self):
+        import contextlib
+
+        from app import teacher_review_repository as repo
+
+        captured = {}
+
+        class Connection:
+            def execute(self, sql, params=None):
+                captured["sql"], captured["params"] = sql, params
+                return type("R", (), {"fetchall": staticmethod(lambda: [])})()
+
+        class Database:
+            @contextlib.contextmanager
+            def transaction(self):
+                yield Connection()
+
+        repo.rule_input_snapshots(Database(), ["000001"], date(2026, 9, 22))
+        return captured
+
+    def test_the_bucket_expression_is_inlined_and_identical_in_both_clauses(self):
+        captured = self.query()
+        sql = captured["sql"]
+        bucket = "to_timestamp(floor(extract(epoch FROM observed_at)/120)*120)"
+        self.assertEqual(sql.count(bucket), 2)
+        self.assertIn(f"DISTINCT ON (symbol, {bucket})", sql)
+        self.assertIn(f"ORDER BY symbol, {bucket}, observed_at", sql)
+        self.assertEqual(len(captured["params"]), 3)
+
+    def test_codes_are_normalised_to_exchange_symbols(self):
+        self.assertEqual(self.query()["params"][0], ["000001.SZ"])
+
+
 class LearningTests(unittest.TestCase):
     def missed(self, code, gate, pct, day):
         return {"code": code, "name": code, "playbook": "platform_breakout", "outcome": "missed",

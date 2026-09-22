@@ -297,7 +297,10 @@ def rule_input_snapshots(database: Any, codes: Iterable[str], trade_date: date,
         return {}
     start = datetime.combine(trade_date, time(9, 15), tzinfo=_CN_TZ)
     end = datetime.combine(trade_date, time(15, 5), tzinfo=_CN_TZ)
-    bucket = "to_timestamp(floor(extract(epoch FROM observed_at)/%s)*%s)"
+    # The bucket width is inlined, not bound: ``DISTINCT ON`` and ``ORDER BY``
+    # must be the same expression, and two placeholders never are.
+    seconds = max(1, min(int(bucket_seconds), 3600))
+    bucket = f"to_timestamp(floor(extract(epoch FROM observed_at)/{seconds})*{seconds})"
     with database.transaction() as connection:
         rows = connection.execute(
             f"""SELECT DISTINCT ON (symbol, {bucket})
@@ -309,7 +312,7 @@ def rule_input_snapshots(database: Any, codes: Iterable[str], trade_date: date,
                   FROM quant.intraday_rule_input_snapshots
                  WHERE symbol=ANY(%s) AND observed_at>=%s AND observed_at<%s
                  ORDER BY symbol, {bucket}, observed_at""",
-            (bucket_seconds, bucket_seconds, symbols, start, end, bucket_seconds, bucket_seconds),
+            (symbols, start, end),
         ).fetchall()
     result: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
