@@ -14,7 +14,13 @@ score and an unbounded percent return as the same number.
 ``strategy_key`` values this module writes: post_close_base_ready,
 post_close_base_forming, post_close_fresh_start, post_close_limit_pattern,
 ten_day_leader_rotation, limit_linkage, board_stock_mining_inflow,
-board_stock_mining_outflow, daily_recommendation.
+board_stock_mining_outflow, daily_recommendation, teacher_review_relay,
+teacher_review_trend, xiaojie_leader_flow, launch_radar.
+
+The teacher, 小杰 and launch-radar lines are intraday or next-session
+playbooks with their own settlement; the ledger adds the one comparison
+they lacked - the same next-open entry, 10-session horizon and liquidity
+screen as every other strategy.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from .liquidity_screen import liquidity_eligibility, median_daily_amount_by_symbol
+from .teacher_review_playbooks import playbook_kind, ts_code
 from .point_in_time import exchange_day_end
 
 POST_CLOSE_STRATEGY_KEYS = {
@@ -205,9 +212,74 @@ def materialize_recommendation_candidates(connection: Any, as_of_date: date) -> 
     return _upsert_candidates(connection, rows)
 
 
+def materialize_teacher_review_candidates(connection: Any, as_of_date: date) -> int:
+    """Stocks the teacher planned for the next session in the review of ``as_of_date``.
+
+    A pack another same-day pack supersedes is skipped; record-only
+    playbooks (``rejected`` and the like) are not ideas and stay out.
+    """
+    packs = [dict(row["pack"]) for row in connection.execute(
+        """SELECT payload->'pack' AS pack FROM quant.raw_market_observations
+             WHERE provider_key='teacher_review' AND capability='teacher_review_pack'
+               AND payload->'pack'->>'review_date'=%s""",
+        (as_of_date.isoformat(),),
+    ).fetchall() if isinstance(row["pack"], dict)]
+    superseded = {str(pack_id) for pack in packs for pack_id in (pack.get("supersedes") or [])}
+    ideas: dict[tuple[str, str], dict[str, Any]] = {}
+    for pack in packs:
+        if str(pack.get("pack_id")) in superseded:
+            continue
+        for rank, stock in enumerate(pack.get("stocks") or [], start=1):
+            kind = playbook_kind(str(stock.get("playbook") or ""))
+            code = str(stock.get("code") or "")
+            if kind == "record" or not code:
+                continue
+            symbol = str(stock.get("ts_code") or ts_code(code)).upper()
+            ideas.setdefault((f"teacher_review_{kind}", symbol), {
+                "rank": rank, "evidence": {"pack_id": pack.get("pack_id"), "playbook": stock.get("playbook"),
+                                           "stance": stock.get("stance"), "group": stock.get("group"),
+                                           "analyst_id": (pack.get("analyst") or {}).get("analyst_id")}})
+    liquidity = _liquidity_context(connection, sorted({symbol for _, symbol in ideas}), as_of_date)
+    rows = [{
+        "strategy_key": key, "as_of_date": as_of_date, "symbol": symbol, "source_table": "raw_market_observations",
+        "source_run_id": None, "rank": idea["rank"], "raw_score": None, "score_scale": "unscored_plan",
+        "liquidity": liquidity.get(symbol, {"eligible": False, "flags": ["liquidity_context_missing"]}),
+        "evidence": idea["evidence"],
+    } for (key, symbol), idea in sorted(ideas.items())]
+    return _upsert_candidates(connection, rows)
+
+
+def materialize_leader_flow_candidates(connection: Any, as_of_date: date) -> int:
+    """小杰龙头 and launch-radar detections of the day, one row per stock (modes kept as evidence)."""
+    detections = connection.execute(
+        """SELECT symbol, CASE WHEN mode='launch_radar' THEN 'launch_radar' ELSE 'xiaojie_leader_flow' END AS strategy_key,
+                  array_agg(DISTINCT mode ORDER BY mode) AS modes, min(first_seen_at) AS first_seen_at,
+                  sum(observation_count)::int AS observations, bool_or(alerted_at IS NOT NULL) AS alerted
+             FROM quant.xiaojie_leader_flow_observations WHERE trading_date=%s
+            GROUP BY 1,2 ORDER BY min(first_seen_at)""",
+        (as_of_date,),
+    ).fetchall()
+    liquidity = _liquidity_context(connection, sorted({str(row["symbol"]) for row in detections}), as_of_date)
+    ranks: dict[str, int] = {}
+    rows = []
+    for row in detections:
+        key = str(row["strategy_key"])
+        ranks[key] = ranks.get(key, 0) + 1
+        rows.append({
+            "strategy_key": key, "as_of_date": as_of_date, "symbol": row["symbol"],
+            "source_table": "xiaojie_leader_flow_observations", "source_run_id": None, "rank": ranks[key],
+            "raw_score": row["observations"], "score_scale": "scan_observation_count",
+            "liquidity": liquidity.get(str(row["symbol"]), {"eligible": False, "flags": ["liquidity_context_missing"]}),
+            "evidence": {"modes": list(row["modes"] or []), "first_seen_at": row["first_seen_at"].isoformat()
+                         if row["first_seen_at"] else None, "alerted": bool(row["alerted"])},
+        })
+    return _upsert_candidates(connection, rows)
+
+
 MATERIALIZERS = (
     materialize_post_close_candidates, materialize_pattern_candidates, materialize_ten_day_leader_candidates,
     materialize_limit_linkage_candidates, materialize_board_stock_mining_candidates, materialize_recommendation_candidates,
+    materialize_teacher_review_candidates, materialize_leader_flow_candidates,
 )
 
 
@@ -291,7 +363,8 @@ def settle_ledger_outcomes(connection: Any, as_of_date: date) -> int:
 
 __all__ = [
     "HORIZON_DAYS", "MATERIALIZERS", "POST_CLOSE_STRATEGY_KEYS",
-    "materialize_board_stock_mining_candidates", "materialize_ledger", "materialize_limit_linkage_candidates",
+    "materialize_board_stock_mining_candidates", "materialize_leader_flow_candidates", "materialize_ledger",
+    "materialize_limit_linkage_candidates", "materialize_teacher_review_candidates",
     "materialize_pattern_candidates", "materialize_post_close_candidates", "materialize_recommendation_candidates",
     "materialize_ten_day_leader_candidates", "settle_ledger_outcomes",
 ]
