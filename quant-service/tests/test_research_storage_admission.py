@@ -33,7 +33,7 @@ class ResearchStorageAdmissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_governance_uses_managed_database_and_artifact_budgets(self) -> None:
         connection = MagicMock()
-        connection.execute.return_value.fetchone.return_value = {"bytes": 100}
+        connection.execute.return_value.fetchone.return_value = {"bytes": 100, "cold_bytes": 5000}
         database = MagicMock()
         database.transaction.return_value = _Transaction(connection)
 
@@ -50,6 +50,16 @@ class ResearchStorageAdmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["managed"]["used_bytes"], 300)
         self.assertEqual(result["state"], "healthy")
         self.assertTrue(result["allow_nonessential_high_frequency"])
+        # the cold tablespace is reported but never counted against the hot budget
+        self.assertEqual(result["cold_tablespace"], {"used_bytes": 5000, "counted_in_hot_budget": False})
+        self.assertIn("reltablespace=0", connection.execute.call_args.args[0])
+
+    async def test_exempt_evidence_survives_the_stop_without_an_operator_flag(self) -> None:
+        status = {"allow_nonessential_high_frequency": False, "state": "stop_nonessential_high_frequency"}
+        admission = ResearchStorageAdmission(lambda: status, AsyncMock(return_value=status), cache_seconds=60)
+        allowed, detail = await admission.exempt_intraday_evidence_allowed()
+        self.assertTrue(allowed)
+        self.assertEqual(detail["capture_policy"], "exempt_from_storage_stop")
 
     async def test_core_intraday_evidence_can_explicitly_survive_optional_stop(self) -> None:
         status = {"allow_nonessential_high_frequency": False, "state": "stop_nonessential_high_frequency"}

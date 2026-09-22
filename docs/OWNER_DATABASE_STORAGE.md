@@ -76,8 +76,11 @@ evidence for 10; daily bars, reviews and supplements stay hot. The intended
 transfer is copy-after-close into the owner's cold twin, then delete from hot
 only after the hot window and a verified cold copy (same key and payload
 hash), outside 09:00-15:30 on trading days. The owner runs it; the peer never
-moves rows. The peer's hot budget measures the whole `quant` schema today,
-including relations already on `stock_cold`.
+moves rows. The peer's hot budget (the optional-capture storage guard)
+counts only relations in the default tablespace; `stock_cold` usage is
+reported separately as `cold_tablespace`. Board curves and the close-window
+minute profile are exempt from the guard's stop (operator decision,
+2026-09-22).
 
 ## Two database lanes
 
