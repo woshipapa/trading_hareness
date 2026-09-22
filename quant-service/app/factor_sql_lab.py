@@ -201,6 +201,9 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
     known_by_session = "((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')"
     bar_known = f"AND bar.available_at < {known_by_session}" if membership_mode == "point_in_time" else ""
     adjustment_known = (f"AND adjustment.available_at < {known_by_session}" if membership_mode == "point_in_time" else "")
+    # The owner marks many complete OHLC rows 'partial' (an auxiliary field is
+    # missing); plan_bars already treats them as usable prices.
+    bar_quality = "bar.quality_status='fresh'" if membership_mode == "point_in_time" else "bar.quality_status IN ('fresh','partial')"
     size_sql = ("log_market_cap_pit" if membership_mode == "point_in_time" else
                 """CASE WHEN count(amount) OVER(PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)=20
                            THEN ln(nullif(avg(amount) OVER(PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW),0)) END""")
@@ -264,7 +267,7 @@ def prepare_factor_panel(connection: Any, universe_key: str, start_date: date, e
                  ) fundamental ON TRUE
                 WHERE adjustment_history.adj_factor>0 AND bar.close>0
                   {bar_known}
-                  AND bar.quality_status='fresh'
+                  AND {bar_quality}
                   AND (instrument.list_date IS NULL OR instrument.list_date<=bar.trading_date)
                   AND (instrument.delist_date IS NULL OR instrument.delist_date>=bar.trading_date)
            ), returns AS (
