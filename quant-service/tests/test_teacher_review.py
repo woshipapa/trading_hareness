@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from app import teacher_review_rules as rules
 from app import teacher_review_service as service
 from app.intraday_alerts import intraday_alert_text
 from app.intraday_signal_generation import IntradaySignalGenerationDependencies, generate_intraday_signals
@@ -663,9 +664,14 @@ class FakeRepo:
     def recent_packs(self, _db, *, since):
         return list(self.packs)
 
-    def retire_plans(self, _db, *, keep, retired_at, only_pack_ids=None):
-        self.retired.append(sorted(keep))
+    def retire_plans(self, _db, *, keep, retired_at, only_pack_ids=None, only_symbols=None):
+        self.retired.append(sorted(only_symbols) if only_symbols is not None else sorted(keep))
         return {"disabled": [], "stripped": []}
+
+    watch_rows: list = []
+
+    def teacher_watch_rows(self, _db):
+        return list(self.watch_rows)
 
     def session_events(self, _db, session_date):
         return []
@@ -713,7 +719,8 @@ class ServiceTests(unittest.TestCase):
         fake, alerts = FakeRepo(self.sessions), []
         pack = load_pack()
         with patch.multiple(service.repo, **{name: getattr(fake, name) for name in (
-                "pack_record", "open_sessions", "apply_session_plans", "persist_pack", "plan_bars", "minute_period_bars")}):
+                "pack_record", "open_sessions", "apply_session_plans", "persist_pack", "plan_bars", "minute_period_bars",
+                "retire_plans")}):
             with patch.object(service, "plan_stock", side_effect=lambda stock, rows, divergence=None: {
                     "levels": {"date": rows[-1]["date"]}, "extra": {}, "setup": "", "checklist": []}):
                 result = asyncio.run(service.import_pack(pack, self._deps(at(21, 40, date(2026, 9, 21)), alerts)))
@@ -723,12 +730,14 @@ class ServiceTests(unittest.TestCase):
         kinds = [CATALOG[next(s["playbook"] for s in pack["stocks"] if s["ts_code"] == code)]["kind"] for code in planned]
         self.assertEqual(kinds, sorted(kinds, key=lambda kind: kind != "relay"))
         self.assertNotIn("600127.SH", planned)  # rejected -> record only, never watched
+        self.assertIn("600127.SH", fake.retired[-1])  # and any older plan for it is retired
         self.assertTrue(alerts and alerts[0].startswith("【老师复盘入池】"))
 
     def test_late_import_skips_to_the_next_session_and_expires_relays(self):
         fake, alerts = FakeRepo(self.sessions), []
         with patch.multiple(service.repo, **{name: getattr(fake, name) for name in (
-                "pack_record", "open_sessions", "apply_session_plans", "persist_pack", "plan_bars", "minute_period_bars")}):
+                "pack_record", "open_sessions", "apply_session_plans", "persist_pack", "plan_bars", "minute_period_bars",
+                "retire_plans")}):
             with patch.object(service, "plan_stock", side_effect=lambda stock, rows, divergence=None: {
                     "levels": {}, "extra": {}, "setup": "", "checklist": []}):
                 result = asyncio.run(service.import_pack(load_pack(), self._deps(at(9, 40, date(2026, 9, 22)), alerts)))
@@ -775,11 +784,94 @@ class ServiceTests(unittest.TestCase):
             return [], []
 
         with patch.multiple(service.repo, **{name: getattr(fake, name) for name in (
-                "open_sessions", "sessions_between", "apply_session_plans", "retire_plans", "persist_settlement")},
+                "open_sessions", "sessions_between", "apply_session_plans", "retire_plans", "persist_settlement",
+                "teacher_watch_rows")},
                 recent_packs=lambda _db, since: records):
             with patch.object(service, "build_session_plans", side_effect=fake_build):
                 asyncio.run(service.roll(date(2026, 9, 21), self._deps(at(16, 5, date(2026, 9, 21)), alerts)))
         self.assertEqual(built, ["abcdef0123456789"])
+
+    def _live_row(self, pack, code, playbook, *, extra=None, params=None):
+        return {"symbol": service.ts_code(code), "enabled": True, "metadata": {"source": "teacher_review", "teacher_review": {
+            "status": "active", "pack_id": pack["pack_id"], "review_date": pack["review_date"], "session_date": "2026-09-22",
+            "session_index": 1, "valid_sessions": next(int(s["valid_sessions"]) for s in pack["stocks"] if s["code"] == code),
+            "code": code, "name": code, "playbook": playbook, "stance": "positive", "params": params or {},
+            "extra": {"ma_prefix": {"5": 40.0, "10": 90.0}, **(extra or {})}, "lifecycle": {"state": "new"}}}}
+
+    def _roll(self, fake, records, trade_date=date(2026, 9, 22)):
+        alerts, built = [], []
+        with patch.multiple(service.repo, **{name: getattr(fake, name) for name in (
+                "open_sessions", "sessions_between", "apply_session_plans", "retire_plans", "persist_settlement",
+                "teacher_watch_rows", "session_bars", "first_limit_up_times", "xiaojie_session_modes", "session_events",
+                "plan_bars", "minute_period_bars")}, recent_packs=lambda _db, since: records):
+            with patch.object(service, "plan_stock", side_effect=lambda stock, rows, divergence=None: {
+                    "levels": {"date": rows[-1]["date"]}, "extra": {"ma_prefix": {"5": 40.0, "10": 90.0}},
+                    "setup": "", "checklist": []}):
+                result = asyncio.run(service.roll(trade_date, self._deps(at(16, 20, trade_date), alerts)))
+        return result, alerts
+
+    def test_the_roll_promotes_what_satisfied_and_only_observes_the_rest(self):
+        # FakeRepo's session bar closes every stock at its limit (11.0).
+        fake = FakeRepo(self.sessions)
+        pack = load_pack()
+        fake.watch_rows = [self._live_row(pack, "002285", "relay_acceleration"),
+                           self._live_row(pack, "605258", "platform_breakout", extra={"platform_upper": 12.0})]
+        result, alerts = self._roll(fake, [{"pack": pack, "available_at": at(20, 0, date(2026, 9, 21))}])
+        states = {item["code"]: item["state"] for item in result["lifecycle"]}
+        self.assertEqual(states, {"002285": "promoted", "605258": "observe"})
+        self.assertEqual(sorted(result["next_plans"]), ["002285.SZ", "605258.SH"])
+        self.assertIn("晋级延续至下一交易日：世联行（封板晋级）", alerts[-1])
+        self.assertIn("转观察（不推送买点）：协和电子（尚未满足，转观察）", alerts[-1])
+
+    def test_a_carried_plan_takes_a_hold_playbook_and_observed_ones_go_inert(self):
+        fake = FakeRepo(self.sessions)
+        pack = load_pack()
+        fake.watch_rows = [self._live_row(pack, "002285", "relay_acceleration"),
+                           self._live_row(pack, "605258", "platform_breakout", extra={"platform_upper": 12.0})]
+        captured = []
+        original = fake.apply_session_plans
+
+        def capture(_db, plans, **kwargs):
+            captured.extend(plans)
+            return original(_db, plans, **kwargs)
+
+        fake.apply_session_plans = capture
+        self._roll(fake, [{"pack": pack, "available_at": at(20, 0, date(2026, 9, 21))}])
+        by_symbol = {plan["ts_code"]: plan["metadata"] for plan in captured}
+        promoted, observed = by_symbol["002285.SZ"], by_symbol["605258.SH"]
+        self.assertEqual((promoted["playbook"], promoted["status"], promoted["session_date"]),
+                         ("trend_continuation", "active", "2026-09-23"))
+        self.assertEqual(promoted["params"]["prior_high"], 11.0)
+        self.assertEqual(promoted["lifecycle"]["original_playbook"], "relay_acceleration")
+        self.assertEqual((observed["playbook"], observed["status"]), ("platform_breakout", "observe"))
+        self.assertEqual(observed["lifecycle"]["teacher_valid_sessions"], 2)
+        self.assertIsNone(rules.active_plan({"metadata": {"teacher_review": observed}}, at(10, 0, date(2026, 9, 23))))
+        self.assertIsNotNone(rules.active_plan({"metadata": {"teacher_review": promoted}}, at(10, 0, date(2026, 9, 23))))
+
+    def test_the_newest_review_owns_a_stock_it_mentions(self):
+        fake = FakeRepo(self.sessions)
+        old = load_pack()
+        fake.watch_rows = [self._live_row(old, "002285", "relay_acceleration"),
+                           self._live_row(old, "605258", "platform_breakout", extra={"platform_upper": 12.0})]
+        newer = copy.deepcopy(old)
+        newer.update({"pack_id": "fedcba9876543210", "review_date": "2026-09-22",
+                      "stocks": [{**next(s for s in old["stocks"] if s["code"] == "002285"),
+                                  "playbook": "rejected", "stance": "negative", "params": {}}]})
+        result, _ = self._roll(fake, [{"pack": old, "available_at": at(20, 0, date(2026, 9, 21))},
+                                      {"pack": newer, "available_at": at(21, 0, date(2026, 9, 22))}])
+        self.assertEqual([item["code"] for item in result["lifecycle"]], ["605258"])   # 002285 now belongs to the newer review
+        self.assertNotIn("002285.SZ", result["next_plans"])                          # which rejects it: settle only
+
+    def test_a_rerun_reapplies_the_decision_it_already_made(self):
+        fake = FakeRepo(self.sessions)
+        pack = load_pack()
+        row = self._live_row(pack, "605258", "platform_breakout")
+        row["metadata"]["teacher_review"].update({"session_date": "2026-09-23", "status": "observe",
+                                                   "lifecycle": {"state": "observe", "decided_on": "2026-09-22"}})
+        fake.watch_rows = [row]
+        result, _ = self._roll(fake, [{"pack": pack, "available_at": at(20, 0, date(2026, 9, 21))}])
+        self.assertEqual(result["next_plans"], ["605258.SH"])
+        self.assertEqual(result["lifecycle"], [])
 
     def test_invalid_pack_is_rejected_without_side_effects(self):
         pack = copy.deepcopy(load_pack())

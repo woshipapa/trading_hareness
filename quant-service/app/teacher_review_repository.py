@@ -184,10 +184,11 @@ def apply_session_plans(
 
 
 def retire_plans(database: Any, *, keep: set[str], retired_at: datetime,
-                 only_pack_ids: set[str] | None = None) -> dict[str, Any]:
+                 only_pack_ids: set[str] | None = None, only_symbols: set[str] | None = None) -> dict[str, Any]:
     """Expire teacher plans not in ``keep``: disable our own rows, strip the key from others.
 
-    ``only_pack_ids`` limits it to plans of those packs (a superseded pack).
+    ``only_pack_ids`` limits it to plans of those packs (a superseded pack);
+    ``only_symbols`` to those stocks (a newer review now rejects them).
     """
     disabled, stripped = [], []
     with database.transaction() as connection:
@@ -201,6 +202,8 @@ def retire_plans(database: Any, *, keep: set[str], retired_at: datetime,
                 continue
             metadata = dict(row["metadata"] or {})
             if only_pack_ids is not None and str((metadata.get("teacher_review") or {}).get("pack_id")) not in only_pack_ids:
+                continue
+            if only_symbols is not None and symbol not in only_symbols:
                 continue
             if metadata.get("source") == SOURCE_TAG:
                 history = dict(metadata.get("teacher_review") or {})

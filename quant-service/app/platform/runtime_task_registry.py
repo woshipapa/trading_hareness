@@ -79,6 +79,13 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         "copy closed sessions of these hot tables into their stock_cold twins (*_cold), delete hot rows past the "
         "hot window only when the cold copy matches; inert until the owner grants SELECT,INSERT on the twins",
     ),
+    "peer_close_research": RuntimeTaskContract(
+        "peer_close_research", "research", "once per trading date after 16:15 (catch-up before 09:00)",
+        ("intraday_minutes",),
+        ("raw_market_observations", "xiaojie_leader_flow_observations", "automation_runs"),
+        "the peer-owned close stages the owner's pipeline does not run: teacher plan roll (settle, promote, "
+        "observe, retire), watch-list daily review and 小杰 outcome settlement, each behind its receipt",
+    ),
     "all_a_level1_snapshot": RuntimeTaskContract(
         "all_a_level1_snapshot", "intraday_edge", "60s during evidence observation session from 09:15",
         ("a_share_prices_snapshot",), ("raw_market_observations",),

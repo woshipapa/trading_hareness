@@ -12,7 +12,25 @@
 | 复盘视频发布后（约 19:30–22:00） | 导入策略包：校验 → 选定首个可用交易日 → 用已存日线冻结价位 → 写入观察池 → 存档 → 飞书“入池”通知 | `POST /api/v1/teacher-review/packs`、`teacher_review_service.import_pack` |
 | 次日盘中（9:30 起，前 30 分钟每 10 秒一轮） | 扫描规则族读取 `metadata.teacher_review`，逐只判定；满足即发 `entry`，失效发失效提醒，缺数据发“数据缺失” | `teacher_review_rules.teacher_review_signals`（挂在 `intraday_signal_generation`） |
 | 信号生成后 | 首次满足即确认 → `intraday_alert_deliveries` 先落库 → 并发推送飞书 | `intraday_alerts._teacher_review_alert_text` |
-| 盘后刷新（约 16:00） | `teacher_review_roll`：结算当日触发、老师预判与多策略共振，为仍有效的趋势票重算次日价位，下线过期计划，飞书结算摘要 | `teacher_review_service.roll` |
+| 收盘后（16:15 起，peer 自己的 `peer_close_research`） | `teacher_review_roll`：结算当日触发、老师预判和多策略共振；按延续规则把票分成晋级延续、观察、退出，最新复评优先；飞书推送结算摘要 | `teacher_review_service.roll`、`teacher_review_lifecycle` |
+
+## 计划的延续：晋级、观察、退出（2026-09-22 起）
+
+每个交易日收盘后，peer 自己的收盘研究任务 `peer_close_research`（调度器，16:15 之后；如果漏跑，次日 09:00 前补跑上一交易日）会依次执行老师计划滚动、自选股复盘和小杰结算，每一步都有回执，已完成的不会重复执行。原因是 owner 的 15681 每天跑的是它自己的收盘流水线，peer 的完整流水线只能手动触发，所以这三步在此之前从来没有自动跑过。
+
+滚动规则（`teacher_review_lifecycle.py`）：
+
+- **最新复评为准**：新复盘提到的股票，一律按新复盘的计划处理。新复盘否定的股票（剧本 `rejected` 或 `relay_no_chase`），导入时会同时撤掉它的旧计划。
+- **晋级延续**（已满足）：满足下面任一条件即晋级：
+  - 接力票当天封板；
+  - 趋势票收盘站上触发位（前高、平台上沿、颈线、60 日线）；
+  - 盘中确认买点，且收盘守住买点价。
+
+  晋级后换成持有计划 `trend_continuation`：守 5 日线，过晋级日最高价算确认，收盘跌破 10 日线退出。照常推送，最多延续 5 个交易日。延续期间收盘跌破 5 日线就转为观察。
+- **观察**（还没满足）：留在观察池里，扫描、收盘复盘和第二天的收盘判定都照常覆盖，但盘中**不推送买点**。之后哪天收盘满足了就晋级。观察期为老师原定的有效期再加 2 个交易日，到期退出。
+- **退出**：盘中失效、观察期满，或晋级延续已满 5 天。
+
+每天的结算推送会列出"晋级延续 / 转观察 / 退出"三份名单和原因，并存入 `raw_market_observations`（`teacher_review_settlement`）。
 
 ## 数据：只用数据面，Longhu 优先
 

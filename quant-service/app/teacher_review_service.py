@@ -9,9 +9,11 @@ Flow:
 2. The intraday scan evaluates the plan (``teacher_review_rules``) and emits
    ordinary signal events, which the existing confirmation/outbox/Feishu path
    delivers.
-3. ``roll`` (post-close refresh stage): settle the session's triggers and the
-   teacher's forecasts, re-plan still-valid trend stocks for the next session
-   and retire expired plans.
+3. ``roll`` (post-close, run by the peer's own close-research loop): settle
+   the session's triggers and the teacher's forecasts, then carry each older
+   plan by ``teacher_review_lifecycle``: satisfied -> promoted (hold plan),
+   not yet satisfied -> observe (inert intraday), otherwise retired.  The
+   newest review always wins for a stock it mentions.
 
 Market data comes only from evidence the data-source layer already stored
 (see ``teacher_review_repository``); the strategy names capabilities in
@@ -31,6 +33,7 @@ from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
 from . import teacher_review_repository as repo
+from .teacher_review_lifecycle import STATE_LABELS, STATUS, continuation_stock, decide
 from .teacher_review_playbooks import playbook_kind, ts_code, validate_pack
 from .teacher_review_plan import DIVERGENCE_MIN_BARS, divergence_status, plan_stock
 from .teacher_review_rules import MODEL_VERSION
@@ -163,16 +166,22 @@ async def build_session_plans(
                              "reason": f"no adjusted bar for {previous_session} ({','.join(entry.get('flags') or ['stale'])})"})
             continue
         divergence = None
-        if stock["playbook"] == "ma5_reclaim_or_divergence":
+        observed = (stock.get("_lifecycle") or {}).get("state") == "observe"
+        if stock["playbook"] == "ma5_reclaim_or_divergence" and not observed:
             divergence = {period: await period_divergence(ts_code(code), period, previous_session, deps)
                           for period in ("30", "60")}
         plan = plan_stock(stock, entry["bars"], divergence=divergence)
+        lifecycle = dict(stock.get("_lifecycle") or {"state": "new", "since": session.isoformat()})
+        priority = _priority(stock)
+        if lifecycle["state"] == "observe":
+            # Observed names give way first when the watch pool is full.
+            priority = (2, *priority[1:])
         plans.append({
             "ts_code": ts_code(code), "name": str(stock.get("name") or code),
             "label": f"{stock.get('name') or code}·复盘{str(pack['review_date'])[5:].replace('-', '')}",
-            "priority": _priority(stock),
+            "priority": priority,
             "metadata": {
-                "status": "active", "model_version": MODEL_VERSION,
+                "status": STATUS[lifecycle["state"]], "lifecycle": lifecycle, "model_version": MODEL_VERSION,
                 "pack_id": pack["pack_id"], "analyst_id": analyst, "review_date": pack["review_date"],
                 "session_date": session.isoformat(), "session_index": session_index,
                 "valid_sessions": int(stock["valid_sessions"]), "code": code, "name": stock.get("name"),
@@ -259,6 +268,14 @@ async def import_pack(pack: dict[str, Any], deps: TeacherReviewDependencies, *, 
             summary["superseded"] = {"packs": list(pack["supersedes"]), **await _db(
                 deps, repo.retire_plans, keep={plan["ts_code"] for plan in plans}, retired_at=deps.now_utc(),
                 only_pack_ids={str(item) for item in pack["supersedes"]}, timeout_seconds=60)}
+        # The newest review wins: a stock it now rejects (or only records) no
+        # longer keeps an older plan alive.
+        rejected = {ts_code(str(stock["code"])) for stock in pack["stocks"]
+                    if playbook_kind(str(stock["playbook"])) == "record"} - {plan["ts_code"] for plan in plans}
+        if rejected:
+            summary["retired_by_newer_review"] = await _db(
+                deps, repo.retire_plans, keep=set(), retired_at=deps.now_utc(), only_symbols=rejected,
+                timeout_seconds=60)
         summary["status"] = "imported"
     if dry_run:
         summary["status"] = "dry_run"
@@ -343,8 +360,23 @@ def check_forecast(check: Mapping[str, Any], bars: Mapping[str, Mapping[str, Any
     return None, None
 
 
+def _live_plans(rows: list[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(row["symbol"]).upper(): dict((row.get("metadata") or {}).get("teacher_review") or {})
+            for row in rows if isinstance((row.get("metadata") or {}).get("teacher_review"), Mapping)}
+
+
+def _plan_from_row(symbol: str, plan: Mapping[str, Any]) -> dict[str, Any]:
+    """A plan already decided for the next session, re-applied unchanged on a re-run."""
+    stance = str(plan.get("stance") or "")
+    kind = playbook_kind(str(plan.get("playbook") or ""))
+    priority = (2 if plan.get("status") == "observe" else 0 if kind == "relay" else 1, _STANCE_RANK.get(stance, 2), 0)
+    name = str(plan.get("name") or symbol)
+    return {"ts_code": symbol, "name": name, "label": f"{name}·复盘{str(plan.get('review_date', ''))[5:].replace('-', '')}",
+            "priority": priority, "metadata": dict(plan)}
+
+
 async def roll(trade_date: date, deps: TeacherReviewDependencies) -> dict[str, Any]:
-    """Settle ``trade_date`` and prepare plans for the next session (post-close stage)."""
+    """Settle ``trade_date`` and carry every teacher plan into the next session."""
     records = await _db(deps, repo.recent_packs, since=trade_date - timedelta(days=deps.lookback_days))
     superseded = {str(item) for record in records for item in (record["pack"].get("supersedes") or [])}
     records = [record for record in records if str(record["pack"].get("pack_id")) not in superseded]
@@ -353,22 +385,75 @@ async def roll(trade_date: date, deps: TeacherReviewDependencies) -> dict[str, A
     now = deps.now_utc()
     upcoming = await _db(deps, repo.open_sessions, after=trade_date, count=1)
     next_session = upcoming[0] if upcoming else None
-    settlements, plans, failures = [], [], []
+    # The newest review that mentions a stock owns it.
+    records.sort(key=lambda record: (str(record["pack"]["review_date"]), str(record["available_at"])))
+    owner = {str(stock["code"]): str(record["pack"]["pack_id"]) for record in records for stock in record["pack"]["stocks"]}
+    live = _live_plans(await _db(deps, repo.teacher_watch_rows, timeout_seconds=30))
+    settlements, plans, failures, lifecycle = [], [], [], []
     for record in records:
         pack, available_at = record["pack"], _parse_time(record["available_at"])
+        pack_id = str(pack["pack_id"])
         review_date = date.fromisoformat(str(pack["review_date"]))
         sessions = await _db(deps, repo.sessions_between, after=review_date, through=trade_date)
         first = _eligible_session(sessions, available_at) if sessions else None
+        carried = {symbol[:6] for symbol, plan in live.items()
+                   if plan.get("pack_id") == pack_id and plan.get("session_date") == trade_date.isoformat()}
+        settlement = None
         if first is not None and trade_date in sessions:
-            settlements.append(await settle_pack(pack, trade_date, sessions.index(trade_date) + 1, first[1], deps))
-        if next_session is None:
+            settlement = await settle_pack(pack, trade_date, sessions.index(trade_date) + 1, first[1], deps,
+                                           carried=carried)
+            settlements.append(settlement)
+        if next_session is None or _open_at(next_session) <= available_at:
             continue
         next_index = len(sessions) + 1
-        if _open_at(next_session) <= available_at:
+        mine = [stock for stock in pack["stocks"] if owner.get(str(stock["code"])) == pack_id]
+        if first is None:
+            # The review's first session: its plans as the teacher wrote them.
+            session_plans, session_failures = await build_session_plans(
+                {**pack, "stocks": mine}, next_session, next_index, trade_date, deps)
+            plans.extend(session_plans)
+            failures.extend(session_failures)
             continue
-        session_plans, session_failures = await build_session_plans(pack, next_session, next_index, trade_date, deps)
-        plans.extend(session_plans)
-        failures.extend(session_failures)
+        facts = {str(item["code"]): item for item in (settlement or {}).get("stocks") or []}
+        carry: list[dict[str, Any]] = []
+        for stock in mine:
+            if playbook_kind(str(stock["playbook"])) == "record":
+                continue
+            code = str(stock["code"])
+            symbol = ts_code(code)
+            plan = live.get(symbol) or {}
+            if plan.get("pack_id") != pack_id:
+                continue
+            decided = plan.get("lifecycle") or {}
+            if plan.get("session_date") == next_session.isoformat() and decided.get("decided_on") == trade_date.isoformat():
+                plans.append(_plan_from_row(symbol, plan))
+                continue
+            if plan.get("session_date") != trade_date.isoformat():
+                continue
+            outcome = decide(plan, facts.get(code))
+            entry = {"code": code, "name": stock.get("name"), "state": outcome["state"], "reason": outcome["reason"],
+                     "from": (plan.get("lifecycle") or {}).get("state", "new")}
+            lifecycle.append(entry)
+            if outcome["state"] == "expired":
+                continue
+            state_record = {"state": outcome["state"], "reason": outcome["reason"], "carried": outcome["carried"],
+                            "decided_on": trade_date.isoformat(),
+                            "since": (plan.get("lifecycle") or {}).get("since") or str(plan.get("session_date")),
+                            "teacher_valid_sessions": int(stock["valid_sessions"]),
+                            "original_playbook": (plan.get("lifecycle") or {}).get("original_playbook") or stock["playbook"]}
+            base = stock
+            if outcome["state"] == "promoted":
+                bar = (facts.get(code) or {}).get("bar") or {}
+                if bar.get("high") is None:
+                    continue
+                base = continuation_stock(stock, bar, outcome["reason"])
+            carry.append({**base, "valid_sessions": max(int(stock["valid_sessions"]), next_index),
+                          "_lifecycle": state_record})
+        if carry:
+            session_plans, session_failures = await build_session_plans(
+                {**pack, "stocks": carry}, next_session, next_index, trade_date, deps)
+            plans.extend(session_plans)
+            failures.extend(session_failures)
     plans.sort(key=lambda item: item["priority"])
     applied = await _db(
         deps, repo.apply_session_plans, plans, max_symbols=deps.max_symbols(), reserve=deps.reserve,
@@ -379,20 +464,23 @@ async def roll(trade_date: date, deps: TeacherReviewDependencies) -> dict[str, A
         "status": "completed", "trade_date": trade_date.isoformat(),
         "next_session": next_session.isoformat() if next_session else None,
         "settled_packs": len(settlements), "next_plans": [plan["ts_code"] for plan in plans],
-        "plan_failures": failures, "watchlist": {k: v for k, v in applied.items() if k != "new_rows"},
+        "lifecycle": lifecycle, "plan_failures": failures,
+        "watchlist": {k: v for k, v in applied.items() if k != "new_rows"},
         "retired": retired, "research_only": True, "live_effect": "none",
     }
-    if settlements:
+    if settlements or lifecycle:
         payload = {"trade_date": trade_date.isoformat(), "packs": settlements, "roll": result, "model_version": MODEL_VERSION}
         await _db(deps, repo.persist_settlement, trade_date, payload, available_at=now)
-        result["alert"] = await deps.send_alert(settlement_text(trade_date, settlements))
+        result["alert"] = await deps.send_alert(settlement_text(trade_date, settlements, lifecycle))
     return result
 
 
 async def settle_pack(pack: Mapping[str, Any], trade_date: date, session_index: int, first_index: int,
-                      deps: TeacherReviewDependencies) -> dict[str, Any]:
+                      deps: TeacherReviewDependencies, *, carried: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
+    """``carried`` names stocks still live past their window (promoted or observed)."""
     active = [stock for stock in pack["stocks"] if first_index <= session_index <= int(stock["valid_sessions"])
-              or (session_index == first_index and playbook_kind(str(stock["playbook"])) == "record")]
+              or (session_index == first_index and playbook_kind(str(stock["playbook"])) == "record")
+              or str(stock["code"]) in carried]
     forecast_codes = {str(value) for forecast in pack.get("forecasts") or []
                       for key, value in (forecast.get("check") or {}).items() if key in {"code", "loser", "winner"}}
     forecast_codes |= {str(code) for forecast in pack.get("forecasts") or []
@@ -454,7 +542,8 @@ async def settle_pack(pack: Mapping[str, Any], trade_date: date, session_index: 
             "missing_bars": sorted(set(codes) - set(bars))}
 
 
-def settlement_text(trade_date: date, settlements: list[dict[str, Any]]) -> str:
+def settlement_text(trade_date: date, settlements: list[dict[str, Any]],
+                    lifecycle: list[dict[str, Any]] | None = None) -> str:
     lines = [f"【老师复盘结算｜{trade_date.isoformat()}】"]
     for pack in settlements:
         lines.append(f"{pack['analyst_id']} {pack['review_date']} 复盘（第 {pack['session_index']} 个交易日）")
@@ -480,6 +569,14 @@ def settlement_text(trade_date: date, settlements: list[dict[str, Any]]) -> str:
             lines.append("老师否定：" + "、".join(
                 f"{s['name']}{s['bar']['pct']:+.1f}%{'封板' if s['closed_at_limit'] else ''}" if s["bar"].get("pct") is not None
                 else f"{s['name']}—" for s in rejected[:12]))
+    by_state: dict[str, list[str]] = {}
+    for item in lifecycle or []:
+        by_state.setdefault(item["state"], []).append(f"{item.get('name') or item['code']}（{item['reason']}）")
+    for state in ("promoted", "observe", "expired"):
+        if by_state.get(state):
+            label = {"promoted": "晋级延续至下一交易日", "observe": "转观察（不推送买点）", "expired": "退出"}[state]
+            more = f" 等{len(by_state[state])}只" if len(by_state[state]) > 12 else ""
+            lines.append(f"{label}：" + "、".join(by_state[state][:12]) + more)
     lines.append("研究记录，不构成交易指令。")
     return "\n".join(lines)
 

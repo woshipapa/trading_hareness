@@ -3986,6 +3986,43 @@ async def storage_tiering_mover_loop() -> None:
         await asyncio.sleep(delay)
 
 
+async def peer_close_research_loop() -> None:
+    """Teacher roll, watch review and 小杰 settlement - the peer's own close stages.
+
+    The owner runs the full close pipeline; these three belong to the peer and
+    only ever ran by hand until this loop (see ``peer_close_research``).
+    """
+    from .peer_close_research import daily_bars_ready, run_due, target_session
+
+    async def teacher_roll(trade_date: date) -> dict[str, Any]:
+        if not teacher_review_enabled():
+            return {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
+        return await roll_teacher_review(trade_date, _teacher_review_dependencies())
+
+    stages = {
+        "teacher_review_roll": teacher_roll,
+        "watch_daily_review": lambda trade_date: run_watch_daily_review(trade_date),
+        "xiaojie_outcomes": lambda trade_date: run_database_blocking(
+            settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
+    }
+
+    async def record(name: str, trade_date: date, action: Callable[[], Any]) -> Any:
+        return await record_stage_with_receipt(
+            name, trade_date, action, db=db, run_database_blocking=run_database_blocking,
+            safe_error_detail=safe_error_detail)
+
+    while True:
+        try:
+            now = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
+            trade_date = await target_session(now, sse_calendar_open_async)
+            if trade_date is not None and await run_database_blocking(
+                    lambda: daily_bars_ready(db, trade_date), timeout_seconds=30):
+                await run_due(trade_date, stages=stages, record=record)
+        except Exception as error:  # noqa: BLE001 - the next tick retries
+            print(f"peer close research failed: {safe_error_detail(str(error), 300)}")
+        await asyncio.sleep(600)
+
+
 async def post_close_public_archive_loop() -> None:
     """Archive the short-lived and post-close public evidence once per session."""
     await _datasource_loops()["post_close_public_archive"]()
@@ -5286,6 +5323,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "public_evidence_capture": os.getenv("PUBLIC_EVIDENCE_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "post_close_public_archive": os.getenv("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "storage_tiering_mover": os.getenv("STORAGE_TIERING_MOVER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "peer_close_research": os.getenv("PEER_CLOSE_RESEARCH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
         },
         loops={
             "intraday_monitor": lambda: intraday_monitor_loop(interval_seconds),
@@ -5301,6 +5339,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "public_evidence_capture": public_evidence_capture_loop,
             "post_close_public_archive": post_close_public_archive_loop,
             "storage_tiering_mover": storage_tiering_mover_loop,
+            "peer_close_research": peer_close_research_loop,
         },
     )
     validate_runtime_task_specs(specs)
