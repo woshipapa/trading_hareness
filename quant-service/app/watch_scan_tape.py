@@ -105,13 +105,17 @@ def persist_scan_tape(connection: Any, *, scan_id: Any, observed_at: datetime,
     # value (a Decimal from a sector read, say) can make the insert fail.
     serialized = json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
     body = json.loads(serialized)
+    # ``payload`` holds the rows; ``normalized`` only a header, so the tape is
+    # not stored twice in the hot database.
+    header = {key: body[key] for key in ("scan_id", "observed_at", "version", "provider_key", "capability")}
+    header["stocks"] = len(body["rows"])
     row = connection.execute(
         """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
            VALUES(%s,%s,'cn','watch:scan',%s,%s,%s,%s,%s)
            ON CONFLICT(provider_key,capability,market,symbol,effective_at,payload_sha256) DO NOTHING
            RETURNING observation_id""",
         (TAPE_PROVIDER, TAPE_CAPABILITY, observed_at, observed_at,
-         hashlib.sha256(serialized.encode()).hexdigest(), Json(body), Json(body)),
+         hashlib.sha256(serialized.encode()).hexdigest(), Json(header), Json(body)),
     ).fetchone()
     return row is not None
 

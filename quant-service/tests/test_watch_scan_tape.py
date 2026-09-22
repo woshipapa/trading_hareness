@@ -58,7 +58,7 @@ class TapePersistenceTests(unittest.TestCase):
         class Connection:
             def execute(self, sql, params):
                 import json as _json
-                _json.dumps(params[5].obj)          # what psycopg's Json adapter will do
+                _json.dumps(params[5].obj), _json.dumps(params[6].obj)   # what psycopg's Json adapter does
                 executed.append(params)
                 return self
 
@@ -67,7 +67,9 @@ class TapePersistenceTests(unittest.TestCase):
 
         self.assertTrue(persist_scan_tape(Connection(), scan_id="s", observed_at=at(0),
                                           rows={"A": {"p": 1.0, "sec": {"cp": Decimal("2")}}}))
-        self.assertEqual(executed[0][5].obj["rows"]["A"]["sec"]["cp"], "2")
+        self.assertEqual(executed[0][6].obj["rows"]["A"]["sec"]["cp"], "2")
+        self.assertEqual(executed[0][5].obj["stocks"], 1)          # normalized is only a header
+        self.assertNotIn("rows", executed[0][5].obj)
 
 
 if __name__ == "__main__":

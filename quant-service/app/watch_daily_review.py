@@ -11,6 +11,10 @@ For each stock on the watchlist this produces one structured, stored record:
   the correlation of their 5-minute changes and who led whom;
 * recent history - 5/20-day moves, position in the 60-day range, MA order,
   limit-ups in 20 sessions;
+* the scan tape - the opening auction (09:15/09:20/09:25), seal on/off at
+  scan resolution, volume-ratio and sector-breadth checkpoints, minute
+  volume bursts, when the stock and its peer group peaked, the signal
+  timeline, and the tape's own coverage;
 * the day's signals, and transparent pattern labels.
 
 Records accumulate day by day so later reviews can mine recurring patterns
@@ -157,8 +161,136 @@ def history_context(bars: list[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+TAPE_CHECKPOINTS = ("0915", "0920", "0925", "0935", "1000", "1030", "1130", "1330", "1400", "1430", "1500")
+VOLUME_BURST_MULTIPLE = 3.0
+
+
+def _bucket5(hhmmss: str) -> str | None:
+    """The 5-minute bucket (by minutes since 09:30) of a continuous-session time."""
+    if not ("0930" <= hhmmss[:4] <= "1130" or "1300" <= hhmmss[:4] <= "1500"):
+        return None
+    return str(_minutes_since_open(hhmmss[:4]) // 5)
+
+
+def tape_timeline(entries: list[tuple[str, Mapping[str, Any]]]) -> dict[str, Any]:
+    """One stock's day from its scan tape: ``entries`` are (HHMMSS, tape row) in time order."""
+    rows = [(stamp, row) for stamp, row in entries if isinstance(row, Mapping) and _num(row.get("p"))]
+    if not rows:
+        return {"status": "no_tape", "scans": len(entries)}
+    live = [(stamp, row) for stamp, row in rows if stamp[:4] >= "0930"]
+
+    def at(check: str) -> Mapping[str, Any] | None:
+        # The last scan at or before the checkpoint, within the same half-session.
+        floor = "0915" if check < "0930" else "0930" if check <= "1130" else "1300"
+        eligible = [row for stamp, row in rows if floor <= stamp[:4] and stamp[:4] + stamp[4:6] <= check + "00"]
+        return eligible[-1] if eligible else None
+
+    checkpoints = {}
+    for check in TAPE_CHECKPOINTS:
+        row = at(check)
+        if row is not None:
+            values = {"pct": row.get("pct"), "vr": row.get("vr"), "gb": (row.get("sec") or {}).get("gb"),
+                      "sealed": row.get("sealed")}
+            checkpoints[_clock(check)] = {key: value for key, value in values.items() if value is not None}
+    auction = {}
+    for check in ("0915", "0920", "0925"):
+        row = at(check) if rows[0][0][:4] < "0930" else None
+        if row is not None and row.get("pct") is not None:
+            auction[_clock(check)] = row["pct"]
+    if "09:20" in auction and "09:25" in auction:
+        auction["after_0920_change"] = round(auction["09:25"] - auction["09:20"], 2)
+
+    # Seal episodes from continuous-session scans; a one-scan unsealed flicker
+    # (a missing bid book, a source switch) is not counted as a board opening.
+    seal_states = [(stamp, bool(row["sealed"])) for stamp, row in live if row.get("sealed") is not None]
+    episodes, flickers, start, gap = [], 0, None, 0
+    for index, (stamp, sealed) in enumerate(seal_states):
+        if sealed:
+            if start is None:
+                start = stamp
+            elif gap == 1:
+                flickers += 1
+            gap = 0
+        elif start is not None:
+            gap += 1
+            if gap == 2:
+                episodes.append((start, seal_states[index - 2][0]))
+                start, gap = None, 0
+    if start is not None:
+        episodes.append((start, seal_states[-1][0]))
+    touched = [stamp for stamp, row in live if row.get("touched")]
+    seal = {
+        "first_touch": _clock(touched[0]) if touched else None,
+        "first_seal": _clock(episodes[0][0]) if episodes else None,
+        "episodes": [[_clock(a), _clock(b)] for a, b in episodes][:12],
+        "breaks": max(0, len(episodes) - 1) + (1 if episodes and seal_states and not seal_states[-1][1] else 0),
+        "flickers": flickers,
+        "sealed_share_after_first_seal": round(sum(1 for stamp, sealed in seal_states if sealed and stamp >= episodes[0][0])
+                                               / max(1, sum(1 for stamp, _ in seal_states if stamp >= episodes[0][0])), 3)
+        if episodes else None,
+    } if seal_states else {}
+
+    ratios = [(stamp, _num(row.get("vr"))) for stamp, row in live if _num(row.get("vr")) is not None]
+    peak_vr = max(ratios, key=lambda item: item[1]) if ratios else None
+    above = [float(row["p"]) >= float(row["vw"]) for _, row in live if _num(row.get("vw"))]
+    bursts: dict[str, tuple[float, float | None]] = {}
+    for stamp, row in live:
+        minute = row.get("m") or {}
+        multiple, when = _num(minute.get("vm")), str(minute.get("t") or stamp[:4])[:4]
+        if multiple is not None and multiple >= VOLUME_BURST_MULTIPLE and multiple > bursts.get(when, (0.0, None))[0]:
+            bursts[when] = (multiple, _num(minute.get("r1")))
+    top_bursts = sorted(bursts.items(), key=lambda item: -item[1][0])[:5]
+
+    pct_live = [(stamp, float(row["pct"])) for stamp, row in live if _num(row.get("pct")) is not None]
+    breadth = [(stamp, float(row["sec"]["gb"])) for stamp, row in live
+               if isinstance(row.get("sec"), Mapping) and _num(row["sec"].get("gb")) is not None]
+    groups = [str(row["sec"].get("g")) for _, row in live if isinstance(row.get("sec"), Mapping) and row["sec"].get("g")]
+    peer: dict[str, Any] = {}
+    if breadth and pct_live:
+        stock_peak = max(pct_live, key=lambda item: item[1])[0]
+        breadth_peak = max(breadth, key=lambda item: item[1])
+        stock_b, breadth_b = {}, {}
+        for stamp, value in pct_live:
+            if _bucket5(stamp) is not None:
+                stock_b[_bucket5(stamp)] = value
+        for stamp, value in breadth:
+            if _bucket5(stamp) is not None:
+                breadth_b[_bucket5(stamp)] = value
+        grid = sorted(set(stock_b) & set(breadth_b), key=int)
+        ds = [stock_b[b] - stock_b[a] for a, b in zip(grid, grid[1:])]
+        dg = [breadth_b[b] - breadth_b[a] for a, b in zip(grid, grid[1:])]
+        peer = {
+            "group": max(set(groups), key=groups.count) if groups else None,
+            "breadth_open": breadth[0][1], "breadth_peak": breadth_peak[1], "breadth_peak_time": _clock(breadth_peak[0]),
+            "breadth_close": breadth[-1][1], "stock_peak_time": _clock(stock_peak),
+            "breadth_peaked_first": breadth_peak[0] < stock_peak,
+            "corr_5m_stock_vs_breadth": _corr(ds, dg),
+        }
+
+    first_seen: dict[str, str] = {}
+    for stamp, row in rows:
+        for item in row.get("sig") or []:
+            key = ":".join(str(item).split(":")[:2])
+            first_seen.setdefault(key, _clock(stamp))
+    fresh = [str(row.get("fresh")) for _, row in live if row.get("fresh")]
+    return {
+        "status": "ok", "scans": len(rows), "continuous_scans": len(live),
+        "first_scan": _clock(rows[0][0]), "last_scan": _clock(rows[-1][0]),
+        "auction": auction, "checkpoints": checkpoints, "seal": seal,
+        "volume_ratio_peak": {"value": peak_vr[1], "time": _clock(peak_vr[0])} if peak_vr else None,
+        "pct_scans_above_vwap": round(100 * sum(above) / len(above), 1) if above else None,
+        "volume_bursts": [{"time": _clock(when), "multiple": round(multiple, 2), "return_1m_pct": r1}
+                          for when, (multiple, r1) in top_bursts],
+        "volume_burst_minutes": len(bursts),
+        "peer_group": peer,
+        "signal_first_seen": first_seen,
+        "stale_share": round(sum(1 for status in fresh if status != "fresh") / len(fresh), 3) if fresh else None,
+    }
+
+
 def pattern_labels(day: Mapping[str, Any], path: Mapping[str, Any], limit: Mapping[str, Any],
-                   sector: Mapping[str, Any], history: Mapping[str, Any]) -> list[str]:
+                   sector: Mapping[str, Any], history: Mapping[str, Any],
+                   tape: Mapping[str, Any] | None = None) -> list[str]:
     """Transparent, rule-based labels (thresholds are defaults, recorded with the review)."""
     labels: list[str] = []
     gap = _num(day.get("gap_pct"))
@@ -208,13 +340,23 @@ def pattern_labels(day: Mapping[str, Any], path: Mapping[str, Any], limit: Mappi
             labels.append("领先板块")
     if history.get("at_60d_high"):
         labels.append("60日新高")
+    tape = tape or {}
+    change = _num((tape.get("auction") or {}).get("after_0920_change"))
+    if change is not None and abs(change) >= 1:
+        labels.append("竞价走强" if change > 0 else "竞价走弱")
+    if ((tape.get("seal") or {}).get("breaks") or 0) >= 2:
+        labels.append("反复炸板")
+    peer = tape.get("peer_group") or {}
+    if peer.get("breadth_peaked_first") and path.get("status") == "ok" and path.get("drawdown_from_high_pct", 0) <= -3:
+        labels.append("板块先退潮")
     return labels
 
 
 def review_stock(*, symbol: str, name: str, trade_date: date, quote_day: Mapping[str, Any],
                  minutes: list[Mapping[str, Any]], bars: list[Mapping[str, Any]],
                  limit: Mapping[str, Any], sector: Mapping[str, Any], sector_series: list[tuple[str, float]],
-                 signals: list[Mapping[str, Any]], themes: Iterable[str] = ()) -> dict[str, Any]:
+                 signals: list[Mapping[str, Any]], themes: Iterable[str] = (),
+                 tape: list[tuple[str, Mapping[str, Any]]] = ()) -> dict[str, Any]:
     pre_close = _num(quote_day.get("pre_close"))
     opened, high, low, close = (_num(quote_day.get(key)) for key in ("open", "high", "low", "close"))
     limit_price = _num(quote_day.get("limit_up_price"))
@@ -231,12 +373,19 @@ def review_stock(*, symbol: str, name: str, trade_date: date, quote_day: Mapping
     relation = sector_relation(minutes, pre_close, sector_series, sector.get("label"))
     relation.update({key: sector.get(key) for key in ("taxonomy_key", "sector_key") if sector.get(key)})
     history = history_context(bars)
+    timeline = tape_timeline(list(tape))
+    limit = dict(limit)
+    if timeline.get("seal"):
+        # The tape sees every board opening; the pools only whether one happened.
+        limit["seal_breaks_tape"] = timeline["seal"]["breaks"]
+        limit["board_opens"] = max(int(limit.get("board_opens") or 0), timeline["seal"]["breaks"])
+        limit["touched"] = bool(limit.get("touched") or timeline["seal"].get("first_touch"))
     return {
         "version": REVIEW_VERSION, "symbol": symbol, "name": name, "trade_date": trade_date.isoformat(),
-        "day": day, "path": path, "limit": dict(limit), "sector": relation, "history": history,
+        "day": day, "path": path, "limit": limit, "sector": relation, "history": history, "tape": timeline,
         "themes": sorted({str(theme) for theme in themes if theme})[:12],
         "signals": [dict(item) for item in signals][:30],
-        "patterns": pattern_labels(day, path, limit, relation, history),
+        "patterns": pattern_labels(day, path, limit, relation, history, timeline),
     }
 
 
@@ -262,7 +411,7 @@ def summarize(reviews: list[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 __all__ = ["REVIEW_CAPABILITY", "REVIEW_PROVIDER", "REVIEW_VERSION", "history_context", "intraday_path",
-           "pattern_labels", "review_stock", "sector_relation", "summarize"]
+           "pattern_labels", "review_stock", "sector_relation", "summarize", "tape_timeline"]
 
 
 # --- data-plane reads and orchestration --------------------------------------
@@ -353,6 +502,22 @@ def read_review_inputs(database: Any, trade_date: date) -> dict[str, Any]:
             "pool_last": pool_last, "opened": opened, "sealed_at_close": sealed_at_close, "signals": signals}
 
 
+def read_scan_tape(database: Any, trade_date: date) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+    """The day's ``watch_scan_tape`` rows regrouped per stock as (HHMMSS, row) in time order."""
+    start, end = _day_bounds(trade_date)
+    per_symbol: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    with database.transaction() as connection:
+        for row in connection.execute(
+                """SELECT effective_at, payload->'rows' AS rows FROM quant.raw_market_observations
+                    WHERE provider_key='quant_scan' AND capability='watch_scan_tape' AND market='cn'
+                      AND symbol='watch:scan' AND effective_at>=%s AND effective_at<%s ORDER BY effective_at""",
+                (start, end)).fetchall():
+            stamp = row["effective_at"].astimezone(_CN).strftime("%H%M%S")
+            for symbol, item in (row["rows"] or {}).items():
+                per_symbol.setdefault(symbol, []).append((stamp, item))
+    return per_symbol
+
+
 def persist_reviews(database: Any, trade_date: date, reviews: list[dict[str, Any]], summary: dict[str, Any]) -> int:
     effective = datetime.combine(trade_date, _time(15, 0), tzinfo=_CN)
     available = datetime.now(_CN)
@@ -399,6 +564,10 @@ class WatchReviewDependencies:
 async def run_watch_daily_review(trade_date: date, deps: WatchReviewDependencies, *, persist: bool = True) -> dict[str, Any]:
     inputs = await deps.run_database(lambda: read_review_inputs(deps.database, trade_date), timeout_seconds=90)
     symbols = [row["symbol"] for row in inputs["watches"]]
+    try:
+        tape = await deps.run_database(lambda: read_scan_tape(deps.database, trade_date), timeout_seconds=120)
+    except Exception:  # noqa: BLE001 - a review without the tape keeps everything else
+        tape = {}
     minutes = await deps.minutes_batch(symbols) if symbols else {}
     bars = await deps.run_database(lambda: deps.plan_bars(deps.database, symbols, through=trade_date, limit=80),
                                    timeout_seconds=90)
@@ -448,7 +617,7 @@ async def run_watch_daily_review(trade_date: date, deps: WatchReviewDependencies
             symbol=symbol, name=name, trade_date=trade_date, quote_day=quote_day, minutes=stock_minutes,
             bars=review_bars, limit=limit, sector=sector,
             sector_series=inputs["boards"].get(key, []) if key else [], signals=inputs["signals"].get(symbol, []),
-            themes=themes))
+            themes=themes, tape=tape.get(symbol, [])))
         reviews[-1]["history"]["as_of"] = entry.get("as_of") or trade_date.isoformat()
     if deps.industry_board_flow is not None and any(r["sector"].get("status") != "ok" for r in reviews):
         try:
@@ -465,10 +634,13 @@ async def run_watch_daily_review(trade_date: date, deps: WatchReviewDependencies
                            "sector_close_pct": round(float(board["change_pct"]), 2), "stock_close_pct": close_pct,
                            "relative_strength_pct": round(close_pct - float(board["change_pct"]), 2),
                            "note": "no intraday board series; relative strength at the close only"})
-            review["patterns"] = pattern_labels(review["day"], review["path"], review["limit"], sector, review["history"])
+            review["patterns"] = pattern_labels(review["day"], review["path"], review["limit"], sector, review["history"],
+                                                review["tape"])
     summary = {"version": REVIEW_VERSION, "trade_date": trade_date.isoformat(), **summarize(reviews),
                "coverage": {"watched": len(symbols), "with_minutes": sum(1 for r in reviews if r["path"].get("status") == "ok"),
                             "with_sector_series": sum(1 for r in reviews if r["sector"].get("status") == "ok"),
+                            "with_tape": sum(1 for r in reviews if r["tape"].get("status") == "ok"),
+                            "tape_scans": max((r["tape"].get("scans") or 0 for r in reviews), default=0),
                             "board_snapshots": max((len(v) for v in inputs["boards"].values()), default=0)}}
     stored = await deps.run_database(lambda: persist_reviews(deps.database, trade_date, reviews, summary),
                                      timeout_seconds=90) if persist else 0

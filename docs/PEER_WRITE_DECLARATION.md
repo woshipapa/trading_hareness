@@ -31,7 +31,7 @@
 | `quant.raw_market_observations`（`provider_key='teacher_review'`） | 每期复盘导入一次；盘后刷新一次 | 老师复盘策略包与盘后结算存档（`teacher_review_pack` / `teacher_review_settlement`） | API、scheduler；INSERT（按唯一键去重） |
 | `quant.intraday_watchlists`（`metadata.teacher_review`） | 导入与盘后刷新 | 次日计划合并进观察池行；超容量不写入 | API、scheduler；表锁下 INSERT/UPDATE，过期停用自有行 |
 | `quant.raw_market_observations`（`provider_key='quant_scan'`，`capability='watch_scan_tape'`） | 每轮盯盘扫描一行（上午 5 秒） | 全部观察池股票的紧凑逐轮记录（价/高开低/累计量额/均价/量比/换手/封板/分钟指标/板块广度/本轮信号），供复盘与模式归纳 | API；INSERT（按唯一键去重）；原始报价行与规则输入快照改为每股 30 秒抽样、出信号时必存 |
-| `quant.raw_market_observations`（`provider_key='quant_scan'`，`capability='watch_daily_review'`） | 盘后刷新一次（或手动 POST /api/v1/watch-reviews/run） | 观察池每只股票的当日复盘（走势/分时路径/涨停行为/所属行业关系/近期与历史/信号/模式标签）与当日汇总 | API、scheduler；INSERT（按唯一键去重） |
+| `quant.raw_market_observations`（`provider_key='quant_scan'`，`capability='watch_daily_review'`） | 盘后刷新一次（或手动 POST /api/v1/watch-reviews/run） | 观察池每只股票的当日复盘（走势/分时路径/逐轮盯盘记录中的竞价、封板开合、量比与板块广度变化/涨停行为/所属行业关系/近期与历史/信号/模式标签）与当日汇总 | API、scheduler；INSERT（按唯一键去重） |
 | `quant.raw_archive_offsets` / `quant.raw_archive_batches` | 仅启用 overflow 时；重试安全 | 原始观测离线归档游标与 ACK | archive adapter；事务内 UPDATE/INSERT |
 
 ## 运行约束

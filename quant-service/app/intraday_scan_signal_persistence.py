@@ -8,12 +8,16 @@ event state to injected collaborators.
 
 from __future__ import annotations
 
+import contextlib
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 import uuid
 
 from .stable_json import tolerant_json
+
+logger = logging.getLogger(__name__)
 
 
 def scan_rejection_reasons(
@@ -263,7 +267,13 @@ def persist_scan_signals(
                             "minute_status": minute_feature.get("status") if isinstance(minute_feature, dict) else None})),
         )
     if tape_rows and dependencies.persist_scan_tape is not None:
-        dependencies.persist_scan_tape(connection, scan_id=scan_id, observed_at=observed_at, rows=tape_rows)
+        # Research evidence in a savepoint: a failed tape insert must never
+        # roll back the scan's signals.
+        try:
+            with connection.transaction() if hasattr(connection, "transaction") else contextlib.nullcontext():
+                dependencies.persist_scan_tape(connection, scan_id=scan_id, observed_at=observed_at, rows=tape_rows)
+        except Exception:  # noqa: BLE001
+            logger.warning("watch scan tape not stored for scan %s", scan_id, exc_info=True)
     return signals
 
 
