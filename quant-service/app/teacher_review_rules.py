@@ -107,6 +107,7 @@ class SnapshotTape:
         self._day: date | None = None
         self._samples: dict[str, deque[tuple[datetime, float, float | None, str | None]]] = {}
         self._latest: dict[str, tuple[datetime, dict[str, Any]]] = {}
+        self._missing: dict[str, tuple[datetime, int]] = {}
 
     def observe(self, symbol: str, observed_at: datetime, price: float | None,
                 volume_lot: float | None, volume_source: str | None) -> None:
@@ -114,7 +115,7 @@ class SnapshotTape:
             return
         day = observed_at.astimezone(_CN_TZ).date()
         if day != self._day:
-            self._day, self._samples, self._latest = day, {}, {}
+            self._day, self._samples, self._latest, self._missing = day, {}, {}, {}
         ring = self._samples.setdefault(symbol, deque())
         if ring and observed_at <= ring[-1][0]:
             return
@@ -127,6 +128,24 @@ class SnapshotTape:
         if observed_at.astimezone(_CN_TZ).date() != self._day:
             return
         self._latest[symbol] = (observed_at, dict(summary))
+
+    MISSING_MIN_SCANS = 3
+    MISSING_MIN_SECONDS = 60.0
+
+    def missing_streak(self, symbol: str, observed_at: datetime, missing: list[str]) -> bool:
+        """True once the same plan has lacked inputs for >=3 consecutive scans over >=60 s.
+
+        One degraded scan (a source briefly rejected) must not page anyone as
+        "data missing"; a gap that persists must.
+        """
+        if observed_at.astimezone(_CN_TZ).date() != self._day:
+            return bool(missing)
+        if not missing:
+            self._missing.pop(symbol, None)
+            return False
+        first_at, count = self._missing.get(symbol, (observed_at, 0))
+        self._missing[symbol] = (first_at, count + 1)
+        return count + 1 >= self.MISSING_MIN_SCANS and (observed_at - first_at).total_seconds() >= self.MISSING_MIN_SECONDS
 
     def latest(self, symbol: str, observed_at: datetime, max_age_seconds: float = 120.0) -> dict[str, Any] | None:
         entry = self._latest.get(symbol) if self._day == observed_at.astimezone(_CN_TZ).date() else None
@@ -743,12 +762,18 @@ def teacher_review_signals(
                                    "signals": result["signals"], "features": feature_view, "missing": missing},
             },
         })
-    if missing:
+    # Live scans (with a tape) report a gap only once it persisted; the streak
+    # itself is the confirmation, so the alert goes out on that scan.
+    persistent = tape.missing_streak(symbol, observed_at, missing) if tape is not None else bool(missing)
+    if missing and persistent:
         signals.append({
             **base, "signal_key": f"{symbol}:data_issue:teacher_review", "signal_type": "data_issue",
             "severity": "warning", "score": 0,
+            **({"independent_confirmation": True} if tape is not None else {}),
             "conditions": {"setup": "teacher_review_data_missing",
                            "teacher_review": {**review_base, "action": "data_missing", "missing": missing,
+                                              "quote_source": quote.get("price_source"),
+                                              "quote_freshness": quote.get("price_freshness"),
                                               "features": feature_view}},
         })
     return signals
@@ -767,8 +792,10 @@ def teacher_review_alert_lines(signal: Mapping[str, Any]) -> list[str]:
     features = review.get("features") or {}
     if review.get("action") == "data_missing":
         return [f"老师复盘：{review.get('analyst_id')} {review.get('review_date')}｜打法 {review.get('playbook')}",
-                "条件无法判定，缺少数据：" + "、".join(_INPUT_LABELS.get(key, key) for key in review.get("missing") or []),
-                "已按数据面现有接口依次尝试 Longhu/腾讯/全A快照/分钟线；请检查对应数据源。"]
+                "条件无法判定，缺少数据：" + "、".join(_INPUT_LABELS.get(key, key) for key in review.get("missing") or [])
+                + "（已连续缺失 ≥3 轮扫描、≥60 秒）",
+                f"本轮价格来源：{review.get('quote_source') or '—'}（时间戳 {(review.get('quote_freshness') or {}).get('status', '—')}）；"
+                "已按数据面现有接口依次尝试 Longhu/腾讯/全A快照/分钟线。"]
     lines = [
         f"老师复盘：{review.get('analyst_id')} {review.get('review_date')}｜{review.get('group') or ''}｜打法 {review.get('playbook')}"
         + (f"（路径 {review['path']}）" if review.get("path") else ""),

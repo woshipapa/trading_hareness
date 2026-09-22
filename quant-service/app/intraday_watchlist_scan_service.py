@@ -263,7 +263,12 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     membership_rows = await dependencies.load_exact_memberships(selected_symbols, observed_at)
     mapped_peer_groups = dependencies.mapped_peers(selected_symbols, membership_rows)
     quote_timestamp_slo_seconds = 20.0 if dependencies.high_frequency_window(observed_at) else 45.0
-    quote_capture = await dependencies.capture_quotes(selected_symbols, observed_at, quote_timestamp_slo_seconds)
+    # Judge quote freshness against the clock when quotes are fetched, not the
+    # scan start: the watch/membership reads above cross the database tunnel
+    # and took >5 s at times on 2026-09-22, which made every fresh Longhu row a
+    # "future_timestamp" and every Tencent row not-fresh in the same scan.
+    quote_capture = await dependencies.capture_quotes(
+        selected_symbols, max(observed_at, dependencies.now_utc()), quote_timestamp_slo_seconds)
     anomaly_symbols = quote_volume_anomaly_symbols(watches, quote_capture.quotes)
     surge_features, surge_source = await _surge_context_with_priority(
         dependencies.surge_context, watches, mapped_peer_groups, anomaly_symbols,

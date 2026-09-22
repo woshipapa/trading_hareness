@@ -236,6 +236,23 @@ class PrecisionTests(unittest.TestCase):
         self.assertNotEqual(race_at(14, 0, 5), "invalid")      # 5 >= 8/2
         self.assertEqual(race_at(14, 30, 3), "invalid")        # fell below half of today's peak
 
+    def test_a_single_degraded_scan_is_not_reported_as_missing_data(self):
+        tape = SnapshotTape()
+        plan = watch("001216.SZ", "relay_one_word", {"auction_amount_min": 5e8, "turnover_max_pct": 12.0, "prior_high": 24.06})
+        no_book = {"price": 26.47, "pct_change": 10.0, "turnover_rate": 3.0, "price_source": "fuyao_ths_all_a_snapshot",
+                   "price_freshness": {"status": "missing_timestamp"}, "raw": {}}
+        full = quote(26.47, 24.06, amount=6e8, volume_lot=2.3e5, turnover=3.0, sealed=True, opened=26.47)
+        issues = lambda signals: [s for s in signals if s["signal_type"] == "data_issue"]
+        start = at(10, 30)
+        self.assertEqual(issues(teacher_review_signals(plan, no_book, None, None, start, tape=tape)), [])
+        teacher_review_signals(plan, full, {"vwap": 26.47}, None, start + timedelta(seconds=30), tape=tape)   # recovered
+        for step in (60, 90):
+            self.assertEqual(issues(teacher_review_signals(plan, no_book, None, None, start + timedelta(seconds=step), tape=tape)), [])
+        persisted = issues(teacher_review_signals(plan, no_book, None, None, start + timedelta(seconds=120), tape=tape))
+        self.assertEqual(len(persisted), 1)                  # 3 consecutive scans over 60 s
+        self.assertTrue(persisted[0]["independent_confirmation"])
+        self.assertEqual(persisted[0]["conditions"]["teacher_review"]["quote_source"], "fuyao_ths_all_a_snapshot")
+
     def test_stale_sector_counts_are_unknown_not_zero(self):
         book = TeacherMarketBook()
         book.store_sectors(at(10, 0), at(9, 40), {"大金融": {"count": 4}})
