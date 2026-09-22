@@ -300,6 +300,12 @@ class AlertNamesTheStockNotJustItsCodeTests(unittest.TestCase):
         candidate["evidence"]["qianlong_warning"] = {"level": "yellow", "reasons": ["过热2项：高于20日线60%、5日已涨32%"]}
         self.assertIn("🟡【注意】过热2项", self._text(candidate, self.names))
 
+    def test_the_instructor_chat_line_sits_above_the_disclaimer(self):
+        from app.main import _xiaojie_alert_text
+        text = _xiaojie_alert_text(self._candidate(), date(2026, 8, 27), self.names,
+                                   chat="小杰群聊 08-26 20:14 夜报/复盘：金健米业放量突破")
+        self.assertLess(text.index("小杰群聊"), text.index("不构成交易指令"))
+
     def test_other_modes_carry_no_qianlong_line(self):
         self.assertNotIn("潜龙证据", self._text(self._candidate(), self.names))
 

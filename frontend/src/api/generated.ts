@@ -3106,6 +3106,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/strategies/xiaojie-leader-flow/message-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Message Features
+         * @description Group-message features known at ``as_of`` (default now), newest first.
+         */
+        get: operations["message_features_api_v1_research_strategies_xiaojie_leader_flow_message_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/strategies/xiaojie-leader-flow/evaluate": {
         parameters: {
             query?: never;
@@ -4836,7 +4856,7 @@ export interface components {
             snapshot: components["schemas"]["XiaojieLeaderFlowSnapshotRequest"];
             /** Parameters */
             parameters?: {
-                [key: string]: number;
+                [key: string]: boolean | number;
             };
         };
         /**
@@ -4924,6 +4944,36 @@ export interface components {
             is_etf?: boolean | null;
             /** Trend Support Holds */
             trend_support_holds?: boolean | null;
+            /** Distance From Ma20 Pct */
+            distance_from_ma20_pct?: number | null;
+            /** Pre Signal 5D Return Pct */
+            pre_signal_5d_return_pct?: number | null;
+            /** Sector Day Return Pct */
+            sector_day_return_pct?: number | null;
+            /** Sector Net Inflow Rate Pct */
+            sector_net_inflow_rate_pct?: number | null;
+            /** Stock Vs Sector Divergence Pct */
+            stock_vs_sector_divergence_pct?: number | null;
+            /** Ma Spread Min 10D Pct */
+            ma_spread_min_10d_pct?: number | null;
+            /** Consolidation Box Range Pct */
+            consolidation_box_range_pct?: number | null;
+            /** Marker K Sessions Ago */
+            marker_k_sessions_ago?: number | null;
+            /** Daily History Complete */
+            daily_history_complete?: boolean | null;
+            /** Reverse Wrap Volume Confirmed */
+            reverse_wrap_volume_confirmed?: boolean | null;
+            /** Signed Distance From Ma5 Pct */
+            signed_distance_from_ma5_pct?: number | null;
+            /** Distance From Box Top Pct */
+            distance_from_box_top_pct?: number | null;
+            /** Candidate In Main Sector */
+            candidate_in_main_sector?: boolean | null;
+            /** Fundamental Pe */
+            fundamental_pe?: number | null;
+            /** Overhead High Distance Pct */
+            overhead_high_distance_pct?: number | null;
         };
     };
     responses: never;
@@ -10606,6 +10656,43 @@ export interface operations {
                 "application/json": components["schemas"]["GenerateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    message_features_api_v1_research_strategies_xiaojie_leader_flow_message_features_get: {
+        parameters: {
+            query?: {
+                symbol?: string | null;
+                as_of?: string | null;
+                since?: string | null;
+                instructor_only?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

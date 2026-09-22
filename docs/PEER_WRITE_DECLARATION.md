@@ -35,6 +35,7 @@
 | `quant.intraday_minute_sessions`（`source_name='longhu_intraday_minutes'`） | 盘后复盘一次（当日） | 观察池每只股票当日完整 1 分钟线（09:30–15:00），补齐盘末剖面 36 只上限与尾盘分钟 | scheduler；UPSERT（按 symbol/日期/分钟/来源），不做删除 |
 | `quant.factor_evaluations` / `quant.research_runs` | 手动或每周一次 | 日频因子横截面评估（Rank IC、分位多空差、换手、按时间 60/20/20 走查与 BH q 值）；`membership_mode=current_backfill` 的结果带回填标签，永不进入晋升 | scheduler；INSERT |
 | `quant.raw_market_observations`（`provider_key='longhuvip_history'` 的 `limit_performance_history`/`morning_bidding_history`/`market_breadth_history`；`provider_key='fuyao_ths'` 的 `limit_pool_history`） | 历史回填（交易日 09:00–15:45 不运行），可断点续跑 | 每个交易日一行：龙虎涨停表现五类列表、竞价列表、市场涨跌广度；同花顺涨停/炸板/跌停池（含题材与封单），供涨停生态与竞价策略研究 | scheduler；INSERT（按唯一键去重） |
+| `quant.raw_market_observations`（`provider_key='feishu_group_relay'`, `capability='xiaojie_message_feature'`） | 工作站 `scripts/sync-xiaojie-message-features.sh` 从 relay edge 账本只读拉取后经 scheduler 入库，可重复执行 | 小杰夜报与小杰交流群每条文字消息一行（按提到的股票拆行，无股票记 `market:xiaojie`）：`available_at`=账本首次接收时间、`stated_at`=正文作者时间（仅供复核）、角色、立场、规则标签、股票代码；只保留讲师回复/陈述/夜报的摘录与提及片段，不保留参与者正文和 @昵称。研究特征，不进入实时阈值 | scheduler；INSERT（按消息 ID 去重） |
 | `quant.raw_archive_offsets` / `quant.raw_archive_batches` | 仅启用 overflow 时；重试安全 | 原始观测离线归档游标与 ACK | archive adapter；事务内 UPDATE/INSERT |
 
 ## 运行约束

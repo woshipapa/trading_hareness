@@ -223,6 +223,22 @@ class XiaojieLeaderFlowSnapshotRequest(BaseModel):
     leader_not_broken: bool | None = None
     is_etf: bool | None = None
     trend_support_holds: bool | None = None
+    # 潜龙出海_swing overheat inputs (v2) and five-evidence inputs (v3).
+    distance_from_ma20_pct: float | None = None
+    pre_signal_5d_return_pct: float | None = None
+    sector_day_return_pct: float | None = None
+    sector_net_inflow_rate_pct: float | None = None
+    stock_vs_sector_divergence_pct: float | None = None
+    ma_spread_min_10d_pct: float | None = Field(default=None, ge=0)
+    consolidation_box_range_pct: float | None = Field(default=None, ge=0)
+    marker_k_sessions_ago: int | None = Field(default=None, ge=0)
+    daily_history_complete: bool | None = None
+    reverse_wrap_volume_confirmed: bool | None = None
+    signed_distance_from_ma5_pct: float | None = None
+    distance_from_box_top_pct: float | None = None
+    candidate_in_main_sector: bool | None = None
+    fundamental_pe: float | None = None
+    overhead_high_distance_pct: float | None = Field(default=None, ge=0)
 
 
 class TeacherReviewPackImportRequest(BaseModel):
@@ -248,7 +264,7 @@ class XiaojieLeaderFlowEvaluateRequest(BaseModel):
     """Evaluate the Xiao Jie playbook without any provider or order side effect."""
 
     snapshot: XiaojieLeaderFlowSnapshotRequest
-    parameters: dict[str, float | int] = Field(default_factory=dict, max_length=40)
+    parameters: dict[str, bool | float | int] = Field(default_factory=dict, max_length=40)
 
     @model_validator(mode="after")
     def validate_parameters(self) -> "XiaojieLeaderFlowEvaluateRequest":

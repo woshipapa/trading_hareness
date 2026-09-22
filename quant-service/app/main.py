@@ -179,6 +179,8 @@ from .xiaojie_reference_repository import (
     trade_limits as read_xiaojie_trade_limits,
 )
 from .xiaojie_outcome_settlement import settle_session as settle_xiaojie_session
+from .xiaojie_message_features import features as read_xiaojie_message_features
+from .xiaojie_message_features import latest_instructor_line as xiaojie_chat_line
 from .xiaojie_observation_repository import (
     alerted_count as xiaojie_alerted_count, mark_alerted as mark_xiaojie_alerted,
     record_candidates as record_xiaojie_candidates,
@@ -2233,6 +2235,7 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
                 event_id, _xiaojie_alert_text(
                     candidate, trading_date, reference.get("names"),
                     teacher=strategy_confluence.teacher_plan(trading_date, candidate["symbol"]),
+                    chat=await _xiaojie_chat_context(candidate["symbol"], observed_at),
                 ))
             alerted.append((candidate["symbol"], str(candidate.get("mode") or "unclassified")))
         except Exception as error:  # noqa: BLE001 - an alert failure must not end the scan
@@ -2357,8 +2360,24 @@ def intraday_alert_text_with_confluence(signal: dict[str, Any], watch: dict[str,
                                confluence=confluence)
 
 
+#: How far back the instructor's words on a stock are shown next to an alert.
+XIAOJIE_CHAT_LOOKBACK = timedelta(days=10)
+
+
+async def _xiaojie_chat_context(symbol: str, observed_at: datetime) -> str | None:
+    """The instructor's latest words on ``symbol`` known before this scan, for display only."""
+    try:
+        items = await xiaojie_message_features(symbol=symbol, as_of=observed_at,
+                                               since=observed_at - XIAOJIE_CHAT_LOOKBACK,
+                                               instructor_only=True, limit=5)
+    except Exception:  # noqa: BLE001 - the chat line is optional context
+        return None
+    return xiaojie_chat_line(items, symbol)
+
+
 def _xiaojie_alert_text(candidate: dict[str, Any], trading_date: date,
-                        names: Mapping[str, str] | None = None, *, teacher: Mapping[str, Any] | None = None) -> str:
+                        names: Mapping[str, str] | None = None, *, teacher: Mapping[str, Any] | None = None,
+                        chat: str | None = None) -> str:
     evidence = candidate.get("evidence") or {}
     board = evidence.get("board") or {}
     state = "封板" if board.get("sealed") else ("炸板" if board.get("broken") else "近板")
@@ -2382,6 +2401,7 @@ def _xiaojie_alert_text(candidate: dict[str, Any], trading_date: date,
         f"研究仓位参考 {(candidate.get('position') or {}).get('target_fraction')}；"
         f"风险标记 {', '.join(candidate.get('risk_flags') or []) or '无'}\n"
         + (f"{teacher_confluence_line(teacher)}\n" if teacher else "")
+        + (f"{chat}\n" if chat else "")
         + "仅为研究观察，零实盘权重，不构成交易指令。"
     )
 
@@ -6555,7 +6575,14 @@ app.include_router(build_strategy_actions_router(StrategyActionDependencies(
     generate_recommendations=recommendations,
     daily_pipeline=run_daily_pipeline,
 )))
-app.include_router(build_xiaojie_leader_flow_router(evaluate_xiaojie_leader_flow_snapshot))
+async def xiaojie_message_features(**query: Any) -> list[dict[str, Any]]:
+    return await run_database_blocking(
+        lambda: _with_connection(lambda connection: read_xiaojie_message_features(connection, **query)),
+        timeout_seconds=30,
+    )
+
+
+app.include_router(build_xiaojie_leader_flow_router(evaluate_xiaojie_leader_flow_snapshot, xiaojie_message_features))
 async def teacher_review_cohort() -> dict[str, Any]:
     rows = await run_database_blocking(teacher_review_repository.teacher_watch_rows, db)
     since = cn_today() - timedelta(days=14)
