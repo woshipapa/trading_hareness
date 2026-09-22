@@ -254,6 +254,28 @@ class PrecisionTests(unittest.TestCase):
         self.assertTrue(persisted[0]["independent_confirmation"])
         self.assertEqual(persisted[0]["conditions"]["teacher_review"]["quote_source"], "fuyao_ths_all_a_snapshot")
 
+    def test_the_tape_bridges_the_lunch_break_in_trading_time(self):
+        tape = SnapshotTape()
+        for second in range(0, 330, 30):                    # 11:24:30 .. 11:29:30
+            tape.observe("605258.SH", at(11, 24) + timedelta(seconds=30 + second), 42.16, None, None)
+        tape.observe("605258.SH", at(13, 0) + timedelta(seconds=30), 42.16, None, None)
+        view = tape.features("605258.SH", at(13, 0) + timedelta(seconds=30))
+        self.assertEqual(view["return_5m_pct"], 0.0)       # 11:25:30 -> 13:00:30 is five trading minutes
+        self.assertLessEqual(view["span_seconds"], 31 * 60)
+
+    def test_a_restart_rehydrates_the_tape_from_the_stored_scan_tape(self):
+        from app.teacher_review_rules import trading_lookback_start
+        tape = SnapshotTape()
+        tape.observe("605058.SH", at(13, 12), 53.27, 2.2e5, "longhu")          # first live scan after the restart
+        self.assertNotIn("return_5m_pct", tape.features("605058.SH", at(13, 12)))
+        stored = [(at(13, 0) + timedelta(seconds=30 * i), "605058.SH", 50.0 + 0.1 * i) for i in range(24)]
+        self.assertEqual(tape.rehydrate(stored), 24)                          # merged in front of the live sample
+        view = tape.features("605058.SH", at(13, 12))
+        self.assertIn("return_5m_pct", view)
+        self.assertEqual(tape.rehydrate(stored), 0)                           # idempotent
+        self.assertEqual(trading_lookback_start(at(13, 5), 40 * 60), at(10, 55))   # 5 + 35 trading minutes
+        self.assertEqual(trading_lookback_start(at(9, 40), 40 * 60), at(9, 15))
+
     def test_call_auction_is_evidence_only_and_the_final_auction_runs_only_auction_plays(self):
         from app.intraday_signal_generation import session_phase
         self.assertEqual(session_phase(at(9, 16)), "call_auction")

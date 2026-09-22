@@ -4040,12 +4040,19 @@ async def intraday_surge_context(
     def minute_budget() -> int:
         return intraday_minute_profile_max_symbols() + len(teacher_symbols)
 
+    def licensed_budget() -> int:
+        # The owner batch route carries the whole basket in one request (the
+        # owner fans out on its own pool), so every watched stock gets real
+        # minutes; the old 36-symbol budget left the last 10 watches without a
+        # 5-minute trend.  Watched stocks come first in the request order.
+        return max(minute_budget(), min(len(watches), intraday_watchlist_max_symbols()))
+
     async def licensed_context() -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
         if not longhu_vendor_configured():
             return licensed_features, licensed_status
         return await capture_intraday_surge_context(
             watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols,
-            cache=_intraday_longhu_minute_cache, max_symbols=minute_budget,
+            cache=_intraday_longhu_minute_cache, max_symbols=licensed_budget,
             open_capabilities=open_provider_capabilities, capability="intraday_minute",
             fetch_minutes=intraday_longhu_minutes, minute_features=intraday_minute_features,
             persist_health=persist_longhu_intraday_minute_health, run_database=run_database_blocking,
@@ -4587,9 +4594,46 @@ async def refresh_teacher_sectors(watches: list[dict[str, Any]]) -> dict[str, An
 
 
 async def refresh_teacher_context(watches: list[dict[str, Any]]) -> dict[str, Any]:
-    divergence, auction, sectors = await asyncio.gather(
-        refresh_teacher_divergence(watches), refresh_teacher_auction(watches), refresh_teacher_sectors(watches))
-    return {"divergence": divergence, "auction": auction, "sectors": sectors}
+    divergence, auction, sectors, tape = await asyncio.gather(
+        refresh_teacher_divergence(watches), refresh_teacher_auction(watches), refresh_teacher_sectors(watches),
+        rehydrate_teacher_tape())
+    return {"divergence": divergence, "auction": auction, "sectors": sectors, "tape": tape}
+
+
+_teacher_tape_rehydration: dict[str, Any] = {}
+
+
+async def rehydrate_teacher_tape() -> dict[str, Any]:
+    """Once per process and day: reload the snapshot tape from the stored watch tape.
+
+    A restart (a deploy, or the session guard after a database stall) used to
+    empty the in-memory tape, so plans without minute context had no 5-minute
+    trend for five minutes and raised "data missing".  Never raises.
+    """
+    from .teacher_review_rules import trading_lookback_start
+    from .watch_scan_tape import read_tape_prices
+    now = datetime.now(timezone.utc)
+    day = now.astimezone(ZoneInfo("Asia/Shanghai")).date()
+    state = _teacher_tape_rehydration
+    if state.get("day") == day:
+        return {"status": "done", "loaded": state.get("loaded")}
+    last = state.get("attempt_at")
+    if last is not None and (now - last).total_seconds() < 60:
+        return {"status": "throttled"}
+    state["attempt_at"] = now
+    since = trading_lookback_start(now, 40 * 60)
+
+    def read() -> list[tuple[datetime, str, float]]:
+        with db.transaction() as connection:
+            return read_tape_prices(connection, since, now)
+
+    try:
+        samples = await run_database_blocking(read, timeout_seconds=15)
+        loaded = teacher_review_tape.rehydrate(samples)
+    except Exception as error:  # noqa: BLE001 - the tape rebuilds from live scans meanwhile
+        return {"status": "failed", "error": safe_error_detail(str(error), 200)}
+    state.update({"day": day, "loaded": loaded})
+    return {"status": "completed", "samples": len(samples), "loaded": loaded, "since": since.isoformat()}
 
 
 def _optional_float(value: Any) -> float | None:

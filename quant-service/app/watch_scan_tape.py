@@ -123,6 +123,17 @@ def persist_scan_tape(connection: Any, *, scan_id: Any, observed_at: datetime,
     return row is not None
 
 
+def read_tape_prices(connection: Any, since: datetime, until: datetime) -> list[tuple[datetime, str, float]]:
+    """(observed_at, symbol, price) from the stored tape - prices only, unpacked server side."""
+    rows = connection.execute(
+        """SELECT r.effective_at, e.key AS symbol, (e.value->>'p')::float8 AS price
+             FROM quant.raw_market_observations r CROSS JOIN LATERAL jsonb_each(r.payload->'rows') e
+            WHERE r.provider_key=%s AND r.capability=%s AND r.market='cn' AND r.symbol='watch:scan'
+              AND r.effective_at>=%s AND r.effective_at<=%s AND e.value ? 'p'""",
+        (TAPE_PROVIDER, TAPE_CAPABILITY, since, until)).fetchall()
+    return [(row["effective_at"], str(row["symbol"]), float(row["price"])) for row in rows if row["price"]]
+
+
 TAPE_FIELDS = {
     "p": "price", "pct": "change %", "o/h/l/pc": "open/high/low/pre-close", "v": "cumulative volume (lots)",
     "a": "cumulative amount (yuan)", "vw": "session VWAP", "vr": "volume ratio", "to": "turnover %",
@@ -132,4 +143,5 @@ TAPE_FIELDS = {
     "sig": "signals this scan (type:state:key)",
 }
 
-__all__ = ["EvidenceThrottle", "TAPE_CAPABILITY", "TAPE_FIELDS", "TAPE_PROVIDER", "persist_scan_tape", "tape_record"]
+__all__ = ["EvidenceThrottle", "TAPE_CAPABILITY", "TAPE_FIELDS", "TAPE_PROVIDER", "persist_scan_tape", "read_tape_prices",
+           "tape_record"]

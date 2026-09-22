@@ -79,6 +79,15 @@ class RawOverflowArchiveTests(unittest.TestCase):
         self.assertEqual(result["first_offset"]["observation_id"], "00000000-0000-0000-0000-000000000001")
         self.assertNotIn("access_token", repr(result))
 
+    def test_a_disabled_lane_answers_polls_without_touching_the_database(self):
+        class NoDatabase:
+            def transaction(self):
+                raise AssertionError("a disabled poll must not open a transaction")
+
+        config = RawOverflowConfig(enabled=False, capabilities=("realtime_quote",), batch_rows=1)
+        result = next_batch(NoDatabase(), stream=stream_key("realtime_quote"), limit=100, config=config)
+        self.assertEqual(result, {"status": "disabled", "stream_key": stream_key("realtime_quote"), "rows": []})
+
 
 if __name__ == "__main__":
     unittest.main()

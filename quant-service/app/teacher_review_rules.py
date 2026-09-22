@@ -90,18 +90,52 @@ REQUIRED_INPUTS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _trading_seconds(moment: datetime) -> float:
+    """Seconds into the A-share session, with the 11:30-13:00 break removed.
+
+    09:30 is 0, 11:30 and 13:00 are both 7200, 15:00 is 14400; call-auction
+    times before 09:30 are negative.  Ages measured on this clock make "the
+    last five minutes" at 13:02 reach back into 11:27-11:30.
+    """
+    local = moment.astimezone(_CN_TZ)
+    seconds = local.hour * 3600 + local.minute * 60 + local.second + local.microsecond / 1e6
+    if seconds <= 41400:                      # up to 11:30
+        return seconds - 34200               # minus 09:30
+    if seconds < 46800:                       # the lunch break
+        return 7200.0
+    return seconds - 46800 + 7200            # 13:00 onwards
+
+
+def _trading_age(later: datetime, earlier: datetime) -> float:
+    return _trading_seconds(later) - _trading_seconds(earlier)
+
+
+def trading_lookback_start(now: datetime, seconds_back: float) -> datetime:
+    """The wall-clock moment ``seconds_back`` trading seconds before ``now`` (not before 09:15)."""
+    local = now.astimezone(_CN_TZ)
+    target = _trading_seconds(local) - seconds_back
+    base = datetime.combine(local.date(), time(9, 30), tzinfo=_CN_TZ)
+    if target <= 7200:
+        moment = base + timedelta(seconds=max(target, -900))
+    else:
+        moment = datetime.combine(local.date(), time(13, 0), tzinfo=_CN_TZ) + timedelta(seconds=target - 7200)
+    return moment.astimezone(now.tzinfo or _CN_TZ)
+
+
 class SnapshotTape:
     """Minute-equivalent values rebuilt from each scan's list quotes.
 
     One sample per symbol per scan: price and cumulative volume (lots) with
     the volume's source.  Volumes are differenced only between samples of the
     same source, because providers use different units.  The tape keeps 31
-    minutes, resets on a new exchange day and lives in process memory: after
-    a restart it is empty and the plan falls back to the previous scan price
-    and the quote's volume ratio until enough samples exist.
+    trading minutes (the lunch break does not count, so 13:00 still sees the
+    morning's last samples) and resets on a new exchange day.  It lives in
+    process memory; after a restart ``rehydrate`` reloads prices from the
+    stored per-scan watch tape, so the 5-minute return survives a restart.
     """
 
     WINDOW = timedelta(minutes=31)
+    REHYDRATED_SOURCE = "stored_scan_tape"
     RETURN_SECONDS = 300
     CURRENT_SECONDS = 60
     MIN_BASELINE_MINUTES = 5
@@ -123,8 +157,38 @@ class SnapshotTape:
         if ring and observed_at <= ring[-1][0]:
             return
         ring.append((observed_at, float(price), volume_lot, volume_source))
-        while observed_at - ring[0][0] > self.WINDOW:
+        while _trading_age(observed_at, ring[0][0]) > self.WINDOW.total_seconds():
             ring.popleft()
+
+    def rehydrate(self, samples: list[tuple[datetime, str, float]]) -> int:
+        """Reload today's (observed_at, symbol, price) samples after a restart.
+
+        Stored samples older than a symbol's first live sample are merged in
+        front, so it does not matter whether a live scan already ran.  Prices
+        only: they carry no volume source, so they never enter volume
+        differencing and the volume multiple rebuilds from live scans.
+        """
+        by_symbol: dict[str, list[tuple[datetime, float]]] = {}
+        for observed_at, symbol, price in samples:
+            if price is not None and float(price) > 0:
+                by_symbol.setdefault(str(symbol), []).append((observed_at, float(price)))
+        loaded = 0
+        for symbol, items in by_symbol.items():
+            items.sort(key=lambda item: item[0])
+            day = items[-1][0].astimezone(_CN_TZ).date()
+            if self._day is None:
+                self._day = day
+            if day != self._day:
+                continue
+            ring = self._samples.setdefault(symbol, deque())
+            first = ring[0][0] if ring else None
+            older = [(at, price, None, self.REHYDRATED_SOURCE) for at, price in items
+                     if at.astimezone(_CN_TZ).date() == day and (first is None or at < first)]
+            ring.extendleft(reversed(older))
+            loaded += len(older)
+            while ring and _trading_age(ring[-1][0], ring[0][0]) > self.WINDOW.total_seconds():
+                ring.popleft()
+        return loaded
 
     def note_latest(self, symbol: str, observed_at: datetime, summary: Mapping[str, Any]) -> None:
         """Latest per-scan summary of a symbol, for plans that watch another plan's stock."""
@@ -163,10 +227,10 @@ class SnapshotTape:
         if not ring:
             return {}
         latest_at, latest_price, latest_volume, source = ring[-1]
-        result: dict[str, Any] = {"samples": len(ring), "span_seconds": int((latest_at - ring[0][0]).total_seconds())}
+        result: dict[str, Any] = {"samples": len(ring), "span_seconds": int(_trading_age(latest_at, ring[0][0]))}
         anchor = None
         for sample in ring:
-            if (latest_at - sample[0]).total_seconds() < self.RETURN_SECONDS:
+            if _trading_age(latest_at, sample[0]) < self.RETURN_SECONDS:
                 break
             anchor = sample
         if anchor is not None:
@@ -176,12 +240,12 @@ class SnapshotTape:
             return result
         start = None
         for at, volume in same:
-            if (latest_at - at).total_seconds() < self.CURRENT_SECONDS:
+            if _trading_age(latest_at, at) < self.CURRENT_SECONDS:
                 break
             start = (at, volume)
-        if start is None or latest_volume < start[1]:
+        if start is None or latest_volume < start[1] or _trading_age(latest_at, start[0]) <= 0:
             return result
-        current = (latest_volume - start[1]) * 60 / (latest_at - start[0]).total_seconds()
+        current = (latest_volume - start[1]) * 60 / _trading_age(latest_at, start[0])
         # Per-minute volumes before the current window: last cumulative value
         # in each clock minute, differenced and spread over skipped minutes.
         closes: dict[datetime, float] = {}
@@ -190,9 +254,9 @@ class SnapshotTape:
                 closes[at.replace(second=0, microsecond=0)] = volume
         minutes = sorted(closes.items())
         per_minute = [
-            (right - left) / ((later - earlier).total_seconds() / 60)
+            (right - left) / (_trading_age(later, earlier) / 60)
             for (earlier, left), (later, right) in zip(minutes, minutes[1:])
-            if right >= left
+            if right >= left and _trading_age(later, earlier) > 0
         ]
         if len(per_minute) >= self.MIN_BASELINE_MINUTES:
             baseline = median(per_minute)

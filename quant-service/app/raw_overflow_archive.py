@@ -201,10 +201,13 @@ def next_batch(database: Any, *, stream: str, limit: int | None = None,
     config = config or RawOverflowConfig.from_env()
     capability = capability_from_stream(stream, config)
     requested = _bounded_int(limit, config.batch_rows, 1, config.batch_rows)
+    if not config.enabled:
+        # An adapter polls every few seconds; a disabled lane must not run the
+        # ~1 s storage-size scan on the shared database each time (the state
+        # stays available from /raw-overflow/status).
+        return {"status": "disabled", "stream_key": stream, "rows": []}
     with database.transaction() as connection:
         state, reasons, storage = _storage_state(connection, config)
-        if not config.enabled:
-            return {"status": "disabled", "stream_key": stream, "state": state, "reasons": list(reasons), "rows": []}
         if state == "normal":
             return {"status": "not_needed", "stream_key": stream, "state": state, "reasons": list(reasons), "rows": []}
         connection.execute(
