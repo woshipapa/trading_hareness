@@ -457,6 +457,10 @@ from .intraday_market_context_repository import (
     point_in_time_market_context_batch as read_point_in_time_market_context_batch,
 )
 from .intraday_rule_snapshot_repository import persist_rule_input_snapshot, prune_rule_input_evidence
+from .watch_scan_tape import EvidenceThrottle, persist_scan_tape as persist_watch_scan_tape, tape_record as watch_tape_record
+
+# Raw quote rows and rule-input snapshots per stock: on a signal, else every 30 s.
+watch_evidence_throttle = EvidenceThrottle(float(os.getenv("WATCH_EVIDENCE_MIN_SECONDS", "30")))
 from .intraday_event_retention import ephemeral_signal_retention_days, prune_ephemeral_signal_events
 from .edge_evidence_transfer import (
     JOURNAL_RETENTION_DAYS as EDGE_CHANGE_JOURNAL_RETENTION_DAYS,
@@ -3068,6 +3072,8 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                 ),
                 quote_source=intraday_quote_observation_source, json_safe=strategy_json_safe,
                 persist_rule_input_snapshot=persist_rule_input_snapshot,
+                evidence_throttle=watch_evidence_throttle, tape_record=watch_tape_record,
+                persist_scan_tape=persist_watch_scan_tape,
                 attach_volume_time_profile=pure_attach_volume_time_profile, number=intraday_number,
                 aggregate_order_book_observations=aggregate_order_book_observations,
                 generate_signals=generate_intraday_signals,
