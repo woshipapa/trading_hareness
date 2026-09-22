@@ -5,6 +5,8 @@
 策略只声明需要哪些数据能力，数值一律取自数据面已有接口/已沉淀证据，不直连任何供应商。
 研究用途，`live_effect="none"`，不产生订单，不改任何实盘阈值。
 
+> 每日操作流程（harness 复盘 → 结合当天结算与收盘 → 更新次日计划）见 [TEACHER_REVIEW_DAILY.md](TEACHER_REVIEW_DAILY.md)，策略包生成细则见 [teacher_review/PACK_BUILD_BRIEF.md](teacher_review/PACK_BUILD_BRIEF.md)。
+
 ## 流程
 
 | 时间 | 环节 | 代码 |
