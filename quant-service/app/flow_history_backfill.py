@@ -43,6 +43,26 @@ def flow_covered(connection: Any, trade_date: date, expected: int) -> bool:
     return int(row["n"] or 0) >= int(expected * MINIMUM_COVERAGE_RATIO)
 
 
+def historical_cross_section(database: Any, trade_date: date) -> int:
+    """All-A members with a usable daily bar that session - the backfill's coverage base.
+
+    The nightly sync's ``full_market_daily_row_count`` also requires each bar
+    to have been recorded by the next session, which no backfilled history
+    satisfies (it returns 0 for every past day), so the walker needs its own.
+    """
+    with database.transaction() as connection:
+        row = connection.execute(
+            """SELECT count(DISTINCT bar.symbol)::int AS n
+                 FROM quant.canonical_bars_daily bar
+                 JOIN quant.universe_membership_history membership
+                   ON membership.universe_key='all_a' AND membership.symbol=bar.symbol
+                  AND membership.effective_from<=%s
+                  AND (membership.effective_to IS NULL OR membership.effective_to>=%s)
+                WHERE bar.trading_date=%s AND bar.quality_status IN ('fresh','partial')""",
+            (trade_date, trade_date, trade_date)).fetchone()
+    return int((row or {}).get("n") or 0)
+
+
 def limit_list_stored(connection: Any, trade_date: date) -> bool:
     row = connection.execute(
         """SELECT 1 FROM quant.tushare_raw_records WHERE api_name='limit_list_d'
@@ -128,7 +148,8 @@ def main() -> None:  # pragma: no cover - operational entry point
     started = time.monotonic()
     report = asyncio.run(backfill(
         args.start, args.end, database=service.db, run_database=service.run_database_blocking,
-        call_tushare_api=service.call_tushare_api, expected_symbols=service.full_market_daily_row_count,
+        call_tushare_api=service.call_tushare_api,
+        expected_symbols=lambda trade_date: historical_cross_section(service.db, trade_date),
         parse_date=service.tushare_date, fetch_limit_list=fetch_limit_list if args.limit_list else None,
         pace_seconds=args.pace))
     report["seconds"] = round(time.monotonic() - started, 1)
@@ -139,4 +160,4 @@ if __name__ == "__main__":  # pragma: no cover
     main()
 
 
-__all__ = ["FLOW_API", "backfill", "flow_covered", "limit_list_stored", "sessions_between"]
+__all__ = ["FLOW_API", "backfill", "flow_covered", "historical_cross_section", "limit_list_stored", "sessions_between"]

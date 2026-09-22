@@ -91,5 +91,29 @@ class FlowHistoryBackfillTests(unittest.TestCase):
         self.assertEqual(report["sessions"], 3)
 
 
+class HistoricalCrossSectionTests(unittest.TestCase):
+    def test_counts_fresh_and_partial_bars_without_the_next_session_rule(self):
+        from app.flow_history_backfill import historical_cross_section
+        seen = {}
+
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self_inner):
+                        return self_inner
+
+                    def __exit__(self_inner, *exc):
+                        return False
+
+                    def execute(self_inner, sql, params):
+                        seen["sql"] = sql
+                        return Result(row={"n": 5300})
+                return Tx()
+
+        self.assertEqual(historical_cross_section(Database(), date(2024, 5, 6)), 5300)
+        self.assertIn("quality_status IN ('fresh','partial')", seen["sql"])
+        self.assertNotIn("available_at", seen["sql"])
+
+
 if __name__ == "__main__":
     unittest.main()
