@@ -428,6 +428,10 @@ def _signed(value: Any) -> str:
     return "—" if value is None else f"{float(value):+.1f}%"
 
 
+def _rate(value: Any) -> str:
+    return "—" if value is None else f"{float(value):.1f}%"
+
+
 def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
     """人读的完整版：每只票一行，附卡点与重放证据。"""
     items = list(report.get("stocks") or [])
@@ -461,9 +465,8 @@ def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
         for row in learned["playbooks"]:
             lines.append(
                 f"| {row['playbook']} | {row['total']} | {row['hit']} | {row['triggered_faded']} | "
-                f"{row['missed']} | {row['hit_rate_pct'] if row['hit_rate_pct'] is not None else '—'}% | "
-                f"{row['missed_rate_pct'] if row['missed_rate_pct'] is not None else '—'}% | "
-                f"{row['missed_mean_pct'] if row['missed_mean_pct'] is not None else '—'} |")
+                f"{row['missed']} | {_rate(row['hit_rate_pct'])} | {_rate(row['missed_rate_pct'])} | "
+                f"{_signed(row['missed_mean_pct'])} |")
         lines.append("")
     if learned.get("unpushed"):
         lines += ["## 重放满足条件却没推送（先查这里，不是阈值问题）", ""]

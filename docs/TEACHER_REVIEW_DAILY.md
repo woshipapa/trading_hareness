@@ -11,9 +11,10 @@
 |---|---|---|---|
 | T 15:00 | 收盘 | — | — |
 | T 约 16:05 | owner 收盘流水线（`post-close-refresh-v6`）写入全市场日线和控制数据 | owner（15681） | `canonical_bars_daily` 等 |
-| T 16:15 起 | `peer_close_research`，在 peer 调度器上自动执行：<br>① 结算 T 日老师计划，按延续规则分成晋级延续、观察、退出<br>② 自选股复盘<br>③ 小杰结算 | 自动 | T+1 的延续计划、结算存档、飞书结算摘要 |
+| T 16:15 起 | `peer_close_research`，在 peer 调度器上自动执行：<br>① 结算 T 日老师计划，按延续规则分成晋级延续、观察、退出<br>② **次日结果复盘**：分类 + 归因 + 学习（见下节）<br>③ 自选股复盘<br>④ 小杰结算 | 自动 | T+1 的延续计划、结算存档、复盘存档、两条飞书摘要 |
 | T 晚间 | 老师视频发布后，harness 建任务（类别 `financial_review`）：<br>下载 → 大/小两套 ASR → OCR → 个股实体 → 研究智能体抽取 | video_understanding_harness | 任务目录 `jobs/<job_id>/` |
 | T 晚间 | 量化整理老师观点，并用 owner 读路径核对价位 | harness 侧智能体 | `teacher_strategy_<T+1>.md`、`owner_market_evidence_<T>.json` |
+| T 晚间 | **第 0 步 看复盘**：读 T 日的结果复盘，知道哪些条件该调 | `teacher_review_daily.py outcome` | `outcome_<T>.json/.md` |
 | T 晚间 | **第 1 步 上下文**：取 T 日结算、延续结果和 T+1 观察池 | `teacher_review_daily.py context` | `daily_context_<T>.json/.md` |
 | T 晚间 | **第 2 步 生成策略包**：按细则，把老师观点和上下文合成 pack | 智能体（Claude 等） | `teacher_pack_<T>.json` |
 | T 晚间 | **第 3 步 检查**：校验结构，核对 owner 名录，演练导入，列出会覆盖哪些计划 | `teacher_review_daily.py check` | `pack_check_<T>.json` |
@@ -34,6 +35,7 @@
 | `daily_context_<T>.json/.md` | 第 1 步 | 由流程生成 |
 | `teacher_pack_<T>.json` | 第 2 步 | 由流程生成 |
 | `pack_check_<T>.json`、`import_report_<T>.json`、`pool_<T>.md` | 第 3、4 步 | 由流程生成 |
+| `outcome_<T>.json/.md` | 第 0 步 | 由流程生成 |
 
 ## 命令
 
@@ -45,10 +47,42 @@ python scripts/teacher_review_daily.py context $J --date <T>    # 第 1 步
 # 第 2 步：按 PACK_BUILD_BRIEF 生成 $J/teacher_pack_<T>.json
 python scripts/teacher_review_daily.py check  $J                # 第 3 步；有 problems 时退出码为 1
 python scripts/teacher_review_daily.py import $J                # 第 4 步：先重跑一遍检查，通过才导入
+python scripts/teacher_review_daily.py outcome $J --date <T>    # 第 0 步；--rerun 重算
 python scripts/teacher_review_daily.py status $J                # 随时查看观察池
 ```
 
 脚本通过 SSH（`stockpeer@47.110.79.189:3535`）在 peer API 容器里执行 `python -m app.teacher_review_ops`。策略包经 stdin 传入，不落任何临时文件。导入调用服务自己的 `POST /api/v1/teacher-review/packs`，写权限 key 由容器从自身环境变量读取，全程不打印。
+
+## 次日结果复盘（每天自动跑，也可以手动重算）
+
+结算回答"计划走成什么样"，这一层回答"我们的条件对不对"。T 日收盘后自动执行，
+存档 capability 为 `teacher_review_outcome`，读取接口 `GET /api/v1/teacher-review/outcomes`。
+
+**每只票落到一个结果里**
+
+| 结果 | 含义 |
+|---|---|
+| 触发并守住 | 推送了买点，收盘仍在入场价之上 |
+| 触发后回落 | 推送了，收盘跌回入场价下方 |
+| **未触发但大涨** | 没推送，但收盘涨 ≥5%（或封板），或盘中最高涨 ≥7%（或触及涨停）——**要学的就是这一类** |
+| 盘中失效 | 触发前就跌破失效价 |
+| 未触发且未涨 | 条件正确地把它过滤掉了 |
+| 老师否定但大涨 | 老师说不碰，结果涨了 —— 老师这条逻辑的边界 |
+| 老师否定且确实未涨 | 避坑正确 |
+
+**归因怎么来的**：盘中每次扫描的规则输入都存在 `quant.intraday_rule_input_snapshots`，
+复盘按 2 分钟一档重放同一个纯函数 `teacher_review_rules.evaluate`，数出每条 gating
+条件当天卡了多少次、最接近触发的那一刻差几条。三种原因分得很清楚，不要混着看：
+
+1. **条件太严**：某条 gating 条件全天未满足 → 报告给出这条的名字、卡住比例、最后一次的值；
+2. **输入缺失**：规则要的输入（分时均价、成交额、开盘价、封板盘口…）过半扫描取不到 →
+   这是数据问题，不是阈值问题，报告单列；
+3. **重放满足却没推送**：重放显示条件全满足但盘中没有事件 → 这是缺陷，要查采样间隔、
+   输入缺失或事件确认，**不要**据此放宽阈值。
+
+**学习**：按剧本滚动累计最近 20 份复盘的命中率、漏网率和漏掉的平均幅度；同一条条件在
+漏掉的大涨里卡满 3 次，就进"条件复核建议"。建议只描述计数，**任何阈值都不会自动改**，
+改不改由人决定，改完要记进策略包的参数来源（T/D/I）。
 
 ## 每一步的检查
 
