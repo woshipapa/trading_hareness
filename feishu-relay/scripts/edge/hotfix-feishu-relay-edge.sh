@@ -281,6 +281,8 @@ install -m 0755 "$project_root/deploy/edge/larkagentx-bridge-entrypoint.sh" \
   "$stage_dir/ops/larkagentx-bridge-entrypoint.sh"
 install -m 0644 "$project_root/deploy/edge/larkagentx-group-relay-hotfix.conf" \
   "$stage_dir/ops/larkagentx-group-relay-hotfix.conf"
+install -m 0644 "$project_root/deploy/edge/feishu-relay-dashboard.nginx.conf" \
+  "$stage_dir/ops/feishu-relay-dashboard.conf"
 printf '%s\n' "$head_sha" > "$stage_dir/.base-git-sha"
 test -f "$stage_dir/adapter/package.json"
 test -f "$stage_dir/adapter/index.mjs"
@@ -294,6 +296,7 @@ test -f "$stage_dir/bridge/event_spool.py"
 test -f "$stage_dir/bridge/owner_lock.py"
 test -x "$stage_dir/ops/larkagentx-bridge-entrypoint.sh"
 test -f "$stage_dir/ops/larkagentx-group-relay-hotfix.conf"
+test -f "$stage_dir/ops/feishu-relay-dashboard.conf"
 
 upload_dir="$hotfix_root/staging/${release_id}.uploading"
 "${ssh_command[@]}" "$edge_host" bash -s -- "$edge_dir" "$hotfix_root" "$upload_dir" <<'REMOTE_PREPARE'
@@ -345,6 +348,9 @@ upload_moved=false
 compose_moved=false
 runtime_committed=false
 compose_backup="$edge_dir/.docker-compose.yml.$release_id.previous"
+nginx_conf=/etc/nginx/conf.d/feishu-relay-dashboard.conf
+nginx_conf_backup="$edge_dir/.feishu-relay-dashboard.conf.$release_id.previous"
+nginx_conf_changed=false
 previous_runtime_env=""
 cleanup_upload() {
   if [ "$upload_moved" != true ]; then rm -rf -- "$upload_dir"; fi
@@ -352,6 +358,11 @@ cleanup_upload() {
     mv -f "$compose_backup" "$edge_dir/docker-compose.yml" || true
   fi
   if [ "$runtime_committed" != true ]; then rm -f -- "$compose_stage" "$compose_backup"; fi
+  if [ "$nginx_conf_changed" = true ] && [ "$runtime_committed" != true ]; then
+    if [ -f "$nginx_conf_backup" ]; then install -m 0644 "$nginx_conf_backup" "$nginx_conf"; else rm -f "$nginx_conf"; fi
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    rm -f "$nginx_conf_backup"
+  fi
   if [ -n "$previous_runtime_env" ]; then rm -f -- "$previous_runtime_env"; fi
 }
 trap cleanup_upload EXIT
@@ -370,9 +381,25 @@ test -f "$upload_dir/bridge/event_spool.py"
 test -f "$upload_dir/bridge/owner_lock.py"
 test -x "$upload_dir/ops/larkagentx-bridge-entrypoint.sh"
 test -f "$upload_dir/ops/larkagentx-group-relay-hotfix.conf"
+test -f "$upload_dir/ops/feishu-relay-dashboard.conf"
 test -f "$upload_dir/.base-git-sha"
 test -f "$compose_stage"
 test ! -e "$release_dir"
+
+# The edge nginx serves the same origin for both SPAs. Install the candidate
+# config before restarting the adapter, then restore it automatically if any
+# later activation or health gate fails.
+if [ -f "$nginx_conf" ]; then cp -p "$nginx_conf" "$nginx_conf_backup"; fi
+nginx_conf_changed=true
+install -m 0644 "$upload_dir/ops/feishu-relay-dashboard.conf" "$nginx_conf"
+if ! nginx -t >/dev/null 2>&1 || ! systemctl reload nginx; then
+  if [ -f "$nginx_conf_backup" ]; then install -m 0644 "$nginx_conf_backup" "$nginx_conf"; else rm -f "$nginx_conf"; fi
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+  nginx_conf_changed=false
+  rm -f "$nginx_conf_backup"
+  echo 'hotfix refused: nginx dashboard configuration failed validation or reload' >&2
+  exit 42
+fi
 
 # A dependency manifest change belongs to an immutable image release.
 base_image="$(docker inspect -f '{{.Config.Image}}' "$container_name")"
@@ -490,6 +517,11 @@ restore_previous() {
     mv -f "$compose_backup" "$edge_dir/docker-compose.yml"
     compose_moved=false
   fi
+  if [ "$nginx_conf_changed" = true ]; then
+    if [ -f "$nginx_conf_backup" ]; then install -m 0644 "$nginx_conf_backup" "$nginx_conf"; else rm -f "$nginx_conf"; fi
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    nginx_conf_changed=false
+  fi
 }
 if ! restart_adapter || ! restart_bridge; then
   restore_previous
@@ -578,6 +610,8 @@ if ! test -f "$hotfix_root/current/adapter/index.mjs" \
 fi
 rm -f "$compose_backup"
 compose_moved=false
+rm -f "$nginx_conf_backup"
+nginx_conf_changed=false
 runtime_committed=true
 
 # Retain a bounded rollback window and protect the active pointer.
