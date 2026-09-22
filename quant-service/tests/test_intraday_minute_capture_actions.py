@@ -75,8 +75,19 @@ class IntradayMinuteCaptureActionTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def executemany(self, sql, params_seq):
-                self.calls.extend((sql, params) for params in params_seq)
+            def cursor(self):
+                calls = self.calls
+
+                class Cursor:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *_args):
+                        return False
+
+                    def executemany(self, sql, params_seq):
+                        calls.extend((sql, params) for params in params_seq)
+                return Cursor()
 
             def execute(self, sql, params=()):
                 self.calls.append((sql, params))
@@ -123,9 +134,6 @@ class IntradayMinuteCaptureActionTests(unittest.TestCase):
         self.assertIn("longhu_intraday_minutes", delete_sql)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class StoreSessionMinutesTests(unittest.TestCase):
     def test_whole_sessions_are_upserted_and_other_days_skipped(self) -> None:
@@ -136,10 +144,19 @@ class StoreSessionMinutesTests(unittest.TestCase):
                 executed.append((sql, params))
                 return self
 
-            def executemany(self, sql, params_seq):
-                for params in params_seq:
-                    executed.append((sql, params))
-                batches.append(len(params_seq))
+            def cursor(self):
+                class Cursor:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *_args):
+                        return False
+
+                    def executemany(self, sql, params_seq):
+                        for params in params_seq:
+                            executed.append((sql, params))
+                        batches.append(len(params_seq))
+                return Cursor()
 
         class Database:
             def transaction(self):
@@ -170,3 +187,7 @@ class StoreSessionMinutesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store_session_minutes(Database(), date(2026, 9, 22), rows, source_name="made_up",
                                   parse_minute=parse, ensure_instrument=lambda *_: None)
+
+
+if __name__ == "__main__":
+    unittest.main()

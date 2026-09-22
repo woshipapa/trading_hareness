@@ -148,7 +148,9 @@ def store_symbol_minutes(connection: Any, symbol: str, rows: list[dict[str, Any]
         except (ValueError, TypeError) as validation_error:
             first_error = first_error or f"invalid minute row: {str(validation_error)[:200]}"
     if params:
-        connection.executemany(
+        # psycopg batches executemany on a cursor (the connection has no executemany).
+        with connection.cursor() as cursor:
+            cursor.executemany(
             """INSERT INTO quant.intraday_minute_sessions(
                    symbol,trading_date,minute_bucket,bar_time,open,high,low,close,volume,amount,source_name,available_at,raw
                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
@@ -156,8 +158,8 @@ def store_symbol_minutes(connection: Any, symbol: str, rows: list[dict[str, Any]
                    bar_time=EXCLUDED.bar_time,open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
                    close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount,
                    available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
-            params,
-        )
+                params,
+            )
     return len(params), first_error
 
 
