@@ -261,7 +261,9 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           history="30/60 分钟周期K：GetKLineDay_W14 Type=30/60（longhu_vendor_source.stock_period_bars），"
                   "单页 ≤300 根；120 根≈30 分钟 15 个交易日 / 60 分钟 30 个交易日，含盘中形成中的K",
           notes="日期可验证才用"),
-    _bind("tencent_free", "bars.minute", 50, LIVE_VERIFIED, "intraday_minute_sessions", "app/intraday_minute_provider_service.py"),
+    _bind("tencent_free", "bars.minute", 50, LIVE_VERIFIED, "intraday_minute_sessions", "app/intraday_minute_provider_service.py",
+          history="5/15/30/60 分钟K：mkline（free_market_providers.tencent_period_bars），含当日K与真实开高低；"
+                  "10 分钟 = 两根 5 分钟精确合成"),
     _bind("tushare_super_get", "bars.minute", 15, LIVE_VERIFIED, "tushare_raw_records", "app/tushare_providers.py", notes="rt_min"),
     _bind("tdx_local", "bars.minute", 35, DECLARED, "market_bars_minute (offline import)",
           "app/datasources/sources/tdx_local_files.py:parse_minute_bytes", "客户端保留的全部分钟线"),

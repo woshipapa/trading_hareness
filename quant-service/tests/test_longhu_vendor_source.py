@@ -442,3 +442,24 @@ class PeriodKlineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             source.stock_period_bars("603386.SH", "15")
 
+
+class MinuteAmountAndTencentKlineTests(unittest.TestCase):
+    def test_minute_turnover_is_the_difference_of_cumulative_turnover(self):
+        from app.longhu_vendor_source import exact_minute_amounts
+        rows = [{"vwap": 10.0, "cumulative_volume_lot": 100, "volume_lot": 100, "amount": 1},
+                {"vwap": 10.1, "cumulative_volume_lot": 300, "volume_lot": 200, "amount": 1},
+                {"vwap": 10.2, "cumulative_volume_lot": 400, "volume_lot": 100, "amount": 1}]
+        out = exact_minute_amounts(rows)
+        self.assertEqual([row["amount"] for row in out], [100000.0, 203000.0, 105000.0])
+        self.assertAlmostEqual(sum(row["amount"] for row in out) / (400 * 100), 10.2)   # equals the cumulative average price
+
+    def test_tencent_period_klines_keep_true_open_high_low(self):
+        from app.free_market_providers import parse_tencent_period_klines
+        payload = {"data": {"sz300476": {"m30": [
+            ["202609221000", "251.00", "245.36", "251.05", "243.61", "204359.000", {}, ""],
+            ["202609220930", "bad"], ["202609211500", "240.0", "248.0", "248.5", "239.9", "1000"]]}}}
+        bars = parse_tencent_period_klines(payload, "sz300476", "300476.SZ", "30")
+        self.assertEqual([bar["bar_time"] for bar in bars], ["202609211500", "202609221000"])
+        self.assertEqual((bars[1]["open"], bars[1]["high"], bars[1]["low"], bars[1]["close"], bars[1]["volume_lot"]),
+                         (251.0, 251.05, 243.61, 245.36, 204359.0))
+

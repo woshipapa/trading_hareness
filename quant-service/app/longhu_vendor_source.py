@@ -325,7 +325,28 @@ def current_session_minute_rows(
     dates = {str(row.get("trade_date") or "") for row in materialized}
     if dates != {expected_text}:
         raise RuntimeError("Longhu minute rows are stale or span multiple exchange dates")
-    return materialized
+    return exact_minute_amounts(materialized)
+
+
+def exact_minute_amounts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per-minute turnover from the cumulative average price.
+
+    The trend feed has no per-minute turnover; the adapter's ``vwap`` is the
+    session's cumulative average price, so cumulative turnover is
+    ``vwap x cumulative volume x 100`` and a minute's turnover is the
+    difference of two of them.  The previous derivation (``vwap x minute
+    volume``) biased 30-minute window VWAPs by up to ~1% (2026-09-22).
+    """
+    previous = 0.0
+    for row in rows:
+        vwap, cumulative = _number(row.get("vwap")), _number(row.get("cumulative_volume_lot"))
+        if vwap is None or vwap <= 0 or cumulative is None:
+            return rows
+        total = vwap * cumulative * 100
+        row["amount"] = round(max(0.0, total - previous), 4)
+        row["cumulative_amount"] = round(total, 4)
+        previous = total
+    return rows
 
 
 @dataclass(frozen=True)
@@ -1060,7 +1081,7 @@ __all__ = [
     "DEFAULT_CONFIG_PATH", "FLOW_CONVENTION", "LonghuIntradaySource", "LonghuVendorConfig",
     "LonghuVendorSource", "SharedLonghuReadSource", "intraday_source",
     "MAX_PAGE_SIZE", "MAX_TENCENT_BATCH_SIZE", "configured", "normalize_stock_symbol",
-    "current_session_minute_rows", "parse_industry_stock_row", "parse_period_kline_payload",
+    "current_session_minute_rows", "exact_minute_amounts", "parse_industry_stock_row", "parse_period_kline_payload",
     "parse_stock_minute_payload", "parse_stock_snapshot_payload", "PERIOD_KLINE_TYPES",
     "parse_tencent_quote_text", "safe_page_size", "market_today", "direct_access_enabled",
 ]

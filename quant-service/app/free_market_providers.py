@@ -362,6 +362,45 @@ def tencent_minute_amount_scale(*, price: float, cumulative_volume_lot: int,
     return 100.0 if 80.0 <= ratio <= 120.0 else 1.0
 
 
+TENCENT_PERIOD_KLINES = frozenset({"5", "15", "30", "60"})
+
+
+def parse_tencent_period_klines(payload: Any, key: str, symbol: str, period: str) -> list[dict[str, Any]]:
+    """Normalize Tencent ``mkline`` rows ``[YYYYMMDDHHMM, open, close, high, low, volume_lot, ...]``, oldest first.
+
+    Unlike a bar rebuilt from one-price-per-minute feeds, these carry the
+    bar's true open/high/low; the newest bar can still be forming.
+    """
+    rows = (((payload or {}).get("data") or {}).get(key) or {}).get(f"m{period}") or []
+    bars: dict[str, dict[str, Any]] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, list) or len(row) < 6 or not re.fullmatch(r"\d{12}", str(row[0])):
+            continue
+        try:
+            opened, closed, high, low, volume = (float(value) for value in row[1:6])
+        except (TypeError, ValueError):
+            continue
+        if min(opened, closed, high, low) <= 0:
+            continue
+        bars[str(row[0])] = {"symbol": symbol, "period": str(period), "bar_time": str(row[0]),
+                             "open": opened, "high": high, "low": low, "close": closed, "volume_lot": volume}
+    return [bars[stamp] for stamp in sorted(bars)]
+
+
+async def tencent_period_bars(symbol: str, period: str, count: int = 60) -> list[dict[str, Any]]:
+    """5/15/30/60-minute K-line with today's bars (public Tencent endpoint)."""
+    if str(period) not in TENCENT_PERIOD_KLINES:
+        raise FreeProviderError(f"unsupported Tencent kline period: {period}")
+    key = tencent_symbol(symbol)
+    async with public_http_client() as client:
+        response = await _request_with_retry(
+            client, "GET", "https://ifzq.gtimg.cn/appstock/app/kline/mkline",
+            params={"param": f"{key},m{period},,{max(1, min(320, int(count)))}"},
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=6,
+        )
+    return parse_tencent_period_klines(response.json(), key, symbol, str(period))
+
+
 async def tencent_intraday_minutes(symbol: str) -> list[dict[str, Any]]:
     """Return today's Tencent minute tape with non-look-ahead volume deltas.
 

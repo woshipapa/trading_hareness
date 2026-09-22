@@ -326,6 +326,7 @@ from .free_market_providers import (
     tencent_daily,
     tencent_index_daily,
     tencent_intraday_minutes,
+    tencent_period_bars,
     tencent_order_book_quotes,
 )
 from .order_book_features import aggregate_order_book_observations
@@ -4625,15 +4626,36 @@ async def refresh_teacher_divergence(watches: list[dict[str, Any]]) -> dict[str,
                         fetched[(symbol, period)] = f"{type(error).__name__}: {str(error)[:160]}"
             return fetched
 
-        fetched = await run_akshare_blocking(fetch, timeout_seconds=6)
         today = observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date()
+        today_text = today.strftime("%Y%m%d")
+
+        async def today_bars(symbol: str, period: str) -> list[dict[str, Any]] | None:
+            # Longhu's K-line only covers completed sessions; Tencent's carries
+            # today's bars (true open/high/low, the newest still forming).
+            try:
+                bars = await asyncio.wait_for(tencent_period_bars(symbol, period, 20), timeout=4)
+            except Exception:  # noqa: BLE001 - history alone is still a valid (older) read
+                return None
+            return [bar for bar in bars if str(bar["bar_time"]).startswith(today_text)]
+
+        keys = [(symbol, period) for symbol in due for period in ("30", "60")]
+        fetched, *today_rows = await asyncio.gather(
+            run_akshare_blocking(fetch, timeout_seconds=6), *(today_bars(symbol, period) for symbol, period in keys))
+        today_by_key = dict(zip(keys, today_rows))
         refreshed, errors = [], {}
         for symbol in due:
             rows = {period: fetched.get((symbol, period)) for period in ("30", "60")}
             if all(isinstance(value, list) for value in rows.values()):
-                teacher_divergence_book.store(symbol, observed_at, {
-                    period: divergence_status(period_bars_through(value, today), "longhuvip_kline")
-                    for period, value in rows.items()})
+                statuses = {}
+                for period, history in rows.items():
+                    today_part = today_by_key.get((symbol, period))
+                    merged = {str(bar["bar_time"]): bar for bar in history if not str(bar["bar_time"]).startswith(today_text)}
+                    merged.update({str(bar["bar_time"]): bar for bar in today_part or []})
+                    status = divergence_status(period_bars_through([merged[k] for k in sorted(merged)], today),
+                                               "longhuvip_kline+tencent_today" if today_part is not None else "longhuvip_kline")
+                    status["today_bars"] = None if today_part is None else len(today_part)
+                    statuses[period] = status
+                teacher_divergence_book.store(symbol, observed_at, statuses)
                 refreshed.append(symbol)
             else:
                 errors[symbol] = next((str(value) for value in rows.values() if isinstance(value, str)), "deadline")
