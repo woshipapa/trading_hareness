@@ -63,7 +63,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: feishu-adapter/Dockerfile
+          file: feishu-relay/adapter/Dockerfile
           push: true
           platforms: linux/amd64
           tags: |

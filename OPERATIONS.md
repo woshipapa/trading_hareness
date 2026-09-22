@@ -10,7 +10,7 @@
 
 ```text
 飞书群消息
-  -> 飞书长连接（feishu-adapter）
+  -> 飞书长连接（feishu-relay/adapter）
   -> POST http://n8n:5678/webhook/feishu-market-text 或 /feishu-media-part
   -> n8n 原生 HTTP Request 分片节点
 ```
@@ -132,7 +132,7 @@ docker compose run --rm --no-deps n8n execute --id=remoteArchiveReports123 --raw
 
 ### 剪贴板快捷键
 
-在任意桌面应用中复制文字后，可运行 [`scripts/relay-from-clipboard.sh`](scripts/relay-from-clipboard.sh)。脚本会把文字放入只保留 5 分钟的一次性本机草稿，并自动打开投递台、填好正文；剪贴板内容不会出现在 URL 或浏览器历史中。图片仍可在投递台内直接粘贴。
+在任意桌面应用中复制文字后，可运行 [`feishu-relay/scripts/desktop/relay-from-clipboard.sh`](feishu-relay/scripts/desktop/relay-from-clipboard.sh)。脚本会把文字放入只保留 5 分钟的一次性本机草稿，并自动打开投递台、填好正文；剪贴板内容不会出现在 URL 或浏览器历史中。图片仍可在投递台内直接粘贴。
 
 已安装的本机 LaunchAgent `com.papa.market-relay-hotkey` 会在登录后自动注册全局快捷键 `⌃⌥⌘R`，不需要再在“快捷指令”中配置。该服务只会在按下快捷键时读取一次剪贴板；不会持续监控、保存或上传剪贴板内容。若“快捷指令”里留有刚才新建的空白快捷指令，可直接关闭且不保存。
 
@@ -248,17 +248,17 @@ docker compose ps
 # 日常启动或恢复；保留已有数据
 docker compose up -d
 
-# 本机修改 feishu-adapter 代码或 Compose 后，重建本机适配器
+# 本机修改 feishu-relay 代码或 Compose 后，重建本机适配器
 docker compose up -d --build feishu-adapter
 
 # 47 上的 adapter/LarkAgentX bug 修复：复用已有 image 和 supervisor venv，走版本化源码覆盖层
-bash scripts/hotfix-feishu-relay-edge.sh --apply
+bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply
 # 覆盖层版本与应急回滚
-bash scripts/hotfix-feishu-relay-edge.sh --list
-bash scripts/hotfix-feishu-relay-edge.sh --rollback <release-id> --apply
+bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --list
+bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --rollback <release-id> --apply
 
 # 只有依赖、Node/Python 运行时或基础镜像变化时，才走不可变 image release
-# scripts/deploy-feishu-relay-edge-release.sh <git-sha> <release-label> --apply
+# feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.sh <git-sha> <release-label> --apply
 
 # 查看飞书连接和转发日志
 docker compose logs -f feishu-adapter
@@ -387,7 +387,7 @@ session reference 的 `membership_taxonomy` 上。
 ## 关键文件
 
 - [`compose.yaml`](compose.yaml)：容器、网络端口、持久卷与环境变量映射。
-- [`feishu-adapter/index.mjs`](feishu-adapter/index.mjs)：飞书官方 Node SDK 长连接、转发到 n8n、监控页与 SSE 实现。
+- [`feishu-relay/adapter/index.mjs`](feishu-relay/adapter/index.mjs)：飞书官方 Node SDK 长连接、转发到 n8n、监控页与 SSE 实现。
 - [`scripts/start-compose.sh`](scripts/start-compose.sh)：等待 Colima 后启动 Compose。
 - [`/Users/papa/Library/LaunchAgents/com.papa.n8n-compose.plist`](/Users/papa/Library/LaunchAgents/com.papa.n8n-compose.plist)：登录自启动配置。
 - [`.env`](.env)：仅本机私密变量，禁止提交或分享。

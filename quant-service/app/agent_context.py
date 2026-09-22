@@ -25,7 +25,7 @@ def repository_agent_context() -> dict[str, Any]:
             "http_routers": "quant-service/app/routers/",
             "database_migrations": "quant-service/migrations/versions/",
             "frontend": "frontend/src/App.vue + frontend/src/composables/useDashboardWorkspace.ts",
-            "feishu_proxy": "feishu-adapter/index.mjs",
+            "feishu_proxy": "feishu-relay/adapter/index.mjs",
             "architecture": "docs/ARCHITECTURE.md",
             "architecture_index": "docs/ARCHITECTURE_INDEX.md",
             "data_product_registry": "quant-service/app/platform/data_product_registry.py",
@@ -113,7 +113,7 @@ def repository_agent_context() -> dict[str, Any]:
         ],
         "verification": {
             "backend": "docker compose exec -T quant-research python -m unittest discover -s tests -q",
-            "adapter": "node --test feishu-adapter/*.test.mjs",
+            "adapter": "node --test feishu-relay/adapter/*.test.mjs",
             "frontend": "cd frontend && npm run typecheck && npm run build && npm test",
             "frontend_e2e": "cd frontend && npm run test:e2e",
             "diff": "git diff --check",

@@ -52,7 +52,7 @@ for (const path of [
   if (source.includes('http://quant-research:8000')) throw new Error(`${path} still contains a direct quant address`);
 }
 
-const adapter = readFileSync('feishu-adapter/index.mjs', 'utf8');
+const adapter = readFileSync('feishu-relay/adapter/index.mjs', 'utf8');
 for (const expected of [
   "['/api/research/ten-day-leader-rotation/latest', '/api/v1/research/ten-day-leader-rotation/latest']",
   "['/api/research/ten-day-leader-rotation/run', '/api/v1/research/ten-day-leader-rotation/run']",

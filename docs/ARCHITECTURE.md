@@ -17,7 +17,7 @@ satisfied.
 Feishu / n8n / browser
         |
         v
-feishu-adapter (proxy, relay, OAuth and media boundary)
+feishu-relay/adapter (proxy, relay, OAuth and media boundary)
         |
         v
 quant-research FastAPI

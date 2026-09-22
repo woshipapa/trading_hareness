@@ -22,7 +22,7 @@ provider response directly to a live threshold or order path.
 - `frontend/src/composables/`: lifecycle-owned polling/subscriptions.
 - `frontend/src/components/`: focused feature panels; new UI must not expand
   the root dashboard shell.
-- `feishu-adapter/index.mjs`: browser/API proxy; route mappings need separate GET
+- `feishu-relay/adapter/index.mjs`: browser/API proxy; route mappings need separate GET
   and POST entries.
 - `quant-service/app/security.py`: shared write-boundary primitives; keep this
   module framework-light so HTTP contract tests can import it without startup.

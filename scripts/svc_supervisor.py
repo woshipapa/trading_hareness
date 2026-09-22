@@ -80,7 +80,7 @@ TASKS = [
     # 需要恢复本地监听时设 ITOUGU_TABLE_WATCH=1 再重启 supervisor。
     *([
         dict(name="itougu-table-watch", kind="daemon",
-             args=[PY, os.path.join(N8N, "scripts/itougu_table_watch.py"), "--interval", "1.5"],
+             args=[PY, os.path.join(N8N, "feishu-relay/scripts/sources/itougu/itougu_table_watch.py"), "--interval", "1.5"],
              cwd=N8N, out=os.path.join(N8N, "logs/itougu-table-watch.log"),
              err=os.path.join(N8N, "logs/itougu-table-watch.log"), env={"PYTHONUNBUFFERED": "1"}),
     ] if os.environ.get("ITOUGU_TABLE_WATCH") == "1" else []),

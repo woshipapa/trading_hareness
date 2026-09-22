@@ -51,9 +51,9 @@ jobs:
 
       - name: Build and test Feishu adapter
         run: |
-          docker build --tag n8n-feishu-adapter:test --file feishu-adapter/Dockerfile .
+          docker build --tag n8n-feishu-adapter:test --file feishu-relay/adapter/Dockerfile .
           docker run --rm \
-            --volume "$GITHUB_WORKSPACE/feishu-adapter:/tests:ro" \
+            --volume "$GITHUB_WORKSPACE/feishu-relay/adapter:/tests:ro" \
             n8n-feishu-adapter:test \
             sh -lc 'cp /tests/*.test.mjs /app/ && node --test *.test.mjs'
 
