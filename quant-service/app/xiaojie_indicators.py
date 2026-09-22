@@ -659,25 +659,21 @@ def evaluate_pool(rows: list[dict[str, Any]], *, limits: Mapping[str, float],
         evidence = snapshot.pop("_evidence")
         result = evaluate_snapshot(snapshot)
         if result["mode"] == "潜龙出海_swing":
+            # Stored with the observation, so settlement can compare red,
+            # yellow and clean reminders without a separate shadow record.
             evidence["qianlong_evidence"] = result["qianlong_evidence"]
             evidence["qianlong_swing_overheat"] = result["qianlong_swing_overheat"]
+            evidence["qianlong_warning"] = result["qianlong_warning"]
         evaluations.append({"symbol": symbol, "decision": result["decision"], "mode": result["mode"],
                             "position": result["position"], "exit": result["exit"],
                             "stop_loss": result["stop_loss"],
                             "risk_flags": result["risk_flags"], "reasons": result["reasons"],
-                            "market_gate": result["market_gate"], "evidence": evidence,
-                            "decision_without_qianlong_gates": result["decision_without_qianlong_gates"]})
+                            "market_gate": result["market_gate"], "evidence": evidence})
     candidates = [item for item in evaluations if item["decision"] == "research_candidate"]
-    # 潜龙 names that only the 潜龙-specific gates (five evidence, overheat)
-    # turned away.  They are recorded under their own mode so the gate can be
-    # scored against the names it let through; they are never alerted.
-    qianlong_gated = [item for item in evaluations
-                      if item["mode"] == "潜龙出海_swing" and item["decision"] == "no_trade"
-                      and item["decision_without_qianlong_gates"] == "research_candidate"]
     return {
         "observed_at": observed_at.isoformat(), "pool_size": len(pool),
         "pool_qualified": len(qualified), "pool_truncated": len(qualified) - len(pool),
-        "evaluated": len(evaluations), "candidates": candidates, "qianlong_gated": qianlong_gated,
+        "evaluated": len(evaluations), "candidates": candidates,
         "sector_flow": {key: value for key, value in flow_view.items() if key != "boards"}
                        | {"boards": len(flow_view.get("boards") or {})},
         "main_sector_count": len(sectors["main_sectors"]),

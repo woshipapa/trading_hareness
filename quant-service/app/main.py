@@ -166,7 +166,7 @@ from .intraday_surge_context_service import capture as capture_intraday_surge_co
 from .strategy_candidate_ranking import select as select_intraday_candidates
 from .xiaojie_leader_flow import MODEL_VERSION as XIAOJIE_LEADER_FLOW_MODEL_VERSION, evaluate_snapshot as evaluate_xiaojie_leader_flow_snapshot
 from .longhu_multifactor_shadow import MODEL_VERSION as LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION
-from .xiaojie_leader_flow import QIANLONG_EVIDENCE_LABELS, QIANLONG_GATED_MODE
+from .xiaojie_leader_flow import QIANLONG_EVIDENCE_LABELS
 from .xiaojie_leader_flow import alert_priority as xiaojie_alert_priority
 from .xiaojie_leader_flow import research_alert_allowed as xiaojie_research_alert_allowed
 from .xiaojie_indicators import evaluate_pool as evaluate_xiaojie_leader_pool
@@ -2172,20 +2172,6 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
         sector_flow=board_flow, membership_taxonomy=reference.get("membership_taxonomy"),
     )
     candidates = result["candidates"]
-    # Gated 潜龙 names are settled like any observation so the gate itself can
-    # be scored; their own mode keeps them out of every alert path.
-    gated = [{**item, "mode": QIANLONG_GATED_MODE} for item in result.get("qianlong_gated") or []]
-    gated_status: dict[str, Any] = {"recorded": 0}
-    if gated:
-        try:
-            await run_database_blocking(
-                lambda: _with_connection(lambda connection: record_xiaojie_candidates(
-                    connection, trading_date, observed_at, scan_id, gated)),
-                timeout_seconds=60,
-            )
-            gated_status["recorded"] = len(gated)
-        except Exception as error:  # noqa: BLE001 - shadow evidence must not end the scan
-            gated_status["error"] = safe_error_detail(str(error), 160)
     await _refresh_strategy_confluence(trading_date, observed_at, candidates)
     fresh = await run_database_blocking(
         lambda: _with_connection(lambda connection: record_xiaojie_candidates(
@@ -2287,7 +2273,7 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
         "main_sector_count": result["main_sector_count"],
         "regime": result["regime"],
         "candidates": len(candidates), "new_candidates": new_candidate_count, "alerted": len(alerted),
-        "qianlong_gated": gated_status, "sector_flow": result.get("sector_flow"),
+        "sector_flow": result.get("sector_flow"),
         "actionable_candidates": len(actionable),
         "sealed_skipped": sealed_skipped,
         "sealed_research_alerts": sealed_research_alerts,
@@ -2382,13 +2368,17 @@ def _xiaojie_alert_text(candidate: dict[str, Any], trading_date: date,
         "封板，仅作研究提醒，不追板；等待开板/承接确认。\n"
         if board.get("sealed") and candidate.get("mode") == "潜龙出海_swing" else ""
     )
-    qianlong_line = _qianlong_alert_line(evidence) if candidate.get("mode") == "潜龙出海_swing" else ""
+    is_qianlong = candidate.get("mode") == "潜龙出海_swing"
+    qianlong_line = _qianlong_alert_line(evidence) if is_qianlong else ""
+    warning = (evidence.get("qianlong_warning") or {}) if is_qianlong else {}
+    marker = {"red": "🔴【红色预警】", "yellow": "🟡【注意】"}.get(str(warning.get("level") or ""), "")
+    warning_line = (f"{marker}{'；'.join(warning.get('reasons') or [])}\n" if marker else "")
     return (
-        f"【研究观察·小杰龙头】{label} {candidate.get('mode')}\n"
+        f"{marker}【研究观察·小杰龙头】{label} {candidate.get('mode')}\n"
         f"{trading_date} {state} 涨幅 {pct:.2f}%\n" if pct is not None else
-        f"【研究观察·小杰龙头】{label} {candidate.get('mode')}\n{trading_date} {state}\n"
+        f"{marker}【研究观察·小杰龙头】{label} {candidate.get('mode')}\n{trading_date} {state}\n"
     ) + (
-        sealed_research_notice + qianlong_line +
+        warning_line + sealed_research_notice + qianlong_line +
         f"研究仓位参考 {(candidate.get('position') or {}).get('target_fraction')}；"
         f"风险标记 {', '.join(candidate.get('risk_flags') or []) or '无'}\n"
         + (f"{teacher_confluence_line(teacher)}\n" if teacher else "")

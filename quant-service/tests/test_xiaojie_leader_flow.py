@@ -120,14 +120,17 @@ class XiaojieLeaderFlowTests(unittest.TestCase):
         self.assertTrue(result["qianlong_evidence"]["passed"])
         self.assertEqual(result["position"]["target_fraction"], 0.10)
 
-    def test_qianlong_swing_without_evidence_fails_closed(self):
-        # v2 read every absent field as "no flag"; v3 treats absence as unknown.
+    def test_qianlong_swing_without_evidence_is_sent_under_a_red_warning(self):
+        # v2 read every absent field as "no flag"; v3 treats absence as unknown
+        # and says so on the reminder instead of silently passing it.
         bare = self._snapshot(prior_one_word_board=False, limit_up_return_flow=False,
                               breakout_or_reverse_wrap=True)
         result = evaluate_snapshot(bare)
         self.assertEqual(result["mode"], "潜龙出海_swing")
-        self.assertEqual(result["decision"], "no_trade")
-        self.assertEqual(result["decision_without_qianlong_gates"], "research_candidate")
+        self.assertEqual(result["decision"], "research_candidate")
+        self.assertEqual(result["position"]["target_fraction"], 0.05)
+        self.assertEqual(result["qianlong_warning"]["level"], "red")
+        self.assertIn("qianlong_red_warning", result["risk_flags"])
         self.assertIn("qianlong_evidence_incomplete", result["risk_flags"])
         self.assertIn("qianlong_overheat_inputs_incomplete", result["risk_flags"])
         self.assertEqual(set(result["qianlong_evidence"]["missing"]),
@@ -148,17 +151,19 @@ class XiaojieLeaderFlowTests(unittest.TestCase):
         self.assertIn("qianlong_overheat_inputs_incomplete", result["risk_flags"])
         self.assertEqual(result["position"]["target_fraction"], 0.05)
 
-    def test_a_loss_maker_is_refused_even_with_the_shape(self):
+    def test_a_loss_maker_is_sent_with_a_red_warning_naming_the_pe(self):
         # 跨境通: "形态理论上符合、基本面不行".
         result = evaluate_snapshot(self._qianlong_swing_snapshot(fundamental_pe=-25.76))
-        self.assertEqual(result["decision"], "no_trade")
+        self.assertEqual(result["decision"], "research_candidate")
         self.assertEqual(result["qianlong_evidence"]["failed"], ["fundamental"])
         self.assertIn("qianlong_evidence_failed", result["risk_flags"])
+        self.assertEqual(result["qianlong_warning"]["reasons"], ["潜龙证据不成立：基本面兑现（PE -25.8，亏损）"])
+        self.assertEqual(result["position"]["target_fraction"], 0.05)
 
     def test_convergence_without_a_volume_marker_k_is_refused(self):
         # 共进股份: "均线粘合、没有放量标志性 K".
         result = evaluate_snapshot(self._qianlong_swing_snapshot(breakout_confirmed=False))
-        self.assertEqual(result["decision"], "no_trade")
+        self.assertEqual(result["qianlong_warning"]["level"], "red")
         self.assertEqual(result["qianlong_evidence"]["evidence"]["breakout_volume"], False)
         self.assertEqual(result["qianlong_evidence"]["evidence"]["pullback_support"], False)
 
@@ -173,11 +178,11 @@ class XiaojieLeaderFlowTests(unittest.TestCase):
         held = evaluate_snapshot(self._qianlong_swing_snapshot(
             breakout_confirmed=False, marker_k_sessions_ago=2,
             signed_distance_from_ma5_pct=-0.5, distance_from_box_top_pct=-3.0))
-        self.assertEqual(held["decision"], "research_candidate")
+        self.assertIsNone(held["qianlong_warning"]["level"])
         lost = evaluate_snapshot(self._qianlong_swing_snapshot(
             breakout_confirmed=False, marker_k_sessions_ago=2,
             signed_distance_from_ma5_pct=-2.5, distance_from_box_top_pct=-4.0))
-        self.assertEqual(lost["decision"], "no_trade")
+        self.assertEqual(lost["qianlong_warning"]["level"], "red")
         self.assertEqual(lost["qianlong_evidence"]["failed"], ["pullback_support"])
         stale = evaluate_snapshot(self._qianlong_swing_snapshot(
             breakout_confirmed=False, marker_k_sessions_ago=8))
@@ -195,23 +200,34 @@ class XiaojieLeaderFlowTests(unittest.TestCase):
         result = evaluate_snapshot(self._qianlong_swing_snapshot(overhead_high_distance_pct=2.0))
         self.assertEqual(result["decision"], "research_candidate")
         self.assertIn("qianlong_overhead_pressure", result["risk_flags"])
+        self.assertEqual(result["qianlong_warning"], {"level": "yellow", "reasons": ["上方前高压力：距60日高点2.0%"]})
         self.assertEqual(result["position"]["target_fraction"], 0.05)
 
-    def test_the_evidence_gate_can_be_switched_off_for_ablation(self):
-        result = evaluate_snapshot(self._qianlong_swing_snapshot(fundamental_pe=-3.0),
-                                   {"qianlong_evidence_required": False})
-        self.assertEqual(result["decision"], "research_candidate")
-        self.assertIn("qianlong_evidence_failed", result["risk_flags"])
+    def test_blocking_can_be_restored_for_a_walk_forward_comparison(self):
+        warned = self._qianlong_swing_snapshot(fundamental_pe=-3.0)
+        self.assertEqual(evaluate_snapshot(warned)["decision"], "research_candidate")
+        blocked = evaluate_snapshot(warned, {"qianlong_gates_block": True})
+        self.assertEqual(blocked["decision"], "no_trade")
+        self.assertEqual(blocked["position"]["target_fraction"], 0.0)
+        # A yellow warning never blocks, even under the blocking policy.
+        yellow = evaluate_snapshot(self._qianlong_swing_snapshot(distance_from_ma20_pct=20.0),
+                                   {"qianlong_gates_block": True})
+        self.assertEqual(yellow["decision"], "research_candidate")
 
-    def test_qianlong_swing_three_overheat_flags_blocks_entirely(self):
+    def test_three_overheat_flags_are_sent_under_a_red_warning_with_values(self):
+        # 新华文轩 601811 on 2026-09-22 10:30: 40% above MA20, +27% in five
+        # sessions, 文化传媒 +3.8% on an 8.7% net inflow rate.
         result = evaluate_snapshot(self._qianlong_swing_snapshot(
-            distance_from_ma20_pct=20.0, pre_signal_5d_return_pct=15.0,
-            sector_day_return_pct=3.0, sector_net_inflow_rate_pct=5.0,
-            stock_vs_sector_divergence_pct=0.0,
+            distance_from_ma20_pct=40.3, pre_signal_5d_return_pct=27.1,
+            sector_day_return_pct=3.833, sector_net_inflow_rate_pct=8.66,
+            stock_vs_sector_divergence_pct=6.2,
         ))
-        self.assertEqual(result["decision"], "no_trade")
-        self.assertEqual(result["position"]["target_fraction"], 0.0)
-        self.assertGreaterEqual(result["qianlong_swing_overheat"]["count"], 3)
+        self.assertEqual(result["decision"], "research_candidate")
+        self.assertEqual(result["position"]["target_fraction"], 0.05)
+        self.assertEqual(result["qianlong_swing_overheat"]["count"], 3)
+        self.assertEqual(result["qianlong_warning"]["level"], "red")
+        self.assertEqual(result["qianlong_warning"]["reasons"],
+                         ["过热3项：高于20日线40%、5日已涨27%、板块已热（涨+3.8%，净流入率+8.7%）"])
 
     def test_qianlong_swing_overheat_does_not_apply_outside_its_own_mode(self):
         result = evaluate_snapshot(self._snapshot(

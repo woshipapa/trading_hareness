@@ -284,6 +284,22 @@ class AlertNamesTheStockNotJustItsCodeTests(unittest.TestCase):
         self.assertIn("过热 1 项", text)
         self.assertIn("板块 文化传媒 +3.12% 净流入率 +6.4%", text)
 
+    def test_a_red_warning_leads_the_alert_with_its_reasons(self):
+        candidate = self._candidate("603636.SH")
+        candidate["mode"] = "潜龙出海_swing"
+        candidate["evidence"]["qianlong_warning"] = {
+            "level": "red", "reasons": ["潜龙证据不成立：基本面兑现（PE -7.8，亏损）", "过热3项：高于20日线40%"]}
+        text = self._text(candidate, {"603636.SH": "南威软件"})
+        self.assertTrue(text.startswith("🔴【红色预警】【研究观察·小杰龙头】南威软件"))
+        self.assertIn("🔴【红色预警】潜龙证据不成立：基本面兑现（PE -7.8，亏损）；过热3项：高于20日线40%\n", text)
+        self.assertIn("不构成交易指令", text)
+
+    def test_a_yellow_warning_is_marked_as_attention(self):
+        candidate = self._candidate("605058.SH")
+        candidate["mode"] = "潜龙出海_swing"
+        candidate["evidence"]["qianlong_warning"] = {"level": "yellow", "reasons": ["过热2项：高于20日线60%、5日已涨32%"]}
+        self.assertIn("🟡【注意】过热2项", self._text(candidate, self.names))
+
     def test_other_modes_carry_no_qianlong_line(self):
         self.assertNotIn("潜龙证据", self._text(self._candidate(), self.names))
 

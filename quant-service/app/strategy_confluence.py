@@ -36,9 +36,7 @@ class ConfluenceBook:
                 self._xiaojie.setdefault(symbol, set()).add(str(candidate.get("mode") or "unclassified"))
 
     def hydrate_xiaojie(self, day: date, rows: Iterable[Mapping[str, Any]]) -> None:
-        # Shadow rows (a gated 潜龙 name is stored as no_trade) are evidence
-        # for scoring the gate, not a detection another strategy may cite.
-        self.note_xiaojie(day, [row for row in rows if row.get("decision") != "no_trade"])
+        self.note_xiaojie(day, rows)
         self.xiaojie_hydrated = True
 
     def set_teacher_plans(self, day: date, plans: Mapping[str, Mapping[str, Any]], refreshed_at: Any) -> None:

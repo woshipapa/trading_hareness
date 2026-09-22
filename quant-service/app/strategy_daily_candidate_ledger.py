@@ -255,8 +255,7 @@ def materialize_leader_flow_candidates(connection: Any, as_of_date: date) -> int
         """SELECT symbol, CASE WHEN mode='launch_radar' THEN 'launch_radar' ELSE 'xiaojie_leader_flow' END AS strategy_key,
                   array_agg(DISTINCT mode ORDER BY mode) AS modes, min(first_seen_at) AS first_seen_at,
                   sum(observation_count)::int AS observations, bool_or(alerted_at IS NOT NULL) AS alerted
-             FROM quant.xiaojie_leader_flow_observations
-            WHERE trading_date=%s AND decision IS DISTINCT FROM 'no_trade'
+             FROM quant.xiaojie_leader_flow_observations WHERE trading_date=%s
             GROUP BY 1,2 ORDER BY min(first_seen_at)""",
         (as_of_date,),
     ).fetchall()

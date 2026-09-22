@@ -98,8 +98,9 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "inflow, stock-vs-sector divergence) scoped to the 潜龙出海_swing fallback mode only, calibrated from a "
         "23-observation \"小杰交流\" event study (2026-08-26 to 09-16); v3 wires those inputs live and adds the "
         "潜龙 five-evidence contract (MA convergence/box, volume marker K, pullback holding MA5/box top, sector "
-        "main line, profitable fundamentals) distilled from the 小杰交流 replies - missing evidence is no_trade, "
-        "and gated names are settled under their own mode for ablation",
+        "main line, profitable fundamentals) distilled from the 小杰交流 replies; a failed or missing item or three "
+        "overheat flags sends the reminder under a red warning with its reasons (blocking is a preregistered "
+        "switch for walk-forward comparison)",
     ),
     # Per-stock plans distilled from a named analyst's post-close review
     # (video/text).  The pack is point-in-time (first session whose 09:15 open

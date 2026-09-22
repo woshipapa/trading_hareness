@@ -694,9 +694,10 @@ class QianlongInputTests(unittest.TestCase):
         self.assertAlmostEqual(earlier["overhead_high_distance_pct"], (10.7 - 10.5) / 10.5 * 100)
         self.assertEqual(earlier["fundamental_pe"], 30.0)
 
-    def test_the_pool_reports_gated_qianlong_names_separately(self):
+    def test_a_qianlong_name_missing_evidence_is_a_candidate_under_a_red_warning(self):
         # A front-row breakout in a main sector with no fundamentals on file:
-        # every non-潜龙 gate passes, the missing evidence alone turns it away.
+        # every other gate passes, and the missing evidence rides along as a
+        # red warning on the candidate rather than turning it away.
         def sealed(symbol):
             return {"symbol": symbol, "price": 11.0, "pct_change": 10.0, "volume": 1e6, "turnover": 1.08e7,
                     "raw": {"open_price": 10.5, "high_price": 11.0, "low_price": 10.4, "prev_price": 10.0}}
@@ -715,10 +716,8 @@ class QianlongInputTests(unittest.TestCase):
                                index_volume_ratio=1.2, index_above_support=True)
         self.assertEqual(result["sector_flow"]["status"], "fresh")
         self.assertEqual(result["sector_flow"]["boards"], 2)
-        gated = {item["symbol"]: item for item in result["qianlong_gated"]}
-        self.assertIn("A.SZ", gated)
-        self.assertNotIn("A.SZ", {item["symbol"] for item in result["candidates"]})
-        self.assertEqual(gated["A.SZ"]["decision_without_qianlong_gates"], "research_candidate")
-        contract = gated["A.SZ"]["evidence"]["qianlong_evidence"]
-        self.assertIn("fundamental", contract["missing"])
-        self.assertEqual(gated["A.SZ"]["evidence"]["qianlong_inputs"]["sector_flow"]["label"], "文化传媒")
+        candidate = {item["symbol"]: item for item in result["candidates"]}["A.SZ"]
+        self.assertEqual(candidate["mode"], "潜龙出海_swing")
+        self.assertEqual(candidate["evidence"]["qianlong_warning"]["level"], "red")
+        self.assertIn("fundamental", candidate["evidence"]["qianlong_evidence"]["missing"])
+        self.assertEqual(candidate["evidence"]["qianlong_inputs"]["sector_flow"]["label"], "文化传媒")
