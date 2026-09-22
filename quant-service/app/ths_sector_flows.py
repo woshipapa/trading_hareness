@@ -53,6 +53,10 @@ async def sync_industry(
             "provider": provider_key, "request_key": outcome["request_key"]}
 
 
+#: 概念资金流一天约 400 个板块、每板块两条语句，10 秒的默认值必然超时。
+CONCEPT_PERSIST_TIMEOUT_SECONDS = 120.0
+
+
 async def sync_concept_signals(
     request: Any,
     *,
@@ -96,9 +100,17 @@ async def sync_concept_signals(
                      decimal_or_none(row.get("net_sell_amount")), int(row["company_num"]) if row.get("company_num") not in (None, "") else None,
                      row.get("lead_stock"), json_value(row)),
                 )
-    await run_database_blocking(persist_concept_flow)
-    results["concept_flow"] = {"status": concept_outcome["status"], "taxonomy_key": "ths_concept_flow", "sectors": len(concept_rows),
-                                "provider": concept_provider, "request_key": concept_outcome["request_key"]}
+    # About 400 concepts, two statements each, so the executor's 10s default is
+    # not enough; and a slow write here must not take limit strength down with
+    # it, which is why that taxonomy had never been written at all.
+    try:
+        await run_database_blocking(persist_concept_flow, timeout_seconds=CONCEPT_PERSIST_TIMEOUT_SECONDS)
+        results["concept_flow"] = {"status": concept_outcome["status"], "taxonomy_key": "ths_concept_flow",
+                                   "sectors": len(concept_rows), "provider": concept_provider,
+                                   "request_key": concept_outcome["request_key"]}
+    except Exception as error:  # noqa: BLE001 - reported per source; limit strength still runs
+        results["concept_flow"] = {"status": "failed", "taxonomy_key": "ths_concept_flow", "sectors": 0,
+                                   "error": str(getattr(error, "detail", error))[:200]}
     try:
         strength_outcome = await fetch_catalog(fetch_request(api_name="limit_cpt_list", provider=request.provider, params={"trade_date": stamp}, max_rows=1000))
         strength_rows = [row for row in await load_rows(str(strength_outcome["request_key"])) if str(row.get("ts_code") or "").endswith(".TI") and row.get("name")]
@@ -120,7 +132,7 @@ async def sync_concept_signals(
                         ("ths_limit_strength", sector_key, day, strength_provider, observed, decimal_or_none(row.get("pct_chg")),
                          int(row["cons_nums"]) if row.get("cons_nums") not in (None, "") else None, json_value(row)),
                     )
-        await run_database_blocking(persist_limit_strength)
+        await run_database_blocking(persist_limit_strength, timeout_seconds=CONCEPT_PERSIST_TIMEOUT_SECONDS)
         results["limit_strength"] = {"status": strength_outcome["status"], "taxonomy_key": "ths_limit_strength", "sectors": len(strength_rows),
                                       "provider": strength_provider, "request_key": strength_outcome["request_key"]}
     except http_exception as error:
@@ -129,4 +141,4 @@ async def sync_concept_signals(
     return {"status": status, "trade_date": str(day), "sources": results}
 
 
-__all__ = ["sync_industry", "sync_concept_signals"]
+__all__ = ["CONCEPT_PERSIST_TIMEOUT_SECONDS", "sync_industry", "sync_concept_signals"]

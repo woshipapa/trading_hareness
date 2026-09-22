@@ -1124,31 +1124,34 @@ class AnnualDailyBackfill:
         counts: dict[str, int] = {}
         for api_name, kind in mappings:
             with self.db.transaction() as connection:
+                # Whichever provider actually answered keeps its own provenance.
+                # Pinning one here silently skipped every row the fallback chain
+                # fetched, which is how concept flow and limit strength stayed
+                # empty while their raw evidence sat in this very table.
                 raw_rows = connection.execute(
-                    """SELECT DISTINCT ON(row_data->>'trade_date',row_data->>'ts_code') row_data,available_at
+                    """SELECT DISTINCT ON(row_data->>'trade_date',row_data->>'ts_code')
+                              provider_key,row_data,available_at
                          FROM quant.tushare_raw_records
-                        WHERE provider_key='tushare_super_sdk' AND api_name=%s
+                        WHERE api_name=%s
                           AND row_data->>'ts_code' LIKE '%%.TI'
                           AND row_data->>'trade_date' ~ '^[0-9]{8}$'
                           AND to_date(row_data->>'trade_date','YYYYMMDD') BETWEEN %s AND %s
                         ORDER BY row_data->>'trade_date',row_data->>'ts_code',available_at DESC""",
                     (api_name, self.start_date, self.end_date),
                 ).fetchall()
-            grouped: dict[str, list[dict[str, Any]]] = {}
-            available_by_date: dict[str, datetime] = {}
+            grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            available_by_group: dict[tuple[str, str], datetime] = {}
             for raw in raw_rows:
                 row = dict(raw["row_data"])
-                stamp = str(row.get("trade_date") or "")
-                grouped.setdefault(stamp, []).append(row)
-                available_by_date[stamp] = max(
-                    available_by_date.get(stamp, raw["available_at"]), raw["available_at"],
+                group = (str(raw["provider_key"]), str(row.get("trade_date") or ""))
+                grouped.setdefault(group, []).append(row)
+                available_by_group[group] = max(
+                    available_by_group.get(group, raw["available_at"]), raw["available_at"],
                 )
-            for stamp, rows in grouped.items():
+            for group, rows in grouped.items():
                 with self.db.transaction() as connection:
                     _stage_rows(connection, rows)
-                    _persist_sector_flow(
-                        connection, "tushare_super_sdk", available_by_date[stamp], kind=kind,
-                    )
+                    _persist_sector_flow(connection, group[0], available_by_group[group], kind=kind)
             counts[api_name] = len(raw_rows)
         return counts
 
