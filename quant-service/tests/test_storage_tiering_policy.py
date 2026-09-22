@@ -17,7 +17,7 @@ class StorageTieringPolicyTests(unittest.TestCase):
         self.assertFalse(set(capabilities) & set(KEEP_HOT))
         all_a = next(rule for rule in RULES if rule.capability == "a_share_prices_snapshot")
         self.assertTrue(all_a.realtime)
-        self.assertEqual(tiering_policy()["mover"], "owner")
+        self.assertIn("owner grants", tiering_policy()["mover"])
 
     def test_status_reports_tier_usage_and_twin_presence(self):
         class Result:
@@ -27,16 +27,26 @@ class StorageTieringPolicyTests(unittest.TestCase):
             def fetchall(self):
                 return self.rows
 
+            def fetchone(self):
+                return self.rows[0] if self.rows else None
+
         class Connection:
             def execute(self, sql, params=None):
                 if "GROUP BY 1" in sql:
                     return Result([{"tablespace": "pg_default", "bytes": 100}, {"tablespace": "stock_cold", "bytes": 7}])
+                if "to_regclass" in sql:                           # mover readiness: no grant yet
+                    return Result([{"cold_exists": True, "cold_ok": False, "hot_ok": True}])
+                if "storage_tiering_run" in str(params):
+                    return Result([])
                 return Result([{"name": "quant.raw_market_observations_cold", "tablespace": "stock_cold"}])
 
         status = tiering_status(Connection())
         self.assertEqual(status["tier_usage_bytes"], {"pg_default": 100, "stock_cold": 7})
         self.assertTrue(status["cold_twins"]["quant.raw_market_observations_cold"]["exists"])
         self.assertFalse(status["cold_twins"]["quant.intraday_quote_observations_cold"]["exists"])
+        readiness = status["mover_readiness"]["quant.raw_market_observations:a_share_prices_snapshot"]
+        self.assertEqual(readiness["status"], "awaiting_owner_grant")
+        self.assertIsNone(status["mover_last_run"])
 
 
 if __name__ == "__main__":

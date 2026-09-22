@@ -75,8 +75,12 @@ for 2 sessions; intraday replay evidence for 5; sampled quote/rule-input
 evidence for 10; daily bars, reviews and supplements stay hot. The intended
 transfer is copy-after-close into the owner's cold twin, then delete from hot
 only after the hot window and a verified cold copy (same key and payload
-hash), outside 09:00-15:30 on trading days. The owner runs it; the peer never
-moves rows. The peer's hot budget (the optional-capture storage guard)
+hash), outside 09:00-15:45 on trading days. The research scheduler's
+`storage_tiering_mover` executes it over the 5433 lane once the owner grants
+`stock_peer` SELECT,INSERT on the cold twins (it also requires an index
+leading with the key on each twin); until then it reports
+`awaiting_owner_grant` and touches nothing. The owner may instead run the same
+policy from its own job. The peer's hot budget (the optional-capture storage guard)
 counts only relations in the default tablespace; `stock_cold` usage is
 reported separately as `cold_tablespace`. Board curves and the close-window
 minute profile are exempt from the guard's stop (operator decision,

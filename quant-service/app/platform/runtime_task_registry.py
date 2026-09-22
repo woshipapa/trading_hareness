@@ -73,6 +73,12 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         ("market_events", "raw_market_observations"),
         "archive short-lived and post-close public evidence (pools, LHB, corporate events, ticks)",
     ),
+    "storage_tiering_mover": RuntimeTaskContract(
+        "storage_tiering_mover", "research", "bounded passes outside 09:00-15:45 on trading days", (),
+        ("raw_market_observations", "intraday_quote_observations", "intraday_rule_input_snapshots"),
+        "copy closed sessions of these hot tables into their stock_cold twins (*_cold), delete hot rows past the "
+        "hot window only when the cold copy matches; inert until the owner grants SELECT,INSERT on the twins",
+    ),
     "all_a_level1_snapshot": RuntimeTaskContract(
         "all_a_level1_snapshot", "intraday_edge", "60s during evidence observation session from 09:15",
         ("a_share_prices_snapshot",), ("raw_market_observations",),

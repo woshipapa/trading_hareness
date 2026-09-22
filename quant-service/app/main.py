@@ -3862,6 +3862,32 @@ async def public_evidence_capture_loop() -> None:
     await _datasource_loops()["public_evidence_capture"]()
 
 
+async def storage_tiering_mover_loop() -> None:
+    """Hot -> stock_cold copy with overlap, verified hot deletion; inert until the owner grants.
+
+    Each pass runs on its own thread (not the shared DB executor) for at most
+    eight minutes and only outside 09:00-15:45 on trading days.  A report is
+    stored when rows moved, the status changed, or every 30 minutes.
+    """
+    from .storage_tiering_mover import StorageTieringMover, persist_run_report
+    mover = StorageTieringMover(db)
+    last_status, last_saved = None, 0.0
+    while True:
+        delay = 900.0
+        try:
+            report = await asyncio.to_thread(mover.run_pass, budget_seconds=480.0)
+            moved = bool(report.get("copied_rows") or report.get("deleted_rows"))
+            now_monotonic = asyncio.get_running_loop().time()
+            if moved or report.get("status") != last_status or now_monotonic - last_saved >= 1800:
+                await asyncio.to_thread(persist_run_report, db, report)
+                last_status, last_saved = report.get("status"), now_monotonic
+            if moved or (report.get("status") in {"completed", "partial"} and not report.get("complete")):
+                delay = 60.0
+        except Exception as error:  # noqa: BLE001 - the next pass retries
+            print(f"storage tiering pass failed: {safe_error_detail(str(error), 300)}")
+        await asyncio.sleep(delay)
+
+
 async def post_close_public_archive_loop() -> None:
     """Archive the short-lived and post-close public evidence once per session."""
     await _datasource_loops()["post_close_public_archive"]()
@@ -5159,6 +5185,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "all_a_level1_snapshot": os.getenv("ALL_A_LEVEL1_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "public_evidence_capture": os.getenv("PUBLIC_EVIDENCE_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "post_close_public_archive": os.getenv("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "storage_tiering_mover": os.getenv("STORAGE_TIERING_MOVER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
         },
         loops={
             "intraday_monitor": lambda: intraday_monitor_loop(interval_seconds),
@@ -5173,6 +5200,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "all_a_level1_snapshot": all_a_level1_snapshot_capture_loop,
             "public_evidence_capture": public_evidence_capture_loop,
             "post_close_public_archive": post_close_public_archive_loop,
+            "storage_tiering_mover": storage_tiering_mover_loop,
         },
     )
     validate_runtime_task_specs(specs)

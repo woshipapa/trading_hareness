@@ -2,8 +2,8 @@
 
 The owner database keeps its hot tier on NVMe (the default tablespace) and a
 cold tier on a separate disk (``stock_cold``) with cold twins such as
-``raw_market_observations_cold``.  By the owner contract only the owner moves
-rows between tiers; the peer declares *what* may move and *when*:
+``raw_market_observations_cold``.  The peer declares *what* may move and
+*when*:
 
 * ``realtime`` data is read by same-day live computation (the latest all-A
   snapshot, today's tape).  It stays hot through its session.
@@ -13,9 +13,10 @@ rows between tiers; the peer declares *what* may move and *when*:
   and payload hash) - the two tiers overlap for the whole window, so no read
   path ever sees a gap and a failed copy never loses data.
 
-The owner job reads this policy from ``GET /api/v1/research/storage-tiering``
-and runs outside the session (``transfer_window``) in bounded batches.  The
-peer itself never moves or deletes rows here.
+``storage_tiering_mover`` executes the policy from the research scheduler
+once the owner grants SELECT,INSERT on the cold twins (until then it only
+reports ``awaiting_owner_grant``); alternatively the owner job reads this
+policy from ``GET /api/v1/research/storage-tiering`` and runs it itself.
 """
 
 from __future__ import annotations
@@ -59,16 +60,17 @@ KEEP_HOT = ("daily_bar", "legacy_daily_bar", "daily", "watch_daily_review", "cap
             "block_trade_supplement", "corporate_risk_supplement", "lhb_supplement", "moneyflow_supplement",
             "analyst_heat_supplement", "market_sentiment_close")
 
-TRANSFER_WINDOW = {"timezone": "Asia/Shanghai", "trading_days": "15:45-08:45", "non_trading_days": "all day",
-                   "never": "09:00-15:30 on a trading day"}
-VERIFY = ("copy: INSERT INTO <cold_twin> SELECT ... ON CONFLICT DO NOTHING, bounded batches ordered by "
-          "(<time_column>, primary key); delete from hot only rows whose primary key and payload hash "
-          "exist in the cold twin and whose session is older than hot_sessions")
+TRANSFER_WINDOW = {"timezone": "Asia/Shanghai", "trading_days": "15:45-09:00", "non_trading_days": "all day",
+                   "never": "09:00-15:45 on a trading day"}
+VERIFY = ("copy: INSERT INTO <cold_twin> SELECT ... WHERE NOT EXISTS (same key in the twin) ON CONFLICT DO NOTHING, "
+          "one calendar day and 50 symbols per statement; delete from hot only rows whose key and verification "
+          "columns (raw: payload_sha256) match the twin and whose session is older than hot_sessions")
 
 
 def tiering_policy() -> dict[str, Any]:
     return {"version": POLICY_VERSION, "rules": [asdict(rule) for rule in RULES], "keep_hot": list(KEEP_HOT),
-            "transfer_window": TRANSFER_WINDOW, "verify_before_delete": VERIFY, "mover": "owner",
+            "transfer_window": TRANSFER_WINDOW, "verify_before_delete": VERIFY,
+            "mover": "peer research scheduler once the owner grants SELECT,INSERT on the cold twins (or the owner job)",
             "unlisted_capabilities": "stay hot until listed"}
 
 
@@ -86,8 +88,16 @@ def tiering_status(connection: Any) -> dict[str, Any]:
              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
              LEFT JOIN pg_tablespace t ON t.oid=c.reltablespace
             WHERE n.nspname||'.'||c.relname = ANY(%s)""", (twins,)).fetchall()}
+    from .storage_tiering_mover import latest_run_report, rule_readiness
+    readiness = {}
+    for rule in RULES:
+        key = f"{rule.table}:{rule.capability}" if rule.capability else rule.table
+        ready = rule_readiness(connection, rule)
+        readiness[key] = {k: v for k, v in ready.items() if k not in ("columns", "spec")}
     return {
         **tiering_policy(),
+        "mover_readiness": readiness,
+        "mover_last_run": latest_run_report(connection),
         "tier_usage_bytes": {row["tablespace"]: int(row["bytes"] or 0) for row in usage},
         "cold_twins": {name: {"exists": name in present,
                               "tablespace": (present.get(name) or {}).get("tablespace")} for name in twins},

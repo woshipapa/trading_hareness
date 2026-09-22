@@ -42,7 +42,7 @@
 - `daily_adjustment_factors` 不写恒等占位值；缺失日用“没有因子行”表达。因子能否进入研究价格由 `raw->>'factor_semantics'` 与 provider/正值检查决定。
 - `quant.runtime_leases` 是预期的高频小写入；其余写入应有对应 scheduler/run ledger。异常写入由 owner `/api/v1/peer/errors` 与 peer ERROR 日志双向发现。
 - 本申报不包含 owner 冷层表；`stock_cold` 中的关系是 owner 运维证据，`stock_peer` 不依赖也不写入。
-- 热/冷分层由 owner 执行：peer 只在 `GET /api/v1/research/storage-tiering` 声明哪些证据是当日实时计算所需、各保留几个交易日在热层（`app/storage_tiering_policy.py`）；收盘后复制到冷孪生表、热窗口过后且冷副本校验一致才从热层删除，期间两层重叠。peer 不移动也不删除这些行。
+- 热/冷分层：peer 在 `GET /api/v1/research/storage-tiering` 声明哪些证据是当日实时计算所需、各保留几个交易日在热层（`app/storage_tiering_policy.py`）。research scheduler 的 `storage_tiering_mover`（5433 批量通道，交易日 09:00–15:45 不运行）收盘后把已收盘交易日复制到 `stock_cold` 冷孪生表（`*_cold`），热窗口过后且冷副本主键与校验列（raw 为 `payload_sha256`）一致才从热层删除，期间两层重叠。**只有 owner 授予 `stock_peer` 冷孪生表 SELECT,INSERT 后才会动作**；未授权时只报告 `awaiting_owner_grant`。owner 也可以不授权、改由自己的任务按同一策略执行。
 
 ## 对账输出建议
 
