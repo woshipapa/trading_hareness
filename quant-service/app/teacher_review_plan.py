@@ -167,7 +167,7 @@ def plan_stock(
     setup, checklist = "", []
     if playbook == "relay_one_word":
         setup = f"一字板，收 {lv['close']}，距前高 {p['prior_high']} 差 {round((p['prior_high'] / lv['close'] - 1) * 100, 2)}%"
-        checklist = [f"竞价成交额 ≥ {_yi(p['auction_amount_min'])}（放量分歧打满）", f"最高 > 前高 {p['prior_high']}（参考）",
+        checklist = [f"09:25 竞价打满（涨停价）且封单 ≥ {_yi(p['auction_amount_min'])}", f"最高 > 前高 {p['prior_high']}（参考）",
                      f"换手 ≤ {p['turnover_max_pct']:g}%", "开板后跌破分时均价或昨收 → 失效"]
     elif playbook == "relay_acceleration":
         low, high = p["entry_amount_range"]

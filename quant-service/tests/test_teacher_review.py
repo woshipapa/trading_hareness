@@ -46,7 +46,8 @@ def at(hour: int, minute: int, day: date = date(2026, 9, 22)) -> datetime:
 
 def quote(price: float, pre_close: float, *, amount: float, volume_lot: float, volume_ratio: float = 2.0,
           turnover: float = 5.0, sealed: bool = False, opened: float | None = None, high: float | None = None) -> dict:
-    book = {"book_side": "bid_only", "bids": [{"price": price, "size": 50000}], "asks": []} if sealed else {
+    # A sealed book as parse_longhu_order_book returns it: bid-only, seal volume in lots.
+    book = {"book_side": "bid_only", "bids": [{"price": price, "size": 200000}], "asks": [], "seal_volume_lot": 200000} if sealed else {
         "book_side": "two_sided", "bids": [{"price": price - 0.01, "size": 100}], "asks": [{"price": price, "size": 100}]}
     return {
         "price": price, "pct_change": round((price / pre_close - 1) * 100, 3), "amount": amount,
@@ -290,15 +291,24 @@ class PrecisionTests(unittest.TestCase):
         quit_ = teacher_review_signals(follower, mine, minute, None, at(10, 1) + timedelta(seconds=10), tape=tape)
         self.assertTrue(any(item["signal_key"].endswith("teacher_review_invalid:sympathy_follow") for item in quit_))
 
-    def test_one_word_relay_reads_the_0925_auction_snapshot(self):
+    def test_one_word_relay_reads_the_0925_auction_seal(self):
         book = TeacherMarketBook()
         plan = watch("001216.SZ", "relay_one_word", {"auction_amount_min": 5e8, "turnover_max_pct": 12.0, "prior_high": 24.06})
-        sealed = quote(26.47, 24.06, amount=6.2e8, volume_lot=234000, turnover=3.0, sealed=True, opened=26.47)
-        book.store_auction("001216.SZ", at(9, 30), {"amount": 4.1e8, "seal_amount": 3.2e8, "source": "fuyao_auction_0925", "final": True})
+        sealed = quote(26.47, 24.06, amount=2e7, volume_lot=7500, turnover=0.3, sealed=True, opened=26.47)
+        # 2026-09-22 华瓷股份: matched only 0.19亿, unmatched buy at the limit 5.15亿 -> "竞价五个亿，打满".
+        book.store_auction("001216.SZ", at(9, 30), {"amount": 0.19e8, "seal_amount": 5.15e8, "price": 26.47,
+                                                    "source": "fuyao_auction_0925", "final": True})
         signals = teacher_review_signals(plan, sealed, {"vwap": 26.47}, None, at(9, 30), market_book=book)
-        self.assertEqual(signals, [])                      # 4.1亿 < 5亿 although the cumulative amount is 6.2亿
-        features = scan_features("001216.SZ", sealed, {"vwap": 26.47}, at(9, 30))
-        self.assertEqual(features["auction_amount"], 6.2e8)   # the proxy the snapshot replaces
+        self.assertEqual(signals[0]["signal_type"], "entry")
+        self.assertEqual(signals[0]["conditions"]["teacher_review"]["features"]["auction_seal"], 5.15e8)
+        thin = TeacherMarketBook()
+        thin.store_auction("001216.SZ", at(9, 30), {"amount": 4.1e8, "seal_amount": 3.2e8, "price": 26.47,
+                                                    "source": "fuyao_auction_0925", "final": True})
+        self.assertEqual(teacher_review_signals(plan, sealed, {"vwap": 26.47}, None, at(9, 30), market_book=thin), [])
+        below_limit = TeacherMarketBook()
+        below_limit.store_auction("001216.SZ", at(9, 30), {"amount": 1e7, "seal_amount": 6e8, "price": 26.0,
+                                                           "source": "fuyao_auction_0925", "final": True})
+        self.assertEqual(teacher_review_signals(plan, sealed, {"vwap": 26.47}, None, at(9, 30), market_book=below_limit), [])
 
     def test_volume_projection_follows_the_stocks_own_curve(self):
         from app.teacher_review_rules import _session_share
@@ -310,14 +320,18 @@ class PrecisionTests(unittest.TestCase):
 
 
 class RuleTests(unittest.TestCase):
-    def test_one_word_relay_needs_auction_amount_turnover_and_seal(self):
+    def test_one_word_relay_needs_a_full_auction_seal_turnover_and_a_sealed_book(self):
         plan = watch("001216.SZ", "relay_one_word", {"auction_amount_min": 5e8, "turnover_max_pct": 12.0, "prior_high": 24.26})
-        sealed = quote(26.47, 24.06, amount=6e8, volume_lot=226700, turnover=3.0, sealed=True, opened=26.47)
+        # Longhu book after the 09:25 match: bid-only at the limit, 200,000 lots x 26.47 = 5.29亿.
+        sealed = quote(26.47, 24.06, amount=2e7, volume_lot=7500, turnover=0.3, sealed=True, opened=26.47)
+        sealed["raw"]["longhu_watch_quote"]["order_book"]["seal_volume_lot"] = 200000
         signals = teacher_review_signals(plan, sealed, {"vwap": 26.47}, None, at(9, 30))
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0]["signal_type"], "entry")
         self.assertEqual(signals[0]["policy_profile"], "teacher_review")
-        # The same amount observed after 09:31 is no longer an auction proxy.
+        features = signals[0]["conditions"]["teacher_review"]["features"]
+        self.assertEqual(features["sources"]["auction_seal"], "longhu_book_0925")
+        # The book after 09:31 is no longer the auction seal.
         self.assertEqual(teacher_review_signals(plan, sealed, {"vwap": 26.47}, None, at(9, 45)), [])
 
     def test_acceleration_window_and_failure_amount(self):
@@ -517,7 +531,7 @@ class PipelineIntegrationTests(unittest.TestCase):
         text = intraday_alert_text(signal, {"label": "华瓷股份"}, {"name": "华瓷股份"}, None)
         self.assertIn("【老师复盘｜条件触发】", text)
         self.assertIn("老师原话：老师原话", text)
-        self.assertIn("✔ 竞价成交额≥5亿", text)
+        self.assertIn("✔ 竞价打满且封单≥5亿", text)
         self.assertIn("不构成交易指令", text)
 
 

@@ -41,7 +41,7 @@ _CN_TZ = ZoneInfo("Asia/Shanghai")
 #: Before continuous trading only plays judged on the final 09:25 auction run.
 AUCTION_PLAYBOOKS = frozenset({"relay_one_word"})
 AUCTION_PLAYBOOK_UNTIL = time(9, 30)
-MODEL_VERSION = "teacher-review-rules-v3"
+MODEL_VERSION = "teacher-review-rules-v4"
 
 
 def _num(value: Any) -> float | None:
@@ -494,6 +494,29 @@ def _session_share(profile: Mapping[str, Any] | None, clock: str, elapsed_min: i
     return 1.0
 
 
+def _auction_seal(features: dict[str, Any], quote: Mapping[str, Any]) -> None:
+    """The 09:25 auction seal: unmatched buy x auction price, and whether the auction printed at the limit.
+
+    Fuyao's final auction snapshot first; else, between 09:25 and 09:31, the
+    Longhu book's bid at the limit (a one-sided book) as it stood after the match.
+    """
+    limit = features.get("limit_up_price")
+    auction = features.get("auction") or {}
+    seal, price, source = _num(auction.get("seal_amount")), _num(auction.get("price")), auction.get("source")
+    if seal is None and "09:25" <= features["clock"] < DEFAULTS["auction_proxy_until"]:
+        raw = quote.get("raw") if isinstance(quote.get("raw"), Mapping) else {}
+        row = raw.get("longhu_watch_quote") or raw.get("longhu_watch_quote_unfresh") or {}
+        book = row.get("order_book") if isinstance(row, Mapping) and isinstance(row.get("order_book"), Mapping) else {}
+        bids = book.get("bids") or []
+        if book.get("book_side") == "bid_only" and _num(book.get("seal_volume_lot")) and bids:
+            price = _num(bids[0].get("price")) or features["price"]
+            seal, source = float(book["seal_volume_lot"]) * 100 * price, "longhu_book_0925"
+    features["auction_seal"] = None if seal is None else round(seal, 2)
+    features["auction_at_limit"] = None if price is None or not limit else price >= float(limit) - 0.005
+    if seal is not None:
+        features["sources"]["auction_seal"] = str(source or "auction")
+
+
 def _live_ma(x: Mapping[str, Any], n: int | None, price: float, frozen: Any = None) -> float | None:
     """Today's MA_n from the frozen prefix (sum of the previous n-1 closes); frozen level for older plans."""
     prefix = (x.get("ma_prefix") or {}).get(str(n)) if n else None
@@ -521,12 +544,13 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
     invalid = False
     path = None
     if pb == "relay_one_word":
+        # 老师“竞价五个亿，打满”：09:25 竞价价在涨停价、且未匹配买单（封单）金额 ≥ 阈值（用户确认 2026-09-22）。
+        seal, at_limit = f.get("auction_seal"), f.get("auction_at_limit")
         auction = f["auction_amount"]
-        seal = (f.get("auction") or {}).get("seal_amount")
-        sig += [_sig(f"竞价成交额≥{_yi(p['auction_amount_min'])}（{f['sources'].get('auction_amount', '—')}）", auction,
-                     None if auction is None else auction >= p["auction_amount_min"], "T"),
-                _sig("竞价封单（未匹配买量×价，参考）", None if seal is None else f"{seal / 1e8:.2f}亿", None if seal is None else seal > 0,
-                     "D", gating=False),
+        sig += [_sig(f"竞价打满且封单≥{_yi(p['auction_amount_min'])}（{f['sources'].get('auction_seal', '—')}）",
+                     None if seal is None else f"{seal / 1e8:.2f}亿/涨停价={at_limit}",
+                     None if seal is None else seal >= p["auction_amount_min"] and bool(at_limit), "T"),
+                _sig("竞价成交额（参考）", None if auction is None else f"{auction / 1e8:.2f}亿", None, "D", gating=False),
                 _sig(f"换手≤{p['turnover_max_pct']:g}%", f["turnover_pct"], (f["turnover_pct"] or 0) <= p["turnover_max_pct"], "T"),
                 _sig("封板中", f["sealed"], f["sealed"]),
                 _sig(f"最高>前高{p['prior_high']}", f["high"], f["high"] > p["prior_high"], "D", gating=False)]
@@ -735,6 +759,8 @@ def teacher_review_signals(
         features["sector_peaks"] = market_book.sector_peaks(observed_at)
     if features.get("auction_amount") is not None and "auction_amount" not in features["sources"]:
         features["sources"]["auction_amount"] = "proxy:cum_amount_before_0931"
+    if playbook in AUCTION_PLAYBOOKS:
+        _auction_seal(features, quote)
     if divergence_book is not None and playbook == "ma5_reclaim_or_divergence":
         live = divergence_book.get(symbol, observed_at)
         if live:
@@ -748,6 +774,9 @@ def teacher_review_signals(
         "price", "pct", "pre_close", "open", "high", "low", "amount", "turnover_pct", "volume_ratio", "vwap",
         "limit_up_price", "sealed", "seal_verified_by_book", "touched_limit", "open_gap_pct", "surge",
         "not_falling", "auction_amount", "clock", "sources")}
+    for key in ("auction_seal", "auction_at_limit"):
+        if key in features:
+            feature_view[key] = features[key]
     for key in ("tape", "divergence_live", "auction", "sector_counts", "leader_latest"):
         if features.get(key):
             feature_view[key] = features[key]

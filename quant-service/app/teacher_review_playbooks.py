@@ -32,7 +32,7 @@ DEFAULTS: Final[dict[str, Any]] = {
 
 # kind: relay = next-session relay, trend = multi-session setup, record = settle only (never watched)
 CATALOG: Final[dict[str, dict[str, Any]]] = {
-    "relay_one_word": {"kind": "relay", "zh": "一字板接力：竞价额/换手/前高",
+    "relay_one_word": {"kind": "relay", "zh": "一字板接力：竞价打满封单额/换手/前高（auction_amount_min = 09:25 封单金额下限）",
                        "required": ("auction_amount_min", "turnover_max_pct", "prior_high")},
     "relay_acceleration": {"kind": "relay", "zh": "放量分歧后次日加速：成交额买点窗口 + 首封额上限",
                            "required": ("seal_amount_max", "entry_amount_range", "entry_pct_min", "fail_amount")},
