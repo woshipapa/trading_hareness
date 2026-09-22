@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-POLICY_VERSION = "peer-storage-tiering-v1"
+POLICY_VERSION = "peer-storage-tiering-v2"
 
 
 @dataclass(frozen=True)
@@ -40,19 +40,23 @@ class TierRule:
 
 _RAW = ("quant.raw_market_observations", "quant.raw_market_observations_cold", "effective_at")
 
+# Hot windows (operator decision 2026-09-22, F: has 500 GB): about a month of
+# every stream stays directly queryable for reviews and pattern mining.
+HOT_SESSIONS = 20
+
 RULES: tuple[TierRule, ...] = (
     # ~1.5 GB a session, ~95% of raw growth; live reads use only the latest snapshot.
-    TierRule(*_RAW, "a_share_prices_snapshot", 2, True, "all-A Level-1 snapshot; live reads take the latest capture"),
-    TierRule(*_RAW, "watch_scan_tape", 5, True, "per-scan watch tape; read by that day's post-close review"),
-    *(TierRule(*_RAW, capability, 5, False, "intraday evidence for replay")
+    TierRule(*_RAW, "a_share_prices_snapshot", HOT_SESSIONS, True, "all-A Level-1 snapshot; live reads take the latest capture"),
+    TierRule(*_RAW, "watch_scan_tape", HOT_SESSIONS, True, "per-scan watch tape; read by the post-close reviews"),
+    *(TierRule(*_RAW, capability, HOT_SESSIONS, False, "intraday evidence for replay")
       for capability in ("realtime_quote", "settled_quote", "order_book_quote", "opening_auction_pulse",
                          "board_change_snapshot", "hot_rank_popularity", "hot_rank_surge", "a_share_hot_stock_list",
                          "a_share_skyrocket_list", "ths_index_prices_snapshot", "a_share_valuations_snapshot",
                          "limit_pool_broken", "news_flash")),
-    TierRule("quant.intraday_quote_observations", "quant.intraday_quote_observations_cold", "observed_at", None, 10, False,
-             "sampled full quote evidence per watched stock"),
-    TierRule("quant.intraday_rule_input_snapshots", "quant.intraday_rule_input_snapshots_cold", "observed_at", None, 10, False,
-             "sampled rule-input snapshots per watched stock"),
+    TierRule("quant.intraday_quote_observations", "quant.intraday_quote_observations_cold", "observed_at", None,
+             HOT_SESSIONS, False, "sampled full quote evidence per watched stock"),
+    TierRule("quant.intraday_rule_input_snapshots", "quant.intraday_rule_input_snapshots_cold", "observed_at", None,
+             HOT_SESSIONS, False, "sampled rule-input snapshots per watched stock"),
 )
 
 # Research reads these from the hot tier; they are small and stay there.
@@ -104,4 +108,4 @@ def tiering_status(connection: Any) -> dict[str, Any]:
     }
 
 
-__all__ = ["KEEP_HOT", "POLICY_VERSION", "RULES", "TierRule", "tiering_policy", "tiering_status"]
+__all__ = ["HOT_SESSIONS", "KEEP_HOT", "POLICY_VERSION", "RULES", "TierRule", "tiering_policy", "tiering_status"]

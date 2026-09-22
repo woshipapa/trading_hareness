@@ -17,6 +17,7 @@ class StorageTieringPolicyTests(unittest.TestCase):
         self.assertFalse(set(capabilities) & set(KEEP_HOT))
         all_a = next(rule for rule in RULES if rule.capability == "a_share_prices_snapshot")
         self.assertTrue(all_a.realtime)
+        self.assertEqual({rule.hot_sessions for rule in RULES}, {20})           # about a month stays hot
         self.assertIn("owner grants", tiering_policy()["mover"])
 
     def test_status_reports_tier_usage_and_twin_presence(self):

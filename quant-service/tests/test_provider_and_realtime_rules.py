@@ -11,14 +11,14 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(bounded_memory_ratio("2"), 0.98)
         self.assertEqual(
             bounded_storage_budget_bytes(
-                str(200 * 1024 ** 3), DEFAULT_RESEARCH_STORAGE_SOFT_BYTES,
+                str(2000 * 1024 ** 3), DEFAULT_RESEARCH_STORAGE_SOFT_BYTES,
                 DEFAULT_RESEARCH_STORAGE_SOFT_BYTES,
             ),
             DEFAULT_RESEARCH_STORAGE_SOFT_BYTES,
         )
         self.assertEqual(
             bounded_storage_budget_bytes(
-                str(40 * 1024 ** 3), DEFAULT_HOT_DATABASE_SOFT_BYTES,
+                str(2000 * 1024 ** 3), DEFAULT_HOT_DATABASE_SOFT_BYTES,
                 DEFAULT_HOT_DATABASE_SOFT_BYTES,
             ),
             DEFAULT_HOT_DATABASE_SOFT_BYTES,

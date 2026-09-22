@@ -9,12 +9,17 @@ from typing import Any
 
 
 GIB = 1024 ** 3
-# The operator reserved 40 GiB for the complete research estate.  Daily P2
-# history is a database-resident evidence ledger, so reserve 36 GiB for that
-# hot path and 4 GiB for bounded artifacts/exports.  The total 40 GiB cap is
-# still absolute; retention jobs keep their existing bounded windows.
-DEFAULT_RESEARCH_STORAGE_SOFT_BYTES = 40 * GIB
-DEFAULT_HOT_DATABASE_SOFT_BYTES = 36 * GIB
+GB = 1000 ** 3
+# Operator decision 2026-09-22: the owner's hot PostgreSQL disk (F:) has
+# 500 GB.  The hot database may use 300 GB (80% warning = 240 GB, 90% stop of
+# optional high-frequency capture = 270 GB), leaving ~200 GB of F: for WAL,
+# temp files, index rebuilds and a one-off table repack (which needs free
+# space equal to the table) and keeping below the owner's 85%-of-disk tier
+# trigger.  The whole research estate (hot database + local artifacts) is
+# capped at 320 GB.  Both are hard caps: environment values can only lower
+# them (the earlier plan was 40 GiB total / 36 GiB hot).
+DEFAULT_RESEARCH_STORAGE_SOFT_BYTES = 320 * GB
+DEFAULT_HOT_DATABASE_SOFT_BYTES = 300 * GB
 
 
 def bounded_min_free_bytes(value: str | None) -> int:
@@ -51,7 +56,7 @@ def bounded_storage_budget_bytes(value: str | None, default: int, maximum: int) 
     A configuration value is an admission-control preference, not permission
     to grow the research estate past its approved capacity.  In particular,
     callers must pass the total or hot-database allocation as ``maximum`` so a
-    stale environment file cannot silently turn the 40 GiB plan into an
+    stale environment file cannot silently turn the approved plan into an
     unbounded collection job.
     """
     try:

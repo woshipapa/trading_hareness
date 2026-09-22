@@ -70,9 +70,11 @@ research prices.
 The peer publishes which of its evidence is needed by same-day live
 computation and how many sessions each stream stays hot:
 `GET /api/v1/research/storage-tiering` (`app/storage_tiering_policy.py`).
-The all-A Level-1 snapshot (~1.5 GB a session, ~95% of raw growth) stays hot
-for 2 sessions; intraday replay evidence for 5; sampled quote/rule-input
-evidence for 10; daily bars, reviews and supplements stay hot. The intended
+Every listed stream (the all-A Level-1 snapshot is ~1.5 GB a session, ~95%
+of raw growth) stays hot for 20 sessions, about a month; daily bars, reviews
+and supplements stay hot. The peer's hot-database budget is 300 GB of the
+500 GB F: disk (80% warning at 240 GB, 90% stop of optional capture at
+270 GB; operator decision 2026-09-22). The intended
 transfer is copy-after-close into the owner's cold twin, then delete from hot
 only after the hot window and a verified cold copy (same key and payload
 hash), outside 09:00-15:45 on trading days. The research scheduler's
