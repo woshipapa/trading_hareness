@@ -465,6 +465,9 @@ class StrategyBacktestRequest(BaseModel):
     top_n: int = Field(default=20, ge=1, le=500)
     total_cost_bps: float = Field(default=18.0, ge=0, le=500)
     factors: list[str] = Field(default_factory=lambda: ["momentum_20d", "sma_gap_20d", "volume_ratio_20d", "reversal_5d"], min_length=1, max_length=16)
+    # Per-factor sign overrides (+1 higher-is-better, -1 lower); omitted factors keep the registry prior.
+    directions: dict[str, Literal[1, -1]] = Field(default_factory=dict)
+    membership_mode: Literal["point_in_time", "current_backfill"] = "point_in_time"
 
 
 class L2PairedObservation(BaseModel):

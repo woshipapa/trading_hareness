@@ -162,6 +162,8 @@ def backtest_strategy(payload: Any, deps: ResearchExperimentDependencies) -> dic
             **dict(registry["configuration"]), "rebalance_days": payload.rebalance_days,
             "hold_days": payload.hold_days, "top_n": payload.top_n,
             "total_cost_bps": payload.total_cost_bps, "factors": payload.factors,
+            "directions": dict(getattr(payload, "directions", {}) or {}),
+            "membership_mode": getattr(payload, "membership_mode", "point_in_time"),
         }
         knowledge_cutoff = deps.as_utc(exchange_day_end(end))
         data_manifest_id = latest_data_manifest_id(connection, end, knowledge_cutoff)

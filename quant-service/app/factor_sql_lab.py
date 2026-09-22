@@ -593,7 +593,15 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
         )
     top_n = max(1, int(parameters.get("top_n", 20)))
     cost_bps = max(0.0, float(parameters.get("total_cost_bps", 18.0)))
-    panel = prepare_factor_panel(connection, universe_key, start_date, end_date, exit_lag)
+    membership_mode = _check_membership_mode(str(parameters.get("membership_mode") or "point_in_time"))
+    # A direction per factor, +1 (higher is better) or -1; the defaults are the
+    # registry's priors, which the 2023-2026 all-A evaluation contradicts for
+    # momentum/MA-gap/volume-ratio/close-strength (short-horizon reversal).
+    overrides = dict(parameters.get("directions") or {})
+    if set(overrides) - set(factor_keys) or any(value not in (1, -1, 1.0, -1.0) for value in overrides.values()):
+        raise ValueError("directions must map requested factors to +1 or -1")
+    directions = {key: float(overrides.get(key, FACTOR_DIRECTIONS[key])) for key in factor_keys}
+    panel = prepare_factor_panel(connection, universe_key, start_date, end_date, exit_lag, membership_mode=membership_mode)
     connection.execute("DROP TABLE IF EXISTS factor_sql_strategy_scores")
     connection.execute(
         """CREATE TEMP TABLE factor_sql_strategy_scores(
@@ -601,12 +609,12 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
                directed_zscore double precision NOT NULL) ON COMMIT DROP"""
     )
     for factor_key in factor_keys:
-        _materialize_factor_scores(connection, factor_key, start_date, end_date)
+        _materialize_factor_scores(connection, factor_key, start_date, end_date, membership_mode)
         connection.execute(
             """INSERT INTO factor_sql_strategy_scores(factor_key,symbol,trading_date,directed_zscore)
                SELECT %s,symbol,trading_date,factor_zscore*%s
                  FROM factor_sql_factor_scores WHERE factor_zscore IS NOT NULL""",
-            (factor_key, FACTOR_DIRECTIONS[factor_key]),
+            (factor_key, directions[factor_key]),
         )
     connection.execute("CREATE INDEX factor_sql_strategy_scores_date_symbol_idx ON factor_sql_strategy_scores(trading_date,symbol)")
     connection.execute("ANALYZE factor_sql_strategy_scores")
@@ -701,13 +709,16 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
             "excluded_unknown_industry_rows": max(
                 0, int(panel.get("rows") or 0) - int(panel.get("industry_pit_rows") or 0)
             ),
+            "membership_mode": membership_mode,
             "blockers": [
                 *_formal_history_blockers(history),
                 *( ["point_in_time_industry_history_missing"] if not point_in_time_industry_ready else [] ),
+                *( _BACKFILL_BLOCKERS if membership_mode == "current_backfill" else [] ),
             ],
             "live_strategy_effect": "none",
         },
         "assumptions": {
+            "factor_directions": directions,
             "long_only": True, "signal_available": "after signal-date close",
             "entry": "next exact SSE trading-day raw open",
             "exit": f"signal trading index + {exit_lag}; never same-day as entry",

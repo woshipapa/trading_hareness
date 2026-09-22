@@ -83,6 +83,24 @@ class FactorSqlLabTests(unittest.TestCase):
         )
         self.assertEqual(trade_insert_params[2], 6)
 
+    def test_strategy_applies_direction_overrides_and_research_mode(self):
+        connection = RecordingConnection()
+        with patch("app.factor_sql_lab.prepare_factor_panel", return_value={}) as prepare_panel:
+            result = run_multi_factor_strategy_sql(
+                connection, "all_a", date(2026, 1, 1), date(2026, 3, 1),
+                {"factors": ["volume_ratio_20d", "reversal_5d"], "rebalance_days": 6, "hold_days": 5,
+                 "directions": {"volume_ratio_20d": -1}, "membership_mode": "current_backfill"},
+            )
+        self.assertEqual(prepare_panel.call_args.kwargs["membership_mode"], "current_backfill")
+        score_params = [params for sql, params in connection.calls if "INSERT INTO factor_sql_strategy_scores" in sql]
+        self.assertEqual([params[1] for params in score_params], [-1.0, 1.0])     # override, then the registry prior
+        self.assertEqual(result["metrics"]["assumptions"]["factor_directions"], {"volume_ratio_20d": -1.0, "reversal_5d": 1.0})
+        self.assertIn("industry_membership_backfilled_from_current", result["metrics"]["promotion_gate"]["blockers"])
+        with self.assertRaises(ValueError):
+            run_multi_factor_strategy_sql(connection, "all_a", date(2026, 1, 1), date(2026, 3, 1),
+                                          {"factors": ["reversal_5d"], "rebalance_days": 6, "hold_days": 5,
+                                           "directions": {"reversal_5d": 2}})
+
     def test_formal_history_requires_calendar_span_as_well_as_trading_day_count(self):
         class Connection:
             def execute(self, _sql, _params):

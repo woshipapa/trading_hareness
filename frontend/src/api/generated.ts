@@ -4471,6 +4471,16 @@ export interface components {
             total_cost_bps: number;
             /** Factors */
             factors?: string[];
+            /** Directions */
+            directions?: {
+                [key: string]: 1 | -1;
+            };
+            /**
+             * Membership Mode
+             * @default point_in_time
+             * @enum {string}
+             */
+            membership_mode: "point_in_time" | "current_backfill";
         };
         /**
          * StrategyDecisionRequest
