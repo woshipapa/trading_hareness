@@ -49,5 +49,26 @@ class TapeRecordTests(unittest.TestCase):
         self.assertIn("m", record)
 
 
+class TapePersistenceTests(unittest.TestCase):
+    def test_non_json_values_cannot_break_the_scan_transaction(self):
+        from decimal import Decimal
+        from app.watch_scan_tape import persist_scan_tape
+        executed = []
+
+        class Connection:
+            def execute(self, sql, params):
+                import json as _json
+                _json.dumps(params[5].obj)          # what psycopg's Json adapter will do
+                executed.append(params)
+                return self
+
+            def fetchone(self):
+                return {"observation_id": 1}
+
+        self.assertTrue(persist_scan_tape(Connection(), scan_id="s", observed_at=at(0),
+                                          rows={"A": {"p": 1.0, "sec": {"cp": Decimal("2")}}}))
+        self.assertEqual(executed[0][5].obj["rows"]["A"]["sec"]["cp"], "2")
+
+
 if __name__ == "__main__":
     unittest.main()

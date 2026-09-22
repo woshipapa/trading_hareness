@@ -361,6 +361,7 @@ def persist_reviews(database: Any, trade_date: date, reviews: list[dict[str, Any
         for symbol, payload in [(review["symbol"], review) for review in reviews] + [("watch:review", summary)]:
             body = {**payload, "provider_key": REVIEW_PROVIDER, "capability": REVIEW_CAPABILITY}
             serialized = _json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
+            body = _json.loads(serialized)
             row = connection.execute(
                 """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
                    VALUES(%s,%s,'cn',%s,%s,%s,%s,%s,%s)

@@ -101,7 +101,10 @@ def persist_scan_tape(connection: Any, *, scan_id: Any, observed_at: datetime,
         return False
     body = {"scan_id": str(scan_id), "observed_at": observed_at.isoformat(), "version": TAPE_VERSION,
             "rows": dict(rows), "provider_key": TAPE_PROVIDER, "capability": TAPE_CAPABILITY}
+    # This write shares the scan's transaction: round-trip through JSON so no
+    # value (a Decimal from a sector read, say) can make the insert fail.
     serialized = json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
+    body = json.loads(serialized)
     row = connection.execute(
         """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
            VALUES(%s,%s,'cn','watch:scan',%s,%s,%s,%s,%s)
