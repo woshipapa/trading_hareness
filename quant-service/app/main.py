@@ -494,7 +494,7 @@ from .research_storage_admission import ResearchStorageAdmission, governance as 
 from .owner_storage import owner_runtime_schema_status
 from .owner_deploy_events import owner_deploy_status
 from .async_pool_watchdog import AsyncPoolWatchdogState, watchdog_loop as async_pool_watchdog_loop
-from .health_read_model import DatabaseUnavailableError, HealthDependencies, health_payload as read_health_payload
+from .health_read_model import DatabaseUnavailableError, HealthDependencies, HealthEvidenceCache, health_payload as read_health_payload
 from .paper_order_bridge import STAGE as PAPER_AUTO_STAGE
 from .release_metadata import release_metadata
 from .replay_readiness import historical_replay_readiness
@@ -5315,6 +5315,9 @@ async def require_quant_write_key(request: Request, call_next: Any) -> Any:
     return response
 
 
+_health_evidence_cache = HealthEvidenceCache()
+
+
 def _health_payload() -> dict[str, Any]:
     """Build local runtime evidence without touching market providers."""
     def set_db_pool_gauge(pool: dict[str, Any]) -> None:
@@ -5362,7 +5365,7 @@ def _health_payload() -> dict[str, Any]:
             raw_overflow_status=raw_overflow_status,
             owner_storage_status=owner_runtime_schema_status,
             owner_deploy_status=owner_deploy_status,
-        ))
+        ), _health_evidence_cache)
 
 
 def _metrics_response() -> Response:
