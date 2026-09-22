@@ -658,9 +658,31 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
         (len(factor_keys), rebalance_days, exit_lag, top_n, cost_bps),
     )
     connection.execute("CREATE INDEX factor_sql_strategy_trades_date_idx ON factor_sql_strategy_trades(trading_date)")
+    # Equal-weight benchmark over the same universe, the same signal dates and
+    # the same entry/exit bars (gross, no cost): the factor scores are
+    # industry- and size-neutral but a long-only book is not, so raw returns
+    # alone mix factor skill with market direction.
+    connection.execute("DROP TABLE IF EXISTS factor_sql_strategy_benchmark")
+    connection.execute(
+        """CREATE TEMP TABLE factor_sql_strategy_benchmark ON COMMIT DROP AS
+           SELECT signal.trading_date,
+                  avg(exit_bar.adjusted_close/nullif(entry.adjusted_open,0)-1) AS benchmark_return,
+                  count(*)::int AS benchmark_members
+             FROM (SELECT DISTINCT trading_date FROM factor_sql_strategy_trades) rebalance
+             JOIN factor_sql_panel signal ON signal.trading_date=rebalance.trading_date
+             JOIN factor_sql_panel entry ON entry.symbol=signal.symbol AND entry.trading_index=signal.trading_index+1
+             JOIN factor_sql_panel exit_bar ON exit_bar.symbol=signal.symbol AND exit_bar.trading_index=signal.trading_index+%s
+            WHERE entry.raw_open>0 AND exit_bar.raw_close>0
+              AND NOT coalesce(entry.is_suspended,false) AND NOT coalesce(exit_bar.is_suspended,false)
+            GROUP BY signal.trading_date""",
+        (exit_lag,),
+    )
     period_rows = [dict(row) for row in connection.execute(
-        """SELECT trading_date,avg(net_return) AS period_return,count(*)::int AS positions
-             FROM factor_sql_strategy_trades GROUP BY trading_date ORDER BY trading_date"""
+        """SELECT trades.trading_date,avg(trades.net_return) AS period_return,count(*)::int AS positions,
+                  max(benchmark.benchmark_return) AS benchmark_return
+             FROM factor_sql_strategy_trades trades
+             LEFT JOIN factor_sql_strategy_benchmark benchmark USING(trading_date)
+            GROUP BY trades.trading_date ORDER BY trades.trading_date"""
     ).fetchall()]
     trade_count = int(connection.execute("SELECT count(*)::int AS count FROM factor_sql_strategy_trades").fetchone()["count"])
     trade_rows = [dict(row) for row in connection.execute(
@@ -668,15 +690,22 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
                   entry_price,exit_price,gross_return,net_return
              FROM factor_sql_strategy_trades ORDER BY trading_date,candidate_rank LIMIT 500"""
     ).fetchall()]
-    equity, curve, returns = 1.0, [], []
+    equity, benchmark_equity, curve, returns, excess = 1.0, 1.0, [], [], []
     for row in period_rows:
         period_return = float(row["period_return"])
+        benchmark_return = float(row["benchmark_return"]) if row.get("benchmark_return") is not None else None
         returns.append(period_return)
         equity *= 1 + period_return
+        if benchmark_return is not None:
+            benchmark_equity *= 1 + benchmark_return
+            excess.append(period_return - benchmark_return)
         curve.append({
             "date": str(row["trading_date"]), "return": period_return,
             "equity": equity, "positions": int(row["positions"]),
+            "benchmark_return": benchmark_return, "benchmark_equity": benchmark_equity,
         })
+    excess_std = _sample_std(excess)
+    periods_per_year = 252 / rebalance_days
     return_std = _sample_std(returns)
     annualized_volatility = return_std * math.sqrt(252 / rebalance_days) if return_std else None
     annualized_return = equity ** (252 / max(1, len(period_rows) * rebalance_days)) - 1 if period_rows else None
@@ -691,6 +720,16 @@ def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date
         if annualized_return is not None and annualized_volatility else None,
         "max_drawdown": _max_drawdown([item["equity"] for item in curve]),
         "win_rate": sum(value > 0 for value in returns) / len(returns) if returns else None,
+        "benchmark": {
+            "definition": "equal-weight universe, same signal dates and entry/exit bars, gross of cost",
+            "total_return": benchmark_equity - 1 if excess else None,
+            "annualized_return": benchmark_equity ** (252 / max(1, len(excess) * rebalance_days)) - 1 if excess else None,
+            "mean_excess_per_period": _average(excess),
+            "annualized_excess_arithmetic": _average(excess) * periods_per_year if excess else None,
+            "information_ratio": (_average(excess) / excess_std) * math.sqrt(periods_per_year) if excess and excess_std else None,
+            "excess_win_rate": sum(value > 0 for value in excess) / len(excess) if excess else None,
+            "cost_drag_per_period": 1 - (1 - cost_bps / 10000) ** 2,
+        },
         "periods": len(period_rows), "trades": trade_count,
         "promotion_gate": {
             "status": "eligible_for_review" if promotion_ready else "research_only",

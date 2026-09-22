@@ -101,6 +101,30 @@ class FactorSqlLabTests(unittest.TestCase):
                                           {"factors": ["reversal_5d"], "rebalance_days": 6, "hold_days": 5,
                                            "directions": {"reversal_5d": 2}})
 
+    def test_strategy_reports_excess_over_an_equal_weight_benchmark(self):
+        class Connection(RecordingConnection):
+            def execute(self, sql, params=None):
+                self.calls.append((sql, params))
+                if "avg(trades.net_return) AS period_return" in sql:
+                    class Rows(RecordingResult):
+                        def fetchall(self_inner):
+                            return [{"trading_date": date(2026, 1, 5), "period_return": 0.02, "positions": 20, "benchmark_return": 0.01},
+                                    {"trading_date": date(2026, 1, 13), "period_return": -0.01, "positions": 20, "benchmark_return": -0.02}]
+                    return Rows()
+                return super().execute(sql, params)
+
+        connection = Connection()
+        with patch("app.factor_sql_lab.prepare_factor_panel", return_value={}):
+            result = run_multi_factor_strategy_sql(connection, "all_a", date(2026, 1, 1), date(2026, 3, 1),
+                                                   {"factors": ["reversal_5d"], "rebalance_days": 6, "hold_days": 5})
+        benchmark = result["metrics"]["benchmark"]
+        self.assertAlmostEqual(benchmark["mean_excess_per_period"], 0.01)
+        self.assertEqual(benchmark["excess_win_rate"], 1.0)
+        self.assertAlmostEqual(benchmark["total_return"], 1.01 * 0.98 - 1)
+        benchmark_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_strategy_benchmark" in sql)
+        self.assertIn("entry.trading_index=signal.trading_index+1", benchmark_sql)
+        self.assertEqual(result["equity_curve"][1]["benchmark_return"], -0.02)
+
     def test_formal_history_requires_calendar_span_as_well_as_trading_day_count(self):
         class Connection:
             def execute(self, _sql, _params):
