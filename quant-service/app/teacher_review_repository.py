@@ -226,6 +226,36 @@ def retire_plans(database: Any, *, keep: set[str], retired_at: datetime,
     return {"disabled": disabled, "stripped": stripped}
 
 
+#: A signal the operator actually received.  ``confirming`` never reached
+#: anyone and ``suppressed`` is a repeat of one that did; the teacher rules
+#: set ``independent_confirmation``, so most first deliveries land on
+#: ``alerted`` and only rarely on ``confirmed``.
+DELIVERED_STATES = ("confirmed", "alerted")
+
+
+def delivered_entries(database: Any, session_date: date) -> dict[str, dict[str, Any]]:
+    """The first delivered teacher-review entry per stock on one session."""
+    start = datetime.combine(session_date, time(9, 0), tzinfo=_CN_TZ).astimezone(timezone.utc)
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT DISTINCT ON (symbol) symbol,observed_at,signal_key,
+                      conditions->'teacher_review' AS review
+                 FROM quant.intraday_signal_events
+                WHERE observed_at>=%s AND observed_at<%s AND signal_type='entry'
+                  AND state=ANY(%s) AND conditions ? 'teacher_review'
+                ORDER BY symbol,observed_at""",
+            (start, start + timedelta(hours=7), list(DELIVERED_STATES)),
+        ).fetchall()
+    result = {}
+    for row in rows:
+        review = row["review"] or {}
+        result[str(row["symbol"])[:6]] = {
+            "at": row["observed_at"], "price": ((review.get("features") or {}).get("price")),
+            "path": review.get("path"), "playbook": review.get("playbook"), "pack_id": review.get("pack_id"),
+        }
+    return result
+
+
 def session_events(database: Any, session_date: date) -> list[dict[str, Any]]:
     start = datetime.combine(session_date, time(9, 0), tzinfo=_CN_TZ).astimezone(timezone.utc)
     with database.transaction() as connection:
@@ -534,7 +564,7 @@ def xiaojie_session_modes(database: Any, trade_date: date) -> dict[str, list[str
 __all__ = [
     "GAP_CHECK_SESSIONS", "OUTCOME_CAPABILITY", "PACK_CAPABILITY", "PROVIDER", "REPLAY_BUCKET_SECONDS",
     "SETTLEMENT_CAPABILITY", "SOURCE_TAG", "apply_session_plans",
-    "calendar_gaps", "first_limit_up_times",
+    "DELIVERED_STATES", "calendar_gaps", "delivered_entries", "first_limit_up_times",
     "minute_period_bars", "open_sessions", "pack_record", "persist_pack", "persist_settlement", "plan_bars",
     "persist_outcome_review", "recent_outcome_reviews", "recent_packs", "recent_settlements", "retire_plans",
     "rule_input_snapshots", "session_bars", "session_events", "sessions_between",

@@ -209,6 +209,32 @@ class SnapshotQueryTests(unittest.TestCase):
         self.assertEqual(self.query()["params"][0], ["000001.SZ"])
 
 
+class DeliveredEntryTests(unittest.TestCase):
+    """A push the settlement missed must not be scored as a miss."""
+
+    def packs(self):
+        return [{"pack_id": "p1", "stocks": [
+            stock("605058", name="澳弘电子", close=11.0),
+            stock("600519", name="否定票", kind="record", playbook="rejected", close=11.0),
+        ]}]
+
+    def test_an_event_log_entry_is_adopted_when_the_settlement_has_none(self):
+        from app.teacher_outcome_review import with_delivered_entries
+
+        delivered = {"605058": {"at": "2026-09-22T10:05:00+08:00", "price": 10.5, "path": None}}
+        merged = with_delivered_entries(self.packs(), delivered)[0]["stocks"]
+        self.assertEqual(merged[0]["entry"]["source"], "signal_events")
+        self.assertEqual(merged[0]["entry_to_close_pct"], 4.76)
+        self.assertEqual(classify(merged[0])["outcome"], "hit")
+
+    def test_a_rejected_stock_is_never_given_an_entry(self):
+        from app.teacher_outcome_review import with_delivered_entries
+
+        delivered = {"600519": {"at": "2026-09-22T10:05:00+08:00", "price": 10.5}}
+        merged = with_delivered_entries(self.packs(), delivered)[0]["stocks"]
+        self.assertIsNone(merged[1]["entry"])
+
+
 class LearningTests(unittest.TestCase):
     def missed(self, code, gate, pct, day):
         return {"code": code, "name": code, "playbook": "platform_breakout", "outcome": "missed",

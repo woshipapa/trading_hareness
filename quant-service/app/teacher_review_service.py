@@ -502,8 +502,12 @@ async def settle_pack(pack: Mapping[str, Any], trade_date: date, session_index: 
         code = str(stock["code"])
         bar = bars.get(code)
         stock_events = by_code.get(code, [])
-        entry = next((e for e in stock_events if e["signal_type"] == "entry" and e["state"] == "confirmed"), None)
-        invalid = next((e for e in stock_events if "teacher_review_invalid" in str(e["signal_key"])), None)
+        # Delivered, not "confirmed": the teacher rules confirm independently, so
+        # a first push is recorded as ``alerted``.  Reading only ``confirmed``
+        # hid 12 of 13 real entries on 2026-09-22.
+        delivered = [e for e in stock_events if e["state"] in repo.DELIVERED_STATES]
+        entry = next((e for e in delivered if e["signal_type"] == "entry"), None)
+        invalid = next((e for e in delivered if "teacher_review_invalid" in str(e["signal_key"])), None)
         entry_price = ((entry or {}).get("review") or {}).get("features", {}).get("price") if entry else None
         limit = (bar or {}).get("limit_up_price")
         stocks.append({

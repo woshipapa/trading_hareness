@@ -252,6 +252,33 @@ def _blocker_line(replay: Mapping[str, Any] | None, *, live_entry: bool = False)
     return text
 
 
+def with_delivered_entries(packs: Sequence[Mapping[str, Any]],
+                           delivered: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Trust the event log over the settlement for "did this actually push?".
+
+    The settlement read only ``state='confirmed'`` until 2026-09-23, so older
+    archives call a delivered entry a miss.  Re-deriving it here keeps the
+    learning history honest without re-running any roll.
+    """
+    out = []
+    for pack in packs:
+        stocks = []
+        for stock in pack.get("stocks") or []:
+            entry = delivered.get(str(stock.get("code")))
+            if stock.get("entry") or not entry or str(stock.get("kind")) == "record":
+                stocks.append(stock)
+                continue
+            bar = stock.get("bar") or {}
+            price = _pct(entry.get("price"))
+            stocks.append({**stock,
+                           "entry": {"at": str(entry.get("at")), "price": price,
+                                     "path": entry.get("path"), "source": "signal_events"},
+                           "entry_to_close_pct": (round((float(bar["close"]) / price - 1) * 100, 2)
+                                                  if price and bar.get("close") else None)})
+        out.append({**pack, "stocks": stocks})
+    return out
+
+
 def review_stocks(packs: Sequence[Mapping[str, Any]],
                   replays: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
     """把结算里的每只票合成一条复盘记录。"""
@@ -467,7 +494,8 @@ async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, A
     if today is None:
         return {"status": "skipped", "reason": "no settlement archived for this session",
                 "trade_date": trade_date.isoformat(), "research_only": True, "live_effect": "none"}
-    packs = list((today["payload"] or {}).get("packs") or [])
+    delivered = await _db(deps, repo.delivered_entries, trade_date)
+    packs = with_delivered_entries(list((today["payload"] or {}).get("packs") or []), delivered)
     replay_codes = [
         str(stock.get("code")) for pack in packs for stock in (pack.get("stocks") or [])
         if str(stock.get("kind")) != "record" and not stock.get("entry")
@@ -482,6 +510,7 @@ async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, A
     report: dict[str, Any] = {
         "trade_date": trade_date.isoformat(), "model_version": MODEL_VERSION, "rules_version": RULES_VERSION,
         "packs": len(packs), "stocks": stocks,
+        "delivered_entries": len(delivered),
         "counts": dict(Counter(str(item["outcome"]) for item in stocks)),
         "thresholds": {"big_move_pct": BIG_MOVE_PCT, "big_intraday_pct": BIG_INTRADAY_PCT,
                        "fade_pct": FADE_PCT, "suggest_min_blocks": SUGGEST_MIN_BLOCKS},
@@ -502,6 +531,6 @@ async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, A
 
 __all__ = [
     "BIG_INTRADAY_PCT", "BIG_MOVE_PCT", "LEARNING_SESSIONS", "MODEL_VERSION", "OUTCOME_LABELS",
-    "classify", "gate_replay", "high_pct", "learning", "outcome_markdown", "outcome_text",
-    "review_stocks", "run",
+    "classify", "dominant_gap", "gate_replay", "high_pct", "learning", "outcome_markdown", "outcome_text",
+    "review_stocks", "run", "with_delivered_entries",
 ]
