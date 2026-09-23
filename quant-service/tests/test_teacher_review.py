@@ -19,7 +19,7 @@ from app.live_policy import live_policy_gate
 from app.teacher_review_plan import bullish_divergence, limit_up_price, parse_longhu_kline, plan_stock
 from app.teacher_review_playbooks import CATALOG, validate_pack
 from app.teacher_review_rules import (PeriodDivergenceBook, SnapshotTape, TeacherMarketBook, count_sector_limit_ups, evaluate,
-                                      scan_features, teacher_review_signals)
+                                      missing_inputs, scan_features, teacher_review_signals)
 
 CN = ZoneInfo("Asia/Shanghai")
 FIXTURE = Path(__file__).parent / "fixtures" / "teacher_review_pack_20260921.json"
@@ -1025,3 +1025,54 @@ class ScanPersistenceIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpeningTrendFallbackTests(unittest.TestCase):
+    """09:30-09:35 has no five-minute window; one minute of tape stands in."""
+
+    def tape_at(self, *offsets_and_prices, seconds_apart=30):
+        tape = SnapshotTape()
+        base = at(9, 30)
+        for index, price in enumerate(offsets_and_prices):
+            tape.observe("300741.SZ", base + timedelta(seconds=index * seconds_apart), price, None, None)
+        return tape, base + timedelta(seconds=(len(offsets_and_prices) - 1) * seconds_apart)
+
+    def features_at(self, tape, moment, price):
+        return scan_features("300741.SZ", quote(price, 10.0, amount=4e8, volume_lot=120000),
+                             {"vwap": price - 0.05}, moment, "华宝股份", None, tape.features("300741.SZ", moment))
+
+    def test_the_tape_reports_a_one_minute_return_before_it_can_report_five(self):
+        tape, moment = self.tape_at(10.0, 10.1, 10.2)   # 09:30, 09:30:30, 09:31
+        view = tape.features("300741.SZ", moment)
+        self.assertNotIn("return_5m_pct", view)
+        self.assertAlmostEqual(view["return_1m_pct"], 2.0, places=3)
+
+    def test_the_opening_minutes_judge_the_trend_instead_of_reporting_it_missing(self):
+        tape, moment = self.tape_at(10.0, 10.1, 10.2)
+        features = self.features_at(tape, moment, 10.2)
+        self.assertIs(features["not_falling"], True)
+        self.assertTrue(str(features["sources"]["not_falling"]).endswith(":1m"))
+        self.assertNotIn("not_falling", missing_inputs("prior_high_breakout", features))
+
+    def test_a_falling_open_is_still_refused(self):
+        tape, moment = self.tape_at(10.0, 9.9, 9.8)
+        features = self.features_at(tape, moment, 9.8)
+        self.assertIs(features["not_falling"], False)
+
+    def test_after_the_opening_window_only_the_five_minute_window_counts(self):
+        # 09:36 with a minute of tape: the fallback is out of its window, and
+        # the previous scan (not the tape) answers instead.
+        tape = SnapshotTape()
+        for index, price in enumerate((10.0, 10.1, 10.2)):
+            tape.observe("300741.SZ", at(9, 36) + timedelta(seconds=index * 30), price, None, None)
+        moment = at(9, 36) + timedelta(seconds=60)
+        features = self.features_at(tape, moment, 10.2)
+        self.assertNotEqual(str(features["sources"].get("not_falling", "")), "snapshot_tape:1m")
+
+    def test_the_gate_label_says_which_window_answered(self):
+        tape, moment = self.tape_at(10.0, 10.1, 10.2)
+        features = self.features_at(tape, moment, 10.2)
+        plan = {"playbook": "prior_high_breakout", "params": {"prior_high": 10.0}, "extra": {}}
+        names = [signal["name"] for signal in evaluate(plan, features)["signals"]]
+        self.assertIn("1分钟不下跌（开盘前5分钟）", names)
+        self.assertNotIn("5分钟不下跌", names)

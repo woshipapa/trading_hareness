@@ -15,7 +15,9 @@ lapsed for longer than the confirmation window and triggered again.
 
 Scan-time approximations of the teacher's minute language (all ``I``):
 分时放量 = minute volume multiple ≥ 2, or volume ratio ≥ 1.5 with a positive
-5-minute return; 不能往下跌 = 5-minute return ≥ -0.3%; 竞价额 = cumulative
+5-minute return; 不能往下跌 = 5-minute return ≥ -0.3%, falling back to the
+1-minute return for the first five minutes of a session, when no five-minute
+window exists yet; 竞价额 = cumulative
 turnover observed before 09:31; 封板时成交 = cumulative turnover on the scan
 that first sees a sealed bid-only book.
 
@@ -137,6 +139,10 @@ class SnapshotTape:
     WINDOW = timedelta(minutes=31)
     REHYDRATED_SOURCE = "stored_scan_tape"
     RETURN_SECONDS = 300
+    #: The first five minutes of a session cannot have a five-minute return.
+    #: One minute of tape is a shorter but real trend, and ``scan_features``
+    #: reads it only while the five-minute window is still filling.
+    OPENING_RETURN_SECONDS = 60
     CURRENT_SECONDS = 60
     MIN_BASELINE_MINUTES = 5
 
@@ -228,13 +234,15 @@ class SnapshotTape:
             return {}
         latest_at, latest_price, latest_volume, source = ring[-1]
         result: dict[str, Any] = {"samples": len(ring), "span_seconds": int(_trading_age(latest_at, ring[0][0]))}
-        anchor = None
-        for sample in ring:
-            if _trading_age(latest_at, sample[0]) < self.RETURN_SECONDS:
-                break
-            anchor = sample
-        if anchor is not None:
-            result["return_5m_pct"] = round((latest_price / anchor[1] - 1) * 100, 4)
+        for key, seconds in (("return_5m_pct", self.RETURN_SECONDS),
+                             ("return_1m_pct", self.OPENING_RETURN_SECONDS)):
+            anchor = None
+            for sample in ring:
+                if _trading_age(latest_at, sample[0]) < seconds:
+                    break
+                anchor = sample
+            if anchor is not None:
+                result[key] = round((latest_price / anchor[1] - 1) * 100, 4)
         same = [(at, volume) for at, _price, volume, src in ring if src == source and volume is not None]
         if latest_volume is None or len(same) < 2:
             return result
@@ -491,6 +499,14 @@ def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, An
         surge = None
     if return_5m is not None:
         not_falling, sources["not_falling"] = return_5m >= DEFAULTS["not_falling_return_5m_min"], return_source
+    elif _elapsed_minutes(observed_at) < OPENING_WINDOW_MINUTES and first("return_1m_pct")[0] is not None:
+        # 09:30-09:35 has no five-minute history, and reporting the input as
+        # missing silenced every breakout plan for the first minutes of the
+        # session.  One minute of tape answers the same question - is it
+        # falling right now - so it stands in, tagged by its own source.
+        return_1m, minute_source = first("return_1m_pct")
+        not_falling = return_1m >= DEFAULTS["not_falling_return_5m_min"]
+        sources["not_falling"] = f"{minute_source}:1m"
     elif previous_price:
         not_falling, sources["not_falling"] = price >= previous_price * 0.997, "previous_scan"
     else:
@@ -517,6 +533,10 @@ def missing_inputs(playbook: str, features: Mapping[str, Any]) -> list[str]:
     return [key for key in REQUIRED_INPUTS.get(playbook, ()) if features.get(key) is None]
 
 
+#: Minutes after an open during which the five-minute trend is unavailable.
+OPENING_WINDOW_MINUTES = 5
+
+
 def _elapsed_minutes(observed_at: datetime) -> int:
     local = observed_at.astimezone(_CN_TZ)
     minutes = local.hour * 60 + local.minute
@@ -532,7 +552,8 @@ def _breakout(f: dict[str, Any], level: float | None, label: str) -> list[dict[s
         _sig(f"价格>{label}", f"{f['price']} vs {level}", level is not None and f["price"] > level),
         _sig(f"量比≥{DEFAULTS['vol_ratio_min']:g}（带量）", f["volume_ratio"], (f["volume_ratio"] or 0) >= DEFAULTS["vol_ratio_min"], "I"),
         _sig("均价上方（不能往下跌）", f"{f['price']} vs {f['vwap']}", bool(f["above_vwap"]), "I"),
-        _sig("5分钟不下跌", f["not_falling"], bool(f["not_falling"]), "I"),
+        _sig("1分钟不下跌（开盘前5分钟）" if str(f["sources"].get("not_falling", "")).endswith(":1m")
+             else "5分钟不下跌", f["not_falling"], bool(f["not_falling"]), "I"),
     ]
 
 
