@@ -77,6 +77,11 @@ PROMAX_VERIFIED_APIS = frozenset({
     "ths_hot", "dc_hot",
     # THS sector catalogue
     "ths_index", "ths_daily", "ths_member",
+    # DC and KPL board catalogues, probed 2026-09-23: each returned code=0 with
+    # real rows for trade_date=20260922 on the fallback route (the primary one
+    # answered its usual transient 503).  Without these the router fell through
+    # to the SDK, which is 407 on this host, so nothing was ever stored.
+    "dc_index", "dc_member", "kpl_concept_cons",
     # dragon-tiger and hot-money
     "top_list", "top_inst", "hm_list", "hm_detail", "report_rc",
     # reporting calendar and guidance

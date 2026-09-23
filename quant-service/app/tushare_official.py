@@ -330,6 +330,7 @@ SUPPLIER_PROBE_PROFILES: Final[dict[str, str]] = {
     "limit_cpt_list": "trade_date", "ths_hot": "trade_date", "dc_hot": "trade_date",
     "hm_list": "no_params", "hm_detail": "trade_date", "ths_index": "ths_index_catalog",
     "ths_daily": "ths_range", "tdx_index": "tdx_only", "tdx_daily": "tdx_range", "kpl_list": "trade_date",
+    "dc_index": "trade_date", "dc_member": "trade_date", "kpl_concept_cons": "trade_date",
 }
 
 
