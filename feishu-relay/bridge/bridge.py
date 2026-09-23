@@ -399,6 +399,7 @@ class Bridge:
 		self.route_catalog_last_refresh_at = None
 		self.route_catalog_error = None
 		self.dynamic_routes: dict[str, dict[str, str]] = {}
+		self.route_bindings_lock = threading.RLock()
 		self.summary_chat_ids = csv_env("LARKX_SUMMARY_CHAT_IDS")
 		self.summary_ingress_url = os.environ.get("LARKX_SUMMARY_INGRESS_URL", "").strip()
 		if self.summary_chat_ids and not self.summary_ingress_url:
@@ -413,6 +414,10 @@ class Bridge:
 		larkx_home = Path(os.environ.get("LARKX_HOME", "~/.larkx")).expanduser()
 		auth_path, default_spool_path, default_owner_path = profile_storage_paths(larkx_home, self.profile)
 		auth_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+		self.route_bindings_path = Path(
+			os.environ.get("LARKX_ROUTE_BINDINGS_FILE", str(auth_path.parent / "route-bindings.json"))
+		).expanduser()
+		self.route_bindings = self._load_route_bindings()
 		spool_path = os.environ.get("LARKX_EVENT_SPOOL_DB", str(default_spool_path))
 		self.event_spool = EventSpool(spool_path)
 		history_path = os.environ.get("LARKX_HISTORY_DB", str(Path(spool_path).with_name("history.db")))
@@ -461,6 +466,7 @@ class Bridge:
 		# WebSocket events use numeric chat ids. Keep official oc_ aliases in the
 		# configuration for documentation, but do not count them as live sockets.
 		self.websocket_chat_ids = {chat_id for chat_id in self.listen_chats if chat_id.isdigit()}
+		self._apply_persisted_route_bindings()
 		self.chat_validation = {
 			chat_id: {"state": "pending", "name": None, "checked_at": None, "error": None}
 			for chat_id in sorted(self.websocket_chat_ids)
@@ -501,6 +507,103 @@ class Bridge:
 			threading.Thread(target=self.refresh_route_catalog, name="route-catalog-startup", daemon=True).start()
 		LOG.info("listening to %d allowlisted chat(s): %s", len(self.listen_chats), ",".join(sorted(self.listen_chats)))
 
+	def _load_route_bindings(self) -> dict[str, dict[str, str]]:
+		try:
+			payload = json.loads(self.route_bindings_path.read_text(encoding="utf-8"))
+		except FileNotFoundError:
+			return {}
+		except (OSError, json.JSONDecodeError) as error:
+			LOG.warning("读取持久化 LarkAgentX 路由绑定失败：%s", error)
+			return {}
+		if not isinstance(payload, dict):
+			return {}
+		bindings = payload.get("bindings", payload)
+		if not isinstance(bindings, dict):
+			return {}
+		result: dict[str, dict[str, str]] = {}
+		for source_key, item in bindings.items():
+			if not isinstance(item, dict):
+				continue
+			chat_id = str(item.get("chat_id", "")).strip()
+			if not chat_id.isdigit():
+				continue
+			result[str(source_key).strip()] = {
+				"source_key": str(item.get("source_key") or source_key).strip(),
+				"chat_id": chat_id,
+				"chat_name": str(item.get("chat_name", "")).strip(),
+				"source_chat_id": str(item.get("source_chat_id", "")).strip(),
+				"bound_at": str(item.get("bound_at", "")).strip(),
+			}
+		return {key: value for key, value in result.items() if key and value["source_key"]}
+
+	def _route_stats_template(self) -> dict[str, Any]:
+		return {
+			"allowlisted": True, "observed_count": 0, "self_message_count": 0,
+			"forwarded_count": 0, "failed_count": 0,
+			"last_observed_at": None, "last_forwarded_at": None, "last_message_type": None,
+		}
+
+	def _register_runtime_route(self, chat_id: str, route: dict[str, str]) -> None:
+		chat_id = str(chat_id).strip()
+		if not chat_id.isdigit():
+			return
+		self.listen_chats.add(chat_id)
+		self.websocket_chat_ids.add(chat_id)
+		self.dynamic_routes[chat_id] = dict(route)
+		if hasattr(self, "chat_validation"):
+			self.chat_validation.setdefault(chat_id, {"state": "pending", "name": route.get("chat_name"), "checked_at": None, "error": None})
+		if hasattr(self, "chat_stats"):
+			self.chat_stats.setdefault(chat_id, self._route_stats_template())
+
+	def _apply_persisted_route_bindings(self) -> None:
+		for binding in self.route_bindings.values():
+			chat_id = binding.get("chat_id", "")
+			if not chat_id.isdigit():
+				continue
+			route = {
+				"source_key": binding.get("source_key", ""),
+				"chat_name": binding.get("chat_name", ""),
+				"source_chat_id": binding.get("source_chat_id", ""),
+			}
+			self._register_runtime_route(chat_id, route)
+
+	def _persist_route_binding(self, chat_id: str, route: dict[str, str]) -> None:
+		chat_id = str(chat_id).strip()
+		source_key = str(route.get("source_key", "")).strip()
+		if not chat_id.isdigit() or not source_key:
+			return
+		binding = {
+			"source_key": source_key,
+			"chat_id": chat_id,
+			"chat_name": str(route.get("chat_name", "")).strip(),
+			"source_chat_id": str(route.get("source_chat_id", "")).strip(),
+			"bound_at": datetime.now(timezone.utc).isoformat(),
+		}
+		try:
+			with self.route_bindings_lock:
+				self.route_bindings[source_key] = binding
+				self.route_bindings_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+				temporary = self.route_bindings_path.with_name(f".{self.route_bindings_path.name}.{os.getpid()}.tmp")
+				temporary.write_text(json.dumps({"version": 1, "bindings": self.route_bindings}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+				os.chmod(temporary, 0o600)
+				os.replace(temporary, self.route_bindings_path)
+		except OSError as error:
+			LOG.warning("持久化 LarkAgentX 路由绑定失败 source_key=%s：%s", source_key, error)
+
+	def _apply_catalog_bindings(self, routes: list[dict[str, str]]) -> None:
+		for route in routes:
+			source_key = route.get("source_key", "")
+			binding = self.route_bindings.get(source_key, {})
+			chat_id = route.get("source_chat_id", "")
+			if not chat_id.isdigit():
+				chat_id = str(binding.get("chat_id", "")).strip()
+			if not chat_id.isdigit():
+				continue
+			runtime_route = dict(route)
+			if not runtime_route.get("source_chat_id"):
+				runtime_route["source_chat_id"] = str(binding.get("source_chat_id", "")).strip()
+			self._register_runtime_route(chat_id, runtime_route)
+
 	def refresh_route_catalog(self) -> None:
 		if not self.dynamic_route_discovery or not self.route_catalog_url:
 			return
@@ -523,6 +626,7 @@ class Bridge:
 				if source_key and chat_name:
 					routes.append({"source_key": source_key, "chat_name": chat_name, "source_chat_id": chat_id})
 			self.route_catalog = routes
+			self._apply_catalog_bindings(routes)
 			self.route_catalog_last_refresh_at = datetime.now(timezone.utc).isoformat()
 			self.route_catalog_error = None
 		except Exception as error:
@@ -550,14 +654,9 @@ class Bridge:
 				self.route_catalog_error = f"群名重复，拒绝自动绑定：{name}"[:240]
 			return None
 		route = matches[0]
-		self.dynamic_routes[chat_id] = route
-		self.listen_chats.add(chat_id)
-		self.websocket_chat_ids.add(chat_id)
+		self._register_runtime_route(chat_id, route)
+		self._persist_route_binding(chat_id, route)
 		self.chat_validation[chat_id] = {"state": "verified", "name": name, "checked_at": datetime.now(timezone.utc).isoformat(), "error": None}
-		self.chat_stats[chat_id] = {
-			"allowlisted": True, "observed_count": 0, "self_message_count": 0, "forwarded_count": 0,
-			"failed_count": 0, "last_observed_at": None, "last_forwarded_at": None, "last_message_type": None,
-		}
 		LOG.info("动态绑定 LarkAgentX 源群 chat_id=%s name=%s source_key=%s", chat_id, name, route["source_key"])
 		return route
 
@@ -599,6 +698,10 @@ class Bridge:
 		durable_chat_stats = self.event_spool.chat_stats()
 		durable_summary = self.event_spool.chat_summary()
 		durable_counters = self.event_spool.counters()
+		durable_ignored = self.event_spool.ignored_stats()
+		durable_ignored_summary = self.event_spool.ignored_summary()
+		durable_positions = self.event_spool.position_stats()
+		durable_position_summary = self.event_spool.position_summary()
 		# The event spool is the durable source for message-level metrics. Keep
 		# the live self-message counter from this process, but restore all relay
 		# counters and timestamps after a restart or source-overlay hot deploy.
@@ -625,6 +728,8 @@ class Bridge:
 			"route_catalog_last_refresh_at": self.route_catalog_last_refresh_at,
 			"route_catalog_error": self.route_catalog_error,
 			"dynamic_routes": {chat_id: dict(route) for chat_id, route in sorted(self.dynamic_routes.items())},
+			"persisted_route_bindings": {key: dict(value) for key, value in sorted(self.route_bindings.items())},
+			"route_bindings_file": str(self.route_bindings_path),
 			"chat_validation": {chat_id: dict(value) for chat_id, value in sorted(self.chat_validation.items())},
 			"mapping_check_at": self.mapping_check_at,
 			"mapping_check_error": self.mapping_check_error,
@@ -632,7 +737,10 @@ class Bridge:
 			"metrics_persisted": True,
 			"metrics_source": "larkagentx_event_spool",
 			"observed_count": durable_summary["observed_count"],
-			"ignored_count": self.ignored_count,
+			"ignored_count": max(self.ignored_count, durable_ignored_summary["ignored_count"]),
+			"ignored_by_chat": durable_ignored,
+			"position_stats": durable_positions,
+			"position_summary": durable_position_summary,
 			"forwarded_count": durable_summary["forwarded_count"],
 			"retry_count": self.retry_count,
 			"failed_count": durable_summary["failed_count"],
@@ -745,6 +853,14 @@ class Bridge:
 			self._persist_counter("partial_recovery_count")
 			asyncio.create_task(self.recover_gap("larkagentx_partial_frame"))
 
+	def _log_position_gap(self, chat_id: str, gap: dict[str, int] | None, *, reason: str = "") -> None:
+		if not gap:
+			return
+		LOG.warning(
+			"LarkAgentX position gap chat_id=%s previous=%s current=%s missing=%s-%s count=%s reason=%s",
+			chat_id, gap["previous"], gap["current"], gap["start"], gap["end"], gap["missing"], reason or "observed",
+		)
+
 	async def recover_gap(self, reason: str) -> None:
 		try:
 			now_ms = int(time.time() * 1000)
@@ -826,8 +942,29 @@ class Bridge:
 			dynamic_route = await self.discover_dynamic_route(chat_id)
 		if chat_id not in self.websocket_chat_ids:
 			self.ignored_count += 1
+			try:
+				gap = await asyncio.to_thread(
+					self.event_spool.record_ignored,
+					chat_id,
+					position=message.get("position"),
+					message_id=str(message.get("msg_id", "")),
+					message_type=str(message.get("msg_type_name", message.get("msg_type", "UNKNOWN"))),
+					reason="not_allowlisted_or_dynamic_binding_failed",
+				)
+				self._log_position_gap(chat_id, gap, reason="ignored")
+				LOG.warning(
+					"忽略未绑定 LarkAgentX 源群 chat_id=%s type=%s position=%s message_id=%s",
+					chat_id, message.get("msg_type_name", message.get("msg_type", "UNKNOWN")), message.get("position"), message.get("msg_id", ""),
+				)
+			except Exception as error:
+				LOG.warning("记录未绑定 LarkAgentX 源群指标失败 chat_id=%s：%s", chat_id, error)
 			return
 		stats = self.chat_stats[chat_id]
+		try:
+			gap = await asyncio.to_thread(self.event_spool.record_position, message)
+			self._log_position_gap(chat_id, gap)
+		except Exception as error:
+			LOG.warning("记录 LarkAgentX position 失败 chat_id=%s：%s", chat_id, error)
 		if str(message.get("from_id", "")) == str(self.auth.user_id):
 			stats["self_message_count"] += 1
 			self.self_message_count += 1

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import sys
+import tempfile
+import threading
 import unittest
 from io import BytesIO
 from pathlib import Path
@@ -103,6 +105,25 @@ class LarkAgentXDynamicRouteTests(unittest.TestCase):
 		self.assertIsNone(route)
 		self.assertNotIn("9000000000000000002", instance.websocket_chat_ids)
 		self.assertIn("群名重复", instance.route_catalog_error)
+
+	def test_dynamic_binding_is_persisted_for_restart(self):
+		with tempfile.TemporaryDirectory() as directory:
+			instance = bridge.Bridge.__new__(bridge.Bridge)
+			instance.route_bindings_path = Path(directory) / "route-bindings.json"
+			instance.route_bindings_lock = threading.RLock()
+			instance.route_bindings = {}
+			route = {
+				"source_key": "relay_persisted",
+				"chat_name": "持久化测试群",
+				"source_chat_id": "",
+			}
+			instance._persist_route_binding("9000000000000000003", route)
+
+			reloaded = bridge.Bridge.__new__(bridge.Bridge)
+			reloaded.route_bindings_path = instance.route_bindings_path
+			bindings = reloaded._load_route_bindings()
+			self.assertEqual(bindings["relay_persisted"]["chat_id"], "9000000000000000003")
+			self.assertEqual(bindings["relay_persisted"]["chat_name"], "持久化测试群")
 
 
 if __name__ == "__main__":

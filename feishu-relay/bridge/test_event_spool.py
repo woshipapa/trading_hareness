@@ -87,6 +87,43 @@ class EventSpoolTests(unittest.TestCase):
             self.assertEqual(final.counters()["decode_error_count"], 1)
             final.close()
 
+    def test_position_gaps_and_ignored_chat_metrics_are_durable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            spool = EventSpool(path)
+            self.assertIsNone(spool.record_position({"chat_id": "chat-a", "position": 10}))
+            gap = spool.record_position({"chat_id": "chat-a", "position": 12})
+            self.assertEqual(gap, {"previous": 10, "current": 12, "start": 11, "end": 11, "missing": 1})
+            ignored_gap = spool.record_ignored("chat-unknown", position=3, message_id="m-3", message_type="IMAGE")
+            self.assertIsNone(ignored_gap)
+            ignored_gap = spool.record_ignored("chat-unknown", position=5, message_id="m-5", message_type="IMAGE")
+            self.assertEqual(ignored_gap["missing"], 1)
+            self.assertEqual(spool.ignored_stats()["chat-unknown"]["ignored_count"], 2)
+            self.assertEqual(spool.ignored_summary(), {"ignored_count": 2})
+            self.assertEqual(spool.position_stats()["chat-a"]["missing_position_count"], 1)
+            self.assertEqual(spool.position_stats()["chat-unknown"]["last_gap_start"], 4)
+            spool.close()
+
+            reopened = EventSpool(path)
+            self.assertEqual(reopened.ignored_stats()["chat-unknown"]["ignored_count"], 2)
+            self.assertEqual(reopened.position_summary()["missing_position_count"], 2)
+            reopened.close()
+
+    def test_position_metrics_are_backfilled_from_existing_events(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            spool = EventSpool(path)
+            spool.enqueue("e1", {"chat_id": "chat-a", "position": 20, "msg_id": "m1"})
+            spool.enqueue("e2", {"chat_id": "chat-a", "position": 22, "msg_id": "m2"})
+            spool.close()
+
+            reopened = EventSpool(path)
+            stats = reopened.position_stats()["chat-a"]
+            self.assertEqual(stats["last_position"], 22)
+            self.assertEqual(stats["missing_position_count"], 1)
+            self.assertEqual(stats["last_gap_start"], 21)
+            reopened.close()
+
 
 if __name__ == "__main__":
     unittest.main()

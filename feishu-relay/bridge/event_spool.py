@@ -76,6 +76,27 @@ class EventSpool:
                 counter_value INTEGER NOT NULL DEFAULT 0,
                 updated_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS ignored_chat_stats (
+                chat_id TEXT PRIMARY KEY,
+                ignored_count INTEGER NOT NULL DEFAULT 0,
+                last_position INTEGER,
+                last_message_id TEXT,
+                last_message_type TEXT,
+                last_reason TEXT,
+                first_ignored_at REAL NOT NULL,
+                last_ignored_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS position_stats (
+                chat_id TEXT PRIMARY KEY,
+                last_position INTEGER,
+                missing_position_count INTEGER NOT NULL DEFAULT 0,
+                gap_event_count INTEGER NOT NULL DEFAULT 0,
+                last_gap_start INTEGER,
+                last_gap_end INTEGER,
+                last_gap_at REAL,
+                out_of_order_count INTEGER NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL
+            );
             """
         )
         # The bridge was initially released without a sequence column. Keep the
@@ -94,6 +115,7 @@ class EventSpool:
             self._db.execute("UPDATE events SET sequence=? WHERE rowid=?", (int(sequence), int(row[0])))
         self._db.execute("INSERT INTO spool_cursor(cursor_name,sequence,updated_at) VALUES('drain',0,?) ON CONFLICT(cursor_name) DO NOTHING", (self._now(),))
         self._backfill_chat_stats_locked()
+        self._rebuild_position_stats_locked()
         self._db.commit()
         try:
             os.chmod(self.path, 0o600)
@@ -121,6 +143,15 @@ class EventSpool:
         chat_id = str(payload.get("chat_id") or "").strip()
         message_type = str(payload.get("msg_type_name") or payload.get("msg_type") or "UNKNOWN").strip().upper()
         return chat_id, message_type or "UNKNOWN"
+
+    @staticmethod
+    def _payload_position(payload: dict[str, Any]) -> int | None:
+        value = payload.get("position")
+        try:
+            position = int(value)
+        except (TypeError, ValueError):
+            return None
+        return position if position > 0 else None
 
     def _backfill_chat_stats_locked(self) -> None:
         """Build the durable projection once for spools created before chat_stats."""
@@ -175,19 +206,214 @@ class EventSpool:
             raise ValueError("counter name is empty")
         now = self._now()
         with self._lock:
-            self._db.execute(
-                """
-                INSERT INTO runtime_counters(counter_name,counter_value,updated_at)
-                VALUES(?,?,?)
-                ON CONFLICT(counter_name) DO UPDATE SET
-                  counter_value=runtime_counters.counter_value+excluded.counter_value,
-                  updated_at=excluded.updated_at
-                """,
-                (name, int(amount), now),
-            )
+            self._increment_counter_locked(name, amount, now)
             self._db.commit()
             row = self._db.execute("SELECT counter_value FROM runtime_counters WHERE counter_name=?", (name,)).fetchone()
             return int(row["counter_value"] if row else 0)
+
+    def _increment_counter_locked(self, name: str, amount: int, now: float) -> None:
+        self._db.execute(
+            """
+            INSERT INTO runtime_counters(counter_name,counter_value,updated_at)
+            VALUES(?,?,?)
+            ON CONFLICT(counter_name) DO UPDATE SET
+              counter_value=runtime_counters.counter_value+excluded.counter_value,
+              updated_at=excluded.updated_at
+            """,
+            (name, int(amount), now),
+        )
+
+    def _rebuild_position_stats_locked(self) -> None:
+        """Seed position telemetry from events retained before this schema existed."""
+        existing = self._db.execute("SELECT count(*) AS count FROM position_stats").fetchone()
+        if existing and int(existing["count"]) > 0:
+            return
+        states: dict[str, dict[str, Any]] = {}
+        rows = self._db.execute("SELECT payload_json,created_at FROM events ORDER BY sequence").fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            chat_id = str(payload.get("chat_id") or "").strip()
+            position = self._payload_position(payload)
+            if not chat_id or position is None:
+                continue
+            state = states.setdefault(chat_id, {
+                "last_position": None, "missing_position_count": 0, "gap_event_count": 0,
+                "last_gap_start": None, "last_gap_end": None, "last_gap_at": None,
+                "out_of_order_count": 0, "updated_at": float(row["created_at"]),
+            })
+            previous = state["last_position"]
+            state["updated_at"] = float(row["created_at"])
+            if previous is None:
+                state["last_position"] = position
+                continue
+            if position <= previous:
+                if position < previous:
+                    state["out_of_order_count"] += 1
+                continue
+            missing = position - previous - 1
+            if missing > 0:
+                state["missing_position_count"] += missing
+                state["gap_event_count"] += 1
+                state["last_gap_start"] = previous + 1
+                state["last_gap_end"] = position - 1
+                state["last_gap_at"] = float(row["created_at"])
+            state["last_position"] = position
+        for chat_id, state in states.items():
+            self._db.execute(
+                """
+                INSERT INTO position_stats(
+                    chat_id,last_position,missing_position_count,gap_event_count,
+                    last_gap_start,last_gap_end,last_gap_at,out_of_order_count,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    chat_id, state["last_position"], state["missing_position_count"], state["gap_event_count"],
+                    state["last_gap_start"], state["last_gap_end"], state["last_gap_at"],
+                    state["out_of_order_count"], state["updated_at"],
+                ),
+            )
+
+    def _record_position_locked(self, chat_id: str, position: int | None, now: float) -> dict[str, int] | None:
+        if not chat_id or position is None:
+            return None
+        row = self._db.execute("SELECT * FROM position_stats WHERE chat_id=?", (chat_id,)).fetchone()
+        if row is None:
+            self._db.execute(
+                "INSERT INTO position_stats(chat_id,last_position,updated_at) VALUES(?,?,?)",
+                (chat_id, position, now),
+            )
+            return None
+        previous = row["last_position"]
+        if previous is None:
+            self._db.execute("UPDATE position_stats SET last_position=?,updated_at=? WHERE chat_id=?", (position, now, chat_id))
+            return None
+        previous = int(previous)
+        if position <= previous:
+            if position < previous:
+                self._db.execute(
+                    "UPDATE position_stats SET out_of_order_count=out_of_order_count+1,updated_at=? WHERE chat_id=?",
+                    (now, chat_id),
+                )
+            return None
+        missing = position - previous - 1
+        if missing <= 0:
+            self._db.execute("UPDATE position_stats SET last_position=?,updated_at=? WHERE chat_id=?", (position, now, chat_id))
+            return None
+        self._db.execute(
+            """
+            UPDATE position_stats SET
+                last_position=?, missing_position_count=missing_position_count+?,
+                gap_event_count=gap_event_count+1, last_gap_start=?, last_gap_end=?,
+                last_gap_at=?, updated_at=?
+            WHERE chat_id=?
+            """,
+            (position, missing, previous + 1, position - 1, now, now, chat_id),
+        )
+        return {"previous": previous, "current": position, "start": previous + 1, "end": position - 1, "missing": missing}
+
+    def record_position(self, payload: dict[str, Any]) -> dict[str, int] | None:
+        chat_id = str(payload.get("chat_id") or "").strip()
+        position = self._payload_position(payload)
+        now = self._now()
+        with self._lock:
+            gap = self._record_position_locked(chat_id, position, now)
+            self._db.commit()
+            return gap
+
+    def record_ignored(
+        self,
+        chat_id: str,
+        *,
+        position: Any = None,
+        message_id: str = "",
+        message_type: str = "UNKNOWN",
+        reason: str = "not_allowlisted",
+    ) -> dict[str, int] | None:
+        chat_id = str(chat_id or "").strip()
+        if not chat_id:
+            return None
+        try:
+            parsed_position = int(position)
+            if parsed_position <= 0:
+                parsed_position = None
+        except (TypeError, ValueError):
+            parsed_position = None
+        now = self._now()
+        with self._lock:
+            self._db.execute(
+                """
+                INSERT INTO ignored_chat_stats(
+                    chat_id,ignored_count,last_position,last_message_id,last_message_type,last_reason,
+                    first_ignored_at,last_ignored_at
+                ) VALUES(?,?,?,?,?,?,?,?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    ignored_count=ignored_chat_stats.ignored_count+1,
+                    last_position=excluded.last_position,
+                    last_message_id=excluded.last_message_id,
+                    last_message_type=excluded.last_message_type,
+                    last_reason=excluded.last_reason,
+                    last_ignored_at=excluded.last_ignored_at
+                """,
+                (chat_id, 1, parsed_position, str(message_id or "")[:128], str(message_type or "UNKNOWN")[:32], str(reason or "not_allowlisted")[:120], now, now),
+            )
+            self._increment_counter_locked("ignored_count", 1, now)
+            gap = self._record_position_locked(chat_id, parsed_position, now)
+            self._db.commit()
+            return gap
+
+    def ignored_stats(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT chat_id,ignored_count,last_position,last_message_id,last_message_type,last_reason,first_ignored_at,last_ignored_at FROM ignored_chat_stats ORDER BY chat_id"
+            ).fetchall()
+        return {
+            str(row["chat_id"]): {
+                "ignored_count": int(row["ignored_count"]),
+                "last_position": row["last_position"],
+                "last_message_id": row["last_message_id"],
+                "last_message_type": row["last_message_type"],
+                "last_reason": row["last_reason"],
+                "first_ignored_at": self._iso(row["first_ignored_at"]),
+                "last_ignored_at": self._iso(row["last_ignored_at"]),
+            }
+            for row in rows
+        }
+
+    def ignored_summary(self) -> dict[str, int]:
+        with self._lock:
+            row = self._db.execute("SELECT COALESCE(SUM(ignored_count),0) AS ignored_count FROM ignored_chat_stats").fetchone()
+        return {"ignored_count": int(row["ignored_count"] if row else 0)}
+
+    def position_stats(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT chat_id,last_position,missing_position_count,gap_event_count,last_gap_start,last_gap_end,last_gap_at,out_of_order_count,updated_at FROM position_stats ORDER BY chat_id"
+            ).fetchall()
+        return {
+            str(row["chat_id"]): {
+                "last_position": row["last_position"],
+                "missing_position_count": int(row["missing_position_count"]),
+                "gap_event_count": int(row["gap_event_count"]),
+                "last_gap_start": row["last_gap_start"],
+                "last_gap_end": row["last_gap_end"],
+                "last_gap_at": self._iso(row["last_gap_at"]),
+                "out_of_order_count": int(row["out_of_order_count"]),
+                "updated_at": self._iso(row["updated_at"]),
+            }
+            for row in rows
+        }
+
+    def position_summary(self) -> dict[str, int]:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COALESCE(SUM(missing_position_count),0) AS missing_position_count, COALESCE(SUM(gap_event_count),0) AS gap_event_count, COALESCE(SUM(out_of_order_count),0) AS out_of_order_count FROM position_stats"
+            ).fetchone()
+        return {key: int(row[key] if row else 0) for key in ("missing_position_count", "gap_event_count", "out_of_order_count")}
 
     def counters(self) -> dict[str, int]:
         with self._lock:

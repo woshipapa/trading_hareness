@@ -1511,7 +1511,7 @@ async function groupRelayDashboardStatus() {
 }
 
 async function larkAgentXDashboardStatus() {
-	const unavailable = (message) => ({ status: 'unavailable', observed_at: new Date().toISOString(), message, metrics_persisted: false, metrics_source: null, websocket: { state: 'unavailable' }, listen_chat_count: 0, listen_chat_ids: [], websocket_chat_ids: [], summary_chat_ids: [], summary_ingress_configured: false, gap_repair_enabled: false, dynamic_route_discovery: false, route_catalog_count: 0, route_catalog_last_refresh_at: null, route_catalog_error: null, dynamic_routes: {}, chat_validation: {}, chat_stats: {} });
+	const unavailable = (message) => ({ status: 'unavailable', observed_at: new Date().toISOString(), message, metrics_persisted: false, metrics_source: null, websocket: { state: 'unavailable' }, listen_chat_count: 0, listen_chat_ids: [], websocket_chat_ids: [], summary_chat_ids: [], summary_ingress_configured: false, gap_repair_enabled: false, dynamic_route_discovery: false, route_catalog_count: 0, route_catalog_last_refresh_at: null, route_catalog_error: null, dynamic_routes: {}, persisted_route_bindings: {}, chat_validation: {}, chat_stats: {}, ignored_count: 0, ignored_by_chat: {}, position_stats: {}, position_summary: { missing_position_count: 0, gap_event_count: 0, out_of_order_count: 0 } });
 	if (!larkAgentXHealthUrl) return unavailable('未配置 LarkAgentX health 地址');
 	try {
 		const controller = new AbortController();
@@ -1535,10 +1535,14 @@ async function larkAgentXDashboardStatus() {
 			listen_chat_ids: Array.isArray(raw.listen_chat_ids) ? raw.listen_chat_ids : [], websocket_chat_ids: Array.isArray(raw.websocket_chat_ids) ? raw.websocket_chat_ids : [],
 			summary_chat_ids: Array.isArray(raw.summary_chat_ids) ? raw.summary_chat_ids : [], summary_ingress_configured: Boolean(raw.summary_ingress_configured),
 			gap_repair_enabled: Boolean(raw.gap_repair_enabled), dynamic_route_discovery: Boolean(raw.dynamic_route_discovery),
-			route_catalog_count: Number(raw.route_catalog_count ?? 0), route_catalog_last_refresh_at: raw.route_catalog_last_refresh_at ?? null,
-			route_catalog_error: raw.route_catalog_error ?? null, dynamic_routes: raw.dynamic_routes && typeof raw.dynamic_routes === 'object' ? raw.dynamic_routes : {},
-			mapping_check_at: raw.mapping_check_at ?? null, mapping_check_error: raw.mapping_check_error ?? null,
-			observed_count: Number(raw.observed_count ?? 0), forwarded_count: Number(raw.forwarded_count ?? 0), failed_count: Number(raw.failed_count ?? 0),
+				route_catalog_count: Number(raw.route_catalog_count ?? 0), route_catalog_last_refresh_at: raw.route_catalog_last_refresh_at ?? null,
+				route_catalog_error: raw.route_catalog_error ?? null, dynamic_routes: raw.dynamic_routes && typeof raw.dynamic_routes === 'object' ? raw.dynamic_routes : {},
+				persisted_route_bindings: raw.persisted_route_bindings && typeof raw.persisted_route_bindings === 'object' ? raw.persisted_route_bindings : {},
+				mapping_check_at: raw.mapping_check_at ?? null, mapping_check_error: raw.mapping_check_error ?? null,
+				observed_count: Number(raw.observed_count ?? 0), forwarded_count: Number(raw.forwarded_count ?? 0), failed_count: Number(raw.failed_count ?? 0), ignored_count: Number(raw.ignored_count ?? 0),
+				ignored_by_chat: raw.ignored_by_chat && typeof raw.ignored_by_chat === 'object' ? raw.ignored_by_chat : {},
+				position_stats: raw.position_stats && typeof raw.position_stats === 'object' ? raw.position_stats : {},
+				position_summary: raw.position_summary && typeof raw.position_summary === 'object' ? raw.position_summary : { missing_position_count: 0, gap_event_count: 0, out_of_order_count: 0 },
 			decode_error_count: Number(raw.decode_error_count ?? 0), decode_fallback_count: Number(raw.decode_fallback_count ?? 0), unknown_field_count: Number(raw.unknown_field_count ?? 0),
 			partial_frame_count: Number(raw.partial_frame_count ?? 0), retry_count: Number(raw.retry_count ?? 0), last_observed_chat_id: raw.last_observed_chat_id ?? null,
 			last_observed_message_type: raw.last_observed_message_type ?? null, event_spool: {
