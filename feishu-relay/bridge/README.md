@@ -50,6 +50,11 @@ LARKX_GROUP_RELAY_ENABLED=true
 LARKX_GROUP_RELAY_ROUTES=7661209668907207659=anqiang;7667390477875858612=liwei
 ```
 
+爱投顾的尾盘掘金和擒龙产品由 47 上独立的 `itougu-neican` 轮询服务读取并通过
+各自 webhook 投递。它们的更新群是投递目标，不是 WebSocket 源群；不要把这两个群的
+数字或 `oc_` ID 写入 `LARKX_LISTEN_CHAT_IDS`、`LARKX_SEND_CHAT_IDS` 或
+`LARKX_GROUP_RELAY_ROUTES`，否则会产生重复入口和误报的 WS 投递失败。
+
 安强源消息的来源级过滤可在 bridge 入站处提前终止 webhook 调用。生产环境通过
 `LARKX_ANQIANG_SOURCE_KEYS` 或 `LARKX_ANQIANG_CHAT_IDS` 指定来源，并用
 `LARKX_ANQIANG_BLOCK_KEYWORDS` 配置过滤词；当前默认词为 `般若星登山的川柏`。

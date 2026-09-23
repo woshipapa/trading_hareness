@@ -2,7 +2,11 @@
 
 ## 当前执行方案
 
-47 上由 LarkAgentX 通过 WebSocket 监听已核验的 8 个数字源群，bridge 只对白名单 chat ID 放行，并把事件交给 `feishu-adapter`。源群的官方 `message.list` 轮询保持关闭，文本消息直接进入现有 relay ledger、过滤和目标群 fan-out。
+47 上由 LarkAgentX 通过 WebSocket 监听已核验的数字源群，bridge 只对白名单 chat ID 放行，并把事件交给 `feishu-adapter`。源群的官方 `message.list` 轮询保持关闭，文本消息直接进入现有 relay ledger、过滤和目标群 fan-out。
+
+尾盘掘金和擒龙更新群属于 itougu 的投递目标，不属于 WebSocket 源群。它们由独立的
+`itougu-neican` 服务按产品 API 轮询，再通过对应 webhook 发送到汇总群和专属群；这两
+个更新群的数字/`oc_` ID 不应重新加入 LarkAgentX 白名单或 relay route 表。
 
 非文本消息由实时事件触发旧链路补读：
 
