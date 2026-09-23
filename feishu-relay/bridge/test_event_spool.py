@@ -71,7 +71,7 @@ class EventSpoolTests(unittest.TestCase):
             spool.enqueue("e2", {**payload, "msg_id": "m2"})
             spool.claim("e2")
             spool.mark_failed("e2", "temporary")
-            self.assertEqual(spool.chat_summary(), {"observed_count": 2, "forwarded_count": 1, "failed_count": 1, "historical_failed_count": 1})
+            self.assertEqual(spool.chat_summary(), {"observed_count": 2, "forwarded_count": 1, "failed_count": 1, "historical_failed_count": 1, "filtered_count": 0})
             self.assertEqual(spool.chat_stats()["7667390477875858612"]["last_message_type"], "IMAGE")
             spool.close()
 
@@ -80,6 +80,7 @@ class EventSpoolTests(unittest.TestCase):
             self.assertEqual(stats["observed_count"], 2)
             self.assertEqual(stats["forwarded_count"], 1)
             self.assertEqual(stats["failed_count"], 1)
+            self.assertEqual(stats["filtered_count"], 0)
             reopened.increment_counter("decode_error_count")
             reopened.close()
 
@@ -123,6 +124,44 @@ class EventSpoolTests(unittest.TestCase):
             self.assertEqual(stats["missing_position_count"], 1)
             self.assertEqual(stats["last_gap_start"], 21)
             reopened.close()
+
+    def test_private_recovery_is_durable_and_closes_unresolved_gap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            spool = EventSpool(path)
+            spool.enqueue("e10", {"chat_id": "chat-a", "position": 10, "msg_id": "m10"})
+            spool.enqueue("e12", {"chat_id": "chat-a", "position": 12, "msg_id": "m12"})
+            self.assertEqual(spool.position_gap_ranges("chat-a"), [{"start": 11, "end": 11, "missing": 1}])
+            self.assertTrue(spool.record_recovered_position("chat-a", 11))
+            self.assertFalse(spool.record_recovered_position("chat-a", 11))
+            stats = spool.position_stats()["chat-a"]
+            self.assertEqual(stats["recovered_position_count"], 1)
+            self.assertEqual(stats["unresolved_position_count"], 0)
+            self.assertEqual(spool.position_gap_ranges("chat-a"), [])
+            spool.close()
+
+            reopened = EventSpool(path)
+            self.assertEqual(reopened.position_summary()["recovered_position_count"], 1)
+            self.assertEqual(reopened.position_summary()["unresolved_position_count"], 0)
+            reopened.close()
+
+    def test_filtered_event_is_durable_and_counts_as_observed_without_delivery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            spool = EventSpool(path)
+            self.assertTrue(spool.record_filtered(
+                "larkagentx:chat-a:m11", "chat-a", message_id="m11", position=11,
+                message_type="CARD", source_key="anqiang", keyword="般若星登山的川柏",
+            ))
+            self.assertFalse(spool.record_filtered(
+                "larkagentx:chat-a:m11", "chat-a", message_id="m11", position=11,
+                message_type="CARD", source_key="anqiang", keyword="般若星登山的川柏",
+            ))
+            self.assertEqual(spool.chat_stats()["chat-a"]["observed_count"], 1)
+            self.assertEqual(spool.chat_stats()["chat-a"]["filtered_count"], 1)
+            self.assertEqual(spool.chat_summary()["filtered_count"], 1)
+            self.assertEqual(spool.position_gap_ranges("chat-a"), [])
+            spool.close()
 
 
 if __name__ == "__main__":

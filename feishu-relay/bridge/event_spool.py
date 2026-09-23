@@ -67,6 +67,7 @@ class EventSpool:
                 forwarded_count INTEGER NOT NULL DEFAULT 0,
                 failed_count INTEGER NOT NULL DEFAULT 0,
                 failure_count INTEGER NOT NULL DEFAULT 0,
+                filtered_count INTEGER NOT NULL DEFAULT 0,
                 last_observed_at REAL,
                 last_forwarded_at REAL,
                 last_message_type TEXT
@@ -95,8 +96,28 @@ class EventSpool:
                 last_gap_end INTEGER,
                 last_gap_at REAL,
                 out_of_order_count INTEGER NOT NULL DEFAULT 0,
+                recovered_position_count INTEGER NOT NULL DEFAULT 0,
+                last_recovered_position INTEGER,
+                last_recovered_at REAL,
                 updated_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS position_recoveries (
+                chat_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                recovered_at REAL NOT NULL,
+                PRIMARY KEY(chat_id, position)
+            );
+            CREATE TABLE IF NOT EXISTS filtered_events (
+                event_id TEXT PRIMARY KEY,
+                chat_id TEXT NOT NULL,
+                message_id TEXT,
+                position INTEGER,
+                source_key TEXT,
+                keyword TEXT,
+                reason TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS filtered_events_chat_position_idx ON filtered_events(chat_id, position);
             """
         )
         # The bridge was initially released without a sequence column. Keep the
@@ -110,6 +131,15 @@ class EventSpool:
         if added_failure_count:
             self._db.execute("ALTER TABLE chat_stats ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0")
             self._db.execute("UPDATE chat_stats SET failure_count=failed_count WHERE failure_count=0")
+        if "filtered_count" not in chat_stat_columns:
+            self._db.execute("ALTER TABLE chat_stats ADD COLUMN filtered_count INTEGER NOT NULL DEFAULT 0")
+        position_stat_columns = {str(row[1]) for row in self._db.execute("PRAGMA table_info(position_stats)").fetchall()}
+        if "recovered_position_count" not in position_stat_columns:
+            self._db.execute("ALTER TABLE position_stats ADD COLUMN recovered_position_count INTEGER NOT NULL DEFAULT 0")
+        if "last_recovered_position" not in position_stat_columns:
+            self._db.execute("ALTER TABLE position_stats ADD COLUMN last_recovered_position INTEGER")
+        if "last_recovered_at" not in position_stat_columns:
+            self._db.execute("ALTER TABLE position_stats ADD COLUMN last_recovered_at REAL")
         for row in self._db.execute("SELECT rowid FROM events WHERE sequence IS NULL ORDER BY rowid").fetchall():
             sequence = self._db.execute("SELECT COALESCE(MAX(sequence),0)+1 AS next_sequence FROM events").fetchone()["next_sequence"]
             self._db.execute("UPDATE events SET sequence=? WHERE rowid=?", (int(sequence), int(row[0])))
@@ -165,7 +195,7 @@ class EventSpool:
             if not chat_id:
                 continue
             item = aggregates.setdefault(chat_id, {
-                "observed_count": 0, "forwarded_count": 0, "failed_count": 0, "failure_count": 0,
+                "observed_count": 0, "forwarded_count": 0, "failed_count": 0, "failure_count": 0, "filtered_count": 0,
                 "last_observed_at": None, "last_forwarded_at": None, "last_message_type": None,
             })
             item["observed_count"] += 1
@@ -179,8 +209,8 @@ class EventSpool:
                 item["failure_count"] += 1
         for chat_id, item in aggregates.items():
             self._db.execute(
-                "INSERT INTO chat_stats(chat_id,observed_count,forwarded_count,failed_count,failure_count,last_observed_at,last_forwarded_at,last_message_type) VALUES(?,?,?,?,?,?,?,?)",
-                (chat_id, item["observed_count"], item["forwarded_count"], item["failed_count"], item["failure_count"], item["last_observed_at"], item["last_forwarded_at"], item["last_message_type"]),
+                "INSERT INTO chat_stats(chat_id,observed_count,forwarded_count,failed_count,failure_count,filtered_count,last_observed_at,last_forwarded_at,last_message_type) VALUES(?,?,?,?,?,?,?,?,?)",
+                (chat_id, item["observed_count"], item["forwarded_count"], item["failed_count"], item["failure_count"], item["filtered_count"], item["last_observed_at"], item["last_forwarded_at"], item["last_message_type"]),
             )
 
     def _record_observed_locked(self, payload: dict[str, Any], created_at: float) -> None:
@@ -244,7 +274,9 @@ class EventSpool:
             state = states.setdefault(chat_id, {
                 "last_position": None, "missing_position_count": 0, "gap_event_count": 0,
                 "last_gap_start": None, "last_gap_end": None, "last_gap_at": None,
-                "out_of_order_count": 0, "updated_at": float(row["created_at"]),
+                "out_of_order_count": 0, "recovered_position_count": 0,
+                "last_recovered_position": None, "last_recovered_at": None,
+                "updated_at": float(row["created_at"]),
             })
             previous = state["last_position"]
             state["updated_at"] = float(row["created_at"])
@@ -268,13 +300,15 @@ class EventSpool:
                 """
                 INSERT INTO position_stats(
                     chat_id,last_position,missing_position_count,gap_event_count,
-                    last_gap_start,last_gap_end,last_gap_at,out_of_order_count,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?)
+                    last_gap_start,last_gap_end,last_gap_at,out_of_order_count,
+                    recovered_position_count,last_recovered_position,last_recovered_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     chat_id, state["last_position"], state["missing_position_count"], state["gap_event_count"],
                     state["last_gap_start"], state["last_gap_end"], state["last_gap_at"],
-                    state["out_of_order_count"], state["updated_at"],
+                    state["out_of_order_count"], state["recovered_position_count"],
+                    state["last_recovered_position"], state["last_recovered_at"], state["updated_at"],
                 ),
             )
 
@@ -324,6 +358,134 @@ class EventSpool:
             gap = self._record_position_locked(chat_id, position, now)
             self._db.commit()
             return gap
+
+    def record_recovered_position(self, chat_id: str, position: Any = None) -> bool:
+        """Persist a position recovered through the private history gateway.
+
+        The observed gap counter remains an audit of what the WebSocket skipped;
+        recovered_position_count makes the unresolved portion explicit without
+        rewriting that original transport signal.
+        """
+        chat_id = str(chat_id or "").strip()
+        try:
+            parsed_position = int(position)
+        except (TypeError, ValueError):
+            return False
+        if not chat_id or parsed_position <= 0:
+            return False
+        now = self._now()
+        with self._lock:
+            inserted = self._db.execute(
+                "INSERT OR IGNORE INTO position_recoveries(chat_id,position,recovered_at) VALUES(?,?,?)",
+                (chat_id, parsed_position, now),
+            ).rowcount
+            if inserted:
+                self._db.execute(
+                    """
+                    INSERT INTO position_stats(
+                        chat_id,last_position,recovered_position_count,last_recovered_position,last_recovered_at,updated_at
+                    ) VALUES(?,?,?,?,?,?)
+                    ON CONFLICT(chat_id) DO UPDATE SET
+                        recovered_position_count=position_stats.recovered_position_count+1,
+                        last_recovered_position=excluded.last_recovered_position,
+                        last_recovered_at=excluded.last_recovered_at,
+                        updated_at=excluded.updated_at
+                    """,
+                    (chat_id, None, 1, parsed_position, now, now),
+                )
+            self._db.commit()
+            return bool(inserted)
+
+    def record_filtered(
+        self,
+        event_id: str,
+        chat_id: str,
+        *,
+        message_id: str = "",
+        position: Any = None,
+        message_type: str = "UNKNOWN",
+        source_key: str = "",
+        keyword: str = "",
+        reason: str = "source_keyword",
+    ) -> bool:
+        """Record a source-filtered event without enqueueing a downstream call."""
+        event_id = str(event_id or "").strip()
+        chat_id = str(chat_id or "").strip()
+        if not event_id or not chat_id:
+            return False
+        try:
+            parsed_position = int(position)
+            if parsed_position <= 0:
+                parsed_position = None
+        except (TypeError, ValueError):
+            parsed_position = None
+        now = self._now()
+        normalized_type = str(message_type or "UNKNOWN").strip().upper() or "UNKNOWN"
+        with self._lock:
+            inserted = self._db.execute(
+                """
+                INSERT OR IGNORE INTO filtered_events(
+                    event_id,chat_id,message_id,position,source_key,keyword,reason,created_at
+                ) VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (event_id, chat_id, str(message_id or "")[:128], parsed_position, str(source_key or "")[:128], str(keyword or "")[:128], str(reason or "source_keyword")[:160], now),
+            ).rowcount
+            if inserted:
+                self._db.execute(
+                    """
+                    INSERT INTO chat_stats(chat_id,observed_count,filtered_count,last_observed_at,last_message_type)
+                    VALUES(?,?,?,?,?)
+                    ON CONFLICT(chat_id) DO UPDATE SET
+                        observed_count=chat_stats.observed_count+1,
+                        filtered_count=chat_stats.filtered_count+1,
+                        last_observed_at=excluded.last_observed_at,
+                        last_message_type=excluded.last_message_type
+                    """,
+                    (chat_id, 1, 1, now, normalized_type),
+                )
+            self._db.commit()
+            return bool(inserted)
+
+    def position_gap_ranges(self, chat_id: str, limit: int = 32) -> list[dict[str, int]]:
+        """Return retained, unresolved position gaps for one numeric chat.
+
+        This is intentionally derived from the durable event and recovery rows:
+        a restart does not lose the ranges that still need private backfill.
+        """
+        chat_id = str(chat_id or "").strip()
+        bounded_limit = max(1, min(128, int(limit)))
+        if not chat_id:
+            return []
+        with self._lock:
+            rows = self._db.execute("SELECT payload_json FROM events ORDER BY sequence").fetchall()
+            recovered_rows = self._db.execute(
+                "SELECT position FROM position_recoveries WHERE chat_id=? ORDER BY position", (chat_id,)
+            ).fetchall()
+            filtered_rows = self._db.execute(
+                "SELECT position FROM filtered_events WHERE chat_id=? AND position IS NOT NULL ORDER BY position", (chat_id,)
+            ).fetchall()
+        positions: set[int] = set()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict) or str(payload.get("chat_id") or "").strip() != chat_id:
+                continue
+            position = self._payload_position(payload)
+            if position is not None:
+                positions.add(position)
+        positions.update(int(row["position"]) for row in recovered_rows)
+        positions.update(int(row["position"]) for row in filtered_rows)
+        ordered = sorted(positions)
+        ranges: list[dict[str, int]] = []
+        for previous, current in zip(ordered, ordered[1:]):
+            if current - previous <= 1:
+                continue
+            ranges.append({"start": previous + 1, "end": current - 1, "missing": current - previous - 1})
+            if len(ranges) >= bounded_limit:
+                break
+        return ranges
 
     def record_ignored(
         self,
@@ -392,9 +554,9 @@ class EventSpool:
     def position_stats(self) -> dict[str, dict[str, Any]]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT chat_id,last_position,missing_position_count,gap_event_count,last_gap_start,last_gap_end,last_gap_at,out_of_order_count,updated_at FROM position_stats ORDER BY chat_id"
+                "SELECT chat_id,last_position,missing_position_count,gap_event_count,last_gap_start,last_gap_end,last_gap_at,out_of_order_count,recovered_position_count,last_recovered_position,last_recovered_at,updated_at FROM position_stats ORDER BY chat_id"
             ).fetchall()
-        return {
+        result = {
             str(row["chat_id"]): {
                 "last_position": row["last_position"],
                 "missing_position_count": int(row["missing_position_count"]),
@@ -403,17 +565,30 @@ class EventSpool:
                 "last_gap_end": row["last_gap_end"],
                 "last_gap_at": self._iso(row["last_gap_at"]),
                 "out_of_order_count": int(row["out_of_order_count"]),
+                "recovered_position_count": int(row["recovered_position_count"]),
+                "last_recovered_position": row["last_recovered_position"],
+                "last_recovered_at": self._iso(row["last_recovered_at"]),
+                "unresolved_position_count": 0,
                 "updated_at": self._iso(row["updated_at"]),
             }
             for row in rows
         }
+        for chat_id, item in result.items():
+            item["unresolved_position_count"] = sum(int(gap["missing"]) for gap in self.position_gap_ranges(chat_id))
+        return result
 
     def position_summary(self) -> dict[str, int]:
         with self._lock:
             row = self._db.execute(
-                "SELECT COALESCE(SUM(missing_position_count),0) AS missing_position_count, COALESCE(SUM(gap_event_count),0) AS gap_event_count, COALESCE(SUM(out_of_order_count),0) AS out_of_order_count FROM position_stats"
+                "SELECT COALESCE(SUM(missing_position_count),0) AS missing_position_count, COALESCE(SUM(gap_event_count),0) AS gap_event_count, COALESCE(SUM(out_of_order_count),0) AS out_of_order_count, COALESCE(SUM(recovered_position_count),0) AS recovered_position_count FROM position_stats"
             ).fetchone()
-        return {key: int(row[key] if row else 0) for key in ("missing_position_count", "gap_event_count", "out_of_order_count")}
+        result = {key: int(row[key] if row else 0) for key in ("missing_position_count", "gap_event_count", "out_of_order_count", "recovered_position_count")}
+        result["unresolved_position_count"] = sum(
+            int(gap["missing"])
+            for chat_id in self.position_stats()
+            for gap in self.position_gap_ranges(chat_id)
+        )
+        return result
 
     def counters(self) -> dict[str, int]:
         with self._lock:
@@ -552,7 +727,7 @@ class EventSpool:
     def chat_stats(self) -> dict[str, dict[str, Any]]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT chat_id,observed_count,forwarded_count,failed_count,failure_count,last_observed_at,last_forwarded_at,last_message_type FROM chat_stats ORDER BY chat_id"
+                "SELECT chat_id,observed_count,forwarded_count,failed_count,failure_count,filtered_count,last_observed_at,last_forwarded_at,last_message_type FROM chat_stats ORDER BY chat_id"
             ).fetchall()
         return {
             str(row["chat_id"]): {
@@ -562,6 +737,7 @@ class EventSpool:
                 "forwarded_count": int(row["forwarded_count"]),
                 "failed_count": int(row["failed_count"]),
                 "historical_failed_count": int(row["failure_count"]),
+                "filtered_count": int(row["filtered_count"]),
                 "last_observed_at": self._iso(row["last_observed_at"]),
                 "last_forwarded_at": self._iso(row["last_forwarded_at"]),
                 "last_message_type": row["last_message_type"],
@@ -572,9 +748,9 @@ class EventSpool:
     def chat_summary(self) -> dict[str, int]:
         with self._lock:
             row = self._db.execute(
-                "SELECT COALESCE(SUM(observed_count),0) AS observed_count, COALESCE(SUM(forwarded_count),0) AS forwarded_count, COALESCE(SUM(failed_count),0) AS failed_count, COALESCE(SUM(failure_count),0) AS historical_failed_count FROM chat_stats"
+                "SELECT COALESCE(SUM(observed_count),0) AS observed_count, COALESCE(SUM(forwarded_count),0) AS forwarded_count, COALESCE(SUM(failed_count),0) AS failed_count, COALESCE(SUM(failure_count),0) AS historical_failed_count, COALESCE(SUM(filtered_count),0) AS filtered_count FROM chat_stats"
             ).fetchone()
-        return {key: int(row[key]) for key in ("observed_count", "forwarded_count", "failed_count", "historical_failed_count")}
+        return {key: int(row[key]) for key in ("observed_count", "forwarded_count", "failed_count", "historical_failed_count", "filtered_count")}
 
     def close(self) -> None:
         with self._lock:

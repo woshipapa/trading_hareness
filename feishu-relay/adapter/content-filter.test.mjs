@@ -32,8 +32,8 @@ test('does not filter ordinary analyst content', () => {
 	assert.equal(blockedMessageReason({ msg_type: 'text', body: { content: JSON.stringify({ text: '#anqiang\n今日指数缩量震荡' }) } }), null);
 });
 
-test('filters the newly blocked promotional phrase', () => {
-	assert.match(blockedMessageReason({ msg_type: 'text', body: { content: JSON.stringify({ text: '般若星登山的川柏' }) } }), /般若星登山的川柏/);
+test('keeps source-specific phrases out of the global filter list', () => {
+	assert.equal(blockedMessageReason({ msg_type: 'text', body: { content: JSON.stringify({ text: '般若星登山的川柏' }) } }), null);
 });
 
 test('supports an additive configured keyword list', () => {

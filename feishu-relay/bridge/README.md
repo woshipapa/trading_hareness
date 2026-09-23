@@ -50,6 +50,12 @@ LARKX_GROUP_RELAY_ENABLED=true
 LARKX_GROUP_RELAY_ROUTES=7661209668907207659=anqiang;7667390477875858612=liwei
 ```
 
+安强源消息的来源级过滤可在 bridge 入站处提前终止 webhook 调用。生产环境通过
+`LARKX_ANQIANG_SOURCE_KEYS` 或 `LARKX_ANQIANG_CHAT_IDS` 指定来源，并用
+`LARKX_ANQIANG_BLOCK_KEYWORDS` 配置过滤词；当前默认词为 `般若星登山的川柏`。
+命中的消息仍记录为已观测和已过滤，
+不会进入 adapter 的 relay queue，也不会占用 webhook 发送。
+
 前端新增源群时可以启用动态发现：适配器会提供受桥接 token 保护的路由目录，bridge
 在收到尚未配置数字群 ID 的 WebSocket 事件时，按群名做唯一匹配并把该消息带上 source
 key 交给适配器。这样新增源群无需手工改 `LARKX_GROUP_RELAY_ROUTES`；首次消息完成绑定，
@@ -61,6 +67,17 @@ key 交给适配器。这样新增源群无需手工改 `LARKX_GROUP_RELAY_ROUTE
 该绑定再建立 WebSocket。这样首条消息不会再承担“发现并绑定”的职责。health 同时提供
 `persisted_route_bindings`、`ignored_by_chat` 和 `position_stats`；未知群事件按 chat_id
 持久化计数，WebSocket position 跳号会记录缺口范围和累计缺口数。
+
+如果某个已核验数字群需要在不消耗官方 OAuth `message.list` 配额的情况下补齐
+WebSocket 跳号，可单独启用 `LARKX_PRIVATE_GAP_REPAIR_ENABLED=true`，并用
+`LARKX_PRIVATE_GAP_REPAIR_CHAT_IDS` 限定群 ID。bridge 会通过 LarkAgentX 私有
+`PullMessagesByPositions` 回读缺口，再把完整消息送回同一个 relay ingress；恢复后的
+position 会持久化为 `recovered_position_count`，health 同时给出
+`unresolved_position_count`。首次启用时可设置
+`LARKX_PRIVATE_GAP_REPAIR_ON_START=true`，只处理配置群在本地 spool 中已经观察到的
+缺口。也可以通过受保护的 `POST /private-gap-repair` 传入
+`{"chat_id":"<numeric>","positions":[...]}` 做一次受控回填。这个入口不接受
+Cookie、图片密钥或原始 protobuf，消息仍由现有 ledger 做幂等判断。
 
 适配器入口为 `/internal/larkagentx/group-relay`，由 `x-larkagentx-token` 保护。文本、完整卡片、独立图片和带有完整解密参数的 post 图片直接进入 relay；bridge 在 WebSocket 事件进入 JSON 前解析 `RichTextElement.property` 中的 `img_v3` key、32 字节 AES key 和 12 字节 nonce。适配器通过 LarkAgentX cookie 下载密文，在本地完成 AES-256-GCM 解密；webhook 目标可直接复用源 `image_key`，从而绕过飞书图片上传额度。汇总群也可以通过 `LARKX_SUMMARY_CHAT_IDS` 和 `LARKX_SUMMARY_INGRESS_URL` 进入同一 WebSocket 事件链。edge 正常运行时关闭官方历史轮询和启动缺口补读：`FEISHU_GROUP_RELAY_ENABLED=false`、`FEISHU_SUMMARY_LISTENER_ENABLED=false`、`LARKX_GAP_REPAIR_ENABLED=false`。缺少媒体解密参数或尚未实现的文件类型会记录为不支持，不能假定官方 OAuth 补读仍然可用。systemd 环境中应使用统一 supervisor venv 的 `/opt/supervisor/.venv/bin/python`，凭证放在受限权限的 `LARKX_HOME`，不要提交到仓库。
 

@@ -1384,12 +1384,24 @@ async function groupRelayDashboardStatus() {
 	const runtimeByKey = new Map(runtime.sources.map((source) => [source.key, source]));
 	const ingestionByTag = new Map(ingestionSources.map((source) => [source.source_tag, source]));
 	const websocketChatIdsBySource = new Map();
-	for (const [chatId, sourceKey] of [...larkAgentXGroupRelayRoutes, ...larkAgentXDynamicGroupRelayRoutes]) {
+	const addWebsocketRoute = (chatId, sourceKey) => {
 		// The route map keeps official oc_ aliases for documentation and
 		// deduplication, but only numeric ids are actual LarkAgentX socket ids.
-		if (!/^\d+$/.test(chatId)) continue;
+		if (!/^\d+$/.test(chatId) || !String(sourceKey ?? '').trim()) return;
 		if (!websocketChatIdsBySource.has(sourceKey)) websocketChatIdsBySource.set(sourceKey, []);
-		websocketChatIdsBySource.get(sourceKey).push(chatId);
+		if (!websocketChatIdsBySource.get(sourceKey).includes(chatId)) websocketChatIdsBySource.get(sourceKey).push(chatId);
+	};
+	for (const [chatId, sourceKey] of [...larkAgentXGroupRelayRoutes, ...larkAgentXDynamicGroupRelayRoutes]) {
+		addWebsocketRoute(chatId, sourceKey);
+	}
+	// A bridge restart restores dynamic numeric ids before the first new event.
+	// Merge that durable view into the dashboard projection so a quiet source is
+	// shown as WebSocket-bound immediately instead of waiting for another event.
+	for (const [chatId, route] of Object.entries(larkagentx.dynamic_routes ?? {})) {
+		addWebsocketRoute(chatId, String(route?.source_key ?? '').trim());
+	}
+	for (const [sourceKey, binding] of Object.entries(larkagentx.persisted_route_bindings ?? {})) {
+		addWebsocketRoute(String(binding?.chat_id ?? '').trim(), String(binding?.source_key ?? sourceKey).trim());
 	}
 	const staleAfterSeconds = Math.max(45, groupRelayConfig.intervalSeconds * 3);
 	const now = Date.now();
@@ -1511,7 +1523,7 @@ async function groupRelayDashboardStatus() {
 }
 
 async function larkAgentXDashboardStatus() {
-	const unavailable = (message) => ({ status: 'unavailable', observed_at: new Date().toISOString(), message, metrics_persisted: false, metrics_source: null, websocket: { state: 'unavailable' }, listen_chat_count: 0, listen_chat_ids: [], websocket_chat_ids: [], summary_chat_ids: [], summary_ingress_configured: false, gap_repair_enabled: false, dynamic_route_discovery: false, route_catalog_count: 0, route_catalog_last_refresh_at: null, route_catalog_error: null, dynamic_routes: {}, persisted_route_bindings: {}, chat_validation: {}, chat_stats: {}, ignored_count: 0, ignored_by_chat: {}, position_stats: {}, position_summary: { missing_position_count: 0, gap_event_count: 0, out_of_order_count: 0 } });
+	const unavailable = (message) => ({ status: 'unavailable', observed_at: new Date().toISOString(), message, metrics_persisted: false, metrics_source: null, websocket: { state: 'unavailable' }, listen_chat_count: 0, listen_chat_ids: [], websocket_chat_ids: [], summary_chat_ids: [], summary_ingress_configured: false, gap_repair_enabled: false, private_gap_repair_enabled: false, private_gap_repair_on_start: false, private_repair_count: 0, private_repair_message_count: 0, private_repair_failed_count: 0, dynamic_route_discovery: false, route_catalog_count: 0, route_catalog_last_refresh_at: null, route_catalog_error: null, dynamic_routes: {}, persisted_route_bindings: {}, chat_validation: {}, chat_stats: {}, observed_count: 0, forwarded_count: 0, filtered_count: 0, ignored_count: 0, ignored_by_chat: {}, position_stats: {}, position_summary: { missing_position_count: 0, gap_event_count: 0, out_of_order_count: 0, recovered_position_count: 0, unresolved_position_count: 0 } });
 	if (!larkAgentXHealthUrl) return unavailable('未配置 LarkAgentX health 地址');
 	try {
 		const controller = new AbortController();
@@ -1525,7 +1537,7 @@ async function larkAgentXDashboardStatus() {
 		}]));
 		const stats = Object.fromEntries(Object.entries(raw.chat_stats ?? {}).map(([chatId, value]) => [chatId, {
 			allowlisted: value?.allowlisted !== false, observed_count: Number(value?.observed_count ?? 0), self_message_count: Number(value?.self_message_count ?? 0),
-			forwarded_count: Number(value?.forwarded_count ?? 0), failed_count: Number(value?.failed_count ?? 0), historical_failed_count: Number(value?.historical_failed_count ?? value?.failed_count ?? 0), last_observed_at: value?.last_observed_at ?? null,
+				forwarded_count: Number(value?.forwarded_count ?? 0), failed_count: Number(value?.failed_count ?? 0), filtered_count: Number(value?.filtered_count ?? 0), historical_failed_count: Number(value?.historical_failed_count ?? value?.failed_count ?? 0), last_observed_at: value?.last_observed_at ?? null,
 			last_forwarded_at: value?.last_forwarded_at ?? null, last_message_type: value?.last_message_type ?? null,
 		}]));
 		return {
@@ -1533,16 +1545,19 @@ async function larkAgentXDashboardStatus() {
 			metrics_persisted: raw.metrics_persisted === true, metrics_source: raw.metrics_source ?? null,
 			websocket: raw.websocket ?? { state: 'unknown' }, listen_chat_count: Number(raw.listen_chat_count ?? 0),
 			listen_chat_ids: Array.isArray(raw.listen_chat_ids) ? raw.listen_chat_ids : [], websocket_chat_ids: Array.isArray(raw.websocket_chat_ids) ? raw.websocket_chat_ids : [],
-			summary_chat_ids: Array.isArray(raw.summary_chat_ids) ? raw.summary_chat_ids : [], summary_ingress_configured: Boolean(raw.summary_ingress_configured),
-			gap_repair_enabled: Boolean(raw.gap_repair_enabled), dynamic_route_discovery: Boolean(raw.dynamic_route_discovery),
+				summary_chat_ids: Array.isArray(raw.summary_chat_ids) ? raw.summary_chat_ids : [], summary_ingress_configured: Boolean(raw.summary_ingress_configured),
+				gap_repair_enabled: Boolean(raw.gap_repair_enabled), private_gap_repair_enabled: Boolean(raw.private_gap_repair_enabled),
+				private_gap_repair_on_start: Boolean(raw.private_gap_repair_on_start), private_repair_count: Number(raw.private_repair_count ?? 0),
+				private_repair_message_count: Number(raw.private_repair_message_count ?? 0), private_repair_failed_count: Number(raw.private_repair_failed_count ?? 0),
+				dynamic_route_discovery: Boolean(raw.dynamic_route_discovery),
 				route_catalog_count: Number(raw.route_catalog_count ?? 0), route_catalog_last_refresh_at: raw.route_catalog_last_refresh_at ?? null,
 				route_catalog_error: raw.route_catalog_error ?? null, dynamic_routes: raw.dynamic_routes && typeof raw.dynamic_routes === 'object' ? raw.dynamic_routes : {},
 				persisted_route_bindings: raw.persisted_route_bindings && typeof raw.persisted_route_bindings === 'object' ? raw.persisted_route_bindings : {},
 				mapping_check_at: raw.mapping_check_at ?? null, mapping_check_error: raw.mapping_check_error ?? null,
-				observed_count: Number(raw.observed_count ?? 0), forwarded_count: Number(raw.forwarded_count ?? 0), failed_count: Number(raw.failed_count ?? 0), ignored_count: Number(raw.ignored_count ?? 0),
+				observed_count: Number(raw.observed_count ?? 0), forwarded_count: Number(raw.forwarded_count ?? 0), failed_count: Number(raw.failed_count ?? 0), filtered_count: Number(raw.filtered_count ?? 0), ignored_count: Number(raw.ignored_count ?? 0),
 				ignored_by_chat: raw.ignored_by_chat && typeof raw.ignored_by_chat === 'object' ? raw.ignored_by_chat : {},
 				position_stats: raw.position_stats && typeof raw.position_stats === 'object' ? raw.position_stats : {},
-				position_summary: raw.position_summary && typeof raw.position_summary === 'object' ? raw.position_summary : { missing_position_count: 0, gap_event_count: 0, out_of_order_count: 0 },
+				position_summary: raw.position_summary && typeof raw.position_summary === 'object' ? raw.position_summary : { missing_position_count: 0, gap_event_count: 0, out_of_order_count: 0, recovered_position_count: 0, unresolved_position_count: 0 },
 			decode_error_count: Number(raw.decode_error_count ?? 0), decode_fallback_count: Number(raw.decode_fallback_count ?? 0), unknown_field_count: Number(raw.unknown_field_count ?? 0),
 			partial_frame_count: Number(raw.partial_frame_count ?? 0), retry_count: Number(raw.retry_count ?? 0), last_observed_chat_id: raw.last_observed_chat_id ?? null,
 			last_observed_message_type: raw.last_observed_message_type ?? null, event_spool: {
@@ -1752,6 +1767,11 @@ const researchPaths = new Map([
 	['/api/research/strategy/contracts', '/api/v1/strategy/contracts'],
 	['/api/research/strategy/funnel', '/api/v1/strategy/funnel'],
 	['/api/research/intraday/services/status', '/api/v1/intraday/services/status'],
+	['/api/research/intraday/watchlists', '/api/v1/intraday/watchlists'],
+	['/api/research/intraday/scans/latest', '/api/v1/intraday/scans/latest'],
+	['/api/research/strategy/decisions/latest', '/api/v1/strategy/decisions/latest'],
+	['/api/research/strategy/promotion', '/api/v1/strategy/promotion'],
+	['/api/research/strategy/watchlist-proposals', '/api/v1/strategy/watchlist-proposals'],
 	['/api/research/analyst-scorecards', '/api/v1/analyst-scorecards'],
 	['/api/research/analyst-research/observations', '/api/v1/analyst-research/observations'],
 	['/api/research/analyst-research/status', '/api/v1/analyst-research/status'],

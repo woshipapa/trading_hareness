@@ -87,6 +87,36 @@ Itougu 轮询服务使用独立的持久化环境 `/etc/itougu-neican.env`，不
 - 保留 `message_id` 幂等键、源群标签、目标群回执和失败重试；图片解密成功不能代替发送回执。
 - 只有在 P1/P2/P3 的真实群消息验收通过后，才评估减少图片类 OAuth 补读。
 
+## 2026-09-23 私有 position 缺口修复
+
+bridge 新增独立的 LarkAgentX 私有历史补读通道。它使用当前登录会话的
+`PullMessagesByPositions`，按 WebSocket position 精确取回缺失的消息，并重新走
+bridge ingress、图片解密、Webhook fan-out 和 relay ledger；不会调用官方 OAuth
+`message.list`，也不会把 Cookie、AES key/IV 或原始 protobuf 写入持久化数据。
+
+缺口检测和已恢复 position 均写入 event spool。health 现在同时显示观测缺口、已恢复
+数量和 `unresolved_position_count`。自动修复默认关闭；生产 edge 只对经过核验的数字
+群开启 `LARKX_PRIVATE_GAP_REPAIR_ENABLED`，并用
+`LARKX_PRIVATE_GAP_REPAIR_CHAT_IDS` 限定范围。首次启用的历史缺口由
+`LARKX_PRIVATE_GAP_REPAIR_ON_START` 受控处理，避免把所有历史群消息重新灌入下游。
+
+本轮在 Liwei 群核验到 3 段、16 个真实 `IMAGE` position 缺口；这些位置由私有网关读回
+后按原有图片转发链路回填，后续实时跳号也会自动修复。adapter 状态页同时从 bridge
+的持久化绑定读取数字 chat_id，因此服务重启后无需等待下一条消息才显示 WebSocket
+已绑定。
+
+## 2026-09-23 安强来源关键词过滤
+
+安强监听源新增来源级过滤词 `般若星登山的川柏`。过滤发生在 bridge 收到并解码
+WebSocket 消息之后、调用 adapter/webhook 之前，因此命中消息不会产生下游 webhook
+请求，也不会进入 relay delivery queue；消息的 position 仍会进入持久化观测账本，避免
+后续缺口补读把主动过滤的事件再次取回。
+
+过滤范围按 `LARKX_ANQIANG_SOURCE_KEYS`、`LARKX_ANQIANG_CHAT_IDS` 和持久化路由名称核验，
+只覆盖 `anqiang` 及名称含“安强”的 VIP 路由，立伟、六边形、猫等其他来源不受这条词影响。health 和
+状态页分别显示来源过滤总数、群级过滤数及原因；adapter 仍保留同一来源级过滤作为
+OAuth/人工补读入口的第二道防线。
+
 ## 暂不采用的方案
 
 不直接 cherry-pick 或部署 PR #18，不替换 47 上当前已验证的 `larkx` WebSocket 客户端。PR 的独立图片解密思路已兼容移植；post 富文本则额外从 `RichTextElement.property` 提取密钥并走同一资源桥。对于缺少完整参数的消息，仍保留 OAuth 精确补读作为安全兜底。

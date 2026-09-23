@@ -36,6 +36,7 @@ from proto_wire import decode_primary_websocket, tolerant_websocket_decode_with_
 from event_spool import EventSpool
 from history_archive import HistoryArchive
 from owner_lock import OwnerLock, profile_storage_paths
+from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
 
 
 LOG = logging.getLogger("larkagentx-bridge")
@@ -49,6 +50,8 @@ DEFAULT_GAP_REPAIR_SECONDS = 600
 MIN_GAP_REPAIR_SECONDS = 120
 MAX_GAP_REPAIR_SECONDS = 1800
 DEFAULT_ROUTE_CATALOG_REFRESH_SECONDS = 15
+DEFAULT_PRIVATE_REPAIR_MAX_POSITIONS = 64
+MAX_PRIVATE_REPAIR_MAX_POSITIONS = 256
 
 
 def bounded_int_env(name: str, default: int, minimum: int, maximum: int | None = None) -> int:
@@ -382,9 +385,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				result = self.bridge.send(payload)
 				self.send_json(200, result)
 				return
+			if self.path == "/private-gap-repair":
+				result = asyncio.run(self.bridge.repair_private_positions(payload, reason="manual_private_gap_repair"))
+				self.send_json(200, result)
+				return
 			self.send_json(404, {"status": "not_found"})
 		except Exception as error:
-			LOG.warning("send request failed: %s", error)
+			LOG.warning("bridge POST request failed path=%s: %s", self.path, error)
 			self.send_json(400, {"status": "error", "message": str(error)[:240]})
 
 
@@ -399,6 +406,11 @@ class Bridge:
 		self.route_catalog_last_refresh_at = None
 		self.route_catalog_error = None
 		self.dynamic_routes: dict[str, dict[str, str]] = {}
+		self.static_source_keys_by_chat = self._load_static_source_keys()
+		self.anqiang_source_keys = parse_csv(os.environ.get("LARKX_ANQIANG_SOURCE_KEYS")) or {"anqiang"}
+		self.anqiang_chat_ids = parse_csv(os.environ.get("LARKX_ANQIANG_CHAT_IDS"))
+		configured_anqiang_keywords = parse_csv(os.environ.get("LARKX_ANQIANG_BLOCK_KEYWORDS"))
+		self.anqiang_block_keywords = configured_anqiang_keywords or set(DEFAULT_ANQIANG_BLOCK_KEYWORDS)
 		self.route_bindings_lock = threading.RLock()
 		self.summary_chat_ids = csv_env("LARKX_SUMMARY_CHAT_IDS")
 		self.summary_ingress_url = os.environ.get("LARKX_SUMMARY_INGRESS_URL", "").strip()
@@ -456,6 +468,20 @@ class Bridge:
 			configured_gap_seconds = DEFAULT_GAP_REPAIR_SECONDS
 		self.gap_repair_seconds = max(MIN_GAP_REPAIR_SECONDS, min(MAX_GAP_REPAIR_SECONDS, configured_gap_seconds))
 		self.gap_repair_enabled = os.environ.get("LARKX_GAP_REPAIR_ENABLED", "false").strip().lower() == "true"
+		self.private_gap_repair_enabled = os.environ.get("LARKX_PRIVATE_GAP_REPAIR_ENABLED", "false").strip().lower() == "true"
+		self.private_gap_repair_on_start = os.environ.get("LARKX_PRIVATE_GAP_REPAIR_ON_START", "false").strip().lower() == "true"
+		self.private_gap_repair_chat_ids = csv_env("LARKX_PRIVATE_GAP_REPAIR_CHAT_IDS")
+		self.private_gap_repair_max_positions = bounded_int_env(
+			"LARKX_PRIVATE_REPAIR_MAX_POSITIONS", DEFAULT_PRIVATE_REPAIR_MAX_POSITIONS, 1, MAX_PRIVATE_REPAIR_MAX_POSITIONS,
+		)
+		self._private_repair_lock = threading.RLock()
+		self._private_repair_in_flight: set[tuple[str, int, int]] = set()
+		self._private_startup_repair_started = False
+		self.private_repair_count = 0
+		self.private_repair_message_count = 0
+		self.private_repair_failed_count = 0
+		self.last_private_repair_at = None
+		self.last_private_repair_result = None
 		self._recovery_in_flight = False
 		self.client = RecoveringLarkClient(
 			self.auth,
@@ -507,6 +533,33 @@ class Bridge:
 			threading.Thread(target=self.refresh_route_catalog, name="route-catalog-startup", daemon=True).start()
 		LOG.info("listening to %d allowlisted chat(s): %s", len(self.listen_chats), ",".join(sorted(self.listen_chats)))
 
+	def _load_static_source_keys(self) -> dict[str, str]:
+		result: dict[str, str] = {}
+		for pair in os.environ.get("LARKX_GROUP_RELAY_ROUTES", "").split(";"):
+			if "=" not in pair:
+				continue
+			chat_id, source_key = (part.strip() for part in pair.split("=", 1))
+			if chat_id.isdigit() and source_key:
+				result[chat_id] = source_key
+		return result
+
+	def _source_route_for_chat(self, chat_id: str, dynamic_route: dict[str, str] | None = None) -> tuple[str, str]:
+		chat_id = str(chat_id or "").strip()
+		route = dynamic_route or self.dynamic_routes.get(chat_id) or {}
+		source_key = str(route.get("source_key") or self.static_source_keys_by_chat.get(chat_id) or "").strip()
+		chat_name = str(route.get("chat_name") or "").strip()
+		if not source_key or not chat_name:
+			for binding in self.route_bindings.values():
+				if str(binding.get("chat_id") or "").strip() != chat_id:
+					continue
+				source_key = source_key or str(binding.get("source_key") or "").strip()
+				chat_name = chat_name or str(binding.get("chat_name") or "").strip()
+				break
+		if not chat_name:
+			validation = getattr(self, "chat_validation", {}).get(chat_id, {})
+			chat_name = str(validation.get("name") or "").strip()
+		return source_key, chat_name
+
 	def _load_route_bindings(self) -> dict[str, dict[str, str]]:
 		try:
 			payload = json.loads(self.route_bindings_path.read_text(encoding="utf-8"))
@@ -539,7 +592,7 @@ class Bridge:
 	def _route_stats_template(self) -> dict[str, Any]:
 		return {
 			"allowlisted": True, "observed_count": 0, "self_message_count": 0,
-			"forwarded_count": 0, "failed_count": 0,
+			"forwarded_count": 0, "failed_count": 0, "filtered_count": 0,
 			"last_observed_at": None, "last_forwarded_at": None, "last_message_type": None,
 		}
 
@@ -693,6 +746,8 @@ class Bridge:
 				self._persist_counter("reconnect_recovery_count")
 				reason = "larkagentx_websocket_reconnect"
 			asyncio.create_task(self.recover_gap(reason))
+		if self.private_gap_repair_enabled and self.private_gap_repair_on_start and not self._private_startup_repair_started:
+			asyncio.create_task(self.repair_known_private_gaps())
 
 	def health(self) -> dict[str, Any]:
 		durable_chat_stats = self.event_spool.chat_stats()
@@ -738,6 +793,13 @@ class Bridge:
 			"metrics_source": "larkagentx_event_spool",
 			"observed_count": durable_summary["observed_count"],
 			"ignored_count": max(self.ignored_count, durable_ignored_summary["ignored_count"]),
+			"filtered_count": durable_summary.get("filtered_count", 0),
+			"source_filters": {
+				"anqiang_source_keys": sorted(self.anqiang_source_keys),
+				"anqiang_chat_ids": sorted(self.anqiang_chat_ids),
+				"anqiang_block_keywords": sorted(self.anqiang_block_keywords),
+				"filtered_count": durable_summary.get("filtered_count", 0),
+			},
 			"ignored_by_chat": durable_ignored,
 			"position_stats": durable_positions,
 			"position_summary": durable_position_summary,
@@ -768,6 +830,15 @@ class Bridge:
 			"last_recovery_result": self.last_recovery_result,
 			"gap_repair_seconds": self.gap_repair_seconds,
 			"gap_repair_enabled": self.gap_repair_enabled,
+			"private_gap_repair_enabled": self.private_gap_repair_enabled,
+			"private_gap_repair_on_start": self.private_gap_repair_on_start,
+			"private_gap_repair_chat_ids": sorted(self.private_gap_repair_chat_ids),
+			"private_gap_repair_max_positions": self.private_gap_repair_max_positions,
+			"private_repair_count": durable_counters.get("private_repair_count", self.private_repair_count),
+			"private_repair_message_count": durable_counters.get("private_repair_message_count", self.private_repair_message_count),
+			"private_repair_failed_count": durable_counters.get("private_repair_failed_count", self.private_repair_failed_count),
+			"last_private_repair_at": self.last_private_repair_at,
+			"last_private_repair_result": self.last_private_repair_result,
 			"summary_chat_ids": sorted(self.summary_chat_ids),
 			"summary_ingress_configured": bool(self.summary_ingress_url),
 			"last_observed_chat_id": self.last_observed_chat_id or None,
@@ -861,6 +932,174 @@ class Bridge:
 			chat_id, gap["previous"], gap["current"], gap["start"], gap["end"], gap["missing"], reason or "observed",
 		)
 
+	def _private_repair_allowed(self, chat_id: str) -> bool:
+		chat_id = str(chat_id or "").strip()
+		return (
+			chat_id.isdigit()
+			and chat_id in self.websocket_chat_ids
+			and (not self.private_gap_repair_chat_ids or chat_id in self.private_gap_repair_chat_ids)
+		)
+
+	def _private_repair_chunks(self, start: int, end: int) -> list[tuple[int, int]]:
+		if end < start:
+			return []
+		chunk_size = max(1, self.private_gap_repair_max_positions)
+		return [
+			(chunk_start, min(end, chunk_start + chunk_size - 1))
+			for chunk_start in range(start, end + 1, chunk_size)
+		]
+
+	def _schedule_private_gap(self, chat_id: str, gap: dict[str, int]) -> None:
+		if not self.private_gap_repair_enabled or not self._private_repair_allowed(chat_id):
+			return
+		for start, end in self._private_repair_chunks(int(gap["start"]), int(gap["end"])):
+			key = (str(chat_id), start, end)
+			with self._private_repair_lock:
+				if key in self._private_repair_in_flight:
+					continue
+				self._private_repair_in_flight.add(key)
+			asyncio.create_task(self._run_scheduled_private_gap(key))
+
+	async def _run_scheduled_private_gap(self, key: tuple[str, int, int]) -> None:
+		chat_id, start, end = key
+		try:
+			await self.repair_private_positions(
+				{"chat_id": chat_id, "positions": list(range(start, end + 1))},
+				reason="live_websocket_position_gap",
+			)
+		finally:
+			with self._private_repair_lock:
+				self._private_repair_in_flight.discard(key)
+
+	def _private_requests_from_payload(self, payload: dict[str, Any]) -> dict[str, list[int]]:
+		requests: dict[str, set[int]] = {}
+
+		def add(chat_id: Any, positions: Any = None, start: Any = None, end: Any = None) -> None:
+			chat = str(chat_id or "").strip()
+			if not self._private_repair_allowed(chat):
+				raise ValueError(f"私有缺口补读群不在当前 WebSocket 白名单：{chat or 'unknown'}")
+			values: set[int] = set()
+			if isinstance(positions, (list, tuple, set)):
+				for value in positions:
+					try:
+						position = int(value)
+					except (TypeError, ValueError):
+						continue
+					if position > 0:
+						values.add(position)
+			if start is not None or end is not None:
+				try:
+					first = int(start)
+					last = int(end)
+				except (TypeError, ValueError) as error:
+					raise ValueError("私有缺口补读范围格式错误") from error
+				if first <= 0 or last < first:
+					raise ValueError("私有缺口补读范围无效")
+				values.update(range(first, last + 1))
+			if not values:
+				raise ValueError("私有缺口补读必须包含 positions 或 start/end")
+			requests.setdefault(chat, set()).update(values)
+
+		if isinstance(payload.get("requests"), list):
+			for item in payload["requests"]:
+				if not isinstance(item, dict):
+					continue
+				add(item.get("chat_id"), item.get("positions"), item.get("start"), item.get("end"))
+		else:
+			add(payload.get("chat_id"), payload.get("positions"), payload.get("start"), payload.get("end"))
+		bounded_total = sum(len(values) for values in requests.values())
+		if bounded_total > MAX_PRIVATE_REPAIR_MAX_POSITIONS * 4:
+			raise ValueError("一次私有缺口补读最多允许 1024 个 position")
+		return {chat_id: sorted(values) for chat_id, values in requests.items()}
+
+	async def repair_private_positions(self, payload: dict[str, Any], *, reason: str) -> dict[str, Any]:
+		"""Recover messages through LarkAgentX's private history gateway.
+
+		This path intentionally never calls the official message.list API.  Each
+		recovered message is sent through the same normalized ingress as a live
+		WebSocket event, so image decryption, webhook fan-out and ledger idempotency
+		remain centralized in the adapter.
+		"""
+		requests = self._private_requests_from_payload(payload)
+		result: dict[str, Any] = {
+			"status": "completed", "transport": "larkagentx_private_history", "reason": reason,
+			"recovered": 0, "forwarded": 0, "duplicates": 0, "filtered": 0, "failed": 0,
+			"requested": sum(len(values) for values in requests.values()), "sources": [],
+		}
+		for chat_id, positions in requests.items():
+			source_result: dict[str, Any] = {"chat_id": chat_id, "requested": len(positions), "found": 0, "recovered": 0, "failed": 0}
+			try:
+				messages = await asyncio.to_thread(self.client.pull_history, chat_id, positions)
+				source_result["found"] = len(messages)
+			except Exception as error:
+				source_result["failed"] += len(positions)
+				result["failed"] += len(positions)
+				source_result["error"] = str(error)[:240]
+				result["sources"].append(source_result)
+				continue
+			requested = set(positions)
+			for message in sorted(messages, key=lambda item: int(item.get("position") or 0)):
+				try:
+					position = int(message.get("position"))
+				except (TypeError, ValueError):
+					continue
+				if position not in requested:
+					continue
+				try:
+					delivery = await self.on_message(message, recovered=True)
+					status = str((delivery or {}).get("status", ""))
+					if status in {"delivered", "duplicate", "filtered"}:
+						await asyncio.to_thread(self.event_spool.record_recovered_position, chat_id, position)
+						result["recovered"] += 1
+						source_result["recovered"] += 1
+						if status == "delivered":
+							result["forwarded"] += 1
+						elif status == "duplicate":
+							result["duplicates"] += 1
+						else:
+							result["filtered"] += 1
+					else:
+						result["failed"] += 1
+						source_result["failed"] += 1
+				except Exception as error:
+					result["failed"] += 1
+					source_result["failed"] += 1
+					LOG.warning("LarkAgentX 私有缺口消息转发失败 chat_id=%s position=%s：%s", chat_id, position, error)
+			result["sources"].append(source_result)
+		if result["failed"]:
+			result["status"] = "partial"
+		self.private_repair_count += 1
+		self.private_repair_message_count += int(result["recovered"])
+		self.private_repair_failed_count += int(result["failed"])
+		self._persist_counter("private_repair_count")
+		self._persist_counter("private_repair_message_count", int(result["recovered"]))
+		self._persist_counter("private_repair_failed_count", int(result["failed"]))
+		self.last_private_repair_at = datetime.now(timezone.utc).isoformat()
+		self.last_private_repair_result = {
+			"status": result["status"], "reason": reason, "requested": result["requested"],
+			"recovered": result["recovered"], "forwarded": result["forwarded"],
+			"duplicates": result["duplicates"], "filtered": result["filtered"], "failed": result["failed"],
+		}
+		LOG.info("LarkAgentX 私有缺口补读完成：%s", self.last_private_repair_result)
+		return result
+
+	async def repair_known_private_gaps(self) -> None:
+		if not self.private_gap_repair_enabled or not self.private_gap_repair_on_start or self._private_startup_repair_started:
+			return
+		self._private_startup_repair_started = True
+		chat_ids = sorted(chat_id for chat_id in self.websocket_chat_ids if self._private_repair_allowed(chat_id))
+		for chat_id in chat_ids:
+			try:
+				ranges = await asyncio.to_thread(self.event_spool.position_gap_ranges, chat_id)
+				for gap in ranges:
+					for start, end in self._private_repair_chunks(int(gap["start"]), int(gap["end"])):
+						await self.repair_private_positions(
+							{"chat_id": chat_id, "positions": list(range(start, end + 1))},
+							reason="startup_private_position_gap",
+						)
+			except Exception as error:
+				LOG.warning("LarkAgentX 启动私有缺口补读失败 chat_id=%s：%s", chat_id, error)
+
 	async def recover_gap(self, reason: str) -> None:
 		try:
 			now_ms = int(time.time() * 1000)
@@ -932,7 +1171,7 @@ class Bridge:
 		# avoids adding a second crypto implementation to the supervisor venv.
 		return encrypted, response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
 
-	async def on_message(self, message: dict[str, Any]) -> None:
+	async def on_message(self, message: dict[str, Any], *, recovered: bool = False) -> dict[str, Any]:
 		# connect_websocket does not expose a separate connected callback.  Any
 		# decoded event is proof that the WebSocket session is receiving data.
 		self.websocket_state = "connected"
@@ -958,17 +1197,19 @@ class Bridge:
 				)
 			except Exception as error:
 				LOG.warning("记录未绑定 LarkAgentX 源群指标失败 chat_id=%s：%s", chat_id, error)
-			return
+			return {"status": "ignored", "chat_id": chat_id}
 		stats = self.chat_stats[chat_id]
 		try:
 			gap = await asyncio.to_thread(self.event_spool.record_position, message)
 			self._log_position_gap(chat_id, gap)
+			if gap and not recovered:
+				self._schedule_private_gap(chat_id, gap)
 		except Exception as error:
 			LOG.warning("记录 LarkAgentX position 失败 chat_id=%s：%s", chat_id, error)
 		if str(message.get("from_id", "")) == str(self.auth.user_id):
 			stats["self_message_count"] += 1
 			self.self_message_count += 1
-			return
+			return {"status": "filtered", "chat_id": chat_id, "message_id": str(message.get("msg_id", ""))}
 		self.observed_count += 1
 		stats["observed_count"] += 1
 		stats["last_observed_at"] = datetime.now(timezone.utc).isoformat()
@@ -979,10 +1220,20 @@ class Bridge:
 		if not message_id:
 			LOG.warning("dropping LarkAgentX message without msg_id")
 			stats["failed_count"] += 1
-			return
+			return {"status": "failed", "chat_id": chat_id, "message_id": ""}
 		payload = json_safe(dict(message))
 		if dynamic_route:
 			payload["_larkagentx_route"] = dict(dynamic_route)
+		source_key, chat_name = self._source_route_for_chat(chat_id, dynamic_route)
+		blocked_keyword = matched_source_keyword(
+			message,
+			source_key=source_key,
+			chat_name=chat_name,
+			configured_source_keys=self.anqiang_source_keys,
+			keywords=self.anqiang_block_keywords,
+			chat_id=chat_id,
+			configured_chat_ids=self.anqiang_chat_ids,
+		)
 		if self.last_observed_message_type in {"IMAGE", "POST"}:
 			image = image_resource_info(message)
 			if image.get("image_id"):
@@ -993,18 +1244,44 @@ class Bridge:
 		payload["source_label"] = os.environ.get("LARKX_SOURCE_LABEL", "LarkAgentX 个人会话")
 		event_id = f"larkagentx:{chat_id}:{message_id}"
 		self.history_archive.append(event_id, payload)
+		if blocked_keyword:
+			payload["_larkagentx_filter"] = {
+				"reason": "source_keyword",
+				"keyword": blocked_keyword,
+				"source_key": source_key,
+			}
+			try:
+				inserted = await asyncio.to_thread(
+					self.event_spool.record_filtered,
+					event_id,
+					chat_id,
+					message_id=message_id,
+					position=message.get("position"),
+					message_type=self.last_observed_message_type,
+					source_key=source_key,
+					keyword=blocked_keyword,
+					reason="source_keyword",
+				)
+				if inserted:
+					stats["filtered_count"] = int(stats.get("filtered_count", 0)) + 1
+				LOG.info("LarkAgentX 源消息命中过滤词，跳过 webhook：source=%s chat_id=%s type=%s message_id=%s keyword=%s", source_key or chat_name or "unknown", chat_id, self.last_observed_message_type, message_id, blocked_keyword)
+				return {"status": "filtered", "chat_id": chat_id, "message_id": message_id, "filter_reason": "source_keyword"}
+			except Exception as error:
+				stats["failed_count"] += 1
+				LOG.error("记录 LarkAgentX 源过滤事件失败 message_id=%s：%s", message_id, error)
+				return {"status": "failed", "chat_id": chat_id, "message_id": message_id, "error": str(error)[:240]}
 		try:
 			spool_state = await asyncio.to_thread(self.event_spool.enqueue, event_id, payload)
 			if spool_state == "delivered":
-				return
+				return {"status": "duplicate", "chat_id": chat_id, "message_id": message_id}
 			claim_state = await asyncio.to_thread(self.event_spool.claim, event_id)
 			if claim_state in {"delivered", "in_flight"}:
-				return
+				return {"status": "duplicate", "chat_id": chat_id, "message_id": message_id}
 		except Exception as error:
 			self.failed_count += 1
 			stats["failed_count"] += 1
 			LOG.error("inbound event spool failed message_id=%s: %s", message_id, error)
-			return
+			return {"status": "failed", "chat_id": chat_id, "message_id": message_id, "error": str(error)[:240]}
 		try:
 			last_error: Exception | None = None
 			for attempt in range(1, 4):
@@ -1015,7 +1292,7 @@ class Bridge:
 					stats["forwarded_count"] += 1
 					stats["last_forwarded_at"] = datetime.now(timezone.utc).isoformat()
 					LOG.info("inbound accepted chat_id=%s type=%s message_id=%s status=%s", chat_id, self.last_observed_message_type, message_id, result.get("status"))
-					return
+					return {"status": "delivered", "chat_id": chat_id, "message_id": message_id, "adapter_status": result.get("status")}
 				except Exception as error:
 					last_error = error
 					if attempt < 3:
@@ -1027,6 +1304,7 @@ class Bridge:
 			self.failed_count += 1
 			stats["failed_count"] += 1
 			LOG.error("inbound delivery failed message_id=%s: %s", message_id, error)
+			return {"status": "failed", "chat_id": chat_id, "message_id": message_id, "error": str(error)[:240]}
 
 	async def replay_spool_once(self) -> int:
 		"""Replay queued/expired events; adapter-side ledger remains idempotent."""

@@ -295,6 +295,23 @@ test('group system notices are filtered before they can be tagged or sent', asyn
 	assert.equal(saved.get('om_system_1').status, 'filtered_system');
 });
 
+test('the Anqiang source filter drops its configured phrase before webhook or API delivery', async () => {
+	const message = { message_id: 'om_anqiang_blocked', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '般若星登山的川柏' }) } };
+	const { relay, sent, saved } = createHarness([]);
+	const source = { key: 'anqiang', tag: 'anqiang', chatName: '安强训练营', resolvedChatId: 'oc_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	assert.equal((await relay.processInbound(message, source)).status, 'filtered');
+	assert.equal(sent.length, 0);
+	assert.equal(saved.get(message.message_id).status, 'filtered_system');
+});
+
+test('the Anqiang phrase does not filter an unrelated source', async () => {
+	const message = { message_id: 'om_liwei_phrase', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '般若星登山的川柏' }) } };
+	const { relay, sent } = createHarness([]);
+	const source = { key: 'liwei', tag: 'liwei', chatName: '立伟群', resolvedChatId: 'oc_liwei', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	assert.equal((await relay.processInbound(message, source)).status, 'sent');
+	assert.equal(sent.length, 1);
+});
+
 test('an edited text source updates the original single outgoing message instead of sending another bubble', async () => {
 	const message = { message_id: 'om_text_edit_1', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '第一版' }) } };
 	const { relay, sent, updated } = createHarness([message]);

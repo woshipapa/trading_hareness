@@ -1,7 +1,7 @@
 import { createDecipheriv, createHash } from 'node:crypto';
 import { buildRelayCard, cardImageKeys, cardText } from './card-content.mjs';
 import { isSystemMessage } from './message-filter.mjs';
-import { blockedMessageReason } from './content-filter.mjs';
+import { blockedMessageKeywords, blockedMessageReason } from './content-filter.mjs';
 
 const DEFAULT_HISTORY_LOOKBACK_SECONDS = 5 * 60;
 const MAX_HISTORY_PAGES = 20;
@@ -48,9 +48,18 @@ export function isWebhookSentinel(id) {
 // falls back to the tenant API for that one message.
 const WEBHOOK_CAPABLE_MSG_TYPES = new Set(['text', 'post', 'interactive']);
 const XIANYU_BYPASS_SOURCES = new Set(['relay_132c18eb3486455b8d63f3012ba0c720', 'relay_4595b5c48596444bbd552a56052ac5d4']);
+const ANQIANG_BLOCK_KEYWORDS = ['般若星登山的川柏'];
 
 function sourceFilterOptions(source) {
-	return XIANYU_BYPASS_SOURCES.has(String(source?.key ?? '')) ? { skipKeywords: ['咸鱼'] } : {};
+	const sourceKey = String(source?.key ?? '').trim();
+	const sourceName = String(source?.chatName ?? source?.chat_name ?? '').trim();
+	const keywords = sourceKey === 'anqiang' || sourceName.includes('安强')
+		? [...blockedMessageKeywords(), ...ANQIANG_BLOCK_KEYWORDS]
+		: blockedMessageKeywords();
+	return {
+		keywords: [...new Set(keywords)].join(','),
+		skipKeywords: XIANYU_BYPASS_SOURCES.has(sourceKey) ? ['咸鱼'] : [],
+	};
 }
 
 function webhookContentWithKeyword(msgType, content, keyword) {

@@ -12,6 +12,7 @@ assert.match(source, /--no-build --pull never --force-recreate --no-deps feishu-
 assert.match(source, /FEISHU_ADAPTER_HOTFIX_ENABLED true/);
 assert.match(source, /FEISHU_ADAPTER_HOTFIX_DIR/);
 assert.match(source, /project_root\/bridge/);
+assert.match(source, /bridge\/source_filter\.py/);
 assert.match(source, /larkagentx-group-relay.service/);
 assert.match(source, /supervisor\/\.venv\/bin\/python/);
 assert.match(source, /larkagentx-bridge-entrypoint\.sh/);

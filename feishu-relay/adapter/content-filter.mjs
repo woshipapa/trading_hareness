@@ -3,7 +3,7 @@
 // cannot consume downstream quota or occupy the delivery queue.
 const DEFAULT_BLOCKED_KEYWORDS = [
 	'咸鱼', '到期联系', '加微信', '加V', '加v', '扫码', '返现', '优惠券',
-	'推广', '广告', '私聊领取', '联系客服', '代理加盟', '般若星登山的川柏',
+	'推广', '广告', '私聊领取', '联系客服', '代理加盟',
 ]; 
 
 function parseKeywords(value) {
