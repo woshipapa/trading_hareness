@@ -230,3 +230,7 @@ patch a text bubble (Feishu answers 400).
 shape for both the Feishu group relay and the WeChat relay; nothing already
 delivered is re-sent either way, because the card path uses its own
 deterministic message uuid.
+
+The shared adapter endpoint serves the quant console at `/` and the standalone
+Feishu Relay dashboard at `/monitor`. `/dashboard` is retained as a compatibility
+alias for the group-listening page; `/workbench` and `/relay` remain Feishu routes.

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const FEISHU_ROUTES = ['/monitor', '/workbench', '/relay'];
+const FEISHU_ROUTES = ['/monitor', '/dashboard', '/workbench', '/relay'];
 
 export function resolveFrontendAssetPath(pathname, feishuDist, quantDist, exists = existsSync) {
 	const feishuRoute = FEISHU_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
