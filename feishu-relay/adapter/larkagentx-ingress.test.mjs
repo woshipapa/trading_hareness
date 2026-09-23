@@ -112,6 +112,21 @@ test('normalizes a complete LarkAgentX CARD jsonCard without OAuth backfill', ()
 	assert.equal(isDirectLarkAgentXRelayType({ msg_type_name: 'CARD', content_data: { jsonCard: JSON.stringify(card) } }), true);
 	assert.equal(message.msg_type, 'interactive');
 	assert.deepEqual(JSON.parse(message.body.content), card);
+
+	const imageCard = normalizeLarkAgentXRelayMessage({
+		msg_id: 'om_card_image_only',
+		msg_type_name: 'CARD',
+		content: '[卡片]',
+		_larkagentx_images: [{ image_id: 'img_v3_card_only', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }],
+	});
+	assert.equal(imageCard.msg_type, 'post');
+	const imageCardContent = JSON.parse(imageCard.body.content);
+	assert.deepEqual(imageCardContent.zh_cn.content[0][0], {
+		tag: 'img',
+		image_key: 'img_v3_card_only',
+		larkagentx_resource: { image_id: 'img_v3_card_only', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) },
+	});
+	assert.equal(hasLarkAgentXCardPayload({ msg_type_name: 'CARD', _larkagentx_images: [{ image_id: 'img_v3_card_only' }] }), true);
 });
 
 test('accepts JSON carried by LarkAgentX openCardContent', () => {

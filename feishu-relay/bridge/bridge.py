@@ -1234,7 +1234,10 @@ class Bridge:
 			chat_id=chat_id,
 			configured_chat_ids=self.anqiang_chat_ids,
 		)
-		if self.last_observed_message_type in {"IMAGE", "POST"}:
+		# Card v2 image-only messages store their media and AES-GCM metadata in
+		# richtext element properties, just like POST images.  Extract them before
+		# json_safe() turns protobuf bytes into replacement-text strings.
+		if self.last_observed_message_type in {"IMAGE", "POST", "CARD", "INTERACTIVE"}:
 			image = image_resource_info(message)
 			if image.get("image_id"):
 				payload["_larkagentx_image"] = image

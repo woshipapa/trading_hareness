@@ -112,8 +112,23 @@ function cardContentFromLarkAgentX(input) {
 	return null;
 }
 
+function cardImageResourcesFromLarkAgentX(input) {
+	const resources = Array.isArray(input?._larkagentx_images) ? input._larkagentx_images : [];
+	const seen = new Set();
+	return resources.filter((resource) => {
+		const imageId = String(resource?.image_id ?? '').trim();
+		if (!imageId || seen.has(imageId)) return false;
+		seen.add(imageId);
+		return true;
+	}).map((resource) => ({
+		...resource,
+		image_id: String(resource.image_id).trim(),
+	}));
+}
+
 export function hasLarkAgentXCardPayload(input) {
-	return ['CARD', 'INTERACTIVE'].includes(larkAgentXMessageType(input)) && Boolean(cardContentFromLarkAgentX(input));
+	return ['CARD', 'INTERACTIVE'].includes(larkAgentXMessageType(input))
+		&& (Boolean(cardContentFromLarkAgentX(input)) || cardImageResourcesFromLarkAgentX(input).length > 0);
 }
 
 function imageKeyFromLarkAgentX(input) {
@@ -201,6 +216,25 @@ export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) 
 	if (['CARD', 'INTERACTIVE'].includes(upstreamType)) {
 		const card = cardContentFromLarkAgentX(input);
 		if (!card) {
+			const images = cardImageResourcesFromLarkAgentX(input);
+			if (images.length) {
+				// Card v2 image-only payloads have no portable JSON card.  Preserve
+				// the source image key as a rich-text post; the relay can keep it
+				// unchanged for webhook targets or decrypt/upload it for API targets.
+				const imageRows = images.map((image) => ({
+					tag: 'img',
+					image_key: image.image_id,
+					...(image.key_hex && image.iv_hex ? { larkagentx_resource: image } : {}),
+				}));
+				return {
+					message_id: messageId,
+					msg_type: 'post',
+					create_time: input?.create_time ?? now(),
+					update_time: input?.update_time ?? null,
+					body: { content: JSON.stringify({ zh_cn: { title: '', content: [imageRows.map((image) => image)] } }) },
+					sender: { sender_id: String(input?.from_id ?? input?.sender_id ?? '') },
+				};
+			}
 			const summary = String(input?.content ?? '').trim() || `[${upstreamType.toLowerCase()}] 卡片内容未随 WebSocket 提供`;
 			return {
 				message_id: messageId,
