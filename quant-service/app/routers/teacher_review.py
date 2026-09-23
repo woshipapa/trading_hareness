@@ -21,6 +21,8 @@ class TeacherReviewRouterDependencies:
     roll: Callable[[date | None], Awaitable[dict[str, Any]]]
     outcomes: Callable[[int], Awaitable[list[dict[str, Any]]]] | None = None
     outcome_review: Callable[[date | None], Awaitable[dict[str, Any]]] | None = None
+    changes: Callable[[int], Awaitable[list[dict[str, Any]]]] | None = None
+    record_change: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
 
 
 def build_teacher_review_router(dependencies: TeacherReviewRouterDependencies) -> APIRouter:
@@ -65,6 +67,23 @@ def build_teacher_review_router(dependencies: TeacherReviewRouterDependencies) -
         if dependencies.outcome_review is None:
             raise HTTPException(status_code=503, detail="outcome review is not wired")
         return {**await dependencies.outcome_review(trade_date), "live_effect": "none"}
+
+    @router.get("/api/v1/research/strategy-changes")
+    async def strategy_changes(limit: int = 50) -> dict[str, Any]:
+        """Every deliberate strategy change with its preregistered expectation."""
+        if dependencies.changes is None:
+            raise HTTPException(status_code=503, detail="the change log is not wired")
+        return {"items": await dependencies.changes(limit), "live_effect": "none"}
+
+    @router.post("/api/v1/research/strategy-changes")
+    async def record_strategy_change(payload: dict[str, Any]) -> dict[str, Any]:
+        """Record a change before it ships; it is refused without an expectation."""
+        if dependencies.record_change is None:
+            raise HTTPException(status_code=503, detail="the change log is not wired")
+        result = await dependencies.record_change(payload)
+        if result.get("status") == "rejected":
+            raise HTTPException(status_code=422, detail={"problems": result.get("problems") or []})
+        return {**result, "live_effect": "none"}
 
     return router
 

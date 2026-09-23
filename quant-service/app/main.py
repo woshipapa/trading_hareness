@@ -752,6 +752,7 @@ from .teacher_review_service import (
     roll as roll_teacher_review,
 )
 from .teacher_outcome_review import run as run_teacher_outcome_review
+from . import strategy_change_log as strategy_change_log
 from . import teacher_review_repository as teacher_review_repository
 from .l2_research_gate import evaluate_l2_incremental_value
 from .l2_research_repository import latest_l2_evaluation, persist_l2_evaluation
@@ -6664,6 +6665,8 @@ app.include_router(build_teacher_review_router(TeacherReviewRouterDependencies(
     outcome_review=lambda trade_date: run_teacher_outcome_review(
         trade_date or cn_today(), _teacher_review_dependencies(),
     ),
+    changes=lambda limit: run_database_blocking(lambda: strategy_change_log.recent(db, limit=limit)),
+    record_change=lambda payload: run_database_blocking(lambda: strategy_change_log.record(db, dict(payload))),
 )))
 app.include_router(build_ten_day_leader_rotation_actions_router(
     TenDayLeaderRotationActionDependencies(run=run_ten_day_leader_rotation_endpoint),

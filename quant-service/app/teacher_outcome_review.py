@@ -29,6 +29,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from . import teacher_review_repository as repo
+from . import strategy_change_log as changes
 from .strategy_outcome_measures import UNBUYABLE, measure
 from .teacher_review_playbooks import ts_code
 from .teacher_review_rules import (
@@ -468,6 +469,8 @@ def outcome_text(trade_date: date, report: Mapping[str, Any]) -> str:
     if unpushed:
         lines.append("待查：" + "、".join(f"{item['name']}（重放满足 {item['scans']} 次却没推送）"
                                           for item in unpushed[:4]))
+    for line in changes.change_lines(report.get("changes") or [])[:2]:
+        lines.append("改动跟踪：" + line)
     for gap in (learned.get("data_gaps") or [])[:1]:
         lines.append(f"数据缺口：{gap['input']} 缺失导致 {gap['missed_cases']} 次漏判")
     for suggestion in (learned.get("suggestions") or [])[:2]:
@@ -536,6 +539,11 @@ def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
     if learned.get("data_gaps"):
         lines += ["## 输入缺失导致的漏判", "", "| 缺的输入 | 次数 |", "|---|---|"]
         lines += [f"| {gap['input']} | {gap['missed_cases']} |" for gap in learned["data_gaps"]]
+        lines.append("")
+    tracked = report.get("changes") or []
+    if tracked:
+        lines += ["## 已生效改动的跟踪（对照改动前写下的预期）", ""]
+        lines += [f"- {line}" for line in changes.change_lines(tracked)]
         lines.append("")
     if learned.get("suggestions"):
         lines += ["## 条件复核建议（只描述计数，改不改由人定）", ""]
@@ -620,6 +628,8 @@ async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, A
                 if str((row["payload"] or {}).get("trade_date")) != trade_date.isoformat()]
     completed = await complete_previous(previous, trade_date, deps)
     report["learning"] = learning([report, *previous])
+    recorded = await _db(deps, changes.recent, limit=50)
+    report["changes"] = changes.evaluate(recorded, [report, *previous])
     await _db(deps, repo.persist_outcome_review, trade_date, report, available_at=deps.now_utc())
     result = {"status": "completed", "trade_date": trade_date.isoformat(), "counts": report["counts"],
               "replayed": len(replays), "suggestions": len(report["learning"]["suggestions"]),
