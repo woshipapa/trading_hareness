@@ -752,6 +752,7 @@ from .teacher_review_service import (
     roll as roll_teacher_review,
 )
 from .teacher_outcome_review import run as run_teacher_outcome_review
+from .daily_research_digest import run as run_daily_research_digest
 from . import strategy_change_log as strategy_change_log
 from . import teacher_review_repository as teacher_review_repository
 from .l2_research_gate import evaluate_l2_incremental_value
@@ -4012,6 +4013,8 @@ async def peer_close_research_loop() -> None:
         "watch_daily_review": lambda trade_date: run_watch_daily_review(trade_date),
         "xiaojie_outcomes": lambda trade_date: run_database_blocking(
             settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
+        "daily_digest": lambda trade_date: run_daily_research_digest(
+            trade_date, _teacher_review_dependencies()),
     }
 
     async def record(name: str, trade_date: date, action: Callable[[], Any]) -> Any:

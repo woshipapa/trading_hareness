@@ -6,6 +6,7 @@
     python -m app.teacher_review_ops status
     python -m app.teacher_review_ops outcome --date 2026-09-22
     python -m app.teacher_review_ops sweep   --date 2026-09-22
+    python -m app.teacher_review_ops digest  --date 2026-09-22
 
 Each prints one JSON document on stdout.  ``context``, ``check`` and
 ``status`` only read.  ``import`` goes through the service's own HTTP route,
@@ -383,6 +384,25 @@ def sweep(database: Any, trade_date: date, *, limit: int = 40) -> dict[str, Any]
             "research_only": True, "live_effect": "none"}
 
 
+def digest(database: Any, trade_date: date) -> dict[str, Any]:
+    """The session's cross-strategy digest, as a page (no alert is sent)."""
+    from dataclasses import replace
+    from . import main
+    from .daily_research_digest import digest_markdown, run as run_digest
+
+    async def run_database(action: Any, timeout_seconds: float = 30) -> Any:
+        return await asyncio.wait_for(asyncio.to_thread(action), timeout=timeout_seconds)
+
+    async def no_alert(_text: str) -> dict[str, Any]:
+        return {"status": "skipped"}
+
+    deps = replace(main._teacher_review_dependencies(), run_database=run_database, send_alert=no_alert,
+                   period_bars=None, repair_daily=None)
+    result = asyncio.run(run_digest(trade_date, deps, alert=False))
+    return {"status": result.get("status"), "digest": result.get("digest"),
+            "markdown": digest_markdown(trade_date, result.get("digest") or {})}
+
+
 def check(database: Any, pack: dict[str, Any]) -> dict[str, Any]:
     from . import teacher_review_repository as repo
     codes = [ts_code(str(stock.get("code") or "")) for stock in pack.get("stocks") or [] if isinstance(stock, Mapping)]
@@ -438,6 +458,8 @@ def main() -> None:  # pragma: no cover - operational entry point
     outcome_parser.add_argument("--rerun", action="store_true")
     sweep_parser = sub.add_parser("sweep")
     sweep_parser.add_argument("--date", type=date.fromisoformat)
+    digest_parser = sub.add_parser("digest")
+    digest_parser.add_argument("--date", type=date.fromisoformat)
     args = parser.parse_args()
 
     def read_pack() -> dict[str, Any]:
@@ -452,6 +474,9 @@ def main() -> None:  # pragma: no cover - operational entry point
     elif args.command == "outcome":
         trade_date = args.date or datetime.now(timezone.utc).astimezone(_CN).date()
         output = outcome(db, trade_date, rerun=bool(args.rerun))
+    elif args.command == "digest":
+        trade_date = args.date or datetime.now(timezone.utc).astimezone(_CN).date()
+        output = digest(db, trade_date)
     elif args.command == "sweep":
         trade_date = args.date or datetime.now(timezone.utc).astimezone(_CN).date()
         output = sweep(db, trade_date)
@@ -469,5 +494,5 @@ if __name__ == "__main__":  # pragma: no cover
     main()
 
 
-__all__ = ["build_context", "check_report", "context_markdown", "outcome", "outcome_digest",
+__all__ = ["build_context", "check_report", "context_markdown", "digest", "outcome", "outcome_digest",
            "pack_digest", "pool_view", "sweep"]

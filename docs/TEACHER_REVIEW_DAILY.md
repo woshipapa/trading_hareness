@@ -11,7 +11,7 @@
 |---|---|---|---|
 | T 15:00 | 收盘 | — | — |
 | T 约 16:05 | owner 收盘流水线（`post-close-refresh-v6`）写入全市场日线和控制数据 | owner（15681） | `canonical_bars_daily` 等 |
-| T 16:15 起 | `peer_close_research`，在 peer 调度器上自动执行：<br>① 结算 T 日老师计划，按延续规则分成晋级延续、观察、退出<br>② **次日结果复盘**：分类 + 归因 + 学习（见下节）<br>③ 自选股复盘<br>④ 小杰结算 | 自动 | T+1 的延续计划、结算存档、复盘存档、两条飞书摘要 |
+| T 16:15 起 | `peer_close_research`，在 peer 调度器上自动执行：<br>① 结算 T 日老师计划，按延续规则分成晋级延续、观察、退出<br>② **次日结果复盘**：分类 + 归因 + 学习（见下节）<br>③ 自选股复盘<br>④ 小杰结算<br>⑤ **跨策略日报**：把上面几件合成一条飞书和一页 | 自动 | T+1 的延续计划、各自存档、复盘存档、飞书摘要 |
 | T 晚间 | 老师视频发布后，harness 建任务（类别 `financial_review`）：<br>下载 → 大/小两套 ASR → OCR → 个股实体 → 研究智能体抽取 | video_understanding_harness | 任务目录 `jobs/<job_id>/` |
 | T 晚间 | 量化整理老师观点，并用 owner 读路径核对价位 | harness 侧智能体 | `teacher_strategy_<T+1>.md`、`owner_market_evidence_<T>.json` |
 | T 晚间 | **第 0 步 看复盘**：读 T 日的结果复盘，知道哪些条件该调 | `teacher_review_daily.py outcome` | `outcome_<T>.json/.md` |
@@ -48,6 +48,9 @@ python scripts/teacher_review_daily.py context $J --date <T>    # 第 1 步
 python scripts/teacher_review_daily.py check  $J                # 第 3 步；有 problems 时退出码为 1
 python scripts/teacher_review_daily.py import $J                # 第 4 步：先重跑一遍检查，通过才导入
 python scripts/teacher_review_daily.py outcome $J --date <T>    # 第 0 步；--rerun 重算
+# 跨策略日报与反事实扫描（收盘后，在 peer 容器内）：
+#   python -m app.teacher_review_ops digest --date <T>
+#   python -m app.teacher_review_ops sweep  --date <T>
 python scripts/teacher_review_daily.py status $J                # 随时查看观察池
 ```
 
@@ -80,9 +83,21 @@ python scripts/teacher_review_daily.py status $J                # 随时查看�
 3. **重放满足却没推送**：重放显示条件全满足但盘中没有事件 → 这是缺陷，要查采样间隔、
    输入缺失或事件确认，**不要**据此放宽阈值。
 
-**学习**：按剧本滚动累计最近 20 份复盘的命中率、漏网率和漏掉的平均幅度；同一条条件在
-漏掉的大涨里卡满 3 次，就进"条件复核建议"。建议只描述计数，**任何阈值都不会自动改**，
-改不改由人决定，改完要记进策略包的参数来源（T/D/I）。
+**收益口径**：和小杰结算完全一致 —— 三种持有期（入场→当日收盘、入场→次日收盘、
+次日开盘→次日收盘）、每种扣一次往返成本、与当日全市场中位数比超额；**封板价触发的
+单列为「买不到」，不计入任何胜率**，因为它反映的是标记太晚而不是选错。次日的复盘会
+回填前一天的远期收益。
+
+**学习**：按剧本滚动累计最近 20 份复盘的命中率、漏网率、净收益与超额；同一条条件在
+漏掉的大涨里卡满 3 次，就进"条件复核建议"。建议只描述计数，**任何阈值都不会自动改**。
+
+要改阈值，按这个顺序：
+
+1. `teacher_review_ops sweep --date <T>` —— 在当天自己的扫描输入上重放其它阈值，
+   同时给出多抓到什么、多放进来什么、净收益与超额如何变化；
+2. 把改动连同**事先写下的预期**（哪个指标、往哪个方向、看多少个交易日）记进变更台账
+   （`POST /api/v1/research/strategy-changes`），没有预期的改动会被拒绝；
+3. 之后每天的日报自动对照预期报告改动前后的变化，与预期相反的会被顶到最前面。
 
 ## 每一步的检查
 

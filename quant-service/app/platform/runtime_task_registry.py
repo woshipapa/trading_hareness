@@ -85,7 +85,8 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         ("raw_market_observations", "xiaojie_leader_flow_observations", "automation_runs"),
         "the peer-owned close stages the owner's pipeline does not run: teacher plan roll (settle, promote, "
         "observe, retire), the next-day outcome review that replays what blocked each untriggered plan, "
-        "watch-list daily review and 小杰 outcome settlement, each behind its receipt",
+        "watch-list daily review, 小杰 outcome settlement and the cross-strategy digest, each behind "
+        "its receipt",
     ),
     "all_a_level1_snapshot": RuntimeTaskContract(
         "all_a_level1_snapshot", "intraday_edge", "60s during evidence observation session from 09:15",

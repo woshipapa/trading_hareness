@@ -21,10 +21,12 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-#: Order matters: the outcome review reads the settlement the roll just wrote.
-STAGES = ("teacher_review_roll", "teacher_outcome_review", "watch_daily_review", "xiaojie_outcomes")
+#: Order matters: the outcome review reads the settlement the roll just wrote,
+#: and the digest reads what all of them archived.
+STAGES = ("teacher_review_roll", "teacher_outcome_review", "watch_daily_review", "xiaojie_outcomes",
+          "daily_digest")
 STAGE_TIMEOUT_SECONDS = {"teacher_review_roll": 300.0, "teacher_outcome_review": 240.0,
-                         "watch_daily_review": 240.0, "xiaojie_outcomes": 150.0}
+                         "watch_daily_review": 240.0, "xiaojie_outcomes": 150.0, "daily_digest": 120.0}
 #: The owner's close pipeline has published the day's bars by ~16:05.
 CLOSE_READY_AT = time(16, 15)
 SESSION_GUARD_FROM = time(9, 0)
