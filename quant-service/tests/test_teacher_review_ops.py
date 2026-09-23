@@ -8,6 +8,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
+from app import teacher_review_ops as ops
 from app.teacher_review_ops import build_context, check_report, context_markdown, pack_digest, pool_view
 
 FIXTURE = Path(__file__).parent / "fixtures" / "teacher_review_pack_20260921.json"
@@ -97,3 +98,49 @@ class CheckReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OutcomeDigestTests(unittest.TestCase):
+    """Yesterday's lesson has to reach tomorrow's pack, not sit in an archive."""
+
+    def outcome(self):
+        return {
+            "trade_date": "2026-09-22", "benchmark_session_pct": 0.8,
+            "counts": {"hit": 7, "missed": 5, "unbuyable": 2},
+            "stocks": [
+                {"code": "603316", "name": "诚邦股份", "playbook": "trend_pullback_restart", "outcome": "missed",
+                 "opportunity_pct": 10.02, "blocked_by": "再起三条件（全天 100% 未满足）"},
+                {"code": "000504", "name": "南华生物", "outcome": "unbuyable", "entry": {"at": "09:33"}},
+                {"code": "000910", "name": "大亚圣象", "outcome": "avoid_missed", "close_pct": 10.1},
+                {"code": "300741", "name": "华宝股份", "outcome": "hit", "measures": {}},
+            ],
+            "learning": {"session_count": 3,
+                         "playbooks": [{"playbook": "platform_breakout", "total": 15, "hit": 4,
+                                        "triggered_faded": 1, "missed": 3, "hit_rate_pct": 26.7,
+                                        "net_mean_pct": 1.8}],
+                         "suggestions": [{"playbook": "platform_breakout", "gate": "量比≥1.5（带量）",
+                                          "missed_cases": 3, "mean_pct": 7.5,
+                                          "note": "platform_breakout 漏掉的大涨里，「量比≥1.5（带量）」卡了 3 次"}],
+                         "unpushed": [{"name": "奥士康", "scans": 79}], "data_gaps": []},
+        }
+
+    def test_the_digest_keeps_what_changes_a_decision(self):
+        digest = ops.outcome_digest(self.outcome())
+        self.assertEqual([item["name"] for item in digest["missed"]], ["诚邦股份"])
+        self.assertEqual([item["name"] for item in digest["unbuyable"]], ["南华生物"])
+        self.assertEqual([item["name"] for item in digest["rejected_but_ran"]], ["大亚圣象"])
+        self.assertEqual(digest["session_count"], 3)
+
+    def test_an_absent_review_leaves_the_context_unchanged(self):
+        self.assertEqual(ops.outcome_digest(None), {})
+
+    def test_the_page_tells_the_builder_what_to_do_with_it(self):
+        context = ops.build_context(date(2026, 9, 22), settlement=None, rows=[], packs=[], bars={},
+                                    receipts={}, outcome=self.outcome())
+        page = ops.context_markdown(context)
+        self.assertIn("没触发却大涨的（条件可能太紧）", page)
+        self.assertIn("诚邦股份", page)
+        self.assertIn("封板价才触发", page)
+        self.assertIn("老师否定却大涨的", page)
+        self.assertIn("复核建议", page)
+        self.assertIn("重放满足条件却没推送", page)

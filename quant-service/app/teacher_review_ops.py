@@ -30,6 +30,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 from zoneinfo import ZoneInfo
 
+from .teacher_outcome_review import OUTCOME_LABELS
 from .teacher_review_lifecycle import STATE_LABELS
 from .teacher_review_playbooks import playbook_kind, ts_code, validate_pack
 
@@ -68,9 +69,41 @@ def pool_view(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda item: ({"new": 0, "promoted": 1, "observe": 2}.get(item["state"], 3), item["symbol"]))
 
 
+def outcome_digest(outcome: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The part of the outcome review a pack builder must act on.
+
+    Counting what our own conditions missed is only useful if it reaches the
+    next decision, so the digest travels with the context rather than sitting
+    in an archive nobody opens.
+    """
+    if not outcome:
+        return {}
+    learned = outcome.get("learning") or {}
+    stocks = outcome.get("stocks") or []
+    return {
+        "trade_date": outcome.get("trade_date"),
+        "counts": outcome.get("counts") or {},
+        "benchmark_session_pct": outcome.get("benchmark_session_pct"),
+        "missed": [{"code": item.get("code"), "name": item.get("name"), "playbook": item.get("playbook"),
+                    "opportunity_pct": item.get("opportunity_pct"), "blocked_by": item.get("blocked_by")}
+                   for item in stocks if item.get("outcome") == "missed"],
+        "unbuyable": [{"code": item.get("code"), "name": item.get("name"),
+                       "at": (item.get("entry") or {}).get("at")}
+                      for item in stocks if item.get("outcome") == "unbuyable"],
+        "rejected_but_ran": [{"code": item.get("code"), "name": item.get("name"),
+                              "close_pct": item.get("close_pct")}
+                             for item in stocks if item.get("outcome") == "avoid_missed"],
+        "session_count": learned.get("session_count"),
+        "playbooks": [row for row in (learned.get("playbooks") or []) if row.get("total", 0) >= 2][:10],
+        "suggestions": learned.get("suggestions") or [],
+        "data_gaps": learned.get("data_gaps") or [],
+        "unpushed": learned.get("unpushed") or [],
+    }
+
+
 def build_context(trade_date: date, *, settlement: Mapping[str, Any] | None, rows: Iterable[Mapping[str, Any]],
                   packs: Iterable[Mapping[str, Any]], bars: Mapping[str, Mapping[str, Any]],
-                  receipts: Mapping[str, str]) -> dict[str, Any]:
+                  receipts: Mapping[str, str], outcome: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Everything a pack builder needs about the session that just closed."""
     pool = pool_view(rows)
     roll = (settlement or {}).get("roll") or {}
@@ -100,6 +133,7 @@ def build_context(trade_date: date, *, settlement: Mapping[str, Any] | None, row
         "pool": pool,
         "close": {symbol: {key: bar.get(key) for key in ("close", "pct", "high", "low", "amount", "limit_up_price")}
                   for symbol, bar in bars.items()},
+        "outcome": outcome_digest(outcome),
         "research_only": True,
     }
 
@@ -123,6 +157,44 @@ def context_markdown(context: Mapping[str, Any]) -> str:
             lines.append("- 老师否定的票当日表现：" + "、".join(
                 f"{item['name']}{item['pct']:+.1f}%{'封板' if item['sealed'] else ''}" if item["pct"] is not None
                 else f"{item['name']}—" for item in pack["rejected_results"]))
+    outcome = context.get("outcome") or {}
+    if outcome:
+        counts = outcome.get("counts") or {}
+        lines += ["", f"## 昨日复盘：我们自己的条件表现（{outcome.get('trade_date')}）", "",
+                  "、".join(f"{OUTCOME_LABELS.get(key, key)} {value}" for key, value in counts.items()) or "—"]
+        if outcome.get("benchmark_session_pct") is not None:
+            lines.append(f"当日全市场中位数 {outcome['benchmark_session_pct']:+.2f}%；"
+                         "收益均为扣一次往返成本后的净值，封板价触发的不计入胜率。")
+        if outcome.get("missed"):
+            lines += ["", "**没触发却大涨的（条件可能太紧）**", ""]
+            lines += [f"- {item['name']}（{item['code']}）{item['playbook']} "
+                      f"{item['opportunity_pct']:+.1f}%｜{item.get('blocked_by') or '无扫描留痕'}"
+                      for item in outcome["missed"]]
+        if outcome.get("unbuyable"):
+            lines += ["", "**封板价才触发（等于没抓到，说明标记太晚）**：" + "、".join(
+                f"{item['name']} {item.get('at') or ''}" for item in outcome["unbuyable"])]
+        if outcome.get("rejected_but_ran"):
+            lines += ["", "**老师否定却大涨的**：" + "、".join(
+                f"{item['name']} {item['close_pct']:+.1f}%" for item in outcome["rejected_but_ran"])]
+        for suggestion in (outcome.get("suggestions") or [])[:3]:
+            lines += ["", f"> 复核建议：{suggestion['note']}（近 {outcome.get('session_count')} 份复盘，"
+                          f"这些票平均 {suggestion['mean_pct']:+.1f}%）"]
+        if outcome.get("unpushed"):
+            lines += ["", "**重放满足条件却没推送（缺陷，别据此放宽阈值）**：" + "、".join(
+                f"{item['name']}×{item['scans']}" for item in outcome["unpushed"])]
+        if outcome.get("playbooks"):
+            lines += ["", "| 剧本 | 样本 | 守住 | 回落 | 漏掉 | 命中率 | 净收益均值 |", "|---|---|---|---|---|---|---|"]
+            for row in outcome["playbooks"]:
+                rate = row.get("hit_rate_pct")
+                net = row.get("net_mean_pct")
+                lines.append(f"| {row['playbook']} | {row['total']} | {row.get('hit', 0)} | "
+                             f"{row.get('triggered_faded', 0)} | {row.get('missed', 0)} | "
+                             f"{'—' if rate is None else f'{rate:.0f}%'} | "
+                             f"{'—' if net is None else f'{net:+.1f}%'} |")
+        lines.append("")
+        lines.append("建包时用得上：某个剧本反复漏掉大涨，就在参数里放宽对应的条件并写明理由；"
+                     "反复出现封板价才触发，说明这个剧本的买点设计本身要改。")
+
     lifecycle = context.get("lifecycle") or []
     if lifecycle:
         lines += ["", "## 计划延续结果（系统按收盘判定）", "", "| 股票 | 前状态 | 结果 | 原因 |", "|---|---|---|---|"]
@@ -210,9 +282,12 @@ def load_context(database: Any, trade_date: date) -> dict[str, Any]:
              for record in records if str(record["pack"]["pack_id"]) not in superseded]
     symbols = [item["symbol"] for item in pool_view(rows)]
     bars = repo.session_bars(database, symbols, trade_date) if symbols else {}
+    outcome = next((dict(item.get("payload") or {}) for item in repo.recent_outcome_reviews(database, limit=4)
+                    if str((item.get("payload") or {}).get("trade_date")) == trade_date.isoformat()), None)
     with database.transaction() as connection:
         receipts = _receipts(connection, trade_date)
-    return build_context(trade_date, settlement=settlement, rows=rows, packs=packs, bars=bars, receipts=receipts)
+    return build_context(trade_date, settlement=settlement, rows=rows, packs=packs, bars=bars,
+                         receipts=receipts, outcome=outcome)
 
 
 async def _dry_run(pack: dict[str, Any]) -> dict[str, Any]:
