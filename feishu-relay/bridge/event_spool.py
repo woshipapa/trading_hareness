@@ -118,6 +118,14 @@ class EventSpool:
                 created_at REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS filtered_events_chat_position_idx ON filtered_events(chat_id, position);
+            CREATE TABLE IF NOT EXISTS position_coverage (
+                chat_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                coverage_type TEXT NOT NULL CHECK(coverage_type IN ('observed','recovered','filtered')),
+                recorded_at REAL NOT NULL,
+                PRIMARY KEY(chat_id, position, coverage_type)
+            );
+            CREATE INDEX IF NOT EXISTS position_coverage_chat_position_idx ON position_coverage(chat_id, position);
             """
         )
         # The bridge was initially released without a sequence column. Keep the
@@ -146,6 +154,7 @@ class EventSpool:
         self._db.execute("INSERT INTO spool_cursor(cursor_name,sequence,updated_at) VALUES('drain',0,?) ON CONFLICT(cursor_name) DO NOTHING", (self._now(),))
         self._backfill_chat_stats_locked()
         self._rebuild_position_stats_locked()
+        self._backfill_position_coverage_locked()
         self._db.commit()
         try:
             os.chmod(self.path, 0o600)
@@ -312,6 +321,42 @@ class EventSpool:
                 ),
             )
 
+    def _backfill_position_coverage_locked(self) -> None:
+        """Index retained positions once so health checks never rescan JSON payloads."""
+        existing = self._db.execute("SELECT count(*) AS count FROM position_coverage").fetchone()
+        if existing and int(existing["count"]) > 0:
+            return
+        rows = self._db.execute("SELECT payload_json,created_at FROM events").fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            chat_id = str(payload.get("chat_id") or "").strip()
+            position = self._payload_position(payload)
+            if chat_id and position is not None:
+                self._db.execute(
+                    "INSERT OR IGNORE INTO position_coverage(chat_id,position,coverage_type,recorded_at) VALUES(?,?,?,?)",
+                    (chat_id, position, "observed", float(row["created_at"])),
+                )
+        for table, coverage_type in (("position_recoveries", "recovered"), ("filtered_events", "filtered")):
+            rows = self._db.execute(f"SELECT chat_id,position,created_at FROM {table} WHERE position IS NOT NULL").fetchall() if table == "filtered_events" else self._db.execute(f"SELECT chat_id,position,recovered_at AS created_at FROM {table}").fetchall()
+            for row in rows:
+                self._db.execute(
+                    "INSERT OR IGNORE INTO position_coverage(chat_id,position,coverage_type,recorded_at) VALUES(?,?,?,?)",
+                    (str(row["chat_id"]), int(row["position"]), coverage_type, float(row["created_at"])),
+                )
+
+    def _record_position_coverage_locked(self, chat_id: str, position: int | None, coverage_type: str, now: float) -> None:
+        if not chat_id or position is None or position <= 0:
+            return
+        self._db.execute(
+            "INSERT OR IGNORE INTO position_coverage(chat_id,position,coverage_type,recorded_at) VALUES(?,?,?,?)",
+            (chat_id, int(position), coverage_type, now),
+        )
+
     def _record_position_locked(self, chat_id: str, position: int | None, now: float) -> dict[str, int] | None:
         if not chat_id or position is None:
             return None
@@ -356,6 +401,7 @@ class EventSpool:
         now = self._now()
         with self._lock:
             gap = self._record_position_locked(chat_id, position, now)
+            self._record_position_coverage_locked(chat_id, position, "observed", now)
             self._db.commit()
             return gap
 
@@ -380,6 +426,7 @@ class EventSpool:
                 (chat_id, parsed_position, now),
             ).rowcount
             if inserted:
+                self._record_position_coverage_locked(chat_id, parsed_position, "recovered", now)
                 self._db.execute(
                     """
                     INSERT INTO position_stats(
@@ -431,6 +478,7 @@ class EventSpool:
                 (event_id, chat_id, str(message_id or "")[:128], parsed_position, str(source_key or "")[:128], str(keyword or "")[:128], str(reason or "source_keyword")[:160], now),
             ).rowcount
             if inserted:
+                self._record_position_coverage_locked(chat_id, parsed_position, "filtered", now)
                 self._db.execute(
                     """
                     INSERT INTO chat_stats(chat_id,observed_count,filtered_count,last_observed_at,last_message_type)
@@ -457,27 +505,10 @@ class EventSpool:
         if not chat_id:
             return []
         with self._lock:
-            rows = self._db.execute("SELECT payload_json FROM events ORDER BY sequence").fetchall()
-            recovered_rows = self._db.execute(
-                "SELECT position FROM position_recoveries WHERE chat_id=? ORDER BY position", (chat_id,)
+            rows = self._db.execute(
+                "SELECT position FROM position_coverage WHERE chat_id=? GROUP BY position ORDER BY position", (chat_id,)
             ).fetchall()
-            filtered_rows = self._db.execute(
-                "SELECT position FROM filtered_events WHERE chat_id=? AND position IS NOT NULL ORDER BY position", (chat_id,)
-            ).fetchall()
-        positions: set[int] = set()
-        for row in rows:
-            try:
-                payload = json.loads(row["payload_json"])
-            except (TypeError, json.JSONDecodeError):
-                continue
-            if not isinstance(payload, dict) or str(payload.get("chat_id") or "").strip() != chat_id:
-                continue
-            position = self._payload_position(payload)
-            if position is not None:
-                positions.add(position)
-        positions.update(int(row["position"]) for row in recovered_rows)
-        positions.update(int(row["position"]) for row in filtered_rows)
-        ordered = sorted(positions)
+        ordered = [int(row["position"]) for row in rows]
         ranges: list[dict[str, int]] = []
         for previous, current in zip(ordered, ordered[1:]):
             if current - previous <= 1:
@@ -611,6 +642,12 @@ class EventSpool:
             )
             if cursor.rowcount > 0:
                 self._record_observed_locked(payload, now)
+                self._record_position_coverage_locked(
+                    str(payload.get("chat_id") or "").strip(),
+                    self._payload_position(payload),
+                    "observed",
+                    now,
+                )
             self._db.commit()
             row = self._db.execute("SELECT status FROM events WHERE event_id=?", (event_id,)).fetchone()
             return str(row["status"] if row else "queued")
