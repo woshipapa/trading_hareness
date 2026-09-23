@@ -249,11 +249,34 @@ def delivered_entries(database: Any, session_date: date) -> dict[str, dict[str, 
     result = {}
     for row in rows:
         review = row["review"] or {}
+        features = review.get("features") or {}
         result[str(row["symbol"])[:6]] = {
-            "at": row["observed_at"], "price": ((review.get("features") or {}).get("price")),
+            "at": row["observed_at"], "price": features.get("price"),
+            # Whether the board was sealed when the flag fired decides if the
+            # entry was available at all (see ``strategy_outcome_measures``).
+            "sealed": features.get("sealed"), "limit_up_price": features.get("limit_up_price"),
             "path": review.get("path"), "playbook": review.get("playbook"), "pack_id": review.get("pack_id"),
         }
     return result
+
+
+def session_benchmark(database: Any, trading_date: date) -> float | None:
+    """The session's cross-sectional median return, in percent.
+
+    The same definition the 小杰 settlement credits its modes against, so a
+    strategy is measured by what it added rather than by the tape it rode.
+    """
+    with database.transaction() as connection:
+        row = connection.execute(
+            """SELECT percentile_cont(0.5) WITHIN GROUP (
+                        ORDER BY (close / nullif(pre_close, 0) - 1) * 100) AS median_pct
+                 FROM quant.canonical_bars_daily b
+                 JOIN quant.instruments i ON i.symbol = b.symbol
+                WHERE b.trading_date = %s AND b.volume > 0 AND i.list_date IS NOT NULL""",
+            (trading_date,),
+        ).fetchone()
+    value = (row or {}).get("median_pct")
+    return float(value) if value is not None else None
 
 
 def session_events(database: Any, session_date: date) -> list[dict[str, Any]]:
@@ -567,6 +590,6 @@ __all__ = [
     "DELIVERED_STATES", "calendar_gaps", "delivered_entries", "first_limit_up_times",
     "minute_period_bars", "open_sessions", "pack_record", "persist_pack", "persist_settlement", "plan_bars",
     "persist_outcome_review", "recent_outcome_reviews", "recent_packs", "recent_settlements", "retire_plans",
-    "rule_input_snapshots", "session_bars", "session_events", "sessions_between",
+    "rule_input_snapshots", "session_bars", "session_benchmark", "session_events", "sessions_between",
     "latest_limit_up_pool", "teacher_watch_rows", "xiaojie_session_modes",
 ]

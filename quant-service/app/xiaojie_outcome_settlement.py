@@ -40,10 +40,10 @@ from datetime import date
 from typing import Any
 
 from .ashare_reality import round_trip_cost_pct
+from .strategy_outcome_measures import SEALED_TOLERANCE
 
-
-#: A session's close is only comparable against entries made during it.
-SEALED_TOLERANCE = 0.005
+#: The tolerance is shared so this module's SQL and every other strategy's
+#: review read one definition of "locked at the limit".
 
 
 def settle_session(connection: Any, trading_date: date) -> dict[str, Any]:

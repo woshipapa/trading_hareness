@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, datetime, timedelta, timezone
 
+from app.strategy_outcome_measures import UNBUYABLE
 from app.teacher_outcome_review import (
     BIG_MOVE_PCT, OUTCOME_LABELS, classify, gate_replay, learning, outcome_markdown, outcome_text, review_stocks,
 )
@@ -29,12 +30,40 @@ def stock(code="000001", *, name="测试", playbook="platform_breakout", kind="t
 
 class ClassifyTests(unittest.TestCase):
     def test_a_triggered_plan_that_held_into_the_close_is_a_hit(self):
-        held = stock(entry={"at": "2026-09-22T10:02:00+08:00", "price": 10.2}, entry_to_close_pct=3.1, close=10.5)
-        self.assertEqual(classify(held)["outcome"], "hit")
+        held = stock(entry={"at": "2026-09-22T10:02:00+08:00", "price": 10.2}, close=10.5)
+        verdict = classify(held)
+        self.assertEqual(verdict["outcome"], "hit")
+        # Net of one round trip, so the reported number is under the gross 2.94%.
+        self.assertLess(verdict["measures"]["net_session_return_pct"], 2.94)
+        self.assertGreater(verdict["measures"]["net_session_return_pct"], 2.5)
 
     def test_a_triggered_plan_that_gave_it_back_is_reported_separately(self):
-        faded = stock(entry={"at": "2026-09-22T10:02:00+08:00", "price": 10.8}, entry_to_close_pct=-2.4, close=10.5)
+        faded = stock(entry={"at": "2026-09-22T10:02:00+08:00", "price": 10.8}, close=10.5)
         self.assertEqual(classify(faded)["outcome"], "triggered_faded")
+
+    def test_an_entry_that_only_covers_the_round_trip_is_not_a_hit(self):
+        # +0.1% gross is a loss once the round trip is paid.
+        marginal = stock(entry={"at": "2026-09-22T10:02:00+08:00", "price": 10.49}, close=10.5)
+        self.assertEqual(classify(marginal)["outcome"], "triggered_faded")
+
+    def test_a_flag_raised_on_a_sealed_board_is_not_scored_at_all(self):
+        sealed = stock(entry={"at": "2026-09-22T09:33:00+08:00", "price": 11.0, "sealed": True},
+                       close=11.0, sealed=True)
+        verdict = classify(sealed)
+        self.assertEqual(verdict["outcome"], UNBUYABLE)
+        self.assertIs(verdict["measures"]["evaluable"], False)
+
+    def test_the_limit_price_alone_is_enough_to_tell_it_was_unbuyable(self):
+        # Older archives kept no sealed flag; the price against the limit does.
+        at_limit = stock(entry={"at": "2026-09-22T09:33:00+08:00", "price": 11.0}, close=11.0)
+        at_limit["bar"]["limit_up_price"] = 11.0
+        self.assertEqual(classify(at_limit)["outcome"], UNBUYABLE)
+
+    def test_the_session_move_is_credited_against_the_day(self):
+        held = stock(entry={"at": "2026-09-22T10:02:00+08:00", "price": 10.2}, close=10.5)
+        verdict = classify(held, benchmark_pct=1.5)
+        self.assertAlmostEqual(verdict["measures"]["excess_session_pct"], 2.9412 - 1.5, places=3)
+        self.assertEqual(verdict["measures"]["benchmark_session_pct"], 1.5)
 
     def test_an_untriggered_plan_that_ran_anyway_is_the_one_to_learn_from(self):
         self.assertEqual(classify(stock(close=10.0 * (1 + BIG_MOVE_PCT / 100)))["outcome"], "missed")
@@ -120,8 +149,8 @@ class GateReplayTests(unittest.TestCase):
 class ReportTests(unittest.TestCase):
     def packs(self):
         return [{"pack_id": "p1", "review_date": "2026-09-21", "session_index": 1, "stocks": [
-            stock("000993", name="闽东电力", entry={"at": "2026-09-22T10:02:00+08:00", "price": 20.1},
-                  entry_to_close_pct=4.2, close=10.6),
+            stock("000993", name="闽东电力", entry={"at": "2026-09-22T10:02:00+08:00", "price": 10.2},
+                  close=10.6),
             stock("300476", name="胜宏科技", playbook="ma60_reclaim", close=10.8),
             stock("600519", name="否定票", kind="record", playbook="rejected", close=10.9),
             stock("000001", name="过滤票", close=10.05),
@@ -269,3 +298,63 @@ class LearningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForwardCompletionTests(unittest.TestCase):
+    """A report written at its own close cannot know the next open."""
+
+    def previous(self, *, already_filled=False):
+        measures = {"session_return_pct": 2.9, "next_open_to_close_pct": 1.0} if already_filled else {
+            "session_return_pct": 2.9, "next_open_to_close_pct": None}
+        return [{"trade_date": "2026-09-22", "benchmark_session_pct": 0.8, "stocks": [
+            {"code": "000993", "name": "闽东电力", "outcome": "hit", "measures": measures,
+             "entry": {"at": "10:02", "price": 10.2},
+             "bar": {"close": 10.5, "pre_close": 10.0, "limit_up_price": 11.0}},
+            {"code": "000001", "name": "过滤票", "outcome": "filtered", "entry": None, "bar": {"close": 10.05}},
+        ]}]
+
+    def run_completion(self, previous, next_bars):
+        import asyncio
+        from app import teacher_outcome_review as module
+
+        saved = {}
+
+        from types import SimpleNamespace
+
+        async def run_database(action, timeout_seconds=30):
+            return action()
+
+        deps = SimpleNamespace(database=None, run_database=run_database,
+                               now_utc=lambda: datetime(2026, 9, 23, 8, 0, tzinfo=timezone.utc))
+
+        original_bars, original_persist = module.repo.session_bars, module.repo.persist_outcome_review
+        module.repo.session_bars = lambda _db, symbols, trade_date: next_bars
+        module.repo.persist_outcome_review = lambda _db, session, payload, available_at: saved.update(
+            {"session": session, "payload": payload}) or True
+        try:
+            filled = asyncio.run(module.complete_previous(previous, date(2026, 9, 23), deps))
+        finally:
+            module.repo.session_bars, module.repo.persist_outcome_review = original_bars, original_persist
+        return filled, saved
+
+    def test_the_next_sessions_bars_fill_the_forward_returns(self):
+        filled, saved = self.run_completion(
+            self.previous(), {"000993.SZ": {"open": 10.6, "close": 11.0, "limit_up_price": 11.55}})
+        self.assertEqual(filled, 1)
+        self.assertEqual(saved["session"], date(2026, 9, 22))
+        stock = saved["payload"]["stocks"][0]
+        self.assertAlmostEqual(stock["measures"]["next_open_to_close_pct"], (11.0 / 10.6 - 1) * 100, places=3)
+        # The verdict itself is decided on the session and never revised.
+        self.assertEqual(stock["outcome"], "hit")
+        self.assertEqual(saved["payload"]["forward_completed_on"], "2026-09-23")
+
+    def test_a_report_already_completed_is_left_alone(self):
+        filled, saved = self.run_completion(
+            self.previous(already_filled=True), {"000993.SZ": {"open": 10.6, "close": 11.0}})
+        self.assertEqual(filled, 0)
+        self.assertEqual(saved, {})
+
+    def test_a_symbol_without_a_next_bar_keeps_its_record_unchanged(self):
+        filled, saved = self.run_completion(self.previous(), {})
+        self.assertEqual(filled, 0)
+        self.assertEqual(saved, {})

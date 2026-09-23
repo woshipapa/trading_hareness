@@ -29,6 +29,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from . import teacher_review_repository as repo
+from .strategy_outcome_measures import UNBUYABLE, measure
 from .teacher_review_playbooks import ts_code
 from .teacher_review_rules import (
     MODEL_VERSION as RULES_VERSION,
@@ -61,12 +62,13 @@ OUTCOME_LABELS = {
     "missed": "未触发但大涨",
     "invalidated": "盘中失效",
     "filtered": "未触发且未涨",
+    "unbuyable": "封板价触发（买不到）",
     "avoid_missed": "老师否定但大涨",
     "avoided": "老师否定且确实未涨",
     "no_data": "无当日数据",
 }
 #: 值得拿出来学的几类，按报告里的先后顺序。
-LEARNING_OUTCOMES = ("hit", "triggered_faded", "missed", "avoid_missed", "invalidated")
+LEARNING_OUTCOMES = ("hit", "triggered_faded", "unbuyable", "missed", "avoid_missed", "invalidated")
 #: 规则要求但当时取不到的输入，报告里用人话说。
 INPUT_LABELS = {
     "price": "现价", "pre_close": "昨收", "open": "开盘价", "high": "最高", "low": "最低", "amount": "成交额",
@@ -95,8 +97,13 @@ def high_pct(bar: Mapping[str, Any] | None) -> float | None:
 
 
 def classify(stock: Mapping[str, Any], *, big_move_pct: float = BIG_MOVE_PCT,
-             big_intraday_pct: float = BIG_INTRADAY_PCT) -> dict[str, Any]:
-    """一只票当天的结果归类。大涨永远优先暴露，哪怕它同时失效过。"""
+             big_intraday_pct: float = BIG_INTRADAY_PCT,
+             benchmark_pct: float | None = None) -> dict[str, Any]:
+    """一只票当天的结果归类，附上和小杰同一套口径的收益度量。
+
+    触发过的票按**净收益**（扣一次往返成本）判定守住还是回落；封板价触发的
+    不进胜率，单列为"买不到" —— 它反映的是标记太晚，不是选错。
+    """
     bar = stock.get("bar") or {}
     close_pct = _pct(bar.get("pct"))
     top_pct = high_pct(bar)
@@ -105,10 +112,14 @@ def classify(stock: Mapping[str, Any], *, big_move_pct: float = BIG_MOVE_PCT,
     big_close = close_pct >= big_move_pct or bool(stock.get("closed_at_limit"))
     big_intraday = (top_pct is not None and top_pct >= big_intraday_pct) or bool(stock.get("touched_limit"))
     entry = stock.get("entry") or None
+    measured = measure(entry, bar, stock.get("next_bar"), benchmark_pct=benchmark_pct) if entry else {}
     if str(stock.get("kind")) == "record":
         outcome = "avoid_missed" if big_close or big_intraday else "avoided"
+    elif entry and measured.get("evaluable") is False:
+        outcome = UNBUYABLE
     elif entry:
-        outcome = "hit" if (stock.get("entry_to_close_pct") or 0) >= FADE_PCT else "triggered_faded"
+        net = measured.get("net_session_return_pct")
+        outcome = "hit" if (net if net is not None else -1.0) >= FADE_PCT else "triggered_faded"
     elif big_close or big_intraday:
         outcome = "missed"
     elif stock.get("invalidated_at"):
@@ -119,6 +130,7 @@ def classify(stock: Mapping[str, Any], *, big_move_pct: float = BIG_MOVE_PCT,
         "outcome": outcome, "close_pct": close_pct, "high_pct": top_pct,
         "opportunity_pct": top_pct if top_pct is not None else close_pct,
         "big_close": big_close, "big_intraday": big_intraday,
+        "measures": {key: value for key, value in measured.items() if key != "reason"} or None,
     }
 
 
@@ -279,14 +291,20 @@ def with_delivered_entries(packs: Sequence[Mapping[str, Any]],
     return out
 
 
+#: Kept on every archived item so the next session can complete its forward
+#: returns without re-reading the settlement.
+BAR_FIELDS = ("open", "high", "low", "close", "pre_close", "limit_up_price", "pct")
+
+
 def review_stocks(packs: Sequence[Mapping[str, Any]],
-                  replays: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
+                  replays: Mapping[str, Mapping[str, Any]],
+                  *, benchmark_pct: float | None = None) -> list[dict[str, Any]]:
     """把结算里的每只票合成一条复盘记录。"""
     items: list[dict[str, Any]] = []
     for pack in packs:
         for stock in pack.get("stocks") or []:
             code = str(stock.get("code"))
-            verdict = classify(stock)
+            verdict = classify(stock, benchmark_pct=benchmark_pct)
             replay = replays.get(code)
             entry = stock.get("entry") or None
             items.append({
@@ -296,7 +314,8 @@ def review_stocks(packs: Sequence[Mapping[str, Any]],
                 "session_index": pack.get("session_index"),
                 **verdict,
                 "entry": None if not entry else {"at": str(entry.get("at"))[11:16], "price": entry.get("price"),
-                                                 "path": entry.get("path")},
+                                                 "path": entry.get("path"), "sealed": entry.get("sealed")},
+                "bar": {key: (stock.get("bar") or {}).get(key) for key in BAR_FIELDS},
                 "entry_to_close_pct": stock.get("entry_to_close_pct"),
                 "closed_at_limit": stock.get("closed_at_limit"), "touched_limit": stock.get("touched_limit"),
                 "first_limit_up_at": (str(stock.get("first_limit_up_at"))[11:16]
@@ -324,6 +343,8 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     by_playbook: dict[str, Counter[str]] = defaultdict(Counter)
     missed_pct: dict[str, list[float]] = defaultdict(list)
     hit_pct: dict[str, list[float]] = defaultdict(list)
+    excess_pct: dict[str, list[float]] = defaultdict(list)
+    forward_pct: dict[str, list[float]] = defaultdict(list)
     gate_blocks: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     data_gaps: Counter[str] = Counter()
     unpushed: list[dict[str, Any]] = []
@@ -351,19 +372,31 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                     gate_blocks[(playbook, str(gate.get("name")))].append(
                         {"code": item.get("code"), "name": item.get("name"), "date": trade_date,
                          "pct": value, "share": gate.get("share")})
-            if outcome == "hit" and item.get("entry_to_close_pct") is not None:
-                hit_pct[playbook].append(float(item["entry_to_close_pct"]))
+            measures = item.get("measures") or {}
+            if outcome in {"hit", "triggered_faded"}:
+                # Net of one round trip, and credited against the day's median,
+                # so a strong tape is not mistaken for an edge.
+                if measures.get("net_session_return_pct") is not None:
+                    hit_pct[playbook].append(float(measures["net_session_return_pct"]))
+                if measures.get("excess_session_pct") is not None:
+                    excess_pct[playbook].append(float(measures["excess_session_pct"]))
+                if measures.get("net_next_open_to_close_pct") is not None:
+                    forward_pct[playbook].append(float(measures["net_next_open_to_close_pct"]))
     playbooks = []
     for playbook, counts in sorted(by_playbook.items(), key=lambda pair: -sum(pair[1].values())):
         total = sum(counts.values())
-        actionable = total - counts.get("avoided", 0) - counts.get("avoid_missed", 0) - counts.get("no_data", 0)
+        # 封板价触发的既不是命中也不是失手，它反映的是标记太晚，所以不进分母。
+        actionable = (total - counts.get("avoided", 0) - counts.get("avoid_missed", 0)
+                      - counts.get("no_data", 0) - counts.get(UNBUYABLE, 0))
         playbooks.append({
             "playbook": playbook, "total": total,
             **{outcome: counts.get(outcome, 0) for outcome in OUTCOME_LABELS},
             "hit_rate_pct": round(counts.get("hit", 0) / actionable * 100, 1) if actionable else None,
             "missed_rate_pct": round(counts.get("missed", 0) / actionable * 100, 1) if actionable else None,
             "missed_mean_pct": _mean(missed_pct.get(playbook, [])),
-            "hit_mean_pct": _mean(hit_pct.get(playbook, [])),
+            "net_mean_pct": _mean(hit_pct.get(playbook, [])),
+            "excess_mean_pct": _mean(excess_pct.get(playbook, [])),
+            "net_next_day_mean_pct": _mean(forward_pct.get(playbook, [])),
         })
     suggestions = []
     for (playbook, gate), cases in sorted(gate_blocks.items(), key=lambda pair: -len(pair[1])):
@@ -384,6 +417,23 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _entry_line(item: Mapping[str, Any]) -> str:
+    """One triggered name: when, at what, and what it was actually worth."""
+    entry = item.get("entry") or {}
+    measures = item.get("measures") or {}
+    net = measures.get("net_session_return_pct")
+    excess_pct = measures.get("excess_session_pct")
+    forward = measures.get("net_next_open_to_close_pct")
+    parts = [f"{item['name']} {entry.get('at', '')}@{entry.get('price')}"]
+    parts.append(f"净 {net:+.1f}%" if net is not None else "净 —")
+    if excess_pct is not None:
+        parts.append(f"超额 {excess_pct:+.1f}%")
+    if forward is not None:
+        parts.append(f"次日开→收 {forward:+.1f}%")
+    parts.append(f"当日 {item['close_pct']:+.1f}%")
+    return "，".join(parts)
+
+
 def outcome_text(trade_date: date, report: Mapping[str, Any]) -> str:
     """飞书摘要：先说结果，再说卡点，最后给一条学习结论。"""
     items = list(report.get("stocks") or [])
@@ -395,14 +445,17 @@ def outcome_text(trade_date: date, report: Mapping[str, Any]) -> str:
     def names(outcome: str, limit: int = 6) -> list[Mapping[str, Any]]:
         return [item for item in items if item["outcome"] == outcome][:limit]
 
+    benchmark = report.get("benchmark_session_pct")
+    if benchmark is not None:
+        lines.append(f"当日全市场中位数 {benchmark:+.2f}%，以下均为扣一次往返成本后的净收益")
     for item in names("hit"):
-        entry = item.get("entry") or {}
-        lines.append(f"✔ {item['name']} {entry.get('at', '')}@{entry.get('price')}→收 "
-                     f"{item['entry_to_close_pct']:+.1f}%（当日 {item['close_pct']:+.1f}%）")
+        lines.append("✔ " + _entry_line(item))
     for item in names("triggered_faded", 4):
+        lines.append("↘ " + _entry_line(item))
+    for item in names(UNBUYABLE, 4):
         entry = item.get("entry") or {}
-        lines.append(f"↘ {item['name']} {entry.get('at', '')}@{entry.get('price')}→收 "
-                     f"{item['entry_to_close_pct']:+.1f}%（当日 {item['close_pct']:+.1f}%）")
+        lines.append(f"⊘ {item['name']} {entry.get('at', '')}@{entry.get('price')} 封板价触发，买不到"
+                     f"（当日 {item['close_pct']:+.1f}%，不计入胜率）")
     for item in names("missed", 6):
         tail = f"｜{item['blocked_by']}" if item.get("blocked_by") else "｜无扫描留痕"
         top = f"，盘中最高 {item['high_pct']:+.1f}%" if item.get("high_pct") is not None else ""
@@ -437,7 +490,9 @@ def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
     items = list(report.get("stocks") or [])
     lines = [f"# 老师计划次日复盘 {trade_date.isoformat()}", "",
              f"模型 `{report.get('model_version')}`｜规则 `{report.get('rules_version')}`｜"
-             f"结算包 {report.get('packs')} 个｜标的 {len(items)} 只", ""]
+             f"结算包 {report.get('packs')} 个｜标的 {len(items)} 只", "",
+             f"收益口径与小杰结算一致：扣一次往返成本的**净收益**，超额 = 净收益 − 当日全市场中位数"
+             f"（{_signed(report.get('benchmark_session_pct'))}）。封板价触发的单列为「买不到」，不计入胜率。", ""]
     counts = Counter(str(item["outcome"]) for item in items)
     lines += ["## 结果分布", "", "| 结果 | 只数 |", "|---|---|"]
     lines += [f"| {OUTCOME_LABELS[outcome]} | {counts[outcome]} |" for outcome in OUTCOME_LABELS if counts.get(outcome)]
@@ -447,26 +502,30 @@ def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
         if not group:
             continue
         lines += [f"## {OUTCOME_LABELS[outcome]}（{len(group)}）", "",
-                  "| 代码 | 名称 | 剧本 | 收盘 | 最高 | 触发 | 卡点 |", "|---|---|---|---|---|---|---|"]
+                  "| 代码 | 名称 | 剧本 | 收盘 | 最高 | 触发 | 净收益 | 超额 | 次日开→收 | 卡点 |",
+                  "|---|---|---|---|---|---|---|---|---|---|"]
         for item in group:
             entry = item.get("entry") or {}
-            trigger = (f"{entry.get('at')}@{entry.get('price')}（→收 {item['entry_to_close_pct']:+.1f}%）"
-                       if entry else "—")
+            measures = item.get("measures") or {}
+            trigger = f"{entry.get('at')}@{entry.get('price')}" if entry else "—"
             lines.append(
                 f"| {item['code']} | {item.get('name') or ''} | {item.get('playbook')} | "
-                f"{_signed(item.get('close_pct'))} | {_signed(item.get('high_pct'))} | "
-                f"{trigger} | {item.get('blocked_by') or '—'} |")
+                f"{_signed(item.get('close_pct'))} | {_signed(item.get('high_pct'))} | {trigger} | "
+                f"{_signed(measures.get('net_session_return_pct'))} | "
+                f"{_signed(measures.get('excess_session_pct'))} | "
+                f"{_signed(measures.get('net_next_open_to_close_pct'))} | {item.get('blocked_by') or '—'} |")
         lines.append("")
     learned = report.get("learning") or {}
     if learned.get("playbooks"):
         lines += [f"## 按剧本累计（近 {learned.get('session_count', 0)} 个交易日）", "",
-                  "| 剧本 | 合计 | 触发守住 | 触发回落 | 漏掉大涨 | 命中率 | 漏网率 | 漏掉的平均幅度 |",
-                  "|---|---|---|---|---|---|---|---|"]
+                  "| 剧本 | 合计 | 守住 | 回落 | 买不到 | 漏掉大涨 | 命中率 | 漏网率 | 净收益均值 | 超额均值 | 漏掉幅度 |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|"]
         for row in learned["playbooks"]:
             lines.append(
                 f"| {row['playbook']} | {row['total']} | {row['hit']} | {row['triggered_faded']} | "
-                f"{row['missed']} | {_rate(row['hit_rate_pct'])} | {_rate(row['missed_rate_pct'])} | "
-                f"{_signed(row['missed_mean_pct'])} |")
+                f"{row.get(UNBUYABLE, 0)} | {row['missed']} | {_rate(row['hit_rate_pct'])} | "
+                f"{_rate(row['missed_rate_pct'])} | {_signed(row.get('net_mean_pct'))} | "
+                f"{_signed(row.get('excess_mean_pct'))} | {_signed(row['missed_mean_pct'])} |")
         lines.append("")
     if learned.get("unpushed"):
         lines += ["## 重放满足条件却没推送（先查这里，不是阈值问题）", ""]
@@ -489,6 +548,42 @@ def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+async def complete_previous(previous: Sequence[Mapping[str, Any]], trade_date: date, deps: Any) -> int:
+    """Fill the forward returns of the last session's report with this session's bars.
+
+    A report written at its own close cannot know the next open or close, and
+    those are the only numbers an account could have earned when the flagged
+    price was unavailable.  The next session's review completes it in place -
+    the archive keeps the newest payload per session.
+    """
+    pending = next((dict(item) for item in previous
+                    if any((stock.get("entry") and not (stock.get("measures") or {}).get("next_open_to_close_pct"))
+                           for stock in item.get("stocks") or [])), None)
+    if pending is None:
+        return 0
+    codes = [str(stock["code"]) for stock in pending.get("stocks") or [] if stock.get("entry")]
+    if not codes:
+        return 0
+    bars = await _db(deps, repo.session_bars, [ts_code(code) for code in codes], trade_date)
+    next_bars = {symbol[:6]: bar for symbol, bar in bars.items()}
+    filled, stocks = 0, []
+    for stock in pending.get("stocks") or []:
+        entry, next_bar = stock.get("entry"), next_bars.get(str(stock.get("code")))
+        if not entry or not next_bar:
+            stocks.append(stock)
+            continue
+        measured = measure(entry, stock.get("bar") or {}, next_bar,
+                           benchmark_pct=pending.get("benchmark_session_pct"))
+        stocks.append({**stock, "measures": {key: value for key, value in measured.items() if key != "reason"}})
+        filled += 1
+    if not filled:
+        return 0
+    session = date.fromisoformat(str(pending["trade_date"]))
+    payload = {**pending, "stocks": stocks, "forward_completed_on": trade_date.isoformat()}
+    await _db(deps, repo.persist_outcome_review, session, payload, available_at=deps.now_utc())
+    return filled
+
+
 async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, Any]:
     """T 日收盘后的结果复盘。读 roll 刚写的结算存档，不重算行情。"""
     settlements = await _db(deps, repo.recent_settlements, limit=LEARNING_SESSIONS + 4)
@@ -509,11 +604,12 @@ async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, A
                      timeout_seconds=90) if replay_codes else {}
     replays = {code: gate_replay(ts_code(code), names.get(code, ""), rows.get(code) or [])
                for code in replay_codes if rows.get(code)}
-    stocks = review_stocks(packs, replays)
+    benchmark_pct = await _db(deps, repo.session_benchmark, trade_date)
+    stocks = review_stocks(packs, replays, benchmark_pct=benchmark_pct)
     report: dict[str, Any] = {
         "trade_date": trade_date.isoformat(), "model_version": MODEL_VERSION, "rules_version": RULES_VERSION,
         "packs": len(packs), "stocks": stocks,
-        "delivered_entries": len(delivered),
+        "delivered_entries": len(delivered), "benchmark_session_pct": benchmark_pct,
         "counts": dict(Counter(str(item["outcome"]) for item in stocks)),
         "thresholds": {"big_move_pct": BIG_MOVE_PCT, "big_intraday_pct": BIG_INTRADAY_PCT,
                        "fade_pct": FADE_PCT, "suggest_min_blocks": SUGGEST_MIN_BLOCKS},
@@ -522,10 +618,12 @@ async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, A
     history = await _db(deps, repo.recent_outcome_reviews, limit=LEARNING_SESSIONS)
     previous = [row["payload"] for row in history
                 if str((row["payload"] or {}).get("trade_date")) != trade_date.isoformat()]
+    completed = await complete_previous(previous, trade_date, deps)
     report["learning"] = learning([report, *previous])
     await _db(deps, repo.persist_outcome_review, trade_date, report, available_at=deps.now_utc())
     result = {"status": "completed", "trade_date": trade_date.isoformat(), "counts": report["counts"],
               "replayed": len(replays), "suggestions": len(report["learning"]["suggestions"]),
+              "completed_forward_returns": completed,
               "research_only": True, "live_effect": "none"}
     if alert and stocks:
         result["alert"] = await deps.send_alert(outcome_text(trade_date, report))
@@ -534,6 +632,7 @@ async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, A
 
 __all__ = [
     "BIG_INTRADAY_PCT", "BIG_MOVE_PCT", "LEARNING_SESSIONS", "MODEL_VERSION", "OUTCOME_LABELS",
-    "classify", "dominant_gap", "gate_replay", "high_pct", "learning", "outcome_markdown", "outcome_text",
+    "classify", "complete_previous", "dominant_gap", "gate_replay", "high_pct", "learning",
+    "outcome_markdown", "outcome_text",
     "review_stocks", "run", "with_delivered_entries",
 ]
