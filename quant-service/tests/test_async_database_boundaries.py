@@ -258,9 +258,9 @@ class RouterReadBoundaryTests(unittest.TestCase):
         ("automation_reads.py", "agent_context"),
         ("intraday_status.py", "intraday_services_status"),
         ("research_readiness.py", "training_roadmap"),
-        # Health probes the strict synchronous local database control plane;
-        # Prometheus must remain scrapeable even while that probe is degraded.
-        ("system_control.py", "health"),
+        # Prometheus must remain scrapeable even while the health probe is
+        # degraded.  Health itself is async since 2026-09-23: it still runs the
+        # strict synchronous probe, in the threadpool, under a deadline.
         ("system_control.py", "prometheus_metrics"),
     }
 

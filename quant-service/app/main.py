@@ -5743,11 +5743,22 @@ def _legacy_schema_bootstrap() -> dict[str, Any]:
     return {"status": "ok", "catalog": catalog_counts()}
 
 
+def _busy_health_payload() -> dict[str, Any]:
+    """What /health can say from memory alone while the full evidence is slow."""
+    return {
+        "service": "quant-research", "build": release_metadata(),
+        "database_pool": db.pool_status(), "async_database_pool": async_db.pool_status(),
+        "blocking_executors": runtime_executor_status(), "network": network_state.snapshot(),
+        "runtime_loops": background_loop_registry.snapshot(),
+    }
+
+
 app.include_router(build_system_control_router(SystemControlDependencies(
     health_payload=_health_payload,
     database_unavailable_error=DatabaseUnavailableError,
     metrics_response=_metrics_response,
     legacy_bootstrap=_legacy_schema_bootstrap,
+    busy_payload=_busy_health_payload,
 )))
 
 
