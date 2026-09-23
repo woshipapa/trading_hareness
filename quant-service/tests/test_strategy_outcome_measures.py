@@ -22,10 +22,13 @@ class EvaluabilityTests(unittest.TestCase):
         self.assertIsNone(locked_at(11.0, None))
         self.assertIsNone(locked_at(None, 11.0))
 
-    def test_the_scans_own_reading_wins_over_the_price_comparison(self):
+    def test_either_fact_alone_is_enough_to_call_it_unbuyable(self):
         # The board was sealed even though the last print was a cent below.
         self.assertFalse(entry_evaluable(10.99, limit_up=11.0, flagged_sealed=True))
-        self.assertTrue(entry_evaluable(11.0, limit_up=11.0, flagged_sealed=False))
+        # And a price at the limit is unbuyable however the book field reads:
+        # the scan returns False when no book came back at all.
+        self.assertFalse(entry_evaluable(11.0, limit_up=11.0, flagged_sealed=False))
+        self.assertTrue(entry_evaluable(10.5, limit_up=11.0, flagged_sealed=False))
 
     def test_an_archive_without_either_fact_is_treated_as_evaluable(self):
         self.assertTrue(entry_evaluable(10.5))

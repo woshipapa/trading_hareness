@@ -422,7 +422,8 @@ def _tencent_field(row: Mapping[str, Any], index: int) -> Any:
 def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, Any] | None,
                   observed_at: datetime, name: str = "",
                   previous_quote: Mapping[str, Any] | None = None,
-                  tape: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                  tape: Mapping[str, Any] | None = None,
+                  defaults: Mapping[str, Any] = DEFAULTS) -> dict[str, Any]:
     """Collect every value the playbooks read, from whichever scan source has it.
 
     Order: licensed watch quote (Longhu) -> Tencent watch depth quote -> all-A
@@ -491,21 +492,21 @@ def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, An
     return_5m, return_source = first("return_5m_pct")
     previous_price = _num((previous_quote or {}).get("price"))
     if multiple is not None:
-        surge, sources["surge"] = multiple >= DEFAULTS["minute_volume_multiple_min"] or (
-            (volume_ratio or 0) >= DEFAULTS["vol_ratio_min"] and (return_5m or 0) > 0), multiple_source
+        surge, sources["surge"] = multiple >= defaults["minute_volume_multiple_min"] or (
+            (volume_ratio or 0) >= defaults["vol_ratio_min"] and (return_5m or 0) > 0), multiple_source
     elif volume_ratio is not None:
-        surge, sources["surge"] = volume_ratio >= DEFAULTS["vol_ratio_min"] and (vwap is None or price >= vwap), "volume_ratio"
+        surge, sources["surge"] = volume_ratio >= defaults["vol_ratio_min"] and (vwap is None or price >= vwap), "volume_ratio"
     else:
         surge = None
     if return_5m is not None:
-        not_falling, sources["not_falling"] = return_5m >= DEFAULTS["not_falling_return_5m_min"], return_source
+        not_falling, sources["not_falling"] = return_5m >= defaults["not_falling_return_5m_min"], return_source
     elif _elapsed_minutes(observed_at) < OPENING_WINDOW_MINUTES and first("return_1m_pct")[0] is not None:
         # 09:30-09:35 has no five-minute history, and reporting the input as
         # missing silenced every breakout plan for the first minutes of the
         # session.  One minute of tape answers the same question - is it
         # falling right now - so it stands in, tagged by its own source.
         return_1m, minute_source = first("return_1m_pct")
-        not_falling = return_1m >= DEFAULTS["not_falling_return_5m_min"]
+        not_falling = return_1m >= defaults["not_falling_return_5m_min"]
         sources["not_falling"] = f"{minute_source}:1m"
     elif previous_price:
         not_falling, sources["not_falling"] = price >= previous_price * 0.997, "previous_scan"
@@ -523,7 +524,7 @@ def scan_features(symbol: str, quote: Mapping[str, Any], minute: Mapping[str, An
         "touched_limit": bool(limit) and high >= limit - 0.005,
         "open_gap_pct": round((opened / pre_close - 1) * 100, 2) if opened and pre_close else None,
         "surge": surge, "not_falling": not_falling,
-        "auction_amount": amount if clock < DEFAULTS["auction_proxy_until"] else None,
+        "auction_amount": amount if clock < defaults["auction_proxy_until"] else None,
         "clock": clock, "session_elapsed_min": _elapsed_minutes(observed_at), "sources": sources,
     }
     return features
@@ -547,10 +548,11 @@ def _sig(name: str, value: Any, ok: bool | None, src: str = "", *, gating: bool 
     return {"name": name, "value": value, "pass": ok, "src": src, "gating": gating}
 
 
-def _breakout(f: dict[str, Any], level: float | None, label: str) -> list[dict[str, Any]]:
+def _breakout(f: dict[str, Any], level: float | None, label: str,
+              defaults: Mapping[str, Any] = DEFAULTS) -> list[dict[str, Any]]:
     return [
         _sig(f"价格>{label}", f"{f['price']} vs {level}", level is not None and f["price"] > level),
-        _sig(f"量比≥{DEFAULTS['vol_ratio_min']:g}（带量）", f["volume_ratio"], (f["volume_ratio"] or 0) >= DEFAULTS["vol_ratio_min"], "I"),
+        _sig(f"量比≥{defaults['vol_ratio_min']:g}（带量）", f["volume_ratio"], (f["volume_ratio"] or 0) >= defaults["vol_ratio_min"], "I"),
         _sig("均价上方（不能往下跌）", f"{f['price']} vs {f['vwap']}", bool(f["above_vwap"]), "I"),
         _sig("1分钟不下跌（开盘前5分钟）" if str(f["sources"].get("not_falling", "")).endswith(":1m")
              else "5分钟不下跌", f["not_falling"], bool(f["not_falling"]), "I"),
@@ -621,7 +623,8 @@ def _close_breach(f: Mapping[str, Any], breach: bool, label: str, sig: list[dict
     return False
 
 
-def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[str, Any] | None = None,
+             *, defaults: Mapping[str, Any] = DEFAULTS) -> dict[str, Any]:
     """Return ``{"action": entry|watch|invalid, "path": ..., "signals": [...]}`` for one snapshot."""
     pb, p = str(plan["playbook"]), plan.get("params") or {}
     x = plan.get("extra") or {}
@@ -684,7 +687,7 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
                      f["sealed"] and amount <= p["seal_amount_max"], "I")]
         invalid = (amount >= p["fail_amount"] and not f["sealed"]) or f["price"] < (f["pre_close"] or 0)
     elif pb == "trend_pullback_restart":
-        restart = (f["volume_ratio"] or 0) >= DEFAULTS["vol_ratio_min"] and (f["pct"] or 0) >= 3 and bool(f["above_vwap"])
+        restart = (f["volume_ratio"] or 0) >= defaults["vol_ratio_min"] and (f["pct"] or 0) >= 3 and bool(f["above_vwap"])
         sig += [_sig("未涨停追高（<9.5%）", f["pct"], (f["pct"] or 0) < 9.5, "T"),
                 _sig("前一日已回调缩量", x.get("pulled_back"), bool(x.get("pulled_back")), "I"),
                 _sig("再起：量比≥1.5、涨幅≥3%、均价上方", f"{f['volume_ratio']}/{f['pct']}%", restart, "I")]
@@ -713,7 +716,7 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
     elif pb == "ma5_reclaim_or_divergence":
         short_mas = [value for value in (_live_ma(x, 5, f["price"]), _live_ma(x, 10, f["price"])) if value]
         a_level = max(short_mas) if short_mas else x.get("a_level")
-        path_a = _breakout(f, a_level, "当日短均线压制")
+        path_a = _breakout(f, a_level, "当日短均线压制", defaults)
         zone = x.get("zone") or [0, 0]
         in_zone = zone[0] <= f["low"] <= zone[1]
         sig += path_a + [_sig("B：进入回踩区", f"{f['low']} in {zone}", in_zone, "T/I", gating=False)]
@@ -744,13 +747,13 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
                 _sig(f"延续：价格>前高{p['prior_high']}", f["high"], f["high"] > p["prior_high"], "D")]
         invalid = _close_breach(f, f["price"] < floor, f"跌破当日MA{x.get('floor_ma', '')} {floor}", sig)
     elif pb == "prior_high_breakout":
-        sig += _breakout(f, p["prior_high"], "前高")
+        sig += _breakout(f, p["prior_high"], "前高", defaults)
         floor = _live_ma(x, x.get("floor_ma"), f["price"], x.get("floor_level")) or 0
         invalid = _close_breach(f, f["price"] < floor, f"跌破当日MA{x.get('floor_ma', '')} {floor}", sig)
     elif pb == "platform_breakout":
         # 老师：追高是很难的，加自选等回调、走平台；仍在创新高时没有平台可突破。
         sig.append(_sig("已形成平台（高点后整理≥1天）", x.get("days_since_peak"), int(x.get("days_since_peak") or 0) >= 1, "T"))
-        sig += _breakout(f, x.get("platform_upper"), "平台上沿")
+        sig += _breakout(f, x.get("platform_upper"), "平台上沿", defaults)
         floor_ma = int(x.get("floor_ma") or 10)
         ma_floor = _live_ma(x, floor_ma, f["price"], x.get(f"ma{floor_ma}") or x.get("ma10"))
         floor = min(x.get("platform_lower") or 0, ma_floor or x.get("platform_lower") or 0)
@@ -761,12 +764,12 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
         mid = (f["high"] + f["low"]) / 2
         drift = (mid / x["prior_mid"] - 1) * 100 if x.get("prior_mid") else 0.0
         sig += [_sig("已回到10日线", touched, touched, "T"),
-                _sig(f"重心不再下移（≥-{DEFAULTS['center_flat_pct']:g}%）", round(drift, 2), drift >= -DEFAULTS["center_flat_pct"], "I"),
+                _sig(f"重心不再下移（≥-{defaults['center_flat_pct']:g}%）", round(drift, 2), drift >= -defaults["center_flat_pct"], "I"),
                 _sig("均价上方", f["above_vwap"], f["above_vwap"], "I")]
         invalid = _close_breach(f, f["price"] < ma10 * 0.97, f"跌破当日MA10×0.97 {round(ma10 * 0.97, 3)}", sig)
     elif pb == "double_bottom_platform":
         sig += [_sig("颈线上方", f"{f['price']} vs {p['neckline']}", f["price"] >= p["neckline"], "D")]
-        sig += _breakout(f, p["platform_high"], "平台高点")
+        sig += _breakout(f, p["platform_high"], "平台高点", defaults)
         invalid = _close_breach(f, f["price"] < p["neckline"], f"跌回颈线 {p['neckline']}", sig)
     elif pb == "ma60_reclaim":
         pace = _session_share(p.get("volume_profile"), f["clock"], f["session_elapsed_min"])

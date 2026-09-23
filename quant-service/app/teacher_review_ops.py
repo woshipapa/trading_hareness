@@ -5,6 +5,7 @@
     python -m app.teacher_review_ops import --pack -        < pack.json
     python -m app.teacher_review_ops status
     python -m app.teacher_review_ops outcome --date 2026-09-22
+    python -m app.teacher_review_ops sweep   --date 2026-09-22
 
 Each prints one JSON document on stdout.  ``context``, ``check`` and
 ``status`` only read.  ``import`` goes through the service's own HTTP route,
@@ -348,6 +349,40 @@ def outcome(database: Any, trade_date: date, *, rerun: bool = False) -> dict[str
     return {"status": "ok", "report": report, "markdown": outcome_markdown(trade_date, report)}
 
 
+def sweep(database: Any, trade_date: date, *, limit: int = 40) -> dict[str, Any]:
+    """Replay the session at other thresholds and report both sides of each.
+
+    Post-close only: it reads one row per two minutes per name and evaluates
+    every variant over them, which is far too much work to do while the scan
+    is running.
+    """
+    from . import teacher_review_repository as repo
+    from .strategy_parameter_sweep import summarize, sweep_lines, sweep_symbol
+
+    outcome = next((dict(item.get("payload") or {}) for item in repo.recent_outcome_reviews(database, limit=4)
+                    if str((item.get("payload") or {}).get("trade_date")) == trade_date.isoformat()), None)
+    if outcome is None:
+        return {"status": "missing", "reason": "run the outcome review for this session first"}
+    # Only names the live thresholds did not take: a variant can only change
+    # what was blocked, and including the taken ones would double-count them.
+    candidates = [item for item in (outcome.get("stocks") or [])
+                  if item.get("kind") != "record" and not item.get("entry")][:limit]
+    codes = [str(item["code"]) for item in candidates]
+    rows = repo.rule_input_snapshots(database, codes, trade_date) if codes else {}
+    benchmark = outcome.get("benchmark_session_pct")
+    per_symbol = {}
+    for item in candidates:
+        code = str(item["code"])
+        if not rows.get(code):
+            continue
+        per_symbol[code] = sweep_symbol(ts_code(code), str(item.get("name") or ""), rows[code],
+                                        bar=item.get("bar"), benchmark_pct=benchmark)
+    table = summarize(per_symbol)
+    return {"status": "ok", "trade_date": trade_date.isoformat(), "symbols": len(per_symbol),
+            "benchmark_session_pct": benchmark, "variants": table, "lines": sweep_lines(table),
+            "research_only": True, "live_effect": "none"}
+
+
 def check(database: Any, pack: dict[str, Any]) -> dict[str, Any]:
     from . import teacher_review_repository as repo
     codes = [ts_code(str(stock.get("code") or "")) for stock in pack.get("stocks") or [] if isinstance(stock, Mapping)]
@@ -401,6 +436,8 @@ def main() -> None:  # pragma: no cover - operational entry point
     outcome_parser = sub.add_parser("outcome")
     outcome_parser.add_argument("--date", type=date.fromisoformat)
     outcome_parser.add_argument("--rerun", action="store_true")
+    sweep_parser = sub.add_parser("sweep")
+    sweep_parser.add_argument("--date", type=date.fromisoformat)
     args = parser.parse_args()
 
     def read_pack() -> dict[str, Any]:
@@ -415,6 +452,9 @@ def main() -> None:  # pragma: no cover - operational entry point
     elif args.command == "outcome":
         trade_date = args.date or datetime.now(timezone.utc).astimezone(_CN).date()
         output = outcome(db, trade_date, rerun=bool(args.rerun))
+    elif args.command == "sweep":
+        trade_date = args.date or datetime.now(timezone.utc).astimezone(_CN).date()
+        output = sweep(db, trade_date)
     elif args.command == "import":
         pack = read_pack()
         report = check(db, pack)
@@ -429,4 +469,5 @@ if __name__ == "__main__":  # pragma: no cover
     main()
 
 
-__all__ = ["build_context", "check_report", "context_markdown", "outcome", "pack_digest", "pool_view"]
+__all__ = ["build_context", "check_report", "context_markdown", "outcome", "outcome_digest",
+           "pack_digest", "pool_view", "sweep"]

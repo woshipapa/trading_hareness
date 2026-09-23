@@ -53,15 +53,14 @@ def locked_at(price: Any, limit_up: Any, *, tolerance: float = SEALED_TOLERANCE)
 
 
 def entry_evaluable(entry_price: Any, *, limit_up: Any = None, flagged_sealed: Any = None) -> bool:
-    """False when the flag fired on a sealed board, whatever raised it.
+    """False when the flag fired where no seller was available.
 
-    ``flagged_sealed`` is the scan's own reading; the price/limit comparison
-    is the fallback for an archive that kept only the price.
+    Either fact is enough.  The scan's ``sealed`` reading comes from the order
+    book and is ``False`` when no book was returned at all, so a ``False``
+    there is an absent reading rather than evidence of an open board; a price
+    sitting at the limit is evidence on its own.
     """
-    if flagged_sealed is not None:
-        return not bool(flagged_sealed)
-    locked = locked_at(entry_price, limit_up)
-    return True if locked is None else not locked
+    return not (bool(flagged_sealed) or locked_at(entry_price, limit_up) is True)
 
 
 def returns(entry_price: Any, *, session_close: Any = None, next_open: Any = None,
