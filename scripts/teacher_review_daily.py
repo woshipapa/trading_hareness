@@ -15,6 +15,10 @@ docs/TEACHER_REVIEW_DAILY.md for the whole procedure):
         -> JOB_DIR/import_report_<T>.json + pool_<T>.md
     teacher_review_daily.py outcome JOB_DIR [--date 2026-09-22] [--rerun]
         -> JOB_DIR/outcome_<T>.json + .md         (次日复盘：符合预期的、漏掉的大涨、卡在哪一条)
+    teacher_review_daily.py digest  JOB_DIR [--date 2026-09-22]
+        -> JOB_DIR/digest_<T>.json + .md          (跨策略日报：需要决定的、各策略记分牌、改动跟踪)
+    teacher_review_daily.py sweep   JOB_DIR [--date 2026-09-22]
+        -> JOB_DIR/sweep_<T>.json + .md           (反事实扫描：换一个阈值会多抓到什么、多放进来什么；收盘后跑)
     teacher_review_daily.py status  [JOB_DIR]
 
 <T> is the review (trading) date as YYYYMMDD.  The default pack path is
@@ -92,7 +96,7 @@ def pool_markdown(pool: list[dict], title: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("context", "check", "import", "outcome", "status"))
+    parser.add_argument("command", choices=("context", "check", "import", "outcome", "digest", "sweep", "status"))
     parser.add_argument("job_dir", nargs="?", type=pathlib.Path)
     parser.add_argument("--date", type=date.fromisoformat, help="review (trading) date, default from the job files")
     parser.add_argument("--pack", type=pathlib.Path)
@@ -113,6 +117,30 @@ def main() -> None:
     missing = [name for name in REQUIRED_HARNESS_FILES if not (job / name).exists()]
     if missing:
         raise SystemExit(f"harness job is incomplete, missing: {', '.join(missing)}")
+
+    if args.command in {"digest", "sweep"}:
+        trade_date = review_date_of(job, args.date)
+        now = datetime.now(CN)
+        if args.command == "sweep" and now.weekday() < 5 and (9, 15) <= (now.hour, now.minute) < (15, 0):
+            raise SystemExit("sweep replays a whole session of scan inputs; run it after the close, not during it")
+        result = peer_ops([args.command, f"--date={trade_date.isoformat()}"], timeout=1800)
+        if result.get("status") not in {"ok", "completed"}:
+            raise SystemExit(f"{args.command} unavailable: {result.get('reason') or result.get('status')}")
+        stem = trade_date.strftime("%Y%m%d")
+        if args.command == "digest":
+            write(job / f"digest_{stem}.json", result.get("digest") or {})
+            write(job / f"digest_{stem}.md", result.get("markdown") or "")
+            print("\n".join((result.get("digest") or {}).get("decisions") or ["（今天没有需要决定的事项）"]))
+        else:
+            write(job / f"sweep_{stem}.json", result)
+            page = [f"# 反事实阈值扫描 {trade_date.isoformat()}", "",
+                    f"重放 {result.get('symbols')} 只未触发的票，当日中位数 {result.get('benchmark_session_pct')}。"
+                    "每个变体只改一个阈值；收益为扣一次往返成本的净值，封板价触发计为买不到。", ""]
+            page += [f"- {line}" for line in result.get("lines") or []]
+            page += ["", "看起来更好的变体只是赢得了一次**预注册改动**的资格：先把它连同预期写进变更台账，再改。"]
+            write(job / f"sweep_{stem}.md", "\n".join(page) + "\n")
+            print("\n".join(result.get("lines") or ["（参与的票太少，没有可报告的变体）"]))
+        return
 
     if args.command == "outcome":
         trade_date = review_date_of(job, args.date)
