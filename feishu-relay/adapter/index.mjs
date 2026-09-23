@@ -1430,6 +1430,10 @@ async function groupRelayDashboardStatus() {
 			: 'processing';
 		const ingestionFailed = ['failed', 'stalled'].includes(ingestionState);
 		const lastForwardedAt = asIsoString(persisted?.last_forwarded_at);
+		const effectiveLastForwardedAt = websocketChatIds.length ? websocketLastForwardedAt ?? lastForwardedAt : lastForwardedAt;
+		const deliveryState = websocketChatIds.length
+			? websocketFailedCount > 0 ? 'failed' : websocketForwardedCount > 0 ? 'verified' : 'awaiting_message'
+			: failedCount > 0 ? 'failed' : lastForwardedAt ? 'verified' : 'awaiting_message';
 		const activeError = current?.last_error
 			?? (ingestionFailed ? ingestionRecord?.error_message ?? null : null);
 		const resolvedError = !activeError && failedCount === 0
@@ -1455,10 +1459,10 @@ async function groupRelayDashboardStatus() {
 			websocket_failed_count: websocketFailedCount, websocket_last_observed_at: websocketLastObservedAt, websocket_last_forwarded_at: websocketLastForwardedAt,
 			state, last_polled_at: lastPolledAt, poll_age_seconds: pollAgeSeconds,
 			last_source_message_at: asIsoString(persisted?.last_source_message_at),
-			last_forwarded_at: lastForwardedAt,
+			last_forwarded_at: effectiveLastForwardedAt,
 			// Polling proves source readability. A real delivery is separately
 			// visible so a quiet source group is never mistaken for a send test.
-			delivery_state: failedCount > 0 ? 'failed' : lastForwardedAt ? 'verified' : 'awaiting_message',
+			delivery_state: deliveryState,
 			last_reconciled_at: current?.last_reconciled_at ?? null,
 			last_message_status: persisted?.last_message_status ?? null,
 			failed_count: failedCount,
