@@ -144,6 +144,33 @@ test('recovers a card JSON suffix carried in the human summary', () => {
 	assert.deepEqual(JSON.parse(normalizeLarkAgentXRelayMessage(input).body.content), card);
 });
 
+test('decodes LarkAgentX internal richtext cards with text and encrypted images', () => {
+	const input = {
+		msg_id: 'om_diaoyan_richtext_card', msg_type_name: 'CARD',
+		content: '[卡片] 📢 新动态 · 2026-09-26 22:48',
+		content_data: {
+			cardVersion: 2,
+			richtext: {
+				imageIds: ['5'],
+				elements: { dictionary: {
+					'1': { tag: 1, property: '\n\uFFFD\u0017电子布高端需求挤压普通供给' },
+					'5': { tag: 2, property: 'img_v3_diaoyan' },
+				} },
+			},
+		},
+		_larkagentx_images: [{ image_id: 'img_v3_diaoyan', source_id: '5', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }],
+	};
+	assert.equal(isDirectLarkAgentXRelayType(input), true);
+	const message = normalizeLarkAgentXRelayMessage(input);
+	assert.equal(message.msg_type, 'post');
+	const content = JSON.parse(message.body.content).zh_cn.content;
+	assert.equal(content[0][0].text, '电子布高端需求挤压普通供给');
+	assert.deepEqual(content[1][0], {
+		tag: 'img', image_key: 'img_v3_diaoyan',
+		larkagentx_resource: { image_id: 'img_v3_diaoyan', source_id: '5', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) },
+	});
+});
+
 test('marks incomplete LarkAgentX cards for the narrow official backfill lane', () => {
 	const input = { msg_id: 'om_card_incomplete', msg_type_name: 'CARD', content: '[卡片]', content_data: { cardDesc: '仅摘要' } };
 	assert.equal(hasLarkAgentXCardPayload(input), false);
