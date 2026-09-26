@@ -15,6 +15,10 @@ import re
 from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable
 
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
+from .owner_factor_repository import FACTOR_PROVIDER_ORDER
+from .replay_readiness_coverage import refresh_daily_coverage
+
 CONTROL_APIS = ("adj_factor", "daily_basic", "stk_limit", "suspend_d")
 CONTROL_PERSIST_TIMEOUT_SECONDS = 180
 # Whole-market control calls must page: an unpaged stk_limit is refused or cut
@@ -56,6 +60,7 @@ async def sync(
     record_provider_success: Callable[..., Any],
     record_provider_failure: Callable[..., Any],
     record_provider_api_capability: Callable[..., Any],
+    read_persisted_factor_controls: Callable[[date, int], Awaitable[Any]] | None = None,
 ) -> dict[str, Any]:
     """Fetch and promote exactly one date of controls after full-market daily.
 
@@ -72,8 +77,22 @@ async def sync(
     started = asyncio.get_running_loop().time()
     results: dict[str, Any] = {}
     rows_by_api: dict[str, list[dict[str, Any]]] = {}
+    persisted_control_apis: set[str] = set()
     try:
+        if read_persisted_factor_controls is not None:
+            persisted = await read_persisted_factor_controls(trade_date, expected)
+            factor_rows = valid_rows("adj_factor", list(persisted.get("rows") or []), trade_date, parse_date)
+            if len(factor_rows) < max(1, int(expected * 0.95)):
+                raise ValueError(
+                    f"owner persisted adjustment factors returned {len(factor_rows)} valid rows; "
+                    f"expected at least {max(1, int(expected * 0.95))}"
+                )
+            results["adj_factor"] = persisted
+            rows_by_api["adj_factor"] = factor_rows
+            persisted_control_apis.add("adj_factor")
         for api_name in CONTROL_APIS:
+            if api_name in persisted_control_apis:
+                continue
             result = await call_tushare_api(
                 api_name, {"trade_date": stamp}, None, "auto",
                 paginate=True, page_size=CONTROL_PAGE_SIZE, max_rows=CONTROL_MAX_ROWS,
@@ -130,6 +149,9 @@ async def sync(
             )
             for api_name in CONTROL_APIS:
                 result = results[api_name]
+                if api_name in persisted_control_apis:
+                    normalized[api_name] = len(rows_by_api[api_name])
+                    continue
                 request_key = hashlib.sha256(json.dumps({"capability": f"{api_name}_all_a", "trade_date": stamp, "provider": result.provider.key}, sort_keys=True).encode()).hexdigest()
                 normalized[api_name] = persist_tushare_rows(
                     connection, api_name, request_key, rows_by_api[api_name], result.provider.key, observed_at,
@@ -147,11 +169,23 @@ async def sync(
             # the verified same-provider controls there rather than leaving
             # its current date with NULLs.
             connection.execute(
-                """UPDATE quant.market_bars_daily bar SET adj_factor=factor.adj_factor
-                     FROM quant.daily_adjustment_factors factor
-                    WHERE bar.trading_date=%s AND factor.trading_date=bar.trading_date
-                      AND factor.symbol=bar.symbol AND factor.provider=%s""",
-                (trade_date, results["adj_factor"].provider.key),
+                f"""UPDATE quant.market_bars_daily bar
+                     SET adj_factor=selected_factor.adj_factor
+                     FROM LATERAL (
+                           SELECT factor.adj_factor
+                             FROM quant.daily_adjustment_factors factor
+                            WHERE factor.trading_date=bar.trading_date
+                              AND factor.symbol=bar.symbol
+                              AND {persisted_factor_semantics_sql('factor')}
+                              AND factor.adj_factor>0
+                              AND factor.available_at<((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                            ORDER BY array_position(%s::text[],factor.provider) NULLS LAST,
+                                     factor.available_at DESC,
+                                     factor.provider
+                            LIMIT 1
+                     ) selected_factor
+                    WHERE bar.trading_date=%s""",
+                (list(FACTOR_PROVIDER_ORDER), trade_date),
             )
             connection.execute(
                 """UPDATE quant.market_bars_daily bar SET limit_up=limits.limit_up,limit_down=limits.limit_down
@@ -181,6 +215,7 @@ async def sync(
                                 default=str, ensure_ascii=False)),
                 )
                 normalized["stock_st"] = len(st_rows)
+            refresh_daily_coverage(connection, trade_date, trade_date)
         return normalized
 
     # Four complete all-A payloads are promoted in one transaction.  The
@@ -191,7 +226,14 @@ async def sync(
     return {
         "status": "completed", "trade_date": str(trade_date), "expected_daily_rows": expected,
         "rows": {api_name: len(rows) for api_name, rows in rows_by_api.items()}, "normalized_rows": normalized,
-        "providers": {api_name: result.provider.key for api_name, result in results.items()},
+        "providers": {
+            api_name: (
+                "owner_persisted_adjustment_factor"
+                if api_name in persisted_control_apis
+                else result.provider.key
+            )
+            for api_name, result in results.items()
+        },
         "st_evidence": {"status": st_status, "rows": len(st_rows), "provider": st_provider},
     }
 

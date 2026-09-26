@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,6 +10,7 @@ import re
 from typing import Any
 import uuid
 
+from .intraday_features import strongest_group_peer_context
 from .platform.strategy_data_needs import strategy_taxonomies
 
 
@@ -123,7 +125,12 @@ def build_peer_contexts(
     surge_features: dict[str, dict[str, Any]],
     peer_context: Callable[[list[str], dict[str, dict[str, Any]]], dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """Join explicit configured peers with exact point-in-time memberships."""
+    """Score configured peers and each exact point-in-time membership group.
+
+    ``peer_context`` measures one group; the context a rule reads is the
+    strongest single group (``strongest_group_peer_context``), never the union
+    of every sector a name happens to share with the basket.
+    """
     contexts: dict[str, dict[str, Any]] = {}
     for watch in watches:
         symbol = str(watch["symbol"]).upper()
@@ -140,9 +147,12 @@ def build_peer_contexts(
             if re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", str(value).upper()) and str(value).upper() != symbol
         ]
         mapped = mapped_peer_groups.get(symbol) or {"peer_symbols": [], "groups": []}
-        peers = sorted(set(configured_peers) | set(mapped.get("peer_symbols") or []))
+        # Peers a watch names itself are one declared sector of their own.
+        groups = [{"taxonomy_key": "configured", "sector_key": "watch_metadata",
+                   "peer_symbols": sorted(set(configured_peers))}] if configured_peers else []
+        groups.extend(group for group in mapped.get("groups") or [] if isinstance(group, dict))
         contexts[symbol] = {
-            **peer_context(peers, surge_features),
+            **strongest_group_peer_context(groups, surge_features, group_context=peer_context),
             "configured_peer_symbols": sorted(set(configured_peers)),
             "mapped_peer_symbols": list(mapped.get("peer_symbols") or []),
             "exact_membership_groups": list(mapped.get("groups") or []),
@@ -176,6 +186,33 @@ async def _market_wide_research(
             "xiaojie_leader_flow": xiaojie,
         },
     }
+
+
+async def _deliver_confirmed(
+    confirmed: list[dict[str, Any]], dependencies: "IntradayWatchlistScanDependencies",
+) -> list[dict[str, Any]]:
+    """Send confirmed alerts concurrently.
+
+    Each delivery persists its outbox row before any network I/O, so sending
+    concurrently cannot lose an alert; it only stops one slow Feishu call from
+    delaying the others.  Failures are left to the outbox retry.
+    """
+    gate = asyncio.Semaphore(4)
+
+    async def deliver(signal: dict[str, Any]) -> dict[str, Any]:
+        async with gate:
+            try:
+                return await dependencies.deliver_alert(
+                    signal["signal_event_id"],
+                    dependencies.alert_text(
+                        signal, signal["watch"], signal["quote"] or {}, signal["minute"],
+                        decision_card_url=dependencies.decision_card_url(signal["symbol"]),
+                    ),
+                )
+            except Exception as error:  # noqa: BLE001 - the outbox retry owns recovery
+                return {"status": "failed", "error": str(error)[:240]}
+
+    return list(await asyncio.gather(*(deliver(signal) for signal in confirmed)))
 
 
 async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDependencies) -> dict[str, Any]:
@@ -226,7 +263,12 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     membership_rows = await dependencies.load_exact_memberships(selected_symbols, observed_at)
     mapped_peer_groups = dependencies.mapped_peers(selected_symbols, membership_rows)
     quote_timestamp_slo_seconds = 20.0 if dependencies.high_frequency_window(observed_at) else 45.0
-    quote_capture = await dependencies.capture_quotes(selected_symbols, observed_at, quote_timestamp_slo_seconds)
+    # Judge quote freshness against the clock when quotes are fetched, not the
+    # scan start: the watch/membership reads above cross the database tunnel
+    # and took >5 s at times on 2026-09-22, which made every fresh Longhu row a
+    # "future_timestamp" and every Tencent row not-fresh in the same scan.
+    quote_capture = await dependencies.capture_quotes(
+        selected_symbols, max(observed_at, dependencies.now_utc()), quote_timestamp_slo_seconds)
     anomaly_symbols = quote_volume_anomaly_symbols(watches, quote_capture.quotes)
     surge_features, surge_source = await _surge_context_with_priority(
         dependencies.surge_context, watches, mapped_peer_groups, anomaly_symbols,
@@ -281,6 +323,12 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         quote_capture.all_a_rows, quote_capture.latency_ms, realtime_minutes, surge_features,
         peer_contexts, fast_confirmations,
     )
+    # Deliver confirmed alerts before anything else: the shadow rotation and
+    # 小杰 research below never change these signals.  Running them while the
+    # delivery was only scheduled let their work hold the outbox write back by
+    # ~10 s on 2026-09-22; deliveries themselves take well under a second.
+    confirmed = [signal for signal in signals if signal["state"] == "confirmed"]
+    deliveries = await _deliver_confirmed(confirmed, dependencies)
     shadow_observation: dict[str, Any] = {"status": "standby", "reason": "awaiting_next_minute_rotation"}
     if dependencies.shadow_rotation_due(observed_at):
         try:
@@ -339,21 +387,11 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
         # mutation alone never reaches the database.
         if dependencies.persist_xiaojie_status is not None:
             await dependencies.persist_xiaojie_status(scan_id, xiaojie_observation)
-    alerts: list[dict[str, Any]] = []
-    for signal in signals:
-        if signal["state"] != "confirmed":
-            continue
-        delivery = await dependencies.deliver_alert(
-            signal["signal_event_id"],
-            dependencies.alert_text(
-                signal, signal["watch"], signal["quote"] or {}, signal["minute"],
-                decision_card_url=dependencies.decision_card_url(signal["symbol"]),
-            ),
-        )
-        alerts.append({
-            "signal_event_id": str(signal["signal_event_id"]), "symbol": signal["symbol"],
-            "signal_type": signal["signal_type"], "severity": signal["severity"], "delivery": delivery,
-        })
+    alerts: list[dict[str, Any]] = [
+        {"signal_event_id": str(signal["signal_event_id"]), "symbol": signal["symbol"],
+         "signal_type": signal["signal_type"], "severity": signal["severity"], "delivery": delivery}
+        for signal, delivery in zip(confirmed, deliveries)
+    ]
     return {
         "status": "completed", "scan_id": str(scan_id), "observed_at": observed_at.isoformat(),
         "source_status": source_status,

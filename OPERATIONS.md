@@ -10,7 +10,7 @@
 
 ```text
 飞书群消息
-  -> 飞书长连接（feishu-adapter）
+  -> 飞书长连接（feishu-relay/adapter）
   -> POST http://n8n:5678/webhook/feishu-market-text 或 /feishu-media-part
   -> n8n 原生 HTTP Request 分片节点
 ```
@@ -44,7 +44,7 @@
 
 默认配置在 `compose.yaml`，可用 `.env` 覆盖 `FEISHU_GROUP_RELAY_*`。外部源群通过用户 OAuth 读取：授权码或已取得的 refresh token 仅经本机受保护的 `/internal/feishu-user-oauth` 入口一次性保存；access/refresh token 以 AES-GCM 密文持久化在 PostgreSQL，access token 过期前自动滚动刷新。机器人不需要在源外部群内，但授权用户必须可见这些群并具有 `im:chat:readonly`、`im:message` / `im:message.group_msg` 与 `offline_access` 权限。成功和失败状态在 `feishu_group_relay_messages` 表中可审计。
 
-汇总群另有独立的 `FEISHU_SUMMARY_LISTENER_*` 轮询器。它用同一用户 OAuth 每 10 秒读取“分析师发送汇总群”的历史，因此**用户手动发送**和**机器人自动转发**都会被观察；不依赖 `im.message.receive_v1`（该事件不覆盖机器人自己的普通群消息）。只有首行带已登记来源标签的消息才会交给 n8n 和远端导入，未带标签或未知标签的群消息会被安全忽略，不会被错误归因。监听使用汇总群消息 ID 建立 `ingestion_jobs` 幂等键；首次启动默认受控回补最近 1 小时，可用 `FEISHU_SUMMARY_LISTENER_BOOTSTRAP_MODE=skip_existing` 只建立基线。外部源群的媒体资源也由同一用户 OAuth 读取后再上传到汇总群；授权链接必须显式请求 `im:resource`，飞书对资源可见性仍会按消息与授权状态单独校验。
+旧的 `FEISHU_SUMMARY_LISTENER_*` 轮询器只用于人工恢复和历史补齐，不能作为 edge 实时链路。47 上的源群和分析师汇总群由 LarkAgentX 私有 WebSocket 接收，事件进入适配器后继续使用 `ingestion_jobs` 幂等键；`LARKX_SUMMARY_CHAT_IDS` 应包含分析师汇总群，并把 `LARKX_SUMMARY_INGRESS_URL` 指向 `/internal/larkagentx/summary`。edge 正常运行时保持 `FEISHU_GROUP_RELAY_ENABLED=false`、`FEISHU_SUMMARY_LISTENER_ENABLED=false` 和 `LARKX_GAP_REPAIR_ENABLED=false`，避免 OAuth 轮询、官方缺口补读和重复投递。
 
 ### 飞书分析师工作台与协作闭环
 
@@ -113,7 +113,7 @@ docker compose run --rm --no-deps n8n execute --id=remoteArchiveReports123 --raw
 
 监控页通过 Server-Sent Events 实时显示当前适配器进程收到的最近 200 条事件。它显示文本、消息/群聊/发送者 ID、图片或文件 key、完整原始 JSON，以及“已接收 → n8n 执行中/完成/失败 → 目标导入队列状态”。重启 `feishu-adapter` 后该页面的内存记录会清空，不影响 n8n 的执行历史。
 
-本机 relay/monitor 页面由 `frontend/` 中的 Vue 3 + Vite + TypeScript 构建产物提供。relay 使用 multipart，不再把媒体编码为 Base64；浏览器显示上传进度并支持取消。适配器提供 `/api/config`、`/jobs`、`/metrics`，其中 job/asset/part 状态持久化在 PostgreSQL，临时媒体文件存放在 `adapter_ingestion_data` volume，由本地对账定时清理。
+本机量化研究台由根目录 `frontend/` 的 Vue 3 + Vite + TypeScript 构建产物提供；Feishu relay/monitor 页面由 `feishu-relay/dashboard/` 的独立构建产物提供。两者由 adapter 按路径选择并共享同源 API。relay 使用 multipart，不再把媒体编码为 Base64；浏览器显示上传进度并支持取消。适配器提供 `/api/config`、`/jobs`、`/metrics`，其中 job/asset/part 状态持久化在 PostgreSQL，临时媒体文件存放在 `adapter_ingestion_data` volume，由本地对账定时清理。
 
 幂等规则：同一 `event_id` 或 `message_id` 永远复用本地 job；已完成过的相同媒体 SHA256 会标记为 `duplicate_media`，不会再次调用远端 reserve。批次、正文和媒体上传键均为确定性 idempotency key；远端 HTTP 409 会分类为 `remote_conflict`，保留 job 和临时分片供人工检查；只有通过 `POST /api/jobs/{job_id}/retry` 明确重试，才会重新进入本地队列。源群的飞书 `system` 消息（入群、退群、群设置变更）会在转发前标为 `filtered_system`，汇总群的历史 `[system]` 占位消息也不会送入 n8n。
 
@@ -132,7 +132,7 @@ docker compose run --rm --no-deps n8n execute --id=remoteArchiveReports123 --raw
 
 ### 剪贴板快捷键
 
-在任意桌面应用中复制文字后，可运行 [`scripts/relay-from-clipboard.sh`](scripts/relay-from-clipboard.sh)。脚本会把文字放入只保留 5 分钟的一次性本机草稿，并自动打开投递台、填好正文；剪贴板内容不会出现在 URL 或浏览器历史中。图片仍可在投递台内直接粘贴。
+在任意桌面应用中复制文字后，可运行 [`feishu-relay/scripts/desktop/relay-from-clipboard.sh`](feishu-relay/scripts/desktop/relay-from-clipboard.sh)。脚本会把文字放入只保留 5 分钟的一次性本机草稿，并自动打开投递台、填好正文；剪贴板内容不会出现在 URL 或浏览器历史中。图片仍可在投递台内直接粘贴。
 
 已安装的本机 LaunchAgent `com.papa.market-relay-hotkey` 会在登录后自动注册全局快捷键 `⌃⌥⌘R`，不需要再在“快捷指令”中配置。该服务只会在按下快捷键时读取一次剪贴板；不会持续监控、保存或上传剪贴板内容。若“快捷指令”里留有刚才新建的空白快捷指令，可直接关闭且不保存。
 
@@ -248,17 +248,17 @@ docker compose ps
 # 日常启动或恢复；保留已有数据
 docker compose up -d
 
-# 本机修改 feishu-adapter 代码或 Compose 后，重建本机适配器
+# 本机修改 feishu-relay 代码或 Compose 后，重建本机适配器
 docker compose up -d --build feishu-adapter
 
 # 47 上的 adapter/LarkAgentX bug 修复：复用已有 image 和 supervisor venv，走版本化源码覆盖层
-bash scripts/hotfix-feishu-relay-edge.sh --apply
+bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply
 # 覆盖层版本与应急回滚
-bash scripts/hotfix-feishu-relay-edge.sh --list
-bash scripts/hotfix-feishu-relay-edge.sh --rollback <release-id> --apply
+bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --list
+bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --rollback <release-id> --apply
 
 # 只有依赖、Node/Python 运行时或基础镜像变化时，才走不可变 image release
-# scripts/deploy-feishu-relay-edge-release.sh <git-sha> <release-label> --apply
+# feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.sh <git-sha> <release-label> --apply
 
 # 查看飞书连接和转发日志
 docker compose logs -f feishu-adapter
@@ -387,7 +387,7 @@ session reference 的 `membership_taxonomy` 上。
 ## 关键文件
 
 - [`compose.yaml`](compose.yaml)：容器、网络端口、持久卷与环境变量映射。
-- [`feishu-adapter/index.mjs`](feishu-adapter/index.mjs)：飞书官方 Node SDK 长连接、转发到 n8n、监控页与 SSE 实现。
+- [`feishu-relay/adapter/index.mjs`](feishu-relay/adapter/index.mjs)：飞书官方 Node SDK 长连接、转发到 n8n、监控页与 SSE 实现。
 - [`scripts/start-compose.sh`](scripts/start-compose.sh)：等待 Colima 后启动 Compose。
 - [`/Users/papa/Library/LaunchAgents/com.papa.n8n-compose.plist`](/Users/papa/Library/LaunchAgents/com.papa.n8n-compose.plist)：登录自启动配置。
 - [`.env`](.env)：仅本机私密变量，禁止提交或分享。

@@ -17,14 +17,18 @@ from typing import Any
 from psycopg.types.json import Json
 
 from .market_regimes import STRATEGY_INDEX_SYMBOLS, strategy_index_regime
+from .owner_storage import tiered_sql_builder
 
 
 def materialize_market_regime(connection: Any, trading_date: date) -> dict[str, Any]:
     """Classify and persist the regime for one already-closed trading day."""
+    tiered_sql = tiered_sql_builder(connection)
     rows = connection.execute(
-        """SELECT symbol,trading_date,close,high,low,volume FROM quant.canonical_bars_daily
+        tiered_sql("""SELECT symbol,trading_date,close,high,low,volume FROM quant.canonical_bars_daily
              WHERE symbol=ANY(%s) AND trading_date<=%s
-             ORDER BY symbol,trading_date""",
+               AND quality_status='fresh'
+               AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+             ORDER BY symbol,trading_date"""),
         (list(STRATEGY_INDEX_SYMBOLS), trading_date),
     ).fetchall()
     by_symbol: dict[str, list[dict[str, Any]]] = {}

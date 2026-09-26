@@ -7,7 +7,7 @@
         [
           {
             "index": 0,
-            "node": "Reserve upload in new batch",
+            "node": "Collapse text items",
             "type": "main"
           }
         ]
@@ -58,7 +58,7 @@
         [
           {
             "index": 0,
-            "node": "Add text item",
+            "node": "Prepare text items",
             "type": "main"
           }
         ],
@@ -67,10 +67,27 @@
             "index": 0,
             "node": "Reserve upload in new batch",
             "type": "main"
-          },
+          }
+        ]
+      ]
+    },
+    "Prepare text items": {
+      "main": [
+        [
           {
-            "index": 1,
-            "node": "Merge new batch session",
+            "index": 0,
+            "node": "Add text item",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Collapse text items": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Reserve upload in new batch",
             "type": "main"
           }
         ]
@@ -89,17 +106,6 @@
           {
             "index": 0,
             "node": "Has batch session",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "Merge new batch session": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "Attach reserved upload session",
             "type": "main"
           }
         ]
@@ -132,7 +138,7 @@
         [
           {
             "index": 0,
-            "node": "Merge new batch session",
+            "node": "Attach reserved upload session",
             "type": "main"
           }
         ]
@@ -289,6 +295,20 @@
       "typeVersion": 2.2
     },
     {
+      "id": "prepare-text-items-8f39b8b5-7a3a-4b35-8bc1-12b4c5d6e7f8",
+      "name": "Prepare text items",
+      "parameters": {
+        "jsCode": "const inbound = $('Prepare media input').first();\nconst body = inbound.json.body ?? inbound.json;\nconst batchId = $('Create batch').first().json.batch?.id;\nif (!batchId) throw new Error('创建批次未返回 batch.id');\nlet chunks = [];\nconst serialized = String(body.content_chunks ?? '').trim();\nif (serialized) {\n  try { chunks = JSON.parse(serialized); } catch { throw new Error('文本分片清单不是有效 JSON'); }\n}\nif (!Array.isArray(chunks) || !chunks.length) {\n  if (!String(body.content ?? '').trim()) throw new Error('文字内容为空');\n  chunks = [{ idempotency_key: body.item_key, content: body.content, content_sha256: body.content_sha256 }];\n}\nreturn chunks.map((chunk, index) => {\n  const content = String(chunk?.content ?? '');\n  const digest = String(chunk?.content_sha256 ?? '');\n  const idempotencyKey = String(chunk?.idempotency_key ?? `${body.item_key}_${index}`);\n  if (!content || !/^[0-9a-f]{64}$/.test(digest)) throw new Error(`文本分片 ${index} 缺少内容或 SHA-256`);\n  return { json: { batch_id: String(batchId), idempotency_key: idempotencyKey, content, content_sha256: digest, source_label: body.source_label ?? null, ...(body.content_date ? { content_date: body.content_date, content_time: body.content_time } : {}) } };\n});",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [
+        1400,
+        240
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
       "credentials": {
         "httpBearerAuth": {
           "id": "xMKQ62bkIB1m5DZF",
@@ -368,7 +388,7 @@
         "authentication": "genericCredentialType",
         "contentType": "json",
         "genericAuthType": "httpBearerAuth",
-        "jsonBody": "={{ JSON.stringify({ idempotency_key: $('Prepare media input').first().json.body.item_key, content: $('Prepare media input').first().json.body.content || \"\", content_sha256: $('Prepare media input').first().json.body.content_sha256 || \"\", source_label: $('Prepare media input').first().json.body.source_label, ...($('Prepare media input').first().json.body.content_date ? { content_date: $('Prepare media input').first().json.body.content_date, content_time: $('Prepare media input').first().json.body.content_time } : {}) }) }}",
+        "jsonBody": "={{ JSON.stringify({ idempotency_key: $json.idempotency_key, content: $json.content, content_sha256: $json.content_sha256, source_label: $json.source_label, ...($json.content_date ? { content_date: $json.content_date, content_time: $json.content_time } : {}) }) }}",
         "method": "POST",
         "options": {
           "response": {
@@ -378,7 +398,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "url": "={{ '__REMOTE_ANALYST_ARCHIVE_BASE_URL__/imports/batches/' + $('Create batch').first().json.batch.id + '/items/text' }}"
+        "url": "={{ '__REMOTE_ANALYST_ARCHIVE_BASE_URL__/imports/batches/' + $json.batch_id + '/items/text' }}"
       },
       "position": [
         1400,
@@ -388,6 +408,20 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "waitBetweenTries": 1000
+    },
+    {
+      "id": "collapse-text-items-8f39b8b5-7a3a-4b35-8bc1-12b4c5d6e7f9",
+      "name": "Collapse text items",
+      "parameters": {
+        "jsCode": "const batchId = $('Create batch').first().json.batch?.id;\nif (!batchId) throw new Error('创建批次未返回 batch.id');\nreturn [{ json: { batch_id: String(batchId), text_item_count: $input.all().length } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "position": [
+        1640,
+        320
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
     },
     {
       "credentials": {
@@ -533,21 +567,6 @@
       ],
       "type": "n8n-nodes-base.code",
       "typeVersion": 2
-    },
-    {
-      "id": "merge-new-batch-session",
-      "name": "Merge new batch session",
-      "parameters": {
-        "combineBy": "combineByPosition",
-        "mode": "combine",
-        "options": {}
-      },
-      "position": [
-        1080,
-        680
-      ],
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2
     }
   ],
   "pinData": null,

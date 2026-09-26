@@ -9,7 +9,22 @@ generation boundary.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, time
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
+
+_CN_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def session_phase(observed_at: Any) -> str:
+    """``call_auction`` 09:15-09:25 (orders still cancellable), ``auction_final`` 09:25-09:30, else ``continuous``."""
+    if isinstance(observed_at, datetime):
+        clock = observed_at.astimezone(_CN_TZ).time()
+        if time(9, 15) <= clock < time(9, 25):
+            return "call_auction"
+        if time(9, 25) <= clock < time(9, 30):
+            return "auction_final"
+    return "continuous"
 
 
 @dataclass(frozen=True)
@@ -19,6 +34,8 @@ class IntradaySignalGenerationDependencies:
     rebound_signal: Callable[..., dict[str, Any] | None]
     rebound_failure_signal: Callable[..., dict[str, Any] | None]
     eac_acceptance: Callable[..., dict[str, Any]]
+    # Analyst/teacher review plans frozen into ``watch.metadata.teacher_review``.
+    teacher_review_signal: Callable[..., list[dict[str, Any]]] | None = None
 
 
 def generate_intraday_signals(
@@ -39,9 +56,22 @@ def generate_intraday_signals(
     """Create candidates from frozen scan inputs without changing their scores.
 
     State transitions, policy/risk gates, order-book attribution and durable
-    event writes remain in the scanner.  This boundary only keeps the five
+    event writes remain in the scanner.  This boundary only keeps the
     independent candidate families in one deterministic, testable place.
     """
+    # Scans start at 09:15 to collect evidence, but indicative call-auction
+    # prices must not trigger anything; after 09:25 only the teacher hook
+    # (whose auction-based checks read the final auction) runs, and every
+    # other rule keeps its continuous-session hours.
+    phase = session_phase(observed_at)
+    if phase == "call_auction":
+        return []
+    if phase == "auction_final":
+        if dependencies.teacher_review_signal is None:
+            return []
+        return list(dependencies.teacher_review_signal(
+            watch, quote, minute_features, peer_context, observed_at, previous_quote,
+        ))
     rule_quote = {**quote, "_scan_observed_at": observed_at} if quote else None
     signals = list(dependencies.base_rules(
         watch, rule_quote, previous_quote, daily_factors, minute_features, peer_context,
@@ -88,7 +118,11 @@ def generate_intraday_signals(
                 "risk_flags": ["eac_timed_acceptance", "manual_review_required", "no_automatic_order",
                                *acceptance.get("risk_flags", [])],
             })
+    if dependencies.teacher_review_signal is not None:
+        signals.extend(dependencies.teacher_review_signal(
+            watch, quote, minute_features, peer_context, observed_at, previous_quote,
+        ))
     return signals
 
 
-__all__ = ["IntradaySignalGenerationDependencies", "generate_intraday_signals"]
+__all__ = ["IntradaySignalGenerationDependencies", "generate_intraday_signals", "session_phase"]

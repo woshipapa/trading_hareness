@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from app.main import intraday_longhu_max_symbols
+from app.longhu_limits import intraday_longhu_max_symbols
 
 
 class LonghuIntradayLimitTests(unittest.TestCase):

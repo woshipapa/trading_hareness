@@ -1,13 +1,10 @@
-export const DASHBOARD_SECTIONS = ['research', 'personal', 'monitor', 'workbench', 'relay'] as const;
+export const DASHBOARD_SECTIONS = ['research', 'personal'] as const;
 
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
 
 const routeSections: Record<string, DashboardSection> = {
   '/research': 'research',
   '/personal': 'personal',
-  '/monitor': 'monitor',
-  '/workbench': 'workbench',
-  '/relay': 'relay',
 };
 
 export function isDashboardSection(value: string | null): value is DashboardSection {

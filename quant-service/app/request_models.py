@@ -223,13 +223,48 @@ class XiaojieLeaderFlowSnapshotRequest(BaseModel):
     leader_not_broken: bool | None = None
     is_etf: bool | None = None
     trend_support_holds: bool | None = None
+    # 潜龙出海_swing overheat inputs (v2) and five-evidence inputs (v3).
+    distance_from_ma20_pct: float | None = None
+    pre_signal_5d_return_pct: float | None = None
+    sector_day_return_pct: float | None = None
+    sector_net_inflow_rate_pct: float | None = None
+    stock_vs_sector_divergence_pct: float | None = None
+    ma_spread_min_10d_pct: float | None = Field(default=None, ge=0)
+    consolidation_box_range_pct: float | None = Field(default=None, ge=0)
+    marker_k_sessions_ago: int | None = Field(default=None, ge=0)
+    daily_history_complete: bool | None = None
+    reverse_wrap_volume_confirmed: bool | None = None
+    signed_distance_from_ma5_pct: float | None = None
+    distance_from_box_top_pct: float | None = None
+    candidate_in_main_sector: bool | None = None
+    fundamental_pe: float | None = None
+    overhead_high_distance_pct: float | None = Field(default=None, ge=0)
+
+
+class TeacherReviewPackImportRequest(BaseModel):
+    """Import one reviewed analyst/teacher pack (schema ``teacher-review-pack/v1``).
+
+    The pack body is validated by ``teacher_review_playbooks.validate_pack``;
+    only its size is bounded here so a malformed pack is reported as a list of
+    problems instead of a generic 422.
+    """
+
+    pack: dict[str, Any]
+    dry_run: bool = False
+
+    @model_validator(mode="after")
+    def bounded(self) -> "TeacherReviewPackImportRequest":
+        stocks = self.pack.get("stocks")
+        if isinstance(stocks, list) and len(stocks) > 120:
+            raise ValueError("a review pack may carry at most 120 stocks")
+        return self
 
 
 class XiaojieLeaderFlowEvaluateRequest(BaseModel):
     """Evaluate the Xiao Jie playbook without any provider or order side effect."""
 
     snapshot: XiaojieLeaderFlowSnapshotRequest
-    parameters: dict[str, float | int] = Field(default_factory=dict, max_length=40)
+    parameters: dict[str, bool | float | int] = Field(default_factory=dict, max_length=40)
 
     @model_validator(mode="after")
     def validate_parameters(self) -> "XiaojieLeaderFlowEvaluateRequest":
@@ -431,6 +466,9 @@ class FactorEvaluationRequest(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     horizon_days: Literal[1, 5, 20, 60] = 5
+    # current_backfill: labelled look-ahead research mode (today's industry,
+    # turnover as size) for the history before point-in-time data exists.
+    membership_mode: Literal["point_in_time", "current_backfill"] = "point_in_time"
 
 
 class StrategyBacktestRequest(BaseModel):
@@ -443,6 +481,9 @@ class StrategyBacktestRequest(BaseModel):
     top_n: int = Field(default=20, ge=1, le=500)
     total_cost_bps: float = Field(default=18.0, ge=0, le=500)
     factors: list[str] = Field(default_factory=lambda: ["momentum_20d", "sma_gap_20d", "volume_ratio_20d", "reversal_5d"], min_length=1, max_length=16)
+    # Per-factor sign overrides (+1 higher-is-better, -1 lower); omitted factors keep the registry prior.
+    directions: dict[str, Literal[1, -1]] = Field(default_factory=dict)
+    membership_mode: Literal["point_in_time", "current_backfill"] = "point_in_time"
 
 
 class L2PairedObservation(BaseModel):
@@ -660,7 +701,7 @@ class RealtimeProbeRequest(BaseModel):
 
 class TushareCapabilityAuditRequest(BaseModel):
     api_names: list[str] = Field(default_factory=lambda: list(AUDIT_FOCUS_APIS[:8]), min_length=1, max_length=12)
-    providers: list[Literal["primary", "super", "super_sdk", "super_get"]] = Field(default_factory=lambda: ["primary", "super"], min_length=1, max_length=4)
+    providers: list[Literal["super", "super_sdk", "super_get"]] = Field(default_factory=lambda: ["super"], min_length=1, max_length=3)
     symbol: str = Field(default="000636.SZ", pattern=r"^\d{6}\.(SH|SZ|BJ)$")
     as_of_date: date | None = None
     max_rows: int = Field(default=10, ge=1, le=50)

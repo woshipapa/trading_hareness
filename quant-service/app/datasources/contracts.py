@@ -14,7 +14,7 @@ and tests without starting anything.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Any, Final
 
 
 #: Binding states, from strongest to weakest evidence.
@@ -25,6 +25,8 @@ UNSUPPORTED: Final = "unsupported"       # the upstream refuses it (kept to re-p
 RETIRED: Final = "retired"               # deliberately taken out of resolution
 BINDING_STATES: Final = (LIVE_VERIFIED, DECLARED, DORMANT, UNSUPPORTED, RETIRED)
 RESOLVABLE_STATES: Final = frozenset({LIVE_VERIFIED, DECLARED, DORMANT})
+PURPOSES: Final = ("research", "replay", "shadow")
+QUALITY_STATUSES: Final = ("complete", "partial", "empty", "stale", "invalid", "conflicted")
 
 CATEGORIES: Final = (
     "quote", "bars", "ticks", "auction", "limits", "sector", "flow", "lhb", "attention",
@@ -131,6 +133,71 @@ class CapabilityRequirement:
 
 
 @dataclass(frozen=True)
+class CapabilityRequest:
+    """Runtime policy for one capability read.
+
+    The catalog describes what a source *can* provide.  This request describes
+    what the current consumer is allowed to accept.  Keeping the policy here
+    prevents a research fallback from silently becoming a shadow decision
+    input while preserving the existing vendor-free call shape.
+    """
+
+    capability: str
+    purpose: str = "research"
+    as_of: Any | None = None
+    min_rows: int = 1
+    required_fields: tuple[str, ...] = ()
+    min_coverage: float | None = None
+    max_age_seconds: float | None = None
+    require_live_verified: bool = False
+    require_decision_eligible: bool = False
+    allow_empty: bool = False
+
+    def __post_init__(self) -> None:
+        if self.purpose not in PURPOSES:
+            raise ValueError(f"unknown capability request purpose: {self.purpose}")
+        if self.min_rows < 0:
+            raise ValueError("min_rows must be non-negative")
+        if self.min_coverage is not None and not 0 <= self.min_coverage <= 1:
+            raise ValueError("min_coverage must be between 0 and 1")
+        if self.max_age_seconds is not None and self.max_age_seconds < 0:
+            raise ValueError("max_age_seconds must be non-negative")
+
+
+@dataclass(frozen=True)
+class QualityReceipt:
+    """Small, serializable quality record attached to every resolver result."""
+
+    status: str
+    row_count: int | None
+    coverage: float | None
+    effective_at_min: Any | None
+    effective_at_max: Any | None
+    available_at_min: Any | None
+    available_at_max: Any | None
+    response_hash: str | None
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CapabilityEvidence:
+    """Optional adapter return envelope.
+
+    Existing adapters may continue returning rows.  New adapters can return
+    this envelope to provide source clocks and coverage without changing the
+    resolver API again.
+    """
+
+    rows: Any
+    coverage: float | None = None
+    effective_at_min: Any | None = None
+    effective_at_max: Any | None = None
+    available_at_min: Any | None = None
+    available_at_max: Any | None = None
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class StrategyDataNeeds:
     strategy: str
     needs: tuple[CapabilityRequirement, ...] = field(default_factory=tuple)
@@ -140,7 +207,8 @@ class StrategyDataNeeds:
 
 
 __all__ = [
-    "BINDING_STATES", "Binding", "CATEGORIES", "Capability", "CapabilityRequirement", "DECLARED", "DORMANT",
-    "DataSource", "GRAINS", "LICENSES", "LIVE_VERIFIED", "RESOLVABLE_STATES", "RETIRED", "SCOPES", "SourceLabel",
+    "BINDING_STATES", "Binding", "CATEGORIES", "Capability", "CapabilityEvidence", "CapabilityRequest",
+    "CapabilityRequirement", "DECLARED", "DORMANT", "DataSource", "GRAINS", "LICENSES", "LIVE_VERIFIED",
+    "PURPOSES", "QUALITY_STATUSES", "QualityReceipt", "RESOLVABLE_STATES", "RETIRED", "SCOPES", "SourceLabel",
     "StrategyDataNeeds", "Taxonomy", "UNSUPPORTED",
 ]

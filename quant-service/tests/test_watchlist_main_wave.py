@@ -29,6 +29,21 @@ class WatchlistMainWaveTests(unittest.TestCase):
             self.assertIn("available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')", source, relative)
             self.assertIn("daily_adjustment_factors", source, relative)
 
+    def test_research_sql_allows_owner_longhu_factors_but_rejects_unknown_providers(self) -> None:
+        for relative in ("app/watchlist_main_wave.py", "app/watchlist_main_wave_v2.py"):
+            source = Path(relative).read_text(encoding="utf-8")
+            self.assertIn("persisted_factor_semantics_sql", source, relative)
+            self.assertLess(
+                source.index("ORDER BY CASE WHEN factor.provider='longhu_qfq_derived'"),
+                source.index("factor.available_at DESC"),
+                relative,
+            )
+        source = Path("app/watchlist_countertrend_rebound.py").read_text(encoding="utf-8")
+        self.assertIn("persisted_factor_semantics_sql", source)
+        self.assertIn('store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")', source)
+        self.assertLess(source.index("ORDER BY array_position(%s::text[],factor.provider)"),
+                        source.index("factor.available_at DESC"))
+
     def test_chronological_split_embargo_separates_future_labels(self) -> None:
         start = date(2026, 1, 1)
         examples = [

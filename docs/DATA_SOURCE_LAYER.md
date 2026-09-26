@@ -1,6 +1,6 @@
 # 数据源层（app/datasources）
 
-更新：2026-09-18。所有“实测”均指从 owner peer（47.110.79.189）出口、收盘后的只读探测与不落库干跑。
+更新：2026-09-20。所有“实测”均指从 owner peer（47.110.79.189）出口、收盘后的只读探测与不落库干跑；当前工作树新增的策略能力 facade 已完成本地回归，远端重启回读待 peer 运维会话。
 
 ## 1. 目标与边界
 
@@ -19,7 +19,7 @@
 
 ```text
 app/datasources/
-  contracts.py    Capability / DataSource / Binding / CapabilityRequirement 类型
+  contracts.py    Capability / DataSource / Binding / CapabilityRequest / QualityReceipt 类型
   catalog.py      所有数据源 × 能力 × 绑定（优先级、实测状态、历史深度、限额、落库位置）
   resolver.py     能力 → 数据：按目录优先级 + 健康门控 + 失败/空结果回退，结果带来源证明
   bindings.py     把本包适配器绑到能力上（统一每个能力的参数约定）
@@ -40,11 +40,11 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 
 | 能力 | 解析顺序（状态） | 说明 |
 |---|---|---|
-| `quote.all_a_snapshot` | fuyao_ths(LV) | owner 规则：Longhu 行业截面/观察池报价不冒充全 A；东财 clist 在 owner 出口被断连（unsupported） |
+| `quote.all_a_snapshot` | fuyao_ths(LV) → akshare(Tencent spot, declared fallback) | Fuyao 是主源；AKShare 腾讯全 A 仅在 Fuyao 请求失败/熔断时补充研究覆盖，日期为会话推断且不提升决策资格；东财 clist 在 owner 出口被断连（unsupported） |
 | `quote.watch_snapshot` | longhuvip(LV) → tencent_free(LV) → sina_free(LV) | 仅 longhu/腾讯带交易所时间戳可进决策 |
 | `quote.order_book` | longhuvip 十档(LV) → tencent 五档(LV) | |
 | `quote.valuation` | fuyao 估值(D) → tushare daily_basic(LV) | 盘后全 A 5553 只/15.7 秒 |
-| `bars.daily` | tushare 主源/超级GET/备用(LV)、longhu 合成(LV)、fuyao 10 年导出(D)、通达信本地 .day(D)、baostock/东财/akshare(dormant) | 开盘啦个股 K 线（旧系统 id=7，恒空）**retired** |
+| `bars.daily` | tushare 超级GET/超级SDK/备用(LV)、longhu 合成(LV)、fuyao 10 年导出(D)、通达信本地 .day(D)、baostock/东财/akshare(dormant) | 兼容主源已下线；历史主源行只作 provenance，不再路由 |
 | `bars.minute` | longhuvip(LV) → tushare rt_min(LV) → 通达信本地 .lc1/.lc5(D) → 腾讯(LV) | fuyao 无分钟 K |
 | `ticks.session` | tdx_public(D) → tencent_free(D) | 通达信历史分笔与 pytdx 逐笔一致；方向与腾讯逐分钟 100% 对上 |
 | `auction.history_0925` | tdx_public(D) | 历史每日 09:25 竞价成交 + 09:15-09:25 虚拟撮合曲线 |
@@ -82,8 +82,42 @@ evidence_locations("limits.limit_up_pool")
 # [{'source': 'fuyao_ths', 'table': 'market_events', 'filter': {'event_type': 'limit_up_pool'}}, ...]
 ```
 
+### 4.1 请求级质量门（2026-09-18）
+
+目录状态只回答“这个源宣称能提供什么”，不能替代某一次读取的点时质量。需要把结果交给
+复盘、影子策略或任何后续评分时，调用方可以附带 `CapabilityRequest`：
+
+```python
+from app.datasources import CapabilityRequest
+
+request = CapabilityRequest(
+    "quote.watch_snapshot", purpose="replay", as_of=observed_at,
+    required_fields=("symbol", "price", "effective_at"),
+    min_rows=1, max_age_seconds=15,
+    require_live_verified=True, require_decision_eligible=True,
+)
+result = await resolver.fetch("quote.watch_snapshot", request=request, symbols=symbols)
+```
+
+适配器可以继续返回旧的 `list[dict]`，也可以返回 `CapabilityEvidence` 以提供覆盖率和
+`effective_at`/`available_at` 时钟。解析器会对每次尝试生成 `QualityReceipt`（`complete`、
+`partial`、`empty`、`stale`、`invalid` 或 `conflicted`）与确定性响应哈希；不满足必填字段、
+最小行数、覆盖率或新鲜度时自动尝试下一个目录源，并把失败原因保留在 `attempts`。这使
+“研究结果可展示”和“复盘输入可用”成为显式策略，而不是把非空响应误当成完整数据。
+
+生产采集器已将盘口异动这条链路接入同一解析器；没有解析器的单元测试和旧调用仍保留直接
+适配器回退。`purpose`、源状态和 `decision_eligible` 只进入证据 provenance，不会改变任何
+live 阈值或订单路径。
+
 新策略先在 `app/platform/strategy_data_needs.py` 登记所需能力（板块类需求同时登记口径）；测试会校验每个必需能力
 至少有一个可解析的来源。需要换源/加源时只改 `catalog.py` 与 `bindings.py`，策略不动。
+
+策略运行时通过 `app/platform/strategy_data_context.py` 把这份登记编译成不可变的
+`StrategyDataPlan`，再注入 `CapabilityResolver`、持久化证据仓库或 replay fixture
+进行解析。必需能力失败会抛出 `StrategyDataUnavailable` 并阻断本次研究输入；可选能力
+只记录 `optional_missing`。返回值同时保留 `QualityReceipt` 与 provenance，因此策略规则
+不需要知道供应商、传输方式或数据库实现。这个 facade 只做能力编排，不改变任何 live
+阈值、推荐权重或订单路径。
 
 读库时同样不写供应商：`store_values(capability, table, column)` / `primary_store_value(...)` 给出该能力在某表上的
 来源过滤值（按优先级），`strategy_taxonomies(strategy)` 给出口径，`SOURCE_LABELS` 给出标签属性。
@@ -101,7 +135,7 @@ evidence_locations("limits.limit_up_pool")
 | `intraday_scan_preparation` | 记 `fuyao_ths` 健康 | 记目录中 `quote.all_a_snapshot` 的主来源 | 不变 |
 | 扫描链路 | `tushare_minutes` 依赖 | `realtime_minutes`（实现仍由组合根注入） | 不变；信号证据键 `tushare_rt_min`→`realtime_minute` |
 | `post_close_strategy_service` | 直读 `tushare_raw_records` daily_basic、`source='longhuvip_main_net'` | 读 canonical `daily_fundamentals`（按目录优先级）；资金流来源由目录给出 | 不变（owner 库 9-16/9-17 逐行比对一致） |
-| `watchlist_countertrend_rebound` | 复权因子优先两个 tushare 源；`taxonomy_key='ths_industry'` | 目录来源顺序；策略登记的口径 | 不变（仅同一 available_at 的平局次序可能不同） |
+| `watchlist_countertrend_rebound` | 复权因子优先两个 Tushare 源；`taxonomy_key='ths_industry'` | 目录来源顺序（当前 `longhu_qfq_derived` 优先，Tushare 仅作已落库 checkpoint）；策略登记的口径 | 研究价 fail-closed；先按 provider 优先级选 Longhu，再在同源内按 `available_at` 选最新 |
 | `strategy_pattern_mining_service` | 分钟回放写死腾讯 | 组合根注入 `minute_source` | 不变 |
 | `xiaojie_reference_repository` | `call_tushare_api('stk_limit',…)`；口径优先级写死 | `limits.prices` 适配器（分页契约在 `sources/tushare_limits.py`）；口径来自策略登记 | 不变 |
 | 盘中扫描同业集合（两处仓库查询） | `('ths_concept_flow','ths_index_n','ths_industry')` | 策略登记的口径 | 不变 |

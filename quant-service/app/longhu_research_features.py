@@ -17,7 +17,7 @@ SYMBOL_RE = re.compile(r"(?:SZ|SH|BJ)?\d{6}|\d{6}\.(?:SZ|SH|BJ)", re.I)
 
 def payload_rows(payload: Mapping[str, Any]) -> list[Any]:
     """Return the first recognised vendor collection, preserving row shape."""
-    for key in ("list", "data", "items", "trend", "rows", "bid"):
+    for key in ("list", "data", "items", "trend", "rows", "bid", "info"):
         value = payload.get(key)
         if isinstance(value, list):
             return value

@@ -1,0 +1,10 @@
+{
+  "name": "feishu-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test adapter/*.test.mjs",
+    "test:adapter": "node --test adapter/*.test.mjs",
+    "test:bridge": "PYTHONPATH=bridge python3 -m unittest discover -s bridge -p 'test_*.py' -q"
+  }
+}

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
+from .instrument_registry import ensure_instruments
+
 
 @dataclass(frozen=True)
 class ResearchMaintenanceDependencies:
@@ -52,11 +54,8 @@ def update_analyst_profile(
 def update_universe_members(payload: Any, deps: ResearchMaintenanceDependencies) -> dict[str, Any]:
     """Update explicit member flags and retain their point-in-time history."""
     with deps.database.transaction() as connection:
+        ensure_instruments(connection, payload.symbols, source="universe")
         for symbol in payload.symbols:
-            connection.execute(
-                "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'universe') ON CONFLICT(symbol) DO NOTHING",
-                (symbol, deps.exchange_for(symbol)),
-            )
             connection.execute(
                 """INSERT INTO quant.universe_members(universe_key,symbol,enabled,priority,source,updated_at)
                    VALUES(%s,%s,%s,%s,'api',now()) ON CONFLICT(universe_key,symbol) DO UPDATE SET enabled=EXCLUDED.enabled,

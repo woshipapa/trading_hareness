@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import UUID
 
-from app.raw_overflow_archive import RawOverflowConfig, next_batch, stream_key
+from app.raw_overflow_archive import DEFAULT_CAPABILITIES, RawOverflowConfig, capability_from_stream, next_batch, stream_key
 
 
 class _Connection:
@@ -52,6 +52,17 @@ class _Database:
 
 
 class RawOverflowArchiveTests(unittest.TestCase):
+    def test_legacy_env_allowlist_keeps_canonical_daily_bar_stream(self):
+        config = RawOverflowConfig.from_env({
+            "QUANT_RAW_OVERFLOW_CAPABILITIES": "realtime_quote,rt_min",
+            "QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED": "false",
+        })
+        self.assertEqual(capability_from_stream("raw_market_observations:daily_bar", config), "daily_bar")
+
+    def test_daily_bar_stream_is_an_explicit_owner_allowlist_capability(self):
+        config = RawOverflowConfig(enabled=True, capabilities=DEFAULT_CAPABILITIES)
+        self.assertEqual(capability_from_stream("raw_market_observations:daily_bar", config), "daily_bar")
+
     def test_next_batch_is_keyset_bounded_and_token_free(self):
         old = os.environ.get("QUANT_HOT_DATABASE_SOFT_BYTES")
         os.environ["QUANT_HOT_DATABASE_SOFT_BYTES"] = str(1024 * 1024 * 1024)
@@ -67,6 +78,15 @@ class RawOverflowArchiveTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 1)
         self.assertEqual(result["first_offset"]["observation_id"], "00000000-0000-0000-0000-000000000001")
         self.assertNotIn("access_token", repr(result))
+
+    def test_a_disabled_lane_answers_polls_without_touching_the_database(self):
+        class NoDatabase:
+            def transaction(self):
+                raise AssertionError("a disabled poll must not open a transaction")
+
+        config = RawOverflowConfig(enabled=False, capabilities=("realtime_quote",), batch_rows=1)
+        result = next_batch(NoDatabase(), stream=stream_key("realtime_quote"), limit=100, config=config)
+        self.assertEqual(result, {"status": "disabled", "stream_key": stream_key("realtime_quote"), "rows": []})
 
 
 if __name__ == "__main__":

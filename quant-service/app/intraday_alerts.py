@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .teacher_review_rules import teacher_review_alert_lines
+
 
 def intraday_alert_text(
     signal: dict[str, Any],
@@ -13,9 +15,16 @@ def intraday_alert_text(
     quote: dict[str, Any],
     minute_row: dict[str, Any] | None,
     decision_card_url: str | None = None,
+    confluence: list[str] | None = None,
 ) -> str:
-    """Render an evidence-oriented Feishu message without side effects."""
+    """Render an evidence-oriented Feishu message without side effects.
+
+    ``confluence`` lines name other strategies that selected the same symbol
+    this session; they are annotations and never change the signal.
+    """
     conditions = signal["conditions"]
+    if str(conditions.get("setup") or "").startswith("teacher_review"):
+        return _teacher_review_alert_text(signal, watch, quote, decision_card_url, confluence)
     title = {
         "entry": "入场条件确认",
         "watch": "异常量能",
@@ -99,6 +108,31 @@ def intraday_alert_text(
     return "\n".join(lines)
 
 
+def _teacher_review_alert_text(
+    signal: dict[str, Any], watch: dict[str, Any], quote: dict[str, Any], decision_card_url: str | None,
+    confluence: list[str] | None = None,
+) -> str:
+    conditions = signal["conditions"]
+    setup = conditions.get("setup")
+    title = {"teacher_review_invalidated": "条件失效", "teacher_review_data_missing": "数据缺失"}.get(setup, "条件触发")
+    policy = conditions.get("policy_gate") if isinstance(conditions.get("policy_gate"), dict) else {}
+    name = str(quote.get("name") or (conditions.get("teacher_review") or {}).get("name") or watch.get("label") or signal["symbol"])
+    lines = [
+        f"【老师复盘｜{title}】",
+        f"{name} {signal['symbol']}",
+        f"信号观测时间（上海）：{_shanghai_time(signal.get('observed_at'))}",
+        *teacher_review_alert_lines(signal),
+        *[line for line in confluence or [] if line],
+    ]
+    advisory = [str(item) for item in policy.get("advisory_reason_codes") or [] if str(item)]
+    if advisory:
+        lines.append(f"门禁提示（不阻断）：{','.join(advisory)}")
+    if decision_card_url:
+        lines.append(f"决策卡：{decision_card_url}")
+    lines.append("老师观点的量化复核提醒，研究用途；不构成交易指令，系统不会下单。")
+    return "\n".join(lines)
+
+
 def _probability_text(value: Any) -> str:
     profile = value if isinstance(value, dict) else {}
     estimate = profile.get("estimated_probability")
@@ -163,6 +197,7 @@ def daily_strategy_summary_text(summary: dict[str, Any], dashboard_url: str | No
     signal_counts = summary.get("signal_counts") or {}
     outcome_counts = summary.get("outcome_counts") or {}
     post_close = summary.get("post_close") or {}
+    close_review = summary.get("close_review") or {}
     readiness = summary.get("readiness") or {}
     learning = summary.get("offline_policy_learning") or {}
     daily_learning = learning.get("daily_review") if isinstance(learning.get("daily_review"), dict) else {}
@@ -181,6 +216,7 @@ def daily_strategy_summary_text(summary: dict[str, Any], dashboard_url: str | No
         f"【日终研究摘要｜{summary.get('exchange_date', '—')}】",
         f"盘中信号：已送达 {signal_counts.get('alerted', 0)}｜待确认 {signal_counts.get('confirmed', 0)}｜抑制去重 {signal_counts.get('suppressed', 0)}。",
         f"信号结算：{outcomes}。",
+        f"收盘状态：{close_review.get('market_state', '—')}｜数据边界：{close_review.get('data_boundary', '—')}。",
         f"盘后候选：{post_close.get('status', 'missing')}｜{candidate_text}。",
         f"数据门禁：{'通过' if readiness.get('decision_ready') else '未通过'}；阻塞项：{blockers}。",
         "策略学习：上下文动作回报离线复盘｜"

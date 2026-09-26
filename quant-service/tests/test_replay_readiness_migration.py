@@ -17,6 +17,11 @@ class ReplayReadinessMigrationTest(unittest.TestCase):
         source = (Path(__file__).parents[1] / "app" / "replay_readiness.py").read_text()
         self.assertIn("READINESS_STATEMENT_TIMEOUT_MS = 8000", source)
         self.assertIn("SET LOCAL statement_timeout", source)
+        self.assertIn("MATERIALIZED_DAILY_METRICS_SQL", source)
+        self.assertIn("source_available_at<=bar_time+interval '10 minutes'", source)
+        self.assertIn("offline_minute_noncausal_source_clock_bars", source)
+        self.assertIn("causally_clocked_minute_trading_days", source)
+        self.assertNotIn("ms';\n                {PIT_DAILY_COVERAGE_CTE}", source)
 
 
 if __name__ == "__main__":

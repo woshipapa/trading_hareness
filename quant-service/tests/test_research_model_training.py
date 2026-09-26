@@ -24,7 +24,26 @@ class ResearchModelTrainingTests(unittest.TestCase):
         self.assertEqual(result["folds"], 1)
         self.assertEqual(result["oof_days"], 20)
         self.assertTrue(result["metrics"]["out_of_sample"])
+        self.assertEqual(result["parameters"]["l2"], 0.01)
+        self.assertIn("roc_auc", result["metrics"])
+        self.assertIn("constant_baseline", result["metrics"])
         self.assertEqual(result["live_effect"], "none")
+
+    def test_trial_hyperparameters_are_audited_and_deterministic(self):
+        rows = []
+        start = date(2026, 1, 2)
+        for index in range(85):
+            day = str(start + timedelta(days=index))
+            rows.extend([
+                {"exchange_date": day, "label": index % 2, "x": float(index % 7)},
+                {"exchange_date": day, "label": (index + 1) % 2, "x": float((index + 2) % 7)},
+                {"exchange_date": day, "label": index % 2, "x": float((index + 4) % 7)},
+            ])
+        first = train_oof(rows, feature_names=["x"], l2=0.1, learning_rate=0.05, iterations=20)
+        second = train_oof(rows, feature_names=["x"], l2=0.1, learning_rate=0.05, iterations=20)
+        self.assertEqual(first["artifact"], second["artifact"])
+        self.assertEqual(first["metrics"], second["metrics"])
+        self.assertEqual(first["parameters"], {"l2": 0.1, "learning_rate": 0.05, "iterations": 20})
 
 
 if __name__ == "__main__":

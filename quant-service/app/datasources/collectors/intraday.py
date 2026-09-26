@@ -22,6 +22,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..derived.market_sentiment import market_sentiment_snapshot
+from ..resolver import CapabilityResolver
 from ..sources import eastmoney_hot_rank, eastmoney_ztb, investor_qa, news_flash
 from ..sources.fuyao_evidence import fetch_all_pool_pages
 
@@ -74,6 +75,9 @@ class CollectorDeps:
     persist_events: Callable[[str, list[dict[str, Any]]], Awaitable[int]]
     persist_observations: Callable[[str, str, list[dict[str, Any]]], Awaitable[int]]
     record_health: Callable[[str, str, bool, int, int | None, str | None], Awaitable[None]]
+    #: Package resolver used by production wiring; optional for small collector
+    #: tests and legacy callers that inject the Eastmoney adapter directly.
+    resolver: CapabilityResolver | None = None
     fuyao_fetch: Callable[[str, dict[str, Any]], Awaitable[Mapping[str, Any]]] | None = None
     fuyao_snapshot: Callable[[], Awaitable[tuple[list[dict[str, Any]], dict[str, Any]]]] | None = None
     previous_turnover_total: Callable[[date], Awaitable[float | None]] | None = None
@@ -184,7 +188,12 @@ async def capture_investor_qa(deps: CollectorDeps, state: CollectorState, now: d
 async def capture_stock_changes(deps: CollectorDeps, state: CollectorState, now: datetime) -> dict[str, Any]:
     provider = eastmoney_ztb.PROVIDER_KEY
     try:
-        rows, latency = await _timed(eastmoney_ztb.fetch_stock_changes())
+        if deps.resolver is None:
+            rows, latency = await _timed(eastmoney_ztb.fetch_stock_changes())
+        else:
+            resolved, latency = await _timed(deps.resolver.fetch("limits.anomaly_tape", accept_empty=True))
+            provider = resolved.source
+            rows = resolved.rows
         trade_date = now.astimezone(CN_TZ).date()
         events = eastmoney_ztb.stock_change_events(rows, trade_date)
         seen = state.seen_for(f"changes:{trade_date.isoformat()}", 50_000)

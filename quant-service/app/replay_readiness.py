@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Mapping
 
+from .replay_readiness_coverage import MATERIALIZED_DAILY_METRICS_SQL
+
 
 # A-share calendars normally have about 240--244 trading days in a year.
 # Requiring 3 * 244 made a correctly collected three-calendar-year dataset
@@ -26,13 +28,16 @@ READINESS_STATEMENT_TIMEOUT_MS = 8000
 # eligible on that trading date, not to today's live universe.  It also needs
 # the daily control-plane records that the replay will consume.  Keep this SQL
 # fragment shared with the native-async read projection so both paths publish
-# the same point-in-time evidence.
+# the same point-in-time evidence. A daily bar is only research-eligible when
+# the owner has proved its cumulative adjustment factor; raw or identity-only
+# bars must not inflate the P2 full-cross-section count.
 PIT_DAILY_COVERAGE_CTE = """WITH daily_dates AS (
         SELECT DISTINCT trading_date
          FROM quant.canonical_bars_daily
          WHERE symbol<>'000300.SH'
            AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
            AND quality_status='fresh'
+           AND adj_factor>0
     ), expected_universe AS (
         SELECT dates.trading_date,count(DISTINCT membership.symbol)::int AS expected_symbols
           FROM daily_dates dates
@@ -56,6 +61,7 @@ PIT_DAILY_COVERAGE_CTE = """WITH daily_dates AS (
          WHERE bars.symbol<>'000300.SH'
            AND bars.available_at < ((bars.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
            AND bars.quality_status='fresh'
+           AND bars.adj_factor>0
          GROUP BY bars.trading_date
     ), full_dates AS (
         SELECT controls.trading_date,controls.bar_symbols,controls.fundamental_symbols,
@@ -68,6 +74,48 @@ PIT_DAILY_COVERAGE_CTE = """WITH daily_dates AS (
            AND controls.limit_symbols>=greatest(ceil(universe.expected_symbols*0.8)::int,1000)
     )"""
 
+DIRECT_DAILY_METRICS_SQL = f"""{PIT_DAILY_COVERAGE_CTE}
+    SELECT
+      (SELECT min(trading_date) FROM daily_dates) first_daily_date,
+      (SELECT max(trading_date) FROM daily_dates) latest_daily_date,
+      (SELECT min(trading_date) FROM full_dates) first_full_cross_section_date,
+      (SELECT max(trading_date) FROM full_dates) latest_full_cross_section_date,
+      (SELECT count(*)::int FROM full_dates) full_cross_section_days,
+      (SELECT count(*)::int FROM daily_dates) daily_bar_days,
+      (SELECT count(*)::int FROM expected_universe) point_in_time_universe_days,
+      (SELECT count(*)::int FROM daily_dates dates
+        WHERE NOT EXISTS (SELECT 1 FROM expected_universe universe
+                          WHERE universe.trading_date=dates.trading_date)) missing_point_in_time_universe_days,
+      'direct_daily_coverage_v1'::text daily_coverage_source"""
+
+AUXILIARY_REPLAY_METRICS_SQL = """SELECT
+      (SELECT count(DISTINCT (bar_time AT TIME ZONE 'Asia/Shanghai')::date)::int
+         FROM quant.market_bars_minute) offline_minute_trading_days,
+      (SELECT count(DISTINCT symbol)::int FROM quant.market_bars_minute) offline_minute_symbols,
+      (SELECT count(*)::int FROM quant.market_bars_minute) offline_minute_bars,
+      (SELECT count(*)::int FROM quant.market_bars_minute
+        WHERE source_available_at IS NOT NULL) offline_minute_observed_source_clock_bars,
+      (SELECT count(*)::int FROM quant.market_bars_minute
+        WHERE source_available_at>=bar_time
+          AND source_available_at<=bar_time+interval '10 minutes') offline_minute_source_clock_bars,
+      (SELECT count(*)::int FROM quant.market_bars_minute
+        WHERE source_available_at IS NOT NULL
+          AND (source_available_at<bar_time
+            OR source_available_at>bar_time+interval '10 minutes')) offline_minute_noncausal_source_clock_bars,
+      (SELECT count(DISTINCT (bar_time AT TIME ZONE 'Asia/Shanghai')::date)::int
+         FROM quant.market_bars_minute
+        WHERE source_available_at>=bar_time
+          AND source_available_at<=bar_time+interval '10 minutes') offline_minute_source_clock_days,
+      (SELECT count(DISTINCT (observed_at AT TIME ZONE 'Asia/Shanghai')::date)::int
+         FROM quant.intraday_rule_input_snapshots) forward_rule_input_days,
+      (SELECT count(*)::int FROM quant.intraday_rule_input_snapshots) forward_rule_input_rows,
+      (SELECT count(*)::int FROM quant.offline_imports
+        WHERE status IN ('completed','partial')) completed_offline_imports,
+      (SELECT count(*)::int FROM quant.intraday_signal_events
+        WHERE state IN ('confirmed','alerted')) confirmed_signal_events,
+      (SELECT count(DISTINCT signal_event_id)::int FROM quant.intraday_signal_outcomes
+        WHERE status='matured') matured_signal_events"""
+
 
 def replay_readiness_payload(metrics: Mapping[str, Any]) -> dict[str, Any]:
     """Turn local evidence counts into explicit P2/P3 gates."""
@@ -76,6 +124,7 @@ def replay_readiness_payload(metrics: Mapping[str, Any]) -> dict[str, Any]:
     minute_symbols = int(metrics.get("offline_minute_symbols") or 0)
     minute_bars = int(metrics.get("offline_minute_bars") or 0)
     minute_clock_bars = int(metrics.get("offline_minute_source_clock_bars") or 0)
+    minute_noncausal_clock_bars = int(metrics.get("offline_minute_noncausal_source_clock_bars") or 0)
     minute_clock_days = int(metrics.get("offline_minute_source_clock_days") or 0)
     forward_rule_input_days = int(metrics.get("forward_rule_input_days") or 0)
     forward_rule_input_rows = int(metrics.get("forward_rule_input_rows") or 0)
@@ -110,12 +159,14 @@ def replay_readiness_payload(metrics: Mapping[str, Any]) -> dict[str, Any]:
             "Historical minute data is accepted only through the mounted offline import path; this check never fetches it.",
         ),
         gate(
-            "p2_offline_minute_availability_clock", "P2", minute_clock_bars, 1, "bars_with_source_available_at",
-            "Minute replay needs a vendor-recorded source_available_at; local import time and bar-close time are not substitutes.",
+            "p2_offline_minute_availability_clock", "P2", minute_clock_days, P3_MIN_REPLAY_DAYS,
+            "causally_clocked_minute_trading_days",
+            "Minute replay needs at least 60 days whose source_available_at is between bar time and ten minutes later; local import time and synthetic bar-close time are not substitutes.",
         ),
         gate(
-            "p3_replay_window", "P3", min(full_days, minute_days), P3_MIN_REPLAY_DAYS, "aligned_daily_and_minute_days",
-            "Strategy replay requires at least 60 locally available daily and offline-minute trading days before threshold calibration.",
+            "p3_replay_window", "P3", min(full_days, minute_clock_days), P3_MIN_REPLAY_DAYS,
+            "aligned_daily_and_causally_clocked_minute_days",
+            "Strategy replay requires at least 60 aligned daily and causally clocked minute days before threshold calibration.",
         ),
         gate(
             "p3_signal_sample", "P3", confirmed_signals, P3_MIN_SIGNAL_EVENTS, "confirmed_signal_events",
@@ -135,6 +186,7 @@ def replay_readiness_payload(metrics: Mapping[str, Any]) -> dict[str, Any]:
             "full_cross_section_calendar_span_days": calendar_span_days,
             "offline_minute_symbols": minute_symbols,
             "offline_minute_bars": minute_bars, "offline_minute_source_clock_bars": minute_clock_bars,
+            "offline_minute_noncausal_source_clock_bars": minute_noncausal_clock_bars,
             "offline_minute_source_clock_days": minute_clock_days,
             "forward_rule_input_days": forward_rule_input_days,
             "forward_rule_input_rows": forward_rule_input_rows, "matured_signal_events": matured_signals,
@@ -149,7 +201,7 @@ def replay_readiness_payload(metrics: Mapping[str, Any]) -> dict[str, Any]:
             ),
         },
         "policy": "Read-only local evidence check: it does not call providers, download history, or change strategy thresholds.",
-        "coverage_definition": "point_in_time_all_a_membership_with_daily_bars_fundamentals_and_trade_limits_at_80pct_min_1000",
+        "coverage_definition": "point_in_time_all_a_membership_with_complete_adjusted_daily_bars_fundamentals_and_trade_limits_at_80pct_min_1000",
     }
 
 
@@ -169,45 +221,40 @@ def historical_replay_readiness(database: Any) -> dict[str, Any]:
     """Read bounded local coverage metrics for P2/P3 admission."""
     with database.transaction() as connection:
         try:
-            row = connection.execute(
-                f"""SET LOCAL statement_timeout = '{READINESS_STATEMENT_TIMEOUT_MS}ms';
-                {PIT_DAILY_COVERAGE_CTE}
-                SELECT
-                  (SELECT min(trading_date) FROM daily_dates) first_daily_date,
-                  (SELECT max(trading_date) FROM daily_dates) latest_daily_date,
-                  (SELECT min(trading_date) FROM full_dates) first_full_cross_section_date,
-                  (SELECT max(trading_date) FROM full_dates) latest_full_cross_section_date,
-                  (SELECT count(*)::int FROM full_dates) full_cross_section_days,
-                  (SELECT count(*)::int FROM daily_dates) daily_bar_days,
-                  (SELECT count(*)::int FROM expected_universe) point_in_time_universe_days,
-                  (SELECT count(*)::int FROM daily_dates dates
-                    WHERE NOT EXISTS (SELECT 1 FROM expected_universe universe
-                                      WHERE universe.trading_date=dates.trading_date)) missing_point_in_time_universe_days,
-                  (SELECT count(DISTINCT (bar_time AT TIME ZONE 'Asia/Shanghai')::date)::int
-                     FROM quant.market_bars_minute) offline_minute_trading_days,
-                  (SELECT count(DISTINCT symbol)::int FROM quant.market_bars_minute) offline_minute_symbols,
-                  (SELECT count(*)::int FROM quant.market_bars_minute) offline_minute_bars,
-                  (SELECT count(*)::int FROM quant.market_bars_minute WHERE source_available_at IS NOT NULL) offline_minute_source_clock_bars,
-                  (SELECT count(DISTINCT (source_available_at AT TIME ZONE 'Asia/Shanghai')::date)::int
-                     FROM quant.market_bars_minute WHERE source_available_at IS NOT NULL) offline_minute_source_clock_days,
-                  (SELECT count(DISTINCT (observed_at AT TIME ZONE 'Asia/Shanghai')::date)::int
-                     FROM quant.intraday_rule_input_snapshots) forward_rule_input_days,
-                  (SELECT count(*)::int FROM quant.intraday_rule_input_snapshots) forward_rule_input_rows,
-                  (SELECT count(*)::int FROM quant.offline_imports WHERE status IN ('completed','partial')) completed_offline_imports,
-                  (SELECT count(*)::int FROM quant.intraday_signal_events
-                    WHERE state IN ('confirmed','alerted')) confirmed_signal_events,
-                  (SELECT count(DISTINCT signal_event_id)::int FROM quant.intraday_signal_outcomes
-                    WHERE status='matured') matured_signal_events"""
+            # psycopg returns the result for only one statement at a time.
+            # Keeping SET LOCAL separate prevents the old multi-statement call
+            # from being misreported as a timeout even when PostgreSQL finished
+            # the coverage query successfully.
+            connection.execute(f"SET LOCAL statement_timeout = '{READINESS_STATEMENT_TIMEOUT_MS}ms'")
+            table = connection.execute(
+                "SELECT to_regclass('quant.replay_readiness_daily_coverage') AS value"
             ).fetchone()
-        except Exception:
+            daily: dict[str, Any] = {}
+            table_value = table.get("value") if isinstance(table, Mapping) else None
+            if table_value is not None:
+                daily = dict(connection.execute(MATERIALIZED_DAILY_METRICS_SQL).fetchone() or {})
+                if int(daily.get("daily_bar_days") or 0) <= 0:
+                    # A projection table with no rows for the current
+                    # coverage definition is stale (for example after the
+                    # adjustment-state contract changed).  Do not launch a
+                    # multi-million-row fallback scan from a dashboard GET;
+                    # the bounded refresh job must rebuild it first.
+                    return replay_readiness_payload({"readiness_query_status": "coverage_stale"})
+            else:
+                daily = dict(connection.execute(DIRECT_DAILY_METRICS_SQL).fetchone() or {})
+            auxiliary = dict(connection.execute(AUXILIARY_REPLAY_METRICS_SQL).fetchone() or {})
+            metrics = {**daily, **auxiliary, "readiness_query_status": "ok"}
+        except Exception as error:
             # A control-plane timeout must remain a fast, explicit blocker.
             # Never hold a pool slot indefinitely or turn an incomplete read
             # into an apparently healthy research gate.
-            return replay_readiness_payload({"readiness_query_status": "timeout"})
-    return replay_readiness_payload(dict(row or {}))
+            status = "timeout" if type(error).__name__ in {"QueryCanceled", "QueryCanceledError"} else "error"
+            return replay_readiness_payload({"readiness_query_status": status})
+    return replay_readiness_payload(metrics)
 
 
 __all__ = [
     "P2_MIN_FULL_CROSS_SECTION_DAYS", "P2_MIN_DAILY_CALENDAR_SPAN_DAYS", "P3_MIN_REPLAY_DAYS", "P3_MIN_SIGNAL_EVENTS",
-    "PIT_DAILY_COVERAGE_CTE", "READINESS_STATEMENT_TIMEOUT_MS", "historical_replay_readiness", "replay_readiness_payload",
+    "AUXILIARY_REPLAY_METRICS_SQL", "DIRECT_DAILY_METRICS_SQL", "PIT_DAILY_COVERAGE_CTE",
+    "READINESS_STATEMENT_TIMEOUT_MS", "historical_replay_readiness", "replay_readiness_payload",
 ]

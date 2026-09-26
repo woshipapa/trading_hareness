@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
+
 
 _SPECS = (
     ("daily", "日线行情", "P0"),
@@ -43,7 +45,17 @@ def stock_window_readiness(database: Any, symbol: str, start_date: date, end_dat
         items: list[dict[str, Any]] = []
         for api_name, label, priority in _SPECS:
             table = table_by_api.get(api_name)
-            if table is not None:
+            if api_name == "adj_factor":
+                row = connection.execute(
+                    f"""SELECT count(DISTINCT trading_date)::int rows,max(trading_date) latest_date
+                         FROM quant.daily_adjustment_factors factor
+                        WHERE symbol=%s AND trading_date BETWEEN %s AND %s
+                          AND {persisted_factor_semantics_sql('factor')}
+                          AND adj_factor>0 AND available_at<=now()""",
+                    (symbol, start_date, end_date),
+                ).fetchone()
+                rows, latest_date = int(row["rows"] or 0), row["latest_date"]
+            elif table is not None:
                 row = connection.execute(
                     f"""SELECT count(*)::int rows,max(trading_date) latest_date
                          FROM {table}

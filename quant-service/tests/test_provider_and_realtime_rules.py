@@ -1,6 +1,7 @@
 """Focused regression tests extracted from the legacy provider helper suite."""
 
 from provider_test_support import *  # noqa: F403
+from app.database import AsyncDatabase, Database
 from app.tushare_providers import PROMAX_VERIFIED_APIS
 
 
@@ -11,14 +12,14 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(bounded_memory_ratio("2"), 0.98)
         self.assertEqual(
             bounded_storage_budget_bytes(
-                str(200 * 1024 ** 3), DEFAULT_RESEARCH_STORAGE_SOFT_BYTES,
+                str(2000 * 1024 ** 3), DEFAULT_RESEARCH_STORAGE_SOFT_BYTES,
                 DEFAULT_RESEARCH_STORAGE_SOFT_BYTES,
             ),
             DEFAULT_RESEARCH_STORAGE_SOFT_BYTES,
         )
         self.assertEqual(
             bounded_storage_budget_bytes(
-                str(40 * 1024 ** 3), DEFAULT_HOT_DATABASE_SOFT_BYTES,
+                str(2000 * 1024 ** 3), DEFAULT_HOT_DATABASE_SOFT_BYTES,
                 DEFAULT_HOT_DATABASE_SOFT_BYTES,
             ),
             DEFAULT_HOT_DATABASE_SOFT_BYTES,
@@ -294,6 +295,16 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(pool_settings({"QUANT_DB_POOL_MIN_SIZE": "4", "QUANT_DB_POOL_MAX_SIZE": "3", "QUANT_DB_POOL_TIMEOUT_SECONDS": "2"}),
                          {"min_size": 4, "max_size": 4, "timeout_seconds": 2})
 
+    def test_async_read_pool_accepts_owner_sixteen_connection_budget(self):
+        with patch.dict("os.environ", {"QUANT_ASYNC_READ_POOL_MAX_SIZE": "16"}, clear=False):
+            database = AsyncDatabase(Database())
+        self.assertEqual(database._pool_settings["max_size"], 16)
+
+    def test_async_read_pool_clamps_values_above_owner_budget(self):
+        with patch.dict("os.environ", {"QUANT_ASYNC_READ_POOL_MAX_SIZE": "999"}, clear=False):
+            database = AsyncDatabase(Database())
+        self.assertEqual(database._pool_settings["max_size"], 16)
+
     def test_akshare_retry_is_bounded_and_returns_the_first_success(self):
         with patch("app.akshare_provider._call", side_effect=[AkShareProviderError("temporary disconnect"), [{"code": "000001"}]] ) as call, \
              patch("app.akshare_provider.time.sleep") as sleep:
@@ -409,9 +420,15 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(normalize_tushare_rows(connection, "adj_factor", [{"ts_code": "600001.SH", "trade_date": "20260810", "adj_factor": "1.25"}], observed), 1)
         self.assertEqual(normalize_tushare_rows(connection, "stk_limit", [{"ts_code": "600001.SH", "trade_date": "20260810", "up_limit": "11", "down_limit": "9"}], observed), 1)
         sql = "\n".join(statement for statement, _ in connection.calls)
-        self.assertIn("is_st=EXCLUDED.is_st", sql)
+        self.assertIn("is_st=COALESCE(EXCLUDED.is_st", sql)
         self.assertIn("SET is_suspended=true", sql)
         self.assertIn("SET adj_factor=%s", sql)
+        self.assertIn("available_at,raw", sql)
+        factor_params = [params for statement, params in connection.calls if "daily_adjustment_factors" in statement]
+        self.assertEqual(len(factor_params), 1)
+        factor_payload = getattr(factor_params[0][5], "obj", factor_params[0][5])
+        self.assertEqual(factor_payload["factor_semantics"], "corporate_action_cumulative")
+        self.assertEqual(factor_payload["adjustment_state"], "complete")
         self.assertIn("SET limit_up=%s,limit_down=%s", sql)
 
     def test_daily_suspension_without_resume_date_marks_only_that_day(self):
@@ -437,8 +454,8 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(update[1], ("600001.SH", date(2026, 8, 10)))
 
     def test_adjustment_factor_removes_ex_right_price_jump_from_factor_returns(self):
-        bars = [{"close": 10.0, "adj_factor": 1.0} for _ in range(5)]
-        bars.append({"close": 5.0, "adj_factor": 2.0})
+        bars = [{"close": 10.0, "adj_factor": 1.0, "provider": "tushare_primary", "raw": {}} for _ in range(5)]
+        bars.append({"close": 5.0, "adj_factor": 2.0, "provider": "tushare_primary", "raw": {}})
         self.assertEqual(factor_at(bars, 5, "momentum_5d"), 0.0)
         self.assertEqual(factor_at(bars, 5, "sma_gap_20d"), None)
 
@@ -613,12 +630,12 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(configs["super_sdk"].rate_limit_per_minute, 30)
         self.assertEqual(configs["super_get"].rate_limit_per_minute, 60)
         self.assertEqual(configs["super_get"].min_interval_seconds, 1.0)
-        self.assertEqual([item.key for item in provider_candidates("daily", environ=env)], ["tushare_super_get", "tushare_primary", "tushare_backup"])
-        self.assertEqual([item.key for item in provider_candidates("stock_basic", environ=env)], ["tushare_primary", "tushare_super_get", "tushare_super_sdk", "tushare_backup"])
-        self.assertEqual([item.key for item in provider_candidates("stk_factor", environ=env)], ["tushare_primary", "tushare_super_sdk"])
-        self.assertEqual([item.key for item in provider_candidates("moneyflow", environ=env)], ["tushare_super_sdk", "tushare_super_get", "tushare_primary", "tushare_backup"])
-        self.assertEqual([item.key for item in provider_candidates("ths_member", environ=env)], ["tushare_super_sdk", "tushare_super_get", "tushare_primary", "tushare_backup"])
-        self.assertEqual([item.key for item in provider_candidates("moneyflow_ind_dc", environ=env)], ["tushare_super_get", "tushare_super_sdk", "tushare_primary", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("daily", environ=env)], ["tushare_super_get", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("stock_basic", environ=env)], ["tushare_super_get", "tushare_super_sdk", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("stk_factor", environ=env)], ["tushare_super_sdk"])
+        self.assertEqual([item.key for item in provider_candidates("moneyflow", environ=env)], ["tushare_super_sdk", "tushare_super_get", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("ths_member", environ=env)], ["tushare_super_sdk", "tushare_super_get", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("moneyflow_ind_dc", environ=env)], ["tushare_super_get", "tushare_super_sdk", "tushare_backup"])
         self.assertEqual([item.key for item in provider_candidates("rt_min", environ=env)], ["tushare_super_sdk", "tushare_super_get"])
         self.assertEqual([item.key for item in provider_candidates("rt_min_daily", environ=env)], ["tushare_super_get"])
         self.assertEqual([item.key for item in provider_candidates("rt_etf_min", environ=env)], ["tushare_super_sdk"])
@@ -626,10 +643,13 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual([item.key for item in provider_candidates("rt_sw_k", environ=env)], ["tushare_super_get", "tushare_super_sdk"])
         self.assertEqual([item.key for item in provider_candidates("rt_fut_min", environ=env)], ["tushare_super_get"])
         self.assertEqual(provider_candidates("rt_etf_min_daily", environ=env), [])
-        self.assertEqual([item.key for item in provider_candidates("index_weight", environ=env)], ["tushare_super_sdk", "tushare_primary"])
+        self.assertEqual([item.key for item in provider_candidates("index_weight", environ=env)], ["tushare_super_sdk"])
         self.assertEqual([item.key for item in provider_candidates("daily", "super_sdk", environ=env)], ["tushare_super_sdk"])
+        self.assertEqual(provider_candidates("daily", "primary", environ=env), [])
         status = {item["name"]: item for item in provider_status(environ=env)}
         self.assertEqual(status["primary"]["realtime_coverage"], "unavailable")
+        self.assertTrue(status["primary"]["retired"])
+        self.assertFalse(status["primary"]["configured"])
         self.assertEqual(status["super_sdk"]["realtime_coverage"], "verified_partial")
         self.assertEqual(status["super_get"]["realtime_coverage"], "verified_partial")
         self.assertEqual(status["super_get"]["get_apis"], sorted(SUPER_GET_VERIFIED_APIS))
@@ -663,7 +683,7 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertFalse(promax.supports("rt_fut_min_daily"))
         self.assertFalse(promax.supports("not_a_real_api"))
         self.assertEqual([item.key for item in provider_candidates("daily", environ=env)],
-                         ["tushare_super_get", "tushare_primary"])
+                         ["tushare_super_get"])
         self.assertEqual([item.key for item in provider_candidates("rt_min_daily", environ=env)],
                          ["tushare_super_get"])
         status = {item["name"]: item for item in provider_status(environ=env)}["super_get"]
@@ -919,9 +939,16 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertTrue(intraday_high_frequency_window(late_morning))
         self.assertTrue(intraday_high_frequency_window(afternoon_open))
         self.assertTrue(intraday_high_frequency_window(closing_window))
-        self.assertEqual(intraday_effective_scan_interval_seconds(30, high), 10)
-        self.assertEqual(intraday_effective_scan_interval_seconds(30, opening), 10)
-        self.assertEqual(intraday_effective_scan_interval_seconds(30, normal), 30)
+        # The whole morning (09:15-11:30) scans every 5 s; the afternoon keeps
+        # 10 s windows and the 30 s normal cadence.
+        afternoon_normal = __import__("datetime").datetime(2026, 8, 10, 13, 45, tzinfo=china)
+        call_auction = __import__("datetime").datetime(2026, 8, 10, 9, 15, tzinfo=china)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, high), 5)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, opening), 5)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, normal), 5)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, call_auction), 5)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, afternoon_open), 10)
+        self.assertEqual(intraday_effective_scan_interval_seconds(30, afternoon_normal), 30)
         self.assertEqual(intraday_effective_scan_interval_seconds(0, high), 0)
         offsets = [0]
         for _ in range(6):
@@ -956,10 +983,13 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(bounded_rotation_pool_size(40, 0.0, 30.0), 40)
         self.assertEqual(intraday_board_refresh_interval_seconds(high), 60)
         self.assertEqual(intraday_board_refresh_interval_seconds(normal), 300)
-        pre_open = __import__("datetime").datetime(2026, 8, 10, 9, 29, 50, tzinfo=china)
+        # The morning window opens with the 09:15 call auction.
+        pre_open = __import__("datetime").datetime(2026, 8, 10, 9, 14, 50, tzinfo=china)
         self.assertEqual(intraday_next_monitor_delay_seconds(30, pre_open), 10.0)
-        one_second_to_open = __import__("datetime").datetime(2026, 8, 10, 9, 29, 59, tzinfo=china)
+        one_second_to_open = __import__("datetime").datetime(2026, 8, 10, 9, 14, 59, tzinfo=china)
         self.assertEqual(intraday_next_monitor_delay_seconds(30, one_second_to_open), 1.0)
+        in_call_auction = __import__("datetime").datetime(2026, 8, 10, 9, 29, 50, tzinfo=china)
+        self.assertEqual(intraday_next_monitor_delay_seconds(30, in_call_auction), 5.0)
         with patch.dict("os.environ", {"INTRADAY_SUPER_GET_FAST_INTERVAL_SECONDS": "1"}):
             self.assertEqual(intraday_super_get_fast_interval_seconds(), 1.0)
         with patch.dict("os.environ", {"INTRADAY_SUPER_GET_FAST_MAX_IN_FLIGHT": "20"}):

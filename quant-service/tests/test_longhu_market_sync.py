@@ -43,7 +43,7 @@ class LonghuMarketSyncTests(unittest.TestCase):
         self.assertEqual(by_symbol["600001.SH"]["up_limit"], "11.00")
         self.assertEqual(by_symbol["600002.SH"]["up_limit"], "10.50")
         self.assertEqual(by_symbol["300002.SZ"]["up_limit"], "12.00")
-        self.assertTrue(all(row["factor_semantics"] == "same_day_identity_only" for row in controls["adj_factor"]))
+        self.assertEqual(controls["adj_factor"], [])
 
 
 if __name__ == "__main__":

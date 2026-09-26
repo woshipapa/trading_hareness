@@ -13,7 +13,8 @@ describe('dashboard navigation', () => {
   });
 
   it('accepts only known persisted sections', () => {
-    expect(isDashboardSection('monitor')).toBe(true);
+    expect(isDashboardSection('research')).toBe(true);
+    expect(isDashboardSection('monitor')).toBe(false);
     expect(isDashboardSection('admin')).toBe(false);
   });
 });

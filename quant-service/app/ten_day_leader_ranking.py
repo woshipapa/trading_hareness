@@ -13,6 +13,8 @@ from datetime import date
 import math
 from typing import Any
 
+from .research_prices import research_price_eligible
+
 
 def _number(value: Any) -> float | None:
     try:
@@ -78,7 +80,8 @@ def rank_ten_day_candidates(
         for row in window:
             close = _number(row.get("close"))
             factor = _number(row.get("adj_factor"))
-            if close is None or close <= 0 or factor is None or factor <= 0:
+            if (not research_price_eligible(row) or close is None or close <= 0
+                    or factor is None or factor <= 0):
                 valid = False
                 break
             adjusted.append(close * factor)

@@ -68,6 +68,15 @@ async def model_registry(async_database: Any) -> dict[str, Any]:
     """List offline model artifact registrations through the read pool."""
     async with async_database.transaction() as conn:
         result = await conn.execute(
+            "SELECT to_regclass('quant.research_model_registry') AS value"
+        )
+        table = await result.fetchone()
+        if not table or table.get("value") is None:
+            return {
+                "items": [], "research_only": True, "live_effect": "none",
+                "registry_status": "schema_unavailable",
+            }
+        result = await conn.execute(
             """SELECT model_id,model_key,model_family,model_version,framework,artifact_uri,
                       artifact_sha256,data_snapshot_key,feature_contract_version,label_contract_version,
                       status,trial_count,independent_days,sample_count,metrics,metadata,approved_by,
@@ -75,7 +84,10 @@ async def model_registry(async_database: Any) -> dict[str, Any]:
                  FROM quant.research_model_registry ORDER BY created_at DESC,model_key"""
         )
         rows = await result.fetchall()
-    return {"items": rows, "research_only": True, "live_effect": "none"}
+    return {
+        "items": rows, "research_only": True, "live_effect": "none",
+        "registry_status": "available",
+    }
 
 
 async def research_trials(async_database: Any, family: str | None, limit: int) -> dict[str, Any]:

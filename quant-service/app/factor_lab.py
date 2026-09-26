@@ -14,7 +14,9 @@ from typing import Any
 
 from .market_rules import a_share_limit_ratio
 from .point_in_time_status import pit_st_sql
+from .owner_storage import eligible_cold_tables, tiered_relation_sql
 from .research_prices import adjusted_value
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 from .universe_history import point_in_time_membership_predicate
 from .backtest_execution_rules import a_share_exit_lag
 
@@ -129,18 +131,42 @@ def load_universe_bars(connection: Any, universe_key: str, start_date: date, end
         )
 
     membership_predicate = point_in_time_membership_predicate("membership", "b")
-    rows = connection.execute(
-        """SELECT b.symbol,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,b.volume,b.adj_factor,b.is_suspended,b.limit_up,b.limit_down,
-                  """ + pit_st_sql("b.symbol", "b.trading_date", "coalesce(i.is_st,false)") + """ AS is_st
+    factor_semantics_sql = persisted_factor_semantics_sql("factor")
+    panel_sql = f"""SELECT b.symbol,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,b.volume,
+                  adjustment_history.adj_factor,CASE WHEN adjustment_history.adj_factor>0 THEN 'complete' ELSE 'absent' END AS adjustment_state,
+                  adjustment_history.provider AS factor_provider,
+                  adjustment_history.raw->>'factor_semantics' AS factor_semantics,
+                  b.is_suspended,b.limit_up,b.limit_down,
+                  {pit_st_sql('b.symbol', 'b.trading_date', 'coalesce(i.is_st,false)')} AS is_st
            FROM quant.canonical_bars_daily b
            JOIN quant.universe_membership_history membership
              ON membership.universe_key=%s AND membership.symbol=b.symbol
             AND """ + membership_predicate + """
            JOIN quant.instruments i ON i.symbol=b.symbol
+           JOIN LATERAL (
+                 SELECT factor.adj_factor,factor.provider,factor.raw
+                   FROM quant.daily_adjustment_factors factor
+                  WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                    AND {factor_semantics_sql}
+                    AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                  ORDER BY CASE WHEN factor.provider='longhu_qfq_derived' THEN 0
+                                WHEN factor.provider IN ('tushare_primary','tushare_super_sdk') THEN 1 ELSE 2 END,
+                           factor.available_at DESC,
+                           factor.provider
+                  LIMIT 1
+           ) adjustment_history ON TRUE
            WHERE b.trading_date BETWEEN %s AND %s
+             AND b.adj_factor>0
              AND (i.list_date IS NULL OR i.list_date<=b.trading_date)
              AND (i.delist_date IS NULL OR i.delist_date>=b.trading_date)
-           ORDER BY b.symbol,b.trading_date""",
+           ORDER BY b.symbol,b.trading_date"""
+    cold_tables = eligible_cold_tables(connection) if hasattr(connection, "cursor") else set()
+    for logical_name in ("canonical_bars_daily", "daily_adjustment_factors"):
+        panel_sql = panel_sql.replace(
+            f"quant.{logical_name}", tiered_relation_sql(logical_name, cold_tables),
+        )
+    rows = connection.execute(
+        panel_sql,
         (universe_key, warmup_start, end_date),
     ).fetchall()
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)

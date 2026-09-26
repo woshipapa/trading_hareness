@@ -459,9 +459,25 @@ class AlertBudgetDurabilityTests(unittest.TestCase):
             mark_alerted(connection, self.trading_date, stamp, [(self.symbols[0], "reverse_wrap")])
             self.assertEqual(alerted_count(connection, self.trading_date + timedelta(days=1)), 0)
 
+    def test_unalerted_qianlong_can_be_recovered_after_alert_policy_widening(self):
+        from datetime import datetime, timezone
+        from app.main import db
+        from app.xiaojie_observation_repository import record_candidates, unalerted_research_candidates
+        stamp = datetime(2099, 9, 1, 2, 0, tzinfo=timezone.utc)
+        with db.transaction() as connection:
+            record_candidates(connection, self.trading_date, stamp, None, [{
+                "symbol": self.symbols[0], "mode": "潜龙出海_swing", "decision": "research_candidate",
+                "position": {"target_fraction": 0.1}, "exit": {}, "risk_flags": [],
+                "reasons": ["研究"], "market_gate": {},
+                "evidence": {"board": {"sealed": True}, "candidate_strength_rank": 2},
+            }])
+            rows = unalerted_research_candidates(connection, self.trading_date, "潜龙出海_swing")
+        self.assertEqual([row["symbol"] for row in rows], [self.symbols[0]])
+        self.assertTrue(rows[0]["evidence"]["board"]["sealed"])
+
 
 class SealedBoardsAreNotAlertableTests(unittest.TestCase):
-    """A locked board cannot be acted on, so it must not spend an alert slot.
+    """Only the explicit 潜龙出海 research exception may alert when sealed.
 
     Across 104 observations on 2026-08-27 the 61 found already sealed produced
     0 gains, 57 unchanged and 4 losses from the moment they were flagged; the
@@ -475,8 +491,8 @@ class SealedBoardsAreNotAlertableTests(unittest.TestCase):
 
     @staticmethod
     def _actionable(candidates):
-        return [item for item in candidates
-                if not ((item.get("evidence") or {}).get("board") or {}).get("sealed")]
+        from app.xiaojie_leader_flow import research_alert_allowed
+        return [item for item in candidates if research_alert_allowed(item)]
 
     def test_sealed_candidates_are_filtered_out(self):
         candidates = [self._candidate("A.SZ", True), self._candidate("B.SZ", False)]
@@ -487,6 +503,11 @@ class SealedBoardsAreNotAlertableTests(unittest.TestCase):
 
     def test_an_all_sealed_scan_yields_nothing_to_alert(self):
         self.assertEqual(self._actionable([self._candidate(f"{i}.SZ", True) for i in range(5)]), [])
+
+    def test_sealed_qianlong_is_a_research_alert_exception(self):
+        candidate = self._candidate("Q.SZ", True)
+        candidate["mode"] = "潜龙出海_swing"
+        self.assertEqual([item["symbol"] for item in self._actionable([candidate])], ["Q.SZ"])
 
 
 class PoolBoundReportingTests(unittest.TestCase):
@@ -594,3 +615,109 @@ class FrontRowWidthTests(unittest.TestCase):
 
     def test_rank_four_is_back_row(self):
         self.assertTrue(self._rank(4))
+
+
+class QianlongInputTests(unittest.TestCase):
+    """The 潜龙 overheat and five-evidence inputs, and where each came from."""
+
+    OBSERVED = datetime(2026, 9, 22, 5, 0, tzinfo=timezone.utc)
+
+    def _flow(self, **overrides):
+        flow = {"status": "stored", "taxonomy": "longhu_ths_industry", "provider": "longhuvip",
+                "observed_at": datetime(2026, 9, 22, 4, 59, tzinfo=timezone.utc),
+                "boards": {"881164": {"label": "文化传媒", "change_pct": 3.0, "net_inflow": 2.0e9, "amount": 4.0e10},
+                           "881271": {"label": "IT服务", "change_pct": 1.0, "net_inflow": 1.0e9, "amount": 9.0e10}}}
+        flow.update(overrides)
+        return flow
+
+    def test_the_board_flow_is_used_only_when_fresh_and_of_the_same_taxonomy(self):
+        from app.xiaojie_indicators import sector_flow_view
+        self.assertEqual(sector_flow_view(self._flow(), self.OBSERVED, "longhu_ths_industry")["status"], "fresh")
+        self.assertEqual(sector_flow_view(self._flow(), self.OBSERVED, "ths_concept_flow")["status"],
+                         "taxonomy_mismatch")
+        stale = self._flow(observed_at=datetime(2026, 9, 22, 4, 50, tzinfo=timezone.utc))
+        view = sector_flow_view(stale, self.OBSERVED, "longhu_ths_industry")
+        self.assertEqual(view["status"], "stale")
+        self.assertEqual(view["boards"], {})
+        self.assertEqual(sector_flow_view(None, self.OBSERVED, "longhu_ths_industry")["status"], "missing")
+
+    def _snapshot(self, reference=None, flow=None, sealed=None, price=10.5, pct=5.0):
+        from app.xiaojie_indicators import sector_flow_view
+        view = sector_flow_view(flow if flow is not None else self._flow(), self.OBSERVED, "longhu_ths_industry")
+        row = _row("A.SZ", price, prev=10.0, high=price, low=10.0, pct=pct)
+        base = {"sectors": {"881164", "881271"}, "ma20": 10.0, "ma5": 10.2, "high_20d": 10.4, "low_20d": 9.0,
+                "prior_bar": {"close": 10.0}, "close_5_sessions_before": 9.5, "high_60d": 10.7,
+                "fundamental": {"pe": 30.0, "trading_date": "2026-09-21", "provider": "longhuvip_composite"}}
+        return candidate_snapshot("A.SZ", row, market={"elapsed_session_minutes": 120},
+                                  reference={**base, **(reference or {})},
+                                  sectors={"main_sectors": set(), "ranks": {}, "strength_percentile": {"A.SZ": 0.9},
+                                           "sealed_by_sector": sealed or {}},
+                                  limits={"A.SZ": 11.0}, sector_flow=view)
+
+    def test_overheat_inputs_come_from_prior_bars_and_the_candidate_board(self):
+        snapshot = self._snapshot()
+        self.assertAlmostEqual(snapshot["distance_from_ma20_pct"], 5.0)
+        self.assertAlmostEqual(snapshot["pre_signal_5d_return_pct"], (10.0 / 9.5 - 1) * 100)
+        # Two boards, no sealed names: the larger board by turnover is the candidate's.
+        self.assertEqual(snapshot["sector_day_return_pct"], 1.0)
+        self.assertAlmostEqual(snapshot["sector_net_inflow_rate_pct"], 1.0e9 / 9.0e10 * 100)
+        self.assertAlmostEqual(snapshot["stock_vs_sector_divergence_pct"], 4.0)
+        flow = snapshot["_evidence"]["qianlong_inputs"]["sector_flow"]
+        self.assertEqual((flow["status"], flow["sector_key"], flow["label"]), ("fresh", "881271", "IT服务"))
+
+    def test_the_board_with_more_sealed_names_wins(self):
+        snapshot = self._snapshot(sealed={"881164": 4})
+        self.assertEqual(snapshot["sector_day_return_pct"], 3.0)
+        self.assertAlmostEqual(snapshot["sector_net_inflow_rate_pct"], 5.0)
+
+    def test_a_stale_board_leaves_sector_inputs_absent(self):
+        stale = self._flow(observed_at=datetime(2026, 9, 22, 4, 40, tzinfo=timezone.utc))
+        snapshot = self._snapshot(flow=stale)
+        for field in ("sector_day_return_pct", "sector_net_inflow_rate_pct", "stock_vs_sector_divergence_pct"):
+            self.assertIsNone(snapshot[field], field)
+        self.assertEqual(snapshot["_evidence"]["qianlong_inputs"]["sector_flow"]["status"], "stale")
+
+    def test_evidence_inputs_are_passed_through_not_defaulted(self):
+        bare = candidate_snapshot("A.SZ", _row("A.SZ", 10.5, prev=10.0), market={},
+                                  reference={"sectors": set()}, sectors={}, limits={"A.SZ": 11.0})
+        for field in ("distance_from_ma20_pct", "pre_signal_5d_return_pct", "ma_spread_min_10d_pct",
+                      "consolidation_box_range_pct", "fundamental_pe", "overhead_high_distance_pct",
+                      "daily_history_complete", "sector_day_return_pct"):
+            self.assertIsNone(bare[field], field)
+
+    def test_the_box_is_the_one_before_an_earlier_marker_k(self):
+        today = self._snapshot()
+        self.assertAlmostEqual(today["consolidation_box_range_pct"], (10.4 - 9.0) / 9.0 * 100)
+        earlier = self._snapshot({"marker_k_sessions_ago": 2, "marker_box_top": 10.0, "marker_box_range_pct": 12.0})
+        self.assertEqual(earlier["consolidation_box_range_pct"], 12.0)
+        self.assertAlmostEqual(earlier["distance_from_box_top_pct"], 5.0)
+        self.assertAlmostEqual(earlier["overhead_high_distance_pct"], (10.7 - 10.5) / 10.5 * 100)
+        self.assertEqual(earlier["fundamental_pe"], 30.0)
+
+    def test_a_qianlong_name_missing_evidence_is_a_candidate_under_a_red_warning(self):
+        # A front-row breakout in a main sector with no fundamentals on file:
+        # every other gate passes, and the missing evidence rides along as a
+        # red warning on the candidate rather than turning it away.
+        def sealed(symbol):
+            return {"symbol": symbol, "price": 11.0, "pct_change": 10.0, "volume": 1e6, "turnover": 1.08e7,
+                    "raw": {"open_price": 10.5, "high_price": 11.0, "low_price": 10.4, "prev_price": 10.0}}
+
+        def weak(symbol):
+            return {"symbol": symbol, "price": 9.8, "pct_change": -2.0, "volume": 1e6, "turnover": 9.8e6,
+                    "raw": {"open_price": 10.0, "high_price": 10.0, "low_price": 9.7, "prev_price": 10.0}}
+
+        leader = {"symbol": "A.SZ", "price": 10.9, "pct_change": 10.5, "volume": 3e6, "turnover": 3.2e7,
+                  "raw": {"open_price": 10.2, "high_price": 10.95, "low_price": 10.1, "prev_price": 10.0}}
+        rows = [leader, *(sealed(f"S{index}.SZ") for index in range(4)), *(weak(f"W{index}.SZ") for index in range(5))]
+        membership = {row["symbol"]: {"881164"} for row in rows[:5]} | {row["symbol"]: {"881271"} for row in rows[5:]}
+        result = evaluate_pool(rows, limits={row["symbol"]: 11.0 for row in rows}, membership=membership,
+                               references={"A.SZ": {"high_20d": 10.5}}, observed_at=self.OBSERVED,
+                               sector_flow=self._flow(), membership_taxonomy="longhu_ths_industry",
+                               index_volume_ratio=1.2, index_above_support=True)
+        self.assertEqual(result["sector_flow"]["status"], "fresh")
+        self.assertEqual(result["sector_flow"]["boards"], 2)
+        candidate = {item["symbol"]: item for item in result["candidates"]}["A.SZ"]
+        self.assertEqual(candidate["mode"], "潜龙出海_swing")
+        self.assertEqual(candidate["evidence"]["qianlong_warning"]["level"], "red")
+        self.assertIn("fundamental", candidate["evidence"]["qianlong_evidence"]["missing"])
+        self.assertEqual(candidate["evidence"]["qianlong_inputs"]["sector_flow"]["label"], "文化传媒")

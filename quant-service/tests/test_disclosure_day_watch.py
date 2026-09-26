@@ -89,7 +89,10 @@ class DisclosureDayWatchIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._cleanup()
         self.addCleanup(self._cleanup)
-        stamp = datetime(2099, 3, 1, tzinfo=timezone.utc)
+        # Evidence must be available before the Shanghai session boundary of
+        # each synthetic bar; using the as-of midnight would correctly make
+        # the February bars unavailable under the PIT liquidity read.
+        stamp = datetime(2099, 2, 1, tzinfo=timezone.utc)
         with db.transaction() as connection:
             connection.execute(
                 """INSERT INTO quant.market_trade_calendar(exchange,calendar_date,is_open,provider,available_at)

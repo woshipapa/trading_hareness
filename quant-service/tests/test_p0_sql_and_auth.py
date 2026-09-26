@@ -135,6 +135,7 @@ class WriteAuthenticationMiddlewareTests(unittest.TestCase):
                         "trading_date": date(2026, 1, index + 1), "close": 10 + index,
                         "high": 10 + index, "low": 10 + index, "volume": 100,
                         "amount": 1000, "adj_factor": 2.0, "is_suspended": False,
+                        "provider": "tushare_primary", "raw": {},
                         "limit_up": None, "limit_down": None, "selected_provider": "super_sdk",
                     }
                     for index in range(21)

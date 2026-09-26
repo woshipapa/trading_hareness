@@ -16,7 +16,7 @@ def event_capture_window(now: datetime) -> tuple[bool, bool]:
     if local.weekday() >= 5:
         return False, False
     current = local.time()
-    active = (time(9, 20) <= current <= time(11, 30)) or (time(13, 0) <= current <= time(15, 0))
+    active = (time(9, 15) <= current <= time(11, 30)) or (time(13, 0) <= current <= time(15, 0))
     return active, current >= time(14, 57)
 
 

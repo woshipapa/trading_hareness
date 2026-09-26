@@ -83,11 +83,19 @@ async def sync(
         valid_rows: list[dict[str, Any]] = []
         for candidate in candidates:
             try:
+                # ProMax returns the complete daily cross-section when called
+                # without limit/offset; adding an offset makes a later page
+                # repeat or truncate the response. Backup/SDK providers retain
+                # verified offset paging and are still rejected if they cannot
+                # reach the minimum complete population.
+                native_snapshot = (
+                    candidate.name == "super_get" and getattr(candidate, "get_gateway_mode", "legacy") == "promax"
+                )
                 candidate_result = await call_tushare_api(
                     "daily", {"trade_date": trade_date.strftime("%Y%m%d")},
                     "ts_code,trade_date,open,high,low,close,pre_close,vol,amount", candidate.name,
-                    paginate=True, page_size=DAILY_PAGE_SIZE, max_rows=DAILY_MAX_ROWS,
-                    max_pages=DAILY_MAX_PAGES, require_complete=True,
+                    paginate=not native_snapshot, page_size=DAILY_PAGE_SIZE, max_rows=DAILY_MAX_ROWS,
+                    max_pages=DAILY_MAX_PAGES, require_complete=not native_snapshot,
                 )
             except executor_saturated_error:
                 raise

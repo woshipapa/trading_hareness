@@ -7,6 +7,7 @@ from typing import Any, Callable
 from fastapi import APIRouter
 
 from ..request_models import HistoricalCoverageEstimateRequest
+from ..research_framework_readiness import enrich_framework_rows
 from ..async_research_readiness_repository import (
     frameworks, feature_readiness as async_feature_readiness,
     replay_readiness as async_replay_readiness, historical_estimate as async_historical_estimate,
@@ -48,7 +49,11 @@ def build_research_readiness_router(
                 rows = connection.execute(
                     "SELECT framework_key,label,role,integration_mode,status,license_note,prerequisites,metadata,updated_at FROM quant.research_frameworks ORDER BY framework_key"
                 ).fetchall()
-            return {"items": rows}
+            return {
+                "items": enrich_framework_rows([dict(row) for row in rows]),
+                "research_only": True,
+                "live_effect": "none",
+            }
         return await run_database_blocking(read_sync)
 
     @router.get("/api/v1/training/roadmap")

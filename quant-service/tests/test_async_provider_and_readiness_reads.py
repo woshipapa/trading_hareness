@@ -147,8 +147,40 @@ class AsyncProviderAndReadinessReadTests(unittest.IsolatedAsyncioTestCase):
         database = Database()
         payload = await async_replay_readiness(database)
         self.assertEqual(payload["status"], "blocked")
-        self.assertEqual(len(database.connection.calls), 1)
-        self.assertIn("canonical_bars_daily", database.connection.calls[0])
+        self.assertEqual(len(database.connection.calls), 4)
+        self.assertTrue(database.connection.calls[0].startswith("SET LOCAL statement_timeout"))
+        self.assertTrue(any("canonical_bars_daily" in sql for sql in database.connection.calls))
+
+    async def test_stale_materialized_coverage_fails_closed_without_fallback_scan(self) -> None:
+        class Result:
+            def __init__(self, row): self.row = row
+            async def fetchone(self): return self.row
+
+        class Connection:
+            def __init__(self):
+                self.calls = []
+                self.results = [
+                    Result(None),
+                    Result({"value": "quant.replay_readiness_daily_coverage"}),
+                    Result({"daily_bar_days": 0}),
+                ]
+            async def execute(self, sql, _params=()):
+                self.calls.append(sql)
+                return self.results.pop(0)
+
+        class Tx:
+            def __init__(self, connection): self.connection = connection
+            async def __aenter__(self): return self.connection
+            async def __aexit__(self, *_args): return False
+
+        class Database:
+            def __init__(self): self.connection = Connection()
+            def transaction(self): return Tx(self.connection)
+
+        payload = await async_replay_readiness(Database())
+
+        self.assertEqual(payload["evidence"]["readiness_query_status"], "coverage_stale")
+
 
     async def test_research_readiness_router_prefers_async_replay_projection(self) -> None:
         calls = []
@@ -182,7 +214,33 @@ class AsyncProviderAndReadinessReadTests(unittest.IsolatedAsyncioTestCase):
         endpoint = next(route.endpoint for route in router.routes if route.path == "/api/v1/data-readiness/replay")
         payload = await endpoint()
         self.assertEqual(payload["status"], "blocked")
-        self.assertEqual(calls, ["async"])
+        self.assertEqual(calls, ["async"] * 4)
+
+    async def test_framework_catalog_projection_keeps_external_benchmark_fail_closed(self) -> None:
+        class Result:
+            async def fetchall(self):
+                return [{"framework_key": "qlib", "status": "adapter_ready", "label": "Qlib"}]
+
+        class Connection:
+            async def execute(self, _sql):
+                return Result()
+
+        class Tx:
+            async def __aenter__(self):
+                return Connection()
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class Database:
+            def transaction(self):
+                return Tx()
+
+        payload = await async_research_frameworks(Database())
+        self.assertTrue(payload["research_only"])
+        self.assertEqual(payload["live_effect"], "none")
+        self.assertEqual(payload["items"][0]["readiness"]["status"], "blocked")
+        self.assertEqual(payload["items"][0]["readiness"]["benchmark_status"], "not_executed")
 
     async def test_historical_estimate_projection_uses_native_async_connection(self) -> None:
         class Result:

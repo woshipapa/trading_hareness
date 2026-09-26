@@ -13,7 +13,8 @@ class StrategySignalPolicyTests(unittest.TestCase):
             narrow = index >= 15
             bars.append({"close": close, "high": 10.4 if narrow else close + 0.2,
                          "low": 9.6 if narrow and index % 5 == 0 else close - (0.08 if narrow else 0.2),
-                         "volume": 50 if index >= 25 else 70 if narrow else 120, "adj_factor": 1.0})
+                         "volume": 50 if index >= 25 else 70 if narrow else 120, "adj_factor": 1.0,
+                         "provider": "tushare_primary", "raw": {}})
         structure = daily_base_structure(bars)
         self.assertEqual(structure["status"], "ready")
         self.assertTrue(structure["components"]["volume_dry_up"])

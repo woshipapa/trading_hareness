@@ -1,7 +1,7 @@
 """Index dated ST evidence by session for point-in-time reads.
 
 Revision ID: 20260926_pit0001
-Revises: 20260918_ds0001
+Revises: 20260919_ds0005
 
 Historical research now reads a session's ST status from the daily stock_st
 cross-section instead of today's instrument flag.  Each read asks whether a
@@ -17,7 +17,7 @@ from alembic import op
 
 
 revision = "20260926_pit0001"
-down_revision = "20260918_ds0001"
+down_revision = "20260919_ds0005"
 branch_labels = None
 depends_on = None
 

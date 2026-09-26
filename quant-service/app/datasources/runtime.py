@@ -25,7 +25,9 @@ from ..runtime_leases import (
     acquire_runtime_lease, background_loop_lease_seconds, release_runtime_lease, renew_runtime_lease,
 )
 from . import storage
+from .bindings import register_package_sources
 from .collectors import intraday, post_close
+from .resolver import CapabilityResolver
 
 
 COLLECTOR_TASKS: tuple[str, ...] = ("public_evidence_capture", "post_close_public_archive")
@@ -76,8 +78,11 @@ def build_collector_deps(
     async def concept_membership() -> dict[str, set[str]] | None:
         return await run(storage.fuyao_concept_membership, database, timeout_seconds=30)
 
+    resolver = register_package_sources(CapabilityResolver(), fuyao_fetch=fuyao_fetch)
+
     return intraday.CollectorDeps(
         persist_events=persist_events, persist_observations=persist_observations, record_health=record_health,
+        resolver=resolver,
         fuyao_fetch=fuyao_fetch, fuyao_snapshot=fuyao_snapshot, previous_turnover_total=previous_turnover,
         concept_membership=concept_membership, log=log,
     )

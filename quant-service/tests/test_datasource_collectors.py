@@ -132,6 +132,27 @@ class SentimentBuildTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StockChangeRequestTests(unittest.IsolatedAsyncioTestCase):
+    async def test_capture_uses_capability_resolver_when_wired(self):
+        from app.datasources.resolver import CapabilityResolver
+
+        recorder = Recorder()
+        resolver = CapabilityResolver()
+        calls = []
+
+        async def resolved_rows(**_params):
+            calls.append(True)
+            return [{"symbol": "600000.SH", "name": "x", "time": "09:30:00", "change_type": 8201,
+                     "change_label": "火箭发射", "direction": "up", "info": "", "info_values": []}]
+
+        resolver.bind("eastmoney_ztb", "limits.anomaly_tape", resolved_rows)
+        result = await intraday.capture_stock_changes(
+            recorder.deps(resolver=resolver), intraday.CollectorState(), SESSION,
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(calls, [True])
+        self.assertEqual(recorder.events[0][0], "eastmoney_ztb")
+
     async def test_one_request_per_change_type(self):
         from app.datasources.sources import eastmoney_ztb
         requested = []

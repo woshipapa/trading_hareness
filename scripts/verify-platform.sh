@@ -7,8 +7,9 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
 docker compose exec -T quant-research python -m unittest discover -s tests -q
-node --test feishu-adapter/*.test.mjs
+node --test feishu-relay/adapter/*.test.mjs
 (cd frontend && npm run typecheck && npm run build)
+(cd feishu-relay/dashboard && npm run typecheck && npm test -- --run && npm run build)
 git diff --check
 
 if command -v curl >/dev/null 2>&1; then

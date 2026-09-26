@@ -55,3 +55,24 @@ class CoreDailyControlSyncTests(unittest.TestCase):
         ])
         self.assertEqual(calls[1].params["start_date"], "20260821")
         self.assertEqual(calls[0].params["start_date"], "20260101")
+
+    def test_production_reader_replaces_per_symbol_tushare_factor_calls(self) -> None:
+        calls: list[_Request] = []
+
+        async def resolve(symbols: list[str]) -> list[str]:
+            return symbols
+
+        async def fetch(request: _Request) -> dict[str, object]:
+            calls.append(request)
+            return {"api_name": request.api_name}
+
+        async def persisted(day: date, symbols: list[str]) -> dict[str, object]:
+            return {"api_name": "adj_factor", "status": "completed", "source": "owner_persisted_adjustment_factor", "symbols": symbols}
+
+        result = asyncio.run(sync(
+            date(2026, 8, 21), ["000001.SZ"],
+            CoreDailyControlDependencies(resolve, fetch, _Request, persisted),
+        ))
+        self.assertEqual(result["status"], "completed")
+        self.assertNotIn("adj_factor", [request.api_name for request in calls])
+        self.assertIn("adj_factor", [item["api_name"] for item in result["requests"]])

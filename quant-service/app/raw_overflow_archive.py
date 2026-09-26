@@ -30,6 +30,10 @@ DEFAULT_CAPABILITIES = (
     "rt_k",
     "rt_min",
     "rt_min_daily",
+    # The owner error report uses this canonical raw-observation stream for
+    # historical daily bars.  It is evidence archival only, never a strategy
+    # input, and must be explicitly allowlisted like the intraday streams.
+    "daily_bar",
 )
 DEFAULT_STREAM_PREFIX = "raw_market_observations:"
 
@@ -60,7 +64,11 @@ class RawOverflowConfig:
             item.strip() for item in str(env.get("QUANT_RAW_OVERFLOW_CAPABILITIES", "") or "").split(",")
             if item.strip()
         )
-        capabilities = configured or DEFAULT_CAPABILITIES
+        # ``daily_bar`` is the canonical owner hand-off stream.  Older peer
+        # env files omitted it, while the scheduler already polled it; keep
+        # that rollout mismatch from becoming a repeated 400 loop.  Operators
+        # can still disable the archive with QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED.
+        capabilities = tuple(dict.fromkeys((*configured, "daily_bar"))) if configured else DEFAULT_CAPABILITIES
         warning = _bounded_float(env.get("QUANT_RAW_OVERFLOW_WARNING_RATIO"), 0.80, 0.50, 0.98)
         stop = _bounded_float(env.get("QUANT_RAW_OVERFLOW_STOP_RATIO"), 0.90, warning, 0.99)
         return cls(
@@ -193,10 +201,13 @@ def next_batch(database: Any, *, stream: str, limit: int | None = None,
     config = config or RawOverflowConfig.from_env()
     capability = capability_from_stream(stream, config)
     requested = _bounded_int(limit, config.batch_rows, 1, config.batch_rows)
+    if not config.enabled:
+        # An adapter polls every few seconds; a disabled lane must not run the
+        # ~1 s storage-size scan on the shared database each time (the state
+        # stays available from /raw-overflow/status).
+        return {"status": "disabled", "stream_key": stream, "rows": []}
     with database.transaction() as connection:
         state, reasons, storage = _storage_state(connection, config)
-        if not config.enabled:
-            return {"status": "disabled", "stream_key": stream, "state": state, "reasons": list(reasons), "rows": []}
         if state == "normal":
             return {"status": "not_needed", "stream_key": stream, "state": state, "reasons": list(reasons), "rows": []}
         connection.execute(

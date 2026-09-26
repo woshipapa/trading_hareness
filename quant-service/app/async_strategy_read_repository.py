@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from .strategy_read_model import compact_post_close_run
+
 
 async def latest_strategy_decision(async_database: Any, model_version: str) -> dict[str, Any]:
     async with async_database.transaction() as connection:
@@ -48,8 +50,8 @@ async def latest_post_close_strategy(async_database: Any) -> dict[str, Any]:
         latest_completed = await completed_result.fetchone()
         if not latest_completed:
             return {
-                "run": latest_attempt,
-                "latest_attempt": latest_attempt,
+                "run": compact_post_close_run(latest_attempt),
+                "latest_attempt": compact_post_close_run(latest_attempt),
                 "latest_completed": None,
                 "candidate_run": None,
                 "candidates": [],
@@ -63,10 +65,10 @@ async def latest_post_close_strategy(async_database: Any) -> dict[str, Any]:
         )
         rows = await candidates_result.fetchall()
     return {
-        "run": latest_attempt,
-        "latest_attempt": latest_attempt,
-        "latest_completed": latest_completed,
-        "candidate_run": latest_completed,
+        "run": compact_post_close_run(latest_attempt),
+        "latest_attempt": compact_post_close_run(latest_attempt),
+        "latest_completed": compact_post_close_run(latest_completed),
+        "candidate_run": compact_post_close_run(latest_completed),
         "candidates": rows,
         "notice": "候选用于次日人工观察；未自动加入盘中观察池，也不会自动下单。",
     }

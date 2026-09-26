@@ -10,10 +10,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .tushare_providers import RETIRED_PROVIDER_KEYS
+
 
 def mirror_runtime_rate_limits(connection: Any, configs: Mapping[str, Any]) -> None:
     """Mirror effective local rate limits into the read-only control plane."""
     for provider in configs.values():
+        if str(provider.key) in RETIRED_PROVIDER_KEYS:
+            continue
         rate_limit = int(provider.rate_limit_per_minute)
         provider_key = str(provider.key)
         connection.execute(
@@ -57,7 +61,7 @@ class ProviderControlPlaneRuntime:
             for item in items:
                 api_name = str(item["api_name"])
                 contract = dependencies.capability_contract(api_name)
-                provider_keys = ["tushare_primary", "tushare_super_sdk"]
+                provider_keys = ["tushare_super_sdk"]
                 if api_name in dependencies.super_get_verified_apis:
                     provider_keys.append("tushare_super_get")
                 if api_name == "stock_basic":

@@ -1,0 +1,1367 @@
+{
+ "schema": "teacher-review-pack/v1",
+ "analyst": {
+  "analyst_id": "itougu-A0780615020001",
+  "platform": "itougu",
+  "license_no": "A0780615020001",
+  "firm": "深圳市新兰德证券投资咨询有限公司",
+  "display_name": null,
+  "display_name_note": "屏幕水印姓名 OCR 在 宋瑜/朱瑜/采瑜 之间不稳定，未录入"
+ },
+ "source": {
+  "kind": "video",
+  "job_id": "227740d99c644972",
+  "source_ref": "19d6a428b24a1ef2",
+  "media_sha256": "9bfb2730737b76b0dc9fdbc62ced1e284d25523ff2f4a5d4109c24a561affb3b",
+  "audio_sha256": "a8c54432234c74226bff04d3479e8bc64bfe4327c548b856dc49eccab3cdf2c0",
+  "duration_seconds": 1760.99,
+  "stated_at": "2026-09-21",
+  "stated_precision": "day",
+  "received_at": "2026-09-21T19:52:37+08:00",
+  "strategy_available_at": "2026-09-21T21:31:43+08:00"
+ },
+ "review_date": "2026-09-21",
+ "target_session": "2026-09-22",
+ "extraction": {
+  "method": "whisper small+large ASR, RapidOCR, Qwen3-VL-8B (auxiliary), manual agent review",
+  "extractor_version": "teacher-quant-0.2",
+  "human_reviewed": false,
+  "asr_corrections": [
+   "华南生物/花生物→南华生物 000504, 华人科技/黄染科技→华软科技 002453, 华词→华瓷股份 001216,",
+   "市联航/设断行→世联行 002285, 金剑民业→金健米业 600127, 华坊/黄芳芳芝→华纺股份 600448,",
+   "城邦→诚邦股份 603316, 马矿星骨→马矿股份(次新) 601123, 摆通能源→百通能源 001376,",
+   "国防集团→国芳集团 601086, 快递山/快捷山→会稽山 601579, 鬼龙山→古越龙山 600059,",
+   "怀孕资本→华金资本 000532, 俊压科技→骏亚科技 603386, 二康→奥士康 002913,",
+   "通达之创→通达创智 001368, 一顿/鞋合/金鹿电子→依顿/协和/金禄电子, 踹板→创业板,",
+   "天然风能→天顺风能 002531, 中级出版/终于出版→中信出版 300788, 没让电路→明阳电路 300739,",
+   "本圈智能→本川智能 300964, 华人天成→华胜天成 600410, 盛宏/生活股份→胜宏科技 300476,",
+   "二十块一毛一→前高 22.11 (骏亚 2026-06-26 最高), 八二九块九毛七→87.97 (奥士康 9/18 最高),",
+   "十块二毛五→约 17.25 (骏亚 9/14 收盘；ASR 漏字，按数据推断，待回听)。"
+  ]
+ },
+ "defaults": {
+  "vol_ratio_min": 1.5,
+  "surge_window_min": 5,
+  "surge_mult": 2.0,
+  "not_falling_window_min": 15,
+  "divergence_periods": [
+   "30",
+   "60"
+  ],
+  "center_flat_pct": 1.0,
+  "center_flat_days": 2
+ },
+ "market": {
+  "sse_4000": {
+   "index": "SH000001",
+   "level": 4000.0,
+   "src": "T",
+   "rule": "沪指收盘≥4000 视为突破，连续2日收盘≥4000 视为站稳（2日为 I）；本周（至 9/25）能站稳=最佳预期",
+   "evidence": [
+    {
+     "time": "00:31-01:01",
+     "quote": "护指的话，你再往上走一波的话，也会遇到四千点的压制……这周这个压制要能站稳突破就是最佳预期"
+    },
+    {
+     "time": "12:11-12:43",
+     "quote": "你重新4000一个，大盘重新4000的问题能有多大了"
+    }
+   ],
+   "forecast": "本周（2026-09-22~25）沪指重回 4000"
+  },
+  "cyb_ma250": {
+   "index": "SZ399006",
+   "ma": 250,
+   "src": "T",
+   "rule": "创业板指 收盘>MA250 = 年线突破；最高≥MA250×0.995 且 收盘<MA250 = 年线压制仍在",
+   "evidence": [
+    {
+     "time": "00:15-01:01",
+     "quote": "创业板这个走势打到那个年线肯定是有压制的……结果收了个上影十字线还是放量的，说明整个市场情绪还不错"
+    }
+   ],
+   "doji_rule": "|收-开|/开 ≤0.4%，上影线≥2×实体，成交量>前一日（I）"
+  },
+  "turnover": {
+   "indices": [
+    "SH000001",
+    "SZ399106"
+   ],
+   "frozen_below": 1600000000000.0,
+   "active_above": 2000000000000.0,
+   "src": "T",
+   "rule": "两市成交额≤1.6万亿=冰点，怎么出手都是死（停止接力）；≥2.0万亿（=1.6万亿+回流4000亿）=可以玩",
+   "evidence": [
+    {
+     "time": "04:45-05:17",
+     "quote": "前两交易日那个成交量萎缩到1.6万亿的时候你怎么出手都是死……这两天其实可以玩"
+    },
+    {
+     "time": "11:09-11:39",
+     "quote": "稍微资金回流，回流四千亿吧"
+    }
+   ]
+  },
+  "events": {
+   "window": [
+    "2026-09-23",
+    "2026-09-25"
+   ],
+   "src": "T",
+   "rule": "访美窗口：外贸/纺织出口/关税受益与沪指权重优先；科技只看 PCB（国际领先）和存储（中长期轮动）",
+   "evidence": [
+    {
+     "time": "11:39-12:43",
+     "quote": "23号访美，24号白宫举行欢迎仪式……23到25号三天……带指数往上冲的，肯定是以沪指为主"
+    },
+    {
+     "time": "13:16-14:28",
+     "quote": "我们这边强项应该只有PCB……PCB这个方向我觉得还是比较靠谱的……可能会轮动到存储上去……是长期方向，不是短期热点"
+    }
+   ]
+  },
+  "sector_system": {
+   "min_limit_ups": 10,
+   "broad_plates_excluded": [
+    "大消费",
+    "其他"
+   ],
+   "src": "I",
+   "rule": "板块当日涨停数≥10 且不是宽泛口径 = 成体系（9/21 校准：医药21、房地产10 成体系；大消费10 因口径宽被老师排除）",
+   "evidence": [
+    {
+     "time": "03:45-04:45",
+     "quote": "成体系的现在就医药比较明显……今天可能就医药地产相对来说明显点，因为消费它很宽泛"
+    }
+   ]
+  },
+  "emotion_relay": {
+   "src": "T",
+   "rule": "接力不纠结换手，只看“合理的情绪爆发”：竞价不低开、开盘后分时放量上攻、价格在均价线上方（后三项量化为 I）",
+   "evidence": [
+    {
+     "time": "21:47-22:20",
+     "quote": "明天不要去过度纠结于换手问题，你只要看到合理的这个情绪爆发就行了"
+    }
+   ],
+   "unresolved": "“上周五直播课讲的情绪接力思路”未在本视频展开"
+  }
+ },
+ "lessons": [
+  {
+   "rule": "消息龙头复牌一字时，套利首选“高一个身位”的连板龙头而非一进二；该龙头一字封单≤1亿（T）时不一定封得死：开盘后前10秒（T）盯封单，封单开始下降即可顶板；纯手速一进二不做",
+   "seal_amount_weak": 100000000.0,
+   "watch_seconds": 10,
+   "evidence": [
+    {
+     "time": "07:28-08:26",
+     "quote": "新华传媒……放开第一天成交，封单顶了一百多个亿……你可以套它（内蒙新华）呀，怎么会套一进二"
+    },
+    {
+     "time": "08:26-09:36",
+     "quote": "内蒙新华一字板封得死吗，一个亿不一定封得死……开盘之后第八秒这个封单开始减了，第十秒……你看到这个封单开始往下减了，这个票就可以顶了"
+    },
+    {
+     "time": "10:07-11:09",
+     "quote": "不是说纯比手快，有一个关键的决策点，决策在那儿你才能手快"
+    }
+   ]
+  }
+ ],
+ "forecasts": [
+  {
+   "id": "F1",
+   "text": "前六个明天赛，至少能成两到三个（成一半）",
+   "time": "16:59-17:33",
+   "test": "次日收盘涨停数（前六）≥2 为基本命中，≥3 为完全命中",
+   "check": {
+    "kind": "race_sealed_count",
+    "codes": [
+     "001216",
+     "603230",
+     "002285",
+     "600630",
+     "000504",
+     "002453"
+    ],
+    "min": 2
+   }
+  },
+  {
+   "id": "F2",
+   "text": "龙头股份下个交易日要顶一次",
+   "time": "16:24-16:59",
+   "test": "次日最高价≥涨停价",
+   "check": {
+    "kind": "touched_limit",
+    "code": "600630"
+   }
+  },
+  {
+   "id": "F3",
+   "text": "内蒙新华赛不赢世联行，4进5难",
+   "time": "15:36-16:24",
+   "test": "次日内蒙新华未收涨停，或世联行涨幅更高",
+   "check": {
+    "kind": "race_loses",
+    "loser": "603230",
+    "winner": "002285"
+   }
+  },
+  {
+   "id": "F4",
+   "text": "华瓷股份要过前高",
+   "time": "14:28-15:01",
+   "test": "次日最高价>24.26",
+   "check": {
+    "kind": "high_above",
+    "code": "001216",
+    "level": 24.26
+   }
+  },
+  {
+   "id": "F5",
+   "text": "今晚有金融利好（华金资本、南华期货在赌）",
+   "time": "21:07-21:47",
+   "test": "次日大金融板块涨停数≥3",
+   "check": {
+    "kind": "sector_limit_ups_at_least",
+    "sector": "大金融",
+    "min": 3
+   }
+  },
+  {
+   "id": "F6",
+   "text": "本周沪指重回 4000",
+   "time": "12:11-12:43",
+   "test": "2026-09-22~25 任一交易日收盘≥4000",
+   "check": {
+    "kind": "index_close_at_least",
+    "index": "SH000001",
+    "level": 4000,
+    "within_sessions": 4
+   }
+  }
+ ],
+ "race_group": [
+  "001216",
+  "603230",
+  "002285",
+  "600630",
+  "000504",
+  "002453"
+ ],
+ "stocks": [
+  {
+   "code": "001216",
+   "name": "华瓷股份",
+   "group": "连板赛马（前六）",
+   "board_0921": "5板一字（缩量）",
+   "stance": "watch",
+   "playbook": "relay_one_word",
+   "teacher": "五板龙头但股性差；次日看竞价，竞价5亿“打满”=放量分歧板，按一字板接力常规逻辑；换手最好别超12%；要过前高",
+   "params": {
+    "auction_amount_min": 500000000.0,
+    "auction_amount_min_src": "T",
+    "turnover_max_pct": 12.0,
+    "turnover_max_pct_src": "T（“十二的换手，最好别换完”，ASR 有歧义）",
+    "prior_high": 24.26,
+    "prior_high_src": "D（2025-11-24 最高；9/21 收 24.06“打平了”）"
+   },
+   "invalidation": "开板后跌破分时均价线或跌破昨收即离场（“要死的话就是跌停板”）",
+   "evidence": [
+    {
+     "time": "13:48-15:01",
+     "quote": "华瓷，大消费加地产……MLCC……他今天是个缩量一字板，他明天要过前高，今天已经……打平了……股性不太好，到时候要死的话就是跌停板……五板，你也不得不认为他是个龙头……十二的换手，最好别换完……一字板接力就是常规逻辑了，看竞价就行了，五个亿，打满，放量分歧板"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "001216.SZ"
+  },
+  {
+   "code": "002285",
+   "name": "世联行",
+   "group": "连板赛马（前六）",
+   "board_0921": "4板（10天5板），13:17 放量分歧封板，成交 8.59亿",
+   "stance": "positive",
+   "playbook": "relay_acceleration",
+   "teacher": "地产消息票，量能/速度都够；次日要拼加速：封板约需4亿（半换手），买入时成交2~3亿即可，拼速度；和内蒙新华赛马时它更可能赢",
+   "params": {
+    "seal_amount_max": 400000000.0,
+    "seal_amount_max_src": "T",
+    "entry_amount_range": [
+     200000000.0,
+     300000000.0
+    ],
+    "entry_amount_range_src": "T",
+    "entry_pct_min": 7.0,
+    "entry_pct_min_src": "I",
+    "fail_amount": 859000000.0,
+    "fail_amount_src": "D（9/21 全天成交额，超过仍未封=没加速）"
+   },
+   "invalidation": "成交额超过 8.59亿仍未封板，或跌破分时均价线",
+   "evidence": [
+    {
+     "time": "15:01-15:36",
+     "quote": "世联行，这个就是地产……前高，这个量能倒是够啊，速度也可以……今天还是放量分歧，下交易日的话，拼加速，拼四个亿加速，半换手……你买的时候不一定要四个亿啊，上板可能两三个亿够了，拼速度"
+    },
+    {
+     "time": "15:36-16:59",
+     "quote": "明天这俩要赛马……这个票（内蒙新华）应该赛不赢啊，只有他（世联行）可能赛赢……地产这个东西消息出来之前都有机会炒"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "002285.SZ"
+  },
+  {
+   "code": "603230",
+   "name": "内蒙新华",
+   "group": "连板赛马（前六）",
+   "board_0921": "4板，一字秒开，开板3次，成交 5.57亿",
+   "stance": "negative",
+   "playbook": "relay_no_chase",
+   "teacher": "今天是套利（新华传媒复牌），明天别追；上个交易日炸板，4进5 难；若要赢需一致转分歧再换约9亿",
+   "params": {
+    "reenable_amount": 900000000.0,
+    "reenable_amount_src": "T"
+   },
+   "invalidation": "默认不参与；仅记录是否出现“换手≥9亿后封板”",
+   "evidence": [
+    {
+     "time": "15:01-15:36",
+     "quote": "内蒙新华，这个套利，今天套了，明天别追了啊，不追"
+    },
+    {
+     "time": "15:36-16:24",
+     "quote": "内蒙新华九个亿，今天板上换五个亿，分歧还挺大……上个交易日是炸板……他要做四进五，有点难……这个票应该赛不赢"
+    },
+    {
+     "time": "16:24-16:59",
+     "quote": "一致转分化的话，你又得换九个亿"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "603230.SH"
+  },
+  {
+   "code": "600630",
+   "name": "龙头股份",
+   "group": "连板赛马（前六）",
+   "board_0921": "3板，竞价一字，开板1次，换手10.8%",
+   "stance": "positive",
+   "playbook": "relay_expect_touch",
+   "teacher": "关税/纺织出口赛马赛出来的龙头（赛马胜过华纺股份）；连续两天秒板，这个量能下个交易日要“顶一次”，冲高可能性蛮高",
+   "params": {
+    "touch_limit_expected": true,
+    "touch_limit_expected_src": "T",
+    "entry_pct_min": 5.0,
+    "entry_pct_min_src": "I"
+   },
+   "invalidation": "跌破昨收",
+   "evidence": [
+    {
+     "time": "06:51-07:22",
+     "quote": "龙头股份……跟华纺股份两个就是赛马关系……这俩都是纺织染料，出口……肯定是龙头股份赢了"
+    },
+    {
+     "time": "09:36-10:07",
+     "quote": "这是名牌……关税，纺织出口，纺织赛马赛出来的龙头"
+    },
+    {
+     "time": "16:24-16:59",
+     "quote": "龙头应该锁死了……他这个量能下交易日应该是要顶一次的，他已经连续两天是秒板了，这个龙头股份我觉得冲（高）的可能性还是蛮高的"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "600630.SH"
+  },
+  {
+   "code": "000504",
+   "name": "南华生物",
+   "group": "连板赛马（前六）",
+   "board_0921": "3板一字（医药利好）",
+   "stance": "positive",
+   "playbook": "relay_race",
+   "teacher": "医药利好一字；医药这条线也对，可以赛",
+   "params": {},
+   "invalidation": "竞价低开或开盘后跌破均价线",
+   "evidence": [
+    {
+     "time": "07:22-07:27",
+     "quote": "南华生物，因为是生物制药，有利好消息，上来就直接顶一字了"
+    },
+    {
+     "time": "16:59-17:33",
+     "quote": "南华生物，这个也行啊，因为医药这个线段其实也对……前六个明天赛"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "000504.SZ"
+  },
+  {
+   "code": "002453",
+   "name": "华软科技",
+   "group": "连板赛马（前六）",
+   "board_0921": "3板，9:30 秒板（重组+国产芯片）",
+   "stance": "positive",
+   "playbook": "relay_race",
+   "teacher": "今天“正常博弈”的最佳标的，二进三里最强；重组+芯片自己赛出来的龙头，明天能赛",
+   "params": {},
+   "invalidation": "竞价低开或开盘后跌破均价线",
+   "evidence": [
+    {
+     "time": "05:48-06:20",
+     "quote": "最好的方式应该是那个华软科技，这个是应该最快的……它是二进三里面最强的一个"
+    },
+    {
+     "time": "09:36-10:07",
+     "quote": "最好的方式就是正常博弈，就是那个华软科技最好的……重组加国产芯片，然后自己赛出来的龙头"
+    },
+    {
+     "time": "16:59-17:33",
+     "quote": "华软科技也是，都能赛"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "002453.SZ"
+  },
+  {
+   "code": "001376",
+   "name": "百通能源",
+   "group": "二板（可看）",
+   "board_0921": "2板，9:32 放量T字板，成交 2.27亿",
+   "stance": "positive",
+   "playbook": "relay_fast_seal",
+   "teacher": "电解铝+热电，底部平台突破好看（前放量6亿）；今天放量T字板2亿、秒得很快、情绪很好；二板明天可以看、可以赛",
+   "params": {
+    "seal_amount_max": 300000000.0,
+    "seal_amount_max_src": "I（参照 9/21 的 2亿秒板）",
+    "fail_amount": 600000000.0,
+    "fail_amount_src": "T（前次放量 6亿）"
+   },
+   "invalidation": "成交≥6亿仍未封板，或跌破昨收",
+   "evidence": [
+    {
+     "time": "18:05-19:17",
+     "quote": "百通能源……电解铝加热电……底部平台突破还挺好看的，放量6个亿，然后今天是一个放量T字板，2个亿，2个亿秒得很快啊，这个票情绪很好啊，这个二板明天可以看一下……百通可以"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "001376.SZ"
+  },
+  {
+   "code": "600606",
+   "name": "绿地控股",
+   "group": "二板（可看）",
+   "board_0921": "2板，11:18 封板（房地产）",
+   "stance": "positive",
+   "playbook": "relay_race",
+   "teacher": "房地产这段先可以",
+   "params": {
+    "sector": "房地产"
+   },
+   "invalidation": "房地产板块涨停数显著回落（<5，I）或跌破昨收",
+   "evidence": [
+    {
+     "time": "19:53-20:29",
+     "quote": "绿地，房地产，绿地可以啊……房地产这个，这段先可以"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "600606.SH"
+  },
+  {
+   "code": "000532",
+   "name": "华金资本",
+   "group": "二板（条件）",
+   "board_0921": "2板，14:37 尾盘封（大金融/创投/被动元件）",
+   "stance": "watch",
+   "playbook": "relay_news_conditional",
+   "teacher": "位置在底部但做连板悬；和南华期货尾盘同时封板=在赌今晚有金融利好",
+   "params": {
+    "sector": "大金融",
+    "sector_min_limit_ups": 3,
+    "sector_min_limit_ups_src": "I"
+   },
+   "invalidation": "次日大金融板块未形成（涨停<3家）则不做连板",
+   "evidence": [
+    {
+     "time": "20:29-21:07",
+     "quote": "华金资本，被动元件，多元金融创投，这个票在底部……做连板是不是有点悬了"
+    },
+    {
+     "time": "21:07-21:47",
+     "quote": "南华期货……这两票都是还没涨的，一定是在赌明天嘛，那今天晚上肯定有金融相关利好"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "000532.SZ"
+  },
+  {
+   "code": "603093",
+   "name": "南华期货",
+   "group": "二板（条件）",
+   "board_0921": "1板，14:37 尾盘封（大金融）",
+   "stance": "watch",
+   "playbook": "relay_news_conditional",
+   "teacher": "同华金资本：尾盘抢板赌金融利好",
+   "params": {
+    "sector": "大金融",
+    "sector_min_limit_ups": 3,
+    "sector_min_limit_ups_src": "I"
+   },
+   "invalidation": "次日大金融板块未形成（涨停<3家）则不做",
+   "evidence": [
+    {
+     "time": "21:07-21:47",
+     "quote": "大金融有没有什么利好啊，南华期货……今天晚上肯定有金融相关利好，怪不得了"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "603093.SH"
+  },
+  {
+   "code": "603316",
+   "name": "诚邦股份",
+   "group": "趋势（不追连板）",
+   "board_0921": "2板（存储芯片），成交 4.16亿",
+   "stance": "watch",
+   "playbook": "trend_pullback_restart",
+   "teacher": "存储芯片有意义、走势挺好，但它是“连续突破后放量→杀一波→再起”的趋势结构，追连板容易吃面",
+   "params": {
+    "pullback_amount_max": 416000000.0,
+    "pullback_amount_max_src": "D（9/21 成交 4亿，老师：今天4个亿，上个交易日6-7亿）",
+    "peak_amount_ref": 2000000000.0,
+    "peak_amount_ref_src": "T（前期最高量 20亿、换手30%）"
+   },
+   "invalidation": "回调跌破 MA10",
+   "evidence": [
+    {
+     "time": "17:33-18:40",
+     "quote": "诚邦，这是存储芯片，这个有意义……最高量这个位置是20个亿，换手30%……现在是4个亿……你总不能一连板上去吧……更像是连续突破之后的放量，然后又多一波，杀一波，然后再起……连板你要追的话，很容易吃面的"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "603316.SH"
+  },
+  {
+   "code": "601579",
+   "name": "会稽山",
+   "group": "趋势（标杆）",
+   "board_0921": "2板（12天6板），酿酒龙头",
+   "stance": "watch",
+   "playbook": "leader_benchmark_pullback",
+   "teacher": "已是酿酒龙头但已连板加速，做不了；当标杆看，回踩了可以（原话 ASR 为“卖”，语义更像“买”），博趋势不结束",
+   "params": {
+    "pullback_ma": 5,
+    "pullback_ma_src": "I",
+    "trend_floor_ma": 10,
+    "trend_floor_ma_src": "I"
+   },
+   "invalidation": "收盘跌破 MA10 = 趋势结束",
+   "evidence": [
+    {
+     "time": "19:53-21:07",
+     "quote": "会稽山这个已经成龙头了，就是酿酒里边的龙头，但是这个龙头它现在已经给连板了，这有点加速的嫌疑了，做不了啊，能看，把它当标杆……这票回踩了可以卖（买？），就博它那个趋势不结束"
+    }
+   ],
+   "uncertainty": "“回踩了可以卖/买”ASR 两个模型都写“卖”，与“博趋势不结束”矛盾，需回听",
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "601579.SH"
+  },
+  {
+   "code": "600059",
+   "name": "古越龙山",
+   "group": "跟随套利",
+   "board_0921": "+7.29%，成交 11.48亿",
+   "stance": "watch",
+   "playbook": "sympathy_follow",
+   "teacher": "选它的目的就是去套会稽山（同为黄酒）",
+   "params": {
+    "leader": "601579",
+    "leader_strong_pct": 5.0,
+    "leader_strong_pct_src": "I",
+    "leader_weak_pct": -3.0,
+    "leader_weak_pct_src": "I",
+    "leader_name": "会稽山"
+   },
+   "invalidation": "会稽山转弱（跌≥3%）或古越龙山跌破昨收",
+   "evidence": [
+    {
+     "time": "26:34-26:49",
+     "quote": "古越龙山，为什么选它呢，我选它目的就是要去套会稽山的"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "600059.SH"
+  },
+  {
+   "code": "600127",
+   "name": "金健米业",
+   "group": "连板（老师否定）",
+   "board_0921": "3板",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "技术博弈能创新高也不错，但明天不要",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "16:59-17:33",
+     "quote": "金健米业也不行了，金健米业也不要啊"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "600127.SH"
+  },
+  {
+   "code": "600448",
+   "name": "华纺股份",
+   "group": "连板（老师否定）",
+   "board_0921": "3板，换手39%",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "和龙头股份赛马输了，不要",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "16:59-18:05",
+     "quote": "华纺股份也不要……华纺没意义"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "600448.SH"
+  },
+  {
+   "code": "601811",
+   "name": "新华文轩",
+   "group": "连板（老师否定）",
+   "board_0921": "2板，开板8次",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "套利走远了，没意义",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "17:33-18:05",
+     "quote": "新华文轩也没意义"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "601811.SH"
+  },
+  {
+   "code": "601123",
+   "name": "马矿股份",
+   "group": "连板（老师否定）",
+   "board_0921": "2板（次新）",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "次新股就算了",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "18:05-18:40",
+     "quote": "马矿，次新，这是个什么玩意儿啊，这个次新就算了啊"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "601123.SH"
+  },
+  {
+   "code": "603068",
+   "name": "博通集成",
+   "group": "连板（老师否定）",
+   "board_0921": "2板，开板34次",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "单纯AI，接力不行",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "18:41-19:17",
+     "quote": "博通集成这个算了，单纯AI，博通集成算了，接力不行"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "603068.SH"
+  },
+  {
+   "code": "002589",
+   "name": "瑞康医药",
+   "group": "连板（老师否定）",
+   "board_0921": "2板，放量 6.85亿",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "二板放量弱分歧6亿，会把对手盘慢慢换出来，很难",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "18:41-19:51",
+     "quote": "瑞康医药，二板放量，弱分歧，六个亿，不行，这个走法会把对手盘慢慢换出来的"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "002589.SZ"
+  },
+  {
+   "code": "601086",
+   "name": "国芳集团",
+   "group": "连板（老师否定）",
+   "board_0921": "2板（17天9板）",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "零售/场景改造，可能创新高但属第三段鱼尾，追不了",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "19:17-19:51",
+     "quote": "他这个走法搞不好要创新高啊，这应该就是个三段了，但是你创新高咱也追不了……标准的鱼尾行情"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "601086.SH"
+  },
+  {
+   "code": "603001",
+   "name": "奥康国际",
+   "group": "连板（老师否定）",
+   "board_0921": "2板，开板7次",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "股权转让/皮革/新零售/体育，这个玄",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "19:17-20:29",
+     "quote": "奥康国际……股权转让，皮革，新零售、体育，这个玄"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "603001.SH"
+  },
+  {
+   "code": "001317",
+   "name": "三羊马",
+   "group": "连板（老师否定）",
+   "board_0921": "2板，开板15次",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "扭亏为盈，独立平台，不行",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "19:53-20:29",
+     "quote": "三羊马……扭亏为盈……也是独立的，这个平台，不行，这也不行，这也很难"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "001317.SZ"
+  },
+  {
+   "code": "000910",
+   "name": "大亚圣象",
+   "group": "连板（老师否定）",
+   "board_0921": "2板",
+   "stance": "negative",
+   "playbook": "rejected",
+   "teacher": "这也算了",
+   "params": {},
+   "invalidation": "不参与；只记录次日结果",
+   "evidence": [
+    {
+     "time": "20:29-21:07",
+     "quote": "大亚圣象这也算了，这也算了"
+    }
+   ],
+   "valid_sessions": 1,
+   "valid_sessions_src": "I（连板接力只对下一交易日有效）",
+   "ts_code": "000910.SZ"
+  },
+  {
+   "code": "603386",
+   "name": "骏亚科技",
+   "group": "趋势-PCB",
+   "board_0921": "+2.15%，收 18.02 < MA5 18.15",
+   "stance": "watch",
+   "playbook": "ma5_reclaim_or_divergence",
+   "teacher": "9/15 附近 PCB 领涨、平台突破；横盘调整1-2天止跌但被5日线压制，可能走上涨第三段。A：次日放量突破→买点，日线转大阳冲前高 22.11；B：否则回踩10日线附近，找30/60分钟两段背离（约 17.25）",
+   "params": {
+    "prior_high": 22.11,
+    "prior_high_src": "D（ASR“二十块一毛一”，2026-06-26 最高 22.11）",
+    "support_level": 17.25,
+    "support_level_src": "D?（ASR“十块二毛五”，按 9/14 收盘 17.25 推断，待回听）",
+    "support_ma": 10,
+    "support_ma_src": "T（“回踩应该就是踩十线”，ASR 为“实险”）",
+    "invalid_below": 16.73,
+    "invalid_below_src": "I（支撑下方3%）"
+   },
+   "invalidation": "收盘跌破 16.73（支撑下方3%）且无背离",
+   "evidence": [
+    {
+     "time": "22:52-23:45",
+     "quote": "你像骏亚科技，这是标准的前面PCB……9月15号这段时间，他们是领涨，他们平台突破……横盘第一个调整一天两天，现在又暂时的止跌但是又被五日线压制……明天如果直接放量开始突破的话，这个票也是个买点"
+    },
+    {
+     "time": "23:45-24:13",
+     "quote": "它的日线就会变成转了之后再走大阳线开始往上冲前高，二十（二）块一毛一……如果说不是这个走势，那它现在这个结构应该就是一个向下回踩，回踩应该就是踩十线，然后你就去找30分钟的60分钟的两段背离……十（七）块二毛五这个位置"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "603386.SH"
+  },
+  {
+   "code": "600869",
+   "name": "远东股份",
+   "group": "趋势-PCB节奏",
+   "board_0921": "+7.15%，冲板炸板（涨停池外、炸板池内）",
+   "stance": "watch",
+   "playbook": "ma5_reclaim_or_divergence",
+   "teacher": "跟骏亚科技节奏一样",
+   "params": {
+    "prior_high": 26.68,
+    "prior_high_src": "D（9/10 最高）",
+    "support_level": 21.01,
+    "support_level_src": "I（9/18 最低，平台下沿；MA10 已在现价上方，不作支撑）",
+    "invalid_below": 20.38,
+    "invalid_below_src": "I（支撑下方3%）"
+   },
+   "invalidation": "收盘跌破 20.38",
+   "evidence": [
+    {
+     "time": "26:49-27:00",
+     "quote": "还有这个远东股份跟那一样，远东跟前面骏亚科技他们一样的，节奏一样的"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "600869.SH"
+  },
+  {
+   "code": "002913",
+   "name": "奥士康",
+   "group": "趋势-PCB高端",
+   "board_0921": "+0.52%，收 84.50",
+   "stance": "positive",
+   "playbook": "trend_continuation",
+   "teacher": "纯粹测试趋势延续能力；重心都是好的，PCB+高端，地位高，趋势应能延续；只是价格 87.97 看着吓人",
+   "params": {
+    "prior_high": 87.97,
+    "prior_high_src": "D（ASR“八二九块九毛七”，9/18 最高 87.97）",
+    "hold_ma": 5,
+    "hold_ma_src": "I",
+    "floor_ma": 10,
+    "floor_ma_src": "I"
+   },
+   "invalidation": "收盘跌破 MA10",
+   "evidence": [
+    {
+     "time": "24:15-24:41",
+     "quote": "你要奥士康这种，就是纯粹的去测试这个趋势的延续能力……这个走势其实整个重心都是好的，PCB加高端……这个走势应该是能够得以延续的……只不过你这样看这个价格你会害怕，八十七块九毛七……这种就是趋势票"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "002913.SZ"
+  },
+  {
+   "code": "001368",
+   "name": "通达创智",
+   "group": "趋势-大消费",
+   "board_0921": "+2.62%，收 33.30，最高 33.50",
+   "stance": "positive",
+   "playbook": "prior_high_breakout",
+   "teacher": "有点晚了，这个位置要过前高，但按走势逻辑应该过得去",
+   "params": {
+    "prior_high": 33.56,
+    "prior_high_src": "D（2026-02-03 最高）",
+    "floor_ma": 10,
+    "floor_ma_src": "I"
+   },
+   "invalidation": "收盘跌破 MA10",
+   "evidence": [
+    {
+     "time": "24:41-24:51",
+     "quote": "还有这个通达创智，这个也是大消费，但是现在看稍微有点晚了，因为它这个位置要过前高，但是按照这个走势的逻辑，我觉得它应该过得去"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "001368.SZ"
+  },
+  {
+   "code": "603328",
+   "name": "依顿电子",
+   "group": "趋势-PCB三兄弟",
+   "board_0921": "+4.39%",
+   "stance": "positive",
+   "playbook": "platform_breakout",
+   "teacher": "三个PCB结构差不多，选谁都行，谁涨得多看运气",
+   "params": {
+    "preference": 2,
+    "preference_src": "T"
+   },
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "24:51-25:22",
+     "quote": "依顿电子、协和电子、金禄电子，三个电子，PCB……5G、PCB……它们三个结构差不多，你选谁都行，但是谁最后涨得多那有点看运气，按理来讲创业板更好一点，因为它空间大"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "603328.SH"
+  },
+  {
+   "code": "605258",
+   "name": "协和电子",
+   "group": "趋势-PCB三兄弟",
+   "board_0921": "+2.35%",
+   "stance": "positive",
+   "playbook": "platform_breakout",
+   "teacher": "三个PCB结构差不多，选谁都行，谁涨得多看运气",
+   "params": {
+    "preference": 2,
+    "preference_src": "T"
+   },
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "24:51-25:22",
+     "quote": "依顿电子、协和电子、金禄电子，三个电子，PCB……5G、PCB……它们三个结构差不多，你选谁都行，但是谁最后涨得多那有点看运气，按理来讲创业板更好一点，因为它空间大"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "605258.SH"
+  },
+  {
+   "code": "301282",
+   "name": "金禄电子",
+   "group": "趋势-PCB三兄弟",
+   "board_0921": "+0.88%（创业板）",
+   "stance": "positive",
+   "playbook": "platform_breakout",
+   "teacher": "三个PCB结构差不多，选谁都行；创业板（金禄）20%涨跌幅空间大，按理更好一点",
+   "params": {
+    "preference": 1,
+    "preference_src": "T"
+   },
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "24:51-25:22",
+     "quote": "依顿电子、协和电子、金禄电子，三个电子，PCB……5G、PCB……它们三个结构差不多，你选谁都行，但是谁最后涨得多那有点看运气，按理来讲创业板更好一点，因为它空间大"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "301282.SZ"
+  },
+  {
+   "code": "002531",
+   "name": "天顺风能",
+   "group": "趋势-风电新周期",
+   "board_0921": "+0.13%，收 7.72，MA10 7.31",
+   "stance": "watch",
+   "playbook": "ma10_second_wave",
+   "teacher": "风电设备新周期：涨停-两天调整-涨停-大阴线修正；这两三天修正关键，今天低开高走但重心下移，一定要等回调结束（大概到10日线），重心开始平移时上，等第二轮",
+   "params": {
+    "ma": 10,
+    "ma_src": "T",
+    "touch_tol_pct": 1.0,
+    "touch_tol_pct_src": "I"
+   },
+   "invalidation": "收盘跌破 MA10 超过3%（I）",
+   "evidence": [
+    {
+     "time": "25:22-25:55",
+     "quote": "天顺风能，就是前面风电设备的，这也是一个新周期……涨停板，两天调整，涨停板，然后一个大阴线修正……今天是低开高走，虽然说低开高走，但是重心下移，所以说一定要等这个回调结束，这个回调大概就是10线，回调结束之后，重心开始平移的时候你就上，然后等第二轮"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "002531.SZ"
+  },
+  {
+   "code": "601595",
+   "name": "上海电影",
+   "group": "趋势-AI短剧/营销",
+   "board_0921": "-1.67%",
+   "stance": "positive",
+   "playbook": "platform_breakout",
+   "teacher": "AI短剧、AI营销那波里活下来的票，资金不傻，属于延续；按平台突破等带量",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "25:55-26:21",
+     "quote": "上海电影跟刚才那个影视是一样的，中信出版一样的……这俩就是AI短剧、AI营销后面的延续，这些票是活下来的……资金又不傻"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "601595.SH"
+  },
+  {
+   "code": "300788",
+   "name": "中信出版",
+   "group": "趋势-AI短剧/营销",
+   "board_0921": "-5.35%",
+   "stance": "positive",
+   "playbook": "platform_breakout",
+   "teacher": "AI短剧、AI营销那波里活下来的票，资金不傻，属于延续；按平台突破等带量",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "25:55-26:21",
+     "quote": "上海电影跟刚才那个影视是一样的，中信出版一样的……这俩就是AI短剧、AI营销后面的延续，这些票是活下来的……资金又不傻"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "300788.SZ"
+  },
+  {
+   "code": "300739",
+   "name": "明阳电路",
+   "group": "趋势-PCB慢牛",
+   "board_0921": "+0.41%",
+   "stance": "positive",
+   "playbook": "prior_high_breakout",
+   "teacher": "有点慢，短期有点拿不住，但趋势方向很好，前高迟早要过，只是时间问题；业绩预期非常好",
+   "params": {
+    "prior_high": 41.73,
+    "prior_high_src": "D（250日最高）",
+    "floor_ma": 20,
+    "floor_ma_src": "I（慢票放宽到 MA20）"
+   },
+   "invalidation": "收盘跌破 MA20（I，慢票放宽）",
+   "evidence": [
+    {
+     "time": "26:21-26:34",
+     "quote": "明阳电路、本川智能，本川智能就有点慢，我觉得短期有点拿不住，但是它的趋势方向很好，这个前高大概也是要过的，就是个时间问题，业绩预期非常好"
+    }
+   ],
+   "uncertainty": "两只是否都被点评：large 写“没让电路 本圈智能”，small 写“明阳链路”，按自选列表第20/21行推定两只",
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "300739.SZ"
+  },
+  {
+   "code": "300964",
+   "name": "本川智能",
+   "group": "趋势-PCB慢牛",
+   "board_0921": "+3.17%",
+   "stance": "positive",
+   "playbook": "prior_high_breakout",
+   "teacher": "有点慢，短期有点拿不住，但趋势方向很好，前高迟早要过，只是时间问题；业绩预期非常好",
+   "params": {
+    "prior_high": 88.6,
+    "prior_high_src": "D（250日最高）",
+    "floor_ma": 20,
+    "floor_ma_src": "I（慢票放宽到 MA20）"
+   },
+   "invalidation": "收盘跌破 MA20（I，慢票放宽）",
+   "evidence": [
+    {
+     "time": "26:21-26:34",
+     "quote": "明阳电路、本川智能，本川智能就有点慢，我觉得短期有点拿不住，但是它的趋势方向很好，这个前高大概也是要过的，就是个时间问题，业绩预期非常好"
+    }
+   ],
+   "uncertainty": "两只是否都被点评：large 写“没让电路 本圈智能”，small 写“明阳链路”，按自选列表第20/21行推定两只",
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "300964.SZ"
+  },
+  {
+   "code": "600410",
+   "name": "华胜天成",
+   "group": "趋势-AI算力/应用",
+   "board_0921": "+4.06%，收 17.19，最高 17.98",
+   "stance": "watch",
+   "playbook": "double_bottom_platform",
+   "teacher": "刚完成圆弧底/偏双底，然后平台突破，但突破节奏缓慢；188亿体量还好；一二季度业绩不好，要先确认逻辑（AI算力/AI应用）",
+   "params": {
+    "neckline": 16.4,
+    "neckline_src": "D（双底 7月底 11.95 / 8月底 12.74 之间的 8月高点）",
+    "platform_high": 17.98,
+    "platform_high_src": "D（9/21 最高）"
+   },
+   "invalidation": "收盘跌回颈线 16.40 下方",
+   "evidence": [
+    {
+     "time": "27:00-27:41",
+     "quote": "华胜天成是刚完成圆弧底……188亿还好……应该是一个偏双底，然后平台突破，不过他突破的节奏会比较缓慢……这个票我觉得大家还是要确定他的逻辑，因为他一二季度业绩并不是很好……应该就是AI算力、AI应用"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "600410.SH"
+  },
+  {
+   "code": "300476",
+   "name": "胜宏科技",
+   "group": "趋势-PCB大票",
+   "board_0921": "+9.23%，成交 147.98亿，最高 250.32=MA60",
+   "stance": "positive",
+   "playbook": "ma60_reclaim",
+   "teacher": "大票走势漂亮：第一波带量反弹打到60日线后长时间回踩，今天带量上攻挑战60日线；周期较长；靠业绩支撑，预期三季度比一二季度增50%",
+   "params": {
+    "ma": 60,
+    "ma_src": "T",
+    "amount_mult": 1.5,
+    "amount_mult_src": "I",
+    "q3_growth_expect_pct": 50,
+    "q3_growth_expect_pct_src": "T"
+   },
+   "invalidation": "收盘连续2日低于 MA60（I）",
+   "evidence": [
+    {
+     "time": "27:44-28:09",
+     "quote": "胜宏，这是大票……第一波带量反弹直接打了六十均线，然后回踩这么长时间……今天带量上攻，六十日线这边就是挑战了……但这个周期会比较长"
+    },
+    {
+     "time": "28:09-28:35",
+     "quote": "两千多亿的市值，这个票炒的就是业绩……一天成交148个亿……三季度可能比一二季度还要增百分之五十"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "300476.SZ"
+  },
+  {
+   "code": "000993",
+   "name": "闽东电力",
+   "group": "自选截图（未点评）",
+   "board_0921": "9天6板",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "000993.SZ"
+  },
+  {
+   "code": "000823",
+   "name": "超声电子",
+   "group": "自选截图（未点评）",
+   "board_0921": "+7.78%",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "000823.SZ"
+  },
+  {
+   "code": "002815",
+   "name": "崇达技术",
+   "group": "自选截图（未点评）",
+   "board_0921": "+2.05%",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "002815.SZ"
+  },
+  {
+   "code": "605058",
+   "name": "澳弘电子",
+   "group": "自选截图（未点评）",
+   "board_0921": "7天5板",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "605058.SH"
+  },
+  {
+   "code": "300741",
+   "name": "华宝股份",
+   "group": "自选截图（未点评）",
+   "board_0921": "+3.38%",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "300741.SZ"
+  },
+  {
+   "code": "003006",
+   "name": "百亚股份",
+   "group": "自选截图（未点评）",
+   "board_0921": "-0.19%",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "003006.SZ"
+  },
+  {
+   "code": "603657",
+   "name": "春光科技",
+   "group": "自选截图（未点评）",
+   "board_0921": "+2.56%",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "603657.SH"
+  },
+  {
+   "code": "002011",
+   "name": "盾安环境",
+   "group": "自选截图（未点评）",
+   "board_0921": "+3.94%",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "002011.SZ"
+  },
+  {
+   "code": "000592",
+   "name": "平潭发展",
+   "group": "自选截图（未点评）",
+   "board_0921": "4天1板",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "000592.SZ"
+  },
+  {
+   "code": "600184",
+   "name": "光电股份",
+   "group": "自选截图（未点评）",
+   "board_0921": "-3.13%",
+   "stance": "unknown",
+   "playbook": "platform_breakout",
+   "teacher": "出现在老师“前期强势股”自选列表，统一适用“加自选等回调、平台带量突破”规则",
+   "params": {},
+   "invalidation": "跌破平台下沿或 MA10",
+   "evidence": [
+    {
+     "time": "22:20-23:08",
+     "quote": "我就是把前期那个比较强势的股票找出来了……你追高是很难的，但是你加个自选，然后等它回调，向平台发展……带量突破，什么时候就是好买点"
+    }
+   ],
+   "valid_sessions": 2,
+   "valid_sessions_src": "T（29:05“这些东西我觉得也够大家用两天了”）",
+   "ts_code": "600184.SH"
+  }
+ ],
+ "pack_id": "7b137a1e97e2e652"
+}

@@ -104,6 +104,9 @@ jq -e '
   ([.blocking_executors[] | .available_slots >= 0] | all)
 ' <<<"$health_json" >/dev/null || fail 'quant local health lacks an opening-ready control-plane condition'
 required_leases=(
+  background_loop:market_event_capture
+  background_loop:all_a_level1_snapshot
+  background_loop:public_evidence_capture
   background_loop:intraday_monitor
   background_loop:super_get_fast_quote
   background_loop:tencent_order_book

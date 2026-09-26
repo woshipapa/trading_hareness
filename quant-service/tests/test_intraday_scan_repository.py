@@ -161,6 +161,7 @@ class IntradayScanRepositoryTests(unittest.TestCase):
                 rows.append({
                     "symbol": symbol, "trading_date": date(2026, 7, day), "high": close * 1.02,
                     "low": close * 0.98, "close": close, "volume": 1000 + day, "adj_factor": 1.0,
+                    "factor_provider": "tushare_primary", "factor_raw": {},
                     "is_suspended": False, "limit_up": close * 1.1, "limit_down": close * 0.9, "is_st": False,
                 })
         connection = MagicMock()
@@ -174,6 +175,10 @@ class IntradayScanRepositoryTests(unittest.TestCase):
         self.assertEqual(factors["600000.SH"]["status"], "completed")
         self.assertGreater(factors["600000.SH"]["latest_daily_close"], factors["000001.SZ"]["latest_daily_close"])
         self.assertIn("row_number() OVER(PARTITION BY b.symbol", connection.execute.call_args.args[0])
+        self.assertIn("b.quality_status='fresh'", connection.execute.call_args.args[0])
+        self.assertIn("AS adjustment_state", connection.execute.call_args.args[0])
+        self.assertIn("quant.daily_adjustment_factors", connection.execute.call_args.args[0])
+        self.assertIn("raw->>'factor_semantics'", connection.execute.call_args.args[0])
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -203,6 +204,52 @@ def _minute_clock(value: Any) -> tuple[str | None, str | None]:
     return clock if clock and re.fullmatch(r"\d{4}", clock) else None, embedded_date
 
 
+#: ``GetKLineDay_W14`` ``Type`` values for intraday periods (verified live
+#: 2026-09-21: 120 bars reach ~15 sessions at 30 minutes, ~30 at 60 minutes).
+PERIOD_KLINE_TYPES: dict[str, str] = {"30": "30", "60": "60"}
+PERIOD_KLINE_MAX_BARS = MAX_PAGE_SIZE
+
+
+def parse_period_kline_payload(payload: Mapping[str, Any], symbol: str, period: str) -> list[dict[str, Any]]:
+    """Normalize a ``GetKLineDay_W14`` intraday-period payload, oldest first.
+
+    ``x`` holds the bar's end as ``YYYYMMDDHHMM`` (exchange clock) and ``y``
+    ``[open, close, high, low]``; ``vol``/``bal`` are volume in lots and amount.
+    The newest bar can still be forming during the session.
+    """
+    stamps, ohlc = payload.get("x") or [], payload.get("y") or []
+    volumes, amounts = payload.get("vol") or [], payload.get("bal") or []
+    bars: dict[str, dict[str, Any]] = {}
+    for index, stamp in enumerate(stamps):
+        text = str(stamp)
+        if not re.fullmatch(r"\d{12}", text):
+            continue
+        try:
+            opened, closed, high, low = (float(value) for value in ohlc[index][:4])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if min(opened, closed, high, low) <= 0:
+            continue
+        bars[text] = {
+            "symbol": symbol, "period": str(period), "bar_time": text,
+            "open": opened, "high": high, "low": low, "close": closed,
+            "volume_lot": _number(volumes[index]) if index < len(volumes) else None,
+            "amount": _number(amounts[index]) if index < len(amounts) else None,
+        }
+    return [bars[key] for key in sorted(bars)]
+
+
+def _period_kline_params(symbol: str, period: str, count: int) -> dict[str, Any]:
+    if str(period) not in PERIOD_KLINE_TYPES:
+        raise ValueError(f"unsupported Longhu kline period: {period}")
+    code = _stock_code(symbol)
+    if not code:
+        raise ValueError(f"unsupported Longhu stock symbol: {symbol}")
+    return {"a": "GetKLineDay_W14", "c": "StockLineData", "apiv": "w40", "StockID": code,
+            "Type": PERIOD_KLINE_TYPES[str(period)], "Is_FS": "1",
+            "st": max(1, min(PERIOD_KLINE_MAX_BARS, int(count))), "Index": 0}
+
+
 def parse_stock_minute_payload(
     payload: Mapping[str, Any], symbol: str, *, require_trade_date: bool = False,
 ) -> list[dict[str, Any]]:
@@ -278,7 +325,28 @@ def current_session_minute_rows(
     dates = {str(row.get("trade_date") or "") for row in materialized}
     if dates != {expected_text}:
         raise RuntimeError("Longhu minute rows are stale or span multiple exchange dates")
-    return materialized
+    return exact_minute_amounts(materialized)
+
+
+def exact_minute_amounts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per-minute turnover from the cumulative average price.
+
+    The trend feed has no per-minute turnover; the adapter's ``vwap`` is the
+    session's cumulative average price, so cumulative turnover is
+    ``vwap x cumulative volume x 100`` and a minute's turnover is the
+    difference of two of them.  The previous derivation (``vwap x minute
+    volume``) biased 30-minute window VWAPs by up to ~1% (2026-09-22).
+    """
+    previous = 0.0
+    for row in rows:
+        vwap, cumulative = _number(row.get("vwap")), _number(row.get("cumulative_volume_lot"))
+        if vwap is None or vwap <= 0 or cumulative is None:
+            return rows
+        total = vwap * cumulative * 100
+        row["amount"] = round(max(0.0, total - previous), 4)
+        row["cumulative_amount"] = round(total, 4)
+        previous = total
+    return rows
 
 
 @dataclass(frozen=True)
@@ -306,7 +374,7 @@ class LonghuVendorConfig:
             plate_page_size=safe_page_size(int(payload.get("plate_page_size") or 60)),
             timeout_seconds=float(payload.get("timeout_seconds") or 20.0),
             retries=max(1, int(payload.get("retries") or 3)),
-            workers=max(1, min(24, int(payload.get("workers") or 12))),
+            workers=max(1, min(64, int(payload.get("workers") or 12))),
         )
         if not result.token or not result.user_id or not result.device_id or not result.version:
             raise ValueError("Longhu token, user_id, device_id and version are required")
@@ -338,6 +406,65 @@ def configured(path: str | Path | None = None) -> bool:
         return False
 
 
+MINUTE_BATCH_DEADLINE_EXCEEDED = "minute_batch_deadline_exceeded"
+MINUTE_BATCH_DEFAULT_DEADLINE_SECONDS = 5.5
+MINUTE_BATCH_TRANSFER_RESERVE_SECONDS = 1.5
+# Gateways (by base URL) that answered the batch minute route with 404/405,
+# i.e. an owner not yet upgraded; per-symbol calls are used until expiry.
+_BATCH_MINUTE_ROUTE_MISSING_UNTIL: dict[str, float] = {}
+BATCH_MINUTE_ROUTE_RECHECK_SECONDS = 600.0
+
+
+def minute_batch_workers() -> int:
+    """In-flight single-symbol minute calls when a basket must be fanned out here.
+
+    The trend endpoint takes one ``StockID``.  An upgraded owner fans a basket
+    out itself behind ``GET /licensed/longhu/minutes`` (one owner slot).  Until
+    then a peer fans out single gateway calls, each occupying one slot of the
+    owner's blocking executor (4 workers + 8 queued by default); measured
+    throughput is flat above 4 in flight and more only turns into 503s that
+    also reject quote and auction reads.  Raise this together with the
+    owner's ``AKSHARE_MAX_WORKERS``.
+    """
+    try:
+        return max(1, min(MAX_PAGE_SIZE, int(os.getenv("LONGHU_MINUTE_BATCH_WORKERS", "4"))))
+    except ValueError:
+        return 4
+
+
+def _minutes_batch(
+    fetch: Any, symbols: Iterable[str], workers: int, deadline_seconds: float | None = None,
+) -> dict[str, list[dict[str, Any]] | str]:
+    """Fan one bounded basket out on a private pool; one symbol's failure is its own entry.
+
+    Results are keyed by the caller's spelling so callers can look symbols up
+    without re-normalizing; unsupported symbols get an error entry.
+    """
+    ordered = list(dict.fromkeys(str(value) for value in symbols if value))[:MAX_PAGE_SIZE]
+    result: dict[str, list[dict[str, Any]] | str] = {
+        symbol: "unsupported Longhu stock symbol" for symbol in ordered if normalize_stock_symbol(symbol) is None
+    }
+    ordered = [symbol for symbol in ordered if symbol not in result]
+    if not ordered:
+        return result
+    pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(ordered))), thread_name_prefix="longhu-minute")
+    futures = {pool.submit(fetch, symbol): symbol for symbol in ordered}
+    try:
+        for future in as_completed(futures, timeout=deadline_seconds):
+            symbol = futures[future]
+            try:
+                result[symbol] = future.result()
+            except Exception as error:  # one symbol must not abort the basket
+                result[symbol] = f"{type(error).__name__}: {str(error)[:200]}"
+    except FuturesTimeoutError:
+        # Return what finished; stragglers are reported, never waited on.
+        for future, symbol in futures.items():
+            result.setdefault(symbol, MINUTE_BATCH_DEADLINE_EXCEEDED)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    return result
+
+
 class LonghuIntradaySource(Protocol):
     """Small contract shared by the local licensed and remote gateway clients."""
 
@@ -348,6 +475,12 @@ class LonghuIntradaySource(Protocol):
     def stock_quote(self, symbol: str) -> dict[str, Any]: ...
 
     def stock_minutes(self, symbol: str) -> list[dict[str, Any]]: ...
+
+    def stock_minutes_batch(
+        self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
+    ) -> dict[str, list[dict[str, Any]] | str]: ...
+
+    def stock_period_bars(self, symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]: ...
 
     def raw_call(self, request: Mapping[str, Any]) -> dict[str, Any]: ...
 
@@ -376,6 +509,11 @@ class SharedLonghuReadSource:
         self._session = requests.Session()
         self._session.trust_env = False
         self._session.headers.update({"X-Quant-Read-Key": self.read_key, "Accept": "application/json"})
+        # Batched minute requests run many calls at once; size the keep-alive
+        # pool for them instead of discarding connections above ten.
+        adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=max(16, minute_batch_workers()))
+        self._session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
 
     def _get(self, path: str, *, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
         response = self._session.get(
@@ -488,6 +626,62 @@ class SharedLonghuReadSource:
         if not rows:
             raise RuntimeError(f"shared Longhu minute returned no rows for {normalized}")
         return rows
+
+    def stock_minutes_batch(
+        self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
+    ) -> dict[str, list[dict[str, Any]] | str]:
+        """One gateway request for the basket; per-symbol calls only for an old owner."""
+        ordered = list(dict.fromkeys(str(value) for value in symbols if value))[:MAX_PAGE_SIZE]
+        if not ordered:
+            return {}
+        if time.monotonic() >= _BATCH_MINUTE_ROUTE_MISSING_UNTIL.get(self.base_url, 0.0):
+            result = self._gateway_minutes_batch(ordered, deadline_seconds)
+            if result is not None:
+                return result
+            _BATCH_MINUTE_ROUTE_MISSING_UNTIL[self.base_url] = time.monotonic() + BATCH_MINUTE_ROUTE_RECHECK_SECONDS
+        return _minutes_batch(self.stock_minutes, ordered, minute_batch_workers(), deadline_seconds)
+
+    def _gateway_minutes_batch(
+        self, ordered: list[str], deadline_seconds: float | None,
+    ) -> dict[str, list[dict[str, Any]] | str] | None:
+        """Call ``GET /licensed/longhu/minutes``; ``None`` means the owner lacks the route.
+
+        Any other failure (503 saturation, timeout) raises: fanning the same
+        basket out as single calls would only add load to a busy owner.
+        """
+        budget = float(deadline_seconds or MINUTE_BATCH_DEFAULT_DEADLINE_SECONDS)
+        # The owner stops fanning out early enough for the rows to cross the
+        # tunnel within the caller's budget.
+        owner_deadline = max(1.0, min(20.0, budget - MINUTE_BATCH_TRANSFER_RESERVE_SECONDS))
+        wanted = {symbol: symbol.strip().upper() for symbol in ordered}
+        response = self._session.get(
+            f"{self.base_url}/licensed/longhu/minutes",
+            params={"symbols": ",".join(dict.fromkeys(wanted.values())), "deadline_seconds": owner_deadline},
+            timeout=budget + 1.0,
+        )
+        if response.status_code in (404, 405):
+            return None
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise TypeError("shared Longhu minute batch response must be an object")
+        rows = payload.get("rows") if isinstance(payload.get("rows"), dict) else {}
+        errors = payload.get("errors") if isinstance(payload.get("errors"), dict) else {}
+        result: dict[str, list[dict[str, Any]] | str] = {}
+        for symbol, key in wanted.items():
+            value = rows.get(key)
+            if isinstance(value, list):
+                result[symbol] = [dict(row) for row in value if isinstance(row, Mapping)]
+            else:
+                result[symbol] = str(errors.get(key) or "minute_batch_missing_symbol")
+        return result
+
+    def stock_period_bars(self, symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]:
+        """30/60-minute K-line history (plus the forming bar) through the documented call."""
+        params = _period_kline_params(symbol, period, count)
+        payload = self._call_single(target="longhu_history", action=params.pop("a"),
+                                    controller=params.pop("c"), params=params)
+        return parse_period_kline_payload(payload, normalize_stock_symbol(symbol) or str(symbol), str(period))
 
     def raw_call(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Forward the complete documented call contract to the owner gateway."""
@@ -690,6 +884,22 @@ class LonghuVendorSource:
             raise RuntimeError(f"Longhu minute returned no rows for {code}")
         return rows
 
+    def stock_minutes_batch(
+        self, symbols: Iterable[str], *, deadline_seconds: float | None = None,
+    ) -> dict[str, list[dict[str, Any]] | str]:
+        return _minutes_batch(
+            self.stock_minutes, symbols, max(self.config.workers, minute_batch_workers()), deadline_seconds,
+        )
+
+    def stock_period_bars(self, symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]:
+        """30/60-minute K-line history (plus the forming bar) for one security."""
+        params = _period_kline_params(symbol, period, count)
+        payload = self._single_raw_call_payload(
+            {"target": "longhu_history", "path": "/w1/api/index.php", "params": params},
+            action="GetKLineDay_W14",
+        )
+        return parse_period_kline_payload(payload, normalize_stock_symbol(symbol) or str(symbol), str(period))
+
     def _single_raw_call_payload(self, request: Mapping[str, Any], *, action: str) -> dict[str, Any]:
         """Extract one page from the same generic contract used by peers."""
         result = self.raw_call(request)
@@ -871,6 +1081,7 @@ __all__ = [
     "DEFAULT_CONFIG_PATH", "FLOW_CONVENTION", "LonghuIntradaySource", "LonghuVendorConfig",
     "LonghuVendorSource", "SharedLonghuReadSource", "intraday_source",
     "MAX_PAGE_SIZE", "MAX_TENCENT_BATCH_SIZE", "configured", "normalize_stock_symbol",
-    "current_session_minute_rows", "parse_industry_stock_row", "parse_stock_minute_payload", "parse_stock_snapshot_payload",
+    "current_session_minute_rows", "exact_minute_amounts", "parse_industry_stock_row", "parse_period_kline_payload",
+    "parse_stock_minute_payload", "parse_stock_snapshot_payload", "PERIOD_KLINE_TYPES",
     "parse_tencent_quote_text", "safe_page_size", "market_today", "direct_access_enabled",
 ]

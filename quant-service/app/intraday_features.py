@@ -127,6 +127,75 @@ def peer_context(peer_symbols: list[str], features: dict[str, dict[str, Any]]) -
     }
 
 
+#: How a peer context counts its peers; persisted with every context so a
+#: stored signal says which semantics produced its breadth.
+PEER_SCOPE = "strongest_single_group_v1"
+#: Per-group rows kept for audit; a name in twenty concepts would otherwise
+#: persist twenty rows with every observation.
+GROUP_BREADTH_AUDIT_LIMIT = 8
+
+
+def strongest_group_peer_context(
+    groups: list[dict[str, Any]],
+    features: dict[str, dict[str, Any]],
+    *,
+    group_context: Callable[[list[str], dict[str, dict[str, Any]]], dict[str, Any]] = peer_context,
+) -> dict[str, Any]:
+    """Breadth of the strongest single sector the target shares with its peers.
+
+    The union of every group a name belongs to stops meaning "its sector": a
+    name in twenty concepts shared at least one with 39 of 88 names in the
+    2026-09-21 ten-day pool, so union breadth measured the pool, not a
+    sector.  Each group is scored on its own and the strongest -- at least two
+    observed peers first, then breadth, then confirming count, then size --
+    supplies the headline counts every rule reads.  The union is kept beside
+    it for audit; ``peers`` still carries every observed peer's features so a
+    replay can rescore any group.
+    """
+    scored: list[dict[str, Any]] = []
+    seen: set[frozenset[str]] = set()
+    for group in sorted(groups, key=lambda item: (str(item.get("taxonomy_key") or ""),
+                                                   str(item.get("sector_key") or ""))):
+        members = sorted({str(symbol).upper() for symbol in group.get("peer_symbols") or []})
+        # The same THS code sits in two taxonomies with the same members;
+        # scoring it twice adds rows, not evidence.
+        if not members or frozenset(members) in seen:
+            continue
+        seen.add(frozenset(members))
+        context = group_context(members, features)
+        scored.append({
+            "taxonomy_key": str(group.get("taxonomy_key") or ""), "sector_key": str(group.get("sector_key") or ""),
+            "peer_symbols": members, "context": context,
+        })
+    scored.sort(key=lambda item: (
+        -int(int(item["context"].get("available_peer_count") or 0) >= 2),
+        -float(item["context"].get("confirming_breadth") or 0),
+        -int(item["context"].get("confirming_peer_count") or 0),
+        -int(item["context"].get("available_peer_count") or 0),
+    ))
+    union_symbols = sorted({symbol for item in scored for symbol in item["peer_symbols"]})
+    union = group_context(union_symbols, features)
+    headline = scored[0]["context"] if scored else union
+    return {
+        **headline,
+        "peers": union.get("peers", []),
+        "peer_scope": PEER_SCOPE,
+        "selected_group": ({
+            "taxonomy_key": scored[0]["taxonomy_key"], "sector_key": scored[0]["sector_key"],
+            "peer_symbols": scored[0]["peer_symbols"],
+        } if scored else None),
+        "group_count": len(scored),
+        "group_breadth": [{
+            "taxonomy_key": item["taxonomy_key"], "sector_key": item["sector_key"],
+            "available_peer_count": item["context"].get("available_peer_count"),
+            "confirming_peer_count": item["context"].get("confirming_peer_count"),
+            "confirming_breadth": item["context"].get("confirming_breadth"),
+        } for item in scored[:GROUP_BREADTH_AUDIT_LIMIT]],
+        "union": {key: union.get(key) for key in (
+            "requested_peer_count", "available_peer_count", "confirming_peer_count", "confirming_breadth")},
+    }
+
+
 def annotate_flow_snapshot_provenance(
     quotes: dict[str, dict[str, Any]], snapshot_status: dict[str, Any], *, max_age_seconds: float = 45.0,
 ) -> None:
@@ -226,6 +295,6 @@ def strategy_session_rows(rows: list[dict[str, Any]], *, number: Callable[[Any],
 
 
 __all__ = [
-    "annotate_flow_snapshot_provenance", "mapped_watchlist_peers", "minute_features",
-    "peer_context", "strategy_session_rows",
+    "GROUP_BREADTH_AUDIT_LIMIT", "PEER_SCOPE", "annotate_flow_snapshot_provenance", "mapped_watchlist_peers",
+    "minute_features", "peer_context", "strategy_session_rows", "strongest_group_peer_context",
 ]

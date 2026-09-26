@@ -10,6 +10,7 @@ from app.factor_sql_lab import (
     _materialize_evaluation_rows, _materialize_factor_scores,
     _point_in_time_industry_ready, _split_rows, evaluable_factor_keys, prepare_factor_panel, run_multi_factor_strategy_sql,
 )
+from app.owner_storage import TIERED_EVIDENCE_TABLES
 
 
 class RecordingResult:
@@ -82,6 +83,48 @@ class FactorSqlLabTests(unittest.TestCase):
         )
         self.assertEqual(trade_insert_params[2], 6)
 
+    def test_strategy_applies_direction_overrides_and_research_mode(self):
+        connection = RecordingConnection()
+        with patch("app.factor_sql_lab.prepare_factor_panel", return_value={}) as prepare_panel:
+            result = run_multi_factor_strategy_sql(
+                connection, "all_a", date(2026, 1, 1), date(2026, 3, 1),
+                {"factors": ["volume_ratio_20d", "reversal_5d"], "rebalance_days": 6, "hold_days": 5,
+                 "directions": {"volume_ratio_20d": -1}, "membership_mode": "current_backfill"},
+            )
+        self.assertEqual(prepare_panel.call_args.kwargs["membership_mode"], "current_backfill")
+        score_params = [params for sql, params in connection.calls if "INSERT INTO factor_sql_strategy_scores" in sql]
+        self.assertEqual([params[1] for params in score_params], [-1.0, 1.0])     # override, then the registry prior
+        self.assertEqual(result["metrics"]["assumptions"]["factor_directions"], {"volume_ratio_20d": -1.0, "reversal_5d": 1.0})
+        self.assertIn("industry_membership_backfilled_from_current", result["metrics"]["promotion_gate"]["blockers"])
+        with self.assertRaises(ValueError):
+            run_multi_factor_strategy_sql(connection, "all_a", date(2026, 1, 1), date(2026, 3, 1),
+                                          {"factors": ["reversal_5d"], "rebalance_days": 6, "hold_days": 5,
+                                           "directions": {"reversal_5d": 2}})
+
+    def test_strategy_reports_excess_over_an_equal_weight_benchmark(self):
+        class Connection(RecordingConnection):
+            def execute(self, sql, params=None):
+                self.calls.append((sql, params))
+                if "avg(trades.net_return) AS period_return" in sql:
+                    class Rows(RecordingResult):
+                        def fetchall(self_inner):
+                            return [{"trading_date": date(2026, 1, 5), "period_return": 0.02, "positions": 20, "benchmark_return": 0.01},
+                                    {"trading_date": date(2026, 1, 13), "period_return": -0.01, "positions": 20, "benchmark_return": -0.02}]
+                    return Rows()
+                return super().execute(sql, params)
+
+        connection = Connection()
+        with patch("app.factor_sql_lab.prepare_factor_panel", return_value={}):
+            result = run_multi_factor_strategy_sql(connection, "all_a", date(2026, 1, 1), date(2026, 3, 1),
+                                                   {"factors": ["reversal_5d"], "rebalance_days": 6, "hold_days": 5})
+        benchmark = result["metrics"]["benchmark"]
+        self.assertAlmostEqual(benchmark["mean_excess_per_period"], 0.01)
+        self.assertEqual(benchmark["excess_win_rate"], 1.0)
+        self.assertAlmostEqual(benchmark["total_return"], 1.01 * 0.98 - 1)
+        benchmark_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_strategy_benchmark" in sql)
+        self.assertIn("entry.trading_index=signal.trading_index+1", benchmark_sql)
+        self.assertEqual(result["equity_curve"][1]["benchmark_return"], -0.02)
+
     def test_formal_history_requires_calendar_span_as_well_as_trading_day_count(self):
         class Connection:
             def execute(self, _sql, _params):
@@ -113,6 +156,44 @@ class FactorSqlLabTests(unittest.TestCase):
         self.assertNotIn("instrument.industry", create_sql)
         self.assertIn("trading_index-index_20d_ago=20", create_sql)
         self.assertIn("bar.close*adjustment_history.adj_factor", create_sql)
+
+    def test_backfill_mode_uses_current_industry_and_turnover_size_and_is_labelled(self):
+        connection = RecordingConnection()
+        panel = prepare_factor_panel(connection, "all_a", date(2023, 9, 1), date(2026, 9, 1), 5, "current_backfill")
+        create_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_panel" in sql)
+        self.assertIn("'longhu_ths_industry','ths_index_i'", create_sql)
+        self.assertIn("member.effective_to IS NULL", create_sql)
+        self.assertNotIn("member.known_at <", create_sql)                    # not point-in-time, by design
+        self.assertIn("'current_backfill' END AS industry_quality", create_sql)
+        self.assertIn("ln(nullif(avg(amount)", create_sql)
+        self.assertNotIn("bar.available_at <", create_sql)                   # backfilled history is kept
+        self.assertNotIn("adjustment.available_at <", create_sql)
+        self.assertIn("bar.quality_status IN ('fresh','partial')", create_sql)
+        self.assertEqual(panel["membership_mode"], "current_backfill")
+        connection.calls.clear()
+        _materialize_factor_scores(connection, "momentum_20d", date(2023, 9, 1), date(2026, 9, 1), "current_backfill")
+        score_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_factor_scores" in sql)
+        self.assertIn("signal.industry_quality='current_backfill'", score_sql)
+        with self.assertRaises(ValueError):
+            prepare_factor_panel(connection, "all_a", date(2023, 9, 1), date(2026, 9, 1), 5, "guess")
+
+    def test_strict_mode_keeps_market_value_size(self):
+        connection = RecordingConnection()
+        prepare_factor_panel(connection, "all_a", date(2026, 1, 1), date(2026, 3, 1), 5)
+        create_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_panel" in sql)
+        self.assertIn("log_market_cap_pit AS log_market_cap", create_sql)
+        self.assertNotIn("longhu_ths_industry", create_sql)
+
+    def test_panel_uses_atomic_owner_cold_relations_after_cutover(self):
+        connection = RecordingConnection()
+        connection.cursor = object()
+        cold = {f"{name}_cold" for name in TIERED_EVIDENCE_TABLES}
+        with patch("app.factor_sql_lab.eligible_cold_tables", return_value=cold):
+            prepare_factor_panel(connection, "all_a", date(2025, 1, 1), date(2026, 3, 1), 5)
+        create_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_panel" in sql)
+        for relation in ("canonical_bars_daily", "daily_adjustment_factors", "daily_fundamentals"):
+            self.assertIn(f"quant.{relation}_cold", create_sql)
+            self.assertIn(f"SELECT * FROM quant.{relation} UNION ALL", create_sql)
 
     def test_industry_gate_fails_closed_when_any_panel_row_is_unknown(self):
         self.assertTrue(_point_in_time_industry_ready({"rows": 10, "industry_pit_rows": 10}))

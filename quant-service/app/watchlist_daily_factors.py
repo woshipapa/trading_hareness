@@ -7,7 +7,9 @@ from collections import defaultdict
 from typing import Any, Callable, Iterable
 
 from .post_close_structures import daily_base_structure
+from .owner_factor_repository import FACTOR_PROVIDER_ORDER
 from .research_prices import adjusted_bars
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
 def daily_factors_from_rows(rows: Iterable[dict[str, Any]], *, number: Callable[[Any], float | None]) -> dict[str, Any]:
@@ -52,12 +54,30 @@ def daily_factors_from_rows(rows: Iterable[dict[str, Any]], *, number: Callable[
 
 def watchlist_daily_factors(symbol: str, connection: Any, *, number: Callable[[Any], float | None]) -> dict[str, Any]:
     """Compute bounded adjusted factors from a caller-owned transaction."""
+    factor_sql = persisted_factor_semantics_sql("factor")
     rows = connection.execute(
-        """SELECT b.trading_date,b.high,b.low,b.close,b.volume,b.adj_factor,b.is_suspended,b.limit_up,b.limit_down,
+        f"""SELECT b.trading_date,b.high,b.low,b.close,b.volume,pit_adjustment.adj_factor,
+                         pit_adjustment.provider AS factor_provider,pit_adjustment.raw AS factor_raw,
+                         CASE WHEN pit_adjustment.adj_factor>0 THEN 'complete' ELSE 'absent' END AS adjustment_state,b.is_suspended,b.limit_up,b.limit_down,
                   i.is_st
              FROM quant.canonical_bars_daily b
              JOIN quant.instruments i ON i.symbol=b.symbol
-             WHERE b.symbol=%s ORDER BY b.trading_date DESC LIMIT 61""", (symbol,)
+             JOIN LATERAL (
+                   SELECT factor.adj_factor,factor.provider,factor.raw
+                     FROM quant.daily_adjustment_factors factor
+                    WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                      AND {factor_sql}
+                      AND factor.adj_factor>0
+                      AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                    ORDER BY array_position(%s::text[],factor.provider) NULLS LAST,
+                             factor.available_at DESC,factor.provider
+                    LIMIT 1
+             ) pit_adjustment ON TRUE
+             WHERE b.symbol=%s
+               AND b.quality_status='fresh'
+               AND b.available_at <= now()
+               AND b.trading_date <= (now() AT TIME ZONE 'Asia/Shanghai')::date
+             ORDER BY b.trading_date DESC LIMIT 61""", (list(FACTOR_PROVIDER_ORDER), symbol)
     ).fetchall()
     return daily_factors_from_rows((dict(row) for row in reversed(rows)), number=number)
 
@@ -74,17 +94,34 @@ def watchlist_daily_factors_by_symbol(
     requested = sorted({str(symbol) for symbol in symbols if str(symbol)})
     if not requested:
         return {}
+    factor_sql = persisted_factor_semantics_sql("factor")
     rows = connection.execute(
-        """WITH ranked AS (
-               SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,b.adj_factor,b.is_suspended,b.limit_up,b.limit_down,
+        f"""WITH ranked AS (
+               SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,pit_adjustment.adj_factor,
+                      pit_adjustment.provider AS factor_provider,pit_adjustment.raw AS factor_raw,
+                      CASE WHEN pit_adjustment.adj_factor>0 THEN 'complete' ELSE 'absent' END AS adjustment_state,b.is_suspended,b.limit_up,b.limit_down,
                       i.is_st,row_number() OVER(PARTITION BY b.symbol ORDER BY b.trading_date DESC) AS row_number
                  FROM quant.canonical_bars_daily b
                  JOIN quant.instruments i ON i.symbol=b.symbol
+                 JOIN LATERAL (
+                       SELECT factor.adj_factor,factor.provider,factor.raw
+                         FROM quant.daily_adjustment_factors factor
+                        WHERE factor.symbol=b.symbol AND factor.trading_date=b.trading_date
+                          AND {factor_sql}
+                          AND factor.adj_factor>0
+                          AND factor.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                        ORDER BY array_position(%s::text[],factor.provider) NULLS LAST,
+                                 factor.available_at DESC,factor.provider
+                        LIMIT 1
+                 ) pit_adjustment ON TRUE
                 WHERE b.symbol=ANY(%s)
+                  AND b.quality_status='fresh'
+                  AND b.available_at <= now()
+                  AND b.trading_date <= (now() AT TIME ZONE 'Asia/Shanghai')::date
            )
-           SELECT symbol,trading_date,high,low,close,volume,adj_factor,is_suspended,limit_up,limit_down,is_st
+           SELECT symbol,trading_date,high,low,close,volume,adj_factor,factor_provider,factor_raw,adjustment_state,is_suspended,limit_up,limit_down,is_st
              FROM ranked WHERE row_number<=61 ORDER BY symbol,trading_date ASC""",
-        (requested,),
+        (list(FACTOR_PROVIDER_ORDER), requested),
     ).fetchall()
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:

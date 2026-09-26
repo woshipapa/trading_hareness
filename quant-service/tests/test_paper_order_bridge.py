@@ -75,6 +75,8 @@ class PlaceOrderTests(unittest.TestCase):
         self.assertIn("stage", insert)
         values = next(v for s, v in connection.statements if "intraday_signal_events" in s)
         self.assertEqual(values[-1], STAGE)
+        self.assertNotIsInstance(values[5], dict)
+        self.assertNotIsInstance(values[6], dict)
 
     def test_the_ledgers_own_acceptance_places_the_order(self):
         connection, accepted = _Connection(), []

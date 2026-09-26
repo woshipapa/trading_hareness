@@ -318,10 +318,55 @@ def track_ma5_break(state: dict[str, Any], symbol: str, price: float | None,
             "recovered": False}
 
 
+#: A stored board-flow point older than this no longer describes the scan.
+SECTOR_FLOW_MAX_AGE_SECONDS = 180
+
+
+def sector_flow_view(flow: Mapping[str, Any] | None, observed_at: datetime,
+                     membership_taxonomy: str | None) -> dict[str, Any]:
+    """Decide whether the session's board-flow point may inform this scan.
+
+    Board keys are only comparable with the membership when both come from the
+    same taxonomy, and a point captured minutes ago describes a different
+    market; either way the sector inputs stay absent rather than stale.
+    """
+    flow = flow or {}
+    view = {"status": str(flow.get("status") or "missing"), "taxonomy": flow.get("taxonomy"),
+            "provider": flow.get("provider"), "observed_at": None, "age_seconds": None, "boards": {}}
+    captured = flow.get("observed_at")
+    if isinstance(captured, datetime):
+        view["observed_at"] = captured.isoformat()
+        view["age_seconds"] = round((observed_at - captured).total_seconds(), 1)
+    if view["status"] != "stored":
+        return view
+    if membership_taxonomy != flow.get("taxonomy"):
+        view["status"] = "taxonomy_mismatch"
+    elif view["age_seconds"] is None or not 0 <= view["age_seconds"] <= SECTOR_FLOW_MAX_AGE_SECONDS:
+        view["status"] = "stale"
+    else:
+        view["status"] = "fresh"
+        view["boards"] = dict(flow.get("boards") or {})
+    return view
+
+
+def _candidate_sector_flow(candidate_sectors: set[str], sectors: Mapping[str, Any],
+                           flow: Mapping[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
+    """The candidate's own board: the one with the most sealed names, then the largest."""
+    boards = flow.get("boards") or {}
+    present = [sector for sector in candidate_sectors if sector in boards]
+    if not present:
+        return None, None
+    sealed = sectors.get("sealed_by_sector", {})
+    chosen = min(present, key=lambda sector: (-int(sealed.get(sector, 0)),
+                                              -(_number(boards[sector].get("amount")) or 0.0), sector))
+    return chosen, boards[chosen]
+
+
 def candidate_snapshot(symbol: str, row: Mapping[str, Any], *, market: Mapping[str, Any],
                        reference: Mapping[str, Any], sectors: Mapping[str, Any],
                        limits: Mapping[str, float],
-                       ma5_break: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                       ma5_break: Mapping[str, Any] | None = None,
+                       sector_flow: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Assemble one candidate's point-in-time snapshot for the decision function."""
     fields = snapshot_fields(row)
     price = fields["price"]
@@ -405,6 +450,40 @@ def candidate_snapshot(symbol: str, row: Mapping[str, Any], *, market: Mapping[s
         and float(fields["low"]) < float(limit_up) - LIMIT_TOLERANCE
     )
 
+    # --- 潜龙 overheat inputs: daily bars before the session + licensed board flow
+    def pct(value: float | None, base: Any) -> float | None:
+        return (value / float(base) - 1) * 100 if (value is not None and base) else None
+
+    distance_from_ma20 = pct(price, ma20)
+    pre_signal_5d_return = pct(prior.get("close"), reference.get("close_5_sessions_before"))
+    flow_view = sector_flow or {}
+    flow_sector, sector_board = _candidate_sector_flow(set(reference.get("sectors") or set()), sectors, flow_view)
+    sector_day_return = _number((sector_board or {}).get("change_pct"))
+    board_amount = _number((sector_board or {}).get("amount"))
+    board_net = _number((sector_board or {}).get("net_inflow"))
+    sector_net_inflow_rate = (board_net / board_amount * 100
+                              if board_net is not None and board_amount else None)
+    divergence_vs_sector = (fields["pct_change"] - sector_day_return
+                            if fields["pct_change"] is not None and sector_day_return is not None else None)
+
+    # --- 潜龙 five-evidence inputs
+    marker_ago = reference.get("marker_k_sessions_ago")
+    # The consolidation box is the one before the marker K when there was one,
+    # otherwise the 20 sessions a breakout today would be clearing.
+    if marker_ago is not None:
+        box_top, box_range = reference.get("marker_box_top"), reference.get("marker_box_range_pct")
+    else:
+        low_20d = reference.get("low_20d")
+        box_top = high_20d
+        box_range = ((float(high_20d) - float(low_20d)) / float(low_20d) * 100
+                     if (high_20d and low_20d) else None)
+    reverse_wrap_volume = bool(
+        reverse_wrap and own_volume_ratio is not None and own_volume_ratio >= BREAKOUT_VOLUME_RATIO_MIN)
+    high_60d = reference.get("high_60d")
+    overhead_distance = (max(0.0, (float(high_60d) - price) / price * 100)
+                         if (high_60d and price) else None)
+    fundamental = reference.get("fundamental") or {}
+
     return {
         # market gate
         "index_above_support": market.get("index_above_support"),
@@ -464,6 +543,23 @@ def candidate_snapshot(symbol: str, row: Mapping[str, Any], *, market: Mapping[s
         "ma5_recovered": (ma5_break or {}).get("recovered"),
         "days_without_new_high": reference.get("days_without_new_high"),
         "days_without_rise": reference.get("days_without_rise"),
+        # 潜龙出海_swing overheat inputs; absent stays absent, never a default
+        "distance_from_ma20_pct": distance_from_ma20,
+        "pre_signal_5d_return_pct": pre_signal_5d_return,
+        "sector_day_return_pct": sector_day_return,
+        "sector_net_inflow_rate_pct": sector_net_inflow_rate,
+        "stock_vs_sector_divergence_pct": divergence_vs_sector,
+        # 潜龙 five-evidence contract inputs
+        "ma_spread_min_10d_pct": reference.get("ma_spread_min_10d_pct"),
+        "consolidation_box_range_pct": box_range,
+        "marker_k_sessions_ago": marker_ago,
+        "daily_history_complete": reference.get("daily_history_complete"),
+        "reverse_wrap_volume_confirmed": reverse_wrap_volume,
+        "signed_distance_from_ma5_pct": signed_distance_from_ma5,
+        "distance_from_box_top_pct": pct(price, box_top),
+        "candidate_in_main_sector": in_main,
+        "fundamental_pe": fundamental.get("pe"),
+        "overhead_high_distance_pct": overhead_distance,
         # observability, not consumed by the decision function
         "_evidence": {
             "vwap": vwap, "vwap_distance_pct": vwap_distance, "limit_up": limit_up,
@@ -475,6 +571,25 @@ def candidate_snapshot(symbol: str, row: Mapping[str, Any], *, market: Mapping[s
             "decline_from_10_sessions_pct": decline_pct,
             "board": board, "session_high": fields["high"], "price": price,
             "pct_change": fields["pct_change"],
+            "qianlong_inputs": {
+                "distance_from_ma20_pct": distance_from_ma20,
+                "pre_signal_5d_return_pct": pre_signal_5d_return,
+                "sector_day_return_pct": sector_day_return,
+                "sector_net_inflow_rate_pct": sector_net_inflow_rate,
+                "stock_vs_sector_divergence_pct": divergence_vs_sector,
+                "daily_source": "canonical_bars_daily before the session",
+                "ma20": ma20, "close_5_sessions_before": reference.get("close_5_sessions_before"),
+                "marker_k_sessions_ago": marker_ago, "box_top": box_top, "box_range_pct": box_range,
+                "ma_spread_min_10d_pct": reference.get("ma_spread_min_10d_pct"),
+                "high_60d": high_60d, "overhead_high_distance_pct": overhead_distance,
+                "fundamental": fundamental or None,
+                "sector_flow": {
+                    "status": flow_view.get("status") or "missing", "taxonomy": flow_view.get("taxonomy"),
+                    "provider": flow_view.get("provider"), "observed_at": flow_view.get("observed_at"),
+                    "age_seconds": flow_view.get("age_seconds"), "sector_key": flow_sector,
+                    "label": (sector_board or {}).get("label"),
+                },
+            },
         },
     }
 
@@ -486,7 +601,9 @@ def evaluate_pool(rows: list[dict[str, Any]], *, limits: Mapping[str, float],
                   elapsed_session_minutes: int | None = None,
                   index_volume_ratio: float | None = None,
                   index_above_support: bool | None = None,
-                  max_candidates: int = MAX_CANDIDATES) -> dict[str, Any]:
+                  max_candidates: int = MAX_CANDIDATES,
+                  sector_flow: Mapping[str, Any] | None = None,
+                  membership_taxonomy: str | None = None) -> dict[str, Any]:
     """Build snapshots for the leader pool and run the decision function over it."""
     rows_by_symbol = {str(row.get("symbol") or ""): dict(row) for row in rows}
     # Ranked once without the bound so the caller can see when the bound binds:
@@ -528,6 +645,7 @@ def evaluate_pool(rows: list[dict[str, Any]], *, limits: Mapping[str, float],
     market["elapsed_session_minutes"] = regime["elapsed_session_minutes"]
     evaluations: list[dict[str, Any]] = []
     break_state = ma5_break_state if ma5_break_state is not None else {}
+    flow_view = sector_flow_view(sector_flow, observed_at, membership_taxonomy)
     for symbol in pool:
         reference = dict(references.get(symbol) or {})
         reference.setdefault("sectors", membership.get(symbol, set()))
@@ -537,11 +655,18 @@ def evaluate_pool(rows: list[dict[str, Any]], *, limits: Mapping[str, float],
         )
         snapshot = candidate_snapshot(symbol, rows_by_symbol[symbol], market=market,
                                       reference=reference, sectors=sectors, limits=limits,
-                                      ma5_break=ma5_break)
+                                      ma5_break=ma5_break, sector_flow=flow_view)
         evidence = snapshot.pop("_evidence")
         result = evaluate_snapshot(snapshot)
+        if result["mode"] == "潜龙出海_swing":
+            # Stored with the observation, so settlement can compare red,
+            # yellow and clean reminders without a separate shadow record.
+            evidence["qianlong_evidence"] = result["qianlong_evidence"]
+            evidence["qianlong_swing_overheat"] = result["qianlong_swing_overheat"]
+            evidence["qianlong_warning"] = result["qianlong_warning"]
         evaluations.append({"symbol": symbol, "decision": result["decision"], "mode": result["mode"],
                             "position": result["position"], "exit": result["exit"],
+                            "stop_loss": result["stop_loss"],
                             "risk_flags": result["risk_flags"], "reasons": result["reasons"],
                             "market_gate": result["market_gate"], "evidence": evidence})
     candidates = [item for item in evaluations if item["decision"] == "research_candidate"]
@@ -549,6 +674,8 @@ def evaluate_pool(rows: list[dict[str, Any]], *, limits: Mapping[str, float],
         "observed_at": observed_at.isoformat(), "pool_size": len(pool),
         "pool_qualified": len(qualified), "pool_truncated": len(qualified) - len(pool),
         "evaluated": len(evaluations), "candidates": candidates,
+        "sector_flow": {key: value for key, value in flow_view.items() if key != "boards"}
+                       | {"boards": len(flow_view.get("boards") or {})},
         "main_sector_count": len(sectors["main_sectors"]),
         "market_gate": market, "regime": regime, "evaluations": evaluations,
     }
@@ -558,9 +685,9 @@ __all__ = [
     "BREAKOUT_VOLUME_RATIO_MIN", "FRONT_ROW_MAX_RANK", "ICEPOINT_BREADTH_MAX", "ICEPOINT_MAX_LIMIT_UPS",
     "LIMIT_TOLERANCE", "MAIN_SECTOR_MIN_LIMIT_UPS", "MAX_CANDIDATES", "NEAR_LIMIT_PCT",
     "OVERSOLD_DECLINE_MIN_PCT", "RIGHT_SIDE_BREADTH_MIN", "RIGHT_SIDE_VOLUME_RATIO_MIN",
-    "SUPPLEMENT_MIN_RANK",
+    "SECTOR_FLOW_MAX_AGE_SECONDS", "SUPPLEMENT_MIN_RANK",
     "PULLBACK_MIN_EXTENSION_PCT", "VWAP_BAND_PCT", "board_state", "candidate_snapshot", "evaluate_pool", "leader_pool",
     "market_gate_inputs", "market_regime_inputs", "sector_context",
-    "sector_strength_percentiles",
+    "sector_flow_view", "sector_strength_percentiles",
     "session_vwap", "snapshot_fields", "track_ma5_break",
 ]

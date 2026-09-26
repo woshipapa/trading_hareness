@@ -37,14 +37,33 @@ def continuous_auction_bounds(value: datetime) -> tuple[datetime, datetime] | No
     return None
 
 
+def _afternoon_target(entry: datetime, session_end: datetime, minutes: int) -> tuple[datetime, datetime, datetime] | None:
+    """A morning target past 11:30 counted in trading time: 13:00 plus the remainder."""
+    local_end = session_end.astimezone(CN_TZ)
+    _, morning_end = CONTINUOUS_AUCTION_SESSIONS[0]
+    afternoon_start, afternoon_end = CONTINUOUS_AUCTION_SESSIONS[1]
+    if local_end.timetz().replace(tzinfo=None) != morning_end:
+        return None
+    remainder = entry + timedelta(minutes=minutes) - session_end
+    start = datetime.combine(local_end.date(), afternoon_start, tzinfo=CN_TZ).astimezone(timezone.utc)
+    end = datetime.combine(local_end.date(), afternoon_end, tzinfo=CN_TZ).astimezone(timezone.utc)
+    target = start + remainder
+    return (start, end, target) if target <= end else None
+
+
 def intraday_outcome_window(entry_at: datetime, *, horizon_minutes: int, cutoff: datetime,
-                            tolerance_seconds: int = 90) -> dict[str, Any]:
+                            tolerance_seconds: int = 90, trading_time: bool = False) -> dict[str, Any]:
     """Build a bounded quote window for an intraday outcome.
 
     ``pending`` is reserved for a still-observable target.  Once its segment
     has ended, or a bounded quote-delay tolerance expired, the result becomes
     ``unavailable`` rather than borrowing lunch/overnight prices.  The helper
     is pure so live settlement and deterministic replay share the same clock.
+
+    ``trading_time=True`` counts the horizon in trading minutes: a morning
+    target past 11:30 moves to 13:00 plus the remainder (11:28 + 5 minutes
+    is 13:03) and is looked up only inside the afternoon segment, so no lunch
+    or overnight price is ever used.  A target past 15:00 stays unavailable.
     """
     entry = _as_aware_utc(entry_at)
     as_of = _as_aware_utc(cutoff)
@@ -60,6 +79,12 @@ def intraday_outcome_window(entry_at: datetime, *, horizon_minutes: int, cutoff:
     session_start, session_end = bounds
     target_at = entry + timedelta(minutes=base["horizon_minutes"])
     base.update({"session_start": session_start, "session_end": session_end, "target_at": target_at})
+    if target_at > session_end and trading_time:
+        afternoon = _afternoon_target(entry, session_end, base["horizon_minutes"])
+        if afternoon is not None:
+            session_start, session_end, target_at = afternoon
+            base.update({"session_start": session_start, "session_end": session_end, "target_at": target_at,
+                         "clock": "trading_time_after_lunch"})
     # A target exactly at the close is allowed, but no later quote is allowed.
     if target_at > session_end:
         return {**base, "status": "unavailable", "reason": "target_crosses_continuous_session_boundary"}

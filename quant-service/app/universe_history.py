@@ -107,6 +107,7 @@ def rebuild_historical_membership_from_canonical(
         "canonical_presence_plus_current_universe",
         "canonical_presence_delisting_proxy",
         "annual_daily_backfill_pit_active",
+        "annual_daily_backfill_pit_bridge_to_authoritative",
         "annual_daily_backfill_pit_inferred_delisting",
         "annual_daily_backfill_pit_supplier_delisting",
         "stock-basic-all-a:tushare_primary",
@@ -122,28 +123,45 @@ def rebuild_historical_membership_from_canonical(
                  FROM quant.canonical_bars_daily bar
                 WHERE bar.symbol ~ '^((60[0135]|68[89])[0-9]{3}\\.SH|(000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$'
                 GROUP BY bar.symbol
-             ), desired AS (
-               SELECT %s::text AS universe_key,bars.symbol,
+             ), authoritative_open AS (
+               SELECT history.symbol,min(history.effective_from) AS effective_from
+                 FROM quant.universe_membership_history history
+                WHERE history.universe_key=%s AND history.effective_to IS NULL
+                  AND NOT (history.source=ANY(%s))
+                GROUP BY history.symbol
+             ), desired_base AS (
+               SELECT bars.symbol,
                       greatest(bars.first_bar_date,coalesce(instrument.list_date,bars.first_bar_date)) AS effective_from,
-                      CASE WHEN current.symbol IS NOT NULL THEN NULL
-                           ELSE least(bars.last_bar_date,coalesce(instrument.delist_date,bars.last_bar_date)) END AS effective_to,
-                      CASE WHEN current.symbol IS NOT NULL THEN 'annual_daily_backfill_pit_active'
-                           WHEN instrument.delist_date IS NOT NULL THEN 'annual_daily_backfill_pit_supplier_delisting'
-                           ELSE 'annual_daily_backfill_pit_inferred_delisting' END AS source,
-                      jsonb_build_object(
-                          'effective_from_basis',CASE WHEN instrument.list_date IS NULL THEN 'first_canonical_bar'
-                              ELSE 'max_of_list_date_and_first_canonical_bar' END,
-                          'effective_to_basis',CASE WHEN current.symbol IS NOT NULL THEN 'current_active_snapshot'
-                              WHEN instrument.delist_date IS NOT NULL THEN 'supplier_delist_date_or_last_bar'
-                              ELSE 'last_canonical_bar' END,
-                          'delist_date_quality',CASE WHEN current.symbol IS NOT NULL THEN 'not_applicable'
-                              WHEN instrument.delist_date IS NOT NULL THEN 'supplier' ELSE 'inferred' END
-                      ) AS metadata
+                      bars.last_bar_date,instrument.delist_date,current.symbol AS current_symbol,
+                      authoritative.effective_from AS authoritative_from
                  FROM canonical_presence bars
                  JOIN quant.instruments instrument ON instrument.symbol=bars.symbol
                  LEFT JOIN quant.universe_members current
                    ON current.universe_key=%s AND current.enabled AND current.symbol=bars.symbol
+                 LEFT JOIN authoritative_open authoritative ON authoritative.symbol=bars.symbol
                 WHERE instrument.delist_date IS NULL OR instrument.delist_date>=bars.first_bar_date
+             ), desired AS (
+               SELECT %s::text AS universe_key,base.symbol,base.effective_from,
+                      CASE WHEN base.authoritative_from IS NOT NULL THEN base.authoritative_from-1
+                           WHEN base.current_symbol IS NOT NULL THEN NULL
+                           ELSE least(base.last_bar_date,coalesce(base.delist_date,base.last_bar_date)) END AS effective_to,
+                      CASE WHEN base.authoritative_from IS NOT NULL THEN 'annual_daily_backfill_pit_bridge_to_authoritative'
+                           WHEN base.current_symbol IS NOT NULL THEN 'annual_daily_backfill_pit_active'
+                           WHEN base.delist_date IS NOT NULL THEN 'annual_daily_backfill_pit_supplier_delisting'
+                           ELSE 'annual_daily_backfill_pit_inferred_delisting' END AS source,
+                      jsonb_build_object(
+                          'effective_from_basis','max_of_list_date_and_first_canonical_bar',
+                          'effective_to_basis',CASE WHEN base.authoritative_from IS NOT NULL THEN 'day_before_authoritative_snapshot'
+                              WHEN base.current_symbol IS NOT NULL THEN 'current_active_snapshot'
+                              WHEN base.delist_date IS NOT NULL THEN 'supplier_delist_date_or_last_bar'
+                              ELSE 'last_canonical_bar' END,
+                          'delist_date_quality',CASE WHEN base.authoritative_from IS NOT NULL
+                                   OR base.current_symbol IS NOT NULL THEN 'not_applicable'
+                              WHEN base.delist_date IS NOT NULL THEN 'supplier' ELSE 'inferred' END,
+                          'authoritative_from',base.authoritative_from
+                      ) AS metadata
+                 FROM desired_base base
+                WHERE base.authoritative_from IS NULL OR base.effective_from<base.authoritative_from
              )
            INSERT INTO quant.universe_membership_history(
                universe_key,symbol,effective_from,effective_to,source,priority,metadata
@@ -153,7 +171,7 @@ def rebuild_historical_membership_from_canonical(
            ON CONFLICT(universe_key,symbol,effective_from) DO UPDATE SET
              effective_to=EXCLUDED.effective_to,source=EXCLUDED.source,priority=EXCLUDED.priority,
              metadata=EXCLUDED.metadata,updated_at=now()""",
-        (universe_key, universe_key),
+        (universe_key, list(automatic_sources), universe_key, universe_key),
     ).rowcount
     return {"removed": int(removed or 0), "inserted": int(inserted or 0)}
 

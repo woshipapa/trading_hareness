@@ -108,7 +108,9 @@ def persist_generated_signals(
         )
         if signal.get("shadow_only"):
             state = "suppressed"
-        if state == "confirmed" and fast_confirmation.get("status") == "mismatch":
+        if (state == "confirmed" and fast_confirmation.get("status") == "mismatch"
+                and signal.get("policy_profile") != "teacher_review"):
+            # A teacher prompt keeps the mismatch as an advisory policy flag.
             state = "confirming"
         if state == "confirmed" and not policy["allow_confirmation"]:
             state = "confirming"

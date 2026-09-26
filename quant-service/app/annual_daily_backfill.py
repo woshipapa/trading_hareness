@@ -23,14 +23,17 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json, Jsonb
 
 from .database import Database
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 from .daily_bar_repository import quarantine_tushare_daily_amount_mismatches
+from .instrument_registry import InstrumentRecord, ensure_instruments
 from .runtime_resources import DEFAULT_HOT_DATABASE_SOFT_BYTES, bounded_storage_budget_bytes
+from .replay_readiness_coverage import refresh_daily_coverage
 from .sector_flow_repository import rebuild_sector_flow_daily_features
 from .tushare_providers import ProviderCallError, call_provider, provider_configs, safe_error_detail
 from .universe_history import rebuild_historical_membership_from_canonical
@@ -79,24 +82,28 @@ class ApiSpec:
 
 
 CORE_DAILY_SPECS = (
-    # The verified Super GET route is the canonical daily-price gateway.  A
-    # full primary response remains a per-request fallback, rather than a
-    # reason to silently move daily bars back to the old SDK/primary path.
+    # The verified Super GET route is the canonical daily-price gateway.
+    # Historical primary REST is retired; the SDK and DataHub remain bounded
+    # fallbacks with their own provenance.
     ApiSpec("daily", "super_get", 4_800, promote="daily", fallback_provider_name="super_sdk",
-            fallback_provider_names=("primary",)),
-    ApiSpec("adj_factor", "super_sdk", 4_800, promote="adj_factor", fallback_provider_name="primary"),
+            fallback_provider_names=("backup",)),
+    ApiSpec("adj_factor", "super_sdk", 4_800, promote="adj_factor", fallback_provider_name="super_get",
+            fallback_provider_names=("backup",)),
     # ProMax was verified for the complete same-day daily_basic cross-section
     # on 2026-08-17.  Prefer it over the City SDK so the control-plane repair
     # exercises the current GET protocol; retain the previously verified SDK
-    # and primary routes as explicit fallbacks.
+    # and DataHub routes as explicit fallbacks.
     ApiSpec("daily_basic", "super_get", 4_800, promote="daily_basic", fallback_provider_name="super_sdk",
-            fallback_provider_names=("primary",)),
-    ApiSpec("stk_limit", "super_sdk", 4_800, promote="stk_limit", fallback_provider_name="primary"),
-    ApiSpec("suspend_d", "super_sdk", legal_empty=True, promote="suspend_d", fallback_provider_name="primary"),
+            fallback_provider_names=("backup",)),
+    ApiSpec("stk_limit", "super_sdk", 4_800, promote="stk_limit", fallback_provider_name="super_get",
+            fallback_provider_names=("backup",)),
+    ApiSpec("suspend_d", "super_sdk", legal_empty=True, promote="suspend_d", fallback_provider_name="super_get",
+            fallback_provider_names=("backup",)),
     # Daily ST membership is retained as dated evidence.  It is not merged
     # into the current instrument flag until a separate point-in-time reader
     # asks for the requested trade date.
-    ApiSpec("stock_st", "primary", legal_empty=True, promote="stock_st", fallback_provider_name="super_sdk"),
+    ApiSpec("stock_st", "super_get", legal_empty=True, promote="stock_st", fallback_provider_name="super_sdk",
+            fallback_provider_names=("backup",)),
 )
 
 # Dated suspension/ST cross-sections remain available for an explicitly
@@ -222,34 +229,37 @@ def _persist_raw(
     )
 
 
-def _persist_instruments_from_stage(connection: Any, provider_key: str) -> None:
-    connection.execute(
-        """INSERT INTO quant.instruments(symbol,exchange,source)
-           SELECT DISTINCT upper(row_data->>'ts_code'),
+def _row_value(row: Any, key: str, index: int) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(key)
+    return row[index]
+
+
+def _persist_instruments_from_stage(connection: Any, provider_key: str, *, index_mode: bool = False) -> None:
+    """Materialize stage symbols through the shared sorted instrument writer."""
+    pattern = r"^\d{6}\.(SH|SZ)$" if index_mode else r"^\d{6}\.(SH|SZ|BJ)$"
+    rows = connection.execute(
+        f"""SELECT DISTINCT upper(row_data->>'ts_code') AS symbol,
                   CASE right(upper(row_data->>'ts_code'),2)
-                    WHEN 'SH' THEN 'SSE' WHEN 'SZ' THEN 'SZSE' ELSE 'BSE' END,
-                  %s
+                    WHEN 'SH' THEN 'SH' WHEN 'SZ' THEN 'SZ' ELSE 'BJ' END AS exchange
              FROM annual_daily_stage
-            WHERE upper(row_data->>'ts_code') ~ '^\\d{6}\\.(SH|SZ|BJ)$'
-           ON CONFLICT(symbol) DO NOTHING""",
-        (provider_key,),
+            WHERE upper(row_data->>'ts_code') ~ '{pattern}'
+            ORDER BY 1""",
+    ).fetchall()
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(
+            symbol=str(_row_value(row, "symbol", 0)),
+            exchange=str(_row_value(row, "exchange", 1)),
+            source=provider_key,
+        ) for row in rows],
+        update_existing=False,
     )
 
 
 def _persist_daily(connection: Any, provider_key: str, available_at: datetime, ingested_at: datetime,
-                   availability_basis: str, *, index_mode: bool = False) -> None:
-    if index_mode:
-        connection.execute(
-            """INSERT INTO quant.instruments(symbol,exchange,source)
-               SELECT DISTINCT upper(row_data->>'ts_code'),
-                      CASE right(upper(row_data->>'ts_code'),2) WHEN 'SH' THEN 'SSE' ELSE 'SZSE' END,%s
-                 FROM annual_daily_stage
-                WHERE upper(row_data->>'ts_code') ~ '^\\d{6}\\.(SH|SZ)$'
-               ON CONFLICT(symbol) DO NOTHING""",
-            (provider_key,),
-        )
-    else:
-        _persist_instruments_from_stage(connection, provider_key)
+    availability_basis: str, *, index_mode: bool = False) -> None:
+    _persist_instruments_from_stage(connection, provider_key, index_mode=index_mode)
     capability = "index_daily" if index_mode else "daily"
     connection.execute(
         """WITH stage AS (
@@ -356,6 +366,8 @@ def _persist_daily(connection: Any, provider_key: str, available_at: datetime, i
 
 def _persist_adj_factor(connection: Any, provider_key: str, available_at: datetime, _ingested_at: datetime,
                         _availability_basis: str) -> None:
+    if not provider_key.startswith("tushare") and provider_key != "longhu_qfq_derived":
+        raise ValueError(f"{provider_key} cannot provide cumulative adjustment factors")
     _persist_instruments_from_stage(connection, provider_key)
     connection.execute(
         """WITH stage AS (
@@ -364,8 +376,12 @@ def _persist_adj_factor(connection: Any, provider_key: str, available_at: dateti
                 ORDER BY upper(row_data->>'ts_code'),row_data->>'trade_date',record_index DESC
            ) INSERT INTO quant.daily_adjustment_factors(symbol,trading_date,adj_factor,provider,available_at,raw)
            SELECT upper(row_data->>'ts_code'),to_date(row_data->>'trade_date','YYYYMMDD'),
-                  nullif(row_data->>'adj_factor','')::numeric,%s,%s,row_data
-             FROM stage WHERE nullif(row_data->>'adj_factor','') IS NOT NULL
+                  nullif(row_data->>'adj_factor','')::numeric,%s,%s,
+                  row_data || jsonb_build_object('factor_semantics','corporate_action_cumulative','adjustment_state','complete')
+             FROM stage
+            WHERE nullif(row_data->>'adj_factor','') IS NOT NULL
+              AND nullif(row_data->>'adj_factor','') ~ '^[+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?$'
+              AND nullif(row_data->>'adj_factor','')::numeric > 0
            ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET
              adj_factor=EXCLUDED.adj_factor,available_at=EXCLUDED.available_at,raw=EXCLUDED.raw""",
         (provider_key, available_at),
@@ -379,7 +395,9 @@ def _persist_adj_factor(connection: Any, provider_key: str, available_at: dateti
                ) UPDATE quant.{table} bar SET adj_factor=nullif(stage.row_data->>'adj_factor','')::numeric
                   FROM stage
                  WHERE bar.symbol=upper(stage.row_data->>'ts_code')
-                   AND bar.trading_date=to_date(stage.row_data->>'trade_date','YYYYMMDD')"""
+                   AND bar.trading_date=to_date(stage.row_data->>'trade_date','YYYYMMDD')
+                   AND nullif(stage.row_data->>'adj_factor','') ~ '^[+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?$'
+                   AND nullif(stage.row_data->>'adj_factor','')::numeric > 0"""
         )
 
 
@@ -494,25 +512,29 @@ def _persist_trade_calendar(connection: Any, provider_key: str, available_at: da
 
 
 def _persist_stock_basic(connection: Any, provider_key: str, available_at: datetime) -> None:
-    connection.execute(
-        """INSERT INTO quant.instruments(symbol,exchange,name,industry,list_date,delist_date,is_st,source)
-           SELECT upper(row_data->>'ts_code'),
+    rows = connection.execute(
+        """SELECT upper(row_data->>'ts_code') AS symbol,
                   coalesce(nullif(row_data->>'exchange',''),
                     CASE right(upper(row_data->>'ts_code'),2)
-                      WHEN 'SH' THEN 'SSE' WHEN 'SZ' THEN 'SZSE' ELSE 'BSE' END),
-                  nullif(row_data->>'name',''),nullif(row_data->>'industry',''),
-                  CASE WHEN row_data->>'list_date' ~ '^\\d{8}$' THEN to_date(row_data->>'list_date','YYYYMMDD') END,
-                  CASE WHEN row_data->>'delist_date' ~ '^\\d{8}$' THEN to_date(row_data->>'delist_date','YYYYMMDD') END,
-                  coalesce(row_data->>'name','') ~* '(^|\\*)ST',%s
+                      WHEN 'SH' THEN 'SH' WHEN 'SZ' THEN 'SZ' ELSE 'BJ' END) AS exchange,
+                  nullif(row_data->>'name','') AS name,
+                  nullif(row_data->>'industry','') AS industry,
+                  CASE WHEN row_data->>'list_date' ~ '^\\d{8}$' THEN to_date(row_data->>'list_date','YYYYMMDD') END AS list_date,
+                  CASE WHEN row_data->>'delist_date' ~ '^\\d{8}$' THEN to_date(row_data->>'delist_date','YYYYMMDD') END AS delist_date,
+                  coalesce(row_data->>'name','') ~* '(^|\\*)ST' AS is_st
              FROM annual_daily_stage
             WHERE upper(row_data->>'ts_code') ~ '^\\d{6}\\.(SH|SZ|BJ)$'
-           ON CONFLICT(symbol) DO UPDATE SET
-             exchange=EXCLUDED.exchange,name=coalesce(EXCLUDED.name,quant.instruments.name),
-             industry=coalesce(EXCLUDED.industry,quant.instruments.industry),
-             list_date=coalesce(EXCLUDED.list_date,quant.instruments.list_date),
-             delist_date=coalesce(EXCLUDED.delist_date,quant.instruments.delist_date),
-             is_st=EXCLUDED.is_st,source=EXCLUDED.source,updated_at=now()""",
-        (provider_key,),
+            ORDER BY 1""",
+    ).fetchall()
+    ensure_instruments(
+        connection,
+        [InstrumentRecord(
+            symbol=str(_row_value(row, "symbol", 0)), exchange=str(_row_value(row, "exchange", 1)),
+            name=_row_value(row, "name", 2), industry=_row_value(row, "industry", 3),
+            list_date=_row_value(row, "list_date", 4), delist_date=_row_value(row, "delist_date", 5),
+            is_st=_row_value(row, "is_st", 6), source=provider_key,
+        ) for row in rows],
+        update_existing=True,
     )
     # Keep the three stock_basic list-status cross-sections as immutable
     # evidence.  ``quant.instruments`` is intentionally only the current
@@ -916,7 +938,7 @@ class AnnualDailyBackfill:
         expected_calendar_rows = (self.end_date - self.start_date).days + 1
         await self._bootstrap_reference(
             "trade_cal", calendar_params,
-            provider_names=("super_sdk", "primary"),
+            provider_names=("super_sdk", "super_get", "backup"),
             minimum_rows=expected_calendar_rows,
             normalize_rows=lambda rows: [dict(row) for row in rows],
             persist=_persist_trade_calendar,
@@ -926,7 +948,7 @@ class AnnualDailyBackfill:
             params = {"exchange": "", "list_status": status}
             await self._bootstrap_reference(
                 "stock_basic", params,
-                provider_names=("super_sdk", "primary"),
+                provider_names=("super_sdk", "super_get", "backup"),
                 minimum_rows=4_800 if status == "L" else 0,
                 normalize_rows=lambda rows, status=status: [
                     dict(row, _list_status=status)
@@ -991,8 +1013,8 @@ class AnnualDailyBackfill:
                 print(json.dumps({"lane": "sector", "day": str(day), "progress": f"{index}/{len(days)}", "failures": len(self.failures)}), flush=True)
 
     async def index_lane(self) -> None:
-        spec = ApiSpec("index_daily", "primary", 200, promote="raw")
-        provider = self.providers["primary"]
+        spec = ApiSpec("index_daily", "super_get", 200, promote="raw")
+        provider = self.providers["super_get"]
         for symbol in INDEX_CODES:
             params = {
                 "ts_code": symbol, "start_date": self.start_date.strftime("%Y%m%d"),
@@ -1035,13 +1057,15 @@ class AnnualDailyBackfill:
                           FROM (
                               SELECT DISTINCT ON(symbol,trading_date)
                                      symbol,trading_date,adj_factor
-                                FROM quant.daily_adjustment_factors
-                               WHERE trading_date BETWEEN %s AND %s
+                               FROM quant.daily_adjustment_factors factor
+                               WHERE factor.trading_date BETWEEN %s AND %s
+                                 AND factor.adj_factor>0
+                                 AND {persisted_factor_semantics_sql('factor')}
                                ORDER BY symbol,trading_date,
                                         CASE provider
-                                          WHEN 'tushare_super_sdk' THEN 0
-                                          WHEN 'tushare_super_get' THEN 1
-                                          WHEN 'tushare_primary' THEN 2
+                                          WHEN 'longhu_qfq_derived' THEN 0
+                                          WHEN 'tushare_super_sdk' THEN 1
+                                          WHEN 'tushare_super_get' THEN 2
                                           ELSE 9 END,
                                         available_at DESC
                           ) factor
@@ -1063,7 +1087,6 @@ class AnnualDailyBackfill:
                                         CASE provider
                                           WHEN 'tushare_super_sdk' THEN 0
                                           WHEN 'tushare_super_get' THEN 1
-                                          WHEN 'tushare_primary' THEN 2
                                           ELSE 9 END,
                                         available_at DESC
                           ) limits
@@ -1103,31 +1126,34 @@ class AnnualDailyBackfill:
         counts: dict[str, int] = {}
         for api_name, kind in mappings:
             with self.db.transaction() as connection:
+                # Whichever provider actually answered keeps its own provenance.
+                # Pinning one here silently skipped every row the fallback chain
+                # fetched, which is how concept flow and limit strength stayed
+                # empty while their raw evidence sat in this very table.
                 raw_rows = connection.execute(
-                    """SELECT DISTINCT ON(row_data->>'trade_date',row_data->>'ts_code') row_data,available_at
+                    """SELECT DISTINCT ON(row_data->>'trade_date',row_data->>'ts_code')
+                              provider_key,row_data,available_at
                          FROM quant.tushare_raw_records
-                        WHERE provider_key='tushare_super_sdk' AND api_name=%s
+                        WHERE api_name=%s
                           AND row_data->>'ts_code' LIKE '%%.TI'
                           AND row_data->>'trade_date' ~ '^[0-9]{8}$'
                           AND to_date(row_data->>'trade_date','YYYYMMDD') BETWEEN %s AND %s
                         ORDER BY row_data->>'trade_date',row_data->>'ts_code',available_at DESC""",
                     (api_name, self.start_date, self.end_date),
                 ).fetchall()
-            grouped: dict[str, list[dict[str, Any]]] = {}
-            available_by_date: dict[str, datetime] = {}
+            grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            available_by_group: dict[tuple[str, str], datetime] = {}
             for raw in raw_rows:
                 row = dict(raw["row_data"])
-                stamp = str(row.get("trade_date") or "")
-                grouped.setdefault(stamp, []).append(row)
-                available_by_date[stamp] = max(
-                    available_by_date.get(stamp, raw["available_at"]), raw["available_at"],
+                group = (str(raw["provider_key"]), str(row.get("trade_date") or ""))
+                grouped.setdefault(group, []).append(row)
+                available_by_group[group] = max(
+                    available_by_group.get(group, raw["available_at"]), raw["available_at"],
                 )
-            for stamp, rows in grouped.items():
+            for group, rows in grouped.items():
                 with self.db.transaction() as connection:
                     _stage_rows(connection, rows)
-                    _persist_sector_flow(
-                        connection, "tushare_super_sdk", available_by_date[stamp], kind=kind,
-                    )
+                    _persist_sector_flow(connection, group[0], available_by_group[group], kind=kind)
             counts[api_name] = len(raw_rows)
         return counts
 
@@ -1199,7 +1225,7 @@ class AnnualDailyBackfill:
         original receipt timestamp remains recoverable as ``ingested_at`` on
         the facts being reprojected.
         """
-        specs = (*self._core_specs(), *SECTOR_EVENT_SPECS, ApiSpec("index_daily", "primary", promote="index_daily"))
+        specs = (*self._core_specs(), *SECTOR_EVENT_SPECS, ApiSpec("index_daily", "super_get", promote="index_daily"))
         api_names = [item.api_name for item in specs]
         with self.db.transaction() as connection:
             day_rows = connection.execute(
@@ -1282,13 +1308,14 @@ class AnnualDailyBackfill:
         market_aggregates = self.materialize_daily_market_aggregates()
         with self.db.transaction() as connection:
             universe_membership = rebuild_historical_membership_from_canonical(connection, "all_a")
+            readiness_coverage = refresh_daily_coverage(connection, self.start_date, self.end_date)
         feature_result = self.rebuild_sector_features()
         with self.db.transaction() as connection:
             coverage = connection.execute(
                 """SELECT
                      count(*) FILTER (WHERE trading_date BETWEEN %s AND %s)::bigint daily_rows,
                      count(DISTINCT trading_date) FILTER (WHERE trading_date BETWEEN %s AND %s)::int daily_days,
-                     count(*) FILTER (WHERE trading_date BETWEEN %s AND %s AND adj_factor IS NOT NULL)::bigint adjusted_rows,
+                     count(*) FILTER (WHERE trading_date BETWEEN %s AND %s AND adj_factor>0)::bigint adjusted_rows,
                      count(*) FILTER (WHERE trading_date BETWEEN %s AND %s AND limit_up IS NOT NULL)::bigint limited_rows
                    FROM quant.canonical_bars_daily""",
                 (self.start_date, self.end_date, self.start_date, self.end_date,
@@ -1304,6 +1331,7 @@ class AnnualDailyBackfill:
             "status_controls": "included" if self.include_status_controls else "explicitly_skipped_for_this_range",
             "coverage": dict(coverage), "market_aggregates": market_aggregates,
             "universe_membership": universe_membership,
+            "readiness_coverage": readiness_coverage,
             "sector_promotions": sector_promotions,
             "sector_features": feature_result,
             "failure_count": len(self.failures), "failures": self.failures[:50],

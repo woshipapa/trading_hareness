@@ -4,16 +4,39 @@ services:
     # PEER_BACKGROUND_TASKS_ENABLED=true and PEER_RUNTIME_PROFILE=intraday_edge.
     # It keeps the existing peer compose file usable for research/shadow runs.
     env_file:
-      - ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+      - path: ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+        required: false
     environment:
+      QUANT_APPLICATION_NAME: peer-quant-research
+      PEER_OWNER_CONTRACT_MODE: ${PEER_OWNER_CONTRACT_MODE:-report_only}
+      PEER_OWNER_CONTRACT_RECEIPT_PATH: /var/lib/quant/owner-peer-contract.json
       QUANT_BACKGROUND_TASKS_ENABLED: ${PEER_BACKGROUND_TASKS_ENABLED:-false}
       QUANT_RUNTIME_PROFILE: ${PEER_RUNTIME_PROFILE:-research}
       QUANT_SKIP_MIGRATIONS: "true"
+      PEER_REQUIRE_OWNER_SEMANTICS: "true"
       QUANT_LEGACY_SCHEMA_BOOTSTRAP: "false"
       # Longhu credentials remain on the owner API.  The writer consumes only
       # the normalized gateway through db-tunnel:5681.
       QUANT_LONGHU_DIRECT_ENABLED: "false"
       QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      # Fuyao/同花顺 calls are research-only; pass the operator-managed
+      # credential explicitly into the API process.
+      FUYAO_API_KEY: ${FUYAO_API_KEY:-}
+      # Tushare-compatible licensed routes. DataHub is the bounded REST
+      # fallback; ProMax is the independent GET gateway.
+      TUSHARE_BACKUP_API_KEY: ${TUSHARE_BACKUP_API_KEY:-}
+      TUSHARE_BACKUP_API_URL: ${TUSHARE_BACKUP_API_URL:-}
+      TUSHARE_SUPER_GET_MODE: ${TUSHARE_SUPER_GET_MODE:-legacy}
+      TUSHARE_SUPER_GET_API_KEY: ${TUSHARE_SUPER_GET_API_KEY:-}
+      TUSHARE_SUPER_GET_API_URL: ${TUSHARE_SUPER_GET_API_URL:-}
+      TUSHARE_SUPER_GET_FALLBACK_API_KEY: ${TUSHARE_SUPER_GET_FALLBACK_API_KEY:-}
+      TUSHARE_SUPER_GET_FALLBACK_API_URL: ${TUSHARE_SUPER_GET_FALLBACK_API_URL:-}
+      TUSHARE_SUPER_GET_FALLBACK_PROXY_URL: ${TUSHARE_SUPER_GET_FALLBACK_PROXY_URL:-}
+      TUSHARE_SUPER_GET_REQUESTS_PER_MINUTE: ${TUSHARE_SUPER_GET_REQUESTS_PER_MINUTE:-60}
+      TUSHARE_SUPER_GET_MIN_INTERVAL_SECONDS: ${TUSHARE_SUPER_GET_MIN_INTERVAL_SECONDS:-1}
+      # The owner gateway accepts up to 300 Longhu quote symbols per logical
+      # request. Keep the env-file default from silently reducing this to 24.
+      QUANT_LONGHU_INTRADAY_MAX_SYMBOLS: ${PEER_LONGHU_INTRADAY_MAX_SYMBOLS:-300}
       # Dashboard/read-model polling and intraday evidence loops share the
       # bounded synchronous repository bridge. Keep it below the database
       # connection budget, but leave enough slots for the owner watcher pool.
@@ -37,6 +60,12 @@ services:
       INTRADAY_MINUTE_PROFILE_CAPTURE_ENABLED: ${PEER_MINUTE_PROFILE_CAPTURE_ENABLED:-true}
       INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS: ${PEER_MINUTE_PROFILE_MAX_SYMBOLS:-36}
       INTRADAY_BOARD_CURVE_ENABLED: ${PEER_BOARD_CURVE_ENABLED:-true}
+      # Opening-auction pulse: 2s evidence cadence, Feishu only on changed
+      # states with a cooldown. It remains research-only and never controls
+      # orders or live thresholds.
+      AUCTION_PULSE_ENABLED: ${PEER_AUCTION_PULSE_ENABLED:-true}
+      AUCTION_PULSE_INTERVAL_SECONDS: ${PEER_AUCTION_PULSE_INTERVAL_SECONDS:-2}
+      AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS: ${PEER_AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS:-30}
       # Keep the low-memory target bounded; raw evidence remains in owner PG.
       QUANT_RUNTIME_MAX_MEMORY_RATIO: ${PEER_RUNTIME_MAX_MEMORY_RATIO:-0.80}
       QUANT_RUNTIME_MIN_FREE_BYTES: ${PEER_RUNTIME_MIN_FREE_BYTES:-2147483648}
@@ -48,22 +77,50 @@ services:
   # collection tasks.  Keeping this as a second container avoids changing the
   # single-writer realtime process into a broad ``full`` profile.
   quant-research-scheduler:
-    image: trading-hareness-peer-quant-research:latest
+    # Build the scheduler from the same immutable source/image as the main
+    # peer service.  A scheduler-only image reference would let a release
+    # switch the source symlink while post-close jobs kept running old factor
+    # and instrument code.
+    build:
+      context: ../..
+      dockerfile: quant-service/Dockerfile.peer
+      additional_contexts:
+        wheelhouse: ${PEER_WHEELHOUSE_PATH:?Set PEER_WHEELHOUSE_PATH}
+      args:
+        APP_GIT_SHA: ${PEER_APP_GIT_SHA:-unknown}
+        APP_RELEASE: ${PEER_APP_RELEASE:-unknown}
+        APP_BUILD_CREATED_AT: ${PEER_APP_BUILD_CREATED_AT:-unknown}
+    image: ${PEER_QUANT_IMAGE:-trading-hareness-peer-quant-research:latest}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "5"}
     depends_on:
       db-tunnel:
         condition: service_healthy
     ports:
       - "127.0.0.1:${PEER_RESEARCH_QUANT_PORT:-15683}:8000"
     env_file:
-      - ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+      - path: ${PEER_INTRADAY_SECRETS_FILE:-./intraday-secrets.env}
+        required: false
     environment:
-      PGHOST: db-tunnel
-      PGPORT: 5432
+      # Batch/backfill/COPY work uses the owner's independent 15433 reverse,
+      # exposed by the normal peer db-tunnel as 5433. Intraday remains on the
+      # separate quant-research service at db-tunnel:5432.
+      PGHOST: ${PEER_RESEARCH_DB_HOST:-db-tunnel}
+      # All post-close/backfill/COPY work uses the independent bulk tunnel;
+      # intraday quant-research remains on db-tunnel:5432.
+      PGPORT: ${PEER_RESEARCH_DB_PORT:-5433}
       PGDATABASE: ${PEER_QUANT_DATABASE:-trading_hareness}
       PGUSER: ${PEER_DB_USER:-stock_peer}
       PGPASSWORD: ${PEER_DB_PASSWORD:?Set PEER_DB_PASSWORD}
+      # Keep the operator's intent visible inside the scheduler.  ``auto``
+      # still infers the guard from db-tunnel:5433; an explicit true is
+      # useful in a preflight; migration execution remains disabled.
+      PEER_REQUIRE_OWNER_CUTOVER: ${PEER_REQUIRE_OWNER_CUTOVER:-auto}
+      PEER_REQUIRE_OWNER_SEMANTICS: "true"
       QUANT_DATA_DIR: /var/lib/quant-research
+      QUANT_ASYNC_READ_POOL_MAX_SIZE: ${PEER_RESEARCH_ASYNC_READ_POOL_MAX_SIZE:-16}
       QUANT_LEGACY_SCHEMA_BOOTSTRAP: "false"
       QUANT_SKIP_MIGRATIONS: "true"
       QUANT_BACKGROUND_TASKS_ENABLED: ${PEER_RESEARCH_BACKGROUND_TASKS_ENABLED:-true}
@@ -71,14 +128,31 @@ services:
       QUANT_WRITE_API_KEY: ${PEER_QUANT_WRITE_API_KEY:?Set PEER_QUANT_WRITE_API_KEY}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:?Set QUANT_SHARED_READ_API_KEY}
       QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      # Keep the scheduler's provider configuration identical to the API lane.
+      FUYAO_API_KEY: ${FUYAO_API_KEY:-}
+      TUSHARE_BACKUP_API_KEY: ${TUSHARE_BACKUP_API_KEY:-}
+      TUSHARE_BACKUP_API_URL: ${TUSHARE_BACKUP_API_URL:-}
+      TUSHARE_SUPER_GET_MODE: ${TUSHARE_SUPER_GET_MODE:-legacy}
+      TUSHARE_SUPER_GET_API_KEY: ${TUSHARE_SUPER_GET_API_KEY:-}
+      TUSHARE_SUPER_GET_API_URL: ${TUSHARE_SUPER_GET_API_URL:-}
+      TUSHARE_SUPER_GET_FALLBACK_API_KEY: ${TUSHARE_SUPER_GET_FALLBACK_API_KEY:-}
+      TUSHARE_SUPER_GET_FALLBACK_API_URL: ${TUSHARE_SUPER_GET_FALLBACK_API_URL:-}
+      TUSHARE_SUPER_GET_FALLBACK_PROXY_URL: ${TUSHARE_SUPER_GET_FALLBACK_PROXY_URL:-}
+      TUSHARE_SUPER_GET_REQUESTS_PER_MINUTE: ${TUSHARE_SUPER_GET_REQUESTS_PER_MINUTE:-60}
+      TUSHARE_SUPER_GET_MIN_INTERVAL_SECONDS: ${TUSHARE_SUPER_GET_MIN_INTERVAL_SECONDS:-1}
+      QUANT_APPLICATION_NAME: peer-quant-research-scheduler
+      PEER_OWNER_CONTRACT_MODE: ${PEER_OWNER_CONTRACT_MODE:-report_only}
+      PEER_OWNER_CONTRACT_RECEIPT_PATH: /var/lib/quant-research/owner-peer-contract.json
       QUANT_DB_BLOCKING_MAX_WORKERS: ${PEER_RESEARCH_DB_BLOCKING_MAX_WORKERS:-4}
       QUANT_DB_BLOCKING_MAX_QUEUE: ${PEER_RESEARCH_DB_BLOCKING_MAX_QUEUE:-16}
       QUANT_LONGHU_DIRECT_ENABLED: "false"
+      QUANT_HOTFIX_ENABLED: ${QUANT_HOTFIX_ENABLED:-false}
       QUANT_FEISHU_DIRECT_ENABLED: "false"
       STRATEGY_REVIEW_AUTOMATION_ENABLED: ${PEER_STRATEGY_REVIEW_AUTOMATION_ENABLED:-true}
       POST_CLOSE_STRATEGY_AUTOMATION_ENABLED: ${PEER_POST_CLOSE_STRATEGY_AUTOMATION_ENABLED:-true}
       TEN_DAY_LEADER_ROTATION_AUTOMATION_ENABLED: ${PEER_TEN_DAY_LEADER_ROTATION_AUTOMATION_ENABLED:-true}
       DAILY_SUMMARY_AUTOMATION_ENABLED: ${PEER_DAILY_SUMMARY_AUTOMATION_ENABLED:-true}
+      DAILY_SUMMARY_FEISHU_ENABLED: ${PEER_DAILY_SUMMARY_FEISHU_ENABLED:-true}
       # Member backfills are separate maintenance work, not part of the
       # migrated close-review worker.  They stay opt-in and bounded.
       THS_CONCEPT_MEMBER_BACKFILL_ENABLED: ${PEER_RESEARCH_THS_BACKFILL_ENABLED:-false}
@@ -91,6 +165,15 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - peer_quant_research_data:/var/lib/quant-research
+      - ${QUANT_HOTFIX_HOST_DIR:-./hotfix/quant-service}:/app/hotfix:ro
+    command:
+      - sh
+      - -c
+      - >-
+        if [ "$$QUANT_HOTFIX_ENABLED" = "true" ] && [ -f /app/hotfix/current/app/main.py ]; then
+        export PYTHONPATH=/app/hotfix/current:/app;
+        exec python entrypoint.py uvicorn app.main:app --app-dir /app/hotfix/current --host 0.0.0.0 --port 8000; fi;
+        exec python entrypoint.py uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
       interval: 15s

@@ -1,7 +1,7 @@
 # 爱投顾视频归档与转写
 
 当前接入分为两层：`itougu_neican_relay.py` 只读取并转发
-`videoInfo.videoUrl`；`scripts/itougu_video_worker.py` 在具备存储和媒体依赖的
+`videoInfo.videoUrl`；`feishu-relay/scripts/sources/itougu/itougu_video_worker.py` 在具备存储和媒体依赖的
 owner 节点上做受限 HLS 探测和音频抽取。两者均不把视频内容或转写结果写入实时
 策略阈值，也不会下载任意域名资源。
 
@@ -21,7 +21,7 @@ worker 应运行在 owner 的大容量节点，不能运行在 edge relay 小盘
 示例（仅探测，不下载媒体）：
 
 ```bash
-python3 scripts/itougu_video_worker.py \
+python3 feishu-relay/scripts/sources/itougu/itougu_video_worker.py \
   'https://voss.itougu.com/path/video.m3u8' --probe
 ```
 

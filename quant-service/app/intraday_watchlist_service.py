@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from .instrument_registry import InstrumentRecord, ensure_instruments
+
 
 @dataclass(frozen=True)
 class IntradayWatchlistDependencies:
@@ -26,11 +28,10 @@ async def upsert(symbol: str, payload: Any, deps: IntradayWatchlistDependencies)
 
     def persist_watchlist() -> Any:
         with deps.database.transaction() as connection:
-            connection.execute(
-                """INSERT INTO quant.instruments(symbol,exchange,name,source) VALUES(%s,%s,%s,'intraday_watchlist')
-                   ON CONFLICT(symbol) DO NOTHING""",
-                (symbol, deps.exchange_for(symbol), payload.label),
-            )
+            ensure_instruments(connection, [InstrumentRecord(
+                symbol=symbol, exchange=deps.exchange_for(symbol), name=payload.label,
+                source="intraday_watchlist",
+            )], source="intraday_watchlist")
             return connection.execute(
                 """INSERT INTO quant.intraday_watchlists(symbol,label,enabled,alert_on_entry,alert_on_exit,entry_price,available_quantity,hard_stop,take_profit,metadata)
                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)

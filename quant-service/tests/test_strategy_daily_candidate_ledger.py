@@ -10,9 +10,11 @@ from decimal import Decimal
 from app.liquidity_screen import MINIMUM_MEDIAN_DAILY_AMOUNT
 from app.main import DailyBar, db, upsert_bar
 from app.strategy_daily_candidate_ledger import (
+    materialize_leader_flow_candidates,
     materialize_ledger,
     materialize_limit_linkage_candidates,
     materialize_post_close_candidates,
+    materialize_teacher_review_candidates,
     settle_ledger_outcomes,
 )
 
@@ -185,9 +187,87 @@ class LedgerOrchestratorSmokeTests(unittest.TestCase):
         self.assertEqual(set(result), {
             "materialize_post_close_candidates", "materialize_pattern_candidates", "materialize_ten_day_leader_candidates",
             "materialize_limit_linkage_candidates", "materialize_board_stock_mining_candidates",
-            "materialize_recommendation_candidates",
+            "materialize_recommendation_candidates", "materialize_teacher_review_candidates",
+            "materialize_leader_flow_candidates",
         })
         self.assertTrue(all(isinstance(value, int) for value in result.values()))
+
+
+
+@unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
+class TeacherAndLeaderFlowLedgerTests(unittest.TestCase):
+    relay_symbol, record_symbol = "999986.SZ", "999985.SZ"
+    run_date = date(2099, 2, 3)
+
+    def _cleanup(self) -> None:
+        with db.transaction() as connection:
+            for symbol in (self.relay_symbol, self.record_symbol):
+                connection.execute("DELETE FROM quant.strategy_daily_candidates WHERE symbol=%s", (symbol,))
+                connection.execute("DELETE FROM quant.xiaojie_leader_flow_observations WHERE symbol=%s", (symbol,))
+                connection.execute("DELETE FROM quant.canonical_bars_daily WHERE symbol=%s", (symbol,))
+                connection.execute("DELETE FROM quant.market_bars_daily WHERE symbol=%s", (symbol,))
+            connection.execute("""DELETE FROM quant.raw_market_observations WHERE provider_key='teacher_review'
+                                   AND capability='teacher_review_pack' AND payload->'pack'->>'review_date'=%s""",
+                               (self.run_date.isoformat(),))
+            for symbol in (self.relay_symbol, self.record_symbol):
+                connection.execute("DELETE FROM quant.instruments WHERE symbol=%s", (symbol,))
+
+    def _pack(self, connection, pack_id: str, stocks: list[dict], supersedes: list[str] | None = None) -> None:
+        from psycopg.types.json import Json
+        body = {"pack": {"pack_id": pack_id, "review_date": self.run_date.isoformat(), "supersedes": supersedes or [],
+                         "analyst": {"analyst_id": "test-analyst"}, "stocks": stocks}}
+        connection.execute(
+            """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
+               VALUES('teacher_review','teacher_review_pack','cn','analyst:test-analyst',%s,%s,%s,%s,%s)""",
+            (datetime(2099, 2, 3, 7, 0, tzinfo=timezone.utc), datetime(2099, 2, 3, 12, 0, tzinfo=timezone.utc),
+             pack_id.ljust(64, "0"), Json(body), Json(body)))
+
+    def test_teacher_plans_enter_the_ledger_by_kind_and_superseded_packs_do_not(self) -> None:
+        self._cleanup()
+        try:
+            with db.transaction() as connection:
+                _seed_bars(connection, self.relay_symbol, self.run_date)
+                _seed_bars(connection, self.record_symbol, self.run_date)
+                self._pack(connection, "old", [{"code": "999986", "playbook": "prior_high_breakout", "stance": "watch"}])
+                self._pack(connection, "new", [
+                    {"code": "999986", "ts_code": self.relay_symbol, "playbook": "relay_race", "stance": "watch", "group": "g1"},
+                    {"code": "999985", "ts_code": self.record_symbol, "playbook": "rejected", "stance": "avoid"},
+                ], supersedes=["old"])
+            with db.transaction() as connection:
+                stored = materialize_teacher_review_candidates(connection, self.run_date)
+                rows = connection.execute(
+                    """SELECT strategy_key,symbol,score_scale,evidence FROM quant.strategy_daily_candidates
+                        WHERE as_of_date=%s AND strategy_key LIKE 'teacher_review%%' AND symbol=ANY(%s)""",
+                    (self.run_date, [self.relay_symbol, self.record_symbol])).fetchall()
+            self.assertEqual(stored, 1)
+            self.assertEqual([(row["strategy_key"], row["symbol"]) for row in rows], [("teacher_review_relay", self.relay_symbol)])
+            self.assertEqual(rows[0]["evidence"]["pack_id"], "new")
+            self.assertEqual(rows[0]["score_scale"], "unscored_plan")
+        finally:
+            self._cleanup()
+
+    def test_leader_flow_modes_collapse_to_one_row_per_stock_and_radar_is_separate(self) -> None:
+        self._cleanup()
+        try:
+            seen = datetime(2099, 2, 3, 2, 0, tzinfo=timezone.utc)
+            with db.transaction() as connection:
+                _seed_bars(connection, self.relay_symbol, self.run_date)
+                for mode, count in (("leader_pullback", 3), ("right_side_breakout", 2), ("launch_radar", 5)):
+                    connection.execute(
+                        """INSERT INTO quant.xiaojie_leader_flow_observations(trading_date,symbol,mode,model_version,first_seen_at,
+                               last_seen_at,observation_count,decision) VALUES(%s,%s,%s,'test',%s,%s,%s,'research_candidate')""",
+                        (self.run_date, self.relay_symbol, mode, seen, seen, count))
+            with db.transaction() as connection:
+                stored = materialize_leader_flow_candidates(connection, self.run_date)
+                rows = {row["strategy_key"]: row for row in connection.execute(
+                    """SELECT strategy_key,raw_score,evidence FROM quant.strategy_daily_candidates
+                        WHERE as_of_date=%s AND symbol=%s""", (self.run_date, self.relay_symbol)).fetchall()}
+            self.assertEqual(stored, 2)
+            self.assertEqual(rows["xiaojie_leader_flow"]["evidence"]["modes"], ["leader_pullback", "right_side_breakout"])
+            self.assertEqual(rows["xiaojie_leader_flow"]["raw_score"], 5)
+            self.assertEqual(rows["launch_radar"]["raw_score"], 5)
+        finally:
+            self._cleanup()
 
 
 if __name__ == "__main__":

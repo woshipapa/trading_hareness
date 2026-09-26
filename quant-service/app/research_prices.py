@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .adjustment_factor_semantics import factor_usable
+
 
 ADJUSTMENT_MISSING_FLAG = "adj_factor_missing"
 CORPORATE_ACTION_UNRESOLVED_FLAG = "corporate_action_unresolved"
@@ -22,6 +24,22 @@ def number(value: Any) -> float | None:
         return None
 
 
+def research_price_eligible(row: dict[str, Any]) -> bool:
+    """Return whether a stored bar carries an eligible adjustment contract.
+
+    Owner v2 requires provider provenance, the raw semantic rule and an
+    unsuperseded row.  The function accepts both direct factor projections
+    (``provider``/``raw``) and bar projections (``factor_provider``/
+    ``factor_raw``); a bare positive number is deliberately not enough.
+    """
+    factor = dict(row)
+    if factor.get("provider") is None and factor.get("factor_provider") is not None:
+        factor["provider"] = factor.get("factor_provider")
+    if factor.get("raw") is None and factor.get("factor_raw") is not None:
+        factor["raw"] = factor.get("factor_raw")
+    return factor_usable(factor)
+
+
 def adjusted_value(row: dict[str, Any], field: str = "close") -> float | None:
     """Return a strict same-day adjusted research value.
 
@@ -31,7 +49,7 @@ def adjusted_value(row: dict[str, Any], field: str = "close") -> float | None:
     """
     raw = number(row.get(field))
     factor = number(row.get("adj_factor"))
-    if raw is None or factor is None or factor <= 0:
+    if not research_price_eligible(row) or raw is None or factor is None or factor <= 0:
         return None
     return raw * factor
 
@@ -50,7 +68,7 @@ def adjusted_bars(rows: list[dict[str, Any]], *, fields: tuple[str, ...] = ("ope
     for row in rows:
         item = dict(row)
         factor = number(item.get("adj_factor"))
-        if factor is None or factor <= 0:
+        if not research_price_eligible(item) or factor is None or factor <= 0:
             return None, [ADJUSTMENT_MISSING_FLAG]
         for field in fields:
             raw = number(item.get(field))
@@ -74,4 +92,5 @@ __all__ = [
     "adjusted_bars",
     "adjusted_value",
     "number",
+    "research_price_eligible",
 ]

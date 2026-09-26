@@ -13,6 +13,15 @@ from .ashare_reality import price_limit_state
 from .datasources.catalog import EXCHANGE_TIMESTAMPED_QUOTE_LABELS
 from .market_rules import as_exchange_date, cn_today
 
+#: Analyst/teacher review prompts (``policy_profile="teacher_review"``) are
+#: human-review evidence of a named plan, not system entries, and the user
+#: asked that a satisfied plan is never held back.  Only a missing live price
+#: (nothing was evaluated) blocks confirmation; every other reason - quote
+#: source/freshness, cross-source mismatch, limit-up tradability, market
+#: regime, factor quality, paper-portfolio limits - is carried as an advisory
+#: flag so the Feishu message says what to double-check.
+TEACHER_BLOCKING_REASONS = frozenset({"missing_live_price"})
+
 
 def _number(value: Any) -> float | None:
     try:
@@ -33,6 +42,7 @@ def live_policy_gate(signal: dict[str, Any], watch: dict[str, Any], quote: dict[
     gate.
     """
     signal_type = str(signal.get("signal_type") or "watch")
+    teacher_profile = signal.get("policy_profile") == "teacher_review"
     entry_like = signal_type == "entry"
     exit_like = signal_type in {"exit", "reduce"}
     reasons: list[str] = []
@@ -139,12 +149,19 @@ def live_policy_gate(signal: dict[str, Any], watch: dict[str, Any], quote: dict[
         reasons.append("no_confirmed_sellable_quantity")
         flags.append("policy_risk_alert_only")
 
+    advisory: list[str] = []
+    if teacher_profile:
+        advisory = [reason for reason in reasons if reason not in TEACHER_BLOCKING_REASONS]
+        reasons = [reason for reason in reasons if reason in TEACHER_BLOCKING_REASONS]
+        flags = [*flags, *(f"advisory_{reason}" for reason in advisory)]
     blocks_confirmation = bool(reasons) and not risk_alert_only
     return {
         "version": "live-policy-gate-v1",
         "decision": "risk_alert_only" if risk_alert_only else "watch_only" if blocks_confirmation else "pass",
         "allow_confirmation": not blocks_confirmation,
         "reason_codes": reasons,
+        "advisory_reason_codes": advisory,
+        "policy_profile": "teacher_review" if teacher_profile else "default",
         "risk_flags": flags,
         "market_state": market_state,
         "board_snapshot_age_seconds": board_age,

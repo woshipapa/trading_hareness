@@ -25,7 +25,8 @@ class KnownAtIsNeverMovedLaterTests(unittest.TestCase):
         return [call.args[0] for call in connection.execute.call_args_list]
 
     def test_upserts_keep_the_earliest_known_at(self):
-        upserts = [sql for sql in self._statements() if "ON CONFLICT" in sql]
+        upserts = [sql for sql in self._statements()
+                   if "ON CONFLICT" in sql and "INSERT INTO quant.sector_membership_history" in sql]
         self.assertEqual(len(upserts), 2)
         for sql in upserts:
             self.assertIn("known_at=LEAST(sector_membership_history.known_at,EXCLUDED.known_at)", sql)

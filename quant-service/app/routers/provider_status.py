@@ -13,6 +13,10 @@ from fastapi import APIRouter
 
 from ..async_provider_status_read_repository import provider_capabilities as async_provider_capabilities
 from ..async_provider_status_read_repository import provider_health as async_provider_health
+from ..realtime_provider_health_repository import realtime_provider_health as async_realtime_provider_health
+from ..realtime_provider_health_repository import realtime_provider_health_snapshot
+from ..longhu_limits import intraday_longhu_max_symbols
+from ..longhu_vendor_source import configured as longhu_configured
 from ..async_provider_status_read_repository import tushare_catalog as async_tushare_catalog
 from ..provider_catalog import provider_capabilities_snapshot, tushare_catalog_snapshot
 from ..fuyao_catalog import catalog_contract as fuyao_catalog_contract
@@ -29,6 +33,7 @@ def build_provider_status_router(
     async_tushare_catalog_fn: Callable[[Any, Callable[[], list[dict[str, Any]]], Callable[[], list[dict[str, Any]]]], Awaitable[dict[str, Any]]] | None = None,
     async_provider_capabilities_fn: Callable[[Any], Awaitable[dict[str, Any]]] | None = None,
     async_provider_health_fn: Callable[[Any, list[dict[str, Any]], datetime], Awaitable[dict[str, Any]]] | None = None,
+    async_realtime_provider_health_fn: Callable[[Any, list[dict[str, Any]], datetime], Awaitable[dict[str, Any]]] | None = None,
 ) -> APIRouter:
     """Build read-only routes without allowing a front-end refresh to probe."""
     router = APIRouter(tags=["provider-status"])
@@ -66,5 +71,25 @@ def build_provider_status_router(
             database,
             provider_configs, observed_at,
         )
+
+    @router.get("/api/v1/providers/realtime-health")
+    async def realtime_providers_health() -> dict[str, Any]:
+        """Return source-level realtime health from stored evidence only."""
+        provider_configs = [*provider_status_fn(), *free_provider_status_fn(),
+                            {"provider_key": "longhuvip", "configured": longhu_configured()}]
+        observed_at = datetime.now(timezone.utc)
+        if async_database is not None:
+            payload = await (async_realtime_provider_health_fn or async_realtime_provider_health)(
+                async_database, provider_configs, observed_at,
+            )
+        else:
+            payload = realtime_provider_health_snapshot(database, provider_configs, observed_at)
+        limit = intraday_longhu_max_symbols()
+        payload["runtime_limits"] = {"longhu_quote": limit, "longhu_logical_maximum": 300,
+            "longhu_transport": "logical basket; GetStockPanKou fans out per symbol"}
+        for item in payload.get("items", []):
+            if item["source_key"] == "longhuvip":
+                item["current_limit"] = limit
+        return payload
 
     return router

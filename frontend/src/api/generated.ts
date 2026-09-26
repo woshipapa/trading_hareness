@@ -72,6 +72,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/providers/realtime-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Realtime Providers Health
+         * @description Return source-level realtime health from stored evidence only.
+         */
+        get: operations["realtime_providers_health_api_v1_providers_realtime_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/storage-tiers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Storage Tiers */
+        get: operations["storage_tiers_api_v1_research_storage_tiers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/storage-tiering": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Storage Tiering
+         * @description The peer's hot/cold tiering policy for the owner's mover (read only).
+         */
+        get: operations["storage_tiering_api_v1_research_storage_tiering_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/licensed/longhu/quotes": {
         parameters: {
             query?: never;
@@ -81,6 +138,31 @@ export interface paths {
         };
         /** Read Quotes */
         get: operations["read_quotes_licensed_longhu_quotes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/licensed/longhu/minutes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Minutes Batch
+         * @description Current-session minute paths for up to 300 symbols in one request.
+         *
+         *     The single-``StockID`` trend calls fan out on the adapter's own
+         *     pool inside one blocking-executor slot, like ``/quotes``.  Symbols
+         *     still unfinished at the deadline come back as
+         *     ``minute_batch_deadline_exceeded`` instead of holding the request.
+         */
+        get: operations["read_minutes_batch_licensed_longhu_minutes_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3044,6 +3126,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/strategies/xiaojie-leader-flow/message-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Message Features
+         * @description Group-message features known at ``as_of`` (default now), newest first.
+         */
+        get: operations["message_features_api_v1_research_strategies_xiaojie_leader_flow_message_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/strategies/xiaojie-leader-flow/evaluate": {
         parameters: {
             query?: never;
@@ -3055,6 +3157,128 @@ export interface paths {
         put?: never;
         /** Evaluate */
         post: operations["evaluate_api_v1_research_strategies_xiaojie_leader_flow_evaluate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/watch-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Reviews */
+        get: operations["read_reviews_api_v1_watch_reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/watch-reviews/patterns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Patterns */
+        get: operations["review_patterns_api_v1_watch_reviews_patterns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/watch-reviews/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Reviews */
+        post: operations["run_reviews_api_v1_watch_reviews_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher-review/packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Pack */
+        post: operations["import_pack_api_v1_teacher_review_packs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher-review/roll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Roll
+         * @description Re-run the post-close roll: settle ``trade_date`` and re-freeze next-session plans.
+         */
+        post: operations["roll_api_v1_teacher_review_roll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher-review/cohort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cohort */
+        get: operations["cohort_api_v1_teacher_review_cohort_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher-review/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Settlements */
+        get: operations["settlements_api_v1_teacher_review_settlements_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3611,6 +3835,12 @@ export interface components {
              * @enum {integer}
              */
             horizon_days: 1 | 5 | 20 | 60;
+            /**
+             * Membership Mode
+             * @default point_in_time
+             * @enum {string}
+             */
+            membership_mode: "point_in_time" | "current_backfill";
         };
         /** FetchRunReconcileRequest */
         FetchRunReconcileRequest: {
@@ -4281,6 +4511,16 @@ export interface components {
             total_cost_bps: number;
             /** Factors */
             factors?: string[];
+            /** Directions */
+            directions?: {
+                [key: string]: 1 | -1;
+            };
+            /**
+             * Membership Mode
+             * @default point_in_time
+             * @enum {string}
+             */
+            membership_mode: "point_in_time" | "current_backfill";
         };
         /**
          * StrategyDecisionRequest
@@ -4352,6 +4592,25 @@ export interface components {
              * @default true
              */
             persist: boolean;
+        };
+        /**
+         * TeacherReviewPackImportRequest
+         * @description Import one reviewed analyst/teacher pack (schema ``teacher-review-pack/v1``).
+         *
+         *     The pack body is validated by ``teacher_review_playbooks.validate_pack``;
+         *     only its size is bounded here so a malformed pack is reported as a list of
+         *     problems instead of a generic 422.
+         */
+        TeacherReviewPackImportRequest: {
+            /** Pack */
+            pack: {
+                [key: string]: unknown;
+            };
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
         };
         /** TenDayLeaderRotationCandidateResponse */
         TenDayLeaderRotationCandidateResponse: {
@@ -4617,7 +4876,7 @@ export interface components {
             snapshot: components["schemas"]["XiaojieLeaderFlowSnapshotRequest"];
             /** Parameters */
             parameters?: {
-                [key: string]: number;
+                [key: string]: boolean | number;
             };
         };
         /**
@@ -4705,6 +4964,36 @@ export interface components {
             is_etf?: boolean | null;
             /** Trend Support Holds */
             trend_support_holds?: boolean | null;
+            /** Distance From Ma20 Pct */
+            distance_from_ma20_pct?: number | null;
+            /** Pre Signal 5D Return Pct */
+            pre_signal_5d_return_pct?: number | null;
+            /** Sector Day Return Pct */
+            sector_day_return_pct?: number | null;
+            /** Sector Net Inflow Rate Pct */
+            sector_net_inflow_rate_pct?: number | null;
+            /** Stock Vs Sector Divergence Pct */
+            stock_vs_sector_divergence_pct?: number | null;
+            /** Ma Spread Min 10D Pct */
+            ma_spread_min_10d_pct?: number | null;
+            /** Consolidation Box Range Pct */
+            consolidation_box_range_pct?: number | null;
+            /** Marker K Sessions Ago */
+            marker_k_sessions_ago?: number | null;
+            /** Daily History Complete */
+            daily_history_complete?: boolean | null;
+            /** Reverse Wrap Volume Confirmed */
+            reverse_wrap_volume_confirmed?: boolean | null;
+            /** Signed Distance From Ma5 Pct */
+            signed_distance_from_ma5_pct?: number | null;
+            /** Distance From Box Top Pct */
+            distance_from_box_top_pct?: number | null;
+            /** Candidate In Main Sector */
+            candidate_in_main_sector?: boolean | null;
+            /** Fundamental Pe */
+            fundamental_pe?: number | null;
+            /** Overhead High Distance Pct */
+            overhead_high_distance_pct?: number | null;
         };
     };
     responses: never;
@@ -4803,6 +5092,72 @@ export interface operations {
             };
         };
     };
+    realtime_providers_health_api_v1_providers_realtime_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    storage_tiers_api_v1_research_storage_tiers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    storage_tiering_api_v1_research_storage_tiering_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     read_quotes_licensed_longhu_quotes_get: {
         parameters: {
             query: {
@@ -4825,6 +5180,40 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_minutes_batch_licensed_longhu_minutes_get: {
+        parameters: {
+            query: {
+                symbols: string;
+                deadline_seconds?: number;
+            };
+            header?: {
+                "X-Quant-Read-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -10344,6 +10733,43 @@ export interface operations {
             };
         };
     };
+    message_features_api_v1_research_strategies_xiaojie_leader_flow_message_features_get: {
+        parameters: {
+            query?: {
+                symbol?: string | null;
+                as_of?: string | null;
+                since?: string | null;
+                instructor_only?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     evaluate_api_v1_research_strategies_xiaojie_leader_flow_evaluate_post: {
         parameters: {
             query?: never;
@@ -10356,6 +10782,231 @@ export interface operations {
                 "application/json": components["schemas"]["XiaojieLeaderFlowEvaluateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_reviews_api_v1_watch_reviews_get: {
+        parameters: {
+            query?: {
+                trade_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_patterns_api_v1_watch_reviews_patterns_get: {
+        parameters: {
+            query?: {
+                start?: string | null;
+                end?: string | null;
+                min_count?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_reviews_api_v1_watch_reviews_run_post: {
+        parameters: {
+            query?: {
+                trade_date?: string | null;
+                persist?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_pack_api_v1_teacher_review_packs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeacherReviewPackImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    roll_api_v1_teacher_review_roll_post: {
+        parameters: {
+            query?: {
+                trade_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cohort_api_v1_teacher_review_cohort_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    settlements_api_v1_teacher_review_settlements_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

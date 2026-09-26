@@ -50,8 +50,23 @@ async def run_intraday_monitor_loop(
     next_started_at = loop.time()
     next_board_refresh_at = loop.time()
     realtime_rotation_offset = 0
+    board_task: asyncio.Task[Any] | None = None
+
+    def report_failure(result: BaseException) -> None:
+        # The message alone does not locate the defect.  On 2026-08-28 a bare
+        # "Object of type Decimal is not JSON serializable" failed 352 passes -
+        # about 68% of the session - and named no file, no line and no source
+        # pass, and it did not reproduce off the edge.  The tail of the frames
+        # is what makes such a failure addressable.
+        frames = "".join(traceback.format_exception(type(result), result, result.__traceback__))
+        log(f"intraday monitor source pass failed: {str(result)[:300]}\n{frames[-1500:]}")
+
     while True:
         await asyncio.sleep(max(0.0, next_started_at - loop.time()))
+        if board_task is not None and board_task.done():
+            if not board_task.cancelled() and board_task.exception() is not None:
+                report_failure(board_task.exception())
+            board_task = None
         local = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
         # A slow provider pass must never generate a stale catch-up burst.
         next_started_at = loop.time() + next_delay_seconds(interval_seconds, local)
@@ -60,28 +75,22 @@ async def run_intraday_monitor_loop(
             if not active:
                 continue
             minute_limit = 0 if high_frequency_window(local) else 4
-            jobs = [scan_watchlist(make_scan_request(minute_limit, realtime_rotation_offset))]
-            if loop.time() >= next_board_refresh_at:
+            if board_task is None and loop.time() >= next_board_refresh_at:
                 next_board_refresh_at = loop.time() + board_refresh_interval_seconds(local)
                 # Board reports are frontend research evidence; watched-stock
-                # signals remain the only path to Feishu.
-                jobs.append(run_board_report(deliver=False))
-            results = await asyncio.gather(*jobs, return_exceptions=True)
+                # signals remain the only path to Feishu.  A report can take
+                # minutes (public fund-flow pages), so it runs beside the watch
+                # scans - one at a time - and never holds the next scan back.
+                board_task = asyncio.create_task(run_board_report(deliver=False))
+            results = await asyncio.gather(
+                scan_watchlist(make_scan_request(minute_limit, realtime_rotation_offset)), return_exceptions=True)
             realtime_rotation_offset = next_rotation_offset_from_scan(
                 results[0] if results else None,
                 realtime_rotation_offset,
             )
             for result in results:
                 if isinstance(result, Exception):
-                    # The message alone does not locate the defect.  On
-                    # 2026-08-28 a bare "Object of type Decimal is not JSON
-                    # serializable" failed 352 passes - about 68% of the
-                    # session - and named no file, no line and no source pass,
-                    # and it did not reproduce off the edge.  The tail of the
-                    # frames is what makes such a failure addressable.
-                    frames = "".join(traceback.format_exception(
-                        type(result), result, result.__traceback__))
-                    log(f"intraday monitor source pass failed: {str(result)[:300]}\n{frames[-1500:]}")
+                    report_failure(result)
         except Exception as error:  # noqa: BLE001 - a later interval may recover a public source
             log(f"intraday monitor iteration failed: {str(error)[:300]}")
 

@@ -49,6 +49,7 @@ from app.async_provider_status_read_repository import provider_health as async_p
 from app.async_analyst_text_feature_read_repository import analyst_text_factor_summary as async_analyst_factor_summary
 from app.async_research_readiness_repository import replay_readiness as async_replay_readiness
 from app.async_research_readiness_repository import historical_estimate as async_historical_estimate
+from app.async_research_readiness_repository import frameworks as async_research_frameworks
 from app.request_models import HistoricalCoverageEstimateRequest
 from app.routers.intraday_status import build_intraday_status_router
 from app.routers.event_reads import build_event_reads_router

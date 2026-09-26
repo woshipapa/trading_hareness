@@ -23,6 +23,11 @@ class _Transaction:
 
 
 class FeatureSnapshotRuntimeTests(unittest.TestCase):
+    def test_owner_recommendation_feature_contract_is_v4(self):
+        from app.main import FEATURE_VERSION
+
+        self.assertEqual(FEATURE_VERSION, "multi-source-feature-v4")
+
     def test_materializes_through_one_transaction_with_explicit_contract_ports(self):
         connection = object()
         database = type("Database", (), {"transaction": lambda _self: _Transaction(connection)})()

@@ -19,6 +19,7 @@ async def sync_index_context(
     run_database: Callable[..., Awaitable[Any]],
     fetch_secondary: Callable[[str, str, str], Awaitable[list[dict[str, Any]]]] | None = None,
     secondary_provider: str = "tencent_index_free",
+    primary_provider: str = "tushare_super_get",
 ) -> dict[str, Any]:
     """Persist every requested index, falling back symbol by symbol."""
     start_date = as_of_date - timedelta(days=45)
@@ -28,7 +29,7 @@ async def sync_index_context(
         if not prefer_public:
             try:
                 result = await fetch_primary(primary_request(symbol, start_date, as_of_date))
-                return symbol, {"status": "completed", "provider": "tushare_primary", "result": result}
+                return symbol, {"status": "completed", "provider": primary_provider, "result": result}
             except Exception as error:  # noqa: BLE001 - explicit labelled fallback
                 primary_error = str(error)[:240]
         else:

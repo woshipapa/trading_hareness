@@ -6,11 +6,15 @@ services:
       context: ../..
       dockerfile: deploy/shared-peer/Dockerfile.ssh-tunnel
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "5"}
     environment:
       PEER_SSH_HOST: ${PEER_SSH_HOST:?Set PEER_SSH_HOST}
       PEER_SSH_PORT: ${PEER_SSH_PORT:-3535}
       PEER_SSH_USER: ${PEER_SSH_USER:-stockpeer}
       REMOTE_DB_PORT: ${REMOTE_DB_PORT:-15432}
+      REMOTE_BATCH_DB_PORT: ${REMOTE_BATCH_DB_PORT:-15433}
       REMOTE_API_PORT: ${REMOTE_API_PORT:-15681}
       # PEER_SSH_HOST may be a routing-internal address (VPN/overlay IP) that
       # moves independently of the owner host's identity. known_hosts is keyed
@@ -22,10 +26,39 @@ services:
       - ${PEER_SSH_KEY_PATH:?Set PEER_SSH_KEY_PATH}:/run/secrets/peer_ssh_key:ro
       - ${PEER_KNOWN_HOSTS_PATH:?Set PEER_KNOWN_HOSTS_PATH}:/run/secrets/known_hosts:ro
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 && nc -z 127.0.0.1 5681"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 && nc -z 127.0.0.1 5433 && nc -z 127.0.0.1 5681"]
       interval: 10s
       timeout: 3s
       retries: 12
+
+  # Independent bulk lane. A reconnect or long COPY here must not interrupt
+  # the low-latency 5432/session path. The owner publishes 15433 -> 55432.
+  db-batch-tunnel:
+    build:
+      context: ../..
+      dockerfile: deploy/shared-peer/Dockerfile.ssh-tunnel
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "5"}
+    environment:
+      PEER_SSH_HOST: ${PEER_SSH_HOST:?Set PEER_SSH_HOST}
+      PEER_SSH_PORT: ${PEER_SSH_PORT:-3535}
+      PEER_SSH_USER: ${PEER_SSH_USER:-stockpeer}
+      REMOTE_DB_PORT: ${REMOTE_BATCH_DB_PORT:-15433}
+      LOCAL_DB_BIND_PORT: 5433
+      ENABLE_BATCH_FORWARD: "false"
+      ENABLE_API_FORWARD: "false"
+      PEER_SSH_HOST_KEY_ALIAS: ${PEER_SSH_HOST_KEY_ALIAS:-}
+    volumes:
+      - ${PEER_SSH_KEY_PATH:?Set PEER_SSH_KEY_PATH}:/run/secrets/peer_ssh_key:ro
+      - ${PEER_KNOWN_HOSTS_PATH:?Set PEER_KNOWN_HOSTS_PATH}:/run/secrets/known_hosts:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5433"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   quant-research:
     build:
@@ -33,13 +66,15 @@ services:
       dockerfile: quant-service/Dockerfile.peer
       additional_contexts:
         wheelhouse: ${PEER_WHEELHOUSE_PATH:?Set PEER_WHEELHOUSE_PATH}
-      # /health.build reports these, so every host can be checked against
-      # one release SHA (docs/RELEASE_SYNC_47.md).  Set them when building.
       args:
-        APP_GIT_SHA: ${APP_GIT_SHA:-unknown}
-        APP_RELEASE: ${APP_RELEASE:-unknown}
-        APP_BUILD_CREATED_AT: ${APP_BUILD_CREATED_AT:-unknown}
+        APP_GIT_SHA: ${PEER_APP_GIT_SHA:-unknown}
+        APP_RELEASE: ${PEER_APP_RELEASE:-unknown}
+        APP_BUILD_CREATED_AT: ${PEER_APP_BUILD_CREATED_AT:-unknown}
+    image: ${PEER_QUANT_IMAGE:-trading-hareness-peer-quant-research:latest}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "5"}
     depends_on:
       db-tunnel:
         condition: service_healthy
@@ -52,22 +87,42 @@ services:
       PGUSER: ${PEER_DB_USER:-stock_peer}
       PGPASSWORD: ${PEER_DB_PASSWORD:?Set PEER_DB_PASSWORD}
       QUANT_DATA_DIR: /var/lib/quant
+      QUANT_ASYNC_READ_POOL_MAX_SIZE: ${PEER_RESEARCH_ASYNC_READ_POOL_MAX_SIZE:-16}
       QUANT_LEGACY_SCHEMA_BOOTSTRAP: "false"
-      # The owner database role is read-only; schema migrations belong to the
-      # owner release pipeline and must never run from the peer container.
+      # Schema migrations belong to the owner release pipeline and must never
+      # run from the peer container. Existing stock_peer write ACLs are
+      # monitored by declaration/error reconciliation, not changed here.
       QUANT_SKIP_MIGRATIONS: "true"
+      # New research SQL reports the owner's live machine-readable contract;
+      # it does not invent adjustment_state/factor_semantics columns.
+      PEER_REQUIRE_OWNER_SEMANTICS: ${PEER_REQUIRE_OWNER_SEMANTICS:-true}
       QUANT_BACKGROUND_TASKS_ENABLED: ${PEER_BACKGROUND_TASKS_ENABLED:-false}
       QUANT_RUNTIME_PROFILE: research
       QUANT_WRITE_API_KEY: ${PEER_QUANT_WRITE_API_KEY:?Set PEER_QUANT_WRITE_API_KEY}
       QUANT_SHARED_READ_API_KEY: ${QUANT_SHARED_READ_API_KEY:?Set QUANT_SHARED_READ_API_KEY}
       QUANT_SHARED_READ_API_BASE_URL: http://db-tunnel:5681
+      QUANT_APPLICATION_NAME: peer-quant-research
+      # Contract rollout is report-only for the first restart. Once the
+      # receipt exists, operators may set PEER_OWNER_CONTRACT_MODE=block.
+      PEER_OWNER_CONTRACT_MODE: ${PEER_OWNER_CONTRACT_MODE:-report_only}
+      PEER_OWNER_CONTRACT_RECEIPT_PATH: /var/lib/quant/owner-peer-contract.json
       # The peer is a gateway consumer; only the licensed owner host may use
       # the direct Longhu adapter.
       QUANT_LONGHU_DIRECT_ENABLED: "false"
+      QUANT_HOTFIX_ENABLED: ${QUANT_HOTFIX_ENABLED:-false}
       NO_PROXY: "*"
       TZ: Asia/Shanghai
     volumes:
       - peer_quant_data:/var/lib/quant
+      - ${QUANT_HOTFIX_HOST_DIR:-./hotfix/quant-service}:/app/hotfix:ro
+    command:
+      - sh
+      - -c
+      - >-
+        if [ "$$QUANT_HOTFIX_ENABLED" = "true" ] && [ -f /app/hotfix/current/app/main.py ]; then
+        export PYTHONPATH=/app/hotfix/current:/app;
+        exec python entrypoint.py uvicorn app.main:app --app-dir /app/hotfix/current --host 0.0.0.0 --port 8000; fi;
+        exec python entrypoint.py uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
       interval: 15s
@@ -79,6 +134,9 @@ services:
     image: docker.n8n.io/n8nio/n8n:2.33.7
     profiles: ["n8n"]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "5"}
     depends_on:
       db-tunnel:
         condition: service_healthy

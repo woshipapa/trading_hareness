@@ -64,62 +64,19 @@ class IntradaySettlementClockTests(unittest.TestCase):
         self.assertEqual(attribution["model_version"], "legacy-unversioned")
         self.assertEqual(attribution["volume_baseline"], "not_applicable")
 
-    def test_settlement_does_not_query_an_afternoon_or_overnight_quote_for_lunch_crossing_horizon(self) -> None:
-        signal_at = datetime(2026, 8, 11, 3, 25, tzinfo=timezone.utc)  # 11:25 China.
-        signal = {
-            "signal_event_id": "signal-1", "symbol": "000001.SZ", "signal_type": "entry",
-            "observed_at": signal_at, "evidence": {"tencent": {"price": "10.00"}},
-        }
+    def test_trading_time_moves_a_lunch_crossing_target_into_the_afternoon(self) -> None:
+        entry = datetime(2026, 8, 11, 3, 25, tzinfo=timezone.utc)  # 11:25 China.
+        window = intraday_outcome_window(entry, horizon_minutes=15, cutoff=datetime(2026, 8, 11, 7, 0, tzinfo=timezone.utc),
+                                         trading_time=True)
+        self.assertEqual(window["target_at"], datetime(2026, 8, 11, 5, 10, tzinfo=timezone.utc))  # 13:10
+        self.assertEqual(window["clock"], "trading_time_after_lunch")
+        self.assertEqual(window["query_start"], datetime(2026, 8, 11, 5, 10, tzinfo=timezone.utc))
+        late = intraday_outcome_window(datetime(2026, 8, 11, 6, 50, tzinfo=timezone.utc), horizon_minutes=15,
+                                       cutoff=datetime(2026, 8, 11, 8, 0, tzinfo=timezone.utc), trading_time=True)
+        self.assertEqual(late["reason"], "target_crosses_continuous_session_boundary")   # 14:50 + 15 is past the close
 
-        class Result:
-            def __init__(self, *, rows=None, row=None):
-                self.rows, self.row = rows or [], row
-
-            def fetchall(self):
-                return self.rows
-
-            def fetchone(self):
-                return self.row
-
-        calls: list[tuple[str, tuple[object, ...] | None]] = []
-
-        class Connection:
-            def execute(self, query, params=None):
-                calls.append((str(query), params))
-                if "FROM quant.intraday_signal_events" in query:
-                    return Result(rows=[signal])
-                if "SELECT observed_at,price" in query:
-                    return Result(rows=[])
-                if "FROM quant.canonical_bars_daily" in query:
-                    return Result(row=None)
-                return Result()
-
-        persist_barrier = MagicMock()
-        result = settle(
-            Connection(), date(2026, 8, 11), cutoff=datetime(2026, 8, 11, 6, 0, tzinfo=timezone.utc),
-            horizons=(("15m", 15),), direction_for=lambda _signal_type: 1,
-            metrics_for=intraday_signal_outcome_metrics,
-            decimal_or_none=lambda value: Decimal(str(value)) if value is not None else None,
-            barrier_spec_type=LabelSpec, triple_barrier_label=triple_barrier_label,
-            persist_barrier_outcome=persist_barrier, return_decomposition=a_share_return_decomposition,
-            json_safe=lambda value: value,
-        )
-
-        self.assertEqual(result["matured"], 0)
-        self.assertEqual(result["pending"], 2)  # the two daily references remain pending.
-        self.assertFalse(any("observed_at>=%s AND observed_at<=%s" in query for query, _ in calls))
-        outcome_insert = next(params for query, params in calls if "INSERT INTO quant.intraday_signal_outcomes" in query)
-        self.assertEqual(outcome_insert[10], "unavailable")
-        self.assertEqual(persist_barrier.call_args.kwargs["result"]["status"], "unavailable")
-
-    def test_post_close_recompute_uses_a_persisted_quote_inside_the_original_tolerance(self) -> None:
-        signal_at = datetime(2026, 8, 11, 2, 0, tzinfo=timezone.utc)  # 10:00 Shanghai.
-        exit_at = datetime(2026, 8, 11, 2, 5, 20, tzinfo=timezone.utc)
-        signal = {
-            "signal_event_id": "signal-2", "symbol": "000001.SZ", "signal_type": "entry",
-            "observed_at": signal_at, "evidence": {"tencent": {"price": "10.00"}},
-        }
-
+    @staticmethod
+    def _settle(signal, *, quotes=(), tape=(), horizons=(("15m", 15),), cutoff=None):
         class Result:
             def __init__(self, *, rows=None, row=None):
                 self.rows, self.row = rows or [], row
@@ -131,16 +88,18 @@ class IntradaySettlementClockTests(unittest.TestCase):
                 return self.row
 
         inserts: list[tuple[object, ...]] = []
+        barrier = MagicMock()
 
         class Connection:
             def execute(self, query, params=None):
                 text = str(query)
                 if "FROM quant.intraday_signal_events" in text:
                     return Result(rows=[signal])
-                if "source_name='tencent_free' AND observed_at>=%s AND observed_at<=%s" in text:
-                    return Result(row={"observed_at": exit_at, "price": "10.20"})
-                if "SELECT price FROM quant.intraday_quote_observations" in text:
-                    return Result(rows=[{"price": "10.00"}, {"price": "10.20"}])
+                if "watch_scan_tape" in text:
+                    return Result(rows=[{"effective_at": at, "symbol": signal["symbol"], "price": price} for at, price in tape])
+                if "FROM quant.intraday_quote_observations" in text:
+                    assert "tencent_free" not in text                     # every priced source, not Tencent only
+                    return Result(rows=[{"observed_at": at, "price": price} for at, price in quotes])
                 if "FROM quant.canonical_bars_daily" in text:
                     return Result(row=None)
                 if "INSERT INTO quant.intraday_signal_outcomes" in text:
@@ -148,20 +107,51 @@ class IntradaySettlementClockTests(unittest.TestCase):
                 return Result()
 
         result = settle(
-            Connection(), date(2026, 8, 11), cutoff=datetime(2026, 8, 11, 2, 10, tzinfo=timezone.utc),
-            horizons=(("5m", 5),), direction_for=lambda _signal_type: 1,
+            Connection(), date(2026, 8, 11), cutoff=cutoff or datetime(2026, 8, 11, 7, 0, tzinfo=timezone.utc),
+            horizons=horizons, direction_for=lambda _signal_type: 1,
             metrics_for=intraday_signal_outcome_metrics,
             decimal_or_none=lambda value: Decimal(str(value)) if value is not None else None,
             barrier_spec_type=LabelSpec, triple_barrier_label=triple_barrier_label,
-            persist_barrier_outcome=MagicMock(), return_decomposition=a_share_return_decomposition,
+            persist_barrier_outcome=barrier, return_decomposition=a_share_return_decomposition,
             json_safe=lambda value: value,
         )
+        return result, inserts, barrier
 
+    def test_a_lunch_crossing_horizon_settles_in_the_afternoon_and_never_uses_a_lunch_print(self) -> None:
+        signal = {"signal_event_id": "signal-1", "symbol": "000001.SZ", "signal_type": "entry",
+                  "observed_at": datetime(2026, 8, 11, 3, 25, tzinfo=timezone.utc), "evidence": {"quote": {"price": "10.00"}}}
+        exit_at = datetime(2026, 8, 11, 5, 10, 20, tzinfo=timezone.utc)          # 13:10:20
+        quotes = [(datetime(2026, 8, 11, 4, 0, tzinfo=timezone.utc), "50.00"),    # a 12:00 print must never count
+                  (exit_at, "10.30")]
+        result, inserts, _ = self._settle(signal, quotes=quotes)
+        row = next(params for params in inserts if params[1] == "15m")
+        self.assertEqual(row[10], "matured")
+        self.assertEqual(row[5], exit_at)
+        self.assertEqual(row[7], Decimal("0.03"))
+        self.assertEqual(row[8], Decimal("0.03"))                                 # MFE ignores the lunch print
+        self.assertEqual(result["skipped_without_entry_price"], 0)
+
+    def test_longhu_quotes_settle_and_a_signal_without_a_price_takes_its_entry_from_the_tape(self) -> None:
+        signal_at = datetime(2026, 8, 11, 2, 0, 10, tzinfo=timezone.utc)          # 10:00:10
+        signal = {"signal_event_id": "signal-2", "symbol": "000001.SZ", "signal_type": "watch",
+                  "observed_at": signal_at, "evidence": {}}
+        tape = [(datetime(2026, 8, 11, 2, 0, 5, tzinfo=timezone.utc), "10.00")]
+        quotes = [(datetime(2026, 8, 11, 2, 5, 12, tzinfo=timezone.utc), "10.20")]  # a Longhu row
+        result, inserts, _ = self._settle(signal, quotes=quotes, tape=tape, horizons=(("5m", 5),),
+                                          cutoff=datetime(2026, 8, 11, 2, 10, tzinfo=timezone.utc))
+        row = next(params for params in inserts if params[1] == "5m")
+        self.assertEqual(row[4], Decimal("10.00"))                                # entry from the tape
+        self.assertEqual(row[10], "matured")
+        self.assertEqual(row[7], Decimal("0.02"))
         self.assertEqual(result["matured"], 1)
-        intraday_insert = next(params for params in inserts if params[1] == "5m")
-        self.assertEqual(intraday_insert[10], "matured")
-        self.assertEqual(intraday_insert[5], exit_at)
 
+    def test_entry_price_prefers_the_scan_quote_then_the_strategy_price(self) -> None:
+        from app.intraday_outcome_settlement import signal_entry_price
+        number = lambda value: Decimal(str(value)) if value is not None else None  # noqa: E731
+        self.assertEqual(signal_entry_price({"tencent": {"price": 9.58}, "price": 1}, number), (Decimal("9.58"), "signal_evidence.tencent.price"))
+        self.assertEqual(signal_entry_price({"quote": {"price": 9.6}}, number), (Decimal("9.6"), "signal_evidence.quote.price"))
+        self.assertEqual(signal_entry_price({"price": 3.51}, number), (Decimal("3.51"), "signal_evidence.price"))
+        self.assertEqual(signal_entry_price({}, number), (None, None))
 
 if __name__ == "__main__":
     unittest.main()

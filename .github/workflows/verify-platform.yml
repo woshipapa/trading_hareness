@@ -29,7 +29,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            feishu-relay/dashboard/package-lock.json
 
       - name: Verify architecture contracts
         run: python3 scripts/verify_architecture.py
@@ -41,6 +43,13 @@ jobs:
           npm test --prefix frontend
           npm run build --prefix frontend
 
+      - name: Install and verify Feishu dashboard
+        run: |
+          npm ci --prefix feishu-relay/dashboard
+          npm run typecheck --prefix feishu-relay/dashboard
+          npm test --prefix feishu-relay/dashboard
+          npm run build --prefix feishu-relay/dashboard
+
       - name: Build and test research service
         run: |
           docker compose up -d --wait --wait-timeout 120 postgres
@@ -50,7 +59,7 @@ jobs:
           # quant bootstrap, which stamps the baseline and upgrades to head.
           # initialize-ledger.mjs is not copied into the adapter image.
           docker compose run --rm --no-deps \
-            --volume "$GITHUB_WORKSPACE/feishu-adapter/initialize-ledger.mjs:/app/initialize-ledger.mjs:ro" \
+            --volume "$GITHUB_WORKSPACE/feishu-relay/adapter/initialize-ledger.mjs:/app/initialize-ledger.mjs:ro" \
             feishu-adapter node initialize-ledger.mjs
           docker compose run --rm --no-deps quant-research python database_bootstrap.py
           docker compose run --rm --no-deps quant-research python -m unittest discover -s tests -q
@@ -63,9 +72,9 @@ jobs:
 
       - name: Build and test Feishu adapter
         run: |
-          docker build --tag n8n-feishu-adapter:test --file feishu-adapter/Dockerfile .
+          docker build --tag n8n-feishu-adapter:test --file feishu-relay/adapter/Dockerfile .
           docker run --rm \
-            --volume "$GITHUB_WORKSPACE/feishu-adapter:/tests:ro" \
+            --volume "$GITHUB_WORKSPACE/feishu-relay/adapter:/tests:ro" \
             n8n-feishu-adapter:test \
             sh -lc 'cp /tests/*.test.mjs /app/ && node --test *.test.mjs'
 

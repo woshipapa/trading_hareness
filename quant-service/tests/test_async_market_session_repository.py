@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import unittest
 
-from app.async_market_session_repository import realtime_market_session, sse_calendar_open, sse_calendar_status
+from app.async_market_session_repository import (
+    market_observation_session,
+    realtime_market_session,
+    sse_calendar_open,
+    sse_calendar_status,
+)
 
 
 class _Result:
@@ -65,6 +70,22 @@ class AsyncMarketSessionRepositoryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(active)
         self.assertIn("fail closed", reason)
+
+    async def test_observation_gate_opens_at_0915_but_strategy_gate_stays_closed(self) -> None:
+        china = timezone(__import__("datetime").timedelta(hours=8))
+        observed_at = datetime(2026, 9, 21, 9, 15, tzinfo=china)
+        database = _Database({"is_open": True})
+        self.assertTrue((await market_observation_session(database, observed_at))[0])
+        self.assertFalse((await realtime_market_session(database, now=observed_at))[0])
+
+    async def test_observation_gate_honors_calendar_and_clock(self) -> None:
+        china = timezone(__import__("datetime").timedelta(hours=8))
+        self.assertFalse((await market_observation_session(
+            _Database({"is_open": True}), datetime(2026, 9, 21, 9, 14, tzinfo=china),
+        ))[0])
+        self.assertFalse((await market_observation_session(
+            _Database({"is_open": False}), datetime(2026, 9, 21, 9, 15, tzinfo=china),
+        ))[0])
 
 
 if __name__ == "__main__":

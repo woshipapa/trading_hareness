@@ -21,6 +21,7 @@ from app.minute_bar_backfill import (
     parse_trade_time,
     persist_minute_rows,
     reconcile_against_daily,
+    source_clock_coverage,
 )
 
 
@@ -121,6 +122,22 @@ class NormalizeMinuteRowTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_available_at"], datetime(2026, 8, 25, 1, 30, 2, tzinfo=timezone.utc))
         self.assertIsNone(parse_source_available_at("not-a-clock"))
 
+    def test_source_clock_coverage_does_not_treat_local_time_as_provider_time(self):
+        rows = normalize_minute_rows(self.symbol, [
+            _bar(self.symbol, "2026-08-25 09:30:00"),
+            _bar(self.symbol, "2026-08-25 09:31:00",
+                 provider_available_at="2026-08-25T01:31:05+00:00"),
+            _bar(self.symbol, "2026-08-25 09:32:00",
+                 source_available_at="2026-08-25T02:00:00+00:00"),
+        ])
+        coverage = source_clock_coverage(rows)
+        self.assertEqual(coverage["bars"], 3)
+        self.assertEqual(coverage["explicit_source_clock_bars"], 2)
+        self.assertEqual(coverage["causally_clocked_bars"], 1)
+        self.assertEqual(coverage["missing_source_clock_bars"], 1)
+        self.assertEqual(coverage["status"], "missing_or_noncausal")
+        self.assertEqual(coverage["provider_contract"], "explicit_row_clock_only")
+
 
 class BackfillOrchestrationTests(unittest.TestCase):
     def _run(self, rows):
@@ -155,6 +172,8 @@ class BackfillOrchestrationTests(unittest.TestCase):
         self.assertEqual(result["bars"], 1)
         self.assertEqual(result["expected"], FULL_SESSION_BARS)
         self.assertEqual(result["reconciliation"]["status"], "unverifiable")
+        self.assertEqual(result["source_clock"]["status"], "missing_or_noncausal")
+        self.assertEqual(result["source_clock"]["missing_source_clock_bars"], 1)
 
     def test_an_empty_response_is_reported_not_raised(self):
         result, _ = self._run([])

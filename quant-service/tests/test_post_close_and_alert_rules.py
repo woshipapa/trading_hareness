@@ -1,15 +1,37 @@
 """Focused regression tests extracted from the legacy provider helper suite."""
 
 from provider_test_support import *  # noqa: F403
+from app.strategy_read_model import compact_post_close_run
 
 
 class PostCloseAndAlertRuleTests(unittest.TestCase):
+    def test_post_close_read_projection_drops_large_nested_summary_payloads(self):
+        row = {
+            "run_id": "run-1",
+            "status": "blocked",
+            "summary": {
+                "reason": "only 0 symbols have saved daily bars; need 1000",
+                "returned": 0,
+                "eligible_candidates": 0,
+                "trade_thesis": {"all_symbols": ["000001.SZ"] * 1000},
+                "strategy_lanes": {"lane": {"details": ["large"] * 1000}},
+            },
+        }
+
+        projected = compact_post_close_run(row)
+
+        self.assertEqual(projected["summary"], {
+            "reason": "only 0 symbols have saved daily bars; need 1000",
+            "returned": 0,
+            "eligible_candidates": 0,
+        })
     def test_post_close_15_session_structures_are_explicitly_provisional(self):
         bars = []
         for index in range(15):
             close = 10.0 + (index % 3) * 0.05
             bars.append({"high": close + 0.08, "low": close - 0.08, "close": close,
-                         "volume": 100 if index < 12 else 60, "adj_factor": 1.0})
+                         "volume": 100 if index < 12 else 60, "adj_factor": 1.0,
+                         "provider": "tushare_primary", "raw": {}})
         forming = post_close_forming_structure(bars)
         self.assertIn(forming["status"], {"forming", "not_ready"})
         self.assertEqual(forming["bar_count"], 15)
@@ -25,7 +47,8 @@ class PostCloseAndAlertRuleTests(unittest.TestCase):
         self.assertGreaterEqual(started["metrics"]["volume_multiple_5d"], 1.5)
 
     def test_post_close_structures_refuse_mixed_adjustment_basis(self):
-        bars = [{"high": 10.2, "low": 9.8, "close": 10.0, "volume": 100, "adj_factor": 1.0}
+        bars = [{"high": 10.2, "low": 9.8, "close": 10.0, "volume": 100, "adj_factor": 1.0,
+                 "provider": "tushare_primary", "raw": {}}
                 for _ in range(30)]
         bars[-1].pop("adj_factor")
         result = daily_base_structure(bars)

@@ -55,9 +55,12 @@ class TenDayLeaderRotationRepositoryTests(unittest.TestCase):
         self.assertEqual(inputs.daily_rows[0]["symbol"], "600001.SH")
         self.assertIn("universe_membership_history", database.calls[0][0])
         self.assertIn("quality_status='fresh'", database.calls[0][0])
+        self.assertIn("raw->>'factor_semantics'", database.calls[0][0])
         self.assertIn("available_at <", database.calls[0][0])
         self.assertIn("rn<=11", database.calls[1][0])
-        self.assertIn("known_at <", database.calls[1][0])
+        self.assertNotIn("known_at", database.calls[0][0])
+        self.assertNotIn("known_at", database.calls[1][0])
+        self.assertIn("adj_factor>0", database.calls[1][0])
 
     def test_latest_full_market_date_requires_point_in_time_coverage(self) -> None:
         database = _Database([_Result(row={"trading_date": date(2026, 8, 17)})])
@@ -66,7 +69,7 @@ class TenDayLeaderRotationRepositoryTests(unittest.TestCase):
         self.assertIn("expected_symbols", sql)
         self.assertIn("ceil(expected.expected_symbols*0.95)", sql)
         self.assertIn("quality_status='fresh'", sql)
-        self.assertIn("known_at <", sql)
+        self.assertNotIn("known_at", sql)
         self.assertEqual(params, (5_000,))
 
     def test_persists_run_and_replaces_only_its_candidates(self) -> None:

@@ -10,7 +10,9 @@ These tests pin the corrected behaviour.
 
 from __future__ import annotations
 
+import asyncio
 import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.tushare_providers import (
     PROMAX_BOUNDED_ONLY_APIS,
@@ -21,6 +23,8 @@ from app.tushare_providers import (
     SUPER_GET_VERIFIED_APIS,
     TushareProvider,
     _filter_requested_realtime_rows,
+    call_provider,
+    provider_configs,
 )
 
 
@@ -34,6 +38,43 @@ def _promax(**overrides) -> TushareProvider:
 
 
 class PromaxAllowListTests(unittest.TestCase):
+    def test_fallback_can_use_an_independent_endpoint(self):
+        env = {
+            "TUSHARE_SUPER_GET_MODE": "promax",
+            "TUSHARE_SUPER_GET_API_KEY": "primary-key",
+            "TUSHARE_SUPER_GET_API_URL": "https://primary.example/tushare/pro",
+            "TUSHARE_SUPER_GET_FALLBACK_API_KEY": "fallback-key",
+            "TUSHARE_SUPER_GET_FALLBACK_API_URL": "https://fallback.example/tushare/pro",
+            "TUSHARE_SUPER_GET_FALLBACK_PROXY_URL": "http://fallback-proxy.example:8080",
+        }
+        provider = provider_configs(env)["super_get"]
+        self.assertEqual(provider.fallback_endpoint, "https://fallback.example/tushare/pro")
+        self.assertEqual(provider.fallback_proxy_url, "http://fallback-proxy.example:8080")
+
+        rejected = MagicMock(ok=False, status_code=403, text="rejected", reason="Forbidden", headers={})
+        accepted = MagicMock(ok=True, status_code=200, headers={})
+        accepted.json.return_value = {
+            "code": 0,
+            "data": {"fields": ["ts_code"], "items": [["000001.SZ"]]},
+        }
+
+        async def run_inline(_executor, operation, *, timeout_seconds):
+            self.assertGreater(timeout_seconds, 0)
+            return operation()
+
+        with patch("app.tushare_providers.acquire_provider_request_slot", new=AsyncMock()), \
+             patch("app.tushare_providers._super_get_executor_boundary.run", new=AsyncMock(side_effect=run_inline)), \
+             patch("app.tushare_providers._super_get_http_get", side_effect=[rejected, accepted]) as get:
+            rows = asyncio.run(call_provider(provider, "daily", {"ts_code": "000001.SZ"}, None))
+
+        self.assertEqual(rows, [{"ts_code": "000001.SZ"}])
+        self.assertEqual(get.call_args_list[0].args[0], "https://primary.example/tushare/pro/daily")
+        self.assertEqual(get.call_args_list[0].kwargs["credential"], "primary-key")
+        self.assertEqual(get.call_args_list[0].kwargs["proxy_url"], "")
+        self.assertEqual(get.call_args_list[1].args[0], "https://fallback.example/tushare/pro/daily")
+        self.assertEqual(get.call_args_list[1].kwargs["credential"], "fallback-key")
+        self.assertEqual(get.call_args_list[1].kwargs["proxy_url"], "http://fallback-proxy.example:8080")
+
     def test_the_probed_capability_set_is_routable(self):
         """Every API below returned code=0 with real rows on 2026-08-26."""
         for api in ("stk_limit", "adj_factor", "moneyflow_dc", "moneyflow_ths",

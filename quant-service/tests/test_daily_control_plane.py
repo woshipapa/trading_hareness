@@ -16,6 +16,8 @@ class DailyControlPlaneTests(unittest.TestCase):
         self.assertIn("universe_key='all_a'", EQUITY_DAILY_CONTROL_STATUS_SQL)
         self.assertIn("expected_daily_rows", EQUITY_DAILY_CONTROL_STATUS_SQL)
         self.assertIn("quality_status='fresh'", EQUITY_DAILY_CONTROL_STATUS_SQL)
+        self.assertIn("daily_adjustment_factors", EQUITY_DAILY_CONTROL_STATUS_SQL)
+        self.assertIn("raw->>'factor_semantics'", EQUITY_DAILY_CONTROL_STATUS_SQL)
         self.assertIn("available_at <", EQUITY_DAILY_CONTROL_STATUS_SQL)
         payload = status_payload({
             "trading_date": date(2026, 8, 21), "expected_daily_rows": 5_000,

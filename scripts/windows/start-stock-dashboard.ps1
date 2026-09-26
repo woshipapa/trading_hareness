@@ -73,14 +73,14 @@ if (-not (Test-Listener $AdapterPort)) {
         QUANT_WRITE_API_KEY = $config.QUANT_WRITE_API_KEY
         DASHBOARD_HOST = '127.0.0.1'; DASHBOARD_PORT = [string]$AdapterPort
         FRONTEND_DIST = Join-Path $repository 'frontend\dist'; FRONTEND_MODE = 'spa'
-        SOURCE_REGISTRY_FILE = Join-Path $repository 'config\source-registry.json'
+        SOURCE_REGISTRY_FILE = Join-Path $repository 'feishu-relay\config\source-registry.json'
         INGESTION_STORAGE_DIR = Join-Path $platform 'data\adapter'
         FEISHU_LONG_CONNECTION_ENABLED = 'false'; FEISHU_GROUP_RELAY_ENABLED = 'false'
         FEISHU_SUMMARY_LISTENER_ENABLED = 'false'; WECHAT_GROUP_RELAY_ENABLED = 'false'
         BAIDU_PAN_ENABLED = 'false'; BAIDU_PAN_MARKET_ARCHIVE_ENABLED = 'false'
     }
     $adapter = Start-Process -FilePath 'C:\Program Files\nodejs\node.exe' -PassThru -WindowStyle Hidden `
-        -WorkingDirectory (Join-Path $repository 'feishu-adapter') -ArgumentList @('index.mjs') `
+        -WorkingDirectory (Join-Path $repository 'feishu-relay\adapter') -ArgumentList @('index.mjs') `
         -Environment $environment -RedirectStandardOutput (Join-Path $logs 'dashboard-adapter.stdout.log') `
         -RedirectStandardError (Join-Path $logs 'dashboard-adapter.stderr.log')
     [IO.File]::WriteAllText($adapterPid, [string]$adapter.Id, [Text.UTF8Encoding]::new($false))
