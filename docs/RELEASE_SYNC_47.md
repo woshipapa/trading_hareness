@@ -1,6 +1,6 @@
 # 47 双机统一发布与同步手册
 
-更新时间：2026-09-26。适用范围：`woshipapa/trading_hareness#2`（`cb54f9c`）及之后的每一次发布。
+更新时间：2026-09-26。适用范围：`woshipapa/trading_hareness#2`（已合并三条同步分支，`e54cd2f` 及之后）以及之后的每一次发布。
 
 本手册写给在**操作员工作站**上运行的本地 agent（Codex 或其他）。云端会话连不到 47 主机，也没有部署密钥；本手册就是完整的执行计划。按阶段顺序执行，每个阶段末尾都有**通过条件**，不满足就停止、回滚（第 12 节）并向用户报告，不要跳过或"先继续再说"。
 
@@ -27,6 +27,8 @@
 | **owner Windows 工作站**（本地） | G: PostgreSQL `127.0.0.1:55432`，库 `trading_hareness`，**唯一数据写入库**；Alembic 迁移在这里执行 | `alembic upgrade head` | `quant.alembic_version` |
 | | 本地 quant API（`127.0.0.1:5681`，Longhu 授权网关），代码在 `F:\AIWorkflow\trading_hareness` | `git checkout` + `scripts/windows/restart-local-quant-api.ps1` | `/health` 的 `build.git_sha` |
 | | 到 lightServer 的反向隧道（`15432` 库、`15681` API） | 计划任务 | `scripts/shared-peer/verify-shared-runtime.ps1` |
+
+路径说明：同步分支把飞书中继整体移到了 `feishu-relay/`。adapter 源码在 `feishu-relay/adapter/`，bridge 在 `feishu-relay/bridge/`，edge 部署文件在 `feishu-relay/deploy/edge/`，edge 脚本在 `feishu-relay/scripts/edge/`。上表和下文里的 `scripts/*-feishu-relay-edge*.sh`、`scripts/*-edge-relay-workflows.sh`、`scripts/install-edge-import-watchdog.sh` 仍然可以直接用，它们只是转发到 `feishu-relay/scripts/edge/` 的入口。
 
 owner 容器设置了 `QUANT_SKIP_MIGRATIONS=true`，服务启动时只检查几张基础表是否存在，**不检查迁移版本**。因此如果先换代码、后迁移，服务照样能启动，但新代码用到的新列/新表会在运行时报错。迁移必须在换代码之前完成。
 
@@ -107,7 +109,9 @@ Get-ChildItem quant-service\migrations\versions | Where-Object Name -match '_0(0
 
 ## 5. 阶段 B：把漂移收回 Git（首次同步必做；以后只要存在未提交的 hotfix 就要做）
 
-### B0. 先把本机从未推送的提交推到 GitHub（2026-09-26 巡检发现）
+### B0. 先把本机从未推送的提交推到 GitHub（2026-09-26 巡检发现；**已完成**）
+
+2026-09-26 已完成：`sync/owner-runtime-d5c359d`（`d5c359d`）、`sync/edge-runtime-6271d88`（`6271d88`）、`sync/local-worktree-20260926`（`b743d7e`，包含前两者和本地 74 个未提交文件）都已推送，并已合并进 PR #2（合并提交 `269c5c2`）。以后再出现未推送的运行代码时，按下面的原步骤处理。
 
 2026-09-26 的巡检结果：owner 运行的是 `d5c359d`，edge overlay 基于 `6271d88`，owner 库版本为 `20260923_0117`。这三样在 GitHub 上**都不存在**，任何分支、标签和 PR 里都没有。它们只存在于操作员工作站的本地提交里，以及主机上已部署的代码中。本地还有大量未提交改动。
 
@@ -125,9 +129,13 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 推送完成后，由 PR #2 的维护方把这些分支与 PR #2 做三方合并：解决冲突，补上 B2 的合并迁移，跑通测试和 CI 后合入 `main`。这样 `origin/main` 才会同时包含主机上正在运行的代码和 PR #2 的改动。在此之前，任何发布都会造成代码回退。
 
-### B1. edge 上的 overlay 代码
+### B1. edge 上的 overlay 代码（内容已随同步分支入库，发布前只需做一次比对）
 
-现状：edge 当前运行的 overlay 里有若干内容，仓库的**任何分支**里都没有：
+2026-09-26 更正：下面列出的 overlay 内容已经在 `sync/local-worktree-20260926` 里，只是换到了新路径，现已随 PR #2 合并：`feishu-relay/bridge/larkagentx_image_property.py`、`feishu-relay/deploy/edge/{docker-compose.yml,larkagentx-bridge-entrypoint.sh,larkagentx-group-relay-hotfix.conf}`，以及 `feishu-relay/adapter/index.mjs` 里的 `POST /internal/larkagentx/gap-repair` 和 `FEISHU_ADAPTER_HOTFIX_ENABLED`/`runtime_source` 处理。之前说"仓库任何分支都没有"，是因为只查了旧路径，这个结论是错的。
+
+现在剩下的工作是：先按第 1 步取回 edge 正在运行的 overlay，再与 PR #2 合并后的 `feishu-relay/` 做 `diff -r`。只有 edge 上比仓库更新的内容才需要走第 2 步，拿不准就报告用户。第 3、4 步照做，作为发布前的校验。
+
+以下是原始记录。当时的 overlay 里有这些内容，而旧路径下找不到：
 
 - `integrations/larkagentx/larkagentx_image_property.py`：仓库里的 `bridge.py` 第 33 行就 `import` 了它，所以仓库版本的 bridge 无法启动；
 - `deploy/feishu-relay-edge/larkagentx-bridge-entrypoint.sh`、`deploy/feishu-relay-edge/larkagentx-group-relay-hotfix.conf`：`hotfix-feishu-relay-edge.sh` 要求这两个文件存在；
@@ -155,12 +163,12 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
    ```bash
    BASE=$(cat "$D/overlay/.base-git-sha")
    git switch -c sync/edge-overlay-$(date +%Y%m%d) "$BASE"
-   rsync -a --exclude node_modules --exclude '*.test.mjs' "$D/overlay/adapter/" feishu-adapter/
-   for f in "$D"/overlay/bridge/*.py; do cp "$f" integrations/larkagentx/; done
-   cp "$D/overlay/source-registry.json" config/source-registry.json
-   cp "$D/docker-compose.yml" deploy/feishu-relay-edge/docker-compose.yml
-   cp "$D/overlay/ops/larkagentx-bridge-entrypoint.sh" deploy/feishu-relay-edge/
-   cp "$D/overlay/ops/larkagentx-group-relay-hotfix.conf" deploy/feishu-relay-edge/
+   rsync -a --exclude node_modules --exclude '*.test.mjs' "$D/overlay/adapter/" feishu-relay/adapter/
+   for f in "$D"/overlay/bridge/*.py; do cp "$f" feishu-relay/bridge/; done
+   cp "$D/overlay/source-registry.json" feishu-relay/config/source-registry.json
+   cp "$D/docker-compose.yml" feishu-relay/deploy/edge/docker-compose.yml
+   cp "$D/overlay/ops/larkagentx-bridge-entrypoint.sh" feishu-relay/deploy/edge/
+   cp "$D/overlay/ops/larkagentx-group-relay-hotfix.conf" feishu-relay/deploy/edge/
    git status --short          # 逐个检查
    git add <逐个文件>; git commit -m "chore: capture the edge's running overlay into Git"
    git merge origin/main       # 解决冲突时两边的行为都要保留
@@ -171,17 +179,25 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 3. 校验：
 
    ```bash
-   (cd feishu-adapter && npm ci && node --test *.test.mjs)
-   PYTHONPATH=integrations/larkagentx python3 -m unittest discover -s integrations/larkagentx -p 'test_*.py'
-   node scripts/deploy-feishu-relay-edge-release.test.mjs
+   (cd feishu-relay/adapter && npm install --no-audit --no-fund && node --test *.test.mjs)
+   python3 -m unittest discover -s feishu-relay/bridge -p 'test_*.py'   # 缺 larkx 依赖时部分测试会跳过
+   node feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.test.mjs
    scripts/hotfix-feishu-relay-edge.sh      # 只做演练；overlay_release 不得含 -dirty
    ```
 
-4. 确认 overlay 开关语义与发布脚本一致：`deploy-feishu-relay-edge-release.sh` 会写入 `FEISHU_ADAPTER_HOTFIX_ENABLED=false`，并在 `/health` 仍报告 `"runtime_source":"source-overlay"` 时拒绝发布。用 `grep -rn FEISHU_ADAPTER_HOTFIX feishu-adapter deploy/feishu-relay-edge` 确认刚提交的 compose/adapter 读的是这个键。如果实际用的是别的键，就修改发布脚本及其测试，让它关掉真正生效的开关。
+4. 确认 overlay 开关语义与发布脚本一致：`deploy-feishu-relay-edge-release.sh` 会写入 `FEISHU_ADAPTER_HOTFIX_ENABLED=false`，并在 `/health` 仍报告 `"runtime_source":"source-overlay"` 时拒绝发布。用 `grep -rn FEISHU_ADAPTER_HOTFIX feishu-relay/adapter feishu-relay/deploy/edge` 确认（2026-09-26 已核对：compose 读的就是这个键）刚提交的 compose/adapter 读的是这个键。如果实际用的是别的键，就修改发布脚本及其测试，让它关掉真正生效的开关。
 
 5. 推送分支、开 PR，CI 通过后合并（CI 现状见第 6 节）。
 
 ### B2. owner 库的迁移分叉（实测 `20260923_0117`）
+
+2026-09-26 合并后的仓库迁移链只有一条，唯一 head 是 `20260926_srg0001`：
+
+`… 20260906_0094 … 20260918_ds0001 → 20260919_ds0002 → ds0003 → ds0004 → ds0005 → 20260926_pit0001 → 20260926_t1s0001 → 20260926_trl0001 → 20260926_srg0001`
+
+（`pit0001` 原本接在 `ds0001` 后面，合并时改为接在 `ds0005` 后面，所以没有额外的合并迁移。它还没有在任何共享库上执行过。）
+
+`20260923_0117` 的源码在 Mac、owner 主机历史 release 和 owner 镜像里都没有找到，只能从 Windows 工作站 `F:\AIWorkflow\trading_hareness` 或其他备份找回。**不能凭空补写**：下面第 4 步的"空版本标记"只有在用户明确同意后才能做。
 
 现状：owner 库的 `quant.alembic_version` 记录的是另一条迁移线（0095 起，2026-09-26 实测末端为 `20260923_0117`；以实际查询结果为准，下文用 `<owner_head>` 表示）的末端，本仓库没有这些迁移文件。在这种状态下执行 `alembic upgrade head` 会报 `Can't locate revision identified by '<owner_head>'`。本仓库以前处理过同样的情况：`20260902_0089_legacy_owner_bridge.py` 是一个空的版本标记，`20260905_0093_merge_legacy_owner.py` 是合并迁移。
 
@@ -197,14 +213,14 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
    - 把这些文件原样加入 `quant-service/migrations/versions/`。
    - 核对它们的 `down_revision` 链能接到仓库已有的某个版本（通常是 `20260906_0094`）。
    - 新增一个空的合并迁移，例如 `20260927_mrg0001`，`down_revision = ("<owner_head>", "<当前仓库 head>")`，写法照抄 `20260905_0093`。
-   - 检查这条迁移线上的各个迁移与 `20260918_ds0001`、`20260926_pit0001`、`20260926_t1s0001`、`20260926_trl0001` 是否创建了同名对象。本仓库这 4 个都用了 `IF NOT EXISTS` 或 `ON CONFLICT`，重复执行是安全的，但对方的写法需要逐个确认。
-4. **找不到**：
+   - 检查这条迁移线上的各个迁移与本仓库 `20260918_ds0001` 至 `20260926_srg0001` 是否创建了同名对象。本仓库这些迁移都用了 `IF NOT EXISTS`、`to_regclass` 判断或 `ON CONFLICT`，重复执行是安全的，但对方的写法需要逐个确认。
+4. **找不到**（必须先得到用户明确同意）：
    - 新增空的版本标记 `<owner_head>`，`down_revision = "20260906_0094"`，写法照抄 `0089`；
    - 再新增上面那个合并迁移。
    - 然后用 `pg_dump --schema-only -n quant` 导出 owner 库的 schema，与"空库迁移到仓库 head"导出的 schema 做 diff。只存在于 owner 库的对象，要补写成真正的新增迁移（`IF NOT EXISTS`），这样新环境才能和 owner 一致。
    - 这一步没做完之前，在发布记录里注明"schema 差异未收敛"。
 5. 验证：
-   - 在一个空库上执行 `node feishu-adapter/initialize-ledger.mjs` 和 `python quant-service/database_bootstrap.py`，必须能迁移到新的唯一 head。
+   - 在一个空库上执行 `node feishu-relay/adapter/initialize-ledger.mjs` 和 `python quant-service/database_bootstrap.py`，必须能迁移到新的唯一 head。
    - 把 owner 的 schema-only dump 恢复到一个临时库，执行 `alembic upgrade head`，必须成功。
    - 用 `python3 - <<'PY'` 解析 `migrations/versions`，确认只有一个 head（`scripts/release-sync-status.sh` 内置的就是这套逻辑）。
 6. 推送、开 PR，合并。
@@ -219,7 +235,9 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 ## 6. 阶段 C：合并并确定发布 SHA
 
-1. PR #2 的 CI 一直是红的，原因在 `main` 的 CI 配置（见 PR 评论 `#issuecomment-5842937183`）。附录 A 的修复已经按用户要求加进 PR #2（`1daae6e`）。之后仍会失败的只有 2 个依赖真实行情数据的测试，如何处理由用户决定。**在 CI 仍为红色时合并，必须先得到用户明确同意。**
+1. PR #2 的 CI 一直是红的，原因在 `main` 的 CI 配置（见 PR 评论 `#issuecomment-5842937183`）。附录 A 的修复已经按用户要求加进 PR #2（`1daae6e`）。合并同步分支后（`e54cd2f`），本地模拟 CI 的结果是：2277 个后端测试里只剩 2 个依赖真实行情数据的测试失败，如何处理由用户决定。**在 CI 仍为红色时合并，必须先得到用户明确同意。**
+
+   注意：同步分支自带的测试以前是在旧镜像的容器里跑的（`docker compose exec quant-research …`），所以当时报告的 "1874 tests OK" 验证的是旧代码。以后必须在当前检出上运行，例如 `cd quant-service && python -m unittest discover -s tests -q`，或者先重建镜像再在容器里跑。
 2. PR #2 和阶段 B 的 PR 全部合并后：
 
    ```bash
@@ -242,6 +260,47 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 ---
 
 ## 7. 阶段 D：数据库迁移（Windows 工作站，必须先于任何代码切换）
+
+### D0. 停止点：先确认 owner 接受哪些 DDL（2026-09-26 新增）
+
+合并同步分支之后，本仓库从 `20260918_ds0001` 到 head 之间有 8 个迁移：
+
+| 迁移 | 内容 | 本次发布的代码是否依赖 |
+| --- | --- | --- |
+| `20260919_ds0002` | 新建 `replay_readiness_daily_coverage` 投影表 | 是：全市场 controls 同步会刷新它 |
+| `20260919_ds0003` | 新建 `research_model_trials` | 仅离线训练 worker |
+| `20260919_ds0004` | 给行情/因子大表**加列加约束**（`adjustment_state` 等），`_cold` 孪生表 | 否 |
+| `20260919_ds0005` | 上述列上的 guard 索引 | 否 |
+| `20260926_pit0001` | `instrument_lifecycle_evidence` 上的部分索引 | 否（只影响速度） |
+| `20260926_t1s0001` | 4 张结果表新增 T+1 结算列 | **是**：结果重算会写这些列，缺列就报错 |
+| `20260926_trl0001` | 新建 `research_trials` | **是**：因子评估和 `/api/v1/research/trials` |
+| `20260926_srg0001` | 3 条 disabled、权重 0 的策略登记行 | 否（缺行等同 disabled） |
+
+`docs/PLAN_COMPLETION_MATRIX.md` 的 2026-09-20 owner clarification 写明：**owner 不会为 peer 执行 ds0004/ds0005 的 DDL**。所以在 owner 库上直接 `alembic upgrade head`，会把 owner 已经拒绝的 DDL 一起执行，而且 ds0004 要改写几张大表。
+
+**执行到这里先停下，请用户决定**，只能二选一：
+
+1. owner 同意执行全部 8 个迁移：按下面的原步骤 `upgrade head`（先完成 B2，让 `<owner_head>` 能接上本仓库的链）。
+2. owner 只执行本次发布需要的迁移：先生成 SQL 交给 owner 审阅，不连接数据库：
+
+   ```powershell
+   ..\.venv\Scripts\python.exe -m alembic -c alembic.ini upgrade 20260919_ds0005:20260926_srg0001 --sql > G:\StockPlatform\backups\ddl-pit0001-srg0001.sql
+   ```
+
+   这份 SQL 只包含 `pit0001`、`t1s0001`、`trl0001`、`srg0001`。`ds0002` 是否执行要单独确认：如果 owner 库里已经有 `quant.replay_readiness_daily_coverage`（`SELECT to_regclass('quant.replay_readiness_daily_coverage')` 不为空），就不需要。生成的 SQL 里每一步都带一条 `UPDATE quant.alembic_version … WHERE version_num='<上一步>'`；owner 库的版本是 `<owner_head>`，这些 UPDATE 不会匹配任何行，也就不会改动版本记录。执行后 `quant.alembic_version` 该怎样记录，由用户和 owner 决定。
+
+无论选哪一项，都必须等 `t1s0001` 的列和 `trl0001` 的表在 owner 库里存在之后，才能进入阶段 F。可以用下面的查询核对，应返回 `28|t`（4 张结果表 × 7 列，外加试验表）：
+
+```sql
+SELECT count(*) FILTER (WHERE table_name IN ('outcomes','post_close_strategy_candidate_outcomes',
+                                             'ten_day_leader_rotation_candidate_outcomes','strategy_daily_candidate_outcomes')
+                          AND column_name IN ('exit_date','net_return','benchmark_key','sessions_held',
+                                              'exit_rolled_sessions','price_basis','settlement_version')),
+       to_regclass('quant.research_trials') IS NOT NULL
+  FROM information_schema.columns WHERE table_schema='quant';
+```
+
+以下是原步骤（选第 1 项时执行）。
 
 ```powershell
 cd F:\AIWorkflow\trading_hareness
@@ -276,7 +335,7 @@ New-Item -ItemType Directory -Force G:\StockPlatform\backups | Out-Null
 ..\.venv\Scripts\python.exe -m alembic -c alembic.ini current     # 必须等于 heads 的输出
 ```
 
-PR #2 自带 4 个迁移：`20260918_ds0001`（owner 上此前手工执行过，其中插入语句是幂等的）→ `20260926_pit0001`（索引）→ `20260926_t1s0001`（给结果表新增列）→ `20260926_trl0001`（新建试验日志表）。它们都是新增型的，旧代码不受影响。
+迁移清单见 D0 的表。`20260918_ds0001` 此前已在 owner 上手工执行过，其中的插入语句是幂等的。所有迁移都是新增型的，旧代码不受影响。
 
 **通过条件**：`alembic current` 等于唯一的 head；出错时不要重试"半截"迁移，保存完整输出并报告。PostgreSQL 的 DDL 是事务性的，失败的那个版本会整体回滚。
 
@@ -304,7 +363,7 @@ scripts/deploy-feishu-relay-edge-release.sh "$X" "$L" --apply
 # E4 n8n 工作流：先做漂移比对；有漂移或工作流在两次发布之间有改动时才发布
 scripts/verify-edge-relay-workflows.sh || scripts/deploy-edge-relay-workflows.sh "$X" --apply
 
-# E5 watchdog：只有 deploy/feishu-relay-edge/stock-reports-import-watchdog.* 有改动时才执行
+# E5 watchdog：只有 feishu-relay/deploy/edge/stock-reports-import-watchdog.* 有改动时才执行
 # scripts/install-edge-import-watchdog.sh --apply
 ```
 
@@ -355,13 +414,21 @@ ssh -i "$RELAY_EDGE_SSH_KEY" root@47.114.113.152 'curl -fsS http://127.0.0.1:183
 
    如果 `intraday-secrets.env` 缺失，从上一个 release 目录拷回来（路径见阶段 A 记录的回滚点）：`install -m 0600 <上一个release>/deploy/shared-peer/intraday-secrets.env ~/trading_hareness/deploy/shared-peer/`。
 
-3. **构建并重建容器**。必须带上 `APP_GIT_SHA`，这样 `/health` 才能报告版本号：
+3. **构建并重建容器**。`/health` 的版本号来自 `deploy/shared-peer/.env` 里的 `PEER_APP_GIT_SHA`、`PEER_APP_RELEASE`、`PEER_APP_BUILD_CREATED_AT`（compose 把它们作为构建参数传入）。`verify-owner-cutover.py` 则读 `PEER_EXPECTED_RELEASE`。激活脚本只会在这些键还是占位值时才填写，所以第二次及以后的发布会沿用上一次的值，必须在构建前显式改写。下面的写法只改这 4 个非密钥键，不打印 `.env`：
 
    ```bash
    ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 "set -euo pipefail
      export XDG_RUNTIME_DIR=/run/user/\$(id -u) DOCKER_HOST=unix:///run/user/\$(id -u)/docker.sock
-     export APP_GIT_SHA='$X' APP_RELEASE='$L' APP_BUILD_CREATED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
      cd ~/trading_hareness/deploy/shared-peer
+     python3 - .env '$X' '$L' <<'PY'
+   import datetime, os, pathlib, sys
+   path, sha, label = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+   wanted = {'PEER_APP_GIT_SHA': sha, 'PEER_APP_RELEASE': label, 'PEER_EXPECTED_RELEASE': label,
+             'PEER_APP_BUILD_CREATED_AT': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}
+   lines = [line for line in path.read_text().splitlines() if line.split('=', 1)[0] not in wanted]
+   tmp = path.with_suffix('.tmp'); tmp.write_text('\\n'.join(lines + [f'{k}={v}' for k, v in wanted.items()]) + '\\n')
+   os.chmod(tmp, 0o600); tmp.replace(path)
+   PY
      C='docker compose -f compose.yaml -f compose.intraday-owner.yaml'
      \$C config --quiet
      \$C build quant-research
@@ -369,7 +436,7 @@ ssh -i "$RELAY_EDGE_SSH_KEY" root@47.114.113.152 'curl -fsS http://127.0.0.1:183
      \$C ps"
    ```
 
-   `quant-research-scheduler` 复用 `quant-research` 构建出来的 `trading-hareness-peer-quant-research:latest` 镜像，所以只需要构建一次。
+   `quant-research-scheduler` 复用 `quant-research` 构建出来的镜像（`PEER_QUANT_IMAGE`，默认 `trading-hareness-peer-quant-research:latest`），所以只需要构建一次。
 
 4. **systemd 单元**：只有 `deploy/shared-peer/systemd/` 有改动时才执行：
 
@@ -441,9 +508,9 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 2. `scripts/release-sync-status.sh --sha origin/main`：记录回滚点，看清漂移。
 3. 有 hotfix 或未提交内容时，先做阶段 B。
 4. `X=origin/main`，推送 `edge-*` 标签，等镜像发布完成。
-5. 如果 `git diff --name-only <owner当前sha> $X -- quant-service/migrations` 有输出：先做阶段 D（迁移）。
+5. 如果 `git diff --name-only <owner当前sha> $X -- quant-service/migrations` 有输出：先做阶段 D（迁移，包括 D0 的停止点）。
 6. 阶段 E（edge：E1 → E2 → E3，E4/E5 按需）。
-7. 阶段 F（owner：打包、激活、带 `APP_GIT_SHA` 构建、`up`、guard）。
+7. 阶段 F（owner：打包、激活、改写 `PEER_APP_*` 后构建、`up`、guard）。
 8. 阶段 G（Windows API）。
 9. `scripts/release-sync-status.sh --sha $X` 输出 `ALL CHECKS PASSED`。
 10. 登记发布记录。
@@ -477,7 +544,7 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
           docker compose build quant-research feishu-adapter
           # initialize-ledger.mjs is not copied into the adapter image; mount it.
           docker compose run --rm --no-deps \
-            -v "$GITHUB_WORKSPACE/feishu-adapter/initialize-ledger.mjs:/app/initialize-ledger.mjs:ro" \
+            -v "$GITHUB_WORKSPACE/feishu-relay/adapter/initialize-ledger.mjs:/app/initialize-ledger.mjs:ro" \
             feishu-adapter node initialize-ledger.mjs
           docker compose run --rm --no-deps quant-research python database_bootstrap.py
           docker compose run --rm --no-deps quant-research python -m unittest discover -s tests -q
@@ -487,13 +554,13 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 ## 附录 B：本次为统一同步所做的修复
 
-- `scripts/deploy-feishu-relay-edge-release.sh`：发布固定镜像时写入 `FEISHU_ADAPTER_HOTFIX_ENABLED=false`；如果 `/health` 仍报告 `runtime_source=source-overlay` 则拒绝。以前 hotfix 脚本的提示说发布脚本会关掉 overlay，但实际上没有，adapter 会一边报告新的 SHA、一边继续运行 overlay 里的旧代码。
-- `scripts/shared-peer/activate-peer-release.sh`：切换版本时，除了 `.env`，也保留 `deploy/shared-peer/intraday-secrets.env`（0600，去掉 CRLF）。以前切换后盘中写入者和 guard 告警会拿不到凭据。
-- `deploy/shared-peer/compose.yaml`：构建时传入 `APP_GIT_SHA`/`APP_RELEASE`/`APP_BUILD_CREATED_AT`。以前 owner 的 `/health` 只能显示 `unknown`，无法核验版本。
+- `feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.sh`（`scripts/` 下同名文件是转发入口）：发布固定镜像时写入 `FEISHU_ADAPTER_HOTFIX_ENABLED=false`；如果 `/health` 仍报告 `runtime_source=source-overlay` 则拒绝。以前 hotfix 脚本的提示说发布脚本会关掉 overlay，但实际上没有，adapter 会一边报告新的 SHA、一边继续运行 overlay 里的旧代码。
+- `scripts/shared-peer/activate-peer-release.sh`：切换版本时，除了 `.env`，也保留 `deploy/shared-peer/intraday-secrets.env`（0600，去掉 CRLF）。同步分支里已有同样的保留逻辑，合并时采用了它的写法，另外补上去 CRLF。
+- `deploy/shared-peer/compose.yaml`：构建参数采用同步分支的 `PEER_APP_GIT_SHA`/`PEER_APP_RELEASE`/`PEER_APP_BUILD_CREATED_AT`（来自 `.env`），见阶段 F 第 3 步。
 - `.gitignore`：忽略 `intraday-secrets.env`。以前 `git add -A` 会把它提交进仓库。
 - 新增 `scripts/release-sync-status.sh`（只读巡检）及其测试 `scripts/release-sync-status.test.mjs`。
 
-尚未解决、需要在阶段 B 处理的问题：本地未推送的提交（B0）；edge overlay 的代码未入库；owner 的迁移分叉；bridge 没有独立发布路径（建议增加 `--bridge-only`）；CI 中 2 个依赖真实行情数据的测试（附录 A 第 3 项）。
+2026-09-26 状态：B0（推送本地提交）已完成；edge overlay 的代码已经在同步分支里，并已合并进 PR #2（B1 只剩一次比对）。尚未解决：`20260923_0117` 的源码（B2，等待从 Windows 找回）；owner 接受哪些 DDL（D0，等待用户决定）；bridge 没有独立发布路径（建议增加 `--bridge-only`）；CI 中 2 个依赖真实行情数据的测试（附录 A 第 3 项）。
 
 ## 附录 C：发布记录
 
