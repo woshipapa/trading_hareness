@@ -16,6 +16,7 @@ def recompute(
     recompute_intraday_signal_outcomes: Callable[[Any], dict[str, Any]],
     settle_post_close_and_leader_rotation_outcomes: Callable[[Any, Any], dict[str, int]] | None = None,
     settle_ledger_outcomes: Callable[[Any, Any], int] | None = None,
+    evaluate_trial_families: Callable[[Any, Any], dict[str, int]] | None = None,
 ) -> dict[str, Any]:
     """Close only outcomes whose already-persisted future bars are observable."""
     as_of_date = as_of_date or cn_today()
@@ -84,13 +85,15 @@ def recompute(
             if settle_post_close_and_leader_rotation_outcomes is not None else {}
         )
         ledger_outcome_rows = settle_ledger_outcomes(connection, as_of_date) if settle_ledger_outcomes is not None else 0
+        # Re-deflate each outcome family once its newly settled rows are in.
+        trial_families = evaluate_trial_families(connection, as_of_date) if evaluate_trial_families is not None else {}
     intraday = recompute_intraday_signal_outcomes(as_of_date)
     candidate_outcome_rows = sum(candidate_outcomes.values())
     return {"as_of_date": str(as_of_date),
             "outcomes": len(rows) + recommendation_outcomes + intraday["outcome_rows"] + candidate_outcome_rows + ledger_outcome_rows,
             "claim_outcomes": len(rows), "recommendation_outcomes": recommendation_outcomes,
             "intraday_signal_outcomes": intraday, "candidate_outcomes": candidate_outcomes,
-            "ledger_outcomes": ledger_outcome_rows}
+            "ledger_outcomes": ledger_outcome_rows, "research_trial_families": trial_families}
 
 
 __all__ = ["recompute"]

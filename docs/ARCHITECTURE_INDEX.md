@@ -8,10 +8,10 @@
 | Item | Current value |
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
-| `main.py` top-level functions | 453 |
-| Python modules under `app/` | 459 |
+| `main.py` top-level functions | 454 |
+| Python modules under `app/` | 461 |
 | HTTP router modules | 44 |
-| Alembic migrations | 98 |
+| Alembic migrations | 99 |
 | Frontend source files | 37 |
 
 ## Domain naming inventory
@@ -28,7 +28,7 @@ New behaviour should be owned by an existing domain package/owner.
 | `longhu` | 16 |
 | `market` | 13 |
 | `post` | 13 |
-| `research` | 11 |
+| `research` | 13 |
 | `ten` | 11 |
 | `board` | 10 |
 | `limit` | 9 |

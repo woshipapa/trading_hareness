@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from .research_trial_repository import LATEST_TRIALS_SQL, latest_trials_parameters, trials_payload
 
 
 def _limit(value: int, maximum: int) -> int:
@@ -75,6 +76,14 @@ async def model_registry(async_database: Any) -> dict[str, Any]:
         )
         rows = await result.fetchall()
     return {"items": rows, "research_only": True, "live_effect": "none"}
+
+
+async def research_trials(async_database: Any, family: str | None, limit: int) -> dict[str, Any]:
+    """Each research variant's latest selection-corrected evaluation."""
+    async with async_database.transaction() as conn:
+        result = await conn.execute(LATEST_TRIALS_SQL, latest_trials_parameters(family, limit))
+        rows = await result.fetchall()
+    return trials_payload(rows)
 
 
 async def strategy_experiments(async_database: Any, universe_key: str, limit: int) -> dict[str, Any]:

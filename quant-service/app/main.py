@@ -1202,6 +1202,11 @@ def recompute_intraday_signal_outcomes(as_of_date: date | None = None) -> dict[s
 def recompute_outcomes_legacy(as_of_date: date | None = None) -> dict[str, Any]:
     """Deprecated compatibility alias; use the isolated outcome service."""
     return recompute_outcomes(as_of_date)
+def evaluate_research_trial_families(connection: Any, as_of_date: date) -> dict[str, int]:
+    from .research_trial_repository import evaluate_outcome_families
+    return evaluate_outcome_families(connection, as_of_date)
+
+
 def recompute_outcomes(as_of_date: date | None = None) -> dict[str, Any]:
     """Compatibility entry point backed by local-only outcome recomputation."""
     return recompute_outcomes_isolated(
@@ -1211,6 +1216,7 @@ def recompute_outcomes(as_of_date: date | None = None) -> dict[str, Any]:
         recompute_intraday_signal_outcomes=recompute_intraday_signal_outcomes,
         settle_post_close_and_leader_rotation_outcomes=settle_post_close_and_leader_rotation_outcomes,
         settle_ledger_outcomes=settle_strategy_ledger_outcomes,
+        evaluate_trial_families=evaluate_research_trial_families,
     )
 
 

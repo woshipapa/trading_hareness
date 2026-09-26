@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from .research_trial_repository import latest_trials
 
 
 def _limit(value: int, maximum: int) -> int:
@@ -65,6 +66,11 @@ def strategy_registry(database: Any) -> dict[str, Any]:
             "SELECT strategy_key,label,engine,version,configuration,status,updated_at FROM quant.strategy_registry ORDER BY strategy_key"
         ).fetchall()
     return {"items": rows}
+
+
+def research_trials(database: Any, family: str | None, limit: int) -> dict[str, Any]:
+    with database.transaction() as connection:
+        return latest_trials(connection, family, limit)
 
 
 def model_registry(database: Any) -> dict[str, Any]:

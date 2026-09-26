@@ -248,3 +248,53 @@ class T1SettlementSqlTests(unittest.TestCase):
         self.assertEqual(row["exit_date"], date(2099, 3, 5))
         self.assertEqual(row["direction"], 1)
         self.assertEqual(settle_candidate_outcomes(self.connection, date(2099, 3, 6), target), 0)
+
+
+@unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
+class ResearchTrialSqlTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import psycopg
+        from psycopg.rows import dict_row
+        self.connection = psycopg.connect(
+            host=os.getenv("PGHOST"), port=os.getenv("PGPORT", "5432"), dbname=os.getenv("PGDATABASE", "n8n"),
+            user=os.getenv("PGUSER", "n8n"), password=os.getenv("PGPASSWORD", ""), row_factory=dict_row,
+        )
+
+    def tearDown(self) -> None:
+        self.connection.rollback()
+        self.connection.close()
+
+    def test_earlier_variants_keep_counting_and_reruns_do_not(self) -> None:
+        import random
+        from app.research_trial_repository import latest_trials, record_family
+        generator = random.Random(3)
+        series = lambda drift: [drift + generator.gauss(0, 0.01) for _ in range(60)]
+        first = record_family(self.connection, family="test_family", return_basis="test", source="test", variants=[
+            {"variant_key": "a", "parameters": {"x": 1}, "returns": series(0.002),
+             "sample_start": date(2099, 1, 1), "sample_end": date(2099, 3, 1)},
+            {"variant_key": "b", "parameters": {"x": 2}, "returns": series(0.0),
+             "sample_start": date(2099, 1, 1), "sample_end": date(2099, 3, 1)},
+        ])
+        self.assertEqual({row["family_trials"] for row in first}, {2})
+        # A later run evaluates a new variant alone and re-evaluates "a" on a
+        # longer window: the family still counts a, b and c - three trials.
+        second = record_family(self.connection, family="test_family", return_basis="test", source="test", variants=[
+            {"variant_key": "c", "parameters": {"x": 3}, "returns": series(0.001),
+             "sample_start": date(2099, 1, 1), "sample_end": date(2099, 3, 2)},
+            {"variant_key": "a", "parameters": {"x": 1}, "returns": series(0.002),
+             "sample_start": date(2099, 1, 1), "sample_end": date(2099, 3, 2)},
+        ])
+        self.assertEqual({row["family_trials"] for row in second}, {3})
+        payload = latest_trials(self.connection, "test_family")
+        self.assertEqual(sorted(item["variant_key"] for item in payload["items"]), ["a", "b", "c"])
+        self.assertEqual(payload["live_effect"], "none")
+        latest_a = next(item for item in payload["items"] if item["variant_key"] == "a")
+        self.assertEqual(latest_a["sample_end"], date(2099, 3, 2))
+        self.assertIsNotNone(latest_a["deflated_sharpe"])
+        self.assertIsNotNone(latest_a["q_value"])
+
+    def test_outcome_families_read_settled_rows(self) -> None:
+        from app.research_trial_repository import evaluate_outcome_families
+        # Runs cleanly against the real schema even with no settled rows.
+        self.assertEqual(evaluate_outcome_families(self.connection, date(2099, 3, 6)),
+                         {"candidate_ledger": 0, "xiaojie_leader_flow": 0})

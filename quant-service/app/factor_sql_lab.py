@@ -14,6 +14,7 @@ from typing import Any, Iterable
 
 from .replay_readiness import P2_MIN_DAILY_CALENDAR_SPAN_DAYS, P2_MIN_FULL_CROSS_SECTION_DAYS
 from .backtest_execution_rules import a_share_exit_lag
+from .research_trial_repository import record_family
 
 
 SQL_FACTOR_COLUMNS = {
@@ -489,16 +490,51 @@ def evaluate_factor_set(connection: Any, factor_keys: list[str], universe_key: s
         for result in results
     }
     q_values = _bh_q_values(p_values)
+    # Every factor/horizon/universe evaluated is one trial of this family; the
+    # registry keeps earlier runs, so the DSR null counts all of them, not only
+    # the factors requested together now.
+    trials = {row["variant_key"]: row for row in record_family(
+        connection, family="factor_sql_lab", return_basis="test_split_daily_neutral_top_minus_bottom",
+        source="factor_sql_lab.evaluate_factor_set",
+        variants=[_trial_variant(result, universe_key, horizon_days) for result in results],
+    )}
     for result in results:
+        trial = trials.get(_trial_key(result["factor_key"], universe_key, horizon_days)) or {}
         result["metrics"]["multiple_testing"] = {
             "method": "benjamini_hochberg_on_test_date_cluster_normal_approximation",
             "tested_factors": len(results),
             "test_p_value": p_values[result["factor_key"]],
             "test_q_value": q_values[result["factor_key"]],
-            "deflated_sharpe_ratio": None,
-            "notice": "DSR is withheld until at least three years and a registered trial count are available.",
+            "deflated_sharpe_ratio": trial.get("deflated_sharpe"),
+            "registered_family_trials": trial.get("family_trials"),
+            "expected_maximum_sharpe": trial.get("expected_maximum_sharpe"),
+            "selection_gate": trial.get("selection_gate"),
+            "notice": ("DSR deflates the test-split long-short Sharpe by every factor/horizon/universe this "
+                       "family has evaluated (quant.research_trials); overlapping horizons make it optimistic. "
+                       "Evidence only; no live effect."),
         }
     return results
+
+
+def _trial_key(factor_key: str, universe_key: str, horizon_days: int) -> str:
+    return f"{factor_key}:{universe_key}:h{int(horizon_days)}"
+
+
+def _trial_variant(result: dict[str, Any], universe_key: str, horizon_days: int) -> dict[str, Any]:
+    test_range = ((result.get("artifact") or {}).get("split_contract") or {}).get("ranges", {}).get("test") or {}
+    start, end = test_range.get("start"), test_range.get("end")
+    returns = [
+        float(row["neutral_top_minus_bottom"])
+        for row in (result.get("artifact") or {}).get("daily_rank_ic") or []
+        if start and end and start <= row["date"] <= end and row.get("neutral_top_minus_bottom") is not None
+    ]
+    return {
+        "variant_key": _trial_key(result["factor_key"], universe_key, horizon_days),
+        "parameters": {"factor_key": result["factor_key"], "universe_key": universe_key,
+                       "horizon_days": int(horizon_days), "methodology": "sql-cross-section-v2"},
+        "returns": returns,
+        "sample_start": start, "sample_end": end,
+    }
 
 
 def run_multi_factor_strategy_sql(connection: Any, universe_key: str, start_date: date, end_date: date,
