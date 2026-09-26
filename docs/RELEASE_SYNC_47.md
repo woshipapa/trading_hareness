@@ -216,7 +216,8 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
    - 检查这条迁移线上的各个迁移与本仓库 `20260918_ds0001` 至 `20260926_srg0001` 是否创建了同名对象。本仓库这些迁移都用了 `IF NOT EXISTS`、`to_regclass` 判断或 `ON CONFLICT`，重复执行是安全的，但对方的写法需要逐个确认。
 4. **找不到**（本次已得到用户明确同意）：
    - 新增空的版本标记 `<owner_head>`，`down_revision = "20260906_0094"`，写法照抄 `0089`；本次实际文件为 `20260926_0117_legacy_owner_bridge.py`；
-   - 再新增上面那个合并迁移。
+   - 新增 `20260926_own0001_owner_schema_gap.py`，合并 `20260923_0117` 与 `20260919_ds0002`，幂等补建实测缺少的 `research_model_registry`；`ds0003` 从该修复点继续。
+   - `20260926_mrg0001_owner_lineage.py` 再合并 `20260926_own0001` 与当前仓库链 `20260926_srg0001`。
    - 然后用 `pg_dump --schema-only -n quant` 导出 owner 库的 schema，与"空库迁移到仓库 head"导出的 schema 做 diff。只存在于 owner 库的对象，要补写成真正的新增迁移（`IF NOT EXISTS`），这样新环境才能和 owner 一致。
    - 这一步没做完之前，在发布记录里注明"schema 差异未收敛"。本次发布记录还必须注明：旧 0117 的未知 DDL 未恢复，空标记只收敛版本线。
 5. 验证：

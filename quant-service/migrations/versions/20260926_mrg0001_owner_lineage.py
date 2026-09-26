@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 
 revision: str = "20260926_mrg0001"
-down_revision: tuple[str, str] = ("20260923_0117", "20260926_srg0001")
+down_revision: tuple[str, str] = ("20260926_own0001", "20260926_srg0001")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
