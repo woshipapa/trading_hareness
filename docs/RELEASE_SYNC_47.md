@@ -81,7 +81,7 @@ scripts/release-sync-status.sh --sha origin/main | tee ~/release-sync-logs/$(dat
 
 - edge `adapter release` 是 `hotfix-…`，`runtime_source` 是 `source-overlay`，bridge `release` 含 `-dirty`；
 - owner 的 `git_sha` 是 `unknown`（旧镜像构建时没有注入版本号，本次已修）；
-- owner `alembic revision` 是仓库里不存在的 `20260918_0105`；
+- owner `alembic revision` 是仓库里不存在的另一条迁移线的末端（2026-09-26 巡检实测为 `20260923_0117`）；
 - owner `intraday-secrets.env` 可能缺失。
 
 补充盘点（阶段 B 需要用到）：
@@ -90,7 +90,7 @@ scripts/release-sync-status.sh --sha origin/main | tee ~/release-sync-logs/$(dat
 E=root@47.114.113.152
 ssh -i "$RELAY_EDGE_SSH_KEY" $E 'readlink /opt/feishu-relay-edge/hotfix/current; cat /opt/feishu-relay-edge/hotfix/current/.base-git-sha'
 ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 \
-  'ls -1 ~/.local/share/trading-hareness/releases/; ls ~/.local/share/trading-hareness/releases/*/trading_hareness/quant-service/migrations/versions/ 2>/dev/null | grep -E "_0(09[5-9]|10[0-5])_" | sort -u'
+  'ls -1 ~/.local/share/trading-hareness/releases/; ls ~/.local/share/trading-hareness/releases/*/trading_hareness/quant-service/migrations/versions/ 2>/dev/null | grep -E "_0(09[5-9]|1[0-9][0-9])_" | sort -u'
 ```
 
 在 Windows 工作站上：
@@ -98,7 +98,7 @@ ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 \
 ```powershell
 cd F:\AIWorkflow\trading_hareness
 git status --porcelain
-Get-ChildItem quant-service\migrations\versions | Where-Object Name -match '_0(09[5-9]|10[0-5])_'
+Get-ChildItem quant-service\migrations\versions | Where-Object Name -match '_0(09[5-9]|1[0-9][0-9])_'
 ```
 
 通过条件：拿到三台机器的盘点输出，并已记录回滚点。
@@ -106,6 +106,24 @@ Get-ChildItem quant-service\migrations\versions | Where-Object Name -match '_0(0
 ---
 
 ## 5. 阶段 B：把漂移收回 Git（首次同步必做；以后只要存在未提交的 hotfix 就要做）
+
+### B0. 先把本机从未推送的提交推到 GitHub（2026-09-26 巡检发现）
+
+2026-09-26 的巡检结果：owner 运行的是 `d5c359d`，edge overlay 基于 `6271d88`，owner 库版本为 `20260923_0117`。这三样在 GitHub 上**都不存在**，任何分支、标签和 PR 里都没有。它们只存在于操作员工作站的本地提交里，以及主机上已部署的代码中。本地还有大量未提交改动。
+
+所以第一步是把它们原样推到 GitHub 的独立分支上，其他所有步骤都在这之后。**不要**改写历史，**不要**推到 `main`，**不要**在这一步合并任何东西：
+
+```bash
+git branch -a --contains d5c359d; git branch -a --contains 6271d88     # 看它们在哪个本地分支
+git log --oneline origin/main..d5c359d | wc -l                         # 相对 origin/main 领先多少提交
+git ls-tree -r --name-only d5c359d -- quant-service/migrations/versions | grep -E "_0(09[5-9]|1[0-9][0-9])_"
+git push origin d5c359d:refs/heads/sync/owner-d5c359d
+git push origin 6271d88:refs/heads/sync/edge-6271d88
+```
+
+本地未提交的改动：先逐个文件检查，确认没有 `.env`、`*-secrets.env`、`runtime.env`、token 或密码，再提交到一个单独分支（例如 `sync/local-worktree-20260926`）并推送。拿不准的文件不要提交，列出来报告用户。
+
+推送完成后，由 PR #2 的维护方把这些分支与 PR #2 做三方合并：解决冲突，补上 B2 的合并迁移，跑通测试和 CI 后合入 `main`。这样 `origin/main` 才会同时包含主机上正在运行的代码和 PR #2 的改动。在此之前，任何发布都会造成代码回退。
 
 ### B1. edge 上的 overlay 代码
 
@@ -163,9 +181,9 @@ Get-ChildItem quant-service\migrations\versions | Where-Object Name -match '_0(0
 
 5. 推送分支、开 PR，CI 通过后合并（CI 现状见第 6 节）。
 
-### B2. owner 库的迁移分叉（`20260918_0105`）
+### B2. owner 库的迁移分叉（实测 `20260923_0117`）
 
-现状：owner 库的 `quant.alembic_version` 记录的是另一条迁移线（0095–0105）的末端 `20260918_0105`，本仓库没有这些迁移文件。在这种状态下执行 `alembic upgrade head` 会报 `Can't locate revision identified by '20260918_0105'`。本仓库以前处理过同样的情况：`20260902_0089_legacy_owner_bridge.py` 是一个空的版本标记，`20260905_0093_merge_legacy_owner.py` 是合并迁移。
+现状：owner 库的 `quant.alembic_version` 记录的是另一条迁移线（0095 起，2026-09-26 实测末端为 `20260923_0117`；以实际查询结果为准，下文用 `<owner_head>` 表示）的末端，本仓库没有这些迁移文件。在这种状态下执行 `alembic upgrade head` 会报 `Can't locate revision identified by '<owner_head>'`。本仓库以前处理过同样的情况：`20260902_0089_legacy_owner_bridge.py` 是一个空的版本标记，`20260905_0093_merge_legacy_owner.py` 是合并迁移。
 
 1. 在 Windows 工作站上读取实际版本。先按第 7 节的方式把 `runtime.env` 加载进当前进程（`PGPASSWORD` 取自其中），再执行：
 
@@ -174,14 +192,14 @@ Get-ChildItem quant-service\migrations\versions | Where-Object Name -match '_0(0
    & $psql -h 127.0.0.1 -p 55432 -U quant_app -d trading_hareness -tAc "SELECT version_num FROM quant.alembic_version"
    ```
 
-2. 找回 0095–0105 的原始迁移文件。可能的来源：Windows 工作站 `F:\AIWorkflow\trading_hareness` 里未跟踪的文件；owner 主机历史 release 目录（阶段 A 的补充盘点）；其他开发机。
+2. 找回这条迁移线的原始迁移文件。首选来源是 B0 推送的 `sync/owner-d5c359d` 分支（owner 正在运行的代码）。其次是 Windows 工作站 `F:\AIWorkflow\trading_hareness` 里未跟踪的文件、owner 主机的历史 release 目录（阶段 A 的补充盘点）。
 3. **找到了**：新建分支 `sync/owner-migration-lineage-<date>`。
    - 把这些文件原样加入 `quant-service/migrations/versions/`。
    - 核对它们的 `down_revision` 链能接到仓库已有的某个版本（通常是 `20260906_0094`）。
-   - 新增一个空的合并迁移，例如 `20260927_mrg0001`，`down_revision = ("20260918_0105", "<当前仓库 head>")`，写法照抄 `20260905_0093`。
-   - 检查这 11 个迁移与 `20260918_ds0001`、`20260926_pit0001`、`20260926_t1s0001`、`20260926_trl0001` 是否创建了同名对象。本仓库这 4 个都用了 `IF NOT EXISTS` 或 `ON CONFLICT`，重复执行是安全的，但对方的写法需要逐个确认。
+   - 新增一个空的合并迁移，例如 `20260927_mrg0001`，`down_revision = ("<owner_head>", "<当前仓库 head>")`，写法照抄 `20260905_0093`。
+   - 检查这条迁移线上的各个迁移与 `20260918_ds0001`、`20260926_pit0001`、`20260926_t1s0001`、`20260926_trl0001` 是否创建了同名对象。本仓库这 4 个都用了 `IF NOT EXISTS` 或 `ON CONFLICT`，重复执行是安全的，但对方的写法需要逐个确认。
 4. **找不到**：
-   - 新增空的版本标记 `20260918_0105`，`down_revision = "20260906_0094"`，写法照抄 `0089`；
+   - 新增空的版本标记 `<owner_head>`，`down_revision = "20260906_0094"`，写法照抄 `0089`；
    - 再新增上面那个合并迁移。
    - 然后用 `pg_dump --schema-only -n quant` 导出 owner 库的 schema，与"空库迁移到仓库 head"导出的 schema 做 diff。只存在于 owner 库的对象，要补写成真正的新增迁移（`IF NOT EXISTS`），这样新环境才能和 owner 一致。
    - 这一步没做完之前，在发布记录里注明"schema 差异未收敛"。
@@ -201,7 +219,7 @@ Get-ChildItem quant-service\migrations\versions | Where-Object Name -match '_0(0
 
 ## 6. 阶段 C：合并并确定发布 SHA
 
-1. PR #2 的 CI 目前是红的，原因不在本 PR，而是 `main` 的 CI 配置问题（见 PR 评论 `#issuecomment-5842937183`）。修复补丁见附录 A。**应用附录 A 或在 CI 红的情况下合并，都必须先得到用户明确同意。**
+1. PR #2 的 CI 一直是红的，原因在 `main` 的 CI 配置（见 PR 评论 `#issuecomment-5842937183`）。附录 A 的修复已经按用户要求加进 PR #2（`1daae6e`）。之后仍会失败的只有 2 个依赖真实行情数据的测试，如何处理由用户决定。**在 CI 仍为红色时合并，必须先得到用户明确同意。**
 2. PR #2 和阶段 B 的 PR 全部合并后：
 
    ```bash
@@ -434,7 +452,7 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 ---
 
-## 附录 A：CI 修复补丁（需要用户同意才能应用）
+## 附录 A：CI 修复补丁（已于 `1daae6e` 应用到 PR #2）
 
 `main` 的 `Verify platform contracts` 从 09-05 起一直是红的，原因有三：
 
@@ -475,7 +493,7 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 - `.gitignore`：忽略 `intraday-secrets.env`。以前 `git add -A` 会把它提交进仓库。
 - 新增 `scripts/release-sync-status.sh`（只读巡检）及其测试 `scripts/release-sync-status.test.mjs`。
 
-尚未解决、需要在阶段 B 处理的问题：edge overlay 的代码未入库；owner 的迁移分叉；bridge 没有独立发布路径（建议增加 `--bridge-only`）；CI（附录 A）。
+尚未解决、需要在阶段 B 处理的问题：本地未推送的提交（B0）；edge overlay 的代码未入库；owner 的迁移分叉；bridge 没有独立发布路径（建议增加 `--bridge-only`）；CI 中 2 个依赖真实行情数据的测试（附录 A 第 3 项）。
 
 ## 附录 C：发布记录
 
