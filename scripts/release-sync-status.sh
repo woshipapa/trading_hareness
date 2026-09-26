@@ -65,8 +65,12 @@ import sys
 revisions, parents = set(), set()
 for path in pathlib.Path(sys.argv[1]).glob("*.py"):
     text = path.read_text(encoding="utf-8")
-    revision = re.search(r'^revision\s*=\s*"([^"]+)"', text, re.M)
-    down = re.search(r"^down_revision\s*=\s*(.+)$", text, re.M)
+    # 迁移文件可能带类型标注（``revision: str = "..."``、
+    # ``down_revision: tuple[str, str] = (...)``）。旧正则要求名字紧跟 ``=``，于是
+    # 这类文件整个被跳过：2026-09-26 有 3 个，正好是最新的 owner lineage 链
+    # （own0001 → mrg0001），结果 heads 少算、DB 血统被误报成不一致。
+    revision = re.search(r'^revision(?:\s*:[^=\n]+)?\s*=\s*"([^"]+)"', text, re.M)
+    down = re.search(r"^down_revision(?:\s*:[^=\n]+)?\s*=\s*(.+)$", text, re.M)
     if not revision:
         continue
     revisions.add(revision.group(1))
@@ -172,14 +176,39 @@ if not skip_edge:
         build = (adapter or {}).get("build") or {}
         check("edge", "adapter /health", (adapter or {}).get("status"), (adapter or {}).get("status") == "ok", "ok")
         check("edge", "adapter git_sha", build.get("git_sha"), sha_matches(build.get("git_sha")), expected[:12])
-        check("edge", "adapter release", build.get("release"), not str(build.get("release") or "").startswith("hotfix"), "pinned (not hotfix*)")
-        check("edge", "adapter runtime_source", (adapter or {}).get("runtime_source") or "image",
-              (adapter or {}).get("runtime_source") != "source-overlay", "not source-overlay")
+        # 2026-09-26 起源码 overlay 是常规更新的默认模型（AGENTS.md「47 Release Model」）。
+        # 所以这几项不能写死"必须是固定镜像"：先认出实际在用哪种模型，再校验那一种的
+        # 契约。写死的话，规范规定的正常状态会被报成失败，校验就失去意义了。
         env = dict(item.split("=", 1) for item in edge.get("runtime_env", []) if "=" in item)
-        check("edge", "runtime.env image", env.get("FEISHU_ADAPTER_IMAGE"), expected[:12] in str(env.get("FEISHU_ADAPTER_IMAGE") or ""),
-              f"...:{expected[:12]}...")
-        check("edge", "runtime.env overlay", env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "unset",
-              str(env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "false").lower() != "true", "false/unset")
+        runtime_source = (adapter or {}).get("runtime_source") or "image"
+        overlay_flag = str(env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "false").lower() == "true"
+        overlay = runtime_source == "source-overlay" or overlay_flag
+        mode = "source-overlay" if overlay else "pinned-image"
+        check("edge", "release model", mode, True, "overlay 或 pinned-image（两者都合规）")
+        release = str(build.get("release") or "")
+        if overlay:
+            # overlay 的契约：release 必须由干净的期望 SHA 构建，两个标志互相一致。
+            check("edge", "adapter release", release or "<none>",
+                  expected[:12] in release and "-dirty" not in release,
+                  f"overlay built from clean {expected[:12]}")
+            check("edge", "adapter runtime_source", runtime_source, runtime_source == "source-overlay",
+                  "source-overlay")
+            check("edge", "runtime.env overlay", env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "unset",
+                  overlay_flag, "true")
+            # overlay 复用现有镜像，镜像标签可以没有；只要求它别指向别的 SHA。
+            image = str(env.get("FEISHU_ADAPTER_IMAGE") or "")
+            check("edge", "runtime.env image", image or "<none>",
+                  not image or expected[:12] in image,
+                  f"overlay 下可为空；若有则须含 {expected[:12]}")
+        else:
+            check("edge", "adapter release", release or "<none>", not release.startswith("hotfix"),
+                  "pinned (not hotfix*)")
+            check("edge", "adapter runtime_source", runtime_source, runtime_source != "source-overlay",
+                  "not source-overlay")
+            check("edge", "runtime.env image", env.get("FEISHU_ADAPTER_IMAGE"),
+                  expected[:12] in str(env.get("FEISHU_ADAPTER_IMAGE") or ""), f"...:{expected[:12]}...")
+            check("edge", "runtime.env overlay", env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "unset",
+                  not overlay_flag, "false/unset")
         bridge = health(first(edge, "bridge_health"))
         bridge_release = str((bridge or {}).get("release") or "")
         check("edge", "larkagentx bridge", (bridge or {}).get("status"), (bridge or {}).get("status") == "ok", "ok")

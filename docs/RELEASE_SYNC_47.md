@@ -473,7 +473,12 @@ scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
   --from-sha <active_sha> --apply
 ```
 
-脚本会先比较两个 Git SHA。出现 `requirements.txt`、Dockerfile、compose、迁移或
+脚本会先比较两个 Git SHA，并**逐个路径**校验：只允许 `quant-service/app/*`、
+`entrypoint.py`、`run_server.py`、`database_bootstrap.py`、`alembic.ini`，其余一律
+`full release required for: <path>` 并退出。**注意 `quant-service/tests/**` 不在白名单里** ——
+「改 `app/` 顺手改测试」放在同一个提交里会被拒；请把 `app/` 单独成一个提交，测试与文档另提。
+横跨多个目录的批量提交（例如工作站同步产生的那种）同样过不了快速通道。
+出现 `requirements.txt`、Dockerfile、compose、迁移或
 其他构建文件变化时直接拒绝，必须回到完整镜像发布和数据库迁移流程；纯代码发布
 会把 Git archive 写入 owner 的保留 release 目录，原子切换 `hotfix/current`，并用
 同一个基础镜像重建两个容器。健康接口会显示源码 SHA 和 release label。启动失败
@@ -520,6 +525,27 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 ```
 
 必须输出 `ALL CHECKS PASSED`。然后在附录 C 的发布记录表里追加一行，通过一个只改这一处的 PR 提交。
+
+**`--sha` 不是可选项**：省略时脚本回退到 `origin/main`，在 overlay 模型下会把正常状态
+报成一堆失败。始终显式传入本次发布的 SHA。
+
+校验脚本从 2026-09-26 起同时支持两种发布模型（此前写死了固定镜像那一种，于是本规范
+规定的 overlay 常态被报成 4 项失败，校验反而失去意义）：
+
+- 先认出实际在用哪一种（`runtime_source=source-overlay` 或 `FEISHU_ADAPTER_HOTFIX_ENABLED=true`
+  即判为 overlay），再校验那一种的契约，并把结果登记成 `release model` 一行；
+- **overlay**：`release` 必须含干净的期望 SHA 且不带 `-dirty`、`runtime_source` 必须是
+  `source-overlay`、overlay 标志必须为 `true`；镜像标签可以为空（overlay 复用现有镜像），
+  若存在则必须指向同一个 SHA；
+- **pinned-image**：仍按原来的契约校验（release 非 `hotfix*`、`runtime_source` 非 overlay、
+  镜像标签含期望 SHA、overlay 标志为 false/unset）。
+
+同时修了一个会误报数据库血统的解析 bug：Alembic heads 是用正则从迁移文件里抽的，而正则
+要求 `revision` / `down_revision` **紧跟** `=`，于是带类型标注的迁移文件
+（`revision: str = "..."`、`down_revision: tuple[str, str] = (...)`）整个被跳过。
+2026-09-26 有 3 个这样的文件，正好是最新的 owner lineage 链（`own0001` → `mrg0001`），
+结果合并节点的父节点仍被当成 head，`alembic revision` 被报成不一致——**数据库本来是对的，
+是检查在骗人**。以后新增迁移写不写类型标注都能被正确识别。
 
 下一个交易日：08:40 的 preopen 检查不应报警；15:05 收盘复盘之后，`GET /api/v1/research/trials` 应能看到 `candidate_ledger`、`xiaojie_leader_flow` 两个族的数据。部署后第一次盘后结果重算会把全部历史结果按 T+1 规则重新结算，耗时会比平时长。
 
