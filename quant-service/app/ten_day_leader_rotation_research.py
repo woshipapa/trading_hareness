@@ -24,6 +24,36 @@ TOP_RANK_LIMIT = 30
 BOARD_EXPANSION_MIN_PCT = {"main": 5.0, "growth": 10.0, "bj": 15.0}
 SUPPORTIVE_CYCLE_STATES = {"attack_incubating", "attack_accelerating", "repair", "handoff"}
 RISK_CYCLE_STATES = {"kill_high", "retreat", "panic", "ice_point"}
+#: The workbook's cycle words name the short-term sentiment cycle, which the
+#: platform produces as ``sentiment_cycle_daily.stage``.  Only stages whose
+#: published definitions match a workbook state are mapped: ``fermenting``
+#: (few broken boards, high promotion) is an attack phase; ``icepoint`` and
+#: ``ebbing`` are its ice point and retreat.  ``climax`` and ``mixed`` stay
+#: unmapped and so block like any other non-supportive state.  Nothing
+#: produces ``repair`` or ``handoff`` yet.
+SENTIMENT_STAGE_CYCLE_STATES = {"fermenting": "attack_accelerating", "icepoint": "ice_point", "ebbing": "retreat"}
+CYCLE_MAPPING_VERSION = "sentiment-stage-to-workbook-cycle-v1"
+
+
+def cycle_context_from_sentiment(reading: dict[str, Any] | None) -> dict[str, Any]:
+    """The workbook cycle state for one prior-session sentiment reading.
+
+    ``reading`` is the last closed session's ``sentiment_cycle_daily`` row as
+    known at scan time, or ``None`` when there is none; that fails closed.
+    """
+    if not reading or not reading.get("stage"):
+        return {"state": "unavailable", "source": "sentiment_cycle_daily",
+                "mapping_version": CYCLE_MAPPING_VERSION, "reason": "prior_session_sentiment_missing"}
+    stage = str(reading["stage"])
+    trading_date = reading.get("trading_date")
+    return {
+        "state": SENTIMENT_STAGE_CYCLE_STATES.get(stage, stage),
+        "source": "sentiment_cycle_daily",
+        "sentiment_stage": stage,
+        "sentiment_trading_date": str(trading_date) if trading_date is not None else None,
+        "sentiment_model_version": reading.get("model_version"),
+        "mapping_version": CYCLE_MAPPING_VERSION,
+    }
 
 
 def _number(value: Any) -> float | None:
@@ -102,6 +132,9 @@ def classify_ten_day_coordination(
         "current_return_pct": current_return,
         "board_expansion_min_pct": threshold,
         "cycle_state": cycle_state,
+        "cycle_source": {key: cycle[key] for key in (
+            "source", "sentiment_stage", "sentiment_trading_date", "mapping_version", "reason",
+        ) if cycle.get(key) is not None},
         "strategy_available_at": cycle.get("strategy_available_at"),
         "external_force": {
             "exact_sector_mapping": exact_mapping,
@@ -202,9 +235,12 @@ def classify_ten_day_coordination(
 
 __all__ = [
     "BOARD_EXPANSION_MIN_PCT",
+    "CYCLE_MAPPING_VERSION",
     "MODEL_VERSION",
     "RISK_CYCLE_STATES",
+    "SENTIMENT_STAGE_CYCLE_STATES",
     "SUPPORTIVE_CYCLE_STATES",
     "TOP_RANK_LIMIT",
     "classify_ten_day_coordination",
+    "cycle_context_from_sentiment",
 ]

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
+from .regime_stratification import (
+    STRATIFIED_SESSION_RETURNS_SQL, stratification_payload, stratified_session_returns_parameters,
+)
 from .research_trial_repository import LATEST_TRIALS_SQL, latest_trials_parameters, trials_payload
 
 
@@ -96,6 +100,16 @@ async def research_trials(async_database: Any, family: str | None, limit: int) -
         result = await conn.execute(LATEST_TRIALS_SQL, latest_trials_parameters(family, limit))
         rows = await result.fetchall()
     return trials_payload(rows)
+
+
+async def regime_strata(async_database: Any, as_of_date: date, strategy_key: str | None) -> dict[str, Any]:
+    """Settled ledger outcomes split by the regime and sentiment stage they were chosen in."""
+    async with async_database.transaction() as conn:
+        result = await conn.execute(
+            STRATIFIED_SESSION_RETURNS_SQL, stratified_session_returns_parameters(as_of_date, strategy_key),
+        )
+        rows = await result.fetchall()
+    return stratification_payload(rows, as_of_date)
 
 
 async def strategy_experiments(async_database: Any, universe_key: str, limit: int) -> dict[str, Any]:

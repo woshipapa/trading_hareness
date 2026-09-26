@@ -25,7 +25,7 @@ COPY feishu-relay/adapter/index.mjs feishu-relay/adapter/ledger.mjs feishu-relay
      feishu-relay/adapter/larkagentx-ingress.mjs feishu-relay/adapter/webhook-config.mjs ./
 COPY feishu-relay/adapter/frontend-assets.mjs ./
 COPY feishu-relay/config/source-registry.json /app/source-registry.json
-COPY feishu-relay/adapter/larkagentx-backfill.mjs ./
+COPY feishu-relay/adapter/larkagentx-backfill.mjs feishu-relay/adapter/cross-site-guard.mjs ./
 COPY feishu-relay/dashboard/dist /app/frontend-dist
 COPY frontend/dist /app/quant-frontend-dist
 ENV APP_GIT_SHA=${APP_GIT_SHA} \

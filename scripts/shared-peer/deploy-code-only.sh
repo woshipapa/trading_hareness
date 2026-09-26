@@ -32,16 +32,67 @@ git cat-file -e "$from_sha^{commit}"
 
 changed_files="$(git diff --name-only "$from_sha" "$target_sha")"
 [[ -n "$changed_files" ]] || { echo 'target SHA has no changes' >&2; exit 1; }
+# Three kinds of path.  Owner runtime source ships in this release.  Paths
+# that never reach the owner runtime are skipped: tests and docs carry no
+# behaviour, and feishu-relay/ and frontend/ run on the edge (released there by
+# the edge overlay).  Everything else - migrations, requirements, Dockerfiles,
+# compose, deploy/ and scripts/ (the systemd guards run from the release
+# checkout) - needs the full release.
+runtime_files=""
+skipped_files=""
+# A migration whose code is unchanged - only comments or docstrings differ -
+# changes no schema, so it does not force a full release.  Anything else in a
+# migration does.
+migration_code_unchanged() {
+  python3 - "$from_sha" "$target_sha" "$1" <<'PY'
+import ast, subprocess, sys
+
+def code(sha, path):
+    try:
+        text = subprocess.run(["git", "show", f"{sha}:{path}"], check=True, capture_output=True, text=True).stdout
+    except subprocess.CalledProcessError:
+        return None
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(body, list) and body and isinstance(body[0], ast.Expr) \
+                and isinstance(getattr(body[0], "value", None), ast.Constant) and isinstance(body[0].value.value, str):
+            node.body = body[1:] or [ast.Pass()]
+    return ast.dump(tree)
+
+before, after = code(sys.argv[1], sys.argv[3]), code(sys.argv[2], sys.argv[3])
+sys.exit(0 if before is not None and before == after else 1)
+PY
+}
 while IFS= read -r path; do
   case "$path" in
-    quant-service/app/*|quant-service/entrypoint.py|quant-service/run_server.py|quant-service/database_bootstrap.py|quant-service/alembic.ini) ;;
+    quant-service/migrations/versions/*.py)
+      if migration_code_unchanged "$path"; then
+        skipped_files+="$path (comments or docstrings only)"$'\n'
+        continue
+      fi
+      echo "full release required for: $path" >&2; exit 1 ;;
+  esac
+  case "$path" in
+    quant-service/app/*|quant-service/entrypoint.py|quant-service/run_server.py|quant-service/database_bootstrap.py|quant-service/alembic.ini)
+      runtime_files+="$path"$'\n' ;;
+    quant-service/tests/*|docs/*|*.md|.github/*|feishu-relay/*|frontend/*|scripts/*.test.mjs|scripts/test_*.py)
+      skipped_files+="$path"$'\n' ;;
+    # Release tooling that runs on the operator workstation, the Windows owner
+    # workstation or the edge - never inside the owner peer runtime.
+    scripts/release-sync-status.sh|scripts/shared-peer/deploy-code-only.sh|scripts/windows/*|\
+    scripts/*feishu-relay-edge*.sh|scripts/*edge-relay-workflows.sh|scripts/install-edge-import-watchdog.sh)
+      skipped_files+="$path"$'\n' ;;
     *) echo "full release required for: $path" >&2; exit 1 ;;
   esac
 done <<< "$changed_files"
 
 if [[ "$apply" != true ]]; then
   printf 'code-only release candidate: sha=%s label=%s from=%s\n' "$target_sha" "$release_label" "$from_sha"
-  printf 'changed files:\n%s\n' "$changed_files"
+  printf 'owner runtime files:\n%s' "${runtime_files:-  (none: this release only records the new SHA)
+}"
+  printf 'not owner runtime (skipped; edge paths ship with the edge overlay):\n%s' "${skipped_files:-  (none)
+}"
   exit 0
 fi
 

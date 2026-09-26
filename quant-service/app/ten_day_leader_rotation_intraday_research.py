@@ -58,9 +58,17 @@ def evaluate_intraday_rotation_candidates(
     peer_contexts: dict[str, dict[str, Any]],
     market_contexts: dict[str, dict[str, Any]],
     quote_source: Callable[[dict[str, Any] | None], str],
+    cycle_context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate selected candidates from causal, already-observed inputs only."""
+    """Evaluate selected candidates from causal, already-observed inputs only.
+
+    ``cycle_context`` is the market-wide sentiment cycle
+    (``cycle_context_from_sentiment``).  The board-flow ``market_state`` in
+    ``market_contexts`` is a different taxonomy (``broad_risk_on`` ...) that
+    never names a workbook cycle state, so it is kept as evidence only.
+    """
     strategy_available_at = run.get("strategy_available_at")
+    cycle_source = dict(cycle_context or {"state": "unavailable", "reason": "sentiment_cycle_not_supplied"})
     observations: list[dict[str, Any]] = []
     for stored in candidates:
         candidate = dict(stored)
@@ -79,10 +87,7 @@ def evaluate_intraday_rotation_candidates(
         # A board peer must be observed in this same bounded slice before it
         # contributes to breadth.  Do not infer a leader from a board label.
         peers["leader_limit_up"] = False
-        cycle = {
-            "state": market_context.get("market_state") or "unavailable",
-            "strategy_available_at": strategy_available_at,
-        }
+        cycle = {**cycle_source, "strategy_available_at": strategy_available_at}
         result = classify_ten_day_coordination(candidate, cycle, minute, peers)
         observations.append({
             "symbol": symbol,
