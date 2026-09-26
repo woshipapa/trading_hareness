@@ -57,3 +57,6 @@ coverage/
 
 # 凭据地图（含凭据架构，本地存档勿提交）
 docs/凭据地图.md
+# Host-local credential files (shared-peer intraday writer and guard alerts).
+intraday-secrets.env
+**/intraday-secrets.env

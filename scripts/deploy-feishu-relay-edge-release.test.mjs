@@ -15,3 +15,9 @@ assert.match(source, /if ! "\$\{ssh_command\[@\]\}" "\$edge_host" bash -s -- "\$
 assert.match(source, /docker save "\$image_ref" \| gzip -1 \| "\$\{ssh_command\[@\]\}" "\$edge_host" 'gunzip \| docker load'/);
 assert.match(source, /docker image inspect "\$image_ref" >\/dev\/null/);
 console.log('a stalled edge-side pull falls back to a local pull and ssh transfer automatically');
+
+// The hotfix overlay reports whatever APP_GIT_SHA says, so a pinned release
+// has to switch the overlay off and then prove the adapter is not running it.
+assert.match(source, /update_env FEISHU_ADAPTER_HOTFIX_ENABLED false/);
+assert.match(source, /"runtime_source":"source-overlay"/);
+console.log('a pinned image release disables the source overlay and verifies it is off');

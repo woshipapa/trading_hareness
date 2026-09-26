@@ -12,7 +12,8 @@ wheelhouse_target="${release_root}/wheelhouse"
 current_repo="${peer_home}/trading_hareness"
 current_wheelhouse="${peer_home}/wheelhouse"
 saved_env="$(mktemp)"
-trap 'rm -f "${saved_env}"' EXIT
+saved_intraday_secrets="$(mktemp)"
+trap 'rm -f "${saved_env}" "${saved_intraday_secrets}"' EXIT
 
 test -r "${repo_archive}"
 test -r "${wheelhouse_archive}"
@@ -21,6 +22,13 @@ tar -tf "${wheelhouse_archive}" >/dev/null
 
 if [[ -f "${current_repo}/deploy/shared-peer/.env" ]]; then
   install -m 0600 "${current_repo}/deploy/shared-peer/.env" "${saved_env}"
+fi
+# compose.intraday-owner.yaml and the peer-session-guard units both read
+# deploy/shared-peer/intraday-secrets.env from the active release.  It is not
+# in the archive, so without this copy a release switch leaves the intraday
+# writer and the preopen alert path without their credentials.
+if [[ -f "${current_repo}/deploy/shared-peer/intraday-secrets.env" ]]; then
+  install -m 0600 "${current_repo}/deploy/shared-peer/intraday-secrets.env" "${saved_intraday_secrets}"
 fi
 
 install -d -m 0755 "${release_store}" "${release_root}"
@@ -40,6 +48,10 @@ fi
 # CRLF before Linux shells source the file; otherwise a trailing CR can become
 # part of an HTTP header value and make an otherwise valid static API key fail.
 sed -i 's/\r$//' "${repo_target}/deploy/shared-peer/.env"
+if [[ -s "${saved_intraday_secrets}" ]]; then
+  install -m 0600 "${saved_intraday_secrets}" "${repo_target}/deploy/shared-peer/intraday-secrets.env"
+  sed -i 's/\r$//' "${repo_target}/deploy/shared-peer/intraday-secrets.env"
+fi
 grep -q '^PEER_WHEELHOUSE_PATH=' "${repo_target}/deploy/shared-peer/.env" || \
   printf '\nPEER_WHEELHOUSE_PATH=%s\n' "${current_wheelhouse}" >> "${repo_target}/deploy/shared-peer/.env"
 

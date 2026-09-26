@@ -98,6 +98,11 @@ update_env() {
   rm -f "$temp"
 }
 update_env FEISHU_ADAPTER_IMAGE "$image_ref"
+# A pinned image release must execute the image's own source.  The hotfix path
+# (scripts/hotfix-feishu-relay-edge.sh) mounts a source overlay and sets this
+# key to true; left on, the adapter would report this release's SHA while
+# still running the overlay's code.
+update_env FEISHU_ADAPTER_HOTFIX_ENABLED false
 update_env APP_GIT_SHA "$release_sha"
 update_env APP_RELEASE "$release_label"
 update_env APP_BUILD_CREATED_AT "$built_at"
@@ -108,6 +113,10 @@ test -s /tmp/feishu-relay-release-health.json
 grep -Fq '"status":"ok"' /tmp/feishu-relay-release-health.json
 grep -Fq "\"git_sha\":\"${release_sha}\"" /tmp/feishu-relay-release-health.json
 grep -Fq "\"release\":\"${release_label}\"" /tmp/feishu-relay-release-health.json
+if grep -Fq '"runtime_source":"source-overlay"' /tmp/feishu-relay-release-health.json; then
+  echo 'release refused: the adapter still runs the hotfix source overlay, not the pinned image' >&2
+  exit 1
+fi
 echo 'relay adapter release health verified'
 docker inspect -f '{{.State.Health.Status}} {{.RestartCount}}' feishu-relay-edge-adapter
 REMOTE

@@ -53,6 +53,10 @@ provider response directly to a live threshold or order path.
    change; `npm run api:check` verifies the checked-in generated type is current.
 8. Read `docs/ARCHITECTURE.md` before a cross-domain change; it is the concise
    ownership map, while this file remains the operational checklist.
+9. Syncing or releasing to the two 47 hosts (edge `47.114.113.152`, owner
+   `47.110.79.189`) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
+   with the read-only `scripts/release-sync-status.sh --sha <sha>`; never run
+   `scripts/deploy-intraday-edge-release.sh` (the edge quant writer is retired).
 
 ## Review automation
 
