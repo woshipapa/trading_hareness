@@ -17,7 +17,7 @@ def intraday_limit_lift_pattern(
     """Find causal opening-drive, ignition and deep-reversal checkpoints."""
     session = session_rows(rows, number=number)
     previous_close = number(daily.get("pre_close"))
-    limit_pct = float(daily.get("limit_pct") or limit_ratio(str(daily.get("symbol") or ""), bool(daily.get("is_st"))) * 100)
+    limit_pct = float(daily.get("limit_pct") or limit_ratio(str(daily.get("symbol") or ""), bool(daily.get("is_st")), daily.get("trading_date")) * 100)
     limit_price = number(daily.get("limit_up"))
     if limit_price is None and float(daily.get("close_pct") or 0) >= limit_pct * 0.95:
         limit_price = number(daily.get("close"))

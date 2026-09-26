@@ -62,8 +62,18 @@ class PaperExecutionTests(unittest.TestCase):
         self.assertFalse(paper_tradability(
             side="buy", requested_quantity=100, symbol="830001.BJ", quote={"pct_change": 30.0, "price": 10},
         ).allowed)
+        # Main-board ST: 5% band before 2026-07-06, 10% from that session on.
         self.assertFalse(paper_tradability(
-            side="buy", requested_quantity=100, symbol="600001.SH", quote={"pct_change": 5.0, "price": 10, "is_st": True},
+            side="buy", requested_quantity=100, symbol="600001.SH",
+            quote={"pct_change": 5.0, "price": 10, "is_st": True, "price_trade_date": "20260703"},
+        ).allowed)
+        self.assertTrue(paper_tradability(
+            side="buy", requested_quantity=100, symbol="600001.SH",
+            quote={"pct_change": 5.0, "price": 10, "is_st": True, "price_trade_date": "20260925"},
+        ).allowed)
+        self.assertFalse(paper_tradability(
+            side="buy", requested_quantity=100, symbol="600001.SH",
+            quote={"pct_change": 10.0, "price": 10, "is_st": True, "price_trade_date": "20260925"},
         ).allowed)
 
     def test_exact_limit_price_precedes_percent_fallback(self):
@@ -161,11 +171,11 @@ class RoundTripCostPercentTests(unittest.TestCase):
     def test_it_is_one_buy_plus_one_sell_from_the_shared_constants(self):
         from app.ashare_reality import (
             DEFAULT_COMMISSION_RATE, DEFAULT_SLIPPAGE_BPS, DEFAULT_STAMP_TAX_RATE,
-            round_trip_cost_pct,
+            DEFAULT_TRANSFER_FEE_RATE, round_trip_cost_pct,
         )
         slippage = DEFAULT_SLIPPAGE_BPS / Decimal("10000")
-        expected = ((DEFAULT_COMMISSION_RATE + slippage)
-                    + (DEFAULT_COMMISSION_RATE + DEFAULT_STAMP_TAX_RATE + slippage)) * Decimal("100")
+        expected = ((DEFAULT_COMMISSION_RATE + DEFAULT_TRANSFER_FEE_RATE + slippage)
+                    + (DEFAULT_COMMISSION_RATE + DEFAULT_TRANSFER_FEE_RATE + DEFAULT_STAMP_TAX_RATE + slippage)) * Decimal("100")
         self.assertEqual(round_trip_cost_pct(), expected)
 
     def test_stamp_tax_is_charged_once_on_the_sell_leg_only(self):
@@ -185,6 +195,15 @@ class RoundTripCostPercentTests(unittest.TestCase):
         sell = estimate_trade_cost(side="sell", quantity=quantity, price=price)
         combined = (buy["total_cost"] + sell["total_cost"]) / notional * Decimal("100")
         self.assertAlmostEqual(float(combined), float(round_trip_cost_pct()), places=9)
+
+    def test_the_current_statutory_rates_are_in_force(self):
+        from app.ashare_reality import DEFAULT_STAMP_TAX_RATE, DEFAULT_TRANSFER_FEE_RATE, estimate_trade_cost
+        # Stamp duty was halved to 0.05% on 2023-08-28; transfer fee is 0.001%.
+        self.assertEqual(DEFAULT_STAMP_TAX_RATE, Decimal("0.0005"))
+        self.assertEqual(DEFAULT_TRANSFER_FEE_RATE, Decimal("0.00001"))
+        sell = estimate_trade_cost(side="sell", quantity=10_000, price=Decimal("10"))
+        self.assertEqual(sell["stamp_tax"], Decimal("50.0000"))
+        self.assertEqual(sell["transfer_fee"], Decimal("1.00000"))
 
     def test_the_round_trip_is_material_against_the_edges_being_measured(self):
         from app.ashare_reality import round_trip_cost_pct

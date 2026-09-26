@@ -32,7 +32,7 @@ def limit_daily_features(bars: list[dict[str, Any]], *, number: Callable[[Any], 
         previous_close = number(ordered[-2].get("close"))
     opened, high, low, close = (number(current.get(key)) for key in ("open", "high", "low", "close"))
     exact_limit_up, exact_limit_down = number(current.get("limit_up")), number(current.get("limit_down"))
-    ratio = limit_ratio(str(current.get("symbol") or ""), bool(current.get("is_st")))
+    ratio = limit_ratio(str(current.get("symbol") or ""), bool(current.get("is_st")), current.get("trading_date"))
     implied_limit_pct = round((exact_limit_up / previous_close - 1) * 100, 4) if exact_limit_up and previous_close else ratio * 100
     volume = number(current.get("volume"))
     prior_volumes = [number(row.get("volume")) for row in ordered[:-1]]

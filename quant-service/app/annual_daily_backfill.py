@@ -1142,7 +1142,7 @@ class AnnualDailyBackfill:
                         WHERE trading_date BETWEEN %s AND %s
                           AND quality_status='fresh'
                           AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                          AND symbol ~ '^(?:(?:60[0135]|68[89])[0-9]{3}\\.SH|(?:000|001|002|003|300|301)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$'
+                          AND symbol ~ '^(?:(?:60[0135]|68[89])[0-9]{3}\\.SH|(?:000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$'
                      ), aggregate AS (
                        SELECT trading_date,count(*)::integer AS stock_count,
                               count(*) FILTER (WHERE change_pct>0)::integer AS advancers,

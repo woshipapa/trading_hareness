@@ -28,8 +28,8 @@ is credited with what it added rather than with the market it rode.
 
 Every return is also recorded net of a round trip.  Gross was misleading at
 the size of edge these modes produce: on 2026-08-27 ``supplement_rotation``
-settled at +0.36% gross against a +0.53% market median, and the 0.26% round
-trip is the difference between a marginal positive and a clear negative.  A
+settled at +0.36% gross against a +0.53% market median, and the round trip
+(0.26% then, about 0.21% at the 2023 stamp duty) is the difference between a marginal positive and a clear negative.  A
 scorecard that only reports gross will keep recommending strategies that lose
 money after costs.
 """

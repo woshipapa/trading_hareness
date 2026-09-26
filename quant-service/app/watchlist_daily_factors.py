@@ -17,7 +17,10 @@ def daily_factors_from_rows(rows: Iterable[dict[str, Any]], *, number: Callable[
     closes = [number(row.get("research_close")) for row in research_bars] if research_bars is not None else []
     volumes = [number(row.get("volume")) for row in bars]
     trade_constraints = ({"is_suspended": bool(bars[-1].get("is_suspended")), "is_st": bool(bars[-1].get("is_st")),
-                          "limit_up": bars[-1].get("limit_up"), "limit_down": bars[-1].get("limit_down")} if bars else {})
+                          "limit_up": bars[-1].get("limit_up"), "limit_down": bars[-1].get("limit_down"),
+                          # Limit prices belong to one session.  During the
+                          # day the newest stored bar is the prior session's.
+                          "limit_trading_date": bars[-1].get("trading_date")} if bars else {})
     if research_bars is None:
         return {"status": "data_quality_blocked", "bar_count": len(bars), "quality_flags": adjustment_flags,
                 "trade_constraints": trade_constraints}

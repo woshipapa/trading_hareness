@@ -123,13 +123,21 @@ class StrategySignalPolicyTests(unittest.TestCase):
         self.assertFalse(growth_limit["allow_confirmation"])
         self.assertIn("policy_limit_up", growth_limit["risk_flags"])
 
+        # Main-board ST moved from a 5% to a 10% band on 2026-07-06.
         st_limit = live_policy_gate(
             {"signal_type": "entry"}, {"symbol": "600001.SH", "available_quantity": 0},
-            {**fresh_quote, "pct_change": 5},
+            {**fresh_quote, "pct_change": 10, "price_trade_date": "20260925"},
             {"status": "completed", "trade_constraints": {"is_st": True}}, context, {"status": "confirmed"},
         )
         self.assertFalse(st_limit["allow_confirmation"])
-        self.assertEqual(st_limit["price_limit_state"]["limit_ratio"], 0.05)
+        self.assertEqual(st_limit["price_limit_state"]["limit_ratio"], 0.10)
+        old_st_limit = live_policy_gate(
+            {"signal_type": "entry"}, {"symbol": "600001.SH", "available_quantity": 0},
+            {**fresh_quote, "pct_change": 5, "price_trade_date": "20260703"},
+            {"status": "completed", "trade_constraints": {"is_st": True}}, context, {"status": "confirmed"},
+        )
+        self.assertFalse(old_st_limit["allow_confirmation"])
+        self.assertEqual(old_st_limit["price_limit_state"]["limit_ratio"], 0.05)
 
     def test_live_policy_keeps_realtime_exact_limit_when_daily_constraint_is_missing(self):
         from app.live_policy import live_policy_gate

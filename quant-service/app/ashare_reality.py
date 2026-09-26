@@ -17,7 +17,10 @@ from .market_rules import a_share_limit_ratio
 
 LOT_SIZE = 100
 DEFAULT_COMMISSION_RATE = Decimal("0.0003")
-DEFAULT_STAMP_TAX_RATE = Decimal("0.001")
+# Sell-side stamp duty was halved from 0.1% to 0.05% on 2023-08-28.
+DEFAULT_STAMP_TAX_RATE = Decimal("0.0005")
+# Exchange transfer fee: 0.001% of notional on both sides since 2022-04-29.
+DEFAULT_TRANSFER_FEE_RATE = Decimal("0.00001")
 DEFAULT_SLIPPAGE_BPS = Decimal("5")
 
 
@@ -66,7 +69,9 @@ def price_limit_state(*, symbol: str | None, quote: dict[str, Any] | None) -> di
     # band to retain the prior conservative main-board 9.8% behavior while
     # correctly handling 20%, 30%, and ST 5% price bands.
     pct_change = _number(merged.get("pct_change"))
-    ratio = a_share_limit_ratio(resolved_symbol, is_st=is_st)
+    ratio = a_share_limit_ratio(
+        resolved_symbol, is_st=is_st, trade_date=merged.get("price_trade_date") or merged.get("trading_date"),
+    )
     threshold_pct = ratio * 100.0 * 0.98
     if pct_change is not None and limit_up is None:
         at_limit_up = at_limit_up or pct_change >= threshold_pct
@@ -106,24 +111,28 @@ def assess_tradability(*, side: str, requested_quantity: int, quote: dict[str, A
 def estimate_trade_cost(*, side: str, quantity: int, price: Decimal | float,
                         commission_rate: Decimal = DEFAULT_COMMISSION_RATE,
                         stamp_tax_rate: Decimal = DEFAULT_STAMP_TAX_RATE,
-                        slippage_bps: Decimal = DEFAULT_SLIPPAGE_BPS) -> dict[str, Decimal]:
+                        slippage_bps: Decimal = DEFAULT_SLIPPAGE_BPS,
+                        transfer_fee_rate: Decimal = DEFAULT_TRANSFER_FEE_RATE) -> dict[str, Decimal]:
     """Estimate A-share paper costs; sell-side stamp tax only."""
     notional = Decimal(str(price)) * Decimal(max(0, quantity))
     commission = max(Decimal("5"), notional * commission_rate) if notional else Decimal("0")
     stamp = notional * stamp_tax_rate if str(side).lower() == "sell" else Decimal("0")
     slippage = notional * slippage_bps / Decimal("10000")
+    transfer_fee = notional * transfer_fee_rate
     return {
         "notional": notional,
         "commission": commission,
         "stamp_tax": stamp,
+        "transfer_fee": transfer_fee,
         "slippage": slippage,
-        "total_cost": commission + stamp + slippage,
+        "total_cost": commission + stamp + transfer_fee + slippage,
     }
 
 
 def round_trip_cost_pct(*, commission_rate: Decimal = DEFAULT_COMMISSION_RATE,
                         stamp_tax_rate: Decimal = DEFAULT_STAMP_TAX_RATE,
-                        slippage_bps: Decimal = DEFAULT_SLIPPAGE_BPS) -> Decimal:
+                        slippage_bps: Decimal = DEFAULT_SLIPPAGE_BPS,
+                        transfer_fee_rate: Decimal = DEFAULT_TRANSFER_FEE_RATE) -> Decimal:
     """One buy plus one sell, as a percentage of notional.
 
     Research settles in percentage returns and has no position size, so it
@@ -136,13 +145,13 @@ def round_trip_cost_pct(*, commission_rate: Decimal = DEFAULT_COMMISSION_RATE,
     Costs are therefore understated for small positions, which is the
     direction that flatters a strategy - read a marginal net edge accordingly.
     """
-    buy = commission_rate + slippage_bps / Decimal("10000")
-    sell = commission_rate + stamp_tax_rate + slippage_bps / Decimal("10000")
+    buy = commission_rate + transfer_fee_rate + slippage_bps / Decimal("10000")
+    sell = commission_rate + transfer_fee_rate + stamp_tax_rate + slippage_bps / Decimal("10000")
     return (buy + sell) * Decimal("100")
 
 
 __all__ = [
-    "AshareTradability", "DEFAULT_COMMISSION_RATE", "DEFAULT_SLIPPAGE_BPS", "DEFAULT_STAMP_TAX_RATE",
+    "AshareTradability", "DEFAULT_COMMISSION_RATE", "DEFAULT_SLIPPAGE_BPS", "DEFAULT_STAMP_TAX_RATE", "DEFAULT_TRANSFER_FEE_RATE",
     "LOT_SIZE", "assess_tradability", "estimate_trade_cost", "price_limit_state", "round_board_lot",
     "round_trip_cost_pct",
 ]

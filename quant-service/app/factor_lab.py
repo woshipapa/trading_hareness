@@ -295,7 +295,7 @@ def run_multi_factor_strategy(connection: Any, universe_key: str, start_date: da
             # has not yet been backfilled.
             entry_pre_close = value(entry_bar.get("pre_close"))
             exit_pre_close = value(exit_bar.get("pre_close"))
-            ratio = a_share_limit_ratio(symbol, bool(entry_bar.get("is_st")))
+            ratio = a_share_limit_ratio(symbol, bool(entry_bar.get("is_st")), entry_bar.get("trading_date"))
             if limit_up is None and entry_pre_close is not None:
                 limit_up = round(entry_pre_close * (1 + ratio), 2)
             if limit_down is None and exit_pre_close is not None:

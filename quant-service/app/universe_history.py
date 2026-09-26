@@ -107,7 +107,7 @@ def rebuild_historical_membership_from_canonical(
         """WITH canonical_presence AS (
                SELECT bar.symbol,min(bar.trading_date) AS first_bar_date,max(bar.trading_date) AS last_bar_date
                  FROM quant.canonical_bars_daily bar
-                WHERE bar.symbol ~ '^((60[0135]|68[89])[0-9]{3}\\.SH|(000|001|002|003|300|301)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$'
+                WHERE bar.symbol ~ '^((60[0135]|68[89])[0-9]{3}\\.SH|(000|001|002|003|300|301|302)[0-9]{3}\\.SZ|[489][0-9]{5}\\.BJ)$'
                 GROUP BY bar.symbol
              ), desired AS (
                SELECT %s::text AS universe_key,bars.symbol,

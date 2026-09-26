@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from statistics import mean, median, pstdev
 from typing import Any, Iterable, Mapping, Sequence
 
+from ...market_rules import a_share_limit_ratio, is_st_security_name
+
 
 INDICATOR_VERSION = "market-sentiment-indicators-v1"
 #: A move within this of the board's limit counts as "at limit" in the
@@ -42,15 +44,8 @@ class StrengthWeights:
     member_up_ratio: float = 0.2
 
 
-def limit_ratio_pct(symbol: str, name: str | None = None) -> float:
-    code = symbol[:3]
-    if name and "ST" in name.upper():
-        return 5.0
-    if code in {"300", "301", "302", "688", "689"}:
-        return 20.0
-    if symbol.endswith(".BJ"):
-        return 30.0
-    return 10.0
+def limit_ratio_pct(symbol: str, name: str | None = None, trade_date: object = None) -> float:
+    return a_share_limit_ratio(symbol, is_st_security_name(name), trade_date) * 100
 
 
 def _symbol_set(rows: Iterable[Mapping[str, Any]]) -> set[str]:

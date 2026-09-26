@@ -18,9 +18,11 @@ STRATEGY_CODE = {APP / name for name in (
 )}
 
 #: Application modules the data layer may use: transport, persistence and
-#: lease infrastructure plus the pre-existing Fuyao client -- no strategy,
-#: rule, router or composition-root code.
+#: lease infrastructure plus the pre-existing Fuyao client, and the exchange's
+#: own price-band primitives in market_rules -- no strategy rule, router or
+#: composition-root code.
 ALLOWED_APP_MODULES = frozenset({
+    "market_rules",
     "http_clients", "http_retry", "network_health", "provider_health", "public_market_repository",
     "runtime_leases", "runtime_tasks", "database", "async_market_session_repository", "fuyao_provider",
 })

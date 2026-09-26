@@ -32,12 +32,17 @@ class LonghuMarketSyncTests(unittest.TestCase):
             {"ts_code": "600664.SH", "trade_date": "20260901", "pre_close": 10, "name": "哈药股份"},
             {"ts_code": "300001.SZ", "trade_date": "20260901", "pre_close": 10, "name": "特锐德"},
             {"ts_code": "600001.SH", "trade_date": "20260901", "pre_close": 10, "name": "ST测试"},
+            {"ts_code": "600002.SH", "trade_date": "20260703", "pre_close": 10, "name": "*ST测试"},
+            {"ts_code": "300002.SZ", "trade_date": "20260703", "pre_close": 10, "name": "ST创业"},
         ]
         controls = build_control_rows(daily)
         by_symbol = {row["ts_code"]: row for row in controls["stk_limit"]}
         self.assertEqual(by_symbol["600664.SH"]["up_limit"], "11.00")
         self.assertEqual(by_symbol["300001.SZ"]["up_limit"], "12.00")
-        self.assertEqual(by_symbol["600001.SH"]["up_limit"], "10.50")
+        # Main-board ST: 10% from 2026-07-06, 5% before; a ChiNext ST stays 20%.
+        self.assertEqual(by_symbol["600001.SH"]["up_limit"], "11.00")
+        self.assertEqual(by_symbol["600002.SH"]["up_limit"], "10.50")
+        self.assertEqual(by_symbol["300002.SZ"]["up_limit"], "12.00")
         self.assertTrue(all(row["factor_semantics"] == "same_day_identity_only" for row in controls["adj_factor"]))
 
 

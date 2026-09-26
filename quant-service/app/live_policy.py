@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .ashare_reality import price_limit_state
+from .market_rules import as_exchange_date, cn_today
 
 
 def _number(value: Any) -> float | None:
@@ -92,7 +93,15 @@ def live_policy_gate(signal: dict[str, Any], watch: dict[str, Any], quote: dict[
     # A same-scan quote/raw payload may carry exact exchange limits.  Daily
     # factors are only a backfill: never replace a present intraday exact
     # value with ``None`` from a sparse daily row.
+    # Limit prices are only valid for the session they were set for; during
+    # the day the newest daily bar is the prior session, whose band is
+    # anchored on the wrong pre-close.  Without a same-session row the
+    # board/ST percentage fallback on today's pct_change is the correct test.
+    session_date = as_exchange_date((quote or {}).get("price_trade_date")) or cn_today()
+    same_session_limits = as_exchange_date(constraints.get("limit_trading_date")) == session_date
     for key in ("limit_up", "limit_down", "is_st"):
+        if key != "is_st" and not same_session_limits:
+            continue
         if limit_quote.get(key) in (None, "") and constraints.get(key) not in (None, ""):
             limit_quote[key] = constraints[key]
     limit_state = price_limit_state(
