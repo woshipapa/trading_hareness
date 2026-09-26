@@ -18,6 +18,10 @@ jobs:
       QUANT_WRITE_API_KEY: ci-quant-write-key
       N8N_ENCRYPTION_KEY: ci-n8n-encryption-key
       QUANT_BACKGROUND_TASKS_ENABLED: "false"
+      # compose.yaml requires these for the feishu-adapter service; CI never
+      # talks to Feishu, so placeholders only let compose interpolate.
+      FEISHU_APP_ID: ci-feishu-app-id
+      FEISHU_APP_SECRET: ci-feishu-app-secret
     steps:
       - uses: actions/checkout@v4
 
@@ -25,7 +29,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            feishu-relay/dashboard/package-lock.json
 
       - name: Verify architecture contracts
         run: python3 scripts/verify_architecture.py
@@ -37,10 +43,25 @@ jobs:
           npm test --prefix frontend
           npm run build --prefix frontend
 
+      - name: Install and verify Feishu dashboard
+        run: |
+          npm ci --prefix feishu-relay/dashboard
+          npm run typecheck --prefix feishu-relay/dashboard
+          npm test --prefix feishu-relay/dashboard
+          npm run build --prefix feishu-relay/dashboard
+
       - name: Build and test research service
         run: |
           docker compose up -d --wait --wait-timeout 120 postgres
-          docker compose build quant-research
+          docker compose build quant-research feishu-adapter
+          # The PostgreSQL-backed tests need the real schema: the adapter's
+          # ingestion ledger first (the quant baseline references it), then the
+          # quant bootstrap, which stamps the baseline and upgrades to head.
+          # initialize-ledger.mjs is not copied into the adapter image.
+          docker compose run --rm --no-deps \
+            --volume "$GITHUB_WORKSPACE/feishu-relay/adapter/initialize-ledger.mjs:/app/initialize-ledger.mjs:ro" \
+            feishu-adapter node initialize-ledger.mjs
+          docker compose run --rm --no-deps quant-research python database_bootstrap.py
           docker compose run --rm --no-deps quant-research python -m unittest discover -s tests -q
 
       - name: Verify mounted API contract and generated types
@@ -49,13 +70,21 @@ jobs:
           node scripts/verify-api-contract.mjs
           npm run api:check --prefix frontend
 
-      - name: Build and test Feishu adapter
+      - name: Test Feishu adapter sources
         run: |
-          docker build --tag n8n-feishu-adapter:test --file feishu-adapter/Dockerfile .
+          npm install --prefix feishu-relay/adapter --no-audit --no-fund
+          cd feishu-relay/adapter && node --test *.test.mjs
+
+      - name: Build and test Feishu adapter image
+        run: |
+          docker build --tag n8n-feishu-adapter:test --file feishu-relay/adapter/Dockerfile .
+          # The same tests against the modules the image actually ships.  The
+          # Dockerfile manifest check reads the build recipes, which are not in
+          # the image; it ran against the sources in the step above.
           docker run --rm \
-            --volume "$GITHUB_WORKSPACE/feishu-adapter:/tests:ro" \
+            --volume "$GITHUB_WORKSPACE/feishu-relay/adapter:/tests:ro" \
             n8n-feishu-adapter:test \
-            sh -lc 'cp /tests/*.test.mjs /app/ && node --test *.test.mjs'
+            sh -lc 'cp /tests/*.test.mjs /app/ && rm /app/dockerfile-manifest.test.mjs && node --test *.test.mjs'
 
       - name: Verify whitespace
         run: git diff --check

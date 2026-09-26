@@ -285,7 +285,7 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
         key="daily_strategy_summary", label="日终研究摘要", role="保存盘中结算、策略学习、盘后候选与数据门禁到研究台",
         configured=deps.daily_summary_automation_enabled(), expected_active=summary_expected,
         last_observed_at=summary_delivery.get("sent_at") or summary_delivery.get("updated_at"), max_age_seconds=15 * 60.0,
-        cadence="交易日 19:15–22:00；失败至多重试 3 次",
+        cadence="交易日 15:05–22:00；15:05 起发送，失败自动重试",
         details={"latest_exchange_date": str(summary_delivery.get("exchange_date") or "") or None,
                  "latest_delivery_status": summary_delivery.get("delivery_status"),
                  "attempt_count": int(summary_delivery.get("attempt_count") or 0),
@@ -301,7 +301,7 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
     items.append(summary_item)
     items.append({
         "key": "primary_realtime", "label": "Tushare 主源实时", "role": "明确排除，不进入盘中决策",
-        "state": "unavailable", "configured": bool((configs.get("primary") or {}).get("configured")),
+        "state": "retired", "configured": False,
         "expected_active": False, "cadence": "不调用", "max_age_seconds": None, "last_observed_at": None,
         "age_seconds": None, "last_success_at": None, "last_failure_at": None,
         "last_error": "主源不具备已验证实时能力", "last_latency_ms": None, "last_row_count": None,

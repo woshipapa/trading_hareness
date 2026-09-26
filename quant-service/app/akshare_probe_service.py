@@ -34,7 +34,13 @@ async def run(
     start = as_of - timedelta(days=payload.lookback_days + 12)
     results: list[dict[str, Any]] = []
 
-    async def run_step(label: str, capability: str, action: Callable[[], list[dict[str, Any]]]) -> None:
+    async def run_step(
+        label: str,
+        capability: str,
+        action: Callable[[], list[dict[str, Any]]],
+        *,
+        timeout_seconds: int = 45,
+    ) -> None:
         if capability in await open_provider_capabilities("akshare", [capability]):
             results.append({"source": label, "provider": "akshare", "capability": capability,
                             "status": "circuit_open", "received": 0, "stored": 0,
@@ -42,7 +48,7 @@ async def run(
             return
         started_at = asyncio.get_running_loop().time()
         try:
-            rows = await run_akshare(action, timeout_seconds=45)
+            rows = await run_akshare(action, timeout_seconds=timeout_seconds)
             latency_ms = round((asyncio.get_running_loop().time() - started_at) * 1000)
             stored = await run_database(
                 persist_result, capability, rows, payload.symbol, latency_ms, timeout_seconds=60,
@@ -73,7 +79,16 @@ async def run(
     if payload.include_supplements:
         await run_step("AKShare市场宽度补充", "market_breadth", lambda: sources["market_breadth"](as_of))
         if payload.include_board_taxonomy:
-            await run_step("AKShare板块/行业/成分补充", "board_taxonomy", lambda: sources["board_supplements"](payload.board_limit))
+            # This capability deliberately combines five board directories and
+            # their bounded member samples.  Production probes measure roughly
+            # one minute, so the generic 45-second provider budget creates a
+            # false failure even when every upstream request succeeds.
+            await run_step(
+                "AKShare板块/行业/成分补充",
+                "board_taxonomy",
+                lambda: sources["board_supplements"](payload.board_limit),
+                timeout_seconds=90,
+            )
         if payload.include_moneyflow:
             await run_step("AKShare资金流补充", "moneyflow_supplement", lambda: sources["moneyflow_supplements"](payload.symbol))
         if payload.include_limit_pools:

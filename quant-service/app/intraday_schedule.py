@@ -42,9 +42,23 @@ def intraday_high_frequency_window(now: datetime | None = None) -> bool:
     return any(start <= local.time() < end for start, end in windows)
 
 
+#: The whole morning, from the opening call auction to the lunch break, is
+#: scanned every 5 s (user decision 2026-09-22).  Separate from the
+#: high-frequency window so the Tushare fast-quote loop keeps its own hours.
+MORNING_FAST_WINDOW = (time(9, 15), time(11, 30))
+MORNING_FAST_SCAN_SECONDS = 5
+
+
+def intraday_morning_fast_window(now: datetime | None = None) -> bool:
+    local = (now or datetime.now(timezone.utc)).astimezone(CN_TZ)
+    return MORNING_FAST_WINDOW[0] <= local.time() < MORNING_FAST_WINDOW[1]
+
+
 def intraday_effective_scan_interval_seconds(normal_interval_seconds: int, now: datetime | None = None) -> int:
     if normal_interval_seconds <= 0:
         return 0
+    if intraday_morning_fast_window(now):
+        return MORNING_FAST_SCAN_SECONDS
     return 10 if intraday_high_frequency_window(now) else normal_interval_seconds
 
 
@@ -173,9 +187,9 @@ def intraday_next_monitor_delay_seconds(normal_interval_seconds: int, now: datet
         return 0
     local = (now or datetime.now(timezone.utc)).astimezone(CN_TZ)
     normal_delay = float(intraday_effective_scan_interval_seconds(normal_interval_seconds, local))
-    if intraday_high_frequency_window(local):
+    if intraday_morning_fast_window(local) or intraday_high_frequency_window(local):
         return normal_delay
-    for start in (time(9, 30), time(11, 10), time(13, 0), time(14, 30)):
+    for start in (MORNING_FAST_WINDOW[0], time(13, 0), time(14, 30)):
         seconds = (datetime.combine(local.date(), start, tzinfo=local.tzinfo) - local).total_seconds()
         if 0 < seconds < normal_delay:
             return seconds

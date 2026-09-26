@@ -3,6 +3,7 @@ import asyncio
 import functools
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -45,10 +46,13 @@ from .akshare_provider import (
     akshare_moneyflow_supplements,
     akshare_status,
     akshare_strong_pool_events,
+    akshare_tencent_all_a_spot,
+    normalize_tencent_all_a_spot_rows,
 )
 from .fuyao_provider import FuyaoProviderError, all_a_snapshot_rows as fuyao_all_a_snapshot_rows
 from .limit_up_anchor import live_limit_up_pool_rows
 from .launch_radar import (
+    MODEL_VERSION as LAUNCH_RADAR_MODEL_VERSION,
     evaluate_launch_radar,
     record_launch_observations as record_launch_radar_observations,
 )
@@ -56,12 +60,17 @@ from .analysis import as_utc
 from .capability_registry import api_capability
 from .database import AsyncDatabase, Database
 from .daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload as daily_control_plane_status_payload
+from .owner_factor_repository import read_persisted_factor_controls, read_persisted_factor_window
 from .async_provider_circuit_repository import open_capabilities as read_async_open_provider_capabilities
 from .async_provider_circuit_repository import open_provider_keys as read_async_open_provider_keys
-from .async_market_session_repository import realtime_market_session as read_async_realtime_market_session
+from .async_market_session_repository import (
+    market_observation_session as read_async_market_observation_session,
+    realtime_market_session as read_async_realtime_market_session,
+)
 from .async_market_session_repository import sse_calendar_open as read_async_sse_calendar_open
 from .async_market_session_repository import sse_calendar_status as read_async_sse_calendar_status
 from .daily_bar_repository import exchange_for, provider_priority, upsert_daily_bar, upsert_daily_bars
+from .instrument_registry import InstrumentRecord, ensure_instrument as ensure_registry_instrument, ensure_instruments as ensure_registry_instruments
 from .sector_membership_repository import (
     persist_observed_snapshot as persist_observed_sector_snapshot,
     persist_ths_snapshot as persist_ths_sector_snapshot,
@@ -158,19 +167,30 @@ from .intraday_minute_provider_service import fetch_bounded_minute_context
 from .intraday_surge_context_service import capture as capture_intraday_surge_context
 from .strategy_candidate_ranking import select as select_intraday_candidates
 from .xiaojie_leader_flow import MODEL_VERSION as XIAOJIE_LEADER_FLOW_MODEL_VERSION, evaluate_snapshot as evaluate_xiaojie_leader_flow_snapshot
+from .longhu_multifactor_shadow import MODEL_VERSION as LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION
+from .xiaojie_leader_flow import QIANLONG_EVIDENCE_LABELS
 from .xiaojie_leader_flow import alert_priority as xiaojie_alert_priority
+from .xiaojie_leader_flow import research_alert_allowed as xiaojie_research_alert_allowed
 from .xiaojie_indicators import evaluate_pool as evaluate_xiaojie_leader_pool
 from .xiaojie_indicators import leader_pool as leader_pool_symbols
 from .xiaojie_reference_repository import (
     ensure_session_trade_limits as ensure_xiaojie_session_trade_limits,
+    latest_board_flow as read_xiaojie_latest_board_flow,
     load_session_reference as load_xiaojie_session_reference,
     persist_trade_limit_rows as persist_xiaojie_trade_limit_rows,
     trade_limits as read_xiaojie_trade_limits,
 )
 from .xiaojie_outcome_settlement import settle_session as settle_xiaojie_session
+from .xiaojie_message_features import features as read_xiaojie_message_features
+from .xiaojie_message_features import latest_instructor_line as xiaojie_chat_line
 from .xiaojie_observation_repository import (
     alerted_count as xiaojie_alerted_count, mark_alerted as mark_xiaojie_alerted,
     record_candidates as record_xiaojie_candidates,
+    session_observations as read_xiaojie_session_observations,
+    unalerted_research_candidates as read_unalerted_xiaojie_candidates,
+)
+from .strategy_confluence import (
+    ConfluenceBook, teacher_confluence_line, teacher_plans_for_day, xiaojie_confluence_line,
 )
 from . import offline_minute_import_service
 from .intraday_cross_section import SharedAsyncSnapshot
@@ -313,6 +333,7 @@ from .free_market_providers import (
     tencent_daily,
     tencent_index_daily,
     tencent_intraday_minutes,
+    tencent_period_bars,
     tencent_order_book_quotes,
 )
 from .order_book_features import aggregate_order_book_observations
@@ -371,6 +392,7 @@ from .intraday_schedule import (
     intraday_effective_scan_interval_seconds,
     intraday_fast_quote_retention_days,
     intraday_high_frequency_window,
+    intraday_morning_fast_window,
     intraday_next_monitor_delay_seconds,
     intraday_realtime_validation_slice,
     intraday_rule_input_retention_days,
@@ -380,11 +402,14 @@ from .intraday_schedule import (
     intraday_super_get_fast_max_in_flight,
     intraday_super_get_fast_max_symbols,
     intraday_watchlist_capacity,
+    intraday_watchlist_max_symbols,
 )
 from .intraday_monitor_service import run_intraday_monitor_loop
 from .market_event_capture import capture as capture_market_events
 from .longhu_auction_capture import capture as capture_longhu_morning_auction
 from .market_event_runtime import run_market_event_capture_loop
+from .auction_pulse import PULSE_REQUESTS, alert_decision, format_alert, summarize_pulse
+from .auction_pulse_runtime import run_auction_pulse_loop
 from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapshot_loop
 from .datasources import runtime as datasource_runtime
 from .datasources.sources.tushare_limits import fetch_limit_cross_section as fetch_tushare_limit_cross_section
@@ -439,6 +464,10 @@ from .intraday_market_context_repository import (
     point_in_time_market_context_batch as read_point_in_time_market_context_batch,
 )
 from .intraday_rule_snapshot_repository import persist_rule_input_snapshot, prune_rule_input_evidence
+from .watch_scan_tape import EvidenceThrottle, persist_scan_tape as persist_watch_scan_tape, tape_record as watch_tape_record
+
+# Raw quote rows and rule-input snapshots per stock: on a signal, else every 30 s.
+watch_evidence_throttle = EvidenceThrottle(float(os.getenv("WATCH_EVIDENCE_MIN_SECONDS", "30")))
 from .intraday_event_retention import ephemeral_signal_retention_days, prune_ephemeral_signal_events
 from .edge_evidence_transfer import (
     JOURNAL_RETENTION_DAYS as EDGE_CHANGE_JOURNAL_RETENTION_DAYS,
@@ -475,8 +504,10 @@ from .runtime_resources import (
 )
 from .edge_evidence_transfer import read_live_session_acceptance
 from .research_storage_admission import ResearchStorageAdmission, governance as research_storage_governance_isolated
+from .owner_storage import owner_runtime_schema_status
+from .owner_deploy_events import owner_deploy_status
 from .async_pool_watchdog import AsyncPoolWatchdogState, watchdog_loop as async_pool_watchdog_loop
-from .health_read_model import DatabaseUnavailableError, HealthDependencies, health_payload as read_health_payload
+from .health_read_model import DatabaseUnavailableError, HealthDependencies, HealthEvidenceCache, health_payload as read_health_payload
 from .paper_order_bridge import STAGE as PAPER_AUTO_STAGE
 from .release_metadata import release_metadata
 from .replay_readiness import historical_replay_readiness
@@ -492,6 +523,7 @@ from .stock_study_readiness_repository import (
 )
 from .intraday_status_read_model import IntradayStatusDependencies, intraday_services_status_payload as read_intraday_services_status_payload, intraday_services_status_payload_async as read_intraday_services_status_payload_async
 from .routers.provider_status import build_provider_status_router
+from .routers.owner_storage import build_owner_storage_router
 from .routers.longhu_reads import build_longhu_reads_router
 from .routers.licensed_stock_api import build_licensed_stock_api_router
 from .routers.longhu_capabilities import build_longhu_capabilities_router
@@ -699,6 +731,32 @@ from .telemetry import (
 from .runtime_executors import ExecutorSaturatedError, run_akshare_blocking, run_database_blocking, runtime_executor_status, shutdown_runtime_executors
 from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
 from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
+from .routers.teacher_review import TeacherReviewRouterDependencies, build_teacher_review_router
+from .routers.watch_reviews import WatchReviewRouterDependencies, build_watch_review_router
+from .watch_daily_review import (
+    WatchReviewDependencies,
+    read_reviews as read_watch_reviews,
+    run_watch_daily_review as run_watch_daily_review_service,
+)
+from .teacher_review_rules import (
+    MODEL_VERSION as TEACHER_REVIEW_MODEL_VERSION,
+    PeriodDivergenceBook as TeacherReviewDivergenceBook,
+    SnapshotTape as TeacherReviewSnapshotTape,
+    TeacherMarketBook,
+    count_sector_limit_ups as teacher_count_sector_limit_ups,
+    divergence_plan_symbols as teacher_divergence_plan_symbols,
+    active_plan as teacher_active_plan,
+    teacher_review_signals,
+)
+from .teacher_review_service import (
+    TeacherReviewDependencies,
+    import_pack as import_teacher_review_pack,
+    roll as roll_teacher_review,
+)
+from .teacher_outcome_review import run as run_teacher_outcome_review
+from .daily_research_digest import run as run_daily_research_digest
+from . import strategy_change_log as strategy_change_log
+from . import teacher_review_repository as teacher_review_repository
 from .l2_research_gate import evaluate_l2_incremental_value
 from .l2_research_repository import latest_l2_evaluation, persist_l2_evaluation
 from .personal_decision_repository import persist_broker_snapshot, persist_trade_plan
@@ -789,6 +847,9 @@ from .tushare_providers import (
 from .universe_history import sync_universe_membership_history
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 db = Database()
 async_db = AsyncDatabase(db)
 _remote_archive_actions = RemoteArchiveActions(
@@ -828,6 +889,11 @@ async def nonessential_high_frequency_capture_allowed() -> tuple[bool, dict[str,
 async def core_intraday_evidence_capture_allowed() -> tuple[bool, dict[str, Any]]:
     """Use the explicit bounded-evidence override for board/minute captures."""
     return await _research_storage_admission.core_intraday_evidence_allowed()
+
+
+async def exempt_intraday_evidence_capture_allowed() -> tuple[bool, dict[str, Any]]:
+    """Board curves and the close minute profile are exempt from the storage stop."""
+    return await _research_storage_admission.exempt_intraday_evidence_allowed()
 
 
 # The one-click post-close refresh has several write-heavy, ordered phases.
@@ -1006,7 +1072,11 @@ def recompute_scorecards(as_of_date: date | None = None) -> dict[str, Any]:
     return recompute_scorecards_isolated(as_of_date, cn_today=cn_today, db=db, readiness=analyst_scorecard_readiness)
 
 
-FEATURE_VERSION = "multi-source-feature-v3"
+# Owner release 20260919T160546 switched recommendation snapshots to the
+# current-session close contract.  The snapshot repository already reads the
+# latest point-in-time bar at ``as_of_date``; keep the version explicit so old
+# v3 snapshots are never silently mixed with the new recommendation model.
+FEATURE_VERSION = "multi-source-feature-v4"
 MODEL_VERSION = "multi-source-direction-v1"
 ANALYST_TEXT_FACTOR_VERSION = DEFAULT_FACTOR_VERSION
 
@@ -1202,6 +1272,11 @@ def recompute_intraday_signal_outcomes(as_of_date: date | None = None) -> dict[s
 def recompute_outcomes_legacy(as_of_date: date | None = None) -> dict[str, Any]:
     """Deprecated compatibility alias; use the isolated outcome service."""
     return recompute_outcomes(as_of_date)
+def evaluate_research_trial_families(connection: Any, as_of_date: date) -> dict[str, int]:
+    from .research_trial_repository import evaluate_outcome_families
+    return evaluate_outcome_families(connection, as_of_date)
+
+
 def recompute_outcomes(as_of_date: date | None = None) -> dict[str, Any]:
     """Compatibility entry point backed by local-only outcome recomputation."""
     return recompute_outcomes_isolated(
@@ -1211,6 +1286,7 @@ def recompute_outcomes(as_of_date: date | None = None) -> dict[str, Any]:
         recompute_intraday_signal_outcomes=recompute_intraday_signal_outcomes,
         settle_post_close_and_leader_rotation_outcomes=settle_post_close_and_leader_rotation_outcomes,
         settle_ledger_outcomes=settle_strategy_ledger_outcomes,
+        evaluate_trial_families=evaluate_research_trial_families,
     )
 
 
@@ -1242,6 +1318,19 @@ def settle_xiaojie_leader_flow_outcomes(as_of_date: date) -> dict[str, Any]:
     """Attach realised outcomes to one session's leader-flow observations."""
     with db.transaction() as connection:
         return settle_xiaojie_session(connection, as_of_date)
+
+
+def settle_xiaojie_recent_sessions(as_of_date: date) -> dict[str, Any]:
+    """Post-close: settle the session and refresh the previous one.
+
+    The previous session's next-open/next-close columns can only be filled
+    once today's bars exist; settling is idempotent, so re-running refreshes.
+    """
+    with db.transaction() as connection:
+        previous = connection.execute(
+            """SELECT max(calendar_date) AS d FROM quant.market_trade_calendar
+                WHERE exchange='SSE' AND is_open AND calendar_date<%s""", (as_of_date,)).fetchone()["d"]
+    return {str(day): settle_xiaojie_leader_flow_outcomes(day) for day in (previous, as_of_date) if day is not None}
 
 
 def _read_session_minute_symbols(as_of_date: date) -> dict[str, Any]:
@@ -1395,28 +1484,20 @@ def tushare_date(value: Any) -> date | None:
     return None
 
 
-def ensure_tushare_instrument(connection: Any, symbol: str) -> None:
-    connection.execute(
-        "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'tushare') ON CONFLICT(symbol) DO NOTHING",
-        (symbol, exchange_for(symbol)),
-    )
+def ensure_tushare_instrument(connection: Any, symbol: str, *, source: str = "tushare",
+                              update_existing: bool = False) -> None:
+    ensure_registry_instrument(connection, symbol, source=source, update_existing=update_existing)
 
 
-def ensure_tushare_instruments(connection: Any, symbols: list[str]) -> None:
+def ensure_tushare_instruments(connection: Any, symbols: list[str], *, source: str = "tushare",
+                               update_existing: bool = False) -> None:
     """Same placeholder rows as the per-symbol call, in one batched statement.
 
     The insert is ``ON CONFLICT DO NOTHING``, so it is idempotent and order
     independent; grouping it changes nothing but the number of round trips,
     which a full-market cross-section pays 5,500 of.
     """
-    distinct = list(dict.fromkeys(symbols))
-    if not distinct:
-        return
-    with connection.cursor() as cursor:
-        cursor.executemany(
-            "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'tushare') ON CONFLICT(symbol) DO NOTHING",
-            [(symbol, exchange_for(symbol)) for symbol in distinct],
-        )
+    ensure_registry_instruments(connection, symbols, source=source, update_existing=update_existing)
 
 
 def offline_data_root() -> Path:
@@ -1629,7 +1710,12 @@ def full_market_daily_control_status() -> dict[str, Any]:
 
 
 async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
-    """Fill same-date adjustment, limit and suspension controls after daily sync."""
+    """Fill same-date controls using the owner's persisted factor task output."""
+    async def persisted_factors(as_of: date, _expected_rows: int) -> Any:
+        return await run_database_blocking(
+            lambda: _read_persisted_factor_controls(as_of), timeout_seconds=30,
+        )
+
     return await sync_full_market_daily_controls_isolated(
         trade_date,
         expected_daily_rows=full_market_daily_row_count,
@@ -1644,7 +1730,13 @@ async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
         record_provider_success=record_provider_success,
         record_provider_failure=record_provider_failure,
         record_provider_api_capability=record_provider_api_capability,
+        read_persisted_factor_controls=persisted_factors,
     )
+
+
+def _read_persisted_factor_controls(trade_date: date) -> dict[str, Any]:
+    with db.transaction() as connection:
+        return read_persisted_factor_controls(connection, trade_date)
 
 
 def upsert_sector_taxonomy(connection: Any, taxonomy_key: str, label: str, provider_key: str, metadata: dict[str, Any]) -> None:
@@ -1695,11 +1787,11 @@ def persist_eastmoney_sector_members(connection: Any, taxonomy_key: str, sector_
                                      available_at: datetime) -> int:
     """Persist a current-snapshot response with its real observation date."""
     def ensure_instrument(connection: Any, symbol: str, row: dict[str, Any]) -> None:
-        connection.execute(
-            "INSERT INTO quant.instruments(symbol,exchange,name,source) VALUES(%s,%s,%s,'akshare') "
-            "ON CONFLICT(symbol) DO UPDATE SET name=coalesce(EXCLUDED.name,quant.instruments.name),updated_at=now()",
-            (symbol, exchange_for(symbol), str(row.get("名称") or row.get("name") or "").strip() or None),
-        )
+        ensure_registry_instruments(connection, [InstrumentRecord(
+            symbol=symbol, exchange=exchange_for(symbol),
+            name=str(row.get("名称") or row.get("name") or "").strip() or None,
+            source="akshare",
+        )], update_existing=True)
 
     return persist_observed_sector_snapshot(
         connection, taxonomy_key, sector_key, rows, "akshare", available_at,
@@ -2000,6 +2092,10 @@ _launch_velocity_state: dict[str, Any] = {}
 #: so a restart cannot reset it.
 XIAOJIE_MAX_ALERTS_PER_SCAN = 5
 XIAOJIE_MAX_ALERTS_PER_SESSION = 40
+#: The board-flow loop stores one point a minute; the 30-second xiaojie scan
+#: rereads it at most this often.
+XIAOJIE_BOARD_FLOW_REFRESH_SECONDS = 30.0
+_xiaojie_board_flow: dict[str, Any] = {"trading_date": None, "read_at": 0.0, "value": None}
 
 
 async def _xiaojie_session_context(trading_date: date) -> dict[str, Any]:
@@ -2042,6 +2138,29 @@ def _with_connection(action: Any) -> Any:
         return action(connection)
 
 
+async def _xiaojie_board_flow_point(trading_date: date, observed_at: datetime) -> dict[str, Any]:
+    """The newest stored licensed board-flow point, cached briefly per process.
+
+    A failed read leaves the sector inputs absent for this scan; it never
+    stops the leader-flow pass.
+    """
+    cached = _xiaojie_board_flow
+    now = monotonic()
+    if (cached["value"] is not None and cached["trading_date"] == trading_date
+            and now - cached["read_at"] < XIAOJIE_BOARD_FLOW_REFRESH_SECONDS):
+        return cached["value"]
+    try:
+        value = await run_database_blocking(
+            lambda: _with_connection(lambda connection: read_xiaojie_latest_board_flow(
+                connection, trading_date, observed_at)),
+            timeout_seconds=15,
+        )
+    except Exception as error:  # noqa: BLE001 - sector inputs are optional per scan
+        return {"status": "unavailable", "reason": safe_error_detail(str(error), 160), "boards": {}}
+    cached.update({"trading_date": trading_date, "read_at": now, "value": value})
+    return value
+
+
 async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
                                   all_a_rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Evaluate the leader pool from this scan's own cross-section.
@@ -2057,27 +2176,53 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
     reference = await _xiaojie_session_context(trading_date)
     if not reference.get("limits"):
         return {"status": "blocked", "reason": "session trade limits unavailable"}
+    board_flow = await _xiaojie_board_flow_point(trading_date, observed_at)
     result = evaluate_xiaojie_leader_pool(
         all_a_rows, limits=reference["limits"], membership=reference["membership"],
         references=reference["references"], observed_at=observed_at,
         ma5_break_state=_xiaojie_ma5_break_state,
         market_volume_baseline=reference.get("market_volume_baseline"),
+        sector_flow=board_flow, membership_taxonomy=reference.get("membership_taxonomy"),
     )
     candidates = result["candidates"]
+    await _refresh_strategy_confluence(trading_date, observed_at, candidates)
     fresh = await run_database_blocking(
         lambda: _with_connection(lambda connection: record_xiaojie_candidates(
             connection, trading_date, observed_at, scan_id, candidates)),
         timeout_seconds=60,
     ) if candidates else []
+    new_candidate_count = len(fresh)
 
-    # A board already locked at the limit cannot be acted on: measured across
-    # 104 observations on 2026-08-27, the 61 found already sealed produced 0
-    # gains, 57 unchanged and 4 losses from the moment they were flagged, while
-    # the 43 found unsealed averaged +0.40%.  They stay recorded as research
-    # evidence but must not consume a scarce alert slot.
-    actionable = [item for item in fresh
-                  if not ((item.get("evidence") or {}).get("board") or {}).get("sealed")]
-    sealed_skipped = len(fresh) - len(actionable)
+    # A policy widening must also reach candidates recorded by an earlier
+    # scan. Only the explicit sealed 潜龙出海 research mode is reread, and
+    # alerted_at makes this idempotent across the 30-second scan loop.
+    pending_qianlong = await run_database_blocking(
+        lambda: _with_connection(lambda connection: read_unalerted_xiaojie_candidates(
+            connection, trading_date, "潜龙出海_swing")),
+        timeout_seconds=30,
+    )
+    known = {(str(item.get("symbol") or ""), str(item.get("mode") or "")) for item in fresh}
+    fresh.extend(
+        item for item in pending_qianlong
+        if (str(item.get("symbol") or ""), str(item.get("mode") or "")) not in known
+    )
+
+    # Ordinary sealed boards remain excluded because there is no longer an
+    # actionable entry/承接 observation.  潜龙出海 is the explicit exception:
+    # the user asked to receive a research reminder even when it is sealed.
+    # The alert text labels it as research-only and this strategy remains at
+    # zero live weight; it never becomes an order candidate.
+    actionable = [item for item in fresh if xiaojie_research_alert_allowed(item)]
+    sealed_skipped = sum(
+        1 for item in fresh
+        if ((item.get("evidence") or {}).get("board") or {}).get("sealed")
+        and not xiaojie_research_alert_allowed(item)
+    )
+    sealed_research_alerts = sum(
+        1 for item in fresh
+        if ((item.get("evidence") or {}).get("board") or {}).get("sealed")
+        and xiaojie_research_alert_allowed(item)
+    )
     # The budget is read from what the table already recorded, so a restart
     # mid-session cannot hand out a fresh allowance.
     sent = await run_database_blocking(
@@ -2098,7 +2243,11 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
                 timeout_seconds=30,
             )
             await deliver_intraday_alert(
-                event_id, _xiaojie_alert_text(candidate, trading_date, reference.get("names")))
+                event_id, _xiaojie_alert_text(
+                    candidate, trading_date, reference.get("names"),
+                    teacher=strategy_confluence.teacher_plan(trading_date, candidate["symbol"]),
+                    chat=await _xiaojie_chat_context(candidate["symbol"], observed_at),
+                ))
             alerted.append((candidate["symbol"], str(candidate.get("mode") or "unclassified")))
         except Exception as error:  # noqa: BLE001 - an alert failure must not end the scan
             alert_errors.append(f"{candidate.get('symbol')}: {safe_error_detail(str(error), 160)}")
@@ -2137,9 +2286,11 @@ async def run_xiaojie_leader_flow(*, scan_id: uuid.UUID, observed_at: datetime,
         "pool_size": result["pool_size"], "evaluated": result["evaluated"],
         "main_sector_count": result["main_sector_count"],
         "regime": result["regime"],
-        "candidates": len(candidates), "new_candidates": len(fresh), "alerted": len(alerted),
+        "candidates": len(candidates), "new_candidates": new_candidate_count, "alerted": len(alerted),
+        "sector_flow": result.get("sector_flow"),
         "actionable_candidates": len(actionable),
         "sealed_skipped": sealed_skipped,
+        "sealed_research_alerts": sealed_research_alerts,
         "alerts_suppressed_by_cap": max(0, len(actionable) - len(alerted)),
         "alerted_modes": sorted({mode for _symbol, mode in alerted}),
         "alerts_sent_this_session": sent + len(alerted),
@@ -2184,22 +2335,113 @@ def _xiaojie_alert_name(symbol: str, names: Mapping[str, str] | None) -> str:
     return f"{name} {symbol}" if name else symbol
 
 
+strategy_confluence = ConfluenceBook()
+TEACHER_CONFLUENCE_REFRESH = timedelta(minutes=5)
+
+
+async def _refresh_strategy_confluence(trading_date: date, observed_at: datetime,
+                                       candidates: list[dict[str, Any]]) -> None:
+    """Keep the cross-strategy book current; failures only drop annotations."""
+    try:
+        if not strategy_confluence.xiaojie_hydrated or strategy_confluence.teacher_refreshed_at is None:
+            rows = await run_database_blocking(
+                lambda: _with_connection(lambda connection: read_xiaojie_session_observations(connection, trading_date)),
+                timeout_seconds=30,
+            )
+            strategy_confluence.hydrate_xiaojie(trading_date, rows)
+        strategy_confluence.note_xiaojie(trading_date, candidates)
+        refreshed = strategy_confluence.teacher_refreshed_at
+        if refreshed is None or observed_at - refreshed >= TEACHER_CONFLUENCE_REFRESH:
+            rows = await run_database_blocking(teacher_review_repository.teacher_watch_rows, db, timeout_seconds=30)
+            strategy_confluence.set_teacher_plans(trading_date, teacher_plans_for_day(rows, trading_date), observed_at)
+    except Exception as error:  # noqa: BLE001 - confluence is an annotation, never a gate
+        print(f"strategy confluence refresh failed: {safe_error_detail(str(error), 200)}")
+
+
+def intraday_alert_text_with_confluence(signal: dict[str, Any], watch: dict[str, Any], quote: dict[str, Any],
+                                        minute_row: dict[str, Any] | None, decision_card_url: str | None = None) -> str:
+    """Watchlist alert text plus same-session 小杰/潜龙出海 confluence for teacher-review plans."""
+    confluence: list[str] = []
+    if str((signal.get("conditions") or {}).get("setup") or "").startswith("teacher_review"):
+        observed = signal.get("observed_at")
+        day = observed.astimezone(ZoneInfo("Asia/Shanghai")).date() if isinstance(observed, datetime) else cn_today()
+        line = xiaojie_confluence_line(strategy_confluence.xiaojie_modes(day, str(signal["symbol"])))
+        confluence = [line] if line else []
+    return intraday_alert_text(signal, watch, quote, minute_row, decision_card_url=decision_card_url,
+                               confluence=confluence)
+
+
+#: How far back the instructor's words on a stock are shown next to an alert.
+XIAOJIE_CHAT_LOOKBACK = timedelta(days=10)
+
+
+async def _xiaojie_chat_context(symbol: str, observed_at: datetime) -> str | None:
+    """The instructor's latest words on ``symbol`` known before this scan, for display only."""
+    try:
+        items = await xiaojie_message_features(symbol=symbol, as_of=observed_at,
+                                               since=observed_at - XIAOJIE_CHAT_LOOKBACK,
+                                               instructor_only=True, limit=5)
+    except Exception:  # noqa: BLE001 - the chat line is optional context
+        return None
+    return xiaojie_chat_line(items, symbol)
+
+
 def _xiaojie_alert_text(candidate: dict[str, Any], trading_date: date,
-                        names: Mapping[str, str] | None = None) -> str:
+                        names: Mapping[str, str] | None = None, *, teacher: Mapping[str, Any] | None = None,
+                        chat: str | None = None) -> str:
     evidence = candidate.get("evidence") or {}
     board = evidence.get("board") or {}
     state = "封板" if board.get("sealed") else ("炸板" if board.get("broken") else "近板")
     pct = evidence.get("pct_change")
     label = _xiaojie_alert_name(candidate["symbol"], names)
+    sealed_research_notice = (
+        "封板，仅作研究提醒，不追板；等待开板/承接确认。\n"
+        if board.get("sealed") and candidate.get("mode") == "潜龙出海_swing" else ""
+    )
+    is_qianlong = candidate.get("mode") == "潜龙出海_swing"
+    qianlong_line = _qianlong_alert_line(evidence) if is_qianlong else ""
+    warning = (evidence.get("qianlong_warning") or {}) if is_qianlong else {}
+    marker = {"red": "🔴【红色预警】", "yellow": "🟡【注意】"}.get(str(warning.get("level") or ""), "")
+    warning_line = (f"{marker}{'；'.join(warning.get('reasons') or [])}\n" if marker else "")
     return (
-        f"【研究观察·小杰龙头】{label} {candidate.get('mode')}\n"
+        f"{marker}【研究观察·小杰龙头】{label} {candidate.get('mode')}\n"
         f"{trading_date} {state} 涨幅 {pct:.2f}%\n" if pct is not None else
-        f"【研究观察·小杰龙头】{label} {candidate.get('mode')}\n{trading_date} {state}\n"
+        f"{marker}【研究观察·小杰龙头】{label} {candidate.get('mode')}\n{trading_date} {state}\n"
     ) + (
+        warning_line + sealed_research_notice + qianlong_line +
         f"研究仓位参考 {(candidate.get('position') or {}).get('target_fraction')}；"
         f"风险标记 {', '.join(candidate.get('risk_flags') or []) or '无'}\n"
-        "仅为研究观察，零实盘权重，不构成交易指令。"
+        + (f"{teacher_confluence_line(teacher)}\n" if teacher else "")
+        + (f"{chat}\n" if chat else "")
+        + "仅为研究观察，零实盘权重，不构成交易指令。"
     )
+
+
+def _qianlong_alert_line(evidence: Mapping[str, Any]) -> str:
+    """One line of the 潜龙 contract: which evidence held, overheat, and the board."""
+    contract = evidence.get("qianlong_evidence") or {}
+    items = contract.get("evidence") or {}
+    parts: list[str] = []
+    if items:
+        marks = {True: "✓", False: "✗", None: "?"}
+        passed = sum(1 for value in items.values() if value is True)
+        parts.append(f"潜龙证据 {passed}/{len(items)}：" + " ".join(
+            f"{QIANLONG_EVIDENCE_LABELS.get(name, name)}{marks.get(value, '?')}" for name, value in items.items()))
+    overheat = evidence.get("qianlong_swing_overheat") or {}
+    if overheat:
+        text = f"过热 {int(overheat.get('count') or 0)} 项"
+        if overheat.get("missing"):
+            text += f"（缺 {len(overheat['missing'])} 项输入）"
+        parts.append(text)
+    inputs = evidence.get("qianlong_inputs") or {}
+    flow = inputs.get("sector_flow") or {}
+    change, rate = inputs.get("sector_day_return_pct"), inputs.get("sector_net_inflow_rate_pct")
+    if flow.get("label") and change is not None:
+        text = f"板块 {flow['label']} {float(change):+.2f}%"
+        if rate is not None:
+            text += f" 净流入率 {float(rate):+.1f}%"
+        parts.append(text)
+    return ("；".join(parts) + "\n") if parts else ""
 
 
 async def intraday_watch_volume_fallback(symbols: list[str]) -> dict[str, float]:
@@ -2324,14 +2566,24 @@ def is_circuit_open_http_error(error: HTTPException) -> bool:
     return error.status_code == 503 and "circuit-open" in str(error.detail)
 
 
-def persist_tencent_intraday_minute_health(completed: int, errors: list[str], latency_ms: int | None = None) -> None:
+def persist_intraday_minute_health(
+    provider_key: str, completed: int, errors: list[str], latency_ms: int | None = None,
+) -> None:
     """Persist one aggregate minute-tape outcome, never one health row per symbol."""
     with db.transaction() as connection:
         if completed:
-            record_provider_success(connection, "tencent_free", TENCENT_INTRADAY_MINUTE_CAPABILITY, completed, latency_ms)
+            record_provider_success(connection, provider_key, TENCENT_INTRADAY_MINUTE_CAPABILITY, completed, latency_ms)
         elif errors:
-            record_provider_failure(connection, "tencent_free", TENCENT_INTRADAY_MINUTE_CAPABILITY,
+            record_provider_failure(connection, provider_key, TENCENT_INTRADAY_MINUTE_CAPABILITY,
                                     " | ".join(errors)[:500], latency_ms)
+
+
+def persist_tencent_intraday_minute_health(completed: int, errors: list[str], latency_ms: int | None = None) -> None:
+    persist_intraday_minute_health("tencent_free", completed, errors, latency_ms)
+
+
+def persist_longhu_intraday_minute_health(completed: int, errors: list[str], latency_ms: int | None = None) -> None:
+    persist_intraday_minute_health("longhuvip", completed, errors, latency_ms)
 
 
 def limit_board_count(tag: Any) -> int:
@@ -2508,19 +2760,29 @@ WATCHLIST_FACTOR_MODEL_VERSION = "qlib-lean-watchlist-v1"
 
 
 async def hydrate_watchlist_history(watchlist_id: uuid.UUID, symbol: str) -> dict[str, Any]:
-    """Fetch bounded history on pool registration and persist factor evidence."""
+    """Fetch bounded history while reading factors from the owner projection."""
     end_date = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     start_date = end_date - timedelta(days=45)
     dated = {"ts_code": symbol, "start_date": start_date.strftime("%Y%m%d"), "end_date": end_date.strftime("%Y%m%d")}
     daily_result = await sync_tushare(TushareSyncRequest(symbols=[symbol], start_date=start_date, end_date=end_date))
     supplemental = await asyncio.gather(
-        stock_study_fetch("watchlist_adj_factor", TushareFetchRequest(api_name="adj_factor", params=dated, max_rows=60)),
         stock_study_fetch("watchlist_daily_basic", TushareFetchRequest(api_name="daily_basic", params=dated, max_rows=60)),
         stock_study_fetch("watchlist_moneyflow", TushareFetchRequest(api_name="moneyflow", params=dated, max_rows=60)),
         stock_study_fetch("watchlist_moneyflow_dc", TushareFetchRequest(api_name="moneyflow_dc", params=dated, max_rows=60)),
     )
-    source_status = {"daily": daily_result, **{item[0]["source"]: item[0] for item in supplemental}}
     factors = await run_database_blocking(watchlist_daily_factors, symbol)
+    source_status = {
+        "daily": daily_result,
+        "owner_persisted_adjustment_factor": {
+            "source": "owner persisted adjustment factor",
+            "api_name": "adj_factor",
+            "provider": "owner_persisted_adjustment_factor",
+            "status": "completed" if factors.get("factor_ready") else "blocked",
+            "received": int(factors.get("bar_count") or 0),
+            "stored": 0,
+        },
+        **{item[0]["source"]: item[0] for item in supplemental},
+    }
     daily_ok = daily_result.get("status") in {"completed", "partial", "unchanged"} and int(factors.get("bar_count") or 0) >= 21
     supplemental_ok = sum(1 for item, _ in supplemental if item.get("status") in {"completed", "partial", "unchanged"})
     status = "completed" if daily_ok and supplemental_ok >= 2 else "partial" if daily_ok else "failed"
@@ -2624,7 +2886,7 @@ def intraday_minute_profile_retention_days() -> int:
 def intraday_minute_profile_max_symbols() -> int:
     """Bound the close capture without silently reducing the normal pool."""
     try:
-        return max(1, min(40, int(os.getenv("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", "40"))))
+        return max(1, min(100, int(os.getenv("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", "40"))))
     except ValueError:
         return 40
 
@@ -2728,6 +2990,32 @@ async def intraday_longhu_minutes(symbol: str) -> list[dict[str, Any]]:
     return current_session_minute_rows(rows, observed_at=datetime.now(timezone.utc))
 
 
+async def intraday_longhu_minutes_batch(symbols: list[str], deadline_seconds: float = 5.5) -> dict[str, Any]:
+    """One executor slot for a whole basket; each symbol keeps the exchange-date guard.
+
+    On the licensed owner this fans out direct vendor calls and also serves
+    ``GET /licensed/longhu/minutes``; on a peer it is one request to that route.
+    """
+    if not longhu_vendor_configured():
+        raise RuntimeError("longhu_not_configured")
+    from .longhu_vendor_source import current_session_minute_rows
+    batch = await run_akshare_blocking(
+        lambda: longhu_intraday_source().stock_minutes_batch(symbols, deadline_seconds=deadline_seconds),
+        timeout_seconds=deadline_seconds + 2.5,
+    )
+    observed_at = datetime.now(timezone.utc)
+    result: dict[str, Any] = {}
+    for symbol, rows in batch.items():
+        if isinstance(rows, list):
+            try:
+                result[symbol] = current_session_minute_rows(rows, observed_at=observed_at)
+            except RuntimeError as error:
+                result[symbol] = str(error)
+        else:
+            result[symbol] = rows
+    return result
+
+
 async def shared_stock_api_call(request: dict[str, Any]) -> dict[str, Any]:
     """Execute or forward one unrestricted documented stock-data call."""
     if not longhu_vendor_configured():
@@ -2738,11 +3026,18 @@ async def shared_stock_api_call(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def intraday_watch_priority_key(row: dict[str, Any]) -> tuple[int, int, str]:
-    """Keep the small verified-minute budget on explicitly enabled research watches."""
+    """Keep the small verified-minute budget on explicitly enabled research watches.
+
+    A next-session teacher relay plan (连板接力) reads minute volume and VWAP in
+    the opening minutes, so it follows research watches but precedes plain ones.
+    """
     metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
     research_enabled = any(isinstance(metadata.get(key), dict) and metadata[key].get("enabled")
                            for key in ("surge_strategy", "reversal_research", "upside_research"))
-    return (0 if research_enabled else 1, -int(row.get("available_quantity") or 0), str(row["symbol"]))
+    teacher = metadata.get("teacher_review") if isinstance(metadata.get("teacher_review"), dict) else {}
+    teacher_relay = teacher.get("status", "active") == "active" and teacher.get("kind") == "relay"
+    rank = 0 if research_enabled else 1 if teacher_relay else 2
+    return (rank, -int(row.get("available_quantity") or 0), str(row["symbol"]))
 
 
 def intraday_order_book_enabled() -> bool:
@@ -2821,11 +3116,12 @@ async def capture_intraday_minute_sessions(symbols: list[str]) -> dict[str, Any]
 async def intraday_tencent_surge_context(
     watches: list[dict[str, Any]], *, mapped_peers: dict[str, dict[str, Any]] | None = None,
     priority_symbols: list[str] | None = None,
+    max_symbols: Callable[[], int] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Compatibility entry point backed by the bounded minute-context service."""
     return await capture_intraday_surge_context(
         watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols, cache=_intraday_tencent_minute_cache,
-        max_symbols=intraday_minute_profile_max_symbols,
+        max_symbols=max_symbols or intraday_minute_profile_max_symbols,
         open_capabilities=open_provider_capabilities,
         capability=TENCENT_INTRADAY_MINUTE_CAPABILITY,
         fetch_minutes=tencent_intraday_minutes,
@@ -2896,6 +3192,8 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                 ),
                 quote_source=intraday_quote_observation_source, json_safe=strategy_json_safe,
                 persist_rule_input_snapshot=persist_rule_input_snapshot,
+                evidence_throttle=watch_evidence_throttle, tape_record=watch_tape_record,
+                persist_scan_tape=persist_watch_scan_tape,
                 attach_volume_time_profile=pure_attach_volume_time_profile, number=intraday_number,
                 aggregate_order_book_observations=aggregate_order_book_observations,
                 generate_signals=generate_intraday_signals,
@@ -2904,6 +3202,9 @@ def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceD
                     rebound_signal=countertrend_rebound_realtime_signal,
                     rebound_failure_signal=countertrend_rebound_failure_reduce_signal,
                     eac_acceptance=intraday_eac_acceptance_assessment,
+                    teacher_review_signal=functools.partial(teacher_review_signals, tape=teacher_review_tape,
+                                                            divergence_book=teacher_divergence_book,
+                                                            market_book=teacher_market_book),
                 ),
                 load_event_state=load_intraday_signal_event_state,
                 persist_generated_signals=persist_generated_signals,
@@ -2976,7 +3277,8 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
         watchlist_capacity=intraday_watchlist_capacity,
         read_watchlists=read_async_intraday_scan_watchlists,
         persist_terminal=persist_intraday_scan_terminal,
-        realtime_session=realtime_market_session_async,
+        # Scans run from the 09:15 call auction (evidence only until 09:25).
+        realtime_session=market_observation_session_async,
         prune_rule_inputs=prune_intraday_rule_input_evidence_if_due,
         retry_pending_alerts=retry_pending_intraday_alerts,
         read_exact_memberships=read_async_exact_watchlist_memberships,
@@ -3033,7 +3335,7 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
         persist_rotation_observations=persist_ten_day_leader_rotation_intraday,
         persist_rotation_scan_status=persist_intraday_rotation_scan_status,
         json_safe=strategy_json_safe,
-        deliver_alert=deliver_intraday_alert, alert_text=intraday_alert_text,
+        deliver_alert=deliver_intraday_alert, alert_text=intraday_alert_text_with_confluence,
         decision_card_url=decision_card_url, run_scan=run_watchlist_scan,
     ))
 
@@ -3152,7 +3454,9 @@ async def drill_intraday_board_stock_candidates(
     events = [event for event in rotation_events
               if str(event.get("taxonomy_key") or "") == "longhu_ths_industry"]
     if not events:
-        return {"status": "idle", "reason": "no licensed board crossed its threshold", "candidates": []}
+        # Held paper positions still need their stops checked on a quiet minute.
+        return {"status": "idle", "reason": "no licensed board crossed its threshold", "candidates": [],
+                "paper": await run_paper_auto_execution([], None)}
     trading_date = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date()
 
     def reference() -> tuple[dict[str, set[str]], dict[str, str]]:
@@ -3162,7 +3466,7 @@ async def drill_intraday_board_stock_candidates(
     membership, names = await run_database_blocking(reference, timeout_seconds=120)
     if not membership:
         return {"status": "blocked", "reason": "no sector membership is known for this session",
-                "boards": len(events), "candidates": []}
+                "boards": len(events), "candidates": [], "paper": await run_paper_auto_execution([], None)}
     rows, _status = await intraday_all_a_snapshot()
     quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
     drilled = drill_board_events(events, membership, quotes)
@@ -3187,7 +3491,7 @@ def paper_auto_execution_enabled() -> bool:
 
 
 async def run_paper_auto_execution(
-    candidates: list[dict[str, Any]], quotes: dict[str, Any],
+    candidates: list[dict[str, Any]], quotes: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Confirm the shortlist, plan against the ledger, and place the orders.
 
@@ -3197,8 +3501,6 @@ async def run_paper_auto_execution(
     """
     if not paper_auto_execution_enabled():
         return {"status": "disabled", "reason": "QUANT_PAPER_AUTO_EXECUTION_ENABLED is not set"}
-    if not candidates:
-        return {"status": "idle", "reason": "no candidates this pass"}
     from .board_flow_drill import select_for_delivery
     from .large_order_confirmation import confirm_candidates
     from .paper_auto_execution import plan_paper_orders
@@ -3208,30 +3510,47 @@ async def run_paper_auto_execution(
     from .longhu_vendor_source import intraday_source
 
     def already_delivered() -> list[str]:
+        # The drill's delivery key is carried on each placed order; comparing
+        # it with the order's own signal_key never matched, so a hot board's
+        # leader was re-confirmed against the gateway every minute.
         with db.transaction() as connection:
             rows = connection.execute(
-                """SELECT DISTINCT signal_key FROM quant.intraday_signal_events
-                    WHERE stage=%s AND observed_at::date
-                          = (now() AT TIME ZONE 'Asia/Shanghai')::date""",
+                """SELECT DISTINCT conditions->>'delivery_key' AS delivery_key
+                     FROM quant.intraday_signal_events
+                    WHERE stage=%s AND conditions ? 'delivery_key'
+                      AND observed_at::date = (now() AT TIME ZONE 'Asia/Shanghai')::date""",
                 (PAPER_AUTO_STAGE,),
             ).fetchall()
-            return [str(dict(row)["signal_key"]) for row in rows]
+            return [str(dict(row)["delivery_key"]) for row in rows if dict(row)["delivery_key"]]
 
-    delivered = await run_database_blocking(already_delivered, timeout_seconds=60)
-    chosen = select_for_delivery(candidates, delivered)
-    if not chosen["selected"]:
-        return {"status": "idle", "reason": "nothing new within the session budget",
-                "suppressed_repeat": chosen["suppressed_repeat"]}
-    source = intraday_source()
-    confirmed = await run_akshare_blocking(
-        lambda: confirm_candidates(chosen["selected"], source.raw_call), timeout_seconds=90)
+    # Only inflow leaders can be bought; an outflow name would spend the
+    # session budget and a gateway confirmation before the planner drops it.
+    buyable = [candidate for candidate in candidates if str(candidate.get("direction") or "inflow") == "inflow"]
+    confirmed: list[dict[str, Any]] = []
+    suppressed_repeat = 0
+    if buyable:
+        delivered = await run_database_blocking(already_delivered, timeout_seconds=60)
+        chosen = select_for_delivery(buyable, delivered)
+        suppressed_repeat = chosen["suppressed_repeat"]
+        if chosen["selected"]:
+            source = intraday_source()
+            confirmed = await run_akshare_blocking(
+                lambda: confirm_candidates(chosen["selected"], source.raw_call), timeout_seconds=90)
 
     def read_account() -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
         with db.transaction() as connection:
             account = connection.execute(
                 "SELECT cash FROM quant.paper_accounts WHERE account_key='default'").fetchone()
+            # The stop a strategy set at entry travels with the holding, so an
+            # exit is still evaluated on a pass where that strategy is silent.
             positions = connection.execute(
-                "SELECT symbol,quantity,sellable_quantity,average_cost FROM quant.paper_positions"
+                """SELECT p.symbol,p.quantity,p.sellable_quantity,p.average_cost,p.buy_date,
+                          (SELECT (d.evidence->>'stop_loss_pct')::numeric
+                             FROM quant.paper_decisions d
+                            WHERE d.symbol=p.symbol AND d.direction=1 AND d.status='accepted'
+                              AND jsonb_typeof(d.evidence->'stop_loss_pct')='number'
+                            ORDER BY d.decision_at DESC LIMIT 1) AS entry_stop_loss_pct
+                     FROM quant.paper_positions p WHERE p.quantity>0"""
             ).fetchall()
             return (dict(account) if account else None,
                     {str(dict(row)["symbol"]): dict(row) for row in positions})
@@ -3239,9 +3558,16 @@ async def run_paper_auto_execution(
     account, positions = await run_database_blocking(read_account, timeout_seconds=60)
     if account is None:
         return {"status": "blocked", "reason": "no paper account is configured"}
+    if not confirmed and not positions:
+        return {"status": "idle", "reason": "no new candidates and no open paper positions",
+                "suppressed_repeat": suppressed_repeat}
+    if quotes is None:
+        rows, _status = await intraday_all_a_snapshot()
+        quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
     cash = float(account["cash"])
     plan = plan_paper_orders(confirmed, positions, quotes,
-                             equity=PAPER_ACCOUNT_EQUITY, cash=cash)
+                             equity=PAPER_ACCOUNT_EQUITY, cash=cash,
+                             session_date=datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date())
     if not plan["buys"] and not plan["sells"]:
         return {"status": "no_orders", "skipped": plan["skipped"][:4], "cash": cash}
     observed_at = datetime.now(timezone.utc)
@@ -3298,7 +3624,7 @@ async def intraday_board_flow_curve_loop() -> None:
     """Capture once per SSE board-observation minute without catch-up bursts."""
     await run_intraday_board_curve_runtime_loop(IntradayBoardCurveRuntimeDependencies(
         database=db, run_database=run_database_blocking, board_session=intraday_board_curve_session_async,
-        storage_allowed=core_intraday_evidence_capture_allowed, capture=capture_intraday_board_flow_curve,
+        storage_allowed=exempt_intraday_evidence_capture_allowed, capture=capture_intraday_board_flow_curve,
         curve_retention_days=intraday_board_curve_retention_days,
         rotation_retention_days=intraday_board_rotation_retention_days,
         run_loop=intraday_board_curve_runner.run_loop,
@@ -3319,6 +3645,10 @@ def ten_day_leader_rotation_automation_enabled() -> bool:
 
 def daily_summary_automation_enabled() -> bool:
     return os.getenv("DAILY_SUMMARY_AUTOMATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def daily_summary_feishu_enabled() -> bool:
+    return os.getenv("DAILY_SUMMARY_FEISHU_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def sse_calendar_open(calendar_date: date) -> bool:
@@ -3407,11 +3737,11 @@ def build_daily_strategy_summary(exchange_date: date) -> dict[str, Any]:
 
 
 async def run_daily_strategy_summary(exchange_date: date) -> dict[str, Any]:
-    """Persist the frontend-only daily summary through its runtime adapter."""
+    """Persist and deliver the evidence-only daily summary through its runtime adapter."""
     return await run_daily_strategy_summary_runtime(exchange_date, _daily_strategy_summary_runtime_dependencies())
 
 async def daily_strategy_summary_loop() -> None:
-    """Run the frontend-only daily summary scheduler through its adapter."""
+    """Run the 15:05 Asia/Shanghai daily summary scheduler through its adapter."""
     await run_daily_strategy_summary_runtime_loop(_daily_strategy_summary_runtime_dependencies())
 
 
@@ -3424,6 +3754,7 @@ def _daily_strategy_summary_runtime_dependencies() -> DailyStrategySummaryRuntim
         calendar_open=sse_calendar_open_async,
         now=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")),
         scheduler=daily_strategy_summary_scheduler,
+        post_text=post_feishu_alert_text if daily_summary_feishu_enabled() else None,
     )
 
 
@@ -3431,8 +3762,10 @@ async def intraday_monitor_loop(interval_seconds: int) -> None:
     """Run only during continuous auction with a bounded adaptive cadence."""
     await run_intraday_monitor_loop(
         interval_seconds,
-        realtime_session=realtime_market_session_async,
-        high_frequency_window=intraday_high_frequency_window,
+        realtime_session=market_observation_session_async,
+        # No Tushare minute-validation slice in the 5 s morning window either:
+        # 4 symbols x 12 scans a minute would approach its 60/min budget.
+        high_frequency_window=lambda local: intraday_high_frequency_window(local) or intraday_morning_fast_window(local),
         next_delay_seconds=intraday_next_monitor_delay_seconds,
         make_scan_request=lambda limit, offset: IntradayScanRequest(
             realtime_validation_limit=limit,
@@ -3499,7 +3832,7 @@ async def intraday_minute_profile_capture_loop() -> None:
     await run_intraday_minute_profile_runtime_loop(IntradayMinuteProfileRuntimeDependencies(
         database=db, run_database=run_database_blocking,
         max_symbols=intraday_minute_profile_max_symbols, watch_priority_key=intraday_watch_priority_key,
-        calendar_open=sse_calendar_open_async, storage_allowed=core_intraday_evidence_capture_allowed,
+        calendar_open=sse_calendar_open_async, storage_allowed=exempt_intraday_evidence_capture_allowed,
         capture=capture_intraday_minute_sessions, run_loop=intraday_minute_profile_runner.run_loop,
     ))
 
@@ -3514,7 +3847,7 @@ async def market_event_capture_loop() -> None:
         return await run_database_blocking(persist_market_events, provider, rows, timeout_seconds=60)
 
     async def open_session(now: datetime) -> bool:
-        active, _reason = await realtime_market_session_async(now=now)
+        active, _reason = await market_observation_session_async(now=now)
         return active
 
     async def all_symbols() -> Sequence[str]:
@@ -3550,6 +3883,89 @@ async def market_event_capture_loop() -> None:
     )
 
 
+def auction_pulse_enabled() -> bool:
+    return os.getenv("AUCTION_PULSE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def auction_pulse_interval_seconds() -> float:
+    try:
+        return max(1.0, min(30.0, float(os.getenv("AUCTION_PULSE_INTERVAL_SECONDS", "2"))))
+    except (TypeError, ValueError):
+        return 2.0
+
+
+def auction_pulse_alert_cooldown_seconds() -> int:
+    try:
+        return max(5, min(300, int(os.getenv("AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS", "30"))))
+    except (TypeError, ValueError):
+        return 30
+
+
+async def capture_auction_pulse(observed_at: datetime, state: dict[str, Any]) -> dict[str, Any]:
+    """Read Longhu's bounded opening-auction endpoints and emit cooled evidence."""
+    if not longhu_vendor_configured():
+        return {"status": "skipped", "reason": "longhu_not_configured", "stored": 0}
+    envelopes: dict[str, Any] = {}
+
+    async def call_one(spec: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
+        request = {"target": spec["target"], "params": dict(spec["params"])}
+        try:
+            result = await shared_stock_api_call(request)
+            pages = result.get("pages") if isinstance(result, Mapping) else []
+            payloads = [page.get("payload") for page in pages if isinstance(page, Mapping) and isinstance(page.get("payload"), Mapping)]
+            return str(spec["name"]), {"action": spec["action"], "payload": {"pages": payloads}}, None
+        except Exception as error:  # noqa: BLE001 - one source must not hide the others
+            return str(spec["name"]), None, f"{type(error).__name__}: {str(error)[:180]}"
+
+    results = await asyncio.gather(*(call_one(spec) for spec in PULSE_REQUESTS))
+    source_status: dict[str, Any] = {}
+    for name, envelope, error in results:
+        if envelope is not None:
+            envelopes[name] = envelope
+            pages = envelope["payload"].get("pages") or []
+            source_status[name] = {"status": "completed", "action": envelope["action"], "pages": len(pages)}
+        else:
+            source_status[name] = {"status": "failed", "error": error}
+    summary = summarize_pulse(envelopes, observed_at)
+    summary["source_status"] = source_status
+    stored = await run_database_blocking(
+        persist_timed_observations, "longhuvip", "opening_auction_pulse", [{
+            "effective_at": observed_at.isoformat(), "available_at": observed_at.isoformat(),
+            "ts_code": None, "exchange_window": "opening_call_auction", "summary": summary,
+            "source_status": source_status, "research_only": True, "live_effect": "none",
+        }], timeout_seconds=20,
+    )
+    decision = alert_decision(
+        summary, state.get("last_summary"), now=observed_at,
+        last_alert_at=state.get("last_alert_at"), cooldown_seconds=auction_pulse_alert_cooldown_seconds(),
+    )
+    delivery: dict[str, Any] = {"status": "suppressed", "reason": decision["reason"]}
+    if decision["should_send"]:
+        delivery = await post_feishu_alert_text(format_alert(summary))
+        if delivery.get("status") == "sent":
+            state["last_alert_at"] = observed_at
+    state["last_summary"] = summary
+    return {
+        "status": "completed" if envelopes else "partial", "stored": stored,
+        "sources": source_status, "alert": {**decision, "delivery": delivery},
+        "research_only": True, "live_effect": "none",
+    }
+
+
+async def auction_pulse_loop() -> None:
+    state: dict[str, Any] = {"last_summary": None, "last_alert_at": None}
+
+    async def session_open(now: datetime) -> bool:
+        active, _reason = await market_observation_session_async(now=now)
+        return active
+
+    await run_auction_pulse_loop(
+        interval_seconds=auction_pulse_interval_seconds(),
+        capture=lambda observed_at: capture_auction_pulse(observed_at, state),
+        session_open=session_open,
+    )
+
+
 def _datasource_collector_deps() -> Any:
     """Production adapters for the data-source collectors (see app.datasources.runtime)."""
     from .fuyao_provider import configured as fuyao_configured
@@ -3565,7 +3981,7 @@ def _datasource_collector_deps() -> Any:
 
 def _datasource_loops() -> dict[str, Callable[[], Any]]:
     async def session_open(now: datetime) -> bool:
-        active, _reason = await realtime_market_session_async(now=now)
+        active, _reason = await market_observation_session_async(now=now)
         return active
 
     collector = _datasource_collector_deps()
@@ -3577,6 +3993,77 @@ def _datasource_loops() -> dict[str, Callable[[], Any]]:
 async def public_evidence_capture_loop() -> None:
     """News, investor Q&A, the anomaly tape, rankings and live sentiment."""
     await _datasource_loops()["public_evidence_capture"]()
+
+
+async def storage_tiering_mover_loop() -> None:
+    """Hot -> stock_cold copy with overlap, verified hot deletion; inert until the owner grants.
+
+    Each pass runs on its own thread (not the shared DB executor) for at most
+    eight minutes and only outside 09:00-15:45 on trading days.  A report is
+    stored when rows moved, the status changed, or every 30 minutes.
+    """
+    from .storage_tiering_mover import StorageTieringMover, persist_run_report
+    mover = StorageTieringMover(db)
+    last_status, last_saved = None, 0.0
+    while True:
+        delay = 900.0
+        try:
+            report = await asyncio.to_thread(mover.run_pass, budget_seconds=480.0)
+            moved = bool(report.get("copied_rows") or report.get("deleted_rows"))
+            now_monotonic = asyncio.get_running_loop().time()
+            if moved or report.get("status") != last_status or now_monotonic - last_saved >= 1800:
+                await asyncio.to_thread(persist_run_report, db, report)
+                last_status, last_saved = report.get("status"), now_monotonic
+            if moved or (report.get("status") in {"completed", "partial"} and not report.get("complete")):
+                delay = 60.0
+        except Exception as error:  # noqa: BLE001 - the next pass retries
+            print(f"storage tiering pass failed: {safe_error_detail(str(error), 300)}")
+        await asyncio.sleep(delay)
+
+
+async def peer_close_research_loop() -> None:
+    """Teacher roll, watch review and 小杰 settlement - the peer's own close stages.
+
+    The owner runs the full close pipeline; these three belong to the peer and
+    only ever ran by hand until this loop (see ``peer_close_research``).
+    """
+    from .peer_close_research import daily_bars_ready, run_due, target_session
+
+    async def teacher_roll(trade_date: date) -> dict[str, Any]:
+        if not teacher_review_enabled():
+            return {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
+        return await roll_teacher_review(trade_date, _teacher_review_dependencies())
+
+    async def teacher_outcome(trade_date: date) -> dict[str, Any]:
+        if not teacher_review_enabled():
+            return {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
+        return await run_teacher_outcome_review(trade_date, _teacher_review_dependencies())
+
+    stages = {
+        "teacher_review_roll": teacher_roll,
+        "teacher_outcome_review": teacher_outcome,
+        "watch_daily_review": lambda trade_date: run_watch_daily_review(trade_date),
+        "xiaojie_outcomes": lambda trade_date: run_database_blocking(
+            settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
+        "daily_digest": lambda trade_date: run_daily_research_digest(
+            trade_date, _teacher_review_dependencies()),
+    }
+
+    async def record(name: str, trade_date: date, action: Callable[[], Any]) -> Any:
+        return await record_stage_with_receipt(
+            name, trade_date, action, db=db, run_database_blocking=run_database_blocking,
+            safe_error_detail=safe_error_detail)
+
+    while True:
+        try:
+            now = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
+            trade_date = await target_session(now, sse_calendar_open_async)
+            if trade_date is not None and await run_database_blocking(
+                    lambda: daily_bars_ready(db, trade_date), timeout_seconds=30):
+                await run_due(trade_date, stages=stages, record=record)
+        except Exception as error:  # noqa: BLE001 - the next tick retries
+            print(f"peer close research failed: {safe_error_detail(str(error), 300)}")
+        await asyncio.sleep(600)
 
 
 async def post_close_public_archive_loop() -> None:
@@ -3593,7 +4080,7 @@ async def all_a_level1_snapshot_capture_loop() -> None:
 
     async def capture() -> dict[str, Any]:
         async def session_open(now: datetime) -> bool:
-            active, _reason = await realtime_market_session_async(now=now)
+            active, _reason = await market_observation_session_async(now=now)
             return active
 
         return await capture_level1_snapshot(
@@ -3728,7 +4215,7 @@ async def sync_strategy_index_context(as_of_date: date) -> dict[str, Any]:
         as_of_date, STRATEGY_INDEX_SYMBOLS,
         prefer_public=longhu_vendor_configured(),
         primary_request=lambda symbol, start, end: TushareFetchRequest(
-            api_name="index_daily", provider="primary",
+            api_name="index_daily", provider="super_get",
             params={"ts_code": symbol, "start_date": start.strftime("%Y%m%d"),
                     "end_date": end.strftime("%Y%m%d")},
             max_rows=60, force_refresh=True,
@@ -3750,19 +4237,48 @@ async def intraday_surge_context(
     licensed_status: dict[str, Any] = {
         "provider_status": "disabled", "provider": "longhuvip", "reason": "longhu_not_configured",
     }
-    if longhu_vendor_configured():
-        licensed_features, licensed_status = await capture_intraday_surge_context(
+    # Teacher-review plans take VWAP/volume/5-minute return from the list-quote
+    # snapshot tape.  Only an operator-set TEACHER_REVIEW_MINUTE_EXTRA adds
+    # per-stock minute requests for them, with its own budget, so every other
+    # strategy keeps the minute share it had before.
+    teacher_extra = teacher_review_minute_extra()
+    teacher_symbols = (teacher_review_minute_symbols(watches, datetime.now(timezone.utc))[:teacher_extra]
+                       if teacher_extra else [])
+    priority_symbols = list(dict.fromkeys([*(priority_symbols or []), *teacher_symbols]))
+
+    def minute_budget() -> int:
+        return intraday_minute_profile_max_symbols() + len(teacher_symbols)
+
+    def licensed_budget() -> int:
+        # The owner batch route carries the whole basket in one request (the
+        # owner fans out on its own pool), so every watched stock gets real
+        # minutes; the old 36-symbol budget left the last 10 watches without a
+        # 5-minute trend.  Watched stocks come first in the request order.
+        return max(minute_budget(), min(len(watches), intraday_watchlist_max_symbols()))
+
+    async def licensed_context() -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+        if not longhu_vendor_configured():
+            return licensed_features, licensed_status
+        return await capture_intraday_surge_context(
             watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols,
-            cache=_intraday_longhu_minute_cache, max_symbols=intraday_minute_profile_max_symbols,
+            cache=_intraday_longhu_minute_cache, max_symbols=licensed_budget,
             open_capabilities=open_provider_capabilities, capability="intraday_minute",
             fetch_minutes=intraday_longhu_minutes, minute_features=intraday_minute_features,
-            persist_health=lambda *_args: None, run_database=run_database_blocking,
+            persist_health=persist_longhu_intraday_minute_health, run_database=run_database_blocking,
             safe_error=safe_error_detail, handled_errors=(Exception,),
             provider_key="longhuvip", feature_source="longhuvip_minute",
-            check_provider_circuit=False,
+            check_provider_circuit=False, fetch_minutes_batch=intraday_longhu_minutes_batch,
         )
-    fallback_features, fallback_status = await intraday_tencent_surge_context(
-        watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols,
+
+    # Independent providers: waiting for Longhu before starting Tencent used to
+    # add both deadlines to the first scan of a session.
+    (licensed_features, licensed_status), (fallback_features, fallback_status), divergence_status = await asyncio.gather(
+        licensed_context(),
+        intraday_tencent_surge_context(
+            watches, mapped_peers=mapped_peers, priority_symbols=priority_symbols, max_symbols=minute_budget,
+        ),
+        # Teacher context (30/60-minute divergence, 09:25 auction, sector limit-ups) rides the same wait; never raises.
+        refresh_teacher_context(watches),
     )
     return {**fallback_features, **licensed_features}, {
         "provider_status": (
@@ -3774,6 +4290,7 @@ async def intraday_surge_context(
         "licensed_completed": sorted(licensed_features),
         "fallback_completed": sorted(set(fallback_features) - set(licensed_features)),
         "policy": "longhuvip_primary_tencent_fallback",
+        "teacher_context": divergence_status,
     }
 
 
@@ -4096,12 +4613,34 @@ def fuyao_snapshot_quotes(rows: list[dict[str, Any]], exchange_date: date) -> li
     return _market_snapshot_actions.fuyao_quotes(rows, exchange_date, intraday_quote_from_fuyao)
 
 
+async def akshare_all_a_snapshot_rows(exchange_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch the bounded Tencent/AKShare all-A fallback off the event loop."""
+    started_at = asyncio.get_running_loop().time()
+    raw_rows = await run_akshare_blocking(akshare_tencent_all_a_spot, timeout_seconds=60)
+    rows = normalize_tencent_all_a_spot_rows(raw_rows, exchange_date)
+    return rows, {
+        "status": "fresh" if rows else "empty",
+        "age_seconds": 0.0,
+        "source": "akshare_tencent_all_a_snapshot",
+        "scope": "all_a_cross_section",
+        "cross_sectional": True,
+        "semantics": "public_tencent_price_volume_turnover_snapshot_no_exchange_timestamp",
+        "raw_rows": len(raw_rows),
+        "matched_rows": len(rows),
+        "latency_ms": round((asyncio.get_running_loop().time() - started_at) * 1000),
+    }
+
+
 def realtime_market_session(api_name: str | None = None, now: datetime | None = None) -> tuple[bool, str]:
     return read_realtime_market_session(db, api_name, now)
 
 
 async def realtime_market_session_async(api_name: str | None = None, now: datetime | None = None) -> tuple[bool, str]:
     return await read_async_realtime_market_session(async_db, api_name, now)
+
+
+async def market_observation_session_async(now: datetime | None = None) -> tuple[bool, str]:
+    return await read_async_market_observation_session(async_db, now)
 
 
 def quote_is_for_exchange_date(quote: dict[str, Any], exchange_date: date) -> bool:
@@ -4133,11 +4672,12 @@ def finalize_market_snapshot(
     refresh_error: str | None,
     refresh_skipped: str | None,
     fuyao_status: dict[str, Any],
+    fallback_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _market_snapshot_actions.finalize(
         request, observed_at, exchange_date, symbols, minimum_universe, minimum_coverage,
         licensed_providers, public_quote_settings, planned_public_requests, refresh_error,
-        refresh_skipped, fuyao_status,
+        refresh_skipped, fuyao_status, fallback_status,
     )
 
 
@@ -4147,6 +4687,7 @@ async def build_market_snapshot(request: MarketSnapshotRequest) -> dict[str, Any
         request,
         run_database=run_database_blocking,
         fetch_fuyao_all_a=fuyao_all_a_snapshot_rows,
+        fetch_akshare_all_a=akshare_all_a_snapshot_rows,
         provider_capabilities=open_provider_capabilities,
         quote_mapper=intraday_quote_from_fuyao,
         thresholds=market_snapshot_thresholds,
@@ -4189,6 +4730,318 @@ async def _post_close_core_symbols(limit: int) -> list[str]:
     return await read_async_limited_core_symbols(async_db, limit)
 
 
+# Teacher plans read their minute-style values from the list-quote snapshot
+# tape (one sample per scan), so by default they add no per-stock minute
+# requests.  A positive value restores extra per-stock minute budget for them.
+TEACHER_REVIEW_MINUTE_EXTRA_MAX = 100
+teacher_review_tape = TeacherReviewSnapshotTape()
+teacher_divergence_book = TeacherReviewDivergenceBook()
+TEACHER_DIVERGENCE_MAX_SYMBOLS = 10
+teacher_market_book = TeacherMarketBook()
+_teacher_auction_attempt: dict[str, datetime] = {}
+
+
+def _teacher_plans_today(watches: list[dict[str, Any]], observed_at: datetime) -> list[tuple[str, dict[str, Any]]]:
+    return [(str(watch["symbol"]).upper(), plan) for watch in watches
+            if (plan := teacher_active_plan(watch, observed_at)) is not None]
+
+
+async def refresh_teacher_auction(watches: list[dict[str, Any]]) -> dict[str, Any]:
+    """09:25 opening-auction facts for today's teacher plans (data plane: Fuyao auction snapshot).
+
+    One request (<=100 codes) per attempt, at most every 30 s, until the
+    snapshot is final; then the book serves it all day.  Never raises.
+    """
+    from .fuyao_provider import fetch as fetch_fuyao
+    from .market_event_capture import normalize_fuyao_auction
+    try:
+        observed_at = datetime.now(timezone.utc)
+        local = observed_at.astimezone(ZoneInfo("Asia/Shanghai"))
+        if not (time(9, 25, 5) <= local.time() <= time(15, 0)):
+            return {"status": "outside_window"}
+        plans = dict(_teacher_plans_today(watches, observed_at))
+        missing = teacher_market_book.auction_missing(list(plans), observed_at)[:100]
+        if not missing:
+            return {"status": "fresh"}
+        last = _teacher_auction_attempt.get("at")
+        if last is not None and (observed_at - last).total_seconds() < 30:
+            return {"status": "throttled", "missing": len(missing)}
+        _teacher_auction_attempt["at"] = observed_at
+        data = await asyncio.wait_for(fetch_fuyao("a_share_auction_snapshot", {"thscodes": ",".join(missing)}), timeout=4)
+        stored, rejected = [], {}
+        for event in normalize_fuyao_auction(data, observed_at):
+            raw = event["raw"]
+            price = _optional_float(raw.get("auction_price"))
+            unmatched = _optional_float(raw.get("auction_unmatched"))
+            # The snapshot carries no date: it is today's only when it is final and its
+            # pre-close equals the plan's previous close (yesterday's row has the day before).
+            previous_close = _optional_float(((plans.get(event["ts_code"]) or {}).get("levels") or {}).get("close"))
+            pre_close = _optional_float(raw.get("pre_close_price"))
+            if str(raw.get("data_status") or "") != "final" or previous_close is None or pre_close is None \
+                    or abs(pre_close - previous_close) > max(0.011, previous_close * 0.001):
+                rejected[event["ts_code"]] = f"{raw.get('data_status')}:pre_close={pre_close} vs {previous_close}"
+                continue
+            final = True
+            teacher_market_book.store_auction(event["ts_code"], observed_at, {
+                "amount": _optional_float(raw.get("auction_amount")), "price": price,
+                "pct": _optional_float(raw.get("auction_pct")), "open": _optional_float(raw.get("open_price")),
+                "volume_lot": _optional_float(raw.get("auction_volume")),
+                "seal_amount": round(unmatched * 100 * price, 2) if unmatched is not None and price else None,
+                "turnover_pct": _optional_float(raw.get("auction_turnover_pct")),
+                "status": raw.get("data_status"), "final": final, "source": "fuyao_auction_0925",
+            })
+            stored.append(event["ts_code"])
+        return {"status": "completed" if stored else "not_ready", "stored": len(stored), "requested": len(missing),
+                "rejected": dict(list(rejected.items())[:5]), "rejected_count": len(rejected)}
+    except Exception as error:  # noqa: BLE001 - the proxy stays in force; the scan never waits on this
+        return {"status": "failed", "error": safe_error_detail(str(error), 200)}
+
+
+async def refresh_teacher_sectors(watches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Per-sector limit-up counts for today's teacher plans from the stored limit-up pool (≤ once a minute)."""
+    from .teacher_review_repository import latest_limit_up_pool
+    try:
+        observed_at = datetime.now(timezone.utc)
+        sectors = sorted({str((plan.get("params") or {}).get("sector"))
+                          for _symbol, plan in _teacher_plans_today(watches, observed_at)
+                          if (plan.get("params") or {}).get("sector")})
+        if not sectors:
+            return {"status": "no_sector_plans"}
+        refreshed = teacher_market_book.sector_refreshed_at
+        if refreshed is not None and (observed_at - refreshed).total_seconds() < 5 \
+                and refreshed.astimezone(ZoneInfo("Asia/Shanghai")).date() == observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date():
+            return {"status": "fresh"}
+        day_start = datetime.combine(observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date(), time(0),
+                                     tzinfo=ZoneInfo("Asia/Shanghai"))
+        snapshot_at, rows = await run_database_blocking(
+            lambda: latest_limit_up_pool(db, since=day_start), timeout_seconds=10)
+        counts = teacher_count_sector_limit_ups(rows, sectors)
+        teacher_market_book.store_sectors(observed_at, snapshot_at, counts)
+        return {"status": "completed", "snapshot_at": str(snapshot_at), "counts": {k: v["count"] for k, v in counts.items()}}
+    except Exception as error:  # noqa: BLE001 - an unknown count only keeps the sector gate closed
+        return {"status": "failed", "error": safe_error_detail(str(error), 200)}
+
+
+async def refresh_teacher_context(watches: list[dict[str, Any]]) -> dict[str, Any]:
+    divergence, auction, sectors, tape = await asyncio.gather(
+        refresh_teacher_divergence(watches), refresh_teacher_auction(watches), refresh_teacher_sectors(watches),
+        rehydrate_teacher_tape())
+    return {"divergence": divergence, "auction": auction, "sectors": sectors, "tape": tape}
+
+
+_teacher_tape_rehydration: dict[str, Any] = {}
+
+
+async def rehydrate_teacher_tape() -> dict[str, Any]:
+    """Once per process and day: reload the snapshot tape from the stored watch tape.
+
+    A restart (a deploy, or the session guard after a database stall) used to
+    empty the in-memory tape, so plans without minute context had no 5-minute
+    trend for five minutes and raised "data missing".  Never raises.
+
+    A restart *before* the open reads an empty 40-minute window, so the reload
+    only settles once it has actually found samples; otherwise it retries on the
+    next scan, still behind the 60-second throttle.  Latching that zero for the
+    whole session left the second-choice source for ``not_falling`` (and the
+    5-minute trend behind it) empty until the next restart.
+    """
+    from .teacher_review_rules import trading_lookback_start
+    from .watch_scan_tape import read_tape_prices
+    now = datetime.now(timezone.utc)
+    day = now.astimezone(ZoneInfo("Asia/Shanghai")).date()
+    state = _teacher_tape_rehydration
+    if state.get("day") == day and state.get("loaded"):
+        return {"status": "done", "loaded": state.get("loaded")}
+    last = state.get("attempt_at")
+    if last is not None and (now - last).total_seconds() < 60:
+        return {"status": "throttled"}
+    state["attempt_at"] = now
+    since = trading_lookback_start(now, 40 * 60)
+
+    def read() -> list[tuple[datetime, str, float]]:
+        with db.transaction() as connection:
+            return read_tape_prices(connection, since, now)
+
+    try:
+        samples = await run_database_blocking(read, timeout_seconds=15)
+        loaded = teacher_review_tape.rehydrate(samples)
+    except Exception as error:  # noqa: BLE001 - the tape rebuilds from live scans meanwhile
+        return {"status": "failed", "error": safe_error_detail(str(error), 200)}
+    state.update({"day": day, "loaded": loaded})
+    return {"status": "completed", "samples": len(samples), "loaded": loaded, "since": since.isoformat()}
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def longhu_period_bars(symbol: str, period: str, count: int = 120) -> list[dict[str, Any]]:
+    """Data plane: Longhu 30/60-minute K-line (history plus the forming bar)."""
+    if not longhu_vendor_configured():
+        raise RuntimeError("longhu_not_configured")
+    return await run_akshare_blocking(
+        lambda: longhu_intraday_source().stock_period_bars(symbol, period, count), timeout_seconds=8,
+    )
+
+
+async def refresh_teacher_divergence(watches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Intraday 30/60-minute divergence for today's divergence plans, at most once a minute.
+
+    One blocking-executor slot runs the few K-line reads in sequence under a
+    4-second budget; anything unfinished is retried on the next scan and the
+    rules keep the previous (or pre-session) result meanwhile.  Never raises.
+    """
+    from .teacher_review_plan import divergence_status
+    from .teacher_review_service import period_bars_through
+    try:
+        if not longhu_vendor_configured():
+            return {"status": "disabled"}
+        observed_at = datetime.now(timezone.utc)
+        due = teacher_divergence_book.due(teacher_divergence_plan_symbols(watches, observed_at), observed_at)
+        due = due[:TEACHER_DIVERGENCE_MAX_SYMBOLS]
+        if not due:
+            return {"status": "fresh"}
+
+        def fetch() -> dict[tuple[str, str], Any]:
+            source, deadline, fetched = longhu_intraday_source(), monotonic() + 4.0, {}
+            for symbol in due:
+                for period in ("30", "60"):
+                    if monotonic() > deadline:
+                        return fetched
+                    try:
+                        fetched[(symbol, period)] = source.stock_period_bars(symbol, period, 120)
+                    except Exception as error:  # noqa: BLE001 - one symbol never stops the others
+                        fetched[(symbol, period)] = f"{type(error).__name__}: {str(error)[:160]}"
+            return fetched
+
+        today = observed_at.astimezone(ZoneInfo("Asia/Shanghai")).date()
+        today_text = today.strftime("%Y%m%d")
+
+        async def today_bars(symbol: str, period: str) -> list[dict[str, Any]] | None:
+            # Longhu's K-line only covers completed sessions; Tencent's carries
+            # today's bars (true open/high/low, the newest still forming).
+            try:
+                bars = await asyncio.wait_for(tencent_period_bars(symbol, period, 20), timeout=4)
+            except Exception:  # noqa: BLE001 - history alone is still a valid (older) read
+                return None
+            return [bar for bar in bars if str(bar["bar_time"]).startswith(today_text)]
+
+        keys = [(symbol, period) for symbol in due for period in ("30", "60")]
+        fetched, *today_rows = await asyncio.gather(
+            run_akshare_blocking(fetch, timeout_seconds=6), *(today_bars(symbol, period) for symbol, period in keys))
+        today_by_key = dict(zip(keys, today_rows))
+        refreshed, errors = [], {}
+        for symbol in due:
+            rows = {period: fetched.get((symbol, period)) for period in ("30", "60")}
+            if all(isinstance(value, list) for value in rows.values()):
+                statuses = {}
+                for period, history in rows.items():
+                    today_part = today_by_key.get((symbol, period))
+                    merged = {str(bar["bar_time"]): bar for bar in history if not str(bar["bar_time"]).startswith(today_text)}
+                    merged.update({str(bar["bar_time"]): bar for bar in today_part or []})
+                    status = divergence_status(period_bars_through([merged[k] for k in sorted(merged)], today),
+                                               "longhuvip_kline+tencent_today" if today_part is not None else "longhuvip_kline")
+                    status["today_bars"] = None if today_part is None else len(today_part)
+                    statuses[period] = status
+                teacher_divergence_book.store(symbol, observed_at, statuses)
+                refreshed.append(symbol)
+            else:
+                errors[symbol] = next((str(value) for value in rows.values() if isinstance(value, str)), "deadline")
+        return {"status": "completed" if not errors else "partial", "refreshed": refreshed, "errors": errors}
+    except Exception as error:  # noqa: BLE001 - a divergence refresh must never block the scan
+        return {"status": "failed", "error": safe_error_detail(str(error), 200)}
+
+
+def teacher_review_minute_extra() -> int:
+    try:
+        return max(0, min(TEACHER_REVIEW_MINUTE_EXTRA_MAX, int(os.getenv("TEACHER_REVIEW_MINUTE_EXTRA", "0"))))
+    except ValueError:
+        return 0
+
+
+def teacher_review_minute_symbols(watches: list[dict[str, Any]], observed_at: datetime) -> list[str]:
+    """Watches with a teacher plan for this session, relay plans first."""
+    active = [(watch, teacher_active_plan(watch, observed_at)) for watch in watches]
+    ordered = sorted(((watch, plan) for watch, plan in active if plan is not None),
+                     key=lambda item: (item[1].get("kind") != "relay", str(item[0]["symbol"])))
+    return [str(watch["symbol"]).upper() for watch, _plan in ordered]
+
+
+def teacher_review_enabled() -> bool:
+    return os.getenv("TEACHER_REVIEW_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def teacher_review_repair_daily(trade_date: date) -> dict[str, Any]:
+    """Data-plane repair of one session: daily bars (Longhu full market first), then controls."""
+    bars = await sync_full_market_daily(FullMarketDailySyncRequest(trade_date=trade_date))
+    controls = await sync_full_market_daily_controls(trade_date)
+    return {"bars": {key: bars.get(key) for key in ("status", "provider", "stored", "rows") if key in bars},
+            "controls": {key: controls.get(key) for key in ("status", "stored", "reason") if key in controls}}
+
+
+async def watch_review_auction_snapshot(symbols: list[str]) -> dict[str, dict[str, Any]]:
+    """Today's 09:25 opening-auction rows for the watchlist (Fuyao, <=100 codes a call)."""
+    from .fuyao_provider import fetch as fetch_fuyao
+    from .market_event_capture import normalize_fuyao_auction
+    rows: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(symbols), 100):
+        data = await asyncio.wait_for(
+            fetch_fuyao("a_share_auction_snapshot", {"thscodes": ",".join(symbols[start:start + 100])}), timeout=8)
+        for event in normalize_fuyao_auction(data, datetime.now(timezone.utc)):
+            rows[event["ts_code"]] = event["raw"]
+    return rows
+
+
+async def watch_review_store_minutes(trade_date: date, rows_by_symbol: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    from .intraday_minute_capture_actions import store_session_minutes
+    return await run_database_blocking(lambda: store_session_minutes(
+        db, trade_date, rows_by_symbol, source_name="longhu_intraday_minutes",
+        parse_minute=offline_minute_row, ensure_instrument=ensure_offline_instrument), timeout_seconds=120)
+
+
+def _watch_review_dependencies() -> WatchReviewDependencies:
+    from .teacher_review_repository import plan_bars as teacher_plan_bars
+    from .teacher_review_rules import scan_features as teacher_scan_features
+    return WatchReviewDependencies(
+        database=db, run_database=run_database_blocking, minutes_batch=intraday_longhu_minutes_batch,
+        plan_bars=teacher_plan_bars,
+        quote_features=lambda symbol, quote, observed_at: teacher_scan_features(symbol, quote, None, observed_at),
+        industry_board_flow=intraday_longhu_industry_board_flow,
+        auction_snapshot=watch_review_auction_snapshot, persist_minutes=watch_review_store_minutes,
+    )
+
+
+async def run_watch_daily_review(trade_date: date, persist: bool = True) -> dict[str, Any]:
+    """Post-close review of every watched stock (day, path, industry, history, patterns)."""
+    return await run_watch_daily_review_service(trade_date, _watch_review_dependencies(), persist=persist)
+
+
+async def watch_review_patterns(start: date, end: date, min_count: int = 3) -> dict[str, Any]:
+    """Label -> next-session outcomes and per-stock industry relations across stored reviews."""
+    from .teacher_review_repository import plan_bars as teacher_plan_bars
+    from .watch_review_patterns import WatchPatternDependencies, watch_review_patterns as patterns_service
+    return await patterns_service(start, end, WatchPatternDependencies(
+        database=db, run_database=run_database_blocking, plan_bars=teacher_plan_bars,
+        today=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date(),
+    ), min_count=min_count)
+
+
+def _teacher_review_dependencies() -> TeacherReviewDependencies:
+    return TeacherReviewDependencies(
+        database=db, run_database=run_database_blocking, now_utc=lambda: datetime.now(timezone.utc),
+        send_alert=post_feishu_alert_text, max_symbols=intraday_watchlist_max_symbols,
+        exchange_for=exchange_for,
+        # Owner PG already carries full-market daily bars; per-symbol Tushare
+        # hydration would saturate the shared 6/min provider queue.  Missing
+        # sessions are repaired date-wise through the data plane instead.
+        hydrate_history=None, repair_daily=teacher_review_repair_daily,
+        period_bars=longhu_period_bars,
+    )
+
+
 def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
     """Compose the local-only boundaries of the post-close application service."""
     return PostCloseRefreshDependencies(
@@ -4216,6 +5069,13 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         renew_lease=renew_runtime_lease, release_lease=release_runtime_lease,
         safe_error_detail=safe_error_detail, json_safe=strategy_json_safe,
         longhu_supplemental_sync=sync_longhu_supplemental_evidence,
+        teacher_review_roll=(
+            (lambda trade_date: roll_teacher_review(trade_date, _teacher_review_dependencies()))
+            if teacher_review_enabled() else None
+        ),
+        watch_daily_review=lambda trade_date: run_watch_daily_review(trade_date),
+        xiaojie_outcomes=lambda trade_date: run_database_blocking(
+            settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
     )
 
 
@@ -4414,6 +5274,12 @@ def stock_study_claims(symbol: str) -> tuple[list[dict[str, Any]], dict[str, Any
 
 
 async def build_stock_study(symbol: str, request: StockStudyRequest) -> dict[str, Any]:
+    async def persisted_factors(stock: str, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        def read() -> list[dict[str, Any]]:
+            with db.transaction() as connection:
+                return read_persisted_factor_window(connection, stock, start_date, end_date)
+        return await run_database_blocking(read, timeout_seconds=30)
+
     return await build_stock_study_isolated(
         symbol, request,
         StockStudyDependencies(
@@ -4427,18 +5293,35 @@ async def build_stock_study(symbol: str, request: StockStudyRequest) -> dict[str
             persist_announcement_health=persist_announcement_provider_health, technical_summary=technical_summary,
             analyst_claims=stock_study_claims, recent_events=recent_market_events,
             window_readiness=stock_window_readiness, latest_row=latest_study_row,
+            read_persisted_factors=persisted_factors,
         ),
     )
 
 
 async def sync_tushare_daily_core(as_of_date: date, requested_symbols: list[str] | None = None) -> dict[str, Any]:
     """Compatibility adapter for explicit-symbol, same-day controls only."""
+    async def persisted_factors(day: date, symbols: list[str]) -> dict[str, Any]:
+        def read() -> dict[str, Any]:
+            with db.transaction() as connection:
+                payload = read_persisted_factor_controls(connection, day, symbols)
+            rows = payload["rows"]
+            return {
+                "api_name": "adj_factor",
+                "status": "completed" if len(rows) == len(symbols) else "blocked",
+                "source": payload["source"],
+                "providers": payload["providers"],
+                "rows": rows,
+                "symbols": symbols,
+            }
+        return await run_database_blocking(read, timeout_seconds=30)
+
     return await sync_core_daily_controls_isolated(
         as_of_date, requested_symbols,
         CoreDailyControlDependencies(
             resolve_symbols=resolve_sync_symbols_async,
             fetch_catalog=fetch_tushare_catalog,
             request=TushareFetchRequest,
+            read_persisted_factors=persisted_factors,
         ),
     )
 
@@ -4504,9 +5387,12 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "tencent_order_book": intraday_order_book_enabled() and interval_seconds >= 30,
             "board_flow_curve": intraday_board_curve_enabled(),
             "market_event_capture": os.getenv("MARKET_EVENT_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "auction_pulse": auction_pulse_enabled(),
             "all_a_level1_snapshot": os.getenv("ALL_A_LEVEL1_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "public_evidence_capture": os.getenv("PUBLIC_EVIDENCE_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             "post_close_public_archive": os.getenv("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "storage_tiering_mover": os.getenv("STORAGE_TIERING_MOVER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "peer_close_research": os.getenv("PEER_CLOSE_RESEARCH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
         },
         loops={
             "intraday_monitor": lambda: intraday_monitor_loop(interval_seconds),
@@ -4517,9 +5403,12 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "minute_profile_capture": intraday_minute_profile_capture_loop, "tencent_order_book": intraday_order_book_loop,
             "board_flow_curve": intraday_board_flow_curve_loop,
             "market_event_capture": market_event_capture_loop,
+            "auction_pulse": auction_pulse_loop,
             "all_a_level1_snapshot": all_a_level1_snapshot_capture_loop,
             "public_evidence_capture": public_evidence_capture_loop,
             "post_close_public_archive": post_close_public_archive_loop,
+            "storage_tiering_mover": storage_tiering_mover_loop,
+            "peer_close_research": peer_close_research_loop,
         },
     )
     validate_runtime_task_specs(specs)
@@ -4544,6 +5433,9 @@ def _verify_strategy_runtime_contracts() -> None:
         "disclosure_day_watch": DISCLOSURE_DAY_WATCH_MODEL_VERSION,
         "limit_up_continuation": LIMIT_UP_CONTINUATION_MODEL_VERSION,
         "xiaojie_leader_flow": XIAOJIE_LEADER_FLOW_MODEL_VERSION,
+        "longhu_multifactor_shadow": LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION,
+        "teacher_review_playbooks": TEACHER_REVIEW_MODEL_VERSION,
+        "launch_radar": LAUNCH_RADAR_MODEL_VERSION,
     })
 
 
@@ -4646,11 +5538,13 @@ async def executor_saturated_response(_: Request, __: ExecutorSaturatedError) ->
 
 
 app.include_router(build_provider_status_router(db, provider_status, free_provider_status, async_database=async_db))
+app.include_router(build_owner_storage_router(db, run_database_blocking))
 app.include_router(build_longhu_reads_router(
     configured=longhu_vendor_configured,
     shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
     quotes=shared_longhu_quotes,
     minutes=intraday_longhu_minutes,
+    minutes_batch=intraday_longhu_minutes_batch,
 ))
 app.include_router(build_licensed_stock_api_router(
     configured=longhu_vendor_configured,
@@ -4773,14 +5667,27 @@ async def require_quant_write_key(request: Request, call_next: Any) -> Any:
     licensed_read = licensed_stock_read_allowed(
         request, os.getenv("QUANT_SHARED_READ_API_KEY", ""),
     )
-    if (
-        not write_access_allowed(request.method, supplied_key, configured_key)
-        and not remote_archive_sync_bearer_allowed(request)
-        and not licensed_read
-        and not raw_overflow_archive_allowed(request, configured_key)
-    ):
-        return JSONResponse(status_code=401, content={"detail": "valid X-Quant-Write-Key is required for write operations"})
-    return await call_next(request)
+    try:
+        if (
+            not write_access_allowed(request.method, supplied_key, configured_key)
+            and not remote_archive_sync_bearer_allowed(request)
+            and not licensed_read
+            and not raw_overflow_archive_allowed(request, configured_key)
+        ):
+            response = JSONResponse(status_code=401, content={"detail": "valid X-Quant-Write-Key is required for write operations"})
+        else:
+            response = await call_next(request)
+    except Exception:  # noqa: BLE001 - make otherwise silent 500s durable
+        LOGGER.exception("http request failed method=%s path=%s", request.method, request.url.path)
+        raise
+    if response.status_code >= 500:
+        LOGGER.error("http response error method=%s path=%s status=%s", request.method, request.url.path, response.status_code)
+    elif response.status_code >= 400:
+        LOGGER.warning("http client error method=%s path=%s status=%s", request.method, request.url.path, response.status_code)
+    return response
+
+
+_health_evidence_cache = HealthEvidenceCache()
 
 
 def _health_payload() -> dict[str, Any]:
@@ -4828,7 +5735,9 @@ def _health_payload() -> dict[str, Any]:
             release_metadata=release_metadata,
             post_close_runtime_status=post_close_refresh_runtime.status,
             raw_overflow_status=raw_overflow_status,
-    ))
+            owner_storage_status=owner_runtime_schema_status,
+            owner_deploy_status=owner_deploy_status,
+        ), _health_evidence_cache)
 
 
 def _metrics_response() -> Response:
@@ -4892,11 +5801,22 @@ def _legacy_schema_bootstrap() -> dict[str, Any]:
     return {"status": "ok", "catalog": catalog_counts()}
 
 
+def _busy_health_payload() -> dict[str, Any]:
+    """What /health can say from memory alone while the full evidence is slow."""
+    return {
+        "service": "quant-research", "build": release_metadata(),
+        "database_pool": db.pool_status(), "async_database_pool": async_db.pool_status(),
+        "blocking_executors": runtime_executor_status(), "network": network_state.snapshot(),
+        "runtime_loops": background_loop_registry.snapshot(),
+    }
+
+
 app.include_router(build_system_control_router(SystemControlDependencies(
     health_payload=_health_payload,
     database_unavailable_error=DatabaseUnavailableError,
     metrics_response=_metrics_response,
     legacy_bootstrap=_legacy_schema_bootstrap,
+    busy_payload=_busy_health_payload,
 )))
 
 
@@ -5774,7 +6694,52 @@ app.include_router(build_strategy_actions_router(StrategyActionDependencies(
     generate_recommendations=recommendations,
     daily_pipeline=run_daily_pipeline,
 )))
-app.include_router(build_xiaojie_leader_flow_router(evaluate_xiaojie_leader_flow_snapshot))
+async def xiaojie_message_features(**query: Any) -> list[dict[str, Any]]:
+    return await run_database_blocking(
+        lambda: _with_connection(lambda connection: read_xiaojie_message_features(connection, **query)),
+        timeout_seconds=30,
+    )
+
+
+app.include_router(build_xiaojie_leader_flow_router(evaluate_xiaojie_leader_flow_snapshot, xiaojie_message_features))
+async def teacher_review_cohort() -> dict[str, Any]:
+    rows = await run_database_blocking(teacher_review_repository.teacher_watch_rows, db)
+    since = cn_today() - timedelta(days=14)
+    packs = await run_database_blocking(lambda: teacher_review_repository.recent_packs(db, since=since))
+    return {
+        "watches": [{"symbol": row["symbol"], "label": row["label"], "enabled": row["enabled"],
+                     "plan": (row["metadata"] or {}).get("teacher_review")} for row in rows],
+        "packs": [{"pack_id": item["pack"]["pack_id"], "analyst_id": item["pack"]["analyst"]["analyst_id"],
+                   "review_date": item["pack"]["review_date"], "available_at": str(item["available_at"]),
+                   "stocks": len(item["pack"]["stocks"])} for item in packs],
+    }
+
+
+app.include_router(build_watch_review_router(WatchReviewRouterDependencies(
+    run=lambda trade_date, persist: run_watch_daily_review(trade_date, persist),
+    read=lambda trade_date: run_database_blocking(lambda: read_watch_reviews(db, trade_date), timeout_seconds=30),
+    today=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date(),
+    patterns=watch_review_patterns,
+)))
+app.include_router(build_teacher_review_router(TeacherReviewRouterDependencies(
+    enabled=teacher_review_enabled,
+    import_pack=lambda pack, dry_run=False: import_teacher_review_pack(
+        pack, _teacher_review_dependencies(), dry_run=dry_run,
+    ),
+    cohort=teacher_review_cohort,
+    settlements=lambda limit: run_database_blocking(
+        lambda: teacher_review_repository.recent_settlements(db, limit=limit),
+    ),
+    roll=lambda trade_date: roll_teacher_review(trade_date or cn_today(), _teacher_review_dependencies()),
+    outcomes=lambda limit: run_database_blocking(
+        lambda: teacher_review_repository.recent_outcome_reviews(db, limit=limit),
+    ),
+    outcome_review=lambda trade_date: run_teacher_outcome_review(
+        trade_date or cn_today(), _teacher_review_dependencies(),
+    ),
+    changes=lambda limit: run_database_blocking(lambda: strategy_change_log.recent(db, limit=limit)),
+    record_change=lambda payload: run_database_blocking(lambda: strategy_change_log.record(db, dict(payload))),
+)))
 app.include_router(build_ten_day_leader_rotation_actions_router(
     TenDayLeaderRotationActionDependencies(run=run_ten_day_leader_rotation_endpoint),
 ))

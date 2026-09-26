@@ -51,6 +51,13 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         ("market_events", "raw_market_observations"),
         "all-A auction, limit-pool, limit-chain and THS attention evidence capture", 180,
     ),
+    "auction_pulse": RuntimeTaskContract(
+        "auction_pulse", "intraday_edge", "2s during 09:15-09:30 Shanghai opening auction",
+        ("longhu:MorningBiddingList", "longhu:GetBKJJ_W36", "longhu:GetPlateInfo_w38", "longhu:RiseFallAnalysis", "longhu:MoodNumCount"),
+        ("raw_market_observations",),
+        "bounded Longhu auction, sector anomaly, sentiment and money-flow evidence with cooled Feishu alerts",
+        10,
+    ),
     "public_evidence_capture": RuntimeTaskContract(
         "public_evidence_capture", "intraday_edge", "30s tick; per-source 90s-15min cadences",
         ("news_flash", "investor_qa", "stock_change", "hot_rank_popularity", "hot_rank_surge",
@@ -66,8 +73,23 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         ("market_events", "raw_market_observations"),
         "archive short-lived and post-close public evidence (pools, LHB, corporate events, ticks)",
     ),
+    "storage_tiering_mover": RuntimeTaskContract(
+        "storage_tiering_mover", "research", "bounded passes outside 09:00-15:45 on trading days", (),
+        ("raw_market_observations", "intraday_quote_observations", "intraday_rule_input_snapshots"),
+        "copy closed sessions of these hot tables into their stock_cold twins (*_cold), delete hot rows past the "
+        "hot window only when the cold copy matches; inert until the owner grants SELECT,INSERT on the twins",
+    ),
+    "peer_close_research": RuntimeTaskContract(
+        "peer_close_research", "research", "once per trading date after 16:15 (catch-up before 09:00)",
+        ("intraday_minutes",),
+        ("raw_market_observations", "xiaojie_leader_flow_observations", "automation_runs"),
+        "the peer-owned close stages the owner's pipeline does not run: teacher plan roll (settle, promote, "
+        "observe, retire), the next-day outcome review that replays what blocked each untriggered plan, "
+        "watch-list daily review, 小杰 outcome settlement and the cross-strategy digest, each behind "
+        "its receipt",
+    ),
     "all_a_level1_snapshot": RuntimeTaskContract(
-        "all_a_level1_snapshot", "intraday_edge", "60s during market session",
+        "all_a_level1_snapshot", "intraday_edge", "60s during evidence observation session from 09:15",
         ("a_share_prices_snapshot",), ("raw_market_observations",),
         "complete all-A Level-1 raw snapshot for width/rank and validation windows", 120,
     ),

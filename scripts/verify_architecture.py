@@ -31,8 +31,9 @@ def main() -> int:
     for relative in (
         "frontend/src/api/http.ts", "frontend/src/composables/usePolling.ts",
         "frontend/src/composables/useDashboardWorkspace.ts", "frontend/src/dashboard-context.ts",
-        "frontend/src/components/RealtimeServicesPanel.vue", "frontend/src/views/ManualRelayView.vue",
-        "frontend/src/views/GroupRelayMonitorView.vue", "frontend/src/views/FeishuWorkbenchView.vue",
+        "frontend/src/components/RealtimeServicesPanel.vue", "feishu-relay/dashboard/src/views/ManualRelayView.vue",
+        "feishu-relay/dashboard/src/views/GroupRelayMonitorView.vue",
+        "feishu-relay/dashboard/src/views/FeishuWorkbenchView.vue",
         "frontend/src/views/research/ResearchOverviewTab.vue", "frontend/src/views/research/MarketSnapshotsTab.vue",
         "frontend/src/views/research/CloseReviewTab.vue", "frontend/src/views/research/StrategyTab.vue",
         "frontend/src/views/research/FactorLabTab.vue", "frontend/src/views/research/StockStudyTab.vue",

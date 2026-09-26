@@ -23,9 +23,10 @@ class DailyStrategySummarySchedulerDependencies:
 
 
 def in_summary_window(local: datetime) -> bool:
-    # Keep the dashboard receipt retryable while delayed daily bars are still
-    # allowed to unblock the same-date post-close strategy (through 22:00).
-    return time(19, 15) <= local.time() < time(22, 0)
+    # The close review checkpoint is materialized at 15:05 Asia/Shanghai. Send
+    # the evidence summary immediately after that checkpoint, then keep the
+    # same-date retry window open for delayed provider evidence through 22:00.
+    return time(15, 5) <= local.time() < time(22, 0)
 
 
 async def daily_strategy_summary_scheduler_step(

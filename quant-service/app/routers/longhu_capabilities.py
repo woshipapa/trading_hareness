@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 
 from ..licensed_stock_api import UpstreamStockApiError, catalog
+from ..longhu_capability_registry import capability_contract_catalog
 from ..longhu_capability_probe import sanitized_request, summarize_result
 from ..runtime_executors import run_database_blocking
 from .licensed_stock_api import StockApiCall
@@ -38,6 +39,7 @@ def build_longhu_capabilities_router(
     ) -> dict[str, Any]:
         authorize(x_quant_read_key)
         payload = catalog()
+        payload["integration_contracts"] = capability_contract_catalog()
         payload["research_only"] = True
         payload["replay_only"] = True
         payload["live_effect"] = "none"

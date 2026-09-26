@@ -17,6 +17,8 @@ from zoneinfo import ZoneInfo
 from psycopg.types.json import Json
 
 from .datasources.catalog import primary_store_value, store_values
+from .owner_factor_repository import FACTOR_PROVIDER_ORDER
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
 def candidates(
@@ -50,54 +52,70 @@ def candidates(
     does not claim to have, and a window silently scaled by it would look
     perfectly adjusted while ignoring every split in it.
     """
+    factor_semantics_sql = persisted_factor_semantics_sql("factor")
     with database.transaction() as connection:
         coverage = connection.execute(
             """SELECT count(DISTINCT symbol)::int AS symbols
                  FROM quant.canonical_bars_daily
                 WHERE trading_date=%s
+                  AND quality_status='fresh'
+                  AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                   AND (symbol ~ '^(600|601|603|605)[0-9]{3}\\.SH$'
                        OR symbol ~ '^(000|001|002|003)[0-9]{3}\\.SZ$')""",
             (as_of_date,),
         ).fetchone()
         rows = connection.execute(
-            """WITH latest_basic AS (
+            f"""WITH latest_basic AS (
                    SELECT DISTINCT ON (symbol) symbol,
                           turnover_rate::text AS turnover_rate,volume_ratio::text AS volume_ratio,
                           pe::text AS pe,pb::text AS pb
-                     FROM quant.daily_fundamentals
+                    FROM quant.daily_fundamentals
                     WHERE trading_date=%s
+                      AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     ORDER BY symbol,array_position(%s::text[],provider) NULLS LAST,available_at DESC
                ), latest_flow AS (
                    SELECT DISTINCT ON (symbol) symbol,net_amount
-                     FROM quant.stock_money_flow_daily
+                    FROM quant.stock_money_flow_daily
                     WHERE trading_date=%s AND source=%s
+                      AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                     ORDER BY symbol,available_at DESC
                ), factors AS (
-                   SELECT DISTINCT ON (symbol,trading_date) symbol,trading_date,adj_factor
-                     FROM quant.daily_adjustment_factors
-                    WHERE trading_date<=%s AND trading_date>=%s
-                      AND adj_factor IS NOT NULL AND adj_factor>0
-                      AND raw->>'factor_semantics' IS DISTINCT FROM 'same_day_identity_only'
-                    ORDER BY symbol,trading_date,available_at DESC
+                   SELECT DISTINCT ON (factor.symbol,factor.trading_date) factor.symbol,factor.trading_date,
+                          factor.adj_factor,factor.provider AS factor_provider,factor.raw AS factor_raw
+                     FROM quant.daily_adjustment_factors factor
+                    WHERE factor.trading_date<=%s AND factor.trading_date>=%s
+                      AND factor.adj_factor IS NOT NULL AND factor.adj_factor>0
+                      AND {factor_semantics_sql}
+                      AND factor.raw->>'factor_semantics' IS DISTINCT FROM 'same_day_identity_only'
+                      AND factor.available_at < ((factor.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                    ORDER BY factor.symbol,factor.trading_date,
+                             array_position(%s::text[],factor.provider) NULLS LAST,
+                             factor.available_at DESC
                ), ranked AS (
-                   SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,f.adj_factor,i.name,
+                   SELECT b.symbol,b.trading_date,b.high,b.low,b.close,b.volume,f.adj_factor,
+                          f.factor_provider,f.factor_raw,i.name,
                           close_day.amount,basic.turnover_rate,basic.volume_ratio,basic.pe,basic.pb,
                           flow.net_amount AS main_net_amount,
                           row_number() OVER (PARTITION BY b.symbol ORDER BY b.trading_date DESC) AS rn
                      FROM quant.canonical_bars_daily b
                      JOIN factors f ON f.symbol=b.symbol AND f.trading_date=b.trading_date
                      LEFT JOIN quant.instruments i ON i.symbol=b.symbol
-                     LEFT JOIN quant.canonical_bars_daily close_day
+                    LEFT JOIN quant.canonical_bars_daily close_day
                        ON close_day.symbol=b.symbol AND close_day.trading_date=%s
+                      AND close_day.quality_status='fresh'
+                      AND close_day.available_at < ((close_day.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                      LEFT JOIN latest_basic basic ON basic.symbol=b.symbol
                      LEFT JOIN latest_flow flow ON flow.symbol=b.symbol
                     WHERE b.trading_date<=%s AND b.trading_date>=%s
+                      AND b.quality_status='fresh'
+                      AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
                  ) SELECT symbol,trading_date,high,low,close,volume,adj_factor,name
                          ,amount,turnover_rate,volume_ratio,pe,pb,main_net_amount
                     FROM ranked WHERE rn<=30 ORDER BY symbol,trading_date""",
             (as_of_date, list(store_values("fundamentals.daily_basic", "daily_fundamentals", "provider")),
              as_of_date, primary_store_value("flow.stock_daily", "stock_money_flow_daily", "source"),
              as_of_date, as_of_date - timedelta(days=70),
+             list(FACTOR_PROVIDER_ORDER),
              as_of_date, as_of_date, as_of_date - timedelta(days=70)),
         ).fetchall()
     return screen(

@@ -121,7 +121,7 @@ def initialize_database() -> dict[str, str]:
                 if not bool(cursor.fetchone()[0]):
                     raise RuntimeError(
                         "public ingestion ledger is absent; run "
-                        "feishu-adapter/initialize-ledger.mjs before the quant bootstrap"
+                        "feishu-relay/adapter/initialize-ledger.mjs before the quant bootstrap"
                     )
             # Keep the prerequisites and frozen baseline atomic. A failed
             # empty-DB bootstrap therefore leaves no partial quant schema that

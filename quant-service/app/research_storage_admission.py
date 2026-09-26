@@ -26,15 +26,21 @@ def governance(
 ) -> dict[str, Any]:
     """Measure managed research storage without mutating or pruning evidence."""
     env = os.environ if environ is None else environ
+    # Only the hot tier counts: relations in the database's default tablespace
+    # (reltablespace=0).  The owner's cold tablespace (``stock_cold`` on a
+    # separate disk) holds legacy and cold-twin relations and is reported
+    # separately; counting it let cold data stop hot capture (operator
+    # decision 2026-09-22).
     with database.transaction() as connection:
         row = connection.execute(
-            """SELECT coalesce(sum(pg_total_relation_size(c.oid)),0)::bigint AS bytes
+            """SELECT coalesce(sum(pg_total_relation_size(c.oid)) FILTER (WHERE c.reltablespace=0),0)::bigint AS bytes,
+                      coalesce(sum(pg_total_relation_size(c.oid)) FILTER (WHERE c.reltablespace<>0),0)::bigint AS cold_bytes
                  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                 WHERE n.nspname='quant' AND c.relkind IN ('r','m','p')""",
         ).fetchone()
     data_dir = Path(env.get("QUANT_DATA_DIR", "/var/lib/quant"))
     warning_ratio = bounded_storage_ratio(env.get("QUANT_RESEARCH_STORAGE_WARNING_RATIO"), 0.80)
-    return research_storage_governance(
+    result = research_storage_governance(
         hot_database_bytes=int((row or {}).get("bytes") or 0),
         artifact_bytes=directory_bytes(data_dir),
         research_budget_bytes=bounded_storage_budget_bytes(
@@ -48,6 +54,8 @@ def governance(
         warning_ratio=warning_ratio,
         stop_ratio=max(bounded_storage_ratio(env.get("QUANT_RESEARCH_STORAGE_STOP_RATIO"), 0.90), warning_ratio),
     )
+    result["cold_tablespace"] = {"used_bytes": int((row or {}).get("cold_bytes") or 0), "counted_in_hot_budget": False}
+    return result
 
 
 @dataclass
@@ -87,6 +95,18 @@ class ResearchStorageAdmission:
             override["capture_policy"] = "core_intraday_evidence_allowed_at_storage_stop"
             return True, override
         return allowed, status
+
+    async def exempt_intraday_evidence_allowed(self) -> tuple[bool, dict[str, Any]]:
+        """Board curves and the close-window minute profile never stop at the watermark.
+
+        Both are small (board curves ~11 MB a day), strategy-context datasets the
+        post-close reviews depend on; the operator exempted them explicitly
+        (2026-09-22).  The status is still returned so the exemption is visible.
+        """
+        allowed, status = await self.optional_high_frequency_allowed()
+        if allowed:
+            return True, status
+        return True, {**status, "capture_policy": "exempt_from_storage_stop"}
 
 
 __all__ = ["ResearchStorageAdmission", "governance"]

@@ -59,6 +59,15 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
     ),
     _needs("limit_up_continuation", Need("bars.daily"), Need("limits.prices")),
     _needs(
+        "teacher_review_playbooks",
+        Need("quote.watch_snapshot", purpose="per-scan price, turnover, volume ratio and cumulative amount"),
+        Need("quote.order_book", False, "sealed bid-only book at the limit price"),
+        Need("bars.minute", False, "30/60-minute two-leg divergence (period K-line history + forming bar)"),
+        Need("bars.daily", purpose="pre-session MA/platform/prior-high plan and session settlement"),
+        Need("limits.limit_up_pool", False, "post-close forecast settlement (first seal time, plate counts)"),
+        Need("reference.trade_calendar", purpose="point-in-time first eligible session"),
+    ),
+    _needs(
         "post_close_limit_lift_pattern",
         Need("limits.limit_up_pool"), Need("limits.ladder"), Need("bars.minute", purpose="minute-pattern replay"),
         Need("bars.daily"),
@@ -71,7 +80,27 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         # sector" only has an answer under the first.
         Need("sector.membership", purpose="sector core confirmation; first loaded taxonomy in order wins",
              taxonomies=("longhu_ths_industry", "ths_concept_flow")),
-        Need("bars.daily", purpose="MA20/overheat gate"),
+        Need("bars.daily", purpose="MA20/overheat gate; 潜龙 MA convergence, marker K and pressure high"),
+        # Optional for the strategy as a whole, read by one mode: without them
+        # 潜龙出海_swing reports its evidence as incomplete (a red warning).
+        Need("sector.flow_curve", False, "潜龙 sector day return and net inflow rate (same taxonomy as membership)"),
+        Need("fundamentals.daily_basic", False, "潜龙 fundamental evidence (profitable PE proxy)"),
+    ),
+    _needs(
+        "launch_radar",
+        Need("quote.all_a_snapshot", purpose="cross-section price and cumulative volume per scan"),
+        Need("limits.prices", purpose="limit price for the launch band and sealed anchors"),
+        Need("sector.membership", purpose="a sealed anchor in a shared concept", taxonomies=("ths_concept_flow",)),
+        Need("bars.daily", purpose="the name's own 5-day volume baseline"),
+    ),
+    _needs(
+        "longhu_multifactor_shadow",
+        Need("quote.watch_snapshot", purpose="quote return and volume ratio"),
+        Need("bars.minute", purpose="minute momentum"),
+        Need("quote.order_book", purpose="order-book imbalance"),
+        Need("flow.watch_intraday", False, "large-order net ratio"),
+        Need("sector.flow_curve", False, "board-relative strength"),
+        Need("auction.open_snapshot", False, "opening-auction premium"),
     ),
 )}
 

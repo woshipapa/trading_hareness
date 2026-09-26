@@ -14,7 +14,13 @@ score and an unbounded percent return as the same number.
 ``strategy_key`` values this module writes: post_close_base_ready,
 post_close_base_forming, post_close_fresh_start, post_close_limit_pattern,
 ten_day_leader_rotation, limit_linkage, board_stock_mining_inflow,
-board_stock_mining_outflow, daily_recommendation.
+board_stock_mining_outflow, daily_recommendation, teacher_review_relay,
+teacher_review_trend, xiaojie_leader_flow, launch_radar.
+
+The teacher, 小杰 and launch-radar lines are intraday or next-session
+playbooks with their own settlement; the ledger adds the one comparison
+they lacked - the same next-open entry, 10-session horizon and liquidity
+screen as every other strategy.
 """
 
 from __future__ import annotations
@@ -26,7 +32,13 @@ from typing import Any
 from psycopg.types.json import Json
 
 from .liquidity_screen import liquidity_eligibility, median_daily_amount_by_symbol
+from .teacher_review_playbooks import playbook_kind, ts_code
 from .point_in_time import exchange_day_end
+from .point_in_time_status import st_flags_as_of
+from .t1_settlement import SETTLEMENT_VERSION
+from .t1_settlement_repository import (
+    EqualWeightMarket, settle_idea, settlement_columns, settlement_update_sql, settlement_values,
+)
 
 POST_CLOSE_STRATEGY_KEYS = {
     "base_ready_30d": "post_close_base_ready",
@@ -48,9 +60,11 @@ def _liquidity_context(connection: Any, symbols: list[str], as_of_date: date) ->
         return {}
     median_amount = median_daily_amount_by_symbol(connection, symbols, as_of_date)
     instrument_rows = connection.execute(
-        "SELECT symbol,is_st,list_date FROM quant.instruments WHERE symbol=ANY(%s)", (symbols,),
+        "SELECT symbol,list_date FROM quant.instruments WHERE symbol=ANY(%s)", (symbols,),
     ).fetchall()
     instruments = {str(row["symbol"]): dict(row) for row in instrument_rows}
+    # A re-materialized past date must see that session's ST status.
+    st_status = st_flags_as_of(connection, symbols, as_of_date)
     latest_bar_rows = connection.execute(
         """SELECT DISTINCT ON (symbol) symbol,close,is_suspended FROM quant.canonical_bars_daily
              WHERE symbol=ANY(%s) AND trading_date<=%s AND available_at<=%s AND quality_status='fresh'
@@ -65,7 +79,7 @@ def _liquidity_context(connection: Any, symbols: list[str], as_of_date: date) ->
         eligible, flags = liquidity_eligibility(
             median_daily_amount=median_amount.get(symbol), latest_price=_number(bar.get("close")),
             list_date=instrument.get("list_date"), as_of_date=as_of_date,
-            is_st=bool(instrument.get("is_st")), is_suspended=bool(bar.get("is_suspended")),
+            is_st=bool((st_status.get(symbol) or {}).get("is_st")), is_suspended=bool(bar.get("is_suspended")),
         )
         context[symbol] = {"eligible": eligible, "flags": flags}
     return context
@@ -205,9 +219,74 @@ def materialize_recommendation_candidates(connection: Any, as_of_date: date) -> 
     return _upsert_candidates(connection, rows)
 
 
+def materialize_teacher_review_candidates(connection: Any, as_of_date: date) -> int:
+    """Stocks the teacher planned for the next session in the review of ``as_of_date``.
+
+    A pack another same-day pack supersedes is skipped; record-only
+    playbooks (``rejected`` and the like) are not ideas and stay out.
+    """
+    packs = [dict(row["pack"]) for row in connection.execute(
+        """SELECT payload->'pack' AS pack FROM quant.raw_market_observations
+             WHERE provider_key='teacher_review' AND capability='teacher_review_pack'
+               AND payload->'pack'->>'review_date'=%s""",
+        (as_of_date.isoformat(),),
+    ).fetchall() if isinstance(row["pack"], dict)]
+    superseded = {str(pack_id) for pack in packs for pack_id in (pack.get("supersedes") or [])}
+    ideas: dict[tuple[str, str], dict[str, Any]] = {}
+    for pack in packs:
+        if str(pack.get("pack_id")) in superseded:
+            continue
+        for rank, stock in enumerate(pack.get("stocks") or [], start=1):
+            kind = playbook_kind(str(stock.get("playbook") or ""))
+            code = str(stock.get("code") or "")
+            if kind == "record" or not code:
+                continue
+            symbol = str(stock.get("ts_code") or ts_code(code)).upper()
+            ideas.setdefault((f"teacher_review_{kind}", symbol), {
+                "rank": rank, "evidence": {"pack_id": pack.get("pack_id"), "playbook": stock.get("playbook"),
+                                           "stance": stock.get("stance"), "group": stock.get("group"),
+                                           "analyst_id": (pack.get("analyst") or {}).get("analyst_id")}})
+    liquidity = _liquidity_context(connection, sorted({symbol for _, symbol in ideas}), as_of_date)
+    rows = [{
+        "strategy_key": key, "as_of_date": as_of_date, "symbol": symbol, "source_table": "raw_market_observations",
+        "source_run_id": None, "rank": idea["rank"], "raw_score": None, "score_scale": "unscored_plan",
+        "liquidity": liquidity.get(symbol, {"eligible": False, "flags": ["liquidity_context_missing"]}),
+        "evidence": idea["evidence"],
+    } for (key, symbol), idea in sorted(ideas.items())]
+    return _upsert_candidates(connection, rows)
+
+
+def materialize_leader_flow_candidates(connection: Any, as_of_date: date) -> int:
+    """小杰龙头 and launch-radar detections of the day, one row per stock (modes kept as evidence)."""
+    detections = connection.execute(
+        """SELECT symbol, CASE WHEN mode='launch_radar' THEN 'launch_radar' ELSE 'xiaojie_leader_flow' END AS strategy_key,
+                  array_agg(DISTINCT mode ORDER BY mode) AS modes, min(first_seen_at) AS first_seen_at,
+                  sum(observation_count)::int AS observations, bool_or(alerted_at IS NOT NULL) AS alerted
+             FROM quant.xiaojie_leader_flow_observations WHERE trading_date=%s
+            GROUP BY 1,2 ORDER BY min(first_seen_at)""",
+        (as_of_date,),
+    ).fetchall()
+    liquidity = _liquidity_context(connection, sorted({str(row["symbol"]) for row in detections}), as_of_date)
+    ranks: dict[str, int] = {}
+    rows = []
+    for row in detections:
+        key = str(row["strategy_key"])
+        ranks[key] = ranks.get(key, 0) + 1
+        rows.append({
+            "strategy_key": key, "as_of_date": as_of_date, "symbol": row["symbol"],
+            "source_table": "xiaojie_leader_flow_observations", "source_run_id": None, "rank": ranks[key],
+            "raw_score": row["observations"], "score_scale": "scan_observation_count",
+            "liquidity": liquidity.get(str(row["symbol"]), {"eligible": False, "flags": ["liquidity_context_missing"]}),
+            "evidence": {"modes": list(row["modes"] or []), "first_seen_at": row["first_seen_at"].isoformat()
+                         if row["first_seen_at"] else None, "alerted": bool(row["alerted"])},
+        })
+    return _upsert_candidates(connection, rows)
+
+
 MATERIALIZERS = (
     materialize_post_close_candidates, materialize_pattern_candidates, materialize_ten_day_leader_candidates,
     materialize_limit_linkage_candidates, materialize_board_stock_mining_candidates, materialize_recommendation_candidates,
+    materialize_teacher_review_candidates, materialize_leader_flow_candidates,
 )
 
 
@@ -218,72 +297,50 @@ def materialize_ledger(connection: Any, as_of_date: date) -> dict[str, int]:
 HORIZON_DAYS = 10
 
 
-def settle_ledger_outcomes(connection: Any, as_of_date: date) -> int:
-    """Settle every ledger candidate whose forward window is already observable.
+def candidate_direction(strategy_key: str, evidence: Any) -> int:
+    """The side a ledger candidate's own hypothesis takes.
 
-    Every strategy_key here is treated as a long/watch idea (none of the six
-    source tables carries an explicit direction other than the always-1
-    daily_recommendation rows already filtered upstream); entry is the next
-    session's open, matching outcome_recomputation.py's convention, and a
-    locked limit-up open or a suspended entry session is left unsettled.
+    Board-mining outflow picks name the members leading a sector *down*;
+    settling them as longs inverted the hypothesis they test.
     """
-    rows = connection.execute(
-        """WITH eligible AS (
-                SELECT c.strategy_key,c.as_of_date candidate_date,c.symbol,
-                  (SELECT b.trading_date FROM quant.canonical_bars_daily b
-                   WHERE b.symbol=c.symbol AND b.trading_date>c.as_of_date AND b.trading_date<=%s
-                   ORDER BY b.trading_date LIMIT 1) entry_date
-                FROM quant.strategy_daily_candidates c
-                WHERE c.as_of_date<=%s
-              ), priced AS (
-                SELECT e.*, entry.open entry_price, entry.is_suspended entry_is_suspended, entry.limit_up entry_limit_up,
-                  (SELECT close FROM quant.canonical_bars_daily b WHERE b.symbol=e.symbol AND b.trading_date>=e.entry_date
-                   ORDER BY b.trading_date OFFSET %s LIMIT 1) exit_close,
-                  benchmark_entry.close benchmark_entry_close,
-                  (SELECT close FROM quant.canonical_bars_daily b WHERE b.symbol='000300.SH' AND b.trading_date>=e.entry_date
-                   ORDER BY b.trading_date OFFSET %s LIMIT 1) benchmark_exit_close
-                FROM eligible e
-                JOIN quant.canonical_bars_daily entry ON entry.symbol=e.symbol AND entry.trading_date=e.entry_date
-                LEFT JOIN quant.canonical_bars_daily benchmark_entry ON benchmark_entry.symbol='000300.SH' AND benchmark_entry.trading_date=e.entry_date
-              )
-              SELECT * FROM priced
-              WHERE exit_close IS NOT NULL AND entry_price IS NOT NULL AND NOT entry_is_suspended
-                AND (entry_limit_up IS NULL OR entry_price<entry_limit_up*0.999)""",
-        (as_of_date, as_of_date, HORIZON_DAYS - 1, HORIZON_DAYS - 1),
-    ).fetchall()
+    if str(strategy_key).endswith("_outflow"):
+        return -1
+    if isinstance(evidence, dict) and _number(evidence.get("direction")) is not None:
+        return -1 if float(_number(evidence.get("direction"))) < 0 else 1
+    return 1
+
+
+def settle_ledger_outcomes(connection: Any, as_of_date: date) -> int:
+    """Settle every ledger candidate not yet settled under the current T+1 rule."""
+    candidates = [dict(row) for row in connection.execute(
+        """SELECT c.strategy_key,c.as_of_date candidate_date,c.symbol,c.evidence
+             FROM quant.strategy_daily_candidates c
+            WHERE c.as_of_date<%s
+              AND NOT EXISTS (
+                  SELECT 1 FROM quant.strategy_daily_candidate_outcomes settled
+                   WHERE settled.strategy_key=c.strategy_key AND settled.as_of_date=c.as_of_date
+                     AND settled.symbol=c.symbol AND settled.settlement_version=%s)""",
+        (as_of_date, SETTLEMENT_VERSION),
+    ).fetchall()]
+    if not candidates:
+        return 0
+    market = EqualWeightMarket(connection, min(row["candidate_date"] for row in candidates), as_of_date)
+    columns = ["strategy_key", "as_of_date", "symbol", "horizon_days", *settlement_columns("entry_price", "exit_price")]
     settled = 0
-    for row in rows:
-        entry_price, exit_close = Decimal(row["entry_price"]), Decimal(row["exit_close"])
-        raw_return = exit_close / entry_price - 1
-        benchmark_return = (Decimal(row["benchmark_exit_close"]) / Decimal(row["benchmark_entry_close"]) - 1
-                            if row["benchmark_exit_close"] and row["benchmark_entry_close"] else None)
-        exit_row = connection.execute(
-            """SELECT trading_date FROM quant.canonical_bars_daily WHERE symbol=%s AND trading_date>=%s
-                 ORDER BY trading_date OFFSET %s LIMIT 1""",
-            (row["symbol"], row["entry_date"], HORIZON_DAYS - 1),
-        ).fetchone()
-        path = connection.execute(
-            """SELECT high,low,close FROM quant.canonical_bars_daily
-                 WHERE symbol=%s AND trading_date>=%s AND trading_date<=%s ORDER BY trading_date""",
-            (row["symbol"], row["entry_date"], exit_row["trading_date"]),
-        ).fetchall()
-        highs = [Decimal(bar["high"] or bar["close"]) for bar in path]
-        lows = [Decimal(bar["low"] or bar["close"]) for bar in path]
-        mfe = max(highs) / entry_price - 1
-        mae = min(lows) / entry_price - 1
+    for row in candidates:
+        result = settle_idea(
+            connection, symbol=row["symbol"], signal_date=row["candidate_date"], as_of_date=as_of_date,
+            direction=candidate_direction(row["strategy_key"], row.get("evidence")), horizon_sessions=HORIZON_DAYS,
+            market=market,
+        )
+        if result["status"] != "settled":
+            continue
         connection.execute(
-            """INSERT INTO quant.strategy_daily_candidate_outcomes(
-                    strategy_key,as_of_date,symbol,entry_date,horizon_days,entry_price,exit_price,raw_return,
-                    benchmark_return,excess_return,maximum_favorable_excursion,maximum_adverse_excursion,tradability)
-               VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'observed_open')
-               ON CONFLICT(strategy_key,as_of_date,symbol) DO UPDATE SET exit_price=EXCLUDED.exit_price,
-                 raw_return=EXCLUDED.raw_return,benchmark_return=EXCLUDED.benchmark_return,
-                 excess_return=EXCLUDED.excess_return,maximum_favorable_excursion=EXCLUDED.maximum_favorable_excursion,
-                 maximum_adverse_excursion=EXCLUDED.maximum_adverse_excursion,tradability=EXCLUDED.tradability,
-                 calculated_at=now()""",
-            (row["strategy_key"], row["candidate_date"], row["symbol"], row["entry_date"], HORIZON_DAYS, row["entry_price"],
-             row["exit_close"], raw_return, benchmark_return,
-             raw_return - benchmark_return if benchmark_return is not None else None, mfe, mae),
+            f"""INSERT INTO quant.strategy_daily_candidate_outcomes({",".join(columns)})
+                VALUES({",".join(["%s"] * len(columns))})
+                ON CONFLICT(strategy_key,as_of_date,symbol) DO UPDATE SET horizon_days=EXCLUDED.horizon_days,
+                  {settlement_update_sql("entry_price", "exit_price", keys=("strategy_key", "as_of_date", "symbol"))}""",
+            (row["strategy_key"], row["candidate_date"], row["symbol"], HORIZON_DAYS, *settlement_values(result)),
         )
         settled += 1
     return settled
@@ -291,7 +348,8 @@ def settle_ledger_outcomes(connection: Any, as_of_date: date) -> int:
 
 __all__ = [
     "HORIZON_DAYS", "MATERIALIZERS", "POST_CLOSE_STRATEGY_KEYS",
-    "materialize_board_stock_mining_candidates", "materialize_ledger", "materialize_limit_linkage_candidates",
+    "materialize_board_stock_mining_candidates", "materialize_leader_flow_candidates", "materialize_ledger",
+    "materialize_limit_linkage_candidates", "materialize_teacher_review_candidates",
     "materialize_pattern_candidates", "materialize_post_close_candidates", "materialize_recommendation_candidates",
-    "materialize_ten_day_leader_candidates", "settle_ledger_outcomes",
+    "materialize_ten_day_leader_candidates", "candidate_direction", "settle_ledger_outcomes",
 ]

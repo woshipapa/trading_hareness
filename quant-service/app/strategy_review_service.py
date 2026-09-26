@@ -72,7 +72,7 @@ def build(
                   AND b.quality_status='fresh'
                   AND (
                     b.symbol ~ '^(600|601|603|605|688|689|900)[0-9]{3}\\.SH$'
-                    OR b.symbol ~ '^(000|001|002|003|300|301)[0-9]{3}\\.SZ$'
+                    OR b.symbol ~ '^(000|001|002|003|300|301|302)[0-9]{3}\\.SZ$'
                     OR b.symbol ~ '^[489][0-9]{5}\\.BJ$'
                   )
                 ORDER BY b.amount DESC NULLS LAST""",

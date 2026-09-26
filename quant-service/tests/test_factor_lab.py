@@ -7,13 +7,15 @@ from app.factor_lab import (
     factor_at, load_universe_bars, max_drawdown, pearson, rank,
     run_multi_factor_strategy,
 )
+from app.owner_storage import TIERED_EVIDENCE_TABLES
 
 
 class FactorLabTests(unittest.TestCase):
     def setUp(self):
         self.bars = [
             {"close": 10 + index * 0.2, "high": 10.3 + index * 0.2, "low": 9.8 + index * 0.2,
-             "volume": 100 + index, "adj_factor": 1.0}
+             "volume": 100 + index, "adj_factor": 1.0,
+             "provider": "tushare_primary", "raw": {}}
             for index in range(25)
         ]
 
@@ -84,6 +86,28 @@ class FactorLabTests(unittest.TestCase):
             load_universe_bars(connection, "all_a", date(2026, 8, 1), date(2026, 8, 14))
         self.assertEqual(len(connection.calls), 1)
 
+    def test_legacy_loader_uses_atomic_owner_cold_relations_after_cutover(self):
+        class Result:
+            def __init__(self, row=None): self.row = row
+            def fetchone(self): return self.row
+            def fetchall(self): return []
+
+        class Connection:
+            cursor = object()
+            def __init__(self): self.calls = []
+            def execute(self, sql, params):
+                self.calls.append((str(sql), params))
+                return Result({"count": 1}) if "count(DISTINCT" in str(sql) else Result()
+
+        connection = Connection()
+        cold = {f"{name}_cold" for name in TIERED_EVIDENCE_TABLES}
+        with patch("app.factor_lab.eligible_cold_tables", return_value=cold):
+            load_universe_bars(connection, "all_a", date(2025, 1, 1), date(2026, 3, 1))
+        bars_sql = connection.calls[-1][0]
+        for relation in ("canonical_bars_daily", "daily_adjustment_factors"):
+            self.assertIn(f"quant.{relation}_cold", bars_sql)
+            self.assertIn(f"SELECT * FROM quant.{relation} UNION ALL", bars_sql)
+
     def test_native_strategy_holds_one_session_after_next_day_entry(self):
         signal_day = date(2026, 8, 3)
         entry_day = date(2026, 8, 4)
@@ -92,11 +116,11 @@ class FactorLabTests(unittest.TestCase):
         def bars(first_close: float, second_open: float, third_close: float):
             return [
                 {"trading_date": signal_day, "open": first_close, "close": first_close,
-                 "pre_close": first_close, "adj_factor": 1.0, "is_suspended": False, "is_st": False},
+                 "pre_close": first_close, "adj_factor": 1.0, "provider": "tushare_primary", "raw": {}, "is_suspended": False, "is_st": False},
                 {"trading_date": entry_day, "open": second_open, "close": second_open,
-                 "pre_close": first_close, "adj_factor": 1.0, "is_suspended": False, "is_st": False},
+                 "pre_close": first_close, "adj_factor": 1.0, "provider": "tushare_primary", "raw": {}, "is_suspended": False, "is_st": False},
                 {"trading_date": exit_day, "open": third_close, "close": third_close,
-                 "pre_close": second_open, "adj_factor": 1.0, "is_suspended": False, "is_st": False},
+                 "pre_close": second_open, "adj_factor": 1.0, "provider": "tushare_primary", "raw": {}, "is_suspended": False, "is_st": False},
             ]
 
         panel = {

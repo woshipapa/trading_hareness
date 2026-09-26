@@ -28,6 +28,8 @@ def test_catalog_and_probe_require_shared_key_and_mark_research_only():
     )
     assert catalog.status_code == 200
     assert catalog.json()["research_only"] is True
+    assert len(catalog.json()["integration_contracts"]) == 51
+    assert all(item["live_effect"] == "none" for item in catalog.json()["integration_contracts"])
     response = http.post(
         "/api/v1/research/longhu/probe",
         headers={"X-Quant-Read-Key": "peer-key"},

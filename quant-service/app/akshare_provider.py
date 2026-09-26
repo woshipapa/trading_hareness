@@ -106,6 +106,8 @@ def _symbol_from_code(code: Any) -> str | None:
     if text.startswith(("SH", "SZ", "BJ")):
         prefix, code_text = text[:2], text[2:]
         return f"{code_text}.{prefix}" if len(code_text) == 6 and code_text.isdigit() else None
+    if text.isdigit() and len(text) < 6:
+        text = text.zfill(6)
     if len(text) != 6 or not text.isdigit():
         return None
     if text.startswith("6"):
@@ -304,6 +306,45 @@ def akshare_eastmoney_board_flow(kind: str) -> list[dict[str, Any]]:
 
 def akshare_tencent_all_a_spot() -> list[dict[str, Any]]:
     return _retry_call("stock_zh_a_spot_tx", lambda ak: ak.stock_zh_a_spot_tx())
+
+
+def normalize_tencent_all_a_spot_rows(rows: list[dict[str, Any]], exchange_date: date) -> list[dict[str, Any]]:
+    """Normalize AKShare's Tencent all-A spot table as research evidence.
+
+    The spot endpoint does not expose a per-row exchange timestamp.  The
+    requested session date is therefore carried as an explicit inferred date;
+    the result can fill a coverage snapshot but cannot become a
+    timestamp-qualified decision feed.
+    """
+    def number(value: Any) -> float | None:
+        try:
+            text = str(value).replace(",", "").replace("%", "").strip()
+            return float(text) if text and text not in {"-", "--", "nan", "None"} else None
+        except (TypeError, ValueError):
+            return None
+
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = _symbol_from_code(
+            row.get("代码") or row.get("证券代码") or row.get("股票代码") or row.get("code")
+        )
+        close = number(row.get("最新价") or row.get("现价") or row.get("收盘") or row.get("zxj"))
+        if not symbol or close is None or close <= 0:
+            continue
+        normalized.append({
+            "ts_code": symbol,
+            "name": row.get("名称") or row.get("股票名称") or row.get("name"),
+            "close": close,
+            "pct_chg": number(row.get("涨跌幅") or row.get("zdf")),
+            "vol": number(row.get("成交量") or row.get("volume")),
+            "amount": number(row.get("成交额") or row.get("turnover")),
+            "trade_date": exchange_date.strftime("%Y%m%d"),
+            "source_session_date_inferred": True,
+            "price_source": "akshare_tencent_all_a_snapshot",
+        })
+    return normalized
 
 
 def akshare_moneyflow_supplements(symbol: str) -> list[dict[str, Any]]:

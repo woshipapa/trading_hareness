@@ -80,7 +80,10 @@ def _liquidity_for(connection: Any, symbols: list[str], as_of_date: date) -> tup
     bars = {
         str(row["symbol"]): dict(row) for row in connection.execute(
             """SELECT DISTINCT ON (symbol) symbol,close,is_suspended FROM quant.canonical_bars_daily
-                 WHERE symbol=ANY(%s) AND trading_date<=%s ORDER BY symbol,trading_date DESC""",
+                 WHERE symbol=ANY(%s) AND trading_date<=%s
+                   AND quality_status='fresh'
+                   AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                 ORDER BY symbol,trading_date DESC""",
             (symbols, as_of_date),
         ).fetchall()
     }

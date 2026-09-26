@@ -293,7 +293,10 @@ def _journal_head(connection: psycopg.Connection) -> tuple[int, datetime | None]
 def export_jsonl(since: datetime, output: Any = sys.stdout) -> dict[str, Any]:
     """Write one repeatable-read, bounded evidence snapshot as JSONL."""
     emitted: dict[str, int] = {}
-    with psycopg.connect(row_factory=dict_row) as connection:
+    with psycopg.connect(
+        row_factory=dict_row,
+        application_name=os.getenv("QUANT_APPLICATION_NAME", "peer-edge-evidence-export"),
+    ) as connection:
         connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         checkpoint = connection.execute("SELECT transaction_timestamp() AS value").fetchone()["value"]
         journal_sequence = _journal_checkpoint(connection)
@@ -334,7 +337,10 @@ def export_changes(
     requested_after = parse_sequence(after_sequence)
     bounded_limit = max(1, min(CHANGE_PAGE_SIZE, int(limit)))
     replay_from = max(0, requested_after - CHANGE_REPLAY_WINDOW)
-    with psycopg.connect(row_factory=dict_row) as connection:
+    with psycopg.connect(
+        row_factory=dict_row,
+        application_name=os.getenv("QUANT_APPLICATION_NAME", "peer-edge-evidence-export"),
+    ) as connection:
         connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         checkpoint = connection.execute("SELECT transaction_timestamp() AS value").fetchone()["value"]
         if not connection.execute("SELECT to_regclass('quant.edge_evidence_changes') AS value").fetchone()["value"]:
@@ -606,7 +612,9 @@ def import_jsonl(lines: Iterable[str], *, cursor_path: Path | None = None) -> di
     has_more = False
     metadata_seen = False
     edge_runtime: dict[str, Any] = {}
-    with psycopg.connect() as connection:
+    with psycopg.connect(
+        application_name=os.getenv("QUANT_APPLICATION_NAME", "peer-edge-evidence-import"),
+    ) as connection:
         with connection.transaction():
             for raw_line in lines:
                 if not raw_line.strip():

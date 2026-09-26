@@ -89,14 +89,50 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "research", "research_enabled", "none", "bounded post-close minute-pattern discovery and replay evidence",
     ),
     "xiaojie_leader_flow": StrategyContract(
-        "xiaojie_leader_flow", "xiaojie-leader-flow-v2", "app/xiaojie_leader_flow.py",
-        "xiaojie-leader-flow-input-v1",
+        "xiaojie_leader_flow", "xiaojie-leader-flow-v3", "app/xiaojie_leader_flow.py",
+        "xiaojie-leader-flow-input-v2",
         ("intraday_quote_observations", "intraday_scan_runs", "strategy_pattern_samples", "analyst_observations"),
         "research", "shadow", "none",
         "point-in-time, research-only quantification of the 小杰夜报 leader/divergence/return-flow playbook; "
         "v2 adds a daily-bar overheat gate (distance from MA20, pre-signal 5-day run-up, sector day return/net "
         "inflow, stock-vs-sector divergence) scoped to the 潜龙出海_swing fallback mode only, calibrated from a "
-        "23-observation \"小杰交流\" event study (2026-08-26 to 09-16)",
+        "23-observation \"小杰交流\" event study (2026-08-26 to 09-16); v3 wires those inputs live and adds the "
+        "潜龙 five-evidence contract (MA convergence/box, volume marker K, pullback holding MA5/box top, sector "
+        "main line, profitable fundamentals) distilled from the 小杰交流 replies; a failed or missing item or three "
+        "overheat flags sends the reminder under a red warning with its reasons (blocking is a preregistered "
+        "switch for walk-forward comparison)",
+    ),
+    # Per-stock plans distilled from a named analyst's post-close review
+    # (video/text).  The pack is point-in-time (first session whose 09:15 open
+    # follows availability); every threshold carries T/D/I provenance.
+    "teacher_review_playbooks": StrategyContract(
+        "teacher_review_playbooks", "teacher-review-rules-v5", "app/teacher_review_rules.py",
+        "teacher-review-pack-v1",
+        ("intraday_rule_input_snapshots", "intraday_signal_events", "raw_market_observations"),
+        "intraday_edge", "shadow", "none",
+        "research-only quantification of an analyst's next-session plan per stock: relay (auction amount, "
+        "acceleration amount window, first-seal amount) and trend (MA reclaim, platform/prior-high breakout, "
+        "MA10 second wave, MA60 reclaim) playbooks, with post-close forecast settlement",
+    ),
+    # Pre-seal "attack" detection that feeds the 小杰 observation table; it had
+    # no contract of its own, so its evidence carried no registered identity.
+    "launch_radar": StrategyContract(
+        "launch_radar", "launch-radar-v1", "app/launch_radar.py",
+        "launch-radar-input-v1",
+        ("intraday_quote_observations", "intraday_scan_runs"),
+        "intraday_edge", "shadow", "none",
+        "research-only pre-limit launch detection: admitted at +5% (warm from +3%) only with a volume burst "
+        "against the name's own 5-day baseline, a sealed anchor in a shared concept and +1.5% within 180 s; "
+        "observations settle with the leader-flow outcomes",
+    ),
+    "longhu_multifactor_shadow": StrategyContract(
+        "longhu_multifactor_shadow", "longhu-multifactor-shadow-v1", "app/longhu_multifactor_shadow.py",
+        "longhu-multifactor-v1",
+        ("raw_market_observations", "intraday_quote_observations", "intraday_rule_input_snapshots",
+         "intraday_scan_runs", "strategy_candidates"),
+        "research", "shadow", "none",
+        "Longhu quote/minute/order-book/auction/large-order/board context scorer; "
+        "all outputs remain research-only until point-in-time replay and promotion gates pass",
     ),
 }
 

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
+import logging
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..security import raw_overflow_archive_allowed
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class RawOverflowOffset(BaseModel):
@@ -68,7 +72,11 @@ def build_raw_overflow_router(deps: RawOverflowDependencies) -> APIRouter:
                 partial(deps.next_batch, deps.database, stream=stream_key, limit=limit, config=deps.config()), timeout_seconds=30,
             )
         except ValueError as error:
+            LOGGER.error("raw overflow next rejected stream=%s limit=%s error=%s", stream_key, limit, error, exc_info=True)
             raise HTTPException(status_code=400, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001 - boundary must expose durable evidence
+            LOGGER.exception("raw overflow next database failure stream=%s limit=%s", stream_key, limit)
+            raise HTTPException(status_code=503, detail="raw overflow source unavailable") from error
 
     @router.post(f"{prefix}/ack")
     async def raw_overflow_ack(request: Request, payload: RawOverflowAckRequest) -> dict[str, Any]:
@@ -78,7 +86,11 @@ def build_raw_overflow_router(deps: RawOverflowDependencies) -> APIRouter:
                 partial(deps.acknowledge, deps.database, payload=payload.model_dump(mode="json"), config=deps.config()), timeout_seconds=30,
             )
         except ValueError as error:
+            LOGGER.error("raw overflow ack rejected stream=%s batch=%s error=%s", payload.stream_key, payload.batch_id, error, exc_info=True)
             raise HTTPException(status_code=409, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001
+            LOGGER.exception("raw overflow ack database failure stream=%s batch=%s", payload.stream_key, payload.batch_id)
+            raise HTTPException(status_code=503, detail="raw overflow source unavailable") from error
 
     @router.post(f"{prefix}/failure")
     async def raw_overflow_failure(request: Request, payload: RawOverflowFailureRequest) -> dict[str, Any]:
@@ -88,7 +100,11 @@ def build_raw_overflow_router(deps: RawOverflowDependencies) -> APIRouter:
                 partial(deps.failure, deps.database, payload=payload.model_dump(mode="json"), config=deps.config()), timeout_seconds=20,
             )
         except ValueError as error:
+            LOGGER.error("raw overflow failure report rejected stream=%s error=%s", payload.stream_key, error, exc_info=True)
             raise HTTPException(status_code=400, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001
+            LOGGER.exception("raw overflow failure report database failure stream=%s", payload.stream_key)
+            raise HTTPException(status_code=503, detail="raw overflow source unavailable") from error
 
     return router
 

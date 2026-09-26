@@ -21,11 +21,15 @@ importing ``app.datasources.sources``.
 """
 
 from .catalog import CAPABILITIES, SOURCES, bindings_for, catalog_document, evidence_locations, validate_catalog
-from .contracts import Binding, Capability, CapabilityRequirement, DataSource, StrategyDataNeeds
+from .contracts import (
+    Binding, Capability, CapabilityEvidence, CapabilityRequest, CapabilityRequirement, DataSource, PURPOSES,
+    QUALITY_STATUSES, QualityReceipt, StrategyDataNeeds,
+)
 from .resolver import CapabilityResolver, CapabilityResult, CapabilityUnavailable
 
 __all__ = [
-    "Binding", "CAPABILITIES", "Capability", "CapabilityRequirement", "CapabilityResolver", "CapabilityResult",
-    "CapabilityUnavailable", "DataSource", "SOURCES", "StrategyDataNeeds", "bindings_for", "catalog_document",
-    "evidence_locations", "validate_catalog",
+    "Binding", "CAPABILITIES", "Capability", "CapabilityEvidence", "CapabilityRequest", "CapabilityRequirement",
+    "CapabilityResolver", "CapabilityResult", "CapabilityUnavailable", "DataSource", "PURPOSES", "QUALITY_STATUSES",
+    "QualityReceipt", "SOURCES", "StrategyDataNeeds", "bindings_for", "catalog_document", "evidence_locations",
+    "validate_catalog",
 ]

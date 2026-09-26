@@ -19,7 +19,10 @@ class SentimentTests(unittest.TestCase):
         self.assertEqual(limit_ratio_pct("300750.SZ"), 20.0)
         self.assertEqual(limit_ratio_pct("688981.SH"), 20.0)
         self.assertEqual(limit_ratio_pct("920819.BJ"), 30.0)
-        self.assertEqual(limit_ratio_pct("600000.SH", "*ST 某某"), 5.0)
+        self.assertEqual(limit_ratio_pct("302132.SZ"), 20.0)
+        # Main-board ST moved from 5% to 10% on 2026-07-06.
+        self.assertEqual(limit_ratio_pct("600000.SH", "*ST 某某", "20260703"), 5.0)
+        self.assertEqual(limit_ratio_pct("600000.SH", "*ST 某某", "20260706"), 10.0)
 
     def test_ladder_and_layered_promotion(self):
         today = ladder([{"thscode": "A", "continue_day_cnt": 3}, {"thscode": "B", "continue_day_cnt": 1},

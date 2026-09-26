@@ -54,6 +54,8 @@ class AvailabilityAwareFeatureReadTests(unittest.TestCase):
         fundamental_sql, fundamental_params = next(item for item in connection.calls if "FROM quant.daily_fundamentals" in item[0])
         self.assertIn("bar.available_at<=%s", bar_sql)
         self.assertEqual(bar_params[-1], cutoff)
+        self.assertIn("adjustment.available_at<=%s", bar_sql)
+        self.assertEqual(bar_params[0], cutoff)
         self.assertIn("available_at<=%s", fundamental_sql)
         self.assertEqual(fundamental_params[-1], cutoff)
     def test_daily_cutoff_is_the_end_of_the_exchange_day_in_shanghai(self):

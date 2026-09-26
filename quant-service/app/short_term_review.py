@@ -14,6 +14,8 @@ from collections import Counter
 from statistics import mean
 from typing import Any
 
+from .market_rules import a_share_limit_ratio
+
 
 def _number(value: Any) -> float | None:
     if value is None or value == "":
@@ -77,12 +79,7 @@ def _limit_value(payload: dict[str, Any], *keys: str) -> float | None:
 
 
 def _limit_ratio(symbol: str) -> float:
-    code = str(symbol or "")[:3]
-    if code in {"300", "301", "688", "689"}:
-        return 20.0
-    if code.startswith(("8", "4")):
-        return 30.0
-    return 10.0
+    return a_share_limit_ratio(str(symbol or "")) * 100
 
 
 def _bar_change_pct(row: dict[str, Any], field: str) -> float | None:

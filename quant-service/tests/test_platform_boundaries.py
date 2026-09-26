@@ -258,11 +258,11 @@ class PlatformBoundaryTests(unittest.TestCase):
 
         sync_runtime_provider_rate_limits(connection, {"primary": primary, "super_get": super_get})
 
-        self.assertEqual(connection.execute.call_count, 4)
+        self.assertEqual(connection.execute.call_count, 2)
         first_rate_update = connection.execute.call_args_list[0]
-        self.assertEqual(first_rate_update.args[1], (61, "tushare_primary"))
+        self.assertEqual(first_rate_update.args[1], (17, "tushare_super_get"))
         first_metadata_update = connection.execute.call_args_list[1]
-        self.assertEqual(first_metadata_update.args[1], (61, "tushare_primary"))
+        self.assertEqual(first_metadata_update.args[1], (17, "tushare_super_get"))
         self.assertIn("runtime_environment", first_metadata_update.args[0])
 
     def test_metrics_refreshes_local_circuit_gauge_without_provider_io(self):
@@ -509,7 +509,7 @@ class PlatformBoundaryTests(unittest.TestCase):
 
         self.assertEqual(payload["timezone"], "Asia/Shanghai")
         self.assertEqual([item["key"] for item in payload["items"]][-1], "primary_realtime")
-        self.assertEqual(next(item for item in payload["items"] if item["key"] == "primary_realtime")["state"], "unavailable")
+        self.assertEqual(next(item for item in payload["items"] if item["key"] == "primary_realtime")["state"], "retired")
         order_book = next(item for item in payload["items"] if item["key"] == "tencent_order_book")
         self.assertEqual(order_book["details"]["max_symbols"], 40)
         self.assertEqual(order_book["details"]["uncovered_watch_count"], 0)
@@ -774,6 +774,7 @@ class PlatformBoundaryTests(unittest.TestCase):
         self.assertEqual(methods_by_path["/api/v1/providers/tushare/catalog"], {"GET"})
         self.assertEqual(methods_by_path["/api/v1/providers/capabilities"], {"GET"})
         self.assertEqual(methods_by_path["/api/v1/providers/health"], {"GET"})
+        self.assertEqual(methods_by_path["/api/v1/providers/realtime-health"], {"GET"})
 
     def test_strategy_pattern_read_model_and_router_are_local_get_only(self):
         connection = MagicMock()
@@ -828,6 +829,10 @@ class PlatformBoundaryTests(unittest.TestCase):
         availability_gate = next(item for item in unclocked_minutes["gates"]
                                  if item["key"] == "p2_offline_minute_availability_clock")
         self.assertEqual(availability_gate["status"], "insufficient")
+        self.assertEqual(availability_gate["required"], P3_MIN_REPLAY_DAYS)
+        replay_gate = next(item for item in unclocked_minutes["gates"]
+                           if item["key"] == "p3_replay_window")
+        self.assertEqual(replay_gate["observed"], 0)
         self.assertFalse(unclocked_minutes["p2_data_foundation_ready"])
 
         ready = replay_readiness_payload({
@@ -1394,7 +1399,8 @@ class PlatformBoundaryTests(unittest.TestCase):
         self.assertEqual(a_share_limit_ratio("300750.SZ"), 0.20)
         self.assertEqual(a_share_limit_ratio("688001.SH"), 0.20)
         self.assertEqual(a_share_limit_ratio("830001.BJ"), 0.30)
-        self.assertEqual(a_share_limit_ratio("600000.SH", True), 0.05)
+        self.assertEqual(a_share_limit_ratio("600000.SH", True, date(2026, 7, 3)), 0.05)
+        self.assertEqual(a_share_limit_ratio("600000.SH", True, date(2026, 7, 6)), 0.10)
         self.assertTrue(is_st_security_name("*ST美丽"))
         self.assertTrue(is_st_security_name("ST海王"))
         self.assertFalse(is_st_security_name("东方财富"))

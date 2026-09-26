@@ -59,6 +59,7 @@ def signal_event_state(signal: dict[str, Any], *, observed_at: datetime,
     key_duplicate = last_key_alerted_at is not None and recent and not material_change
     symbol_watch_duplicate = (
         signal["signal_type"] == "watch" and not signal.get("stage_upgrade")
+        and signal.get("policy_profile") != "teacher_review"
         and last_symbol_watch_alerted_at is not None
         and observed_at - last_symbol_watch_alerted_at <= alert_cooldown
     )

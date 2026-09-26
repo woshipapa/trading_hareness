@@ -51,6 +51,12 @@ def roll_paper_positions_sellable(connection: Any, *, trading_date: Any) -> int:
     return max(0, int(result.rowcount or 0))
 
 
+#: A fill needs a price from the moment of acceptance.  The age was recorded
+#: but never enforced, so a decision accepted long after the last capture was
+#: filled at a stale price.  Watch quotes refresh every 10-30 seconds.
+MAX_FILL_QUOTE_AGE_SECONDS = 300
+
+
 def _latest_local_quote(connection: Any, symbol: str, at_or_before: datetime) -> dict[str, Any] | None:
     row = connection.execute(
         """SELECT source_name,observed_at,price,pct_change,raw FROM quant.intraday_quote_observations
@@ -105,6 +111,9 @@ def accept_paper_decision(connection: Any, *, decision_id: Any, quantity: int,
         reasons.append("paper_account_not_configured")
     if quote is None or quote_price <= 0:
         reasons.append("no_usable_local_quote")
+    elif isinstance(quote.get("observed_at"), datetime) and (
+            accepted_at - quote["observed_at"]).total_seconds() > MAX_FILL_QUOTE_AGE_SECONDS:
+        reasons.append("local_quote_stale")
     elif side == "buy" and _number(account["cash"]) < gross + _number(costs["total_cost"]):
         reasons.append("insufficient_paper_cash")
     allowed = bool(tradability.allowed and not reasons)

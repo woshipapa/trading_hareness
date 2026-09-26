@@ -20,7 +20,7 @@ apply=false
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_sha="$(git -C "$repo_root" rev-parse --verify "${release_ref}^{commit}")"
 built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-release_paths=(quant-service feishu-adapter frontend compose.yaml scripts/audit-fuyao-capabilities.py scripts/deploy-local-research-release.sh)
+release_paths=(quant-service feishu-relay frontend compose.yaml scripts/audit-fuyao-capabilities.py scripts/deploy-local-research-release.sh)
 github_branch="${QUANT_RELEASE_GITHUB_BRANCH:-main}"
 [[ "$github_branch" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid GitHub branch" >&2; exit 2; }
 

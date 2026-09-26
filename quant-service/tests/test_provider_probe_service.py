@@ -30,7 +30,7 @@ class ProviderProbeServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result["status"], "skipped")
-        self.assertEqual(len(result["results"]), 3)
+        self.assertEqual(len(result["results"]), 2)
         self.assertTrue(all(item["availability"] == "unsupported" for item in result["results"]))
         self.assertEqual(fetched, [])
 

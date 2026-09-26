@@ -113,7 +113,34 @@ def session_observations(connection: Any, trading_date: date) -> list[dict[str, 
     return [dict(row) for row in rows]
 
 
+def unalerted_research_candidates(connection: Any, trading_date: date, mode: str) -> list[dict[str, Any]]:
+    """Read persisted candidates that became alertable after a policy change.
+
+    The normal write path returns only newly inserted observations. That is
+    correct for deduplication, but it would strand an already-recorded
+    candidate when the alert policy is deliberately widened. ``alerted_at``
+    keeps this recovery read idempotent across the scan loop.
+    """
+    rows = connection.execute(
+        """SELECT symbol,mode,decision,target_fraction,risk_flags,reasons,last_evidence
+             FROM quant.xiaojie_leader_flow_observations
+            WHERE trading_date=%s AND mode=%s AND decision='research_candidate'
+              AND alerted_at IS NULL
+            ORDER BY last_seen_at DESC""",
+        (trading_date, mode),
+    ).fetchall()
+    return [{
+        "symbol": row["symbol"],
+        "mode": row["mode"],
+        "decision": row["decision"],
+        "position": {"target_fraction": row["target_fraction"]},
+        "risk_flags": row["risk_flags"] or [],
+        "reasons": row["reasons"] or [],
+        "evidence": row["last_evidence"] or {},
+    } for row in rows]
+
+
 __all__ = [
     "alerted_count", "mark_alerted", "persist_scan_status", "record_candidates",
-    "session_observations",
+    "session_observations", "unalerted_research_candidates",
 ]

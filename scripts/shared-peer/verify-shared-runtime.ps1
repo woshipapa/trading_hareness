@@ -3,6 +3,11 @@ param(
     [string]$RuntimeEnv = 'G:\StockPlatform\config\runtime.env',
     [string]$ApiBase = 'http://127.0.0.1:5681',
     [string]$SshAlias = 'lightServer1',
+    [string]$SshHost = $env:PEER_SSH_HOST,
+    [int]$SshPort = 0,
+    [string]$SshUser = $env:PEER_SSH_USER,
+    [string]$SshKeyPath = $env:PEER_SSH_KEY_PATH,
+    [string]$KnownHostsPath = $env:PEER_KNOWN_HOSTS_PATH,
     [int]$RemoteDatabasePort = 15432,
     [int]$RemoteApiPort = 15681,
     [string]$PeerApiBase = ''
@@ -35,7 +40,22 @@ $quote = Invoke-RestMethod -Uri "$ApiBase/licensed/longhu/quotes?symbols=600664.
     -Headers $headers -TimeoutSec 35
 if (@($quote.rows).Count -ne 1) { throw 'Licensed read gateway did not return the requested quote' }
 
-$remotePorts = & ssh.exe -o BatchMode=yes $SshAlias `
+$sshTarget = $SshAlias
+$targetArguments = @('-o', 'BatchMode=yes')
+if (-not [string]::IsNullOrWhiteSpace($SshHost)) {
+    if ($SshPort -le 0 -and -not [string]::IsNullOrWhiteSpace($env:PEER_SSH_PORT)) {
+        $SshPort = [int]$env:PEER_SSH_PORT
+    }
+    $sshTarget = if ([string]::IsNullOrWhiteSpace($SshUser)) { $SshHost } else { "$SshUser@$SshHost" }
+    if ($SshPort -gt 0) { $targetArguments += @('-p', [string]$SshPort) }
+}
+if (-not [string]::IsNullOrWhiteSpace($SshKeyPath)) {
+    $targetArguments += @('-i', $SshKeyPath, '-o', 'IdentitiesOnly=yes')
+}
+if (-not [string]::IsNullOrWhiteSpace($KnownHostsPath)) {
+    $targetArguments += @('-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$KnownHostsPath")
+}
+$remotePorts = & ssh.exe @targetArguments $sshTarget `
     "ss -lnt | grep -E '127.0.0.1:($RemoteDatabasePort|$RemoteApiPort)' | wc -l"
 if ([int]$remotePorts -lt 2) { throw 'Both reverse-tunnel loopback ports are not available on lightServer' }
 

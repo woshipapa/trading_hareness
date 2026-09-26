@@ -305,6 +305,16 @@ async def capture_watch_quotes(
                     max_age_seconds=quote_timestamp_slo_seconds,
                 )
                 dependencies.merge_licensed_prices(quotes, accepted)
+                # A licensed row that missed the price freshness SLO still
+                # carries the session's pre-close/open and a slightly older
+                # cumulative book.  Keep it beside the chosen price for rules
+                # that need those fields; it never becomes the price source.
+                accepted_symbols = {str(r.get("ts_code") or r.get("symbol") or "").upper() for r in accepted}
+                for row in licensed_watch_rows:
+                    symbol = str(row.get("ts_code") or row.get("symbol") or "").upper()
+                    if symbol in quotes and symbol not in accepted_symbols:
+                        raw = quotes[symbol].get("raw") if isinstance(quotes[symbol].get("raw"), dict) else {}
+                        quotes[symbol]["raw"] = {**raw, "longhu_watch_quote_unfresh": row}
                 licensed_watch_status.update({
                     "priority": "primary_when_fresh", "eligible_symbols": len(accepted),
                     "rejected_symbols": rejected,

@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, NoReturn
 
 import requests
 
@@ -252,8 +252,22 @@ def shared_longhu_source_factory() -> SharedLonghuFullMarketSource:
     return SharedLonghuFullMarketSource()
 
 
+def owner_factor_task(*_args: Any, **_kwargs: Any) -> NoReturn:
+    """Reject attempts to derive owner adjustment factors on the peer.
+
+    The catalog keeps the owner-maintained ``longhu_qfq_derived`` binding
+    visible for provenance, but this checkout is a gateway consumer.  Factor
+    derivation requires the owner's Longhu close job and must be read back
+    from ``quant.daily_adjustment_factors``; silently deriving a second series
+    here would break the provider/availability contract.
+    """
+    raise RuntimeError(
+        "longhu_qfq_derived is owner-only; peer must read the persisted factor task output"
+    )
+
+
 __all__ = [
     "DEFAULT_WORKERS", "MEMBER_MAX_PAGES", "MINIMUM_PLATES",
-    "SharedLonghuFullMarketSource", "gateway_workers", "parse_catalog_row",
-    "shared_longhu_source_factory",
+    "SharedLonghuFullMarketSource", "gateway_workers", "owner_factor_task",
+    "parse_catalog_row", "shared_longhu_source_factory",
 ]

@@ -35,6 +35,9 @@ class StockStudyReadinessRepositoryTests(unittest.TestCase):
         self.assertEqual(result["blockers"], ["daily_basic"])
         self.assertEqual(len(result["items"]), 10)
         self.assertTrue(all("FROM quant." in sql for sql, _ in database.connection.calls))
+        factor_sql = next(sql for sql, _ in database.connection.calls if "daily_adjustment_factors" in sql)
+        self.assertIn("count(DISTINCT trading_date)", factor_sql)
+        self.assertIn("FROM quant.daily_adjustment_factors factor", factor_sql)
 
     def test_stock_claim_summary_is_text_only_and_does_not_promote_live_weight(self) -> None:
         class Result:

@@ -107,6 +107,25 @@ class StrategyHealthReadModelTests(unittest.TestCase):
 
 
 class ReplayReadinessRepositoryTests(unittest.TestCase):
+    def test_stale_materialized_coverage_fails_closed_without_fallback_scan(self) -> None:
+        class Result:
+            def __init__(self, row): self.row = row
+            def fetchone(self): return self.row
+
+        connection = MagicMock()
+        connection.execute.side_effect = [
+            Result(None),
+            Result({"value": "quant.replay_readiness_daily_coverage"}),
+            Result({"daily_bar_days": 0}),
+        ]
+        database = MagicMock()
+        database.transaction.return_value.__enter__.return_value = connection
+
+        payload = historical_replay_readiness(database)
+
+        self.assertEqual(payload["evidence"]["readiness_query_status"], "coverage_stale")
+        self.assertEqual(connection.execute.call_count, 3)
+
     def test_full_cross_section_uses_point_in_time_universe_and_daily_controls(self) -> None:
         connection = MagicMock()
         connection.execute.return_value.fetchone.return_value = {
@@ -122,7 +141,7 @@ class ReplayReadinessRepositoryTests(unittest.TestCase):
         database.transaction.return_value.__enter__.return_value = connection
 
         payload = historical_replay_readiness(database)
-        sql = connection.execute.call_args.args[0]
+        sql = "\n".join(call.args[0] for call in connection.execute.call_args_list)
 
         self.assertIn("universe_membership_history", sql)
         self.assertIn("daily_fundamentals", sql)
@@ -131,9 +150,11 @@ class ReplayReadinessRepositoryTests(unittest.TestCase):
         self.assertIn("limits.available_at", sql)
         self.assertIn("bars.available_at", sql)
         self.assertIn("quality_status='fresh'", sql)
+        self.assertIn("adj_factor>0", sql)
+        self.assertIn("SET LOCAL statement_timeout", sql)
         self.assertEqual(
             payload["coverage_definition"],
-            "point_in_time_all_a_membership_with_daily_bars_fundamentals_and_trade_limits_at_80pct_min_1000",
+            "point_in_time_all_a_membership_with_complete_adjusted_daily_bars_fundamentals_and_trade_limits_at_80pct_min_1000",
         )
 
 

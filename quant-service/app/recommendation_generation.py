@@ -10,6 +10,20 @@ from typing import Any, Callable
 from .stable_json import stable_json
 
 
+CURRENT_CLOSE_MISSING_FLAG = "current_close_missing"
+
+
+def current_close_available(feature: dict[str, Any], as_of_date: date) -> bool:
+    """Require the feature snapshot to contain the requested session's close.
+
+    The v4 recommendation contract is explicitly close-based.  A prior
+    session's bar remains useful evidence for diagnostics, but it must not be
+    presented as a recommendation for ``as_of_date``.
+    """
+    market_data_date = feature.get("market_data_date")
+    return market_data_date is not None and str(market_data_date) == as_of_date.isoformat()
+
+
 def generate(
     request: Any,
     *,
@@ -34,6 +48,8 @@ def generate(
         for item in materialized["items"]:
             feature = item["features"]
             flags = list(item["quality_flags"])
+            if not current_close_available(feature, as_of_date):
+                flags.append(CURRENT_CLOSE_MISSING_FLAG)
             close, sma20 = number(feature.get("close"), None), number(feature.get("sma_20"), None)
             return_5, return_20 = number(feature.get("return_5"), None), number(feature.get("return_20"), None)
             flow_rate = number((feature.get("moneyflow_dc") or {}).get("net_amount_rate"), None)
@@ -55,7 +71,7 @@ def generate(
                                        applied_weight=applied_analyst_weight,
                                        risk_penalty=risk_penalty)
             signal = (ablation["applied_score"] - 50.0) / 50.0
-            hard_flags = {"ST", "suspended", "missing_market_data", "insufficient_history_20", "adj_factor_missing", "corporate_action_unresolved"}
+            hard_flags = {"ST", "suspended", "missing_market_data", "insufficient_history_20", "adj_factor_missing", "corporate_action_unresolved", CURRENT_CLOSE_MISSING_FLAG}
             penalty = min(0.35, 0.07 * len(set(flags)))
             score = max(0.0, min(100.0, 50 + 50 * signal - 100 * penalty))
             direction = 1 if signal >= 0.14 else -1 if signal <= -0.14 else 0
@@ -102,4 +118,4 @@ def generate(
     return {"run_id": str(run_id), "as_of_date": str(as_of_date), "market_regime": regime, "snapshot_key": materialized["snapshot_key"], "recommendations": candidates[:request.limit]}
 
 
-__all__ = ["generate"]
+__all__ = ["CURRENT_CLOSE_MISSING_FLAG", "current_close_available", "generate"]

@@ -21,6 +21,8 @@ import uuid
 from datetime import datetime
 from typing import Any, Callable, Mapping
 
+from .stable_json import tolerant_json
+
 #: Kept distinct from the watchlist stages so a decision-path consumer that
 #: selects on those can never pick these up.
 STAGE = "paper_auto_execution"
@@ -46,8 +48,9 @@ def persist_signal_event(connection: Any, order: Mapping[str, Any],
            VALUES(%s,NULL,%s,%s,%s,'info','confirmed',0,%s,%s,%s,%s,%s)""",
         (event_id, order["symbol"], signal_key(order),
          "entry" if order.get("side") == "buy" else "exit",
-         observed_at, json_safe(dict(order)), json_safe({"boundary": "paper_simulation_only"}),
-         json_safe(list(order.get("risk_flags") or [])), STAGE),
+         observed_at, tolerant_json(json_safe(dict(order))),
+         tolerant_json(json_safe({"boundary": "paper_simulation_only"})),
+         tolerant_json(json_safe(list(order.get("risk_flags") or []))), STAGE),
     )
     return event_id
 

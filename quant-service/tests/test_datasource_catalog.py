@@ -34,7 +34,13 @@ class CatalogTests(unittest.TestCase):
                     root = SERVICE_ROOT
                 self.assertTrue((root / path).is_file(), f"{binding.source}->{binding.capability}: {path}")
         for source in SOURCES.values():
-            self.assertTrue((SERVICE_ROOT / source.module).is_file(), source.module)
+                self.assertTrue((SERVICE_ROOT / source.module).is_file(), source.module)
+
+    def test_owner_factor_binding_is_explicitly_peer_blocked(self):
+        from app.longhu_shared_full_market import owner_factor_task
+
+        with self.assertRaisesRegex(RuntimeError, "owner-only"):
+            owner_factor_task()
 
     def test_credentials_are_names_never_values(self):
         for source in SOURCES.values():
@@ -155,11 +161,18 @@ class MigrationPinTests(unittest.TestCase):
         self.assertEqual(primary_source("quote.all_a_snapshot"), "fuyao_ths")
         self.assertEqual(primary_store_value("flow.stock_daily", "stock_money_flow_daily", "source"), "longhuvip_main_net")
         self.assertEqual(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")[:2],
-                         ("tushare_primary", "tushare_super_sdk"))
+                         ("longhu_qfq_derived", "tushare_super_sdk"))
         self.assertEqual(store_values("fundamentals.daily_basic", "daily_fundamentals", "provider"),
                          ("tushare_super_get", "longhuvip_composite"))
         self.assertNotIn("fuyao_ths_concept", taxonomies_for(["ths_concept"]))       # declared, not proven
         self.assertIn("fuyao_ths_concept", taxonomies_for(["ths_concept"], min_status="declared"))
+
+    def test_order_book_storage_declares_real_relation_and_source(self):
+        longhu = [b for b in bindings_for("quote.order_book") if b.source == "longhuvip"][0]
+        tencent = [b for b in bindings_for("quote.order_book") if b.source == "tencent_free"][0]
+        self.assertEqual(longhu.store, "intraday_quote_observations:source_name=longhu_order_book")
+        self.assertEqual(tencent.store, "intraday_quote_observations:source_name=tencent_order_book")
+        self.assertNotIn("intraday_order_book_observations", longhu.store)
 
 
 class ResolverTests(unittest.IsolatedAsyncioTestCase):

@@ -81,7 +81,7 @@ class LimitUpContinuationIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._cleanup()
         self.addCleanup(self._cleanup)
-        stamp = datetime(2099, 7, 2, tzinfo=timezone.utc)
+        stamp = datetime(2099, 6, 1, tzinfo=timezone.utc)
         import datetime as _dt
         with db.transaction() as connection:
             for symbol in self.symbols:
@@ -120,7 +120,7 @@ class LimitUpContinuationIntegrationTests(unittest.TestCase):
         # (as_of_date, symbol) is unique, so overlapping sources must merge
         # rather than each insert their own row.
         from app.watchlist_candidate_proposals import materialize_watchlist_proposals
-        stamp = datetime(2099, 7, 2, tzinfo=timezone.utc)
+        stamp = datetime(2099, 6, 1, tzinfo=timezone.utc)
         with db.transaction() as connection:
             connection.execute(
                 """INSERT INTO quant.disclosure_schedule(symbol,period,provider,pre_date,available_at)

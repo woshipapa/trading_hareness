@@ -14,11 +14,14 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable
+from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json
 
 from .platform.strategy_data_needs import strategy_taxonomies
 from .sector_membership_repository import point_in_time_membership_predicate, sector_group_predicate
+
+_CHINA = ZoneInfo("Asia/Shanghai")
 
 #: Sessions used for the breakout high and the recent-behaviour counters.
 LOOKBACK_SESSIONS = 20
@@ -300,6 +303,140 @@ def candidate_references(connection: Any, trading_date: date) -> dict[str, dict[
     return references
 
 
+#: Completed sessions searched for a 潜龙 marker K and the MA-convergence low.
+QIANLONG_MARKER_LOOKBACK = 10
+#: A marker K closes above its prior 20-session box on this multiple of the
+#: prior five sessions' mean volume - the same bar as an intraday breakout.
+QIANLONG_MARKER_VOLUME_RATIO = 1.5
+#: Sessions behind the overhead-pressure high (前高/套牢盘).
+PRESSURE_LOOKBACK_SESSIONS = 60
+#: Sessions a name needs before "no marker K found" is a real absence rather
+#: than a short history: the deepest marker needs its own 20-session box.
+QIANLONG_MIN_HISTORY_SESSIONS = QIANLONG_MARKER_LOOKBACK + 20
+#: A fundamentals row older than this no longer describes the session.
+FUNDAMENTAL_MAX_AGE_DAYS = 20
+
+
+def qianlong_references(connection: Any, trading_date: date) -> dict[str, dict[str, Any]]:
+    """Per-symbol daily inputs for the 潜龙 contract and overheat check.
+
+    All from completed sessions before ``trading_date``:
+
+    * ``ma_spread_min_10d_pct`` - the tightest MA5/MA10/MA20 spread over the
+      last ten sessions (均线收敛 before the move, not after it);
+    * the most recent marker K in that window - a close above the prior
+      20-session box on 1.5x the prior five sessions' volume - with its
+      sessions-ago, box top and box range;
+    * ``close_5_sessions_before`` for the pre-signal five-session run-up;
+    * ``high_60d`` for the overhead pressure (前高) check;
+    * ``fundamental_pe`` - the latest PE a provider published before the
+      session, which Longhu reports negative for a loss-maker.
+    """
+    rows = connection.execute(
+        """WITH bars AS (
+              SELECT symbol, trading_date, high, low, close, volume,
+                     row_number() OVER (PARTITION BY symbol ORDER BY trading_date DESC) AS rn,
+                     count(*) OVER w20 AS n20,
+                     avg(close) OVER (PARTITION BY symbol ORDER BY trading_date
+                                      ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS ma5,
+                     avg(close) OVER (PARTITION BY symbol ORDER BY trading_date
+                                      ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) AS ma10,
+                     avg(close) OVER w20 AS ma20,
+                     max(high) OVER box AS box_high, min(low) OVER box AS box_low, count(*) OVER box AS box_n,
+                     avg(volume) OVER (PARTITION BY symbol ORDER BY trading_date
+                                       ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING) AS prior_volume
+                FROM quant.canonical_bars_daily
+               WHERE trading_date < %s AND trading_date >= %s - INTERVAL '150 days'
+                 AND volume > 0 AND NOT coalesce(is_suspended, false)
+              WINDOW w20 AS (PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW),
+                     box AS (PARTITION BY symbol ORDER BY trading_date ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING)
+           ), summary AS (
+              SELECT symbol,
+                     count(*) AS sessions,
+                     max(close) FILTER (WHERE rn = 6) AS close_5_sessions_before,
+                     max(ma10) FILTER (WHERE rn = 1) AS ma10,
+                     max(high) FILTER (WHERE rn <= %s) AS high_60d,
+                     min((greatest(ma5, ma10, ma20) - least(ma5, ma10, ma20)) / nullif(least(ma5, ma10, ma20), 0) * 100)
+                       FILTER (WHERE rn <= %s AND n20 = 20) AS ma_spread_min_10d_pct
+                FROM bars GROUP BY symbol
+           ), markers AS (
+              SELECT DISTINCT ON (symbol) symbol, rn AS marker_k_sessions_ago, box_high AS marker_box_top,
+                     (box_high - box_low) / nullif(box_low, 0) * 100 AS marker_box_range_pct
+                FROM bars
+               WHERE rn <= %s AND box_n = 20 AND prior_volume > 0
+                 AND close > box_high AND volume >= %s * prior_volume
+               ORDER BY symbol, rn
+           ), fundamentals AS (
+              SELECT DISTINCT ON (symbol) symbol, pe, trading_date AS fundamental_date, provider AS fundamental_provider
+                FROM quant.daily_fundamentals
+               WHERE trading_date < %s AND trading_date >= %s - make_interval(days => %s) AND pe IS NOT NULL
+               ORDER BY symbol, trading_date DESC, provider
+           )
+           SELECT summary.*, markers.marker_k_sessions_ago, markers.marker_box_top, markers.marker_box_range_pct,
+                  fundamentals.pe AS fundamental_pe, fundamentals.fundamental_date, fundamentals.fundamental_provider
+             FROM summary
+             LEFT JOIN markers USING (symbol)
+             LEFT JOIN fundamentals USING (symbol)""",
+        (trading_date, trading_date, PRESSURE_LOOKBACK_SESSIONS, QIANLONG_MARKER_LOOKBACK,
+         QIANLONG_MARKER_LOOKBACK, QIANLONG_MARKER_VOLUME_RATIO,
+         trading_date, trading_date, FUNDAMENTAL_MAX_AGE_DAYS),
+    ).fetchall()
+
+    def number(value: Any) -> float | None:
+        return float(value) if value is not None else None
+
+    references: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        references[str(row["symbol"])] = {
+            "daily_history_complete": int(row["sessions"] or 0) >= QIANLONG_MIN_HISTORY_SESSIONS,
+            "close_5_sessions_before": number(row["close_5_sessions_before"]),
+            "ma10": number(row["ma10"]),
+            "high_60d": number(row["high_60d"]),
+            "ma_spread_min_10d_pct": number(row["ma_spread_min_10d_pct"]),
+            "marker_k_sessions_ago": int(row["marker_k_sessions_ago"]) if row["marker_k_sessions_ago"] is not None else None,
+            "marker_box_top": number(row["marker_box_top"]),
+            "marker_box_range_pct": number(row["marker_box_range_pct"]),
+            "fundamental": {
+                "pe": number(row["fundamental_pe"]),
+                "trading_date": row["fundamental_date"].isoformat() if row["fundamental_date"] else None,
+                "provider": row["fundamental_provider"],
+            },
+        }
+    return references
+
+
+#: The licensed board-flow point the xiaojie scan reads sector return and net
+#: inflow from, captured once a minute by the board-curve loop.
+BOARD_FLOW_TAXONOMY = "longhu_ths_industry"
+
+
+def latest_board_flow(connection: Any, trading_date: date, until: datetime) -> dict[str, Any]:
+    """The session's newest stored board-flow cross-section at or before ``until``.
+
+    Only boards of ``BOARD_FLOW_TAXONOMY`` are kept: they share their keys with
+    the session's sector membership, which the public concept boards do not.
+    """
+    session_start = datetime.combine(trading_date, datetime.min.time(), tzinfo=_CHINA)
+    row = connection.execute(
+        """SELECT observed_at, payload->'providers' AS providers, payload->'items' AS items
+             FROM quant.intraday_board_flow_snapshots
+            WHERE observed_at >= %s AND observed_at <= %s AND status IN ('completed','partial')
+            ORDER BY observed_at DESC LIMIT 1""",
+        (session_start, until),
+    ).fetchone()
+    if row is None:
+        return {"status": "missing", "taxonomy": BOARD_FLOW_TAXONOMY, "boards": {}}
+    boards = {
+        str(item["sector_key"]): {"label": item.get("label"), "change_pct": item.get("change_pct"),
+                                  "net_inflow": item.get("net_inflow"), "amount": item.get("amount")}
+        for item in (row["items"] or [])
+        if isinstance(item, dict) and item.get("taxonomy_key") == BOARD_FLOW_TAXONOMY and item.get("sector_key")
+    }
+    return {"status": "stored" if boards else "missing", "taxonomy": BOARD_FLOW_TAXONOMY,
+            "observed_at": row["observed_at"], "provider": (row["providers"] or {}).get("industry"),
+            "boards": boards}
+
+
 def market_volume_baseline(connection: Any, trading_date: date,
                            sessions: int = MA_SESSIONS) -> float | None:
     """Mean total market volume, in shares, over the recent completed sessions.
@@ -344,20 +481,24 @@ def instrument_names(connection: Any) -> dict[str, str]:
 
 def load_session_reference(connection: Any, trading_date: date) -> dict[str, Any]:
     """One call for everything a session's indicator construction needs."""
+    references = candidate_references(connection, trading_date)
+    for symbol, extra in qianlong_references(connection, trading_date).items():
+        references.setdefault(symbol, {}).update(extra)
     return {
         "trading_date": trading_date,
         "limits": trade_limits(connection, trading_date),
         "membership": sector_membership(connection, trading_date),
         "membership_taxonomy": sector_membership_taxonomy(connection, trading_date),
-        "references": candidate_references(connection, trading_date),
+        "references": references,
         "market_volume_baseline": market_volume_baseline(connection, trading_date),
         "names": instrument_names(connection),
     }
 
 
 __all__ = [
-    "LOOKBACK_SESSIONS", "MA_SESSIONS", "MINIMUM_TAXONOMY_COVERAGE", "SECTOR_TAXONOMY_PREFERENCE",
-    "candidate_references", "ensure_session_trade_limits",
+    "BOARD_FLOW_TAXONOMY", "LOOKBACK_SESSIONS", "MA_SESSIONS", "MINIMUM_TAXONOMY_COVERAGE",
+    "QIANLONG_MARKER_LOOKBACK", "QIANLONG_MARKER_VOLUME_RATIO", "SECTOR_TAXONOMY_PREFERENCE",
+    "candidate_references", "ensure_session_trade_limits", "latest_board_flow", "qianlong_references",
     "instrument_names", "load_session_reference", "membership_for_taxonomy",
     "persist_trade_limit_rows", "market_volume_baseline", "sector_membership",
     "sector_membership_taxonomy", "trade_limits",

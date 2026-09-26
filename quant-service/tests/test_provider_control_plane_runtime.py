@@ -31,7 +31,8 @@ class ProviderControlPlaneRuntimeTests(unittest.TestCase):
     def test_initialization_mirrors_limits_and_declares_expected_provider_matrix(self):
         connection = _Connection()
         database = type("Database", (), {"transaction": lambda _self: _Transaction(connection)})()
-        config = SimpleNamespace(key="tushare_primary", rate_limit_per_minute=60)
+        primary = SimpleNamespace(key="tushare_primary", rate_limit_per_minute=60)
+        super_sdk = SimpleNamespace(key="tushare_super_sdk", rate_limit_per_minute=30)
         items = [
             {"api_name": "daily", "catalog_origin": "official", "permission_model": "points", "min_points": 1,
              "request_policy": "bounded", "model_role": "research", "priority": "high"},
@@ -40,7 +41,7 @@ class ProviderControlPlaneRuntimeTests(unittest.TestCase):
         ]
         runtime = ProviderControlPlaneRuntime(ProviderControlPlaneRuntimeDependencies(
             database=database,
-            provider_configs=lambda: {"primary": config},
+            provider_configs=lambda: {"primary": primary, "super_sdk": super_sdk},
             catalog_items=lambda: items,
             capability_contract=lambda _name: SimpleNamespace(frequency="60/min", decision_eligible=False, note="declared"),
             super_get_verified_apis=frozenset({"daily"}),
@@ -49,12 +50,11 @@ class ProviderControlPlaneRuntimeTests(unittest.TestCase):
 
         runtime.initialize()
 
-        self.assertEqual(connection.calls[0][1], (60, "tushare_primary"))
-        self.assertEqual(connection.calls[1][1], (60, "tushare_primary"))
+        self.assertEqual(connection.calls[0][1], (30, "tushare_super_sdk"))
+        self.assertEqual(connection.calls[1][1], (30, "tushare_super_sdk"))
         declarations = [call[1][:2] for call in connection.calls[2:]]
         self.assertEqual(declarations, [
-            ("tushare_primary", "daily"), ("tushare_super_sdk", "daily"),
-            ("tushare_super_get", "daily"), ("tushare_primary", "stock_basic"),
+            ("tushare_super_sdk", "daily"), ("tushare_super_get", "daily"),
             ("tushare_super_sdk", "stock_basic"), ("tushare_backup", "stock_basic"),
         ])
 

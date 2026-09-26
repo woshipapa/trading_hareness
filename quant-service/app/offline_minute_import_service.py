@@ -14,6 +14,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from .instrument_registry import InstrumentRecord, ensure_instruments
 from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json
@@ -57,7 +59,10 @@ def minute_timestamp(value: Any) -> datetime:
 
 def source_available_at(row: Mapping[str, Any]) -> datetime | None:
     """Only accept an explicit source clock; never derive it from bar time."""
-    for key in ("source_available_at", "provider_available_at", "received_at", "available_at"):
+    # ``available_at`` is the local database-ingest clock in the canonical
+    # table. Accepting that generic name here would let an importer silently
+    # turn file arrival time into a provider clock and admit a false replay.
+    for key in ("source_available_at", "provider_available_at", "received_at", "upstream_available_at"):
         value = row.get(key)
         if value not in (None, ""):
             return minute_timestamp(value)
@@ -110,10 +115,9 @@ def recovery_action(existing: Mapping[str, Any] | None, *, now: datetime, stale_
 
 
 def ensure_instrument(connection: Any, symbol: str, *, exchange_for: Callable[[str], str]) -> None:
-    connection.execute(
-        "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,'offline-import') ON CONFLICT(symbol) DO NOTHING",
-        (symbol, exchange_for(symbol)),
-    )
+    ensure_instruments(connection, [InstrumentRecord(
+        symbol=symbol, exchange=exchange_for(symbol), source="offline-import",
+    )], source="offline-import")
 
 
 def import_csv(

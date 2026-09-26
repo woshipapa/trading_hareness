@@ -20,6 +20,7 @@ from psycopg.types.json import Json
 
 from .analysis import as_utc
 from .daily_bar_repository import exchange_for
+from .instrument_registry import InstrumentRecord, ensure_instruments
 from .market_flow_features import market_event_identity_key
 
 
@@ -39,22 +40,28 @@ def persist_free_quote(database: Any, provider: str, symbol: str, quote: dict[st
 
 def persist_free_quotes(database: Any, provider: str, quotes: list[dict[str, Any]]) -> int:
     """Write a market quote batch in one transaction; malformed rows are skipped."""
-    accepted = 0
+    parameters = []
     observed_at = datetime.now(timezone.utc)
+    for quote in quotes:
+        symbol = str(quote.get("ts_code") or "").upper()
+        if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol):
+            continue
+        payload = json.dumps(quote, ensure_ascii=False, sort_keys=True, default=str)
+        parameters.append((
+            provider, symbol, observed_at, observed_at,
+            hashlib.sha256(payload.encode()).hexdigest(), Json(quote), Json(quote),
+        ))
+    if not parameters:
+        return 0
     with database.transaction() as connection:
-        for quote in quotes:
-            symbol = str(quote.get("ts_code") or "").upper()
-            if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol):
-                continue
-            payload = json.dumps(quote, ensure_ascii=False, sort_keys=True, default=str)
-            connection.execute(
+        with connection.cursor() as cursor:
+            cursor.executemany(
                 """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
                    VALUES(%s,'realtime_quote','cn',%s,%s,%s,%s,%s,%s)
                    ON CONFLICT(provider_key,capability,market,symbol,effective_at,payload_sha256) DO UPDATE SET available_at=EXCLUDED.available_at""",
-                (provider, symbol, observed_at, observed_at, hashlib.sha256(payload.encode()).hexdigest(), Json(quote), Json(quote)),
+                parameters,
             )
-            accepted += 1
-    return accepted
+    return len(parameters)
 
 
 def _observation_symbol(value: Any) -> str | None:
@@ -205,11 +212,13 @@ def persist_market_events(database: Any, provider: str, rows: list[dict[str, Any
     if not keyed and not content_keyed:
         return 0
     with database.transaction() as connection:
+        ensure_instruments(
+            connection,
+            [InstrumentRecord(symbol=symbol, exchange=exchange, source=instrument_source)
+             for symbol, exchange, instrument_source in instruments.values()],
+            source=provider,
+        )
         with connection.cursor() as cursor:
-            cursor.executemany(
-                "INSERT INTO quant.instruments(symbol,exchange,source) VALUES(%s,%s,%s) ON CONFLICT(symbol) DO NOTHING",
-                list(instruments.values()),
-            )
             if keyed:
                 cursor.executemany(
                     """INSERT INTO quant.market_events(

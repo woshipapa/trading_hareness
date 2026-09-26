@@ -11,11 +11,13 @@ from __future__ import annotations
 import math
 from typing import Any, Mapping
 
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
+
 
 MINIMUM_ALL_A_COVERAGE_RATIO = 0.95
 
 
-EQUITY_DAILY_CONTROL_STATUS_SQL = """WITH latest AS (
+EQUITY_DAILY_CONTROL_STATUS_SQL = f"""WITH latest AS (
        SELECT max(trading_date) AS trading_date FROM quant.canonical_bars_daily
         WHERE quality_status='fresh'
           AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
@@ -29,7 +31,14 @@ EQUITY_DAILY_CONTROL_STATUS_SQL = """WITH latest AS (
         GROUP BY latest.trading_date
    ) SELECT expected.trading_date,expected.expected_daily_rows,
        count(DISTINCT bar.symbol)::int AS daily_rows,
-       count(DISTINCT bar.symbol) FILTER (WHERE bar.adj_factor IS NOT NULL)::int AS adjustment_rows,
+       count(DISTINCT bar.symbol) FILTER (WHERE EXISTS (
+           SELECT 1 FROM quant.daily_adjustment_factors factor
+            WHERE factor.symbol=bar.symbol
+              AND factor.trading_date=bar.trading_date
+              AND factor.adj_factor>0
+              AND {persisted_factor_semantics_sql('factor')}
+              AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+       ))::int AS adjustment_rows,
        count(DISTINCT bar.symbol) FILTER (WHERE bar.limit_up IS NOT NULL AND bar.limit_down IS NOT NULL)::int AS limit_rows
      FROM expected
        LEFT JOIN quant.canonical_bars_daily bar

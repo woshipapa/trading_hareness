@@ -6,9 +6,13 @@ import unittest
 from pathlib import Path
 
 from app.platform.data_product_registry import (
+    OWNER_HOT_WINDOW_DAYS,
+    OWNER_TIERED_DATA_PRODUCTS,
+    OWNER_WHOLE_COLD_DATA_PRODUCTS,
     data_product_contract_catalog,
     validate_declared_dataset_coverage,
 )
+from app.owner_storage import LEGACY_COLD_RELATION, TIERED_EVIDENCE_TABLES
 from app.platform.evidence_contracts import (
     evidence_contract_catalog,
     materialize_evidence_status,
@@ -93,6 +97,20 @@ class PlatformContractRegistryTests(unittest.TestCase):
         self.assertEqual(by_key["tushare_raw_records"]["local_hot_window_days"], 90)
         self.assertEqual(by_key["intraday_quote_observations"]["local_hot_window_days"], 90)
         self.assertEqual(by_key["intraday_rule_input_snapshots"]["local_hot_window_days"], 120)
+
+    def test_owner_hot_cold_contract_matches_the_physical_cutover_allowlist(self) -> None:
+        by_key = {item["key"]: item for item in data_product_contract_catalog()}
+        self.assertEqual(OWNER_HOT_WINDOW_DAYS, 365)
+        self.assertEqual(set(OWNER_TIERED_DATA_PRODUCTS), set(TIERED_EVIDENCE_TABLES))
+        self.assertEqual(OWNER_WHOLE_COLD_DATA_PRODUCTS, frozenset({LEGACY_COLD_RELATION}))
+        for key in OWNER_TIERED_DATA_PRODUCTS:
+            self.assertEqual(by_key[key]["local_tier"], "owner_hot_cold")
+            self.assertEqual(by_key[key]["local_hot_window_days"], OWNER_HOT_WINDOW_DAYS)
+            self.assertEqual(by_key[key]["owner_storage_policy"], "split_after_365_days")
+        legacy = by_key[LEGACY_COLD_RELATION]
+        self.assertEqual(legacy["local_tier"], "owner_cold")
+        self.assertEqual(legacy["local_hot_window_days"], 0)
+        self.assertEqual(legacy["owner_storage_policy"], "whole_table_cold")
 
     def test_runtime_strategy_versions_must_match_every_declared_contract(self) -> None:
         versions = {

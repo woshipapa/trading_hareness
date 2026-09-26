@@ -261,6 +261,54 @@ class AlertNamesTheStockNotJustItsCodeTests(unittest.TestCase):
     def test_no_names_at_all_degrades_rather_than_raising(self):
         self.assertIn("600127.SH", self._text(self._candidate(), None))
 
+    def test_sealed_qianlong_alert_is_explicitly_research_only(self):
+        candidate = self._candidate("600825.SH")
+        candidate["mode"] = "潜龙出海_swing"
+        text = self._text(candidate, self.names)
+        self.assertIn("封板，仅作研究提醒，不追板", text)
+
+    def test_a_qianlong_alert_shows_its_evidence_overheat_and_board(self):
+        candidate = self._candidate("601811.SH")
+        candidate["mode"] = "潜龙出海_swing"
+        candidate["evidence"].update({
+            "qianlong_evidence": {"evidence": {"ma_confluence": True, "breakout_volume": True,
+                                               "pullback_support": True, "sector_context": True,
+                                               "fundamental": None}},
+            "qianlong_swing_overheat": {"flags": ["qianlong_swing_sector_already_hot"], "count": 1,
+                                        "missing": []},
+            "qianlong_inputs": {"sector_day_return_pct": 3.125, "sector_net_inflow_rate_pct": 6.4,
+                                "sector_flow": {"label": "文化传媒"}},
+        })
+        text = self._text(candidate, self.names)
+        self.assertIn("潜龙证据 4/5：均线收敛/箱体✓ 放量标志K✓ 回踩守支撑✓ 板块主线✓ 基本面兑现?", text)
+        self.assertIn("过热 1 项", text)
+        self.assertIn("板块 文化传媒 +3.12% 净流入率 +6.4%", text)
+
+    def test_a_red_warning_leads_the_alert_with_its_reasons(self):
+        candidate = self._candidate("603636.SH")
+        candidate["mode"] = "潜龙出海_swing"
+        candidate["evidence"]["qianlong_warning"] = {
+            "level": "red", "reasons": ["潜龙证据不成立：基本面兑现（PE -7.8，亏损）", "过热3项：高于20日线40%"]}
+        text = self._text(candidate, {"603636.SH": "南威软件"})
+        self.assertTrue(text.startswith("🔴【红色预警】【研究观察·小杰龙头】南威软件"))
+        self.assertIn("🔴【红色预警】潜龙证据不成立：基本面兑现（PE -7.8，亏损）；过热3项：高于20日线40%\n", text)
+        self.assertIn("不构成交易指令", text)
+
+    def test_a_yellow_warning_is_marked_as_attention(self):
+        candidate = self._candidate("605058.SH")
+        candidate["mode"] = "潜龙出海_swing"
+        candidate["evidence"]["qianlong_warning"] = {"level": "yellow", "reasons": ["过热2项：高于20日线60%、5日已涨32%"]}
+        self.assertIn("🟡【注意】过热2项", self._text(candidate, self.names))
+
+    def test_the_instructor_chat_line_sits_above_the_disclaimer(self):
+        from app.main import _xiaojie_alert_text
+        text = _xiaojie_alert_text(self._candidate(), date(2026, 8, 27), self.names,
+                                   chat="小杰群聊 08-26 20:14 夜报/复盘：金健米业放量突破")
+        self.assertLess(text.index("小杰群聊"), text.index("不构成交易指令"))
+
+    def test_other_modes_carry_no_qianlong_line(self):
+        self.assertNotIn("潜龙证据", self._text(self._candidate(), self.names))
+
     def test_the_body_of_the_alert_is_unchanged(self):
         text = self._text(self._candidate(), self.names)
         for fragment in ("【研究观察·小杰龙头】", "封板", "涨幅 10.00%",

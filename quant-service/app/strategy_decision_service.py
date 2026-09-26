@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json
 
+from .instrument_registry import InstrumentRecord, ensure_instruments
+
 from .request_models import IntradaySectorReportRequest
 
 
@@ -96,10 +98,10 @@ async def run(
                 if not coverage_complete:
                     flags.append("incomplete_board_mapping")
                 event_context_rows = events.get(candidate["symbol"], [])
-                connection.execute(
-                    "INSERT INTO quant.instruments(symbol,exchange,name,source) VALUES(%s,%s,%s,'strategy_decision') ON CONFLICT(symbol) DO NOTHING",
-                    (candidate["symbol"], exchange_for(candidate["symbol"]), candidate.get("name")),
-                )
+                ensure_instruments(connection, [InstrumentRecord(
+                    symbol=candidate["symbol"], exchange=exchange_for(candidate["symbol"]),
+                    name=candidate.get("name"), source="strategy_decision",
+                )], source="strategy_decision")
                 connection.execute(
                     """INSERT INTO quant.recommendations(run_id,rank,symbol,decision,score,score_breakdown,explanation,risk_flags,
                           direction,horizon_days,confidence,valid_until,invalidation)

@@ -127,6 +127,9 @@ class PostCloseStructureSourceTests(unittest.TestCase):
         statement, _parameters = self._statement()
         self.assertIn("FROM quant.canonical_bars_daily b", statement)
         self.assertIn("JOIN factors f ON f.symbol=b.symbol", statement)
+        self.assertIn("b.quality_status='fresh'", statement)
+        self.assertIn("factor.available_at < ((factor.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')", statement)
+        self.assertIn("latest_basic", statement)
 
     def test_the_hand_imported_adjusted_artifact_is_no_longer_a_dependency(self):
         statement, _parameters = self._statement()
@@ -153,7 +156,9 @@ class PostCloseStructureSourceTests(unittest.TestCase):
         # daily_basic providers and the flow source now come from the catalog;
         # they resolve to exactly what the query used to spell out.
         self.assertEqual(parameters, (as_of, ["tushare_super_get", "longhuvip_composite"], as_of,
-                                      "longhuvip_main_net", as_of, start, as_of, as_of, start))
+                                      "longhuvip_main_net", as_of, start,
+                                      ["longhu_qfq_derived", "tushare", "tushare_backup", "tushare_super", "tushare_super_get", "tushare_super_sdk"],
+                                      as_of, as_of, start))
         self.assertIn("quant.daily_fundamentals", statement)
         self.assertNotIn("tushare_raw_records", statement)
         self.assertIn("rn<=30", statement)

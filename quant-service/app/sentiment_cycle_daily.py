@@ -29,7 +29,9 @@ _BOARD_FILTER = "AND greatest(b.high, b.close) >= b.limit_up - 0.005"
 _BARS = """SELECT b.trading_date, b.symbol, b.open, b.high, b.close, b.limit_up
              FROM quant.canonical_bars_daily b
              JOIN quant.instruments i ON i.symbol = b.symbol
-            WHERE b.volume > 0 AND b.limit_up IS NOT NULL AND i.list_date IS NOT NULL"""
+            WHERE b.volume > 0 AND b.limit_up IS NOT NULL AND i.list_date IS NOT NULL
+              AND b.quality_status='fresh'
+              AND b.available_at < ((b.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')"""
 
 
 def _load_sessions(connection: Any, trading_date: date,
@@ -48,6 +50,8 @@ def _load_sessions(connection: Any, trading_date: date,
     sessions = [row["trading_date"] for row in connection.execute(
         """SELECT DISTINCT trading_date FROM quant.canonical_bars_daily
             WHERE trading_date <= %s AND volume > 0
+              AND quality_status='fresh'
+              AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
             ORDER BY trading_date DESC LIMIT %s""",
         (trading_date, max(1, lookback)),
     ).fetchall()]

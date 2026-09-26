@@ -39,6 +39,11 @@ def build_research_catalog_reads_router(database: Any, async_database: Any | Non
     async def models() -> dict[str, Any]:
         return await async_read_model.model_registry(async_database) if async_database else read_model.model_registry(database)
 
+    @router.get("/api/v1/research/trials")
+    async def research_trials(family: str | None = None, limit: int = 200) -> dict[str, Any]:
+        """Latest evaluation of every research variant, deflated for its family's trial count."""
+        return await async_read_model.research_trials(async_database, family, limit) if async_database else read_model.research_trials(database, family, limit)
+
     @router.get("/api/v1/strategies/experiments")
     async def experiments(universe_key: str = "core", limit: int = 50) -> dict[str, Any]:
         return await async_read_model.strategy_experiments(async_database, universe_key, limit) if async_database else read_model.strategy_experiments(database, universe_key, limit)

@@ -7,6 +7,8 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Mapping
 
+from .market_rules import a_share_board, a_share_limit_ratio, is_st_security_name
+
 
 PROVIDER_KEY = "longhuvip_composite"
 FLOW_SOURCE = "longhuvip_main_net"
@@ -103,28 +105,29 @@ def merge_cross_section(
     return MergedCrossSection(daily, fundamentals, flows, snapshots, coverage, tuple(conflicts))
 
 
-def _limit_ratio(symbol: str, name: str) -> tuple[Decimal, str]:
-    normalized_name = name.upper().replace("*", "")
-    if "ST" in normalized_name:
-        return Decimal("0.05"), "st_5_percent"
-    code, exchange = symbol.split(".")
-    if exchange == "BJ":
-        return Decimal("0.30"), "beijing_30_percent"
-    if code.startswith(("300", "301", "688", "689")):
-        return Decimal("0.20"), "registration_board_20_percent"
-    return Decimal("0.10"), "mainboard_10_percent"
+def _limit_ratio(symbol: str, name: str, trade_date: object = None) -> tuple[Decimal, str]:
+    ratio = a_share_limit_ratio(symbol, is_st_security_name(name), trade_date)
+    board = a_share_board(symbol)
+    if board == "beijing":
+        rule = "beijing_30_percent"
+    elif board == "registration":
+        rule = "registration_board_20_percent"
+    elif ratio == 0.05:
+        rule = "st_5_percent"
+    else:
+        rule = "mainboard_10_percent"
+    return Decimal(str(ratio)), rule
 
 
 def build_control_rows(daily_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Build transparent same-day controls without claiming corporate-action history."""
     limits: list[dict[str, Any]] = []
-    factors: list[dict[str, Any]] = []
     for row in daily_rows:
         symbol, name = str(row["ts_code"]), str(row.get("name") or "")
         pre_close = _decimal(row.get("pre_close"))
         if pre_close is None or pre_close <= 0:
             continue
-        ratio, rule = _limit_ratio(symbol, name)
+        ratio, rule = _limit_ratio(symbol, name, row.get("trade_date"))
         quantum = Decimal("0.01")
         limits.append({
             "ts_code": symbol, "trade_date": row["trade_date"],
@@ -133,12 +136,12 @@ def build_control_rows(daily_rows: list[dict[str, Any]]) -> dict[str, list[dict[
             "derivation": "preclose_times_board_limit_ratio", "board_rule": rule,
             "exception_warning": "IPO/resumption/no-limit exceptions are not inferred",
         })
-        factors.append({
-            "ts_code": symbol, "trade_date": row["trade_date"], "adj_factor": "1",
-            "factor_semantics": "same_day_identity_only",
-            "warning": "not a historical corporate-action adjustment factor",
-        })
-    return {"stk_limit": limits, "adj_factor": factors}
+    # Longhu/Tencent close data has no corporate-action history.  It may derive
+    # a same-day limit price, but writing ``adj_factor=1`` would make a missing
+    # split/dividend history look complete to research consumers.  The licensed
+    # The owner's Longhu qfq factor-maintenance task owns this table instead;
+    # this close-data adapter must never invent an identity factor.
+    return {"stk_limit": limits, "adj_factor": []}
 
 
 __all__ = [

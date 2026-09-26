@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from .raw_overflow_policy import RawOverflowLimits, classify
+from .runtime_resources import DEFAULT_HOT_DATABASE_SOFT_BYTES, bounded_storage_budget_bytes
 
 
 DEFAULT_CAPABILITIES = (
@@ -30,6 +31,10 @@ DEFAULT_CAPABILITIES = (
     "rt_k",
     "rt_min",
     "rt_min_daily",
+    # The owner error report uses this canonical raw-observation stream for
+    # historical daily bars.  It is evidence archival only, never a strategy
+    # input, and must be explicitly allowlisted like the intraday streams.
+    "daily_bar",
 )
 DEFAULT_STREAM_PREFIX = "raw_market_observations:"
 
@@ -60,7 +65,11 @@ class RawOverflowConfig:
             item.strip() for item in str(env.get("QUANT_RAW_OVERFLOW_CAPABILITIES", "") or "").split(",")
             if item.strip()
         )
-        capabilities = configured or DEFAULT_CAPABILITIES
+        # ``daily_bar`` is the canonical owner hand-off stream.  Older peer
+        # env files omitted it, while the scheduler already polled it; keep
+        # that rollout mismatch from becoming a repeated 400 loop.  Operators
+        # can still disable the archive with QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED.
+        capabilities = tuple(dict.fromkeys((*configured, "daily_bar"))) if configured else DEFAULT_CAPABILITIES
         warning = _bounded_float(env.get("QUANT_RAW_OVERFLOW_WARNING_RATIO"), 0.80, 0.50, 0.98)
         stop = _bounded_float(env.get("QUANT_RAW_OVERFLOW_STOP_RATIO"), 0.90, warning, 0.99)
         return cls(
@@ -121,10 +130,14 @@ def _storage_state(connection: Any, config: RawOverflowConfig) -> tuple[str, tup
     row = connection.execute(
         """SELECT coalesce(sum(pg_total_relation_size(c.oid)),0)::bigint AS bytes
              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname='quant' AND c.relkind IN ('r','m','p')""",
+            WHERE n.nspname='quant' AND c.relkind IN ('r','m','p') AND c.reltablespace=0""",
     ).fetchone() or {}
     hot_used = int(row.get("bytes") or 0)
-    hot_budget = _bounded_int(os.getenv("QUANT_HOT_DATABASE_SOFT_BYTES"), 36 * 1024**3, 1 * 1024**3, 36 * 1024**3)
+    hot_budget = bounded_storage_budget_bytes(
+        os.getenv("QUANT_HOT_DATABASE_SOFT_BYTES"),
+        DEFAULT_HOT_DATABASE_SOFT_BYTES,
+        DEFAULT_HOT_DATABASE_SOFT_BYTES,
+    )
     queue = connection.execute(
         """SELECT count(*)::int AS count FROM quant.raw_archive_batches
             WHERE status IN ('queued','uploading','retryable_failed')""",
@@ -193,10 +206,13 @@ def next_batch(database: Any, *, stream: str, limit: int | None = None,
     config = config or RawOverflowConfig.from_env()
     capability = capability_from_stream(stream, config)
     requested = _bounded_int(limit, config.batch_rows, 1, config.batch_rows)
+    if not config.enabled:
+        # An adapter polls every few seconds; a disabled lane must not run the
+        # ~1 s storage-size scan on the shared database each time (the state
+        # stays available from /raw-overflow/status).
+        return {"status": "disabled", "stream_key": stream, "rows": []}
     with database.transaction() as connection:
         state, reasons, storage = _storage_state(connection, config)
-        if not config.enabled:
-            return {"status": "disabled", "stream_key": stream, "state": state, "reasons": list(reasons), "rows": []}
         if state == "normal":
             return {"status": "not_needed", "stream_key": stream, "state": state, "reasons": list(reasons), "rows": []}
         connection.execute(

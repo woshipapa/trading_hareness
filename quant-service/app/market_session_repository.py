@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
-from .market_rules import china_equity_session, china_futures_session
+from .market_rules import china_equity_observation_session, china_equity_session, china_futures_session
 from .runtime_executors import ExecutorSaturatedError, run_database_blocking
 from .tushare_providers import safe_error_detail
 
@@ -105,7 +105,33 @@ async def realtime_market_session_async(database: Any, api_name: str | None = No
     return True, reason
 
 
+def market_observation_session(database: Any, now: datetime | None = None) -> tuple[bool, str]:
+    """Gate research evidence from 09:15 while retaining the SSE calendar."""
+    active, reason = china_equity_observation_session(now)
+    if not active:
+        return active, reason
+    calendar_open, calendar_reason = sse_calendar_status(database, _calendar_date(now))
+    return (True, reason) if calendar_open else (False, calendar_reason)
+
+
+async def market_observation_session_async(
+    database: Any,
+    now: datetime | None = None,
+    *,
+    database_runner: Callable[..., Awaitable[Any]] = run_database_blocking,
+) -> tuple[bool, str]:
+    """Async-safe 09:15 evidence gate; it never broadens strategy sessions."""
+    active, reason = china_equity_observation_session(now)
+    if not active:
+        return active, reason
+    calendar_open, calendar_reason = await sse_calendar_status_async(
+        database, _calendar_date(now), database_runner=database_runner,
+    )
+    return (True, reason) if calendar_open else (False, calendar_reason)
+
+
 __all__ = [
+    "market_observation_session", "market_observation_session_async",
     "realtime_market_session", "realtime_market_session_async",
     "sse_calendar_open", "sse_calendar_open_async", "sse_calendar_status", "sse_calendar_status_async",
 ]

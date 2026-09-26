@@ -22,6 +22,7 @@ Simulation only. No broker client exists anywhere on this path.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Any, Iterable, Mapping
 
@@ -38,6 +39,13 @@ MAX_NEW_PER_PASS = 2
 
 #: A-share board lot.
 LOT_SIZE = 100
+
+#: Protective exits for a holding whose strategy is silent this pass.  Exits
+#: were only read from the current pass's candidates, and a board-drill
+#: candidate carries none, so a bought name that fell 15% was never sold.
+#: Like FALLBACK_WEIGHT these are declared fallbacks, recorded as such.
+FALLBACK_STOP_LOSS_PCT = 8.0
+FALLBACK_MAX_HOLDING_DAYS = 5
 
 #: Exit actions a strategy may ask for, and how much of the holding each closes.
 EXIT_FRACTIONS = {"exit": 1.0, "reduce_or_exit": 1.0, "reduce_half": 0.5}
@@ -78,6 +86,7 @@ def strategy_intent(candidate: Mapping[str, Any]) -> dict[str, Any]:
         "risk_flags": list(candidate.get("risk_flags") or []),
         "confirmed": bool((candidate.get("large_order") or {}).get("confirmed", True)),
         "direction": str(candidate.get("direction") or "inflow"),
+        "delivery_key": candidate.get("delivery_key"),
     }
 
 
@@ -106,6 +115,14 @@ def stop_loss_hit(position: Mapping[str, Any], price: float, stop_loss_pct: floa
     return (price - cost) / cost * 100 <= -abs(stop_loss_pct)
 
 
+def holding_days_exceeded(position: Mapping[str, Any], session_date: date | None, max_days: int) -> bool:
+    """Has a holding outlived the fallback holding period (calendar days)?"""
+    buy_date = position.get("buy_date")
+    if session_date is None or not isinstance(buy_date, date) or max_days <= 0:
+        return False
+    return (session_date - buy_date).days >= max_days
+
+
 def plan_paper_orders(
     candidates: Iterable[Mapping[str, Any]],
     positions: Mapping[str, Mapping[str, Any]],
@@ -115,6 +132,9 @@ def plan_paper_orders(
     cash: Decimal | float,
     max_open_positions: int = MAX_OPEN_POSITIONS,
     max_new_per_pass: int = MAX_NEW_PER_PASS,
+    session_date: date | None = None,
+    fallback_stop_loss_pct: float = FALLBACK_STOP_LOSS_PCT,
+    fallback_max_holding_days: int = FALLBACK_MAX_HOLDING_DAYS,
 ) -> dict[str, Any]:
     """Decide this pass's simulated orders from the strategies' own decisions.
 
@@ -133,10 +153,18 @@ def plan_paper_orders(
         intent = by_symbol.get(symbol, {})
         action = intent.get("exit_action") or ""
         reason = None
+        # A strategy silent this pass still owns the stop it set at entry.
+        strategy_stop = intent.get("stop_loss_pct")
+        if strategy_stop is None:
+            strategy_stop = _number(position.get("entry_stop_loss_pct"))
         if action in EXIT_FRACTIONS:
             reason = f"strategy_exit:{action}"
-        elif stop_loss_hit(position, price, intent.get("stop_loss_pct")):
+        elif stop_loss_hit(position, price, strategy_stop):
             reason, action = "strategy_stop_loss", "exit"
+        elif strategy_stop is None and stop_loss_hit(position, price, fallback_stop_loss_pct):
+            reason, action = "fallback_stop_loss", "exit"
+        elif holding_days_exceeded(position, session_date, fallback_max_holding_days):
+            reason, action = "fallback_max_holding_period", "exit"
         if reason is None:
             continue
         quantity = exit_quantity(position, action)
@@ -196,6 +224,7 @@ def plan_paper_orders(
         buys.append({
             "symbol": symbol, "side": "buy", "quantity": quantity, "price": price,
             "notional": round(notional, 2), "strategy_key": intent["strategy_key"],
+            "delivery_key": intent["delivery_key"],
             "mode": intent["mode"], "entry_fraction": intent["entry_fraction"],
             "sizing_source": intent["sizing_source"], "target_fraction": intent["target_fraction"],
             "stop_loss_pct": intent["stop_loss_pct"], "risk_flags": intent["risk_flags"],
@@ -209,6 +238,6 @@ def plan_paper_orders(
 
 
 __all__ = [
-    "EXIT_FRACTIONS", "FALLBACK_WEIGHT", "LOT_SIZE", "MAX_NEW_PER_PASS", "MAX_OPEN_POSITIONS",
-    "exit_quantity", "plan_paper_orders", "position_size", "stop_loss_hit", "strategy_intent",
+    "EXIT_FRACTIONS", "FALLBACK_MAX_HOLDING_DAYS", "FALLBACK_STOP_LOSS_PCT", "FALLBACK_WEIGHT", "LOT_SIZE",
+    "MAX_NEW_PER_PASS", "MAX_OPEN_POSITIONS", "exit_quantity", "holding_days_exceeded", "plan_paper_orders", "position_size", "stop_loss_hit", "strategy_intent",
 ]

@@ -96,6 +96,8 @@ The adapter needs only the App ID and App Secret in `.env`; no public callback U
 
 ```bash
 docker compose logs -f feishu-adapter
+
+Feishu relay 的源码、LarkAgentX bridge、47edge 部署和运维脚本统一维护在 [`feishu-relay/`](feishu-relay/)。
 ```
 
 If this instance is later made public through a reverse proxy, change `N8N_HOST`, `N8N_PROTOCOL`, `N8N_EDITOR_BASE_URL`, and `WEBHOOK_URL`, and restore secure cookies.

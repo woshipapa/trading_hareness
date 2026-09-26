@@ -115,5 +115,48 @@ class FailedSourcePassIsLocatableTests(unittest.TestCase):
         self.assertLess(len(failure), 2200)
 
 
+class SlowBoardReportTests(unittest.TestCase):
+    def test_a_slow_board_report_never_holds_the_next_watch_scan(self):
+        from app.intraday_monitor_service import run_intraday_monitor_loop
+
+        scans, boards, delays = [], [], {"calls": 0}
+        never = None
+
+        def next_delay_seconds(_interval, _local):
+            delays["calls"] += 1
+            if delays["calls"] > 4:
+                raise _Stop
+            return 0.0
+
+        async def realtime_session():
+            return True, "open"
+
+        async def scan_watchlist(request):
+            scans.append(request)
+            return {"status": "completed"}
+
+        async def run_board_report(**_kwargs):
+            boards.append(1)
+            await never.wait()          # a report that takes "minutes"
+
+        async def drive():
+            nonlocal never
+            never = asyncio.Event()
+            try:
+                await run_intraday_monitor_loop(
+                    1, realtime_session=realtime_session, high_frequency_window=lambda _local: True,
+                    next_delay_seconds=next_delay_seconds,
+                    make_scan_request=lambda limit, offset: {"limit": limit, "offset": offset},
+                    scan_watchlist=scan_watchlist, board_refresh_interval_seconds=lambda _local: 0.0,
+                    run_board_report=run_board_report, log=lambda _line: None,
+                )
+            except _Stop:
+                pass
+
+        asyncio.run(drive())
+        self.assertEqual(len(scans), 4)      # every scan ran while the report was still running
+        self.assertEqual(len(boards), 1)     # and only one report at a time
+
+
 if __name__ == "__main__":
     unittest.main()

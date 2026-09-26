@@ -12,6 +12,8 @@ from .stable_json import stable_dumps, stable_json
 from .point_in_time import availability_cutoff
 
 from .research_prices import adjusted_bars
+from .point_in_time_status import pit_st_sql
+from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
 def _call_with_cutoff(callback: Callable[..., Any], *args: Any, cutoff: datetime) -> Any:
@@ -39,7 +41,8 @@ def materialize_feature_snapshot(
     cutoff = availability_cutoff(as_of_date, knowledge_cutoff)
     members = connection.execute(
         """SELECT DISTINCT ON (membership.symbol)
-                      membership.symbol,i.name,i.is_st,
+                      membership.symbol,i.name,
+                      """ + pit_st_sql("membership.symbol", "%s::date", "coalesce(i.is_st,false)") + """ AS is_st,
                       coalesce(sector_history.sector_key,'UNKNOWN') AS industry
              FROM quant.universe_membership_history membership
              JOIN quant.instruments i ON i.symbol=membership.symbol
@@ -59,7 +62,7 @@ def materialize_feature_snapshot(
               AND membership.effective_from<=%s
               AND (membership.effective_to IS NULL OR membership.effective_to>=%s)
             ORDER BY membership.symbol,membership.priority,membership.effective_from DESC""",
-        (as_of_date, as_of_date, cutoff, universe_key, as_of_date, as_of_date),
+        (as_of_date, as_of_date, as_of_date, as_of_date, cutoff, universe_key, as_of_date, as_of_date),
     ).fetchall()
     if not members:
         raise ValueError(f"universe {universe_key} has no enabled symbols")
@@ -68,24 +71,33 @@ def materialize_feature_snapshot(
     items: list[dict[str, Any]] = []
     for member in members:
         symbol = str(member["symbol"])
+        factor_semantics_sql = persisted_factor_semantics_sql("adjustment")
         bars = list(reversed(connection.execute(
-            """SELECT bar.trading_date,bar.close,bar.high,bar.low,bar.volume,bar.amount,
-                      adjustment_history.adj_factor,bar.is_suspended,bar.limit_up,bar.limit_down,bar.selected_provider
+            f"""SELECT bar.trading_date,bar.close,bar.high,bar.low,bar.volume,bar.amount,
+                      CASE WHEN adjustment_history.adj_factor>0 THEN 'complete' ELSE 'absent' END AS adjustment_state,
+                      adjustment_history.adj_factor,
+                      adjustment_history.provider AS factor_provider,
+                      adjustment_history.raw AS factor_raw,
+                      adjustment_history.raw->>'factor_semantics' AS factor_semantics,
+                      bar.is_suspended,bar.limit_up,bar.limit_down,bar.selected_provider
                  FROM quant.canonical_bars_daily bar
                  JOIN LATERAL (
-                       SELECT adjustment.adj_factor,adjustment.provider
+                       SELECT adjustment.adj_factor,adjustment.provider,adjustment.raw
                          FROM quant.daily_adjustment_factors adjustment
                         WHERE adjustment.symbol=bar.symbol
                           AND adjustment.trading_date=bar.trading_date
+                          AND {factor_semantics_sql}
+                          AND adjustment.available_at<=%s
                           AND adjustment.available_at<((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                        ORDER BY adjustment.available_at DESC,
-                                 CASE WHEN adjustment.provider IN ('tushare_primary','tushare_super_sdk') THEN 0 ELSE 1 END,
+                        ORDER BY CASE WHEN adjustment.provider='longhu_qfq_derived' THEN 0
+                                      WHEN adjustment.provider IN ('tushare_primary','tushare_super_sdk') THEN 1 ELSE 2 END,
+                                 adjustment.available_at DESC,
                                  adjustment.provider
                         LIMIT 1
                  ) adjustment_history ON TRUE
                 WHERE bar.symbol=%s AND bar.trading_date<=%s
                   AND bar.available_at<=%s AND adjustment_history.adj_factor>0
-                ORDER BY bar.trading_date DESC LIMIT 60""", (symbol, as_of_date, cutoff)
+                ORDER BY bar.trading_date DESC LIMIT 60""", (cutoff, symbol, as_of_date, cutoff)
         ).fetchall()))
         flags: list[str] = []
         if len(bars) < 21:

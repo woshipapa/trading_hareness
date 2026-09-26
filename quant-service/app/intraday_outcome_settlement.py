@@ -1,8 +1,19 @@
-"""Persisted-evidence settlement for confirmed intraday signal events."""
+"""Persisted-evidence settlement for confirmed intraday signal events.
+
+Prices come from what the scans stored: the per-scan watch tape (every
+watched stock, every scan) and the priced quote rows of the providers the
+scan uses (Longhu, Tencent, the Fuyao all-A snapshot).  Order-book rows are
+excluded - their price is not a trade.  Settlement used to read Tencent rows
+only, so after Longhu became the primary quote nearly every signal had no
+entry or exit price and was skipped (2026-09-21: 40 alerts, 0 outcomes).
+Intraday horizons are counted in trading time and never use a lunch or
+overnight price.
+"""
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from bisect import bisect_left, bisect_right
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -13,6 +24,79 @@ from .intraday_clock import continuous_auction_bounds, intraday_outcome_window
 
 
 INTRADAY_EXIT_QUOTE_TOLERANCE_SECONDS = 90
+PRICED_QUOTE_SOURCES = ("longhuvip", "tencent_free", "fuyao_ths")
+_CN = ZoneInfo("Asia/Shanghai")
+
+
+class PricePaths:
+    """Per (symbol, exchange day): sorted (observed_at, price) from the tape and priced quote rows."""
+
+    def __init__(self, connection: Any, cutoff: datetime) -> None:
+        self.connection, self.cutoff = connection, cutoff
+        self._tape: dict[date, dict[str, list[tuple[datetime, Decimal]]]] = {}
+        self._series: dict[tuple[str, date], tuple[list[datetime], list[Decimal]]] = {}
+
+    def _day_tape(self, day: date) -> dict[str, list[tuple[datetime, Decimal]]]:
+        if day not in self._tape:
+            start = datetime.combine(day, time(0), tzinfo=_CN)
+            rows = self.connection.execute(
+                """SELECT r.effective_at, e.key AS symbol, (e.value->>'p')::numeric AS price
+                     FROM quant.raw_market_observations r CROSS JOIN LATERAL jsonb_each(r.payload->'rows') e
+                    WHERE r.provider_key='quant_scan' AND r.capability='watch_scan_tape' AND r.market='cn'
+                      AND r.symbol='watch:scan' AND r.effective_at>=%s AND r.effective_at<%s AND r.effective_at<=%s
+                      AND e.value ? 'p'""",
+                (start, start + timedelta(days=1), self.cutoff),
+            ).fetchall()
+            grouped: dict[str, list[tuple[datetime, Decimal]]] = {}
+            for row in rows:
+                if row["price"] is not None and Decimal(row["price"]) > 0:
+                    grouped.setdefault(str(row["symbol"]), []).append((row["effective_at"], Decimal(row["price"])))
+            self._tape[day] = grouped
+        return self._tape[day]
+
+    def series(self, symbol: str, at: datetime) -> tuple[list[datetime], list[Decimal]]:
+        day = at.astimezone(_CN).date()
+        key = (symbol, day)
+        if key not in self._series:
+            start = datetime.combine(day, time(0), tzinfo=_CN)
+            quotes = self.connection.execute(
+                """SELECT observed_at,price FROM quant.intraday_quote_observations
+                     WHERE symbol=%s AND source_name=ANY(%s) AND observed_at>=%s AND observed_at<%s AND observed_at<=%s
+                       AND price>0""",
+                (symbol, list(PRICED_QUOTE_SOURCES), start, start + timedelta(days=1), self.cutoff),
+            ).fetchall()
+            merged: dict[datetime, Decimal] = {row["observed_at"]: Decimal(row["price"]) for row in quotes}
+            merged.update(dict(self._day_tape(day).get(symbol, [])))
+            ordered = sorted(merged.items())
+            self._series[key] = ([at for at, _ in ordered], [price for _, price in ordered])
+        return self._series[key]
+
+    def last_at_or_before(self, symbol: str, at: datetime, not_before: datetime) -> tuple[datetime, Decimal] | None:
+        times, prices = self.series(symbol, at)
+        index = bisect_right(times, at) - 1
+        return (times[index], prices[index]) if index >= 0 and times[index] >= not_before else None
+
+    def first_in(self, symbol: str, start: datetime, end: datetime) -> tuple[datetime, Decimal] | None:
+        times, prices = self.series(symbol, start)
+        index = bisect_left(times, start)
+        return (times[index], prices[index]) if index < len(times) and times[index] <= end else None
+
+    def between(self, symbol: str, start: datetime, end: datetime, *, include_start: bool = True) -> list[tuple[datetime, Decimal]]:
+        times, prices = self.series(symbol, start)
+        low = bisect_left(times, start) if include_start else bisect_right(times, start)
+        high = bisect_right(times, end)
+        return list(zip(times[low:high], prices[low:high]))
+
+
+def signal_entry_price(evidence: dict[str, Any], decimal_or_none: Callable[[Any], Decimal | None]) -> tuple[Decimal | None, str | None]:
+    """The price the signal saw: the scan quote (legacy key ``tencent``, or ``quote``), or a strategy's own ``price``."""
+    for source, value in (("signal_evidence.tencent.price", (evidence.get("tencent") or {}).get("price")),
+                          ("signal_evidence.quote.price", (evidence.get("quote") or {}).get("price")),
+                          ("signal_evidence.price", evidence.get("price"))):
+        price = decimal_or_none(value)
+        if price is not None and price > 0:
+            return price, source
+    return None, None
 
 
 def settle(
@@ -32,25 +116,25 @@ def settle(
             WHERE state IN ('confirmed','alerted') AND signal_type IN ('entry','watch','reduce','exit')
               AND observed_at<=%s ORDER BY observed_at""", (cutoff,),
     ).fetchall()
+    paths = PricePaths(connection, cutoff)
+    skipped = 0
     for signal in signals:
         direction = direction_for(str(signal["signal_type"]))
         evidence = signal["evidence"] if isinstance(signal["evidence"], dict) else {}
-        entry_price = decimal_or_none((evidence.get("tencent") or {}).get("price"))
+        symbol = str(signal["symbol"])
+        entry_price, entry_source = signal_entry_price(evidence, decimal_or_none)
         entry_observed_at = signal["observed_at"]
         if entry_price is None:
             signal_bounds = continuous_auction_bounds(signal["observed_at"])
             entry_quote = None
             if signal_bounds is not None:
                 session_start, _ = signal_bounds
-                entry_quote = connection.execute(
-                    """SELECT observed_at,price FROM quant.intraday_quote_observations
-                         WHERE symbol=%s AND source_name='tencent_free' AND observed_at<=%s AND observed_at>=%s
-                           AND price>0 ORDER BY observed_at DESC LIMIT 1""",
-                    (signal["symbol"], signal["observed_at"], max(session_start, signal["observed_at"] - timedelta(seconds=90))),
-                ).fetchone()
+                entry_quote = paths.last_at_or_before(
+                    symbol, signal["observed_at"], max(session_start, signal["observed_at"] - timedelta(seconds=90)))
             if entry_quote:
-                entry_price, entry_observed_at = Decimal(entry_quote["price"]), entry_quote["observed_at"]
+                (entry_observed_at, entry_price), entry_source = entry_quote, "stored_price_path"
         if entry_price is None or direction is None:
+            skipped += 1
             continue
         barrier_spec = barrier_spec_type()
         barrier_bounds = continuous_auction_bounds(entry_observed_at)
@@ -63,14 +147,10 @@ def settle(
         else:
             _, session_end = barrier_bounds
             barrier_end = min(cutoff, session_end, barrier_deadline)
-            barrier_rows = connection.execute(
-                """SELECT observed_at,price FROM quant.intraday_quote_observations
-                     WHERE symbol=%s AND source_name='tencent_free' AND observed_at>%s AND observed_at<=%s AND price>0
-                     ORDER BY observed_at""",
-                (signal["symbol"], entry_observed_at, barrier_end),
-            ).fetchall()
+            barrier_rows = [{"observed_at": at, "price": price}
+                            for at, price in paths.between(symbol, entry_observed_at, barrier_end, include_start=False)]
             barrier_result = triple_barrier_label(
-                [dict(row) for row in barrier_rows], entry_price=entry_price,
+                barrier_rows, entry_price=entry_price,
                 entry_at=entry_observed_at, spec=barrier_spec,
             )
             # The generic labeler deliberately knows no exchange sessions.  A
@@ -87,7 +167,7 @@ def settle(
             connection, signal["signal_event_id"], spec=barrier_spec, entry_at=entry_observed_at,
             entry_price=entry_price, result=barrier_result,
             source_status={
-                "path": "local_tencent_free", "cutoff": cutoff.isoformat(),
+                "path": "stored_scan_tape_and_priced_quotes", "cutoff": cutoff.isoformat(),
                 "session_bounded": True,
                 "row_count": len(barrier_rows),
                 "reason": barrier_result.get("reason"),
@@ -96,7 +176,7 @@ def settle(
         for horizon_key, minutes in horizons:
             window = intraday_outcome_window(
                 entry_observed_at, horizon_minutes=minutes, cutoff=cutoff,
-                tolerance_seconds=INTRADAY_EXIT_QUOTE_TOLERANCE_SECONDS,
+                tolerance_seconds=INTRADAY_EXIT_QUOTE_TOLERANCE_SECONDS, trading_time=True,
             )
             exit_quote = None
             # ``unavailable`` after the quote-delay tolerance has elapsed is
@@ -106,21 +186,14 @@ def settle(
             # bounds and must never borrow lunch/overnight data.
             if (window.get("query_start") is not None and window.get("query_end") is not None
                     and window["query_end"] >= window["query_start"]):
-                exit_quote = connection.execute(
-                    """SELECT observed_at,price FROM quant.intraday_quote_observations
-                         WHERE symbol=%s AND source_name='tencent_free' AND observed_at>=%s AND observed_at<=%s AND price>0
-                         ORDER BY observed_at LIMIT 1""",
-                    (signal["symbol"], window["query_start"], window["query_end"]),
-                ).fetchone()
+                found = paths.first_in(symbol, window["query_start"], window["query_end"])
+                exit_quote = {"observed_at": found[0], "price": found[1]} if found else None
             status = "matured" if exit_quote else str(window["status"])
             if exit_quote:
-                path = connection.execute(
-                    """SELECT price FROM quant.intraday_quote_observations
-                         WHERE symbol=%s AND source_name='tencent_free' AND observed_at>=%s AND observed_at<=%s AND price>0
-                         ORDER BY observed_at""",
-                    (signal["symbol"], signal["observed_at"], exit_quote["observed_at"]),
-                ).fetchall()
-                outcome = metrics_for(entry_price, direction, [Decimal(row["price"]) for row in path])
+                # Only prices from continuous trading enter the path (never a lunch print).
+                path = [price for at, price in paths.between(symbol, signal["observed_at"], exit_quote["observed_at"])
+                        if continuous_auction_bounds(at) is not None]
+                outcome = metrics_for(entry_price, direction, path or [Decimal(exit_quote["price"])])
                 matured += 1
             else:
                 outcome = None
@@ -140,7 +213,7 @@ def settle(
                  outcome["raw_return"] if outcome else None, outcome["maximum_favorable_excursion"] if outcome else None,
                  outcome["maximum_adverse_excursion"] if outcome else None, status,
                  Json({
-                     "entry": "signal_evidence.tencent.price", "exit": "tencent_free",
+                     "entry": entry_source, "exit": "stored_scan_tape_and_priced_quotes",
                      "cutoff": cutoff.isoformat(), "settlement_window": {
                          key: value.isoformat() if isinstance(value, datetime) else value
                          for key, value in window.items()
@@ -178,7 +251,7 @@ def settle(
                  daily_exit["available_at"] if daily_exit else None, daily_exit["close"] if daily_exit else None,
                  outcome["raw_return"] if outcome else None, outcome["maximum_favorable_excursion"] if outcome else None,
                  outcome["maximum_adverse_excursion"] if outcome else None, status,
-                 Json(json_safe({"entry": "signal_evidence.tencent.price", "exit": "canonical_daily_close", "cutoff": cutoff.isoformat(),
+                 Json(json_safe({"entry": entry_source, "exit": "canonical_daily_close", "cutoff": cutoff.isoformat(),
                                  "return_decomposition": decomposition}))),
             )
             if status == "matured":
@@ -186,8 +259,9 @@ def settle(
             else:
                 pending += 1
     return {"as_of_date": str(as_of_date) if as_of_date else None, "signals": len(signals),
-            "outcome_rows": sum(horizon_counts.values()) + len(signals) * 2,
+            "skipped_without_entry_price": skipped,
+            "outcome_rows": sum(horizon_counts.values()) + (len(signals) - skipped) * 2,
             "matured": matured, "pending": pending, "intraday_horizons": horizon_counts}
 
 
-__all__ = ["settle"]
+__all__ = ["PRICED_QUOTE_SOURCES", "PricePaths", "settle", "signal_entry_price"]

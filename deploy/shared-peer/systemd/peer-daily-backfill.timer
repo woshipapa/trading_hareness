@@ -1,12 +1,10 @@
 [Unit]
-Description=Backfill the daily history after the close
+Description=Backfill the daily history in the owner batch window
 
 [Timer]
-# 15:40 is past the close and past the post-close refresh window, so the
-# backfill never competes with live collection for the shared 6-per-minute
-# provider - during a session that race is lost every time, and the request
-# returns "shared provider rate-limit queue is full".
-OnCalendar=Mon..Fri 15:40 Asia/Shanghai
+# Keep bulk history/COPY work on the independent owner lane during 04:00-08:00;
+# the live 5432/session process remains untouched during market hours.
+OnCalendar=Mon..Fri 06:30 Asia/Shanghai
 Persistent=false
 AccuracySec=1min
 Unit=peer-daily-backfill.service

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from app.research_capacity import feature_readiness_projection
+from app.owner_storage import TIERED_EVIDENCE_TABLES
+from app.research_capacity import current_data_coverage, feature_readiness_projection
 
 
 class FeatureReadinessProjectionTests(unittest.TestCase):
@@ -32,6 +34,25 @@ class FeatureReadinessProjectionTests(unittest.TestCase):
         source = Path("app/research_capacity.py").read_text(encoding="utf-8")
         self.assertIn("greatest(ceil(universe.symbols*0.8)::int,1000)", source)
         self.assertNotIn("least(universe.symbols*0.8,1000)", source)
+
+    def test_historical_coverage_uses_atomic_owner_cold_relations(self):
+        class Result:
+            def fetchone(self): return {}
+
+        class Connection:
+            cursor = object()
+            def __init__(self): self.calls = []
+            def execute(self, sql):
+                self.calls.append(str(sql))
+                return Result()
+
+        connection = Connection()
+        cold = {f"{name}_cold" for name in TIERED_EVIDENCE_TABLES}
+        with patch("app.research_capacity.eligible_cold_tables", return_value=cold):
+            current_data_coverage(connection)
+        sql = connection.calls[0]
+        for relation in ("canonical_bars_daily", "daily_fundamentals", "daily_trade_limits"):
+            self.assertIn(f"quant.{relation}_cold", sql)
 
 
 if __name__ == "__main__":

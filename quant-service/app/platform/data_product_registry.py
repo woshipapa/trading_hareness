@@ -12,6 +12,17 @@ from dataclasses import dataclass
 from typing import Any, Final, Iterable, Mapping
 
 
+OWNER_HOT_WINDOW_DAYS: Final = 365
+OWNER_TIERED_DATA_PRODUCTS: Final = frozenset({
+    "canonical_bars_daily",
+    "daily_fundamentals",
+    "daily_trade_limits",
+    "daily_adjustment_factors",
+    "security_suspensions",
+})
+OWNER_WHOLE_COLD_DATA_PRODUCTS: Final = frozenset({"legacy_source_records"})
+
+
 @dataclass(frozen=True)
 class DataProductContract:
     key: str
@@ -22,6 +33,7 @@ class DataProductContract:
     cloud_retention: str
     local_tier: str
     local_hot_window_days: int | None
+    owner_storage_policy: str
     replay_role: str
     description: str
 
@@ -35,6 +47,7 @@ def _product(
     archive_format: str = "parquet_zstd",
     local_tier: str = "warm",
     local_hot_window_days: int | None = 120,
+    owner_storage_policy: str = "standard",
     replay_role: str = "point_in_time_replay",
     description: str,
 ) -> DataProductContract:
@@ -47,6 +60,7 @@ def _product(
         cloud_retention="indefinite_immutable",
         local_tier=local_tier,
         local_hot_window_days=local_hot_window_days,
+        owner_storage_policy=owner_storage_policy,
         replay_role=replay_role,
         description=description,
     )
@@ -61,12 +75,16 @@ _PRODUCTS = (
     _product("remote_reports", "raw", "report_date+first_synced_at", ("report_year", "source_key"), archive_format="jsonl_zstd", local_tier="warm", local_hot_window_days=365, replay_role="analyst_source_replay", description="remote analyst reports before extraction"),
     _product("remote_analyst_messages", "raw", "received_at", ("received_date", "source_key"), archive_format="jsonl_zstd", local_tier="warm", local_hot_window_days=365, replay_role="analyst_source_replay", description="remote analyst messages before extraction"),
 
-    # L1: canonical market and point-in-time reference data. Daily bars and
-    # controls stay local because nearly every research query reuses them.
-    _product("canonical_bars_daily", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="hot", local_hot_window_days=None, replay_role="daily_market_replay", description="point-in-time canonical adjusted daily bars"),
-    _product("daily_fundamentals", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="hot", local_hot_window_days=None, replay_role="daily_fundamental_replay", description="daily valuation, turnover and share controls"),
-    _product("daily_trade_limits", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="hot", local_hot_window_days=None, replay_role="entry_feasibility_replay", description="point-in-time daily limit controls"),
-    _product("daily_adjustment_factors", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="hot", local_hot_window_days=None, replay_role="price_adjustment_replay", description="point-in-time corporate-action adjustment factors"),
+    # L1: canonical market and point-in-time reference data. The owner keeps a
+    # 365-day NVMe working set and moves older rows as one atomic family into
+    # schema-compatible ``*_cold`` twins. Consumers may union those twins only
+    # after the owner-storage gate proves that the whole family is ready.
+    _product("canonical_bars_daily", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="owner_hot_cold", local_hot_window_days=OWNER_HOT_WINDOW_DAYS, owner_storage_policy="split_after_365_days", replay_role="daily_market_replay", description="point-in-time canonical adjusted daily bars"),
+    _product("daily_fundamentals", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="owner_hot_cold", local_hot_window_days=OWNER_HOT_WINDOW_DAYS, owner_storage_policy="split_after_365_days", replay_role="daily_fundamental_replay", description="daily valuation, turnover and share controls"),
+    _product("daily_trade_limits", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="owner_hot_cold", local_hot_window_days=OWNER_HOT_WINDOW_DAYS, owner_storage_policy="split_after_365_days", replay_role="entry_feasibility_replay", description="point-in-time daily limit controls"),
+    _product("daily_adjustment_factors", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="owner_hot_cold", local_hot_window_days=OWNER_HOT_WINDOW_DAYS, owner_storage_policy="split_after_365_days", replay_role="price_adjustment_replay", description="point-in-time corporate-action adjustment factors"),
+    _product("security_suspensions", "canonical", "trading_date+available_at", ("exchange", "trading_year", "symbol_bucket"), local_tier="owner_hot_cold", local_hot_window_days=OWNER_HOT_WINDOW_DAYS, owner_storage_policy="split_after_365_days", replay_role="trading_eligibility_replay", description="point-in-time security suspension controls"),
+    _product("legacy_source_records", "raw", "available_at", ("source_name", "available_year"), archive_format="jsonl_zstd", local_tier="owner_cold", local_hot_window_days=0, owner_storage_policy="whole_table_cold", replay_role="legacy_source_audit", description="legacy provider evidence retained wholly in the owner cold tablespace"),
     _product("stock_money_flow_daily", "canonical", "trading_date+available_at", ("trading_year", "symbol_bucket"), local_tier="hot", local_hot_window_days=None, replay_role="daily_flow_replay", description="daily stock-flow evidence with provider provenance"),
     _product("market_bars_minute", "canonical", "bar_time+source_available_at", ("exchange_date", "sample_role", "symbol_bucket", "hour"), local_tier="warm", local_hot_window_days=120, replay_role="minute_tape_replay", description="canonical minute tape for event, near-threshold and matched-control replay"),
     _product("intraday_minute_sessions", "canonical", "bar_time+available_at", ("exchange_date", "symbol_bucket", "hour"), local_tier="hot", local_hot_window_days=60, replay_role="time_of_day_replay", description="captured watch-universe minute sessions"),
@@ -111,6 +129,7 @@ _PRODUCTS = (
     _product("strategy_experiments", "research", "created_at", ("strategy_key", "created_year"), local_tier="hot", local_hot_window_days=None, replay_role="walk_forward_trial_ledger", description="all tried variants and out-of-sample metrics"),
     _product("strategy_reviews", "outcomes", "exchange_date+observed_at", ("strategy_key", "review_year"), local_tier="hot", local_hot_window_days=None, replay_role="strategy_calibration_review", description="logical strategy review projection backed by strategy_review_runs"),
     _product("research_model_registry", "research", "created_at", ("model_family", "model_version"), archive_format="jsonl_zstd", local_tier="warm", local_hot_window_days=None, replay_role="offline_model_lineage", description="offline model artifact metadata, immutable data snapshot and validation status; never a live model source"),
+    _product("research_model_trials", "research", "created_at", ("model_id", "trial_key"), archive_format="jsonl_zstd", local_tier="warm", local_hot_window_days=None, replay_role="offline_model_trial_ledger", description="append-only pre-registered OOF trial parameters and metrics; live_effect is always none"),
     _product("strategy_day_summaries", "outcomes", "exchange_date", ("exchange_year",), local_tier="hot", local_hot_window_days=None, replay_role="daily_strategy_attribution", description="daily cross-strategy summary"),
 
     # Analyst observations stay shadow inputs. Both source time and
@@ -147,6 +166,7 @@ def data_product_contract_catalog() -> list[dict[str, Any]]:
             "cloud_retention": item.cloud_retention,
             "local_tier": item.local_tier,
             "local_hot_window_days": item.local_hot_window_days,
+            "owner_storage_policy": item.owner_storage_policy,
             "replay_role": item.replay_role,
             "description": item.description,
         }
@@ -170,6 +190,7 @@ def validate_declared_dataset_coverage(
 
 
 __all__ = [
-    "DATA_PRODUCT_CONTRACTS", "DataProductContract", "data_product_contract",
+    "DATA_PRODUCT_CONTRACTS", "DataProductContract", "OWNER_HOT_WINDOW_DAYS",
+    "OWNER_TIERED_DATA_PRODUCTS", "OWNER_WHOLE_COLD_DATA_PRODUCTS", "data_product_contract",
     "data_product_contract_catalog", "validate_declared_dataset_coverage",
 ]

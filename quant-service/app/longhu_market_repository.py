@@ -94,18 +94,17 @@ def persist_full_market_close(
                   jsonb_build_object('snapshot_date',%s::text,'coverage_gated',true)
              FROM unnest(%s::text[]) AS candidate(symbol)
            ON CONFLICT(universe_key,symbol) DO UPDATE SET enabled=true,priority=EXCLUDED.priority,
-             source=EXCLUDED.source,metadata=EXCLUDED.metadata,updated_at=now()""",
+             source=EXCLUDED.source,metadata=EXCLUDED.metadata,updated_at=now()
+           WHERE NOT quant.universe_members.enabled""",
         (PROVIDER_KEY, trade_date, symbols),
     )
-    if symbols:
-        connection.execute(
-            """UPDATE quant.universe_members SET enabled=false,updated_at=now(),
-                      metadata=metadata || jsonb_build_object('disabled_by_snapshot',%s::text)
-                WHERE universe_key='all_a' AND enabled AND NOT (symbol=ANY(%s))""",
-            (trade_date, symbols),
-        )
+    # This composite snapshot passes with ~3,500 rows and tolerates failed
+    # plates, so a symbol missing from it has not been shown to stop trading.
+    # It may add members; only the authoritative stock_basic listing removes
+    # them.  Disabling here closed hundreds of live names' PIT intervals on a
+    # partial run, and relabelling existing rows hid them from that listing.
     history = sync_universe_membership_history(
-        connection, "all_a", trade_date, symbols, source=PROVIDER_KEY, priority=20,
+        connection, "all_a", trade_date, symbols, source=PROVIDER_KEY, priority=20, close_missing=False,
     )
     flow_count = persist_flow_rows(connection, merged.flow_rows, PROVIDER_KEY, observed_at)
     quote_count = 0
@@ -180,7 +179,7 @@ def persist_full_market_close(
                 # those remain the responsibility of the Tushare control
                 # synchronizer.  The raw vendor rows above retain pre-close
                 # and board context for research/audit only.
-                "adj_factor": "not_promoted;_tushare_control_plane_only",
+                "adj_factor": "not_promoted;owner_longhu_qfq_factor_task_only",
                 "stk_limit": "not_promoted;_tushare_control_plane_only",
                 "trade_calendar": "observed_open_from_coverage_gated_settled_close",
             },

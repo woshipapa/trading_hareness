@@ -11,7 +11,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .market_rules import china_equity_session, china_futures_session
+from .market_rules import china_equity_observation_session, china_equity_session, china_futures_session
 from .tushare_providers import safe_error_detail
 
 
@@ -54,4 +54,17 @@ async def realtime_market_session(
     return (True, reason) if calendar_open else (False, calendar_reason)
 
 
-__all__ = ["realtime_market_session", "sse_calendar_open", "sse_calendar_status"]
+async def market_observation_session(
+    async_database: Any,
+    now: datetime | None = None,
+) -> tuple[bool, str]:
+    """Open evidence collectors at 09:15 without widening strategy hours."""
+    active, reason = china_equity_observation_session(now)
+    if not active:
+        return active, reason
+    exchange_date = (now or datetime.now(timezone.utc)).astimezone(CN_TZ).date()
+    calendar_open, calendar_reason = await sse_calendar_status(async_database, exchange_date)
+    return (True, reason) if calendar_open else (False, calendar_reason)
+
+
+__all__ = ["market_observation_session", "realtime_market_session", "sse_calendar_open", "sse_calendar_status"]

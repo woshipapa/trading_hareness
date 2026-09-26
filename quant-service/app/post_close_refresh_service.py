@@ -29,7 +29,7 @@ POST_CLOSE_STAGE_ORDER = (
     "market_flow_features", "limit_ladder", "limit_lift_pattern_mining", "cninfo_announcements",
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
-    "watchlist_main_wave", "research_snapshot",
+    "watchlist_main_wave", "teacher_review_roll", "watch_daily_review", "xiaojie_outcomes", "research_snapshot",
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
@@ -43,6 +43,13 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     # window instead of inheriting the generic ten-second request budget.
     "analyst_outcomes": 300.0,
     "analyst_intraday_outcomes": 180.0,
+    # Settles the session and re-freezes still-valid teacher plans from
+    # bounded Longhu bar requests (two in flight at a time).
+    "teacher_review_roll": 240.0,
+    "watch_daily_review": 240.0,
+    # Settles the session's 小杰 observations and refreshes the previous
+    # session, whose next-open/next-close columns only exist from today.
+    "xiaojie_outcomes": 120.0,
 }
 
 POST_CLOSE_STAGE_DEPENDENCIES = {
@@ -59,6 +66,11 @@ POST_CLOSE_STAGE_DEPENDENCIES = {
     "research_snapshot": ("core_daily_controls",),
     "longhu_supplemental_evidence": ("full_market_daily", "core_daily_controls"),
     "decision_research_closure": ("post_close_strategy", "core_daily_controls"),
+    # Settlement and next-session plans read the day's canonical bars and
+    # point-in-time adjustment factors.
+    "teacher_review_roll": ("full_market_daily", "core_daily_controls"),
+    "watch_daily_review": ("full_market_daily", "core_daily_controls"),
+    "xiaojie_outcomes": ("full_market_daily", "core_daily_controls"),
 }
 
 
@@ -109,6 +121,9 @@ class PostCloseRefreshDependencies:
     safe_error_detail: Callable[[str, int], str]
     json_safe: Callable[[Any], Any]
     longhu_supplemental_sync: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    teacher_review_roll: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    watch_daily_review: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    xiaojie_outcomes: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -169,7 +184,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         ),
         "index_context": lambda: dependencies.sync_strategy_index_context(trade_date),
         "close_market_snapshot": lambda: dependencies.build_market_snapshot(
-            MarketSnapshotRequest(session="close", universe_key="all_a", refresh_public_quotes=False),
+            # The close checkpoint is the owner-side collection boundary. Ask
+            # the capability resolver to refresh Fuyao and its bounded public
+            # fallbacks here; the snapshot gate still keeps those sources
+            # supplemental unless a separately configured licensed feed exists.
+            MarketSnapshotRequest(session="close", universe_key="all_a", refresh_public_quotes=True),
         ),
         "akshare_supplements": akshare_stage,
         "ths_industry_flow": (
@@ -215,6 +234,21 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             lambda: dependencies.longhu_supplemental_sync(trade_date)
             if dependencies.longhu_supplemental_sync is not None and longhu_mode
             else {"status": "skipped", "reason": "Longhu supplemental capture is disabled or not configured", "research_only": True}
+        ),
+        "teacher_review_roll": (
+            (lambda: dependencies.teacher_review_roll(trade_date))
+            if dependencies.teacher_review_roll is not None
+            else (lambda: {"status": "skipped", "reason": "teacher review disabled", "research_only": True})
+        ),
+        "watch_daily_review": (
+            (lambda: dependencies.watch_daily_review(trade_date))
+            if dependencies.watch_daily_review is not None
+            else (lambda: {"status": "skipped", "reason": "watch review not wired", "research_only": True})
+        ),
+        "xiaojie_outcomes": (
+            (lambda: dependencies.xiaojie_outcomes(trade_date))
+            if dependencies.xiaojie_outcomes is not None
+            else (lambda: {"status": "skipped", "reason": "xiaojie settlement not wired", "research_only": True})
         ),
         "analyst_outcomes": lambda: dependencies.run_database(
             dependencies.recompute_outcomes, trade_date, timeout_seconds=300,

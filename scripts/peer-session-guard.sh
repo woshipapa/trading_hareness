@@ -25,10 +25,12 @@ RESTART_COOLDOWN_SECONDS="${PEER_GUARD_RESTART_COOLDOWN_SECONDS:-600}"
 MAIN_PORT="${PEER_QUANT_PORT:-15682}"
 SCHEDULER_PORT="${PEER_SCHEDULER_PORT:-15683}"
 EXPECTED_MAIN_PROFILE="${PEER_EXPECTED_MAIN_PROFILE:-intraday_edge}"
+BATCH_TUNNEL_REQUIRED="${PEER_BATCH_TUNNEL_REQUIRED:-auto}"
 
 MAIN=trading-hareness-peer-quant-research-1
 SCHEDULER=trading-hareness-peer-quant-research-scheduler-1
 TUNNEL=trading-hareness-peer-db-tunnel-1
+BATCH_TUNNEL=trading-hareness-peer-db-batch-tunnel-1
 
 mkdir -p "$STATE_DIR"
 problems=()
@@ -49,10 +51,42 @@ compose() {
   (cd "$COMPOSE_DIR" && docker compose -f compose.yaml -f compose.intraday-owner.yaml "$@")
 }
 
-container_state() { docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null || echo missing; }
+container_state() {
+  local value
+  if value=$(docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null); then
+    printf '%s\n' "$value"
+  else
+    echo missing
+  fi
+}
 
 container_health() {
-  docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$1" 2>/dev/null || echo missing
+  local value
+  if value=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$1" 2>/dev/null); then
+    printf '%s\n' "$value"
+  else
+    echo missing
+  fi
+}
+
+batch_tunnel_required() {
+  case "$BATCH_TUNNEL_REQUIRED" in
+    1|true|TRUE|True|yes|YES|Yes|on|ON|On) return 0 ;;
+    0|false|FALSE|False|no|NO|No|off|OFF|Off) return 1 ;;
+    auto|AUTO|Auto) ;;
+    *)
+      problem "PEER_BATCH_TUNNEL_REQUIRED must be auto/true/false, got '$BATCH_TUNNEL_REQUIRED'"
+      return 1
+      ;;
+  esac
+
+  # The current contract exposes 5433 from the normal db-tunnel.  The
+  # db-batch-tunnel sidecar remains an optional compatibility service, but its
+  # absence must not make the scheduler or the session guard restart-loop.
+  case "$BATCH_TUNNEL_REQUIRED" in
+    auto|AUTO|Auto) return 1 ;;
+  esac
+  [ "$(container_state "$BATCH_TUNNEL")" != missing ]
 }
 
 cooled_down() {
@@ -151,7 +185,13 @@ fi
 # The tunnel goes first: the application containers cannot become healthy while
 # their database path is down, and restarting them ahead of it just burns the
 # cooldown on a container that was never the problem.
-for pair in "db-tunnel:$TUNNEL" "quant-research:$MAIN" "quant-research-scheduler:$SCHEDULER"; do
+guarded_services=("db-tunnel:$TUNNEL")
+if batch_tunnel_required; then
+  guarded_services+=("db-batch-tunnel:$BATCH_TUNNEL")
+fi
+guarded_services+=("quant-research:$MAIN" "quant-research-scheduler:$SCHEDULER")
+
+for pair in "${guarded_services[@]}"; do
   service=${pair%%:*}; name=${pair##*:}
   state=$(container_state "$name")
   health=$(container_health "$name")
@@ -259,7 +299,7 @@ fi
 # unfixed problem is worth a message and a failed unit.
 unresolved=0
 for item in "${problems[@]}"; do
-  case "$item" in *"did not become healthy"*|*"not restarting again"*|*"does not exist"*|*"refusing to act"*) unresolved=1 ;; esac
+  case "$item" in *"did not become healthy"*|*"not restarting again"*|*"does not exist"*|*"refusing to act"*|*"PEER_BATCH_TUNNEL_REQUIRED must be"*) unresolved=1 ;; esac
 done
 if [ "$MODE" = preopen ]; then
   alert "$summary"

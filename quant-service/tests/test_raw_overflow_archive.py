@@ -2,13 +2,15 @@ import os
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from unittest.mock import patch
 from uuid import UUID
 
-from app.raw_overflow_archive import RawOverflowConfig, next_batch, stream_key
+from app.raw_overflow_archive import DEFAULT_CAPABILITIES, RawOverflowConfig, capability_from_stream, next_batch, stream_key
 
 
 class _Connection:
-    def __init__(self):
+    def __init__(self, bytes_used=900 * 1024 * 1024):
+        self.bytes_used = bytes_used
         self.rows = [
             {
                 "observation_id": UUID("00000000-0000-0000-0000-000000000001"),
@@ -23,7 +25,8 @@ class _Connection:
 
     def execute(self, sql, params=None):
         if "pg_total_relation_size" in sql:
-            return _Result({"bytes": 900 * 1024 * 1024})
+            self.storage_sql = sql
+            return _Result({"bytes": self.bytes_used})
         if "count(*)::int AS count" in sql:
             return _Result({"count": 0})
         if "SELECT effective_at,observation_id FROM quant.raw_archive_offsets" in sql:
@@ -52,6 +55,17 @@ class _Database:
 
 
 class RawOverflowArchiveTests(unittest.TestCase):
+    def test_legacy_env_allowlist_keeps_canonical_daily_bar_stream(self):
+        config = RawOverflowConfig.from_env({
+            "QUANT_RAW_OVERFLOW_CAPABILITIES": "realtime_quote,rt_min",
+            "QUANT_RAW_OVERFLOW_ARCHIVE_ENABLED": "false",
+        })
+        self.assertEqual(capability_from_stream("raw_market_observations:daily_bar", config), "daily_bar")
+
+    def test_daily_bar_stream_is_an_explicit_owner_allowlist_capability(self):
+        config = RawOverflowConfig(enabled=True, capabilities=DEFAULT_CAPABILITIES)
+        self.assertEqual(capability_from_stream("raw_market_observations:daily_bar", config), "daily_bar")
+
     def test_next_batch_is_keyset_bounded_and_token_free(self):
         old = os.environ.get("QUANT_HOT_DATABASE_SOFT_BYTES")
         os.environ["QUANT_HOT_DATABASE_SOFT_BYTES"] = str(1024 * 1024 * 1024)
@@ -67,6 +81,31 @@ class RawOverflowArchiveTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 1)
         self.assertEqual(result["first_offset"]["observation_id"], "00000000-0000-0000-0000-000000000001")
         self.assertNotIn("access_token", repr(result))
+
+    def test_a_disabled_lane_answers_polls_without_touching_the_database(self):
+        class NoDatabase:
+            def transaction(self):
+                raise AssertionError("a disabled poll must not open a transaction")
+
+        config = RawOverflowConfig(enabled=False, capabilities=("realtime_quote",), batch_rows=1)
+        result = next_batch(NoDatabase(), stream=stream_key("realtime_quote"), limit=100, config=config)
+        self.assertEqual(result, {"status": "disabled", "stream_key": stream_key("realtime_quote"), "rows": []})
+
+    def test_storage_budget_uses_owner_large_hot_tier_and_excludes_cold_tablespace(self):
+        from app.raw_overflow_archive import _storage_state
+
+        connection = _Connection(bytes_used=45 * 1024**3)
+        config = RawOverflowConfig(enabled=True, capabilities=DEFAULT_CAPABILITIES)
+        # The owner sets no override, so the default budget applies.  The
+        # local compose file sets a 36 GiB override, and CI runs the tests in
+        # that container, so the variable is removed for this test only.
+        with patch.dict(os.environ):
+            os.environ.pop("QUANT_HOT_DATABASE_SOFT_BYTES", None)
+            state, reasons, storage = _storage_state(connection, config)
+        self.assertEqual(state, "normal")
+        self.assertEqual(reasons, ())
+        self.assertEqual(storage["hot_database_budget_bytes"], 300 * 1000**3)
+        self.assertIn("c.reltablespace=0", connection.storage_sql)
 
 
 if __name__ == "__main__":

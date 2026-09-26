@@ -349,3 +349,117 @@ class LonghuVendorSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, payload: dict | None = None):
+        self.status_code, self._payload = status_code, payload or {}
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"{self.status_code} Server Error")
+
+
+class SharedMinuteBatchTests(unittest.TestCase):
+    def setUp(self):
+        from app import longhu_vendor_source as module
+        self.module = module
+        module._BATCH_MINUTE_ROUTE_MISSING_UNTIL.clear()
+        self.addCleanup(module._BATCH_MINUTE_ROUTE_MISSING_UNTIL.clear)
+
+    def source(self, responses: list, calls: list):
+        source = SharedLonghuReadSource("http://owner.test", "read-key")
+
+        class Session:
+            def get(self, url, params=None, timeout=None):
+                calls.append((url, dict(params or {}), timeout))
+                return responses.pop(0)
+
+        source._session = Session()
+        source.stock_minutes = lambda symbol: [{"symbol": symbol, "single": True}]
+        return source
+
+    def test_one_gateway_request_serves_the_basket_in_the_callers_spelling(self):
+        calls: list = []
+        source = self.source([_FakeResponse(200, {
+            "rows": {"000001.SZ": [{"time": "0930"}]}, "errors": {"600000.SH": "stale"}})], calls)
+        result = source.stock_minutes_batch(["000001.sz", "600000.SH", "000002.SZ"], deadline_seconds=5.5)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][0].endswith("/licensed/longhu/minutes"))
+        self.assertEqual(calls[0][1], {"symbols": "000001.SZ,600000.SH,000002.SZ", "deadline_seconds": 4.0})
+        self.assertEqual(result, {"000001.sz": [{"time": "0930"}], "600000.SH": "stale",
+                                  "000002.SZ": "minute_batch_missing_symbol"})
+
+    def test_an_old_owner_falls_back_to_single_calls_and_is_not_probed_every_scan(self):
+        calls: list = []
+        source = self.source([_FakeResponse(404)], calls)
+        first = source.stock_minutes_batch(["000001.SZ"], deadline_seconds=5.5)
+        second = source.stock_minutes_batch(["000002.SZ"], deadline_seconds=5.5)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(first["000001.SZ"], [{"symbol": "000001.SZ", "single": True}])
+        self.assertEqual(second["000002.SZ"], [{"symbol": "000002.SZ", "single": True}])
+
+    def test_a_saturated_owner_is_not_hit_with_single_calls(self):
+        import requests
+        calls: list = []
+        source = self.source([_FakeResponse(503)], calls)
+        source.stock_minutes = lambda symbol: self.fail("must not fan out against a saturated owner")
+        with self.assertRaises(requests.HTTPError):
+            source.stock_minutes_batch(["000001.SZ"], deadline_seconds=5.5)
+        self.assertEqual(self.module._BATCH_MINUTE_ROUTE_MISSING_UNTIL, {})
+
+
+class PeriodKlineTests(unittest.TestCase):
+    def test_period_kline_payload_is_normalized_oldest_first(self):
+        from app.longhu_vendor_source import parse_period_kline_payload
+        payload = {"x": ["202609211500", "202609211030", "bad", "202609211000"],
+                   "y": [[10.2, 10.4, 10.5, 10.1], [10.0, 10.1, 10.2, 9.9], [1, 1, 1, 1], [9.8, 10.0, 10.05, 9.7]],
+                   "vol": [1200, 800, 1, 1000], "bal": [1.2e6, 8e5, 1, 1e6]}
+        rows = parse_period_kline_payload(payload, "603386.SH", "30")
+        self.assertEqual([row["bar_time"] for row in rows], ["202609211000", "202609211030", "202609211500"])
+        self.assertEqual((rows[0]["open"], rows[0]["high"], rows[0]["low"], rows[0]["close"]), (9.8, 10.05, 9.7, 10.0))
+        self.assertEqual(rows[-1]["volume_lot"], 1200)
+
+    def test_shared_period_bars_use_the_documented_history_call(self):
+        source = SharedLonghuReadSource("http://owner.test", "read-key")
+        calls = []
+
+        def post(payload):
+            calls.append(payload)
+            return {"target": "longhu_history", "calls": 1, "pages": [{"payload": {
+                "errcode": "0", "x": ["202609211000"], "y": [[10.0, 10.1, 10.2, 9.9]], "vol": [100], "bal": [1e5]}}]}
+
+        source.raw_call = post
+        rows = source.stock_period_bars("603386.SH", "60", 120)
+        self.assertEqual(rows[0]["period"], "60")
+        self.assertEqual(calls[0]["target"], "longhu_history")
+        self.assertEqual({key: calls[0]["params"][key] for key in ("a", "c", "StockID", "Type", "st")},
+                         {"a": "GetKLineDay_W14", "c": "StockLineData", "StockID": "603386", "Type": "60", "st": 120})
+        with self.assertRaises(ValueError):
+            source.stock_period_bars("603386.SH", "15")
+
+
+class MinuteAmountAndTencentKlineTests(unittest.TestCase):
+    def test_minute_turnover_is_the_difference_of_cumulative_turnover(self):
+        from app.longhu_vendor_source import exact_minute_amounts
+        rows = [{"vwap": 10.0, "cumulative_volume_lot": 100, "volume_lot": 100, "amount": 1},
+                {"vwap": 10.1, "cumulative_volume_lot": 300, "volume_lot": 200, "amount": 1},
+                {"vwap": 10.2, "cumulative_volume_lot": 400, "volume_lot": 100, "amount": 1}]
+        out = exact_minute_amounts(rows)
+        self.assertEqual([row["amount"] for row in out], [100000.0, 203000.0, 105000.0])
+        self.assertAlmostEqual(sum(row["amount"] for row in out) / (400 * 100), 10.2)   # equals the cumulative average price
+
+    def test_tencent_period_klines_keep_true_open_high_low(self):
+        from app.free_market_providers import parse_tencent_period_klines
+        payload = {"data": {"sz300476": {"m30": [
+            ["202609221000", "251.00", "245.36", "251.05", "243.61", "204359.000", {}, ""],
+            ["202609220930", "bad"], ["202609211500", "240.0", "248.0", "248.5", "239.9", "1000"]]}}}
+        bars = parse_tencent_period_klines(payload, "sz300476", "300476.SZ", "30")
+        self.assertEqual([bar["bar_time"] for bar in bars], ["202609211500", "202609221000"])
+        self.assertEqual((bars[1]["open"], bars[1]["high"], bars[1]["low"], bars[1]["close"], bars[1]["volume_lot"]),
+                         (251.0, 251.05, 243.61, 245.36, 204359.0))
+

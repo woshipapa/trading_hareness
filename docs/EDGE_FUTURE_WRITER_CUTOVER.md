@@ -1,5 +1,11 @@
 # Edge → owner future-writer cutover
 
+> **Current operating rule:** the cutover is complete. The remote owner/peer is
+> the only real-time data and strategy writer. The local workstation only
+> analyzes or pulls remote evidence through the owner API; it is not a fallback
+> live collector. Recovery instructions below are historical/explicit operator
+> procedures only.
+
 状态：已切换（2026-09-05，非交易时段）。历史数据不迁移；edge47 的
 `quant_intraday_edge` 保留为历史证据库。下一个交易日开始，新的盘中
 evidence、signals 和 outcomes 由 Longhu peer runtime 写入 owner

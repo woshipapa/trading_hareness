@@ -29,6 +29,7 @@ async def capture(
     provider_key: str = "tencent_free",
     feature_source: str = "tencent_free_minute",
     check_provider_circuit: bool = True,
+    fetch_minutes_batch: Callable[[list[str]], Awaitable[dict[str, Any]]] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Capture a capped target/peer basket with a 45-second feature cache."""
     requested: list[str] = []
@@ -113,7 +114,30 @@ async def capture(
     tasks: dict[asyncio.Task[tuple[str, dict[str, Any] | None, str | None]], str] = {}
     pending: set[asyncio.Task[tuple[str, dict[str, Any] | None, str | None]]] = set()
     results: list[tuple[str, dict[str, Any] | None, str | None]] = []
-    if missing:
+    uncached: set[str] = set()
+    batched = bool(missing) and fetch_minutes_batch is not None
+    if batched:
+        # One batched provider request: the source fans the basket out on its
+        # own pool, so the shared blocking executor holds a single slot.
+        try:
+            batch = await asyncio.wait_for(fetch_minutes_batch(missing), timeout=6.5)
+        except handled_errors as error:
+            batch = {symbol: str(error) or type(error).__name__ for symbol in missing}
+        for symbol in missing:
+            value = batch.get(symbol, "minute_batch_missing_symbol")
+            if isinstance(value, list):
+                try:
+                    results.append((symbol, minute_features(value, source=feature_source), None))
+                except handled_errors as error:
+                    results.append((symbol, None, safe_error(str(error), 240)))
+            elif value == "minute_batch_deadline_exceeded":
+                # Not a provider answer: leave it uncached so the next scan
+                # starts with the symbols this one could not reach.
+                results.append((symbol, None, str(value)))
+                uncached.add(symbol)
+            else:
+                results.append((symbol, None, safe_error(str(value), 240)))
+    elif missing:
         tasks = {asyncio.create_task(fetch_one(symbol)): symbol for symbol in missing}
         done, pending = await asyncio.wait(tasks, timeout=6.5)
         for task in pending:
@@ -134,7 +158,8 @@ async def capture(
     fresh_errors: list[str] = []
     fresh_completed = 0
     for symbol, item, error in results:
-        cache[symbol] = (now_monotonic, item, error)
+        if symbol not in uncached:
+            cache[symbol] = (now_monotonic, item, error)
         if item is not None:
             features[symbol] = item
             fresh_completed += 1
@@ -155,7 +180,7 @@ async def capture(
             "configured_targets": configured_targets, "configured_peers": configured_peers,
             "passive_watches": passive_watches, "mapped_peers": mapped_peer_symbols,
         },
-        "deadline_exceeded_symbols": sorted(tasks[task] for task in pending),
+        "deadline_exceeded_symbols": sorted({*(tasks[task] for task in pending), *uncached}),
         "provider_status": "completed" if fresh_completed else "failed" if fresh_errors else "cached",
         "provider": provider_key,
         "feature_source": feature_source,

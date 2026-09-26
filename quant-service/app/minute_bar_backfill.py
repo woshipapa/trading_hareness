@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import date, datetime, time as _time, timezone
+from datetime import date, datetime, time as _time, timedelta, timezone
 from typing import Any, Awaitable, Callable, Sequence
 from zoneinfo import ZoneInfo
 
@@ -127,11 +127,51 @@ def normalize_minute_rows(symbol: str, rows: list[dict[str, Any]]) -> list[dict[
             "low": _number(row.get("low")), "close": close,
             "volume": _number(row.get("vol")), "amount": _number(row.get("amount")),
             "source_available_at": parse_source_available_at(
-                row.get("source_available_at") or row.get("provider_available_at") or row.get("received_at")
+                row.get("source_available_at") or row.get("provider_available_at")
+                or row.get("received_at") or row.get("upstream_available_at")
             ),
             "raw": dict(row),
         })
     return [by_minute[key][1] for key in sorted(by_minute)]
+
+
+def source_clock_coverage(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize explicit, causally usable provider clocks without inventing one.
+
+    ``available_at`` (the local persistence time) is deliberately not used
+    here.  A historical minute response is causally usable only when the
+    upstream supplied a timestamp at or after the bar and no more than ten
+    minutes later, which is the same admission rule used by replay readiness.
+    """
+    explicit = 0
+    causal = 0
+    for row in rows:
+        source_available_at = row.get("source_available_at")
+        if not isinstance(source_available_at, datetime):
+            continue
+        explicit += 1
+        bar_time = row.get("bar_time")
+        if not isinstance(bar_time, datetime):
+            continue
+        bar_utc = bar_time.astimezone(timezone.utc)
+        source_utc = source_available_at.astimezone(timezone.utc)
+        if bar_utc <= source_utc <= bar_utc + timedelta(minutes=10):
+            causal += 1
+    total = len(rows)
+    missing = max(0, total - explicit)
+    noncausal = max(0, explicit - causal)
+    status = "empty" if total == 0 else "causally_clocked" if causal == total else "missing_or_noncausal"
+    return {
+        "status": status,
+        "bars": total,
+        "explicit_source_clock_bars": explicit,
+        "causally_clocked_bars": causal,
+        "missing_source_clock_bars": missing,
+        "noncausal_source_clock_bars": noncausal,
+        "provider_contract": "explicit_row_clock_only",
+        "research_only": True,
+        "live_effect": "none",
+    }
 
 
 def ensure_import_record(connection: Any, symbol: str, trading_date: date, row_count: int,
@@ -249,7 +289,10 @@ async def backfill_symbol_session(
     )
     rows = normalize_minute_rows(symbol, call.rows)
     if not rows:
-        return {"symbol": symbol, "trading_date": str(trading_date), "status": "empty", "bars": 0}
+        return {
+            "symbol": symbol, "trading_date": str(trading_date), "status": "empty", "bars": 0,
+            "source_clock": source_clock_coverage(rows),
+        }
     roles = sorted({str(role) for role in selection_roles if str(role)})
     if roles:
         rows = [{**row, "raw": {**dict(row["raw"]), "selection_roles": roles}} for row in rows]
@@ -267,15 +310,23 @@ async def backfill_symbol_session(
             return reconcile_against_daily(connection, symbol, trading_date)
 
     reconciliation = await run_database_blocking(verify, timeout_seconds=60)
+    clock = source_clock_coverage(rows)
+    if clock["status"] != "causally_clocked":
+        clock["warning"] = (
+            "provider did not supply a complete source availability clock; "
+            "local persistence time is not substituted"
+        )
     return {"symbol": symbol, "trading_date": str(trading_date),
             "status": "completed" if stored >= FULL_SESSION_BARS - 1 else "partial",
             "bars": stored, "expected": FULL_SESSION_BARS,
-            "selection_roles": roles, "reconciliation": reconciliation}
+            "selection_roles": roles, "reconciliation": reconciliation,
+            "source_clock": clock}
 
 
 __all__ = [
     "CN_TZ", "FULL_SESSION_BARS", "MINUTE_API", "SOURCE_NAME",
     "backfill_symbol_session", "ensure_import_record", "in_session", "limit_up_symbols",
     "normalize_minute_rows", "parse_source_available_at", "parse_trade_time", "persist_minute_rows",
+    "source_clock_coverage",
     "reconcile_against_daily",
 ]

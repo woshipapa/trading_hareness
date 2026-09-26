@@ -85,6 +85,7 @@ _tenant_token_cache = FeishuTenantTokenCache()
 async def post_direct_feishu_alert_text(
     text: str,
     *,
+    idempotency_key: str | None = None,
     environ: Mapping[str, str] | None = None,
     client_factory: Callable[..., Any] = alert_http_client,
     token_cache: FeishuTenantTokenCache = _tenant_token_cache,
@@ -104,6 +105,9 @@ async def post_direct_feishu_alert_text(
                     "receive_id": config.receive_id,
                     "msg_type": "text",
                     "content": json.dumps({"text": str(text)}, ensure_ascii=False),
+                    # Feishu drops a second create carrying the same uuid, so
+                    # an outbox retry after a lost response cannot duplicate.
+                    **({"uuid": str(idempotency_key)[:50]} if idempotency_key else {}),
                 },
             )
             response.raise_for_status()
@@ -112,7 +116,8 @@ async def post_direct_feishu_alert_text(
                 raise ValueError(f"Feishu message rejected: {str(payload.get('msg') or 'unknown error')[:200]}")
             return {"status": "sent", "response": payload}
     except (httpx.HTTPError, ValueError, TypeError) as error:
-        return {"status": "failed", "error": safe_error_detail(str(error), 500)}
+        return {"status": "failed", "error": safe_error_detail(str(error), 500),
+                "ambiguous": isinstance(error, (httpx.ReadTimeout, httpx.WriteTimeout, httpx.ReadError, httpx.RemoteProtocolError))}
 
 
 __all__ = [

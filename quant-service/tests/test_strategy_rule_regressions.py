@@ -141,6 +141,30 @@ class StrategyRuleRegressionTests(unittest.TestCase):
         self.assertNotIn("main_net_inflow", quotes[0])
         self.assertTrue(quotes[0]["source_session_date_inferred"])
 
+    def test_akshare_tencent_snapshot_normalization_is_source_labelled(self):
+        from app.akshare_provider import normalize_tencent_all_a_spot_rows
+
+        rows = normalize_tencent_all_a_spot_rows([
+            {"代码": "000001", "名称": "平安银行", "最新价": "10.20", "涨跌幅": "1.5",
+             "成交量": "123", "成交额": "456789"},
+            {"代码": "BAD", "名称": "无效", "最新价": "10"},
+        ], date(2026, 8, 10))
+        self.assertEqual(rows, [{
+            "ts_code": "000001.SZ", "name": "平安银行", "close": 10.2, "pct_chg": 1.5,
+            "vol": 123.0, "amount": 456789.0, "trade_date": "20260810",
+            "source_session_date_inferred": True,
+            "price_source": "akshare_tencent_all_a_snapshot",
+        }])
+
+        english_rows = normalize_tencent_all_a_spot_rows([
+            {"code": "sh600519", "name": "贵州茅台", "zxj": "1251.24", "zdf": "-0.20",
+             "volume": "30981.00", "turnover": "389463"},
+        ], date(2026, 8, 10))
+        self.assertEqual(english_rows[0]["ts_code"], "600519.SH")
+        self.assertEqual(english_rows[0]["close"], 1251.24)
+        self.assertEqual(english_rows[0]["vol"], 30981.0)
+        self.assertEqual(english_rows[0]["amount"], 389463.0)
+
     def test_free_provider_symbol_routing_is_explicit(self):
         self.assertEqual(eastmoney_secid("603580.SH"), "1.603580")
         self.assertEqual(eastmoney_secid("000636.SZ"), "0.000636")
@@ -171,9 +195,13 @@ class StrategyRuleRegressionTests(unittest.TestCase):
 
     def test_public_market_batch_is_opt_in_and_bounded(self):
         with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(market_snapshot_public_quote_settings(), {"enabled": False, "batch_size": 80, "concurrency": 2})
+            self.assertEqual(market_snapshot_public_quote_settings(), {
+                "enabled": False, "fallback_enabled": True, "batch_size": 80, "concurrency": 2,
+            })
         with patch.dict("os.environ", {"MARKET_SNAPSHOT_ENABLE_PUBLIC_BATCH": "true", "MARKET_SNAPSHOT_PUBLIC_BATCH_SIZE": "999", "MARKET_SNAPSHOT_PUBLIC_CONCURRENCY": "0"}, clear=True):
-            self.assertEqual(market_snapshot_public_quote_settings(), {"enabled": True, "batch_size": 200, "concurrency": 1})
+            self.assertEqual(market_snapshot_public_quote_settings(), {
+                "enabled": True, "fallback_enabled": True, "batch_size": 200, "concurrency": 1,
+            })
 
     def test_sector_catalog_sync_is_explicitly_bounded(self):
         self.assertEqual(ths_taxonomy_key("N"), "ths_index_n")

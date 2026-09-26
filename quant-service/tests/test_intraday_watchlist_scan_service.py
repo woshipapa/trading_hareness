@@ -253,11 +253,13 @@ class IntradayWatchlistScanServiceTests(unittest.TestCase):
     def test_peer_contexts_keep_only_exact_and_configured_valid_symbols(self):
         contexts = build_peer_contexts(
             [{"symbol": "000001.SZ", "metadata": {"upside_research": {"enabled": True, "peer_symbols": ["000002.SZ", "bad"]}}}],
-            {"000001.SZ": {"peer_symbols": ["000003.SZ"], "groups": ["concept:a"]}},
+            {"000001.SZ": {"peer_symbols": ["000003.SZ"], "groups": [
+                {"taxonomy_key": "ths_concept", "sector_key": "concept:a", "peer_symbols": ["000003.SZ"]},
+            ]}},
             {}, lambda peers, _: {"received": peers},
         )
-        self.assertEqual(contexts["000001.SZ"]["received"], ["000002.SZ", "000003.SZ"])
-        self.assertEqual(contexts["000001.SZ"]["exact_membership_groups"], ["concept:a"])
+        self.assertEqual(contexts["000001.SZ"]["received"], ["000002.SZ"])
+        self.assertEqual(contexts["000001.SZ"]["exact_membership_groups"][0]["sector_key"], "concept:a")
 
 
 if __name__ == "__main__":

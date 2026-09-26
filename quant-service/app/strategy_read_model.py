@@ -5,6 +5,28 @@ from __future__ import annotations
 from typing import Any
 
 
+_POST_CLOSE_SUMMARY_SCALARS = (
+    "reason",
+    "returned",
+    "base_ready_30d",
+    "fresh_start_15d",
+    "base_forming_15d",
+    "eligible_candidates",
+)
+
+
+def compact_post_close_run(row: Any) -> Any:
+    """Keep dashboard counters while avoiding multi-megabyte research blobs."""
+    if not row or not isinstance(row, dict):
+        return row
+    summary = row.get("summary")
+    if not isinstance(summary, dict):
+        return row
+    projected = dict(row)
+    projected["summary"] = {key: summary[key] for key in _POST_CLOSE_SUMMARY_SCALARS if key in summary}
+    return projected
+
+
 def latest_strategy_decision(database: Any, model_version: str) -> dict[str, Any]:
     with database.transaction() as connection:
         run = connection.execute(
@@ -40,8 +62,8 @@ def latest_post_close_strategy(database: Any) -> dict[str, Any]:
         ).fetchone()
         if not latest_completed:
             return {
-                "run": latest_attempt,
-                "latest_attempt": latest_attempt,
+                "run": compact_post_close_run(latest_attempt),
+                "latest_attempt": compact_post_close_run(latest_attempt),
                 "latest_completed": None,
                 "candidate_run": None,
                 "candidates": [],
@@ -56,10 +78,10 @@ def latest_post_close_strategy(database: Any) -> dict[str, Any]:
     return {
         # ``run`` deliberately reflects the latest attempt so a dated, blocked
         # run cannot be rendered as a stale successful run for today.
-        "run": latest_attempt,
-        "latest_attempt": latest_attempt,
-        "latest_completed": latest_completed,
-        "candidate_run": latest_completed,
+        "run": compact_post_close_run(latest_attempt),
+        "latest_attempt": compact_post_close_run(latest_attempt),
+        "latest_completed": compact_post_close_run(latest_completed),
+        "candidate_run": compact_post_close_run(latest_completed),
         "candidates": rows,
         "notice": "候选用于次日人工观察；未自动加入盘中观察池，也不会自动下单。",
     }
