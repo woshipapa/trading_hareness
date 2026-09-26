@@ -1,6 +1,7 @@
 """Focused regression tests extracted from the legacy provider helper suite."""
 
 from provider_test_support import *  # noqa: F403
+from app.fuyao_provider import FuyaoProviderError
 from app.main import _start_application_background_tasks
 from app.runtime_tasks import (
     BackgroundTaskSpec,
@@ -681,7 +682,10 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
 
         async def check() -> tuple[dict[str, object], AsyncMock]:
             blocking = AsyncMock(side_effect=[summary, None])
-            with patch("app.main.run_database_blocking", new=blocking), \
+            # Feishu delivery of the daily review is opt-out; with it off the
+            # summary is still persisted for the frontend.
+            with patch.dict("os.environ", {"DAILY_SUMMARY_FEISHU_ENABLED": "false"}), \
+                 patch("app.main.run_database_blocking", new=blocking), \
                  patch("app.main.post_feishu_alert_text", new=AsyncMock()) as outbound:
                 result = await run_daily_strategy_summary(date(2026, 8, 11))
             return result, blocking, outbound
@@ -691,7 +695,7 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         outbound.assert_not_awaited()
         self.assertEqual(
             [call.args[0].__name__ for call in blocking.await_args_list],
-            ["build_daily_strategy_summary", "persist_frontend_only"],
+            ["build_daily_strategy_summary", "persist_delivery"],
         )
 
     def test_minute_session_capture_persists_in_database_executor(self):
@@ -954,7 +958,8 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         expected = {"status": "degraded", "quote_count": 1, "source_summary": {"providers": {"akshare": 1}}}
 
         async def check() -> tuple[dict[str, object], AsyncMock, AsyncMock, AsyncMock]:
-            blocking = AsyncMock(side_effect=[["000001.SZ"], 1, expected])
+            # universe symbols, the Fuyao failure record, the AKShare batch, finalize.
+            blocking = AsyncMock(side_effect=[["000001.SZ"], None, 1, expected])
             fuyao = AsyncMock(side_effect=FuyaoProviderError("temporary Fuyao failure"))
             akshare = AsyncMock(return_value=([{
                 "ts_code": "000001.SZ", "close": 10.2, "trade_date": "20260810",

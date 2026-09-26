@@ -2010,7 +2010,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * Health
+         * @description Full evidence when it is quick; a live "busy" answer when it is not.
+         *
+         *     On 2026-09-23 the guard restarted the API three times in one session
+         *     (10:16, 11:22, 13:00).  Each time the process was alive - 13 of 13
+         *     /health calls in the four minutes before 13:00 returned 200 - but one
+         *     probe outlasted the guard's 15 s while a dashboard's parallel reads and
+         *     the session-open loops held every pool connection.  A restart cures
+         *     none of that and drops a minute of capture, so a slow probe now answers
+         *     from memory.  A service that stays that busy for ``busy_grace_seconds``
+         *     still fails health, and an unreachable database still fails at once.
+         */
         get: operations["health_health_get"];
         put?: never;
         post?: never;
@@ -3279,6 +3291,70 @@ export interface paths {
         get: operations["settlements_api_v1_teacher_review_settlements_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher-review/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Outcomes
+         * @description Archived next-day outcome reviews: what worked, what was missed and what blocked it.
+         */
+        get: operations["outcomes_api_v1_teacher_review_outcomes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teacher-review/outcome-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Outcome Review
+         * @description Re-run one session's outcome review (idempotent: it re-archives the report).
+         */
+        post: operations["outcome_review_api_v1_teacher_review_outcome_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/strategy-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Strategy Changes
+         * @description Every deliberate strategy change with its preregistered expectation.
+         */
+        get: operations["strategy_changes_api_v1_research_strategy_changes_get"];
+        put?: never;
+        /**
+         * Record Strategy Change
+         * @description Record a change before it ships; it is refused without an expectation.
+         */
+        post: operations["record_strategy_change_api_v1_research_strategy_changes_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4759,7 +4835,7 @@ export interface components {
             /** Api Names */
             api_names?: string[];
             /** Providers */
-            providers?: ("primary" | "super" | "super_sdk" | "super_get")[];
+            providers?: ("super" | "super_sdk" | "super_get")[];
             /**
              * Symbol
              * @default 000636.SZ
@@ -11007,6 +11083,142 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    outcomes_api_v1_teacher_review_outcomes_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    outcome_review_api_v1_teacher_review_outcome_review_post: {
+        parameters: {
+            query?: {
+                trade_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    strategy_changes_api_v1_research_strategy_changes_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_strategy_change_api_v1_research_strategy_changes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

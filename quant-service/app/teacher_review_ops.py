@@ -444,7 +444,10 @@ def import_via_api(database: Any, pack: dict[str, Any], *, timeout_seconds: floa
 
 
 def main() -> None:  # pragma: no cover - operational entry point
-    from .main import db
+    # Same connection settings as the service, without importing the ASGI root.
+    from .database import Database
+
+    db = Database()
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)

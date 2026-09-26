@@ -91,7 +91,13 @@ def capability_contracts() -> tuple[LonghuCapabilityContract, ...]:
     }
     rows: list[LonghuCapabilityContract] = []
     seen: set[tuple[str, str]] = set()
-    for item in DOCUMENTED_OPERATIONS:
+    # A pair can be documented only by a gateway parameter example (for
+    # example longhu_quote/GetPlate_Info_QJ); it still needs a contract.
+    documented_pairs = [*DOCUMENTED_OPERATIONS, *(
+        example for key, example in examples.items()
+        if key not in {(str(item["target"]), str(item["action"])) for item in DOCUMENTED_OPERATIONS}
+    )]
+    for item in documented_pairs:
         target, action = str(item["target"]), str(item["action"])
         key = (target, action)
         if not target.startswith("longhu_") or key in seen:
