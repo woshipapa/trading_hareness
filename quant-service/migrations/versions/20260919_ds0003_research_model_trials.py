@@ -1,7 +1,7 @@
 """Add append-only trial evidence for offline research models.
 
 Revision ID: 20260919_ds0003
-Revises: 20260919_ds0002
+Revises: 20260926_own0001
 """
 
 from alembic import op
