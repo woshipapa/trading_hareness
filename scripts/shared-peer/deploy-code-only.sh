@@ -69,13 +69,18 @@ set -euo pipefail
 release_root="$HOME/trading_hareness/hotfix/quant-service/releases/$RELEASE_LABEL"
 current_root="$HOME/trading_hareness/hotfix/quant-service/current"
 previous_root=""
+previous_target=""
 if [ -e "$current_root" ]; then previous_root="$(readlink -f "$current_root")"; fi
+if [ -n "$previous_root" ]; then previous_target="releases/$(basename "$previous_root")"; fi
 rm -rf "$release_root"
 mkdir -p "$release_root"
 tar -xzf "$ARCHIVE" -C "$release_root"
 test -f "$release_root/app/main.py"
 test -f "$release_root/entrypoint.py"
-ln -sfn "$release_root" "${current_root}.next"
+# The hotfix directory is mounted into the container, so an absolute host path
+# here would be dangling inside the container and silently select the image.
+release_target="releases/$RELEASE_LABEL"
+ln -sfn "$release_target" "${current_root}.next"
 mv -Tf "${current_root}.next" "$current_root"
 
 set_env() {
@@ -100,7 +105,7 @@ C=(docker compose --env-file .env -f compose.yaml -f compose.intraday-owner.yaml
 "${C[@]}" config --quiet
 if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
   if [ -n "$previous_root" ]; then
-    ln -sfn "$previous_root" "${current_root}.next"
+    ln -sfn "$previous_target" "${current_root}.next"
     mv -Tf "${current_root}.next" "$current_root"
     "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler || true
   fi
