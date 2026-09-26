@@ -473,13 +473,25 @@ scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
   --from-sha <active_sha> --apply
 ```
 
-脚本会先比较两个 Git SHA，并**逐个路径**校验：只允许 `quant-service/app/*`、
-`entrypoint.py`、`run_server.py`、`database_bootstrap.py`、`alembic.ini`，其余一律
-`full release required for: <path>` 并退出。**注意 `quant-service/tests/**` 不在白名单里** ——
-「改 `app/` 顺手改测试」放在同一个提交里会被拒；请把 `app/` 单独成一个提交，测试与文档另提。
-横跨多个目录的批量提交（例如工作站同步产生的那种）同样过不了快速通道。
-出现 `requirements.txt`、Dockerfile、compose、迁移或
-其他构建文件变化时直接拒绝，必须回到完整镜像发布和数据库迁移流程；纯代码发布
+脚本先比较两个 Git SHA 之间改动的每个路径，分三类：
+
+- **随本次发布**：`quant-service/app/*`、`entrypoint.py`、`run_server.py`、
+  `database_bootstrap.py`、`alembic.ini`。
+- **跳过**，这些路径不进入 owner 运行时：
+  - `quant-service/tests/`、`docs/`、任何 `*.md`、`.github/`；
+  - `feishu-relay/` 和 `frontend/`，它们随 F6 的 edge overlay 发布；
+  - 发布工具：状态脚本、本脚本、edge 包装脚本、`scripts/windows/`、脚本测试；
+  - 只改了注释或 docstring 的迁移文件，脚本会比对去掉 docstring 后的语法树。
+- **其余一律**输出 `full release required for: <path>` 并退出，包括：迁移代码、依赖、
+  Dockerfile、compose、`deploy/`，以及在 owner 上从发布检出运行的 guard 脚本等其他
+  `scripts/`。
+
+所以合并进 `main` 的普通 PR（代码连同测试和文档）可以直接走快速通道。如果两个 SHA
+之间没有 owner 运行时改动（例如只改了 edge），发布只会刷新记录的 SHA，这样
+`release-sync-status.sh --sha <main>` 在两台机器上都能通过。先不带 `--apply` 演练，
+它会列出每一类包含哪些文件。
+
+需要完整发布时，按完整镜像发布和数据库迁移流程执行。纯代码发布
 会把 Git archive 写入 owner 的保留 release 目录，原子切换 `hotfix/current`，并用
 同一个基础镜像重建两个容器。健康接口会显示源码 SHA 和 release label。启动失败
 会自动恢复上一个源码指针并重启旧代码。旧 release 和镜像不会删除，便于回滚。
