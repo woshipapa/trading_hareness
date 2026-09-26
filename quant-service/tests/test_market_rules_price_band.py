@@ -77,3 +77,29 @@ class StaleLimitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DecisionQuoteSourceTests(unittest.TestCase):
+    def test_a_fresh_licensed_longhu_watch_quote_is_decision_eligible(self):
+        # The licensed merge relabels a fresh quote longhuvip_watch_quote; the
+        # policy accepted only the Tencent label and downgraded every entry.
+        for source in ("tencent_batched_watch_quote", "longhuvip_watch_quote"):
+            gate = live_policy_gate(
+                {"signal_type": "entry"}, {"symbol": "600000.SH"},
+                {"price": 10.2, "pct_change": 2.0, "price_source": source,
+                 "price_freshness": {"status": "fresh"}, "price_trade_date": "20260925"},
+                {"trade_constraints": {}}, {"status": "available", "market_state": "mixed_or_neutral"},
+                {"status": "confirmed"},
+            )
+            with self.subTest(source=source):
+                self.assertNotIn("quote_source_not_decision_eligible", gate["reason_codes"])
+
+    def test_a_snapshot_quote_is_still_not_decision_eligible(self):
+        gate = live_policy_gate(
+            {"signal_type": "entry"}, {"symbol": "600000.SH"},
+            {"price": 10.2, "pct_change": 2.0, "price_source": "tencent_all_a_snapshot",
+             "price_freshness": {"status": "fresh"}},
+            {"trade_constraints": {}}, {"status": "available", "market_state": "mixed_or_neutral"},
+            {"status": "confirmed"},
+        )
+        self.assertIn("quote_source_not_decision_eligible", gate["reason_codes"])

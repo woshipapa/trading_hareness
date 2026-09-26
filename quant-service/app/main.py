@@ -3152,7 +3152,9 @@ async def drill_intraday_board_stock_candidates(
     events = [event for event in rotation_events
               if str(event.get("taxonomy_key") or "") == "longhu_ths_industry"]
     if not events:
-        return {"status": "idle", "reason": "no licensed board crossed its threshold", "candidates": []}
+        # Held paper positions still need their stops checked on a quiet minute.
+        return {"status": "idle", "reason": "no licensed board crossed its threshold", "candidates": [],
+                "paper": await run_paper_auto_execution([], None)}
     trading_date = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date()
 
     def reference() -> tuple[dict[str, set[str]], dict[str, str]]:
@@ -3162,7 +3164,7 @@ async def drill_intraday_board_stock_candidates(
     membership, names = await run_database_blocking(reference, timeout_seconds=120)
     if not membership:
         return {"status": "blocked", "reason": "no sector membership is known for this session",
-                "boards": len(events), "candidates": []}
+                "boards": len(events), "candidates": [], "paper": await run_paper_auto_execution([], None)}
     rows, _status = await intraday_all_a_snapshot()
     quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
     drilled = drill_board_events(events, membership, quotes)
@@ -3187,7 +3189,7 @@ def paper_auto_execution_enabled() -> bool:
 
 
 async def run_paper_auto_execution(
-    candidates: list[dict[str, Any]], quotes: dict[str, Any],
+    candidates: list[dict[str, Any]], quotes: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Confirm the shortlist, plan against the ledger, and place the orders.
 
@@ -3197,8 +3199,6 @@ async def run_paper_auto_execution(
     """
     if not paper_auto_execution_enabled():
         return {"status": "disabled", "reason": "QUANT_PAPER_AUTO_EXECUTION_ENABLED is not set"}
-    if not candidates:
-        return {"status": "idle", "reason": "no candidates this pass"}
     from .board_flow_drill import select_for_delivery
     from .large_order_confirmation import confirm_candidates
     from .paper_auto_execution import plan_paper_orders
@@ -3208,30 +3208,47 @@ async def run_paper_auto_execution(
     from .longhu_vendor_source import intraday_source
 
     def already_delivered() -> list[str]:
+        # The drill's delivery key is carried on each placed order; comparing
+        # it with the order's own signal_key never matched, so a hot board's
+        # leader was re-confirmed against the gateway every minute.
         with db.transaction() as connection:
             rows = connection.execute(
-                """SELECT DISTINCT signal_key FROM quant.intraday_signal_events
-                    WHERE stage=%s AND observed_at::date
-                          = (now() AT TIME ZONE 'Asia/Shanghai')::date""",
+                """SELECT DISTINCT conditions->>'delivery_key' AS delivery_key
+                     FROM quant.intraday_signal_events
+                    WHERE stage=%s AND conditions ? 'delivery_key'
+                      AND observed_at::date = (now() AT TIME ZONE 'Asia/Shanghai')::date""",
                 (PAPER_AUTO_STAGE,),
             ).fetchall()
-            return [str(dict(row)["signal_key"]) for row in rows]
+            return [str(dict(row)["delivery_key"]) for row in rows if dict(row)["delivery_key"]]
 
-    delivered = await run_database_blocking(already_delivered, timeout_seconds=60)
-    chosen = select_for_delivery(candidates, delivered)
-    if not chosen["selected"]:
-        return {"status": "idle", "reason": "nothing new within the session budget",
-                "suppressed_repeat": chosen["suppressed_repeat"]}
-    source = intraday_source()
-    confirmed = await run_akshare_blocking(
-        lambda: confirm_candidates(chosen["selected"], source.raw_call), timeout_seconds=90)
+    # Only inflow leaders can be bought; an outflow name would spend the
+    # session budget and a gateway confirmation before the planner drops it.
+    buyable = [candidate for candidate in candidates if str(candidate.get("direction") or "inflow") == "inflow"]
+    confirmed: list[dict[str, Any]] = []
+    suppressed_repeat = 0
+    if buyable:
+        delivered = await run_database_blocking(already_delivered, timeout_seconds=60)
+        chosen = select_for_delivery(buyable, delivered)
+        suppressed_repeat = chosen["suppressed_repeat"]
+        if chosen["selected"]:
+            source = intraday_source()
+            confirmed = await run_akshare_blocking(
+                lambda: confirm_candidates(chosen["selected"], source.raw_call), timeout_seconds=90)
 
     def read_account() -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
         with db.transaction() as connection:
             account = connection.execute(
                 "SELECT cash FROM quant.paper_accounts WHERE account_key='default'").fetchone()
+            # The stop a strategy set at entry travels with the holding, so an
+            # exit is still evaluated on a pass where that strategy is silent.
             positions = connection.execute(
-                "SELECT symbol,quantity,sellable_quantity,average_cost FROM quant.paper_positions"
+                """SELECT p.symbol,p.quantity,p.sellable_quantity,p.average_cost,p.buy_date,
+                          (SELECT (d.evidence->>'stop_loss_pct')::numeric
+                             FROM quant.paper_decisions d
+                            WHERE d.symbol=p.symbol AND d.direction=1 AND d.status='accepted'
+                              AND jsonb_typeof(d.evidence->'stop_loss_pct')='number'
+                            ORDER BY d.decision_at DESC LIMIT 1) AS entry_stop_loss_pct
+                     FROM quant.paper_positions p WHERE p.quantity>0"""
             ).fetchall()
             return (dict(account) if account else None,
                     {str(dict(row)["symbol"]): dict(row) for row in positions})
@@ -3239,9 +3256,16 @@ async def run_paper_auto_execution(
     account, positions = await run_database_blocking(read_account, timeout_seconds=60)
     if account is None:
         return {"status": "blocked", "reason": "no paper account is configured"}
+    if not confirmed and not positions:
+        return {"status": "idle", "reason": "no new candidates and no open paper positions",
+                "suppressed_repeat": suppressed_repeat}
+    if quotes is None:
+        rows, _status = await intraday_all_a_snapshot()
+        quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
     cash = float(account["cash"])
     plan = plan_paper_orders(confirmed, positions, quotes,
-                             equity=PAPER_ACCOUNT_EQUITY, cash=cash)
+                             equity=PAPER_ACCOUNT_EQUITY, cash=cash,
+                             session_date=datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date())
     if not plan["buys"] and not plan["sells"]:
         return {"status": "no_orders", "skipped": plan["skipped"][:4], "cash": cash}
     observed_at = datetime.now(timezone.utc)

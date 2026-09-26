@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 import unittest
 
@@ -143,6 +143,9 @@ class PaperExecutionTests(unittest.TestCase):
                 class Result:
                     def fetchall(self):
                         return []
+
+                    def fetchone(self):
+                        return None
                 return Result()
 
         connection = Connection()
@@ -158,6 +161,49 @@ class PaperExecutionTests(unittest.TestCase):
                                   list(NON_SECTOR_GROUPS), NON_SECTOR_LABEL_PATTERN))
         self.assertIn("NOT (m.sector_key = ANY(%s))", membership_sql)
         self.assertEqual(membership_sql.count("%s"), len(params))
+
+
+class PaperPortfolioRiskStateTests(unittest.TestCase):
+    def test_a_holding_without_a_quote_is_marked_at_cost_not_zero(self):
+        from app.paper_portfolio import mark_to_market
+        snapshot = mark_to_market(positions=[{"symbol": "600000.SH", "quantity": 1000, "average_cost": 10}],
+                                  quotes={}, cash=90_000)
+        self.assertEqual(snapshot["equity"], 100_000)
+
+    def test_drawdown_is_measured_from_the_high_water_mark(self):
+        from app.paper_portfolio import mark_to_market, paper_risk_gate
+        # Equity peaked at 110k; the prior minute was 92k and now 91k.  One
+        # minute's move is ~1%, but the book is 17% under its peak.
+        snapshot = mark_to_market(positions=[], quotes={}, cash=91_000, previous_equity=92_000, peak_equity=110_000)
+        self.assertAlmostEqual(snapshot["drawdown"], 91_000 / 110_000 - 1, places=6)
+        self.assertIn("portfolio_drawdown_limit", paper_risk_gate(signal_type="entry", symbol="600000.SH", snapshot=snapshot).reasons)
+
+    def test_daily_loss_uses_the_last_equity_before_this_session(self):
+        from app.paper_portfolio import persist_portfolio_snapshot
+
+        class Connection:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params=None):
+                self.calls.append((sql, params))
+
+                class Result:
+                    def fetchall(self):
+                        return []
+
+                    def fetchone(self):
+                        return {"peak_equity": 100_000, "previous_close_equity": 100_000} if "max(equity)" in sql else None
+                return Result()
+
+        connection = Connection()
+        snapshot = persist_portfolio_snapshot(
+            connection, as_of=datetime(2026, 9, 25, 2, 0, tzinfo=timezone.utc), quotes={}, cash=96_000,
+        )
+        self.assertAlmostEqual(snapshot["daily_return"], -0.04, places=6)
+        history_sql, history_params = next(call for call in connection.calls if "max(equity)" in call[0])
+        # Session start is Shanghai midnight of the snapshot's exchange date.
+        self.assertEqual(history_params[0], datetime(2026, 9, 24, 16, 0, tzinfo=timezone.utc))
 
 
 class RoundTripCostPercentTests(unittest.TestCase):
@@ -214,3 +260,77 @@ class RoundTripCostPercentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PaperAutoExitTests(unittest.TestCase):
+    def _plan(self, positions, quotes, candidates=(), session=date(2026, 9, 25)):
+        from app.paper_auto_execution import plan_paper_orders
+        return plan_paper_orders(list(candidates), positions, quotes, equity=1_000_000, cash=500_000, session_date=session)
+
+    def test_a_held_name_with_no_candidate_this_pass_is_stopped_out(self):
+        positions = {"600000.SH": {"symbol": "600000.SH", "quantity": 1000, "sellable_quantity": 1000,
+                                   "average_cost": 10, "buy_date": date(2026, 9, 24)}}
+        plan = self._plan(positions, {"600000.SH": {"price": 8.5}})
+        self.assertEqual([(sell["symbol"], sell["reason"]) for sell in plan["sells"]],
+                         [("600000.SH", "fallback_stop_loss")])
+
+    def test_the_entry_stop_is_kept_when_the_strategy_is_silent(self):
+        positions = {"600000.SH": {"symbol": "600000.SH", "quantity": 1000, "sellable_quantity": 1000,
+                                   "average_cost": 10, "buy_date": date(2026, 9, 24), "entry_stop_loss_pct": 15}}
+        # Down 12%: inside the strategy's own 15% stop, so the 8% fallback does not apply.
+        self.assertEqual(self._plan(positions, {"600000.SH": {"price": 8.8}})["sells"], [])
+        self.assertEqual(self._plan(positions, {"600000.SH": {"price": 8.4}})["sells"][0]["reason"], "strategy_stop_loss")
+
+    def test_a_stale_holding_leaves_after_the_fallback_holding_period(self):
+        positions = {"600000.SH": {"symbol": "600000.SH", "quantity": 1000, "sellable_quantity": 1000,
+                                   "average_cost": 10, "buy_date": date(2026, 9, 18)}}
+        plan = self._plan(positions, {"600000.SH": {"price": 10.2}})
+        self.assertEqual(plan["sells"][0]["reason"], "fallback_max_holding_period")
+
+    def test_a_bought_order_carries_the_drill_delivery_key(self):
+        candidate = {"symbol": "600000.SH", "direction": "inflow", "delivery_key": "600000.SH:ths:881101:inflow"}
+        plan = self._plan({}, {"600000.SH": {"price": 10}}, [candidate])
+        self.assertEqual(plan["buys"][0]["delivery_key"], "600000.SH:ths:881101:inflow")
+
+
+class PaperFillQuoteAgeTests(unittest.TestCase):
+    def _accept(self, quote_age_seconds):
+        import uuid
+        from decimal import Decimal
+        from app.paper_execution_service import accept_paper_decision
+
+        accepted_at = datetime(2026, 9, 25, 2, 0, tzinfo=timezone.utc)
+        decision_id = uuid.uuid4()
+        quote = {"source_name": "tencent_free", "observed_at": accepted_at - timedelta(seconds=quote_age_seconds),
+                 "price": Decimal("10"), "pct_change": 1.0, "raw": {}}
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params=None):
+                calls.append(sql)
+
+                class Result:
+                    rowcount = 1
+
+                    def fetchone(self):
+                        if "FROM quant.paper_decisions" in sql:
+                            return {"decision_id": decision_id, "symbol": "600000.SH", "direction": 1, "status": "proposed",
+                                    "decision_at": accepted_at, "evidence": {}, "risk_flags": []}
+                        if "FROM quant.intraday_quote_observations" in sql:
+                            return quote
+                        if "FROM quant.paper_accounts" in sql:
+                            return {"account_key": "default", "cash": Decimal("1000000")}
+                        if "INSERT INTO quant.paper_orders" in sql:
+                            return {"order_id": uuid.uuid4()}
+                        return None
+                return Result()
+
+        return accept_paper_decision(Connection(), decision_id=decision_id, quantity=100, accepted_at=accepted_at)
+
+    def test_a_fresh_quote_fills(self):
+        self.assertEqual(self._accept(20)["status"], "filled")
+
+    def test_a_stale_quote_does_not_fill(self):
+        result = self._accept(1800)
+        self.assertEqual(result["status"], "non_fill")
+        self.assertIn("local_quote_stale", result["reason_codes"])

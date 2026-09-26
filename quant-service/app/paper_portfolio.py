@@ -7,6 +7,7 @@ does not represent broker buying power or submit an order.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, time
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
@@ -24,10 +25,18 @@ class PaperRiskDecision:
 
 
 def _number(value: Any, default: float = 0.0) -> float:
+    # A missing value must take the caller's default: marking a holding with
+    # no quote this pass at 0 instead of its cost fabricated a total loss.
+    if value is None or value == "":
+        return default
     try:
-        return float(value or 0)
+        return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _optional(value: Any) -> float | None:
+    return None if value is None else _number(value, 0.0) or None
 
 
 def paper_risk_gate(*, signal_type: str, symbol: str, position: dict[str, Any] | None = None,
@@ -80,7 +89,8 @@ def paper_risk_gate(*, signal_type: str, symbol: str, position: dict[str, Any] |
 
 
 def mark_to_market(*, positions: Iterable[dict[str, Any]], quotes: dict[str, Any], cash: float,
-                   previous_equity: float | None = None, previous_close_equity: float | None = None) -> dict[str, Any]:
+                   previous_equity: float | None = None, previous_close_equity: float | None = None,
+                   peak_equity: float | None = None) -> dict[str, Any]:
     """Calculate a bounded snapshot from local paper positions and quotes."""
     rows: list[dict[str, Any]] = []
     market_value = 0.0
@@ -93,13 +103,17 @@ def mark_to_market(*, positions: Iterable[dict[str, Any]], quotes: dict[str, Any
         rows.append({"symbol": symbol, "quantity": quantity, "price": price, "market_value": round(value, 4),
                      "sector_keys": list(position.get("sector_keys") or ())})
     equity = float(cash) + market_value
-    peak = max(float(previous_equity or equity), equity)
+    # Drawdown is measured from the running high-water mark; against the prior
+    # minute's snapshot it only ever saw one minute's move and never tripped.
+    peak = max([equity, *(float(value) for value in (peak_equity, previous_equity) if value)])
     drawdown = equity / peak - 1 if peak else 0.0
     daily_return = equity / float(previous_close_equity) - 1 if previous_close_equity else 0.0
     return {"cash": round(float(cash), 4), "equity": round(equity, 4),
             "gross_exposure": round(market_value / equity, 6) if equity else 0.0,
             "net_exposure": round(market_value / equity, 6) if equity else 0.0,
             "drawdown": round(drawdown, 6), "daily_return": round(daily_return, 6),
+            "peak_equity": round(peak, 4),
+            "previous_close_equity": round(float(previous_close_equity), 4) if previous_close_equity else None,
             "sector_exposure": _sector_exposure(rows, equity), "positions": rows}
 
 
@@ -141,9 +155,22 @@ def persist_portfolio_snapshot(connection: Any, *, as_of: Any, quotes: dict[str,
                  GROUP BY p.symbol,p.quantity,p.sellable_quantity,p.average_cost,p.buy_date,p.realized_pnl"""
         , (as_of_date, as_of_date, as_of_date, list(strategy_taxonomies("intraday_watchlist_confirmation")),
            *sector_parameters)).fetchall()]
+    session_start = datetime.combine(as_of_date, time.min, tzinfo=ZoneInfo("Asia/Shanghai"))
+    history = connection.execute(
+        """SELECT max(equity) AS peak_equity,
+                  (SELECT equity FROM quant.paper_portfolio_snapshots
+                    WHERE as_of<%s ORDER BY as_of DESC LIMIT 1) AS previous_close_equity
+             FROM quant.paper_portfolio_snapshots WHERE as_of<%s""",
+        (session_start, as_of),
+    ).fetchone()
+    history = dict(history) if history else {}
     snapshot = mark_to_market(positions=positions, quotes=quotes, cash=cash,
                               previous_equity=previous_equity,
-                              previous_close_equity=previous_close_equity)
+                              # The last equity recorded before this session is
+                              # the daily-loss base; nothing wrote the payload
+                              # key the caller used to read, so it was always 0.
+                              previous_close_equity=previous_close_equity or _optional(history.get("previous_close_equity")),
+                              peak_equity=_optional(history.get("peak_equity")))
     connection.execute(
         """INSERT INTO quant.paper_portfolio_snapshots(as_of,cash,equity,gross_exposure,net_exposure,drawdown,payload)
            VALUES(%s,%s,%s,%s,%s,%s,%s)

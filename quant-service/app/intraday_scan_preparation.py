@@ -94,12 +94,10 @@ def prepare_intraday_scan_inputs(
     prior_snapshot = connection.execute(
         "SELECT equity,payload FROM quant.paper_portfolio_snapshots ORDER BY as_of DESC LIMIT 1"
     ).fetchone()
-    prior_payload = dict(prior_snapshot["payload"] or {}) if prior_snapshot else {}
     dependencies.persist_portfolio_snapshot(
         connection, as_of=observed_at, quotes=quotes,
         cash=float(account["cash"]) if account is not None else 0,
         previous_equity=float(prior_snapshot["equity"]) if prior_snapshot and prior_snapshot["equity"] is not None else None,
-        previous_close_equity=float(prior_payload.get("previous_close_equity") or 0) or None,
     )
     session_start = observed_at.astimezone(timezone(timedelta(hours=8))).replace(
         hour=0, minute=0, second=0, microsecond=0,

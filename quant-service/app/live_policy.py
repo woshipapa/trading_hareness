@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .ashare_reality import price_limit_state
+from .datasources.catalog import EXCHANGE_TIMESTAMPED_QUOTE_LABELS
 from .market_rules import as_exchange_date, cn_today
 
 
@@ -45,13 +46,15 @@ def live_policy_gate(signal: dict[str, Any], watch: dict[str, Any], quote: dict[
         reasons.append("missing_live_price")
         flags.append("policy_data_unavailable")
     # Sina and the cross-sectional Tencent snapshot remain valuable evidence,
-    # but only the same-scan Tencent watch batch has the explicit per-symbol
-    # freshness contract used by a human-facing confirmation.  Do not let a
-    # fallback silently become a decision source merely because it has a price.
+    # but only a same-scan watch quote carrying an exchange timestamp has the
+    # per-symbol freshness contract a human-facing confirmation needs.  That
+    # is the Tencent batch and, when fresh, the licensed Longhu quote that
+    # replaces it - the same label set the signal rules already accept.  Do
+    # not let a fallback become a decision source merely because it has a price.
     quote_source = str((quote or {}).get("price_source") or "unknown")
     quote_freshness = (quote or {}).get("price_freshness")
     quote_freshness = quote_freshness if isinstance(quote_freshness, dict) else {}
-    if quote_source != "tencent_batched_watch_quote":
+    if quote_source not in EXCHANGE_TIMESTAMPED_QUOTE_LABELS:
         reasons.append("quote_source_not_decision_eligible")
         flags.append("policy_quote_source_not_decision_eligible")
     elif str(quote_freshness.get("status") or "missing_timestamp") != "fresh":
