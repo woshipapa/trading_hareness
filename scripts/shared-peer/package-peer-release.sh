@@ -13,6 +13,7 @@ required=(
   compose.yaml OPERATIONS.md frontend workflows certs
   scripts/peer-session-guard.sh scripts/backfill-full-market-daily.sh
   scripts/shared-peer/activate-peer-release.sh
+  scripts/shared-peer/deploy-code-only.sh
   scripts/shared-peer/verify-owner-cutover.py
   deploy/shared-peer/compose.yaml deploy/shared-peer/compose.intraday-owner.yaml
   quant-service/entrypoint.py quant-service/app/owner_peer_contract.py

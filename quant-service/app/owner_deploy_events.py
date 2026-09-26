@@ -16,6 +16,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+STALE_DEPLOY_AGE_SECONDS = 15 * 60
+
+
 def _value(row: Any, key: str, index: int = 0) -> Any:
     if isinstance(row, Mapping):
         return row.get(key)
@@ -41,6 +44,21 @@ def _iso(value: Any) -> str | None:
         stamp = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
         return stamp.astimezone(timezone.utc).isoformat()
     return str(value)
+
+
+def _age_seconds(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, datetime):
+            stamp = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        else:
+            stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds())
+    except (TypeError, ValueError):
+        return None
 
 
 def owner_deploy_status(connection: Any) -> dict[str, Any]:
@@ -102,6 +120,23 @@ def owner_deploy_status(connection: Any) -> dict[str, Any]:
         }
 
     surfaces = _json_object(_value(row, "surfaces", 4))
+    recorded_at = _value(row, "recorded_at", 6)
+    age_seconds = _age_seconds(recorded_at)
+    if age_seconds is not None and age_seconds > STALE_DEPLOY_AGE_SECONDS:
+        return {
+            "status": "stale",
+            "active": False,
+            "pause_writes": False,
+            "reason": "deployment_starting_event_expired",
+            "deploy_id": str(_value(row, "deploy_id", 1) or ""),
+            "phase": str(_value(row, "phase", 2) or "starting"),
+            "release_id": str(_value(row, "release_id", 3) or ""),
+            "surfaces": surfaces,
+            "expected_seconds": _value(row, "expected_seconds", 5),
+            "recorded_at": _iso(recorded_at),
+            "age_seconds": round(age_seconds, 1),
+            "rule": "expired_starting_event_does_not_pause_writes",
+        }
     pause_writes = bool(surfaces.get("shared_tunnel") is True)
     return {
         "status": "in_progress",

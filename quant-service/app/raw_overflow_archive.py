@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from .raw_overflow_policy import RawOverflowLimits, classify
+from .runtime_resources import DEFAULT_HOT_DATABASE_SOFT_BYTES, bounded_storage_budget_bytes
 
 
 DEFAULT_CAPABILITIES = (
@@ -129,10 +130,14 @@ def _storage_state(connection: Any, config: RawOverflowConfig) -> tuple[str, tup
     row = connection.execute(
         """SELECT coalesce(sum(pg_total_relation_size(c.oid)),0)::bigint AS bytes
              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname='quant' AND c.relkind IN ('r','m','p')""",
+            WHERE n.nspname='quant' AND c.relkind IN ('r','m','p') AND c.reltablespace=0""",
     ).fetchone() or {}
     hot_used = int(row.get("bytes") or 0)
-    hot_budget = _bounded_int(os.getenv("QUANT_HOT_DATABASE_SOFT_BYTES"), 36 * 1024**3, 1 * 1024**3, 36 * 1024**3)
+    hot_budget = bounded_storage_budget_bytes(
+        os.getenv("QUANT_HOT_DATABASE_SOFT_BYTES"),
+        DEFAULT_HOT_DATABASE_SOFT_BYTES,
+        DEFAULT_HOT_DATABASE_SOFT_BYTES,
+    )
     queue = connection.execute(
         """SELECT count(*)::int AS count FROM quant.raw_archive_batches
             WHERE status IN ('queued','uploading','retryable_failed')""",
