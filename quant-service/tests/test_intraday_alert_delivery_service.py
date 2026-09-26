@@ -52,16 +52,19 @@ class IntradayAlertDeliveryServiceTests(unittest.TestCase):
         statement, params = database.connection.calls[0]
         self.assertIn("NOT EXISTS", statement)
         self.assertIn("attempt_count<%s", statement)
-        self.assertEqual(params, (3, 10))
+        self.assertIn("FOR UPDATE SKIP LOCKED", statement)
+        self.assertEqual(params, (60, 3, 10))
 
     def test_recovery_receipt_uses_the_injected_transport_after_normal_message(self) -> None:
         health_event = {"health_event_id": uuid.uuid4(), "event_type": "recovered", "message_text": "recovered"}
 
         async def check():
             sent: list[str] = []
+            keys: list[str | None] = []
 
-            async def post_text(text: str):
+            async def post_text(text: str, *, idempotency_key: str | None = None):
                 sent.append(text)
+                keys.append(idempotency_key)
                 return {"status": "sent", "response": {"ok": True}}
 
             calls = 0
@@ -72,13 +75,16 @@ class IntradayAlertDeliveryServiceTests(unittest.TestCase):
                 return health_event if calls == 1 else None
 
             outcome = await attempt_delivery(
-                object(), uuid.uuid4(), uuid.uuid4(), "signal", post_text=post_text,
+                object(), delivery_id, uuid.uuid4(), "signal", post_text=post_text,
                 run_database=run_database, json_safe=lambda value: value,
                 recovery_text=lambda streak: f"recovery {streak}", max_attempts=3,
             )
-            return outcome, sent, calls
+            return outcome, sent, calls, keys
 
-        outcome, sent, calls = asyncio.run(check())
+        delivery_id = uuid.uuid4()
+        outcome, sent, calls, keys = asyncio.run(check())
+        # Each send carries its own durable row id as the Feishu dedup key.
+        self.assertEqual(keys, [str(delivery_id), str(health_event["health_event_id"])])
         self.assertEqual(outcome["status"], "sent")
         self.assertEqual(sent, ["signal", "recovered"])
         self.assertEqual(calls, 2)

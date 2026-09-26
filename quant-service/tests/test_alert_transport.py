@@ -114,7 +114,7 @@ class AlertTransportTests(unittest.TestCase):
     def test_the_direct_app_identity_sits_between_the_hook_and_the_adapter(self):
         sent = {}
 
-        async def direct(text):
+        async def direct(text, **_kwargs):
             sent["text"] = text
             return {"status": "sent", "transport": "direct"}
 
@@ -129,6 +129,43 @@ class AlertTransportTests(unittest.TestCase):
         self.assertEqual(result["transport"], "direct")
         self.assertEqual(sent["text"], "买点提示")
         self.assertEqual([url for url, _ in client.posts], [BOT_HOOK])
+
+    def test_the_idempotency_key_reaches_the_adapter(self):
+        client = _Client({ADAPTER: _Response({"ok": True})})
+        with mock.patch.dict(alert_transport.os.environ, {"QUANT_ALERT_WEBHOOK_URL": ADAPTER, "QUANT_ALERT_WEBHOOK_TOKEN": "t"}, clear=True), \
+             mock.patch.object(alert_transport, "alert_http_client", _factory(client)):
+            asyncio.run(alert_transport.post_feishu_alert_text("买点提示", idempotency_key="delivery-1"))
+        self.assertEqual(client.posts[0][1]["json"], {"text": "买点提示", "idempotency_key": "delivery-1"})
+
+    def test_an_ambiguous_timeout_does_not_fall_through_to_another_group(self):
+        # A read timeout may mean Feishu already posted the alert; trying the
+        # adapter next would deliver it twice, possibly into a second group.
+        result, client = self._run(
+            {"QUANT_ALERT_FEISHU_WEBHOOK_URL": BOT_HOOK,
+             "QUANT_ALERT_WEBHOOK_URL": ADAPTER, "QUANT_ALERT_WEBHOOK_TOKEN": "t"},
+            {BOT_HOOK: httpx.ReadTimeout("no response"), ADAPTER: _Response({"ok": True})},
+        )
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(result["ambiguous"])
+        self.assertEqual([url for url, _ in client.posts], [BOT_HOOK])
+
+    def test_the_direct_route_sends_the_key_as_feishu_uuid(self):
+        from app import feishu_direct_alert
+
+        class _TokenCache:
+            async def token(self, _client, _config):
+                return "tenant-token"
+
+        api = "https://open.feishu.cn/open-apis/im/v1/messages"
+        client = _Client({api: _Response({"code": 0, "data": {"message_id": "om_1"}})})
+        env = {"QUANT_FEISHU_DIRECT_ENABLED": "true", "FEISHU_APP_ID": "a", "FEISHU_APP_SECRET": "b",
+               "FEISHU_ALERT_RECEIVE_ID": "oc_1"}
+        result = asyncio.run(feishu_direct_alert.post_direct_feishu_alert_text(
+            "买点提示", idempotency_key="0f5d2c1e-delivery", environ=env,
+            client_factory=_factory(client), token_cache=_TokenCache(),
+        ))
+        self.assertEqual(result["status"], "sent")
+        self.assertEqual(client.posts[0][1]["json"]["uuid"], "0f5d2c1e-delivery")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,11 @@ from psycopg.types.json import Json
 
 
 DatabaseExecutor = Callable[[Callable[[], Any]], Awaitable[Any]]
-AlertSender = Callable[[str], Awaitable[dict[str, Any]]]
+AlertSender = Callable[..., Awaitable[dict[str, Any]]]
+# The first attempt runs inline right after the row is written.  Until it has
+# recorded its result, the retry scan must not pick the same row up and send
+# it a second time, so a new row is only due once this lease has passed.
+FIRST_ATTEMPT_LEASE_SECONDS = 60
 JsonSafe = Callable[[Any], Any]
 RecoveryText = Callable[[int], str]
 
@@ -26,8 +30,8 @@ def create_pending_delivery(database: Any, signal_event_id: uuid.UUID, text: str
         row = connection.execute(
             """INSERT INTO quant.intraday_alert_deliveries(
                    signal_event_id,channel,status,message_text,next_attempt_at
-               ) VALUES(%s,'feishu_adapter','pending',%s,now()) RETURNING delivery_id""",
-            (signal_event_id, text),
+               ) VALUES(%s,'feishu_adapter','pending',%s,now()+make_interval(secs => %s)) RETURNING delivery_id""",
+            (signal_event_id, text, FIRST_ATTEMPT_LEASE_SECONDS),
         ).fetchone()
     return row["delivery_id"]
 
@@ -45,7 +49,7 @@ async def attempt_delivery(
     max_attempts: int,
 ) -> dict[str, Any]:
     """Send one outbox row, preserving both failures and recovery receipts."""
-    outcome = await post_text(text)
+    outcome = await post_text(text, idempotency_key=str(delivery_id))
 
     def persist_delivery_attempt() -> dict[str, Any] | None:
         with database.transaction() as connection:
@@ -109,7 +113,9 @@ async def attempt_delivery(
 
     health_event = await run_database(persist_delivery_attempt)
     if health_event and health_event["event_type"] == "recovered":
-        health_outcome = await post_text(str(health_event["message_text"]))
+        health_outcome = await post_text(
+            str(health_event["message_text"]), idempotency_key=str(health_event["health_event_id"]),
+        )
 
         def persist_health_event_attempt() -> None:
             with database.transaction() as connection:
@@ -127,20 +133,26 @@ async def attempt_delivery(
 
 
 def load_due_deliveries(database: Any, max_attempts: int, limit: int) -> list[dict[str, Any]]:
-    """Return a bounded set of unsent due rows, never re-sending an event."""
+    """Claim a bounded set of unsent due rows, never re-sending an event."""
     with database.transaction() as connection:
         rows = connection.execute(
-            """SELECT d.delivery_id,d.signal_event_id,d.message_text
-                 FROM quant.intraday_alert_deliveries d
-                WHERE d.channel='feishu_adapter' AND d.status IN ('pending','failed')
-                  AND d.message_text IS NOT NULL AND d.message_text<>''
-                  AND d.attempt_count<%s
-                  AND coalesce(d.next_attempt_at,d.created_at)<=now()
-                  AND NOT EXISTS (
-                      SELECT 1 FROM quant.intraday_alert_deliveries sent
-                       WHERE sent.signal_event_id=d.signal_event_id AND sent.status='sent'
-                  )
-                ORDER BY d.created_at LIMIT %s""",
-            (max_attempts, max(1, min(limit, 10))),
+            """UPDATE quant.intraday_alert_deliveries claimed
+                  SET next_attempt_at=now()+make_interval(secs => %s)
+                WHERE claimed.delivery_id IN (
+                    SELECT d.delivery_id
+                      FROM quant.intraday_alert_deliveries d
+                     WHERE d.channel='feishu_adapter' AND d.status IN ('pending','failed')
+                       AND d.message_text IS NOT NULL AND d.message_text<>''
+                       AND d.attempt_count<%s
+                       AND coalesce(d.next_attempt_at,d.created_at)<=now()
+                       AND NOT EXISTS (
+                           SELECT 1 FROM quant.intraday_alert_deliveries sent
+                            WHERE sent.signal_event_id=d.signal_event_id AND sent.status='sent'
+                       )
+                     ORDER BY d.created_at LIMIT %s
+                     FOR UPDATE SKIP LOCKED
+                )
+            RETURNING claimed.delivery_id,claimed.signal_event_id,claimed.message_text""",
+            (FIRST_ATTEMPT_LEASE_SECONDS, max_attempts, max(1, min(limit, 10))),
         ).fetchall()
     return [dict(row) for row in rows]

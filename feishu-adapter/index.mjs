@@ -853,9 +853,13 @@ async function handleQuantAlert(request, response) {
 		const text = String(payload?.text ?? '').trim();
 		if (!text) throw new Error('alert text is required');
 		if (text.length > 3500) throw new Error('alert text exceeds 3500 characters');
+		// The quant outbox's delivery id arrives as idempotency_key; Feishu drops a
+		// second create with the same uuid, so a retry after a lost response
+		// cannot post the alert twice.
+		const idempotencyKey = String(payload?.idempotency_key ?? '').trim().slice(0, 50);
 		const result = await larkClient.im.v1.message.create({
 			params: { receive_id_type: feishuAlertReceiveIdType },
-			data: { receive_id: feishuAlertReceiveId, msg_type: 'text', content: JSON.stringify({ text }) },
+			data: { receive_id: feishuAlertReceiveId, msg_type: 'text', content: JSON.stringify({ text }), ...(idempotencyKey ? { uuid: idempotencyKey } : {}) },
 		});
 		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({ status: 'sent', message_id: result?.data?.message_id ?? null }));

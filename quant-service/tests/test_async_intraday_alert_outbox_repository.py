@@ -64,10 +64,13 @@ class AsyncIntradayAlertOutboxRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(due), 1)
         insert_query, insert_params = database.connection.calls[0]
         due_query, due_params = database.connection.calls[1]
-        self.assertIn("VALUES(%s,'feishu_adapter','pending',%s,now())", insert_query)
-        self.assertEqual(insert_params, (signal_event_id, "signal"))
+        # The inline first attempt holds a lease; the retry scan cannot race it.
+        self.assertIn("VALUES(%s,'feishu_adapter','pending',%s,now()+make_interval(secs => %s))", insert_query)
+        self.assertEqual(insert_params, (signal_event_id, "signal", 60))
         self.assertIn("NOT EXISTS", due_query)
-        self.assertEqual(due_params, (3, 10))
+        self.assertIn("FOR UPDATE SKIP LOCKED", due_query)
+        self.assertIn("SET next_attempt_at=now()+make_interval(secs => %s)", due_query)
+        self.assertEqual(due_params, (60, 3, 10))
 
 
 if __name__ == "__main__":
