@@ -70,13 +70,21 @@ jobs:
           node scripts/verify-api-contract.mjs
           npm run api:check --prefix frontend
 
-      - name: Build and test Feishu adapter
+      - name: Test Feishu adapter sources
+        run: |
+          npm install --prefix feishu-relay/adapter --no-audit --no-fund
+          cd feishu-relay/adapter && node --test *.test.mjs
+
+      - name: Build and test Feishu adapter image
         run: |
           docker build --tag n8n-feishu-adapter:test --file feishu-relay/adapter/Dockerfile .
+          # The same tests against the modules the image actually ships.  The
+          # Dockerfile manifest check reads the build recipes, which are not in
+          # the image; it ran against the sources in the step above.
           docker run --rm \
             --volume "$GITHUB_WORKSPACE/feishu-relay/adapter:/tests:ro" \
             n8n-feishu-adapter:test \
-            sh -lc 'cp /tests/*.test.mjs /app/ && node --test *.test.mjs'
+            sh -lc 'cp /tests/*.test.mjs /app/ && rm /app/dockerfile-manifest.test.mjs && node --test *.test.mjs'
 
       - name: Verify whitespace
         run: git diff --check
