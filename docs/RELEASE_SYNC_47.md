@@ -237,6 +237,8 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 1. PR #2 的 CI 一直是红的，原因在 `main` 的 CI 配置（见 PR 评论 `#issuecomment-5842937183`）。附录 A 的修复已经按用户要求加进 PR #2（`1daae6e`）。合并同步分支后（`e54cd2f`），CI 在 2277 个后端测试上只剩 2 个依赖真实行情数据的测试失败。按用户 2026-09-26 的决定，这 2 个测试改为只在 `QUANT_REAL_DATA_TESTS=1` 时运行（附录 A 第 3 项）。**在 CI 仍为红色时合并，必须先得到用户明确同意。**
 
+   `verify-api-contract.mjs` 和 `api:check` 读的是**正在运行的**服务的 OpenAPI 文档。必须先用待发布的检出启动服务（例如在该检出里执行 `docker compose up -d --build postgres quant-research`），再做这两项检查。本机 5681 上原有的旧服务不能用来检查：拿它校验，得到的是旧代码的结果（例如 180 个 operations，而 PR #2 是 194 个）；拿它执行 `api:generate`，会删掉 PR 新增的路由类型。
+
    注意：同步分支自带的测试以前是在旧镜像的容器里跑的（`docker compose exec quant-research …`），所以当时报告的 "1874 tests OK" 验证的是旧代码。以后必须在当前检出上运行，例如 `cd quant-service && python -m unittest discover -s tests -q`，或者先重建镜像再在容器里跑。
 2. PR #2 和阶段 B 的 PR 全部合并后：
 
@@ -278,7 +280,9 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 `docs/PLAN_COMPLETION_MATRIX.md` 的 2026-09-20 owner clarification 写明：**owner 不会为 peer 执行 ds0004/ds0005 的 DDL**。所以在 owner 库上直接 `alembic upgrade head`，会把 owner 已经拒绝的 DDL 一起执行，而且 ds0004 要改写几张大表。
 
-**执行到这里先停下，请用户决定**，只能二选一：
+**决定（2026-09-26）：用户选择第 1 项**，owner 执行全部 8 个迁移。前提不变：必须先完成 B2，也就是从 Windows 找回 `20260923_0117` 的源码，让 `<owner_head>` 能接上本仓库的链。在此之前不要执行 `upgrade head`。第 2 项保留，作为以后同类情况的备选。
+
+两个选项：
 
 1. owner 同意执行全部 8 个迁移：按下面的原步骤 `upgrade head`（先完成 B2，让 `<owner_head>` 能接上本仓库的链）。
 2. owner 只执行本次发布需要的迁移：先生成 SQL 交给 owner 审阅，不连接数据库：
