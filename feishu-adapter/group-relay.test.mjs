@@ -4,9 +4,9 @@ import { Readable } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { createGroupRelay } from './group-relay.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null, messageList = null, initialSourceStates = null } = {}) {
 	const saved = new Map();
-	const sourceStates = new Map();
+	const sourceStates = new Map(Object.entries(initialSourceStates ?? {}));
 	const sent = [];
 	const updated = [];
 	const patched = [];
@@ -56,6 +56,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 	const sourceApi = {
 		messageList: async (params) => {
 			listCalls.push(params);
+			if (messageList) return messageList(params);
 			if (messageListDelayMs) await new Promise((resolve) => setTimeout(resolve, messageListDelayMs));
 			return { data: { items: messages, has_more: false } };
 		},
@@ -78,7 +79,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			webhooksByChatId: webhooksByChatId ? new Map(Object.entries(webhooksByChatId)) : undefined,
 		},
 	});
-	return { relay, sent, updated, patched, saved, listCalls };
+	return { relay, sent, updated, patched, saved, listCalls, sourceStates };
 }
 
 test('a fenced relay observes no source messages and never sends', async () => {
@@ -561,4 +562,77 @@ test('a message type the webhook cannot carry still uses the tenant API even whe
 			assert.equal(sent.length, 2, 'both the summary group and the webhook-configured target fall back to the tenant API');
 		},
 	);
+});
+
+// A faithful stand-in for im/v1/messages list: start_time filters in seconds,
+// results are ascending by create_time and paged by an opaque token.
+function pagedHistory(messages) {
+	return async (params) => {
+		const from = Number(params.start_time) * 1000;
+		const matching = messages.filter((message) => Number(message.create_time) >= from)
+			.sort((left, right) => Number(left.create_time) - Number(right.create_time));
+		const offset = Number(params.page_token ?? 0);
+		const items = matching.slice(offset, offset + params.page_size);
+		const next = offset + items.length;
+		return { data: { items, has_more: next < matching.length, ...(next < matching.length ? { page_token: String(next) } : {}) } };
+	};
+}
+
+function textMessage(id, createTime) {
+	return { message_id: id, msg_type: 'text', create_time: String(createTime), body: { content: JSON.stringify({ text: id }) } };
+}
+
+test('a restart after an outage longer than the reconcile lookback relays every message since the cursor', async () => {
+	const now = Date.now();
+	const cursor = now - 66 * 3600_000;
+	const messages = [
+		textMessage('om_before_cursor', cursor - 3600_000),
+		textMessage('om_friday_evening', cursor + 3600_000),
+		textMessage('om_saturday', cursor + 20 * 3600_000),
+		textMessage('om_monday', now - 60_000),
+	];
+	const { relay, sent, saved } = createHarness(messages, {
+		messageList: pagedHistory(messages),
+		initialSourceStates: { anqiang: { chat_id: 'oc_source', cursor_create_time: cursor } },
+	});
+	await relay.tick();
+	const relayed = sent.map((data) => JSON.parse(data.content).text);
+	assert.deepEqual(relayed, ['#anqiang\nom_friday_evening', '#anqiang\nom_saturday', '#anqiang\nom_monday']);
+	assert.equal(saved.get('om_before_cursor'), undefined);
+});
+
+test('a backlog beyond the page cap resumes from the newest seen message instead of skipping the tail', async () => {
+	const now = Date.now();
+	const cursor = now - 3 * 3600_000;
+	const messages = Array.from({ length: 1500 }, (_, index) => textMessage(`om_backlog_${index}`, cursor + (index + 1) * 5_000));
+	const { relay, sent, sourceStates } = createHarness(messages, {
+		messageList: pagedHistory(messages),
+		initialSourceStates: { anqiang: { chat_id: 'oc_source', cursor_create_time: cursor } },
+	});
+	await relay.tick();
+	assert.equal(sent.length, 1000);
+	assert.ok(sourceStates.get('anqiang').cursor_create_time < now);
+	await relay.tick();
+	const relayed = new Set(sent.map((data) => JSON.parse(data.content).text));
+	assert.equal(relayed.size, 1500);
+	assert.equal(sent.length, 1500);
+});
+
+test('an edited source is synced once, not again on every overlapping or reconcile poll', async () => {
+	const createTime = Date.now() - 5_000;
+	const message = textMessage('om_edit_once', createTime);
+	const { relay, sent, updated } = createHarness([message]);
+	await relay.tick();
+	message.updated = true;
+	message.update_time = String(createTime + 2_000);
+	message.body.content = JSON.stringify({ text: '修订版' });
+	await relay.tick();
+	await relay.tick();
+	await relay.tick();
+	assert.equal(sent.length, 1);
+	assert.equal(updated.length, 1);
+	message.update_time = String(createTime + 4_000);
+	message.body.content = JSON.stringify({ text: '二次修订' });
+	await relay.tick();
+	assert.equal(updated.length, 2);
 });

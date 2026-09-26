@@ -73,6 +73,15 @@ function asCreateTimeMs(value, fallback = Date.now()) {
 	return parsed < 100_000_000_000 ? parsed * 1000 : parsed;
 }
 
+// Feishu keeps reporting updated=true for an edited message on every later
+// read.  Once an update time is on record, only a newer one is a new edit;
+// otherwise every overlap/reconcile poll would re-patch the delivered copy.
+export function sourceEdited(message, sourceUpdateTime, existing) {
+	const stored = Number(existing?.source_update_time ?? existing?.sourceUpdateTime) || null;
+	if (stored && sourceUpdateTime) return sourceUpdateTime > stored;
+	return message?.updated === true;
+}
+
 function asEpochSeconds(value) {
 	return String(Math.max(0, Math.floor(asCreateTimeMs(value) / 1000)));
 }
@@ -571,9 +580,15 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			: Math.max(0, Number(state.cursor_create_time) - config.overlapSeconds * 1000);
 		const runtime = sourceRuntime.get(source.key);
 		const reconciling = !bootstrap && (!runtime?.last_reconciled_at || Date.now() - Date.parse(runtime.last_reconciled_at) >= reconcileEveryMs);
-		const from = reconciling ? Math.max(0, now - reconcileLookbackMs) : normalFrom;
+		// A reconcile window only ever widens the read.  After an outage longer
+		// than the lookback, the persisted cursor is older than now - lookback,
+		// and starting at the later bound would skip every message in between.
+		const from = reconciling ? Math.max(0, Math.min(normalFrom, now - reconcileLookbackMs)) : normalFrom;
+		const previousCursor = Number(state?.cursor_create_time) || 0;
 		let pageToken;
 		let newestCreateTime = now;
+		let newestSeenCreateTime = 0;
+		let truncated = false;
 		for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
 			// Without card_msg_content_type the API renders a card into its legacy
 			// 1.0 shape, and a card JSON 2.0 message - which it cannot downgrade -
@@ -598,6 +613,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				if (!message?.message_id) continue;
 				const createTime = asCreateTimeMs(message.create_time, now);
 				newestCreateTime = Math.max(newestCreateTime, createTime);
+				newestSeenCreateTime = Math.max(newestSeenCreateTime, createTime);
 				const sourceUpdateTime = message.update_time ? asCreateTimeMs(message.update_time, createTime) : null;
 				const record = {
 					sourceMessageId: message.message_id, sourceKey: source.key, sourceChatId: source.resolvedChatId,
@@ -628,7 +644,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 					} else if (!existing) await ledger.skipRelayMessage(record);
 					continue;
 				}
-				if (existing && (message.updated === true || (sourceUpdateTime && (!existing.source_update_time || sourceUpdateTime > Number(existing.source_update_time))))) {
+				if (existing && sourceEdited(message, sourceUpdateTime, existing)) {
 					let originalSynced = false;
 					try { originalSynced = await updateRelayedMessage(message, source, existing); }
 					catch (error) { logger.warn(`同步源消息编辑失败：${source.key} ${message.message_id}：${error instanceof Error ? error.message : String(error)}`); }
@@ -649,8 +665,14 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			if (!result.data?.has_more) break;
 			pageToken = result.data?.page_token;
 			if (!pageToken) break;
+			if (page === MAX_HISTORY_PAGES - 1) truncated = true;
 		}
-		await ledger.saveRelaySourceCursor({ sourceKey: source.key, chatId: source.resolvedChatId, cursorCreateTime: newestCreateTime });
+		// A page cap with more history still unread must not jump the cursor to
+		// now: the unread tail would never be requested again.  Resume from the
+		// newest message actually seen, never moving the cursor backwards.
+		const cursorCreateTime = truncated ? Math.max(previousCursor, newestSeenCreateTime) : newestCreateTime;
+		if (truncated) logger.warn(`源群 ${source.key} 单轮读取达到 ${MAX_HISTORY_PAGES} 页上限，下一轮从已读最新消息继续`);
+		await ledger.saveRelaySourceCursor({ sourceKey: source.key, chatId: source.resolvedChatId, cursorCreateTime });
 		if (reconciling) {
 			const previous = sourceRuntime.get(source.key) ?? {};
 			sourceRuntime.set(source.key, { ...previous, last_reconciled_at: new Date().toISOString() });

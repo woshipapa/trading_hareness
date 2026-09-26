@@ -79,3 +79,36 @@ test('summary listener restores the last source-message timestamp after a restar
 	await listener.tick();
 	assert.equal(listener.status().last_source_message_at, '2023-11-14T22:13:20.000Z');
 });
+
+test('summary listener resumes a backlog beyond the page cap instead of skipping its tail', async () => {
+	const now = Date.now();
+	const cursor = now - 3 * 3600_000;
+	const messages = Array.from({ length: 1200 }, (_, index) => ({
+		message_id: `om_summary_${index}`, msg_type: 'text', create_time: String(cursor + (index + 1) * 5_000),
+		body: { content: JSON.stringify({ text: `#liwei\n${index}` }) },
+	}));
+	let state = { chat_id: 'oc_summary', cursor_create_time: cursor, last_source_create_time: cursor };
+	const processed = new Set();
+	const listener = createSummaryListener({
+		sourceApi: { messageList: async (params) => {
+			const matching = messages.filter((message) => Number(message.create_time) >= Number(params.start_time) * 1000);
+			const offset = Number(params.page_token ?? 0);
+			const items = matching.slice(offset, offset + params.page_size);
+			const next = offset + items.length;
+			return { data: { items, has_more: next < matching.length, page_token: next < matching.length ? String(next) : undefined } };
+		} },
+		ledger: {
+			summaryListenerState: async () => state,
+			saveSummaryListenerCursor: async ({ chatId, cursorCreateTime, lastSourceCreateTime }) => {
+				state = { chat_id: chatId, cursor_create_time: Math.max(state.cursor_create_time, cursorCreateTime), last_source_create_time: lastSourceCreateTime };
+			},
+		},
+		processMessage: async (event) => { processed.add(event.message.message_id); return {}; },
+		logger: { error() {}, info() {} },
+		config: { enabled: true, key: 'summary', chatId: 'oc_summary', intervalSeconds: 10, historyLookbackSeconds: 3600, overlapSeconds: 30, bootstrapMode: 'forward_existing', sourceLabel: '分析师发送汇总群' },
+	});
+	await listener.tick();
+	assert.ok(state.cursor_create_time < now);
+	await listener.tick();
+	assert.equal(processed.size, 1200);
+});

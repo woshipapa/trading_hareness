@@ -88,6 +88,9 @@ export function createSummaryListener({ sourceApi, ledger, processMessage, confi
 			const from = bootstrap || needsSourceTimestamp
 				? now - config.historyLookbackSeconds * 1000
 				: Math.max(0, Number(state.cursor_create_time) - config.overlapSeconds * 1000);
+			const previousCursor = Number(state?.cursor_create_time) || 0;
+			let truncated = false;
+			let newestSeenCreateTime = 0;
 			let pageToken;
 			let newestCreateTime = now;
 			let newestSourceCreateTime = Number(state?.last_source_create_time) || 0;
@@ -105,6 +108,7 @@ export function createSummaryListener({ sourceApi, ledger, processMessage, confi
 					const createTime = asCreateTimeMs(item.create_time, now);
 					newestCreateTime = Math.max(newestCreateTime, createTime);
 					newestSourceCreateTime = Math.max(newestSourceCreateTime, createTime);
+					newestSeenCreateTime = Math.max(newestSeenCreateTime, createTime);
 					lastMessageAt = new Date(createTime).toISOString();
 					if (bootstrap && config.bootstrapMode === 'skip_existing') {
 						ignoredCount += 1;
@@ -125,8 +129,11 @@ export function createSummaryListener({ sourceApi, ledger, processMessage, confi
 				if (!result.data?.has_more) break;
 				pageToken = result.data?.page_token;
 				if (!pageToken) break;
+				if (page === MAX_HISTORY_PAGES - 1) truncated = true;
 			}
-			await ledger.saveSummaryListenerCursor({ listenerKey: config.key, chatId: config.chatId, cursorCreateTime: newestCreateTime, lastSourceCreateTime: newestSourceCreateTime || null });
+			// Resume a capped backlog from the newest message read, not from now.
+			const cursorCreateTime = truncated ? Math.max(previousCursor, newestSeenCreateTime) : newestCreateTime;
+			await ledger.saveSummaryListenerCursor({ listenerKey: config.key, chatId: config.chatId, cursorCreateTime, lastSourceCreateTime: newestSourceCreateTime || null });
 			lastSuccessAt = new Date().toISOString();
 		} catch (error) {
 			lastError = error instanceof Error ? error.message : String(error);
