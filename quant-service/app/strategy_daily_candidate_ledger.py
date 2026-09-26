@@ -27,6 +27,7 @@ from psycopg.types.json import Json
 
 from .liquidity_screen import liquidity_eligibility, median_daily_amount_by_symbol
 from .point_in_time import exchange_day_end
+from .point_in_time_status import st_flags_as_of
 
 POST_CLOSE_STRATEGY_KEYS = {
     "base_ready_30d": "post_close_base_ready",
@@ -48,9 +49,11 @@ def _liquidity_context(connection: Any, symbols: list[str], as_of_date: date) ->
         return {}
     median_amount = median_daily_amount_by_symbol(connection, symbols, as_of_date)
     instrument_rows = connection.execute(
-        "SELECT symbol,is_st,list_date FROM quant.instruments WHERE symbol=ANY(%s)", (symbols,),
+        "SELECT symbol,list_date FROM quant.instruments WHERE symbol=ANY(%s)", (symbols,),
     ).fetchall()
     instruments = {str(row["symbol"]): dict(row) for row in instrument_rows}
+    # A re-materialized past date must see that session's ST status.
+    st_status = st_flags_as_of(connection, symbols, as_of_date)
     latest_bar_rows = connection.execute(
         """SELECT DISTINCT ON (symbol) symbol,close,is_suspended FROM quant.canonical_bars_daily
              WHERE symbol=ANY(%s) AND trading_date<=%s AND available_at<=%s AND quality_status='fresh'
@@ -65,7 +68,7 @@ def _liquidity_context(connection: Any, symbols: list[str], as_of_date: date) ->
         eligible, flags = liquidity_eligibility(
             median_daily_amount=median_amount.get(symbol), latest_price=_number(bar.get("close")),
             list_date=instrument.get("list_date"), as_of_date=as_of_date,
-            is_st=bool(instrument.get("is_st")), is_suspended=bool(bar.get("is_suspended")),
+            is_st=bool((st_status.get(symbol) or {}).get("is_st")), is_suspended=bool(bar.get("is_suspended")),
         )
         context[symbol] = {"eligible": eligible, "flags": flags}
     return context

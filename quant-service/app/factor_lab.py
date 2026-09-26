@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from .market_rules import a_share_limit_ratio
+from .point_in_time_status import pit_st_sql
 from .research_prices import adjusted_value
 from .universe_history import point_in_time_membership_predicate
 from .backtest_execution_rules import a_share_exit_lag
@@ -130,7 +131,7 @@ def load_universe_bars(connection: Any, universe_key: str, start_date: date, end
     membership_predicate = point_in_time_membership_predicate("membership", "b")
     rows = connection.execute(
         """SELECT b.symbol,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,b.volume,b.adj_factor,b.is_suspended,b.limit_up,b.limit_down,
-                  i.is_st
+                  """ + pit_st_sql("b.symbol", "b.trading_date", "coalesce(i.is_st,false)") + """ AS is_st
            FROM quant.canonical_bars_daily b
            JOIN quant.universe_membership_history membership
              ON membership.universe_key=%s AND membership.symbol=b.symbol

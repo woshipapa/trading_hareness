@@ -17,7 +17,17 @@ from typing import Any, Awaitable, Callable
 
 CONTROL_APIS = ("adj_factor", "daily_basic", "stk_limit", "suspend_d")
 CONTROL_PERSIST_TIMEOUT_SECONDS = 180
-_A_SHARE = re.compile(r"\d{6}\.(SH|SZ|BJ)$")
+# Whole-market control calls must page: an unpaged stk_limit is refused or cut
+# short by the vendor (2,359 of ~5,700 names on 2026-09-16), and a short table
+# could still clear the coverage gate below.  Same bounds as tushare_limits.
+CONTROL_PAGE_SIZE = 2000
+CONTROL_MAX_ROWS = 12000
+CONTROL_MAX_PAGES = 8
+# Listed A-share equity codes only.  A bare six-digit pattern also counted
+# index, fund and B-share rows toward the 95% coverage gate.
+_A_SHARE = re.compile(
+    r"^(?:(?:60[0135]|68[89])\d{3}\.SH|(?:000|001|002|003|300|301|302)\d{3}\.SZ|[489]\d{5}\.BJ)$"
+)
 
 
 def valid_rows(api_name: str, rows: list[dict[str, Any]], trade_date: date, parse_date: Callable[[Any], date | None]) -> list[dict[str, Any]]:
@@ -64,7 +74,11 @@ async def sync(
     rows_by_api: dict[str, list[dict[str, Any]]] = {}
     try:
         for api_name in CONTROL_APIS:
-            result = await call_tushare_api(api_name, {"trade_date": stamp}, None, "auto")
+            result = await call_tushare_api(
+                api_name, {"trade_date": stamp}, None, "auto",
+                paginate=True, page_size=CONTROL_PAGE_SIZE, max_rows=CONTROL_MAX_ROWS,
+                max_pages=CONTROL_MAX_PAGES, require_complete=True,
+            )
             rows = valid_rows(api_name, result.rows, trade_date, parse_date)
             if api_name != "suspend_d" and len(rows) < max(1, int(expected * 0.95)):
                 raise ValueError(f"{api_name} returned {len(rows)} valid rows; expected at least 95% of {expected}")
@@ -76,6 +90,27 @@ async def sync(
         return {"status": "blocked", "trade_date": str(trade_date), "reason": safe_error_detail(str(error), 500)}
     except Exception as error:  # provider result is intentionally not promoted partially
         return {"status": "blocked", "trade_date": str(trade_date), "reason": safe_error_detail(str(error), 500)}
+
+    # The session's ST list is dated evidence for point-in-time research
+    # (point_in_time_status).  It is best-effort: a failure leaves the date
+    # uncovered, which readers report as the current-flag fallback, and never
+    # blocks the four controls above.
+    st_rows: list[dict[str, Any]] = []
+    st_provider: str | None = None
+    st_status = "unavailable"
+    try:
+        st_result = await call_tushare_api(
+            "stock_st", {"trade_date": stamp}, None, "auto",
+            paginate=True, page_size=CONTROL_PAGE_SIZE, max_rows=CONTROL_MAX_ROWS,
+            max_pages=CONTROL_MAX_PAGES, require_complete=True,
+        )
+        st_rows = valid_rows("stock_st", st_result.rows, trade_date, parse_date)
+        st_provider = str(st_result.provider.key)
+        st_status = "captured" if st_rows else "empty_not_recorded"
+    except executor_saturated_error:
+        st_status = "deferred_executor_saturated"
+    except Exception as error:  # noqa: BLE001 - evidence only, never blocks controls
+        st_status = f"unavailable: {safe_error_detail(str(error), 200)}"
 
     observed_at = datetime.now(timezone.utc)
     latency_ms = round((asyncio.get_running_loop().time() - started) * 1000)
@@ -132,6 +167,20 @@ async def sync(
                       AND suspension.symbol=bar.symbol AND suspension.provider=%s""",
                 (trade_date, trade_date, results["suspend_d"].provider.key),
             )
+            if st_rows and st_provider:
+                connection.execute(
+                    """INSERT INTO quant.instrument_lifecycle_evidence(
+                           symbol,provider,observed_at,status_date,list_status,is_st,available_at,raw)
+                       SELECT candidate.symbol,%s,%s,%s,'UNKNOWN',true,%s,candidate.raw
+                         FROM jsonb_to_recordset(%s::jsonb) AS candidate(symbol text, raw jsonb)
+                         JOIN quant.instruments instrument ON instrument.symbol=candidate.symbol
+                       ON CONFLICT(symbol,provider,status_date,list_status) DO UPDATE SET
+                         is_st=true,raw=EXCLUDED.raw""",
+                    (st_provider, observed_at, trade_date, observed_at,
+                     json.dumps([{"symbol": str(row["ts_code"]).upper(), "raw": row} for row in st_rows],
+                                default=str, ensure_ascii=False)),
+                )
+                normalized["stock_st"] = len(st_rows)
         return normalized
 
     # Four complete all-A payloads are promoted in one transaction.  The
@@ -143,6 +192,7 @@ async def sync(
         "status": "completed", "trade_date": str(trade_date), "expected_daily_rows": expected,
         "rows": {api_name: len(rows) for api_name, rows in rows_by_api.items()}, "normalized_rows": normalized,
         "providers": {api_name: result.provider.key for api_name, result in results.items()},
+        "st_evidence": {"status": st_status, "rows": len(st_rows), "provider": st_provider},
     }
 
 

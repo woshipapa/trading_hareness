@@ -12,6 +12,7 @@ from .stable_json import stable_dumps, stable_json
 from .point_in_time import availability_cutoff
 
 from .research_prices import adjusted_bars
+from .point_in_time_status import pit_st_sql
 
 
 def _call_with_cutoff(callback: Callable[..., Any], *args: Any, cutoff: datetime) -> Any:
@@ -39,7 +40,8 @@ def materialize_feature_snapshot(
     cutoff = availability_cutoff(as_of_date, knowledge_cutoff)
     members = connection.execute(
         """SELECT DISTINCT ON (membership.symbol)
-                      membership.symbol,i.name,i.is_st,
+                      membership.symbol,i.name,
+                      """ + pit_st_sql("membership.symbol", "%s::date", "coalesce(i.is_st,false)") + """ AS is_st,
                       coalesce(sector_history.sector_key,'UNKNOWN') AS industry
              FROM quant.universe_membership_history membership
              JOIN quant.instruments i ON i.symbol=membership.symbol
@@ -59,7 +61,7 @@ def materialize_feature_snapshot(
               AND membership.effective_from<=%s
               AND (membership.effective_to IS NULL OR membership.effective_to>=%s)
             ORDER BY membership.symbol,membership.priority,membership.effective_from DESC""",
-        (as_of_date, as_of_date, cutoff, universe_key, as_of_date, as_of_date),
+        (as_of_date, as_of_date, as_of_date, as_of_date, cutoff, universe_key, as_of_date, as_of_date),
     ).fetchall()
     if not members:
         raise ValueError(f"universe {universe_key} has no enabled symbols")

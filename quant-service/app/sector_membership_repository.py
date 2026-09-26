@@ -82,6 +82,12 @@ def sector_group_predicate(alias: str = "member") -> tuple[str, tuple[Any, ...]]
     )
 
 
+# ``known_at`` is the point-in-time boundary replays filter on.  A refresh or
+# an interval close must never move it later: that hid a membership from every
+# replay dated before the latest refresh.  Upserts keep the earliest value and
+# closes leave it untouched; ``available_at`` still records the latest write.
+
+
 def persist_ths_snapshot(
     connection: Any,
     taxonomy_key: str,
@@ -110,7 +116,8 @@ def persist_ths_snapshot(
                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT(taxonomy_key,sector_key,symbol,effective_from) DO UPDATE
                  SET effective_to=EXCLUDED.effective_to,provider_key=EXCLUDED.provider_key,
-                     available_at=EXCLUDED.available_at,known_at=EXCLUDED.known_at,
+                     available_at=EXCLUDED.available_at,
+                     known_at=LEAST(sector_membership_history.known_at,EXCLUDED.known_at),
                      effective_from_basis=EXCLUDED.effective_from_basis,
                      effective_to_basis=EXCLUDED.effective_to_basis,raw=EXCLUDED.raw""",
             (taxonomy_key, sector_key, symbol, effective_from, effective_to, provider_key,
@@ -121,10 +128,10 @@ def persist_ths_snapshot(
     if rows:
         connection.execute(
             """UPDATE quant.sector_membership_history
-                  SET effective_to=%s,available_at=%s,known_at=%s,effective_to_basis=%s
+                  SET effective_to=%s,available_at=%s,effective_to_basis=%s
                 WHERE taxonomy_key=%s AND sector_key=%s AND provider_key=%s AND effective_to IS NULL
                   AND NOT symbol = ANY(%s)""",
-            (observed_exchange_date(observed_at) - timedelta(days=1), observed_at, observed_at,
+            (observed_exchange_date(observed_at) - timedelta(days=1), observed_at,
              OBSERVED_SNAPSHOT, taxonomy_key, sector_key, provider_key, list(active_members)),
         )
     return len(active_members)
@@ -157,7 +164,8 @@ def persist_observed_snapshot(
                ) VALUES(%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s)
                ON CONFLICT(taxonomy_key,sector_key,symbol,effective_from) DO UPDATE
                  SET effective_to=NULL,provider_key=EXCLUDED.provider_key,
-                     available_at=EXCLUDED.available_at,known_at=EXCLUDED.known_at,
+                     available_at=EXCLUDED.available_at,
+                     known_at=LEAST(sector_membership_history.known_at,EXCLUDED.known_at),
                      effective_from_basis=EXCLUDED.effective_from_basis,
                      effective_to_basis=EXCLUDED.effective_to_basis,raw=EXCLUDED.raw""",
             (taxonomy_key, sector_key, symbol, effective_from, provider_key, observed_at, observed_at,
@@ -168,10 +176,10 @@ def persist_observed_snapshot(
     if rows:
         connection.execute(
             """UPDATE quant.sector_membership_history
-                  SET effective_to=%s,available_at=%s,known_at=%s,effective_to_basis=%s
+                  SET effective_to=%s,available_at=%s,effective_to_basis=%s
                 WHERE taxonomy_key=%s AND sector_key=%s AND provider_key=%s AND effective_to IS NULL
                   AND effective_from<%s AND NOT symbol = ANY(%s)""",
-            (effective_from - timedelta(days=1), observed_at, observed_at, OBSERVED_SNAPSHOT,
+            (effective_from - timedelta(days=1), observed_at, OBSERVED_SNAPSHOT,
              taxonomy_key, sector_key, provider_key, effective_from, list(members)),
         )
     return stored
@@ -211,7 +219,8 @@ def persist_observed_snapshot_batched(
                ) VALUES(%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s)
                ON CONFLICT(taxonomy_key,sector_key,symbol,effective_from) DO UPDATE
                  SET effective_to=NULL,provider_key=EXCLUDED.provider_key,
-                     available_at=EXCLUDED.available_at,known_at=EXCLUDED.known_at,
+                     available_at=EXCLUDED.available_at,
+                     known_at=LEAST(sector_membership_history.known_at,EXCLUDED.known_at),
                      effective_from_basis=EXCLUDED.effective_from_basis,
                      effective_to_basis=EXCLUDED.effective_to_basis,raw=EXCLUDED.raw""",
             [(taxonomy_key, sector_key, symbol, effective_from, provider_key, observed_at, observed_at,
@@ -219,10 +228,10 @@ def persist_observed_snapshot_batched(
         )
     connection.execute(
         """UPDATE quant.sector_membership_history
-              SET effective_to=%s,available_at=%s,known_at=%s,effective_to_basis=%s
+              SET effective_to=%s,available_at=%s,effective_to_basis=%s
             WHERE taxonomy_key=%s AND sector_key=%s AND provider_key=%s AND effective_to IS NULL
               AND effective_from<%s AND NOT symbol = ANY(%s)""",
-        (effective_from - timedelta(days=1), observed_at, observed_at, OBSERVED_SNAPSHOT,
+        (effective_from - timedelta(days=1), observed_at, OBSERVED_SNAPSHOT,
          taxonomy_key, sector_key, provider_key, effective_from, list(members)),
     )
     return len(members)

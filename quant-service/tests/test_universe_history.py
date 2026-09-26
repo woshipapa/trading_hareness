@@ -37,6 +37,24 @@ class UniverseHistoryTests(unittest.TestCase):
         self.assertEqual(result, {"opened": 0, "closed": 4, "discarded_same_day": 1, "active": 0})
         self.assertEqual(connection.execute.call_count, 2)
 
+    def test_a_supplementary_snapshot_opens_but_never_closes(self):
+        # A partial vendor snapshot cannot prove an absent symbol stopped
+        # trading; it must not close that symbol's PIT interval.
+        connection = MagicMock()
+        connection.execute.side_effect = [MagicMock(rowcount=5)]
+        result = sync_universe_membership_history(
+            connection, "all_a", date(2026, 8, 17), ["600000.SH"], source="longhu", close_missing=False,
+        )
+        self.assertEqual(result, {"opened": 5, "closed": 0, "discarded_same_day": 0, "active": 1})
+        self.assertEqual(connection.execute.call_count, 1)
+        self.assertIn("INSERT INTO quant.universe_membership_history", connection.execute.call_args.args[0])
+
+    def test_the_longhu_close_snapshot_never_disables_or_closes_members(self):
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "app" / "longhu_market_repository.py").read_text(encoding="utf-8")
+        self.assertNotIn("SET enabled=false", source)
+        self.assertIn("close_missing=False", source)
+
 
 if __name__ == "__main__":
     unittest.main()

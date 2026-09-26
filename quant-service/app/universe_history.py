@@ -12,17 +12,8 @@ from datetime import date, timedelta
 from typing import Any, Iterable
 
 
-def sync_universe_membership_history(
-    connection: Any,
-    universe_key: str,
-    exchange_date: date,
-    active_symbols: Iterable[str],
-    *,
-    source: str,
-    priority: int = 100,
-) -> dict[str, int]:
-    """Open/close PIT intervals for one authoritative live-universe snapshot."""
-    symbols = sorted({str(symbol).strip().upper() for symbol in active_symbols if symbol})
+def _close_missing(connection: Any, universe_key: str, exchange_date: date,
+                   symbols: list[str], source: str) -> tuple[int, int]:
     discarded_same_day = connection.execute(
         """DELETE FROM quant.universe_membership_history history
             WHERE history.universe_key=%s AND history.effective_to IS NULL
@@ -39,6 +30,28 @@ def sync_universe_membership_history(
               AND NOT (history.symbol=ANY(%s))""",
         (exchange_date - timedelta(days=1), source, universe_key, exchange_date, symbols),
     ).rowcount
+    return int(discarded_same_day or 0), int(closed or 0)
+
+
+def sync_universe_membership_history(
+    connection: Any,
+    universe_key: str,
+    exchange_date: date,
+    active_symbols: Iterable[str],
+    *,
+    source: str,
+    priority: int = 100,
+    close_missing: bool = True,
+) -> dict[str, int]:
+    """Open/close PIT intervals for one authoritative live-universe snapshot.
+
+    ``close_missing=False`` is for a supplementary snapshot that can prove a
+    symbol trades but not that an absent one stopped: it only opens intervals.
+    """
+    symbols = sorted({str(symbol).strip().upper() for symbol in active_symbols if symbol})
+    discarded_same_day, closed = (
+        _close_missing(connection, universe_key, exchange_date, symbols, source) if close_missing else (0, 0)
+    )
     if symbols:
         opened = connection.execute(
             """INSERT INTO quant.universe_membership_history(
@@ -59,8 +72,8 @@ def sync_universe_membership_history(
     else:
         opened = 0
     return {
-        "opened": int(opened or 0), "closed": int(closed or 0),
-        "discarded_same_day": int(discarded_same_day or 0), "active": len(symbols),
+        "opened": int(opened or 0), "closed": closed,
+        "discarded_same_day": discarded_same_day, "active": len(symbols),
     }
 
 
