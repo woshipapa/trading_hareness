@@ -189,6 +189,19 @@ test('official gap repair replaces a websocket card placeholder with the full of
 	assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n[interactive]\n书房猫完整卡片');
 });
 
+test('official gap repair recognizes a card placeholder that kept the websocket title', async () => {
+	const stamp = Date.now();
+	const card = { schema: '2.0', body: { elements: [{ tag: 'markdown', content: '调研纪要完整卡片' }] } };
+	const official = { message_id: 'om_diaoyan_placeholder_title', chat_id: 'oc_source', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify(card) } };
+	const { relay, sent, saved } = createHarness([official]);
+	saved.set(official.message_id, { sourceMessageId: official.message_id, sourceKey: 'anqiang', sourceCreateTime: stamp, status: 'sent', message: { msg_type: 'text', body: { content: JSON.stringify({ text: '[card] [卡片] 📢 新动态 · 2026-09-26 22:48' }) } }, targetMessageIds: [{ targetChatId: 'oc_summary', messageId: 'old', msgType: 'text' }] });
+	const result = await relay.repairFromOfficial({ fromCreateTime: stamp - 1000, toCreateTime: stamp + 1000, sourceKeys: ['anqiang'], forcePlaceholderCards: true });
+	assert.equal(result.sent, 1);
+	assert.equal(result.replaced_placeholders, 1);
+	assert.equal(saved.get(official.message_id).status, 'sent');
+	assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n[interactive]\n调研纪要完整卡片');
+});
+
 test('official gap repair does not skip a missed message before a later sent row', async () => {
 	const stamp = Date.now();
 	const missed = { message_id: 'om_gap_before_later', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '窗口前半段漏收消息' }] } }) } };

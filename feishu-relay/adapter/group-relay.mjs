@@ -123,7 +123,7 @@ function isPlaceholderCardRelay(message) {
 	if (String(message?.msg_type ?? '').trim().toLowerCase() !== 'text') return false;
 	const body = parseJson(message?.body?.content, {});
 	const text = String(body?.text ?? '').trim();
-	return /^\[(?:card|interactive)\]\s+(?:\[卡片\]|卡片内容未随 WebSocket 提供)\s*$/iu.test(text);
+	return /^\[(?:card|interactive)\]\s+(?:\[卡片\]|卡片内容未随 WebSocket 提供)(?:\s+.*)?$/iu.test(text);
 }
 
 function cloneJson(value) {
