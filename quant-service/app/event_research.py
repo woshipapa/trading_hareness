@@ -32,7 +32,7 @@ BENCHMARK_SYMBOL = "000300.SH"
 # adjusted research prices.  Keep provider precedence in SQL as well as in
 # ``owner_factor_repository`` because these studies run as one bounded query
 # against the hot+cold snapshot and must not fall back to the bar-side factor.
-_FACTOR_PROVIDERS_SQL = "ARRAY['longhu_qfq_derived','tushare','tushare_primary','tushare_backup','tushare_super','tushare_super_get','tushare_super_sdk']::text[]"
+_FACTOR_PROVIDERS_SQL = "ARRAY['longhu_qfq_derived','tushare','tushare_backup','tushare_super','tushare_super_get','tushare_super_sdk']::text[]"
 
 
 def _factorized_bars_cte() -> str:

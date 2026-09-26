@@ -1639,6 +1639,15 @@ INSERT INTO quant.providers(provider_key,label) VALUES
     ('derived_market_sentiment','自算短线情绪指标'), ('derived_tick_flow','自算分笔资金流')
 ON CONFLICT(provider_key) DO NOTHING;
 
+-- The legacy compatible REST source is retained for historical provenance,
+-- but is removed from every active routing/capability path.
+UPDATE quant.providers
+   SET enabled=false, label='Tushare 兼容主源（已下线）', updated_at=now()
+ WHERE provider_key='tushare_primary';
+UPDATE quant.provider_capabilities
+   SET enabled=false
+ WHERE provider_key='tushare_primary';
+
 UPDATE quant.providers SET enabled=false,updated_at=now()
  WHERE provider_key='tushare_super';
 UPDATE quant.providers SET label='Tushare 超级路径源（历史聚合身份）',updated_at=now()
@@ -1756,12 +1765,19 @@ INSERT INTO quant.provider_capabilities(provider_key,capability,market,priority,
     ('eastmoney_free','realtime_quote','cn',45,true,10),
     ('tencent_free','daily_bar','cn',50,true,20),
     ('sina_free','realtime_quote','cn',55,true,10),
+    ('akshare','realtime_quote','cn',60,true,4),
     ('cninfo_free','announcement','cn',35,true,20),
     ('fuyao_ths','realtime_quote','cn',12,true,120),
     ('remote_archive','analyst_report','cn',10,true,60)
 ON CONFLICT(provider_key,capability,market) DO UPDATE SET
     priority=EXCLUDED.priority,enabled=EXCLUDED.enabled,
     rate_limit_per_minute=EXCLUDED.rate_limit_per_minute;
+
+-- Re-assert the retirement after capability seeding so a fresh schema cannot
+-- accidentally re-enable the legacy route through the INSERT above.
+UPDATE quant.provider_capabilities
+   SET enabled=false
+ WHERE provider_key='tushare_primary';
 
 INSERT INTO quant.universe_members(universe_key,symbol,source,priority)
 SELECT 'core', symbol, 'bootstrap-existing-instruments', 100
@@ -1946,13 +1962,11 @@ class AsyncDatabase:
         self._pool_settings = dict(source._pool_settings)
         try:
             async_min = max(1, min(4, int(os.getenv("QUANT_ASYNC_READ_POOL_MIN_SIZE", "1"))))
-            # Eight connections keep dashboard reads and the seven edge lease
-            # heartbeats from starving one another during the trading session.
-            # The upper bound remains deliberately small for the single-node
-            # deployment.
-            async_max = max(async_min, min(8, int(os.getenv("QUANT_ASYNC_READ_POOL_MAX_SIZE", "8"))))
+            # Keep dashboard reads and edge lease heartbeats in one bounded
+            # pool while allowing the owner-provided sixteen read connections.
+            async_max = max(async_min, min(16, int(os.getenv("QUANT_ASYNC_READ_POOL_MAX_SIZE", "16"))))
         except ValueError:
-            async_min, async_max = 1, 4
+            async_min, async_max = 1, 16
         self._pool_settings["min_size"] = async_min
         self._pool_settings["max_size"] = async_max
         self._pool = self._new_pool()

@@ -182,6 +182,11 @@ def plan_stock(
         checklist = ["竞价不低开", "分时放量或封板", "价格在分时均价上方"]
         if playbook == "relay_news_conditional":
             checklist.insert(0, f"前提：{p['sector']} 板块涨停 ≥ {p['sector_min_limit_ups']} 家（盘后核对）")
+    elif playbook == "relay_break_reseal":
+        setup = f"炸板回封，涨停价 {extra['limit_up_price']}"
+        checklist = ["今日必须先到过板", "开板时买（有对手盘）",
+                     f"距涨停 ≤ {float(p['reentry_discount_max_pct']):g}%", "回到分时均价上方",
+                     f"成交 ≥ {_yi(p['fail_amount'])} 仍不能回封 → 失效"]
     elif playbook == "relay_fast_seal":
         setup = f"快速封板，涨停价 {extra['limit_up_price']}"
         checklist = [f"封板时成交 ≤ {_yi(p['seal_amount_max'])}", "竞价不低开", f"成交 ≥ {_yi(p['fail_amount'])} 仍未封 → 失效"]

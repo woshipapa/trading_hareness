@@ -5,7 +5,7 @@ import { DataAnalysis, Document, Operation, Refresh, UploadFilled, WarningFilled
 import VChart from 'vue-echarts';
 import { use } from 'echarts/core';
 import { BarChart, CandlestickChart, LineChart, ScatterChart } from 'echarts/charts';
-import { DataZoomComponent, GridComponent, LegendComponent, MarkPointComponent, TooltipComponent } from 'echarts/components';
+import { DataZoomComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, MarkPointComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { AnalystMarketReview, AutomationRun } from '../api/analyst-contract';
 import type { components } from '../api/generated';
@@ -13,11 +13,19 @@ import { getJson as getJsonBase, postJson } from '../api/http';
 import { usePolling } from './usePolling';
 import { resolveInitialDashboardSection, type DashboardSection } from '../dashboard-navigation';
 import { dashboardContextKey } from '../dashboard-context';
+import {
+  annotationStorageKey,
+  buildManualAnnotationSeries,
+  buildTonghuashunDeepLink,
+  buildTonghuashunWebLink,
+  type AnalystChartAnnotation,
+} from '../research/analyst-chart';
+import { buildStrategyEvidenceMatrix, type StrategyEvidenceDailyCandidate, type StrategyEvidenceMatrixRow } from '../research/strategy-evidence';
 
 
 
 export function useDashboardWorkspace() {
-use([BarChart, CandlestickChart, LineChart, ScatterChart, DataZoomComponent, GridComponent, LegendComponent, MarkPointComponent, TooltipComponent, CanvasRenderer]);
+use([BarChart, CandlestickChart, LineChart, ScatterChart, DataZoomComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, MarkPointComponent, TooltipComponent, CanvasRenderer]);
 
 type ProviderConfig = { name: string; provider_key: string; label: string; configured: boolean; protocol: string; rate_limit_per_minute?: number; min_interval_seconds?: number; realtime_coverage?: string; realtime_note?: string; realtime_apis?: string[]; super_alias_first_apis?: string[]; get_apis?: string[]; complete_query_apis?: string[]; bounded_only_apis?: string[]; reconciliation_required_apis?: string[] };
 type Availability = 'declared' | 'verified' | 'empty' | 'unsupported' | 'failed' | 'unknown';
@@ -172,6 +180,15 @@ const analystDailyReview = ref<AnalystMarketReview | null>(null); const analystW
 const analystReviewRuns = ref<AutomationRun[]>([]);
 const automationRuns = ref<AutomationRun[]>([]);
 const analystStockTimeline = ref<AnalystStockTimeline | null>(null); const analystStockTimelineLoading = ref(false); const analystStockTimelineError = ref(''); const analystTimelineAnalyst = ref(''); const analystTimelineDate = ref('');
+const analystChartAnnotations = ref<AnalystChartAnnotation[]>([]);
+const analystAnnotationSelectionMode = ref<'point' | 'area-start' | 'area-end'>('point');
+const analystAnnotationPointIndex = ref<number | null>(null);
+const analystAnnotationAreaStartIndex = ref<number | null>(null);
+const analystAnnotationAreaEndIndex = ref<number | null>(null);
+const analystAnnotationPrice = ref<number | null>(null);
+const analystAnnotationLower = ref<number | null>(null);
+const analystAnnotationUpper = ref<number | null>(null);
+const analystAnnotationLabel = ref('');
 const strategyAblation = ref<StrategyAblation>({});
 const strategyHealth = ref<StrategyHealth>({});
 const catalogQuery = ref(''); const catalogGroup = ref('all'); const selectedCatalog = ref<CatalogItem[]>([]); const auditResults = ref<CapabilityAuditRow[]>([]); const catalogRefreshing = ref(false); const fetchDialogOpen = ref(false); const fetchResultOpen = ref(false); const fetchResult = ref<Record<string, unknown>>({}); const fetchForm = ref({ api_name: 'daily', provider: 'auto', paramsText: '{\n  "ts_code": "000001.SZ",\n  "start_date": "20260804",\n  "end_date": "20260804"\n}', fields: 'ts_code,trade_date,open,high,low,close,vol,amount', max_rows: 100 });
@@ -299,6 +316,30 @@ const selectedReviewBoardStocks = computed(() => selectedReviewBoard.value?.top_
 const completedBackfillBoards = computed(() => conceptBackfill.value.states.filter((item) => item.state === 'completed' || item.state === 'empty').reduce((total, item) => total + Number(item.boards || 0), 0));
 const closeIndexRegime = computed(() => closeStrategyReview.value?.report?.index_breadth_context?.multi_index_regime ?? null);
 const closeShortTermReview = computed(() => closeStrategyReview.value?.report?.short_term_review ?? null);
+const strategyEvidenceDailyCandidates = computed<StrategyEvidenceDailyCandidate[]>(() => {
+  const candidates = dailyStrategySummary.value?.payload?.post_close?.candidates;
+  if (!Array.isArray(candidates)) return [];
+  return candidates.filter((candidate): candidate is StrategyEvidenceDailyCandidate => (
+    candidate && typeof candidate === 'object' && typeof candidate.symbol === 'string'
+  ));
+});
+const strategyEvidenceMatrix = computed<StrategyEvidenceMatrixRow[]>(() => buildStrategyEvidenceMatrix({
+  recommendations: recommendations.value,
+  postCloseCandidates: postCloseCandidates.value,
+  dailyCandidates: strategyEvidenceDailyCandidates.value,
+  outcomes: intradayOutcomes.value,
+  names: Object.fromEntries(universe.value.map((item) => [item.symbol, item.name])),
+}));
+const strategyReviewContext = computed(() => ({
+  exchange_date: dailyStrategySummary.value?.exchange_date ?? closeStrategyReview.value?.exchange_date ?? '-',
+  daily_delivery_status: dailyStrategySummary.value?.delivery_status ?? '缺失',
+  market_state: closeStrategyReview.value?.market_state ?? dailyStrategySummary.value?.payload?.close_review?.market_state ?? '待生成',
+  post_close_status: dailyStrategySummary.value?.payload?.post_close?.status ?? postCloseStrategyRun.value?.status ?? '缺失',
+  post_close_reason: dailyStrategySummary.value?.payload?.post_close?.reason ?? '',
+  validation_gate: dailyStrategySummary.value?.payload?.offline_policy_learning?.validation_gate?.status ?? strategyHealth.value?.validation_gate?.status ?? '未生成',
+  review_risk_flags: closeShortTermReview.value?.loss_effect?.risk_flags ?? [],
+}));
+const strategyEvidenceAlignmentType = (value: StrategyEvidenceMatrixRow['alignment']): 'success' | 'warning' | 'danger' | 'info' => value === '交叉支持' ? 'success' : value === '盘后待确认' ? 'warning' : value === '仅复盘' ? 'info' : 'warning';
 const indexRegimeLabel = computed(() => ({
   corrective_rebound: '纠错反弹情景', trend_recovery: '趋势修复', weak_or_declining: '弱势/下行', mixed_transition: '混合过渡', insufficient_index_history: '历史不足',
 }[closeIndexRegime.value?.state ?? ''] ?? closeIndexRegime.value?.state ?? '待生成'));
@@ -307,20 +348,134 @@ const indexLabel = (symbol: string) => ({ '000001.SH': '上证指数', '000300.S
 const equityChartOption = computed(() => ({
   tooltip: { trigger: 'axis' }, grid: { left: 48, right: 18, top: 24, bottom: 40 }, xAxis: { type: 'category', data: latestExperiment.value?.equity_curve.map((item) => item.date) ?? [] }, yAxis: { type: 'value', name: '净值', scale: true }, series: [{ type: 'line', smooth: true, showSymbol: false, data: latestExperiment.value?.equity_curve.map((item) => item.equity) ?? [], lineStyle: { width: 2, color: '#00897b' }, areaStyle: { color: 'rgba(0,137,123,0.12)' } }],
 }));
+const analystStockDeepLink = computed(() => buildTonghuashunDeepLink(studySymbol.value));
+const analystAnnotationSelectionLabel = computed(() => {
+  const bars = analystStockTimeline.value?.bars ?? [];
+  const format = (index: number | null) => index === null || !bars[index] ? '-' : chinaMinute(bars[index].bar_time);
+  return `点 ${format(analystAnnotationPointIndex.value)} · 区间 ${format(analystAnnotationAreaStartIndex.value)} → ${format(analystAnnotationAreaEndIndex.value)}`;
+});
 const analystStockTimelineChartOption = computed(() => {
   const timeline = analystStockTimeline.value;
   const bars = timeline?.bars ?? [];
   const indexByTime = new Map(bars.map((bar, index) => [bar.bar_time, index]));
+  const manual = buildManualAnnotationSeries(analystChartAnnotations.value, bars.length);
   const markerData = (timeline?.actions ?? []).filter((action) => action.mapping_status === 'mapped' && action.nearest_bar_time && indexByTime.has(action.nearest_bar_time)).map((action) => {
     const index = indexByTime.get(action.nearest_bar_time as string) ?? 0;
     const color = ['buy', 'watch', 'add_t', 'hold'].includes(action.action) ? '#d32f2f' : ['sell', 'reduce', 'avoid'].includes(action.action) ? '#1565c0' : '#f9a825';
     return { value: [index, action.nearest_bar_close ?? 0], name: `${action.analyst_id} · ${action.action}`, action, itemStyle: { color }, label: { show: true, formatter: action.action, color, fontSize: 10, position: 'top' } };
   });
+  const strategyMarkerData = (timeline ? intradayOutcomes.value.filter((outcome) => outcome.symbol === timeline.symbol) : []).flatMap((outcome) => {
+    if (!Number.isFinite(outcome.entry_price)) return [];
+    const entryTime = new Date(outcome.entry_observed_at).getTime();
+    if (!Number.isFinite(entryTime) || !bars.length) return [];
+    const index = bars.reduce((closest, bar, candidate) => Math.abs(new Date(bar.bar_time).getTime() - entryTime) < Math.abs(new Date(bars[closest].bar_time).getTime() - entryTime) ? candidate : closest, 0);
+    const offsetSeconds = Math.abs(new Date(bars[index].bar_time).getTime() - entryTime) / 1000;
+    if (offsetSeconds > 20 * 60) return [];
+    const color = outcome.direction > 0 ? '#c62828' : outcome.direction < 0 ? '#1565c0' : '#f9a825';
+    return [{ value: [index, outcome.entry_price], name: `策略 · ${outcome.signal_type}`, outcome, itemStyle: { color }, label: { show: true, formatter: outcome.signal_type, color, fontSize: 10, position: 'bottom' } }];
+  });
   return { animation: false, tooltip: { trigger: 'axis' }, grid: { left: 52, right: 18, top: 34, bottom: 46 }, xAxis: { type: 'category', data: bars.map((bar) => chinaMinute(bar.bar_time)), boundaryGap: true }, yAxis: { type: 'value', scale: true }, dataZoom: [{ type: 'inside', filterMode: 'none' }], series: [
-    { name: '分钟K线', type: 'candlestick', data: bars.map((bar) => [bar.open, bar.close, bar.low, bar.high]), itemStyle: { color: '#d32f2f', color0: '#1565c0', borderColor: '#d32f2f', borderColor0: '#1565c0' } },
+    { name: '分钟K线', type: 'candlestick', data: bars.map((bar) => [bar.open, bar.close, bar.low, bar.high]), itemStyle: { color: '#d32f2f', color0: '#1565c0', borderColor: '#d32f2f', borderColor0: '#1565c0' }, markPoint: manual.points.length ? { symbol: 'pin', symbolSize: 42, data: manual.points } : undefined, markLine: manual.lines.length ? { silent: true, symbol: ['none', 'none'], data: manual.lines, lineStyle: { color: '#7b1fa2', type: 'dashed' }, label: { color: '#7b1fa2' } } : undefined, markArea: manual.areas.length ? { silent: true, data: manual.areas, itemStyle: { color: 'rgba(123,31,162,0.14)' }, label: { color: '#7b1fa2' } } : undefined },
+    { name: '策略盘中信号', type: 'scatter', data: strategyMarkerData, symbol: 'diamond', symbolSize: 14, z: 11, tooltip: { formatter: (params: { data?: { outcome?: { signal_type?: string; status?: string; raw_return?: number | null; tradability?: string } } }) => { const outcome = params.data?.outcome; return `策略 · ${outcome?.signal_type ?? ''}<br/>状态：${outcome?.status ?? '-'}<br/>方向收益：${outcome?.raw_return === null || outcome?.raw_return === undefined ? '-' : `${(outcome.raw_return * 100).toFixed(3)}%`}<br/>测量：${outcome?.tradability ?? '-'}`; } } },
     { name: '分析师动作', type: 'scatter', data: markerData, symbolSize: 12, z: 10, tooltip: { formatter: (params: { data?: { action?: { analyst_id?: string; action?: string; event_time?: string; evidence?: string } } }) => { const action = params.data?.action; return `${action?.analyst_id ?? ''} · ${action?.action ?? ''}<br/>${action?.event_time ? chinaDateTime(action.event_time) : ''}<br/>${action?.evidence ?? ''}`; } } },
   ] };
 });
+function analystAnnotationKey() {
+  const timeline = analystStockTimeline.value;
+  return timeline ? annotationStorageKey(timeline.symbol, timeline.start_date, timeline.end_date) : '';
+}
+function persistAnalystAnnotations() {
+  const key = analystAnnotationKey();
+  if (key) localStorage.setItem(key, JSON.stringify(analystChartAnnotations.value));
+}
+function loadAnalystAnnotations(timeline: AnalystStockTimeline) {
+  analystChartAnnotations.value = [];
+  analystAnnotationPointIndex.value = null;
+  analystAnnotationAreaStartIndex.value = null;
+  analystAnnotationAreaEndIndex.value = null;
+  analystAnnotationPrice.value = null;
+  analystAnnotationLower.value = null;
+  analystAnnotationUpper.value = null;
+  try {
+    const raw = localStorage.getItem(annotationStorageKey(timeline.symbol, timeline.start_date, timeline.end_date));
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return;
+    analystChartAnnotations.value = parsed.filter((item): item is AnalystChartAnnotation => (
+      item && typeof item === 'object'
+      && typeof item.id === 'string'
+      && ['point', 'line', 'area'].includes(item.kind)
+      && Number.isInteger(item.start_index)
+    ));
+  } catch {
+    analystChartAnnotations.value = [];
+  }
+}
+function handleAnalystChartClick(params: { seriesType?: string; dataIndex?: number }) {
+  if (params.seriesType !== 'candlestick' || !Number.isInteger(params.dataIndex)) return;
+  const index = Number(params.dataIndex);
+  const bar = analystStockTimeline.value?.bars[index];
+  if (!bar) return;
+  if (analystAnnotationSelectionMode.value === 'area-start') analystAnnotationAreaStartIndex.value = index;
+  else if (analystAnnotationSelectionMode.value === 'area-end') analystAnnotationAreaEndIndex.value = index;
+  else {
+    analystAnnotationPointIndex.value = index;
+    if (analystAnnotationPrice.value === null) analystAnnotationPrice.value = bar.close;
+  }
+}
+function addAnalystChartAnnotation(kind: AnalystChartAnnotation['kind']) {
+  const timeline = analystStockTimeline.value;
+  if (!timeline) return;
+  const label = analystAnnotationLabel.value.trim() || (kind === 'point' ? '自定义点' : kind === 'line' ? '自定义价位' : '自定义区域');
+  const base = { id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, kind, label };
+  if (kind === 'point' || kind === 'line') {
+    const index = analystAnnotationPointIndex.value;
+    if (index === null || !Number.isFinite(analystAnnotationPrice.value)) {
+      ElMessage.warning('先点击一根K线选择位置，并填写价格');
+      return;
+    }
+    analystChartAnnotations.value = [...analystChartAnnotations.value, { ...base, start_index: index, price: analystAnnotationPrice.value as number }];
+  } else {
+    const start = analystAnnotationAreaStartIndex.value;
+    const end = analystAnnotationAreaEndIndex.value;
+    if (start === null || end === null || !Number.isFinite(analystAnnotationLower.value) || !Number.isFinite(analystAnnotationUpper.value)) {
+      ElMessage.warning('先分别选择区域起点、终点，并填写上下边界');
+      return;
+    }
+    const lower = analystAnnotationLower.value as number;
+    const upper = analystAnnotationUpper.value as number;
+    if (lower > upper) {
+      ElMessage.warning('区域下边界不能高于上边界');
+      return;
+    }
+    analystChartAnnotations.value = [...analystChartAnnotations.value, { ...base, start_index: Math.min(start, end), end_index: Math.max(start, end), lower, upper }];
+  }
+  persistAnalystAnnotations();
+  analystAnnotationLabel.value = '';
+  ElMessage.success('自定义标记已加入当前研究图（仅保存在本机浏览器）');
+}
+function clearAnalystChartAnnotations() {
+  analystChartAnnotations.value = [];
+  persistAnalystAnnotations();
+}
+function openAnalystStockInTonghuashun(symbol = studySymbol.value) {
+  const appLink = buildTonghuashunDeepLink(symbol);
+  const webLink = buildTonghuashunWebLink(symbol);
+  if (!appLink || !webLink) {
+    ElMessage.warning('请输入带交易所后缀的代码，例如 600000.SH');
+    return;
+  }
+  // Always open a normal HTTPS chart in a new tab. The custom protocol is
+  // attempted separately so a missing handler cannot replace this dashboard.
+  window.open(webLink, '_blank', 'noopener,noreferrer');
+  const launcher = document.createElement('a');
+  launcher.href = appLink;
+  launcher.target = '_blank';
+  launcher.rel = 'noopener noreferrer';
+  launcher.style.display = 'none';
+  document.body.appendChild(launcher);
+  launcher.click();
+  launcher.remove();
+}
 const analystReviewChartOption = computed(() => {
   const points = analystWeeklyReview.value?.summary?.daily_points ?? analystDailyReview.value?.summary?.daily_points ?? [];
   return { animation: false, tooltip: { trigger: 'axis' }, legend: { top: 0 }, grid: { left: 52, right: 18, top: 32, bottom: 42 }, xAxis: { type: 'category', data: points.map((item) => item.exchange_date) }, yAxis: [{ type: 'value', name: '观点净方向' }, { type: 'value', name: '市场涨跌%', axisLabel: { formatter: '{value}%' } }], series: [{ name: '观点净方向', type: 'bar', data: points.map((item) => item.net_direction_score ?? 0), itemStyle: { color: '#7e57c2' } }, { name: '市场均涨跌%', type: 'line', yAxisIndex: 1, smooth: true, data: points.map((item) => item.market_mean_change_pct ?? null), lineStyle: { color: '#00897b', width: 2 } }] };
@@ -512,7 +667,7 @@ async function loadRealtimeServices() {
   realtimeLoading.value = true; realtimeError.value = '';
   try {
     const [services, adapter, runtime] = await Promise.all([
-      getJson<RealtimeServiceStatus>('/api/v1/intraday/services/status'),
+      getJson<RealtimeServiceStatus>('/api/research/intraday/services/status'),
       getJson<AdapterHealth>('/health'), getJson<typeof runtimeHealth.value>('/api/research/runtime/health'),
     ]);
     realtimeServices.value = services; adapterHealth.value = adapter; runtimeHealth.value = runtime;
@@ -532,20 +687,22 @@ async function loadResearch() {
   researchAbortController = controller;
   loading.value = true; researchError.value = '';
   try {
-    const [overviewResult, replayReadinessResult, researchResult] = await Promise.allSettled([
+    const [overviewResult, replayReadinessResult] = await Promise.allSettled([
       getJson<ResearchOverview>('/api/research/overview'),
       getJson<ReplayReadiness>('/api/research/data-readiness/replay'),
-      Promise.all([
-        getJson<{ items?: RemoteReport[] }>('/api/research/reports?limit=30'), getJson<{ items?: AnalystClaim[] }>('/api/research/claims?limit=80'), getJson<{ items?: ProviderHealth[] }>('/api/research/providers'), getJson<RealtimeProviderHealth>('/api/v1/providers/realtime-health').catch(() => ({ items: [], evidence_mode: 'unavailable_on_current_release' })), getJson<{ items?: ProviderApiCapability[] }>('/api/research/provider-capabilities'), getJson<typeof catalog.value>('/api/research/tushare/catalog'), getJson<{ items?: MarketSnapshot[] }>('/api/research/market/snapshots?limit=20'), getJson<{ items?: Sector[] }>('/api/research/market/sectors?taxonomy_key=ths_index_n&limit=500'), getJson<{ items?: SectorFlow[] }>('/api/research/market/sector-flows?taxonomy_key=ths_industry&limit=100'), getJson<{ items?: ConceptSignal[] }>('/api/research/market/sectors/concepts?limit=100'), getJson<{ items?: ConceptCandidate[] }>('/api/research/market/sectors/concepts/candidates?limit=100'), getJson<{ items?: Announcement[] }>('/api/research/events/announcements?limit=100'), getJson<{ items?: Announcement[] }>('/api/research/events/lhb?limit=100'), getJson<{ report?: BoardReviewReport | null }>('/api/research/market/sectors/review/report/latest'), getJson<ConceptBackfill>('/api/research/market/sectors/concepts/members/backfill/status'), getJson<{ review?: StrategyReview | null }>('/api/research/strategy/reviews/latest?session=close'), getJson<{ run?: PostCloseStrategyRun | null; candidates?: PostCloseCandidate[] }>('/api/research/strategy/post-close/latest'), getJson<{ run?: StrategyPatternRun | null; limit_pool?: LimitPoolRow[]; limit_ladder?: LimitLadderRow[]; continuation_candidates?: LimitPoolRow[]; dragon_leader_candidates?: LimitPoolRow[]; dragon_leader_market_context?: DragonLeaderWatch['market_context']; pool_coverage?: LimitPoolCoverage; picks?: StrategyPatternSample[]; samples?: StrategyPatternSample[] }>('/api/research/strategy/pattern-mining/latest'), getJson<TenDayLeaderRotation>('/api/research/ten-day-leader-rotation/latest?limit=90').catch(() => ({ run: null, candidates: [], scope: 'research_only_no_orders', notice: '十日排行榜影子研究尚未部署到当前服务。' })), getJson<{ recommendations?: Recommendation[] }>('/api/research/recommendations'), getJson<{ items?: UniverseMember[] }>('/api/research/universes/core'), getJson<{ items?: FeatureItem[] }>('/api/research/features/latest?universe_key=core'), getJson<{ items?: ClaimReview[] }>('/api/research/claim-review?status=pending'), getJson<{ items?: Factor[] }>('/api/research/factors'), getJson<{ items?: FactorEvaluation[] }>('/api/research/factor-evaluations?universe_key=all_a'), getJson<{ items?: Strategy[] }>('/api/research/strategies'), getJson<{ items?: StrategyExperiment[] }>('/api/research/strategy-experiments?universe_key=all_a'), getJson<{ items?: StrategyExperiment[] }>('/api/research/strategy-experiments-watchlist?universe_key=watchlist&limit=10'), getJson<{ items?: Framework[] }>('/api/research/frameworks'), getJson<TrainingRoadmap>('/api/research/training/roadmap'), getJson<{ items?: QualityIssue[] }>('/api/research/quality?limit=100'), getJson<{ items?: MinuteImport[]; offline_directory?: string }>('/api/research/minute/imports'),
-      ]),
     ]);
     if (overviewResult.status === 'fulfilled') overview.value = overviewResult.value;
     else researchError.value = `研究概览读取失败：${overviewResult.reason instanceof Error ? overviewResult.reason.message : String(overviewResult.reason)}`;
     if (replayReadinessResult.status === 'fulfilled') replayReadiness.value = replayReadinessResult.value;
-    if (researchResult.status !== 'fulfilled') throw researchResult.reason;
-    const [reportsData, claimsData, healthData, realtimeProviderHealthData, capabilityData, catalogData, snapshotData, sectorData, sectorFlowData, conceptSignalData, conceptCandidateData, announcementData, lhbData, boardReviewData, backfillData, strategyReviewData, postCloseStrategyData, patternData, tenDayLeaderRotationData, recommendationData, universeData, featuresData, reviewsData, factorData, factorEvaluationData, strategyData, experimentData, mainWaveData, frameworkData, roadmapData, qualityData, minuteData] = researchResult.value;
+    const researchRequests = [
+      getJson<{ items?: RemoteReport[] }>('/api/research/reports?limit=30'), getJson<{ items?: AnalystClaim[] }>('/api/research/claims?limit=80'), getJson<{ items?: ProviderHealth[] }>('/api/research/providers'), getJson<RealtimeProviderHealth>('/api/research/providers/realtime-health').catch(() => ({ items: [], evidence_mode: 'unavailable_on_current_release' })), getJson<{ items?: ProviderApiCapability[] }>('/api/research/provider-capabilities'), getJson<typeof catalog.value>('/api/research/tushare/catalog'), getJson<{ items?: MarketSnapshot[] }>('/api/research/market/snapshots?limit=20'), getJson<{ items?: Sector[] }>('/api/research/market/sectors?taxonomy_key=ths_index_n&limit=500'), getJson<{ items?: SectorFlow[] }>('/api/research/market/sector-flows?taxonomy_key=ths_industry&limit=100'), getJson<{ items?: ConceptSignal[] }>('/api/research/market/sectors/concepts?limit=100'), getJson<{ items?: ConceptCandidate[] }>('/api/research/market/sectors/concepts/candidates?limit=100'), getJson<{ items?: Announcement[] }>('/api/research/events/announcements?limit=100'), getJson<{ items?: Announcement[] }>('/api/research/events/lhb?limit=100'), getJson<{ report?: BoardReviewReport | null }>('/api/research/market/sectors/review/report/latest'), getJson<ConceptBackfill>('/api/research/market/sectors/concepts/members/backfill/status'), getJson<{ review?: StrategyReview | null }>('/api/research/strategy/reviews/latest?session=close'), getJson<{ run?: PostCloseStrategyRun | null; candidates?: PostCloseCandidate[] }>('/api/research/strategy/post-close/latest'), getJson<{ run?: StrategyPatternRun | null; limit_pool?: LimitPoolRow[]; limit_ladder?: LimitLadderRow[]; continuation_candidates?: LimitPoolRow[]; dragon_leader_candidates?: LimitPoolRow[]; dragon_leader_market_context?: DragonLeaderWatch['market_context']; pool_coverage?: LimitPoolCoverage; picks?: StrategyPatternSample[]; samples?: StrategyPatternSample[] }>('/api/research/strategy/pattern-mining/latest'), getJson<TenDayLeaderRotation>('/api/research/ten-day-leader-rotation/latest?limit=90').catch(() => ({ run: null, candidates: [], scope: 'research_only_no_orders', notice: '十日排行榜影子研究尚未部署到当前服务。' })), getJson<{ recommendations?: Recommendation[] }>('/api/research/recommendations'), getJson<{ items?: UniverseMember[] }>('/api/research/universes/core'), getJson<{ items?: FeatureItem[] }>('/api/research/features/latest?universe_key=core'), getJson<{ items?: ClaimReview[] }>('/api/research/claim-review?status=pending'), getJson<{ items?: Factor[] }>('/api/research/factors'), getJson<{ items?: FactorEvaluation[] }>('/api/research/factor-evaluations?universe_key=all_a'), getJson<{ items?: Strategy[] }>('/api/research/strategies'), getJson<{ items?: StrategyExperiment[] }>('/api/research/strategy-experiments?universe_key=all_a'), getJson<{ items?: StrategyExperiment[] }>('/api/research/strategy-experiments-watchlist?universe_key=watchlist&limit=10'), getJson<{ items?: Framework[] }>('/api/research/frameworks'), getJson<TrainingRoadmap>('/api/research/training/roadmap'), getJson<{ items?: QualityIssue[] }>('/api/research/quality?limit=100'), getJson<{ items?: MinuteImport[]; offline_directory?: string }>('/api/research/minute/imports'),
+    ];
+    const researchResults = await Promise.allSettled(researchRequests);
+    const researchFailures = researchResults.filter((result) => result.status === 'rejected').length;
+    const researchValues = researchResults.map((result) => result.status === 'fulfilled' ? result.value : {}) as any[];
+    const [reportsData, claimsData, healthData, realtimeProviderHealthData, capabilityData, catalogData, snapshotData, sectorData, sectorFlowData, conceptSignalData, conceptCandidateData, announcementData, lhbData, boardReviewData, backfillData, strategyReviewData, postCloseStrategyData, patternData, tenDayLeaderRotationData, recommendationData, universeData, featuresData, reviewsData, factorData, factorEvaluationData, strategyData, experimentData, mainWaveData, frameworkData, roadmapData, qualityData, minuteData] = researchValues;
     reports.value = reportsData.items ?? []; claims.value = claimsData.items ?? []; providerHealth.value = healthData.items ?? []; realtimeProviderHealth.value = realtimeProviderHealthData; providerApiCapabilities.value = capabilityData.items ?? []; catalog.value = catalogData; marketSnapshots.value = snapshotData.items ?? []; sectors.value = sectorData.items ?? []; sectorFlows.value = sectorFlowData.items ?? []; conceptSignals.value = conceptSignalData.items ?? []; conceptCandidates.value = conceptCandidateData.items ?? []; announcements.value = announcementData.items ?? []; lhbEvents.value = lhbData.items ?? []; closeBoardReport.value = boardReviewData.report ?? null; conceptBackfill.value = backfillData; closeStrategyReview.value = strategyReviewData.review ?? null; postCloseStrategyRun.value = postCloseStrategyData.run ?? null; postCloseCandidates.value = postCloseStrategyData.candidates ?? []; strategyPatternRun.value = patternData.run ?? null; tenDayLeaderRotation.value = tenDayLeaderRotationData; strategyLimitPool.value = patternData.limit_pool ?? []; strategyLimitLadder.value = patternData.limit_ladder ?? []; strategyContinuationCandidates.value = patternData.continuation_candidates ?? []; strategyDragonLeaderCandidates.value = patternData.dragon_leader_candidates ?? []; strategyDragonLeaderMarket.value = patternData.dragon_leader_market_context ?? {}; strategyPoolCoverage.value = patternData.pool_coverage ?? {}; strategyPatternPicks.value = patternData.picks ?? []; strategyPatternSamples.value = patternData.samples ?? []; recommendations.value = recommendationData.recommendations ?? []; universe.value = universeData.items ?? []; featureItems.value = featuresData.items ?? []; claimReviews.value = reviewsData.items ?? []; factors.value = factorData.items ?? []; factorEvaluations.value = factorEvaluationData.items ?? []; strategies.value = strategyData.items ?? []; strategyExperiments.value = experimentData.items ?? []; mainWaveExperiments.value = mainWaveData.items ?? []; frameworks.value = frameworkData.items ?? []; trainingRoadmap.value = roadmapData; qualityIssues.value = qualityData.items ?? []; minuteImports.value = minuteData.items ?? []; minuteDirectory.value = minuteData.offline_directory ?? '';
-    const [outcomeData, scorecardData, messageData, skillData, analystResearchData, paperData, funnelData, observationData, governanceData, syncHealthData, evaluationData, dailyReviewData, weeklyReviewData, analystReviewRunData, automationRunData, promptLabData, ablationData, strategyHealthData, dailyStrategySummaryData] = await Promise.all([
+    const secondaryResults = await Promise.allSettled([
       getJson<{ items?: IntradayOutcome[]; summary?: IntradayOutcomeSummary[]; attribution_summary?: IntradayAttributionSummary[]; attribution_validation_gate?: AttributionValidationGate }>('/api/research/intraday/outcomes/latest?limit=100'),
       getJson<{ items?: AnalystScorecard[]; readiness?: AnalystReadiness[] }>('/api/research/analyst-scorecards'),
       getJson<{ items?: RemoteMessage[] }>('/api/research/remote-archive/messages?limit=60'),
@@ -566,6 +723,8 @@ async function loadResearch() {
       getJson<StrategyHealth>('/api/research/strategy/health'),
       getJson<{ summary?: DailyStrategySummary | null }>('/api/research/strategy/daily-summary/latest').catch(() => ({ summary: null })),
     ]);
+    const secondaryFailures = secondaryResults.filter((result) => result.status === 'rejected').length;
+    const [outcomeData, scorecardData, messageData, skillData, analystResearchData, paperData, funnelData, observationData, governanceData, syncHealthData, evaluationData, dailyReviewData, weeklyReviewData, analystReviewRunData, automationRunData, promptLabData, ablationData, strategyHealthData, dailyStrategySummaryData] = secondaryResults.map((result) => result.status === 'fulfilled' ? result.value : {}) as any[];
     intradayOutcomes.value = outcomeData.items ?? []; intradayOutcomeSummary.value = outcomeData.summary ?? [];
     intradayAttributionSummary.value = outcomeData.attribution_summary ?? [];
     attributionValidationGate.value = outcomeData.attribution_validation_gate ?? attributionValidationGate.value;
@@ -577,8 +736,12 @@ async function loadResearch() {
     if (!sectorFlowDate.value) sectorFlowDate.value = sectorFlows.value[0]?.trading_date ?? overview.value.latest_market_snapshot?.exchange_date ?? '';
     if (!selectedFactors.value.length) selectedFactors.value = factors.value.filter((item) => item.implementation === 'native_sql').map((item) => item.factor_key);
     researchLoaded.value = true;
+    if (researchFailures || secondaryFailures) {
+      const totalFailures = researchFailures + secondaryFailures;
+      researchError.value = `部分研究接口暂时不可用（${totalFailures} 项）；已保留可读取数据，稍后自动重试`;
+    }
   } catch (error) {
-    if (!controller.signal.aborted) researchError.value = error instanceof Error ? error.message : String(error);
+    if (!controller.signal.aborted) researchError.value = '研究数据暂时读取不完整，已保留可用结果，稍后自动重试';
   } finally {
     if (researchAbortController === controller) researchAbortController = null;
     loading.value = false;
@@ -607,6 +770,7 @@ async function loadAnalystStockTimeline() {
     if (analystTimelineDate.value) { params.set('start_date', analystTimelineDate.value); params.set('end_date', analystTimelineDate.value); }
     if (analystTimelineAnalyst.value) params.set('analyst_id', analystTimelineAnalyst.value);
     analystStockTimeline.value = await getJson<AnalystStockTimeline>(`/api/research/analyst-research/stock-timeline?${params.toString()}`);
+    loadAnalystAnnotations(analystStockTimeline.value);
   } catch (error) { analystStockTimeline.value = null; analystStockTimelineError.value = error instanceof Error ? error.message : String(error); } finally { analystStockTimelineLoading.value = false; }
 }
 function openFetch(item?: CatalogItem) {
@@ -723,6 +887,13 @@ async function settleIntradayOutcomes() { await runAction('结算盘中信号', 
 async function recomputeAnalystScorecards() { await runAction('刷新分析师成绩单', '/api/research/scorecards/recompute', { as_of_date: sectorFlowDate.value || undefined }, true); }
 async function syncCninfoAnnouncements() { const symbols = conceptCandidates.value.slice(0, 20).map((item) => item.symbol); await runAction('同步巨潮公告', '/api/research/events/cninfo/sync', { symbols, universe_key: 'core', lookback_days: 45, max_pages_per_symbol: 1 }, true); }
 async function studyConceptCandidate(symbol: string) { studySymbol.value = symbol; activeResearchTab.value = 'stock-study'; await runStockStudy(); }
+async function openStrategyEvidence(symbol: string) {
+  if (!/^\d{6}\.(SH|SZ|BJ)$/.test(symbol)) return;
+  studySymbol.value = symbol;
+  analystTimelineDate.value = strategyReviewContext.value.exchange_date === '-' ? '' : strategyReviewContext.value.exchange_date;
+  activeResearchTab.value = 'evidence';
+  await loadAnalystStockTimeline();
+}
 async function reconcileStaleFetchRuns() { await runAction('修复陈旧运行任务', '/api/research/operations/fetch-runs/reconcile-stale', { max_age_minutes: 90, terminal_status: 'failed' }, true); }
 async function decideReview(item: ClaimReview, status: 'approved' | 'rejected') {
   if (status === 'approved' && !/^\d{6}\.(SH|SZ|BJ)$/.test((reviewSymbol.value[item.review_id] || item.suggested_symbol || '').toUpperCase())) { ElMessage.error('批准前请填写有效股票代码'); return; }
@@ -863,6 +1034,17 @@ const dashboardBindings = {
     analystStockTimelineError,
     analystTimelineAnalyst,
     analystTimelineDate,
+    analystStockDeepLink,
+    analystChartAnnotations,
+    analystAnnotationSelectionMode,
+    analystAnnotationSelectionLabel,
+    analystAnnotationPointIndex,
+    analystAnnotationAreaStartIndex,
+    analystAnnotationAreaEndIndex,
+    analystAnnotationPrice,
+    analystAnnotationLower,
+    analystAnnotationUpper,
+    analystAnnotationLabel,
     strategyAblation,
     strategyHealth,
     replayReadiness,
@@ -973,11 +1155,19 @@ const dashboardBindings = {
     completedBackfillBoards,
     closeIndexRegime,
     closeShortTermReview,
+    strategyEvidenceMatrix,
+    strategyReviewContext,
+    strategyEvidenceAlignmentType,
+    openStrategyEvidence,
     indexRegimeLabel,
     indexRegimeType,
     indexLabel,
     equityChartOption,
     analystStockTimelineChartOption,
+    handleAnalystChartClick,
+    addAnalystChartAnnotation,
+    clearAnalystChartAnnotations,
+    openAnalystStockInTonghuashun,
     analystReviewChartOption,
     marketFlowLatest,
     marketFlowSectorHighlights,

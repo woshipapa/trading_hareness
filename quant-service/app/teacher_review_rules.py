@@ -43,7 +43,7 @@ _CN_TZ = ZoneInfo("Asia/Shanghai")
 #: Before continuous trading only plays judged on the final 09:25 auction run.
 AUCTION_PLAYBOOKS = frozenset({"relay_one_word"})
 AUCTION_PLAYBOOK_UNTIL = time(9, 30)
-MODEL_VERSION = "teacher-review-rules-v4"
+MODEL_VERSION = "teacher-review-rules-v5"
 
 
 def _num(value: Any) -> float | None:
@@ -57,17 +57,32 @@ def _yi(amount: float) -> str:
     return f"{amount / 1e8:g}亿"
 
 
-def active_plan(watch: Mapping[str, Any], observed_at: datetime) -> dict[str, Any] | None:
-    """Return the plan only on its own session date; anything else is inert."""
+def active_plan(watch: Mapping[str, Any], observed_at: datetime, *,
+                include_observed: bool = False) -> dict[str, Any] | None:
+    """Return the plan only on its own session date; anything else is inert.
+
+    ``include_observed`` is for the post-close replay only.  Observed plans are
+    deliberately not pushed intraday, but skipping them entirely left the review
+    blind: 2026-09-24 平潭发展 +10.0% and 锡华科技 +9.3% were both observed, and
+    the outcome report could only say "无扫描留痕" - so no counterfactual for the
+    sweep either.  The replay evaluates them and marks them ``observe_only`` so
+    nothing mistakes the missing push for a defect.
+    """
     metadata = watch.get("metadata") if isinstance(watch.get("metadata"), Mapping) else {}
     plan = metadata.get("teacher_review")
-    if not isinstance(plan, Mapping) or plan.get("status", "active") != "active":
+    if not isinstance(plan, Mapping):
+        return None
+    status = str(plan.get("status", "active"))
+    if status != "active" and not (include_observed and status == "observe"):
         return None
     if str(plan.get("session_date") or "") != observed_at.astimezone(_CN_TZ).date().isoformat():
         return None
     if playbook_kind(str(plan.get("playbook") or "")) == "record":
         return None
-    return dict(plan)
+    frozen = dict(plan)
+    if status == "observe":
+        frozen["observe_only"] = True
+    return frozen
 
 
 #: Inputs each playbook's gating conditions need.  A missing one makes the
@@ -79,6 +94,7 @@ REQUIRED_INPUTS: dict[str, tuple[str, ...]] = {
     "relay_race": ("pre_close", "open", "vwap", "surge"),
     "relay_news_conditional": ("pre_close", "open", "vwap", "surge"),
     "relay_fast_seal": ("pre_close", "open", "amount", "book"),
+    "relay_break_reseal": ("pre_close", "vwap", "volume_ratio"),
     "trend_pullback_restart": ("pre_close", "volume_ratio", "vwap"),
     "leader_benchmark_pullback": ("low",),
     "sympathy_follow": ("pre_close", "vwap", "surge"),
@@ -544,8 +560,18 @@ def _elapsed_minutes(observed_at: datetime) -> int:
     return max(0, min(minutes - 570, 120)) + max(0, min(minutes - 780, 120))
 
 
-def _sig(name: str, value: Any, ok: bool | None, src: str = "", *, gating: bool = True) -> dict[str, Any]:
-    return {"name": name, "value": value, "pass": ok, "src": src, "gating": gating}
+def _sig(name: str, value: Any, ok: bool | None, src: str = "", *, gating: bool = True,
+         structural: bool = False) -> dict[str, Any]:
+    """One condition line.
+
+    ``structural`` marks a gate that asks "has the setup the teacher described
+    appeared at all", not "is this number big enough".  A platform cannot break
+    out while the stock is still printing new highs, and a sector play does not
+    start before the sector moves - refusing those is the rule working, so the
+    outcome review must not file them as thresholds to loosen.
+    """
+    row = {"name": name, "value": value, "pass": ok, "src": src, "gating": gating}
+    return {**row, "structural": True} if structural else row
 
 
 def _breakout(f: dict[str, Any], level: float | None, label: str,
@@ -664,8 +690,12 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
         sector_count = (f.get("sector_counts") or {}).get(sector) if sector else None
         minimum = p.get("sector_min_limit_ups")
         if pb == "relay_news_conditional":
+            # 老师的原话就是"等板块异动才做"：板块没动是前提没出现，不是阈值太紧。
+            # 2026-09-24 风电峰值 1 家（形成线 2）、房地产 0 家（形成线 3），
+            # 天顺风能/大金重工/我爱我家 不触发是规则在正常工作。
             sig.append(_sig(f"{sector}板块涨停≥{minimum}（板块形成才做）", sector_count,
-                            None if sector_count is None else sector_count >= minimum, "T"))
+                            None if sector_count is None else sector_count >= minimum, "T",
+                            structural=True))
         elif sector and minimum is not None:
             peak = (f.get("sector_peaks") or {}).get(sector)
             sig.append(_sig(f"{sector}板块涨停（今日峰值 {peak}，形成线 {minimum}）", sector_count,
@@ -686,10 +716,43 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
                 _sig(f"封板时成交≤{_yi(p['seal_amount_max'])}", f"{amount / 1e8:.2f}亿/封板={f['sealed']}",
                      f["sealed"] and amount <= p["seal_amount_max"], "I")]
         invalid = (amount >= p["fail_amount"] and not f["sealed"]) or f["price"] < (f["pre_close"] or 0)
+    elif pb == "relay_break_reseal":
+        # 2026-09-24 天威视讯：09:30 开 8.30、09:31 封 8.43、10:32-10:43 炸板但
+        # 全程在分时均价下方、13:04-13:07 回到均价上方、13:10 回封。全天 17 分钟
+        # 低于涨停、占成交 42%，而"封板价触发买不到"把这些窗口全盖住了。
+        # 老师"封板后被大单砸开=情绪爆发失败"针对的是首板；已成板且题材成立的票，
+        # 炸板反而是唯一的入口 —— 两种情形在这里分开。
+        limit = f["limit_up_price"]
+        discount = (round((1 - f["price"] / limit) * 100, 2)
+                    if limit and f["price"] else None)
+        open_board = bool(limit) and not f["sealed"] and f["price"] < limit - 0.005
+        near = discount is not None and discount <= float(p["reentry_discount_max_pct"])
+        sig += [_sig("今日曾到板", f["touched_limit"], f["touched_limit"], "D", structural=True),
+                _sig("当前已开板（有对手盘）", f"{f['price']} vs {limit}", open_board, "D"),
+                _sig(f"距涨停≤{float(p['reentry_discount_max_pct']):g}%", discount, near, "T"),
+                _sig("回到分时均价上方", f"{f['price']} vs {f['vwap']}", bool(f["above_vwap"]), "T"),
+                _sig(f"量比≥{defaults['vol_ratio_min']:g}（承接还在）", f["volume_ratio"],
+                     (f["volume_ratio"] or 0) >= defaults["vol_ratio_min"], "I"),
+                _sig("已回封", f["sealed"], f["sealed"], gating=False)]
+        invalid = (f["price"] < (f["pre_close"] or 0)
+                   or ((f["amount"] or 0) >= p["fail_amount"] and not f["sealed"]))
     elif pb == "trend_pullback_restart":
         restart = (f["volume_ratio"] or 0) >= defaults["vol_ratio_min"] and (f["pct"] or 0) >= 3 and bool(f["above_vwap"])
+        # 老师说的是"明天应该极度缩量"/"买第一个调整" —— 缩量回调发生在**被盯的
+        # 这一天**，不是建包的前一天。只看冻结值时，科德教育 2026-09-24 +15.2%、
+        # 博通集成 +9.0% 全天 100% 的扫描都卡在这一条：9/23 它们还在突破段，
+        # pulled_back 冻结成 False，盘中再怎么缩量也翻不过来。
+        # 现在三种都算：建包时已回调、当日成交缩到参数以内、或当日回踩到 MA5 附近。
+        live_ma5 = _live_ma(x, 5, f["price"], x.get("ma5"))
+        today_amount = f["amount"]
+        quiet_today = today_amount is not None and today_amount <= p["pullback_amount_max"]
+        touched_ma5 = bool(live_ma5) and f["low"] is not None and f["low"] <= live_ma5 * 1.02
+        pulled = bool(x.get("pulled_back")) or quiet_today or touched_ma5
+        how = ("建包前已回调" if x.get("pulled_back") else
+               f"当日缩量至{(today_amount or 0) / 1e8:.2f}亿" if quiet_today else
+               f"当日回踩MA5 {live_ma5}" if touched_ma5 else "未回调")
         sig += [_sig("未涨停追高（<9.5%）", f["pct"], (f["pct"] or 0) < 9.5, "T"),
-                _sig("前一日已回调缩量", x.get("pulled_back"), bool(x.get("pulled_back")), "I"),
+                _sig(f"已回调缩量（{how}）", how, pulled, "T"),
                 _sig("再起：量比≥1.5、涨幅≥3%、均价上方", f"{f['volume_ratio']}/{f['pct']}%", restart, "I")]
         ma10 = _live_ma(x, 10, f["price"], x.get("ma10")) or 0
         invalid = _close_breach(f, f["price"] < ma10, f"跌破当日MA10 {ma10}", sig)
@@ -752,7 +815,11 @@ def evaluate(plan: Mapping[str, Any], f: dict[str, Any], peer_context: Mapping[s
         invalid = _close_breach(f, f["price"] < floor, f"跌破当日MA{x.get('floor_ma', '')} {floor}", sig)
     elif pb == "platform_breakout":
         # 老师：追高是很难的，加自选等回调、走平台；仍在创新高时没有平台可突破。
-        sig.append(_sig("已形成平台（高点后整理≥1天）", x.get("days_since_peak"), int(x.get("days_since_peak") or 0) >= 1, "T"))
+        # 仍在创新高时没有平台可突破：这是形态没出现，不是阈值太紧。
+        # 2026-09-24 威星智能 +9.5%、9/23 美盈森都卡在这里，而老师的规则本来就是
+        # "加自选等回调"，所以它进 structural，不进"建议放宽阈值"。
+        sig.append(_sig("已形成平台（高点后整理≥1天）", x.get("days_since_peak"),
+                        int(x.get("days_since_peak") or 0) >= 1, "T", structural=True))
         sig += _breakout(f, x.get("platform_upper"), "平台上沿", defaults)
         floor_ma = int(x.get("floor_ma") or 10)
         ma_floor = _live_ma(x, floor_ma, f["price"], x.get(f"ma{floor_ma}") or x.get("ma10"))

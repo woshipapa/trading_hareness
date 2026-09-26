@@ -701,7 +701,7 @@ class RealtimeProbeRequest(BaseModel):
 
 class TushareCapabilityAuditRequest(BaseModel):
     api_names: list[str] = Field(default_factory=lambda: list(AUDIT_FOCUS_APIS[:8]), min_length=1, max_length=12)
-    providers: list[Literal["primary", "super", "super_sdk", "super_get"]] = Field(default_factory=lambda: ["primary", "super"], min_length=1, max_length=4)
+    providers: list[Literal["super", "super_sdk", "super_get"]] = Field(default_factory=lambda: ["super"], min_length=1, max_length=3)
     symbol: str = Field(default="000636.SZ", pattern=r"^\d{6}\.(SH|SZ|BJ)$")
     as_of_date: date | None = None
     max_rows: int = Field(default=10, ge=1, le=50)

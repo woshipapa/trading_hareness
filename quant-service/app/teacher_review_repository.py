@@ -376,6 +376,36 @@ def rule_input_snapshots(database: Any, codes: Iterable[str], trade_date: date,
     return result
 
 
+def session_minutes(database: Any, codes: Iterable[str], trade_date: date) -> dict[str, list[dict[str, Any]]]:
+    """One session's stored minute bars per code, in time order.
+
+    Read by the outcome review to tell "no seller existed" from "we marked it
+    too late": the minute tape is the only evidence that answers that.  One row
+    per minute (the freshest by ``available_at``) so a licensed row and its
+    fallback cannot both count toward the same minute.
+    """
+    symbols = sorted({ts_code(str(code)) for code in codes if str(code)})
+    if not symbols:
+        return {}
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT DISTINCT ON (symbol, minute_bucket)
+                      symbol, minute_bucket, close, volume, amount, source_name
+                 FROM quant.intraday_minute_sessions
+                WHERE symbol=ANY(%s) AND trading_date=%s
+                ORDER BY symbol, minute_bucket, available_at DESC""",
+            (symbols, trade_date),
+        ).fetchall()
+    result: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        result.setdefault(str(row["symbol"])[:6], []).append({
+            "minute_bucket": str(row["minute_bucket"]), "close": row["close"],
+            "volume": row["volume"], "amount": row["amount"], "source_name": row["source_name"]})
+    for items in result.values():
+        items.sort(key=lambda item: item["minute_bucket"])
+    return result
+
+
 #: Sessions whose bars must all be present (or explicitly suspended) before a
 #: plan is frozen; covers MA60, the 20-session platform and prior highs.
 GAP_CHECK_SESSIONS = 60

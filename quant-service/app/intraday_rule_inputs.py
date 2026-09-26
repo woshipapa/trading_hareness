@@ -6,6 +6,15 @@ distinguish "the rule did not fire" from "the evidence was never recorded".
 The v2 contract captures the pure ``signal_rules`` inputs *and* the bounded
 same-scan inputs used by the policy and paper-risk gates.  It intentionally
 excludes provider raw payloads and does not create a trading instruction.
+
+v3 adds the session OHLC the teacher rules read.  v2 dropped ``raw`` entirely,
+but ``teacher_review_rules.scan_features`` takes open/high/low/amount/volume and
+the order book from ``raw.longhu_watch_quote`` - so every replay reported them as
+missing inputs while the live scan had them.  On 2026-09-24 that made 我爱我家 and
+天顺风能 read "输入缺失：开盘价（全天 100% 的扫描无法判定）" although their live cards
+had passed 竞价不低开; 2026-09-23 三羊马 and 博通集成 were the same defect.  What is
+kept is a fixed, named list of scalars plus a two-field order-book summary -
+still never an upstream body.
 """
 
 from __future__ import annotations
@@ -17,8 +26,16 @@ from decimal import Decimal
 from typing import Any
 
 
-INTRADAY_RULE_INPUT_SCHEMA_VERSION = "intraday-rule-input-v2"
+INTRADAY_RULE_INPUT_SCHEMA_VERSION = "intraday-rule-input-v3"
 LEGACY_INTRADAY_RULE_INPUT_SCHEMA_VERSION = "intraday-rule-input-v1"
+#: Superseded but still replayable; v2 rows simply lack the session OHLC.
+PRIOR_INTRADAY_RULE_INPUT_SCHEMA_VERSION = "intraday-rule-input-v2"
+
+#: The only raw-quote values a replay may keep: what the teacher rules read.
+_RAW_QUOTE_FIELDS = ("pre_close", "open", "high", "low", "amount", "volume", "turnover_rate", "volume_ratio")
+#: Raw sub-objects ``scan_features`` looks into, in its own preference order.
+_RAW_QUOTE_SOURCES = ("longhu_watch_quote", "watch_quote", "all_a_snapshot_row")
+_ORDER_BOOK_FIELDS = ("book_side", "seal_volume_lot")
 
 _WATCH_FIELDS = (
     "symbol", "alert_on_entry", "alert_on_exit", "entry_price", "available_quantity",
@@ -40,10 +57,26 @@ _PORTFOLIO_POSITION_FIELDS = ("symbol", "target_weight", "quantity", "sellable_q
 
 
 def _quote_for_policy(quote: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Keep only policy-relevant quote provenance, never an upstream raw body."""
+    """Keep policy-relevant provenance plus the session OHLC, never a raw body."""
     selected = _selected(quote, _QUOTE_FIELDS)
     if selected is None:
         return None
+    raw = (quote or {}).get("raw")
+    if isinstance(raw, dict):
+        bounded: dict[str, Any] = {}
+        for source in _RAW_QUOTE_SOURCES:
+            body = raw.get(source)
+            if not isinstance(body, dict):
+                continue
+            kept = {key: _json_value(body.get(key)) for key in _RAW_QUOTE_FIELDS if body.get(key) is not None}
+            book = body.get("order_book")
+            if isinstance(book, dict):
+                kept["order_book"] = {key: _json_value(book.get(key)) for key in _ORDER_BOOK_FIELDS
+                                      if book.get(key) is not None}
+            if kept:
+                bounded[source] = kept
+        if bounded:
+            selected["raw"] = bounded
     flow_snapshot = (quote or {}).get("flow_snapshot")
     if isinstance(flow_snapshot, dict):
         selected["flow_snapshot"] = {
@@ -117,7 +150,9 @@ def intraday_rule_input_hash(payload: dict[str, Any]) -> str:
 def intraday_rule_replay_inputs(payload: dict[str, Any], *, expected_model_version: str | None = None) -> dict[str, Any]:
     """Validate a stored contract before a caller reruns the pure rule function."""
     schema_version = str(payload.get("schema_version") or "")
-    if schema_version not in {LEGACY_INTRADAY_RULE_INPUT_SCHEMA_VERSION, INTRADAY_RULE_INPUT_SCHEMA_VERSION}:
+    if schema_version not in {LEGACY_INTRADAY_RULE_INPUT_SCHEMA_VERSION,
+                              PRIOR_INTRADAY_RULE_INPUT_SCHEMA_VERSION,
+                              INTRADAY_RULE_INPUT_SCHEMA_VERSION}:
         raise ValueError("unsupported intraday rule input schema")
     model_version = str(payload.get("model_version") or "")
     if expected_model_version and model_version != expected_model_version:
@@ -135,9 +170,12 @@ def intraday_rule_replay_inputs(payload: dict[str, Any], *, expected_model_versi
         "daily_factors": dict(payload["daily_factors"]), "minute_features": dict(payload["minute_features"]),
         "peer_context": dict(payload["peer_context"]), "model_version": model_version,
         "schema_version": schema_version,
-        "policy_replayable": schema_version == INTRADAY_RULE_INPUT_SCHEMA_VERSION,
+        # v2 rows carry the same policy block; they only lack the session OHLC.
+        "policy_replayable": schema_version in {PRIOR_INTRADAY_RULE_INPUT_SCHEMA_VERSION,
+                                                INTRADAY_RULE_INPUT_SCHEMA_VERSION},
+        "ohlc_replayable": schema_version == INTRADAY_RULE_INPUT_SCHEMA_VERSION,
     }
-    if schema_version == INTRADAY_RULE_INPUT_SCHEMA_VERSION:
+    if schema_version in {PRIOR_INTRADAY_RULE_INPUT_SCHEMA_VERSION, INTRADAY_RULE_INPUT_SCHEMA_VERSION}:
         for key in ("market_context", "fast_confirmation", "portfolio_context"):
             if not isinstance(payload.get(key), dict):
                 raise ValueError(f"intraday policy replay input requires object {key}")
@@ -156,6 +194,7 @@ def intraday_rule_replay_inputs(payload: dict[str, Any], *, expected_model_versi
 
 __all__ = [
     "INTRADAY_RULE_INPUT_SCHEMA_VERSION", "LEGACY_INTRADAY_RULE_INPUT_SCHEMA_VERSION",
+    "PRIOR_INTRADAY_RULE_INPUT_SCHEMA_VERSION",
     "intraday_rule_input_hash", "intraday_rule_input_payload",
     "intraday_rule_replay_inputs",
 ]

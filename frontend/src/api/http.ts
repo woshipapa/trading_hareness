@@ -21,10 +21,43 @@ export async function decodeJson<T>(response: Response, path: string): Promise<T
   return data as T;
 }
 
+// Keep a small margin below the owner's async pool (max 16) for lease and
+// health reads while allowing priority research panels to arrive promptly.
+const MAX_CONCURRENT_READS = 12;
+let activeReads = 0;
+const pendingReads: Array<{
+  task: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+}> = [];
+
+function pumpReadQueue(): void {
+  while (activeReads < MAX_CONCURRENT_READS && pendingReads.length) {
+    const next = pendingReads.shift();
+    if (!next) return;
+    activeReads += 1;
+    void next.task().then(next.resolve, next.reject).finally(() => {
+      activeReads -= 1;
+      pumpReadQueue();
+    });
+  }
+}
+
+function scheduleRead<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    pendingReads.push({
+      task,
+      resolve: resolve as (value: unknown) => void,
+      reject,
+    });
+    pumpReadQueue();
+  });
+}
+
 export async function getJson<T>(path: string, options: { signal?: AbortSignal } = {}): Promise<T> {
-  return decodeJson<T>(await fetch(path, {
+  return scheduleRead(async () => decodeJson<T>(await fetch(path, {
     headers: { accept: 'application/json' }, cache: 'no-store', signal: options.signal,
-  }), path);
+  }), path));
 }
 
 export async function postJson<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {

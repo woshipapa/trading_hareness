@@ -100,6 +100,43 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(captured["daily_request"].provider, "super_get")
 
+    async def test_close_snapshot_requests_provider_refresh_for_owner_fallback_chain(self):
+        captured: dict[str, object] = {}
+
+        async def build_snapshot(request):
+            captured["snapshot_request"] = request
+            return {"status": "completed"}
+
+        async def run_db(*_args, **_kwargs):
+            return {"status": "completed"}
+
+        dependencies = PostCloseRefreshDependencies(
+            database=object(), china_today=lambda: date(2026, 8, 21), longhu_configured=lambda: True,
+            longhu_close_context=lambda _day: {"status": "completed"}, provider_configs=lambda: {},
+            run_database=run_db, reconcile_stale_fetch_runs=lambda *_: None,
+            reprocess_remote_reports=lambda *_: None, sync_market_universe=run_db,
+            sync_full_market_daily=run_db, sync_strategy_index_context=run_db,
+            build_market_snapshot=build_snapshot, load_core_symbols=lambda _limit: [], akshare_probe=run_db,
+            sync_ths_industry_flow=run_db, sync_ths_concept_flow=run_db,
+            rebuild_market_flow_features=lambda *_: None, refresh_pattern_sources=run_db,
+            persist_settled_limit_pool=lambda *_: {"status": "completed"}, run_pattern_mining=run_db,
+            sync_daily_controls=run_db, sync_cninfo_announcements=run_db, run_board_report=run_db,
+            run_strategy_decision=run_db, persist_close_review=lambda *_: None,
+            recompute_outcomes=lambda *_: None, recompute_intraday_outcomes=lambda *_: None,
+            recompute_scorecards=lambda *_: None, rebuild_analyst_research=lambda *_: None,
+            run_post_close_strategy=lambda *_: None, refresh_decision_research=lambda *_: {"status": "completed"},
+            persist_watchlist_main_wave=lambda *_: None, build_research_snapshot=lambda *_: None,
+            run_orchestrator=lambda request, **kwargs: kwargs["actions"]["close_market_snapshot"](),
+            record_stage=run_db, lease_key="lease", lease_seconds=lambda: 60,
+            acquire_lease=lambda *_: True, renew_lease=lambda *_: True, release_lease=lambda *_: None,
+            safe_error_detail=lambda value, _limit: value, json_safe=lambda value: value,
+        )
+
+        await run_post_close_refresh(
+            PostCloseRefreshRequest(trade_date=date(2026, 8, 21), announcement_limit=7), dependencies,
+        )
+        self.assertTrue(captured["snapshot_request"].refresh_public_quotes)
+
     async def test_optional_stage_receipt_wrapper_is_used(self):
         seen: list[str] = []
 

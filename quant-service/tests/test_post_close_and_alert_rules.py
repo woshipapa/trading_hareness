@@ -1,9 +1,30 @@
 """Focused regression tests extracted from the legacy provider helper suite."""
 
 from provider_test_support import *  # noqa: F403
+from app.strategy_read_model import compact_post_close_run
 
 
 class PostCloseAndAlertRuleTests(unittest.TestCase):
+    def test_post_close_read_projection_drops_large_nested_summary_payloads(self):
+        row = {
+            "run_id": "run-1",
+            "status": "blocked",
+            "summary": {
+                "reason": "only 0 symbols have saved daily bars; need 1000",
+                "returned": 0,
+                "eligible_candidates": 0,
+                "trade_thesis": {"all_symbols": ["000001.SZ"] * 1000},
+                "strategy_lanes": {"lane": {"details": ["large"] * 1000}},
+            },
+        }
+
+        projected = compact_post_close_run(row)
+
+        self.assertEqual(projected["summary"], {
+            "reason": "only 0 symbols have saved daily bars; need 1000",
+            "returned": 0,
+            "eligible_candidates": 0,
+        })
     def test_post_close_15_session_structures_are_explicitly_provisional(self):
         bars = []
         for index in range(15):

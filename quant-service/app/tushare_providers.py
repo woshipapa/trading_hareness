@@ -34,6 +34,10 @@ from .tushare_official import REALTIME_MARKET_HOURS_APIS
 ProviderName = Literal["primary", "super_sdk", "super_get", "backup"]
 ProviderPreference = Literal["auto", "primary", "super", "super_sdk", "super_get", "backup"]
 
+# The old compatible REST endpoint is retained only as historical provenance.
+# It must not be selected by automatic routing or an explicit provider request.
+RETIRED_PROVIDER_KEYS = frozenset({"tushare_primary"})
+
 # Only APIs that returned a structurally valid response through the dedicated
 # GET + X-API-Key gateway belong here.  This is an observed routing allow-list,
 # not a copy of the supplier's advertised catalog.
@@ -544,7 +548,11 @@ def provider_candidates(api_name: str, preferred: ProviderPreference = "auto", *
     # source cannot unexpectedly affect a super-only comparison.
     if preferred == "auto" and "backup" not in names:
         names.append("backup")
-    return [provider for name in names if (provider := configs[name]).configured and provider.supports(api_name)]
+    return [
+        provider for name in names
+        if (provider := configs[name]).key not in RETIRED_PROVIDER_KEYS
+        and provider.configured and provider.supports(api_name)
+    ]
 
 
 def provider_status(*, environ: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
@@ -575,8 +583,10 @@ def provider_status(*, environ: Mapping[str, str] | None = None) -> list[dict[st
             if order[0] == "super_get" and api_name in provider.get_verified_apis
         )
         realtime_coverage, realtime_note, verified_get_apis = realtime_summary(provider)
+        retired = provider.key in RETIRED_PROVIDER_KEYS
         entries.append({
-            "name": provider.name, "provider_key": provider.key, "label": provider.label, "configured": provider.configured,
+            "name": provider.name, "provider_key": provider.key, "label": provider.label,
+            "configured": provider.configured and not retired, "retired": retired,
             "protocol": provider.protocol,
             "realtime_protocol": "get_x_api_key" if provider.name == "super_get" else "sdk_post" if provider.name == "super_sdk" else "none",
             "realtime_configured": provider.name in {"super_get", "super_sdk"} and provider.configured,

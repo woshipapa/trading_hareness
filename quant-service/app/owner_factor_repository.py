@@ -16,7 +16,7 @@ from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
 FACTOR_PROVIDER_ORDER = (
-    "longhu_qfq_derived", "tushare", "tushare_primary", "tushare_backup",
+    "longhu_qfq_derived", "tushare", "tushare_backup",
     "tushare_super", "tushare_super_get", "tushare_super_sdk",
 )
 

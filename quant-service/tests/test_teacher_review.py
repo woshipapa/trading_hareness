@@ -14,11 +14,15 @@ from zoneinfo import ZoneInfo
 from app import teacher_review_rules as rules
 from app import teacher_review_service as service
 from app.intraday_alerts import intraday_alert_text
+from app.intraday_rule_inputs import intraday_rule_input_payload, intraday_rule_replay_inputs
 from app.intraday_signal_generation import IntradaySignalGenerationDependencies, generate_intraday_signals
 from app.live_policy import live_policy_gate
 from app.teacher_review_plan import bullish_divergence, limit_up_price, parse_longhu_kline, plan_stock
+from app.teacher_buyability import buyability, buyability_line, share_multiplier
+from app.teacher_outcome_review import rejection_review
 from app.teacher_review_playbooks import CATALOG, validate_pack
-from app.teacher_review_rules import (PeriodDivergenceBook, SnapshotTape, TeacherMarketBook, count_sector_limit_ups, evaluate,
+from app.teacher_review_rules import (PeriodDivergenceBook, SnapshotTape, TeacherMarketBook, active_plan,
+                                      count_sector_limit_ups, evaluate,
                                       missing_inputs, scan_features, teacher_review_signals)
 
 CN = ZoneInfo("Asia/Shanghai")
@@ -1076,3 +1080,344 @@ class OpeningTrendFallbackTests(unittest.TestCase):
         names = [signal["name"] for signal in evaluate(plan, features)["signals"]]
         self.assertIn("1分钟不下跌（开盘前5分钟）", names)
         self.assertNotIn("5分钟不下跌", names)
+
+
+class BuyabilityTests(unittest.TestCase):
+    """"买不到"要分成没有对手盘和我们标记太晚，这两件事只有分钟证据能分开。
+
+    数字取自 2026-09-24 这一场（Longhu 分钟 + 涨停池）：新华文轩竞价就 +10%、
+    241 分钟全程封死；奥佳华低开 0.92% 后一分钟内封板；天威视讯炸板三次，
+    10:32-10:43 那一段在分时均价下方（老师规则本就不该买），13:04-13:07 才是
+    合规窗口。
+    """
+
+    @staticmethod
+    def minute(bucket, close, volume=1000.0, amount=None):
+        return {"minute_bucket": bucket, "close": close, "volume": volume,
+                "amount": amount if amount is not None else close * volume}
+
+    def test_a_one_word_board_has_no_counterparty_all_session(self):
+        rows = [self.minute(f"09:{30 + index:02d}", 20.35) for index in range(20)]
+        diagnosis = buyability(rows, limit_up_price=20.35)
+        self.assertEqual(diagnosis["verdict"], "one_word")
+        self.assertEqual(diagnosis["minutes_below_limit"], 0)
+        self.assertIn("无对手盘", buyability_line(diagnosis))
+
+    def test_one_minute_below_the_limit_is_a_late_mark_not_a_one_word_board(self):
+        rows = [self.minute("09:30", 7.50, volume=79728), self.minute("09:31", 8.33, volume=251284),
+                self.minute("09:32", 8.33, volume=146242)]
+        diagnosis = buyability(rows, limit_up_price=8.33)
+        self.assertEqual(diagnosis["verdict"], "late_mark")
+        self.assertEqual(diagnosis["minutes_below_limit"], 1)
+        self.assertEqual(diagnosis["first_compliant_at"], "09:30")
+        self.assertGreater(diagnosis["volume_share_below_pct"], 10.0)
+
+    def test_a_window_entirely_under_vwap_is_not_an_entry_the_rules_allow(self):
+        # 开盘即封、之后炸板砸到均价下方：老师的"均价上方"本就过滤掉这一段，
+        # 报告不能把它算成我们漏掉的机会。
+        rows = [self.minute("09:30", 8.43, volume=83790), self.minute("09:31", 8.43, volume=185553),
+                self.minute("10:32", 8.11, volume=91419), self.minute("10:33", 8.09, volume=38701),
+                self.minute("10:36", 8.07, volume=11937)]
+        diagnosis = buyability(rows, limit_up_price=8.43)
+        self.assertEqual(diagnosis["verdict"], "below_vwap_only")
+        self.assertEqual(diagnosis["compliant_minutes"], 0)
+        self.assertEqual(diagnosis["cheapest_below_limit"], 8.07)
+        self.assertIn("本就不该买", buyability_line(diagnosis))
+
+    def test_the_opening_minute_is_its_own_vwap_so_it_always_counts_as_an_entry(self):
+        # 天威视讯 09:30 开 8.30（涨停 8.43）：第一分钟的均价就是它自己，
+        # 所以"均价上方"在这一刻是恒真的 —— 这是真实可买，不是判定漏洞，
+        # 但它意味着开盘未封的票一律至少有一个合规窗口。
+        rows = [self.minute("09:30", 8.30, volume=83790), self.minute("09:31", 8.43, volume=185553)]
+        diagnosis = buyability(rows, limit_up_price=8.43)
+        self.assertEqual(diagnosis["verdict"], "late_mark")
+        self.assertEqual(diagnosis["first_compliant_at"], "09:30")
+        self.assertEqual(diagnosis["first_compliant_price"], 8.3)
+
+    def test_a_reseal_window_above_vwap_is_reported_and_the_under_vwap_one_is_not(self):
+        # 天威视讯 2026-09-24 的真实形状（价/量取自 Longhu 分钟）：开 8.30、09:31 封、
+        # 10:32-10:43 炸板但全程在均价下方、13:04-13:07 回到均价上方、13:10 回封。
+        rows = [self.minute("09:30", 8.30, volume=83790), self.minute("09:31", 8.43, volume=185553),
+                self.minute("09:32", 8.43, volume=11427),
+                self.minute("10:32", 8.11, volume=91419), self.minute("10:33", 8.09, volume=38701),
+                self.minute("10:34", 8.20, volume=29463), self.minute("10:35", 8.13, volume=10014),
+                self.minute("10:36", 8.07, volume=11937), self.minute("10:43", 8.23, volume=10666),
+                self.minute("13:04", 8.34, volume=28584), self.minute("13:05", 8.38, volume=4440),
+                self.minute("13:06", 8.29, volume=6476), self.minute("13:07", 8.34, volume=5301),
+                self.minute("13:10", 8.43, volume=4831)]
+        diagnosis = buyability(rows, limit_up_price=8.43)
+        self.assertEqual(diagnosis["verdict"], "late_mark")
+        window = diagnosis["compliant_window"]
+        self.assertIn("13:04", window)                 # 回封前的均价上方窗口，是真漏掉的
+        self.assertNotIn("10:36", window)              # 砸到均价下方那一段，规则本就过滤
+        self.assertNotIn("10:33", window)
+        # 只取了 241 分钟里的 14 根，累计均价比全天的 8.309 略低，所以 13:06 这种
+        # 贴着均价的分钟在切片里会算进来；判定的关键是 10:32-10:43 整段被排除。
+        self.assertIn("标记太晚", buyability_line(diagnosis))
+
+    def test_no_minute_evidence_never_claims_a_verdict(self):
+        self.assertEqual(buyability([], limit_up_price=8.43)["verdict"], "unknown")
+        self.assertEqual(buyability([self.minute("09:30", 8.0)], limit_up_price=None)["verdict"], "unknown")
+
+    def test_a_session_that_never_touched_the_limit_is_not_an_unbuyable_case(self):
+        rows = [self.minute("09:30", 8.0), self.minute("09:31", 8.2)]
+        self.assertEqual(buyability(rows, limit_up_price=8.43)["verdict"], "no_limit_touch")
+        self.assertIsNone(buyability_line(buyability(rows, limit_up_price=8.43)))
+
+
+class PullbackRestartTests(unittest.TestCase):
+    """"买第一个调整"要看被盯的这一天，不能只看建包前一天。
+
+    2026-09-24 科德教育 +15.2%、博通集成 +9.0%，全天 100% 的扫描都卡在
+    「前一日已回调缩量」：9/23 它们还在突破段，冻结值是 False，盘中再怎么
+    缩量也翻不过来。老师的原话是"明天应该极度缩量"，说的就是当日。
+    """
+
+    PARAMS = {"pullback_amount_max": 8e8}
+
+    def gate(self, *, price, pre_close, amount, low=None, extra=None, volume_ratio=2.0):
+        """评估这一条剧本，返回「已回调缩量」那一行的标签和结果。
+
+        走 scan_features + evaluate（纯路径）而不是 teacher_review_signals：
+        条件不满足时后者返回空列表，就看不到卡在哪一条了。
+        """
+        tick = quote(price, pre_close, amount=amount, volume_lot=amount / price / 100,
+                     volume_ratio=volume_ratio, opened=pre_close)
+        tick["raw"]["longhu_watch_quote"]["low"] = low if low is not None else min(price, pre_close)
+        features = scan_features("603068.SH", tick, {"vwap": price - 0.05}, at(10, 30), "博通集成")
+        plan = {"playbook": "trend_pullback_restart", "params": self.PARAMS,
+                "extra": extra if extra is not None else {"pulled_back": False, "ma10": 39.25}}
+        signals = evaluate(plan, features)["signals"]
+        row = next(signal for signal in signals if str(signal["name"]).startswith("已回调缩量"))
+        return row["name"], row["pass"]
+
+    def test_a_frozen_false_no_longer_blocks_a_session_that_did_contract(self):
+        # 当日成交 6 亿 ≤ pullback_amount_max 8 亿：当日缩量成立。
+        label, passed = self.gate(price=47.5, pre_close=45.87, amount=6e8)
+        self.assertIs(passed, True)
+        self.assertIn("当日缩量", label)
+
+    def test_a_pullback_to_todays_ma5_also_counts(self):
+        # MA5 = (4×42.0 + 43.0)/5 = 42.2；最低 42.5 在 2% 容差内。
+        extra = {"pulled_back": False, "ma10": 39.25, "ma_prefix": {"5": 4 * 42.0}}
+        label, passed = self.gate(price=43.0, pre_close=41.8, amount=2e9, low=42.5, extra=extra)
+        self.assertIs(passed, True)
+        self.assertIn("回踩MA5", label)
+
+    def test_a_session_that_neither_contracted_nor_pulled_back_is_still_refused(self):
+        label, passed = self.gate(price=49.0, pre_close=45.87, amount=2e9)
+        self.assertIs(passed, False)
+        self.assertIn("未回调", label)
+
+    def test_a_plan_frozen_as_already_pulled_back_keeps_working(self):
+        label, passed = self.gate(price=47.5, pre_close=45.87, amount=2e9,
+                                  extra={"pulled_back": True, "ma10": 39.25})
+        self.assertIs(passed, True)
+        self.assertIn("建包前已回调", label)
+
+
+class BreakResealTests(unittest.TestCase):
+    """炸板回封：已成板的票开板才是唯一的入口，但要贴着涨停且在均价上方。
+
+    数字取自 2026-09-24 天威视讯（昨收 7.66、涨停 8.43）：10:36 砸到 8.07 时在
+    分时均价 8.301 之下，13:04 回到 8.34 时在均价 8.309 之上，13:10 回封。
+    """
+
+    PARAMS = {"reentry_discount_max_pct": 2.0, "fail_amount": 1.2e9}
+
+    def gate(self, *, price, vwap, high=8.43, amount=5e8, volume_ratio=2.0, sealed=False):
+        tick = quote(price, 7.66, amount=amount, volume_lot=amount / price / 100,
+                     volume_ratio=volume_ratio, sealed=sealed, opened=8.30, high=high)
+        features = scan_features("002238.SZ", tick, {"vwap": vwap}, at(13, 4), "天威视讯")
+        plan = {"playbook": "relay_break_reseal", "params": self.PARAMS, "extra": {}}
+        result = evaluate(plan, features)
+        return result, {str(signal["name"]): signal["pass"] for signal in result["signals"]}
+
+    def test_the_reseal_window_above_vwap_is_an_entry(self):
+        result, gates = self.gate(price=8.34, vwap=8.309)
+        self.assertEqual(result["action"], "entry")
+        self.assertIs(gates["今日曾到板"], True)
+        self.assertIs(gates["当前已开板（有对手盘）"], True)
+        self.assertIs(gates["回到分时均价上方"], True)
+
+    def test_the_same_board_below_vwap_is_refused(self):
+        _result, gates = self.gate(price=8.07, vwap=8.301)
+        self.assertIs(gates["回到分时均价上方"], False)
+
+    def test_a_deep_break_is_refused_even_above_vwap(self):
+        # 8.07 距涨停 4.27% > 2%：砸得太深就不是回封，是出货。
+        _result, gates = self.gate(price=8.07, vwap=8.00)
+        self.assertIs(gates["距涨停≤2%"], False)
+
+    def test_a_board_that_never_sealed_has_nothing_to_reseal(self):
+        _result, gates = self.gate(price=8.20, vwap=8.10, high=8.25)
+        self.assertIs(gates["今日曾到板"], False)
+
+    def test_losing_the_prior_close_invalidates(self):
+        result, _gates = self.gate(price=7.60, vwap=7.55)
+        self.assertEqual(result["action"], "invalid")
+
+    def test_the_seal_gate_is_only_a_note_not_a_requirement(self):
+        result, _gates = self.gate(price=8.34, vwap=8.309)
+        seal = next(signal for signal in result["signals"] if signal["name"] == "已回封")
+        self.assertFalse(seal.get("gating", True))
+
+
+class ObservedPlanReplayTests(unittest.TestCase):
+    """观察状态不推送，但复盘必须看得见它 —— 否则连"漏没漏"都量化不了。"""
+
+    def observed_watch(self, status: str = "observe"):
+        row = watch("000592.SZ", "platform_breakout", {}, {"platform_upper": 8.59, "days_since_peak": 2})
+        row["metadata"]["teacher_review"]["status"] = status
+        return row
+
+    def test_the_live_scan_still_ignores_an_observed_plan(self):
+        self.assertIsNone(active_plan(self.observed_watch(), at(10, 0)))
+
+    def test_the_replay_evaluates_it_and_marks_it_observe_only(self):
+        plan = active_plan(self.observed_watch(), at(10, 0), include_observed=True)
+        self.assertIsNotNone(plan)
+        self.assertIs(plan["observe_only"], True)
+
+    def test_an_expired_plan_is_never_included(self):
+        self.assertIsNone(active_plan(self.observed_watch("expired"), at(10, 0), include_observed=True))
+
+
+class ReplayOhlcTests(unittest.TestCase):
+    """复盘必须看得到实时看到的开盘价，否则卡点会被错记成"输入缺失"。
+
+    2026-09-24 我爱我家/天顺风能、9/23 三羊马/博通集成 的 outcome 卡点都写着
+    「输入缺失：开盘价（全天 100% 的扫描无法判定）」，而当时的决策卡上
+    「竞价不低开」是 pass —— v2 的快照把整个 raw 丢掉了，而规则的
+    open/high/low/amount/盘口全在 raw 里。
+    """
+
+    QUOTE = {
+        "symbol": "000560.SZ", "price": 3.80, "pct_change": -1.5, "volume_ratio": 2.0,
+        "turnover_rate": 5.0, "price_source": "longhuvip_watch_quote",
+        "raw": {"longhu_watch_quote": {
+            "pre_close": 3.86, "open": 3.86, "high": 4.10, "low": 3.74, "amount": 9.5e8, "volume": 2500000,
+            "order_book": {"book_side": "two_sided", "bids": [{"price": 3.79, "size": 100}],
+                           "asks": [{"price": 3.80, "size": 100}], "seal_volume_lot": 0},
+            "upstream_body": "must never be stored"}},
+    }
+
+    def stored_quote(self):
+        payload = intraday_rule_input_payload(
+            watch={"symbol": "000560.SZ", "metadata": {}}, quote=copy.deepcopy(self.QUOTE),
+            previous_quote=None, daily_factors=None, minute_features=None, peer_context=None,
+            model_version="teacher-review-rules-v5")
+        return payload, payload["quote"]
+
+    def test_the_session_ohlc_survives_into_the_replay(self):
+        _payload, stored = self.stored_quote()
+        features = scan_features("000560.SZ", stored, None, at(10, 30, date(2026, 9, 24)), "我爱我家")
+        self.assertEqual(features["open"], 3.86)
+        self.assertEqual(features["open_gap_pct"], 0.0)
+        self.assertEqual(features["amount"], 9.5e8)
+        self.assertEqual(missing_inputs("relay_news_conditional", features), [])
+
+    def test_the_upstream_body_is_still_never_stored(self):
+        _payload, stored = self.stored_quote()
+        kept = stored["raw"]["longhu_watch_quote"]
+        self.assertNotIn("upstream_body", kept)
+        self.assertEqual(sorted(kept["order_book"]), ["book_side", "seal_volume_lot"])
+
+    def test_older_v2_rows_stay_replayable(self):
+        payload, _stored = self.stored_quote()
+        legacy = {**payload, "schema_version": "intraday-rule-input-v2"}
+        result = intraday_rule_replay_inputs(legacy)
+        self.assertTrue(result["policy_replayable"])
+        self.assertFalse(result["ohlc_replayable"])
+
+
+class RejectionReviewTests(unittest.TestCase):
+    """老师的否定值不值得信，要用滚动数据回答，不是靠感觉。"""
+
+    @staticmethod
+    def report(trade_date, rows):
+        return {"trade_date": trade_date, "stocks": rows}
+
+    @staticmethod
+    def rejected(code, close, high=None, sealed=False, name="票"):
+        return {"code": code, "name": name, "playbook": "rejected", "kind": "record",
+                "outcome": "avoid_missed" if (close >= 5.0 or sealed or (high or 0) >= 7.0) else "avoided",
+                "close_pct": close, "high_pct": high if high is not None else close,
+                "closed_at_limit": sealed}
+
+    def test_the_avoid_rate_and_the_missed_upside_are_both_measured(self):
+        rows = [self.rejected("600503", -9.9), self.rejected("603636", -9.9), self.rejected("600088", -5.4),
+                self.rejected("001234", 10.0, sealed=True, name="泰慕士"),
+                self.rejected("600641", 7.9, high=10.0, name="先导基电")]
+        review = rejection_review([self.report("2026-09-24", rows)])
+        self.assertEqual(review["sample"], 5)
+        self.assertEqual(review["avoided"], 3)
+        self.assertEqual(review["avoid_missed"], 2)
+        self.assertEqual(review["avoid_rate_pct"], 60.0)
+        self.assertEqual(review["sealed_after_reject"], 1)
+        self.assertEqual(review["worst_calls"][0]["name"], "泰慕士")
+
+    def test_a_small_sample_gets_no_verdict_note(self):
+        review = rejection_review([self.report("2026-09-24", [self.rejected("600503", -9.9)])])
+        self.assertIsNone(review.get("note"))
+
+    def test_a_weak_rate_over_a_real_sample_is_called_out(self):
+        rows = ([self.rejected(f"00{index:04d}", -3.0) for index in range(9)]
+                + [self.rejected(f"30{index:04d}", 8.0, high=9.0) for index in range(8)])
+        review = rejection_review([self.report("2026-09-24", rows)])
+        self.assertEqual(review["sample"], 17)
+        self.assertLess(review["avoid_rate_pct"], 65.0)
+        self.assertIn("不要改阈值", review["note"])
+
+    def test_a_strong_rate_is_reported_without_a_warning(self):
+        rows = [self.rejected(f"00{index:04d}", -4.0) for index in range(18)]
+        review = rejection_review([self.report("2026-09-24", rows)])
+        self.assertEqual(review["avoid_rate_pct"], 100.0)
+        self.assertIsNone(review.get("note"))
+
+
+class BuyabilityVolumeUnitTests(unittest.TestCase):
+    """分钟行的 volume 是手、amount 是元，VWAP 必须先换算，否则每一分钟都"在均价下方"。
+
+    这不是假想：本模块 2026-09-24 第一次上线复跑时，天威视讯和奥佳华都被判成
+    `below_vwap_only`，因为 amount/volume 算出来是价格的 100 倍。真实值取自
+    Longhu 分钟（amount = 分时均价 × 手 × 100）。
+    """
+
+    @staticmethod
+    def lot_row(bucket, close, avg, lots):
+        return {"minute_bucket": bucket, "close": close, "volume": lots, "amount": avg * lots * 100}
+
+    def aojiahua(self):
+        return [self.lot_row("09:30", 7.50, 7.50, 79728),
+                self.lot_row("09:31", 8.33, 7.905, 251284),
+                self.lot_row("09:32", 8.33, 8.033, 146242)]
+
+    def test_the_lot_unit_is_inferred_from_the_rows(self):
+        self.assertEqual(share_multiplier(self.aojiahua()), 100.0)
+
+    def test_rows_already_in_shares_are_left_alone(self):
+        shares = [{"minute_bucket": "09:30", "close": 7.50, "volume": 7972800, "amount": 7.50 * 7972800}]
+        self.assertEqual(share_multiplier(shares), 1.0)
+
+    def test_the_opening_minute_is_no_longer_lost_to_the_unit_error(self):
+        diagnosis = buyability(self.aojiahua(), limit_up_price=8.33)
+        self.assertEqual(diagnosis["volume_unit"], "lot")
+        self.assertEqual(diagnosis["verdict"], "late_mark")
+        self.assertEqual(diagnosis["compliant_minutes"], 1)
+        self.assertEqual(diagnosis["first_compliant_at"], "09:30")
+        self.assertEqual(diagnosis["best_compliant_discount_pct"], 9.96)
+
+    def test_a_one_word_board_is_unaffected_either_way(self):
+        rows = [self.lot_row(f"09:{30 + index:02d}", 20.35, 20.35, 2000) for index in range(10)]
+        self.assertEqual(buyability(rows, limit_up_price=20.35)["verdict"], "one_word")
+
+    def test_every_verdict_reports_the_volume_unit(self):
+        """下游要靠 volume_unit 判断成交量是手还是股；一字板那支以前漏了它。"""
+        one_word = buyability([self.lot_row(f"09:{30 + i:02d}", 20.35, 20.35, 2000) for i in range(10)],
+                              limit_up_price=20.35)
+        self.assertEqual(one_word["volume_unit"], "lot")
+        self.assertEqual(buyability(self.aojiahua(), limit_up_price=8.33)["volume_unit"], "lot")
+        shares = [{"minute_bucket": f"09:{30 + i:02d}", "close": 20.35, "vwap": 20.35,
+                   "volume": 200000, "amount": 20.35 * 200000} for i in range(10)]
+        self.assertEqual(buyability(shares, limit_up_price=20.35)["volume_unit"], "share")

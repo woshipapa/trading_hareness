@@ -301,7 +301,7 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
     items.append(summary_item)
     items.append({
         "key": "primary_realtime", "label": "Tushare 主源实时", "role": "明确排除，不进入盘中决策",
-        "state": "unavailable", "configured": bool((configs.get("primary") or {}).get("configured")),
+        "state": "retired", "configured": False,
         "expected_active": False, "cadence": "不调用", "max_age_seconds": None, "last_observed_at": None,
         "age_seconds": None, "last_success_at": None, "last_failure_at": None,
         "last_error": "主源不具备已验证实时能力", "last_latency_ms": None, "last_row_count": None,

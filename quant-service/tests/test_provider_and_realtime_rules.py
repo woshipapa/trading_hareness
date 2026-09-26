@@ -1,6 +1,7 @@
 """Focused regression tests extracted from the legacy provider helper suite."""
 
 from provider_test_support import *  # noqa: F403
+from app.database import AsyncDatabase, Database
 from app.tushare_providers import PROMAX_VERIFIED_APIS
 
 
@@ -293,6 +294,16 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
                          {"min_size": 1, "max_size": 32, "timeout_seconds": 10})
         self.assertEqual(pool_settings({"QUANT_DB_POOL_MIN_SIZE": "4", "QUANT_DB_POOL_MAX_SIZE": "3", "QUANT_DB_POOL_TIMEOUT_SECONDS": "2"}),
                          {"min_size": 4, "max_size": 4, "timeout_seconds": 2})
+
+    def test_async_read_pool_accepts_owner_sixteen_connection_budget(self):
+        with patch.dict("os.environ", {"QUANT_ASYNC_READ_POOL_MAX_SIZE": "16"}, clear=False):
+            database = AsyncDatabase(Database())
+        self.assertEqual(database._pool_settings["max_size"], 16)
+
+    def test_async_read_pool_clamps_values_above_owner_budget(self):
+        with patch.dict("os.environ", {"QUANT_ASYNC_READ_POOL_MAX_SIZE": "999"}, clear=False):
+            database = AsyncDatabase(Database())
+        self.assertEqual(database._pool_settings["max_size"], 16)
 
     def test_akshare_retry_is_bounded_and_returns_the_first_success(self):
         with patch("app.akshare_provider._call", side_effect=[AkShareProviderError("temporary disconnect"), [{"code": "000001"}]] ) as call, \
@@ -619,12 +630,12 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(configs["super_sdk"].rate_limit_per_minute, 30)
         self.assertEqual(configs["super_get"].rate_limit_per_minute, 60)
         self.assertEqual(configs["super_get"].min_interval_seconds, 1.0)
-        self.assertEqual([item.key for item in provider_candidates("daily", environ=env)], ["tushare_super_get", "tushare_primary", "tushare_backup"])
-        self.assertEqual([item.key for item in provider_candidates("stock_basic", environ=env)], ["tushare_primary", "tushare_super_get", "tushare_super_sdk", "tushare_backup"])
-        self.assertEqual([item.key for item in provider_candidates("stk_factor", environ=env)], ["tushare_primary", "tushare_super_sdk"])
-        self.assertEqual([item.key for item in provider_candidates("moneyflow", environ=env)], ["tushare_super_sdk", "tushare_super_get", "tushare_primary", "tushare_backup"])
-        self.assertEqual([item.key for item in provider_candidates("ths_member", environ=env)], ["tushare_super_sdk", "tushare_super_get", "tushare_primary", "tushare_backup"])
-        self.assertEqual([item.key for item in provider_candidates("moneyflow_ind_dc", environ=env)], ["tushare_super_get", "tushare_super_sdk", "tushare_primary", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("daily", environ=env)], ["tushare_super_get", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("stock_basic", environ=env)], ["tushare_super_get", "tushare_super_sdk", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("stk_factor", environ=env)], ["tushare_super_sdk"])
+        self.assertEqual([item.key for item in provider_candidates("moneyflow", environ=env)], ["tushare_super_sdk", "tushare_super_get", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("ths_member", environ=env)], ["tushare_super_sdk", "tushare_super_get", "tushare_backup"])
+        self.assertEqual([item.key for item in provider_candidates("moneyflow_ind_dc", environ=env)], ["tushare_super_get", "tushare_super_sdk", "tushare_backup"])
         self.assertEqual([item.key for item in provider_candidates("rt_min", environ=env)], ["tushare_super_sdk", "tushare_super_get"])
         self.assertEqual([item.key for item in provider_candidates("rt_min_daily", environ=env)], ["tushare_super_get"])
         self.assertEqual([item.key for item in provider_candidates("rt_etf_min", environ=env)], ["tushare_super_sdk"])
@@ -632,10 +643,13 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual([item.key for item in provider_candidates("rt_sw_k", environ=env)], ["tushare_super_get", "tushare_super_sdk"])
         self.assertEqual([item.key for item in provider_candidates("rt_fut_min", environ=env)], ["tushare_super_get"])
         self.assertEqual(provider_candidates("rt_etf_min_daily", environ=env), [])
-        self.assertEqual([item.key for item in provider_candidates("index_weight", environ=env)], ["tushare_super_sdk", "tushare_primary"])
+        self.assertEqual([item.key for item in provider_candidates("index_weight", environ=env)], ["tushare_super_sdk"])
         self.assertEqual([item.key for item in provider_candidates("daily", "super_sdk", environ=env)], ["tushare_super_sdk"])
+        self.assertEqual(provider_candidates("daily", "primary", environ=env), [])
         status = {item["name"]: item for item in provider_status(environ=env)}
         self.assertEqual(status["primary"]["realtime_coverage"], "unavailable")
+        self.assertTrue(status["primary"]["retired"])
+        self.assertFalse(status["primary"]["configured"])
         self.assertEqual(status["super_sdk"]["realtime_coverage"], "verified_partial")
         self.assertEqual(status["super_get"]["realtime_coverage"], "verified_partial")
         self.assertEqual(status["super_get"]["get_apis"], sorted(SUPER_GET_VERIFIED_APIS))
@@ -669,7 +683,7 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertFalse(promax.supports("rt_fut_min_daily"))
         self.assertFalse(promax.supports("not_a_real_api"))
         self.assertEqual([item.key for item in provider_candidates("daily", environ=env)],
-                         ["tushare_super_get", "tushare_primary"])
+                         ["tushare_super_get"])
         self.assertEqual([item.key for item in provider_candidates("rt_min_daily", environ=env)],
                          ["tushare_super_get"])
         status = {item["name"]: item for item in provider_status(environ=env)}["super_get"]

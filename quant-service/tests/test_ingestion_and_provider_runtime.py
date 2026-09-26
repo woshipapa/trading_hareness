@@ -950,6 +950,35 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(circuits.await_count, 2)
         upstream.assert_not_awaited()
 
+    def test_market_snapshot_uses_snapshot_capability_gate_and_akshare_fallback(self):
+        expected = {"status": "degraded", "quote_count": 1, "source_summary": {"providers": {"akshare": 1}}}
+
+        async def check() -> tuple[dict[str, object], AsyncMock, AsyncMock, AsyncMock]:
+            blocking = AsyncMock(side_effect=[["000001.SZ"], 1, expected])
+            fuyao = AsyncMock(side_effect=FuyaoProviderError("temporary Fuyao failure"))
+            akshare = AsyncMock(return_value=([{
+                "ts_code": "000001.SZ", "close": 10.2, "trade_date": "20260810",
+            }], {"status": "fresh", "source": "akshare_tencent_all_a_snapshot"}))
+            circuits = AsyncMock(side_effect=[set(), set()])
+            with patch("app.main.market_snapshot_thresholds", return_value=(1, 0.95, set())), \
+                 patch("app.main.market_snapshot_public_quote_settings", return_value={
+                     "enabled": False, "fallback_enabled": True, "batch_size": 80, "concurrency": 2,
+                 }), \
+                 patch("app.main.market_snapshot_fuyao_enabled", return_value=True), \
+                 patch("app.main.run_database_blocking", new=blocking), \
+                 patch("app.main.open_provider_capabilities", new=circuits), \
+                 patch("app.main.fuyao_all_a_snapshot_rows", new=fuyao), \
+                 patch("app.main.akshare_all_a_snapshot_rows", new=akshare):
+                result = await build_market_snapshot(MarketSnapshotRequest(session="close", refresh_public_quotes=True))
+            return result, circuits, fuyao, akshare
+
+        result, circuits, fuyao, akshare = asyncio.run(check())
+        self.assertEqual(result, expected)
+        self.assertEqual(circuits.await_args_list[0].args, ("fuyao_ths", ["a_share_prices_snapshot"]))
+        self.assertEqual(circuits.await_args_list[1].args, ("akshare", ["realtime_quote"]))
+        fuyao.assert_awaited_once()
+        akshare.assert_awaited_once()
+
     def test_cninfo_sync_skips_when_its_provider_circuit_is_open(self):
         async def check() -> tuple[dict[str, object], AsyncMock]:
             circuit = AsyncMock(return_value={"announcement"})

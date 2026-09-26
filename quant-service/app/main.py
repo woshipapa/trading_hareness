@@ -46,6 +46,8 @@ from .akshare_provider import (
     akshare_moneyflow_supplements,
     akshare_status,
     akshare_strong_pool_events,
+    akshare_tencent_all_a_spot,
+    normalize_tencent_all_a_spot_rows,
 )
 from .fuyao_provider import FuyaoProviderError, all_a_snapshot_rows as fuyao_all_a_snapshot_rows
 from .limit_up_anchor import live_limit_up_pool_rows
@@ -4183,7 +4185,7 @@ async def sync_strategy_index_context(as_of_date: date) -> dict[str, Any]:
         as_of_date, STRATEGY_INDEX_SYMBOLS,
         prefer_public=longhu_vendor_configured(),
         primary_request=lambda symbol, start, end: TushareFetchRequest(
-            api_name="index_daily", provider="primary",
+            api_name="index_daily", provider="super_get",
             params={"ts_code": symbol, "start_date": start.strftime("%Y%m%d"),
                     "end_date": end.strftime("%Y%m%d")},
             max_rows=60, force_refresh=True,
@@ -4581,6 +4583,24 @@ def fuyao_snapshot_quotes(rows: list[dict[str, Any]], exchange_date: date) -> li
     return _market_snapshot_actions.fuyao_quotes(rows, exchange_date, intraday_quote_from_fuyao)
 
 
+async def akshare_all_a_snapshot_rows(exchange_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch the bounded Tencent/AKShare all-A fallback off the event loop."""
+    started_at = asyncio.get_running_loop().time()
+    raw_rows = await run_akshare_blocking(akshare_tencent_all_a_spot, timeout_seconds=60)
+    rows = normalize_tencent_all_a_spot_rows(raw_rows, exchange_date)
+    return rows, {
+        "status": "fresh" if rows else "empty",
+        "age_seconds": 0.0,
+        "source": "akshare_tencent_all_a_snapshot",
+        "scope": "all_a_cross_section",
+        "cross_sectional": True,
+        "semantics": "public_tencent_price_volume_turnover_snapshot_no_exchange_timestamp",
+        "raw_rows": len(raw_rows),
+        "matched_rows": len(rows),
+        "latency_ms": round((asyncio.get_running_loop().time() - started_at) * 1000),
+    }
+
+
 def realtime_market_session(api_name: str | None = None, now: datetime | None = None) -> tuple[bool, str]:
     return read_realtime_market_session(db, api_name, now)
 
@@ -4622,11 +4642,12 @@ def finalize_market_snapshot(
     refresh_error: str | None,
     refresh_skipped: str | None,
     fuyao_status: dict[str, Any],
+    fallback_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _market_snapshot_actions.finalize(
         request, observed_at, exchange_date, symbols, minimum_universe, minimum_coverage,
         licensed_providers, public_quote_settings, planned_public_requests, refresh_error,
-        refresh_skipped, fuyao_status,
+        refresh_skipped, fuyao_status, fallback_status,
     )
 
 
@@ -4636,6 +4657,7 @@ async def build_market_snapshot(request: MarketSnapshotRequest) -> dict[str, Any
         request,
         run_database=run_database_blocking,
         fetch_fuyao_all_a=fuyao_all_a_snapshot_rows,
+        fetch_akshare_all_a=akshare_all_a_snapshot_rows,
         provider_capabilities=open_provider_capabilities,
         quote_mapper=intraday_quote_from_fuyao,
         thresholds=market_snapshot_thresholds,
@@ -4786,13 +4808,19 @@ async def rehydrate_teacher_tape() -> dict[str, Any]:
     A restart (a deploy, or the session guard after a database stall) used to
     empty the in-memory tape, so plans without minute context had no 5-minute
     trend for five minutes and raised "data missing".  Never raises.
+
+    A restart *before* the open reads an empty 40-minute window, so the reload
+    only settles once it has actually found samples; otherwise it retries on the
+    next scan, still behind the 60-second throttle.  Latching that zero for the
+    whole session left the second-choice source for ``not_falling`` (and the
+    5-minute trend behind it) empty until the next restart.
     """
     from .teacher_review_rules import trading_lookback_start
     from .watch_scan_tape import read_tape_prices
     now = datetime.now(timezone.utc)
     day = now.astimezone(ZoneInfo("Asia/Shanghai")).date()
     state = _teacher_tape_rehydration
-    if state.get("day") == day:
+    if state.get("day") == day and state.get("loaded"):
         return {"status": "done", "loaded": state.get("loaded")}
     last = state.get("attempt_at")
     if last is not None and (now - last).total_seconds() < 60:

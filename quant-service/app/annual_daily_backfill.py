@@ -82,24 +82,28 @@ class ApiSpec:
 
 
 CORE_DAILY_SPECS = (
-    # The verified Super GET route is the canonical daily-price gateway.  A
-    # full primary response remains a per-request fallback, rather than a
-    # reason to silently move daily bars back to the old SDK/primary path.
+    # The verified Super GET route is the canonical daily-price gateway.
+    # Historical primary REST is retired; the SDK and DataHub remain bounded
+    # fallbacks with their own provenance.
     ApiSpec("daily", "super_get", 4_800, promote="daily", fallback_provider_name="super_sdk",
-            fallback_provider_names=("primary",)),
-    ApiSpec("adj_factor", "super_sdk", 4_800, promote="adj_factor", fallback_provider_name="primary"),
+            fallback_provider_names=("backup",)),
+    ApiSpec("adj_factor", "super_sdk", 4_800, promote="adj_factor", fallback_provider_name="super_get",
+            fallback_provider_names=("backup",)),
     # ProMax was verified for the complete same-day daily_basic cross-section
     # on 2026-08-17.  Prefer it over the City SDK so the control-plane repair
     # exercises the current GET protocol; retain the previously verified SDK
-    # and primary routes as explicit fallbacks.
+    # and DataHub routes as explicit fallbacks.
     ApiSpec("daily_basic", "super_get", 4_800, promote="daily_basic", fallback_provider_name="super_sdk",
-            fallback_provider_names=("primary",)),
-    ApiSpec("stk_limit", "super_sdk", 4_800, promote="stk_limit", fallback_provider_name="primary"),
-    ApiSpec("suspend_d", "super_sdk", legal_empty=True, promote="suspend_d", fallback_provider_name="primary"),
+            fallback_provider_names=("backup",)),
+    ApiSpec("stk_limit", "super_sdk", 4_800, promote="stk_limit", fallback_provider_name="super_get",
+            fallback_provider_names=("backup",)),
+    ApiSpec("suspend_d", "super_sdk", legal_empty=True, promote="suspend_d", fallback_provider_name="super_get",
+            fallback_provider_names=("backup",)),
     # Daily ST membership is retained as dated evidence.  It is not merged
     # into the current instrument flag until a separate point-in-time reader
     # asks for the requested trade date.
-    ApiSpec("stock_st", "primary", legal_empty=True, promote="stock_st", fallback_provider_name="super_sdk"),
+    ApiSpec("stock_st", "super_get", legal_empty=True, promote="stock_st", fallback_provider_name="super_sdk",
+            fallback_provider_names=("backup",)),
 )
 
 # Dated suspension/ST cross-sections remain available for an explicitly
@@ -934,7 +938,7 @@ class AnnualDailyBackfill:
         expected_calendar_rows = (self.end_date - self.start_date).days + 1
         await self._bootstrap_reference(
             "trade_cal", calendar_params,
-            provider_names=("super_sdk", "primary"),
+            provider_names=("super_sdk", "super_get", "backup"),
             minimum_rows=expected_calendar_rows,
             normalize_rows=lambda rows: [dict(row) for row in rows],
             persist=_persist_trade_calendar,
@@ -944,7 +948,7 @@ class AnnualDailyBackfill:
             params = {"exchange": "", "list_status": status}
             await self._bootstrap_reference(
                 "stock_basic", params,
-                provider_names=("super_sdk", "primary"),
+                provider_names=("super_sdk", "super_get", "backup"),
                 minimum_rows=4_800 if status == "L" else 0,
                 normalize_rows=lambda rows, status=status: [
                     dict(row, _list_status=status)
@@ -1009,8 +1013,8 @@ class AnnualDailyBackfill:
                 print(json.dumps({"lane": "sector", "day": str(day), "progress": f"{index}/{len(days)}", "failures": len(self.failures)}), flush=True)
 
     async def index_lane(self) -> None:
-        spec = ApiSpec("index_daily", "primary", 200, promote="raw")
-        provider = self.providers["primary"]
+        spec = ApiSpec("index_daily", "super_get", 200, promote="raw")
+        provider = self.providers["super_get"]
         for symbol in INDEX_CODES:
             params = {
                 "ts_code": symbol, "start_date": self.start_date.strftime("%Y%m%d"),
@@ -1062,7 +1066,6 @@ class AnnualDailyBackfill:
                                           WHEN 'longhu_qfq_derived' THEN 0
                                           WHEN 'tushare_super_sdk' THEN 1
                                           WHEN 'tushare_super_get' THEN 2
-                                          WHEN 'tushare_primary' THEN 3
                                           ELSE 9 END,
                                         available_at DESC
                           ) factor
@@ -1084,7 +1087,6 @@ class AnnualDailyBackfill:
                                         CASE provider
                                           WHEN 'tushare_super_sdk' THEN 0
                                           WHEN 'tushare_super_get' THEN 1
-                                          WHEN 'tushare_primary' THEN 2
                                           ELSE 9 END,
                                         available_at DESC
                           ) limits
@@ -1223,7 +1225,7 @@ class AnnualDailyBackfill:
         original receipt timestamp remains recoverable as ``ingested_at`` on
         the facts being reprojected.
         """
-        specs = (*self._core_specs(), *SECTOR_EVENT_SPECS, ApiSpec("index_daily", "primary", promote="index_daily"))
+        specs = (*self._core_specs(), *SECTOR_EVENT_SPECS, ApiSpec("index_daily", "super_get", promote="index_daily"))
         api_names = [item.api_name for item in specs]
         with self.db.transaction() as connection:
             day_rows = connection.execute(

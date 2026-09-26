@@ -83,16 +83,12 @@ async def sync(
         valid_rows: list[dict[str, Any]] = []
         for candidate in candidates:
             try:
-                # The two configured broad-market gateways do not share the
-                # same pagination contract. ProMax returns the complete daily
-                # cross-section when called without limit/offset; adding an
-                # offset makes a later page repeat or truncate the response.
-                # The standard primary gateway likewise rejects ``limit``.
-                # Keep the all-A gate, but request one provider-native snapshot
-                # from those routes. Backup/SDK providers retain verified
-                # offset paging and are still rejected if they cannot reach the
-                # minimum complete population.
-                native_snapshot = candidate.name == "primary" or (
+                # ProMax returns the complete daily cross-section when called
+                # without limit/offset; adding an offset makes a later page
+                # repeat or truncate the response. Backup/SDK providers retain
+                # verified offset paging and are still rejected if they cannot
+                # reach the minimum complete population.
+                native_snapshot = (
                     candidate.name == "super_get" and getattr(candidate, "get_gateway_mode", "legacy") == "promax"
                 )
                 candidate_result = await call_tushare_api(

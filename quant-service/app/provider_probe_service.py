@@ -44,7 +44,7 @@ async def probe_realtime(
     results: list[dict[str, Any]] = []
     for api_name, params in matrix:
         active, reason = await realtime_market_session(api_name)
-        for provider in ("primary", "super_sdk", "super_get"):
+        for provider in ("super_sdk", "super_get"):
             if not provider_candidates(api_name, provider):
                 results.append({"provider": provider, "api_name": api_name, "params": params,
                                 "status": "skipped", "availability": "unsupported",

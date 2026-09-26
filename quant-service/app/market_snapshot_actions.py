@@ -65,6 +65,7 @@ class MarketSnapshotActions:
     def public_quote_settings() -> dict[str, int | bool]:
         """Read bounded public-quote settings without turning an invalid env into load."""
         enabled = os.getenv("MARKET_SNAPSHOT_ENABLE_PUBLIC_BATCH", "false").strip().lower() in {"1", "true", "yes", "on"}
+        fallback_enabled = os.getenv("MARKET_SNAPSHOT_ENABLE_PUBLIC_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
         try:
             batch_size = int(os.getenv("MARKET_SNAPSHOT_PUBLIC_BATCH_SIZE", "80"))
         except ValueError:
@@ -75,6 +76,7 @@ class MarketSnapshotActions:
             concurrency = 2
         return {
             "enabled": enabled,
+            "fallback_enabled": fallback_enabled,
             "batch_size": min(200, max(1, batch_size)),
             "concurrency": min(8, max(1, concurrency)),
         }
@@ -105,6 +107,25 @@ class MarketSnapshotActions:
         return result
 
     @staticmethod
+    def fallback_quotes(rows: list[dict[str, Any]], exchange_date: date) -> list[dict[str, Any]]:
+        """Normalize a public all-A fallback while retaining its inferred date."""
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            symbol = str(row.get("ts_code") or row.get("symbol") or "").upper()
+            close = row.get("close", row.get("price"))
+            if not symbol or close in (None, ""):
+                continue
+            result.append({
+                "ts_code": symbol, "name": row.get("name"), "close": close,
+                "pct_chg": row.get("pct_chg", row.get("pct_change")),
+                "vol": row.get("vol", row.get("volume")), "amount": row.get("amount", row.get("turnover")),
+                "trade_date": row.get("trade_date") or exchange_date.strftime("%Y%m%d"),
+                "source_session_date_inferred": bool(row.get("source_session_date_inferred", True)),
+                **({"price_source": row["price_source"]} if row.get("price_source") else {}),
+            })
+        return result
+
+    @staticmethod
     def quote_is_for_exchange_date(quote: dict[str, Any], exchange_date: date) -> bool:
         raw_date = str(quote.get("trade_date") or "").replace("-", "")
         return raw_date == exchange_date.strftime("%Y%m%d")
@@ -122,11 +143,19 @@ class MarketSnapshotActions:
         stored = persist_free_quotes(self._database, provider, quotes)
         with self._database.transaction() as connection:
             record_provider_success(connection, provider, "realtime_quote", stored, latency_ms)
+            if provider == "fuyao_ths":
+                # The raw rows retain the legacy realtime_quote storage shape,
+                # while the circuit and catalog use Fuyao's precise snapshot
+                # capability. Keep both health projections synchronized for
+                # old dashboards and the new capability gate.
+                record_provider_success(connection, provider, "a_share_prices_snapshot", stored, latency_ms)
         return stored
 
     def persist_public_quote_failure(self, provider: str, detail: str, latency_ms: int | None = None) -> None:
         with self._database.transaction() as connection:
             record_provider_failure(connection, provider, "realtime_quote", detail, latency_ms)
+            if provider == "fuyao_ths":
+                record_provider_failure(connection, provider, "a_share_prices_snapshot", detail, latency_ms)
 
     def finalize(
         self,
@@ -142,6 +171,7 @@ class MarketSnapshotActions:
         refresh_error: str | None,
         refresh_skipped: str | None,
         fuyao_status: dict[str, Any],
+        fallback_status: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Read fresh evidence and write the idempotent snapshot in one DB worker."""
         fresh_after = snapshot_fresh_after(request, observed_at, exchange_date)
@@ -188,6 +218,7 @@ class MarketSnapshotActions:
                 "refresh_error": refresh_error,
                 "refresh_skipped": refresh_skipped,
                 "fuyao_snapshot": fuyao_status,
+                "fallback_snapshot": fallback_status or {"status": "not_attempted"},
                 "licensed_providers": sorted(licensed_providers),
                 "public_quotes_are_supplemental": True,
                 "public_quote_batch": {**public_quote_settings, "planned_requests": planned_public_requests},
@@ -221,6 +252,7 @@ class MarketSnapshotActions:
         *,
         run_database: Callable[..., Awaitable[Any]],
         fetch_fuyao_all_a: Callable[[], Awaitable[tuple[list[dict[str, Any]], dict[str, Any]]]],
+        fetch_akshare_all_a: Callable[[date], Awaitable[tuple[list[dict[str, Any]], dict[str, Any]]]] | None = None,
         provider_capabilities: Callable[[str, list[str]], Awaitable[set[str]]],
         quote_mapper: Callable[[dict[str, Any]], dict[str, Any] | None],
         thresholds: Callable[[], tuple[int, float, set[str]]],
@@ -244,15 +276,24 @@ class MarketSnapshotActions:
         refresh_error = None
         refresh_skipped = None
         fuyao_status: dict[str, Any] = {"enabled": fuyao_enabled(), "status": "not_attempted"}
+        fallback_status: dict[str, Any] = {"status": "not_attempted"}
         planned_public_requests = math.ceil(len(symbols) / int(settings["batch_size"])) if symbols else 0
         fuyao_circuit_open = False
+        akshare_circuit_open = False
         sina_circuit_open = False
         if request.refresh_public_quotes and len(symbols) >= minimum_universe:
-            fuyao_circuit_open = "realtime_quote" in await provider_capabilities("fuyao_ths", ["realtime_quote"])
-            if settings["enabled"]:
-                sina_circuit_open = "realtime_quote" in await provider_capabilities("sina_free", ["realtime_quote"])
+            # Fuyao's all-A endpoint has its own capability. A circuit opened
+            # by the legacy per-quote health row must not suppress it.
+            fuyao_circuit_open = "a_share_prices_snapshot" in await provider_capabilities(
+                "fuyao_ths", ["a_share_prices_snapshot"],
+            )
+        if (request.refresh_public_quotes and len(symbols) >= minimum_universe
+                and settings.get("fallback_enabled") and fetch_akshare_all_a):
+            akshare_circuit_open = "realtime_quote" in await provider_capabilities("akshare", ["realtime_quote"])
+        if request.refresh_public_quotes and len(symbols) >= minimum_universe and settings["enabled"]:
+            sina_circuit_open = "realtime_quote" in await provider_capabilities("sina_free", ["realtime_quote"])
         if request.refresh_public_quotes and fuyao_enabled() and len(symbols) >= minimum_universe and fuyao_circuit_open:
-            fuyao_status = {"enabled": True, "status": "circuit_open", "notice": "provider health circuit is open; upstream request skipped"}
+            fuyao_status = {"enabled": True, "status": "circuit_open", "notice": "provider capability circuit is open; upstream request skipped"}
         elif request.refresh_public_quotes and fuyao_enabled() and len(symbols) >= minimum_universe:
             try:
                 started_at = asyncio.get_running_loop().time()
@@ -269,20 +310,49 @@ class MarketSnapshotActions:
             except ExecutorSaturatedError as error:
                 detail = safe_error_detail(str(error), 500)
                 # Local queue pressure says nothing about supplier availability.
-                # Keep the provider circuit untouched and allow Sina below.
+                # Keep the provider circuit untouched and allow the fallback chain below.
                 fuyao_status = {"enabled": True, "status": "local_capacity", "error": detail}
             except (asyncio.TimeoutError, FuyaoProviderError, ValueError) as error:
                 detail = safe_error_detail(str(error), 500)
                 fuyao_status = {"enabled": True, "status": "failed", "error": detail}
                 latency_ms = round((asyncio.get_running_loop().time() - started_at) * 1000)
                 await run_database(persist_failure, "fuyao_ths", detail, latency_ms)
-        elif request.refresh_public_quotes and not fuyao_enabled() and not settings["enabled"]:
-            refresh_skipped = "public_quote_batch_disabled"
-        elif request.refresh_public_quotes and len(symbols) < minimum_universe:
+
+        # The AKShare Tencent spot table is a bounded full-market fallback.
+        # It remains supplemental evidence because it has no row-level
+        # exchange timestamp or licensed decision contract.
+        if (request.refresh_public_quotes and len(symbols) >= minimum_universe
+                and settings.get("fallback_enabled") and fetch_akshare_all_a
+                and fuyao_status.get("status") != "completed"):
+            if akshare_circuit_open:
+                fallback_status = {"status": "circuit_open", "provider": "akshare"}
+            else:
+                try:
+                    started_at = asyncio.get_running_loop().time()
+                    raw_rows, upstream_status = await fetch_akshare_all_a(exchange_date)
+                    normalized = self.fallback_quotes(raw_rows, exchange_date)
+                    stored = await run_database(
+                        persist_batch, "akshare", normalized,
+                        round((asyncio.get_running_loop().time() - started_at) * 1000), timeout_seconds=60,
+                    )
+                    fallback_status = {
+                        "status": "completed" if stored else "empty", "provider": "akshare",
+                        "upstream_rows": len(raw_rows), "stored": stored, "session_date_inferred": True,
+                        "upstream": upstream_status,
+                    }
+                except Exception as error:  # noqa: BLE001 - fallback must not stop close evidence
+                    detail = safe_error_detail(str(error), 500) or type(error).__name__
+                    fallback_status = {"status": "failed", "provider": "akshare", "error": detail}
+                    latency_ms = round((asyncio.get_running_loop().time() - started_at) * 1000)
+                    await run_database(persist_failure, "akshare", detail, latency_ms)
+
+        if request.refresh_public_quotes and len(symbols) < minimum_universe:
             refresh_skipped = "universe_below_minimum"
-        elif request.refresh_public_quotes and fuyao_status["status"] != "completed" and settings["enabled"] and sina_circuit_open:
-            refresh_skipped = "sina_realtime_quote_circuit_open"
-        elif request.refresh_public_quotes and fuyao_status["status"] != "completed" and settings["enabled"]:
+        elif (request.refresh_public_quotes and not fuyao_enabled()
+              and not settings["enabled"] and not settings.get("fallback_enabled")):
+            refresh_skipped = "public_quote_batch_disabled"
+        elif (request.refresh_public_quotes and settings["enabled"] and not sina_circuit_open
+              and fuyao_status.get("status") != "completed" and fallback_status.get("status") != "completed"):
             try:
                 started_at = asyncio.get_running_loop().time()
                 fetched = await sina_quotes(
@@ -292,12 +362,25 @@ class MarketSnapshotActions:
                     persist_batch, "sina_free", fetched,
                     round((asyncio.get_running_loop().time() - started_at) * 1000), timeout_seconds=60,
                 )
+                fallback_status = {
+                    "status": "completed" if fetched else "empty", "provider": "sina_free",
+                    "upstream_rows": len(fetched), "stored": len(fetched), "session_date_inferred": False,
+                    "previous": fallback_status if fallback_status.get("status") != "not_attempted" else None,
+                }
             except Exception as error:  # noqa: BLE001
                 refresh_error = safe_error_detail(str(error), 500)
                 latency_ms = round((asyncio.get_running_loop().time() - started_at) * 1000)
                 await run_database(persist_failure, "sina_free", refresh_error, latency_ms)
+                fallback_status = {
+                    "status": "failed", "provider": "sina_free", "error": refresh_error,
+                    "previous": fallback_status if fallback_status.get("status") != "not_attempted" else None,
+                }
+        elif (request.refresh_public_quotes and settings["enabled"] and sina_circuit_open
+              and fuyao_status.get("status") != "completed" and fallback_status.get("status") != "completed"):
+            refresh_skipped = "sina_realtime_quote_circuit_open"
         return await run_database(
             finalize, request, observed_at, exchange_date, symbols, minimum_universe, minimum_coverage,
             licensed_providers, settings, planned_public_requests, refresh_error, refresh_skipped, fuyao_status,
+            fallback_status,
             timeout_seconds=60,
         )

@@ -41,6 +41,8 @@ CATALOG: Final[dict[str, dict[str, Any]]] = {
     "relay_race": {"kind": "relay", "zh": "连板赛马：竞价不低开 + 放量 + 均价上方", "required": ()},
     "relay_fast_seal": {"kind": "relay", "zh": "快速封板：首封额上限 + 失败成交额",
                         "required": ("seal_amount_max", "fail_amount")},
+    "relay_break_reseal": {"kind": "relay", "zh": "炸板回封：已到板又开板，回到分时均价上方再买（贴着涨停买，不追深跌）",
+                           "required": ("reentry_discount_max_pct", "fail_amount")},
     "relay_news_conditional": {"kind": "relay", "zh": "赌隔夜消息：板块形成才做",
                                "required": ("sector", "sector_min_limit_ups")},
     "trend_pullback_restart": {"kind": "trend", "zh": "突破-杀跌-再起：回调缩量后再起",

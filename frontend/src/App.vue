@@ -15,6 +15,7 @@ const ClaimReviewTab = defineAsyncComponent(() => import('./views/research/Claim
 const ProviderTab = defineAsyncComponent(() => import('./views/research/ProviderTab.vue'));
 const CatalogTab = defineAsyncComponent(() => import('./views/research/CatalogTab.vue'));
 const QualityTab = defineAsyncComponent(() => import('./views/research/QualityTab.vue'));
+const RemoteRealtimeTab = defineAsyncComponent(() => import('./views/research/RemoteRealtimeTab.vue'));
 const PersonalDecisionView = defineAsyncComponent(() => import('./views/PersonalDecisionView.vue'));
 </script>
 
@@ -45,6 +46,9 @@ const PersonalDecisionView = defineAsyncComponent(() => import('./views/Personal
             </el-tab-pane>
             <el-tab-pane label="策略与股票池" name="strategy">
               <StrategyTab />
+            </el-tab-pane>
+            <el-tab-pane label="远端实时" name="realtime">
+              <RemoteRealtimeTab />
             </el-tab-pane>
             <el-tab-pane label="因子与回测" name="factor-lab">
               <FactorLabTab />

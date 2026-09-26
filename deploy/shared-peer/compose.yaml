@@ -87,6 +87,7 @@ services:
       PGUSER: ${PEER_DB_USER:-stock_peer}
       PGPASSWORD: ${PEER_DB_PASSWORD:?Set PEER_DB_PASSWORD}
       QUANT_DATA_DIR: /var/lib/quant
+      QUANT_ASYNC_READ_POOL_MAX_SIZE: ${PEER_RESEARCH_ASYNC_READ_POOL_MAX_SIZE:-16}
       QUANT_LEGACY_SCHEMA_BOOTSTRAP: "false"
       # Schema migrations belong to the owner release pipeline and must never
       # run from the peer container. Existing stock_peer write ACLs are

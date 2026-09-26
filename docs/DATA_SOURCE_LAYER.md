@@ -40,11 +40,11 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 
 | 能力 | 解析顺序（状态） | 说明 |
 |---|---|---|
-| `quote.all_a_snapshot` | fuyao_ths(LV) | owner 规则：Longhu 行业截面/观察池报价不冒充全 A；东财 clist 在 owner 出口被断连（unsupported） |
+| `quote.all_a_snapshot` | fuyao_ths(LV) → akshare(Tencent spot, declared fallback) | Fuyao 是主源；AKShare 腾讯全 A 仅在 Fuyao 请求失败/熔断时补充研究覆盖，日期为会话推断且不提升决策资格；东财 clist 在 owner 出口被断连（unsupported） |
 | `quote.watch_snapshot` | longhuvip(LV) → tencent_free(LV) → sina_free(LV) | 仅 longhu/腾讯带交易所时间戳可进决策 |
 | `quote.order_book` | longhuvip 十档(LV) → tencent 五档(LV) | |
 | `quote.valuation` | fuyao 估值(D) → tushare daily_basic(LV) | 盘后全 A 5553 只/15.7 秒 |
-| `bars.daily` | tushare 主源/超级GET/备用(LV)、longhu 合成(LV)、fuyao 10 年导出(D)、通达信本地 .day(D)、baostock/东财/akshare(dormant) | 开盘啦个股 K 线（旧系统 id=7，恒空）**retired** |
+| `bars.daily` | tushare 超级GET/超级SDK/备用(LV)、longhu 合成(LV)、fuyao 10 年导出(D)、通达信本地 .day(D)、baostock/东财/akshare(dormant) | 兼容主源已下线；历史主源行只作 provenance，不再路由 |
 | `bars.minute` | longhuvip(LV) → tushare rt_min(LV) → 通达信本地 .lc1/.lc5(D) → 腾讯(LV) | fuyao 无分钟 K |
 | `ticks.session` | tdx_public(D) → tencent_free(D) | 通达信历史分笔与 pytdx 逐笔一致；方向与腾讯逐分钟 100% 对上 |
 | `auction.history_0925` | tdx_public(D) | 历史每日 09:25 竞价成交 + 09:15-09:25 虚拟撮合曲线 |

@@ -1728,6 +1728,9 @@ const researchPaths = new Map([
 	['/api/research/remote-archive/messages', '/api/v1/remote-archive/messages'],
 	['/api/research/claims', '/api/v1/analyst-claims'],
 	['/api/research/providers', '/api/v1/providers/health'],
+	['/api/research/providers/realtime-health', '/api/v1/providers/realtime-health'],
+	// Keep the generated OpenAPI path readable through the edge as well as the dashboard alias.
+	['/api/v1/providers/realtime-health', '/api/v1/providers/realtime-health'],
 	['/api/research/provider-capabilities', '/api/v1/providers/capabilities'],
 	['/api/research/quality', '/api/v1/data-quality/issues'],
 	['/api/research/recommendations', '/api/v1/recommendations/latest'],
@@ -1839,7 +1842,8 @@ const researchActions = new Map([
 
 async function proxyResearch(path, search, response) {
 	if (!quantServiceUrl) throw new Error('量化研究服务未配置');
-	const upstream = await fetch(`${quantServiceUrl}${path}${search}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15_000) });
+	const readTimeoutMs = path === '/api/v1/strategy/post-close/latest' ? 45_000 : 15_000;
+	const upstream = await fetch(`${quantServiceUrl}${path}${search}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(readTimeoutMs) });
 	const body = await upstream.text();
 	response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });
 	response.end(body);
@@ -1881,6 +1885,14 @@ const dashboard = createServer((request, response) => {
 	const researchRunDetail = /^\/api\/research\/research-runs\/([0-9a-f-]{36})$/i.exec(url.pathname);
 	if (researchRunDetail && request.method === 'GET') {
 		void proxyResearch(`/api/v1/research/runs/${researchRunDetail[1]}`, url.search, response).catch((error) => {
+			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
+		});
+		return;
+	}
+	const intradayDecisionCard = /^\/api\/research\/intraday\/decision-cards\/(\d{6}\.(?:SH|SZ|BJ))$/i.exec(url.pathname);
+	if (intradayDecisionCard && request.method === 'GET') {
+		void proxyResearch(`/api/v1/intraday/decision-cards/${intradayDecisionCard[1].toUpperCase()}`, url.search, response).catch((error) => {
 			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
 		});

@@ -8,6 +8,7 @@ import os, sys, time, signal, subprocess, threading, datetime, json
 HOME = os.path.expanduser("~")
 PY = os.path.join(HOME, ".venvs/svc/bin/python")
 PKB = os.path.join(HOME, "codebase/literature_maps/paper_kb")
+HARNESS = os.environ.get("VIDEO_HARNESS_DIR", "/Users/papa/codebase/video_understanding_harness")
 N8N = os.path.join(HOME, "codebase/n8n")
 PKLOG = os.path.join(HOME, "Library/Logs/paper-kb")
 SUP_LOG = os.path.join(N8N, "logs/svc-supervisor.log")
@@ -68,6 +69,21 @@ TASKS = [
     dict(name="paperkb.server", kind="daemon",
          args=[PY, os.path.join(PKB, "kb_server.py"), "--port", "8787"],
          cwd=PKB, out=os.path.join(PKLOG, "server.log"), err=os.path.join(PKLOG, "server.log"), env={}),
+    # owner 只读路径的 ssh 隧道。整条老师复盘链都靠它；以前没人托管，它一断
+    # teacher.cycle 就一直 hold，症状只是"owner 读路径不可用"，很容易以为是别的事。
+    # 值从 n8n/.env（已 gitignore）在内存里读，不落盘、不进日志。
+    *([dict(name="owner-tunnel", kind="daemon",
+            args=["ssh", "-NT", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
+                  "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
+                  "-o", "StrictHostKeyChecking=yes", "-i", _load_env_secret("LONGHU_SSH_KEY_PATH"),
+                  "-p", _load_env_secret("LONGHU_SSH_PORT") or "22",
+                  "-L", f"127.0.0.1:{_load_env_secret('LONGHU_LOCAL_PORT') or '15682'}"
+                        f":127.0.0.1:{_load_env_secret('LONGHU_REMOTE_PORT') or '15682'}",
+                  f"{_load_env_secret('LONGHU_SSH_USER')}@{_load_env_secret('LONGHU_SSH_HOST')}"],
+            cwd=HOME, out=os.path.join(N8N, "logs/owner-tunnel.log"),
+            err=os.path.join(N8N, "logs/owner-tunnel.log"), env={})]
+      if all(_load_env_secret(name) for name in
+             ("LONGHU_SSH_KEY_PATH", "LONGHU_SSH_USER", "LONGHU_SSH_HOST")) else []),
     dict(name="feishu-tunnel", kind="daemon",
          args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
                "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
@@ -85,6 +101,31 @@ TASKS = [
              err=os.path.join(N8N, "logs/itougu-table-watch.log"), env={"PYTHONUNBUFFERED": "1"}),
     ] if os.environ.get("ITOUGU_TABLE_WATCH") == "1" else []),
     # ---- 定时 interval (原 StartInterval, RunAtLoad) ----
+    # 老师复盘的每日闭环：结算已由 peer 的 peer_close_research 自己跑，策略稿已由
+    # harness 自动写，缺的是"策略稿 → 策略包 → 入池"和方法蒸馏这两段。每 20 分钟
+    # 看一眼最新任务，条件不足就什么都不做（gate 会拦住证据缺失的稿子）。
+    # 自动入池自 2026-09-25 起默认开启（owner 要求）。仍然过三道闸：gate（owner 通、
+    # 交接清单 completed、无阻断代码问题、正文核对 >= 50 个数字）、check 的 problems
+    # 为空、以及导入时间窗（目标就是今天且已开盘/已收盘一律不自动入池）。
+    # 设 TEACHER_CYCLE_AUTO_IMPORT=0 可关掉。
+    # 视频投递：47 edge 上的 itougu relay 每晚把「猎场擒龙内参」的复盘视频写成一行
+    # JSON 追加到 video-tasks.jsonl；这里读那份队列，有新的就建 harness 任务。
+    # 老师 19:10~21:40 之间发，所以 18:00 后每 10 分钟看一眼；一轮最多投一个。
+    dict(name="video.ingest", kind="interval", interval=600, run_at_load=False,
+         args=[PY, os.path.join(HARNESS, "ingest.py"), "--scheduled"],
+         cwd=HARNESS, out=os.path.join(N8N, "logs/video-ingest.log"),
+         err=os.path.join(N8N, "logs/video-ingest.log"),
+         env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1",
+              # NiceGUI 把 FastAPI 后端挂在 /backend 下；少了这一段建任务是 404。
+              "VIDEO_HARNESS_BASE_URL": os.environ.get("VIDEO_HARNESS_BASE_URL",
+                                                       "http://127.0.0.1:8765/backend")}),
+    dict(name="teacher.cycle", kind="interval", interval=1200, run_at_load=False,
+         args=[PY, os.path.join(N8N, "scripts/teacher_cycle.py")],
+         cwd=N8N, out=os.path.join(N8N, "logs/teacher-cycle.log"),
+         err=os.path.join(N8N, "logs/teacher-cycle.log"),
+         env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1",
+              "VIDEO_RESEARCH_API_BASE_URL": "http://127.0.0.1:15682",
+              "TEACHER_CYCLE_AUTO_IMPORT": os.environ.get("TEACHER_CYCLE_AUTO_IMPORT", "1")}),
     dict(name="paperkb.arxiv", kind="interval", interval=1800, run_at_load=True,
          args=[PY, os.path.join(PKB, "jobs.py"), "arxiv"],
          cwd=PKB, out=os.path.join(PKLOG, "arxiv.log"), err=os.path.join(PKLOG, "arxiv.log"),

@@ -161,7 +161,7 @@ class MigrationPinTests(unittest.TestCase):
         self.assertEqual(primary_source("quote.all_a_snapshot"), "fuyao_ths")
         self.assertEqual(primary_store_value("flow.stock_daily", "stock_money_flow_daily", "source"), "longhuvip_main_net")
         self.assertEqual(store_values("bars.adjustment_factor", "daily_adjustment_factors", "provider")[:2],
-                         ("longhu_qfq_derived", "tushare_primary"))
+                         ("longhu_qfq_derived", "tushare_super_sdk"))
         self.assertEqual(store_values("fundamentals.daily_basic", "daily_fundamentals", "provider"),
                          ("tushare_super_get", "longhuvip_composite"))
         self.assertNotIn("fuyao_ths_concept", taxonomies_for(["ths_concept"]))       # declared, not proven

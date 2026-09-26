@@ -43,6 +43,8 @@ PEER_KEY = os.path.expanduser(os.environ.get("PEER_SSH_KEY", "~/.ssh/stockpeer_e
 PEER_CONTAINER = os.environ.get("PEER_API_CONTAINER", "trading-hareness-peer-quant-research-1")
 PEER_APP_DIR = os.environ.get("PEER_APP_DIR", "/app/hotfix/current")
 CN = timezone(timedelta(hours=8))
+HARNESS_DIR = pathlib.Path(os.environ.get("VIDEO_HARNESS_DIR",
+                                          "/Users/papa/codebase/video_understanding_harness"))
 REQUIRED_HARNESS_FILES = ("transcript_large.srt", "provenance.json", "state.json")
 
 
@@ -94,6 +96,23 @@ def pool_markdown(pool: list[dict], title: str) -> str:
     return "\n".join(lines)
 
 
+def in_session_now(now: datetime) -> bool:
+    """现在是不是真的盘中。
+
+    以前写的是 ``now.weekday() < 5``：休市的工作日（中秋、国庆）也被当成交易日，
+    于是 09:15–15:00 之间 sweep 一律被拒，而每 20 分钟一轮的自动化就这么空转半天。
+    交易日历用 harness 里那份（XSHG），拿不到才退回工作日判断。
+    """
+    if not ((9, 15) <= (now.hour, now.minute) < (15, 0)):
+        return False
+    try:
+        sys.path.insert(0, str(HARNESS_DIR))
+        from teacher_strategy import is_trading_day
+        return is_trading_day(now.date())
+    except Exception:  # noqa: BLE001 - 日历不可用时退回工作日
+        return now.weekday() < 5
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("context", "check", "import", "outcome", "digest", "sweep", "status"))
@@ -121,7 +140,7 @@ def main() -> None:
     if args.command in {"digest", "sweep"}:
         trade_date = review_date_of(job, args.date)
         now = datetime.now(CN)
-        if args.command == "sweep" and now.weekday() < 5 and (9, 15) <= (now.hour, now.minute) < (15, 0):
+        if args.command == "sweep" and in_session_now(now):
             raise SystemExit("sweep replays a whole session of scan inputs; run it after the close, not during it")
         result = peer_ops([args.command, f"--date={trade_date.isoformat()}"], timeout=1800)
         if result.get("status") not in {"ok", "completed"}:
@@ -181,7 +200,7 @@ def main() -> None:
         sys.exit(0 if report["ok"] else 1)
 
     now = datetime.now(CN)
-    if now.weekday() < 5 and (9, 15) <= (now.hour, now.minute) < (15, 0):
+    if in_session_now(now):
         print("note: importing during the session - plans take effect from the next session", file=sys.stderr)
     result = peer_ops(["import", "--pack=-"], stdin=body, timeout=2400)
     write(job / f"import_report_{stem}.json", result)

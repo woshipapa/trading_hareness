@@ -76,7 +76,7 @@ def api_capability(api_name: str) -> ApiCapability:
         return ApiCapability(
             frequency="daily_or_event",
             decision_eligible=api_name in {"moneyflow", "moneyflow_dc", "cyq_perf", "cyq_chips", "stk_factor_pro"},
-            preferred_providers=("super", "primary"),
+            preferred_providers=("super",),
             status="verified" if api_name in VERIFIED_SUPER_APIS else "declared",
             note="Super gateway is preferred for specialty data; empty responses remain source evidence, not a successful signal.",
         )
@@ -84,7 +84,7 @@ def api_capability(api_name: str) -> ApiCapability:
         return ApiCapability(
             frequency="reference_daily",
             decision_eligible=True,
-            preferred_providers=("primary", "super", "backup"),
+            preferred_providers=("super", "backup"),
             status="verified",
             note="Reference-data route; the REST backup supports this endpoint only.",
         )
@@ -92,15 +92,15 @@ def api_capability(api_name: str) -> ApiCapability:
         return ApiCapability(
             frequency="daily_or_auction",
             decision_eligible=True,
-            preferred_providers=("super_get", "primary"),
+            preferred_providers=("super_get", "super"),
             status="verified",
-            note="The verified super GET gateway is the canonical equity daily route; the primary provider remains a fallback.",
+            note="The verified super GET gateway is the canonical equity daily route; the retired compatible REST source is excluded.",
         )
     if api_name in {"index_daily", "daily_basic", "adj_factor", "stk_limit", "suspend_d", "trade_cal", "stk_auction", "stk_auction_o", "stk_auction_c"}:
         return ApiCapability(
             frequency="daily_or_auction",
             decision_eligible=True,
-            preferred_providers=("primary", "super"),
+            preferred_providers=("super",),
             status="verified" if api_name in {"stk_auction_o", "stk_auction_c"} else "declared",
             note="Primary source is preferred for canonical daily and auction data.",
         )
@@ -109,14 +109,14 @@ def api_capability(api_name: str) -> ApiCapability:
         return ApiCapability(
             frequency=spec.frequency if spec else "event_or_periodic",
             decision_eligible=False,
-            preferred_providers=("super", "primary"),
+            preferred_providers=("super",),
             status="declared",
             note="Official catalog candidate within the configured package boundary; the super route is tried first, but only observed rows verify provider coverage.",
         )
     return ApiCapability(
         frequency="event_or_periodic",
         decision_eligible=False,
-        preferred_providers=("primary", "super"),
+        preferred_providers=("super",),
     )
 
 

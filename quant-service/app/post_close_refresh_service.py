@@ -184,7 +184,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         ),
         "index_context": lambda: dependencies.sync_strategy_index_context(trade_date),
         "close_market_snapshot": lambda: dependencies.build_market_snapshot(
-            MarketSnapshotRequest(session="close", universe_key="all_a", refresh_public_quotes=False),
+            # The close checkpoint is the owner-side collection boundary. Ask
+            # the capability resolver to refresh Fuyao and its bounded public
+            # fallbacks here; the snapshot gate still keeps those sources
+            # supplemental unless a separately configured licensed feed exists.
+            MarketSnapshotRequest(session="close", universe_key="all_a", refresh_public_quotes=True),
         ),
         "akshare_supplements": akshare_stage,
         "ths_industry_flow": (

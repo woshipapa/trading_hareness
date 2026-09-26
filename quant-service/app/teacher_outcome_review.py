@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 from . import teacher_review_repository as repo
 from . import strategy_change_log as changes
 from .strategy_outcome_measures import UNBUYABLE, measure
+from .teacher_buyability import buyability, buyability_line
 from .teacher_review_playbooks import ts_code
 from .teacher_review_rules import (
     MODEL_VERSION as RULES_VERSION,
@@ -54,6 +55,10 @@ FADE_PCT = 0.0
 LEARNING_SESSIONS = 20
 #: 一条 gating 条件在漏掉的大涨里卡到这个次数才进复核建议。
 SUGGEST_MIN_BLOCKS = 3
+#: 老师否定名单要累计到这么多只才给避开率，避免单日噪音。
+REJECTION_MIN_SAMPLE = 15
+#: 避开率低于这里，就把"老师这条否定逻辑的边界"顶到报告前面。
+REJECTION_WEAK_RATE_PCT = 65.0
 #: 单次复盘最多重放的股票数，保护收盘任务的时间预算。
 MAX_REPLAY_SYMBOLS = 80
 
@@ -152,6 +157,8 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
     seen: Counter[str] = Counter()
     absent: Counter[str] = Counter()
     last_value: dict[str, Any] = {}
+    structural_gates: set[str] = set()
+    observe_only = False
     evaluated = entry_scans = quote_gaps = 0
     closest: dict[str, Any] | None = None
     for row in rows:
@@ -160,9 +167,11 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
         watch = payload.get("watch")
         if not isinstance(watch, Mapping):
             continue
-        plan = active_plan(watch, observed_at)
+        plan = active_plan(watch, observed_at, include_observed=True)
         if plan is None:
             continue
+        if plan.get("observe_only"):
+            observe_only = True
         quote = payload.get("quote")
         if not isinstance(quote, Mapping) or quote.get("price") in (None, ""):
             quote_gaps += 1
@@ -197,6 +206,8 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
         for item in gating:
             label = str(item["name"])
             seen[label] += 1
+            if item.get("structural"):
+                structural_gates.add(label)
             if item["pass"] is False:
                 blocked[label] += 1
                 last_value[label] = item.get("value")
@@ -216,12 +227,13 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
     gates = [
         {"name": label, "blocked": blocked[label], "scans": seen[label],
          "share": round(blocked[label] / seen[label] * 100, 1) if seen[label] else None,
-         "last_value": last_value.get(label)}
+         "last_value": last_value.get(label),
+         **({"structural": True} if label in structural_gates else {})}
         for label in sorted(blocked, key=lambda key: (-blocked[key], key))
     ]
     return {
         "scans": len(rows), "evaluated": evaluated, "entry_scans": entry_scans, "quote_gaps": quote_gaps,
-        "gates": gates, "closest": closest,
+        "gates": gates, "closest": closest, **({"observe_only": True} if observe_only else {}),
         "unknown_gates": [{"name": label, "scans": unknown[label]} for label in sorted(unknown, key=lambda k: -unknown[k])],
         "missing_inputs": [{"name": label, "scans": absent[label]} for label in sorted(absent, key=lambda k: -absent[k])],
         "rules_version": RULES_VERSION,
@@ -299,8 +311,14 @@ BAR_FIELDS = ("open", "high", "low", "close", "pre_close", "limit_up_price", "pc
 
 def review_stocks(packs: Sequence[Mapping[str, Any]],
                   replays: Mapping[str, Mapping[str, Any]],
-                  *, benchmark_pct: float | None = None) -> list[dict[str, Any]]:
-    """把结算里的每只票合成一条复盘记录。"""
+                  *, benchmark_pct: float | None = None,
+                  minutes: Mapping[str, Sequence[Mapping[str, Any]]] | None = None) -> list[dict[str, Any]]:
+    """把结算里的每只票合成一条复盘记录。
+
+    ``minutes`` 是当日分钟证据（只需要"买不到"那几只）：有了它，"买不到"会进一步
+    分成一字板（无对手盘）和标记太晚，后者才是我们自己的问题。
+    """
+    minutes = minutes or {}
     items: list[dict[str, Any]] = []
     for pack in packs:
         for stock in pack.get("stocks") or []:
@@ -308,7 +326,11 @@ def review_stocks(packs: Sequence[Mapping[str, Any]],
             verdict = classify(stock, benchmark_pct=benchmark_pct)
             replay = replays.get(code)
             entry = stock.get("entry") or None
+            diagnosis = (buyability(minutes.get(code) or [],
+                                    limit_up_price=(stock.get("bar") or {}).get("limit_up_price"))
+                         if verdict["outcome"] == UNBUYABLE else None)
             items.append({
+                "buyability": diagnosis, "buyability_note": buyability_line(diagnosis),
                 "code": code, "name": stock.get("name"), "playbook": stock.get("playbook"),
                 "kind": stock.get("kind"), "stance": stock.get("stance"), "group": stock.get("group"),
                 "pack_id": pack.get("pack_id"), "review_date": pack.get("review_date"),
@@ -336,6 +358,50 @@ def _mean(values: Sequence[float]) -> float | None:
     return round(sum(values) / len(values), 2) if values else None
 
 
+def rejection_review(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """老师否定名单的滚动检验：避开率，以及被否定却涨上去的那些票涨了多少。
+
+    2026-09-24 否定名单里 6 只大涨（泰慕士 +10% 封板、先导基电 +7.9%、光智科技
+    盘中 +9.4%），9/23 是 14 只 —— 他对"到头了/差不多了"连续偏早。这一层不改
+    任何参数，只把边界量出来：避开的票躲掉了多少跌幅，没避开的错过了多少涨幅。
+    """
+    avoided: list[float] = []
+    missed: list[dict[str, Any]] = []
+    sealed_after_reject = 0
+    for report in reports:
+        for item in report.get("stocks") or []:
+            outcome = str(item.get("outcome") or "")
+            if outcome not in {"avoided", "avoid_missed"}:
+                continue
+            close = item.get("close_pct")
+            if outcome == "avoided":
+                if close is not None:
+                    avoided.append(float(close))
+                continue
+            missed.append({"code": item.get("code"), "name": item.get("name"),
+                           "date": str(report.get("trade_date") or ""),
+                           "close_pct": close, "high_pct": item.get("high_pct"),
+                           "playbook": item.get("playbook")})
+            if item.get("closed_at_limit"):
+                sealed_after_reject += 1
+    total = len(avoided) + len(missed)
+    rate = round(len(avoided) / total * 100, 1) if total else None
+    missed.sort(key=lambda row: -(row.get("high_pct") or row.get("close_pct") or 0))
+    review = {
+        "sample": total, "avoided": len(avoided), "avoid_missed": len(missed),
+        "avoid_rate_pct": rate,
+        "avoided_mean_close_pct": _mean(avoided),
+        "missed_mean_high_pct": _mean([float(row["high_pct"]) for row in missed if row.get("high_pct") is not None]),
+        "sealed_after_reject": sealed_after_reject,
+        "worst_calls": missed[:6],
+    }
+    if total >= REJECTION_MIN_SAMPLE and rate is not None and rate < REJECTION_WEAK_RATE_PCT:
+        review["note"] = (f"老师否定名单近 {total} 只只避开了 {rate}%，其中 {sealed_after_reject} 只当日封板；"
+                          "他的「到头了」偏早，值得把这条逻辑的边界写进下一份包的 uncertainty，"
+                          "但这不是参数问题，不要改阈值")
+    return review
+
+
 def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """按剧本累计命中与漏网，并把反复卡住大涨的条件列成复核建议。
 
@@ -347,6 +413,7 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     excess_pct: dict[str, list[float]] = defaultdict(list)
     forward_pct: dict[str, list[float]] = defaultdict(list)
     gate_blocks: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    setup_absent: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     data_gaps: Counter[str] = Counter()
     unpushed: list[dict[str, Any]] = []
     sessions: list[str] = []
@@ -362,7 +429,8 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             if outcome == "missed" and value is not None:
                 missed_pct[playbook].append(float(value))
                 replay = item.get("replay") or {}
-                if replay.get("entry_scans") and not item.get("entry"):
+                # 观察状态本来就不推送，不能算系统缺陷。
+                if replay.get("entry_scans") and not item.get("entry") and not replay.get("observe_only"):
                     unpushed.append({"code": item.get("code"), "name": item.get("name"), "date": trade_date,
                                      "playbook": playbook, "pct": value, "scans": replay["entry_scans"]})
                     continue
@@ -370,9 +438,12 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                     data_gaps[str(item["data_gap"]["name"])] += 1
                     continue
                 for gate in (replay.get("gates") or [])[:2]:
-                    gate_blocks[(playbook, str(gate.get("name")))].append(
-                        {"code": item.get("code"), "name": item.get("name"), "date": trade_date,
-                         "pct": value, "share": gate.get("share")})
+                    case = {"code": item.get("code"), "name": item.get("name"), "date": trade_date,
+                            "pct": value, "share": gate.get("share")}
+                    # 形态没出现（平台未形成、板块未异动）是规则正常拒绝，
+                    # 不能混进"建议放宽阈值"里 —— 那会把老师的纪律调松。
+                    target = setup_absent if gate.get("structural") else gate_blocks
+                    target[(playbook, str(gate.get("name")))].append(case)
             measures = item.get("measures") or {}
             if outcome in {"hit", "triggered_faded"}:
                 # Net of one round trip, and credited against the day's median,
@@ -409,9 +480,18 @@ def learning(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "examples": [f"{case['date']} {case['name'] or case['code']} {case['pct']:+.1f}%" for case in cases[:4]],
             "note": f"{playbook} 漏掉的大涨里，「{gate}」卡了 {len(cases)} 次，建议复核这条的阈值或取值口径",
         })
+    # 形态未出现：单独列出来给人看，明确写"不要据此放宽"。
+    setups = [{"playbook": playbook, "gate": gate, "cases": len(cases),
+               "mean_pct": _mean([case["pct"] for case in cases]),
+               "examples": [f"{case['date']} {case['name'] or case['code']} {case['pct']:+.1f}%" for case in cases[:4]],
+               "note": f"{playbook}：「{gate}」是形态/前提条件，{len(cases)} 次没出现即没买，"
+                       f"属于规则正常拒绝，不要据此放宽阈值"}
+              for (playbook, gate), cases in sorted(setup_absent.items(), key=lambda pair: -len(pair[1]))
+              if len(cases) >= SUGGEST_MIN_BLOCKS]
     return {
         "sessions": sorted(set(sessions)), "session_count": len(set(sessions)),
-        "playbooks": playbooks, "suggestions": suggestions,
+        "playbooks": playbooks, "suggestions": suggestions, "setup_absent": setups,
+        "rejection_review": rejection_review(reports),
         "data_gaps": [{"input": INPUT_LABELS.get(name, name), "missed_cases": count}
                       for name, count in data_gaps.most_common()],
         "unpushed": unpushed,
@@ -455,8 +535,12 @@ def outcome_text(trade_date: date, report: Mapping[str, Any]) -> str:
         lines.append("↘ " + _entry_line(item))
     for item in names(UNBUYABLE, 4):
         entry = item.get("entry") or {}
+        verdict = str((item.get("buyability") or {}).get("verdict") or "")
+        # 一字板和"标记太晚"要当场分开说：后者才是我们能改的。
+        tail = {"one_word": "｜一字板无对手盘", "late_mark": "｜实际有窗口，标记太晚",
+                "below_vwap_only": "｜窗口全在均价下方，规则本就过滤"}.get(verdict, "")
         lines.append(f"⊘ {item['name']} {entry.get('at', '')}@{entry.get('price')} 封板价触发，买不到"
-                     f"（当日 {item['close_pct']:+.1f}%，不计入胜率）")
+                     f"（当日 {item['close_pct']:+.1f}%，不计入胜率）{tail}")
     for item in names("missed", 6):
         tail = f"｜{item['blocked_by']}" if item.get("blocked_by") else "｜无扫描留痕"
         top = f"，盘中最高 {item['high_pct']:+.1f}%" if item.get("high_pct") is not None else ""
@@ -516,7 +600,8 @@ def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
                 f"{_signed(item.get('close_pct'))} | {_signed(item.get('high_pct'))} | {trigger} | "
                 f"{_signed(measures.get('net_session_return_pct'))} | "
                 f"{_signed(measures.get('excess_session_pct'))} | "
-                f"{_signed(measures.get('net_next_open_to_close_pct'))} | {item.get('blocked_by') or '—'} |")
+                f"{_signed(measures.get('net_next_open_to_close_pct'))} | "
+                f"{item.get('blocked_by') or item.get('buyability_note') or '—'} |")
         lines.append("")
     learned = report.get("learning") or {}
     if learned.get("playbooks"):
@@ -552,6 +637,29 @@ def outcome_markdown(trade_date: date, report: Mapping[str, Any]) -> str:
                          f"{suggestion['missed_cases']} 次，平均 {suggestion['mean_pct']:+.1f}%；"
                          f"例：{'、'.join(suggestion['examples'])}")
         lines.append("")
+    if learned.get("setup_absent"):
+        lines += ["## 形态/前提未出现（规则正常拒绝，**不要据此放宽**）", ""]
+        for setup in learned["setup_absent"]:
+            lines.append(f"- **{setup['playbook']} ·「{setup['gate']}」**：{setup['cases']} 次没出现，"
+                         f"这些票平均 {setup['mean_pct']:+.1f}%；例：{'、'.join(setup['examples'])}")
+        lines += ["", "> 这一节和上面的「条件复核建议」性质不同：平台没走出来、板块没异动，"
+                      "是老师的纪律本身在拒绝，放宽只会把纪律改掉。要动的是建包时的剧本选择。", ""]
+    rejection = learned.get("rejection_review") or {}
+    if rejection.get("sample"):
+        lines += ["## 老师否定名单的滚动检验（只量边界，不改参数）", "",
+                  f"近 {rejection['sample']} 只：避开 {rejection['avoided']} 只、否定却大涨 "
+                  f"{rejection['avoid_missed']} 只，**避开率 {_rate(rejection.get('avoid_rate_pct'))}**；"
+                  f"避开的当日平均 {_signed(rejection.get('avoided_mean_close_pct'))}，"
+                  f"没避开的盘中最高平均 {_signed(rejection.get('missed_mean_high_pct'))}，"
+                  f"其中当日封板 {rejection.get('sealed_after_reject', 0)} 只。", ""]
+        if rejection.get("worst_calls"):
+            lines += ["| 代码 | 名称 | 复盘日 | 收盘 | 盘中最高 |", "|---|---|---|---|---|"]
+            lines += [f"| {row['code']} | {row.get('name') or ''} | {row.get('date')} | "
+                      f"{_signed(row.get('close_pct'))} | {_signed(row.get('high_pct'))} |"
+                      for row in rejection["worst_calls"]]
+            lines.append("")
+        if rejection.get("note"):
+            lines += [f"> {rejection['note']}", ""]
     lines += ["---", "", "研究记录，不构成交易指令。"]
     return "\n".join(lines)
 
@@ -613,7 +721,14 @@ async def run(trade_date: date, deps: Any, *, alert: bool = True) -> dict[str, A
     replays = {code: gate_replay(ts_code(code), names.get(code, ""), rows.get(code) or [])
                for code in replay_codes if rows.get(code)}
     benchmark_pct = await _db(deps, repo.session_benchmark, trade_date)
-    stocks = review_stocks(packs, replays, benchmark_pct=benchmark_pct)
+    # Which names were flagged at the limit price is known before the minute
+    # read, so only those few sessions' tapes are loaded.
+    provisional = review_stocks(packs, replays, benchmark_pct=benchmark_pct)
+    unbuyable_codes = [str(item["code"]) for item in provisional if item["outcome"] == UNBUYABLE]
+    minutes = await _db(deps, repo.session_minutes, unbuyable_codes, trade_date,
+                        timeout_seconds=60) if unbuyable_codes else {}
+    stocks = (review_stocks(packs, replays, benchmark_pct=benchmark_pct, minutes=minutes)
+              if minutes else provisional)
     report: dict[str, Any] = {
         "trade_date": trade_date.isoformat(), "model_version": MODEL_VERSION, "rules_version": RULES_VERSION,
         "packs": len(packs), "stocks": stocks,

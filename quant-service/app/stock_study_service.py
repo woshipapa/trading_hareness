@@ -51,7 +51,6 @@ def _market_date(as_of: date) -> date:
 def _tushare_fetches(symbol: str, start: str, end: str, request: Any) -> list[tuple[str, Any]]:
     dated = {"ts_code": symbol, "start_date": start, "end_date": end}
     return [
-        ("主 Tushare 日线", request(api_name="daily", provider="primary", params=dated, fields="ts_code,trade_date,open,high,low,close,pre_close,vol,amount", max_rows=60)),
         ("超级源日线", request(api_name="daily", provider="super", params=dated, fields="ts_code,trade_date,open,high,low,close,pre_close,vol,amount", max_rows=60)),
         ("REST 备用基础信息", request(api_name="stock_basic", provider="backup", params={"ts_code": symbol, "limit": 3}, max_rows=3)),
         ("每日估值指标", request(api_name="daily_basic", params=dated, max_rows=60)),
@@ -80,7 +79,6 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
     realtime_active, realtime_reason = await deps.realtime_market_session()
     if realtime_active:
         fetches.extend([
-            ("主源实时分钟", deps.tushare_request(api_name="rt_min", provider="primary", params={"ts_code": symbol, "freq": "1MIN"}, max_rows=3)),
             ("超级源实时分钟", deps.tushare_request(api_name="rt_min", provider="super", params={"ts_code": symbol, "freq": "1MIN"}, max_rows=3)),
         ])
 
@@ -103,7 +101,6 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
     })
     if not realtime_active:
         sources.extend([
-            {"source": "主源实时分钟", "api_name": "rt_min", "provider": "primary", "status": "skipped", "received": 0, "stored": 0, "error": realtime_reason},
             {"source": "超级源实时分钟", "api_name": "rt_min", "provider": "super", "status": "skipped", "received": 0, "stored": 0, "error": realtime_reason},
         ])
     sources.extend(result[0] for result in free_results)
@@ -137,7 +134,7 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
         sources.append({"source": "巨潮公开公告", "api_name": "announcement", "provider": "cninfo_free",
                         "status": "failed", "received": 0, "stored": 0, "error": str(error)[:300]})
 
-    daily_rows = data["主 Tushare 日线"] or data["超级源日线"]
+    daily_rows = data["超级源日线"]
     technical = deps.technical_summary(daily_rows)
     claims, analyst = await deps.run_database(deps.analyst_claims, symbol)
     announcements = await deps.run_database(deps.recent_events, symbol, 20)
@@ -150,7 +147,7 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
         "symbol": symbol, "as_of_date": str(market_date), "lookback_days": request.lookback_days, "sources": sources,
         "on_demand_readiness": readiness,
         "market": {
-            "daily_bars": daily_rows[-45:], "latest_realtime": deps.latest_row(data.get("主源实时分钟", []) or data.get("超级源实时分钟", [])),
+            "daily_bars": daily_rows[-45:], "latest_realtime": deps.latest_row(data.get("超级源实时分钟", [])),
             "eastmoney_quote": free_data["东方财富公开报价"], "eastmoney_daily_bars": free_data["东方财富公开日线"],
             "akshare_daily_bars": free_data["AKShare公开日线"], "tencent_daily_bars": free_data["腾讯财经公开日线"],
             "sina_quote": free_data["新浪财经公开报价"], "latest_adj_factor": deps.latest_row(persisted_factor_rows),

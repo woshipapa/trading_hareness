@@ -18,7 +18,7 @@ class StockStudyServiceTests(unittest.TestCase):
             return payload
 
         async def fetch_tushare(label, payload):
-            if payload.api_name == "daily" and payload.provider == "primary":
+            if payload.api_name == "daily" and payload.provider == "super":
                 rows = [{"trade_date": "20260821", "close": 10.0}]
             elif payload.api_name == "stock_basic":
                 rows = [{"ts_code": "000001.SZ", "name": "测试"}]
@@ -81,7 +81,7 @@ class StockStudyServiceTests(unittest.TestCase):
         self.assertEqual(result["as_of_date"], "2026-08-21")
         self.assertFalse(any(getattr(item, "api_name", None) == "rt_min" for item in fetched_requests))
         skipped = [item for item in result["sources"] if item["api_name"] == "rt_min"]
-        self.assertEqual([item["status"] for item in skipped], ["skipped", "skipped"])
+        self.assertEqual([item["status"] for item in skipped], ["skipped"])
         self.assertEqual(result["events"]["decision_eligible"], False)
         self.assertEqual(result["market"]["tencent_daily_bars"][0]["close"], 10.0)
         self.assertFalse(any(getattr(item, "api_name", None) == "adj_factor" for item in fetched_requests))
@@ -110,6 +110,6 @@ class StockStudyServiceTests(unittest.TestCase):
         result = asyncio.run(build("000001.SZ", request, self.dependencies(realtime_active=True, fetched_requests=fetched_requests)))
 
         realtime_requests = [item for item in fetched_requests if getattr(item, "api_name", None) == "rt_min"]
-        self.assertEqual([item.provider for item in realtime_requests], ["primary", "super"])
+        self.assertEqual([item.provider for item in realtime_requests], ["super"])
         self.assertEqual(result["market"]["latest_realtime"]["close"], 10.1)
         self.assertIn("不构成交易指令", result["combined"]["notice"])

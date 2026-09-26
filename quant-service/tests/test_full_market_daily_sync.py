@@ -29,7 +29,7 @@ class FullMarketDailySyncTests(unittest.IsolatedAsyncioTestCase):
         attempted: list[str] = []
         rejected: list[tuple[str, str]] = []
         super_get = SimpleNamespace(key="tushare_super_get", name="super_get", get_gateway_mode="promax")
-        primary = SimpleNamespace(key="tushare_primary", name="primary")
+        fallback = SimpleNamespace(key="tushare_super_sdk", name="super_sdk")
 
         def rows(count: int) -> list[dict[str, object]]:
             return [
@@ -42,7 +42,7 @@ class FullMarketDailySyncTests(unittest.IsolatedAsyncioTestCase):
         async def call(_api, _params, _fields, preference, **kwargs):
             attempted.append(preference)
             pagination.append(kwargs)
-            provider = super_get if preference == "super_get" else primary
+            provider = super_get if preference == "super_get" else fallback
             return SimpleNamespace(
                 provider=provider, rows=rows(2 if preference == "super_get" else 5),
                 failed_providers=(), empty_providers=(),
@@ -50,7 +50,7 @@ class FullMarketDailySyncTests(unittest.IsolatedAsyncioTestCase):
 
         result = await sync(
             SimpleNamespace(trade_date=date(2026, 8, 21), provider="auto", minimum_rows=5),
-            provider_candidates=lambda *_args: [super_get, primary], cn_date=lambda: date(2026, 8, 21),
+            provider_candidates=lambda *_args: [super_get, fallback], cn_date=lambda: date(2026, 8, 21),
             call_tushare_api=call, looks_like_response_header=lambda _rows: False,
             tushare_date=lambda value: value, persist_tushare_rows=lambda *_args: 5,
             run_database_blocking=run_database, persist_tushare_fetch_blocked=lambda *_args: None,
@@ -61,14 +61,14 @@ class FullMarketDailySyncTests(unittest.IsolatedAsyncioTestCase):
             record_provider_api_capability=lambda *_args, **_kwargs: None,
         )
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["provider"], "tushare_primary")
-        self.assertEqual(attempted, ["super_get", "primary"])
+        self.assertEqual(result["provider"], "tushare_super_sdk")
+        self.assertEqual(attempted, ["super_get", "super_sdk"])
         self.assertEqual(rejected, [("tushare_super_get", "daily returned 2 valid A-share rows; expected at least 5")])
         self.assertEqual(database_timeouts, [None, 180])
-        # ProMax and the primary route use their native single-snapshot
-        # contracts; they must not receive unsupported limit/offset params.
-        self.assertEqual([item["paginate"] for item in pagination], [False, False])
-        self.assertEqual([item["require_complete"] for item in pagination], [False, False])
+        # ProMax uses its native single-snapshot contract; the SDK fallback
+        # retains the verified offset paging contract.
+        self.assertEqual([item["paginate"] for item in pagination], [False, True])
+        self.assertEqual([item["require_complete"] for item in pagination], [False, True])
 
     async def test_minimum_row_gate_participates_in_idempotency_key(self):
         class Connection:

@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from .free_market_providers import free_provider_status
 from .tushare_catalog import TUSHARE_CATALOG, catalog_counts, catalog_items
-from .tushare_providers import SUPER_GET_VERIFIED_APIS, provider_status
+from .tushare_providers import RETIRED_PROVIDER_KEYS, SUPER_GET_VERIFIED_APIS, provider_status
 
 
 def tushare_catalog_snapshot(
@@ -47,7 +47,10 @@ def project_tushare_catalog(
     for item in items:
         provider_observations = observations.get(str(item["api_name"]), {})
         item["provider_observations"] = provider_observations
-        item["primary_availability"] = provider_observations.get("tushare_primary", {}).get("availability", "unknown")
+        item["primary_availability"] = (
+            "retired" if "tushare_primary" in RETIRED_PROVIDER_KEYS
+            else provider_observations.get("tushare_primary", {}).get("availability", "unknown")
+        )
         item["super_sdk_availability"] = provider_observations.get("tushare_super_sdk", {}).get("availability", "unknown")
         item["super_get_availability"] = provider_observations.get("tushare_super_get", {}).get("availability", "unknown")
         item["super_availability"] = (

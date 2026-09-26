@@ -39,16 +39,16 @@ class AnnualDailyBackfillTests(unittest.TestCase):
         self.assertIn("moneyflow_cnt_ths", api_names)
         self.assertIn("top_list", api_names)
 
-    def test_daily_prefers_verified_get_with_primary_fallback(self):
+    def test_daily_prefers_verified_get_with_retired_primary_removed(self):
         daily = next(spec for spec in CORE_DAILY_SPECS if spec.api_name == "daily")
-        self.assertEqual(daily.provider_names, ("super_get", "super_sdk", "primary"))
+        self.assertEqual(daily.provider_names, ("super_get", "super_sdk", "backup"))
         self.assertEqual(daily.minimum_rows, 4_800)
 
-    def test_daily_controls_prefer_the_verified_city_path_before_primary(self):
+    def test_daily_controls_prefer_verified_routes_without_primary(self):
         by_api = {spec.api_name: spec for spec in CORE_DAILY_SPECS}
         for api_name in ("adj_factor", "stk_limit", "suspend_d"):
-            self.assertEqual(by_api[api_name].provider_names, ("super_sdk", "primary"))
-        self.assertEqual(by_api["daily_basic"].provider_names, ("super_get", "super_sdk", "primary"))
+            self.assertEqual(by_api[api_name].provider_names, ("super_sdk", "super_get", "backup"))
+        self.assertEqual(by_api["daily_basic"].provider_names, ("super_get", "super_sdk", "backup"))
 
     def test_historical_factor_backfill_only_promotes_positive_allowlisted_factors(self):
         source = Path("app/annual_daily_backfill.py").read_text(encoding="utf-8")
@@ -130,7 +130,7 @@ class AnnualDailyBackfillTests(unittest.TestCase):
     def test_calendar_validation_scales_to_the_requested_range(self):
         source = Path("app/annual_daily_backfill.py").read_text(encoding="utf-8")
         self.assertIn("expected_calendar_rows = (self.end_date - self.start_date).days + 1", source)
-        self.assertIn("provider_names=(\"super_sdk\", \"primary\")", source)
+        self.assertIn("provider_names=(\"super_sdk\", \"super_get\", \"backup\")", source)
         self.assertIn("calendar produced no open days for the requested range", source)
 
     def test_range_level_reference_tables_have_audited_fallbacks(self):

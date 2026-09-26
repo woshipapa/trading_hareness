@@ -142,6 +142,8 @@ def observation_source(quote: dict[str, Any] | None) -> str:
         return "longhuvip"
     if source == "fuyao_ths_all_a_snapshot":
         return "fuyao_ths"
+    if source == "akshare_tencent_all_a_snapshot":
+        return "akshare"
     return "unknown_realtime_source"
 
 
