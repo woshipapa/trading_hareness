@@ -9,7 +9,7 @@
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
 | `main.py` top-level functions | 496 |
-| Python modules under `app/` | 506 |
+| Python modules under `app/` | 507 |
 | HTTP router modules | 47 |
 | Alembic migrations | 107 |
 | Frontend source files | 37 |

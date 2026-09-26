@@ -356,3 +356,69 @@ class PriorSessionSentimentSqlTests(unittest.TestCase):
         # Written only after the scan: still unknown at scan time.
         self._reading(date(2099, 5, 7), "fermenting", datetime(2099, 5, 8, 3, tzinfo=timezone.utc))
         self.assertIsNone(read_prior_session_sentiment_cycle(self.connection, scan))
+
+
+@unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
+class RegimeStrataSqlTests(unittest.TestCase):
+    """Settled ledger outcomes read back next to their signal date's readings."""
+
+    symbols = ("990031.SH", "990032.SH")
+
+    def setUp(self) -> None:
+        import psycopg
+        from psycopg.rows import dict_row
+        self.connection = psycopg.connect(
+            host=os.getenv("PGHOST"), port=os.getenv("PGPORT", "5432"), dbname=os.getenv("PGDATABASE", "n8n"),
+            user=os.getenv("PGUSER", "n8n"), password=os.getenv("PGPASSWORD", ""), row_factory=dict_row,
+        )
+        from app.t1_settlement import SETTLEMENT_VERSION
+        for symbol in self.symbols:
+            self.connection.execute("INSERT INTO quant.instruments(symbol,exchange) VALUES(%s,'SH') ON CONFLICT DO NOTHING",
+                                    (symbol,))
+        # Two signal sessions: 2099-06-01 trend_up/fermenting, 2099-06-02 unread.
+        outcomes = [(date(2099, 6, 1), self.symbols[0], 0.03), (date(2099, 6, 1), self.symbols[1], 0.01),
+                    (date(2099, 6, 2), self.symbols[0], -0.02)]
+        for as_of_date, symbol, net in outcomes:
+            self.connection.execute(
+                """INSERT INTO quant.strategy_daily_candidates(strategy_key,as_of_date,symbol,source_table,score_scale)
+                   VALUES('regime_strata_test',%s,%s,'test','rank')""", (as_of_date, symbol))
+            self.connection.execute(
+                """INSERT INTO quant.strategy_daily_candidate_outcomes(strategy_key,as_of_date,symbol,entry_date,horizon_days,
+                       entry_price,exit_date,net_return,settlement_version)
+                   VALUES('regime_strata_test',%s,%s,%s,10,10,%s,%s,%s)""",
+                (as_of_date, symbol, as_of_date + timedelta(days=1), as_of_date + timedelta(days=12), net,
+                 SETTLEMENT_VERSION))
+        self.connection.execute(
+            """INSERT INTO quant.market_regime_daily(trading_date,model_version,regime_label,index_count)
+               VALUES('2099-06-01','test','trend_up',4)""")
+        self.connection.execute(
+            """INSERT INTO quant.sentiment_cycle_daily(trading_date,model_version,stage,sealed_count,broken_count,
+                   max_board_height,high_board_count) VALUES('2099-06-01','test','fermenting',0,0,0,0)""")
+
+    def tearDown(self) -> None:
+        self.connection.rollback()
+        self.connection.close()
+
+    def test_sessions_are_stratified_by_their_signal_date_readings(self) -> None:
+        from app.research_catalog_read_model import regime_strata
+
+        connection = self.connection
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self): return connection
+                    def __exit__(self, *_args): return False
+                return Context()
+
+        payload = regime_strata(Database(), date(2099, 7, 1), "regime_strata_test")
+        [line] = payload["strategies"]
+        self.assertEqual(line["all"]["sessions"], 2)
+        self.assertAlmostEqual(line["all"]["mean_net_return"], (0.02 + -0.02) / 2)
+        by_key = {(item["kind"], item["stratum"]): item for item in line["strata"]}
+        self.assertAlmostEqual(by_key[("regime", "trend_up")]["mean_net_return"], 0.02)
+        self.assertAlmostEqual(by_key[("sentiment_stage", "fermenting")]["mean_net_return"], 0.02)
+        self.assertAlmostEqual(by_key[("regime", "unknown")]["mean_net_return"], -0.02)
+        # Outcomes not settled by the as-of date are left out.
+        early = regime_strata(Database(), date(2099, 6, 13), "regime_strata_test")
+        self.assertEqual(early["strategies"][0]["all"]["sessions"], 1)

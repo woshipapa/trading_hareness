@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from .. import research_catalog_read_model as read_model
 from .. import async_research_catalog_read_repository as async_read_model
@@ -43,6 +44,12 @@ def build_research_catalog_reads_router(database: Any, async_database: Any | Non
     async def research_trials(family: str | None = None, limit: int = 200) -> dict[str, Any]:
         """Latest evaluation of every research variant, deflated for its family's trial count."""
         return await async_read_model.research_trials(async_database, family, limit) if async_database else read_model.research_trials(database, family, limit)
+
+    @router.get("/api/v1/research/regime-strata")
+    async def research_regime_strata(as_of_date: date | None = None, strategy_key: str | None = None) -> dict[str, Any]:
+        """Settled candidate-ledger outcomes by the index regime and sentiment stage of their signal date."""
+        day = as_of_date or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        return await async_read_model.regime_strata(async_database, day, strategy_key) if async_database else read_model.regime_strata(database, day, strategy_key)
 
     @router.get("/api/v1/strategies/experiments")
     async def experiments(universe_key: str = "core", limit: int = 50) -> dict[str, Any]:
