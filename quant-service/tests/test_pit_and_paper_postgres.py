@@ -298,3 +298,61 @@ class ResearchTrialSqlTests(unittest.TestCase):
         # Runs cleanly against the real schema even with no settled rows.
         self.assertEqual(evaluate_outcome_families(self.connection, date(2099, 3, 6)),
                          {"candidate_ledger": 0, "xiaojie_leader_flow": 0})
+
+
+@unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
+class PriorSessionSentimentSqlTests(unittest.TestCase):
+    """The ten-day rule reads the last closed session's cycle as known then."""
+
+    symbol = "990020.SH"
+
+    def setUp(self) -> None:
+        import psycopg
+        from psycopg.rows import dict_row
+        self.connection = psycopg.connect(
+            host=os.getenv("PGHOST"), port=os.getenv("PGPORT", "5432"), dbname=os.getenv("PGDATABASE", "n8n"),
+            user=os.getenv("PGUSER", "n8n"), password=os.getenv("PGPASSWORD", ""), row_factory=dict_row,
+        )
+        self.connection.execute("INSERT INTO quant.instruments(symbol,exchange) VALUES(%s,'SH') ON CONFLICT DO NOTHING",
+                                (self.symbol,))
+        # Sessions 2099-05-06 and 2099-05-07; each day's bars land after its close.
+        for day in (date(2099, 5, 6), date(2099, 5, 7)):
+            self.connection.execute(
+                """INSERT INTO quant.canonical_bars_daily(symbol,trading_date,open,high,low,close,pre_close,adj_factor,
+                       is_suspended,limit_up,limit_down,selected_provider,available_at)
+                   VALUES(%s,%s,10,10,10,10,10,1,false,11,9,'test',%s)""",
+                (self.symbol, day, datetime(day.year, day.month, day.day, 9, tzinfo=timezone.utc)),
+            )
+
+    def tearDown(self) -> None:
+        self.connection.rollback()
+        self.connection.close()
+
+    def _reading(self, day: date, stage: str, calculated_at: datetime) -> None:
+        self.connection.execute(
+            """INSERT INTO quant.sentiment_cycle_daily(trading_date,model_version,stage,sealed_count,broken_count,
+                   max_board_height,high_board_count,calculated_at)
+               VALUES(%s,'test',%s,0,0,0,0,%s)""",
+            (day, stage, calculated_at),
+        )
+
+    def test_the_last_closed_session_is_read_as_known_at_scan_time(self) -> None:
+        from app.sentiment_cycle_daily import read_prior_session_sentiment_cycle
+        self._reading(date(2099, 5, 6), "icepoint", datetime(2099, 5, 6, 12, tzinfo=timezone.utc))
+        self._reading(date(2099, 5, 7), "fermenting", datetime(2099, 5, 7, 12, tzinfo=timezone.utc))
+        # 10:00 Shanghai on 05-08: the prior session is 05-07.
+        scan = datetime(2099, 5, 8, 2, tzinfo=timezone.utc)
+        reading = read_prior_session_sentiment_cycle(self.connection, scan)
+        self.assertEqual((reading["trading_date"], reading["stage"]), (date(2099, 5, 7), "fermenting"))
+        # During 05-07's own session its reading is not yet known; 05-06 is.
+        during = read_prior_session_sentiment_cycle(self.connection, datetime(2099, 5, 7, 2, tzinfo=timezone.utc))
+        self.assertEqual((during["trading_date"], during["stage"]), (date(2099, 5, 6), "icepoint"))
+
+    def test_a_missing_or_late_reading_is_not_replaced_by_an_older_one(self) -> None:
+        from app.sentiment_cycle_daily import read_prior_session_sentiment_cycle
+        self._reading(date(2099, 5, 6), "fermenting", datetime(2099, 5, 6, 12, tzinfo=timezone.utc))
+        scan = datetime(2099, 5, 8, 2, tzinfo=timezone.utc)
+        self.assertIsNone(read_prior_session_sentiment_cycle(self.connection, scan))
+        # Written only after the scan: still unknown at scan time.
+        self._reading(date(2099, 5, 7), "fermenting", datetime(2099, 5, 8, 3, tzinfo=timezone.utc))
+        self.assertIsNone(read_prior_session_sentiment_cycle(self.connection, scan))

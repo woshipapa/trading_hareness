@@ -12,8 +12,9 @@ be counted as names that failed to reach one.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json
 
@@ -22,6 +23,7 @@ from .sentiment_cycle import MAX_LADDER_LOOKBACK, sentiment_reading
 #: Identifies the reading, so a later revision of the thresholds is separable
 #: from the rows judged under the current ones.
 MODEL_VERSION = "sentiment-cycle-v1"
+EXCHANGE_TZ = ZoneInfo("Asia/Shanghai")
 
 
 #: Earlier sessions are loaded board-only; the last one is loaded whole.
@@ -117,7 +119,32 @@ def read_sentiment_cycle(connection: Any, trading_date: date) -> dict[str, Any] 
     return dict(row) if row is not None else None
 
 
+def read_prior_session_sentiment_cycle(connection: Any, observed_at: datetime) -> dict[str, Any] | None:
+    """The last closed session's reading, as it was known at ``observed_at``.
+
+    The session is the latest one before ``observed_at``'s exchange date whose
+    bars were available by then, and its reading must have been written by
+    then too.  When that session's reading is missing, an older one is not
+    substituted: a stale cycle would read as current.
+    """
+    session_date = observed_at.astimezone(EXCHANGE_TZ).date()
+    prior = connection.execute(
+        """SELECT max(trading_date) AS trading_date FROM quant.canonical_bars_daily
+            WHERE trading_date < %s AND available_at <= %s""",
+        (session_date, observed_at),
+    ).fetchone()
+    prior_date = (prior or {}).get("trading_date")
+    if prior_date is None:
+        return None
+    row = connection.execute(
+        """SELECT trading_date,model_version,stage,calculated_at FROM quant.sentiment_cycle_daily
+            WHERE trading_date=%s AND calculated_at <= %s""",
+        (prior_date, observed_at),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
 __all__ = [
     "MODEL_VERSION", "backfill_sentiment_cycle", "materialize_sentiment_cycle",
-    "read_sentiment_cycle",
+    "read_prior_session_sentiment_cycle", "read_sentiment_cycle",
 ]
