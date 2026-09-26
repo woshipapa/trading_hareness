@@ -2,6 +2,7 @@ import os
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from unittest.mock import patch
 from uuid import UUID
 
 from app.raw_overflow_archive import DEFAULT_CAPABILITIES, RawOverflowConfig, capability_from_stream, next_batch, stream_key
@@ -95,7 +96,12 @@ class RawOverflowArchiveTests(unittest.TestCase):
 
         connection = _Connection(bytes_used=45 * 1024**3)
         config = RawOverflowConfig(enabled=True, capabilities=DEFAULT_CAPABILITIES)
-        state, reasons, storage = _storage_state(connection, config)
+        # The owner sets no override, so the default budget applies.  The
+        # local compose file sets a 36 GiB override, and CI runs the tests in
+        # that container, so the variable is removed for this test only.
+        with patch.dict(os.environ):
+            os.environ.pop("QUANT_HOT_DATABASE_SOFT_BYTES", None)
+            state, reasons, storage = _storage_state(connection, config)
         self.assertEqual(state, "normal")
         self.assertEqual(reasons, ())
         self.assertEqual(storage["hot_database_budget_bytes"], 300 * 1000**3)
