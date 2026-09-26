@@ -132,6 +132,21 @@ test('a LarkAgentX source message uses the existing relay ledger and fan-out', a
 	assert.equal(sent.length, 1);
 });
 
+test('a LarkAgentX history replay replaces only a previously sent card placeholder', async () => {
+	const { relay, sent, saved } = createHarness([]);
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: '767_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	const message = { message_id: 'larkx_history_card_1', msg_type: 'interactive', create_time: String(Date.now()), body: { content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '历史完整内容' }] } }) } };
+	saved.set(message.message_id, {
+		sourceMessageId: message.message_id, sourceKey: source.key, sourceChatId: source.resolvedChatId,
+		sourceCreateTime: Number(message.create_time), status: 'sent', message: { msg_type: 'text', body: { content: JSON.stringify({ text: '[card] [卡片] 📢 新动态 · 2026-09-26 22:48' }) } },
+		targetMessageIds: [{ targetChatId: 'oc_summary', messageId: 'old', msgType: 'text' }],
+	});
+	assert.equal((await relay.processInbound(message, source)).status, 'duplicate');
+	assert.equal((await relay.processInbound(message, source, { replacePlaceholder: true })).status, 'sent');
+	assert.equal(sent.length, 1);
+	assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n[interactive]\n历史完整内容');
+});
+
 test('a WebSocket ID and an official ID for the same source content are cross-deduplicated', async () => {
 	const stamp = Date.now();
 	const official = { message_id: 'om_official_same', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify(CARD_2_0_TRADING_NOTE) } };

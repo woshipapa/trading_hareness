@@ -1222,7 +1222,9 @@ async function handleLarkAgentXGroupRelayInbound(request, response) {
 			}
 		}
 		const resolvedChatId = message.oauth_chat_id || chatId;
-		const result = await groupRelay.processInbound({ ...message, source_chat_id: resolvedChatId }, { ...source, resolvedChatId, targetChatIds, targetChatId: targetChatIds[0] });
+		const result = await groupRelay.processInbound({ ...message, source_chat_id: resolvedChatId }, { ...source, resolvedChatId, targetChatIds, targetChatId: targetChatIds[0] }, {
+			replacePlaceholder: input?._larkagentx_force_placeholder === true,
+		});
 		response.writeHead(result.status === 'sent' ? 201 : 202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({ ...result, source_key: sourceKey, chat_id: chatId }));
 	} catch (error) {
