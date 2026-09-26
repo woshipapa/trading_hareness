@@ -148,3 +148,103 @@ class PointInTimeAndPaperSqlTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
+class T1SettlementSqlTests(unittest.TestCase):
+    """All three settlement lines, on real tables, through the shared T+1 rule."""
+
+    symbol = "990010.SH"
+
+    def setUp(self) -> None:
+        import psycopg
+        from psycopg.rows import dict_row
+        self.connection = psycopg.connect(
+            host=os.getenv("PGHOST"), port=os.getenv("PGPORT", "5432"), dbname=os.getenv("PGDATABASE", "n8n"),
+            user=os.getenv("PGUSER", "n8n"), password=os.getenv("PGPASSWORD", ""), row_factory=dict_row,
+        )
+        self.connection.execute("INSERT INTO quant.instruments(symbol,exchange) VALUES(%s,'SH') ON CONFLICT DO NOTHING",
+                                (self.symbol,))
+        # Signal day 2099-03-02, entry 03-03 at 10.00.  03-04 closes sealed at
+        # limit-down 9.00, so a 1-session idea rolls to 03-05 (8.60).
+        closes = [(date(2099, 3, 2), 10.0, 10.0, 10.0), (date(2099, 3, 3), 10.0, 10.0, 10.0),
+                  (date(2099, 3, 4), 9.0, 9.0, 10.0), (date(2099, 3, 5), 8.8, 8.6, 9.0)]
+        for day, open_, close, pre_close in closes:
+            self.connection.execute(
+                """INSERT INTO quant.canonical_bars_daily(symbol,trading_date,open,high,low,close,pre_close,adj_factor,
+                       is_suspended,limit_up,limit_down,selected_provider,available_at)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,1,false,%s,%s,'test',now())""",
+                (self.symbol, day, open_, max(open_, close), min(open_, close), close, pre_close,
+                 round(pre_close * 1.1, 2), round(pre_close * 0.9, 2)),
+            )
+
+    def tearDown(self) -> None:
+        self.connection.rollback()
+        self.connection.close()
+
+    def test_the_candidate_ledger_settles_under_t1_and_scores_outflow_as_bearish(self) -> None:
+        from app.strategy_daily_candidate_ledger import HORIZON_DAYS, settle_ledger_outcomes
+        from app.t1_settlement import SETTLEMENT_VERSION
+        for key in ("board_stock_mining_inflow", "board_stock_mining_outflow"):
+            self.connection.execute(
+                """INSERT INTO quant.strategy_daily_candidates(strategy_key,as_of_date,symbol,source_table,score_scale)
+                   VALUES(%s,'2099-03-02',%s,'test','unbounded_positive')""", (key, self.symbol))
+        # Ten sessions are not yet observable: nothing settles, nothing is written.
+        self.assertEqual(settle_ledger_outcomes(self.connection, date(2099, 3, 6)), 0)
+        self.assertEqual(HORIZON_DAYS, 10)
+
+    def test_recommendations_settle_through_the_shared_rule(self) -> None:
+        from app.outcome_recomputation import recompute
+        run_id = uuid.uuid4()
+        self.connection.execute(
+            """INSERT INTO quant.recommendation_runs(run_id,as_of_date,model_version,market_regime)
+               VALUES(%s,'2099-03-02','test','neutral')""", (run_id,))
+        self.connection.execute(
+            """INSERT INTO quant.recommendations(run_id,rank,symbol,decision,score,score_breakdown,explanation,direction,horizon_days)
+               VALUES(%s,1,%s,'research_candidate',1,'{}','["test"]',1,1)""", (run_id, self.symbol))
+
+        connection = self.connection
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self): return connection
+                    def __exit__(self, *_args): return False
+                return Context()
+
+        result = recompute(date(2099, 3, 6), cn_today=lambda: date(2099, 3, 6), db=Database(),
+                           recompute_intraday_signal_outcomes=lambda _day: {"outcome_rows": 0})
+        self.assertEqual(result["recommendation_outcomes"], 1)
+        row = self.connection.execute(
+            "SELECT * FROM quant.outcomes WHERE recommendation_run_id=%s", (run_id,)).fetchone()
+        # One-day horizon: bought 03-03 open, could not sell into the 03-04
+        # limit-down close, sold 03-05 at 8.60.
+        self.assertEqual(row["entry_date"], date(2099, 3, 3))
+        self.assertEqual(row["exit_date"], date(2099, 3, 5))
+        self.assertEqual(row["tradability"], "exit_rolled_past_blocked_session")
+        self.assertEqual(row["sessions_held"], 3)
+        self.assertAlmostEqual(float(row["raw_return"]), 8.6 / 10.0 - 1, places=9)
+        self.assertLess(float(row["net_return"]), float(row["raw_return"]))
+        self.assertEqual(row["settlement_version"], "t1-settlement-v1")
+        # A second run finds it current and does no work.
+        again = recompute(date(2099, 3, 6), cn_today=lambda: date(2099, 3, 6), db=Database(),
+                          recompute_intraday_signal_outcomes=lambda _day: {"outcome_rows": 0})
+        self.assertEqual(again["recommendation_outcomes"], 0)
+
+    def test_post_close_candidates_settle_through_the_shared_rule(self) -> None:
+        from app.post_close_candidate_outcomes import CandidateOutcomeTarget, settle_candidate_outcomes
+        run_id = uuid.uuid4()
+        self.connection.execute(
+            """INSERT INTO quant.post_close_strategy_runs(run_id,run_key,as_of_date,model_version,status)
+               VALUES(%s,'t1-test','2099-03-02','test','completed')""", (run_id,))
+        self.connection.execute(
+            """INSERT INTO quant.post_close_strategy_candidates(run_id,rank,symbol,candidate_type,score)
+               VALUES(%s,1,%s,'base_ready_30d',1)""", (run_id, self.symbol))
+        target = CandidateOutcomeTarget("post_close_strategy_candidates", "post_close_strategy_runs",
+                                        "post_close_strategy_candidate_outcomes", 2)
+        self.assertEqual(settle_candidate_outcomes(self.connection, date(2099, 3, 6), target), 1)
+        row = self.connection.execute(
+            "SELECT * FROM quant.post_close_strategy_candidate_outcomes WHERE run_id=%s", (run_id,)).fetchone()
+        self.assertEqual(row["exit_date"], date(2099, 3, 5))
+        self.assertEqual(row["direction"], 1)
+        self.assertEqual(settle_candidate_outcomes(self.connection, date(2099, 3, 6), target), 0)

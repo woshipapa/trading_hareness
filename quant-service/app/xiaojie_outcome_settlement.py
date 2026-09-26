@@ -9,12 +9,17 @@ Three returns are recorded because they answer different questions and the
 first live session showed they disagree sharply:
 
 ``session_return_pct``        entry price to that session's close - what the
-                              flag was worth on the day it fired.
-``entry_to_next_close_pct``   the continuation question.
-``next_open_to_close_pct``    the only one an account could actually have
-                              earned, since an entry at the flagged price is
-                              usually unavailable - a name flagged while locked
-                              at the limit cannot be bought at all.
+                              flag was marked at on the day it fired.  Under
+                              T+1 a buy cannot be sold that day, so this is a
+                              mark, not a return anyone realised.
+``entry_to_next_close_pct``   entry price to the next session's close - the
+                              earliest sale T+1 allows, so the first return an
+                              account that took the flag could realise.
+``next_open_to_close_pct``    the next session's open to its close.  Also a
+                              same-day round trip, so not realisable either;
+                              kept as a read on the following session's tape.
+                              (It was once described as the only earnable one;
+                              that overlooked T+1.)
 
 ``sealed_at_entry`` is carried as its own column because it decides whether a
 row is evaluable. On 2026-08-27, of 111 observations the 63 flagged while
@@ -153,9 +158,12 @@ def mode_scorecard(connection: Any, start_date: date, end_date: date,
     entries, and including them drags every mode toward zero for a reason that
     has nothing to do with whether the mode picks well.
 
-    Both gross and net columns are returned.  The win rate is counted on net,
+    Both gross and net columns are returned.  Win rates are counted on net,
     because a session that finishes ahead by less than a round trip was not a
-    win for the account that took it.
+    win for the account that took it.  ``t1_win_pct`` and the
+    ``entry_to_next_close`` columns are the realisable ones: T+1 makes the next
+    session's close the earliest sale.  The ``session`` columns are same-day
+    marks, retained for comparison with earlier reports.
     """
     rows = connection.execute(
         """SELECT mode,
@@ -167,6 +175,12 @@ def mode_scorecard(connection: Any, start_date: date, end_date: date,
                   round((100.0 * count(*) FILTER (WHERE net_session_return_pct > 0)
                          / nullif(count(*) FILTER (WHERE net_session_return_pct IS NOT NULL), 0))::numeric, 2)
                     AS session_win_pct,
+                  round(avg(entry_to_next_close_pct)::numeric, 4) AS avg_entry_to_next_close_pct,
+                  round(avg(entry_to_next_close_pct - round_trip_cost_pct)::numeric, 4)
+                    AS avg_net_entry_to_next_close_pct,
+                  round((100.0 * count(*) FILTER (WHERE entry_to_next_close_pct - round_trip_cost_pct > 0)
+                         / nullif(count(*) FILTER (WHERE entry_to_next_close_pct IS NOT NULL), 0))::numeric, 2)
+                    AS t1_win_pct,
                   round(avg(next_open_to_close_pct)::numeric, 4) AS avg_next_open_to_close_pct,
                   round(avg(net_next_open_to_close_pct)::numeric, 4) AS avg_net_next_open_to_close_pct,
                   count(*) FILTER (WHERE next_open_locked) AS next_open_locked

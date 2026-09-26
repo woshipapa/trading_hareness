@@ -67,7 +67,7 @@ class RemoteArchiveNormalizationTests(unittest.TestCase):
             date(2026, 8, 13), cn_today=lambda: date(2026, 8, 13), db=database,
             recompute_intraday_signal_outcomes=lambda _as_of: {"outcome_rows": 0},
         )
-        claim_query = next(sql for sql in statements if "WITH eligible AS" in sql)
+        claim_query = next(sql for sql in statements if "FROM quant.analyst_claims" in sql)
         self.assertIn("(c.available_at AT TIME ZONE 'Asia/Shanghai')::date", claim_query)
         self.assertNotIn("c.available_at::date", claim_query)
         self.assertEqual(result["claim_outcomes"], 0)
