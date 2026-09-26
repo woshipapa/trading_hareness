@@ -126,9 +126,81 @@ function cardImageResourcesFromLarkAgentX(input) {
 	}));
 }
 
+function richTextValueText(value) {
+	if (typeof value === 'object' && value !== null) {
+		for (const key of ['content', 'text', 'property']) {
+			const nested = richTextValueText(value[key]);
+			if (nested) return nested;
+		}
+		return '';
+	}
+	if (typeof value !== 'string') return '';
+	// CardContent serializes a text field as protobuf bytes coerced to a
+	// string. The first wire byte can show up as a control character, U+FFFD,
+	// or one ASCII marker before the actual analyst text.
+	return value
+		.replace(/[\u0000-\u001f\u007f-\u009f]/gu, '')
+		.replace(/^\s*[\uFFFD�]+/u, '')
+		.replace(/^\s*[A-Za-z](?=[\u3400-\u9fff])/u, '')
+		.trim();
+}
+
+function richTextCardText(input) {
+	const data = input?.content_data;
+	const richText = data?.richtext ?? data?.richText ?? data?.rich_text;
+	if (!richText || typeof richText !== 'object') return '';
+	const innerText = richTextValueText(richText.elements?.innerText ?? richText.innerText);
+	if (innerText) return innerText;
+	const dictionary = richText.elements?.dictionary ?? richText.dictionary;
+	if (!dictionary || typeof dictionary !== 'object') return '';
+	return Object.entries(dictionary)
+		.sort(([left], [right]) => Number(left) - Number(right))
+		.filter(([, element]) => element?.tag === undefined || Number(element?.tag) === 1)
+		.map(([, element]) => richTextValueText(element?.property ?? element))
+		.filter(Boolean)
+		.filter((text, index, values) => values.indexOf(text) === index)
+		.join('\n')
+		.trim();
+}
+
+function richTextCardImageResources(input) {
+	const data = input?.content_data;
+	const richText = data?.richtext ?? data?.richText ?? data?.rich_text;
+	const imageIds = Array.isArray(richText?.imageIds) ? richText.imageIds : [];
+	const resources = cardImageResourcesFromLarkAgentX(input);
+	const selected = imageIds.length
+		? imageIds.map((id) => resources.find((resource) => imageResourceMatchesId(resource, id))).filter(Boolean)
+		: resources;
+	const seen = new Set();
+	return selected.filter((resource) => {
+		if (seen.has(resource.image_id)) return false;
+		seen.add(resource.image_id);
+		return true;
+	}).map((resource) => ({
+		tag: 'img',
+		image_key: resource.image_id,
+		larkagentx_resource: resource,
+	}));
+}
+
+function richTextCardPost(input) {
+	const text = richTextCardText(input);
+	const images = richTextCardImageResources(input);
+	if (!text && !images.length) return null;
+	return {
+		zh_cn: {
+			title: '',
+			content: [
+				...(text ? portablePostRows(text) : []),
+				...images.map((image) => [image]),
+			],
+		},
+	};
+}
+
 export function hasLarkAgentXCardPayload(input) {
 	return ['CARD', 'INTERACTIVE'].includes(larkAgentXMessageType(input))
-		&& (Boolean(cardContentFromLarkAgentX(input)) || cardImageResourcesFromLarkAgentX(input).length > 0);
+		&& (Boolean(cardContentFromLarkAgentX(input)) || Boolean(richTextCardPost(input)) || cardImageResourcesFromLarkAgentX(input).length > 0);
 }
 
 function imageKeyFromLarkAgentX(input) {
@@ -215,6 +287,17 @@ export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) 
 	const upstreamType = larkAgentXMessageType(input);
 	if (['CARD', 'INTERACTIVE'].includes(upstreamType)) {
 		const card = cardContentFromLarkAgentX(input);
+		const richTextPost = card ? null : richTextCardPost(input);
+		if (richTextPost) {
+			return {
+				message_id: messageId,
+				msg_type: 'post',
+				create_time: input?.create_time ?? now(),
+				update_time: input?.update_time ?? null,
+				body: { content: JSON.stringify(richTextPost) },
+				sender: { sender_id: String(input?.from_id ?? input?.sender_id ?? '') },
+			};
+		}
 		if (!card) {
 			const images = cardImageResourcesFromLarkAgentX(input);
 			if (images.length) {
