@@ -197,7 +197,7 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 （`pit0001` 原本接在 `ds0001` 后面，合并时改为接在 `ds0005` 后面，所以没有额外的合并迁移。它还没有在任何共享库上执行过。）
 
-`20260923_0117` 的源码在 Mac、owner 主机历史 release 和 owner 镜像里都没有找到，只能从 Windows 工作站 `F:\AIWorkflow\trading_hareness` 或其他备份找回。**不能凭空补写**：下面第 4 步的"空版本标记"只有在用户明确同意后才能做。
+`20260923_0117` 的源码在 Mac、owner 主机历史 release、owner 镜像、Git 对象和可用部署归档中均未找到。用户已明确决定不再追溯这条旧迁移源码，因此本次采用仓库中的显式空版本标记和合并迁移。该标记只收敛 Alembic 版本，不声称恢复未知 DDL；新版本需要的表和列仍由仓库中的后续迁移创建，并必须通过 schema 回读确认。
 
 现状：owner 库的 `quant.alembic_version` 记录的是另一条迁移线（0095 起，2026-09-26 实测末端为 `20260923_0117`；以实际查询结果为准，下文用 `<owner_head>` 表示）的末端，本仓库没有这些迁移文件。在这种状态下执行 `alembic upgrade head` 会报 `Can't locate revision identified by '<owner_head>'`。本仓库以前处理过同样的情况：`20260902_0089_legacy_owner_bridge.py` 是一个空的版本标记，`20260905_0093_merge_legacy_owner.py` 是合并迁移。
 
@@ -209,16 +209,16 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
    ```
 
 2. 找回这条迁移线的原始迁移文件。首选来源是 B0 推送的 `sync/owner-d5c359d` 分支（owner 正在运行的代码）。其次是 Windows 工作站 `F:\AIWorkflow\trading_hareness` 里未跟踪的文件、owner 主机的历史 release 目录（阶段 A 的补充盘点）。
-3. **找到了**：新建分支 `sync/owner-migration-lineage-<date>`。
+3. **如果找到了**：新建分支 `sync/owner-migration-lineage-<date>`。
    - 把这些文件原样加入 `quant-service/migrations/versions/`。
    - 核对它们的 `down_revision` 链能接到仓库已有的某个版本（通常是 `20260906_0094`）。
    - 新增一个空的合并迁移，例如 `20260927_mrg0001`，`down_revision = ("<owner_head>", "<当前仓库 head>")`，写法照抄 `20260905_0093`。
    - 检查这条迁移线上的各个迁移与本仓库 `20260918_ds0001` 至 `20260926_srg0001` 是否创建了同名对象。本仓库这些迁移都用了 `IF NOT EXISTS`、`to_regclass` 判断或 `ON CONFLICT`，重复执行是安全的，但对方的写法需要逐个确认。
-4. **找不到**（必须先得到用户明确同意）：
-   - 新增空的版本标记 `<owner_head>`，`down_revision = "20260906_0094"`，写法照抄 `0089`；
+4. **找不到**（本次已得到用户明确同意）：
+   - 新增空的版本标记 `<owner_head>`，`down_revision = "20260906_0094"`，写法照抄 `0089`；本次实际文件为 `20260926_0117_legacy_owner_bridge.py`；
    - 再新增上面那个合并迁移。
    - 然后用 `pg_dump --schema-only -n quant` 导出 owner 库的 schema，与"空库迁移到仓库 head"导出的 schema 做 diff。只存在于 owner 库的对象，要补写成真正的新增迁移（`IF NOT EXISTS`），这样新环境才能和 owner 一致。
-   - 这一步没做完之前，在发布记录里注明"schema 差异未收敛"。
+   - 这一步没做完之前，在发布记录里注明"schema 差异未收敛"。本次发布记录还必须注明：旧 0117 的未知 DDL 未恢复，空标记只收敛版本线。
 5. 验证：
    - 在一个空库上执行 `node feishu-relay/adapter/initialize-ledger.mjs` 和 `python quant-service/database_bootstrap.py`，必须能迁移到新的唯一 head。
    - 把 owner 的 schema-only dump 恢复到一个临时库，执行 `alembic upgrade head`，必须成功。
@@ -229,7 +229,7 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 对每个用于发布的检出目录（Mac 仓库、Windows `F:\AIWorkflow\trading_hareness`）执行 `git status --porcelain`。有未提交的内容就拿去和 `origin/main` 比对：已经在 main 里的丢弃；需要保留的走 PR；拿不准的报告用户。**不要**把 `.env` 或 `*-secrets.env` 加进提交，`.gitignore` 现在已经忽略了 `intraday-secrets.env`。
 
-**B 阶段通过条件**：edge overlay 的内容和 owner 迁移线都已进入 `origin/main`；每个发布用的检出目录 `git status --porcelain` 都为空。
+**B 阶段通过条件**：edge overlay 的内容和 owner 迁移线都已进入 `origin/main`；每个发布用的检出目录 `git status --porcelain` 都为空；owner 的 schema 回读通过。旧 `20260923_0117` 的未知 DDL 不作为本次发布的完成条件，但必须保留在发布记录中。
 
 ---
 
@@ -480,6 +480,22 @@ scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
 
 ---
 
+### F6. 日常 Feishu relay 代码快速发布（不重建镜像）
+
+edge 的 adapter 镜像固定 Node 运行时和生产依赖；`hotfix/current` 是只读源码
+overlay。日常只改 `feishu-relay/adapter/`、`feishu-relay/bridge/`、配置注册表
+或前端源码时，使用：
+
+```bash
+feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply
+```
+
+脚本会先运行 adapter、bridge 和两个前端的检查，再把当前 Git 检出生成保留
+overlay，原子切换 `hotfix/current`，重启 adapter 和 bridge，不构建也不拉取镜像。
+它会校验 overlay 依赖 hash 与当前镜像一致；依赖、Dockerfile、compose 或 Node
+依赖清单变化时，必须回到固定镜像发布流程。edge 的 immutable image 发布仍使用
+`deploy-feishu-relay-edge-release.sh`，并在发布时强制关闭 overlay。
+
 ## 10. 阶段 G：owner Windows 工作站 API
 
 代码在阶段 D 已切到 `X`，这里只需重启并登记版本号。在安全窗口内执行，因为重启会让 Longhu 网关短暂不可用。
@@ -580,7 +596,7 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 - `.gitignore`：忽略 `intraday-secrets.env`。以前 `git add -A` 会把它提交进仓库。
 - 新增 `scripts/release-sync-status.sh`（只读巡检）及其测试 `scripts/release-sync-status.test.mjs`。
 
-2026-09-26 状态：B0（推送本地提交）已完成；edge overlay 的代码已经在同步分支里，并已合并进 PR #2（B1 只剩一次比对）。尚未解决：`20260923_0117` 的源码（B2，等待从 Windows 找回）；owner 接受哪些 DDL（D0，等待用户决定）；bridge 没有独立发布路径（建议增加 `--bridge-only`）；CI 中 2 个依赖真实行情数据的测试已改为按需运行（附录 A 第 3 项）。
+2026-09-26 状态：B0（推送本地提交）已完成；edge overlay 的代码已经在同步分支里，并已合并进 PR #2；`20260923_0117` 原始源码未找到，已按用户决定加入空版本标记和合并迁移；owner 执行全部迁移；bridge 继续随 edge overlay 发布；CI 中 2 个依赖真实行情数据的测试已改为按需运行（附录 A 第 3 项）。
 
 ## 附录 C：发布记录
 
