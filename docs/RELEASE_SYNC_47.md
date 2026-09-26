@@ -535,8 +535,9 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 - 先认出实际在用哪一种（`runtime_source=source-overlay` 或 `FEISHU_ADAPTER_HOTFIX_ENABLED=true`
   即判为 overlay），再校验那一种的契约，并把结果登记成 `release model` 一行；
 - **overlay**：`release` 必须含干净的期望 SHA 且不带 `-dirty`、`runtime_source` 必须是
-  `source-overlay`、overlay 标志必须为 `true`；镜像标签可以为空（overlay 复用现有镜像），
-  若存在则必须指向同一个 SHA；
+  `source-overlay`、overlay 标志必须为 `true`；overlay 可以复用旧的基础镜像，
+  因此 `runtime.env` 中的镜像标签可以为空或仍指向旧镜像。脚本同时读取运行容器的
+  image ID 和 `/app/package.json` 哈希，要求依赖清单与本次 Git SHA 一致；
 - **pinned-image**：仍按原来的契约校验（release 非 `hotfix*`、`runtime_source` 非 overlay、
   镜像标签含期望 SHA、overlay 标志为 false/unset）。
 
@@ -567,7 +568,9 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 ## 13. 以后每次同步的标准流程
 
-1. 所有改动经 PR 合入 `main`。overlay hotfix 只能作为临时手段，24 小时内必须提交并走正式发布，**不允许**长期运行在 `-dirty` 或 `hotfix-*` 上。
+1. 所有改动经 PR 合入 `main`。普通源码改动按 F5/F6 使用干净 Git SHA 的源码 overlay，
+   overlay 可以长期作为常规发布模型运行，但**不允许**运行在 `-dirty` release 上；依赖、
+   镜像、compose、systemd 或迁移变化必须按完整发布流程切换到新的 immutable image 和/或数据库结构。
 2. `scripts/release-sync-status.sh --sha origin/main`：记录回滚点，看清漂移。
 3. 有 hotfix 或未提交内容时，先做阶段 B。
 4. `X=origin/main`，推送 `edge-*` 标签，等镜像发布完成。

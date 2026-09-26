@@ -41,6 +41,8 @@ if [[ -z "$expected_ref" ]]; then
   expected_ref="origin/main"
 fi
 expected_sha="$(git -C "$repo_root" rev-parse --verify "${expected_ref}^{commit}")"
+expected_adapter_package_hash="$(git -C "$repo_root" show "$expected_sha:feishu-relay/adapter/package.json" \
+  | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
 
 edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
 edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
@@ -86,6 +88,8 @@ if [[ "$skip_edge" != true ]]; then
 edge_dir="$1"; runtime_env="$2"
 printf '@adapter_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:18300/health 2>/dev/null | tr -d '\n')"
 printf '@bridge_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:8090/health 2>/dev/null | tr -d '\n')"
+printf '@adapter_image_id %s\n' "$(docker inspect feishu-relay-edge-adapter --format '{{.Image}}' 2>/dev/null || true)"
+printf '@adapter_package_hash %s\n' "$(docker exec feishu-relay-edge-adapter sha256sum /app/package.json 2>/dev/null | awk '{print $1}' || true)"
 printf '@hotfix_current %s\n' "$(readlink "$edge_dir/hotfix/current" 2>/dev/null || true)"
 grep -E '^(FEISHU_ADAPTER_IMAGE|FEISHU_ADAPTER_HOTFIX_ENABLED|APP_GIT_SHA|APP_RELEASE)=' "$runtime_env" 2>/dev/null \
   | sed 's/^/@runtime_env /'
@@ -121,12 +125,13 @@ REMOTE_OWNER
   fi
 fi
 
-python3 - "$expected_sha" "$work_dir" "$skip_edge" "$skip_owner" <<'PY'
+python3 - "$expected_sha" "$expected_adapter_package_hash" "$work_dir" "$skip_edge" "$skip_owner" <<'PY'
 import json
 import pathlib
 import sys
 
-expected, work, skip_edge, skip_owner = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3] == "true", sys.argv[4] == "true"
+expected, expected_adapter_package_hash = sys.argv[1], sys.argv[2]
+work, skip_edge, skip_owner = pathlib.Path(sys.argv[3]), sys.argv[4] == "true", sys.argv[5] == "true"
 heads = [line for line in (work / "expected_heads").read_text().split() if line]
 rows, failures = [], 0
 
@@ -195,11 +200,17 @@ if not skip_edge:
                   "source-overlay")
             check("edge", "runtime.env overlay", env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "unset",
                   overlay_flag, "true")
-            # overlay 复用现有镜像，镜像标签可以没有；只要求它别指向别的 SHA。
+            check("edge", "adapter image id", first(edge, "adapter_image_id"),
+                  bool(first(edge, "adapter_image_id")), "running image id")
+            check("edge", "adapter dependency hash", first(edge, "adapter_package_hash"),
+                  first(edge, "adapter_package_hash") == expected_adapter_package_hash,
+                  expected_adapter_package_hash)
+            # overlay 复用现有镜像，runtime.env 的镜像标签可以为空或仍指向旧基础镜像。
+            # 实际运行镜像和依赖清单已由上面的 image id/package hash 校验覆盖。
             image = str(env.get("FEISHU_ADAPTER_IMAGE") or "")
             check("edge", "runtime.env image", image or "<none>",
-                  not image or expected[:12] in image,
-                  f"overlay 下可为空；若有则须含 {expected[:12]}")
+                  True,
+                  "overlay 复用现有镜像（可为空或旧镜像）")
         else:
             check("edge", "adapter release", release or "<none>", not release.startswith("hotfix"),
                   "pinned (not hotfix*)")
@@ -209,6 +220,11 @@ if not skip_edge:
                   expected[:12] in str(env.get("FEISHU_ADAPTER_IMAGE") or ""), f"...:{expected[:12]}...")
             check("edge", "runtime.env overlay", env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "unset",
                   not overlay_flag, "false/unset")
+            check("edge", "adapter image id", first(edge, "adapter_image_id"),
+                  bool(first(edge, "adapter_image_id")), "running image id")
+            check("edge", "adapter dependency hash", first(edge, "adapter_package_hash"),
+                  first(edge, "adapter_package_hash") == expected_adapter_package_hash,
+                  expected_adapter_package_hash)
         bridge = health(first(edge, "bridge_health"))
         bridge_release = str((bridge or {}).get("release") or "")
         check("edge", "larkagentx bridge", (bridge or {}).get("status"), (bridge or {}).get("status") == "ok", "ok")
