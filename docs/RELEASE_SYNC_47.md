@@ -633,3 +633,4 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 | 日期（上海） | X | L | edge 回滚点 | owner 回滚点（release / alembic） | 结果 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
 | | | | | | | |
+| 2026-09-26 | 37a4cca | — | `hotfix-20260926T091351Z-434e379115a8-371` | `20260926T164500Z-source-434e379` / `20260926_mrg0001` | `ALL CHECKS PASSED` | 合并后只读核验；两台机器运行代码仍为 `434e379`，未重启、未部署。日志：`~/release-sync-logs/20260926-0622-post-merge.txt` |
