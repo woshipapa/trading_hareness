@@ -458,6 +458,22 @@ ssh -i "$RELAY_EDGE_SSH_KEY" root@47.114.113.152 'curl -fsS http://127.0.0.1:183
 
 **通过条件**：`--skip-edge` 的巡检全部通过；guard 没有报出问题；scheduler 的服务状态正常（周末应显示 `standby`）。
 
+### F5. 日常 Python 代码快速发布（不重建镜像）
+
+owner 的量化镜像固定 Python、系统库和 wheelhouse；`/app/hotfix` 是只读的
+源码挂载。日常只改 `quant-service/app/` 或入口 Python 文件时，使用：
+
+```bash
+scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
+  --from-sha <active_sha> --apply
+```
+
+脚本会先比较两个 Git SHA。出现 `requirements.txt`、Dockerfile、compose、迁移或
+其他构建文件变化时直接拒绝，必须回到完整镜像发布和数据库迁移流程；纯代码发布
+会把 Git archive 写入 owner 的保留 release 目录，原子切换 `hotfix/current`，并用
+同一个基础镜像重建两个容器。健康接口会显示源码 SHA 和 release label。启动失败
+会自动恢复上一个源码指针并重启旧代码。旧 release 和镜像不会删除，便于回滚。
+
 ---
 
 ## 10. 阶段 G：owner Windows 工作站 API

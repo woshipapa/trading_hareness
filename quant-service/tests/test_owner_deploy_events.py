@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.owner_deploy_events import owner_deploy_status
 
@@ -41,7 +41,7 @@ class OwnerDeployEventTests(unittest.TestCase):
                 "release_id": "release-1",
                 "surfaces": {"http_api": True, "shared_tunnel": True},
                 "expected_seconds": 10,
-                "recorded_at": datetime(2026, 9, 20, 6, tzinfo=timezone.utc),
+                "recorded_at": datetime.now(timezone.utc) - timedelta(seconds=30),
             },
         ))
         self.assertEqual(result["status"], "in_progress")
@@ -55,6 +55,23 @@ class OwnerDeployEventTests(unittest.TestCase):
             (1, "deploy-2", "starting", "release-2", {"shared_tunnel": False}, 12, None),
         ))
         self.assertEqual(result["status"], "in_progress")
+        self.assertFalse(result["pause_writes"])
+
+    def test_old_starting_event_is_reported_stale_without_pausing_writes(self):
+        result = owner_deploy_status(_Connection(
+            {"present": True},
+            {
+                "event_id": 7,
+                "deploy_id": "deploy-old",
+                "phase": "starting",
+                "release_id": "release-old",
+                "surfaces": {"http_api": True, "shared_tunnel": True},
+                "expected_seconds": 10,
+                "recorded_at": datetime(2026, 9, 20, 6, tzinfo=timezone.utc),
+            },
+        ))
+        self.assertEqual(result["status"], "stale")
+        self.assertFalse(result["active"])
         self.assertFalse(result["pause_writes"])
 
 

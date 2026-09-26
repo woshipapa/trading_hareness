@@ -8,7 +8,8 @@ from app.raw_overflow_archive import DEFAULT_CAPABILITIES, RawOverflowConfig, ca
 
 
 class _Connection:
-    def __init__(self):
+    def __init__(self, bytes_used=900 * 1024 * 1024):
+        self.bytes_used = bytes_used
         self.rows = [
             {
                 "observation_id": UUID("00000000-0000-0000-0000-000000000001"),
@@ -23,7 +24,8 @@ class _Connection:
 
     def execute(self, sql, params=None):
         if "pg_total_relation_size" in sql:
-            return _Result({"bytes": 900 * 1024 * 1024})
+            self.storage_sql = sql
+            return _Result({"bytes": self.bytes_used})
         if "count(*)::int AS count" in sql:
             return _Result({"count": 0})
         if "SELECT effective_at,observation_id FROM quant.raw_archive_offsets" in sql:
@@ -87,6 +89,17 @@ class RawOverflowArchiveTests(unittest.TestCase):
         config = RawOverflowConfig(enabled=False, capabilities=("realtime_quote",), batch_rows=1)
         result = next_batch(NoDatabase(), stream=stream_key("realtime_quote"), limit=100, config=config)
         self.assertEqual(result, {"status": "disabled", "stream_key": stream_key("realtime_quote"), "rows": []})
+
+    def test_storage_budget_uses_owner_large_hot_tier_and_excludes_cold_tablespace(self):
+        from app.raw_overflow_archive import _storage_state
+
+        connection = _Connection(bytes_used=45 * 1024**3)
+        config = RawOverflowConfig(enabled=True, capabilities=DEFAULT_CAPABILITIES)
+        state, reasons, storage = _storage_state(connection, config)
+        self.assertEqual(state, "normal")
+        self.assertEqual(reasons, ())
+        self.assertEqual(storage["hot_database_budget_bytes"], 300 * 1000**3)
+        self.assertIn("c.reltablespace=0", connection.storage_sql)
 
 
 if __name__ == "__main__":
