@@ -343,6 +343,10 @@ class PostCloseBacktestRealDataTests(unittest.TestCase):
     exact same pure functions.
     """
 
+    # Needs ingested market history (it reads real bars, not a fixture), so it
+    # fails on any empty database, CI included.  Run it against a populated
+    # database with QUANT_REAL_DATA_TESTS=1.
+    @unittest.skipUnless(os.getenv("QUANT_REAL_DATA_TESTS") == "1", "set QUANT_REAL_DATA_TESTS=1 to run against real market data")
     def test_batched_scan_agrees_with_an_unbatched_direct_computation(self) -> None:
         run_date = date(2026, 8, 10)
         with db.transaction() as connection:

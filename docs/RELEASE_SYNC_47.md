@@ -235,7 +235,7 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 ## 6. 阶段 C：合并并确定发布 SHA
 
-1. PR #2 的 CI 一直是红的，原因在 `main` 的 CI 配置（见 PR 评论 `#issuecomment-5842937183`）。附录 A 的修复已经按用户要求加进 PR #2（`1daae6e`）。合并同步分支后（`e54cd2f`），本地模拟 CI 的结果是：2277 个后端测试里只剩 2 个依赖真实行情数据的测试失败，如何处理由用户决定。**在 CI 仍为红色时合并，必须先得到用户明确同意。**
+1. PR #2 的 CI 一直是红的，原因在 `main` 的 CI 配置（见 PR 评论 `#issuecomment-5842937183`）。附录 A 的修复已经按用户要求加进 PR #2（`1daae6e`）。合并同步分支后（`e54cd2f`），CI 在 2277 个后端测试上只剩 2 个依赖真实行情数据的测试失败。按用户 2026-09-26 的决定，这 2 个测试改为只在 `QUANT_REAL_DATA_TESTS=1` 时运行（附录 A 第 3 项）。**在 CI 仍为红色时合并，必须先得到用户明确同意。**
 
    注意：同步分支自带的测试以前是在旧镜像的容器里跑的（`docker compose exec quant-research …`），所以当时报告的 "1874 tests OK" 验证的是旧代码。以后必须在当前检出上运行，例如 `cd quant-service && python -m unittest discover -s tests -q`，或者先重建镜像再在容器里跑。
 2. PR #2 和阶段 B 的 PR 全部合并后：
@@ -550,7 +550,7 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
           docker compose run --rm --no-deps quant-research python -m unittest discover -s tests -q
 ```
 
-第 3 项是测试策略问题（例如只在显式开启真实数据测试时才运行这两个测试），由用户决定。在本地按上述方式模拟 CI，结果与 `main` 一致，只剩这 2 个测试失败。
+第 3 项：按用户 2026-09-26 的决定，这两个测试只在 `QUANT_REAL_DATA_TESTS=1` 时运行。要验证它们，就连到一个有真实行情的库（例如 owner 库的只读副本），设置 `QUANT_REAL_DATA_TESTS=1` 后单独运行。
 
 ## 附录 B：本次为统一同步所做的修复
 
@@ -560,7 +560,7 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 - `.gitignore`：忽略 `intraday-secrets.env`。以前 `git add -A` 会把它提交进仓库。
 - 新增 `scripts/release-sync-status.sh`（只读巡检）及其测试 `scripts/release-sync-status.test.mjs`。
 
-2026-09-26 状态：B0（推送本地提交）已完成；edge overlay 的代码已经在同步分支里，并已合并进 PR #2（B1 只剩一次比对）。尚未解决：`20260923_0117` 的源码（B2，等待从 Windows 找回）；owner 接受哪些 DDL（D0，等待用户决定）；bridge 没有独立发布路径（建议增加 `--bridge-only`）；CI 中 2 个依赖真实行情数据的测试（附录 A 第 3 项）。
+2026-09-26 状态：B0（推送本地提交）已完成；edge overlay 的代码已经在同步分支里，并已合并进 PR #2（B1 只剩一次比对）。尚未解决：`20260923_0117` 的源码（B2，等待从 Windows 找回）；owner 接受哪些 DDL（D0，等待用户决定）；bridge 没有独立发布路径（建议增加 `--bridge-only`）；CI 中 2 个依赖真实行情数据的测试已改为按需运行（附录 A 第 3 项）。
 
 ## 附录 C：发布记录
 
