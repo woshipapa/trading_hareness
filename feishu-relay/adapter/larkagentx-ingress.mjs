@@ -13,6 +13,20 @@ const DIRECT_RELAY_TYPES = new Set(['TEXT', 'SYSTEM', 'POST']);
 const URL_RE = /https?:\/\/[^\s<>'"\u3000<>「」『』（）()\[\]{}]+/giu;
 const LARK_IMAGE_CDN_RE = /^https?:\/\/s1-imfile\.feishucdn\.com\/static-resource\//iu;
 
+// CardContent uses this client-side banner when the card body is an image the
+// current client cannot render.  In the WebSocket payload it can be prefixed
+// by a protobuf text marker (the observed value is `5Upgrade...`).  It is a
+// transport placeholder, never analyst content, so it must not become the
+// text part of a webhook post.
+function isCardUnavailableNotice(value) {
+	const normalized = String(value ?? '')
+		.replace(/[\u0000-\u001f\u007f-\u009f\uFFFD�]/gu, '')
+		.trim();
+	return /^(?:\d+\s*)?upgrade to the latest app version to view the content$/iu.test(normalized)
+		|| normalized === '请升级至最新版本客户端，以查看内容'
+		|| normalized === '请升级至最新版本客户端以查看内容';
+}
+
 function cleanUrl(value) {
 	let url = String(value ?? '').trim();
 	while (/[.,!?;:，。！？；：、）)】》」』]$/u.test(url)) url = url.slice(0, -1);
@@ -150,7 +164,7 @@ function richTextCardText(input) {
 	const richText = data?.richtext ?? data?.richText ?? data?.rich_text;
 	if (!richText || typeof richText !== 'object') return '';
 	const innerText = richTextValueText(richText.elements?.innerText ?? richText.innerText);
-	if (innerText) return innerText;
+	if (innerText && !isCardUnavailableNotice(innerText)) return innerText;
 	const dictionary = richText.elements?.dictionary ?? richText.dictionary;
 	if (!dictionary || typeof dictionary !== 'object') return '';
 	return Object.entries(dictionary)
@@ -158,6 +172,7 @@ function richTextCardText(input) {
 		.filter(([, element]) => element?.tag === undefined || Number(element?.tag) === 1)
 		.map(([, element]) => richTextValueText(element?.property ?? element))
 		.filter(Boolean)
+		.filter((text) => !isCardUnavailableNotice(text))
 		.filter((text, index, values) => values.indexOf(text) === index)
 		.join('\n')
 		.trim();
