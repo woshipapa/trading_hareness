@@ -77,6 +77,46 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		instance.event_spool.record_filtered.assert_called_once()
 		instance.history_archive.append.assert_called_once()
 
+	def test_private_tail_repair_starts_after_recovered_cursor(self):
+		instance = object.__new__(bridge.Bridge)
+		instance.private_tail_repair_enabled = True
+		instance._private_tail_repair_in_flight = False
+		instance.private_tail_repair_window = 16
+		instance.private_gap_repair_chat_ids = set()
+		instance.websocket_chat_ids = {"7667390477875858612"}
+		instance.event_spool = Mock()
+		instance.event_spool.position_stats.return_value = {
+			"7667390477875858612": {
+				"last_position": 237,
+				"last_recovered_position": 261,
+			}
+		}
+		instance.private_tail_repair_count = 0
+		instance.last_private_tail_repair_at = None
+		instance.last_private_tail_repair_result = None
+		calls = []
+
+		async def repair(payload, *, reason):
+			calls.append((payload, reason))
+			return {
+				"requested": 16,
+				"recovered": 2,
+				"forwarded": 2,
+				"duplicates": 0,
+				"filtered": 0,
+				"failed": 0,
+			}
+
+		instance.repair_private_positions = repair
+		result = asyncio.run(instance.repair_private_tail_once())
+
+		self.assertEqual(result["recovered"], 2)
+		self.assertEqual(calls, [(
+			{"chat_id": "7667390477875858612", "start": 262, "end": 277},
+			"periodic_private_tail_repair",
+		)])
+		self.assertEqual(instance.private_tail_repair_count, 1)
+
 
 if __name__ == "__main__":
 	unittest.main()
