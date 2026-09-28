@@ -1718,6 +1718,11 @@ async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
             lambda: _read_persisted_factor_controls(as_of), timeout_seconds=30,
         )
 
+    async def persisted_controls(api_name: str, as_of: date, _expected_rows: int) -> Any:
+        return await run_database_blocking(
+            lambda: _read_persisted_control_rows(api_name, as_of), timeout_seconds=30,
+        )
+
     return await sync_full_market_daily_controls_isolated(
         trade_date,
         expected_daily_rows=full_market_daily_row_count,
@@ -1733,6 +1738,7 @@ async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
         record_provider_failure=record_provider_failure,
         record_provider_api_capability=record_provider_api_capability,
         read_persisted_factor_controls=persisted_factors,
+        read_persisted_control_rows=persisted_controls,
     )
 
 
@@ -1757,6 +1763,36 @@ async def reconcile_daily_controls(trade_date: date) -> dict[str, Any]:
 def _read_persisted_factor_controls(trade_date: date) -> dict[str, Any]:
     with db.transaction() as connection:
         return read_persisted_factor_controls(connection, trade_date)
+
+
+def _read_persisted_control_rows(api_name: str, trade_date: date) -> dict[str, Any] | None:
+    """Read a complete owner projection before using a remote fallback."""
+    if api_name != "stk_limit":
+        return None
+    with db.transaction() as connection:
+        provider_row = connection.execute(
+            """SELECT provider,count(DISTINCT symbol)::int AS symbols
+                 FROM quant.daily_trade_limits
+                WHERE trading_date=%s
+                  AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                GROUP BY provider ORDER BY symbols DESC,provider LIMIT 1""",
+            (trade_date,),
+        ).fetchone()
+        if not provider_row:
+            return None
+        provider = str(provider_row["provider"])
+        rows = connection.execute(
+            """SELECT symbol AS ts_code,to_char(trading_date,'YYYYMMDD') AS trade_date,
+                      limit_up,limit_down
+                 FROM quant.daily_trade_limits
+                WHERE trading_date=%s AND provider=%s
+                  AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')""",
+            (trade_date, provider),
+        ).fetchall()
+    return {
+        "rows": [dict(row) for row in rows], "provider": provider,
+        "trade_date": trade_date.isoformat(), "source": "owner_persisted_trade_limits",
+    }
 
 
 def upsert_sector_taxonomy(connection: Any, taxonomy_key: str, label: str, provider_key: str, metadata: dict[str, Any]) -> None:

@@ -67,6 +67,7 @@ async def sync(
     record_provider_failure: Callable[..., Any],
     record_provider_api_capability: Callable[..., Any],
     read_persisted_factor_controls: Callable[[date, int], Awaitable[Any]] | None = None,
+    read_persisted_control_rows: Callable[[str, date, int], Awaitable[Any]] | None = None,
 ) -> dict[str, Any]:
     """Fetch and promote exactly one date of controls after full-market daily.
 
@@ -99,6 +100,18 @@ async def sync(
         for api_name in CONTROL_APIS:
             if api_name in persisted_control_apis:
                 continue
+            if read_persisted_control_rows is not None:
+                persisted = await read_persisted_control_rows(api_name, trade_date, expected)
+                if persisted:
+                    persisted_rows = valid_rows(
+                        api_name, list(persisted.get("rows") or []), trade_date, parse_date,
+                    )
+                    minimum = 1 if api_name == "suspend_d" else max(1, int(expected * 0.95))
+                    if len(persisted_rows) >= minimum:
+                        results[api_name] = persisted
+                        rows_by_api[api_name] = persisted_rows
+                        persisted_control_apis.add(api_name)
+                        continue
             result = await call_tushare_api(
                 api_name, {"trade_date": stamp}, None, CONTROL_PROVIDER_PREFERENCE,
                 paginate=True, page_size=CONTROL_PAGE_SIZE, max_rows=CONTROL_MAX_ROWS,
@@ -174,6 +187,14 @@ async def sync(
             # source bar table is also a strategy/recovery input, so mirror
             # the verified same-provider controls there rather than leaving
             # its current date with NULLs.
+            def selected_provider(api_name: str) -> str:
+                result = results[api_name]
+                if api_name in persisted_control_apis:
+                    if api_name == "adj_factor":
+                        return "owner_persisted_adjustment_factor"
+                    return str(result.get("provider") or "owner_persisted")
+                return str(result.provider.key)
+
             connection.execute(
                 f"""UPDATE quant.market_bars_daily bar
                      SET adj_factor=selected_factor.adj_factor
@@ -198,14 +219,14 @@ async def sync(
                      FROM quant.daily_trade_limits limits
                     WHERE bar.trading_date=%s AND limits.trading_date=bar.trading_date
                       AND limits.symbol=bar.symbol AND limits.provider=%s""",
-                (trade_date, results["stk_limit"].provider.key),
+                (trade_date, selected_provider("stk_limit")),
             )
             connection.execute(
                 """UPDATE quant.market_bars_daily bar SET is_suspended=true
                      FROM quant.security_suspensions suspension
                     WHERE bar.trading_date=%s AND suspension.suspend_date=%s
                       AND suspension.symbol=bar.symbol AND suspension.provider=%s""",
-                (trade_date, trade_date, results["suspend_d"].provider.key),
+                (trade_date, trade_date, selected_provider("suspend_d")),
             )
             if st_rows and st_provider:
                 connection.execute(
@@ -235,6 +256,8 @@ async def sync(
         "providers": {
             api_name: (
                 "owner_persisted_adjustment_factor"
+                if api_name == "adj_factor" and api_name in persisted_control_apis
+                else str(result.get("provider") or "owner_persisted")
                 if api_name in persisted_control_apis
                 else result.provider.key
             )

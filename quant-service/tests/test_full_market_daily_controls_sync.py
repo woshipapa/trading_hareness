@@ -172,6 +172,14 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
             persisted_calls.append((day, expected))
             return {"rows": [{"ts_code": "000001.SZ", "trade_date": "20260821", "adj_factor": "1.2"}]}
 
+        async def persisted_controls(api_name, day, expected):
+            if api_name == "stk_limit":
+                return {
+                    "rows": [{"ts_code": "000001.SZ", "trade_date": "20260821", "limit_up": 11, "limit_down": 9}],
+                    "provider": "longhuvip_composite",
+                }
+            return None
+
         def parse(value):
             text = str(value)
             return date.fromisoformat(f"{text[:4]}-{text[4:6]}-{text[6:8]}")
@@ -184,12 +192,14 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
             record_provider_failure=lambda *_args: None,
             record_provider_api_capability=lambda *_args, **_kwargs: None,
             read_persisted_factor_controls=persisted,
+            read_persisted_control_rows=persisted_controls,
         )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(persisted_calls, [(trade_date, 1)])
         # adj_factor comes from the owner; the session's ST list is still read.
-        self.assertEqual(requested, ["daily_basic", "stk_limit", "suspend_d", "stock_st"])
+        self.assertEqual(requested, ["daily_basic", "suspend_d", "stock_st"])
         self.assertEqual(result["providers"]["adj_factor"], "owner_persisted_adjustment_factor")
+        self.assertEqual(result["providers"]["stk_limit"], "longhuvip_composite")
 
     async def test_a_failed_st_list_never_blocks_the_controls(self):
         trade_date = date(2026, 8, 21)
