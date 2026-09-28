@@ -174,6 +174,11 @@ async def sync(
                 api_name, {"trade_date": stamp}, None, CONTROL_PROVIDER_PREFERENCE,
                 paginate=True, page_size=CONTROL_PAGE_SIZE, max_rows=CONTROL_MAX_ROWS,
                 max_pages=CONTROL_MAX_PAGES, require_complete=True,
+                # The owner async read pool is dashboard-facing and may be
+                # saturated while this write repair runs.  Provider selection
+                # remains explicit and fail-closed on response completeness;
+                # a stale circuit read must not turn into an empty blocker.
+                blocked_provider_keys=set(),
             )
             rows = valid_rows(api_name, result.rows, trade_date, parse_date)
             if api_name != "suspend_d" and len(rows) < max(1, int(expected * 0.95)):

@@ -134,6 +134,7 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("INSERT INTO quant.instrument_lifecycle_evidence" in statement for statement in statements))
         # Every whole-market control call pages and refuses a short table.
         self.assertTrue(all(call.get("paginate") and call.get("require_complete") for call in paging))
+        self.assertTrue(all(call.get("blocked_provider_keys") == set() for call in paging[:4]))
         self.assertEqual(database_timeouts, [None, CONTROL_PERSIST_TIMEOUT_SECONDS])
         self.assertIn("UPDATE quant.canonical_bars_daily SET is_suspended=false,canonicalized_at=now() WHERE trading_date=%s", statements)
         self.assertIn("UPDATE quant.market_bars_daily SET is_suspended=false WHERE trading_date=%s", statements)
