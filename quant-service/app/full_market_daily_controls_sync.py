@@ -17,7 +17,7 @@ from typing import Any, Awaitable, Callable
 
 from .adjustment_factor_semantics import persisted_factor_semantics_sql
 from .owner_factor_repository import FACTOR_PROVIDER_ORDER
-from .replay_readiness_coverage import refresh_daily_coverage
+from .replay_readiness_coverage import COVERAGE_DEFINITION
 
 CONTROL_APIS = ("adj_factor", "daily_basic", "stk_limit", "suspend_d")
 # These are full-cross-section controls. The audited Super route is the only
@@ -42,6 +42,60 @@ CONTROL_MAX_PAGES = 8
 _A_SHARE = re.compile(
     r"^(?:(?:60[0135]|68[89])\d{3}\.SH|(?:000|001|002|003|300|301|302)\d{3}\.SZ|[489]\d{5}\.BJ)$"
 )
+
+
+def _refresh_same_day_coverage(connection: Any, trade_date: date) -> dict[str, int]:
+    """Refresh only the repaired date instead of rescanning historical rows."""
+    row = connection.execute(
+        """WITH bars AS MATERIALIZED (
+                 SELECT symbol
+                   FROM quant.canonical_bars_daily
+                  WHERE trading_date=%s AND symbol<>'000300.SH'
+                    AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                    AND quality_status='fresh' AND adj_factor>0
+             ), universe AS (
+                 SELECT count(DISTINCT symbol)::int AS expected_symbols
+                   FROM quant.universe_membership_history
+                  WHERE universe_key='all_a'
+                    AND effective_from<=%s
+                    AND (effective_to IS NULL OR effective_to>=%s)
+             )
+             SELECT coalesce(universe.expected_symbols,0)::int AS expected_symbols,
+                    count(DISTINCT bars.symbol)::int AS bar_symbols,
+                    count(DISTINCT fundamentals.symbol)::int AS fundamental_symbols,
+                    count(DISTINCT limits.symbol)::int AS limit_symbols
+               FROM bars CROSS JOIN universe
+               LEFT JOIN quant.daily_fundamentals fundamentals
+                 ON fundamentals.symbol=bars.symbol AND fundamentals.trading_date=%s
+                AND fundamentals.available_at < ((fundamentals.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+               LEFT JOIN quant.daily_trade_limits limits
+                 ON limits.symbol=bars.symbol AND limits.trading_date=%s
+                AND limits.available_at < ((limits.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+              GROUP BY universe.expected_symbols""",
+        (trade_date, trade_date, trade_date, trade_date, trade_date),
+    ).fetchone() or {}
+    expected = int(row.get("expected_symbols") or 0)
+    bars = int(row.get("bar_symbols") or 0)
+    fundamentals = int(row.get("fundamental_symbols") or 0)
+    limits = int(row.get("limit_symbols") or 0)
+    minimum = max(int(expected * 0.8 + 0.999999), 1000)
+    complete = expected >= 1000 and bars >= minimum and fundamentals >= minimum and limits >= minimum
+    connection.execute(
+        """INSERT INTO quant.replay_readiness_daily_coverage(
+               trading_date,expected_symbols,bar_symbols,fundamental_symbols,limit_symbols,
+               is_full_cross_section,coverage_definition,refreshed_at)
+             VALUES(%s,%s,%s,%s,%s,%s,%s,now())
+             ON CONFLICT(trading_date) DO UPDATE SET
+               expected_symbols=EXCLUDED.expected_symbols,bar_symbols=EXCLUDED.bar_symbols,
+               fundamental_symbols=EXCLUDED.fundamental_symbols,limit_symbols=EXCLUDED.limit_symbols,
+               is_full_cross_section=EXCLUDED.is_full_cross_section,
+               coverage_definition=EXCLUDED.coverage_definition,refreshed_at=EXCLUDED.refreshed_at""",
+        (trade_date, expected, bars, fundamentals, limits, complete, COVERAGE_DEFINITION),
+    )
+    return {
+        "expected_symbols": expected, "bar_symbols": bars,
+        "fundamental_symbols": fundamentals, "limit_symbols": limits,
+    }
 
 
 def valid_rows(api_name: str, rows: list[dict[str, Any]], trade_date: date, parse_date: Callable[[Any], date | None]) -> list[dict[str, Any]]:
@@ -246,7 +300,7 @@ async def sync(
                                 default=str, ensure_ascii=False)),
                 )
                 normalized["stock_st"] = len(st_rows)
-            refresh_daily_coverage(connection, trade_date, trade_date)
+            _refresh_same_day_coverage(connection, trade_date)
         return normalized
 
     # Four complete all-A payloads are promoted in one transaction.  The

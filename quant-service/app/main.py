@@ -1767,31 +1767,41 @@ def _read_persisted_factor_controls(trade_date: date) -> dict[str, Any]:
 
 def _read_persisted_control_rows(api_name: str, trade_date: date) -> dict[str, Any] | None:
     """Read a complete owner projection before using a remote fallback."""
-    if api_name != "stk_limit":
+    if api_name not in {"daily_basic", "stk_limit", "suspend_d"}:
         return None
     with db.transaction() as connection:
+        table, date_column = {
+            "daily_basic": ("quant.daily_fundamentals", "trading_date"),
+            "stk_limit": ("quant.daily_trade_limits", "trading_date"),
+            "suspend_d": ("quant.security_suspensions", "suspend_date"),
+        }[api_name]
         provider_row = connection.execute(
-            """SELECT provider,count(DISTINCT symbol)::int AS symbols
-                 FROM quant.daily_trade_limits
-                WHERE trading_date=%s
-                  AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                GROUP BY provider ORDER BY symbols DESC,provider LIMIT 1""",
+            f"""SELECT provider,count(DISTINCT symbol)::int AS symbols
+                  FROM {table}
+                 WHERE {date_column}=%s
+                   AND available_at < (({date_column}+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                 GROUP BY provider ORDER BY symbols DESC,provider LIMIT 1""",
             (trade_date,),
         ).fetchone()
         if not provider_row:
             return None
         provider = str(provider_row["provider"])
+        if api_name == "daily_basic":
+            projection = "symbol AS ts_code,to_char(trading_date,'YYYYMMDD') AS trade_date,close,turnover_rate,volume_ratio,pe,pb,total_share,float_share,total_mv,circ_mv"
+        elif api_name == "stk_limit":
+            projection = "symbol AS ts_code,to_char(trading_date,'YYYYMMDD') AS trade_date,limit_up,limit_down"
+        else:
+            projection = "symbol AS ts_code,to_char(suspend_date,'YYYYMMDD') AS trade_date,suspend_reason,resume_date"
         rows = connection.execute(
-            """SELECT symbol AS ts_code,to_char(trading_date,'YYYYMMDD') AS trade_date,
-                      limit_up,limit_down
-                 FROM quant.daily_trade_limits
-                WHERE trading_date=%s AND provider=%s
-                  AND available_at < ((trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')""",
+            f"""SELECT {projection}
+                  FROM {table}
+                 WHERE {date_column}=%s AND provider=%s
+                   AND available_at < (({date_column}+1)::timestamp AT TIME ZONE 'Asia/Shanghai')""",
             (trade_date, provider),
         ).fetchall()
     return {
         "rows": [dict(row) for row in rows], "provider": provider,
-        "trade_date": trade_date.isoformat(), "source": "owner_persisted_trade_limits",
+        "trade_date": trade_date.isoformat(), "source": f"owner_persisted_{api_name}",
     }
 
 

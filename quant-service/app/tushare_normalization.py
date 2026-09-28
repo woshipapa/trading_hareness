@@ -85,6 +85,57 @@ def _normalize_daily_rows(
     return normalized
 
 
+def _normalize_daily_basic_rows(
+    connection: Any, rows: list[dict[str, Any]], available_at: datetime, *,
+    date_parser: Callable[[Any], Any], decimal_or_none: Callable[[Any], Any],
+    safe_error_detail: Callable[[str, int], str], provider_key: str,
+) -> int | None:
+    """Batch the large daily-basic projection while preserving row fallback.
+
+    The owner database is reached through a tunnel.  A per-row UPSERT for a
+    5k-name cross-section makes the same request spend several minutes waiting
+    on network round trips.  ``None`` means the connection fake does not offer
+    a cursor or the batch was rejected, so the caller can use its row contract.
+    """
+    prepared: list[tuple[dict[str, Any], tuple[Any, ...]]] = []
+    for row in rows:
+        try:
+            symbol = str(row.get("ts_code") or "").upper()
+            trading_date = date_parser(row.get("trade_date"))
+            if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol) or not trading_date:
+                raise ValueError("daily_basic row needs ts_code and trade_date")
+            prepared.append((row, (
+                symbol, trading_date, decimal_or_none(row.get("close")),
+                decimal_or_none(row.get("turnover_rate")), decimal_or_none(row.get("volume_ratio")),
+                decimal_or_none(row.get("pe")), decimal_or_none(row.get("pb")),
+                decimal_or_none(row.get("total_share")), decimal_or_none(row.get("float_share")),
+                decimal_or_none(row.get("total_mv")), decimal_or_none(row.get("circ_mv")),
+                provider_key, available_at, Json(row),
+            )))
+        except Exception as error:  # noqa: BLE001 - preserve row-level warning semantics
+            _record_normalization_failure(connection, "daily_basic", error, row, safe_error_detail)
+    if not prepared or not hasattr(connection, "cursor"):
+        return None
+    statement = """INSERT INTO quant.daily_fundamentals(
+                   symbol,trading_date,close,turnover_rate,volume_ratio,pe,pb,total_share,float_share,total_mv,circ_mv,provider,available_at,raw)
+                 VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 ON CONFLICT(symbol,trading_date,provider) DO UPDATE SET
+                   close=EXCLUDED.close,turnover_rate=EXCLUDED.turnover_rate,
+                   volume_ratio=EXCLUDED.volume_ratio,pe=EXCLUDED.pe,pb=EXCLUDED.pb,
+                   total_share=EXCLUDED.total_share,float_share=EXCLUDED.float_share,
+                   total_mv=EXCLUDED.total_mv,circ_mv=EXCLUDED.circ_mv,
+                   available_at=EXCLUDED.available_at,raw=EXCLUDED.raw"""
+    try:
+        with connection.transaction():
+            with connection.cursor() as cursor:
+                cursor.executemany(statement, [parameters for _row, parameters in prepared])
+        return len(prepared)
+    except Exception:
+        # The caller's per-row path records the exact rejected rows after this
+        # savepoint rolls back, rather than losing a whole provider response.
+        return None
+
+
 def normalize_rows(
     connection: Any, api_name: str, rows: list[dict[str, Any]], available_at: datetime,
     *,
@@ -108,6 +159,14 @@ def normalize_rows(
             decimal_or_none=decimal_or_none, safe_error_detail=safe_error_detail,
             provider_key=provider_key,
         )
+    if api_name == "daily_basic":
+        batched = _normalize_daily_basic_rows(
+            connection, rows, available_at, date_parser=date_parser,
+            decimal_or_none=decimal_or_none, safe_error_detail=safe_error_detail,
+            provider_key=provider_key,
+        )
+        if batched is not None:
+            return batched
     normalized = 0
     for row in rows:
         try:

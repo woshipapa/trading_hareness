@@ -38,6 +38,28 @@ class _Connection:
             raise
 
 
+class _DailyBasicBatchConnection(_Connection):
+    def __init__(self):
+        super().__init__()
+        self.batches: list[tuple[str, list[tuple]]] = []
+
+    @contextmanager
+    def cursor(self):
+        connection = self
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def executemany(self, statement, parameters):
+                connection.batches.append((statement, list(parameters)))
+
+        yield Cursor()
+
+
 def _bar_type(**fields):
     return SimpleNamespace(**fields)
 
@@ -125,6 +147,28 @@ class DailyNormalizationBatchingTests(unittest.TestCase):
         )
         self.assertEqual(normalized, 2)
         self.assertEqual(len(seen), 2)
+
+    def test_daily_basic_uses_one_batched_projection_write(self):
+        connection = _DailyBasicBatchConnection()
+        rows = [
+            {"ts_code": "600176.SH", "trade_date": "20260918", "close": "51.0"},
+            {"ts_code": "000001.SZ", "trade_date": "20260918", "close": "12.0"},
+        ]
+        normalized = normalize_rows(
+            connection, "daily_basic", rows, AVAILABLE_AT,
+            core_apis=frozenset({"daily_basic"}),
+            date_parser=lambda value: date(2026, 9, 18) if value else None,
+            exchange_for=lambda symbol: symbol.rsplit(".", 1)[1],
+            is_st_security_name=lambda _name: False,
+            ensure_instrument=lambda *_args: None, upsert_bar=lambda *_args: None,
+            daily_bar_type=_bar_type,
+            decimal_or_none=lambda value: Decimal(str(value)) if value is not None else None,
+            safe_error_detail=lambda message, _limit: message, provider_key="tushare_super_get",
+        )
+        self.assertEqual(normalized, 2)
+        self.assertEqual(len(connection.batches), 1)
+        self.assertEqual(len(connection.batches[0][1]), 2)
+        self.assertIn("INSERT INTO quant.daily_fundamentals", connection.batches[0][0])
 
 
 if __name__ == "__main__":
