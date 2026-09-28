@@ -98,7 +98,8 @@ PY
 
 tar -C "$tmp_dir" --exclude='__pycache__' --exclude='*.pyc' -cf - . \
   | "${ssh_command[@]}" "$edge_host" "set -euo pipefail; rm -rf '$remote_stage'; install -d -m 0700 '$remote_stage'; tar -xf - -C '$remote_stage'"
-scp -q "${ssh_command[@]}" "$cookie_source" "$edge_host:$remote_stage/.xhs-cookie"
+scp -q -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=yes "$cookie_source" "$edge_host:$remote_stage/.xhs-cookie"
 
 "${ssh_command[@]}" "$edge_host" bash -s -- \
   "$edge_dir" "$runtime_env" "$secrets_env" "$remote_stage" "$workflow_id" \
