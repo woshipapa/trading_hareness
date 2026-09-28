@@ -77,6 +77,9 @@ MAX_PRODUCT_IMAGE_CHARS = 5000
 DEFAULT_MAX_RELAY_AGE_DAYS = 90
 MIN_MAX_RELAY_AGE_DAYS = 1
 MAX_MAX_RELAY_AGE_DAYS = 3650
+DEFAULT_STATE_HISTORY_LIMIT = 5000
+MIN_STATE_HISTORY_LIMIT = 500
+MAX_STATE_HISTORY_LIMIT = 50000
 # Stop at JSON/HTML quoting as well as whitespace.  Itougu video metadata can
 # be embedded inline as JSON, where an m3u8 URL is immediately followed by
 # `","videoName"...`; treating the whole non-whitespace run as the URL makes
@@ -849,6 +852,15 @@ def item_content_key(item):
     return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
+def state_history_limit():
+    """Bound valid upstream history without letting stale API rows evict it."""
+    try:
+        value = int(os.environ.get("ITOUGU_STATE_HISTORY_LIMIT", str(DEFAULT_STATE_HISTORY_LIMIT)))
+    except ValueError:
+        value = DEFAULT_STATE_HISTORY_LIMIT
+    return max(MIN_STATE_HISTORY_LIMIT, min(MAX_STATE_HISTORY_LIMIT, value))
+
+
 # ---------------- 飞书 ----------------
 def load_feishu_env():
     if os.environ.get("FEISHU_APP_ID") and os.environ.get("FEISHU_APP_SECRET"):
@@ -1058,12 +1070,13 @@ def load_state():
 
 def save_state(state):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    limit = state_history_limit()
     for bid, ids in state["seen"].items():
-        state["seen"][bid] = ids[-500:]     # 每个内参最多记 500 个已发 id
+        state["seen"][bid] = list(dict.fromkeys(ids))[-limit:]
     for bid, ids in state.get("content_seen", {}).items():
-        state["content_seen"][bid] = ids[-500:]
+        state["content_seen"][bid] = list(dict.fromkeys(ids))[-limit:]
     for bid, entries in state.get("deliveries", {}).items():
-        state["deliveries"][bid] = dict(list(entries.items())[-500:])
+        state["deliveries"][bid] = dict(list(entries.items())[-limit:])
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -1119,18 +1132,32 @@ def _deliver_new_unlocked(products=None, chat_ids=None, dry_run=False, bootstrap
                 continue
             content_key = item_content_key(item)
             stale = is_stale_item(item)
-            if stale or (content_key and content_key in content_seen):
-                state["seen"].setdefault(bid, []).append(aid)
-                if content_key:
-                    state["content_seen"].setdefault(bid, []).append(content_key)
-                if verbose and stale:
+            if stale:
+                # The endpoint currently leaks an endless stream of old rows
+                # with fresh append IDs. Never persist those IDs or their
+                # content hashes: doing so eventually evicts valid morning
+                # messages from the bounded dedupe history.
+                if verbose:
                     print("[%s] skip stale appendContentId=%s publish=%s" % (
                         name, aid, item.get("publishTime") or item.get("createTime")), flush=True)
+                continue
+            if content_key and content_key in content_seen:
+                # A changed append ID for an already delivered body is an
+                # upstream alias, not a new message. Do not grow `seen` with
+                # aliases; the content key is the durable dedupe boundary.
                 continue
             new.append(item)
         new.reverse()   # 旧→新 顺序发
         if bootstrap:
-            state["seen"][bid] = state["seen"].get(bid, []) + [str(it.get("appendContentId")) for it in items]
+            for it in items:
+                if is_stale_item(it):
+                    continue
+                aid = str(it.get("appendContentId") or "").strip()
+                if aid:
+                    state["seen"].setdefault(bid, []).append(aid)
+                content_key = item_content_key(it)
+                if content_key:
+                    state["content_seen"].setdefault(bid, []).append(content_key)
             if verbose:
                 print("[%s] bootstrap: 标记 %d 条为已读，不发送" % (name, len(items)), flush=True)
             continue
