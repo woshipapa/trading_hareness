@@ -16,18 +16,20 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 [--sha <git-sha>] [--edge-source-sha <git-sha>] [--skip-edge] [--skip-owner]" >&2
+  echo "usage: $0 [--sha <git-sha>] [--edge-source-sha <git-sha>] [--owner-source-sha <git-sha>] [--skip-edge] [--skip-owner]" >&2
   exit 2
 }
 
 expected_ref=""
 edge_source_ref=""
+owner_source_ref=""
 skip_edge=false
 skip_owner=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sha) [[ -n "${2:-}" ]] || usage; expected_ref="$2"; shift 2 ;;
     --edge-source-sha) [[ -n "${2:-}" ]] || usage; edge_source_ref="$2"; shift 2 ;;
+    --owner-source-sha) [[ -n "${2:-}" ]] || usage; owner_source_ref="$2"; shift 2 ;;
     --skip-edge) skip_edge=true; shift ;;
     --skip-owner) skip_owner=true; shift ;;
     *) usage ;;
@@ -46,6 +48,10 @@ expected_sha="$(git -C "$repo_root" rev-parse --verify "${expected_ref}^{commit}
 edge_source_sha=""
 if [[ -n "$edge_source_ref" ]]; then
   edge_source_sha="$(git -C "$repo_root" rev-parse --verify "${edge_source_ref}^{commit}")"
+fi
+owner_source_sha=""
+if [[ -n "$owner_source_ref" ]]; then
+  owner_source_sha="$(git -C "$repo_root" rev-parse --verify "${owner_source_ref}^{commit}")"
 fi
 
 edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
@@ -126,6 +132,8 @@ printf '@main_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:15682/health 2>/de
 printf '@scheduler_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:15683/health 2>/dev/null | tr -d '\n')"
 printf '@main_profile %s\n' "$(docker inspect "$main" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
   | sed -n 's/^QUANT_RUNTIME_PROFILE=//p' | head -1)"
+printf '@main_hotfix %s\n' "$(docker inspect "$main" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+  | sed -n 's/^QUANT_HOTFIX_ENABLED=//p' | head -1)"
 printf '@alembic %s\n' "$(docker exec "$main" python -c '
 import psycopg
 with psycopg.connect() as connection:
@@ -138,13 +146,14 @@ REMOTE_OWNER
   fi
 fi
 
-python3 - "$expected_sha" "$edge_source_sha" "$work_dir" "$skip_edge" "$skip_owner" <<'PY'
+python3 - "$expected_sha" "$edge_source_sha" "$owner_source_sha" "$work_dir" "$skip_edge" "$skip_owner" <<'PY'
 import json
 import pathlib
 import sys
 
-expected, edge_source, work, skip_edge, skip_owner = (
-    sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3]), sys.argv[4] == "true", sys.argv[5] == "true"
+expected, edge_source, owner_source, work, skip_edge, skip_owner = (
+    sys.argv[1], sys.argv[2], sys.argv[3], pathlib.Path(sys.argv[4]),
+    sys.argv[5] == "true", sys.argv[6] == "true"
 )
 heads = [line for line in (work / "expected_heads").read_text().split() if line]
 rows, failures = [], 0
@@ -232,11 +241,16 @@ if not skip_owner:
     else:
         link = first(owner, "release_link")
         check("owner", "~/trading_hareness", link, bool(link), "release symlink")
+        owner_expected = owner_source or expected
         for key, label in (("main_health", "quant-research :15682"), ("scheduler_health", "scheduler :15683")):
             payload = health(first(owner, key))
             build = (payload or {}).get("build") or {}
             check("owner", f"{label} /health", (payload or {}).get("status"), (payload or {}).get("status") == "ok", "ok")
-            check("owner", f"{label} git_sha", build.get("git_sha"), sha_matches(build.get("git_sha")), expected[:12])
+            check("owner", f"{label} git_sha", build.get("git_sha"), sha_matches(build.get("git_sha"), owner_expected), owner_expected[:12])
+            if owner_source:
+                check("owner", f"{label} release", build.get("release"), str(build.get("release") or "").startswith("owner-source-"), "owner-source-*")
+        if owner_source:
+            check("owner", "quant source-overlay", first(owner, "main_hotfix"), first(owner, "main_hotfix") == "true", "true")
         check("owner", "main runtime profile", first(owner, "main_profile"), first(owner, "main_profile") == "intraday_edge",
               "intraday_edge")
         revisions = [value for value in first(owner, "alembic").split(",") if value]

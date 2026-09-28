@@ -31,7 +31,7 @@ for path in pathlib.Path('quant-service/migrations/versions').glob('*.py'):
 print(",".join(sorted(revisions - parents)))
 `], { encoding: 'utf8' }).trim();
 
-function run({ edge, owner, edgeSourceSha = '' }) {
+function run({ edge, owner, edgeSourceSha = '', ownerSourceSha = '' }) {
 	const dir = mkdtempSync(join(tmpdir(), 'release-sync-test-'));
 	writeFileSync(join(dir, 'edge.out'), edge);
 	writeFileSync(join(dir, 'owner.out'), owner);
@@ -44,6 +44,7 @@ case " $* " in *" -p 3535 "*) cat "${dir}/owner.out" ;; *) cat "${dir}/edge.out"
 	chmodSync(fakeSsh, 0o755);
 	const args = ['scripts/release-sync-status.sh', '--sha', sha];
 	if (edgeSourceSha) args.push('--edge-source-sha', edgeSourceSha);
+	if (ownerSourceSha) args.push('--owner-source-sha', ownerSourceSha);
 	return spawnSync('bash', args, {
 		encoding: 'utf8',
 		env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, RELAY_EDGE_SSH_KEY: join(dir, 'key'), OWNER_PEER_SSH_KEY: join(dir, 'key') },
@@ -63,6 +64,7 @@ const convergedOwner = [
 	`@main_health ${health('owner-2026.09.26-sync')}`,
 	`@scheduler_health ${health('owner-2026.09.26-sync')}`,
 	'@main_profile intraday_edge',
+	'@main_hotfix false',
 	`@alembic ${heads}`,
 	'@intraday_secrets present',
 ].join('\n');
@@ -108,3 +110,12 @@ const sourceOverlay = run({ edge: sourceOverlayEdge, owner: convergedOwner, edge
 assert.equal(sourceOverlay.status, 0, sourceOverlay.stdout + sourceOverlay.stderr);
 assert.match(sourceOverlay.stdout, /ALL CHECKS PASSED/);
 console.log('an explicitly expected source-overlay release passes with a matching clean base sha');
+
+const sourceOwner = convergedOwner
+	.replace(`@main_health ${health('owner-2026.09.26-sync')}`, `@main_health ${health('owner-source-20260928')}`)
+	.replace(`@scheduler_health ${health('owner-2026.09.26-sync')}`, `@scheduler_health ${health('owner-source-20260928')}`)
+	.replace('@main_hotfix false', '@main_hotfix true');
+const sourceBoth = run({ edge: sourceOverlayEdge, owner: sourceOwner, edgeSourceSha: sha, ownerSourceSha: sha });
+assert.equal(sourceBoth.status, 0, sourceBoth.stdout + sourceBoth.stderr);
+assert.match(sourceBoth.stdout, /ALL CHECKS PASSED/);
+console.log('edge and owner source-overlay releases pass when both explicit base shas match');
