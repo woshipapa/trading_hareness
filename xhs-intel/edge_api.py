@@ -35,7 +35,13 @@ DELIVERY_INTERVAL = max(5, int(os.environ.get("XHS_DELIVERY_INTERVAL", "15")))
 
 def cookie_configured() -> bool:
     try:
-        return COOKIE_FILE.is_file() and bool(COOKIE_FILE.read_text(encoding="utf-8").strip())
+        value = COOKIE_FILE.read_text(encoding="utf-8").strip() if COOKIE_FILE.is_file() else ""
+        fields = {
+            item.split("=", 1)[0].strip()
+            for item in value.split(";")
+            if "=" in item
+        }
+        return "a1" in fields and "web_session" in fields
     except OSError:
         return False
 

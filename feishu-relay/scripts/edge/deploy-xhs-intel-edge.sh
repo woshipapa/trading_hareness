@@ -25,10 +25,11 @@ edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
 secrets_env="${RELAY_EDGE_SECRETS_ENV:-/etc/feishu-relay-edge/secrets.env}"
 cookie_file="${XHS_COOKIE_FILE:-/etc/feishu-relay-edge/xhs-cookie}"
+cookie_source="${XHS_COOKIE_SOURCE:-$HOME/.config/xhs/xhs-cookie}"
 xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77}"
 workflow_id="xhs-intel-edge-daily-v1"
 
-for command in ssh tar python3; do
+for command in ssh scp tar python3; do
   command -v "$command" >/dev/null || { echo "missing required command: $command" >&2; exit 127; }
 done
 [[ -r "$edge_key" ]] || { echo "edge SSH key is not readable" >&2; exit 2; }
@@ -54,6 +55,20 @@ if [[ "$apply" != true ]]; then
   exit 0
 fi
 
+[[ -r "$cookie_source" ]] || {
+  echo "XHS cookie source is not readable: $cookie_source" >&2
+  exit 2
+}
+COOKIE_SOURCE="$cookie_source" python3 - <<'PY'
+import os
+from pathlib import Path
+
+value = Path(os.environ["COOKIE_SOURCE"]).read_text(encoding="utf-8").strip()
+fields = {item.split("=", 1)[0].strip() for item in value.split(";") if "=" in item}
+if not {"a1", "web_session"}.issubset(fields):
+    raise SystemExit("XHS cookie source must contain a1 and web_session")
+PY
+
 # Keep the worker and edge API on one random token without printing it. This is
 # deliberately done only on --apply so a dry run has no secret side effect.
 if [[ -n "${XHS_COLLECTOR_TOKEN:-}" ]]; then
@@ -78,13 +93,15 @@ PY
 
 tar -C "$tmp_dir" --exclude='__pycache__' --exclude='*.pyc' -cf - . \
   | "${ssh_command[@]}" "$edge_host" "set -euo pipefail; rm -rf '$remote_stage'; install -d -m 0700 '$remote_stage'; tar -xf - -C '$remote_stage'"
+scp -q "${ssh_command[@]}" "$cookie_source" "$edge_host:$remote_stage/.xhs-cookie"
 
 "${ssh_command[@]}" "$edge_host" bash -s -- \
   "$edge_dir" "$runtime_env" "$secrets_env" "$remote_stage" "$workflow_id" \
-  "$xhs_token" "${XHS_FEISHU_WEBHOOK_URL:-}" "$cookie_file" "$xhs_chat_ids" <<'REMOTE'
+  "$xhs_token" "${XHS_FEISHU_WEBHOOK_URL:-}" "$cookie_file" "$xhs_chat_ids" \
+  "$remote_stage/.xhs-cookie" <<'REMOTE'
 set -euo pipefail
 edge_dir="$1"; runtime_env="$2"; secrets_env="$3"; stage="$4"; workflow_id="$5"
-xhs_token="$6"; xhs_webhook="$7"; xhs_cookie_file="$8"; xhs_chat_ids="$9"
+xhs_token="$6"; xhs_webhook="$7"; xhs_cookie_file="$8"; xhs_chat_ids="$9"; cookie_stage="${10}"
 bridge_env=/etc/larkagentx-group-relay.env
 exec 9>/var/lock/xhs-intel-edge.lock
 flock -w 120 9
@@ -95,8 +112,18 @@ rm -rf "$edge_dir/xhs-intel" "$edge_dir/xhs-source"
 cp -a "$stage/xhs-intel" "$edge_dir/xhs-intel"
 cp -a "$stage/xhs-source" "$edge_dir/xhs-source"
 cp "$stage/docker-compose.yml" "$edge_dir/docker-compose.yml"
+test -s "$cookie_stage"
 install -d -m 0700 "$(dirname "$xhs_cookie_file")"
-if [ ! -e "$xhs_cookie_file" ]; then install -m 0600 /dev/null "$xhs_cookie_file"; fi
+install -o root -g root -m 0600 "$cookie_stage" "$xhs_cookie_file"
+python3 - "$xhs_cookie_file" <<'PY'
+from pathlib import Path
+import sys
+
+value = Path(sys.argv[1]).read_text(encoding="utf-8").strip()
+fields = {item.split("=", 1)[0].strip() for item in value.split(";") if "=" in item}
+if not {"a1", "web_session"}.issubset(fields):
+    raise SystemExit("remote XHS cookie validation failed")
+PY
 
 update_env() {
   file="$1"; key="$2"; value="$3"; temp="$(mktemp "${file}.XXXXXX")"
