@@ -102,6 +102,23 @@ TASKS = [
                "-N","-L","127.0.0.1:18300:127.0.0.1:18300","root@47.114.113.152"],
          cwd=HOME, out=os.path.join(N8N,"logs/feishu-tunnel.log"),
          err=os.path.join(N8N,"logs/feishu-tunnel.log"), env={}),
+    # 小红书 edge API 的 loopback forward。采集器一直运行在 edge，本地只
+    # 领取摘要任务并调用 Paper-KB 的 codex-teleai provider。
+    dict(name="xhs-edge-tunnel", kind="daemon",
+         args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
+               "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
+               "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
+               "-N","-L","127.0.0.1:18790:127.0.0.1:18790","root@47.114.113.152"],
+         cwd=HOME, out=os.path.join(N8N,"logs/xhs-edge-tunnel.log"),
+         err=os.path.join(N8N,"logs/xhs-edge-tunnel.log"), env={}),
+    dict(name="xhs-ai-worker", kind="daemon",
+         args=[PY, os.path.join(N8N, "xhs-intel/local_worker.py")],
+         cwd=N8N, out=os.path.join(N8N, "logs/xhs-ai-worker.log"),
+         err=os.path.join(N8N, "logs/xhs-ai-worker.log"),
+         env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1",
+              "XHS_EDGE_URL": "http://127.0.0.1:18790",
+              "XHS_COLLECTOR_TOKEN": _load_env_secret("XHS_COLLECTOR_TOKEN"),
+              "XHS_AI_WORKER_ID": "mac-codex-teleai"}),
     # Paper-KB lives on this workstation while the always-on Feishu adapter
     # runs on edge.  Keep its command webhooks on a loopback-only reverse SSH
     # forward so 收录/查询/反馈 do not depend on an edge n8n workflow copy.
