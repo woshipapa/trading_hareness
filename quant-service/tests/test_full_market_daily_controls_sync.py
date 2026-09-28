@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from pydantic import ValidationError
 
-from app.full_market_daily_controls_sync import CONTROL_PERSIST_TIMEOUT_SECONDS, sync, valid_rows
+from app.full_market_daily_controls_sync import CONTROL_PERSIST_TIMEOUT_SECONDS, CONTROL_PROVIDER_PREFERENCE, sync, valid_rows
 from app.request_models import FullMarketDailyControlsSyncRequest
 
 
@@ -102,9 +102,11 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
             return action(*args)
 
         paging: list[dict] = []
+        requested_providers: list[str] = []
 
-        async def fetch(api_name, _params, _fields, _provider, **kwargs):
+        async def fetch(api_name, _params, _fields, provider, **kwargs):
             requested.append(api_name)
+            requested_providers.append(provider)
             paging.append(kwargs)
             rows = [] if api_name == "suspend_d" else [{"ts_code": "000001.SZ", "trade_date": "20260821"}]
             return SimpleNamespace(rows=rows, provider=SimpleNamespace(key="super"), failed_providers=())
@@ -125,6 +127,7 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(requested, ["adj_factor", "daily_basic", "stk_limit", "suspend_d", "stock_st"])
+        self.assertEqual(requested_providers[:4], [CONTROL_PROVIDER_PREFERENCE] * 4)
         self.assertEqual(persisted, requested[:4])
         # The session's ST list is recorded as dated evidence for PIT reads.
         self.assertEqual(result["st_evidence"], {"status": "captured", "rows": 1, "provider": "super"})

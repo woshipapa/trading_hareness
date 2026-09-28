@@ -20,6 +20,12 @@ from .owner_factor_repository import FACTOR_PROVIDER_ORDER
 from .replay_readiness_coverage import refresh_daily_coverage
 
 CONTROL_APIS = ("adj_factor", "daily_basic", "stk_limit", "suspend_d")
+# These are full-cross-section controls. The audited Super route is the only
+# compatible capability chain for them; the REST backup is intentionally not
+# allowed to consume the shared queue because it is reference/partial-only
+# and cannot satisfy this gate. ``super`` expands to ProMax GET first and the
+# Super SDK fallback according to the provider catalog.
+CONTROL_PROVIDER_PREFERENCE = "super"
 CONTROL_PERSIST_TIMEOUT_SECONDS = 180
 # Whole-market control calls must page: an unpaged stk_limit is refused or cut
 # short by the vendor (2,359 of ~5,700 names on 2026-09-16), and a short table
@@ -94,7 +100,7 @@ async def sync(
             if api_name in persisted_control_apis:
                 continue
             result = await call_tushare_api(
-                api_name, {"trade_date": stamp}, None, "auto",
+                api_name, {"trade_date": stamp}, None, CONTROL_PROVIDER_PREFERENCE,
                 paginate=True, page_size=CONTROL_PAGE_SIZE, max_rows=CONTROL_MAX_ROWS,
                 max_pages=CONTROL_MAX_PAGES, require_complete=True,
             )
@@ -238,4 +244,6 @@ async def sync(
     }
 
 
-__all__ = ["CONTROL_APIS", "CONTROL_PERSIST_TIMEOUT_SECONDS", "sync", "valid_rows"]
+__all__ = [
+    "CONTROL_APIS", "CONTROL_PERSIST_TIMEOUT_SECONDS", "CONTROL_PROVIDER_PREFERENCE", "sync", "valid_rows",
+]
