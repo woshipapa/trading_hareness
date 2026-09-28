@@ -37,10 +37,10 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     "limit_lift_pattern_mining": 120.0,
     # Four bounded full-market control APIs run sequentially so an individual
     # provider's shared limiter remains authoritative.
-    "core_daily_controls": 240.0,
+    "core_daily_controls": 720.0,
     # A stale completed control receipt can require the same four API calls
     # plus a persisted coverage read-back.
-    "daily_control_reconciliation": 360.0,
+    "daily_control_reconciliation": 720.0,
     # Outcome settlement scans retained evidence and is intentionally local.
     # Give both orchestration and the blocking repository the same bounded
     # window instead of inheriting the generic ten-second request budget.

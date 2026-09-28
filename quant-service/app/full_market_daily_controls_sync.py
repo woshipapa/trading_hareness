@@ -26,7 +26,11 @@ CONTROL_APIS = ("adj_factor", "daily_basic", "stk_limit", "suspend_d")
 # and cannot satisfy this gate. ``super`` expands to ProMax GET first and the
 # Super SDK fallback according to the provider catalog.
 CONTROL_PROVIDER_PREFERENCE = "super"
-CONTROL_PERSIST_TIMEOUT_SECONDS = 180
+# Persisting a same-day full-market projection also refreshes the bounded
+# replay-coverage row.  On the owner database this can exceed three minutes
+# while the canonical tables are under read load; keep the operation bounded
+# but do not cancel a valid atomic write before it can commit.
+CONTROL_PERSIST_TIMEOUT_SECONDS = 600
 # Whole-market control calls must page: an unpaged stk_limit is refused or cut
 # short by the vendor (2,359 of ~5,700 names on 2026-09-16), and a short table
 # could still clear the coverage gate below.  Same bounds as tushare_limits.
@@ -249,7 +253,13 @@ async def sync(
     # general ten-second database budget is intentionally too small here and
     # can make a committed write look like a failed caller.  Keep a bounded,
     # explicit budget rather than relying on a worker that outlives its result.
-    normalized = await run_database_blocking(persist, timeout_seconds=CONTROL_PERSIST_TIMEOUT_SECONDS)
+    try:
+        normalized = await run_database_blocking(persist, timeout_seconds=CONTROL_PERSIST_TIMEOUT_SECONDS)
+    except Exception as error:  # provider rows are never reported as promoted when the atomic write did not return
+        return {
+            "status": "blocked", "trade_date": str(trade_date),
+            "reason": safe_error_detail(f"control projection persistence failed: {error}", 500),
+        }
     return {
         "status": "completed", "trade_date": str(trade_date), "expected_daily_rows": expected,
         "rows": {api_name: len(rows) for api_name, rows in rows_by_api.items()}, "normalized_rows": normalized,
