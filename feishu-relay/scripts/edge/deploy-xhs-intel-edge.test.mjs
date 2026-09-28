@@ -10,6 +10,8 @@ assert.match(source, /XHS_COOKIE_SOURCE/);
 assert.match(source, /a1/);
 assert.match(source, /web_session/);
 assert.match(source, /XHS_FEISHU_WEBHOOK_URL must be set/);
+assert.match(source, /XHS_FORCE_BUILD/);
+assert.match(source, /docker image inspect feishu-relay-edge-xhs:local/);
 assert.match(source, /docker compose --env-file "\$runtime_env" --env-file "\$secrets_env" build xhs-collector/);
 
 console.log('XHS deployment uploads and validates the private Cookie independently of SSH command arguments');

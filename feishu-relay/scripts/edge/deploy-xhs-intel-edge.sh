@@ -28,6 +28,7 @@ cookie_file="${XHS_COOKIE_FILE:-/etc/feishu-relay-edge/xhs-cookie}"
 cookie_source="${XHS_COOKIE_SOURCE:-$HOME/.config/xhs/xhs-cookie}"
 xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77}"
 xhs_webhook="${XHS_FEISHU_WEBHOOK_URL:-}"
+xhs_force_build="${XHS_FORCE_BUILD:-false}"
 workflow_id="xhs-intel-edge-daily-v1"
 
 for command in ssh scp tar python3; do
@@ -156,7 +157,11 @@ chmod 0600 "$secrets_env"
 
 cd "$edge_dir"
 docker compose --env-file "$runtime_env" --env-file "$secrets_env" config --quiet
-docker compose --env-file "$runtime_env" --env-file "$secrets_env" build xhs-collector
+if [[ "$xhs_force_build" == true ]] || ! docker image inspect feishu-relay-edge-xhs:local >/dev/null 2>&1; then
+  docker compose --env-file "$runtime_env" --env-file "$secrets_env" build xhs-collector
+else
+  echo 'xhs image already present; skipping collector image build'
+fi
 docker compose --env-file "$runtime_env" --env-file "$secrets_env" up -d --no-deps xhs-collector n8n
 for attempt in $(seq 1 45); do
   curl -fsS http://127.0.0.1:18790/health >/dev/null && break
