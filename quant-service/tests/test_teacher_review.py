@@ -616,7 +616,7 @@ class CompositionTests(unittest.TestCase):
         self.assertIsNotNone(post_close.xiaojie_outcomes)          # 小杰 settlement is scheduled after the close
         from app.post_close_refresh_service import POST_CLOSE_STAGE_DEPENDENCIES, POST_CLOSE_STAGE_ORDER
         self.assertIn("xiaojie_outcomes", POST_CLOSE_STAGE_ORDER)
-        self.assertEqual(POST_CLOSE_STAGE_DEPENDENCIES["xiaojie_outcomes"], ("full_market_daily", "core_daily_controls"))
+        self.assertEqual(POST_CLOSE_STAGE_DEPENDENCIES["xiaojie_outcomes"], ("full_market_daily", "daily_control_reconciliation"))
 
 
 class ConfluenceTests(unittest.TestCase):

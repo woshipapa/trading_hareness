@@ -76,12 +76,23 @@ def _fail_stage_receipt(db: Any, run_id: str, error: BaseException,
 
 
 def _finish_stage_receipt(db: Any, run_id: str, status: str, result: Any) -> None:
+    summary: dict[str, Any] = {"status": status}
+    if isinstance(result, dict):
+        # Keep durable stage diagnostics bounded and secret-free.  In
+        # particular, retain the coverage read-back and selected providers so
+        # a blocked repair can be diagnosed without rerunning the provider.
+        for key in ("reason", "trade_date", "coverage_before", "coverage_after", "source_plan"):
+            if key in result:
+                summary[key] = result[key]
+        provider_sync = result.get("provider_sync")
+        if isinstance(provider_sync, dict) and "providers" in provider_sync:
+            summary["providers"] = provider_sync["providers"]
     with db.transaction() as connection:
         finish_run(
             connection, run_id, status=status,
             # Persist the normalized status computed by the wrapper rather
             # than trusting every legacy action to return one consistently.
-            output_summary={"status": status},
+            output_summary=summary,
         )
 
 
@@ -167,7 +178,10 @@ async def run_refresh(
         deferred = [name for name, item in stages.items() if item.get("status") in {"blocked", "failed"}]
         daily = stages.get("full_market_daily", {"status": "blocked"})
         daily_ready = daily.get("status") in {"completed", "unchanged"}
-        controls = stages.get("core_daily_controls", {"status": "blocked"})
+        controls = stages.get(
+            "daily_control_reconciliation",
+            stages.get("core_daily_controls", {"status": "blocked"}),
+        )
         controls_ready = controls.get("status") in {"completed", "unchanged"}
         retry_hint = (
             "收盘日线尚未发布时，可稍后再次点击；自动盘后任务会在18:55-22:00的同一交易日窗口内重试策略筛选。"

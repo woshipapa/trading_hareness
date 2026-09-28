@@ -24,7 +24,7 @@ from .request_models import (
 
 
 POST_CLOSE_STAGE_ORDER = (
-    "stale_fetch_runs", "analyst_text", "all_a_universe", "full_market_daily", "core_daily_controls", "index_context",
+    "stale_fetch_runs", "analyst_text", "all_a_universe", "full_market_daily", "core_daily_controls", "daily_control_reconciliation", "index_context",
     "close_market_snapshot", "akshare_supplements", "ths_industry_flow", "ths_concept_flow_and_limit_strength",
     "market_flow_features", "limit_ladder", "limit_lift_pattern_mining", "cninfo_announcements",
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
@@ -38,6 +38,9 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     # Four bounded full-market control APIs run sequentially so an individual
     # provider's shared limiter remains authoritative.
     "core_daily_controls": 240.0,
+    # A stale completed control receipt can require the same four API calls
+    # plus a persisted coverage read-back.
+    "daily_control_reconciliation": 360.0,
     # Outcome settlement scans retained evidence and is intentionally local.
     # Give both orchestration and the blocking repository the same bounded
     # window instead of inheriting the generic ten-second request budget.
@@ -56,21 +59,21 @@ POST_CLOSE_STAGE_DEPENDENCIES = {
     # Daily controls are correctness prerequisites: downstream strategy stages
     # must not reason over missing adjustment, limit or suspension fields.
     # Independent source evidence may still finish and remains diagnosable.
-    "index_context": ("core_daily_controls",),
-    "limit_ladder": ("core_daily_controls",),
-    "limit_lift_pattern_mining": ("core_daily_controls", "limit_ladder"),
-    "close_strategy_decision": ("core_daily_controls",),
-    "close_review": ("core_daily_controls",),
-    "post_close_strategy": ("core_daily_controls",),
-    "watchlist_main_wave": ("core_daily_controls",),
-    "research_snapshot": ("core_daily_controls",),
-    "longhu_supplemental_evidence": ("full_market_daily", "core_daily_controls"),
-    "decision_research_closure": ("post_close_strategy", "core_daily_controls"),
+    "index_context": ("daily_control_reconciliation",),
+    "limit_ladder": ("daily_control_reconciliation",),
+    "limit_lift_pattern_mining": ("daily_control_reconciliation", "limit_ladder"),
+    "close_strategy_decision": ("daily_control_reconciliation",),
+    "close_review": ("daily_control_reconciliation",),
+    "post_close_strategy": ("daily_control_reconciliation",),
+    "watchlist_main_wave": ("daily_control_reconciliation",),
+    "research_snapshot": ("daily_control_reconciliation",),
+    "longhu_supplemental_evidence": ("full_market_daily", "daily_control_reconciliation"),
+    "decision_research_closure": ("post_close_strategy", "daily_control_reconciliation"),
     # Settlement and next-session plans read the day's canonical bars and
     # point-in-time adjustment factors.
-    "teacher_review_roll": ("full_market_daily", "core_daily_controls"),
-    "watch_daily_review": ("full_market_daily", "core_daily_controls"),
-    "xiaojie_outcomes": ("full_market_daily", "core_daily_controls"),
+    "teacher_review_roll": ("full_market_daily", "daily_control_reconciliation"),
+    "watch_daily_review": ("full_market_daily", "daily_control_reconciliation"),
+    "xiaojie_outcomes": ("full_market_daily", "daily_control_reconciliation"),
 }
 
 
@@ -124,6 +127,7 @@ class PostCloseRefreshDependencies:
     teacher_review_roll: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     watch_daily_review: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     xiaojie_outcomes: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    reconcile_daily_controls: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -213,6 +217,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             StrategyPatternMiningRequest(as_of_date=trade_date, refresh_limit_sources=False),
         ),
         "core_daily_controls": lambda: dependencies.sync_daily_controls(trade_date),
+        "daily_control_reconciliation": lambda: (
+            dependencies.reconcile_daily_controls(trade_date)
+            if dependencies.reconcile_daily_controls is not None
+            else dependencies.sync_daily_controls(trade_date)
+        ),
         "cninfo_announcements": announcements_stage,
         "board_review": (
             lambda: dependencies.run_database(dependencies.longhu_close_context, trade_date)

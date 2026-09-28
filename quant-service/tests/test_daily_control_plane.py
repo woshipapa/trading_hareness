@@ -21,7 +21,8 @@ class DailyControlPlaneTests(unittest.TestCase):
         self.assertIn("available_at <", EQUITY_DAILY_CONTROL_STATUS_SQL)
         payload = status_payload({
             "trading_date": date(2026, 8, 21), "expected_daily_rows": 5_000,
-            "daily_rows": 4_950, "adjustment_rows": 4_950, "limit_rows": 4_950,
+            "daily_rows": 4_950, "fundamental_rows": 4_950,
+            "adjustment_rows": 4_950, "limit_rows": 4_950,
         })
         self.assertEqual(payload["state"], "ready")
         self.assertIsNone(payload["reason"])
@@ -30,7 +31,7 @@ class DailyControlPlaneTests(unittest.TestCase):
     def test_missing_equity_controls_remain_fail_closed(self):
         payload = status_payload({
             "trading_date": date(2026, 8, 21), "daily_rows": 3447,
-            "adjustment_rows": 3446, "limit_rows": 3447,
+            "fundamental_rows": 3447, "adjustment_rows": 3446, "limit_rows": 3447,
         })
         self.assertEqual(payload["state"], "blocked")
         self.assertIn("missing", payload["reason"])
@@ -39,10 +40,20 @@ class DailyControlPlaneTests(unittest.TestCase):
         payload = status_payload({
             "trading_date": date(2026, 8, 21), "expected_daily_rows": 5_549,
             "daily_rows": 3_447, "adjustment_rows": 3_447, "limit_rows": 3_447,
+            "fundamental_rows": 3_447,
         })
         self.assertEqual(payload["state"], "blocked")
         self.assertEqual(payload["coverage_ratio"], 0.6212)
         self.assertIn("point-in-time all-A", payload["reason"])
+
+    def test_missing_daily_fundamentals_is_visible_and_blocked(self):
+        payload = status_payload({
+            "trading_date": date(2026, 9, 28), "expected_daily_rows": 5_500,
+            "daily_rows": 5_402, "fundamental_rows": 5_095,
+            "adjustment_rows": 5_402, "limit_rows": 5_402,
+        })
+        self.assertEqual(payload["state"], "blocked")
+        self.assertIn("daily fundamentals 5095/5402", payload["reason"])
 
     def test_empty_result_is_absent(self):
         self.assertEqual(status_payload(None), {"state": "absent", "reason": "no canonical equity daily bars"})

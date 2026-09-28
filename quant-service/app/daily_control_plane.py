@@ -39,6 +39,12 @@ EQUITY_DAILY_CONTROL_STATUS_SQL = f"""WITH latest AS (
               AND {persisted_factor_semantics_sql('factor')}
               AND factor.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
        ))::int AS adjustment_rows,
+       count(DISTINCT bar.symbol) FILTER (WHERE EXISTS (
+           SELECT 1 FROM quant.daily_fundamentals basic
+            WHERE basic.symbol=bar.symbol
+              AND basic.trading_date=bar.trading_date
+              AND basic.available_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+       ))::int AS fundamental_rows,
        count(DISTINCT bar.symbol) FILTER (WHERE bar.limit_up IS NOT NULL AND bar.limit_down IS NOT NULL)::int AS limit_rows
      FROM expected
        LEFT JOIN quant.canonical_bars_daily bar
@@ -60,10 +66,15 @@ def status_payload(row: Mapping[str, Any] | None) -> dict[str, Any]:
     daily_rows = int(row["daily_rows"])
     expected_daily_rows = int(row.get("expected_daily_rows") or daily_rows)
     adjustment_rows = int(row["adjustment_rows"])
+    fundamental_rows = int(row.get("fundamental_rows") or 0)
     limit_rows = int(row["limit_rows"])
     minimum_required_rows = math.ceil(expected_daily_rows * MINIMUM_ALL_A_COVERAGE_RATIO)
     cross_section_ready = daily_rows >= minimum_required_rows
-    controls_ready = adjustment_rows == daily_rows and limit_rows == daily_rows
+    controls_ready = (
+        fundamental_rows == daily_rows
+        and adjustment_rows == daily_rows
+        and limit_rows == daily_rows
+    )
     ready = daily_rows > 0 and cross_section_ready and controls_ready
     if not cross_section_ready:
         reason = (
@@ -72,7 +83,14 @@ def status_payload(row: Mapping[str, Any] | None) -> dict[str, Any]:
             f"requires at least {MINIMUM_ALL_A_COVERAGE_RATIO:.0%}"
         )
     elif not controls_ready:
-        reason = "latest canonical equity daily bars are missing same-date adjustment or limit controls"
+        missing = []
+        if fundamental_rows != daily_rows:
+            missing.append(f"daily fundamentals {fundamental_rows}/{daily_rows}")
+        if adjustment_rows != daily_rows:
+            missing.append(f"adjustment factors {adjustment_rows}/{daily_rows}")
+        if limit_rows != daily_rows:
+            missing.append(f"trade limits {limit_rows}/{daily_rows}")
+        reason = "latest canonical equity daily bars are missing same-date " + ", ".join(missing)
     else:
         reason = None
     return {
@@ -82,6 +100,7 @@ def status_payload(row: Mapping[str, Any] | None) -> dict[str, Any]:
         "expected_daily_rows": expected_daily_rows,
         "minimum_required_rows": minimum_required_rows,
         "coverage_ratio": round(daily_rows / expected_daily_rows, 4) if expected_daily_rows else 0.0,
+        "fundamental_rows": fundamental_rows,
         "adjustment_rows": adjustment_rows,
         "limit_rows": limit_rows,
         "reason": reason,

@@ -60,6 +60,8 @@ from .analysis import as_utc
 from .capability_registry import api_capability
 from .database import AsyncDatabase, Database
 from .daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload as daily_control_plane_status_payload
+from .daily_control_reconciliation import read_coverage as read_daily_control_coverage
+from .daily_control_reconciliation import reconcile as reconcile_daily_control_coverage
 from .owner_factor_repository import read_persisted_factor_controls, read_persisted_factor_window
 from .async_provider_circuit_repository import open_capabilities as read_async_open_provider_capabilities
 from .async_provider_circuit_repository import open_provider_keys as read_async_open_provider_keys
@@ -1731,6 +1733,24 @@ async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
         record_provider_failure=record_provider_failure,
         record_provider_api_capability=record_provider_api_capability,
         read_persisted_factor_controls=persisted_factors,
+    )
+
+
+def _read_daily_control_coverage(trade_date: date) -> dict[str, Any]:
+    """Read same-date persisted controls without contacting a provider."""
+    with db.transaction() as connection:
+        return read_daily_control_coverage(connection, trade_date)
+
+
+async def reconcile_daily_controls(trade_date: date) -> dict[str, Any]:
+    """Repair and verify same-date controls through the capability resolver."""
+    async def read(day: date) -> dict[str, Any]:
+        return await run_database_blocking(_read_daily_control_coverage, day, timeout_seconds=30)
+
+    return await reconcile_daily_control_coverage(
+        trade_date,
+        read=read,
+        sync=sync_full_market_daily_controls,
     )
 
 
@@ -3690,6 +3710,7 @@ async def post_close_strategy_loop() -> None:
         main_wave_request=WatchlistMainWaveResearchRequest,
         now=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")),
         scheduler=post_close_strategy_scheduler,
+        reconcile_daily_controls=reconcile_daily_controls,
     ))
 
 
@@ -5056,7 +5077,9 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         rebuild_market_flow_features=rebuild_stored_market_flow_features,
         refresh_pattern_sources=refresh_strategy_pattern_sources, run_pattern_mining=run_strategy_pattern_mining,
         persist_settled_limit_pool=persist_settled_limit_pool,
-        sync_daily_controls=sync_full_market_daily_controls, sync_cninfo_announcements=sync_cninfo_announcements,
+        sync_daily_controls=sync_full_market_daily_controls,
+        reconcile_daily_controls=reconcile_daily_controls,
+        sync_cninfo_announcements=sync_cninfo_announcements,
         run_board_report=run_intraday_board_report, run_strategy_decision=run_strategy_decision,
         persist_close_review=_persist_close_review, recompute_outcomes=recompute_outcomes,
         recompute_intraday_outcomes=recompute_analyst_intraday_outcomes_for_date,

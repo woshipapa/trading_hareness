@@ -117,10 +117,13 @@ class PostCloseStrategyRuntimeDependencies:
     main_wave_request: Callable[..., Any]
     now: Callable[[], datetime]
     scheduler: Callable[[PostCloseSchedulerDependencies], Awaitable[None]]
+    reconcile_daily_controls: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_strategy_loop(dependencies: PostCloseStrategyRuntimeDependencies) -> None:
     """Run durable same-date post-close operations through the existing scheduler."""
+    last_control_reconciliation: dict[date, datetime] = {}
+
     async def completed_for_date(exchange_date: date) -> tuple[bool, bool]:
         return (
             bool(await dependencies.run_database(dependencies.strategy_completed_for_date, exchange_date, timeout_seconds=10)),
@@ -128,6 +131,15 @@ async def run_post_close_strategy_loop(dependencies: PostCloseStrategyRuntimeDep
         )
 
     async def run_strategy(exchange_date: date) -> str:
+        if dependencies.reconcile_daily_controls is not None:
+            now = dependencies.now()
+            previous_attempt = last_control_reconciliation.get(exchange_date)
+            if previous_attempt is not None and (now - previous_attempt).total_seconds() < 300:
+                return "blocked"
+            last_control_reconciliation[exchange_date] = now
+            controls = await dependencies.reconcile_daily_controls(exchange_date)
+            if str(controls.get("status") or "blocked") not in {"completed", "unchanged"}:
+                return str(controls.get("status") or "blocked")
         result = await dependencies.run_database(functools.partial(
             dependencies.run_recorded, dependencies.database, task_key="post_close_strategy",
             run_key=f"post-close-strategy:{exchange_date}",
