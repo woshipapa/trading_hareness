@@ -97,3 +97,11 @@ with conn.cursor() as cur:
     cur.execute('SELECT count(DISTINCT trading_date) FROM quant.canonical_bars_daily')
     print('symbols with >=30 sessions: %s  distinct sessions: %s' % (deep, cur.fetchone()[0]))
 "
+
+# A partial batch is not a successful systemd run.  Returning non-zero makes
+# the failure visible to the timer/monitoring lane instead of silently waiting
+# for the next morning while the research gate remains stale.
+if (( failed > 0 )); then
+  printf 'batch backfill finished with %s failed date(s)\n' "$failed" >&2
+  exit 1
+fi

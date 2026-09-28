@@ -9,6 +9,8 @@ from datetime import date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .scheduler_error_detail import scheduler_error_detail
+
 
 def post_close_materialization_window(value: datetime) -> bool:
     local = value.astimezone(ZoneInfo("Asia/Shanghai"))
@@ -46,7 +48,7 @@ async def ten_day_leader_rotation_scheduler_step(
             completed_dates.add(exchange_date)
             return True
     except Exception as error:  # noqa: BLE001 - bounded same-date window owns retries
-        dependencies.report_error(f"ten-day leader rotation failed: {str(error)[:300]}")
+        dependencies.report_error(f"ten-day leader rotation failed: {scheduler_error_detail(error)}")
     return False
 
 

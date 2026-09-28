@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
+from .scheduler_error_detail import scheduler_error_detail
+
 
 REVIEW_CHECKPOINTS: tuple[tuple[str, time], ...] = (("midday", time(11, 31)), ("close", time(15, 5)))
 
@@ -85,7 +87,9 @@ async def strategy_review_scheduler_step(
             completed.add(key)
             completed_now.append(session)
         except Exception as error:  # noqa: BLE001 - retry only within checkpoint window.
-            dependencies.report_error(f"strategy review checkpoint {session} failed: {str(error)[:300]}")
+            dependencies.report_error(
+                f"strategy review checkpoint {session} failed: {scheduler_error_detail(error)}"
+            )
     return tuple(completed_now)
 
 

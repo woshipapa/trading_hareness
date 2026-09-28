@@ -65,7 +65,7 @@ def build_strategy_reads_router(database: Any, decision_model_version: str, asyn
         return {"as_of_date": str(as_of_date), "strategies": sync_strategy_promotion_catalog(database, as_of_date)}
 
     @router.get("/api/v1/strategy/watchlist-proposals")
-    async def watchlist_proposals() -> dict[str, Any]:
+    async def watchlist_proposals(as_of_date: date | None = None) -> dict[str, Any]:
         """Cross-strategy watchlist candidates for human review only.
 
         Never written into quant.intraday_watchlists: that table has a
@@ -73,6 +73,6 @@ def build_strategy_reads_router(database: Any, decision_model_version: str, asyn
         Tencent batched-quote request size, and a human-curated watchlist
         already uses most of it.
         """
-        return sync_latest_watchlist_proposals(database)
+        return sync_latest_watchlist_proposals(database, as_of_date or cn_today())
 
     return router

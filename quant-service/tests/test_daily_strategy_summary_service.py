@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from app.daily_strategy_summary_service import LEARNING_WINDOW_LIMIT, build_daily_strategy_summary, terminal_for_exchange_date
+from app.daily_strategy_summary_service import (
+    LEARNING_WINDOW_LIMIT, apply_exchange_date_data_gate, build_daily_strategy_summary, terminal_for_exchange_date,
+)
 
 
 class _Result:
@@ -28,6 +30,8 @@ class DailyStrategySummaryServiceTests(unittest.TestCase):
                     return _Rows([])
                 if "FROM quant.post_close_strategy_runs" in sql or "FROM quant.strategy_review_runs" in sql:
                     return _Result(None)
+                if "FROM quant.market_trade_calendar" in sql or "FROM quant.canonical_bars_daily" in sql or "FROM quant.market_snapshot_runs" in sql:
+                    return _Result(None)
                 return _Rows([])
 
         class _Rows:
@@ -49,6 +53,18 @@ class DailyStrategySummaryServiceTests(unittest.TestCase):
         self.assertEqual(connection.learning_params, (LEARNING_WINDOW_LIMIT + 1,))
         self.assertEqual(result["offline_policy_learning"]["source_window"]["rows"], LEARNING_WINDOW_LIMIT)
         self.assertTrue(result["offline_policy_learning"]["source_window"]["truncated"])
+
+    def test_exchange_date_gate_blocks_stale_bars_and_ineligible_snapshot(self):
+        result = apply_exchange_date_data_gate(
+            {"decision_ready": True, "blockers": []},
+            expected_daily_bar_date=date(2026, 8, 20),
+            latest_daily_bar_date=date(2026, 8, 19),
+            market_snapshot_decision_eligible=False,
+        )
+        self.assertFalse(result["decision_ready"])
+        self.assertEqual(result["blockers"], [
+            "daily_bars_stale_for_exchange_date", "market_snapshot_not_decision_eligible",
+        ])
 
     def test_terminal_receipt_accepts_only_non_retry_delivery_states(self):
         class Connection:

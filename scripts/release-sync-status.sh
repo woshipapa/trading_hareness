@@ -59,19 +59,33 @@ trap 'rm -rf -- "$work_dir"' EXIT
 git -C "$repo_root" archive "$expected_sha" quant-service/migrations/versions | tar -x -C "$work_dir"
 python3 - "$work_dir/quant-service/migrations/versions" > "$work_dir/expected_heads" <<'PY'
 import pathlib
-import re
+import ast
 import sys
 
 revisions, parents = set(), set()
 for path in pathlib.Path(sys.argv[1]).glob("*.py"):
-    text = path.read_text(encoding="utf-8")
-    revision = re.search(r'^revision\s*=\s*"([^"]+)"', text, re.M)
-    down = re.search(r"^down_revision\s*=\s*(.+)$", text, re.M)
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    values = {}
+    for node in tree.body:
+        target = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+        if isinstance(target, ast.Name) and target.id in {"revision", "down_revision"}:
+            try:
+                values[target.id] = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                pass
+    revision = values.get("revision")
     if not revision:
         continue
-    revisions.add(revision.group(1))
-    if down:
-        parents.update(re.findall(r'"([^"]+)"', down.group(1)))
+    revisions.add(str(revision))
+    down = values.get("down_revision")
+    if isinstance(down, (tuple, list)):
+        parents.update(str(value) for value in down if value)
+    elif down:
+        parents.add(str(down))
 print("\n".join(sorted(revisions - parents)))
 PY
 

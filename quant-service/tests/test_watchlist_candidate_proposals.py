@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import unittest
 from datetime import date
+from unittest.mock import MagicMock
 
 from app.main import db
 from app.watchlist_candidate_proposals import latest_watchlist_proposals, materialize_watchlist_proposals
@@ -116,6 +117,22 @@ class WatchlistCandidateProposalsIntegrationTests(unittest.TestCase):
             self.assertEqual(count, 1)
         finally:
             self._cleanup()
+
+
+class WatchlistCandidateProposalReadTests(unittest.TestCase):
+    def test_latest_read_can_be_bounded_to_an_exchange_date(self) -> None:
+        connection = MagicMock()
+        connection.execute.side_effect = [
+            MagicMock(fetchone=MagicMock(return_value={"d": date(2026, 9, 28)})),
+            MagicMock(fetchall=MagicMock(return_value=[])),
+        ]
+
+        result = latest_watchlist_proposals(connection, date(2026, 9, 28))
+
+        self.assertEqual(result["as_of_date"], "2026-09-28")
+        max_sql, max_params = connection.execute.call_args_list[0].args
+        self.assertIn("as_of_date<=%s", max_sql)
+        self.assertEqual(max_params, (date(2026, 9, 28),))
 
 
 if __name__ == "__main__":

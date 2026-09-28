@@ -204,8 +204,17 @@ def materialize_watchlist_proposals(connection: Any, as_of_date: date, *, top_k:
             "disclosure": disclosure}
 
 
-def latest_watchlist_proposals(connection: Any) -> dict[str, Any]:
-    as_of = connection.execute("SELECT max(as_of_date) d FROM quant.strategy_watchlist_proposals").fetchone()["d"]
+def latest_watchlist_proposals(connection: Any, as_of_date: date | None = None) -> dict[str, Any]:
+    """Read the newest proposal date that is not in the future.
+
+    Future-dated rows are useful as isolated fixtures/replay data, but must
+    never become the production dashboard's "latest" proposal set.
+    """
+    date_filter = " WHERE as_of_date<=%s" if as_of_date is not None else ""
+    date_params = (as_of_date,) if as_of_date is not None else ()
+    as_of = connection.execute(
+        f"SELECT max(as_of_date) d FROM quant.strategy_watchlist_proposals{date_filter}", date_params,
+    ).fetchone()["d"]
     if as_of is None:
         return {"as_of_date": None, "proposals": []}
     rows = connection.execute(
@@ -217,9 +226,9 @@ def latest_watchlist_proposals(connection: Any) -> dict[str, Any]:
             "notice": "research proposal only; never written into quant.intraday_watchlists"}
 
 
-def sync_latest_watchlist_proposals(database: Any) -> dict[str, Any]:
+def sync_latest_watchlist_proposals(database: Any, as_of_date: date | None = None) -> dict[str, Any]:
     with database.transaction() as connection:
-        return latest_watchlist_proposals(connection)
+        return latest_watchlist_proposals(connection, as_of_date)
 
 
 __all__ = [

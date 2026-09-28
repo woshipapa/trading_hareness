@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from typing import Any
 
+from .scheduler_error_detail import scheduler_error_detail
+
 
 TERMINAL_SUMMARY_STATUSES = frozenset({"sent", "disabled", "suppressed", "already_terminal", "attempts_exhausted"})
 
@@ -49,7 +51,7 @@ async def daily_strategy_summary_scheduler_step(
             completed_dates.add(exchange_date)
             return True
     except Exception as error:  # noqa: BLE001 - retry only inside this bounded window.
-        dependencies.report_error(f"daily strategy summary failed: {str(error)[:300]}")
+        dependencies.report_error(f"daily strategy summary failed: {scheduler_error_detail(error)}")
     return False
 
 

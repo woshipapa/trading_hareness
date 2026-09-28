@@ -8,16 +8,26 @@ import { join } from 'node:path';
 // would, so the comparison logic is exercised without touching either host.
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const heads = execFileSync('python3', ['-c', `
-import pathlib, re
+import ast, pathlib
 revisions, parents = set(), set()
 for path in pathlib.Path('quant-service/migrations/versions').glob('*.py'):
-    text = path.read_text(encoding='utf-8')
-    revision = re.search(r'^revision\\s*=\\s*"([^"]+)"', text, re.M)
-    down = re.search(r'^down_revision\\s*=\\s*(.+)$', text, re.M)
+    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    values = {}
+    for node in tree.body:
+        target = node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else node.target if isinstance(node, ast.AnnAssign) else None
+        if isinstance(target, ast.Name) and target.id in {'revision', 'down_revision'}:
+            try:
+                values[target.id] = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                pass
+    revision = values.get('revision')
     if revision:
-        revisions.add(revision.group(1))
-    if down:
-        parents.update(re.findall(r'"([^"]+)"', down.group(1)))
+        revisions.add(str(revision))
+    down = values.get('down_revision')
+    if isinstance(down, (tuple, list)):
+        parents.update(str(value) for value in down if value)
+    elif down:
+        parents.add(str(down))
 print(",".join(sorted(revisions - parents)))
 `], { encoding: 'utf8' }).trim();
 

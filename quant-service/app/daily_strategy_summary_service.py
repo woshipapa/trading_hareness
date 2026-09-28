@@ -9,6 +9,38 @@ from typing import Any, Callable
 LEARNING_WINDOW_LIMIT = 10_000
 
 
+def apply_exchange_date_data_gate(
+    readiness: Any,
+    *,
+    expected_daily_bar_date: date | None,
+    latest_daily_bar_date: date | None,
+    market_snapshot_decision_eligible: bool | None,
+) -> dict[str, Any]:
+    """Overlay same-date evidence on the historical feature-readiness result.
+
+    Feature coverage can be complete while today's close snapshot or the
+    previous session's daily bars are missing.  Keeping this gate explicit
+    prevents a summary from presenting historical readiness as today's
+    decision eligibility.
+    """
+    result = dict(readiness or {})
+    blockers = list(result.get("blockers") or [])
+    if (expected_daily_bar_date is not None
+            and (latest_daily_bar_date is None or latest_daily_bar_date < expected_daily_bar_date)):
+        blockers.append("daily_bars_stale_for_exchange_date")
+    if market_snapshot_decision_eligible is False:
+        blockers.append("market_snapshot_not_decision_eligible")
+    blockers = list(dict.fromkeys(str(item) for item in blockers))
+    result["decision_ready"] = not blockers
+    result["blockers"] = blockers
+    result["exchange_date_gate"] = {
+        "expected_daily_bar_date": str(expected_daily_bar_date) if expected_daily_bar_date else None,
+        "latest_daily_bar_date": str(latest_daily_bar_date) if latest_daily_bar_date else None,
+        "market_snapshot_decision_eligible": market_snapshot_decision_eligible,
+    }
+    return result
+
+
 def build_daily_strategy_summary(database: Any, exchange_date: date, *, readiness: Callable[[Any], Any],
                                  json_safe: Callable[[Any], Any], policy_review: Callable[..., Any]) -> dict[str, Any]:
     with database.transaction() as connection:
@@ -50,6 +82,24 @@ def build_daily_strategy_summary(database: Any, exchange_date: date, *, readines
                  WHERE exchange_date=%s AND session='close' ORDER BY observed_at DESC LIMIT 1""", (exchange_date,),
         ).fetchone()
         readiness_result = readiness(connection)
+        expected_daily_bar = connection.execute(
+            """SELECT max(calendar_date) expected_date FROM quant.market_trade_calendar
+                WHERE is_open AND calendar_date < %s""", (exchange_date,),
+        ).fetchone()
+        latest_daily_bar = connection.execute(
+            """SELECT max(trading_date) latest_date FROM quant.canonical_bars_daily
+                WHERE symbol<>'000300.SH' AND adj_factor>0"""
+        ).fetchone()
+        market_snapshot = connection.execute(
+            """SELECT decision_eligible FROM quant.market_snapshot_runs
+                WHERE exchange_date=%s ORDER BY observed_at DESC LIMIT 1""", (exchange_date,),
+        ).fetchone()
+        readiness_result = apply_exchange_date_data_gate(
+            readiness_result,
+            expected_daily_bar_date=(expected_daily_bar or {}).get("expected_date"),
+            latest_daily_bar_date=(latest_daily_bar or {}).get("latest_date"),
+            market_snapshot_decision_eligible=(market_snapshot or {}).get("decision_eligible"),
+        )
     signal_counts = {str(row["state"]): int(row["count"] or 0) for row in signal_rows}
     outcome_counts: dict[str, dict[str, int]] = {}
     for row in outcome_rows:
@@ -100,4 +150,7 @@ def terminal_for_exchange_date(connection: Any, exchange_date: date) -> bool:
     return row is not None
 
 
-__all__ = ["LEARNING_WINDOW_LIMIT", "build_daily_strategy_summary", "terminal_for_exchange_date"]
+__all__ = [
+    "LEARNING_WINDOW_LIMIT", "apply_exchange_date_data_gate", "build_daily_strategy_summary",
+    "terminal_for_exchange_date",
+]

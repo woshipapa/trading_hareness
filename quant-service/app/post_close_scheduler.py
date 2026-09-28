@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
+from .scheduler_error_detail import scheduler_error_detail
+
 
 @dataclass(frozen=True)
 class PostCloseSchedulerDependencies:
@@ -57,7 +59,7 @@ async def post_close_scheduler_step(
             completed_dates.add(exchange_date)
             return True
     except Exception as error:  # noqa: BLE001 - bounded retry window handles transient upstream delays.
-        dependencies.report_error(f"post-close strategy run failed: {str(error)[:300]}")
+        dependencies.report_error(f"post-close strategy run failed: {scheduler_error_detail(error)}")
     return False
 
 
