@@ -25,6 +25,7 @@ edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
 secrets_env="${RELAY_EDGE_SECRETS_ENV:-/etc/feishu-relay-edge/secrets.env}"
 cookie_file="${XHS_COOKIE_FILE:-/etc/feishu-relay-edge/xhs-cookie}"
+xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77}"
 workflow_id="xhs-intel-edge-daily-v1"
 
 for command in ssh tar python3; do
@@ -80,10 +81,11 @@ tar -C "$tmp_dir" --exclude='__pycache__' --exclude='*.pyc' -cf - . \
 
 "${ssh_command[@]}" "$edge_host" bash -s -- \
   "$edge_dir" "$runtime_env" "$secrets_env" "$remote_stage" "$workflow_id" \
-  "$xhs_token" "${XHS_FEISHU_WEBHOOK_URL:-}" "$cookie_file" <<'REMOTE'
+  "$xhs_token" "${XHS_FEISHU_WEBHOOK_URL:-}" "$cookie_file" "$xhs_chat_ids" <<'REMOTE'
 set -euo pipefail
 edge_dir="$1"; runtime_env="$2"; secrets_env="$3"; stage="$4"; workflow_id="$5"
-xhs_token="$6"; xhs_webhook="$7"; xhs_cookie_file="$8"
+xhs_token="$6"; xhs_webhook="$7"; xhs_cookie_file="$8"; xhs_chat_ids="$9"
+bridge_env=/etc/larkagentx-group-relay.env
 exec 9>/var/lock/xhs-intel-edge.lock
 flock -w 120 9
 test -f "$runtime_env"; test -f "$secrets_env"
@@ -110,6 +112,11 @@ update_env "$runtime_env" XHS_COOKIE_FILE "$xhs_cookie_file"
 update_env "$runtime_env" XHS_KEYWORDS "AI基础设施,AI加速,系统软件,分布式训练,算力网络,推理优化"
 update_env "$runtime_env" XHS_FETCH_LIMIT "5"
 update_env "$runtime_env" LARKX_XHS_COMMANDS_ENABLED "true"
+update_env "$runtime_env" LARKX_XHS_COMMAND_CHAT_IDS "$xhs_chat_ids"
+if [ -f "$bridge_env" ]; then
+  update_env "$bridge_env" LARKX_XHS_COMMANDS_ENABLED "true"
+  update_env "$bridge_env" LARKX_XHS_COMMAND_CHAT_IDS "$xhs_chat_ids"
+fi
 update_env "$secrets_env" XHS_COLLECTOR_TOKEN "$xhs_token"
 update_env "$secrets_env" XHS_FEISHU_WEBHOOK_URL "$xhs_webhook"
 chmod 0600 "$secrets_env"

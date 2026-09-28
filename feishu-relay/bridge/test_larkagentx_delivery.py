@@ -40,6 +40,9 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		self.assertFalse(bridge.is_xhs_command_message({"content": "xhs status"}))
 		self.assertFalse(bridge.is_xhs_command_message({"content": "#xhs"}))
 
+	def test_xhs_command_lane_can_bind_chat_ids(self):
+		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs status", "chat_id": "oc_bound"}))
+
 	def test_adapter_business_failure_is_retried(self):
 		response = FakeResponse(json.dumps({"status": "failed", "message": "webhook temporary failure"}).encode("utf-8"))
 		with patch.object(bridge, "urlopen", return_value=response):
