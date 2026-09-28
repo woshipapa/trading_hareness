@@ -26,6 +26,7 @@ import { shouldRedownloadRetryMedia } from './retry-media.mjs';
 import { parsePaperIngestIds } from './paper-ingest-command.mjs';
 import { cardPayload } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
+import { parseXhsCommand } from './xhs-command.mjs';
 import { personalDecisionResearchPaths } from './personal-decision-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
 import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
@@ -58,6 +59,8 @@ const paperIngestWebhook = String(process.env.PAPER_KB_INGEST_WEBHOOK ?? '').tri
 const paperIngestChatId = String(process.env.PAPER_KB_FEISHU_CHAT_ID ?? '').trim();
 const paperSearchWebhook = String(process.env.PAPER_KB_SEARCH_WEBHOOK ?? '').trim();
 const paperFeedbackWebhook = String(process.env.PAPER_KB_FEEDBACK_WEBHOOK ?? '').trim();
+const xhsCommandWebhook = String(process.env.XHS_COMMAND_WEBHOOK ?? 'http://127.0.0.1:5678/webhook/xhs-command').trim();
+const xhsCommandChatId = String(process.env.XHS_COMMAND_CHAT_ID ?? '').trim();
 const larkAgentXIngressToken = String(process.env.LARKX_BRIDGE_TOKEN ?? '').trim();
 const larkAgentXResourceUrl = String(process.env.LARKX_BRIDGE_RESOURCE_URL ?? '').trim();
 const larkAgentXGroupRelayEnabled = String(process.env.LARKX_GROUP_RELAY_ENABLED ?? 'false').toLowerCase() === 'true';
@@ -2714,6 +2717,17 @@ async function forwardPaperFeedback(command, sourceEventId) {
 	return response.status;
 }
 
+async function forwardXhsCommand(command, sourceEventId) {
+	if (!xhsCommandWebhook) throw new Error('XHS_COMMAND_WEBHOOK is not configured');
+	const response = await fetch(xhsCommandWebhook, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ ...command, event_id: sourceEventId }),
+	});
+	if (!response.ok) throw new Error(`xhs command webhook responded ${response.status}`);
+	return response.status;
+}
+
 function pruneFeishuDedupe(now = Date.now()) {
 	for (const [key, entry] of feishuEventPromises) {
 		if (entry.expiresAt <= now) feishuEventPromises.delete(key);
@@ -2734,6 +2748,21 @@ async function processFeishuEvent(data, options = {}) {
 	if (isQuantAlertBindingCommand(data)) {
 		updateEvent(eventId, { n8n_status: '已识别为盘中提醒绑定命令，未转发研究导入' });
 		return { bound_alert_group: true };
+	}
+	const xhsCommand = parseXhsCommand({
+		...data,
+		message: { ...(data?.message ?? {}), content: String(extractMessagePayload(data?.message ?? {}).text ?? data?.message?.content ?? '') },
+	}, xhsCommandChatId);
+	if (xhsCommand) {
+		try {
+			await forwardXhsCommand(xhsCommand, eventId);
+			updateEvent(eventId, { n8n_status: `已转发小红书指令：${xhsCommand.command}` });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			updateEvent(eventId, { n8n_status: '小红书指令转发失败', n8n_error: message });
+			console.error(`小红书指令转发失败：${message}`);
+		}
+		return { xhs_command: xhsCommand };
 	}
 	const paperFeedback = isPaperFeedbackCommand(data);
 	if (paperFeedback) {
