@@ -105,10 +105,10 @@ scp -q -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes \
 "${ssh_command[@]}" "$edge_host" bash -s -- \
   "$edge_dir" "$runtime_env" "$secrets_env" "$remote_stage" "$workflow_id" \
   "$xhs_token" "$xhs_webhook" "$cookie_file" "$xhs_chat_ids" \
-  "$remote_stage/.xhs-cookie" <<'REMOTE'
+  "$remote_stage/.xhs-cookie" "$xhs_force_build" <<'REMOTE'
 set -euo pipefail
 edge_dir="$1"; runtime_env="$2"; secrets_env="$3"; stage="$4"; workflow_id="$5"
-xhs_token="$6"; xhs_webhook="$7"; xhs_cookie_file="$8"; xhs_chat_ids="$9"; cookie_stage="${10}"
+xhs_token="$6"; xhs_webhook="$7"; xhs_cookie_file="$8"; xhs_chat_ids="$9"; cookie_stage="${10}"; xhs_force_build="${11}"
 bridge_env=/etc/larkagentx-group-relay.env
 exec 9>/var/lock/xhs-intel-edge.lock
 flock -w 120 9
