@@ -27,6 +27,13 @@ class FakeResponse(BytesIO):
 
 @unittest.skipUnless(bridge is not None, f"supervisor larkx dependency unavailable: {BRIDGE_IMPORT_ERROR}")
 class LarkAgentXDeliveryTests(unittest.TestCase):
+	def test_paper_command_lane_is_narrow(self):
+		self.assertTrue(bridge.is_paper_command_message({"content": "收录 2609.30059v1"}))
+		self.assertTrue(bridge.is_paper_command_message({"content": "收 1 3"}))
+		self.assertTrue(bridge.is_paper_command_message({"content": "查询 KV cache"}))
+		self.assertFalse(bridge.is_paper_command_message({"content": "收入增长 20%"}))
+		self.assertFalse(bridge.is_paper_command_message({"content": "普通群消息"}))
+
 	def test_adapter_business_failure_is_retried(self):
 		response = FakeResponse(json.dumps({"status": "failed", "message": "webhook temporary failure"}).encode("utf-8"))
 		with patch.object(bridge, "urlopen", return_value=response):

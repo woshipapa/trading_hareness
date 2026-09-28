@@ -402,6 +402,7 @@ export function normalizeLarkAgentXMessage(input, { now = Date.now } = {}) {
 		event_type: 'im.message.receive_v1',
 		source: 'larkagentx',
 		source_label: sourceLabel || 'LarkAgentX 个人会话',
+		...(input?._larkagentx_command_lane === true ? { larkagentx_command_lane: true } : {}),
 		message: {
 			message_id: messageId,
 			chat_id: chatId,

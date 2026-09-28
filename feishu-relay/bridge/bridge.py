@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import threading
 import time
@@ -56,6 +57,24 @@ DEFAULT_PRIVATE_TAIL_REPAIR_SECONDS = 60
 MIN_PRIVATE_TAIL_REPAIR_SECONDS = 30
 MAX_PRIVATE_TAIL_REPAIR_SECONDS = 600
 DEFAULT_PRIVATE_TAIL_REPAIR_WINDOW = 16
+PAPER_COMMAND_RE = re.compile(
+	r"^(?:收录(?:\s*[:：]\s*|\s+)|收(?=\s|[:：])|留(?=\s|[:：])|略(?=\s|[:：])|"
+	r"稍后(?=\s|[:：])|原因(?=\s|[:：])|多点(?:\s|[:：])+|少点(?:\s|[:：])+|作者\s*\+|"
+	r"精查(?:\s|[:：])+|深查(?:\s|[:：])+|查询(?:\s|[:：])+|搜索(?:\s|[:：])+|"
+	r"search(?:\s|[:：])+|ingest(?:\s|[:：])+).+",
+	re.IGNORECASE,
+)
+
+
+def is_paper_command_message(message: dict[str, Any]) -> bool:
+	"""Return true only for explicit Paper-KB commands.
+
+	The private WebSocket receives chats outside the source allowlist too. This
+	narrow lane lets a user send Paper-KB commands from the reading group without
+	forwarding unrelated private-session traffic into the adapter.
+	"""
+	text = re.sub(r"@_user_\d+\s*", "", str(message.get("content", ""))).strip()
+	return bool(text and PAPER_COMMAND_RE.match(text))
 
 
 def bounded_int_env(name: str, default: int, minimum: int, maximum: int | None = None) -> int:
@@ -426,6 +445,7 @@ class Bridge:
 			raise RuntimeError("LARKX_LISTEN_CHAT_IDS must contain at least one chat ID")
 		if not self.send_chats:
 			raise RuntimeError("LARKX_SEND_CHAT_IDS must contain at least one chat ID")
+		self.paper_command_lane_enabled = os.environ.get("LARKX_PAPER_KB_COMMANDS_ENABLED", "false").strip().lower() == "true"
 		self.profile = os.environ.get("LARKX_PROFILE", "default").strip() or "default"
 		larkx_home = Path(os.environ.get("LARKX_HOME", "~/.larkx")).expanduser()
 		auth_path, default_spool_path, default_owner_path = profile_storage_paths(larkx_home, self.profile)
@@ -873,6 +893,7 @@ class Bridge:
 			"last_private_repair_result": self.last_private_repair_result,
 			"summary_chat_ids": sorted(self.summary_chat_ids),
 			"summary_ingress_configured": bool(self.summary_ingress_url),
+			"paper_command_lane_enabled": self.paper_command_lane_enabled,
 			"last_observed_chat_id": self.last_observed_chat_id or None,
 			"last_observed_message_type": self.last_observed_message_type or None,
 			"websocket": {
@@ -1129,7 +1150,7 @@ class Bridge:
 							{"chat_id": chat_id, "positions": list(range(start, end + 1))},
 							reason="startup_private_position_gap",
 						)
-			except Exception as error:
+				except Exception as error:
 				LOG.warning("LarkAgentX 启动私有缺口补读失败 chat_id=%s：%s", chat_id, error)
 
 	async def repair_private_tail_once(self) -> dict[str, Any]:
@@ -1287,10 +1308,11 @@ class Bridge:
 		# decoded event is proof that the WebSocket session is receiving data.
 		self.websocket_state = "connected"
 		chat_id = str(message.get("chat_id", ""))
+		paper_command_lane = getattr(self, "paper_command_lane_enabled", False) and is_paper_command_message(message)
 		dynamic_route = self.dynamic_routes.get(chat_id)
-		if chat_id not in self.websocket_chat_ids:
+		if chat_id not in self.websocket_chat_ids and not paper_command_lane:
 			dynamic_route = await self.discover_dynamic_route(chat_id)
-		if chat_id not in self.websocket_chat_ids:
+		if chat_id not in self.websocket_chat_ids and not dynamic_route and not paper_command_lane:
 			self.ignored_count += 1
 			try:
 				gap = await asyncio.to_thread(
@@ -1309,7 +1331,11 @@ class Bridge:
 			except Exception as error:
 				LOG.warning("记录未绑定 LarkAgentX 源群指标失败 chat_id=%s：%s", chat_id, error)
 			return {"status": "ignored", "chat_id": chat_id}
-		stats = self.chat_stats[chat_id]
+		stats = self.chat_stats.setdefault(chat_id, {
+			"allowlisted": chat_id in self.websocket_chat_ids, "observed_count": 0,
+			"self_message_count": 0, "forwarded_count": 0, "failed_count": 0,
+			"last_observed_at": None, "last_forwarded_at": None, "last_message_type": None,
+		})
 		try:
 			gap = await asyncio.to_thread(self.event_spool.record_position, message)
 			self._log_position_gap(chat_id, gap)
@@ -1333,6 +1359,8 @@ class Bridge:
 			stats["failed_count"] += 1
 			return {"status": "failed", "chat_id": chat_id, "message_id": ""}
 		payload = json_safe(dict(message))
+		if paper_command_lane:
+			payload["_larkagentx_command_lane"] = True
 		if dynamic_route:
 			payload["_larkagentx_route"] = dict(dynamic_route)
 		source_key, chat_name = self._source_route_for_chat(chat_id, dynamic_route)

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 
 test('normalizes an inbound LarkAgentX text message into the adapter event contract', () => {
@@ -14,6 +15,26 @@ test('normalizes an inbound LarkAgentX text message into the adapter event contr
 	assert.equal(event.message.message_type, 'text');
 	assert.deepEqual(JSON.parse(event.message.content), { text: '#liwei\n正文' });
 	assert.equal(event.sender.sender_id.open_id, 'ou_sender');
+});
+
+test('keeps Paper-KB commands on the shared adapter event path', () => {
+	const event = normalizeLarkAgentXMessage({
+		msg_id: 'om_larkx_paper_command', chat_id: '7660000000000000000', from_id: 'ou_sender',
+		msg_type_name: 'TEXT', content: '收录 2609.30059v1', _larkagentx_command_lane: true,
+	});
+	assert.equal(JSON.parse(event.message.content).text, '收录 2609.30059v1');
+	assert.equal(event.larkagentx_command_lane, true);
+
+	// The handler used to call forwardToN8n directly, bypassing paper command
+	// parsing. Keep this small source contract next to the ingress fixture so a
+	// future WebSocket refactor cannot silently reintroduce that split path.
+	const source = readFileSync(new URL('./index.mjs', import.meta.url), 'utf8');
+	const start = source.indexOf('async function handleLarkAgentXInbound');
+	const end = source.indexOf('async function handleLarkAgentXSummaryInbound');
+	assert.ok(start >= 0 && end > start);
+	const handler = source.slice(start, end);
+	assert.match(handler, /dispatchFeishuMessage\(data/);
+	assert.doesNotMatch(handler, /forwardToN8n\(data/);
 });
 
 test('normalizes a summary-group WebSocket POST into the n8n event contract', () => {

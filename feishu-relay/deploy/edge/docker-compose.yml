@@ -79,6 +79,13 @@ services:
       N8N_MEDIA_PART_WEBHOOK_URL: http://127.0.0.1:5678/webhook/feishu-media-part
       N8N_MEDIA_FINALIZE_WEBHOOK_URL: http://127.0.0.1:5678/webhook/feishu-media-finalize
       N8N_MEDIA_STATE_WEBHOOK_URL: http://127.0.0.1:5678/webhook/feishu-media-state
+      # Paper-KB commands are received through the private LarkAgentX
+      # WebSocket and forwarded to these n8n workflows. Keep this contract in
+      # the edge compose file as well as the workstation compose file.
+      PAPER_KB_FEISHU_CHAT_ID: ${PAPER_KB_FEISHU_CHAT_ID:-}
+      PAPER_KB_INGEST_WEBHOOK: ${PAPER_KB_INGEST_WEBHOOK:-http://127.0.0.1:5678/webhook/paper-ingest}
+      PAPER_KB_SEARCH_WEBHOOK: ${PAPER_KB_SEARCH_WEBHOOK:-http://127.0.0.1:5678/webhook/paper-search}
+      PAPER_KB_FEEDBACK_WEBHOOK: ${PAPER_KB_FEEDBACK_WEBHOOK:-http://127.0.0.1:5678/webhook/paper-feedback}
       DASHBOARD_HOST: 127.0.0.1
       DASHBOARD_PORT: 18300
       UPLOAD_PART_BYTES: ${UPLOAD_PART_BYTES:-8388608}
