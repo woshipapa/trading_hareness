@@ -516,6 +516,7 @@ class Bridge:
 			1,
 			self.private_gap_repair_max_positions,
 		)
+		self.private_tail_repair_chat_ids = csv_env("LARKX_PRIVATE_TAIL_REPAIR_CHAT_IDS")
 		self._private_repair_lock = threading.RLock()
 		self._private_repair_in_flight: set[tuple[str, int, int]] = set()
 		self._private_tail_repair_in_flight = False
@@ -883,6 +884,7 @@ class Bridge:
 			"private_tail_repair_enabled": self.private_tail_repair_enabled,
 			"private_tail_repair_seconds": self.private_tail_repair_seconds,
 			"private_tail_repair_window": self.private_tail_repair_window,
+			"private_tail_repair_chat_ids": sorted(self.private_tail_repair_chat_ids),
 			"private_tail_repair_count": self.private_tail_repair_count,
 			"last_private_tail_repair_at": self.last_private_tail_repair_at,
 			"last_private_tail_repair_result": self.last_private_tail_repair_result,
@@ -991,6 +993,12 @@ class Bridge:
 			chat_id.isdigit()
 			and chat_id in self.websocket_chat_ids
 			and (not self.private_gap_repair_chat_ids or chat_id in self.private_gap_repair_chat_ids)
+		)
+
+	def _private_tail_repair_allowed(self, chat_id: str) -> bool:
+		return (
+			self._private_repair_allowed(chat_id)
+			and (not self.private_tail_repair_chat_ids or chat_id in self.private_tail_repair_chat_ids)
 		)
 
 	def _private_repair_chunks(self, start: int, end: int) -> list[tuple[int, int]]:
@@ -1177,7 +1185,7 @@ class Bridge:
 		}
 		try:
 			for chat_id in sorted(self.websocket_chat_ids):
-				if not self._private_repair_allowed(chat_id):
+				if not self._private_tail_repair_allowed(chat_id):
 					continue
 				try:
 					stats = await asyncio.to_thread(self.event_spool.position_stats)

@@ -90,6 +90,7 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		instance._private_tail_repair_in_flight = False
 		instance.private_tail_repair_window = 16
 		instance.private_gap_repair_chat_ids = set()
+		instance.private_tail_repair_chat_ids = set()
 		instance.websocket_chat_ids = {"7667390477875858612"}
 		instance.event_spool = Mock()
 		instance.event_spool.position_stats.return_value = {
