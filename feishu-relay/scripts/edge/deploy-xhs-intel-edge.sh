@@ -27,6 +27,7 @@ secrets_env="${RELAY_EDGE_SECRETS_ENV:-/etc/feishu-relay-edge/secrets.env}"
 cookie_file="${XHS_COOKIE_FILE:-/etc/feishu-relay-edge/xhs-cookie}"
 cookie_source="${XHS_COOKIE_SOURCE:-$HOME/.config/xhs/xhs-cookie}"
 xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77}"
+xhs_webhook="${XHS_FEISHU_WEBHOOK_URL:-}"
 workflow_id="xhs-intel-edge-daily-v1"
 
 for command in ssh scp tar python3; do
@@ -57,6 +58,10 @@ fi
 
 [[ -r "$cookie_source" ]] || {
   echo "XHS cookie source is not readable: $cookie_source" >&2
+  exit 2
+}
+[[ -n "$xhs_webhook" ]] || {
+  echo "XHS_FEISHU_WEBHOOK_URL must be set for the Feishu delivery lane" >&2
   exit 2
 }
 COOKIE_SOURCE="$cookie_source" python3 - <<'PY'
@@ -97,7 +102,7 @@ scp -q "${ssh_command[@]}" "$cookie_source" "$edge_host:$remote_stage/.xhs-cooki
 
 "${ssh_command[@]}" "$edge_host" bash -s -- \
   "$edge_dir" "$runtime_env" "$secrets_env" "$remote_stage" "$workflow_id" \
-  "$xhs_token" "${XHS_FEISHU_WEBHOOK_URL:-}" "$cookie_file" "$xhs_chat_ids" \
+  "$xhs_token" "$xhs_webhook" "$cookie_file" "$xhs_chat_ids" \
   "$remote_stage/.xhs-cookie" <<'REMOTE'
 set -euo pipefail
 edge_dir="$1"; runtime_env="$2"; secrets_env="$3"; stage="$4"; workflow_id="$5"
