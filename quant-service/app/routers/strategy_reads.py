@@ -73,6 +73,9 @@ def build_strategy_reads_router(database: Any, decision_model_version: str, asyn
         Tencent batched-quote request size, and a human-curated watchlist
         already uses most of it.
         """
-        return sync_latest_watchlist_proposals(database, as_of_date or cn_today())
+        today = cn_today()
+        # A caller may ask for an older replay date, but never use a future
+        # date to expose fixture rows that are not eligible for production.
+        return sync_latest_watchlist_proposals(database, min(as_of_date or today, today))
 
     return router
