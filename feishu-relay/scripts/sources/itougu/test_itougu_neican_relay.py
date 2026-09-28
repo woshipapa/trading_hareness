@@ -388,6 +388,15 @@ class ItouguRelayTests(unittest.TestCase):
         self.assertLess(elapsed, 0.25, f"fan-out was serialized: {elapsed:.3f}s")
         self.assertEqual(set(calls), {"chat-a", "chat-b", "chat-c"})
 
+    def test_stale_upstream_rows_are_not_relayable(self):
+        self.assertTrue(relay.is_stale_item({"createTime": "2023-05-26 15:11:57"}))
+        self.assertFalse(relay.is_stale_item({"createTime": "2026-09-28 10:38:21"}))
+
+    def test_content_key_ignores_upstream_append_id(self):
+        first = {"appendContentId": "old-id", "content": "same body", "createTime": "2026-09-28 10:00:00"}
+        second = {"appendContentId": "new-id", "content": "same body", "createTime": "2026-09-28 10:01:00"}
+        self.assertEqual(relay.item_content_key(first), relay.item_content_key(second))
+
 
 if __name__ == "__main__":
     unittest.main()
