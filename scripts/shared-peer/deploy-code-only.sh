@@ -80,7 +80,8 @@ test -f "$release_root/entrypoint.py"
 # The hotfix directory is mounted into the container, so an absolute host path
 # here would be dangling inside the container and silently select the image.
 release_target="releases/$RELEASE_LABEL"
-ln -sfn "$release_target" "${current_root}.next"
+rm -f "${current_root}.next"
+ln -s "$release_target" "${current_root}.next"
 mv -Tf "${current_root}.next" "$current_root"
 
 set_env() {
@@ -105,7 +106,8 @@ C=(docker compose --env-file .env -f compose.yaml -f compose.intraday-owner.yaml
 "${C[@]}" config --quiet
 if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
   if [ -n "$previous_root" ]; then
-    ln -sfn "$previous_target" "${current_root}.next"
+    rm -f "${current_root}.next"
+    ln -s "$previous_target" "${current_root}.next"
     mv -Tf "${current_root}.next" "$current_root"
     "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler || true
   fi
