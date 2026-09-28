@@ -168,6 +168,10 @@ for attempt in $(seq 1 45); do
   sleep 2
 done
 curl -fsS http://127.0.0.1:18790/health >/dev/null
+for attempt in $(seq 1 45); do
+  curl -fsS http://127.0.0.1:5678/healthz >/dev/null && break
+  sleep 2
+done
 curl -fsS http://127.0.0.1:5678/healthz >/dev/null
 container=feishu-relay-edge-n8n
 docker cp "$stage/xhs-intel-edge.json" "$container:/tmp/xhs-intel-edge.json"
