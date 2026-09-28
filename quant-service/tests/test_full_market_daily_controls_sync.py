@@ -23,6 +23,8 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("persisted_factor_semantics_sql", source)
         self.assertIn("factor.available_at<", mirror_section)
         self.assertIn("array_position", mirror_section)
+        self.assertIn("DISTINCT ON", mirror_section)
+        self.assertNotIn("FROM LATERAL", mirror_section)
 
     def test_repair_contract_requires_one_explicit_trade_date(self):
         self.assertEqual(

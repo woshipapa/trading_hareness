@@ -259,23 +259,25 @@ async def sync(
                 return str(result.provider.key)
 
             connection.execute(
-                f"""UPDATE quant.market_bars_daily bar
-                     SET adj_factor=selected_factor.adj_factor
-                     FROM LATERAL (
-                           SELECT factor.adj_factor
-                             FROM quant.daily_adjustment_factors factor
-                            WHERE factor.trading_date=bar.trading_date
-                              AND factor.symbol=bar.symbol
-                              AND {persisted_factor_semantics_sql('factor')}
-                              AND factor.adj_factor>0
-                              AND factor.available_at<((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                            ORDER BY array_position(%s::text[],factor.provider) NULLS LAST,
-                                     factor.available_at DESC,
-                                     factor.provider
-                            LIMIT 1
-                     ) selected_factor
-                    WHERE bar.trading_date=%s""",
-                (list(FACTOR_PROVIDER_ORDER), trade_date),
+                f"""WITH selected_factor AS (
+                         SELECT DISTINCT ON (factor.trading_date,factor.symbol)
+                                factor.trading_date,factor.symbol,factor.adj_factor
+                           FROM quant.daily_adjustment_factors factor
+                          WHERE factor.trading_date=%s
+                            AND {persisted_factor_semantics_sql('factor')}
+                            AND factor.adj_factor>0
+                            AND factor.available_at<((factor.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
+                          ORDER BY factor.trading_date,factor.symbol,
+                                   array_position(%s::text[],factor.provider) NULLS LAST,
+                                   factor.available_at DESC,factor.provider
+                     )
+                     UPDATE quant.market_bars_daily bar
+                        SET adj_factor=selected_factor.adj_factor
+                       FROM selected_factor
+                      WHERE bar.trading_date=selected_factor.trading_date
+                        AND bar.symbol=selected_factor.symbol
+                        AND bar.trading_date=%s""",
+                (trade_date, list(FACTOR_PROVIDER_ORDER), trade_date),
             )
             connection.execute(
                 """UPDATE quant.market_bars_daily bar SET limit_up=limits.limit_up,limit_down=limits.limit_down
