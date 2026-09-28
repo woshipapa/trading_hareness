@@ -18,8 +18,9 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 
 #: Longest a health probe waits for the full evidence before answering from
-#: memory.  The session guard gives /health 15 s and restarts on silence.
-HEALTH_DEADLINE_SECONDS = 8.0
+#: memory.  The container's urllib probe has a three-second socket deadline,
+#: so the in-app fallback must leave enough time to serialize its busy answer.
+HEALTH_DEADLINE_SECONDS = 1.0
 #: How long the service may keep answering "busy" before health fails anyway,
 #: so a process that is truly wedged is still restarted.
 BUSY_GRACE_SECONDS = 180.0

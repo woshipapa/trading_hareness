@@ -6,7 +6,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi.responses import Response
 
-from app.routers.system_control import SystemControlDependencies, build_system_control_router
+from app.routers.system_control import (
+    HEALTH_DEADLINE_SECONDS,
+    SystemControlDependencies,
+    build_system_control_router,
+)
 
 
 class _Unavailable(RuntimeError):
@@ -14,6 +18,9 @@ class _Unavailable(RuntimeError):
 
 
 class SystemControlRouterTests(unittest.TestCase):
+    def test_default_fallback_precedes_container_socket_deadline(self) -> None:
+        self.assertLess(HEALTH_DEADLINE_SECONDS, 3.0)
+
     def _client(self, *, health_payload=lambda: {"status": "ok"}, bootstrap=lambda: {"status": "ok"}) -> TestClient:
         app = FastAPI()
         app.include_router(build_system_control_router(SystemControlDependencies(
