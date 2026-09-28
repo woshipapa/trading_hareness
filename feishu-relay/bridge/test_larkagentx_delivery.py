@@ -34,6 +34,12 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		self.assertFalse(bridge.is_paper_command_message({"content": "收入增长 20%"}))
 		self.assertFalse(bridge.is_paper_command_message({"content": "普通群消息"}))
 
+	def test_xhs_command_lane_is_narrow(self):
+		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs status"}))
+		self.assertTrue(bridge.is_xhs_command_message({"content": "@_user_123 #xhs 最新"}))
+		self.assertFalse(bridge.is_xhs_command_message({"content": "xhs status"}))
+		self.assertFalse(bridge.is_xhs_command_message({"content": "#xhs"}))
+
 	def test_adapter_business_failure_is_retried(self):
 		response = FakeResponse(json.dumps({"status": "failed", "message": "webhook temporary failure"}).encode("utf-8"))
 		with patch.object(bridge, "urlopen", return_value=response):
