@@ -176,8 +176,9 @@ curl -fsS http://127.0.0.1:5678/healthz >/dev/null
 container=feishu-relay-edge-n8n
 docker cp "$stage/xhs-intel-edge.json" "$container:/tmp/xhs-intel-edge.json"
 if ! docker exec "$container" sh -lc "rm -rf /tmp/xhs-export; n8n export:workflow --all --separate --output=/tmp/xhs-export >/dev/null 2>&1 && grep -R -q '$workflow_id' /tmp/xhs-export"; then
-  docker exec "$container" n8n import:workflow --input=/tmp/xhs-intel-edge.json --activeState=fromJson
+  docker exec "$container" n8n import:workflow --input=/tmp/xhs-intel-edge.json
 fi
+docker exec "$container" n8n publish:workflow --id="$workflow_id" >/dev/null
 docker exec "$container" sh -lc "rm -rf /tmp/xhs-export /tmp/xhs-intel-edge.json"
 printf 'xhs_edge_health='
 curl -fsS http://127.0.0.1:18790/health | python3 -c 'import json,sys; x=json.load(sys.stdin); print(json.dumps({k:x.get(k) for k in ("status","collector","cookie_configured","feishu_webhook_configured","jobs")}, ensure_ascii=False))'
