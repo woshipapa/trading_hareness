@@ -1150,7 +1150,7 @@ class Bridge:
 							{"chat_id": chat_id, "positions": list(range(start, end + 1))},
 							reason="startup_private_position_gap",
 						)
-				except Exception as error:
+			except Exception as error:
 				LOG.warning("LarkAgentX 启动私有缺口补读失败 chat_id=%s：%s", chat_id, error)
 
 	async def repair_private_tail_once(self) -> dict[str, Any]:
