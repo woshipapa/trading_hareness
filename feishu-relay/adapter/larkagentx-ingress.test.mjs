@@ -192,6 +192,32 @@ test('decodes LarkAgentX internal richtext cards with text and encrypted images'
 	});
 });
 
+test('drops the protobuf-prefixed client upgrade banner from image-only cat cards', () => {
+	const input = {
+		msg_id: 'om_cat_image_only', msg_type_name: 'CARD', content: '[卡片]  ',
+		content_data: {
+			cardVersion: 2,
+			richtext: {
+				imageIds: ['1'],
+				elements: { dictionary: {
+					'1': { tag: 2, property: 'img_v3_cat_image' },
+					'4': { tag: 1, property: '\n5Upgrade to the latest app version to view the content' },
+				} },
+			},
+		},
+		_larkagentx_images: [{ image_id: 'img_v3_cat_image', source_id: '1', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }],
+	};
+	assert.equal(isDirectLarkAgentXRelayType(input), true);
+	const message = normalizeLarkAgentXRelayMessage(input);
+	assert.equal(message.msg_type, 'post');
+	const rows = JSON.parse(message.body.content).zh_cn.content;
+	assert.equal(rows.some((row) => row.some((item) => item.text?.includes('Upgrade to the latest app version'))), false);
+	assert.deepEqual(rows.at(-1), [{
+		tag: 'img', image_key: 'img_v3_cat_image',
+		larkagentx_resource: input._larkagentx_images[0],
+	}]);
+});
+
 test('marks incomplete LarkAgentX cards for the narrow official backfill lane', () => {
 	const input = { msg_id: 'om_card_incomplete', msg_type_name: 'CARD', content: '[卡片]', content_data: { cardDesc: '仅摘要' } };
 	assert.equal(hasLarkAgentXCardPayload(input), false);
