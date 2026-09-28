@@ -113,7 +113,8 @@ bridge_env=/etc/larkagentx-group-relay.env
 exec 9>/var/lock/xhs-intel-edge.lock
 flock -w 120 9
 test -f "$runtime_env"; test -f "$secrets_env"
-install -d -m 0750 "$edge_dir" "$edge_dir/xhs-state" /etc/feishu-relay-edge
+install -d -m 0755 "$edge_dir" /etc/feishu-relay-edge
+install -d -m 0750 "$edge_dir/xhs-state"
 cp -a "$edge_dir/docker-compose.yml" "$edge_dir/docker-compose.yml.bak-xhs-$(date -u +%Y%m%d-%H%M%S)" 2>/dev/null || true
 rm -rf "$edge_dir/xhs-intel" "$edge_dir/xhs-source"
 cp -a "$stage/xhs-intel" "$edge_dir/xhs-intel"
