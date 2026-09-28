@@ -12,10 +12,13 @@ workflow.
   to the edge API. If the workstation is offline, the edge queue retains
   `pending`/`processing` jobs and leases them again after expiry.
 
-The edge API is a complete image/service deployment. It is not compatible with
-the Feishu adapter source-overlay hotfix path: deploy `xhs-intel/Dockerfile`,
-`Spider_XHS`, the edge compose service and the workflow together with
-`deploy-xhs-intel-edge.sh`.
+The edge API is a separate image/service deployment. The Feishu adapter and
+LarkAgentX bridge can be updated through the existing source-overlay path
+without rebuilding their immutable image. The XHS collector image is built on
+the first deployment, or when its Python/Node source or dependencies change;
+workflow, runtime environment and Cookie rotations do not require rebuilding
+the adapter image. Deploy `xhs-intel/Dockerfile`, `Spider_XHS`, the edge
+compose service and the workflow together with `deploy-xhs-intel-edge.sh`.
 
 The source checkout is supplied at deployment time as `/opt/xhs` in the edge
 container. Cookies and all runtime state remain outside git.

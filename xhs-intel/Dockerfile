@@ -8,6 +8,6 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY xhs-intel/*.py /app/
 COPY xhs-source /opt/xhs
 WORKDIR /opt/xhs
-RUN npm install --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 ENV PYTHONUNBUFFERED=1 PYTHONPATH=/opt/xhs
 CMD ["python", "/app/edge_api.py"]
