@@ -31,7 +31,7 @@ for path in pathlib.Path('quant-service/migrations/versions').glob('*.py'):
 print(",".join(sorted(revisions - parents)))
 `], { encoding: 'utf8' }).trim();
 
-function run({ edge, owner }) {
+function run({ edge, owner, edgeSourceSha = '' }) {
 	const dir = mkdtempSync(join(tmpdir(), 'release-sync-test-'));
 	writeFileSync(join(dir, 'edge.out'), edge);
 	writeFileSync(join(dir, 'owner.out'), owner);
@@ -42,7 +42,9 @@ cat > /dev/null
 case " $* " in *" -p 3535 "*) cat "${dir}/owner.out" ;; *) cat "${dir}/edge.out" ;; esac
 `);
 	chmodSync(fakeSsh, 0o755);
-	return spawnSync('bash', ['scripts/release-sync-status.sh', '--sha', sha], {
+	const args = ['scripts/release-sync-status.sh', '--sha', sha];
+	if (edgeSourceSha) args.push('--edge-source-sha', edgeSourceSha);
+	return spawnSync('bash', args, {
 		encoding: 'utf8',
 		env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, RELAY_EDGE_SSH_KEY: join(dir, 'key'), OWNER_PEER_SSH_KEY: join(dir, 'key') },
 	});
@@ -51,8 +53,7 @@ case " $* " in *" -p 3535 "*) cat "${dir}/owner.out" ;; *) cat "${dir}/edge.out"
 const health = (release, extra = {}) => JSON.stringify({ status: 'ok', build: { git_sha: sha, release }, ...extra });
 const convergedEdge = [
 	`@adapter_health ${health('edge-2026.09.26-sync')}`,
-	`@bridge_health ${JSON.stringify({ status: 'ok', release: `hotfix-20260926T010203Z-${sha.slice(0, 12)}-4242`, runtime_source: 'source-overlay' })}`,
-	`@hotfix_current releases/hotfix-20260926T010203Z-${sha.slice(0, 12)}-4242`,
+	`@bridge_health ${JSON.stringify({ status: 'ok', release: `edge-2026.09.26-sync-${sha.slice(0, 12)}`, runtime_source: 'image' })}`,
 	`@runtime_env FEISHU_ADAPTER_IMAGE=ghcr.io/woshipapa/trading-hareness-feishu-adapter:${sha}`,
 	'@runtime_env FEISHU_ADAPTER_HOTFIX_ENABLED=false',
 	'@retired_quant inactive disabled',
@@ -76,6 +77,7 @@ const drifted = run({
 		.replace(`@adapter_health ${health('edge-2026.09.26-sync')}`,
 			`@adapter_health ${health('hotfix-x', { runtime_source: 'source-overlay' })}`)
 		.replace('FEISHU_ADAPTER_HOTFIX_ENABLED=false', 'FEISHU_ADAPTER_HOTFIX_ENABLED=true')
+		.replace('edge-2026.09.26-sync-', 'hotfix-20260926T010203Z-')
 		.replace(`-${sha.slice(0, 12)}-4242`, `-${sha.slice(0, 12)}-dirty-4242`)
 		.replace('@retired_quant inactive disabled', '@retired_quant active enabled'),
 	owner: convergedOwner
@@ -93,3 +95,16 @@ console.log('overlay, dirty bridge, a live retired writer, research profile, unk
 const unreachable = run({ edge: '', owner: '' });
 assert.equal(unreachable.status, 1);
 console.log('a host that returns nothing is a failure, not a pass');
+
+const sourceOverlayEdge = [
+	`@adapter_health ${health(`hotfix-20260928T010203Z-${sha.slice(0, 12)}-4242`, { runtime_source: 'source-overlay' })}`,
+	`@bridge_health ${JSON.stringify({ status: 'ok', release: `hotfix-20260928T010203Z-${sha.slice(0, 12)}-4242`, runtime_source: 'source-overlay' })}`,
+	`@hotfix_current releases/hotfix-20260928T010203Z-${sha.slice(0, 12)}-4242`,
+	`@hotfix_base ${sha}`,
+	'@runtime_env FEISHU_ADAPTER_HOTFIX_ENABLED=true',
+	'@retired_quant inactive disabled',
+].join('\n');
+const sourceOverlay = run({ edge: sourceOverlayEdge, owner: convergedOwner, edgeSourceSha: sha });
+assert.equal(sourceOverlay.status, 0, sourceOverlay.stdout + sourceOverlay.stderr);
+assert.match(sourceOverlay.stdout, /ALL CHECKS PASSED/);
+console.log('an explicitly expected source-overlay release passes with a matching clean base sha');

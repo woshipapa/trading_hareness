@@ -16,16 +16,18 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 [--sha <git-sha>] [--skip-edge] [--skip-owner]" >&2
+  echo "usage: $0 [--sha <git-sha>] [--edge-source-sha <git-sha>] [--skip-edge] [--skip-owner]" >&2
   exit 2
 }
 
 expected_ref=""
+edge_source_ref=""
 skip_edge=false
 skip_owner=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sha) [[ -n "${2:-}" ]] || usage; expected_ref="$2"; shift 2 ;;
+    --edge-source-sha) [[ -n "${2:-}" ]] || usage; edge_source_ref="$2"; shift 2 ;;
     --skip-edge) skip_edge=true; shift ;;
     --skip-owner) skip_owner=true; shift ;;
     *) usage ;;
@@ -41,6 +43,10 @@ if [[ -z "$expected_ref" ]]; then
   expected_ref="origin/main"
 fi
 expected_sha="$(git -C "$repo_root" rev-parse --verify "${expected_ref}^{commit}")"
+edge_source_sha=""
+if [[ -n "$edge_source_ref" ]]; then
+  edge_source_sha="$(git -C "$repo_root" rev-parse --verify "${edge_source_ref}^{commit}")"
+fi
 
 edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
 edge_key="${RELAY_EDGE_SSH_KEY:-$HOME/.ssh/feishu_relay_edge_ed25519}"
@@ -97,6 +103,7 @@ edge_dir="$1"; runtime_env="$2"
 printf '@adapter_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:18300/health 2>/dev/null | tr -d '\n')"
 printf '@bridge_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:8090/health 2>/dev/null | tr -d '\n')"
 printf '@hotfix_current %s\n' "$(readlink "$edge_dir/hotfix/current" 2>/dev/null || true)"
+printf '@hotfix_base %s\n' "$(cat "$edge_dir/hotfix/current/.base-git-sha" 2>/dev/null || true)"
 grep -E '^(FEISHU_ADAPTER_IMAGE|FEISHU_ADAPTER_HOTFIX_ENABLED|APP_GIT_SHA|APP_RELEASE)=' "$runtime_env" 2>/dev/null \
   | sed 's/^/@runtime_env /'
 printf '@retired_quant %s %s\n' "$(systemctl is-active quant-intraday-edge.service 2>/dev/null || true)" \
@@ -131,12 +138,14 @@ REMOTE_OWNER
   fi
 fi
 
-python3 - "$expected_sha" "$work_dir" "$skip_edge" "$skip_owner" <<'PY'
+python3 - "$expected_sha" "$edge_source_sha" "$work_dir" "$skip_edge" "$skip_owner" <<'PY'
 import json
 import pathlib
 import sys
 
-expected, work, skip_edge, skip_owner = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3] == "true", sys.argv[4] == "true"
+expected, edge_source, work, skip_edge, skip_owner = (
+    sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3]), sys.argv[4] == "true", sys.argv[5] == "true"
+)
 heads = [line for line in (work / "expected_heads").read_text().split() if line]
 rows, failures = [], 0
 
@@ -172,9 +181,9 @@ def check(host, item, observed, ok, expected_text):
         failures += 1
 
 
-def sha_matches(value):
+def sha_matches(value, reference=expected):
     value = str(value or "").lower()
-    return len(value) >= 7 and expected.lower().startswith(value)
+    return len(value) >= 7 and reference.lower().startswith(value)
 
 
 if not skip_edge:
@@ -184,21 +193,34 @@ if not skip_edge:
     else:
         adapter = health(first(edge, "adapter_health"))
         build = (adapter or {}).get("build") or {}
+        edge_expected = edge_source or expected
         check("edge", "adapter /health", (adapter or {}).get("status"), (adapter or {}).get("status") == "ok", "ok")
-        check("edge", "adapter git_sha", build.get("git_sha"), sha_matches(build.get("git_sha")), expected[:12])
-        check("edge", "adapter release", build.get("release"), not str(build.get("release") or "").startswith("hotfix"), "pinned (not hotfix*)")
-        check("edge", "adapter runtime_source", (adapter or {}).get("runtime_source") or "image",
-              (adapter or {}).get("runtime_source") != "source-overlay", "not source-overlay")
         env = dict(item.split("=", 1) for item in edge.get("runtime_env", []) if "=" in item)
-        check("edge", "runtime.env image", env.get("FEISHU_ADAPTER_IMAGE"), expected[:12] in str(env.get("FEISHU_ADAPTER_IMAGE") or ""),
-              f"...:{expected[:12]}...")
-        check("edge", "runtime.env overlay", env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "unset",
-              str(env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "false").lower() != "true", "false/unset")
+        if edge_source:
+            check("edge", "adapter git_sha", build.get("git_sha"), sha_matches(build.get("git_sha"), edge_expected), edge_expected[:12])
+            check("edge", "adapter release", build.get("release"), str(build.get("release") or "").startswith("hotfix"), "hotfix source-overlay")
+            check("edge", "adapter runtime_source", (adapter or {}).get("runtime_source") or "image",
+                  (adapter or {}).get("runtime_source") == "source-overlay", "source-overlay")
+            check("edge", "hotfix base", first(edge, "hotfix_base"), sha_matches(first(edge, "hotfix_base"), edge_expected), edge_expected[:12])
+            check("edge", "runtime.env image", env.get("FEISHU_ADAPTER_IMAGE") or "not required", True, "not required for source-overlay")
+            check("edge", "runtime.env overlay", env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "unset",
+                  str(env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "false").lower() == "true", "true")
+        else:
+            check("edge", "adapter git_sha", build.get("git_sha"), sha_matches(build.get("git_sha")), expected[:12])
+            check("edge", "adapter release", build.get("release"), not str(build.get("release") or "").startswith("hotfix"), "pinned (not hotfix*)")
+            check("edge", "adapter runtime_source", (adapter or {}).get("runtime_source") or "image",
+                  (adapter or {}).get("runtime_source") != "source-overlay", "not source-overlay")
+            check("edge", "runtime.env image", env.get("FEISHU_ADAPTER_IMAGE"), expected[:12] in str(env.get("FEISHU_ADAPTER_IMAGE") or ""),
+                  f"...:{expected[:12]}...")
+            check("edge", "runtime.env overlay", env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "unset",
+                  str(env.get("FEISHU_ADAPTER_HOTFIX_ENABLED") or "false").lower() != "true", "false/unset")
         bridge = health(first(edge, "bridge_health"))
         bridge_release = str((bridge or {}).get("release") or "")
         check("edge", "larkagentx bridge", (bridge or {}).get("status"), (bridge or {}).get("status") == "ok", "ok")
         check("edge", "bridge release", bridge_release or "<none>",
-              expected[:12] in bridge_release and "-dirty" not in bridge_release, f"overlay built from clean {expected[:12]}")
+              edge_expected[:12] in bridge_release and "-dirty" not in bridge_release
+              and ((edge_source and bridge_release.startswith("hotfix-")) or (not edge_source and not bridge_release.startswith("hotfix-"))),
+              f"{'source-overlay' if edge_source else 'pinned'} from {edge_expected[:12]}")
         active, enabled = (first(edge, "retired_quant") + " ").split(" ", 1)
         check("edge", "retired quant-intraday-edge", f"{active}/{enabled.strip()}",
               active != "active" and enabled.strip() != "enabled", "inactive/disabled")
