@@ -13,4 +13,6 @@ test('parses explicit xhs commands and defaults to status', () => {
 test('enforces the optional chat binding', () => {
 	assert.equal(parseXhsCommand({ message: { chat_id: 'oc_other', content: '#xhs status' } }, 'oc_bound'), null);
 	assert.equal(parseXhsCommand({ message: { chat_id: 'oc_bound', content: '#xhs status' } }, 'oc_bound').command, 'status');
+	assert.equal(parseXhsCommand({ larkagentx_command_lane: true, message: { chat_id: '7685299326167305463', content: '#xhs status' } }, 'oc_bound').command, 'status');
+	assert.equal(parseXhsCommand({ message: { chat_id: 'oc_bound', content: '#xhs status' } }, 'oc_bound,oc_other').command, 'status');
 });

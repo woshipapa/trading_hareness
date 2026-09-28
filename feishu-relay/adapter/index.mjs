@@ -60,7 +60,7 @@ const paperIngestChatId = String(process.env.PAPER_KB_FEISHU_CHAT_ID ?? '').trim
 const paperSearchWebhook = String(process.env.PAPER_KB_SEARCH_WEBHOOK ?? '').trim();
 const paperFeedbackWebhook = String(process.env.PAPER_KB_FEEDBACK_WEBHOOK ?? '').trim();
 const xhsCommandWebhook = String(process.env.XHS_COMMAND_WEBHOOK ?? 'http://127.0.0.1:5678/webhook/xhs-command').trim();
-const xhsCommandChatId = String(process.env.XHS_COMMAND_CHAT_ID ?? '').trim();
+const xhsCommandChatId = String(process.env.XHS_COMMAND_CHAT_IDS ?? process.env.XHS_COMMAND_CHAT_ID ?? '').trim();
 const larkAgentXIngressToken = String(process.env.LARKX_BRIDGE_TOKEN ?? '').trim();
 const larkAgentXResourceUrl = String(process.env.LARKX_BRIDGE_RESOURCE_URL ?? '').trim();
 const larkAgentXGroupRelayEnabled = String(process.env.LARKX_GROUP_RELAY_ENABLED ?? 'false').toLowerCase() === 'true';

@@ -454,6 +454,7 @@ class Bridge:
 			raise RuntimeError("LARKX_SEND_CHAT_IDS must contain at least one chat ID")
 		self.paper_command_lane_enabled = os.environ.get("LARKX_PAPER_KB_COMMANDS_ENABLED", "false").strip().lower() == "true"
 		self.xhs_command_lane_enabled = os.environ.get("LARKX_XHS_COMMANDS_ENABLED", "false").strip().lower() == "true"
+		self.xhs_command_chat_ids = csv_env("LARKX_XHS_COMMAND_CHAT_IDS")
 		self.profile = os.environ.get("LARKX_PROFILE", "default").strip() or "default"
 		larkx_home = Path(os.environ.get("LARKX_HOME", "~/.larkx")).expanduser()
 		auth_path, default_spool_path, default_owner_path = profile_storage_paths(larkx_home, self.profile)
@@ -905,6 +906,7 @@ class Bridge:
 			"summary_ingress_configured": bool(self.summary_ingress_url),
 			"paper_command_lane_enabled": self.paper_command_lane_enabled,
 			"xhs_command_lane_enabled": self.xhs_command_lane_enabled,
+			"xhs_command_chat_ids": sorted(self.xhs_command_chat_ids),
 			"last_observed_chat_id": self.last_observed_chat_id or None,
 			"last_observed_message_type": self.last_observed_message_type or None,
 			"websocket": {
@@ -1326,7 +1328,11 @@ class Bridge:
 		self.websocket_state = "connected"
 		chat_id = str(message.get("chat_id", ""))
 		paper_command_lane = getattr(self, "paper_command_lane_enabled", False) and is_paper_command_message(message)
-		xhs_command_lane = getattr(self, "xhs_command_lane_enabled", False) and is_xhs_command_message(message)
+		xhs_command_lane = (
+			getattr(self, "xhs_command_lane_enabled", False)
+			and is_xhs_command_message(message)
+			and (not getattr(self, "xhs_command_chat_ids", set()) or chat_id in self.xhs_command_chat_ids)
+		)
 		command_lane = paper_command_lane or xhs_command_lane
 		dynamic_route = self.dynamic_routes.get(chat_id)
 		if chat_id not in self.websocket_chat_ids and not command_lane:
