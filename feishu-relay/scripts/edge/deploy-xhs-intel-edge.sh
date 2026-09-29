@@ -51,6 +51,9 @@ cp -R "$repo_root/Spider_XHS/." "$tmp_dir/xhs-source/"
 rm -rf "$tmp_dir/xhs-source/.git" "$tmp_dir/xhs-source/node_modules" "$tmp_dir/xhs-source/__pycache__"
 cp "$source_root/feishu-relay/deploy/edge/docker-compose.yml" "$tmp_dir/docker-compose.yml"
 cp "$source_root/workflows/xhs-intel-edge.json" "$tmp_dir/xhs-intel-edge.json"
+cp "$source_root/feishu-relay/deploy/edge/xhs-n8n-execution-reconcile.sh" \
+  "$source_root/feishu-relay/deploy/edge/xhs-n8n-execution-reconcile.service" \
+  "$source_root/feishu-relay/deploy/edge/xhs-n8n-execution-reconcile.timer" "$tmp_dir/"
 
 if [[ "$apply" != true ]]; then
   echo "dry run only; source and Spider_XHS are ready, append --apply to deploy"
@@ -238,33 +241,12 @@ if [[ "$runner_registered" != true ]]; then
   docker compose --env-file "$runtime_env" --env-file "$secrets_env" ps >&2 || true
   exit 1
 fi
-relay_pguser=""; relay_pgdatabase=""; relay_pgpassword=""
-while IFS='=' read -r key value; do
-  case "$key" in
-    RELAY_PGUSER) relay_pguser="$value" ;;
-    RELAY_PGDATABASE) relay_pgdatabase="$value" ;;
-    RELAY_PGPASSWORD) relay_pgpassword="$value" ;;
-  esac
-done < "$runtime_env"
-if [[ -z "$relay_pguser" || -z "$relay_pgdatabase" || -z "$relay_pgpassword" ]]; then
-  echo 'remote relay database settings are incomplete' >&2
-  exit 1
-fi
-audit_dir="$edge_dir/backups/n8n-executions/$(date -u +%Y%m%d-%H%M%S)-xhs"
-mkdir -p -m 0750 "$audit_dir"
-candidate_count="$(PGPASSWORD="$relay_pgpassword" psql -h 127.0.0.1 -p 5432 -U "$relay_pguser" -d "$relay_pgdatabase" -Atqc \
-  "SELECT count(*) FROM execution_entity WHERE \"workflowId\"='$workflow_id' AND status='running' AND \"startedAt\" < now() - interval '10 minutes'")"
-if [[ "$candidate_count" != 0 ]]; then
-  PGPASSWORD="$relay_pgpassword" psql -h 127.0.0.1 -p 5432 -U "$relay_pguser" -d "$relay_pgdatabase" -At -F $'\\t' -c \
-    "SELECT id,\"workflowId\",\"startedAt\" FROM execution_entity WHERE \"workflowId\"='$workflow_id' AND status='running' AND \"startedAt\" < now() - interval '10 minutes' ORDER BY \"startedAt\"" > "$audit_dir/before.tsv"
-  chmod 0600 "$audit_dir/before.tsv"
-  PGPASSWORD="$relay_pgpassword" psql -h 127.0.0.1 -p 5432 -U "$relay_pguser" -d "$relay_pgdatabase" -Atqc \
-    "UPDATE execution_entity SET status='crashed',\"stoppedAt\"=now() WHERE \"workflowId\"='$workflow_id' AND status='running' AND \"startedAt\" < now() - interval '10 minutes' RETURNING id" > "$audit_dir/updated_ids.tsv"
-  chmod 0600 "$audit_dir/updated_ids.tsv"
-  echo "reconciled stale XHS executions; audit=$audit_dir"
-else
-  rmdir "$audit_dir"
-fi
+install -o root -g root -m 0755 "$stage/xhs-n8n-execution-reconcile.sh" /usr/local/sbin/xhs-n8n-execution-reconcile.sh
+install -o root -g root -m 0644 "$stage/xhs-n8n-execution-reconcile.service" /etc/systemd/system/xhs-n8n-execution-reconcile.service
+install -o root -g root -m 0644 "$stage/xhs-n8n-execution-reconcile.timer" /etc/systemd/system/xhs-n8n-execution-reconcile.timer
+systemctl daemon-reload
+systemctl enable --now xhs-n8n-execution-reconcile.timer
+systemctl start --wait xhs-n8n-execution-reconcile.service
 container=feishu-relay-edge-n8n
 docker cp "$stage/xhs-intel-edge.json" "$container:/tmp/xhs-intel-edge.json"
 if ! docker exec "$container" sh -lc "rm -rf /tmp/xhs-export; n8n export:workflow --all --separate --output=/tmp/xhs-export >/dev/null 2>&1 && grep -R -q '$workflow_id' /tmp/xhs-export"; then
