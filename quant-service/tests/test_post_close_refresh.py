@@ -22,6 +22,7 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
     async def test_service_assembles_same_date_stages_and_announcements_after_core_symbols(self):
         captured: dict[str, object] = {}
         providers: dict[str, object] = {}
+        longhu_enabled = {"value": False}
 
         async def completed(*_args, **_kwargs):
             return {"status": "completed"}
@@ -51,7 +52,8 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             return {"status": "completed", "stages": {}}
 
         dependencies = PostCloseRefreshDependencies(
-            database=object(), china_today=lambda: date(2026, 8, 21), longhu_configured=lambda: False,
+            database=object(), china_today=lambda: date(2026, 8, 21),
+            longhu_configured=lambda: longhu_enabled["value"],
             longhu_close_context=lambda _day: {"status": "completed"}, provider_configs=lambda: providers,
             run_database=completed, reconcile_stale_fetch_runs=lambda *_: None,
             reprocess_remote_reports=lambda *_: None, sync_market_universe=completed,
@@ -99,6 +101,14 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             PostCloseRefreshRequest(trade_date=date(2026, 8, 21), announcement_limit=7), dependencies,
         )
         self.assertEqual(captured["daily_request"].provider, "super_get")
+
+        # A configured Longhu owner must enter the Longhu auto route even when
+        # a Promax Super GET capability is also present.
+        longhu_enabled["value"] = True
+        await run_post_close_refresh(
+            PostCloseRefreshRequest(trade_date=date(2026, 8, 21), announcement_limit=7), dependencies,
+        )
+        self.assertEqual(captured["daily_request"].provider, "auto")
 
     async def test_close_snapshot_requests_provider_refresh_for_owner_fallback_chain(self):
         captured: dict[str, object] = {}
