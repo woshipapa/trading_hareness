@@ -222,6 +222,10 @@ services:
       XHS_STATE_DIR: /var/lib/xhs-collector
       XHS_KEYWORDS: ${XHS_KEYWORDS:-AI基础设施,AI加速,系统软件,分布式训练,算力网络,推理优化}
       XHS_FETCH_LIMIT: ${XHS_FETCH_LIMIT:-5}
+      XHS_SOURCE_GIT_SHA: ${XHS_SOURCE_GIT_SHA:-}
+      XHS_SOURCE_TREE_SHA256: ${XHS_SOURCE_TREE_SHA256:-}
+      XHS_INTEL_TREE_SHA256: ${XHS_INTEL_TREE_SHA256:-}
+      XHS_WORKFLOW_SHA256: ${XHS_WORKFLOW_SHA256:-}
       XHS_FEISHU_WEBHOOK_URL: ${XHS_FEISHU_WEBHOOK_URL:-}
       TZ: Asia/Shanghai
     volumes:
