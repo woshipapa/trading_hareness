@@ -38,7 +38,7 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs status"}))
 		self.assertTrue(bridge.is_xhs_command_message({"content": "@_user_123 #xhs 最新"}))
 		self.assertFalse(bridge.is_xhs_command_message({"content": "xhs status"}))
-		self.assertFalse(bridge.is_xhs_command_message({"content": "#xhs"}))
+		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs"}))
 
 	def test_xhs_command_lane_can_bind_chat_ids(self):
 		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs status", "chat_id": "oc_bound"}))

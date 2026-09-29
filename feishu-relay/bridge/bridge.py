@@ -64,7 +64,7 @@ PAPER_COMMAND_RE = re.compile(
 	r"search(?:\s|[:：])+|ingest(?:\s|[:：])+).+",
 	re.IGNORECASE,
 )
-XHS_COMMAND_RE = re.compile(r"^#xhs(?:\s|$).+?", re.IGNORECASE)
+XHS_COMMAND_RE = re.compile(r"^#xhs(?:\s|$)(?:.*)$", re.IGNORECASE)
 
 
 def is_paper_command_message(message: dict[str, Any]) -> bool:
