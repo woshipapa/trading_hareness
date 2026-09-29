@@ -1,0 +1,8 @@
+[Unit]
+Description=Reconcile stale XHS n8n executions
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/xhs-n8n-execution-reconcile.sh
