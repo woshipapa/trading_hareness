@@ -129,7 +129,11 @@ def _watch_user_id(value):
     """Accept an XHS user id or a profile URL, but persist only the id."""
     value = str(value or "").strip()
     if "://" in value:
-        value = urlparse(value).path.rstrip("/").split("/")[-1]
+        parsed = urlparse(value)
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) < 2 or parts[-2].lower() != "profile":
+            raise OperationError("用户主页 URL 必须是 /user/profile/<用户ID>")
+        value = parts[-1]
     import re
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,128}", value):
         raise OperationError("用户 ID 或用户主页 URL 无效")
