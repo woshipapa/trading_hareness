@@ -19,7 +19,7 @@ assert.match(source, /xhs_source_digest/);
 assert.match(source, /XHS_SOURCE_TREE_SHA256/);
 assert.match(source, /xhs-manifest\.json/);
 assert.match(source, /build_required=false/);
-assert.match(source, /docker compose --env-file "\$runtime_env" --env-file "\$secrets_env" build --build-arg BASE_IMAGE="\$xhs_base_image" xhs-collector/);
+assert.match(source, /docker compose --env-file "\$runtime_env" --env-file "\$secrets_env" build[\s\S]*--build-arg BASE_IMAGE="\$xhs_base_image"[\s\S]*xhs-collector/);
 assert.match(source, /N8N_RUNNERS_AUTH_TOKEN/);
 assert.match(source, /n8n-runners/);
 assert.match(compose, /N8N_RUNNERS_MODE: external/);

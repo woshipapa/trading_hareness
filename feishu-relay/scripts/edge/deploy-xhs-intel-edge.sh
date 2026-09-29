@@ -34,6 +34,7 @@ xhs_webhook="${XHS_FEISHU_WEBHOOK_URL:-}"
 xhs_force_build="${XHS_FORCE_BUILD:-false}"
 xhs_skip_build="${XHS_SKIP_BUILD:-false}"
 xhs_base_image="${XHS_BASE_IMAGE:-python:3.11-slim}"
+xhs_reuse_base="${XHS_REUSE_BASE:-false}"
 workflow_id="xhs-intel-edge-daily-v1"
 xhs_source_dir="$repo_root/Spider_XHS"
 
@@ -199,11 +200,11 @@ scp -q -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes \
 "${ssh_command[@]}" "$edge_host" bash -s -- \
   "$edge_dir" "$runtime_env" "$secrets_env" "$remote_stage" "$workflow_id" \
   "$remote_stage/.xhs-credentials" "$cookie_file" "$xhs_chat_ids" \
-  "$remote_stage/.xhs-cookie" "$xhs_force_build" "$xhs_skip_build" "$xhs_base_image" <<'REMOTE'
+  "$remote_stage/.xhs-cookie" "$xhs_force_build" "$xhs_skip_build" "$xhs_base_image" "$xhs_reuse_base" <<'REMOTE'
 set -euo pipefail
 edge_dir="$1"; runtime_env="$2"; secrets_env="$3"; stage="$4"; workflow_id="$5"
 credentials_stage="$6"; xhs_cookie_file="$7"; xhs_chat_ids="$8"; cookie_stage="${9}"; xhs_force_build="${10}"
-xhs_skip_build="${11}"; xhs_base_image="${12}"
+xhs_skip_build="${11}"; xhs_base_image="${12}"; xhs_reuse_base="${13}"
 bridge_env=/etc/larkagentx-group-relay.env
 exec 9>/var/lock/xhs-intel-edge.lock
 flock -w 120 9
@@ -318,7 +319,8 @@ elif [[ ! -s "$edge_dir/xhs-manifest.json" || "$old_xhs_git_sha" != "$xhs_git_sh
   build_required=true
 fi
 if [[ "$xhs_skip_build" != true && "$build_required" == true ]]; then
-  BASE_IMAGE="$xhs_base_image" docker compose --env-file "$runtime_env" --env-file "$secrets_env" build --build-arg BASE_IMAGE="$xhs_base_image" xhs-collector
+  BASE_IMAGE="$xhs_base_image" docker compose --env-file "$runtime_env" --env-file "$secrets_env" build \
+    --build-arg BASE_IMAGE="$xhs_base_image" --build-arg REUSE_BASE="$xhs_reuse_base" xhs-collector
 elif [[ "$xhs_skip_build" != true ]]; then
   echo 'xhs image already present; skipping collector image build'
 fi
