@@ -27,6 +27,7 @@ import { shouldRedownloadRetryMedia } from './retry-media.mjs';
 import { parsePaperIngestIds } from './paper-ingest-command.mjs';
 import { cardPayload } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
+import { parseXhsCommand } from './xhs-command.mjs';
 import { personalDecisionResearchPaths } from './personal-decision-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
 import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
@@ -59,6 +60,8 @@ const paperIngestWebhook = String(process.env.PAPER_KB_INGEST_WEBHOOK ?? '').tri
 const paperIngestChatId = String(process.env.PAPER_KB_FEISHU_CHAT_ID ?? '').trim();
 const paperSearchWebhook = String(process.env.PAPER_KB_SEARCH_WEBHOOK ?? '').trim();
 const paperFeedbackWebhook = String(process.env.PAPER_KB_FEEDBACK_WEBHOOK ?? '').trim();
+const xhsCommandWebhook = String(process.env.XHS_COMMAND_WEBHOOK ?? 'http://127.0.0.1:5678/webhook/xhs-command').trim();
+const xhsCommandChatId = String(process.env.XHS_COMMAND_CHAT_IDS ?? process.env.XHS_COMMAND_CHAT_ID ?? '').trim();
 const larkAgentXIngressToken = String(process.env.LARKX_BRIDGE_TOKEN ?? '').trim();
 const larkAgentXResourceUrl = String(process.env.LARKX_BRIDGE_RESOURCE_URL ?? '').trim();
 const larkAgentXGroupRelayEnabled = String(process.env.LARKX_GROUP_RELAY_ENABLED ?? 'false').toLowerCase() === 'true';
@@ -1104,16 +1107,14 @@ async function handleLarkAgentXInbound(request, response) {
 	try {
 		const input = await readJsonBody(request, 64 * 1024);
 		const data = normalizeLarkAgentXMessage(input);
-		addEvent(data);
-		updateEvent(data.event_id, { n8n_status: 'LarkAgentX 消息转发中' });
-		const result = await forwardToN8n(data, {
+		// Keep the private WebSocket ingress on the same event path as the
+		// official Feishu dispatcher.  In particular, paper commands (收/收录/
+		// 查询) are adapter commands and must not be mistaken for ordinary
+		// research text just because they arrived through LarkAgentX.
+		const result = await dispatchFeishuMessage(data, {
 			source: 'larkagentx', sourceLabel: data.source_label,
 			messageText: JSON.parse(data.message.content).text,
 			receivedAt: new Date().toISOString(),
-		});
-		updateEvent(data.event_id, {
-			n8n_status: result?.duplicate ? '重复已跳过' : '已接收，处理中',
-			target_status: result?.duplicate ? '本地幂等去重，未重复请求远端' : null,
 		});
 		response.writeHead(202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({ status: result?.duplicate ? 'duplicate' : 'accepted', message_id: data.message.message_id, job_id: result?.jobId ?? null }));
@@ -1223,7 +1224,9 @@ async function handleLarkAgentXGroupRelayInbound(request, response) {
 			}
 		}
 		const resolvedChatId = message.oauth_chat_id || chatId;
-		const result = await groupRelay.processInbound({ ...message, source_chat_id: resolvedChatId }, { ...source, resolvedChatId, targetChatIds, targetChatId: targetChatIds[0] });
+		const result = await groupRelay.processInbound({ ...message, source_chat_id: resolvedChatId }, { ...source, resolvedChatId, targetChatIds, targetChatId: targetChatIds[0] }, {
+			replacePlaceholder: input?._larkagentx_force_placeholder === true,
+		});
 		response.writeHead(result.status === 'sent' ? 201 : 202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({ ...result, source_key: sourceKey, chat_id: chatId }));
 	} catch (error) {
@@ -2658,7 +2661,7 @@ function isQuantAlertBindingCommand(data) {
 // against NNNN.NNNNN before anything reaches a subprocess.
 function isPaperIngestCommand(data) {
 	const chatId = String(data?.message?.chat_id ?? '');
-	if (paperIngestChatId && chatId !== paperIngestChatId) return null;
+	if (paperIngestChatId && chatId !== paperIngestChatId && data?.larkagentx_command_lane !== true) return null;
 	const text = String(extractMessagePayload(data?.message ?? {}).text ?? '').replace(/@_user_\d+\s*/g, '').trim();
 	return parsePaperIngestIds(text);
 }
@@ -2683,7 +2686,7 @@ const PAPER_SEARCH_DEEP_PREFIX = /^(精查|深查)/;
 
 function isPaperSearchCommand(data) {
 	const chatId = String(data?.message?.chat_id ?? '');
-	if (paperIngestChatId && chatId !== paperIngestChatId) return null;
+	if (paperIngestChatId && chatId !== paperIngestChatId && data?.larkagentx_command_lane !== true) return null;
 	const text = String(extractMessagePayload(data?.message ?? {}).text ?? '').replace(/@_user_\d+\s*/g, '').trim();
 	const match = text.match(PAPER_SEARCH_COMMAND);
 	if (!match) return null;
@@ -2705,7 +2708,7 @@ async function forwardPaperSearch(query, deep) {
 
 function isPaperFeedbackCommand(data) {
 	const chatId = String(data?.message?.chat_id ?? '');
-	if (paperIngestChatId && chatId !== paperIngestChatId) return null;
+	if (paperIngestChatId && chatId !== paperIngestChatId && data?.larkagentx_command_lane !== true) return null;
 	const text = String(extractMessagePayload(data?.message ?? {}).text ?? '').replace(/@_user_\d+\s*/g, '').trim();
 	return parsePaperFeedback(text);
 }
@@ -2721,13 +2724,24 @@ async function forwardPaperFeedback(command, sourceEventId) {
 	return response.status;
 }
 
+async function forwardXhsCommand(command, sourceEventId) {
+	if (!xhsCommandWebhook) throw new Error('XHS_COMMAND_WEBHOOK is not configured');
+	const response = await fetch(xhsCommandWebhook, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ ...command, event_id: sourceEventId }),
+	});
+	if (!response.ok) throw new Error(`xhs command webhook responded ${response.status}`);
+	return response.status;
+}
+
 function pruneFeishuDedupe(now = Date.now()) {
 	for (const [key, entry] of feishuEventPromises) {
 		if (entry.expiresAt <= now) feishuEventPromises.delete(key);
 	}
 }
 
-async function processFeishuEvent(data) {
+async function processFeishuEvent(data, options = {}) {
 	const eventId = data?.event_id ?? 'unknown';
 	console.info(`Forwarding im.message.receive_v1 event ${eventId} to n8n`);
 	addEvent(data);
@@ -2741,6 +2755,21 @@ async function processFeishuEvent(data) {
 	if (isQuantAlertBindingCommand(data)) {
 		updateEvent(eventId, { n8n_status: '已识别为盘中提醒绑定命令，未转发研究导入' });
 		return { bound_alert_group: true };
+	}
+	const xhsCommand = parseXhsCommand({
+		...data,
+		message: { ...(data?.message ?? {}), content: String(extractMessagePayload(data?.message ?? {}).text ?? data?.message?.content ?? '') },
+	}, xhsCommandChatId);
+	if (xhsCommand) {
+		try {
+			await forwardXhsCommand(xhsCommand, eventId);
+			updateEvent(eventId, { n8n_status: `已转发小红书指令：${xhsCommand.command}` });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			updateEvent(eventId, { n8n_status: '小红书指令转发失败', n8n_error: message });
+			console.error(`小红书指令转发失败：${message}`);
+		}
+		return { xhs_command: xhsCommand };
 	}
 	const paperFeedback = isPaperFeedbackCommand(data);
 	if (paperFeedback) {
@@ -2781,11 +2810,39 @@ async function processFeishuEvent(data) {
 	const hasMedia = extractMessagePayload(data?.message ?? {}).resources.length > 0;
 	updateEvent(eventId, { n8n_status: hasMedia ? '下载媒体并转发中' : '转发中' });
 	try {
-		const result = await forwardToN8n(data);
+		const result = await forwardToN8n(data, options);
 		updateEvent(eventId, { n8n_status: result?.duplicate ? '重复已跳过' : '已接收，处理中', target_status: result?.duplicate ? '本地幂等去重，未重复请求远端' : null });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		updateEvent(eventId, { n8n_status: '失败', n8n_error: message });
+		throw error;
+	}
+}
+
+// Both the official dispatcher and the private WebSocket are at-least-once
+// delivery paths. Keep their short-lived event promise table in one wrapper so
+// a retry cannot trigger a second Paper-KB command before the durable job state
+// has caught up.
+async function dispatchFeishuMessage(data, options = {}) {
+	const keys = feishuDedupeKeys(data);
+	if (!keys.length || feishuDedupeTtlMs === 0) return processFeishuEvent(data, options);
+	const now = Date.now();
+	pruneFeishuDedupe(now);
+	const existing = keys.map((key) => feishuEventPromises.get(key)).find((entry) => entry && entry.expiresAt > now);
+	if (existing) {
+		console.info(`Skipping duplicate Feishu event ${data?.event_id ?? data?.message?.message_id ?? 'unknown'}`);
+		return existing.promise;
+	}
+
+	const promise = processFeishuEvent(data, options);
+	const entry = { promise, expiresAt: now + feishuDedupeTtlMs, keys };
+	for (const key of keys) feishuEventPromises.set(key, entry);
+	try {
+		return await promise;
+	} catch (error) {
+		for (const key of keys) {
+			if (feishuEventPromises.get(key) === entry) feishuEventPromises.delete(key);
+		}
 		throw error;
 	}
 }
@@ -2845,27 +2902,7 @@ async function processBotMenuEvent(data) {
 
 const eventDispatcher = new Lark.EventDispatcher({ loggerLevel: Lark.LoggerLevel.info }).register({
 	'im.message.receive_v1': async (data) => {
-		const keys = feishuDedupeKeys(data);
-		if (!keys.length || feishuDedupeTtlMs === 0) return processFeishuEvent(data);
-		const now = Date.now();
-		pruneFeishuDedupe(now);
-		const existing = keys.map((key) => feishuEventPromises.get(key)).find((entry) => entry && entry.expiresAt > now);
-		if (existing) {
-			console.info(`Skipping duplicate Feishu event ${data?.event_id ?? data?.message?.message_id ?? 'unknown'}`);
-			return existing.promise;
-		}
-
-		const promise = processFeishuEvent(data);
-		const entry = { promise, expiresAt: now + feishuDedupeTtlMs, keys };
-		for (const key of keys) feishuEventPromises.set(key, entry);
-		try {
-			return await promise;
-		} catch (error) {
-			for (const key of keys) {
-				if (feishuEventPromises.get(key) === entry) feishuEventPromises.delete(key);
-			}
-			throw error;
-		}
+		return dispatchFeishuMessage(data);
 	},
 	'card.action.trigger': async (data) => { noteWorkbenchEvent('card.action.trigger'); return processFeishuCardAction(data); },
 	'im.message.reaction.created_v1': async (data) => { noteWorkbenchEvent('im.message.reaction.created_v1'); return processFeishuReaction(data); },

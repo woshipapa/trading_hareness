@@ -26,14 +26,18 @@ services:
       EXECUTIONS_DATA_MAX_AGE: "72"
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
       EXECUTIONS_DATA_SAVE_ON_ERROR: all
-      N8N_RUNNERS_MODE: internal
+      # Keep the edge main process and the JavaScript task runner as separate
+      # processes, with a dedicated shared token instead of the encryption key.
+      N8N_RUNNERS_MODE: external
       N8N_RUNNERS_TASK_TIMEOUT: "300"
-      N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "900"
-      N8N_RUNNERS_AUTH_TOKEN: ${N8N_ENCRYPTION_KEY}
+      N8N_RUNNERS_TASK_REQUEST_TIMEOUT: "300"
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?Set N8N_RUNNERS_AUTH_TOKEN in secrets.env}
+      N8N_RUNNERS_BROKER_LISTEN_ADDRESS: 127.0.0.1
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       QUANT_SERVICE_URL: ${QUANT_SERVICE_URL:-http://127.0.0.1:15682}
       QUANT_WRITE_API_KEY: ${QUANT_WRITE_API_KEY}
       REMOTE_ANALYST_ARCHIVE_BASE_URL: ${REMOTE_ANALYST_ARCHIVE_BASE_URL:-}
+      XHS_COLLECTOR_TOKEN: ${XHS_COLLECTOR_TOKEN:-}
       TZ: Asia/Shanghai
       GENERIC_TIMEZONE: Asia/Shanghai
       NODE_EXTRA_CA_CERTS: /opt/n8n-certs/market-review-api.pem
@@ -79,6 +83,15 @@ services:
       N8N_MEDIA_PART_WEBHOOK_URL: http://127.0.0.1:5678/webhook/feishu-media-part
       N8N_MEDIA_FINALIZE_WEBHOOK_URL: http://127.0.0.1:5678/webhook/feishu-media-finalize
       N8N_MEDIA_STATE_WEBHOOK_URL: http://127.0.0.1:5678/webhook/feishu-media-state
+      # Paper-KB commands are received through the private LarkAgentX
+      # WebSocket and forwarded to these n8n workflows. Keep this contract in
+      # the edge compose file as well as the workstation compose file.
+      PAPER_KB_FEISHU_CHAT_ID: ${PAPER_KB_FEISHU_CHAT_ID:-}
+      PAPER_KB_INGEST_WEBHOOK: ${PAPER_KB_INGEST_WEBHOOK:-http://127.0.0.1:5678/webhook/paper-ingest}
+      PAPER_KB_SEARCH_WEBHOOK: ${PAPER_KB_SEARCH_WEBHOOK:-http://127.0.0.1:5678/webhook/paper-search}
+      PAPER_KB_FEEDBACK_WEBHOOK: ${PAPER_KB_FEEDBACK_WEBHOOK:-http://127.0.0.1:5678/webhook/paper-feedback}
+      XHS_COMMAND_WEBHOOK: ${XHS_COMMAND_WEBHOOK:-http://127.0.0.1:5678/webhook/xhs-command}
+      XHS_COMMAND_CHAT_IDS: ${XHS_COMMAND_CHAT_IDS:-}
       DASHBOARD_HOST: 127.0.0.1
       DASHBOARD_PORT: 18300
       UPLOAD_PART_BYTES: ${UPLOAD_PART_BYTES:-8388608}
@@ -127,6 +140,7 @@ services:
       LARKX_BRIDGE_RESOURCE_URL: ${LARKX_BRIDGE_RESOURCE_URL:-http://127.0.0.1:8090/resource}
       LARKX_GROUP_RELAY_ENABLED: ${LARKX_GROUP_RELAY_ENABLED:-false}
       LARKX_GROUP_RELAY_ROUTES: ${LARKX_GROUP_RELAY_ROUTES:-}
+      LARKX_XHS_COMMANDS_ENABLED: ${LARKX_XHS_COMMANDS_ENABLED:-true}
       LARKX_DYNAMIC_ROUTE_DISCOVERY: ${LARKX_DYNAMIC_ROUTE_DISCOVERY:-false}
       LARKX_CARD_BACKFILL_ENABLED: ${LARKX_CARD_BACKFILL_ENABLED:-false}
       LARKX_CARD_BACKFILL_TAGS: ${LARKX_CARD_BACKFILL_TAGS:-}
@@ -190,6 +204,54 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  xhs-collector:
+    build:
+      context: .
+      dockerfile: xhs-intel/Dockerfile
+    image: feishu-relay-edge-xhs:local
+    container_name: feishu-relay-edge-xhs
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      XHS_COLLECTOR_HOST: 127.0.0.1
+      XHS_COLLECTOR_PORT: 18790
+      XHS_COLLECTOR_TOKEN: ${XHS_COLLECTOR_TOKEN:-}
+      XHS_SOURCE_ROOT: /opt/xhs
+      XHS_COOKIE_FILE: /run/secrets/xhs_cookie
+      XHS_STATE_DIR: /var/lib/xhs-collector
+      XHS_KEYWORDS: ${XHS_KEYWORDS:-AI基础设施,AI加速,系统软件,分布式训练,算力网络,推理优化}
+      XHS_FETCH_LIMIT: ${XHS_FETCH_LIMIT:-5}
+      XHS_SOURCE_GIT_SHA: ${XHS_SOURCE_GIT_SHA:-}
+      XHS_SOURCE_TREE_SHA256: ${XHS_SOURCE_TREE_SHA256:-}
+      XHS_INTEL_TREE_SHA256: ${XHS_INTEL_TREE_SHA256:-}
+      XHS_WORKFLOW_SHA256: ${XHS_WORKFLOW_SHA256:-}
+      XHS_FEISHU_WEBHOOK_URL: ${XHS_FEISHU_WEBHOOK_URL:-}
+      TZ: Asia/Shanghai
+    volumes:
+      - ./xhs-state:/var/lib/xhs-collector
+      - ${XHS_COOKIE_FILE:-/etc/feishu-relay-edge/xhs-cookie}:/run/secrets/xhs_cookie:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:18790/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  n8n-runners:
+    image: n8nio/runners:2.33.7
+    container_name: feishu-relay-edge-n8n-runners
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      n8n:
+        condition: service_started
+    environment:
+      N8N_RUNNERS_TASK_BROKER_URI: http://127.0.0.1:5679
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?Set N8N_RUNNERS_AUTH_TOKEN in secrets.env}
+      N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "900"
+      N8N_RUNNERS_LAUNCHER_LOG_LEVEL: info
+      TZ: Asia/Shanghai
 
 volumes:
   n8n_data:

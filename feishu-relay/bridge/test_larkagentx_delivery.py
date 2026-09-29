@@ -27,6 +27,31 @@ class FakeResponse(BytesIO):
 
 @unittest.skipUnless(bridge is not None, f"supervisor larkx dependency unavailable: {BRIDGE_IMPORT_ERROR}")
 class LarkAgentXDeliveryTests(unittest.TestCase):
+	def test_paper_command_lane_is_narrow(self):
+		self.assertTrue(bridge.is_paper_command_message({"content": "收录 2609.30059v1"}))
+		self.assertTrue(bridge.is_paper_command_message({"content": "收 1 3"}))
+		self.assertTrue(bridge.is_paper_command_message({"content": "查询 KV cache"}))
+		self.assertFalse(bridge.is_paper_command_message({"content": "收入增长 20%"}))
+		self.assertFalse(bridge.is_paper_command_message({"content": "普通群消息"}))
+
+	def test_xhs_command_lane_is_narrow(self):
+		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs status"}))
+		self.assertTrue(bridge.is_xhs_command_message({"content": "@_user_123 #xhs 最新"}))
+		self.assertFalse(bridge.is_xhs_command_message({"content": "xhs status"}))
+		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs"}))
+
+	def test_xhs_command_lane_can_bind_chat_ids(self):
+		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs status", "chat_id": "oc_bound"}))
+
+	def test_command_lane_uses_direct_adapter_ingress(self):
+		instance = object.__new__(bridge.Bridge)
+		instance.ingress_url = "http://127.0.0.1:18300/internal/larkagentx/group-relay"
+		instance.command_ingress_url = "http://127.0.0.1:18300/internal/larkagentx/inbound"
+		instance.summary_ingress_url = "http://127.0.0.1:18300/internal/larkagentx/summary"
+		instance.summary_chat_ids = set()
+		self.assertEqual(instance.ingress_url_for("7690524560642280650", command_lane=True), instance.command_ingress_url)
+		self.assertEqual(instance.ingress_url_for("source-chat"), instance.ingress_url)
+
 	def test_adapter_business_failure_is_retried(self):
 		response = FakeResponse(json.dumps({"status": "failed", "message": "webhook temporary failure"}).encode("utf-8"))
 		with patch.object(bridge, "urlopen", return_value=response):
@@ -76,6 +101,47 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		post.assert_not_called()
 		instance.event_spool.record_filtered.assert_called_once()
 		instance.history_archive.append.assert_called_once()
+
+	def test_private_tail_repair_starts_after_recovered_cursor(self):
+		instance = object.__new__(bridge.Bridge)
+		instance.private_tail_repair_enabled = True
+		instance._private_tail_repair_in_flight = False
+		instance.private_tail_repair_window = 16
+		instance.private_gap_repair_chat_ids = set()
+		instance.private_tail_repair_chat_ids = set()
+		instance.websocket_chat_ids = {"7667390477875858612"}
+		instance.event_spool = Mock()
+		instance.event_spool.position_stats.return_value = {
+			"7667390477875858612": {
+				"last_position": 237,
+				"last_recovered_position": 261,
+			}
+		}
+		instance.private_tail_repair_count = 0
+		instance.last_private_tail_repair_at = None
+		instance.last_private_tail_repair_result = None
+		calls = []
+
+		async def repair(payload, *, reason):
+			calls.append((payload, reason))
+			return {
+				"requested": 16,
+				"recovered": 2,
+				"forwarded": 2,
+				"duplicates": 0,
+				"filtered": 0,
+				"failed": 0,
+			}
+
+		instance.repair_private_positions = repair
+		result = asyncio.run(instance.repair_private_tail_once())
+
+		self.assertEqual(result["recovered"], 2)
+		self.assertEqual(calls, [(
+			{"chat_id": "7667390477875858612", "start": 262, "end": 277},
+			"periodic_private_tail_repair",
+		)])
+		self.assertEqual(instance.private_tail_repair_count, 1)
 
 
 if __name__ == "__main__":

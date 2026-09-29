@@ -31,6 +31,18 @@ Only these workflows are imported: text aggregation plus media-part,
 media-finalize and media-state callbacks. Local scheduled market workflows are
 not copied, so this relay deployment cannot duplicate local research schedules.
 
+The XHS edge add-on is deployed separately by
+`feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh`. It keeps collection and
+Feishu delivery on the edge while the local worker performs AI summarization.
+The edge n8n process uses the matching `n8nio/runners` sidecar in external mode;
+the runner token is generated into the protected `secrets.env` on first apply.
+XHS overrides the global success-retention setting so its successful executions
+remain visible for 72 hours. When success retention is disabled, n8n 2.33.7
+sets `deletedAt` without saving final status or node outputs: raw rows can still
+say `running` even after success. Exclude soft-deleted rows from live execution
+diagnostics; never mark them crashed based on age alone. The deployer backs up
+and compares the workflow, then stops n8n before importing changed definitions.
+
 ## Versioned release
 
 The adapter source is built by the GitHub `edge-*` release workflow into an

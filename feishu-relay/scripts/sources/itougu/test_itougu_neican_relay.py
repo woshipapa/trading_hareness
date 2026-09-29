@@ -388,6 +388,68 @@ class ItouguRelayTests(unittest.TestCase):
         self.assertLess(elapsed, 0.25, f"fan-out was serialized: {elapsed:.3f}s")
         self.assertEqual(set(calls), {"chat-a", "chat-b", "chat-c"})
 
+    def test_stale_upstream_rows_are_not_relayable(self):
+        self.assertTrue(relay.is_stale_item({"createTime": "2023-05-26 15:11:57"}))
+        self.assertFalse(relay.is_stale_item({"createTime": "2026-09-28 10:38:21"}))
+
+    def test_content_key_ignores_upstream_append_id(self):
+        first = {"appendContentId": "old-id", "content": "same body", "createTime": "2026-09-28 10:00:00"}
+        second = {"appendContentId": "new-id", "content": "same body", "createTime": "2026-09-28 10:01:00"}
+        self.assertEqual(relay.item_content_key(first), relay.item_content_key(second))
+
+    def test_stale_rows_do_not_evict_valid_dedupe_history(self):
+        originals = {
+            "state_file": relay.STATE_FILE,
+            "video_queue_file": relay.VIDEO_QUEUE_FILE,
+            "chat_ids": relay.CHAT_IDS,
+            "juejin": relay.JUEJIN_CHAT_IDS,
+            "qinlong": relay.QINLONG_CHAT_IDS,
+            "load_headers": relay.load_headers,
+            "fetch_append": relay.fetch_append,
+            "send_feishu_many": relay.send_feishu_many,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            relay.STATE_FILE = Path(directory) / "state.json"
+            relay.VIDEO_QUEUE_FILE = Path(directory) / "video-tasks.jsonl"
+            relay.CHAT_IDS = ["shared"]
+            relay.JUEJIN_CHAT_IDS = []
+            relay.QINLONG_CHAT_IDS = []
+            relay.load_headers = lambda: {}
+            current = "2026-09-28 10:00:00"
+            stale_rows = [
+                {
+                    "appendContentId": "stale-%04d" % index,
+                    "createTime": "2023-05-26 15:11:57",
+                    "content": "stale body %04d" % index,
+                }
+                for index in range(600)
+            ]
+            batches = [
+                [{"appendContentId": "fresh-1", "createTime": current, "content": "morning body"}, *stale_rows],
+                [{"appendContentId": "fresh-2", "createTime": current, "content": "morning body"}, *stale_rows],
+            ]
+            relay.fetch_append = lambda _business_id, _headers: batches.pop(0)
+            calls = []
+            relay.send_feishu_many = lambda chat_ids, title, text, dedup_seed: calls.append(
+                (list(chat_ids), dedup_seed))
+            try:
+                product = {"1661993558510538753": relay.WATCH["1661993558510538753"]}
+                relay._deliver_new_unlocked(products=product, verbose=False)
+                relay._deliver_new_unlocked(products=product, verbose=False)
+                state = json.loads(relay.STATE_FILE.read_text(encoding="utf-8"))
+            finally:
+                relay.STATE_FILE = originals["state_file"]
+                relay.VIDEO_QUEUE_FILE = originals["video_queue_file"]
+                relay.CHAT_IDS = originals["chat_ids"]
+                relay.JUEJIN_CHAT_IDS = originals["juejin"]
+                relay.QINLONG_CHAT_IDS = originals["qinlong"]
+                relay.load_headers = originals["load_headers"]
+                relay.fetch_append = originals["fetch_append"]
+                relay.send_feishu_many = originals["send_feishu_many"]
+        self.assertEqual(calls, [(["shared"], "fresh-1")])
+        self.assertEqual(state["seen"]["1661993558510538753"], ["fresh-1"])
+        self.assertEqual(len(state["content_seen"]["1661993558510538753"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

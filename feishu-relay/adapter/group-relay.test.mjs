@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { createGroupRelay } from './group-relay.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
+import { normalizeLarkAgentXRelayMessage } from './larkagentx-ingress.mjs';
 
 function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null, webhookKeywordsByChatId = null, larkAgentXResourceUrl = '', larkAgentXToken = '', messageList = null, initialSourceStates = null } = {}) {
 	const saved = new Map();
@@ -132,6 +133,21 @@ test('a LarkAgentX source message uses the existing relay ledger and fan-out', a
 	assert.equal(sent.length, 1);
 });
 
+test('a LarkAgentX history replay replaces only a previously sent card placeholder', async () => {
+	const { relay, sent, saved } = createHarness([]);
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: '767_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	const message = { message_id: 'larkx_history_card_1', msg_type: 'interactive', create_time: String(Date.now()), body: { content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '历史完整内容' }] } }) } };
+	saved.set(message.message_id, {
+		sourceMessageId: message.message_id, sourceKey: source.key, sourceChatId: source.resolvedChatId,
+		sourceCreateTime: Number(message.create_time), status: 'sent', message: { msg_type: 'text', body: { content: JSON.stringify({ text: '[card] [卡片] 📢 新动态 · 2026-09-26 22:48' }) } },
+		targetMessageIds: [{ targetChatId: 'oc_summary', messageId: 'old', msgType: 'text' }],
+	});
+	assert.equal((await relay.processInbound(message, source)).status, 'duplicate');
+	assert.equal((await relay.processInbound(message, source, { replacePlaceholder: true })).status, 'sent');
+	assert.equal(sent.length, 1);
+	assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n[interactive]\n历史完整内容');
+});
+
 test('a WebSocket ID and an official ID for the same source content are cross-deduplicated', async () => {
 	const stamp = Date.now();
 	const official = { message_id: 'om_official_same', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify(CARD_2_0_TRADING_NOTE) } };
@@ -187,6 +203,19 @@ test('official gap repair replaces a websocket card placeholder with the full of
 	assert.equal(result.replaced_placeholders, 1);
 	assert.equal(saved.get(official.message_id).status, 'sent');
 	assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n[interactive]\n书房猫完整卡片');
+});
+
+test('official gap repair recognizes a card placeholder that kept the websocket title', async () => {
+	const stamp = Date.now();
+	const card = { schema: '2.0', body: { elements: [{ tag: 'markdown', content: '调研纪要完整卡片' }] } };
+	const official = { message_id: 'om_diaoyan_placeholder_title', chat_id: 'oc_source', msg_type: 'interactive', create_time: String(stamp), body: { content: JSON.stringify(card) } };
+	const { relay, sent, saved } = createHarness([official]);
+	saved.set(official.message_id, { sourceMessageId: official.message_id, sourceKey: 'anqiang', sourceCreateTime: stamp, status: 'sent', message: { msg_type: 'text', body: { content: JSON.stringify({ text: '[card] [卡片] 📢 新动态 · 2026-09-26 22:48' }) } }, targetMessageIds: [{ targetChatId: 'oc_summary', messageId: 'old', msgType: 'text' }] });
+	const result = await relay.repairFromOfficial({ fromCreateTime: stamp - 1000, toCreateTime: stamp + 1000, sourceKeys: ['anqiang'], forcePlaceholderCards: true });
+	assert.equal(result.sent, 1);
+	assert.equal(result.replaced_placeholders, 1);
+	assert.equal(saved.get(official.message_id).status, 'sent');
+	assert.equal(JSON.parse(sent[0].content).text, '#anqiang\n[interactive]\n调研纪要完整卡片');
 });
 
 test('official gap repair does not skip a missed message before a later sent row', async () => {
@@ -719,6 +748,46 @@ test('a webhook-only interactive card keeps source image keys without tenant upl
 				[{ tag: 'img', image_key: 'img_v3_source_card' }],
 				[{ tag: 'text', text: '汇总' }],
 			]);
+		},
+	);
+});
+
+test('a LarkAgentX richtext card sends text and image together through webhook without OAuth', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async (webhookCalls) => {
+			const raw = {
+				msg_id: 'om_diaoyan_richtext_webhook', chat_id: '7679358719007673304', msg_type_name: 'CARD',
+				content: '[卡片] 📢 新动态 · 2026-09-26 22:48',
+				content_data: {
+					cardVersion: 2,
+					richtext: {
+						imageIds: ['5'],
+						elements: { dictionary: {
+							'1': { tag: 1, property: '\n\uFFFD\u0017电子布高端需求挤压普通供给' },
+							'5': { tag: 2, property: 'img_v3_diaoyan' },
+						} },
+					},
+				},
+				_larkagentx_images: [{ image_id: 'img_v3_diaoyan', source_id: '5', key_hex: '00'.repeat(32), iv_hex: '11'.repeat(12) }],
+			};
+			const message = normalizeLarkAgentXRelayMessage(raw);
+			const quotaError = Object.assign(new Error('OAuth must not be called'), { response: { data: { code: 99991403, msg: "This month's API call quota has been exceeded" } } });
+			const { relay, sent, saved } = createHarness([], {
+				targetChatIds: ['oc_summary'], imageError: quotaError,
+				webhooksByChatId: { oc_summary: 'https://x/summary-hook' },
+				webhookKeywordsByChatId: { oc_summary: '汇总' },
+			});
+			const result = await relay.processInbound(message, { key: 'diaoyan', tag: 'diaoyan', resolvedChatId: 'oc_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] });
+			assert.equal(result.status, 'sent');
+			assert.equal(sent.length, 0);
+			assert.equal(webhookCalls.length, 1);
+			assert.equal(webhookCalls[0].body.msg_type, 'post');
+			const rows = webhookCalls[0].body.content.post.zh_cn.content;
+			assert.equal(rows[0][0].text, '#diaoyan');
+			assert.equal(rows.some((row) => row.some((item) => item.text === '电子布高端需求挤压普通供给')), true);
+			assert.equal(rows.some((row) => row.some((item) => item.image_key === 'img_v3_diaoyan')), true);
+			assert.equal(saved.get(message.message_id).status, 'sent');
 		},
 	);
 });

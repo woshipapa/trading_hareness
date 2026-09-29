@@ -1,0 +1,39 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const source = readFileSync(fileURLToPath(new URL('./deploy-xhs-intel-edge.sh', import.meta.url)), 'utf8');
+const compose = readFileSync(fileURLToPath(new URL('../../deploy/edge/docker-compose.yml', import.meta.url)), 'utf8');
+const workflow = JSON.parse(readFileSync(fileURLToPath(new URL('../../../workflows/xhs-intel-edge.json', import.meta.url)), 'utf8'))[0];
+
+assert.match(source, /scp -q -i "\$edge_key"/);
+assert.doesNotMatch(source, /scp -q "\$\{ssh_command\[@\]\}"/);
+assert.match(source, /XHS_COOKIE_SOURCE/);
+assert.match(source, /a1/);
+assert.match(source, /web_session/);
+assert.match(source, /edge secrets\.env value will be reused/);
+assert.match(source, /XHS_FORCE_BUILD/);
+assert.match(source, /docker image inspect feishu-relay-edge-xhs:local/);
+assert.match(source, /xhs_git_sha/);
+assert.match(source, /xhs_source_digest/);
+assert.match(source, /XHS_SOURCE_TREE_SHA256/);
+assert.match(source, /xhs-manifest\.json/);
+assert.match(source, /build_required=false/);
+assert.match(source, /docker compose --env-file "\$runtime_env" --env-file "\$secrets_env" build[\s\S]*--build-arg BASE_IMAGE="\$xhs_base_image"[\s\S]*xhs-collector/);
+assert.match(source, /N8N_RUNNERS_AUTH_TOKEN/);
+assert.match(source, /n8n-runners/);
+assert.match(compose, /N8N_RUNNERS_MODE: external/);
+assert.match(compose, /container_name: feishu-relay-edge-n8n-runners/);
+assert.match(compose, /N8N_RUNNERS_TASK_BROKER_URI: http:\/\/127\.0\.0\.1:5679/);
+assert.doesNotMatch(source, /UPDATE execution_entity|status='crashed'/);
+assert.equal(workflow.settings.saveDataSuccessExecution, 'all');
+assert.equal(workflow.settings.saveDataErrorExecution, 'all');
+assert.match(source, /XHS workflow unchanged; skipping import and restart/);
+assert.match(source, /stop n8n/);
+assert.match(source, /before\.json/);
+assert.match(source, /import:workflow --input=\/xhs-deploy\/candidate\.json/);
+assert.match(source, /\.xhs-credentials/);
+assert.doesNotMatch(source, /"\$xhs_token" "\$xhs_webhook"/);
+assert.match(source, /XHS workflow was not activated after n8n restart/);
+
+console.log('XHS deployment validates the private Cookie and provisions an external n8n task runner');

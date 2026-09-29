@@ -1,0 +1,11 @@
+curl_cffi==0.15.0
+loguru
+python-dotenv
+requests
+PyExecJS
+retry
+openpyxl
+aiohttp
+numpy
+opencv-python-headless
+qrcode

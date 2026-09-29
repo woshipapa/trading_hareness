@@ -66,6 +66,17 @@ TASKS = [
          out=os.path.join(HOME, "Library/Logs/video-understanding-harness.log"),
          err=os.path.join(HOME, "Library/Logs/video-understanding-harness.log"),
          env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1", "VIDEO_HARNESS_PORT": "8765"}),
+    # Shared model registry/API.  Keep it on the existing documented local
+    # port; the document worker itself uses durable job directories and does
+    # not open another listener.
+    dict(name="model-service", kind="daemon",
+         args=[PY, "-m", "model_service.app"],
+         cwd=os.path.join(HOME, "codebase"),
+         out=os.path.join(HOME, "Library/Logs/model-service.log"),
+         err=os.path.join(HOME, "Library/Logs/model-service.log"),
+         env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1", "MODEL_SERVICE_HOST": "127.0.0.1",
+              "MODEL_SERVICE_PORT": "8791", "MODEL_SERVICE_DOCUMENT_INPUT_ROOT": "/Users/papa/Downloads",
+              "MODEL_SERVICE_DOCUMENT_OUTPUT_ROOT": "/Users/papa/Downloads"}),
     dict(name="paperkb.server", kind="daemon",
          args=[PY, os.path.join(PKB, "kb_server.py"), "--port", "8787"],
          cwd=PKB, out=os.path.join(PKLOG, "server.log"), err=os.path.join(PKLOG, "server.log"), env={}),
@@ -91,6 +102,33 @@ TASKS = [
                "-N","-L","127.0.0.1:18300:127.0.0.1:18300","root@47.114.113.152"],
          cwd=HOME, out=os.path.join(N8N,"logs/feishu-tunnel.log"),
          err=os.path.join(N8N,"logs/feishu-tunnel.log"), env={}),
+    # 小红书 edge API 的 loopback forward。采集器一直运行在 edge，本地只
+    # 领取摘要任务并调用 Paper-KB 的 codex-teleai provider。
+    dict(name="xhs-edge-tunnel", kind="daemon",
+         args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
+               "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
+               "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
+               "-N","-L","127.0.0.1:18790:127.0.0.1:18790","root@47.114.113.152"],
+         cwd=HOME, out=os.path.join(N8N,"logs/xhs-edge-tunnel.log"),
+         err=os.path.join(N8N,"logs/xhs-edge-tunnel.log"), env={}),
+    dict(name="xhs-ai-worker", kind="daemon",
+         args=[PY, os.path.join(N8N, "xhs-intel/local_worker.py")],
+         cwd=N8N, out=os.path.join(N8N, "logs/xhs-ai-worker.log"),
+         err=os.path.join(N8N, "logs/xhs-ai-worker.log"),
+         env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1",
+              "XHS_EDGE_URL": "http://127.0.0.1:18790",
+              "XHS_COLLECTOR_TOKEN": _load_env_secret("XHS_COLLECTOR_TOKEN"),
+              "XHS_AI_WORKER_ID": "mac-codex-teleai"}),
+    # Paper-KB lives on this workstation while the always-on Feishu adapter
+    # runs on edge.  Keep its command webhooks on a loopback-only reverse SSH
+    # forward so 收录/查询/反馈 do not depend on an edge n8n workflow copy.
+    dict(name="paper-kb-webhook-tunnel", kind="daemon",
+         args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
+               "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
+               "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
+               "-N","-R","127.0.0.1:15678:127.0.0.1:5678","root@47.114.113.152"],
+         cwd=HOME, out=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"),
+         err=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"), env={}),
     # 专表监听（SQLite/WAL 事件）当前停用：本地不再跑这条低延迟链路，爱投顾
     # 三个来源全部由 edge 的 API 轮询覆盖（含 11:30-13:00 午休窗口）。默认不启动，
     # 需要恢复本地监听时设 ITOUGU_TABLE_WATCH=1 再重启 supervisor。

@@ -1,0 +1,155 @@
+[
+  {
+    "id": "xhs-intel-edge-daily-v1",
+    "name": "小红书：每日采集与本地 AI 摘要",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 8 * * *"
+              }
+            ]
+          }
+        },
+        "id": "xhs-daily-trigger",
+        "name": "每日 08:00 采集",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [-420, 80]
+      },
+      {
+        "parameters": {
+          "url": "http://127.0.0.1:18790/v1/run",
+          "method": "POST",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-XHS-Collector-Token",
+                "value": "={{ $env.XHS_COLLECTOR_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ trigger: 'n8n_daily', requested_at: new Date().toISOString() }) }}",
+          "options": {
+            "timeout": 900000
+          }
+        },
+        "id": "xhs-daily-run",
+        "name": "远端小红书采集入队",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [-120, 80]
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "*/30 * * * *"
+              }
+            ]
+          }
+        },
+        "id": "xhs-watch-trigger",
+        "name": "每30分钟检查关注用户",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [-420, 160]
+      },
+      {
+        "parameters": {
+          "url": "http://127.0.0.1:18790/v1/watch/run",
+          "method": "POST",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-XHS-Collector-Token",
+                "value": "={{ $env.XHS_COLLECTOR_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ trigger: 'n8n_watch_users', requested_at: new Date().toISOString() }) }}",
+          "options": {
+            "timeout": 900000
+          }
+        },
+        "id": "xhs-watch-run",
+        "name": "关注用户新笔记入队",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [-120, 160]
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "xhs-command",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "id": "xhs-command-webhook",
+        "name": "飞书 #xhs 指令",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [-420, 280],
+        "webhookId": "xhs-command"
+      },
+      {
+        "parameters": {
+          "url": "http://127.0.0.1:18790/v1/command",
+          "method": "POST",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-XHS-Collector-Token",
+                "value": "={{ $env.XHS_COLLECTOR_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.body || $json) }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "id": "xhs-command-forward",
+        "name": "远端执行小红书指令",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [-120, 280]
+      }
+    ],
+    "connections": {
+      "每日 08:00 采集": {
+        "main": [[{"node": "远端小红书采集入队", "type": "main", "index": 0}]]
+      },
+      "每30分钟检查关注用户": {
+        "main": [[{"node": "关注用户新笔记入队", "type": "main", "index": 0}]]
+      },
+      "飞书 #xhs 指令": {
+        "main": [[{"node": "远端执行小红书指令", "type": "main", "index": 0}]]
+      }
+    },
+    "active": true,
+    "settings": {
+      "executionOrder": "v1",
+      "timezone": "Asia/Shanghai",
+      "saveDataSuccessExecution": "all",
+      "saveDataErrorExecution": "all"
+    }
+  }
+]

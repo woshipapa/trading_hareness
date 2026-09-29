@@ -71,6 +71,7 @@ services:
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       # paper-kb schedules run here; the workflow POSTs to the KB on the host.
       PAPER_KB_JOBS_TOKEN: ${PAPER_KB_JOBS_TOKEN:-}
+      XHS_COLLECTOR_TOKEN: ${XHS_COLLECTOR_TOKEN:-}
       N8N_PAYLOAD_SIZE_MAX: ${N8N_PAYLOAD_SIZE_MAX:-512}
       N8N_FORMDATA_FILE_SIZE_MAX: ${N8N_FORMDATA_FILE_SIZE_MAX:-512}
       NODE_EXTRA_CA_CERTS: /opt/n8n-certs/market-review-api.pem
@@ -137,6 +138,8 @@ services:
       PAPER_KB_INGEST_WEBHOOK: ${PAPER_KB_INGEST_WEBHOOK:-}
       PAPER_KB_SEARCH_WEBHOOK: ${PAPER_KB_SEARCH_WEBHOOK:-}
       PAPER_KB_FEEDBACK_WEBHOOK: ${PAPER_KB_FEEDBACK_WEBHOOK:-}
+      XHS_COMMAND_WEBHOOK: ${XHS_COMMAND_WEBHOOK:-http://n8n:5678/webhook/xhs-command}
+      XHS_COMMAND_CHAT_IDS: ${XHS_COMMAND_CHAT_IDS:-}
       PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: n8n

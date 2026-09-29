@@ -49,6 +49,14 @@ class TaskInventoryTests(unittest.TestCase):
         names = [t["name"] for t in module.TASKS]
         self.assertEqual(len(names), len(set(names)))
 
+    def test_model_service_is_a_single_local_daemon_on_documented_port(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None)
+        task = next(item for item in module.TASKS if item["name"] == "model-service")
+        self.assertEqual(task["kind"], "daemon")
+        self.assertIn("model_service.app", task["args"])
+        self.assertEqual(task["env"]["MODEL_SERVICE_HOST"], "127.0.0.1")
+        self.assertEqual(task["env"]["MODEL_SERVICE_PORT"], "8791")
+
     def test_paper_source_snapshot_task_is_bounded_and_non_mutating(self):
         module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None)
         task = next(item for item in module.TASKS if item["name"] == "paperkb.sources")

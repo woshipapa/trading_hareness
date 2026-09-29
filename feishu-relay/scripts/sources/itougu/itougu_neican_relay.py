@@ -74,6 +74,12 @@ PRODUCT_NOTICE = "认真一手咸鱼店铺：餐厅焦糖味的momo，其他都�
 IMAGE_SHOP_WATERMARK = "咸鱼店铺：餐厅焦糖味的momo"
 MAX_FEISHU_TEXT_CHARS = 28000
 MAX_PRODUCT_IMAGE_CHARS = 5000
+DEFAULT_MAX_RELAY_AGE_DAYS = 90
+MIN_MAX_RELAY_AGE_DAYS = 1
+MAX_MAX_RELAY_AGE_DAYS = 3650
+DEFAULT_STATE_HISTORY_LIMIT = 5000
+MIN_STATE_HISTORY_LIMIT = 500
+MAX_STATE_HISTORY_LIMIT = 50000
 # Stop at JSON/HTML quoting as well as whitespace.  Itougu video metadata can
 # be embedded inline as JSON, where an m3u8 URL is immediately followed by
 # `","videoName"...`; treating the whole non-whitespace run as the URL makes
@@ -795,6 +801,66 @@ def format_item(name, it, delivery_label=""):
     return title, "\n".join(lines)
 
 
+def max_relay_age_days():
+    try:
+        value = int(os.environ.get("ITOUGU_MAX_RELAY_AGE_DAYS", str(DEFAULT_MAX_RELAY_AGE_DAYS)))
+    except ValueError:
+        value = DEFAULT_MAX_RELAY_AGE_DAYS
+    return max(MIN_MAX_RELAY_AGE_DAYS, min(MAX_MAX_RELAY_AGE_DAYS, value))
+
+
+def item_datetime(item):
+    """Parse the upstream publication time used for stale-record protection."""
+    raw = item.get("publishTime") or item.get("createTime")
+    if not raw:
+        return None
+    value = str(raw).strip().replace("Z", "+00:00")
+    for parser in (datetime.fromisoformat,):
+        try:
+            parsed = parser(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=CST)
+            return parsed.astimezone(CST)
+        except ValueError:
+            continue
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=CST)
+        except ValueError:
+            continue
+    return None
+
+
+def is_stale_item(item, *, now=None):
+    """Reject old rows occasionally returned by the append-content endpoint."""
+    published = item_datetime(item)
+    if published is None:
+        return False
+    current = now or datetime.now(CST)
+    return published < current - timedelta(days=max_relay_age_days())
+
+
+def item_content_key(item):
+    """Deduplicate the same body when upstream assigns multiple append IDs."""
+    fields = (
+        "consultantName", "content", "tipContent", "stockOfPool", "videoInfo", "videoUrl",
+        "videoName", "videoId", "stockTransactionDetail", "simulateOperationJson", "reportList",
+    )
+    material = {key: item.get(key) for key in fields if item.get(key) not in (None, "", [], {})}
+    if not material:
+        return ""
+    return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def state_history_limit():
+    """Bound valid upstream history without letting stale API rows evict it."""
+    try:
+        value = int(os.environ.get("ITOUGU_STATE_HISTORY_LIMIT", str(DEFAULT_STATE_HISTORY_LIMIT)))
+    except ValueError:
+        value = DEFAULT_STATE_HISTORY_LIMIT
+    return max(MIN_STATE_HISTORY_LIMIT, min(MAX_STATE_HISTORY_LIMIT, value))
+
+
 # ---------------- 飞书 ----------------
 def load_feishu_env():
     if os.environ.get("FEISHU_APP_ID") and os.environ.get("FEISHU_APP_SECRET"):
@@ -965,6 +1031,13 @@ def send_feishu(chat_id, title, text, dedup_seed):
             raise RuntimeError("飞书发送失败: code=%s msg=%s" % (res.get("code"), res.get("msg")))
 
 
+class DeliveryError(RuntimeError):
+    def __init__(self, failures, successful):
+        self.failures = list(failures)
+        self.successful = list(successful)
+        super().__init__("；".join(self.failures))
+
+
 def send_feishu_many(chat_ids, title, text, dedup_seed):
     """Fan out one immutable message to a bounded set of chats concurrently."""
     destinations = list(dict.fromkeys(str(chat_id).strip() for chat_id in chat_ids if str(chat_id).strip()))
@@ -972,13 +1045,16 @@ def send_feishu_many(chat_ids, title, text, dedup_seed):
         return
     futures = [(chat_id, _delivery_executor.submit(send_feishu, chat_id, title, text, dedup_seed)) for chat_id in destinations[:4]]
     failures = []
+    successful = []
     for chat_id, future in futures:
         try:
             future.result()
+            successful.append(chat_id)
         except Exception as exc:
             failures.append("%s: %s" % (chat_id, exc))
     if failures:
-        raise RuntimeError("；".join(failures))
+        raise DeliveryError(failures, successful)
+    return successful
 
 
 # ---------------- state ----------------
@@ -989,13 +1065,18 @@ def load_state():
             return s
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
-    return {"seen": {}}
+    return {"seen": {}, "content_seen": {}, "deliveries": {}}
 
 
 def save_state(state):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    limit = state_history_limit()
     for bid, ids in state["seen"].items():
-        state["seen"][bid] = ids[-500:]     # 每个内参最多记 500 个已发 id
+        state["seen"][bid] = list(dict.fromkeys(ids))[-limit:]
+    for bid, ids in state.get("content_seen", {}).items():
+        state["content_seen"][bid] = list(dict.fromkeys(ids))[-limit:]
+    for bid, entries in state.get("deliveries", {}).items():
+        state["deliveries"][bid] = dict(list(entries.items())[-limit:])
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -1018,6 +1099,8 @@ def _deliver_new_unlocked(products=None, chat_ids=None, dry_run=False, bootstrap
     chat_ids = chat_ids or None
     headers = load_headers()
     state = load_state()
+    state.setdefault("content_seen", {})
+    state.setdefault("deliveries", {})
     total_sent = 0
     fetched = {}
     fetch_errors = {}
@@ -1041,10 +1124,40 @@ def _deliver_new_unlocked(products=None, chat_ids=None, dry_run=False, bootstrap
             continue
         items = fetched.get(bid, [])
         seen = set(state["seen"].get(bid, []))
-        new = [it for it in items if str(it.get("appendContentId")) not in seen]
+        content_seen = set(state["content_seen"].get(bid, []))
+        new = []
+        for item in items:
+            aid = str(item.get("appendContentId") or "").strip()
+            if not aid or aid in seen:
+                continue
+            content_key = item_content_key(item)
+            stale = is_stale_item(item)
+            if stale:
+                # The endpoint currently leaks an endless stream of old rows
+                # with fresh append IDs. Never persist those IDs or their
+                # content hashes: doing so eventually evicts valid morning
+                # messages from the bounded dedupe history.
+                if verbose:
+                    print("[%s] skip stale appendContentId=%s publish=%s" % (
+                        name, aid, item.get("publishTime") or item.get("createTime")), flush=True)
+                continue
+            if content_key and content_key in content_seen:
+                # A changed append ID for an already delivered body is an
+                # upstream alias, not a new message. Do not grow `seen` with
+                # aliases; the content key is the durable dedupe boundary.
+                continue
+            new.append(item)
         new.reverse()   # 旧→新 顺序发
         if bootstrap:
-            state["seen"][bid] = state["seen"].get(bid, []) + [str(it.get("appendContentId")) for it in items]
+            for it in items:
+                if is_stale_item(it):
+                    continue
+                aid = str(it.get("appendContentId") or "").strip()
+                if aid:
+                    state["seen"].setdefault(bid, []).append(aid)
+                content_key = item_content_key(it)
+                if content_key:
+                    state["content_seen"].setdefault(bid, []).append(content_key)
             if verbose:
                 print("[%s] bootstrap: 标记 %d 条为已读，不发送" % (name, len(items)), flush=True)
             continue
@@ -1064,11 +1177,23 @@ def _deliver_new_unlocked(products=None, chat_ids=None, dry_run=False, bootstrap
                 # The final sender applies the notice by destination, keeping
                 # the shared 公众号同步群 unchanged while covering every
                 # message type that uses a named product-group exit.
-                send_feishu_many(destinations, title, text, aid)
-                total_sent += 1
+                delivered = set(state["deliveries"].setdefault(bid, {}).get(aid, []))
+                pending = [destination for destination in destinations if destination not in delivered]
+                try:
+                    delivered.update(send_feishu_many(pending, title, text, aid) or [])
+                except DeliveryError as error:
+                    delivered.update(error.successful)
+                    state["deliveries"].setdefault(bid, {})[aid] = sorted(delivered)
+                    save_state(state)
+                    raise
+                state["deliveries"].setdefault(bid, {})[aid] = sorted(delivered)
+                total_sent += 1 if pending else 0
                 if verbose:
                     print("✅ 已发飞书 [%s] %s (%s)" % (name, title, aid), flush=True)
             state["seen"].setdefault(bid, []).append(aid)
+            content_key = item_content_key(it)
+            if content_key:
+                state["content_seen"].setdefault(bid, []).append(content_key)
     if not dry_run:
         save_state(state)
     return total_sent

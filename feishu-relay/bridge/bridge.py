@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import threading
 import time
@@ -52,6 +53,35 @@ MAX_GAP_REPAIR_SECONDS = 1800
 DEFAULT_ROUTE_CATALOG_REFRESH_SECONDS = 15
 DEFAULT_PRIVATE_REPAIR_MAX_POSITIONS = 64
 MAX_PRIVATE_REPAIR_MAX_POSITIONS = 256
+DEFAULT_PRIVATE_TAIL_REPAIR_SECONDS = 60
+MIN_PRIVATE_TAIL_REPAIR_SECONDS = 30
+MAX_PRIVATE_TAIL_REPAIR_SECONDS = 600
+DEFAULT_PRIVATE_TAIL_REPAIR_WINDOW = 16
+PAPER_COMMAND_RE = re.compile(
+	r"^(?:收录(?:\s*[:：]\s*|\s+)|收(?=\s|[:：])|留(?=\s|[:：])|略(?=\s|[:：])|"
+	r"稍后(?=\s|[:：])|原因(?=\s|[:：])|多点(?:\s|[:：])+|少点(?:\s|[:：])+|作者\s*\+|"
+	r"精查(?:\s|[:：])+|深查(?:\s|[:：])+|查询(?:\s|[:：])+|搜索(?:\s|[:：])+|"
+	r"search(?:\s|[:：])+|ingest(?:\s|[:：])+).+",
+	re.IGNORECASE,
+)
+XHS_COMMAND_RE = re.compile(r"^#xhs(?:\s|$)(?:.*)$", re.IGNORECASE)
+
+
+def is_paper_command_message(message: dict[str, Any]) -> bool:
+	"""Return true only for explicit Paper-KB commands.
+
+	The private WebSocket receives chats outside the source allowlist too. This
+	narrow lane lets a user send Paper-KB commands from the reading group without
+	forwarding unrelated private-session traffic into the adapter.
+	"""
+	text = re.sub(r"@_user_\d+\s*", "", str(message.get("content", ""))).strip()
+	return bool(text and PAPER_COMMAND_RE.match(text))
+
+
+def is_xhs_command_message(message: dict[str, Any]) -> bool:
+	"""Return true only for explicit XHS control commands."""
+	text = re.sub(r"@_user_\d+\s*", "", str(message.get("content", ""))).strip()
+	return bool(text and XHS_COMMAND_RE.match(text))
 
 
 def bounded_int_env(name: str, default: int, minimum: int, maximum: int | None = None) -> int:
@@ -399,6 +429,12 @@ class Bridge:
 	def __init__(self) -> None:
 		self.token = required_env("LARKX_BRIDGE_TOKEN")
 		self.ingress_url = required_env("LARKX_INGRESS_URL")
+		# Source-group traffic uses the group-relay contract. Explicit Paper-KB
+		# and XHS commands use the adapter's direct ingress so they can arrive
+		# from a command-only chat without a source route.
+		self.command_ingress_url = os.environ.get("LARKX_COMMAND_INGRESS_URL", "").strip()
+		if not self.command_ingress_url:
+			self.command_ingress_url = self.ingress_url.rsplit("/", 1)[0] + "/inbound"
 		self.route_catalog_url = os.environ.get("LARKX_ROUTE_CATALOG_URL", "").strip()
 		self.dynamic_route_discovery = os.environ.get("LARKX_DYNAMIC_ROUTE_DISCOVERY", "false").strip().lower() == "true"
 		self.route_catalog_refresh_seconds = bounded_int_env("LARKX_ROUTE_CATALOG_REFRESH_SECONDS", DEFAULT_ROUTE_CATALOG_REFRESH_SECONDS, 5, 300)
@@ -422,6 +458,9 @@ class Bridge:
 			raise RuntimeError("LARKX_LISTEN_CHAT_IDS must contain at least one chat ID")
 		if not self.send_chats:
 			raise RuntimeError("LARKX_SEND_CHAT_IDS must contain at least one chat ID")
+		self.paper_command_lane_enabled = os.environ.get("LARKX_PAPER_KB_COMMANDS_ENABLED", "false").strip().lower() == "true"
+		self.xhs_command_lane_enabled = os.environ.get("LARKX_XHS_COMMANDS_ENABLED", "false").strip().lower() == "true"
+		self.xhs_command_chat_ids = csv_env("LARKX_XHS_COMMAND_CHAT_IDS")
 		self.profile = os.environ.get("LARKX_PROFILE", "default").strip() or "default"
 		larkx_home = Path(os.environ.get("LARKX_HOME", "~/.larkx")).expanduser()
 		auth_path, default_spool_path, default_owner_path = profile_storage_paths(larkx_home, self.profile)
@@ -474,14 +513,37 @@ class Bridge:
 		self.private_gap_repair_max_positions = bounded_int_env(
 			"LARKX_PRIVATE_REPAIR_MAX_POSITIONS", DEFAULT_PRIVATE_REPAIR_MAX_POSITIONS, 1, MAX_PRIVATE_REPAIR_MAX_POSITIONS,
 		)
+		# A position gap can only be detected after a later WebSocket event. The
+		# bounded tail check also catches a silent socket tail without using OAuth.
+		self.private_tail_repair_enabled = (
+			self.private_gap_repair_enabled
+			and os.environ.get("LARKX_PRIVATE_TAIL_REPAIR_ENABLED", "true").strip().lower() == "true"
+		)
+		self.private_tail_repair_seconds = bounded_int_env(
+			"LARKX_PRIVATE_TAIL_REPAIR_SECONDS",
+			DEFAULT_PRIVATE_TAIL_REPAIR_SECONDS,
+			MIN_PRIVATE_TAIL_REPAIR_SECONDS,
+			MAX_PRIVATE_TAIL_REPAIR_SECONDS,
+		)
+		self.private_tail_repair_window = bounded_int_env(
+			"LARKX_PRIVATE_TAIL_REPAIR_WINDOW",
+			DEFAULT_PRIVATE_TAIL_REPAIR_WINDOW,
+			1,
+			self.private_gap_repair_max_positions,
+		)
+		self.private_tail_repair_chat_ids = csv_env("LARKX_PRIVATE_TAIL_REPAIR_CHAT_IDS")
 		self._private_repair_lock = threading.RLock()
 		self._private_repair_in_flight: set[tuple[str, int, int]] = set()
+		self._private_tail_repair_in_flight = False
 		self._private_startup_repair_started = False
 		self.private_repair_count = 0
 		self.private_repair_message_count = 0
 		self.private_repair_failed_count = 0
 		self.last_private_repair_at = None
 		self.last_private_repair_result = None
+		self.private_tail_repair_count = 0
+		self.last_private_tail_repair_at = None
+		self.last_private_tail_repair_result = None
 		self._recovery_in_flight = False
 		self.client = RecoveringLarkClient(
 			self.auth,
@@ -834,6 +896,13 @@ class Bridge:
 			"private_gap_repair_on_start": self.private_gap_repair_on_start,
 			"private_gap_repair_chat_ids": sorted(self.private_gap_repair_chat_ids),
 			"private_gap_repair_max_positions": self.private_gap_repair_max_positions,
+			"private_tail_repair_enabled": self.private_tail_repair_enabled,
+			"private_tail_repair_seconds": self.private_tail_repair_seconds,
+			"private_tail_repair_window": self.private_tail_repair_window,
+			"private_tail_repair_chat_ids": sorted(self.private_tail_repair_chat_ids),
+			"private_tail_repair_count": self.private_tail_repair_count,
+			"last_private_tail_repair_at": self.last_private_tail_repair_at,
+			"last_private_tail_repair_result": self.last_private_tail_repair_result,
 			"private_repair_count": durable_counters.get("private_repair_count", self.private_repair_count),
 			"private_repair_message_count": durable_counters.get("private_repair_message_count", self.private_repair_message_count),
 			"private_repair_failed_count": durable_counters.get("private_repair_failed_count", self.private_repair_failed_count),
@@ -841,6 +910,9 @@ class Bridge:
 			"last_private_repair_result": self.last_private_repair_result,
 			"summary_chat_ids": sorted(self.summary_chat_ids),
 			"summary_ingress_configured": bool(self.summary_ingress_url),
+			"paper_command_lane_enabled": self.paper_command_lane_enabled,
+			"xhs_command_lane_enabled": self.xhs_command_lane_enabled,
+			"xhs_command_chat_ids": sorted(self.xhs_command_chat_ids),
 			"last_observed_chat_id": self.last_observed_chat_id or None,
 			"last_observed_message_type": self.last_observed_message_type or None,
 			"websocket": {
@@ -938,6 +1010,12 @@ class Bridge:
 			chat_id.isdigit()
 			and chat_id in self.websocket_chat_ids
 			and (not self.private_gap_repair_chat_ids or chat_id in self.private_gap_repair_chat_ids)
+		)
+
+	def _private_tail_repair_allowed(self, chat_id: str) -> bool:
+		return (
+			self._private_repair_allowed(chat_id)
+			and (not self.private_tail_repair_chat_ids or chat_id in self.private_tail_repair_chat_ids)
 		)
 
 	def _private_repair_chunks(self, start: int, end: int) -> list[tuple[int, int]]:
@@ -1100,6 +1178,85 @@ class Bridge:
 			except Exception as error:
 				LOG.warning("LarkAgentX 启动私有缺口补读失败 chat_id=%s：%s", chat_id, error)
 
+	async def repair_private_tail_once(self) -> dict[str, Any]:
+		"""Boundedly reconcile each live WebSocket source's unseen position tail.
+
+		Position-gap repair is event-driven and therefore cannot see a gap when
+		there is no later WebSocket event. This check asks the private LarkAgentX
+		history gateway for only the next small range after the durable cursor.
+		"""
+		if not self.private_tail_repair_enabled or self._private_tail_repair_in_flight:
+			return {"status": "skipped", "reason": "disabled_or_in_flight"}
+		self._private_tail_repair_in_flight = True
+		result: dict[str, Any] = {
+			"status": "completed",
+			"transport": "larkagentx_private_history",
+			"reason": "periodic_private_tail_repair",
+			"requested": 0,
+			"recovered": 0,
+			"forwarded": 0,
+			"duplicates": 0,
+			"filtered": 0,
+			"failed": 0,
+			"sources": [],
+		}
+		try:
+			for chat_id in sorted(self.websocket_chat_ids):
+				if not self._private_tail_repair_allowed(chat_id):
+					continue
+				try:
+					stats = await asyncio.to_thread(self.event_spool.position_stats)
+					cursor = stats.get(chat_id, {}) if isinstance(stats, dict) else {}
+					last_position = int(cursor.get("last_position") or 0)
+					last_recovered = int(cursor.get("last_recovered_position") or 0)
+					start = max(last_position, last_recovered) + 1
+					if start <= 1:
+						continue
+					end = start + self.private_tail_repair_window - 1
+					chunk = await self.repair_private_positions(
+						{"chat_id": chat_id, "start": start, "end": end},
+						reason="periodic_private_tail_repair",
+					)
+					for key in ("requested", "recovered", "forwarded", "duplicates", "filtered", "failed"):
+						result[key] += int(chunk.get(key) or 0)
+					result["sources"].append({
+						"chat_id": chat_id,
+						"start": start,
+						"end": end,
+						"requested": chunk.get("requested", 0),
+						"recovered": chunk.get("recovered", 0),
+						"forwarded": chunk.get("forwarded", 0),
+						"failed": chunk.get("failed", 0),
+					})
+				except Exception as error:
+					result["failed"] += self.private_tail_repair_window
+					result["sources"].append({"chat_id": chat_id, "error": str(error)[:240]})
+					LOG.warning("LarkAgentX 私有尾部补读失败 chat_id=%s：%s", chat_id, error)
+			if result["failed"]:
+				result["status"] = "partial"
+			self.private_tail_repair_count += 1
+			self.last_private_tail_repair_at = datetime.now(timezone.utc).isoformat()
+			self.last_private_tail_repair_result = {
+				"status": result["status"],
+				"requested": result["requested"],
+				"recovered": result["recovered"],
+				"forwarded": result["forwarded"],
+				"duplicates": result["duplicates"],
+				"filtered": result["filtered"],
+				"failed": result["failed"],
+			}
+			return result
+		finally:
+			self._private_tail_repair_in_flight = False
+
+	async def private_tail_repair_forever(self) -> None:
+		while True:
+			try:
+				await self.repair_private_tail_once()
+			except Exception as error:
+				LOG.warning("LarkAgentX 私有尾部巡检异常：%s", error)
+			await asyncio.sleep(self.private_tail_repair_seconds)
+
 	async def recover_gap(self, reason: str) -> None:
 		try:
 			now_ms = int(time.time() * 1000)
@@ -1124,7 +1281,9 @@ class Bridge:
 		finally:
 			self._recovery_in_flight = False
 
-	def ingress_url_for(self, chat_id: str) -> str:
+	def ingress_url_for(self, chat_id: str, *, command_lane: bool = False) -> str:
+		if command_lane:
+			return self.command_ingress_url
 		return self.summary_ingress_url if chat_id in self.summary_chat_ids else self.ingress_url
 
 	def send(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1176,10 +1335,17 @@ class Bridge:
 		# decoded event is proof that the WebSocket session is receiving data.
 		self.websocket_state = "connected"
 		chat_id = str(message.get("chat_id", ""))
+		paper_command_lane = getattr(self, "paper_command_lane_enabled", False) and is_paper_command_message(message)
+		xhs_command_lane = (
+			getattr(self, "xhs_command_lane_enabled", False)
+			and is_xhs_command_message(message)
+			and (not getattr(self, "xhs_command_chat_ids", set()) or chat_id in self.xhs_command_chat_ids)
+		)
+		command_lane = paper_command_lane or xhs_command_lane
 		dynamic_route = self.dynamic_routes.get(chat_id)
-		if chat_id not in self.websocket_chat_ids:
+		if chat_id not in self.websocket_chat_ids and not command_lane:
 			dynamic_route = await self.discover_dynamic_route(chat_id)
-		if chat_id not in self.websocket_chat_ids:
+		if chat_id not in self.websocket_chat_ids and not dynamic_route and not command_lane:
 			self.ignored_count += 1
 			try:
 				gap = await asyncio.to_thread(
@@ -1198,7 +1364,11 @@ class Bridge:
 			except Exception as error:
 				LOG.warning("记录未绑定 LarkAgentX 源群指标失败 chat_id=%s：%s", chat_id, error)
 			return {"status": "ignored", "chat_id": chat_id}
-		stats = self.chat_stats[chat_id]
+		stats = self.chat_stats.setdefault(chat_id, {
+			"allowlisted": chat_id in self.websocket_chat_ids, "observed_count": 0,
+			"self_message_count": 0, "forwarded_count": 0, "failed_count": 0,
+			"last_observed_at": None, "last_forwarded_at": None, "last_message_type": None,
+		})
 		try:
 			gap = await asyncio.to_thread(self.event_spool.record_position, message)
 			self._log_position_gap(chat_id, gap)
@@ -1222,6 +1392,8 @@ class Bridge:
 			stats["failed_count"] += 1
 			return {"status": "failed", "chat_id": chat_id, "message_id": ""}
 		payload = json_safe(dict(message))
+		if command_lane:
+			payload["_larkagentx_command_lane"] = True
 		if dynamic_route:
 			payload["_larkagentx_route"] = dict(dynamic_route)
 		source_key, chat_name = self._source_route_for_chat(chat_id, dynamic_route)
@@ -1289,7 +1461,12 @@ class Bridge:
 			last_error: Exception | None = None
 			for attempt in range(1, 4):
 				try:
-					result = await asyncio.to_thread(post_json, self.ingress_url_for(chat_id), self.token, payload)
+					result = await asyncio.to_thread(
+						post_json,
+						self.ingress_url_for(chat_id, command_lane=command_lane),
+						self.token,
+						payload,
+					)
 					await asyncio.to_thread(self.event_spool.mark_delivered, event_id)
 					self.forwarded_count += 1
 					stats["forwarded_count"] += 1
@@ -1323,7 +1500,12 @@ class Bridge:
 					continue
 				payload = event["payload"]
 				chat_id = str(payload.get("chat_id", "")).strip()
-				await asyncio.to_thread(post_json, self.ingress_url_for(chat_id), self.token, payload)
+				await asyncio.to_thread(
+					post_json,
+					self.ingress_url_for(chat_id, command_lane=payload.get("_larkagentx_command_lane") is True),
+					self.token,
+					payload,
+				)
 				await asyncio.to_thread(self.event_spool.mark_delivered, event_id)
 				replayed += 1
 				self.spool_replay_count += 1
@@ -1348,6 +1530,7 @@ class Bridge:
 	async def listen_forever(self) -> None:
 		spool_task = asyncio.create_task(self.replay_spool_forever())
 		route_catalog_task = asyncio.create_task(self.refresh_route_catalog_forever()) if self.dynamic_route_discovery and self.route_catalog_url else None
+		tail_repair_task = asyncio.create_task(self.private_tail_repair_forever()) if self.private_tail_repair_enabled else None
 		try:
 			while True:
 				try:
@@ -1369,7 +1552,14 @@ class Bridge:
 			spool_task.cancel()
 			if route_catalog_task:
 				route_catalog_task.cancel()
-			await asyncio.gather(spool_task, *( [route_catalog_task] if route_catalog_task else []), return_exceptions=True)
+			if tail_repair_task:
+				tail_repair_task.cancel()
+			await asyncio.gather(
+				spool_task,
+				*( [route_catalog_task] if route_catalog_task else []),
+				*( [tail_repair_task] if tail_repair_task else []),
+				return_exceptions=True,
+			)
 
 	async def refresh_route_catalog_forever(self) -> None:
 		while True:
