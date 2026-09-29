@@ -26,7 +26,10 @@ runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
 secrets_env="${RELAY_EDGE_SECRETS_ENV:-/etc/feishu-relay-edge/secrets.env}"
 cookie_file="${XHS_COOKIE_FILE:-/etc/feishu-relay-edge/xhs-cookie}"
 cookie_source="${XHS_COOKIE_SOURCE:-$HOME/.config/xhs/xhs-cookie}"
-xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77}"
+# The official Feishu API exposes the oc_ chat id, while the personal
+# WebSocket emits the numeric chat id. Keep both identities in the command
+# lane so an explicit #xhs command can cross either ingress.
+xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77,7669744189332065542}"
 xhs_webhook="${XHS_FEISHU_WEBHOOK_URL:-}"
 xhs_force_build="${XHS_FORCE_BUILD:-false}"
 xhs_skip_build="${XHS_SKIP_BUILD:-false}"
