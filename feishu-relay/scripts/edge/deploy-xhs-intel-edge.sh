@@ -150,6 +150,7 @@ for key in ("collector_token", "feishu_webhook"):
     print(value)
 PY
 )
+[[ "${#credentials[@]}" == 2 ]] || { echo 'XHS credential bundle is incomplete' >&2; exit 2; }
 xhs_token="${credentials[0]}"; xhs_webhook="${credentials[1]}"
 rm -f "$credentials_stage"
 trap 'rm -rf "$stage"' EXIT
@@ -225,7 +226,8 @@ done
 curl -fsS http://127.0.0.1:5678/healthz >/dev/null
 runner_registered=false
 for attempt in $(seq 1 45); do
-  if docker logs --since 120s feishu-relay-edge-n8n 2>&1 | grep -q 'Registered runner'; then
+  runner_state="$(docker inspect -f '{{.State.Status}}' feishu-relay-edge-n8n-runners 2>/dev/null || true)"
+  if [[ "$runner_state" == running ]] && docker logs feishu-relay-edge-n8n 2>&1 | grep -q 'Registered runner'; then
     runner_registered=true
     break
   fi
