@@ -89,6 +89,10 @@ def loop():
         job = None
         try:
             response = call_edge("/v1/worker/claim", {"worker": WORKER_ID})
+            # A successful claim request proves the edge tunnel and token are
+            # healthy even when the queue is empty. Clear a transient error so
+            # the health endpoint reflects the current connection state.
+            STATE["last_error"] = None
             job = response.get("job") if isinstance(response, dict) else None
             if not job:
                 time.sleep(POLL_SECONDS)
