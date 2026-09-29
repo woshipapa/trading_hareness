@@ -165,7 +165,11 @@ if ! "${C[@]}" config --quiet; then
   rollback || true
   exit 1
 fi
-if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
+if ! "${C[@]}" up -d --no-build --pull never --wait db-tunnel; then
+  rollback || true
+  exit 1
+fi
+if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler; then
   rollback || true
   exit 1
 fi
