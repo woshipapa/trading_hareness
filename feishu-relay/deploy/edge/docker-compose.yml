@@ -27,8 +27,7 @@ services:
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
       EXECUTIONS_DATA_SAVE_ON_ERROR: all
       # Keep the edge main process and the JavaScript task runner as separate
-      # processes.  Internal mode was leaving grant-token retries and orphaned
-      # trigger executions after a runner restart on this host.
+      # processes, with a dedicated shared token instead of the encryption key.
       N8N_RUNNERS_MODE: external
       N8N_RUNNERS_TASK_TIMEOUT: "300"
       N8N_RUNNERS_TASK_REQUEST_TIMEOUT: "300"

@@ -64,12 +64,14 @@ if [[ "$prune_only" == true || "$dry_run" == true ]]; then
   exit 0
 fi
 
+# Successful executions with save-on-success=none retain their initial status
+# until hard deletion. They have deletedAt set and are not active executions.
 query="SELECT id,\"workflowId\",\"startedAt\" FROM execution_entity
-       WHERE status='running' AND \"startedAt\" < now() - interval '${seconds} seconds'
+       WHERE status='running' AND \"deletedAt\" IS NULL AND \"startedAt\" < now() - interval '${seconds} seconds'
        ORDER BY \"startedAt\""
 candidate_count="$($DOCKER compose exec -T postgres psql -v ON_ERROR_STOP=1 -U n8n -d n8n -Atqc "
   SELECT count(*) FROM execution_entity
-   WHERE status='running' AND \"startedAt\" < now() - interval '${seconds} seconds'
+   WHERE status='running' AND \"deletedAt\" IS NULL AND \"startedAt\" < now() - interval '${seconds} seconds'
 ")"
 if [[ "$candidate_count" == "0" ]]; then
   echo "no stale executions"
@@ -91,7 +93,7 @@ fi
 "$DOCKER" compose exec -T postgres psql -v ON_ERROR_STOP=1 -U n8n -d n8n -Atqc "
   UPDATE execution_entity
      SET status='crashed', \"stoppedAt\"=now()
-   WHERE status='running' AND \"startedAt\" < now() - interval '${seconds} seconds'
+   WHERE status='running' AND \"deletedAt\" IS NULL AND \"startedAt\" < now() - interval '${seconds} seconds'
   RETURNING id
 " > "$backup_dir/updated_ids.tsv"
 chmod 600 "$backup_dir/updated_ids.tsv"

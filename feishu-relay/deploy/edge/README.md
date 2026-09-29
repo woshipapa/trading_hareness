@@ -36,8 +36,12 @@ The XHS edge add-on is deployed separately by
 Feishu delivery on the edge while the local worker performs AI summarization.
 The edge n8n process uses the matching `n8nio/runners` sidecar in external mode;
 the runner token is generated into the protected `secrets.env` on first apply.
-The same deployer installs `xhs-n8n-execution-reconcile.timer`, which records
-and closes only stale XHS execution rows after the n8n webhook dispatch wedge.
+XHS overrides the global success-retention setting so its successful executions
+remain visible for 72 hours. When success retention is disabled, n8n 2.33.7
+sets `deletedAt` without saving final status or node outputs: raw rows can still
+say `running` even after success. Exclude soft-deleted rows from live execution
+diagnostics; never mark them crashed based on age alone. The deployer backs up
+and compares the workflow, then stops n8n before importing changed definitions.
 
 ## Versioned release
 

@@ -100,7 +100,9 @@
     "active": true,
     "settings": {
       "executionOrder": "v1",
-      "timezone": "Asia/Shanghai"
+      "timezone": "Asia/Shanghai",
+      "saveDataSuccessExecution": "all",
+      "saveDataErrorExecution": "all"
     }
   }
 ]
