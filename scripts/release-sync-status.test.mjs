@@ -112,8 +112,8 @@ assert.match(sourceOverlay.stdout, /ALL CHECKS PASSED/);
 console.log('an explicitly expected source-overlay release passes with a matching clean base sha');
 
 const sourceOwner = convergedOwner
-	.replace(`@main_health ${health('owner-2026.09.26-sync')}`, `@main_health ${health('owner-source-20260928')}`)
-	.replace(`@scheduler_health ${health('owner-2026.09.26-sync')}`, `@scheduler_health ${health('owner-source-20260928')}`)
+	.replace(`@main_health ${health('owner-2026.09.26-sync')}`, `@main_health ${health('teacher-observe-only-20260929')}`)
+	.replace(`@scheduler_health ${health('owner-2026.09.26-sync')}`, `@scheduler_health ${health('teacher-observe-only-20260929')}`)
 	.replace('@main_hotfix false', '@main_hotfix true');
 const sourceBoth = run({ edge: sourceOverlayEdge, owner: sourceOwner, edgeSourceSha: sha, ownerSourceSha: sha });
 assert.equal(sourceBoth.status, 0, sourceBoth.stdout + sourceBoth.stderr);

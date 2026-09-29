@@ -77,6 +77,15 @@ lifespan, dependency assembly and router registration.  New behaviour belongs
 in a focused module, then is injected from `main.py`; production modules must
 not import `app.main`.
 
+## Component releases
+
+The repository is one source tree with several independently deployable runtime
+units. Feishu relay, XHS intelligence and owner quant code therefore carry
+component release identities and rollback pointers rather than pretending that
+one Git SHA describes every process. The operational rules, source-overlay
+boundaries and component-aware status commands are in
+[`UNIFIED_RELEASE_MODEL_47.md`](UNIFIED_RELEASE_MODEL_47.md).
+
 ## Ownership boundaries
 
 | Concern | Location | Rule |

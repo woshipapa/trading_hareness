@@ -55,8 +55,18 @@ provider response directly to a live threshold or order path.
    ownership map, while this file remains the operational checklist.
 9. Syncing or releasing to the two 47 hosts (edge `47.114.113.152`, owner
    `47.110.79.189`) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
-   with the read-only `scripts/release-sync-status.sh --sha <sha>`; never run
-   `scripts/deploy-intraday-edge-release.sh` (the edge quant writer is retired).
+   with the read-only `scripts/release-sync-status.sh`. The edge relay and owner
+   quant service are independent release units: use `--edge-source-sha` and
+   `--owner-source-sha` when their runtime SHAs differ; never force one SHA into
+   both checks. Ordinary source changes use the component overlay paths described
+   in [`docs/UNIFIED_RELEASE_MODEL_47.md`](docs/UNIFIED_RELEASE_MODEL_47.md).
+   Never run `scripts/deploy-intraday-edge-release.sh` (the edge quant writer is
+   retired).
+10. Keep XHS source provenance explicit. `Spider_XHS` is currently outside this
+    repository, so an XHS release must record its commit or content digest. Do
+    not claim a reproducible release until that source is pinned or brought into
+    the repository. XHS cookies, collector tokens and Feishu webhooks stay in
+    ignored host env files.
 
 ## Review automation
 

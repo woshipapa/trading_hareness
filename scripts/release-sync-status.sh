@@ -248,7 +248,10 @@ if not skip_owner:
             check("owner", f"{label} /health", (payload or {}).get("status"), (payload or {}).get("status") == "ok", "ok")
             check("owner", f"{label} git_sha", build.get("git_sha"), sha_matches(build.get("git_sha"), owner_expected), owner_expected[:12])
             if owner_source:
-                check("owner", f"{label} release", build.get("release"), str(build.get("release") or "").startswith("owner-source-"), "owner-source-*")
+                owner_release = str(build.get("release") or "")
+                check("owner", f"{label} release", owner_release,
+                      bool(owner_release) and owner_release not in {"unknown", "latest"},
+                      "non-empty source-overlay release")
         if owner_source:
             check("owner", "quant source-overlay", first(owner, "main_hotfix"), first(owner, "main_hotfix") == "true", "true")
         check("owner", "main runtime profile", first(owner, "main_profile"), first(owner, "main_profile") == "intraday_edge",

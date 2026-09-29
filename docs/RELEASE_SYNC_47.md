@@ -6,8 +6,8 @@
 
 目标有两个：
 
-1. 把 47 edge 与 47 owner 同步到同一个 Git 提交 `X`，并用脚本证明它们一致；
-2. 消除让两台机器无法统一发布的漂移，使以后每次发布都只需按第 13 节的清单执行。
+1. 把 47 edge relay、47 owner quant 和 edge XHS 分别同步到已审阅的组件提交，并用组件级身份证明实际运行版本；
+2. 消除让不同运行面无法统一维护的漂移，使以后每次发布都只需按第 13 节和 [`UNIFIED_RELEASE_MODEL_47.md`](UNIFIED_RELEASE_MODEL_47.md) 的清单执行。
 
 ---
 
@@ -41,7 +41,7 @@ owner 容器设置了 `QUANT_SKIP_MIGRATIONS=true`，服务启动时只检查几
 3. **先迁移数据库，后换代码。永远不要执行 `alembic downgrade`**（会删列删表，丢数据）。本仓库的迁移都是新增型，旧代码可以在新 schema 上继续运行。
 4. 只发布已经合并进 `origin/main` 的提交。例外情况见第 6 节，需要用户明确同意。
 5. 不提交、不打印任何密钥：`.env`、`intraday-secrets.env`、`runtime.env`、`secrets.env`、`relay.env`、OAuth 状态。不要在任何主机上执行 `git add -A`，提交前逐个文件 `git add <path>`，并用 `git diff --cached` 检查。
-6. 交易时段不发布。交易日 08:30–15:10 不要重启 owner 的 `quant-research`、Windows API 或 edge adapter；18:45–22:05 不要重启 owner 的 `quant-research-scheduler`（盘后调度在跑）。安全窗口：交易日 22:10 至次日 08:00，或周末。
+6. 交易时段不发布。交易日 `09:00–12:00` 和 `13:00–15:00` 不要重启 owner 的 `quant-research`、Windows API 或 edge adapter；经用户批准，`12:00–13:00` 是允许发布的午间窗口。`18:45–22:05` 不要重启 owner 的 `quant-research-scheduler`（盘后调度在跑）。其他安全窗口为交易日 `15:00` 后至次日 `09:00`，或周末。
 7. 不删除旧的 release 目录、旧镜像、旧 overlay，回滚依赖它们。
 8. 任何通过条件不满足时停止，按第 12 节回滚，再向用户报告实际输出。
 
@@ -520,16 +520,16 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 ## 13. 以后每次同步的标准流程
 
-1. 所有改动经 PR 合入 `main`。overlay hotfix 只能作为临时手段，24 小时内必须提交并走正式发布，**不允许**长期运行在 `-dirty` 或 `hotfix-*` 上。
-2. `scripts/release-sync-status.sh --sha origin/main`：记录回滚点，看清漂移。
+1. 所有改动经 PR 合入 `main`。overlay hotfix 必须来自干净组件 SHA，不能运行在 `-dirty` 上；依赖、镜像、compose、systemd 或迁移变化时必须走完整发布。
+2. `scripts/release-sync-status.sh --sha origin/main --edge-source-sha <edge_sha> --owner-source-sha <owner_sha>`：记录组件回滚点，看清漂移。若两侧使用同一 pinned image，才只传一个 `--sha`。
 3. 有 hotfix 或未提交内容时，先做阶段 B。
-4. `X=origin/main`，推送 `edge-*` 标签，等镜像发布完成。
+4. `X=origin/main`，按组件变更决定是否推送 `edge-*` 标签；纯源码 overlay 不构建镜像。
 5. 如果 `git diff --name-only <owner当前sha> $X -- quant-service/migrations` 有输出：先做阶段 D（迁移，包括 D0 的停止点）。
-6. 阶段 E（edge：E1 → E2 → E3，E4/E5 按需）。
-7. 阶段 F（owner：打包、激活、改写 `PEER_APP_*` 后构建、`up`、guard）。
+6. 按需发布 edge relay、edge workflows、edge XHS；不要启动已退役的 edge quant writer。
+7. 阶段 F（owner：源码 overlay 或完整镜像，改写 `PEER_APP_*` 后 `up`、guard）。
 8. 阶段 G（Windows API）。
-9. `scripts/release-sync-status.sh --sha $X` 输出 `ALL CHECKS PASSED`。
-10. 登记发布记录。
+9. 用组件 SHA 运行巡检，输出 `ALL CHECKS PASSED`，并将 manifest 和日志登记到附录 C。
+10. 记录每个组件的独立回滚点，不以一个全局 SHA 代替。
 
 平时（不发布时）可以每周运行一次第 2 步：任何 FAIL 都说明有机器偏离了 `main`，要当作问题处理。
 
