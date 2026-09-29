@@ -31,6 +31,14 @@ Only these workflows are imported: text aggregation plus media-part,
 media-finalize and media-state callbacks. Local scheduled market workflows are
 not copied, so this relay deployment cannot duplicate local research schedules.
 
+The XHS edge add-on is deployed separately by
+`feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh`. It keeps collection and
+Feishu delivery on the edge while the local worker performs AI summarization.
+The edge n8n process uses the matching `n8nio/runners` sidecar in external mode;
+the runner token is generated into the protected `secrets.env` on first apply.
+The same deployer installs `xhs-n8n-execution-reconcile.timer`, which records
+and closes only stale XHS execution rows after the n8n webhook dispatch wedge.
+
 ## Versioned release
 
 The adapter source is built by the GitHub `edge-*` release workflow into an
