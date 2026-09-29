@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable
 
@@ -16,6 +17,13 @@ from .longhu_vendor_source import LonghuVendorSource, direct_access_enabled
 
 MINIMUM_ROWS = 3_500
 MINIMUM_COVERAGE = 0.95
+FULL_MARKET_SOURCE_TIMEOUT_SECONDS = 900
+
+
+def minimum_full_market_rows(expected_rows: int) -> int:
+    """Return the point-in-time all-A row gate for a provider response."""
+    expected = max(int(expected_rows or 0), 0)
+    return max(MINIMUM_ROWS, math.ceil(expected * MINIMUM_COVERAGE)) if expected else MINIMUM_ROWS
 
 
 def owner_longhu_source_factory() -> LonghuVendorSource:
@@ -39,7 +47,7 @@ async def sync(
     force: bool = False,
 ) -> dict[str, Any]:
     request_key = hashlib.sha256(json.dumps({
-        "capability": "longhu_full_market_close_v2", "trade_date": str(trade_date),
+        "capability": "longhu_full_market_close_v3", "trade_date": str(trade_date),
         "minimum_rows": MINIMUM_ROWS, "minimum_coverage": MINIMUM_COVERAGE,
     }, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -81,16 +89,22 @@ async def sync(
     try:
         source = source_factory()
         evidence = await run_public_blocking(
-            source.fetch_full_market_evidence, trade_date, timeout_seconds=240,
+            source.fetch_full_market_evidence, trade_date,
+            timeout_seconds=FULL_MARKET_SOURCE_TIMEOUT_SECONDS,
         )
         merged = merge_cross_section(trade_date, evidence["vendor_rows"], evidence["quote_rows"])
         vendor_count = len(evidence["vendor_rows"])
         if vendor_count < MINIMUM_ROWS:
             raise RuntimeError(f"Longhu returned {vendor_count} symbols; minimum is {MINIMUM_ROWS}")
-        if len(merged.daily_rows) < MINIMUM_ROWS or merged.coverage < MINIMUM_COVERAGE:
+        expected_rows = await run_database_blocking(
+            lambda: _expected_all_a_rows(db, trade_date), timeout_seconds=30,
+        )
+        minimum_rows = minimum_full_market_rows(expected_rows)
+        if len(merged.daily_rows) < minimum_rows or merged.coverage < MINIMUM_COVERAGE:
             raise RuntimeError(
                 f"cross-source OHLC coverage {len(merged.daily_rows)}/{vendor_count} "
-                f"({merged.coverage:.2%}) is below {MINIMUM_COVERAGE:.0%}"
+                f"({merged.coverage:.2%}) is below the point-in-time all-A gate "
+                f"{minimum_rows}/{expected_rows} (and {MINIMUM_COVERAGE:.0%} vendor coverage)"
             )
         observed_at = datetime.now(timezone.utc)
 
@@ -127,4 +141,20 @@ async def sync(
         }
 
 
-__all__ = ["MINIMUM_COVERAGE", "MINIMUM_ROWS", "sync"]
+def _expected_all_a_rows(db: Any, trade_date: date) -> int:
+    """Read the point-in-time all-A population before promoting a close."""
+    with db.transaction() as connection:
+        row = connection.execute(
+            """SELECT count(DISTINCT symbol)::int AS expected_rows
+                 FROM quant.universe_membership_history
+                WHERE universe_key='all_a' AND effective_from<=%s
+                  AND (effective_to IS NULL OR effective_to>%s)""",
+            (trade_date, trade_date),
+        ).fetchone()
+    return int((row or {}).get("expected_rows") or 0)
+
+
+__all__ = [
+    "FULL_MARKET_SOURCE_TIMEOUT_SECONDS", "MINIMUM_COVERAGE", "MINIMUM_ROWS",
+    "minimum_full_market_rows", "sync",
+]

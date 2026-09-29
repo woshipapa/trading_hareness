@@ -11,6 +11,7 @@ from app.longhu_shared_full_market import (
     gateway_workers,
     parse_catalog_row,
 )
+from app.longhu_market_service import minimum_full_market_rows
 
 TRADE_DATE = date(2026, 9, 18)
 
@@ -139,6 +140,10 @@ class SharedLonghuFullMarketTests(unittest.TestCase):
         self.assertEqual(health["coverage"], 0.0)
         self.assertEqual(len(health["errors"]), 1)
 
+    def test_close_gate_uses_point_in_time_all_a_population(self):
+        self.assertEqual(minimum_full_market_rows(5_569), 5_291)
+        self.assertEqual(minimum_full_market_rows(3_000), 3_500)
+
 
 class FullMarketTransportSelectionTests(unittest.TestCase):
     """One flag, two hosts: the licence decides the transport, not the operator."""
@@ -191,6 +196,30 @@ class LicensedClosePathWiringTests(unittest.TestCase):
             ))
         self.assertEqual(result["status"], "completed")
         self.assertIs(result["source_factory"], shared_longhu_source_factory)
+
+    def test_full_market_route_falls_back_after_partial_longhu_result(self):
+        import asyncio
+
+        import app.main as main
+        from app.request_models import FullMarketDailySyncRequest
+
+        async def failed_longhu(*_args, **_kwargs):
+            return {"status": "failed", "reason": "point-in-time all-A coverage"}
+
+        async def isolated(*_args, **_kwargs):
+            return {"status": "completed", "provider": "tushare_super_get", "imported": 5_559}
+
+        with patch("app.main.longhu_full_market_enabled", return_value=True), \
+             patch("app.main.longhu_full_market_source_factory", return_value=object()), \
+             patch("app.main.sync_longhu_full_market_close", new=failed_longhu), \
+             patch("app.main.sync_full_market_daily_isolated", new=isolated):
+            result = asyncio.run(main.sync_full_market_daily(
+                FullMarketDailySyncRequest(provider="auto", trade_date=TRADE_DATE),
+            ))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["provider"], "tushare_super_get")
+        self.assertEqual(result["longhu_attempt"]["status"], "failed")
 
 
 if __name__ == "__main__":
