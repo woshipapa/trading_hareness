@@ -143,6 +143,15 @@ update_env() {
   ' "$file" >"$temp"
   chown --reference="$file" "$temp"; chmod --reference="$file" "$temp"; mv -f "$temp" "$file"
 }
+runner_token="$(awk -F= '$1 == "N8N_RUNNERS_AUTH_TOKEN" { print substr($0, index($0, "=") + 1); exit }' "$secrets_env")"
+if [[ -z "$runner_token" ]]; then
+  runner_token="$(python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+)"
+  update_env "$secrets_env" N8N_RUNNERS_AUTH_TOKEN "$runner_token"
+fi
 update_env "$runtime_env" XHS_COOKIE_FILE "$xhs_cookie_file"
 update_env "$runtime_env" XHS_KEYWORDS "AI基础设施,AI加速,系统软件,分布式训练,算力网络,推理优化"
 update_env "$runtime_env" XHS_FETCH_LIMIT "5"
@@ -163,7 +172,7 @@ if [[ "$xhs_force_build" == true ]] || ! docker image inspect feishu-relay-edge-
 else
   echo 'xhs image already present; skipping collector image build'
 fi
-docker compose --env-file "$runtime_env" --env-file "$secrets_env" up -d --no-deps xhs-collector n8n
+docker compose --env-file "$runtime_env" --env-file "$secrets_env" up -d --no-deps xhs-collector n8n n8n-runners
 for attempt in $(seq 1 45); do
   curl -fsS http://127.0.0.1:18790/health >/dev/null && break
   sleep 2
@@ -174,6 +183,46 @@ for attempt in $(seq 1 45); do
   sleep 2
 done
 curl -fsS http://127.0.0.1:5678/healthz >/dev/null
+runner_registered=false
+for attempt in $(seq 1 45); do
+  if docker logs --since 120s feishu-relay-edge-n8n 2>&1 | grep -q 'Registered runner'; then
+    runner_registered=true
+    break
+  fi
+  sleep 2
+done
+if [[ "$runner_registered" != true ]]; then
+  echo 'n8n task runner did not register after restart' >&2
+  docker compose --env-file "$runtime_env" --env-file "$secrets_env" ps >&2 || true
+  exit 1
+fi
+relay_pguser=""; relay_pgdatabase=""; relay_pgpassword=""
+while IFS='=' read -r key value; do
+  case "$key" in
+    RELAY_PGUSER) relay_pguser="$value" ;;
+    RELAY_PGDATABASE) relay_pgdatabase="$value" ;;
+    RELAY_PGPASSWORD) relay_pgpassword="$value" ;;
+  esac
+done < "$runtime_env"
+if [[ -z "$relay_pguser" || -z "$relay_pgdatabase" || -z "$relay_pgpassword" ]]; then
+  echo 'remote relay database settings are incomplete' >&2
+  exit 1
+fi
+audit_dir="$edge_dir/backups/n8n-executions/$(date -u +%Y%m%d-%H%M%S)-xhs"
+mkdir -p -m 0750 "$audit_dir"
+candidate_count="$(PGPASSWORD="$relay_pgpassword" psql -h 127.0.0.1 -p 5432 -U "$relay_pguser" -d "$relay_pgdatabase" -Atqc \
+  "SELECT count(*) FROM execution_entity WHERE \"workflowId\"='$workflow_id' AND status='running' AND \"startedAt\" < now() - interval '10 minutes'")"
+if [[ "$candidate_count" != 0 ]]; then
+  PGPASSWORD="$relay_pgpassword" psql -h 127.0.0.1 -p 5432 -U "$relay_pguser" -d "$relay_pgdatabase" -At -F $'\\t' -c \
+    "SELECT id,\"workflowId\",\"startedAt\" FROM execution_entity WHERE \"workflowId\"='$workflow_id' AND status='running' AND \"startedAt\" < now() - interval '10 minutes' ORDER BY \"startedAt\"" > "$audit_dir/before.tsv"
+  chmod 0600 "$audit_dir/before.tsv"
+  PGPASSWORD="$relay_pgpassword" psql -h 127.0.0.1 -p 5432 -U "$relay_pguser" -d "$relay_pgdatabase" -Atqc \
+    "UPDATE execution_entity SET status='crashed',\"stoppedAt\"=now() WHERE \"workflowId\"='$workflow_id' AND status='running' AND \"startedAt\" < now() - interval '10 minutes' RETURNING id" > "$audit_dir/updated_ids.tsv"
+  chmod 0600 "$audit_dir/updated_ids.tsv"
+  echo "reconciled stale XHS executions; audit=$audit_dir"
+else
+  rmdir "$audit_dir"
+fi
 container=feishu-relay-edge-n8n
 docker cp "$stage/xhs-intel-edge.json" "$container:/tmp/xhs-intel-edge.json"
 if ! docker exec "$container" sh -lc "rm -rf /tmp/xhs-export; n8n export:workflow --all --separate --output=/tmp/xhs-export >/dev/null 2>&1 && grep -R -q '$workflow_id' /tmp/xhs-export"; then
