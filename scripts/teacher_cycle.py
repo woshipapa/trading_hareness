@@ -210,13 +210,34 @@ def report(job: pathlib.Path, review: str, state: dict[str, Any]) -> pathlib.Pat
     # pack_check_<T>.json 里；报告要读文件，否则"覆盖旧计划"永远是 0。
     check = _read_json(job / f"pack_check_{review.replace('-', '')}.json", {}) or {}
     check = check or ((state.get("check") or {}).get("json") or {})
-    imported = ((state.get("import") or {}).get("json") or {})
-    pack = state.get("pack") or {}
+    imported = ((state.get("import") or {}).get("json") or {}).get("import") or {}
+    if not imported.get("status"):
+        imported = ((state.get("import") or {}).get("json") or {})
+    if not imported.get("status"):
+        # 导入可能是人工在这套编排之外跑的（9/28 就是：check 卡住后人补了代码再导）。
+        # 池子里的事实写在文件里，报告要读它，否则会一直写"未导入，等人确认"。
+        imported = (_read_json(job / f"import_report_{review.replace('-', '')}.json", {}) or {}).get("import") or {}
+    # ``pack`` 那一步第二轮就被 done() 跳过了，state 里存的是第一轮的 pack_id 和只数。
+    # 包在那之后被改过（补代码、去掉板块条目），报告必须按文件现在的样子写。
+    on_disk = _read_json(job / f"teacher_pack_{review.replace('-', '')}.json", {}) or {}
+    pack = dict(state.get("pack") or {})
+    if on_disk:
+        pack.update({"pack_file": f"teacher_pack_{review.replace('-', '')}.json",
+                     "pack_id": on_disk.get("pack_id"), "stocks": len(on_disk.get("stocks") or []),
+                     "forecasts": len(on_disk.get("forecasts") or []),
+                     "method_notes": len(on_disk.get("method_notes") or [])})
+    # ``already imported`` 是"这个包已经在池子里"，是成功；只有其余的才是真阻断。
+    already = [item for item in check.get("problems") or [] if "already imported" in str(item)]
+    blocking = [item for item in check.get("problems") or [] if item not in already]
     lines = [f"# 老师复盘每日闭环 · {review}", "",
              f"任务 `{job.name}`｜下一交易日 {state.get('target_session') or '?'}｜"
              f"生成于 {dt.datetime.now(CN).isoformat(timespec='seconds')}", ""]
     for step in STEPS:
         entry = state.get(step)
+        if step == "import" and imported.get("status") and not entry:
+            # 这一轮没跑 import，但池子里已经有了（人工导的，或上一轮导的）。
+            lines.append(f"- import：{imported['status']}（按 import_report 文件）")
+            continue
         if entry is None:
             lines.append(f"- {step}：未执行")
             continue
@@ -234,6 +255,8 @@ def report(job: pathlib.Path, review: str, state: dict[str, Any]) -> pathlib.Pat
             status = "ok" if entry["ok"] else "不通过"
         else:
             status = "ok"
+        if step == "check" and status.startswith("失败") and already and not blocking:
+            status = f"ok（{already[0]}：本包已在池中，不重复导入）"
         lines.append(f"- {step}：{status}")
     lines.append("")
     if pack.get("pack_id"):
@@ -242,11 +265,12 @@ def report(job: pathlib.Path, review: str, state: dict[str, Any]) -> pathlib.Pat
                   f"量价推演 {pack.get('method_notes')} 条", ""]
     if check:
         counts = check.get("counts") or {}
-        lines += [f"**检查**：problems {len(check.get('problems') or [])}、warnings {len(check.get('warnings') or [])}、"
+        lines += [f"**检查**：阻断 {len(blocking)}、warnings {len(check.get('warnings') or [])}、"
                   f"推送 {counts.get('watched')}、只记录 {counts.get('record_only')}、"
                   f"覆盖旧计划 {len(check.get('overrides') or [])}、延续 {len(check.get('carried_unmentioned') or [])}", ""]
         for problem in (check.get("problems") or [])[:10]:
-            lines.append(f"- 阻断：{problem}")
+            label = "已导入" if "already imported" in str(problem) else "阻断"
+            lines.append(f"- {label}：{problem}")
         lines.append("")
     if imported.get("status"):
         lines += [f"**导入**：{imported.get('status')}｜session {imported.get('session_date')}｜"
@@ -403,9 +427,18 @@ def run_cycle(job: pathlib.Path, review: str, *, auto_import: bool, only: str | 
             state["pack_gaps"] = [{"error": str(error)[:200]}]
         _write_json(state_path, state)
     problems = ((state.get("check") or {}).get("json") or {}).get("problems")
-    green = isinstance(problems, list) and not problems
+    # ``pack <id> is already imported`` 说的是这个包已经在池子里了 —— 那是成功。
+    # 以前它和"代码不是六位"一样被算成 problems 非空，于是当晚每一轮都报
+    # "check 未通过 → 未导入（等人确认）"，看板上像还没入池。
+    already = [item for item in problems or [] if "already imported" in str(item)]
+    blocking = [item for item in problems or [] if item not in already]
+    green = isinstance(problems, list) and not blocking
     if only in (None, "import"):
-        if not green:
+        if already:
+            state["import"] = {"status": "imported", "json": _read_json(
+                job / f"import_report_{review.replace('-', '')}.json", {}) or {"import": {"status": "imported"}}}
+            state["import_note"] = f"{already[0]}（本包已在池中，不重复导入）"
+        elif not green:
             state["hold"] = "check 未通过（problems 非空或没跑出 JSON），不导入"
         elif not auto_import:
             state["hold"] = "check 全绿，但 TEACHER_CYCLE_AUTO_IMPORT 未开启，等人确认后导入"
@@ -465,11 +498,16 @@ def main() -> int:
         print(json.dumps({"status": "failed", "reason": "无法确定复盘交易日，请用 --date"}, ensure_ascii=False))
         return 2
     state = run_cycle(job, review, auto_import=auto, only=args.only)
+    problems = (((state.get("check") or {}).get("json") or {}).get("problems") or [])
     summary = {"job_id": job.name, "review_date": review, "target_session": state.get("target_session"),
                "pack": (state.get("pack") or {}).get("status"),
-               "pack_id": (state.get("pack") or {}).get("pack_id"),
-               "check_problems": len((((state.get("check") or {}).get("json") or {}).get("problems") or [])),
-               "import": ((state.get("import") or {}).get("json") or {}).get("status"),
+               # 包在这一轮之外被改过也要报对：pack_id 按文件读，不按 state。
+               "pack_id": (_read_json(job / f"teacher_pack_{review.replace('-', '')}.json", {}) or {}
+                           ).get("pack_id") or (state.get("pack") or {}).get("pack_id"),
+               "check_problems": len([item for item in problems if "already imported" not in str(item)]),
+               "import": (((state.get("import") or {}).get("json") or {}).get("status")
+                          or ((_read_json(job / f"import_report_{review.replace('-', '')}.json", {}) or {}
+                               ).get("import") or {}).get("status")),
                "hold": state.get("hold"), "report": state.get("report_file")}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
