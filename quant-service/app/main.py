@@ -713,7 +713,7 @@ from .ths_sector_flows import sync_industry as sync_ths_industry_isolated, sync_
 from .outcome_recomputation import recompute as recompute_outcomes_isolated
 from .post_close_candidate_outcomes import settle_post_close_and_leader_rotation_outcomes
 from .market_regime_daily import materialize_market_regime
-from .sentiment_cycle_daily import materialize_sentiment_cycle
+from .sentiment_cycle_daily import materialize_sentiment_cycle, read_prior_session_sentiment_cycle
 from .strategy_daily_candidate_ledger import materialize_ledger, settle_ledger_outcomes as settle_strategy_ledger_outcomes
 from .watchlist_candidate_proposals import materialize_watchlist_proposals
 from .strategy_timing_challengers import run_challenger_backtest as run_intraday_entry_timing_challenger_backtest
@@ -3469,6 +3469,7 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
             market_context_batch=intraday_point_in_time_market_context_batch,
             evaluate=evaluate_intraday_rotation_candidates,
             persist=persist_intraday_rotation_observations, json_safe=strategy_json_safe,
+            sentiment_cycle=read_prior_session_sentiment_cycle,
         ),
         xiaojie_leader_flow=run_xiaojie_leader_flow,
         persist_quote_health=persist_intraday_quote_health,

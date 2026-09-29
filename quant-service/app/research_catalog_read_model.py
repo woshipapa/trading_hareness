@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
+from .regime_stratification import (
+    STRATIFIED_SESSION_RETURNS_SQL, stratification_payload, stratified_session_returns_parameters,
+)
 from .research_trial_repository import latest_trials
 
 
@@ -71,6 +75,14 @@ def strategy_registry(database: Any) -> dict[str, Any]:
 def research_trials(database: Any, family: str | None, limit: int) -> dict[str, Any]:
     with database.transaction() as connection:
         return latest_trials(connection, family, limit)
+
+
+def regime_strata(database: Any, as_of_date: date, strategy_key: str | None) -> dict[str, Any]:
+    with database.transaction() as connection:
+        rows = connection.execute(
+            STRATIFIED_SESSION_RETURNS_SQL, stratified_session_returns_parameters(as_of_date, strategy_key),
+        ).fetchall()
+    return stratification_payload(rows, as_of_date)
 
 
 def model_registry(database: Any) -> dict[str, Any]:

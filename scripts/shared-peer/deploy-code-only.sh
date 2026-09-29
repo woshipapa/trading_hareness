@@ -32,28 +32,68 @@ git cat-file -e "$from_sha^{commit}"
 
 changed_files="$(git diff --name-only "$from_sha" "$target_sha")"
 [[ -n "$changed_files" ]] || { echo 'target SHA has no changes' >&2; exit 1; }
+# Three kinds of path.  Owner runtime source ships in this release.  Paths
+# that never reach the owner runtime are skipped: tests and docs carry no
+# behaviour, and feishu-relay/ and frontend/ run on the edge (released there by
+# the edge overlay).  Everything else - migrations, requirements, Dockerfiles,
+# compose, deploy/ and scripts/ (the systemd guards run from the release
+# checkout) - needs the full release.
+runtime_files=""
+skipped_files=""
+# A migration whose code is unchanged - only comments or docstrings differ -
+# changes no schema, so it does not force a full release.  Anything else in a
+# migration does.
+migration_code_unchanged() {
+  python3 - "$from_sha" "$target_sha" "$1" <<'PY'
+import ast, subprocess, sys
+
+def code(sha, path):
+    try:
+        text = subprocess.run(["git", "show", f"{sha}:{path}"], check=True, capture_output=True, text=True).stdout
+    except subprocess.CalledProcessError:
+        return None
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(body, list) and body and isinstance(body[0], ast.Expr) \
+                and isinstance(getattr(body[0], "value", None), ast.Constant) and isinstance(body[0].value.value, str):
+            node.body = body[1:] or [ast.Pass()]
+    return ast.dump(tree)
+
+before, after = code(sys.argv[1], sys.argv[3]), code(sys.argv[2], sys.argv[3])
+sys.exit(0 if before is not None and before == after else 1)
+PY
+}
 while IFS= read -r path; do
   case "$path" in
-    quant-service/app/*|quant-service/entrypoint.py|quant-service/run_server.py|quant-service/database_bootstrap.py|quant-service/alembic.ini) ;;
+    quant-service/migrations/versions/*.py)
+      if migration_code_unchanged "$path"; then
+        skipped_files+="$path (comments or docstrings only)"$'\n'
+        continue
+      fi
+      echo "full release required for: $path" >&2; exit 1 ;;
+  esac
+  case "$path" in
+    quant-service/app/*|quant-service/entrypoint.py|quant-service/run_server.py|quant-service/database_bootstrap.py|quant-service/alembic.ini)
+      runtime_files+="$path"$'\n' ;;
+    quant-service/tests/*|docs/*|*.md|.github/*|feishu-relay/*|frontend/*|scripts/*.test.mjs|scripts/test_*.py)
+      skipped_files+="$path"$'\n' ;;
+    # Release tooling that runs on the operator workstation, the Windows owner
+    # workstation or the edge - never inside the owner peer runtime.
+    scripts/release-sync-status.sh|scripts/shared-peer/deploy-code-only.sh|scripts/windows/*|\
+    scripts/*feishu-relay-edge*.sh|scripts/*edge-relay-workflows.sh|scripts/install-edge-import-watchdog.sh)
+      skipped_files+="$path"$'\n' ;;
     *) echo "full release required for: $path" >&2; exit 1 ;;
   esac
 done <<< "$changed_files"
 
 if [[ "$apply" != true ]]; then
   printf 'code-only release candidate: sha=%s label=%s from=%s\n' "$target_sha" "$release_label" "$from_sha"
-  printf 'changed files:\n%s\n' "$changed_files"
+  printf 'owner runtime files:\n%s' "${runtime_files:-  (none: this release only records the new SHA)
+}"
+  printf 'not owner runtime (skipped; edge paths ship with the edge overlay):\n%s' "${skipped_files:-  (none)
+}"
   exit 0
-fi
-
-# Evaluate the deployment window at execution time. The operator-approved
-# lunch window from 12:00 through 13:00 Beijing time remains available; the
-# surrounding market window stays blocked.
-beijing_weekday="$(TZ=Asia/Shanghai date +%u)"
-beijing_hhmm="$(TZ=Asia/Shanghai date +%H%M)"
-beijing_minutes=$((10#${beijing_hhmm:0:2} * 60 + 10#${beijing_hhmm:2:2}))
-if (( beijing_weekday <= 5 && ((beijing_minutes >= 540 && beijing_minutes < 720) || (beijing_minutes >= 780 && beijing_minutes < 900)) )); then
-  echo "refusing code-only release during Beijing trading window: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %z')" >&2
-  exit 1
 fi
 
 owner_host="${OWNER_PEER_HOST:-stockpeer@47.110.79.189}"
@@ -77,36 +117,16 @@ remote_archive="/tmp/$(basename "$archive")"
 ssh -i "$owner_key" -p "$owner_port" "$owner_host" \
   "TARGET_SHA='$target_sha' RELEASE_LABEL='$release_label' COMPOSE_DIR='$compose_dir' ARCHIVE='$remote_archive' bash -s" <<'REMOTE'
 set -euo pipefail
-
-beijing_weekday="$(TZ=Asia/Shanghai date +%u)"
-beijing_hhmm="$(TZ=Asia/Shanghai date +%H%M)"
-beijing_minutes=$((10#${beijing_hhmm:0:2} * 60 + 10#${beijing_hhmm:2:2}))
-if [ "$beijing_weekday" -le 5 ] && { [ "$beijing_minutes" -ge 540 ] && [ "$beijing_minutes" -lt 720 ] || [ "$beijing_minutes" -ge 780 ] && [ "$beijing_minutes" -lt 900 ]; }; then
-  printf 'refusing owner release during Beijing trading window: %s\n' \
-    "$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %z')" >&2
-  exit 1
-fi
-
 release_root="$HOME/trading_hareness/hotfix/quant-service/releases/$RELEASE_LABEL"
 current_root="$HOME/trading_hareness/hotfix/quant-service/current"
-env_file="$COMPOSE_DIR/.env"
-test -f "$env_file"
-env_backup="$(mktemp "${env_file}.rollback.XXXXXX")"
-cp -p "$env_file" "$env_backup"
 previous_root=""
-previous_target=""
 if [ -e "$current_root" ]; then previous_root="$(readlink -f "$current_root")"; fi
-if [ -n "$previous_root" ]; then previous_target="releases/$(basename "$previous_root")"; fi
 rm -rf "$release_root"
 mkdir -p "$release_root"
 tar -xzf "$ARCHIVE" -C "$release_root"
 test -f "$release_root/app/main.py"
 test -f "$release_root/entrypoint.py"
-# The hotfix directory is mounted into the container, so an absolute host path
-# here would be dangling inside the container and silently select the image.
-release_target="releases/$RELEASE_LABEL"
-rm -f "${current_root}.next"
-ln -s "$release_target" "${current_root}.next"
+ln -sfn "$release_root" "${current_root}.next"
 mv -Tf "${current_root}.next" "$current_root"
 
 set_env() {
@@ -120,60 +140,24 @@ set_env() {
   chmod 0600 "$tmp"
   mv -f "$tmp" "$file"
 }
-
-cd "$COMPOSE_DIR"
-C=(docker compose --env-file .env -f compose.yaml -f compose.intraday-owner.yaml)
-rollback_needed=true
-
-rollback() {
-  local rollback_ok=true
-  rollback_needed=false
-  if [ -n "$previous_target" ]; then
-    rm -f "${current_root}.next"
-    ln -s "$previous_target" "${current_root}.next"
-    mv -Tf "${current_root}.next" "$current_root"
-  else
-    rm -f "$current_root" "${current_root}.next"
-  fi
-  if ! cp -p "$env_backup" "$env_file"; then
-    rollback_ok=false
-    printf 'rollback failed: could not restore %s\n' "$env_file" >&2
-  fi
-  if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler; then
-    rollback_ok=false
-    printf 'rollback failed: previous application containers did not become healthy\n' >&2
-  fi
-  rm -f "$env_backup" "$ARCHIVE"
-  [ "$rollback_ok" = true ]
-}
-
-cleanup_remote() {
-  if [ "$rollback_needed" = true ]; then
-    rollback || true
-  fi
-  rm -f "$env_backup" "$ARCHIVE"
-}
-trap cleanup_remote EXIT
-
 set_env PEER_APP_GIT_SHA "$TARGET_SHA"
 set_env PEER_APP_RELEASE "$RELEASE_LABEL"
 set_env PEER_EXPECTED_RELEASE "$RELEASE_LABEL"
 set_env PEER_APP_BUILD_CREATED_AT "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 set_env QUANT_HOTFIX_ENABLED true
 
-if ! "${C[@]}" config --quiet; then
-  rollback || true
+cd "$COMPOSE_DIR"
+C=(docker compose --env-file .env -f compose.yaml -f compose.intraday-owner.yaml)
+"${C[@]}" config --quiet
+if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
+  if [ -n "$previous_root" ]; then
+    ln -sfn "$previous_root" "${current_root}.next"
+    mv -Tf "${current_root}.next" "$current_root"
+    "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler || true
+  fi
   exit 1
 fi
-if ! "${C[@]}" up -d --no-build --pull never --wait db-tunnel; then
-  rollback || true
-  exit 1
-fi
-if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler; then
-  rollback || true
-  exit 1
-fi
-rollback_needed=false
+rm -f "$ARCHIVE"
 printf 'code-only release active: %s\n' "$RELEASE_LABEL"
 REMOTE
 

@@ -6,8 +6,8 @@
 
 目标有两个：
 
-1. 把 47 edge relay、47 owner quant 和 edge XHS 分别同步到已审阅的组件提交，并用组件级身份证明实际运行版本；
-2. 消除让不同运行面无法统一维护的漂移，使以后每次发布都只需按第 13 节和 [`UNIFIED_RELEASE_MODEL_47.md`](UNIFIED_RELEASE_MODEL_47.md) 的清单执行。
+1. 把 47 edge 与 47 owner 同步到同一个 Git 提交 `X`，并用脚本证明它们一致；
+2. 消除让两台机器无法统一发布的漂移，使以后每次发布都只需按第 13 节的清单执行。
 
 ---
 
@@ -41,7 +41,7 @@ owner 容器设置了 `QUANT_SKIP_MIGRATIONS=true`，服务启动时只检查几
 3. **先迁移数据库，后换代码。永远不要执行 `alembic downgrade`**（会删列删表，丢数据）。本仓库的迁移都是新增型，旧代码可以在新 schema 上继续运行。
 4. 只发布已经合并进 `origin/main` 的提交。例外情况见第 6 节，需要用户明确同意。
 5. 不提交、不打印任何密钥：`.env`、`intraday-secrets.env`、`runtime.env`、`secrets.env`、`relay.env`、OAuth 状态。不要在任何主机上执行 `git add -A`，提交前逐个文件 `git add <path>`，并用 `git diff --cached` 检查。
-6. 交易时段不发布。交易日 `09:00–12:00` 和 `13:00–15:00` 不要重启 owner 的 `quant-research`、Windows API 或 edge adapter；经用户批准，`12:00–13:00` 是允许发布的午间窗口。`18:45–22:05` 不要重启 owner 的 `quant-research-scheduler`（盘后调度在跑）。其他安全窗口为交易日 `15:00` 后至次日 `09:00`，或周末。
+6. 交易时段不发布。交易日 08:30–15:10 不要重启 owner 的 `quant-research`、Windows API 或 edge adapter；18:45–22:05 不要重启 owner 的 `quant-research-scheduler`（盘后调度在跑）。安全窗口：交易日 22:10 至次日 08:00，或周末。
 7. 不删除旧的 release 目录、旧镜像、旧 overlay，回滚依赖它们。
 8. 任何通过条件不满足时停止，按第 12 节回滚，再向用户报告实际输出。
 
@@ -197,7 +197,7 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 （`pit0001` 原本接在 `ds0001` 后面，合并时改为接在 `ds0005` 后面，所以没有额外的合并迁移。它还没有在任何共享库上执行过。）
 
-`20260923_0117` 的源码在 Mac、owner 主机历史 release 和 owner 镜像里都没有找到，只能从 Windows 工作站 `F:\AIWorkflow\trading_hareness` 或其他备份找回。**不能凭空补写**：下面第 4 步的"空版本标记"只有在用户明确同意后才能做。
+`20260923_0117` 的源码在 Mac、owner 主机历史 release、owner 镜像、Git 对象和可用部署归档中均未找到。用户已明确决定不再追溯这条旧迁移源码，因此本次采用仓库中的显式空版本标记和合并迁移。该标记只收敛 Alembic 版本，不声称恢复未知 DDL；新版本需要的表和列仍由仓库中的后续迁移创建，并必须通过 schema 回读确认。
 
 现状：owner 库的 `quant.alembic_version` 记录的是另一条迁移线（0095 起，2026-09-26 实测末端为 `20260923_0117`；以实际查询结果为准，下文用 `<owner_head>` 表示）的末端，本仓库没有这些迁移文件。在这种状态下执行 `alembic upgrade head` 会报 `Can't locate revision identified by '<owner_head>'`。本仓库以前处理过同样的情况：`20260902_0089_legacy_owner_bridge.py` 是一个空的版本标记，`20260905_0093_merge_legacy_owner.py` 是合并迁移。
 
@@ -209,16 +209,17 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
    ```
 
 2. 找回这条迁移线的原始迁移文件。首选来源是 B0 推送的 `sync/owner-d5c359d` 分支（owner 正在运行的代码）。其次是 Windows 工作站 `F:\AIWorkflow\trading_hareness` 里未跟踪的文件、owner 主机的历史 release 目录（阶段 A 的补充盘点）。
-3. **找到了**：新建分支 `sync/owner-migration-lineage-<date>`。
+3. **如果找到了**：新建分支 `sync/owner-migration-lineage-<date>`。
    - 把这些文件原样加入 `quant-service/migrations/versions/`。
    - 核对它们的 `down_revision` 链能接到仓库已有的某个版本（通常是 `20260906_0094`）。
    - 新增一个空的合并迁移，例如 `20260927_mrg0001`，`down_revision = ("<owner_head>", "<当前仓库 head>")`，写法照抄 `20260905_0093`。
    - 检查这条迁移线上的各个迁移与本仓库 `20260918_ds0001` 至 `20260926_srg0001` 是否创建了同名对象。本仓库这些迁移都用了 `IF NOT EXISTS`、`to_regclass` 判断或 `ON CONFLICT`，重复执行是安全的，但对方的写法需要逐个确认。
-4. **找不到**（必须先得到用户明确同意）：
-   - 新增空的版本标记 `<owner_head>`，`down_revision = "20260906_0094"`，写法照抄 `0089`；
-   - 再新增上面那个合并迁移。
+4. **找不到**（本次已得到用户明确同意）：
+   - 新增空的版本标记 `<owner_head>`，`down_revision = "20260906_0094"`，写法照抄 `0089`；本次实际文件为 `20260926_0117_legacy_owner_bridge.py`；
+   - 新增 `20260926_own0001_owner_schema_gap.py`，合并 `20260923_0117` 与 `20260919_ds0002`，幂等补建实测缺少的 `research_model_registry`；`ds0003` 从该修复点继续。
+   - `20260926_mrg0001_owner_lineage.py` 再合并 `20260926_own0001` 与当前仓库链 `20260926_srg0001`。
    - 然后用 `pg_dump --schema-only -n quant` 导出 owner 库的 schema，与"空库迁移到仓库 head"导出的 schema 做 diff。只存在于 owner 库的对象，要补写成真正的新增迁移（`IF NOT EXISTS`），这样新环境才能和 owner 一致。
-   - 这一步没做完之前，在发布记录里注明"schema 差异未收敛"。
+   - 这一步没做完之前，在发布记录里注明"schema 差异未收敛"。本次发布记录还必须注明：旧 0117 的未知 DDL 未恢复，空标记只收敛版本线。
 5. 验证：
    - 在一个空库上执行 `node feishu-relay/adapter/initialize-ledger.mjs` 和 `python quant-service/database_bootstrap.py`，必须能迁移到新的唯一 head。
    - 把 owner 的 schema-only dump 恢复到一个临时库，执行 `alembic upgrade head`，必须成功。
@@ -229,13 +230,15 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 对每个用于发布的检出目录（Mac 仓库、Windows `F:\AIWorkflow\trading_hareness`）执行 `git status --porcelain`。有未提交的内容就拿去和 `origin/main` 比对：已经在 main 里的丢弃；需要保留的走 PR；拿不准的报告用户。**不要**把 `.env` 或 `*-secrets.env` 加进提交，`.gitignore` 现在已经忽略了 `intraday-secrets.env`。
 
-**B 阶段通过条件**：edge overlay 的内容和 owner 迁移线都已进入 `origin/main`；每个发布用的检出目录 `git status --porcelain` 都为空。
+**B 阶段通过条件**：edge overlay 的内容和 owner 迁移线都已进入 `origin/main`；每个发布用的检出目录 `git status --porcelain` 都为空；owner 的 schema 回读通过。旧 `20260923_0117` 的未知 DDL 不作为本次发布的完成条件，但必须保留在发布记录中。
 
 ---
 
 ## 6. 阶段 C：合并并确定发布 SHA
 
 1. PR #2 的 CI 一直是红的，原因在 `main` 的 CI 配置（见 PR 评论 `#issuecomment-5842937183`）。附录 A 的修复已经按用户要求加进 PR #2（`1daae6e`）。合并同步分支后（`e54cd2f`），CI 在 2277 个后端测试上只剩 2 个依赖真实行情数据的测试失败。按用户 2026-09-26 的决定，这 2 个测试改为只在 `QUANT_REAL_DATA_TESTS=1` 时运行（附录 A 第 3 项）。**在 CI 仍为红色时合并，必须先得到用户明确同意。**
+
+   `verify-api-contract.mjs` 和 `api:check` 读的是**正在运行的**服务的 OpenAPI 文档。必须先用待发布的检出启动服务（例如在该检出里执行 `docker compose up -d --build postgres quant-research`），再做这两项检查。本机 5681 上原有的旧服务不能用来检查：拿它校验，得到的是旧代码的结果（例如 180 个 operations，而 PR #2 是 194 个）；拿它执行 `api:generate`，会删掉 PR 新增的路由类型。
 
    注意：同步分支自带的测试以前是在旧镜像的容器里跑的（`docker compose exec quant-research …`），所以当时报告的 "1874 tests OK" 验证的是旧代码。以后必须在当前检出上运行，例如 `cd quant-service && python -m unittest discover -s tests -q`，或者先重建镜像再在容器里跑。
 2. PR #2 和阶段 B 的 PR 全部合并后：
@@ -278,7 +281,9 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 
 `docs/PLAN_COMPLETION_MATRIX.md` 的 2026-09-20 owner clarification 写明：**owner 不会为 peer 执行 ds0004/ds0005 的 DDL**。所以在 owner 库上直接 `alembic upgrade head`，会把 owner 已经拒绝的 DDL 一起执行，而且 ds0004 要改写几张大表。
 
-**执行到这里先停下，请用户决定**，只能二选一：
+**决定（2026-09-26）：用户选择第 1 项**，owner 执行全部 8 个迁移。前提不变：必须先完成 B2，也就是从 Windows 找回 `20260923_0117` 的源码，让 `<owner_head>` 能接上本仓库的链。在此之前不要执行 `upgrade head`。第 2 项保留，作为以后同类情况的备选。
+
+两个选项：
 
 1. owner 同意执行全部 8 个迁移：按下面的原步骤 `upgrade head`（先完成 B2，让 `<owner_head>` 能接上本仓库的链）。
 2. owner 只执行本次发布需要的迁移：先生成 SQL 交给 owner 审阅，不连接数据库：
@@ -468,13 +473,46 @@ scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> \
   --from-sha <active_sha> --apply
 ```
 
-脚本会先比较两个 Git SHA。出现 `requirements.txt`、Dockerfile、compose、迁移或
-其他构建文件变化时直接拒绝，必须回到完整镜像发布和数据库迁移流程；纯代码发布
+脚本先比较两个 Git SHA 之间改动的每个路径，分三类：
+
+- **随本次发布**：`quant-service/app/*`、`entrypoint.py`、`run_server.py`、
+  `database_bootstrap.py`、`alembic.ini`。
+- **跳过**，这些路径不进入 owner 运行时：
+  - `quant-service/tests/`、`docs/`、任何 `*.md`、`.github/`；
+  - `feishu-relay/` 和 `frontend/`，它们随 F6 的 edge overlay 发布；
+  - 发布工具：状态脚本、本脚本、edge 包装脚本、`scripts/windows/`、脚本测试；
+  - 只改了注释或 docstring 的迁移文件，脚本会比对去掉 docstring 后的语法树。
+- **其余一律**输出 `full release required for: <path>` 并退出，包括：迁移代码、依赖、
+  Dockerfile、compose、`deploy/`，以及在 owner 上从发布检出运行的 guard 脚本等其他
+  `scripts/`。
+
+所以合并进 `main` 的普通 PR（代码连同测试和文档）可以直接走快速通道。如果两个 SHA
+之间没有 owner 运行时改动（例如只改了 edge），发布只会刷新记录的 SHA，这样
+`release-sync-status.sh --sha <main>` 在两台机器上都能通过。先不带 `--apply` 演练，
+它会列出每一类包含哪些文件。
+
+需要完整发布时，按完整镜像发布和数据库迁移流程执行。纯代码发布
 会把 Git archive 写入 owner 的保留 release 目录，原子切换 `hotfix/current`，并用
 同一个基础镜像重建两个容器。健康接口会显示源码 SHA 和 release label。启动失败
 会自动恢复上一个源码指针并重启旧代码。旧 release 和镜像不会删除，便于回滚。
 
 ---
+
+### F6. 日常 Feishu relay 代码快速发布（不重建镜像）
+
+edge 的 adapter 镜像固定 Node 运行时和生产依赖；`hotfix/current` 是只读源码
+overlay。日常只改 `feishu-relay/adapter/`、`feishu-relay/bridge/`、配置注册表
+或前端源码时，使用：
+
+```bash
+feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply
+```
+
+脚本会先运行 adapter、bridge 和两个前端的检查，再把当前 Git 检出生成保留
+overlay，原子切换 `hotfix/current`，重启 adapter 和 bridge，不构建也不拉取镜像。
+它会校验 overlay 依赖 hash 与当前镜像一致；依赖、Dockerfile、compose 或 Node
+依赖清单变化时，必须回到固定镜像发布流程。edge 的 immutable image 发布仍使用
+`deploy-feishu-relay-edge-release.sh`，并在发布时强制关闭 overlay。
 
 ## 10. 阶段 G：owner Windows 工作站 API
 
@@ -500,6 +538,28 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 必须输出 `ALL CHECKS PASSED`。然后在附录 C 的发布记录表里追加一行，通过一个只改这一处的 PR 提交。
 
+**`--sha` 不是可选项**：省略时脚本回退到 `origin/main`，在 overlay 模型下会把正常状态
+报成一堆失败。始终显式传入本次发布的 SHA。
+
+校验脚本从 2026-09-26 起同时支持两种发布模型（此前写死了固定镜像那一种，于是本规范
+规定的 overlay 常态被报成 4 项失败，校验反而失去意义）：
+
+- 先认出实际在用哪一种（`runtime_source=source-overlay` 或 `FEISHU_ADAPTER_HOTFIX_ENABLED=true`
+  即判为 overlay），再校验那一种的契约，并把结果登记成 `release model` 一行；
+- **overlay**：`release` 必须含干净的期望 SHA 且不带 `-dirty`、`runtime_source` 必须是
+  `source-overlay`、overlay 标志必须为 `true`；overlay 可以复用旧的基础镜像，
+  因此 `runtime.env` 中的镜像标签可以为空或仍指向旧镜像。脚本同时读取运行容器的
+  image ID 和 `/app/package.json` 哈希，要求依赖清单与本次 Git SHA 一致；
+- **pinned-image**：仍按原来的契约校验（release 非 `hotfix*`、`runtime_source` 非 overlay、
+  镜像标签含期望 SHA、overlay 标志为 false/unset）。
+
+同时修了一个会误报数据库血统的解析 bug：Alembic heads 是用正则从迁移文件里抽的，而正则
+要求 `revision` / `down_revision` **紧跟** `=`，于是带类型标注的迁移文件
+（`revision: str = "..."`、`down_revision: tuple[str, str] = (...)`）整个被跳过。
+2026-09-26 有 3 个这样的文件，正好是最新的 owner lineage 链（`own0001` → `mrg0001`），
+结果合并节点的父节点仍被当成 head，`alembic revision` 被报成不一致——**数据库本来是对的，
+是检查在骗人**。以后新增迁移写不写类型标注都能被正确识别。
+
 下一个交易日：08:40 的 preopen 检查不应报警；15:05 收盘复盘之后，`GET /api/v1/research/trials` 应能看到 `candidate_ledger`、`xiaojie_leader_flow` 两个族的数据。部署后第一次盘后结果重算会把全部历史结果按 T+1 规则重新结算，耗时会比平时长。
 
 ---
@@ -520,16 +580,18 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 ## 13. 以后每次同步的标准流程
 
-1. 所有改动经 PR 合入 `main`。overlay hotfix 必须来自干净组件 SHA，不能运行在 `-dirty` 上；依赖、镜像、compose、systemd 或迁移变化时必须走完整发布。
-2. `scripts/release-sync-status.sh --sha origin/main --edge-source-sha <edge_sha> --owner-source-sha <owner_sha>`：记录组件回滚点，看清漂移。若两侧使用同一 pinned image，才只传一个 `--sha`。
+1. 所有改动经 PR 合入 `main`。普通源码改动按 F5/F6 使用干净 Git SHA 的源码 overlay，
+   overlay 可以长期作为常规发布模型运行，但**不允许**运行在 `-dirty` release 上；依赖、
+   镜像、compose、systemd 或迁移变化必须按完整发布流程切换到新的 immutable image 和/或数据库结构。
+2. `scripts/release-sync-status.sh --sha origin/main`：记录回滚点，看清漂移。
 3. 有 hotfix 或未提交内容时，先做阶段 B。
-4. `X=origin/main`，按组件变更决定是否推送 `edge-*` 标签；纯源码 overlay 不构建镜像。
+4. `X=origin/main`，推送 `edge-*` 标签，等镜像发布完成。
 5. 如果 `git diff --name-only <owner当前sha> $X -- quant-service/migrations` 有输出：先做阶段 D（迁移，包括 D0 的停止点）。
-6. 按需发布 edge relay、edge workflows、edge XHS；不要启动已退役的 edge quant writer。
-7. 阶段 F（owner：源码 overlay 或完整镜像，改写 `PEER_APP_*` 后 `up`、guard）。
+6. 阶段 E（edge：E1 → E2 → E3，E4/E5 按需）。
+7. 阶段 F（owner：打包、激活、改写 `PEER_APP_*` 后构建、`up`、guard）。
 8. 阶段 G（Windows API）。
-9. 用组件 SHA 运行巡检，输出 `ALL CHECKS PASSED`，并将 manifest 和日志登记到附录 C。
-10. 记录每个组件的独立回滚点，不以一个全局 SHA 代替。
+9. `scripts/release-sync-status.sh --sha $X` 输出 `ALL CHECKS PASSED`。
+10. 登记发布记录。
 
 平时（不发布时）可以每周运行一次第 2 步：任何 FAIL 都说明有机器偏离了 `main`，要当作问题处理。
 
@@ -576,7 +638,7 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 - `.gitignore`：忽略 `intraday-secrets.env`。以前 `git add -A` 会把它提交进仓库。
 - 新增 `scripts/release-sync-status.sh`（只读巡检）及其测试 `scripts/release-sync-status.test.mjs`。
 
-2026-09-26 状态：B0（推送本地提交）已完成；edge overlay 的代码已经在同步分支里，并已合并进 PR #2（B1 只剩一次比对）。尚未解决：`20260923_0117` 的源码（B2，等待从 Windows 找回）；owner 接受哪些 DDL（D0，等待用户决定）；bridge 没有独立发布路径（建议增加 `--bridge-only`）；CI 中 2 个依赖真实行情数据的测试已改为按需运行（附录 A 第 3 项）。
+2026-09-26 状态：B0（推送本地提交）已完成；edge overlay 的代码已经在同步分支里，并已合并进 PR #2；`20260923_0117` 原始源码未找到，已按用户决定加入空版本标记和合并迁移；owner 执行全部迁移；bridge 继续随 edge overlay 发布；CI 中 2 个依赖真实行情数据的测试已改为按需运行（附录 A 第 3 项）。
 
 ## 附录 C：发布记录
 

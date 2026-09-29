@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from .ten_day_leader_rotation_research import cycle_context_from_sentiment
+
 
 @dataclass(frozen=True)
 class TenDayLeaderRotationIntradayDependencies:
@@ -17,6 +19,9 @@ class TenDayLeaderRotationIntradayDependencies:
     evaluate: Callable[..., list[dict[str, Any]]]
     persist: Callable[..., int]
     json_safe: Callable[[Any], Any]
+    # The last closed session's sentiment reading as known at scan time; the
+    # workbook cycle is read from it.  Without it every candidate fails closed.
+    sentiment_cycle: Callable[[Any, datetime], dict[str, Any] | None] | None = None
 
 
 def persist_ten_day_leader_rotation_intraday(
@@ -38,11 +43,14 @@ def persist_ten_day_leader_rotation_intraday(
     symbols = [str(item.get("symbol") or "").upper() for item in candidates]
     with dependencies.database.transaction() as connection:
         contexts = dependencies.market_context_batch(connection, [(observed_at, symbol) for symbol in symbols])
+        cycle_context = cycle_context_from_sentiment(
+            dependencies.sentiment_cycle(connection, observed_at) if dependencies.sentiment_cycle else None,
+        )
         observations = dependencies.evaluate(
             run=run, candidates=candidates, observed_at=observed_at, quotes=quote_by_symbol,
             minute_features=minute_features, peer_contexts=peer_contexts,
             market_contexts={symbol: contexts.get((observed_at, symbol), {}) for symbol in symbols},
-            quote_source=dependencies.quote_source,
+            quote_source=dependencies.quote_source, cycle_context=cycle_context,
         )
         written = dependencies.persist(
             connection, run_id=run["run_id"], scan_id=scan_id, observations=observations,
@@ -52,6 +60,7 @@ def persist_ten_day_leader_rotation_intraday(
             "status": "completed", "run_id": str(run["run_id"]), "observed": written,
             "shadow_eligible": sum(bool(item["shadow_eligible"]) for item in observations),
             "states": dict(sorted(Counter(str(item["shadow_state"]) for item in observations).items())),
+            "cycle_state": cycle_context["state"],
             "scope": "research_only_no_orders",
         }
     return summary

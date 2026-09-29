@@ -44,6 +44,13 @@ jobs:
           python3 scripts/test_component_export.py
           python3 scripts/test_component_runtimes.py
 
+      - name: Verify release scripts
+        run: |
+          node scripts/release-sync-status.test.mjs
+          node scripts/shared-peer/deploy-code-only.test.mjs
+          node feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.test.mjs
+          node feishu-relay/scripts/edge/hotfix-feishu-relay-edge.test.mjs
+
       - name: Install and verify dashboard
         run: |
           npm ci --prefix frontend

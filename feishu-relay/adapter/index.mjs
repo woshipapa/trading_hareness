@@ -5,6 +5,7 @@ import { open, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
+import { crossSiteWriteRejection } from './cross-site-guard.mjs';
 import { createLedger } from './ledger.mjs';
 import { releaseMetadata } from './release-metadata.mjs';
 import { endWritable, writeChunk } from './stream-write.mjs';
@@ -1881,6 +1882,12 @@ async function proxyResearchAction(path, request, response, method = 'POST') {
 
 const dashboard = createServer((request, response) => {
 	const url = new URL(request.url ?? '/', 'http://localhost');
+	const crossSite = crossSiteWriteRejection(request);
+	if (crossSite) {
+		response.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'forbidden', reason: crossSite }));
+		return;
+	}
 	const researchPath = researchPaths.get(url.pathname);
 	if (researchPath && request.method === 'GET') {
 		void proxyResearch(researchPath, url.search, response).catch((error) => {

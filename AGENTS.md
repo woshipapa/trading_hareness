@@ -68,6 +68,47 @@ provider response directly to a live threshold or order path.
     the repository. XHS cookies, collector tokens and Feishu webhooks stay in
     ignored host env files.
 
+## 47 Release Model
+
+Routine source changes use the existing runtime images and a versioned source
+overlay. Do not rebuild or pull an image for ordinary Python, Node, bridge,
+adapter, relay, dashboard, frontend, data-processing, or research-strategy
+code changes when the required runtime dependencies are already in the active
+image.
+
+- Quant owner source changes use
+  `scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> --from-sha <active_sha> --apply`.
+- Feishu edge source changes use
+  `feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply`.
+- Both paths must source the exact Git SHA, stage a retained release, atomically
+  switch the `current` pointer, reuse the existing image with `--no-build
+  --pull never`, verify health and runtime provenance, and keep the previous
+  release available for rollback.
+- Never copy secrets, cookies, tokens, `*.env`, or `*-secrets.env` into a
+  source release. Update only non-secret version metadata in the remote
+  runtime environment.
+- A fast source release must fail closed when `requirements.txt`,
+  `package.json`, a lockfile, Dockerfile, compose file, system package,
+  supervisor/systemd contract, or Alembic migration changes. Those changes
+  require the complete image and/or database migration procedure in
+  `docs/RELEASE_SYNC_47.md`.
+- A database migration must be applied and verified before switching code that
+  depends on its schema. Do not recreate an unavailable historical migration
+  from memory; use an observed, idempotent repair or stop and document the
+  missing lineage.
+- After either deployment, verify the actual running SHA/release, image ID,
+  service health, owner database lineage, WebSocket/relay state, queue and
+  failure counters, and relevant source-to-target mapping. A build result or a
+  single health endpoint alone is not deployment evidence.
+- Keep research and teacher strategies fail-closed: registration or loading
+  does not grant execution permission. Confirm promotion status, weight and
+  `live_effect` remain consistent with the explicit approval record.
+
+The detailed commands, rollback steps and immutable-image transition are in
+`docs/RELEASE_SYNC_47.md`, especially sections F5 and F6. The overlay is the
+default for routine code updates; an immutable image release is still required
+when runtime dependencies or infrastructure contracts change.
+
 ## Review automation
 
 Analyst daily/weekly reviews are materialized by
