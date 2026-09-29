@@ -51,9 +51,6 @@ cp -R "$repo_root/Spider_XHS/." "$tmp_dir/xhs-source/"
 rm -rf "$tmp_dir/xhs-source/.git" "$tmp_dir/xhs-source/node_modules" "$tmp_dir/xhs-source/__pycache__"
 cp "$source_root/feishu-relay/deploy/edge/docker-compose.yml" "$tmp_dir/docker-compose.yml"
 cp "$source_root/workflows/xhs-intel-edge.json" "$tmp_dir/xhs-intel-edge.json"
-cp "$source_root/feishu-relay/deploy/edge/xhs-n8n-execution-reconcile.sh" \
-  "$source_root/feishu-relay/deploy/edge/xhs-n8n-execution-reconcile.service" \
-  "$source_root/feishu-relay/deploy/edge/xhs-n8n-execution-reconcile.timer" "$tmp_dir/"
 
 if [[ "$apply" != true ]]; then
   echo "dry run only; source and Spider_XHS are ready, append --apply to deploy"
@@ -122,7 +119,7 @@ pathlib.Path(sys.argv[1]).write_text(
 pathlib.Path(sys.argv[1]).chmod(0o600)
 PY
 
-tar -C "$tmp_dir" --exclude='__pycache__' --exclude='*.pyc' -cf - . \
+COPYFILE_DISABLE=1 tar -C "$tmp_dir" --exclude='__pycache__' --exclude='*.pyc' --exclude='.xhs-credentials' -cf - . \
   | "${ssh_command[@]}" "$edge_host" "set -euo pipefail; rm -rf '$remote_stage'; install -d -m 0700 '$remote_stage'; tar -xf - -C '$remote_stage'"
 scp -q -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=yes "$cookie_source" "$edge_host:$remote_stage/.xhs-cookie"
@@ -230,7 +227,7 @@ curl -fsS http://127.0.0.1:5678/healthz >/dev/null
 runner_registered=false
 for attempt in $(seq 1 45); do
   runner_state="$(docker inspect -f '{{.State.Status}}' feishu-relay-edge-n8n-runners 2>/dev/null || true)"
-  if [[ "$runner_state" == running ]] && docker logs feishu-relay-edge-n8n 2>&1 | grep -q 'Registered runner'; then
+  if [[ "$runner_state" == running ]] && docker logs feishu-relay-edge-n8n 2>&1 | grep 'Registered runner "launcher-javascript"' >/dev/null; then
     runner_registered=true
     break
   fi
@@ -241,19 +238,67 @@ if [[ "$runner_registered" != true ]]; then
   docker compose --env-file "$runtime_env" --env-file "$secrets_env" ps >&2 || true
   exit 1
 fi
-install -o root -g root -m 0755 "$stage/xhs-n8n-execution-reconcile.sh" /usr/local/sbin/xhs-n8n-execution-reconcile.sh
-install -o root -g root -m 0644 "$stage/xhs-n8n-execution-reconcile.service" /etc/systemd/system/xhs-n8n-execution-reconcile.service
-install -o root -g root -m 0644 "$stage/xhs-n8n-execution-reconcile.timer" /etc/systemd/system/xhs-n8n-execution-reconcile.timer
-systemctl daemon-reload
-systemctl enable --now xhs-n8n-execution-reconcile.timer
-systemctl start --wait xhs-n8n-execution-reconcile.service
 container=feishu-relay-edge-n8n
-docker cp "$stage/xhs-intel-edge.json" "$container:/tmp/xhs-intel-edge.json"
-if ! docker exec "$container" sh -lc "rm -rf /tmp/xhs-export; n8n export:workflow --all --separate --output=/tmp/xhs-export >/dev/null 2>&1 && grep -R -q '$workflow_id' /tmp/xhs-export"; then
-  docker exec "$container" n8n import:workflow --input=/tmp/xhs-intel-edge.json
+compose=(docker compose --env-file "$runtime_env" --env-file "$secrets_env")
+install -d -m 0755 "$stage/cli"
+install -m 0644 "$stage/xhs-intel-edge.json" "$stage/cli/candidate.json"
+docker exec "$container" n8n export:workflow --all --output=/tmp/xhs-export.json >/dev/null
+docker cp "$container:/tmp/xhs-export.json" "$stage/export.json"
+docker exec --user root "$container" rm -f /tmp/xhs-export.json
+python3 - "$stage" "$workflow_id" <<'PY'
+import json
+import pathlib
+import sys
+
+stage = pathlib.Path(sys.argv[1])
+current = [w for w in json.loads((stage / 'export.json').read_text()) if w['id'] == sys.argv[2]]
+candidate = json.loads((stage / 'cli/candidate.json').read_text())
+if len(candidate) != 1 or candidate[0]['id'] != sys.argv[2]:
+    raise SystemExit('invalid XHS workflow candidate')
+if current:
+    (stage / 'cli/before.json').write_text(json.dumps(current, ensure_ascii=False))
+keys = ('id', 'name', 'nodes', 'connections', 'settings', 'active')
+def contract(workflows):
+    return [{k: w.get(k) for k in keys} for w in workflows]
+if contract(current) != contract(candidate):
+    (stage / 'changed').touch()
+PY
+if [[ -f "$stage/changed" ]]; then
+  workflow_backup="$edge_dir/backups/xhs-workflow/$(date -u +%Y%m%d-%H%M%S)"
+  install -d -m 0700 "$workflow_backup"
+  if [[ -f "$stage/cli/before.json" ]]; then
+    install -m 0600 "$stage/cli/before.json" "$workflow_backup/before.json"
+  fi
+  n8n_stopped=false
+  restart_on_exit() {
+    if [[ "$n8n_stopped" == true ]]; then "${compose[@]}" start n8n >/dev/null || true; fi
+    rm -rf "$stage"
+  }
+  trap restart_on_exit EXIT
+  "${compose[@]}" stop n8n
+  n8n_stopped=true
+  workflow_cli=("${compose[@]}" run --rm --no-deps -v "$stage/cli:/xhs-deploy:ro" n8n)
+  if "${workflow_cli[@]}" import:workflow --input=/xhs-deploy/candidate.json && \
+     "${workflow_cli[@]}" publish:workflow --id="$workflow_id"; then
+    echo "XHS workflow published; backup=$workflow_backup"
+  else
+    if [[ -f "$stage/cli/before.json" ]]; then
+      "${workflow_cli[@]}" import:workflow --input=/xhs-deploy/before.json
+      "${workflow_cli[@]}" publish:workflow --id="$workflow_id"
+    fi
+    echo 'XHS workflow publication failed; restored the previous definition' >&2
+    exit 1
+  fi
+  "${compose[@]}" start n8n
+  n8n_stopped=false
+else
+  echo 'XHS workflow unchanged; skipping import and restart'
 fi
-docker exec "$container" n8n publish:workflow --id="$workflow_id" >/dev/null
-docker exec --user root "$container" sh -lc "rm -rf /tmp/xhs-export /tmp/xhs-intel-edge.json"
+for attempt in $(seq 1 45); do
+  curl -fsS http://127.0.0.1:5678/healthz >/dev/null 2>&1 && break
+  sleep 2
+done
+curl -fsS http://127.0.0.1:5678/healthz >/dev/null
 printf 'xhs_edge_health='
 curl -fsS http://127.0.0.1:18790/health | python3 -c 'import json,sys; x=json.load(sys.stdin); print(json.dumps({k:x.get(k) for k in ("status","collector","cookie_configured","feishu_webhook_configured","jobs")}, ensure_ascii=False))'
 printf 'n8n_health='

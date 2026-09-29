@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const source = readFileSync(fileURLToPath(new URL('./deploy-xhs-intel-edge.sh', import.meta.url)), 'utf8');
 const compose = readFileSync(fileURLToPath(new URL('../../deploy/edge/docker-compose.yml', import.meta.url)), 'utf8');
-const reconciler = readFileSync(fileURLToPath(new URL('../../deploy/edge/xhs-n8n-execution-reconcile.sh', import.meta.url)), 'utf8');
+const workflow = JSON.parse(readFileSync(fileURLToPath(new URL('../../../workflows/xhs-intel-edge.json', import.meta.url)), 'utf8'))[0];
 
 assert.match(source, /scp -q -i "\$edge_key"/);
 assert.doesNotMatch(source, /scp -q "\$\{ssh_command\[@\]\}"/);
@@ -20,9 +20,14 @@ assert.match(source, /n8n-runners/);
 assert.match(compose, /N8N_RUNNERS_MODE: external/);
 assert.match(compose, /container_name: feishu-relay-edge-n8n-runners/);
 assert.match(compose, /N8N_RUNNERS_TASK_BROKER_URI: http:\/\/127\.0\.0\.1:5679/);
-assert.match(source, /xhs-n8n-execution-reconcile\.timer/);
-assert.match(source, /systemctl start --wait xhs-n8n-execution-reconcile\.service/);
-assert.match(reconciler, /status='crashed'/);
-assert.match(reconciler, /workflowId/);
+assert.doesNotMatch(source, /UPDATE execution_entity|status='crashed'/);
+assert.equal(workflow.settings.saveDataSuccessExecution, 'all');
+assert.equal(workflow.settings.saveDataErrorExecution, 'all');
+assert.match(source, /XHS workflow unchanged; skipping import and restart/);
+assert.match(source, /stop n8n/);
+assert.match(source, /before\.json/);
+assert.match(source, /import:workflow --input=\/xhs-deploy\/candidate\.json/);
+assert.match(source, /\.xhs-credentials/);
+assert.doesNotMatch(source, /"\$xhs_token" "\$xhs_webhook"/);
 
 console.log('XHS deployment validates the private Cookie and provisions an external n8n task runner');
