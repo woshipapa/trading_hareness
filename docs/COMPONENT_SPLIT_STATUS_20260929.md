@@ -2,7 +2,9 @@
 
 当前仓库仍保持 monorepo，但已经把 `quant-research`、`feishu-relay`、`xhs-intel` 和 `integration` 的路径、运行位置、发布单元、测试入口写入 `config/components.json`。`scripts/verify_component_boundaries.py` 检查跨组件导入，`scripts/export_component.py` 可以生成不含 secrets、构建目录和依赖缓存的独立归档；归档不是生产发布。
 
-本地工作树基于 `main@216e5c4`，而 `origin/main` 已前进到包含 owner 迁移 lineage 的 `bdbebee`。当前改动尚未提交，不能直接把这份工作树作为发布源；合并前要先在保留改动的前提下对齐最新主线并重跑迁移链校验。
+当前分支为 `feat/component-split-20260929`，拆分提交为 `3629529`，并已合并包含 owner
+迁移 lineage 的 `origin/main@bdbebee`（合并提交 `6aa26d7`）。工作树已清洁；这只代表
+代码具备可审阅的版本身份，不代表已经切换 47edge 或 47owner 的运行服务。
 
 三个运行项目现在各自有独立构建上下文、compose 入口和 runtime contract：Quant 使用
 `quant-service/compose.standalone.yaml`，Feishu 使用
