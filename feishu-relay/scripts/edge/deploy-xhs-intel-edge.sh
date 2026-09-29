@@ -29,7 +29,7 @@ cookie_source="${XHS_COOKIE_SOURCE:-$HOME/.config/xhs/xhs-cookie}"
 # The official Feishu API exposes the oc_ chat id, while the personal
 # WebSocket emits the numeric chat id. Keep both identities in the command
 # lane so an explicit #xhs command can cross either ingress.
-xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77,7669744189332065542}"
+xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77,7690524560642280650}"
 xhs_webhook="${XHS_FEISHU_WEBHOOK_URL:-}"
 xhs_force_build="${XHS_FORCE_BUILD:-false}"
 xhs_skip_build="${XHS_SKIP_BUILD:-false}"
