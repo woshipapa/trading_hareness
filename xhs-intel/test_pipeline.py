@@ -68,6 +68,15 @@ class QueueTests(unittest.TestCase):
         self.assertIsNotNone(job_id)
         self.assertIsNone(self.store.enqueue_pending())
 
+    def test_watch_users_are_durable_and_can_be_disabled(self):
+        self.store.add_watch_user('user-123', '核心作者')
+        self.assertEqual(self.store.status()['watch_users'], 1)
+        self.assertEqual(self.store.list_watch_users()[0]['label'], '核心作者')
+        self.store.add_watch_user('user-123', '更新备注')
+        self.assertEqual(self.store.list_watch_users()[0]['label'], '更新备注')
+        self.assertTrue(self.store.remove_watch_user('user-123'))
+        self.assertEqual(self.store.list_watch_users(), [])
+
 
 if __name__ == '__main__':
     unittest.main()

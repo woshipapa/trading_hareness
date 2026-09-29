@@ -428,6 +428,7 @@ def capability_text() -> str:
     lines.extend([
         "常用别名：#xhs search 关键词 [数量]；#xhs note 笔记URL；#xhs user 用户ID；",
         "#xhs comments 笔记URL；#xhs feed 频道 [数量]；#xhs unread；#xhs latest；#xhs status。",
+        "关注用户：#xhs watch add 用户ID [备注]；#xhs watch list；#xhs watch remove 用户ID。",
         "直播事件：#xhs live.watch 房间ID [秒数]；#xhs live.events watch_id。",
     ])
     return "\n".join(lines)

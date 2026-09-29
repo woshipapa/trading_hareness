@@ -104,6 +104,7 @@ class OperationContractTests(unittest.TestCase):
 
     def test_help_and_invalid_json_are_safe(self):
         self.assertIn("pc:", capability_text())
+        self.assertIn("watch add", capability_text())
         with self.assertRaises(OperationError):
             command_to_operation("#xhs api pc.search_note not-json")
 

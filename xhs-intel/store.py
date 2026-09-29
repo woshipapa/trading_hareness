@@ -43,6 +43,10 @@ class Store:
                 status TEXT NOT NULL DEFAULT 'pending', result TEXT);
             CREATE TABLE IF NOT EXISTS workers (
                 worker TEXT PRIMARY KEY, last_seen REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS watch_users (
+                user_id TEXT PRIMARY KEY, label TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1, created REAL NOT NULL,
+                updated REAL NOT NULL);
             ''')
         self.path.chmod(0o600)
 
@@ -165,8 +169,30 @@ class Store:
             return {'notes': db.execute('SELECT count(DISTINCT note_id) FROM notes').fetchone()[0],
                     'revisions': db.execute('SELECT count(*) FROM notes').fetchone()[0],
                     'jobs': dict(db.execute('SELECT status,count(*) FROM jobs GROUP BY status').fetchall()),
+                    'watch_users': db.execute('SELECT count(*) FROM watch_users WHERE enabled=1').fetchone()[0],
                     'last_worker_seen': db.execute('SELECT max(last_seen) FROM workers').fetchone()[0],
                     'runs': [dict(r) for r in db.execute('SELECT * FROM runs ORDER BY updated DESC LIMIT 10')]}
+
+    def list_watch_users(self, enabled=True):
+        with self.connect() as db:
+            clause = ' WHERE enabled=1' if enabled else ''
+            return [dict(row) for row in db.execute(
+                'SELECT user_id,label,enabled,created,updated FROM watch_users' + clause
+                + ' ORDER BY created').fetchall()]
+
+    def add_watch_user(self, user_id, label=''):
+        stamp = time.time()
+        with self.connect() as db:
+            db.execute('''INSERT INTO watch_users(user_id,label,enabled,created,updated)
+                          VALUES(?,?,1,?,?)
+                          ON CONFLICT(user_id) DO UPDATE SET label=excluded.label,
+                          enabled=1,updated=excluded.updated''',
+                       (str(user_id), str(label or ''), stamp, stamp))
+
+    def remove_watch_user(self, user_id):
+        with self.connect() as db:
+            return bool(db.execute('UPDATE watch_users SET enabled=0,updated=? WHERE user_id=?',
+                                   (time.time(), str(user_id))).rowcount)
 
     def command(self, message_id, command):
         with self.connect() as db:
