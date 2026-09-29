@@ -10,12 +10,14 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from collector import collect  # noqa: E402
+from collector import collect, collect_watched  # noqa: E402
 from common import error_code, request_json  # noqa: E402
 from operations import (  # noqa: E402
+    OperationError,
     SpiderRuntime,
     capability_text,
     command_to_operation,
@@ -35,6 +37,7 @@ STATE_DIR = Path(os.environ.get("XHS_STATE_DIR", "/var/lib/xhs-collector"))
 STORE = Store(STATE_DIR / "queue.sqlite3")
 DEFAULT_QUERIES = [x.strip() for x in os.environ.get("XHS_KEYWORDS", "AI infra,推理系统,大模型部署,CUDA,算子优化").split(",") if x.strip()]
 FETCH_LIMIT = max(1, min(20, int(os.environ.get("XHS_FETCH_LIMIT", "8"))))
+WATCH_FETCH_LIMIT = max(1, min(20, int(os.environ.get("XHS_WATCH_FETCH_LIMIT", "5"))))
 FEISHU_WEBHOOK = os.environ.get("XHS_FEISHU_WEBHOOK_URL", "").strip()
 FEISHU_TOKEN = os.environ.get("XHS_ALERT_WEBHOOK_TOKEN", "")
 FEISHU_MAX_CHARS = 3000
@@ -122,6 +125,17 @@ def _command_text(payload):
     return command if command.lower().startswith("#xhs") else "#xhs " + command
 
 
+def _watch_user_id(value):
+    """Accept an XHS user id or a profile URL, but persist only the id."""
+    value = str(value or "").strip()
+    if "://" in value:
+        value = urlparse(value).path.rstrip("/").split("/")[-1]
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_-]{6,128}", value):
+        raise OperationError("用户 ID 或用户主页 URL 无效")
+    return value
+
+
 def command_result(payload):
     message_id = str(payload.get("message_id") or hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:24])
     command = _command_text(payload)
@@ -135,11 +149,31 @@ def command_result(payload):
     try:
         if lowered in {"#xhs status", "#xhs 状态"}:
             status = STORE.status()
-            text = f"小红书流水线状态\n库存：{status['notes']} 条笔记、{status['revisions']} 个内容版本\n任务：{status['jobs']}\n最近摘要：{STORE.latest_summary()[:1200]}"
+            text = f"小红书流水线状态\n库存：{status['notes']} 条笔记、{status['revisions']} 个内容版本\n关注用户：{status['watch_users']} 个\n任务：{status['jobs']}\n最近摘要：{STORE.latest_summary()[:1200]}"
         elif lowered in {"#xhs latest", "#xhs 最新", "#xhs 摘要"}:
             text = STORE.latest_summary()[:2800]
         elif lowered in {"#xhs", "#xhs help", "#xhs 帮助"}:
             text = capability_text()
+        elif lowered in {"#xhs watch list", "#xhs watch list users", "#xhs 关注列表"}:
+            rows = STORE.list_watch_users()
+            text = "关注用户：\n" + ("\n".join(
+                f"- {row['user_id']}" + (f"（{row['label']}）" if row['label'] else "")
+                for row in rows) if rows else "（空）")
+        elif lowered.startswith("#xhs watch add ") or lowered.startswith("#xhs 关注 添加 "):
+            tail = command.split(None, 3)[3]
+            values = tail.strip().split(None, 1)
+            user_id = values[0] if values else ""
+            label = values[1].strip() if len(values) > 1 else ""
+            user_id = _watch_user_id(user_id)
+            label = label[:80]
+            STORE.add_watch_user(user_id, label)
+            text = f"已加入关注：{user_id}" + (f"（{label}）" if label else "")
+        elif lowered.startswith("#xhs watch remove ") or lowered.startswith("#xhs 关注 删除 "):
+            user_id = _watch_user_id(command.split(None, 3)[3].strip())
+            if STORE.remove_watch_user(user_id):
+                text = f"已取消关注：{user_id}"
+            else:
+                text = f"未找到启用中的关注用户：{user_id}"
         else:
             operation = command_to_operation(command)
             if operation is None:
@@ -184,6 +218,22 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(queries, list):
                     raise ValueError("keywords_must_be_list")
                 result = collect(STORE, SOURCE_ROOT, COOKIE_FILE, [str(x) for x in queries[:20]], limit=FETCH_LIMIT, request_key=str(payload.get("run_key") or ""), delay=max(1, int(os.environ.get("XHS_REQUEST_DELAY", "3"))))
+                while STORE.enqueue_pending():
+                    pass
+                reply(self, 200, {**result, "queue": STORE.status().get("jobs", {})})
+                return
+            if self.path == "/v1/watch/run":
+                users = STORE.list_watch_users()
+                if not users:
+                    reply(self, 200, {"status": "idle", "reason": "no_watch_users", "users": 0})
+                    return
+                interval = max(5, int(os.environ.get("XHS_WATCH_INTERVAL_SECONDS", "1800")))
+                bucket = int(time.time() // interval)
+                run_key = str(payload.get("run_key") or f"watch-{bucket}")
+                result = collect_watched(
+                    STORE, SOURCE_ROOT, COOKIE_FILE, users, limit=WATCH_FETCH_LIMIT,
+                    request_key=run_key,
+                    delay=max(1, int(os.environ.get("XHS_REQUEST_DELAY", "3"))))
                 while STORE.enqueue_pending():
                     pass
                 reply(self, 200, {**result, "queue": STORE.status().get("jobs", {})})

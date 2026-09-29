@@ -29,7 +29,18 @@ an explicit namespace allowlist:
 #xhs api live.get_chats {"args":[],"kwargs":{"limit":20}}
 #xhs api pgy.get_user_detail {"args":["<kol-id>"],"kwargs":{}}
 #xhs api qianfan.get_user_fans {"args":["<distributor-id>"],"kwargs":{}}
+#xhs watch add <user-id> [备注]
+#xhs watch list
+#xhs watch remove <user-id>
 ```
+
+The watch lane polls the first page of each configured user's posted notes every
+30 minutes. XHS does not provide a dependable push event for ordinary note
+publication, so this is bounded polling rather than a real-time subscription.
+New note revisions use the same durable queue, local `codex-teleai` worker and
+Feishu delivery ledger as the keyword lane. A profile URL is accepted by the
+`watch add` command, but only its user id is persisted; signed URL parameters
+are never stored.
 
 PC collection, Creator metadata/publish methods, live and IM HTTP methods,
 蒲公英 KOL methods and 千帆 distributor methods all use the checked-in public
