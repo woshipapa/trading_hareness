@@ -258,6 +258,13 @@ def _blocker_line(replay: Mapping[str, Any] | None, *, live_entry: bool = False)
         return None
     if replay.get("entry_scans") and not live_entry:
         closest = replay.get("closest") or {}
+        # 观察状态的计划按设计就不推送买点，重放只是为了算它的反事实
+        # （``active_plan(include_observed=True)`` 就是为此加的）。聚合那边一直
+        # 记得这一条，这里漏了，于是 2026-09-28 把四只观察计划报成了"系统漏推"，
+        # 还被当晚的策略包抄成一条"系统漏推不能靠放宽条件修复"的教训。
+        if replay.get("observe_only"):
+            return (f"**观察**状态的计划，按设计不推送买点；重放显示 {closest.get('at') or '盘中'} 起有 "
+                    f"{replay['entry_scans']} 次扫描满足全部条件 —— 这是反事实，不是漏推")
         return (f"重放显示 {closest.get('at') or '盘中'} 起有 {replay['entry_scans']} 次扫描满足全部条件，"
                 "但盘中没有推送 —— 要查采样间隔、输入缺失或事件确认，不是条件太严")
     gap = dominant_gap(replay)
