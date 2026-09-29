@@ -97,22 +97,62 @@ path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 path.chmod(0o600)
 PY
 
+credentials_file="$tmp_dir/.xhs-credentials"
+XHS_TOKEN_FOR_CREDENTIALS="$xhs_token" XHS_WEBHOOK_FOR_CREDENTIALS="$xhs_webhook" \
+  python3 - "$credentials_file" <<'PY'
+import json
+import os
+import pathlib
+import sys
+
+pathlib.Path(sys.argv[1]).write_text(
+    json.dumps(
+        {
+            "collector_token": os.environ["XHS_TOKEN_FOR_CREDENTIALS"],
+            "feishu_webhook": os.environ["XHS_WEBHOOK_FOR_CREDENTIALS"],
+        },
+        ensure_ascii=False,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+pathlib.Path(sys.argv[1]).chmod(0o600)
+PY
+
 tar -C "$tmp_dir" --exclude='__pycache__' --exclude='*.pyc' -cf - . \
   | "${ssh_command[@]}" "$edge_host" "set -euo pipefail; rm -rf '$remote_stage'; install -d -m 0700 '$remote_stage'; tar -xf - -C '$remote_stage'"
 scp -q -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=yes "$cookie_source" "$edge_host:$remote_stage/.xhs-cookie"
+scp -q -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=yes "$credentials_file" "$edge_host:$remote_stage/.xhs-credentials"
 
 "${ssh_command[@]}" "$edge_host" bash -s -- \
   "$edge_dir" "$runtime_env" "$secrets_env" "$remote_stage" "$workflow_id" \
-  "$xhs_token" "$xhs_webhook" "$cookie_file" "$xhs_chat_ids" \
+  "$remote_stage/.xhs-credentials" "$cookie_file" "$xhs_chat_ids" \
   "$remote_stage/.xhs-cookie" "$xhs_force_build" <<'REMOTE'
 set -euo pipefail
 edge_dir="$1"; runtime_env="$2"; secrets_env="$3"; stage="$4"; workflow_id="$5"
-xhs_token="$6"; xhs_webhook="$7"; xhs_cookie_file="$8"; xhs_chat_ids="$9"; cookie_stage="${10}"; xhs_force_build="${11}"
+credentials_stage="$6"; xhs_cookie_file="$7"; xhs_chat_ids="$8"; cookie_stage="${9}"; xhs_force_build="${10}"
 bridge_env=/etc/larkagentx-group-relay.env
 exec 9>/var/lock/xhs-intel-edge.lock
 flock -w 120 9
 test -f "$runtime_env"; test -f "$secrets_env"
+test -s "$credentials_stage"
+readarray -t credentials < <(python3 - "$credentials_stage" <<'PY'
+import json
+import sys
+
+payload = json.loads(open(sys.argv[1], encoding="utf-8").read())
+for key in ("collector_token", "feishu_webhook"):
+    value = payload.get(key, "")
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"missing XHS credential: {key}")
+    print(value)
+PY
+)
+xhs_token="${credentials[0]}"; xhs_webhook="${credentials[1]}"
+rm -f "$credentials_stage"
+trap 'rm -rf "$stage"' EXIT
 install -d -m 0755 "$edge_dir" /etc/feishu-relay-edge
 install -d -m 0750 "$edge_dir/xhs-state"
 cp -a "$edge_dir/docker-compose.yml" "$edge_dir/docker-compose.yml.bak-xhs-$(date -u +%Y%m%d-%H%M%S)" 2>/dev/null || true
@@ -229,7 +269,7 @@ if ! docker exec "$container" sh -lc "rm -rf /tmp/xhs-export; n8n export:workflo
   docker exec "$container" n8n import:workflow --input=/tmp/xhs-intel-edge.json
 fi
 docker exec "$container" n8n publish:workflow --id="$workflow_id" >/dev/null
-docker exec "$container" sh -lc "rm -rf /tmp/xhs-export /tmp/xhs-intel-edge.json"
+docker exec --user root "$container" sh -lc "rm -rf /tmp/xhs-export /tmp/xhs-intel-edge.json"
 printf 'xhs_edge_health='
 curl -fsS http://127.0.0.1:18790/health | python3 -c 'import json,sys; x=json.load(sys.stdin); print(json.dumps({k:x.get(k) for k in ("status","collector","cookie_configured","feishu_webhook_configured","jobs")}, ensure_ascii=False))'
 printf 'n8n_health='
