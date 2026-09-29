@@ -263,7 +263,9 @@ def contract(workflows):
 if contract(current) != contract(candidate):
     (stage / 'changed').touch()
 PY
+workflow_changed=false
 if [[ -f "$stage/changed" ]]; then
+  workflow_changed=true
   workflow_backup="$edge_dir/backups/xhs-workflow/$(date -u +%Y%m%d-%H%M%S)"
   install -d -m 0700 "$workflow_backup"
   if [[ -f "$stage/cli/before.json" ]]; then
@@ -299,6 +301,21 @@ for attempt in $(seq 1 45); do
   sleep 2
 done
 curl -fsS http://127.0.0.1:5678/healthz >/dev/null
+if [[ "$workflow_changed" == true ]]; then
+  workflow_loaded=false
+  for attempt in $(seq 1 45); do
+    if docker logs --since 300s "$container" 2>&1 | grep -q "ID: $workflow_id"; then
+      workflow_loaded=true
+      break
+    fi
+    sleep 2
+  done
+  if [[ "$workflow_loaded" != true ]]; then
+    echo "XHS workflow was not activated after n8n restart" >&2
+    docker compose --env-file "$runtime_env" --env-file "$secrets_env" ps >&2 || true
+    exit 1
+  fi
+fi
 printf 'xhs_edge_health='
 curl -fsS http://127.0.0.1:18790/health | python3 -c 'import json,sys; x=json.load(sys.stdin); print(json.dumps({k:x.get(k) for k in ("status","collector","cookie_configured","feishu_webhook_configured","jobs")}, ensure_ascii=False))'
 printf 'n8n_health='

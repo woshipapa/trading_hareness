@@ -29,5 +29,6 @@ assert.match(source, /before\.json/);
 assert.match(source, /import:workflow --input=\/xhs-deploy\/candidate\.json/);
 assert.match(source, /\.xhs-credentials/);
 assert.doesNotMatch(source, /"\$xhs_token" "\$xhs_webhook"/);
+assert.match(source, /XHS workflow was not activated after n8n restart/);
 
 console.log('XHS deployment validates the private Cookie and provisions an external n8n task runner');
