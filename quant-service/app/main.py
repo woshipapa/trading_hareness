@@ -1619,8 +1619,32 @@ async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, 
             persist_flow_rows=persist_stock_money_flow_rows,
             source_factory=longhu_full_market_source_factory(),
         )
-        return {**result, "universe_key": request.universe_key,
-                "members": int(result.get("daily_rows") or result.get("imported") or 0)}
+        if result.get("status") in {"completed", "unchanged"}:
+            return {**result, "universe_key": request.universe_key,
+                    "members": int(result.get("daily_rows") or result.get("imported") or 0)}
+        # Longhu is the preferred licensed close source, but a partial vendor
+        # cross-section must not block the already audited isolated provider
+        # chain.  Keep the failed attempt in the receipt for diagnosis.
+        fallback = await sync_market_universe_isolated(
+            request,
+            provider_candidates=provider_candidates,
+            cn_date=cn_today,
+            call_tushare_api=call_tushare_api,
+            looks_like_response_header=looks_like_response_header,
+            persist_tushare_rows=persist_tushare_rows,
+            run_database_blocking=run_database_blocking,
+            persist_tushare_fetch_blocked=persist_tushare_fetch_blocked,
+            db=db,
+            safe_error_detail=safe_error_detail,
+            provider_call_error=ProviderCallError,
+            executor_saturated_error=ExecutorSaturatedError,
+            record_provider_success=record_provider_success,
+            record_provider_failure=record_provider_failure,
+            record_provider_api_capability=record_provider_api_capability,
+        )
+        return {**fallback, "universe_key": request.universe_key,
+                "longhu_attempt": result,
+                "members": int(fallback.get("members") or fallback.get("imported") or 0)}
     return await sync_market_universe_isolated(
         request,
         provider_candidates=provider_candidates,
@@ -1647,12 +1671,37 @@ async def sync_full_market_daily_legacy(request: FullMarketDailySyncRequest) -> 
 async def sync_full_market_daily(request: FullMarketDailySyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by isolated full-market sync."""
     if request.provider == "auto" and longhu_full_market_enabled():
-        return await sync_longhu_full_market_close(
+        result = await sync_longhu_full_market_close(
             request.trade_date or cn_today(), db=db, run_public_blocking=run_akshare_blocking,
             run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
             persist_flow_rows=persist_stock_money_flow_rows,
             source_factory=longhu_full_market_source_factory(),
         )
+        if result.get("status") in {"completed", "unchanged"}:
+            return result
+        # A Longhu response can be healthy against its own vendor member set
+        # yet still miss the point-in-time all-A gate.  Retry through the
+        # capability-scoped Tushare chain so a partial licensed response never
+        # becomes the final close result.
+        fallback = await sync_full_market_daily_isolated(
+            request,
+            provider_candidates=provider_candidates,
+            cn_date=cn_today,
+            call_tushare_api=call_tushare_api,
+            looks_like_response_header=looks_like_response_header,
+            tushare_date=tushare_date,
+            persist_tushare_rows=persist_tushare_rows,
+            run_database_blocking=run_database_blocking,
+            persist_tushare_fetch_blocked=persist_tushare_fetch_blocked,
+            db=db,
+            safe_error_detail=safe_error_detail,
+            provider_call_error=ProviderCallError,
+            executor_saturated_error=ExecutorSaturatedError,
+            record_provider_success=record_provider_success,
+            record_provider_failure=record_provider_failure,
+            record_provider_api_capability=record_provider_api_capability,
+        )
+        return {**fallback, "longhu_attempt": result}
     return await sync_full_market_daily_isolated(
         request,
         provider_candidates=provider_candidates,

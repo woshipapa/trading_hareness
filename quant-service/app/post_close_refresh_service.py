@@ -33,6 +33,11 @@ POST_CLOSE_STAGE_ORDER = (
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
+    # The owner Longhu close is a bounded multi-page full-market fetch.  The
+    # generic stage budget (90s) is shorter than the provider work and would
+    # cancel the caller while the shielded worker keeps running.
+    "all_a_universe": 900.0,
+    "full_market_daily": 900.0,
     "akshare_supplements": 240.0,
     "limit_lift_pattern_mining": 120.0,
     # Four bounded full-market control APIs run sequentially so an individual
@@ -139,10 +144,18 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
     trade_date = request.trade_date or dependencies.china_today()
     longhu_mode = dependencies.longhu_configured()
     super_get = dependencies.provider_configs().get("super_get")
+    # Longhu owns the licensed close path.  Passing an explicit Tushare
+    # provider here bypasses the Longhu branch in ``main`` and was the reason
+    # a configured Longhu close silently started with an empty Super GET
+    # response.  Keep the explicit route only for the non-Longhu fallback.
     full_market_daily_provider = (
-        "super_get"
-        if super_get and super_get.configured and super_get.get_gateway_mode == "promax" and super_get.supports("daily")
-        else "auto"
+        "auto"
+        if longhu_mode
+        else (
+            "super_get"
+            if super_get and super_get.configured and super_get.get_gateway_mode == "promax" and super_get.supports("daily")
+            else "auto"
+        )
     )
     core_symbols: list[str] = []
 
