@@ -182,6 +182,23 @@ class ReportTests(unittest.TestCase):
         self.assertIn("没有推送", missed["blocked_by"])
         self.assertIn("不是条件太严", missed["blocked_by"])
 
+    def test_an_observed_plan_that_would_have_entered_is_a_counterfactual_not_a_defect(self):
+        """观察状态按设计不推送买点，不能报成系统漏推。
+
+        2026-09-28 这条假警报同时命中 4 只（春光科技 115 次、华宝股份 69 次、
+        平潭发展 45 次、奥士康 41 次），还被当晚的策略包抄成一条教训。同一份
+        报告的聚合 ``learning.unpushed`` 是空的 —— 聚合记得看 ``observe_only``，
+        逐只这条漏了。
+        """
+        replays = {"300476": {"evaluated": 122, "entry_scans": 115, "observe_only": True, "gates": [],
+                              "closest": {"at": "09:40", "shortfall": 0, "blocked": [], "unknown": []}}}
+        missed = next(item for item in review_stocks(self.packs(), replays) if item["code"] == "300476")
+        self.assertIn("观察", missed["blocked_by"])
+        self.assertIn("115 次", missed["blocked_by"])
+        self.assertIn("反事实", missed["blocked_by"])
+        self.assertNotIn("没有推送", missed["blocked_by"])
+        self.assertNotIn("不是条件太严", missed["blocked_by"])
+
     def test_a_missing_input_is_reported_as_a_data_gap_not_a_tight_threshold(self):
         replays = {"300476": {"evaluated": 100, "entry_scans": 0, "gates": [
             {"name": "均价上方（不能往下跌）", "blocked": 80, "scans": 100, "share": 80.0, "last_value": "x vs None"}],
