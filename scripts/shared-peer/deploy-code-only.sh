@@ -45,6 +45,17 @@ if [[ "$apply" != true ]]; then
   exit 0
 fi
 
+# Evaluate the deployment window at execution time. The operator-approved
+# lunch window from 12:00 through 13:00 Beijing time remains available; the
+# surrounding market window stays blocked.
+beijing_weekday="$(TZ=Asia/Shanghai date +%u)"
+beijing_hhmm="$(TZ=Asia/Shanghai date +%H%M)"
+beijing_minutes=$((10#${beijing_hhmm:0:2} * 60 + 10#${beijing_hhmm:2:2}))
+if (( beijing_weekday <= 5 && ((beijing_minutes >= 540 && beijing_minutes < 720) || (beijing_minutes >= 780 && beijing_minutes < 900)) )); then
+  echo "refusing code-only release during Beijing trading window: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %z')" >&2
+  exit 1
+fi
+
 owner_host="${OWNER_PEER_HOST:-stockpeer@47.110.79.189}"
 owner_port="${OWNER_PEER_PORT:-3535}"
 owner_key="${OWNER_PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
@@ -66,8 +77,22 @@ remote_archive="/tmp/$(basename "$archive")"
 ssh -i "$owner_key" -p "$owner_port" "$owner_host" \
   "TARGET_SHA='$target_sha' RELEASE_LABEL='$release_label' COMPOSE_DIR='$compose_dir' ARCHIVE='$remote_archive' bash -s" <<'REMOTE'
 set -euo pipefail
+
+beijing_weekday="$(TZ=Asia/Shanghai date +%u)"
+beijing_hhmm="$(TZ=Asia/Shanghai date +%H%M)"
+beijing_minutes=$((10#${beijing_hhmm:0:2} * 60 + 10#${beijing_hhmm:2:2}))
+if [ "$beijing_weekday" -le 5 ] && { [ "$beijing_minutes" -ge 540 ] && [ "$beijing_minutes" -lt 720 ] || [ "$beijing_minutes" -ge 780 ] && [ "$beijing_minutes" -lt 900 ]; }; then
+  printf 'refusing owner release during Beijing trading window: %s\n' \
+    "$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %z')" >&2
+  exit 1
+fi
+
 release_root="$HOME/trading_hareness/hotfix/quant-service/releases/$RELEASE_LABEL"
 current_root="$HOME/trading_hareness/hotfix/quant-service/current"
+env_file="$COMPOSE_DIR/.env"
+test -f "$env_file"
+env_backup="$(mktemp "${env_file}.rollback.XXXXXX")"
+cp -p "$env_file" "$env_backup"
 previous_root=""
 previous_target=""
 if [ -e "$current_root" ]; then previous_root="$(readlink -f "$current_root")"; fi
@@ -95,25 +120,56 @@ set_env() {
   chmod 0600 "$tmp"
   mv -f "$tmp" "$file"
 }
+
+cd "$COMPOSE_DIR"
+C=(docker compose --env-file .env -f compose.yaml -f compose.intraday-owner.yaml)
+rollback_needed=true
+
+rollback() {
+  local rollback_ok=true
+  rollback_needed=false
+  if [ -n "$previous_target" ]; then
+    rm -f "${current_root}.next"
+    ln -s "$previous_target" "${current_root}.next"
+    mv -Tf "${current_root}.next" "$current_root"
+  else
+    rm -f "$current_root" "${current_root}.next"
+  fi
+  if ! cp -p "$env_backup" "$env_file"; then
+    rollback_ok=false
+    printf 'rollback failed: could not restore %s\n' "$env_file" >&2
+  fi
+  if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler; then
+    rollback_ok=false
+    printf 'rollback failed: previous application containers did not become healthy\n' >&2
+  fi
+  rm -f "$env_backup" "$ARCHIVE"
+  [ "$rollback_ok" = true ]
+}
+
+cleanup_remote() {
+  if [ "$rollback_needed" = true ]; then
+    rollback || true
+  fi
+  rm -f "$env_backup" "$ARCHIVE"
+}
+trap cleanup_remote EXIT
+
 set_env PEER_APP_GIT_SHA "$TARGET_SHA"
 set_env PEER_APP_RELEASE "$RELEASE_LABEL"
 set_env PEER_EXPECTED_RELEASE "$RELEASE_LABEL"
 set_env PEER_APP_BUILD_CREATED_AT "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 set_env QUANT_HOTFIX_ENABLED true
 
-cd "$COMPOSE_DIR"
-C=(docker compose --env-file .env -f compose.yaml -f compose.intraday-owner.yaml)
-"${C[@]}" config --quiet
-if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
-  if [ -n "$previous_root" ]; then
-    rm -f "${current_root}.next"
-    ln -s "$previous_target" "${current_root}.next"
-    mv -Tf "${current_root}.next" "$current_root"
-    "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler || true
-  fi
+if ! "${C[@]}" config --quiet; then
+  rollback || true
   exit 1
 fi
-rm -f "$ARCHIVE"
+if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
+  rollback || true
+  exit 1
+fi
+rollback_needed=false
 printf 'code-only release active: %s\n' "$RELEASE_LABEL"
 REMOTE
 
