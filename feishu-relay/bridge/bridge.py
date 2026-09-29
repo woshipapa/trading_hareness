@@ -429,6 +429,12 @@ class Bridge:
 	def __init__(self) -> None:
 		self.token = required_env("LARKX_BRIDGE_TOKEN")
 		self.ingress_url = required_env("LARKX_INGRESS_URL")
+		# Source-group traffic uses the group-relay contract. Explicit Paper-KB
+		# and XHS commands use the adapter's direct ingress so they can arrive
+		# from a command-only chat without a source route.
+		self.command_ingress_url = os.environ.get("LARKX_COMMAND_INGRESS_URL", "").strip()
+		if not self.command_ingress_url:
+			self.command_ingress_url = self.ingress_url.rsplit("/", 1)[0] + "/inbound"
 		self.route_catalog_url = os.environ.get("LARKX_ROUTE_CATALOG_URL", "").strip()
 		self.dynamic_route_discovery = os.environ.get("LARKX_DYNAMIC_ROUTE_DISCOVERY", "false").strip().lower() == "true"
 		self.route_catalog_refresh_seconds = bounded_int_env("LARKX_ROUTE_CATALOG_REFRESH_SECONDS", DEFAULT_ROUTE_CATALOG_REFRESH_SECONDS, 5, 300)
@@ -1275,7 +1281,9 @@ class Bridge:
 		finally:
 			self._recovery_in_flight = False
 
-	def ingress_url_for(self, chat_id: str) -> str:
+	def ingress_url_for(self, chat_id: str, *, command_lane: bool = False) -> str:
+		if command_lane:
+			return self.command_ingress_url
 		return self.summary_ingress_url if chat_id in self.summary_chat_ids else self.ingress_url
 
 	def send(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1453,7 +1461,12 @@ class Bridge:
 			last_error: Exception | None = None
 			for attempt in range(1, 4):
 				try:
-					result = await asyncio.to_thread(post_json, self.ingress_url_for(chat_id), self.token, payload)
+					result = await asyncio.to_thread(
+						post_json,
+						self.ingress_url_for(chat_id, command_lane=command_lane),
+						self.token,
+						payload,
+					)
 					await asyncio.to_thread(self.event_spool.mark_delivered, event_id)
 					self.forwarded_count += 1
 					stats["forwarded_count"] += 1
@@ -1487,7 +1500,12 @@ class Bridge:
 					continue
 				payload = event["payload"]
 				chat_id = str(payload.get("chat_id", "")).strip()
-				await asyncio.to_thread(post_json, self.ingress_url_for(chat_id), self.token, payload)
+				await asyncio.to_thread(
+					post_json,
+					self.ingress_url_for(chat_id, command_lane=payload.get("_larkagentx_command_lane") is True),
+					self.token,
+					payload,
+				)
 				await asyncio.to_thread(self.event_spool.mark_delivered, event_id)
 				replayed += 1
 				self.spool_replay_count += 1

@@ -43,6 +43,15 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 	def test_xhs_command_lane_can_bind_chat_ids(self):
 		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs status", "chat_id": "oc_bound"}))
 
+	def test_command_lane_uses_direct_adapter_ingress(self):
+		instance = object.__new__(bridge.Bridge)
+		instance.ingress_url = "http://127.0.0.1:18300/internal/larkagentx/group-relay"
+		instance.command_ingress_url = "http://127.0.0.1:18300/internal/larkagentx/inbound"
+		instance.summary_ingress_url = "http://127.0.0.1:18300/internal/larkagentx/summary"
+		instance.summary_chat_ids = set()
+		self.assertEqual(instance.ingress_url_for("7690524560642280650", command_lane=True), instance.command_ingress_url)
+		self.assertEqual(instance.ingress_url_for("source-chat"), instance.ingress_url)
+
 	def test_adapter_business_failure_is_retried(self):
 		response = FakeResponse(json.dumps({"status": "failed", "message": "webhook temporary failure"}).encode("utf-8"))
 		with patch.object(bridge, "urlopen", return_value=response):
