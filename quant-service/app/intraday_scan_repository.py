@@ -22,6 +22,27 @@ from .platform.strategy_data_needs import strategy_taxonomies
 from .sector_membership_repository import point_in_time_membership_predicate, sector_group_predicate
 
 
+def normalize_provider_failures(provider_failure: Any) -> list[tuple[str, str]]:
+    """Normalize terminal scan failures without collapsing provider identity."""
+    if not provider_failure:
+        return []
+    items = provider_failure if isinstance(provider_failure, (list, tuple)) else [provider_failure]
+    normalized: list[tuple[str, str]] = []
+    for item in items:
+        if isinstance(item, str):
+            normalized.append(("tencent_free", item))
+        elif isinstance(item, dict):
+            normalized.append((
+                str(item.get("provider") or item.get("provider_key") or "tencent_free"),
+                str(item.get("error") or item.get("detail") or "provider failure"),
+            ))
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            normalized.append((str(item[0] or "tencent_free"), str(item[1] or "provider failure")))
+        else:
+            normalized.append(("tencent_free", str(item)))
+    return normalized
+
+
 @dataclass(frozen=True)
 class IntradayScanLocalState:
     """Bounded local inputs used by one signal-persistence transaction."""
@@ -207,7 +228,7 @@ def persist_intraday_scan_terminal(
     requested_symbols: list[str],
     source_status: dict[str, Any],
     summary: dict[str, Any],
-    provider_failure: str | None = None,
+    provider_failure: Any = None,
     provider_latency_ms: int | None = None,
 ) -> None:
     """Write a terminal scan state and optional public-source failure.
@@ -218,13 +239,9 @@ def persist_intraday_scan_terminal(
     from losing the last useful latency sample.
     """
     with database.transaction() as connection:
-        if provider_failure:
+        for provider_key, failure in normalize_provider_failures(provider_failure):
             record_provider_failure(
-                connection,
-                "tencent_free",
-                "realtime_quote",
-                safe_error_detail(provider_failure, 300),
-                provider_latency_ms,
+                connection, provider_key, "realtime_quote", safe_error_detail(failure, 300), provider_latency_ms,
             )
         connection.execute(
             """INSERT INTO quant.intraday_scan_runs(
@@ -247,6 +264,7 @@ __all__ = [
     "first_eac_breakout_events",
     "load_intraday_scan_local_state",
     "load_intraday_signal_event_state",
+    "normalize_provider_failures",
     "persist_intraday_scan_terminal",
     "previous_quote_frames",
 ]

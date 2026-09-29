@@ -19,6 +19,9 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
+# Registry identity for the board-to-member research projection.
+MODEL_VERSION = "board-flow-drill-v1"
+
 #: A board contributes at most this many names, so one crowded sector cannot
 #: fill the whole shortlist.
 MAX_PER_BOARD = 5

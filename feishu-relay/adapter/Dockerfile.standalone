@@ -1,0 +1,29 @@
+FROM node:22-alpine
+
+ARG APP_GIT_SHA=unknown
+ARG APP_RELEASE=standalone
+ARG APP_BUILD_CREATED_AT=unknown
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    FRONTEND_MODE=legacy \
+    FEISHU_ADAPTER_SOURCE_MODE=image
+
+# Build context is feishu-relay/. The standalone image deliberately serves
+# the HTTP relay/API and health endpoint without requiring either dashboard
+# build; dashboards remain independently buildable under dashboard/.
+COPY adapter/package.json ./package.json
+COPY adapter/package-lock.json ./package-lock.json
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+COPY adapter/*.mjs ./
+COPY config/source-registry.json ./source-registry.json
+
+ENV APP_GIT_SHA=${APP_GIT_SHA} \
+    APP_RELEASE=${APP_RELEASE} \
+    APP_BUILD_CREATED_AT=${APP_BUILD_CREATED_AT}
+LABEL org.opencontainers.image.revision=${APP_GIT_SHA} \
+      org.opencontainers.image.version=${APP_RELEASE} \
+      org.opencontainers.image.created=${APP_BUILD_CREATED_AT}
+
+EXPOSE 3000
+CMD ["node", "index.mjs"]

@@ -1,0 +1,86 @@
+name: feishu-relay-standalone
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${RELAY_PGUSER:-relay}
+      POSTGRES_PASSWORD: ${RELAY_PGPASSWORD:?Set RELAY_PGPASSWORD}
+      POSTGRES_DB: ${RELAY_PGDATABASE:-relay}
+    volumes:
+      - relay_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  feishu-adapter:
+    build:
+      context: .
+      dockerfile: adapter/Dockerfile.standalone
+    image: feishu-relay:standalone
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${FEISHU_RELAY_PORT:-18300}:3000"
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${RELAY_PGDATABASE:-relay}
+      PGUSER: ${RELAY_PGUSER:-relay}
+      PGPASSWORD: ${RELAY_PGPASSWORD:?Set RELAY_PGPASSWORD}
+      INGESTION_STORAGE_DIR: /var/lib/adapter-ingestion
+      FEISHU_APP_ID: ${FEISHU_APP_ID:?Set FEISHU_APP_ID}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:?Set FEISHU_APP_SECRET}
+      N8N_TEXT_WEBHOOK_URL: ${N8N_TEXT_WEBHOOK_URL:-http://127.0.0.1:5678/webhook/feishu-market-text}
+      N8N_MEDIA_PART_WEBHOOK_URL: ${N8N_MEDIA_PART_WEBHOOK_URL:-http://127.0.0.1:5678/webhook/feishu-media-part}
+      N8N_MEDIA_FINALIZE_WEBHOOK_URL: ${N8N_MEDIA_FINALIZE_WEBHOOK_URL:-http://127.0.0.1:5678/webhook/feishu-media-finalize}
+      N8N_MEDIA_WEBHOOK_URL: ${N8N_MEDIA_WEBHOOK_URL:-http://127.0.0.1:5678/webhook/feishu-market-media}
+      N8N_MEDIA_STATE_WEBHOOK_URL: ${N8N_MEDIA_STATE_WEBHOOK_URL:-http://127.0.0.1:5678/webhook/feishu-media-state}
+      FEISHU_LONG_CONNECTION_ENABLED: ${FEISHU_LONG_CONNECTION_ENABLED:-false}
+      FEISHU_GROUP_RELAY_ENABLED: ${FEISHU_GROUP_RELAY_ENABLED:-false}
+      FEISHU_SUMMARY_LISTENER_ENABLED: ${FEISHU_SUMMARY_LISTENER_ENABLED:-false}
+      LARKX_GROUP_RELAY_ENABLED: ${LARKX_GROUP_RELAY_ENABLED:-false}
+    volumes:
+      - relay_ingestion_data:/var/lib/adapter-ingestion
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # Optional private WebSocket listener. Start with --profile listener after
+  # mounting a pinned LarkAgentX checkout and authenticated profile directory.
+  larkagentx-bridge:
+    profiles: ["listener"]
+    build:
+      context: .
+      dockerfile: bridge/Dockerfile.runtime
+    image: feishu-relay-bridge:standalone
+    depends_on:
+      feishu-adapter:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LARKX_BRIDGE_PORT:-8090}:8090"
+    environment:
+      LARKX_BRIDGE_HOST: 0.0.0.0
+      LARKX_BRIDGE_PORT: 8090
+      LARKX_BRIDGE_TOKEN: ${LARKX_BRIDGE_TOKEN:-standalone-local-only}
+      LARKX_INGRESS_URL: http://feishu-adapter:3000/internal/larkagentx/group-relay
+      LARKX_COMMAND_INGRESS_URL: http://feishu-adapter:3000/internal/larkagentx/inbound
+      LARKX_LISTEN_CHAT_IDS: ${LARKX_LISTEN_CHAT_IDS:-}
+      LARKX_SEND_CHAT_IDS: ${LARKX_SEND_CHAT_IDS:-}
+      LARKX_HOME: /var/lib/larkx
+      LARKX_EVENT_SPOOL_DB: /var/lib/larkx/event-spool.sqlite3
+      LARKX_HISTORY_DB: /var/lib/larkx/history.db
+    volumes:
+      - ${LARKX_SOURCE_ROOT:-/tmp/larkagentx}:/opt/larkagentx:ro
+      - ${LARKX_PROFILE_HOME:-/tmp/larkx-profile}:/var/lib/larkx
+    restart: unless-stopped
+
+volumes:
+  relay_postgres_data:
+  relay_ingestion_data:

@@ -22,6 +22,21 @@ from .contracts import (
 
 CATALOG_VERSION: Final = "datasource-catalog-v2"
 
+# Runtime health uses one stable physical capability name for each catalog
+# binding. Keeping this translation beside source priority prevents circuit
+# checks and resolver receipts from drifting independently.
+HEALTH_CAPABILITY_ALIASES: Final[dict[tuple[str, str], str]] = {
+    ("fuyao_ths", "quote.all_a_snapshot"): "a_share_prices_snapshot",
+    ("longhuvip", "quote.watch_snapshot"): "stock_quote",
+    ("tencent_free", "quote.watch_snapshot"): "order_book_quote",
+    ("sina_free", "quote.watch_snapshot"): "realtime_quote",
+    ("tushare_super_get", "quote.fast_confirmation"): "realtime_quote",
+    ("longhuvip", "quote.order_book"): "order_book_quote",
+    ("tencent_free", "quote.order_book"): "order_book_quote",
+    ("longhuvip", "bars.minute"): "intraday_minute",
+    ("tencent_free", "bars.minute"): "intraday_minute",
+}
+
 _TUSHARE_RISK = "共享限频池；全市场截面需分页；超级 GET 网关偶发返回错数据集并按参数缓存"
 _EASTMONEY_RISK = "按出口 IP 限流/反爬；push2 clist 全市场在 owner 出口被断连（2026-09-18）"
 
@@ -240,8 +255,9 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tencent_free", "quote.order_book", 50, LIVE_VERIFIED,
           "intraday_quote_observations:source_name=tencent_order_book",
           "app/intraday_order_book_service.py", notes="五档；source_name=tencent_order_book"),
-    _bind("tushare_super_get", "quote.fast_confirmation", 15, LIVE_VERIFIED, "intraday_fast_quotes",
-          "app/intraday_fast_quote_service.py", notes="rt_k"),
+    _bind("tushare_super_get", "quote.fast_confirmation", 15, LIVE_VERIFIED,
+          "intraday_quote_observations:source_name=tushare_super_get_rt_k",
+          "app/intraday_fast_quote_service.py", notes="rt_k; shared observation table"),
     _bind("fuyao_ths", "quote.valuation", 12, DECLARED, _RAW + "a_share_valuations_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", "盘后逐日", "thscodes≤100"),
     _bind("tushare_primary", "quote.valuation", 20, RETIRED, "daily_fundamentals", "app/tushare_providers.py", notes="主源已下线；仅保留历史证据"),
@@ -505,6 +521,11 @@ def primary_source(capability: str, *, min_status: str = LIVE_VERIFIED) -> str:
     raise LookupError(f"no {min_status} source for {capability}")
 
 
+def health_capability(source: str, capability: str, *, fallback: str | None = None) -> str:
+    """Return the physical provider-health capability for a catalog binding."""
+    return HEALTH_CAPABILITY_ALIASES.get((source, capability), fallback or capability)
+
+
 def store_values(capability: str, table: str, column: str, *, min_status: str = DORMANT) -> tuple[str, ...]:
     """Values of ``table.column`` that identify each source's stored evidence,
     in resolution order.  Replaces hard-coded ``source='...'`` filters."""
@@ -619,9 +640,9 @@ def catalog_document() -> dict[str, Any]:
 
 
 __all__ = [
-    "BINDINGS", "CAPABILITIES", "CATALOG_VERSION", "EXCHANGE_TIMESTAMPED_QUOTE_LABELS", "NON_SECTOR_GROUPS",
+    "BINDINGS", "CAPABILITIES", "CATALOG_VERSION", "EXCHANGE_TIMESTAMPED_QUOTE_LABELS", "HEALTH_CAPABILITY_ALIASES", "NON_SECTOR_GROUPS",
     "NON_SECTOR_LABEL_PATTERN", "RULE_USABLE_FLOW_LABELS",
     "SOURCES", "SOURCE_LABELS", "TAXONOMIES", "bindings_for", "capabilities_of", "catalog_document",
-    "evidence_locations", "primary_source", "primary_store_value", "store_values", "taxonomies_for",
+    "evidence_locations", "health_capability", "primary_source", "primary_store_value", "store_values", "taxonomies_for",
     "validate_catalog",
 ]

@@ -1,7 +1,8 @@
 import unittest
+import asyncio
 from datetime import datetime, timezone
 
-from app.market_event_capture import normalize_fuyao_auction, normalize_fuyao_events
+from app.market_event_capture import capture, normalize_fuyao_auction, normalize_fuyao_events
 
 
 class MarketEventCaptureTests(unittest.TestCase):
@@ -22,6 +23,27 @@ class MarketEventCaptureTests(unittest.TestCase):
         }, self.observed_at)
         self.assertEqual(rows[0]["event_type"], "auction_final")
         self.assertEqual(rows[0]["raw"]["data_status"], "final")
+
+    def test_capture_reports_each_capability_health_independently(self):
+        health = []
+
+        async def fetch(capability, _params):
+            if capability == "a_share_limit_up_pool":
+                return {"item": [{"thscode": "000001.SZ"}]}
+            return {"item": []}
+
+        async def persist(_provider, rows):
+            return len(rows)
+
+        async def persist_health(provider, capability, rows, error):
+            health.append((provider, capability, rows, error))
+
+        result = asyncio.run(capture(
+            self.observed_at, fetch=fetch, persist=persist, persist_health=persist_health,
+        ))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(health), 4)
+        self.assertEqual(health[0], ("fuyao_ths", "a_share_limit_up_pool", 1, None))
 
 
 if __name__ == "__main__":

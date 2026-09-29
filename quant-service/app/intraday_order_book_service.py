@@ -49,6 +49,15 @@ def max_symbols(environ: dict[str, str] | None = None) -> int:
         return 40
 
 
+def provider_row_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Count attempted observations by their actual upstream source."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        provider = "longhuvip" if str(row.get("source") or "") == "longhu_order_book" else "tencent_free"
+        counts[provider] = counts.get(provider, 0) + 1
+    return counts
+
+
 def persist_observations(
     database: Any, observed_at: datetime, rows: list[dict[str, Any]], latency_ms: int,
     *, json_safe: Callable[[Any], Any], record_success: Callable[..., Any],
@@ -113,14 +122,21 @@ def persist_observations(
                 params,
             )
             stored = inserted.rowcount
-        provider_key = "longhuvip" if any(str(row.get("source") or "") == "longhu_order_book" for row in rows) else "tencent_free"
-        record_success(connection, provider_key, "order_book_quote", stored, latency_ms)
+        # Keep mixed primary/fallback batches attributable to both providers.
+        # The INSERT remains batched, so the per-source count is the attempted
+        # row count rather than an invented split of one aggregate rowcount.
+        for provider_key, attempted in provider_row_counts(rows).items():
+            record_success(connection, provider_key, "order_book_quote", attempted, latency_ms)
     return stored
 
 
-def persist_failure(database: Any, error: str, latency_ms: int | None, *, record_failure: Callable[..., Any]) -> None:
+def persist_failure(
+    database: Any, error: str, latency_ms: int | None, *, record_failure: Callable[..., Any],
+    provider_keys: list[str] | None = None,
+) -> None:
     with database.transaction() as connection:
-        record_failure(connection, "tencent_free", "order_book_quote", error, latency_ms)
+        for provider_key in dict.fromkeys(provider_keys or ["tencent_free"]):
+            record_failure(connection, provider_key, "order_book_quote", error, latency_ms)
 
 
 async def capture_snapshot(
@@ -158,5 +174,5 @@ async def capture_snapshot(
 
 __all__ = [
     "capture_snapshot", "enabled", "interval_seconds", "max_symbols", "persist_failure",
-    "persist_observations", "retention_days",
+    "persist_observations", "provider_row_counts", "retention_days",
 ]

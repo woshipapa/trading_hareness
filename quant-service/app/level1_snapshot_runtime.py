@@ -18,6 +18,7 @@ async def capture_level1_snapshot(
     fetch_snapshot: Callable[[], Awaitable[tuple[list[dict[str, Any]], Mapping[str, Any]]]],
     persist: Callable[[str, str, list[dict[str, Any]]], Awaitable[int]],
     session_open: Callable[[datetime], Awaitable[bool]],
+    persist_health: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Capture one all-A snapshot, returning a secret-free health result."""
@@ -44,15 +45,19 @@ async def capture_level1_snapshot(
             "research_only": True,
         })
     stored = await persist("fuyao_ths", "a_share_prices_snapshot", payloads) if payloads else 0
-    return {
+    result = {
         "status": "completed" if payloads else "empty",
         "received": len(payloads),
         "stored": stored,
         "provider": "fuyao_ths",
         "capability": "a_share_prices_snapshot",
         "upstream_timestamp_ms": metadata.get("upstream_timestamp_ms"),
+        "freshness_status": metadata.get("status") or metadata.get("freshness_status") or "unknown",
         "cross_sectional": bool(metadata.get("cross_sectional", False)),
     }
+    if persist_health is not None:
+        await persist_health(result)
+    return result
 
 
 async def run_level1_snapshot_loop(

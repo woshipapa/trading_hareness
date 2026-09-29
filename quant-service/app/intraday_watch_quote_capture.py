@@ -4,11 +4,70 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 from .platform.evidence_contracts import materialize_evidence_status
 from .intraday_price_priority import fresh_price_rows
+
+
+def _parse_upstream_timestamp(value: Any, *, timezone_hint: timezone = timezone.utc) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone_hint)
+    text = str(value).strip()
+    if text.isdigit():
+        number = int(text)
+        if len(text) >= 13:
+            number /= 1000
+        if 0 < number < 4_000_000_000:
+            return datetime.fromtimestamp(number, tz=timezone.utc)
+    compact = "".join(character for character in text if character.isdigit())
+    if len(compact) >= 14:
+        try:
+            return datetime.strptime(compact[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone_hint)
+        except ValueError:
+            return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone_hint)
+
+
+def eastmoney_flow_freshness(
+    rows: list[dict[str, Any]], observed_at: datetime, *, max_age_seconds: float = 45.0,
+) -> dict[str, Any]:
+    """Classify upstream flow freshness without treating request completion as freshness."""
+    timestamps = [
+        _parse_upstream_timestamp(
+            row.get("upstream_observed_at") or row.get("source_available_at")
+            or row.get("timestamp") or row.get("trade_time")
+            or (row.get("raw") or {}).get("f124"),
+            timezone_hint=observed_at.tzinfo or timezone.utc,
+        )
+        for row in rows
+    ]
+    timestamps = [item for item in timestamps if item is not None]
+    if not rows:
+        return {"status": "empty", "request_status": "completed", "freshness_status": "unknown",
+                "freshness_reason": "no_rows", "age_seconds": None, "max_age_seconds": max_age_seconds}
+    if not timestamps:
+        return {"status": "unknown", "request_status": "completed", "freshness_status": "unknown",
+                "freshness_reason": "upstream_timestamp_missing", "age_seconds": None,
+                "max_age_seconds": max_age_seconds}
+    newest = max(timestamps).astimezone(timezone.utc)
+    age_seconds = (observed_at.astimezone(timezone.utc) - newest).total_seconds()
+    if age_seconds < -5:
+        freshness_status, reason = "invalid", "future_timestamp"
+    elif age_seconds > max_age_seconds:
+        freshness_status, reason = "stale", "age_exceeded"
+    else:
+        freshness_status, reason = "fresh", "within_slo"
+    return {"status": freshness_status, "request_status": "completed", "freshness_status": freshness_status,
+            "freshness_reason": reason, "age_seconds": round(max(age_seconds, 0.0), 3),
+            "upstream_observed_at": newest.isoformat(), "max_age_seconds": max_age_seconds}
 
 
 async def _batched_provider_fetch(
@@ -243,9 +302,10 @@ async def capture_watch_quotes(
     except (asyncio.TimeoutError, *dependencies.watch_quote_errors) as error:
         eastmoney_watch_flow_status["error"] = dependencies.safe_error(str(error), 300)
     else:
+        freshness = eastmoney_flow_freshness(eastmoney_watch_flow_rows, observed_at)
         eastmoney_watch_flow_status = materialize_evidence_status(
             "eastmoney_watch_flow",
-            {"status": "fresh", "age_seconds": 0.0, "source": "eastmoney_watch_flow_batch",
+            {**freshness, "source": "eastmoney_watch_flow_batch",
              "matched_symbols": len(eastmoney_watch_flow_rows)},
             research_confirmation_only=True,
         )
@@ -342,4 +402,6 @@ async def capture_watch_quotes(
     )
 
 
-__all__ = ["WatchQuoteCapture", "WatchQuoteCaptureDependencies", "capture_watch_quotes"]
+__all__ = [
+    "WatchQuoteCapture", "WatchQuoteCaptureDependencies", "capture_watch_quotes", "eastmoney_flow_freshness",
+]

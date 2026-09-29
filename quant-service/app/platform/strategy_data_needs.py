@@ -102,6 +102,31 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         Need("sector.flow_curve", False, "board-relative strength"),
         Need("auction.open_snapshot", False, "opening-auction premium"),
     ),
+    _needs(
+        "multi_factor_rank_v1",
+        Need("bars.daily", purpose="point-in-time factor panel and forward labels"),
+        Need("bars.adjustment_factor", purpose="point-in-time adjusted price features"),
+        Need("fundamentals.daily_basic", False, "daily size and valuation controls when available"),
+        Need("sector.membership", purpose="point-in-time industry neutralization",
+             taxonomies=("ths_industry", "ths_index_i")),
+    ),
+    _needs(
+        "board_flow_drill",
+        Need("sector.flow_curve", purpose="board direction and net-inflow delta"),
+        Need("sector.membership", purpose="exact board-to-member projection",
+             taxonomies=("ths_concept_flow", "ths_index_n", "ths_industry")),
+        Need("quote.all_a_snapshot", purpose="member return and turnover cross-section"),
+    ),
+    _needs(
+        "dragon_leader_research",
+        Need("limits.limit_up_pool", purpose="post-close leader universe"),
+        Need("limits.ladder", False, "board-height and continuation context"),
+        Need("bars.daily", purpose="leader history and next-session replay labels"),
+        Need("quote.watch_snapshot", False, "next-session confirmation evidence"),
+        Need("sector.membership", False, "theme context for leader relative position",
+             taxonomies=("longhu_ths_industry", "ths_concept_flow")),
+        Need("sector.flow_curve", False, "theme flow context when available"),
+    ),
 )}
 
 

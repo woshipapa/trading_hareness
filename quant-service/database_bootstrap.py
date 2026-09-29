@@ -15,6 +15,7 @@ import sys
 from typing import Literal
 
 from app.database import PLATFORM_SCHEMA_SQL, SCHEMA_SQL
+from app.database_bootstrap_contract import ingestion_ledger_required
 from entrypoint import acquire_migration_lock, database_connection, release_migration_lock
 
 
@@ -27,6 +28,7 @@ REQUIRED_BASELINE_TABLES = (
     "quant.providers",
     "quant.fetch_runs",
 )
+
 
 # The frozen baseline accumulated two later sector-flow tables before the
 # original taxonomy tables they reference. Existing databases masked that
@@ -116,13 +118,14 @@ def initialize_database() -> dict[str, str]:
             required_table_count=state[2],
         )
         if action == "create_baseline":
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT to_regclass('public.ingestion_jobs') IS NOT NULL")
-                if not bool(cursor.fetchone()[0]):
-                    raise RuntimeError(
-                        "public ingestion ledger is absent; run "
-                        "feishu-relay/adapter/initialize-ledger.mjs before the quant bootstrap"
-                    )
+            if ingestion_ledger_required():
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT to_regclass('public.ingestion_jobs') IS NOT NULL")
+                    if not bool(cursor.fetchone()[0]):
+                        raise RuntimeError(
+                            "public ingestion ledger is absent; run "
+                            "feishu-relay/adapter/initialize-ledger.mjs before the quant bootstrap"
+                        )
             # Keep the prerequisites and frozen baseline atomic. A failed
             # empty-DB bootstrap therefore leaves no partial quant schema that
             # a later run might accidentally stamp as valid.

@@ -19,6 +19,7 @@ import httpx
 from .http_clients import public_http_client
 from .http_retry import retry_delay_seconds
 from .network_health import network_state
+from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot, provider_key_for_host
 from .fuyao_provider import configured as fuyao_configured
 
 
@@ -34,6 +35,12 @@ async def _request_with_retry(
 ) -> httpx.Response:
     """Retry only transient public HTTP failures once, without widening scope."""
     last_error: Exception | None = None
+    host = url.split('/', 3)[2] if '://' in url else "public_unknown"
+    provider_key = provider_key_for_host(host)
+    try:
+        await acquire_public_provider_slot(provider_key)
+    except PublicProviderRateLimited as error:
+        raise FreeProviderError(str(error)) from error
     for attempt in range(2):
         try:
             response = await client.request(method, url, **kwargs)

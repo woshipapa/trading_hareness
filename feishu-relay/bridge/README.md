@@ -1,5 +1,8 @@
 # LarkAgentX 实验桥
 
+Standalone bridge builds install `requirements.lock`; change the lock together
+with the runtime image when bridge dependencies change.
+
 这个桥接层基于已拉取的 LarkAgentX（当前审计 commit `2cb4f90`）把个人会话接入当前 `feishu-adapter`：
 
 ```text

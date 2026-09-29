@@ -11,7 +11,10 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from app.runtime_executors import BlockingExecutorBoundary, ExecutorSaturatedError, run_akshare_blocking
+from app.runtime_executors import (
+    BlockingExecutorBoundary, ExecutorSaturatedError, run_akshare_blocking,
+    run_realtime_vendor_blocking, runtime_executor_status,
+)
 from app.async_strategy_read_repository import latest_strategy_decision
 from app.async_strategy_health_repository import latest_strategy_health
 from app.async_research_catalog_read_repository import factor_registry as async_factor_registry
@@ -322,6 +325,16 @@ class BlockingExecutorBoundaryTests(unittest.IsolatedAsyncioTestCase):
             timeout_seconds=1,
         )
         self.assertEqual(result, "000001_SZ")
+
+    async def test_realtime_vendor_boundary_forwards_action_keywords_and_is_observable(self) -> None:
+        result = await run_realtime_vendor_blocking(
+            lambda value, *, converter: converter(value),
+            "000001.SZ", converter=lambda value: value.replace(".", "_"), timeout_seconds=1,
+        )
+        self.assertEqual(result, "000001_SZ")
+        status = runtime_executor_status()
+        self.assertIn("realtime_vendor", status)
+        self.assertGreaterEqual(status["realtime_vendor"]["workers"], 1)
 
     async def test_timeout_keeps_the_slot_until_the_thread_has_really_finished(self) -> None:
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="test-boundary")

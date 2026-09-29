@@ -24,12 +24,12 @@ class RuntimeTaskContract:
 
 RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
     "intraday_monitor": RuntimeTaskContract(
-        "intraday_monitor", "intraday_edge", "30s during session", ("order_book_quote", "a_share_prices_snapshot"),
+        "intraday_monitor", "intraday_edge", "5s early session; 30s otherwise", ("order_book_quote", "a_share_prices_snapshot"),
         ("intraday_scan_runs", "intraday_signal_events"), "bounded watchlist scan and research alert writer", 90,
     ),
     "super_get_fast_quote": RuntimeTaskContract(
         "super_get_fast_quote", "intraday_edge", "1s rotating during session", ("rt_k",),
-        ("intraday_fast_quotes",), "secondary same-session quote confirmation", 30,
+        ("intraday_quote_observations",), "secondary same-session quote confirmation (source_name=tushare_super_get_rt_k)", 30,
     ),
     "minute_profile_capture": RuntimeTaskContract(
         "minute_profile_capture", "intraday_edge", "bounded market-session polling", ("intraday_minutes",),
@@ -37,7 +37,7 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
     ),
     "tencent_order_book": RuntimeTaskContract(
         "tencent_order_book", "intraday_edge", "3s during session", ("order_book_quote",),
-        ("intraday_order_book_observations",), "bounded watchlist order-book capture", 20,
+        ("intraday_quote_observations",), "bounded watchlist order-book capture (source_name=*_order_book)", 20,
     ),
     "board_flow_curve": RuntimeTaskContract(
         "board_flow_curve", "intraday_edge", "market-session polling", ("board_flow",),

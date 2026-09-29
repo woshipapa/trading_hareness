@@ -60,6 +60,28 @@ class Level1SnapshotRuntimeTests(unittest.TestCase):
         ))
         self.assertEqual(result["status"], "outside_session")
 
+    def test_capture_reports_provider_health_after_persisting_snapshot(self):
+        health = []
+
+        async def fetch():
+            return ([{"symbol": "000001.SZ", "price": 10}], {"cross_sectional": True, "status": "unknown"})
+
+        async def persist(*_args):
+            return 1
+
+        async def persist_health(result):
+            health.append(result)
+
+        async def open_session(_now):
+            return True
+
+        result = asyncio.run(capture_level1_snapshot(
+            fetch_snapshot=fetch, persist=persist, persist_health=persist_health,
+            session_open=open_session, now=datetime(2026, 8, 31, 1, 0, tzinfo=timezone.utc),
+        ))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(health[0]["freshness_status"], "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

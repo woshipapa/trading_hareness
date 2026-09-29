@@ -83,8 +83,30 @@ def handoff_of(job: pathlib.Path) -> dict[str, Any]:
     return _read_json(job / "teacher_review_handoff.json", {}) or {}
 
 
+def draft_quality(job: pathlib.Path) -> tuple[int, int, int, str]:
+    """同一场复盘有两份稿子时，用什么挑：``(代码问题, 代码警告, 未核对上, 生成时间)``。
+
+    2026-09-29 同一个视频被跑了两遍（自动入库一份、手工又投了一份），两个任务
+    的 ``review_date`` 都是那天，而原来只按复盘日排序，最后取哪个**由文件系统
+    的遍历顺序决定** —— 那天碰巧挑中了干净的那份（159 个数字、0 代码问题），
+    另一份有 14 条 unbound 代码问题。这种事不能靠运气。
+
+    排序键越小越好：先看代码问题（写错代码最致命），再看未核对上的数字，
+    最后用生成时间做确定性的平手判据（取较晚的那份）。
+    """
+    handoff = handoff_of(job)
+    numbers = handoff.get("number_check") or {}
+    # ``code_warnings`` 才是"候选代码没绑上"的信号所在：2026-09-29 被淘汰的那份
+    # code_problems 是 0，但 code_warnings 有 14 条（雪龙集团、襄阳轴承、机器人…
+    # 全写成了"候选X（代码）"）。只看 problems 会把这份和干净的那份看成一样。
+    return (int(numbers.get("code_problems") or 0),
+            int(numbers.get("code_warnings") or 0),
+            int(numbers.get("unverified_count") or 0),
+            str(handoff.get("generated_at") or ""))
+
+
 def eligible_jobs(root: pathlib.Path = JOBS) -> list[tuple[pathlib.Path, str]]:
-    """有交接清单、且策略稿和证据都在的任务，按复盘日排序。"""
+    """有交接清单、且策略稿和证据都在的任务，按复盘日排序；同一天取更干净的那份。"""
     found: list[tuple[pathlib.Path, str]] = []
     for job in root.iterdir():
         if not job.is_dir():
@@ -99,7 +121,10 @@ def eligible_jobs(root: pathlib.Path = JOBS) -> list[tuple[pathlib.Path, str]]:
         if not strategy.is_file():
             continue
         found.append((job, review))
-    found.sort(key=lambda item: item[1])
+    # 调用方取 ``[-1]``：复盘日升序，同一天把**更好的那份排在后面**
+    # （质量键越小越好，所以同日内按质量降序排）。
+    found.sort(key=lambda item: (item[1], tuple(-value for value in draft_quality(item[0])[:3]),
+                                 draft_quality(item[0])[3]))
     return found
 
 

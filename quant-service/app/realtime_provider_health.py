@@ -4,18 +4,20 @@ from datetime import datetime, time, timezone
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from .datasources.catalog import health_capability
+
 CN = ZoneInfo("Asia/Shanghai")
 STATES = ("healthy", "partial", "degraded", "unavailable", "stale", "standby",
           "not_tested", "unconfigured", "disabled", "circuit_open", "unknown")
 # key, physical provider, capability, label, scope, observation freshness budget
 SOURCES = (
-    ("longhuvip", "longhuvip", "stock_quote", "Longhu 报价", "watchlist", 90),
-    ("tencent_free", "tencent_free", "realtime_quote", "腾讯报价", "watchlist", 90),
-    ("sina_free", "sina_free", "realtime_quote", "新浪补缺报价", "fallback", 90),
-    ("fuyao_ths", "fuyao_ths", "realtime_quote", "Fuyao 全 A 快照", "all_a", 120),
-    ("longhuvip_minute", "longhuvip", "intraday_minute", "Longhu 分钟", "priority_subset", 90),
-    ("tencent_minute", "tencent_free", "intraday_minute", "腾讯分钟", "priority_subset", 90),
-    ("tushare_super_get", "tushare_super_get", "rt_k", "Super GET 报价交叉确认", "rotation", 90),
+    ("longhuvip", "longhuvip", health_capability("longhuvip", "quote.watch_snapshot"), "Longhu 报价", "watchlist", 90),
+    ("tencent_free", "tencent_free", health_capability("tencent_free", "quote.watch_snapshot"), "腾讯报价", "watchlist", 90),
+    ("sina_free", "sina_free", health_capability("sina_free", "quote.watch_snapshot"), "新浪补缺报价", "fallback", 90),
+    ("fuyao_ths", "fuyao_ths", health_capability("fuyao_ths", "quote.all_a_snapshot"), "Fuyao 全 A 快照", "all_a", 120),
+    ("longhuvip_minute", "longhuvip", health_capability("longhuvip", "bars.minute"), "Longhu 分钟", "priority_subset", 90),
+    ("tencent_minute", "tencent_free", health_capability("tencent_free", "bars.minute"), "腾讯分钟", "priority_subset", 90),
+    ("tushare_super_get", "tushare_super_get", health_capability("tushare_super_get", "quote.fast_confirmation"), "Super GET 报价交叉确认", "rotation", 90),
     ("tushare_super_get_rt_min", "tushare_super_get", "rt_min", "Super GET 分钟", "rotation", 90),
     ("tushare_super_sdk_rt_min", "tushare_super_sdk", "rt_min", "Super SDK 分钟", "rotation", 90),
     ("eastmoney_free", "eastmoney_free", "watchlist_flow_quote", "东财个股资金", "watchlist", 90),

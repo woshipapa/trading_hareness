@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import os
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
@@ -15,6 +16,7 @@ from app.fuyao_provider import (
     configured,
     fetch_envelope,
     normalize_snapshot_rows,
+    snapshot_timestamp_status,
     validate_capability_query,
 )
 from app.request_models import FuyaoQueryRequest
@@ -85,6 +87,14 @@ OFFICIAL_REST_PATHS = frozenset("""
 
 
 class FuyaoProviderTests(unittest.TestCase):
+    def test_snapshot_timestamp_status_is_fail_closed(self) -> None:
+        now = datetime(2026, 9, 29, 1, 30, tzinfo=timezone.utc)
+        fresh = int((now - timedelta(seconds=5)).timestamp() * 1000)
+        self.assertEqual(snapshot_timestamp_status(fresh, now=now)["status"], "fresh")
+        self.assertEqual(snapshot_timestamp_status(int((now - timedelta(seconds=46)).timestamp() * 1000), now=now)["status"], "stale")
+        self.assertEqual(snapshot_timestamp_status(None, now=now)["status"], "unknown")
+        self.assertEqual(snapshot_timestamp_status(int((now + timedelta(seconds=6)).timestamp() * 1000), now=now)["status"], "invalid")
+
     def test_normalizes_official_snapshot_without_inventing_flow_fields(self) -> None:
         rows = normalize_snapshot_rows({
             "timestamp": 1787625155000,

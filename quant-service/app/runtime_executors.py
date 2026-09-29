@@ -135,8 +135,17 @@ database_executor = ThreadPoolExecutor(
 
 public_source_queue_capacity = bounded_queue_size("AKSHARE_MAX_QUEUE", 16)
 database_executor_queue_capacity = bounded_queue_size("QUANT_DB_BLOCKING_MAX_QUEUE", 8)
+realtime_vendor_executor_workers = bounded_worker_count("REALTIME_VENDOR_MAX_WORKERS", 4, 16)
+realtime_vendor_queue_capacity = bounded_queue_size("REALTIME_VENDOR_MAX_QUEUE", 8, 32)
 public_source_boundary = BlockingExecutorBoundary("public_source", public_source_executor_workers, public_source_queue_capacity)
 database_executor_boundary = BlockingExecutorBoundary("database", database_executor_workers, database_executor_queue_capacity)
+realtime_vendor_executor = ThreadPoolExecutor(
+    max_workers=realtime_vendor_executor_workers,
+    thread_name_prefix="realtime-vendor",
+)
+realtime_vendor_boundary = BlockingExecutorBoundary(
+    "realtime_vendor", realtime_vendor_executor_workers, realtime_vendor_queue_capacity,
+)
 db_blocking_tasks.labels("capacity").set(database_executor_workers)
 db_blocking_tasks.labels("queue_capacity").set(database_executor_queue_capacity)
 db_blocking_tasks.labels("inflight").set(0)
@@ -162,14 +171,27 @@ async def run_database_blocking(action: Any, *args: Any, timeout_seconds: float 
     return await database_executor_boundary.run(database_executor, action, *args, timeout_seconds=timeout_seconds)
 
 
+async def run_realtime_vendor_blocking(action: Any, *args: Any, timeout_seconds: float, **action_kwargs: Any) -> Any:
+    """Run Longhu realtime quote/minute calls outside the public-source pool."""
+    callable_action = partial(action, **action_kwargs) if action_kwargs else action
+    return await realtime_vendor_boundary.run(
+        realtime_vendor_executor, callable_action, *args, timeout_seconds=timeout_seconds,
+    )
+
+
 def runtime_executor_status() -> dict[str, dict[str, int]]:
     """Expose only local capacity state; never starts market or DB work."""
-    return {"public_source": public_source_boundary.status(), "database": database_executor_boundary.status()}
+    return {
+        "public_source": public_source_boundary.status(),
+        "realtime_vendor": realtime_vendor_boundary.status(),
+        "database": database_executor_boundary.status(),
+    }
 
 
 def shutdown_runtime_executors() -> None:
     """Stop accepting new work during application shutdown without blocking it."""
     public_source_executor.shutdown(wait=False, cancel_futures=True)
+    realtime_vendor_executor.shutdown(wait=False, cancel_futures=True)
     database_executor.shutdown(wait=False, cancel_futures=True)
 
 
@@ -182,5 +204,6 @@ __all__ = [
     "runtime_executor_status",
     "run_akshare_blocking",
     "run_database_blocking",
+    "run_realtime_vendor_blocking",
     "shutdown_runtime_executors",
 ]

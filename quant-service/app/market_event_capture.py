@@ -127,6 +127,7 @@ async def capture(
     include_auction: bool = False,
     auction_symbols: Sequence[str] = (),
     persist_observations: Callable[[str, str, list[dict[str, Any]]], Awaitable[int]] | None = None,
+    persist_health: Callable[[str, str, int, str | None], Awaitable[None]] | None = None,
     state: MutableMapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fetch and persist the bounded event set, continuing after one failure.
@@ -136,6 +137,16 @@ async def capture(
     and the requested auction run, as before.
     """
     results: dict[str, Any] = {"status": "completed", "capabilities": {}, "stored": 0}
+
+    async def report_health(provider: str, capability: str, rows: int, error: str | None) -> None:
+        if persist_health is None:
+            return
+        try:
+            await persist_health(provider, capability, rows, error)
+        except Exception as health_error:  # noqa: BLE001 - health must not stop evidence capture
+            results["status"] = "partial"
+            results.setdefault("health_errors", []).append(str(health_error)[:240])
+
     for capability in CAPTURE_CAPABILITIES:
         try:
             if capability in PAGED_POOLS:
@@ -146,9 +157,11 @@ async def capture(
             stored = await persist("fuyao_ths", rows) if rows else 0
             results["capabilities"][capability] = {"status": "completed", "received": len(rows), "stored": stored}
             results["stored"] += stored
+            await report_health("fuyao_ths", capability, len(rows), None)
         except Exception as error:  # noqa: BLE001 - one pool outage must not stop the others
             results["status"] = "partial"
             results["capabilities"][capability] = {"status": "failed", "error": str(error)[:240]}
+            await report_health("fuyao_ths", capability, 0, str(error)[:240])
 
     local = observed_at.astimezone(CN_TZ)
     if state is not None and time(9, 26) <= local.time() <= time(9, 45) \
@@ -160,9 +173,11 @@ async def capture(
                 state["auction_benchmark_date"] = local.date().isoformat()
             results["capabilities"]["a_share_auction_short_term_benchmark"] = {"status": "completed", "received": len(rows), "stored": stored}
             results["stored"] += stored
+            await report_health("fuyao_ths", "a_share_auction_short_term_benchmark", len(rows), None)
         except Exception as error:  # noqa: BLE001
             results["status"] = "partial"
             results["capabilities"]["a_share_auction_short_term_benchmark"] = {"status": "failed", "error": str(error)[:240]}
+            await report_health("fuyao_ths", "a_share_auction_short_term_benchmark", 0, str(error)[:240])
 
     for capability, params, interval in ATTENTION_CAPTURES:
         if not _due(state, capability, observed_at, interval):
@@ -179,9 +194,11 @@ async def capture(
                 stored = await persist_observations("fuyao_ths", capability, rows) if rows and persist_observations else 0
             results["capabilities"][capability] = {"status": "completed", "received": len(rows), "stored": stored}
             results["stored"] += stored
+            await report_health("fuyao_ths", capability, len(rows), None)
         except Exception as error:  # noqa: BLE001
             results["status"] = "partial"
             results["capabilities"][capability] = {"status": "failed", "error": str(error)[:240]}
+            await report_health("fuyao_ths", capability, 0, str(error)[:240])
 
     if include_auction and auction_symbols:
         batches, dropped, failures = await fetch_code_batches(fetch, "a_share_auction_snapshot", auction_symbols)
@@ -195,6 +212,8 @@ async def capture(
             "received": received, "stored": stored, "dropped_codes": dropped[:50], "failures": failures[:10],
         }
         results["stored"] += stored
+        await report_health("fuyao_ths", "a_share_auction_snapshot", received,
+                           None if not failures else "; ".join(failures[:3]))
         if failures:
             results["status"] = "partial"
     return results

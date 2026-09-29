@@ -6,6 +6,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
+python3 scripts/verify_component_boundaries.py --check
+python3 scripts/verify_component_runtimes.py --check
+python3 scripts/test_component_boundaries.py
+python3 scripts/test_component_export.py
+python3 scripts/test_component_runtimes.py
 docker compose exec -T quant-research python -m unittest discover -s tests -q
 node --test feishu-relay/adapter/*.test.mjs
 (cd frontend && npm run typecheck && npm run build)

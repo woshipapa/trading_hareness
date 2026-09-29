@@ -12,6 +12,7 @@ import httpx
 from .fuyao_catalog import FUYAO_PATHS, FUYAO_QUERY_PARAMS
 from .http_clients import provider_http_client
 from .http_retry import retry_delay_seconds
+from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
 from .tushare_providers import safe_error_detail
 
 
@@ -21,6 +22,7 @@ FUYAO_API_KEY_ENV_NAMES = ("HITHINK_FINANCE_API_KEY", "FUYAO_API_KEY", "FUYAO_TO
 FUYAO_RETRY_BUSINESS_CODES = {4001, 5001, 5002, 5003}
 FUYAO_TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
 FUYAO_MAX_ATTEMPTS = 3
+FUYAO_ALL_A_MAX_AGE_SECONDS = 45.0
 
 
 class FuyaoProviderError(RuntimeError):
@@ -75,6 +77,10 @@ async def fetch_envelope(capability: str, params: dict[str, Any] | None = None) 
     safe_params = {name: value for name, value in dict(params or {}).items() if value is not None}
     path = validate_capability_query(capability, safe_params)
     last_transport_error: Exception | None = None
+    try:
+        await acquire_public_provider_slot(FUYAO_PROVIDER_KEY)
+    except PublicProviderRateLimited as error:
+        raise FuyaoProviderError(str(error)) from error
     async with provider_http_client(FUYAO_PROVIDER_KEY, "") as client:
         for attempt in range(FUYAO_MAX_ATTEMPTS):
             response_headers: Any | None = None
@@ -137,6 +143,43 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def snapshot_timestamp_status(
+    timestamp: Any,
+    *,
+    now: datetime | None = None,
+    max_age_seconds: float = FUYAO_ALL_A_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Classify Fuyao's upstream timestamp without treating receipt time as freshness.
+
+    The provider timestamp is milliseconds since the Unix epoch. Missing or
+    malformed timestamps remain ``unknown`` and therefore cannot silently make
+    a cached cross-section eligible for a new decision.
+    """
+    observed_at = now or datetime.now(timezone.utc)
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=timezone.utc)
+    try:
+        upstream = datetime.fromtimestamp(float(timestamp) / 1000, tz=timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return {
+            "status": "unknown",
+            "freshness_reason": "missing_timestamp" if timestamp in (None, "") else "invalid_timestamp",
+            "age_seconds": None,
+            "max_age_seconds": max_age_seconds,
+        }
+    age_seconds = (observed_at.astimezone(timezone.utc) - upstream).total_seconds()
+    result: dict[str, Any] = {
+        "upstream_observed_at": upstream.isoformat(),
+        "age_seconds": round(age_seconds, 3),
+        "max_age_seconds": max_age_seconds,
+    }
+    if age_seconds < -5:
+        return {**result, "status": "invalid", "freshness_reason": "future_timestamp"}
+    if age_seconds > max_age_seconds:
+        return {**result, "status": "stale", "freshness_reason": "age_exceeded"}
+    return {**result, "status": "fresh", "freshness_reason": "within_slo"}
+
+
 def normalize_snapshot_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize official price fields; intentionally do not invent fund flow."""
     timestamp = data.get("timestamp")
@@ -163,7 +206,7 @@ def normalize_snapshot_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
-async def all_a_snapshot_rows() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+async def all_a_snapshot_rows(*, now: datetime | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Retrieve the documented full cross-section in at most two bounded pages."""
     first = await fetch("a_share_prices_snapshot", {"limit": 5000, "offset": 0})
     rows = normalize_snapshot_rows(first)
@@ -172,8 +215,9 @@ async def all_a_snapshot_rows() -> tuple[list[dict[str, Any]], dict[str, Any]]:
         second = await fetch("a_share_prices_snapshot", {"limit": min(5000, total - 5000), "offset": 5000})
         rows.extend(normalize_snapshot_rows(second))
     timestamp = first.get("timestamp")
+    freshness = snapshot_timestamp_status(timestamp, now=now)
     return rows, {
-        "status": "fresh", "age_seconds": 0.0, "source": "fuyao_ths_all_a_snapshot",
+        **freshness, "source": "fuyao_ths_all_a_snapshot",
         "scope": "all_a_cross_section", "cross_sectional": True,
         "semantics": "all_a_price_volume_turnover_snapshot_no_main_flow", "upstream_timestamp_ms": timestamp,
         "total": total, "matched_rows": len(rows),
@@ -183,5 +227,5 @@ async def all_a_snapshot_rows() -> tuple[list[dict[str, Any]], dict[str, Any]]:
 __all__ = [
     "FUYAO_API_KEY_ENV_NAMES", "FUYAO_PROVIDER_KEY", "FuyaoProviderError", "FuyaoQueryValidationError",
     "all_a_snapshot_rows", "configured", "fetch", "fetch_envelope",
-    "normalize_snapshot_rows", "validate_capability_query",
+    "normalize_snapshot_rows", "snapshot_timestamp_status", "validate_capability_query",
 ]

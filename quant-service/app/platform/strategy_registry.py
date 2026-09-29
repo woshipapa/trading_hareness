@@ -22,6 +22,7 @@ class StrategyContract:
     maturity: str
     live_effect: str
     description: str
+    alert_effect: str = "none"
     deprecated_reason: str | None = None
 
 
@@ -30,6 +31,7 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "intraday_watchlist_confirmation", "watchlist-confirmation-v8", "app/intraday_signal_rules.py",
         "intraday-rule-input-v2", ("intraday_scan_runs", "intraday_rule_input_snapshots", "intraday_signal_events"),
         "intraday_edge", "shadow", "none", "bounded watchlist price/minute/peer confirmation research",
+        alert_effect="research_alert",
     ),
     "watchlist_main_wave_shadow": StrategyContract(
         "watchlist_main_wave_shadow", "watchlist-main-wave-pattern-v2", "app/watchlist_main_wave_v2.py",
@@ -100,7 +102,7 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "潜龙 five-evidence contract (MA convergence/box, volume marker K, pullback holding MA5/box top, sector "
         "main line, profitable fundamentals) distilled from the 小杰交流 replies; a failed or missing item or three "
         "overheat flags sends the reminder under a red warning with its reasons (blocking is a preregistered "
-        "switch for walk-forward comparison)",
+        "switch for walk-forward comparison)", alert_effect="research_alert",
     ),
     # Per-stock plans distilled from a named analyst's post-close review
     # (video/text).  The pack is point-in-time (first session whose 09:15 open
@@ -112,7 +114,7 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "intraday_edge", "shadow", "none",
         "research-only quantification of an analyst's next-session plan per stock: relay (auction amount, "
         "acceleration amount window, first-seal amount) and trend (MA reclaim, platform/prior-high breakout, "
-        "MA10 second wave, MA60 reclaim) playbooks, with post-close forecast settlement",
+        "MA10 second wave, MA60 reclaim) playbooks, with post-close forecast settlement", alert_effect="research_alert",
     ),
     # Pre-seal "attack" detection that feeds the 小杰 observation table; it had
     # no contract of its own, so its evidence carried no registered identity.
@@ -133,6 +135,28 @@ STRATEGY_CONTRACTS: Final[dict[str, StrategyContract]] = {
         "research", "shadow", "none",
         "Longhu quote/minute/order-book/auction/large-order/board context scorer; "
         "all outputs remain research-only until point-in-time replay and promotion gates pass",
+    ),
+    "multi_factor_rank_v1": StrategyContract(
+        "multi_factor_rank_v1", "strategy-v1", "app/factor_sql_lab.py",
+        "factor-sql-v1",
+        ("canonical_bars_daily", "daily_adjustment_factors", "strategy_experiments", "strategy_candidates"),
+        "research", "research_enabled", "none",
+        "bounded SQL cross-sectional factor ranking for replay and calibration only",
+    ),
+    "board_flow_drill": StrategyContract(
+        "board_flow_drill", "board-flow-drill-v1", "app/board_flow_drill.py",
+        "board-flow-drill-v1",
+        ("intraday_board_flow_snapshots", "sector_membership_history", "intraday_quote_observations", "strategy_candidates"),
+        "intraday_edge", "shadow", "none",
+        "board flow to member leadership projection; research alerts remain evidence-only",
+        alert_effect="research_alert",
+    ),
+    "dragon_leader_research": StrategyContract(
+        "dragon_leader_research", "dragon-leader-v1", "app/dragon_leader_research.py",
+        "dragon-leader-v1",
+        ("canonical_bars_daily", "strategy_candidates", "intraday_quote_observations"),
+        "research", "shadow", "none",
+        "post-close limit-up leader and next-session confirmation research",
     ),
 }
 
@@ -155,11 +179,23 @@ def strategy_contract_catalog() -> list[dict[str, Any]]:
             "runtime_owner": item.runtime_owner,
             "maturity": item.maturity,
             "live_effect": item.live_effect,
+            "alert_effect": item.alert_effect,
             "description": item.description,
             "deprecated_reason": item.deprecated_reason,
         }
         for item in sorted(STRATEGY_CONTRACTS.values(), key=lambda item: item.key)
     ]
+
+
+def validate_strategy_contracts() -> None:
+    """Validate registry semantics before runtime composition starts."""
+    allowed_alert_effects = {"none", "research_alert"}
+    invalid = [
+        item.key for item in STRATEGY_CONTRACTS.values()
+        if item.alert_effect not in allowed_alert_effects or item.live_effect != "none"
+    ]
+    if invalid:
+        raise ValueError(f"invalid strategy alert/live semantics: {', '.join(sorted(invalid))}")
 
 
 def validate_strategy_runtime_versions(runtime_versions: Mapping[str, str]) -> None:
@@ -190,5 +226,6 @@ def validate_strategy_runtime_versions(runtime_versions: Mapping[str, str]) -> N
 
 __all__ = [
     "STRATEGY_CONTRACTS", "StrategyContract", "strategy_contract", "strategy_contract_catalog",
+    "validate_strategy_contracts",
     "validate_strategy_runtime_versions",
 ]

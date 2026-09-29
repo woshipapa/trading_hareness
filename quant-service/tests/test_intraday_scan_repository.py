@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+import uuid
 
 from app.datasources.catalog import NON_SECTOR_GROUPS, NON_SECTOR_LABEL_PATTERN
 from app.intraday_scan_repository import (
     first_eac_breakout_events,
     load_intraday_scan_local_state,
     load_intraday_signal_event_state,
+    normalize_provider_failures,
+    persist_intraday_scan_terminal,
     previous_quote_frames,
 )
 from app.watchlist_daily_factors import watchlist_daily_factors_by_symbol
@@ -179,6 +182,32 @@ class IntradayScanRepositoryTests(unittest.TestCase):
         self.assertIn("AS adjustment_state", connection.execute.call_args.args[0])
         self.assertIn("quant.daily_adjustment_factors", connection.execute.call_args.args[0])
         self.assertIn("raw->>'factor_semantics'", connection.execute.call_args.args[0])
+
+    def test_normalize_provider_failures_keeps_each_source(self) -> None:
+        self.assertEqual(
+            normalize_provider_failures([
+                {"provider": "longhuvip", "error": "denied"},
+                {"provider_key": "tencent_free", "detail": "timeout"},
+            ]),
+            [("longhuvip", "denied"), ("tencent_free", "timeout")],
+        )
+
+    def test_terminal_repository_records_each_provider_failure(self) -> None:
+        connection = MagicMock()
+        database = MagicMock()
+        database.transaction.return_value.__enter__.return_value = connection
+        with patch("app.intraday_scan_repository.record_provider_failure") as record_failure:
+            persist_intraday_scan_terminal(
+                database, uuid.uuid4(), datetime(2026, 8, 13, 3, tzinfo=timezone.utc), "failed",
+                ["600000.SH"], {}, {},
+                provider_failure=[
+                    {"provider": "longhuvip", "error": "denied"},
+                    {"provider": "tencent_free", "error": "timeout"},
+                ],
+                provider_latency_ms=234,
+            )
+        self.assertEqual(record_failure.call_count, 2)
+        self.assertEqual({call.args[1] for call in record_failure.call_args_list}, {"longhuvip", "tencent_free"})
 
 
 if __name__ == "__main__":

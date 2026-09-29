@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from collections import Counter
 from typing import Any, Iterable, Mapping
 
 #: Used only when a source carries no sizing of its own.
@@ -121,6 +122,12 @@ def holding_days_exceeded(position: Mapping[str, Any], session_date: date | None
     if session_date is None or not isinstance(buy_date, date) or max_days <= 0:
         return False
     return (session_date - buy_date).days >= max_days
+
+
+def non_fill_reason_counts(items: Iterable[Mapping[str, Any]]) -> dict[str, int]:
+    """Aggregate research-only intent skips for lifecycle evidence gates."""
+    counts = Counter(str(item.get("reason") or "unknown") for item in items)
+    return dict(sorted(counts.items()))
 
 
 def plan_paper_orders(
@@ -231,6 +238,7 @@ def plan_paper_orders(
         })
     return {
         "sells": sells, "buys": buys, "skipped": skipped,
+        "non_fill_reason_counts": non_fill_reason_counts(skipped),
         "open_positions": len(held), "open_slots": open_slots,
         "cash_after_plan": round(remaining_cash, 2),
         "boundary": "paper simulation only; no broker client on this path",
@@ -239,5 +247,6 @@ def plan_paper_orders(
 
 __all__ = [
     "EXIT_FRACTIONS", "FALLBACK_MAX_HOLDING_DAYS", "FALLBACK_STOP_LOSS_PCT", "FALLBACK_WEIGHT", "LOT_SIZE",
-    "MAX_NEW_PER_PASS", "MAX_OPEN_POSITIONS", "exit_quantity", "holding_days_exceeded", "plan_paper_orders", "position_size", "stop_loss_hit", "strategy_intent",
+    "MAX_NEW_PER_PASS", "MAX_OPEN_POSITIONS", "exit_quantity", "holding_days_exceeded", "non_fill_reason_counts",
+    "plan_paper_orders", "position_size", "stop_loss_hit", "strategy_intent",
 ]

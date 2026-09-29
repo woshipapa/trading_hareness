@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "component_version": "0.1.0",
+  "id": "feishu-relay",
+  "runtime": "47edge",
+  "release": "edge-relay",
+  "release_units": ["edge-relay", "edge-workflows"],
+  "description": "Feishu relay API, message ledger, WebSocket bridge and dashboard.",
+  "interfaces": [
+    {
+      "id": "relay-http-v1",
+      "kind": "http",
+      "health_path": "/health",
+      "inbound_paths": [
+        "/internal/larkagentx/inbound",
+        "/internal/larkagentx/group-relay",
+        "/internal/larkagentx/summary"
+      ],
+      "history_path": "/api/group-relay/larkagentx/history/export",
+      "auth": "internal ingress requires x-larkagentx-token",
+      "consumers": ["larkagentx-bridge", "xhs-intel", "n8n"]
+    },
+    {
+      "id": "quant-consumer-v1",
+      "kind": "http-client",
+      "base_url_env": "QUANT_SERVICE_URL",
+      "auth_env": "QUANT_WRITE_API_KEY",
+      "consumers": ["feishu-relay"],
+      "compatibility": "quant-http-v1"
+    }
+  ],
+  "external_dependencies": [
+    "PostgreSQL relay ledger",
+    "Feishu app credentials and webhook targets",
+    "optional pinned LarkAgentX checkout and private account profile",
+    "pinned bridge Python dependency lock file",
+    "optional owner quant HTTP service"
+  ],
+  "commands": {
+    "api": "docker compose -f compose.standalone.yaml up --build",
+    "adapter_test": "cd adapter && npm ci --no-audit --no-fund && npm test",
+    "bridge_test": "npm run test:bridge",
+    "dashboard": "cd dashboard && npm ci && npm run typecheck && npm test -- --run && npm run build"
+  },
+  "safety": {
+    "message_level_idempotency": true,
+    "secrets_in_git": false
+  }
+}

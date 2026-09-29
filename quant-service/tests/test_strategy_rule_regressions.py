@@ -277,6 +277,13 @@ class StrategyRuleRegressionTests(unittest.TestCase):
     def test_technical_summary_requires_prices_and_exposes_trend_inputs(self):
         empty = technical_summary([])
         self.assertEqual(empty["status"], "insufficient_market_data")
+        blocked = technical_summary([
+            {"trade_date": "20260801", "close": 10},
+            {"trade_date": "20260802"},
+            {"trade_date": "20260803", "close": 10.2},
+        ])
+        self.assertEqual(blocked["status"], "data_quality_blocked")
+        self.assertEqual(blocked["missing_close_rows"], 1)
         rows = [{"trade_date": f"202608{day:02d}", "close": 10 + day / 10} for day in range(1, 22)]
         summary = technical_summary(rows)
         self.assertEqual(summary["status"], "ready")

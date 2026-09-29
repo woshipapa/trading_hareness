@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "component_version": "0.1.0",
+  "id": "quant-research",
+  "runtime": "47owner",
+  "release": "owner-quant",
+  "release_units": ["owner-quant", "owner-schema"],
+  "description": "Research-only quant API, evidence store and replay services.",
+  "interfaces": [
+    {
+      "id": "quant-http-v1",
+      "kind": "http",
+      "base_url_env": "QUANT_SERVICE_URL",
+      "health_path": "/health",
+      "auth": "write routes use the owner write boundary; read routes use the existing API contract",
+      "consumers": ["feishu-relay", "frontend"]
+    },
+    {
+      "id": "quant-postgres-v1",
+      "kind": "database",
+      "connection_env": "PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD",
+      "migration_owner": "owner-schema",
+      "consumers": ["quant-research"]
+    }
+  ],
+  "external_dependencies": [
+    "PostgreSQL quant schema with Alembic lineage",
+    "pinned Python dependency lock file",
+    "provider credentials supplied by the owner host",
+    "optional Feishu ingestion ledger contract"
+  ],
+  "commands": {
+    "api": "docker compose -f compose.standalone.yaml up --build",
+    "test": "python -m unittest discover -s tests -q",
+    "dashboard": "cd ../frontend && npm ci && npm run typecheck && npm run build"
+  },
+  "safety": {
+    "research_only": true,
+    "live_effect": "none",
+    "orders": false
+  }
+}

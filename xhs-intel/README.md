@@ -66,3 +66,30 @@ checkout by default and records its Git commit and deterministic source-tree
 SHA-256 in `/opt/feishu-relay-edge/xhs-manifest.json` and the collector health
 payload. A deliberately dirty deployment requires `XHS_ALLOW_DIRTY_SOURCE=true`
 and is marked in that manifest, so it must not be described as reproducible.
+
+## Standalone collector runtime
+
+The collector image can be built from this directory alone. The external
+`Spider_XHS` checkout is an explicit runtime mount and must be pinned by both
+commit and tree digest:
+
+```bash
+export XHS_SOURCE_ROOT=/srv/Spider_XHS
+export XHS_COOKIE_FILE=/etc/xhs/xhs-cookie
+export XHS_COLLECTOR_TOKEN='local-token'
+export XHS_SOURCE_GIT_SHA='pinned-commit'
+export XHS_SOURCE_TREE_SHA256='pinned-tree-sha256'
+docker compose -f compose.standalone.yaml up --build
+curl http://127.0.0.1:18790/health
+```
+
+The standalone image does not copy `Spider_XHS`, Feishu credentials, or a
+webhook into the build context. `/v1/run` remains blocked without a valid XHS
+cookie; `/health` is available for runtime verification. `local_worker.py` is a
+separate optional worker and communicates with this API over its token-protected
+HTTP contract.
+
+The standalone image installs `requirements.lock`; update it deliberately when
+the collector dependency set changes. The legacy integrated image may continue to
+use `requirements.txt` during the transition, but it is not the independent
+runtime acceptance path.

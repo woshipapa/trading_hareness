@@ -132,9 +132,20 @@ def _govern_probability_display(profile: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def probability_profiles_from_rows(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Aggregate one mature 30-minute row per event into family/type profiles."""
-    materialized = [dict(raw) for raw in rows]
+def probability_profiles_from_rows(
+    rows: Iterable[dict[str, Any]], *, horizon_key: str = "next_close",
+) -> dict[str, dict[str, Any]]:
+    """Aggregate mature T+1 rows into family/type profiles.
+
+    The intraday horizons remain useful timing diagnostics, but a probability
+    shown beside a human review card must use the next-session close outcome
+    that an A-share T+1 position can actually realize.  Rows from older test
+    fixtures without ``horizon_key`` are accepted as already-filtered inputs.
+    """
+    materialized = [
+        dict(raw) for raw in rows
+        if raw.get("horizon_key") in (None, horizon_key)
+    ]
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     global_by_type_day: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for row in materialized:
@@ -167,12 +178,12 @@ def probability_profiles_from_rows(rows: Iterable[dict[str, Any]]) -> dict[str, 
         profiles[f"{family}:{signal_type}"] = shrunk_probability(
             raw_positive_rate=daily_rate,
             sample_rows=len(usable), independent_days=len(daily_rates),
-            average_directional_return=avg_return, horizon="30m",
-            source="matured_intraday_signal_outcomes",
+            average_directional_return=avg_return, horizon=horizon_key,
+            source="matured_t1_settlement_outcomes",
             prior_rate=global_prior_rates.get(signal_type, PROBABILITY_PRIOR_RATE),
         ) | {
             "raw_event_positive_rate": round(raw_rate, 4) if raw_rate is not None else None,
-            "prior_source": "all_matured_30m_outcomes_for_signal_type",
+            "prior_source": f"all_matured_{horizon_key}_outcomes_for_signal_type",
         }
     return profiles
 
@@ -188,16 +199,16 @@ def load_intraday_probability_profiles(
         if loaded_at > 0 and now - loaded_at < max(0.0, cache_ttl_seconds):
             return cached
         rows = connection.execute(
-            """SELECT e.signal_key,e.signal_type,
+            """SELECT e.signal_key,e.signal_type,o.horizon_key,
                       (e.observed_at AT TIME ZONE 'Asia/Shanghai')::date AS exchange_date,
                       o.raw_return
                  FROM quant.intraday_signal_outcomes o
                  JOIN quant.intraday_signal_events e ON e.signal_event_id=o.signal_event_id
-                WHERE o.horizon_key='30m' AND o.status='matured' AND o.raw_return IS NOT NULL
+                WHERE o.horizon_key='next_close' AND o.status='matured' AND o.raw_return IS NOT NULL
                   AND e.observed_at>=now()-interval '365 days'
                 ORDER BY e.observed_at"""
         ).fetchall()
-        profiles = probability_profiles_from_rows(dict(row) for row in rows)
+        profiles = probability_profiles_from_rows((dict(row) for row in rows), horizon_key="next_close")
         _PROFILE_CACHE.update({"loaded_at": now, "profiles": profiles})
         return profiles
 

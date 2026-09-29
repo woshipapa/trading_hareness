@@ -6,7 +6,10 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from app.intraday_order_book_service import capture_snapshot, enabled, interval_seconds, max_symbols, persist_observations, retention_days
+from app.intraday_order_book_service import (
+    capture_snapshot, enabled, interval_seconds, max_symbols, persist_failure,
+    persist_observations, provider_row_counts, retention_days,
+)
 
 
 class IntradayOrderBookServiceTests(unittest.TestCase):
@@ -17,6 +20,27 @@ class IntradayOrderBookServiceTests(unittest.TestCase):
         self.assertEqual(interval_seconds({"INTRADAY_ORDER_BOOK_INTERVAL_SECONDS": "bad"}), 3.0)
         self.assertEqual(retention_days({"INTRADAY_ORDER_BOOK_RETENTION_DAYS": "100"}), 30)
         self.assertEqual(max_symbols({"INTRADAY_ORDER_BOOK_MAX_SYMBOLS": "1000"}), 80)
+
+    def test_mixed_batch_keeps_provider_health_separate(self) -> None:
+        self.assertEqual(
+            provider_row_counts([
+                {"source": "longhu_order_book"}, {"source": "tencent_order_book"},
+                {"source": "longhu_order_book"},
+            ]),
+            {"longhuvip": 2, "tencent_free": 1},
+        )
+
+    def test_failure_can_record_each_attempted_provider(self) -> None:
+        calls = []
+        database = type("Database", (), {})()
+        database.transaction = lambda: type("Tx", (), {
+            "__enter__": lambda self: object(), "__exit__": lambda self, *_args: False,
+        })()
+        persist_failure(
+            database, "timeout", 12, record_failure=lambda *args: calls.append(args),
+            provider_keys=["longhuvip", "tencent_free", "longhuvip"],
+        )
+        self.assertEqual([call[1] for call in calls], ["longhuvip", "tencent_free"])
 
     def test_capture_filters_symbols_and_persists_one_bounded_batch(self) -> None:
         async def check() -> tuple[dict[str, object], list[object]]:

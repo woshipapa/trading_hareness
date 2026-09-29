@@ -86,6 +86,25 @@ one Git SHA describes every process. The operational rules, source-overlay
 boundaries and component-aware status commands are in
 [`UNIFIED_RELEASE_MODEL_47.md`](UNIFIED_RELEASE_MODEL_47.md).
 
+The logical project map is machine-readable in `config/components.json`. It
+currently keeps Quant Research, Feishu Relay and XHS Intelligence as separate
+ownership units inside this monorepo, while `integration` owns compose, release
+scripts, manifests and cross-project workflows. A physical repository split is
+allowed only after the HTTP/event contracts and component release manifests are
+stable; the manifest also records the release units that can move at different
+cadences (`owner-schema`, `edge-workflows`, and so on). The boundary checker
+runs before any such move. `scripts/export_component.py` can then produce a
+secret-free, component-scoped archive for the eventual standalone repository;
+the archive is not a production release and does not change the remote hosts.
+
+Each component also carries a local `component.json` and `Makefile`. The local
+manifest repeats its release identity, declares external dependencies and names
+the stable interfaces that must remain HTTP/event boundaries. The three standalone
+compose files and the component-local manifests are checked together, so an
+exported project can be maintained without importing this repository's business
+modules. The detailed compatibility rules are in
+[`COMPONENT_CONTRACTS.md`](COMPONENT_CONTRACTS.md).
+
 ## Ownership boundaries
 
 | Concern | Location | Rule |

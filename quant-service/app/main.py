@@ -86,7 +86,9 @@ from .public_market_repository import (
     persist_timed_observations as _persist_timed_observations,
     recent_market_events as _recent_market_events,
 )
-from .factor_sql_lab import evaluate_factor_set, run_multi_factor_strategy_sql
+from .factor_sql_lab import MULTI_FACTOR_MODEL_VERSION, evaluate_factor_set, run_multi_factor_strategy_sql
+from .board_flow_drill import MODEL_VERSION as BOARD_FLOW_DRILL_MODEL_VERSION
+from .dragon_leader_research import MODEL_VERSION as DRAGON_LEADER_MODEL_VERSION
 from .research_experiment_service import (
     ResearchExperimentDependencies,
     backtest_strategy as backtest_strategy_isolated,
@@ -414,6 +416,7 @@ from .auction_pulse import PULSE_REQUESTS, alert_decision, format_alert, summari
 from .auction_pulse_runtime import run_auction_pulse_loop
 from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapshot_loop
 from .datasources import runtime as datasource_runtime
+from .datasources.catalog import health_capability
 from .datasources.sources.tushare_limits import fetch_limit_cross_section as fetch_tushare_limit_cross_section
 from .intraday_fast_quote_service import cross_source_confirmation, run_intraday_fast_quote_loop
 from .intraday_fast_quote_runtime import (
@@ -442,7 +445,7 @@ from .runtime_tasks import (
     supervise_leased_loop, supervise_loop, validate_runtime_task_specs,
 )
 from .platform.runtime_task_registry import runtime_task_contract, runtime_task_contract_catalog
-from .platform.strategy_registry import validate_strategy_runtime_versions
+from .platform.strategy_registry import validate_strategy_contracts, validate_strategy_runtime_versions
 from .runtime_composition import LeasedRuntimeDependencies, build_leased_task_runner
 from .application_lifecycle import ApplicationLifecycleDependencies, application_lifespan
 from .background_task_catalog import build_specs as build_background_task_specs
@@ -730,7 +733,10 @@ from .telemetry import (
     provider_shared_rate_limit_rejections_total,
     provider_shared_rate_limit_wait_seconds,
 )
-from .runtime_executors import ExecutorSaturatedError, run_akshare_blocking, run_database_blocking, runtime_executor_status, shutdown_runtime_executors
+from .runtime_executors import (
+    ExecutorSaturatedError, run_akshare_blocking, run_database_blocking,
+    run_realtime_vendor_blocking, runtime_executor_status, shutdown_runtime_executors,
+)
 from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
 from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
 from .routers.teacher_review import TeacherReviewRouterDependencies, build_teacher_review_router
@@ -3048,7 +3054,7 @@ async def intraday_longhu_watch_quotes(
     def fetch() -> tuple[list[dict[str, Any]], dict[str, Any]]:
         return longhu_intraday_source().watch_quotes(symbols, max_symbols=intraday_longhu_max_symbols())
 
-    return await run_akshare_blocking(fetch, timeout_seconds=15)
+    return await run_realtime_vendor_blocking(fetch, timeout_seconds=15)
 
 
 async def intraday_longhu_order_book_quotes(
@@ -3089,7 +3095,7 @@ async def shared_longhu_quotes(
     symbols: list[str], max_symbols: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Gateway boundary for a caller-authenticated logical batch."""
-    return await run_akshare_blocking(
+    return await run_realtime_vendor_blocking(
         lambda: longhu_intraday_source().watch_quotes(symbols, max_symbols=max_symbols),
         timeout_seconds=30,
     )
@@ -3099,7 +3105,7 @@ async def intraday_longhu_minutes(symbol: str) -> list[dict[str, Any]]:
     if not longhu_vendor_configured():
         raise RuntimeError("longhu_not_configured")
     from .longhu_vendor_source import current_session_minute_rows
-    rows = await run_akshare_blocking(
+    rows = await run_realtime_vendor_blocking(
         lambda: longhu_intraday_source().stock_minutes(symbol), timeout_seconds=7,
     )
     return current_session_minute_rows(rows, observed_at=datetime.now(timezone.utc))
@@ -3114,7 +3120,7 @@ async def intraday_longhu_minutes_batch(symbols: list[str], deadline_seconds: fl
     if not longhu_vendor_configured():
         raise RuntimeError("longhu_not_configured")
     from .longhu_vendor_source import current_session_minute_rows
-    batch = await run_akshare_blocking(
+    batch = await run_realtime_vendor_blocking(
         lambda: longhu_intraday_source().stock_minutes_batch(symbols, deadline_seconds=deadline_seconds),
         timeout_seconds=deadline_seconds + 2.5,
     )
@@ -3384,6 +3390,24 @@ async def prune_intraday_rule_input_evidence_if_due(observed_at: datetime) -> No
 
 def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
     """Compose scan I/O ports without putting transactional closures in main."""
+    async def persist_intraday_quote_health(capture: Any) -> None:
+        """Record licensed watch-quote health independently from public fallbacks."""
+        status = dict(getattr(capture, "licensed_watch_status", {}) or {})
+        if status.get("status") == "disabled":
+            return
+        rows = list(getattr(capture, "licensed_watch_rows", []) or [])
+        error = str(status.get("error") or "longhu watch quote returned no usable rows")
+        latency_ms = getattr(capture, "latency_ms", None)
+
+        def write() -> None:
+            with db.transaction() as connection:
+                if status.get("status") == "completed" and rows:
+                    record_provider_success(connection, "longhuvip", "stock_quote", len(rows), latency_ms)
+                else:
+                    record_provider_failure(connection, "longhuvip", "stock_quote", error, latency_ms)
+
+        await run_database_blocking(write, timeout_seconds=10)
+
     return IntradayWatchlistScanRuntime(IntradayWatchlistScanRuntimeDependencies(
         clock=asyncio.get_running_loop().time,
         observe_duration=lambda status, seconds: intraday_scan_duration_seconds.labels(status).observe(seconds),
@@ -3447,6 +3471,7 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
             persist=persist_intraday_rotation_observations, json_safe=strategy_json_safe,
         ),
         xiaojie_leader_flow=run_xiaojie_leader_flow,
+        persist_quote_health=persist_intraday_quote_health,
         persist_rotation_observations=persist_ten_day_leader_rotation_intraday,
         persist_rotation_scan_status=persist_intraday_rotation_scan_status,
         json_safe=strategy_json_safe,
@@ -3971,7 +3996,7 @@ async def market_event_capture_loop() -> None:
         # so its own live code list is the auction universe; the local
         # universe is only the fallback.
         try:
-            rows, _meta = await fuyao_all_a_snapshot_rows()
+            rows, _meta = await intraday_all_a_snapshot()
             if rows:
                 return [str(row["symbol"]) for row in rows]
         except Exception as error:  # noqa: BLE001 - fall back to the local universe
@@ -3980,6 +4005,35 @@ async def market_event_capture_loop() -> None:
 
     async def persist_observations(provider: str, capability: str, rows: list[dict[str, Any]]) -> int:
         return await run_database_blocking(persist_timed_observations, provider, capability, rows, timeout_seconds=60)
+
+    health_names = {
+        "a_share_limit_up_pool": "limits.limit_up_pool",
+        "a_share_limit_break_pool": "limits.broken_pool",
+        "a_share_limit_down_pool": "limits.limit_down_pool",
+        "a_share_limit_up_ladder": "limits.ladder",
+        "a_share_auction_short_term_benchmark": "auction.short_term_benchmark",
+        "a_share_auction_snapshot": "auction.open_snapshot",
+        "a_share_hot_stock_list": "attention.ths_hot_rank",
+        "a_share_skyrocket_list": "attention.ths_skyrocket",
+        "a_share_anomaly_analysis_list": "limits.anomaly_tape",
+    }
+
+    async def persist_health(provider: str, capability: str, rows: int, error: str | None) -> None:
+        health_capability_name = health_capability(
+            provider, health_names.get(capability, capability), fallback=capability,
+        )
+
+        def write() -> None:
+            with db.transaction() as connection:
+                if error is None and rows > 0:
+                    record_provider_success(connection, provider, health_capability_name, rows, None)
+                else:
+                    record_provider_failure(
+                        connection, provider, health_capability_name,
+                        error or f"empty response for {capability}", None,
+                    )
+
+        await run_database_blocking(write, timeout_seconds=10)
 
     async def longhu_auction(observed_at: datetime) -> dict[str, Any]:
         if not longhu_vendor_configured():
@@ -3994,7 +4048,7 @@ async def market_event_capture_loop() -> None:
     await run_market_event_capture_loop(
         interval_seconds=60, capture=lambda observed_at, **kwargs: capture_market_events(
             observed_at, fetch=fetch, persist=persist, persist_observations=persist_observations,
-            state=attention_state, **kwargs,
+            persist_health=persist_health, state=attention_state, **kwargs,
         ), capture_longhu_auction=longhu_auction, session_open=open_session, symbols=all_symbols,
     )
 
@@ -4091,7 +4145,9 @@ def _datasource_collector_deps() -> Any:
     return datasource_runtime.build_collector_deps(
         db, run_blocking=run_database_blocking,
         fuyao_fetch=fetch_fuyao if has_fuyao else None,
-        fuyao_snapshot=fuyao_all_a_snapshot_rows if has_fuyao else None,
+        # Reuse the process-wide single-flight/30s cache so public collectors
+        # cannot fan out duplicate 5k-row Fuyao requests beside the scan.
+        fuyao_snapshot=intraday_all_a_snapshot if has_fuyao else None,
     )
 
 
@@ -4199,11 +4255,36 @@ async def all_a_level1_snapshot_capture_loop() -> None:
             active, _reason = await market_observation_session_async(now=now)
             return active
 
-        return await capture_level1_snapshot(
-            fetch_snapshot=fuyao_all_a_snapshot_rows,
-            persist=persist,
-            session_open=session_open,
-        )
+        async def persist_health(result: dict[str, Any]) -> None:
+            status = str(result.get("status") or "unknown")
+            if status == "outside_session":
+                return
+            error = str(result.get("error") or f"all-A snapshot status={status}")
+
+            def write() -> None:
+                with db.transaction() as connection:
+                    if status == "completed" and int(result.get("received") or 0) > 0:
+                        record_provider_success(
+                            connection, "fuyao_ths", "a_share_prices_snapshot",
+                            int(result.get("received") or 0), None,
+                        )
+                    else:
+                        record_provider_failure(
+                            connection, "fuyao_ths", "a_share_prices_snapshot", error, None,
+                        )
+
+            await run_database_blocking(write, timeout_seconds=10)
+
+        try:
+            return await capture_level1_snapshot(
+                fetch_snapshot=intraday_all_a_snapshot,
+                persist=persist,
+                persist_health=persist_health,
+                session_open=session_open,
+            )
+        except Exception as error:  # noqa: BLE001 - health must see provider errors
+            await persist_health({"status": "failed", "error": safe_error_detail(str(error), 300)})
+            raise
 
     await run_level1_snapshot_loop(interval_seconds=60, capture=capture)
 
@@ -4272,7 +4353,7 @@ async def refresh_intraday_limit_up_anchors(observed_at: datetime) -> dict[str, 
         limits = reference.get("limits") or {}
         if not limits:
             return {"status": "blocked", "reason": "session trade limits unavailable"}
-        snapshot_rows, _meta = await fuyao_all_a_snapshot_rows()
+        snapshot_rows, _meta = await intraday_all_a_snapshot()
         rows = live_limit_up_pool_rows(snapshot_rows, limits, reference.get("names"), observed_at)
         stored = await run_database_blocking(_persist_local_limit_pool, rows, timeout_seconds=30)
         return {"status": "completed" if rows else "empty", "received": len(rows), "stored": stored,
@@ -4998,7 +5079,7 @@ async def longhu_period_bars(symbol: str, period: str, count: int = 120) -> list
     """Data plane: Longhu 30/60-minute K-line (history plus the forming bar)."""
     if not longhu_vendor_configured():
         raise RuntimeError("longhu_not_configured")
-    return await run_akshare_blocking(
+    return await run_realtime_vendor_blocking(
         lambda: longhu_intraday_source().stock_period_bars(symbol, period, count), timeout_seconds=8,
     )
 
@@ -5541,6 +5622,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
 
 def _verify_strategy_runtime_contracts() -> None:
     """Verify runtime model identities before any strategy loop obtains a lease."""
+    validate_strategy_contracts()
     validate_strategy_runtime_versions({
         "intraday_watchlist_confirmation": INTRADAY_SIGNAL_MODEL_VERSION,
         "watchlist_main_wave_shadow": WATCHLIST_MAIN_WAVE_MODEL_VERSION,
@@ -5554,6 +5636,9 @@ def _verify_strategy_runtime_contracts() -> None:
         "longhu_multifactor_shadow": LONGHU_MULTIFACTOR_SHADOW_MODEL_VERSION,
         "teacher_review_playbooks": TEACHER_REVIEW_MODEL_VERSION,
         "launch_radar": LAUNCH_RADAR_MODEL_VERSION,
+        "multi_factor_rank_v1": MULTI_FACTOR_MODEL_VERSION,
+        "board_flow_drill": BOARD_FLOW_DRILL_MODEL_VERSION,
+        "dragon_leader_research": DRAGON_LEADER_MODEL_VERSION,
     })
 
 

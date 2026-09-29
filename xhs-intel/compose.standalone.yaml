@@ -1,0 +1,33 @@
+name: xhs-intel-standalone
+
+services:
+  xhs-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+    image: xhs-intel:standalone
+    ports:
+      - "127.0.0.1:${XHS_COLLECTOR_PORT:-18790}:18790"
+    environment:
+      XHS_COLLECTOR_HOST: 0.0.0.0
+      XHS_COLLECTOR_PORT: 18790
+      XHS_COLLECTOR_TOKEN: ${XHS_COLLECTOR_TOKEN:?Set XHS_COLLECTOR_TOKEN}
+      XHS_SOURCE_ROOT: /opt/xhs
+      XHS_COOKIE_FILE: /run/secrets/xhs_cookie
+      XHS_STATE_DIR: /var/lib/xhs-collector
+      XHS_FEISHU_WEBHOOK_URL: ${XHS_FEISHU_WEBHOOK_URL:-}
+      XHS_SOURCE_GIT_SHA: ${XHS_SOURCE_GIT_SHA:?Set pinned Spider_XHS commit}
+      XHS_SOURCE_TREE_SHA256: ${XHS_SOURCE_TREE_SHA256:?Set Spider_XHS source digest}
+    volumes:
+      - ${XHS_SOURCE_ROOT:?Set XHS_SOURCE_ROOT to a pinned Spider_XHS checkout}:/opt/xhs:ro
+      - ${XHS_COOKIE_FILE:?Set XHS_COOKIE_FILE}:/run/secrets/xhs_cookie:ro
+      - xhs_state:/var/lib/xhs-collector
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:18790/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  xhs_state:

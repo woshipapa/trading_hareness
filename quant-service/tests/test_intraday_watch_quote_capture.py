@@ -8,7 +8,7 @@ from app.intraday_derived_flow_metrics import (
     derive_watch_flow_metrics as pure_derive_watch_flow_metrics,
     derived_flow_divergence as pure_derived_flow_divergence,
 )
-from app.intraday_watch_quote_capture import WatchQuoteCaptureDependencies, capture_watch_quotes
+from app.intraday_watch_quote_capture import WatchQuoteCaptureDependencies, capture_watch_quotes, eastmoney_flow_freshness
 from app.runtime_executors import ExecutorSaturatedError
 from app.intraday_quote_normalization import (
     exchange_time_status, merge_longhu_watch_quotes, merge_watch_quote_prices, merge_sina_watch_quotes,
@@ -16,6 +16,16 @@ from app.intraday_quote_normalization import (
 
 
 class WatchQuoteCaptureTests(unittest.TestCase):
+    def test_eastmoney_flow_requires_an_upstream_timestamp_for_freshness(self):
+        observed_at = datetime(2026, 9, 7, 1, 30, 10, tzinfo=timezone.utc)
+        missing = eastmoney_flow_freshness([{"ts_code": "000001.SZ"}], observed_at)
+        self.assertEqual(missing["status"], "unknown")
+        self.assertEqual(missing["freshness_reason"], "upstream_timestamp_missing")
+        fresh = eastmoney_flow_freshness(
+            [{"ts_code": "000001.SZ", "upstream_observed_at": "2026-09-07T01:30:00+00:00"}], observed_at,
+        )
+        self.assertEqual(fresh["status"], "fresh")
+
     def test_real_mergers_keep_fresh_fallback_when_longhu_is_stale_or_missing(self):
         async def all_a():
             return [], {"status": "unavailable"}
@@ -136,7 +146,8 @@ class WatchQuoteCaptureTests(unittest.TestCase):
         self.assertEqual(capture.quotes["000001.SZ"]["price_freshness"]["status"], "fresh")
         self.assertIn("percentiles", calls)
         self.assertEqual(capture.all_a_snapshot_status["status"], "fresh")
-        self.assertEqual(capture.eastmoney_watch_flow_status["status"], "fresh")
+        self.assertEqual(capture.eastmoney_watch_flow_status["status"], "unknown")
+        self.assertEqual(capture.eastmoney_watch_flow_status["request_status"], "completed")
         self.assertTrue(capture.eastmoney_watch_flow_status["research_confirmation_only"])
 
     def test_licensed_quote_overlays_tencent_and_reports_independent_status(self):

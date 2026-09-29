@@ -8,8 +8,8 @@
 | Item | Current value |
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
-| `main.py` top-level functions | 496 |
-| Python modules under `app/` | 506 |
+| `main.py` top-level functions | 499 |
+| Python modules under `app/` | 512 |
 | HTTP router modules | 47 |
 | Alembic migrations | 104 |
 | Frontend source files | 37 |
@@ -23,7 +23,7 @@ New behaviour should be owned by an existing domain package/owner.
 |---|---:|
 | `intraday` | 66 |
 | `async` | 42 |
-| `strategy` | 23 |
+| `strategy` | 24 |
 | `longhu` | 18 |
 | `analyst` | 17 |
 | `research` | 15 |
@@ -33,11 +33,11 @@ New behaviour should be owned by an existing domain package/owner.
 | `board` | 10 |
 | `teacher` | 10 |
 | `limit` | 9 |
-| `daily` | 7 |
+| `daily` | 8 |
+| `provider` | 7 |
 | `tushare` | 7 |
 | `xiaojie` | 7 |
 | `paper` | 6 |
-| `provider` | 6 |
 | `watchlist` | 6 |
 
 ## Router entrypoints

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
@@ -120,6 +121,27 @@ def _measure_for(report: Mapping[str, Any], scope: str, measure: str) -> float |
     return None if value is None else float(value)
 
 
+def _difference_significance(before: Sequence[float], after: Sequence[float]) -> str:
+    """Use a conservative Welch-style normal approximation for change review.
+
+    This is a descriptive guard, not a promotion test.  With fewer than two
+    observations on either side there is no variance estimate, so the caller
+    keeps the historical directional verdict for compatibility and reports the
+    result as ``insufficient_variance``.
+    """
+    if len(before) < 2 or len(after) < 2:
+        return "insufficient_variance"
+    before_mean = sum(before) / len(before)
+    after_mean = sum(after) / len(after)
+    before_var = sum((value - before_mean) ** 2 for value in before) / (len(before) - 1)
+    after_var = sum((value - after_mean) ** 2 for value in after) / (len(after) - 1)
+    standard_error = math.sqrt(before_var / len(before) + after_var / len(after))
+    if standard_error <= 0:
+        return "significant" if before_mean != after_mean else "inconclusive"
+    z = abs(after_mean - before_mean) / standard_error
+    return "significant" if z >= 1.96 else "inconclusive"
+
+
 def evaluate(changes: Sequence[Mapping[str, Any]], reports: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Each applied change against its own preregistered expectation.
 
@@ -146,8 +168,11 @@ def evaluate(changes: Sequence[Mapping[str, Any]], reports: Sequence[Mapping[str
         after_mean = round(sum(after) / len(after), 4) if after else None
         moved = (None if before_mean is None or after_mean is None
                  else round(after_mean - before_mean, 4))
+        significance = _difference_significance(before, after) if moved is not None else "insufficient_variance"
         if moved is None or len(after) < window:
             verdict = "too_early"
+        elif significance == "inconclusive":
+            verdict = "inconclusive"
         elif (moved > 0) == (str(expectation.get("direction")) == "up"):
             verdict = "as_expected"
         else:
@@ -158,6 +183,7 @@ def evaluate(changes: Sequence[Mapping[str, Any]], reports: Sequence[Mapping[str
             "applied_on": applied_on, "measure": measure, "direction": expectation.get("direction"),
             "sessions_before": len(before), "sessions_after": len(after), "review_after_sessions": window,
             "before": before_mean, "after": after_mean, "moved": moved, "verdict": verdict,
+            "significance": significance,
             "reason": change.get("reason"),
         })
     return out
@@ -165,7 +191,7 @@ def evaluate(changes: Sequence[Mapping[str, Any]], reports: Sequence[Mapping[str
 
 def change_lines(evaluations: Sequence[Mapping[str, Any]]) -> list[str]:
     """Report lines: what we changed, what we expected, what happened."""
-    labels = {"too_early": "样本不足", "as_expected": "符合预期", "against_expectation": "与预期相反"}
+    labels = {"too_early": "样本不足", "inconclusive": "差异不确定", "as_expected": "符合预期", "against_expectation": "与预期相反"}
     lines = []
     for item in evaluations:
         moved = "—" if item["moved"] is None else f"{item['moved']:+.2f}"

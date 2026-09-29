@@ -16,8 +16,23 @@ def _date_key(row: dict[str, Any]) -> str:
     return str(row.get("trade_date") or row.get("date") or "")
 
 
-def technical_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    ordered = sorted((row for row in rows if _number(row.get("close")) is not None), key=_date_key)
+def technical_summary(rows: list[dict[str, Any]], *, as_of_date: str | None = None) -> dict[str, Any]:
+    """Summarize bars visible by an optional point-in-time date boundary."""
+    raw_rows = [row for row in rows if as_of_date is None or _date_key(row) <= str(as_of_date)]
+    missing_close_rows = [row for row in raw_rows if _number(row.get("close")) is None]
+    if missing_close_rows:
+        # Dropping a missing bar silently shortens windows and can make a
+        # supposedly point-in-time feature use a later observation than the
+        # caller intended.  Make the data-quality failure visible to every
+        # consumer instead of inventing continuity.
+        return {
+            "status": "data_quality_blocked",
+            "score": None,
+            "trend": "unknown",
+            "reasons": ["日线收盘价存在缺口，拒绝跳过缺失 bar"],
+            "missing_close_rows": len(missing_close_rows),
+        }
+    ordered = sorted(raw_rows, key=_date_key)
     closes = [value for row in ordered if (value := _number(row.get("close"))) is not None]
     if not closes:
         return {"status": "insufficient_market_data", "score": None, "trend": "unknown", "reasons": ["没有可计算的日线收盘价"]}

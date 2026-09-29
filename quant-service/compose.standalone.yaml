@@ -1,0 +1,72 @@
+name: quant-research-standalone
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-quant}
+    volumes:
+      - quant_postgres_data:/var/lib/postgresql/data
+      - ./standalone/001-ingestion-contract.sql:/docker-entrypoint-initdb.d/001-ingestion-contract.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  quant-bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile.standalone
+    image: quant-research:standalone
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "database_bootstrap.py"]
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-quant}
+      PGUSER: ${POSTGRES_USER:-quant}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      # A standalone research database has no Feishu ingestion ledger. The
+      # analyst-signal FK remains part of the shared owner schema contract and
+      # is only used when that ledger is present.
+      QUANT_REQUIRE_INGESTION_LEDGER: "false"
+      QUANT_BACKGROUND_TASKS_ENABLED: "false"
+    restart: "no"
+
+  quant-research:
+    build:
+      context: .
+      dockerfile: Dockerfile.standalone
+    image: quant-research:standalone
+    depends_on:
+      quant-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${QUANT_PORT:-5681}:8000"
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-quant}
+      PGUSER: ${POSTGRES_USER:-quant}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      QUANT_REQUIRE_INGESTION_LEDGER: "false"
+      QUANT_BACKGROUND_TASKS_ENABLED: ${QUANT_BACKGROUND_TASKS_ENABLED:-false}
+      QUANT_RUNTIME_PROFILE: ${QUANT_RUNTIME_PROFILE:-research}
+      QUANT_WRITE_API_KEY: ${QUANT_WRITE_API_KEY:-standalone-local-only}
+    volumes:
+      - quant_data:/var/lib/quant
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  quant_postgres_data:
+  quant_data:

@@ -90,7 +90,18 @@ def build_scan_source_status(
         },
         "eastmoney_watch_flow": {
             **eastmoney_watch_flow_status,
-            "status": "completed" if eastmoney_watch_flow_status.get("status") == "fresh" else "unavailable",
+            # ``request_status`` records transport completion; ``status`` is
+            # the freshness result and may correctly be unknown when the
+            # public payload has no upstream timestamp.
+            "status": (
+                "completed"
+                if (
+                    eastmoney_watch_flow_status.get("request_status") == "completed"
+                    and eastmoney_watch_flow_rows
+                ) or eastmoney_watch_flow_status.get("status") == "fresh"
+                else "unavailable"
+            ),
+            "freshness_status": eastmoney_watch_flow_status.get("freshness_status", eastmoney_watch_flow_status.get("status")),
             "rows": len(eastmoney_watch_flow_rows), "scope": "explicit_watchlist_only",
             "percentiles": "not_computed", "research_confirmation_only": True,
             "supplies": "main_net_inflow_only_when_derived_metrics_available",

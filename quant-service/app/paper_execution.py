@@ -56,6 +56,19 @@ def triple_barrier_label(path: Iterable[dict[str, Any]], *, entry_price: Decimal
     entry = Decimal(str(entry_price))
     upper = entry * (Decimal("1") + Decimal(str(spec.upper_return)))
     lower = entry * (Decimal("1") + Decimal(str(spec.lower_return)))
+    cost_bps = max(Decimal("0"), Decimal(str(getattr(spec, "cost_bps", 0.0))))
+    cost_rate = cost_bps / Decimal("10000")
+
+    def matured(label: str, at: datetime, close: Decimal) -> dict[str, Any]:
+        gross = close / entry - 1
+        return {
+            "status": "matured", "label": label, "exit_at": at, "exit_price": close,
+            # ``return`` is the cost-aware label consumed by calibration;
+            # gross_return remains available for descriptive diagnostics.
+            "return": float(gross - cost_rate), "gross_return": float(gross),
+            "net_return": float(gross - cost_rate), "cost_bps": float(cost_bps),
+        }
+
     deadline = entry_at.timestamp() + int(spec.max_horizon_minutes) * 60
     last = None
     for row in path:
@@ -69,18 +82,15 @@ def triple_barrier_label(path: Iterable[dict[str, Any]], *, entry_price: Decimal
             continue
         last = (at, close)
         if close >= upper:
-            return {"status": "matured", "label": "upper", "exit_at": at, "exit_price": close,
-                    "return": float(close / entry - 1)}
+            return matured("upper", at, close)
         if close <= lower:
-            return {"status": "matured", "label": "lower", "exit_at": at, "exit_price": close,
-                    "return": float(close / entry - 1)}
+            return matured("lower", at, close)
     if last is None:
         return {"status": "unavailable", "label": None, "reason": "no_point_in_time_path"}
     at, close = last
     if at.timestamp() < deadline:
         return {"status": "pending", "label": None, "last_at": at, "last_price": close}
-    return {"status": "matured", "label": "time", "exit_at": at, "exit_price": close,
-            "return": float(close / entry - 1)}
+    return matured("time", at, close)
 
 
 def paper_decision_payload(signal: dict[str, Any], state: str, policy: dict[str, Any],

@@ -83,10 +83,12 @@ class PaperExecutionTests(unittest.TestCase):
 
     def test_triple_barrier_is_point_in_time_and_matures(self):
         start = datetime(2026, 8, 14, 1, 30, tzinfo=timezone.utc)
-        spec = type("Spec", (), {"upper_return": 0.03, "lower_return": -0.02, "max_horizon_minutes": 60})
+        spec = type("Spec", (), {"upper_return": 0.03, "lower_return": -0.02, "max_horizon_minutes": 60, "cost_bps": 18})
         path = [{"observed_at": start + timedelta(minutes=5), "close": 103}]
         labeled = triple_barrier_label(path, entry_price=100, entry_at=start, spec=spec)
         self.assertEqual(labeled["label"], "upper")
+        self.assertEqual(labeled["cost_bps"], 18.0)
+        self.assertLess(labeled["return"], labeled["gross_return"])
 
     def test_contract_payload_is_json_safe(self):
         observed = datetime(2026, 8, 14, tzinfo=timezone.utc)

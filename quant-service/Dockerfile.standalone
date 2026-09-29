@@ -1,0 +1,33 @@
+FROM python:3.12-slim
+
+ARG APP_GIT_SHA=unknown
+ARG APP_RELEASE=standalone
+ARG APP_BUILD_CREATED_AT=unknown
+
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# This Dockerfile is intentionally buildable with quant-service as the
+# context. It contains no COPY from the integration repository or Feishu
+# implementation; the database/provider contracts are supplied at runtime.
+COPY requirements.lock ./requirements.lock
+RUN pip install --no-cache-dir --timeout 120 --retries 8 -r requirements.lock
+
+COPY app ./app
+COPY tests ./tests
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
+COPY entrypoint.py ./entrypoint.py
+COPY run_server.py ./run_server.py
+COPY database_bootstrap.py ./database_bootstrap.py
+
+ENV APP_GIT_SHA=${APP_GIT_SHA} \
+    APP_RELEASE=${APP_RELEASE} \
+    APP_BUILD_CREATED_AT=${APP_BUILD_CREATED_AT}
+LABEL org.opencontainers.image.revision=${APP_GIT_SHA} \
+      org.opencontainers.image.version=${APP_RELEASE} \
+      org.opencontainers.image.created=${APP_BUILD_CREATED_AT}
+
+EXPOSE 8000
+CMD ["python", "entrypoint.py", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

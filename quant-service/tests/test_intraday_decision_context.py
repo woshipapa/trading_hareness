@@ -36,6 +36,18 @@ class IntradayDecisionContextTests(unittest.TestCase):
         self.assertEqual(profile["independent_trading_days"], 1)
         self.assertEqual(profile["raw_event_positive_rate"], 0.75)
 
+    def test_probability_profiles_use_t1_rows_when_horizon_is_present(self) -> None:
+        rows = [
+            {"signal_key": "000001.SZ:entry:sector_surge_v1", "signal_type": "entry",
+             "horizon_key": "next_close", "exchange_date": "2026-08-10", "raw_return": 0.04},
+            {"signal_key": "000002.SZ:entry:sector_surge_v1", "signal_type": "entry",
+             "horizon_key": "30m", "exchange_date": "2026-08-10", "raw_return": -0.40},
+        ]
+        profile = probability_profiles_from_rows(rows)["sector_surge:entry"]
+        self.assertEqual(profile["horizon"], "next_close")
+        self.assertEqual(profile["source"], "matured_t1_settlement_outcomes")
+        self.assertEqual(profile["sample_rows"], 1)
+
     def test_preregistered_rebound_probability_takes_precedence(self) -> None:
         expected = {"estimated_probability": 0.31, "sample_rows": 10}
         signal = {"signal_key": "000001.SZ:entry:countertrend_rebound_v1", "signal_type": "entry",

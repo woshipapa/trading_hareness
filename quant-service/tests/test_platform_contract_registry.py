@@ -23,7 +23,7 @@ from app.platform.runtime_task_registry import (
     runtime_task_contract_catalog,
 )
 from app.runtime_tasks import BackgroundTaskSpec, validate_runtime_task_specs
-from app.platform.strategy_registry import strategy_contract_catalog
+from app.platform.strategy_registry import strategy_contract_catalog, validate_strategy_contracts
 from app.platform.strategy_registry import validate_strategy_runtime_versions
 from app.health_read_model import HealthDependencies, health_payload
 
@@ -75,6 +75,9 @@ class PlatformContractRegistryTests(unittest.TestCase):
         self.assertIsNotNone(main_wave["deprecated_reason"], "roc_auc<0.5 finding must stay documented, not silently dropped")
         self.assertIn("roc_auc", main_wave["deprecated_reason"])
         self.assertIsNone(next(item for item in catalog if item["key"] == "intraday_watchlist_confirmation")["deprecated_reason"])
+        validate_strategy_contracts()
+        self.assertEqual(intraday["alert_effect"], "research_alert")
+        self.assertEqual(next(item for item in catalog if item["key"] == "watchlist_main_wave_shadow")["alert_effect"], "none")
 
     def test_every_declared_evidence_dataset_has_a_cloud_archive_contract(self) -> None:
         catalog = data_product_contract_catalog()

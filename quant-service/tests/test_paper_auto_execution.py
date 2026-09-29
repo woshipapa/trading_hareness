@@ -1,7 +1,7 @@
 import unittest
 
 from app.paper_auto_execution import (
-    exit_quantity, plan_paper_orders, position_size, stop_loss_hit, strategy_intent,
+    exit_quantity, non_fill_reason_counts, plan_paper_orders, position_size, stop_loss_hit, strategy_intent,
 )
 
 # A xiaojie_leader_flow candidate carries its own sizing, stop and exit.
@@ -22,6 +22,16 @@ QUOTES = {"301583.SZ": {"price": 142.56}, "688200.SH": {"price": 400.03},
 
 class StrategyIntentTests(unittest.TestCase):
     """Sizing and exits belong to the strategy, not to this module."""
+
+    def test_non_fill_reasons_are_aggregated_for_research_evidence(self):
+        self.assertEqual(
+            non_fill_reason_counts([
+                {"reason": "insufficient_paper_cash"},
+                {"reason": "insufficient_paper_cash"},
+                {},
+            ]),
+            {"insufficient_paper_cash": 2, "unknown": 1},
+        )
 
     def test_the_strategy_supplies_its_own_entry_fraction(self):
         intent = strategy_intent(XIAOJIE)

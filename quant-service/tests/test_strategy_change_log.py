@@ -105,6 +105,14 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "too_early")
         self.assertEqual(result["sessions_after"], 1)
 
+    def test_small_noisy_change_is_inconclusive_after_window(self):
+        result = evaluate(
+            [change()],
+            self.reports([(21, 50.0), (22, 50.0)], [(23, 49.0), (24, 51.0), (25, 50.0)]),
+        )[0]
+        self.assertEqual(result["verdict"], "inconclusive")
+        self.assertEqual(result["significance"], "inconclusive")
+
     def test_a_proposed_change_is_not_evaluated_at_all(self):
         self.assertEqual(evaluate([change(status="proposed")], self.reports([(22, 50.0)], [(23, 10.0)])), [])
 

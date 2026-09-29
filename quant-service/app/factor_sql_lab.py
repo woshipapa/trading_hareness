@@ -19,6 +19,11 @@ from .owner_storage import eligible_cold_tables, tiered_relation_sql
 from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
+# Stable identity for the bounded SQL factor evaluator.  This remains a
+# research model version and is deliberately separate from any live policy.
+MULTI_FACTOR_MODEL_VERSION = "strategy-v1"
+
+
 SQL_FACTOR_COLUMNS = {
     "momentum_5d": "momentum_5d",
     "momentum_20d": "momentum_20d",

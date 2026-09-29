@@ -63,6 +63,7 @@ class IntradayWatchlistScanRuntimeDependencies:
     decision_card_url: Callable[[str], str | None]
     run_scan: Callable[..., Awaitable[dict[str, Any]]]
     xiaojie_leader_flow: Callable[..., Awaitable[dict[str, Any]]] | None = None
+    persist_quote_health: Callable[[Any], Awaitable[None]] | None = None
 
 
 class IntradayWatchlistScanRuntime:
@@ -95,10 +96,13 @@ class IntradayWatchlistScanRuntime:
         async def capture_quotes(
             symbols: list[str], observed_at: datetime, quote_timestamp_slo_seconds: float,
         ) -> Any:
-            return await capture_watch_quotes(
+            captured = await capture_watch_quotes(
                 symbols, observed_at, quote_timestamp_slo_seconds,
                 dependencies.quote_capture_dependencies,
             )
+            if dependencies.persist_quote_health is not None:
+                await dependencies.persist_quote_health(captured)
+            return captured
 
         async def persist_signals(*args: Any) -> list[dict[str, Any]]:
             return await dependencies.run_database(

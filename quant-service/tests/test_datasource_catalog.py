@@ -174,6 +174,12 @@ class MigrationPinTests(unittest.TestCase):
         self.assertEqual(tencent.store, "intraday_quote_observations:source_name=tencent_order_book")
         self.assertNotIn("intraday_order_book_observations", longhu.store)
 
+    def test_health_capability_aliases_follow_the_binding_catalog(self):
+        from app.datasources.catalog import health_capability
+        self.assertEqual(health_capability("fuyao_ths", "quote.all_a_snapshot"), "a_share_prices_snapshot")
+        self.assertEqual(health_capability("longhuvip", "quote.watch_snapshot"), "stock_quote")
+        self.assertEqual(health_capability("tencent_free", "quote.order_book"), "order_book_quote")
+
 
 class ResolverTests(unittest.IsolatedAsyncioTestCase):
     async def test_priority_fallback_and_provenance(self):

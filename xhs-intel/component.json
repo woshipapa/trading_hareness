@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "component_version": "0.1.0",
+  "id": "xhs-intel",
+  "runtime": "47edge",
+  "release": "edge-xhs",
+  "release_units": ["edge-xhs"],
+  "description": "Bounded XHS collector and durable delivery queue.",
+  "interfaces": [
+    {
+      "id": "xhs-edge-http-v1",
+      "kind": "http",
+      "health_path": "/health",
+      "command_path": "/v1/run",
+      "status_path": "/v1/status",
+      "auth_header": "X-XHS-Collector-Token",
+      "consumers": ["feishu-relay", "local-worker", "n8n"]
+    }
+  ],
+  "external_dependencies": [
+    "pinned Spider_XHS checkout mounted at /opt/xhs",
+    "pinned Python dependency lock file",
+    "XHS cookie file with a1 and web_session",
+    "optional Feishu webhook target"
+  ],
+  "commands": {
+    "api": "docker compose -f compose.standalone.yaml up --build",
+    "test": "python -m unittest discover -s . -p 'test_*.py' -q"
+  },
+  "safety": {
+    "source_pin_required": true,
+    "cookie_in_git": false,
+    "bounded_polling": true
+  }
+}
