@@ -6,6 +6,7 @@ from operations import (
     MUTATING,
     PUBLIC_METHODS,
     OperationError,
+    LiveWatchManager,
     SpiderRuntime,
     capability_text,
     command_to_operation,
@@ -87,6 +88,19 @@ class OperationContractTests(unittest.TestCase):
         self.assertEqual(value["a1"], "[REDACTED]")
         self.assertIn("[REDACTED]", value["url"])
         self.assertEqual(value["title"], "GPU systems")
+
+    def test_live_watch_never_returns_push_session_id(self):
+        manager = LiveWatchManager()
+        manager.sessions["watch-1"] = {
+            "watch_id": "watch-1",
+            "room_id": "room-1",
+            "sid": "private-push-token",
+            "status": "running",
+            "events": [],
+            "stop": __import__("threading").Event(),
+        }
+        result = manager.get("watch-1")
+        self.assertNotIn("sid", result)
 
     def test_help_and_invalid_json_are_safe(self):
         self.assertIn("pc:", capability_text())

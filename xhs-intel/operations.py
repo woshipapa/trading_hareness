@@ -165,7 +165,7 @@ class LiveWatchManager:
             session = self.sessions.get(str(watch_id))
             if not session:
                 raise OperationError("unknown live watch id")
-            return {key: value for key, value in session.items() if key not in {"stop", "client"}}
+            return {key: value for key, value in session.items() if key not in {"stop", "client", "sid"}}
 
     def stop(self, watch_id: str):
         with self.lock:
