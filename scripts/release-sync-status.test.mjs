@@ -55,6 +55,8 @@ const health = (release, extra = {}) => JSON.stringify({ status: 'ok', build: { 
 const convergedEdge = [
 	`@adapter_health ${health('edge-2026.09.26-sync')}`,
 	`@bridge_health ${JSON.stringify({ status: 'ok', release: `edge-2026.09.26-sync-${sha.slice(0, 12)}`, runtime_source: 'image' })}`,
+	`@xhs_health ${JSON.stringify({ status: 'ok', collector: 'Spider_XHS', cookie_configured: true, release: { xhs_git_sha: 'ebb6c4fbeaedf1237190ebc0c8e3ae8b7ddd030e', xhs_source_tree_sha256: 'a'.repeat(64) } })}`,
+	`@xhs_manifest ${JSON.stringify({ component: 'edge-xhs', xhs_source_dirty: false })}`,
 	`@runtime_env FEISHU_ADAPTER_IMAGE=ghcr.io/woshipapa/trading-hareness-feishu-adapter:${sha}`,
 	'@runtime_env FEISHU_ADAPTER_HOTFIX_ENABLED=false',
 	'@retired_quant inactive disabled',
@@ -101,6 +103,8 @@ console.log('a host that returns nothing is a failure, not a pass');
 const sourceOverlayEdge = [
 	`@adapter_health ${health(`hotfix-20260928T010203Z-${sha.slice(0, 12)}-4242`, { runtime_source: 'source-overlay' })}`,
 	`@bridge_health ${JSON.stringify({ status: 'ok', release: `hotfix-20260928T010203Z-${sha.slice(0, 12)}-4242`, runtime_source: 'source-overlay' })}`,
+	`@xhs_health ${JSON.stringify({ status: 'ok', collector: 'Spider_XHS', cookie_configured: true, release: { xhs_git_sha: 'ebb6c4fbeaedf1237190ebc0c8e3ae8b7ddd030e', xhs_source_tree_sha256: 'a'.repeat(64) } })}`,
+	`@xhs_manifest ${JSON.stringify({ component: 'edge-xhs', xhs_source_dirty: false })}`,
 	`@hotfix_current releases/hotfix-20260928T010203Z-${sha.slice(0, 12)}-4242`,
 	`@hotfix_base ${sha}`,
 	'@runtime_env FEISHU_ADAPTER_HOTFIX_ENABLED=true',

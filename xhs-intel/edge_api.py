@@ -15,6 +15,14 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from collector import collect  # noqa: E402
 from common import error_code, request_json  # noqa: E402
+from operations import (  # noqa: E402
+    SpiderRuntime,
+    capability_text,
+    command_to_operation,
+    format_result,
+    parse_operation_payload,
+    sanitize,
+)
 from store import Conflict, Store  # noqa: E402
 
 
@@ -31,6 +39,13 @@ FEISHU_WEBHOOK = os.environ.get("XHS_FEISHU_WEBHOOK_URL", "").strip()
 FEISHU_TOKEN = os.environ.get("XHS_ALERT_WEBHOOK_TOKEN", "")
 FEISHU_MAX_CHARS = 3000
 DELIVERY_INTERVAL = max(5, int(os.environ.get("XHS_DELIVERY_INTERVAL", "15")))
+RUNTIME = SpiderRuntime(SOURCE_ROOT, COOKIE_FILE)
+RELEASE = {
+    "xhs_git_sha": os.environ.get("XHS_SOURCE_GIT_SHA", ""),
+    "xhs_source_tree_sha256": os.environ.get("XHS_SOURCE_TREE_SHA256", ""),
+    "xhs_intel_tree_sha256": os.environ.get("XHS_INTEL_TREE_SHA256", ""),
+    "xhs_workflow_sha256": os.environ.get("XHS_WORKFLOW_SHA256", ""),
+}
 
 
 def cookie_configured() -> bool:
@@ -100,21 +115,43 @@ def delivery_loop():
             time.sleep(DELIVERY_INTERVAL)
 
 
+def _command_text(payload):
+    command = str(payload.get("command") or payload.get("text") or "").strip()
+    # The adapter intentionally forwards the text after #xhs.  Keep accepting
+    # the full form for direct n8n/API callers and for old queued messages.
+    return command if command.lower().startswith("#xhs") else "#xhs " + command
+
+
 def command_result(payload):
     message_id = str(payload.get("message_id") or hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:24])
-    command = str(payload.get("command") or "").strip()
-    if not STORE.command(message_id, command):
+    command = _command_text(payload)
+    # Keep only a digest in the durable command ledger. Generic API arguments
+    # may contain user supplied fields, and the ledger must never become a
+    # second secret store.
+    command_ledger_key = "sha256:" + hashlib.sha256(command.encode()).hexdigest()
+    if not STORE.command(message_id, command_ledger_key):
         return {"status": "duplicate", "message_id": message_id}
     lowered = command.lower()
-    if lowered in {"#xhs status", "#xhs 状态"}:
-        status = STORE.status()
-        text = f"小红书流水线状态\n库存：{status['notes']} 条笔记、{status['revisions']} 个内容版本\n任务：{status['jobs']}\n最近摘要：{STORE.latest_summary()[:1200]}"
-    elif lowered in {"#xhs latest", "#xhs 最新", "#xhs 摘要"}:
-        text = STORE.latest_summary()[:2800]
-    elif lowered in {"#xhs", "#xhs help", "#xhs 帮助"}:
-        text = "小红书指令：#xhs status｜#xhs 最新｜#xhs 帮助"
-    else:
-        text = "暂支持：#xhs status / #xhs 最新 / #xhs 帮助"
+    try:
+        if lowered in {"#xhs status", "#xhs 状态"}:
+            status = STORE.status()
+            text = f"小红书流水线状态\n库存：{status['notes']} 条笔记、{status['revisions']} 个内容版本\n任务：{status['jobs']}\n最近摘要：{STORE.latest_summary()[:1200]}"
+        elif lowered in {"#xhs latest", "#xhs 最新", "#xhs 摘要"}:
+            text = STORE.latest_summary()[:2800]
+        elif lowered in {"#xhs", "#xhs help", "#xhs 帮助"}:
+            text = capability_text()
+        else:
+            operation = command_to_operation(command)
+            if operation is None:
+                text = "无法识别指令。\n\n" + capability_text()
+            else:
+                namespace, method, args, kwargs = operation
+                result = RUNTIME.execute(namespace, method, args, kwargs)
+                text = format_result(f"{namespace}.{method}", result)
+    except Exception as exc:  # noqa: BLE001
+        # User-facing operation errors are intentionally terse; upstream
+        # exceptions can contain signed URLs or private request material.
+        text = f"小红书操作失败：{error_code(exc)}"
     STORE.command_result(message_id, text)
     return {"status": "accepted", "message_id": message_id}
 
@@ -131,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
                 reply(self, 401, {"status": "unauthorized"})
                 return
             value = STORE.status()
-            value.update({"status": "ok", "collector": "Spider_XHS", "cookie_configured": cookie_configured(), "feishu_webhook_configured": bool(FEISHU_WEBHOOK)})
+            value.update({"status": "ok", "collector": "Spider_XHS", "cookie_configured": cookie_configured(), "feishu_webhook_configured": bool(FEISHU_WEBHOOK), "release": RELEASE})
             reply(self, 200, value)
             return
         reply(self, 404, {"status": "not_found"})
@@ -153,6 +190,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.path == "/v1/command":
                 reply(self, 200, command_result(payload))
+                return
+            if self.path == "/v1/operation":
+                namespace, method, args, kwargs = parse_operation_payload(payload)
+                result = RUNTIME.execute(namespace, method, args, kwargs)
+                reply(self, 200, {"status": "completed", "operation": f"{namespace}.{method}", "result": sanitize(result)})
                 return
             if self.path == "/v1/worker/claim":
                 reply(self, 200, {"job": STORE.claim(str(payload.get("worker") or "mac-ai"))})

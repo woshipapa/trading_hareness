@@ -108,6 +108,8 @@ if [[ "$skip_edge" != true ]]; then
 edge_dir="$1"; runtime_env="$2"
 printf '@adapter_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:18300/health 2>/dev/null | tr -d '\n')"
 printf '@bridge_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:8090/health 2>/dev/null | tr -d '\n')"
+printf '@xhs_health %s\n' "$(curl -fsS -m 8 http://127.0.0.1:18790/health 2>/dev/null | tr -d '\n')"
+printf '@xhs_manifest %s\n' "$(cat "$edge_dir/xhs-manifest.json" 2>/dev/null | tr -d '\n')"
 printf '@hotfix_current %s\n' "$(readlink "$edge_dir/hotfix/current" 2>/dev/null || true)"
 printf '@hotfix_base %s\n' "$(cat "$edge_dir/hotfix/current/.base-git-sha" 2>/dev/null || true)"
 grep -E '^(FEISHU_ADAPTER_IMAGE|FEISHU_ADAPTER_HOTFIX_ENABLED|APP_GIT_SHA|APP_RELEASE)=' "$runtime_env" 2>/dev/null \
@@ -230,6 +232,21 @@ if not skip_edge:
               edge_expected[:12] in bridge_release and "-dirty" not in bridge_release
               and ((edge_source and bridge_release.startswith("hotfix-")) or (not edge_source and not bridge_release.startswith("hotfix-"))),
               f"{'source-overlay' if edge_source else 'pinned'} from {edge_expected[:12]}")
+        xhs = health(first(edge, "xhs_health"))
+        xhs_release = (xhs or {}).get("release") or {}
+        manifest = health(first(edge, "xhs_manifest"))
+        check("edge", "XHS collector /health", (xhs or {}).get("status"),
+              (xhs or {}).get("status") == "ok" and (xhs or {}).get("collector") == "Spider_XHS"
+              and (xhs or {}).get("cookie_configured") is True, "ok / Spider_XHS / cookie configured")
+        check("edge", "XHS source commit", xhs_release.get("xhs_git_sha"),
+              bool(xhs_release.get("xhs_git_sha")) and len(str(xhs_release.get("xhs_git_sha"))) >= 7,
+              "pinned external commit")
+        check("edge", "XHS source digest", xhs_release.get("xhs_source_tree_sha256"),
+              len(str(xhs_release.get("xhs_source_tree_sha256") or "")) == 64,
+              "64-char SHA-256")
+        check("edge", "XHS component manifest", manifest.get("component"),
+              manifest.get("component") == "edge-xhs" and manifest.get("xhs_source_dirty") is False,
+              "edge-xhs / clean source")
         active, enabled = (first(edge, "retired_quant") + " ").split(" ", 1)
         check("edge", "retired quant-intraday-edge", f"{active}/{enabled.strip()}",
               active != "active" and enabled.strip() != "enabled", "inactive/disabled")
