@@ -2,6 +2,7 @@
 import datetime as dt
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError
@@ -24,6 +25,43 @@ _NOTE_PATH_RE = re.compile(r'/(?:explore|discovery/item)/([0-9a-fA-F]{24})(?:/|$
 _TRAILING_SHARE_TEXT = '.,;!?)]}\u3002\uff0c\uff1b\uff01\uff1f\u3011\u300b'
 _MAX_NOTE_IMAGES = 18
 _IMAGE_HOST_SUFFIXES = ('.xhscdn.com', '.xiaohongshu.com')
+_EPHEMERAL_LINK_TTL = 15 * 60
+_EPHEMERAL_LINKS = {}
+_EPHEMERAL_LINKS_LOCK = threading.Lock()
+
+
+def remember_note_link(note_id, fetch_url, *, ttl=_EPHEMERAL_LINK_TTL):
+    """Keep a fresh signed link in memory only; never persist xsec material."""
+    note_id = str(note_id or '').lower()
+    parsed = urlparse(str(fetch_url or ''))
+    token = parse_qs(parsed.query).get('xsec_token', [''])[0]
+    source = parse_qs(parsed.query).get('xsec_source', ['pc_share'])[0]
+    if not re.fullmatch(r'[a-f0-9]{24}', note_id) or not token:
+        return False
+    with _EPHEMERAL_LINKS_LOCK:
+        now = time.time()
+        for key, value in list(_EPHEMERAL_LINKS.items()):
+            if value[2] <= now:
+                _EPHEMERAL_LINKS.pop(key, None)
+        _EPHEMERAL_LINKS[note_id] = (token[:2048], source[:64], now + max(30, int(ttl)))
+    return True
+
+
+def ephemeral_note_link(note_id):
+    """Return a fresh signed XHS URL, if the collector saw one recently."""
+    note_id = str(note_id or '').lower()
+    with _EPHEMERAL_LINKS_LOCK:
+        value = _EPHEMERAL_LINKS.get(note_id)
+        if not value:
+            return ''
+        token, source, expires = value
+        if expires <= time.time():
+            _EPHEMERAL_LINKS.pop(note_id, None)
+            return ''
+    return f'https://www.xiaohongshu.com/explore/{note_id}?' + urlencode({
+        'xsec_token': token,
+        'xsec_source': source if re.fullmatch(r'[A-Za-z0-9_-]+', source) else 'pc_share',
+    })
 
 
 def _image_source_urls(image):
@@ -179,6 +217,7 @@ def collect_single_note(store, source_root, cookie_file, value, *, deliver_to_fe
     note_id = reference['note_id']
     if ok and items and isinstance(items[0], dict):
         note = normalize({'id': note_id}, f'single:{note_id}', items[0])
+        remember_note_link(note_id, reference['fetch_url'])
         fetch_source = 'live'
     else:
         note = store.latest_note(note_id)
@@ -291,6 +330,8 @@ def collect_watched(store, source_root, cookie_file, watch_users, *, limit=8,
                 token = item.get('xsec_token') or item.get('xsecToken') or ''
                 detail = None
                 if token:
+                    remember_note_link(note_id, f'https://www.xiaohongshu.com/explore/{note_id}?'
+                                       + urlencode({'xsec_token': token, 'xsec_source': 'pc_user'}))
                     time.sleep(delay)
                     ok, _msg, detail_body = api.get_note_info(
                         f'https://www.xiaohongshu.com/explore/{note_id}?'
@@ -358,6 +399,8 @@ def collect(store, source_root, cookie_file, queries, *, limit=8, request_key=No
                 token = item.get('xsec_token')
                 if not token:
                     raise ValueError('missing_detail_token')
+                remember_note_link(note_id, f'https://www.xiaohongshu.com/explore/{note_id}?'
+                                   + urlencode({'xsec_token': token, 'xsec_source': 'pc_search'}))
                 time.sleep(delay)
                 ok, _msg, detail = api.get_note_info(f'https://www.xiaohongshu.com/explore/{note_id}?' + urlencode({'xsec_token': token, 'xsec_source': 'pc_search'}))
                 if not ok:
@@ -409,6 +452,8 @@ def collect_recommendations(store, source_root, cookie_file, *, run_id, limit=50
             token = item.get('xsec_token') or item.get('xsecToken') or ''
             if not token:
                 continue
+            remember_note_link(note_id, f'https://www.xiaohongshu.com/explore/{note_id}?'
+                               + urlencode({'xsec_token': token, 'xsec_source': 'pc_homefeed'}))
             time.sleep(delay)
             ok, _msg, detail_body = api.get_note_info(
                 f'https://www.xiaohongshu.com/explore/{note_id}?' +

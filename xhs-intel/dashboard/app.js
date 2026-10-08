@@ -98,6 +98,14 @@ function safeXhsUrl(value) {
   return '#';
 }
 
+function safePreviewUrl(value, noteId) {
+  const candidate = String(value || '');
+  const id = String(noteId || '').toLowerCase();
+  if (/^\/[a-z0-9/_-]+$/.test(candidate) && /^[0-9a-f]{24}$/.test(id)
+      && candidate === `/xhs/open/${id}`) return candidate;
+  return /^[0-9a-f]{24}$/.test(id) ? `/xhs/open/${id}` : '#';
+}
+
 function safeStatus(value) {
   return String(value || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '');
 }
@@ -295,7 +303,7 @@ function renderRecommendations() {
     : '';
   const action = `${retryAction}<button class="button primary" data-action="run-recommendations">${icon('play')}<span>扫描 50 条</span></button>`;
   const list = runs.length ? runs.map((run) => `<button type="button" class="run-option ${run.run_id === state.selectedRunId ? 'active' : ''}" data-action="select-run" data-run-id="${escapeHtml(run.run_id)}"><div class="run-option-top"><strong>${escapeHtml(run.run_id)}</strong>${pill(run.status)}</div><div class="run-stats"><span>抓取 ${run.fetched || 0}</span><span>入选 ${run.selected || 0}</span><span>复核 ${run.review || 0}</span></div></button>`).join('') : emptyState('暂无运行记录', '启动推荐扫描后会生成运行记录。');
-  const itemRows = items.map((item) => `<tr><td class="number">${item.source_rank || '-'}</td><td><a class="row-title" href="${safeXhsUrl(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title || '无标题')}</a><span class="row-subtitle">${escapeHtml(item.author || item.text || '作者未知')}</span></td><td>${pill(item.decision || item.state)}</td><td><div class="score">${item.relevance_score == null ? '-' : `${Math.round(item.relevance_score * 100)}%`}</div>${item.relevance_score == null ? '' : `<progress class="score-track" max="100" value="${Math.max(0, Math.min(100, Number(item.relevance_score) * 100))}" aria-label="相关度"></progress>`}</td><td class="ellipsis" title="${escapeHtml(item.reason)}">${escapeHtml(item.reason || '等待 AI 判断')}</td><td><a class="icon-button" href="${safeXhsUrl(item.url)}" target="_blank" rel="noreferrer" title="打开原文" aria-label="打开原文">${icon('external')}</a></td></tr>`).join('');
+  const itemRows = items.map((item) => { const link = safePreviewUrl(item.preview_url, item.note_id); return `<tr><td class="number">${item.source_rank || '-'}</td><td><a class="row-title" href="${link}" target="_blank" rel="noreferrer">${escapeHtml(item.title || '无标题')}</a><span class="row-subtitle">${escapeHtml(item.author || item.text || '作者未知')}</span></td><td>${pill(item.decision || item.state)}</td><td><div class="score">${item.relevance_score == null ? '-' : `${Math.round(item.relevance_score * 100)}%`}</div>${item.relevance_score == null ? '' : `<progress class="score-track" max="100" value="${Math.max(0, Math.min(100, Number(item.relevance_score) * 100))}" aria-label="相关度"></progress>`}</td><td class="ellipsis" title="${escapeHtml(item.reason)}">${escapeHtml(item.reason || '等待 AI 判断')}</td><td><a class="icon-button" href="${link}" target="_blank" rel="noreferrer" title="打开图文预览" aria-label="打开图文预览">${icon('external')}</a></td></tr>`; }).join('');
   return `<div class="recommendation-layout">
     <aside class="run-list"><div class="run-list-header"><h2>最近运行</h2></div>${list}</aside>
     <section class="panel">
@@ -316,7 +324,7 @@ function renderSingleNotes() {
       : `<div class="analysis-pending">${job.last_error ? `处理失败：${escapeHtml(job.last_error)}` : '等待 AI 解析'}</div>`;
     return `<article class="analysis-row">
       <div class="analysis-head">
-        <div><a class="analysis-title" href="${safeXhsUrl(job.url)}" target="_blank" rel="noreferrer">${escapeHtml(job.title || '无标题')}</a><div class="analysis-meta"><span>${escapeHtml(job.author || '作者未知')}</span><span>${formatTime(job.published_at)}</span><span class="mono">${escapeHtml(job.note_id)}</span></div></div>
+        <div><a class="analysis-title" href="${safePreviewUrl(job.preview_url, job.note_id)}" target="_blank" rel="noreferrer">${escapeHtml(job.title || '无标题')}</a><div class="analysis-meta"><span>${escapeHtml(job.author || '作者未知')}</span><span>${formatTime(job.published_at)}</span><span class="mono">${escapeHtml(job.note_id)}</span></div></div>
         <div class="analysis-status">${pill(job.status)}${delivery}</div>
       </div>
       ${result}

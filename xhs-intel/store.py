@@ -447,6 +447,7 @@ class Store:
                 'published_at': note.get('published_at'),
                 'fetched_at': note.get('fetched_at'),
                 'url': note.get('url', ''),
+                'preview_url': f"/xhs/open/{note.get('note_id', '')}",
                 'image_count': int(note.get('image_count') or len(note.get('image_urls') or [])),
                 'coverage': note.get('coverage', 'note_text_only'),
                 'media_analyzed': bool(result.get('media_analyzed', note.get('media_analyzed', False))),

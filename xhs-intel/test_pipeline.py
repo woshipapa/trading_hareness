@@ -4,7 +4,8 @@ from pathlib import Path
 from unittest import mock
 
 from store import Store, Conflict
-from collector import InvalidNoteLink, collect_single_note, normalize, parse_note_reference
+from collector import (InvalidNoteLink, collect_single_note, ephemeral_note_link,
+                       normalize, parse_note_reference, remember_note_link)
 from local_worker import _load_note_images, _multimodal_items
 
 
@@ -48,6 +49,14 @@ class QueueTests(unittest.TestCase):
             'https://ci.xiaohongshu.com/notes_pre_post/image-1?imageView2/format/jpeg'
         ])
         self.assertNotIn('transient', str(value))
+
+    def test_signed_note_links_are_memory_only_and_expire(self):
+        note_id = '1' * 24
+        fetch_url = ('https://www.xiaohongshu.com/explore/' + note_id
+                     + '?xsec_token=short-lived&xsec_source=pc_feed')
+        self.assertTrue(remember_note_link(note_id, fetch_url, ttl=30))
+        self.assertIn('xsec_token=short-lived', ephemeral_note_link(note_id))
+        self.assertEqual(ephemeral_note_link('2' * 24), '')
 
     def test_worker_builds_in_memory_multimodal_inputs_without_persisting_media(self):
         note_value = normalize(

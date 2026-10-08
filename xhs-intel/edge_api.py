@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import json
 import secrets
 import os
+import re
 import sys
 import threading
 import time
@@ -24,6 +26,7 @@ from collector import (  # noqa: E402
     collect_recommendations,
     collect_single_note,
     collect_watched,
+    ephemeral_note_link,
 )
 from common import error_code, request_json  # noqa: E402
 from config import policy_snapshot  # noqa: E402
@@ -140,6 +143,70 @@ def serve_dashboard(handler, path):
             f"xhs_ui_session={DASHBOARD_SESSION}; Path=/; HttpOnly; SameSite=Strict"
         )
     send(handler, 200, target.read_bytes(), content_type, headers=headers)
+    return True
+
+
+def _note_id_from_path(path, prefix):
+    match = re.fullmatch(prefix + r'([0-9a-fA-F]{24})', path)
+    return match.group(1).lower() if match else ''
+
+
+def _note_preview_html(note, signed_url=''):
+    title = html.escape(str(note.get('title') or '小红书笔记'))
+    author = html.escape(str(note.get('author') or '未知作者'))
+    published = html.escape(str(note.get('published_at') or ''))
+    body = html.escape(str(note.get('text') or '暂无正文')).replace('\n', '<br>')
+    images = []
+    for value in (note.get('image_urls') or [])[:18]:
+        parsed = urlparse(str(value))
+        if parsed.scheme == 'https' and parsed.hostname == 'ci.xiaohongshu.com':
+            images.append(
+                f'<figure><img loading="lazy" src="{html.escape(value, quote=True)}" alt="笔记图片"></figure>'
+            )
+    original = ''
+    if signed_url:
+        original = (
+            f'<p><a href="{html.escape(signed_url, quote=True)}" target="_blank" '
+            'rel="noreferrer">在小红书打开原文（签名链接短时有效）</a></p>'
+        )
+    return f'''<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title><meta name="referrer" content="no-referrer">
+<style>body{{margin:0;background:#f5f5f2;color:#1f2428;font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+main{{max-width:860px;margin:0 auto;padding:32px 20px 56px;background:#fff;min-height:100vh}}
+h1{{font-size:28px;line-height:1.3;margin:0 0 8px}}.meta{{color:#687078;font-size:14px;margin-bottom:24px}}
+.text{{white-space:normal;margin:0 0 24px}}figure{{margin:16px 0}}img{{display:block;max-width:100%;height:auto;border-radius:6px;background:#eee}}
+a{{color:#b5452d}}</style></head><body><main><h1>{title}</h1>
+<div class="meta">{author}{' · ' + published if published else ''}</div><div class="text">{body}</div>
+{''.join(images)}{original}</main></body></html>'''
+
+
+def serve_note_link_or_preview(handler, path):
+    """Open a fresh signed XHS page or render the durable local note preview."""
+    note_id = _note_id_from_path(path, r'/xhs/open/')
+    preview_id = _note_id_from_path(path, r'/xhs/note/')
+    if not note_id and not preview_id:
+        return False
+    note_id = note_id or preview_id
+    note = STORE.latest_note(note_id)
+    if not note:
+        reply(handler, 404, {'status': 'not_found', 'error': 'note_not_found'})
+        return True
+    if path.startswith('/xhs/open/'):
+        signed_url = ephemeral_note_link(note_id)
+        if signed_url:
+            handler.send_response(302)
+            handler.send_header('Location', signed_url)
+            handler.send_header('Cache-Control', 'no-store')
+            handler.send_header('Referrer-Policy', 'no-referrer')
+            handler.end_headers()
+            return True
+    data = _note_preview_html(note, ephemeral_note_link(note_id)).encode('utf-8')
+    send(handler, 200, data, 'text/html; charset=utf-8', headers={
+        'Cache-Control': 'no-store',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src https://ci.xiaohongshu.com; frame-ancestors 'none'; base-uri 'none'",
+        'Referrer-Policy': 'no-referrer',
+    })
     return True
 
 
@@ -426,6 +493,7 @@ def _recommendation_item_for_dashboard(row):
         "author": str(note.get("author") or "")[:120],
         "published_at": note.get("published_at"),
         "url": f"https://www.xiaohongshu.com/explore/{row.get('note_id')}",
+        "preview_url": f"/xhs/open/{row.get('note_id')}",
     }
 
 
@@ -546,6 +614,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path != "/health" and not dashboard_auth(self):
             reply(self, 401, {"status": "unauthorized"})
+            return
+        if serve_note_link_or_preview(self, path):
             return
         if path in {"/health", "/v1/status"}:
             value = STORE.status()

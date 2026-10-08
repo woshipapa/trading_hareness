@@ -154,6 +154,24 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertFalse(listing['jobs'][0]['deliver_to_feishu'])
         self.assertNotIn('payload', listing['jobs'][0])
 
+    def test_note_link_renders_local_preview_when_signed_xhs_link_is_unavailable(self):
+        note_id = 'c' * 24
+        item = normalize({
+            'id': note_id,
+            'note_card': {
+                'title': 'KV cache systems', 'desc': '正文内容',
+                'user': {'nickname': 'Infra Author'},
+                'image_list': [{'url_default': 'https://ci.xiaohongshu.com/notes_pre_post/image-1?imageView2/format/jpeg'}],
+            },
+        }, 'single:' + note_id)
+        edge_api.STORE.add_note(item, 'single:' + note_id)
+        self.browser.open(self.base + "/xhs/", timeout=3).close()
+        with self.browser.open(self.base + '/xhs/open/' + note_id, timeout=3) as response:
+            page = response.read().decode()
+        self.assertIn('KV cache systems', page)
+        self.assertIn('正文内容', page)
+        self.assertIn('ci.xiaohongshu.com', page)
+
     def test_worker_can_extend_a_processing_lease(self):
         edge_api.STORE.enqueue_single_note(normalize({
             'id': 'f' * 24, 'note_card': {'title': 'Long analysis', 'desc': 'systems'},
