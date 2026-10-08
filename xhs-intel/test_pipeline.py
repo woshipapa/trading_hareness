@@ -142,10 +142,15 @@ class QueueTests(unittest.TestCase):
 
     def test_note_reference_accepts_share_text_and_rejects_external_hosts(self):
         reference = parse_note_reference(
-            '复制内容 https://www.xiaohongshu.com/discovery/item/' + 'A' * 24
-            + '?xsec_token=private-token&xsec_source=pc_share，打开查看')
+            '21 【梁文锋署名新作：突破大模型KV缓存压缩极限 - 大模型知识分享 | '
+            '小红书 - 你的生活兴趣社区】 😆 share-code 😆 '
+            'https://www.xiaohongshu.com/discovery/item/' + 'A' * 24
+            + '?source=webshare&xhsshare=pc_web&xsec_token=private-token&xsec_source=pc_share')
         self.assertEqual(reference['note_id'], 'a' * 24)
         self.assertIn('xsec_token=private-token', reference['fetch_url'])
+        self.assertIn('xsec_source=pc_share', reference['fetch_url'])
+        self.assertNotIn('source=webshare', reference['fetch_url'])
+        self.assertNotIn('xhsshare=', reference['fetch_url'])
         short = parse_note_reference(
             'https://xhslink.com/a/example',
             short_resolver=lambda _url: 'https://www.xiaohongshu.com/explore/' + 'b' * 24,
