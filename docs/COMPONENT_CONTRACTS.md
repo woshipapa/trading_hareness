@@ -17,6 +17,33 @@ The relay must treat a non-2xx response, an empty response where coverage is
 required, or a stale provider timestamp as an evidence failure. It must never turn
 that response into a trading or order decision.
 
+### Write keys per caller
+
+Quant accepts the shared `QUANT_WRITE_API_KEY` as a full-scope caller named
+`legacy`, plus named keys in `QUANT_WRITE_API_KEYS`
+(`caller|/api/v1/prefix/,...|key;...`, or `*` for every path). An unknown key is
+401; a known key outside its scope is 403 and names the caller. `/health`
+reports `write_boundary`: caller names and scopes (never keys), configuration
+problems, writes per caller since start, and refusals by status. Callers still
+counted under `legacy` have not moved yet.
+
+`config/secrets/env-split.py` assembles the owner's `QUANT_WRITE_API_KEYS` from
+`QUANT_WRITE_KEY_<CALLER>` entries in `.env.local`, using the scope table in that
+script, and gives each such caller its own key on its host. To move the edge
+relay:
+
+1. Add `QUANT_WRITE_KEY_EDGE_RELAY` to `config/secrets/.env.local` (at least 24
+   random characters) and run `env-split.py`.
+2. Push the owner first, then the edge (`sync-secrets.sh owner`, then `edge`),
+   each inside its safe window, and recreate the containers that read the file.
+   Owner first, so the owner already accepts the new key when the relay starts
+   sending it.
+3. Check `/health` → `write_boundary.writes_by_caller` shows `edge-relay`.
+
+The relay also uses its `QUANT_WRITE_API_KEY` to authenticate requests to its
+Feishu user OAuth endpoint, so whoever calls that endpoint must then send the
+edge key.
+
 ## LarkAgentX bridge to Feishu relay
 
 The bridge posts normalized, message-level-idempotent events to the adapter's
