@@ -98,65 +98,6 @@ def _record_daily_amount_unit_issue(connection: Any, bar: DailyBar) -> None:
     )
 
 
-def quarantine_tushare_daily_amount_mismatches(
-    connection: Any, *, trading_dates: tuple[date, ...] | None = None,
-) -> int:
-    """Quarantine existing mixed-unit Tushare daily amounts without fetching data.
-
-    This repair is idempotent: it only clears values that still violate the
-    documented unit contract, preserves raw observations, and emits at most
-    one unresolved issue for a symbol/date.  It intentionally does *not*
-    divide by 1,000 because the gateway response does not provide a reliable
-    per-row unit declaration.
-    """
-    date_filter = " AND trading_date=ANY(%s)" if trading_dates else ""
-    params: list[Any] = [
-        list(TUSHARE_DAILY_AMOUNT_SOURCES), TUSHARE_DAILY_AMOUNT_RATIO_MIN,
-        TUSHARE_DAILY_AMOUNT_RATIO_MAX,
-    ]
-    if trading_dates:
-        params.append(list(trading_dates))
-    rows = connection.execute(
-        """SELECT bar.symbol,bar.trading_date,bar.close,bar.selected_provider,
-                  nullif(observation.normalized->>'amount','')::numeric AS amount,
-                  nullif(observation.normalized->>'volume','')::numeric AS volume
-             FROM quant.canonical_bars_daily bar
-             JOIN LATERAL (
-                 SELECT normalized FROM quant.raw_market_observations observation
-                  WHERE observation.observation_id=ANY(bar.source_observation_ids)
-                    AND observation.provider_key=bar.selected_provider
-                  ORDER BY observation.available_at DESC,observation.created_at DESC
-                  LIMIT 1
-             ) observation ON true
-            WHERE bar.selected_provider=ANY(%s) AND bar.close>0
-              AND nullif(observation.normalized->>'amount','')::numeric>0
-              AND nullif(observation.normalized->>'volume','')::numeric>0
-              AND nullif(observation.normalized->>'amount','')::numeric /
-                  (nullif(observation.normalized->>'volume','')::numeric * bar.close)
-                  NOT BETWEEN %s AND %s""" + date_filter,
-        params,
-    ).fetchall()
-    for row in rows:
-        bar = DailyBar(
-            symbol=row["symbol"], trading_date=row["trading_date"], close=Decimal(row["close"]),
-            volume=Decimal(row["volume"]), amount=Decimal(row["amount"]),
-            source=str(row["selected_provider"]),
-        )
-        _record_daily_amount_unit_issue(connection, bar)
-        connection.execute(
-            """UPDATE quant.canonical_bars_daily
-                  SET amount=NULL,
-                      quality_status=CASE WHEN quality_status='fresh' THEN 'partial' ELSE quality_status END,
-                      canonicalized_at=now()
-                WHERE symbol=%s AND trading_date=%s""",
-            (bar.symbol, bar.trading_date),
-        )
-        connection.execute(
-            """UPDATE quant.market_bars_daily SET amount=NULL
-                WHERE symbol=%s AND trading_date=%s AND source=%s""",
-            (bar.symbol, bar.trading_date, bar.source),
-        )
-    return len(rows)
 
 
 def upsert_daily_bar(connection: Any, bar: DailyBar) -> None:
@@ -401,6 +342,6 @@ def upsert_daily_bars(connection: Any, bars: list[DailyBar]) -> int:
 __all__ = [
     "TUSHARE_DAILY_AMOUNT_RATIO_MAX", "TUSHARE_DAILY_AMOUNT_RATIO_MIN",
     "TUSHARE_DAILY_AMOUNT_SOURCES", "daily_amount_unit_mismatch", "exchange_for",
-    "persisted_adjustment_state", "provider_priority", "quarantine_tushare_daily_amount_mismatches",
+    "persisted_adjustment_state", "provider_priority",
     "upsert_daily_bar", "upsert_daily_bars",
 ]

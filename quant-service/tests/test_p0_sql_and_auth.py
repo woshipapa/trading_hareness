@@ -23,7 +23,7 @@ from app.episode_lifecycle import backfill_signal_event_episode_links, ensure_si
 from app.analyst_observations import persist_extraction_run, persist_observations_for_evidence
 from app.feature_snapshot_repository import materialize_feature_snapshot
 from app.intraday_event_retention import prune_ephemeral_signal_events
-from app.daily_bar_repository import daily_amount_unit_mismatch, quarantine_tushare_daily_amount_mismatches
+from app.daily_bar_repository import daily_amount_unit_mismatch
 from app.main import DailyBar, app, db, executor_saturated_response, upsert_bar
 from app.runtime_executors import ExecutorSaturatedError
 from app.automation_run_repository import fail_run, finish_run, start_or_resume_run, start_run
@@ -257,15 +257,6 @@ class UpsertBarSqlIntegrationTests(unittest.TestCase):
                     volume=Decimal("100"), amount=Decimal("100000"),
                     source="tushare_super_get", available_at=observed,
                 ))
-                # The bulk projector uses this raw-evidence repair path.  It
-                # must rediscover the same mismatch without creating a second
-                # unresolved issue, even after canonical amount is NULL.
-                self.assertEqual(
-                    quarantine_tushare_daily_amount_mismatches(
-                        connection, trading_dates=(self.trading_date,),
-                    ),
-                    1,
-                )
                 market = connection.execute(
                     "SELECT amount FROM quant.market_bars_daily WHERE symbol=%s AND trading_date=%s",
                     (self.symbol, self.trading_date),

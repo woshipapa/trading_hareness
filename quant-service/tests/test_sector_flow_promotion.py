@@ -9,81 +9,9 @@ import unittest
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
-from app.annual_daily_backfill import AnnualDailyBackfill
 from app.ths_sector_flows import CONCEPT_PERSIST_TIMEOUT_SECONDS, sync_concept_signals
 
 AT = datetime(2026, 9, 22, 17, 0, tzinfo=timezone.utc)
-
-
-class RecordingConnection:
-    def __init__(self, rows):
-        self._rows = rows
-        self.persisted: list[tuple[str, str]] = []
-        self.queries: list[str] = []
-
-    def execute(self, sql, params=None):
-        self.queries.append(sql)
-        rows = self._rows if "tushare_raw_records" in sql else []
-        return SimpleNamespace(fetchall=lambda: rows, fetchone=lambda: None)
-
-    def cursor(self):
-        connection = self
-
-        class Cursor:
-            @contextlib.contextmanager
-            def copy(self, _statement):
-                yield SimpleNamespace(write_row=lambda row: connection.persisted.append(("staged", str(row[0]))))
-
-        return Cursor()
-
-
-class Database:
-    def __init__(self, rows):
-        self.connection = RecordingConnection(rows)
-
-    @contextlib.contextmanager
-    def transaction(self):
-        yield self.connection
-
-
-class PromotionTests(unittest.TestCase):
-    def rows(self, provider):
-        return [{"provider_key": provider, "available_at": AT,
-                 "row_data": {"ts_code": "881101.TI", "trade_date": "20260922", "name": "概念"}}]
-
-    def promote(self, provider, monkey):
-        db = Database(self.rows(provider))
-        job = AnnualDailyBackfill(db, date(2026, 9, 22), date(2026, 9, 22))
-        monkey.append(db)
-        return job.promote_stored_sector_flows(), db
-
-    def test_rows_from_the_fallback_provider_are_promoted(self):
-        import app.annual_daily_backfill as module
-
-        seen: list[str] = []
-        original = module._persist_sector_flow
-        module._persist_sector_flow = lambda connection, provider_key, available_at, **kw: seen.append(provider_key)
-        try:
-            counts, _db = self.promote("tushare_super_get", [])
-        finally:
-            module._persist_sector_flow = original
-        # Three mappings, each with the one stored row: the provider is carried
-        # through instead of being pinned to the SDK that never answered here.
-        self.assertEqual(seen, ["tushare_super_get"] * 3)
-        self.assertEqual(counts["moneyflow_cnt_ths"], 1)
-
-    def test_the_query_no_longer_pins_a_provider(self):
-        import app.annual_daily_backfill as module
-
-        original = module._persist_sector_flow
-        module._persist_sector_flow = lambda *args, **kwargs: None
-        try:
-            _counts, db = self.promote("tushare_backup", [])
-        finally:
-            module._persist_sector_flow = original
-        select = next(sql for sql in db.connection.queries if "tushare_raw_records" in sql)
-        self.assertNotIn("tushare_super_sdk", select)
-        self.assertIn("provider_key,row_data,available_at", select)
 
 
 class ConceptSyncTests(unittest.TestCase):

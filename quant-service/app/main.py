@@ -678,10 +678,6 @@ from .longhu_vendor_source import (
 )
 from .longhu_limits import intraday_longhu_max_symbols
 from .full_market_daily_controls_sync import sync as sync_full_market_daily_controls_isolated
-from .minute_bar_session_backfill import (
-    backfill_session as backfill_minute_session,
-    session_symbols as session_minute_symbols,
-)
 from .earnings_calendar_sync import sync as sync_earnings_calendar_isolated
 from .stock_money_flow_sync import (
     persist_flow_rows as persist_stock_money_flow_rows,
@@ -1322,31 +1318,6 @@ def settle_xiaojie_recent_sessions(as_of_date: date) -> dict[str, Any]:
             """SELECT max(calendar_date) AS d FROM quant.market_trade_calendar
                 WHERE exchange='SSE' AND is_open AND calendar_date<%s""", (as_of_date,)).fetchone()["d"]
     return {str(day): settle_xiaojie_leader_flow_outcomes(day) for day in (previous, as_of_date) if day is not None}
-
-
-def _read_session_minute_symbols(as_of_date: date) -> dict[str, Any]:
-    """Read one session's board + benchmark symbol list off the executor."""
-    with db.transaction() as connection:
-        return session_minute_symbols(connection, as_of_date)
-
-
-async def backfill_session_minute_bars(as_of_date: date) -> dict[str, Any]:
-    """Minute bars for one session's boards and benchmarks (research-only).
-
-    Gathered last in the post-close pipeline because ``stk_mins`` is a slow,
-    per-symbol route: it answered ~55% of sampled boards over three closed
-    sessions and 0% intraday, so this is best-effort supplementary data.
-    ``availability_pct`` rides out in the result so a low-answer night reads as
-    low availability rather than an empty table, and a re-run backfills the
-    rest since the write is idempotent.  The symbol read is offloaded like
-    every other database call an async path makes, so the event loop is never
-    blocked on a sync transaction.
-    """
-    selection = await run_database_blocking(
-        lambda: _read_session_minute_symbols(as_of_date), timeout_seconds=30)
-    return await backfill_minute_session(
-        as_of_date, symbols=selection["symbols"], call_tushare_api=call_tushare_api,
-        run_database_blocking=run_database_blocking, db=db)
 
 
 async def sync_stock_money_flow(trade_date: date) -> dict[str, Any]:
@@ -6688,7 +6659,6 @@ async def run_daily_pipeline(payload: GenerateRequest) -> dict[str, Any]:
         sync_stock_money_flow=sync_stock_money_flow,
         materialize_watchlist_proposals=materialize_daily_watchlist_proposals,
         settle_xiaojie_outcomes=settle_xiaojie_leader_flow_outcomes,
-        backfill_minute_bars=backfill_session_minute_bars,
     )
 
 

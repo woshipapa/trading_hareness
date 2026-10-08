@@ -138,8 +138,8 @@ L1 超窗 →(年度分区归档脚本)→ L3。journal 是投递日志,本地�
 | L1→L3 证据归档 | 手动/待例行化 | `archive_and_prune.py`(--archive-only / --apply)、`archive_raw_records.py` |
 | L2→L3 上传 | 手动 | `upload_parquet_to_pan.py`、`upload_by_symbol.py`(并发) |
 | 全库加密备份 | 手动 | `backup_pg_to_pan.sh`(dump→zstd→gpg→1G 分片;口令 `~/.config/feishu-relay/pgbackup-passphrase.txt`,**丢失即备份作废**) |
-| 分钟线回填 | 手动 | 容器内 `python -m app.minute_backfill_cli`(涨停池+基准,断点续跑) |
-| 年度日线回填 | 手动 | `python -m app.annual_daily_backfill --skip-sector-events`(fetch_runs 检查点) |
+| 分钟线回填 | 已退役 | 依赖 Tushare `stk_mins`，2026-10-09 随 Tushare 删除；目前没有替代的历史分钟来源 |
+| 年度日线回填 | 已退役 | 依赖 Tushare，2026-10-09 删除；新的交易日由 Longhu 盘后全市场收盘写入 |
 | 冷读验证 | 抽查 | `verify_cold_read.py`、`query.py --cold` |
 
 建议例行化(尚未做):每日收盘后 L1→L2 增量导出;每周 L1→L3 证据归档 +
