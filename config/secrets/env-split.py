@@ -37,6 +37,25 @@ def get(local: dict, key: str, fallback: str = "") -> str:
 # ═══════════════════════════════════════════════════════════════════════
 # Owner 环境（shared-peer compose 用 PEER_* 前缀）
 # ═══════════════════════════════════════════════════════════════════════
+# 写密钥按调用方分开（quant-service/app/security.py 读 QUANT_WRITE_API_KEYS）。每个调用方
+# 的密钥放在 .env.local 的 QUANT_WRITE_KEY_<CALLER>，作用域写在这里（不是机密）；没设置
+# 密钥的调用方继续用共享的 QUANT_WRITE_API_KEY，owner 的 /health 把它计为 legacy。
+# edge-relay 的作用域是 *：面板上的研究操作都经 relay 的 proxyResearchAction 转发。
+WRITE_CALLERS = {
+    "edge-relay": ("QUANT_WRITE_KEY_EDGE_RELAY", "*"),
+}
+
+
+def write_callers(local: dict) -> str:
+    return ";".join(f"{caller}|{scopes}|{local[key]}"
+                    for caller, (key, scopes) in WRITE_CALLERS.items() if local.get(key))
+
+
+def caller_write_key(local: dict, caller: str) -> str:
+    """该调用方自己的密钥；还没分配时回落到共享密钥。"""
+    return local.get(WRITE_CALLERS[caller][0]) or local.get("QUANT_WRITE_API_KEY", "")
+
+
 def build_owner(local: dict) -> str:
     lines = [
         f"# .env.owner — 47owner (shared-peer) 凭据",
@@ -63,6 +82,7 @@ def build_owner(local: dict) -> str:
         f"QUANT_SHARED_READ_API_KEY={get(local, 'QUANT_SHARED_READ_API_KEY')}",
         f"PEER_QUANT_WRITE_API_KEY={get(local, 'QUANT_WRITE_API_KEY')}",
         f"QUANT_WRITE_API_KEY={get(local, 'QUANT_WRITE_API_KEY')}",
+        f"QUANT_WRITE_API_KEYS={write_callers(local)}",
         f"QUANT_ALERT_WEBHOOK_TOKEN={get(local, 'QUANT_ALERT_WEBHOOK_TOKEN')}",
         "",
         "# ── 热更新 ──",
@@ -190,7 +210,7 @@ def build_edge(local: dict) -> str:
     ]
 
     for key in PASSTHROUGH:
-        val = local.get(key, "")
+        val = caller_write_key(local, "edge-relay") if key == "QUANT_WRITE_API_KEY" else local.get(key, "")
         lines.append(f"{key}={val}")
 
     lines += [
