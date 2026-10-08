@@ -43,8 +43,13 @@ provider response directly to a live threshold or order path.
 2. Add a pure-function test first, then a repository/HTTP test when a route or
    persistence path changes.
 3. Use `apply_patch`; do not rewrite generated artifacts or expose `.env` values.
-4. Run `docker compose exec -T quant-research python -m unittest discover -s tests -q`,
+4. Run `make -C quant-service test-release-path`,
    `cd frontend && npm run typecheck && npm run build`, and `git diff --check`.
+   That target mounts the working tree as the source overlay the release
+   actually runs from. Do **not** verify a source change with
+   `docker compose exec -T quant-research ...`: that executes the code baked
+   into the image, so every change shipped by overlay is silently untested
+   (measured 2026-10-08: 2290 tests via `exec` against 2336 via the overlay).
 5. For a scheduler change, verify database rows, latest status endpoint and one
    real adapter request; a unit test alone does not prove the published route.
 6. Run `node scripts/verify-api-contract.mjs` after adding or renaming a route;

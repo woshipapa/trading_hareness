@@ -26,16 +26,22 @@
       "manifest": "quant-service/component.json",
       "runtime": "47owner",
       "release": "owner-quant",
-      "release_units": ["owner-quant", "owner-schema"],
+      "release_units": [
+        "owner-quant",
+        "owner-schema"
+      ],
       "standalone": {
         "build_context": "quant-service",
         "dockerfile": "quant-service/Dockerfile.standalone",
         "compose": "quant-service/compose.standalone.yaml",
         "entrypoint": "quant-service/entrypoint.py",
-        "external_contracts": ["PostgreSQL quant schema", "provider credentials"]
+        "external_contracts": [
+          "PostgreSQL quant schema",
+          "provider credentials"
+        ]
       },
       "tests": [
-        "docker compose exec -T quant-research python -m unittest discover -s tests -q",
+        "make -C quant-service test-release-path",
         "cd frontend && npm run typecheck && npm run build"
       ]
     },
@@ -48,19 +54,30 @@
       "manifest": "feishu-relay/component.json",
       "runtime": "47edge",
       "release": "edge-relay",
-      "release_units": ["edge-relay", "edge-workflows"],
+      "release_units": [
+        "edge-relay",
+        "edge-workflows"
+      ],
       "standalone": {
         "build_context": "feishu-relay",
         "dockerfile": "feishu-relay/adapter/Dockerfile.standalone",
         "compose": "feishu-relay/compose.standalone.yaml",
         "entrypoint": "feishu-relay/adapter/index.mjs",
-        "external_contracts": ["PostgreSQL relay ledger", "Feishu app credentials", "webhook targets"],
+        "external_contracts": [
+          "PostgreSQL relay ledger",
+          "Feishu app credentials",
+          "webhook targets"
+        ],
         "supporting_runtimes": [
           {
             "id": "larkagentx-bridge",
             "dockerfile": "feishu-relay/bridge/Dockerfile.runtime",
             "entrypoint": "feishu-relay/bridge/bridge.py",
-            "external_contracts": ["pinned LarkAgentX checkout", "private account auth", "allowlisted chat IDs"]
+            "external_contracts": [
+              "pinned LarkAgentX checkout",
+              "private account auth",
+              "allowlisted chat IDs"
+            ]
           }
         ]
       },
@@ -80,13 +97,19 @@
       "manifest": "xhs-intel/component.json",
       "runtime": "47edge",
       "release": "edge-xhs",
-      "release_units": ["edge-xhs"],
+      "release_units": [
+        "edge-xhs"
+      ],
       "standalone": {
         "build_context": "xhs-intel",
         "dockerfile": "xhs-intel/Dockerfile.runtime",
         "compose": "xhs-intel/compose.standalone.yaml",
         "entrypoint": "xhs-intel/edge_api.py",
-        "external_contracts": ["pinned Spider_XHS source mount", "XHS cookie", "optional Feishu webhook"]
+        "external_contracts": [
+          "pinned Spider_XHS source mount",
+          "XHS cookie",
+          "optional Feishu webhook"
+        ]
       },
       "tests": [
         "python3 -m unittest discover -s xhs-intel -p 'test_*.py' -q",

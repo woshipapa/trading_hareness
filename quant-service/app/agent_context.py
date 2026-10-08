@@ -112,7 +112,7 @@ def repository_agent_context() -> dict[str, Any]:
             "transport outages keep local loops alive, back off, fail closed, and retry the same durable cursor/run key after recovery",
         ],
         "verification": {
-            "backend": "docker compose exec -T quant-research python -m unittest discover -s tests -q",
+            "backend": "make -C quant-service test-release-path",
             "adapter": "node --test feishu-relay/adapter/*.test.mjs",
             "frontend": "cd frontend && npm run typecheck && npm run build && npm test",
             "frontend_e2e": "cd frontend && npm run test:e2e",

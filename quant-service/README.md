@@ -37,7 +37,8 @@ when the API dependency set changes.
 ## Local verification
 
 ```bash
-docker compose exec -T quant-research python -m unittest discover -s tests -q
+make -C quant-service test-release-path   # 工作区按发布路径跑；
+# docker compose exec -T quant-research python -m unittest discover -s tests -q  # 只验镜像里的代码
 cd ../frontend && npm run typecheck && npm run build
 ```
 
