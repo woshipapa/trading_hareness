@@ -84,6 +84,33 @@ routers 只做 HTTP 边界与入参校验。现在只允许在那一个适配器
 `analyst_signals` 的来源改成跨库的不可强约束引用 —— 跨界外键已经拆掉，这一步
 不再被 schema 阻挡。
 
+## Release-unit isolation
+
+两条热部署路径互不影响，这一点由 `scripts/test_release_unit_isolation.py` 守住：
+
+| 保证 | 机制 |
+|---|---|
+| 改 feishu-relay（含 xhs、分析师）热部署 47edge 不动 47owner | edge 脚本正文里不出现 `47.110.79.189` / `stockpeer` / `OWNER_PEER_*`，只操作 `EDGE_HOST` |
+| 47owner 的策略更新与迭代不动 47edge | owner 脚本正文里不出现 `47.114.113.152` / `EDGE_HOST`；且 `feishu-relay/*`、`frontend/*` 被归入 `skipped_files`（"不属于 owner 运行时"），未知路径一律 `full release required` fail closed，迁移变更强制走完整流程 |
+
+### 唯一还成立的跨单元耦合
+
+`frontend/dist`（quant 仪表盘）**源码属 quant-research，构建与发布在 edge 热部署里**
+（声明见 `config/components.json` 的 `cross_unit_artifacts`）。两个后果：
+
+- owner 改完前端，要等一次 edge 发布才生效；
+- 一次只为 xhs 的 edge 发布，也会重新发布 quant 面板。
+
+因此 edge 脚本判断工作区是否干净时**必须盯 `frontend/` 源码目录**。它原来盯的是
+`frontend/dist` 和 `feishu-relay/dashboard/dist` —— 两个都在 `.gitignore` 里，
+`git diff` 永远返回 0，所以带着未提交的 quant 前端改动热部署，改动会被构建发到
+edge，而 `release_id` 上**不带 `-dirty`**，出处在说谎。现已改为盯源码目录，并有
+测试端到端验证（真的改一个被跟踪的前端文件，必须被识别为脏）。
+
+要彻底解掉这条耦合，需要把 quant 仪表盘变成 owner 自己的发布单元（或让 edge 只
+消费一个带版本的产物，而不是在 edge 侧 `npm run build`）。那是部署拓扑变更，
+不在本轮范围内。
+
 ## Compatibility rules
 
 - Patch changes keep the documented paths and fields backward compatible.

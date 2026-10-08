@@ -182,5 +182,15 @@
       ],
       "note": "本机开发栈，与 owner 主栈同形；拆分时要一起改，否则本地测不出隔离回归。"
     }
+  ],
+  "cross_unit_artifacts": [
+    {
+      "artifact": "frontend/dist",
+      "owned_by": "quant-research",
+      "published_by": "edge-relay",
+      "publisher": "feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh",
+      "served_from": "47edge",
+      "note": "quant 的仪表盘源码属 quant-research，但构建与发布都在 edge 热部署里（脚本 npm run build 之后把 frontend/dist 发成 quant-frontend-dist）。两个后果：owner 改完前端要等一次 edge 发布才生效；而一次只为 xhs 的edge 发布也会重新发布 quant 面板。所以 edge 脚本判断工作区是否干净时必须盯 frontend/ 源码目录 —— 盯 frontend/dist 等于没盯（它在 .gitignore 里）。owner 的 code-only 发布不碰它：frontend/* 被归入 skipped_files。"
+    }
   ]
 }
