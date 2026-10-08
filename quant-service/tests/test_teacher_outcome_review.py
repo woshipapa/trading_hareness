@@ -139,6 +139,29 @@ class GateReplayTests(unittest.TestCase):
         self.assertEqual(report["entry_scans"], 0)
         self.assertIn("vwap", [item["name"] for item in report["missing_inputs"]])
 
+    def test_a_pre_open_scan_is_not_replayed_for_a_continuous_session_playbook(self):
+        """09:30 之前只有一字板按 09:25 竞价判，别的剧本线上根本不产出候选。
+
+        ``teacher_review_signals`` 在这个条件下直接 ``return []``，而重放原来绕过
+        它直接调 ``evaluate``，于是把竞价时段也算进 ``entry_scans``：2026-09-24
+        宏昌科技"09:16 起 1 次满足"、09-29 巨力索具"09:26 起 2 次满足"都是这么来
+        的，然后被报成"但盘中没有推送"。那两次线上永远不可能推。
+        """
+        rows = [snapshot(datetime(2026, 9, 22, 9, 26, tzinfo=CN), price=11.5)]
+        report = gate_replay("000001.SZ", "测试", rows)
+        self.assertEqual(report["evaluated"], 0)
+        self.assertEqual(report["entry_scans"], 0)
+        self.assertIsNone(report["closest"])
+
+    def test_a_one_word_board_is_still_judged_in_the_auction(self):
+        """细则写死了：一字板的决策点在 09:25，不在 09:30。这条不能被上面那条压掉。"""
+        rows = [snapshot(datetime(2026, 9, 22, 9, 26, tzinfo=CN), price=11.0)]
+        plan = rows[0]["inputs"]["watch"]["metadata"]["teacher_review"]
+        plan["playbook"] = "relay_one_word"
+        plan["params"] = {"auction_amount_min": 1.0, "turnover_max_pct": 3, "prior_high": 11.0}
+        report = gate_replay("000001.SZ", "测试", rows)
+        self.assertEqual(report["evaluated"], 1)
+
     def test_an_entry_is_recognised_when_every_gate_passes(self):
         # The 5-minute trend gate needs a baseline, exactly as the live tape does.
         report = gate_replay("000001.SZ", "测试", self.rows([10.2, 10.4, 10.6, 11.5]))
