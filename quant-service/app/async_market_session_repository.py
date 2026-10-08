@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .market_rules import china_equity_observation_session, china_equity_session, china_futures_session
-from .tushare_providers import safe_error_detail
+from .error_detail import safe_error_detail
 
 
 CN_TZ = ZoneInfo("Asia/Shanghai")

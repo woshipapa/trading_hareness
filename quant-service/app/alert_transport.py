@@ -23,7 +23,7 @@ import httpx
 
 from .http_clients import alert_http_client
 from .feishu_direct_alert import direct_feishu_alert_configured, post_direct_feishu_alert_text
-from .tushare_providers import safe_error_detail
+from .error_detail import safe_error_detail
 
 
 AMBIGUOUS_DELIVERY_ERRORS = (httpx.ReadTimeout, httpx.WriteTimeout, httpx.ReadError, httpx.RemoteProtocolError)

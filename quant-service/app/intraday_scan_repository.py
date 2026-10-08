@@ -17,7 +17,7 @@ import uuid
 from .stable_json import tolerant_json
 
 from .provider_health import record_provider_failure
-from .tushare_providers import safe_error_detail
+from .error_detail import safe_error_detail
 from .platform.strategy_data_needs import strategy_taxonomies
 from .sector_membership_repository import point_in_time_membership_predicate, sector_group_predicate
 

@@ -24,6 +24,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from .capability_registry import provider_order
+from .error_detail import safe_error_detail
 from .http_clients import provider_http_client
 from .http_retry import retry_delay_seconds
 from .network_health import network_state
@@ -345,25 +346,6 @@ def super_get_executor_status() -> dict[str, int]:
 def shutdown_super_get_executor() -> None:
     """Stop accepting queued proxy work during service shutdown."""
     _super_get_executor.shutdown(wait=False, cancel_futures=True)
-
-
-def safe_error_detail(value: str, limit: int = 500) -> str:
-    """Keep supplier diagnostics without retaining credentials in evidence."""
-    compact = value.strip().replace("\n", " ")
-    # Authorization values conventionally contain a scheme plus a whitespace
-    # separated credential (for example ``Bearer token``).  Handle the whole
-    # header before generic key/value redaction so the credential cannot remain
-    # after the scheme is replaced.
-    compact = re.sub(r"(?i)\bauthorization\b\s*[:=]\s*[^,;&]+", "Authorization: <redacted>", compact)
-    compact = re.sub(
-        r"(?i)\b(x-api-key|authorization|api[_-]?key|access[_-]?token|token)\b\s*([:=])\s*([^\s,&;]+)",
-        r"\1\2<redacted>",
-        compact,
-    )
-    # Some gateways echo bearer headers as a separated phrase rather than a
-    # key/value pair.
-    compact = re.sub(r"(?i)\bbearer\s+[a-z0-9._~+/=-]+", "Bearer <redacted>", compact)
-    return compact[:limit]
 
 
 async def provider_http_request(provider: TushareProvider, operation: Any, *, capability_class: str = "bulk") -> httpx.Response:

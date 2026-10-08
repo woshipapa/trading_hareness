@@ -13,7 +13,7 @@ from .fuyao_catalog import FUYAO_PATHS, FUYAO_QUERY_PARAMS
 from .http_clients import provider_http_client
 from .http_retry import retry_delay_seconds
 from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
-from .tushare_providers import safe_error_detail
+from .error_detail import safe_error_detail
 
 
 FUYAO_BASE_URL = "https://fuyao.aicubes.cn"

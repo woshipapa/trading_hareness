@@ -25,7 +25,7 @@ from .market_snapshots import snapshot_status, summarize_quotes
 from .provider_health import record_provider_failure, record_provider_success
 from .public_market_repository import persist_free_quotes
 from .runtime_executors import ExecutorSaturatedError
-from .tushare_providers import safe_error_detail
+from .error_detail import safe_error_detail
 
 
 CHINA = ZoneInfo("Asia/Shanghai")

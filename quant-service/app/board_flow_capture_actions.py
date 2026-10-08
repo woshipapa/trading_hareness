@@ -25,7 +25,7 @@ from .stable_json import tolerant_json
 from .akshare_provider import akshare_eastmoney_board_flow
 from .provider_health import record_provider_failure, record_provider_success
 from .runtime_executors import ExecutorSaturatedError
-from .tushare_providers import safe_error_detail
+from .error_detail import safe_error_detail
 
 
 class BoardFlowCaptureActions:

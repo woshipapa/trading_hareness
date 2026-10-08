@@ -8,7 +8,7 @@ from psycopg.types.json import Json
 
 from .capability_registry import api_capability, catalog_metadata
 from .telemetry import provider_latency_seconds, provider_requests_total
-from .tushare_providers import safe_error_detail
+from .error_detail import safe_error_detail
 
 
 def record_provider_success(connection: Any, provider: str, capability: str, rows: int,

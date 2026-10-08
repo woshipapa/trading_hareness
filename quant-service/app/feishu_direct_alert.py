@@ -11,7 +11,7 @@ from typing import Any, Callable, Mapping
 import httpx
 
 from .http_clients import alert_http_client
-from .tushare_providers import safe_error_detail
+from .error_detail import safe_error_detail
 
 
 FEISHU_OPEN_API_BASE = "https://open.feishu.cn/open-apis"
