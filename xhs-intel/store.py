@@ -172,6 +172,59 @@ class Store:
             db.execute('INSERT OR IGNORE INTO note_queries VALUES(?,?)', (revision, query))
         return bool(inserted)
 
+    def enqueue_single_note(self, note, *, deliver_to_feishu=False):
+        """Persist one revision and queue one reusable analysis for that content."""
+        revision = digest([note['note_id'], note['content_hash']])
+        job_id = 'xhs-single-' + revision[:32]
+        stamp = time.time()
+        query = f"single:{note['note_id']}"
+        payload_value = {
+            'notes': [note],
+            'prompt_version': 1,
+            'source_kind': 'single_note',
+            'deliver_to_feishu': bool(deliver_to_feishu),
+        }
+        encoded = json.dumps(payload_value, ensure_ascii=False)
+        with self.connect() as db:
+            db.execute('INSERT OR IGNORE INTO notes VALUES(?,?,?,?,?,?,?)',
+                       (revision, note['note_id'], note['content_hash'],
+                        json.dumps(note, ensure_ascii=False), stamp, stamp, job_id))
+            db.execute('UPDATE notes SET last_seen=?,job_id=COALESCE(job_id,?) WHERE revision=?',
+                       (stamp, job_id, revision))
+            db.execute('INSERT OR IGNORE INTO note_queries VALUES(?,?)', (revision, query))
+            inserted = db.execute('''INSERT OR IGNORE INTO jobs
+                                     (job_id,status,payload,created,updated,job_type)
+                                     VALUES(?,'pending',?,?,?,'single_note_analysis')''',
+                                  (job_id, encoded, stamp, stamp)).rowcount
+            row = db.execute('SELECT status,payload FROM jobs WHERE job_id=?', (job_id,)).fetchone()
+            existing_payload = json.loads(row['payload']) if row else payload_value
+            requested_delivery = bool(deliver_to_feishu or existing_payload.get('deliver_to_feishu'))
+            if row and requested_delivery != bool(existing_payload.get('deliver_to_feishu')):
+                existing_payload['deliver_to_feishu'] = requested_delivery
+                db.execute('UPDATE jobs SET payload=?,updated=? WHERE job_id=?',
+                           (json.dumps(existing_payload, ensure_ascii=False), stamp, job_id))
+            if row and row['status'] == 'failed':
+                db.execute("""UPDATE jobs SET status='pending',available=0,attempts=0,lease_token=NULL,
+                              lease_until=NULL,worker=NULL,last_error=NULL,updated=? WHERE job_id=?""",
+                           (stamp, job_id))
+            elif row and row['status'] == 'completed' and requested_delivery:
+                db.execute("UPDATE jobs SET status='ready',updated=?,last_error=NULL WHERE job_id=?",
+                           (stamp, job_id))
+            current = db.execute('SELECT status FROM jobs WHERE job_id=?', (job_id,)).fetchone()
+        return {
+            'job_id': job_id,
+            'job_status': current['status'],
+            'duplicate': not bool(inserted),
+            'deliver_to_feishu': requested_delivery,
+            'note': {
+                'note_id': note['note_id'],
+                'title': note.get('title', ''),
+                'author': note.get('author', ''),
+                'published_at': note.get('published_at'),
+                'url': note.get('url', ''),
+            },
+        }
+
     def enqueue_pending(self, limit=12):
         with self.connect() as db:
             rows = db.execute('SELECT * FROM notes WHERE job_id IS NULL ORDER BY first_seen LIMIT ?', (limit,)).fetchall()
@@ -226,8 +279,12 @@ class Store:
                 return 'duplicate'
             if not row or row['lease_token'] != lease or row['status'] != 'processing' or row['lease_until'] < stamp:
                 raise Conflict('lease_lost_or_result_conflict')
-            db.execute("UPDATE jobs SET status='ready',result=?,result_hash=?,updated=?,last_error=NULL WHERE job_id=?",
-                       (json.dumps(result, ensure_ascii=False), result_hash, stamp, job_id))
+            next_status = 'ready'
+            if (row['job_type'] or 'summary') == 'single_note_analysis':
+                payload = json.loads(row['payload'])
+                next_status = 'ready' if payload.get('deliver_to_feishu') else 'completed'
+            db.execute("UPDATE jobs SET status=?,result=?,result_hash=?,updated=?,last_error=NULL WHERE job_id=?",
+                       (next_status, json.dumps(result, ensure_ascii=False), result_hash, stamp, job_id))
             if row['run_id'] and (row['job_type'] or 'summary') == 'summary':
                 db.execute("""UPDATE recommendation_runs
                               SET status='summary_ready',finished=?,last_error=NULL
@@ -319,10 +376,48 @@ class Store:
                                  FROM jobs j
                                  LEFT JOIN delivery_parts d ON d.job_id=j.job_id
                                  WHERE j.job_type NOT IN ('classify_recommendations','classify_profiles')
+                                   AND (j.job_type!='single_note_analysis'
+                                        OR COALESCE(json_extract(j.payload,'$.deliver_to_feishu'),0)=1)
                                  GROUP BY j.job_id
                                  ORDER BY j.updated DESC LIMIT ?''',
                               (bounded_limit,)).fetchall()
             return [dict(row) for row in rows]
+
+    def list_single_note_jobs(self, limit=20):
+        """Return safe note metadata and the user-visible analysis result."""
+        bounded_limit = max(1, min(int(limit), 100))
+        with self.connect() as db:
+            rows = db.execute('''SELECT j.job_id,j.status,j.payload,j.result,j.created,j.updated,
+                                        j.attempts,j.last_error,COUNT(d.part) AS delivered_parts
+                                 FROM jobs j
+                                 LEFT JOIN delivery_parts d ON d.job_id=j.job_id
+                                 WHERE j.job_type='single_note_analysis'
+                                 GROUP BY j.job_id
+                                 ORDER BY j.updated DESC LIMIT ?''',
+                              (bounded_limit,)).fetchall()
+        values = []
+        for row in rows:
+            payload = json.loads(row['payload'])
+            result = json.loads(row['result']) if row['result'] else {}
+            note = (payload.get('notes') or [{}])[0]
+            values.append({
+                'job_id': row['job_id'],
+                'status': row['status'],
+                'note_id': note.get('note_id', ''),
+                'title': note.get('title', ''),
+                'author': note.get('author', ''),
+                'published_at': note.get('published_at'),
+                'url': note.get('url', ''),
+                'created': row['created'],
+                'updated': row['updated'],
+                'attempts': row['attempts'],
+                'last_error': row['last_error'],
+                'deliver_to_feishu': bool(payload.get('deliver_to_feishu')),
+                'delivered_parts': row['delivered_parts'],
+                'summary': result.get('summary', ''),
+                'model': result.get('model', ''),
+            })
+        return values
 
     def enqueue_manual_message(self, text, request_id):
         text = str(text or '').strip()

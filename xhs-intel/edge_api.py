@@ -17,7 +17,13 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from collector import collect, collect_recommendations, collect_watched  # noqa: E402
+from collector import (  # noqa: E402
+    InvalidNoteLink,
+    collect,
+    collect_recommendations,
+    collect_single_note,
+    collect_watched,
+)
 from common import error_code, request_json  # noqa: E402
 from config import policy_snapshot  # noqa: E402
 from operations import (  # noqa: E402
@@ -581,6 +587,10 @@ class Handler(BaseHTTPRequestHandler):
             limit = _query_int(query, "limit", 50, 1, 200)
             reply(self, 200, {"status": "ok", "jobs": STORE.list_jobs(limit=limit)})
             return
+        if path == "/v1/single-notes":
+            limit = _query_int(query, "limit", 20, 1, 100)
+            reply(self, 200, {"status": "ok", "jobs": STORE.list_single_note_jobs(limit=limit)})
+            return
         if path == "/v1/feishu/status":
             limit = _query_int(query, "limit", 50, 1, 200)
             reply(self, 200, {"status": "ok", "configured": bool(FEISHU_WEBHOOK),
@@ -676,6 +686,21 @@ class Handler(BaseHTTPRequestHandler):
                 result = STORE.enqueue_manual_message(payload.get("text"), payload.get("request_id"))
                 reply(self, 202, {"status": "accepted", **result})
                 return
+            if path == "/v1/dashboard/single-notes":
+                deliver_to_feishu = bool(payload.get("deliver_to_feishu"))
+                if deliver_to_feishu and not FEISHU_WEBHOOK:
+                    raise OperationError("XHS Feishu webhook is not configured")
+                try:
+                    result = collect_single_note(
+                        STORE, SOURCE_ROOT, COOKIE_FILE,
+                        payload.get("url") or payload.get("text"),
+                        deliver_to_feishu=deliver_to_feishu,
+                    )
+                except InvalidNoteLink as exc:
+                    reply(self, 400, {"status": "failed", "error": str(exc)})
+                    return
+                reply(self, 202, {"status": "accepted", **result})
+                return
             if path == "/v1/dashboard/operation":
                 namespace, method, args, kwargs = parse_operation_payload(payload)
                 result = RUNTIME.execute(namespace, method, args, kwargs)
@@ -728,6 +753,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/v1/worker/claim":
                 reply(self, 200, {"job": STORE.claim(str(payload.get("worker") or "mac-ai"))})
+                return
+            if path == "/v1/worker/heartbeat":
+                STORE.heartbeat(str(payload.get("job_id")), str(payload.get("lease_token")))
+                reply(self, 200, {"status": "extended"})
                 return
             if path == "/v1/worker/complete":
                 if isinstance(payload.get("decisions"), list):

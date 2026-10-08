@@ -22,6 +22,7 @@ const iconPaths = {
   inbox: '<path d="M4 4h16v14H4z"/><path d="M4 13h4l2 3h4l2-3h4"/>',
   terminal: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m6 9 3 3-3 3M13 15h5"/>',
   message: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/><path d="M8 10h8M8 14h5"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1.1"/>',
 };
 
 function icon(name, label = '') {
@@ -49,6 +50,9 @@ const state = {
   recommendationItems: [],
   capabilities: [],
   deliveries: [],
+  singleJobs: [],
+  singleDraft: '',
+  singleDeliver: false,
   operationDraft: { operation: 'pc.search_some_note', args: '["AI Infra", 5]', kwargs: '{}', confirm: false, deliver: false },
   operationResult: null,
   feishuDraft: '',
@@ -59,6 +63,7 @@ const state = {
 const pageMeta = {
   overview: ['运行总览', '采集、AI 筛选与飞书投递状态'],
   recommendations: ['推荐筛选', '每日推荐流的候选、判断与摘要状态'],
+  single: ['单篇解析', '抓取指定文章并由本机 AI 独立分析'],
   topics: ['关注主题', '管理可版本化的内容筛选策略'],
   following: ['关注账号', '维护监控名单并审核关注候选'],
   capabilities: ['能力控制台', '调用与飞书指令一致的 Spider_XHS 受控方法'],
@@ -183,7 +188,7 @@ async function refreshAll({ quiet = false } = {}) {
     render();
   }
   try {
-    const [dashboard, jobs, watch, candidates, following, capabilities, feishu] = await Promise.all([
+    const [dashboard, jobs, watch, candidates, following, capabilities, feishu, singleNotes] = await Promise.all([
       api('/v1/dashboard'),
       api('/v1/jobs?limit=40'),
       api('/v1/watch-users?enabled=all'),
@@ -191,6 +196,7 @@ async function refreshAll({ quiet = false } = {}) {
       api('/v1/following?limit=100'),
       api('/v1/capabilities'),
       api('/v1/feishu/status?limit=50'),
+      api('/v1/single-notes?limit=20'),
     ]);
     state.dashboard = dashboard;
     state.jobs = jobs.jobs || [];
@@ -200,6 +206,7 @@ async function refreshAll({ quiet = false } = {}) {
     state.followingTotal = following.total || 0;
     state.capabilities = capabilities.namespaces || [];
     state.deliveries = feishu.deliveries || [];
+    state.singleJobs = singleNotes.jobs || [];
     state.error = '';
     const runs = dashboard.recommendation_runs || [];
     if (!state.selectedRunId && runs.length) state.selectedRunId = runs[0].run_id;
@@ -288,6 +295,40 @@ function renderRecommendations() {
     <section class="panel">
       ${sectionHeader(selected ? `候选内容 · ${statusLabel(selected.status)}` : '候选内容', selected ? `抓取 ${selected.fetched || 0}，入选 ${selected.selected || 0}，复核 ${selected.review || 0}，排除 ${selected.rejected || 0}` : '选择一次运行查看筛选结果', action)}
       <div class="panel-body flush">${itemRows ? `<div class="table-wrap"><table><thead><tr><th>序号</th><th>内容</th><th>判断</th><th>相关度</th><th>依据</th><th></th></tr></thead><tbody>${itemRows}</tbody></table></div>` : emptyState('暂无候选结果', selected ? '采集或 AI 筛选完成后会显示详细结果。' : '先选择一次推荐扫描。')}</div>
+    </section>
+  </div>`;
+}
+
+function renderSingleNotes() {
+  const configured = Boolean(state.dashboard?.feishu_webhook_configured);
+  const rows = state.singleJobs.map((job) => {
+    const delivery = job.deliver_to_feishu
+      ? `<span class="status-pill ${job.status === 'sent' ? 'sent' : 'pending'}">${job.status === 'sent' ? '飞书已投递' : '等待飞书'}</span>`
+      : '<span class="status-pill">仅网页</span>';
+    const result = job.summary
+      ? `<div class="analysis-result">${escapeHtml(job.summary)}</div>`
+      : `<div class="analysis-pending">${job.last_error ? `处理失败：${escapeHtml(job.last_error)}` : '等待 AI 解析'}</div>`;
+    return `<article class="analysis-row">
+      <div class="analysis-head">
+        <div><a class="analysis-title" href="${safeXhsUrl(job.url)}" target="_blank" rel="noreferrer">${escapeHtml(job.title || '无标题')}</a><div class="analysis-meta"><span>${escapeHtml(job.author || '作者未知')}</span><span>${formatTime(job.published_at)}</span><span class="mono">${escapeHtml(job.note_id)}</span></div></div>
+        <div class="analysis-status">${pill(job.status)}${delivery}</div>
+      </div>
+      ${result}
+      <div class="analysis-footer"><span>${job.model ? `模型 ${escapeHtml(job.model)}` : `尝试 ${job.attempts || 0} 次`}</span><span>更新 ${formatTime(job.updated)}</span>${job.delivered_parts ? `<span>飞书 ${job.delivered_parts} 个分片</span>` : ''}</div>
+    </article>`;
+  }).join('');
+  return `<div class="single-layout">
+    <section class="panel">
+      ${sectionHeader('提交文章', '支持小红书文章地址或复制的分享文本')}
+      <div class="panel-body single-form">
+        <label><span>文章链接</span><textarea id="single-note-url" rows="5" placeholder="https://www.xiaohongshu.com/explore/...">${escapeHtml(state.singleDraft)}</textarea></label>
+        <label class="single-check"><input id="single-note-deliver" type="checkbox" ${state.singleDeliver ? 'checked' : ''} ${configured ? '' : 'disabled'} /><span>解析完成后同步到飞书</span></label>
+        <button class="button primary" data-action="analyze-single">${icon('sparkles')}<span>抓取并解析</span></button>
+      </div>
+    </section>
+    <section class="panel">
+      ${sectionHeader('最近解析', `${state.singleJobs.length} 个任务`)}
+      <div class="analysis-list">${rows || emptyState('暂无单篇解析', '提交文章后，任务状态和 AI 结果会显示在这里。')}</div>
     </section>
   </div>`;
 }
@@ -423,7 +464,7 @@ function render() {
     return;
   }
   const error = state.error ? `<div class="error-banner">数据读取失败：${escapeHtml(state.error)}</div>` : '';
-  const views = { overview: renderOverview, recommendations: renderRecommendations, topics: renderTopics, following: renderFollowing, capabilities: renderCapabilities, feishu: renderFeishu };
+  const views = { overview: renderOverview, recommendations: renderRecommendations, single: renderSingleNotes, topics: renderTopics, following: renderFollowing, capabilities: renderCapabilities, feishu: renderFeishu };
   content.innerHTML = error + views[state.activeView]();
 }
 
@@ -475,6 +516,13 @@ document.addEventListener('click', async (event) => {
   if (!button) return;
   const action = button.dataset.action;
   if (action === 'run-recommendations') await runAction(button, '推荐扫描已启动', () => post('/v1/dashboard/recommendations/run', { limit: 50, trigger: 'dashboard' }));
+  if (action === 'analyze-single') {
+    if (!state.singleDraft.trim()) { toast('请输入小红书文章链接', 'error'); return; }
+    await runAction(button, '文章已进入 AI 解析队列', async () => {
+      await post('/v1/dashboard/single-notes', { url: state.singleDraft.trim(), deliver_to_feishu: state.singleDeliver });
+      state.singleDraft = '';
+    });
+  }
   if (action === 'select-run') await loadRecommendationItems(button.dataset.runId);
   if (action === 'new-topic') openTopicDialog();
   if (action === 'edit-topic') openTopicDialog(button.dataset.slug);
@@ -531,12 +579,14 @@ document.addEventListener('input', (event) => {
     const count = document.querySelector('#feishu-char-count');
     if (count) count.textContent = `${state.feishuDraft.length} / 12000`;
   }
+  if (event.target.id === 'single-note-url') state.singleDraft = event.target.value;
 });
 
 document.addEventListener('change', (event) => {
   const field = event.target.dataset?.operationField;
   if (field) state.operationDraft[field] = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
   if (field === 'operation') render();
+  if (event.target.id === 'single-note-deliver') state.singleDeliver = event.target.checked;
 });
 
 refreshButton.addEventListener('click', () => refreshAll());

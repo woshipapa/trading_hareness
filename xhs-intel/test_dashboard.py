@@ -25,6 +25,7 @@ class DashboardHttpTests(unittest.TestCase):
         self.previous_token = edge_api.TOKEN
         self.previous_runtime = edge_api.RUNTIME
         self.previous_webhook = edge_api.FEISHU_WEBHOOK
+        self.previous_collect_single_note = edge_api.collect_single_note
         edge_api.STORE = Store(Path(self.tmp.name) / "state.db")
         edge_api.TOKEN = "test-collector-token"
         edge_api.FEISHU_WEBHOOK = "https://example.invalid/hook"
@@ -43,6 +44,7 @@ class DashboardHttpTests(unittest.TestCase):
         edge_api.TOKEN = self.previous_token
         edge_api.RUNTIME = self.previous_runtime
         edge_api.FEISHU_WEBHOOK = self.previous_webhook
+        edge_api.collect_single_note = self.previous_collect_single_note
         self.tmp.cleanup()
 
     def browser_json(self, path, payload=None):
@@ -54,6 +56,16 @@ class DashboardHttpTests(unittest.TestCase):
             method="POST" if payload is not None else "GET",
         )
         with self.browser.open(request, timeout=3) as response:
+            return response.status, json.load(response)
+
+    def machine_json(self, path, payload):
+        request = urllib.request.Request(
+            self.base + path,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json", "X-XHS-Collector-Token": edge_api.TOKEN},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
             return response.status, json.load(response)
 
     def test_dashboard_bootstraps_an_http_only_session(self):
@@ -118,6 +130,40 @@ class DashboardHttpTests(unittest.TestCase):
         _, delivery = self.browser_json("/v1/feishu/status")
         self.assertEqual(len(delivery["deliveries"]), 1)
         self.assertNotIn("人工复核完成", json.dumps(delivery, ensure_ascii=False))
+
+    def test_dashboard_submits_and_lists_a_single_note_analysis(self):
+        def fake_collect(store, _source_root, _cookie_file, value, *, deliver_to_feishu=False):
+            self.assertIn('xiaohongshu.com', value)
+            item = normalize({
+                'id': 'e' * 24,
+                'note_card': {'title': 'SGLang serving', 'desc': 'Radix cache',
+                              'user': {'nickname': 'Systems Author'}},
+            }, 'single:' + 'e' * 24)
+            return store.enqueue_single_note(item, deliver_to_feishu=deliver_to_feishu)
+
+        edge_api.collect_single_note = fake_collect
+        self.browser.open(self.base + "/xhs/", timeout=3).close()
+        status, payload = self.browser_json('/v1/dashboard/single-notes', {
+            'url': 'https://www.xiaohongshu.com/explore/' + 'e' * 24,
+            'deliver_to_feishu': False,
+        })
+        self.assertEqual(status, 202)
+        self.assertEqual(payload['job_status'], 'pending')
+        _, listing = self.browser_json('/v1/single-notes')
+        self.assertEqual(listing['jobs'][0]['title'], 'SGLang serving')
+        self.assertFalse(listing['jobs'][0]['deliver_to_feishu'])
+        self.assertNotIn('payload', listing['jobs'][0])
+
+    def test_worker_can_extend_a_processing_lease(self):
+        edge_api.STORE.enqueue_single_note(normalize({
+            'id': 'f' * 24, 'note_card': {'title': 'Long analysis', 'desc': 'systems'},
+        }, 'single:' + 'f' * 24))
+        job = edge_api.STORE.claim('mac')
+        status, payload = self.machine_json('/v1/worker/heartbeat', {
+            'job_id': job['job_id'], 'lease_token': job['lease_token'],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(payload['status'], 'extended')
 
     def test_dashboard_can_manage_watch_users_without_exposing_a_secret(self):
         self.browser.open(self.base + "/xhs/", timeout=3).close()

@@ -1,9 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from store import Store, Conflict
-from collector import normalize
+from collector import InvalidNoteLink, collect_single_note, normalize, parse_note_reference
 
 
 def note(text='内容', likes='1'):
@@ -96,6 +97,60 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(len(listing), 1)
         self.assertNotIn('result', listing[0])
         self.assertNotIn('payload', listing[0])
+
+    def test_single_note_analysis_stays_local_until_delivery_is_requested(self):
+        first = self.store.enqueue_single_note(note('KV cache paging'), deliver_to_feishu=False)
+        job = self.store.claim('single-worker')
+        self.assertEqual(job['job_id'], first['job_id'])
+        self.assertEqual(job['job_type'], 'single_note_analysis')
+        self.store.complete(job['job_id'], job['lease_token'], {
+            'summary': '单篇分析结果', 'model': 'fake-model',
+        })
+        self.assertEqual(self.store.list_single_note_jobs()[0]['status'], 'completed')
+        self.assertEqual(self.store.list_single_note_jobs()[0]['summary'], '单篇分析结果')
+        self.assertEqual(self.store.ready_deliveries(), [])
+        self.assertEqual(self.store.list_delivery_jobs(), [])
+
+        second = self.store.enqueue_single_note(note('KV cache paging'), deliver_to_feishu=True)
+        self.assertTrue(second['duplicate'])
+        self.assertEqual(second['job_status'], 'ready')
+        self.assertEqual(self.store.ready_deliveries()[0]['job_id'], first['job_id'])
+        self.assertEqual(self.store.list_delivery_jobs()[0]['job_type'], 'single_note_analysis')
+
+    def test_note_reference_accepts_share_text_and_rejects_external_hosts(self):
+        reference = parse_note_reference(
+            '复制内容 https://www.xiaohongshu.com/discovery/item/' + 'A' * 24
+            + '?xsec_token=private-token&xsec_source=pc_share，打开查看')
+        self.assertEqual(reference['note_id'], 'a' * 24)
+        self.assertIn('xsec_token=private-token', reference['fetch_url'])
+        short = parse_note_reference(
+            'https://xhslink.com/a/example',
+            short_resolver=lambda _url: 'https://www.xiaohongshu.com/explore/' + 'b' * 24,
+        )
+        self.assertEqual(short['note_id'], 'b' * 24)
+        with self.assertRaises(InvalidNoteLink):
+            parse_note_reference('https://example.com/explore/' + 'c' * 24)
+
+    def test_single_note_collection_never_persists_signed_link_material(self):
+        class FakeApi:
+            def get_note_info(self, url):
+                self.url = url
+                return True, 'ok', {'data': {'items': [{'note_card': {
+                    'title': 'Paged attention', 'desc': 'KV cache systems',
+                    'user': {'nickname': 'Infra Author'},
+                }}]}}
+
+        cookie = Path(self.tmp.name) / 'cookie'
+        cookie.write_text('a1=fake; web_session=fake', encoding='utf-8')
+        api = FakeApi()
+        submitted = ('https://www.xiaohongshu.com/explore/' + 'd' * 24
+                     + '?xsec_token=private-token&xsec_source=pc_share')
+        with mock.patch('collector._pc_api', return_value=api):
+            result = collect_single_note(self.store, '/tmp/source', cookie, submitted)
+        self.assertIn('private-token', api.url)
+        visible = {'result': result, 'jobs': self.store.list_single_note_jobs()}
+        self.assertNotIn('private-token', str(visible))
+        self.assertEqual(visible['jobs'][0]['url'], 'https://www.xiaohongshu.com/explore/' + 'd' * 24)
 
     def test_recommendation_filter_covers_all_candidates_and_queues_only_selected_summary(self):
         first = note('CUDA distributed training')

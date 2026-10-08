@@ -4,9 +4,115 @@ import re
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from common import digest, error_code
+
+
+class InvalidNoteLink(ValueError):
+    """The submitted text does not contain a supported XHS note link."""
+
+
+_URL_RE = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
+_NOTE_PATH_RE = re.compile(r'/(?:explore|discovery/item)/([0-9a-fA-F]{24})(?:/|$)')
+_TRAILING_SHARE_TEXT = '.,;!?)]}\u3002\uff0c\uff1b\uff01\uff1f\u3011\u300b'
+
+
+def _link_kind(url):
+    parsed = urlparse(str(url or '').strip())
+    host = (parsed.hostname or '').lower().rstrip('.')
+    if parsed.scheme not in {'http', 'https'} or parsed.username or parsed.password:
+        raise InvalidNoteLink('invalid_xhs_url')
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise InvalidNoteLink('invalid_xhs_url') from exc
+    if port not in (None, 80, 443):
+        raise InvalidNoteLink('invalid_xhs_url')
+    if host == 'xiaohongshu.com' or host.endswith('.xiaohongshu.com'):
+        return 'note'
+    if host == 'xhslink.com' or host.endswith('.xhslink.com'):
+        return 'short'
+    raise InvalidNoteLink('unsupported_xhs_host')
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+        return None
+
+
+def resolve_xhs_short_url(url, *, max_redirects=5, timeout=10):
+    """Resolve an XHS short link while validating every redirect target."""
+    current = str(url)
+    opener = build_opener(_NoRedirect())
+    for _ in range(max_redirects + 1):
+        kind = _link_kind(current)
+        if kind == 'note':
+            return current
+        request = Request(current, headers={'User-Agent': 'Mozilla/5.0'}, method='GET')
+        try:
+            response = opener.open(request, timeout=timeout)
+        except HTTPError as exc:
+            try:
+                if exc.code not in {301, 302, 303, 307, 308}:
+                    raise RuntimeError('xhs_short_link_failed') from exc
+                location = exc.headers.get('Location')
+            finally:
+                exc.close()
+        else:
+            try:
+                location = response.headers.get('Location')
+            finally:
+                response.close()
+        if not location:
+            raise InvalidNoteLink('xhs_short_link_missing_redirect')
+        current = urljoin(current, location)
+        _link_kind(current)
+    raise InvalidNoteLink('xhs_short_link_too_many_redirects')
+
+
+def parse_note_reference(value, *, short_resolver=resolve_xhs_short_url):
+    """Extract one note URL from pasted link/share text and build a fetch-only URL."""
+    match = _URL_RE.search(str(value or '').strip())
+    if not match:
+        raise InvalidNoteLink('xhs_note_url_required')
+    submitted = match.group(0).rstrip(_TRAILING_SHARE_TEXT)
+    kind = _link_kind(submitted)
+    resolved = short_resolver(submitted) if kind == 'short' else submitted
+    if _link_kind(resolved) != 'note':
+        raise InvalidNoteLink('xhs_note_url_required')
+    parsed = urlparse(resolved)
+    path_match = _NOTE_PATH_RE.search(parsed.path)
+    if not path_match:
+        raise InvalidNoteLink('xhs_note_id_required')
+    note_id = path_match.group(1).lower()
+    query = parse_qs(parsed.query)
+    fetch_params = {}
+    token = str((query.get('xsec_token') or [''])[0])[:2048]
+    source = str((query.get('xsec_source') or ['pc_share'])[0])[:64]
+    if token:
+        fetch_params['xsec_token'] = token
+    fetch_params['xsec_source'] = source if re.fullmatch(r'[A-Za-z0-9_-]+', source) else 'pc_share'
+    fetch_url = f'https://www.xiaohongshu.com/explore/{note_id}?{urlencode(fetch_params)}'
+    return {'note_id': note_id, 'fetch_url': fetch_url}
+
+
+def collect_single_note(store, source_root, cookie_file, value, *, deliver_to_feishu=False,
+                        short_resolver=resolve_xhs_short_url):
+    """Fetch one submitted note and queue an idempotent local AI analysis."""
+    reference = parse_note_reference(value, short_resolver=short_resolver)
+    api = _pc_api(source_root, cookie_file)
+    ok, _message, response = api.get_note_info(reference['fetch_url'])
+    if not ok:
+        raise RuntimeError('detail_failed')
+    items = ((response or {}).get('data') or {}).get('items') or []
+    if not items or not isinstance(items[0], dict):
+        raise RuntimeError('invalid_note_detail_response')
+    note_id = reference['note_id']
+    note = normalize({'id': note_id}, f'single:{note_id}', items[0])
+    return store.enqueue_single_note(note, deliver_to_feishu=deliver_to_feishu)
 
 
 def normalize(item, query, detail=None):

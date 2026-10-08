@@ -25,6 +25,14 @@ Operations use the same allowlist and explicit mutation confirmation as the
 Feishu command lane. Results are sanitized before rendering or optional Feishu
 delivery.
 
+The `单篇解析` view accepts an official note URL, copied share text, or an
+`xhslink.com` short URL. Edge resolves and validates each redirect, fetches the
+note with the existing Cookie, and queues a `single_note_analysis` job for the
+Mac worker. The canonical note URL is persisted without signed query material.
+Results remain in the console by default; an explicit checkbox puts the final
+analysis into the existing Feishu delivery ledger. Identical note revisions
+reuse the same AI result.
+
 The dashboard is dependency-free static source under `dashboard/`. Both the
 immutable image and the XHS source overlay include it. Future HTML, CSS,
 JavaScript or Python-only changes use `scripts/hotfix-xhs-intel-edge.sh`;
