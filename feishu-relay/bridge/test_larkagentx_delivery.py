@@ -43,6 +43,22 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 	def test_xhs_command_lane_can_bind_chat_ids(self):
 		self.assertTrue(bridge.is_xhs_command_message({"content": "#xhs status", "chat_id": "oc_bound"}))
 
+	def test_xhs_command_chats_are_part_of_the_effective_listener(self):
+		self.assertEqual(
+			bridge.effective_listen_chats(
+				{"source-chat"}, {"summary-chat"},
+				xhs_enabled=True, xhs_commands={"7690524560642280650"},
+			),
+			{"source-chat", "summary-chat", "7690524560642280650"},
+		)
+		self.assertNotIn(
+			"7690524560642280650",
+			bridge.effective_listen_chats(
+				{"source-chat"}, set(),
+				xhs_enabled=False, xhs_commands={"7690524560642280650"},
+			),
+		)
+
 	def test_command_lane_uses_direct_adapter_ingress(self):
 		instance = object.__new__(bridge.Bridge)
 		instance.ingress_url = "http://127.0.0.1:18300/internal/larkagentx/group-relay"

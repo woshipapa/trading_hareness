@@ -10,6 +10,14 @@ test('parses explicit xhs commands and defaults to status', () => {
 	assert.equal(parseXhsCommand({ message: { content: '#xhs' } }).command, 'status');
 });
 
+test('preserves sender open id for edge-side admin checks', () => {
+	const parsed = parseXhsCommand({
+		message: { chat_id: 'oc_x', content: '#xhs intel following approve user-123' },
+		sender: { sender_id: { open_id: 'ou_admin' } },
+	});
+	assert.equal(parsed.sender_open_id, 'ou_admin');
+});
+
 test('enforces the optional chat binding', () => {
 	assert.equal(parseXhsCommand({ message: { chat_id: 'oc_other', content: '#xhs status' } }, 'oc_bound'), null);
 	assert.equal(parseXhsCommand({ message: { chat_id: 'oc_bound', content: '#xhs status' } }, 'oc_bound').command, 'status');

@@ -234,6 +234,7 @@ services:
       XHS_INTEL_TREE_SHA256: ${XHS_INTEL_TREE_SHA256:-}
       XHS_WORKFLOW_SHA256: ${XHS_WORKFLOW_SHA256:-}
       XHS_FEISHU_WEBHOOK_URL: ${XHS_FEISHU_WEBHOOK_URL:-}
+      XHS_ADMIN_OPEN_IDS: ${XHS_ADMIN_OPEN_IDS:-}
       # 与适配器、quant-service 同一套源码 overlay 机制：改 xhs-intel 的 Python
       # 源码不该每次重建镜像。xhs-intel/scripts/hotfix-xhs-intel-edge.sh 在预检
       # 通过后才把它置为 true。依赖（requirements.txt）、Dockerfile、基础镜像或

@@ -13,9 +13,18 @@ export function parseXhsCommand(data, allowChatId = '') {
 		.trim();
 	const match = XHS_RE.exec(raw);
 	if (!match) return null;
+	const senderOpenId = String(
+		data?.sender?.sender_id?.open_id
+		?? data?.sender?.sender_id?.user_id
+		?? data?.event?.sender?.sender_id?.open_id
+		?? data?.event?.sender?.sender_id?.user_id
+		?? data?.sender_open_id
+		?? '',
+	).trim();
 	return {
 		command: String(match[1] ?? 'status').trim() || 'status',
 		chat_id: chatId,
 		message_id: String(data?.message?.message_id ?? data?.message?.msg_id ?? data?.event_id ?? '').trim(),
+		...(senderOpenId ? { sender_open_id: senderOpenId } : {}),
 	};
 }

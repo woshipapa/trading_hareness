@@ -84,6 +84,12 @@ def is_xhs_command_message(message: dict[str, Any]) -> bool:
 	return bool(text and XHS_COMMAND_RE.match(text))
 
 
+def effective_listen_chats(base: set[str], summary: set[str], *,
+						   xhs_enabled: bool, xhs_commands: set[str]) -> set[str]:
+	"""Return every chat that must reach the WebSocket receive loop."""
+	return set(base) | set(summary) | (set(xhs_commands) if xhs_enabled else set())
+
+
 def bounded_int_env(name: str, default: int, minimum: int, maximum: int | None = None) -> int:
 	try:
 		value = int(os.environ.get(name, str(default)))
@@ -452,15 +458,19 @@ class Bridge:
 		self.summary_ingress_url = os.environ.get("LARKX_SUMMARY_INGRESS_URL", "").strip()
 		if self.summary_chat_ids and not self.summary_ingress_url:
 			raise RuntimeError("LARKX_SUMMARY_INGRESS_URL is required when LARKX_SUMMARY_CHAT_IDS is configured")
-		self.listen_chats = csv_env("LARKX_LISTEN_CHAT_IDS") | self.summary_chat_ids
+		self.paper_command_lane_enabled = os.environ.get("LARKX_PAPER_KB_COMMANDS_ENABLED", "false").strip().lower() == "true"
+		self.xhs_command_lane_enabled = os.environ.get("LARKX_XHS_COMMANDS_ENABLED", "false").strip().lower() == "true"
+		self.xhs_command_chat_ids = csv_env("LARKX_XHS_COMMAND_CHAT_IDS")
+		self.listen_chats = effective_listen_chats(
+			csv_env("LARKX_LISTEN_CHAT_IDS"), self.summary_chat_ids,
+			xhs_enabled=self.xhs_command_lane_enabled,
+			xhs_commands=self.xhs_command_chat_ids,
+		)
 		self.send_chats = csv_env("LARKX_SEND_CHAT_IDS")
 		if not self.listen_chats:
 			raise RuntimeError("LARKX_LISTEN_CHAT_IDS must contain at least one chat ID")
 		if not self.send_chats:
 			raise RuntimeError("LARKX_SEND_CHAT_IDS must contain at least one chat ID")
-		self.paper_command_lane_enabled = os.environ.get("LARKX_PAPER_KB_COMMANDS_ENABLED", "false").strip().lower() == "true"
-		self.xhs_command_lane_enabled = os.environ.get("LARKX_XHS_COMMANDS_ENABLED", "false").strip().lower() == "true"
-		self.xhs_command_chat_ids = csv_env("LARKX_XHS_COMMAND_CHAT_IDS")
 		self.profile = os.environ.get("LARKX_PROFILE", "default").strip() or "default"
 		larkx_home = Path(os.environ.get("LARKX_HOME", "~/.larkx")).expanduser()
 		auth_path, default_spool_path, default_owner_path = profile_storage_paths(larkx_home, self.profile)
