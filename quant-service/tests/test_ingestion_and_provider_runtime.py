@@ -938,21 +938,29 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
     def test_market_snapshot_skips_circuit_open_public_providers_without_external_requests(self):
         expected = {"status": "blocked", "source_summary": {"tencent_snapshot": {"status": "circuit_open"}}}
 
-        async def check() -> tuple[dict[str, object], AsyncMock, AsyncMock]:
+        async def check() -> tuple[dict[str, object], AsyncMock, AsyncMock, AsyncMock]:
             blocking = AsyncMock(side_effect=[["000001.SZ"], expected])
-            circuits = AsyncMock(return_value={"realtime_quote"})
+            # Fuyao's all-A snapshot is gated on its own capability, not on the
+            # legacy per-quote realtime_quote circuit, so "every public source is
+            # open" means both. With only realtime_quote open this test used to
+            # reach the real Fuyao endpoint and record its failure.
+            circuits = AsyncMock(return_value={"realtime_quote", "a_share_prices_snapshot"})
+            fuyao = AsyncMock()
             with patch("app.main.market_snapshot_thresholds", return_value=(1, 0.95, set())), \
                  patch("app.main.market_snapshot_public_quote_settings", return_value={"enabled": True, "batch_size": 80, "concurrency": 2}), \
+                 patch("app.main.market_snapshot_fuyao_enabled", return_value=True), \
                  patch("app.main.run_database_blocking", new=blocking), \
                  patch("app.main.open_provider_capabilities", new=circuits), \
+                 patch("app.main.fuyao_all_a_snapshot_rows", new=fuyao), \
                  patch("app.main.run_akshare_blocking", new=AsyncMock()) as upstream:
                 result = await build_market_snapshot(MarketSnapshotRequest(session="close", refresh_public_quotes=True))
-            return result, circuits, upstream
+            return result, circuits, upstream, fuyao
 
-        result, circuits, upstream = asyncio.run(check())
+        result, circuits, upstream, fuyao = asyncio.run(check())
         self.assertEqual(result, expected)
         self.assertEqual(circuits.await_count, 2)
         upstream.assert_not_awaited()
+        fuyao.assert_not_awaited()
 
     def test_market_snapshot_uses_snapshot_capability_gate_and_akshare_fallback(self):
         expected = {"status": "degraded", "quote_count": 1, "source_summary": {"providers": {"akshare": 1}}}

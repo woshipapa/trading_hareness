@@ -20,7 +20,7 @@ admin_sql() {
 }
 run_in_image() {
   "${COMPOSE[@]}" run --rm --no-deps -T -v "$PWD:/src:ro" \
-    -e PYTHONPATH=/src/quant-service -e PGDATABASE="$database" \
+    -e PYTHONPATH=/src/quant-service/tests:/src/quant-service -e PGDATABASE="$database" \
     -w /src/quant-service quant-research "$@"
 }
 
