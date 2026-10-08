@@ -110,7 +110,7 @@ class _DirectAsyncRepositoryCallVisitor(ast.NodeVisitor):
     _SYNC_REPOSITORY_CALLS = {
         "build_snapshot", "generate_recommendations", "recompute_outcomes",
         "recompute_scorecards", "recompute_intraday_signal_outcomes", "run_post_close_strategy",
-        "resolve_sync_symbols", "ensure_catalog_capabilities", "watchlist_daily_factors", "stock_window_readiness",
+        "resolve_sync_symbols", "watchlist_daily_factors", "stock_window_readiness",
         "strategy_event_context", "strategy_tushare_lhb_context", "strategy_source_readiness",
         "persist_daily_bar_batch",
     }

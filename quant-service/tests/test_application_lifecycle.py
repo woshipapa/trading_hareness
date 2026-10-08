@@ -24,15 +24,6 @@ class ApplicationLifecycleTests(unittest.TestCase):
         def configure(reserver, **_kwargs):
             events.append("configure:on" if reserver is not None else "configure:off")
 
-        def ensure_catalog() -> None:
-            events.append("catalog")
-
-        async def run_database(operation, *, timeout_seconds: int):
-            self.assertIs(operation, ensure_catalog)
-            self.assertEqual(timeout_seconds, 30)
-            events.append("run_database")
-            operation()
-
         async def start_http():
             await async_mark("http:start")
 
@@ -56,13 +47,10 @@ class ApplicationLifecycleTests(unittest.TestCase):
             configure_request_reserver=configure,
             request_reserver=request_reserver,
             max_reservation_wait_seconds=3.0,
-            initialize_provider_metrics=mark("metrics:init"),
             start_http_clients=start_http,
             legacy_schema_bootstrap_enabled=lambda: True,
             migrate_database=mark("db:migrate"),
             verify_versioned_schema=mark("db:verify"),
-            ensure_catalog_capabilities=ensure_catalog,
-            run_database=run_database,
             verify_strategy_contracts=mark("strategies:verify"),
             start_background_tasks=lambda: events.append("tasks:start") or {"loop": object_marker},
             cancel_background_tasks=cancel_tasks,
@@ -80,8 +68,8 @@ class ApplicationLifecycleTests(unittest.TestCase):
 
         asyncio.run(exercise())
         self.assertEqual(events, [
-            "db:open", "async_db:open", "configure:on", "metrics:init", "http:start",
-            "db:migrate", "db:verify", "run_database", "catalog", "strategies:verify", "tasks:start", "inside",
+            "db:open", "async_db:open", "configure:on", "http:start",
+            "db:migrate", "db:verify", "strategies:verify", "tasks:start", "inside",
             "tasks:cancel", "snapshot:cancel", "super_get:shutdown", "executors:shutdown",
             "http:close", "configure:off", "async_db:close", "db:close",
         ])
@@ -92,8 +80,6 @@ class ApplicationLifecycleTests(unittest.TestCase):
         async def nothing_async():
             return None
 
-        async def run_database(*_args, **_kwargs):
-            return None
 
         dependencies = ApplicationLifecycleDependencies(
             open_database=lambda: None,
@@ -101,13 +87,10 @@ class ApplicationLifecycleTests(unittest.TestCase):
             configure_request_reserver=lambda *_args, **_kwargs: None,
             request_reserver=nothing_async,
             max_reservation_wait_seconds=1.0,
-            initialize_provider_metrics=lambda: None,
             start_http_clients=nothing_async,
             legacy_schema_bootstrap_enabled=lambda: False,
             migrate_database=lambda: events.append("migrate"),
             verify_versioned_schema=lambda: None,
-            ensure_catalog_capabilities=lambda: None,
-            run_database=run_database,
             start_background_tasks=dict,
             cancel_background_tasks=lambda _tasks: nothing_async(),
             cancel_shared_snapshots=nothing_async,
@@ -146,13 +129,10 @@ class ApplicationLifecycleTests(unittest.TestCase):
             ),
             request_reserver=lambda *_args, **_kwargs: None,
             max_reservation_wait_seconds=1.0,
-            initialize_provider_metrics=lambda: events.append("metrics:init"),
             start_http_clients=start_http_clients,
             legacy_schema_bootstrap_enabled=lambda: False,
             migrate_database=lambda: events.append("migrate"),
             verify_versioned_schema=lambda: events.append("verify"),
-            ensure_catalog_capabilities=lambda: events.append("catalog"),
-            run_database=lambda *_args, **_kwargs: None,
             start_background_tasks=lambda: events.append("tasks:start") or {},
             cancel_background_tasks=lambda _tasks: None,
             cancel_shared_snapshots=lambda: None,
@@ -170,7 +150,7 @@ class ApplicationLifecycleTests(unittest.TestCase):
 
         asyncio.run(exercise())
         self.assertEqual(events, [
-            "db:open", "async_db:open", "configure:on", "metrics:init", "http:start",
+            "db:open", "async_db:open", "configure:on", "http:start",
             "super_get:shutdown", "executors:shutdown", "configure:off", "async_db:close", "db:close",
         ])
 
@@ -196,13 +176,10 @@ class ApplicationLifecycleTests(unittest.TestCase):
             ),
             request_reserver=lambda *_args, **_kwargs: None,
             max_reservation_wait_seconds=1.0,
-            initialize_provider_metrics=lambda: events.append("metrics:init"),
             start_http_clients=start_http_clients,
             legacy_schema_bootstrap_enabled=lambda: False,
             migrate_database=lambda: self.fail("unexpected migration"),
             verify_versioned_schema=lambda: self.fail("unexpected schema check"),
-            ensure_catalog_capabilities=lambda: self.fail("unexpected catalog registration"),
-            run_database=lambda *_args, **_kwargs: self.fail("unexpected database runner"),
             start_background_tasks=lambda: self.fail("tasks must not start"),
             cancel_background_tasks=lambda _tasks: self.fail("no tasks to cancel"),
             cancel_shared_snapshots=lambda: self.fail("no snapshot to cancel"),

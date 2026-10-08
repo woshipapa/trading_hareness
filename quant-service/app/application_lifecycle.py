@@ -22,13 +22,10 @@ class ApplicationLifecycleDependencies:
     configure_request_reserver: Callable[..., Any]
     request_reserver: Callable[..., Awaitable[Any]]
     max_reservation_wait_seconds: float
-    initialize_provider_metrics: Callable[[], Any]
     start_http_clients: Callable[[], Awaitable[Any]]
     legacy_schema_bootstrap_enabled: Callable[[], bool]
     migrate_database: Callable[[], Any]
     verify_versioned_schema: Callable[[], Any]
-    ensure_catalog_capabilities: Callable[[], Any]
-    run_database: Callable[..., Awaitable[Any]]
     start_background_tasks: Callable[[], dict[str, Any]]
     cancel_background_tasks: Callable[[dict[str, Any]], Awaitable[Any]]
     cancel_shared_snapshots: Callable[[], Awaitable[Any]]
@@ -91,13 +88,11 @@ async def application_lifespan(
             max_wait_seconds=dependencies.max_reservation_wait_seconds,
         )
         reserver_configured = True
-        dependencies.initialize_provider_metrics()
         await dependencies.start_http_clients()
         http_clients_started = True
         if dependencies.legacy_schema_bootstrap_enabled():
             dependencies.migrate_database()
         dependencies.verify_versioned_schema()
-        await dependencies.run_database(dependencies.ensure_catalog_capabilities, timeout_seconds=30)
         dependencies.verify_strategy_contracts()
         background_tasks = dependencies.start_background_tasks()
         yield

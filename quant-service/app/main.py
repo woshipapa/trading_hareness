@@ -57,7 +57,6 @@ from .launch_radar import (
     record_launch_observations as record_launch_radar_observations,
 )
 from .analysis import as_utc
-from .capability_registry import api_capability
 from .database import AsyncDatabase, Database
 from .daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload as daily_control_plane_status_payload
 from .daily_control_reconciliation import read_coverage as read_daily_control_coverage
@@ -234,11 +233,6 @@ from .intraday_decision_context import (
 )
 from .feature_snapshot_repository import materialize_feature_snapshot
 from .feature_snapshot_runtime import FeatureSnapshotRuntime, FeatureSnapshotRuntimeDependencies
-from .provider_control_plane_runtime import (
-    ProviderControlPlaneRuntime,
-    ProviderControlPlaneRuntimeDependencies,
-    mirror_runtime_rate_limits,
-)
 from .intraday_limit_lift import intraday_limit_lift_pattern as pure_intraday_limit_lift_pattern
 from .intraday_attribution import signal_attribution as pure_signal_attribution
 from .intraday_breakout import eac_acceptance_assessment as pure_eac_acceptance_assessment
@@ -763,7 +757,7 @@ from .runtime_leases import (
     release_runtime_lease,
     renew_runtime_lease,
 )
-from .tushare_catalog import CORE_NORMALIZED_APIS, TUSHARE_CATALOG, catalog_counts, catalog_items
+from .tushare_catalog import CORE_NORMALIZED_APIS, TUSHARE_CATALOG
 from .tushare_catalog_fetch_service import CatalogFetchDependencies, fetch_catalog as run_catalog_fetch
 from .stock_study_tushare_service import StockStudyTushareDependencies, fetch_stock_study_input
 from .stock_study_service import StockStudyDependencies, build as build_stock_study_isolated
@@ -814,7 +808,6 @@ from .tushare_official import (
     REALTIME_MARKET_HOURS_APIS,
 )
 from .tushare_providers import (
-    SUPER_GET_VERIFIED_APIS,
     ProviderCallError,
     ProviderPreference,
     call_with_fallback,
@@ -970,26 +963,8 @@ def tushare_daily_api(symbol: str) -> str:
     return "index_daily" if symbol in {"000300.SH", "000905.SH", "000852.SH"} else "daily"
 
 
-def ensure_catalog_capabilities() -> None:
-    """Register every catalog/provider contract without fabricating verification."""
-    ProviderControlPlaneRuntime(ProviderControlPlaneRuntimeDependencies(
-        database=db,
-        provider_configs=provider_configs,
-        catalog_items=catalog_items,
-        capability_contract=api_capability,
-        super_get_verified_apis=SUPER_GET_VERIFIED_APIS,
-    )).initialize()
 
 
-def sync_runtime_provider_rate_limits(connection: Any, configs: Mapping[str, Any] | None = None) -> None:
-    """Mirror the effective Tushare limiter configuration into the read-only control plane.
-
-    Environment configuration is the one runtime source of truth because the
-    limiter is process-local and takes effect at startup.  Keeping this small
-    mirror current avoids a stale database rate appearing in the UI as if it
-    governed live requests; no credentials or endpoint details are stored.
-    """
-    mirror_runtime_rate_limits(connection, provider_configs() if configs is None else configs)
 
 
 def persist_free_daily(provider: str, rows: list[dict[str, Any]]) -> int:
@@ -5492,13 +5467,10 @@ def _application_lifecycle_dependencies() -> ApplicationLifecycleDependencies:
         configure_request_reserver=configure_provider_request_reserver,
         request_reserver=reserve_tushare_provider_request_slot,
         max_reservation_wait_seconds=provider_global_rate_limit_max_wait_seconds(),
-        initialize_provider_metrics=_initialize_provider_metrics,
         start_http_clients=start_http_clients,
         legacy_schema_bootstrap_enabled=legacy_schema_bootstrap_enabled,
         migrate_database=db.migrate,
         verify_versioned_schema=db.verify_versioned_schema,
-        ensure_catalog_capabilities=ensure_catalog_capabilities,
-        run_database=run_database_blocking,
         verify_strategy_contracts=_verify_strategy_runtime_contracts,
         start_background_tasks=_start_application_background_tasks,
         cancel_background_tasks=cancel_background_tasks,
@@ -5517,10 +5489,6 @@ async def lifespan(_: FastAPI):
         yield
 
 
-def _initialize_provider_metrics() -> None:
-    for configured_provider in provider_configs().values():
-        provider_shared_rate_limit_wait_seconds.labels(configured_provider.key)
-        provider_shared_rate_limit_rejections_total.labels(configured_provider.key)
 
 
 app = FastAPI(title="Market Research Service", version="0.1.0", lifespan=lifespan)
@@ -5840,8 +5808,7 @@ def _legacy_schema_bootstrap() -> dict[str, Any]:
     if not legacy_schema_bootstrap_enabled():
         raise HTTPException(status_code=409, detail="legacy schema bootstrap is disabled; use versioned Alembic migrations")
     db.migrate()
-    ensure_catalog_capabilities()
-    return {"status": "ok", "catalog": catalog_counts()}
+    return {"status": "ok"}
 
 
 def _busy_health_payload() -> dict[str, Any]:

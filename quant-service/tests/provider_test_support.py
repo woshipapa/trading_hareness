@@ -145,7 +145,6 @@ from app.main import FullMarketDailySyncRequest, MarketUniverseSyncRequest, Tush
 from app.main import ConceptCandidateSyncRequest, ConceptMemberBackfillRequest, ConceptMemberSyncRequest, IntradayWatchlistRequest, PostCloseRefreshRequest, SectorFlowSyncRequest, attempt_intraday_alert_delivery, capture_intraday_board_flow_curve, capture_intraday_minute_sessions, delete_intraday_watchlist, deliver_board_rotation_alert, deliver_intraday_alert, hydrate_eastmoney_live_board_members, hydrate_watchlist_history, run_daily_strategy_summary, run_post_close_refresh, run_ths_concept_member_backfill_batch, sync_concept_limit_candidates, sync_eastmoney_board_members, sync_ths_concept_members, sync_ths_concept_signals, sync_ths_industry_moneyflow, sync_ths_sector_catalog, upsert_intraday_watchlist
 from app.main import sync_all_ths_sector_catalogs
 from app.main import GenerateRequest, run_daily_pipeline
-from app.main import sync_runtime_provider_rate_limits
 
 # Test modules intentionally exercise selected private transport helpers.  A
 # normal wildcard import hides underscore names, so expose the explicit shared

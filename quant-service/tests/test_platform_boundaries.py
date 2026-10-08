@@ -251,20 +251,6 @@ class PlatformBoundaryTests(unittest.TestCase):
         self.assertFalse(pressure[0])
         self.assertIn("local calendar capacity unavailable", pressure[1])
 
-    def test_runtime_tushare_rate_limits_are_mirrored_without_secrets(self):
-        connection = MagicMock()
-        primary = MagicMock(key="tushare_primary", rate_limit_per_minute=61)
-        super_get = MagicMock(key="tushare_super_get", rate_limit_per_minute=17)
-
-        sync_runtime_provider_rate_limits(connection, {"primary": primary, "super_get": super_get})
-
-        self.assertEqual(connection.execute.call_count, 2)
-        first_rate_update = connection.execute.call_args_list[0]
-        self.assertEqual(first_rate_update.args[1], (17, "tushare_super_get"))
-        first_metadata_update = connection.execute.call_args_list[1]
-        self.assertEqual(first_metadata_update.args[1], (17, "tushare_super_get"))
-        self.assertIn("runtime_environment", first_metadata_update.args[0])
-
     def test_metrics_refreshes_local_circuit_gauge_without_provider_io(self):
         import app.main as main_module
 
