@@ -137,7 +137,6 @@ from app.main import AkShareProbeRequest, akshare_probe
 from app.main import stock_study_free_fetch
 from app.main import intraday_tencent_surge_context, remote_archive_sync_bearer_allowed
 from app.remote_archive_sync import remote_archive_get
-from app.main import stock_study_fetch
 from app.main import is_circuit_open_http_error, is_local_capacity_http_error
 from app.main import fetch_tushare_catalog
 from app.main import circuit_open_provider_keys_async

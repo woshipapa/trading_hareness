@@ -16,8 +16,8 @@ FRONTEND = ROOT / "frontend" / "src"
 
 
 # Ratchet for the composition root; see the check below.
-MAIN_MAX_LINES = 6_011
-MAIN_MAX_FUNCTIONS = 467
+MAIN_MAX_LINES = 5_980
+MAIN_MAX_FUNCTIONS = 465
 
 def main() -> int:
     problems: list[str] = []

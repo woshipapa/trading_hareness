@@ -32,10 +32,10 @@ async def run(
     event_context: Callable[[list[str], datetime], dict[str, list[dict[str, Any]]]],
     tushare_lhb_context: Callable[[list[str], datetime], dict[str, list[dict[str, Any]]]],
     source_readiness: Callable[[datetime], dict[str, Any]],
-    tushare_realtime_validation: Callable[[list[str], bool], Awaitable[dict[str, Any]]],
     exchange_for: Callable[[str], str],
     json_safe: Callable[[Any], Any],
     model_version: str,
+    tushare_realtime_validation: Callable[[list[str], bool], Awaitable[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Persist a reproducible, non-executable intraday/close decision snapshot."""
     observed_at = datetime.now(timezone.utc)
@@ -68,7 +68,10 @@ async def run(
         run_database_blocking(tushare_lhb_context, symbols, observed_at),
         run_database_blocking(source_readiness, observed_at),
     )
-    realtime = await tushare_realtime_validation(symbols, request.validate_tushare_realtime)
+    # Tushare rt_k validation was retired on 2026-10-08; the field stays so the snapshot shape does not change.
+    realtime = (await tushare_realtime_validation(symbols, request.validate_tushare_realtime)
+                if tushare_realtime_validation is not None
+                else {"status": "retired", "reason": "Tushare realtime validation was retired on 2026-10-08", "items": []})
     coverage = report.get("coverage", {})
     mapped_boards = sum(int(item.get("boards_with_members") or 0) for item in coverage.values())
     flow_boards = sum(int(item.get("flow_boards") or 0) for item in coverage.values())

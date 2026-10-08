@@ -16,10 +16,7 @@ from typing import Any, Awaitable, Callable
 @dataclass(frozen=True)
 class StockStudyDependencies:
     china_today: Callable[[], date]
-    tushare_request: Callable[..., Any]
     daily_sync_request: Callable[..., Any]
-    fetch_tushare: Callable[[str, Any], Awaitable[tuple[dict[str, Any], list[dict[str, Any]]]]]
-    realtime_market_session: Callable[[], Awaitable[tuple[bool, str]]]
     sync_baostock: Callable[[Any], Awaitable[dict[str, Any]]]
     free_fetch: Callable[[str, str, str, Callable[[], Awaitable[Any]], str], Awaitable[tuple[dict[str, Any], Any]]]
     eastmoney_daily: Callable[[str, str, str], Awaitable[list[dict[str, Any]]]]
@@ -38,6 +35,8 @@ class StockStudyDependencies:
     window_readiness: Callable[[str, date, date], dict[str, Any]]
     latest_row: Callable[[list[dict[str, Any]]], dict[str, Any] | None]
     read_persisted_factors: Callable[[str, date, date], Awaitable[list[dict[str, Any]]]] | None = None
+    # The full-market close Longhu writes every session (canonical_bars_daily).
+    read_daily_bars: Callable[[str, date, date], Awaitable[list[dict[str, Any]]]] | None = None
 
 
 def _market_date(as_of: date) -> date:
@@ -48,22 +47,6 @@ def _market_date(as_of: date) -> date:
     return as_of
 
 
-def _tushare_fetches(symbol: str, start: str, end: str, request: Any) -> list[tuple[str, Any]]:
-    dated = {"ts_code": symbol, "start_date": start, "end_date": end}
-    return [
-        ("超级源日线", request(api_name="daily", provider="super", params=dated, fields="ts_code,trade_date,open,high,low,close,pre_close,vol,amount", max_rows=60)),
-        ("REST 备用基础信息", request(api_name="stock_basic", provider="backup", params={"ts_code": symbol, "limit": 3}, max_rows=3)),
-        ("每日估值指标", request(api_name="daily_basic", params=dated, max_rows=60)),
-        ("涨跌停价格", request(api_name="stk_limit", params=dated, max_rows=60)),
-        ("个股资金流", request(api_name="moneyflow", params=dated, max_rows=60)),
-        ("同花顺个股资金流", request(api_name="moneyflow_ths", params=dated, max_rows=60)),
-        ("东财个股资金流", request(api_name="moneyflow_dc", params=dated, max_rows=60)),
-        ("筹码及胜率", request(api_name="cyq_perf", params=dated, max_rows=60)),
-        ("筹码分布", request(api_name="cyq_chips", params=dated, max_rows=500)),
-        ("技术因子专业版", request(api_name="stk_factor_pro", params=dated, max_rows=60)),
-    ]
-
-
 async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict[str, Any]:
     """Collect the existing bounded evidence set for a single stock study."""
     as_of = request.as_of_date or deps.china_today()
@@ -71,19 +54,15 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
     calendar_span = min(45, max(request.lookback_days + 12, 32))
     start_date = market_date - timedelta(days=calendar_span)
     start, end = start_date.strftime("%Y%m%d"), market_date.strftime("%Y%m%d")
-    fetches = _tushare_fetches(symbol, start, end, deps.tushare_request)
+    # The ten Tushare reads this used to make (daily, profile, valuation, limits, three
+    # money flows, chips, factors and rt_min) were retired with Tushare on 2026-10-08.
+    daily_rows = (await deps.read_daily_bars(symbol, start_date, market_date)
+                  if deps.read_daily_bars is not None else [])
     persisted_factor_rows = (
         await deps.read_persisted_factors(symbol, start_date, market_date)
         if deps.read_persisted_factors is not None else []
     )
-    realtime_active, realtime_reason = await deps.realtime_market_session()
-    if realtime_active:
-        fetches.extend([
-            ("超级源实时分钟", deps.tushare_request(api_name="rt_min", provider="super", params={"ts_code": symbol, "freq": "1MIN"}, max_rows=3)),
-        ])
-
     baostock_task = asyncio.create_task(deps.sync_baostock(deps.daily_sync_request(trade_date=market_date, symbols=[symbol])))
-    results = await asyncio.gather(*(deps.fetch_tushare(label, payload) for label, payload in fetches))
     free_results = await asyncio.gather(
         deps.free_fetch("东方财富公开日线", "eastmoney_free", "daily_bar", lambda: deps.eastmoney_daily(symbol, start, end), symbol),
         deps.free_fetch("东方财富公开报价", "eastmoney_free", "realtime_quote", lambda: deps.eastmoney_quote(symbol), symbol),
@@ -91,7 +70,10 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
         deps.free_fetch("腾讯财经公开日线", "tencent_free", "daily_bar", lambda: deps.tencent_daily(symbol, start, end), symbol),
         deps.free_fetch("新浪财经公开报价", "sina_free", "realtime_quote", lambda: deps.sina_quote(symbol), symbol),
     )
-    sources = [result[0] for result in results]
+    sources = [{
+        "source": "本地收盘日线", "api_name": "daily", "provider": "canonical_bars_daily",
+        "status": "completed" if daily_rows else "missing", "received": len(daily_rows), "stored": 0,
+    }]
     sources.append({
         "source": "owner persisted adjustment factor",
         "api_name": "adj_factor",
@@ -99,12 +81,7 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
         "status": "completed" if persisted_factor_rows else "missing",
         "received": len(persisted_factor_rows), "stored": 0,
     })
-    if not realtime_active:
-        sources.extend([
-            {"source": "超级源实时分钟", "api_name": "rt_min", "provider": "super", "status": "skipped", "received": 0, "stored": 0, "error": realtime_reason},
-        ])
     sources.extend(result[0] for result in free_results)
-    data = {label: rows for (label, _), (_, rows) in zip(fetches, results, strict=True)}
     free_data = {result[0]["source"]: result[1] for result in free_results}
     try:
         baostock = await asyncio.wait_for(baostock_task, timeout=15)
@@ -134,28 +111,25 @@ async def build(symbol: str, request: Any, deps: StockStudyDependencies) -> dict
         sources.append({"source": "巨潮公开公告", "api_name": "announcement", "provider": "cninfo_free",
                         "status": "failed", "received": 0, "stored": 0, "error": str(error)[:300]})
 
-    daily_rows = data["超级源日线"]
     technical = deps.technical_summary(daily_rows)
     claims, analyst = await deps.run_database(deps.analyst_claims, symbol)
     announcements = await deps.run_database(deps.recent_events, symbol, 20)
     technical_component = ((technical["score"] - 50) / 50) if technical.get("score") is not None else 0.0
     combined_score = round(max(0, min(100, 50 + technical_component * 25 + analyst["score"] * 25)), 1)
     stance = "research_positive" if combined_score >= 62 else "research_negative" if combined_score <= 38 else "mixed_or_insufficient"
-    profile = deps.latest_row(data["REST 备用基础信息"])
     readiness = await deps.run_database(deps.window_readiness, symbol, start_date, market_date)
     return {
         "symbol": symbol, "as_of_date": str(market_date), "lookback_days": request.lookback_days, "sources": sources,
         "on_demand_readiness": readiness,
         "market": {
-            "daily_bars": daily_rows[-45:], "latest_realtime": deps.latest_row(data.get("超级源实时分钟", [])),
+            "daily_bars": daily_rows[-45:], "latest_realtime": None,
             "eastmoney_quote": free_data["东方财富公开报价"], "eastmoney_daily_bars": free_data["东方财富公开日线"],
             "akshare_daily_bars": free_data["AKShare公开日线"], "tencent_daily_bars": free_data["腾讯财经公开日线"],
             "sina_quote": free_data["新浪财经公开报价"], "latest_adj_factor": deps.latest_row(persisted_factor_rows),
-            "latest_limit": deps.latest_row(data["涨跌停价格"]), "latest_daily_basic": deps.latest_row(data["每日估值指标"]),
-            "latest_moneyflow": deps.latest_row(data["个股资金流"]), "latest_ths_moneyflow": deps.latest_row(data["同花顺个股资金流"]),
-            "latest_dc_moneyflow": deps.latest_row(data["东财个股资金流"]), "latest_chip": deps.latest_row(data["筹码及胜率"]),
-            "latest_chip_distribution": deps.latest_row(data["筹码分布"]), "latest_factor": deps.latest_row(data["技术因子专业版"]),
-            "profile": profile,
+            # Retired with Tushare; kept so the response shape does not change.
+            "latest_limit": None, "latest_daily_basic": None, "latest_moneyflow": None, "latest_ths_moneyflow": None,
+            "latest_dc_moneyflow": None, "latest_chip": None, "latest_chip_distribution": None, "latest_factor": None,
+            "profile": None,
         },
         "events": {"announcements": announcements, "provider": "cninfo_free", "decision_eligible": False},
         "technical": technical, "analyst": {"summary": analyst, "claims": claims},

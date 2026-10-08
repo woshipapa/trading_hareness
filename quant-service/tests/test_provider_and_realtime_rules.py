@@ -68,19 +68,6 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(stopped["state"], "stop_nonessential_high_frequency")
         self.assertFalse(stopped["allow_nonessential_high_frequency"])
 
-    def test_stock_study_fetch_reads_tushare_evidence_in_database_executor(self):
-        async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(return_value=[])
-            outcome = {"request_key": "request-1", "provider": "super", "status": "completed", "received": 0, "stored": 0}
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(return_value=outcome)), \
-                 patch("app.main.run_database_blocking", new=blocking):
-                source, _ = await stock_study_fetch("daily", TushareFetchRequest(api_name="daily", params={"ts_code": "000001.SZ"}))
-            return source, blocking
-
-        source, blocking = asyncio.run(check())
-        self.assertEqual(source["status"], "completed")
-        self.assertEqual(blocking.await_args.args[0].__name__, "tushare_rows_for_request")
-
     def test_tushare_fetch_prepares_or_reuses_ledger_in_database_executor(self):
         provider = MagicMock(key="tushare_super_sdk")
         cached = {"status": "unchanged", "api_name": "daily", "request_key": "cached", "provider": provider.key,
@@ -168,20 +155,6 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertFalse(is_local_capacity_http_error(circuit))
         self.assertTrue(is_circuit_open_http_error(circuit))
 
-    def test_stock_study_fetch_preserves_local_capacity_and_circuit_open_states(self):
-        async def check() -> tuple[dict[str, object], dict[str, object]]:
-            local = HTTPException(status_code=503, detail="local processing capacity is temporarily saturated; retry shortly")
-            circuit = HTTPException(status_code=503, detail="all configured providers are temporarily circuit-open for daily")
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(side_effect=[local, circuit])):
-                request = TushareFetchRequest(api_name="daily", params={"ts_code": "000001.SZ"})
-                first, _ = await stock_study_fetch("daily", request)
-                second, _ = await stock_study_fetch("daily", request)
-            return first, second
-
-        local, circuit = asyncio.run(check())
-        self.assertEqual(local["status"], "blocked")
-        self.assertEqual(circuit["status"], "circuit_open")
-
     def test_tushare_caller_cancellation_is_blocked_without_provider_health_penalty(self):
         connection = MagicMock()
         context = MagicMock()
@@ -196,26 +169,6 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertIn("caller_cancelled", connection.execute.call_args.args[0])
         failure.assert_not_called()
         capability.assert_not_called()
-
-    def test_stock_study_timeout_is_reported_as_local_blocking_not_provider_failure(self):
-        async def timeout_without_leaking(awaitable: object, timeout: float) -> object:
-            # ``asyncio.wait_for`` closes/cancels its child task on timeout.
-            # Our replacement must do the same, otherwise the mocked fetch
-            # coroutine is left unawaited and masks real async resource leaks.
-            close = getattr(awaitable, "close", None)
-            if callable(close):
-                close()
-            raise asyncio.TimeoutError
-
-        async def check() -> dict[str, object]:
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock()), \
-                 patch("app.main.asyncio.wait_for", new=timeout_without_leaking):
-                source, _ = await stock_study_fetch("daily", TushareFetchRequest(api_name="daily", params={"ts_code": "000001.SZ"}))
-            return source
-
-        source = asyncio.run(check())
-        self.assertEqual(source["status"], "blocked")
-        self.assertIn("local budget", str(source["error"]))
 
     def test_blocked_strategy_decision_persists_through_database_executor(self):
         async def check() -> tuple[dict[str, object], AsyncMock]:

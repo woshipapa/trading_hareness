@@ -315,6 +315,19 @@ def _upsert_daily_bar_round(connection: Any, bars: list[DailyBar]) -> None:
             )
 
 
+def recent_daily_bars(connection: Any, symbol: str, start_date: Any, end_date: Any) -> list[dict[str, Any]]:
+    """One symbol's canonical daily bars in a window, in the Tushare-style shape the study renders."""
+    rows = connection.execute(
+        """SELECT to_char(trading_date,'YYYYMMDD') AS trade_date, open, high, low, close, pre_close,
+                  volume AS vol, amount, selected_provider AS provider
+             FROM quant.canonical_bars_daily
+            WHERE symbol=%s AND trading_date BETWEEN %s AND %s
+            ORDER BY trading_date""",
+        (symbol, start_date, end_date),
+    ).fetchall()
+    return [{**dict(row), "ts_code": symbol} for row in rows]
+
+
 def upsert_daily_bars(connection: Any, bars: list[DailyBar]) -> int:
     """Persist many daily bars with the per-bar contract and far fewer round trips.
 
@@ -342,6 +355,6 @@ def upsert_daily_bars(connection: Any, bars: list[DailyBar]) -> int:
 __all__ = [
     "TUSHARE_DAILY_AMOUNT_RATIO_MAX", "TUSHARE_DAILY_AMOUNT_RATIO_MIN",
     "TUSHARE_DAILY_AMOUNT_SOURCES", "daily_amount_unit_mismatch", "exchange_for",
-    "persisted_adjustment_state", "provider_priority",
+    "persisted_adjustment_state", "provider_priority", "recent_daily_bars",
     "upsert_daily_bar", "upsert_daily_bars",
 ]

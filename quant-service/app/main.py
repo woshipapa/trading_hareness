@@ -67,7 +67,7 @@ from .async_market_session_repository import (
 )
 from .async_market_session_repository import sse_calendar_open as read_async_sse_calendar_open
 from .async_market_session_repository import sse_calendar_status as read_async_sse_calendar_status
-from .daily_bar_repository import exchange_for, provider_priority, upsert_daily_bar, upsert_daily_bars
+from .daily_bar_repository import exchange_for, provider_priority, recent_daily_bars, upsert_daily_bar, upsert_daily_bars
 from .instrument_registry import InstrumentRecord, ensure_instrument as ensure_registry_instrument, ensure_instruments as ensure_registry_instruments
 from .sector_catalog_repository import upsert_sectors
 from .sector_membership_repository import (
@@ -738,7 +738,6 @@ from .runtime_leases import (
 )
 from .tushare_catalog import CORE_NORMALIZED_APIS, TUSHARE_CATALOG
 from .tushare_catalog_fetch_service import CatalogFetchDependencies, fetch_catalog as run_catalog_fetch
-from .stock_study_tushare_service import StockStudyTushareDependencies, fetch_stock_study_input
 from .stock_study_service import StockStudyDependencies, build as build_stock_study_isolated
 from .stock_study_public_service import StockStudyPublicDependencies, fetch as fetch_stock_study_public
 from .intraday_signal_generation import IntradaySignalGenerationDependencies, generate_intraday_signals
@@ -3916,25 +3915,6 @@ def strategy_source_readiness(observed_at: datetime) -> dict[str, Any]:
     )
 
 
-async def strategy_tushare_realtime_validation(symbols: list[str], enabled: bool) -> dict[str, Any]:
-    """Validate at most three candidates through the verified super GET path."""
-    if not enabled or not symbols:
-        return {"status": "skipped", "reason": "disabled or no candidates", "items": []}
-    active, reason = await realtime_market_session_async("rt_k")
-    if not active:
-        return {"status": "skipped", "reason": reason, "items": []}
-    results: list[dict[str, Any]] = []
-    for symbol in symbols[:3]:
-        source, rows = await stock_study_fetch(
-            "tushare_rt_k",
-            TushareFetchRequest(api_name="rt_k", provider="super", params={"ts_code": symbol}, max_rows=1, force_refresh=True),
-        )
-        latest = rows[0] if rows else {}
-        results.append({"symbol": symbol, "source": source, "latest": latest})
-    status = "completed" if any(item["source"]["status"] in {"completed", "partial", "unchanged"} for item in results) else "failed"
-    return {"status": status, "items": results}
-
-
 async def run_strategy_decision(request: StrategyDecisionRequest) -> dict[str, Any]:
     """Compatibility wrapper for the isolated evidence-only decision service."""
     return await run_strategy_decision_isolated(
@@ -3947,7 +3927,6 @@ async def run_strategy_decision(request: StrategyDecisionRequest) -> dict[str, A
         event_context=strategy_event_context,
         tushare_lhb_context=strategy_tushare_lhb_context,
         source_readiness=strategy_source_readiness,
-        tushare_realtime_validation=strategy_tushare_realtime_validation,
         exchange_for=exchange_for,
         json_safe=strategy_json_safe,
         model_version=STRATEGY_DECISION_MODEL_VERSION,
@@ -4549,21 +4528,6 @@ def tushare_rows_for_request(request_key: str) -> list[dict[str, Any]]:
     return [dict(row["row_data"]) for row in rows]
 
 
-async def stock_study_fetch(label: str, request: TushareFetchRequest) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    return await fetch_stock_study_input(
-        label,
-        request,
-        StockStudyTushareDependencies(
-            fetch_catalog=fetch_tushare_catalog,
-            run_database=run_database_blocking,
-            raw_rows_for_request=tushare_rows_for_request,
-            looks_like_response_header=looks_like_response_header,
-            is_local_capacity_error=is_local_capacity_http_error,
-            is_circuit_open_error=is_circuit_open_http_error,
-        ),
-    )
-
-
 def persist_stock_study_free_result(provider: str, capability: str, payload: Any, symbol: str,
                                     latency_ms: int | None = None) -> int:
     if isinstance(payload, list):
@@ -4633,11 +4597,16 @@ async def build_stock_study(symbol: str, request: StockStudyRequest) -> dict[str
                 return read_persisted_factor_window(connection, stock, start_date, end_date)
         return await run_database_blocking(read, timeout_seconds=30)
 
+    async def daily_bars(stock: str, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        def read() -> list[dict[str, Any]]:
+            with db.transaction() as connection:
+                return recent_daily_bars(connection, stock, start_date, end_date)
+        return await run_database_blocking(read, timeout_seconds=30)
+
     return await build_stock_study_isolated(
         symbol, request,
         StockStudyDependencies(
-            china_today=cn_today, tushare_request=TushareFetchRequest, daily_sync_request=TushareSyncRequest,
-            fetch_tushare=stock_study_fetch, realtime_market_session=realtime_market_session_async,
+            china_today=cn_today, daily_sync_request=TushareSyncRequest,
             sync_baostock=sync_baostock, free_fetch=stock_study_free_fetch,
             eastmoney_daily=eastmoney_daily, eastmoney_quote=eastmoney_quote,
             run_akshare=run_akshare_blocking, akshare_daily=akshare_daily,
@@ -4646,7 +4615,7 @@ async def build_stock_study(symbol: str, request: StockStudyRequest) -> dict[str
             persist_announcement_health=persist_announcement_provider_health, technical_summary=technical_summary,
             analyst_claims=stock_study_claims, recent_events=recent_market_events,
             window_readiness=stock_window_readiness, latest_row=latest_study_row,
-            read_persisted_factors=persisted_factors,
+            read_persisted_factors=persisted_factors, read_daily_bars=daily_bars,
         ),
     )
 
