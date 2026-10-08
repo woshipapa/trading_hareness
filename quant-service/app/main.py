@@ -118,6 +118,7 @@ from .research_prices import adjusted_bars
 from .live_policy import live_policy_gate
 from .numeric_utils import decimal_or_none, intraday_number
 from .eastmoney_board_flow_curve import intraday_board_flow_curve_items
+from .board_flow_drill_runtime import BoardDrillDependencies, drill_board_stock_candidates
 from .intraday_clock import eac_window as pure_intraday_eac_window
 from .intraday_clock import feature_clock as pure_intraday_feature_clock
 from .intraday_clock import minute_bucket as pure_intraday_minute_bucket
@@ -3069,45 +3070,12 @@ async def intraday_longhu_industry_board_flow() -> list[dict[str, Any]]:
 async def drill_intraday_board_stock_candidates(
     rotation_events: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Name the members driving each moving board. Computes only; sends nothing.
-
-    Membership is read for the session being scanned, so it obeys the same
-    point-in-time rule as every other reference: a map learned after the open
-    cannot inform the session it opened into.
-    """
-    from .board_flow_drill import attach_names, drill_board_events
-    from .xiaojie_reference_repository import instrument_names, sector_membership
-
-    events = [event for event in rotation_events
-              if str(event.get("taxonomy_key") or "") == "longhu_ths_industry"]
-    if not events:
-        # Held paper positions still need their stops checked on a quiet minute.
-        return {"status": "idle", "reason": "no licensed board crossed its threshold", "candidates": [],
-                "paper": await run_paper_auto_execution([], None)}
-    trading_date = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date()
-
-    def reference() -> tuple[dict[str, set[str]], dict[str, str]]:
-        with db.transaction() as connection:
-            return sector_membership(connection, trading_date), instrument_names(connection)
-
-    membership, names = await run_database_blocking(reference, timeout_seconds=120)
-    if not membership:
-        return {"status": "blocked", "reason": "no sector membership is known for this session",
-                "boards": len(events), "candidates": [], "paper": await run_paper_auto_execution([], None)}
-    rows, _status = await intraday_all_a_snapshot()
-    quotes = {str(row["symbol"]): row for row in rows if row.get("symbol")}
-    drilled = drill_board_events(events, membership, quotes)
-    candidates = attach_names(drilled["candidates"], names)
-    paper = await run_paper_auto_execution(candidates, quotes)
-    return {
-        "status": "completed",
-        "boards": len(events),
-        "boards_drilled": drilled["boards_drilled"],
-        "boards_without_membership": drilled["boards_without_membership"],
-        "candidates": candidates,
-        "paper": paper,
-        "decision_eligible": False,
-    }
+    # Late-bound so a test that patches one of these names in app.main still reaches the service.
+    return await drill_board_stock_candidates(rotation_events, BoardDrillDependencies(
+        database=db, run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs),
+        all_a_snapshot=lambda: intraday_all_a_snapshot(),
+        paper_execution=lambda candidates, quotes: run_paper_auto_execution(candidates, quotes),
+    ))
 
 
 def paper_auto_execution_enabled() -> bool:
