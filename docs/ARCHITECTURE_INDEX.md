@@ -8,11 +8,11 @@
 | Item | Current value |
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
-| `main.py` top-level functions | 499 |
-| Python modules under `app/` | 513 |
+| `main.py` top-level functions | 484 |
+| Python modules under `app/` | 509 |
 | HTTP router modules | 47 |
-| Alembic migrations | 107 |
-| Frontend source files | 37 |
+| Alembic migrations | 109 |
+| Frontend source files | 36 |
 
 ## Domain naming inventory
 
@@ -21,7 +21,7 @@ New behaviour should be owned by an existing domain package/owner.
 
 | Domain prefix | Top-level modules |
 |---|---:|
-| `intraday` | 66 |
+| `intraday` | 61 |
 | `async` | 42 |
 | `strategy` | 24 |
 | `longhu` | 18 |
@@ -34,11 +34,11 @@ New behaviour should be owned by an existing domain package/owner.
 | `teacher` | 10 |
 | `limit` | 9 |
 | `daily` | 8 |
-| `provider` | 7 |
 | `tushare` | 7 |
 | `xiaojie` | 7 |
 | `paper` | 6 |
-| `watchlist` | 6 |
+| `provider` | 6 |
+| `sector` | 6 |
 
 ## Router entrypoints
 
@@ -118,7 +118,6 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/style.css`
 - `frontend/src/views/PersonalDecisionView.vue`
 - `frontend/src/views/research/AnalystEvidenceTab.vue`
-- `frontend/src/views/research/CatalogTab.vue`
 - `frontend/src/views/research/ClaimReviewTab.vue`
 - `frontend/src/views/research/CloseReviewTab.vue`
 - `frontend/src/views/research/FactorLabTab.vue`

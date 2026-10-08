@@ -38,7 +38,7 @@ def main() -> int:
         "frontend/src/views/research/CloseReviewTab.vue", "frontend/src/views/research/StrategyTab.vue",
         "frontend/src/views/research/FactorLabTab.vue", "frontend/src/views/research/StockStudyTab.vue",
         "frontend/src/views/research/AnalystEvidenceTab.vue", "frontend/src/views/research/ClaimReviewTab.vue",
-        "frontend/src/views/research/ProviderTab.vue", "frontend/src/views/research/CatalogTab.vue",
+        "frontend/src/views/research/ProviderTab.vue",
         "frontend/src/views/research/QualityTab.vue",
     ):
         if not (ROOT / relative).is_file():

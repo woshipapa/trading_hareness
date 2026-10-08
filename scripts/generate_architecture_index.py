@@ -12,6 +12,7 @@ import argparse
 import ast
 from collections import Counter
 from pathlib import Path
+import subprocess
 import sys
 
 
@@ -23,8 +24,32 @@ FRONTEND = ROOT / "frontend" / "src"
 OUTPUT = ROOT / "docs" / "ARCHITECTURE_INDEX.md"
 
 
+def _tracked(path: Path) -> list[Path] | None:
+    """Files git tracks under ``path``; None outside a git checkout.
+
+    The index describes the repository, not one working directory: untracked
+    work in progress and build output (frontend/dist) must not change it, or a
+    local regeneration disagrees with CI's clean checkout.
+    """
+    try:
+        listed = subprocess.run(["git", "ls-files", "-z", "--", str(path.relative_to(ROOT))], cwd=ROOT,
+                                capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return [ROOT / name for name in listed.decode("utf-8").split("\0") if name and (ROOT / name).is_file()]
+
+
 def _python_files(path: Path) -> list[Path]:
+    tracked = _tracked(path)
+    if tracked is not None:
+        return sorted(item for item in tracked if item.suffix == ".py" and "__pycache__" not in item.parts)
     return sorted(item for item in path.rglob("*.py") if "__pycache__" not in item.parts)
+
+
+def _frontend_files() -> list[str]:
+    tracked = _tracked(FRONTEND)
+    files = tracked if tracked is not None else [item for item in FRONTEND.rglob("*") if item.is_file()]
+    return sorted(item.relative_to(ROOT).as_posix() for item in files if "node_modules" not in item.parts)
 
 
 def _functions(path: Path) -> int:
@@ -43,7 +68,7 @@ def _prefix(path: Path) -> str:
 def render() -> str:
     app_files = _python_files(APP)
     router_files = _python_files(ROUTERS)
-    frontend_files = sorted(item.relative_to(ROOT).as_posix() for item in FRONTEND.rglob("*") if item.is_file() and "node_modules" not in item.parts)
+    frontend_files = _frontend_files()
     prefixes = Counter(_prefix(path) for path in app_files if path.parent == APP)
     main = APP / "main.py"
     top_functions = _functions(main)
