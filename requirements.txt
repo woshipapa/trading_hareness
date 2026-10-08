@@ -1,6 +1,6 @@
 PyExecJS
 requests
-curl_cffi==0.15.0
+curl_cffi==0.16.2
 loguru
 python-dotenv
 retry
