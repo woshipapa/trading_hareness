@@ -25,7 +25,10 @@ _NOTE_PATH_RE = re.compile(r'/(?:explore|discovery/item)/([0-9a-fA-F]{24})(?:/|$
 _TRAILING_SHARE_TEXT = '.,;!?)]}\u3002\uff0c\uff1b\uff01\uff1f\u3011\u300b'
 _MAX_NOTE_IMAGES = 18
 _IMAGE_HOST_SUFFIXES = ('.xhscdn.com', '.xiaohongshu.com')
-_EPHEMERAL_LINK_TTL = 15 * 60
+# A 50-note recommendation can spend several minutes in classification and
+# local AI summarization. Keep signed links in memory for the same workday
+# window, while never writing token material to SQLite, logs, or artifacts.
+_EPHEMERAL_LINK_TTL = 6 * 60 * 60
 _EPHEMERAL_LINKS = {}
 _EPHEMERAL_LINKS_LOCK = threading.Lock()
 
