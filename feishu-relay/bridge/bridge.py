@@ -1352,6 +1352,30 @@ class Bridge:
 			and (not getattr(self, "xhs_command_chat_ids", set()) or chat_id in self.xhs_command_chat_ids)
 		)
 		command_lane = paper_command_lane or xhs_command_lane
+		xhs_command_chat = (
+			getattr(self, "xhs_command_lane_enabled", False)
+			and chat_id in getattr(self, "xhs_command_chat_ids", set())
+		)
+		if xhs_command_chat and not xhs_command_lane:
+			self.ignored_count += 1
+			try:
+				gap = await asyncio.to_thread(
+					self.event_spool.record_ignored,
+					chat_id,
+					position=message.get("position"),
+					message_id=str(message.get("msg_id", "")),
+					message_type=str(message.get("msg_type_name", message.get("msg_type", "UNKNOWN"))),
+					reason="xhs_command_chat_non_command",
+				)
+				self._log_position_gap(chat_id, gap, reason="ignored")
+			except Exception as error:
+				LOG.warning("记录 XHS 命令群非指令消息失败 chat_id=%s：%s", chat_id, error)
+			return {
+				"status": "ignored",
+				"chat_id": chat_id,
+				"message_id": str(message.get("msg_id", "")),
+				"filter_reason": "xhs_command_chat_non_command",
+			}
 		dynamic_route = self.dynamic_routes.get(chat_id)
 		if chat_id not in self.websocket_chat_ids and not command_lane:
 			dynamic_route = await self.discover_dynamic_route(chat_id)
@@ -1502,14 +1526,27 @@ class Bridge:
 		for event in await asyncio.to_thread(self.event_spool.due, 20):
 			event_id = str(event["event_id"])
 			if event_id in self._spool_active:
-				continue
+					continue
 			self._spool_active.add(event_id)
 			try:
+				payload = event["payload"]
+				chat_id = str(payload.get("chat_id", "")).strip()
+				if (
+					getattr(self, "xhs_command_lane_enabled", False)
+					and chat_id in getattr(self, "xhs_command_chat_ids", set())
+					and not is_xhs_command_message(payload)
+				):
+					ignored = await asyncio.to_thread(
+						self.event_spool.mark_ignored,
+						event_id,
+						reason="xhs_command_chat_non_command",
+					)
+					if ignored:
+						self.ignored_count += 1
+					continue
 				claim_state = await asyncio.to_thread(self.event_spool.claim, event_id)
 				if claim_state in {"delivered", "in_flight"}:
 					continue
-				payload = event["payload"]
-				chat_id = str(payload.get("chat_id", "")).strip()
 				await asyncio.to_thread(
 					post_json,
 					self.ingress_url_for(chat_id, command_lane=payload.get("_larkagentx_command_lane") is True),

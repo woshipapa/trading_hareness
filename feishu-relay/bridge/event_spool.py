@@ -538,26 +538,92 @@ class EventSpool:
             parsed_position = None
         now = self._now()
         with self._lock:
-            self._db.execute(
-                """
-                INSERT INTO ignored_chat_stats(
-                    chat_id,ignored_count,last_position,last_message_id,last_message_type,last_reason,
-                    first_ignored_at,last_ignored_at
-                ) VALUES(?,?,?,?,?,?,?,?)
-                ON CONFLICT(chat_id) DO UPDATE SET
-                    ignored_count=ignored_chat_stats.ignored_count+1,
-                    last_position=excluded.last_position,
-                    last_message_id=excluded.last_message_id,
-                    last_message_type=excluded.last_message_type,
-                    last_reason=excluded.last_reason,
-                    last_ignored_at=excluded.last_ignored_at
-                """,
-                (chat_id, 1, parsed_position, str(message_id or "")[:128], str(message_type or "UNKNOWN")[:32], str(reason or "not_allowlisted")[:120], now, now),
+            gap = self._record_ignored_locked(
+                chat_id,
+                position=parsed_position,
+                message_id=message_id,
+                message_type=message_type,
+                reason=reason,
+                now=now,
             )
-            self._increment_counter_locked("ignored_count", 1, now)
-            gap = self._record_position_locked(chat_id, parsed_position, now)
             self._db.commit()
             return gap
+
+    def _record_ignored_locked(
+        self,
+        chat_id: str,
+        *,
+        position: int | None,
+        message_id: str,
+        message_type: str,
+        reason: str,
+        now: float,
+    ) -> dict[str, int] | None:
+        self._db.execute(
+            """
+            INSERT INTO ignored_chat_stats(
+                chat_id,ignored_count,last_position,last_message_id,last_message_type,last_reason,
+                first_ignored_at,last_ignored_at
+            ) VALUES(?,?,?,?,?,?,?,?)
+            ON CONFLICT(chat_id) DO UPDATE SET
+                ignored_count=ignored_chat_stats.ignored_count+1,
+                last_position=excluded.last_position,
+                last_message_id=excluded.last_message_id,
+                last_message_type=excluded.last_message_type,
+                last_reason=excluded.last_reason,
+                last_ignored_at=excluded.last_ignored_at
+            """,
+            (
+                chat_id, 1, position, str(message_id or "")[:128],
+                str(message_type or "UNKNOWN")[:32], str(reason or "not_allowlisted")[:120],
+                now, now,
+            ),
+        )
+        self._increment_counter_locked("ignored_count", 1, now)
+        return self._record_position_locked(chat_id, position, now)
+
+    def mark_ignored(self, event_id: str, *, reason: str) -> bool:
+        """Terminate an already-spooled event as ignored without counting a forward."""
+        event_id = str(event_id or "").strip()
+        if not event_id:
+            return False
+        now = self._now()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT status,payload_json FROM events WHERE event_id=?", (event_id,)
+            ).fetchone()
+            if row is None or str(row["status"]) == "delivered":
+                return False
+            try:
+                payload = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            chat_id = str(payload.get("chat_id") or "").strip()
+            if not chat_id:
+                return False
+            self._record_ignored_locked(
+                chat_id,
+                position=self._payload_position(payload),
+                message_id=str(payload.get("msg_id") or ""),
+                message_type=str(payload.get("msg_type_name") or payload.get("msg_type") or "UNKNOWN"),
+                reason=reason,
+                now=now,
+            )
+            previous_status = str(row["status"])
+            self._db.execute(
+                """UPDATE events
+                   SET status='delivered',lease_until=NULL,delivered_at=?,updated_at=?,last_error=?
+                   WHERE event_id=?""",
+                (now, now, f"ignored:{str(reason or 'ignored')[:120]}", event_id),
+            )
+            if previous_status == "failed":
+                self._db.execute(
+                    "UPDATE chat_stats SET failed_count=MAX(0,failed_count-1) WHERE chat_id=?",
+                    (chat_id,),
+                )
+            self._advance_cursor_locked(now)
+            self._db.commit()
+            return True
 
     def ignored_stats(self) -> dict[str, dict[str, Any]]:
         with self._lock:

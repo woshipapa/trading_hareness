@@ -68,6 +68,41 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		self.assertEqual(instance.ingress_url_for("7690524560642280650", command_lane=True), instance.command_ingress_url)
 		self.assertEqual(instance.ingress_url_for("source-chat"), instance.ingress_url)
 
+	def test_xhs_command_chat_ignores_non_commands_before_spooling(self):
+		instance = object.__new__(bridge.Bridge)
+		instance.websocket_state = "connecting"
+		instance.paper_command_lane_enabled = True
+		instance.xhs_command_lane_enabled = True
+		instance.xhs_command_chat_ids = {"7690524560642280650"}
+		instance.ignored_count = 0
+		instance.event_spool = Mock()
+		instance.event_spool.record_ignored.return_value = None
+		instance._log_position_gap = Mock()
+		message = {
+			"msg_id": "webhook-summary-1",
+			"chat_id": "7690524560642280650",
+			"position": 101,
+			"from_id": "webhook-bot",
+			"msg_type_name": "TEXT",
+			"content": "# AI Infra 每日情报摘要",
+		}
+
+		with patch.object(bridge, "post_json") as post:
+			result = asyncio.run(instance.on_message(message))
+
+		self.assertEqual(result["status"], "ignored")
+		self.assertEqual(result["filter_reason"], "xhs_command_chat_non_command")
+		self.assertEqual(instance.ignored_count, 1)
+		instance.event_spool.record_ignored.assert_called_once_with(
+			"7690524560642280650",
+			position=101,
+			message_id="webhook-summary-1",
+			message_type="TEXT",
+			reason="xhs_command_chat_non_command",
+		)
+		instance.event_spool.enqueue.assert_not_called()
+		post.assert_not_called()
+
 	def test_adapter_business_failure_is_retried(self):
 		response = FakeResponse(json.dumps({"status": "failed", "message": "webhook temporary failure"}).encode("utf-8"))
 		with patch.object(bridge, "urlopen", return_value=response):

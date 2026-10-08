@@ -40,6 +40,38 @@ class EventSpoolTests(unittest.TestCase):
             self.assertEqual(due[0]["last_error"], "network")
             spool.close()
 
+    def test_failed_event_can_be_terminated_as_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spool = EventSpool(Path(directory) / "events.sqlite3")
+            payload = {
+                "chat_id": "xhs-command-chat",
+                "msg_id": "webhook-summary-1",
+                "msg_type_name": "TEXT",
+                "position": 101,
+            }
+            spool.enqueue("echo-1", payload)
+            spool.claim("echo-1")
+            spool.mark_failed("echo-1", "not configured", retry_after=1)
+
+            self.assertTrue(spool.mark_ignored("echo-1", reason="xhs_command_chat_non_command"))
+            self.assertFalse(spool.mark_ignored("echo-1", reason="xhs_command_chat_non_command"))
+            self.assertEqual(spool.stats(), {
+                "queued": 0,
+                "processing": 0,
+                "delivered": 1,
+                "failed": 0,
+                "pending": 0,
+                "drain_cursor": 1,
+            })
+            self.assertEqual(spool.chat_stats()["xhs-command-chat"]["forwarded_count"], 0)
+            self.assertEqual(spool.chat_stats()["xhs-command-chat"]["failed_count"], 0)
+            self.assertEqual(spool.chat_stats()["xhs-command-chat"]["historical_failed_count"], 1)
+            self.assertEqual(
+                spool.ignored_stats()["xhs-command-chat"]["last_reason"],
+                "xhs_command_chat_non_command",
+            )
+            spool.close()
+
     def test_drain_cursor_advances_only_over_a_contiguous_prefix(self):
         with tempfile.TemporaryDirectory() as directory:
             spool = EventSpool(Path(directory) / "events.sqlite3")
