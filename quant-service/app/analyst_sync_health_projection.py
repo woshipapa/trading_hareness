@@ -5,6 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from .n8n_workflow_audit import (
+    MESSAGES_WORKFLOW_ID,
+    REPORTS_WORKFLOW_ID,
+    WORKFLOW_AUDIT_SQL,
+)
+
 
 CURSORS_SQL = """SELECT stream_key,remote_analyst_id,received_at,message_ids,report_versions,updated_at
                      FROM quant.analyst_sync_cursors ORDER BY updated_at DESC"""
@@ -15,37 +21,9 @@ ATTEMPTS_SQL = """SELECT DISTINCT ON (stream_key) stream_key,status,started_at,c
                     ORDER BY stream_key,completed_at DESC,attempt_id DESC"""
 PROMOTION_SQL = """SELECT promotion_key,methodology_version,status,max_live_weight,approved_by,approved_at,reason,updated_at
                      FROM quant.analyst_promotion_registry ORDER BY promotion_key"""
-WORKFLOW_SQL = """SELECT w.id,w.active,w."activeVersionId" AS active_version_id,
-                          (w."activeVersionId" IS NOT NULL
-                           AND w."activeVersionId"=p."publishedVersionId") AS published,
-                          e.status AS latest_execution_status,e."startedAt" AS latest_started_at,
-                          e."stoppedAt" AS latest_stopped_at,
-                          e."workflowVersionId" AS latest_execution_version_id,
-                          smoke.status AS smoke_execution_status,
-                          smoke."stoppedAt" AS smoke_execution_at,
-                          smoke."workflowVersionId" AS smoke_execution_version_id
-                     FROM public.workflow_entity w
-                LEFT JOIN public.workflow_published_version p ON p."workflowId"=w.id
-                LEFT JOIN LATERAL (
-                    SELECT status,"startedAt","stoppedAt","workflowVersionId"
-                      FROM public.execution_entity
-                     WHERE "workflowId"=w.id AND "deletedAt" IS NULL
-                       AND mode='trigger'
-                     ORDER BY "startedAt" DESC NULLS LAST,id DESC LIMIT 1
-                ) e ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT status,"stoppedAt","workflowVersionId"
-                      FROM public.execution_entity
-                     WHERE "workflowId"=w.id
-                       AND mode='cli' AND status='success' AND finished=true
-                       AND "workflowVersionId"=w."activeVersionId"
-                     ORDER BY "stoppedAt" DESC NULLS LAST,id DESC LIMIT 1
-                ) smoke ON TRUE
-                    WHERE w.id IN ('remoteArchiveReports123','remoteArchiveMessages123')
-                    ORDER BY w.id"""
-
-REPORTS_WORKFLOW_ID = "remoteArchiveReports123"
-MESSAGES_WORKFLOW_ID = "remoteArchiveMessages123"
+# n8n 自己的表只在 ``n8n_workflow_audit`` 里出现一次；这里保留旧名字，
+# 免得改动调用方（``async_analyst_sync_health_repository`` 导的是这个名字）。
+WORKFLOW_SQL = WORKFLOW_AUDIT_SQL
 
 
 def project_sync_health(

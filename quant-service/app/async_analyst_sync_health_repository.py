@@ -12,6 +12,7 @@ from .analyst_sync_health_projection import (
     WORKFLOW_SQL,
     project_sync_health,
 )
+from .n8n_workflow_audit import UNAVAILABLE_NOTICE
 
 
 async def sync_health(async_database: Any) -> dict[str, Any]:
@@ -28,12 +29,18 @@ async def sync_health(async_database: Any) -> dict[str, Any]:
         try:
             workflow_result = await connection.execute(WORKFLOW_SQL)
             workflow_rows = await workflow_result.fetchall()
+            audit_available = True
         except Exception:
             # An isolated quant schema has no n8n public audit tables.  The
             # durable local receipts remain useful and keep the projection
             # read-only rather than turning the whole status board into 500.
+            # 但"读不到"必须和"工作流停用"分开报，否则看板看不出是未知。
             workflow_rows = []
-    return project_sync_health(cursors, global_cursors, attempts, promotion, workflow_rows)
+            audit_available = False
+    envelope = project_sync_health(cursors, global_cursors, attempts, promotion, workflow_rows)
+    envelope["workflow_audit"] = {"available": audit_available,
+                                  "notice": None if audit_available else UNAVAILABLE_NOTICE}
+    return envelope
 
 
 __all__ = ["sync_health"]

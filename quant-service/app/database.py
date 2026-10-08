@@ -250,7 +250,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS market_events_identity_unique_idx
 
 CREATE TABLE IF NOT EXISTS quant.analyst_signals (
     signal_id uuid PRIMARY KEY,
-    ingestion_job_id uuid NOT NULL REFERENCES public.ingestion_jobs(job_id) ON DELETE CASCADE,
+    -- 保留来源作为研究出处，但**不跨组件强约束**。原来这里是
+    -- ``REFERENCES public.ingestion_jobs(job_id) ON DELETE CASCADE``：
+    -- ingestion_jobs 是飞书中继的投递台账（adapter/ledger.mjs 拥有它），
+    -- 删一条投递记录会级联删掉 quant 的研究信号。见迁移 20261008_sep0002。
+    ingestion_job_id uuid NOT NULL,
     analyst_id text NOT NULL,
     source_tag text NOT NULL,
     publisher_key text NOT NULL,

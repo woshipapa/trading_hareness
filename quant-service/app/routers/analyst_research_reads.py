@@ -23,6 +23,12 @@ from ..analyst_market_review import (
 )
 from ..request_models import AnalystMarketReviewRequest
 from ..runtime_executors import run_database_blocking
+from ..n8n_workflow_audit import (
+    MESSAGES_WORKFLOW_ID,
+    REPORTS_WORKFLOW_ID,
+    UNAVAILABLE_NOTICE,
+    WORKFLOW_AUDIT_SQL,
+)
 
 
 def _profiles_sync(database: Any) -> dict[str, Any]:
@@ -158,6 +164,9 @@ def build_analyst_research_reads_router(
         FastAPI worker thread.
         """
         workflow_health: list[dict[str, Any]] = []
+        # 读不到 n8n 审计表 ≠ 工作流停用。这两件事以前都塌成一个空列表，
+        # 看板分不出"未知"和"确实没启用"，所以单独记下来。
+        workflow_audit_available = True
         with database.transaction() as connection:
             cursors = connection.execute(
                 """SELECT stream_key,remote_analyst_id,received_at,message_ids,report_versions,updated_at
@@ -178,39 +187,7 @@ def build_analyst_research_reads_router(
             ).fetchall()
             try:
                 workflow_rows = connection.execute(
-                    """SELECT w.id,w.active,w."activeVersionId" AS active_version_id,
-                                  (w."activeVersionId" IS NOT NULL
-                                   AND w."activeVersionId"=p."publishedVersionId") AS published,
-                                  e.status AS latest_execution_status,e."startedAt" AS latest_started_at,
-                                  e."stoppedAt" AS latest_stopped_at,
-                                  e."workflowVersionId" AS latest_execution_version_id,
-                                  smoke.status AS smoke_execution_status,
-                                  smoke."stoppedAt" AS smoke_execution_at,
-                                  smoke."workflowVersionId" AS smoke_execution_version_id
-                             FROM public.workflow_entity w
-                        LEFT JOIN public.workflow_published_version p ON p."workflowId"=w.id
-                        LEFT JOIN LATERAL (
-                            SELECT status,"startedAt","stoppedAt","workflowVersionId"
-                              FROM public.execution_entity
-                             -- CLI runs are useful smoke diagnostics, but
-                             -- n8n 2.33 can leave their audit row in
-                             -- ``running`` after the child process exits.
-                             -- They cannot prove that the resident scheduler
-                             -- executed the published graph.
-                             WHERE "workflowId"=w.id AND "deletedAt" IS NULL
-                               AND mode='trigger'
-                             ORDER BY "startedAt" DESC NULLS LAST,id DESC LIMIT 1
-                        ) e ON TRUE
-                        LEFT JOIN LATERAL (
-                            SELECT status,"stoppedAt","workflowVersionId"
-                              FROM public.execution_entity
-                             WHERE "workflowId"=w.id
-                               AND mode='cli' AND status='success' AND finished=true
-                               AND "workflowVersionId"=w."activeVersionId"
-                             ORDER BY "stoppedAt" DESC NULLS LAST,id DESC LIMIT 1
-                        ) smoke ON TRUE
-                            WHERE w.id IN ('remoteArchiveReports123','remoteArchiveMessages123')
-                            ORDER BY w.id"""
+                    WORKFLOW_AUDIT_SQL
                 ).fetchall()
                 workflow_health = []
                 for row in workflow_rows:
@@ -252,6 +229,7 @@ def build_analyst_research_reads_router(
                 # The quant schema can be deployed without n8n's public schema
                 # in an isolated environment; sync evidence remains usable.
                 workflow_health = []
+                workflow_audit_available = False
         now = datetime.now(timezone.utc)
         stream_health: list[dict[str, Any]] = []
         latest_attempts = {
@@ -329,7 +307,7 @@ def build_analyst_research_reads_router(
         workflow_verified = streams_ready and {"remoteArchiveReports123", "remoteArchiveMessages123"}.issubset(ready_workflows)
         if workflow_verified:
             runtime_verification = "verified_recent_execution"
-        elif streams_ready and {"remoteArchiveReports123", "remoteArchiveMessages123"}.issubset(smoke_workflows):
+        elif streams_ready and {REPORTS_WORKFLOW_ID, MESSAGES_WORKFLOW_ID}.issubset(smoke_workflows):
             runtime_verification = "verified_cli_smoke_pending_scheduled_execution"
         elif streams_ready:
             runtime_verification = "service_reachable_pending_scheduled_execution"
@@ -337,6 +315,8 @@ def build_analyst_research_reads_router(
             runtime_verification = "pending_next_scheduled_execution"
         return {"cursors": [dict(row) for row in cursors], "stream_health": stream_health,
                 "workflow_health": workflow_health,
+                "workflow_audit": {"available": workflow_audit_available,
+                                   "notice": None if workflow_audit_available else UNAVAILABLE_NOTICE},
                 "promotion_registry": [dict(row) for row in promotion],
                 "live_effect": "none_until_explicit_approval", "boundary": "remote sync health is read-only",
                 "runtime_verification": runtime_verification}
