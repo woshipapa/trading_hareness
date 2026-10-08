@@ -253,13 +253,19 @@ class Store:
             db.executemany('UPDATE notes SET job_id=? WHERE revision=?', [(job_id, r['revision']) for r in rows])
             return job_id
 
-    def claim(self, worker, clock=None):
+    def claim(self, worker, clock=None, lane=None):
         stamp = time.time() if clock is None else clock
+        lane = str(lane or '').strip().lower()
+        if lane not in {'', 'interactive', 'batch'}:
+            raise ValueError('invalid_worker_lane')
+        lane_sql = " AND job_type='single_note_analysis'" if lane == 'interactive' else ''
+        if lane == 'batch':
+            lane_sql = " AND job_type!='single_note_analysis'"
         with self.connect() as db:
             db.execute('INSERT OR REPLACE INTO workers VALUES(?,?)', (worker, stamp))
             row = db.execute("""SELECT * FROM jobs
-                                WHERE (status='pending' AND available<=?)
-                                   OR (status='processing' AND lease_until<?)
+                                WHERE ((status='pending' AND available<=?)
+                                   OR (status='processing' AND lease_until<?))""" + lane_sql + """
                                 ORDER BY CASE WHEN job_type='single_note_analysis' THEN 0 ELSE 1 END,
                                          created LIMIT 1""", (stamp, stamp)).fetchone()
             if not row:

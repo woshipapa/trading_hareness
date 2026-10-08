@@ -33,6 +33,20 @@ class SingleNotePromptTests(unittest.TestCase):
                 self.assertIs(heartbeat.call_args.args[1], analyzer)
         self.assertEqual(result, {'summary': 'ok'})
 
+    def test_each_worker_loop_claims_only_its_lane(self):
+        calls = []
+
+        def fake_call(path, payload=None, timeout=30):  # noqa: ARG001
+            calls.append((path, payload))
+            raise RuntimeError('stop-test-loop')
+
+        with mock.patch.object(local_worker, 'call_edge', side_effect=fake_call), \
+             mock.patch.object(local_worker.time, 'sleep', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                local_worker.loop('interactive')
+        self.assertEqual(calls[0][1]['lane'], 'interactive')
+        self.assertTrue(calls[0][1]['worker'].endswith(':interactive'))
+
 
 if __name__ == '__main__':
     unittest.main()

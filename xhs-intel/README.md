@@ -31,7 +31,9 @@ note with the existing Cookie, and queues a `single_note_analysis` job for the
 Mac worker. The canonical note URL is persisted without signed query material.
 Results remain in the console by default; an explicit checkbox puts the final
 analysis into the existing Feishu delivery ledger. Identical note revisions
-reuse the same AI result.
+reuse the same AI result. The local worker runs separate `interactive` and
+`batch` claim lanes in one supervised process, so a long recommendation batch
+does not block a submitted article.
 
 The dashboard is dependency-free static source under `dashboard/`. Both the
 immutable image and the XHS source overlay include it. Future HTML, CSS,

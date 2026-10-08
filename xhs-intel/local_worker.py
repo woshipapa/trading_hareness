@@ -26,7 +26,8 @@ POLL_SECONDS = max(2, int(os.environ.get("XHS_AI_POLL_SECONDS", "10")))
 TIMEOUT = max(60, int(os.environ.get("XHS_AI_TIMEOUT", "900")))
 HEALTH_HOST = os.environ.get("XHS_AI_WORKER_HOST", "127.0.0.1")
 HEALTH_PORT = int(os.environ.get("XHS_AI_WORKER_PORT", "8793"))
-STATE = {"status": "starting", "last_job": None, "last_error": None, "completed": 0, "failed": 0}
+STATE = {"status": "starting", "last_job": None, "last_jobs": {}, "last_error": None,
+         "completed": 0, "failed": 0}
 
 
 def make_prompt(job):
@@ -243,12 +244,13 @@ def process_job(job):
     return run_with_heartbeat(job, summarize)
 
 
-def loop():
+def loop(lane='batch'):
     STATE["status"] = "running"
     while True:
         job = None
         try:
-            response = call_edge("/v1/worker/claim", {"worker": WORKER_ID})
+            worker = f'{WORKER_ID}:{lane}'
+            response = call_edge("/v1/worker/claim", {"worker": worker, "lane": lane})
             # A successful claim request proves the edge tunnel and token are
             # healthy even when the queue is empty. Clear a transient error so
             # the health endpoint reflects the current connection state.
@@ -258,6 +260,7 @@ def loop():
                 time.sleep(POLL_SECONDS)
                 continue
             STATE["last_job"] = job.get("job_id")
+            STATE["last_jobs"][lane] = job.get("job_id")
             result = process_job(job)
             call_edge("/v1/worker/complete", {"job_id": job["job_id"], "lease_token": job["lease_token"], **result}, timeout=TIMEOUT + 30)
             STATE["completed"] += 1
@@ -293,7 +296,8 @@ class HealthHandler(BaseHTTPRequestHandler):
 def main():
     server = ThreadingHTTPServer((HEALTH_HOST, HEALTH_PORT), HealthHandler)
     Thread(target=server.serve_forever, daemon=True).start()
-    loop()
+    Thread(target=loop, args=('interactive',), name='xhs-ai-interactive', daemon=True).start()
+    loop('batch')
 
 
 if __name__ == "__main__":

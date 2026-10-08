@@ -128,6 +128,18 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(claimed['job_id'], expected['job_id'])
         self.assertEqual(claimed['job_type'], 'single_note_analysis')
 
+    def test_worker_lanes_claim_interactive_and_batch_jobs_independently(self):
+        batch_id = self.enqueue()
+        interactive = normalize({
+            'id': '8' * 24,
+            'note_card': {'title': 'Interactive note', 'desc': 'compiler'},
+        }, 'single:' + '8' * 24)
+        interactive_id = self.store.enqueue_single_note(interactive)['job_id']
+        batch = self.store.claim('mac:batch', lane='batch')
+        single = self.store.claim('mac:interactive', lane='interactive')
+        self.assertEqual(batch['job_id'], batch_id)
+        self.assertEqual(single['job_id'], interactive_id)
+
     def test_note_reference_accepts_share_text_and_rejects_external_hosts(self):
         reference = parse_note_reference(
             '复制内容 https://www.xiaohongshu.com/discovery/item/' + 'A' * 24

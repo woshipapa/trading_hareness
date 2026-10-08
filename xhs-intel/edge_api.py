@@ -756,7 +756,8 @@ class Handler(BaseHTTPRequestHandler):
                 reply(self, 200, {"status": "completed", "operation": f"{namespace}.{method}", "result": sanitize(result)})
                 return
             if path == "/v1/worker/claim":
-                reply(self, 200, {"job": STORE.claim(str(payload.get("worker") or "mac-ai"))})
+                reply(self, 200, {"job": STORE.claim(
+                    str(payload.get("worker") or "mac-ai"), lane=payload.get("lane"))})
                 return
             if path == "/v1/worker/heartbeat":
                 STORE.heartbeat(str(payload.get("job_id")), str(payload.get("lease_token")))
