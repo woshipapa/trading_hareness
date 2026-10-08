@@ -101,8 +101,6 @@ class IntradayWatchlistScanDependencies:
     peer_context: Callable[[list[str], dict[str, dict[str, Any]]], dict[str, Any]]
     watch_priority_key: Callable[[dict[str, Any]], Any]
     realtime_validation_slice: Callable[[list[str], int, int], tuple[list[str], int]]
-    realtime_minutes: Callable[[list[str]], Awaitable[dict[str, dict[str, Any]]]]
-    fast_confirmations: Callable[[list[str], dict[str, dict[str, Any]], datetime], Awaitable[dict[str, dict[str, Any]]]]
     board_cache_evidence: Callable[[datetime], Awaitable[dict[str, Any]]]
     build_source_status: Callable[..., dict[str, Any]]
     persist_signals: Callable[..., Awaitable[list[dict[str, Any]]]]
@@ -295,8 +293,9 @@ async def run_watchlist_scan(request: Any, dependencies: IntradayWatchlistScanDe
     priority_symbols = inject_anomaly_rotation_priority(
         priority_symbols, anomaly_symbols, request.realtime_validation_limit,
     )
-    realtime_minutes = await dependencies.realtime_minutes(priority_symbols) if priority_symbols else {}
-    fast_confirmations = await dependencies.fast_confirmations(selected_symbols, quote_capture.quotes, observed_at)
+    # rt_min validation and the rt_k cross-check came only from Tushare, retired on 2026-10-08.
+    realtime_minutes: dict[str, dict[str, Any]] = {}
+    fast_confirmations: dict[str, dict[str, Any]] = {}
     board_cache_evidence = await dependencies.board_cache_evidence(observed_at)
     source_status = dependencies.build_source_status(
         selected_symbols=selected_symbols, quotes=quote_capture.quotes, all_a_rows=quote_capture.all_a_rows,

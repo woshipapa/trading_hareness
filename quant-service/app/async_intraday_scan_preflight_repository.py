@@ -21,19 +21,4 @@ async def latest_board_report(async_database: Any) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-async def latest_fast_quotes(async_database: Any, symbols: list[str]) -> list[dict[str, Any]]:
-    """Return one persisted Super GET cross-check per requested symbol."""
-    if not symbols:
-        return []
-    async with async_database.transaction() as connection:
-        result = await connection.execute(
-            """SELECT DISTINCT ON(symbol) symbol,observed_at,price,pct_change,raw
-                 FROM quant.intraday_quote_observations
-                WHERE source_name='tushare_super_get_rt_k' AND symbol=ANY(%s)
-                ORDER BY symbol,observed_at DESC""",
-            (symbols,),
-        )
-        return [dict(row) for row in await result.fetchall()]
-
-
-__all__ = ["latest_board_report", "latest_fast_quotes"]
+__all__ = ["latest_board_report"]

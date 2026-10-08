@@ -147,7 +147,6 @@ from .intraday_quote_normalization import (
 from .intraday_decision_card_read_model import decision_card as read_intraday_decision_card
 from .async_intraday_decision_card_repository import decision_card as read_async_intraday_decision_card
 from .async_intraday_scan_preflight_repository import latest_board_report as read_async_latest_board_report
-from .async_intraday_scan_preflight_repository import latest_fast_quotes as read_async_latest_fast_quotes
 from .async_intraday_scan_inputs_repository import exact_memberships as read_async_exact_watchlist_memberships
 from .async_intraday_scan_inputs_repository import enabled_watches as read_async_enabled_intraday_watches
 from .async_intraday_scan_inputs_repository import watchlists as read_async_intraday_scan_watchlists
@@ -168,7 +167,6 @@ from .async_intraday_alert_outbox_repository import due_deliveries as read_async
 from .intraday_volume_profiles import attach_volume_time_profile as pure_attach_volume_time_profile
 from .intraday_volume_profiles import volume_time_profile as pure_intraday_volume_time_profile
 from .intraday_volume_profiles import volume_time_profiles as pure_intraday_volume_time_profiles
-from .intraday_minute_provider_service import fetch_bounded_minute_context
 from .intraday_surge_context_service import capture as capture_intraday_surge_context
 from .strategy_candidate_ranking import select as select_intraday_candidates
 from .xiaojie_leader_flow import MODEL_VERSION as XIAOJIE_LEADER_FLOW_MODEL_VERSION, evaluate_snapshot as evaluate_xiaojie_leader_flow_snapshot
@@ -358,7 +356,6 @@ from .intraday_board_curve_runtime import (
     IntradayBoardCurveRuntimeDependencies,
     run_intraday_board_curve_runtime_loop,
 )
-from . import intraday_fast_quote_capture_service
 from .market_snapshots import snapshot_status, summarize_quotes
 from .market_flow_repository import (
     persist_intraday_market_flow_feature,
@@ -395,7 +392,6 @@ from .intraday_schedule import (
     intraday_board_rotation_retention_days,
     intraday_board_refresh_interval_seconds,
     intraday_effective_scan_interval_seconds,
-    intraday_fast_quote_retention_days,
     intraday_high_frequency_window,
     intraday_morning_fast_window,
     intraday_next_monitor_delay_seconds,
@@ -403,9 +399,6 @@ from .intraday_schedule import (
     intraday_rule_input_retention_days,
     intraday_runtime_service_state,
     intraday_scan_interval_seconds,
-    intraday_super_get_fast_interval_seconds,
-    intraday_super_get_fast_max_in_flight,
-    intraday_super_get_fast_max_symbols,
     intraday_watchlist_capacity,
     intraday_watchlist_max_symbols,
 )
@@ -419,13 +412,6 @@ from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapsho
 from .datasources import runtime as datasource_runtime
 from .datasources.catalog import health_capability
 from .datasources.sources.tushare_limits import fetch_limit_cross_section as fetch_tushare_limit_cross_section
-from .intraday_fast_quote_service import cross_source_confirmation, run_intraday_fast_quote_loop
-from .intraday_fast_quote_runtime import (
-    IntradayFastQuoteRuntimeDependencies,
-    fast_quote_loop_enabled,
-    run_intraday_fast_quote_runtime_loop,
-)
-from .intraday_fast_quote_confirmation_runtime import latest_confirmations as latest_fast_quote_confirmations
 from .study_realtime import _row_trade_date, _row_trade_datetime, looks_like_response_header, realtime_rows_are_current
 from .provider_health import (
     provider_error_availability,
@@ -2963,20 +2949,6 @@ async def retry_pending_intraday_alerts(limit: int = 3) -> dict[str, int]:
     return {"loaded": len(rows), "sent": sent, "failed": failed, "disabled": disabled}
 
 
-async def intraday_tushare_minutes(symbols: list[str]) -> dict[str, dict[str, Any]]:
-    """Get a bounded, fresh minute feature window through Tushare routes."""
-    async def fetch_rows(symbol: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        source, rows = await stock_study_fetch("tushare_rt_min", TushareFetchRequest(
-            api_name="rt_min", provider="super", params={"ts_code": symbol, "freq": "1MIN"}, max_rows=30, force_refresh=True,
-        ))
-        return source, rows
-
-    return await fetch_bounded_minute_context(
-        symbols, fetch_rows=fetch_rows, feature_builder=intraday_minute_features, number=intraday_number,
-        observed_at=datetime.now(timezone.utc), max_age_seconds=90.0,
-    )
-
-
 def intraday_minute_profile_capture_enabled() -> bool:
     return os.getenv("INTRADAY_MINUTE_PROFILE_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -3249,30 +3221,6 @@ async def intraday_board_cache_evidence(observed_at: datetime) -> dict[str, Any]
             "notice": "Eastmoney board flow is a cached snapshot, not a tick-by-tick feed"}
 
 
-def intraday_fast_quote_confirmation(quote: dict[str, Any] | None, fast_quote: dict[str, Any] | None,
-                                     observed_at: datetime, max_age_seconds: float = 30.0) -> dict[str, Any]:
-    """Compare Tencent with the latest rotating Super GET ``rt_k`` sample.
-
-    ``rt_k`` has no exchange timestamp, so freshness comes from our persisted
-    observation time. Missing or stale evidence does not veto a signal. A
-    fresh material disagreement does, preventing a bad cross-source quote from
-    reaching Feishu as a confirmed strategy alert.
-    """
-    return cross_source_confirmation(
-        quote, fast_quote, observed_at, max_age_seconds,
-        number=intraday_number,
-    )
-
-
-async def latest_intraday_fast_quote_confirmations(symbols: list[str], quotes: dict[str, dict[str, Any]],
-                                                   observed_at: datetime) -> dict[str, dict[str, Any]]:
-    return await latest_fast_quote_confirmations(
-        symbols, quotes, observed_at,
-        read_latest=lambda items: read_async_latest_fast_quotes(async_db, items),
-        confirm=intraday_fast_quote_confirmation,
-    )
-
-
 def _intraday_scan_persistence_dependencies() -> IntradayScanPersistenceServiceDependencies:
     """Compose the declared atomic signal-evidence graph at the ASGI boundary."""
     return IntradayScanPersistenceServiceDependencies(
@@ -3434,8 +3382,6 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
         surge_context=intraday_surge_context, peer_context=intraday_peer_context,
         watch_priority_key=intraday_watch_priority_key,
         realtime_validation_slice=intraday_realtime_validation_slice,
-        realtime_minutes=intraday_tushare_minutes,
-        fast_confirmations=latest_intraday_fast_quote_confirmations,
         board_cache_evidence=intraday_board_cache_evidence,
         build_source_status=build_scan_source_status,
         persist_signals=persist_intraday_scan_signals,
@@ -3900,51 +3846,6 @@ async def intraday_monitor_loop(interval_seconds: int) -> None:
         board_refresh_interval_seconds=intraday_board_refresh_interval_seconds,
         run_board_report=run_intraday_board_report,
     )
-
-
-def persist_intraday_super_get_fast_quote(symbol: str, observed_at: datetime, price: float,
-                                          pct_change: float | None, row: dict[str, Any],
-                                          provider_key: str, latency_ms: int) -> None:
-    """Persist one-second quote evidence outside the asyncio event loop."""
-    with db.transaction() as connection:
-        connection.execute(
-            """INSERT INTO quant.intraday_quote_observations(
-                   scan_id,symbol,observed_at,source_name,price,pct_change,raw
-               ) VALUES(null,%s,%s,'tushare_super_get_rt_k',%s,%s,%s)""",
-            (symbol, observed_at, price, pct_change, Json(strategy_json_safe(row))),
-        )
-        record_provider_success(connection, provider_key, "realtime_quote", 1, latency_ms)
-
-
-def record_intraday_super_get_fast_quote_failure(error: str, latency_ms: int | None = None) -> None:
-    with db.transaction() as connection:
-        record_provider_failure(connection, "tushare_super_get", "realtime_quote", error, latency_ms)
-
-
-async def capture_intraday_super_get_fast_quote(symbol: str) -> dict[str, Any]:
-    """Persist one lightweight rt_k cross-check without creating fetch-run churn."""
-    return await intraday_fast_quote_capture_service.capture(
-        symbol, call_provider=call_tushare_api, run_database=run_database_blocking,
-        persist_quote=persist_intraday_super_get_fast_quote,
-        persist_failure=record_intraday_super_get_fast_quote_failure,
-        number=intraday_number, safe_error=safe_error_detail,
-        is_circuit_open=lambda error: isinstance(error, HTTPException) and is_circuit_open_http_error(error),
-    )
-
-
-async def intraday_super_get_fast_quote_loop() -> None:
-    """Run the optional one-second rt_k cross-check in special windows."""
-    await run_intraday_fast_quote_runtime_loop(IntradayFastQuoteRuntimeDependencies(
-        database=db, run_database=run_database_blocking, max_symbols=intraday_super_get_fast_max_symbols,
-        watch_priority_key=intraday_watch_priority_key, realtime_session=realtime_market_session_async,
-        high_frequency_window=intraday_high_frequency_window,
-        storage_allowed=nonessential_high_frequency_capture_allowed,
-        capture_quote=capture_intraday_super_get_fast_quote, observe_completed=observe_completed_task,
-        interval_seconds=intraday_super_get_fast_interval_seconds,
-        max_in_flight=intraday_super_get_fast_max_in_flight,
-        retention_days=intraday_fast_quote_retention_days, run_loop=run_intraday_fast_quote_loop,
-        freshness_budget_seconds=lambda: runtime_task_contract("super_get_fast_quote").freshness_budget_seconds,
-    ))
 
 
 async def intraday_minute_profile_capture_loop() -> None:
@@ -5560,7 +5461,6 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
         interval_seconds=interval_seconds,
         enabled={
             "intraday_monitor": interval_seconds >= 30,
-            "super_get_fast_quote": fast_quote_loop_enabled(interval_seconds),
             "strategy_review": strategy_review_automation_enabled(),
             "post_close_strategy": post_close_strategy_automation_enabled(),
             "ten_day_leader_rotation": ten_day_leader_rotation_automation_enabled(),
@@ -5580,7 +5480,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
         },
         loops={
             "intraday_monitor": lambda: intraday_monitor_loop(interval_seconds),
-            "super_get_fast_quote": intraday_super_get_fast_quote_loop, "strategy_review": strategy_review_loop,
+            "strategy_review": strategy_review_loop,
             "post_close_strategy": post_close_strategy_loop, "ten_day_leader_rotation": ten_day_leader_rotation_loop,
             "daily_strategy_summary": daily_strategy_summary_loop, "ths_member_backfill": ths_concept_member_backfill_loop,
             "all_board_member_backfill": all_board_member_backfill_loop,
@@ -5906,9 +5806,6 @@ def _health_payload() -> dict[str, Any]:
             scan_interval_seconds=intraday_scan_interval_seconds,
             effective_scan_interval_seconds=intraday_effective_scan_interval_seconds,
             high_frequency_window=intraday_high_frequency_window,
-            super_get_fast_interval_seconds=intraday_super_get_fast_interval_seconds,
-            super_get_fast_max_in_flight=intraday_super_get_fast_max_in_flight,
-            fast_quote_retention_days=intraday_fast_quote_retention_days,
             board_curve_enabled=intraday_board_curve_enabled,
             board_curve_retention_days=intraday_board_curve_retention_days,
             board_rotation_retention_days=intraday_board_rotation_retention_days,
@@ -5947,9 +5844,7 @@ def intraday_services_status_payload() -> dict[str, Any]:
         realtime_market_session=realtime_market_session, board_curve_session=intraday_board_curve_session,
         high_frequency_window=intraday_high_frequency_window, scan_interval_seconds=intraday_scan_interval_seconds,
         provider_status=provider_status, runtime_service_state=intraday_runtime_service_state,
-        json_safe=strategy_json_safe, super_get_fast_interval_seconds=intraday_super_get_fast_interval_seconds,
-        super_get_fast_max_in_flight=intraday_super_get_fast_max_in_flight,
-        fast_quote_retention_days=intraday_fast_quote_retention_days, board_curve_enabled=intraday_board_curve_enabled,
+        json_safe=strategy_json_safe, board_curve_enabled=intraday_board_curve_enabled,
         board_curve_retention_days=intraday_board_curve_retention_days,
         board_rotation_retention_days=intraday_board_rotation_retention_days,
         daily_summary_automation_enabled=daily_summary_automation_enabled,
@@ -5963,9 +5858,7 @@ def _intraday_status_dependencies() -> IntradayStatusDependencies:
         realtime_market_session=realtime_market_session, board_curve_session=intraday_board_curve_session,
         high_frequency_window=intraday_high_frequency_window, scan_interval_seconds=intraday_scan_interval_seconds,
         provider_status=provider_status, runtime_service_state=intraday_runtime_service_state,
-        json_safe=strategy_json_safe, super_get_fast_interval_seconds=intraday_super_get_fast_interval_seconds,
-        super_get_fast_max_in_flight=intraday_super_get_fast_max_in_flight,
-        fast_quote_retention_days=intraday_fast_quote_retention_days, board_curve_enabled=intraday_board_curve_enabled,
+        json_safe=strategy_json_safe, board_curve_enabled=intraday_board_curve_enabled,
         board_curve_retention_days=intraday_board_curve_retention_days,
         board_rotation_retention_days=intraday_board_rotation_retention_days,
         daily_summary_automation_enabled=daily_summary_automation_enabled,

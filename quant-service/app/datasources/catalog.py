@@ -30,7 +30,6 @@ HEALTH_CAPABILITY_ALIASES: Final[dict[tuple[str, str], str]] = {
     ("longhuvip", "quote.watch_snapshot"): "stock_quote",
     ("tencent_free", "quote.watch_snapshot"): "order_book_quote",
     ("sina_free", "quote.watch_snapshot"): "realtime_quote",
-    ("tushare_super_get", "quote.fast_confirmation"): "realtime_quote",
     ("longhuvip", "quote.order_book"): "order_book_quote",
     ("tencent_free", "quote.order_book"): "order_book_quote",
     ("longhuvip", "bars.minute"): "intraday_minute",
@@ -129,7 +128,6 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("quote.watch_snapshot", "观察池报价（交易所时间戳）", "realtime", "watchlist",
          "price:yuan volume:shares amount:yuan volume_ratio turnover_rate:pct exchange_time", _OBSERVED),
     _cap("quote.order_book", "盘口五档/十档", "realtime", "watchlist", "bid1..10:yuan ask1..10:yuan bid_vol:lots", _OBSERVED),
-    _cap("quote.fast_confirmation", "秒级二次确认报价", "realtime", "watchlist", "price:yuan", _OBSERVED),
     _cap("quote.valuation", "估值 PE/PB/PS/PCF", "daily", "all_a", "pe_ttm pe_mrq pb_mrq ps_ttm pcf_ttm", _OBSERVED),
     # bars
     _cap("bars.daily", "日K（不复权，canonical 仲裁）", "daily", "all_a",
@@ -255,9 +253,6 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tencent_free", "quote.order_book", 50, LIVE_VERIFIED,
           "intraday_quote_observations:source_name=tencent_order_book",
           "app/intraday_order_book_service.py", notes="五档；source_name=tencent_order_book"),
-    _bind("tushare_super_get", "quote.fast_confirmation", 15, LIVE_VERIFIED,
-          "intraday_quote_observations:source_name=tushare_super_get_rt_k",
-          "app/intraday_fast_quote_service.py", notes="rt_k; shared observation table"),
     _bind("fuyao_ths", "quote.valuation", 12, DECLARED, _RAW + "a_share_valuations_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", "盘后逐日", "thscodes≤100"),
     _bind("tushare_primary", "quote.valuation", 20, RETIRED, "daily_fundamentals", "app/tushare_providers.py", notes="主源已下线；仅保留历史证据"),
@@ -280,7 +275,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           history="30/60 分钟周期K：GetKLineDay_W14 Type=30/60（longhu_vendor_source.stock_period_bars），"
                   "单页 ≤300 根；120 根≈30 分钟 15 个交易日 / 60 分钟 30 个交易日，含盘中形成中的K",
           notes="日期可验证才用"),
-    _bind("tencent_free", "bars.minute", 50, LIVE_VERIFIED, "intraday_minute_sessions", "app/intraday_minute_provider_service.py",
+    _bind("tencent_free", "bars.minute", 50, LIVE_VERIFIED, "intraday_minute_sessions", "app/intraday_minute_capture_actions.py",
           history="5/15/30/60 分钟K：mkline（free_market_providers.tencent_period_bars），含当日K与真实开高低；"
                   "10 分钟 = 两根 5 分钟精确合成"),
     _bind("tushare_super_get", "bars.minute", 15, LIVE_VERIFIED, "tushare_raw_records", "app/tushare_providers.py", notes="rt_min"),

@@ -17,9 +17,6 @@ SOURCES = (
     ("fuyao_ths", "fuyao_ths", health_capability("fuyao_ths", "quote.all_a_snapshot"), "Fuyao 全 A 快照", "all_a", 120),
     ("longhuvip_minute", "longhuvip", health_capability("longhuvip", "bars.minute"), "Longhu 分钟", "priority_subset", 90),
     ("tencent_minute", "tencent_free", health_capability("tencent_free", "bars.minute"), "腾讯分钟", "priority_subset", 90),
-    ("tushare_super_get", "tushare_super_get", health_capability("tushare_super_get", "quote.fast_confirmation"), "Super GET 报价交叉确认", "rotation", 90),
-    ("tushare_super_get_rt_min", "tushare_super_get", "rt_min", "Super GET 分钟", "rotation", 90),
-    ("tushare_super_sdk_rt_min", "tushare_super_sdk", "rt_min", "Super SDK 分钟", "rotation", 90),
     ("eastmoney_free", "eastmoney_free", "watchlist_flow_quote", "东财个股资金", "watchlist", 90),
     ("eastmoney_board_flow", "eastmoney_free", "board_flow", "东财板块资金", "boards", 360),
 )
@@ -55,7 +52,7 @@ def source_observation(key: str, sources: dict[str, Any], watches: int | None) -
     """Normalize counts in their own scopes, never borrowing another source."""
     paths = {"longhuvip": "longhuvip_watch", "tencent_free": "tencent_watch",
              "sina_free": "tencent_watch", "fuyao_ths": "fuyao",
-             "tushare_super_get": "tushare_rt_k_fast", "eastmoney_free": "eastmoney_watch_flow",
+             "eastmoney_free": "eastmoney_watch_flow",
              "eastmoney_board_flow": "eastmoney_board_flow"}
     data = mapping(sources.get(paths.get(key, key)))
     requested = first_count(data, "requested")
@@ -89,22 +86,6 @@ def source_observation(key: str, sources: dict[str, Any], watches: int | None) -
             data = context
         requested, received = count(data.get("requested")), count(data.get("completed"))
         status = str(data.get("provider_status") or "unknown")
-    elif key == "tushare_super_get":
-        counts = mapping(data.get("status_counts"))
-        requested = sum(count(v) or 0 for v in counts.values())
-        received = count(counts.get("confirmed")) or 0
-        valid = received
-        status = "completed" if requested else "not_tested"
-    elif key.endswith("_rt_min"):
-        provider = key.removesuffix("_rt_min")
-        context = mapping(sources.get("tushare_rt_min"))
-        rows = [mapping(row) for row in mapping(context.get("items")).values()
-                if mapping(row).get("provider") in {provider, provider.removeprefix("tushare_")}]
-        requested = len(rows)
-        received = sum((first_count(row, "fresh_rows", "received", "received_rows") or 0) > 0
-                       and row.get("status") in {"completed", "fresh", "cached"} for row in rows)
-        status = "completed" if requested else "not_tested"
-        data = {}
     elif key == "eastmoney_board_flow":
         # A cache timestamp without row/coverage evidence does not prove a feed.
         requested = first_count(data, "requested")

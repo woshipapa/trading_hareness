@@ -52,8 +52,6 @@ class RealtimeProviderHealthTests(unittest.TestCase):
         }, "tushare_rt_min": {"requested": [], "items": {}}})
         self.assertEqual(items["longhuvip_minute"]["state"], "partial")
         self.assertEqual(items["tencent_minute"]["state"], "healthy")
-        self.assertEqual(items["tushare_super_get_rt_min"]["state"], "not_tested")
-        self.assertEqual(items["tushare_super_sdk_rt_min"]["state"], "not_tested")
 
     def test_empty_unknown_cache_and_unused_fallback_are_not_healthy(self):
         items = self.project({"longhuvip_watch": {"status": "completed", "received": 0},
@@ -62,10 +60,6 @@ class RealtimeProviderHealthTests(unittest.TestCase):
         self.assertEqual(items["longhuvip"]["state"], "unavailable")
         self.assertEqual(items["eastmoney_board_flow"]["state"], "unknown")
         self.assertEqual(items["sina_free"]["state"], "not_tested")
-
-    def test_all_confirmed_fast_quote_is_healthy_but_no_counts_is_not(self):
-        self.assertEqual(self.project({"tushare_rt_k_fast": {"status_counts": {"confirmed": 84}}})["tushare_super_get"]["state"], "healthy")
-        self.assertEqual(self.project({"tushare_rt_k_fast": {"status_counts": {}}})["tushare_super_get"]["state"], "not_tested")
 
     def test_future_or_missing_evidence_time_fails_closed(self):
         src = {"longhuvip_watch": {"status": "completed", "requested": 84, "received": 84}}

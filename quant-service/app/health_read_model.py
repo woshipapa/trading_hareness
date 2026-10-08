@@ -60,9 +60,6 @@ class HealthDependencies:
     scan_interval_seconds: Callable[[], int]
     effective_scan_interval_seconds: Callable[[int, datetime], int]
     high_frequency_window: Callable[[datetime], bool]
-    super_get_fast_interval_seconds: Callable[[], float]
-    super_get_fast_max_in_flight: Callable[[], int]
-    fast_quote_retention_days: Callable[[], int]
     board_curve_enabled: Callable[[], bool]
     board_curve_retention_days: Callable[[], int]
     board_rotation_retention_days: Callable[[], int]
@@ -232,9 +229,7 @@ def health_payload(deps: HealthDependencies, cache: HealthEvidenceCache | None =
             "enabled": normal_interval >= 30, "normal_scan_interval_seconds": normal_interval,
             "effective_scan_interval_seconds": deps.effective_scan_interval_seconds(normal_interval, local_now),
             "special_window_active": deps.high_frequency_window(local_now), "special_window_scan_interval_seconds": 10,
-            "super_get_fast_interval_seconds": deps.super_get_fast_interval_seconds(),
-            "super_get_fast_max_in_flight": deps.super_get_fast_max_in_flight(),
-            "fast_quote_retention_days": deps.fast_quote_retention_days(), "board_curve_enabled": deps.board_curve_enabled(),
+            "board_curve_enabled": deps.board_curve_enabled(),
             "board_curve_interval_seconds": 60, "board_curve_retention_days": deps.board_curve_retention_days(),
             "board_rotation_retention_days": deps.board_rotation_retention_days(),
             "board_curve_session_active": board_session_active, "board_curve_session_reason": board_session_reason,

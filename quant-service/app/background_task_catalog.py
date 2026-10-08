@@ -11,7 +11,7 @@ from .runtime_tasks import BackgroundTaskSpec
 def build_specs(*, interval_seconds: int, enabled: dict[str, bool], loops: dict[str, Callable[[], Any]]) -> tuple[BackgroundTaskSpec, ...]:
     """Keep task labels, enablement and factories outside the ASGI root."""
     labels = (
-            "intraday_monitor", "super_get_fast_quote", "strategy_review", "post_close_strategy",
+            "intraday_monitor", "strategy_review", "post_close_strategy",
             "ten_day_leader_rotation", "daily_strategy_summary", "ths_member_backfill",
             "all_board_member_backfill", "minute_profile_capture", "tencent_order_book", "board_flow_curve",
             "market_event_capture",

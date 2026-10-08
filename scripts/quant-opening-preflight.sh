@@ -98,7 +98,6 @@ jq -e '
   .intraday_automation.enabled == true and
   .intraday_automation.normal_scan_interval_seconds == 30 and
   .intraday_automation.special_window_scan_interval_seconds == 10 and
-  .intraday_automation.super_get_fast_interval_seconds == 1 and
   .intraday_automation.board_curve_enabled == true and
   .intraday_automation.board_curve_interval_seconds == 60 and
   ([.blocking_executors[] | .available_slots >= 0] | all)
@@ -108,7 +107,6 @@ required_leases=(
   background_loop:all_a_level1_snapshot
   background_loop:public_evidence_capture
   background_loop:intraday_monitor
-  background_loop:super_get_fast_quote
   background_loop:tencent_order_book
   background_loop:board_flow_curve
   background_loop:minute_profile_capture

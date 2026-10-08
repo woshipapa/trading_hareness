@@ -56,7 +56,7 @@ class IntradayWatchlistScanRuntimeTests(unittest.TestCase):
             mapped_peers=lambda *_: {}, high_frequency_window=lambda _: False,
             quote_capture_dependencies=object(), surge_context=empty_async, peer_context=lambda *_: {},
             watch_priority_key=lambda row: row["symbol"], realtime_validation_slice=lambda symbols, offset, limit: (symbols, offset),
-            realtime_minutes=empty_async, fast_confirmations=empty_async, board_cache_evidence=empty_async,
+            board_cache_evidence=empty_async,
             build_source_status=lambda **_: {}, persist_signals=lambda *_: [], read_shadow_pool=empty_async,
             shadow_rotation_due=lambda _: False, shadow_rotation_slice=lambda *_: ([], 0),
             tencent_watch_quotes=empty_async, merge_watch_prices=lambda *_: None, safe_error=lambda value, _: value,

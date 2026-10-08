@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.async_intraday_scan_preflight_repository import latest_board_report, latest_fast_quotes
+from app.async_intraday_scan_preflight_repository import latest_board_report
 
 
 class _Result:
@@ -48,21 +48,14 @@ class _Database:
 
 
 class AsyncIntradayScanPreflightRepositoryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_queries_are_native_async_and_fast_quotes_stay_symbol_bounded(self) -> None:
+    async def test_the_board_report_query_is_native_async(self) -> None:
         database = _Database()
         board = await latest_board_report(database)
-        rows = await latest_fast_quotes(database, ["000001.SZ", "000002.SZ"])
-        empty = await latest_fast_quotes(database, [])
 
         self.assertEqual(board["status"], "completed")
-        self.assertEqual(rows, [{"symbol": "000001.SZ", "price": 10.0}])
-        self.assertEqual(empty, [])
         board_query, board_params = database.connection.calls[0]
-        quote_query, quote_params = database.connection.calls[1]
         self.assertIn("intraday_board_reports", board_query)
         self.assertIsNone(board_params)
-        self.assertIn("DISTINCT ON(symbol)", quote_query)
-        self.assertEqual(quote_params, (["000001.SZ", "000002.SZ"],))
 
 
 if __name__ == "__main__":

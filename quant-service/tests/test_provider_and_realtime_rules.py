@@ -973,14 +973,6 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(next_rotation_offset_from_scan(RuntimeError("upstream unavailable"), 4), 4)
         self.assertEqual(next_rotation_offset_from_scan({"realtime_validation": {"next_offset": 41}}, 4), 4)
         self.assertEqual(next_rotation_offset_from_scan({"realtime_validation": {"next_offset": True}}, 4), 4)
-        self.assertEqual(fast_quote_rotation_slot(["000001.SZ", "000002.SZ"], 2), ("000001.SZ", 3))
-        self.assertEqual(fast_quote_rotation_slot([], 3), (None, 3))
-        # A full rotation through the pool must fit inside the declared
-        # freshness budget: one new symbol starts per interval tick.
-        self.assertEqual(bounded_rotation_pool_size(40, 1.0, 30.0), 30)
-        self.assertEqual(bounded_rotation_pool_size(20, 1.0, 30.0), 20)
-        self.assertEqual(bounded_rotation_pool_size(40, 1.0, None), 40)
-        self.assertEqual(bounded_rotation_pool_size(40, 0.0, 30.0), 40)
         self.assertEqual(intraday_board_refresh_interval_seconds(high), 60)
         self.assertEqual(intraday_board_refresh_interval_seconds(normal), 300)
         # The morning window opens with the 09:15 call auction.
@@ -990,18 +982,8 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(intraday_next_monitor_delay_seconds(30, one_second_to_open), 1.0)
         in_call_auction = __import__("datetime").datetime(2026, 8, 10, 9, 29, 50, tzinfo=china)
         self.assertEqual(intraday_next_monitor_delay_seconds(30, in_call_auction), 5.0)
-        with patch.dict("os.environ", {"INTRADAY_SUPER_GET_FAST_INTERVAL_SECONDS": "1"}):
-            self.assertEqual(intraday_super_get_fast_interval_seconds(), 1.0)
-        with patch.dict("os.environ", {"INTRADAY_SUPER_GET_FAST_MAX_IN_FLIGHT": "20"}):
-            self.assertEqual(intraday_super_get_fast_max_in_flight(), 20)
-        with patch.dict("os.environ", {"INTRADAY_SUPER_GET_FAST_MAX_SYMBOLS": "40"}):
-            self.assertEqual(intraday_super_get_fast_max_symbols(), 40)
-        with patch.dict("os.environ", {"INTRADAY_FAST_QUOTE_RETENTION_DAYS": "7"}):
-            self.assertEqual(intraday_fast_quote_retention_days(), 7)
         # Accumulating a 60-trading-day validation sample needs a window well past
         # the old 30/120-day ceilings; anything beyond the hot window is archived.
-        with patch.dict("os.environ", {"INTRADAY_FAST_QUOTE_RETENTION_DAYS": "365"}):
-            self.assertEqual(intraday_fast_quote_retention_days(), 365)
         with patch.dict("os.environ", {"INTRADAY_RULE_INPUT_RETENTION_DAYS": "365"}):
             self.assertEqual(intraday_rule_input_retention_days(), 365)
         with patch.dict("os.environ", {"INTRADAY_RULE_INPUT_RETENTION_DAYS": "10"}):
@@ -1068,22 +1050,6 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(len(slots), 131)
         self.assertEqual(slots[0].astimezone(china).strftime("%H:%M"), "09:20")
         self.assertEqual(slots[-1].astimezone(china).strftime("%H:%M"), "11:30")
-
-    def test_fast_super_get_quote_confirms_or_vetoes_fresh_tencent_price(self):
-        now = datetime(2026, 8, 10, 2, 0, tzinfo=timezone.utc)
-        confirmed = intraday_fast_quote_confirmation(
-            {"price": 10.0}, {"price": 10.05, "observed_at": now}, now,
-        )
-        mismatch = intraday_fast_quote_confirmation(
-            {"price": 10.0}, {"price": 10.9, "observed_at": now}, now,
-        )
-        stale = intraday_fast_quote_confirmation(
-            {"price": 10.0}, {"price": 10.0, "observed_at": now},
-            now + __import__("datetime").timedelta(seconds=31),
-        )
-        self.assertEqual(confirmed["status"], "confirmed")
-        self.assertEqual(mismatch["status"], "mismatch")
-        self.assertEqual(stale["status"], "stale")
 
     def test_runtime_service_health_distinguishes_standby_starting_and_stale(self):
         china = __import__("datetime").timezone(__import__("datetime").timedelta(hours=8))

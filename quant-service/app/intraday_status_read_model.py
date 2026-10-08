@@ -54,9 +54,6 @@ class IntradayStatusDependencies:
     provider_status: Callable[[], list[dict[str, Any]]]
     runtime_service_state: Callable[..., tuple[str, float | None]]
     json_safe: Callable[[Any], Any]
-    super_get_fast_interval_seconds: Callable[[], float]
-    super_get_fast_max_in_flight: Callable[[], int]
-    fast_quote_retention_days: Callable[[], int]
     board_curve_enabled: Callable[[], bool]
     board_curve_retention_days: Callable[[], int]
     board_rotation_retention_days: Callable[[], int]
@@ -74,8 +71,6 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
     board_session_active, board_session_reason = board_session or deps.board_curve_session()
     special_window = deps.high_frequency_window(local_now)
     normal_interval = deps.scan_interval_seconds()
-    configs = {item["name"]: item for item in deps.provider_status()}
-    super_configured = bool((configs.get("super_get") or {}).get("configured"))
     alert_configured = direct_feishu_alert_configured() or bool(
         (os.getenv("QUANT_ALERT_WEBHOOK_URL") or "").strip()
         and (os.getenv("QUANT_ALERT_WEBHOOK_TOKEN") or "").strip()
@@ -136,15 +131,6 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
     fuyao_health = most_recent_health(("fuyao_ths",), ("realtime_quote",))
     order_book_quote = quotes.get("longhu_order_book") or quotes.get("tencent_order_book", {})
     order_book_health = most_recent_health(("longhuvip", "tencent_free"), ("order_book_quote",))
-    fast_quote = quotes.get("tushare_super_get_rt_k", {})
-    rt_k_raw = raw.get("rt_k", {})
-    fast_observed_at = fast_quote.get("last_observed_at") or rt_k_raw.get("last_observed_at")
-    fast_health = most_recent_health(("tushare_super_get", "tushare_super_sdk", "tushare_super"), ("realtime_quote", "rt_k"))
-    rt_min = raw.get("rt_min", {})
-    # ``super`` routes rt_min through timestamped City SDK first, with GET as
-    # a bounded fallback.  Include the physical SDK key here; the historical
-    # aggregate key remains solely to render pre-migration evidence.
-    rt_min_health = most_recent_health(("tushare_super_sdk", "tushare_super_get", "tushare_super"), ("rt_min",))
     board_expected_age = 90.0 if deps.board_curve_enabled() else 90.0 if special_window else 360.0
     close_profile_active = session_active and time(14, 55) <= local_now.time() < time(15, 0)
     items = [
@@ -182,24 +168,6 @@ def intraday_services_status_payload(deps: IntradayStatusDependencies, *, eviden
                      "uncovered_watch_count": max(0, int(watch_row["enabled"] or 0) - deps.order_book_max_symbols()),
                      "scope": "Longhu 主源；腾讯在 Longhu 缺失或失败时补齐，特征仅观测，不改变触发阈值"},
             startup_grace_seconds=20.0,
-        ),
-        runtime_item(
-            key="super_get_rt_k", label="Super GET 秒级 rt_k", role="与腾讯现价交叉确认，冲突时阻止直接推送",
-            configured=super_configured, expected_active=session_active and special_window,
-            last_observed_at=fast_observed_at, max_age_seconds=30.0, cadence="特别窗口全局每秒启动 1 次",
-            health_row=fast_health, details={"persisted_fast_rows": int(fast_quote.get("rows") or 0),
-                                             "rotation_symbols": int(watch_row["enabled"] or 0),
-                                             "max_in_flight": deps.super_get_fast_max_in_flight()},
-            startup_grace_seconds=45.0,
-        ),
-        runtime_item(
-            key="super_rt_min", label="Super 分钟 rt_min", role="City SDK 优先、GET 兜底的分钟量价、VWAP 与首动指标验证",
-            configured=super_configured, expected_active=session_active and not special_window,
-            last_observed_at=rt_min.get("last_observed_at"), max_age_seconds=90.0,
-            cadence="普通连续竞价每 30 秒轮转最多 4 只", health_row=rt_min_health,
-            details={"stored_raw_rows": int(rt_min.get("rows") or 0),
-                     "provider_order": ["tushare_super_sdk", "tushare_super_get"],
-                     "health_provider_key": rt_min_health.get("provider_key")}, startup_grace_seconds=90.0,
         ),
         runtime_item(
             key="tencent_minute_profile", label="腾讯观察池分钟剖面", role="盘末保存全部显式观察池的同刻量能基线",

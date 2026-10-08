@@ -29,7 +29,7 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
 
     def test_intraday_edge_profile_only_keeps_network_polling_loops(self):
         specs = tuple(BackgroundTaskSpec(label, True, AsyncMock()) for label in (
-            "intraday_monitor", "super_get_fast_quote", "minute_profile_capture",
+            "intraday_monitor", "minute_profile_capture",
             "tencent_order_book", "board_flow_curve", "strategy_review",
             "auction_pulse",
             "post_close_strategy", "ten_day_leader_rotation", "daily_strategy_summary",
@@ -40,7 +40,7 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(
             {spec.label for spec in profiled if spec.enabled},
-            {"intraday_monitor", "super_get_fast_quote", "minute_profile_capture",
+            {"intraday_monitor", "minute_profile_capture",
              "tencent_order_book", "board_flow_curve", "auction_pulse"},
         )
 

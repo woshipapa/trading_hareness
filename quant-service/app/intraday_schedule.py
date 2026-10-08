@@ -107,37 +107,12 @@ def intraday_realtime_validation_slice(symbols: list[str], current_offset: int,
     return rotated[:bounded_limit], (start + bounded_limit) % size
 
 
-def intraday_super_get_fast_interval_seconds() -> float:
-    try:
-        return max(1.0, min(10.0, float(os.getenv("INTRADAY_SUPER_GET_FAST_INTERVAL_SECONDS", "1"))))
-    except ValueError:
-        return 1.0
 
 
-def intraday_super_get_fast_max_in_flight() -> int:
-    try:
-        return max(1, min(20, int(os.getenv("INTRADAY_SUPER_GET_FAST_MAX_IN_FLIGHT", "20"))))
-    except ValueError:
-        return 20
 
 
-def intraday_super_get_fast_max_symbols() -> int:
-    """Cap only the explicitly configured fast-validation basket.
-
-    A full watch scan remains capped elsewhere.  Keeping this configurable
-    lets service health report when a user intentionally chose lower coverage.
-    """
-    try:
-        return max(1, min(40, int(os.getenv("INTRADAY_SUPER_GET_FAST_MAX_SYMBOLS", "40"))))
-    except ValueError:
-        return 40
 
 
-def intraday_fast_quote_retention_days() -> int:
-    try:
-        return max(1, min(400, int(os.getenv("INTRADAY_FAST_QUOTE_RETENTION_DAYS", "7"))))
-    except ValueError:
-        return 7
 
 
 # Retention upper bounds are wide because the statistical gates, not disk, decide

@@ -42,8 +42,6 @@ class IntradayWatchlistScanRuntimeDependencies:
     peer_context: Callable[[list[str], dict[str, dict[str, Any]]], dict[str, Any]]
     watch_priority_key: Callable[[dict[str, Any]], Any]
     realtime_validation_slice: Callable[[list[str], int, int], tuple[list[str], int]]
-    realtime_minutes: Callable[[list[str]], Awaitable[dict[str, dict[str, Any]]]]
-    fast_confirmations: Callable[[list[str], dict[str, dict[str, Any]], datetime], Awaitable[dict[str, dict[str, Any]]]]
     board_cache_evidence: Callable[[datetime], Awaitable[dict[str, Any]]]
     build_source_status: Callable[..., dict[str, Any]]
     persist_signals: Callable[..., Any]
@@ -172,8 +170,6 @@ class IntradayWatchlistScanRuntime:
             peer_context=dependencies.peer_context,
             watch_priority_key=dependencies.watch_priority_key,
             realtime_validation_slice=dependencies.realtime_validation_slice,
-            realtime_minutes=dependencies.realtime_minutes,
-            fast_confirmations=dependencies.fast_confirmations,
             board_cache_evidence=dependencies.board_cache_evidence,
             build_source_status=dependencies.build_source_status,
             persist_signals=persist_signals,

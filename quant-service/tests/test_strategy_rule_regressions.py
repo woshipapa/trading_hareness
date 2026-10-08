@@ -17,19 +17,6 @@ class StrategyRuleRegressionTests(unittest.TestCase):
         self.assertIn("gross_exposure_limit", result["reason_codes"])
         self.assertIn("policy_portfolio_risk", result["risk_flags"])
 
-    def test_super_get_fast_loop_does_not_extend_circuit_on_local_skip(self):
-        async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock()
-            with patch("app.main.call_tushare_api", new=AsyncMock(
-                side_effect=HTTPException(status_code=503, detail="provider circuit-open until later"),
-            )), patch("app.main.run_database_blocking", new=blocking):
-                result = await capture_intraday_super_get_fast_quote("000001.SZ")
-            return result, blocking
-
-        result, blocking = asyncio.run(check())
-        self.assertEqual(result["status"], "circuit_open")
-        blocking.assert_not_awaited()
-
     def test_intraday_outcome_metrics_keep_direction_and_adverse_path(self):
         prices = [Decimal("10.10"), Decimal("9.80"), Decimal("10.40")]
         long_metrics = intraday_signal_outcome_metrics(Decimal("10.00"), 1, prices)
