@@ -279,7 +279,7 @@ git push origin 6271d88:refs/heads/sync/edge-6271d88
 | `20260926_trl0001` | 新建 `research_trials` | **是**：因子评估和 `/api/v1/research/trials` |
 | `20260926_srg0001` | 3 条 disabled、权重 0 的策略登记行 | 否（缺行等同 disabled） |
 
-`docs/PLAN_COMPLETION_MATRIX.md` 的 2026-09-20 owner clarification 写明：**owner 不会为 peer 执行 ds0004/ds0005 的 DDL**。所以在 owner 库上直接 `alembic upgrade head`，会把 owner 已经拒绝的 DDL 一起执行，而且 ds0004 要改写几张大表。
+`docs/archive/PLAN_COMPLETION_MATRIX.md` 的 2026-09-20 owner clarification 写明：**owner 不会为 peer 执行 ds0004/ds0005 的 DDL**。所以在 owner 库上直接 `alembic upgrade head`，会把 owner 已经拒绝的 DDL 一起执行，而且 ds0004 要改写几张大表。
 
 **决定（2026-09-26）：用户选择第 1 项**，owner 执行全部 8 个迁移。前提不变：必须先完成 B2，也就是从 Windows 找回 `20260923_0117` 的源码，让 `<owner_head>` 能接上本仓库的链。在此之前不要执行 `upgrade head`。第 2 项保留，作为以后同类情况的备选。
 

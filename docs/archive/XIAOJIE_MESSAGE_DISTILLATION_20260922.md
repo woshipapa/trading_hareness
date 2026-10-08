@@ -120,12 +120,12 @@ ETF 的偏稳选项说明（515120、159992、516080），不属于潜龙个股�
 
 ## 已接入的研究量化边界
 
-抽取器位于 [`xiaojie_message_distillation.py`](../quant-service/app/xiaojie_message_distillation.py)，
+抽取器位于 [`xiaojie_message_distillation.py`](../../quant-service/app/xiaojie_message_distillation.py)，
 只输出来源、可用时间、角色、立场、规则标签和股票词典命中；图片和无法解析的 post 会
 显式标成 `unavailable_non_text`。对应测试在
-[`test_xiaojie_message_distillation.py`](../quant-service/tests/test_xiaojie_message_distillation.py)。
+[`test_xiaojie_message_distillation.py`](../../quant-service/tests/test_xiaojie_message_distillation.py)。
 
-现有 [`xiaojie_leader_flow.py`](../quant-service/app/xiaojie_leader_flow.py) 已有市场门控、
+现有 [`xiaojie_leader_flow.py`](../../quant-service/app/xiaojie_leader_flow.py) 已有市场门控、
 5 日线退出、仓位层级和潜龙过热研究标记。本次只把消息规则做成独立的、可复用的结构化
 抽取器，没有把文本判断直接写入现有策略阈值。下一步量化契约应增加
 `qianlong_evidence_complete`，并在证据完整时要求

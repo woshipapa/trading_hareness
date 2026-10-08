@@ -14,7 +14,7 @@ XHS 的 `Spider_XHS`、Feishu 的 LarkAgentX 和账号凭证仍是显式外部�
 
 每个项目现在还带有自己的 `component.json` 和 `Makefile`，导出归档的元数据不再写入
 本机绝对路径；Feishu adapter 已加入 `package-lock.json` 并使用 `npm ci` 构建。跨项目
-入口集中记录在 [`COMPONENT_CONTRACTS.md`](COMPONENT_CONTRACTS.md)，因此后续物理拆仓时
+入口集中记录在 [`COMPONENT_CONTRACTS.md`](../COMPONENT_CONTRACTS.md)，因此后续物理拆仓时
 可以把本地 manifest、compose、测试和契约一起迁移，而不依赖根目录 Python/Node 代码。
 
 已落地的运行改进包括：

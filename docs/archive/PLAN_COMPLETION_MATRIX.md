@@ -121,7 +121,7 @@ but cannot become a `research_candidate` for the requested date.
 - 因子研究 SQL 接受 owner 实际 `raw->>'factor_semantics'='corporate_action_cumulative'`，保留历史标签兼容；身份因子仍退役，缺行仍 fail-closed。修复 `owner_storage._row_value` 对 tuple tablespace 的索引错误。
 - raw-overflow allowlist 纳入 `daily_bar`，`next/ack/failure` 的 4xx、数据库异常现在带 stream/batch 上下文日志；HTTP 4xx/5xx 与同步/异步数据库语句均记录 ERROR/WARNING（SQL 与有界参数）。连接增加 `application_name`，compose 全部 peer 容器加入 `json-file` 50m×5 轮转。
 - 发布归档新增完整性门：`compose.yaml`、`OPERATIONS.md`、`frontend/`、`workflows/`、`certs/`、systemd 依赖脚本缺一不可；新增 `package-peer-release.sh`，排除 state/backups/logs 等运行数据后一次性校验归档内容，避免再次出现 `203/EXEC`。
-- 写入申报已补为 [`PEER_WRITE_DECLARATION.md`](PEER_WRITE_DECLARATION.md)，覆盖 runtime lease、provider/fetch ledger、原始/日线/因子/板块/intraday/research 证据表和批量窗口约束。
+- 写入申报已补为 [`PEER_WRITE_DECLARATION.md`](../PEER_WRITE_DECLARATION.md)，覆盖 runtime lease、provider/fetch ledger、原始/日线/因子/板块/intraday/research 证据表和批量窗口约束。
 - 当前工作树的 owner contract、owner deployment notice、instrument lock retry、shared-peer verifier 定向回归通过；scripts verifier **15 项通过**；OpenAPI **8 paths/180 operations**；前端 typecheck/build/api:check 通过；shared-peer compose config 在注入必需密钥占位值后通过。尚未在本会话重启远端 peer 容器或声称 owner 线上 deadlock 已消失。
 
 ### 2026-09-19 owner 存储与隧道兼容（历史交接回执，已被 2026-09-20 口径取代）

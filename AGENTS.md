@@ -57,7 +57,12 @@ provider response directly to a live threshold or order path.
 7. Run `cd frontend && npm run api:generate` after an intentional API contract
    change; `npm run api:check` verifies the checked-in generated type is current.
 8. Read `docs/ARCHITECTURE.md` before a cross-domain change; it is the concise
-   ownership map, while this file remains the operational checklist.
+   ownership map, while this file remains the operational checklist. Decisions
+   that constrain the design (data ownership, migrations, releases, write keys,
+   Tushare retirement, fail-closed research, host registry) are recorded in
+   `docs/decisions/`; add a record when you make one. Dated status reports,
+   recaps and audits belong in `docs/archive/` once their conclusions are
+   folded into a living document.
 9. Syncing or releasing to the two 47 hosts (edge `47.114.113.152`, owner
    `47.110.79.189`) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
    with the read-only `scripts/release-sync-status.sh`. The edge relay and owner

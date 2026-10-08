@@ -6,14 +6,14 @@
 `live_effect`。
 
 适用范围：远端 owner/peer 的实时数据面与策略扫描面（见
-[`DEPLOYMENT_BOUNDARIES.md`](DEPLOYMENT_BOUNDARIES.md)）。本地工作站只做分析、回放与开发验证。
+[`DEPLOYMENT_BOUNDARIES.md`](../DEPLOYMENT_BOUNDARIES.md)）。本地工作站只做分析、回放与开发验证。
 
 相关文档：
 
-- [`REALTIME_STRATEGY_STRENGTHENING_PLAN.md`](REALTIME_STRATEGY_STRENGTHENING_PLAN.md)：状态机、因子分层、概率契约与晋级门槛（2026-08-16）。本文不重复其研究结论，只补充执行层问题与工程方案。
-- [`OWNER_REALTIME_PROVIDER_PRIORITY.md`](OWNER_REALTIME_PROVIDER_PRIORITY.md)：按能力选主源与"时间门禁先于优先级"规则。
-- [`DATA_SOURCE_LAYER.md`](DATA_SOURCE_LAYER.md)：`app/datasources` 能力目录。
-- [`OPENING_REALTIME_RUNBOOK.md`](OPENING_REALTIME_RUNBOOK.md)：开盘运行手册（部分内容已过期，见 D6）。
+- [`REALTIME_STRATEGY_STRENGTHENING_PLAN.md`](../REALTIME_STRATEGY_STRENGTHENING_PLAN.md)：状态机、因子分层、概率契约与晋级门槛（2026-08-16）。本文不重复其研究结论，只补充执行层问题与工程方案。
+- [`OWNER_REALTIME_PROVIDER_PRIORITY.md`](../OWNER_REALTIME_PROVIDER_PRIORITY.md)：按能力选主源与"时间门禁先于优先级"规则。
+- [`DATA_SOURCE_LAYER.md`](../DATA_SOURCE_LAYER.md)：`app/datasources` 能力目录。
+- [`OPENING_REALTIME_RUNBOOK.md`](../OPENING_REALTIME_RUNBOOK.md)：开盘运行手册（部分内容已过期，见 D6）。
 
 除特别说明，路径相对 `quant-service/`。
 
@@ -47,7 +47,7 @@
   - 在线更新 champion
 
   因此本方案中的衰减与晋级只产出"建议/提案"，状态变更必须由人确认。
-- 生产 schema 只走 Alembic。owner DDL 按 [`OWNER_DATABASE_STORAGE.md`](OWNER_DATABASE_STORAGE.md) 与 [`RELEASE_SYNC_47.md`](RELEASE_SYNC_47.md) 在 owner 执行；peer 不执行 owner DDL。
+- 生产 schema 只走 Alembic。owner DDL 按 [`OWNER_DATABASE_STORAGE.md`](../OWNER_DATABASE_STORAGE.md) 与 [`RELEASE_SYNC_47.md`](../RELEASE_SYNC_47.md) 在 owner 执行；peer 不执行 owner DDL。
 - 大模型不进入盘中决策链。
 
 ---
@@ -591,7 +591,7 @@ harness 中的 agent 循环连续 8 轮没有新的观测结果时停止；同�
    - `git diff --check`
 3. 涉及路由时运行 `node scripts/verify-api-contract.mjs`；接口有意变更时运行 `npm run api:generate`。
 4. 调度或采集变更必须同时核验三项：数据库行、最新状态端点、一次真实的适配器请求。单元测试通过不等于发布路由可用。
-5. 发布到 owner 严格按 [`RELEASE_SYNC_47.md`](RELEASE_SYNC_47.md) 执行，以只读的 `scripts/release-sync-status.sh` 开始并结束。
+5. 发布到 owner 严格按 [`RELEASE_SYNC_47.md`](../RELEASE_SYNC_47.md) 执行，以只读的 `scripts/release-sync-status.sh` 开始并结束。
 
 **基线与对比指标**
 
