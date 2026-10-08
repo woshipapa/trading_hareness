@@ -27,12 +27,6 @@ import { buildStrategyEvidenceMatrix, type StrategyEvidenceDailyCandidate, type 
 export function useDashboardWorkspace() {
 use([BarChart, CandlestickChart, LineChart, ScatterChart, DataZoomComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, MarkPointComponent, TooltipComponent, CanvasRenderer]);
 
-type ProviderConfig = { name: string; provider_key: string; label: string; configured: boolean; protocol: string; rate_limit_per_minute?: number; min_interval_seconds?: number; realtime_coverage?: string; realtime_note?: string; realtime_apis?: string[]; super_alias_first_apis?: string[]; get_apis?: string[]; complete_query_apis?: string[]; bounded_only_apis?: string[]; reconciliation_required_apis?: string[] };
-type Availability = 'declared' | 'verified' | 'empty' | 'unsupported' | 'failed' | 'unknown';
-type ProviderObservation = { availability: Availability; verified_at?: string | null; last_checked_at?: string | null; last_row_count?: number | null; last_observation?: string | null };
-type CatalogItem = { api_name: string; group: string; normalized: boolean; status?: string; frequency?: string; decision_eligible?: boolean; preferred_providers?: string[]; note?: string; catalog_origin: string; permission_model: string; min_points?: number | null; official_doc_url?: string | null; request_policy: string; model_role: string; priority: string; sample_params?: Record<string, unknown> | null; primary_availability: Availability; super_availability: Availability; super_sdk_availability: Availability; super_get_availability: Availability; provider_observations?: Record<string, ProviderObservation> };
-type CatalogCounts = { total?: number; supplier_109?: number; official_extensions?: number; points_at_or_below_15000?: number; market_hours_only?: number; offline_files_only?: number; primary_verified?: number; super_verified?: number; super_sdk_verified?: number; super_get_verified?: number; primary_responded?: number; super_responded?: number; super_sdk_responded?: number; super_get_responded?: number };
-type CapabilityAuditRow = { api_name: string; provider: string; status: string; availability: Availability; received?: number; stored?: number; reason?: string; params?: Record<string, unknown> };
 type MarketSnapshot = { session: string; exchange_date: string; observed_at: string; universe_key: string; universe_count: number; quote_count: number; coverage: number; status: string; decision_eligible: boolean; summary: Record<string, unknown>; source_summary: Record<string, unknown>; quality_flags: string[]; updated_at?: string };
 type ProviderApiCapability = { provider_key: string; label: string; api_name: string; availability: string; frequency: string; decision_eligible: boolean; note?: string; verified_at?: string; last_checked_at?: string; metadata?: Record<string, unknown> };
 type Sector = { taxonomy_key: string; sector_key: string; label: string; active_members: number; updated_at?: string; metadata?: Record<string, unknown> };
@@ -164,7 +158,7 @@ let sectionLoadTimer: number | null = null;
 const getJson = <T>(path: string) => getJsonBase<T>(path, {
   signal: loading.value && path.startsWith('/api/research/') ? researchAbortController?.signal : undefined,
 });
-const overview = ref<ResearchOverview>({}); const reports = ref<RemoteReport[]>([]); const remoteMessages = ref<RemoteMessage[]>([]); const analystSkills = ref<AnalystSkillProfile[]>([]); const analystResearchStatus = ref<AnalystResearchStatus>({}); const claims = ref<AnalystClaim[]>([]); const providerHealth = ref<ProviderHealth[]>([]); const providerApiCapabilities = ref<ProviderApiCapability[]>([]); const marketSnapshots = ref<MarketSnapshot[]>([]); const sectors = ref<Sector[]>([]); const sectorFlows = ref<SectorFlow[]>([]); const conceptSignals = ref<ConceptSignal[]>([]); const conceptCandidates = ref<ConceptCandidate[]>([]); const announcements = ref<Announcement[]>([]); const lhbEvents = ref<Announcement[]>([]); const closeBoardReport = ref<BoardReviewReport | null>(null); const conceptBackfill = ref<ConceptBackfill>({ total_concepts: 0, mapped_concepts: 0, states: [] }); const closeStrategyReview = ref<StrategyReview | null>(null); const postCloseStrategyRun = ref<PostCloseStrategyRun | null>(null); const postCloseCandidates = ref<PostCloseCandidate[]>([]); const strategyPatternRun = ref<StrategyPatternRun | null>(null); const tenDayLeaderRotation = ref<TenDayLeaderRotation>({ candidates: [] }); const strategyLimitPool = ref<LimitPoolRow[]>([]); const strategyLimitLadder = ref<LimitLadderRow[]>([]); const strategyContinuationCandidates = ref<LimitPoolRow[]>([]); const strategyDragonLeaderCandidates = ref<LimitPoolRow[]>([]); const strategyDragonLeaderMarket = ref<DragonLeaderWatch['market_context']>({}); const strategyPoolCoverage = ref<LimitPoolCoverage>({}); const strategyPatternPicks = ref<StrategyPatternSample[]>([]); const strategyPatternSamples = ref<StrategyPatternSample[]>([]); const postCloseRefresh = ref<PostCloseRefresh | null>(null); const intradayOutcomes = ref<IntradayOutcome[]>([]); const intradayOutcomeSummary = ref<IntradayOutcomeSummary[]>([]); const intradayAttributionSummary = ref<IntradayAttributionSummary[]>([]); const attributionValidationGate = ref<AttributionValidationGate>({ status: 'accumulating', matured_unique_signals: 0, trading_days: 0, required_unique_signals: 200, required_trading_days: 60 }); const analystReadiness = ref<AnalystReadiness[]>([]); const analystScorecards = ref<AnalystScorecard[]>([]); const selectedReviewBoardKey = ref(''); const catalog = ref<{ count?: number; counts?: CatalogCounts; items?: CatalogItem[]; providers?: ProviderConfig[]; online_range_max_days?: number; historical_minute_policy?: string; realtime_minute_policy?: string; coverage_rule?: string }>({}); const recommendations = ref<Recommendation[]>([]); const universe = ref<UniverseMember[]>([]); const featureItems = ref<FeatureItem[]>([]); const claimReviews = ref<ClaimReview[]>([]); const factors = ref<Factor[]>([]); const factorEvaluations = ref<FactorEvaluation[]>([]); const researchRuns = ref<ResearchRun[]>([]); const strategies = ref<Strategy[]>([]); const strategyExperiments = ref<StrategyExperiment[]>([]); const mainWaveExperiments = ref<StrategyExperiment[]>([]); const frameworks = ref<Framework[]>([]); const trainingRoadmap = ref<TrainingRoadmap>({ status: 'planned', policy: '', stages: [] }); const qualityIssues = ref<QualityIssue[]>([]); const minuteImports = ref<MinuteImport[]>([]); const minuteDirectory = ref('');
+const overview = ref<ResearchOverview>({}); const reports = ref<RemoteReport[]>([]); const remoteMessages = ref<RemoteMessage[]>([]); const analystSkills = ref<AnalystSkillProfile[]>([]); const analystResearchStatus = ref<AnalystResearchStatus>({}); const claims = ref<AnalystClaim[]>([]); const providerHealth = ref<ProviderHealth[]>([]); const providerApiCapabilities = ref<ProviderApiCapability[]>([]); const marketSnapshots = ref<MarketSnapshot[]>([]); const sectors = ref<Sector[]>([]); const sectorFlows = ref<SectorFlow[]>([]); const conceptSignals = ref<ConceptSignal[]>([]); const conceptCandidates = ref<ConceptCandidate[]>([]); const announcements = ref<Announcement[]>([]); const lhbEvents = ref<Announcement[]>([]); const closeBoardReport = ref<BoardReviewReport | null>(null); const conceptBackfill = ref<ConceptBackfill>({ total_concepts: 0, mapped_concepts: 0, states: [] }); const closeStrategyReview = ref<StrategyReview | null>(null); const postCloseStrategyRun = ref<PostCloseStrategyRun | null>(null); const postCloseCandidates = ref<PostCloseCandidate[]>([]); const strategyPatternRun = ref<StrategyPatternRun | null>(null); const tenDayLeaderRotation = ref<TenDayLeaderRotation>({ candidates: [] }); const strategyLimitPool = ref<LimitPoolRow[]>([]); const strategyLimitLadder = ref<LimitLadderRow[]>([]); const strategyContinuationCandidates = ref<LimitPoolRow[]>([]); const strategyDragonLeaderCandidates = ref<LimitPoolRow[]>([]); const strategyDragonLeaderMarket = ref<DragonLeaderWatch['market_context']>({}); const strategyPoolCoverage = ref<LimitPoolCoverage>({}); const strategyPatternPicks = ref<StrategyPatternSample[]>([]); const strategyPatternSamples = ref<StrategyPatternSample[]>([]); const postCloseRefresh = ref<PostCloseRefresh | null>(null); const intradayOutcomes = ref<IntradayOutcome[]>([]); const intradayOutcomeSummary = ref<IntradayOutcomeSummary[]>([]); const intradayAttributionSummary = ref<IntradayAttributionSummary[]>([]); const attributionValidationGate = ref<AttributionValidationGate>({ status: 'accumulating', matured_unique_signals: 0, trading_days: 0, required_unique_signals: 200, required_trading_days: 60 }); const analystReadiness = ref<AnalystReadiness[]>([]); const analystScorecards = ref<AnalystScorecard[]>([]); const selectedReviewBoardKey = ref(''); const recommendations = ref<Recommendation[]>([]); const universe = ref<UniverseMember[]>([]); const featureItems = ref<FeatureItem[]>([]); const claimReviews = ref<ClaimReview[]>([]); const factors = ref<Factor[]>([]); const factorEvaluations = ref<FactorEvaluation[]>([]); const researchRuns = ref<ResearchRun[]>([]); const strategies = ref<Strategy[]>([]); const strategyExperiments = ref<StrategyExperiment[]>([]); const mainWaveExperiments = ref<StrategyExperiment[]>([]); const frameworks = ref<Framework[]>([]); const trainingRoadmap = ref<TrainingRoadmap>({ status: 'planned', policy: '', stages: [] }); const qualityIssues = ref<QualityIssue[]>([]); const minuteImports = ref<MinuteImport[]>([]); const minuteDirectory = ref('');
 const realtimeProviderHealth = ref<RealtimeProviderHealth>({ items: [] });
 const dailyStrategySummary = ref<DailyStrategySummary | null>(null);
 const replayReadiness = ref<ReplayReadiness>({});
@@ -191,7 +185,6 @@ const analystAnnotationUpper = ref<number | null>(null);
 const analystAnnotationLabel = ref('');
 const strategyAblation = ref<StrategyAblation>({});
 const strategyHealth = ref<StrategyHealth>({});
-const catalogQuery = ref(''); const catalogGroup = ref('all'); const selectedCatalog = ref<CatalogItem[]>([]); const auditResults = ref<CapabilityAuditRow[]>([]); const catalogRefreshing = ref(false); const fetchDialogOpen = ref(false); const fetchResultOpen = ref(false); const fetchResult = ref<Record<string, unknown>>({}); const fetchForm = ref({ api_name: 'daily', provider: 'auto', paramsText: '{\n  "ts_code": "000001.SZ",\n  "start_date": "20260804",\n  "end_date": "20260804"\n}', fields: 'ts_code,trade_date,open,high,low,close,vol,amount', max_rows: 100 });
 const studySymbol = ref(/^\d{6}\.(SH|SZ|BJ)$/.test(sharedResearchSymbol) ? sharedResearchSymbol : '000636.SZ'); const studyLookback = ref(21); const stockStudy = ref<StockStudy | null>(null); const studyLoading = ref(false); const studyError = ref('');
 const universeText = ref(''); const universePriority = ref(100); const reviewSymbol = ref<Record<string, string>>({}); const sectorMemberOffset = ref(0); const sectorMemberLimit = ref(10); const sectorFlowDate = ref('');
 const chinaMinute = (value?: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) : '-';
@@ -201,8 +194,6 @@ const marketFlow = ref<MarketFlowResponse>({ trade_date: '', timezone: 'Asia/Sha
 const selectedFactors = ref<string[]>([]); const factorHorizon = ref(5); const backtestForm = ref({ rebalance_days: 5, hold_days: 5, top_n: 20, total_cost_bps: 18 });
 const polling = usePolling();
 
-const catalogGroups = computed(() => ['all', ...Array.from(new Set((catalog.value.items ?? []).map((item) => item.group)))]);
-const visibleCatalog = computed(() => (catalog.value.items ?? []).filter((item) => (catalogGroup.value === 'all' || item.group === catalogGroup.value) && (!catalogQuery.value || `${item.api_name} ${item.group} ${item.model_role} ${item.request_policy}`.toLowerCase().includes(catalogQuery.value.toLowerCase()))));
 const count = (name: string) => overview.value.counts?.[name] ?? 0;
 const dateText = (value?: string | null) => value ? new Date(value).toLocaleString() : '未运行';
 const healthState = (provider: ProviderHealth) => provider.circuit_open_until ? 'danger' : provider.last_error ? 'warning' : provider.last_success_at ? 'success' : 'info';
@@ -232,12 +223,6 @@ const postCloseCandidateType = (value: PostCloseCandidate['candidate_type']) => 
 const patternCohortLabel = (value: string) => ({ focus: '重点研究', dragon_leader_watch: '龙头复核', limit_continuation_watch: '连板延续', ground_to_sky: '地天反转', preopen_market_leader: '盘前辨识度', market_leader: '盘后辨识度', board_leader: '板块龙头', consecutive_limit: '连板梯队', first_board: '首板' }[value] ?? value);
 const sourceType = (value?: string) => value === 'completed' || value === 'unchanged' ? 'success' : value === 'partial' ? 'warning' : value === 'failed' ? 'danger' : 'info';
 const snapshotType = (value?: string) => value === 'ready' ? 'success' : value === 'degraded' ? 'warning' : value === 'blocked' || value === 'failed' ? 'danger' : 'info';
-const availabilityType = (value?: Availability): 'success' | 'warning' | 'danger' | 'info' => value === 'verified' ? 'success' : value === 'empty' || value === 'declared' ? 'warning' : value === 'failed' || value === 'unsupported' ? 'danger' : 'info';
-const availabilityText = (value?: Availability) => ({ verified: '已验证', empty: '有效空值', declared: '待验证', unsupported: '明确拒绝', failed: '调用失败', unknown: '未登记' }[value ?? 'unknown']);
-const permissionText = (item: CatalogItem) => item.permission_model === 'points' ? `${item.min_points ?? '-'} 积分` : item.permission_model === 'separate_permission' ? '独立权限' : item.permission_model === 'offline_delivery' ? '离线交付' : '供应商合同';
-const policyText = (value: string) => value === 'market_hours_only' ? '仅交易时段' : value === 'offline_files_only' ? '仅离线文件' : '在线受控';
-const catalogCount = (name: keyof CatalogCounts) => catalog.value.counts?.[name] ?? 0;
-const observationText = (item: CatalogItem, provider: 'tushare_primary' | 'tushare_super_sdk' | 'tushare_super_get') => dateText(item.provider_observations?.[provider]?.last_checked_at ?? item.provider_observations?.[provider]?.verified_at);
 const displayValue = (value: unknown) => value === null || value === undefined || value === '' ? '-' : typeof value === 'object' ? JSON.stringify(value) : String(value);
 const readinessType = (value: number) => value > 0 ? 'warning' : 'success';
 const outcomeStatusType = (value: string) => value === 'matured' ? 'success' : value === 'pending' ? 'warning' : 'info';
@@ -695,13 +680,13 @@ async function loadResearch() {
     else researchError.value = `研究概览读取失败：${overviewResult.reason instanceof Error ? overviewResult.reason.message : String(overviewResult.reason)}`;
     if (replayReadinessResult.status === 'fulfilled') replayReadiness.value = replayReadinessResult.value;
     const researchRequests = [
-      getJson<{ items?: RemoteReport[] }>('/api/research/reports?limit=30'), getJson<{ items?: AnalystClaim[] }>('/api/research/claims?limit=80'), getJson<{ items?: ProviderHealth[] }>('/api/research/providers'), getJson<RealtimeProviderHealth>('/api/research/providers/realtime-health').catch(() => ({ items: [], evidence_mode: 'unavailable_on_current_release' })), getJson<{ items?: ProviderApiCapability[] }>('/api/research/provider-capabilities'), getJson<typeof catalog.value>('/api/research/tushare/catalog'), getJson<{ items?: MarketSnapshot[] }>('/api/research/market/snapshots?limit=20'), getJson<{ items?: Sector[] }>('/api/research/market/sectors?taxonomy_key=ths_index_n&limit=500'), getJson<{ items?: SectorFlow[] }>('/api/research/market/sector-flows?taxonomy_key=ths_industry&limit=100'), getJson<{ items?: ConceptSignal[] }>('/api/research/market/sectors/concepts?limit=100'), getJson<{ items?: ConceptCandidate[] }>('/api/research/market/sectors/concepts/candidates?limit=100'), getJson<{ items?: Announcement[] }>('/api/research/events/announcements?limit=100'), getJson<{ items?: Announcement[] }>('/api/research/events/lhb?limit=100'), getJson<{ report?: BoardReviewReport | null }>('/api/research/market/sectors/review/report/latest'), getJson<ConceptBackfill>('/api/research/market/sectors/concepts/members/backfill/status'), getJson<{ review?: StrategyReview | null }>('/api/research/strategy/reviews/latest?session=close'), getJson<{ run?: PostCloseStrategyRun | null; candidates?: PostCloseCandidate[] }>('/api/research/strategy/post-close/latest'), getJson<{ run?: StrategyPatternRun | null; limit_pool?: LimitPoolRow[]; limit_ladder?: LimitLadderRow[]; continuation_candidates?: LimitPoolRow[]; dragon_leader_candidates?: LimitPoolRow[]; dragon_leader_market_context?: DragonLeaderWatch['market_context']; pool_coverage?: LimitPoolCoverage; picks?: StrategyPatternSample[]; samples?: StrategyPatternSample[] }>('/api/research/strategy/pattern-mining/latest'), getJson<TenDayLeaderRotation>('/api/research/ten-day-leader-rotation/latest?limit=90').catch(() => ({ run: null, candidates: [], scope: 'research_only_no_orders', notice: '十日排行榜影子研究尚未部署到当前服务。' })), getJson<{ recommendations?: Recommendation[] }>('/api/research/recommendations'), getJson<{ items?: UniverseMember[] }>('/api/research/universes/core'), getJson<{ items?: FeatureItem[] }>('/api/research/features/latest?universe_key=core'), getJson<{ items?: ClaimReview[] }>('/api/research/claim-review?status=pending'), getJson<{ items?: Factor[] }>('/api/research/factors'), getJson<{ items?: FactorEvaluation[] }>('/api/research/factor-evaluations?universe_key=all_a'), getJson<{ items?: Strategy[] }>('/api/research/strategies'), getJson<{ items?: StrategyExperiment[] }>('/api/research/strategy-experiments?universe_key=all_a'), getJson<{ items?: StrategyExperiment[] }>('/api/research/strategy-experiments-watchlist?universe_key=watchlist&limit=10'), getJson<{ items?: Framework[] }>('/api/research/frameworks'), getJson<TrainingRoadmap>('/api/research/training/roadmap'), getJson<{ items?: QualityIssue[] }>('/api/research/quality?limit=100'), getJson<{ items?: MinuteImport[]; offline_directory?: string }>('/api/research/minute/imports'),
+      getJson<{ items?: RemoteReport[] }>('/api/research/reports?limit=30'), getJson<{ items?: AnalystClaim[] }>('/api/research/claims?limit=80'), getJson<{ items?: ProviderHealth[] }>('/api/research/providers'), getJson<RealtimeProviderHealth>('/api/research/providers/realtime-health').catch(() => ({ items: [], evidence_mode: 'unavailable_on_current_release' })), getJson<{ items?: ProviderApiCapability[] }>('/api/research/provider-capabilities'), getJson<{ items?: MarketSnapshot[] }>('/api/research/market/snapshots?limit=20'), getJson<{ items?: Sector[] }>('/api/research/market/sectors?taxonomy_key=ths_index_n&limit=500'), getJson<{ items?: SectorFlow[] }>('/api/research/market/sector-flows?taxonomy_key=ths_industry&limit=100'), getJson<{ items?: ConceptSignal[] }>('/api/research/market/sectors/concepts?limit=100'), getJson<{ items?: ConceptCandidate[] }>('/api/research/market/sectors/concepts/candidates?limit=100'), getJson<{ items?: Announcement[] }>('/api/research/events/announcements?limit=100'), getJson<{ items?: Announcement[] }>('/api/research/events/lhb?limit=100'), getJson<{ report?: BoardReviewReport | null }>('/api/research/market/sectors/review/report/latest'), getJson<ConceptBackfill>('/api/research/market/sectors/concepts/members/backfill/status'), getJson<{ review?: StrategyReview | null }>('/api/research/strategy/reviews/latest?session=close'), getJson<{ run?: PostCloseStrategyRun | null; candidates?: PostCloseCandidate[] }>('/api/research/strategy/post-close/latest'), getJson<{ run?: StrategyPatternRun | null; limit_pool?: LimitPoolRow[]; limit_ladder?: LimitLadderRow[]; continuation_candidates?: LimitPoolRow[]; dragon_leader_candidates?: LimitPoolRow[]; dragon_leader_market_context?: DragonLeaderWatch['market_context']; pool_coverage?: LimitPoolCoverage; picks?: StrategyPatternSample[]; samples?: StrategyPatternSample[] }>('/api/research/strategy/pattern-mining/latest'), getJson<TenDayLeaderRotation>('/api/research/ten-day-leader-rotation/latest?limit=90').catch(() => ({ run: null, candidates: [], scope: 'research_only_no_orders', notice: '十日排行榜影子研究尚未部署到当前服务。' })), getJson<{ recommendations?: Recommendation[] }>('/api/research/recommendations'), getJson<{ items?: UniverseMember[] }>('/api/research/universes/core'), getJson<{ items?: FeatureItem[] }>('/api/research/features/latest?universe_key=core'), getJson<{ items?: ClaimReview[] }>('/api/research/claim-review?status=pending'), getJson<{ items?: Factor[] }>('/api/research/factors'), getJson<{ items?: FactorEvaluation[] }>('/api/research/factor-evaluations?universe_key=all_a'), getJson<{ items?: Strategy[] }>('/api/research/strategies'), getJson<{ items?: StrategyExperiment[] }>('/api/research/strategy-experiments?universe_key=all_a'), getJson<{ items?: StrategyExperiment[] }>('/api/research/strategy-experiments-watchlist?universe_key=watchlist&limit=10'), getJson<{ items?: Framework[] }>('/api/research/frameworks'), getJson<TrainingRoadmap>('/api/research/training/roadmap'), getJson<{ items?: QualityIssue[] }>('/api/research/quality?limit=100'), getJson<{ items?: MinuteImport[]; offline_directory?: string }>('/api/research/minute/imports'),
     ];
     const researchResults = await Promise.allSettled(researchRequests);
     const researchFailures = researchResults.filter((result) => result.status === 'rejected').length;
     const researchValues = researchResults.map((result) => result.status === 'fulfilled' ? result.value : {}) as any[];
-    const [reportsData, claimsData, healthData, realtimeProviderHealthData, capabilityData, catalogData, snapshotData, sectorData, sectorFlowData, conceptSignalData, conceptCandidateData, announcementData, lhbData, boardReviewData, backfillData, strategyReviewData, postCloseStrategyData, patternData, tenDayLeaderRotationData, recommendationData, universeData, featuresData, reviewsData, factorData, factorEvaluationData, strategyData, experimentData, mainWaveData, frameworkData, roadmapData, qualityData, minuteData] = researchValues;
-    reports.value = reportsData.items ?? []; claims.value = claimsData.items ?? []; providerHealth.value = healthData.items ?? []; realtimeProviderHealth.value = realtimeProviderHealthData; providerApiCapabilities.value = capabilityData.items ?? []; catalog.value = catalogData; marketSnapshots.value = snapshotData.items ?? []; sectors.value = sectorData.items ?? []; sectorFlows.value = sectorFlowData.items ?? []; conceptSignals.value = conceptSignalData.items ?? []; conceptCandidates.value = conceptCandidateData.items ?? []; announcements.value = announcementData.items ?? []; lhbEvents.value = lhbData.items ?? []; closeBoardReport.value = boardReviewData.report ?? null; conceptBackfill.value = backfillData; closeStrategyReview.value = strategyReviewData.review ?? null; postCloseStrategyRun.value = postCloseStrategyData.run ?? null; postCloseCandidates.value = postCloseStrategyData.candidates ?? []; strategyPatternRun.value = patternData.run ?? null; tenDayLeaderRotation.value = tenDayLeaderRotationData; strategyLimitPool.value = patternData.limit_pool ?? []; strategyLimitLadder.value = patternData.limit_ladder ?? []; strategyContinuationCandidates.value = patternData.continuation_candidates ?? []; strategyDragonLeaderCandidates.value = patternData.dragon_leader_candidates ?? []; strategyDragonLeaderMarket.value = patternData.dragon_leader_market_context ?? {}; strategyPoolCoverage.value = patternData.pool_coverage ?? {}; strategyPatternPicks.value = patternData.picks ?? []; strategyPatternSamples.value = patternData.samples ?? []; recommendations.value = recommendationData.recommendations ?? []; universe.value = universeData.items ?? []; featureItems.value = featuresData.items ?? []; claimReviews.value = reviewsData.items ?? []; factors.value = factorData.items ?? []; factorEvaluations.value = factorEvaluationData.items ?? []; strategies.value = strategyData.items ?? []; strategyExperiments.value = experimentData.items ?? []; mainWaveExperiments.value = mainWaveData.items ?? []; frameworks.value = frameworkData.items ?? []; trainingRoadmap.value = roadmapData; qualityIssues.value = qualityData.items ?? []; minuteImports.value = minuteData.items ?? []; minuteDirectory.value = minuteData.offline_directory ?? '';
+    const [reportsData, claimsData, healthData, realtimeProviderHealthData, capabilityData, snapshotData, sectorData, sectorFlowData, conceptSignalData, conceptCandidateData, announcementData, lhbData, boardReviewData, backfillData, strategyReviewData, postCloseStrategyData, patternData, tenDayLeaderRotationData, recommendationData, universeData, featuresData, reviewsData, factorData, factorEvaluationData, strategyData, experimentData, mainWaveData, frameworkData, roadmapData, qualityData, minuteData] = researchValues;
+    reports.value = reportsData.items ?? []; claims.value = claimsData.items ?? []; providerHealth.value = healthData.items ?? []; realtimeProviderHealth.value = realtimeProviderHealthData; providerApiCapabilities.value = capabilityData.items ?? []; marketSnapshots.value = snapshotData.items ?? []; sectors.value = sectorData.items ?? []; sectorFlows.value = sectorFlowData.items ?? []; conceptSignals.value = conceptSignalData.items ?? []; conceptCandidates.value = conceptCandidateData.items ?? []; announcements.value = announcementData.items ?? []; lhbEvents.value = lhbData.items ?? []; closeBoardReport.value = boardReviewData.report ?? null; conceptBackfill.value = backfillData; closeStrategyReview.value = strategyReviewData.review ?? null; postCloseStrategyRun.value = postCloseStrategyData.run ?? null; postCloseCandidates.value = postCloseStrategyData.candidates ?? []; strategyPatternRun.value = patternData.run ?? null; tenDayLeaderRotation.value = tenDayLeaderRotationData; strategyLimitPool.value = patternData.limit_pool ?? []; strategyLimitLadder.value = patternData.limit_ladder ?? []; strategyContinuationCandidates.value = patternData.continuation_candidates ?? []; strategyDragonLeaderCandidates.value = patternData.dragon_leader_candidates ?? []; strategyDragonLeaderMarket.value = patternData.dragon_leader_market_context ?? {}; strategyPoolCoverage.value = patternData.pool_coverage ?? {}; strategyPatternPicks.value = patternData.picks ?? []; strategyPatternSamples.value = patternData.samples ?? []; recommendations.value = recommendationData.recommendations ?? []; universe.value = universeData.items ?? []; featureItems.value = featuresData.items ?? []; claimReviews.value = reviewsData.items ?? []; factors.value = factorData.items ?? []; factorEvaluations.value = factorEvaluationData.items ?? []; strategies.value = strategyData.items ?? []; strategyExperiments.value = experimentData.items ?? []; mainWaveExperiments.value = mainWaveData.items ?? []; frameworks.value = frameworkData.items ?? []; trainingRoadmap.value = roadmapData; qualityIssues.value = qualityData.items ?? []; minuteImports.value = minuteData.items ?? []; minuteDirectory.value = minuteData.offline_directory ?? '';
     const secondaryResults = await Promise.allSettled([
       getJson<{ items?: IntradayOutcome[]; summary?: IntradayOutcomeSummary[]; attribution_summary?: IntradayAttributionSummary[]; attribution_validation_gate?: AttributionValidationGate }>('/api/research/intraday/outcomes/latest?limit=100'),
       getJson<{ items?: AnalystScorecard[]; readiness?: AnalystReadiness[] }>('/api/research/analyst-scorecards'),
@@ -773,45 +758,6 @@ async function loadAnalystStockTimeline() {
     loadAnalystAnnotations(analystStockTimeline.value);
   } catch (error) { analystStockTimeline.value = null; analystStockTimelineError.value = error instanceof Error ? error.message : String(error); } finally { analystStockTimelineLoading.value = false; }
 }
-function openFetch(item?: CatalogItem) {
-  if (item) {
-    fetchForm.value.api_name = item.api_name;
-    fetchForm.value.paramsText = JSON.stringify(item.sample_params ?? {}, null, 2);
-    fetchForm.value.fields = '';
-    fetchForm.value.max_rows = item.request_policy === 'market_hours_only' ? 10 : 100;
-  }
-  fetchDialogOpen.value = true;
-}
-function selectCatalog(rows: CatalogItem[]) { selectedCatalog.value = rows; }
-async function refreshCatalog() {
-  catalogRefreshing.value = true;
-  try {
-    catalog.value = await getJson<typeof catalog.value>('/api/research/tushare/catalog');
-    selectedCatalog.value = [];
-    ElMessage.success('能力状态已刷新');
-  } catch (error) { ElMessage.error(`刷新能力状态失败：${error instanceof Error ? error.message : String(error)}`); } finally { catalogRefreshing.value = false; }
-}
-async function auditSelectedCatalog() {
-  if (!selectedCatalog.value.length) { ElMessage.warning('请先选择需要核验的接口'); return; }
-  if (selectedCatalog.value.length > 12) { ElMessage.error('单次最多核验 12 个接口'); return; }
-  const symbol = /^\d{6}\.(SH|SZ|BJ)$/.test(studySymbol.value.trim().toUpperCase()) ? studySymbol.value.trim().toUpperCase() : '000636.SZ';
-  actionLoading.value = '核验所选接口';
-  try {
-    const result = await postJson<{ status: string; results: CapabilityAuditRow[] }>('/api/research/tushare/audit', { api_names: selectedCatalog.value.map((item) => item.api_name), providers: ['primary', 'super_sdk', 'super_get'], symbol, max_rows: 10 });
-    auditResults.value = result.results ?? [];
-    ElMessage.success(`三条物理通道核验：${result.status}`);
-    await loadResearch();
-  } catch (error) { ElMessage.error(`接口核验失败：${error instanceof Error ? error.message : String(error)}`); } finally { actionLoading.value = ''; }
-}
-async function executeFetch() {
-  let params: Record<string, unknown>;
-  try { params = JSON.parse(fetchForm.value.paramsText); if (Array.isArray(params) || params === null) throw new Error('参数必须是 JSON 对象'); } catch (error) { ElMessage.error(`参数 JSON 无效：${error instanceof Error ? error.message : String(error)}`); return; }
-  actionLoading.value = 'fetch';
-  try {
-    fetchResult.value = await postJson<Record<string, unknown>>('/api/research/tushare/fetch', { api_name: fetchForm.value.api_name, provider: fetchForm.value.provider, params, fields: fetchForm.value.fields || null, max_rows: fetchForm.value.max_rows });
-    fetchDialogOpen.value = false; fetchResultOpen.value = true; ElMessage.success('原始证据已保存'); await loadResearch();
-  } catch (error) { ElMessage.error(`取数失败：${error instanceof Error ? error.message : String(error)}`); } finally { actionLoading.value = ''; }
-}
 async function runStockStudy() {
   const symbol = studySymbol.value.trim().toUpperCase();
   if (!/^\d{6}\.(SH|SZ|BJ)$/.test(symbol)) { ElMessage.error('代码格式应为 000636.SZ'); return; }
@@ -820,12 +766,6 @@ async function runStockStudy() {
     stockStudy.value = await postJson<StockStudy>(`/api/research/stocks/${symbol}/study`, { lookback_days: studyLookback.value });
     studySymbol.value = symbol; ElMessage.success(`${symbol} 的研究证据已刷新`); await loadResearch();
   } catch (error) { studyError.value = error instanceof Error ? error.message : String(error); } finally { studyLoading.value = false; }
-}
-async function probeRealtimeMinutes() {
-  const symbol = studySymbol.value.trim().toUpperCase();
-  if (!/^\d{6}\.(SH|SZ|BJ)$/.test(symbol)) { ElMessage.error('代码格式应为 000636.SZ'); return; }
-  const result = await runAction('验证双源实时接口', '/api/research/providers/realtime/probe', { symbols: [symbol], frequency: '1MIN' }, false);
-  if (result?.results && Array.isArray(result.results)) auditResults.value = result.results as CapabilityAuditRow[];
 }
 async function probeAkshareSupplement() {
   const symbol = studySymbol.value.trim().toUpperCase();
@@ -995,7 +935,6 @@ const dashboardBindings = {
     analystReadiness,
     analystScorecards,
     selectedReviewBoardKey,
-    catalog,
     recommendations,
     universe,
     featureItems,
@@ -1048,15 +987,6 @@ const dashboardBindings = {
     strategyAblation,
     strategyHealth,
     replayReadiness,
-    catalogQuery,
-    catalogGroup,
-    selectedCatalog,
-    auditResults,
-    catalogRefreshing,
-    fetchDialogOpen,
-    fetchResultOpen,
-    fetchResult,
-    fetchForm,
     studySymbol,
     studyLookback,
     stockStudy,
@@ -1090,8 +1020,6 @@ const dashboardBindings = {
     factorHorizon,
     backtestForm,
     polling,
-    catalogGroups,
-    visibleCatalog,
     count,
     dateText,
     healthState,
@@ -1112,12 +1040,6 @@ const dashboardBindings = {
     patternCohortLabel,
     sourceType,
     snapshotType,
-    availabilityType,
-    availabilityText,
-    permissionText,
-    policyText,
-    catalogCount,
-    observationText,
     displayValue,
     readinessType,
     outcomeStatusType,
@@ -1198,13 +1120,7 @@ const dashboardBindings = {
     runAction,
     runAnalystMarketReview,
     loadAnalystStockTimeline,
-    openFetch,
-    selectCatalog,
-    refreshCatalog,
-    auditSelectedCatalog,
-    executeFetch,
     runStockStudy,
-    probeRealtimeMinutes,
     probeAkshareSupplement,
     probeAkshareMacroSupplement,
     saveUniverse,

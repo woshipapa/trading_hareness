@@ -21,7 +21,7 @@ export default defineComponent({
     <el-form inline class="study-form" @submit.prevent="runStockStudy">
       <el-form-item label="股票代码"><el-input v-model="studySymbol" placeholder="000636.SZ" clearable /></el-form-item>
       <el-form-item label="日线窗口"><el-input-number v-model="studyLookback" :min="5" :max="45" /></el-form-item>
-      <el-form-item><el-space><el-button type="primary" :loading="studyLoading" @click="runStockStudy">刷新数据并分析</el-button><el-button :loading="actionLoading === '验证双源实时接口'" @click="probeRealtimeMinutes">验证实时接口</el-button><el-button :loading="actionLoading === 'AkShare补充探测'" @click="probeAkshareSupplement">AkShare完整补充</el-button><el-button :loading="actionLoading === 'AkShare宏观跨资产补充'" @click="probeAkshareMacroSupplement">宏观跨资产</el-button></el-space></el-form-item>
+      <el-form-item><el-space><el-button type="primary" :loading="studyLoading" @click="runStockStudy">刷新数据并分析</el-button><el-button :loading="actionLoading === 'AkShare补充探测'" @click="probeAkshareSupplement">AkShare完整补充</el-button><el-button :loading="actionLoading === 'AkShare宏观跨资产补充'" @click="probeAkshareMacroSupplement">宏观跨资产</el-button></el-space></el-form-item>
     </el-form>
     <el-alert v-if="studyError" :title="studyError" type="error" :closable="false" show-icon />
   </el-card>

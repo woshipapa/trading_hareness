@@ -13,7 +13,6 @@ const StockStudyTab = defineAsyncComponent(() => import('./views/research/StockS
 const AnalystEvidenceTab = defineAsyncComponent(() => import('./views/research/AnalystEvidenceTab.vue'));
 const ClaimReviewTab = defineAsyncComponent(() => import('./views/research/ClaimReviewTab.vue'));
 const ProviderTab = defineAsyncComponent(() => import('./views/research/ProviderTab.vue'));
-const CatalogTab = defineAsyncComponent(() => import('./views/research/CatalogTab.vue'));
 const QualityTab = defineAsyncComponent(() => import('./views/research/QualityTab.vue'));
 const RemoteRealtimeTab = defineAsyncComponent(() => import('./views/research/RemoteRealtimeTab.vue'));
 const PersonalDecisionView = defineAsyncComponent(() => import('./views/PersonalDecisionView.vue'));
@@ -65,9 +64,6 @@ const PersonalDecisionView = defineAsyncComponent(() => import('./views/Personal
             <el-tab-pane label="数据源 Doctor" name="providers">
               <ProviderTab />
             </el-tab-pane>
-            <el-tab-pane label="接口与原始数据" name="catalog">
-              <CatalogTab />
-            </el-tab-pane>
             <el-tab-pane label="质量与分钟数据" name="quality">
               <QualityTab />
             </el-tab-pane>
@@ -77,6 +73,4 @@ const PersonalDecisionView = defineAsyncComponent(() => import('./views/Personal
       </el-main>
     </el-container>
   </el-container>
-  <el-dialog v-model="dashboard.fetchDialogOpen" title="受控数据读取" width="680px" destroy-on-close><el-form label-position="top"><el-row :gutter="14"><el-col :span="12"><el-form-item label="API"><el-input v-model="dashboard.fetchForm.api_name"/></el-form-item></el-col><el-col :span="12"><el-form-item label="来源"><el-select v-model="dashboard.fetchForm.provider" class="full-width"><el-option label="自动回退" value="auto"/><el-option label="主 Tushare 源" value="primary"/><el-option label="Super 聚合兼容路由" value="super"/><el-option label="Super SDK 完整路径" value="super_sdk"/><el-option label="Super GET 已验证路径" value="super_get"/><el-option label="REST 备用源" value="backup"/></el-select></el-form-item></el-col></el-row><el-alert title="完整 ths_member 请选自动、Super 聚合或 Super SDK；Super GET 对大板块会被上游截断。" type="warning" :closable="false" class="section-gap"/><el-form-item label="参数 JSON"><el-input v-model="dashboard.fetchForm.paramsText" type="textarea" :rows="8" class="mono"/></el-form-item><el-row :gutter="14"><el-col :span="16"><el-form-item label="字段"><el-input v-model="dashboard.fetchForm.fields"/></el-form-item></el-col><el-col :span="8"><el-form-item label="最大行数"><el-input-number v-model="dashboard.fetchForm.max_rows" :min="1" :max="10000" class="full-width"/></el-form-item></el-col></el-row></el-form><template #footer><el-button @click="dashboard.fetchDialogOpen = false">取消</el-button><el-button type="primary" :loading="dashboard.actionLoading === 'fetch'" @click="dashboard.executeFetch">读取并保存证据</el-button></template></el-dialog>
-  <el-dialog v-model="dashboard.fetchResultOpen" title="读取结果" width="620px"><el-descriptions :column="2" border><el-descriptions-item v-for="(value, key) in dashboard.fetchResult" :key="String(key)" :label="String(key)"><span class="result-value">{{ typeof value === 'object' ? JSON.stringify(value) : value }}</span></el-descriptions-item></el-descriptions></el-dialog>
 </template>
