@@ -73,6 +73,55 @@ provider response directly to a live threshold or order path.
     the repository. XHS cookies, collector tokens and Feishu webhooks stay in
     ignored host env files.
 
+## Component boundaries and hot update (read this before editing)
+
+`config/components.json` is the machine-readable owner map; it wins over memory
+and over anything a summary told you. Run
+`python3 scripts/verify_component_boundaries.py <changed paths>` to see which
+components a change touches, and `--check` to validate the boundaries.
+
+| You are editing | Component / unit | Hot update with |
+|---|---|---|
+| `quant-service/app/**` (strategies, rules, realtime, providers) | `quant-research` / `owner-quant` | `scripts/shared-peer/deploy-code-only.sh` |
+| `quant-service/migrations/**` | `quant-research` / `owner-schema` | **not hot-updatable** — apply and verify the migration first, then ship the code |
+| `frontend/**` (quant strategy + realtime console) | `quant-research` / `edge-quant-console` | `scripts/edge/deploy-quant-console-edge.sh` |
+| `feishu-relay/**` | `feishu-relay` / `edge-relay` | `feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh` |
+| `xhs-intel/**` | `xhs-intel` / `edge-xhs` | `xhs-intel/scripts/hotfix-xhs-intel-edge.sh` |
+
+Rules that are enforced by tests, not by convention:
+
+1. **Ordinary source changes never rebuild an image.** Use the unit's script
+   above. A hot-update script must not contain `docker build`/`docker pull`, and
+   must pass `--no-build --pull never` when it recreates a container.
+   Dependency, Dockerfile, compose, lockfile, system-package and migration
+   changes fail closed and require the full procedure in
+   `docs/RELEASE_SYNC_47.md`.
+2. **Release units are independent.** An edge deploy must never name the owner
+   host and the owner release must never name the edge host. The owner
+   code-only path classifies `feishu-relay/*` and `frontend/*` as
+   not-owner-runtime; unknown paths fail closed.
+3. **Do not cross a component boundary.** No cross-component Python imports, no
+   `./`/`../` references into another component, and no SQL against another
+   component's schema unless it is declared in `foreign_data_contracts` *and*
+   you keep it at the single declared site. Shared databases are declared in
+   `shared_runtime_databases`. Removing a coupling means deleting its entry too.
+4. **A deploy must prove the new code is executing, not merely staged.** Either
+   the service reports `runtime_source` in its own health payload, or the script
+   checks PID 1's argv / compares the served source digest. "The file exists" is
+   not evidence. Note `docker exec env` cannot see variables exported by the
+   entrypoint shell; read `/proc/<pid>/environ` instead.
+5. **A dirty-worktree check must watch sources, not build output.** `*/dist`
+   directories are gitignored, so `git diff -- frontend/dist` always reports
+   clean and the release would be stamped as clean while shipping uncommitted
+   code.
+
+Before commit, run: the component's own tests, `make -C quant-service
+test-release-path` for quant changes, `python3 -m pytest scripts -q` (the
+boundary, isolation and hot-update guards), and `git diff --check`. Commit only
+your own files; this repository often has more than one agent working in it.
+
+Each component directory has its own `AGENTS.md` with the local detail. Read it.
+
 ## 47 Release Model
 
 Routine source changes use the existing runtime images and a versioned source
