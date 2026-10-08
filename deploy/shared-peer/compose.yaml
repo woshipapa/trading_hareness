@@ -25,10 +25,20 @@ services:
     volumes:
       - ${PEER_SSH_KEY_PATH:?Set PEER_SSH_KEY_PATH}:/run/secrets/peer_ssh_key:ro
       - ${PEER_KNOWN_HOSTS_PATH:?Set PEER_KNOWN_HOSTS_PATH}:/run/secrets/known_hosts:ro
+    # ``nc -z`` 只能证明 ssh 自己的 -L 已经绑上本地端口 —— 那在**每一条转发通道都被
+    # 对端拒绝**时同样成立。2026-09-30~10-08 就是这样：db-tunnel 顶着
+    # ``Up 8 days (healthy)``，日志里却刷满 ``channel N: open failed: connect
+    # failed: Connection refused``，而 ``depends_on: service_healthy`` 照旧放
+    # quant-research 启动，然后它在 ``PoolTimeout`` 上崩溃重启了八天。
+    #
+    # 所以这里改成真的走一遍 Postgres 协议：发 8 字节 SSLRequest（长度 8、
+    # 代码 80877103），活的 Postgres 会回一个字节 ``S`` 或 ``N``；通道被拒时
+    # ssh 立刻关闭连接，读到的是空，判定失败。三条转发共用同一个 ssh 会话，
+    # 所以探通 5432 就证明了这条会话真的能开通道。
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 && nc -z 127.0.0.1 5433 && nc -z 127.0.0.1 5681"]
+      test: ["CMD-SHELL", 'nc -z 127.0.0.1 5433 && nc -z 127.0.0.1 5681 && printf "\000\000\000\010\004\322\026\057" | nc -w 3 127.0.0.1 5432 | head -c 1 | grep -q "[SN]"']
       interval: 10s
-      timeout: 3s
+      timeout: 6s
       retries: 12
 
   # Independent bulk lane. A reconnect or long COPY here must not interrupt
@@ -53,10 +63,11 @@ services:
     volumes:
       - ${PEER_SSH_KEY_PATH:?Set PEER_SSH_KEY_PATH}:/run/secrets/peer_ssh_key:ro
       - ${PEER_KNOWN_HOSTS_PATH:?Set PEER_KNOWN_HOSTS_PATH}:/run/secrets/known_hosts:ro
+    # 同上：批量通道也只验过自己的监听，所以它"healthy"了两周。
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 5433"]
+      test: ["CMD-SHELL", 'printf "\000\000\000\010\004\322\026\057" | nc -w 3 127.0.0.1 5433 | head -c 1 | grep -q "[SN]"']
       interval: 10s
-      timeout: 3s
+      timeout: 6s
       retries: 12
       start_period: 5s
 
