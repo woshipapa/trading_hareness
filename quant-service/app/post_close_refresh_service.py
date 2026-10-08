@@ -24,7 +24,7 @@ from .request_models import (
 
 
 POST_CLOSE_STAGE_ORDER = (
-    "stale_fetch_runs", "analyst_text", "all_a_universe", "full_market_daily", "core_daily_controls", "daily_control_reconciliation", "index_context",
+    "stale_fetch_runs", "trade_calendar", "analyst_text", "all_a_universe", "full_market_daily", "core_daily_controls", "daily_control_reconciliation", "index_context",
     "close_market_snapshot", "akshare_supplements", "ths_industry_flow", "ths_concept_flow_and_limit_strength",
     "market_flow_features", "limit_ladder", "limit_lift_pattern_mining", "cninfo_announcements",
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
@@ -37,6 +37,8 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     # generic stage budget (90s) is shorter than the provider work and would
     # cancel the caller while the shielded worker keeps running.
     "all_a_universe": 900.0,
+    # One Fuyao request plus a held-calendar read; never on a provider's critical path.
+    "trade_calendar": 60.0,
     "full_market_daily": 900.0,
     "akshare_supplements": 240.0,
     "limit_lift_pattern_mining": 120.0,
@@ -133,6 +135,8 @@ class PostCloseRefreshDependencies:
     watch_daily_review: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     xiaojie_outcomes: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     reconcile_daily_controls: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    # Forward exchange calendar (Tushare trade_cal's replacement since 2026-10-08).
+    sync_forward_calendar: Callable[[], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -193,6 +197,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
     actions: dict[str, Callable[[], Any]] = {
         "stale_fetch_runs": lambda: dependencies.run_database(
             dependencies.reconcile_stale_fetch_runs, FetchRunReconcileRequest(max_age_minutes=90),
+        ),
+        "trade_calendar": (
+            dependencies.sync_forward_calendar
+            if dependencies.sync_forward_calendar is not None
+            else (lambda: {"status": "skipped", "reason": "forward calendar not wired"})
         ),
         "analyst_text": lambda: dependencies.run_database(dependencies.reprocess_remote_reports, dependencies.database, 500),
         "all_a_universe": lambda: dependencies.sync_market_universe(MarketUniverseSyncRequest()),

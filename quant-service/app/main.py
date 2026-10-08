@@ -831,6 +831,11 @@ from .tushare_providers import (
     shutdown_super_get_executor,
 )
 from .error_detail import safe_error_detail
+from .trade_calendar_sync import (
+    persist_forward_rows as persist_forward_trade_calendar,
+    read_held_calendar as read_held_trade_calendar,
+    sync_forward_calendar,
+)
 from .universe_history import sync_universe_membership_history
 
 
@@ -5145,7 +5150,31 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         watch_daily_review=lambda trade_date: run_watch_daily_review(trade_date),
         xiaojie_outcomes=lambda trade_date: run_database_blocking(
             settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
+        sync_forward_calendar=sync_forward_trade_calendar,
     )
+
+
+async def sync_forward_trade_calendar() -> dict[str, Any]:
+    """Top up the exchange calendar from Fuyao (trade_cal's replacement), never rewriting a held date."""
+    from .fuyao_provider import fetch_envelope as fetch_fuyao
+
+    def read_held() -> dict[date, bool]:
+        with db.transaction() as connection:
+            return read_held_trade_calendar(connection)
+
+    def persist(rows: Any, request_id: str | None) -> int:
+        with db.transaction() as connection:
+            return persist_forward_trade_calendar(connection, rows, datetime.now(timezone.utc), request_id)
+
+    try:
+        return await sync_forward_calendar(
+            fetch_envelope=fetch_fuyao,
+            read_held=lambda: run_database_blocking(read_held, timeout_seconds=30),
+            persist=lambda rows, request_id: run_database_blocking(persist, rows, request_id, timeout_seconds=30),
+            today=cn_today(),
+        )
+    except FuyaoProviderError as error:
+        return {"status": "unavailable", "provider": "fuyao_ths", "reason": safe_error_detail(str(error), 300)}
 
 
 async def run_post_close_refresh(request: PostCloseRefreshRequest) -> dict[str, Any]:

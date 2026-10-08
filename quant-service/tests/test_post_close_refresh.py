@@ -43,9 +43,14 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             captured["daily_request"] = request
             return {"status": "completed"}
 
+        async def calendar():
+            captured["calendar"] = True
+            return {"status": "completed"}
+
         async def orchestrator(_request, **kwargs):
             captured["stage_order"] = kwargs["stage_order"]
             captured["dependencies"] = kwargs["stage_dependencies"]
+            await kwargs["actions"]["trade_calendar"]()
             await kwargs["actions"]["full_market_daily"]()
             await kwargs["actions"]["akshare_supplements"]()
             await kwargs["actions"]["cninfo_announcements"]()
@@ -73,11 +78,15 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             record_stage=completed, lease_key="lease", lease_seconds=lambda: 60,
             acquire_lease=lambda *_: True, renew_lease=lambda *_: True, release_lease=lambda *_: None,
             safe_error_detail=lambda value, _limit: value, json_safe=lambda value: value,
+            sync_forward_calendar=calendar,
         )
 
         result = await run_post_close_refresh(
             PostCloseRefreshRequest(trade_date=date(2026, 8, 21), announcement_limit=7), dependencies,
         )
+        self.assertTrue(captured["calendar"], "the forward calendar stage runs the wired sync")
+        self.assertEqual(POST_CLOSE_STAGE_ORDER[:2], ("stale_fetch_runs", "trade_calendar"))
+        self.assertNotIn("trade_calendar", POST_CLOSE_STAGE_DEPENDENCIES)
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(captured["stage_order"], POST_CLOSE_STAGE_ORDER)
