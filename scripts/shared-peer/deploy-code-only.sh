@@ -121,6 +121,15 @@ remote_archive="/tmp/$(basename "$archive")"
 ssh -i "$owner_key" -p "$owner_port" "$owner_host" \
   "TARGET_SHA='$target_sha' RELEASE_LABEL='$release_label' COMPOSE_DIR='$compose_dir' ARCHIVE='$remote_archive' bash -s" <<'REMOTE'
 set -euo pipefail
+# Hold the guard lock for the whole switch, so the heal timer cannot restart a
+# container this release is recreating. It expires on its own if this shell dies.
+lock_tool="$HOME/trading_hareness/scripts/shared-peer/release-lock.sh"
+if [ -f "$lock_tool" ]; then
+  bash "$lock_tool" hold "$RELEASE_LABEL" 1800 >/dev/null
+  trap 'bash "$lock_tool" release "$RELEASE_LABEL" >/dev/null 2>&1 || true' EXIT
+else
+  echo 'note: the active owner checkout predates the guard lock; the heal timer may act during this switch' >&2
+fi
 release_root="$HOME/trading_hareness/hotfix/quant-service/releases/$RELEASE_LABEL"
 current_root="$HOME/trading_hareness/hotfix/quant-service/current"
 previous_root=""

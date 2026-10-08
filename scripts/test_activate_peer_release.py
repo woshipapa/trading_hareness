@@ -1,4 +1,11 @@
+import hashlib
+import io
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import tarfile
+import tempfile
 import unittest
 
 
@@ -119,6 +126,102 @@ class ActivatePeerReleaseTests(unittest.TestCase):
             self.assertIn("IdentitiesOnly=yes", source)
             self.assertIn("StrictHostKeyChecking=yes", source)
             self.assertIn("PEER_SSH_HOST", source)
+
+
+def _gnu_userland() -> bool:
+    """The activation script runs on the Linux owner and uses GNU mv/sed."""
+    try:
+        version = subprocess.run(["mv", "--version"], capture_output=True, text=True, check=False).stdout
+    except OSError:
+        return False
+    return "GNU" in version and shutil.which("sha256sum") is not None
+
+
+def _repo_archive(destination: Path) -> bool:
+    """A real release payload: the tracked tree plus the empty certs dir git cannot carry."""
+    prebuilt = os.environ.get("ACTIVATION_REPO_ARCHIVE")
+    if prebuilt:
+        shutil.copyfile(prebuilt, destination)
+    elif shutil.which("git"):
+        with destination.open("wb") as handle:
+            subprocess.run(["git", "-C", str(SCRIPT.parents[2]), "archive", "--format=tar",
+                            "--prefix=trading_hareness/", "HEAD"], stdout=handle, check=True)
+    else:
+        return False
+    with tarfile.open(destination, "a") as archive:
+        certs = tarfile.TarInfo("trading_hareness/certs")
+        certs.type, certs.mode = tarfile.DIRTYPE, 0o755
+        archive.addfile(certs)
+    return True
+
+
+@unittest.skipUnless(_gnu_userland(), "the activation script needs the owner's GNU userland")
+class ActivationKeepsCentralCredentialsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._directory = tempfile.TemporaryDirectory()
+        self.home = Path(self._directory.name)
+        self.repo_archive = self.home / "repo.tar"
+        if not _repo_archive(self.repo_archive):
+            self.skipTest("needs git or ACTIVATION_REPO_ARCHIVE to build a release payload")
+        payload = b"wheel"
+        self.wheelhouse_archive = self.home / "wheelhouse.tar"
+        with tarfile.open(self.wheelhouse_archive, "w") as archive:
+            for name, data in (
+                ("wheelhouse/pkg.whl", payload),
+                ("wheelhouse/SHA256SUMS", f"{hashlib.sha256(payload).hexdigest()}  pkg.whl\n".encode()),
+            ):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+        previous = self.home / "releases" / "previous" / "trading_hareness" / "deploy" / "shared-peer"
+        previous.mkdir(parents=True)
+        (self.home / "trading_hareness").symlink_to(previous.parents[1])
+        self.previous_env_dir = previous
+
+    def tearDown(self) -> None:
+        self._directory.cleanup()
+
+    def activate(self) -> Path:
+        env = {**os.environ, "PEER_HOME": str(self.home), "PEER_RELEASES_ROOT": str(self.home / "releases"),
+               "RELEASE_ID": "next"}
+        result = subprocess.run(["bash", str(SCRIPT), str(self.repo_archive), str(self.wheelhouse_archive)],
+                                env=env, capture_output=True, text=True, timeout=120, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        active = (self.home / "trading_hareness").resolve()
+        self.assertEqual(active, (self.home / "releases" / "next" / "trading_hareness").resolve())
+        return active / "deploy" / "shared-peer"
+
+    def test_symlinks_into_the_central_store_survive_activation(self) -> None:
+        central = self.home / ".secrets" / "owner" / ".env.owner"
+        central.parent.mkdir(parents=True)
+        central.write_text("PEER_APP_RELEASE=previous-release\r\nPEER_APP_GIT_SHA=abc\r\n", encoding="utf-8")
+        for name in (".env", "intraday-secrets.env"):
+            (self.previous_env_dir / name).symlink_to(central)
+
+        env_dir = self.activate()
+
+        for name in (".env", "intraday-secrets.env"):
+            path = env_dir / name
+            self.assertTrue(path.is_symlink(), f"{name} became a regular file")
+            self.assertEqual(path.resolve(), central.resolve())
+        content = central.read_text(encoding="utf-8")
+        self.assertNotIn("\r", content, "carriage returns must be stripped in the real file")
+        self.assertIn("PEER_APP_RELEASE=previous-release", content, "a real value is not a placeholder")
+        self.assertTrue(central.is_file() and not central.is_symlink())
+
+    def test_plain_files_are_still_copied_and_placeholders_filled(self) -> None:
+        (self.previous_env_dir / ".env").write_text("PEER_APP_RELEASE=unknown\nKEEP=1\n", encoding="utf-8")
+        (self.previous_env_dir / "intraday-secrets.env").write_text("TOKEN=x\r\n", encoding="utf-8")
+
+        env_dir = self.activate()
+
+        env_file = env_dir / ".env"
+        self.assertFalse(env_file.is_symlink())
+        self.assertEqual(oct(env_file.stat().st_mode & 0o777), "0o600")
+        content = env_file.read_text(encoding="utf-8")
+        self.assertIn("PEER_APP_RELEASE=next", content)
+        self.assertIn("KEEP=1", content)
+        self.assertEqual((env_dir / "intraday-secrets.env").read_text(encoding="utf-8"), "TOKEN=x\n")
 
 
 if __name__ == "__main__":

@@ -20,10 +20,20 @@ test -r "${wheelhouse_archive}"
 tar -tf "${repo_archive}" >/dev/null
 tar -tf "${wheelhouse_archive}" >/dev/null
 
-if [[ -f "${current_repo}/deploy/shared-peer/.env" ]]; then
+# An env file that is a symlink into the central credential store
+# (~/.secrets/owner, written by config/secrets/sync-secrets.sh) must stay a
+# symlink. Copying its content forked a second, silently stale copy of every
+# secret into the release on 2026-10-08.
+link_target() {
+  [[ -L "$1" && -e "$1" ]] || return 0
+  readlink -f "$1"
+}
+saved_env_link="$(link_target "${current_repo}/deploy/shared-peer/.env")"
+saved_intraday_link="$(link_target "${current_repo}/deploy/shared-peer/intraday-secrets.env")"
+if [[ -z "${saved_env_link}" && -f "${current_repo}/deploy/shared-peer/.env" ]]; then
   install -m 0600 "${current_repo}/deploy/shared-peer/.env" "${saved_env}"
 fi
-if [[ -f "${current_repo}/deploy/shared-peer/intraday-secrets.env" ]]; then
+if [[ -z "${saved_intraday_link}" && -f "${current_repo}/deploy/shared-peer/intraday-secrets.env" ]]; then
   install -m 0600 \
     "${current_repo}/deploy/shared-peer/intraday-secrets.env" \
     "${saved_intraday_secrets}"
@@ -136,24 +146,36 @@ test -f "${wheelhouse_target}/SHA256SUMS"
   tr -d '\r' < SHA256SUMS | sha256sum --check - >/dev/null
 )
 
-if [[ -s "${saved_env}" ]]; then
-  install -m 0600 "${saved_env}" "${repo_target}/deploy/shared-peer/.env"
-fi
+place_env_file() {
+  local destination="${repo_target}/deploy/shared-peer/$1" saved_copy=$2 saved_link=$3
+  if [[ -n "${saved_link}" ]]; then
+    ln -sfn "${saved_link}" "${destination}"
+  elif [[ -s "${saved_copy}" ]]; then
+    install -m 0600 "${saved_copy}" "${destination}"
+  fi
+}
+# Environment bundles are commonly produced on the Windows owner host. Strip
+# CRLF before Linux shells source the file; otherwise a trailing CR can become
+# part of an HTTP header value and make an otherwise valid static API key fail.
+# Always edit the file behind a symlink, never the link itself.
+strip_carriage_returns() {
+  local real
+  real="$(readlink -f "$1")"
+  if grep -q $'\r' "${real}"; then
+    sed -i 's/\r$//' "${real}"
+  fi
+}
+place_env_file .env "${saved_env}" "${saved_env_link}"
 # The intraday provider and alert credentials live outside version control but
 # are part of the peer runtime.  Preserve them across the immutable source
 # switch just like .env; dropping this file leaves collection running while
 # silently disabling Feishu delivery and licensed provider fallbacks.
-if [[ -s "${saved_intraday_secrets}" ]]; then
-  install -m 0600 \
-    "${saved_intraday_secrets}" \
-    "${repo_target}/deploy/shared-peer/intraday-secrets.env"
-  sed -i 's/\r$//' "${repo_target}/deploy/shared-peer/intraday-secrets.env"
+place_env_file intraday-secrets.env "${saved_intraday_secrets}" "${saved_intraday_link}"
+if [[ -e "${repo_target}/deploy/shared-peer/intraday-secrets.env" ]]; then
+  strip_carriage_returns "${repo_target}/deploy/shared-peer/intraday-secrets.env"
 fi
-# Environment bundles are commonly produced on the Windows owner host. Strip
-# CRLF before Linux shells source the file; otherwise a trailing CR can become
-# part of an HTTP header value and make an otherwise valid static API key fail.
-if [[ -f "${repo_target}/deploy/shared-peer/.env" ]]; then
-  sed -i 's/\r$//' "${repo_target}/deploy/shared-peer/.env"
+if [[ -e "${repo_target}/deploy/shared-peer/.env" ]]; then
+  strip_carriage_returns "${repo_target}/deploy/shared-peer/.env"
 else
   install -m 0600 /dev/null "${repo_target}/deploy/shared-peer/.env"
 fi
@@ -161,14 +183,15 @@ fi
 set_env_if_placeholder() {
   local key="$1"
   local value="$2"
-  local env_path="${repo_target}/deploy/shared-peer/.env"
+  local env_path
+  env_path="$(readlink -f "${repo_target}/deploy/shared-peer/.env")"
   local current
   current="$(awk -F= -v wanted_key="$key" '$1 == wanted_key {print substr($0,index($0,"=")+1); exit}' "${env_path}" || true)"
   if [[ -n "${current}" && "${current}" != "unknown" && "${current}" != "unset" ]]; then
     return 0
   fi
   local tmp
-  tmp="$(mktemp)"
+  tmp="$(mktemp "${env_path}.XXXXXX")"
   awk -F= -v wanted_key="$key" -v replacement="$value" '
     BEGIN { replaced=0 }
     $1 == wanted_key { if (!replaced) { print wanted_key "=" replacement; replaced=1 }; next }

@@ -394,6 +394,14 @@ ssh -i "$RELAY_EDGE_SSH_KEY" root@47.114.113.152 'curl -fsS http://127.0.0.1:183
 
    ```bash
    git archive --format=tar --prefix=trading_hareness/ -o "/tmp/trading_hareness-$X.tar" "$X"
+   # 激活脚本要求 release 里有 certs/，但它被 .gitignore 忽略，git archive 带不出来；
+   # 只补一个空目录，证书本身由 config/secrets/sync-secrets.sh 推到 ~/.secrets/owner/certs。
+   python3 - "/tmp/trading_hareness-$X.tar" <<'PY'
+   import sys, tarfile
+   with tarfile.open(sys.argv[1], "a") as archive:
+       info = tarfile.TarInfo("trading_hareness/certs"); info.type, info.mode = tarfile.DIRTYPE, 0o755
+       archive.addfile(info)
+   PY
    ```
 
    wheelhouse：如果 `quant-service/requirements.txt` 自 owner 上次发布以来没有变化（PR #2 没有改它），就直接复用 owner 上现有的 wheelhouse，在 owner 上打包：
@@ -419,15 +427,20 @@ ssh -i "$RELAY_EDGE_SSH_KEY" root@47.114.113.152 'curl -fsS http://127.0.0.1:183
 
    如果 `intraday-secrets.env` 缺失，从上一个 release 目录拷回来（路径见阶段 A 记录的回滚点）：`install -m 0600 <上一个release>/deploy/shared-peer/intraday-secrets.env ~/trading_hareness/deploy/shared-peer/`。
 
-3. **构建并重建容器**。`/health` 的版本号来自 `deploy/shared-peer/.env` 里的 `PEER_APP_GIT_SHA`、`PEER_APP_RELEASE`、`PEER_APP_BUILD_CREATED_AT`（compose 把它们作为构建参数传入）。`verify-owner-cutover.py` 则读 `PEER_EXPECTED_RELEASE`。激活脚本只会在这些键还是占位值时才填写，所以第二次及以后的发布会沿用上一次的值，必须在构建前显式改写。下面的写法只改这 4 个非密钥键，不打印 `.env`：
+3. **构建并重建容器**。`/health` 的版本号来自 `deploy/shared-peer/.env` 里的 `PEER_APP_GIT_SHA`、`PEER_APP_RELEASE`、`PEER_APP_BUILD_CREATED_AT`（compose 把它们作为构建参数传入）。`verify-owner-cutover.py` 则读 `PEER_EXPECTED_RELEASE`。激活脚本只会在这些键还是占位值时才填写，所以第二次及以后的发布会沿用上一次的值，必须在构建前显式改写。下面的写法只改这 4 个非密钥键，不打印 `.env`。
+
+   `.env` 是指向 `~/.secrets/owner/.env.owner` 的软链接，必须写软链接背后的真实文件（`resolve()`），否则 `replace` 会把软链接换成普通文件，从此脱离集中凭据。整个重建期间持有守护锁，heal 定时器不会在中途重启容器；主服务 `--wait` 健康之后才启动 scheduler，二者同时启动会抢写同一批目录表：
 
    ```bash
    ssh -i "$OWNER_PEER_SSH_KEY" -p 3535 stockpeer@47.110.79.189 "set -euo pipefail
      export XDG_RUNTIME_DIR=/run/user/\$(id -u) DOCKER_HOST=unix:///run/user/\$(id -u)/docker.sock
+     LOCK=~/trading_hareness/scripts/shared-peer/release-lock.sh
+     bash \$LOCK hold '$L' 3600
+     trap 'bash \$LOCK release $L' EXIT
      cd ~/trading_hareness/deploy/shared-peer
      python3 - .env '$X' '$L' <<'PY'
    import datetime, os, pathlib, sys
-   path, sha, label = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+   path, sha, label = pathlib.Path(sys.argv[1]).resolve(), sys.argv[2], sys.argv[3]
    wanted = {'PEER_APP_GIT_SHA': sha, 'PEER_APP_RELEASE': label, 'PEER_EXPECTED_RELEASE': label,
              'PEER_APP_BUILD_CREATED_AT': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}
    lines = [line for line in path.read_text().splitlines() if line.split('=', 1)[0] not in wanted]
@@ -437,7 +450,9 @@ ssh -i "$RELAY_EDGE_SSH_KEY" root@47.114.113.152 'curl -fsS http://127.0.0.1:183
      C='docker compose -f compose.yaml -f compose.intraday-owner.yaml'
      \$C config --quiet
      \$C build quant-research
-     \$C up -d --no-build --wait db-tunnel quant-research quant-research-scheduler
+     \$C up -d --no-build --wait db-tunnel
+     \$C up -d --no-build --force-recreate --wait quant-research
+     \$C up -d --no-build --force-recreate --wait quant-research-scheduler
      \$C ps"
    ```
 

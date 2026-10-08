@@ -32,6 +32,9 @@ SCHEDULER=trading-hareness-peer-quant-research-scheduler-1
 TUNNEL=trading-hareness-peer-db-tunnel-1
 BATCH_TUNNEL=trading-hareness-peer-db-batch-tunnel-1
 
+LOCK_TOOL="$(cd "$(dirname "$0")" && pwd)/shared-peer/release-lock.sh"
+RESTARTS_SUPPRESSED_BY=""
+
 mkdir -p "$STATE_DIR"
 problems=()
 actions=()
@@ -111,6 +114,10 @@ wait_healthy() {
 
 restart_service() {
   local service=$1 name=$2
+  if [ -n "$RESTARTS_SUPPRESSED_BY" ]; then
+    problem "$service needs a restart, but release $RESTARTS_SUPPRESSED_BY holds the guard lock; not restarting while it runs"
+    return 1
+  fi
   if ! cooled_down "$service"; then
     problem "$service is unhealthy but was restarted less than ${RESTART_COOLDOWN_SECONDS}s ago; not restarting again"
     return 1
@@ -180,6 +187,29 @@ if [ "$MODE" = selftest ]; then
   alert "✅ 盘中抓取守护自检 @ $(date '+%F %T %Z') — 这条是测试消息，收到即表示告警通道可用。"
   exit $?
 fi
+
+# --- release lock -------------------------------------------------------------
+# A release recreates these containers on purpose. Healing them at the same time
+# restarted the main service while the scheduler held catalog locks on
+# 2026-10-08, which is what turned one release into an outage.
+lock_state=free; lock_label=""; lock_expires=""
+if [ -f "$LOCK_TOOL" ]; then
+  read -r lock_state lock_label lock_expires <<<"$(bash "$LOCK_TOOL" status 2>/dev/null || echo free)"
+fi
+case "$lock_state" in
+  held)
+    if [ "$MODE" = heal ]; then
+      note "release $lock_label holds the guard lock until epoch $lock_expires; not acting"
+      exit 0
+    fi
+    RESTARTS_SUPPRESSED_BY="$lock_label"
+    problem "release $lock_label still holds the guard lock during $MODE; restarts suppressed"
+    ;;
+  stale)
+    note "release lock from $lock_label expired at epoch $lock_expires; removing it and resuming"
+    bash "$LOCK_TOOL" release "$lock_label" >/dev/null 2>&1 || true
+    ;;
+esac
 
 # --- heal -------------------------------------------------------------------
 # The tunnel goes first: the application containers cannot become healthy while
@@ -299,7 +329,7 @@ fi
 # unfixed problem is worth a message and a failed unit.
 unresolved=0
 for item in "${problems[@]}"; do
-  case "$item" in *"did not become healthy"*|*"not restarting again"*|*"does not exist"*|*"refusing to act"*|*"PEER_BATCH_TUNNEL_REQUIRED must be"*) unresolved=1 ;; esac
+  case "$item" in *"did not become healthy"*|*"not restarting again"*|*"not restarting while"*|*"does not exist"*|*"refusing to act"*|*"PEER_BATCH_TUNNEL_REQUIRED must be"*) unresolved=1 ;; esac
 done
 if [ "$MODE" = preopen ]; then
   alert "$summary"
