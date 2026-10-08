@@ -160,10 +160,15 @@ roll_back_release() {
     rm -f "${current_root}.next"
     ln -sfn "$previous_target" "${current_root}.next"
     mv -Tf "${current_root}.next" "$current_root"
-    "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler || true
+    # 先主服务、后 scheduler：二者同时启动会抢写同一批目录表，一方的长事务占锁会让另一方启动超时
+    "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research || true
+    "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research-scheduler || true
   fi
 }
-if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
+# 代码发布不改隧道：只确认它健康，不重建（重建会让所有数据库连接重连）。
+if ! { "${C[@]}" up -d --no-build --pull never --wait db-tunnel \
+    && "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research \
+    && "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research-scheduler; }; then
   roll_back_release
   exit 1
 fi

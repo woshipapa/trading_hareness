@@ -223,13 +223,15 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 
 	def test_owner_hotfix_path_defaults_to_the_component_directory(self) -> None:
 		module = runpy.run_path(str(ROOT / "config/secrets/env-split.py"))
-		default = module["build_owner"]({})
+		default = module["build_owner"]({"OWNER_PEER_SSH_HOST": "internal.example"})
 		self.assertIn(
 			"QUANT_HOTFIX_HOST_DIR=/home/stockpeer/trading_hareness/hotfix/quant-service",
 			default,
 		)
 
-		custom = module["build_owner"]({"QUANT_HOTFIX_HOST_DIR": "/srv/quant-hotfix"})
+		custom = module["build_owner"]({
+			"OWNER_PEER_SSH_HOST": "internal.example", "QUANT_HOTFIX_HOST_DIR": "/srv/quant-hotfix",
+		})
 		self.assertIn(
 			"QUANT_HOTFIX_HOST_DIR=/home/stockpeer/trading_hareness/hotfix/quant-service",
 			custom,
@@ -239,14 +241,35 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 	def test_owner_database_password_prefers_the_peer_identity(self) -> None:
 		module = runpy.run_path(str(ROOT / "config/secrets/env-split.py"))
 		separated = module["build_owner"]({
+			"OWNER_PEER_SSH_HOST": "internal.example",
 			"POSTGRES_PASSWORD": "local-only",
 			"PEER_DB_PASSWORD": "peer-only",
 		})
 		self.assertIn("PEER_DB_PASSWORD=peer-only", separated)
 		self.assertNotIn("local-only", separated)
 
-		fallback = module["build_owner"]({"POSTGRES_PASSWORD": "legacy-owner"})
+		fallback = module["build_owner"]({"OWNER_PEER_SSH_HOST": "internal.example", "POSTGRES_PASSWORD": "legacy-owner"})
 		self.assertIn("PEER_DB_PASSWORD=legacy-owner", fallback)
+
+	def test_owner_code_release_never_starts_the_main_service_and_scheduler_together(self) -> None:
+		# Both write the same catalog tables on startup; started together, one holds the row
+		# locks for minutes and the other times out after 30 seconds (2026-10-08 incident).
+		script = (ROOT / "scripts/shared-peer/deploy-code-only.sh").read_text()
+		for line in (raw for raw in script.splitlines() if " up -d " in raw):
+			tokens = line.replace("\\", " ").replace(";", " ").split()
+			self.assertFalse(
+				"quant-research" in tokens and "quant-research-scheduler" in tokens,
+				f"main service and scheduler must start one after the other: {line.strip()}",
+			)
+		self.assertLess(script.index("--wait quant-research \\"), script.index("--wait quant-research-scheduler;"))
+
+	def test_owner_tunnel_host_must_be_set_explicitly_and_never_falls_back_to_the_public_address(self) -> None:
+		module = runpy.run_path(str(ROOT / "config/secrets/env-split.py"))
+		with self.assertRaises(SystemExit):
+			module["build_owner"]({"LONGHU_SSH_HOST": "public.example"})
+		configured = module["build_owner"]({"LONGHU_SSH_HOST": "public.example", "OWNER_PEER_SSH_HOST": "internal.example"})
+		self.assertIn("PEER_SSH_HOST=internal.example", configured)
+		self.assertNotIn("PEER_SSH_HOST=public.example", configured)
 
 
 if __name__ == "__main__":
