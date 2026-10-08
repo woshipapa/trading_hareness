@@ -24,6 +24,8 @@ done
 [[ "$from_sha" =~ ^[0-9a-f]{40}$ ]] || usage
 [[ "$release_label" =~ ^[A-Za-z0-9._-]+$ ]] || usage
 
+# The operator's checkout of the release tooling, resolved before any cd.
+tool_root="$(cd "$(dirname "$0")/../.." && pwd)"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 git cat-file -e "$target_sha^{commit}"
@@ -111,6 +113,8 @@ if [[ "$apply" != true ]]; then
 }"
   exit 0
 fi
+# The switch recreates quant-research and its scheduler (config/release-windows.json).
+python3 "$tool_root/scripts/release_window.py" check owner-quant-research owner-scheduler || exit $?
 
 owner_host="${OWNER_PEER_HOST:-stockpeer@47.110.79.189}"
 owner_port="${OWNER_PEER_PORT:-3535}"

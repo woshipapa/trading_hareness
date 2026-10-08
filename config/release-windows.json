@@ -1,0 +1,20 @@
+{
+  "description": "When each runtime surface must not be restarted. Times are Beijing (UTC+8), bounds inclusive, and the windows apply on every weekday - holidays included, deliberately: a calendar mistake must not open a window. Read by scripts/release_window.py; every script that restarts one of these surfaces asks it first.",
+  "utc_offset_hours": 8,
+  "windows": [
+    {
+      "name": "trading-session",
+      "from": "08:30",
+      "to": "15:10",
+      "surfaces": ["owner-quant-research", "owner-scheduler", "owner-windows-api", "edge-adapter"],
+      "why": "pre-open checks at 08:40 and 09:10, the session itself, and the close"
+    },
+    {
+      "name": "post-close-scheduler",
+      "from": "18:45",
+      "to": "22:05",
+      "surfaces": ["owner-scheduler"],
+      "why": "the scheduler's post-close pipeline runs then; a restart abandons it half-way"
+    }
+  ]
+}

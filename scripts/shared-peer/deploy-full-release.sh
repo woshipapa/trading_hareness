@@ -31,20 +31,13 @@ done
 [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "target must be a full 40-character SHA" >&2; usage; }
 [[ "$release_label" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "label must match [A-Za-z0-9._-]+" >&2; usage; }
 
+# The operator's checkout of the release tooling (not the release payload).
+tool_root="$(cd "$(dirname "$0")/../.." && pwd)"
+
 # --- safe window ---------------------------------------------------------------
-# Trading days: no restarts 08:30-15:10, and the scheduler must not restart
-# during its 18:45-22:05 post-close run. RELEASE_CLOCK="<1-7> <HHMM>" exists only
-# so the tests can pin the clock.
-read -r weekday hhmm <<<"${RELEASE_CLOCK:-$(TZ=Asia/Shanghai date '+%u %H%M')}"
-minute_of_day=$((10#$hhmm))
-in_no_restart_window() {
-  { [ "$minute_of_day" -ge 830 ] && [ "$minute_of_day" -le 1510 ]; } \
-    || { [ "$minute_of_day" -ge 1845 ] && [ "$minute_of_day" -le 2205 ]; }
-}
-if [ "$weekday" -le 5 ] && in_no_restart_window; then
-  echo "refusing: Beijing $hhmm on a weekday is inside a no-restart window (08:30-15:10, 18:45-22:05)" >&2
-  exit 3
-fi
+# This restarts quant-research and its scheduler; config/release-windows.json says
+# when that is forbidden. RELEASE_CLOCK="<1-7> <HHMM>" pins the clock for tests.
+python3 "$tool_root/scripts/release_window.py" check owner-quant-research owner-scheduler || exit $?
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -85,7 +78,7 @@ owner_key="${OWNER_PEER_SSH_KEY:-$HOME/.ssh/stockpeer_ed25519}"
 # RELEASE_ALLOW_SCHEMA_REVISION names exactly what was seen ("none" if nothing),
 # so an override cannot outlive the situation it was written for.
 # RELEASE_DB_REVISION replaces the owner read (tests; "" means unreadable).
-lineage_tool="$(cd "$(dirname "$0")/../.." && pwd)/quant-service/scripts/migration_lineage.py"
+lineage_tool="$tool_root/quant-service/scripts/migration_lineage.py"
 migrations_root="$(mktemp -d "${TMPDIR:-/tmp}/release-migrations.XXXXXX")"
 cleanup() { rm -f "$archive"; rm -rf "$migrations_root"; }
 git archive "$target_sha" quant-service/migrations/versions 2>/dev/null | tar -x -C "$migrations_root" \

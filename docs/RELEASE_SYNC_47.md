@@ -42,6 +42,7 @@ owner 容器设置了 `QUANT_SKIP_MIGRATIONS=true`，服务启动时只检查几
 4. 只发布已经合并进 `origin/main` 的提交。例外情况见第 6 节，需要用户明确同意。
 5. 不提交、不打印任何密钥：`.env`、`intraday-secrets.env`、`runtime.env`、`secrets.env`、`relay.env`、OAuth 状态。不要在任何主机上执行 `git add -A`，提交前逐个文件 `git add <path>`，并用 `git diff --cached` 检查。
 6. 交易时段不发布。交易日 08:30–15:10 不要重启 owner 的 `quant-research`、Windows API 或 edge adapter；18:45–22:05 不要重启 owner 的 `quant-research-scheduler`（盘后调度在跑）。安全窗口：交易日 22:10 至次日 08:00，或周末。
+   这些时间窗写在 `config/release-windows.json` 里，由 `scripts/release_window.py` 检查。全量发布、code-only 发布、edge 镜像发布和 edge 热更新在重启之前都会先问它：落在窗口内就拒绝（退出码 3）。经批准的紧急操作，把要越过的那个窗口名写进 `RELEASE_WINDOW_OVERRIDE`；检查器会放行，同时打印警告。
 7. 不删除旧的 release 目录、旧镜像、旧 overlay，回滚依赖它们。
 8. 任何通过条件不满足时停止，按第 12 节回滚，再向用户报告实际输出。
 

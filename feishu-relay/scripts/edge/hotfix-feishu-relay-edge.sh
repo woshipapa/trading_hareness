@@ -32,6 +32,11 @@ done
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 repo_root="$(cd "$project_root/.." && pwd)"
+if [[ "$apply" == true ]]; then
+  # Activation and rollback both restart the adapter (config/release-windows.json);
+  # an approved emergency names the window in RELEASE_WINDOW_OVERRIDE.
+  python3 "$repo_root/scripts/release_window.py" check edge-adapter || exit $?
+fi
 edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
 edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"

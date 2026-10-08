@@ -50,6 +50,8 @@ if [[ "$apply" != true ]]; then
   echo "dry run only; append --apply after the GHCR image is published"
   exit 0
 fi
+# Activation recreates the adapter (config/release-windows.json).
+python3 "$repo_root/scripts/release_window.py" check edge-adapter || exit $?
 
 # GHCR blob delivery straight to this edge host has repeatedly stalled mid
 # layer (TLS handshake timeouts on one blob) while the same image pulls fine
