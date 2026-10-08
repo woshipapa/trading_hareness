@@ -4,7 +4,7 @@
 
 ## 已开放接口的接入方式
 
-完整白名单定义在 [`quant-service/app/tushare_catalog.py`](../quant-service/app/tushare_catalog.py)，运行时可查：
+完整白名单定义在 [`quant-service/app/tushare_catalog.py`](../../quant-service/app/tushare_catalog.py)，运行时可查：
 
 ```bash
 curl http://127.0.0.1:5681/api/v1/providers/tushare/catalog

@@ -78,7 +78,7 @@ class LiquidityScreenTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
 class MedianDailyAmountUnitConversionIntegrationTests(unittest.TestCase):
-    """canonical_bars_daily.amount is stored in thousand yuan (docs/TUSHARE_COMPATIBLE_INGESTION.md,
+    """canonical_bars_daily.amount is stored in thousand yuan (docs/archive/TUSHARE_COMPATIBLE_INGESTION.md,
     daily_bar_repository.py's 0.02-0.50 amount/(volume*close) sanity band); a candidate whose
     genuinely-liquid amount was compared without converting to yuan would be flagged illiquid
     for essentially every real A-share symbol."""

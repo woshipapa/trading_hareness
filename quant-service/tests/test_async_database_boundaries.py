@@ -233,7 +233,7 @@ class MainRouterBoundaryTests(unittest.TestCase):
         main_path = Path(__file__).resolve().parents[1] / "app" / "main.py"
         tree = ast.parse(main_path.read_text(encoding="utf-8"))
         names = {
-            "sync_tushare_legacy", "sync_baostock_legacy", "sync_market_universe_legacy",
+            "sync_baostock_legacy", "sync_market_universe_legacy",
             "sync_full_market_daily_legacy", "sync_ths_sector_catalog_legacy",
             "sync_eastmoney_board_members_legacy", "sync_ths_industry_moneyflow_legacy",
             "sync_ths_concept_signals_legacy", "sync_ths_concept_members_legacy",

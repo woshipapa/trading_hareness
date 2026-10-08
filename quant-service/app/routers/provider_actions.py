@@ -18,19 +18,13 @@ from ..fuyao_provider import FuyaoProviderError, FuyaoQueryValidationError
 from ..request_models import (
     AkShareProbeRequest,
     FuyaoQueryRequest,
-    RealtimeProbeRequest,
     StockStudyRequest,
-    TushareCapabilityAuditRequest,
-    TushareFetchRequest,
 )
 
 
 @dataclass(frozen=True)
 class ProviderActionDependencies:
     akshare_probe: Callable[[AkShareProbeRequest], Awaitable[dict[str, Any]]]
-    realtime_probe: Callable[[RealtimeProbeRequest], Awaitable[dict[str, Any]]]
-    tushare_audit: Callable[[TushareCapabilityAuditRequest], Awaitable[dict[str, Any]]]
-    tushare_fetch: Callable[[TushareFetchRequest], Awaitable[dict[str, Any]]]
     stock_study: Callable[[str, StockStudyRequest], Awaitable[dict[str, Any]]]
     fuyao_query: Callable[[FuyaoQueryRequest], Awaitable[dict[str, Any]]] | None = None
 
@@ -42,18 +36,6 @@ def build_provider_actions_router(deps: ProviderActionDependencies) -> APIRouter
     @router.post("/api/v1/providers/akshare/probe")
     async def akshare_probe(payload: AkShareProbeRequest) -> dict[str, Any]:
         return await deps.akshare_probe(payload)
-
-    @router.post("/api/v1/providers/realtime/probe")
-    async def realtime_probe(payload: RealtimeProbeRequest) -> dict[str, Any]:
-        return await deps.realtime_probe(payload)
-
-    @router.post("/api/v1/providers/tushare/audit")
-    async def tushare_audit(payload: TushareCapabilityAuditRequest) -> dict[str, Any]:
-        return await deps.tushare_audit(payload)
-
-    @router.post("/api/v1/providers/tushare/fetch")
-    async def tushare_fetch(payload: TushareFetchRequest) -> dict[str, Any]:
-        return await deps.tushare_fetch(payload)
 
     @router.post("/api/v1/providers/fuyao/query")
     async def fuyao_query(payload: FuyaoQueryRequest) -> dict[str, Any]:

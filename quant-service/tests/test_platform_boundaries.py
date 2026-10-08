@@ -290,16 +290,16 @@ class PlatformBoundaryTests(unittest.TestCase):
     def test_provider_actions_router_has_only_bounded_post_contracts(self):
         action = AsyncMock(return_value={"status": "ok"})
         router = build_provider_actions_router(ProviderActionDependencies(
-            akshare_probe=action, realtime_probe=action, tushare_audit=action,
-            tushare_fetch=action, stock_study=action,
+            akshare_probe=action, stock_study=action,
         ))
         methods_by_path: dict[str, set[str]] = {}
         for route in router.routes:
             methods_by_path.setdefault(route.path, set()).update(route.methods or set())
         self.assertEqual(methods_by_path["/api/v1/providers/akshare/probe"], {"POST"})
-        self.assertEqual(methods_by_path["/api/v1/providers/realtime/probe"], {"POST"})
-        self.assertEqual(methods_by_path["/api/v1/providers/tushare/audit"], {"POST"})
-        self.assertEqual(methods_by_path["/api/v1/providers/tushare/fetch"], {"POST"})
+        # The Tushare fetch/audit and the rt_min realtime probe were retired with Tushare.
+        for retired in ("/api/v1/providers/realtime/probe", "/api/v1/providers/tushare/audit",
+                        "/api/v1/providers/tushare/fetch"):
+            self.assertNotIn(retired, methods_by_path)
         self.assertEqual(methods_by_path["/api/v1/providers/fuyao/query"], {"POST"})
         self.assertEqual(methods_by_path["/api/v1/stocks/{symbol}/study"], {"POST"})
 
@@ -432,16 +432,16 @@ class PlatformBoundaryTests(unittest.TestCase):
     def test_ingestion_actions_router_has_explicit_bounded_write_contracts(self):
         action = AsyncMock(return_value={"status": "ok"})
         router = build_ingestion_actions_router(IngestionActionDependencies(
-            market_snapshot=action, import_offline_minutes=action, sync_tushare=action,
-            sync_baostock=action, sync_tushare_core=action,
+            market_snapshot=action, import_offline_minutes=action, sync_baostock=action,
         ))
         methods_by_path = {route.path: route.methods for route in router.routes}
         for path in (
             "/api/v1/market/snapshots/run", "/api/v1/market/minute/import-offline",
-            "/api/v1/market/sync/tushare", "/api/v1/market/sync/baostock",
-            "/api/v1/market/sync/tushare/core",
+            "/api/v1/market/sync/baostock",
         ):
             self.assertEqual(methods_by_path[path], {"POST"})
+        self.assertNotIn("/api/v1/market/sync/tushare", methods_by_path)
+        self.assertNotIn("/api/v1/market/sync/tushare/core", methods_by_path)
 
     def test_post_close_structure_exports_share_the_side_effect_free_module(self):
         self.assertIs(daily_base_structure, pure_daily_base_structure)
@@ -734,7 +734,7 @@ class PlatformBoundaryTests(unittest.TestCase):
     def test_provider_status_router_keeps_catalog_and_health_as_read_only_routes(self):
         router = build_provider_status_router(MagicMock(), lambda: [], lambda: [])
         methods_by_path = {route.path: route.methods for route in router.routes}
-        self.assertEqual(methods_by_path["/api/v1/providers/tushare/catalog"], {"GET"})
+        self.assertNotIn("/api/v1/providers/tushare/catalog", methods_by_path)
         self.assertEqual(methods_by_path["/api/v1/providers/capabilities"], {"GET"})
         self.assertEqual(methods_by_path["/api/v1/providers/health"], {"GET"})
         self.assertEqual(methods_by_path["/api/v1/providers/realtime-health"], {"GET"})

@@ -85,7 +85,6 @@ class ActivatePeerReleaseTests(unittest.TestCase):
         self.assertIn('owner_factor_repository.py', source)
         self.assertIn("owner_persisted_adjustment_factor", source)
         self.assertIn("full_market_daily_controls_sync.py", source)
-        self.assertIn("core_daily_control_sync.py", source)
         self.assertIn("stock_study_service.py", source)
         self.assertIn('quant-service/app/main.py', source)
         self.assertIn('read_persisted_factor_window', source)

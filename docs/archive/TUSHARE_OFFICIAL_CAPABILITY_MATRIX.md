@@ -85,4 +85,4 @@ curl -X POST http://127.0.0.1:5681/api/v1/providers/realtime/probe \
 
 前端 `接口与原始数据` 页与以上后端事实对齐：可按权限/策略查看，显示主源和超级源独立状态，最多选择 12 项执行双源核验，并展示真实行、有效空值、明确拒绝、调用失败和休市跳过。
 
-![双源接口能力前端验收](screenshots/tushare-capability-dashboard-20260809.jpg)
+![双源接口能力前端验收](../screenshots/tushare-capability-dashboard-20260809.jpg)

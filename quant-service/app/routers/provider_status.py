@@ -17,8 +17,7 @@ from ..realtime_provider_health_repository import realtime_provider_health as as
 from ..realtime_provider_health_repository import realtime_provider_health_snapshot
 from ..longhu_limits import intraday_longhu_max_symbols
 from ..longhu_vendor_source import configured as longhu_configured
-from ..async_provider_status_read_repository import tushare_catalog as async_tushare_catalog
-from ..provider_catalog import provider_capabilities_snapshot, tushare_catalog_snapshot
+from ..provider_catalog import provider_capabilities_snapshot
 from ..fuyao_catalog import catalog_contract as fuyao_catalog_contract
 from ..fuyao_catalog import catalog_items as fuyao_catalog_items
 from ..provider_observability import provider_health_snapshot
@@ -30,21 +29,12 @@ def build_provider_status_router(
     free_provider_status_fn: Callable[[], list[dict[str, Any]]],
     *,
     async_database: Any | None = None,
-    async_tushare_catalog_fn: Callable[[Any, Callable[[], list[dict[str, Any]]], Callable[[], list[dict[str, Any]]]], Awaitable[dict[str, Any]]] | None = None,
     async_provider_capabilities_fn: Callable[[Any], Awaitable[dict[str, Any]]] | None = None,
     async_provider_health_fn: Callable[[Any, list[dict[str, Any]], datetime], Awaitable[dict[str, Any]]] | None = None,
     async_realtime_provider_health_fn: Callable[[Any, list[dict[str, Any]], datetime], Awaitable[dict[str, Any]]] | None = None,
 ) -> APIRouter:
     """Build read-only routes without allowing a front-end refresh to probe."""
     router = APIRouter(tags=["provider-status"])
-
-    @router.get("/api/v1/providers/tushare/catalog")
-    async def tushare_catalog() -> dict[str, Any]:
-        if async_database is not None:
-            return await (async_tushare_catalog_fn or async_tushare_catalog)(
-                async_database, provider_status_fn, free_provider_status_fn,
-            )
-        return tushare_catalog_snapshot(database)
 
     @router.get("/api/v1/providers/fuyao/catalog")
     async def fuyao_catalog() -> dict[str, Any]:

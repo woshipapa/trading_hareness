@@ -55,7 +55,7 @@ def median_daily_amount_by_symbol(connection: Any, symbols: list[str], as_of_dat
     """20-session trailing median traded amount (yuan) per symbol, up to and including as_of_date.
 
     ``canonical_bars_daily.amount`` is stored in the documented Tushare-compatible
-    unit (thousand yuan, see docs/TUSHARE_COMPATIBLE_INGESTION.md and
+    unit (thousand yuan, see docs/archive/TUSHARE_COMPATIBLE_INGESTION.md and
     daily_bar_repository.py's amount/(volume*close) sanity band of 0.02-0.50);
     it is converted to yuan here so MINIMUM_MEDIAN_DAILY_AMOUNT can stay a
     readable yuan constant instead of every caller needing to know the raw unit.

@@ -39,7 +39,6 @@ export const researchReads = new Map([
 	['/api/research/data-readiness/history-estimate', '/api/v1/data-readiness/history-estimate'],
 	['/api/research/data-readiness/features', '/api/v1/data-readiness/features'],
 	['/api/research/data-readiness/replay', '/api/v1/data-readiness/replay'],
-	['/api/research/tushare/catalog', '/api/v1/providers/tushare/catalog'],
 	['/api/research/tushare/raw', '/api/v1/providers/tushare/raw'],
 	['/api/research/minute/imports', '/api/v1/market/minute/imports'],
 	['/api/research/market/snapshots', '/api/v1/market/snapshots'],
@@ -93,8 +92,6 @@ export const researchReads = new Map([
 
 // POST dashboard path -> POST quant path
 export const researchActions = new Map([
-	['/api/research/tushare/fetch', '/api/v1/providers/tushare/fetch'],
-	['/api/research/tushare/audit', '/api/v1/providers/tushare/audit'],
 	['/api/research/pipeline/daily', '/api/v1/pipeline/daily'],
 	['/api/research/snapshots/build', '/api/v1/data-snapshots/build'],
 	['/api/research/reports/reprocess', '/api/v1/remote-archive/reports/reprocess'],
@@ -124,7 +121,6 @@ export const researchActions = new Map([
 	['/api/research/market/sectors/concepts/candidates/sync', '/api/v1/market/sectors/concepts/candidates/sync'],
 	['/api/research/market/sectors/concepts/research/run', '/api/v1/market/sectors/concepts/research/run'],
 	['/api/research/events/cninfo/sync', '/api/v1/events/cninfo/sync'],
-	['/api/research/providers/realtime/probe', '/api/v1/providers/realtime/probe'],
 	['/api/research/providers/akshare/probe', '/api/v1/providers/akshare/probe'],
 	['/api/research/operations/fetch-runs/reconcile-stale', '/api/v1/operations/fetch-runs/reconcile-stale'],
 	['/api/research/analyst-prompt-lab/materialize', '/api/v1/analyst-prompt-lab/materialize'],

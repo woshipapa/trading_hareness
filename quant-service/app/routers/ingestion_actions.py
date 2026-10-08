@@ -19,9 +19,7 @@ from ..request_models import MarketSnapshotRequest, OfflineMinuteImportRequest, 
 class IngestionActionDependencies:
     market_snapshot: Callable[[MarketSnapshotRequest], Awaitable[dict[str, Any]]]
     import_offline_minutes: Callable[[OfflineMinuteImportRequest], Awaitable[dict[str, Any]]]
-    sync_tushare: Callable[[TushareSyncRequest], Awaitable[dict[str, Any]]]
     sync_baostock: Callable[[TushareSyncRequest], Awaitable[dict[str, Any]]]
-    sync_tushare_core: Callable[[TushareSyncRequest], Awaitable[dict[str, Any]]]
 
 
 def build_ingestion_actions_router(deps: IngestionActionDependencies) -> APIRouter:
@@ -36,17 +34,9 @@ def build_ingestion_actions_router(deps: IngestionActionDependencies) -> APIRout
     async def import_offline_minutes(payload: OfflineMinuteImportRequest) -> dict[str, Any]:
         return await deps.import_offline_minutes(payload)
 
-    @router.post("/api/v1/market/sync/tushare")
-    async def sync_tushare(payload: TushareSyncRequest) -> dict[str, Any]:
-        return await deps.sync_tushare(payload)
-
     @router.post("/api/v1/market/sync/baostock")
     async def sync_baostock(payload: TushareSyncRequest) -> dict[str, Any]:
         return await deps.sync_baostock(payload)
-
-    @router.post("/api/v1/market/sync/tushare/core")
-    async def sync_tushare_core(payload: TushareSyncRequest) -> dict[str, Any]:
-        return await deps.sync_tushare_core(payload)
 
     return router
 

@@ -68,27 +68,6 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(stopped["state"], "stop_nonessential_high_frequency")
         self.assertFalse(stopped["allow_nonessential_high_frequency"])
 
-    def test_provider_catalog_snapshot_keeps_get_and_sdk_observations_separate(self):
-        connection = MagicMock()
-        connection.execute.return_value.fetchall.return_value = [
-            {"provider_key": "tushare_super_get", "api_name": "daily", "availability": "verified",
-             "verified_at": None, "last_checked_at": None, "metadata": {"last_row_count": 2}},
-            {"provider_key": "tushare_super_sdk", "api_name": "adj_factor", "availability": "verified",
-             "verified_at": None, "last_checked_at": None, "metadata": {}},
-        ]
-        database = MagicMock()
-        database.transaction.return_value.__enter__.return_value = connection
-        snapshot = tushare_catalog_snapshot(
-            database,
-            catalog_items_fn=lambda: [{"api_name": "daily"}, {"api_name": "adj_factor"}],
-            catalog_counts_fn=lambda: {"declared": 2}, provider_status_fn=lambda: [], free_provider_status_fn=lambda: [],
-        )
-        daily, adj_factor = snapshot["items"]
-        self.assertEqual(daily["super_get_availability"], "verified")
-        self.assertEqual(daily["super_availability"], "verified")
-        self.assertEqual(adj_factor["super_sdk_availability"], "verified")
-        self.assertEqual(adj_factor["super_availability"], "verified")
-
     def test_stock_study_fetch_reads_tushare_evidence_in_database_executor(self):
         async def check() -> tuple[dict[str, object], AsyncMock]:
             blocking = AsyncMock(return_value=[])
@@ -180,20 +159,6 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
             "prepare_tushare_fetch_run", "persist_tushare_fetch_blocked",
         ])
-
-    def test_tushare_capability_audit_keeps_local_capacity_distinct_from_provider_failure(self):
-        async def check() -> dict[str, object]:
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(side_effect=HTTPException(
-                status_code=503, detail="local processing capacity is temporarily saturated; retry shortly",
-            ))):
-                return await audit_tushare_capabilities(TushareCapabilityAuditRequest(
-                    api_names=["daily"], providers=["super"], symbol="000001.SZ",
-                ))
-
-        result = asyncio.run(check())
-        self.assertEqual(result["status"], "blocked")
-        self.assertEqual(result["results"][0]["status"], "blocked")
-        self.assertEqual(result["results"][0]["availability"], "local_capacity")
 
     def test_local_capacity_and_circuit_open_http_errors_have_distinct_states(self):
         local = HTTPException(status_code=503, detail="local processing capacity is temporarily saturated; retry shortly")

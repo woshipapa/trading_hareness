@@ -128,7 +128,6 @@ grep -q 'longhu_qfq_derived' "${repo_target}/quant-service/app/adjustment_factor
 test -f "${repo_target}/quant-service/app/owner_factor_repository.py"
 grep -q 'owner_persisted_adjustment_factor' "${repo_target}/quant-service/app/owner_factor_repository.py"
 grep -q 'read_persisted_factor_controls' "${repo_target}/quant-service/app/full_market_daily_controls_sync.py"
-grep -q 'read_persisted_factors' "${repo_target}/quant-service/app/core_daily_control_sync.py"
 grep -q 'read_persisted_factors' "${repo_target}/quant-service/app/stock_study_service.py"
 grep -q 'read_persisted_factor_controls' "${repo_target}/quant-service/app/main.py"
 grep -q 'read_persisted_factor_window' "${repo_target}/quant-service/app/main.py"

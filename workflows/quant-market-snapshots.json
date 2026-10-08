@@ -45,22 +45,6 @@
         "parameters": {"url": "={{ $env.QUANT_SERVICE_URL || 'http://quant-research-gateway:8000' }}/api/v1/market/sectors/sync", "method": "POST", "sendBody": true, "contentType": "json", "specifyBody": "json", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "X-Quant-Write-Key", "value": "={{ $env.QUANT_WRITE_API_KEY }}"}]}, "jsonBody": "{\"all_types\":true,\"sync_members\":false}", "options": {"timeout": 90000}}
       },
       {
-        "id": "a3c2dc9c-11de-4dd1-9c85-564789a1d009",
-        "name": "实时探针工作日 10:00",
-        "type": "n8n-nodes-base.scheduleTrigger",
-        "typeVersion": 1.2,
-        "position": [0, -10],
-        "parameters": {"rule": {"interval": [{"field": "cronExpression", "expression": "0 10 * * 1-5"}]}}
-      },
-      {
-        "id": "a3c2dc9c-11de-4dd1-9c85-564789a1d010",
-        "name": "验证主源和超级源全套实时接口",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.4,
-        "position": [280, -10],
-        "parameters": {"url": "={{ $env.QUANT_SERVICE_URL || 'http://quant-research-gateway:8000' }}/api/v1/providers/realtime/probe", "method": "POST", "sendBody": true, "contentType": "json", "specifyBody": "json", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "X-Quant-Write-Key", "value": "={{ $env.QUANT_WRITE_API_KEY }}"}]}, "jsonBody": "{\"symbols\":[\"000636.SZ\"],\"frequency\":\"1MIN\",\"etf_symbol\":\"159919.SZ\",\"index_symbol\":\"000300.SH\",\"sw_symbol\":\"801080.SI\"}", "options": {"timeout": 180000}}
-      },
-      {
         "id": "a3c2dc9c-11de-4dd1-9c85-564789a1d004",
         "name": "生成午盘全市场快照",
         "type": "n8n-nodes-base.httpRequest",
@@ -168,7 +152,6 @@
     "connections": {
       "盘前工作日 09:05": {"main": [[{"node": "刷新全市场股票池", "type": "main", "index": 0}]]},
       "板块目录工作日 09:10": {"main": [[{"node": "同步同花顺板块目录", "type": "main", "index": 0}]]},
-      "实时探针工作日 10:00": {"main": [[{"node": "验证主源和超级源全套实时接口", "type": "main", "index": 0}]]},
       "午盘工作日 11:35": {"main": [[{"node": "生成午盘全市场快照", "type": "main", "index": 0}]]},
       "收盘工作日 15:10": {"main": [[{"node": "生成收盘全市场快照", "type": "main", "index": 0}]]},
       "收盘工作日 18:10": {"main": [[{"node": "同步全市场收盘日线", "type": "main", "index": 0}]]},

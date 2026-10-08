@@ -64,7 +64,6 @@ from app.runtime_resources import (
     runtime_resource_state,
 )
 from app.runtime_executors import ExecutorSaturatedError
-from app.provider_catalog import tushare_catalog_snapshot
 from app.routers.provider_status import build_provider_status_router
 from app.routers.strategy_pattern_reads import build_strategy_pattern_reads_router
 from app.routers.research_readiness import build_research_readiness_router, training_roadmap_payload
@@ -134,7 +133,7 @@ from app.main import attach_intraday_volume_time_profile, daily_base_structure, 
 from app.main import StrategyDecisionRequest, run_strategy_decision
 from app.main import intraday_board_curve_session, intraday_board_curve_session_async, realtime_market_session, realtime_market_session_async
 from app.main import AnnouncementSyncRequest, sync_cninfo_announcements
-from app.main import AkShareProbeRequest, akshare_probe, TushareCapabilityAuditRequest, audit_tushare_capabilities
+from app.main import AkShareProbeRequest, akshare_probe
 from app.main import stock_study_free_fetch
 from app.main import intraday_tencent_surge_context, remote_archive_sync_bearer_allowed
 from app.remote_archive_sync import remote_archive_get

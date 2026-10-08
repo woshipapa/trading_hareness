@@ -61,6 +61,7 @@ jobs:
           node scripts/shared-peer/deploy-code-only.test.mjs
           node feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.test.mjs
           node feishu-relay/scripts/edge/hotfix-feishu-relay-edge.test.mjs
+          node scripts/verify-quant-gateway-caller-contract.mjs
 
       - name: Install and verify dashboard
         run: |

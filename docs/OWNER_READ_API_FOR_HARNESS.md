@@ -295,8 +295,7 @@ curl -fsS -m 5 http://127.0.0.1:15682/health | python3 -c "import json,sys; d=js
 | `/api/v1/providers/health` | | provider 健康（必查） |
 | `/api/v1/providers/realtime-health` | | 实时源健康（来自已存证据） |
 | `/api/v1/providers/capabilities` | | 数据能力目录 |
-| `/api/v1/providers/tushare/catalog` | | Tushare 接口目录 |
-| `/api/v1/providers/tushare/raw` | api_name*, provider, limit, offset | 已存的 Tushare 原始记录（例如 `limit_list_d`、`moneyflow_dc`） |
+| `/api/v1/providers/tushare/raw` | api_name*, provider, limit, offset | 已存的 Tushare 格式原始记录：Longhu 写入的 `stock_basic`/`daily`/`daily_basic`，以及 2026-10-08 Tushare 停用前的历史行（例如 `limit_list_d`、`moneyflow_dc`） |
 | `/api/v1/providers/fuyao/catalog` | | Fuyao 接口目录 |
 | `/api/v1/research/longhu/catalog` | | Longhu 能力目录（需读 key） |
 | `/api/v1/research/longhu/schema-profile` | | Longhu 字段结构（需读 key） |

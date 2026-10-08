@@ -678,42 +678,8 @@ class AnnouncementSyncRequest(BaseModel):
         return self
 
 
-class RealtimeProbeRequest(BaseModel):
-    symbols: list[str] = Field(default_factory=lambda: ["000636.SZ"], min_length=1, max_length=3)
-    frequency: Literal["1MIN", "5MIN", "15MIN", "30MIN", "60MIN"] = "1MIN"
-    etf_symbol: str = Field(default="159919.SZ", pattern=r"^\d{6}\.(SH|SZ)$")
-    index_symbol: str = Field(default="000300.SH", pattern=r"^\d{6}\.(SH|SZ)$")
-    sw_symbol: str = Field(default="801080.SI", pattern=r"^\d{6}\.(SI|TI)$")
-    futures_symbol: str | None = Field(default=None, pattern=r"^[A-Z]{1,3}\d{4}\.[A-Z]+$")
-
-    @model_validator(mode="after")
-    def validate_symbols(self) -> "RealtimeProbeRequest":
-        normalized = []
-        for symbol in self.symbols:
-            value = str(symbol).upper()
-            if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", value):
-                raise ValueError("symbols must use Tushare codes, for example 000636.SZ")
-            if value not in normalized:
-                normalized.append(value)
-        self.symbols = normalized
-        return self
 
 
-class TushareCapabilityAuditRequest(BaseModel):
-    api_names: list[str] = Field(default_factory=lambda: list(AUDIT_FOCUS_APIS[:8]), min_length=1, max_length=12)
-    providers: list[Literal["super", "super_sdk", "super_get"]] = Field(default_factory=lambda: ["super"], min_length=1, max_length=3)
-    symbol: str = Field(default="000636.SZ", pattern=r"^\d{6}\.(SH|SZ|BJ)$")
-    as_of_date: date | None = None
-    max_rows: int = Field(default=10, ge=1, le=50)
-
-    @model_validator(mode="after")
-    def validate_audit_scope(self) -> "TushareCapabilityAuditRequest":
-        self.api_names = list(dict.fromkeys(self.api_names))
-        self.providers = list(dict.fromkeys(self.providers))
-        unknown = [api_name for api_name in self.api_names if api_name not in TUSHARE_CATALOG]
-        if unknown:
-            raise ValueError(f"api_names are not enabled: {', '.join(unknown)}")
-        return self
 
 
 class SectorCatalogSyncRequest(BaseModel):

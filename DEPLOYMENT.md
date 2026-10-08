@@ -10,18 +10,16 @@
 - `GET /api/v1/remote-archive/reports`、`GET /api/v1/analyst-claims`：读取远端报告与规范化观点；
 - `GET /api/v1/providers/health`、`GET /api/v1/research/overview`：数据源诊断与研究台总览；
 - `POST /api/v1/market/bars/import`：导入校验后的日线；
-- `POST /api/v1/market/sync/tushare`：仅在配置 Tushare 主源或超级源和 `QUANT_UNIVERSE` 后拉取显式股票池；日线按主源、超级源顺序回退，并保留实际 provider；
 - `POST /api/v1/market/sync/baostock`：无需 token 的日线备源；只读取 `QUANT_UNIVERSE` 或远端报告中明确出现的股票代码，并自动补沪深 300 基准；
-- `GET /api/v1/providers/tushare/catalog`、`POST /api/v1/providers/tushare/fetch`：主源、超级路径源和 REST 备用源的受控通用入口。请求可指定 `provider=auto|primary|super|backup`；在线请求必须在白名单内，单次最多 45 天、3,000 行；历史分钟数据只允许从离线文件导入。
-- `POST /api/v1/stocks/{symbol}/study`：单标的受控研究入口。并发读取主/超级/备用 Tushare、同花顺资金流、BaoStock，以及不需 token 的东方财富、腾讯财经和新浪财经公开来源；逐来源保存原始证据、状态和健康记录。公开来源仅作低优先级交叉验证，不能覆盖已验证的主源日线。
-- `POST /api/v1/market/minute/import-offline`、`GET /api/v1/market/minute/imports`：供应商提供的历史分钟 CSV 只从 `quant-research` 持久卷的 `offline/` 目录流式导入；不经 n8n、浏览器或远端下载。CSV 格式和命令见 [`docs/TUSHARE_COMPATIBLE_INGESTION.md`](docs/TUSHARE_COMPATIBLE_INGESTION.md)。
+- `POST /api/v1/stocks/{symbol}/study`：单标的受控研究入口。并发读取同花顺资金流、BaoStock，以及不需 token 的东方财富、腾讯财经和新浪财经公开来源；逐来源保存原始证据、状态和健康记录。公开来源仅作低优先级交叉验证，不能覆盖已验证的主源日线。
+- `POST /api/v1/market/minute/import-offline`、`GET /api/v1/market/minute/imports`：供应商提供的历史分钟 CSV 只从 `quant-research` 持久卷的 `offline/` 目录流式导入；不经 n8n、浏览器或远端下载。CSV 格式和命令见 [`docs/archive/TUSHARE_COMPATIBLE_INGESTION.md`](docs/archive/TUSHARE_COMPATIBLE_INGESTION.md)。
 - `POST /api/v1/market/universe/sync`：每日盘前通过 `stock_basic` 刷新 `all_a` 活跃 A 股股票池。只有返回至少 1,000 只有效标的才会提交，避免供应商返回截断页时污染全市场任务。
 - `POST /api/v1/market/snapshots/run`、`GET /api/v1/market/snapshots`：生成午盘和收盘的全市场快照，保存覆盖率、涨跌家数、中位涨跌、成交额、来源和质量标记。公开报价只作为补充，未验证授权实时源时快照固定为 `degraded` 或 `blocked`，不会参与推荐。
 - `POST /api/v1/market/sync/full-daily`：盘后使用单次按交易日的全市场日线请求更新 canonical 日线；返回不足 1,000 只有效标的时不写入完整性结论。
 - `POST /api/v1/market/sectors/sync`、`GET /api/v1/market/sectors`：按同花顺 N/I/R/S/ST/BB 分类同步板块目录；成分只能通过带 `member_offset` 和最多 50 个板块的显式批次同步，保留点时成员关系。
 - `POST /api/v1/market/sectors/flows/sync`、`GET /api/v1/market/sectors/flows`：盘后读取 `moneyflow_ind_ths` 的行业横截面，保存涨跌幅、净流入、买卖额、公司数和领涨股。
 - `GET /api/v1/providers/capabilities`：读取逐 provider / API 的权限与实测能力账本，`unsupported` 不会被当作可用行情源。
-- 当前供应商权限的实测边界（含实时分钟未开通、集合竞价可用）见 [`docs/TUSHARE_PROVIDER_CAPABILITY_AUDIT.md`](docs/TUSHARE_PROVIDER_CAPABILITY_AUDIT.md)。
+- 当前供应商权限的实测边界（含实时分钟未开通、集合竞价可用）见 [`docs/archive/TUSHARE_PROVIDER_CAPABILITY_AUDIT.md`](docs/archive/TUSHARE_PROVIDER_CAPABILITY_AUDIT.md)。
 - `POST /api/v1/data-snapshots/build`：封存带时间截止的研究输入；缺少日线或存在 blocking 质量问题时返回 `blocked`；
 - `POST /api/v1/outcomes/recompute`：用已可观测的后续 canonical 日线回填分析师观点结果；
 - `POST /api/v1/pipeline/daily`：更新数据、重算分析师表现并生成研究候选池；
@@ -68,7 +66,7 @@ MARKET_SNAPSHOT_PUBLIC_BATCH_SIZE=80
 MARKET_SNAPSHOT_PUBLIC_CONCURRENCY=2
 ```
 
-主源兼容标准 Tushare 根地址；超级源复刻官方 SDK 的 `POST {base}/{api_name}` 协议并自动补充 `ts_type_name`，可通过 `TUSHARE_SUPER_PROXY_URL` 走专用代理；备用 REST 源仅启用 `stock_basic`。实时分钟仅在沪市连续竞价时段对主源和超级源做单股最小探测，成功前不进入推荐。历史分钟仍从离线 CSV 导入。完整的接口范围、在线限制、标准化表和原始数据查询见 [Tushare 兼容接入说明](docs/TUSHARE_COMPATIBLE_INGESTION.md)。
+主源兼容标准 Tushare 根地址；超级源复刻官方 SDK 的 `POST {base}/{api_name}` 协议并自动补充 `ts_type_name`，可通过 `TUSHARE_SUPER_PROXY_URL` 走专用代理；备用 REST 源仅启用 `stock_basic`。实时分钟仅在沪市连续竞价时段对主源和超级源做单股最小探测，成功前不进入推荐。历史分钟仍从离线 CSV 导入。完整的接口范围、在线限制、标准化表和原始数据查询见 [Tushare 兼容接入说明](docs/archive/TUSHARE_COMPATIBLE_INGESTION.md)。
 
 公开来源受网络出口和上游反爬/限流影响。全市场公开报价默认关闭，避免把约 70 个请求的批量刷新误当成已授权的实时数据服务；开启前必须确认供应商允许的频率。研究接口会将每一项标为 `completed`、`empty`、`failed` 或 `invalid_response`，不会将失败隐藏为无数据。
 

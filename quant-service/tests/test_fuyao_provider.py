@@ -205,8 +205,7 @@ class FuyaoProviderTests(unittest.TestCase):
         noop = AsyncMock(return_value={})
         fuyao = AsyncMock(side_effect=FuyaoQueryValidationError("unknown Fuyao query parameters: typo"))
         router = build_provider_actions_router(ProviderActionDependencies(
-            akshare_probe=noop, realtime_probe=noop, tushare_audit=noop,
-            tushare_fetch=noop, stock_study=noop, fuyao_query=fuyao,
+            akshare_probe=noop, stock_study=noop, fuyao_query=fuyao,
         ))
         endpoint = next(route.endpoint for route in router.routes if route.path == "/api/v1/providers/fuyao/query")
 

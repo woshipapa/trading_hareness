@@ -1749,7 +1749,7 @@ async function proxyResearchAction(path, request, response, method = 'POST') {
 		if (size > 64 * 1024) throw new Error('研究操作请求超过 64 KiB 上限');
 		chunks.push(chunk);
 	}
-	const longRunning = path.includes('/market/') || path.includes('/tushare/audit') || path.includes('/realtime/probe') || path.includes('/akshare/probe') || path.includes('/strategy/post-close/run') || path.includes('/strategy/pattern-mining/run') || path.includes('/strategy/watchlist-main-wave/run') || path.includes('/ten-day-leader-rotation/run');
+	const longRunning = path.includes('/market/') || path.includes('/akshare/probe') || path.includes('/strategy/post-close/run') || path.includes('/strategy/pattern-mining/run') || path.includes('/strategy/watchlist-main-wave/run') || path.includes('/ten-day-leader-rotation/run');
 	const timeoutMs = path.includes('/market/post-close/refresh') ? 360_000 : longRunning ? 180_000 : 45_000;
 	const upstream = await fetch(`${quantServiceUrl}${path}`, {
 		method,

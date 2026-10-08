@@ -4,23 +4,6 @@
  */
 
 export interface paths {
-    "/api/v1/providers/tushare/catalog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Tushare Catalog */
-        get: operations["tushare_catalog_api_v1_providers_tushare_catalog_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/providers/fuyao/catalog": {
         parameters: {
             query?: never;
@@ -2086,57 +2069,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/providers/realtime/probe": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Realtime Probe */
-        post: operations["realtime_probe_api_v1_providers_realtime_probe_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/providers/tushare/audit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Tushare Audit */
-        post: operations["tushare_audit_api_v1_providers_tushare_audit_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/providers/tushare/fetch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Tushare Fetch */
-        post: operations["tushare_fetch_api_v1_providers_tushare_fetch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/providers/fuyao/query": {
         parameters: {
             query?: never;
@@ -2937,23 +2869,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/market/sync/tushare": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Sync Tushare */
-        post: operations["sync_tushare_api_v1_market_sync_tushare_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/market/sync/baostock": {
         parameters: {
             query?: never;
@@ -2965,23 +2880,6 @@ export interface paths {
         put?: never;
         /** Sync Baostock */
         post: operations["sync_baostock_api_v1_market_sync_baostock_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/market/sync/tushare/core": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Sync Tushare Core */
-        post: operations["sync_tushare_core_api_v1_market_sync_tushare_core_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4414,34 +4312,6 @@ export interface components {
             /** Observation Id */
             observation_id: string;
         };
-        /** RealtimeProbeRequest */
-        RealtimeProbeRequest: {
-            /** Symbols */
-            symbols?: string[];
-            /**
-             * Frequency
-             * @default 1MIN
-             * @enum {string}
-             */
-            frequency: "1MIN" | "5MIN" | "15MIN" | "30MIN" | "60MIN";
-            /**
-             * Etf Symbol
-             * @default 159919.SZ
-             */
-            etf_symbol: string;
-            /**
-             * Index Symbol
-             * @default 000300.SH
-             */
-            index_symbol: string;
-            /**
-             * Sw Symbol
-             * @default 801080.SI
-             */
-            sw_symbol: string;
-            /** Futures Symbol */
-            futures_symbol?: string | null;
-        };
         /**
          * RemoteAnalystMessageImport
          * @description A text payload obtained from the remote analyst message detail API.
@@ -4850,72 +4720,6 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** TushareCapabilityAuditRequest */
-        TushareCapabilityAuditRequest: {
-            /** Api Names */
-            api_names?: string[];
-            /** Providers */
-            providers?: ("super" | "super_sdk" | "super_get")[];
-            /**
-             * Symbol
-             * @default 000636.SZ
-             */
-            symbol: string;
-            /** As Of Date */
-            as_of_date?: string | null;
-            /**
-             * Max Rows
-             * @default 10
-             */
-            max_rows: number;
-        };
-        /** TushareFetchRequest */
-        TushareFetchRequest: {
-            /** Api Name */
-            api_name: string;
-            /**
-             * Provider
-             * @default auto
-             * @enum {string}
-             */
-            provider: "auto" | "primary" | "super" | "super_sdk" | "super_get" | "backup";
-            /** Params */
-            params?: {
-                [key: string]: unknown;
-            };
-            /** Fields */
-            fields?: string | null;
-            /**
-             * Max Rows
-             * @default 500
-             */
-            max_rows: number;
-            /**
-             * Paginate
-             * @default false
-             */
-            paginate: boolean;
-            /**
-             * Page Size
-             * @default 1000
-             */
-            page_size: number;
-            /**
-             * Max Pages
-             * @default 10
-             */
-            max_pages: number;
-            /**
-             * Require Complete
-             * @default false
-             */
-            require_complete: boolean;
-            /**
-             * Force Refresh
-             * @default false
-             */
-            force_refresh: boolean;
-        };
         /** TushareSyncRequest */
         TushareSyncRequest: {
             /** Trade Date */
@@ -5100,28 +4904,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    tushare_catalog_api_v1_providers_tushare_catalog_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     fuyao_catalog_api_v1_providers_fuyao_catalog_get: {
         parameters: {
             query?: never;
@@ -6708,7 +6490,9 @@ export interface operations {
     };
     watchlist_proposals_api_v1_strategy_watchlist_proposals_get: {
         parameters: {
-            query?: never;
+            query?: {
+                as_of_date?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6724,6 +6508,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -8653,111 +8446,6 @@ export interface operations {
             };
         };
     };
-    realtime_probe_api_v1_providers_realtime_probe_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RealtimeProbeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    tushare_audit_api_v1_providers_tushare_audit_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TushareCapabilityAuditRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    tushare_fetch_api_v1_providers_tushare_fetch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TushareFetchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     fuyao_query_api_v1_providers_fuyao_query_post: {
         parameters: {
             query?: never;
@@ -10414,77 +10102,7 @@ export interface operations {
             };
         };
     };
-    sync_tushare_api_v1_market_sync_tushare_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TushareSyncRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     sync_baostock_api_v1_market_sync_baostock_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TushareSyncRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sync_tushare_core_api_v1_market_sync_tushare_core_post: {
         parameters: {
             query?: never;
             header?: never;

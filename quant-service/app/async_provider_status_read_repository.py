@@ -3,29 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
-from .provider_catalog import project_tushare_catalog
 from .provider_observability import project_provider_health
-from .tushare_catalog import catalog_counts, catalog_items
-
-
-async def tushare_catalog(
-    async_database: Any, provider_status_fn: Callable[[], list[dict[str, Any]]],
-    free_provider_status_fn: Callable[[], list[dict[str, Any]]],
-) -> dict[str, Any]:
-    items = [dict(item) for item in catalog_items()]
-    async with async_database.transaction() as connection:
-        result = await connection.execute(
-            """SELECT provider_key,api_name,availability,verified_at,last_checked_at,metadata
-               FROM quant.provider_api_capabilities
-               WHERE provider_key IN ('tushare_primary','tushare_super_sdk','tushare_super_get','tushare_backup')"""
-        )
-        rows = [dict(row) for row in await result.fetchall()]
-    return project_tushare_catalog(
-        items=items, rows=rows, counts=dict(catalog_counts()),
-        providers=[*provider_status_fn(), *free_provider_status_fn()],
-    )
 
 
 async def provider_capabilities(async_database: Any) -> dict[str, Any]:

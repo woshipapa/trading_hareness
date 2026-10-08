@@ -618,7 +618,6 @@ from .request_models import (
     OfflineMinuteImportRequest,
     PostCloseStrategyRequest,
     PostCloseRefreshRequest,
-    RealtimeProbeRequest,
     RemoteReportImport,
     RemoteReportReprocessRequest,
     RemoteAnalystMessageImport,
@@ -635,7 +634,6 @@ from .request_models import (
     StrategyReviewRequest,
     WatchlistMainWaveResearchRequest,
     TushareFetchRequest,
-    TushareCapabilityAuditRequest,
     TushareSyncRequest,
     UniverseUpdateRequest,
 )
@@ -660,10 +658,6 @@ from .post_close_refresh_service import (
 from .daily_pipeline import run_pipeline as run_daily_pipeline_orchestrated
 from .board_research_service import run as run_board_research_isolated
 from .akshare_probe_service import run as run_akshare_probe_isolated
-from .provider_probe_service import (
-    audit_tushare_capabilities as audit_tushare_capabilities_isolated,
-    probe_realtime as probe_realtime_sources_isolated,
-)
 from .recommendation_generation import generate as generate_recommendations_isolated
 from .tushare_daily_sync import sync as sync_tushare_isolated
 from .baostock_daily_sync import fetch_rows as fetch_baostock_rows_isolated, sync as sync_baostock_isolated
@@ -695,7 +689,6 @@ from .stock_money_flow_sync import (
 )
 from .disclosure_day_watch import MODEL_VERSION as DISCLOSURE_DAY_WATCH_MODEL_VERSION
 from .limit_up_continuation import MODEL_VERSION as LIMIT_UP_CONTINUATION_MODEL_VERSION
-from .core_daily_control_sync import CoreDailyControlDependencies, sync as sync_core_daily_controls_isolated
 from .sector_catalog_sync import sync_all as sync_all_sector_catalogs_isolated
 from .ths_sector_catalog_sync import sync as sync_ths_sector_catalog_isolated
 from .eastmoney_sector_members_sync import sync as sync_eastmoney_sector_members_isolated
@@ -822,12 +815,7 @@ from .concept_limit_candidate_repository import (
     select_concepts as select_concept_limit_concepts,
 )
 from .tushare_official import (
-    AUDIT_FOCUS_APIS,
-    HISTORICAL_MINUTE_APIS,
     REALTIME_MARKET_HOURS_APIS,
-    default_probe_params,
-    official_spec,
-    realtime_probe_matrix,
 )
 from .tushare_providers import (
     SUPER_GET_VERIFIED_APIS,
@@ -1385,10 +1373,6 @@ def generate_recommendations(request: GenerateRequest) -> dict[str, Any]:
         json_safe=strategy_json_safe,
     )
 
-
-async def sync_tushare_legacy(request: TushareSyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated synchronizer."""
-    return await sync_tushare(request)
 
 async def sync_tushare(request: TushareSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by the isolated daily synchronizer."""
@@ -5383,32 +5367,6 @@ async def build_stock_study(symbol: str, request: StockStudyRequest) -> dict[str
     )
 
 
-async def sync_tushare_daily_core(as_of_date: date, requested_symbols: list[str] | None = None) -> dict[str, Any]:
-    """Compatibility adapter for explicit-symbol, same-day controls only."""
-    async def persisted_factors(day: date, symbols: list[str]) -> dict[str, Any]:
-        def read() -> dict[str, Any]:
-            with db.transaction() as connection:
-                payload = read_persisted_factor_controls(connection, day, symbols)
-            rows = payload["rows"]
-            return {
-                "api_name": "adj_factor",
-                "status": "completed" if len(rows) == len(symbols) else "blocked",
-                "source": payload["source"],
-                "providers": payload["providers"],
-                "rows": rows,
-                "symbols": symbols,
-            }
-        return await run_database_blocking(read, timeout_seconds=30)
-
-    return await sync_core_daily_controls_isolated(
-        as_of_date, requested_symbols,
-        CoreDailyControlDependencies(
-            resolve_symbols=resolve_sync_symbols_async,
-            fetch_catalog=fetch_tushare_catalog,
-            request=TushareFetchRequest,
-            read_persisted_factors=persisted_factors,
-        ),
-    )
 
 
 def _start_async_pool_watchdog() -> dict[str, asyncio.Task[None]]:
@@ -5948,63 +5906,10 @@ async def akshare_probe(payload: AkShareProbeRequest) -> dict[str, Any]:
     )
 
 
-async def probe_realtime_sources(payload: RealtimeProbeRequest) -> dict[str, Any]:
-    """Compatibility wrapper for the isolated bounded realtime probe service."""
-    return await probe_realtime_sources_isolated(
-        payload,
-        realtime_probe_matrix=realtime_probe_matrix,
-        default_probe_params=default_probe_params,
-        realtime_market_session=realtime_market_session_async,
-        provider_candidates=provider_candidates,
-        fetch=stock_study_fetch,
-    )
 
 
-async def audit_tushare_capabilities(payload: TushareCapabilityAuditRequest) -> dict[str, Any]:
-    """Compatibility wrapper for the isolated capability-audit service."""
-    async def record_timeout(provider: str, api_name: str) -> None:
-        provider_key = f"tushare_{provider}"
-
-        def persist() -> None:
-            with db.transaction() as connection:
-                record_provider_api_capability(
-                    connection, provider_key, api_name, "failed",
-                    note="Capability audit timed out after 25 seconds.",
-                )
-
-        await run_database_blocking(persist)
-
-    async def load_observation(provider: str, api_name: str) -> dict[str, Any] | None:
-        provider_key = f"tushare_{provider}"
-
-        def load() -> Any:
-            with db.transaction() as connection:
-                return connection.execute(
-                    "SELECT availability,note FROM quant.provider_api_capabilities WHERE provider_key=%s AND api_name=%s",
-                    (provider_key, api_name),
-                ).fetchone()
-
-        observation = await run_database_blocking(load)
-        return dict(observation) if observation else None
-
-    return await audit_tushare_capabilities_isolated(
-        payload,
-        today=cn_today,
-        api_capability=api_capability,
-        default_probe_params=default_probe_params,
-        historical_minute_apis=HISTORICAL_MINUTE_APIS,
-        realtime_market_hours_apis=REALTIME_MARKET_HOURS_APIS,
-        realtime_market_session=realtime_market_session_async,
-        fetch_catalog=fetch_tushare_catalog,
-        record_timeout=record_timeout,
-        load_observation=load_observation,
-        is_local_capacity_error=is_local_capacity_http_error,
-        is_circuit_open_error=is_circuit_open_http_error,
-    )
 
 
-async def tushare_fetch(payload: TushareFetchRequest) -> dict[str, Any]:
-    return await fetch_tushare_catalog(payload)
 
 
 async def fuyao_query(payload: "FuyaoQueryRequest") -> dict[str, Any]:
@@ -6025,9 +5930,6 @@ async def stock_study(symbol: str, payload: StockStudyRequest | None = None) -> 
 
 app.include_router(build_provider_actions_router(ProviderActionDependencies(
     akshare_probe=akshare_probe,
-    realtime_probe=probe_realtime_sources,
-    tushare_audit=audit_tushare_capabilities,
-    tushare_fetch=tushare_fetch,
     fuyao_query=fuyao_query,
     stock_study=stock_study,
 )))
@@ -6696,24 +6598,18 @@ def offline_minute_imports(limit: int = 30) -> dict[str, Any]:
     return market_result_reads.offline_minute_imports(db, limit, str(offline_data_root()))
 
 
-async def sync_tushare_endpoint(payload: TushareSyncRequest) -> dict[str, Any]:
-    return await sync_tushare(payload)
 
 
 async def sync_baostock_endpoint(payload: TushareSyncRequest) -> dict[str, Any]:
     return await sync_baostock(payload)
 
 
-async def sync_tushare_core_endpoint(payload: TushareSyncRequest) -> dict[str, Any]:
-    return await sync_tushare_daily_core(payload.trade_date or payload.end_date or cn_today(), payload.symbols)
 
 
 app.include_router(build_ingestion_actions_router(IngestionActionDependencies(
     market_snapshot=run_market_snapshot_endpoint,
     import_offline_minutes=import_offline_minute_bars_endpoint,
-    sync_tushare=sync_tushare_endpoint,
     sync_baostock=sync_baostock_endpoint,
-    sync_tushare_core=sync_tushare_core_endpoint,
 )))
 
 

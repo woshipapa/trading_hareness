@@ -52,7 +52,9 @@ for (const path of [
   if (source.includes('http://quant-research:8000')) throw new Error(`${path} still contains a direct quant address`);
 }
 
-const adapter = readFileSync('feishu-relay/adapter/index.mjs', 'utf8');
+// The research route table moved out of index.mjs into research-routes.mjs.
+const adapter = readFileSync('feishu-relay/adapter/index.mjs', 'utf8')
+  + readFileSync('feishu-relay/adapter/research-routes.mjs', 'utf8');
 for (const expected of [
   "['/api/research/ten-day-leader-rotation/latest', '/api/v1/research/ten-day-leader-rotation/latest']",
   "['/api/research/ten-day-leader-rotation/run', '/api/v1/research/ten-day-leader-rotation/run']",
