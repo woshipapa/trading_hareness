@@ -344,6 +344,8 @@ New-Item -ItemType Directory -Force G:\StockPlatform\backups | Out-Null
 
 **通过条件**：`alembic current` 等于唯一的 head；出错时不要重试"半截"迁移，保存完整输出并报告。PostgreSQL 的 DDL 是事务性的，失败的那个版本会整体回滚。
 
+阶段 F 的 `deploy-full-release.sh` 会从运行中服务的 `/health` 读库版本，库落后于发布的 head 时拒绝切代码，所以漏掉这一步不会被静默放过。要看缺哪些迁移：`python3 quant-service/scripts/migration_lineage.py quant-service/migrations/versions --pending <owner 库版本>`。
+
 ---
 
 ## 8. 阶段 E：部署 47 edge
@@ -403,6 +405,19 @@ wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标
 把发布元数据写进软链接背后的真实文件；隧道不重建，主服务健康后才启动 scheduler；
 核验两端 `git_sha`、主服务 profile 和凭据软链接，任何一项失败都自动回滚。
 下面的手工步骤保留作参考，与脚本等价。
+
+**迁移闸门**（2026-10-09 起，"只检查"也会执行）：脚本从归档读出迁移 head，再经 SSH 读 owner
+`/health` 里的 `owner_storage.database_lineage.alembic_version`，两者比较（退出码 6 表示拒绝）：
+
+| owner 库的版本 | 结果 |
+| --- | --- |
+| 等于 head | 继续 |
+| 是 head 的祖先（库落后于代码） | 拒绝，**不可覆盖**。脚本会列出缺的迁移，并给出生成离线 SQL 的命令；先按阶段 D 在 Windows 上迁移，再发布 |
+| 不在本仓库的迁移链里 | 拒绝。可能是 owner 有本仓库没有的迁移（去找回源码，不要凭记忆重建），也可能是这次发布比库还旧。查明后用 `RELEASE_ALLOW_SCHEMA_REVISION=<看到的版本号>` 重跑 |
+| 读不到（服务宕机） | 拒绝。如果这次发布就是修复，先在 Windows 上用 `alembic current` 确认版本，再用 `RELEASE_ALLOW_SCHEMA_REVISION=none` 重跑 |
+
+覆盖值必须写出当时看到的那个版本号，所以一次覆盖不会被下一次发布顺带沿用。
+`deploy-code-only.sh` 遇到迁移文件有实质改动会直接拒绝，所以只有全量发布需要这道闸门。
 
 1. **打包**（工作站上执行）：
 
