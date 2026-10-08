@@ -76,7 +76,11 @@ while IFS= read -r path; do
   case "$path" in
     quant-service/app/*|quant-service/entrypoint.py|quant-service/run_server.py|quant-service/database_bootstrap.py|quant-service/alembic.ini)
       runtime_files+="$path"$'\n' ;;
-    quant-service/tests/*|docs/*|*.md|.github/*|feishu-relay/*|frontend/*|scripts/*.test.mjs|scripts/test_*.py)
+    quant-service/tests/*|docs/*|*.md|.github/*|feishu-relay/*|frontend/*|xhs-intel/*|scripts/*.test.mjs|scripts/test_*.py)
+      skipped_files+="$path"$'\n' ;;
+    # Credential tooling for the operator workstation (templates and generators,
+    # never values); gitignored files do not appear here at all.
+    config/secrets/env-split.py|config/secrets/sync-secrets.sh|config/secrets/env.example|config/secrets/README.md)
       skipped_files+="$path"$'\n' ;;
     # Release tooling that runs on the operator workstation, the Windows owner
     # workstation or the edge - never inside the owner peer runtime.
