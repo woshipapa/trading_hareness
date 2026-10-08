@@ -234,10 +234,29 @@ services:
       XHS_INTEL_TREE_SHA256: ${XHS_INTEL_TREE_SHA256:-}
       XHS_WORKFLOW_SHA256: ${XHS_WORKFLOW_SHA256:-}
       XHS_FEISHU_WEBHOOK_URL: ${XHS_FEISHU_WEBHOOK_URL:-}
+      # 与适配器、quant-service 同一套源码 overlay 机制：改 xhs-intel 的 Python
+      # 源码不该每次重建镜像。xhs-intel/scripts/hotfix-xhs-intel-edge.sh 在预检
+      # 通过后才把它置为 true。依赖（requirements.txt）、Dockerfile、基础镜像或
+      # 外部 Spider_XHS 变化仍然必须走镜像发布 deploy-xhs-intel-edge.sh。
+      XHS_HOTFIX_ENABLED: ${XHS_HOTFIX_ENABLED:-false}
       TZ: Asia/Shanghai
+    # overlay 启用且源码就位时跑 overlay，否则跑镜像里烤进去的那份 —— 和适配器
+    # 的 command 同形。PYTHONPATH 把 overlay 目录放在 /opt/xhs 之前，这样
+    # collector/store/operations/config 这些同级模块都从 overlay 解析。
+    command:
+      - sh
+      - -c
+      - >-
+        if [ "$$XHS_HOTFIX_ENABLED" = "true" ] && [ -f
+        /app/hotfix/current/edge_api.py ]; then export
+        PYTHONPATH=/app/hotfix/current:/opt/xhs; export
+        XHS_RUNTIME_SOURCE=source-overlay; exec python
+        /app/hotfix/current/edge_api.py; fi; export PYTHONPATH=/opt/xhs; export
+        XHS_RUNTIME_SOURCE=image; exec python /app/edge_api.py
     volumes:
       - ./xhs-state:/var/lib/xhs-collector
       - ${XHS_COOKIE_FILE:-/etc/feishu-relay-edge/xhs-cookie}:/run/secrets/xhs_cookie:ro
+      - ${XHS_HOTFIX_DIR:-./hotfix-xhs}:/app/hotfix:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:18790/health', timeout=3)\""]
       interval: 15s
