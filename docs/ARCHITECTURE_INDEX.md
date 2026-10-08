@@ -12,7 +12,7 @@
 | Python modules under `app/` | 510 |
 | HTTP router modules | 47 |
 | Alembic migrations | 109 |
-| Frontend source files | 36 |
+| Frontend source files | 53 |
 
 ## Domain naming inventory
 
@@ -99,12 +99,29 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/api/http.ts`
 - `frontend/src/components/RealtimeServicesPanel.vue`
 - `frontend/src/components/TenDayLeaderRotationPanel.vue`
+- `frontend/src/composables/useDashboardWorkspace.test.ts`
 - `frontend/src/composables/useDashboardWorkspace.ts`
 - `frontend/src/composables/usePersonalDecisionWorkspace.test.ts`
 - `frontend/src/composables/usePersonalDecisionWorkspace.ts`
 - `frontend/src/composables/usePolling.test.ts`
 - `frontend/src/composables/usePolling.ts`
 - `frontend/src/composables/useRemoteQuantRuntime.ts`
+- `frontend/src/composables/workspace/analyst-evidence.ts`
+- `frontend/src/composables/workspace/analyst-timeline.ts`
+- `frontend/src/composables/workspace/board-flow.ts`
+- `frontend/src/composables/workspace/close-review.ts`
+- `frontend/src/composables/workspace/factor-lab.ts`
+- `frontend/src/composables/workspace/format.ts`
+- `frontend/src/composables/workspace/market-data.ts`
+- `frontend/src/composables/workspace/outcomes.ts`
+- `frontend/src/composables/workspace/overview.ts`
+- `frontend/src/composables/workspace/providers.ts`
+- `frontend/src/composables/workspace/research-loader.ts`
+- `frontend/src/composables/workspace/shell.ts`
+- `frontend/src/composables/workspace/stock-study.ts`
+- `frontend/src/composables/workspace/strategy-governance.ts`
+- `frontend/src/composables/workspace/strategy-pool.ts`
+- `frontend/src/composables/workspace/types.ts`
 - `frontend/src/dashboard-context.ts`
 - `frontend/src/dashboard-navigation.test.ts`
 - `frontend/src/dashboard-navigation.ts`
