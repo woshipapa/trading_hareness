@@ -90,6 +90,12 @@ class TaskInventoryTests(unittest.TestCase):
         self.assertIn("source-health", task["args"])
         self.assertNotIn("OPENALEX_API_KEY", " ".join(str(value) for value in task["args"]))
 
+    def test_paper_webhook_tunnel_uses_long_backoff_for_remote_port_collisions(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None)
+        task = next(item for item in module.TASKS if item["name"] == "paper-kb-webhook-tunnel")
+        self.assertEqual(task["kind"], "daemon")
+        self.assertEqual(task["restart_backoff_max"], 300)
+
     def test_s2_children_receive_optional_provider_credentials_at_runtime(self):
         module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None,
                               OPENALEX_API_KEY="openalex-test-only",

@@ -128,7 +128,10 @@ TASKS = [
                "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
                "-N","-R","127.0.0.1:15678:127.0.0.1:5678","root@47.114.113.152"],
          cwd=HOME, out=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"),
-         err=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"), env={}),
+         err=os.path.join(N8N,"logs/paper-kb-webhook-tunnel.log"), env={},
+         # A remote listener collision can persist across several SSH retries;
+         # avoid reconnecting every minute while keeping the tunnel self-healing.
+         restart_backoff_max=300),
     # 专表监听（SQLite/WAL 事件）当前停用：本地不再跑这条低延迟链路，爱投顾
     # 三个来源全部由 edge 的 API 轮询覆盖（含 11:30-13:00 午休窗口）。默认不启动，
     # 需要恢复本地监听时设 ITOUGU_TABLE_WATCH=1 再重启 supervisor。
@@ -216,6 +219,13 @@ TASKS = [
          cwd=PKB, out=os.path.join(PKLOG, "source-health.log"),
          err=os.path.join(PKLOG, "source-health.log"),
          env={**_paper_provider_env(), "PAPER_KB_SOURCE_HEALTH_TASK": "1"}),
+    # Ingest is successful once a paper is searchable, even when the LLM
+    # provider is temporarily exhausted.  Retry only persisted missing specs;
+    # completed specs are removed from the queue before any provider call.
+    dict(name="paperkb.distill-retry", kind="daily", hour=12, minute=0, run_at_load=False,
+         args=[PY, os.path.join(PKB, "jobs.py"), "distill-retry"],
+         cwd=PKB, out=os.path.join(PKLOG, "distill-retry.log"),
+         err=os.path.join(PKLOG, "distill-retry.log"), env={"PATH": PATH_ENV}),
     dict(name="paperkb.refresh", kind="interval", interval=120, run_at_load=True,
          args=[PY, os.path.join(PKB, "kb_refresh.py")],
          cwd=PKB, out=os.path.join(PKLOG, "refresh.log"), err=os.path.join(PKLOG, "refresh.log"), env={}),
@@ -263,6 +273,14 @@ TASKS = [
          args=[PY, os.path.join(PKB, "jobs.py"), "s2-weekly"],
          cwd=PKB, out=os.path.join(PKLOG, "s2.log"), err=os.path.join(PKLOG, "s2.log"),
          env=_paper_provider_env(), catch_up_hours=36),
+    # Recommendation evaluation belongs beside the Paper-KB producer clocks.
+    # The n8n trigger remains a compatibility path, while jobs.py suppresses a
+    # duplicate run within the following day.
+    dict(name="paperkb.eval-recommendations", kind="calendar", weekday=2, hour=20, minute=30,
+         args=[PY, os.path.join(PKB, "jobs.py"), "eval-recommendations"],
+         cwd=PKB, out=os.path.join(PKLOG, "eval-recommendations.log"),
+         err=os.path.join(PKLOG, "eval-recommendations.log"),
+         env={"PATH": PATH_ENV}, catch_up_hours=36),
 ]
 
 _shutdown = threading.Event()
@@ -304,6 +322,7 @@ def run_once(t):
 
 def daemon_loop(t):
     backoff = 1
+    backoff_max = max(1, int(t.get("restart_backoff_max", 60)))
     while not _shutdown.is_set():
         outf, errf = _open_out(t)
         try:
@@ -324,7 +343,7 @@ def daemon_loop(t):
         if _shutdown.is_set(): break
         slog(f"daemon {t['name']} exited rc={rc}; restart in {backoff}s")
         _shutdown.wait(backoff)
-        backoff = min(backoff * 2, 60)  # 指数退避封顶60s
+        backoff = min(backoff * 2, backoff_max)  # 指数退避，任务可提高封顶值
         # 正常存活重置退避
         if rc == 0: backoff = 1
 

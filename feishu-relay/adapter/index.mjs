@@ -34,6 +34,7 @@ import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessag
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import { resolveFrontendAssetPath } from './frontend-assets.mjs';
+import { postWebhookWithRetry, retryDelivery, safeDeliveryError } from './paper-delivery-retry.mjs';
 import Busboy from 'busboy';
 
 const required = ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'N8N_TEXT_WEBHOOK_URL', 'N8N_MEDIA_PART_WEBHOOK_URL', 'N8N_MEDIA_FINALIZE_WEBHOOK_URL'];
@@ -953,10 +954,10 @@ async function handlePaperKbAlert(request, response) {
 			if (claim.inFlight) return { status: 'in-flight', chat_id: targetChatId, event_id: idempotencyKey };
 			claimed = true;
 			try {
-				const result = await larkClient.im.v1.message.create({
+				const result = await retryDelivery(() => larkClient.im.v1.message.create({
 					params: { receive_id_type: 'chat_id' },
 					data: { receive_id: targetChatId, msg_type: 'text', content: JSON.stringify({ text }), uuid: paperKbFeishuUuid(idempotencyKey) },
-				});
+				}), { maxAttempts: 3 });
 				const messageId = result?.data?.message_id ?? null;
 				if (!messageId) throw new Error('Feishu did not return message_id');
 				await ledger.completePaperKbDelivery(idempotencyKey, {
@@ -965,7 +966,7 @@ async function handlePaperKbAlert(request, response) {
 				});
 				return { status: 'sent', chat_id: targetChatId, message_id: messageId, event_id: idempotencyKey, verification: { feishu: 'receipt', archive: 'not_applicable', downstream: 'not_applicable' } };
 			} catch (error) {
-				if (claimed) await ledger.completePaperKbDelivery(idempotencyKey, { status: 'failed', errorMessage: error instanceof Error ? error.message : String(error) });
+				if (claimed) await ledger.completePaperKbDelivery(idempotencyKey, { status: 'failed', errorMessage: safeDeliveryError(error) });
 				throw error;
 			}
 		});
@@ -978,9 +979,10 @@ async function handlePaperKbAlert(request, response) {
 			if (paperKbQueues.get(targetChatId) === current) paperKbQueues.delete(targetChatId);
 		}
 	} catch (error) {
-		console.error(`Paper-KB 学习提醒投递失败：${error instanceof Error ? error.message : String(error)}`);
+		const detail = safeDeliveryError(error);
+		console.error(`Paper-KB 学习提醒投递失败：${detail}`);
 		response.writeHead(502, { 'content-type': 'application/json' });
-		response.end(JSON.stringify({ status: 'failed', message: 'Paper-KB Feishu delivery failed' }));
+		response.end(JSON.stringify({ status: 'failed', message: 'Paper-KB Feishu delivery failed', detail }));
 	}
 }
 
@@ -2666,15 +2668,9 @@ function isPaperIngestCommand(data) {
 	return parsePaperIngestIds(text);
 }
 
-async function forwardPaperIngest(ids) {
+async function forwardPaperIngest(ids, sourceEventId) {
 	if (!paperIngestWebhook) throw new Error('PAPER_KB_INGEST_WEBHOOK is not configured');
-	const response = await fetch(paperIngestWebhook, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ ids: ids.join(',') }),
-	});
-	if (!response.ok) throw new Error(`ingest webhook responded ${response.status}`);
-	return response.status;
+	return postWebhookWithRetry(paperIngestWebhook, { ids: ids.join(','), source_event_id: sourceEventId }, { timeoutMs: 15_000 });
 }
 
 // A reading-group message like `查询 MOE` or `精查 KV cache eviction` asks the KB to
@@ -2695,15 +2691,9 @@ function isPaperSearchCommand(data) {
 	return { query, deep: PAPER_SEARCH_DEEP_PREFIX.test(match[1]) };
 }
 
-async function forwardPaperSearch(query, deep) {
+async function forwardPaperSearch(query, deep, sourceEventId) {
 	if (!paperSearchWebhook) throw new Error('PAPER_KB_SEARCH_WEBHOOK is not configured');
-	const response = await fetch(paperSearchWebhook, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ query, deep }),
-	});
-	if (!response.ok) throw new Error(`search webhook responded ${response.status}`);
-	return response.status;
+	return postWebhookWithRetry(paperSearchWebhook, { query, deep, source_event_id: sourceEventId }, { timeoutMs: 15_000 });
 }
 
 function isPaperFeedbackCommand(data) {
@@ -2715,13 +2705,7 @@ function isPaperFeedbackCommand(data) {
 
 async function forwardPaperFeedback(command, sourceEventId) {
 	if (!paperFeedbackWebhook) throw new Error('PAPER_KB_FEEDBACK_WEBHOOK is not configured');
-	const response = await fetch(paperFeedbackWebhook, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ ...command, source_event_id: sourceEventId }),
-	});
-	if (!response.ok) throw new Error(`feedback webhook responded ${response.status}`);
-	return response.status;
+	return postWebhookWithRetry(paperFeedbackWebhook, { ...command, source_event_id: sourceEventId }, { timeoutMs: 15_000 });
 }
 
 async function forwardXhsCommand(command, sourceEventId) {
@@ -2786,7 +2770,7 @@ async function processFeishuEvent(data, options = {}) {
 	const paperIds = isPaperIngestCommand(data);
 	if (paperIds) {
 		try {
-			await forwardPaperIngest(paperIds);
+			await forwardPaperIngest(paperIds, eventId);
 			updateEvent(eventId, { n8n_status: `已转发论文收录：${paperIds.join(', ')}` });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -2798,7 +2782,7 @@ async function processFeishuEvent(data, options = {}) {
 	const paperSearch = isPaperSearchCommand(data);
 	if (paperSearch) {
 		try {
-			await forwardPaperSearch(paperSearch.query, paperSearch.deep);
+			await forwardPaperSearch(paperSearch.query, paperSearch.deep, eventId);
 			updateEvent(eventId, { n8n_status: `已转发论文检索：${paperSearch.query}${paperSearch.deep ? '（精查）' : ''}` });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

@@ -19,6 +19,12 @@ test('parses topic and author preferences', () => {
 	});
 });
 
+test('accepts immutable recommendation slate ids', () => {
+	assert.deepEqual(parsePaperFeedback('收 2026-W41-a1b2c3d4e5f6-03'), {
+		action: 'accept', items: ['2026-W41-a1b2c3d4e5f6-03'],
+	});
+});
+
 test('does not steal ingest commands or ordinary chatter', () => {
 	assert.equal(parsePaperFeedback('收录 2608.23658v1'), null);
 	assert.equal(parsePaperFeedback('收入增长 20%'), null);

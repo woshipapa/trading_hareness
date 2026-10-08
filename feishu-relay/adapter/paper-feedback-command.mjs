@@ -1,4 +1,4 @@
-const ITEM = /^(?:\d{1,2}|\d{4}-W\d{2}-\d{2})$/i;
+const ITEM = /^(?:\d{1,2}|\d{4}-W\d{2}(?:-[a-z0-9]{12})?-\d{2})$/i;
 
 function parseItems(raw) {
 	return [...new Set(String(raw ?? '')
