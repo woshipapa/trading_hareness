@@ -92,11 +92,18 @@ SQL_OBJECT = re.compile(
     re.IGNORECASE,
 )
 
+#: 写成字符串常量、再拼进 SQL 的表名：``table: 'quant.canonical_bars_daily'``。
+#: 关键字规则看不见它（2026-10-08 发现 relay 的百度盘历史导出就这样直读了 24
+#: 张 quant 表）。只认引号里**恰好一个点**的限定名，所以
+#: ``'quant.market.events'`` 这种出处标签仍然不会误报。
+QUOTED_OBJECT = re.compile(r"""['"`]((?:public|quant)\.[a-z_][a-z0-9_]*)['"`]""")
+
 #: 组件各自拥有的 schema：引用自己的不算跨界。``public`` 不属于任何组件
 #: （n8n 自己的表和飞书投递台账都在里面），所以任何对它的引用都要申报。
+#: 清单里的 ``owned_data`` 优先；这里只是没有清单时的缺省值。
 OWNED_SCHEMAS = {"quant-research": ("quant",)}
 
-#: SQL 行注释。扫描前先去掉。
+#: SQL 行注释。扫描前先去掉（shell / PowerShell 里的 ``--flag`` 不是注释，不去）。
 SQL_COMMENT = re.compile(r"--[^\n]*")
 
 COMPONENT_ROOTS = {
@@ -105,45 +112,137 @@ COMPONENT_ROOTS = {
     "xhs-intel": "xhs-intel",
 }
 
+#: 会写 SQL 或表名的文件类型。shell、PowerShell、SQL 和工作流 JSON 以前不扫，
+#: relay 的 edge 故障切换脚本里的 psql 就从来没被看见过。
+SCANNED_SUFFIXES = (".py", ".mjs", ".js", ".cjs", ".ts", ".sh", ".ps1", ".sql", ".json")
+SHELL_SUFFIXES = (".sh", ".ps1")
+SKIPPED_PARTS = {"__pycache__", "node_modules", "dist", ".git"}
+
+
+def _is_test_file(path: Path) -> bool:
+    name = path.name
+    return ("tests" in path.parts or name.startswith("test_") or name.endswith("_test.py")
+            or any(name.endswith(suffix) for suffix in (".test.mjs", ".test.js", ".test.ts", ".spec.ts")))
+
+
+def _contract_objects(entry: dict) -> list[str]:
+    """One contract may name one object or a list of them (same consumer, sites and reason)."""
+    if isinstance(entry.get("objects"), list):
+        return list(entry["objects"])
+    return [entry["object"]] if isinstance(entry.get("object"), str) else []
+
 
 def _validate_foreign_contracts(document: dict) -> None:
     contracts = document.get("foreign_data_contracts")
-    if contracts is None:
-        return
-    if not isinstance(contracts, list):
-        raise ValueError("foreign_data_contracts must be a list")
-    for entry in contracts:
-        for field in ("consumer", "object", "owner", "kind", "note"):
-            if not isinstance(entry.get(field), str) or not entry[field]:
-                raise ValueError(f"foreign data contract needs a non-empty {field}")
-        sites = entry.get("sites")
-        if not isinstance(sites, list) or not sites or any(not isinstance(s, str) for s in sites):
-            raise ValueError(f"foreign data contract {entry['object']} needs non-empty string sites")
+    if contracts is not None:
+        if not isinstance(contracts, list):
+            raise ValueError("foreign_data_contracts must be a list")
+        for entry in contracts:
+            for field in ("consumer", "owner", "kind", "note"):
+                if not isinstance(entry.get(field), str) or not entry[field]:
+                    raise ValueError(f"foreign data contract needs a non-empty {field}")
+            objects = _contract_objects(entry)
+            if not objects or any(not isinstance(obj, str) or not obj for obj in objects):
+                raise ValueError("foreign data contract needs an object or a non-empty objects list")
+            sites = entry.get("sites")
+            if not isinstance(sites, list) or not sites or any(not isinstance(s, str) for s in sites):
+                raise ValueError(f"foreign data contract {objects[0]} needs non-empty string sites")
+    for component in document.get("components") or []:
+        owned = component.get("owned_data")
+        if owned is None:
+            continue
+        if not isinstance(owned, dict) or set(owned) - {"schemas", "objects", "note"}:
+            raise ValueError(f"component {component.get('id')} owned_data allows schemas, objects and note")
+        for key in ("schemas", "objects"):
+            values = owned.get(key, [])
+            if not isinstance(values, list) or any(not isinstance(v, str) or not v for v in values):
+                raise ValueError(f"component {component.get('id')} owned_data.{key} must be strings")
 
 
-def foreign_data_references(root: Path, component_id: str) -> dict[str, set[str]]:
+def _owned_data(document: dict) -> dict[str, tuple[tuple[str, ...], frozenset[str]]]:
+    """``组件 → (自己的 schema, 自己在共享 schema 里的表)``；清单没写时退回缺省。"""
+    owned = {component_id: (tuple(schemas), frozenset()) for component_id, schemas in OWNED_SCHEMAS.items()}
+    for component in document.get("components") or []:
+        data = component.get("owned_data")
+        if data is not None:
+            owned[component["id"]] = (tuple(data.get("schemas", [])),
+                                      frozenset(obj.lower() for obj in data.get("objects", [])))
+    return owned
+
+
+def _component_files(document: dict, component_id: str) -> list[Path]:
+    """组件的全部源文件：它的目录，加上清单 ``paths`` 里声明的其他位置。"""
+    patterns = [f"{COMPONENT_ROOTS[component_id]}/**"] if component_id in COMPONENT_ROOTS else []
+    for component in document.get("components") or []:
+        if component.get("id") == component_id:
+            patterns.extend(component.get("paths") or [])
+    files: set[Path] = set()
+    for pattern in patterns:
+        candidates = (ROOT / pattern[:-3]).rglob("*") if pattern.endswith("/**") else ROOT.glob(pattern)
+        for path in candidates:
+            if (path.is_file() and path.suffix in SCANNED_SUFFIXES
+                    and not SKIPPED_PARTS.intersection(path.relative_to(ROOT).parts)):
+                files.add(path)
+    return sorted(files)
+
+
+def foreign_data_references(root: Path, component_id: str, *, document: dict | None = None,
+                            owned: tuple[tuple[str, ...], frozenset[str]] | None = None) -> dict[str, set[str]]:
     """这个组件实际引用到的、不属于自己的 schema 对象：``对象 → {文件}``。"""
-    owned = OWNED_SCHEMAS.get(component_id, ())
+    document = document or {}
+    owned_schemas, owned_objects = owned if owned is not None else (OWNED_SCHEMAS.get(component_id, ()), frozenset())
+    if document.get("components"):
+        files = _component_files(document, component_id)
+    else:
+        files = sorted(path for path in root.rglob("*")
+                       if path.is_file() and path.suffix in SCANNED_SUFFIXES
+                       and not SKIPPED_PARTS.intersection(path.parts))
     found: dict[str, set[str]] = {}
-    for suffix in ("*.py", "*.mjs", "*.js"):
-        for path in sorted(root.rglob(suffix)):
-            if "__pycache__" in path.parts or "node_modules" in path.parts:
-                continue
-            # 迁移是历史记录，不是每天在跑的耦合：一条**拆掉**跨界外键的迁移也
-            # 必须在 downgrade 里写出那个对象名。把它们算进来，白名单就只能越
-            # 积越多，棘轮也就失效了。活的耦合看应用代码。
-            if "versions" in path.parts and "migrations" in path.parts:
-                continue
+    for path in files:
+        # 迁移是历史记录，不是每天在跑的耦合：一条**拆掉**跨界外键的迁移也
+        # 必须在 downgrade 里写出那个对象名。把它们算进来，白名单就只能越
+        # 积越多，棘轮也就失效了。活的耦合看应用代码。
+        if "versions" in path.parts and "migrations" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if path.suffix not in SHELL_SUFFIXES:
             # 先去掉 SQL 注释再匹配：注释掉的查询不是活的耦合，而且一句
             # "原来这里是 REFERENCES public.ingestion_jobs" 的说明文字不该让
             # 已经拆掉的耦合看起来还在（这个坑我自己踩过一次）。
-            text = SQL_COMMENT.sub(" ", path.read_text(encoding="utf-8", errors="replace"))
-            for match in SQL_OBJECT.finditer(text):
-                obj = match.group(1).lower()
-                if obj.split(".", 1)[0] in owned:
-                    continue
-                found.setdefault(obj, set()).add(path.relative_to(ROOT).as_posix())
+            text = SQL_COMMENT.sub(" ", text)
+        matches = [match.group(1).lower() for match in SQL_OBJECT.finditer(text)]
+        if not _is_test_file(path):
+            # 测试里写出表名是在描述被测的适配器，不是一处新的耦合。
+            matches += [match.group(1).lower() for match in QUOTED_OBJECT.finditer(text)]
+        for obj in matches:
+            if obj.split(".", 1)[0] in owned_schemas or obj in owned_objects:
+                continue
+            found.setdefault(obj, set()).add(path.relative_to(ROOT).as_posix())
     return found
+
+
+CREATE_TABLE = re.compile(r"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-z_]+\.)?[a-z_][a-z0-9_]*)",
+                          re.IGNORECASE)
+
+
+def owned_data_violations(document: dict) -> list[str]:
+    """``owned_data.objects`` 只能写组件自己真的会建的表。
+
+    否则"声明一张别人的表归我"就能让一处跨界引用静默通过。
+    """
+    violations: list[str] = []
+    for component in document.get("components") or []:
+        declared = (component.get("owned_data") or {}).get("objects") or []
+        if not declared:
+            continue
+        created: set[str] = set()
+        for path in _component_files(document, component["id"]):
+            for match in CREATE_TABLE.finditer(path.read_text(encoding="utf-8", errors="replace")):
+                name = match.group(1).lower()
+                created.add(name if "." in name else f"public.{name}")
+        for obj in sorted(set(item.lower() for item in declared) - created):
+            violations.append(f"{component['id']} declares it owns {obj}, but nothing in its paths creates it")
+    return violations
 
 
 def foreign_data_violations(document: dict) -> list[str]:
@@ -157,13 +256,18 @@ def foreign_data_violations(document: dict) -> list[str]:
     declared: dict[tuple[str, str], set[str]] = {}
     notes: dict[tuple[str, str], str] = {}
     for entry in document.get("foreign_data_contracts") or []:
-        key = (entry["consumer"], entry["object"].lower())
-        declared[key] = set(entry["sites"])
-        notes[key] = entry["owner"]
+        for obj in _contract_objects(entry):
+            key = (entry["consumer"], obj.lower())
+            declared[key] = set(entry["sites"])
+            notes[key] = entry["owner"]
+    owned = _owned_data(document)
     violations: list[str] = []
     seen: set[tuple[str, str]] = set()
     for component_id, relative_root in COMPONENT_ROOTS.items():
-        for obj, files in sorted(foreign_data_references(ROOT / relative_root, component_id).items()):
+        references = foreign_data_references(
+            ROOT / relative_root, component_id, document=document,
+            owned=owned.get(component_id, ((), frozenset())))
+        for obj, files in sorted(references.items()):
             key = (component_id, obj)
             if key not in declared:
                 violations.append(
@@ -337,7 +441,7 @@ def main() -> int:
 
     if args.check:
         violations = (boundary_violations() + foreign_data_violations(manifest)
-                      + shared_database_violations(manifest))
+                      + owned_data_violations(manifest) + shared_database_violations(manifest))
         if violations:
             print("component boundary check failed:", *violations, sep="\n- ")
             return 1

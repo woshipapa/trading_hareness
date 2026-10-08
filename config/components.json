@@ -31,6 +31,12 @@
         "owner-schema",
         "edge-quant-console"
       ],
+      "owned_data": {
+        "schemas": [
+          "quant"
+        ],
+        "note": "quant-service/migrations 是这个 schema 唯一的 DDL 来源；别的组件读它要在 foreign_data_contracts 里逐表申报。"
+      },
       "standalone": {
         "build_context": "quant-service",
         "dockerfile": "quant-service/Dockerfile.standalone",
@@ -66,6 +72,32 @@
         "edge-relay",
         "edge-workflows"
       ],
+      "owned_data": {
+        "objects": [
+          "public.analysis_jobs",
+          "public.baidu_pan_archive_jobs",
+          "public.baidu_pan_oauth_tokens",
+          "public.feishu_group_relay_actions",
+          "public.feishu_group_relay_messages",
+          "public.feishu_group_relay_route_state",
+          "public.feishu_group_relay_routes",
+          "public.feishu_group_relay_sources",
+          "public.feishu_relay_writer_ownership",
+          "public.feishu_summary_listener_state",
+          "public.feishu_user_oauth_tokens",
+          "public.ingestion_asset_parts",
+          "public.ingestion_assets",
+          "public.ingestion_content_items",
+          "public.ingestion_delivery_outbox",
+          "public.ingestion_errors",
+          "public.ingestion_jobs",
+          "public.ingestion_publishers",
+          "public.ingestion_source_profiles",
+          "public.ingestion_topics",
+          "public.paper_kb_deliveries"
+        ],
+        "note": "中继台账建在 n8n 库的 public schema 里（adapter/ledger.mjs 建表，不带 schema 前缀）。public 本身不归任何组件 —— n8n 自己的表也在里面 —— 所以只按表声明。检查器核对每一张都确实由本组件代码创建。"
+      },
       "standalone": {
         "build_context": "feishu-relay",
         "dockerfile": "feishu-relay/adapter/Dockerfile.standalone",
@@ -163,6 +195,40 @@
         "quant-service/app/n8n_workflow_audit.py"
       ],
       "note": "同上。"
+    },
+    {
+      "consumer": "feishu-relay",
+      "objects": [
+        "quant.analyst_evidence",
+        "quant.analyst_observations",
+        "quant.canonical_bars_daily",
+        "quant.daily_adjustment_factors",
+        "quant.daily_fundamentals",
+        "quant.daily_trade_limits",
+        "quant.intraday_board_flow_snapshots",
+        "quant.intraday_quote_observations",
+        "quant.intraday_rule_input_snapshots",
+        "quant.intraday_signal_events",
+        "quant.market_bars_minute",
+        "quant.market_events",
+        "quant.post_close_strategy_candidates",
+        "quant.post_close_strategy_runs",
+        "quant.post_close_strategy_screen_observations",
+        "quant.raw_market_observations",
+        "quant.sector_member_sync_state",
+        "quant.sector_membership_history",
+        "quant.sentiment_cycle_daily",
+        "quant.stock_money_flow_daily",
+        "quant.ten_day_leader_rotation_intraday_observations",
+        "quant.tushare_raw_records",
+        "quant.xiaojie_leader_flow_observations"
+      ],
+      "owner": "quant-research",
+      "kind": "read",
+      "sites": [
+        "feishu-relay/scripts/media/baidu-pan-history-export.mjs"
+      ],
+      "note": "遗留归档工具：把 edge 上已退役的 quant schema（2026-09-05 边缘写入者退役前的数据）按天导出到百度盘。只读、手工运行、不在任何服务的请求路径上。owner 的 quant 数据走 /api/v1 契约（baidu-pan-market-archive.mjs），不得照这里直连。edge 旧库清空后应连同脚本一起删除。"
     }
   ],
   "shared_runtime_databases": [

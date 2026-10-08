@@ -49,6 +49,7 @@ Python import 跨界和 `./`/`../` 路径引用，**看不见 SQL**，所以数�
 | `public.workflow_entity` | n8n（第三方） | quant-research | `quant-service/app/n8n_workflow_audit.py` |
 | `public.workflow_published_version` | n8n（第三方） | quant-research | 同上 |
 | `public.execution_entity` | n8n（第三方） | quant-research | 同上 |
+| 23 张 `quant.*`（见清单） | quant-research | feishu-relay | `feishu-relay/scripts/media/baidu-pan-history-export.mjs` |
 
 这三张是 n8n 自己的内部表，连 `"workflowId"` 这种 camelCase 列名都是它 ORM 的
 产物。读它们是一条**有意保留的兼容缝**，不属于 quant 的契约。原来同一段 35 行
@@ -56,9 +57,19 @@ SQL 被抄了两份，其中一份内联在 `app/routers/` 里 —— 而 AGENTS
 routers 只做 HTTP 边界与入参校验。现在只允许在那一个适配器里出现；读不到时按
 `workflow_audit.available=false` 上报，不再让"未知"塌成"工作流已停用"。
 
-`feishu-relay` 与 `xhs-intel` 对 quant 的跨界数据引用为 **0**：它们消费 quant
-数据走 `/api/v1` HTTP 契约（`baidu-pan-market-archive.mjs` 里的
-`source: 'quant.market.events'` 只是出处标签，不是查表）。
+`feishu-relay` 与 `xhs-intel` 的**服务**消费 quant 数据只走 `/api/v1` HTTP 契约
+（`baidu-pan-market-archive.mjs` 里的 `source: 'quant.market.events'` 只是出处
+标签，不是查表）。唯一的例外是遗留脚本 `baidu-pan-history-export.mjs`：它把
+表名写成字符串常量再拼 SQL，从 edge 上已退役的 quant schema 按天导出到百度盘。
+旧检查只认 `FROM/JOIN/INTO` 后面的表名，看不见它，2026-10-08 起检查器也识别
+引号里的 `schema.table` 字面量（测试文件除外），并按组件在清单里声明的全部路径
+扫描 `.sh/.ps1/.sql/.json/.ts`，所以它现在作为一条多对象契约登记在案。edge 旧库
+清空后应连同脚本一起删除，契约随之变成 stale 并报红。
+
+组件在共享 schema 里拥有的表用 `owned_data` 声明：quant 拥有整个 `quant`
+schema；feishu-relay 只拥有它在 `public` 里建的 21 张台账表（`public` 本身还装着
+n8n 的表，不能整片划给谁）。检查器核对每一张声明的表都真的由本组件代码创建 ——
+声明别人的表归自己，就能让一处跨界引用静默通过。
 
 **已拆除**：`quant.analyst_signals.ingestion_job_id` 曾经是
 `REFERENCES public.ingestion_jobs(job_id) ON DELETE CASCADE` —— `ingestion_jobs`
