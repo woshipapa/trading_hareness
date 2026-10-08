@@ -97,6 +97,12 @@ SHA-256 in `/opt/feishu-relay-edge/xhs-manifest.json` and the collector health
 payload. A deliberately dirty deployment requires `XHS_ALLOW_DIRTY_SOURCE=true`
 and is marked in that manifest, so it must not be described as reproducible.
 
+The deployed compatibility fixes use upstream base `ebb6c4f` and patched commit
+`83132b3`. The exact external Git history is mirrored in this repository's
+`vendor/spider-xhs-20261008` branch because the deployment account cannot write
+to `cv-cat/Spider_XHS`. This branch is provenance only and must not be merged
+into the monorepo mainline.
+
 ## Standalone collector runtime
 
 The collector image can be built from this directory alone. The external
