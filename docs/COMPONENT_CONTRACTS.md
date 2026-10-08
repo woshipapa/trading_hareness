@@ -131,6 +131,48 @@ edge 上同源服务着两个 SPA（nginx 全量代理到适配器 18300，适�
 `git check-ignore`，并端到端验证：改一个被跟踪的 quant 前端文件，控制台单元必须
 识别为脏，而中继单元的判断**不受影响**。
 
+## Hot update per release unit
+
+47 的发布模型是：日常源码改动走带版本的 source overlay、**复用现有镜像**，只有
+运行时依赖或基础设施契约变了才发不可变镜像。每个单元的热更新入口声明在
+`config/components.json` 的 `hot_update_paths`，由
+`scripts/test_hot_update_paths.py` 守住。
+
+| 单元 | 热更新脚本 | 什么情况下必须改走镜像发布 |
+|---|---|---|
+| `owner-quant` | `scripts/shared-peer/deploy-code-only.sh` | requirements/锁文件/Dockerfile/compose/系统包/supervisor 契约；Alembic 迁移（注释与 docstring 改动除外） |
+| `edge-relay` | `feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh` | `adapter/package.json` 的**依赖字段**变化（`scripts` 等无关字段不算） |
+| `edge-quant-console` | `scripts/edge/deploy-quant-console-edge.sh` | 无 —— 纯静态资源 |
+| `edge-xhs` | `xhs-intel/scripts/hotfix-xhs-intel-edge.sh` | `requirements.txt` 与运行镜像不一致；`Dockerfile` 变化；外部 Spider_XHS 变化 |
+
+`owner-schema`（数据库迁移）和 `edge-workflows`（n8n 工作流导入）不在表里：前者
+本质上不能热更新，必须先应用、验证，再切依赖它的代码；后者不是容器源码。
+
+### xhs-intel 原来没有热更新路径
+
+`deploy-xhs-intel-edge.sh` 只要 `XHS_INTEL_TREE_SHA256` 变了就
+`docker compose build xhs-collector` —— **改一行 Python 就重建一次镜像**，而那个
+镜像要装 nodejs/npm、pip 依赖，还要对外部 Spider_XHS 跑 `npm ci`。一次源码改动
+因此变成一次完整的供应链动作。
+
+现在 `xhs-collector` 和适配器、quant-service 用同一套 overlay：挂
+`${XHS_HOTFIX_DIR:-./hotfix-xhs}:/app/hotfix:ro`，`command` 在
+`XHS_HOTFIX_ENABLED=true` 且 `/app/hotfix/current/edge_api.py` 存在时把
+`PYTHONPATH` 指向 overlay 再跑它，否则跑镜像里烤进去的那份。那个镜像发布脚本
+保持原样（它仍是依赖/基础镜像变化时的正道），只是不再是唯一的路。
+
+### 守卫验的是什么
+
+- 每个发布单元都有声明的热更新脚本，脚本存在且可执行；
+- 热更新脚本里**不得出现** `docker build` / `docker pull`；
+- 只要会重建容器，就必须带 `--no-build` 与 `--pull never`；
+- 每条路径都必须写明 fail-closed 条件，并且脚本里真的有那道闸门；
+- 热更新脚本必须放在它所属组件的目录下。
+
+（`feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh` 这个**镜像发布**脚本目前
+还放在 `feishu-relay/` 下，按组件归属应该搬到 `xhs-intel/`。它正在被另一处改动，
+所以这次没动它。）
+
 ## Compatibility rules
 
 - Patch changes keep the documented paths and fields backward compatible.

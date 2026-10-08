@@ -194,5 +194,42 @@
       "serves_at": "/app/hotfix/quant-console/current",
       "note": "quant 控制台（策略与实时数据）的源码属 quant-research，运行位置在 47edge —— 适配器同源代理两个 SPA，所以它必须和飞书面板同源。但它现在是**独立发布单元**：有自己的 hotfix/quant-console/{releases,current}，由 scripts/edge/deploy-quant-console-edge.sh 发布。中继热部署不再构建或发布它，中继的脏检查也不再包含 frontend/；反过来发控制台也不碰中继的 releases。首次切换顺序：先发控制台（目录要先存在），再发中继 —— 目录缺失时适配器会退回镜像内副本，是降级而不是 404。"
     }
-  ]
+  ],
+  "hot_update_paths": {
+    "quant-research": {
+      "script": "scripts/shared-peer/deploy-code-only.sh",
+      "unit": "owner-quant",
+      "reuses_image": true,
+      "full_release_required_when": [
+        "requirements.txt / 锁文件 / Dockerfile / compose / 系统包 / supervisor 契约",
+        "quant-service/migrations/versions/*.py（注释与 docstring 改动除外）"
+      ]
+    },
+    "edge-quant-console": {
+      "script": "scripts/edge/deploy-quant-console-edge.sh",
+      "unit": "edge-quant-console",
+      "reuses_image": true,
+      "full_release_required_when": [
+        "无 —— 纯静态资源，适配器按请求读目录"
+      ]
+    },
+    "feishu-relay": {
+      "script": "feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh",
+      "unit": "edge-relay",
+      "reuses_image": true,
+      "full_release_required_when": [
+        "adapter/package.json 的依赖字段变化（scripts 等无关字段不算）"
+      ]
+    },
+    "xhs-intel": {
+      "script": "xhs-intel/scripts/hotfix-xhs-intel-edge.sh",
+      "unit": "edge-xhs",
+      "reuses_image": true,
+      "full_release_required_when": [
+        "xhs-intel/requirements.txt 与运行镜像里烤进去的那份不一致",
+        "xhs-intel/Dockerfile 变化（基础镜像、系统包、npm ci 都在里面）",
+        "外部 Spider_XHS（xhs-source）变化 —— 走 feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh"
+      ]
+    }
+  }
 }
