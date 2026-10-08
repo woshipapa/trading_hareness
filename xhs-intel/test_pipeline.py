@@ -117,6 +117,17 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.store.ready_deliveries()[0]['job_id'], first['job_id'])
         self.assertEqual(self.store.list_delivery_jobs()[0]['job_type'], 'single_note_analysis')
 
+    def test_single_note_analysis_has_priority_over_batch_work(self):
+        self.enqueue()
+        interactive = normalize({
+            'id': '9' * 24,
+            'note_card': {'title': 'Interactive note', 'desc': 'serving'},
+        }, 'single:' + '9' * 24)
+        expected = self.store.enqueue_single_note(interactive)
+        claimed = self.store.claim('mac')
+        self.assertEqual(claimed['job_id'], expected['job_id'])
+        self.assertEqual(claimed['job_type'], 'single_note_analysis')
+
     def test_note_reference_accepts_share_text_and_rejects_external_hosts(self):
         reference = parse_note_reference(
             '复制内容 https://www.xiaohongshu.com/discovery/item/' + 'A' * 24

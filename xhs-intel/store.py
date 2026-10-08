@@ -257,7 +257,11 @@ class Store:
         stamp = time.time() if clock is None else clock
         with self.connect() as db:
             db.execute('INSERT OR REPLACE INTO workers VALUES(?,?)', (worker, stamp))
-            row = db.execute("SELECT * FROM jobs WHERE (status='pending' AND available<=?) OR (status='processing' AND lease_until<?) ORDER BY created LIMIT 1", (stamp, stamp)).fetchone()
+            row = db.execute("""SELECT * FROM jobs
+                                WHERE (status='pending' AND available<=?)
+                                   OR (status='processing' AND lease_until<?)
+                                ORDER BY CASE WHEN job_type='single_note_analysis' THEN 0 ELSE 1 END,
+                                         created LIMIT 1""", (stamp, stamp)).fetchone()
             if not row:
                 return None
             lease = uuid.uuid4().hex
