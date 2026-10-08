@@ -28,7 +28,8 @@
       "release": "owner-quant",
       "release_units": [
         "owner-quant",
-        "owner-schema"
+        "owner-schema",
+        "edge-quant-console"
       ],
       "standalone": {
         "build_context": "quant-service",
@@ -187,10 +188,11 @@
     {
       "artifact": "frontend/dist",
       "owned_by": "quant-research",
-      "published_by": "edge-relay",
-      "publisher": "feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh",
+      "published_by": "edge-quant-console",
+      "publisher": "scripts/edge/deploy-quant-console-edge.sh",
       "served_from": "47edge",
-      "note": "quant 的仪表盘源码属 quant-research，但构建与发布都在 edge 热部署里（脚本 npm run build 之后把 frontend/dist 发成 quant-frontend-dist）。两个后果：owner 改完前端要等一次 edge 发布才生效；而一次只为 xhs 的edge 发布也会重新发布 quant 面板。所以 edge 脚本判断工作区是否干净时必须盯 frontend/ 源码目录 —— 盯 frontend/dist 等于没盯（它在 .gitignore 里）。owner 的 code-only 发布不碰它：frontend/* 被归入 skipped_files。"
+      "serves_at": "/app/hotfix/quant-console/current",
+      "note": "quant 控制台（策略与实时数据）的源码属 quant-research，运行位置在 47edge —— 适配器同源代理两个 SPA，所以它必须和飞书面板同源。但它现在是**独立发布单元**：有自己的 hotfix/quant-console/{releases,current}，由 scripts/edge/deploy-quant-console-edge.sh 发布。中继热部署不再构建或发布它，中继的脏检查也不再包含 frontend/；反过来发控制台也不碰中继的 releases。首次切换顺序：先发控制台（目录要先存在），再发中继 —— 目录缺失时适配器会退回镜像内副本，是降级而不是 404。"
     }
   ]
 }

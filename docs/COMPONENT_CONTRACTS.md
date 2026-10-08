@@ -93,23 +93,43 @@ routers 只做 HTTP 边界与入参校验。现在只允许在那一个适配器
 | 改 feishu-relay（含 xhs、分析师）热部署 47edge 不动 47owner | edge 脚本正文里不出现 `47.110.79.189` / `stockpeer` / `OWNER_PEER_*`，只操作 `EDGE_HOST` |
 | 47owner 的策略更新与迭代不动 47edge | owner 脚本正文里不出现 `47.114.113.152` / `EDGE_HOST`；且 `feishu-relay/*`、`frontend/*` 被归入 `skipped_files`（"不属于 owner 运行时"），未知路径一律 `full release required` fail closed，迁移变更强制走完整流程 |
 
-### 唯一还成立的跨单元耦合
+### 两个前端已拆成独立发布单元
 
-`frontend/dist`（quant 仪表盘）**源码属 quant-research，构建与发布在 edge 热部署里**
-（声明见 `config/components.json` 的 `cross_unit_artifacts`）。两个后果：
+edge 上同源服务着两个 SPA（nginx 全量代理到适配器 18300，适配器按路由分发：
+`/monitor`、`/dashboard`、`/workbench`、`/relay` 给飞书面板，`/`、`/research`、
+`/personal` 给 quant 控制台）。**同源是故意的** —— 两个 app 共用同一套 API、SSE
+和认证边界，所以不拆同源。拆的是**发布单元**：
 
-- owner 改完前端，要等一次 edge 发布才生效；
-- 一次只为 xhs 的 edge 发布，也会重新发布 quant 面板。
+| | 飞书面板 | quant 控制台 |
+|---|---|---|
+| 源码 | `feishu-relay/dashboard/` | `frontend/`（归 quant-research） |
+| 发布单元 | `edge-relay` | `edge-quant-console` |
+| 发布脚本 | `feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh` | `scripts/edge/deploy-quant-console-edge.sh` |
+| 落盘位置 | `hotfix/releases/<id>/frontend-dist` | `hotfix/quant-console/releases/<id>` |
+| 适配器读取 | `FRONTEND_DIST=/app/hotfix/current/frontend-dist` | `QUANT_FRONTEND_DIST=/app/hotfix/quant-console/current` |
+| 脏检查 pathspec | `feishu-relay` | `frontend` |
 
-因此 edge 脚本判断工作区是否干净时**必须盯 `frontend/` 源码目录**。它原来盯的是
-`frontend/dist` 和 `feishu-relay/dashboard/dist` —— 两个都在 `.gitignore` 里，
-`git diff` 永远返回 0，所以带着未提交的 quant 前端改动热部署，改动会被构建发到
-edge，而 `release_id` 上**不带 `-dirty`**，出处在说谎。现已改为盯源码目录，并有
-测试端到端验证（真的改一个被跟踪的前端文件，必须被识别为脏）。
+拆之前：`frontend/dist` 被打进中继的原子发布目录，所以一次只为 xhs 或分析师的
+中继热部署会顺带重新构建并发布 quant 控制台；反过来 quant 改完前端必须等一次
+中继发布才生效。现在两者互不覆盖，各自有 `releases/` 与 `current/`、各自可回滚。
 
-要彻底解掉这条耦合，需要把 quant 仪表盘变成 owner 自己的发布单元（或让 edge 只
-消费一个带版本的产物，而不是在 edge 侧 `npm run build`）。那是部署拓扑变更，
-不在本轮范围内。
+`./hotfix` 本来就整体挂进适配器容器，所以**不需要新增 compose 卷**，只改了
+`QUANT_FRONTEND_DIST` 的路径。该目录不存在时适配器会退回镜像内副本
+（`index.mjs` 的 `existsSync` 兜底），是降级不是 404 —— 但首次切换仍要
+**先发控制台、再发中继**，并且发完中继要重启一次适配器（`quantFrontendDist`
+在启动时求值一次；之后换 symlink 无需重启）。
+
+### 其余跨单元事实
+
+`frontend/dist` 仍然**运行在 47edge**（同源要求），但已是独立发布单元
+`edge-quant-console`，声明见 `config/components.json` 的 `cross_unit_artifacts`。
+
+两个脚本的脏检查都**只盯自己的源码目录**，而且都不能盯 `*/dist` —— 那些目录在
+`.gitignore` 里，`git diff` 对它们永远返回 0，拿来当 pathspec 等于没有检查
+（带着未提交改动热部署，改动会被构建发出去而 `release_id` 上不带 `-dirty`，
+出处在说谎）。`scripts/test_release_unit_isolation.py` 逐个 pathspec 过
+`git check-ignore`，并端到端验证：改一个被跟踪的 quant 前端文件，控制台单元必须
+识别为脏，而中继单元的判断**不受影响**。
 
 ## Compatibility rules
 

@@ -218,10 +218,6 @@ fi
 	echo "feishu-relay adapter tests failed; nothing was staged" >&2
 	exit 1
 }
-( cd "$repo_root/frontend" && npm run build ) || {
-	echo "quant frontend build failed; nothing was staged" >&2
-	exit 1
-}
 ( cd "$project_root/dashboard" && npm run build ) || {
 	echo "Feishu dashboard build failed; nothing was staged" >&2
 	exit 1
@@ -246,14 +242,12 @@ head_sha="$(git -C "$repo_root" rev-parse --verify HEAD)"
 [[ "$head_sha" =~ ^[0-9a-fA-F]{7,64}$ ]] || { echo "cannot derive a valid git SHA" >&2; exit 2; }
 head_short="${head_sha:0:12}"
 dirty_suffix=""
-# 这里要看的是**源码**，不是构建产物。``frontend/dist`` 和
-# ``feishu-relay/dashboard/dist`` 都在 .gitignore 里，所以拿它们当 pathspec
-# 的话 ``git diff`` 永远返回 0 —— 带着未提交的 quant 前端改动跑这条热部署，
-# 它会把那些改动构建并发到 edge，而 release_id 上**不会**带 -dirty，出处就在
-# 说谎。两个 dist 的源码目录分别是 frontend/ 和 feishu-relay/dashboard/，
-# 后者已被下面的 feishu-relay 覆盖。
-if ! git -C "$repo_root" diff --quiet --ignore-submodules -- \
-  feishu-relay frontend; then
+# 只看本发布单元自己的源码。quant 控制台已经拆成独立发布单元
+# （scripts/edge/deploy-quant-console-edge.sh），所以 frontend/ 不在这里。
+# 注意盯的是源码目录而不是 dist：``feishu-relay/dashboard/dist`` 在 .gitignore
+# 里，拿它当 pathspec 的话 ``git diff`` 永远返回 0，等于没有检查 —— 它的源码
+# 已被 feishu-relay 覆盖。
+if ! git -C "$repo_root" diff --quiet --ignore-submodules -- feishu-relay; then
   dirty_suffix="-dirty"
 fi
 release_id="hotfix-$(date -u +%Y%m%dT%H%M%SZ)-${head_short}${dirty_suffix}-$RANDOM"
@@ -268,14 +262,13 @@ fi
 stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/feishu-relay-overlay.XXXXXX")"
 cleanup() { rm -rf -- "$stage_dir"; }
 trap cleanup EXIT
-mkdir -p "$stage_dir/adapter" "$stage_dir/frontend-dist" "$stage_dir/quant-frontend-dist" "$stage_dir/bridge" "$stage_dir/ops"
+mkdir -p "$stage_dir/adapter" "$stage_dir/frontend-dist" "$stage_dir/bridge" "$stage_dir/ops"
 
 # package.json is copied for a compatibility check; npm is never run here.
 rsync -a --delete --safe-links \
   --exclude 'node_modules' --exclude '*.test.mjs' --exclude '*.log' \
   "$project_root/adapter/" "$stage_dir/adapter/"
 rsync -a --delete --safe-links "$project_root/dashboard/dist/" "$stage_dir/frontend-dist/"
-rsync -a --delete --safe-links "$repo_root/frontend/dist/" "$stage_dir/quant-frontend-dist/"
 install -m 0644 "$project_root/config/source-registry.json" "$stage_dir/source-registry.json"
 for bridge_file in "$project_root"/bridge/*.py; do
   bridge_name="$(basename "$bridge_file")"
@@ -295,7 +288,6 @@ test -f "$stage_dir/adapter/package.json"
 test -f "$stage_dir/adapter/index.mjs"
 test -f "$stage_dir/source-registry.json"
 test -f "$stage_dir/frontend-dist/index.html"
-test -f "$stage_dir/quant-frontend-dist/index.html"
 test -f "$stage_dir/bridge/bridge.py"
 test -f "$stage_dir/bridge/larkagentx_image_property.py"
 test -f "$stage_dir/bridge/proto_wire.py"
@@ -381,7 +373,6 @@ test -f "$upload_dir/adapter/index.mjs"
 test -f "$upload_dir/adapter/package.json"
 test -f "$upload_dir/source-registry.json"
 test -f "$upload_dir/frontend-dist/index.html"
-test -f "$upload_dir/quant-frontend-dist/index.html"
 test -f "$upload_dir/bridge/bridge.py"
 test -f "$upload_dir/bridge/larkagentx_image_property.py"
 test -f "$upload_dir/bridge/proto_wire.py"

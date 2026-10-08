@@ -4,7 +4,11 @@
   "id": "quant-research",
   "runtime": "47owner",
   "release": "owner-quant",
-  "release_units": ["owner-quant", "owner-schema"],
+  "release_units": [
+    "owner-quant",
+    "owner-schema",
+    "edge-quant-console"
+  ],
   "description": "Research-only quant API, evidence store and replay services.",
   "interfaces": [
     {
@@ -13,14 +17,19 @@
       "base_url_env": "QUANT_SERVICE_URL",
       "health_path": "/health",
       "auth": "write routes use the owner write boundary; read routes use the existing API contract",
-      "consumers": ["feishu-relay", "frontend"]
+      "consumers": [
+        "feishu-relay",
+        "frontend"
+      ]
     },
     {
       "id": "quant-postgres-v1",
       "kind": "database",
       "connection_env": "PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD",
       "migration_owner": "owner-schema",
-      "consumers": ["quant-research"]
+      "consumers": [
+        "quant-research"
+      ]
     }
   ],
   "external_dependencies": [
@@ -38,5 +47,8 @@
     "research_only": true,
     "live_effect": "none",
     "orders": false
+  },
+  "release_unit_notes": {
+    "edge-quant-console": "quant 控制台（frontend/）的静态资源发布单元。源码归本组件，运行位置在 47edge —— 适配器同源代理两个 SPA，所以它必须和飞书面板同源。由 scripts/edge/deploy-quant-console-edge.sh 独立发布到 hotfix/quant-console/，与 feishu-relay 的发布目录互不覆盖。"
   }
 }

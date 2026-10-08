@@ -18,7 +18,12 @@ class ComponentBoundaryTests(unittest.TestCase):
             {"quant-research", "feishu-relay", "xhs-intel"},
         )
         releases = {item["id"]: item["release_units"] for item in document["components"]}
-        self.assertEqual(releases["quant-research"], ["owner-quant", "owner-schema"])
+        # ``edge-quant-console`` 是第三个单元：quant 控制台（frontend/）的源码归本
+        # 组件，但静态资源跑在 47edge（适配器同源代理两个 SPA）。它以前被打包进
+        # feishu-relay 的原子发布目录，于是一次 xhs 热部署会顺带重发 quant 控制台、
+        # 而 quant 改完前端要等中继发布才生效。现在它自己发自己。
+        self.assertEqual(releases["quant-research"],
+                         ["owner-quant", "owner-schema", "edge-quant-console"])
         self.assertEqual(releases["feishu-relay"], ["edge-relay", "edge-workflows"])
         for item in document["components"]:
             self.assertTrue(item["standalone"]["build_context"])

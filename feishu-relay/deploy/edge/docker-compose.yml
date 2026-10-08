@@ -177,6 +177,13 @@ services:
       # LarkAgentX bridge source for its systemd service. Keep this disabled
       # for immutable image releases; the hotfix script enables it only after
       # staging and checks.
+      #
+      # QUANT_FRONTEND_DIST 指向 /app/hotfix/quant-console/current，而不是中继
+      # 发布目录里的 quant-frontend-dist：quant 控制台的源码归 quant-research
+      # 组件，已经拆成独立发布单元（scripts/edge/deploy-quant-console-edge.sh），
+      # 有自己的 releases/ 和 current/。``./hotfix`` 整体就是挂载点，所以这里
+      # 不需要新增卷。该目录不存在时适配器会退回镜像内的副本（index.mjs 里的
+      # existsSync 兜底），所以首次切换要先发控制台、再发中继。
       FEISHU_ADAPTER_HOTFIX_ENABLED: ${FEISHU_ADAPTER_HOTFIX_ENABLED:-false}
       APP_GIT_SHA: ${APP_GIT_SHA:-unknown}
       APP_RELEASE: ${APP_RELEASE:-unknown}
@@ -189,7 +196,7 @@ services:
         if [ "$$FEISHU_ADAPTER_HOTFIX_ENABLED" = "true" ] && [ -f
         /app/hotfix/current/adapter/index.mjs ]; then export
         FRONTEND_DIST=/app/hotfix/current/frontend-dist; export
-        QUANT_FRONTEND_DIST=/app/hotfix/current/quant-frontend-dist; export
+        QUANT_FRONTEND_DIST=/app/hotfix/quant-console/current; export
         SOURCE_REGISTRY_FILE=/app/hotfix/current/source-registry.json; export
         FEISHU_ADAPTER_SOURCE_MODE=source-overlay; exec node
         /app/hotfix/current/adapter/index.mjs; fi; export
