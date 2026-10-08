@@ -380,7 +380,7 @@ from .intraday_schedule import (
 from .intraday_monitor_service import run_intraday_monitor_loop
 from .market_event_capture import capture as capture_market_events
 from .longhu_auction_capture import capture as capture_longhu_morning_auction
-from .market_event_runtime import run_market_event_capture_loop
+from .market_event_runtime import MarketEventCaptureDependencies, run_market_event_capture_service
 from .auction_pulse_runtime import AuctionPulseDependencies, run_auction_pulse_service
 from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapshot_loop
 from .datasources import runtime as datasource_runtime
@@ -3372,78 +3372,19 @@ async def intraday_minute_profile_capture_loop() -> None:
 
 
 async def market_event_capture_loop() -> None:
-    """Persist Fuyao all-A auction/pool/chain evidence on a 60s cadence."""
-    async def fetch(capability: str, params: dict[str, Any]) -> Mapping[str, Any]:
-        from .fuyao_provider import fetch as fetch_fuyao
-        return await fetch_fuyao(capability, params)
-
-    async def persist(provider: str, rows: list[dict[str, Any]]) -> int:
-        return await run_database_blocking(persist_market_events, provider, rows, timeout_seconds=60)
-
-    async def open_session(now: datetime) -> bool:
-        active, _reason = await market_observation_session_async(now=now)
-        return active
-
-    async def all_symbols() -> Sequence[str]:
-        # Fuyao rejects a whole 100-code batch for one delisted or index code,
-        # so its own live code list is the auction universe; the local
-        # universe is only the fallback.
-        try:
-            rows, _meta = await intraday_all_a_snapshot()
-            if rows:
-                return [str(row["symbol"]) for row in rows]
-        except Exception as error:  # noqa: BLE001 - fall back to the local universe
-            print(f"Fuyao code list unavailable for the auction capture: {str(error)[:200]}")
-        return await run_database_blocking(lambda: _market_snapshot_actions.universe_symbols("all_a"), timeout_seconds=15)
-
-    async def persist_observations(provider: str, capability: str, rows: list[dict[str, Any]]) -> int:
-        return await run_database_blocking(persist_timed_observations, provider, capability, rows, timeout_seconds=60)
-
-    health_names = {
-        "a_share_limit_up_pool": "limits.limit_up_pool",
-        "a_share_limit_break_pool": "limits.broken_pool",
-        "a_share_limit_down_pool": "limits.limit_down_pool",
-        "a_share_limit_up_ladder": "limits.ladder",
-        "a_share_auction_short_term_benchmark": "auction.short_term_benchmark",
-        "a_share_auction_snapshot": "auction.open_snapshot",
-        "a_share_hot_stock_list": "attention.ths_hot_rank",
-        "a_share_skyrocket_list": "attention.ths_skyrocket",
-        "a_share_anomaly_analysis_list": "limits.anomaly_tape",
-    }
-
-    async def persist_health(provider: str, capability: str, rows: int, error: str | None) -> None:
-        health_capability_name = health_capability(
-            provider, health_names.get(capability, capability), fallback=capability,
-        )
-
-        def write() -> None:
-            with db.transaction() as connection:
-                if error is None and rows > 0:
-                    record_provider_success(connection, provider, health_capability_name, rows, None)
-                else:
-                    record_provider_failure(
-                        connection, provider, health_capability_name,
-                        error or f"empty response for {capability}", None,
-                    )
-
-        await run_database_blocking(write, timeout_seconds=10)
-
-    async def longhu_auction(observed_at: datetime) -> dict[str, Any]:
-        if not longhu_vendor_configured():
-            return {"status": "skipped", "reason": "longhu_not_configured", "stored": 0}
-
-        async def call(request: dict[str, Any]) -> dict[str, Any]:
-            return await shared_stock_api_call(request)
-
-        return await capture_longhu_morning_auction(observed_at, call=call, persist=persist)
-
-    attention_state: dict[str, Any] = {}
-    await run_market_event_capture_loop(
-        interval_seconds=60, capture=lambda observed_at, **kwargs: capture_market_events(
-            observed_at, fetch=fetch, persist=persist, persist_observations=persist_observations,
-            persist_health=persist_health, state=attention_state, **kwargs,
-        ), capture_longhu_auction=longhu_auction, session_open=open_session, symbols=all_symbols,
-    )
+    # Late-bound so a test that patches one of these names in app.main still reaches the service.
+    await run_market_event_capture_service(MarketEventCaptureDependencies(
+        fetch_fuyao=lambda capability, params: fetch_fuyao_data(capability, params),
+        run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs), database=db,
+        persist_market_events=persist_market_events, persist_timed_observations=persist_timed_observations,
+        session_open=lambda now: market_observation_session_async(now=now),
+        all_a_snapshot=lambda: intraday_all_a_snapshot(),
+        universe_symbols=lambda: _market_snapshot_actions.universe_symbols("all_a"),
+        health_capability=health_capability, record_success=record_provider_success,
+        record_failure=record_provider_failure, longhu_configured=lambda: longhu_vendor_configured(),
+        vendor_call=lambda request: shared_stock_api_call(request),
+        capture_events=capture_market_events, capture_longhu_auction=capture_longhu_morning_auction,
+    ))
 
 
 def auction_pulse_enabled() -> bool:
