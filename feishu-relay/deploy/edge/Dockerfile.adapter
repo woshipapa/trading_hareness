@@ -21,7 +21,8 @@ COPY feishu-relay/adapter/index.mjs feishu-relay/adapter/ledger.mjs feishu-relay
      feishu-relay/adapter/summary-ingestion-filter.mjs feishu-relay/adapter/ingestion-health.mjs \
      feishu-relay/adapter/paper-ingest-command.mjs feishu-relay/adapter/paper-feedback-command.mjs \
      feishu-relay/adapter/xhs-command.mjs \
-     feishu-relay/adapter/personal-decision-routes.mjs feishu-relay/adapter/baidu-pan-storage.mjs \
+     feishu-relay/adapter/personal-decision-routes.mjs feishu-relay/adapter/research-routes.mjs \
+     feishu-relay/adapter/baidu-pan-storage.mjs \
      feishu-relay/adapter/baidu-pan-market-archive.mjs feishu-relay/adapter/media-chunks.mjs \
      feishu-relay/adapter/larkagentx-ingress.mjs feishu-relay/adapter/webhook-config.mjs ./
 COPY feishu-relay/adapter/paper-delivery-retry.mjs ./

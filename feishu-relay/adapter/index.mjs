@@ -28,7 +28,7 @@ import { parsePaperIngestIds } from './paper-ingest-command.mjs';
 import { cardPayload } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { parseXhsCommand } from './xhs-command.mjs';
-import { personalDecisionResearchPaths } from './personal-decision-routes.mjs';
+import { matchResearchRoute } from './research-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
 import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
@@ -1731,124 +1731,6 @@ async function updateRelayRoute(sourceKey, payload) {
 	return ledger.updateRelayRoute(sourceKey, await resolveRelayRouteInput(payload, current));
 }
 
-const researchPaths = new Map([
-	['/api/research/runtime/health', '/health'],
-	['/api/research/overview', '/api/v1/research/overview'],
-	['/api/research/reports', '/api/v1/remote-archive/reports'],
-	['/api/research/remote-archive/messages', '/api/v1/remote-archive/messages'],
-	['/api/research/claims', '/api/v1/analyst-claims'],
-	['/api/research/providers', '/api/v1/providers/health'],
-	['/api/research/providers/realtime-health', '/api/v1/providers/realtime-health'],
-	// Keep the generated OpenAPI path readable through the edge as well as the dashboard alias.
-	['/api/v1/providers/realtime-health', '/api/v1/providers/realtime-health'],
-	['/api/research/provider-capabilities', '/api/v1/providers/capabilities'],
-	['/api/research/quality', '/api/v1/data-quality/issues'],
-	['/api/research/recommendations', '/api/v1/recommendations/latest'],
-	['/api/research/universes/core', '/api/v1/universes/core'],
-	['/api/research/features/latest', '/api/v1/features/latest'],
-	['/api/research/claim-review', '/api/v1/claim-review'],
-	['/api/research/factors', '/api/v1/factors'],
-	['/api/research/factor-evaluations', '/api/v1/factors/evaluations'],
-	['/api/research/strategies', '/api/v1/strategies'],
-	['/api/research/strategy-experiments', '/api/v1/strategies/experiments'],
-	['/api/research/strategy-experiments-watchlist', '/api/v1/strategies/experiments'],
-	['/api/research/frameworks', '/api/v1/research-frameworks'],
-	['/api/research/training/roadmap', '/api/v1/training/roadmap'],
-	['/api/research/data-readiness/history-estimate', '/api/v1/data-readiness/history-estimate'],
-	['/api/research/data-readiness/features', '/api/v1/data-readiness/features'],
-	['/api/research/data-readiness/replay', '/api/v1/data-readiness/replay'],
-	['/api/research/tushare/catalog', '/api/v1/providers/tushare/catalog'],
-	['/api/research/tushare/raw', '/api/v1/providers/tushare/raw'],
-	['/api/research/minute/imports', '/api/v1/market/minute/imports'],
-	['/api/research/market/snapshots', '/api/v1/market/snapshots'],
-	['/api/research/market/sectors', '/api/v1/market/sectors'],
-	['/api/research/market/sector-flows', '/api/v1/market/sectors/flows'],
-	['/api/research/market/sectors/concepts', '/api/v1/market/sectors/concepts'],
-	['/api/research/market/sectors/concepts/candidates', '/api/v1/market/sectors/concepts/candidates'],
-	['/api/research/market/sectors/concepts/members/backfill/status', '/api/v1/market/sectors/concepts/members/backfill/status'],
-	['/api/research/market/sectors/review/report/latest', '/api/v1/market/sectors/review/report/latest'],
-	['/api/research/market/sectors/intraday/curves', '/api/v1/market/sectors/intraday/curves'],
-	['/api/research/market/flow/features', '/api/v1/market/flow/features'],
-	['/api/research/intraday/board-rotations/latest', '/api/v1/intraday/board-rotations/latest'],
-	['/api/research/intraday/board-stock-mining/latest', '/api/v1/intraday/board-stock-mining/latest'],
-	['/api/research/intraday/limit-linkage/latest', '/api/v1/intraday/limit-linkage/latest'],
-	['/api/research/strategy/reviews/latest', '/api/v1/strategy/reviews/latest'],
-	['/api/research/strategy/post-close/latest', '/api/v1/strategy/post-close/latest'],
-	['/api/research/strategy/ablation/latest', '/api/v1/strategy/ablation/latest'],
-	['/api/research/strategy/health', '/api/v1/strategy/health'],
-	['/api/research/strategy/pattern-mining/latest', '/api/v1/strategy/pattern-mining/latest'],
-	['/api/research/ten-day-leader-rotation/latest', '/api/v1/research/ten-day-leader-rotation/latest'],
-	['/api/research/intraday/outcomes/latest', '/api/v1/intraday/outcomes/latest'],
-	['/api/research/paper/status', '/api/v1/paper/status'],
-	...personalDecisionResearchPaths,
-	['/api/research/strategy/contracts', '/api/v1/strategy/contracts'],
-	['/api/research/strategy/funnel', '/api/v1/strategy/funnel'],
-	['/api/research/intraday/services/status', '/api/v1/intraday/services/status'],
-	['/api/research/intraday/watchlists', '/api/v1/intraday/watchlists'],
-	['/api/research/intraday/scans/latest', '/api/v1/intraday/scans/latest'],
-	['/api/research/strategy/decisions/latest', '/api/v1/strategy/decisions/latest'],
-	['/api/research/strategy/promotion', '/api/v1/strategy/promotion'],
-	['/api/research/strategy/watchlist-proposals', '/api/v1/strategy/watchlist-proposals'],
-	['/api/research/analyst-scorecards', '/api/v1/analyst-scorecards'],
-	['/api/research/analyst-research/observations', '/api/v1/analyst-research/observations'],
-	['/api/research/analyst-research/status', '/api/v1/analyst-research/status'],
-	['/api/research/analyst-skills', '/api/v1/analyst-skills'],
-	['/api/research/analyst-research/sync-health', '/api/v1/analyst-research/sync-health'],
-	['/api/research/analyst-research/market-evaluation', '/api/v1/analyst-research/market-evaluation'],
-	['/api/research/analyst-research/stock-timeline', '/api/v1/analyst-research/stock-timeline'],
-	['/api/research/analyst-research/reviews', '/api/v1/analyst-research/reviews'],
-	['/api/research/analyst-research/reviews/latest', '/api/v1/analyst-research/reviews/latest'],
-	['/api/research/analyst-research/reviews/run', '/api/v1/analyst-research/reviews/run'],
-	['/api/research/research-runs', '/api/v1/research/runs'],
-	['/api/research/strategy/daily-summary/latest', '/api/v1/strategy/daily-summary/latest'],
-	['/api/research/agent/context', '/api/v1/agent/context'],
-	['/api/research/automation/runs', '/api/v1/automation/runs'],
-	['/api/research/analyst-prompt-lab/status', '/api/v1/analyst-prompt-lab/status'],
-	['/api/research/strategy/governance', '/api/v1/strategy/governance'],
-	['/api/research/paper/accounts', '/api/v1/paper/accounts'],
-	['/api/research/events/announcements', '/api/v1/events/announcements'],
-	['/api/research/events/lhb', '/api/v1/events/lhb'],
-]);
-
-const researchActions = new Map([
-	['/api/research/tushare/fetch', '/api/v1/providers/tushare/fetch'],
-	['/api/research/tushare/audit', '/api/v1/providers/tushare/audit'],
-	['/api/research/pipeline/daily', '/api/v1/pipeline/daily'],
-	['/api/research/snapshots/build', '/api/v1/data-snapshots/build'],
-	['/api/research/reports/reprocess', '/api/v1/remote-archive/reports/reprocess'],
-	['/api/research/outcomes/recompute', '/api/v1/outcomes/recompute'],
-	['/api/research/intraday/outcomes/recompute', '/api/v1/intraday/outcomes/recompute'],
-	['/api/research/scorecards/recompute', '/api/v1/analyst-scorecards/recompute'],
-	['/api/research/features/build', '/api/v1/features/build'],
-	['/api/research/recommendations/generate', '/api/v1/recommendations/generate'],
-	['/api/research/universes/members', '/api/v1/universes/members'],
-	['/api/research/factors/evaluate', '/api/v1/factors/evaluate'],
-	['/api/research/strategies/backtest', '/api/v1/strategies/backtest'],
-	['/api/research/strategy/post-close/run', '/api/v1/strategy/post-close/run'],
-	['/api/research/strategy/pattern-mining/run', '/api/v1/strategy/pattern-mining/run'],
-	['/api/research/ten-day-leader-rotation/run', '/api/v1/research/ten-day-leader-rotation/run'],
-	['/api/research/strategy/watchlist-main-wave/run', '/api/v1/strategy/watchlist-main-wave/run'],
-	['/api/research/market/universe/sync', '/api/v1/market/universe/sync'],
-	['/api/research/market/full-daily/sync', '/api/v1/market/sync/full-daily'],
-	['/api/research/market/full-daily-controls/sync', '/api/v1/market/sync/full-daily-controls'],
-	['/api/research/market/post-close/refresh', '/api/v1/market/post-close/refresh'],
-	['/api/research/market/flow/features/rebuild', '/api/v1/market/flow/features/rebuild'],
-	['/api/research/market/snapshots/run', '/api/v1/market/snapshots/run'],
-	['/api/research/market/sectors/sync', '/api/v1/market/sectors/sync'],
-	['/api/research/market/sector-flows/sync', '/api/v1/market/sectors/flows/sync'],
-	['/api/research/market/sectors/concepts/sync', '/api/v1/market/sectors/concepts/sync'],
-	['/api/research/market/sectors/review/report/run', '/api/v1/market/sectors/review/report/run'],
-	['/api/research/market/sectors/concepts/members/backfill/run', '/api/v1/market/sectors/concepts/members/backfill/run'],
-	['/api/research/market/sectors/concepts/candidates/sync', '/api/v1/market/sectors/concepts/candidates/sync'],
-	['/api/research/market/sectors/concepts/research/run', '/api/v1/market/sectors/concepts/research/run'],
-	['/api/research/events/cninfo/sync', '/api/v1/events/cninfo/sync'],
-	['/api/research/providers/realtime/probe', '/api/v1/providers/realtime/probe'],
-	['/api/research/providers/akshare/probe', '/api/v1/providers/akshare/probe'],
-	['/api/research/operations/fetch-runs/reconcile-stale', '/api/v1/operations/fetch-runs/reconcile-stale'],
-	['/api/research/analyst-prompt-lab/materialize', '/api/v1/analyst-prompt-lab/materialize'],
-	['/api/research/analyst-intraday-outcomes/recompute', '/api/v1/analyst-intraday-outcomes/recompute'],
-	['/api/research/analyst-research/reviews/run', '/api/v1/analyst-research/reviews/run'],
-]);
 
 async function proxyResearch(path, search, response) {
 	if (!quantServiceUrl) throw new Error('量化研究服务未配置');
@@ -1890,81 +1772,12 @@ const dashboard = createServer((request, response) => {
 		response.end(JSON.stringify({ status: 'forbidden', reason: crossSite }));
 		return;
 	}
-	const researchPath = researchPaths.get(url.pathname);
-	if (researchPath && request.method === 'GET') {
-		void proxyResearch(researchPath, url.search, response).catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	const researchRunDetail = /^\/api\/research\/research-runs\/([0-9a-f-]{36})$/i.exec(url.pathname);
-	if (researchRunDetail && request.method === 'GET') {
-		void proxyResearch(`/api/v1/research/runs/${researchRunDetail[1]}`, url.search, response).catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	const intradayDecisionCard = /^\/api\/research\/intraday\/decision-cards\/(\d{6}\.(?:SH|SZ|BJ))$/i.exec(url.pathname);
-	if (intradayDecisionCard && request.method === 'GET') {
-		void proxyResearch(`/api/v1/intraday/decision-cards/${intradayDecisionCard[1].toUpperCase()}`, url.search, response).catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	const researchAction = researchActions.get(url.pathname);
-	if (researchAction && request.method === 'POST') {
-		void proxyResearchAction(researchAction, request, response).catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	if (url.pathname === '/api/research/paper/accounts' && request.method === 'PUT') {
-		void proxyResearchAction('/api/v1/paper/accounts', request, response, 'PUT').catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	const paperDecisionAccept = /^\/api\/research\/paper\/decisions\/([0-9a-f-]{36})\/accept$/i.exec(url.pathname);
-	if (paperDecisionAccept && request.method === 'POST') {
-		void proxyResearchAction(`/api/v1/paper/decisions/${paperDecisionAccept[1]}/accept`, request, response).catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	const promptLabel = /^\/api\/research\/analyst-prompt-lab\/candidates\/([0-9a-f-]{36})\/label$/i.exec(url.pathname);
-	if (promptLabel && request.method === 'POST') {
-		void proxyResearchAction(`/api/v1/analyst-prompt-lab/candidates/${promptLabel[1]}/label`, request, response).catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	const promptEvaluate = /^\/api\/research\/analyst-prompt-lab\/evaluate\/(strict_action|scenario_context|risk_first)$/i.exec(url.pathname);
-	if (promptEvaluate && request.method === 'POST') {
-		void proxyResearchAction(`/api/v1/analyst-prompt-lab/evaluate/${promptEvaluate[1]}`, request, response).catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	const stockStudy = /^\/api\/research\/stocks\/(\d{6}\.(?:SH|SZ|BJ))\/study$/i.exec(url.pathname);
-	if (stockStudy && request.method === 'POST') {
-		const symbol = stockStudy[1].toUpperCase();
-		void proxyResearchAction(`/api/v1/stocks/${encodeURIComponent(symbol)}/study`, request, response).catch((error) => {
-			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
-		});
-		return;
-	}
-	const claimReview = /^\/api\/research\/claim-review\/([0-9a-f-]{36})$/i.exec(url.pathname);
-	if (claimReview && request.method === 'POST') {
-		void proxyResearchAction(`/api/v1/claim-review/${claimReview[1]}`, request, response).catch((error) => {
+	const research = matchResearchRoute(request.method, url.pathname);
+	if (research) {
+		const proxied = research.kind === 'read'
+			? proxyResearch(research.upstream, url.search, response)
+			: proxyResearchAction(research.upstream, request, response, research.method);
+		void proxied.catch((error) => {
 			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
 		});
