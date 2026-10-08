@@ -137,6 +137,10 @@ def build_owner(local: dict) -> str:
             line = f"{k}={local['OWNER_' + k]}"
         out.append(line)
     lines = out
+    # 隧道必须连 owner 主机的内网地址。用公网地址会让流量绕出网关再回来，
+    # 高吞吐时重传严重，隧道健康检查翻转并连带重启主服务（2026-10-08 事故）。
+    if "OWNER_PEER_SSH_HOST" not in local:
+        raise SystemExit("缺少 OWNER_PEER_SSH_HOST：请在 .env.local 里设置 owner 的内网 SSH 地址，不要回落到公网地址")
     return "\n".join(lines) + "\n"
 
 # ═══════════════════════════════════════════════════════════════════════

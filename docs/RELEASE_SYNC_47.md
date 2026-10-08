@@ -644,4 +644,4 @@ scripts/release-sync-status.sh --sha "$X" | tee ~/release-sync-logs/$(date +%Y%m
 
 | 日期（上海） | X | L | edge 回滚点 | owner 回滚点（release / alembic） | 结果 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| | | | | | | |
+| 2026-10-08 | `0442006` | `owner-full-20261008-1` | 未发布 edge | `20260926T164500Z-source-434e379` / `20260926_mrg0001`；镜像回滚标签 `rollback-20260929`；DB 已前进到 `20261008_sep0002`，不回退 | 已切换（17:23）；当晚两次失稳，19:23 恢复，稳定性仍在观察 | • 本地 `test-release-path` 2336 个里 4 项失败，由操作者豁免：`circuit_open_public_providers` 在线上现行 `ca975eb` 上同样失败（既有）；另 3 项是本地测试库状态（缺 `sep0001`、残留 2099-03-06 行）。CI 状态未核实（令牌无 Actions 读权限）。<br>• 激活脚本会把 `.env`、`intraday-secrets.env` 复制成普通文件，需在激活后链回 `~/.secrets/owner/.env.owner`；发布元数据写入该真实文件，不能用 `mv` 覆盖软链接。<br>• 主服务与 scheduler 同时启动会抢写同一批目录表（`quant.sectors`、`quant.sector_taxonomies`），一方的长事务占锁，另一方启动超过 30 秒即失败。重启顺序必须是 隧道 → 主服务（等 `ok`）→ scheduler。`peer-session-guard-heal` 会间隔几秒同时重启二者，会重演此问题。<br>• db-tunnel 经公网地址绕回本机时，高吞吐下重传约 15%、发送队列积压，健康检查翻转；已改回迁移前的内网地址。该因果为推断，尚未在高负载下复证。<br>• 所有 owner 上的 `docker compose` 必须同时带两个 compose 文件；只带 `compose.yaml` 会把主容器降级为 `research` profile 且仍显示 healthy。 |
