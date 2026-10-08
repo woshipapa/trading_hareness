@@ -220,10 +220,54 @@ def body(handler):
     return data
 
 
+def _signed_delivery_links(job):
+    """Return fresh signed links without reading or persisting token material."""
+    try:
+        payload = json.loads(str(job.get("payload") or "{}"))
+    except (TypeError, ValueError):
+        return []
+    notes = payload.get("notes") if isinstance(payload, dict) else None
+    if not isinstance(notes, list):
+        return []
+    links = []
+    seen = set()
+    for note in notes:
+        if not isinstance(note, dict):
+            continue
+        note_id = str(note.get("note_id") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{24}", note_id):
+            continue
+        signed_url = ephemeral_note_link(note_id)
+        if signed_url and signed_url not in seen:
+            seen.add(signed_url)
+            links.append(signed_url)
+    return links
+
+
+def _delivery_chunks(text, signed_links):
+    """Chunk summaries and signed URLs without splitting a URL across messages."""
+    chunks = [text[index:index + FEISHU_MAX_CHARS]
+              for index in range(0, len(text), FEISHU_MAX_CHARS)] or [text]
+    if not signed_links:
+        return chunks
+    current = "原文直链（签名链接短时有效）"
+    for signed_url in signed_links:
+        line = f"原文直链：{signed_url}"
+        candidate = current + "\n" + line
+        if len(candidate) > FEISHU_MAX_CHARS and current:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def deliver_one(job):
     result = json.loads(job["result"])
     text = str(result.get("summary", ""))
-    chunks = [text[index:index + FEISHU_MAX_CHARS] for index in range(0, len(text), FEISHU_MAX_CHARS)] or [text]
+    chunks = _delivery_chunks(text, _signed_delivery_links(job))
     if not FEISHU_WEBHOOK:
         raise RuntimeError("xhs_feishu_webhook_not_configured")
     for index, chunk in enumerate(chunks, 1):

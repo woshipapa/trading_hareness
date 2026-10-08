@@ -25,6 +25,8 @@ class DashboardHttpTests(unittest.TestCase):
         self.previous_token = edge_api.TOKEN
         self.previous_runtime = edge_api.RUNTIME
         self.previous_webhook = edge_api.FEISHU_WEBHOOK
+        self.previous_request_json = edge_api.request_json
+        self.previous_ephemeral_note_link = edge_api.ephemeral_note_link
         self.previous_collect_single_note = edge_api.collect_single_note
         edge_api.STORE = Store(Path(self.tmp.name) / "state.db")
         edge_api.TOKEN = "test-collector-token"
@@ -44,6 +46,8 @@ class DashboardHttpTests(unittest.TestCase):
         edge_api.TOKEN = self.previous_token
         edge_api.RUNTIME = self.previous_runtime
         edge_api.FEISHU_WEBHOOK = self.previous_webhook
+        edge_api.request_json = self.previous_request_json
+        edge_api.ephemeral_note_link = self.previous_ephemeral_note_link
         edge_api.collect_single_note = self.previous_collect_single_note
         self.tmp.cleanup()
 
@@ -130,6 +134,35 @@ class DashboardHttpTests(unittest.TestCase):
         _, delivery = self.browser_json("/v1/feishu/status")
         self.assertEqual(len(delivery["deliveries"]), 1)
         self.assertNotIn("人工复核完成", json.dumps(delivery, ensure_ascii=False))
+
+    def test_feishu_delivery_adds_fresh_signed_links_without_persisting_tokens(self):
+        note_id = "d" * 24
+        item = normalize({
+            "id": note_id,
+            "note_card": {"title": "Signed source", "desc": "正文", "user": {"nickname": "Author"}},
+        }, "single:" + note_id)
+        edge_api.STORE.enqueue_single_note(item, deliver_to_feishu=True)
+        claimed = edge_api.STORE.claim("single-worker")
+        edge_api.STORE.complete(claimed["job_id"], claimed["lease_token"], {
+            "summary": "本地摘要", "model": "fake",
+        })
+        job = edge_api.STORE.ready_deliveries()[0]
+        signed_url = (
+            "https://www.xiaohongshu.com/explore/" + note_id
+            + "?xsec_token=fixture-token&xsec_source=pc_share"
+        )
+        sent = []
+        edge_api.ephemeral_note_link = lambda value: signed_url if value == note_id else ""
+        edge_api.request_json = lambda url, payload, timeout=30: sent.append(payload)
+        edge_api.deliver_one(job)
+        delivery = edge_api.STORE.list_delivery_jobs()[0]
+        self.assertEqual(delivery["status"], "sent")
+        rendered = "\n".join(payload["content"]["text"] for payload in sent)
+        self.assertIn("xsec_token=fixture-token", rendered)
+        self.assertIn("本地摘要", rendered)
+        with edge_api.STORE.connect() as db:
+            raw = " ".join(str(row[0]) for row in db.execute("SELECT payload,result FROM jobs"))
+        self.assertNotIn("fixture-token", raw)
 
     def test_dashboard_submits_and_lists_a_single_note_analysis(self):
         def fake_collect(store, _source_root, _cookie_file, value, *, deliver_to_feishu=False):
