@@ -7,10 +7,16 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
+import os
 import unittest
 from pathlib import Path
 
 CN = dt.timezone(dt.timedelta(hours=8))
+# The exchange holiday calendar lives in the video harness repository; without
+# it teacher_cycle falls back to weekdays by design, so a holiday cannot be told
+# apart from a session (CI does not check that repository out).
+HARNESS_CALENDAR = Path(os.environ.get(
+    "VIDEO_HARNESS_DIR", "/Users/papa/codebase/video_understanding_harness")) / "teacher_strategy.py"
 
 
 def _cycle():
@@ -47,6 +53,7 @@ class ImportWindowTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("这一场已经过去", reason)
 
+    @unittest.skipUnless(HARNESS_CALENDAR.exists(), "the holiday calendar lives in the video harness repository")
     def test_a_closed_day_has_no_session_to_be_inside_of(self) -> None:
         # 2026-09-25 中秋休市：目标是今天、钟点在盘中区间，但没有盘
         ok, _ = self._at("2026-09-25", "2026-09-25 10:30")
