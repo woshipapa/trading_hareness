@@ -15,6 +15,10 @@ TESTS = ROOT / "quant-service" / "tests"
 FRONTEND = ROOT / "frontend" / "src"
 
 
+# Ratchet for the composition root; see the check below.
+MAIN_MAX_LINES = 6_671
+MAIN_MAX_FUNCTIONS = 480
+
 def main() -> int:
     problems: list[str] = []
     if not (ROOT / "docs" / "ARCHITECTURE.md").is_file():
@@ -73,6 +77,15 @@ def main() -> int:
                 direct_routes.append(f"{node.name}:{node.lineno}")
     if direct_routes:
         problems.append("main.py owns HTTP routes: " + ", ".join(direct_routes))
+
+    # main.py is the composition root being taken apart (docs/decisions/0008).
+    # These ceilings only move down: lower them in the commit that shrinks it.
+    main_lines = len(main_path.read_text(encoding="utf-8").splitlines())
+    main_functions = sum(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in main_tree.body)
+    if main_lines > MAIN_MAX_LINES:
+        problems.append(f"quant-service/app/main.py grew: {main_lines} lines > {MAIN_MAX_LINES}")
+    if main_functions > MAIN_MAX_FUNCTIONS:
+        problems.append(f"quant-service/app/main.py grew: {main_functions} top-level functions > {MAIN_MAX_FUNCTIONS}")
 
     for path in APP.rglob("*.py"):
         if path == main_path or "__pycache__" in path.parts:

@@ -13,6 +13,7 @@
 | [0005](0005-retire-tushare.md) | 停用 Tushare，`datasources/` 是唯一的数据源层 | 生效（代码删除中） |
 | [0006](0006-research-fail-closed.md) | 研究与老师策略默认不产生实盘效果 | 生效 |
 | [0007](0007-host-registry.md) | 每个后台任务都登记在某台主机上，退役任务默认不启动 | 生效 |
+| [0008](0008-main-composition-root.md) | 拆分 main.py：运行时上下文与按领域的装配模块 | 生效（进行中） |
 
 格式：
 
