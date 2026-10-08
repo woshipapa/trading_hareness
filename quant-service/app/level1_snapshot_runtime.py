@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -77,4 +78,62 @@ async def run_level1_snapshot_loop(
         await asyncio.sleep(max(10, min(300, int(interval_seconds))))
 
 
-__all__ = ["capture_level1_snapshot", "run_level1_snapshot_loop"]
+@dataclass(frozen=True)
+class Level1CaptureDependencies:
+    """What the minute capture needs from the rest of the service."""
+
+    fetch_snapshot: Callable[[], Awaitable[tuple[list[dict[str, Any]], Mapping[str, Any]]]]
+    persist_observations: Callable[..., int]
+    run_database: Callable[..., Awaitable[Any]]
+    database: Any
+    session_open: Callable[[datetime], Awaitable[tuple[bool, str]]]
+    record_success: Callable[..., Any]
+    record_failure: Callable[..., Any]
+    safe_error: Callable[[str, int], str]
+
+
+def level1_capture(deps: Level1CaptureDependencies) -> Callable[[], Awaitable[dict[str, Any]]]:
+    """One capture round that also records the provider's health, failures included."""
+    async def persist(provider: str, capability: str, rows: list[dict[str, Any]]) -> int:
+        return await deps.run_database(deps.persist_observations, provider, capability, rows, timeout_seconds=90)
+
+    async def session_open(now: datetime) -> bool:
+        active, _reason = await deps.session_open(now)
+        return active
+
+    async def persist_health(result: dict[str, Any]) -> None:
+        status = str(result.get("status") or "unknown")
+        if status == "outside_session":
+            return
+        error = str(result.get("error") or f"all-A snapshot status={status}")
+
+        def write() -> None:
+            with deps.database.transaction() as connection:
+                if status == "completed" and int(result.get("received") or 0) > 0:
+                    deps.record_success(connection, "fuyao_ths", "a_share_prices_snapshot",
+                                        int(result.get("received") or 0), None)
+                else:
+                    deps.record_failure(connection, "fuyao_ths", "a_share_prices_snapshot", error, None)
+
+        await deps.run_database(write, timeout_seconds=10)
+
+    async def capture() -> dict[str, Any]:
+        try:
+            return await capture_level1_snapshot(fetch_snapshot=deps.fetch_snapshot, persist=persist,
+                                                 persist_health=persist_health, session_open=session_open)
+        except Exception as error:  # noqa: BLE001 - health must see provider errors
+            await persist_health({"status": "failed", "error": deps.safe_error(str(error), 300)})
+            raise
+
+    return capture
+
+
+async def run_level1_capture_service(deps: Level1CaptureDependencies) -> None:
+    """Persist one complete all-A Level-1 cross-section about every minute."""
+    await run_level1_snapshot_loop(interval_seconds=60, capture=level1_capture(deps))
+
+
+__all__ = [
+    "Level1CaptureDependencies", "capture_level1_snapshot", "level1_capture", "run_level1_capture_service",
+    "run_level1_snapshot_loop",
+]

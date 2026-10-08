@@ -20,7 +20,9 @@ twin).  Anything missing is reported (``awaiting_owner_grant``,
 
 from __future__ import annotations
 
+import asyncio
 import time as _time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any, Callable
@@ -280,5 +282,30 @@ def latest_run_report(connection: Any) -> dict[str, Any] | None:
     return dict(row["payload"]) if row else None
 
 
-__all__ = ["MOVER_VERSION", "RUN_CAPABILITY", "StorageTieringMover", "TABLES", "latest_run_report",
+async def run_mover_loop(database: Any, *, safe_error: Callable[[str, int], str],
+                         sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+                         mover: StorageTieringMover | None = None) -> None:
+    """Pass after pass, each on its own thread (not the shared DB executor) for at most eight minutes.
+
+    A report is stored when rows moved, the status changed, or every 30 minutes.
+    """
+    mover = mover or StorageTieringMover(database)
+    last_status, last_saved = None, 0.0
+    while True:
+        delay = 900.0
+        try:
+            report = await asyncio.to_thread(mover.run_pass, budget_seconds=480.0)
+            moved = bool(report.get("copied_rows") or report.get("deleted_rows"))
+            now_monotonic = asyncio.get_running_loop().time()
+            if moved or report.get("status") != last_status or now_monotonic - last_saved >= 1800:
+                await asyncio.to_thread(persist_run_report, database, report)
+                last_status, last_saved = report.get("status"), now_monotonic
+            if moved or (report.get("status") in {"completed", "partial"} and not report.get("complete")):
+                delay = 60.0
+        except Exception as error:  # noqa: BLE001 - the next pass retries
+            print(f"storage tiering pass failed: {safe_error(str(error), 300)}")
+        await sleep(delay)
+
+
+__all__ = ["MOVER_VERSION", "RUN_CAPABILITY", "StorageTieringMover", "TABLES", "latest_run_report", "run_mover_loop",
            "persist_run_report", "rule_readiness", "transfer_allowed"]

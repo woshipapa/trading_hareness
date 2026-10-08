@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from statistics import mean
 from time import monotonic
 from typing import Any, Callable, Literal, Mapping
 from zoneinfo import ZoneInfo
@@ -384,7 +383,7 @@ from .market_event_capture import capture as capture_market_events
 from .longhu_auction_capture import capture as capture_longhu_morning_auction
 from .market_event_runtime import MarketEventCaptureDependencies, run_market_event_capture_service
 from .auction_pulse_runtime import AuctionPulseDependencies, run_auction_pulse_service
-from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapshot_loop
+from .level1_snapshot_runtime import Level1CaptureDependencies, run_level1_capture_service
 from .datasources import runtime as datasource_runtime
 from .datasources.catalog import health_capability
 from .datasources.sources.tushare_limits import fetch_limit_cross_section as fetch_tushare_limit_cross_section
@@ -3382,72 +3381,30 @@ async def public_evidence_capture_loop() -> None:
 async def storage_tiering_mover_loop() -> None:
     """Hot -> stock_cold copy with overlap, verified hot deletion; inert until the owner grants.
 
-    Each pass runs on its own thread (not the shared DB executor) for at most
-    eight minutes and only outside 09:00-15:45 on trading days.  A report is
-    stored when rows moved, the status changed, or every 30 minutes.
+    Runs only outside 09:00-15:45 on trading days; see ``storage_tiering_mover``.
     """
-    from .storage_tiering_mover import StorageTieringMover, persist_run_report
-    mover = StorageTieringMover(db)
-    last_status, last_saved = None, 0.0
-    while True:
-        delay = 900.0
-        try:
-            report = await asyncio.to_thread(mover.run_pass, budget_seconds=480.0)
-            moved = bool(report.get("copied_rows") or report.get("deleted_rows"))
-            now_monotonic = asyncio.get_running_loop().time()
-            if moved or report.get("status") != last_status or now_monotonic - last_saved >= 1800:
-                await asyncio.to_thread(persist_run_report, db, report)
-                last_status, last_saved = report.get("status"), now_monotonic
-            if moved or (report.get("status") in {"completed", "partial"} and not report.get("complete")):
-                delay = 60.0
-        except Exception as error:  # noqa: BLE001 - the next pass retries
-            print(f"storage tiering pass failed: {safe_error_detail(str(error), 300)}")
-        await asyncio.sleep(delay)
+    from .storage_tiering_mover import run_mover_loop
+    await run_mover_loop(db, safe_error=safe_error_detail)
 
 
 async def peer_close_research_loop() -> None:
     """Teacher roll, watch review and 小杰 settlement - the peer's own close stages.
 
-    The owner runs the full close pipeline; these three belong to the peer and
-    only ever ran by hand until this loop (see ``peer_close_research``).
+    The owner runs the full close pipeline; these belong to the peer and only
+    ever ran by hand until this loop (see ``peer_close_research``).
     """
-    from .peer_close_research import daily_bars_ready, run_due, target_session
-
-    async def teacher_roll(trade_date: date) -> dict[str, Any]:
-        if not teacher_review_enabled():
-            return {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
-        return await roll_teacher_review(trade_date, _teacher_review_dependencies())
-
-    async def teacher_outcome(trade_date: date) -> dict[str, Any]:
-        if not teacher_review_enabled():
-            return {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
-        return await run_teacher_outcome_review(trade_date, _teacher_review_dependencies())
-
-    stages = {
-        "teacher_review_roll": teacher_roll,
-        "teacher_outcome_review": teacher_outcome,
-        "watch_daily_review": lambda trade_date: run_watch_daily_review(trade_date),
-        "xiaojie_outcomes": lambda trade_date: run_database_blocking(
-            settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
-        "daily_digest": lambda trade_date: run_daily_research_digest(
-            trade_date, _teacher_review_dependencies()),
-    }
-
-    async def record(name: str, trade_date: date, action: Callable[[], Any]) -> Any:
-        return await record_stage_with_receipt(
-            name, trade_date, action, db=db, run_database_blocking=run_database_blocking,
-            safe_error_detail=safe_error_detail)
-
-    while True:
-        try:
-            now = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
-            trade_date = await target_session(now, sse_calendar_open_async)
-            if trade_date is not None and await run_database_blocking(
-                    lambda: daily_bars_ready(db, trade_date), timeout_seconds=30):
-                await run_due(trade_date, stages=stages, record=record)
-        except Exception as error:  # noqa: BLE001 - the next tick retries
-            print(f"peer close research failed: {safe_error_detail(str(error), 300)}")
-        await asyncio.sleep(600)
+    from .peer_close_research import PeerCloseDependencies, run_peer_close_loop
+    # Late-bound so a test that patches one of these names in app.main still reaches the loop.
+    await run_peer_close_loop(PeerCloseDependencies(
+        database=db, run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs),
+        calendar_open=lambda day: sse_calendar_open_async(day), teacher_enabled=lambda: teacher_review_enabled(),
+        teacher_roll=lambda day: roll_teacher_review(day, _teacher_review_dependencies()),
+        teacher_outcome=lambda day: run_teacher_outcome_review(day, _teacher_review_dependencies()),
+        watch_review=lambda day: run_watch_daily_review(day),
+        settle_xiaojie=lambda day: settle_xiaojie_recent_sessions(day),
+        daily_digest=lambda day: run_daily_research_digest(day, _teacher_review_dependencies()),
+        record_stage=record_stage_with_receipt, safe_error=safe_error_detail,
+    ))
 
 
 async def post_close_public_archive_loop() -> None:
@@ -3457,48 +3414,12 @@ async def post_close_public_archive_loop() -> None:
 
 async def all_a_level1_snapshot_capture_loop() -> None:
     """Persist one complete all-A Level-1 cross-section about every minute."""
-    async def persist(provider: str, capability: str, rows: list[dict[str, Any]]) -> int:
-        return await run_database_blocking(
-            persist_public_observations, provider, capability, rows, timeout_seconds=90,
-        )
-
-    async def capture() -> dict[str, Any]:
-        async def session_open(now: datetime) -> bool:
-            active, _reason = await market_observation_session_async(now=now)
-            return active
-
-        async def persist_health(result: dict[str, Any]) -> None:
-            status = str(result.get("status") or "unknown")
-            if status == "outside_session":
-                return
-            error = str(result.get("error") or f"all-A snapshot status={status}")
-
-            def write() -> None:
-                with db.transaction() as connection:
-                    if status == "completed" and int(result.get("received") or 0) > 0:
-                        record_provider_success(
-                            connection, "fuyao_ths", "a_share_prices_snapshot",
-                            int(result.get("received") or 0), None,
-                        )
-                    else:
-                        record_provider_failure(
-                            connection, "fuyao_ths", "a_share_prices_snapshot", error, None,
-                        )
-
-            await run_database_blocking(write, timeout_seconds=10)
-
-        try:
-            return await capture_level1_snapshot(
-                fetch_snapshot=intraday_all_a_snapshot,
-                persist=persist,
-                persist_health=persist_health,
-                session_open=session_open,
-            )
-        except Exception as error:  # noqa: BLE001 - health must see provider errors
-            await persist_health({"status": "failed", "error": safe_error_detail(str(error), 300)})
-            raise
-
-    await run_level1_snapshot_loop(interval_seconds=60, capture=capture)
+    await run_level1_capture_service(Level1CaptureDependencies(
+        fetch_snapshot=lambda: intraday_all_a_snapshot(), persist_observations=persist_public_observations,
+        run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs), database=db,
+        session_open=lambda now: market_observation_session_async(now=now),
+        record_success=record_provider_success, record_failure=record_provider_failure, safe_error=safe_error_detail,
+    ))
 
 
 def intraday_flow_label(value: Any) -> str:

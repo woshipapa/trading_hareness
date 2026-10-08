@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import date, datetime, time, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 #: Order matters: the outcome review reads the settlement the roll just wrote,
 #: and the digest reads what all of them archived.
@@ -76,4 +78,65 @@ async def run_due(trade_date: date, *, stages: Mapping[str, Callable[[date], Awa
     return {"trade_date": trade_date.isoformat(), "stages": results}
 
 
-__all__ = ["CLOSE_READY_AT", "MIN_DAILY_BARS", "STAGES", "daily_bars_ready", "run_due", "target_session"]
+SHANGHAI = ZoneInfo("Asia/Shanghai")
+TEACHER_DISABLED = {"status": "skipped", "reason": "teacher review disabled", "research_only": True}
+
+
+@dataclass(frozen=True)
+class PeerCloseDependencies:
+    """What the peer's close loop needs from the rest of the service."""
+
+    database: Any
+    run_database: Callable[..., Awaitable[Any]]
+    calendar_open: Callable[[date], Awaitable[bool]]
+    teacher_enabled: Callable[[], bool]
+    teacher_roll: Callable[[date], Awaitable[dict[str, Any]]]
+    teacher_outcome: Callable[[date], Awaitable[dict[str, Any]]]
+    watch_review: Callable[[date], Awaitable[Any]]
+    settle_xiaojie: Callable[[date], Any]
+    daily_digest: Callable[[date], Awaitable[Any]]
+    record_stage: Callable[..., Awaitable[Any]]
+    safe_error: Callable[[str, int], str]
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
+
+
+def peer_stages(deps: PeerCloseDependencies) -> dict[str, Callable[[date], Awaitable[Any]]]:
+    async def teacher_roll(trade_date: date) -> dict[str, Any]:
+        return dict(TEACHER_DISABLED) if not deps.teacher_enabled() else await deps.teacher_roll(trade_date)
+
+    async def teacher_outcome(trade_date: date) -> dict[str, Any]:
+        return dict(TEACHER_DISABLED) if not deps.teacher_enabled() else await deps.teacher_outcome(trade_date)
+
+    return {
+        "teacher_review_roll": teacher_roll,
+        "teacher_outcome_review": teacher_outcome,
+        "watch_daily_review": lambda trade_date: deps.watch_review(trade_date),
+        "xiaojie_outcomes": lambda trade_date: deps.run_database(deps.settle_xiaojie, trade_date, timeout_seconds=110),
+        "daily_digest": lambda trade_date: deps.daily_digest(trade_date),
+    }
+
+
+async def run_peer_close_loop(deps: PeerCloseDependencies) -> None:
+    """Every ten minutes: run whatever close stage is due for the target session."""
+    stages = peer_stages(deps)
+
+    async def record(name: str, trade_date: date, action: Callable[[], Any]) -> Any:
+        return await deps.record_stage(name, trade_date, action, db=deps.database,
+                                       run_database_blocking=deps.run_database, safe_error_detail=deps.safe_error)
+
+    while True:
+        try:
+            trade_date = await target_session(deps.now().astimezone(SHANGHAI), deps.calendar_open)
+            if trade_date is not None and await deps.run_database(
+                    lambda: daily_bars_ready(deps.database, trade_date), timeout_seconds=30):
+                await run_due(trade_date, stages=stages, record=record)
+        except Exception as error:  # noqa: BLE001 - the next tick retries
+            print(f"peer close research failed: {deps.safe_error(str(error), 300)}")
+        await deps.sleep(600)
+
+
+__all__ = [
+    "CLOSE_READY_AT", "MIN_DAILY_BARS", "PeerCloseDependencies", "STAGES", "daily_bars_ready", "peer_stages",
+    "run_due", "run_peer_close_loop", "target_session",
+]
