@@ -12,24 +12,27 @@ HARNESS = os.environ.get("VIDEO_HARNESS_DIR", "/Users/papa/codebase/video_unders
 N8N = os.path.join(HOME, "codebase/n8n")
 PKLOG = os.path.join(HOME, "Library/Logs/paper-kb")
 SUP_LOG = os.path.join(N8N, "logs/svc-supervisor.log")
+CENTRAL_SECRETS_ENV = os.path.join(N8N, "config/secrets/.env.local")
+LEGACY_LOCAL_ENV = os.path.join(N8N, ".env")
 
 PATH_ENV = "/Users/papa/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 def _load_env_secret(name):
-    """从进程环境或 n8n/.env(已 gitignore) 读密钥，避免硬编码入库。"""
+    """Read a secret from the process, central source, or legacy local env."""
     v = os.environ.get(name)
     if v:
         return v
-    try:
-        with open(os.path.join(N8N, ".env"), encoding="utf-8") as env_file:
-            for line in env_file:
-                line = line.strip()
-                if line.startswith(name + "="):
-                    val = line.split("=", 1)[1].strip()
-                    if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
-                        val = val[1:-1]
-                    return val
-    except OSError:
-        pass
+    for path in (CENTRAL_SECRETS_ENV, LEGACY_LOCAL_ENV):
+        try:
+            with open(path, encoding="utf-8") as env_file:
+                for line in env_file:
+                    line = line.strip()
+                    if line.startswith(name + "="):
+                        val = line.split("=", 1)[1].strip()
+                        if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+                            val = val[1:-1]
+                        return val
+        except OSError:
+            continue
     return ""
 
 

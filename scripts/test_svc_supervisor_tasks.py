@@ -96,6 +96,21 @@ class TaskInventoryTests(unittest.TestCase):
         self.assertEqual(task["kind"], "daemon")
         self.assertEqual(task["restart_backoff_max"], 300)
 
+    def test_central_secret_source_precedes_the_legacy_local_env(self):
+        module = self._reload(ITOUGU_TABLE_WATCH=None, XHS_COLLECTOR_TOKEN=None)
+        old_central = module.CENTRAL_SECRETS_ENV
+        old_legacy = module.LEGACY_LOCAL_ENV
+        with tempfile.TemporaryDirectory() as directory:
+            central = Path(directory, "central.env")
+            legacy = Path(directory, "legacy.env")
+            central.write_text("TEST_SECRET=central-value\n", encoding="utf-8")
+            legacy.write_text("TEST_SECRET=legacy-value\n", encoding="utf-8")
+            module.CENTRAL_SECRETS_ENV = str(central)
+            module.LEGACY_LOCAL_ENV = str(legacy)
+            self.assertEqual(module._load_env_secret("TEST_SECRET"), "central-value")
+        module.CENTRAL_SECRETS_ENV = old_central
+        module.LEGACY_LOCAL_ENV = old_legacy
+
     def test_s2_children_receive_optional_provider_credentials_at_runtime(self):
         module = self._reload(ITOUGU_TABLE_WATCH=None, HF_TOKEN=None,
                               OPENALEX_API_KEY="openalex-test-only",
