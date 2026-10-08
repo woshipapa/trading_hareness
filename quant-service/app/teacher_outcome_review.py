@@ -34,6 +34,8 @@ from .strategy_outcome_measures import UNBUYABLE, measure
 from .teacher_buyability import buyability, buyability_line
 from .teacher_review_playbooks import ts_code
 from .teacher_review_rules import (
+    AUCTION_PLAYBOOKS,
+    AUCTION_PLAYBOOK_UNTIL,
     MODEL_VERSION as RULES_VERSION,
     SnapshotTape,
     active_plan,
@@ -172,6 +174,16 @@ def gate_replay(symbol: str, name: str, rows: Sequence[Mapping[str, Any]]) -> di
             continue
         if plan.get("observe_only"):
             observe_only = True
+        # 盘前只有一字板按 09:25 竞价判；别的剧本在 09:30 之前**活路径根本不产出
+        # 候选**（``teacher_review_signals`` 在这个条件下直接 ``return []``）。
+        # 重放原来绕过 ``teacher_review_signals`` 直接调 ``evaluate``，于是把
+        # 竞价时段也算进去了 —— 2026-09-24 宏昌科技"09:16 起 1 次满足"、
+        # 09-29 巨力索具"09:26 起 2 次满足"都是这么来的，然后被报成
+        # "但盘中没有推送"。那两次线上永远不可能推。重放必须和线上同口径，
+        # 否则 entry_scans、漏推清单和"最接近 09:2x，还差 1 条"全是虚的。
+        if (observed_at.astimezone(_CN_TZ).time() < AUCTION_PLAYBOOK_UNTIL
+                and str(plan["playbook"]) not in AUCTION_PLAYBOOKS):
+            continue
         quote = payload.get("quote")
         if not isinstance(quote, Mapping) or quote.get("price") in (None, ""):
             quote_gaps += 1
