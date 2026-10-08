@@ -26,6 +26,8 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EDGE_SCRIPT = ROOT / "feishu-relay" / "scripts" / "edge" / "hotfix-feishu-relay-edge.sh"
 OWNER_SCRIPT = ROOT / "scripts" / "shared-peer" / "deploy-code-only.sh"
+# The owner path rules, shared by deploy-code-only.sh and scripts/release_plan.py.
+OWNER_RULES = ROOT / "scripts" / "shared-peer" / "classify-owner-paths.sh"
 CONSOLE_SCRIPT = ROOT / "scripts" / "edge" / "deploy-quant-console-edge.sh"
 
 OWNER_MARKERS = ("47.110.79.189", "stockpeer", "OWNER_PEER_HOST", "OWNER_PEER_SSH_KEY")
@@ -61,28 +63,31 @@ class OwnerAllowlistTests(unittest.TestCase):
     """owner 的 code-only 发布不能夹带 edge 代码，遇到不认识的路径要 fail closed。"""
 
     def setUp(self) -> None:
-        self.text = OWNER_SCRIPT.read_text(encoding="utf-8")
+        self.text = OWNER_RULES.read_text(encoding="utf-8")
+        self.script = OWNER_SCRIPT.read_text(encoding="utf-8")
 
     def test_edge_paths_are_classified_as_not_owner_runtime(self) -> None:
-        skipped = re.search(r"\n\s*(quant-service/tests/\*[^)]*)\)\s*\n\s*skipped_files", self.text)
-        self.assertIsNotNone(skipped, "找不到 skipped_files 那条 case 分支")
+        skipped = re.search(r"\n\s*(quant-service/tests/\*[^)]*)\)\s*\n\s*printf 'skip", self.text)
+        self.assertIsNotNone(skipped, "找不到 skip 那条 case 分支")
         arm = skipped.group(1)
         for pattern in ("feishu-relay/*", "frontend/*"):
             self.assertIn(pattern, arm, f"{pattern} 必须被明确归为「不属于 owner 运行时」")
 
     def test_only_owner_runtime_paths_are_shipped(self) -> None:
-        shipped = re.search(r"\n\s*(quant-service/app/\*[^)]*)\)\s*\n\s*runtime_files", self.text)
+        shipped = re.search(r"\n\s*(quant-service/app/\*[^)]*)\)\s*\n\s*printf 'runtime", self.text)
         self.assertIsNotNone(shipped)
         arm = shipped.group(1)
         for forbidden in ("feishu-relay", "frontend", "xhs-intel"):
             self.assertNotIn(forbidden, arm, f"{forbidden} 不能进 owner 运行时文件集")
 
     def test_an_unknown_path_fails_closed(self) -> None:
-        self.assertRegex(self.text, r"\*\)\s*echo \"full release required for: \$path\" >&2; exit 1")
+        self.assertRegex(self.text, r"\*\) printf 'full\\t%s\\n' \"\$path\" ;;")
+        # and the deploy refuses whenever the rules report a full path
+        self.assertIn('echo "full release required for: $path" >&2; done <<<"$full_paths"\n  exit 1', self.script)
 
     def test_a_migration_change_forces_a_full_release(self) -> None:
         self.assertIn("quant-service/migrations/versions/*.py", self.text)
-        self.assertIn("full release required for", self.text)
+        self.assertIn("printf 'full", self.text)
 
 
 def _dirty_pathspec(path: pathlib.Path) -> list[str]:

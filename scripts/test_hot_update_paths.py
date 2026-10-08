@@ -109,11 +109,15 @@ class FailClosedTests(unittest.TestCase):
                        "xhs dashboard verification failed")
 
     def test_the_owner_path_gates_on_migrations_and_unknown_paths(self) -> None:
-        self._requires("quant-research", "quant-service/migrations/versions/*.py")
-        body = (ROOT / PATHS["quant-research"]["script"]).read_text(encoding="utf-8")
-        self.assertTrue(
-            re.search(r"\*\)\s*echo \"full release required for: \$path\" >&2; exit 1", body),
-            "owner 发布脚本缺少「未知路径一律拒绝」的兜底分支")
+        # The path rules live in classify-owner-paths.sh, shared with scripts/release_plan.py;
+        # the deploy script refuses whenever they report a path that needs a full release.
+        rules = (ROOT / "scripts/shared-peer/classify-owner-paths.sh").read_text(encoding="utf-8")
+        script = (ROOT / PATHS["quant-research"]["script"]).read_text(encoding="utf-8")
+        self.assertTrue("quant-service/migrations/versions/*.py" in rules, "迁移文件必须要求全量发布")
+        self.assertTrue(re.search(r"\*\) printf 'full\\t%s\\n' \"\$path\" ;;", rules),
+                        "owner 路径规则缺少「未知路径一律拒绝」的兜底分支")
+        self.assertTrue("classify-owner-paths.sh" in script and 'echo "full release required for: $path"' in script,
+                        "owner 发布脚本必须按规则拒绝需要全量发布的路径")
 
 
 class ProofOfExecutionTests(unittest.TestCase):
