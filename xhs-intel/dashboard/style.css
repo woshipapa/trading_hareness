@@ -119,8 +119,10 @@ a.row-title { text-decoration: none; }
 a.row-title:hover { color: var(--red-dark); text-decoration: underline; }
 .row-subtitle { display: block; max-width: 380px; margin-top: 4px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .score { min-width: 52px; font-variant-numeric: tabular-nums; }
-.score-track { width: 62px; height: 5px; margin-top: 5px; overflow: hidden; border-radius: 3px; background: #e6e9ed; }
-.score-track span { display: block; height: 100%; background: var(--blue); }
+.score-track { width: 62px; height: 5px; display: block; margin-top: 5px; overflow: hidden; border: 0; border-radius: 3px; background: #e6e9ed; appearance: none; }
+.score-track::-webkit-progress-bar { background: #e6e9ed; }
+.score-track::-webkit-progress-value { background: var(--blue); }
+.score-track::-moz-progress-bar { background: var(--blue); }
 .table-actions { display: flex; gap: 6px; justify-content: flex-end; }
 
 .run-list { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); overflow: hidden; }

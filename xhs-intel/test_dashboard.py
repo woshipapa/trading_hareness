@@ -69,6 +69,11 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertIn("topics", payload)
 
+    def test_dashboard_source_respects_the_strict_style_policy(self):
+        source = (edge_api.DASHBOARD_ROOT / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn('style="', source)
+        self.assertIn("safeXhsUrl", source)
+
     def test_machine_api_still_requires_the_collector_token(self):
         request = urllib.request.Request(self.base + "/v1/status")
         with self.assertRaises(urllib.error.HTTPError) as error:
