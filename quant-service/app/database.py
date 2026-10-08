@@ -3,12 +3,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
+import time
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, AsyncIterator, Iterator, Mapping
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from psycopg.rows import dict_row
+
+from .transaction_audit import TRANSACTION_AUDIT, transaction_site
 
 
 LOGGER = logging.getLogger(__name__)
@@ -75,9 +79,11 @@ class _StatementRecorder:
     def __init__(self) -> None:
         self.sql: object = None
         self.params: object = None
+        self.count = 0
 
     def record(self, query: object, params: object) -> None:
         self.sql, self.params = query, params
+        self.count += 1
 
 
 class _LoggingConnection:
@@ -1895,7 +1901,7 @@ class Database:
             self._pool.close()
             self._opened = False
 
-    def pool_status(self) -> dict[str, int | bool]:
+    def pool_status(self) -> dict[str, Any]:
         stats = self._pool.get_stats()
         return {
             "open": self._opened,
@@ -1904,13 +1910,18 @@ class Database:
             "pool_size": int(stats.get("pool_size", 0)),
             "available": int(stats.get("pool_available", 0)),
             "waiting": int(stats.get("requests_waiting", 0)),
+            # Process-wide, covering the sync and async pools alike.
+            "transactions": TRANSACTION_AUDIT.summary(),
         }
 
     @contextmanager
     def transaction(self) -> Iterator[psycopg.Connection]:
         self.open()
+        # Frame 0 is this generator, 1 is contextlib's __enter__, 2 the caller's ``with``.
+        site = transaction_site(sys._getframe(2))
         with self._pool.connection() as connection:
             recorder = _StatementRecorder()
+            started = time.monotonic()
             try:
                 with connection.transaction():
                     yield _LoggingConnection(connection, recorder)
@@ -1922,6 +1933,8 @@ class Database:
                     exc_info=True,
                 )
                 raise
+            finally:
+                TRANSACTION_AUDIT.record(site, time.monotonic() - started, recorder.count)
 
     def migrate(self) -> None:
         """Legacy bootstrap only; new schema changes belong to Alembic."""
@@ -2038,9 +2051,11 @@ class AsyncDatabase:
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[psycopg.AsyncConnection]:
+        site = transaction_site(sys._getframe(2))
         await self.open()
         async with self._pool.connection() as connection:
             recorder = _StatementRecorder()
+            started = time.monotonic()
             try:
                 async with connection.transaction():
                     yield _AsyncLoggingConnection(connection, recorder)
@@ -2052,6 +2067,8 @@ class AsyncDatabase:
                     exc_info=True,
                 )
                 raise
+            finally:
+                TRANSACTION_AUDIT.record(f"async:{site}", time.monotonic() - started, recorder.count)
 
     async def ping(self) -> None:
         async with self.transaction() as connection:
