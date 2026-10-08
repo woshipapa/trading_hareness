@@ -4,10 +4,11 @@
 !.env.example
 certs/
 
-# 集中凭据目录 — 只有 README.md 和 env.example 入库
+# 集中凭据目录 — 只有 README.md、env.example、env-split.py 入库
 config/secrets/*
 !config/secrets/README.md
 !config/secrets/env.example
+!config/secrets/env-split.py
 
 # Local n8n exports and workflow generators retain private endpoints and
 # credential bindings.  They remain available for local operations but must
