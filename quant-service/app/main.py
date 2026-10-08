@@ -73,6 +73,7 @@ from .async_market_session_repository import sse_calendar_open as read_async_sse
 from .async_market_session_repository import sse_calendar_status as read_async_sse_calendar_status
 from .daily_bar_repository import exchange_for, provider_priority, upsert_daily_bar, upsert_daily_bars
 from .instrument_registry import InstrumentRecord, ensure_instrument as ensure_registry_instrument, ensure_instruments as ensure_registry_instruments
+from .sector_catalog_repository import upsert_sectors
 from .sector_membership_repository import (
     persist_observed_snapshot as persist_observed_sector_snapshot,
     persist_ths_snapshot as persist_ths_sector_snapshot,
@@ -999,7 +1000,6 @@ def ensure_catalog_capabilities() -> None:
         catalog_items=catalog_items,
         capability_contract=api_capability,
         super_get_verified_apis=SUPER_GET_VERIFIED_APIS,
-        json_value=Json,
     )).initialize()
 
 
@@ -1938,7 +1938,7 @@ async def sync_ths_sector_catalog(request: SectorCatalogSyncRequest) -> dict[str
         run_database_blocking=run_database_blocking,
         db=db,
         upsert_taxonomy=upsert_sector_taxonomy,
-        upsert_sector=upsert_sector,
+        upsert_sectors=upsert_sectors,
         ths_member_persist=persist_ths_sector_members,
         member_sync_failure=record_sector_member_sync_failure,
         is_local_capacity_error=is_local_capacity_http_error,
@@ -1973,7 +1973,7 @@ async def sync_eastmoney_board_members(request: EastmoneyBoardMemberSyncRequest)
         run_database_blocking=run_database_blocking,
         db=db,
         upsert_taxonomy=upsert_sector_taxonomy,
-        upsert_sector=upsert_sector,
+        upsert_sectors=upsert_sectors,
         persist_members=persist_eastmoney_sector_members,
         record_failure=record_sector_member_sync_failure,
         safe_error_detail=safe_error_detail,

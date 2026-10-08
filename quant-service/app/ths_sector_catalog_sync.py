@@ -18,7 +18,7 @@ async def sync(
     run_database_blocking: Callable[..., Awaitable[Any]],
     db: Any,
     upsert_taxonomy: Callable[..., Any],
-    upsert_sector: Callable[..., Any],
+    upsert_sectors: Callable[..., int],
     ths_member_persist: Callable[..., int],
     member_sync_failure: Callable[..., Awaitable[Any]],
     is_local_capacity_error: Callable[[Exception], bool],
@@ -42,8 +42,7 @@ async def sync(
         with db.transaction() as connection:
             upsert_taxonomy(connection, key, f"同花顺 {request.index_type} 类板块", provider_key,
                             {"api_name": "ths_index", "index_type": request.index_type})
-            for row in valid_rows:
-                upsert_sector(connection, key, str(row["ts_code"]), str(row["name"]), row)
+            upsert_sectors(connection, key, ((str(row["ts_code"]), str(row["name"]), row) for row in valid_rows))
 
     await run_database_blocking(persist_catalog)
     member_results: list[dict[str, Any]] = []

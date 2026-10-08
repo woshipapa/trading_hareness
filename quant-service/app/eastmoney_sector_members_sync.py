@@ -17,7 +17,7 @@ async def sync(
     run_database_blocking: Callable[..., Awaitable[Any]],
     db: Any,
     upsert_taxonomy: Callable[..., Any],
-    upsert_sector: Callable[..., Any],
+    upsert_sectors: Callable[..., int],
     persist_members: Callable[..., int],
     record_failure: Callable[..., Awaitable[Any]],
     safe_error_detail: Callable[[str, int], str],
@@ -42,8 +42,9 @@ async def sync(
         with db.transaction() as connection:
             upsert_taxonomy(connection, taxonomy_key, f"东方财富{'概念' if request.kind == 'concept' else '行业'}板块", "akshare",
                             {"source": "eastmoney", "kind": request.kind, "member_endpoint": "akshare"})
-            for sector_key, label, raw in boards:
-                upsert_sector(connection, taxonomy_key, sector_key, label, raw)
+            # One statement for the whole directory: a row-per-round-trip loop
+            # held this taxonomy's locks for minutes over the owner tunnel.
+            upsert_sectors(connection, taxonomy_key, boards)
     await run_database_blocking(persist_catalog)
 
     if request.resume:
