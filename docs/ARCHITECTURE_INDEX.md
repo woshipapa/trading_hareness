@@ -8,8 +8,8 @@
 | Item | Current value |
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
-| `main.py` top-level functions | 480 |
-| Python modules under `app/` | 505 |
+| `main.py` top-level functions | 474 |
+| Python modules under `app/` | 506 |
 | HTTP router modules | 47 |
 | Alembic migrations | 109 |
 | Frontend source files | 36 |
@@ -29,9 +29,9 @@ New behaviour should be owned by an existing domain package/owner.
 | `research` | 15 |
 | `market` | 14 |
 | `post` | 13 |
+| `teacher` | 11 |
 | `ten` | 11 |
 | `board` | 10 |
-| `teacher` | 10 |
 | `limit` | 9 |
 | `daily` | 8 |
 | `tushare` | 7 |
