@@ -43,6 +43,13 @@
       "tests": [
         "make -C quant-service test-release-path",
         "cd frontend && npm run typecheck && npm run build"
+      ],
+      "services": [
+        "quant-research",
+        "quant-research-worker",
+        "quant-research-preflight",
+        "quant-research-gateway",
+        "quant-research-scheduler"
       ]
     },
     {
@@ -86,6 +93,10 @@
         "node --test feishu-relay/adapter/*.test.mjs",
         "python3 -m unittest discover -s feishu-relay/bridge -p 'test_*.py' -q",
         "cd feishu-relay/dashboard && npm run typecheck && npm test -- --run && npm run build"
+      ],
+      "services": [
+        "feishu-adapter",
+        "larkagentx-bridge"
       ]
     },
     {
@@ -114,7 +125,62 @@
       "tests": [
         "python3 -m unittest discover -s xhs-intel -p 'test_*.py' -q",
         "node feishu-relay/scripts/edge/deploy-xhs-intel-edge.test.mjs"
+      ],
+      "services": [
+        "xhs-collector"
       ]
+    }
+  ],
+  "foreign_data_contracts": [
+    {
+      "consumer": "quant-research",
+      "object": "public.workflow_entity",
+      "owner": "n8n",
+      "kind": "read",
+      "sites": [
+        "quant-service/app/n8n_workflow_audit.py"
+      ],
+      "note": "第三方内部 schema；只允许在这一个适配器里出现，读不到时按未知上报。"
+    },
+    {
+      "consumer": "quant-research",
+      "object": "public.workflow_published_version",
+      "owner": "n8n",
+      "kind": "read",
+      "sites": [
+        "quant-service/app/n8n_workflow_audit.py"
+      ],
+      "note": "同上。"
+    },
+    {
+      "consumer": "quant-research",
+      "object": "public.execution_entity",
+      "owner": "n8n",
+      "kind": "read",
+      "sites": [
+        "quant-service/app/n8n_workflow_audit.py"
+      ],
+      "note": "同上。"
+    }
+  ],
+  "shared_runtime_databases": [
+    {
+      "compose": "deploy/compose.server.yaml",
+      "database": "n8n",
+      "components": [
+        "feishu-relay",
+        "quant-research"
+      ],
+      "note": "47owner 主栈把 feishu-adapter 和 quant-research* 放在同一个库 n8n 里。组件清单把 feishu-relay 的 runtime 记作 47edge，那只对 edge 部署成立 —— owner 上也跑着一份，而且和 quant 共库，public.ingestion_jobs 就是它的台账。对照：deploy/shared-peer/compose.yaml 已经把两者拆成 PEER_QUANT_DATABASE 与 PEER_N8N_DATABASE 两个库，是想要的终态。"
+    },
+    {
+      "compose": "compose.yaml",
+      "database": "n8n",
+      "components": [
+        "feishu-relay",
+        "quant-research"
+      ],
+      "note": "本机开发栈，与 owner 主栈同形；拆分时要一起改，否则本地测不出隔离回归。"
     }
   ]
 }
