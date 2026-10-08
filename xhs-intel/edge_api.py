@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from collector import (  # noqa: E402
     InvalidNoteLink,
+    NoteFetchUnavailable,
     collect,
     collect_recommendations,
     collect_single_note,
@@ -698,6 +699,9 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 except InvalidNoteLink as exc:
                     reply(self, 400, {"status": "failed", "error": str(exc)})
+                    return
+                except NoteFetchUnavailable as exc:
+                    reply(self, 422, {"status": "failed", "error": str(exc)})
                     return
                 reply(self, 202, {"status": "accepted", **result})
                 return

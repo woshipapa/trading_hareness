@@ -15,6 +15,10 @@ class InvalidNoteLink(ValueError):
     """The submitted text does not contain a supported XHS note link."""
 
 
+class NoteFetchUnavailable(RuntimeError):
+    """The note needs a fresh share link and is not available in the local cache."""
+
+
 _URL_RE = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
 _NOTE_PATH_RE = re.compile(r'/(?:explore|discovery/item)/([0-9a-fA-F]{24})(?:/|$)')
 _TRAILING_SHARE_TEXT = '.,;!?)]}\u3002\uff0c\uff1b\uff01\uff1f\u3011\u300b'
@@ -96,7 +100,7 @@ def parse_note_reference(value, *, short_resolver=resolve_xhs_short_url):
         fetch_params['xsec_token'] = token
     fetch_params['xsec_source'] = source if re.fullmatch(r'[A-Za-z0-9_-]+', source) else 'pc_share'
     fetch_url = f'https://www.xiaohongshu.com/explore/{note_id}?{urlencode(fetch_params)}'
-    return {'note_id': note_id, 'fetch_url': fetch_url}
+    return {'note_id': note_id, 'fetch_url': fetch_url, 'has_xsec_token': bool(token)}
 
 
 def collect_single_note(store, source_root, cookie_file, value, *, deliver_to_feishu=False,
@@ -105,14 +109,20 @@ def collect_single_note(store, source_root, cookie_file, value, *, deliver_to_fe
     reference = parse_note_reference(value, short_resolver=short_resolver)
     api = _pc_api(source_root, cookie_file)
     ok, _message, response = api.get_note_info(reference['fetch_url'])
-    if not ok:
-        raise RuntimeError('detail_failed')
     items = ((response or {}).get('data') or {}).get('items') or []
-    if not items or not isinstance(items[0], dict):
-        raise RuntimeError('invalid_note_detail_response')
     note_id = reference['note_id']
-    note = normalize({'id': note_id}, f'single:{note_id}', items[0])
-    return store.enqueue_single_note(note, deliver_to_feishu=deliver_to_feishu)
+    if ok and items and isinstance(items[0], dict):
+        note = normalize({'id': note_id}, f'single:{note_id}', items[0])
+        fetch_source = 'live'
+    else:
+        note = store.latest_note(note_id)
+        if not note:
+            message = ('note_fetch_failed_use_fresh_share_link'
+                       if not reference['has_xsec_token'] else 'note_fetch_failed')
+            raise NoteFetchUnavailable(message)
+        fetch_source = 'cache'
+    return store.enqueue_single_note(
+        note, deliver_to_feishu=deliver_to_feishu, fetch_source=fetch_source)
 
 
 def normalize(item, query, detail=None):

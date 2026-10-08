@@ -152,6 +152,26 @@ class QueueTests(unittest.TestCase):
         self.assertNotIn('private-token', str(visible))
         self.assertEqual(visible['jobs'][0]['url'], 'https://www.xiaohongshu.com/explore/' + 'd' * 24)
 
+    def test_single_note_collection_reuses_cached_content_when_unsigned_fetch_fails(self):
+        class MissingApi:
+            def get_note_info(self, _url):
+                return False, 'not found', None
+
+        cached = normalize({
+            'id': 'e' * 24,
+            'note_card': {'title': 'Cached systems note', 'desc': 'training infrastructure'},
+        }, 'AI infra')
+        self.store.add_note(cached, 'AI infra')
+        cookie = Path(self.tmp.name) / 'cookie-cache'
+        cookie.write_text('a1=fake; web_session=fake', encoding='utf-8')
+        with mock.patch('collector._pc_api', return_value=MissingApi()):
+            result = collect_single_note(
+                self.store, '/tmp/source', cookie,
+                'https://www.xiaohongshu.com/explore/' + 'e' * 24,
+            )
+        self.assertEqual(result['fetch_source'], 'cache')
+        self.assertEqual(self.store.list_single_note_jobs()[0]['fetch_source'], 'cache')
+
     def test_recommendation_filter_covers_all_candidates_and_queues_only_selected_summary(self):
         first = note('CUDA distributed training')
         second = normalize({'id': 'b' * 24, 'note_card': {'title': '美食', 'desc': '无关',

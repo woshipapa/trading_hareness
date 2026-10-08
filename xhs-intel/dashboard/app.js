@@ -314,7 +314,7 @@ function renderSingleNotes() {
         <div class="analysis-status">${pill(job.status)}${delivery}</div>
       </div>
       ${result}
-      <div class="analysis-footer"><span>${job.model ? `模型 ${escapeHtml(job.model)}` : `尝试 ${job.attempts || 0} 次`}</span><span>更新 ${formatTime(job.updated)}</span>${job.delivered_parts ? `<span>飞书 ${job.delivered_parts} 个分片</span>` : ''}</div>
+      <div class="analysis-footer"><span>${job.fetch_source === 'cache' ? '历史缓存' : '实时抓取'}</span><span>${job.model ? `模型 ${escapeHtml(job.model)}` : `尝试 ${job.attempts || 0} 次`}</span><span>更新 ${formatTime(job.updated)}</span>${job.delivered_parts ? `<span>飞书 ${job.delivered_parts} 个分片</span>` : ''}</div>
     </article>`;
   }).join('');
   return `<div class="single-layout">

@@ -172,7 +172,13 @@ class Store:
             db.execute('INSERT OR IGNORE INTO note_queries VALUES(?,?)', (revision, query))
         return bool(inserted)
 
-    def enqueue_single_note(self, note, *, deliver_to_feishu=False):
+    def latest_note(self, note_id):
+        with self.connect() as db:
+            row = db.execute('''SELECT body FROM notes WHERE note_id=?
+                                ORDER BY last_seen DESC LIMIT 1''', (str(note_id),)).fetchone()
+        return json.loads(row['body']) if row else None
+
+    def enqueue_single_note(self, note, *, deliver_to_feishu=False, fetch_source='live'):
         """Persist one revision and queue one reusable analysis for that content."""
         revision = digest([note['note_id'], note['content_hash']])
         job_id = 'xhs-single-' + revision[:32]
@@ -182,6 +188,7 @@ class Store:
             'notes': [note],
             'prompt_version': 1,
             'source_kind': 'single_note',
+            'fetch_source': 'cache' if fetch_source == 'cache' else 'live',
             'deliver_to_feishu': bool(deliver_to_feishu),
         }
         encoded = json.dumps(payload_value, ensure_ascii=False)
@@ -199,8 +206,13 @@ class Store:
             row = db.execute('SELECT status,payload FROM jobs WHERE job_id=?', (job_id,)).fetchone()
             existing_payload = json.loads(row['payload']) if row else payload_value
             requested_delivery = bool(deliver_to_feishu or existing_payload.get('deliver_to_feishu'))
-            if row and requested_delivery != bool(existing_payload.get('deliver_to_feishu')):
-                existing_payload['deliver_to_feishu'] = requested_delivery
+            payload_changed = requested_delivery != bool(existing_payload.get('deliver_to_feishu'))
+            existing_payload['deliver_to_feishu'] = requested_delivery
+            if fetch_source == 'live' and existing_payload.get('fetch_source') != 'live':
+                existing_payload['fetch_source'] = 'live'
+                existing_payload['notes'] = [note]
+                payload_changed = True
+            if row and payload_changed:
                 db.execute('UPDATE jobs SET payload=?,updated=? WHERE job_id=?',
                            (json.dumps(existing_payload, ensure_ascii=False), stamp, job_id))
             if row and row['status'] == 'failed':
@@ -216,11 +228,13 @@ class Store:
             'job_status': current['status'],
             'duplicate': not bool(inserted),
             'deliver_to_feishu': requested_delivery,
+            'fetch_source': existing_payload.get('fetch_source', 'live'),
             'note': {
                 'note_id': note['note_id'],
                 'title': note.get('title', ''),
                 'author': note.get('author', ''),
                 'published_at': note.get('published_at'),
+                'fetched_at': note.get('fetched_at'),
                 'url': note.get('url', ''),
             },
         }
@@ -407,12 +421,14 @@ class Store:
                 'title': note.get('title', ''),
                 'author': note.get('author', ''),
                 'published_at': note.get('published_at'),
+                'fetched_at': note.get('fetched_at'),
                 'url': note.get('url', ''),
                 'created': row['created'],
                 'updated': row['updated'],
                 'attempts': row['attempts'],
                 'last_error': row['last_error'],
                 'deliver_to_feishu': bool(payload.get('deliver_to_feishu')),
+                'fetch_source': payload.get('fetch_source', 'live'),
                 'delivered_parts': row['delivered_parts'],
                 'summary': result.get('summary', ''),
                 'model': result.get('model', ''),
