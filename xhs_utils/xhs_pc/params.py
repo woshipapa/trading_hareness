@@ -508,7 +508,6 @@ def generate_headers(
         a1, api, data, method, b1=b1, dsl_pair=dsl_pair, cookie=cookie, tier=tier,
         sign_context=sign_context,
     )
-    x_b3_traceid = generate_x_b3_traceid()
     headers = get_request_headers_template(
         sign_context,
         method=method,
@@ -519,7 +518,11 @@ def generate_headers(
     headers['x-s'] = xs
     headers['x-t'] = str(xt)
     headers['x-s-common'] = xs_common
-    headers['x-b3-traceid'] = x_b3_traceid
+    # Live-room requests intentionally omit trace headers.  Do not re-add
+    # x-b3-traceid after the template removed it, otherwise the strict live
+    # wire contract rejects the request before it reaches the network.
+    if include_trace_headers:
+        headers['x-b3-traceid'] = generate_x_b3_traceid()
     # 浏览器实抓：仅 homefeed / feed 带 xy-direction
     if with_xy_direction:
         if not user_id:
