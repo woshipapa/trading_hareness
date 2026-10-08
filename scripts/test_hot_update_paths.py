@@ -251,6 +251,19 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 		fallback = module["build_owner"]({"OWNER_PEER_SSH_HOST": "internal.example", "POSTGRES_PASSWORD": "legacy-owner"})
 		self.assertIn("PEER_DB_PASSWORD=legacy-owner", fallback)
 
+	def test_generated_environments_carry_no_tushare_configuration(self) -> None:
+		# Tushare was removed as a data source on 2026-10-08; a key left in the generated
+		# files would quietly bring a paid gateway back into the runtime.
+		module = runpy.run_path(str(ROOT / "config/secrets/env-split.py"))
+		stale = {f"TUSHARE_{name}": "must-not-appear" for name in (
+			"TOKEN", "SUPER_TOKEN", "API_URL", "SUPER_GET_API_KEY", "SUPER_GET_API_URL", "SUPER_PROXY_URL",
+			"BACKUP_API_KEY", "SUPER_REALTIME_API_KEY",
+		)}
+		for build, extra in (("build_owner", {"OWNER_PEER_SSH_HOST": "internal.example"}), ("build_edge", {})):
+			rendered = module[build]({**stale, **extra})
+			self.assertNotIn("TUSHARE", rendered, build)
+			self.assertNotIn("must-not-appear", rendered, build)
+
 	def test_owner_code_release_never_starts_the_main_service_and_scheduler_together(self) -> None:
 		# Both write the same catalog tables on startup; started together, one holds the row
 		# locks for minutes and the other times out after 30 seconds (2026-10-08 incident).
@@ -262,6 +275,17 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 				f"main service and scheduler must start one after the other: {line.strip()}",
 			)
 		self.assertLess(script.index("--wait quant-research \\"), script.index("--wait quant-research-scheduler;"))
+
+	def test_first_overlay_release_can_still_roll_back(self) -> None:
+		# With no previous overlay there is no symlink to restore; the rollback must remove
+		# `current` so the containers fall back to the code baked into the image, instead of
+		# doing nothing and reporting a failed release as handled.
+		script = (ROOT / "scripts/shared-peer/deploy-code-only.sh").read_text()
+		body = script[script.index("roll_back_release() {"):]
+		body = body[:body.index("\n}\n")]
+		self.assertIn('rm -f "$current_root"', body)
+		self.assertIn("--wait quant-research ||", body)
+		self.assertIn("--wait quant-research-scheduler ||", body)
 
 	def test_owner_tunnel_host_must_be_set_explicitly_and_never_falls_back_to_the_public_address(self) -> None:
 		module = runpy.run_path(str(ROOT / "config/secrets/env-split.py"))

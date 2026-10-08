@@ -160,14 +160,17 @@ cd "$COMPOSE_DIR"
 C=(docker compose --env-file .env -f compose.yaml -f compose.intraday-owner.yaml)
 "${C[@]}" config --quiet
 roll_back_release() {
+  rm -f "${current_root}.next"
   if [ -n "$previous_target" ]; then
-    rm -f "${current_root}.next"
     ln -sfn "$previous_target" "${current_root}.next"
     mv -Tf "${current_root}.next" "$current_root"
-    # 先主服务、后 scheduler：二者同时启动会抢写同一批目录表，一方的长事务占锁会让另一方启动超时
-    "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research || true
-    "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research-scheduler || true
+  else
+    # 第一次 overlay 发布没有上一版可回：撤掉 current，容器回落到镜像里的代码。
+    rm -f "$current_root"
   fi
+  # 先主服务、后 scheduler：二者同时启动会抢写同一批目录表，一方的长事务占锁会让另一方启动超时
+  "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research || true
+  "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research-scheduler || true
 }
 # 代码发布不改隧道：只确认它健康，不重建（重建会让所有数据库连接重连）。
 if ! { "${C[@]}" up -d --no-build --pull never --wait db-tunnel \
