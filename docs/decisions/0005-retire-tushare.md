@@ -40,7 +40,8 @@ Tushare 及其兼容网关（super、promax、datahub）曾是主要的行情来
 | 龙虎榜席位（`top_list`/`top_inst`） | 读的是历史原始行 | Fuyao `a_share_dragon_tiger_list` | 是否接入 |
 | 个股资金流（`moneyflow*`）与特征快照里的资金流特征 | 每日管线失败一次 | Longhu 主力净流（口径不同） | 是否换口径 |
 | 财报披露日历 | 每日管线失败一次 | 东财事件（另一张表） | 是否迁移 |
-| 自选股历史补齐、个股研究的 Tushare 读取、指数行情主源 | 软失败，已有公开源兜底 | 已有替代 | 可以直接删除 Tushare 调用 |
+| 个股研究（`/api/v1/stocks/{symbol}/study`） | 十个 Tushare 读取都软失败；**技术面评分取自 Tushare 日线，自停用起一直为空** | 本地收盘日线（Longhu 每日写入）或东财/腾讯公开日线 | 无需决定：改用本地日线并删掉 Tushare 读取（需要核对技术面函数要求的字段） |
+| 自选股历史补齐、指数行情主源 | 已完成（`a953352`、`ce63d66`） | 本地收盘日线；东财→腾讯 | — |
 
 以上部分处理完之后，再删除 `tushare_providers.py` 等五个模块，以及
 `provider_rate_limits` 和 super_get 执行器。
