@@ -72,6 +72,46 @@ class EventSpoolTests(unittest.TestCase):
             )
             spool.close()
 
+    def test_retry_does_not_accumulate_active_failure_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spool = EventSpool(Path(directory) / "events.sqlite3")
+            payload = {"chat_id": "chat-a", "msg_id": "m1", "msg_type_name": "TEXT"}
+            spool.enqueue("e1", payload)
+            spool.claim("e1")
+            spool.mark_failed("e1", "first", retry_after=1)
+            self.assertEqual(spool.chat_stats()["chat-a"]["failed_count"], 1)
+
+            spool._db.execute("UPDATE events SET available_at=0 WHERE event_id='e1'")
+            spool._db.commit()
+            spool.claim("e1")
+            self.assertEqual(spool.chat_stats()["chat-a"]["failed_count"], 0)
+            spool.mark_failed("e1", "second", retry_after=1)
+            self.assertEqual(spool.chat_stats()["chat-a"]["failed_count"], 1)
+
+            spool._db.execute("UPDATE events SET available_at=0 WHERE event_id='e1'")
+            spool._db.commit()
+            spool.claim("e1")
+            spool.mark_delivered("e1")
+            stats = spool.chat_stats()["chat-a"]
+            self.assertEqual(stats["failed_count"], 0)
+            self.assertEqual(stats["historical_failed_count"], 2)
+            spool.close()
+
+    def test_reopen_rebuilds_active_failure_count_from_event_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            spool = EventSpool(path)
+            spool.enqueue("e1", {"chat_id": "chat-a", "msg_id": "m1"})
+            spool.claim("e1")
+            spool.mark_failed("e1", "network")
+            spool._db.execute("UPDATE chat_stats SET failed_count=99 WHERE chat_id='chat-a'")
+            spool._db.commit()
+            spool.close()
+
+            reopened = EventSpool(path)
+            self.assertEqual(reopened.chat_stats()["chat-a"]["failed_count"], 1)
+            reopened.close()
+
     def test_drain_cursor_advances_only_over_a_contiguous_prefix(self):
         with tempfile.TemporaryDirectory() as directory:
             spool = EventSpool(Path(directory) / "events.sqlite3")

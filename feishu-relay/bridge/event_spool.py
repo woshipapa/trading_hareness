@@ -153,6 +153,7 @@ class EventSpool:
             self._db.execute("UPDATE events SET sequence=? WHERE rowid=?", (int(sequence), int(row[0])))
         self._db.execute("INSERT INTO spool_cursor(cursor_name,sequence,updated_at) VALUES('drain',0,?) ON CONFLICT(cursor_name) DO NOTHING", (self._now(),))
         self._backfill_chat_stats_locked()
+        self._reconcile_active_failure_counts_locked()
         self._rebuild_position_stats_locked()
         self._backfill_position_coverage_locked()
         self._db.commit()
@@ -220,6 +221,23 @@ class EventSpool:
             self._db.execute(
                 "INSERT INTO chat_stats(chat_id,observed_count,forwarded_count,failed_count,failure_count,filtered_count,last_observed_at,last_forwarded_at,last_message_type) VALUES(?,?,?,?,?,?,?,?,?)",
                 (chat_id, item["observed_count"], item["forwarded_count"], item["failed_count"], item["failure_count"], item["filtered_count"], item["last_observed_at"], item["last_forwarded_at"], item["last_message_type"]),
+            )
+
+    def _reconcile_active_failure_counts_locked(self) -> None:
+        """Derive active failures from event state instead of retry attempts."""
+        self._db.execute("UPDATE chat_stats SET failed_count=0")
+        rows = self._db.execute(
+            "SELECT payload_json FROM events WHERE status='failed'"
+        ).fetchall()
+        counts: dict[str, int] = {}
+        for row in rows:
+            chat_id, _ = self._payload_meta(row["payload_json"])
+            if chat_id:
+                counts[chat_id] = counts.get(chat_id, 0) + 1
+        for chat_id, count in counts.items():
+            self._db.execute(
+                "UPDATE chat_stats SET failed_count=? WHERE chat_id=?",
+                (count, chat_id),
             )
 
     def _record_observed_locked(self, payload: dict[str, Any], created_at: float) -> None:
@@ -724,7 +742,9 @@ class EventSpool:
         lease = now + max(30, min(1800, int(lease_seconds)))
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
-            row = self._db.execute("SELECT status,lease_until FROM events WHERE event_id=?", (event_id,)).fetchone()
+            row = self._db.execute(
+                "SELECT status,lease_until,payload_json FROM events WHERE event_id=?", (event_id,)
+            ).fetchone()
             if row is None:
                 self._db.rollback()
                 raise KeyError(event_id)
@@ -735,6 +755,13 @@ class EventSpool:
             if status == "processing" and row["lease_until"] is not None and float(row["lease_until"]) > now:
                 self._db.commit()
                 return "in_flight"
+            if status == "failed":
+                chat_id, _ = self._payload_meta(row["payload_json"])
+                if chat_id:
+                    self._db.execute(
+                        "UPDATE chat_stats SET failed_count=MAX(0,failed_count-1) WHERE chat_id=?",
+                        (chat_id,),
+                    )
             self._db.execute(
                 "UPDATE events SET status='processing',attempts=attempts+1,lease_until=?,updated_at=?,last_error=NULL WHERE event_id=?",
                 (lease, now, event_id),
