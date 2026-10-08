@@ -140,7 +140,10 @@ image.
   release available for rollback.
 - Never copy secrets, cookies, tokens, `*.env`, or `*-secrets.env` into a
   source release. Update only non-secret version metadata in the remote
-  runtime environment.
+  runtime environment. All credentials live in `config/secrets/` (gitignored);
+  see `config/secrets/README.md` for structure and `env.example` for the
+  complete key list. Push credentials to remotes with
+  `bash config/secrets/sync-secrets.sh {owner|edge|all}`, never ad-hoc `scp`.
 - A fast source release must fail closed when `requirements.txt`,
   `package.json`, a lockfile, Dockerfile, compose file, system package,
   supervisor/systemd contract, or Alembic migration changes. Those changes
