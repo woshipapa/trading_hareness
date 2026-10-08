@@ -26,6 +26,7 @@ POLL_SECONDS = max(2, int(os.environ.get("XHS_AI_POLL_SECONDS", "10")))
 TIMEOUT = max(60, int(os.environ.get("XHS_AI_TIMEOUT", "900")))
 HEALTH_HOST = os.environ.get("XHS_AI_WORKER_HOST", "127.0.0.1")
 HEALTH_PORT = int(os.environ.get("XHS_AI_WORKER_PORT", "8793"))
+FILTER_BATCH_SIZE = max(1, min(20, int(os.environ.get("XHS_AI_FILTER_BATCH_SIZE", "10"))))
 STATE = {"status": "starting", "last_job": None, "last_jobs": {}, "last_error": None,
          "completed": 0, "failed": 0}
 
@@ -151,21 +152,48 @@ def _parse_json_response(text, key='decisions'):
 
 
 def classify(job):
-    prompt = make_filter_prompt(job)
     base, _model, _effort = codex_provider.load_endpoint()
     keys = codex_provider.ordered_keys()
     if not keys:
         raise RuntimeError("codex-teleai key pool is unavailable")
-    text, model = codex_provider.request(
-        prompt, base=base, keys=keys, chain=codex_provider.default_chain(),
-        timeout=TIMEOUT, retries=2,
-    )
-    parsed = _parse_json_response(text)
+    notes = list(job.get("notes") or [])
+    expected = {
+        str(note.get("_candidate_id") or note.get("revision") or note.get("note_id") or "")
+        for note in notes
+    }
+    if not notes or "" in expected:
+        raise ValueError("invalid_filter_candidates")
+    decisions = []
+    prompts = []
+    model = ""
+    for offset in range(0, len(notes), FILTER_BATCH_SIZE):
+        chunk = notes[offset:offset + FILTER_BATCH_SIZE]
+        chunk_job = dict(job)
+        chunk_job["job_id"] = f"{job.get('job_id', '')}/part-{offset // FILTER_BATCH_SIZE + 1}"
+        chunk_job["notes"] = chunk
+        prompt = make_filter_prompt(chunk_job)
+        prompts.append(prompt)
+        text, model = codex_provider.request(
+            prompt, base=base, keys=keys, chain=codex_provider.default_chain(),
+            timeout=TIMEOUT, retries=2,
+        )
+        parsed = _parse_json_response(text)
+        part = parsed["decisions"]
+        part_ids = [str(item.get("candidate_id") or item.get("note_id") or "")
+                    for item in part if isinstance(item, dict)]
+        if len(part_ids) != len(set(part_ids)) or set(part_ids) != {
+                str(note.get("_candidate_id") or note.get("revision") or note.get("note_id") or "")
+                for note in chunk
+        }:
+            raise ValueError("invalid_filter_batch_coverage")
+        decisions.extend(part)
+    if {str(item.get("candidate_id") or item.get("note_id") or "") for item in decisions} != expected:
+        raise ValueError("invalid_filter_coverage")
     return {
-        "decisions": parsed["decisions"],
+        "decisions": decisions,
         "model": model,
         "provider": "paper-kb/codex_provider",
-        "input_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "input_sha256": hashlib.sha256("\n".join(prompts).encode()).hexdigest(),
     }
 
 

@@ -1,3 +1,5 @@
+import json
+import re
 import unittest
 from unittest import mock
 
@@ -46,6 +48,36 @@ class SingleNotePromptTests(unittest.TestCase):
                 local_worker.loop('interactive')
         self.assertEqual(calls[0][1]['lane'], 'interactive')
         self.assertTrue(calls[0][1]['worker'].endswith(':interactive'))
+
+    def test_recommendation_filter_splits_large_candidate_batches_and_merges_all_decisions(self):
+        job = {
+            'job_id': 'filter-large',
+            'policy': {'topics': []},
+            'notes': [
+                {'_candidate_id': f'candidate-{index}', 'title': f'Note {index}', 'text': 'CUDA'}
+                for index in range(21)
+            ],
+        }
+
+        def fake_request(prompt, **_kwargs):
+            ids = re.findall(r'candidate_id：([^\n]+)', prompt)
+            return json.dumps({
+                'decisions': [
+                    {'candidate_id': value, 'decision': 'include', 'topics': [],
+                     'relevance_score': .9, 'confidence': .9, 'reason': '系统内容'}
+                    for value in ids
+                ]
+            }), 'fake-model'
+
+        with mock.patch.object(local_worker.codex_provider, 'load_endpoint', return_value=('http://test', '', '')), \
+             mock.patch.object(local_worker.codex_provider, 'ordered_keys', return_value=['fixture']), \
+             mock.patch.object(local_worker.codex_provider, 'default_chain', return_value=[('fake-model', 'high')]), \
+             mock.patch.object(local_worker.codex_provider, 'request', side_effect=fake_request) as request:
+            result = local_worker.classify(job)
+
+        self.assertEqual(request.call_count, 3)
+        self.assertEqual({item['candidate_id'] for item in result['decisions']},
+                         {note['_candidate_id'] for note in job['notes']})
 
 
 if __name__ == '__main__':
