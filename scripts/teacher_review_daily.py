@@ -37,14 +37,15 @@ import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import teacher_harness as harness  # noqa: E402 - sibling module, after the path is set
+
 PEER_HOST = os.environ.get("PEER_SSH_HOST", "stockpeer@47.110.79.189")
 PEER_PORT = os.environ.get("PEER_SSH_PORT", "3535")
 PEER_KEY = os.path.expanduser(os.environ.get("PEER_SSH_KEY", "~/.ssh/stockpeer_ed25519"))
 PEER_CONTAINER = os.environ.get("PEER_API_CONTAINER", "trading-hareness-peer-quant-research-1")
 PEER_APP_DIR = os.environ.get("PEER_APP_DIR", "/app/hotfix/current")
 CN = timezone(timedelta(hours=8))
-HARNESS_DIR = pathlib.Path(os.environ.get("VIDEO_HARNESS_DIR",
-                                          "/Users/papa/codebase/video_understanding_harness"))
 REQUIRED_HARNESS_FILES = ("transcript_large.srt", "provenance.json", "state.json")
 
 
@@ -101,16 +102,11 @@ def in_session_now(now: datetime) -> bool:
 
     以前写的是 ``now.weekday() < 5``：休市的工作日（中秋、国庆）也被当成交易日，
     于是 09:15–15:00 之间 sweep 一律被拒，而每 20 分钟一轮的自动化就这么空转半天。
-    交易日历用 harness 里那份（XSHG），拿不到才退回工作日判断。
+    交易日历是 exchange_calendars 的 XSHG（teacher_harness.is_trading_day），拿不到才退回工作日判断。
     """
     if not ((9, 15) <= (now.hour, now.minute) < (15, 0)):
         return False
-    try:
-        sys.path.insert(0, str(HARNESS_DIR))
-        from teacher_strategy import is_trading_day
-        return is_trading_day(now.date())
-    except Exception:  # noqa: BLE001 - 日历不可用时退回工作日
-        return now.weekday() < 5
+    return harness.is_trading_day(now.date())
 
 
 def main() -> None:

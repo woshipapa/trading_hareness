@@ -35,8 +35,10 @@ import subprocess
 import sys
 from typing import Any
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import teacher_harness as harness  # noqa: E402 - sibling module, after the path is set
+
 CN = dt.timezone(dt.timedelta(hours=8))
-HARNESS = pathlib.Path(os.environ.get("VIDEO_HARNESS_DIR", "/Users/papa/codebase/video_understanding_harness"))
 DRIVER = pathlib.Path(__file__).with_name("teacher_review_daily.py")
 JOBS = pathlib.Path(os.environ.get("VIDEO_HARNESS_ARTIFACTS",
                                    "/Users/papa/codebase/video_understanding_artifacts")) / "jobs"
@@ -73,9 +75,7 @@ def _driver(command: list[str], job: pathlib.Path, timeout: int = 2400) -> dict[
 
 def owner_ok(base: str = OWNER_BASE) -> dict[str, Any]:
     """owner 读路径是否可用；不可用就不该继续（不得改用 5681）。"""
-    sys.path.insert(0, str(HARNESS))
-    from owner_universe import owner_health  # noqa: PLC0415 - harness module, imported on demand
-    health = owner_health(base)
+    health = harness.load("owner_universe").owner_health(base)
     return {"ok": bool(health.get("ok")), "base_url": base, **{k: health.get(k) for k in ("http_status", "release", "error_type")}}
 
 
@@ -129,13 +129,17 @@ def eligible_jobs(root: pathlib.Path = JOBS) -> list[tuple[pathlib.Path, str]]:
 
 
 def gate(job: pathlib.Path, review: str) -> dict[str, Any]:
-    """能不能开跑：owner 通不通、交接清单在不在、稿子里的代码有没有阻断问题。"""
+    """能不能开跑：harness 符不符合约定、owner 通不通、交接清单在不在、稿子里的代码有没有阻断问题。"""
     handoff = handoff_of(job)
-    health = owner_ok()
+    # 后面几步都要调 harness；它缺了或者改了名，在这里停，而不是跑到一半抛 ImportError。
+    harness_problems = harness.contract_problems()
+    health = {"ok": False, "error_type": "harness_unavailable"} if harness_problems else owner_ok()
     numbers = handoff.get("number_check") or {}
     blocking = [reason for reason in (handoff.get("blocking_reasons") or []) if "代码问题" in str(reason)]
     reasons: list[str] = []
-    if not health["ok"]:
+    if harness_problems:
+        reasons.append("video harness 与约定不符：" + "；".join(harness_problems))
+    elif not health["ok"]:
         reasons.append(f"owner 读路径不可用（{health.get('error_type') or health.get('http_status')}）")
     if handoff.get("status") != "completed":
         reasons.append(f"交接清单状态 {handoff.get('status')}")
@@ -159,10 +163,8 @@ def run_pack(job: pathlib.Path, review: str) -> dict[str, Any]:
         pack = _read_json(existing, {}) or {}
         return {"status": "exists", "pack_file": existing.name, "pack_id": pack.get("pack_id"),
                 "stocks": len(pack.get("stocks") or [])}
-    sys.path.insert(0, str(HARNESS))
-    import teacher_pack_agent as agent  # noqa: PLC0415
-    from agent_dispatch import _load_provider  # noqa: PLC0415 - reuse the harness provider plumbing
-    provider = _load_provider()
+    agent = harness.load("teacher_pack_agent")
+    provider = harness.load("agent_dispatch")._load_provider()  # reuse the harness provider plumbing
     base, _model, _effort = provider.load_endpoint()
     keys = provider.ordered_keys()
     if not keys:
@@ -185,9 +187,7 @@ def chips(job: pathlib.Path, review: str) -> dict[str, Any]:
               if isinstance(row, dict) and row.get("close") is not None}
     if not closes:
         return {"status": "skipped", "reason": "证据里没有个股收盘价"}
-    sys.path.insert(0, str(HARNESS))
-    from chip_distribution import build_chip_evidence  # noqa: PLC0415
-    built = build_chip_evidence(list(closes), base_url=OWNER_BASE, trade_date=review, closes=closes)
+    built = harness.load("chip_distribution").build_chip_evidence(list(closes), base_url=OWNER_BASE, trade_date=review, closes=closes)
     _write_json(path, built)
     ok = sum(1 for row in built["profiles"].values() if row.get("status") == "ok")
     return {"status": "built", "profiles": len(built["profiles"]), "ok": ok,
@@ -196,8 +196,7 @@ def chips(job: pathlib.Path, review: str) -> dict[str, Any]:
 
 def distill(job: pathlib.Path) -> dict[str, Any]:
     """重建方法库，并把次日结果贴到每条推演上。"""
-    sys.path.insert(0, str(HARNESS))
-    import teacher_method_library as lib  # noqa: PLC0415
+    lib = harness.load("teacher_method_library")
     library = lib.build(JOBS, job)
     out = JOBS.parent / "teacher_method_library"
     _write_json(out.with_suffix(".json"), library)
@@ -420,9 +419,7 @@ def run_cycle(job: pathlib.Path, review: str, *, auto_import: bool, only: str | 
         # 确定性补充检查：抽取里已绑定、有原话、有立场，却没进包的票。建包是模型判断
         # 会漏（9/24 漏了奥佳华），这一条不依赖模型。只报 warning，不阻断。
         try:
-            sys.path.insert(0, str(HARNESS))
-            from teacher_board import dropped_bound_stocks
-            state["pack_gaps"] = dropped_bound_stocks(job, review)
+            state["pack_gaps"] = harness.load("teacher_board").dropped_bound_stocks(job, review)
         except Exception as error:  # noqa: BLE001 - 补充检查失败不该拖垮 check
             state["pack_gaps"] = [{"error": str(error)[:200]}]
         _write_json(state_path, state)
@@ -458,9 +455,7 @@ def run_cycle(job: pathlib.Path, review: str, *, auto_import: bool, only: str | 
     if only in (None, "overlap"):
         # 与 owner 自己策略的同日对照。只读；对不齐交易日就明说，不硬凑。
         try:
-            sys.path.insert(0, str(HARNESS))
-            from teacher_owner_overlap import compare as compare_owner
-            state["overlap"] = compare_owner(review)
+            state["overlap"] = harness.load("teacher_owner_overlap").compare(review)
             _write_json(job / f"overlap_{review.replace('-', '')}.json", state["overlap"])
         except Exception as error:  # noqa: BLE001 - 对照失败不阻断别的步骤
             state["overlap"] = {"status": "failed", "error": str(error)[:300]}

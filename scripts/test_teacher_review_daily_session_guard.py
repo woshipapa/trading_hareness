@@ -6,17 +6,15 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 CN = timezone(timedelta(hours=8))
 DRIVER = Path(__file__).resolve().with_name("teacher_review_daily.py")
-# The exchange holiday calendar lives in the video harness repository; without
-# it in_session_now falls back to weekdays by design (CI has no harness checkout).
-HARNESS_CALENDAR = Path(os.environ.get(
-    "VIDEO_HARNESS_DIR", "/Users/papa/codebase/video_understanding_harness")) / "teacher_strategy.py"
+# Holidays come from exchange_calendars (XSHG); without it the check falls back
+# to weekdays by design, so a holiday cannot be told apart from a session.
+CALENDAR_INSTALLED = importlib.util.find_spec("exchange_calendars") is not None
 
 
 def _driver():
@@ -33,7 +31,7 @@ class SessionGuardTests(unittest.TestCase):
     def _at(self, stamp: str) -> bool:
         return self.driver.in_session_now(datetime.fromisoformat(stamp).replace(tzinfo=CN))
 
-    @unittest.skipUnless(HARNESS_CALENDAR.exists(), "the holiday calendar lives in the video harness repository")
+    @unittest.skipUnless(CALENDAR_INSTALLED, "needs exchange_calendars for the holiday calendar")
     def test_a_closed_weekday_is_not_a_session(self) -> None:
         # 2026-09-25 是中秋休市的周五 —— 这一条是修复的理由
         self.assertFalse(self._at("2026-09-25 10:30"))

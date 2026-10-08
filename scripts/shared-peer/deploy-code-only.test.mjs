@@ -77,6 +77,17 @@ for (const skipped of ['quant-service/compose.standalone.yaml', 'quant-service/D
 git('reset', '-q', '--hard', edgeOnly);
 console.log('standalone build files are not owner runtime');
 
+// The teacher cycle runs on the operator workstation.
+const teacher = commit(['scripts/teacher_cycle.py', 'scripts/teacher_review_daily.py', 'scripts/teacher_harness.py',
+	'quant-service/app/main.py'], 'teacher cycle');
+result = dryRun(teacher, edgeOnly);
+assert.equal(result.status, 0, result.stderr);
+for (const skipped of ['scripts/teacher_cycle.py', 'scripts/teacher_review_daily.py', 'scripts/teacher_harness.py']) {
+	assert.ok(result.stdout.includes(`\n${skipped}\n`), `${skipped} should be listed as skipped`);
+}
+git('reset', '-q', '--hard', edgeOnly);
+console.log('the workstation teacher cycle is not owner runtime');
+
 // Anything the image or the release checkout depends on needs a full release.
 for (const path of ['quant-service/migrations/versions/x.py', 'quant-service/requirements.txt',
 	'quant-service/Dockerfile.peer', 'deploy/shared-peer/compose.yaml', 'scripts/peer-session-guard.sh']) {

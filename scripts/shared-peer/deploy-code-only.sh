@@ -90,6 +90,10 @@ while IFS= read -r path; do
     # never values); gitignored files do not appear here at all.
     config/secrets/env-split.py|config/secrets/sync-secrets.sh|config/secrets/env.example|config/secrets/README.md)
       skipped_files+="$path"$'\n' ;;
+    # The teacher cycle runs on the operator workstation (svc_supervisor's
+    # teacher.cycle) and reaches the owner only over HTTP and ssh.
+    scripts/teacher_cycle.py|scripts/teacher_review_daily.py|scripts/teacher_harness.py)
+      skipped_files+="$path"$'\n' ;;
     # Release tooling that runs on the operator workstation, the Windows owner
     # workstation or the edge - never inside the owner peer runtime.
     scripts/release-sync-status.sh|scripts/shared-peer/deploy-code-only.sh|scripts/shared-peer/deploy-full-release.sh|\
