@@ -136,7 +136,7 @@ ln -sfn "releases/$RELEASE_LABEL" "${current_root}.next"
 mv -Tf "${current_root}.next" "$current_root"
 
 set_env() {
-  key="$1"; value="$2"; file="$COMPOSE_DIR/.env"; tmp="${file}.tmp"
+  key="$1"; value="$2"; file="$(readlink -f "$COMPOSE_DIR/.env")"; tmp="${file}.tmp"
   awk -F= -v key="$key" -v value="$value" '
     BEGIN { replaced=0 }
     $1 == key { if (!replaced) { print key "=" value; replaced=1 }; next }

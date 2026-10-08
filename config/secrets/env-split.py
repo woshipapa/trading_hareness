@@ -127,12 +127,6 @@ def build_owner(local: dict) -> str:
         "",
         "# ── n8n（profiles: n8n，不启动，但 compose 校验变量插值）──",
         f"PEER_N8N_ENCRYPTION_KEY={get(local, 'N8N_ENCRYPTION_KEY', '')}",
-        "",
-        "# ── 发布元数据（deploy-code-only.sh 运行时填充）──",
-        f"PEER_APP_GIT_SHA=unknown",
-        f"PEER_APP_RELEASE=unknown",
-        f"PEER_APP_BUILD_CREATED_AT=unknown",
-        f"PEER_EXPECTED_RELEASE=unknown",
     ]
     return "\n".join(lines) + "\n"
 

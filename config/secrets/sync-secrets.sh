@@ -57,7 +57,15 @@ sync_file() {
 
 sync_owner() {
   local env_file="$SCRIPT_DIR/.env.owner"
-  sync_file "$env_file" "$OWNER_HOST" "$OWNER_PORT" "$OWNER_USER" "$OWNER_KEY" "$OWNER_REMOTE_DIR"
+  # 发布元数据由 deploy-code-only.sh 写在远端文件里，推送时保留，不能被覆盖
+  local keep merged tmpdir
+  keep="$(ssh -o StrictHostKeyChecking=accept-new -p "$OWNER_PORT" -i "$OWNER_KEY" "$OWNER_USER@$OWNER_HOST" \
+    "grep -E '^PEER_(APP_GIT_SHA|APP_RELEASE|APP_BUILD_CREATED_AT|EXPECTED_RELEASE)=' ~/$OWNER_REMOTE_DIR/.env.owner || true")"
+  tmpdir="$(mktemp -d)"; merged="$tmpdir/.env.owner"; umask 077
+  grep -vE '^PEER_(APP_GIT_SHA|APP_RELEASE|APP_BUILD_CREATED_AT|EXPECTED_RELEASE)=' "$env_file" > "$merged"
+  [[ -n "$keep" ]] && printf '%s\n' "$keep" >> "$merged"
+  sync_file "$merged" "$OWNER_HOST" "$OWNER_PORT" "$OWNER_USER" "$OWNER_KEY" "$OWNER_REMOTE_DIR"
+  rm -rf "$tmpdir"
   # 证书
   if [[ -d "$SCRIPT_DIR/certs" ]]; then
     for cert in "$SCRIPT_DIR/certs"/*; do
