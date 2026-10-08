@@ -53,6 +53,35 @@ def make_prompt(job):
     return "\n".join(lines)[:100000]
 
 
+def make_filter_prompt(job):
+    """Build a bounded classifier prompt without signed upstream material."""
+    policy = job.get("policy") or {}
+    topics = policy.get("topics") or []
+    lines = [
+        "你是 AI infrastructure / systems for AI 的内容筛选器。",
+        "只根据给出的标题、作者、时间和正文判断，不能臆造原文没有的事实。",
+        "目标读者关注 AI 基础设施、训练系统、推理、编译器、模型、系统工程和科研。",
+        "对消费、生活方式、泛营销和无关内容判为 exclude；不确定但可能相关判为 review。",
+        "只输出一个 JSON 对象，不要 Markdown、解释或代码围栏。",
+        '格式：{"decisions":[{"candidate_id":"...","decision":"include|review|exclude","topics":[{"topic_id":"ai_infra","score":0.0}],"relevance_score":0.0,"confidence":0.0,"reason":"不超过200字","evidence":["关键词"],"risk_flags":[]}]}',
+        "可用 Topic 策略：" + json.dumps(topics, ensure_ascii=False),
+        "任务：" + str(job.get("job_id", "")),
+        "",
+    ]
+    for index, note in enumerate(job.get("notes") or [], 1):
+        lines.extend([
+            f"候选 {index}",
+            f"candidate_id：{note.get('_candidate_id') or note.get('revision') or ''}",
+            f"标题：{note.get('title', '')}",
+            f"作者：{note.get('author', '')}",
+            f"时间：{note.get('published_at', '')}",
+            f"正文：{str(note.get('text', ''))[:5000]}",
+            f"链接：{note.get('url', '')}",
+            "",
+        ])
+    return "\n".join(lines)[:100000]
+
+
 def summarize(job):
     prompt = make_prompt(job)
     base, _model, _effort = codex_provider.load_endpoint()
@@ -78,6 +107,79 @@ def summarize(job):
     }
 
 
+def _parse_json_response(text, key='decisions'):
+    text = str(text or '').strip()
+    if text.startswith('```'):
+        text = text.strip('`')
+        if text.lstrip().startswith('json'):
+            text = text.lstrip()[4:].lstrip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError('invalid_filter_json') from exc
+    if isinstance(value, list):
+        value = {key: value}
+    if not isinstance(value, dict) or not isinstance(value.get(key), list):
+        raise ValueError('invalid_filter_schema')
+    return value
+
+
+def classify(job):
+    prompt = make_filter_prompt(job)
+    base, _model, _effort = codex_provider.load_endpoint()
+    keys = codex_provider.ordered_keys()
+    if not keys:
+        raise RuntimeError("codex-teleai key pool is unavailable")
+    text, model = codex_provider.request(
+        prompt, base=base, keys=keys, chain=codex_provider.default_chain(),
+        timeout=TIMEOUT, retries=2,
+    )
+    parsed = _parse_json_response(text)
+    return {
+        "decisions": parsed["decisions"],
+        "model": model,
+        "provider": "paper-kb/codex_provider",
+        "input_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+    }
+
+
+def make_profile_filter_prompt(job):
+    lines = [
+        "你是 AI infra / systems for AI 账号筛选器。",
+        "根据账号昵称、简介和最近作品，判断是否值得加入我们的内部监控列表。",
+        "关注 GPU、训练系统、推理、编译器、模型、系统工程和 AI 科研；泛消费、生活方式和纯招聘广告排除。",
+        "只输出 JSON，不要 Markdown。必须覆盖每个 user_id。",
+        '格式：{"profiles":[{"user_id":"...","decision":"include|review|exclude","topics":[{"topic_id":"ai_infra","score":0.0}],"score":0.0,"confidence":0.0,"reason":"不超过300字","recent_note_ids":[]}]}',
+        "任务：" + str(job.get("job_id", "")),
+        "",
+    ]
+    for profile in job.get('profiles') or []:
+        lines.extend([
+            "user_id：" + str(profile.get('user_id', '')),
+            "昵称：" + str(profile.get('nickname', '')),
+            "简介：" + str(profile.get('description', ''))[:1000],
+            "最近作品：" + json.dumps(profile.get('recent_notes') or [], ensure_ascii=False)[:6000],
+            "",
+        ])
+    return "\n".join(lines)[:100000]
+
+
+def classify_profiles(job):
+    prompt = make_profile_filter_prompt(job)
+    base, _model, _effort = codex_provider.load_endpoint()
+    keys = codex_provider.ordered_keys()
+    if not keys:
+        raise RuntimeError("codex-teleai key pool is unavailable")
+    text, model = codex_provider.request(
+        prompt, base=base, keys=keys, chain=codex_provider.default_chain(),
+        timeout=TIMEOUT, retries=2,
+    )
+    parsed = _parse_json_response(text, key='profiles')
+    return {"profiles": parsed.get("profiles") or [],
+            "model": model, "provider": "paper-kb/codex_provider",
+            "input_sha256": hashlib.sha256(prompt.encode()).hexdigest()}
+
+
 def call_edge(path, payload=None, timeout=30):
     return request_json(f"{EDGE_URL}{path}", payload, token=EDGE_TOKEN,
                         header="X-XHS-Collector-Token", timeout=timeout)
@@ -98,7 +200,12 @@ def loop():
                 time.sleep(POLL_SECONDS)
                 continue
             STATE["last_job"] = job.get("job_id")
-            result = summarize(job)
+            if job.get("job_type") == "classify_recommendations":
+                result = classify(job)
+            elif job.get("job_type") == "classify_profiles":
+                result = classify_profiles(job)
+            else:
+                result = summarize(job)
             call_edge("/v1/worker/complete", {"job_id": job["job_id"], "lease_token": job["lease_token"], **result}, timeout=TIMEOUT + 30)
             STATE["completed"] += 1
             STATE["last_error"] = None

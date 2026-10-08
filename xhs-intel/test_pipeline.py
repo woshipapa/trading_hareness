@@ -77,6 +77,78 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(self.store.remove_watch_user('user-123'))
         self.assertEqual(self.store.list_watch_users(), [])
 
+    def test_recommendation_filter_covers_all_candidates_and_queues_only_selected_summary(self):
+        first = note('CUDA distributed training')
+        second = normalize({'id': 'b' * 24, 'note_card': {'title': '美食', 'desc': '无关',
+                             'time': 1750000000000}}, 'recommendation:r')
+        self.store.add_note(first, 'recommendation:r')
+        self.store.add_note(second, 'recommendation:r')
+        self.store.create_recommendation_run('r', requested=2)
+        first_id, _ = self.store.add_recommendation_item('r', first, 1)
+        second_id, _ = self.store.add_recommendation_item('r', second, 2)
+        self.store.queue_recommendation_filter('r')
+        job = self.store.claim('classifier')
+        result = self.store.complete(job['job_id'], job['lease_token'], {
+            'decisions': [
+                {'candidate_id': first_id, 'decision': 'include', 'topics': [{'topic_id': 'ai_infra', 'score': .9}],
+                 'relevance_score': .9, 'confidence': .9, 'reason': '系统内容'},
+                {'candidate_id': second_id, 'decision': 'exclude', 'topics': [],
+                 'relevance_score': .1, 'confidence': .9, 'reason': '无关'},
+            ],
+            'model': 'fake', 'input_sha256': 'test',
+        })
+        self.assertEqual(result['include'], 1)
+        self.assertEqual(result['exclude'], 1)
+        self.assertEqual(self.store.recommendation_run('r')['status'], 'summary_queued')
+        summary = self.store.claim('summary-worker')
+        self.assertEqual(summary['job_type'], 'summary')
+        self.assertEqual(len(summary['notes']), 1)
+        self.assertEqual(summary['notes'][0]['title'], 'GPU serving')
+        self.store.complete(summary['job_id'], summary['lease_token'], {'summary': '摘要', 'model': 'fake'})
+        self.assertEqual(self.store.recommendation_run('r')['status'], 'summary_ready')
+        self.store.delivered(summary['job_id'])
+        self.assertEqual(self.store.recommendation_run('r')['status'], 'sent')
+
+    def test_following_snapshot_is_idempotent(self):
+        accounts = [{'user_id': 'user-1', 'nickname': 'Systems Lab', 'raw': {'rid': 'user-1'}}]
+        self.assertEqual(self.store.upsert_following_accounts(accounts, 'test-endpoint'), 1)
+        self.assertEqual(self.store.upsert_following_accounts(accounts, 'test-endpoint'), 1)
+        self.assertEqual(len(self.store.list_following_accounts()), 1)
+
+    def test_following_listing_supports_count_and_offset(self):
+        accounts = [
+            {'user_id': 'user-1', 'nickname': 'one'},
+            {'user_id': 'user-2', 'nickname': 'two'},
+        ]
+        self.store.upsert_following_accounts(accounts, 'test-endpoint')
+        self.assertEqual(self.store.count_following_accounts(), 2)
+        self.assertEqual(len(self.store.list_following_accounts(limit=1, offset=1)), 1)
+
+    def test_following_profile_filter_requires_full_candidate_coverage(self):
+        self.store.upsert_following_accounts([{'user_id': 'user-1', 'nickname': 'Systems Lab'}], 'test-endpoint')
+        queued = self.store.queue_following_filter([{
+            'user_id': 'user-1', 'nickname': 'Systems Lab', 'recent_notes': [], 'recent_note_ids': [],
+        }])
+        job = self.store.claim('profile-classifier')
+        result = self.store.complete(job['job_id'], job['lease_token'], {
+            'profiles': [{'user_id': 'user-1', 'decision': 'include', 'topics': [{'topic_id': 'research', 'score': .8}],
+                          'score': .8, 'confidence': .8, 'reason': '系统科研账号'}],
+            'model': 'fake', 'input_sha256': 'test',
+        })
+        self.assertEqual(queued['job_id'], job['job_id'])
+        self.assertEqual(result['include'], 1)
+        self.assertEqual(self.store.list_profile_candidates()[0]['decision'], 'include')
+
+    def test_topic_versions_are_additive_and_disable_is_explicit(self):
+        topic = self.store.upsert_topic({'slug': 'accelerator', 'name': '加速器',
+                                         'include_keywords': ['GPU', 'NPU']})
+        self.assertEqual(topic['active_version'], 1)
+        topic = self.store.upsert_topic({'slug': 'accelerator', 'name': '加速器与互联',
+                                         'include_keywords': ['GPU', 'NPU', '互联']})
+        self.assertEqual(topic['active_version'], 2)
+        self.assertTrue(self.store.set_topic_enabled('accelerator', False))
+        self.assertTrue(any(row['slug'] == 'accelerator' for row in self.store.list_topics(enabled=False)))
+
 
 if __name__ == '__main__':
     unittest.main()

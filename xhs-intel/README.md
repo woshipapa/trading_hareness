@@ -42,6 +42,36 @@ Feishu delivery ledger as the keyword lane. A profile URL is accepted by the
 `watch add` command, but only its user id is persisted; signed URL parameters
 are never stored.
 
+## Recommendation and topic lanes
+
+The daily recommendation lane is separate from keyword/watch collection. It
+uses the bounded `homefeed_recommend` category, collects at most 50 notes, and
+creates a `classify_recommendations` job before any summary job. The Mac worker
+must return strict JSON decisions covering every candidate; only `include`
+items reach the existing Feishu delivery ledger. `review` and `exclude` rows
+remain durable for auditing and threshold tuning.
+
+The initial Topic taxonomy is seeded in `config.py` and copied into versioned
+SQLite policy rows. Adding a topic is a data/config change; a run stores its
+policy hash so old results remain reproducible. The following sync is read-only
+and stores an external account snapshot in `following_accounts`. It is not the
+same thing as `watch_users`, which is the internal monitoring list, and it does
+not call the platform follow mutation API.
+
+Useful Feishu commands are:
+
+```text
+#xhs intel scan recommendations 50
+#xhs intel recommendation latest
+#xhs intel topic list
+#xhs intel following sync
+#xhs intel following list
+```
+
+The n8n workflow schedules following snapshot sync at 07:40, the existing
+keyword lane at 08:00, and recommendation filtering at 08:20. n8n only starts
+the Edge jobs; the Edge delivery loop remains the single Feishu sender.
+
 PC collection, Creator metadata/publish methods, live and IM HTTP methods,
 蒲公英 KOL methods and 千帆 distributor methods all use the checked-in public
 method registry in `operations.py`. Account-changing operations require

@@ -188,3 +188,61 @@ def collect(store, source_root, cookie_file, queries, *, limit=8, request_key=No
                 pass
         time.sleep(delay)
     return {'status': 'completed', 'queries': results}
+
+
+def collect_recommendations(store, source_root, cookie_file, *, run_id, limit=50,
+                            category='homefeed_recommend', delay=3):
+    """Collect one bounded recommendation sweep.
+
+    Spider_XHS internally pages the homefeed endpoint.  The caller gives us a
+    hard item limit and this function never follows a caller-controlled cursor.
+    Recommendation notes are persisted in their own run/items tables and are
+    deliberately not put into the legacy global summary queue.
+    """
+    limit = max(1, min(int(limit), 50))
+    cookie = Path(cookie_file).read_text().strip() if Path(cookie_file).is_file() else ''
+    if not cookie:
+        store.finish_recommendation_collection(run_id, 0, 0, 'missing_cookie')
+        return {'status': 'blocked', 'reason': 'missing_cookie', 'run_id': run_id, 'fetched': 0, 'added': 0}
+    api = None
+    fetched = added = 0
+    try:
+        api = _pc_api(source_root, cookie_file)
+        ok, message, items = api.get_homefeed_recommend_by_num(category, limit)
+        if not ok or not isinstance(items, list):
+            raise RuntimeError('recommendation_fetch_failed')
+        query = f'recommendation:{run_id}'
+        for rank, item in enumerate(items[:limit], 1):
+            if not isinstance(item, dict) or item.get('model_type') not in (None, 'note'):
+                continue
+            note_id = str(item.get('id') or item.get('note_id') or '')
+            if not re.fullmatch(r'[0-9a-fA-F]{24}', note_id):
+                continue
+            token = item.get('xsec_token') or item.get('xsecToken') or ''
+            if not token:
+                continue
+            time.sleep(delay)
+            ok, _msg, detail_body = api.get_note_info(
+                f'https://www.xiaohongshu.com/explore/{note_id}?' +
+                urlencode({'xsec_token': token, 'xsec_source': 'pc_homefeed'}))
+            if not ok:
+                continue
+            data = (detail_body or {}).get('data') or {}
+            detail_items = data.get('items') or []
+            detail = detail_items[0] if detail_items else None
+            note = normalize(item, query, detail)
+            note['source_kind'] = 'homefeed_recommendation'
+            note['source_rank'] = rank
+            note['recommendation_run_id'] = run_id
+            was_added = store.add_note(note, query)
+            revision, item_added = store.add_recommendation_item(run_id, note, rank)
+            fetched += 1
+            added += int(was_added or item_added)
+        store.finish_recommendation_collection(run_id, fetched, added)
+        return {'status': 'completed', 'run_id': run_id, 'category': category,
+                'requested': limit, 'fetched': fetched, 'added': added}
+    except Exception as exc:
+        store.finish_recommendation_collection(run_id, fetched, added, error_code(exc))
+        return {'status': 'partial' if fetched else 'failed', 'run_id': run_id,
+                'requested': limit, 'fetched': fetched, 'added': added,
+                'error': error_code(exc)}

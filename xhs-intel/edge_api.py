@@ -10,12 +10,13 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from collector import collect, collect_watched  # noqa: E402
+from collector import collect, collect_recommendations, collect_watched  # noqa: E402
 from common import error_code, request_json  # noqa: E402
+from config import policy_snapshot  # noqa: E402
 from operations import (  # noqa: E402
     OperationError,
     SpiderRuntime,
@@ -38,6 +39,10 @@ STORE = Store(STATE_DIR / "queue.sqlite3")
 DEFAULT_QUERIES = [x.strip() for x in os.environ.get("XHS_KEYWORDS", "AI infra,推理系统,大模型部署,CUDA,算子优化").split(",") if x.strip()]
 FETCH_LIMIT = max(1, min(20, int(os.environ.get("XHS_FETCH_LIMIT", "8"))))
 WATCH_FETCH_LIMIT = max(1, min(20, int(os.environ.get("XHS_WATCH_FETCH_LIMIT", "5"))))
+RECOMMEND_FETCH_LIMIT = max(1, min(50, int(os.environ.get("XHS_RECOMMEND_FETCH_LIMIT", "50"))))
+RECOMMEND_CATEGORY = os.environ.get("XHS_RECOMMEND_CATEGORY", "homefeed_recommend").strip() or "homefeed_recommend"
+RECOMMEND_DELAY = max(1, int(os.environ.get("XHS_RECOMMEND_DELAY", os.environ.get("XHS_REQUEST_DELAY", "3"))))
+ADMIN_OPEN_IDS = {value.strip() for value in os.environ.get("XHS_ADMIN_OPEN_IDS", "").split(",") if value.strip()}
 FEISHU_WEBHOOK = os.environ.get("XHS_FEISHU_WEBHOOK_URL", "").strip()
 FEISHU_TOKEN = os.environ.get("XHS_ALERT_WEBHOOK_TOKEN", "")
 FEISHU_MAX_CHARS = 3000
@@ -140,6 +145,157 @@ def _watch_user_id(value):
     return value
 
 
+def _admin_actor(payload):
+    actor = str(payload.get('sender_open_id') or payload.get('actor_open_id') or payload.get('from_open_id') or '').strip()
+    if not actor or not ADMIN_OPEN_IDS or actor not in ADMIN_OPEN_IDS:
+        raise OperationError('管理员身份未配置或无权执行此审核操作')
+    return actor
+
+
+def run_recommendation(payload=None):
+    payload = dict(payload or {})
+    requested = max(1, min(RECOMMEND_FETCH_LIMIT, int(payload.get('limit') or RECOMMEND_FETCH_LIMIT)))
+    run_id = str(payload.get('run_id') or payload.get('run_key') or '').strip()
+    if not run_id:
+        run_id = 'xhs-reco-' + hashlib.sha256(f"{int(time.time() // 3600)}:{requested}".encode()).hexdigest()[:24]
+    existing = STORE.recommendation_run(run_id)
+    if existing and existing.get('status') in {'summary_queued', 'filtered', 'completed', 'filter_queued', 'collected', 'running'}:
+        return {'status': 'duplicate', 'run_id': run_id, 'run': existing,
+                'queue': STORE.status().get('jobs', {})}
+    STORE.create_recommendation_run(run_id, category=RECOMMEND_CATEGORY, requested=requested,
+                                    policy=policy_snapshot())
+    result = collect_recommendations(STORE, SOURCE_ROOT, COOKIE_FILE, run_id=run_id,
+                                      limit=requested, category=RECOMMEND_CATEGORY,
+                                      delay=RECOMMEND_DELAY)
+    if result.get('status') in {'completed', 'partial'} and result.get('fetched', 0):
+        try:
+            result['filter_job_id'] = STORE.queue_recommendation_filter(run_id)
+        except Exception as exc:  # noqa: BLE001
+            result['filter_error'] = error_code(exc)
+    result['run'] = STORE.recommendation_run(run_id)
+    result['queue'] = STORE.status().get('jobs', {})
+    return result
+
+
+def _start_recommendation_async(payload):
+    run_hint = str(payload.get('run_id') or payload.get('run_key') or '').strip()
+    thread = threading.Thread(target=run_recommendation, args=(payload,), name='xhs-recommendation', daemon=True)
+    thread.start()
+    return {'status': 'accepted', 'run_id': run_hint or 'scheduled', 'message': '推荐扫描已在 Edge 后台启动，请稍后查询 status'}
+
+
+def sync_following(payload=None):
+    """Read and normalize the current XHS following roster.
+
+    This uses the existing read-only Spider_XHS live method as a first source;
+    the canonical PC intimacy endpoint will be added as a separate provider
+    once it is pinned in Spider_XHS.  We record the endpoint so the two
+    rosters can later be reconciled instead of silently merged.
+    """
+    payload = dict(payload or {})
+    max_pages = max(1, min(10, int(payload.get('max_pages') or 5)))
+    page_size = max(1, min(200, int(payload.get('page_size') or 200)))
+    max_accounts = max(1, min(1000, int(payload.get('max_accounts') or 1000)))
+    accounts = []
+    endpoint = 'live:/api/im/web/users/following/all'
+    try:
+        for page in range(1, max_pages + 1):
+            response = RUNTIME.execute('live', 'get_following', [], {'page': page, 'size': page_size})
+            data = response.get('data') if isinstance(response, dict) else response
+            if isinstance(data, dict):
+                items = (data.get('users') or data.get('items') or data.get('list')
+                         or data.get('follow_user_d_t_o_list') or [])
+            else:
+                items = data if isinstance(data, list) else []
+            if not items:
+                break
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                # `rid` is the stable PC intimacy id when this provider is
+                # swapped in; live responses generally use user_id/id.
+                user_id = str(item.get('rid') or item.get('user_id') or item.get('userId') or item.get('id') or '').strip()
+                if not user_id or any(row['user_id'] == user_id for row in accounts):
+                    continue
+                accounts.append({'user_id': user_id,
+                                 'nickname': str(item.get('nickname') or item.get('nick_name') or item.get('name') or ''),
+                                 'source_endpoint': endpoint,
+                                 # Keep only stable profile text; image/CDN
+                                 # URLs and any upstream signed fields stay out
+                                 # of the durable following snapshot.
+                                 'raw': {'nickname': str(item.get('nickname') or item.get('nick_name') or item.get('name') or ''),
+                                         'description': str(item.get('description') or item.get('desc') or '')[:1000]}})
+                if len(accounts) >= max_accounts:
+                    break
+            if len(items) < page_size or len(accounts) >= max_accounts:
+                break
+        saved = STORE.upsert_following_accounts(accounts, endpoint)
+        return {'status': 'completed' if accounts else 'empty', 'source_endpoint': endpoint, 'pages': page,
+                'fetched': len(accounts), 'saved': saved, 'max_accounts': max_accounts,
+                **({'reason': 'no_following_accounts'} if not accounts else {})}
+    except Exception as exc:
+        return {'status': 'failed', 'source_endpoint': endpoint, 'fetched': len(accounts),
+                'saved': STORE.upsert_following_accounts(accounts, endpoint) if accounts else 0,
+                'error': error_code(exc)}
+
+
+def _start_following_sync_async(payload=None):
+    thread = threading.Thread(target=sync_following, args=(payload or {},),
+                              name='xhs-following-sync', daemon=True)
+    thread.start()
+    return {'status': 'accepted', 'message': '关注账号快照已在 Edge 后台同步，请稍后查询 following list'}
+
+
+def screen_following(payload=None):
+    """Build a bounded profile-classification job from recent user posts."""
+    payload = dict(payload or {})
+    limit = max(1, min(50, int(payload.get('limit') or 50)))
+    delay = max(0, int(payload.get('delay') or 1))
+    accounts = STORE.list_following_accounts(state='candidate', limit=limit)
+    profiles = []
+    for account in accounts:
+        profile = {}
+        try:
+            profile = json.loads(account.get('profile_json') or '{}')
+        except (TypeError, ValueError):
+            profile = {}
+        recent = []
+        try:
+            result = RUNTIME.execute('pc', 'get_user_note_info',
+                                    [account['user_id'], '', '', 'pc_user'], {})
+            ok, _message, body_value = result if isinstance(result, tuple) and len(result) == 3 else (True, '', result)
+            if ok:
+                data = (body_value or {}).get('data') or {}
+                items = data.get('notes') or data.get('items') or []
+                items = sorted((item for item in items if isinstance(item, dict)),
+                               key=lambda item: float(item.get('time') or 0), reverse=True)
+                for item in items[:3]:
+                    recent.append({'note_id': str(item.get('id') or item.get('note_id') or ''),
+                                   'title': str(item.get('title') or item.get('display_title') or ''),
+                                   'text': str(item.get('desc') or '')[:1200],
+                                   'time': item.get('time')})
+        except Exception:
+            # A stale or non-PC user id should still be reviewable by nickname;
+            # the failure is represented by an empty recent_notes list.
+            recent = []
+        profiles.append({'user_id': account['user_id'], 'nickname': account['nickname'],
+                         'description': str(profile.get('description') or profile.get('desc') or ''),
+                         'recent_notes': recent,
+                         'recent_note_ids': [row['note_id'] for row in recent if row['note_id']]})
+        if delay:
+            time.sleep(delay)
+    if not profiles:
+        return {'status': 'idle', 'reason': 'no_following_candidates', 'count': 0}
+    return STORE.queue_following_filter(profiles)
+
+
+def _start_following_screen_async(payload=None):
+    thread = threading.Thread(target=screen_following, args=(payload or {},),
+                              name='xhs-following-screen', daemon=True)
+    thread.start()
+    return {'status': 'accepted', 'message': '关注账号筛选已在 Edge 后台启动，请稍后查询 candidates'}
+
+
 def command_result(payload):
     message_id = str(payload.get("message_id") or hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:24])
     command = _command_text(payload)
@@ -158,6 +314,47 @@ def command_result(payload):
             text = STORE.latest_summary()[:2800]
         elif lowered in {"#xhs", "#xhs help", "#xhs 帮助"}:
             text = capability_text()
+        elif lowered in {"#xhs intel topic list", "#xhs intel topics", "#xhs 主题列表"}:
+            rows = STORE.list_topics(enabled=None)
+            text = "Topic 配置：\n" + ("\n".join(
+                f"- {row['slug']}：{row['name']}（{'启用' if row['enabled'] else '停用'}，v{row['active_version']}）"
+                for row in rows) if rows else "（空）")
+        elif lowered in {"#xhs intel recommendation latest", "#xhs intel reco latest", "#xhs 推荐状态"}:
+            status = STORE.status()
+            rows = status.get('recommendation_runs') or []
+            text = "最近推荐扫描：\n" + ("\n".join(
+                f"- {row['run_id']}：{row['status']}，抓取 {row['fetched']}，入选 {row['selected']}，待审 {row['review']}，排除 {row['rejected']}"
+                for row in rows[:5]) if rows else "（暂无）")
+        elif lowered in {"#xhs intel following list", "#xhs intel following", "#xhs 关注候选"}:
+            rows = STORE.list_following_accounts(limit=50)
+            text = "关注账号快照（内部候选）：\n" + ("\n".join(
+                f"- {row['user_id']} {row['nickname']}（{row['state']}）" for row in rows) if rows else "（暂无，请先执行 following sync）")
+        elif lowered in {"#xhs intel following sync", "#xhs 关注同步"}:
+            _start_following_sync_async({'trigger': 'feishu_command'})
+            text = "已启动关注账号只读同步，完成后可使用 #xhs intel following list 查看。"
+        elif lowered in {"#xhs intel following screen", "#xhs 关注筛选"}:
+            _start_following_screen_async({'trigger': 'feishu_command'})
+            text = "已启动关注账号筛选，请稍后使用 #xhs intel following candidates 查看结果。"
+        elif lowered in {"#xhs intel following candidates", "#xhs 关注候选列表"}:
+            rows = STORE.list_profile_candidates(limit=50)
+            text = "关注候选筛选结果：\n" + ("\n".join(
+                f"- {row['user_id']} {row.get('nickname') or ''}：{row['decision']}，{row['reason']}"
+                for row in rows) if rows else "（暂无，请先执行 following screen）")
+        elif lowered.startswith("#xhs intel following approve "):
+            actor = _admin_actor(payload)
+            user_id = _watch_user_id(command.split()[-1])
+            result = STORE.apply_following_candidate(user_id, actor)
+            text = f"已加入内部监控列表：{result['user_id']}（审核人已记录）"
+        elif lowered.startswith("#xhs intel following reject "):
+            actor = _admin_actor(payload)
+            user_id = _watch_user_id(command.split()[-1])
+            STORE.reject_following_candidate(user_id, actor)
+            text = f"已拒绝关注候选：{user_id}"
+        elif lowered.startswith("#xhs intel scan recommendations") or lowered.startswith("#xhs intel scan reco"):
+            parts = command.split()
+            requested = int(parts[-1]) if parts and parts[-1].isdigit() else RECOMMEND_FETCH_LIMIT
+            accepted = _start_recommendation_async({'limit': requested, 'trigger': 'feishu_command'})
+            text = f"已启动推荐扫描（最多 {min(requested, RECOMMEND_FETCH_LIMIT)} 条）。请稍后使用 #xhs intel recommendation latest 查询。"
         elif lowered in {"#xhs watch list", "#xhs watch list users", "#xhs 关注列表"}:
             rows = STORE.list_watch_users()
             text = "关注用户：\n" + ("\n".join(
@@ -201,13 +398,44 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("xhs-edge: " + (fmt % args) + "\n")
 
     def do_GET(self):  # noqa: N802
-        if self.path in {"/health", "/v1/status"}:
-            if self.path == "/v1/status" and not auth(self):
-                reply(self, 401, {"status": "unauthorized"})
-                return
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+        if path != "/health" and not auth(self):
+            reply(self, 401, {"status": "unauthorized"})
+            return
+        if path in {"/health", "/v1/status"}:
             value = STORE.status()
             value.update({"status": "ok", "collector": "Spider_XHS", "cookie_configured": cookie_configured(), "feishu_webhook_configured": bool(FEISHU_WEBHOOK), "release": RELEASE})
             reply(self, 200, value)
+            return
+        if path == "/v1/recommendations/status":
+            value = STORE.status()
+            reply(self, 200, {"status": "ok", "runs": value.get("recommendation_runs", []),
+                              "counts": value.get("recommendation_counts", []), "jobs": value.get("jobs", {})})
+            return
+        if path == "/v1/topics":
+            reply(self, 200, {"status": "ok", "topics": STORE.list_topics(enabled=None)})
+            return
+        if path == "/v1/following":
+            def query_int(name, default, minimum, maximum):
+                try:
+                    value = int(query.get(name, [default])[0])
+                except (TypeError, ValueError):
+                    value = default
+                return max(minimum, min(maximum, value))
+
+            limit = query_int("limit", 100, 1, 1000)
+            offset = query_int("offset", 0, 0, 1_000_000)
+            state = str(query.get("state", [""])[0]).strip() or None
+            reply(self, 200, {
+                "status": "ok",
+                "state": state,
+                "offset": offset,
+                "limit": limit,
+                "total": STORE.count_following_accounts(state),
+                "accounts": STORE.list_following_accounts(state=state, limit=limit, offset=offset),
+            })
             return
         reply(self, 404, {"status": "not_found"})
 
@@ -225,6 +453,22 @@ class Handler(BaseHTTPRequestHandler):
                 while STORE.enqueue_pending():
                     pass
                 reply(self, 200, {**result, "queue": STORE.status().get("jobs", {})})
+                return
+            if self.path == "/v1/recommendations/run":
+                reply(self, 200, run_recommendation(payload))
+                return
+            if self.path == "/v1/following/sync":
+                reply(self, 200, sync_following(payload))
+                return
+            if self.path == "/v1/following/screen":
+                reply(self, 200, screen_following(payload))
+                return
+            if self.path == "/v1/topics":
+                if payload.get('action') == 'disable' or payload.get('action') == 'enable':
+                    changed = STORE.set_topic_enabled(payload.get('slug'), payload.get('action') == 'enable')
+                    reply(self, 200, {'status': 'updated' if changed else 'not_found', 'slug': payload.get('slug')})
+                else:
+                    reply(self, 200, {'status': 'updated', 'topic': STORE.upsert_topic(payload)})
                 return
             if self.path == "/v1/watch/run":
                 users = STORE.list_watch_users()
@@ -254,7 +498,15 @@ class Handler(BaseHTTPRequestHandler):
                 reply(self, 200, {"job": STORE.claim(str(payload.get("worker") or "mac-ai"))})
                 return
             if self.path == "/v1/worker/complete":
-                result = {"summary": payload.get("summary"), "model": payload.get("model"), "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256")}
+                if isinstance(payload.get("decisions"), list):
+                    result = {"decisions": payload.get("decisions"), "model": payload.get("model"),
+                              "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256")}
+                elif isinstance(payload.get("profiles"), list):
+                    result = {"profiles": payload.get("profiles"), "model": payload.get("model"),
+                              "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256")}
+                else:
+                    result = {"summary": payload.get("summary"), "model": payload.get("model"),
+                              "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256")}
                 reply(self, 200, {"status": STORE.complete(str(payload.get("job_id")), str(payload.get("lease_token")), result)})
                 return
             if self.path == "/v1/worker/fail":

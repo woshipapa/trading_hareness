@@ -472,9 +472,9 @@ def build_alias(text: str) -> tuple[str, str, list[Any], dict[str, Any]] | None:
     if command in {"comments", "comment", "评论"} and len(parts) >= 2:
         return "pc", "get_note_all_comment", [parts[1]], {}
     if command in {"feed", "推荐"}:
-        category = parts[1] if len(parts) >= 2 else "homefeed"
+        category = parts[1] if len(parts) >= 2 else "homefeed_recommend"
         count = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 5
-        return "pc", "get_homefeed_recommend_by_num", [category, max(1, min(count, 20))], {}
+        return "pc", "get_homefeed_recommend_by_num", [category, max(1, min(count, 50))], {}
     if command in {"unread", "未读"}:
         return "pc", "get_unread_message", [], {}
     return None

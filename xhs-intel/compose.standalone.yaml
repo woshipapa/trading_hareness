@@ -16,6 +16,7 @@ services:
       XHS_COOKIE_FILE: /run/secrets/xhs_cookie
       XHS_STATE_DIR: /var/lib/xhs-collector
       XHS_FEISHU_WEBHOOK_URL: ${XHS_FEISHU_WEBHOOK_URL:-}
+      XHS_ADMIN_OPEN_IDS: ${XHS_ADMIN_OPEN_IDS:-}
       XHS_SOURCE_GIT_SHA: ${XHS_SOURCE_GIT_SHA:?Set pinned Spider_XHS commit}
       XHS_SOURCE_TREE_SHA256: ${XHS_SOURCE_TREE_SHA256:?Set Spider_XHS source digest}
     volumes:

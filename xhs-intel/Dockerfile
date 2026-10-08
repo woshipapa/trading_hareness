@@ -9,7 +9,11 @@ RUN if [ "$REUSE_BASE" != "true" ]; then \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 COPY xhs-intel/requirements.txt /app/requirements.txt
-RUN if [ "$REUSE_BASE" != "true" ]; then pip install --no-cache-dir -r /app/requirements.txt; fi
+# A reused XHS base already contains the OS/node layer, but Python dependency
+# pins still need to be reconciled when requirements change (for example the
+# Creator API's curl_cffi browser profile). Keep this install outside the OS
+# package guard so a local base image can be rebuilt without apt/Docker Hub.
+RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY xhs-intel/*.py /app/
 COPY xhs-source /opt/xhs
 WORKDIR /opt/xhs
