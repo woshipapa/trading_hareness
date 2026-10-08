@@ -354,7 +354,6 @@ from .board_curve_read_model import intraday_board_flow_curves as read_intraday_
 from .board_curve_read_model import latest_close_sector_review_report as read_latest_close_sector_review_report
 from . import research_catalog_read_model as research_catalog_reads
 from . import sector_read_model as sector_reads
-from . import intraday_evidence_read_model as intraday_evidence_reads
 from . import market_result_read_model as market_result_reads
 from .intraday_outcome_read_model import latest_intraday_outcomes as read_latest_intraday_outcomes
 from .http_clients import (alert_http_client_status, close_http_clients, provider_http_client_status,
@@ -428,7 +427,6 @@ from .intraday_scan_repository import (
 )
 from .intraday_market_context_repository import (
     market_context_from_board_report as read_market_context_from_board_report,
-    point_in_time_market_context as read_point_in_time_market_context,
     point_in_time_market_context_batch as read_point_in_time_market_context_batch,
 )
 from .intraday_rule_snapshot_repository import persist_rule_input_snapshot, prune_rule_input_evidence
@@ -845,11 +843,6 @@ async def nonessential_high_frequency_capture_allowed() -> tuple[bool, dict[str,
     return await _research_storage_admission.optional_high_frequency_allowed()
 
 
-async def core_intraday_evidence_capture_allowed() -> tuple[bool, dict[str, Any]]:
-    """Use the explicit bounded-evidence override for board/minute captures."""
-    return await _research_storage_admission.core_intraday_evidence_allowed()
-
-
 async def exempt_intraday_evidence_capture_allowed() -> tuple[bool, dict[str, Any]]:
     """Board curves and the close minute profile are exempt from the storage stop."""
     return await _research_storage_admission.exempt_intraday_evidence_allowed()
@@ -1015,10 +1008,6 @@ def number(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def mean(values: list[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
-
-
 def bytes_to_gib(value: int | float) -> float:
     """Compatibility export for callers that imported the old helper."""
     return research_capacity.bytes_to_gib(value)
@@ -1097,14 +1086,6 @@ def intraday_market_context_from_board_report(row: Any, observed_at: datetime,
     """Describe a signal using one already-selected, point-in-time board report."""
     return read_market_context_from_board_report(
         row, observed_at, symbol, strategy_market_state=strategy_market_state, number=intraday_number,
-    )
-
-
-def intraday_point_in_time_market_context(connection: Any, observed_at: datetime,
-                                          symbol: str | None = None) -> dict[str, Any]:
-    """Describe only the latest board snapshot known when a signal fired."""
-    return read_point_in_time_market_context(
-        connection, observed_at, symbol, context_from_board_report=intraday_market_context_from_board_report,
     )
 
 
@@ -1364,28 +1345,8 @@ def offline_data_root() -> Path:
     return offline_minute_import_service.data_root()
 
 
-def offline_import_path(file_name: str) -> Path:
-    return offline_minute_import_service.import_path(file_name, root=offline_data_root())
-
-
 def sha256_file(path: Path) -> str:
     return offline_minute_import_service.sha256_file(path)
-
-
-def offline_minute_timestamp(value: Any) -> datetime:
-    """Parse vendor local timestamps; naive input is Shanghai exchange time."""
-    return offline_minute_import_service.minute_timestamp(value)
-
-
-def offline_minute_source_available_at(row: dict[str, Any]) -> datetime | None:
-    """Return a vendor-recorded availability clock without manufacturing one.
-
-    ``bar_time`` says when a bar closed, not when a caller could have seen it.
-    CSV producers may provide an explicit source/provider availability or
-    receive timestamp.  Missing or blank values intentionally remain NULL so
-    the file cannot be admitted to causal strategy replay by accident.
-    """
-    return offline_minute_import_service.source_available_at(row)
 
 
 def offline_minute_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -4947,10 +4908,6 @@ def reprocess_remote_archive_messages(payload: RemoteMessageReprocessRequest) ->
     return _remote_archive_actions.reprocess_messages(payload)
 
 
-def remote_archive_sync_settings() -> dict[str, Any]:
-    return _remote_archive_actions.sync_settings()
-
-
 async def sync_remote_archive(payload: RemoteArchiveSyncRequest, authorization: str | None = None) -> dict[str, Any]:
     return await _remote_archive_actions.sync(payload, authorization)
 
@@ -5324,18 +5281,6 @@ def latest_strategy_pattern_mining() -> dict[str, Any]:
     )
 
 
-def list_intraday_watchlists() -> dict[str, Any]:
-    """Compatibility export for the intraday-evidence read model."""
-    return intraday_evidence_reads.watchlists(db)
-
-
-def latest_intraday_decision_card(symbol: str) -> dict[str, Any]:
-    symbol = symbol.upper()
-    if not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", symbol):
-        raise HTTPException(status_code=422, detail="symbol must use the Tushare form, for example 600176.SH")
-    return intraday_evidence_reads.decision_card(db, symbol, intraday_decision_card)
-
-
 def _intraday_watchlist_dependencies() -> IntradayWatchlistDependencies:
     return IntradayWatchlistDependencies(
         database=db, run_database=run_database_blocking, hydrate_history=hydrate_watchlist_history,
@@ -5406,19 +5351,6 @@ def intraday_board_flow_curves(
         curve_retention_days=intraday_board_curve_retention_days(),
         rotation_retention_days=intraday_board_rotation_retention_days(),
     )
-
-
-def ths_concept_member_backfill_status(trade_date: date | None = None) -> dict[str, Any]:
-    """Compatibility export for the sector read model."""
-    return sector_reads.concept_member_backfill_status(
-        db, trade_date,
-        automatic_enabled=ths_concept_member_backfill_enabled(), batch_size=ths_concept_member_backfill_batch_size(),
-    )
-
-
-def latest_intraday_watchlist_scan() -> dict[str, Any]:
-    """Compatibility export for the bounded intraday-evidence read model."""
-    return intraday_evidence_reads.latest_scan(db)
 
 
 async def sync_sector_flows_endpoint(payload: SectorFlowSyncRequest) -> dict[str, Any]:
