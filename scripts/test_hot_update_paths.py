@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import re
+import runpy
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -199,6 +200,21 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 		self.assertTrue("config/secrets/sync-secrets.sh\" edge" in body)
 		self.assertFalse(".xhs-credentials" in body)
 		self.assertFalse('update_env "$secrets_env"' in body)
+
+	def test_edge_database_passwords_do_not_reuse_the_owner_password(self) -> None:
+		module = runpy.run_path(str(ROOT / "config/secrets/env-split.py"))
+		result = module["build_edge"]({
+			"POSTGRES_PASSWORD": "owner-only",
+			"EDGE_RELAY_PGUSER": "relay-test",
+			"EDGE_RELAY_PGPASSWORD": "relay-only",
+			"EDGE_RELAY_PGDATABASE": "relay-db-test",
+			"EDGE_QUANT_PGPASSWORD": "quant-only",
+		})
+		self.assertTrue("RELAY_PGUSER=relay-test" in result)
+		self.assertTrue("RELAY_PGPASSWORD=relay-only" in result)
+		self.assertTrue("RELAY_PGDATABASE=relay-db-test" in result)
+		self.assertTrue("PGPASSWORD=quant-only" in result)
+		self.assertFalse("owner-only" in result)
 
 
 if __name__ == "__main__":
