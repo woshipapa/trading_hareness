@@ -66,7 +66,7 @@ def build_owner(local: dict) -> str:
         "",
         "# ── 热更新 ──",
         f"QUANT_HOTFIX_ENABLED={get(local, 'QUANT_HOTFIX_ENABLED', 'true')}",
-        f"QUANT_HOTFIX_HOST_DIR={get(local, 'QUANT_HOTFIX_HOST_DIR', '/home/stockpeer/trading_hareness/hotfix')}",
+        f"QUANT_HOTFIX_HOST_DIR={get(local, 'QUANT_HOTFIX_HOST_DIR', '/home/stockpeer/trading_hareness/hotfix/quant-service')}",
         "",
         "# ── 运行时 ──",
         f"PEER_BACKGROUND_TASKS_ENABLED=false",

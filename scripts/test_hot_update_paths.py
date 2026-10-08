@@ -216,6 +216,17 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 		self.assertTrue("PGPASSWORD=quant-only" in result)
 		self.assertFalse("owner-only" in result)
 
+	def test_owner_hotfix_path_defaults_to_the_component_directory(self) -> None:
+		module = runpy.run_path(str(ROOT / "config/secrets/env-split.py"))
+		default = module["build_owner"]({})
+		self.assertIn(
+			"QUANT_HOTFIX_HOST_DIR=/home/stockpeer/trading_hareness/hotfix/quant-service",
+			default,
+		)
+
+		custom = module["build_owner"]({"QUANT_HOTFIX_HOST_DIR": "/srv/quant-hotfix"})
+		self.assertIn("QUANT_HOTFIX_HOST_DIR=/srv/quant-hotfix", custom)
+
 
 if __name__ == "__main__":
     unittest.main()
