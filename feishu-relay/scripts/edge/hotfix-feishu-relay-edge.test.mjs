@@ -23,7 +23,8 @@ assert.match(source, /runtime_committed=true/);
 assert.match(source, /chown --reference=\"\$runtime_env\"/);
 assert.match(source, /runtime_source.*source-overlay/);
 assert.match(source, /current\.next/);
-assert.match(source, /sha256sum \/app\/package\.json/);
+assert.match(source, /dependency_fields_match\(\)/);
+assert.match(source, /dependencies.*devDependencies.*optionalDependencies/s);
 assert.match(source, /base_image_id=/);
 assert.doesNotMatch(source, /docker compose[^\n]*build/);
 assert.match(source, /rsync -az --delete --safe-links -e "\$\{rsync_ssh\[\*\]\}"/);
@@ -38,7 +39,7 @@ assert.match(source, /hotfix health verification failed; previous runtime restor
 assert.match(source, /node --test \*\.test\.mjs/);
 assert.match(source, /npm run build/);
 assert.match(source, /project_root\/dashboard/);
-assert.match(source, /quant-frontend-dist/);
+assert.match(source, /frontend-dist/);
 assert.match(source, /feishu-relay-dashboard\.conf/);
 assert.match(source, /nginx -t/);
 assert.match(source, /systemctl reload nginx/);

@@ -167,5 +167,39 @@ class ComponentOwnershipTests(unittest.TestCase):
                             f"{PATHS[name]['script']}")
 
 
+class CentralEdgeSecretsTests(unittest.TestCase):
+	"""Edge 发布只能消费中央同步后的 ``$edge_dir/.env``。"""
+
+	EDGE_SCRIPTS = (
+		"feishu-relay/scripts/edge/deploy-edge-relay-workflows.sh",
+		"feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.sh",
+		"feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh",
+		"feishu-relay/scripts/edge/failback-feishu-relay-to-remote.sh",
+		"feishu-relay/scripts/edge/failover-feishu-relay-to-local.sh",
+		"feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh",
+		"xhs-intel/scripts/hotfix-xhs-intel-edge.sh",
+	)
+
+	def test_edge_scripts_default_to_the_central_env(self) -> None:
+		for relative in self.EDGE_SCRIPTS:
+			body = (ROOT / relative).read_text(encoding="utf-8")
+			self.assertTrue(
+				"RELAY_EDGE_SECRETS_ENV:-$edge_dir/.env" in body,
+				f"{relative} 没有默认读取中央 edge env",
+			)
+			self.assertFalse(
+				"/etc/feishu-relay-edge/secrets.env" in body,
+				f"{relative} 仍依赖旧的远端 secrets.env",
+			)
+
+	def test_xhs_release_syncs_central_secrets_without_staging_credentials(self) -> None:
+		body = (ROOT / "feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh").read_text(
+			encoding="utf-8"
+		)
+		self.assertTrue("config/secrets/sync-secrets.sh\" edge" in body)
+		self.assertFalse(".xhs-credentials" in body)
+		self.assertFalse('update_env "$secrets_env"' in body)
+
+
 if __name__ == "__main__":
     unittest.main()

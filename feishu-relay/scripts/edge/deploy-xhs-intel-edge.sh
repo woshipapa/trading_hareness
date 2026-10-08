@@ -23,14 +23,14 @@ edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
 edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/feishu_relay_edge_ed25519}"
 edge_dir="${RELAY_EDGE_DIR:-/opt/feishu-relay-edge}"
 runtime_env="${RELAY_EDGE_RUNTIME_ENV:-/etc/feishu-relay-edge/runtime.env}"
-secrets_env="${RELAY_EDGE_SECRETS_ENV:-/etc/feishu-relay-edge/secrets.env}"
+secrets_env="${RELAY_EDGE_SECRETS_ENV:-$edge_dir/.env}"
 cookie_file="${XHS_COOKIE_FILE:-/etc/feishu-relay-edge/xhs-cookie}"
 cookie_source="${XHS_COOKIE_SOURCE:-$HOME/.config/xhs/xhs-cookie}"
+local_secrets_file="${XHS_LOCAL_SECRETS_FILE:-$source_root/config/secrets/.env.local}"
 # The official Feishu API exposes the oc_ chat id, while the personal
 # WebSocket emits the numeric chat id. Keep both identities in the command
 # lane so an explicit #xhs command can cross either ingress.
 xhs_chat_ids="${XHS_COMMAND_CHAT_IDS:-oc_90f551a54bf45a1e2e9a4dc346100c77,7690524560642280650}"
-xhs_webhook="${XHS_FEISHU_WEBHOOK_URL:-}"
 xhs_force_build="${XHS_FORCE_BUILD:-false}"
 xhs_skip_build="${XHS_SKIP_BUILD:-false}"
 xhs_base_image="${XHS_BASE_IMAGE:-python:3.11-slim}"
@@ -133,9 +133,6 @@ fi
   echo "XHS cookie source is not readable: $cookie_source" >&2
   exit 2
 }
-if [[ -z "$xhs_webhook" ]]; then
-  echo 'XHS_FEISHU_WEBHOOK_URL not set locally; the edge secrets.env value will be reused'
-fi
 COOKIE_SOURCE="$cookie_source" python3 - <<'PY'
 import os
 from pathlib import Path
@@ -146,91 +143,33 @@ if not {"a1", "web_session"}.issubset(fields):
     raise SystemExit("XHS cookie source must contain a1 and web_session")
 PY
 
-# Keep the worker and edge API on one random token without printing it. This is
-# deliberately done only on --apply so a dry run has no secret side effect.
-if [[ -n "${XHS_COLLECTOR_TOKEN:-}" ]]; then
-  xhs_token="$XHS_COLLECTOR_TOKEN"
-else
-  xhs_token="$(python3 - <<'PY'
-import secrets
-print(secrets.token_urlsafe(32))
-PY
-)"
-fi
-XHS_TOKEN_FOR_UPDATE="$xhs_token" python3 - "$source_root/.env" <<'PY'
-import os, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-lines = path.read_text(encoding='utf-8').splitlines() if path.exists() else []
-key = 'XHS_COLLECTOR_TOKEN='
-lines = [line for line in lines if not line.startswith(key)]
-lines.append(key + os.environ['XHS_TOKEN_FOR_UPDATE'])
-path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-path.chmod(0o600)
-PY
+# Regenerate and synchronize the derived edge environment from the single
+# local source before switching code. sync-secrets.sh owns permissions and the
+# remote target; this deployment script never copies or edits an env file.
+[[ -r "$local_secrets_file" ]] || {
+  echo "edge secret source is not readable: $local_secrets_file" >&2
+  exit 2
+}
+python3 "$source_root/config/secrets/env-split.py"
+bash "$source_root/config/secrets/sync-secrets.sh" edge
 
-credentials_file="$tmp_dir/.xhs-credentials"
-XHS_TOKEN_FOR_CREDENTIALS="$xhs_token" XHS_WEBHOOK_FOR_CREDENTIALS="$xhs_webhook" \
-  python3 - "$credentials_file" <<'PY'
-import json
-import os
-import pathlib
-import sys
-
-pathlib.Path(sys.argv[1]).write_text(
-    json.dumps(
-        {
-            "collector_token": os.environ["XHS_TOKEN_FOR_CREDENTIALS"],
-            "feishu_webhook": os.environ["XHS_WEBHOOK_FOR_CREDENTIALS"],
-        },
-        ensure_ascii=False,
-    )
-    + "\n",
-    encoding="utf-8",
-)
-pathlib.Path(sys.argv[1]).chmod(0o600)
-PY
-
-COPYFILE_DISABLE=1 tar -C "$tmp_dir" --exclude='__pycache__' --exclude='*.pyc' --exclude='.xhs-credentials' -cf - . \
+COPYFILE_DISABLE=1 tar -C "$tmp_dir" --exclude='__pycache__' --exclude='*.pyc' -cf - . \
   | "${ssh_command[@]}" "$edge_host" "set -euo pipefail; rm -rf '$remote_stage'; install -d -m 0700 '$remote_stage'; tar -xf - -C '$remote_stage'"
 scp -q -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=yes "$cookie_source" "$edge_host:$remote_stage/.xhs-cookie"
-scp -q -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes \
-  -o StrictHostKeyChecking=yes "$credentials_file" "$edge_host:$remote_stage/.xhs-credentials"
 
 "${ssh_command[@]}" "$edge_host" bash -s -- \
   "$edge_dir" "$runtime_env" "$secrets_env" "$remote_stage" "$workflow_id" \
-  "$remote_stage/.xhs-credentials" "$cookie_file" "$xhs_chat_ids" \
-  "$remote_stage/.xhs-cookie" "$xhs_force_build" "$xhs_skip_build" "$xhs_base_image" "$xhs_reuse_base" <<'REMOTE'
+  "$cookie_file" "$xhs_chat_ids" "$remote_stage/.xhs-cookie" \
+  "$xhs_force_build" "$xhs_skip_build" "$xhs_base_image" "$xhs_reuse_base" <<'REMOTE'
 set -euo pipefail
 edge_dir="$1"; runtime_env="$2"; secrets_env="$3"; stage="$4"; workflow_id="$5"
-credentials_stage="$6"; xhs_cookie_file="$7"; xhs_chat_ids="$8"; cookie_stage="${9}"; xhs_force_build="${10}"
-xhs_skip_build="${11}"; xhs_base_image="${12}"; xhs_reuse_base="${13}"
+xhs_cookie_file="$6"; xhs_chat_ids="$7"; cookie_stage="$8"; xhs_force_build="${9}"
+xhs_skip_build="${10}"; xhs_base_image="${11}"; xhs_reuse_base="${12}"
 bridge_env=/etc/larkagentx-group-relay.env
 exec 9>/var/lock/xhs-intel-edge.lock
 flock -w 120 9
 test -f "$runtime_env"; test -f "$secrets_env"
-test -s "$credentials_stage"
-readarray -t credentials < <(python3 - "$credentials_stage" <<'PY'
-import json
-import sys
-
-payload = json.loads(open(sys.argv[1], encoding="utf-8").read())
-for key in ("collector_token",):
-    value = payload.get(key, "")
-    if not isinstance(value, str) or not value:
-        raise SystemExit(f"missing XHS credential: {key}")
-    print(value)
-PY
-)
-[[ "${#credentials[@]}" == 1 ]] || { echo 'XHS credential bundle is incomplete' >&2; exit 2; }
-xhs_token="${credentials[0]}"
-xhs_webhook="$(python3 - "$credentials_stage" <<'PY'
-import json
-import sys
-print(json.load(open(sys.argv[1], encoding="utf-8")).get("feishu_webhook", ""))
-PY
-)"
-rm -f "$credentials_stage"
 trap 'rm -rf "$stage"' EXIT
 install -d -m 0755 "$edge_dir" /etc/feishu-relay-edge
 install -d -m 0750 "$edge_dir/xhs-state"
@@ -252,7 +191,35 @@ PY
 old_xhs_git_sha="$(awk -F= '$1 == "XHS_SOURCE_GIT_SHA" { print substr($0, index($0, "=") + 1); exit }' "$runtime_env")"
 old_xhs_source_digest="$(awk -F= '$1 == "XHS_SOURCE_TREE_SHA256" { print substr($0, index($0, "=") + 1); exit }' "$runtime_env")"
 old_xhs_intel_digest="$(awk -F= '$1 == "XHS_INTEL_TREE_SHA256" { print substr($0, index($0, "=") + 1); exit }' "$runtime_env")"
-xhs_webhook="${xhs_webhook:-$(awk -F= '$1 == "XHS_FEISHU_WEBHOOK_URL" { print substr($0, index($0, "=") + 1); exit }' "$secrets_env")}"
+# The runtime env is staged before the image build. If a build fails after
+# that write, it can describe an image that was never produced. The manifest
+# is written only after a successful release, so use it as the retry-safe
+# identity whenever it exists.
+if [[ -s "$edge_dir/xhs-manifest.json" ]]; then
+  old_xhs_git_sha=''
+  old_xhs_source_digest=''
+  old_xhs_intel_digest=''
+  readarray -t manifest_identity < <(python3 - "$edge_dir/xhs-manifest.json" <<'PY'
+import json
+import sys
+
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    raise SystemExit(0)
+for key in ("xhs_git_sha", "xhs_source_tree_sha256", "xhs_intel_tree_sha256"):
+    print(value.get(key, ""))
+PY
+  )
+  if [[ "${#manifest_identity[@]}" == 3 ]]; then
+    old_xhs_git_sha="${manifest_identity[0]}"
+    old_xhs_source_digest="${manifest_identity[1]}"
+    old_xhs_intel_digest="${manifest_identity[2]}"
+  fi
+fi
+xhs_token="$(awk -F= '$1 == "XHS_COLLECTOR_TOKEN" { print substr($0, index($0, "=") + 1); exit }' "$secrets_env")"
+xhs_webhook="$(awk -F= '$1 == "XHS_FEISHU_WEBHOOK_URL" { print substr($0, index($0, "=") + 1); exit }' "$secrets_env")"
+[[ -n "$xhs_token" ]] || { echo 'edge XHS collector token is not configured' >&2; exit 2; }
 [[ -n "$xhs_webhook" ]] || { echo 'edge XHS Feishu webhook is not configured' >&2; exit 2; }
 cp -a "$edge_dir/docker-compose.yml" "$edge_dir/docker-compose.yml.bak-xhs-$(date -u +%Y%m%d-%H%M%S)" 2>/dev/null || true
 rm -rf "$edge_dir/xhs-intel" "$edge_dir/xhs-source"
@@ -283,17 +250,12 @@ update_env() {
   chown --reference="$file" "$temp"; chmod --reference="$file" "$temp"; mv -f "$temp" "$file"
 }
 runner_token="$(awk -F= '$1 == "N8N_RUNNERS_AUTH_TOKEN" { print substr($0, index($0, "=") + 1); exit }' "$secrets_env")"
-if [[ -z "$runner_token" ]]; then
-  runner_token="$(python3 - <<'PY'
-import secrets
-print(secrets.token_hex(32))
-PY
-)"
-  update_env "$secrets_env" N8N_RUNNERS_AUTH_TOKEN "$runner_token"
-fi
+[[ -n "$runner_token" ]] || { echo 'edge n8n runner token is not configured' >&2; exit 2; }
 update_env "$runtime_env" XHS_COOKIE_FILE "$xhs_cookie_file"
 update_env "$runtime_env" XHS_KEYWORDS "AI基础设施,AI加速,系统软件,分布式训练,算力网络,推理优化"
 update_env "$runtime_env" XHS_FETCH_LIMIT "5"
+update_env "$runtime_env" XHS_RECOMMEND_FETCH_LIMIT "50"
+update_env "$runtime_env" XHS_RECOMMEND_CATEGORY "homefeed_recommend"
 update_env "$runtime_env" XHS_SOURCE_GIT_SHA "$xhs_git_sha"
 update_env "$runtime_env" XHS_SOURCE_TREE_SHA256 "$xhs_source_digest"
 update_env "$runtime_env" XHS_INTEL_TREE_SHA256 "$xhs_intel_digest"
@@ -304,10 +266,6 @@ if [ -f "$bridge_env" ]; then
   update_env "$bridge_env" LARKX_XHS_COMMANDS_ENABLED "true"
   update_env "$bridge_env" LARKX_XHS_COMMAND_CHAT_IDS "$xhs_chat_ids"
 fi
-update_env "$secrets_env" XHS_COLLECTOR_TOKEN "$xhs_token"
-update_env "$secrets_env" XHS_FEISHU_WEBHOOK_URL "$xhs_webhook"
-chmod 0600 "$secrets_env"
-
 cd "$edge_dir"
 docker compose --env-file "$runtime_env" --env-file "$secrets_env" config --quiet
 build_required=false
@@ -469,4 +427,4 @@ echo
 rm -rf "$stage"
 REMOTE
 
-printf 'xhs edge deployed; local worker token updated in ignored n8n/.env\n'
+printf 'xhs edge deployed; local worker token was read from config/secrets/.env.local\n'

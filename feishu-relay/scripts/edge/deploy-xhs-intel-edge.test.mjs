@@ -9,9 +9,11 @@ const workflow = JSON.parse(readFileSync(fileURLToPath(new URL('../../../workflo
 assert.match(source, /scp -q -i "\$edge_key"/);
 assert.doesNotMatch(source, /scp -q "\$\{ssh_command\[@\]\}"/);
 assert.match(source, /XHS_COOKIE_SOURCE/);
+assert.doesNotMatch(source, /\$source_root\/\.env/);
+assert.match(source, /config\/secrets\/\.env\.local/);
 assert.match(source, /a1/);
 assert.match(source, /web_session/);
-assert.match(source, /edge secrets\.env value will be reused/);
+assert.match(source, /sync-secrets\.sh" edge/);
 assert.match(source, /XHS_FORCE_BUILD/);
 assert.match(source, /docker image inspect feishu-relay-edge-xhs:local/);
 assert.match(source, /xhs_git_sha/);
@@ -32,8 +34,8 @@ assert.match(source, /XHS workflow unchanged; skipping import and restart/);
 assert.match(source, /stop n8n/);
 assert.match(source, /before\.json/);
 assert.match(source, /import:workflow --input=\/xhs-deploy\/candidate\.json/);
-assert.match(source, /\.xhs-credentials/);
-assert.doesNotMatch(source, /"\$xhs_token" "\$xhs_webhook"/);
+assert.doesNotMatch(source, /\.xhs-credentials/);
+assert.doesNotMatch(source, /update_env "\$secrets_env"/);
 assert.match(source, /XHS workflow was not activated after n8n restart/);
 
 console.log('XHS deployment validates the private Cookie and provisions an external n8n task runner');
