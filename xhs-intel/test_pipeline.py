@@ -76,6 +76,26 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.store.list_watch_users()[0]['label'], '更新备注')
         self.assertTrue(self.store.remove_watch_user('user-123'))
         self.assertEqual(self.store.list_watch_users(), [])
+        self.assertEqual(self.store.list_watch_users(enabled=False)[0]['user_id'], 'user-123')
+        self.assertEqual(self.store.list_watch_users(enabled=None)[0]['enabled'], 0)
+
+    def test_job_listing_does_not_expose_payload_result_or_lease(self):
+        job_id = self.enqueue()
+        row = self.store.list_jobs()[0]
+        self.assertEqual(row['job_id'], job_id)
+        self.assertNotIn('payload', row)
+        self.assertNotIn('result', row)
+        self.assertNotIn('lease_token', row)
+
+    def test_manual_feishu_message_is_idempotent_and_content_is_not_listed(self):
+        first = self.store.enqueue_manual_message('人工消息', 'request-1')
+        second = self.store.enqueue_manual_message('人工消息', 'request-1')
+        self.assertFalse(first['duplicate'])
+        self.assertTrue(second['duplicate'])
+        listing = self.store.list_delivery_jobs()
+        self.assertEqual(len(listing), 1)
+        self.assertNotIn('result', listing[0])
+        self.assertNotIn('payload', listing[0])
 
     def test_recommendation_filter_covers_all_candidates_and_queues_only_selected_summary(self):
         first = note('CUDA distributed training')
@@ -144,8 +164,10 @@ class QueueTests(unittest.TestCase):
                                          'include_keywords': ['GPU', 'NPU']})
         self.assertEqual(topic['active_version'], 1)
         topic = self.store.upsert_topic({'slug': 'accelerator', 'name': '加速器与互联',
-                                         'include_keywords': ['GPU', 'NPU', '互联']})
+                                         'include_keywords': ['GPU', 'NPU', '互联'], 'enabled': False})
         self.assertEqual(topic['active_version'], 2)
+        self.assertEqual(topic['enabled'], 0)
+        self.assertEqual(self.store.list_topics(enabled=False)[0]['policy']['include_keywords'][-1], '互联')
         self.assertTrue(self.store.set_topic_enabled('accelerator', False))
         self.assertTrue(any(row['slug'] == 'accelerator' for row in self.store.list_topics(enabled=False)))
 

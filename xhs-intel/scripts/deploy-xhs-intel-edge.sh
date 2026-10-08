@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 repo_root="$(cd "$source_root/.." && pwd)"
 edge_host="${RELAY_EDGE_HOST:-root@47.114.113.152}"
 edge_key="${RELAY_EDGE_SSH_KEY:-/Users/papa/.ssh/feishu_relay_edge_ed25519}"
@@ -76,8 +76,11 @@ import sys
 
 root = pathlib.Path(sys.argv[1]).resolve()
 digest = hashlib.sha256()
-for path in sorted(p for p in root.iterdir() if p.is_file()):
-    rel = path.name.encode()
+paths = [path for path in root.glob('*.py') if not path.name.startswith('test_')]
+paths.extend(path for path in (root / 'dashboard').rglob('*') if path.is_file())
+paths.extend(root / name for name in ('Dockerfile', 'requirements.txt'))
+for path in sorted(paths):
+    rel = path.relative_to(root).as_posix().encode()
     digest.update(len(rel).to_bytes(8, 'big'))
     digest.update(rel)
     data = path.read_bytes()
@@ -113,8 +116,13 @@ printf 'xhs_git_sha=%s\nxhs_source_digest=%s\nxhs_intel_digest=%s\nxhs_workflow_
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/xhs-edge-upload.XXXXXX")"
 cleanup() { rm -rf "$tmp_dir"; }
 trap cleanup EXIT
-mkdir -p "$tmp_dir/xhs-intel" "$tmp_dir/xhs-source"
-cp "$source_root"/xhs-intel/*.py "$source_root"/xhs-intel/requirements.txt "$source_root"/xhs-intel/Dockerfile "$tmp_dir/xhs-intel/"
+mkdir -p "$tmp_dir/xhs-intel/dashboard" "$tmp_dir/xhs-source"
+for runtime_source in "$source_root"/xhs-intel/*.py; do
+  [[ "$(basename "$runtime_source")" == test_*.py ]] && continue
+  cp "$runtime_source" "$tmp_dir/xhs-intel/"
+done
+cp "$source_root"/xhs-intel/requirements.txt "$source_root"/xhs-intel/Dockerfile "$tmp_dir/xhs-intel/"
+cp -R "$source_root/xhs-intel/dashboard/." "$tmp_dir/xhs-intel/dashboard/"
 cp -R "$xhs_source_dir/." "$tmp_dir/xhs-source/"
 rm -rf "$tmp_dir/xhs-source/.git" "$tmp_dir/xhs-source/node_modules" "$tmp_dir/xhs-source/__pycache__"
 printf '%s\n' "$xhs_git_sha" > "$tmp_dir/xhs-source/.xhs-git-sha"
@@ -260,6 +268,7 @@ update_env "$runtime_env" XHS_SOURCE_GIT_SHA "$xhs_git_sha"
 update_env "$runtime_env" XHS_SOURCE_TREE_SHA256 "$xhs_source_digest"
 update_env "$runtime_env" XHS_INTEL_TREE_SHA256 "$xhs_intel_digest"
 update_env "$runtime_env" XHS_WORKFLOW_SHA256 "$xhs_workflow_hash"
+update_env "$runtime_env" XHS_HOTFIX_ENABLED "false"
 update_env "$runtime_env" LARKX_XHS_COMMANDS_ENABLED "true"
 update_env "$runtime_env" LARKX_XHS_COMMAND_CHAT_IDS "$xhs_chat_ids"
 if [ -f "$bridge_env" ]; then
@@ -288,6 +297,12 @@ for attempt in $(seq 1 45); do
   sleep 2
 done
 curl -fsS http://127.0.0.1:18790/health >/dev/null
+curl -fsS http://127.0.0.1:18790/xhs/ | grep -q 'XHS Intelligence'
+runtime_cmdline="$(docker exec feishu-relay-edge-xhs sh -c 'tr "\0" " " < /proc/1/cmdline')"
+if [[ "$runtime_cmdline" == *'/app/hotfix/current/'* || "$runtime_cmdline" != *'/app/edge_api.py'* ]]; then
+  echo 'XHS image release is healthy but PID 1 is not running the immutable image source' >&2
+  exit 1
+fi
 curl -fsS http://127.0.0.1:18790/health > "$stage/xhs-health.json"
 python3 - "$xhs_git_sha" "$xhs_source_digest" "$xhs_intel_digest" "$xhs_workflow_hash" "$stage/xhs-health.json" <<'PY'
 import json

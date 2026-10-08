@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import secrets
 import os
 import sys
 import threading
 import time
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -18,6 +21,8 @@ from collector import collect, collect_recommendations, collect_watched  # noqa:
 from common import error_code, request_json  # noqa: E402
 from config import policy_snapshot  # noqa: E402
 from operations import (  # noqa: E402
+    MUTATING,
+    PUBLIC_METHODS,
     OperationError,
     SpiderRuntime,
     capability_text,
@@ -35,6 +40,8 @@ TOKEN = os.environ.get("XHS_COLLECTOR_TOKEN", "")
 SOURCE_ROOT = Path(os.environ.get("XHS_SOURCE_ROOT", "/opt/xhs"))
 COOKIE_FILE = Path(os.environ.get("XHS_COOKIE_FILE", "/run/secrets/xhs_cookie"))
 STATE_DIR = Path(os.environ.get("XHS_STATE_DIR", "/var/lib/xhs-collector"))
+DASHBOARD_ROOT = ROOT / "dashboard"
+DASHBOARD_SESSION = secrets.token_urlsafe(32)
 STORE = Store(STATE_DIR / "queue.sqlite3")
 DEFAULT_QUERIES = [x.strip() for x in os.environ.get("XHS_KEYWORDS", "AI infra,推理系统,大模型部署,CUDA,算子优化").split(",") if x.strip()]
 FETCH_LIMIT = max(1, min(20, int(os.environ.get("XHS_FETCH_LIMIT", "8"))))
@@ -73,13 +80,60 @@ def auth(handler):
     return bool(TOKEN) and handler.headers.get("X-XHS-Collector-Token", "") == TOKEN
 
 
-def reply(handler, status, payload):
-    data = json.dumps(payload, ensure_ascii=False).encode()
+def dashboard_auth(handler):
+    if auth(handler):
+        return True
+    cookie = SimpleCookie()
+    try:
+        cookie.load(handler.headers.get("Cookie", ""))
+        value = cookie.get("xhs_ui_session")
+        return bool(value) and hmac.compare_digest(value.value, DASHBOARD_SESSION)
+    except (CookieError, KeyError, TypeError):
+        return False
+
+
+def send(handler, status, data, content_type, headers=None):
     handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    for name, value in (headers or {}).items():
+        handler.send_header(name, value)
     handler.end_headers()
     handler.wfile.write(data)
+
+
+def reply(handler, status, payload, headers=None):
+    data = json.dumps(payload, ensure_ascii=False).encode()
+    send(handler, status, data, "application/json; charset=utf-8", headers=headers)
+
+
+def serve_dashboard(handler, path):
+    assets = {
+        "/xhs": ("index.html", "text/html; charset=utf-8"),
+        "/xhs/": ("index.html", "text/html; charset=utf-8"),
+        "/xhs/app.js": ("app.js", "text/javascript; charset=utf-8"),
+        "/xhs/style.css": ("style.css", "text/css; charset=utf-8"),
+    }
+    asset = assets.get(path)
+    if not asset:
+        return False
+    filename, content_type = asset
+    target = DASHBOARD_ROOT / filename
+    if not target.is_file():
+        reply(handler, 503, {"status": "dashboard_unavailable"})
+        return True
+    headers = {
+        "Cache-Control": "no-store" if filename == "index.html" else "no-cache",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        "Referrer-Policy": "no-referrer",
+    }
+    if filename == "index.html":
+        headers["Set-Cookie"] = (
+            f"xhs_ui_session={DASHBOARD_SESSION}; Path=/; HttpOnly; SameSite=Strict"
+        )
+    send(handler, 200, target.read_bytes(), content_type, headers=headers)
+    return True
 
 
 def body(handler):
@@ -296,6 +350,73 @@ def _start_following_screen_async(payload=None):
     return {'status': 'accepted', 'message': '关注账号筛选已在 Edge 后台启动，请稍后查询 candidates'}
 
 
+def run_watch(payload=None):
+    payload = dict(payload or {})
+    users = STORE.list_watch_users()
+    if not users:
+        return {"status": "idle", "reason": "no_watch_users", "users": 0}
+    interval = max(5, int(os.environ.get("XHS_WATCH_INTERVAL_SECONDS", "1800")))
+    bucket = int(time.time() // interval)
+    run_key = str(payload.get("run_key") or f"watch-{bucket}")
+    result = collect_watched(
+        STORE, SOURCE_ROOT, COOKIE_FILE, users, limit=WATCH_FETCH_LIMIT,
+        request_key=run_key,
+        delay=max(1, int(os.environ.get("XHS_REQUEST_DELAY", "3"))))
+    while STORE.enqueue_pending():
+        pass
+    return {**result, "queue": STORE.status().get("jobs", {})}
+
+
+def _start_watch_async(payload=None):
+    thread = threading.Thread(target=run_watch, args=(payload or {},),
+                              name="xhs-watch", daemon=True)
+    thread.start()
+    return {"status": "accepted", "message": "监控名单扫描已在 Edge 后台启动"}
+
+
+def _query_int(query, name, default, minimum, maximum):
+    try:
+        value = int(query.get(name, [default])[0])
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _recommendation_item_for_dashboard(row):
+    try:
+        note = json.loads(row.get("body") or "{}")
+    except (TypeError, ValueError):
+        note = {}
+    try:
+        topics = json.loads(row.get("topics_json") or "[]")
+    except (TypeError, ValueError):
+        topics = []
+    return {
+        "candidate_id": row.get("candidate_id"),
+        "note_id": row.get("note_id"),
+        "source_rank": row.get("source_rank"),
+        "state": row.get("state"),
+        "decision": row.get("decision"),
+        "relevance_score": row.get("relevance_score"),
+        "confidence": row.get("confidence"),
+        "reason": row.get("reason") or "",
+        "topics": topics if isinstance(topics, list) else [],
+        "title": str(note.get("title") or "")[:240],
+        "text": str(note.get("text") or "")[:1000],
+        "author": str(note.get("author") or "")[:120],
+        "published_at": note.get("published_at"),
+        "url": f"https://www.xiaohongshu.com/explore/{row.get('note_id')}",
+    }
+
+
+def _bounded_operation_result(value):
+    safe = sanitize(value)
+    encoded = json.dumps(safe, ensure_ascii=False, default=str)
+    if len(encoded) <= 200_000:
+        return safe
+    return {"truncated": True, "preview": encoded[:200_000]}
+
+
 def command_result(payload):
     message_id = str(payload.get("message_id") or hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:24])
     command = _command_text(payload)
@@ -401,7 +522,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
-        if path != "/health" and not auth(self):
+        if serve_dashboard(self, path):
+            return
+        if path != "/health" and not dashboard_auth(self):
             reply(self, 401, {"status": "unauthorized"})
             return
         if path in {"/health", "/v1/status"}:
@@ -409,24 +532,77 @@ class Handler(BaseHTTPRequestHandler):
             value.update({"status": "ok", "collector": "Spider_XHS", "cookie_configured": cookie_configured(), "feishu_webhook_configured": bool(FEISHU_WEBHOOK), "release": RELEASE})
             reply(self, 200, value)
             return
+        if path == "/v1/dashboard":
+            value = STORE.status()
+            value.update({
+                "status": "ok",
+                "collector": "Spider_XHS",
+                "cookie_configured": cookie_configured(),
+                "feishu_webhook_configured": bool(FEISHU_WEBHOOK),
+                "release": RELEASE,
+                "following": {
+                    "total": STORE.count_following_accounts(),
+                    "candidate": STORE.count_following_accounts("candidate"),
+                    "active": STORE.count_following_accounts("active"),
+                    "rejected": STORE.count_following_accounts("rejected"),
+                },
+                "topics": STORE.list_topics(enabled=None),
+            })
+            reply(self, 200, value)
+            return
         if path == "/v1/recommendations/status":
             value = STORE.status()
             reply(self, 200, {"status": "ok", "runs": value.get("recommendation_runs", []),
                               "counts": value.get("recommendation_counts", []), "jobs": value.get("jobs", {})})
             return
+        if path == "/v1/recommendations/items":
+            run_id = str(query.get("run_id", [""])[0]).strip()
+            if not run_id:
+                reply(self, 400, {"status": "failed", "error": "run_id_required"})
+                return
+            states = [value for value in query.get("state", []) if value]
+            rows = STORE.list_recommendation_items(run_id, states=states or None)
+            reply(self, 200, {"status": "ok", "run_id": run_id,
+                              "items": [_recommendation_item_for_dashboard(row) for row in rows]})
+            return
         if path == "/v1/topics":
             reply(self, 200, {"status": "ok", "topics": STORE.list_topics(enabled=None)})
             return
+        if path == "/v1/watch-users":
+            enabled = str(query.get("enabled", ["active"])[0]).strip().lower()
+            filter_value = None if enabled == "all" else enabled not in {"0", "false", "disabled"}
+            reply(self, 200, {"status": "ok", "users": STORE.list_watch_users(enabled=filter_value)})
+            return
+        if path == "/v1/following/candidates":
+            limit = _query_int(query, "limit", 100, 1, 500)
+            reply(self, 200, {"status": "ok", "candidates": STORE.list_profile_candidates(limit=limit)})
+            return
+        if path == "/v1/jobs":
+            limit = _query_int(query, "limit", 50, 1, 200)
+            reply(self, 200, {"status": "ok", "jobs": STORE.list_jobs(limit=limit)})
+            return
+        if path == "/v1/feishu/status":
+            limit = _query_int(query, "limit", 50, 1, 200)
+            reply(self, 200, {"status": "ok", "configured": bool(FEISHU_WEBHOOK),
+                              "deliveries": STORE.list_delivery_jobs(limit=limit)})
+            return
+        if path == "/v1/capabilities":
+            mutating = {f"{namespace}.{method}" for namespace, method in MUTATING}
+            reply(self, 200, {
+                "status": "ok",
+                "namespaces": [
+                    {"name": namespace, "methods": [
+                        {"name": method, "operation": f"{namespace}.{method}",
+                         "mutating": f"{namespace}.{method}" in mutating}
+                        for method in methods
+                    ]}
+                    for namespace, methods in PUBLIC_METHODS.items()
+                ],
+            })
+            return
         if path == "/v1/following":
-            def query_int(name, default, minimum, maximum):
-                try:
-                    value = int(query.get(name, [default])[0])
-                except (TypeError, ValueError):
-                    value = default
-                return max(minimum, min(maximum, value))
-
-            limit = query_int("limit", 100, 1, 1000)
-            offset = query_int("offset", 0, 0, 1_000_000)
+            limit = _query_int(query, "limit", 100, 1, 1000)
+            offset = _query_int(query, "offset", 0, 0, 1_000_000)
             state = str(query.get("state", [""])[0]).strip() or None
             reply(self, 200, {
                 "status": "ok",
@@ -440,12 +616,81 @@ class Handler(BaseHTTPRequestHandler):
         reply(self, 404, {"status": "not_found"})
 
     def do_POST(self):  # noqa: N802
-        if not auth(self):
+        path = urlparse(self.path).path
+        dashboard_path = path.startswith("/v1/dashboard/")
+        if (dashboard_path and not dashboard_auth(self)) or (not dashboard_path and not auth(self)):
             reply(self, 401, {"status": "unauthorized"})
             return
         try:
             payload = body(self)
-            if self.path == "/v1/run":
+            if path == "/v1/dashboard/recommendations/run":
+                reply(self, 202, _start_recommendation_async(payload))
+                return
+            if path == "/v1/dashboard/following/sync":
+                reply(self, 202, _start_following_sync_async(payload))
+                return
+            if path == "/v1/dashboard/following/screen":
+                reply(self, 202, _start_following_screen_async(payload))
+                return
+            if path == "/v1/dashboard/watch/run":
+                reply(self, 202, _start_watch_async(payload))
+                return
+            if path == "/v1/dashboard/watch-users":
+                action = str(payload.get("action") or "add").strip().lower()
+                user_id = _watch_user_id(payload.get("user_id") or payload.get("url"))
+                if action == "remove":
+                    changed = STORE.remove_watch_user(user_id)
+                    reply(self, 200, {"status": "updated" if changed else "not_found", "user_id": user_id})
+                elif action == "add":
+                    STORE.add_watch_user(user_id, str(payload.get("label") or "")[:80],
+                                         source="dashboard", topic_ids=payload.get("topic_ids") or [])
+                    reply(self, 200, {"status": "updated", "user_id": user_id})
+                else:
+                    raise ValueError("invalid_watch_user_action")
+                return
+            if path == "/v1/dashboard/topics":
+                action = str(payload.get("action") or "upsert").strip().lower()
+                if action in {"disable", "enable"}:
+                    changed = STORE.set_topic_enabled(payload.get("slug"), action == "enable")
+                    reply(self, 200, {"status": "updated" if changed else "not_found",
+                                      "slug": payload.get("slug")})
+                elif action == "upsert":
+                    reply(self, 200, {"status": "updated", "topic": STORE.upsert_topic(payload)})
+                else:
+                    raise ValueError("invalid_topic_action")
+                return
+            if path == "/v1/dashboard/following/candidates":
+                action = str(payload.get("action") or "").strip().lower()
+                user_id = _watch_user_id(payload.get("user_id"))
+                if action == "approve":
+                    result = STORE.apply_following_candidate(user_id, "xhs-dashboard")
+                elif action == "reject":
+                    result = STORE.reject_following_candidate(user_id, "xhs-dashboard")
+                else:
+                    raise ValueError("invalid_candidate_action")
+                reply(self, 200, {"status": "updated", "result": result})
+                return
+            if path == "/v1/dashboard/feishu/messages":
+                if not FEISHU_WEBHOOK:
+                    raise OperationError("XHS Feishu webhook is not configured")
+                result = STORE.enqueue_manual_message(payload.get("text"), payload.get("request_id"))
+                reply(self, 202, {"status": "accepted", **result})
+                return
+            if path == "/v1/dashboard/operation":
+                namespace, method, args, kwargs = parse_operation_payload(payload)
+                result = RUNTIME.execute(namespace, method, args, kwargs)
+                safe_result = _bounded_operation_result(result)
+                delivery = None
+                if payload.get("deliver_to_feishu"):
+                    if not FEISHU_WEBHOOK:
+                        raise OperationError("XHS Feishu webhook is not configured")
+                    request_id = str(payload.get("request_id") or secrets.token_hex(16))
+                    delivery = STORE.enqueue_manual_message(
+                        format_result(f"{namespace}.{method}", safe_result), request_id)
+                reply(self, 200, {"status": "completed", "operation": f"{namespace}.{method}",
+                                  "result": safe_result, "delivery": delivery})
+                return
+            if path == "/v1/run":
                 queries = payload.get("keywords") or DEFAULT_QUERIES
                 if not isinstance(queries, list):
                     raise ValueError("keywords_must_be_list")
@@ -454,50 +699,37 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 reply(self, 200, {**result, "queue": STORE.status().get("jobs", {})})
                 return
-            if self.path == "/v1/recommendations/run":
+            if path == "/v1/recommendations/run":
                 reply(self, 200, run_recommendation(payload))
                 return
-            if self.path == "/v1/following/sync":
+            if path == "/v1/following/sync":
                 reply(self, 200, sync_following(payload))
                 return
-            if self.path == "/v1/following/screen":
+            if path == "/v1/following/screen":
                 reply(self, 200, screen_following(payload))
                 return
-            if self.path == "/v1/topics":
+            if path == "/v1/topics":
                 if payload.get('action') == 'disable' or payload.get('action') == 'enable':
                     changed = STORE.set_topic_enabled(payload.get('slug'), payload.get('action') == 'enable')
                     reply(self, 200, {'status': 'updated' if changed else 'not_found', 'slug': payload.get('slug')})
                 else:
                     reply(self, 200, {'status': 'updated', 'topic': STORE.upsert_topic(payload)})
                 return
-            if self.path == "/v1/watch/run":
-                users = STORE.list_watch_users()
-                if not users:
-                    reply(self, 200, {"status": "idle", "reason": "no_watch_users", "users": 0})
-                    return
-                interval = max(5, int(os.environ.get("XHS_WATCH_INTERVAL_SECONDS", "1800")))
-                bucket = int(time.time() // interval)
-                run_key = str(payload.get("run_key") or f"watch-{bucket}")
-                result = collect_watched(
-                    STORE, SOURCE_ROOT, COOKIE_FILE, users, limit=WATCH_FETCH_LIMIT,
-                    request_key=run_key,
-                    delay=max(1, int(os.environ.get("XHS_REQUEST_DELAY", "3"))))
-                while STORE.enqueue_pending():
-                    pass
-                reply(self, 200, {**result, "queue": STORE.status().get("jobs", {})})
+            if path == "/v1/watch/run":
+                reply(self, 200, run_watch(payload))
                 return
-            if self.path == "/v1/command":
+            if path == "/v1/command":
                 reply(self, 200, command_result(payload))
                 return
-            if self.path == "/v1/operation":
+            if path == "/v1/operation":
                 namespace, method, args, kwargs = parse_operation_payload(payload)
                 result = RUNTIME.execute(namespace, method, args, kwargs)
                 reply(self, 200, {"status": "completed", "operation": f"{namespace}.{method}", "result": sanitize(result)})
                 return
-            if self.path == "/v1/worker/claim":
+            if path == "/v1/worker/claim":
                 reply(self, 200, {"job": STORE.claim(str(payload.get("worker") or "mac-ai"))})
                 return
-            if self.path == "/v1/worker/complete":
+            if path == "/v1/worker/complete":
                 if isinstance(payload.get("decisions"), list):
                     result = {"decisions": payload.get("decisions"), "model": payload.get("model"),
                               "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256")}
@@ -509,7 +741,7 @@ class Handler(BaseHTTPRequestHandler):
                               "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256")}
                 reply(self, 200, {"status": STORE.complete(str(payload.get("job_id")), str(payload.get("lease_token")), result)})
                 return
-            if self.path == "/v1/worker/fail":
+            if path == "/v1/worker/fail":
                 STORE.fail(str(payload.get("job_id")), str(payload.get("lease_token")), str(payload.get("error") or "worker_failed"))
                 reply(self, 200, {"status": "recorded"})
                 return

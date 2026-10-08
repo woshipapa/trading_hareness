@@ -299,6 +299,51 @@ class Store:
                     'recommendation_runs': [dict(r) for r in db.execute('SELECT * FROM recommendation_runs ORDER BY started DESC LIMIT 10')],
                     'recommendation_counts': [dict(r) for r in recommendation]}
 
+    def list_jobs(self, limit=50):
+        """Return operational job metadata without prompts, results, or leases."""
+        bounded_limit = max(1, min(int(limit), 200))
+        with self.connect() as db:
+            rows = db.execute('''SELECT job_id,status,created,updated,attempts,worker,
+                                        job_type,run_id,last_error
+                                 FROM jobs ORDER BY updated DESC LIMIT ?''',
+                              (bounded_limit,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_delivery_jobs(self, limit=50):
+        """Return Feishu delivery metadata without persisted message content."""
+        bounded_limit = max(1, min(int(limit), 200))
+        with self.connect() as db:
+            rows = db.execute('''SELECT j.job_id,j.status,j.created,j.updated,j.attempts,
+                                        j.job_type,j.run_id,j.last_error,
+                                        COUNT(d.part) AS delivered_parts
+                                 FROM jobs j
+                                 LEFT JOIN delivery_parts d ON d.job_id=j.job_id
+                                 WHERE j.job_type NOT IN ('classify_recommendations','classify_profiles')
+                                 GROUP BY j.job_id
+                                 ORDER BY j.updated DESC LIMIT ?''',
+                              (bounded_limit,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def enqueue_manual_message(self, text, request_id):
+        text = str(text or '').strip()
+        request_id = str(request_id or '').strip()
+        if not text or len(text) > 12000:
+            raise ValueError('manual_message_must_be_1_to_12000_chars')
+        if not request_id or len(request_id) > 160:
+            raise ValueError('manual_message_request_id_required')
+        job_id = 'xhs-dashboard-' + digest(request_id)[:32]
+        stamp = time.time()
+        payload = json.dumps({'source': 'xhs-dashboard', 'request_id_hash': digest(request_id)},
+                             ensure_ascii=False)
+        result = json.dumps({'summary': text, 'model': 'xhs-dashboard'}, ensure_ascii=False)
+        with self.connect() as db:
+            inserted = db.execute('''INSERT OR IGNORE INTO jobs
+                                     (job_id,status,payload,created,updated,result,job_type)
+                                     VALUES(?,'ready',?,?,?,?, 'manual_message')''',
+                                  (job_id, payload, stamp, stamp, result)).rowcount
+            row = db.execute('SELECT status FROM jobs WHERE job_id=?', (job_id,)).fetchone()
+        return {'job_id': job_id, 'job_status': row['status'], 'duplicate': not bool(inserted)}
+
     def create_recommendation_run(self, run_id, *, profile='ai-infra-daily', category='homefeed_recommend', requested=50, policy=None):
         policy = policy or policy_snapshot()
         encoded = json.dumps(policy, ensure_ascii=False, sort_keys=True)
@@ -428,9 +473,23 @@ class Store:
 
     def list_topics(self, enabled=None):
         with self.connect() as db:
-            clause = '' if enabled is None else ' WHERE enabled=?'
+            clause = '' if enabled is None else ' WHERE t.enabled=?'
             args = () if enabled is None else (1 if enabled else 0,)
-            return [dict(row) for row in db.execute('SELECT * FROM topics' + clause + ' ORDER BY topic_id', args)]
+            rows = db.execute('''SELECT t.*,v.policy_json,v.policy_hash
+                                 FROM topics t
+                                 LEFT JOIN topic_versions v
+                                   ON v.topic_id=t.topic_id AND v.version=t.active_version''' +
+                              clause + ' ORDER BY t.topic_id', args).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                encoded = item.pop('policy_json', None)
+                try:
+                    item['policy'] = json.loads(encoded) if encoded else {}
+                except (TypeError, ValueError):
+                    item['policy'] = {}
+                result.append(item)
+            return result
 
     def upsert_topic(self, row):
         slug = str(row.get('slug') or '').strip().lower()
@@ -454,7 +513,7 @@ class Store:
             db.execute('''INSERT INTO topics(topic_id,slug,name,description,enabled,active_version,created,updated)
                           VALUES(?,?,?,?,?,?,?,?)
                           ON CONFLICT(slug) DO UPDATE SET name=excluded.name,description=excluded.description,
-                          active_version=excluded.active_version,updated=excluded.updated''',
+                          enabled=excluded.enabled,active_version=excluded.active_version,updated=excluded.updated''',
                        (topic_id, slug, name, policy['description'], int(row.get('enabled', 1)), version, stamp, stamp))
             db.execute('''INSERT INTO topic_versions(topic_id,version,policy_json,policy_hash,created)
                           VALUES(?,?,?,?,?)''', (topic_id, version, json.dumps(policy, ensure_ascii=False, sort_keys=True),
@@ -628,10 +687,15 @@ class Store:
 
     def list_watch_users(self, enabled=True):
         with self.connect() as db:
-            clause = ' WHERE enabled=1' if enabled else ''
+            if enabled is None:
+                clause = ''
+                args = ()
+            else:
+                clause = ' WHERE enabled=?'
+                args = (1 if enabled else 0,)
             return [dict(row) for row in db.execute(
                 'SELECT user_id,label,enabled,created,updated,source,state,priority,topic_ids_json FROM watch_users' + clause
-                + ' ORDER BY created').fetchall()]
+                + ' ORDER BY created', args).fetchall()]
 
     def add_watch_user(self, user_id, label='', *, source='manual', topic_ids=None):
         stamp = time.time()

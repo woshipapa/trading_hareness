@@ -21,8 +21,8 @@
   edge script. Edge deploys must not be able to reach 47owner.
 - The dirty-worktree check watches `feishu-relay` sources only. Never point it at
   a gitignored `*/dist` directory — `git diff` always reports those clean.
-- `deploy-xhs-intel-edge.sh` still lives here but releases the `xhs-intel`
-  component; its ordinary Python hot update is `xhs-intel/scripts/hotfix-xhs-intel-edge.sh`.
+- XHS image and overlay release scripts live under `xhs-intel/scripts/`; this
+  component does not own or publish the XHS runtime.
 
 - Tests this component must pass before commit (from `config/components.json`):
 

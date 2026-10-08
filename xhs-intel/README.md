@@ -12,6 +12,24 @@ workflow.
   to the edge API. If the workstation is offline, the edge queue retains
   `pending`/`processing` jobs and leases them again after expiry.
 
+## Web console
+
+The collector serves its operational console at
+`http://127.0.0.1:18790/xhs/`. Keep the listener on loopback and reach the edge
+instance through the existing SSH tunnel. The page receives a process-scoped,
+HTTP-only runtime session; the collector token, XHS Cookie and Feishu webhook
+remain on the server. It covers pipeline status, recommendation decisions, topic
+versions, following candidates, the watch list, the complete registered
+Spider_XHS operation surface and the XHS-specific Feishu delivery ledger.
+Operations use the same allowlist and explicit mutation confirmation as the
+Feishu command lane. Results are sanitized before rendering or optional Feishu
+delivery.
+
+The dashboard is dependency-free static source under `dashboard/`. Both the
+immutable image and the XHS source overlay include it. Future HTML, CSS,
+JavaScript or Python-only changes use `scripts/hotfix-xhs-intel-edge.sh`;
+Dockerfile and runtime dependency changes require an image release.
+
 ## Feishu command surface
 
 The adapter accepts `#xhs` in the bound XHS group and forwards the command to
@@ -87,7 +105,8 @@ without rebuilding their immutable image. The XHS collector image is built on
 the first deployment, or when its Python/Node source or dependencies change;
 workflow, runtime environment and Cookie rotations do not require rebuilding
 the adapter image. Deploy `xhs-intel/Dockerfile`, `Spider_XHS`, the edge
-compose service and the workflow together with `deploy-xhs-intel-edge.sh`.
+compose service and the workflow together with
+`xhs-intel/scripts/deploy-xhs-intel-edge.sh`.
 
 The source checkout is supplied at deployment time as `/opt/xhs` in the edge
 container. Cookies and all runtime state remain outside git. Because

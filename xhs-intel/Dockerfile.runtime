@@ -3,7 +3,8 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir -r requirements.lock
-COPY *.py ./
+COPY collector.py common.py config.py edge_api.py local_worker.py operations.py store.py ./
+COPY dashboard ./dashboard
 
 # Spider_XHS is intentionally an external, pinned runtime contract. Mount it
 # at XHS_SOURCE_ROOT; the image stays reproducible without copying credentials

@@ -32,7 +32,7 @@ media-finalize and media-state callbacks. Local scheduled market workflows are
 not copied, so this relay deployment cannot duplicate local research schedules.
 
 The XHS edge add-on is deployed separately by
-`feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh`. It keeps collection and
+`xhs-intel/scripts/deploy-xhs-intel-edge.sh`. It keeps collection and
 Feishu delivery on the edge while the local worker performs AI summarization.
 The edge n8n process uses the matching `n8nio/runners` sidecar in external mode;
 the runner token is generated into the protected `secrets.env` on first apply.

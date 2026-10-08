@@ -169,9 +169,8 @@ edge 上同源服务着两个 SPA（nginx 全量代理到适配器 18300，适�
 - 每条路径都必须写明 fail-closed 条件，并且脚本里真的有那道闸门；
 - 热更新脚本必须放在它所属组件的目录下。
 
-（`feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh` 这个**镜像发布**脚本目前
-还放在 `feishu-relay/` 下，按组件归属应该搬到 `xhs-intel/`。它正在被另一处改动，
-所以这次没动它。）
+XHS 的镜像发布和源码 overlay 脚本都位于 `xhs-intel/scripts/`；完整镜像发布由
+`deploy-xhs-intel-edge.sh` 负责，常规源码更新由 `hotfix-xhs-intel-edge.sh` 负责。
 
 ## Compatibility rules
 

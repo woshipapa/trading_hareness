@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# xhs-intel 的源码热更新：只发 Python 源码，复用现有镜像，不重建。
+# xhs-intel 的源码热更新：发布 Python 与控制台静态资源，复用现有镜像，不重建。
 #
 # 为什么需要它：``deploy-xhs-intel-edge.sh`` 只要 ``XHS_INTEL_TREE_SHA256`` 变了
 # 就 ``docker compose build xhs-collector`` —— 也就是**改一行 Python 就重建一次
@@ -121,7 +121,8 @@ printf 'xhs_overlay_release=%s\nbase_git_sha=%s\nedge_host=%s\nhotfix_root=%s\n'
   "$release_id" "$head_sha" "$edge_host" "$hotfix_root"
 
 # fail closed：Dockerfile 变了就不能走 overlay（基础镜像/系统包/npm ci 都在里面）
-if ! git -C "$repo_root" diff --quiet --ignore-submodules HEAD -- xhs-intel/Dockerfile; then
+if ! git -C "$repo_root" diff --quiet --ignore-submodules HEAD -- \
+  xhs-intel/Dockerfile xhs-intel/Dockerfile.runtime; then
   echo 'refused: xhs-intel/Dockerfile changed; publish an image release with deploy-xhs-intel-edge.sh' >&2
   exit 42
 fi
@@ -133,13 +134,21 @@ fi
 
 stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/xhs-intel-overlay.XXXXXX")"
 trap 'rm -rf -- "$stage_dir"' EXIT
-# 只发 Python 源码；测试、Dockerfile、README 都不进运行时
+# 只发 Python 源码与无构建依赖的控制台；测试、Dockerfile、README 都不进运行时
 # rsync 的过滤是**第一条命中的规则生效**，所以 exclude 必须排在 include 前面。
 # 写成 ``--include '*.py' --exclude 'test_*.py'`` 的话 test_*.py 会先被 include
 # 命中，测试文件就跟着进运行时了 —— 实测确实如此，所以这个顺序不能调。
-rsync -a --safe-links --exclude 'test_*.py' --include '*.py' --exclude '*' \
+rsync -a --safe-links \
+  --exclude 'test_*.py' \
+  --include '/*.py' \
+  --include '/dashboard/' \
+  --include '/dashboard/*.html' \
+  --include '/dashboard/*.css' \
+  --include '/dashboard/*.js' \
+  --exclude '*' \
   "$component_root/" "$stage_dir/"
 test -f "$stage_dir/edge_api.py" || { echo "edge_api.py missing from stage" >&2; exit 1; }
+test -f "$stage_dir/dashboard/index.html" || { echo "dashboard/index.html missing from stage" >&2; exit 1; }
 printf '%s\n' "$head_sha" > "$stage_dir/.base-git-sha"
 cp "$component_root/requirements.txt" "$stage_dir/.requirements.candidate"
 
@@ -162,6 +171,7 @@ edge_dir="$1"; runtime_env="$2"; secrets_env="$3"; hotfix_root="$4"; upload_dir=
 release_id="$6"; head_sha="$7"; container_name="$8"; retain="$9"
 release_dir="$hotfix_root/releases/$release_id"
 test -f "$upload_dir/edge_api.py"
+test -f "$upload_dir/dashboard/index.html"
 test ! -e "$release_dir"
 
 # 依赖闸门：候选 requirements 必须和运行镜像里烤进去的那份一致。overlay 复用
@@ -239,6 +249,11 @@ if [ "$ok" != true ]; then
   echo 'xhs overlay health verification failed; previous runtime restored' >&2
   exit 1
 fi
+curl -fsS --max-time 5 http://127.0.0.1:18790/xhs/ | grep -q 'XHS Intelligence' || {
+  restore_previous
+  echo 'xhs dashboard verification failed; previous runtime restored' >&2
+  exit 1
+}
 # 文件存在 ≠ 进程在跑它。健康端点有响应、镜像 id 没变、overlay 文件在，这三件
 # 事加起来仍然不能证明 overlay 生效 —— 只要 compose 的 command 丢了或
 # XHS_HOTFIX_ENABLED 没置上，进程就会安静地跑 /app/edge_api.py，而这些检查全绿。

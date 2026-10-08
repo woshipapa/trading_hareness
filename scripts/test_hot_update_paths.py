@@ -103,6 +103,11 @@ class FailClosedTests(unittest.TestCase):
         self._requires("xhs-intel", "requirements.txt differs from the running image",
                        "xhs-intel/Dockerfile changed", "exit 42")
 
+    def test_the_xhs_overlay_packages_and_verifies_dashboard_assets(self) -> None:
+        self._requires("xhs-intel", "--include '/dashboard/'",
+                       'dashboard/index.html missing from stage',
+                       "xhs dashboard verification failed")
+
     def test_the_owner_path_gates_on_migrations_and_unknown_paths(self) -> None:
         self._requires("quant-research", "quant-service/migrations/versions/*.py")
         body = (ROOT / PATHS["quant-research"]["script"]).read_text(encoding="utf-8")
@@ -174,7 +179,7 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 	EDGE_SCRIPTS = (
 		"feishu-relay/scripts/edge/deploy-edge-relay-workflows.sh",
 		"feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.sh",
-		"feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh",
+		"xhs-intel/scripts/deploy-xhs-intel-edge.sh",
 		"feishu-relay/scripts/edge/failback-feishu-relay-to-remote.sh",
 		"feishu-relay/scripts/edge/failover-feishu-relay-to-local.sh",
 		"feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh",
@@ -194,7 +199,7 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 			)
 
 	def test_xhs_release_syncs_central_secrets_without_staging_credentials(self) -> None:
-		body = (ROOT / "feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh").read_text(
+		body = (ROOT / "xhs-intel/scripts/deploy-xhs-intel-edge.sh").read_text(
 			encoding="utf-8"
 		)
 		self.assertTrue("config/secrets/sync-secrets.sh\" edge" in body)

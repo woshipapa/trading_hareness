@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>XHS Intelligence</title>
+    <link rel="stylesheet" href="/xhs/style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-nav">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">小</span>
+          <div>
+            <strong>XHS Intelligence</strong>
+            <span>内容采集与筛选</span>
+          </div>
+        </div>
+        <nav aria-label="主导航">
+          <button class="nav-item active" data-view="overview" type="button"><span data-icon="layout"></span><span>运行总览</span></button>
+          <button class="nav-item" data-view="recommendations" type="button"><span data-icon="sparkles"></span><span>推荐筛选</span></button>
+          <button class="nav-item" data-view="topics" type="button"><span data-icon="tags"></span><span>关注主题</span></button>
+          <button class="nav-item" data-view="following" type="button"><span data-icon="users"></span><span>关注账号</span></button>
+          <button class="nav-item" data-view="capabilities" type="button"><span data-icon="terminal"></span><span>能力控制台</span></button>
+          <button class="nav-item" data-view="feishu" type="button"><span data-icon="message"></span><span>飞书交互</span></button>
+        </nav>
+        <div class="side-status">
+          <span class="status-dot" id="side-status-dot"></span>
+          <div><strong id="side-status-label">连接中</strong><span id="side-status-detail">正在读取 Edge 状态</span></div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title">运行总览</h1>
+            <p id="page-subtitle">采集、AI 筛选与飞书投递状态</p>
+          </div>
+          <div class="topbar-actions">
+            <span class="last-updated" id="last-updated">尚未更新</span>
+            <button class="button secondary" id="refresh-button" type="button" title="刷新当前数据"><span data-icon="refresh"></span><span>刷新</span></button>
+          </div>
+        </header>
+        <div class="content" id="content" aria-live="polite"></div>
+      </main>
+    </div>
+
+    <dialog id="topic-dialog" class="dialog">
+      <form method="dialog" id="topic-form">
+        <div class="dialog-header"><div><h2 id="topic-dialog-title">新增主题</h2><p>每次保存都会生成新的策略版本。</p></div><button class="icon-button" value="cancel" title="关闭" aria-label="关闭"><span data-icon="close"></span></button></div>
+        <div class="form-grid">
+          <label><span>标识</span><input name="slug" required pattern="[a-z][a-z0-9_-]{1,63}" placeholder="inference_systems" /></label>
+          <label><span>名称</span><input name="name" required maxlength="100" placeholder="推理系统" /></label>
+          <label class="wide"><span>描述</span><textarea name="description" maxlength="500" rows="3"></textarea></label>
+          <label class="wide"><span>包含关键词</span><input name="include_keywords" placeholder="vLLM, SGLang, KV Cache" /></label>
+          <label class="wide"><span>排除关键词</span><input name="exclude_keywords" placeholder="培训, 招聘" /></label>
+          <label><span>入选阈值</span><input name="threshold" type="number" min="0" max="1" step="0.05" value="0.65" /></label>
+          <label class="check-label"><input name="enabled" type="checkbox" checked /><span>启用主题</span></label>
+        </div>
+        <div class="dialog-actions"><button class="button secondary" value="cancel">取消</button><button class="button primary" value="default" id="topic-save"><span data-icon="save"></span><span>保存主题</span></button></div>
+      </form>
+    </dialog>
+
+    <dialog id="watch-dialog" class="dialog small">
+      <form method="dialog" id="watch-form">
+        <div class="dialog-header"><div><h2>加入监控名单</h2><p>支持用户 ID 或小红书用户主页地址。</p></div><button class="icon-button" value="cancel" title="关闭" aria-label="关闭"><span data-icon="close"></span></button></div>
+        <div class="form-grid single">
+          <label><span>用户 ID / 主页地址</span><input name="user_id" required /></label>
+          <label><span>备注</span><input name="label" maxlength="80" placeholder="例如：推理系统作者" /></label>
+        </div>
+        <div class="dialog-actions"><button class="button secondary" value="cancel">取消</button><button class="button primary" value="default"><span data-icon="user-plus"></span><span>加入名单</span></button></div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/xhs/app.js"></script>
+  </body>
+</html>

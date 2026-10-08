@@ -53,6 +53,7 @@ class ComponentExportTests(unittest.TestCase):
             self.assertIn("xhs-intel/Dockerfile.runtime", names)
             self.assertIn("xhs-intel/compose.standalone.yaml", names)
             self.assertIn("xhs-intel/requirements.lock", names)
+            self.assertIn("xhs-intel/dashboard/index.html", names)
             self.assertNotIn("Spider_XHS/", "\n".join(names))
 
 

@@ -125,7 +125,8 @@
       },
       "tests": [
         "python3 -m unittest discover -s xhs-intel -p 'test_*.py' -q",
-        "node feishu-relay/scripts/edge/deploy-xhs-intel-edge.test.mjs"
+        "node --check xhs-intel/dashboard/app.js",
+        "node xhs-intel/scripts/deploy-xhs-intel-edge.test.mjs"
       ],
       "services": [
         "xhs-collector"
@@ -228,7 +229,7 @@
       "full_release_required_when": [
         "xhs-intel/requirements.txt 与运行镜像里烤进去的那份不一致",
         "xhs-intel/Dockerfile 变化（基础镜像、系统包、npm ci 都在里面）",
-        "外部 Spider_XHS（xhs-source）变化 —— 走 feishu-relay/scripts/edge/deploy-xhs-intel-edge.sh"
+        "外部 Spider_XHS（xhs-source）变化 —— 走 xhs-intel/scripts/deploy-xhs-intel-edge.sh"
       ]
     }
   }

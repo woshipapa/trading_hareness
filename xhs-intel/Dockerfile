@@ -14,7 +14,8 @@ COPY xhs-intel/requirements.txt /app/requirements.txt
 # Creator API's curl_cffi browser profile). Keep this install outside the OS
 # package guard so a local base image can be rebuilt without apt/Docker Hub.
 RUN pip install --no-cache-dir -r /app/requirements.txt
-COPY xhs-intel/*.py /app/
+COPY xhs-intel/collector.py xhs-intel/common.py xhs-intel/config.py xhs-intel/edge_api.py xhs-intel/local_worker.py xhs-intel/operations.py xhs-intel/store.py /app/
+COPY xhs-intel/dashboard /app/dashboard
 COPY xhs-source /opt/xhs
 WORKDIR /opt/xhs
 RUN if [ "$REUSE_BASE" != "true" ]; then npm ci --omit=dev --ignore-scripts --no-audit --no-fund; fi

@@ -17,6 +17,9 @@
       "following_sync_path": "/v1/following/sync",
       "following_screen_path": "/v1/following/screen",
       "topics_path": "/v1/topics",
+      "dashboard_path": "/xhs/",
+      "capabilities_path": "/v1/capabilities",
+      "feishu_status_path": "/v1/feishu/status",
       "auth_header": "X-XHS-Collector-Token",
       "consumers": ["feishu-relay", "local-worker", "n8n"]
     }
@@ -29,7 +32,7 @@
   ],
   "commands": {
     "api": "docker compose -f compose.standalone.yaml up --build",
-    "test": "python -m unittest discover -s . -p 'test_*.py' -q"
+    "test": "python -m unittest discover -s . -p 'test_*.py' -q && node --check dashboard/app.js"
   },
   "safety": {
     "source_pin_required": true,
