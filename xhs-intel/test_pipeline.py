@@ -232,6 +232,26 @@ class QueueTests(unittest.TestCase):
         self.store.delivered(summary['job_id'])
         self.assertEqual(self.store.recommendation_run('r')['status'], 'sent')
 
+    def test_failed_recommendation_filter_is_visible_and_retryable(self):
+        candidate = note('CUDA distributed training')
+        self.store.add_note(candidate, 'recommendation:failed-run')
+        self.store.create_recommendation_run('failed-run', requested=1)
+        self.store.add_recommendation_item('failed-run', candidate, 1)
+        self.store.queue_recommendation_filter('failed-run')
+        job = self.store.claim('classifier', lane='batch')
+        with self.store.connect() as db:
+            db.execute('UPDATE jobs SET attempts=5 WHERE job_id=?', (job['job_id'],))
+
+        self.store.fail(job['job_id'], job['lease_token'], 'HTTPError:502')
+        run = self.store.recommendation_run('failed-run')
+        self.assertEqual(run['status'], 'filter_failed')
+        self.assertEqual(self.store.list_recommendation_items('failed-run')[0]['state'], 'filter_failed')
+
+        self.assertTrue(self.store.retry_recommendation_filter('failed-run'))
+        self.assertEqual(self.store.recommendation_run('failed-run')['status'], 'filter_queued')
+        retried = self.store.claim('classifier', lane='batch')
+        self.assertEqual(retried['job_id'], job['job_id'])
+
     def test_following_snapshot_is_idempotent(self):
         accounts = [{'user_id': 'user-1', 'nickname': 'Systems Lab', 'raw': {'rid': 'user-1'}}]
         self.assertEqual(self.store.upsert_following_accounts(accounts, 'test-endpoint'), 1)

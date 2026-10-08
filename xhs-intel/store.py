@@ -318,12 +318,26 @@ class Store:
 
     def fail(self, job_id, lease, error):
         with self.connect() as db:
-            row = db.execute("SELECT attempts FROM jobs WHERE job_id=? AND status='processing' AND lease_token=?", (job_id, lease)).fetchone()
+            row = db.execute("""SELECT attempts,job_type,run_id
+                                FROM jobs
+                                WHERE job_id=? AND status='processing' AND lease_token=?""",
+                             (job_id, lease)).fetchone()
             if not row:
                 raise Conflict('lease_lost')
             attempts = row['attempts']
+            stamp = time.time()
+            terminal = attempts >= 5
+            error_text = str(error)[:120]
             db.execute('UPDATE jobs SET status=?,available=?,updated=?,last_error=? WHERE job_id=?',
-                       ('failed' if attempts >= 5 else 'pending', time.time() + min(3600, 60 * 2**min(attempts, 6)), time.time(), error[:120], job_id))
+                       ('failed' if terminal else 'pending', stamp + min(3600, 60 * 2**min(attempts, 6)), stamp,
+                        error_text, job_id))
+            if terminal and row['job_type'] == 'classify_recommendations' and row['run_id']:
+                db.execute("""UPDATE recommendation_runs
+                              SET status='filter_failed', finished=?, last_error=?
+                              WHERE run_id=? AND status='filter_queued'""",
+                           (stamp, error_text, row['run_id']))
+                db.execute("""UPDATE recommendation_items SET state='filter_failed'
+                              WHERE run_id=? AND state='filter_queued'""", (row['run_id'],))
 
     def ready_deliveries(self):
         with self.connect() as db:
@@ -852,6 +866,29 @@ class Store:
     def retry_job(self, job_id):
         with self.connect() as db:
             return bool(db.execute("UPDATE jobs SET status='pending',available=0,attempts=0,updated=? WHERE job_id=? AND status='failed'", (time.time(), job_id)).rowcount)
+
+    def retry_recommendation_filter(self, run_id):
+        """Reset one terminal AI filter job without recollecting its candidates."""
+        stamp = time.time()
+        with self.connect() as db:
+            row = db.execute("""SELECT job_id FROM jobs
+                                WHERE run_id=? AND job_type='classify_recommendations'
+                                ORDER BY created DESC LIMIT 1""", (str(run_id),)).fetchone()
+            if not row:
+                return False
+            changed = db.execute("""UPDATE jobs SET status='pending',available=0,attempts=0,
+                                      lease_token=NULL,lease_until=NULL,worker=NULL,
+                                      updated=?,last_error=NULL
+                                      WHERE job_id=? AND status='failed'""",
+                                 (stamp, row['job_id'])).rowcount
+            if not changed:
+                return False
+            db.execute("""UPDATE recommendation_runs
+                          SET status='filter_queued', finished=NULL, last_error=NULL
+                          WHERE run_id=? AND status='filter_failed'""", (str(run_id),))
+            db.execute("""UPDATE recommendation_items SET state='filter_queued'
+                          WHERE run_id=? AND state='filter_failed'""", (str(run_id),))
+            return True
 
     def latest_summary(self):
         with self.connect() as db:

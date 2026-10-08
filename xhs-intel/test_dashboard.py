@@ -192,6 +192,34 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertNotIn("body", item)
         self.assertNotIn("xsec_token", json.dumps(item))
 
+    def test_dashboard_can_retry_a_failed_recommendation_filter(self):
+        note = normalize({
+            "id": "b" * 24,
+            "note_card": {"title": "Failed filter", "desc": "CUDA", "user": {"nickname": "Infra"}},
+        }, "recommendation:failed")
+        edge_api.STORE.add_note(note, "recommendation:failed")
+        edge_api.STORE.create_recommendation_run("failed-dashboard", requested=1)
+        edge_api.STORE.add_recommendation_item("failed-dashboard", note, 1)
+        edge_api.STORE.queue_recommendation_filter("failed-dashboard")
+        job = edge_api.STORE.claim("classifier", lane="batch")
+        with edge_api.STORE.connect() as db:
+            db.execute("UPDATE jobs SET attempts=5 WHERE job_id=?", (job["job_id"],))
+        edge_api.STORE.fail(job["job_id"], job["lease_token"], "HTTPError:502")
+
+        self.browser.open(self.base + "/xhs/", timeout=3).close()
+        status, payload = self.browser_json("/v1/dashboard/recommendations/retry", {
+            "run_id": "failed-dashboard",
+        })
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["run_id"], "failed-dashboard")
+        self.assertEqual(edge_api.STORE.recommendation_run("failed-dashboard")["status"], "filter_queued")
+
+    def test_dashboard_recommendation_runs_do_not_reuse_hourly_scheduler_keys(self):
+        first = edge_api._recommendation_run_id({"trigger": "dashboard"}, 50)
+        second = edge_api._recommendation_run_id({"trigger": "dashboard"}, 50)
+        self.assertTrue(first.startswith("xhs-reco-manual-"))
+        self.assertNotEqual(first, second)
+
 
 if __name__ == "__main__":
     unittest.main()

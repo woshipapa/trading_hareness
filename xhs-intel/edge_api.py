@@ -213,12 +213,22 @@ def _admin_actor(payload):
     return actor
 
 
+def _recommendation_run_id(payload, requested):
+    payload = dict(payload or {})
+    explicit = str(payload.get('run_id') or payload.get('run_key') or '').strip()
+    if explicit:
+        return explicit
+    # Dashboard actions are user initiated. Give each click its own durable run
+    # so a failed AI filter cannot be hidden behind the hourly scheduler key.
+    if str(payload.get('trigger') or '').strip() == 'dashboard':
+        return f"xhs-reco-manual-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+    return 'xhs-reco-' + hashlib.sha256(f"{int(time.time() // 3600)}:{requested}".encode()).hexdigest()[:24]
+
+
 def run_recommendation(payload=None):
     payload = dict(payload or {})
     requested = max(1, min(RECOMMEND_FETCH_LIMIT, int(payload.get('limit') or RECOMMEND_FETCH_LIMIT)))
-    run_id = str(payload.get('run_id') or payload.get('run_key') or '').strip()
-    if not run_id:
-        run_id = 'xhs-reco-' + hashlib.sha256(f"{int(time.time() // 3600)}:{requested}".encode()).hexdigest()[:24]
+    run_id = _recommendation_run_id(payload, requested)
     existing = STORE.recommendation_run(run_id)
     if existing and existing.get('status') in {'summary_queued', 'filtered', 'completed', 'filter_queued', 'collected', 'running'}:
         return {'status': 'duplicate', 'run_id': run_id, 'run': existing,
@@ -239,10 +249,13 @@ def run_recommendation(payload=None):
 
 
 def _start_recommendation_async(payload):
-    run_hint = str(payload.get('run_id') or payload.get('run_key') or '').strip()
+    payload = dict(payload or {})
+    requested = max(1, min(RECOMMEND_FETCH_LIMIT, int(payload.get('limit') or RECOMMEND_FETCH_LIMIT)))
+    run_hint = _recommendation_run_id(payload, requested)
+    payload['run_id'] = run_hint
     thread = threading.Thread(target=run_recommendation, args=(payload,), name='xhs-recommendation', daemon=True)
     thread.start()
-    return {'status': 'accepted', 'run_id': run_hint or 'scheduled', 'message': '推荐扫描已在 Edge 后台启动，请稍后查询 status'}
+    return {'status': 'accepted', 'run_id': run_hint, 'message': '推荐扫描已在 Edge 后台启动，请稍后查询 status'}
 
 
 def sync_following(payload=None):
@@ -637,6 +650,16 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/v1/dashboard/recommendations/run":
                 reply(self, 202, _start_recommendation_async(payload))
                 return
+            if path == "/v1/dashboard/recommendations/retry":
+                run_id = str(payload.get("run_id") or "").strip()
+                if not run_id:
+                    raise ValueError("recommendation_run_id_required")
+                if not STORE.retry_recommendation_filter(run_id):
+                    reply(self, 409, {"status": "not_retryable", "run_id": run_id})
+                    return
+                reply(self, 202, {"status": "accepted", "run_id": run_id,
+                                  "message": "AI 筛选已重新进入队列"})
+                return
             if path == "/v1/dashboard/following/sync":
                 reply(self, 202, _start_following_sync_async(payload))
                 return
@@ -730,6 +753,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/v1/recommendations/run":
                 reply(self, 200, run_recommendation(payload))
+                return
+            if path == "/v1/recommendations/retry":
+                run_id = str(payload.get("run_id") or "").strip()
+                if not run_id:
+                    raise ValueError("recommendation_run_id_required")
+                if not STORE.retry_recommendation_filter(run_id):
+                    reply(self, 409, {"status": "not_retryable", "run_id": run_id})
+                    return
+                reply(self, 200, {"status": "accepted", "run_id": run_id})
                 return
             if path == "/v1/following/sync":
                 reply(self, 200, sync_following(payload))

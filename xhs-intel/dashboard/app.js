@@ -104,7 +104,7 @@ function safeStatus(value) {
 
 function statusLabel(value) {
   const labels = {
-    pending: '待处理', processing: '处理中', ready: '待投递', sent: '已投递', failed: '失败',
+    pending: '待处理', processing: '处理中', ready: '待投递', sent: '已投递', failed: '失败', filter_failed: '筛选失败',
     completed: '已完成', running: '运行中', blocked: '已阻断', partial: '部分完成', collected: '已采集',
     filter_queued: '待筛选', summary_queued: '待总结', summary_ready: '摘要就绪', include: '入选', review: '复核',
     exclude: '排除', candidate: '候选', active: '监控中', rejected: '已拒绝', disabled: '已停用', ok: '正常',
@@ -210,7 +210,10 @@ async function refreshAll({ quiet = false } = {}) {
     state.error = '';
     const runs = dashboard.recommendation_runs || [];
     if (!state.selectedRunId && runs.length) state.selectedRunId = runs[0].run_id;
-    if (state.selectedRunId && state.activeView === 'recommendations') await loadRecommendationItems(state.selectedRunId, false);
+    if (state.selectedRunId && runs.some((run) => run.run_id === state.selectedRunId)
+        && state.activeView === 'recommendations') {
+      await loadRecommendationItems(state.selectedRunId, false);
+    }
     updateConnection(true);
     document.querySelector('#last-updated').textContent = `更新于 ${new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date())}`;
   } catch (error) {
@@ -287,7 +290,10 @@ function renderRecommendations() {
   const runs = state.dashboard?.recommendation_runs || [];
   const selected = runs.find((run) => run.run_id === state.selectedRunId);
   const items = state.recommendationItems;
-  const action = `<button class="button primary" data-action="run-recommendations">${icon('play')}<span>扫描 50 条</span></button>`;
+  const retryAction = selected?.status === 'filter_failed'
+    ? `<button class="button secondary" data-action="retry-recommendation" data-run-id="${escapeHtml(selected.run_id)}">${icon('refresh')}<span>重试 AI 筛选</span></button>`
+    : '';
+  const action = `${retryAction}<button class="button primary" data-action="run-recommendations">${icon('play')}<span>扫描 50 条</span></button>`;
   const list = runs.length ? runs.map((run) => `<button type="button" class="run-option ${run.run_id === state.selectedRunId ? 'active' : ''}" data-action="select-run" data-run-id="${escapeHtml(run.run_id)}"><div class="run-option-top"><strong>${escapeHtml(run.run_id)}</strong>${pill(run.status)}</div><div class="run-stats"><span>抓取 ${run.fetched || 0}</span><span>入选 ${run.selected || 0}</span><span>复核 ${run.review || 0}</span></div></button>`).join('') : emptyState('暂无运行记录', '启动推荐扫描后会生成运行记录。');
   const itemRows = items.map((item) => `<tr><td class="number">${item.source_rank || '-'}</td><td><a class="row-title" href="${safeXhsUrl(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title || '无标题')}</a><span class="row-subtitle">${escapeHtml(item.author || item.text || '作者未知')}</span></td><td>${pill(item.decision || item.state)}</td><td><div class="score">${item.relevance_score == null ? '-' : `${Math.round(item.relevance_score * 100)}%`}</div>${item.relevance_score == null ? '' : `<progress class="score-track" max="100" value="${Math.max(0, Math.min(100, Number(item.relevance_score) * 100))}" aria-label="相关度"></progress>`}</td><td class="ellipsis" title="${escapeHtml(item.reason)}">${escapeHtml(item.reason || '等待 AI 判断')}</td><td><a class="icon-button" href="${safeXhsUrl(item.url)}" target="_blank" rel="noreferrer" title="打开原文" aria-label="打开原文">${icon('external')}</a></td></tr>`).join('');
   return `<div class="recommendation-layout">
@@ -515,7 +521,11 @@ document.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const action = button.dataset.action;
-  if (action === 'run-recommendations') await runAction(button, '推荐扫描已启动', () => post('/v1/dashboard/recommendations/run', { limit: 50, trigger: 'dashboard' }));
+  if (action === 'run-recommendations') await runAction(button, '推荐扫描已启动', async () => {
+    const accepted = await post('/v1/dashboard/recommendations/run', { limit: 50, trigger: 'dashboard' });
+    if (accepted.run_id) state.selectedRunId = accepted.run_id;
+  });
+  if (action === 'retry-recommendation') await runAction(button, 'AI 筛选已重新排队', () => post('/v1/dashboard/recommendations/retry', { run_id: button.dataset.runId }));
   if (action === 'analyze-single') {
     if (!state.singleDraft.trim()) { toast('请输入小红书文章链接', 'error'); return; }
     await runAction(button, '文章已进入 AI 解析队列', async () => {

@@ -101,7 +101,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .status-pill { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 8px; border-radius: 999px; background: #eef1f4; color: #58616b; font-size: 11px; font-weight: 650; white-space: nowrap; }
 .status-pill.ok, .status-pill.sent, .status-pill.completed, .status-pill.include, .status-pill.active { background: var(--green-soft); color: var(--green); }
 .status-pill.pending, .status-pill.processing, .status-pill.running, .status-pill.review, .status-pill.summary_queued, .status-pill.filter_queued { background: var(--amber-soft); color: var(--amber); }
-.status-pill.failed, .status-pill.rejected, .status-pill.exclude, .status-pill.disabled { background: var(--red-soft); color: var(--danger); }
+.status-pill.failed, .status-pill.filter_failed, .status-pill.rejected, .status-pill.exclude, .status-pill.disabled { background: var(--red-soft); color: var(--danger); }
 .status-pill.collected, .status-pill.summary_ready { background: var(--blue-soft); color: var(--blue); }
 
 .table-wrap { width: 100%; overflow-x: auto; }
