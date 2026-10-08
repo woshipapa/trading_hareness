@@ -21,7 +21,8 @@ from typing import Any
 
 from app.tushare_catalog import TUSHARE_CATALOG
 from app.tushare_official import HISTORICAL_MINUTE_APIS, REALTIME_MARKET_HOURS_APIS, default_probe_params
-from app.tushare_providers import call_provider, provider_configs, safe_error_detail
+from app.error_detail import safe_error_detail
+from app.tushare_providers import call_provider, provider_configs
 
 
 def _parse_date(value: str) -> date:

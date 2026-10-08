@@ -126,7 +126,6 @@ class WatchQuoteCaptureDependencies:
     sina_quotes: Callable[[list[str]], Awaitable[list[dict[str, Any]]]]
     eastmoney_watch_flows: Callable[..., Awaitable[list[dict[str, Any]]]]
     watch_flow_reference: Callable[[list[str], datetime], Awaitable[dict[str, dict[str, Any]]]]
-    watch_volume_fallback: Callable[[list[str]], Awaitable[dict[str, float]]]
     derive_flow_metrics: Callable[..., dict[str, dict[str, float]]]
     apply_derived_flow_metrics: Callable[
         [dict[str, dict[str, Any]], dict[str, dict[str, float]]], dict[str, dict[str, str]]
@@ -176,29 +175,11 @@ async def _apply_derived_flow_metrics(
             "fuyao_ths_derived_watch_flow",
             {"status": "unavailable", "error": dependencies.safe_error(str(error), 300)},
         )
-    # The derivation needs cumulative volume, normally carried by the all-A
-    # snapshot.  On 2026-08-26 13:30 that snapshot and the Eastmoney basket
-    # failed in the same scan, leaving the watchlist with prices but no flow at
-    # all.  A single batched realtime quote covers the whole basket in well
-    # under a second and is independent of both, so it is used - only when the
-    # snapshot supplied nothing, never on the normal path.
-    volume_fallback: dict[str, float] = {}
-    if quotes and not any(quote.get("volume") for quote in quotes.values()):
-        try:
-            volume_fallback = await asyncio.wait_for(
-                dependencies.watch_volume_fallback(sorted(quotes)), timeout=3.0,
-            )
-        except (asyncio.TimeoutError, *dependencies.watch_quote_errors) as error:
-            volume_fallback = {}
-            fallback_error = dependencies.safe_error(str(error), 200)
-        else:
-            fallback_error = None
-        for symbol, volume in volume_fallback.items():
-            if symbol in quotes and not quotes[symbol].get("volume"):
-                quotes[symbol]["volume"] = volume
-                quotes[symbol]["volume_source"] = "promax_rt_k_batch"
-    else:
-        fallback_error = None
+    # The derivation needs cumulative volume, carried by the all-A snapshot.
+    # When the snapshot supplied none, the derived fields stay unavailable for
+    # this scan. (A batched ProMax rt_k volume used to stand in; it went with
+    # the Tushare retirement on 2026-10-08, and with no credentials left it
+    # raised out of the scan instead of falling back.)
     derived = dependencies.derive_flow_metrics(quotes, reference, observed_at=observed_at)
     sources = dependencies.apply_derived_flow_metrics(quotes, derived)
     divergence = dependencies.derived_flow_divergence(quotes, derived)
@@ -223,8 +204,6 @@ async def _apply_derived_flow_metrics(
          "volume_sources": sorted({str(quote.get("volume_source") or "fuyao_ths_all_a_snapshot")
                                    for quote in quotes.values() if quote.get("volume") is not None}),
          "main_net_inflow_source": "eastmoney_watch_flow_only_no_licensed_equivalent",
-         "volume_fallback_symbols": len(volume_fallback),
-         "volume_fallback_error": fallback_error,
          "eastmoney_agreement": divergence},
     )
 

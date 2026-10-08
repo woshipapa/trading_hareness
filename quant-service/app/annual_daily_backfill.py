@@ -35,7 +35,8 @@ from .instrument_registry import InstrumentRecord, ensure_instruments
 from .runtime_resources import DEFAULT_HOT_DATABASE_SOFT_BYTES, bounded_storage_budget_bytes
 from .replay_readiness_coverage import refresh_daily_coverage
 from .sector_flow_repository import rebuild_sector_flow_daily_features
-from .tushare_providers import ProviderCallError, call_provider, provider_configs, safe_error_detail
+from .error_detail import safe_error_detail
+from .tushare_providers import ProviderCallError, call_provider, provider_configs
 from .universe_history import rebuild_historical_membership_from_canonical
 
 

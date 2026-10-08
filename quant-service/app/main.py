@@ -852,11 +852,11 @@ from .tushare_providers import (
     provider_configs,
     provider_request_reservation_status,
     provider_status,
-    safe_error_detail,
     configure_provider_request_reserver,
     super_get_executor_status,
     shutdown_super_get_executor,
 )
+from .error_detail import safe_error_detail
 from .universe_history import sync_universe_membership_history
 
 
@@ -2569,26 +2569,6 @@ def _qianlong_alert_line(evidence: Mapping[str, Any]) -> str:
     return ("；".join(parts) + "\n") if parts else ""
 
 
-async def intraday_watch_volume_fallback(symbols: list[str]) -> dict[str, float]:
-    """Batched live cumulative volume, used only when the all-A snapshot fails.
-
-    ProMax ``rt_k`` answers the whole watch basket in one request with a
-    second-resolution ``updated_at``, so it is an independent third source for
-    the one input the derived flow metrics need.  It supplies volume only; the
-    decision price still comes from the Tencent batch.
-    """
-    if not symbols:
-        return {}
-    call = await call_tushare_api("rt_k", {"ts_code": ",".join(symbols)}, None, "super_get")
-    volumes: dict[str, float] = {}
-    for row in call.rows:
-        symbol = str(row.get("ts_code") or "").upper()
-        volume = intraday_number(row.get("vol"))
-        if symbol in set(symbols) and volume is not None and volume > 0:
-            volumes[symbol] = volume
-    return volumes
-
-
 def derive_intraday_watch_flow_metrics(
     quotes: dict[str, dict[str, Any]], reference: dict[str, dict[str, Any]], *, observed_at: datetime,
 ) -> dict[str, dict[str, float]]:
@@ -3432,7 +3412,6 @@ def _intraday_watchlist_scan_runtime() -> IntradayWatchlistScanRuntime:
             tencent_watch_quotes=tencent_order_book_quotes, sina_quotes=sina_quotes,
             eastmoney_watch_flows=eastmoney_watch_flow_quotes,
             watch_flow_reference=intraday_watch_flow_reference,
-            watch_volume_fallback=intraday_watch_volume_fallback,
             derive_flow_metrics=derive_intraday_watch_flow_metrics,
             apply_derived_flow_metrics=apply_intraday_derived_watch_flow_metrics,
             derived_flow_divergence=intraday_derived_flow_divergence,
@@ -4365,7 +4344,8 @@ async def refresh_intraday_limit_up_anchors(observed_at: datetime) -> dict[str, 
                 "source": "fuyao_all_a_plus_stk_limit"}
     except ExecutorSaturatedError as error:
         return {"status": "blocked", "reason": safe_error_detail(str(error), 300)}
-    except (asyncio.TimeoutError, FuyaoProviderError, ValueError) as error:
+    # ProviderCallError: no limit-price source answered for this session (Tushare is retired).
+    except (asyncio.TimeoutError, FuyaoProviderError, ProviderCallError, ValueError) as error:
         await run_database_blocking(
             _persist_local_limit_pool_failure, str(error) or "limit-up pool request failed")
         return {"status": "unavailable", "reason": safe_error_detail(str(error), 300)}
