@@ -29,6 +29,7 @@ git('config', 'user.email', 'test@example.invalid');
 git('config', 'user.name', 'test');
 mkdirSync(join(repo, 'scripts/shared-peer'), { recursive: true });
 copyFileSync(script, join(repo, 'scripts/shared-peer/deploy-code-only.sh'));
+copyFileSync(join(dirname(script), 'classify-owner-paths.sh'), join(repo, 'scripts/shared-peer/classify-owner-paths.sh'));
 const base = commit(['quant-service/app/main.py', 'quant-service/entrypoint.py', 'README.md'], 'base');
 
 function dryRun(target, from = base) {

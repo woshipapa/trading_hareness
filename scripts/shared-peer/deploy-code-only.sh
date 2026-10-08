@@ -34,76 +34,19 @@ git cat-file -e "$from_sha^{commit}"
 
 changed_files="$(git diff --name-only "$from_sha" "$target_sha")"
 [[ -n "$changed_files" ]] || { echo 'target SHA has no changes' >&2; exit 1; }
-# Three kinds of path.  Owner runtime source ships in this release.  Paths
-# that never reach the owner runtime are skipped: tests and docs carry no
-# behaviour, and feishu-relay/ and frontend/ run on the edge (released there by
-# the edge overlay).  Everything else - migrations, requirements, Dockerfiles,
-# compose, deploy/ and scripts/ (the systemd guards run from the release
-# checkout) - needs the full release.
-runtime_files=""
-skipped_files=""
-# A migration whose code is unchanged - only comments or docstrings differ -
-# changes no schema, so it does not force a full release.  Anything else in a
-# migration does.
-migration_code_unchanged() {
-  python3 - "$from_sha" "$target_sha" "$1" <<'PY'
-import ast, subprocess, sys
-
-def code(sha, path):
-    try:
-        text = subprocess.run(["git", "show", f"{sha}:{path}"], check=True, capture_output=True, text=True).stdout
-    except subprocess.CalledProcessError:
-        return None
-    tree = ast.parse(text)
-    for node in ast.walk(tree):
-        body = getattr(node, "body", None)
-        if isinstance(body, list) and body and isinstance(body[0], ast.Expr) \
-                and isinstance(getattr(body[0], "value", None), ast.Constant) and isinstance(body[0].value.value, str):
-            node.body = body[1:] or [ast.Pass()]
-    return ast.dump(tree)
-
-before, after = code(sys.argv[1], sys.argv[3]), code(sys.argv[2], sys.argv[3])
-sys.exit(0 if before is not None and before == after else 1)
-PY
-}
-while IFS= read -r path; do
-  case "$path" in
-    quant-service/migrations/versions/*.py)
-      if migration_code_unchanged "$path"; then
-        skipped_files+="$path (comments or docstrings only)"$'\n'
-        continue
-      fi
-      echo "full release required for: $path" >&2; exit 1 ;;
-  esac
-  case "$path" in
-    quant-service/app/*|quant-service/entrypoint.py|quant-service/run_server.py|quant-service/database_bootstrap.py|quant-service/alembic.ini)
-      runtime_files+="$path"$'\n' ;;
-    quant-service/tests/*|docs/*|*.md|.github/*|feishu-relay/*|frontend/*|xhs-intel/*|scripts/*.test.mjs|scripts/test_*.py)
-      skipped_files+="$path"$'\n' ;;
-    # The exported standalone component: its own image, compose and lock. The
-    # owner builds from Dockerfile.peer + requirements.txt and never reads these.
-    quant-service/compose.standalone.yaml|quant-service/Dockerfile.standalone|quant-service/standalone/*|\
-    quant-service/requirements.lock|quant-service/Makefile|quant-service/component.json)
-      skipped_files+="$path"$'\n' ;;
-    # Developer tooling: Dockerfile.peer never copies quant-service/scripts/.
-    quant-service/scripts/*)
-      skipped_files+="$path"$'\n' ;;
-    # Credential tooling for the operator workstation (templates and generators,
-    # never values); gitignored files do not appear here at all.
-    config/secrets/env-split.py|config/secrets/sync-secrets.sh|config/secrets/env.example|config/secrets/README.md)
-      skipped_files+="$path"$'\n' ;;
-    # The teacher cycle runs on the operator workstation (svc_supervisor's
-    # teacher.cycle) and reaches the owner only over HTTP and ssh.
-    scripts/teacher_cycle.py|scripts/teacher_review_daily.py|scripts/teacher_harness.py)
-      skipped_files+="$path"$'\n' ;;
-    # Release tooling that runs on the operator workstation, the Windows owner
-    # workstation or the edge - never inside the owner peer runtime.
-    scripts/release-sync-status.sh|scripts/shared-peer/deploy-code-only.sh|scripts/shared-peer/deploy-full-release.sh|\
-    scripts/windows/*|scripts/*feishu-relay-edge*.sh|scripts/*edge-relay-workflows.sh|scripts/install-edge-import-watchdog.sh)
-      skipped_files+="$path"$'\n' ;;
-    *) echo "full release required for: $path" >&2; exit 1 ;;
-  esac
-done <<< "$changed_files"
+# Each changed path is runtime (ships here), skip (never reaches the owner
+# runtime) or full (needs deploy-full-release.sh); classify-owner-paths.sh owns
+# the rules.
+classification="$(bash "$tool_root/scripts/shared-peer/classify-owner-paths.sh" "$from_sha" "$target_sha")"
+full_paths="$(awk -F'\t' '$1 == "full" { print $2 }' <<<"$classification")"
+if [[ -n "$full_paths" ]]; then
+  while IFS= read -r path; do echo "full release required for: $path" >&2; done <<<"$full_paths"
+  exit 1
+fi
+runtime_files="$(awk -F'\t' '$1 == "runtime" { print $2 }' <<<"$classification")"
+skipped_files="$(awk -F'\t' '$1 == "skip" { print $2 }' <<<"$classification")"
+[[ -z "$runtime_files" ]] || runtime_files+=$'\n'
+[[ -z "$skipped_files" ]] || skipped_files+=$'\n'
 
 if [[ "$apply" != true ]]; then
   printf 'code-only release candidate: sha=%s label=%s from=%s\n' "$target_sha" "$release_label" "$from_sha"

@@ -177,8 +177,16 @@ adapter, relay, dashboard, frontend, data-processing, or research-strategy
 code changes when the required runtime dependencies are already in the active
 image.
 
+- Start with `scripts/release plan [<sha>]` (read-only): it reads what each host
+  runs, says per host whether the change is a code-only overlay, a full release
+  (and which paths force it) or nothing, lists migrations the owner must apply
+  first, and checks the no-restart windows (`config/release-windows.json`).
+  `scripts/release` is also the entry point for every release verb (`owner
+  full|code`, `edge image|hotfix|workflows`, `status`, `window`).
 - Quant owner source changes use
-  `scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> --from-sha <active_sha> --apply`.
+  `scripts/shared-peer/deploy-code-only.sh <target_sha> <release_label> --from-sha <active_sha> --apply`
+  (`scripts/release owner code ...`); the path rules live in
+  `scripts/shared-peer/classify-owner-paths.sh`.
 - Feishu edge source changes use
   `feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply`.
 - Both paths must source the exact Git SHA, stage a retained release, atomically

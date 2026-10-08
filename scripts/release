@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# One entry point for releases; each verb runs the script that owns it.
+#
+#   release plan [<ref>]                                    what each host needs for <ref> (default origin/main), read-only
+#   release status [--sha <sha>]                            read-only inventory of both 47 hosts
+#   release window <surface>...                             may these surfaces restart now?
+#   release owner full <sha> <label> [--apply]              new checkout and image (migrations applied first, stage D)
+#   release owner code <sha> <label> --from-sha <sha> [--apply]   source overlay for runtime-only changes
+#   release edge image <sha> <label> [--apply]              pinned adapter image from GHCR
+#   release edge hotfix [--apply | --rollback <id> | --list]       adapter source overlay
+#   release edge workflows <args>                           edge n8n workflows
+#
+# deploy-intraday-edge-release.sh is deliberately absent: that service is retired.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+usage() {
+  sed -n '4,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+verb="${1:-}"
+[ -n "$verb" ] || usage
+shift
+case "$verb" in
+  plan) exec python3 "$root/scripts/release_plan.py" "$@" ;;
+  status) exec bash "$root/scripts/release-sync-status.sh" "$@" ;;
+  window) [ $# -gt 0 ] || usage; exec python3 "$root/scripts/release_window.py" check "$@" ;;
+  owner|edge)
+    kind="${1:-}"
+    [ -n "$kind" ] || usage
+    shift
+    case "$verb/$kind" in
+      owner/full) exec bash "$root/scripts/shared-peer/deploy-full-release.sh" "$@" ;;
+      owner/code) exec bash "$root/scripts/shared-peer/deploy-code-only.sh" "$@" ;;
+      edge/image) exec bash "$root/feishu-relay/scripts/edge/deploy-feishu-relay-edge-release.sh" "$@" ;;
+      edge/hotfix) exec bash "$root/feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh" "$@" ;;
+      edge/workflows) exec bash "$root/feishu-relay/scripts/edge/deploy-edge-relay-workflows.sh" "$@" ;;
+      *) usage ;;
+    esac ;;
+  -h|--help|help) usage ;;
+  *) usage ;;
+esac
