@@ -5,6 +5,26 @@ from xhs_utils.http_util import REQUEST_TIMEOUT
 from xhs_utils.xhs_qianfan_util import get_qianfan_headers_template, generate_qianfan_data, get_qianfan_userDetail_headers_template
 
 class QianFanAPI:
+    @staticmethod
+    def _json_or_raise(response, operation):
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f'{operation} requires a valid Qianfan session '
+                f'(HTTP {response.status_code})'
+            )
+        try:
+            value = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f'{operation} returned a non-JSON response '
+                f'(HTTP {response.status_code})'
+            ) from exc
+        if isinstance(value, dict) and value.get('success') is False:
+            raise RuntimeError(
+                f"{operation} rejected the session: {value.get('msg') or 'unknown error'}"
+            )
+        return value
+
     def get_all_categories(self, cookies):
         headers = get_qianfan_headers_template()
         url = "https://pgy.xiaohongshu.com/api/draco/distributor-square/distributors-tags"
@@ -12,7 +32,11 @@ class QianFanAPI:
             "types": "content_category,distribution_category,user_design_tag,content_tag"
         }
         response = requests.get(url, headers=headers, cookies=cookies, params=params, timeout=REQUEST_TIMEOUT)
-        distribution_category = response.json()["data"]['distributor_tag_map']["distribution_category"]
+        payload = self._json_or_raise(response, 'qianfan.get_all_categories')
+        try:
+            distribution_category = payload["data"]["distributor_tag_map"]["distribution_category"]
+        except (KeyError, TypeError) as exc:
+            raise RuntimeError('qianfan.get_all_categories returned no category tree') from exc
         return distribution_category
 
     def choose_categories(self, cookies):

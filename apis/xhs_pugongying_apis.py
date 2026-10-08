@@ -26,11 +26,34 @@ class PuGongYingAPI:
             cookies, api, data, profile=self.profile
         )
 
+    @staticmethod
+    def _json_or_raise(response, operation):
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f'{operation} requires a valid Pugongying session '
+                f'(HTTP {response.status_code})'
+            )
+        try:
+            value = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f'{operation} returned a non-JSON response '
+                f'(HTTP {response.status_code})'
+            ) from exc
+        if isinstance(value, dict) and value.get('success') is False:
+            raise RuntimeError(
+                f"{operation} rejected the session: {value.get('msg') or 'unknown error'}"
+            )
+        return value
+
     def get_all_categories(self, cookies):
         api = '/api/solar/cooperator/content/tag_tree'
         headers = self._signed_headers(cookies, api)
         response = requests.get(self.base_url + api, headers=headers, cookies=cookies, timeout=REQUEST_TIMEOUT)
-        distribution_category = response.json()["data"]
+        payload = self._json_or_raise(response, 'pgy.get_all_categories')
+        distribution_category = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(distribution_category, list):
+            raise RuntimeError('pgy.get_all_categories returned no category tree')
         return distribution_category
 
     def choose_categories(self, cookies):

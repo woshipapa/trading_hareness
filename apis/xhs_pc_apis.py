@@ -886,7 +886,13 @@ class XHS_Apis():
     def search_onebox(self, query: str, *, search_id: str = None,
                       biz_type: str = "web_search_user", request_id: str = None,
                       proxies: dict = None):
-        """Fetch search suggestions with the captured four-field JSON body."""
+        """Fetch search suggestions with the captured four-field JSON body.
+
+        The legacy onebox endpoint currently returns ``success=false`` with an
+        empty data object even for an authenticated session.  Keep the wire
+        request available for callers that still need it, but fall back to the
+        live recommend endpoint so a search-assist request remains useful.
+        """
         api = "/api/sns/web/v1/search/onebox"
         data = {
             "keyword": str(query),
@@ -901,7 +907,25 @@ class XHS_Apis():
             proxies=self._proxies(proxies), timeout=REQUEST_TIMEOUT,
         )
         self._merge_response_cookies(response, target)
-        return response.json()
+        result = response.json()
+        if (
+            isinstance(result, dict)
+            and result.get("success") is False
+            and not result.get("data")
+        ):
+            success, _message, recommendation = self.get_search_keyword(
+                str(query), proxies=proxies
+            )
+            if success and isinstance(recommendation, dict):
+                data = recommendation.get("data") or {}
+                return {
+                    "code": result.get("code", 0),
+                    "success": True,
+                    "msg": result.get("msg", "成功"),
+                    "data": data,
+                    "compat_fallback": "search/recommend",
+                }
+        return result
 
     def search_filter(self, keyword: str, search_id: str,
                       proxies: dict = None):
