@@ -110,6 +110,49 @@ class FailClosedTests(unittest.TestCase):
             "owner 发布脚本缺少「未知路径一律拒绝」的兜底分支")
 
 
+class ProofOfExecutionTests(unittest.TestCase):
+    """overlay 发布必须证明**进程真的在跑 overlay**，而不只是文件就位。
+
+    2026-10-08 实测踩到这件事：xhs 的 overlay 发布报了成功，而它的门禁只验了
+    /health 有响应、镜像 id 未变、``test -f /app/hotfix/current/edge_api.py``。
+    这三条加起来仍然不能排除"compose 的 command 丢了或开关没置上，进程安静地
+    跑着 /app/edge_api.py"。和 db-tunnel 当年那个只验自己监听的 healthcheck 是
+    同一类毛病：验的是旁证，不是事实。
+
+    两种可接受的证明方式：
+      * 应用自己在 /health 里报 ``runtime_source=source-overlay``（中继、bridge）；
+      * 直接看 PID 1 的 argv 是不是 overlay 路径（xhs，它的 /health 不报这个）。
+
+    纯静态资源的单元没有进程，豁免。
+    """
+
+    #: 没有常驻进程、只发静态资源的单元。
+    STATIC_ONLY = {"edge-quant-console"}
+
+    def test_every_process_bearing_overlay_proves_it_is_executing(self) -> None:
+        for name, entry in PATHS.items():
+            if entry["unit"] in self.STATIC_ONLY:
+                continue
+            body = (ROOT / entry["script"]).read_text(encoding="utf-8")
+            self_report = "runtime_source" in body
+            process_argv = "/proc/1/cmdline" in body
+            self.assertTrue(
+                self_report or process_argv,
+                f"{entry['script']} 没有任何「进程确实在跑 overlay」的证明："
+                "要么让应用在 /health 里报 runtime_source，要么检查 PID 1 的 argv。"
+                "只验文件存在是不够的。")
+
+    def test_a_file_existence_check_alone_is_not_accepted(self) -> None:
+        """这条是上面那条的反向说明：光有 test -f 不算证明。"""
+        for name, entry in PATHS.items():
+            if entry["unit"] in self.STATIC_ONLY:
+                continue
+            body = (ROOT / entry["script"]).read_text(encoding="utf-8")
+            if "test -f /app/hotfix/current" in body:
+                self.assertTrue("runtime_source" in body or "/proc/1/cmdline" in body,
+                                f"{entry['script']} 只有文件存在检查")
+
+
 class ComponentOwnershipTests(unittest.TestCase):
     """热更新脚本应该放在它所属组件的目录里。"""
 

@@ -120,13 +120,19 @@ set -euo pipefail
 release_root="$HOME/trading_hareness/hotfix/quant-service/releases/$RELEASE_LABEL"
 current_root="$HOME/trading_hareness/hotfix/quant-service/current"
 previous_root=""
+previous_target=""
 if [ -e "$current_root" ]; then previous_root="$(readlink -f "$current_root")"; fi
+if [ -n "$previous_root" ]; then previous_target="releases/$(basename "$previous_root")"; fi
 rm -rf "$release_root"
 mkdir -p "$release_root"
 tar -xzf "$ARCHIVE" -C "$release_root"
 test -f "$release_root/app/main.py"
 test -f "$release_root/entrypoint.py"
-ln -sfn "$release_root" "${current_root}.next"
+# ``current`` 必须是**相对**目标。这棵 hotfix 树整体挂进容器的 /app/hotfix，
+# 绝对宿主路径在容器里根本不存在，symlink 会悬空，于是容器里
+# ``[ -f /app/hotfix/current/app/main.py ]`` 不成立 —— 它会安静地回退到镜像里的
+# 代码，而发布脚本照样报成功。相对目标两边都能解析。
+ln -sfn "releases/$RELEASE_LABEL" "${current_root}.next"
 mv -Tf "${current_root}.next" "$current_root"
 
 set_env() {
@@ -149,16 +155,48 @@ set_env QUANT_HOTFIX_ENABLED true
 cd "$COMPOSE_DIR"
 C=(docker compose --env-file .env -f compose.yaml -f compose.intraday-owner.yaml)
 "${C[@]}" config --quiet
-if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
-  if [ -n "$previous_root" ]; then
-    ln -sfn "$previous_root" "${current_root}.next"
+roll_back_release() {
+  if [ -n "$previous_target" ]; then
+    rm -f "${current_root}.next"
+    ln -sfn "$previous_target" "${current_root}.next"
     mv -Tf "${current_root}.next" "$current_root"
     "${C[@]}" up -d --no-build --pull never --force-recreate --wait quant-research quant-research-scheduler || true
   fi
+}
+if ! "${C[@]}" up -d --no-build --pull never --force-recreate --wait db-tunnel quant-research quant-research-scheduler; then
+  roll_back_release
+  exit 1
+fi
+
+# 容器起来了 ≠ 它在跑这次发布的代码。``PEER_APP_GIT_SHA`` / ``PEER_APP_RELEASE``
+# 是**先写 env、后重建容器**的，而失败回滚只换回 symlink、不回滚 env ——
+# 2026-10-08 就出现过 /health 报着新 release 和新 sha、实际跑的是上一版，
+# ``release-sync-status.sh`` 因此报了 PASS。而 PID 1 的 argv 永远是
+# ``/app/hotfix/current``（它是 symlink），所以光看 argv 也证明不了是哪一版。
+#
+# 真正的证明是内容：容器里 ``current`` 解析出来的文件必须和这次刚落盘的
+# release 目录逐字节一致。
+container=trading-hareness-peer-quant-research-1
+if [ "$(readlink -f "$current_root")" != "$(readlink -f "$release_root")" ]; then
+  roll_back_release
+  echo 'release verification failed: current no longer resolves to this release' >&2
+  exit 1
+fi
+host_digest="$(sha256sum "$release_root/app/main.py" | awk '{print $1}')"
+container_digest="$(docker exec "$container" sha256sum /app/hotfix/current/app/main.py 2>/dev/null | awk '{print $1}')"
+if [ -z "$container_digest" ] || [ "$host_digest" != "$container_digest" ]; then
+  roll_back_release
+  echo 'release verification failed: the container is not serving this release source' >&2
+  exit 1
+fi
+if ! docker exec "$container" sh -c \
+    'tr "\0" " " < /proc/1/cmdline | grep -q "/app/hotfix/current"'; then
+  roll_back_release
+  echo 'release verification failed: PID 1 is not running from the overlay' >&2
   exit 1
 fi
 rm -f "$ARCHIVE"
-printf 'code-only release active: %s\n' "$RELEASE_LABEL"
+printf 'code-only release active: %s (overlay source verified against the container)\n' "$RELEASE_LABEL"
 REMOTE
 
 echo 'source release applied; verify owner health and routes before declaring success'

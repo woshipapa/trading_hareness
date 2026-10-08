@@ -239,7 +239,18 @@ if [ "$ok" != true ]; then
   echo 'xhs overlay health verification failed; previous runtime restored' >&2
   exit 1
 fi
+# 文件存在 ≠ 进程在跑它。健康端点有响应、镜像 id 没变、overlay 文件在，这三件
+# 事加起来仍然不能证明 overlay 生效 —— 只要 compose 的 command 丢了或
+# XHS_HOTFIX_ENABLED 没置上，进程就会安静地跑 /app/edge_api.py，而这些检查全绿。
+# 所以直接看 PID 1 的 argv。注意不能用 ``docker exec env``：exec 起的是新进程，
+# 看不到 entrypoint shell 里 export 的变量（我第一次核查就被这一点误导了）。
 docker exec "$container_name" test -f /app/hotfix/current/edge_api.py
+if ! docker exec "$container_name" sh -c \
+    'tr "\0" " " < /proc/1/cmdline | grep -q "/app/hotfix/current/edge_api.py"'; then
+  restore_previous
+  echo 'xhs overlay is staged but PID 1 is not running it; previous runtime restored' >&2
+  exit 1
+fi
 
 ls -1dt "$hotfix_root/releases"/* 2>/dev/null | tail -n +"$((retain + 1))" | while read -r stale; do
   [ "$stale" = "$release_dir" ] && continue
