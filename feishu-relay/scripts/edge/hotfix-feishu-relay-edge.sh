@@ -246,8 +246,14 @@ head_sha="$(git -C "$repo_root" rev-parse --verify HEAD)"
 [[ "$head_sha" =~ ^[0-9a-fA-F]{7,64}$ ]] || { echo "cannot derive a valid git SHA" >&2; exit 2; }
 head_short="${head_sha:0:12}"
 dirty_suffix=""
+# 这里要看的是**源码**，不是构建产物。``frontend/dist`` 和
+# ``feishu-relay/dashboard/dist`` 都在 .gitignore 里，所以拿它们当 pathspec
+# 的话 ``git diff`` 永远返回 0 —— 带着未提交的 quant 前端改动跑这条热部署，
+# 它会把那些改动构建并发到 edge，而 release_id 上**不会**带 -dirty，出处就在
+# 说谎。两个 dist 的源码目录分别是 frontend/ 和 feishu-relay/dashboard/，
+# 后者已被下面的 feishu-relay 覆盖。
 if ! git -C "$repo_root" diff --quiet --ignore-submodules -- \
-  feishu-relay frontend/dist feishu-relay/dashboard/dist; then
+  feishu-relay frontend; then
   dirty_suffix="-dirty"
 fi
 release_id="hotfix-$(date -u +%Y%m%dT%H%M%SZ)-${head_short}${dirty_suffix}-$RANDOM"
