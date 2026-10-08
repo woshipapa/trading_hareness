@@ -165,6 +165,95 @@
       ]
     }
   ],
+  "hosts": [
+    {
+      "id": "47owner",
+      "role": "owner/peer 实时数据面：唯一的 provider 轮询、扫描、租约调度与生产写入方",
+      "components": [
+        "quant-research"
+      ],
+      "processes": [
+        "rootless Docker 项目 trading-hareness-peer：db-tunnel（5432 会话、5433 批量、5681 API，经反向隧道到 owner-windows）、db-batch-tunnel（兼容 sidecar）",
+        "quant-research：QUANT_RUNTIME_PROFILE=intraday_edge，127.0.0.1:15682",
+        "quant-research-scheduler：research profile，127.0.0.1:15683；必须在主服务健康之后启动",
+        "systemd 用户定时器：peer-session-guard-heal（2 分钟）、peer-session-guard-preopen（08:40/09:10）、peer-daily-backfill（06:30）"
+      ],
+      "release": "代码：scripts/shared-peer/deploy-code-only.sh；完整：docs/RELEASE_SYNC_47.md 阶段 F。两者都持有 scripts/shared-peer/release-lock.sh 的守护锁。",
+      "credentials": "~/.secrets/owner/.env.owner，由 config/secrets/sync-secrets.sh owner 推送；compose 的 .env 与 intraday-secrets.env 都是指向它的软链接",
+      "writes": [
+        "owner PostgreSQL 的 quant schema（经 db-tunnel）"
+      ]
+    },
+    {
+      "id": "owner-windows",
+      "role": "owner 的数据库与上游供应商凭据所在地；peer 只经它发起的反向隧道访问",
+      "components": [
+        "quant-research"
+      ],
+      "processes": [
+        "PostgreSQL 热库 127.0.0.1:55432 + stock_cold 表空间",
+        "quant API 127.0.0.1:5681（scripts/windows/start-stock-platform.ps1：research profile，后台任务关闭；Longhu 网关）",
+        "持久反向 SSH：15432 会话、15433 批量、15681 API 到 47owner"
+      ],
+      "release": "docs/RELEASE_SYNC_47.md 阶段 D（迁移，先于任何代码切换）与阶段 G（Windows API）",
+      "credentials": "G:\\StockPlatform\\config\\runtime.env，由 owner 自己保管，不从本仓库同步",
+      "writes": [
+        "它就是数据库；owner-schema 迁移在这里执行"
+      ]
+    },
+    {
+      "id": "47edge",
+      "role": "飞书中继、n8n 工作流、小红书采集，以及同源托管的两个前端；没有任何 quant 写入者",
+      "components": [
+        "feishu-relay",
+        "xhs-intel",
+        "quant-research"
+      ],
+      "processes": [
+        "Docker 项目 feishu-relay-edge：feishu-adapter（同源托管飞书面板与 quant 控制台 edge-quant-console）、n8n、n8n-runners、xhs-collector",
+        "systemd：larkagentx-group-relay.service（LarkAgentX bridge）"
+      ],
+      "retired": [
+        "quant-intraday-edge.service：2026-09 退役并 disable；docs/RELEASE_SYNC_47.md 铁律 1 禁止再启用"
+      ],
+      "release": "feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh、scripts/edge/deploy-quant-console-edge.sh、xhs-intel/scripts/hotfix-xhs-intel-edge.sh",
+      "credentials": "~/.secrets/edge/.env.edge，由 config/secrets/sync-secrets.sh edge 推送",
+      "writes": [
+        "n8n 库 public schema 里的中继台账（owned_data）",
+        "xhs-intel 自己的 SQLite 队列"
+      ]
+    },
+    {
+      "id": "workstation",
+      "role": "运维与研究工作站：只读分析、发布操作、个人自动化；不是任何生产数据的事实源",
+      "components": [],
+      "processes": [
+        "launchd com.papa.svc-supervisor 运行 scripts/svc_supervisor.py 的任务（下面逐个分类）",
+        "本地开发栈 compose.yaml（127.0.0.1:5681，只做本地验证，不是 owner 数据）"
+      ],
+      "release": "无：本机直接运行工作树",
+      "credentials": "config/secrets/.env.local（唯一真源）",
+      "writes": [
+        "teacher.cycle：经 ssh + docker exec，在 47owner 的 peer 容器里运行 app.teacher_review_ops 导入老师复盘包 —— 这是 HTTP 写边界之外唯一的 owner 写入口"
+      ],
+      "supervisor_tasks": {
+        "teacher.cycle": "owner-writer",
+        "video-harness": "owner-reader",
+        "video.ingest": "owner-reader",
+        "owner-tunnel": "tunnel",
+        "feishu-tunnel": "tunnel",
+        "xhs-edge-tunnel": "tunnel",
+        "paper-kb-webhook-tunnel": "tunnel",
+        "xhs-ai-worker": "edge-client",
+        "itougu-table-watch": "local",
+        "model-service": "local",
+        "agent-skills.web": "local",
+        "paperkb.*": "local",
+        "watchlist.sync": "retired",
+        "watchlist.refresh": "retired"
+      }
+    }
+  ],
   "foreign_data_contracts": [
     {
       "consumer": "quant-research",
@@ -239,7 +328,7 @@
         "feishu-relay",
         "quant-research"
       ],
-      "note": "47owner 主栈把 feishu-adapter 和 quant-research* 放在同一个库 n8n 里。组件清单把 feishu-relay 的 runtime 记作 47edge，那只对 edge 部署成立 —— owner 上也跑着一份，而且和 quant 共库，public.ingestion_jobs 就是它的台账。对照：deploy/shared-peer/compose.yaml 已经把两者拆成 PEER_QUANT_DATABASE 与 PEER_N8N_DATABASE 两个库，是想要的终态。"
+      "note": "单机一体化部署模板（DEPLOYMENT.md、scripts/deploy-server.sh：Caddy + 两个域名）把 feishu-adapter 和 quant-research* 放进同一个 n8n 库。2026-10-08 核对：47owner 跑的是 shared-peer 栈（quant 与 n8n 分库），47edge 跑的是 feishu-relay-edge，两台都没有部署这个模板 —— 共库只在有人按模板部署时才成立。quant schema 已不依赖中继台账（20261008_sep0002 去掉了外键，bootstrap 不再要求 public.ingestion_jobs），所以按模板部署时两边只是同库、不再耦合。"
     },
     {
       "compose": "compose.yaml",

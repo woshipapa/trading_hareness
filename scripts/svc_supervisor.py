@@ -256,17 +256,22 @@ TASKS = [
          args=[PY, os.path.join(PKB, "citation_watch.py"), "--notify"],
          cwd=PKB, out=os.path.join(PKLOG, "citation-watch.log"), err=os.path.join(PKLOG, "citation-watch.log"),
          env=_paper_provider_env(), catch_up_hours=36),
-    # ---- 观察池自动化:本地是唯一真源,edge 是扫描方 ----
-    # sync 每 5 分钟推差异到 edge(diff 后才 PUT,避免无谓触发 45 天 hydration);
-    # refresh 每 30 分钟触发,脚本内按沪时窗口+当日标记自行决定是否真正执行。
-    dict(name="watchlist.sync", kind="interval", interval=300, run_at_load=True,
-         args=["/bin/bash", os.path.join(N8N, "scripts/sync-watchlist-to-edge.sh")],
-         cwd=N8N, out=os.path.join(N8N, "logs/watchlist-sync.log"),
-         err=os.path.join(N8N, "logs/watchlist-sync.log"), env={"PATH": PATH_ENV}),
-    dict(name="watchlist.refresh", kind="interval", interval=1800, run_at_load=False,
-         args=[PY, os.path.join(N8N, "scripts/refresh-watchlist-from-proposals.py")],
-         cwd=N8N, out=os.path.join(N8N, "logs/watchlist-refresh.log"),
-         err=os.path.join(N8N, "logs/watchlist-refresh.log"), env={"PATH": PATH_ENV}),
+    # ---- 观察池本地 -> edge 同步:默认关闭 ----
+    # 它们把本机 5681 的观察池推给 47edge 上的 quant-intraday-edge(127.0.0.1:18110)。
+    # 那个 edge 写入者 2026-09 已退役并 disable(RELEASE_SYNC_47 铁律 1 禁止再启用),
+    # 实时观察池现在只在 owner;到 2026-10-08 sync 已连续失败 11328 次
+    # (Connection refused),refresh 最后一次有效运行是 2026-09-17。
+    # 需要时设 WATCHLIST_EDGE_SYNC=1 再重启 supervisor —— 但先确认目标已经不是退役写入者。
+    *([
+        dict(name="watchlist.sync", kind="interval", interval=300, run_at_load=True,
+             args=["/bin/bash", os.path.join(N8N, "scripts/sync-watchlist-to-edge.sh")],
+             cwd=N8N, out=os.path.join(N8N, "logs/watchlist-sync.log"),
+             err=os.path.join(N8N, "logs/watchlist-sync.log"), env={"PATH": PATH_ENV}),
+        dict(name="watchlist.refresh", kind="interval", interval=1800, run_at_load=False,
+             args=[PY, os.path.join(N8N, "scripts/refresh-watchlist-from-proposals.py")],
+             cwd=N8N, out=os.path.join(N8N, "logs/watchlist-refresh.log"),
+             err=os.path.join(N8N, "logs/watchlist-refresh.log"), env={"PATH": PATH_ENV}),
+    ] if os.environ.get("WATCHLIST_EDGE_SYNC") == "1" else []),
     # ---- 周更 calendar (原 StartCalendarInterval: 周一 09:00) ----
     dict(name="paperkb.harvest", kind="calendar", weekday=1, hour=9, minute=0,
          args=[PY, os.path.join(PKB, "kb_harvest.py")],

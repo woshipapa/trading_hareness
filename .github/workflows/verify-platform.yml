@@ -47,6 +47,7 @@ jobs:
         run: |
           python3 scripts/verify_component_boundaries.py --check
           python3 scripts/verify_component_runtimes.py --check
+          python3 scripts/verify_runtime_hosts.py --check
 
       # Every guard under scripts/ (boundaries, hot-update paths, release units,
       # the session guard and its release lock, activation) - until 2026-10-08 CI
