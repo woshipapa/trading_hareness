@@ -3775,17 +3775,9 @@ strategy_index_regime = pure_strategy_index_regime
 
 
 async def sync_strategy_index_context(as_of_date: date) -> dict[str, Any]:
-    """Persist close-daily index context with a labelled public fallback."""
+    """Persist close-daily index context from Eastmoney, then Tencent."""
     return await sync_index_context_isolated(
         as_of_date, STRATEGY_INDEX_SYMBOLS,
-        prefer_public=longhu_vendor_configured(),
-        primary_request=lambda symbol, start, end: TushareFetchRequest(
-            api_name="index_daily", provider="super_get",
-            params={"ts_code": symbol, "start_date": start.strftime("%Y%m%d"),
-                    "end_date": end.strftime("%Y%m%d")},
-            max_rows=60, force_refresh=True,
-        ),
-        fetch_primary=fetch_tushare_catalog,
         fetch_public=eastmoney_daily,
         persist_public=persist_free_daily,
         run_database=run_database_blocking,
