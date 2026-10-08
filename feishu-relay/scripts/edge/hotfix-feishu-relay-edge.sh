@@ -100,9 +100,34 @@ test -f "$release_dir/adapter/package.json"
 test -f "$release_dir/source-registry.json"
 test -x "$bridge_python"
 base_image_id="$(docker inspect -f '{{.Image}}' "$container_name")"
-base_package_hash="$(docker exec "$container_name" sha256sum /app/package.json | awk '{print $1}')"
-candidate_package_hash="$(sha256sum "$release_dir/adapter/package.json" | awk '{print $1}')"
-if [ "$base_package_hash" != "$candidate_package_hash" ]; then
+# overlay 复用镜像里的 node_modules，所以要拦的是**依赖**变化。原来比的是整个
+# package.json 的 sha256 —— 于是一个 ``scripts`` 条目（对运行期毫无影响）也会
+# 被报成"依赖变了，必须发不可变镜像"。2026-10-08 实测就是这样被拦住的：组件
+# 拆分给各组件加标准测试入口，只多了 ``"scripts": {"test": "node --test *.test.mjs"}``，
+# 依赖一个都没变。只比依赖相关的字段，和 owner 侧 migration_code_unchanged()
+# 忽略注释只比代码是同一个思路。
+dependency_fields_match() {
+  docker exec -i "$container_name" node -e '
+    const fs = require("node:fs");
+    const keys = ["dependencies", "devDependencies", "optionalDependencies",
+                  "peerDependencies", "bundledDependencies", "engines"];
+    const pick = (value) => {
+      const out = {};
+      for (const key of keys) {
+        const section = value?.[key];
+        if (section === undefined) continue;
+        out[key] = Array.isArray(section)
+          ? [...section].sort()
+          : Object.fromEntries(Object.entries(section).sort(([a], [b]) => a.localeCompare(b)));
+      }
+      return JSON.stringify(out);
+    };
+    const image = JSON.parse(fs.readFileSync("/app/package.json", "utf8"));
+    const candidate = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (pick(image) !== pick(candidate)) process.exit(1);
+  ' < "$1"
+}
+if ! dependency_fields_match "$release_dir/adapter/package.json"; then
   echo 'rollback refused: retained overlay dependencies differ from the current image' >&2
   exit 42
 fi
@@ -404,10 +429,35 @@ fi
 # A dependency manifest change belongs to an immutable image release.
 base_image="$(docker inspect -f '{{.Config.Image}}' "$container_name")"
 base_image_id="$(docker inspect -f '{{.Image}}' "$container_name")"
-base_package_hash="$(docker exec "$container_name" sha256sum /app/package.json | awk '{print $1}')"
-candidate_package_hash="$(sha256sum "$upload_dir/adapter/package.json" | awk '{print $1}')"
-if [ "$base_package_hash" != "$candidate_package_hash" ]; then
-  echo 'hotfix refused: feishu-relay/adapter/package.json changed; publish an immutable image release' >&2
+# overlay 复用镜像里的 node_modules，所以要拦的是**依赖**变化。原来比的是整个
+# package.json 的 sha256 —— 于是一个 ``scripts`` 条目（对运行期毫无影响）也会
+# 被报成"依赖变了，必须发不可变镜像"。2026-10-08 实测就是这样被拦住的：组件
+# 拆分给各组件加标准测试入口，只多了 ``"scripts": {"test": "node --test *.test.mjs"}``，
+# 依赖一个都没变。只比依赖相关的字段，和 owner 侧 migration_code_unchanged()
+# 忽略注释只比代码是同一个思路。
+dependency_fields_match() {
+  docker exec -i "$container_name" node -e '
+    const fs = require("node:fs");
+    const keys = ["dependencies", "devDependencies", "optionalDependencies",
+                  "peerDependencies", "bundledDependencies", "engines"];
+    const pick = (value) => {
+      const out = {};
+      for (const key of keys) {
+        const section = value?.[key];
+        if (section === undefined) continue;
+        out[key] = Array.isArray(section)
+          ? [...section].sort()
+          : Object.fromEntries(Object.entries(section).sort(([a], [b]) => a.localeCompare(b)));
+      }
+      return JSON.stringify(out);
+    };
+    const image = JSON.parse(fs.readFileSync("/app/package.json", "utf8"));
+    const candidate = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (pick(image) !== pick(candidate)) process.exit(1);
+  ' < "$1"
+}
+if ! dependency_fields_match "$upload_dir/adapter/package.json"; then
+  echo 'hotfix refused: feishu-relay/adapter runtime dependencies changed; publish an immutable image release' >&2
   exit 42
 fi
 
