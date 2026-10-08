@@ -63,6 +63,9 @@ provider response directly to a live threshold or order path.
    `docs/decisions/`; add a record when you make one. Dated status reports,
    recaps and audits belong in `docs/archive/` once their conclusions are
    folded into a living document.
+   `scripts/CATALOG.md` says what every script is for, which component owns it
+   and which host runs it; a new script needs a rule in
+   `scripts/generate_scripts_catalog.py`, then regenerate the catalog.
 9. Syncing or releasing to the two 47 hosts (edge `47.114.113.152`, owner
    `47.110.79.189`) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
    with the read-only `scripts/release-sync-status.sh`. The edge relay and owner

@@ -77,6 +77,9 @@ while IFS= read -r path; do
       printf 'skip\t%s\n' "$path" ;;
     # Release tooling that runs on the operator workstation, the Windows owner
     # workstation or the edge - never inside the owner peer runtime.
+    # CI and contract checks run on the workstation and in CI, never in the owner runtime.
+    scripts/verify_*.py|scripts/verify-*|scripts/generate_*.py|scripts/generate-*.mjs|scripts/export_component.py)
+      printf 'skip\t%s\n' "$path" ;;
     scripts/release|scripts/release_plan.py|scripts/release_window.py|config/release-windows.json|\
     scripts/shared-peer/classify-owner-paths.sh|\
     scripts/release-sync-status.sh|scripts/shared-peer/deploy-code-only.sh|scripts/shared-peer/deploy-full-release.sh|\
