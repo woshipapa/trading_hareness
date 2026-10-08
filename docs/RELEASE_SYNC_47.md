@@ -390,6 +390,20 @@ ssh -i "$RELAY_EDGE_SSH_KEY" root@47.114.113.152 'curl -fsS http://127.0.0.1:183
 
 在安全窗口内执行（第 2 节第 6 条）。
 
+**推荐入口**（2026-10-09 起）：
+
+```bash
+OWNER_PEER_SSH_KEY=... scripts/shared-peer/deploy-full-release.sh "$X" "$L"          # 只检查
+OWNER_PEER_SSH_KEY=... scripts/shared-peer/deploy-full-release.sh "$X" "$L" --apply  # 发布
+```
+
+它把下面第 1–3、5 步做成一条命令：拒绝交易时段和盘后 scheduler 窗口、拒绝不在
+`origin/main` 上的提交；打包补 `certs/`；发布前从 owner 读出回滚点（上一个 release、
+wheelhouse、发布元数据、镜像 ID，并给旧镜像打 `rollback-<L>` 标签）；激活后持有守护锁，
+把发布元数据写进软链接背后的真实文件；隧道不重建，主服务健康后才启动 scheduler；
+核验两端 `git_sha`、主服务 profile 和凭据软链接，任何一项失败都自动回滚。
+下面的手工步骤保留作参考，与脚本等价。
+
 1. **打包**（工作站上执行）：
 
    ```bash

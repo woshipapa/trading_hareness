@@ -89,8 +89,8 @@ while IFS= read -r path; do
       skipped_files+="$path"$'\n' ;;
     # Release tooling that runs on the operator workstation, the Windows owner
     # workstation or the edge - never inside the owner peer runtime.
-    scripts/release-sync-status.sh|scripts/shared-peer/deploy-code-only.sh|scripts/windows/*|\
-    scripts/*feishu-relay-edge*.sh|scripts/*edge-relay-workflows.sh|scripts/install-edge-import-watchdog.sh)
+    scripts/release-sync-status.sh|scripts/shared-peer/deploy-code-only.sh|scripts/shared-peer/deploy-full-release.sh|\
+    scripts/windows/*|scripts/*feishu-relay-edge*.sh|scripts/*edge-relay-workflows.sh|scripts/install-edge-import-watchdog.sh)
       skipped_files+="$path"$'\n' ;;
     *) echo "full release required for: $path" >&2; exit 1 ;;
   esac
