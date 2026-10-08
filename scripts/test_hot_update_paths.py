@@ -225,7 +225,23 @@ class CentralEdgeSecretsTests(unittest.TestCase):
 		)
 
 		custom = module["build_owner"]({"QUANT_HOTFIX_HOST_DIR": "/srv/quant-hotfix"})
-		self.assertIn("QUANT_HOTFIX_HOST_DIR=/srv/quant-hotfix", custom)
+		self.assertIn(
+			"QUANT_HOTFIX_HOST_DIR=/home/stockpeer/trading_hareness/hotfix/quant-service",
+			custom,
+		)
+		self.assertNotIn("QUANT_HOTFIX_HOST_DIR=/srv/quant-hotfix", custom)
+
+	def test_owner_database_password_prefers_the_peer_identity(self) -> None:
+		module = runpy.run_path(str(ROOT / "config/secrets/env-split.py"))
+		separated = module["build_owner"]({
+			"POSTGRES_PASSWORD": "local-only",
+			"PEER_DB_PASSWORD": "peer-only",
+		})
+		self.assertIn("PEER_DB_PASSWORD=peer-only", separated)
+		self.assertNotIn("local-only", separated)
+
+		fallback = module["build_owner"]({"POSTGRES_PASSWORD": "legacy-owner"})
+		self.assertIn("PEER_DB_PASSWORD=legacy-owner", fallback)
 
 
 if __name__ == "__main__":
