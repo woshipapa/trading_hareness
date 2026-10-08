@@ -400,8 +400,7 @@ from .intraday_monitor_service import run_intraday_monitor_loop
 from .market_event_capture import capture as capture_market_events
 from .longhu_auction_capture import capture as capture_longhu_morning_auction
 from .market_event_runtime import run_market_event_capture_loop
-from .auction_pulse import PULSE_REQUESTS, alert_decision, format_alert, summarize_pulse
-from .auction_pulse_runtime import run_auction_pulse_loop
+from .auction_pulse_runtime import AuctionPulseDependencies, run_auction_pulse_service
 from .level1_snapshot_runtime import capture_level1_snapshot, run_level1_snapshot_loop
 from .datasources import runtime as datasource_runtime
 from .datasources.catalog import health_capability
@@ -3871,69 +3870,21 @@ def auction_pulse_alert_cooldown_seconds() -> int:
     return settings.integer("AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS", minimum=5, maximum=300)
 
 
-async def capture_auction_pulse(observed_at: datetime, state: dict[str, Any]) -> dict[str, Any]:
-    """Read Longhu's bounded opening-auction endpoints and emit cooled evidence."""
-    if not longhu_vendor_configured():
-        return {"status": "skipped", "reason": "longhu_not_configured", "stored": 0}
-    envelopes: dict[str, Any] = {}
-
-    async def call_one(spec: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
-        request = {"target": spec["target"], "params": dict(spec["params"])}
-        try:
-            result = await shared_stock_api_call(request)
-            pages = result.get("pages") if isinstance(result, Mapping) else []
-            payloads = [page.get("payload") for page in pages if isinstance(page, Mapping) and isinstance(page.get("payload"), Mapping)]
-            return str(spec["name"]), {"action": spec["action"], "payload": {"pages": payloads}}, None
-        except Exception as error:  # noqa: BLE001 - one source must not hide the others
-            return str(spec["name"]), None, f"{type(error).__name__}: {str(error)[:180]}"
-
-    results = await asyncio.gather(*(call_one(spec) for spec in PULSE_REQUESTS))
-    source_status: dict[str, Any] = {}
-    for name, envelope, error in results:
-        if envelope is not None:
-            envelopes[name] = envelope
-            pages = envelope["payload"].get("pages") or []
-            source_status[name] = {"status": "completed", "action": envelope["action"], "pages": len(pages)}
-        else:
-            source_status[name] = {"status": "failed", "error": error}
-    summary = summarize_pulse(envelopes, observed_at)
-    summary["source_status"] = source_status
-    stored = await run_database_blocking(
-        persist_timed_observations, "longhuvip", "opening_auction_pulse", [{
-            "effective_at": observed_at.isoformat(), "available_at": observed_at.isoformat(),
-            "ts_code": None, "exchange_window": "opening_call_auction", "summary": summary,
-            "source_status": source_status, "research_only": True, "live_effect": "none",
-        }], timeout_seconds=20,
+def _auction_pulse_dependencies() -> AuctionPulseDependencies:
+    # Late-bound so a test that patches one of these names in app.main still reaches the service.
+    return AuctionPulseDependencies(
+        vendor_configured=lambda: longhu_vendor_configured(),
+        call_vendor=lambda request: shared_stock_api_call(request),
+        persist=lambda rows: run_database_blocking(
+            persist_timed_observations, "longhuvip", "opening_auction_pulse", rows, timeout_seconds=20),
+        post_alert=lambda text: post_feishu_alert_text(text),
+        cooldown_seconds=auction_pulse_alert_cooldown_seconds,
+        session_open=lambda now: market_observation_session_async(now=now),
     )
-    decision = alert_decision(
-        summary, state.get("last_summary"), now=observed_at,
-        last_alert_at=state.get("last_alert_at"), cooldown_seconds=auction_pulse_alert_cooldown_seconds(),
-    )
-    delivery: dict[str, Any] = {"status": "suppressed", "reason": decision["reason"]}
-    if decision["should_send"]:
-        delivery = await post_feishu_alert_text(format_alert(summary))
-        if delivery.get("status") == "sent":
-            state["last_alert_at"] = observed_at
-    state["last_summary"] = summary
-    return {
-        "status": "completed" if envelopes else "partial", "stored": stored,
-        "sources": source_status, "alert": {**decision, "delivery": delivery},
-        "research_only": True, "live_effect": "none",
-    }
 
 
 async def auction_pulse_loop() -> None:
-    state: dict[str, Any] = {"last_summary": None, "last_alert_at": None}
-
-    async def session_open(now: datetime) -> bool:
-        active, _reason = await market_observation_session_async(now=now)
-        return active
-
-    await run_auction_pulse_loop(
-        interval_seconds=auction_pulse_interval_seconds(),
-        capture=lambda observed_at: capture_auction_pulse(observed_at, state),
-        session_open=session_open,
-    )
+    await run_auction_pulse_service(_auction_pulse_dependencies(), interval_seconds=auction_pulse_interval_seconds())
 
 
 def _datasource_collector_deps() -> Any:

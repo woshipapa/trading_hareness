@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -53,3 +54,61 @@ class AuctionPulseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuctionPulseCaptureTests(unittest.TestCase):
+    """The capture moved out of main.py (docs/decisions/0008); it had no test of its own."""
+
+    def deps(self, *, configured=True, fail=frozenset(), sent=True, calls=None):
+        from app.auction_pulse_runtime import AuctionPulseDependencies
+        calls = [] if calls is None else calls
+
+        async def call_vendor(request):
+            calls.append(("vendor", request["target"]))
+            if request["target"] in fail:
+                raise RuntimeError("gateway down")
+            return {"pages": [{"payload": {"rows": []}}]}
+
+        async def persist(rows):
+            calls.append(("persist", rows))
+            return len(rows)
+
+        async def post_alert(text):
+            calls.append(("alert", text))
+            return {"status": "sent" if sent else "failed"}
+
+        async def session_open(_now):
+            return True, "open"
+
+        return AuctionPulseDependencies(
+            vendor_configured=lambda: configured, call_vendor=call_vendor, persist=persist,
+            post_alert=post_alert, cooldown_seconds=lambda: 30, session_open=session_open,
+        ), calls
+
+    def test_an_unconfigured_vendor_is_skipped_without_calls(self):
+        from app.auction_pulse_runtime import capture_auction_pulse
+        deps, calls = self.deps(configured=False)
+        result = asyncio.run(capture_auction_pulse(datetime(2026, 10, 9, 1, 20, tzinfo=timezone.utc), {}, deps))
+        self.assertEqual((result["status"], calls), ("skipped", []))
+
+    def test_one_failing_source_is_recorded_and_the_rest_are_persisted(self):
+        from app.auction_pulse import PULSE_REQUESTS
+        from app.auction_pulse_runtime import capture_auction_pulse
+        failing = PULSE_REQUESTS[0]["target"]
+        deps, calls = self.deps(fail={failing})
+        state: dict = {}
+        result = asyncio.run(capture_auction_pulse(datetime(2026, 10, 9, 1, 20, tzinfo=timezone.utc), state, deps))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["sources"][PULSE_REQUESTS[0]["name"]]["status"], "failed")
+        persisted = [payload for kind, payload in calls if kind == "persist"]
+        self.assertEqual(len(persisted), 1)
+        self.assertEqual(persisted[0][0]["live_effect"], "none")
+        self.assertIs(state["last_summary"], persisted[0][0]["summary"])
+        self.assertEqual(result["alert"]["should_send"], any(kind == "alert" for kind, _ in calls))
+
+    def test_every_source_failing_is_partial(self):
+        from app.auction_pulse import PULSE_REQUESTS
+        from app.auction_pulse_runtime import capture_auction_pulse
+        deps, _calls = self.deps(fail={spec["target"] for spec in PULSE_REQUESTS})
+        result = asyncio.run(capture_auction_pulse(datetime(2026, 10, 9, 1, 20, tzinfo=timezone.utc), {}, deps))
+        self.assertEqual(result["status"], "partial")
