@@ -48,7 +48,8 @@ class RawOverflowDependencies:
     acknowledge: Callable[..., dict[str, Any]]
     failure: Callable[..., dict[str, Any]]
     run_database_blocking: Callable[..., Awaitable[Any]]
-    configured_key: Callable[[], str]
+    # The parsed write credentials (or, in tests, the single legacy key).
+    configured_key: Callable[[], Any]
 
 
 def build_raw_overflow_router(deps: RawOverflowDependencies) -> APIRouter:

@@ -78,6 +78,7 @@ class HealthDependencies:
     live_session_acceptance_status: Callable[[], dict[str, Any]] | None = None
     release_metadata: Callable[[], dict[str, str | None]] | None = None
     post_close_runtime_status: Callable[[], dict[str, Any]] | None = None
+    write_boundary_status: Callable[[], dict[str, Any]] | None = None
     raw_overflow_status: Callable[[Any], dict[str, Any]] | None = None
     owner_storage_status: Callable[[Any], dict[str, Any]] | None = None
     owner_deploy_status: Callable[[Any], dict[str, Any]] | None = None
@@ -223,6 +224,7 @@ def health_payload(deps: HealthDependencies, cache: HealthEvidenceCache | None =
             "remote_analyst_archive": deps.remote_archive_http_client_status(),
         },
         "network": deps.network_status(),
+        "write_boundary": deps.write_boundary_status() if deps.write_boundary_status else {},
         "provider_rate_limits": deps.provider_request_reservation_status(),
         "blocking_executors": {**deps.runtime_executor_status(), "super_get": deps.super_get_executor_status()},
         "market_providers": heavy["market_providers"],

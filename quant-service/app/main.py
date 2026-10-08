@@ -543,7 +543,10 @@ from .routers.analyst_action_outcomes import build_analyst_action_outcomes_route
 from .routers.analyst_skill_reads import build_analyst_skill_reads_router
 from .routers.analyst_research_reads import build_analyst_research_reads_router
 from .routers.automation_reads import build_automation_reads_router
-from .security import licensed_stock_read_allowed, raw_overflow_archive_allowed, remote_archive_sync_bearer_allowed, write_access_allowed
+from .security import (
+    WRITE_CALLERS, authorize_write, licensed_stock_read_allowed, raw_overflow_archive_allowed,
+    remote_archive_sync_bearer_allowed, write_boundary_status, write_credentials,
+)
 from .automation_run_repository import run_recorded
 from .daily_strategy_summary_service import (
     build_daily_strategy_summary as build_daily_strategy_summary_projection,
@@ -5861,26 +5864,29 @@ app.include_router(build_raw_overflow_router(RawOverflowDependencies(
     acknowledge=acknowledge_raw_overflow,
     failure=record_raw_overflow_failure,
     run_database_blocking=run_database_blocking,
-    configured_key=lambda: os.getenv("QUANT_WRITE_API_KEY", ""),
+    configured_key=lambda: write_credentials()[0],
 )))
 
 
 @app.middleware("http")
 async def require_quant_write_key(request: Request, call_next: Any) -> Any:
-    configured_key = os.getenv("QUANT_WRITE_API_KEY", "").strip()
-    supplied_key = request.headers.get("X-Quant-Write-Key")
+    credentials, _problems = write_credentials()
+    decision = authorize_write(request.method, request.url.path, request.headers.get("X-Quant-Write-Key"), credentials)
     licensed_read = licensed_stock_read_allowed(
         request, os.getenv("QUANT_SHARED_READ_API_KEY", ""),
     )
     try:
         if (
-            not write_access_allowed(request.method, supplied_key, configured_key)
+            not decision.allowed
             and not remote_archive_sync_bearer_allowed(request)
             and not licensed_read
-            and not raw_overflow_archive_allowed(request, configured_key)
+            and not raw_overflow_archive_allowed(request, credentials)
         ):
-            response = JSONResponse(status_code=401, content={"detail": "valid X-Quant-Write-Key is required for write operations"})
+            WRITE_CALLERS.refused(decision.status)
+            response = JSONResponse(status_code=decision.status, content={"detail": decision.reason})
         else:
+            if decision.caller:
+                WRITE_CALLERS.allowed(decision.caller)
             response = await call_next(request)
     except Exception:  # noqa: BLE001 - make otherwise silent 500s durable
         LOGGER.exception("http request failed method=%s path=%s", request.method, request.url.path)
@@ -5910,6 +5916,7 @@ def _health_payload() -> dict[str, Any]:
             alert_http_client_status=alert_http_client_status, provider_http_client_status=provider_http_client_status,
             remote_archive_http_client_status=remote_archive_http_client_status,
             network_status=network_state.snapshot,
+            write_boundary_status=write_boundary_status,
             provider_request_reservation_status=provider_request_reservation_status,
             runtime_executor_status=runtime_executor_status, super_get_executor_status=super_get_executor_status,
             async_database_pool_status=async_db.pool_status,
