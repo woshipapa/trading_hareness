@@ -73,6 +73,48 @@ provider response directly to a live threshold or order path.
     the repository. XHS cookies, collector tokens and Feishu webhooks stay in
     ignored host env files.
 
+## Credential management (read this before touching tokens or env vars)
+
+All tokens, API keys, secrets and certificates are centrally managed in
+`config/secrets/`. **Do not scatter credentials in ad-hoc `.env` files, `scp`
+them manually, or hard-code values in source.** Read
+`config/secrets/README.md` for the full directory layout.
+
+### Single source of truth
+
+`.env.local` is the only file you edit. `.env.owner` and `.env.edge` are
+**derived** from it by `env-split.py` — never edit them by hand. Owner compose
+uses `PEER_*` prefixed names (the mapping is declared in `build_owner()`);
+edge compose uses the original names.
+
+### When you add or change a credential
+
+1. Add `KEY=value` to `config/secrets/.env.local`.
+2. Add `KEY=` (empty template) to `config/secrets/env.example`.
+3. Add the key to `env-split.py`: in `PASSTHROUGH` for edge, in
+   `build_owner()` for owner — so it flows to the right environment.
+4. Regenerate and push:
+   ```
+   cd config/secrets
+   python3 env-split.py              # regenerate .env.owner + .env.edge
+   bash sync-secrets.sh all          # rsync to both remotes
+   ```
+5. Restart the affected service on the remote to pick up the new value.
+6. Update `docs/凭据地图.md` (gitignored) if the key is a new category.
+
+### Hard rules
+
+- **Never echo, log, persist or commit a secret value.** Variable names are
+  fine; values are not. Test code must use fixture values, never `.env.local`.
+- **Never `scp` or hand-copy an env file to a remote.** Always use
+  `sync-secrets.sh` — it sets 600 permissions and targets the correct path.
+- **Never create a new `.env` file outside `config/secrets/`.** The root `.env`
+  and the remote compose `.env` files are **symlinks** into `config/secrets/`;
+  do not replace them with regular files.
+- **Tracked files:** `README.md`, `env.example`, `env-split.py`. Everything
+  else under `config/secrets/` is gitignored. The `.gitignore` pattern is
+  `config/secrets/*` with `!` exceptions for these three.
+
 ## Component boundaries and hot update (read this before editing)
 
 `config/components.json` is the machine-readable owner map; it wins over memory
