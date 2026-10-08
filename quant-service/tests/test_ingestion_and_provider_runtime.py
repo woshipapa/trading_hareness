@@ -74,71 +74,6 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         fallback = asyncio.run(check())
         self.assertEqual(fallback.await_args.kwargs["blocked_provider_keys"], {"tushare_primary"})
 
-    def test_tushare_daily_sync_checks_its_ledger_in_database_executor(self):
-        provider = MagicMock(key="tushare_super_sdk")
-        unchanged = {"status": "unchanged", "trade_date": "2026-08-11", "imported": 1, "request_key": "cached"}
-
-        async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(return_value=unchanged)
-            with patch("app.main.provider_candidates", return_value=[provider]), \
-                 patch("app.main.run_database_blocking", new=blocking):
-                result = await sync_tushare(TushareSyncRequest(symbols=["000001.SZ"]))
-            return result, blocking
-
-        result, blocking = asyncio.run(check())
-        self.assertEqual(result, unchanged)
-        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], ["prepare_run"])
-
-    def test_tushare_daily_sync_batches_one_provider_response_into_one_database_write(self):
-        provider = MagicMock(key="tushare_super_get")
-        provider_result = MagicMock(
-            provider=provider, failed_providers=(), rows=[
-                {"ts_code": "000001.SZ", "trade_date": "20260810", "open": 10, "high": 11, "low": 9, "close": 10.5, "pre_close": 10, "vol": 100, "amount": 1000},
-                {"ts_code": "000001.SZ", "trade_date": "20260811", "open": 10.5, "high": 12, "low": 10, "close": 11.5, "pre_close": 10.5, "vol": 120, "amount": 1200},
-            ],
-        )
-
-        async def check() -> tuple[dict[str, object], list[str]]:
-            calls: list[str] = []
-
-            async def blocking(operation, *args, **kwargs):
-                calls.append(operation.__name__)
-                return 2 if operation.__name__ == "persist_daily_bar_batch" else None
-
-            with patch("app.main.resolve_sync_symbols_async", new=AsyncMock(return_value=["000001.SZ"])), \
-                 patch("app.main.provider_candidates", return_value=[provider]), \
-                 patch("app.main.call_tushare_api", new=AsyncMock(return_value=provider_result)), \
-                 patch("app.main.run_database_blocking", new=blocking):
-                result = await sync_tushare(TushareSyncRequest(symbols=["000001.SZ"]))
-            return result, calls
-
-        result, calls = asyncio.run(check())
-        self.assertEqual(result["imported"], 2)
-        self.assertEqual(calls, ["prepare_run", "persist_daily_bar_batch", "finalize_run"])
-
-    def test_tushare_daily_sync_reports_shared_rate_limit_backpressure_without_provider_failure(self):
-        provider = MagicMock(key="tushare_super_get")
-
-        async def check() -> tuple[dict[str, object], list[str]]:
-            calls: list[str] = []
-
-            async def blocking(operation, *args, **kwargs):
-                calls.append(operation.__name__)
-                return None
-
-            with patch("app.main.resolve_sync_symbols_async", new=AsyncMock(return_value=["000001.SZ"])), \
-                 patch("app.main.provider_candidates", return_value=[provider]), \
-                 patch("app.main.call_tushare_api", new=AsyncMock(side_effect=ExecutorSaturatedError("shared provider rate-limit queue is full"))), \
-                 patch("app.main.run_database_blocking", new=blocking):
-                result = await sync_tushare(TushareSyncRequest(symbols=["000001.SZ"]))
-            return result, calls
-
-        result, calls = asyncio.run(check())
-        self.assertEqual(result["status"], "blocked")
-        self.assertEqual(result["failures"], [])
-        self.assertEqual(len(result["local_capacity_failures"]), 1)
-        self.assertEqual(calls, ["prepare_run", "finalize_run"])
-
     def test_daily_bar_batch_uses_one_transaction_for_all_validated_bars(self):
         connection = MagicMock()
         transaction = MagicMock()
@@ -528,24 +463,24 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
             "select_concepts", "tushare_rows_for_request", "persist_members", "tushare_rows_for_request", "persist_candidates",
         ])
 
-    def test_watchlist_history_persists_factor_snapshot_in_database_executor(self):
-        factor_snapshot = {"bar_count": 21}
-        source = ({"source": "watchlist", "status": "completed"}, [])
-
-        async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(side_effect=[factor_snapshot, None])
-            with patch("app.main.sync_tushare", new=AsyncMock(return_value={"status": "completed"})), \
-                 patch("app.main.stock_study_fetch", new=AsyncMock(return_value=source)), \
-                 patch("app.main.run_database_blocking", new=blocking):
+    def test_watchlist_history_reads_local_close_bars_and_persists_the_snapshot(self):
+        async def check(bar_count: int) -> tuple[dict[str, object], AsyncMock]:
+            blocking = AsyncMock(side_effect=[{"bar_count": bar_count}, None])
+            with patch("app.main.run_database_blocking", new=blocking):
                 result = await hydrate_watchlist_history(uuid.uuid4(), "000001.SZ")
             return result, blocking
 
-        result, blocking = asyncio.run(check())
-        self.assertEqual(result["status"], "completed")
-        self.assertIn("owner_persisted_adjustment_factor", result["source_status"])
+        ready, blocking = asyncio.run(check(21))
+        self.assertEqual(ready["status"], "completed")
+        self.assertTrue(ready["factors"]["factor_ready"])
+        self.assertEqual(ready["source_status"]["daily"]["source"], "canonical_bars_daily")
+        self.assertIn("owner_persisted_adjustment_factor", ready["source_status"])
         self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
             "watchlist_daily_factors", "persist_factor_snapshot",
         ])
+        thin, _blocking = asyncio.run(check(5))
+        self.assertEqual(thin["status"], "failed")
+        self.assertEqual(thin["source_status"]["daily"]["reason"], "fewer than 21 local daily bars")
 
     def test_intraday_factor_queries_reuse_the_existing_transaction_connection(self):
         class DailyConnection:

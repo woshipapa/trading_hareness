@@ -634,7 +634,6 @@ from .daily_pipeline import run_pipeline as run_daily_pipeline_orchestrated
 from .board_research_service import run as run_board_research_isolated
 from .akshare_probe_service import run as run_akshare_probe_isolated
 from .recommendation_generation import generate as generate_recommendations_isolated
-from .tushare_daily_sync import sync as sync_tushare_isolated
 from .baostock_daily_sync import fetch_rows as fetch_baostock_rows_isolated, sync as sync_baostock_isolated
 from .market_universe_sync import sync as sync_market_universe_isolated
 from .full_market_daily_sync import sync as sync_full_market_daily_isolated
@@ -931,12 +930,6 @@ async def resolve_sync_symbols_async(requested: list[str]) -> list[str]:
 def baostock_code(symbol: str) -> str:
     code, exchange = symbol.split(".", 1)
     return f"{exchange.lower()}.{code}"
-
-
-def tushare_daily_api(symbol: str) -> str:
-    # Tushare exposes equity and index daily bars through different endpoints.
-    # Keep this allow-list explicit; not every 000xxx security is an index.
-    return "index_daily" if symbol in {"000300.SH", "000905.SH", "000852.SH"} else "daily"
 
 
 
@@ -1298,27 +1291,6 @@ def generate_recommendations(request: GenerateRequest) -> dict[str, Any]:
         analyst_execution_context=analyst_execution_context, ablation_scores=ablation_scores,
         number=number, db=db, model_version=MODEL_VERSION, feature_version=FEATURE_VERSION,
         json_safe=strategy_json_safe,
-    )
-
-
-async def sync_tushare(request: TushareSyncRequest) -> dict[str, Any]:
-    """Compatibility entry point backed by the isolated daily synchronizer."""
-    return await sync_tushare_isolated(
-        request,
-        resolve_symbols=resolve_sync_symbols_async,
-        provider_candidates=provider_candidates,
-        cn_today=cn_today,
-        tushare_daily_api=tushare_daily_api,
-        call_tushare_api=call_tushare_api,
-        decimal_or_none=decimal_or_none,
-        daily_bar_type=DailyBar,
-        persist_daily_bar_batch=persist_daily_bar_batch,
-        run_database_blocking=run_database_blocking,
-        db=db,
-        record_provider_failure=record_provider_failure,
-        record_provider_success=record_provider_success,
-        safe_error_detail=safe_error_detail,
-        executor_saturated_error=ExecutorSaturatedError,
     )
 
 
@@ -2480,34 +2452,35 @@ WATCHLIST_FACTOR_MODEL_VERSION = "qlib-lean-watchlist-v1"
 
 
 async def hydrate_watchlist_history(watchlist_id: uuid.UUID, symbol: str) -> dict[str, Any]:
-    """Fetch bounded history while reading factors from the owner projection."""
+    """Read the watch's daily factors from the local close history and record the snapshot.
+
+    The bars come from the full-market close Longhu writes every session, so nothing is
+    fetched here. (The Tushare daily, daily_basic and money-flow fetches this used to make
+    were retired on 2026-10-08; with no credentials they marked every new watch failed.)
+    """
     end_date = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     start_date = end_date - timedelta(days=45)
-    dated = {"ts_code": symbol, "start_date": start_date.strftime("%Y%m%d"), "end_date": end_date.strftime("%Y%m%d")}
-    daily_result = await sync_tushare(TushareSyncRequest(symbols=[symbol], start_date=start_date, end_date=end_date))
-    supplemental = await asyncio.gather(
-        stock_study_fetch("watchlist_daily_basic", TushareFetchRequest(api_name="daily_basic", params=dated, max_rows=60)),
-        stock_study_fetch("watchlist_moneyflow", TushareFetchRequest(api_name="moneyflow", params=dated, max_rows=60)),
-        stock_study_fetch("watchlist_moneyflow_dc", TushareFetchRequest(api_name="moneyflow_dc", params=dated, max_rows=60)),
-    )
     factors = await run_database_blocking(watchlist_daily_factors, symbol)
+    bar_count = int(factors.get("bar_count") or 0)
+    daily_ok = bar_count >= 21
     source_status = {
-        "daily": daily_result,
+        "daily": {
+            "source": "canonical_bars_daily", "provider": "local close history",
+            "status": "completed" if daily_ok else "blocked", "received": bar_count, "stored": 0,
+            **({} if daily_ok else {"reason": "fewer than 21 local daily bars"}),
+        },
         "owner_persisted_adjustment_factor": {
             "source": "owner persisted adjustment factor",
             "api_name": "adj_factor",
             "provider": "owner_persisted_adjustment_factor",
             "status": "completed" if factors.get("factor_ready") else "blocked",
-            "received": int(factors.get("bar_count") or 0),
+            "received": bar_count,
             "stored": 0,
         },
-        **{item[0]["source"]: item[0] for item in supplemental},
     }
-    daily_ok = daily_result.get("status") in {"completed", "partial", "unchanged"} and int(factors.get("bar_count") or 0) >= 21
-    supplemental_ok = sum(1 for item, _ in supplemental if item.get("status") in {"completed", "partial", "unchanged"})
-    status = "completed" if daily_ok and supplemental_ok >= 2 else "partial" if daily_ok else "failed"
+    status = "completed" if daily_ok else "failed"
     factors.update({"factor_family": ["qlib_price_volume_rolling", "rsi14", "ma_trend", "lean_separate_risk_layer"],
-                    "factor_ready": daily_ok, "supplemental_sources_ready": supplemental_ok})
+                    "factor_ready": daily_ok})
 
     def persist_factor_snapshot() -> None:
         with db.transaction() as connection:
