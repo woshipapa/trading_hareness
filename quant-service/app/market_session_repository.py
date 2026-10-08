@@ -2,35 +2,27 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any, Awaitable, Callable
-from zoneinfo import ZoneInfo
 
-from .market_rules import china_equity_observation_session, china_equity_session, china_futures_session
+from .market_session_rules import (
+    SSE_CALENDAR_SQL, calendar_verdict, exchange_date, observation_clock, realtime_clock, session_verdict,
+    weekend_verdict,
+)
 from .runtime_executors import ExecutorSaturatedError, run_database_blocking
 from .error_detail import safe_error_detail
 
-CN_TZ = ZoneInfo("Asia/Shanghai")
-
-
 def _calendar_date(now: datetime | None) -> date:
-    return (now or datetime.now(timezone.utc)).astimezone(CN_TZ).date()
+    return exchange_date(now)
 
 
 def sse_calendar_status(database: Any, calendar_date: date) -> tuple[bool, str]:
     """Return persisted SSE state with a safe diagnostic reason."""
-    if calendar_date.weekday() >= 5:
-        return False, "SSE trade calendar treats weekends as closed"
+    if (closed := weekend_verdict(calendar_date)) is not None:
+        return closed
     with database.transaction() as connection:
-        row = connection.execute(
-            "SELECT is_open FROM quant.market_trade_calendar WHERE exchange='SSE' AND calendar_date=%s",
-            (calendar_date,),
-        ).fetchone()
-    if row is None:
-        return False, "SSE trade calendar has no entry for today; fail closed"
-    if not row["is_open"]:
-        return False, "SSE trade calendar marks today closed"
-    return True, "SSE trade calendar marks today open"
+        row = connection.execute(SSE_CALENDAR_SQL, (calendar_date,)).fetchone()
+    return calendar_verdict(row)
 
 
 def sse_calendar_open(database: Any, calendar_date: date) -> bool:
@@ -57,61 +49,41 @@ async def sse_calendar_status_async(
     database_runner: Callable[..., Awaitable[Any]] = run_database_blocking,
 ) -> tuple[bool, str]:
     """Async-safe SSE state; gaps and local capacity pressure fail closed."""
-    if calendar_date.weekday() >= 5:
-        return False, "SSE trade calendar treats weekends as closed"
+    if (closed := weekend_verdict(calendar_date)) is not None:
+        return closed
 
     def load_calendar() -> Any:
         with database.transaction() as connection:
-            return connection.execute(
-                "SELECT is_open FROM quant.market_trade_calendar WHERE exchange='SSE' AND calendar_date=%s",
-                (calendar_date,),
-            ).fetchone()
+            return connection.execute(SSE_CALENDAR_SQL, (calendar_date,)).fetchone()
 
     try:
         row = await database_runner(load_calendar)
     except ExecutorSaturatedError as error:
         return False, f"local calendar capacity unavailable; fail closed: {safe_error_detail(str(error), 180)}"
-    if row is None:
-        return False, "SSE trade calendar has no entry for today; fail closed"
-    if not row["is_open"]:
-        return False, "SSE trade calendar marks today closed"
-    return True, "SSE trade calendar marks today open"
+    return calendar_verdict(row)
 
 
 def realtime_market_session(database: Any, api_name: str | None = None,
                             now: datetime | None = None) -> tuple[bool, str]:
-    active, reason = china_futures_session(now) if api_name == "rt_fut_min" else china_equity_session(now)
-    if not active:
-        return active, reason
-    calendar_open, calendar_reason = sse_calendar_status(database, _calendar_date(now))
-    if not calendar_open:
-        return False, calendar_reason
-    return True, reason
+    clock = realtime_clock(api_name, now)
+    return session_verdict(clock, sse_calendar_status(database, exchange_date(now)) if clock[0] else clock)
 
 
 async def realtime_market_session_async(database: Any, api_name: str | None = None,
                                         now: datetime | None = None, *,
                                         database_runner: Callable[..., Awaitable[Any]] = run_database_blocking) -> tuple[bool, str]:
-    active, reason = china_futures_session(now) if api_name == "rt_fut_min" else china_equity_session(now)
-    if not active:
-        return active, reason
-    exchange_date = _calendar_date(now)
-
-    calendar_open, calendar_reason = await sse_calendar_status_async(
-        database, exchange_date, database_runner=database_runner,
-    )
-    if not calendar_open:
-        return False, calendar_reason
-    return True, reason
+    clock = realtime_clock(api_name, now)
+    if not clock[0]:
+        return clock
+    return session_verdict(clock, await sse_calendar_status_async(
+        database, exchange_date(now), database_runner=database_runner,
+    ))
 
 
 def market_observation_session(database: Any, now: datetime | None = None) -> tuple[bool, str]:
     """Gate research evidence from 09:15 while retaining the SSE calendar."""
-    active, reason = china_equity_observation_session(now)
-    if not active:
-        return active, reason
-    calendar_open, calendar_reason = sse_calendar_status(database, _calendar_date(now))
-    return (True, reason) if calendar_open else (False, calendar_reason)
+    clock = observation_clock(now)
+    return session_verdict(clock, sse_calendar_status(database, exchange_date(now)) if clock[0] else clock)
 
 
 async def market_observation_session_async(
@@ -121,13 +93,12 @@ async def market_observation_session_async(
     database_runner: Callable[..., Awaitable[Any]] = run_database_blocking,
 ) -> tuple[bool, str]:
     """Async-safe 09:15 evidence gate; it never broadens strategy sessions."""
-    active, reason = china_equity_observation_session(now)
-    if not active:
-        return active, reason
-    calendar_open, calendar_reason = await sse_calendar_status_async(
-        database, _calendar_date(now), database_runner=database_runner,
-    )
-    return (True, reason) if calendar_open else (False, calendar_reason)
+    clock = observation_clock(now)
+    if not clock[0]:
+        return clock
+    return session_verdict(clock, await sse_calendar_status_async(
+        database, exchange_date(now), database_runner=database_runner,
+    ))
 
 
 __all__ = [
