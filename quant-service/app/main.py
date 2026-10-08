@@ -994,9 +994,6 @@ def persist_daily_bar_batch(bars: list[DailyBar]) -> int:
         return upsert_daily_bars(connection, bars)
 
 
-def recompute_scorecards_legacy(as_of_date: date | None = None) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated scorecard service."""
-    return recompute_scorecards(as_of_date)
 def recompute_scorecards(as_of_date: date | None = None) -> dict[str, Any]:
     """Compatibility entry point backed by local-only analyst scorecards."""
     return recompute_scorecards_isolated(as_of_date, cn_today=cn_today, db=db, readiness=analyst_scorecard_readiness)
@@ -1175,9 +1172,6 @@ def refresh_intraday_signal_attributions(connection: Any, *, cutoff: datetime) -
     return changed
 
 
-def recompute_intraday_signal_outcomes_legacy(as_of_date: date | None = None) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated outcome service."""
-    return recompute_intraday_signal_outcomes(as_of_date)
 def recompute_intraday_signal_outcomes(as_of_date: date | None = None) -> dict[str, Any]:
     """Settle confirmed alerts from persisted evidence through the shared repository."""
     result = IntradayOutcomeRuntime(IntradayOutcomeRuntimeDependencies(
@@ -1199,9 +1193,6 @@ def recompute_intraday_signal_outcomes(as_of_date: date | None = None) -> dict[s
     return result
 
 
-def recompute_outcomes_legacy(as_of_date: date | None = None) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated outcome service."""
-    return recompute_outcomes(as_of_date)
 def evaluate_research_trial_families(connection: Any, as_of_date: date) -> dict[str, int]:
     from .research_trial_repository import evaluate_outcome_families
     return evaluate_outcome_families(connection, as_of_date)
@@ -1280,9 +1271,6 @@ async def sync_earnings_calendar(as_of_date: date) -> dict[str, Any]:
     )
 
 
-def generate_recommendations_legacy(request: GenerateRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated recommendation service."""
-    return generate_recommendations(request)
 def generate_recommendations(request: GenerateRequest) -> dict[str, Any]:
     """Compatibility entry point backed by the isolated scorer/materializer."""
     return generate_recommendations_isolated(
@@ -1292,15 +1280,6 @@ def generate_recommendations(request: GenerateRequest) -> dict[str, Any]:
         json_safe=strategy_json_safe,
     )
 
-
-def fetch_baostock_rows_legacy(symbols: list[str], trade_date: date) -> tuple[list[dict[str, str]], list[str]]:
-    """Deprecated compatibility alias; use the isolated BaoStock fetcher."""
-    return fetch_baostock_rows_isolated(symbols, trade_date, baostock_code=baostock_code)
-
-
-async def sync_baostock_legacy(request: TushareSyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated BaoStock synchronizer."""
-    return await sync_baostock(request)
 
 async def sync_baostock(request: TushareSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by the isolated BaoStock synchronizer."""
@@ -1484,10 +1463,6 @@ def persist_tushare_rows(connection: Any, api_name: str, request_key: str, rows:
     return normalize_tushare_rows(connection, api_name, rows, available_at, provider_key)
 
 
-async def sync_market_universe_legacy(request: MarketUniverseSyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated universe synchronizer."""
-    return await sync_market_universe(request)
-
 async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by the isolated universe synchronizer."""
     if request.provider == "auto" and longhu_full_market_enabled():
@@ -1541,10 +1516,6 @@ async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, 
         record_provider_api_capability=record_provider_api_capability,
     )
 
-
-async def sync_full_market_daily_legacy(request: FullMarketDailySyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated full-market synchronizer."""
-    return await sync_full_market_daily(request)
 
 async def sync_full_market_daily(request: FullMarketDailySyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by isolated full-market sync."""
@@ -1792,10 +1763,6 @@ def persist_eastmoney_sector_members(connection: Any, taxonomy_key: str, sector_
     )
 
 
-async def sync_ths_sector_catalog_legacy(request: SectorCatalogSyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated THS catalog synchronizer."""
-    return await sync_ths_sector_catalog(request)
-
 async def sync_ths_sector_catalog(request: SectorCatalogSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by isolated THS catalog sync."""
     # The isolated module keeps the exact member-code guard: re.fullmatch(r"\d{6}\.TI", code)
@@ -1829,10 +1796,6 @@ async def sync_all_ths_sector_catalogs() -> dict[str, Any]:
         is_circuit_open_error=is_circuit_open_http_error,
     )
 
-
-async def sync_eastmoney_board_members_legacy(request: EastmoneyBoardMemberSyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated Eastmoney member synchronizer."""
-    return await sync_eastmoney_board_members(request)
 
 async def sync_eastmoney_board_members(request: EastmoneyBoardMemberSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by isolated Eastmoney member sync."""
@@ -3725,10 +3688,6 @@ async def run_strategy_decision(request: StrategyDecisionRequest) -> dict[str, A
         model_version=STRATEGY_DECISION_MODEL_VERSION,
     )
 
-async def sync_ths_industry_moneyflow_legacy(request: SectorFlowSyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated THS flow synchronizer."""
-    return await sync_ths_industry_moneyflow(request)
-
 async def sync_ths_industry_moneyflow(request: SectorFlowSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by isolated THS industry flow sync."""
     return await sync_ths_industry_isolated(
@@ -3737,11 +3696,6 @@ async def sync_ths_industry_moneyflow(request: SectorFlowSyncRequest) -> dict[st
         run_database_blocking=run_database_blocking, db=db, upsert_taxonomy=upsert_sector_taxonomy, upsert_sector=upsert_sector,
         decimal_or_none=decimal_or_none, json_value=Json, observed_at=lambda: datetime.now(timezone.utc),
     )
-
-
-async def sync_ths_concept_signals_legacy(request: SectorFlowSyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated THS concept synchronizer."""
-    return await sync_ths_concept_signals(request)
 
 
 async def sync_ths_concept_signals(request: SectorFlowSyncRequest) -> dict[str, Any]:
@@ -3753,10 +3707,6 @@ async def sync_ths_concept_signals(request: SectorFlowSyncRequest) -> dict[str, 
         decimal_or_none=decimal_or_none, json_value=Json, observed_at=lambda: datetime.now(timezone.utc), http_exception=HTTPException,
     )
 
-
-async def sync_ths_concept_members_legacy(request: ConceptMemberSyncRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated THS member synchronizer."""
-    return await sync_ths_concept_members(request)
 
 async def sync_ths_concept_members(request: ConceptMemberSyncRequest) -> dict[str, Any]:
     """Compatibility entry point backed by isolated concept-member sync."""
@@ -4013,11 +3963,6 @@ async def sync_cninfo_announcements(request: AnnouncementSyncRequest) -> dict[st
         persist_events=persist_market_events,
         persist_health=persist_announcement_provider_health,
     )
-
-
-async def run_post_close_refresh_legacy(request: PostCloseRefreshRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the lease-aware orchestrator."""
-    return await run_post_close_refresh(request)
 
 
 async def _post_close_core_symbols(limit: int) -> list[str]:
@@ -5028,11 +4973,6 @@ def _research_maintenance_dependencies() -> ResearchMaintenanceDependencies:
 
 def update_analyst_research_profile(analyst_id: str, payload: AnalystResearchProfileRequest) -> dict[str, Any]:
     return update_analyst_research_profile_isolated(analyst_id, payload, _research_maintenance_dependencies())
-
-
-def review_claim_legacy(review_id: uuid.UUID, payload: ClaimReviewRequest) -> dict[str, Any]:
-    """Deprecated compatibility alias; use the isolated claim-review service."""
-    return review_claim(review_id, payload)
 
 
 def review_claim(review_id: uuid.UUID, payload: ClaimReviewRequest) -> dict[str, Any]:

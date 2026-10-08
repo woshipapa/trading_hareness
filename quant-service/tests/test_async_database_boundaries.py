@@ -228,24 +228,17 @@ class MainRouterBoundaryTests(unittest.TestCase):
                     direct_routes.add((method.upper(), decorator.args[0].value))
         self.assertEqual(direct_routes, set())
 
-    def test_legacy_sync_names_are_thin_compatibility_aliases(self) -> None:
-        """Prevent removed provider implementations from returning to main.py."""
+    def test_retired_legacy_aliases_stay_out_of_main(self) -> None:
+        """The *_legacy compatibility aliases had no caller and were removed on 2026-10-09.
+
+        Their implementations live in the isolated services; neither the
+        aliases nor removed provider code may return to the composition root.
+        """
         main_path = Path(__file__).resolve().parents[1] / "app" / "main.py"
         tree = ast.parse(main_path.read_text(encoding="utf-8"))
-        names = {
-            "sync_baostock_legacy", "sync_market_universe_legacy",
-            "sync_full_market_daily_legacy", "sync_ths_sector_catalog_legacy",
-            "sync_eastmoney_board_members_legacy", "sync_ths_industry_moneyflow_legacy",
-            "sync_ths_concept_signals_legacy", "sync_ths_concept_members_legacy",
-            "review_claim_legacy",
-        }
-        found = {}
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names:
-                found[node.name] = node
-        self.assertEqual(set(found), names)
-        for name, node in found.items():
-            self.assertLessEqual(len(node.body), 4, name)
+        legacy = sorted(node.name for node in tree.body
+                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.endswith("_legacy"))
+        self.assertEqual(legacy, [])
 
 
 class RouterReadBoundaryTests(unittest.TestCase):
