@@ -35,8 +35,7 @@
   "external_dependencies": [
     "PostgreSQL quant schema with Alembic lineage",
     "pinned Python dependency lock file",
-    "provider credentials supplied by the owner host",
-    "optional Feishu ingestion ledger contract"
+    "provider credentials supplied by the owner host"
   ],
   "commands": {
     "api": "docker compose -f compose.standalone.yaml up --build",

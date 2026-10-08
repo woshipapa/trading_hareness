@@ -26,10 +26,10 @@ curl http://127.0.0.1:5681/health
 ```
 
 `compose.standalone.yaml` owns a local PostgreSQL volume and starts the
-versioned schema bootstrap before the API. It uses an explicit, write-free
-`public.ingestion_jobs` compatibility table because the integrated schema
-keeps the analyst signal foreign key owned by the Feishu ingestion contract.
-The standalone profile disables background collectors and remains research
+versioned schema bootstrap before the API. The quant schema needs nothing from
+another component: the analyst-signal foreign key into the Feishu relay's
+ingestion ledger was dropped in `20261008_sep0002`, so a bare PostgreSQL is
+enough. The standalone profile disables background collectors and remains research
 only; provider credentials are optional until a research route needs them.
 The standalone image installs `requirements.lock`; update that lock deliberately
 when the API dependency set changes.

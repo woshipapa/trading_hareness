@@ -61,6 +61,21 @@ assert.equal(result.status, 0, result.stderr);
 assert.match(result.stdout, /owner runtime files:\n {2}\(none: this release only records the new SHA\)/);
 console.log('an edge-only change still lets the owner record the new SHA');
 
+// The exported standalone component's build files never reach the owner, which
+// builds from Dockerfile.peer and requirements.txt.
+const standalone = commit(['quant-service/compose.standalone.yaml', 'quant-service/Dockerfile.standalone',
+	'quant-service/standalone/001-seed.sql', 'quant-service/requirements.lock', 'quant-service/Makefile',
+	'quant-service/component.json', 'quant-service/app/main.py'], 'standalone files');
+result = dryRun(standalone, edgeOnly);
+assert.equal(result.status, 0, result.stderr);
+for (const skipped of ['quant-service/compose.standalone.yaml', 'quant-service/Dockerfile.standalone',
+	'quant-service/standalone/001-seed.sql', 'quant-service/requirements.lock', 'quant-service/Makefile',
+	'quant-service/component.json']) {
+	assert.ok(result.stdout.includes(`\n${skipped}\n`), `${skipped} should be listed as skipped`);
+}
+git('reset', '-q', '--hard', edgeOnly);
+console.log('standalone build files are not owner runtime');
+
 // Anything the image or the release checkout depends on needs a full release.
 for (const path of ['quant-service/migrations/versions/x.py', 'quant-service/requirements.txt',
 	'quant-service/Dockerfile.peer', 'deploy/shared-peer/compose.yaml', 'scripts/peer-session-guard.sh']) {

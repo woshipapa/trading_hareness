@@ -78,14 +78,11 @@ jobs:
       - name: Build and test research service
         run: |
           docker compose up -d --wait --wait-timeout 120 postgres
-          docker compose build quant-research feishu-adapter
-          # The PostgreSQL-backed tests need the real schema: the adapter's
-          # ingestion ledger first (the quant baseline references it), then the
-          # quant bootstrap, which stamps the baseline and upgrades to head.
-          # initialize-ledger.mjs is not copied into the adapter image.
-          docker compose run --rm --no-deps \
-            --volume "$GITHUB_WORKSPACE/feishu-relay/adapter/initialize-ledger.mjs:/app/initialize-ledger.mjs:ro" \
-            feishu-adapter node initialize-ledger.mjs
+          docker compose build quant-research
+          # The PostgreSQL-backed tests need the real schema: the quant bootstrap
+          # stamps the baseline and upgrades to head on a bare database. It no
+          # longer needs the Feishu relay's ingestion ledger first; if it ever
+          # does again, this step fails instead of quietly re-coupling them.
           docker compose run --rm --no-deps quant-research python database_bootstrap.py
           docker compose run --rm --no-deps quant-research python -m unittest discover -s tests -q
 

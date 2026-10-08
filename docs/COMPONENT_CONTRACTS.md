@@ -65,7 +65,10 @@ routers 只做 HTTP 边界与入参校验。现在只允许在那一个适配器
 是飞书中继的投递台账（`feishu-relay/adapter/ledger.mjs` 拥有），删一条投递记录
 会级联删掉 quant 的研究信号。迁移 `20261008_sep0002` 去掉了这条约束，列本身
 保留（`NOT NULL`，仍是研究出处）。它也是逼着 quant-only 库伪造外部表的原因：
-`standalone/001-ingestion-contract.sql` 的桩表在该迁移到达所有环境后即可退役。
+`standalone/001-ingestion-contract.sql` 的桩表、`database_bootstrap.py` 启动前对
+`public.ingestion_jobs` 的存在性检查，以及 CI 里先跑 relay `initialize-ledger.mjs`
+的前置步骤，都已在该迁移到达 owner 后（2026-10-08）删除：quant schema 在一个
+空 PostgreSQL 上即可从基线迁到 head。
 
 ### 共库事实（`shared_runtime_databases`）
 

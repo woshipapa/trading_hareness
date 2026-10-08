@@ -15,7 +15,6 @@ import sys
 from typing import Literal
 
 from app.database import PLATFORM_SCHEMA_SQL, SCHEMA_SQL
-from app.database_bootstrap_contract import ingestion_ledger_required
 from entrypoint import acquire_migration_lock, database_connection, release_migration_lock
 
 
@@ -118,14 +117,9 @@ def initialize_database() -> dict[str, str]:
             required_table_count=state[2],
         )
         if action == "create_baseline":
-            if ingestion_ledger_required():
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT to_regclass('public.ingestion_jobs') IS NOT NULL")
-                    if not bool(cursor.fetchone()[0]):
-                        raise RuntimeError(
-                            "public ingestion ledger is absent; run "
-                            "feishu-relay/adapter/initialize-ledger.mjs before the quant bootstrap"
-                        )
+            # The quant schema needs nothing from another component: the baseline
+            # no longer references the Feishu relay's ingestion ledger (dropped
+            # in 20261008_sep0002), so a bare PostgreSQL is enough.
             # Keep the prerequisites and frozen baseline atomic. A failed
             # empty-DB bootstrap therefore leaves no partial quant schema that
             # a later run might accidentally stamp as valid.

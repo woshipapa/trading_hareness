@@ -78,6 +78,11 @@ while IFS= read -r path; do
       runtime_files+="$path"$'\n' ;;
     quant-service/tests/*|docs/*|*.md|.github/*|feishu-relay/*|frontend/*|xhs-intel/*|scripts/*.test.mjs|scripts/test_*.py)
       skipped_files+="$path"$'\n' ;;
+    # The exported standalone component: its own image, compose and lock. The
+    # owner builds from Dockerfile.peer + requirements.txt and never reads these.
+    quant-service/compose.standalone.yaml|quant-service/Dockerfile.standalone|quant-service/standalone/*|\
+    quant-service/requirements.lock|quant-service/Makefile|quant-service/component.json)
+      skipped_files+="$path"$'\n' ;;
     # Credential tooling for the operator workstation (templates and generators,
     # never values); gitignored files do not appear here at all.
     config/secrets/env-split.py|config/secrets/sync-secrets.sh|config/secrets/env.example|config/secrets/README.md)
