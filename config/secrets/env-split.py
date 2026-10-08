@@ -57,6 +57,7 @@ def build_owner(local: dict) -> str:
         f"PEER_DB_PASSWORD={get(local, 'PEER_DB_PASSWORD', get(local, 'POSTGRES_PASSWORD'))}",
         f"PEER_DB_USER=stock_peer",
         f"PEER_QUANT_DATABASE=trading_hareness",
+        f"PEER_N8N_DATABASE=trading_hareness_peer_n8n",
         "",
         "# ── 量化服务鉴权 ──",
         f"QUANT_SHARED_READ_API_KEY={get(local, 'QUANT_SHARED_READ_API_KEY')}",
@@ -69,14 +70,14 @@ def build_owner(local: dict) -> str:
         f"QUANT_HOTFIX_HOST_DIR=/home/stockpeer/trading_hareness/hotfix/quant-service",
         "",
         "# ── 运行时 ──",
-        f"PEER_BACKGROUND_TASKS_ENABLED=false",
+        f"PEER_BACKGROUND_TASKS_ENABLED=true",
         f"PEER_REQUIRE_OWNER_SEMANTICS=true",
         f"PEER_OWNER_CONTRACT_MODE=strict",
-        f"PEER_RUNTIME_PROFILE=research",
+        f"PEER_RUNTIME_PROFILE=intraday_edge",
         f"PEER_RESEARCH_ASYNC_READ_POOL_MAX_SIZE=16",
-        f"PEER_RESEARCH_BOARD_BACKFILL_ENABLED=false",
-        f"PEER_RESEARCH_THS_BACKFILL_ENABLED=false",
-        f"PEER_FEISHU_DIRECT_ENABLED=false",
+        f"PEER_RESEARCH_BOARD_BACKFILL_ENABLED=true",
+        f"PEER_RESEARCH_THS_BACKFILL_ENABLED=true",
+        f"PEER_FEISHU_DIRECT_ENABLED=true",
         "",
         "# ── 远端端口 ──",
         f"REMOTE_DB_PORT=15432",
@@ -89,9 +90,9 @@ def build_owner(local: dict) -> str:
         f"FEISHU_APP_SECRET={get(local, 'FEISHU_APP_SECRET')}",
         f"FEISHU_ALERT_RECEIVE_ID={get(local, 'FEISHU_ALERT_RECEIVE_ID')}",
         f"FEISHU_ALERT_RECEIVE_ID_TYPE={get(local, 'FEISHU_ALERT_RECEIVE_ID_TYPE')}",
-        f"QUANT_FEISHU_DIRECT_ENABLED=false",
-        f"QUANT_LONGHU_FULL_MARKET_ENABLED=false",
-        f"QUANT_PAPER_AUTO_EXECUTION_ENABLED=false",
+        f"QUANT_FEISHU_DIRECT_ENABLED=true",
+        f"QUANT_LONGHU_FULL_MARKET_ENABLED=true",
+        f"QUANT_PAPER_AUTO_EXECUTION_ENABLED=true",
         "",
         "# ── 数据源 API ──",
         f"TUSHARE_TOKEN={get(local, 'TUSHARE_TOKEN')}",
@@ -128,6 +129,14 @@ def build_owner(local: dict) -> str:
         "# ── n8n（profiles: n8n，不启动，但 compose 校验变量插值）──",
         f"PEER_N8N_ENCRYPTION_KEY={get(local, 'N8N_ENCRYPTION_KEY', '')}",
     ]
+    # owner 专属的值（与本机不同）放在 .env.local 的 OWNER_<键名> 里，这里覆盖同名键
+    out = []
+    for line in lines:
+        k = line.split("=", 1)[0]
+        if "=" in line and not line.startswith("#") and ("OWNER_" + k) in local:
+            line = f"{k}={local['OWNER_' + k]}"
+        out.append(line)
+    lines = out
     return "\n".join(lines) + "\n"
 
 # ═══════════════════════════════════════════════════════════════════════
