@@ -9,9 +9,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 from .intraday_fast_quote_service import bounded_rotation_pool_size
+from .tushare_providers import provider_configs
+
+
+def fast_quote_loop_enabled(interval_seconds: float, *, environ: Mapping[str, str] | None = None) -> bool:
+    """The rt_k cross-check is optional; with no super_get route every tick would only record a failure."""
+    return interval_seconds >= 30 and provider_configs(environ)["super_get"].configured
 
 
 @dataclass(frozen=True)

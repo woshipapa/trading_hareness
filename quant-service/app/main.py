@@ -421,6 +421,7 @@ from .datasources.sources.tushare_limits import fetch_limit_cross_section as fet
 from .intraday_fast_quote_service import cross_source_confirmation, run_intraday_fast_quote_loop
 from .intraday_fast_quote_runtime import (
     IntradayFastQuoteRuntimeDependencies,
+    fast_quote_loop_enabled,
     run_intraday_fast_quote_runtime_loop,
 )
 from .intraday_fast_quote_confirmation_runtime import latest_confirmations as latest_fast_quote_confirmations
@@ -5576,7 +5577,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
         interval_seconds=interval_seconds,
         enabled={
             "intraday_monitor": interval_seconds >= 30,
-            "super_get_fast_quote": interval_seconds >= 30,
+            "super_get_fast_quote": fast_quote_loop_enabled(interval_seconds),
             "strategy_review": strategy_review_automation_enabled(),
             "post_close_strategy": post_close_strategy_automation_enabled(),
             "ten_day_leader_rotation": ten_day_leader_rotation_automation_enabled(),
