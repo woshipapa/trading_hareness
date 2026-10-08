@@ -111,7 +111,11 @@ export function useResearchLoader(shell: ResearchShell, slices: ResearchSlices) 
         read(getJson<{ items?: Announcement[] }>('/api/research/events/announcements?limit=100'), (announcementData) => { announcements.value = announcementData.items ?? []; }),
         read(getJson<{ items?: Announcement[] }>('/api/research/events/lhb?limit=100'), (lhbData) => { lhbEvents.value = lhbData.items ?? []; }),
         read(getJson<{ report?: BoardReviewReport | null }>('/api/research/market/sectors/review/report/latest'), (boardReviewData) => { closeBoardReport.value = boardReviewData.report ?? null; }),
-        read(getJson<ConceptBackfill>('/api/research/market/sectors/concepts/members/backfill/status'), (backfillData) => { conceptBackfill.value = backfillData; }),
+        read(getJson<ConceptBackfill>('/api/research/market/sectors/concepts/members/backfill/status'), (backfillData) => {
+          // A failed read unpacks as {}; the close-review counters still need a states list.
+          const data: Partial<ConceptBackfill> = backfillData;
+          conceptBackfill.value = { ...data, total_concepts: data.total_concepts ?? 0, mapped_concepts: data.mapped_concepts ?? 0, states: data.states ?? [] };
+        }),
         read(getJson<{ review?: StrategyReview | null }>('/api/research/strategy/reviews/latest?session=close'), (strategyReviewData) => { closeStrategyReview.value = strategyReviewData.review ?? null; }),
         read(getJson<{ run?: PostCloseStrategyRun | null; candidates?: PostCloseCandidate[] }>('/api/research/strategy/post-close/latest'), (postCloseStrategyData) => {
           postCloseStrategyRun.value = postCloseStrategyData.run ?? null;

@@ -243,6 +243,16 @@ describe('useDashboardWorkspace', () => {
     expect(JSON.stringify(workspace.marketSnapshots)).toContain('/api/research/market/snapshots?limit=20');
   });
 
+  it('keeps the close-review counters readable when the backfill status cannot be read', async () => {
+    failing.set('/api/research/market/sectors/concepts/members/backfill/status', 'unavailable');
+
+    await workspace.loadResearch();
+
+    expect(workspace.conceptBackfill).toEqual({ total_concepts: 0, mapped_concepts: 0, states: [] });
+    expect(workspace.completedBackfillBoards).toBe(0);
+    expect(workspace.researchError).toBe('部分研究接口暂时不可用（1 项）；已保留可读取数据，稍后自动重试');
+  });
+
   it('runs one research load at a time', async () => {
     await Promise.all([workspace.loadResearch(), workspace.loadResearch()]);
     await flushPromises();
