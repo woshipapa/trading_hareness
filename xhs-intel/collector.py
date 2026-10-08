@@ -22,6 +22,72 @@ class NoteFetchUnavailable(RuntimeError):
 _URL_RE = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
 _NOTE_PATH_RE = re.compile(r'/(?:explore|discovery/item)/([0-9a-fA-F]{24})(?:/|$)')
 _TRAILING_SHARE_TEXT = '.,;!?)]}\u3002\uff0c\uff1b\uff01\uff1f\u3011\u300b'
+_MAX_NOTE_IMAGES = 18
+_IMAGE_HOST_SUFFIXES = ('.xhscdn.com', '.xiaohongshu.com')
+
+
+def _image_source_urls(image):
+    """Yield the image variants exposed by Spider_XHS without trusting arbitrary URLs."""
+    if not isinstance(image, dict):
+        return
+    for key in ('url_default', 'url', 'url_pre', 'url_placeholder'):
+        value = image.get(key)
+        if isinstance(value, str) and value.strip():
+            yield value.strip()
+    for item in image.get('info_list') or []:
+        if not isinstance(item, dict):
+            continue
+        value = item.get('url')
+        if isinstance(value, str) and value.strip():
+            yield value.strip()
+
+
+def _canonical_image_url(value):
+    """Turn an XHS image variant into a stable, no-watermark JPEG URL.
+
+    The upstream image URLs contain size/format suffixes and sometimes expiring
+    query parameters.  Only XHS-owned hosts are accepted and the canonical
+    ``ci.xiaohongshu.com`` form keeps the durable note revision free of those
+    transient parameters.
+    """
+    parsed = urlparse(str(value or '').strip())
+    host = (parsed.hostname or '').lower().rstrip('.')
+    if parsed.scheme not in {'http', 'https'} or not (host == 'xiaohongshu.com' or host.endswith(_IMAGE_HOST_SUFFIXES)):
+        return ''
+    if parsed.port not in (None, 80, 443):
+        return ''
+    path = parsed.path.split('!', 1)[0].split('?', 1)[0].strip('/')
+    if not path:
+        return ''
+    if 'notes_pre_post/' in path:
+        token = 'notes_pre_post/' + path.split('notes_pre_post/', 1)[1]
+    elif 'spectrum' in path:
+        token = '/'.join(path.split('/')[-2:])
+    elif path.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        token = '/'.join(path.split('/')[-3:])
+    else:
+        token = path.split('/')[-1]
+    token = token.strip('/')
+    if not token or len(token) > 512 or any(char in token for char in ('\x00', '\r', '\n')):
+        return ''
+    return f'https://ci.xiaohongshu.com/{token}?imageView2/format/jpeg'
+
+
+def _extract_image_urls(images):
+    urls = []
+    seen = set()
+    for image in images or []:
+        selected = ''
+        for candidate in _image_source_urls(image):
+            selected = _canonical_image_url(candidate)
+            if selected:
+                break
+        if selected and selected not in seen:
+            seen.add(selected)
+            urls.append(selected)
+        if len(urls) >= _MAX_NOTE_IMAGES:
+            break
+    return urls
 
 
 def _link_kind(url):
@@ -135,18 +201,24 @@ def normalize(item, query, detail=None):
     if isinstance(stamp, (int, float)):
         published = dt.datetime.fromtimestamp(stamp / 1000 if stamp > 1e11 else stamp, dt.timezone.utc).isoformat()
     images = card.get('image_list') or []
+    image_urls = _extract_image_urls(images)
     # Stable image identity, excluding expiring CDN parameters and engagement.
-    image_ids = [str(x.get('file_id') or x.get('url_default', '').split('?')[0]) for x in images if isinstance(x, dict)]
+    image_ids = [str(x.get('file_id') or '') for x in images if isinstance(x, dict) and x.get('file_id')]
+    if not image_ids:
+        image_ids = [url.rsplit('/', 1)[-1].split('?', 1)[0] for url in image_urls]
     content = {'title': str(card.get('title') or card.get('display_title') or ''),
                'text': str(card.get('desc') or ''), 'image_ids': image_ids,
+               'image_urls': image_urls,
                'video_id': str((card.get('video') or {}).get('consumer', {}).get('origin_video_key') or '')}
     author = card.get('user') or {}
     return {'note_id': note_id, **content, 'author': str(author.get('nickname') or ''),
             'author_id': str(author.get('user_id') or author.get('userId') or ''),
             'published_at': published, 'fetched_at': dt.datetime.now(dt.timezone.utc).isoformat(),
             'url': f'https://www.xiaohongshu.com/explore/{note_id}', 'query': query,
-            'content_hash': digest(content), 'coverage': 'note_text_only',
-            'media_analyzed': False, 'detail_fetched': detail is not None}
+            'content_hash': digest(content),
+            'coverage': 'note_text_and_image_refs' if image_urls else 'note_text_only',
+            'image_count': len(image_urls), 'media_analyzed': False,
+            'detail_fetched': detail is not None}
 
 
 def _pc_api(source_root, cookie_file):

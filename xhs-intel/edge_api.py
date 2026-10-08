@@ -804,7 +804,12 @@ class Handler(BaseHTTPRequestHandler):
                               "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256")}
                 else:
                     result = {"summary": payload.get("summary"), "model": payload.get("model"),
-                              "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256")}
+                              "provider": payload.get("provider"), "input_sha256": payload.get("input_sha256"),
+                              "media_analyzed": bool(payload.get("media_analyzed")),
+                              "media_requested": payload.get("media_requested", 0),
+                              "media_downloaded": payload.get("media_downloaded", 0),
+                              "media_errors": payload.get("media_errors", 0),
+                              "coverage": payload.get("coverage", "text_only")}
                 reply(self, 200, {"status": STORE.complete(str(payload.get("job_id")), str(payload.get("lease_token")), result)})
                 return
             if path == "/v1/worker/fail":

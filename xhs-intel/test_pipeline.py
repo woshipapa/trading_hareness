@@ -5,6 +5,7 @@ from unittest import mock
 
 from store import Store, Conflict
 from collector import InvalidNoteLink, collect_single_note, normalize, parse_note_reference
+from local_worker import _load_note_images, _multimodal_items
 
 
 def note(text='内容', likes='1'):
@@ -28,6 +29,44 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(self.store.add_note(note(), 'GPU'))
         self.assertFalse(self.store.add_note(note(likes='2'), 'GPU'))
         self.assertTrue(self.store.add_note(note('更新的内容'), 'GPU'))
+
+    def test_note_detail_keeps_full_text_and_canonical_image_references(self):
+        value = normalize(
+            {'id': 'f' * 24}, 'GPU',
+            {'note_card': {
+                'title': 'KV cache', 'desc': '正文第一段\n正文第二段',
+                'image_list': [{
+                    'file_id': 'image-1',
+                    'info_list': [{}, {'url': 'https://sns-webpic-qc.xhscdn.com/2026/abc/notes_pre_post/image-1!nd_dft_wlteh_webp_3?foo=transient'}],
+                }],
+            }},
+        )
+        self.assertEqual(value['text'], '正文第一段\n正文第二段')
+        self.assertEqual(value['image_count'], 1)
+        self.assertEqual(value['coverage'], 'note_text_and_image_refs')
+        self.assertEqual(value['image_urls'], [
+            'https://ci.xiaohongshu.com/notes_pre_post/image-1?imageView2/format/jpeg'
+        ])
+        self.assertNotIn('transient', str(value))
+
+    def test_worker_builds_in_memory_multimodal_inputs_without_persisting_media(self):
+        note_value = normalize(
+            {'id': '0' * 24}, 'GPU',
+            {'note_card': {
+                'title': 'Vision note', 'desc': '图文正文',
+                'image_list': [{'url_default': 'https://ci.xiaohongshu.com/notes_pre_post/image-2?imageView2/format/jpeg'}],
+            }},
+        )
+        with mock.patch('local_worker._download_image', return_value=b'fake-image'), \
+                mock.patch('local_worker._image_data_url', return_value='data:image/jpeg;base64,ZmFrZQ=='):
+            media, stats = _load_note_images([note_value], max_images=1)
+        self.assertEqual(stats, {'requested': 1, 'downloaded': 1, 'errors': 0})
+        self.assertEqual(len(media), 1)
+        payload = _multimodal_items('分析正文', media)
+        self.assertIsInstance(payload, list)
+        self.assertEqual(payload[0]['content'][-1]['type'], 'input_image')
+        self.assertTrue(payload[0]['content'][-1]['image_url'].startswith('data:image/jpeg;base64,'))
+        self.assertNotIn('image-2', str(payload))
 
     def test_local_offline_and_restart_keep_work(self):
         job_id = self.enqueue()

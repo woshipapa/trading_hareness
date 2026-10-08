@@ -320,7 +320,7 @@ function renderSingleNotes() {
         <div class="analysis-status">${pill(job.status)}${delivery}</div>
       </div>
       ${result}
-      <div class="analysis-footer"><span>${job.fetch_source === 'cache' ? '历史缓存' : '实时抓取'}</span><span>${job.model ? `模型 ${escapeHtml(job.model)}` : `尝试 ${job.attempts || 0} 次`}</span><span>更新 ${formatTime(job.updated)}</span>${job.delivered_parts ? `<span>飞书 ${job.delivered_parts} 个分片</span>` : ''}</div>
+      <div class="analysis-footer"><span>${job.fetch_source === 'cache' ? '历史缓存' : '实时抓取'}</span><span>${job.image_count ? `正文 + ${job.image_count} 张图片${job.media_analyzed ? ' · 已视觉解析' : ' · 图片待解析'}` : '仅正文'}</span><span>${job.model ? `模型 ${escapeHtml(job.model)}` : `尝试 ${job.attempts || 0} 次`}</span><span>更新 ${formatTime(job.updated)}</span>${job.delivered_parts ? `<span>飞书 ${job.delivered_parts} 个分片</span>` : ''}</div>
     </article>`;
   }).join('');
   return `<div class="single-layout">

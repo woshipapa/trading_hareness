@@ -2,7 +2,9 @@
 """Mac-side worker: claim edge jobs and summarize them with Paper-KB Codex."""
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import json
 import os
 import sys
@@ -10,6 +12,9 @@ import time
 from pathlib import Path
 from threading import Event, Thread
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parent
 PAPER_KB = Path(os.environ.get("XHS_PAPER_KB_ROOT", str(ROOT.parent.parent / "literature_maps" / "paper_kb")))
@@ -27,6 +32,12 @@ TIMEOUT = max(60, int(os.environ.get("XHS_AI_TIMEOUT", "900")))
 HEALTH_HOST = os.environ.get("XHS_AI_WORKER_HOST", "127.0.0.1")
 HEALTH_PORT = int(os.environ.get("XHS_AI_WORKER_PORT", "8793"))
 FILTER_BATCH_SIZE = max(1, min(20, int(os.environ.get("XHS_AI_FILTER_BATCH_SIZE", "10"))))
+MAX_IMAGES_PER_NOTE = max(1, min(18, int(os.environ.get("XHS_AI_MAX_IMAGES_PER_NOTE", "18"))))
+MAX_BATCH_IMAGES = max(1, min(32, int(os.environ.get("XHS_AI_MAX_BATCH_IMAGES", "24"))))
+MAX_IMAGE_BYTES = max(256 * 1024, min(12 * 1024 * 1024,
+                                      int(os.environ.get("XHS_AI_MAX_IMAGE_BYTES", str(8 * 1024 * 1024)))))
+IMAGE_TIMEOUT = max(5, min(60, int(os.environ.get("XHS_AI_IMAGE_TIMEOUT", "20"))))
+_IMAGE_HOST = "ci.xiaohongshu.com"
 STATE = {"status": "starting", "last_job": None, "last_jobs": {}, "last_error": None,
          "completed": 0, "failed": 0}
 
@@ -43,6 +54,7 @@ def make_prompt(job):
         f"任务：{job.get('job_id', '')}", "",
     ]
     for index, note in enumerate(notes, 1):
+        image_count = len(note.get("image_urls") or [])
         lines.extend([
             f"### 笔记 {index}",
             f"标题：{note.get('title', '')}",
@@ -50,6 +62,7 @@ def make_prompt(job):
             f"时间：{note.get('published_at', '')}",
             f"链接：{note.get('url', '')}",
             f"正文：{note.get('text', '')}",
+            f"图片：{image_count} 张；图片会作为视觉输入提供，请把图片中可读文字、图表和关键视觉信息单独标注为‘图片观察’，不确定内容标为待核验。",
             "",
         ])
     return "\n".join(lines)[:100000]
@@ -57,6 +70,7 @@ def make_prompt(job):
 
 def make_single_note_prompt(job):
     note = (job.get("notes") or [{}])[0]
+    image_count = len(note.get("image_urls") or [])
     return "\n".join([
         "你是做 AI infra / systems for AI 的中文研究编辑。",
         "请独立分析下面这一篇小红书公开笔记，输出可直接阅读的 Markdown。",
@@ -64,6 +78,7 @@ def make_single_note_prompt(job):
         "模型或科研的相关性；适合账号继续创作的内容角度；待核验的说法或数字；后续检索词。",
         "如果文章与这些领域弱相关，要直接说明，不要强行建立联系。",
         "不得把作者自述当成已核验事实；保留标题、作者、时间和原文链接。输出 3000 字以内。",
+        f"图片：{image_count} 张。图片会作为视觉输入提供；请把图片中可读文字、图表和关键视觉信息单独标注为‘图片观察’，不要把看不清的内容当成事实。",
         f"任务：{job.get('job_id', '')}",
         f"标题：{note.get('title', '')}",
         f"作者：{note.get('author', '')}",
@@ -73,13 +88,117 @@ def make_single_note_prompt(job):
     ])[:100000]
 
 
-def _request_summary(prompt):
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+        return None
+
+
+def _allowed_image_url(value):
+    parsed = urlparse(str(value or ""))
+    return (parsed.scheme == "https" and parsed.hostname == _IMAGE_HOST
+            and parsed.port in (None, 443) and not parsed.username and not parsed.password)
+
+
+def _download_image(url):
+    """Download one XHS CDN image with an allowlist and hard byte limit."""
+    current = str(url or "")
+    opener = build_opener(_NoRedirect())
+    for _ in range(3):
+        if not _allowed_image_url(current):
+            raise ValueError("image_host_not_allowed")
+        request = Request(current, headers={"User-Agent": "Mozilla/5.0"}, method="GET")
+        try:
+            response = opener.open(request, timeout=IMAGE_TIMEOUT)
+        except HTTPError as exc:
+            try:
+                if exc.code not in {301, 302, 303, 307, 308}:
+                    raise RuntimeError("image_fetch_failed") from exc
+                location = exc.headers.get("Location")
+            finally:
+                exc.close()
+            if not location:
+                raise RuntimeError("image_redirect_missing")
+            current = urljoin(current, location)
+            continue
+        except (OSError, URLError) as exc:
+            raise RuntimeError("image_fetch_failed") from exc
+        try:
+            if response.headers.get_content_type() not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+                raise ValueError("image_content_type_not_allowed")
+            length = response.headers.get("Content-Length")
+            if length and int(length) > MAX_IMAGE_BYTES:
+                raise ValueError("image_too_large")
+            data = response.read(MAX_IMAGE_BYTES + 1)
+        finally:
+            response.close()
+        if len(data) > MAX_IMAGE_BYTES:
+            raise ValueError("image_too_large")
+        if not data:
+            raise ValueError("image_empty")
+        return data
+    raise RuntimeError("image_too_many_redirects")
+
+
+def _image_data_url(data):
+    """Normalize remote media before it enters the model request."""
+    try:
+        from PIL import Image
+        image = Image.open(io.BytesIO(data))
+        image.seek(0)
+        image = image.convert("RGB")
+        image.thumbnail((1600, 1600))
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=82, optimize=True)
+        data = output.getvalue()
+    except Exception as exc:  # noqa: BLE001 - malformed media is per-image failure
+        raise ValueError("image_decode_failed") from exc
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
+
+
+def _load_note_images(notes, *, max_images=MAX_BATCH_IMAGES, per_note=MAX_IMAGES_PER_NOTE):
+    """Return in-memory vision inputs and aggregate sanitized media counters."""
+    media = []
+    errors = 0
+    requested = 0
+    for note in notes or []:
+        note_id = str(note.get("note_id") or note.get("_candidate_id") or "")
+        urls = list(note.get("image_urls") or [])[:per_note]
+        for index, url in enumerate(urls):
+            if len(media) >= max_images:
+                break
+            requested += 1
+            try:
+                media.append({
+                    "note_id": note_id,
+                    "index": index + 1,
+                    "image_url": _image_data_url(_download_image(url)),
+                })
+            except (OSError, RuntimeError, ValueError, TypeError):
+                errors += 1
+    return media, {"requested": requested, "downloaded": len(media), "errors": errors}
+
+
+def _multimodal_items(prompt, media):
+    if not media:
+        return prompt
+    content = [{"type": "input_text", "text": prompt}]
+    for item in media:
+        content.append({
+            "type": "input_text",
+            "text": f"图片观察输入：note_id={item['note_id']}，第 {item['index']} 张图片。",
+        })
+        content.append({"type": "input_image", "image_url": item["image_url"], "detail": "low"})
+    return [{"role": "user", "content": content}]
+
+
+def _request_summary(prompt, *, media=None, media_stats=None):
     base, _model, _effort = codex_provider.load_endpoint()
     keys = codex_provider.ordered_keys()
     if not keys:
         raise RuntimeError("codex-teleai key pool is unavailable")
+    request_input = _multimodal_items(prompt, media or [])
     text, model = codex_provider.request(
-        prompt,
+        request_input,
         base=base,
         keys=keys,
         chain=codex_provider.default_chain(),
@@ -93,7 +212,14 @@ def _request_summary(prompt):
         "summary": text,
         "model": model,
         "provider": "paper-kb/codex_provider",
-        "input_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "input_sha256": hashlib.sha256(
+            (prompt + "\n" + "\n".join(item["image_url"] for item in media or [])).encode()
+        ).hexdigest(),
+        "media_analyzed": bool(media),
+        "media_requested": int((media_stats or {}).get("requested", 0)),
+        "media_downloaded": int((media_stats or {}).get("downloaded", 0)),
+        "media_errors": int((media_stats or {}).get("errors", 0)),
+        "coverage": "text_and_images" if media else "text_only",
     }
 
 
@@ -127,11 +253,15 @@ def make_filter_prompt(job):
 
 
 def summarize(job):
-    return _request_summary(make_prompt(job))
+    notes = list(job.get("notes") or [])
+    media, stats = _load_note_images(notes)
+    return _request_summary(make_prompt(job), media=media, media_stats=stats)
 
 
 def analyze_single_note(job):
-    return _request_summary(make_single_note_prompt(job))
+    notes = list(job.get("notes") or [])[:1]
+    media, stats = _load_note_images(notes, max_images=MAX_IMAGES_PER_NOTE)
+    return _request_summary(make_single_note_prompt(job), media=media, media_stats=stats)
 
 
 def _parse_json_response(text, key='decisions'):
