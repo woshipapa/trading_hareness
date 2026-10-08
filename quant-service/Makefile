@@ -13,12 +13,11 @@ test:
 # 的代码。日常变更走源码 overlay、不重建镜像，所以那条命令会放过所有新代码 ——
 # 2026-10-08 实测同一个模块 exec 跑出 32 个、这里跑出 35 个；全量 2290 对 2336，
 # 被静默跳过 46 个。
+#
+# 数据库每次新建、从工作树迁到 head、跑完删除（和 CI 一样），结果不再取决于开发库里
+# 以前留下的数据；指定模块：make test-release-path QUANT_TESTS="tests.test_x"。
 test-release-path:
-	cd .. && docker compose -f compose.yaml run --rm \
-	  -v "$$PWD:/src:ro" \
-	  -e PYTHONPATH=/src/quant-service \
-	  -w /src/quant-service \
-	  quant-research python -m unittest discover -s tests -q
+	QUANT_TESTS="$(QUANT_TESTS)" bash scripts/run-release-path-tests.sh
 
 standalone-up:
 	docker compose -f compose.standalone.yaml up --build

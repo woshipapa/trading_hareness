@@ -83,6 +83,9 @@ while IFS= read -r path; do
     quant-service/compose.standalone.yaml|quant-service/Dockerfile.standalone|quant-service/standalone/*|\
     quant-service/requirements.lock|quant-service/Makefile|quant-service/component.json)
       skipped_files+="$path"$'\n' ;;
+    # Developer tooling: Dockerfile.peer never copies quant-service/scripts/.
+    quant-service/scripts/*)
+      skipped_files+="$path"$'\n' ;;
     # Credential tooling for the operator workstation (templates and generators,
     # never values); gitignored files do not appear here at all.
     config/secrets/env-split.py|config/secrets/sync-secrets.sh|config/secrets/env.example|config/secrets/README.md)

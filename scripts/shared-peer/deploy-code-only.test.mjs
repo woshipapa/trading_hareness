@@ -65,12 +65,13 @@ console.log('an edge-only change still lets the owner record the new SHA');
 // builds from Dockerfile.peer and requirements.txt.
 const standalone = commit(['quant-service/compose.standalone.yaml', 'quant-service/Dockerfile.standalone',
 	'quant-service/standalone/001-seed.sql', 'quant-service/requirements.lock', 'quant-service/Makefile',
-	'quant-service/component.json', 'quant-service/app/main.py'], 'standalone files');
+	'quant-service/component.json', 'quant-service/scripts/run-release-path-tests.sh', 'quant-service/app/main.py'],
+'standalone files');
 result = dryRun(standalone, edgeOnly);
 assert.equal(result.status, 0, result.stderr);
 for (const skipped of ['quant-service/compose.standalone.yaml', 'quant-service/Dockerfile.standalone',
 	'quant-service/standalone/001-seed.sql', 'quant-service/requirements.lock', 'quant-service/Makefile',
-	'quant-service/component.json']) {
+	'quant-service/component.json', 'quant-service/scripts/run-release-path-tests.sh']) {
 	assert.ok(result.stdout.includes(`\n${skipped}\n`), `${skipped} should be listed as skipped`);
 }
 git('reset', '-q', '--hard', edgeOnly);

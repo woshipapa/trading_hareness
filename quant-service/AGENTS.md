@@ -16,9 +16,9 @@ Component `quant-research` (runtime `47owner`). Release units: `owner-quant`
   *before* shipping code that depends on its schema. Commit migrations in their
   own commit; `quant-service/app/*` is on the code-only allowlist and
   `quant-service/migrations/**` is not.
-- Keep `quant-service/app/*` and `quant-service/tests/**` in **separate
-  commits** — the code-only allowlist excludes tests, so a mixed commit is
-  refused by the fast path.
+- An app change and its tests belong in the same commit: the code-only release
+  ships `quant-service/app/*` and skips `quant-service/tests/**` (it does not
+  refuse them; `scripts/shared-peer/deploy-code-only.test.mjs` checks this).
 - Only `app/n8n_workflow_audit.py` may name n8n's own tables
   (`public.workflow_entity`, `public.workflow_published_version`,
   `public.execution_entity`). Any other site, or any new foreign object, fails
@@ -28,7 +28,10 @@ Component `quant-research` (runtime `47owner`). Release units: `owner-quant`
   (`analyst_signals.ingestion_job_id` → the Feishu relay's ledger, with
   `ON DELETE CASCADE`) was removed in `20261008_sep0002`.
 - Tests: `make -C quant-service test-release-path` runs the suite the way the
-  release runs the code (working tree mounted into the existing image).
+  release runs the code (working tree mounted into the existing image) against
+  a database created for the run, migrated from the working tree and dropped
+  afterwards; `QUANT_TESTS="tests.test_x"` selects modules. A failure is
+  therefore the code's, not leftovers in the development database.
   Do **not** verify a source change with `docker compose exec -T
   quant-research ...` — that executes the image's baked copy and silently skips
   everything you just wrote.
