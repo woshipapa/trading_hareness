@@ -5,7 +5,6 @@ import hashlib
 import json
 import logging
 import math
-import os
 import re
 import secrets
 import threading
@@ -26,6 +25,7 @@ from pydantic import BaseModel, Field, model_validator
 import psycopg
 from psycopg.types.json import Json
 
+from . import settings
 from .akshare_provider import (
     AkShareProviderError,
     akshare_analyst_heat_supplements,
@@ -454,7 +454,7 @@ from .intraday_rule_snapshot_repository import persist_rule_input_snapshot, prun
 from .watch_scan_tape import EvidenceThrottle, persist_scan_tape as persist_watch_scan_tape, tape_record as watch_tape_record
 
 # Raw quote rows and rule-input snapshots per stock: on a signal, else every 30 s.
-watch_evidence_throttle = EvidenceThrottle(float(os.getenv("WATCH_EVIDENCE_MIN_SECONDS", "30")))
+watch_evidence_throttle = EvidenceThrottle(settings.number("WATCH_EVIDENCE_MIN_SECONDS"))
 from .intraday_event_retention import ephemeral_signal_retention_days, prune_ephemeral_signal_events
 from .edge_evidence_transfer import (
     JOURNAL_RETENTION_DAYS as EDGE_CHANGE_JOURNAL_RETENTION_DAYS,
@@ -881,17 +881,13 @@ async def exempt_intraday_evidence_capture_allowed() -> tuple[bool, dict[str, An
 # A durable PostgreSQL lease serializes browser clicks and separate service
 # instances without relying on one process's asyncio state.
 def legacy_schema_bootstrap_enabled(environ: Mapping[str, str] | None = None) -> bool:
-    env = os.environ if environ is None else environ
-    return str(env.get("QUANT_LEGACY_SCHEMA_BOOTSTRAP", "false")).strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("QUANT_LEGACY_SCHEMA_BOOTSTRAP", environ)
 
 
 def provider_global_rate_limit_max_wait_seconds(environ: Mapping[str, str] | None = None) -> float:
     """Keep shared provider reservations bounded so callers fail locally first."""
-    env = os.environ if environ is None else environ
-    try:
-        return min(30.0, max(0.0, float(env.get("QUANT_PROVIDER_GLOBAL_RATE_LIMIT_MAX_WAIT_SECONDS", "5"))))
-    except (TypeError, ValueError):
-        return 5.0
+    return settings.number("QUANT_PROVIDER_GLOBAL_RATE_LIMIT_MAX_WAIT_SECONDS", minimum=0.0, maximum=30.0,
+                           environ=environ)
 
 
 async def reserve_tushare_provider_request_slot(provider_key: str, rate_limit_per_minute: int,
@@ -934,7 +930,7 @@ def _normalize_sync_symbols(values: list[str]) -> list[str]:
 
 def resolve_sync_symbols(requested: list[str]) -> list[str]:
     """Synchronous compatibility resolver for non-async callers and tests."""
-    values = requested or [item.strip() for item in os.getenv("QUANT_UNIVERSE", "").split(",") if item.strip()]
+    values = requested or settings.csv("QUANT_UNIVERSE")
     if not values:
         values = read_sync_core_symbols(db)
     if not values:
@@ -944,7 +940,7 @@ def resolve_sync_symbols(requested: list[str]) -> list[str]:
 
 async def resolve_sync_symbols_async(requested: list[str]) -> list[str]:
     """Resolve the same bounded universe without blocking an async caller."""
-    values = requested or [item.strip() for item in os.getenv("QUANT_UNIVERSE", "").split(",") if item.strip()]
+    values = requested or settings.csv("QUANT_UNIVERSE")
     if not values:
         values = await read_async_core_symbols(async_db)
     if not values:
@@ -2847,7 +2843,7 @@ def intraday_signal_rules(watch: dict[str, Any], quote: dict[str, Any] | None,
 
 def decision_card_url(symbol: str) -> str | None:
     """Return a human-reachable review link only when the operator configured one."""
-    base_url = (os.getenv("QUANT_DASHBOARD_PUBLIC_URL") or "").strip().rstrip("/")
+    base_url = settings.text("QUANT_DASHBOARD_PUBLIC_URL").rstrip("/")
     if not base_url:
         return None
     return f"{base_url}/?section=research&tab=stock-study&symbol={symbol}"
@@ -2885,29 +2881,21 @@ async def retry_pending_intraday_alerts(limit: int = 3) -> dict[str, int]:
 
 
 def intraday_minute_profile_capture_enabled() -> bool:
-    return os.getenv("INTRADAY_MINUTE_PROFILE_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("INTRADAY_MINUTE_PROFILE_CAPTURE_ENABLED")
 
 
 def intraday_minute_profile_retention_days() -> int:
-    try:
-        return max(20, min(365, int(os.getenv("INTRADAY_MINUTE_PROFILE_RETENTION_DAYS", "90"))))
-    except ValueError:
-        return 90
+    return settings.integer("INTRADAY_MINUTE_PROFILE_RETENTION_DAYS", minimum=20, maximum=365)
 
 
 def intraday_minute_profile_max_symbols() -> int:
     """Bound the close capture without silently reducing the normal pool."""
-    try:
-        return max(1, min(100, int(os.getenv("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", "40"))))
-    except ValueError:
-        return 40
+    return settings.integer("INTRADAY_MINUTE_PROFILE_MAX_SYMBOLS", minimum=1, maximum=100)
 
 
 def longhu_full_market_enabled() -> bool:
     """Keep the licensed close cross-section opt-in and supplementary."""
-    return os.getenv("QUANT_LONGHU_FULL_MARKET_ENABLED", "false").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+    return settings.flag("QUANT_LONGHU_FULL_MARKET_ENABLED")
 
 
 def longhu_full_market_source_factory() -> Callable[[], Any]:
@@ -3490,9 +3478,7 @@ async def drill_intraday_board_stock_candidates(
 
 def paper_auto_execution_enabled() -> bool:
     """Opt-in: the ledger only moves when the operator has said it should."""
-    return os.getenv("QUANT_PAPER_AUTO_EXECUTION_ENABLED", "false").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+    return settings.flag("QUANT_PAPER_AUTO_EXECUTION_ENABLED")
 
 
 async def run_paper_auto_execution(
@@ -3637,23 +3623,23 @@ async def intraday_board_flow_curve_loop() -> None:
 
 
 def strategy_review_automation_enabled() -> bool:
-    return os.getenv("STRATEGY_REVIEW_AUTOMATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("STRATEGY_REVIEW_AUTOMATION_ENABLED")
 
 
 def post_close_strategy_automation_enabled() -> bool:
-    return os.getenv("POST_CLOSE_STRATEGY_AUTOMATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("POST_CLOSE_STRATEGY_AUTOMATION_ENABLED")
 
 
 def ten_day_leader_rotation_automation_enabled() -> bool:
-    return os.getenv("TEN_DAY_LEADER_ROTATION_AUTOMATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("TEN_DAY_LEADER_ROTATION_AUTOMATION_ENABLED")
 
 
 def daily_summary_automation_enabled() -> bool:
-    return os.getenv("DAILY_SUMMARY_AUTOMATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("DAILY_SUMMARY_AUTOMATION_ENABLED")
 
 
 def daily_summary_feishu_enabled() -> bool:
-    return os.getenv("DAILY_SUMMARY_FEISHU_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("DAILY_SUMMARY_FEISHU_ENABLED")
 
 
 def sse_calendar_open(calendar_date: date) -> bool:
@@ -3755,7 +3741,7 @@ def _daily_strategy_summary_runtime_dependencies() -> DailyStrategySummaryRuntim
     return DailyStrategySummaryRuntimeDependencies(
         database=db, run_database=run_database_blocking, build_summary=build_daily_strategy_summary,
         summary_text=daily_strategy_summary_text,
-        dashboard_url=lambda: (os.getenv("QUANT_DASHBOARD_PUBLIC_URL") or "").strip().rstrip("/") or None,
+        dashboard_url=lambda: settings.text("QUANT_DASHBOARD_PUBLIC_URL").rstrip("/") or None,
         json_safe=strategy_json_safe, json_value=Json, terminal_for_exchange_date=daily_summary_terminal_isolated,
         calendar_open=sse_calendar_open_async,
         now=lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")),
@@ -3874,21 +3860,15 @@ async def market_event_capture_loop() -> None:
 
 
 def auction_pulse_enabled() -> bool:
-    return os.getenv("AUCTION_PULSE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("AUCTION_PULSE_ENABLED")
 
 
 def auction_pulse_interval_seconds() -> float:
-    try:
-        return max(1.0, min(30.0, float(os.getenv("AUCTION_PULSE_INTERVAL_SECONDS", "2"))))
-    except (TypeError, ValueError):
-        return 2.0
+    return settings.number("AUCTION_PULSE_INTERVAL_SECONDS", minimum=1.0, maximum=30.0)
 
 
 def auction_pulse_alert_cooldown_seconds() -> int:
-    try:
-        return max(5, min(300, int(os.getenv("AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS", "30"))))
-    except (TypeError, ValueError):
-        return 30
+    return settings.integer("AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS", minimum=5, maximum=300)
 
 
 async def capture_auction_pulse(observed_at: datetime, state: dict[str, Any]) -> dict[str, Any]:
@@ -4492,27 +4472,19 @@ async def sync_ths_concept_members(request: ConceptMemberSyncRequest) -> dict[st
 
 
 def ths_concept_member_backfill_enabled() -> bool:
-    return os.getenv("THS_CONCEPT_MEMBER_BACKFILL_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("THS_CONCEPT_MEMBER_BACKFILL_ENABLED")
 
 
 def ths_concept_member_backfill_batch_size() -> int:
-    try:
-        value = int(os.getenv("THS_CONCEPT_MEMBER_BACKFILL_BATCH_SIZE", "25"))
-    except ValueError:
-        value = 25
-    return min(25, max(1, value))
+    return settings.integer("THS_CONCEPT_MEMBER_BACKFILL_BATCH_SIZE", minimum=1, maximum=25)
 
 
 def all_board_member_backfill_enabled() -> bool:
-    return os.getenv("ALL_BOARD_MEMBER_BACKFILL_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("ALL_BOARD_MEMBER_BACKFILL_ENABLED")
 
 
 def all_board_member_backfill_batch_size() -> int:
-    try:
-        value = int(os.getenv("ALL_BOARD_MEMBER_BACKFILL_BATCH_SIZE", "10"))
-    except ValueError:
-        value = 10
-    return min(25, max(1, value))
+    return settings.integer("ALL_BOARD_MEMBER_BACKFILL_BATCH_SIZE", minimum=1, maximum=25)
 
 
 async def run_all_board_member_backfill_batch(request: AllBoardMemberBackfillRequest) -> dict[str, Any]:
@@ -4974,10 +4946,7 @@ async def refresh_teacher_divergence(watches: list[dict[str, Any]]) -> dict[str,
 
 
 def teacher_review_minute_extra() -> int:
-    try:
-        return max(0, min(TEACHER_REVIEW_MINUTE_EXTRA_MAX, int(os.getenv("TEACHER_REVIEW_MINUTE_EXTRA", "0"))))
-    except ValueError:
-        return 0
+    return settings.integer("TEACHER_REVIEW_MINUTE_EXTRA", minimum=0, maximum=TEACHER_REVIEW_MINUTE_EXTRA_MAX)
 
 
 def teacher_review_minute_symbols(watches: list[dict[str, Any]], observed_at: datetime) -> list[str]:
@@ -4989,7 +4958,7 @@ def teacher_review_minute_symbols(watches: list[dict[str, Any]], observed_at: da
 
 
 def teacher_review_enabled() -> bool:
-    return os.getenv("TEACHER_REVIEW_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.flag("TEACHER_REVIEW_ENABLED")
 
 
 async def teacher_review_repair_daily(trade_date: date) -> dict[str, Any]:
@@ -5403,13 +5372,13 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "minute_profile_capture": intraday_minute_profile_capture_enabled(),
             "tencent_order_book": intraday_order_book_enabled() and interval_seconds >= 30,
             "board_flow_curve": intraday_board_curve_enabled(),
-            "market_event_capture": os.getenv("MARKET_EVENT_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "market_event_capture": settings.flag("MARKET_EVENT_CAPTURE_ENABLED"),
             "auction_pulse": auction_pulse_enabled(),
-            "all_a_level1_snapshot": os.getenv("ALL_A_LEVEL1_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
-            "public_evidence_capture": os.getenv("PUBLIC_EVIDENCE_CAPTURE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
-            "post_close_public_archive": os.getenv("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
-            "storage_tiering_mover": os.getenv("STORAGE_TIERING_MOVER_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
-            "peer_close_research": os.getenv("PEER_CLOSE_RESEARCH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            "all_a_level1_snapshot": settings.flag("ALL_A_LEVEL1_CAPTURE_ENABLED"),
+            "public_evidence_capture": settings.flag("PUBLIC_EVIDENCE_CAPTURE_ENABLED"),
+            "post_close_public_archive": settings.flag("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED"),
+            "storage_tiering_mover": settings.flag("STORAGE_TIERING_MOVER_ENABLED"),
+            "peer_close_research": settings.flag("PEER_CLOSE_RESEARCH_ENABLED"),
         },
         loops={
             "intraday_monitor": lambda: intraday_monitor_loop(interval_seconds),
@@ -5555,19 +5524,19 @@ app.include_router(build_provider_status_router(db, provider_status, free_provid
 app.include_router(build_owner_storage_router(db, run_database_blocking))
 app.include_router(build_longhu_reads_router(
     configured=longhu_vendor_configured,
-    shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
+    shared_read_key=lambda: settings.text("QUANT_SHARED_READ_API_KEY"),
     quotes=shared_longhu_quotes,
     minutes=intraday_longhu_minutes,
     minutes_batch=intraday_longhu_minutes_batch,
 ))
 app.include_router(build_licensed_stock_api_router(
     configured=longhu_vendor_configured,
-    shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
+    shared_read_key=lambda: settings.text("QUANT_SHARED_READ_API_KEY"),
     call=shared_stock_api_call,
 ))
 app.include_router(build_longhu_capabilities_router(
     configured=longhu_vendor_configured,
-    shared_read_key=lambda: os.getenv("QUANT_SHARED_READ_API_KEY", ""),
+    shared_read_key=lambda: settings.text("QUANT_SHARED_READ_API_KEY"),
     call=shared_stock_api_call,
     schema_profile=lambda: longhu_schema_profile(db),
 ))
@@ -5679,7 +5648,7 @@ async def require_quant_write_key(request: Request, call_next: Any) -> Any:
     credentials, _problems = write_credentials()
     decision = authorize_write(request.method, request.url.path, request.headers.get("X-Quant-Write-Key"), credentials)
     licensed_read = licensed_stock_read_allowed(
-        request, os.getenv("QUANT_SHARED_READ_API_KEY", ""),
+        request, settings.text("QUANT_SHARED_READ_API_KEY"),
     )
     try:
         if (
@@ -5717,7 +5686,7 @@ def _health_payload() -> dict[str, Any]:
     return read_health_payload(HealthDependencies(
             database=db, post_close_lease_key=POST_CLOSE_REFRESH_LEASE_KEY,
             background_loop_lease_seconds=background_loop_lease_seconds,
-            data_directory=lambda: Path(os.getenv("QUANT_DATA_DIR", "/var/lib/quant")),
+            data_directory=lambda: Path(settings.text("QUANT_DATA_DIR")),
             resource_status=runtime_resource_status, public_http_client_status=public_http_client_status,
             alert_http_client_status=alert_http_client_status, provider_http_client_status=provider_http_client_status,
             remote_archive_http_client_status=remote_archive_http_client_status,
