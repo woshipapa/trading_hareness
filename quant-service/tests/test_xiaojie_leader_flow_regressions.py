@@ -240,7 +240,7 @@ class AlertNamesTheStockNotJustItsCodeTests(unittest.TestCase):
                 "evidence": {"pct_change": 10.0, "board": {"sealed": True}}}
 
     def _text(self, candidate, names):
-        from app.main import _xiaojie_alert_text
+        from app.xiaojie_alerts import alert_text as _xiaojie_alert_text
         return _xiaojie_alert_text(candidate, date(2026, 8, 27), names)
 
     def test_the_chinese_name_appears_alongside_the_code(self):
@@ -301,7 +301,7 @@ class AlertNamesTheStockNotJustItsCodeTests(unittest.TestCase):
         self.assertIn("🟡【注意】过热2项", self._text(candidate, self.names))
 
     def test_the_instructor_chat_line_sits_above_the_disclaimer(self):
-        from app.main import _xiaojie_alert_text
+        from app.xiaojie_alerts import alert_text as _xiaojie_alert_text
         text = _xiaojie_alert_text(self._candidate(), date(2026, 8, 27), self.names,
                                    chat="小杰群聊 08-26 20:14 夜报/复盘：金健米业放量突破")
         self.assertLess(text.index("小杰群聊"), text.index("不构成交易指令"))
