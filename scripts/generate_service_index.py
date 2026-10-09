@@ -22,7 +22,7 @@ OUTPUT = ROOT / "docs" / "services.html"
 
 # (分组, 名称, base URL, 形态, 说明, [(路径, 链接名), ...])
 REGISTRY: list[tuple[str, str, str, str, str, list[tuple[str, str]]]] = [
-    ("控制台", "服务索引（本页）", "http://127.0.0.1:8800",
+    ("控制台", "服务索引（本页）", "http://127.0.0.1:8888",
      "supervisor 服务（service-index）",
      "常驻入口，加书签用这个地址；以 http 打开时左侧圆点是各服务的存活探测。",
      [("/", "本页"), ("/health", "health")]),

@@ -22,7 +22,7 @@ class ServiceIndexTests(unittest.TestCase):
 
     def test_known_core_entries_present(self):
         text = index.render()
-        for marker in (":18300", ":18790", ":5678", ":8787", ":15682", ":8800", "/xhs/", "/monitor"):
+        for marker in (":18300", ":18790", ":5678", ":8787", ":15682", ":8888", "/xhs/", "/monitor"):
             self.assertIn(marker, text)
 
     def test_served_entry_point_returns_the_page_and_health(self):

@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "docs" / "services.html"
 HOST = os.environ.get("SERVICE_INDEX_HOST", "127.0.0.1")
-PORT = int(os.environ.get("SERVICE_INDEX_PORT", "8800"))
+PORT = int(os.environ.get("SERVICE_INDEX_PORT", "8888"))
 
 
 class Handler(BaseHTTPRequestHandler):

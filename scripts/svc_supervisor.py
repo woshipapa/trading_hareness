@@ -123,7 +123,7 @@ TASKS = [
               "XHS_EDGE_URL": "http://127.0.0.1:18790",
               "XHS_COLLECTOR_TOKEN": _load_env_secret("XHS_COLLECTOR_TOKEN"),
               "XHS_AI_WORKER_ID": "mac-codex-teleai"}),
-    # 服务索引常驻入口：http://127.0.0.1:8800/ 一页点达全部本机/隧道服务。
+    # 服务索引常驻入口：http://127.0.0.1:8888/ 一页点达全部本机/隧道服务。
     dict(name="service-index", kind="daemon",
          args=[PY, os.path.join(N8N, "scripts/serve_service_index.py")],
          cwd=N8N, out=os.path.join(N8N, "logs/service-index.log"),
