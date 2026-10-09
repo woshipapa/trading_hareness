@@ -551,12 +551,17 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
 	def send_json(self, status: int, payload: dict[str, Any]) -> None:
 		body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-		self.send_response(status)
-		self.send_header("content-type", "application/json; charset=utf-8")
-		self.send_header("cache-control", "no-store")
-		self.send_header("content-length", str(len(body)))
-		self.end_headers()
-		self.wfile.write(body)
+		try:
+			self.send_response(status)
+			self.send_header("content-type", "application/json; charset=utf-8")
+			self.send_header("cache-control", "no-store")
+			self.send_header("content-length", str(len(body)))
+			self.end_headers()
+			self.wfile.write(body)
+		except (BrokenPipeError, ConnectionResetError):
+			# The health poller routinely reads headers and closes before the
+			# body is flushed; that is not an error and must not bury real ones.
+			pass
 
 	def authorized(self) -> bool:
 		return self.headers.get("x-larkagentx-token", "") == self.bridge.token
