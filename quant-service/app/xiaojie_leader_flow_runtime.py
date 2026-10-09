@@ -105,10 +105,10 @@ class XiaojieLeaderFlowRuntime:
                 lambda: self.deps.with_connection(lambda connection: read_xiaojie_trade_limits(connection, day)),
             )
 
-        async def persist_limits(day: date, rows: list[dict[str, Any]]) -> int:
+        async def persist_limits(day: date, rows: list[dict[str, Any]], provider_key: str) -> int:
             return await self.deps.run_database(
                 lambda: self.deps.with_connection(lambda connection: persist_xiaojie_trade_limit_rows(
-                    connection, day, rows, "tushare", datetime.now(timezone.utc))),
+                    connection, day, rows, provider_key, datetime.now(timezone.utc))),
                 timeout_seconds=180,
             )
 
@@ -120,7 +120,7 @@ class XiaojieLeaderFlowRuntime:
             persist_limits=persist_limits,
         )
         reference = await self.deps.run_database(
-            lambda: self.deps.with_connection(lambda connection: loadself.session_reference(connection, trading_date)),
+            lambda: self.deps.with_connection(lambda connection: load_xiaojie_session_reference(connection, trading_date)),
             timeout_seconds=180,
         )
         self.session_reference.update({"trading_date": trading_date, "reference": reference})

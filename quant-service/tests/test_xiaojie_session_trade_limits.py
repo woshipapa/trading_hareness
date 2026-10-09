@@ -25,8 +25,9 @@ class EnsureSessionTradeLimitsTests(unittest.TestCase):
                 return await api(day)
             return list(rows or []), "tencent_free"
 
-        async def persist_limits(day, persisted):
+        async def persist_limits(day, persisted, provider_key):
             seen["persisted"] = (day, persisted)
+            seen["provider"] = provider_key
             return stored if stored is not None else len(persisted)
 
         result = asyncio.run(ensure_session_trade_limits(
@@ -49,6 +50,7 @@ class EnsureSessionTradeLimitsTests(unittest.TestCase):
         self.assertEqual(result["symbols"], 5259)
         self.assertEqual(result["provider"], "tencent_free")
         self.assertEqual(seen["persisted"][0], TRADING_DATE)
+        self.assertEqual(seen["provider"], "tencent_free", "stored under the provider that served them")
 
     def test_rows_without_a_symbol_are_not_persisted(self):
         rows = [{"ts_code": "600176.SH", "up_limit": "51.0"},

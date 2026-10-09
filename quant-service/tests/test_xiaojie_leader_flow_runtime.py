@@ -61,6 +61,40 @@ def build(*, sent):
     return flow, patches, delivered, marked
 
 
+class SessionContextTests(unittest.TestCase):
+    """The session load runs its real lambdas: a broken name in one fails here, not on the first scan."""
+
+    def test_the_session_reference_loads_and_tencent_limits_are_stored_under_their_provider(self):
+        from datetime import date
+
+        persisted = []
+
+        async def run_database(action, *args, **_kwargs):
+            return action(*args)
+
+        async def fetch_limits(_day):
+            return ([{"ts_code": "600001.SH", "up_limit": 11.0}, {"ts_code": "000001.SZ", "up_limit": 12.0}],
+                    "tencent_free")
+
+        async def nothing(*_args, **_kwargs):
+            return None
+
+        flow = XiaojieLeaderFlowRuntime(XiaojieLeaderFlowDependencies(
+            run_database=run_database, with_connection=lambda action: action(object()),
+            fetch_limit_cross_section=fetch_limits, refresh_confluence=nothing,
+            teacher_plan=lambda _day, _symbol: None, chat_context=nothing, deliver_alert=nothing,
+            safe_error=lambda value, limit: value[:limit]))
+        reads = iter([{}, {"600001.SH": 11.0, "000001.SZ": 12.0}])
+        with patch.object(runtime_module, "read_xiaojie_trade_limits", side_effect=lambda *_args: next(reads)), \
+                patch.object(runtime_module, "persist_xiaojie_trade_limit_rows",
+                             side_effect=lambda _connection, _day, rows, provider, _at: persisted.append(provider) or len(rows)), \
+                patch.object(runtime_module, "load_xiaojie_session_reference",
+                             return_value={"limits": {"600001.SH": 11.0}, "membership": {}}):
+            reference = asyncio.run(flow.session_context(date(2026, 10, 9)))
+        self.assertEqual(reference["limits"], {"600001.SH": 11.0})
+        self.assertEqual(persisted, ["tencent_free"])
+
+
 class LeaderFlowRuntimeTests(unittest.TestCase):
     def test_without_a_cross_section_the_pass_is_skipped(self):
         flow, _patches, _delivered, _marked = build(sent=0)

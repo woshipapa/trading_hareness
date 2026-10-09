@@ -25,6 +25,10 @@ PROVIDER_KEY = "tencent_free"
 MINIMUM_COVERAGE = 0.95
 
 
+class LimitCrossSectionUnavailable(RuntimeError):
+    """No complete, session-dated limit cross-section could be read; callers degrade, not fail."""
+
+
 async def session_limit_cross_section(
     trading_date: date, *,
     universe_symbols: Callable[[], Awaitable[Sequence[str]]],
@@ -33,10 +37,10 @@ async def session_limit_cross_section(
     """``stk_limit``-shaped rows for ``trading_date`` and the provider that served them."""
     symbols = sorted({str(symbol).upper() for symbol in await universe_symbols()})
     if not symbols:
-        raise RuntimeError("no universe to ask Tencent for limit prices")
+        raise LimitCrossSectionUnavailable("no universe to ask Tencent for limit prices")
     rows, health = await fetch_quotes(symbols)
     if health.get("errors"):
-        raise RuntimeError(f"Tencent limit prices: {len(health['errors'])} batch(es) failed, "
+        raise LimitCrossSectionUnavailable(f"Tencent limit prices: {len(health['errors'])} batch(es) failed, "
                            f"first {health['errors'][0]}")
     stamp = trading_date.strftime("%Y%m%d")
     limits = [{
@@ -46,9 +50,9 @@ async def session_limit_cross_section(
     } for row in rows if row.get("trade_date") == stamp and row.get("up_limit") and row.get("down_limit")]
     if len(limits) < MINIMUM_COVERAGE * len(symbols):
         dated = sum(1 for row in rows if row.get("trade_date") == stamp)
-        raise RuntimeError(f"Tencent limit prices for {trading_date}: {len(limits)} of {len(symbols)} symbols "
+        raise LimitCrossSectionUnavailable(f"Tencent limit prices for {trading_date}: {len(limits)} of {len(symbols)} symbols "
                            f"({dated} quotes dated that session); retrying on the next scan")
     return limits, PROVIDER_KEY
 
 
-__all__ = ["MINIMUM_COVERAGE", "PROVIDER_KEY", "session_limit_cross_section"]
+__all__ = ["LimitCrossSectionUnavailable", "MINIMUM_COVERAGE", "PROVIDER_KEY", "session_limit_cross_section"]

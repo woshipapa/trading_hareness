@@ -12,7 +12,7 @@ reading its own outcome.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -63,7 +63,7 @@ async def ensure_session_trade_limits(
     trading_date: date, *,
     read_limits: Callable[[date], Awaitable[dict[str, float]]],
     fetch_limit_cross_section: Callable[[date], Awaitable[tuple[list[dict[str, Any]], str]]],
-    persist_limits: Callable[[date, list[dict[str, Any]]], Awaitable[int]],
+    persist_limits: Callable[[date, list[dict[str, Any]], str], Awaitable[int]],
 ) -> dict[str, Any]:
     """Guarantee the session's limit prices exist before the first scan needs them.
 
@@ -96,7 +96,8 @@ async def ensure_session_trade_limits(
                        f"missing {sorted(missing)} after {len(rows)} rows"),
             "provider": provider_key,
         }
-    stored = await persist_limits(trading_date, rows)
+    # Stored under the provider that served them (Tencent since 2026-10-09), not a fixed label.
+    stored = await persist_limits(trading_date, rows, provider_key)
     limits = await read_limits(trading_date)
     return {"status": "fetched", "symbols": len(limits), "stored": stored,
             "provider": provider_key, "limits": limits}

@@ -375,7 +375,7 @@ from .level1_snapshot_runtime import Level1CaptureDependencies, run_level1_captu
 from .market_radar_runtime import MarketRadarDependencies, MarketRadarRuntime
 from .datasources import runtime as datasource_runtime
 from .datasources.catalog import health_capability
-from .datasources.sources.tencent_limits import session_limit_cross_section
+from .datasources.sources.tencent_limits import LimitCrossSectionUnavailable, session_limit_cross_section
 from .study_realtime import looks_like_response_header, realtime_rows_are_current
 from .provider_health import (
     provider_error_availability,
@@ -3246,8 +3246,8 @@ async def refresh_intraday_limit_up_anchors(observed_at: datetime) -> dict[str, 
                 "source": "fuyao_all_a_plus_stk_limit"}
     except ExecutorSaturatedError as error:
         return {"status": "blocked", "reason": safe_error_detail(str(error), 300)}
-    # ProviderCallError: no limit-price source answered for this session (Tushare is retired).
-    except (asyncio.TimeoutError, FuyaoProviderError, ProviderCallError, ValueError) as error:
+    # LimitCrossSectionUnavailable: Tencent gave no complete, session-dated limit cross-section.
+    except (asyncio.TimeoutError, FuyaoProviderError, ProviderCallError, LimitCrossSectionUnavailable, ValueError) as error:
         await run_database_blocking(
             _persist_local_limit_pool_failure, str(error) or "limit-up pool request failed")
         return {"status": "unavailable", "reason": safe_error_detail(str(error), 300)}
