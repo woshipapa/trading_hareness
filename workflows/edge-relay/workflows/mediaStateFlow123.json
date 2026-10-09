@@ -1,6 +1,6 @@
 {
   "active": true,
-  "activeVersionId": "d3636435-b361-4498-a01c-960a7efd38f5",
+  "activeVersionId": "0f499f39-6635-414e-9c98-29c5f9a3f7cf",
   "connections": {
     "Webhook": {
       "main": [
@@ -96,11 +96,11 @@
   "staticData": null,
   "tags": [],
   "triggerCount": 1,
-  "updatedAt": "2026-08-09T03:48:29.612Z",
-  "versionCounter": 1,
-  "versionId": "d3636435-b361-4498-a01c-960a7efd38f5",
+  "updatedAt": "2026-08-24T16:11:02.190Z",
+  "versionCounter": 2,
+  "versionId": "0f499f39-6635-414e-9c98-29c5f9a3f7cf",
   "versionMetadata": {
     "description": null,
-    "name": null
+    "name": "媒体原生：上传会话状态核验"
   }
 }

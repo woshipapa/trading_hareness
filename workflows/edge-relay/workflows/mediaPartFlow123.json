@@ -1,6 +1,6 @@
 {
   "active": true,
-  "activeVersionId": "18c34f0a-3430-4f41-84c0-07a37bcea904",
+  "activeVersionId": "bbedd978-f0d4-47fb-a3b5-e592a9b797a3",
   "connections": {
     "Add text item": {
       "main": [
@@ -19,6 +19,17 @@
           {
             "index": 0,
             "node": "Upload part",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Collapse text items": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Reserve upload in new batch",
             "type": "main"
           }
         ]
@@ -71,28 +82,6 @@
         ]
       ]
     },
-    "Prepare text items": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "Add text item",
-            "type": "main"
-          }
-        ]
-      ]
-    },
-    "Collapse text items": {
-      "main": [
-        [
-          {
-            "index": 0,
-            "node": "Reserve upload in new batch",
-            "type": "main"
-          }
-        ]
-      ]
-    },
     "Has upload session": {
       "main": [
         [
@@ -117,6 +106,17 @@
           {
             "index": 0,
             "node": "Has upload session",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Prepare text items": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Add text item",
             "type": "main"
           }
         ]
@@ -598,9 +598,9 @@
   "staticData": null,
   "tags": [],
   "triggerCount": 1,
-  "updatedAt": "2026-08-17T15:32:05.572Z",
-  "versionCounter": 19,
-  "versionId": "18c34f0a-3430-4f41-84c0-07a37bcea904",
+  "updatedAt": "2026-09-14T13:41:11.249Z",
+  "versionCounter": 23,
+  "versionId": "bbedd978-f0d4-47fb-a3b5-e592a9b797a3",
   "versionMetadata": {
     "description": null,
     "name": "媒体原生：单分片上传"
