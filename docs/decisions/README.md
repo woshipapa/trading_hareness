@@ -16,6 +16,7 @@
 | [0008](0008-main-composition-root.md) | 拆分 main.py：运行时上下文与按领域的装配模块 | 生效（进行中） |
 | [0009](0009-minute-cross-section-storage.md) | 全 A 分钟截面一分钟存一行，最新截面走内存 | 生效（默认双写，待切换） |
 | [0010](0010-post-close-data-readiness-contract.md) | 盘后数据分别就绪、真实可用时间与公共阶段接管 | 草案，待双方确认 |
+| [0013](0013-sentiment-temperature-and-flows.md) | 短线情绪温度（冰点 / 沸点）与资金流向配合 | 日频已实现；分时、金/银指、看板待实现 |
 
 格式：
 

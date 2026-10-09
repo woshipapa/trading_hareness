@@ -1,4 +1,4 @@
-"""Short-term sentiment temperature (情绪温度), daily and intraday (decision 0012).
+"""Short-term sentiment temperature (情绪温度), daily and intraday (decision 0013).
 
 A-share short-term traders read the day's mood from a handful of board statistics:
 - how many stocks close limit-up and limit-down;
