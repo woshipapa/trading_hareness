@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auctionRows, pctText, radarLegend, radarOption, radarRows, stars, tone, yi, type RadarDay } from './session-radar';
+import { auctionRows, bandCounts, breadthText, pctText, radarLegend, radarOption, radarRows, stars, tone, yi, type RadarDay } from './session-radar';
 
 const cell = (turnover: number, count = 1) => ({ turnover, count });
 const bands = (up: number, down: number, pool: number, nowUp = up, nowDown = down) => ({
@@ -36,6 +36,17 @@ describe('session radar', () => {
     const chinext = radarRows(DAY, '2', 'chinext');
     expect(chinext).toHaveLength(1);
     expect([chinext[0].cumUp, chinext[0].mainNet]).toEqual([5e9, null]);
+  });
+
+  it('counts the limit band\'s broken boards and the breadth', () => {
+    const limitDay: RadarDay = { trade_date: '2026-10-08', main_net: [], points: [{
+      observed_at: '2026-10-08T14:00:00+08:00', phase: 'continuous', pool: cell(1e10, 5000),
+      breadth: { up: 1075, down: 4369, flat: 120 },
+      bands: { limit: { cum_up: cell(5e9, 43), cum_down: cell(1e9, 13), middle: cell(4e9, 4944),
+                        now_up: cell(4e9, 27), now_down: cell(8e8, 16), now_middle: cell(5.2e9, 4957) } } }] };
+    const rows = radarRows(limitDay, 'limit', 'all');
+    expect(bandCounts(rows, 'limit')).toBe('涨停 27（曾 43，炸板 16）· 跌停 16（曾 13）');
+    expect(breadthText(rows)).toBe('上涨 1075 · 下跌 4369 · 平 120');
   });
 
   it('keeps the auction distribution apart from the counted bands', () => {

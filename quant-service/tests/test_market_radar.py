@@ -78,6 +78,12 @@ class BandTests(unittest.TestCase):
         self.assertNotIn("limit", radar_point([row("600001.SH", 1.0, 1.0)], RadarState(DAY),
                                               observed_at=at(10, 0))["bands"])
 
+    def test_breadth_counts_rising_falling_and_flat_per_segment(self):
+        point = radar_point([row("600001.SH", 3.0, 10.0), row("600002.SH", -0.1, 20.0), row("300001.SZ", 0.0, 30.0)],
+                            RadarState(DAY), observed_at=at(10, 0))
+        self.assertEqual(point["breadth"], {"up": 1, "down": 1, "flat": 1})
+        self.assertEqual(point["segments"]["chinext"]["breadth"], {"up": 0, "down": 0, "flat": 1})
+
     def test_unusable_rows_are_skipped_and_counted(self):
         point = radar_point([row("600001.SH", 1.0, 1.0), {"ts_code": "600002.SH", "pct_change": None, "turnover": 5},
                              row("510300.SH", 1.0, 9.0), row("600003.SH", 1.0, None)], RadarState(DAY),

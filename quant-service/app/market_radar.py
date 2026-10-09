@@ -122,6 +122,11 @@ def _bands_skeleton(band_keys: Iterable[str]) -> dict[str, dict[str, dict[str, f
     return {band: {name: _cell() for name in ("cum_up", "cum_down", "now_up", "now_down")} for band in band_keys}
 
 
+def _breadth() -> dict[str, int]:
+    """Rising, falling and unchanged stocks against the previous close."""
+    return {"up": 0, "down": 0, "flat": 0}
+
+
 def _finish(pool: dict[str, float], bands: dict[str, dict[str, dict[str, float]]]) -> None:
     """The middle band is the pool minus both sides, as a cumulative and as a now reading."""
     for cells in bands.values():
@@ -146,7 +151,9 @@ def radar_point(
     band_keys = [f"{threshold:g}" for threshold in THRESHOLDS] + (["limit"] if limits else [])
     pool = _cell()
     bands = _bands_skeleton(band_keys)
-    segments = {segment: {"pool": _cell(), "bands": _bands_skeleton(band_keys)} for segment in SEGMENTS}
+    segments = {segment: {"pool": _cell(), "bands": _bands_skeleton(band_keys), "breadth": _breadth()}
+                for segment in SEGMENTS}
+    breadth = _breadth()
     entered: dict[str, dict[str, list[str]]] = {band: {"up": [], "down": []} for band in band_keys}
     auction = {"up": {f"{t:g}": 0 for t in THRESHOLDS}, "down": {f"{t:g}": 0 for t in THRESHOLDS}, "priced": 0}
     skipped = 0
@@ -172,6 +179,9 @@ def radar_point(
             continue
         _add(pool, turnover)
         _add(segments[segment]["pool"], turnover)
+        side_now = "up" if pct > 0 else "down" if pct < 0 else "flat"
+        breadth[side_now] += 1
+        segments[segment]["breadth"][side_now] += 1
         sides: dict[str, str | None] = {}
         for threshold in THRESHOLDS:
             sides[f"{threshold:g}"] = "up" if pct >= threshold else "down" if pct <= -threshold else None
@@ -203,7 +213,7 @@ def radar_point(
         "research_only": True, "live_effect": "none",
     }
     if counting:
-        point.update(pool=pool, bands=bands, segments=segments,
+        point.update(pool=pool, bands=bands, segments=segments, breadth=breadth,
                      entered={band: sides for band, sides in entered.items() if sides["up"] or sides["down"]})
     else:
         point["auction"] = auction

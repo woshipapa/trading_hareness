@@ -4,7 +4,8 @@ import { Refresh } from '@element-plus/icons-vue';
 import VChart from 'vue-echarts';
 import { getJson } from '../../api/http';
 import {
-  BAND_LABELS, GATE_LABELS, PHASE_LABELS, SEGMENT_LABELS, auctionRows, boardText, lineRankText, pctText, radarLegend,
+  BAND_LABELS, GATE_LABELS, PHASE_LABELS, SEGMENT_LABELS, auctionRows, bandCounts, boardText, breadthText, lineRankText,
+  pctText, radarLegend,
   radarOption, radarRows, shanghaiTime, shanghaiToday, stars, tone, yi,
   type CardPick, type LimitDetailDay, type RadarDay, type StrategyCardsDay,
 } from '../../research/session-radar';
@@ -110,6 +111,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
       <span :class="`tone-${tone(latestFlow?.main_net)}`">主力净额 {{ yi(latestFlow?.main_net) }}</span>
       <el-text type="info" size="small">此刻在上方 {{ legend.nowUp ?? '-' }} / 下方 {{ legend.nowDown ?? '-' }} · {{ legend.time ?? '-' }} · {{ lastPhase }}</el-text>
     </div>
+    <div class="radar-counts"><el-text size="small">{{ bandCounts(rows, band) }}</el-text><el-text size="small" type="info">{{ breadthText(rows) }}</el-text></div>
     <el-text v-if="latestFlow" type="info" size="small">主力净额来源：{{ latestFlow.upstream ?? latestFlow.source ?? '-' }}（{{ latestFlow.boards }} 个行业板块，{{ shanghaiTime(latestFlow.observed_at) }}）；分板块视图不拆分主力净额。</el-text>
     <v-chart v-if="rows.length" :option="option" autoresize class="radar-chart" />
     <el-empty v-else description="该日尚无雷达点（竞价撮合前只统计虚拟价分布）" :image-size="56" />
@@ -242,6 +244,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 <style scoped>
 .radar-legend { display: flex; flex-wrap: wrap; gap: 16px; align-items: baseline; margin: 6px 0; font-weight: 600; }
 .radar-chart { height: 380px; width: 100%; }
+.radar-counts { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 4px; }
 .tone-up { color: #d93026; }
 .tone-down { color: #188038; }
 .card-return { font-size: 22px; font-weight: 700; }

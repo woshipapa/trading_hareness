@@ -142,7 +142,9 @@ def radar_day(connection: Any, trade_date: date, *, include_entered: bool = Fals
             "cum_up/cum_down": "当日曾达到 +阈值/-阈值 的股票（按首次触及归一侧，只进不出）的当日累计成交额",
             "now_up/now_down": "此刻仍在阈值之外的股票的当日累计成交额",
             "middle": "全池总额减去两侧累计（轧差）；now_middle 为即时口径",
-            "limit": "以当日公布涨跌停价为阈值的同一组带",
+            "limit": "以当日公布涨跌停价为阈值的同一组带；炸板数 = 曾涨停（cum_up.count）- 此刻涨停（now_up.count），"
+                     "按首次触及方向归侧，先触跌停后翻涨停的股票计在跌停侧",
+            "breadth": "相对昨收上涨/下跌/平盘的家数（全池与各板块）",
             "auction": "09:25 撮合前只有虚拟价：报告各阈值外的股票数，不计入当日集合",
             "main_net": "行业板块净额之和，逐条按其单位换算为元（来源见 source/upstream：longhuvip 为开盘啦授权行业排行；"
                         "eastmoney_free 实为同花顺公开资金流页 data.10jqka.com.cn，净额=流入-流出）",

@@ -7,13 +7,15 @@
 // "now" readings follow the price instead. Turnover is in CNY and shown in 亿.
 
 export type Cell = { turnover: number; count: number };
+export type Breadth = { up: number; down: number; flat: number };
 export type BandCells = Record<'cum_up' | 'cum_down' | 'middle' | 'now_up' | 'now_down' | 'now_middle', Cell>;
 export type RadarPoint = {
   observed_at: string;
   phase: string;
   pool?: Cell;
   bands?: Record<string, BandCells>;
-  segments?: Record<string, { pool: Cell; bands: Record<string, BandCells> }>;
+  breadth?: Breadth;
+  segments?: Record<string, { pool: Cell; bands: Record<string, BandCells>; breadth?: Breadth }>;
   auction?: { up: Record<string, number>; down: Record<string, number>; priced: number };
 };
 export type MainNetPoint = {
@@ -26,6 +28,7 @@ export type RadarDay = {
 export type RadarRow = {
   time: string; observedAt: string; cumUp: number; cumDown: number; middle: number; pool: number;
   nowUp: number; nowDown: number; mainNet: number | null;
+  counts: { cumUp: number; cumDown: number; nowUp: number; nowDown: number }; breadth: Breadth | null;
 };
 
 export const SEGMENT_LABELS: Record<string, string> = {
@@ -53,14 +56,14 @@ export function shanghaiToday(now: Date = new Date()): string {
   return now.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
 }
 
-function cellsOf(point: RadarPoint, band: string, segment: string): { pool: Cell; bands: BandCells } | null {
+function cellsOf(point: RadarPoint, band: string, segment: string): { pool: Cell; bands: BandCells; breadth: Breadth | null } | null {
   if (segment === 'all') {
     const bands = point.bands?.[band];
-    return point.pool && bands ? { pool: point.pool, bands } : null;
+    return point.pool && bands ? { pool: point.pool, bands, breadth: point.breadth ?? null } : null;
   }
   const part = point.segments?.[segment];
   const bands = part?.bands?.[band];
-  return part && bands ? { pool: part.pool, bands } : null;
+  return part && bands ? { pool: part.pool, bands, breadth: part.breadth ?? null } : null;
 }
 
 /** The main net as of a moment: the latest flow snapshot not after it. */
@@ -87,6 +90,11 @@ export function radarRows(day: RadarDay | null | undefined, band: string, segmen
       pool: cells.pool.turnover, nowUp: cells.bands.now_up.turnover, nowDown: cells.bands.now_down.turnover,
       // The board flow is market-wide; it is not split by segment.
       mainNet: segment === 'all' ? mainNetAsOf(flows, point.observed_at) : null,
+      counts: {
+        cumUp: cells.bands.cum_up.count, cumDown: cells.bands.cum_down.count,
+        nowUp: cells.bands.now_up.count, nowDown: cells.bands.now_down.count,
+      },
+      breadth: cells.breadth,
     });
   }
   return rows;
@@ -100,6 +108,22 @@ export function auctionRows(day: RadarDay | null | undefined): AuctionRow[] {
     up2: point.auction!.up['2'] ?? 0, up5: point.auction!.up['5'] ?? 0,
     down2: point.auction!.down['2'] ?? 0, down5: point.auction!.down['5'] ?? 0, priced: point.auction!.priced,
   }));
+}
+
+/** Stocks on each side now, ever on each side, and - for the limit band - those that broke. */
+export function bandCounts(rows: RadarRow[], band: string): string {
+  const last = rows[rows.length - 1];
+  if (!last) return '';
+  const { cumUp, cumDown, nowUp, nowDown } = last.counts;
+  if (band === 'limit') {
+    return `涨停 ${nowUp}（曾 ${cumUp}，炸板 ${Math.max(0, cumUp - nowUp)}）· 跌停 ${nowDown}（曾 ${cumDown}）`;
+  }
+  return `在上方 ${nowUp}/曾 ${cumUp} · 在下方 ${nowDown}/曾 ${cumDown}`;
+}
+
+export function breadthText(rows: RadarRow[]): string {
+  const breadth = rows[rows.length - 1]?.breadth;
+  return breadth ? `上涨 ${breadth.up} · 下跌 ${breadth.down} · 平 ${breadth.flat}` : '';
 }
 
 export function radarLegend(rows: RadarRow[]): Record<string, string> {
