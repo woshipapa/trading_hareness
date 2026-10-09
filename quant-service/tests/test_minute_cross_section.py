@@ -78,7 +78,10 @@ class _Database:
 
         class Context:
             def __enter__(self):
-                return SimpleNamespace(execute=lambda sql, params=(): database.statements.append((sql, params)))
+                def execute(sql, params=()):
+                    database.statements.append((sql, params))
+                    return SimpleNamespace(fetchone=lambda: None)
+                return SimpleNamespace(execute=execute)
 
             def __exit__(self, *exc):
                 return False
@@ -89,8 +92,10 @@ class StorageTests(unittest.TestCase):
     def test_a_minute_is_one_insert_under_its_own_capability(self):
         database = _Database()
         result = mcs.persist_document(database, MINUTE, ROWS, METADATA)
-        self.assertEqual(len(database.statements), 1)
-        sql, params = database.statements[0]
+        lock, check, (sql, params) = database.statements
+        self.assertIn("pg_advisory_xact_lock", lock[0])
+        self.assertIn("symbol IS NULL", check[0])
+        self.assertTrue(result["written"])
         self.assertIn("raw_market_observations", sql)
         self.assertEqual(params[:2], ("fuyao_ths", "a_share_minute_cross_section"))
         self.assertEqual(result["rows"], 400)

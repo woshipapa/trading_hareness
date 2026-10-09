@@ -97,7 +97,14 @@ class StrategyCardsSqlTests(unittest.TestCase):
                  "volume": 1e4, "raw": {"open_price": 10.0, "prev_price": 10.0}},
                 {"symbol": "699902.SH", "ts_code": "699902.SH", "price": 9.5, "pct_change": -5.0, "turnover": 2e6,
                  "volume": 2e4, "raw": {"open_price": 9.8, "prev_price": 10.0}}]
-        mcs.persist_document(Database(), minute, rows, {"pages": 2})
+        self.assertTrue(mcs.persist_document(Database(), minute, rows, {"pages": 2})["written"])
+        # A second copy of the same capture (a retried write) is not stored again,
+        # although its NULL symbol means the table's unique key cannot catch it.
+        self.assertFalse(mcs.persist_document(Database(), minute, rows, {"pages": 2})["written"])
+        self.assertEqual(connection.execute(
+            """SELECT count(*) AS n FROM quant.raw_market_observations
+                WHERE capability='a_share_minute_cross_section' AND symbol IS NULL AND effective_at=%s""",
+            (minute,)).fetchone()["n"], 1)
         mcs.persist_document(Database(), minute + timedelta(minutes=30), rows[:1], {"pages": 2})
         latest = mcs.latest(connection, SESSION)
         self.assertEqual(latest[0], minute + timedelta(minutes=30))

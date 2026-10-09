@@ -97,8 +97,7 @@ def convert_day(database: Any, day: date, *, apply: bool) -> dict[str, Any]:
     for minute in pending if apply else ():
         with database.transaction() as connection:
             rows = legacy_rows(connection, minute)
-        if rows:
-            mcs.persist_document(database, minute, rows, rows[0].get("snapshot_metadata") or {})
+        if rows and mcs.persist_document(database, minute, rows, rows[0].get("snapshot_metadata") or {})["written"]:
             written += 1
     return {"day": day.isoformat(), "minutes": len(minutes), "already_documented": len(minutes) - len(pending),
             "pending": len(pending), "written": written, "applied": apply}
