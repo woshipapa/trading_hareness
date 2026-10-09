@@ -3073,6 +3073,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/limit-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Market Limit Detail */
+        get: operations["market_limit_detail_api_v1_market_limit_detail_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/strategies/xiaojie-leader-flow/message-features": {
         parameters: {
             query?: never;
@@ -10503,6 +10520,39 @@ export interface operations {
             query?: {
                 trade_date?: string | null;
                 include_entered?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    market_limit_detail_api_v1_market_limit_detail_get: {
+        parameters: {
+            query?: {
+                trade_date?: string | null;
             };
             header?: never;
             path?: never;

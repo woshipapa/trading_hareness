@@ -42,7 +42,14 @@ def supplemental_requests(trade_date: date) -> tuple[dict[str, Any], ...]:
         {"target": "longhu_lhb", "action": "InfoList", "controller": "Topic", "availability_basis": "post_close_lhb_topic_receipt", "next_session_only": True,
          "params": {"a": "InfoList", "st": 100, "apiv": "w44", "c": "Topic", "Index": 0}},
     )
-    return (*BASE_REQUESTS, *history, *next_session_context)
+    # 选股宝's public pools through the same gateway: the last seal time, the
+    # breaks and N天M板 that the Longhu review does not carry.
+    public_pools = tuple(
+        {"target": "xuangubao", "action": f"pool:{pool}", "controller": "xuangubao",
+         "availability_basis": "post_close_public_pool_receipt", "params": {"pool_name": pool, "date": day}}
+        for pool in ("limit_up", "limit_up_broken", "limit_down")
+    )
+    return (*BASE_REQUESTS, *history, *next_session_context, *public_pools)
 
 
 async def sync(

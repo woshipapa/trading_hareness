@@ -79,6 +79,9 @@ def normalize_payload(
             "replay_only": True,
             "live_effect": "none",
             "record_index": index,
+            # The vendor's own date, when the response states one: a review asked
+            # for "the latest" can still be the previous session's.
+            "source_date": str(payload.get("date") or "")[:10] or None,
             "payload": item,
         })
     return result

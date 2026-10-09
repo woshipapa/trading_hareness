@@ -44,3 +44,12 @@ class LonghuResearchFeatureTests(unittest.TestCase):
         self.assertEqual(result["status"], "available")
         self.assertEqual(result["capabilities"]["longhu:MorningBiddingList"]["symbols"], ["600000.SH"])
         self.assertEqual(result["rejected_same_day_rows"], 1)
+
+
+class SourceDateTests(unittest.TestCase):
+    def test_the_vendor_s_own_date_is_kept_beside_the_capture_session(self):
+        kwargs = dict(target="longhu_market_wide", action="GetPlateInfo_w38", controller="DailyLimitResumption",
+                      trade_date=date(2026, 10, 9), observed_at=datetime(2026, 10, 9, 8, tzinfo=timezone.utc))
+        dated = normalize_payload(payload={"date": "2026-10-08", "list": [{"ZSCode": "801004"}]}, **kwargs)
+        self.assertEqual((dated[0]["exchange_date"], dated[0]["source_date"]), ("2026-10-09", "2026-10-08"))
+        self.assertIsNone(normalize_payload(payload={"list": [{"ZSCode": "801004"}]}, **kwargs)[0]["source_date"])
