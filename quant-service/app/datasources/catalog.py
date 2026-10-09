@@ -369,7 +369,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("derived_tick_flow", "flow.tick_derived", 90, DECLARED, _RAW + "tick_flow_daily",
           "app/datasources/collectors/post_close.py:job_tick_flow"),
     # lhb
-    _bind("tushare_super_get", "lhb.daily", 15, LIVE_VERIFIED, "tushare_raw_records", "app/tushare_providers.py", notes="top_list/top_inst"),
+    _bind("tushare_super_get", "lhb.daily", 15, RETIRED, "tushare_raw_records", "app/tushare_providers.py",
+          notes="2026-10-08 停用 Tushare（决策 0005），由 Fuyao 龙虎榜替代"),
     _bind("fuyao_ths", "lhb.daily", 12, DECLARED, _EVT + "lhb_ths", "app/datasources/collectors/post_close.py:job_fuyao_dragon_tiger"),
     _bind("akshare", "lhb.daily", 60, DORMANT, _EVT + "lhb_event", "app/akshare_provider.py"),
     _bind("akshare", "lhb.seat_statistics", 60, DORMANT, "raw_market_observations", "app/akshare_provider.py"),

@@ -1,5 +1,7 @@
 import unittest
 
+from app.numeric_utils import intraday_number
+from app.post_close_evidence import lhb_context
 from app.short_term_review import build_short_term_review
 
 
@@ -21,14 +23,22 @@ class ShortTermReviewTests(unittest.TestCase):
             ],
             board_summary={"ths_concept_flow": {"inflow": [{"label": "板块A", "net_inflow": 5, "top_stocks": [], "mapped_members": 0, "quoted_members": 0}], "outflow": []}},
             observed_at="2026-08-21T08:00:00+00:00",
-            tushare_lhb_context={"000001.SZ": {"institution_records": 2, "institution_net_buy": 100.5}},
+            lhb_context=lhb_context([{"symbol": "000001.SZ", "source": "fuyao_ths", "available_at": None, "payload": {
+                "capability": "a_share_dragon_tiger_list", "trade_date": "2026-08-21", "name": "A",
+                "net_value": 1200000.0, "buy_value": 5600000.0, "sell_value": 4400000.0, "range_days": 1,
+                "hot_money_net_value": 300000.0, "limit_reason": "银行"}}], number=intraday_number),
         )
         self.assertEqual(result["methodology"], "short-term-review-v3")
         self.assertEqual(result["market_emotion"]["limit_up_count"], 1)
         self.assertEqual(result["market_emotion"]["previous_limit_positive_count"], 1)
         self.assertEqual(result["ladder"]["highest_board_count"], 2)
         self.assertEqual(result["capital_and_lhb"]["lhb_positive_net_count"], 1)
-        self.assertEqual(result["capital_and_lhb"]["tushare_institution_records"], 2)
+        self.assertEqual(result["capital_and_lhb"]["lhb_symbol_count"], 1)
+        self.assertEqual(result["capital_and_lhb"]["lhb_evidence_status"], "completed")
+        # The list has no seat rows or institution split: unknown, not zero.
+        self.assertIsNone(result["capital_and_lhb"]["institution_records"])
+        self.assertIsNone(result["capital_and_lhb"]["institution_net_buy"])
+        self.assertEqual(result["capital_and_lhb"]["lhb_seat_evidence_status"], "unavailable")
         self.assertEqual(result["capital_and_lhb"]["top_amount_evidence_status"], "partial")
         self.assertIsNone(result["capital_and_lhb"]["top20_amount_share"])
         self.assertEqual(result["capital_and_lhb"]["top_amount_quality_flags"], ["insufficient_all_a_daily_coverage"])
@@ -38,6 +48,22 @@ class ShortTermReviewTests(unittest.TestCase):
         self.assertTrue(result["next_session_plan"]["symbol_plans"])
         self.assertIn("next_session_trigger", result["next_session_plan"]["symbol_plans"][0])
         self.assertFalse(result["next_session_plan"]["decision_eligible"])
+
+    def test_seat_detail_is_summed_only_when_every_listed_symbol_carries_it(self):
+        def review(context):
+            return build_short_term_review(event_rows=[], daily_rows=[], board_summary={}, lhb_context=context)["capital_and_lhb"]
+
+        missing = review({})
+        self.assertEqual((missing["lhb_symbol_count"], missing["lhb_evidence_status"]), (0, "missing"))
+        self.assertIsNone(missing["institution_records"])
+        self.assertEqual(missing["lhb_seat_evidence_status"], "unavailable")
+        partial = review({"000001.SZ": {"institution_records": 2, "institution_net_buy": 100.5},
+                          "000002.SZ": {"institution_records": None, "institution_net_buy": None}})
+        self.assertIsNone(partial["institution_net_buy"])
+        self.assertEqual(partial["lhb_seat_evidence_status"], "unavailable")
+        complete = review({"000001.SZ": {"institution_records": 2, "institution_net_buy": 100.5}})
+        self.assertEqual((complete["institution_records"], complete["institution_net_buy"]), (2, 100.5))
+        self.assertEqual(complete["lhb_seat_evidence_status"], "completed")
 
     def test_amount_concentration_fails_closed_when_distribution_is_implausible(self):
         rows = [

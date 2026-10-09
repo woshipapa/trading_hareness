@@ -7,7 +7,7 @@ provenance and same-date joins explicit at the composition boundary.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from .sector_membership_repository import point_in_time_membership_predicate
@@ -70,17 +70,33 @@ def load_exact_board_context_rows(database: Any, as_of_date: date) -> list[dict[
     return [dict(row) for row in rows]
 
 
-def load_tushare_lhb_context_rows(database: Any, as_of_date: date) -> list[dict[str, Any]]:
-    """Return newest same-date Tushare top-list and institution-seat records."""
-    with database.transaction() as connection:
-        rows = connection.execute(
-            """SELECT api_name,row_data,provider_key,available_at
-                 FROM quant.tushare_raw_records
-                WHERE api_name IN ('top_list','top_inst') AND row_data->>'trade_date'=%s
-                ORDER BY available_at DESC""",
-            (as_of_date.strftime("%Y%m%d"),),
-        ).fetchall()
+def lhb_event_rows(connection: Any, trade_date: date, *, available_by: datetime | None = None) -> list[dict[str, Any]]:
+    """Return the stored Fuyao dragon-tiger rows of ``trade_date``, newest capture first.
+
+    The session is the list's own ``trade_date``, not the capture clock: a
+    list that publishes late is first captured on a later evening and still
+    belongs to its own session.  With ``available_by`` only rows captured by
+    then are visible.  A body that is not valid JSON is skipped instead of
+    failing the read.
+    """
+    rows = connection.execute(
+        """SELECT symbol,source,available_at,payload FROM (
+               SELECT symbol,source,available_at,CASE WHEN body IS JSON THEN body::jsonb END AS payload
+                 FROM quant.market_events
+                WHERE event_type='lhb_ths' AND source='fuyao_ths'
+                  AND (%s::timestamptz IS NULL OR available_at<=%s)
+           ) event
+          WHERE payload->>'trade_date'=%s
+          ORDER BY available_at DESC,symbol""",
+        (available_by, available_by, trade_date.isoformat()),
+    ).fetchall()
     return [dict(row) for row in rows]
 
 
-__all__ = ["load_exact_board_context_rows", "load_tushare_lhb_context_rows"]
+def load_lhb_context_rows(database: Any, as_of_date: date) -> list[dict[str, Any]]:
+    """Return every stored dragon-tiger row of the session (see :func:`lhb_event_rows`)."""
+    with database.transaction() as connection:
+        return lhb_event_rows(connection, as_of_date)
+
+
+__all__ = ["lhb_event_rows", "load_exact_board_context_rows", "load_lhb_context_rows"]

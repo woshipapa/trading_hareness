@@ -11,6 +11,11 @@ class SectorFlowFeatureTests(unittest.TestCase):
         source = (Path(__file__).parents[1] / "app" / "sector_flow_repository.py").read_text(encoding="utf-8")
         self.assertIn("CASE WHEN body IS JSON THEN body::jsonb END", source)
         self.assertIn("FROM event_json WHERE payload IS NOT NULL", source)
+        # The Fuyao list replaced Tushare top_list; a malformed date or net
+        # reads as unknown instead of failing every sector's rebuild.
+        self.assertIn("FROM fuyao_json WHERE payload IS NOT NULL", source)
+        self.assertIn("jsonb_typeof(payload->'net_value')='number'", source)
+        self.assertNotIn("tushare_raw_records", source)
 
     def test_detects_flow_reversal_and_lhb_sell_pressure(self):
         result = sector_flow_feature(

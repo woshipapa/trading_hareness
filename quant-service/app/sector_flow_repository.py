@@ -37,11 +37,19 @@ def rebuild_sector_flow_daily_features(database: Any, start_date: date, end_date
                          available_at DESC""",
             (context_start, end_date),
         ).fetchall()
+        # One list row per stock and day.  The Fuyao list, dated by its own
+        # trade_date because a late list is captured on a later evening, is
+        # preferred to AKShare's lhb_event rows, dated by capture.  A Fuyao row
+        # is already unique per stock and day, so it needs no amount rank; a
+        # net that is not a JSON number stays unknown instead of failing.
         lhb_rows = connection.execute(
             f"""WITH event_json AS (
                    SELECT occurred_at,symbol,available_at,
                           CASE WHEN body IS JSON THEN body::jsonb END AS payload
                      FROM quant.market_events WHERE event_type='lhb_event'
+               ), fuyao_json AS (
+                   SELECT symbol,available_at,CASE WHEN body IS JSON THEN body::jsonb END AS payload
+                     FROM quant.market_events WHERE event_type='lhb_ths' AND source='fuyao_ths'
                ), lhb_candidates AS (
                    SELECT (occurred_at AT TIME ZONE 'Asia/Shanghai')::date AS day,symbol,
                           COALESCE(NULLIF(payload->>'龙虎榜净买额','')::numeric,0) AS net_amount,
@@ -49,11 +57,13 @@ def rebuild_sector_flow_daily_features(database: Any, start_date: date, end_date
                           1 AS source_priority,available_at
                      FROM event_json WHERE payload IS NOT NULL
                    UNION ALL
-                   SELECT to_date(row_data->>'trade_date','YYYYMMDD') AS day,row_data->>'ts_code' AS symbol,
-                          COALESCE(NULLIF(row_data->>'net_amount','')::numeric,0) AS net_amount,
-                          COALESCE(NULLIF(row_data->>'l_amount','')::numeric,0) AS lhb_amount,
+                   SELECT CASE WHEN payload->>'trade_date' ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$'
+                               THEN (payload->>'trade_date')::date END AS day,symbol,
+                          CASE WHEN jsonb_typeof(payload->'net_value')='number'
+                               THEN (payload->>'net_value')::numeric END AS net_amount,
+                          NULL::numeric AS lhb_amount,
                           0 AS source_priority,available_at
-                     FROM quant.tushare_raw_records WHERE api_name='top_list'
+                     FROM fuyao_json WHERE payload IS NOT NULL
                ), one_per_symbol AS (
                    SELECT DISTINCT ON(day,symbol) day,symbol,net_amount
                      FROM lhb_candidates WHERE day BETWEEN %s AND %s

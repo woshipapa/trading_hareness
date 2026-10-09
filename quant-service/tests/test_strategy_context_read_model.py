@@ -7,8 +7,8 @@ import unittest
 from app.strategy_context_read_model import (
     event_context,
     index_breadth_context,
+    lhb_context,
     source_readiness,
-    tushare_lhb_context,
 )
 
 
@@ -47,9 +47,16 @@ class _Connection:
                                   "last_failure_at": None, "last_row_count": 1, "consecutive_failures": 0}])
         if "GROUP BY source,event_type" in statement:
             return _Result(rows=[{"source": "akshare", "event_type": "limit_up_pool", "latest_available_at": None, "rows": 2}])
-        if "tushare_raw_records" in statement:
-            return _Result(rows=[{"api_name": "top_inst", "available_at": datetime(2026, 8, 21, 8, tzinfo=timezone.utc),
-                                  "row_data": {"ts_code": "000001.SZ", "net_buy": 3}}])
+        if "lhb_ths" in statement:
+            return _Result(rows=[
+                {"symbol": "601086.SH", "source": "fuyao_ths", "available_at": datetime(2026, 8, 20, 12, tzinfo=timezone.utc),
+                 "payload": {"capability": "a_share_dragon_tiger_list", "trade_date": "2026-08-20", "name": "国芳集团",
+                             "net_value": 12599059.02, "buy_value": 112179750.0, "sell_value": 99580690.98,
+                             "range_days": 1, "hot_money_net_value": -2185780.98}},
+                # A body that was not valid JSON reads as no payload and is skipped.
+                {"symbol": "601086.SH", "source": "fuyao_ths", "available_at": datetime(2026, 8, 19, 12, tzinfo=timezone.utc),
+                 "payload": None},
+            ])
         if "market_events" in statement:
             return _Result(rows=[{"symbol": "000001.SZ", "event_type": "limit_up_pool", "title": "A", "available_at": datetime(2026, 8, 21, 8, tzinfo=timezone.utc)}])
         raise AssertionError(statement)
@@ -85,9 +92,18 @@ class StrategyContextReadModelTests(unittest.TestCase):
 
     def test_event_and_lhb_contexts_group_saved_rows_by_symbol(self):
         events = event_context(self.database, ["000001.SZ"], self.observed_at)
-        lhb = tushare_lhb_context(self.database, ["000001.SZ"], self.observed_at)
+        lhb = lhb_context(self.database, ["601086.SH"], self.observed_at)
         self.assertEqual(events["000001.SZ"][0]["event_type"], "limit_up_pool")
-        self.assertEqual(lhb["000001.SZ"][0]["api_name"], "top_inst")
+        self.assertEqual(len(lhb["601086.SH"]), 1)
+        row = lhb["601086.SH"][0]
+        self.assertEqual((row["source"], row["trade_date"]), ("fuyao_ths", "2026-08-20"))
+        self.assertEqual(row["row"]["net_value"], 12599059.02)
+        self.assertEqual(row["seat_detail"], "unavailable")
+        statement, params = next(call for call in self.connection.calls if "lhb_ths" in call[0])
+        self.assertIn("available_at<=%s", statement)
+        self.assertIn("CASE WHEN body IS JSON THEN body::jsonb END", statement)
+        self.assertEqual(params, (["601086.SH"], self.observed_at))
+        self.assertEqual(lhb_context(self.database, [], self.observed_at), {})
 
     def test_source_readiness_exposes_unconfigured_xinhua_without_guessing_endpoint(self):
         result = source_readiness(

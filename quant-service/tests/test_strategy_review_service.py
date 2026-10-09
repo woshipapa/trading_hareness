@@ -59,6 +59,41 @@ class StrategyReviewServiceTests(unittest.TestCase):
         longhu_query = next(sql for sql, _params in connection.calls if "raw_market_observations" in sql)
         self.assertIn("::date<%s", longhu_query)
 
+    def test_lhb_comes_from_the_dragon_tiger_rows_captured_by_the_checkpoint(self):
+        class Connection(_Connection):
+            def execute(self, statement, params=()):
+                if "lhb_ths" in statement:
+                    self.calls.append((statement, params))
+                    return _Result(rows=[{
+                        "symbol": "601086.SH", "source": "fuyao_ths",
+                        "available_at": datetime(2026, 8, 21, 7, 0, tzinfo=timezone.utc),
+                        "payload": {"capability": "a_share_dragon_tiger_list", "trade_date": "2026-08-21",
+                                    "name": "国芳集团", "net_value": 12599059.02, "buy_value": 112179750.0,
+                                    "sell_value": 99580690.98, "range_days": 1, "hot_money_net_value": -2185780.98},
+                    }])
+                return super().execute(statement, params)
+
+        connection = Connection()
+        review = build(
+            connection,
+            StrategyReviewRequest(session="close", as_of_date=date(2026, 8, 21), persist=False),
+            market_state=lambda items: ("mixed", {}),
+            index_breadth_context=lambda *args: {"quality_flags": []},
+            analyst_context=lambda *args: {"execution_eligible": False},
+            json_safe=lambda value: value,
+        )
+        capital = review["short_term_review"]["capital_and_lhb"]
+        self.assertEqual((capital["lhb_symbol_count"], capital["lhb_evidence_status"]), (1, "completed"))
+        self.assertIsNone(capital["institution_records"])
+        self.assertEqual(capital["lhb_seat_evidence_status"], "unavailable")
+        self.assertIn("Fuyao", review["data_boundary"]["lhb"])
+        self.assertNotIn("Tushare", review["data_boundary"]["lhb"])
+        lhb_params = next(params for sql, params in connection.calls if "lhb_ths" in sql)
+        # Only rows captured by the review's own snapshot, for its trade date.
+        snapshot = datetime(2026, 8, 21, 7, 30, tzinfo=timezone.utc)
+        self.assertEqual(lhb_params, (snapshot, snapshot, "2026-08-21"))
+        self.assertFalse(any("tushare_raw_records" in sql for sql, _params in connection.calls))
+
     def test_completed_checkpoint_requires_completed_persisted_report(self):
         class Connection:
             def __init__(self, row): self.row = row

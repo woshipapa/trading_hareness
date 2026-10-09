@@ -38,7 +38,7 @@ class StrategyDecisionServiceTests(unittest.TestCase):
             "market_regime": lambda items: ("mixed", {}),
             "select_candidates": lambda items, limit: [],
             "event_context": lambda symbols, observed_at: {},
-            "tushare_lhb_context": lambda symbols, observed_at: {},
+            "lhb_context": lambda symbols, observed_at: {},
             "source_readiness": lambda observed_at: {"providers": {}},
             "tushare_realtime_validation": AsyncMock(return_value={"status": "skipped", "items": []}),
             "exchange_for": lambda symbol: symbol.rsplit(".", 1)[1],

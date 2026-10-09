@@ -30,7 +30,7 @@ async def run(
     market_regime: Callable[[list[dict[str, Any]]], tuple[str, dict[str, Any]]],
     select_candidates: Callable[[list[dict[str, Any]], int], list[dict[str, Any]]],
     event_context: Callable[[list[str], datetime], dict[str, list[dict[str, Any]]]],
-    tushare_lhb_context: Callable[[list[str], datetime], dict[str, list[dict[str, Any]]]],
+    lhb_context: Callable[[list[str], datetime], dict[str, list[dict[str, Any]]]],
     source_readiness: Callable[[datetime], dict[str, Any]],
     exchange_for: Callable[[str], str],
     json_safe: Callable[[Any], Any],
@@ -63,9 +63,9 @@ async def run(
     regime, regime_metrics = market_regime(report["items"])
     candidates = select_candidates(report["items"], request.limit)
     symbols = [candidate["symbol"] for candidate in candidates]
-    events, tushare_lhb, readiness = await asyncio.gather(
+    events, lhb, readiness = await asyncio.gather(
         run_database_blocking(event_context, symbols, observed_at),
-        run_database_blocking(tushare_lhb_context, symbols, observed_at),
+        run_database_blocking(lhb_context, symbols, observed_at),
         run_database_blocking(source_readiness, observed_at),
     )
     # Tushare rt_k validation was retired on 2026-10-08; the field stays so the snapshot shape does not change.
@@ -82,7 +82,7 @@ async def run(
         "tushare_realtime_validation": realtime,
         "mapping": {"mapped_boards": mapped_boards, "flow_boards": flow_boards, "complete": coverage_complete},
         "akshare_and_cninfo_event_context": "next_session_context_only",
-        "tushare_lhb_context": "next_session_context_only",
+        "lhb_context": "next_session_context_only",
         "source_readiness": readiness, "decision_eligible": False,
     }
 
@@ -116,7 +116,7 @@ async def run(
                      )}),
                      Json({"sector": {key: candidate[key] for key in ("taxonomy_key", "sector_key", "sector_label")},
                            "post_close_context": json_safe(event_context_rows[:5]),
-                           "tushare_lhb_context": json_safe(tushare_lhb.get(candidate["symbol"], [])[:5]),
+                           "lhb_context": json_safe(lhb.get(candidate["symbol"], [])[:5]),
                            "notice": "龙虎榜和涨停池仅作下一交易日背景，不参与盘中打分"}),
                      Json(sorted(set(flags))), 1 if candidate["decision"] == "research_candidate" else 0,
                      candidate["confidence"], china_date,

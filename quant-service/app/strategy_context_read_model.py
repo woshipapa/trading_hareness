@@ -106,25 +106,32 @@ def event_context(database: Any, symbols: list[str], observed_at: datetime) -> d
     return grouped
 
 
-def tushare_lhb_context(database: Any, symbols: list[str], observed_at: datetime) -> dict[str, list[dict[str, Any]]]:
-    """Read post-close LHB evidence, never treating it as same-day signal input."""
+def lhb_context(database: Any, symbols: list[str], observed_at: datetime) -> dict[str, list[dict[str, Any]]]:
+    """Read dragon-tiger rows captured by the snapshot, never as same-day signal input.
+
+    Rows are the Fuyao list's per-stock totals, newest capture first.  The
+    source has no seat (营业部) rows or institution split, so each row says
+    that detail is unavailable instead of carrying empty seat fields.
+    """
     if not symbols:
         return {}
     with database.transaction() as connection:
         rows = connection.execute(
-            """SELECT api_name,row_data,available_at
-                 FROM quant.tushare_raw_records
-                WHERE api_name IN ('top_list','top_inst') AND available_at<=%s
-                  AND row_data->>'ts_code'=ANY(%s)
-                ORDER BY available_at DESC,record_index LIMIT 100""",
-            (observed_at, symbols),
+            """SELECT symbol,source,available_at,CASE WHEN body IS JSON THEN body::jsonb END AS payload
+                 FROM quant.market_events
+                WHERE event_type='lhb_ths' AND source='fuyao_ths'
+                  AND symbol=ANY(%s) AND available_at<=%s
+                ORDER BY available_at DESC,symbol LIMIT 100""",
+            (symbols, observed_at),
         ).fetchall()
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        payload = dict(row["row_data"])
-        symbol = str(payload.get("ts_code") or "")
-        if symbol:
-            grouped.setdefault(symbol, []).append({"api_name": row["api_name"], "available_at": row["available_at"], "row": payload})
+        payload = row["payload"]
+        if isinstance(payload, dict):
+            grouped.setdefault(str(row["symbol"]), []).append({
+                "source": row["source"], "trade_date": payload.get("trade_date"), "available_at": row["available_at"],
+                "row": payload, "seat_detail": "unavailable",
+            })
     return grouped
 
 
@@ -163,4 +170,4 @@ def source_readiness(
     }
 
 
-__all__ = ["event_context", "index_breadth_context", "source_readiness", "tushare_lhb_context"]
+__all__ = ["event_context", "index_breadth_context", "lhb_context", "source_readiness"]

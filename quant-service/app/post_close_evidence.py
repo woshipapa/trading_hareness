@@ -22,49 +22,45 @@ def exact_board_context(rows: list[dict[str, Any]], *, json_safe: Callable[[Any]
     return contexts
 
 
+#: Detail the Tushare-era context filled from ``top_inst`` (every seat on the
+#: list with its own buy/sell/net) and ``top_list`` (the exchange's listing
+#: reason).  The Fuyao list has one row per stock -- the list's buy/sell/net
+#: and the hot-money seats' combined net -- with no seat names, no
+#: institution split and no listing reason, so these are reported as
+#: unavailable (``None``), never as an empty list or a zero.
+UNAVAILABLE_DETAIL_FIELDS: tuple[str, ...] = (
+    "reasons", "institutions", "institution_count", "institution_records",
+    "institution_buy", "institution_sell", "institution_net_buy",
+)
+
+
 def lhb_context(rows: list[dict[str, Any]], *, number: Callable[[Any], float | None]) -> dict[str, dict[str, Any]]:
+    """Project one session's stored dragon-tiger list by symbol.
+
+    ``rows`` are ``lhb_ths`` market events of a single trade date, newest
+    capture first, each with its parsed ``payload``; a row whose body was not
+    JSON is skipped.  Amounts are CNY totals over the seats on the list, not
+    an institution-only figure.  ``hot_money_net_buy`` rests on the
+    provider's own hot-money seat classification, which has no official
+    source.  ``limit_reason`` is the provider's limit-up theme, not the
+    exchange's listing reason.
+    """
     contexts: dict[str, dict[str, Any]] = {}
-    seen_inst: set[tuple[str, str, float, float, float]] = set()
-    seen_list: set[tuple[str, str]] = set()
     for stored in rows:
-        raw = dict(stored.get("row_data") or {})
-        symbol = str(raw.get("ts_code") or "").upper()
-        if not symbol:
+        payload = stored.get("payload")
+        symbol = str(stored.get("symbol") or "").upper()
+        if not isinstance(payload, dict) or not symbol or symbol in contexts:
             continue
-        context = contexts.setdefault(symbol, {
-            "trade_date": raw.get("trade_date"), "top_list_rows": 0, "institution_records": 0,
-            "institution_buy": 0.0, "institution_sell": 0.0, "institution_net_buy": 0.0,
-            "institutions": [], "reasons": [], "providers": [], "available_at": stored.get("available_at"),
-        })
-        context["providers"] = list(dict.fromkeys([*context["providers"], str(stored.get("provider_key") or "")]))
-        reason = str(raw.get("reason") or "").strip()
-        if reason:
-            context["reasons"] = list(dict.fromkeys([*context["reasons"], reason]))
-        if stored.get("api_name") == "top_inst":
-            institution = str(raw.get("exalter") or "机构席位").strip()
-            buy = float(number(raw.get("buy")) or 0)
-            sell = float(number(raw.get("sell")) or 0)
-            net_buy = float(number(raw.get("net_buy")) or (buy - sell))
-            key = (symbol, institution, buy, sell, net_buy)
-            if key in seen_inst:
-                continue
-            seen_inst.add(key)
-            context["institution_records"] += 1
-            context["institution_buy"] += buy
-            context["institution_sell"] += sell
-            context["institution_net_buy"] += net_buy
-            context["institutions"] = list(dict.fromkeys([*context["institutions"], institution]))
-        else:
-            key = (symbol, reason)
-            if key in seen_list:
-                continue
-            seen_list.add(key)
-            context["top_list_rows"] += 1
-    for context in contexts.values():
-        for key in ("institution_buy", "institution_sell", "institution_net_buy"):
-            context[key] = round(float(context[key]), 2)
-        context["institution_count"] = len(context["institutions"])
+        contexts[symbol] = {
+            "trade_date": payload.get("trade_date"), "name": payload.get("name"),
+            "net_buy": number(payload.get("net_value")), "buy": number(payload.get("buy_value")),
+            "sell": number(payload.get("sell_value")), "hot_money_net_buy": number(payload.get("hot_money_net_value")),
+            "range_days": payload.get("range_days"), "limit_reason": payload.get("limit_reason") or None,
+            "concepts": [str(name) for name in payload.get("concepts") or [] if name],
+            "providers": [str(stored.get("source") or "")], "available_at": stored.get("available_at"),
+            "seat_detail": "unavailable", **dict.fromkeys(UNAVAILABLE_DETAIL_FIELDS),
+        }
     return contexts
 
 
-__all__ = ["exact_board_context", "lhb_context"]
+__all__ = ["UNAVAILABLE_DETAIL_FIELDS", "exact_board_context", "lhb_context"]

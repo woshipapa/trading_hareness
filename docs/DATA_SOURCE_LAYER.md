@@ -57,7 +57,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `sector.membership` | longhu 行业(LV)、tushare ths_member(LV)、**fuyao 概念/行业/地域(D)** | fuyao 848 个同花顺指数，几分钟灌完 |
 | `sector.index_quote` / `sector.anomaly` / `sector.flow_curve` | fuyao / eastmoney_ztb / eastmoney_free(LV) | |
 | `flow.stock_daily` / `flow.watch_intraday` / `flow.tick_derived` | longhu 合成、tushare / 东财 / 自算分笔 | 自算为 L1 成交额阈值估算，非 L2 |
-| `lhb.daily` / `lhb.seat_statistics` | tushare(LV) → fuyao(D) → akshare(dormant) | 席位→游资映射无官方来源 |
+| `lhb.daily` / `lhb.seat_statistics` | fuyao(D) → akshare(dormant)；tushare 已停用（决策 0005） | fuyao 只有个股合计与游资合计，没有营业部席位明细和机构拆分，读侧如实报“不可得”；席位→游资映射无官方来源 |
 | `attention.*` | 同花顺热榜/飙升榜/热榜历史（fuyao）、东财人气/飙升/个股一年历史 | 同花顺热榜无历史，只能从现在快照；东财可回填一年 |
 | `news.flash` | 财联社(A/B/C 等级) → 金十(important) → 东财 7x24 → 同花顺 | 只挂供应商自带的关联个股，不从正文猜 |
 | `events.investor_qa` | 巨潮互动易、上证e互动 | 以“回答公开时间”为事件时间 |

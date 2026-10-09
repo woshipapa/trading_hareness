@@ -199,7 +199,7 @@ def _sector_structure(board_summary: dict[str, Any]) -> dict[str, Any]:
 def _capital_and_loss(
     daily_rows: list[dict[str, Any]],
     lhb_rows: list[dict[str, Any]],
-    tushare_lhb_context: dict[str, dict[str, Any]],
+    lhb_context: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     ranked = sorted(daily_rows, key=lambda row: _number(row.get("amount")) or float("-inf"), reverse=True)
     top20 = ranked[:20]
@@ -220,8 +220,11 @@ def _capital_and_loss(
         value = _limit_value(payload, "龙虎榜净买额", "net_amount", "net_buy_amount", "净买额")
         if value is not None:
             lhb_net.append(value)
-    institution_records = sum(int(item.get("institution_records") or 0) for item in tushare_lhb_context.values())
-    institution_net_buy = sum(_number(item.get("institution_net_buy")) or 0.0 for item in tushare_lhb_context.values())
+    # Seat (营业部) and institution detail is summed only when every listed
+    # symbol carries it; a list without that detail reads unavailable, not 0.
+    seats = [(_number(item.get("institution_records")), _number(item.get("institution_net_buy")))
+             for item in lhb_context.values()]
+    seat_complete = bool(seats) and all(records is not None and net is not None for records, net in seats)
     capital = {
         "top_amount_count": len(top20),
         "top_amount_advancers": sum(value > 0 for value in changes),
@@ -239,10 +242,11 @@ def _capital_and_loss(
         "lhb_net_amount_sum": round(sum(lhb_net), 4) if lhb_net else None,
         "lhb_positive_net_count": sum(value > 0 for value in lhb_net),
         "lhb_negative_net_count": sum(value < 0 for value in lhb_net),
-        "tushare_lhb_symbol_count": len(tushare_lhb_context),
-        "tushare_institution_records": institution_records,
-        "tushare_institution_net_buy": round(institution_net_buy, 4) if institution_records else None,
-        "lhb_seat_evidence_status": "completed" if tushare_lhb_context else "missing",
+        "lhb_symbol_count": len(lhb_context),
+        "lhb_evidence_status": "completed" if lhb_context else "missing",
+        "institution_records": int(sum(records for records, _net in seats)) if seat_complete else None,
+        "institution_net_buy": round(sum(net for _records, net in seats), 4) if seat_complete else None,
+        "lhb_seat_evidence_status": "completed" if seat_complete else "unavailable",
         "coverage_note": "成交额前20只有在至少 3,000 只本地 A 股日线可用、且前20成交额占比通过分布合理性检查时才代表全市场；否则只保留局部研究样本，不解读集中度。",
     }
     return capital
@@ -344,7 +348,7 @@ def build_short_term_review(
     event_rows: list[dict[str, Any]],
     daily_rows: list[dict[str, Any]],
     board_summary: dict[str, Any],
-    tushare_lhb_context: dict[str, dict[str, Any]] | None = None,
+    lhb_context: dict[str, dict[str, Any]] | None = None,
     observed_at: str | None = None,
 ) -> dict[str, Any]:
     limit_ups = _event_rows(event_rows, "limit_up_pool")
@@ -355,7 +359,7 @@ def build_short_term_review(
     emotion = _market_emotion(limit_ups, limit_downs, previous)
     ladder = _ladder(limit_ups)
     sectors = _sector_structure(board_summary)
-    capital = _capital_and_loss(daily_rows, lhb_rows, tushare_lhb_context or {})
+    capital = _capital_and_loss(daily_rows, lhb_rows, lhb_context or {})
     loss = _loss_effect(daily_rows, previous, limit_opens, capital)
     wind_flags = _watch_flags(limit_ups, previous, daily_rows, loss)
     if emotion["state"] == "risk_off":

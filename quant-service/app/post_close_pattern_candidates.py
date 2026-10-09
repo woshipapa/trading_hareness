@@ -70,6 +70,8 @@ def select_candidates(
         selection_score = streak * 20 + float(board.get("flow_percentile") or 0) * 18 + min(18, math.log10(max(1, limit_amount)) * 2)
         if daily.get("ground_to_sky_daily_shape"):
             selection_score += 35
+        # Only seat-level institution evidence adjusts the score; a list that
+        # carries none (None) leaves the score and risk flags unchanged.
         if lhb_context and float(lhb_context.get("institution_net_buy") or 0) > 0:
             selection_score += 10
         elif lhb_context and float(lhb_context.get("institution_net_buy") or 0) < 0:
@@ -100,9 +102,10 @@ def select_candidates(
             selection_reasons.append(f"5日量能{float(daily['volume_multiple_5d']):.2f}倍")
         if float(board.get("net_amount") or 0) > 0:
             selection_reasons.append(f"{board.get('label') or '精确板块'}资金为正")
-        if lhb_context:
-            direction = "净买" if float(lhb_context.get("institution_net_buy") or 0) > 0 else "净卖"
-            selection_reasons.append(f"龙虎榜机构{direction}{abs(float(lhb_context.get('institution_net_buy') or 0)) / 10_000:.0f}万")
+        if lhb_context and lhb_context.get("net_buy") is not None:
+            # The list's net over all of its seats, not an institution figure.
+            lhb_net = float(lhb_context["net_buy"])
+            selection_reasons.append(f"龙虎榜{'净买' if lhb_net >= 0 else '净卖'}{abs(lhb_net) / 10_000:.0f}万")
         items.append({"symbol": symbol, "name": raw.get("name"), "cohorts": cohorts, "board_context": board,
                       "limit_context": {**raw, "provider_key": stored.get("provider_key"), "streak_count": streak,
                                         "sample_role": "positive_limit_pool",

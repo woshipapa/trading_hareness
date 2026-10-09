@@ -188,7 +188,7 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
 
             async def blocking(operation, *args, **kwargs):
                 calls.append(operation.__name__)
-                if operation.__name__ in {"strategy_event_context", "strategy_tushare_lhb_context"}:
+                if operation.__name__ in {"strategy_event_context", "strategy_lhb_context"}:
                     return {}
                 if operation.__name__ == "strategy_source_readiness":
                     return {"providers": {}, "post_close_event_inventory": []}
@@ -204,7 +204,7 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         result, calls = asyncio.run(check())
         self.assertEqual(result["status"], "completed")
         self.assertEqual(set(calls), {
-            "strategy_event_context", "strategy_tushare_lhb_context", "strategy_source_readiness", "persist_completed",
+            "strategy_event_context", "strategy_lhb_context", "strategy_source_readiness", "persist_completed",
         })
 
     def test_database_pool_settings_are_bounded(self):

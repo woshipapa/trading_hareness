@@ -221,7 +221,7 @@ from .post_close_pattern_score import review_score as pure_pattern_review_score
 from .post_close_pattern_candidates import select_candidates as pure_post_close_pattern_candidates
 from .post_close_candidate_screen import screen_candidates as pure_post_close_screen_candidates
 from .post_close_evidence import exact_board_context as pure_exact_board_context, lhb_context as pure_lhb_context
-from .post_close_evidence_repository import load_exact_board_context_rows, load_tushare_lhb_context_rows
+from .post_close_evidence_repository import load_exact_board_context_rows, load_lhb_context_rows
 from .limit_pool_merge import merge_limit_pool_sources as merge_persisted_limit_pool_sources
 from .strategy_pattern_sample_repository import (
     load_strategy_pattern_sample_inputs,
@@ -512,7 +512,7 @@ from .strategy_context_read_model import (
     event_context as read_strategy_event_context,
     index_breadth_context as read_strategy_index_breadth_context,
     source_readiness as read_strategy_source_readiness,
-    tushare_lhb_context as read_strategy_tushare_lhb_context,
+    lhb_context as read_strategy_lhb_context,
 )
 from .routers.event_reads import build_event_reads_router
 from .routers.strategy_reads import build_strategy_reads_router
@@ -2030,10 +2030,10 @@ def post_close_exact_board_context(as_of_date: date) -> dict[str, dict[str, Any]
     )
 
 
-def post_close_tushare_lhb_context(as_of_date: date) -> dict[str, dict[str, Any]]:
-    """Aggregate deduplicated post-close institution-seat evidence by symbol."""
+def post_close_lhb_context(as_of_date: date) -> dict[str, dict[str, Any]]:
+    """Project the session's stored dragon-tiger list by symbol; seat detail is unavailable."""
     return pure_lhb_context(
-        load_tushare_lhb_context_rows(db, as_of_date), number=intraday_number,
+        load_lhb_context_rows(db, as_of_date), number=intraday_number,
     )
 
 
@@ -2160,7 +2160,7 @@ def strategy_pattern_sample_candidates(as_of_date: date, max_symbols: int, per_c
         as_of_date, max_symbols, per_cohort, inputs.limit_rows,
         inputs.step_rows, inputs.prior_limit_rows, inputs.control_rows,
         inputs.daily_rows, post_close_exact_board_context(as_of_date),
-        post_close_tushare_lhb_context(as_of_date), focus_symbols,
+        post_close_lhb_context(as_of_date), focus_symbols,
         limit_daily_features=post_close_limit_daily_features, board_count=limit_board_count,
     )
 
@@ -3522,13 +3522,13 @@ def strategy_event_context(symbols: list[str], observed_at: datetime) -> dict[st
     return read_strategy_event_context(db, symbols, observed_at)
 
 
-def strategy_tushare_lhb_context(symbols: list[str], observed_at: datetime) -> dict[str, list[dict[str, Any]]]:
-    """Read Tushare龙虎榜 evidence already available at the snapshot time.
+def strategy_lhb_context(symbols: list[str], observed_at: datetime) -> dict[str, list[dict[str, Any]]]:
+    """Read 龙虎榜 rows already captured at the snapshot time.
 
-    `top_list`/`top_inst` are post-close facts.  They deliberately remain
-    explanation-only and cannot influence a same-day intraday rank.
+    The list is a post-close fact.  It deliberately remains explanation-only
+    and cannot influence a same-day intraday rank.
     """
-    return read_strategy_tushare_lhb_context(db, symbols, observed_at)
+    return read_strategy_lhb_context(db, symbols, observed_at)
 
 
 def strategy_source_readiness(observed_at: datetime) -> dict[str, Any]:
@@ -3548,7 +3548,7 @@ async def run_strategy_decision(request: StrategyDecisionRequest) -> dict[str, A
         market_regime=strategy_market_regime,
         select_candidates=strategy_intraday_candidates,
         event_context=strategy_event_context,
-        tushare_lhb_context=strategy_tushare_lhb_context,
+        lhb_context=strategy_lhb_context,
         source_readiness=strategy_source_readiness,
         exchange_for=exchange_for,
         json_safe=strategy_json_safe,
@@ -4511,7 +4511,7 @@ app.include_router(build_analyst_prompt_lab_router(
 ))
 app.include_router(build_strategy_pattern_reads_router(
     db, merge_limit_pool_sources, limit_board_count, strategy_json_safe,
-    post_close_limit_daily_features, post_close_exact_board_context, post_close_tushare_lhb_context, async_db,
+    post_close_limit_daily_features, post_close_exact_board_context, post_close_lhb_context, async_db,
     run_database_blocking,
 ))
 app.include_router(build_ten_day_leader_rotation_reads_router(async_db))
@@ -5178,7 +5178,7 @@ def latest_strategy_pattern_mining() -> dict[str, Any]:
     return read_latest_strategy_pattern_mining(
         db, merge_limit_pool_sources, limit_board_count, strategy_json_safe,
         post_close_limit_daily_features, post_close_exact_board_context,
-        post_close_tushare_lhb_context,
+        post_close_lhb_context,
     )
 
 

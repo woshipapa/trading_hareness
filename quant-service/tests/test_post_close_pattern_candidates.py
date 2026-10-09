@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 import unittest
 
+from app.numeric_utils import intraday_number
+from app.post_close_evidence import lhb_context
 from app.post_close_pattern_candidates import select_candidates
 
 
@@ -43,6 +45,31 @@ class PostClosePatternCandidateTests(unittest.TestCase):
         self.assertTrue(all(item["limit_context"]["sample_role"] == "matched_near_limit_control"
                             for item in result["candidates"][1:]))
         self.assertEqual(result["candidates"][1]["limit_context"]["matched_to_symbol"], "000001.SZ")
+
+    def test_dragon_tiger_list_without_seat_detail_is_described_and_never_scored(self) -> None:
+        def select(lhb_by_symbol):
+            return select_candidates(
+                date(2026, 9, 17), 1, 1,
+                limit_rows=[{"row_data": {"ts_code": "601086.SH", "tag": "2连板", "name": "国芳集团"}, "provider_key": "fuyao_ths"}],
+                step_rows=[{"ts_code": "601086.SH", "nums": 2}], prior_limit_rows=[], control_rows=[],
+                daily_rows=[{"symbol": "601086.SH", "trading_date": date(2026, 9, 17)}],
+                boards={}, lhb_by_symbol=lhb_by_symbol, focus_symbols=None,
+                limit_daily_features=lambda rows: {"status": "completed", "limit_pct": 10.0, "volume_multiple_5d": 1.0},
+                board_count=lambda tag: 2 if "2" in str(tag) else 0,
+            )["candidates"][0]
+
+        listed = lhb_context([{"symbol": "601086.SH", "source": "fuyao_ths", "available_at": None, "payload": {
+            "capability": "a_share_dragon_tiger_list", "trade_date": "2026-09-17", "name": "国芳集团",
+            "net_value": -12599059.02, "buy_value": 99580690.98, "sell_value": 112179750.0, "range_days": 1,
+            "hot_money_net_value": -2185780.98}}], number=intraday_number)
+        with_list, without_list = select(listed), select({})
+        reasons = with_list["limit_context"]["selection_reasons"]
+        self.assertIn("龙虎榜净卖1260万", reasons)
+        self.assertFalse(any("机构" in reason for reason in reasons))
+        # The institution score and risk flag need seat detail the list lacks.
+        self.assertEqual(with_list["selection_score"], without_list["selection_score"])
+        self.assertNotIn("lhb_institution_net_sell", with_list["risk_flags"])
+        self.assertIsNone(with_list["limit_context"]["lhb_context"]["institution_net_buy"])
 
 
 if __name__ == "__main__":

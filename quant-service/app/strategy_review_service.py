@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from psycopg.types.json import Json
 
 from .post_close_evidence import lhb_context
+from .post_close_evidence_repository import lhb_event_rows
 from .longhu_research_features import next_session_context
 from .short_term_review import build_short_term_review
 
@@ -78,18 +79,7 @@ def build(
                 ORDER BY b.amount DESC NULLS LAST""",
         (as_of_date, observed_at),
     ).fetchall()
-    lhb_raw_rows = connection.execute(
-        """SELECT api_name,row_data,provider_key,available_at
-             FROM quant.tushare_raw_records
-            WHERE api_name IN ('top_list','top_inst')
-              AND row_data->>'trade_date'=%s AND available_at<=%s
-            ORDER BY available_at DESC,record_index""",
-        (as_of_date.strftime("%Y%m%d"), observed_at),
-    ).fetchall()
-    tushare_lhb = lhb_context(
-        [dict(item) for item in lhb_raw_rows],
-        number=_number,
-    )
+    lhb = lhb_context(lhb_event_rows(connection, as_of_date, available_by=observed_at), number=_number)
     longhu_rows = connection.execute(
         """SELECT capability,symbol,available_at,payload
              FROM quant.raw_market_observations
@@ -106,7 +96,7 @@ def build(
         event_rows=[dict(item) for item in event_rows],
         daily_rows=[dict(item) for item in daily_rows],
         board_summary=board_summary,
-        tushare_lhb_context=tushare_lhb,
+        lhb_context=lhb,
         observed_at=observed_at.isoformat(),
     )
     review = {
@@ -128,7 +118,8 @@ def build(
                 "semantics": source_status.get("flow_semantics") or "provider-declared board flow",
             },
             "index_breadth": "saved Tencent all-A breadth plus point-in-time SSE/CSI300/SZSE/ChiNext close-daily context",
-            "lhb": "saved Tushare top_list/top_inst rows when available; absence is reported, never inferred",
+            "lhb": "saved Fuyao dragon-tiger rows of this trade date captured by observed_at; absence is reported, "
+                   "never inferred; the source has no seat or institution detail, which is reported unavailable",
             "longhu_next_session": "saved Longhu historical limit, auction and article evidence from earlier exchange dates only",
             "analyst": "text-only reports available no later than observed_at",
             "automation": "no broker order submission",

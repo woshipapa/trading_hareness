@@ -100,19 +100,36 @@ class PlatformBoundaryTests(unittest.TestCase):
         # Proposals must be read after the ledger materializes (they read from it).
         self.assertLess(call_order.index(materialize_ledger), call_order.index(materialize_proposals))
 
-    def test_post_close_evidence_aggregation_keeps_exact_board_and_deduplicates_lhb(self):
+    def test_post_close_evidence_aggregation_keeps_exact_board_and_projects_the_dragon_tiger_list(self):
         boards = exact_board_context([
             {"symbol": "000001.SZ", "net_amount": 10, "label": "A"},
             {"symbol": "000001.SZ", "net_amount": 20, "label": "B"},
         ], json_safe=lambda value: value)
         self.assertEqual(boards["000001.SZ"]["label"], "B")
-        rows = [{"api_name": "top_inst", "provider_key": "tushare", "available_at": None,
-                 "row_data": {"ts_code": "000001.SZ", "exalter": "机构", "buy": 10, "sell": 4}},
-                {"api_name": "top_inst", "provider_key": "tushare", "available_at": None,
-                 "row_data": {"ts_code": "000001.SZ", "exalter": "机构", "buy": 10, "sell": 4}}]
-        lhb = lhb_context(rows, number=lambda value: float(value or 0))
-        self.assertEqual(lhb["000001.SZ"]["institution_records"], 1)
-        self.assertEqual(lhb["000001.SZ"]["institution_net_buy"], 6.0)
+        # The stored body of a Fuyao lhb_ths event (2026-09-17 capture).
+        payload = {"capability": "a_share_dragon_tiger_list", "trade_date": "2026-09-17", "board_type": "all",
+                   "concepts": ["乳业", "玉米"], "name": "金健米业", "change": 0.099662,
+                   "net_value": 215363530.68, "net_rate": 0.09073764, "buy_value": 465896012.93,
+                   "sell_value": 250532482.25, "hot_rank": 2, "range_days": 1,
+                   "hot_money_net_value": -17657808.15, "limit_reason": "粮油食品+粮食储备+健康食品"}
+        captured = datetime(2026, 9, 17, 10, 0, tzinfo=timezone.utc)
+        rows = [{"symbol": "600127.SH", "source": "fuyao_ths", "available_at": captured, "payload": payload},
+                {"symbol": "600127.SH", "source": "fuyao_ths", "available_at": captured - timedelta(hours=1),
+                 "payload": {**payload, "net_value": 1}},
+                {"symbol": "601086.SH", "source": "fuyao_ths", "available_at": captured, "payload": None}]
+        lhb = lhb_context(rows, number=pure_intraday_number)
+        self.assertEqual(set(lhb), {"600127.SH"})          # a body that was not JSON is skipped
+        context = lhb["600127.SH"]
+        self.assertEqual(context["net_buy"], 215363530.68)  # newest capture wins
+        self.assertEqual((context["buy"], context["sell"]), (465896012.93, 250532482.25))
+        self.assertEqual(context["hot_money_net_buy"], -17657808.15)
+        self.assertEqual(context["limit_reason"], "粮油食品+粮食储备+健康食品")
+        self.assertEqual((context["trade_date"], context["providers"]), ("2026-09-17", ["fuyao_ths"]))
+        # No seat rows and no institution split: unavailable, never zero.
+        self.assertEqual(context["seat_detail"], "unavailable")
+        for field in ("reasons", "institutions", "institution_count", "institution_records",
+                      "institution_buy", "institution_sell", "institution_net_buy"):
+            self.assertIsNone(context[field], field)
 
     def test_intraday_outcome_settlement_entry_delegates_to_isolated_repository(self):
         import app.main as main_module
