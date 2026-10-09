@@ -70,6 +70,33 @@ Feishu delivery ledger as the keyword lane. A profile URL is accepted by the
 `watch add` command, but only its user id is persisted; signed URL parameters
 are never stored.
 
+## Topic collection, screening and the daily digest
+
+The daily keyword lane is topic driven. Every enabled topic carries its own
+`search_keywords` (editable in the console topic dialog; a topic without them
+falls back to its display name), and `/v1/topics/run` searches one bounded page
+per keyword of every enabled topic — there is no artificial daily query budget;
+the per-request delay and the collector's stop-on-risk-control behavior remain
+the protection for the logged-in session. Notes and runs are tagged
+`topic:<slug>:<keyword>`. `/v1/run` with an explicit keyword list stays
+available for manual calls.
+
+Keyword/topic notes then pass the same local AI screening as the
+recommendation lane (`classify_notes` jobs against the live, console-edited
+topic policy); every decision is durable in `note_topics` and only `include`
+notes reach a summary. Watch-user notes come from hand-approved authors and
+keep their direct, timely summary.
+
+`/v1/digest/run` queues one idempotent `daily_digest` job per Asia/Shanghai
+day (scheduled 09:30 by n8n). It gathers the last ~26 h of include-screened
+keyword notes, include recommendations and watch notes, deduplicated by
+revision and capped at 60, together with the previous digest text. The Mac
+worker writes a per-topic Markdown digest with 今日导读 / 与昨日对比 / 待核验 /
+继续跟踪 sections; the result is delivered through the existing Feishu ledger
+and browsable (with history) in the console's 每日简报 view. Useful commands:
+`#xhs digest latest`, `#xhs digest 2026-10-08`, `#xhs intel digest run`,
+`#xhs intel scan topics`.
+
 ## Recommendation and topic lanes
 
 The daily recommendation lane is separate from keyword/watch collection. It
@@ -96,9 +123,10 @@ Useful Feishu commands are:
 #xhs intel following list
 ```
 
-The n8n workflow schedules following snapshot sync at 07:40, the existing
-keyword lane at 08:00, and recommendation filtering at 08:20. n8n only starts
-the Edge jobs; the Edge delivery loop remains the single Feishu sender.
+The n8n workflow schedules following snapshot sync at 07:40, candidate
+screening at 07:50, the topic keyword lane at 08:00, recommendation filtering
+at 08:20, and the daily learning digest at 09:30. n8n only starts the Edge
+jobs; the Edge delivery loop remains the single Feishu sender.
 
 PC collection, Creator metadata/publish methods, live and IM HTTP methods,
 蒲公英 KOL methods and 千帆 distributor methods all use the checked-in public

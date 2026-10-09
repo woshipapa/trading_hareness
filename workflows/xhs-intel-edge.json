@@ -15,14 +15,14 @@
           }
         },
         "id": "xhs-daily-trigger",
-        "name": "每日 08:00 采集",
+        "name": "每日 08:00 主题采集",
         "type": "n8n-nodes-base.scheduleTrigger",
         "typeVersion": 1.2,
         "position": [-420, 80]
       },
       {
         "parameters": {
-          "url": "http://127.0.0.1:18790/v1/run",
+          "url": "http://127.0.0.1:18790/v1/topics/run",
           "method": "POST",
           "sendHeaders": true,
           "headerParameters": {
@@ -36,13 +36,13 @@
           "sendBody": true,
           "contentType": "json",
           "specifyBody": "json",
-          "jsonBody": "={{ JSON.stringify({ trigger: 'n8n_daily', requested_at: new Date().toISOString() }) }}",
+          "jsonBody": "={{ JSON.stringify({ trigger: 'n8n_topics_daily', requested_at: new Date().toISOString() }) }}",
           "options": {
-            "timeout": 900000
+            "timeout": 30000
           }
         },
         "id": "xhs-daily-run",
-        "name": "远端小红书采集入队",
+        "name": "按启用主题检索词采集入队",
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [-120, 80]
@@ -225,6 +225,50 @@
       },
       {
         "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "30 9 * * *"
+              }
+            ]
+          }
+        },
+        "id": "xhs-digest-trigger",
+        "name": "每日 09:30 学习简报",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [-420, 320]
+      },
+      {
+        "parameters": {
+          "url": "http://127.0.0.1:18790/v1/digest/run",
+          "method": "POST",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-XHS-Collector-Token",
+                "value": "={{ $env.XHS_COLLECTOR_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ trigger: 'n8n_digest_daily', requested_at: new Date().toISOString() }) }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "id": "xhs-digest-run",
+        "name": "每日简报任务入队",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [-120, 320]
+      },
+      {
+        "parameters": {
           "httpMethod": "POST",
           "path": "xhs-command",
           "responseMode": "onReceived",
@@ -266,8 +310,11 @@
       }
     ],
     "connections": {
-      "每日 08:00 采集": {
-        "main": [[{"node": "远端小红书采集入队", "type": "main", "index": 0}]]
+      "每日 08:00 主题采集": {
+        "main": [[{"node": "按启用主题检索词采集入队", "type": "main", "index": 0}]]
+      },
+      "每日 09:30 学习简报": {
+        "main": [[{"node": "每日简报任务入队", "type": "main", "index": 0}]]
       },
       "每日 08:20 推荐筛选": {
         "main": [[{"node": "远端推荐 50 条并进入筛选队列", "type": "main", "index": 0}]]
