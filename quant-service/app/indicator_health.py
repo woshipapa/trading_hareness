@@ -102,9 +102,13 @@ def radar_checks(connection: Any, trade_date: date, now: datetime) -> list[dict[
         checks.append(_check("fresh", _grade(age, FRESH_SECONDS, STALE_SECONDS, lower_is_better=True),
                              round(age), f"<={FRESH_SECONDS}s", "最新雷达点距今秒数"))
     gap = summary.get("max_gap_seconds")
-    checks.append(_check("continuity", _grade(float(gap) if gap is not None else None, FRESH_SECONDS, STALE_SECONDS,
-                                              lower_is_better=True),
-                         None if gap is None else round(float(gap)), f"<={FRESH_SECONDS}s", "连续竞价内相邻两点的最大间隔"))
+    if gap is None:
+        # Fewer than two points inside continuous trading (just after the open, or
+        # a restart): continuity cannot be judged yet, which is not the same as missing.
+        checks.append(_check("continuity", WARN, None, f"<={FRESH_SECONDS}s", "连续竞价内不足两个点，尚不能判断间隔"))
+    else:
+        checks.append(_check("continuity", _grade(float(gap), FRESH_SECONDS, STALE_SECONDS, lower_is_better=True),
+                             round(float(gap)), f"<={FRESH_SECONDS}s", "连续竞价内相邻两点的最大间隔"))
     point = latest_point(connection, trade_date) or {}
     pool = (point.get("pool") or {}).get("count")
     checks.append(_check("coverage", _grade(pool, MIN_POOL, WARN_POOL), pool, f">={MIN_POOL}", "最新一点计入的股票数"))

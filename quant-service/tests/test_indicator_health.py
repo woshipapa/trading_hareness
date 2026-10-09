@@ -75,6 +75,14 @@ class RadarHealthTests(unittest.TestCase):
         checks = {check["name"]: check for check in indicator_status(connection, "market.radar", DAY, at(10, 31))["checks"]}
         self.assertEqual(checks["fresh"]["status"], "fail")
 
+    def test_a_single_point_after_a_restart_warns_instead_of_missing(self):
+        # 2026-10-09 13:14: the first point after the release; continuity cannot be judged yet.
+        connection = _Connection(radar={"points": 1, "last_at": at(13, 14), "max_gap_seconds": None}, point=POINT)
+        status = indicator_status(connection, "market.radar", DAY, at(13, 15))
+        checks = {check["name"]: check["status"] for check in status["checks"]}
+        self.assertEqual((checks["continuity"], status["status"]), ("warn", "warn"))
+        self.assertFalse(status["decision_eligible"])
+
     def test_before_the_match_the_radar_is_pending_not_missing(self):
         self.assertEqual(indicator_status(_Connection(), "market.radar", DAY, at(9, 20))["status"], "pending")
 
