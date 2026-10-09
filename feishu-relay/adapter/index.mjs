@@ -1769,6 +1769,52 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 	}
 }
 
+async function handleLarkAgentXSend(request, response, action) {
+	// Unified outbound text send: the adapter injects the bridge token; the
+	// bridge owns the whitelist, token bucket, idempotency and audit trail, so
+	// 429/409 and their bodies pass through unchanged.
+	if (!larkAgentXIngressToken || !larkAgentXHealthUrl) {
+		response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: 'LarkAgentX 发送服务未配置' }));
+		return;
+	}
+	try {
+		const bridgeUrl = new URL(larkAgentXHealthUrl);
+		let init;
+		if (action === 'send') {
+			const payload = await readJsonBody(request, 16 * 1024);
+			bridgeUrl.pathname = '/send';
+			bridgeUrl.search = '';
+			init = {
+				method: 'POST',
+				headers: { 'x-larkagentx-token': larkAgentXIngressToken, 'content-type': 'application/json' },
+				body: JSON.stringify({
+					chat_id: String(payload?.chat_id ?? ''), text: String(payload?.text ?? ''),
+					root_id: String(payload?.root_id ?? ''), idempotency_key: String(payload?.idempotency_key ?? ''),
+				}),
+			};
+		} else {
+			const limit = Math.max(1, Math.min(500, Number(new URL(request.url, 'http://x').searchParams.get('limit')) || 50));
+			const chatId = String(new URL(request.url, 'http://x').searchParams.get('chat_id') ?? '').slice(0, 128);
+			bridgeUrl.pathname = '/send/audit';
+			bridgeUrl.search = '';
+			bridgeUrl.searchParams.set('limit', String(limit));
+			if (chatId) bridgeUrl.searchParams.set('chat_id', chatId);
+			init = { headers: { 'x-larkagentx-token': larkAgentXIngressToken } };
+		}
+		const upstream = await fetch(bridgeUrl, { ...init, signal: AbortSignal.timeout(30_000) });
+		const text = await upstream.text();
+		const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
+		const retryAfter = upstream.headers.get('retry-after');
+		if (retryAfter) headers['retry-after'] = retryAfter;
+		response.writeHead(upstream.status === 401 ? 502 : upstream.status, headers);
+		response.end(text || JSON.stringify({ status: upstream.ok ? 'ok' : 'error' }));
+	} catch (error) {
+		if (!response.headersSent) response.writeHead(502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		if (!response.writableEnded) response.end(JSON.stringify({ status: 'error', message: `LarkAgentX 发送不可用：${error instanceof Error ? error.message : String(error)}` }));
+	}
+}
+
 async function handleLarkAgentXQr(request, response, action) {
 	// Browser-facing QR login: the adapter holds the bridge token and injects
 	// it, so the operator's browser never needs a secret. init opens a login
@@ -2014,6 +2060,14 @@ const dashboard = createServer((request, response) => {
 				response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
 			}
 		})();
+		return;
+	}
+	if (url.pathname === '/api/group-relay/larkagentx/send' && request.method === 'POST') {
+		void handleLarkAgentXSend(request, response, 'send');
+		return;
+	}
+	if (url.pathname === '/api/group-relay/larkagentx/send/audit' && request.method === 'GET') {
+		void handleLarkAgentXSend(request, response, 'audit');
 		return;
 	}
 	if (url.pathname === '/api/group-relay/larkagentx/qr/init' && request.method === 'POST') {

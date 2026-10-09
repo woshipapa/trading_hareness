@@ -143,6 +143,13 @@ API），官方 OAuth 应用只做精确补读与兜底。
 
 ## 5. 发送层产品化（面向自有群）
 
+> **已实现（源码，未发布）**：`bridge/send_gate.py`（滑动窗口限速 + 幂等键 + `send_audit` 表，
+> 库文件 `LARKX_SEND_DB`，默认与 spool 同目录 `send-audit.db`；审计只存正文 sha256 与长度，不存正文）、
+> bridge `POST /send`（429 带 `Retry-After`，409 为幂等冲突）与 `GET /send/audit`、health 的 `send` 块、
+> adapter `POST /api/group-relay/larkagentx/send` 与 `GET …/send/audit`、dashboard「发送」页（`/send`）。
+> 失败的发送不占额度；崩溃遗留的 pending 在重启时标为 `unknown`，同键重放按首次结果返回，不重发。
+> 开关：`LARKX_SEND_ENABLED=0`；额度：`LARKX_SEND_PER_CHAT_PER_MIN`、`LARKX_SEND_GLOBAL_PER_HOUR`。
+
 **现状**：bridge `POST /send`（`LARKX_SEND_CHAT_IDS` 白名单 13 群，文本 + 可选
 `root_id` 回复），无限速、无幂等、无审计。上游只有文本发送包
 （`build_send_message_packet`），`media.py` 只下载——**图片/文件上传上游不支持**，

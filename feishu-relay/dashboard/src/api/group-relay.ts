@@ -32,7 +32,23 @@ export type ExportHistoryOptions = {
   days?: 1 | 7 | 30;
 };
 
+export type SendAuditRow = {
+  id: number; idempotency_key: string | null; chat_id: string; text_sha256: string; text_length: number;
+  root_id: string | null; result: 'pending' | 'accepted' | 'failed' | 'unknown'; error: string | null;
+  created_at: number; finished_at: number | null;
+};
+
+export type SendStats = {
+  per_chat_per_min: number; global_per_hour: number; global_remaining: number;
+  chat_remaining: Record<string, number>; failed_last_hour: number;
+  last_failure: { id: number; chat_id: string; error: string | null; created_at: number } | null;
+};
+
+export type SendInput = { chat_id: string; text: string; root_id?: string; idempotency_key?: string };
+
 export const groupRelayApi = {
+  sendMessage: <T>(input: SendInput) => postJson<T>('/api/group-relay/larkagentx/send', input),
+  sendAudit: (limit = 50) => getJson<{ audit: SendAuditRow[]; stats: SendStats }>(`/api/group-relay/larkagentx/send/audit?limit=${limit}`),
   status: <T>() => getJson<T>('/api/group-relay/status'),
   qrInit: <T>() => postJson<T>('/api/group-relay/larkagentx/qr/init'),
   qrPoll: <T>(sessionId: string) => postJson<T>('/api/group-relay/larkagentx/qr/poll', { session_id: sessionId }),

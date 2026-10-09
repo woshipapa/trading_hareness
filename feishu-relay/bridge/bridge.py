@@ -37,6 +37,7 @@ from proto_wire import (DEFAULT_PUSH_CMDS, decode_primary_websocket, parse_notif
                         tolerant_websocket_decode_with_meta)
 from event_spool import EventSpool
 from history_archive import HistoryArchive
+from send_gate import SendConflict, SendGate, SendRateLimited
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
@@ -552,12 +553,14 @@ class BridgeHandler(BaseHTTPRequestHandler):
 	def bridge(self) -> "Bridge":
 		return self.server.bridge  # type: ignore[attr-defined]
 
-	def send_json(self, status: int, payload: dict[str, Any]) -> None:
+	def send_json(self, status: int, payload: dict[str, Any], headers: dict[str, str] | None = None) -> None:
 		body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 		try:
 			self.send_response(status)
 			self.send_header("content-type", "application/json; charset=utf-8")
 			self.send_header("cache-control", "no-store")
+			for name, value in (headers or {}).items():
+				self.send_header(name, value)
 			self.send_header("content-length", str(len(body)))
 			self.end_headers()
 			self.wfile.write(body)
@@ -678,6 +681,18 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				LOG.warning("history transcript failed: %s", error)
 				self.send_json(400, {"status": "error", "message": str(error)[:240]})
 			return
+		if urlsplit(self.path).path == "/send/audit":
+			if not self.authorized():
+				self.send_json(401, {"status": "unauthorized"})
+				return
+			query = parse_qs(urlsplit(self.path).query)
+			try:
+				limit = int((query.get("limit") or ["50"])[0] or 50)
+			except ValueError:
+				limit = 50
+			chat_id = str((query.get("chat_id") or [""])[0]).strip() or None
+			self.send_json(200, {"audit": self.bridge.send_gate.audit(limit, chat_id), "stats": self.bridge.send_gate.stats(sorted(self.bridge.send_chats))})
+			return
 		if self.path != "/health":
 			self.send_json(404, {"status": "not_found"})
 			return
@@ -707,6 +722,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				self.send_json(200, self.bridge.qr_login.poll(session_id))
 				return
 			self.send_json(404, {"status": "not_found"})
+		except SendRateLimited as error:
+			LOG.warning("send rate limited scope=%s retry_after=%s", error.scope, error.retry_after)
+			self.send_json(429, {"status": "rate_limited", "scope": error.scope, "retry_after": error.retry_after, "message": str(error)}, {"retry-after": str(error.retry_after)})
+		except SendConflict as error:
+			self.send_json(409, {"status": "conflict", "message": str(error)})
 		except Exception as error:
 			LOG.warning("bridge POST request failed path=%s: %s", self.path, error)
 			self.send_json(400, {"status": "error", "message": str(error)[:240]})
@@ -764,6 +784,12 @@ class Bridge:
 		self.event_spool = EventSpool(spool_path)
 		history_path = os.environ.get("LARKX_HISTORY_DB", str(Path(spool_path).with_name("history.db")))
 		self.history_archive = HistoryArchive(history_path)
+		self.send_enabled = os.environ.get("LARKX_SEND_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+		self.send_gate = SendGate(
+			os.environ.get("LARKX_SEND_DB", str(Path(spool_path).with_name("send-audit.db"))),
+			per_chat_per_min=int(os.environ.get("LARKX_SEND_PER_CHAT_PER_MIN", "6") or 6),
+			global_per_hour=int(os.environ.get("LARKX_SEND_GLOBAL_PER_HOUR", "120") or 120),
+		)
 		# Preserve events already retained by the spool when this capability is
 		# enabled for the first time; future WebSocket events append below.
 		self.history_archive.append_many(self.event_spool.all_payloads())
@@ -1272,6 +1298,7 @@ class Bridge:
 			"mapping_check_at": self.mapping_check_at,
 			"mapping_check_error": self.mapping_check_error,
 			"send_chat_count": len(self.send_chats),
+			"send": {"enabled": self.send_enabled, **self.send_gate.stats(sorted(self.send_chats))},
 			"metrics_persisted": True,
 			"metrics_source": "larkagentx_event_spool",
 			"observed_count": durable_summary["observed_count"],
@@ -1767,6 +1794,9 @@ class Bridge:
 		chat_id = str(payload.get("chat_id", "")).strip()
 		text = str(payload.get("text", "")).strip()
 		root_id = str(payload.get("root_id", "")).strip() or None
+		idempotency_key = str(payload.get("idempotency_key", "")).strip() or None
+		if not self.send_enabled:
+			raise RuntimeError("发送已被 LARKX_SEND_ENABLED=0 关闭")
 		if self.client is None:
 			raise RuntimeError("尚未登录(needs_login),无法发送;请先完成扫码登录")
 		if chat_id not in self.send_chats:
@@ -1775,9 +1805,23 @@ class Bridge:
 			raise ValueError("text 不能为空且不能超过 10000 字符")
 		if root_id and len(root_id) > 128:
 			raise ValueError("root_id 超过长度限制")
-		if not self.client.send_msg(text, chat_id, root_id=root_id):
+		if idempotency_key and len(idempotency_key) > 128:
+			raise ValueError("idempotency_key 超过长度限制")
+		admitted = self.send_gate.begin(chat_id=chat_id, text=text, root_id=root_id, idempotency_key=idempotency_key)
+		if "replay" in admitted:
+			first = admitted["replay"]
+			return {"status": first["result"], "chat_id": chat_id, "root_id": root_id, "audit_id": first["id"], "idempotent_replay": True}
+		audit_id = admitted["audit_id"]
+		try:
+			sent = self.client.send_msg(text, chat_id, root_id=root_id)
+		except Exception as error:
+			self.send_gate.finish(audit_id, ok=False, error=str(error))
+			raise
+		if not sent:
+			self.send_gate.finish(audit_id, ok=False, error="LarkAgentX 文本发送失败")
 			raise RuntimeError("LarkAgentX 文本发送失败")
-		return {"status": "accepted", "chat_id": chat_id, "root_id": root_id}
+		self.send_gate.finish(audit_id, ok=True)
+		return {"status": "accepted", "chat_id": chat_id, "root_id": root_id, "audit_id": audit_id, "idempotent_replay": False}
 
 	def resource(self, query: dict[str, str]) -> tuple[bytes, str]:
 		"""Download one encrypted image payload using the personal-session cookies."""

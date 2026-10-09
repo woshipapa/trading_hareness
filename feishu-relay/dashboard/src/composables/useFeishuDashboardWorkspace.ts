@@ -14,7 +14,7 @@ type EventItem = {
   n8n_error?: string | null;
 };
 
-type DashboardSection = 'monitor' | 'workbench' | 'relay';
+type DashboardSection = 'monitor' | 'workbench' | 'relay' | 'send';
 
 export function useFeishuDashboardWorkspace() {
   const mobileMediaQuery = window.matchMedia('(max-width: 760px)');
@@ -83,7 +83,7 @@ export function useFeishuDashboardWorkspace() {
   }
 
   function selectActiveSection(section: string) {
-    if (!['monitor', 'workbench', 'relay'].includes(section)) return;
+    if (!['monitor', 'workbench', 'relay', 'send'].includes(section)) return;
     activeSection.value = section as DashboardSection;
     localStorage.setItem('feishu-relay-active-section', section);
     window.history.replaceState({}, '', section === 'monitor' ? '/monitor' : `/${section}`);
@@ -172,6 +172,7 @@ export function useFeishuDashboardWorkspace() {
 function initialSection(path: string): DashboardSection {
   if (path === '/workbench') return 'workbench';
   if (path === '/relay') return 'relay';
+  if (path === '/send') return 'send';
   const persisted = localStorage.getItem('feishu-relay-active-section');
-  return persisted === 'workbench' || persisted === 'relay' || persisted === 'monitor' ? persisted : 'monitor';
+  return persisted === 'workbench' || persisted === 'relay' || persisted === 'send' || persisted === 'monitor' ? persisted : 'monitor';
 }

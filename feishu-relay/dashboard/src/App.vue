@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { DataAnalysis, Document, Operation, Refresh, UploadFilled } from '@element-plus/icons-vue';
+import { DataAnalysis, Document, Operation, Promotion, Refresh, UploadFilled } from '@element-plus/icons-vue';
 import GroupRelayMonitorView from './views/GroupRelayMonitorView.vue';
 import FeishuWorkbenchView from './views/FeishuWorkbenchView.vue';
 import ManualRelayView from './views/ManualRelayView.vue';
+import SendView from './views/SendView.vue';
 import { useFeishuDashboardWorkspace } from './composables/useFeishuDashboardWorkspace';
 
 const dashboard = useFeishuDashboardWorkspace();
@@ -16,14 +17,16 @@ const dashboard = useFeishuDashboardWorkspace();
         <el-menu-item index="monitor"><el-icon><Operation /></el-icon><span>群监听状态</span></el-menu-item>
         <el-menu-item index="workbench"><el-icon><Document /></el-icon><span>飞书工作台</span></el-menu-item>
         <el-menu-item index="relay"><el-icon><UploadFilled /></el-icon><span>手动投递</span></el-menu-item>
+        <el-menu-item index="send"><el-icon><Promotion /></el-icon><span>发送</span></el-menu-item>
       </el-menu>
       <div class="side-state"><el-tag :type="dashboard.connected ? 'success' : 'warning'" effect="plain">{{ dashboard.connected ? '事件流已连接' : '事件流重连中' }}</el-tag></div>
     </el-aside>
     <el-container>
-      <el-header class="topbar"><div><h1>{{ dashboard.activeSection === 'monitor' ? '群监听状态' : dashboard.activeSection === 'workbench' ? '飞书工作台' : '手动投递' }}</h1><span>{{ dashboard.activeSection === 'monitor' ? 'LarkAgentX WebSocket、webhook 和 Itougu 状态' : dashboard.activeSection === 'workbench' ? '汇总群协作闭环、能力与授权状态' : '通过适配器提交人工消息和媒体' }}</span></div><el-button :icon="Refresh" :loading="dashboard.activeSection === 'monitor' ? dashboard.groupRelayLoading : dashboard.feishuWorkbenchLoading" @click="dashboard.activeSection === 'monitor' ? dashboard.loadGroupRelayStatus() : dashboard.loadFeishuWorkbench()">刷新数据</el-button></el-header>
+      <el-header class="topbar"><div><h1>{{ dashboard.activeSection === 'monitor' ? '群监听状态' : dashboard.activeSection === 'workbench' ? '飞书工作台' : dashboard.activeSection === 'send' ? '发送' : '手动投递' }}</h1><span>{{ dashboard.activeSection === 'monitor' ? 'LarkAgentX WebSocket、webhook 和 Itougu 状态' : dashboard.activeSection === 'workbench' ? '汇总群协作闭环、能力与授权状态' : dashboard.activeSection === 'send' ? '个人会话统一发送:限速、幂等、可审计' : '通过适配器提交人工消息和媒体' }}</span></div><el-button :icon="Refresh" :loading="dashboard.activeSection === 'monitor' ? dashboard.groupRelayLoading : dashboard.feishuWorkbenchLoading" @click="dashboard.activeSection === 'monitor' ? dashboard.loadGroupRelayStatus() : dashboard.loadFeishuWorkbench()">刷新数据</el-button></el-header>
       <el-main class="content">
         <GroupRelayMonitorView v-if="dashboard.activeSection === 'monitor'" />
         <FeishuWorkbenchView v-else-if="dashboard.activeSection === 'workbench'" />
+        <SendView v-else-if="dashboard.activeSection === 'send'" />
         <ManualRelayView v-else />
       </el-main>
     </el-container>
