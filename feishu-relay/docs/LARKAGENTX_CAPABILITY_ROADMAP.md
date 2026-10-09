@@ -173,6 +173,35 @@ API），官方 OAuth 应用只做精确补读与兜底。
 `idempotency_key` 重放不重复发。
 **回滚**：`LARKX_SEND_ENABLED=0`（新增总开关，默认沿用现状=开）。
 
+### 5.1 图片上传调研结论（2026-10-09）
+
+**路线 A：协议层（larkx 网关）——不建议。**
+- 发图是两步：上传字节得到 `imageKey`，再 `PutMessageRequest`（cmd 5，`type=IMAGE`，
+  `Content.imageKey`，可带 `isOriginSource`）。第二步的 proto 已在 `proto.proto` 里。
+- 第一步的网关命令在 `cmd_map.json` 里有编号：`media.v1.UploadFilesRequest`(1028)、
+  `UploadSecureImageRequest`(2108)、`im.v1.UploadResourceRequest`(4159)，
+  `PushUploadResourceStatus`(4157) 是异步上传状态推送。**但这些请求/响应的 schema 不在
+  编译进来的 `lark_all_pb2` 里**（该文件只有 233 个顶层包，无 `media`/`im`），
+  `client.api()` 只能用 `raw=` 手拼字节；真正的字节上传走哪个 HTTP 主机、是否分片/加密
+  （`FileContent.Cipher`、`ImageSetV2.crypto` 暗示有加密）均未知。
+- 要走通必须抓一次官方 web 客户端发图的真实流量逆向，成本高、随客户端版本漂移，
+  且属于账号风控敏感路径。
+
+**路线 B：官方开放平台 API + 用户 OAuth——推荐。**
+- `POST /im/v1/images`（`image_type=message`，≤10MB）同时支持 `tenant_access_token` 与
+  `user_access_token`，需 `im:resource`（我们已授予）。返回 `image_key`。
+- `POST /im/v1/messages`（`msg_type=image`，`content={"image_key":...}`）用
+  `user_access_token` 即以**用户本人身份**发出，不经 papa-bot；需 `im:message` 与
+  **`im:message.send_as_user`**。自带 `uuid`（≤50 字符，1 小时内同 uuid 至多成功一次），
+  可与第 5 节的幂等键对接。限频：同用户 5 QPS，同群 5 QPS。
+- 现状：线上 OAuth 已授予 `im:message`、`im:resource`，**缺 `im:message.send_as_user`**；
+  需在开放平台为应用申请并发布该权限，再在面板「重新授权」一次（授权链路阶段 3 已有）。
+- 接入点：adapter 已有 `feishuUserOauth` 取 user token；新增发送路径应复用第 5 节的
+  限速/审计（审计表目前在 bridge，需让 adapter 路径同样落审计，或把图片发送也交给
+  bridge 的 gate——建议后者：adapter 只负责上传取 key 与带 token 的发送，限速仍在一处）。
+- 待验证：`image_key` 是应用作用域，用户在外部群（跨租户）发送是否被接受，需在自有测试群
+  实测一次。
+
 ## 6. 可观测与前端整合
 
 - 面板补齐 bridge 新字段：`auth` 块、`ws_notify_cmds/count/last`、尾部巡检覆盖
