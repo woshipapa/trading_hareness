@@ -367,6 +367,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(len(summary['notes']), 1)
         self.assertEqual(summary['notes'][0]['title'], 'GPU serving')
         self.assertEqual(summary['notes'][0]['_topics'][0]['topic_id'], 'compiler_runtime')
+        self.assertTrue(summary['policy']['topics'])
         with self.store.connect() as db:
             decisions = dict(db.execute('SELECT revision,decision FROM note_topics').fetchall())
         self.assertEqual(decisions[first_id], 'include')
@@ -406,6 +407,14 @@ class QueueTests(unittest.TestCase):
         self.store.set_topic_enabled('quantum', False)
         slugs = {row['slug'] for row in self.store.topic_search_queries()}
         self.assertNotIn('quantum', slugs)
+
+    def test_finance_topic_is_seeded_and_watch_payloads_carry_the_policy(self):
+        queries = self.store.topic_search_queries()
+        self.assertIn({'slug': 'finance', 'keyword': '量化交易'}, queries)
+        job_id = self.enqueue()
+        job = self.store.claim('w')
+        self.assertEqual(job['job_id'], job_id)
+        self.assertTrue(any(row.get('slug') == 'finance' for row in job['policy']['topics']))
 
     def test_active_policy_reflects_live_topic_versions(self):
         self.store.upsert_topic({'slug': 'inference', 'name': '推理系统',

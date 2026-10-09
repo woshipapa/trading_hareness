@@ -42,12 +42,20 @@ STATE = {"status": "starting", "last_job": None, "last_jobs": {}, "last_error": 
          "completed": 0, "failed": 0}
 
 
+def _policy_topic_names(job):
+    policy = job.get("policy") or {}
+    return "、".join(
+        str(item.get("name") or item.get("slug") or "")
+        for item in policy.get("topics") or [] if item.get("name") or item.get("slug"))
+
+
 def make_prompt(job):
     notes = job.get("notes") or []
+    interests = _policy_topic_names(job) or "GPU、训练系统、推理、编译器、互联、存储和 AI 工程实践"
     lines = [
-        "你是做 AI infra / systems for AI 的中文研究编辑。",
+        "你是中文研究编辑，服务一个技术与财经情报流水线。",
         "请把下面的小红书公开笔记整理成适合飞书群阅读的每日情报摘要。",
-        "读者关注 GPU、训练系统、推理、编译器、互联、存储和 AI 工程实践。",
+        f"读者关注的主题：{interests}。中英文术语等价对待。",
         "要求：先列 3-8 条关键结论；按主题合并；明确区分原文事实、作者观点和你的推断；",
         "无法核验的数字、传闻和营销表述标为‘待核验’；每条保留标题、作者、时间、原文链接；",
         "最后给出值得继续跟踪的方向和下一步检索词。输出纯 Markdown，3000 字以内。",
@@ -72,10 +80,10 @@ def make_single_note_prompt(job):
     note = (job.get("notes") or [{}])[0]
     image_count = len(note.get("image_urls") or [])
     return "\n".join([
-        "你是做 AI infra / systems for AI 的中文研究编辑。",
+        "你是服务技术与财经情报流水线的中文研究编辑。",
         "请独立分析下面这一篇小红书公开笔记，输出可直接阅读的 Markdown。",
-        "结构必须包括：内容摘要；原文事实、作者观点、编辑推断；与 AI infra / systems、",
-        "模型或科研的相关性；适合账号继续创作的内容角度；待核验的说法或数字；后续检索词。",
+        "结构必须包括：内容摘要；原文事实、作者观点、编辑推断；与我们关注领域（AI infra /",
+        "systems、模型与算法、科研，或财经与量化）的相关性；适合账号继续创作的内容角度；待核验的说法或数字；后续检索词。",
         "如果文章与这些领域弱相关，要直接说明，不要强行建立联系。",
         "不得把作者自述当成已核验事实；保留标题、作者、时间和原文链接。输出 3000 字以内。",
         f"图片：{image_count} 张。图片会作为视觉输入提供；请把图片中可读文字、图表和关键视觉信息单独标注为‘图片观察’，不要把看不清的内容当成事实。",
@@ -227,11 +235,14 @@ def make_filter_prompt(job):
     """Build a bounded classifier prompt without signed upstream material."""
     policy = job.get("policy") or {}
     topics = policy.get("topics") or []
+    topic_names = _policy_topic_names(job)
     lines = [
-        "你是 AI infrastructure / systems for AI 的内容筛选器。",
+        "你是个人情报流水线的内容筛选器，根据下方 Topic 策略判断每条笔记属于哪些主题。",
         "只根据给出的标题、作者、时间和正文判断，不能臆造原文没有的事实。",
-        "目标读者关注 AI 基础设施、训练系统、推理、编译器、模型、系统工程和科研。",
-        "对消费、生活方式、泛营销和无关内容判为 exclude；不确定但可能相关判为 review。",
+        f"启用主题：{topic_names or 'AI 基础设施、训练、推理、编译器、模型、系统工程、科研'}。"
+        "中英文关键词等价匹配（如 训练/training、推理/inference、量化交易/quant）。",
+        "命中任一主题判 include 并在 topics 里给出对应 topic_id 与分数；",
+        "与所有主题无关，或属于泛消费、生活方式、纯营销引流的内容判为 exclude；不确定但可能相关判为 review。",
         "只输出一个 JSON 对象，不要 Markdown、解释或代码围栏。",
         '格式：{"decisions":[{"candidate_id":"...","decision":"include|review|exclude","topics":[{"topic_id":"ai_infra","score":0.0}],"relevance_score":0.0,"confidence":0.0,"reason":"不超过200字","evidence":["关键词"],"risk_flags":[]}]}',
         "可用 Topic 策略：" + json.dumps(topics, ensure_ascii=False),
@@ -259,7 +270,7 @@ def make_digest_prompt(job):
         f"{item.get('name', '')}({item.get('slug', '')})"
         for item in policy.get("topics") or [])
     lines = [
-        "你是做 AI infra / systems for AI 的中文研究编辑，负责写一份个人学习用的每日情报简报。",
+        "你是服务个人学习的中文研究编辑，负责按主题写每日情报简报（技术与财经主题并存，分节互不混杂）。",
         f"简报日期:{job.get('digest_date', '')}。输出纯 Markdown，结构固定为:",
         "1. `## 今日导读`:3-6 条全局要点，每条一句话并标注所属主题;",
         "2. 按主题分节(`## 主题:<名称>`)，只为有内容的主题建节;每节 2-6 条,",
@@ -374,10 +385,12 @@ def classify(job):
 
 
 def make_profile_filter_prompt(job):
+    topic_names = _policy_topic_names(job)
     lines = [
-        "你是 AI infra / systems for AI 账号筛选器。",
+        "你是个人情报流水线的账号筛选器。",
         "根据账号昵称、简介和最近作品，判断是否值得加入我们的内部监控列表。",
-        "关注 GPU、训练系统、推理、编译器、模型、系统工程和 AI 科研；泛消费、生活方式和纯招聘广告排除。",
+        f"关注主题：{topic_names or 'GPU、训练系统、推理、编译器、模型、系统工程、AI 科研'}（中英文等价）；"
+        "泛消费、生活方式和纯招聘广告排除。",
         "只输出 JSON，不要 Markdown。必须覆盖每个 user_id。",
         '格式：{"profiles":[{"user_id":"...","decision":"include|review|exclude","topics":[{"topic_id":"ai_infra","score":0.0}],"score":0.0,"confidence":0.0,"reason":"不超过300字","recent_note_ids":[]}]}',
         "任务：" + str(job.get("job_id", "")),

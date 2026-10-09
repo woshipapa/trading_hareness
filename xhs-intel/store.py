@@ -265,7 +265,8 @@ class Store:
                 (watch_rows if body.get('watch_user_id') else screen_rows).append((row, body))
             if watch_rows:
                 job_id = 'xhs-' + digest([row['revision'] for row, _ in watch_rows])[:32]
-                payload = {'notes': [body for _, body in watch_rows], 'prompt_version': 1}
+                payload = {'notes': [body for _, body in watch_rows], 'policy': policy,
+                           'prompt_version': 1}
                 db.execute('''INSERT INTO jobs(job_id,status,payload,created,updated,job_type)
                               VALUES(?,?,?,?,?,?)''',
                            (job_id, 'pending', json.dumps(payload, ensure_ascii=False), stamp, stamp, 'summary'))
@@ -692,7 +693,8 @@ class Store:
                     selected.append(selected_note)
             summary_job_id = 'xhs-screened-' + digest(job_id)[:32]
             if selected and not db.execute('SELECT 1 FROM jobs WHERE job_id=?', (summary_job_id,)).fetchone():
-                summary_payload = {'notes': selected, 'prompt_version': 1,
+                summary_payload = {'notes': selected, 'policy': payload.get('policy'),
+                                   'prompt_version': 1,
                                    'source_kind': 'screened_search', 'parent_job_id': job_id}
                 db.execute('''INSERT INTO jobs(job_id,status,payload,created,updated,job_type,parent_job_id)
                               VALUES(?,?,?,?,?,?,?)''',
@@ -855,13 +857,14 @@ class Store:
         profiles = [dict(item) for item in (profiles or []) if isinstance(item, dict) and item.get('user_id')]
         if not profiles:
             raise ValueError('no_following_candidates')
+        policy = self.active_policy()
         run_id = 'xhs-profile-' + digest([row['user_id'] for row in profiles])[:24]
         job_id = 'xhs-profile-filter-' + digest(run_id)[:32]
         with self.connect() as db:
             existing = db.execute('SELECT job_id FROM jobs WHERE job_id=?', (job_id,)).fetchone()
             if existing:
                 return {'run_id': run_id, 'job_id': job_id, 'status': 'duplicate'}
-            payload = {'run_id': run_id, 'profiles': profiles,
+            payload = {'run_id': run_id, 'profiles': profiles, 'policy': policy,
                        'candidate_ids': [str(row['user_id']) for row in profiles], 'prompt_version': 1}
             stamp = time.time()
             db.execute('''INSERT INTO jobs(job_id,status,payload,created,updated,job_type,run_id)

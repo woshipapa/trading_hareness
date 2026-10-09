@@ -44,6 +44,17 @@ class SingleNotePromptTests(unittest.TestCase):
         self.assertEqual(classifier.call_count, 1)
         self.assertEqual(result, {'decisions': []})
 
+    def test_filter_summary_and_profile_prompts_follow_the_live_topic_policy(self):
+        policy = {'topics': [{'slug': 'finance', 'name': '财经与量化'},
+                             {'slug': 'inference', 'name': '推理系统'}]}
+        filter_prompt = local_worker.make_filter_prompt({'job_id': 'j', 'policy': policy, 'notes': []})
+        self.assertIn('财经与量化', filter_prompt)
+        self.assertIn('中英文关键词等价匹配', filter_prompt)
+        summary_prompt = local_worker.make_prompt({'job_id': 'j', 'policy': policy, 'notes': []})
+        self.assertIn('财经与量化、推理系统', summary_prompt)
+        profile_prompt = local_worker.make_profile_filter_prompt({'job_id': 'j', 'policy': policy, 'profiles': []})
+        self.assertIn('财经与量化', profile_prompt)
+
     def test_digest_prompt_groups_by_topic_and_carries_the_previous_digest(self):
         prompt = local_worker.make_digest_prompt({
             'job_id': 'xhs-digest-2026-10-08',
