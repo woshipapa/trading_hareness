@@ -393,7 +393,7 @@ def run_with_heartbeat(job, task):
 
 
 def process_job(job):
-    if job.get("job_type") == "classify_recommendations":
+    if job.get("job_type") in ("classify_recommendations", "classify_notes"):
         return run_with_heartbeat(job, classify)
     if job.get("job_type") == "classify_profiles":
         return run_with_heartbeat(job, classify_profiles)

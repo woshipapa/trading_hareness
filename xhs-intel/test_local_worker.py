@@ -35,6 +35,15 @@ class SingleNotePromptTests(unittest.TestCase):
                 self.assertIs(heartbeat.call_args.args[1], analyzer)
         self.assertEqual(result, {'summary': 'ok'})
 
+    def test_note_screening_jobs_use_the_shared_classifier(self):
+        job = {'job_id': 'screen', 'job_type': 'classify_notes'}
+        with mock.patch.object(local_worker, 'run_with_heartbeat',
+                               side_effect=lambda value, task: task(value)):
+            with mock.patch.object(local_worker, 'classify', return_value={'decisions': []}) as classifier:
+                result = local_worker.process_job(job)
+        self.assertEqual(classifier.call_count, 1)
+        self.assertEqual(result, {'decisions': []})
+
     def test_each_worker_loop_claims_only_its_lane(self):
         calls = []
 

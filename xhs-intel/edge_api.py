@@ -29,7 +29,6 @@ from collector import (  # noqa: E402
     ephemeral_note_link,
 )
 from common import error_code, request_json  # noqa: E402
-from config import policy_snapshot  # noqa: E402
 from operations import (  # noqa: E402
     MUTATING,
     PUBLIC_METHODS,
@@ -344,8 +343,10 @@ def run_recommendation(payload=None):
     if existing and existing.get('status') in {'summary_queued', 'filtered', 'completed', 'filter_queued', 'collected', 'running'}:
         return {'status': 'duplicate', 'run_id': run_id, 'run': existing,
                 'queue': STORE.status().get('jobs', {})}
+    # The run snapshots the live, console-edited topic versions, not the static
+    # config seed, so adding or tuning a topic changes the next classification.
     STORE.create_recommendation_run(run_id, category=RECOMMEND_CATEGORY, requested=requested,
-                                    policy=policy_snapshot())
+                                    policy=STORE.active_policy())
     result = collect_recommendations(STORE, SOURCE_ROOT, COOKIE_FILE, run_id=run_id,
                                       limit=requested, category=RECOMMEND_CATEGORY,
                                       delay=RECOMMEND_DELAY)

@@ -23,7 +23,10 @@ class QueueTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def enqueue(self):
-        self.store.add_note(note(), 'GPU')
+        # Watch notes come from hand-approved authors and keep the direct summary path.
+        value = note()
+        value['watch_user_id'] = 'user-1'
+        self.store.add_note(value, 'watch:user-1')
         return self.store.enqueue_pending()
 
     def test_engagement_changes_do_not_create_new_revision(self):
@@ -329,6 +332,70 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(queued['job_id'], job['job_id'])
         self.assertEqual(result['include'], 1)
         self.assertEqual(self.store.list_profile_candidates()[0]['decision'], 'include')
+
+    def test_search_notes_are_screened_before_any_summary(self):
+        first = note('CUDA kernel 调优')
+        second = normalize({'id': 'b' * 24, 'note_card': {'title': '穿搭', 'desc': '无关',
+                            'time': 1750000000000}}, 'topic:ai_infra:GPU')
+        self.store.add_note(first, 'topic:compiler_runtime:CUDA')
+        self.store.add_note(second, 'topic:ai_infra:GPU')
+        job_id = self.store.enqueue_pending()
+        self.assertIsNone(self.store.enqueue_pending())
+        job = self.store.claim('screener')
+        self.assertEqual(job['job_id'], job_id)
+        self.assertEqual(job['job_type'], 'classify_notes')
+        self.assertEqual(len(job['candidate_ids']), 2)
+        self.assertTrue(job['policy']['topics'])
+        first_id = next(value['_candidate_id'] for value in job['notes']
+                        if value['title'] == 'GPU serving')
+        second_id = next(value['_candidate_id'] for value in job['notes']
+                         if value['title'] == '穿搭')
+        result = self.store.complete(job['job_id'], job['lease_token'], {
+            'decisions': [
+                {'candidate_id': first_id, 'decision': 'include',
+                 'topics': [{'topic_id': 'compiler_runtime', 'score': .9}],
+                 'relevance_score': .9, 'confidence': .9, 'reason': '系统内容'},
+                {'candidate_id': second_id, 'decision': 'exclude', 'topics': [],
+                 'relevance_score': .05, 'confidence': .95, 'reason': '泛消费'},
+            ],
+            'model': 'fake', 'input_sha256': 'test',
+        })
+        self.assertEqual(result['include'], 1)
+        self.assertEqual(result['exclude'], 1)
+        summary = self.store.claim('summary-worker')
+        self.assertEqual(summary['job_type'], 'summary')
+        self.assertEqual(len(summary['notes']), 1)
+        self.assertEqual(summary['notes'][0]['title'], 'GPU serving')
+        self.assertEqual(summary['notes'][0]['_topics'][0]['topic_id'], 'compiler_runtime')
+        with self.store.connect() as db:
+            decisions = dict(db.execute('SELECT revision,decision FROM note_topics').fetchall())
+        self.assertEqual(decisions[first_id], 'include')
+        self.assertEqual(decisions[second_id], 'exclude')
+
+    def test_watch_notes_skip_screening_and_mixed_batches_split(self):
+        watch_value = note('手工笔记')
+        watch_value['watch_user_id'] = 'user-9'
+        self.store.add_note(watch_value, 'watch:user-9')
+        search_value = normalize({'id': 'c' * 24, 'note_card': {'title': '推理优化', 'desc': 'serving',
+                                  'time': 1750000000000}}, 'topic:inference:vLLM')
+        self.store.add_note(search_value, 'topic:inference:vLLM')
+        first = self.store.enqueue_pending()
+        second = self.store.enqueue_pending()
+        self.assertIsNone(self.store.enqueue_pending())
+        jobs = {row['job_id']: row['job_type'] for row in self.store.list_jobs()}
+        self.assertEqual(jobs[first], 'summary')
+        self.assertEqual(jobs[second], 'classify_notes')
+
+    def test_fully_excluded_screening_queues_no_summary(self):
+        self.store.add_note(note(), 'topic:ai_infra:GPU')
+        self.store.enqueue_pending()
+        job = self.store.claim('screener')
+        result = self.store.complete(job['job_id'], job['lease_token'], {
+            'decisions': [{'candidate_id': job['candidate_ids'][0], 'decision': 'exclude', 'topics': [],
+                           'relevance_score': .1, 'confidence': .9, 'reason': '无关'}],
+            'model': 'fake', 'input_sha256': 'test'})
+        self.assertIsNone(result['summary_job_id'])
+        self.assertIsNone(self.store.claim('summary-worker'))
 
     def test_topic_search_queries_use_policy_keywords_and_fall_back_to_the_name(self):
         queries = self.store.topic_search_queries()

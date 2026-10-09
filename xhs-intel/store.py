@@ -88,6 +88,11 @@ class Store:
             CREATE TABLE IF NOT EXISTS watch_user_topics (
                 user_id TEXT NOT NULL, topic_id TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1,
                 PRIMARY KEY(user_id, topic_id));
+            CREATE TABLE IF NOT EXISTS note_topics (
+                revision TEXT PRIMARY KEY, note_id TEXT NOT NULL, decision TEXT NOT NULL,
+                topics_json TEXT NOT NULL, relevance_score REAL NOT NULL, confidence REAL NOT NULL,
+                reason TEXT NOT NULL DEFAULT '', model TEXT NOT NULL, input_sha256 TEXT NOT NULL,
+                created REAL NOT NULL);
             ''')
             # Additive migrations for databases created by the previous XHS
             # release. SQLite has no IF NOT EXISTS form for ADD COLUMN.
@@ -240,17 +245,44 @@ class Store:
         }
 
     def enqueue_pending(self, limit=12):
+        """Queue unassigned notes for the next pipeline stage.
+
+        Watch-user notes come from hand-approved authors and keep their direct,
+        timely summary.  Keyword/topic search notes go through an AI topic
+        screening first, so irrelevant content never reaches a summary.
+        """
+        policy = self.active_policy()
         with self.connect() as db:
             rows = db.execute('SELECT * FROM notes WHERE job_id IS NULL ORDER BY first_seen LIMIT ?', (limit,)).fetchall()
             if not rows:
                 return None
-            job_id = 'xhs-' + digest([r['revision'] for r in rows])[:32]
-            payload = {'notes': [json.loads(r['body']) for r in rows], 'prompt_version': 1}
             stamp = time.time()
+            watch_rows = []
+            screen_rows = []
+            for row in rows:
+                body = json.loads(row['body'])
+                (watch_rows if body.get('watch_user_id') else screen_rows).append((row, body))
+            if watch_rows:
+                job_id = 'xhs-' + digest([row['revision'] for row, _ in watch_rows])[:32]
+                payload = {'notes': [body for _, body in watch_rows], 'prompt_version': 1}
+                db.execute('''INSERT INTO jobs(job_id,status,payload,created,updated,job_type)
+                              VALUES(?,?,?,?,?,?)''',
+                           (job_id, 'pending', json.dumps(payload, ensure_ascii=False), stamp, stamp, 'summary'))
+                db.executemany('UPDATE notes SET job_id=? WHERE revision=?',
+                               [(job_id, row['revision']) for row, _ in watch_rows])
+                return job_id
+            notes = []
+            for row, body in screen_rows:
+                body['_candidate_id'] = row['revision']
+                notes.append(body)
+            job_id = 'xhs-screen-' + digest([row['revision'] for row, _ in screen_rows])[:32]
+            payload = {'notes': notes, 'candidate_ids': [row['revision'] for row, _ in screen_rows],
+                       'policy': policy, 'policy_hash': policy_hash(policy), 'prompt_version': 1}
             db.execute('''INSERT INTO jobs(job_id,status,payload,created,updated,job_type)
                           VALUES(?,?,?,?,?,?)''',
-                       (job_id, 'pending', json.dumps(payload, ensure_ascii=False), stamp, stamp, 'summary'))
-            db.executemany('UPDATE notes SET job_id=? WHERE revision=?', [(job_id, r['revision']) for r in rows])
+                       (job_id, 'pending', json.dumps(payload, ensure_ascii=False), stamp, stamp, 'classify_notes'))
+            db.executemany('UPDATE notes SET job_id=? WHERE revision=?',
+                           [(job_id, row['revision']) for row, _ in screen_rows])
             return job_id
 
     def claim(self, worker, clock=None, lane=None):
@@ -293,6 +325,8 @@ class Store:
             return self.complete_filter(job_id, lease, result, clock=stamp)
         if row and (row['job_type'] or 'summary') == 'classify_profiles':
             return self.complete_profile_filter(job_id, lease, result, clock=stamp)
+        if row and (row['job_type'] or 'summary') == 'classify_notes':
+            return self.complete_note_filter(job_id, lease, result, clock=stamp)
         text = result.get('summary', '')
         if not isinstance(text, str) or not text.strip() or len(text) > 20000 or not result.get('model'):
             raise ValueError('invalid_summary')
@@ -611,6 +645,62 @@ class Store:
                           WHERE run_id=?''', ('summary_queued' if selected_notes else 'filtered', len(decisions),
                                               counts['include'], counts['review'], counts['exclude'], stamp, row['run_id']))
             return {'status': 'completed', 'summary_job_id': summary_job_id if selected_notes else None, **counts}
+
+    def complete_note_filter(self, job_id, lease, result, clock=None):
+        """Persist lane-agnostic topic screenings; summarize only included notes."""
+        stamp = time.time() if clock is None else clock
+        decisions = result.get('decisions') if isinstance(result, dict) else None
+        if not isinstance(decisions, list):
+            raise ValueError('invalid_filter_decisions')
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM jobs WHERE job_id=?', (job_id,)).fetchone()
+            if not row or row['job_type'] != 'classify_notes' or row['lease_token'] != lease or row['status'] != 'processing' or row['lease_until'] < stamp:
+                raise Conflict('lease_lost_or_result_conflict')
+            payload = json.loads(row['payload'])
+            allowed = set(payload.get('candidate_ids') or [])
+            got = {str(item.get('candidate_id') or '') for item in decisions if isinstance(item, dict)}
+            if got != allowed or len(decisions) != len(allowed):
+                raise ValueError('filter_decisions_do_not_cover_candidates')
+            notes_by_revision = {str(note.get('_candidate_id') or ''): note
+                                 for note in payload.get('notes') or []}
+            counts = {'include': 0, 'review': 0, 'exclude': 0}
+            selected = []
+            for item in decisions:
+                revision = str(item.get('candidate_id') or '')
+                decision = str(item.get('decision') or '').lower()
+                if decision not in counts:
+                    raise ValueError('invalid_filter_decision')
+                topics = item.get('topics') if isinstance(item.get('topics'), list) else []
+                score = float(item.get('relevance_score', 0))
+                confidence = float(item.get('confidence', 0))
+                if not (0 <= score <= 1 and 0 <= confidence <= 1):
+                    raise ValueError('invalid_filter_score')
+                note = notes_by_revision.get(revision) or {}
+                db.execute('''INSERT OR REPLACE INTO note_topics
+                              (revision,note_id,decision,topics_json,relevance_score,confidence,
+                               reason,model,input_sha256,created)
+                              VALUES(?,?,?,?,?,?,?,?,?,?)''',
+                           (revision, str(note.get('note_id') or ''), decision,
+                            json.dumps(topics, ensure_ascii=False), score, confidence,
+                            str(item.get('reason') or '')[:200], str(result.get('model') or 'unknown'),
+                            str(result.get('input_sha256') or ''), stamp))
+                counts[decision] += 1
+                if decision == 'include' and note:
+                    selected_note = dict(note)
+                    selected_note['_topics'] = topics
+                    selected.append(selected_note)
+            summary_job_id = 'xhs-screened-' + digest(job_id)[:32]
+            if selected and not db.execute('SELECT 1 FROM jobs WHERE job_id=?', (summary_job_id,)).fetchone():
+                summary_payload = {'notes': selected, 'prompt_version': 1,
+                                   'source_kind': 'screened_search', 'parent_job_id': job_id}
+                db.execute('''INSERT INTO jobs(job_id,status,payload,created,updated,job_type,parent_job_id)
+                              VALUES(?,?,?,?,?,?,?)''',
+                           (summary_job_id, 'pending', json.dumps(summary_payload, ensure_ascii=False),
+                            stamp, stamp, 'summary', job_id))
+            db.execute('''UPDATE jobs SET status='completed',result=?,result_hash=?,updated=?,last_error=NULL
+                          WHERE job_id=?''', (json.dumps(result, ensure_ascii=False), digest(result), stamp, job_id))
+            return {'status': 'completed',
+                    'summary_job_id': summary_job_id if selected else None, **counts}
 
     def list_topics(self, enabled=None):
         with self.connect() as db:
