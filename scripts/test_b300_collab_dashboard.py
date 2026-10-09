@@ -137,6 +137,7 @@ class EventTests(unittest.TestCase):
         c["h100"]["timings"].append({"run": "t1020_p3", "lock": 1020, "p90": 0.012, "audit": "pass"})
         c["h100"]["screens"] += [{"lock": 1020, "passing": 24, "cells": 25}, {"lock": 1830, "passing": 0, "cells": 25}]
         c["h100"]["log"].append("[09:00] LADDER STOPPED: timing at 1410 failed: correctness")
+        c["h100"]["log"].append("[09:01] note: the LADDER STOPPED above was a handover race")  # a note, not a stop
         return c
 
     def test_every_kind_of_change_and_its_flags(self):
@@ -151,6 +152,7 @@ class EventTests(unittest.TestCase):
         self.assertEqual(flags["proposal_new"], (True, True))
         self.assertEqual(flags["lock_chosen"], (True, True))
         self.assertEqual(flags["h100_stopped"], (True, True))
+        self.assertEqual(sum(1 for e in dash.diff_snapshots(self.PREV, self.cur()) if e["type"] == "h100_stopped"), 1)
         self.assertEqual(flags["fix_new"], (False, False))          # our own pushes are recorded, not sent alone
         self.assertEqual(flags["review_new"], (False, False))
         runs = [e for e in dash.diff_snapshots(self.PREV, self.cur()) if e["type"] == "run_new"]

@@ -433,10 +433,11 @@ def diff_snapshots(prev: dict[str, Any], cur: dict[str, Any]) -> list[dict[str, 
         for line in ch.get("log", []):
             if line in old_log:
                 continue
-            if "LADDER STOPPED" in line:
+            # only the ladder's own lines ("[time] LADDER STOPPED: why"), not notes that mention them
+            if re.match(r"^\[[^\]]+\] LADDER STOPPED:", line):
                 ev.append(_event("h100_stopped", "h100", "H100 频率轴阶梯中途停下：" + line.split("LADDER STOPPED:", 1)[-1].strip()[:120],
                                  True, True))
-            elif "LADDER_DONE" in line:
+            elif re.match(r"^\[[^\]]+\] LADDER_DONE", line):
                 ev.append(_event("h100_done", "h100", "H100 频率轴阶梯全部完成", False, True))
     return ev
 
