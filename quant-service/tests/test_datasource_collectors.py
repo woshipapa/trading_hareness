@@ -190,17 +190,53 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         state.done["eastmoney_pools"] = "2026-09-18"
         self.assertNotIn("eastmoney_pools", {job.key for job in post_close.due_jobs(state, EVENING, trading_day=True, monotonic=900.0)})
 
-    async def test_dragon_tiger_stores_the_latest_list_but_waits_for_today(self):
+    async def test_dragon_tiger_asks_for_the_session_and_stores_an_older_list_while_it_waits(self):
+        recorder = Recorder()
+        asked = []
+
+        async def fuyao(route, params):
+            asked.append(params)
+            return {"trade_date": "2026-09-17", "stock_items": [{"thscode": "601086.SH", "name": "国芳集团", "net_value": 1}]}
+
+        with self.assertRaises(post_close.NotYetPublished):
+            await post_close.job_fuyao_dragon_tiger(self._deps(recorder, fuyao_fetch=fuyao), post_close.ArchiveState(),
+                                                    date(2026, 9, 18), EVENING)
+        self.assertEqual(asked, [{"board_type": "all", "date": "2026-09-18"}])
+        # the previous session's list is archived, not dropped
+        self.assertEqual(recorder.events[0][1][0]["event_identity_key"], "fuyao_ths:lhb_ths:601086.SH:2026-09-17")
+
+    async def test_dragon_tiger_completes_once_the_dated_list_has_rows(self):
+        # 2026-10-09: undated, the route still answered with 10-08; dated, it had 76 rows for 10-09.
         recorder = Recorder()
 
         async def fuyao(route, params):
-            return {"trade_date": "2026-09-17", "stock_items": [{"thscode": "601086.SH", "name": "国芳集团", "net_value": 1}]}
+            return {"trade_date": params["date"], "stock_items": [{"thscode": "601086.SH", "name": "国芳集团", "net_value": 1}]}
 
-        with self.assertRaises(RuntimeError):
-            await post_close.job_fuyao_dragon_tiger(self._deps(recorder, fuyao_fetch=fuyao), post_close.ArchiveState(),
-                                                    date(2026, 9, 18), EVENING)
-        # the previous session's list is archived, not dropped
-        self.assertEqual(recorder.events[0][1][0]["event_identity_key"], "fuyao_ths:lhb_ths:601086.SH:2026-09-17")
+        result = await post_close.job_fuyao_dragon_tiger(self._deps(recorder, fuyao_fetch=fuyao), post_close.ArchiveState(),
+                                                         date(2026, 10, 9), EVENING)
+        self.assertEqual((result["trade_date"], result["stocks"]), ("2026-10-09", 1))
+
+    async def test_valuation_index_drops_an_index_code_the_quote_route_rejects(self):
+        recorder = Recorder()
+
+        async def snapshot():
+            return [{"symbol": "600519.SH"}], {}
+
+        async def fuyao(route, params):
+            if route == "ths_index_list":
+                return {"item": [{"thscode": "886001.TI", "name": "A"}, {"thscode": "886113.TI", "name": "B"}]}
+            if route == "ths_index_prices_snapshot":
+                codes = params["thscodes"].split(",")
+                if "886113.TI" in codes:
+                    raise RuntimeError("Unknown thscode: 886113.TI")
+                return {"item": [{"thscode": code, "last_price": 1.0} for code in codes]}
+            return {"item": []}
+
+        result = await post_close.job_fuyao_valuation_index(
+            self._deps(recorder, fuyao_fetch=fuyao, fuyao_snapshot=snapshot), post_close.ArchiveState(),
+            date(2026, 10, 9), EVENING)
+        self.assertEqual(result["dropped_index_codes"], ["886113.TI"] * 4)    # once per index tag
+        self.assertEqual(result["index_quotes"], 4)
 
     async def test_tick_flow_falls_back_to_tencent(self):
         recorder = Recorder()
@@ -229,15 +265,23 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         async def broken(*_args):
             raise RuntimeError("upstream empty")
 
-        with patch.dict(post_close.RUNNERS, {"tick_flow": ok, "eastmoney_pools": broken}):
+        async def unpublished(*_args):
+            raise post_close.NotYetPublished("THS hot list history for this session is not published yet")
+
+        with patch.dict(post_close.RUNNERS, {"tick_flow": ok, "eastmoney_pools": broken, "fuyao_attention_close": unpublished}):
             results = await post_close.run_due_jobs(deps, state, EVENING, trading_day=True,
-                                                    enabled={job.key: job.key in {"tick_flow", "eastmoney_pools"}
+                                                    enabled={job.key: job.key in {"tick_flow", "eastmoney_pools",
+                                                                                  "fuyao_attention_close"}
                                                              for job in post_close.JOBS})
         self.assertEqual(results["tick_flow"]["status"], "completed")
         self.assertEqual(state.done["tick_flow"], "2026-09-18")
         self.assertEqual(results["eastmoney_pools"]["status"], "failed")
         self.assertNotIn("eastmoney_pools", state.done)
         self.assertIn(("public_archive", "eastmoney_pools", False), recorder.health)
+        # not yet published: retried later, but neither done nor a provider failure
+        self.assertEqual(results["fuyao_attention_close"]["status"], "pending")
+        self.assertNotIn("fuyao_attention_close", state.done)
+        self.assertFalse([entry for entry in recorder.health if entry[1] == "fuyao_attention_close"])
 
 
 if __name__ == "__main__":

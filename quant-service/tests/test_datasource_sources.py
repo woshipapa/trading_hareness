@@ -253,6 +253,21 @@ class FuyaoRequestShapeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(len(codes) for codes, _data in batches), 149)   # indices filtered, one dropped
 
 
+class IndexCodeBatchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_index_codes_pass_the_filter_and_an_unknown_one_is_dropped(self):
+        async def fetch(capability, params):
+            codes = params["thscodes"].split(",")
+            if "886113.TI" in codes:
+                raise RuntimeError("Unknown thscode: 886113.TI")
+            return {"item": [{"thscode": code} for code in codes]}
+
+        batches, dropped, failures = await fuyao_evidence.fetch_code_batches(
+            fetch, "ths_index_prices_snapshot", ["886001.TI", "886113.TI", "886001.ti"],
+            code_filter=fuyao_evidence.index_codes)
+        self.assertEqual((dropped, failures), (["886113.TI"], []))
+        self.assertEqual([codes for codes, _data in batches], [["886001.TI"]])
+
+
 class FundNavTests(unittest.TestCase):
     def test_nav_rows(self):
         rows = ttfund.normalize_nav("161725", FIXTURES["ttfund_lsjz"])

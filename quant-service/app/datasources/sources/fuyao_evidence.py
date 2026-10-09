@@ -213,11 +213,17 @@ def equity_codes(symbols: Sequence[str]) -> list[str]:
     return sorted({symbol for symbol in (ashare_symbol(item) for item in symbols) if symbol})
 
 
+def index_codes(symbols: Sequence[str]) -> list[str]:
+    """THS index codes (``886113.TI``), de-duplicated and ordered."""
+    return sorted({str(item).strip().upper() for item in symbols if str(item or "").strip()})
+
+
 async def fetch_code_batches(
     fetch: FuyaoFetch,
     capability: str,
     symbols: Sequence[str],
     extra: Mapping[str, Any] | None = None,
+    code_filter: Callable[[Sequence[str]], list[str]] = equity_codes,
 ) -> tuple[list[tuple[list[str], Mapping[str, Any]]], list[str], list[str]]:
     """Fetch ``symbols`` 100 at a time, dropping codes the provider rejects.
 
@@ -228,7 +234,7 @@ async def fetch_code_batches(
     batches: list[tuple[list[str], Mapping[str, Any]]] = []
     dropped: list[str] = []
     failures: list[str] = []
-    codes = equity_codes(symbols)
+    codes = code_filter(symbols)
     for offset in range(0, len(codes), MAX_CODES_PER_REQUEST):
         chunk = codes[offset:offset + MAX_CODES_PER_REQUEST]
         for _attempt in range(MAX_BAD_CODE_RETRIES + 1):
@@ -250,7 +256,7 @@ async def fetch_code_batches(
 
 
 __all__ = [
-    "MAX_CODES_PER_REQUEST", "equity_codes", "fetch_all_pool_pages", "fetch_code_batches",
+    "MAX_CODES_PER_REQUEST", "equity_codes", "fetch_all_pool_pages", "fetch_code_batches", "index_codes",
     "anomaly_events", "auction_benchmark_events", "constituent_symbols", "dragon_tiger_events",
     "dragon_tiger_hot_money_observations",
     "hot_history_observations", "index_catalog", "index_quote_observations", "rank_observations",

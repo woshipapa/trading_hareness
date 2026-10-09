@@ -119,6 +119,15 @@ async def job_sentiment_close(deps: ArchiveDeps, state: ArchiveState, day: date,
     return {"stored": stored, "limit_up_count": reading["limit_up_count"], "seal_rate": reading["seal_rate"]}
 
 
+class NotYetPublished(RuntimeError):
+    """The source has not published this session's data yet.
+
+    The job is retried on the next tick inside its window, but this is not a provider
+    failure: counting it as one opened the public_archive circuit every evening (the
+    dragon-tiger job had 274 consecutive "failures" by 2026-10-09).
+    """
+
+
 def _fetch(deps: ArchiveDeps) -> Callable[[str, dict[str, Any]], Awaitable[Mapping[str, Any]]]:
     if deps.collector.fuyao_fetch is None:
         raise RuntimeError("Fuyao is not configured")
@@ -130,7 +139,7 @@ async def job_fuyao_attention_close(deps: ArchiveDeps, state: ArchiveState, day:
     history = await fetch("a_share_hot_stock_list_history", {"date": day.isoformat()})
     rows = fuyao_evidence.hot_history_observations(history, now)
     if not rows:
-        raise RuntimeError("THS hot list history for this session is not published yet")
+        raise NotYetPublished("THS hot list history for this session is not published yet")
     stored = await deps.collector.persist_observations("fuyao_ths", "a_share_hot_stock_list_history", rows)
     anomalies = fuyao_evidence.anomaly_events(await fetch("a_share_anomaly_analysis_list", {}), now)
     events = await deps.collector.persist_events("fuyao_ths", anomalies) if anomalies else 0
@@ -138,21 +147,24 @@ async def job_fuyao_attention_close(deps: ArchiveDeps, state: ArchiveState, day:
 
 
 async def job_fuyao_dragon_tiger(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
-    """Archive the latest published list; done only once it is this session's.
+    """Archive this session's list, asked for by date.
 
-    The list can publish late in the evening or the next morning.  Whatever
-    date comes back is stored (identity per stock and trade date), so a list
-    first seen the next session is still archived rather than skipped.
+    Without a date the route answers with its latest list, which lags: at 19:11 on
+    2026-10-09 it still returned the 10-08 list while a request dated 10-09 already
+    returned 76 rows, so the job never completed (274 consecutive failures). Whatever
+    date comes back is still stored (identity per stock and trade date); the job is
+    done only once this session's list has arrived, and until then it is pending.
     """
-    data = await _fetch(deps)("a_share_dragon_tiger_list", {"board_type": "all"})
+    data = await _fetch(deps)("a_share_dragon_tiger_list", {"board_type": "all", "date": day.isoformat()})
     trade_date = str(data.get("trade_date") or "")[:10]
     events = fuyao_evidence.dragon_tiger_events(data, now)
     stored = await deps.collector.persist_events("fuyao_ths", events) if events else 0
     hot_money = fuyao_evidence.dragon_tiger_hot_money_observations(data, now)
     if hot_money:
         await deps.collector.persist_observations("fuyao_ths", "lhb_hot_money", hot_money)
-    if trade_date != day.isoformat():
-        raise RuntimeError(f"dragon-tiger list still dated {trade_date or 'unknown'} (stored {stored} rows of it)")
+    if trade_date != day.isoformat() or not events:
+        raise NotYetPublished(f"dragon-tiger list for {day} not published yet "
+                              f"(got {trade_date or 'no date'}, stored {stored} rows of it)")
     return {"trade_date": trade_date, "stocks": len(events), "stored": stored, "hot_money": len(hot_money)}
 
 
@@ -201,15 +213,20 @@ async def job_fuyao_valuation_index(deps: ArchiveDeps, state: ArchiveState, day:
     valuations = [row for _codes, data in batches for row in fuyao_evidence.valuation_observations(data, now)]
     stored = await deps.collector.persist_observations("fuyao_ths", "a_share_valuations_snapshot", valuations) if valuations else 0
     index_rows: list[dict[str, Any]] = []
+    dropped_indices: list[str] = []
     for tag in ("cn_concept", "industry", "region", "tszs"):
         names = fuyao_evidence.index_catalog(await fetch("ths_index_list", {"tag": tag}))
-        index_codes = sorted(names)
-        for offset in range(0, len(index_codes), 100):
-            data = await fetch("ths_index_prices_snapshot", {"thscodes": ",".join(index_codes[offset:offset + 100])})
+        # The catalog can list an index the quote route no longer knows ("Unknown thscode:
+        # 886113.TI" failed the whole job 38 times by 2026-10-09); drop it and go on.
+        index_batches, index_dropped, index_failures = await fetch_code_batches(
+            fetch, "ths_index_prices_snapshot", list(names), code_filter=fuyao_evidence.index_codes)
+        dropped_indices.extend(index_dropped)
+        failures.extend(index_failures)
+        for _codes, data in index_batches:
             index_rows.extend({**row, "index_tag": tag} for row in fuyao_evidence.index_quote_observations(data, now, names))
     index_stored = await deps.collector.persist_observations("fuyao_ths", "ths_index_prices_snapshot", index_rows) if index_rows else 0
     return {"valuations": len(valuations), "stored": stored, "dropped_codes": dropped[:20], "failures": failures[:5],
-            "index_quotes": len(index_rows), "index_stored": index_stored}
+            "index_quotes": len(index_rows), "index_stored": index_stored, "dropped_index_codes": dropped_indices[:20]}
 
 
 async def job_tick_flow(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
@@ -287,6 +304,8 @@ async def run_due_jobs(deps: ArchiveDeps, state: ArchiveState, now: datetime, *,
             results[job.key] = {"status": "completed", **await RUNNERS[job.key](deps, state, day, now)}
             state.done[job.key] = day.isoformat()
             await deps.collector.record_health("public_archive", job.key, True, 1, None, None)
+        except NotYetPublished as pending:
+            results[job.key] = {"status": "pending", "reason": error_text(pending, 240)}
         except Exception as error:  # noqa: BLE001 - retried on the next window tick
             results[job.key] = {"status": "failed", "error": error_text(error, 240)}
             try:
@@ -318,6 +337,6 @@ async def run_loop(
 
 
 __all__ = [
-    "ArchiveDeps", "ArchiveJob", "ArchiveState", "DATACENTER_EVENT_REPORTS", "JOBS", "RUNNERS",
+    "ArchiveDeps", "ArchiveJob", "ArchiveState", "DATACENTER_EVENT_REPORTS", "JOBS", "NotYetPublished", "RUNNERS",
     "due_jobs", "run_due_jobs", "run_loop",
 ]
