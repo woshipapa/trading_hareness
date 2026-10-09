@@ -67,7 +67,23 @@ REPORTS: dict[str, ReportSpec] = {spec.key: spec for spec in (
                None, "两融市场汇总", _dates("DIM_DATE")),
     ReportSpec("share_capital", "RPT_F10_EH_EQUITY", _WEB, "END_DATE", "-1",
                None, "股本变动", None),
+    # Queried by date or reporting period through ``extra_filter`` (see
+    # suspension_filter / period_filter), never by a capture window.
+    ReportSpec("suspension", "RPT_CUSTOM_SUSPEND_DATA_INTERFACE", _WEB, "SUSPEND_START_DATE,SECURITY_CODE", "-1,1",
+               None, "停复牌", None),
+    ReportSpec("disclosure_schedule", "RPT_PUBLIC_BS_APPOIN", _WEB, "FIRST_APPOINT_DATE,SECURITY_CODE", "1,1",
+               None, "定期报告预约披露", None),
 )}
+
+
+def suspension_filter(trading_date: date) -> str:
+    """Every security suspended on ``trading_date``, including multi-day suspensions begun earlier."""
+    return f'(MARKET="全部")(DATETIME=\'{trading_date.isoformat()}\')'
+
+
+def period_filter(period: date) -> str:
+    """One reporting period (a quarter end) of the disclosure, forecast or express report."""
+    return f"(REPORT_DATE='{period.isoformat()}')"
 
 
 def _parse_clock(value: Any) -> datetime | None:
@@ -194,13 +210,20 @@ async def fetch_report(
     extra_filter: str = "",
     page_size: int = 500,
     max_pages: int = 20,
+    require_complete: bool = False,
 ) -> list[dict[str, Any]]:
-    """Fetch one allow-listed report, paging until exhausted or ``max_pages``."""
+    """Fetch one allow-listed report, paging until exhausted or ``max_pages``.
+
+    ``require_complete`` refuses a short answer: when the pages read hold
+    fewer rows than the report's own ``count``, it raises instead of
+    returning a cross-section that only looks whole.
+    """
     spec = REPORTS[key]
     filters = extra_filter
     if spec.window_filter is not None and start is not None:
         filters = spec.window_filter(start, end or start) + filters
     rows: list[dict[str, Any]] = []
+    expected: int | None = None
     for page in range(1, max(1, max_pages) + 1):
         params = {
             "reportName": spec.report_name, "columns": "ALL", "source": "WEB", "client": "WEB",
@@ -219,12 +242,20 @@ async def fetch_report(
                 break
             raise ValueError("Eastmoney datacenter response has no result")
         data = [dict(row) for row in result.get("data") or [] if isinstance(row, Mapping)]
+        if expected is None:
+            expected = int(number(result.get("count")) or 0)
         rows.extend(data)
         pages = int(number(result.get("pages")) or 1)
         if page >= pages or not data:
             break
+    if require_complete and expected is not None and len(rows) < expected:
+        raise ValueError(f"Eastmoney {spec.report_name} returned {len(rows)} of {expected} rows")
     return rows
 
+
+async def period_report(key: str, period: date) -> list[dict[str, Any]]:
+    """One whole reporting period of a calendar report, or an error - never a short answer."""
+    return await fetch_report(key, extra_filter=period_filter(period), max_pages=40, require_complete=True)
 
 def default_window(key: str, today: date) -> tuple[date, date]:
     """The capture window each daily archive run uses."""
@@ -239,5 +270,5 @@ def default_window(key: str, today: date) -> tuple[date, date]:
 
 __all__ = [
     "PROVIDER_KEY", "REPORTS", "ReportSpec", "available_at", "default_window", "fetch_report",
-    "report_events", "report_observations", "row_symbol",
+    "period_filter", "period_report", "report_events", "report_observations", "row_symbol", "suspension_filter",
 ]

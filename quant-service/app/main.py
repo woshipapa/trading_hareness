@@ -641,6 +641,7 @@ from .longhu_vendor_source import (
 )
 from .longhu_limits import intraday_longhu_max_symbols
 from .full_market_daily_controls_sync import sync as sync_full_market_daily_controls_isolated
+from .datasources.sources import eastmoney_datacenter
 from .earnings_calendar_sync import sync as sync_earnings_calendar_isolated
 from .stock_money_flow_sync import (
     persist_flow_rows as persist_stock_money_flow_rows,
@@ -1235,11 +1236,10 @@ async def sync_stock_money_flow(trade_date: date) -> dict[str, Any]:
 
 
 async def sync_earnings_calendar(as_of_date: date) -> dict[str, Any]:
-    """Ingest one reporting period's disclosure calendar and prior guidance."""
-    return await sync_earnings_calendar_isolated(
-        as_of_date, call_tushare_api=call_tushare_api, parse_date=tushare_date,
-        run_database_blocking=run_database_blocking, db=db, safe_error_detail=safe_error_detail,
-    )
+    """Ingest one reporting period's disclosure calendar and prior guidance from Eastmoney."""
+    return await sync_earnings_calendar_isolated(as_of_date, fetch_period_report=eastmoney_datacenter.period_report,
+                                                 run_database_blocking=run_database_blocking, db=db,
+                                                 safe_error_detail=safe_error_detail)
 
 
 def generate_recommendations(request: GenerateRequest) -> dict[str, Any]:

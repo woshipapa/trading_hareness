@@ -44,6 +44,12 @@ def _report(key: str) -> Callable[..., Awaitable[list[dict[str, Any]]]]:
     return fetch
 
 
+def _period_report(key: str) -> Callable[..., Awaitable[list[dict[str, Any]]]]:
+    async def fetch(*, period: date) -> list[dict[str, Any]]:
+        return await eastmoney_datacenter.period_report(key, period)
+    return fetch
+
+
 def _fuyao_pool(fuyao_fetch: FuyaoFetch, capability: str) -> Callable[..., Awaitable[list[dict[str, Any]]]]:
     async def fetch(*, trade_date: date) -> list[dict[str, Any]]:
         today = datetime.now(timezone.utc).astimezone(CN_TZ).date()
@@ -94,6 +100,7 @@ def register_package_sources(resolver: CapabilityResolver, *, fuyao_fetch: Fuyao
         ("events.repurchase", "repurchase"), ("events.ipo_calendar", "ipo_calendar"),
     ):
         resolver.bind("eastmoney_datacenter", capability, _report(report))
+    resolver.bind("eastmoney_datacenter", "events.disclosure_schedule", _period_report("disclosure_schedule"))
 
     for source, fetch in news_flash.FETCHERS.items():
         resolver.bind(source, "news.flash", fetch)
