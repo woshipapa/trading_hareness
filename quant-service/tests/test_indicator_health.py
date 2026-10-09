@@ -142,6 +142,29 @@ class MainNetHealthTests(unittest.TestCase):
                          "a radar warning makes the gate a warning, not a failure")
 
 
+class MinuteDocumentHealthTests(unittest.TestCase):
+    def _connection(self, summary):
+        connection = _Connection(point=POINT)
+        original = connection._rows
+
+        def rows(sql, params):
+            if "a_share_minute_cross_section" in sql:
+                return [summary]
+            return original(sql, params)
+        connection._rows = rows
+        return connection
+
+    def test_one_document_a_minute_of_bounded_size_is_healthy(self):
+        connection = self._connection({"documents": 60, "max_bytes": 260_000, "last_at": at(10, 30), "max_gap_seconds": 61})
+        self.assertEqual(indicator_status(connection, "market.minute_documents", DAY, at(10, 31))["status"], "ok")
+
+    def test_an_oversized_document_fails_and_none_is_missing(self):
+        oversized = self._connection({"documents": 60, "max_bytes": 4_000_000, "last_at": at(10, 30), "max_gap_seconds": 61})
+        self.assertEqual(indicator_status(oversized, "market.minute_documents", DAY, at(10, 31))["status"], "fail")
+        empty = self._connection({"documents": 0})
+        self.assertEqual(indicator_status(empty, "market.minute_documents", DAY, at(10, 31))["status"], "missing")
+
+
 class SessionHealthTests(unittest.TestCase):
     def test_post_close_indicators_are_pending_during_the_session(self):
         day = indicator_health(_Connection(), DAY, at(10, 31), ["board.concept_flow", "limits.detail"])

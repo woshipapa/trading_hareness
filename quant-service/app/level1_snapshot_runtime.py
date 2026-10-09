@@ -60,13 +60,18 @@ async def capture_level1_snapshot(
             "research_only": True,
         })
     stored = 0
+    timings: dict[str, float] = {}
     if payloads and storage in ("per_symbol", "both"):
+        started = asyncio.get_running_loop().time()
         stored = await persist("fuyao_ths", "a_share_prices_snapshot", payloads)
+        timings["per_symbol_seconds"] = round(asyncio.get_running_loop().time() - started, 3)
     document: dict[str, Any] | None = None
     document_error: str | None = None
     if payloads and storage in ("document", "both") and persist_document is not None:
+        started = asyncio.get_running_loop().time()
         try:
             document = await persist_document(observed_at, payloads, metadata)
+            timings["document_seconds"] = round(asyncio.get_running_loop().time() - started, 3)
         except Exception as error:  # noqa: BLE001 - reported; fatal only when it is the only copy
             if storage == "document":
                 raise
@@ -84,7 +89,7 @@ async def capture_level1_snapshot(
         "upstream_timestamp_ms": metadata.get("upstream_timestamp_ms"),
         "freshness_status": metadata.get("status") or metadata.get("freshness_status") or "unknown",
         "cross_sectional": bool(metadata.get("cross_sectional", False)),
-        "storage": storage,
+        "storage": storage, "timings": timings,
         "document": document, "document_error": document_error,
     }
     if on_persisted is not None and payloads:

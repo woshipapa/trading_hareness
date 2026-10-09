@@ -1,6 +1,6 @@
 # 0009 全 A 分钟截面：一分钟存一行，最新截面走内存
 
-- 状态：提议（待操作者批准后按分步实施）
+- 状态：生效（2026-10-09 操作者批准；第 1–3 步已实现，默认双写 `LEVEL1_STORAGE=both`，待 owner 方确认无人读取逐只行后切为 `document` 并执行第 2 步删除）
 - 日期：2026-10-09
 
 ## 背景
@@ -88,6 +88,13 @@
 2. **收盘后执行。** 存量转换、删除脚本（分批、可续跑、只在收盘后运行），并与对方协调 VACUUM 和 ANALYZE。
 3. **研究面板和接口提速。** 每日 Parquet 导出、研究面板接口、重读接口的缓存或预计算。
 4. **可选。** 需要 DDL，要等与对方的迁移链对齐之后：专用分区表，用二进制压缩矩阵（float32 + zstd）进一步缩小。
+
+## 实现（2026-10-09）
+
+- 第 1 步：`app/minute_cross_section.py`。包含分钟文档、`LEVEL1_STORAGE` 开关、最新截面走内存、最新快照和战法卡片的文档读取；见 `6bd729b`。
+- 第 2 步：`python -m app.minute_cross_section_backfill convert|verify|delete|radar --from --to [--apply]`。只在安全时段运行，删除前必须校验通过；见 `7a5b0a1`。
+- 第 3 步：盘后阶段 `minute_panel_export` 导出 Parquet，加上 `GET /api/v1/market/minute-panel`，并给因子评估、分析师技能的读接口加 120 s 缓存；见 `848b48b`。
+- 指标健康新增 `market.minute_documents`，检查存在、连续性和单份体积；采集结果记录逐只写入与文档写入各自的耗时。
 
 ## 怎样保证
 

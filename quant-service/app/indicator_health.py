@@ -160,6 +160,38 @@ def longhu_mood_checks(connection: Any, trade_date: date, point: dict[str, Any])
     return checks
 
 
+#: A minute document past this size means the columnar encoding stopped working.
+MAX_DOCUMENT_BYTES = 1_500_000
+
+
+def minute_document_checks(connection: Any, trade_date: date, now: datetime) -> list[dict[str, Any]]:
+    start, end = _day_bounds(trade_date)
+    summary = _one(connection, """
+        WITH documents AS (
+            SELECT effective_at,(effective_at AT TIME ZONE 'Asia/Shanghai')::time AS clock,
+                   pg_column_size(normalized) AS bytes
+              FROM quant.raw_market_observations
+             WHERE capability='a_share_minute_cross_section' AND symbol IS NULL AND provider_key='fuyao_ths'
+               AND effective_at>=%s AND effective_at<%s),
+        continuous AS (
+            SELECT effective_at - lag(effective_at) OVER (PARTITION BY clock<'12:00' ORDER BY effective_at) AS gap
+              FROM documents WHERE clock BETWEEN '09:31' AND '11:30' OR clock BETWEEN '13:01' AND '15:00')
+        SELECT (SELECT count(*) FROM documents)::int AS documents, (SELECT max(bytes) FROM documents) AS max_bytes,
+               (SELECT max(effective_at) FROM documents) AS last_at,
+               (SELECT extract(epoch FROM max(gap)) FROM continuous) AS max_gap_seconds""", (start, end))
+    if not summary.get("documents"):
+        return [_check("present", MISSING, 0, ">0", "该日没有分钟文档（LEVEL1_STORAGE=per_symbol，或采集未运行）")]
+    checks = [_check("present", OK, summary["documents"], ">0")]
+    gap = summary.get("max_gap_seconds")
+    checks.append(_check("continuity", WARN if gap is None else _grade(float(gap), FRESH_SECONDS, STALE_SECONDS,
+                                                                        lower_is_better=True),
+                         None if gap is None else round(float(gap)), f"<={FRESH_SECONDS}s", "连续竞价内相邻两份文档的最大间隔"))
+    size = summary.get("max_bytes")
+    checks.append(_check("size", _grade(float(size or 0), MAX_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES * 2, lower_is_better=True),
+                         size, f"<={MAX_DOCUMENT_BYTES}", "单份文档的存储字节（压缩后）"))
+    return checks
+
+
 def main_net_checks(connection: Any, trade_date: date, now: datetime) -> list[dict[str, Any]]:
     flow = latest_main_net(connection, trade_date)
     if not flow:
@@ -273,6 +305,7 @@ def _session_checks(key: str) -> Callable[[Any, date, datetime], list[dict[str, 
 
 CHECKS: dict[str, Callable[[Any, date, datetime], list[dict[str, Any]]]] = {
     "market.radar": radar_checks, "market.main_net": main_net_checks, "limits.detail": limit_detail_checks,
+    "market.minute_documents": minute_document_checks,
     **{key: _session_checks(key) for key in ("board.concept_strength", "board.concept_flow", "board.industry_flow",
                                              "stock.money_flow", "stock.limit_prices", "strategy.ledger", "events.lhb")},
 }
