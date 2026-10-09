@@ -3,6 +3,7 @@
 #
 #   release plan [<ref>]                                    what each host needs for <ref> (default origin/main), read-only
 #   release status [--sha <sha>]                            read-only inventory of both 47 hosts
+#   release workflows [--local-only|--edge-only]            read-only n8n workflow drift report (catalog: workflows/CATALOG.md)
 #   release window <surface>...                             may these surfaces restart now?
 #   release owner full <sha> <label> [--apply]              new checkout and image (migrations applied first, stage D)
 #   release owner code <sha> <label> --from-sha <sha> [--apply]   source overlay for runtime-only changes
@@ -15,7 +16,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 usage() {
-  sed -n '4,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '4,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -25,6 +26,7 @@ shift
 case "$verb" in
   plan) exec python3 "$root/scripts/release_plan.py" "$@" ;;
   status) exec bash "$root/scripts/release-sync-status.sh" "$@" ;;
+  workflows) exec bash "$root/scripts/workflow-status.sh" "$@" ;;
   window) [ $# -gt 0 ] || usage; exec python3 "$root/scripts/release_window.py" check "$@" ;;
   owner|edge)
     kind="${1:-}"
