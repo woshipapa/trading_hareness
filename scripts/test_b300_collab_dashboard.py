@@ -106,6 +106,78 @@ class ParserTests(unittest.TestCase):
         self.assertEqual([(c["side"], c["kind"]) for c in cs], [("executor", "run"), ("reviewer", "fix")])
 
 
+class EventTests(unittest.TestCase):
+    PREV = {
+        "queue": [{"id": "Q03", "owner": "执行方", "task": "锁频选档", "status_class": "running"},
+                  {"id": "Q09", "owner": "执行方", "task": "追加团队", "status_class": "waiting"}],
+        "reviews": [{"file": "15.md", "ordinal": 15, "title": "频率轴", "responded": False}],
+        "proposals": [{"file": "old.md", "title": "目录撞名", "answered": False}],
+        "fixes": [{"num": "1.49", "title": "目录名"}],
+        "runs": [{"name": "r1", "kind": "选档压力测试", "lock": "960", "gpu": "2", "audit": "pass"}],
+        "lock_choice": {"file": "lock_choice_960.json", "chosen": None}, "lock_history": [],
+        "h100": {"state": "live", "timings": [{"run": "t1200_p1", "lock": 1200}], "screens": [{"lock": 1200, "passing": 24, "cells": 25}],
+                 "log": ["[08:00] lock 1620: power screen"]},
+    }
+
+    def cur(self):
+        import copy
+        c = copy.deepcopy(self.PREV)
+        c["queue"][0]["status_class"] = "closed"
+        c["queue"][1]["status_class"] = "blocked"
+        c["queue"].append({"id": "Q40", "owner": "审查方", "task": "新任务", "status_class": "waiting"})
+        c["reviews"][0]["responded"] = True
+        c["reviews"].append({"file": "16.md", "ordinal": 16, "title": "新审查", "responded": False})
+        c["proposals"][0]["answered"] = True
+        c["proposals"].append({"file": "new.md", "title": "新提案", "answered": False})
+        c["fixes"].insert(0, {"num": "1.50", "title": "新修复"})
+        c["runs"] = [{"name": "r3", "kind": "选档短 campaign", "lock": "975", "gpu": "4", "audit": "fail"},
+                     {"name": "r2", "kind": "选档短 campaign", "lock": "990", "gpu": "2", "audit": "pass"}] + c["runs"]
+        c["lock_choice"] = {"file": "lock_choice_975.json", "chosen": 975}
+        c["lock_history"] = [{"file": "lock_choice_960.json", "chosen": None}]
+        c["h100"]["timings"].append({"run": "t1020_p3", "lock": 1020, "p90": 0.012, "audit": "pass"})
+        c["h100"]["screens"] += [{"lock": 1020, "passing": 24, "cells": 25}, {"lock": 1830, "passing": 0, "cells": 25}]
+        c["h100"]["log"].append("[09:00] LADDER STOPPED: timing at 1410 failed: correctness")
+        return c
+
+    def test_every_kind_of_change_and_its_flags(self):
+        ev = {e["type"] + ":" + e["text"][:12]: e for e in dash.diff_snapshots(self.PREV, self.cur())}
+        kinds = [k.split(":")[0] for k in ev]
+        for kind in ("task_status", "task_new", "review_new", "response_new", "proposal_new", "proposal_answered",
+                     "fix_new", "run_new", "lock_chosen", "h100_timing", "h100_screen", "h100_stopped"):
+            self.assertIn(kind, kinds, kind)
+        flags = {e["type"]: (e["attention"], e["trigger"]) for e in dash.diff_snapshots(self.PREV, self.cur())
+                 if e["type"] in ("response_new", "proposal_new", "lock_chosen", "h100_stopped", "fix_new", "review_new")}
+        self.assertEqual(flags["response_new"], (True, True))
+        self.assertEqual(flags["proposal_new"], (True, True))
+        self.assertEqual(flags["lock_chosen"], (True, True))
+        self.assertEqual(flags["h100_stopped"], (True, True))
+        self.assertEqual(flags["fix_new"], (False, False))          # our own pushes are recorded, not sent alone
+        self.assertEqual(flags["review_new"], (False, False))
+        runs = [e for e in dash.diff_snapshots(self.PREV, self.cur()) if e["type"] == "run_new"]
+        self.assertEqual([(e["attention"], "fail" in e["text"]) for e in runs], [(False, False), (True, True)])
+        blocked = [e for e in dash.diff_snapshots(self.PREV, self.cur()) if e["type"] == "task_status" and "Q09" in e["text"]]
+        self.assertEqual((blocked[0]["attention"], blocked[0]["trigger"]), (True, True))
+        self.assertIn("等依赖 → 需返工/等修复", blocked[0]["text"])
+        self.assertEqual(dash.diff_snapshots(self.PREV, self.PREV), [])  # nothing changed, no events
+
+    def test_short_cuts_at_a_clause_or_marks_the_cut(self):
+        self.assertEqual(dash.short("990 MHz 不过属实；990 短 campaign 的校准空洞（修复 1.44）；930 不稳", 45),
+                         "990 MHz 不过属实；990 短 campaign 的校准空洞（修复 1.44）")
+        self.assertEqual(dash.short("abcdefghij", 5), "abcd…")
+        self.assertEqual(dash.short("abc", 5), "abc")
+
+    def test_events_are_appended_unsent_with_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            dash.record_events([{"type": "x", "side": "h100", "text": "a", "attention": False, "trigger": True}],
+                               "2026-10-09T09:00:00Z", "abcdef1234", path)
+            dash.record_events([{"type": "y", "side": "executor", "text": "b", "attention": True, "trigger": True}],
+                               "2026-10-09T09:05:00Z", "abcdef1234", path)
+            events = dash.load_events(path)
+            self.assertEqual([e["id"] for e in events], ["20261009T090000Z-0", "20261009T090500Z-0"])
+            self.assertEqual({e["sent"] for e in events}, {None})
+
+
 class RenderTests(unittest.TestCase):
     def data(self, task_text="锁频选档"):
         q = dash.parse_queue(QUEUE.replace("锁频选档：短 campaign、压力测试", task_text))
@@ -120,6 +192,19 @@ class RenderTests(unittest.TestCase):
         page = dash.render(self.data())
         for text in ("B300 协作进展", "执行方现在在做", "H100 频率轴", "锁频选档", "任务队列",
                      "提交时间线", "审查与回复", "审查方修复", "最近交付的运行目录", "Q03"):
+            self.assertIn(text, page)
+
+    def test_recent_changes_show_what_was_sent(self):
+        d = self.data()
+        d["events"] = [{"at": "2026-10-09T09:00:00Z", "side": "executor", "text": "执行方提案：<b>x</b>", "attention": True,
+                        "trigger": True, "sent": None},
+                       {"at": "2026-10-09T09:05:00Z", "side": "h100", "text": "H100 1020 MHz 完成", "attention": False,
+                        "trigger": True, "sent": "sent 2026-10-09T09:06:00Z"},
+                       {"at": "2026-10-09T09:05:00Z", "side": "reviewer", "text": "修复 1.50", "attention": False,
+                        "trigger": False, "sent": None}]
+        page = dash.render(d)
+        self.assertIn("最近变化", page)
+        for text in ("已发飞书", "待发", "只记录", "&lt;b&gt;x&lt;/b&gt;", 'class="attn"'):
             self.assertIn(text, page)
 
     def test_repository_text_is_escaped(self):

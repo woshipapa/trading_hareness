@@ -12,9 +12,14 @@ service index's visual style:
     state/b300-collab-dashboard.html   (served by serve_service_index.py at /b300)
     state/b300-collab-dashboard.json   (the same data)
 
-The supervisor task b300-collab.watch runs it every 5 minutes after the Feishu
-watcher.  Loopback only: nothing is sent anywhere, no secret is read.  Every text
-taken from the repo is executor- or reviewer-written and is escaped as untrusted.
+Each run also compares the new snapshot with the previous one and appends the
+differences as structured events to state/b300-collab-events.jsonl (a task changed
+status, the executor answered a review, a new run or lock decision arrived, an H100
+ladder step finished).  The supervisor task b300-collab.watch runs this script, then
+sends the unsent events with the executor's new commits to Feishu and marks them
+sent, then re-renders the page (--render-only) so the page shows what was sent.
+Loopback only: this script sends nothing, reads no secret.  Every text taken from
+the repo is executor- or reviewer-written and is escaped as untrusted.
 """
 
 from __future__ import annotations
@@ -39,6 +44,10 @@ CLONE = Path(os.environ.get("B300_DASH_CLONE", str(STATE / "b300-collab-repo")))
 OUT_HTML = Path(os.environ.get("B300_DASH_HTML", str(STATE / "b300-collab-dashboard.html")))
 OUT_JSON = Path(os.environ.get("B300_DASH_JSON", str(STATE / "b300-collab-dashboard.json")))
 H100_CACHE = STATE / "b300-collab-h100.json"
+EVENTS = Path(os.environ.get("B300_DASH_EVENTS", str(STATE / "b300-collab-events.jsonl")))
+EVENTS_KEEP = 500
+CLASS_LABELS = {"running": "运行中", "ready": "可开始", "waiting": "等依赖", "review": "待审",
+                "blocked": "需返工/等修复", "closed": "已结案", "other": "其他"}
 EXECUTOR_AUTHOR = os.environ.get("B300_COLLAB_EXECUTOR_AUTHOR", "b300-exec-agent")
 COLLAB = "analysis/b300_collab"
 SPARSE = [
@@ -335,6 +344,136 @@ def read_h100() -> dict[str, Any]:
         return {"state": "unreachable"}
 
 
+# ---------------------------------------------------------------- events
+def short(text: str, n: int) -> str:
+    """At most n characters: cut at a "；" boundary when one falls in the second half, else add "…"."""
+    text = text.strip()
+    if len(text) <= n:
+        return text
+    cut = text.rfind("；", n // 2, n)
+    return text[:cut] if cut > 0 else text[:n - 1] + "…"
+
+
+def _event(kind: str, side: str, text: str, attention: bool = False, trigger: bool = False) -> dict[str, Any]:
+    return {"type": kind, "side": side, "text": text, "attention": attention, "trigger": trigger}
+
+
+def diff_snapshots(prev: dict[str, Any], cur: dict[str, Any]) -> list[dict[str, Any]]:
+    """What changed between two snapshots, as events.  trigger: worth a Feishu message on its own;
+    attention: listed under "需要审查方处理".  Commits are not events (the watcher lists them)."""
+    ev: list[dict[str, Any]] = []
+    old_q = {t["id"]: t for t in prev.get("queue", [])}
+    for t in cur.get("queue", []):
+        o = old_q.get(t["id"])
+        if o is None:
+            ev.append(_event("task_new", "reviewer", f"新任务 {t['id']}（{t['owner']}）：{short(t['task'], 60)}"))
+        elif o.get("status_class") != t["status_class"]:
+            blocked = t["status_class"] == "blocked"
+            ev.append(_event("task_status", "reviewer",
+                             f"{t['id']} {CLASS_LABELS.get(o.get('status_class'), '?')} → "
+                             f"{CLASS_LABELS.get(t['status_class'], '?')}：{short(t['task'], 50)}", blocked, blocked))
+    old_r = {r["file"]: r for r in prev.get("reviews", [])}
+    for r in cur.get("reviews", []):
+        o = old_r.get(r["file"])
+        name = f"第 {r['ordinal'] or '?'} 份审查"
+        if o is None:
+            ev.append(_event("review_new", "reviewer", f"{name}发布：{short(r['title'], 60)}"))
+        if r.get("responded") and not (o or {}).get("responded"):
+            ev.append(_event("response_new", "executor", f"执行方回复了{name}（{short(r['title'], 60)}）", True, True))
+    old_p = {x["file"]: x for x in prev.get("proposals", [])}
+    for x in cur.get("proposals", []):
+        o = old_p.get(x["file"])
+        if o is None and not x.get("answered"):
+            ev.append(_event("proposal_new", "executor", f"执行方提案：{short(x['title'], 70)}", True, True))
+        elif o is not None and x.get("answered") and not o.get("answered"):
+            ev.append(_event("proposal_answered", "reviewer", f"提案已答复：{short(x['title'], 60)}"))
+    old_f = {f["num"] for f in prev.get("fixes", [])}
+    for f in reversed(cur.get("fixes", [])):
+        if f["num"] not in old_f:
+            ev.append(_event("fix_new", "reviewer", f"修复 {f['num']}：{short(f['title'], 60)}"))
+    old_runs = {r["name"] for r in prev.get("runs", [])}
+    for r in reversed(cur.get("runs", [])):
+        if r["name"] not in old_runs:
+            failed = r.get("audit") not in ("pass", "")
+            gpu = f" GPU{r['gpu']}" if r.get("gpu") else ""
+            lock = f" {r['lock']} MHz" if r.get("lock") else ""
+            ev.append(_event("run_new", "executor", f"新运行：{r['kind']}{lock}{gpu}，审计 {r.get('audit') or '—'}",
+                             failed, True))
+    def decisions(snap):
+        out = {}
+        if snap.get("lock_choice"):
+            out[snap["lock_choice"]["file"]] = snap["lock_choice"].get("chosen")
+        for h in snap.get("lock_history", []):
+            out[h["file"]] = h.get("chosen")
+        return out
+    old_d = decisions(prev)
+    for f, chosen in decisions(cur).items():
+        if f not in old_d:
+            if chosen:
+                ev.append(_event("lock_chosen", "executor", f"decide（{f}）选出 L = {chosen} MHz：审查方把 L 写进 platforms.py（Q05）",
+                                 True, True))
+            else:
+                ev.append(_event("lock_decision", "executor", f"decide（{f}）：没有选出锁频（chosen=null）", False, True))
+    ph, ch = prev.get("h100", {}), cur.get("h100", {})
+    if ch.get("state") == "live":
+        old_t = {t["run"] for t in ph.get("timings", [])}
+        screens = {s["lock"]: s for s in ch.get("screens", [])}
+        for t in ch.get("timings", []):
+            if t["run"] not in old_t:
+                s = screens.get(t["lock"], {})
+                p90 = f"{100 * t['p90']:.2f}%" if isinstance(t.get("p90"), (int, float)) else "—"
+                ev.append(_event("h100_timing", "h100", f"H100 频率轴：{t['lock']} MHz 计时完成，筛查 {s.get('passing', '?')}/"
+                                 f"{s.get('cells', '?')} 格，轮间偏差 p90 {p90}，审计 {t.get('audit') or '—'}", False, True))
+        old_s = {s["lock"] for s in ph.get("screens", [])}
+        for s in ch.get("screens", []):
+            if s["lock"] not in old_s and s.get("passing", 0) < 3:
+                ev.append(_event("h100_screen", "h100", f"H100 频率轴：{s['lock']} MHz 筛查只有 {s['passing']}/{s['cells']} 格"
+                                 "不撞墙，这一档不计时", False, True))
+        old_log = set(ph.get("log", []))
+        for line in ch.get("log", []):
+            if line in old_log:
+                continue
+            if "LADDER STOPPED" in line:
+                ev.append(_event("h100_stopped", "h100", "H100 频率轴阶梯中途停下：" + line.split("LADDER STOPPED:", 1)[-1].strip()[:120],
+                                 True, True))
+            elif "LADDER_DONE" in line:
+                ev.append(_event("h100_done", "h100", "H100 频率轴阶梯全部完成", False, True))
+    return ev
+
+
+def load_events(path: Path = EVENTS) -> list[dict[str, Any]]:
+    out = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return out
+
+
+def write_events(events: list[dict[str, Any]], path: Path = EVENTS) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events[-EVENTS_KEEP:]), encoding="utf-8")
+    tmp.replace(path)
+
+
+def record_events(new: list[dict[str, Any]], at: str, tip: str, path: Path = EVENTS) -> list[dict[str, Any]]:
+    """Append new events (unsent) and return the whole log."""
+    events = load_events(path)
+    stamp = at.replace("-", "").replace(":", "")
+    for i, e in enumerate(new):
+        events.append({"id": f"{stamp}-{i}", "at": at, "tip": tip[:8], **e, "sent": None})
+    if new:
+        write_events(events, path)
+    return events
+
+
 # ---------------------------------------------------------------- collect
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -490,7 +629,18 @@ def render(d: dict[str, Any]) -> str:
                    f'<td>{pill("green", "pass") if r["audit"] == "pass" else esc(r["audit"] or "—")}</td>'
                    f'<td class="why">{esc(r["verdict"])}</td></tr>' for r in d["runs"][:25])
 
+    side_pill = {"executor": ("blue", "执行方"), "reviewer": ("violet", "审查方"), "h100": ("green", "H100")}
+    ev_rows = []
+    for e in reversed(d.get("events", [])[-25:]):
+        cls, label = side_pill.get(e.get("side"), ("amber", e.get("side", "?")))
+        sent = (pill("green", "已发飞书") if e.get("sent") else
+                pill("amber", "待发") if e.get("trigger") else '<span class="muted">只记录</span>')
+        ev_rows.append(f'<li class="{"attn" if e.get("attention") else ""}"><time>{esc(local_time(e.get("at", "")))}</time>'
+                       f'{pill(cls, label)}<span class="subj">{esc(e.get("text", ""))}</span>{sent}</li>')
+    events_html = "".join(ev_rows) or '<li class="muted">还没有变化记录（第一次运行只记基线）</li>'
+
     return PAGE.format(
+        events=events_html,
         generated=esc(local_time(d["generated_at"], "%Y-%m-%d %H:%M")), tip=esc(d["tip"][:8]), branch_url=esc(d["branch_url"]),
         queue_updated=esc(d["queue_updated"]), tiles=tiles_html, heartbeat=hb_html, h100=h_html, lock=lock_html,
         board="".join(board), timeline=tl or "<li class=muted>近几天没有提交</li>", reviews=reviews, proposals=props or "<li class=muted>无</li>",
@@ -568,12 +718,19 @@ th, td {{ white-space: nowrap; }}
 .timeline li {{ display: grid; grid-template-columns: 82px 54px 58px minmax(0, 1fr) 64px; gap: 8px; align-items: baseline; padding: 6px 4px; border-bottom: 1px solid var(--line); font-size: 13px; }}
 .timeline time, .timeline .kind {{ color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }}
 .timeline .subj {{ overflow-wrap: anywhere; }}
+.events {{ list-style: none; margin: 0; padding: 0 !important; max-height: 360px; overflow-y: auto; }}
+.events li {{ display: grid; grid-template-columns: 82px 58px minmax(0, 1fr) auto; gap: 8px; align-items: baseline;
+  padding: 6px 4px; border-bottom: 1px solid var(--line); font-size: 13px; }}
+.events li.attn {{ background: var(--red-soft); }}
+.events li.muted, .timeline li.muted {{ display: block; }}
+.events time {{ color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }}
 .docs {{ list-style: none; padding: 0 !important; }}
 .docs li {{ padding: 6px 0; border-bottom: 1px solid var(--line); }}
 .docs p {{ margin: 2px 0 0; color: var(--muted); font-size: 12px; }}
 @media (max-width: 1100px) {{ .board {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }} }}
 @media (max-width: 900px) {{ .board {{ grid-template-columns: 1fr 1fr; }} .timeline li {{ grid-template-columns: 70px 50px minmax(0, 1fr); }} .timeline .kind, .timeline a {{ display: none; }} }}
-@media (max-width: 560px) {{ .board {{ grid-template-columns: 1fr; }} }}
+@media (max-width: 560px) {{ .board {{ grid-template-columns: 1fr; }}
+  .events li {{ grid-template-columns: 70px minmax(0, 1fr); }} .events li .pill:first-of-type {{ display: none; }} }}
 </style>
 </head>
 <body>
@@ -584,6 +741,9 @@ th, td {{ white-space: nowrap; }}
   <div class="meta">生成于 {generated}（北京时间）· 分支 <a href="{branch_url}">{tip}</a> · <a href="/">服务索引</a></div>
 </div>
 <div class="tiles">{tiles}</div>
+
+<section><h2>最近变化（每 5 分钟和上一轮对比；触发飞书的标"待发 / 已发飞书"）</h2>
+  <div class="card"><ul class="events">{events}</ul></div></section>
 
 <div class="grid2">
   <section><h2>执行方现在在做</h2><div class="card">{heartbeat}</div></section>
@@ -625,23 +785,43 @@ document.querySelectorAll('.filters button').forEach((b) => b.addEventListener('
 """
 
 
+def write_page(data: dict[str, Any]) -> None:
+    data = {**data, "events": load_events()[-40:]}
+    tmp = OUT_HTML.with_suffix(".tmp")
+    tmp.write_text(render(data), encoding="utf-8")
+    tmp.replace(OUT_HTML)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--no-sync", action="store_true", help="use the clone as it is (no fetch)")
+    parser.add_argument("--render-only", action="store_true",
+                        help="re-render the page from the saved snapshot and the event log (after the watcher sent)")
     args = parser.parse_args()
+    if args.render_only:
+        try:
+            write_page(json.loads(OUT_JSON.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as exc:
+            print(f"[b300-dashboard] render-only: {type(exc).__name__}", file=sys.stderr)
+            return 1
+        return 0
+    try:
+        prev = json.loads(OUT_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        prev = None                     # first run: a baseline, no events
     try:
         tip = git("rev-parse", "HEAD").strip() if args.no_sync else sync_clone()
         data = collect(tip)
     except Exception as exc:  # noqa: BLE001 - the previous page stays; next run retries
         print(f"[b300-dashboard] {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr)
         return 1
+    new = diff_snapshots(prev, data) if prev else []
+    record_events(new, data["generated_at"], data["tip"])
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     OUT_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp = OUT_HTML.with_suffix(".tmp")
-    tmp.write_text(render(data), encoding="utf-8")
-    tmp.replace(OUT_HTML)
+    write_page(data)
     print(f"[b300-dashboard] {data['tip'][:8]}: {len(data['queue'])} tasks, {len(data['commits'])} commits, "
-          f"h100 {data['h100'].get('state')}")
+          f"h100 {data['h100'].get('state')}, {len(new)} new event(s)")
     return 0
 
 

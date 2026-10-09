@@ -142,6 +142,80 @@ class RunTests(unittest.TestCase):
         sender.assert_not_called()
 
 
+class EventLinkTests(unittest.TestCase):
+    """看板事件随消息发出：单独值得发的才单独发，其余跟着下一条走；发失败不标已发。"""
+
+    def setUp(self):
+        import b300_collab_dashboard as dash
+        self.dash = dash
+        self.dir = tempfile.TemporaryDirectory()
+        self.old_state = watch.STATE_PATH
+        watch.STATE_PATH = Path(self.dir.name, "state.json")
+        watch.STATE_PATH.write_text(json.dumps({"last_seen_sha": "a" * 40}))
+
+    def tearDown(self):
+        watch.STATE_PATH = self.old_state
+        self.dir.cleanup()
+
+    def add(self, text, trigger=True, attention=False, at=None):
+        at = at or watch.now_iso()
+        self.dash.record_events([{"type": "t", "side": "h100", "text": text, "attention": attention, "trigger": trigger}],
+                                at, "abc", watch.events_path())
+
+    def sent(self):
+        return {e["text"]: e["sent"] for e in self.dash.load_events(watch.events_path())}
+
+    def test_trigger_events_alone_send_a_status_update(self):
+        self.add("H100 频率轴阶梯中途停下：correctness", attention=True)
+        ok = mock.Mock(return_value={"status": "sent"})
+        with mock.patch.dict(os.environ, {watch.WEBHOOK_ENV: HOOK}):
+            self.assertEqual(watch.run(fetch=lambda: [commit("a", "run: a")], sender=ok), 0)
+        text, _url, key = ok.call_args.args
+        self.assertTrue(text.startswith("B300 协作：状态更新（分支 aaaaaaa）"))
+        self.assertIn("需要审查方处理：\n- H100 频率轴阶梯中途停下", text)
+        self.assertIn(watch.DASHBOARD_URL, text)
+        self.assertTrue(key.startswith("b300-collab-events-"))
+        self.assertTrue(self.sent()["H100 频率轴阶梯中途停下：correctness"].startswith("sent "))
+
+    def test_record_only_events_ride_along_with_the_next_message(self):
+        self.add("修复 1.50：新修复", trigger=False)
+        sender = mock.Mock(return_value={"status": "sent"})
+        with mock.patch.dict(os.environ, {watch.WEBHOOK_ENV: HOOK}):
+            watch.run(fetch=lambda: [commit("a", "run: a")], sender=sender)
+            sender.assert_not_called()
+            self.assertIsNone(self.sent()["修复 1.50：新修复"])
+            watch.run(fetch=lambda: [commit("b", "run: b"), commit("a", "run: a")], sender=sender)
+        text = sender.call_args.args[0]
+        self.assertIn("状态变化：\n- 修复 1.50：新修复", text)
+        self.assertTrue(self.sent()["修复 1.50：新修复"].startswith("sent "))
+
+    def test_failed_send_leaves_events_unsent(self):
+        self.add("执行方提案：x", attention=True)
+        failing = mock.Mock(return_value={"status": "failed", "http": 500})
+        with mock.patch.dict(os.environ, {watch.WEBHOOK_ENV: HOOK}):
+            self.assertEqual(watch.run(fetch=lambda: [commit("a", "run: a")], sender=failing), 1)
+        self.assertIsNone(self.sent()["执行方提案：x"])
+
+    def test_baseline_and_stale_events_are_not_sent(self):
+        watch.STATE_PATH.unlink()
+        self.add("基线之前的事件")
+        sender = mock.Mock()
+        watch.run(fetch=lambda: [commit("a", "run: a")], sender=sender)
+        self.assertTrue(self.sent()["基线之前的事件"].startswith("baseline "))
+        self.add("两天前的事件", at="2026-01-01T00:00:00Z")
+        with mock.patch.dict(os.environ, {watch.WEBHOOK_ENV: HOOK}):
+            watch.run(fetch=lambda: [commit("a", "run: a")], sender=sender)
+        sender.assert_not_called()
+        self.assertTrue(self.sent()["两天前的事件"].startswith("expired "))
+
+    def test_commits_come_from_the_clone_or_from_gh(self):
+        with mock.patch.object(watch, "fetch_commits_from_clone", side_effect=FileNotFoundError("no clone")), \
+                mock.patch.object(watch, "fetch_commits", return_value=[commit("z", "run: z")]):
+            self.assertEqual(watch.clone_or_gh()[0]["sha"][0], "z")
+        with mock.patch.object(watch, "fetch_commits_from_clone", return_value=[commit("y", "run: y")]):
+            self.assertEqual(watch.clone_or_gh()[0]["sha"][0], "y")
+
+
 class SupervisorEntryTests(unittest.TestCase):
     """supervisor 每 5 分钟跑一次；webhook 只在配置了时才交给子进程。"""
 
