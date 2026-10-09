@@ -289,6 +289,45 @@ class DashboardHttpTests(unittest.TestCase):
         queries = edge_api.STORE.topic_search_queries()
         self.assertIn({"slug": "agents", "keyword": "多智能体"}, queries)
 
+    def test_digest_routes_queue_list_and_serve_the_rendered_markdown(self):
+        value = normalize({"id": "1" * 24, "note_card": {"title": "GPU 实践", "desc": "正文",
+                           "user": {"nickname": "Infra"}, "time": 1750000000000}},
+                          "topic:ai_infra:GPU")
+        edge_api.STORE.add_note(value, "topic:ai_infra:GPU")
+        edge_api.STORE.enqueue_pending()
+        job = edge_api.STORE.claim("screener")
+        edge_api.STORE.complete(job["job_id"], job["lease_token"], {
+            "decisions": [{"candidate_id": job["candidate_ids"][0], "decision": "include",
+                           "topics": [{"topic_id": "ai_infra", "score": .9}],
+                           "relevance_score": .9, "confidence": .9, "reason": "相关"}],
+            "model": "fake", "input_sha256": "test"})
+        self.browser.open(self.base + "/xhs/", timeout=3).close()
+        status, payload = self.browser_json("/v1/dashboard/digest/run", {"trigger": "dashboard"})
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["status"], "queued")
+        date_value = payload["digest_date"]
+        status, duplicate = self.machine_json("/v1/digest/run", {"trigger": "n8n_digest_daily"})
+        self.assertEqual(status, 202)
+        self.assertEqual(duplicate["status"], "duplicate")
+        _, listing = self.browser_json("/v1/digests")
+        self.assertEqual(listing["digests"][0]["digest_date"], date_value)
+        claimed = edge_api.STORE.claim("digest-worker")
+        while claimed and claimed["job_type"] != "daily_digest":
+            edge_api.STORE.complete(claimed["job_id"], claimed["lease_token"],
+                                    {"summary": "x", "model": "fake"})
+            claimed = edge_api.STORE.claim("digest-worker")
+        edge_api.STORE.complete(claimed["job_id"], claimed["lease_token"],
+                                {"summary": "## 今日导读\n- 要点", "model": "fake"})
+        status, detail = self.browser_json(f"/v1/digests/detail?date={date_value}")
+        self.assertEqual(status, 200)
+        self.assertIn("今日导读", detail["digest"]["summary"])
+        self.assertEqual(detail["digest"]["notes"][0]["note_id"], "1" * 24)
+        self.assertNotIn("xsec_token", json.dumps(detail))
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.browser_json("/v1/digests/detail?date=not-a-date")
+        self.assertEqual(error.exception.code, 400)
+        error.exception.close()
+
     def test_dashboard_recommendation_runs_do_not_reuse_hourly_scheduler_keys(self):
         first = edge_api._recommendation_run_id({"trigger": "dashboard"}, 50)
         second = edge_api._recommendation_run_id({"trigger": "dashboard"}, 50)

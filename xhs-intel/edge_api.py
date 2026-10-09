@@ -515,6 +515,14 @@ def _start_topic_collection_async(payload=None):
     return {'status': 'accepted', 'message': '主题关键词采集已在 Edge 后台启动，请稍后查询 status'}
 
 
+def run_daily_digest(payload=None):
+    """Queue the per-day learning digest; pure SQLite, so no background thread."""
+    payload = dict(payload or {})
+    return STORE.queue_daily_digest(
+        payload.get('date') or payload.get('digest_date'),
+        deliver_to_feishu=bool(payload.get('deliver_to_feishu', True)))
+
+
 def run_watch(payload=None):
     payload = dict(payload or {})
     users = STORE.list_watch_users()
@@ -637,6 +645,25 @@ def command_result(payload):
             user_id = _watch_user_id(command.split()[-1])
             STORE.reject_following_candidate(user_id, actor)
             text = f"已拒绝关注候选：{user_id}"
+        elif lowered in {"#xhs digest latest", "#xhs 简报"}:
+            rows = STORE.list_digests(limit=1)
+            value = STORE.get_digest(rows[0]['digest_date']) if rows else None
+            if value:
+                text = (value.get('summary') or f"{value['digest_date']} 的简报仍在生成中（{value['status']}），请稍后再试。")[:2800]
+            else:
+                text = "暂无每日简报，可先执行 #xhs intel digest run。"
+        elif lowered.startswith("#xhs digest ") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", command.split()[-1]):
+            date_value = command.split()[-1]
+            value = STORE.get_digest(date_value)
+            if value:
+                text = (value.get('summary') or f"{date_value} 的简报仍在生成中（{value['status']}）。")[:2800]
+            else:
+                text = f"未找到 {date_value} 的简报。"
+        elif lowered in {"#xhs intel digest run", "#xhs 生成简报"}:
+            value = run_daily_digest({'trigger': 'feishu_command'})
+            labels = {'queued': '已进入生成队列', 'duplicate': '当日简报已存在',
+                      'empty': '近一天没有可入简报的笔记'}
+            text = f"每日简报（{value.get('digest_date', '')}）：{labels.get(value.get('status'), value.get('status'))}"
         elif lowered in {"#xhs intel scan topics", "#xhs 主题采集"}:
             _start_topic_collection_async({'trigger': 'feishu_command'})
             text = "已启动主题关键词采集，完成后可使用 #xhs status 查看队列与运行记录。"
@@ -739,6 +766,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/topics":
             reply(self, 200, {"status": "ok", "topics": STORE.list_topics(enabled=None)})
             return
+        if path == "/v1/digests":
+            limit = _query_int(query, "limit", 30, 1, 100)
+            reply(self, 200, {"status": "ok", "digests": STORE.list_digests(limit=limit)})
+            return
+        if path == "/v1/digests/detail":
+            date_value = str(query.get("date", [""])[0]).strip()
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_value):
+                reply(self, 400, {"status": "failed", "error": "digest_date_required"})
+                return
+            value = STORE.get_digest(date_value)
+            if not value:
+                reply(self, 404, {"status": "not_found", "digest_date": date_value})
+                return
+            reply(self, 200, {"status": "ok", "digest": value})
+            return
         if path == "/v1/watch-users":
             enabled = str(query.get("enabled", ["active"])[0]).strip().lower()
             filter_value = None if enabled == "all" else enabled not in {"0", "false", "disabled"}
@@ -822,6 +864,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/v1/dashboard/topics/run":
                 reply(self, 202, _start_topic_collection_async(payload))
+                return
+            if path == "/v1/dashboard/digest/run":
+                reply(self, 202, run_daily_digest(payload))
                 return
             if path == "/v1/dashboard/watch-users":
                 action = str(payload.get("action") or "add").strip().lower()
@@ -907,6 +952,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/v1/topics/run":
                 reply(self, 202, _start_topic_collection_async(payload))
+                return
+            if path == "/v1/digest/run":
+                reply(self, 202, run_daily_digest(payload))
                 return
             if path == "/v1/recommendations/run":
                 reply(self, 200, run_recommendation(payload))

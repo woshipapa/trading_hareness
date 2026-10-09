@@ -252,10 +252,56 @@ def make_filter_prompt(job):
     return "\n".join(lines)[:100000]
 
 
+def make_digest_prompt(job):
+    """Per-topic daily digest with delta marking against the previous digest."""
+    policy = job.get("policy") or {}
+    topic_names = "、".join(
+        f"{item.get('name', '')}({item.get('slug', '')})"
+        for item in policy.get("topics") or [])
+    lines = [
+        "你是做 AI infra / systems for AI 的中文研究编辑，负责写一份个人学习用的每日情报简报。",
+        f"简报日期:{job.get('digest_date', '')}。输出纯 Markdown，结构固定为:",
+        "1. `## 今日导读`:3-6 条全局要点，每条一句话并标注所属主题;",
+        "2. 按主题分节(`## 主题:<名称>`)，只为有内容的主题建节;每节 2-6 条,",
+        "   每条包含结论、依据(原文事实、作者观点、编辑推断分开表述)和 标题+作者+原文链接;",
+        "3. `## 与昨日对比`:相对昨日简报的新话题、进展与反转;无昨日简报则写'首次记录';",
+        "4. `## 待核验`:集中列出可疑数字、传闻与营销表述;",
+        "5. `## 继续跟踪`:值得跟进的方向，以及建议加入主题检索词的新关键词。",
+        "不得虚构原文没有的事实;无法核验的内容必须标注'待核验'。全文 4000 字以内。",
+        f"可用主题:{topic_names}",
+        f"任务:{job.get('job_id', '')}",
+        "",
+        "=== 昨日简报(仅用于对比，勿重复照抄) ===",
+        str(job.get("previous_digest") or "(无)")[:4000],
+        "",
+        "=== 今日候选笔记 ===",
+    ]
+    for index, note in enumerate(job.get("notes") or [], 1):
+        topics_tag = "、".join(
+            str(item.get("topic_id") or "") for item in (note.get("_topics") or [])
+            if isinstance(item, dict) and item.get("topic_id")) or "未分类"
+        lines.extend([
+            f"### 笔记 {index}(主题:{topics_tag})",
+            f"标题:{note.get('title', '')}",
+            f"作者:{note.get('author', '')}",
+            f"时间:{note.get('published_at', '')}",
+            f"链接:{note.get('url', '')}",
+            f"正文:{str(note.get('text', ''))[:3000]}",
+            "",
+        ])
+    return "\n".join(lines)[:100000]
+
+
 def summarize(job):
     notes = list(job.get("notes") or [])
     media, stats = _load_note_images(notes)
     return _request_summary(make_prompt(job), media=media, media_stats=stats)
+
+
+def build_digest(job):
+    # The digest covers up to dozens of already-screened notes; it stays
+    # text-only so one job cannot fan out into hundreds of image downloads.
+    return _request_summary(make_digest_prompt(job))
 
 
 def analyze_single_note(job):
@@ -399,6 +445,8 @@ def process_job(job):
         return run_with_heartbeat(job, classify_profiles)
     if job.get("job_type") == "single_note_analysis":
         return run_with_heartbeat(job, analyze_single_note)
+    if job.get("job_type") == "daily_digest":
+        return run_with_heartbeat(job, build_digest)
     return run_with_heartbeat(job, summarize)
 
 

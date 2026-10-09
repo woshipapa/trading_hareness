@@ -23,6 +23,7 @@ const iconPaths = {
   terminal: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m6 9 3 3-3 3M13 15h5"/>',
   message: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/><path d="M8 10h8M8 14h5"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1.1"/>',
+  book: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
 };
 
 function icon(name, label = '') {
@@ -41,6 +42,9 @@ const state = {
   activeView: 'overview',
   followingTab: 'watch',
   dashboard: null,
+  digests: [],
+  selectedDigestDate: '',
+  digestDetail: null,
   jobs: [],
   watchUsers: [],
   candidates: [],
@@ -62,6 +66,7 @@ const state = {
 
 const pageMeta = {
   overview: ['运行总览', '采集、AI 筛选与飞书投递状态'],
+  digest: ['每日简报', '按主题整合的每日学习简报与历史回看'],
   recommendations: ['推荐筛选', '每日推荐流的候选、判断与摘要状态'],
   single: ['单篇解析', '抓取指定文章并由本机 AI 独立分析'],
   topics: ['关注主题', '管理可版本化的内容筛选策略'],
@@ -196,7 +201,7 @@ async function refreshAll({ quiet = false } = {}) {
     render();
   }
   try {
-    const [dashboard, jobs, watch, candidates, following, capabilities, feishu, singleNotes] = await Promise.all([
+    const [dashboard, jobs, watch, candidates, following, capabilities, feishu, singleNotes, digests] = await Promise.all([
       api('/v1/dashboard'),
       api('/v1/jobs?limit=40'),
       api('/v1/watch-users?enabled=all'),
@@ -205,8 +210,12 @@ async function refreshAll({ quiet = false } = {}) {
       api('/v1/capabilities'),
       api('/v1/feishu/status?limit=50'),
       api('/v1/single-notes?limit=20'),
+      api('/v1/digests?limit=30'),
     ]);
     state.dashboard = dashboard;
+    state.digests = digests.digests || [];
+    if (!state.selectedDigestDate && state.digests.length) state.selectedDigestDate = state.digests[0].digest_date;
+    if (state.activeView === 'digest' && state.selectedDigestDate) await loadDigest(state.selectedDigestDate, false);
     state.jobs = jobs.jobs || [];
     state.watchUsers = watch.users || [];
     state.candidates = candidates.candidates || [];
@@ -247,6 +256,81 @@ async function loadRecommendationItems(runId, rerender = true) {
     state.error = error.message || String(error);
   }
   if (rerender) render();
+}
+
+async function loadDigest(date, rerender = true) {
+  state.selectedDigestDate = date;
+  try {
+    const result = await api(`/v1/digests/detail?date=${encodeURIComponent(date)}`);
+    state.digestDetail = result.digest || null;
+    state.error = '';
+  } catch (error) {
+    state.digestDetail = null;
+    state.error = error.message || String(error);
+  }
+  if (rerender) render();
+}
+
+function renderMarkdownInline(text) {
+  let value = escapeHtml(text);
+  value = value.replace(/`([^`]+)`/g, '<code>$1</code>');
+  value = value.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  value = value.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, url) => {
+    const safe = safeXhsUrl(url);
+    return safe === '#' ? label : `<a href="${safe}" target="_blank" rel="noreferrer">${label}</a>`;
+  });
+  return value;
+}
+
+function renderMarkdown(markdown) {
+  // Minimal dependency-free renderer: content is escaped first, and only
+  // xiaohongshu.com links survive as anchors.
+  const blocks = [];
+  let list = [];
+  const flushList = () => {
+    if (list.length) { blocks.push(`<ul>${list.join('')}</ul>`); list = []; }
+  };
+  for (const raw of String(markdown || '').split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    const bullet = /^\s*(?:[-*]|\d+[.、])\s+(.*)$/.exec(line);
+    if (bullet) { list.push(`<li>${renderMarkdownInline(bullet[1])}</li>`); continue; }
+    flushList();
+    const heading = /^(#{1,4})\s+(.*)$/.exec(line);
+    if (heading) {
+      const level = Math.min(4, heading[1].length + 1);
+      blocks.push(`<h${level}>${renderMarkdownInline(heading[2])}</h${level}>`);
+      continue;
+    }
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote) { blocks.push(`<blockquote>${renderMarkdownInline(quote[1])}</blockquote>`); continue; }
+    if (line.trim()) blocks.push(`<p>${renderMarkdownInline(line)}</p>`);
+  }
+  flushList();
+  return blocks.join('');
+}
+
+function renderDigest() {
+  const digests = state.digests || [];
+  const selected = digests.find((row) => row.digest_date === state.selectedDigestDate) || digests[0] || null;
+  const list = digests.length ? digests.map((row) => `<button type="button" class="run-option ${selected && row.digest_date === selected.digest_date ? 'active' : ''}" data-action="select-digest" data-date="${escapeHtml(row.digest_date)}"><div class="run-option-top"><strong>${escapeHtml(row.digest_date)}</strong>${pill(row.status)}</div><div class="run-stats"><span>来源 ${row.note_count || 0} 篇</span><span>${row.deliver_to_feishu ? '飞书投递' : '仅网页'}</span></div></button>`).join('') : emptyState('暂无简报', '生成今日简报，或等待每日定时任务。');
+  const detail = state.digestDetail;
+  let body = emptyState('选择一期简报', '左侧选择日期查看完整内容。');
+  if (detail && selected && detail.digest_date === selected.digest_date) {
+    if (detail.summary) {
+      const sources = (detail.notes || []).map((note) => `<li><a href="${safePreviewUrl(note.preview_url, note.note_id)}" target="_blank" rel="noreferrer">${escapeHtml(note.title || '无标题')}</a><span class="muted"> · ${escapeHtml(note.author || '作者未知')}${note.topics?.length ? ' · ' + escapeHtml(note.topics.join('、')) : ''}</span></li>`).join('');
+      body = `<article class="markdown">${renderMarkdown(detail.summary)}</article><details class="digest-sources"><summary>本期来源（${(detail.notes || []).length} 篇）</summary><ul>${sources}</ul></details>`;
+    } else {
+      body = emptyState('简报生成中', detail.last_error ? `上次错误：${detail.last_error}` : '本机 AI worker 完成后这里会显示完整内容。');
+    }
+  }
+  const action = `<button class="button primary" data-action="run-digest">${icon('sparkles')}<span>生成今日简报</span></button>`;
+  const header = selected
+    ? sectionHeader(`每日简报 · ${selected.digest_date}`, `${selected.note_count || 0} 篇来源 · ${statusLabel(selected.status)}${detail?.model ? ` · 模型 ${detail.model}` : ''}`, action)
+    : sectionHeader('每日简报', '按主题整合的每日学习内容', action);
+  return `<div class="recommendation-layout">
+    <aside class="run-list"><div class="run-list-header"><h2>历史简报</h2></div>${list}</aside>
+    <section class="panel">${header}<div class="panel-body">${body}</div></section>
+  </div>`;
 }
 
 function updateConnection(healthy) {
@@ -483,7 +567,7 @@ function render() {
     return;
   }
   const error = state.error ? `<div class="error-banner">数据读取失败：${escapeHtml(state.error)}</div>` : '';
-  const views = { overview: renderOverview, recommendations: renderRecommendations, single: renderSingleNotes, topics: renderTopics, following: renderFollowing, capabilities: renderCapabilities, feishu: renderFeishu };
+  const views = { overview: renderOverview, digest: renderDigest, recommendations: renderRecommendations, single: renderSingleNotes, topics: renderTopics, following: renderFollowing, capabilities: renderCapabilities, feishu: renderFeishu };
   content.innerHTML = error + views[state.activeView]();
 }
 
@@ -530,6 +614,7 @@ document.addEventListener('click', async (event) => {
     state.activeView = nav.dataset.view;
     render();
     if (state.activeView === 'recommendations' && state.selectedRunId) await loadRecommendationItems(state.selectedRunId);
+    if (state.activeView === 'digest' && state.selectedDigestDate) await loadDigest(state.selectedDigestDate);
     return;
   }
   const button = event.target.closest('[data-action]');
@@ -548,6 +633,12 @@ document.addEventListener('click', async (event) => {
     });
   }
   if (action === 'select-run') await loadRecommendationItems(button.dataset.runId);
+  if (action === 'select-digest') await loadDigest(button.dataset.date);
+  if (action === 'run-digest') await runAction(button, '简报请求已处理', async () => {
+    const result = await post('/v1/dashboard/digest/run', { trigger: 'dashboard' });
+    if (result.status === 'empty') throw new Error('近一天没有可入简报的笔记');
+    if (result.digest_date) state.selectedDigestDate = result.digest_date;
+  });
   if (action === 'new-topic') openTopicDialog();
   if (action === 'edit-topic') openTopicDialog(button.dataset.slug);
   if (action === 'toggle-topic') await runAction(button, '主题状态已更新', () => post('/v1/dashboard/topics', { action: button.dataset.enabled === '1' ? 'disable' : 'enable', slug: button.dataset.slug }));

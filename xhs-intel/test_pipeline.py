@@ -449,6 +449,79 @@ class QueueTests(unittest.TestCase):
         self.assertIn('topic:inference:vLLM', queries)
         self.assertIn('topic:inference:vLLM', runs)
 
+    def test_daily_digest_covers_screened_recommended_and_watch_notes_once(self):
+        self.store.add_note(note('CUDA 内核调优'), 'topic:compiler_runtime:CUDA')
+        self.store.enqueue_pending()
+        screen = self.store.claim('screener')
+        self.store.complete(screen['job_id'], screen['lease_token'], {
+            'decisions': [{'candidate_id': screen['candidate_ids'][0], 'decision': 'include',
+                           'topics': [{'topic_id': 'compiler_runtime', 'score': .9}],
+                           'relevance_score': .9, 'confidence': .9, 'reason': '相关'}],
+            'model': 'fake', 'input_sha256': 'test'})
+        reco = normalize({'id': 'b' * 24, 'note_card': {'title': '推理优化', 'desc': 'KV cache',
+                          'time': 1750000000000}}, 'recommendation:rd')
+        self.store.add_note(reco, 'recommendation:rd')
+        self.store.create_recommendation_run('rd', requested=1)
+        reco_id, _ = self.store.add_recommendation_item('rd', reco, 1)
+        self.store.queue_recommendation_filter('rd')
+        screened_summary = self.store.claim('w')
+        self.assertEqual(screened_summary['job_type'], 'summary')
+        self.store.complete(screened_summary['job_id'], screened_summary['lease_token'],
+                            {'summary': '筛选摘要', 'model': 'fake'})
+        reco_filter = self.store.claim('w')
+        self.assertEqual(reco_filter['job_type'], 'classify_recommendations')
+        self.store.complete(reco_filter['job_id'], reco_filter['lease_token'], {
+            'decisions': [{'candidate_id': reco_id, 'decision': 'include',
+                           'topics': [{'topic_id': 'inference', 'score': .8}],
+                           'relevance_score': .8, 'confidence': .9, 'reason': '相关'}],
+            'model': 'fake', 'input_sha256': 'test'})
+        reco_summary = self.store.claim('w')
+        self.store.complete(reco_summary['job_id'], reco_summary['lease_token'],
+                            {'summary': '推荐摘要', 'model': 'fake'})
+        watch_value = normalize({'id': 'c' * 24, 'note_card': {'title': '手工笔记', 'desc': '正文',
+                                 'time': 1750000000000}}, 'watch:user-9')
+        watch_value['watch_user_id'] = 'user-9'
+        self.store.add_note(watch_value, 'watch:user-9')
+
+        queued = self.store.queue_daily_digest('2026-10-08')
+        self.assertEqual(queued['status'], 'queued')
+        self.assertEqual(queued['notes'], 3)
+        self.assertEqual(self.store.queue_daily_digest('2026-10-08')['status'], 'duplicate')
+
+        digest_job = self.store.claim('digest-worker')
+        self.assertEqual(digest_job['job_type'], 'daily_digest')
+        self.assertEqual(digest_job['digest_date'], '2026-10-08')
+        self.assertEqual(len(digest_job['notes']), 3)
+        self.assertEqual(digest_job['previous_digest'], '')
+        self.assertTrue(digest_job['policy']['topics'])
+        self.store.complete(digest_job['job_id'], digest_job['lease_token'],
+                            {'summary': '# 简报正文', 'model': 'fake'})
+        ready_ids = {row['job_id'] for row in self.store.ready_deliveries()}
+        self.assertIn('xhs-digest-2026-10-08', ready_ids)
+        self.store.delivered(digest_job['job_id'])
+
+        second = self.store.queue_daily_digest('2026-10-09')
+        self.assertEqual(second['status'], 'queued')
+        day2 = self.store.claim('digest-worker')
+        self.assertEqual(day2['job_type'], 'daily_digest')
+        self.assertIn('# 简报正文', day2['previous_digest'])
+
+        listing = self.store.list_digests()
+        self.assertEqual(listing[0]['digest_date'], '2026-10-09')
+        self.assertEqual(listing[1]['digest_date'], '2026-10-08')
+        self.assertNotIn('summary', listing[0])
+        detail = self.store.get_digest('2026-10-08')
+        self.assertEqual(detail['summary'], '# 简报正文')
+        self.assertEqual(len(detail['notes']), 3)
+        self.assertNotIn('text', detail['notes'][0])
+
+    def test_daily_digest_without_candidate_notes_creates_no_job(self):
+        result = self.store.queue_daily_digest('2026-10-08')
+        self.assertEqual(result['status'], 'empty')
+        self.assertIsNone(self.store.claim('digest-worker'))
+        self.assertEqual(self.store.list_digests(), [])
+        self.assertIsNone(self.store.get_digest('2026-10-08'))
+
     def test_topic_versions_are_additive_and_disable_is_explicit(self):
         topic = self.store.upsert_topic({'slug': 'accelerator', 'name': '加速器',
                                          'include_keywords': ['GPU', 'NPU']})

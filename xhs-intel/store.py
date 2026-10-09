@@ -1,4 +1,5 @@
 """Edge-owned durable queue: immutable note revisions, fenced AI leases, receipts."""
+import datetime as dt
 import json
 import sqlite3
 import time
@@ -338,7 +339,7 @@ class Store:
             if not row or row['lease_token'] != lease or row['status'] != 'processing' or row['lease_until'] < stamp:
                 raise Conflict('lease_lost_or_result_conflict')
             next_status = 'ready'
-            if (row['job_type'] or 'summary') == 'single_note_analysis':
+            if (row['job_type'] or 'summary') in ('single_note_analysis', 'daily_digest'):
                 payload = json.loads(row['payload'])
                 next_status = 'ready' if payload.get('deliver_to_feishu') else 'completed'
             db.execute("UPDATE jobs SET status=?,result=?,result_hash=?,updated=?,last_error=NULL WHERE job_id=?",
@@ -1017,6 +1018,120 @@ class Store:
             db.execute("""UPDATE recommendation_items SET state='filter_queued'
                           WHERE run_id=? AND state='filter_failed'""", (str(run_id),))
             return True
+
+    def queue_daily_digest(self, digest_date=None, *, deliver_to_feishu=True,
+                           lookback_hours=26, max_notes=60):
+        """Queue one idempotent per-day digest over screened, recommended and watch notes.
+
+        The payload carries the previous digest text so the worker can mark what
+        is new versus already covered, and the live topic policy so sections
+        follow the console-edited taxonomy.
+        """
+        tz = dt.timezone(dt.timedelta(hours=8))
+        digest_date = str(digest_date or dt.datetime.now(tz).date().isoformat())
+        dt.date.fromisoformat(digest_date)
+        job_id = 'xhs-digest-' + digest_date
+        cutoff = time.time() - max(1, int(lookback_hours)) * 3600
+        policy = self.active_policy()
+        with self.connect() as db:
+            existing = db.execute('SELECT status FROM jobs WHERE job_id=?', (job_id,)).fetchone()
+            if existing:
+                return {'job_id': job_id, 'status': 'duplicate', 'job_status': existing['status'],
+                        'digest_date': digest_date}
+            selected = {}
+            for row in db.execute('''SELECT t.revision,t.topics_json,n.body FROM note_topics t
+                                     JOIN notes n ON n.revision=t.revision
+                                     WHERE t.decision='include' AND t.created>=?''', (cutoff,)):
+                value = json.loads(row['body'])
+                value['_topics'] = json.loads(row['topics_json'] or '[]')
+                selected[row['revision']] = value
+            for row in db.execute('''SELECT i.revision,s.topics_json,n.body FROM note_screenings s
+                                     JOIN recommendation_items i
+                                       ON i.run_id=s.run_id AND i.candidate_id=s.candidate_id
+                                     JOIN notes n ON n.revision=i.revision
+                                     WHERE s.decision='include' AND s.created>=?''', (cutoff,)):
+                if row['revision'] not in selected:
+                    value = json.loads(row['body'])
+                    value['_topics'] = json.loads(row['topics_json'] or '[]')
+                    selected[row['revision']] = value
+            for row in db.execute('''SELECT DISTINCT n.revision,n.body FROM notes n
+                                     JOIN note_queries q ON q.revision=n.revision
+                                     WHERE n.first_seen>=? AND q.query LIKE 'watch:%' ''', (cutoff,)):
+                if row['revision'] not in selected:
+                    value = json.loads(row['body'])
+                    value['_topics'] = []
+                    selected[row['revision']] = value
+            if not selected:
+                return {'job_id': job_id, 'status': 'empty', 'digest_date': digest_date, 'notes': 0}
+            notes = sorted(selected.values(),
+                           key=lambda value: str(value.get('fetched_at') or ''),
+                           reverse=True)[:max(1, int(max_notes))]
+            previous = db.execute('''SELECT result FROM jobs
+                                     WHERE job_type='daily_digest' AND result IS NOT NULL AND job_id!=?
+                                     ORDER BY created DESC LIMIT 1''', (job_id,)).fetchone()
+            previous_summary = ''
+            if previous:
+                try:
+                    previous_summary = str(json.loads(previous['result']).get('summary') or '')[:4000]
+                except (TypeError, ValueError):
+                    previous_summary = ''
+            stamp = time.time()
+            payload = {'digest_date': digest_date, 'notes': notes, 'policy': policy,
+                       'previous_digest': previous_summary,
+                       'deliver_to_feishu': bool(deliver_to_feishu),
+                       'source_kind': 'daily_digest', 'prompt_version': 1}
+            db.execute('''INSERT INTO jobs(job_id,status,payload,created,updated,job_type)
+                          VALUES(?,?,?,?,?,?)''',
+                       (job_id, 'pending', json.dumps(payload, ensure_ascii=False), stamp, stamp,
+                        'daily_digest'))
+            return {'job_id': job_id, 'status': 'queued', 'digest_date': digest_date,
+                    'notes': len(notes)}
+
+    @staticmethod
+    def _digest_row(row, *, include_summary=False):
+        payload = json.loads(row['payload'])
+        result = json.loads(row['result']) if row['result'] else {}
+        value = {
+            'job_id': row['job_id'],
+            'digest_date': payload.get('digest_date', ''),
+            'status': row['status'],
+            'note_count': len(payload.get('notes') or []),
+            'deliver_to_feishu': bool(payload.get('deliver_to_feishu')),
+            'model': result.get('model', ''),
+            'created': row['created'],
+            'updated': row['updated'],
+            'attempts': row['attempts'],
+            'last_error': row['last_error'],
+        }
+        if include_summary:
+            value['summary'] = result.get('summary', '')
+            value['notes'] = [{
+                'note_id': note.get('note_id', ''),
+                'title': note.get('title', ''),
+                'author': note.get('author', ''),
+                'published_at': note.get('published_at'),
+                'url': note.get('url', ''),
+                'preview_url': f"/xhs/open/{note.get('note_id', '')}",
+                'topics': [str(item.get('topic_id') or '') for item in (note.get('_topics') or [])
+                           if isinstance(item, dict) and item.get('topic_id')],
+            } for note in payload.get('notes') or []]
+        return value
+
+    def list_digests(self, limit=30):
+        bounded = max(1, min(int(limit), 100))
+        with self.connect() as db:
+            rows = db.execute('''SELECT job_id,status,payload,result,created,updated,attempts,last_error
+                                 FROM jobs WHERE job_type='daily_digest'
+                                 ORDER BY created DESC LIMIT ?''', (bounded,)).fetchall()
+        return [self._digest_row(row) for row in rows]
+
+    def get_digest(self, digest_date):
+        job_id = 'xhs-digest-' + str(digest_date)
+        with self.connect() as db:
+            row = db.execute('''SELECT job_id,status,payload,result,created,updated,attempts,last_error
+                                FROM jobs WHERE job_id=? AND job_type='daily_digest' ''',
+                             (job_id,)).fetchone()
+        return self._digest_row(row, include_summary=True) if row else None
 
     def latest_summary(self):
         with self.connect() as db:

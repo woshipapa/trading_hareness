@@ -44,6 +44,34 @@ class SingleNotePromptTests(unittest.TestCase):
         self.assertEqual(classifier.call_count, 1)
         self.assertEqual(result, {'decisions': []})
 
+    def test_digest_prompt_groups_by_topic_and_carries_the_previous_digest(self):
+        prompt = local_worker.make_digest_prompt({
+            'job_id': 'xhs-digest-2026-10-08',
+            'digest_date': '2026-10-08',
+            'policy': {'topics': [{'slug': 'inference', 'name': '推理系统'}]},
+            'previous_digest': '昨日要点:vLLM 新版本',
+            'notes': [{'title': 'KV cache 实践', 'author': 'Infra',
+                       'url': 'https://www.xiaohongshu.com/explore/' + 'a' * 24,
+                       'text': '正文', '_topics': [{'topic_id': 'inference', 'score': 0.9}]}],
+        })
+        self.assertIn('今日导读', prompt)
+        self.assertIn('与昨日对比', prompt)
+        self.assertIn('待核验', prompt)
+        self.assertIn('推理系统(inference)', prompt)
+        self.assertIn('主题:inference', prompt)
+        self.assertIn('昨日要点:vLLM 新版本', prompt)
+        self.assertIn('KV cache 实践', prompt)
+
+    def test_daily_digest_jobs_use_the_text_only_builder(self):
+        job = {'job_id': 'xhs-digest-2026-10-08', 'job_type': 'daily_digest'}
+        with mock.patch.object(local_worker, 'run_with_heartbeat',
+                               side_effect=lambda value, task: task(value)):
+            with mock.patch.object(local_worker, 'build_digest',
+                                   return_value={'summary': '# ok'}) as builder:
+                result = local_worker.process_job(job)
+        self.assertEqual(builder.call_count, 1)
+        self.assertEqual(result, {'summary': '# ok'})
+
     def test_each_worker_loop_claims_only_its_lane(self):
         calls = []
 
