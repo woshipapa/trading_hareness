@@ -116,6 +116,13 @@ class MarketUniverseSyncTests(unittest.TestCase):
         self.assertIn("['BJ']", result["reason"])
         self.assertFalse([sql for sql, _ in connection.statements if "universe_members" in sql])
 
+    def test_an_error_with_no_message_still_records_a_reason(self):
+        # 2026-10-09 15:14: the listing failed with an empty message, and the receipt said nothing.
+        result, _requested, connection = self._run(items=[], error=TimeoutError())
+        self.assertEqual((result["status"], result["reason"]), ("blocked", "TimeoutError"))
+        failed = [values for sql, values in connection.statements if "status='failed'" in sql]
+        self.assertEqual(failed[0][0], "TimeoutError")
+
     def test_a_saturated_executor_is_blocked_without_a_provider_failure(self):
         result, _requested, connection = self._run(items=[], error=ExecutorSaturated("local capacity"))
         self.assertEqual(result["status"], "blocked")

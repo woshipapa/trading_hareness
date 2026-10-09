@@ -151,7 +151,9 @@ async def sync(
         return {"status": "blocked", "universe_key": request.universe_key, "reason": safe_error_detail(str(error), 500), "request_key": request_key}
     except Exception as error:  # noqa: BLE001 - provider failures are persisted and returned safely
         failure_latency_ms = round((asyncio.get_running_loop().time() - provider_started_at) * 1000)
-        detail = safe_error_detail(str(error), 1000)
+        # A timeout's message is empty; on 2026-10-09 that left the receipt and the
+        # provider health with no reason at all. The exception's type always says something.
+        detail = safe_error_detail(f"{type(error).__name__}: {error}".rstrip(": "), 1000)
 
         def persist_failure() -> None:
             with db.transaction() as connection:
@@ -159,7 +161,7 @@ async def sync(
                 record_provider_failure(connection, PROVIDER_KEY, "stock_basic_all_a", detail, failure_latency_ms)
 
         await run_database_blocking(persist_failure)
-        return {"status": "blocked", "universe_key": request.universe_key, "reason": safe_error_detail(str(error), 500), "request_key": request_key}
+        return {"status": "blocked", "universe_key": request.universe_key, "reason": detail[:500], "request_key": request_key}
 
 
 __all__ = ["MAX_PAGES", "PAGE_SIZE", "PROVIDER_KEY", "REQUIRED_EXCHANGES", "fetch_listing", "listed_rows", "sync"]
