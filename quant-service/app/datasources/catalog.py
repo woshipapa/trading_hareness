@@ -64,6 +64,9 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
     # -- public web -----------------------------------------------------------
     DataSource("eastmoney_free", "东方财富公开行情（板块资金流/观察池资金流）", "push2.eastmoney.com", "public_web", "http_json", "free",
                "app/free_market_providers.py", risks=_EASTMONEY_RISK),
+    DataSource("xuangubao", "选股宝公开涨停/炸板/跌停池", "flash-api.xuangubao.com.cn", "public_web", "http_json", "free",
+               "app/datasources/sources/xuangubao_pool.py",
+               risks="公开无鉴权接口；沪市代码写作 .SS；换手率为其自身口径"),
     DataSource("eastmoney_ztb", "东方财富涨停板专题与盘口异动", "push2ex.eastmoney.com", "public_web", "http_json", "free",
                "app/datasources/sources/eastmoney_ztb.py", risks=_EASTMONEY_RISK + "；池子只保留近期，须每日归档"),
     DataSource("eastmoney_hot_rank", "东方财富股吧人气榜", "emappdata.eastmoney.com", "public_web", "http_json", "free",
@@ -331,6 +334,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("fuyao_ths", "limits.limit_down_pool", 12, DECLARED, _EVT + "limit_down_pool", "app/market_event_capture.py"),
     _bind("eastmoney_ztb", "limits.limit_down_pool", 50, DECLARED, _RAW + "limit_pool_limit_down", "app/datasources/sources/eastmoney_ztb.py"),
     _bind("fuyao_ths", "limits.ladder", 12, LIVE_VERIFIED, _EVT + "limit_chain", "app/market_event_capture.py"),
+    _bind("longhuvip", "limits.seal_detail", 10, DECLARED, _RAW + "longhu:longhu_market_wide:GetPlateInfo_w38",
+          "app/datasources/sources/longhu_limit_review.py:decode_review",
+          notes="涨停复盘逐股：首封时间、连板数、封单额、主力净额、成交额、流通市值、题材与原因；收盘后补充采集归档；"
+                "2026-10-09 与选股宝逐只核对首封时间与连板数"),
+    _bind("xuangubao", "limits.seal_detail", 20, DECLARED, "", "app/datasources/sources/xuangubao_pool.py:fetch_pool",
+          notes="补末封时间、开板次数、N天M板、新股标记；公开接口按需取"),
     _bind("eastmoney_ztb", "limits.seal_detail", 50, DECLARED, _RAW + "limit_pool_limit_up",
           "app/datasources/sources/eastmoney_ztb.py:normalize_pool_item", "近期窗口，每日归档"),
     _bind("eastmoney_ztb", "limits.previous_limit_up", 50, DECLARED, _EVT + "previous_limit_pool",

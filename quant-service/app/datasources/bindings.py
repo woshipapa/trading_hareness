@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from .derived.tick_flow import summarize_ticks
 from .resolver import CapabilityResolver
-from .sources import eastmoney_datacenter, eastmoney_hot_rank, eastmoney_ztb, investor_qa, news_flash, ticks, ttfund
+from .sources import eastmoney_datacenter, eastmoney_hot_rank, eastmoney_ztb, investor_qa, news_flash, ticks, ttfund, xuangubao_pool
 from .sources.fuyao_evidence import fetch_all_pool_pages
 
 
@@ -101,6 +101,8 @@ def register_package_sources(resolver: CapabilityResolver, *, fuyao_fetch: Fuyao
     ):
         resolver.bind("eastmoney_datacenter", capability, _report(report))
     resolver.bind("eastmoney_datacenter", "events.disclosure_schedule", _period_report("disclosure_schedule"))
+    resolver.bind("xuangubao", "limits.seal_detail",
+                  lambda *, trade_date: xuangubao_pool.fetch_pool("limit_up", trade_date))
     resolver.bind("eastmoney_datacenter", "reference.suspensions",
                   lambda *, trade_date: eastmoney_datacenter.suspensions_on(trade_date))
 
