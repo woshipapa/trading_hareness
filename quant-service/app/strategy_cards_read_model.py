@@ -41,6 +41,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .indicator_health import indicator_status
+from . import minute_cross_section
 from .limit_detail_read_model import limit_detail_day
 from .market_radar_runtime import latest_main_net, latest_point
 from .owner_storage import tiered_sql_builder
@@ -123,8 +124,29 @@ def ledger_picks(connection: Any, as_of: date) -> list[dict[str, Any]]:
          ORDER BY strategy_key,rank NULLS LAST,raw_score DESC NULLS LAST,symbol""", (as_of,))
 
 
+def _document_quotes(connection: Any, trade_date: date, symbols: list[str]) -> dict[str, dict[str, Any]] | None:
+    """The same fields from the minute documents (decision 0009); None for a day stored only per symbol."""
+    latest = minute_cross_section.latest(connection, trade_date)
+    if latest is None:
+        return None
+    quotes: dict[str, dict[str, Any]] = {}
+    for symbol, row in minute_cross_section.rows_for(latest[1], symbols).items():
+        quotes[symbol] = {**snapshot_fields(row), "observed_at": latest[0].isoformat()}
+    auction = minute_cross_section.first_between(connection, datetime.combine(trade_date, AUCTION_FROM, CN_TZ),
+                                                 datetime.combine(trade_date, AUCTION_TO, CN_TZ))
+    if auction is not None:
+        for symbol, row in minute_cross_section.rows_for(auction[1], symbols).items():
+            fields = snapshot_fields(row)
+            quotes.setdefault(symbol, {})["auction"] = {
+                "pct_change": fields["pct_change"], "turnover": fields["turnover"], "observed_at": auction[0].isoformat()}
+    return quotes
+
+
 def session_quotes(connection: Any, trade_date: date, symbols: list[str]) -> dict[str, dict[str, Any]]:
     """Latest and 09:25-match snapshot fields per symbol for the session."""
+    from_documents = _document_quotes(connection, trade_date, symbols)
+    if from_documents is not None:
+        return from_documents
     start, end = _day_bounds(trade_date)
     auction_from = datetime.combine(trade_date, AUCTION_FROM, CN_TZ)
     auction_to = datetime.combine(trade_date, AUCTION_TO, CN_TZ)

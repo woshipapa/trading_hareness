@@ -8,10 +8,12 @@ creates a trading decision.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+
+from . import minute_cross_section
 
 
 async def capture_level1_snapshot(
@@ -22,8 +24,15 @@ async def capture_level1_snapshot(
     persist_health: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     now: datetime | None = None,
     on_persisted: Callable[[datetime, list[dict[str, Any]]], Awaitable[dict[str, Any]]] | None = None,
+    persist_document: Callable[[datetime, list[dict[str, Any]], Mapping[str, Any]], Awaitable[dict[str, Any]]] | None = None,
+    storage: str = "per_symbol",
 ) -> dict[str, Any]:
     """Capture one all-A snapshot, returning a secret-free health result.
+
+    ``storage`` (decision 0009): ``per_symbol`` writes a row per stock, ``document``
+    one row for the minute, ``both`` while readers move over. With ``document``
+    alone a failed document write fails the capture; with ``both`` it is
+    reported and the per-symbol rows still stand.
 
     ``on_persisted`` derives from the stored cross-section (the market radar);
     its failure is reported in the result and never fails the capture.
@@ -50,7 +59,22 @@ async def capture_level1_snapshot(
             "snapshot_metadata": dict(metadata),
             "research_only": True,
         })
-    stored = await persist("fuyao_ths", "a_share_prices_snapshot", payloads) if payloads else 0
+    stored = 0
+    if payloads and storage in ("per_symbol", "both"):
+        stored = await persist("fuyao_ths", "a_share_prices_snapshot", payloads)
+    document: dict[str, Any] | None = None
+    document_error: str | None = None
+    if payloads and storage in ("document", "both") and persist_document is not None:
+        try:
+            document = await persist_document(observed_at, payloads, metadata)
+        except Exception as error:  # noqa: BLE001 - reported; fatal only when it is the only copy
+            if storage == "document":
+                raise
+            document_error = f"{type(error).__name__}: {str(error)[:200]}"
+        if document is not None:
+            stored = stored or int(document.get("rows") or 0)
+    if payloads:
+        minute_cross_section.remember(observed_at, payloads)
     result = {
         "status": "completed" if payloads else "empty",
         "received": len(payloads),
@@ -60,6 +84,8 @@ async def capture_level1_snapshot(
         "upstream_timestamp_ms": metadata.get("upstream_timestamp_ms"),
         "freshness_status": metadata.get("status") or metadata.get("freshness_status") or "unknown",
         "cross_sectional": bool(metadata.get("cross_sectional", False)),
+        "storage": storage,
+        "document": document, "document_error": document_error,
     }
     if on_persisted is not None and payloads:
         try:
@@ -129,11 +155,17 @@ def level1_capture(deps: Level1CaptureDependencies) -> Callable[[], Awaitable[di
 
         await deps.run_database(write, timeout_seconds=10)
 
+    async def persist_document(observed_at: datetime, rows: list[dict[str, Any]],
+                               metadata: Mapping[str, Any]) -> dict[str, Any]:
+        return await deps.run_database(minute_cross_section.persist_document, deps.database, observed_at, rows,
+                                       metadata, timeout_seconds=60)
+
     async def capture() -> dict[str, Any]:
         try:
             return await capture_level1_snapshot(fetch_snapshot=deps.fetch_snapshot, persist=persist,
                                                  persist_health=persist_health, session_open=session_open,
-                                                 on_persisted=deps.on_persisted)
+                                                 on_persisted=deps.on_persisted, persist_document=persist_document,
+                                                 storage=minute_cross_section.storage_mode())
         except Exception as error:  # noqa: BLE001 - health must see provider errors
             await persist_health({"status": "failed", "error": deps.safe_error(str(error), 300)})
             raise

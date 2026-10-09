@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable
 
 from fastapi import HTTPException
+from . import minute_cross_section
 
 
 def tushare_raw(database: Any, api_name: str, provider: str | None, limit: int, offset: int,
@@ -85,14 +86,26 @@ def market_snapshots(database: Any, limit: int) -> dict[str, Any]:
     return {"items": rows}
 
 
+def _cross_section_payload(source: str, observed_at: Any, rows: list[dict[str, Any]], limit: int) -> dict[str, Any]:
+    items = minute_cross_section.latest_level1_items(observed_at, rows, limit)
+    return {"status": "completed", "snapshot_at": observed_at, "items": items, "count": len(rows),
+            "returned": len(items), "truncated": len(rows) > len(items), "research_only": True, "source": source}
+
+
 def latest_all_a_level1(database: Any, limit: int = 6000) -> dict[str, Any]:
-    """Return the newest complete raw all-A Level-1 capture."""
+    """Return the newest complete raw all-A Level-1 capture: this process's memory, the minute document, the rows."""
     limit = max(1, min(int(limit), 6000))
+    remembered = minute_cross_section.recent()
+    if remembered is not None:
+        return _cross_section_payload("memory", remembered[0], remembered[1], limit)
     with database.transaction() as connection:
-        latest = connection.execute(
+        document = minute_cross_section.latest(connection)
+        legacy = connection.execute(
             "SELECT max(effective_at) AS snapshot_at FROM quant.raw_market_observations WHERE capability='a_share_prices_snapshot'"
         ).fetchone()
-        snapshot_at = latest["snapshot_at"] if latest else None
+        if document is not None and (legacy is None or legacy["snapshot_at"] is None or document[0] >= legacy["snapshot_at"]):
+            return _cross_section_payload("document", document[0], minute_cross_section.rows_of(document[1]), limit)
+        snapshot_at = legacy["snapshot_at"] if legacy else None
         if snapshot_at is None:
             return {"status": "empty", "snapshot_at": None, "items": [], "count": 0}
         rows = connection.execute(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from fastapi import HTTPException
+from . import minute_cross_section
 
 
 def _limit(value: int, maximum: int) -> int:
@@ -33,14 +34,27 @@ async def market_snapshots(async_database: Any, limit: int) -> dict[str, Any]:
 
 
 async def latest_all_a_level1(async_database: Any, limit: int = 6000) -> dict[str, Any]:
-    """Return the newest complete raw all-A Level-1 capture."""
+    """Return the newest complete raw all-A Level-1 capture: this process's memory, the minute document, the rows."""
     bounded = max(1, min(int(limit), 6000))
+    remembered = minute_cross_section.recent()
+    if remembered is not None:
+        items = minute_cross_section.latest_level1_items(remembered[0], remembered[1], bounded)
+        return {"status": "completed", "snapshot_at": remembered[0], "items": items, "count": len(remembered[1]),
+                "returned": len(items), "truncated": len(remembered[1]) > len(items), "research_only": True,
+                "source": "memory"}
     async with async_database.transaction() as conn:
+        document = await minute_cross_section.latest_async(conn)
         latest_result = await conn.execute(
             "SELECT max(effective_at) AS snapshot_at FROM quant.raw_market_observations WHERE capability='a_share_prices_snapshot'"
         )
         latest = await latest_result.fetchone()
         snapshot_at = latest["snapshot_at"] if latest else None
+        if document is not None and (snapshot_at is None or document[0] >= snapshot_at):
+            rows = minute_cross_section.rows_of(document[1])
+            items = minute_cross_section.latest_level1_items(document[0], rows, bounded)
+            return {"status": "completed", "snapshot_at": document[0], "items": items, "count": len(rows),
+                    "returned": len(items), "truncated": len(rows) > len(items), "research_only": True,
+                    "source": "document"}
         if snapshot_at is None:
             return {"status": "empty", "snapshot_at": None, "items": [], "count": 0}
         result = await conn.execute(

@@ -74,6 +74,37 @@ class StrategyCardsSqlTests(unittest.TestCase):
         board = strategy_board(self.connection, now)
         self.assertTrue(board["strategies"])
 
+    def test_minute_documents_round_trip_on_the_real_schema(self) -> None:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        from app import minute_cross_section as mcs
+
+        connection = self.connection
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self):
+                        return connection
+
+                    def __exit__(self, *exc):
+                        return False
+                return Context()
+
+        minute = datetime(2099, 3, 4, 9, 25, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+        rows = [{"symbol": "699901.SH", "ts_code": "699901.SH", "price": 10.5, "pct_change": 5.0, "turnover": 1e6,
+                 "volume": 1e4, "raw": {"open_price": 10.0, "prev_price": 10.0}},
+                {"symbol": "699902.SH", "ts_code": "699902.SH", "price": 9.5, "pct_change": -5.0, "turnover": 2e6,
+                 "volume": 2e4, "raw": {"open_price": 9.8, "prev_price": 10.0}}]
+        mcs.persist_document(Database(), minute, rows, {"pages": 2})
+        mcs.persist_document(Database(), minute + timedelta(minutes=30), rows[:1], {"pages": 2})
+        latest = mcs.latest(connection, SESSION)
+        self.assertEqual(latest[0], minute + timedelta(minutes=30))
+        first = mcs.first_between(connection, minute - timedelta(minutes=1), minute + timedelta(minutes=5))
+        self.assertEqual(mcs.rows_for(first[1], ["699902.SH"])["699902.SH"], rows[1])
+        self.assertEqual(len(mcs.day_documents(connection, SESSION)), 2)
+
     def test_the_limit_detail_and_radar_reads_run_on_the_real_schema(self) -> None:
         from app.limit_detail_read_model import limit_detail_day
         from app.market_radar_runtime import radar_day

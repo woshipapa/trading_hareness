@@ -100,6 +100,7 @@ SETTINGS: dict[str, Setting] = {item.name: item for item in [
         ("INTRADAY_SCAN_INTERVAL_SECONDS", "0", "watchlist scan interval; below 30 disables the scan"),
         ("INTRADAY_WATCHLIST_MAX_SYMBOLS", None, "watchlist admission cap"),
         ("INTRADAY_ORDER_BOOK_ENABLED", "true", "capture order books for the watchlist"),
+        ("LEVEL1_STORAGE", "both", "all-A minute cross-section storage: both | document | per_symbol (decision 0009)"),
         ("INTRADAY_BOARD_CURVE_ENABLED", "true", "capture minute board-flow curves"),
         ("INTRADAY_BOARD_CURVE_RETENTION_DAYS", "60", "board-curve retention"),
         ("INTRADAY_BOARD_ROTATION_RETENTION_DAYS", "60", "board-rotation retention"),
