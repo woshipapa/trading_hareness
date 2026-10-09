@@ -17,7 +17,8 @@ check 依次检查，任何一项不过都不合并：
 4. 文件：协作分支带来的改动里不能有 .env、密钥、证书这类文件；
 5. 仓库检查：架构检查通过，架构索引与脚本目录是最新的；改动的 Python 文件跑一遍 ruff，
    只作提示；
-6. 测试：quant-service 全量测试（release-path，一次性数据库）。
+6. 测试：quant-service 全量测试，用本检出的 collab_isolated_tests.sh 隔离运行：不带密钥、
+   不连外网、一次性数据库。
 
 所有改动都在临时工作树里做，不碰本地检出，因为别的代理也在用它。推送从不强推：合并或
 同步期间 main、协作分支被别人推进时，推送会被拒，脚本说明原因后退出，重跑即可。
@@ -49,6 +50,8 @@ FORBIDDEN = (".env", ".env.*", "*.env", "*-secrets.env", "*.pem", "*.key", "*.p1
              "id_rsa*", "id_ed25519*", "id_ecdsa*", "*.kdbx")
 ALLOWED = (".env.example", "*.env.example", "env.example")
 TEST_TIMEOUT_SECONDS = 1800
+#: Our own copy runs the suite, never the one inside the tree under test.
+ISOLATED_RUNNER = Path(__file__).resolve().parent / "collab_isolated_tests.sh"
 
 
 class GitError(RuntimeError):
@@ -233,13 +236,13 @@ def repo_checks(tree: Path, changed: Sequence[str], report: Report) -> None:
 
 
 def test_suite(tree: Path, report: Report) -> None:
-    runner = tree / "quant-service" / "scripts" / "run-release-path-tests.sh"
-    if not runner.exists():
-        report.skip("quant-service tests", "no release-path runner in the tree")
+    """The quant suite on the merged tree, with this checkout's runner: no secrets, no internet."""
+    if not (tree / "quant-service" / "database_bootstrap.py").exists():
+        report.skip("quant-service tests", "no quant-service in the tree")
         return
-    ok, text = run(["bash", str(runner)], tree, timeout=TEST_TIMEOUT_SECONDS)
+    ok, text = run(["bash", str(ISOLATED_RUNNER), str(tree)], tree, timeout=TEST_TIMEOUT_SECONDS)
     summary = " ".join(line for line in text.splitlines() if line.startswith(("Ran ", "OK", "FAILED")))
-    report.add("quant-service tests (release path)", ok, summary or text[-500:])
+    report.add("quant-service tests (isolated)", ok, summary or text[-500:])
 
 
 def check_merge(tree: Path, cwd: Path, report: Report, *, skip_tests: bool, skip_repo_checks: bool) -> bool:

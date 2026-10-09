@@ -73,7 +73,7 @@ python3 scripts/collab_branch.py sync
 | 已有迁移未改 | main 上已有的迁移文件被修改或删除 |
 | 无密钥文件 | 带进来的改动里有 `.env`、密钥或证书 |
 | 仓库检查 | 架构检查不通过，或架构索引、脚本目录没有更新；ruff 只作提示 |
-| 全量测试 | 合并结果上的 quant-service 测试（release-path，一次性数据库）不通过 |
+| 全量测试 | 合并结果上的 quant-service 测试不通过。测试用我方 main 上的 `scripts/collab_isolated_tests.sh` 隔离运行：不带密钥、不连外网、一次性数据库 |
 
 ## 监听
 
