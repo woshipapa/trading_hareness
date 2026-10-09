@@ -84,6 +84,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("consolidate-services.sh", "workstation services", "platform", "workstation"),
     ("start-compose.sh", "workstation services", "platform", "workstation"),
     ("b300_collab_watch.py", "workstation services", "platform", "workstation"),
+    ("b300_collab_dashboard.py", "workstation services", "platform", "workstation"),
     ("*wechat-image-relay*", "workstation services", "feishu-relay (ingest)", "workstation"),
     ("sync-xiaojie-message-features.sh", "workstation services", "quant-research", "workstation"),
     ("teacher_*.py", "teacher review", "quant-research (teacher review)", "workstation"),

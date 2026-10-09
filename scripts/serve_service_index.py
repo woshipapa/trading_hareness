@@ -4,8 +4,9 @@
 A ten-line static host so the launchpad has a memorable, always-on URL
 instead of a file:// path, and so the page's same-origin JavaScript may probe
 the other loopback ports for liveness dots. It reads docs/services.html on
-every request, so regenerating the page needs no restart. Loopback only; no
-secrets, no state.
+every request, so regenerating the page needs no restart. It also serves the
+generated pages listed in GENERATED (the B300 collaboration progress page at
+/b300, written by scripts/b300_collab_dashboard.py). Loopback only; no secrets.
 """
 
 from __future__ import annotations
@@ -17,6 +18,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "docs" / "services.html"
+# Generated pages under state/ (gitignored), refreshed by their own jobs; read on every request.
+GENERATED = {
+    "/b300": (ROOT / "state" / "b300-collab-dashboard.html", "text/html; charset=utf-8"),
+    "/b300.json": (ROOT / "state" / "b300-collab-dashboard.json", "application/json; charset=utf-8"),
+}
 HOST = os.environ.get("SERVICE_INDEX_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SERVICE_INDEX_PORT", "8888"))
 
@@ -45,6 +51,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(503, b'{"status":"page_missing"}', "application/json")
                 return
             self._send(200, data, "text/html; charset=utf-8")
+            return
+        if path in GENERATED:
+            source, content_type = GENERATED[path]
+            try:
+                data = source.read_bytes()
+            except OSError:
+                self._send(503, b'{"status":"page_missing"}', "application/json")
+                return
+            self._send(200, data, content_type)
             return
         if path == "/health":
             self._send(200, json.dumps({"status": "ok", "page": PAGE.exists()}).encode(),

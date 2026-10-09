@@ -218,11 +218,29 @@ def run(dry_run: bool = False,
     return 0
 
 
+def refresh_dashboard() -> None:
+    """进展看板（scripts/b300_collab_dashboard.py，:8888/b300）搭这个 5 分钟任务刷新；
+    它失败只记日志，不改变本任务的退出码。B300_COLLAB_DASHBOARD=0 关闭。"""
+    script = Path(__file__).with_name("b300_collab_dashboard.py")
+    if os.environ.get("B300_COLLAB_DASHBOARD", "1") == "0" or not script.exists():
+        return
+    try:
+        r = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=240)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log(f"dashboard error {type(exc).__name__}")
+        return
+    if r.returncode:
+        log(f"dashboard rc {r.returncode}: {(r.stderr or r.stdout).strip()[-300:]}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true", help="只打印消息，不发送、不写状态")
     args = parser.parse_args()
-    return run(dry_run=args.dry_run)
+    rc = run(dry_run=args.dry_run)
+    if not args.dry_run:
+        refresh_dashboard()
+    return rc
 
 
 if __name__ == "__main__":
