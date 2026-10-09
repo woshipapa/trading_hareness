@@ -1,34 +1,37 @@
-"""Advance MACD/KDJ from a published daily factor seed to a live price.
+"""Advance MACD/KDJ from a daily seed to a live price.
 
-Recomputing these from local history is not an option.  ``canonical_bars_daily``
-keeps a bounded hot window - full-market coverage reaches back about two weeks
-and 600176.SH carries 18 bars - while a converged MACD(12,26,9) needs roughly
-60-100.  ``stk_factor_pro`` publishes converged daily values built on the
-vendor's own full history, so the live value is obtained by seeding from the
-last published session and advancing a single step with the running price,
-which needs no local history at all.
+The seed is the previous session's converged EMA and K/D state.  It used to
+be read from Tushare's ``stk_factor_pro``, on the premise that local history
+was too short to converge a MACD(12,26,9), which needs roughly 60-100
+sessions.  That premise no longer holds: on 2026-10-09 the owner's
+``canonical_bars_daily`` held about 680 sessions per symbol (3.85 million rows
+over 5,676 symbols), and Tushare was retired the day before (decision 0005),
+its newest ``stk_factor_pro`` row being from 2026-09-17.  So the seed is now
+computed from the symbol's own unadjusted daily bars - the last
+``SEED_HISTORY_SESSIONS`` of them, which leaves EMA26's start-up error at
+(25/27)**250, about 1e-8 of the first close - and the live value is that
+seed advanced one step with the running price.
 
-``stk_factor_pro`` does not publish EMA26.  It publishes EXPMA12 and DIF, and
-DIF = EMA12 - EMA26, so ``EMA26 = EXPMA12 - DIF`` recovers the missing state.
-Every formula and constant here was checked against the vendor's own
-consecutive rows for 600176.SH (2026-09-10..2026-09-16): the histogram is
-2*(DIF-DEA), DEA is a 9-period EMA of DIF, EXPMA12 advances with alpha 2/13,
-D is a 3-period smoothing of K, and RSV's window counts the current session's
-own high/low.  Seeding EMA26 through DIF inherits DIF's published precision
-(three decimals), which moves the next DIF by well under 0.001 - immaterial
-against a histogram that moves in tenths.
+The recursion is the vendor's, checked twice.  Against its consecutive rows
+for 600176.SH (2026-09-10..2026-09-16): the histogram is 2*(DIF-DEA), DEA is
+a 9-period EMA of DIF, EXPMA12 advances with alpha 2/13, D is a 3-period
+smoothing of K, and RSV's window counts the current session's own high/low.
+And computed from 250 unadjusted bars to 2026-09-15, the seed equals the
+vendor's published row for that day: EXPMA12 43.69487, K 72.77585 and
+D 62.04631 to every printed digit, DIF and DEA within its three-decimal
+rounding (tests/fixtures/600176_daily_bfq_to_20260915.json).
 
-Seed and live price must share one adjustment basis.  Live quotes are
-unadjusted, so ``bfq`` is the default; pairing a ``qfq`` seed with an
-unadjusted price silently corrupts every value from the next ex-dividend date
-onward, and nothing downstream would flag it.
+Seed and live price must share one adjustment basis.  Live quotes and the
+canonical bars are both unadjusted, so ``bfq`` is the only basis a computed
+seed serves; pairing a front-adjusted seed with an unadjusted price would
+corrupt every value from the next ex-dividend date onward.
 
 Research-only: these are observation features, not an order instruction.
 """
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 MACD_FAST_PERIODS = 12
 MACD_SLOW_PERIODS = 26
@@ -36,8 +39,11 @@ MACD_SIGNAL_PERIODS = 9
 KDJ_WINDOW_SESSIONS = 9
 KDJ_SMOOTHING_PERIODS = 3
 
-#: ``stk_factor_pro`` publishes every factor once per adjustment basis.
+#: The adjustment bases a seed row may carry (``stk_factor_pro`` published all three).
 ADJUSTMENT_BASES = ("bfq", "qfq", "hfq")
+#: Sessions read to compute a seed, and the fewest that count as converged.
+SEED_HISTORY_SESSIONS = 250
+MIN_SEED_SESSIONS = 120
 
 
 def _alpha(periods: int) -> float:
@@ -220,7 +226,7 @@ def realtime_indicators(
         }
 
     if not factor_row:
-        return reading("seed_unavailable", reason="no published factor row")
+        return reading("seed_unavailable", reason=f"no seed: fewer than {MIN_SEED_SESSIONS} completed sessions on file")
     if _number(price) is None:
         return reading("price_unavailable", reason="live price is not numeric")
     macd = advance_macd(macd_seed(factor_row, basis=basis), price)
@@ -230,128 +236,81 @@ def realtime_indicators(
         window_high=bounds[0] if bounds else None, window_low=bounds[1] if bounds else None,
     ) if bounds else None
     if macd is None and kdj is None:
-        return reading("seed_unavailable", reason="the published row carries no usable factor")
+        return reading("seed_unavailable", reason="the seed row carries no usable factor")
     seed_day = _trade_date_key(factor_row.get("trade_date"))
     previous = _trade_date_key(prior_sessions[-1].get("trading_date")) if prior_sessions else None
     if previous is None or seed_day != previous:
-        return reading("seed_stale", reason=(f"the newest published factor row is from {seed_day}; "
+        return reading("seed_stale", reason=(f"the seed is from {seed_day}; "
                                              f"the previous session is {previous or 'unknown'}"))
     return reading("completed", macd=macd, kdj=kdj)
 
 
-def seed_factor_keys(basis: str = "bfq") -> list[str]:
-    """The keys a row must carry before it can seed anything at all."""
+def computed_seed(bars: Sequence[Mapping[str, Any]], *, basis: str = "bfq") -> dict[str, Any] | None:
+    """The last bar's seed, computed from a symbol's unadjusted daily bars (oldest first).
+
+    Shaped like the published row ``macd_seed`` and ``kdj_seed`` parse, so they
+    read it unchanged.  Fewer than ``MIN_SEED_SESSIONS`` bars, a bar without
+    its prices, or any basis but ``bfq`` (the bars are unadjusted) yields None.
+    """
     _require_basis(basis)
-    return [f"expma_12_{basis}", f"kdj_k_{basis}"]
-
-
-def latest_factor_row(
-    symbol: str, connection: Any, *, before_trading_date: Any,
-    known_at: Any = None, basis: str = "bfq",
-) -> dict[str, Any] | None:
-    """Read the newest usable factor row strictly before the live session.
-
-    ``before_trading_date`` is not an optimisation.  Once the vendor publishes
-    the live session's own factors that evening, seeding from them and then
-    advancing with that same session's price would count the session twice, and
-    the result still looks plausible.  ``known_at`` keeps a replay honest by
-    hiding rows that had not been fetched yet at the simulated moment.
-
-    Newest is not enough on its own.  On 2026-09-17 the ProMax GET gateway
-    answered ``stk_factor_pro`` for six symbols with a VCP breakout payload
-    (``vcp_score``, ``pivot_high_60d``) carrying no factor at all, and stored it
-    under this same ``api_name``.  Taking the newest row unconditionally lets
-    one such row shadow the good row sitting directly behind it, and the symbol
-    then reports ``seed_unavailable`` despite holding a perfectly usable seed.
-    Requiring the seed keys in the query skips the impostor instead.
-    """
-    cutoff = _trade_date_key(before_trading_date)
-    if cutoff is None:
+    if basis != "bfq" or len(bars) < MIN_SEED_SESSIONS:
         return None
-    clause = " AND available_at<=%s" if known_at is not None else ""
-    arguments: tuple[Any, ...] = (symbol, cutoff, seed_factor_keys(basis))
-    if known_at is not None:
-        arguments = (symbol, cutoff, known_at, seed_factor_keys(basis))
-    rows = connection.execute(
-        f"""SELECT row_data FROM quant.tushare_raw_records
-             WHERE api_name='stk_factor_pro' AND row_data->>'ts_code'=%s
-               AND row_data->>'trade_date' < %s{clause}
-               AND row_data ?| %s::text[]
-             ORDER BY row_data->>'trade_date' DESC, available_at DESC LIMIT 1""",
-        arguments,
-    ).fetchall()
-    if not rows:
-        return None
-    row_data = dict(rows[0]).get("row_data")
-    return dict(row_data) if row_data else None
+    closes: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    for bar in bars:
+        close, high, low = _number(bar.get("close")), _number(bar.get("high")), _number(bar.get("low"))
+        if close is None or high is None or low is None:
+            return None
+        closes.append(close)
+        highs.append(high)
+        lows.append(low)
+    ema_fast = ema_slow = closes[0]
+    dea = 0.0
+    k = d = 50.0
+    for index, close in enumerate(closes):
+        if index:
+            ema_fast += _alpha(MACD_FAST_PERIODS) * (close - ema_fast)
+            ema_slow += _alpha(MACD_SLOW_PERIODS) * (close - ema_slow)
+            dea += _alpha(MACD_SIGNAL_PERIODS) * (ema_fast - ema_slow - dea)
+        window = slice(max(0, index - KDJ_WINDOW_SESSIONS + 1), index + 1)
+        high, low = max(highs[window]), min(lows[window])
+        # A flat window has no RSV; K and D carry, as advance_kdj declines to invent one.
+        if high > low:
+            k += ((close - low) / (high - low) * 100 - k) / KDJ_SMOOTHING_PERIODS
+            d += (k - d) / KDJ_SMOOTHING_PERIODS
+    return {
+        "trade_date": _trade_date_key(bars[-1].get("trading_date")),
+        f"expma_12_{basis}": round(ema_fast, 6), f"macd_dif_{basis}": round(ema_fast - ema_slow, 6),
+        f"macd_dea_{basis}": round(dea, 6), f"kdj_k_{basis}": round(k, 6), f"kdj_d_{basis}": round(d, 6),
+        "seed_source": "computed_from_canonical_bars", "seed_sessions": len(bars),
+    }
 
 
-def prior_session_bars(symbol: str, connection: Any, *, before_trading_date: Any) -> list[dict[str, Any]]:
-    """The completed sessions the RSV window needs, oldest first."""
-    rows = connection.execute(
-        """SELECT trading_date,high,low FROM quant.canonical_bars_daily
-            WHERE symbol=%s AND trading_date<%s AND is_suspended=false
-            ORDER BY trading_date DESC LIMIT %s""",
-        (symbol, before_trading_date, KDJ_WINDOW_SESSIONS - 1),
-    ).fetchall()
-    return [dict(row) for row in reversed(rows)]
-
-
-def latest_factor_rows_by_symbol(
+def daily_bars_by_symbol(
     symbols: Iterable[str], connection: Any, *, before_trading_date: Any,
-    known_at: Any = None, basis: str = "bfq",
-) -> dict[str, dict[str, Any]]:
-    """One seed per symbol for a whole watch basket in a single read.
-
-    The live scan runs every 10-30 seconds over the full basket, so the
-    per-symbol reader's ``LIMIT 1`` would become one round trip per symbol per
-    scan.  ``DISTINCT ON`` applies the same ordering - and the same rejection of
-    rows carrying no seed - once across the basket.
-    """
-    requested = sorted({str(symbol) for symbol in symbols if str(symbol)})
-    cutoff = _trade_date_key(before_trading_date)
-    if not requested or cutoff is None:
-        return {}
-    clause = " AND available_at<=%s" if known_at is not None else ""
-    arguments: tuple[Any, ...] = (requested, cutoff, seed_factor_keys(basis))
-    if known_at is not None:
-        arguments = (requested, cutoff, known_at, seed_factor_keys(basis))
-    rows = connection.execute(
-        f"""SELECT DISTINCT ON (row_data->>'ts_code')
-                   row_data->>'ts_code' AS symbol, row_data
-              FROM quant.tushare_raw_records
-             WHERE api_name='stk_factor_pro' AND row_data->>'ts_code'=ANY(%s)
-               AND row_data->>'trade_date' < %s{clause}
-               AND row_data ?| %s::text[]
-             ORDER BY row_data->>'ts_code', row_data->>'trade_date' DESC, available_at DESC""",
-        arguments,
-    ).fetchall()
-    result: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        payload = dict(row)
-        row_data = payload.get("row_data")
-        if row_data:
-            result[str(payload.get("symbol"))] = dict(row_data)
-    return result
-
-
-def prior_session_bars_by_symbol(
-    symbols: Iterable[str], connection: Any, *, before_trading_date: Any,
+    known_at: Any = None, sessions: int = SEED_HISTORY_SESSIONS,
 ) -> dict[str, list[dict[str, Any]]]:
-    """The RSV window's completed sessions for a whole basket, oldest first."""
+    """Each symbol's last ``sessions`` completed unsuspended bars, oldest first, in one read.
+
+    The seed and the RSV window both come from these, so a basket costs one
+    query.  ``known_at`` limits a replay to the bars that had landed by then.
+    """
     requested = sorted({str(symbol) for symbol in symbols if str(symbol)})
     if not requested:
         return {}
+    clause = " AND available_at<=%s" if known_at is not None else ""
+    arguments = (requested, before_trading_date, *((known_at,) if known_at is not None else ()), sessions)
     rows = connection.execute(
-        """WITH ranked AS (
-               SELECT symbol,trading_date,high,low,
+        f"""WITH ranked AS (
+               SELECT symbol,trading_date,close,high,low,
                       row_number() OVER(PARTITION BY symbol ORDER BY trading_date DESC) AS row_number
                  FROM quant.canonical_bars_daily
-                WHERE symbol=ANY(%s) AND trading_date<%s AND is_suspended=false
+                WHERE symbol=ANY(%s) AND trading_date<%s AND is_suspended=false{clause}
            )
-           SELECT symbol,trading_date,high,low FROM ranked
+           SELECT symbol,trading_date,close,high,low FROM ranked
             WHERE row_number<=%s ORDER BY symbol,trading_date ASC""",
-        (requested, before_trading_date, KDJ_WINDOW_SESSIONS - 1),
+        arguments,
     ).fetchall()
     # Pre-seeded so a symbol with no bars still answers, and appended through
     # setdefault so an unexpected symbol cannot raise on the live scan path.
@@ -362,11 +321,29 @@ def prior_session_bars_by_symbol(
     return grouped
 
 
+#: One read per symbol per session: a seed cannot change until the next close.
+_SESSION_BARS: dict[str, dict[str, list[dict[str, Any]]]] = {}
+
+
+def _session_bars(symbols: list[str], connection: Any, *, trading_date: Any,
+                  known_at: Any) -> dict[str, list[dict[str, Any]]]:
+    if known_at is not None:
+        return daily_bars_by_symbol(symbols, connection, before_trading_date=trading_date, known_at=known_at)
+    key = _trade_date_key(trading_date) or str(trading_date)
+    for stale in [day for day in _SESSION_BARS if day != key]:
+        del _SESSION_BARS[stale]
+    cached = _SESSION_BARS.setdefault(key, {})
+    missing = [symbol for symbol in symbols if symbol not in cached]
+    if missing:
+        cached.update(daily_bars_by_symbol(missing, connection, before_trading_date=trading_date))
+    return {symbol: cached.get(symbol, []) for symbol in symbols}
+
+
 def realtime_indicators_by_symbol(
     quotes: Mapping[str, Mapping[str, Any]], connection: Any, *,
     trading_date: Any, basis: str = "bfq", known_at: Any = None,
 ) -> dict[str, dict[str, Any]]:
-    """Live readings for a watch basket from two reads, not two per symbol.
+    """Live readings for a watch basket from at most one read per session.
 
     ``quotes`` maps each symbol to its running ``price``, ``session_high`` and
     ``session_low``.  Symbols whose seed is missing still get an entry, because
@@ -376,14 +353,14 @@ def realtime_indicators_by_symbol(
     symbols = sorted({str(symbol) for symbol in quotes if str(symbol)})
     if not symbols:
         return {}
-    seeds = latest_factor_rows_by_symbol(
-        symbols, connection, before_trading_date=trading_date, known_at=known_at, basis=basis)
-    bars = prior_session_bars_by_symbol(symbols, connection, before_trading_date=trading_date)
+    bars = _session_bars(symbols, connection, trading_date=trading_date, known_at=known_at)
     result: dict[str, dict[str, Any]] = {}
     for symbol in symbols:
         quote = quotes.get(symbol) or {}
+        history = bars.get(symbol, [])
         reading = realtime_indicators(
-            seeds.get(symbol), price=quote.get("price"), prior_sessions=bars.get(symbol, ()),
+            computed_seed(history, basis=basis), price=quote.get("price"),
+            prior_sessions=history[-(KDJ_WINDOW_SESSIONS - 1):],
             session_high=quote.get("session_high"), session_low=quote.get("session_low"), basis=basis,
         )
         result[symbol] = {"symbol": symbol, "trading_date": str(trading_date), **reading}
@@ -395,14 +372,11 @@ def symbol_realtime_indicators(
     price: Any, session_high: Any, session_low: Any, trading_date: Any,
     basis: str = "bfq", known_at: Any = None,
 ) -> dict[str, Any]:
-    """Compose one symbol's live reading from a caller-owned transaction."""
-    factor_row = latest_factor_row(
-        symbol, connection, before_trading_date=trading_date, known_at=known_at, basis=basis)
-    result = realtime_indicators(
-        factor_row, price=price, prior_sessions=prior_session_bars(symbol, connection, before_trading_date=trading_date),
-        session_high=session_high, session_low=session_low, basis=basis,
-    )
-    return {"symbol": symbol, "trading_date": str(trading_date), **result}
+    """One symbol's live reading; the basket path with a basket of one."""
+    return realtime_indicators_by_symbol(
+        {symbol: {"price": price, "session_high": session_high, "session_low": session_low}}, connection,
+        trading_date=trading_date, basis=basis, known_at=known_at,
+    )[symbol]
 
 
 def _trade_date_key(value: Any) -> str | None:
@@ -417,9 +391,7 @@ def _trade_date_key(value: Any) -> str | None:
 
 __all__ = [
     "ADJUSTMENT_BASES", "KDJ_SMOOTHING_PERIODS", "KDJ_WINDOW_SESSIONS",
-    "MACD_FAST_PERIODS", "MACD_SIGNAL_PERIODS", "MACD_SLOW_PERIODS",
-    "advance_kdj", "advance_macd", "kdj_seed", "kdj_window_bounds",
-    "latest_factor_row", "latest_factor_rows_by_symbol", "macd_seed",
-    "prior_session_bars", "prior_session_bars_by_symbol", "realtime_indicators",
-    "realtime_indicators_by_symbol", "seed_factor_keys", "symbol_realtime_indicators",
+    "MACD_FAST_PERIODS", "MACD_SIGNAL_PERIODS", "MACD_SLOW_PERIODS", "MIN_SEED_SESSIONS", "SEED_HISTORY_SESSIONS",
+    "advance_kdj", "advance_macd", "computed_seed", "daily_bars_by_symbol", "kdj_seed", "kdj_window_bounds",
+    "macd_seed", "realtime_indicators", "realtime_indicators_by_symbol", "symbol_realtime_indicators",
 ]

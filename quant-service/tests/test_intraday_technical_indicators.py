@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 
 from app.intraday_technical_indicators import (
     advance_kdj,
@@ -192,23 +194,6 @@ class RealtimeIndicatorsTests(unittest.TestCase):
             self._call(basis="raw")
 
 
-class _Connection:
-    """Replays canned result sets and records the SQL it was handed."""
-
-    def __init__(self, factor_rows=None, bar_rows=None):
-        self.factor_rows = factor_rows if factor_rows is not None else [{"row_data": FACTOR_20260915}]
-        self.bar_rows = bar_rows if bar_rows is not None else [
-            {"trading_date": bar["trading_date"], "high": bar["high"], "low": bar["low"]}
-            for bar in reversed(PRIOR_SESSIONS)
-        ]
-        self.calls = []
-
-    def execute(self, statement, values):
-        self.calls.append((" ".join(statement.split()), values))
-        rows = self.factor_rows if "tushare_raw_records" in statement else self.bar_rows
-        return type("Result", (), {"fetchall": lambda _self: list(rows)})()
-
-
 class PayloadShapeTests(unittest.TestCase):
     """Every status answers with the same keys, so consumers need no guard."""
 
@@ -250,86 +235,126 @@ class PayloadShapeTests(unittest.TestCase):
         self.assertIn("no usable factor", result["reason"])
 
 
-class BatchedReaderTests(unittest.TestCase):
-    """The live scan reads the whole basket at once, not once per symbol."""
+FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "600176_daily_bfq_to_20260915.json").read_text(encoding="utf-8"))
+BARS_TO_20260915 = FIXTURE["bars"]
 
-    def _connection(self):
-        return _Connection(
-            factor_rows=[
-                {"symbol": "600176.SH", "row_data": FACTOR_20260915},
-                {"symbol": "002015.SZ", "row_data": FACTOR_20260915},
-            ],
-            bar_rows=[
-                {"symbol": symbol, "trading_date": bar["trading_date"], "high": bar["high"], "low": bar["low"]}
-                for symbol in ("002015.SZ", "600176.SH")
-                for bar in PRIOR_SESSIONS
-            ],
+
+class _BarConnection:
+    """Replays daily bars for the basket read and records each query."""
+
+    def __init__(self, bars_by_symbol):
+        self.bars_by_symbol = bars_by_symbol
+        self.calls = []
+
+    def execute(self, statement, values):
+        self.calls.append((" ".join(statement.split()), values))
+        rows = [{"symbol": symbol, **bar} for symbol in values[0] for bar in self.bars_by_symbol.get(symbol, [])]
+        return type("Result", (), {"fetchall": lambda _self: rows})()
+
+
+class ComputedSeedTests(unittest.TestCase):
+    def test_the_seed_from_250_unadjusted_bars_is_the_vendor_s_published_row(self):
+        from app.intraday_technical_indicators import computed_seed
+
+        seed = computed_seed(BARS_TO_20260915)
+        self.assertEqual(seed["trade_date"], "20260915")
+        self.assertAlmostEqual(seed["expma_12_bfq"], float(FACTOR_20260915["expma_12_bfq"]), places=5)
+        self.assertAlmostEqual(seed["kdj_k_bfq"], float(FACTOR_20260915["kdj_k_bfq"]), places=5)
+        self.assertAlmostEqual(seed["kdj_d_bfq"], float(FACTOR_20260915["kdj_d_bfq"]), places=5)
+        # The vendor prints DIF and DEA to three decimals.
+        self.assertAlmostEqual(seed["macd_dif_bfq"], float(FACTOR_20260915["macd_dif_bfq"]), delta=0.0005)
+        self.assertAlmostEqual(seed["macd_dea_bfq"], float(FACTOR_20260915["macd_dea_bfq"]), delta=0.0005)
+        self.assertEqual(seed["seed_sessions"], 250)
+
+    def test_one_more_bar_is_the_same_as_advancing_the_seed_one_step(self):
+        from app.intraday_technical_indicators import (
+            advance_kdj, advance_macd, computed_seed, kdj_seed, kdj_window_bounds, macd_seed,
         )
 
-    def test_the_basket_seed_read_rejects_rows_carrying_no_seed(self):
-        from datetime import date
+        earlier, last = BARS_TO_20260915[:-1], BARS_TO_20260915[-1]
+        seed = computed_seed(earlier)
+        macd = advance_macd(macd_seed(seed), last["close"])
+        bounds = kdj_window_bounds(earlier, session_high=last["high"], session_low=last["low"])
+        kdj = advance_kdj(kdj_seed(seed), price=last["close"], window_high=bounds[0], window_low=bounds[1])
+        direct = computed_seed(BARS_TO_20260915)
+        self.assertAlmostEqual(macd["ema_fast"], direct["expma_12_bfq"], places=3)
+        self.assertAlmostEqual(macd["dif"], direct["macd_dif_bfq"], places=3)
+        self.assertAlmostEqual(kdj["k"], direct["kdj_k_bfq"], places=3)
+        self.assertAlmostEqual(kdj["d"], direct["kdj_d_bfq"], places=3)
 
-        from app.intraday_technical_indicators import latest_factor_rows_by_symbol
+    def test_too_little_history_an_adjusted_basis_or_a_bar_without_prices_gives_no_seed(self):
+        from app.intraday_technical_indicators import MIN_SEED_SESSIONS, computed_seed
 
-        connection = self._connection()
-        seeds = latest_factor_rows_by_symbol(
-            ["600176.SH", "002015.SZ"], connection, before_trading_date=date(2026, 9, 16))
-        statement, values = connection.calls[0]
-        self.assertIn("DISTINCT ON (row_data->>'ts_code')", statement)
-        self.assertIn("row_data ?| %s::text[]", statement)
-        self.assertEqual(values, (["002015.SZ", "600176.SH"], "20260916", ["expma_12_bfq", "kdj_k_bfq"]))
-        self.assertEqual(sorted(seeds), ["002015.SZ", "600176.SH"])
+        self.assertIsNone(computed_seed(BARS_TO_20260915[-(MIN_SEED_SESSIONS - 1):]))
+        self.assertIsNone(computed_seed(BARS_TO_20260915, basis="qfq"))
+        self.assertIsNone(computed_seed([*BARS_TO_20260915[:-1], {**BARS_TO_20260915[-1], "close": None}]))
 
-    def test_the_basket_is_read_once_rather_than_once_per_symbol(self):
+
+class BasketReadingTests(unittest.TestCase):
+    """The live scan reads the whole basket at once, and a session's seed only once."""
+
+    QUOTE = {"price": NEXT_CLOSE, "session_high": NEXT_SESSION_HIGH, "session_low": NEXT_SESSION_LOW}
+
+    def setUp(self):
+        from app import intraday_technical_indicators
+
+        intraday_technical_indicators._SESSION_BARS.clear()
+        self.addCleanup(intraday_technical_indicators._SESSION_BARS.clear)
+
+    def test_the_next_session_s_live_reading_matches_what_the_vendor_published(self):
         from datetime import date
 
         from app.intraday_technical_indicators import realtime_indicators_by_symbol
 
-        connection = self._connection()
-        quotes = {
-            "600176.SH": {"price": 47.15, "session_high": 47.5, "session_low": 46.0},
-            "002015.SZ": {"price": 16.09, "session_high": 16.3, "session_low": 16.07},
-        }
-        readings = realtime_indicators_by_symbol(quotes, connection, trading_date=date(2026, 9, 16))
-        self.assertEqual(len(connection.calls), 2)
-        self.assertEqual(sorted(readings), ["002015.SZ", "600176.SH"])
-        for symbol, reading in readings.items():
-            self.assertEqual(reading["symbol"], symbol)
-            self.assertEqual(reading["status"], "completed")
-            self.assertEqual(reading["degraded"], [])
+        connection = _BarConnection({"600176.SH": BARS_TO_20260915})
+        reading = realtime_indicators_by_symbol({"600176.SH": self.QUOTE}, connection,
+                                                trading_date=date(2026, 9, 16))["600176.SH"]
+        self.assertEqual(reading["status"], "completed")
+        self.assertEqual(reading["seed_trade_date"], "20260915")
+        self.assertAlmostEqual(reading["macd"]["dif"], PUBLISHED_20260916["dif"], delta=0.001)
+        self.assertAlmostEqual(reading["macd"]["macd"], PUBLISHED_20260916["macd"], delta=0.002)
+        self.assertAlmostEqual(reading["kdj"]["k"], PUBLISHED_20260916["k"], places=3)
+        self.assertAlmostEqual(reading["kdj"]["j"], PUBLISHED_20260916["j"], places=3)
 
-    def test_the_batched_reading_matches_the_single_symbol_reading(self):
+    def test_a_session_reads_the_basket_once_and_a_new_session_reads_again(self):
         from datetime import date
 
-        from app.intraday_technical_indicators import (
-            realtime_indicators_by_symbol, symbol_realtime_indicators,
-        )
+        from app.intraday_technical_indicators import SEED_HISTORY_SESSIONS, realtime_indicators_by_symbol
 
-        quote = {"price": 47.15, "session_high": 47.5, "session_low": 46.0}
-        # One symbol only: the fake replays its canned rows whatever the query
-        # asks for, so the basket's rows must match the basket under test.
-        connection = _Connection(
-            factor_rows=[{"symbol": "600176.SH", "row_data": FACTOR_20260915}],
-            bar_rows=[{"symbol": "600176.SH", "trading_date": bar["trading_date"],
-                       "high": bar["high"], "low": bar["low"]} for bar in PRIOR_SESSIONS],
-        )
-        batched = realtime_indicators_by_symbol(
-            {"600176.SH": quote}, connection, trading_date=date(2026, 9, 16))["600176.SH"]
-        single = symbol_realtime_indicators(
-            "600176.SH", _Connection(), price=quote["price"], session_high=quote["session_high"],
-            session_low=quote["session_low"], trading_date=date(2026, 9, 16))
-        self.assertEqual(batched, single)
+        connection = _BarConnection({"600176.SH": BARS_TO_20260915, "002015.SZ": BARS_TO_20260915})
+        quotes = {"600176.SH": self.QUOTE, "002015.SZ": self.QUOTE}
+        realtime_indicators_by_symbol(quotes, connection, trading_date=date(2026, 9, 16))
+        realtime_indicators_by_symbol(quotes, connection, trading_date=date(2026, 9, 16))
+        self.assertEqual(len(connection.calls), 1)
+        statement, values = connection.calls[0]
+        self.assertIn("row_number() OVER(PARTITION BY symbol ORDER BY trading_date DESC)", statement)
+        self.assertEqual(values, (["002015.SZ", "600176.SH"], date(2026, 9, 16), SEED_HISTORY_SESSIONS))
+        realtime_indicators_by_symbol(quotes, connection, trading_date=date(2026, 9, 17))
+        self.assertEqual(len(connection.calls), 2)
 
-    def test_a_symbol_without_a_seed_still_gets_an_entry(self):
+    def test_a_replay_reads_only_bars_landed_by_then_and_bypasses_the_session_cache(self):
+        from datetime import date, datetime, timezone
+
+        from app.intraday_technical_indicators import realtime_indicators_by_symbol
+
+        known_at = datetime(2026, 9, 16, 2, tzinfo=timezone.utc)
+        connection = _BarConnection({"600176.SH": BARS_TO_20260915})
+        for _ in range(2):
+            realtime_indicators_by_symbol({"600176.SH": self.QUOTE}, connection,
+                                          trading_date=date(2026, 9, 16), known_at=known_at)
+        self.assertEqual(len(connection.calls), 2)
+        statement, values = connection.calls[0]
+        self.assertIn("available_at<=%s", statement)
+        self.assertEqual(values[2], known_at)
+
+    def test_a_symbol_without_bars_still_gets_an_entry(self):
         from datetime import date
 
         from app.intraday_technical_indicators import realtime_indicators_by_symbol
 
         # "no reading" and "not scanned" must stay distinguishable downstream.
-        connection = _Connection(factor_rows=[], bar_rows=[])
-        readings = realtime_indicators_by_symbol(
-            {"600176.SH": {"price": 47.15, "session_high": 47.5, "session_low": 46.0}},
-            connection, trading_date=date(2026, 9, 16))
+        readings = realtime_indicators_by_symbol({"600176.SH": self.QUOTE}, _BarConnection({}),
+                                                 trading_date=date(2026, 9, 16))
         self.assertEqual(readings["600176.SH"]["status"], "seed_unavailable")
 
     def test_an_empty_basket_reads_nothing(self):
@@ -337,92 +362,23 @@ class BatchedReaderTests(unittest.TestCase):
 
         from app.intraday_technical_indicators import realtime_indicators_by_symbol
 
-        connection = _Connection()
+        connection = _BarConnection({})
         self.assertEqual(realtime_indicators_by_symbol({}, connection, trading_date=date(2026, 9, 16)), {})
         self.assertEqual(connection.calls, [])
 
-
-class SeedReaderTests(unittest.TestCase):
-    def test_the_seed_excludes_the_live_session(self):
+    def test_the_single_symbol_reading_is_the_basket_reading(self):
         from datetime import date
 
-        from app.intraday_technical_indicators import latest_factor_row
+        from app import intraday_technical_indicators as indicators
 
-        connection = _Connection()
-        latest_factor_row("600176.SH", connection, before_trading_date=date(2026, 9, 16))
-        statement, values = connection.calls[0]
-        # Seeding from the live session's own factors and then advancing with
-        # that session's price would count it twice, and look plausible.
-        self.assertIn("row_data->>'trade_date' < %s", statement)
-        self.assertEqual(values, ("600176.SH", "20260916", ["expma_12_bfq", "kdj_k_bfq"]))
-
-    def test_a_replay_cutoff_hides_rows_published_later(self):
-        from datetime import date, datetime, timezone
-
-        from app.intraday_technical_indicators import latest_factor_row
-
-        connection = _Connection()
-        known_at = datetime(2026, 9, 16, 1, 0, tzinfo=timezone.utc)
-        latest_factor_row("600176.SH", connection, before_trading_date=date(2026, 9, 16), known_at=known_at)
-        statement, values = connection.calls[0]
-        self.assertIn("available_at<=%s", statement)
-        # Order matters: the cutoff binds before the seed-key array.
-        self.assertEqual(values, ("600176.SH", "20260916", known_at, ["expma_12_bfq", "kdj_k_bfq"]))
-
-    def test_a_row_without_seed_factors_cannot_shadow_a_usable_one(self):
-        from datetime import date
-
-        from app.intraday_technical_indicators import latest_factor_row
-
-        # The gateway has served a VCP breakout payload under this api_name.
-        # Such a row is newer than the real seed and would otherwise win the
-        # ORDER BY, leaving the symbol with no indicators at all.
-        connection = _Connection()
-        latest_factor_row("600176.SH", connection, before_trading_date=date(2026, 9, 17))
-        statement, values = connection.calls[0]
-        self.assertIn("row_data ?| %s::text[]", statement)
-        self.assertEqual(values[-1], ["expma_12_bfq", "kdj_k_bfq"])
-
-    def test_the_seed_keys_follow_the_requested_basis(self):
-        from datetime import date
-
-        from app.intraday_technical_indicators import latest_factor_row
-
-        connection = _Connection()
-        latest_factor_row("600176.SH", connection, before_trading_date=date(2026, 9, 17), basis="hfq")
-        self.assertEqual(connection.calls[0][1][-1], ["expma_12_hfq", "kdj_k_hfq"])
-
-    def test_no_stored_factor_row_yields_no_seed(self):
-        from datetime import date
-
-        from app.intraday_technical_indicators import latest_factor_row
-
-        self.assertIsNone(
-            latest_factor_row("600176.SH", _Connection(factor_rows=[]), before_trading_date=date(2026, 9, 16))
-        )
-
-    def test_prior_bars_are_returned_oldest_first(self):
-        from datetime import date
-
-        from app.intraday_technical_indicators import prior_session_bars
-
-        bars = prior_session_bars("600176.SH", _Connection(), before_trading_date=date(2026, 9, 16))
-        self.assertEqual(bars[0]["trading_date"], "20260904")
-        self.assertEqual(bars[-1]["trading_date"], "20260915")
-
-    def test_a_composed_read_reproduces_the_vendors_next_session(self):
-        from datetime import date
-
-        from app.intraday_technical_indicators import symbol_realtime_indicators
-
-        result = symbol_realtime_indicators(
-            "600176.SH", _Connection(), price=NEXT_CLOSE, session_high=NEXT_SESSION_HIGH,
-            session_low=NEXT_SESSION_LOW, trading_date=date(2026, 9, 16),
-        )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["symbol"], "600176.SH")
-        self.assertAlmostEqual(result["macd"]["macd"], PUBLISHED_20260916["macd"], delta=0.001)
-        self.assertAlmostEqual(result["kdj"]["j"], PUBLISHED_20260916["j"], places=4)
+        batched = indicators.realtime_indicators_by_symbol(
+            {"600176.SH": self.QUOTE}, _BarConnection({"600176.SH": BARS_TO_20260915}),
+            trading_date=date(2026, 9, 16))["600176.SH"]
+        indicators._SESSION_BARS.clear()
+        single = indicators.symbol_realtime_indicators(
+            "600176.SH", _BarConnection({"600176.SH": BARS_TO_20260915}), price=NEXT_CLOSE,
+            session_high=NEXT_SESSION_HIGH, session_low=NEXT_SESSION_LOW, trading_date=date(2026, 9, 16))
+        self.assertEqual(batched, single)
 
 
 if __name__ == "__main__":
