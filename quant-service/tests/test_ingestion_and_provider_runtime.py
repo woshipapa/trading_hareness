@@ -11,6 +11,12 @@ from app.runtime_tasks import (
 )
 
 
+def _action_name(call) -> str:
+    """A database action's name; keyword writes reach the executor as partials."""
+    action = call.args[0]
+    return getattr(action, "__name__", None) or action.func.__name__
+
+
 class IngestionAndProviderRuntimeTests(unittest.TestCase):
     def test_background_task_preflight_flag_defaults_on_and_explicitly_disables_leases(self):
         self.assertTrue(background_tasks_enabled({}))
@@ -198,40 +204,70 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(universe["status"], "blocked")
         self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], ["prepare_run"])
 
-    def test_ths_sector_catalog_uses_database_executor_for_raw_rows_and_catalog(self):
-        outcome = {"status": "completed", "request_key": "ths-index", "provider": "tushare_super_sdk"}
+    def test_ths_sector_catalog_lists_fuyao_indices_through_the_database_executor(self):
+        listing = {"item": [{"thscode": "885431.TI", "name": "新能源汽车"}, {"thscode": "885566.TI", "name": "大飞机"},
+                            {"thscode": "885999.TI", "name": ""}], "timestamp": 1789738641661}
 
-        async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(side_effect=[[{"ts_code": "885001.TI", "name": "测试板块"}], None])
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(return_value=outcome)), \
+        async def check() -> tuple[dict[str, object], AsyncMock, AsyncMock]:
+            blocking = AsyncMock(side_effect=[2])
+            fetch = AsyncMock(return_value=listing)
+            with patch("app.fuyao_provider.configured", return_value=True), \
+                 patch("app.fuyao_provider.fetch", new=fetch), \
                  patch("app.main.run_database_blocking", new=blocking):
                 result = await sync_ths_sector_catalog(SectorCatalogSyncRequest(index_type="N", sync_members=False))
-            return result, blocking
+            return result, blocking, fetch
 
-        result, blocking = asyncio.run(check())
+        result, blocking, fetch = asyncio.run(check())
         self.assertEqual(result["status"], "completed")
-        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
-            "tushare_rows_for_request", "persist_catalog",
-        ])
+        self.assertEqual((result["taxonomy_key"], result["source"]), ("fuyao_ths_concept", "fuyao_ths"))
+        self.assertEqual(result["skipped_non_member_codes"], 1)
+        self.assertEqual(fetch.await_args.args, ("ths_index_list", {"tag": "cn_concept"}))
+        self.assertEqual([_action_name(call) for call in blocking.await_args_list], ["persist_catalog"])
 
-    def test_ths_sector_member_capacity_and_catalog_aggregation_remain_blocked(self):
-        index_outcome = {"status": "completed", "request_key": "ths-index", "provider": "tushare_super_sdk"}
+    def test_ths_index_types_fuyao_does_not_list_are_unavailable_without_provider_work(self):
+        async def check() -> dict[str, object]:
+            with patch("app.fuyao_provider.fetch", new=AsyncMock(side_effect=AssertionError("no request"))), \
+                 patch("app.main.run_database_blocking", new=AsyncMock(side_effect=AssertionError("no write"))):
+                return await sync_ths_sector_catalog(SectorCatalogSyncRequest(index_type="BB"))
+
+        result = asyncio.run(check())
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIsNone(result["taxonomy_key"])
+
+    def test_ths_sector_member_rate_limit_defers_and_catalog_aggregation_stays_blocked(self):
+        from app.public_provider_rate_limits import PublicProviderRateLimited
+
+        listing = {"item": [{"thscode": "885431.TI", "name": "新能源汽车"}]}
         capacity_error = HTTPException(status_code=503, detail="local processing capacity is temporarily saturated; retry shortly")
 
-        async def check() -> tuple[dict[str, object], dict[str, object]]:
-            blocking = AsyncMock(side_effect=[[{"ts_code": "885001.TI", "name": "测试板块"}], None])
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(side_effect=[index_outcome, capacity_error])), \
+        async def fetch(capability, _params):
+            if capability == "ths_index_list":
+                return listing
+            try:
+                raise PublicProviderRateLimited("fuyao_ths")
+            except PublicProviderRateLimited as error:
+                raise FuyaoProviderError(str(error)) from error
+
+        async def check() -> tuple[dict[str, object], dict[str, object], AsyncMock]:
+            blocking = AsyncMock(side_effect=[1, ([{"sector_key": "885431.TI", "label": "新能源汽车"}], 1)])
+            with patch("app.fuyao_provider.configured", return_value=True), \
+                 patch("app.fuyao_provider.fetch", new=fetch), \
+                 patch("app.fuyao_ths_membership.REQUEST_SPACING_SECONDS", 0), \
+                 patch("app.fuyao_ths_membership.RATE_LIMIT_RETRY_SECONDS", 0), \
                  patch("app.main.run_database_blocking", new=blocking):
                 member_result = await sync_ths_sector_catalog(SectorCatalogSyncRequest(
                     index_type="N", sync_members=True, member_limit=1,
                 ))
             with patch("app.main.sync_ths_sector_catalog", new=AsyncMock(side_effect=capacity_error)):
                 catalog_result = await sync_all_ths_sector_catalogs()
-            return member_result, catalog_result
+            return member_result, catalog_result, blocking
 
-        member_result, catalog_result = asyncio.run(check())
+        member_result, catalog_result, blocking = asyncio.run(check())
+        # A refused start is deferred, not failed: no receipt is written and the board stays due.
         self.assertEqual(member_result["status"], "blocked")
-        self.assertEqual(member_result["member_results"][0]["status"], "blocked")
+        self.assertEqual(member_result["member_results"][0]["status"], "deferred")
+        self.assertEqual([_action_name(call) for call in blocking.await_args_list], ["persist_catalog", "boards_page"])
+        self.assertEqual(member_result["next_member_offset"], 0)
         self.assertEqual(catalog_result["status"], "blocked")
         self.assertTrue(all(item["status"] == "blocked" for item in catalog_result["types"]))
 
@@ -390,45 +426,74 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
             "tushare_rows_for_request", "persist_concept_flow", "tushare_rows_for_request", "persist_limit_strength",
         ])
 
-    def test_ths_concept_members_use_database_executor_for_selection_rows_and_state(self):
-        selected = (date(2026, 8, 11), [{"sector_key": "885001.TI", "label": "测试概念"}], 1)
-        outcome = {"status": "completed", "request_key": "member", "provider": "tushare_super_sdk"}
+    def test_ths_concept_members_fetch_fuyao_constituents_through_the_database_executor(self):
+        constituents = {"timestamp": 1789738642255, "item": [
+            {"thscode": "000009.SZ", "ticker": "000009", "name": "中国宝安"},
+            {"thscode": "000021.SZ", "ticker": "000021", "name": "深科技"},
+        ]}
+
+        async def check() -> tuple[dict[str, object], AsyncMock, AsyncMock]:
+            blocking = AsyncMock(side_effect=[
+                {"fuyao_ths_concept": 2}, ([{"sector_key": "885431.TI", "label": "新能源汽车"}], 2),
+                {"members": 2, "opened": 2, "closed": 0, "state": "completed"},
+            ])
+            fetch = AsyncMock(return_value=constituents)
+            with patch("app.fuyao_provider.configured", return_value=True), \
+                 patch("app.fuyao_provider.fetch", new=fetch), \
+                 patch("app.main.run_database_blocking", new=blocking):
+                result = await sync_ths_concept_members(ConceptMemberSyncRequest(member_limit=1))
+            return result, blocking, fetch
+
+        result, blocking, fetch = asyncio.run(check())
+        self.assertEqual(result["member_results"][0]["members"], 2)
+        self.assertEqual((result["taxonomy_key"], result["next_member_offset"]), ("fuyao_ths_concept", 1))
+        self.assertEqual(fetch.await_args.args, ("ths_index_constituents", {"thscode": "885431.TI"}))
+        self.assertEqual([_action_name(call) for call in blocking.await_args_list], [
+            "listed_counts", "boards_page", "persist_member_snapshot",
+        ])
+        members = blocking.await_args_list[2].args[4]
+        self.assertEqual(sorted(members), ["000009.SZ", "000021.SZ"])
+
+    def test_ths_concept_backfill_runs_one_paced_fuyao_batch_and_reports_durable_progress(self):
+        progress = {
+            "fuyao_ths_concept": {"listed": 2, "completed_or_empty": 1, "failed": 0, "remaining": 1},
+            "fuyao_ths_industry": {"listed": 1, "completed_or_empty": 0, "failed": 0, "remaining": 1},
+            "fuyao_ths_region": {"listed": 1, "completed_or_empty": 0, "failed": 1, "remaining": 1},
+        }
 
         async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(side_effect=[selected, [{"ts_code": "000001.SZ"}], 1])
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(return_value=outcome)), \
+            blocking = AsyncMock(side_effect=[
+                {"fuyao_ths_concept": 2, "fuyao_ths_industry": 1, "fuyao_ths_region": 1},
+                ([{"sector_key": "885431.TI", "label": "新能源汽车"}], 2),
+                {"members": 1, "opened": 0, "closed": 0, "state": "completed"},
+                progress,
+            ])
+            with patch("app.fuyao_provider.configured", return_value=True), \
+                 patch("app.fuyao_provider.fetch", new=AsyncMock(return_value={"item": [{"thscode": "000009.SZ", "name": "中国宝安"}]})), \
                  patch("app.main.run_database_blocking", new=blocking):
-                result = await sync_ths_concept_members(ConceptMemberSyncRequest(trade_date=date(2026, 8, 11), member_limit=1))
+                result = await run_ths_concept_member_backfill_batch(ConceptMemberBackfillRequest(
+                    trade_date=date(2026, 8, 11), refresh_flow_catalog=False, batch_size=1,
+                ))
             return result, blocking
 
         result, blocking = asyncio.run(check())
-        self.assertEqual(result["member_results"][0]["members"], 1)
-        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
-            "select_concepts", "tushare_rows_for_request", "persist_member_snapshot",
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["progress"], {"completed_or_empty": 1, "failed": 1, "remaining": 3})
+        self.assertEqual(result["total_concepts"], 2)
+        self.assertIn("notice", result)      # a past trade_date cannot be observed again
+        self.assertEqual([_action_name(call) for call in blocking.await_args_list], [
+            "listed_counts", "boards_due", "persist_member_snapshot", "refresh_progress",
         ])
 
-    def test_ths_concept_backfill_uses_native_async_reads_for_progress(self):
-        completed = {"status": "completed", "total_concepts": 3, "member_results": []}
+    def test_ths_catalog_rows_skip_codes_that_are_not_ths_indices(self):
+        from app.fuyao_ths_membership import index_catalog_rows
 
-        async def check() -> tuple[dict[str, object], AsyncMock, AsyncMock]:
-            existing = AsyncMock(return_value={"rows": 1})
-            progress = AsyncMock(return_value={"done": 2, "failed": 1})
-            with patch("app.main.sync_ths_concept_members", new=AsyncMock(return_value=completed)), \
-                 patch("app.main.read_async_ths_concept_flow_rows", new=existing), \
-                 patch("app.main.read_async_ths_concept_member_progress", new=progress):
-                result = await run_ths_concept_member_backfill_batch(ConceptMemberBackfillRequest(trade_date=date(2026, 8, 11), refresh_flow_catalog=False))
-            return result, existing, progress
-
-        result, existing, progress = asyncio.run(check())
-        self.assertEqual(result["progress"], {"completed_or_empty": 2, "failed": 1, "remaining": 1})
-        self.assertEqual(existing.await_args.args[1], date(2026, 8, 11))
-        self.assertEqual(progress.await_args.args[1], date(2026, 8, 11))
-
-    def test_ths_catalog_member_batches_skip_non_member_index_codes(self):
-        import inspect
-        source = inspect.getsource(__import__("app.main", fromlist=["sync_ths_sector_catalog"]).sync_ths_sector_catalog)
-        self.assertIn('re.fullmatch(r"\\d{6}\\.TI"', source)
-        self.assertIn("skipped_non_member_codes", source)
+        boards, skipped = index_catalog_rows({"item": [
+            {"thscode": "885431.TI", "name": "新能源汽车"}, {"thscode": "885431", "name": "无后缀"},
+            {"thscode": "1A0001.TI", "name": "非六位数字"}, {"thscode": "885566.TI", "name": " "},
+        ]})
+        self.assertEqual(boards, [("885431.TI", "新能源汽车")])
+        self.assertEqual(skipped, 3)
 
     def test_concept_limit_candidates_use_database_executor_for_exact_join_and_write(self):
         selected = (date(2026, 8, 11), [{"sector_key": "885001.TI", "label": "测试概念", "net_amount": 100}])

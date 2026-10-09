@@ -159,7 +159,7 @@ class PaperExecutionTests(unittest.TestCase):
         self.assertIn("effective_from<=%s", membership_sql)
         day = datetime(2026, 8, 14).date()
         # Held exposure buckets are read exactly as a candidate's sectors are.
-        self.assertEqual(params, (day, day, day, ["ths_concept_flow", "ths_index_n", "ths_industry"],
+        self.assertEqual(params, (day, day, day, ["fuyao_ths_concept", "ths_concept_flow", "ths_index_n", "ths_industry"],
                                   list(NON_SECTOR_GROUPS), NON_SECTOR_LABEL_PATTERN))
         self.assertIn("NOT (m.sector_key = ANY(%s))", membership_sql)
         self.assertEqual(membership_sql.count("%s"), len(params))

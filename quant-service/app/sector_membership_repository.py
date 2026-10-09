@@ -259,8 +259,76 @@ def persist_observed_snapshot_batched(
     return len(members)
 
 
+def persist_observed_snapshot_delta(
+    connection: Any,
+    taxonomy_key: str,
+    sector_key: str,
+    members: dict[str, dict[str, Any]],
+    provider_key: str,
+    observed_at: datetime,
+    *,
+    instrument_source: str,
+) -> dict[str, int]:
+    """Record one complete snapshot as changes against the open intervals.
+
+    The batched writer above starts an interval on the observation date for
+    every member, so refreshing a board every session would open one more
+    interval per unchanged member per session, and every reader of open rows
+    would count a member once per refresh.  A repeated refresh therefore
+    writes only what changed: a member with no open interval starts one on the
+    observation date (``known_at`` the observation), a member that is gone is
+    closed the day before, and an unchanged member keeps the interval and the
+    ``known_at`` it was first seen with.  An empty response changes nothing:
+    it is not evidence that the board emptied.
+    """
+    if not members:
+        return {"members": 0, "opened": 0, "closed": 0}
+    effective_from = observed_exchange_date(observed_at)
+    already_open = {str(row["symbol"]) for row in connection.execute(
+        """SELECT DISTINCT symbol FROM quant.sector_membership_history
+            WHERE taxonomy_key=%s AND sector_key=%s AND provider_key=%s AND effective_to IS NULL""",
+        (taxonomy_key, sector_key, provider_key),
+    ).fetchall()}
+    joined = {symbol: row for symbol, row in sorted(members.items()) if symbol not in already_open}
+    if joined:
+        ensure_instruments(
+            connection,
+            [InstrumentRecord(
+                symbol=symbol, exchange=symbol.rsplit(".", 1)[-1],
+                name=str(row.get("name") or "").strip() or None,
+                source=instrument_source,
+            ) for symbol, row in joined.items()],
+            source=instrument_source,
+        )
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """INSERT INTO quant.sector_membership_history(
+                       taxonomy_key,sector_key,symbol,effective_from,effective_to,provider_key,
+                       available_at,known_at,effective_from_basis,effective_to_basis,raw
+                   ) VALUES(%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT(taxonomy_key,sector_key,symbol,effective_from) DO UPDATE
+                     SET effective_to=NULL,provider_key=EXCLUDED.provider_key,
+                         available_at=EXCLUDED.available_at,
+                         known_at=LEAST(sector_membership_history.known_at,EXCLUDED.known_at),
+                         effective_from_basis=EXCLUDED.effective_from_basis,
+                         effective_to_basis=EXCLUDED.effective_to_basis,raw=EXCLUDED.raw""",
+                [(taxonomy_key, sector_key, symbol, effective_from, provider_key, observed_at, observed_at,
+                  OBSERVED_SNAPSHOT, OBSERVED_SNAPSHOT, Json(row)) for symbol, row in joined.items()],
+            )
+    closed = connection.execute(
+        """UPDATE quant.sector_membership_history
+              SET effective_to=%s,available_at=%s,effective_to_basis=%s
+            WHERE taxonomy_key=%s AND sector_key=%s AND provider_key=%s AND effective_to IS NULL
+              AND effective_from<%s AND NOT symbol = ANY(%s)""",
+        (effective_from - timedelta(days=1), observed_at, OBSERVED_SNAPSHOT,
+         taxonomy_key, sector_key, provider_key, effective_from, list(members)),
+    )
+    return {"members": len(members), "opened": len(joined), "closed": max(0, int(getattr(closed, "rowcount", 0) or 0))}
+
+
 __all__ = [
     "LEGACY_UNBOUNDED", "OBSERVED_SNAPSHOT", "PROVIDER_INTERVAL", "membership_interval",
     "observed_exchange_date", "persist_observed_snapshot", "persist_observed_snapshot_batched",
-    "persist_ths_snapshot", "point_in_time_membership_predicate", "sector_group_predicate",
+    "persist_observed_snapshot_delta", "persist_ths_snapshot", "point_in_time_membership_predicate",
+    "sector_group_predicate",
 ]

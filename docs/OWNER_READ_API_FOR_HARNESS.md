@@ -215,7 +215,7 @@ curl -fsS -m 5 http://127.0.0.1:15682/health | python3 -c "import json,sys; d=js
 | `/api/v1/market/sectors/flows` | taxonomy_key, trade_date, limit | 板块资金流（默认 `ths_industry`） |
 | `/api/v1/market/sectors/concepts` | trade_date, limit | 概念板块 |
 | `/api/v1/market/sectors/concepts/candidates` | trade_date, limit | 概念候选 |
-| `/api/v1/market/sectors/concepts/members/backfill/status` | trade_date | 概念成分回填状态 |
+| `/api/v1/market/sectors/concepts/members/backfill/status` | trade_date | Fuyao 同花顺概念/行业/地域成分刷新进度 |
 | `/api/v1/market/sectors/intraday/curves` | trade_date, taxonomy, since | 盘中板块资金流曲线（每分钟一个点） |
 | `/api/v1/market/sectors/review/report/latest` | | 收盘板块复盘报告 |
 

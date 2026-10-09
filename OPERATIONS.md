@@ -365,9 +365,10 @@ release tarball 下发，`~/trading_hareness` 是指向当前 release 的软链�
 `quant.sector_membership_history` 为空时,潜龙出海的**每一只**候选都会被判
 `sector_core_unconfirmed` 而全部 `no_trade`——管道再健康也一条推荐都不会出。
 
-概念成分走 Tushare `ths_member`,逐板块 + 6 次/分限频,要几小时。**Longhu 是能一次
-性给全的授权源**:104 个行业板块,每个板块一次网关调用返回完整成分,约 10 分钟灌完
-5300+ 只。
+概念成分原来走 Tushare `ths_member`(2026-10-08 停用,只剩历史)。同花顺概念/行业/地域成分现由
+Fuyao 提供,盘后循环 `ths_member_backfill`(15:10-18:00,开关 `THS_CONCEPT_MEMBER_BACKFILL_ENABLED`)
+每个交易日分批刷新,只记成分变化。**Longhu 是能一次性给全的授权源**:104 个行业板块,每个板块一次
+网关调用返回完整成分,约 10 分钟灌完 5300+ 只。
 
 ```bash
 # 在 peer 上刷新(收盘后或 08:59 之前)

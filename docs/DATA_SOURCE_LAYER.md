@@ -54,7 +54,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `limits.previous_limit_up` / `strong_pool` / `sub_new_pool` | eastmoney_ztb(D) | 东财只保留近期，每日归档 |
 | `limits.anomaly_tape` | eastmoney_ztb(D) | 盘口异动，当日 7469 条/10 类 |
 | `limits.stock_anomaly_reason` | fuyao(D) | AI 生成原因摘要，只作解释 |
-| `sector.membership` | longhu 行业(LV)、tushare ths_member(LV)、**fuyao 概念/行业/地域(D)** | fuyao 848 个同花顺指数，几分钟灌完 |
+| `sector.membership` | longhu 行业(LV)、**fuyao 概念/行业/地域(D)**；tushare ths_member 已停用（2026-10-08，只余历史） | fuyao 概念/行业/地域由 `ths_member_backfill` 每个交易日盘后分批刷新，只记成分变化 |
 | `sector.index_quote` / `sector.anomaly` / `sector.flow_curve` | fuyao / eastmoney_ztb / eastmoney_free(LV) | |
 | `flow.stock_daily` / `flow.watch_intraday` / `flow.tick_derived` | longhu 合成、tushare / 东财 / 自算分笔 | 自算为 L1 成交额阈值估算，非 L2 |
 | `lhb.daily` / `lhb.seat_statistics` | fuyao(D) → akshare(dormant)；tushare 已停用（决策 0005） | fuyao 只有个股合计与游资合计，没有营业部席位明细和机构拆分，读侧如实报“不可得”；席位→游资映射无官方来源 |
@@ -140,8 +140,11 @@ live 阈值或订单路径。
 | `xiaojie_reference_repository` | `call_tushare_api('stk_limit',…)`；口径优先级写死 | `limits.prices` 适配器（完整性契约在 `sources/tencent_limits.py`：交易所公布值，取不全即报错重试）；口径来自策略登记 | 不变 |
 | 盘中扫描同业集合（两处仓库查询） | `('ths_concept_flow','ths_index_n','ths_industry')` | 策略登记的口径 | 不变 |
 
-口径是**策略参数**：`CapabilityRequirement.taxonomies` 记录该策略基于哪几个板块口径校准，测试要求它们在口径表里且为
-`live_verified`。fuyao 概念/行业口径是 `declared`，入库后也不会被任何策略自动选中，需先在口径表升级并给策略升版本。
+口径是**策略参数**：`CapabilityRequirement.taxonomies` 记录该策略基于哪几个板块口径校准，测试要求它们在口径表里，
+且每项需求至少有一个 `live_verified` 口径。Tushare 停用后 `ths_concept_flow` 不再刷新；按运营者决定（2026-10-09），
+凡列出它的策略都在它**前面**加了 `declared` 的 `fuyao_ths_concept`：按顺序取口径的读者（小杰）在 Fuyao 成分入库后
+先用它，入库前的历史场次仍读 `ths_concept_flow`；按并集取的读者（盘中同业集合）两者都读，同一概念代码的同一组成员只计一次。
+其余 fuyao 口径不会被策略自动选中。
 
 v7 回放对比（owner 库冻结输入，v6 规则 vs v7 规则）：随机 1,279 条 0 差异；开盘窗口 10 条候选 0 差异——
 因为这些 Longhu 报价在开盘窗口的新鲜度全是 `invalid_timestamp`（见下），v7 的放开要配合时钟修复才会生效。
@@ -224,7 +227,8 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 python -m app.datasources validate                 # 目录一致性
 python -m app.datasources catalog --capability limits.limit_up_pool
 python ../scripts/probe-public-sources.py          # 全部公开源只读探测（在要测的出口上跑）
-python ../scripts/fill-fuyao-ths-membership.py --tags cn_concept,industry[,region] [--dry-run]
+# fuyao 同花顺概念/行业/地域成分：盘后循环 ths_member_backfill 自动刷新；手动推进一批用
+#   POST /api/v1/market/sectors/concepts/members/backfill/run  {"batch_size": 25}
 python ../scripts/backfill-eastmoney-hot-rank-history.py [--symbols ...]
 python ../scripts/tdx-local-export.py --vipdoc <通达信>/vipdoc --out <offline 目录> --kinds 1m
 PYTHONPATH=<pytdx 解包> python ../scripts/verify-tdx-protocol.py   # 与 pytdx 逐行比对

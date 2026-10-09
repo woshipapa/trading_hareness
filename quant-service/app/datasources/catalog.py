@@ -352,12 +352,16 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/datasources/sources/eastmoney_ztb.py:fetch_stock_changes", "当日累计"),
     _bind("fuyao_ths", "limits.stock_anomaly_reason", 12, DECLARED, _EVT + "stock_anomaly", "app/market_event_capture.py"),
     # sector
-    _bind("tushare_super_get", "sector.membership", 15, LIVE_VERIFIED, "sector_membership_history:taxonomy_key=ths_concept_flow",
-          "app/ths_concept_members_sync.py", limits="ths_member 逐板块 + 6 次/分，全量数小时"),
+    _bind("tushare_super_get", "sector.membership", 15, RETIRED, "sector_membership_history:taxonomy_key=ths_concept_flow",
+          "app/sector_membership_repository.py:persist_ths_snapshot", limits="ths_member 逐板块 + 6 次/分，全量数小时",
+          notes="2026-10-08 停用 Tushare（决策 0005）；ths_concept_flow 历史成分仍可读，不再刷新，新成分见 fuyao_ths_concept"),
     _bind("longhuvip", "sector.membership", 10, LIVE_VERIFIED, "sector_membership_history:taxonomy_key=longhu_ths_industry",
           "scripts/fill-longhu-sector-membership.py", notes="104 个行业，约 10 分钟"),
     _bind("fuyao_ths", "sector.membership", 12, DECLARED, "sector_membership_history:taxonomy_key=fuyao_ths_concept",
-          "scripts/fill-fuyao-ths-membership.py", notes="概念 390 + 行业 320 + 地域 33，数分钟"),
+          "app/fuyao_ths_membership.py:run_batch", "每个交易日盘后刷新（成分只有当日快照，无历史区间）",
+          "ths_index_list 按 tag + ths_index_constituents 每指数一次；请求间隔 1.5 秒，共用进程内 Fuyao 限频",
+          notes="概念 390 + 行业 320 + 地域 33（fuyao_ths_concept/_industry/_region）；ths_member_backfill 循环 15:10-18:00 分批，"
+                "只记变化（新成员 known_at=观测时刻，盘中刷新对盘中读者次日生效）"),
     _bind("akshare", "sector.membership", 60, DORMANT, "sector_membership_history", "app/akshare_provider.py",
           notes="东财成分函数在 owner 出口不可用"),
     _bind("fuyao_ths", "sector.index_quote", 12, DECLARED, _RAW + "ths_index_prices_snapshot",
@@ -493,13 +497,19 @@ RULE_USABLE_FLOW_LABELS: Final[frozenset[str]] = frozenset(
 #: Stored sector-membership taxonomies.  Strategies select by ``kind`` and
 #: only accept ``live_verified`` ones unless they opt in to weaker evidence.
 TAXONOMIES: Final[dict[str, Taxonomy]] = {item.key: item for item in (
+    # The four Tushare-filled THS taxonomies stopped growing on 2026-10-08
+    # (decision 0005).  Their rows are verified history and stay readable for
+    # replays; their replacements are fuyao_ths_* (membership),
+    # longhu_ths_industry (industry flow) and eastmoney_concept (concept flow).
     Taxonomy("ths_concept_flow", "tushare_super_get", "ths_concept", LIVE_VERIFIED, 10,
-             "ths_member 逐板块回填；9-18 曾只有 1 个板块（中断的回填）"),
-    Taxonomy("ths_index_n", "tushare_super_get", "ths_concept", LIVE_VERIFIED, 12, "ths_index 概念类（N）"),
-    Taxonomy("ths_industry", "tushare_super_get", "ths_industry", LIVE_VERIFIED, 15, "同花顺行业资金流（moneyflow_ind_ths）口径"),
-    Taxonomy("ths_index_i", "tushare_super_get", "ths_industry", LIVE_VERIFIED, 16, "ths_index 行业类（I）"),
+             "ths_member 逐板块回填；9-18 曾只有 1 个板块（中断的回填）；2026-10-08 起不再刷新，仅历史"),
+    Taxonomy("ths_index_n", "tushare_super_get", "ths_concept", LIVE_VERIFIED, 12, "ths_index 概念类（N）；2026-10-08 起不再刷新，仅历史"),
+    Taxonomy("ths_industry", "tushare_super_get", "ths_industry", LIVE_VERIFIED, 15,
+             "同花顺行业资金流（moneyflow_ind_ths）口径；2026-10-08 起不再刷新，仅历史"),
+    Taxonomy("ths_index_i", "tushare_super_get", "ths_industry", LIVE_VERIFIED, 16, "ths_index 行业类（I）；2026-10-08 起不再刷新，仅历史"),
     Taxonomy("longhu_ths_industry", "longhuvip", "ths_industry", LIVE_VERIFIED, 20, "104 个行业，约 5300 只"),
-    Taxonomy("fuyao_ths_concept", "fuyao_ths", "ths_concept", DECLARED, 30, "390 个概念全量成分，待策略侧验证"),
+    Taxonomy("fuyao_ths_concept", "fuyao_ths", "ths_concept", DECLARED, 30,
+             "390 个概念全量成分，盘后自动刷新；作为 ths_concept_flow 的候选替代，待策略侧验证"),
     Taxonomy("fuyao_ths_industry", "fuyao_ths", "ths_industry", DECLARED, 40, "320 个行业"),
     Taxonomy("fuyao_ths_region", "fuyao_ths", "ths_region", DECLARED, 50, "33 个地域"),
 )}

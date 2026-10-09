@@ -145,8 +145,6 @@ from .async_intraday_scan_inputs_repository import enabled_watches as read_async
 from .async_intraday_scan_inputs_repository import watchlists as read_async_intraday_scan_watchlists
 from .async_intraday_scan_inputs_repository import watch_flow_reference as read_async_watch_flow_reference
 from .ten_day_leader_rotation_read_repository import latest_ten_day_leader_rotation_pool as read_async_ten_day_leader_rotation_pool
-from .async_ths_concept_member_backfill_repository import existing_flow_rows as read_async_ths_concept_flow_rows
-from .async_ths_concept_member_backfill_repository import member_progress as read_async_ths_concept_member_progress
 from .async_sync_symbol_repository import analyst_claim_symbols as read_async_analyst_claim_symbols
 from .async_sync_symbol_repository import core_symbols as read_async_core_symbols
 from .async_sync_symbol_repository import limited_core_symbols as read_async_limited_core_symbols
@@ -650,7 +648,6 @@ from .stock_money_flow_sync import (
 from .disclosure_day_watch import MODEL_VERSION as DISCLOSURE_DAY_WATCH_MODEL_VERSION
 from .limit_up_continuation import MODEL_VERSION as LIMIT_UP_CONTINUATION_MODEL_VERSION
 from .sector_catalog_sync import sync_all as sync_all_sector_catalogs_isolated
-from .ths_sector_catalog_sync import sync as sync_ths_sector_catalog_isolated
 from .eastmoney_sector_members_sync import sync as sync_eastmoney_sector_members_isolated
 from .eastmoney_live_hydration import hydrate as hydrate_eastmoney_live_isolated
 from .ths_sector_flows import sync_industry as sync_ths_industry_isolated, sync_concept_signals as sync_ths_concept_signals_isolated
@@ -660,7 +657,6 @@ from .market_regime_daily import materialize_market_regime
 from .sentiment_cycle_daily import materialize_sentiment_cycle, read_prior_session_sentiment_cycle
 from .strategy_daily_candidate_ledger import materialize_ledger, settle_ledger_outcomes as settle_strategy_ledger_outcomes
 from .watchlist_candidate_proposals import materialize_watchlist_proposals
-from .ths_concept_members_sync import sync as sync_ths_concept_members_isolated
 from .analyst_scorecards import readiness as analyst_scorecard_readiness
 from .analyst_scorecards import recompute as recompute_scorecards_isolated
 from .claim_review_service import review_claim as review_claim_isolated
@@ -758,9 +754,9 @@ from .all_board_member_backfill_service import (
     AllBoardMemberBackfillDependencies,
     run as run_all_board_member_backfill_isolated,
 )
-from .ths_concept_member_backfill_service import (
-    ThsConceptMemberBackfillDependencies,
-    run as run_ths_concept_member_backfill_isolated,
+from .fuyao_ths_membership import (
+    FuyaoThsMembershipDependencies, run_batch as run_fuyao_ths_membership_batch,
+    sync_catalog as sync_fuyao_ths_catalog, sync_concept_members as sync_fuyao_ths_concept_members,
 )
 from .concept_limit_candidate_service import (
     ConceptLimitCandidateDependencies,
@@ -876,10 +872,6 @@ async def reserve_tushare_provider_request_slot(provider_key: str, rate_limit_pe
     if wait_seconds > 0:
         await asyncio.sleep(wait_seconds)
 
-
-
-def ths_taxonomy_key(index_type: str) -> str:
-    return f"ths_index_{index_type.lower()}"
 
 
 def _normalize_sync_symbols(values: list[str]) -> list[str]:
@@ -1630,27 +1622,14 @@ def persist_eastmoney_sector_members(connection: Any, taxonomy_key: str, sector_
     )
 
 
+def _fuyao_ths_membership() -> FuyaoThsMembershipDependencies:
+    """THS boards come from Fuyao since Tushare's retirement (decision 0005)."""
+    return FuyaoThsMembershipDependencies(run_database=run_database_blocking, database=db)
+
+
 async def sync_ths_sector_catalog(request: SectorCatalogSyncRequest) -> dict[str, Any]:
-    """Compatibility entry point backed by isolated THS catalog sync."""
-    # The isolated module keeps the exact member-code guard: re.fullmatch(r"\d{6}\.TI", code)
-    # and returns skipped_non_member_codes for audit visibility.
-    return await sync_ths_sector_catalog_isolated(
-        request,
-        taxonomy_key=ths_taxonomy_key,
-        fetch_catalog=fetch_tushare_catalog,
-        catalog_request=TushareFetchRequest,
-        load_rows=lambda request_key: run_database_blocking(tushare_rows_for_request, request_key),
-        run_database_blocking=run_database_blocking,
-        db=db,
-        upsert_taxonomy=upsert_sector_taxonomy,
-        upsert_sectors=upsert_sectors,
-        ths_member_persist=persist_ths_sector_members,
-        member_sync_failure=record_sector_member_sync_failure,
-        is_local_capacity_error=is_local_capacity_http_error,
-        is_circuit_open_error=is_circuit_open_http_error,
-        http_exception=HTTPException,
-        observed_at=lambda: datetime.now(timezone.utc),
-    )
+    """One THS index type's Fuyao catalogue, with an optional bounded member page."""
+    return await sync_fuyao_ths_catalog(request, _fuyao_ths_membership())
 
 
 async def sync_all_ths_sector_catalogs() -> dict[str, Any]:
@@ -3569,20 +3548,8 @@ async def sync_ths_concept_signals(request: SectorFlowSyncRequest) -> dict[str, 
 
 
 async def sync_ths_concept_members(request: ConceptMemberSyncRequest) -> dict[str, Any]:
-    """Compatibility entry point backed by isolated concept-member sync."""
-    return await sync_ths_concept_members_isolated(
-        request,
-        sync_flow_catalog=sync_ths_concept_signals,
-        flow_request=SectorFlowSyncRequest,
-        run_database_blocking=run_database_blocking,
-        db=db,
-        fetch_catalog=fetch_tushare_catalog,
-        catalog_request=TushareFetchRequest,
-        load_rows=lambda request_key: run_database_blocking(tushare_rows_for_request, request_key),
-        persist_members=persist_ths_sector_members,
-        observed_at=lambda: datetime.now(timezone.utc),
-        http_exception=HTTPException,
-    )
+    """One bounded page of Fuyao THS concept constituents (``fuyao_ths_concept``)."""
+    return await sync_fuyao_ths_concept_members(request, _fuyao_ths_membership())
 
 
 def ths_concept_member_backfill_enabled() -> bool:
@@ -3633,26 +3600,16 @@ async def all_board_member_backfill_loop() -> None:
 
 
 async def run_ths_concept_member_backfill_batch(request: ConceptMemberBackfillRequest) -> dict[str, Any]:
-    """Compatibility entry point for a fail-closed exact member batch."""
-    async def existing(trade_date: date) -> Any:
-        return await read_async_ths_concept_flow_rows(async_db, trade_date)
-
-    async def progress(trade_date: date) -> Any:
-        return await read_async_ths_concept_member_progress(async_db, trade_date)
-
-    return await run_ths_concept_member_backfill_isolated(
-        request,
-        ThsConceptMemberBackfillDependencies(
-            china_today=lambda: datetime.now(ZoneInfo("Asia/Shanghai")).date(),
-            load_existing_flow=existing, sync_flow_catalog=sync_ths_concept_signals,
-            flow_request=SectorFlowSyncRequest, sync_members=sync_ths_concept_members,
-            member_request=ConceptMemberSyncRequest, load_progress=progress,
-        ),
-    )
+    """One paced Fuyao THS membership batch: concepts, then industries, then regions."""
+    return await run_fuyao_ths_membership_batch(request, _fuyao_ths_membership())
 
 
 async def ths_concept_member_backfill_loop() -> None:
-    """After close, complete one rate-bounded THS member batch at a time."""
+    """After close, refresh Fuyao THS membership one paced batch at a time.
+
+    Members are observed after the session, so intraday readers (08:59:59
+    cutoff) see a day's refresh from the next session on.
+    """
     while True:
         local = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai"))
         if await sse_calendar_open_async(local.date()) and time(15, 10) <= local.time() < time(18, 0):

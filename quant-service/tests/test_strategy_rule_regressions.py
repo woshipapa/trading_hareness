@@ -191,7 +191,8 @@ class StrategyRuleRegressionTests(unittest.TestCase):
             })
 
     def test_sector_catalog_sync_is_explicitly_bounded(self):
-        self.assertEqual(ths_taxonomy_key("N"), "ths_index_n")
+        from app.fuyao_ths_membership import FUYAO_THS_TAXONOMIES, INDEX_TYPE_TAGS
+        self.assertEqual(FUYAO_THS_TAXONOMIES[INDEX_TYPE_TAGS["N"]][0], "fuyao_ths_concept")
         self.assertEqual(SectorCatalogSyncRequest(index_type="I").member_limit, 0)
         self.assertEqual(ConceptMemberSyncRequest().member_limit, 25)
         self.assertEqual(ConceptMemberSyncRequest(member_offset=50).member_offset, 50)

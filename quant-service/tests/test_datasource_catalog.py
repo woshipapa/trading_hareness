@@ -22,6 +22,15 @@ class CatalogTests(unittest.TestCase):
     def test_catalog_is_internally_consistent(self):
         self.assertEqual(validate_catalog(), [])
 
+    def test_tushare_ths_boards_are_retired_and_fuyao_stays_declared(self):
+        membership = {binding.source: binding for binding in BINDINGS if binding.capability == "sector.membership"}
+        self.assertEqual(membership["tushare_super_get"].status, RETIRED)
+        self.assertEqual(membership["fuyao_ths"].status, "declared")
+        self.assertEqual(membership["fuyao_ths"].adapter, "app/fuyao_ths_membership.py:run_batch")
+        self.assertNotIn("tushare_super_get", [binding.source for binding in bindings_for("sector.membership")])
+        self.assertTrue(all(binding.status == RETIRED for binding in BINDINGS
+                            if binding.source.startswith("tushare") and binding.capability.startswith("sector.")))
+
     def test_every_adapter_and_module_exists(self):
         for binding in BINDINGS:
             if binding.adapter:
@@ -141,14 +150,25 @@ class MigrationPinTests(unittest.TestCase):
 
         # Reordered 2026-09-18 after the membership load filled both maps:
         # coverage then favoured 23.6 concepts per stock over one industry.
-        self.assertEqual(strategy_taxonomies("xiaojie_leader_flow"), ("longhu_ths_industry", "ths_concept_flow"))
+        # fuyao_ths_concept joined on 2026-10-09: ths_concept_flow is no longer
+        # refreshed (Tushare retired), the Fuyao map is, and it is read first.
+        self.assertEqual(strategy_taxonomies("xiaojie_leader_flow"),
+                         ("longhu_ths_industry", "fuyao_ths_concept", "ths_concept_flow"))
         self.assertEqual(strategy_taxonomies("intraday_watchlist_confirmation"),
-                         ("ths_concept_flow", "ths_index_n", "ths_industry"))
+                         ("fuyao_ths_concept", "ths_concept_flow", "ths_index_n", "ths_industry"))
         self.assertEqual(strategy_taxonomies("countertrend_rebound_shadow"), ("ths_industry",))
         for needs in STRATEGY_DATA_NEEDS.values():
             for need in needs.needs:
-                for key in need.taxonomies:
-                    self.assertEqual(TAXONOMIES[key].status, "live_verified", key)
+                if not need.taxonomies:
+                    continue
+                statuses = {key: TAXONOMIES[key].status for key in need.taxonomies}
+                # A declared map is only ever a candidate beside verified ones,
+                # never what a strategy rests on alone.
+                self.assertTrue(set(statuses.values()) <= {"live_verified", "declared"}, statuses)
+                self.assertIn("live_verified", statuses.values(), statuses)
+                if "ths_concept_flow" in need.taxonomies:
+                    keys = list(need.taxonomies)
+                    self.assertEqual(keys.index("fuyao_ths_concept"), keys.index("ths_concept_flow") - 1, keys)
 
     def test_label_properties_and_store_order(self):
         from app.datasources.catalog import (

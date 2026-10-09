@@ -94,6 +94,27 @@ class SectorTaxonomySelectionTests(unittest.TestCase):
     def test_leader_flow_declares_the_industry_map_first(self):
         self.assertEqual(strategy_taxonomies("xiaojie_leader_flow")[0], "longhu_ths_industry")
 
+    def test_the_refreshed_fuyao_concept_map_comes_before_the_frozen_tushare_one(self):
+        # ths_concept_flow stopped growing with Tushare (2026-10-08) but its
+        # open rows still cover the market; the Fuyao map is refreshed daily.
+        connection = _Connection({
+            "longhu_ths_industry": _map(278, 1, "ind"),
+            "fuyao_ths_concept": _map(5400, 20, "fy"),
+            "ths_concept_flow": _map(5569, 24, "con"),
+        })
+        key, membership = _best_membership(connection, TRADING_DATE)
+        self.assertEqual(key, "fuyao_ths_concept")
+        self.assertEqual(len(membership), 5400)
+        self.assertEqual(connection.asked, ["longhu_ths_industry", "fuyao_ths_concept"])
+
+    def test_a_session_before_the_fuyao_load_still_reads_the_tushare_history(self):
+        connection = _Connection({
+            "longhu_ths_industry": _map(278, 1, "ind"),
+            "ths_concept_flow": _map(5569, 24, "con"),
+        })
+        key, _membership = _best_membership(connection, TRADING_DATE)
+        self.assertEqual(key, "ths_concept_flow")
+
     def test_the_floor_sits_below_a_full_market_and_above_a_stub(self):
         self.assertLess(MINIMUM_TAXONOMY_COVERAGE, 5000)
         self.assertGreater(MINIMUM_TAXONOMY_COVERAGE, 500)

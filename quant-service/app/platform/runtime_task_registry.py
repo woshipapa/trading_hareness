@@ -106,11 +106,14 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         ("strategy_day_summaries",), "research-only daily summary materialization",
     ),
     "ths_member_backfill": RuntimeTaskContract(
-        "ths_member_backfill", "research", "bounded background batches", ("ths_member",),
-        ("sector_membership_history",), "point-in-time THS constituent backfill",
+        "ths_member_backfill", "research", "post-close (15:10-18:00) paced batches",
+        ("ths_index_list", "ths_index_constituents"),
+        ("sector_membership_history", "sector_member_sync_state"),
+        "point-in-time Fuyao THS concept/industry/region constituent refresh",
     ),
     "all_board_member_backfill": RuntimeTaskContract(
-        "all_board_member_backfill", "research", "bounded background batches", ("dc_member", "ths_member"),
+        "all_board_member_backfill", "research", "bounded background batches",
+        ("dc_member", "ths_index_list", "ths_index_constituents"),
         ("sector_membership_history",), "bounded board member coverage backfill",
     ),
 }

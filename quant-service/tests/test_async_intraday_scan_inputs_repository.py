@@ -67,7 +67,7 @@ class AsyncIntradayScanInputsRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("taxonomy_key=ANY(%s)", member_query)
         self.assertEqual(member_params[0], ["000001.SZ"])
         # the strategy's declared taxonomies, identical to the literal they replaced
-        self.assertEqual(member_params[-3], ["ths_concept_flow", "ths_index_n", "ths_industry"])
+        self.assertEqual(member_params[-3], ["fuyao_ths_concept", "ths_concept_flow", "ths_index_n", "ths_industry"])
         # qualification lists (融资融券, index constituents) never form a peer group
         self.assertIn("NOT (member.sector_key = ANY(%s))", member_query)
         self.assertEqual(member_params[-2:], (list(NON_SECTOR_GROUPS), NON_SECTOR_LABEL_PATTERN))

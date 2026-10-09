@@ -6,6 +6,12 @@ never vendors; which source serves them is the data-source catalog's job.
 (file:line), so it stays visible until migrated to a capability read.  The
 seven found in the 2026-09-18 audit were migrated the same day; a test keeps
 new vendor literals out of strategy modules.
+
+``ths_concept_flow`` stopped growing when Tushare was retired (decision
+0005).  Wherever a strategy lists it, ``fuyao_ths_concept`` -- the same THS
+concepts, served by Fuyao and refreshed after every close -- is listed just
+before it: an ordered reader takes the refreshed map once it is loaded, while
+a replay of a session before that still reads the Tushare history.
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         Need("quote.all_a_snapshot", purpose="exact-peer breadth"),
         Need("sector.membership", purpose="exact peer sets and paper sector exposure; qualification lists "
                                             "(catalog.NON_SECTOR_GROUPS) are not sectors",
-             taxonomies=("ths_concept_flow", "ths_index_n", "ths_industry")),
+             taxonomies=("fuyao_ths_concept", "ths_concept_flow", "ths_index_n", "ths_industry")),
         Need("limits.prices", purpose="limit-aware rules"),
         Need("flow.watch_intraday", False, "research-only flow confirmation"),
     ),
@@ -79,7 +85,7 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         # concept map gives it twenty-three, and "is this name leading its
         # sector" only has an answer under the first.
         Need("sector.membership", purpose="sector core confirmation; first loaded taxonomy in order wins",
-             taxonomies=("longhu_ths_industry", "ths_concept_flow")),
+             taxonomies=("longhu_ths_industry", "fuyao_ths_concept", "ths_concept_flow")),
         Need("bars.daily", purpose="MA20/overheat gate; 潜龙 MA convergence, marker K and pressure high"),
         # Optional for the strategy as a whole, read by one mode: without them
         # 潜龙出海_swing reports its evidence as incomplete (a red warning).
@@ -90,7 +96,8 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         "launch_radar",
         Need("quote.all_a_snapshot", purpose="cross-section price and cumulative volume per scan"),
         Need("limits.prices", purpose="limit price for the launch band and sealed anchors"),
-        Need("sector.membership", purpose="a sealed anchor in a shared concept", taxonomies=("ths_concept_flow",)),
+        Need("sector.membership", purpose="a sealed anchor in a shared concept",
+             taxonomies=("fuyao_ths_concept", "ths_concept_flow")),
         Need("bars.daily", purpose="the name's own 5-day volume baseline"),
     ),
     _needs(
@@ -114,7 +121,7 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         "board_flow_drill",
         Need("sector.flow_curve", purpose="board direction and net-inflow delta"),
         Need("sector.membership", purpose="exact board-to-member projection",
-             taxonomies=("ths_concept_flow", "ths_index_n", "ths_industry")),
+             taxonomies=("fuyao_ths_concept", "ths_concept_flow", "ths_index_n", "ths_industry")),
         Need("quote.all_a_snapshot", purpose="member return and turnover cross-section"),
     ),
     _needs(
@@ -124,7 +131,7 @@ STRATEGY_DATA_NEEDS: Final[dict[str, StrategyDataNeeds]] = {item.strategy: item 
         Need("bars.daily", purpose="leader history and next-session replay labels"),
         Need("quote.watch_snapshot", False, "next-session confirmation evidence"),
         Need("sector.membership", False, "theme context for leader relative position",
-             taxonomies=("longhu_ths_industry", "ths_concept_flow")),
+             taxonomies=("longhu_ths_industry", "fuyao_ths_concept", "ths_concept_flow")),
         Need("sector.flow_curve", False, "theme flow context when available"),
     ),
 )}

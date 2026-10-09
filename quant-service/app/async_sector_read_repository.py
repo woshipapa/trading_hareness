@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from .sector_read_model import project_concept_member_backfill_status, project_concept_sector_signals
+from .sector_read_model import (
+    ACTIVE_MAPPING_SQL, MEMBERSHIP_PROGRESS_SQL, MEMBERSHIP_TAXONOMIES, SYNC_STATES_SQL, project_concept_sector_signals,
+    project_membership_refresh_status,
+)
 
 
 async def _latest_date(connection: Any, table: str, taxonomy_key: str) -> date | None:
@@ -19,50 +22,33 @@ async def _latest_date(connection: Any, table: str, taxonomy_key: str) -> date |
 async def concept_member_backfill_status(
     async_database: Any, trade_date: date | None, *, automatic_enabled: bool, batch_size: int,
 ) -> dict[str, Any]:
+    concept = MEMBERSHIP_TAXONOMIES[0]
     async with async_database.transaction() as connection:
-        selected_date = trade_date or await _latest_date(connection, "quant.sector_market_observations", "ths_concept_flow")
+        selected_date = trade_date
         if selected_date is None:
-            return {"trade_date": None, "total_concepts": 0, "mapped_concepts": 0, "states": [], "notice": "尚未同步同花顺概念资金流。"}
-        total_result = await connection.execute(
-            "SELECT count(*)::int total FROM quant.sector_market_observations WHERE taxonomy_key='ths_concept_flow' AND trading_date=%s",
-            (selected_date,),
+            latest = await connection.execute(
+                "SELECT max(trading_date) latest FROM quant.sector_member_sync_state WHERE taxonomy_key=ANY(%s)",
+                (list(MEMBERSHIP_TAXONOMIES),),
+            )
+            row = await latest.fetchone()
+            selected_date = row["latest"] if row else None
+        if selected_date is None:
+            return {"trade_date": None, "total_concepts": 0, "mapped_concepts": 0, "states": [],
+                    "taxonomy_key": concept, "taxonomy_keys": list(MEMBERSHIP_TAXONOMIES),
+                    "requested_taxonomy_key": "ths_concept_flow", "source": "fuyao_ths",
+                    "notice": "尚未刷新 Fuyao 同花顺板块成分。"}
+        progress_result = await connection.execute(
+            MEMBERSHIP_PROGRESS_SQL, (selected_date, list(MEMBERSHIP_TAXONOMIES), selected_date.isoformat()),
         )
-        receipt_mapped_result = await connection.execute(
-            """SELECT count(*)::int total FROM quant.sector_member_sync_state
-                WHERE taxonomy_key='ths_concept_flow' AND trading_date=%s AND state IN ('completed','empty')""",
-            (selected_date,),
+        active_result = await connection.execute(
+            ACTIVE_MAPPING_SQL, (concept, selected_date, concept, selected_date.isoformat()),
         )
-        active_mapping_result = await connection.execute(
-            """SELECT count(DISTINCT flow.sector_key)::int AS mapped_concepts,
-                      count(history.symbol)::int AS member_rows,max(history.available_at) AS latest_available_at
-                 FROM quant.sector_market_observations flow
-                 JOIN quant.sector_membership_history history
-                   ON history.taxonomy_key=flow.taxonomy_key AND history.sector_key=flow.sector_key
-                  AND history.effective_to IS NULL
-                WHERE flow.taxonomy_key='ths_concept_flow' AND flow.trading_date=%s""",
-            (selected_date,),
-        )
-        states_result = await connection.execute(
-            """SELECT sync.state,count(*)::int boards,
-                      coalesce(sum(active.member_count),0)::int members,
-                      sum(sync.member_count)::int evidence_rows,
-                      max(sync.updated_at) latest_updated_at
-                 FROM quant.sector_member_sync_state sync
-                 LEFT JOIN LATERAL (
-                     SELECT count(*)::int member_count FROM quant.sector_membership_history history
-                      WHERE history.taxonomy_key=sync.taxonomy_key AND history.sector_key=sync.sector_key
-                        AND history.effective_to IS NULL
-                 ) active ON true
-                WHERE sync.taxonomy_key='ths_concept_flow' AND sync.trading_date=%s
-                GROUP BY sync.state ORDER BY sync.state""",
-            (selected_date,),
-        )
-        total = int((await total_result.fetchone())["total"] or 0)
-        receipt_mapped = int((await receipt_mapped_result.fetchone())["total"] or 0)
-        active_mapping = dict(await active_mapping_result.fetchone() or {})
+        states_result = await connection.execute(SYNC_STATES_SQL, (concept, selected_date))
+        progress = [dict(row) for row in await progress_result.fetchall()]
+        active_mapping = dict(await active_result.fetchone() or {})
         states = [dict(row) for row in await states_result.fetchall()]
-    return project_concept_member_backfill_status(
-        selected_date, total, receipt_mapped, active_mapping, states,
+    return project_membership_refresh_status(
+        selected_date, progress, active_mapping, states,
         automatic_enabled=automatic_enabled, batch_size=batch_size,
     )
 

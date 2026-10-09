@@ -1,9 +1,16 @@
-"""Bounded read-only projections for persisted sector, concept, and member evidence."""
+"""Bounded read-only projections for persisted sector, concept, and member evidence.
+
+The concept-member backfill status reports the Fuyao THS membership refresh,
+which replaced Tushare's ``ths_member`` backfill (decision 0005).
+"""
 
 from __future__ import annotations
 
 from datetime import date
 from typing import Any
+
+
+MEMBERSHIP_TAXONOMIES = ("fuyao_ths_concept", "fuyao_ths_industry", "fuyao_ths_region")
 
 
 def project_concept_member_backfill_status(
@@ -43,50 +50,91 @@ def project_concept_member_backfill_status(
 def concept_member_backfill_status(
     database: Any, trade_date: date | None, *, automatic_enabled: bool, batch_size: int,
 ) -> dict[str, Any]:
+    """Fuyao THS membership refresh progress for one refresh date."""
+    concept = MEMBERSHIP_TAXONOMIES[0]
     with database.transaction() as connection:
         selected_date = trade_date or connection.execute(
-            "SELECT max(trading_date) latest FROM quant.sector_market_observations WHERE taxonomy_key='ths_concept_flow'"
+            "SELECT max(trading_date) latest FROM quant.sector_member_sync_state WHERE taxonomy_key=ANY(%s)",
+            (list(MEMBERSHIP_TAXONOMIES),),
         ).fetchone()["latest"]
         if selected_date is None:
-            return {"trade_date": None, "total_concepts": 0, "mapped_concepts": 0, "states": [], "notice": "尚未同步同花顺概念资金流。"}
-        total = connection.execute(
-            "SELECT count(*)::int total FROM quant.sector_market_observations WHERE taxonomy_key='ths_concept_flow' AND trading_date=%s",
-            (selected_date,),
-        ).fetchone()["total"]
-        receipt_mapped = connection.execute(
-            """SELECT count(*)::int total FROM quant.sector_member_sync_state
-                WHERE taxonomy_key='ths_concept_flow' AND trading_date=%s AND state IN ('completed','empty')""",
-            (selected_date,),
-        ).fetchone()["total"]
-        active_mapping = connection.execute(
-            """SELECT count(DISTINCT flow.sector_key)::int AS mapped_concepts,
-                      count(history.symbol)::int AS member_rows,max(history.available_at) AS latest_available_at
-                 FROM quant.sector_market_observations flow
-                 JOIN quant.sector_membership_history history
-                   ON history.taxonomy_key=flow.taxonomy_key AND history.sector_key=flow.sector_key
-                  AND history.effective_to IS NULL
-                WHERE flow.taxonomy_key='ths_concept_flow' AND flow.trading_date=%s""",
-            (selected_date,),
-        ).fetchone()
-        states = connection.execute(
-            """SELECT sync.state,count(*)::int boards,
-                      coalesce(sum(active.member_count),0)::int members,
-                      sum(sync.member_count)::int evidence_rows,
-                      max(sync.updated_at) latest_updated_at
-                 FROM quant.sector_member_sync_state sync
-                 LEFT JOIN LATERAL (
-                     SELECT count(*)::int member_count FROM quant.sector_membership_history history
-                      WHERE history.taxonomy_key=sync.taxonomy_key AND history.sector_key=sync.sector_key
-                        AND history.effective_to IS NULL
-                 ) active ON true
-                WHERE sync.taxonomy_key='ths_concept_flow' AND sync.trading_date=%s
-                GROUP BY sync.state ORDER BY sync.state""",
-            (selected_date,),
-        ).fetchall()
-    return project_concept_member_backfill_status(
-        selected_date, int(total), int(receipt_mapped), dict(active_mapping or {}), states,
+            return {"trade_date": None, "total_concepts": 0, "mapped_concepts": 0, "states": [],
+                    **_membership_source(), "notice": "尚未刷新 Fuyao 同花顺板块成分。"}
+        progress = connection.execute(MEMBERSHIP_PROGRESS_SQL, (selected_date, list(MEMBERSHIP_TAXONOMIES),
+                                                                  selected_date.isoformat())).fetchall()
+        active_mapping = connection.execute(ACTIVE_MAPPING_SQL, (concept, selected_date, concept,
+                                                                 selected_date.isoformat())).fetchone()
+        states = connection.execute(SYNC_STATES_SQL, (concept, selected_date)).fetchall()
+    return project_membership_refresh_status(
+        selected_date, [dict(row) for row in progress], dict(active_mapping or {}), states,
         automatic_enabled=automatic_enabled, batch_size=batch_size,
     )
+
+
+def _membership_source() -> dict[str, Any]:
+    return {"taxonomy_key": MEMBERSHIP_TAXONOMIES[0], "taxonomy_keys": list(MEMBERSHIP_TAXONOMIES),
+            "requested_taxonomy_key": "ths_concept_flow", "source": "fuyao_ths"}
+
+
+#: Boards listed, settled and failing per taxonomy for one refresh date.
+MEMBERSHIP_PROGRESS_SQL = """
+    SELECT s.taxonomy_key,count(*)::int listed,
+           count(*) FILTER (WHERE state.state IN ('completed','empty'))::int done,
+           count(*) FILTER (WHERE state.state='failed')::int failed
+      FROM quant.sectors s
+      LEFT JOIN quant.sector_member_sync_state state
+        ON state.taxonomy_key=s.taxonomy_key AND state.sector_key=s.sector_key AND state.trading_date=%s
+     WHERE s.taxonomy_key=ANY(%s) AND s.metadata->>'listed_on'=%s
+     GROUP BY s.taxonomy_key ORDER BY s.taxonomy_key
+"""
+#: Listed concepts with open members, and the latest confirmation that day.
+ACTIVE_MAPPING_SQL = """
+    SELECT count(DISTINCT history.sector_key)::int AS mapped_concepts,count(history.symbol)::int AS member_rows,
+           (SELECT max(updated_at) FROM quant.sector_member_sync_state
+             WHERE taxonomy_key=%s AND trading_date=%s AND state IN ('completed','empty')) AS latest_available_at
+      FROM quant.sectors s
+      JOIN quant.sector_membership_history history
+        ON history.taxonomy_key=s.taxonomy_key AND history.sector_key=s.sector_key AND history.effective_to IS NULL
+     WHERE s.taxonomy_key=%s AND s.metadata->>'listed_on'=%s
+"""
+SYNC_STATES_SQL = """
+    SELECT sync.state,count(*)::int boards,coalesce(sum(active.member_count),0)::int members,
+           sum(sync.member_count)::int evidence_rows,max(sync.updated_at) latest_updated_at
+      FROM quant.sector_member_sync_state sync
+      LEFT JOIN LATERAL (
+          SELECT count(*)::int member_count FROM quant.sector_membership_history history
+           WHERE history.taxonomy_key=sync.taxonomy_key AND history.sector_key=sync.sector_key
+             AND history.effective_to IS NULL
+      ) active ON true
+     WHERE sync.taxonomy_key=%s AND sync.trading_date=%s
+     GROUP BY sync.state ORDER BY sync.state
+"""
+
+
+def project_membership_refresh_status(
+    selected_date: date,
+    progress: list[dict[str, Any]],
+    active_mapping: dict[str, Any],
+    states: list[Any],
+    *,
+    automatic_enabled: bool,
+    batch_size: int,
+) -> dict[str, Any]:
+    """Concept coverage in the old shape, plus every Fuyao taxonomy's progress."""
+    by_taxonomy = {key: {"listed": 0, "completed_or_empty": 0, "failed": 0} for key in MEMBERSHIP_TAXONOMIES}
+    for row in progress:
+        by_taxonomy[str(row["taxonomy_key"])] = {
+            "listed": int(row["listed"] or 0), "completed_or_empty": int(row["done"] or 0), "failed": int(row["failed"] or 0),
+        }
+    concept = by_taxonomy[MEMBERSHIP_TAXONOMIES[0]]
+    return {
+        **project_concept_member_backfill_status(
+            selected_date, concept["listed"], concept["completed_or_empty"], active_mapping, states,
+            automatic_enabled=automatic_enabled, batch_size=batch_size,
+        ),
+        **_membership_source(), "taxonomies": by_taxonomy,
+        "refresh": "after the close, in batches, from Fuyao ths_index_list / ths_index_constituents",
+    }
 
 
 def concept_sector_signals(database: Any, trade_date: date | None, limit: int) -> dict[str, Any]:
@@ -223,6 +271,8 @@ def sector_members(database: Any, sector_key: str, taxonomy_key: str, limit: int
 
 
 __all__ = [
+    "ACTIVE_MAPPING_SQL", "MEMBERSHIP_PROGRESS_SQL", "MEMBERSHIP_TAXONOMIES", "SYNC_STATES_SQL",
     "concept_limit_candidates", "concept_member_backfill_status", "concept_sector_signals",
-    "market_sectors", "project_concept_member_backfill_status", "project_concept_sector_signals", "sector_flows", "sector_members",
+    "market_sectors", "project_concept_member_backfill_status", "project_concept_sector_signals",
+    "project_membership_refresh_status", "sector_flows", "sector_members",
 ]

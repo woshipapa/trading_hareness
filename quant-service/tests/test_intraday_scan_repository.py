@@ -104,7 +104,7 @@ class IntradayScanRepositoryTests(unittest.TestCase):
         membership_sql, membership_params = connection.calls[2]
         self.assertIn("effective_from<=", membership_sql)
         self.assertEqual(membership_params[1:], (date(2026, 8, 17), date(2026, 8, 17), date(2026, 8, 17),
-                                                 ["ths_concept_flow", "ths_index_n", "ths_industry"],
+                                                 ["fuyao_ths_concept", "ths_concept_flow", "ths_index_n", "ths_industry"],
                                                  list(NON_SECTOR_GROUPS), NON_SECTOR_LABEL_PATTERN))
         self.assertIn("NOT (member.sector_key = ANY(%s))", membership_sql)
         self.assertEqual(membership_sql.count("%s"), len(membership_params))
