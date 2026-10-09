@@ -35,7 +35,12 @@ delivery.
 The `单篇解析` view accepts an official note URL, copied share text, or an
 `xhslink.com` short URL. Edge resolves and validates each redirect, fetches the
 note with the existing Cookie, and queues a `single_note_analysis` job for the
-Mac worker. The canonical note URL is persisted without signed query material.
+Mac worker. The canonical note URL in payloads carries no signed query
+material; the newest per-note share token is persisted separately in the
+`note_links` table (owner decision 2026-10-09), so `/xhs/open/<id>` redirects
+and Feishu 原文直链 keep working across restarts for as long as the upstream
+honors the token, with the durable local preview as the no-token fallback.
+Cookies and session keys are never persisted.
 Results remain in the console by default; an explicit checkbox puts the final
 analysis into the existing Feishu delivery ledger. Identical note revisions
 reuse the same AI result. The local worker runs separate `interactive` and

@@ -1,6 +1,7 @@
 """Edge-owned durable queue: immutable note revisions, fenced AI leases, receipts."""
 import datetime as dt
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -94,6 +95,10 @@ class Store:
                 topics_json TEXT NOT NULL, relevance_score REAL NOT NULL, confidence REAL NOT NULL,
                 reason TEXT NOT NULL DEFAULT '', model TEXT NOT NULL, input_sha256 TEXT NOT NULL,
                 created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS note_links (
+                note_id TEXT PRIMARY KEY, xsec_token TEXT NOT NULL,
+                xsec_source TEXT NOT NULL DEFAULT 'pc_share',
+                created REAL NOT NULL, updated REAL NOT NULL);
             ''')
             # Additive migrations for databases created by the previous XHS
             # release. SQLite has no IF NOT EXISTS form for ADD COLUMN.
@@ -177,6 +182,34 @@ class Store:
             db.execute('UPDATE notes SET last_seen=? WHERE revision=?', (stamp, revision))
             db.execute('INSERT OR IGNORE INTO note_queries VALUES(?,?)', (revision, query))
         return bool(inserted)
+
+    def save_note_link(self, note_id, token, source='pc_share'):
+        """Persist the newest signed note token durably (owner decision 2026-10-09).
+
+        Links in old Feishu messages and the console stay clickable for as long
+        as the upstream honors the token; the local preview remains the
+        no-token fallback. Only per-note share tokens live here — cookies and
+        session keys are never persisted.
+        """
+        note_id = str(note_id or '').lower()
+        token = str(token or '')[:2048]
+        source = str(source or 'pc_share')[:64]
+        if not re.fullmatch(r'[0-9a-f]{24}', note_id) or not token:
+            return False
+        stamp = time.time()
+        with self.connect() as db:
+            db.execute('''INSERT INTO note_links(note_id,xsec_token,xsec_source,created,updated)
+                          VALUES(?,?,?,?,?)
+                          ON CONFLICT(note_id) DO UPDATE SET xsec_token=excluded.xsec_token,
+                          xsec_source=excluded.xsec_source,updated=excluded.updated''',
+                       (note_id, token, source, stamp, stamp))
+        return True
+
+    def note_link(self, note_id):
+        with self.connect() as db:
+            row = db.execute('SELECT xsec_token,xsec_source,updated FROM note_links WHERE note_id=?',
+                             (str(note_id or '').lower(),)).fetchone()
+        return dict(row) if row else None
 
     def latest_note(self, note_id):
         with self.connect() as db:

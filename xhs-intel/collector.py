@@ -26,15 +26,18 @@ _TRAILING_SHARE_TEXT = '.,;!?)]}\u3002\uff0c\uff1b\uff01\uff1f\u3011\u300b'
 _MAX_NOTE_IMAGES = 18
 _IMAGE_HOST_SUFFIXES = ('.xhscdn.com', '.xiaohongshu.com')
 # A 50-note recommendation can spend several minutes in classification and
-# local AI summarization. Keep signed links in memory for the same workday
-# window, while never writing token material to SQLite, logs, or artifacts.
+# local AI summarization. Fresh signed links stay in memory for the workday
+# window; since 2026-10-09（owner decision）the newest per-note share token is
+# ALSO persisted to the note_links table, so console and Feishu links keep
+# working after a restart for as long as the upstream honors the token.
+# Cookies and session keys still never reach SQLite, logs, or artifacts.
 _EPHEMERAL_LINK_TTL = 6 * 60 * 60
 _EPHEMERAL_LINKS = {}
 _EPHEMERAL_LINKS_LOCK = threading.Lock()
 
 
-def remember_note_link(note_id, fetch_url, *, ttl=_EPHEMERAL_LINK_TTL):
-    """Keep a fresh signed link in memory only; never persist xsec material."""
+def remember_note_link(note_id, fetch_url, *, ttl=_EPHEMERAL_LINK_TTL, store=None):
+    """Remember a fresh signed link in memory, and durably when a store is given."""
     note_id = str(note_id or '').lower()
     parsed = urlparse(str(fetch_url or ''))
     token = parse_qs(parsed.query).get('xsec_token', [''])[0]
@@ -47,7 +50,27 @@ def remember_note_link(note_id, fetch_url, *, ttl=_EPHEMERAL_LINK_TTL):
             if value[2] <= now:
                 _EPHEMERAL_LINKS.pop(key, None)
         _EPHEMERAL_LINKS[note_id] = (token[:2048], source[:64], now + max(30, int(ttl)))
+    if store is not None:
+        store.save_note_link(note_id, token, source)
     return True
+
+
+def _signed_note_url(note_id, token, source):
+    return f'https://www.xiaohongshu.com/explore/{note_id}?' + urlencode({
+        'xsec_token': token,
+        'xsec_source': source if re.fullmatch(r'[A-Za-z0-9_-]+', str(source or '')) else 'pc_share',
+    })
+
+
+def stored_note_link(store, note_id):
+    """The durably persisted signed URL for a note, or '' when none was seen."""
+    note_id = str(note_id or '').lower()
+    if not re.fullmatch(r'[a-f0-9]{24}', note_id):
+        return ''
+    row = store.note_link(note_id)
+    if not row or not row.get('xsec_token'):
+        return ''
+    return _signed_note_url(note_id, row['xsec_token'], row.get('xsec_source'))
 
 
 def ephemeral_note_link(note_id):
@@ -61,10 +84,7 @@ def ephemeral_note_link(note_id):
         if expires <= time.time():
             _EPHEMERAL_LINKS.pop(note_id, None)
             return ''
-    return f'https://www.xiaohongshu.com/explore/{note_id}?' + urlencode({
-        'xsec_token': token,
-        'xsec_source': source if re.fullmatch(r'[A-Za-z0-9_-]+', source) else 'pc_share',
-    })
+    return _signed_note_url(note_id, token, source)
 
 
 def _image_source_urls(image):
@@ -220,7 +240,7 @@ def collect_single_note(store, source_root, cookie_file, value, *, deliver_to_fe
     note_id = reference['note_id']
     if ok and items and isinstance(items[0], dict):
         note = normalize({'id': note_id}, f'single:{note_id}', items[0])
-        remember_note_link(note_id, reference['fetch_url'])
+        remember_note_link(note_id, reference['fetch_url'], store=store)
         fetch_source = 'live'
     else:
         note = store.latest_note(note_id)
@@ -334,7 +354,7 @@ def collect_watched(store, source_root, cookie_file, watch_users, *, limit=8,
                 detail = None
                 if token:
                     remember_note_link(note_id, f'https://www.xiaohongshu.com/explore/{note_id}?'
-                                       + urlencode({'xsec_token': token, 'xsec_source': 'pc_user'}))
+                                       + urlencode({'xsec_token': token, 'xsec_source': 'pc_user'}), store=store)
                     time.sleep(delay)
                     ok, _msg, detail_body = api.get_note_info(
                         f'https://www.xiaohongshu.com/explore/{note_id}?'
@@ -417,7 +437,7 @@ def collect(store, source_root, cookie_file, queries, *, limit=8, request_key=No
                 if not token:
                     raise ValueError('missing_detail_token')
                 remember_note_link(note_id, f'https://www.xiaohongshu.com/explore/{note_id}?'
-                                   + urlencode({'xsec_token': token, 'xsec_source': 'pc_search'}))
+                                   + urlencode({'xsec_token': token, 'xsec_source': 'pc_search'}), store=store)
                 time.sleep(delay)
                 ok, _msg, detail = api.get_note_info(f'https://www.xiaohongshu.com/explore/{note_id}?' + urlencode({'xsec_token': token, 'xsec_source': 'pc_search'}))
                 if not ok:
@@ -470,7 +490,7 @@ def collect_recommendations(store, source_root, cookie_file, *, run_id, limit=50
             if not token:
                 continue
             remember_note_link(note_id, f'https://www.xiaohongshu.com/explore/{note_id}?'
-                               + urlencode({'xsec_token': token, 'xsec_source': 'pc_homefeed'}))
+                               + urlencode({'xsec_token': token, 'xsec_source': 'pc_homefeed'}), store=store)
             time.sleep(delay)
             ok, _msg, detail_body = api.get_note_info(
                 f'https://www.xiaohongshu.com/explore/{note_id}?' +

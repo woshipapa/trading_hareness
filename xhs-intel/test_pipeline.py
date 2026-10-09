@@ -5,7 +5,7 @@ from unittest import mock
 
 from store import Store, Conflict
 from collector import (InvalidNoteLink, collect, collect_single_note, ephemeral_note_link,
-                       normalize, parse_note_reference, remember_note_link)
+                       normalize, parse_note_reference, remember_note_link, stored_note_link)
 from local_worker import _load_note_images, _multimodal_items
 
 
@@ -53,13 +53,23 @@ class QueueTests(unittest.TestCase):
         ])
         self.assertNotIn('transient', str(value))
 
-    def test_signed_note_links_are_memory_only_and_expire(self):
+    def test_signed_note_links_persist_durably_and_survive_restarts(self):
         note_id = '1' * 24
         fetch_url = ('https://www.xiaohongshu.com/explore/' + note_id
-                     + '?xsec_token=short-lived&xsec_source=pc_feed')
-        self.assertTrue(remember_note_link(note_id, fetch_url, ttl=30))
-        self.assertIn('xsec_token=short-lived', ephemeral_note_link(note_id))
+                     + '?xsec_token=share-token&xsec_source=pc_feed')
+        self.assertTrue(remember_note_link(note_id, fetch_url, ttl=30, store=self.store))
+        self.assertIn('xsec_token=share-token', ephemeral_note_link(note_id))
         self.assertEqual(ephemeral_note_link('2' * 24), '')
+        durable = stored_note_link(self.store, note_id)
+        self.assertIn('xsec_token=share-token', durable)
+        self.assertIn('xsec_source=pc_feed', durable)
+        reopened = Store(self.store.path)
+        self.assertIn('share-token', stored_note_link(reopened, note_id))
+        self.assertEqual(stored_note_link(reopened, '2' * 24), '')
+        # A newer sighting replaces the stored token.
+        remember_note_link(note_id, 'https://www.xiaohongshu.com/explore/' + note_id
+                           + '?xsec_token=newer-token&xsec_source=pc_search', store=self.store)
+        self.assertIn('newer-token', stored_note_link(self.store, note_id))
 
     def test_worker_builds_in_memory_multimodal_inputs_without_persisting_media(self):
         note_value = normalize(
@@ -210,7 +220,9 @@ class QueueTests(unittest.TestCase):
         with self.assertRaises(InvalidNoteLink):
             parse_note_reference('https://example.com/explore/' + 'c' * 24)
 
-    def test_single_note_collection_never_persists_signed_link_material(self):
+    def test_single_note_collection_keeps_tokens_out_of_job_surfaces(self):
+        # Tokens live durably in note_links (owner decision 2026-10-09) but must
+        # never appear in job payloads, results, or listing surfaces.
         class FakeApi:
             def get_note_info(self, url):
                 self.url = url
@@ -230,6 +242,10 @@ class QueueTests(unittest.TestCase):
         visible = {'result': result, 'jobs': self.store.list_single_note_jobs()}
         self.assertNotIn('private-token', str(visible))
         self.assertEqual(visible['jobs'][0]['url'], 'https://www.xiaohongshu.com/explore/' + 'd' * 24)
+        self.assertIn('private-token', stored_note_link(self.store, 'd' * 24))
+        with self.store.connect() as db:
+            raw = ' '.join(str(row[0] or '') for row in db.execute('SELECT payload FROM jobs'))
+        self.assertNotIn('private-token', raw)
 
     def test_single_note_collection_reuses_cached_content_when_unsigned_fetch_fails(self):
         class MissingApi:

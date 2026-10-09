@@ -192,6 +192,30 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertFalse(listing['jobs'][0]['deliver_to_feishu'])
         self.assertNotIn('payload', listing['jobs'][0])
 
+    def test_note_open_redirects_with_the_durable_token_after_restart(self):
+        import http.client
+        note_id = "9" * 24
+        item = normalize({
+            "id": note_id,
+            "note_card": {"title": "Durable link", "desc": "正文", "user": {"nickname": "Author"}},
+        }, "topic:ai_infra:GPU")
+        edge_api.STORE.add_note(item, "topic:ai_infra:GPU")
+        edge_api.STORE.save_note_link(note_id, "durable-token", "pc_search")
+        self.browser.open(self.base + "/xhs/", timeout=3).close()
+        cookie = "; ".join(f"{c.name}={c.value}" for c in self.jar)
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        conn.request("GET", f"/xhs/open/{note_id}", headers={"Cookie": cookie})
+        response = conn.getresponse()
+        location = response.getheader("Location") or ""
+        response.read()
+        conn.close()
+        self.assertEqual(response.status, 302)
+        self.assertIn("xsec_token=durable-token", location)
+        self.assertIn("xsec_source=pc_search", location)
+        # Delivery links fall back to the durable token too.
+        links = edge_api._signed_delivery_links({"payload": json.dumps({"notes": [{"note_id": note_id}]})})
+        self.assertTrue(links and "durable-token" in links[0])
+
     def test_note_link_renders_local_preview_when_signed_xhs_link_is_unavailable(self):
         note_id = 'c' * 24
         item = normalize({

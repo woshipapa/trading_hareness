@@ -27,6 +27,7 @@ from collector import (  # noqa: E402
     collect_single_note,
     collect_watched,
     ephemeral_note_link,
+    stored_note_link,
 )
 from common import error_code, request_json  # noqa: E402
 from operations import (  # noqa: E402
@@ -151,6 +152,11 @@ def _note_id_from_path(path, prefix):
     return match.group(1).lower() if match else ''
 
 
+def _note_link(note_id):
+    """Newest signed link: the fresh in-memory token first, else the durable one."""
+    return ephemeral_note_link(note_id) or stored_note_link(STORE, note_id)
+
+
 def _note_preview_html(note, signed_url=''):
     title = html.escape(str(note.get('title') or '小红书笔记'))
     author = html.escape(str(note.get('author') or '未知作者'))
@@ -167,7 +173,7 @@ def _note_preview_html(note, signed_url=''):
     if signed_url:
         original = (
             f'<p><a href="{html.escape(signed_url, quote=True)}" target="_blank" '
-            'rel="noreferrer">在小红书打开原文（签名链接短时有效）</a></p>'
+            'rel="noreferrer">在小红书打开原文</a></p>'
         )
     return f'''<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -193,7 +199,7 @@ def serve_note_link_or_preview(handler, path):
         reply(handler, 404, {'status': 'not_found', 'error': 'note_not_found'})
         return True
     if path.startswith('/xhs/open/'):
-        signed_url = ephemeral_note_link(note_id)
+        signed_url = _note_link(note_id)
         if signed_url:
             handler.send_response(302)
             handler.send_header('Location', signed_url)
@@ -201,7 +207,7 @@ def serve_note_link_or_preview(handler, path):
             handler.send_header('Referrer-Policy', 'no-referrer')
             handler.end_headers()
             return True
-    data = _note_preview_html(note, ephemeral_note_link(note_id)).encode('utf-8')
+    data = _note_preview_html(note, _note_link(note_id)).encode('utf-8')
     send(handler, 200, data, 'text/html; charset=utf-8', headers={
         'Cache-Control': 'no-store',
         'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src https://ci.xiaohongshu.com; frame-ancestors 'none'; base-uri 'none'",
@@ -221,7 +227,7 @@ def body(handler):
 
 
 def _signed_delivery_links(job):
-    """Return fresh signed links without reading or persisting token material."""
+    """Return the newest signed link per note（内存新鲜 token 优先，否则落库 token）."""
     try:
         payload = json.loads(str(job.get("payload") or "{}"))
     except (TypeError, ValueError):
@@ -237,7 +243,7 @@ def _signed_delivery_links(job):
         note_id = str(note.get("note_id") or "").strip().lower()
         if not re.fullmatch(r"[0-9a-f]{24}", note_id):
             continue
-        signed_url = ephemeral_note_link(note_id)
+        signed_url = _note_link(note_id)
         if signed_url and signed_url not in seen:
             seen.add(signed_url)
             links.append(signed_url)
@@ -250,7 +256,7 @@ def _delivery_chunks(text, signed_links):
               for index in range(0, len(text), FEISHU_MAX_CHARS)] or [text]
     if not signed_links:
         return chunks
-    current = "原文直链（签名链接短时有效）"
+    current = "原文直链"
     for signed_url in signed_links:
         line = f"原文直链：{signed_url}"
         candidate = current + "\n" + line
