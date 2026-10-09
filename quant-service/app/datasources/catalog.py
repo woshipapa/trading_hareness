@@ -209,6 +209,8 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("fundamentals.margin", "融资融券", "daily", "all_a", "rzye rzmre rqye net_buy", "effective=T 日; available=T+1 采集"),
     _cap("reference.instruments", "证券基础信息", "reference", "all_a", "symbol name list_date is_st", "effective=入库"),
     _cap("reference.trade_calendar", "交易日历", "reference", "market", "exchange calendar_date is_open", "effective=入库"),
+    _cap("reference.suspensions", "停复牌（按交易日）", "daily", "all_a", "symbol suspend_date suspend_reason",
+         "effective=交易日; available=入库"),
     _cap("fund.nav", "基金单位/累计净值", "daily", "fund", "fund_code nav_date unit_nav accumulated_nav daily_growth_pct",
          "effective=净值日; available=采集时刻"),
     # derived
@@ -407,6 +409,9 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("eastmoney_datacenter", "events.earnings_express", 12, DECLARED, "earnings_express",
           "app/earnings_calendar_sync.py",
           notes="RPT_FCI_PERFORMANCEE 按报告期整期取（元）；2026-10-09 本机探测，owner 出口待验证"),
+    _bind("eastmoney_datacenter", "reference.suspensions", 12, DECLARED, "security_suspensions",
+          "app/full_market_daily_controls_sync.py",
+          notes="RPT_CUSTOM_SUSPEND_DATA_INTERFACE 按交易日取，剔除开盘前已复牌的行；替代 Tushare suspend_d；2026-10-09 本机探测，owner 出口待验证"),
     _bind("eastmoney_datacenter", "events.disclosure_schedule", 12, DECLARED, "disclosure_schedule",
           "app/earnings_calendar_sync.py",
           notes="RPT_PUBLIC_BS_APPOIN 按报告期整期取：首次预约、最近改期、实际披露；2026-10-09 本机探测，owner 出口待验证"),

@@ -1561,7 +1561,7 @@ def full_market_daily_control_status() -> dict[str, Any]:
 
 
 async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
-    """Fill same-date controls using the owner's persisted factor task output."""
+    """Fill same-date controls from the owner's persisted projections and Eastmoney suspensions."""
     async def persisted_factors(as_of: date, _expected_rows: int) -> Any:
         return await run_database_blocking(
             lambda: _read_persisted_factor_controls(as_of), timeout_seconds=30,
@@ -1575,17 +1575,13 @@ async def sync_full_market_daily_controls(trade_date: date) -> dict[str, Any]:
     return await sync_full_market_daily_controls_isolated(
         trade_date,
         expected_daily_rows=full_market_daily_row_count,
-        call_tushare_api=call_tushare_api,
-        parse_date=tushare_date,
-        persist_tushare_rows=persist_tushare_rows,
-        persist_blocked=persist_tushare_fetch_blocked,
+        fetch_suspensions=eastmoney_datacenter.suspensions_on,
         run_database_blocking=run_database_blocking,
         db=db,
         safe_error_detail=safe_error_detail,
         executor_saturated_error=ExecutorSaturatedError,
         record_provider_success=record_provider_success,
         record_provider_failure=record_provider_failure,
-        record_provider_api_capability=record_provider_api_capability,
         read_persisted_factor_controls=persisted_factors,
         read_persisted_control_rows=persisted_controls,
     )

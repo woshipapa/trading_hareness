@@ -2,15 +2,54 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import logging
 from datetime import date, datetime
 from typing import Any, Callable
 
 from psycopg.types.json import Json
 
 from .longhu_market_sync import MergedCrossSection, PROVIDER_KEY
+from .market_rules import is_st_security_name
 from .universe_history import sync_universe_membership_history
+
+LOGGER = logging.getLogger(__name__)
+#: Dated ST evidence for point-in-time reads; a code with no instrument row is
+#: skipped rather than failing the batch.
+ST_EVIDENCE_SQL = """INSERT INTO quant.instrument_lifecycle_evidence(
+                         symbol,provider,observed_at,status_date,list_status,is_st,available_at,raw)
+                     SELECT candidate.symbol,%s,%s,%s,'UNKNOWN',true,%s,candidate.raw
+                       FROM jsonb_to_recordset(%s::jsonb) AS candidate(symbol text, raw jsonb)
+                       JOIN quant.instruments instrument ON instrument.symbol=candidate.symbol
+                     ON CONFLICT(symbol,provider,status_date,list_status) DO UPDATE SET
+                       is_st=true,raw=EXCLUDED.raw"""
+
+
+def record_st_evidence(connection: Any, trade_date: date, rows: list[dict[str, Any]], provider: str,
+                       observed_at: datetime) -> int:
+    """Record the session's ST names as dated evidence.
+
+    The close's own security names are the observation: a name carrying the ST
+    marker on ``trade_date`` was ST that session.  This replaced Tushare's
+    ``stock_st`` list (decision 0005).  It is evidence only, so it runs in a
+    savepoint: a failure leaves the date uncovered - readers then fall back
+    to the instrument's current flag - and never fails the close.
+    """
+    st_rows = [{"symbol": str(row["ts_code"]), "raw": {"name": row.get("name"), "basis": "close_security_name"}}
+               for row in rows if is_st_security_name(row.get("name"))]
+    if not st_rows:
+        return 0
+    savepoint = connection.transaction() if hasattr(connection, "transaction") else contextlib.nullcontext()
+    try:
+        with savepoint:
+            connection.execute(ST_EVIDENCE_SQL, (provider, observed_at, trade_date, observed_at,
+                                                 json.dumps(st_rows, ensure_ascii=False)))
+    except Exception as error:  # noqa: BLE001 - evidence only; the close itself must land
+        LOGGER.warning("ST evidence for %s was not recorded: %s", trade_date, error)
+        return 0
+    return len(st_rows)
 
 
 def persist_settled_trade_calendar(
@@ -86,6 +125,7 @@ def persist_full_market_close(
         "daily_basic": persist_rows(
             connection, "daily_basic", request_key + ":daily_basic", merged.fundamental_rows, PROVIDER_KEY, observed_at,
         ),
+        "st_evidence": record_st_evidence(connection, trade_date, merged.daily_rows, PROVIDER_KEY, observed_at),
     }
     symbols = [row["ts_code"] for row in merged.daily_rows]
     connection.execute(
@@ -256,4 +296,7 @@ def persisted_close_context(database: Any, trade_date: date) -> dict[str, Any]:
     }
 
 
-__all__ = ["persist_full_market_close", "persist_settled_trade_calendar", "persisted_close_context"]
+__all__ = [
+    "ST_EVIDENCE_SQL", "persist_full_market_close", "persist_settled_trade_calendar", "persisted_close_context",
+    "record_st_evidence",
+]

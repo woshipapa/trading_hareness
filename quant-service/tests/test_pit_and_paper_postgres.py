@@ -6,9 +6,9 @@ rows behind in a shared development database.
 
 from __future__ import annotations
 
-import json
 import os
 import unittest
+from unittest.mock import patch
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -86,20 +86,28 @@ class PointInTimeAndPaperSqlTests(unittest.TestCase):
                 WHERE universe_key='test_universe' AND effective_to IS NULL ORDER BY symbol""").fetchall()
         self.assertEqual([row["symbol"] for row in open_rows], ["990001.SH", "990002.SH"])
 
-    def test_the_daily_st_capture_statement_writes_dated_evidence(self) -> None:
-        # The statement full_market_daily_controls_sync issues, verbatim shape.
-        from pathlib import Path
-        source = (Path(__file__).resolve().parents[1] / "app" / "full_market_daily_controls_sync.py").read_text(encoding="utf-8")
-        start = source.index('"""INSERT INTO quant.instrument_lifecycle_evidence(')
-        statement = source[start + 3:source.index('"""', start + 3)]
+    def test_the_close_records_its_st_names_as_dated_evidence(self) -> None:
+        from app.longhu_market_repository import record_st_evidence
+
         observed_at = datetime(2099, 3, 2, 9, 0, tzinfo=timezone.utc)
-        payload = json.dumps([{"symbol": "990001.SH", "raw": {"ts_code": "990001.SH"}},
-                              {"symbol": "999999.SH", "raw": {"ts_code": "999999.SH"}}])
-        self.connection.execute(statement, ("test", observed_at, date(2099, 3, 2), observed_at, payload))
-        rows = self.connection.execute(
-            "SELECT symbol,is_st FROM quant.instrument_lifecycle_evidence WHERE provider='test'").fetchall()
+        rows = [{"ts_code": "990001.SH", "name": "*ST测试"}, {"ts_code": "999999.SH", "name": "ST无记录"},
+                {"ts_code": "990002.SH", "name": "测试二"}]
+        self.assertEqual(record_st_evidence(self.connection, date(2099, 3, 2), rows, "test", observed_at), 2)
+        stored = self.connection.execute(
+            "SELECT symbol,is_st,status_date FROM quant.instrument_lifecycle_evidence WHERE provider='test'").fetchall()
         # A code with no instrument row is skipped rather than failing the batch.
-        self.assertEqual([(row["symbol"], row["is_st"]) for row in rows], [("990001.SH", True)])
+        self.assertEqual([(row["symbol"], row["is_st"], row["status_date"]) for row in stored],
+                         [("990001.SH", True, date(2099, 3, 2))])
+
+    def test_a_failed_st_evidence_write_leaves_the_close_transaction_usable(self) -> None:
+        from app import longhu_market_repository
+
+        observed_at = datetime(2099, 3, 2, 9, 0, tzinfo=timezone.utc)
+        with patch.object(longhu_market_repository, "ST_EVIDENCE_SQL", "SELECT no_such_column FROM quant.instruments"):
+            self.assertEqual(longhu_market_repository.record_st_evidence(
+                self.connection, date(2099, 3, 2), [{"ts_code": "990001.SH", "name": "*ST测试"}], "test", observed_at), 0)
+        # The savepoint rolled back; the surrounding transaction still runs statements.
+        self.assertEqual(self.connection.execute("SELECT 1 AS ok").fetchone()["ok"], 1)
 
     def test_the_alert_retry_scan_claims_a_row_once(self) -> None:
         from app.intraday_alert_delivery_service import create_pending_delivery, load_due_deliveries

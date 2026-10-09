@@ -101,6 +101,8 @@ def register_package_sources(resolver: CapabilityResolver, *, fuyao_fetch: Fuyao
     ):
         resolver.bind("eastmoney_datacenter", capability, _report(report))
     resolver.bind("eastmoney_datacenter", "events.disclosure_schedule", _period_report("disclosure_schedule"))
+    resolver.bind("eastmoney_datacenter", "reference.suspensions",
+                  lambda *, trade_date: eastmoney_datacenter.suspensions_on(trade_date))
 
     for source, fetch in news_flash.FETCHERS.items():
         resolver.bind(source, "news.flash", fetch)

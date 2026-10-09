@@ -257,6 +257,10 @@ async def period_report(key: str, period: date) -> list[dict[str, Any]]:
     """One whole reporting period of a calendar report, or an error - never a short answer."""
     return await fetch_report(key, extra_filter=period_filter(period), max_pages=40, require_complete=True)
 
+async def suspensions_on(trading_date: date) -> list[dict[str, Any]]:
+    """Every security listed as suspended on ``trading_date``, all pages or an error."""
+    return await fetch_report("suspension", extra_filter=suspension_filter(trading_date), require_complete=True)
+
 def default_window(key: str, today: date) -> tuple[date, date]:
     """The capture window each daily archive run uses."""
     if key == "restricted_release":
@@ -271,4 +275,5 @@ def default_window(key: str, today: date) -> tuple[date, date]:
 __all__ = [
     "PROVIDER_KEY", "REPORTS", "ReportSpec", "available_at", "default_window", "fetch_report",
     "period_filter", "period_report", "report_events", "report_observations", "row_symbol", "suspension_filter",
+    "suspensions_on",
 ]

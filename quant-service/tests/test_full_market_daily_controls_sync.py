@@ -7,12 +7,14 @@ from types import SimpleNamespace
 
 from pydantic import ValidationError
 
-from app.full_market_daily_controls_sync import CONTROL_PERSIST_TIMEOUT_SECONDS, CONTROL_PROVIDER_PREFERENCE, sync, valid_rows
+from app.full_market_daily_controls_sync import (
+    CONTROL_PERSIST_TIMEOUT_SECONDS, SUSPENSION_PROVIDER, normalize_suspensions, sync, valid_rows,
+)
 from app.request_models import FullMarketDailyControlsSyncRequest
 
 
 class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
-    def test_bar_factor_mirror_requires_complete_positive_cumulative_tushare_factor(self):
+    def test_bar_factor_mirror_requires_complete_positive_cumulative_factor(self):
         source = Path("app/full_market_daily_controls_sync.py").read_text(encoding="utf-8")
         mirror_section = source[source.index("UPDATE quant.market_bars_daily"):source.index("UPDATE quant.market_bars_daily bar SET limit_up")]
         self.assertTrue(
@@ -55,192 +57,178 @@ class FullMarketDailyControlsSyncTests(unittest.IsolatedAsyncioTestCase):
         ])
 
     async def test_no_daily_cross_section_blocks_without_provider_calls(self):
-        called = False
-
-        async def run_db(action, *args, **_kwargs):
-            return action(*args)
-
-        async def fetch(*_args, **_kwargs):
-            nonlocal called
-            called = True
+        async def fetch(_day):
             raise AssertionError("provider must not be called")
 
-        result = await sync(
-            date(2026, 8, 21), expected_daily_rows=lambda _day: 0, call_tushare_api=fetch,
-            parse_date=lambda _value: None, persist_tushare_rows=lambda *_args: 0,
-            persist_blocked=lambda *_args: None, run_database_blocking=run_db, db=object(),
-            safe_error_detail=lambda value, _limit: value, executor_saturated_error=RuntimeError,
-            record_provider_success=lambda *_args: None, record_provider_failure=lambda *_args: None,
-            record_provider_api_capability=lambda *_args, **_kwargs: None,
-        )
+        result = await sync(date(2026, 8, 21), expected_daily_rows=lambda _day: 0, fetch_suspensions=fetch,
+                            **_common(_Recorder()))
         self.assertEqual(result["status"], "blocked")
-        self.assertFalse(called)
 
-    async def test_complete_controls_reset_suspension_then_promote_all_apis(self):
-        trade_date = date(2026, 8, 21)
-        requested: list[str] = []
-        persisted: list[str] = []
-        statements: list[str] = []
-        database_timeouts: list[int | None] = []
+    async def test_persisted_controls_and_fetched_suspensions_are_promoted_together(self):
+        trade_date = date(2026, 10, 9)
+        recorder = _Recorder()
+        fetched_days: list[date] = []
+
+        async def fetch(day):
+            fetched_days.append(day)
+            return [_suspended("000582.SZ", "2026-10-08 09:30:00"),
+                    _suspended("603183.SH", "2026-09-30 09:30:00", end="2026-10-08 15:00:00")]
+
+        result = await sync(trade_date, expected_daily_rows=lambda _day: 1, fetch_suspensions=fetch,
+                            read_persisted_factor_controls=_factors, read_persisted_control_rows=_controls(),
+                            **_common(recorder))
+        self.assertEqual(result["status"], "completed", result.get("reason"))
+        self.assertEqual(fetched_days, [trade_date])
+        self.assertEqual(result["providers"], {
+            "adj_factor": "owner_persisted_adjustment_factor", "daily_basic": "longhuvip_composite",
+            "stk_limit": "longhuvip_composite", "suspend_d": SUSPENSION_PROVIDER,
+        })
+        self.assertEqual(result["normalized_rows"]["suspend_d"], 1, "603183.SH resumed before the open")
+        self.assertEqual(result["st_evidence"]["status"], "retired_source")
+        self.assertEqual(recorder.successes, [(SUSPENSION_PROVIDER, "suspension_all_a", 1)])
+        statements = recorder.statements
+        self.assertIn("UPDATE quant.canonical_bars_daily SET is_suspended=false,canonicalized_at=now() WHERE trading_date=%s",
+                      statements)
+        inserted = [params for sql, params in recorder.executed if "INSERT INTO quant.security_suspensions" in sql]
+        self.assertEqual([params[0] for params in inserted], ["000582.SZ"])
+        remarked = [sql for sql in statements if "SET is_suspended=true" in sql and "security_suspensions" in sql]
+        self.assertEqual(len(remarked), 2, "both bar tables are re-marked from the selected provider")
+        self.assertTrue(any("replay_readiness_daily_coverage" in sql for sql in statements))
+        self.assertEqual(recorder.timeouts, [None, CONTROL_PERSIST_TIMEOUT_SECONDS])
+
+    async def test_a_rerun_re_marks_persisted_suspensions_without_fetching(self):
+        recorder = _Recorder()
+
+        async def fetch(_day):
+            raise AssertionError("persisted suspensions need no fetch")
+
+        suspensions = {"rows": [{"ts_code": "000582.SZ", "trade_date": "20261009"}], "provider": SUSPENSION_PROVIDER}
+        result = await sync(date(2026, 10, 9), expected_daily_rows=lambda _day: 1, fetch_suspensions=fetch,
+                            read_persisted_factor_controls=_factors,
+                            read_persisted_control_rows=_controls(suspend_d=suspensions),
+                            **_common(recorder))
+        self.assertEqual(result["status"], "completed", result.get("reason"))
+        self.assertFalse([sql for sql, _ in recorder.executed if "INSERT INTO quant.security_suspensions" in sql])
+        remarked = [(sql, params) for sql, params in recorder.executed
+                    if "SET is_suspended=true" in sql and "security_suspensions" in sql]
+        self.assertEqual([params[2] for _sql, params in remarked], [SUSPENSION_PROVIDER, SUSPENSION_PROVIDER])
+
+    async def test_a_missing_owner_projection_blocks_and_names_the_retired_fallback(self):
+        recorder = _Recorder()
+
+        async def fetch(_day):
+            raise AssertionError("no fetch when a persisted control is missing")
+
+        result = await sync(date(2026, 10, 9), expected_daily_rows=lambda _day: 1, fetch_suspensions=fetch,
+                            read_persisted_factor_controls=_factors,
+                            read_persisted_control_rows=_controls(daily_basic=None),
+                            **_common(recorder))
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("daily_basic: no complete owner projection", result["reason"])
+        self.assertIn("Tushare fallback was retired", result["reason"])
+        self.assertEqual(recorder.executed, [], "nothing is promoted")
+
+    async def test_a_failed_suspension_fetch_blocks_and_is_recorded(self):
+        recorder = _Recorder()
+
+        async def fetch(_day):
+            raise ValueError("Eastmoney RPT_CUSTOM_SUSPEND_DATA_INTERFACE returned 5 of 17 rows")
+
+        result = await sync(date(2026, 10, 9), expected_daily_rows=lambda _day: 1, fetch_suspensions=fetch,
+                            read_persisted_factor_controls=_factors, read_persisted_control_rows=_controls(),
+                            **_common(recorder))
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("returned 5 of 17 rows", result["reason"])
+        self.assertEqual([failure[:2] for failure in recorder.failures], [(SUSPENSION_PROVIDER, "suspension_all_a")])
+
+
+class SuspensionNormalizationTests(unittest.TestCase):
+    def test_the_session_s_suspended_a_shares_only(self):
+        # Rows as RPT_CUSTOM_SUSPEND_DATA_INTERFACE returned them for 2026-10-09.
+        rows = normalize_suspensions([
+            _suspended("000582.SZ", "2026-10-08 09:30:00"),
+            _suspended("002388.SZ", "2026-10-08 09:30:00", end="2026-10-21 15:00:00"),
+            _suspended("603183.SH", "2026-09-30 09:30:00", end="2026-10-08 15:00:00"),
+            _suspended("200016.SZ", "2026-09-04 09:30:00"),
+            _suspended("600001.SH", "2026-10-09 10:30:00", end="2026-10-09 11:30:00"),
+            _suspended("600002.SH", "2026-10-10 09:30:00"),
+        ], date(2026, 10, 9))
+        self.assertEqual([row["ts_code"] for row in rows], ["000582.SZ", "002388.SZ", "600001.SH"])
+        self.assertEqual(rows[0]["trade_date"], "20261009")
+        self.assertEqual(rows[0]["suspend_reason"], "刊登重要公告 / 连续停牌")
+
+
+def _suspended(code, start, end=None):
+    return {"SECUCODE": code, "SUSPEND_START_TIME": start, "SUSPEND_END_TIME": end,
+            "SUSPEND_EXPIRE": "连续停牌", "SUSPEND_REASON": "刊登重要公告"}
+
+
+async def _factors(_day, _expected):
+    return {"rows": [{"ts_code": "000001.SZ", "trade_date": "20261009", "adj_factor": "1.2"}]}
+
+
+def _controls(**overrides):
+    rows = {
+        "daily_basic": {"rows": [{"ts_code": "000001.SZ", "trade_date": "20261009"}], "provider": "longhuvip_composite"},
+        "stk_limit": {"rows": [{"ts_code": "000001.SZ", "trade_date": "20261009", "limit_up": 11, "limit_down": 9}],
+                      "provider": "longhuvip_composite"},
+        "suspend_d": None,
+    }
+    rows.update(overrides)
+
+    async def read(api_name, _day, _expected):
+        return rows.get(api_name)
+
+    return read
+
+
+def _common(recorder):
+    return {"run_database_blocking": recorder.run_db, "db": recorder.database,
+            "safe_error_detail": lambda value, _limit: value, "executor_saturated_error": RuntimeError,
+            "record_provider_success": lambda _c, provider, capability, rows, _ms: recorder.successes.append(
+                (provider, capability, rows)),
+            "record_provider_failure": lambda _c, provider, capability, error, _ms: recorder.failures.append(
+                (provider, capability, error))}
+
+
+class _Recorder:
+    """A fake database that keeps every statement, plus the provider-health calls."""
+
+    def __init__(self):
+        self.executed: list[tuple[str, tuple]] = []
+        self.timeouts: list[int | None] = []
+        self.successes: list[tuple] = []
+        self.failures: list[tuple] = []
+        recorder = self
 
         class Result:
-            rowcount = 1
-            def fetchone(self): return {"full_cross_section_days": 1}
+            def fetchone(self):
+                return {}
 
         class Connection:
-            def execute(self, statement, *_args):
-                statements.append(" ".join(statement.split()))
+            def execute(self, statement, params=()):
+                recorder.executed.append((" ".join(statement.split()), params))
                 return Result()
 
         class Database:
             def transaction(self):
                 class Context:
-                    def __enter__(self): return Connection()
-                    def __exit__(self, *_args): return False
+                    def __enter__(self):
+                        return Connection()
+
+                    def __exit__(self, *_args):
+                        return False
                 return Context()
 
-        async def run_db(action, *args, **kwargs):
-            database_timeouts.append(kwargs.get("timeout_seconds"))
-            return action(*args)
+        self.database = Database()
 
-        paging: list[dict] = []
-        requested_providers: list[str] = []
+    @property
+    def statements(self):
+        return [sql for sql, _params in self.executed]
 
-        async def fetch(api_name, _params, _fields, provider, **kwargs):
-            requested.append(api_name)
-            requested_providers.append(provider)
-            paging.append(kwargs)
-            rows = [] if api_name == "suspend_d" else [{"ts_code": "000001.SZ", "trade_date": "20260821"}]
-            return SimpleNamespace(rows=rows, provider=SimpleNamespace(key="super"), failed_providers=())
-
-        def parse(value):
-            return date.fromisoformat(f"{str(value)[:4]}-{str(value)[4:6]}-{str(value)[6:8]}")
-
-        def persist(_connection, api_name, *_args):
-            persisted.append(api_name)
-            return 1
-
-        result = await sync(
-            trade_date, expected_daily_rows=lambda _day: 1, call_tushare_api=fetch, parse_date=parse,
-            persist_tushare_rows=persist, persist_blocked=lambda *_args: None, run_database_blocking=run_db,
-            db=Database(), safe_error_detail=lambda value, _limit: value, executor_saturated_error=RuntimeError,
-            record_provider_success=lambda *_args: None, record_provider_failure=lambda *_args: None,
-            record_provider_api_capability=lambda *_args, **_kwargs: None,
-        )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(requested, ["adj_factor", "daily_basic", "stk_limit", "suspend_d", "stock_st"])
-        self.assertEqual(requested_providers[:4], [CONTROL_PROVIDER_PREFERENCE] * 4)
-        self.assertEqual(persisted, requested[:4])
-        # The session's ST list is recorded as dated evidence for PIT reads.
-        self.assertEqual(result["st_evidence"], {"status": "captured", "rows": 1, "provider": "super"})
-        self.assertTrue(any("INSERT INTO quant.instrument_lifecycle_evidence" in statement for statement in statements))
-        # Every whole-market control call pages and refuses a short table.
-        self.assertTrue(all(call.get("paginate") and call.get("require_complete") for call in paging))
-        self.assertTrue(all(call.get("blocked_provider_keys") == set() for call in paging[:4]))
-        self.assertEqual(database_timeouts, [None, CONTROL_PERSIST_TIMEOUT_SECONDS])
-        self.assertIn("UPDATE quant.canonical_bars_daily SET is_suspended=false,canonicalized_at=now() WHERE trading_date=%s", statements)
-        self.assertIn("UPDATE quant.market_bars_daily SET is_suspended=false WHERE trading_date=%s", statements)
-        self.assertTrue(any("replay_readiness_daily_coverage" in statement for statement in statements))
-
-    async def test_persisted_owner_factors_replace_tushare_factor_request(self):
-        trade_date = date(2026, 8, 21)
-        requested: list[str] = []
-        persisted_calls: list[tuple[date, int]] = []
-
-        class Result:
-            rowcount = 1
-            def fetchone(self): return {"full_cross_section_days": 1}
-
-        class Connection:
-            def execute(self, *_args): return Result()
-
-        class Database:
-            def transaction(self):
-                class Context:
-                    def __enter__(self): return Connection()
-                    def __exit__(self, *_args): return False
-                return Context()
-
-        async def run_db(action, *args, **_kwargs):
-            return action(*args)
-
-        async def fetch(api_name, _params, _fields, _provider, **_kwargs):
-            requested.append(api_name)
-            return SimpleNamespace(
-                rows=[{"ts_code": "000001.SZ", "trade_date": "20260821"}],
-                provider=SimpleNamespace(key="tushare_primary"), failed_providers=(),
-            )
-
-        async def persisted(day, expected):
-            persisted_calls.append((day, expected))
-            return {"rows": [{"ts_code": "000001.SZ", "trade_date": "20260821", "adj_factor": "1.2"}]}
-
-        async def persisted_controls(api_name, day, expected):
-            if api_name == "stk_limit":
-                return {
-                    "rows": [{"ts_code": "000001.SZ", "trade_date": "20260821", "limit_up": 11, "limit_down": 9}],
-                    "provider": "longhuvip_composite",
-                }
-            return None
-
-        def parse(value):
-            text = str(value)
-            return date.fromisoformat(f"{text[:4]}-{text[4:6]}-{text[6:8]}")
-
-        result = await sync(
-            trade_date, expected_daily_rows=lambda _day: 1, call_tushare_api=fetch, parse_date=parse,
-            persist_tushare_rows=lambda *_args: 1, persist_blocked=lambda *_args: None,
-            run_database_blocking=run_db, db=Database(), safe_error_detail=lambda value, _limit: value,
-            executor_saturated_error=RuntimeError, record_provider_success=lambda *_args: None,
-            record_provider_failure=lambda *_args: None,
-            record_provider_api_capability=lambda *_args, **_kwargs: None,
-            read_persisted_factor_controls=persisted,
-            read_persisted_control_rows=persisted_controls,
-        )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(persisted_calls, [(trade_date, 1)])
-        # adj_factor comes from the owner; the session's ST list is still read.
-        self.assertEqual(requested, ["daily_basic", "suspend_d", "stock_st"])
-        self.assertEqual(result["providers"]["adj_factor"], "owner_persisted_adjustment_factor")
-        self.assertEqual(result["providers"]["stk_limit"], "longhuvip_composite")
-
-    async def test_a_failed_st_list_never_blocks_the_controls(self):
-        trade_date = date(2026, 8, 21)
-
-        class Result:
-            rowcount = 0
-            def fetchone(self): return {}
-
-        class Connection:
-            def execute(self, statement, *_args):
-                return Result()
-
-        class Database:
-            def transaction(self):
-                class Context:
-                    def __enter__(self): return Connection()
-                    def __exit__(self, *_args): return False
-                return Context()
-
-        async def run_db(action, *args, **_kwargs):
-            return action(*args)
-
-        async def fetch(api_name, _params, _fields, _provider, **_kwargs):
-            if api_name == "stock_st":
-                raise RuntimeError("stock_st refused")
-            rows = [] if api_name == "suspend_d" else [{"ts_code": "000001.SZ", "trade_date": "20260821"}]
-            return SimpleNamespace(rows=rows, provider=SimpleNamespace(key="super"), failed_providers=())
-
-        result = await sync(
-            trade_date, expected_daily_rows=lambda _day: 1, call_tushare_api=fetch,
-            parse_date=lambda value: date.fromisoformat(f"{str(value)[:4]}-{str(value)[4:6]}-{str(value)[6:8]}"),
-            persist_tushare_rows=lambda *_args: 1, persist_blocked=lambda *_args: None, run_database_blocking=run_db,
-            db=Database(), safe_error_detail=lambda value, _limit: value, executor_saturated_error=TimeoutError,
-            record_provider_success=lambda *_args: None, record_provider_failure=lambda *_args: None,
-            record_provider_api_capability=lambda *_args, **_kwargs: None,
-        )
-        self.assertEqual(result["status"], "completed")
-        self.assertTrue(result["st_evidence"]["status"].startswith("unavailable"))
+    async def run_db(self, action, *args, **kwargs):
+        self.timeouts.append(kwargs.get("timeout_seconds"))
+        return action(*args)
 
 
 if __name__ == "__main__":
