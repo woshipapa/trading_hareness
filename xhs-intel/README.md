@@ -7,7 +7,14 @@ workflow.
   deduplication and Feishu delivery. It never receives a model key.
 * `local_worker.py` runs on the workstation. It uses the Paper-KB
   `codex_provider.py` contract, including its local endpoint, key rotation and
-  model fallback chain.
+  model fallback chain. Jobs are routed by complexity: screening jobs and
+  small watch summaries lead with `gpt-5.6-luna`/medium, while large
+  summaries, single-note analyses and the daily digest lead with
+  `gpt-5.6-sol`/high; both chains fall back through the Paper-KB default
+  chain. Tune with `XHS_AI_SIMPLE_MODEL`/`XHS_AI_SIMPLE_EFFORT`,
+  `XHS_AI_COMPLEX_MODEL`/`XHS_AI_COMPLEX_EFFORT`,
+  `XHS_AI_SIMPLE_SUMMARY_MAX_NOTES` (default 3), or disable with
+  `XHS_AI_MODEL_ROUTING=0`.
 * The workstation supervisor owns an SSH local forward from `127.0.0.1:18790`
   to the edge API. If the workstation is offline, the edge queue retains
   `pending`/`processing` jobs and leases them again after expiry.

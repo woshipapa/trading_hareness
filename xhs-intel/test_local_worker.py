@@ -44,6 +44,48 @@ class SingleNotePromptTests(unittest.TestCase):
         self.assertEqual(classifier.call_count, 1)
         self.assertEqual(result, {'decisions': []})
 
+    def test_screening_jobs_lead_with_the_fast_model_and_keep_fallbacks(self):
+        with mock.patch.object(local_worker.codex_provider, 'default_chain',
+                               return_value=[('gpt-6-astra', 'high'), ('gpt-5.6-sol', 'high')]):
+            chain = local_worker.model_chain({'job_type': 'classify_notes'})
+        self.assertEqual(chain[0], ('gpt-5.6-luna', 'medium'))
+        self.assertEqual(chain[1], ('gpt-5.6-sol', 'high'))
+        self.assertIn(('gpt-6-astra', 'high'), chain)
+        self.assertEqual([m for m, _ in chain].count('gpt-5.6-sol'), 1)
+
+    def test_quality_facing_jobs_lead_with_the_strong_model(self):
+        for job in ({'job_type': 'daily_digest'}, {'job_type': 'single_note_analysis'},
+                    {'job_type': 'summary', 'notes': [{}] * 4}):
+            chain = local_worker.model_chain(job)
+            self.assertEqual(chain[0], ('gpt-5.6-sol', 'high'), job)
+            self.assertNotIn('gpt-5.6-luna', [m for m, _ in chain], job)
+
+    def test_small_watch_summaries_count_as_simple(self):
+        chain = local_worker.model_chain({'job_type': 'summary', 'notes': [{}, {}]})
+        self.assertEqual(chain[0], ('gpt-5.6-luna', 'medium'))
+
+    def test_model_routing_can_be_disabled(self):
+        with mock.patch.object(local_worker, 'MODEL_ROUTING', False):
+            self.assertEqual(local_worker.model_chain({'job_type': 'classify_notes'}),
+                             local_worker.codex_provider.default_chain())
+
+    def test_classify_requests_use_the_routed_chain(self):
+        job = {'job_id': 'f', 'job_type': 'classify_recommendations', 'policy': {'topics': []},
+               'notes': [{'_candidate_id': 'c1', 'title': 't', 'text': 'x'}]}
+        captured = {}
+
+        def fake_request(prompt, **kwargs):
+            captured['chain'] = kwargs['chain']
+            return json.dumps({'decisions': [{'candidate_id': 'c1', 'decision': 'include',
+                                              'topics': [], 'relevance_score': .9,
+                                              'confidence': .9, 'reason': 'ok'}]}), 'fake'
+
+        with mock.patch.object(local_worker.codex_provider, 'load_endpoint', return_value=('http://t', '', '')), \
+             mock.patch.object(local_worker.codex_provider, 'ordered_keys', return_value=['k']), \
+             mock.patch.object(local_worker.codex_provider, 'request', side_effect=fake_request):
+            local_worker.classify(job)
+        self.assertEqual(captured['chain'][0], ('gpt-5.6-luna', 'medium'))
+
     def test_filter_summary_and_profile_prompts_follow_the_live_topic_policy(self):
         policy = {'topics': [{'slug': 'finance', 'name': '财经与量化'},
                              {'slug': 'inference', 'name': '推理系统'}]}

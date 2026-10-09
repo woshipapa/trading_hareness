@@ -37,6 +37,16 @@ MAX_BATCH_IMAGES = max(1, min(32, int(os.environ.get("XHS_AI_MAX_BATCH_IMAGES", 
 MAX_IMAGE_BYTES = max(256 * 1024, min(12 * 1024 * 1024,
                                       int(os.environ.get("XHS_AI_MAX_IMAGE_BYTES", str(8 * 1024 * 1024)))))
 IMAGE_TIMEOUT = max(5, min(60, int(os.environ.get("XHS_AI_IMAGE_TIMEOUT", "20"))))
+# 按任务复杂度路由模型（2026-10-09 实测：三个模型都支持严格 JSON 与图片输入；
+# luna/medium 筛选干净够用，sol/high 的中文摘要最干净——luna/high 与 astra/high
+# 的摘要都出现过结尾幻觉/乱码）。失败沿链回退，最终落回 Paper-KB 默认链。
+MODEL_ROUTING = os.environ.get("XHS_AI_MODEL_ROUTING", "1").strip().lower() not in {"0", "false", "off"}
+SIMPLE_MODEL = os.environ.get("XHS_AI_SIMPLE_MODEL", "gpt-5.6-luna").strip()
+SIMPLE_EFFORT = os.environ.get("XHS_AI_SIMPLE_EFFORT", "medium").strip() or "medium"
+COMPLEX_MODEL = os.environ.get("XHS_AI_COMPLEX_MODEL", "gpt-5.6-sol").strip()
+COMPLEX_EFFORT = os.environ.get("XHS_AI_COMPLEX_EFFORT", "high").strip() or "high"
+SIMPLE_SUMMARY_MAX_NOTES = max(0, int(os.environ.get("XHS_AI_SIMPLE_SUMMARY_MAX_NOTES", "3")))
+SIMPLE_JOB_TYPES = {"classify_notes", "classify_recommendations", "classify_profiles"}
 _IMAGE_HOST = "ci.xiaohongshu.com"
 STATE = {"status": "starting", "last_job": None, "last_jobs": {}, "last_error": None,
          "completed": 0, "failed": 0}
@@ -94,6 +104,27 @@ def make_single_note_prompt(job):
         f"链接：{note.get('url', '')}",
         f"正文：{note.get('text', '')}",
     ])[:100000]
+
+
+def model_chain(job):
+    """Pick the model chain by job complexity.
+
+    Simple jobs (topic/profile screening, small watch summaries) lead with the
+    fast model at medium effort; quality-facing jobs (large summaries, single
+    note analysis, the daily digest) lead with the strong model. Both chains
+    keep the Paper-KB default chain as the tail so an unavailable model falls
+    back instead of failing the job.
+    """
+    if not MODEL_ROUTING:
+        return codex_provider.default_chain()
+    job_type = str(job.get("job_type") or "summary")
+    simple = job_type in SIMPLE_JOB_TYPES or (
+        job_type == "summary" and len(job.get("notes") or []) <= SIMPLE_SUMMARY_MAX_NOTES)
+    routed = [(SIMPLE_MODEL, SIMPLE_EFFORT), (COMPLEX_MODEL, COMPLEX_EFFORT)] if simple \
+        else [(COMPLEX_MODEL, COMPLEX_EFFORT)]
+    seen = {model for model, _effort in routed}
+    tail = [entry for entry in codex_provider.default_chain() if entry[0] not in seen]
+    return routed + tail
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -199,7 +230,7 @@ def _multimodal_items(prompt, media):
     return [{"role": "user", "content": content}]
 
 
-def _request_summary(prompt, *, media=None, media_stats=None):
+def _request_summary(prompt, *, media=None, media_stats=None, chain=None):
     base, _model, _effort = codex_provider.load_endpoint()
     keys = codex_provider.ordered_keys()
     if not keys:
@@ -209,7 +240,7 @@ def _request_summary(prompt, *, media=None, media_stats=None):
         request_input,
         base=base,
         keys=keys,
-        chain=codex_provider.default_chain(),
+        chain=chain or codex_provider.default_chain(),
         timeout=TIMEOUT,
         retries=2,
     )
@@ -306,19 +337,21 @@ def make_digest_prompt(job):
 def summarize(job):
     notes = list(job.get("notes") or [])
     media, stats = _load_note_images(notes)
-    return _request_summary(make_prompt(job), media=media, media_stats=stats)
+    return _request_summary(make_prompt(job), media=media, media_stats=stats,
+                            chain=model_chain(job))
 
 
 def build_digest(job):
     # The digest covers up to dozens of already-screened notes; it stays
     # text-only so one job cannot fan out into hundreds of image downloads.
-    return _request_summary(make_digest_prompt(job))
+    return _request_summary(make_digest_prompt(job), chain=model_chain(job))
 
 
 def analyze_single_note(job):
     notes = list(job.get("notes") or [])[:1]
     media, stats = _load_note_images(notes, max_images=MAX_IMAGES_PER_NOTE)
-    return _request_summary(make_single_note_prompt(job), media=media, media_stats=stats)
+    return _request_summary(make_single_note_prompt(job), media=media, media_stats=stats,
+                            chain=model_chain(job))
 
 
 def _parse_json_response(text, key='decisions'):
@@ -343,6 +376,7 @@ def classify(job):
     keys = codex_provider.ordered_keys()
     if not keys:
         raise RuntimeError("codex-teleai key pool is unavailable")
+    chain = model_chain(job)
     notes = list(job.get("notes") or [])
     expected = {
         str(note.get("_candidate_id") or note.get("revision") or note.get("note_id") or "")
@@ -361,7 +395,7 @@ def classify(job):
         prompt = make_filter_prompt(chunk_job)
         prompts.append(prompt)
         text, model = codex_provider.request(
-            prompt, base=base, keys=keys, chain=codex_provider.default_chain(),
+            prompt, base=base, keys=keys, chain=chain,
             timeout=TIMEOUT, retries=2,
         )
         parsed = _parse_json_response(text)
@@ -414,7 +448,7 @@ def classify_profiles(job):
     if not keys:
         raise RuntimeError("codex-teleai key pool is unavailable")
     text, model = codex_provider.request(
-        prompt, base=base, keys=keys, chain=codex_provider.default_chain(),
+        prompt, base=base, keys=keys, chain=model_chain(job),
         timeout=TIMEOUT, retries=2,
     )
     parsed = _parse_json_response(text, key='profiles')
