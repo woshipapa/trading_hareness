@@ -98,6 +98,34 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(persisted, [(90, "r1")])
         self.assertEqual(result["stored_rows"], 270)
 
+    def _sync_with_list_ending_today(self, held_through: date):
+        held = held_calendar(date(2026, 1, 1), held_through)
+
+        async def fetch(_capability, _params):
+            # 2026-10-09: Fuyao listed sessions up to the day itself and none after.
+            return {"request_id": "r3", "data": {"items": [str(day) for day in sessions(date(2026, 1, 1), date(2026, 10, 9))]}}
+
+        async def read_held():
+            return held
+
+        async def persist(*_args):
+            raise AssertionError("nothing new to persist")
+
+        return asyncio.run(sync_forward_calendar(fetch_envelope=fetch, read_held=read_held, persist=persist,
+                                                 today=date(2026, 10, 9)))
+
+    def test_a_list_ending_today_passes_while_the_held_calendar_runs_a_month_ahead(self):
+        result = self._sync_with_list_ending_today(date(2026, 12, 31))
+        self.assertEqual((result["status"], result["new_dates"]), ("completed", 0))
+        self.assertGreaterEqual(result["runway_sessions"], 20)
+        self.assertEqual(result["calendar_through"], "2026-12-31")
+
+    def test_a_list_ending_today_blocks_when_the_held_calendar_is_about_to_run_out(self):
+        result = self._sync_with_list_ending_today(date(2026, 10, 30))
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("add next year's calendar", result["reason"])
+        self.assertLess(result["runway_sessions"], 20)
+
     def test_an_unreadable_answer_writes_nothing(self):
         async def fetch(_capability, _params):
             return {"request_id": "r2", "data": {"note": "maintenance"}}

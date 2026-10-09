@@ -24,6 +24,9 @@ from typing import Any
 PROVIDER_KEY = "fuyao_ths"
 EXCHANGES = ("SSE", "SZSE", "BSE")  # A-share exchanges share one session calendar
 MIN_SESSIONS = 150                  # a thinner list is not a calendar
+#: Held future sessions that let a vendor list ending today pass: about a month of
+#: warning before the held calendar runs out and the intraday session gate closes.
+RUNWAY_SESSIONS = 20
 _DATE = re.compile(r"^(\d{4})-?(\d{2})-?(\d{2})")
 _DATE_FIELDS = ("trade_date", "trading_day", "calendar_date", "date", "cal_date", "day")
 
@@ -164,6 +167,20 @@ async def sync_forward_calendar(
         "held_through": str(max(held)) if held else None,
     }
     if plan.status != "ready":
+        # A list that stops at today adds nothing but is no emergency while the held
+        # calendar still runs well ahead (2026-10-09: Fuyao ended at the day itself
+        # while the held SSE calendar ran to 12-31). Fewer held sessions than the
+        # runway stays blocked, a month before the intraday gate would close.
+        runway = sorted(day for day, is_open in held.items() if is_open and day > today)
+        if plan.span and plan.span[1] <= today and len(runway) >= RUNWAY_SESSIONS:
+            return {**result, "status": "completed", "new_dates": 0, "runway_sessions": len(runway),
+                    "calendar_through": str(max(held)),
+                    "note": f"vendor list ends at {plan.span[1]}; held calendar covers {len(runway)} sessions "
+                            f"through {runway[-1]}"}
+        if plan.span and plan.span[1] <= today:
+            result["runway_sessions"] = len(runway)
+            result["reason"] = (f"{plan.reason}; only {len(runway)} held future sessions remain "
+                                f"(need {RUNWAY_SESSIONS}) - add next year's calendar")
         return result
     stored = await persist(plan.rows, envelope.get("request_id")) if plan.rows else 0
     return {**result, "status": "completed", "new_dates": len(plan.rows), "stored_rows": stored,
@@ -171,6 +188,6 @@ async def sync_forward_calendar(
 
 
 __all__ = [
-    "CalendarPlan", "extract_trading_days", "persist_forward_rows", "plan_forward_rows",
+    "CalendarPlan", "RUNWAY_SESSIONS", "extract_trading_days", "persist_forward_rows", "plan_forward_rows",
     "read_held_calendar", "sync_forward_calendar",
 ]
