@@ -180,3 +180,46 @@ export function buildRelayCard({ tag, text = '', imageKeys = [] }) {
 		body: { direction: 'vertical', elements },
 	};
 }
+
+const TZ_OFFSET_MS = 8 * 3600_000;
+
+function parseBodyContent(message) {
+	const raw = message?.body?.content;
+	if (raw && typeof raw === 'object') return raw;
+	try { return JSON.parse(String(raw ?? '')); } catch { return { raw: String(raw ?? '') }; }
+}
+
+export function ledgerMessageText(message) {
+	const type = String(message?.msg_type ?? '').toLowerCase();
+	if (type === 'text') return String(parseBodyContent(message)?.text ?? '').trim();
+	if (type === 'interactive') return cardText(message?.body?.content).trim();
+	if (type === 'post') {
+		const body = parseBodyContent(message);
+		const content = body?.content ?? body?.zh_cn?.content ?? [];
+		return content.flat().map((node) => node?.text ?? '').join('').trim();
+	}
+	if (type === 'image') return '[图片]';
+	if (type === 'system') return '';
+	return type ? `[${type}]` : '';
+}
+
+function senderOf(row) {
+	const message = row.message ?? {};
+	return String(row.sender_name ?? message.sender_name ?? message.sender?.name ?? message.sender?.id ?? '未知').trim() || '未知';
+}
+
+export function renderLedgerTranscript(rows) {
+	const lines = [];
+	let lastDay = null;
+	const ordered = [...rows].sort((a, b) => Number(a.source_create_time) - Number(b.source_create_time));
+	for (const row of ordered) {
+		const text = ledgerMessageText(row.message);
+		if (!text) continue;
+		const moment = new Date(Number(row.source_create_time) + TZ_OFFSET_MS);
+		const iso = moment.toISOString();
+		const day = iso.slice(0, 10);
+		if (day !== lastDay) { lines.push(`\n== ${day} ==`); lastDay = day; }
+		lines.push(`${iso.slice(11, 16)} ${senderOf(row)}: ${text.replace(/\n/g, '\n    ')}`);
+	}
+	return lines.join('\n').trim();
+}

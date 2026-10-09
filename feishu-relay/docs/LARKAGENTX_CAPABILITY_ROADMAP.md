@@ -121,6 +121,8 @@ API），官方 OAuth 应用只做精确补读与兜底。
 
 ## 4. 导出数据源升级（降级群取补读账本）
 
+> **已实现（部分）**：`source=archive|ledger`（`ledger` 仅 `format=transcript` + 固定天数窗口，渲染器在 `card-content.mjs` 的 `renderLedgerTranscript`，面板有数据源选择）。**未做**：`source=merged`（归档为主干、降级行按 ±3s 用账本替换）与书签按 source 分键——账本没有 bridge sequence，增量游标不适用，需先定游标语义。
+
 **现状**：导出链路（bridge 转录渲染 + adapter 代理 + 服务端书签 + 面板按钮 +
 本机 CLI）已上线；但对被降级的群，bridge 归档存的是降级卡（转录成 `[图片]`），
 真内容在 adapter 账本 `feishu_group_relay_messages.message`（补读后的官方卡 JSON）。

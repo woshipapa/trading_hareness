@@ -30,6 +30,9 @@ export type ExportHistoryOptions = {
   // otherwise a fixed recent window of `days`.
   mode?: 'incremental' | 'window';
   days?: 1 | 7 | 30;
+  // 'ledger' = OAuth-backfilled official content (real text for downgraded
+  // groups); transcript + fixed window only.
+  source?: 'archive' | 'ledger';
 };
 
 export type SendAuditRow = {
@@ -58,6 +61,7 @@ export const groupRelayApi = {
   exportLarkAgentXHistory: async (chatId: string, options: ExportHistoryOptions = {}) => {
     const format: ExportFormat = options.format ?? 'transcript';
     const query = new URLSearchParams({ chat_id: chatId, format });
+    if (options.source === 'ledger') query.set('source', 'ledger');
     if (options.mode === 'incremental') query.set('mode', 'incremental');
     else query.set('days', String(options.days ?? 7));
     const response = await fetch(`/api/group-relay/larkagentx/history/export?${query.toString()}`, { cache: 'no-store' });

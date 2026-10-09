@@ -345,6 +345,16 @@ export function createLedger(connectionString) {
 				ORDER BY message.source_create_time ASC LIMIT $4`, [String(sourceKey), from, to, boundedLimit]);
 			return rows;
 		},
+		async relayMessagesByChatWindow(chatId, fromCreateTime, toCreateTime, limit = 20000) {
+			const from = Math.max(0, Number(fromCreateTime) || 0);
+			const to = Math.max(from, Number(toCreateTime) || from);
+			const boundedLimit = Math.max(1, Math.min(50000, Number(limit) || 20000));
+			const { rows } = await pool.query(`SELECT source_message_id, source_chat_id, source_create_time, message
+				FROM feishu_group_relay_messages
+				WHERE source_chat_id=$1 AND status='sent' AND source_create_time BETWEEN $2 AND $3
+				ORDER BY source_create_time ASC LIMIT $4`, [String(chatId), from, to, boundedLimit]);
+			return rows;
+		},
 		async getRelayMessageByActionCard(actionCardMessageId) {
 			const { rows } = await pool.query(`SELECT message.*, route.chat_name AS source_chat_name
 				FROM feishu_group_relay_messages message

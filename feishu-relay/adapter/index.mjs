@@ -25,7 +25,7 @@ import { isOperatorPausedIngestion } from './ingestion-health.mjs';
 import { shouldSkipMessageForward } from './message-idempotency.mjs';
 import { shouldRedownloadRetryMedia } from './retry-media.mjs';
 import { parsePaperIngestIds } from './paper-ingest-command.mjs';
-import { cardPayload } from './card-content.mjs';
+import { cardPayload, renderLedgerTranscript } from './card-content.mjs';
 import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { parseXhsCommand } from './xhs-command.mjs';
 import { matchResearchRoute } from './research-routes.mjs';
@@ -1706,6 +1706,41 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 	if (afterSequence === null && ![1, 7, 30].includes(days)) {
 		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({ status: 'error', message: '导出范围只支持最近 1 天、7 天或 30 天（或用 after_sequence 增量）' }));
+		return;
+	}
+	const exportSource = String(url.searchParams.get('source') ?? 'archive').trim().toLowerCase();
+	if (!['archive', 'ledger'].includes(exportSource)) {
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: 'source 只支持 archive 或 ledger' }));
+		return;
+	}
+	if (exportSource === 'ledger') {
+		// Degraded groups archive a placeholder; the ledger holds the OAuth-
+		// backfilled official content. Window export only: the ledger has no
+		// bridge sequence, so an incremental cursor cannot apply to it.
+		if (format !== 'transcript' || afterSequence !== null || useBookmark) {
+			response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ status: 'error', message: 'source=ledger 仅支持 format=transcript 的固定天数窗口' }));
+			return;
+		}
+		try {
+			const toMs = Date.now();
+			const rows = await ledger.relayMessagesByChatWindow(chatId, toMs - days * 86_400_000, toMs);
+			const body = Buffer.from(renderLedgerTranscript(rows), 'utf8');
+			const times = rows.map((row) => Number(row.source_create_time)).filter(Boolean);
+			response.writeHead(200, {
+				'content-type': 'text/plain; charset=utf-8',
+				'content-disposition': `attachment; filename="larkagentx-${chatId}-ledger-last-${days}d.txt"`,
+				'cache-control': 'no-store',
+				'x-larkagentx-export-source': 'ledger',
+				'x-larkagentx-event-count': String(rows.length),
+				...(times.length ? { 'x-larkagentx-from-time': String(Math.min(...times) / 1000), 'x-larkagentx-to-time': String(Math.max(...times) / 1000) } : {}),
+			});
+			response.end(body);
+		} catch (error) {
+			response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ status: 'error', message: `账本导出失败：${error instanceof Error ? error.message : String(error)}` }));
+		}
 		return;
 	}
 	if (!larkAgentXIngressToken || !larkAgentXHealthUrl) {

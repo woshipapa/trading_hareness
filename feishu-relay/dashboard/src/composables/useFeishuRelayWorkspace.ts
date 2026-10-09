@@ -39,6 +39,7 @@ export function useFeishuRelayWorkspace() {
   const larkHistoryDays = ref<1 | 7 | 30>(7);
   // Transcript is the AI-ready default (flat text); ndjson keeps raw structure.
   const larkHistoryFormat = ref<ExportFormat>('transcript');
+  const larkHistorySource = ref<'archive' | 'ledger'>('archive');
   const larkHistoryExporting = ref('');
   const exportBookmarks = ref<Record<string, ExportBookmark>>({});
   const groupRelayRouteForm = ref<GroupRelayRouteForm>(defaultRouteForm());
@@ -238,9 +239,13 @@ export function useFeishuRelayWorkspace() {
   async function exportLarkAgentXHistory(chatId: string, incremental = false) {
     if (larkHistoryExporting.value) return;
     larkHistoryExporting.value = chatId;
+    const ledgerSource = larkHistorySource.value === 'ledger';
+    if (incremental && ledgerSource) incremental = false;
     try {
       const result = await groupRelayApi.exportLarkAgentXHistory(chatId, {
-        format: larkHistoryFormat.value,
+        // The ledger has no bridge sequence: it is transcript + fixed window only.
+        format: ledgerSource ? 'transcript' : larkHistoryFormat.value,
+        source: larkHistorySource.value,
         mode: incremental ? 'incremental' : 'window',
         days: larkHistoryDays.value,
       });
@@ -352,7 +357,7 @@ export function useFeishuRelayWorkspace() {
   }
 
   return {
-    groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
+    groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistorySource, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
     qrDialog, qrSession, qrStatusName, qrPolling, startQrLogin, stopQrPolling, authStateType, authStateText,
     oauthDialog, oauthAuthorizeUrl, oauthRedirectUri, oauthCode, oauthSubmitting, startOauthReauth, submitOauthCode, copyOauthUrl, oauthExpiryText, oauthExpiryTagType,
     feishuWorkbench, feishuWorkbenchMessages, feishuWorkbenchLoading, feishuWorkbenchError, feishuWorkbenchAction, workbenchSearch, workbenchSearchResult, workbenchIntegrationDialog, workbenchIntegration,
