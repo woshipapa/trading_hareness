@@ -52,6 +52,17 @@ class StrategyCardsSqlTests(unittest.TestCase):
         self.assertEqual(day["direction_gate"]["label"], "unknown")
         self.assertEqual(cards["launch_radar"]["leaderboard"]["5"]["without_bar"], 1)
 
+    def test_every_indicator_health_statement_runs_on_the_real_schema(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from app.indicator_health import indicator_health
+
+        day = indicator_health(self.connection, SESSION, datetime(2099, 3, 4, 18, 0, tzinfo=ZoneInfo("Asia/Shanghai")))
+        statuses = {item["key"]: item["status"] for item in day["indicators"]}
+        self.assertEqual(statuses["market.radar"], "missing")
+        self.assertEqual(statuses["strategy.ledger"], "fail", "two lines on the previous session, below the warning floor of four")
+
     def test_the_limit_detail_and_radar_reads_run_on_the_real_schema(self) -> None:
         from app.limit_detail_read_model import limit_detail_day
         from app.market_radar_runtime import radar_day

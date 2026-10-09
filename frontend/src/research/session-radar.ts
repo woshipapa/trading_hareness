@@ -242,3 +242,20 @@ export function boardText(stock: LimitStock): string {
   if (stock.m_days && stock.n_boards && stock.m_days !== stock.n_boards) return `${stock.m_days}天${stock.n_boards}板`;
   return stock.board_label || (stock.board_count ? `${stock.board_count}板` : '-');
 }
+
+export type IndicatorCheck = { name: string; status: string; value?: unknown; threshold?: unknown; detail?: string };
+export type IndicatorStatus = {
+  key: string; label: string; availability: string; status: string; decision_eligible: boolean; checks: IndicatorCheck[];
+};
+export type IndicatorHealth = {
+  trade_date: string; observed_at: string; indicators: IndicatorStatus[]; summary: Record<string, number>;
+  decision_eligible_keys: string[]; rule?: string;
+};
+export const HEALTH_LABELS: Record<string, string> = { ok: '可用', warn: '警告', fail: '失败', missing: '缺失', pending: '未到时' };
+export const HEALTH_TYPES: Record<string, string> = { ok: 'success', warn: 'warning', fail: 'danger', missing: 'danger', pending: 'info' };
+
+/** The checks that withhold eligibility, as one line. */
+export function failingChecks(item: IndicatorStatus): string {
+  return item.checks.filter((check) => check.status !== 'ok')
+    .map((check) => `${check.name}=${check.value ?? '-'}（${check.detail || check.threshold || check.status}）`).join('；');
+}

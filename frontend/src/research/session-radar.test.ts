@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auctionRows, bandCounts, breadthText, pctText, radarLegend, radarOption, radarRows, stars, tone, yi, type RadarDay } from './session-radar';
+import { auctionRows, bandCounts, breadthText, failingChecks, pctText, radarLegend, radarOption, radarRows, stars, tone, yi, type RadarDay } from './session-radar';
 
 const cell = (turnover: number, count = 1) => ({ turnover, count });
 const bands = (up: number, down: number, pool: number, nowUp = up, nowDown = down) => ({
@@ -58,6 +58,13 @@ describe('session radar', () => {
     expect(option.series[0].data).toEqual([300, 3549.9]);
     const bars = option.series.find((series) => series.name === '主力净额')!.data as { value: number; itemStyle: { color: string } }[];
     expect(bars.map((bar) => [bar.value, bar.itemStyle.color])).toEqual([[-50, '#188038'], [-160.1, '#188038']]);
+  });
+
+  it('names the checks that withhold an indicator', () => {
+    expect(failingChecks({ key: 'market.main_net', label: '', availability: '', status: 'fail', decision_eligible: false, checks: [
+      { name: 'present', status: 'ok', value: 104 },
+      { name: 'plausible', status: 'fail', value: 2e7, threshold: '<=0.25', detail: '|主力净额|/全池成交额' }] }))
+      .toBe('plausible=20000000（|主力净额|/全池成交额）');
   });
 
   it('formats signed percentages, tones and event stars', () => {

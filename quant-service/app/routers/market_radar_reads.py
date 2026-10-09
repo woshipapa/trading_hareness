@@ -1,4 +1,4 @@
-"""Read-only session routes: the minute radar, the limit-up detail, and the strategy cards."""
+"""Read-only session routes: the minute radar, the limit-up detail, the strategy cards and indicator health."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from ..market_radar import CN_TZ
+from ..indicator_health import indicator_health
+from ..indicator_registry import registry
 from ..limit_detail_read_model import limit_detail_day
 from ..market_radar_runtime import radar_day
 from ..strategy_cards_read_model import strategy_cards
@@ -45,6 +47,22 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
         def read() -> dict[str, Any]:
             with database.transaction() as connection:
                 return strategy_cards(connection, day, per_line=per_line)
+
+        return await run_database_blocking(read, timeout_seconds=60)
+
+    @router.get("/api/v1/indicators")
+    async def indicator_registry_route() -> dict[str, Any]:
+        return {"indicators": registry(), "research_only": True, "live_effect": "none"}
+
+    @router.get("/api/v1/indicators/health")
+    async def indicator_health_route(trade_date: date | None = None, keys: str | None = None) -> dict[str, Any]:
+        now = datetime.now(CN_TZ)
+        day = trade_date or now.date()
+        wanted = [key.strip() for key in keys.split(",") if key.strip()] if keys else None
+
+        def read() -> dict[str, Any]:
+            with database.transaction() as connection:
+                return indicator_health(connection, day, now, wanted)
 
         return await run_database_blocking(read, timeout_seconds=60)
 

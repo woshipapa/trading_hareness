@@ -4,10 +4,11 @@ import { Refresh } from '@element-plus/icons-vue';
 import VChart from 'vue-echarts';
 import { getJson } from '../../api/http';
 import {
-  BAND_LABELS, GATE_LABELS, PHASE_LABELS, SEGMENT_LABELS, auctionRows, bandCounts, boardText, breadthText, lineRankText,
+  BAND_LABELS, GATE_LABELS, HEALTH_LABELS, HEALTH_TYPES, PHASE_LABELS, SEGMENT_LABELS, auctionRows, bandCounts, boardText,
+  breadthText, failingChecks, lineRankText,
   pctText, radarLegend,
   radarOption, radarRows, shanghaiTime, shanghaiToday, stars, tone, yi,
-  type CardPick, type LimitDetailDay, type RadarDay, type StrategyCardsDay,
+  type CardPick, type IndicatorHealth, type LimitDetailDay, type RadarDay, type StrategyCardsDay,
 } from '../../research/session-radar';
 
 const tradeDate = ref(shanghaiToday());
@@ -19,6 +20,7 @@ const loading = ref(false);
 const radar = ref<RadarDay | null>(null);
 const cards = ref<StrategyCardsDay | null>(null);
 const limits = ref<LimitDetailDay | null>(null);
+const health = ref<IndicatorHealth | null>(null);
 const errors = ref<Record<string, string>>({});
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -35,11 +37,13 @@ async function load() {
   loading.value = true;
   errors.value = {};
   const day = encodeURIComponent(tradeDate.value);
-  const [radarDay, cardDay, limitDay] = await Promise.all([
+  const [radarDay, cardDay, limitDay, healthDay] = await Promise.all([
     read<RadarDay>('radar', `/api/research/market/radar?trade_date=${day}`),
     read<StrategyCardsDay>('cards', `/api/research/strategy/cards?trade_date=${day}&per_line=${perLine.value}`),
     read<LimitDetailDay>('limits', `/api/research/market/limit-detail?trade_date=${day}`),
+    read<IndicatorHealth>('health', `/api/research/indicators/health?trade_date=${day}`),
   ]);
+  health.value = healthDay;
   radar.value = radarDay;
   cards.value = cardDay;
   limits.value = limitDay;
@@ -203,6 +207,30 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         </el-descriptions>
       </el-collapse-item>
     </el-collapse>
+  </el-card>
+
+  <el-card shadow="never" class="section-gap">
+    <template #header>
+      <div class="card-header">
+        <el-space wrap>
+          <strong>指标健康</strong>
+          <el-tag v-for="(count, status) in health?.summary ?? {}" :key="status" size="small" :type="HEALTH_TYPES[status] ?? 'info'">{{ HEALTH_LABELS[status] ?? status }} {{ count }}</el-tag>
+        </el-space>
+        <el-text type="info" size="small">{{ health?.rule ?? '' }}</el-text>
+      </div>
+    </template>
+    <el-alert v-if="errors.health" :title="`指标健康读取失败：${errors.health}`" type="error" :closable="false" show-icon />
+    <el-table v-else :data="health?.indicators ?? []" size="small">
+      <el-table-column prop="label" label="指标" min-width="190" />
+      <el-table-column prop="key" label="键" width="170" />
+      <el-table-column label="状态" width="90">
+        <template #default="{ row }"><el-tag size="small" :type="HEALTH_TYPES[row.status] ?? 'info'">{{ HEALTH_LABELS[row.status] ?? row.status }}</el-tag></template>
+      </el-table-column>
+      <el-table-column label="可作决策输入" width="110"><template #default="{ row }">{{ row.decision_eligible ? '是' : '否' }}</template></el-table-column>
+      <el-table-column label="未通过的检查" min-width="300" show-overflow-tooltip>
+        <template #default="{ row }">{{ failingChecks(row) || '—' }}</template>
+      </el-table-column>
+    </el-table>
   </el-card>
 
   <el-card shadow="never" class="section-gap">

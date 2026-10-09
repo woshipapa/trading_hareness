@@ -56,6 +56,8 @@ export const researchReads = new Map([
 	['/api/research/market/radar', '/api/v1/market/radar'],
 	['/api/research/market/limit-detail', '/api/v1/market/limit-detail'],
 	['/api/research/strategy/cards', '/api/v1/strategies/cards'],
+	['/api/research/indicators', '/api/v1/indicators'],
+	['/api/research/indicators/health', '/api/v1/indicators/health'],
 	['/api/research/strategy/reviews/latest', '/api/v1/strategy/reviews/latest'],
 	['/api/research/strategy/post-close/latest', '/api/v1/strategy/post-close/latest'],
 	['/api/research/strategy/ablation/latest', '/api/v1/strategy/ablation/latest'],
