@@ -247,7 +247,7 @@
         "paper-kb-webhook-tunnel": "tunnel",
         "xhs-ai-worker": "edge-client",
         "itougu-table-watch": "local",
-        "model-service": "local",
+        "model-service": "local", "service-index": "local",
         "agent-skills.web": "local",
         "b300-collab.watch": "local",
         "paperkb.*": "local",
