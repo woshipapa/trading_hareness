@@ -1591,10 +1591,26 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 		response.end(JSON.stringify({ status: 'error', message: '必须选择有效的 WebSocket 数字 chat_id' }));
 		return;
 	}
-	const days = Number(url.searchParams.get('days') ?? '1');
-	if (![1, 7, 30].includes(days)) {
+	// Incremental export: `after_sequence` resumes from a caller-kept cursor,
+	// so a tool exports only what is new since last time. `days` stays as a
+	// convenience window; an explicit after_sequence takes precedence over it.
+	const afterSequenceRaw = String(url.searchParams.get('after_sequence') ?? '').trim();
+	const afterSequence = afterSequenceRaw === '' ? null : Number(afterSequenceRaw);
+	if (afterSequence !== null && (!Number.isInteger(afterSequence) || afterSequence < 0)) {
 		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-		response.end(JSON.stringify({ status: 'error', message: '导出范围只支持最近 1 天、7 天或 30 天' }));
+		response.end(JSON.stringify({ status: 'error', message: 'after_sequence 必须是非负整数' }));
+		return;
+	}
+	const format = String(url.searchParams.get('format') ?? 'ndjson').trim().toLowerCase();
+	if (!['ndjson', 'transcript'].includes(format)) {
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: 'format 只支持 ndjson 或 transcript' }));
+		return;
+	}
+	const days = Number(url.searchParams.get('days') ?? '1');
+	if (afterSequence === null && ![1, 7, 30].includes(days)) {
+		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: '导出范围只支持最近 1 天、7 天或 30 天（或用 after_sequence 增量）' }));
 		return;
 	}
 	if (!larkAgentXIngressToken || !larkAgentXHealthUrl) {
@@ -1604,13 +1620,18 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 	}
 	try {
 		const bridgeUrl = new URL(larkAgentXHealthUrl);
-		bridgeUrl.pathname = '/history/export';
+		bridgeUrl.pathname = format === 'transcript' ? '/history/transcript' : '/history/export';
 		bridgeUrl.search = '';
 		bridgeUrl.searchParams.set('chat_id', chatId);
-		bridgeUrl.searchParams.set('from_time', String((Date.now() - days * 24 * 60 * 60 * 1000) / 1000));
-		bridgeUrl.searchParams.set('to_time', String(Date.now() / 1000));
+		if (afterSequence !== null) {
+			bridgeUrl.searchParams.set('after_sequence', String(afterSequence));
+		} else {
+			bridgeUrl.searchParams.set('from_time', String((Date.now() - days * 24 * 60 * 60 * 1000) / 1000));
+			bridgeUrl.searchParams.set('to_time', String(Date.now() / 1000));
+		}
 		bridgeUrl.searchParams.set('limit', '100000');
-		const upstream = await fetch(bridgeUrl, { headers: { 'x-larkagentx-token': larkAgentXIngressToken, accept: 'application/x-ndjson' } });
+		const accept = format === 'transcript' ? 'text/plain' : 'application/x-ndjson';
+		const upstream = await fetch(bridgeUrl, { headers: { 'x-larkagentx-token': larkAgentXIngressToken, accept } });
 		if (!upstream.ok) {
 			const message = (await upstream.text()).slice(0, 500);
 			response.writeHead(upstream.status === 401 ? 502 : upstream.status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1618,12 +1639,17 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 			return;
 		}
 		const safeFileChatId = chatId.replace(/[^0-9]/g, '');
+		const ext = format === 'transcript' ? 'txt' : 'jsonl';
+		const windowTag = afterSequence !== null ? `after-${afterSequence}` : `last-${days}d`;
+		const passHeader = (name) => (upstream.headers.get(name) ? { [name]: upstream.headers.get(name) } : {});
 		response.writeHead(200, {
-			'content-type': 'application/x-ndjson; charset=utf-8',
-			'content-disposition': `attachment; filename="larkagentx-${safeFileChatId}-last-${days}d.jsonl"`,
+			'content-type': format === 'transcript' ? 'text/plain; charset=utf-8' : 'application/x-ndjson; charset=utf-8',
+			'content-disposition': `attachment; filename="larkagentx-${safeFileChatId}-${windowTag}.${ext}"`,
 			'cache-control': 'no-store',
-			...(upstream.headers.get('x-larkagentx-event-count') ? { 'x-larkagentx-event-count': upstream.headers.get('x-larkagentx-event-count') } : {}),
-			...(upstream.headers.get('x-larkagentx-next-sequence') ? { 'x-larkagentx-next-sequence': upstream.headers.get('x-larkagentx-next-sequence') } : {}),
+			...passHeader('x-larkagentx-event-count'),
+			...passHeader('x-larkagentx-next-sequence'),
+			...passHeader('x-larkagentx-from-time'),
+			...passHeader('x-larkagentx-to-time'),
 		});
 		if (!upstream.body) {
 			response.end();

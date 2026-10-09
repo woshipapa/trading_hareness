@@ -619,11 +619,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
 					limit=int((query.get("limit") or ["10000"])[0] or 10000),
 				)
 				body = b"".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n" for row in rows)
+				span = [r["create_time"] for r in rows if r.get("create_time")]
 				self.send_response(200)
 				self.send_header("content-type", "application/x-ndjson; charset=utf-8")
 				self.send_header("content-disposition", f'attachment; filename="larkagentx-{chat_id}-history.jsonl"')
 				self.send_header("x-larkagentx-event-count", str(len(rows)))
 				self.send_header("x-larkagentx-next-sequence", str(rows[-1]["sequence"] if rows else (self.bridge.history_archive.stats(chat_id)["latest_sequence"])))
+				if span:
+					self.send_header("x-larkagentx-from-time", repr(min(span)))
+					self.send_header("x-larkagentx-to-time", repr(max(span)))
 				self.send_header("content-length", str(len(body)))
 				self.end_headers()
 				self.wfile.write(body)
@@ -656,10 +660,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				)
 				transcript = render_transcript(rows, drop_system=drop_system)
 				body = transcript.encode("utf-8")
+				span = [r["create_time"] for r in rows if r.get("create_time")]
 				self.send_response(200)
 				self.send_header("content-type", "text/plain; charset=utf-8")
 				self.send_header("cache-control", "no-store")
 				self.send_header("x-larkagentx-event-count", str(len(rows)))
+				self.send_header("x-larkagentx-next-sequence", str(rows[-1]["sequence"] if rows else (self.bridge.history_archive.stats(chat_id)["latest_sequence"])))
+				if span:
+					self.send_header("x-larkagentx-from-time", repr(min(span)))
+					self.send_header("x-larkagentx-to-time", repr(max(span)))
 				self.send_header("content-length", str(len(body)))
 				self.end_headers()
 				self.wfile.write(body)
