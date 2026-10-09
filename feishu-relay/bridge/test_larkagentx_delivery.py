@@ -156,6 +156,7 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 
 	def test_private_tail_repair_starts_after_recovered_cursor(self):
 		instance = object.__new__(bridge.Bridge)
+		instance.client = Mock()  # logged in; the tail pull is skipped when client is None
 		instance.private_tail_repair_enabled = True
 		instance._private_tail_repair_in_flight = False
 		instance.private_tail_repair_window = 16

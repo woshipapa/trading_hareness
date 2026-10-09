@@ -29,7 +29,7 @@ from urllib.request import Request, urlopen
 import requests
 import websockets
 
-from larkx.auth import AuthExpired, LarkAuth
+from larkx.auth import AuthExpired, LarkAuth, QrLogin
 from larkx.client import LarkClient
 from larkx.proto import decoders
 from larkagentx_image_property import extract_rich_text_image_resource
@@ -39,6 +39,7 @@ from event_spool import EventSpool
 from history_archive import HistoryArchive
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
+from qr_login_service import QrLoginService
 
 
 LOG = logging.getLogger("larkagentx-bridge")
@@ -58,6 +59,10 @@ DEFAULT_PRIVATE_TAIL_REPAIR_SECONDS = 60
 MIN_PRIVATE_TAIL_REPAIR_SECONDS = 30
 MAX_PRIVATE_TAIL_REPAIR_SECONDS = 600
 DEFAULT_PRIVATE_TAIL_REPAIR_WINDOW = 16
+DEFAULT_QR_MAX_SESSIONS = 4
+DEFAULT_QR_SESSION_TTL_SECONDS = 180
+# Feishu's open-dev messenger is the surface the harvested web session drives.
+QR_LOGIN_REDIRECT_URI = "https://open-dev.feishu.cn/next/messenger"
 PAPER_COMMAND_RE = re.compile(
 	r"^(?:收录(?:\s*[:：]\s*|\s+)|收(?=\s|[:：])|留(?=\s|[:：])|略(?=\s|[:：])|"
 	r"稍后(?=\s|[:：])|原因(?=\s|[:：])|多点(?:\s|[:：])+|少点(?:\s|[:：])+|作者\s*\+|"
@@ -323,6 +328,7 @@ class RecoveringLarkClient(LarkClient):
 		self.on_decode_fallback = on_decode_fallback
 		self.on_connected = on_connected
 		self.on_notify = on_notify
+		self.active_ws = None
 		self.ws_param_overrides = parse_ws_param_overrides(os.environ.get("LARKX_WS_PARAM_OVERRIDES", ""))
 		self.gateway_header_overrides = parse_ws_param_overrides(
 			os.environ.get("LARKX_GATEWAY_HEADER_OVERRIDES", ""))
@@ -364,6 +370,9 @@ class RecoveringLarkClient(LarkClient):
 				",".join(f"{key}={value}" for key, value in sorted(self.ws_param_overrides.items())))
 		async with websockets.connect(url) as ws:
 			logging.getLogger("larkagentx-bridge").info("WS 已连接")
+			# Exposed so a QR re-login can drop this socket and reconnect with
+			# the fresh session without restarting the process.
+			self.active_ws = ws
 			if self.on_connected:
 				try:
 					self.on_connected()
@@ -412,6 +421,7 @@ class RecoveringLarkClient(LarkClient):
 						logging.getLogger("larkagentx-bridge").warning("跳过无法恢复的 WebSocket 帧 len=%d sha256=%s type=%s: %s", len(raw), hashlib.sha256(raw).hexdigest()[:16], type(error).__name__, error)
 			finally:
 				heartbeat_task.cancel()
+				self.active_ws = None
 
 
 def json_safe(value: Any) -> Any:
@@ -633,6 +643,16 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				result = asyncio.run(self.bridge.repair_private_positions(payload, reason="manual_private_gap_repair"))
 				self.send_json(200, result)
 				return
+			if self.path == "/qr/init":
+				self.send_json(200, self.bridge.qr_login.start())
+				return
+			if self.path == "/qr/poll":
+				session_id = str(payload.get("session_id", "")).strip()
+				if not session_id or len(session_id) > 128:
+					self.send_json(400, {"status": "error", "message": "session_id is required"})
+					return
+				self.send_json(200, self.bridge.qr_login.poll(session_id))
+				return
 			self.send_json(404, {"status": "not_found"})
 		except Exception as error:
 			LOG.warning("bridge POST request failed path=%s: %s", self.path, error)
@@ -767,13 +787,23 @@ class Bridge:
 		self.last_ws_notify = None
 		self._notify_repair_in_flight: set[str] = set()
 		self._recovery_in_flight = False
-		self.client = RecoveringLarkClient(
+		# The credential may be dead at startup or expire while running. Build
+		# the client lazily so the HTTP server (and the QR login surface it
+		# hosts) stay up regardless, and treat auth as a state machine instead
+		# of a fatal crash.  See run_forever / _ensure_client.
+		self.client: RecoveringLarkClient | None = None
+		self.auth_state = "needs_login"
+		self.last_auth_error: str | None = None
+		self._loop: asyncio.AbstractEventLoop | None = None
+		self._relogin_event: asyncio.Event | None = None
+		self.qr_login = QrLoginService(
 			self.auth,
-			on_decode_error=self.on_decode_error,
-			on_decode_fallback=self.on_decode_fallback,
-			on_connected=self.on_websocket_connected,
-			on_notify=self.on_ws_notify,
+			qr_login_factory=self._new_qr_login,
+			on_login_success=self._on_qr_login_success,
+			max_sessions=bounded_int_env("LARKX_QR_MAX_SESSIONS", DEFAULT_QR_MAX_SESSIONS, 1, 16),
+			session_ttl_seconds=bounded_int_env("LARKX_QR_SESSION_TTL_SECONDS", DEFAULT_QR_SESSION_TTL_SECONDS, 60, 600),
 		)
+		self._ensure_client()
 		# WebSocket events use numeric chat ids. Keep official oc_ aliases in the
 		# configuration for documentation, but do not count them as live sockets.
 		self.websocket_chat_ids = {chat_id for chat_id in self.listen_chats if chat_id.isdigit()}
@@ -971,7 +1001,7 @@ class Bridge:
 			self.route_catalog_error = str(error)[:240]
 
 	async def discover_dynamic_route(self, chat_id: str) -> dict[str, str] | None:
-		if not self.dynamic_route_discovery or not self.route_catalog_url:
+		if not self.dynamic_route_discovery or not self.route_catalog_url or self.client is None:
 			return None
 		known = self.dynamic_routes.get(chat_id)
 		if known:
@@ -1002,6 +1032,9 @@ class Bridge:
 		"""Resolve numeric WebSocket ids at startup without sending any message."""
 		self.mapping_check_at = datetime.now(timezone.utc).isoformat()
 		self.mapping_check_error = None
+		if self.client is None:
+			self.mapping_check_error = "needs_login: 尚未登录,跳过群映射校验"
+			return
 		for chat_id in sorted(self.websocket_chat_ids):
 			try:
 				info = self.client.get_chat_info(chat_id) or {}
@@ -1012,6 +1045,84 @@ class Bridge:
 			except Exception as error:
 				self.chat_validation[chat_id] = {"state": "error", "name": None, "checked_at": self.mapping_check_at, "error": str(error)[:240]}
 				self.mapping_check_error = self.mapping_check_error or f"{chat_id}: {error}"
+
+	def _new_qr_login(self) -> QrLogin:
+		"""Open a fresh upstream QR login against the messenger redirect URI."""
+		return QrLogin(redirect_uri=QR_LOGIN_REDIRECT_URI)
+
+	def _build_client(self) -> RecoveringLarkClient:
+		return RecoveringLarkClient(
+			self.auth,
+			on_decode_error=self.on_decode_error,
+			on_decode_fallback=self.on_decode_fallback,
+			on_connected=self.on_websocket_connected,
+			on_notify=self.on_ws_notify,
+		)
+
+	def _ensure_client(self) -> bool:
+		"""Build the client if credentials are valid; never raise on expiry.
+
+		Returns True when a live client is available.  A dead or missing
+		session leaves ``self.client`` None and ``auth_state`` at
+		``needs_login`` so the QR login surface can recover it in place.
+		"""
+		if self.client is not None:
+			return True
+		try:
+			self.client = self._build_client()
+			self.auth_state = "authed"
+			self.last_auth_error = None
+			return True
+		except AuthExpired as error:
+			self.client = None
+			self.auth_state = "needs_login"
+			self.last_auth_error = str(error)[:240]
+			return False
+		except Exception as error:  # noqa: BLE001 - a transient build failure must not crash the daemon
+			self.client = None
+			self.auth_state = "needs_login"
+			self.last_auth_error = str(error)[:240]
+			LOG.warning("构建 LarkAgentX 客户端失败,进入 needs_login: %s", error)
+			return False
+
+	def _on_qr_login_success(self, _user_id: str) -> None:
+		"""QR thread → event loop: force a reconnect with the fresh session."""
+		loop = self._loop
+		if loop is not None:
+			loop.call_soon_threadsafe(self._signal_relogin)
+
+	def _signal_relogin(self) -> None:
+		"""Runs in the event loop. Wake the supervisor and drop any live WS."""
+		if self._relogin_event is not None:
+			self._relogin_event.set()
+		client = self.client
+		active_ws = getattr(client, "active_ws", None) if client else None
+		if active_ws is not None:
+			asyncio.create_task(self._close_active_ws(active_ws))
+
+	async def _close_active_ws(self, active_ws: Any) -> None:
+		try:
+			await active_ws.close()
+		except Exception as error:  # noqa: BLE001 - the connect loop reconnects regardless
+			LOG.debug("关闭旧 WebSocket 以重连时出错(忽略): %s", error)
+
+	def auth_status(self) -> dict[str, Any]:
+		"""Credential/login state for the health page and the login UI.
+
+		Never returns any cookie or token value — only whether a session is
+		present, how old it is, and the live login state.
+		"""
+		saved_at = float(getattr(self.auth, "saved_at", 0) or 0)
+		age_hours = round((time.time() - saved_at) / 3600, 1) if saved_at else None
+		return {
+			"state": self.auth_state,
+			"logged_in": self.client is not None,
+			"has_credentials": bool(getattr(self.auth, "cookies", None)),
+			"user_id": str(getattr(self.auth, "user_id", "") or "") or None,
+			"credential_age_hours": age_hours,
+			"last_error": self.last_auth_error,
+			"qr_login": self.qr_login.stats(),
+		}
 
 	def on_websocket_connected(self) -> None:
 		"""Mark the socket healthy at handshake time, before the first event."""
@@ -1057,6 +1168,7 @@ class Bridge:
 			"release": os.environ.get("LARKX_BRIDGE_RELEASE") or None,
 			"profile": self.profile,
 			"auth_path": str(self.auth_path),
+			"auth": self.auth_status(),
 			"owner_lock": {"held": bool(self.owner_lock.held), "path": str(self.owner_lock.path)},
 			"event_spool": {**self.event_spool.stats(), "path": str(self.event_spool.path), "replay_seconds": self.spool_replay_seconds, "replay_count": self.spool_replay_count, "replay_error_count": self.spool_replay_error_count, "last_replay_at": self.last_spool_replay_at, "last_error": self.last_spool_replay_error},
 			"history_archive": {**self.history_archive.stats(), "path": str(self.history_archive.path)},
@@ -1325,6 +1437,10 @@ class Bridge:
 		WebSocket event, so image decryption, webhook fan-out and ledger idempotency
 		remain centralized in the adapter.
 		"""
+		if self.client is None:
+			return {"status": "skipped", "reason": "needs_login",
+			        "message": "尚未登录,无法读取私有历史", "recovered": 0, "forwarded": 0,
+			        "duplicates": 0, "filtered": 0, "failed": 0, "requested": 0, "sources": []}
 		requests = self._private_requests_from_payload(payload)
 		result: dict[str, Any] = {
 			"status": "completed", "transport": "larkagentx_private_history", "reason": reason,
@@ -1407,6 +1523,8 @@ class Bridge:
 
 	async def _repair_chat_tail(self, chat_id: str, reason: str) -> dict[str, Any] | None:
 		"""Pull the next bounded position range after one chat's durable cursor."""
+		if self.client is None:
+			return None
 		stats = await asyncio.to_thread(self.event_spool.position_stats)
 		cursor = stats.get(chat_id, {}) if isinstance(stats, dict) else {}
 		last_position = int(cursor.get("last_position") or 0)
@@ -1563,6 +1681,8 @@ class Bridge:
 		chat_id = str(payload.get("chat_id", "")).strip()
 		text = str(payload.get("text", "")).strip()
 		root_id = str(payload.get("root_id", "")).strip() or None
+		if self.client is None:
+			raise RuntimeError("尚未登录(needs_login),无法发送;请先完成扫码登录")
 		if chat_id not in self.send_chats:
 			raise ValueError("目标会话不在 LARKX_SEND_CHAT_IDS 白名单中")
 		if not text or len(text) > 10_000:
@@ -1838,11 +1958,25 @@ class Bridge:
 			await asyncio.sleep(self.spool_replay_seconds)
 
 	async def listen_forever(self) -> None:
+		self._loop = asyncio.get_running_loop()
+		self._relogin_event = asyncio.Event()
 		spool_task = asyncio.create_task(self.replay_spool_forever())
 		route_catalog_task = asyncio.create_task(self.refresh_route_catalog_forever()) if self.dynamic_route_discovery and self.route_catalog_url else None
 		tail_repair_task = asyncio.create_task(self.private_tail_repair_forever()) if self.private_tail_repair_enabled else None
 		try:
 			while True:
+				if not self._ensure_client():
+					# No valid session: stay up, serve the QR login surface, and
+					# wait for a scan (or an out-of-band credential refresh) rather
+					# than crashing the daemon as the old code did on AuthExpired.
+					self.websocket_state = "needs_login"
+					self._relogin_event.clear()
+					try:
+						await asyncio.wait_for(self._relogin_event.wait(), timeout=60)
+					except asyncio.TimeoutError:
+						pass
+					continue
+				forced_relogin = False
 				try:
 					self.websocket_attempt_count += 1
 					self.websocket_state = "connecting"
@@ -1851,13 +1985,25 @@ class Bridge:
 					self.websocket_state = "ended"
 					LOG.warning("LarkAgentX websocket ended; reconnecting in 10 seconds")
 				except AuthExpired:
-					self.websocket_state = "auth_expired"
-					LOG.error("LarkAgentX credentials expired; run lark auth qr or lark auth import")
-					raise
+					# A session that dies mid-run no longer kills the process; it
+					# drops to needs_login so a QR scan can restore it live.
+					self.websocket_state = "needs_login"
+					self.auth_state = "needs_login"
+					self.last_auth_error = "websocket reported the session expired"
+					self.client = None
+					LOG.error("LarkAgentX 会话失效,等待扫码重新登录")
+					continue
 				except Exception as error:
 					self.websocket_state = "error"
 					LOG.warning("LarkAgentX websocket failed: %s; reconnecting in 10 seconds", error)
-				await asyncio.sleep(10)
+				if self._relogin_event.is_set():
+					# A QR re-login arrived: drop the client so the next loop
+					# rebuilds it with the fresh session, and reconnect at once.
+					self._relogin_event.clear()
+					self.client = None
+					forced_relogin = True
+				if not forced_relogin:
+					await asyncio.sleep(10)
 		finally:
 			spool_task.cancel()
 			if route_catalog_task:

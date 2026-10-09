@@ -225,5 +225,72 @@ class WsNotifyBridgeTests(unittest.IsolatedAsyncioTestCase):
 		self.assertEqual(instance.ws_notify_count, 1)
 
 
+@unittest.skipUnless(bridge is not None, f"supervisor larkx dependency unavailable: {BRIDGE_IMPORT_ERROR}")
+class AuthStateMachineTests(unittest.TestCase):
+	"""The bridge must survive a dead/expired session instead of crashing, so
+	the QR login surface it hosts can recover it in place."""
+
+	class _Expired(Exception):
+		pass
+
+	def make_bridge(self, build_outcomes):
+		instance = bridge.Bridge.__new__(bridge.Bridge)
+		instance.client = None
+		instance.auth_state = "needs_login"
+		instance.last_auth_error = None
+		self._outcomes = list(build_outcomes)
+
+		def build():
+			outcome = self._outcomes.pop(0)
+			if isinstance(outcome, Exception):
+				raise outcome
+			return outcome
+
+		instance._build_client = build
+		return instance
+
+	def test_ensure_client_enters_needs_login_on_expiry_without_raising(self):
+		import larkx.auth
+		instance = self.make_bridge([larkx.auth.AuthExpired("session dead")])
+		self.assertFalse(instance._ensure_client())
+		self.assertIsNone(instance.client)
+		self.assertEqual(instance.auth_state, "needs_login")
+		self.assertIn("session dead", instance.last_auth_error)
+
+	def test_ensure_client_recovers_once_credentials_are_valid(self):
+		import larkx.auth
+		sentinel = object()
+		instance = self.make_bridge([larkx.auth.AuthExpired("dead"), sentinel])
+		self.assertFalse(instance._ensure_client())
+		self.assertTrue(instance._ensure_client())
+		self.assertIs(instance.client, sentinel)
+		self.assertEqual(instance.auth_state, "authed")
+		self.assertIsNone(instance.last_auth_error)
+
+	def test_ensure_client_is_a_noop_when_already_built(self):
+		sentinel = object()
+		instance = self.make_bridge([])
+		instance.client = sentinel
+		self.assertTrue(instance._ensure_client())
+		self.assertIs(instance.client, sentinel)
+
+	def test_auth_status_never_leaks_credential_values(self):
+		import time as _time
+		instance = bridge.Bridge.__new__(bridge.Bridge)
+		instance.client = None
+		instance.auth_state = "needs_login"
+		instance.last_auth_error = None
+		instance.auth = type("A", (), {"saved_at": _time.time() - 3600, "cookies": {"session": "SECRET"},
+		                               "user_id": "u1"})()
+		instance.qr_login = type("Q", (), {"stats": lambda _self: {"login_count": 0}})()
+		status = instance.auth_status()
+		self.assertEqual(status["state"], "needs_login")
+		self.assertFalse(status["logged_in"])
+		self.assertTrue(status["has_credentials"])
+		self.assertEqual(status["user_id"], "u1")
+		self.assertAlmostEqual(status["credential_age_hours"], 1.0, delta=0.2)
+		self.assertNotIn("SECRET", json.dumps(status))
+
+
 if __name__ == "__main__":
 	unittest.main()
