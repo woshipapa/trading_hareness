@@ -12,7 +12,7 @@
 | Python modules under `app/` | 519 |
 | HTTP router modules | 48 |
 | Alembic migrations | 109 |
-| Frontend source files | 53 |
+| Frontend source files | 56 |
 
 ## Domain naming inventory
 
@@ -131,6 +131,8 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/research/analyst-chart.ts`
 - `frontend/src/research/remote-runtime.test.ts`
 - `frontend/src/research/remote-runtime.ts`
+- `frontend/src/research/session-radar.test.ts`
+- `frontend/src/research/session-radar.ts`
 - `frontend/src/research/strategy-evidence.test.ts`
 - `frontend/src/research/strategy-evidence.ts`
 - `frontend/src/style.css`
@@ -144,6 +146,7 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/views/research/QualityTab.vue`
 - `frontend/src/views/research/RemoteRealtimeTab.vue`
 - `frontend/src/views/research/ResearchOverviewTab.vue`
+- `frontend/src/views/research/SessionRadarTab.vue`
 - `frontend/src/views/research/StockStudyTab.vue`
 - `frontend/src/views/research/StrategyTab.vue`
 
