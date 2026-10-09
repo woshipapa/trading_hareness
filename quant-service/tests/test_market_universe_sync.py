@@ -1,9 +1,12 @@
+"""The authoritative all-A listing, from Fuyao's A-share ticker list (decision 0005)."""
+
 import asyncio
 import unittest
 from datetime import date
 from types import SimpleNamespace
 
 from app import market_universe_sync
+from app.market_universe_sync import PAGE_SIZE, listed_rows
 
 
 class _Connection:
@@ -32,85 +35,91 @@ class _Database:
         return _Ctx()
 
 
-class ProviderCallError(RuntimeError):
-    pass
-
-
 class ExecutorSaturated(RuntimeError):
     pass
 
 
-def _rows(count):
-    return [{"ts_code": f"{600000 + index}.SH", "name": f"n{index}", "list_date": "19910403"}
-            for index in range(count)]
+def _ticker(code, *, asset_type="a-share", list_date="1991-04-03", end_date=None):
+    return {"thscode": code, "ticker": code[:6], "name": f"n{code[:6]}", "exchange": code[-2:],
+            "asset_type": asset_type, "list_date": list_date, "end_date": end_date}
+
+
+def _market(sh=2400, sz=2900, bj=280):
+    # Shanghai equity codes start 600/601/603 (602 is not one), so spread across them.
+    shanghai = [f"{prefix}{index:03d}.SH" for prefix in ("600", "601", "603") for index in range(1000)]
+    return ([_ticker(code) for code in shanghai[:sh]]
+            + [_ticker(f"{index + 1:06d}.SZ") for index in range(sz)]
+            + [_ticker(f"{920000 + index}.BJ") for index in range(bj)])
+
+
+class ListedRowsTests(unittest.TestCase):
+    def test_only_listed_a_share_equities_become_stock_basic_rows(self):
+        rows = listed_rows([
+            _ticker("600000.SH", list_date="1999-11-10"),
+            _ticker("883970.TI", asset_type="a-share-index"),
+            _ticker("200028.SZ"),
+            _ticker("600001.SH", end_date="2026-09-30"),
+            _ticker("600002.SH", end_date="2026-12-31"),
+        ], date(2026, 10, 9))
+        self.assertEqual(sorted(rows), ["600000.SH", "600002.SH"])
+        self.assertEqual(rows["600000.SH"]["list_date"], "19991110", "the YYYYMMDD form the normalizer reads")
+        self.assertEqual(rows["600002.SH"]["delist_date"], "20261231")
 
 
 class MarketUniverseSyncTests(unittest.TestCase):
     """instruments.list_date comes from here, and the volume baseline needs it."""
 
-    def _run(self, *, rows, provider="auto", minimum_rows=5000):
-        seen = {}
+    def _run(self, *, items, minimum_rows=5000, error=None):
+        requested = []
 
-        async def call_tushare_api(api_name, params, fields, preference, **kwargs):
-            seen["call"] = {"api_name": api_name, "params": params, "fields": fields, **kwargs}
-            return SimpleNamespace(rows=rows, provider=SimpleNamespace(key="tushare_super_get"),
-                                   failed_providers=())
+        async def fetch(capability, params):
+            requested.append((capability, params))
+            if error is not None:
+                raise error
+            offset = params["offset"]
+            return {"item": items[offset:offset + params["limit"]]}
 
         async def run_database_blocking(action, *args, **kwargs):
             return action(*args) if args else action()
 
         connection = _Connection()
         result = asyncio.run(market_universe_sync.sync(
-            SimpleNamespace(universe_key="all_a", provider=provider, minimum_rows=minimum_rows),
-            provider_candidates=lambda *_args: [SimpleNamespace(key="tushare_super_get")],
-            cn_date=lambda: date(2026, 9, 18),
-            call_tushare_api=call_tushare_api,
-            looks_like_response_header=lambda _rows: False,
-            persist_tushare_rows=lambda *_args, **_kwargs: len(rows),
-            run_database_blocking=run_database_blocking,
-            persist_tushare_fetch_blocked=lambda *_args, **_kwargs: None,
-            db=_Database(connection),
-            safe_error_detail=lambda text, _limit: text,
-            provider_call_error=ProviderCallError,
-            executor_saturated_error=ExecutorSaturated,
+            SimpleNamespace(universe_key="all_a", provider="auto", minimum_rows=minimum_rows),
+            fetch=fetch, cn_date=lambda: date(2026, 10, 9),
+            persist_rows=lambda _connection, api_name, _key, rows, provider, _at: len(rows),
+            run_database_blocking=run_database_blocking, db=_Database(connection),
+            safe_error_detail=lambda text, _limit: text, executor_saturated_error=ExecutorSaturated,
             record_provider_success=lambda *_args, **_kwargs: None,
             record_provider_failure=lambda *_args, **_kwargs: None,
-            record_provider_api_capability=lambda *_args, **_kwargs: None,
         ))
-        return result, seen, connection
+        return result, requested, connection
 
-    def test_the_universe_is_requested_in_pages_and_must_be_complete(self):
-        # One response for ~5,600 rows is refused, which is why this capability
-        # had never succeeded and every instrument carried a null list_date.
-        _result, seen, _connection = self._run(rows=_rows(5565))
-        call = seen["call"]
-        self.assertEqual(call["api_name"], "stock_basic")
-        self.assertTrue(call["paginate"])
-        self.assertTrue(call["require_complete"])
-        self.assertLessEqual(call["page_size"], 3000)
-        self.assertGreaterEqual(call["max_pages"] * call["page_size"], call["max_rows"])
-
-    def test_list_date_is_among_the_requested_fields(self):
-        # The market volume baseline separates index series from listed names
-        # by this column alone; without it the leader-flow market gate closes.
-        _result, seen, _connection = self._run(rows=_rows(5565))
-        self.assertIn("list_date", seen["call"]["fields"])
-
-    def test_a_complete_cross_section_is_accepted(self):
-        result, _seen, _connection = self._run(rows=_rows(5565))
+    def test_the_whole_list_is_paged_to_its_end(self):
+        result, requested, connection = self._run(items=_market())
         self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["imported"], 5580)
+        self.assertEqual([params["offset"] for _capability, params in requested], [0, 1000, 2000, 3000, 4000, 5000])
+        self.assertTrue(all(params["asset_type"] == "a-share" and params["limit"] == PAGE_SIZE
+                            for _capability, params in requested))
+        retired = [values for sql, values in connection.statements if sql.startswith("UPDATE quant.universe_members SET enabled=false")]
+        self.assertEqual(len(retired[0][1]), 5580, "members absent from a complete listing are retired")
 
-    def test_a_short_cross_section_is_reported_blocked_rather_than_stored(self):
-        # A partial universe would silently shrink every downstream scan.
-        result, _seen, _connection = self._run(rows=_rows(12))
+    def test_a_short_listing_changes_nothing(self):
+        result, _requested, connection = self._run(items=_market(sh=1000, sz=1000, bj=100))
         self.assertEqual(result["status"], "blocked")
-        self.assertIn("12 valid active symbols", result["reason"])
+        self.assertIn("expected at least 5000", result["reason"])
+        self.assertFalse([sql for sql, _ in connection.statements if "universe_members" in sql])
 
-    def test_symbols_that_are_not_a_share_codes_are_dropped(self):
-        rows = _rows(5565) + [{"ts_code": "HSI", "name": "index", "list_date": ""}]
-        result, _seen, _connection = self._run(rows=rows)
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["imported"], 5565)
+    def test_a_listing_missing_an_exchange_changes_nothing(self):
+        result, _requested, connection = self._run(items=_market(sh=2600, sz=3000, bj=0))
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("['BJ']", result["reason"])
+        self.assertFalse([sql for sql, _ in connection.statements if "universe_members" in sql])
+
+    def test_a_saturated_executor_is_blocked_without_a_provider_failure(self):
+        result, _requested, connection = self._run(items=[], error=ExecutorSaturated("local capacity"))
+        self.assertEqual(result["status"], "blocked")
+        self.assertFalse([sql for sql, _ in connection.statements if "status='failed'" in sql])
 
 
 if __name__ == "__main__":

@@ -1,57 +1,94 @@
-"""Dependency-injected active A-share universe synchronization."""
+"""Dependency-injected active A-share universe synchronization.
+
+The authoritative listing behind ``all_a`` - the one listing that may also
+*remove* members - is Fuyao's ``ticker_list`` (``asset_type=a-share``).  It
+replaced Tushare's ``stock_basic`` on 2026-10-09 (decision 0005).  The Longhu
+close only ever adds members; this listing is what retires a delisted name
+and what dates every instrument's ``list_date``.
+
+``list_date`` is not cosmetic: the market volume baseline discriminates index
+series from listed names by exactly that column, so with none of them dated
+the baseline was null, the index volume ratio was null, and the leader-flow
+market gate rejected all 250 pool members for incomplete fields.
+
+Because this listing removes members, a short or lopsided answer must never
+be promoted: the whole list is paged to its end, and it must reach the
+request's ``minimum_rows`` and span all three exchanges before anything is
+written.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
-import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from psycopg.types.json import Json
 
+from .datasources.http import ashare_symbol
 from .universe_history import sync_universe_membership_history
+
+PROVIDER_KEY = "fuyao_ths"
+PAGE_SIZE = 1000
+MAX_PAGES = 20
+REQUIRED_EXCHANGES = frozenset({"SH", "SZ", "BJ"})
+
+
+def _day(value: Any) -> date | None:
+    text = str(value or "").strip()[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def listed_rows(items: list[dict[str, Any]], today: date) -> dict[str, dict[str, Any]]:
+    """``stock_basic``-shaped rows for the A-share equities still listed on ``today``."""
+    by_symbol: dict[str, dict[str, Any]] = {}
+    for item in items:
+        symbol = ashare_symbol(item.get("thscode"))
+        if symbol is None or str(item.get("asset_type") or "") != "a-share":
+            continue
+        listed, ended = _day(item.get("list_date")), _day(item.get("end_date"))
+        if ended is not None and ended <= today:
+            continue
+        by_symbol[symbol] = {
+            "ts_code": symbol, "name": item.get("name"), "exchange": symbol[-2:], "industry": None,
+            "list_date": listed.strftime("%Y%m%d") if listed else None,
+            "delist_date": ended.strftime("%Y%m%d") if ended else None,
+        }
+    return by_symbol
+
+
+async def fetch_listing(fetch: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Every page of the A-share ticker list; a list that does not end is an error, not a result."""
+    items: list[dict[str, Any]] = []
+    for page in range(MAX_PAGES):
+        data = await fetch("ticker_list", {"asset_type": "a-share", "limit": PAGE_SIZE, "offset": page * PAGE_SIZE})
+        batch = [dict(item) for item in (data or {}).get("item") or [] if isinstance(item, dict)]
+        items.extend(batch)
+        if len(batch) < PAGE_SIZE:
+            return items
+    raise RuntimeError(f"Fuyao ticker_list did not end within {MAX_PAGES} pages of {PAGE_SIZE}")
 
 
 async def sync(
     request: Any,
     *,
-    provider_candidates: Callable[..., list[Any]],
+    fetch: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
     cn_date: Callable[[], Any],
-    call_tushare_api: Callable[..., Awaitable[Any]],
-    looks_like_response_header: Callable[[list[dict[str, Any]]], bool],
-    persist_tushare_rows: Callable[..., int],
+    persist_rows: Callable[..., int],
     run_database_blocking: Callable[..., Awaitable[Any]],
-    persist_tushare_fetch_blocked: Callable[..., Any],
     db: Any,
     safe_error_detail: Callable[[str, int], str],
-    provider_call_error: type[Exception],
     executor_saturated_error: type[Exception],
     record_provider_success: Callable[..., Any],
     record_provider_failure: Callable[..., Any],
-    record_provider_api_capability: Callable[..., Any],
 ) -> dict[str, Any]:
-    """Refresh ``all_a`` from the complete paginated stock_basic cross-section.
-
-    ``stock_basic`` for list_status=L is ~5,600 rows, and asking for it in one
-    response is refused: the peer's stock_basic_all_a capability had never
-    recorded a success, which is why every row in ``quant.instruments`` carried
-    a null ``list_date``.  That null is not cosmetic - the market volume
-    baseline discriminates index series from listed names by exactly that
-    column, so with none of them dated the baseline was null, the index volume
-    ratio was null, and the leader-flow market gate rejected all 250 pool
-    members for incomplete fields.
-    """
-    candidates = provider_candidates("stock_basic", request.provider)
-    if not candidates:
-        return {"status": "blocked", "reason": "no configured provider supports stock_basic", "universe_key": request.universe_key}
+    """Refresh ``all_a`` from the complete A-share listing, or change nothing."""
     exchange_date = cn_date()
-    params = {"exchange": "", "list_status": "L"}
-    fields = "ts_code,symbol,name,area,industry,market,list_date,delist_date,exchange,is_hs"
-    # Under the REST adapter's own 3,000 cap, and wide enough that the whole
-    # active universe lands in three pages.
-    page_size, max_rows, max_pages = 2000, 12000, 8
     request_key = hashlib.sha256(json.dumps({"capability": "stock_basic_all_a", "date": str(exchange_date), "provider": request.provider}, sort_keys=True).encode()).hexdigest()
 
     def prepare_run() -> dict[str, Any] | None:
@@ -64,7 +101,7 @@ async def sync(
                    VALUES(%s,'stock_basic_all_a',%s,%s,'running',1,now(),%s)
                    ON CONFLICT(request_key) DO UPDATE SET status='running',attempt_count=quant.fetch_runs.attempt_count+1,
                      started_at=now(),finished_at=null,error_class=null,error_message=null""",
-                (candidates[0].key, exchange_date, request_key, Json({"universe_key": request.universe_key, "minimum_rows": request.minimum_rows})),
+                (PROVIDER_KEY, exchange_date, request_key, Json({"universe_key": request.universe_key, "minimum_rows": request.minimum_rows})),
             )
         return None
 
@@ -73,71 +110,56 @@ async def sync(
         return unchanged
     provider_started_at = asyncio.get_running_loop().time()
     try:
-        result = await call_tushare_api(
-            "stock_basic", params, fields, request.provider,
-            paginate=True, page_size=page_size, max_rows=max_rows,
-            max_pages=max_pages, require_complete=True,
-        )
-        rows = result.rows
-        if looks_like_response_header(rows):
-            raise provider_call_error("provider returned a header row instead of market reference data")
-        valid_by_symbol = {
-            str(row["ts_code"]).upper(): row for row in rows
-            if re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", str(row.get("ts_code") or "").upper())
-        }
+        valid_by_symbol = listed_rows(await fetch_listing(fetch), exchange_date)
         valid_rows = list(valid_by_symbol.values())
         if len(valid_rows) < request.minimum_rows:
-            raise provider_call_error(f"stock_basic returned {len(valid_rows)} valid active symbols; expected at least {request.minimum_rows}")
+            raise RuntimeError(f"ticker_list returned {len(valid_rows)} listed A-share symbols; expected at least {request.minimum_rows}")
+        missing = REQUIRED_EXCHANGES - {symbol[-2:] for symbol in valid_by_symbol}
+        if missing:
+            raise RuntimeError(f"ticker_list has no {sorted(missing)} symbols; a listing missing an exchange would retire it")
         observed_at = datetime.now(timezone.utc)
         provider_latency_ms = round((asyncio.get_running_loop().time() - provider_started_at) * 1000)
 
         def persist_result() -> int:
             with db.transaction() as connection:
-                normalized = persist_tushare_rows(connection, "stock_basic", request_key, valid_rows, result.provider.key, observed_at)
-                for row in valid_rows:
-                    symbol = str(row["ts_code"]).upper()
+                normalized = persist_rows(connection, "stock_basic", request_key, valid_rows, PROVIDER_KEY, observed_at)
+                for symbol in valid_by_symbol:
                     connection.execute(
                         """INSERT INTO quant.universe_members(universe_key,symbol,enabled,priority,source,metadata,updated_at)
                            VALUES(%s,%s,true,1000,'stock-basic-all-a',%s,now())
                            ON CONFLICT(universe_key,symbol) DO UPDATE SET enabled=true,source=EXCLUDED.source,metadata=EXCLUDED.metadata,updated_at=now()""",
-                        (request.universe_key, symbol, Json({"provider": result.provider.key, "reference_date": str(exchange_date)})),
+                        (request.universe_key, symbol, Json({"provider": PROVIDER_KEY, "reference_date": str(exchange_date)})),
                     )
                 connection.execute(
                     """UPDATE quant.universe_members SET enabled=false,updated_at=now()
                          WHERE universe_key=%s AND source='stock-basic-all-a' AND enabled
                            AND NOT symbol = ANY(%s)""",
-                    (request.universe_key, [str(row["ts_code"]).upper() for row in valid_rows]),
+                    (request.universe_key, list(valid_by_symbol)),
                 )
                 sync_universe_membership_history(
                     connection, request.universe_key, exchange_date, valid_by_symbol,
-                    source=f"stock-basic-all-a:{result.provider.key}", priority=1000,
+                    source=f"stock-basic-all-a:{PROVIDER_KEY}", priority=1000,
                 )
                 connection.execute("UPDATE quant.fetch_runs SET status='completed',row_count=%s,finished_at=now() WHERE request_key=%s", (len(valid_rows), request_key))
-                record_provider_success(connection, result.provider.key, "stock_basic_all_a", len(valid_rows), provider_latency_ms)
-                record_provider_api_capability(connection, result.provider.key, "stock_basic", "verified", len(valid_rows), "Full active A-share reference universe refreshed.")
-                for provider_key, error in result.failed_providers:
-                    record_provider_failure(connection, provider_key, "stock_basic", error, provider_latency_ms)
-                    record_provider_api_capability(connection, provider_key, "stock_basic", "failed", note=error)
+                record_provider_success(connection, PROVIDER_KEY, "stock_basic_all_a", len(valid_rows), provider_latency_ms)
             return normalized
 
         normalized = await run_database_blocking(persist_result)
         return {"status": "completed", "universe_key": request.universe_key, "imported": len(valid_rows), "normalized_rows": normalized,
-                "provider": result.provider.key, "request_key": request_key}
+                "provider": PROVIDER_KEY, "request_key": request_key}
     except executor_saturated_error as error:
-        await run_database_blocking(persist_tushare_fetch_blocked, request_key, error)
         return {"status": "blocked", "universe_key": request.universe_key, "reason": safe_error_detail(str(error), 500), "request_key": request_key}
     except Exception as error:  # noqa: BLE001 - provider failures are persisted and returned safely
         failure_latency_ms = round((asyncio.get_running_loop().time() - provider_started_at) * 1000)
+        detail = safe_error_detail(str(error), 1000)
 
         def persist_failure() -> None:
             with db.transaction() as connection:
-                detail = safe_error_detail(str(error), 1000)
                 connection.execute("UPDATE quant.fetch_runs SET status='failed',finished_at=now(),error_class='provider_error',error_message=%s WHERE request_key=%s", (detail, request_key))
-                record_provider_failure(connection, candidates[0].key, "stock_basic_all_a", detail, failure_latency_ms)
-                record_provider_api_capability(connection, candidates[0].key, "stock_basic", "failed", note=detail)
+                record_provider_failure(connection, PROVIDER_KEY, "stock_basic_all_a", detail, failure_latency_ms)
 
         await run_database_blocking(persist_failure)
         return {"status": "blocked", "universe_key": request.universe_key, "reason": safe_error_detail(str(error), 500), "request_key": request_key}
 
 
-__all__ = ["sync"]
+__all__ = ["MAX_PAGES", "PAGE_SIZE", "PROVIDER_KEY", "REQUIRED_EXCHANGES", "fetch_listing", "listed_rows", "sync"]

@@ -158,13 +158,11 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         source_executor.assert_not_awaited()
 
     def test_market_universe_sync_checks_its_ledger_in_database_executor(self):
-        provider = MagicMock(key="tushare_super_sdk")
         unchanged = {"status": "unchanged", "universe_key": "all_a", "imported": 1, "request_key": "cached"}
 
         async def check() -> tuple[dict[str, object], AsyncMock]:
             blocking = AsyncMock(return_value=unchanged)
-            with patch("app.main.provider_candidates", return_value=[provider]), \
-                 patch("app.main.longhu_vendor_configured", return_value=False), \
+            with patch("app.main.longhu_vendor_configured", return_value=False), \
                  patch("app.main.run_database_blocking", new=blocking):
                 result = await sync_market_universe(MarketUniverseSyncRequest())
             return result, blocking
@@ -173,42 +171,32 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(result, unchanged)
         self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], ["prepare_run"])
 
-    def test_full_market_daily_sync_checks_its_ledger_in_database_executor(self):
-        provider = MagicMock(key="tushare_super_sdk")
-        unchanged = {"status": "unchanged", "trade_date": "2026-08-11", "imported": 1, "request_key": "cached"}
-
+    def test_full_market_daily_without_longhu_is_disabled_without_touching_the_database(self):
         async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(return_value=unchanged)
-            with patch("app.main.provider_candidates", return_value=[provider]), \
-                 patch("app.main.longhu_vendor_configured", return_value=False), \
+            blocking = AsyncMock()
+            with patch("app.main.longhu_vendor_configured", return_value=False), \
                  patch("app.main.run_database_blocking", new=blocking):
                 result = await sync_full_market_daily(FullMarketDailySyncRequest())
             return result, blocking
 
         result, blocking = asyncio.run(check())
-        self.assertEqual(result, unchanged)
-        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], ["prepare_run"])
+        self.assertEqual(result["status"], "disabled")
+        self.assertIn("decision 0005", result["reason"])
+        blocking.assert_not_awaited()
 
-    def test_full_market_control_plane_syncs_keep_local_capacity_out_of_provider_health(self):
-        provider = MagicMock(key="tushare_super_get")
-
-        async def check() -> tuple[dict[str, object], dict[str, object], AsyncMock]:
-            blocking = AsyncMock(side_effect=[None, None, None, None])
-            saturated = AsyncMock(side_effect=ExecutorSaturatedError("super_get blocking executor is saturated"))
-            with patch("app.main.provider_candidates", return_value=[provider]), \
-                 patch("app.main.longhu_vendor_configured", return_value=False), \
+    def test_a_saturated_universe_listing_keeps_local_capacity_out_of_provider_health(self):
+        async def check() -> tuple[dict[str, object], AsyncMock]:
+            blocking = AsyncMock(side_effect=[None])
+            saturated = AsyncMock(side_effect=ExecutorSaturatedError("public blocking executor is saturated"))
+            with patch("app.main.longhu_vendor_configured", return_value=False), \
                  patch("app.main.run_database_blocking", new=blocking), \
-                 patch("app.main.call_tushare_api", new=saturated):
+                 patch("app.main.fetch_fuyao_data", new=saturated):
                 universe = await sync_market_universe(MarketUniverseSyncRequest())
-                daily = await sync_full_market_daily(FullMarketDailySyncRequest())
-            return universe, daily, blocking
+            return universe, blocking
 
-        universe, daily, blocking = asyncio.run(check())
+        universe, blocking = asyncio.run(check())
         self.assertEqual(universe["status"], "blocked")
-        self.assertEqual(daily["status"], "blocked")
-        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
-            "prepare_run", "persist_tushare_fetch_blocked", "prepare_run", "persist_tushare_fetch_blocked",
-        ])
+        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], ["prepare_run"])
 
     def test_ths_sector_catalog_uses_database_executor_for_raw_rows_and_catalog(self):
         outcome = {"status": "completed", "request_key": "ths-index", "provider": "tushare_super_sdk"}

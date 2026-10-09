@@ -625,7 +625,6 @@ from .akshare_probe_service import run as run_akshare_probe_isolated
 from .recommendation_generation import generate as generate_recommendations_isolated
 from .baostock_daily_sync import fetch_rows as fetch_baostock_rows_isolated, sync as sync_baostock_isolated
 from .market_universe_sync import sync as sync_market_universe_isolated
-from .full_market_daily_sync import sync as sync_full_market_daily_isolated
 from .longhu_market_repository import persisted_close_context as read_longhu_close_context
 from .longhu_market_service import (
     owner_longhu_source_factory,
@@ -1407,112 +1406,48 @@ def persist_tushare_rows(connection: Any, api_name: str, request_key: str, rows:
     return normalize_tushare_rows(connection, api_name, rows, available_at, provider_key)
 
 
+async def _longhu_full_market_close(trade_date: date) -> dict[str, Any]:
+    return await sync_longhu_full_market_close(
+        trade_date, db=db, run_public_blocking=run_akshare_blocking,
+        run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
+        persist_flow_rows=persist_stock_money_flow_rows, source_factory=longhu_full_market_source_factory(),
+    )
+
+
 async def sync_market_universe(request: MarketUniverseSyncRequest) -> dict[str, Any]:
-    """Compatibility entry point backed by the isolated universe synchronizer."""
-    if request.provider == "auto" and longhu_full_market_enabled():
-        result = await sync_longhu_full_market_close(
-            cn_today(), db=db, run_public_blocking=run_akshare_blocking,
-            run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
-            persist_flow_rows=persist_stock_money_flow_rows,
-            source_factory=longhu_full_market_source_factory(),
+    """The Longhu close adds members; the Fuyao A-share listing is the one that can also retire them."""
+    async def listing() -> dict[str, Any]:
+        return await sync_market_universe_isolated(
+            request, fetch=fetch_fuyao_data, cn_date=cn_today, persist_rows=persist_tushare_rows,
+            run_database_blocking=run_database_blocking, db=db, safe_error_detail=safe_error_detail,
+            executor_saturated_error=ExecutorSaturatedError, record_provider_success=record_provider_success,
+            record_provider_failure=record_provider_failure,
         )
+
+    if request.provider == "auto" and longhu_full_market_enabled():
+        result = await _longhu_full_market_close(cn_today())
         if result.get("status") in {"completed", "unchanged"}:
             return {**result, "universe_key": request.universe_key,
                     "members": int(result.get("daily_rows") or result.get("imported") or 0)}
-        # Longhu is the preferred licensed close source, but a partial vendor
-        # cross-section must not block the already audited isolated provider
-        # chain.  Keep the failed attempt in the receipt for diagnosis.
-        fallback = await sync_market_universe_isolated(
-            request,
-            provider_candidates=provider_candidates,
-            cn_date=cn_today,
-            call_tushare_api=call_tushare_api,
-            looks_like_response_header=looks_like_response_header,
-            persist_tushare_rows=persist_tushare_rows,
-            run_database_blocking=run_database_blocking,
-            persist_tushare_fetch_blocked=persist_tushare_fetch_blocked,
-            db=db,
-            safe_error_detail=safe_error_detail,
-            provider_call_error=ProviderCallError,
-            executor_saturated_error=ExecutorSaturatedError,
-            record_provider_success=record_provider_success,
-            record_provider_failure=record_provider_failure,
-            record_provider_api_capability=record_provider_api_capability,
-        )
-        return {**fallback, "universe_key": request.universe_key,
-                "longhu_attempt": result,
+        # A partial vendor cross-section must not block the listing; the
+        # failed attempt stays in the receipt for diagnosis.
+        fallback = await listing()
+        return {**fallback, "universe_key": request.universe_key, "longhu_attempt": result,
                 "members": int(fallback.get("members") or fallback.get("imported") or 0)}
-    return await sync_market_universe_isolated(
-        request,
-        provider_candidates=provider_candidates,
-        cn_date=cn_today,
-        call_tushare_api=call_tushare_api,
-        looks_like_response_header=looks_like_response_header,
-        persist_tushare_rows=persist_tushare_rows,
-        run_database_blocking=run_database_blocking,
-        persist_tushare_fetch_blocked=persist_tushare_fetch_blocked,
-        db=db,
-        safe_error_detail=safe_error_detail,
-        provider_call_error=ProviderCallError,
-        executor_saturated_error=ExecutorSaturatedError,
-        record_provider_success=record_provider_success,
-        record_provider_failure=record_provider_failure,
-        record_provider_api_capability=record_provider_api_capability,
-    )
+    return await listing()
 
 
 async def sync_full_market_daily(request: FullMarketDailySyncRequest) -> dict[str, Any]:
-    """Compatibility entry point backed by isolated full-market sync."""
-    if request.provider == "auto" and longhu_full_market_enabled():
-        result = await sync_longhu_full_market_close(
-            request.trade_date or cn_today(), db=db, run_public_blocking=run_akshare_blocking,
-            run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
-            persist_flow_rows=persist_stock_money_flow_rows,
-            source_factory=longhu_full_market_source_factory(),
-        )
-        if result.get("status") in {"completed", "unchanged"}:
-            return result
-        # A Longhu response can be healthy against its own vendor member set
-        # yet still miss the point-in-time all-A gate.  Retry through the
-        # capability-scoped Tushare chain so a partial licensed response never
-        # becomes the final close result.
-        fallback = await sync_full_market_daily_isolated(
-            request,
-            provider_candidates=provider_candidates,
-            cn_date=cn_today,
-            call_tushare_api=call_tushare_api,
-            looks_like_response_header=looks_like_response_header,
-            tushare_date=tushare_date,
-            persist_tushare_rows=persist_tushare_rows,
-            run_database_blocking=run_database_blocking,
-            persist_tushare_fetch_blocked=persist_tushare_fetch_blocked,
-            db=db,
-            safe_error_detail=safe_error_detail,
-            provider_call_error=ProviderCallError,
-            executor_saturated_error=ExecutorSaturatedError,
-            record_provider_success=record_provider_success,
-            record_provider_failure=record_provider_failure,
-            record_provider_api_capability=record_provider_api_capability,
-        )
-        return {**fallback, "longhu_attempt": result}
-    return await sync_full_market_daily_isolated(
-        request,
-        provider_candidates=provider_candidates,
-        cn_date=cn_today,
-        call_tushare_api=call_tushare_api,
-        looks_like_response_header=looks_like_response_header,
-        tushare_date=tushare_date,
-        persist_tushare_rows=persist_tushare_rows,
-        run_database_blocking=run_database_blocking,
-        persist_tushare_fetch_blocked=persist_tushare_fetch_blocked,
-        db=db,
-        safe_error_detail=safe_error_detail,
-        provider_call_error=ProviderCallError,
-        executor_saturated_error=ExecutorSaturatedError,
-        record_provider_success=record_provider_success,
-        record_provider_failure=record_provider_failure,
-        record_provider_api_capability=record_provider_api_capability,
-    )
+    """The session's full-market close, from Longhu.
+
+    Its Tushare fallback chain was retired on 2026-10-08 (decision 0005).  A
+    failed or partial Longhu result is returned as it is, so the daily
+    pipeline takes its own Baostock fallback instead of a dead provider.
+    """
+    if request.provider != "auto" or not longhu_full_market_enabled():
+        return {"status": "disabled", "provider": request.provider,
+                "reason": "only the Longhu full-market close remains; the Tushare chain was retired (decision 0005)"}
+    return await _longhu_full_market_close(request.trade_date or cn_today())
 
 
 def full_market_daily_row_count(trade_date: date) -> int:

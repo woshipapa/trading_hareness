@@ -197,7 +197,7 @@ class LicensedClosePathWiringTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertIs(result["source_factory"], shared_longhu_source_factory)
 
-    def test_full_market_route_falls_back_after_partial_longhu_result(self):
+    def test_a_partial_longhu_result_is_returned_for_the_pipeline_s_own_fallback(self):
         import asyncio
 
         import app.main as main
@@ -206,20 +206,16 @@ class LicensedClosePathWiringTests(unittest.TestCase):
         async def failed_longhu(*_args, **_kwargs):
             return {"status": "failed", "reason": "point-in-time all-A coverage"}
 
-        async def isolated(*_args, **_kwargs):
-            return {"status": "completed", "provider": "tushare_super_get", "imported": 5_559}
-
         with patch("app.main.longhu_full_market_enabled", return_value=True), \
              patch("app.main.longhu_full_market_source_factory", return_value=object()), \
-             patch("app.main.sync_longhu_full_market_close", new=failed_longhu), \
-             patch("app.main.sync_full_market_daily_isolated", new=isolated):
+             patch("app.main.sync_longhu_full_market_close", new=failed_longhu):
             result = asyncio.run(main.sync_full_market_daily(
                 FullMarketDailySyncRequest(provider="auto", trade_date=TRADE_DATE),
             ))
 
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["provider"], "tushare_super_get")
-        self.assertEqual(result["longhu_attempt"]["status"], "failed")
+        # The daily pipeline falls back to Baostock on a failed primary; the
+        # retired Tushare chain is no longer tried in between.
+        self.assertEqual(result, {"status": "failed", "reason": "point-in-time all-A coverage"})
 
 
 if __name__ == "__main__":
