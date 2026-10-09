@@ -118,12 +118,18 @@ def export_one(adapter: str, chat_id: str, state: dict, out_dir: Path, *,
         "next_sequence": next_sequence,
         "last_export_at": dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).isoformat(),
         "last_event_count": count,
-        "last_range": {"from_epoch": from_epoch, "to_epoch": to_epoch,
-                       "from": iso(from_epoch), "to": iso(to_epoch)},
         "cumulative_events": int(prior.get("cumulative_events", 0)) + count,
-        "last_file": str(file_path) if file_path else prior.get("last_file"),
         "last_format": fmt,
     }
+    if count > 0:
+        record["last_range"] = {"from_epoch": from_epoch, "to_epoch": to_epoch,
+                                "from": iso(from_epoch), "to": iso(to_epoch)}
+        record["last_file"] = str(file_path) if file_path else prior.get("last_file")
+    else:
+        # An empty run must not erase the range/file the last real export
+        # recorded — that span is exactly what the operator wants to remember.
+        record["last_range"] = prior.get("last_range", {"from": None, "to": None})
+        record["last_file"] = prior.get("last_file")
     # Incremental runs advance the cursor; a fixed-window (days) peek must not
     # move it, or it would skip messages the next incremental run should catch.
     if mode != "incremental":
