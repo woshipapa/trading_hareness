@@ -219,11 +219,22 @@ class Report:
         return "\n".join(lines)
 
 
+def regenerated_differs(tree: Path, path: str) -> bool:
+    """Whether a regenerated file now differs from the trial merge's version of it.
+
+    The trial merge is staged, not committed, so ``git status`` lists every file the
+    branch changed as modified. Only a difference between the working tree and the
+    index means the generator disagreed with what the merge brought in (2026-10-09:
+    the owner side's own regenerated index was reported stale).
+    """
+    return git("diff", "--quiet", "--", path, cwd=tree, check=False).returncode != 0
+
+
 def repo_checks(tree: Path, changed: Sequence[str], report: Report) -> None:
     ok, text = run([sys.executable, "scripts/verify_architecture.py"], tree)
     report.add("architecture check", ok, "" if ok else text[-400:])
     ok, text = run([sys.executable, "scripts/generate_architecture_index.py"], tree)
-    stale = git("status", "--porcelain", "--", "docs/ARCHITECTURE_INDEX.md", cwd=tree).stdout.strip()
+    stale = regenerated_differs(tree, "docs/ARCHITECTURE_INDEX.md")
     report.add("architecture index up to date", ok and not stale,
                "" if ok and not stale else (text[-300:] if not ok else "regenerate docs/ARCHITECTURE_INDEX.md on the branch"))
     if (tree / "scripts" / "generate_scripts_catalog.py").exists():

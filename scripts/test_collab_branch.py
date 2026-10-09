@@ -159,6 +159,14 @@ class BranchFlowTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("[FAIL] history not rewritten", out)
 
+    def test_a_regenerated_file_matching_the_staged_merge_is_not_stale(self):
+        # A staged merge lists the branch's index change as modified; that alone is not staleness.
+        self.box.write({"docs/ARCHITECTURE_INDEX.md": "branch version\n"})
+        self.box.git("add", "docs/ARCHITECTURE_INDEX.md")
+        self.assertFalse(cb.regenerated_differs(self.box.work, "docs/ARCHITECTURE_INDEX.md"))
+        self.box.write({"docs/ARCHITECTURE_INDEX.md": "what the generator would write\n"})
+        self.assertTrue(cb.regenerated_differs(self.box.work, "docs/ARCHITECTURE_INDEX.md"))
+
     def test_sync_merges_main_into_the_branch_without_rewriting_it(self):
         self.box.on(cb.COLLAB, {"peer.txt": "fix\n"}, "peer fix")
         peer_tip = self.box.tip(cb.COLLAB)

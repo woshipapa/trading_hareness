@@ -58,7 +58,7 @@ python3 scripts/collab_branch.py sync
 
 ### 合并进 main（我方执行）
 
-1. `python3 scripts/collab_branch.py check`：只读，逐项列出 PASS 或 FAIL。
+1. `python3 scripts/collab_branch.py check`：只读，逐项列出 PASS 或 FAIL。请用装有 ruff 等仓库依赖的解释器运行（我方用 svc 虚拟环境）；用系统自带的 `python3` 跑时，ruff 那一项只会提示找不到模块。
 2. 全部通过后执行 `python3 scripts/collab_branch.py merge`。它会再检查一遍，通过后用 `--no-ff` 合并并推送 main，再把协作分支快进到 main，双方回到同一起点。
 3. 发布照旧：`scripts/release owner full <main 上的 sha> …`。发布前的容器指纹门禁也照旧。
 
