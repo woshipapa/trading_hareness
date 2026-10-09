@@ -248,6 +248,7 @@
         "itougu-table-watch": "local",
         "model-service": "local",
         "agent-skills.web": "local",
+        "b300-collab.watch": "local",
         "paperkb.*": "local",
         "watchlist.sync": "retired",
         "watchlist.refresh": "retired"

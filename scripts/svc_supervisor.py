@@ -58,6 +58,7 @@ def _paper_provider_env():
 
 RELAY_TOKEN = _load_env_secret("RELAY_TOKEN")
 SCHOLAR_ALERT_DIR = _load_env_secret("PAPER_KB_SCHOLAR_ALERT_DIR")
+B300_COLLAB_WEBHOOK = _load_env_secret("B300_COLLAB_FEISHU_WEBHOOK_URL")
 
 TASKS = [
     # ---- 常驻 daemon (原 KeepAlive) ----
@@ -170,6 +171,16 @@ TASKS = [
          env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1",
               "VIDEO_RESEARCH_API_BASE_URL": "http://127.0.0.1:15682",
               "TEACHER_CYCLE_AUTO_IMPORT": os.environ.get("TEACHER_CYCLE_AUTO_IMPORT", "1")}),
+    # B300 协作提醒：B300 实验由内网机器上的执行方 agent 跑，双方只通过 GitHub 分支
+    # crossarch/b300-collab 交互。每 5 分钟用已登录的 gh 看一眼分支，执行方推了新提交
+    # 就往运维群发一条摘要（FAIL、等修复、提案单独列出）。群机器人 webhook 从
+    # .env.local 读，只在非空时交给子进程；没配置时消息只写进日志。
+    dict(name="b300-collab.watch", kind="interval", interval=300, run_at_load=True,
+         args=[PY, os.path.join(N8N, "scripts/b300_collab_watch.py")],
+         cwd=N8N, out=os.path.join(N8N, "logs/b300-collab-watch.log"),
+         err=os.path.join(N8N, "logs/b300-collab-watch.log"),
+         env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1",
+              **({"B300_COLLAB_FEISHU_WEBHOOK_URL": B300_COLLAB_WEBHOOK} if B300_COLLAB_WEBHOOK else {})}),
     dict(name="paperkb.arxiv", kind="interval", interval=1800, run_at_load=True,
          args=[PY, os.path.join(PKB, "jobs.py"), "arxiv"],
          cwd=PKB, out=os.path.join(PKLOG, "arxiv.log"), err=os.path.join(PKLOG, "arxiv.log"),
