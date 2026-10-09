@@ -67,7 +67,7 @@
 | `windows/stop-stock-platform.ps1` | quant-research | owner-windows |  |
 | `windows/watch-stock-dashboard.ps1` | quant-research | owner-windows |  |
 
-## workstation services (13)
+## workstation services (14)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -75,6 +75,7 @@
 | `b300_collab_watch.py` | platform | workstation | B300 协作分支的飞书提醒：执行方推送新提交时，往运维群发一条摘要。 |
 | `consolidate-services.sh` | platform | workstation | 把原 6 个 LaunchAgent 合并为 1 个 supervisor(com.papa.svc-supervisor)。 |
 | `install-svc-baseline.sh` | platform | workstation | 把 Tier1 基线依赖装进 ~/.venvs/svc 并逐个验证 import。 |
+| `owner_collab_watch.py` | platform | workstation | owner 协作分支的飞书提醒：对方往 collab/owner-peer 推新提交，或分支历史被改写时发一条摘要。 |
 | `serve_service_index.py` | platform | workstation | Serve the generated service index at http://127.0.0.1:8800/. |
 | `shared-peer/start-local-longhu-tunnel.sh` | quant-research | workstation |  |
 | `start-compose.sh` | platform | workstation | launchd starts this at login. Wait for the separately managed Colima daemon, |
