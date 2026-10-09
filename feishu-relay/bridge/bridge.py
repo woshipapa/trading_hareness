@@ -37,6 +37,7 @@ from proto_wire import (DEFAULT_PUSH_CMDS, decode_primary_websocket, parse_notif
                         tolerant_websocket_decode_with_meta)
 from event_spool import EventSpool
 from history_archive import HistoryArchive
+from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
 from qr_login_service import QrLoginService
@@ -628,6 +629,42 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				self.wfile.write(body)
 			except Exception as error:
 				LOG.warning("history export failed: %s", error)
+				self.send_json(400, {"status": "error", "message": str(error)[:240]})
+			return
+		if urlsplit(self.path).path == "/history/transcript":
+			# AI-ready: the archived rows rendered to a flat, speaker-labelled,
+			# chronological transcript — the input the "learn this group" step
+			# feeds to a model, so a consumer never re-implements card/richtext
+			# parsing.  Same auth and range parameters as /history/export.
+			if not self.authorized():
+				self.send_json(401, {"status": "unauthorized"})
+				return
+			query = parse_qs(urlsplit(self.path).query)
+			chat_id = str((query.get("chat_id") or [""])[0]).strip()
+			if not chat_id or len(chat_id) > 128:
+				self.send_json(400, {"status": "error", "message": "chat_id is required"})
+				return
+			try:
+				def number(name: str) -> float | None:
+					value = str((query.get(name) or [""])[0]).strip()
+					return float(value) if value else None
+				drop_system = str((query.get("drop_system") or ["1"])[0]).strip() != "0"
+				rows = self.bridge.history_archive.export_rows(
+					chat_id, from_time=number("from_time"), to_time=number("to_time"),
+					after_sequence=int((query.get("after_sequence") or ["0"])[0] or 0),
+					limit=int((query.get("limit") or ["5000"])[0] or 5000),
+				)
+				transcript = render_transcript(rows, drop_system=drop_system)
+				body = transcript.encode("utf-8")
+				self.send_response(200)
+				self.send_header("content-type", "text/plain; charset=utf-8")
+				self.send_header("cache-control", "no-store")
+				self.send_header("x-larkagentx-event-count", str(len(rows)))
+				self.send_header("content-length", str(len(body)))
+				self.end_headers()
+				self.wfile.write(body)
+			except Exception as error:
+				LOG.warning("history transcript failed: %s", error)
 				self.send_json(400, {"status": "error", "message": str(error)[:240]})
 			return
 		if self.path != "/health":
