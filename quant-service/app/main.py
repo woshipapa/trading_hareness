@@ -344,7 +344,6 @@ from .limit_linkage_mining_repository import persist_limit_linkage_mining_run
 from .limit_linkage_mining_service import LimitLinkageMiningDependencies, run as run_limit_linkage_mining_isolated
 from .async_limit_linkage_relation_repository import relations as read_async_limit_linkage_relations
 from .async_board_rotation_outbox_repository import suppress_legacy_deliveries as suppress_async_legacy_board_rotation_deliveries
-from .board_curve_read_model import board_display_slots as _board_display_slots
 from .board_curve_read_model import intraday_board_flow_curves as read_intraday_board_flow_curves
 from .board_curve_read_model import latest_close_sector_review_report as read_latest_close_sector_review_report
 from . import research_catalog_read_model as research_catalog_reads
@@ -378,6 +377,7 @@ from .longhu_auction_capture import capture as capture_longhu_morning_auction
 from .market_event_runtime import MarketEventCaptureDependencies, run_market_event_capture_service
 from .auction_pulse_runtime import AuctionPulseDependencies, run_auction_pulse_service
 from .level1_snapshot_runtime import Level1CaptureDependencies, run_level1_capture_service
+from .market_radar_runtime import MarketRadarDependencies, MarketRadarRuntime
 from .datasources import runtime as datasource_runtime
 from .datasources.catalog import health_capability
 from .datasources.sources.tencent_limits import session_limit_cross_section
@@ -547,6 +547,7 @@ from .routers.xiaojie_leader_flow import build_xiaojie_leader_flow_router
 from .routers.research_actions import ResearchActionDependencies, build_research_actions_router
 from .routers.ingestion_actions import IngestionActionDependencies, build_ingestion_actions_router
 from .routers.system_control import SystemControlDependencies, build_system_control_router
+from .routers.market_radar_reads import build_market_radar_router
 from .market_rules import a_share_limit_ratio, cn_today, is_st_security_name
 from .request_models import (
     AkShareProbeRequest,
@@ -2860,11 +2861,6 @@ async def open_provider_capabilities(provider_key: str, capabilities: list[str])
     return await read_async_open_provider_capabilities(async_db, provider_key, capabilities)
 
 
-def intraday_board_display_slots(selected_date: date, now: datetime | None = None) -> list[datetime]:
-    """Compatibility export for the board-curve read model's exchange clock grid."""
-    return _board_display_slots(selected_date, now)
-
-
 async def intraday_longhu_industry_board_flow() -> list[dict[str, Any]]:
     """One licensed ranking pass over every industry board, newest first."""
     if not longhu_vendor_configured():
@@ -3232,13 +3228,19 @@ async def post_close_public_archive_loop() -> None:
     await _datasource_loops()["post_close_public_archive"]()
 
 
+market_radar = MarketRadarRuntime(MarketRadarDependencies(
+    run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs), database=db,
+    persist_timed_observations=lambda *args: persist_timed_observations(*args)))
+
+
 async def all_a_level1_snapshot_capture_loop() -> None:
-    """Persist one complete all-A Level-1 cross-section about every minute."""
+    """Persist one complete all-A Level-1 cross-section about every minute, and its market radar point."""
     await run_level1_capture_service(Level1CaptureDependencies(
         fetch_snapshot=lambda: intraday_all_a_snapshot(), persist_observations=persist_public_observations,
         run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs), database=db,
         session_open=lambda now: market_observation_session_async(now=now),
         record_success=record_provider_success, record_failure=record_provider_failure, safe_error=safe_error_detail,
+        on_persisted=lambda observed_at, rows: market_radar.observe(observed_at, rows),
     ))
 
 
@@ -3709,10 +3711,6 @@ def market_snapshot_public_quote_settings() -> dict[str, int | bool]:
 
 def market_snapshot_fuyao_enabled() -> bool:
     return _market_snapshot_actions.fuyao_enabled()
-
-
-def fuyao_snapshot_quotes(rows: list[dict[str, Any]], exchange_date: date) -> list[dict[str, Any]]:
-    return _market_snapshot_actions.fuyao_quotes(rows, exchange_date, intraday_quote_from_fuyao)
 
 
 async def akshare_all_a_snapshot_rows(exchange_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -5422,6 +5420,7 @@ async def xiaojie_message_features(**query: Any) -> list[dict[str, Any]]:
     )
 
 
+app.include_router(build_market_radar_router(db, run_database_blocking))
 app.include_router(build_xiaojie_leader_flow_router(evaluate_xiaojie_leader_flow_snapshot, xiaojie_message_features))
 async def teacher_review_cohort() -> dict[str, Any]:
     rows = await run_database_blocking(teacher_review_repository.teacher_watch_rows, db)

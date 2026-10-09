@@ -8,7 +8,7 @@
 | Item | Current value |
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
-| `main.py` top-level functions | 435 |
+| `main.py` top-level functions | 433 |
 | Python modules under `app/` | 514 |
 | HTTP router modules | 48 |
 | Alembic migrations | 109 |

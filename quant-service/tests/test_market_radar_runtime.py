@@ -99,5 +99,17 @@ class ReadTests(unittest.TestCase):
                                             "boards": 2, "source": "eastmoney_free", "status": "completed"}])
 
 
+class WiringTests(unittest.TestCase):
+    def test_the_service_serves_the_radar_and_feeds_it_from_the_all_a_capture(self):
+        import inspect
+
+        import app.main as main
+
+        self.assertIn("/api/v1/market/radar", main.app.openapi()["paths"])
+        self.assertIsInstance(main.market_radar, MarketRadarRuntime)
+        self.assertIn("on_persisted=lambda observed_at, rows: market_radar.observe(observed_at, rows)",
+                      inspect.getsource(main.all_a_level1_snapshot_capture_loop))
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
