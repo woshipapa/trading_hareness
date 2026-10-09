@@ -52,6 +52,16 @@ class PureFunctionTests(unittest.TestCase):
         self.assertTrue(attn("run: check 10 FAIL"))
         self.assertTrue(attn("run: 2 个失败"))
 
+    def test_predicted_outcomes_are_not_attention_but_failures_still_are(self):
+        attn = watch.needs_attention
+        # the review predicted these selection outcomes; the subject says so
+        self.assertFalse(attn("status: 执行方心跳 07:39Z（GPU2 短已交付；GPU4 decide chosen=null 如预期；GPU2 压力在跑）"))
+        self.assertFalse(attn("run: 960 GPU4 decide（chosen=null，与第十五份审查预期一致：短 campaign 轮间 p90 0.68%）"))
+        # an outcome nobody predicted, and a failure or a stop, stay attention items
+        self.assertTrue(attn("run: 锁频选档 990 压力测试（audit pass；功率 92.8%>92%，990 档未过）"))
+        self.assertTrue(attn("run: 门禁 static_2sm FAIL（如预期之外的复现）"))
+        self.assertTrue(attn("status: 执行方心跳（对照如预期；GPU2 被邻居阻塞）"))
+
     def test_message_stays_within_the_feishu_limit(self):
         executor = [commit(chr(97 + i % 26), "run: " + "长" * 300) for i in range(60)]
         text = watch.build_message(executor, history_gap=False)

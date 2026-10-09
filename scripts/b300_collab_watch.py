@@ -49,6 +49,10 @@ SUBJECT_LIMIT = 160
 ATTENTION = ("FAIL", "失败", "等修复", "需返工", "proposal:", "停", "阻塞", "求助", "问题", "不可达",
              "未过", "未通过", "不通过", "chosen=null")
 ZERO_COUNT_RE = re.compile(r"(?<![\d.])0\s*(?:个\s*)?(?:FAIL|失败)")
+# A selection outcome the review predicted ("chosen=null 如预期", "与第十五份审查预期一致") is not an
+# attention item; failures, stops and blocks in the same subject still are.
+EXPECTED_MARKERS = ("如预期", "预期一致", "符合预期")
+PREDICTABLE_OUTCOMES = ("chosen=null", "未过", "未通过", "不通过")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
@@ -93,7 +97,10 @@ def clean(subject: str) -> str:
 
 def needs_attention(subject: str) -> bool:
     text = ZERO_COUNT_RE.sub("", subject)
-    return any(word in text for word in ATTENTION)
+    words = ATTENTION
+    if any(marker in text for marker in EXPECTED_MARKERS):
+        words = tuple(w for w in ATTENTION if w not in PREDICTABLE_OUTCOMES)
+    return any(word in text for word in words)
 
 
 def build_message(executor: list[dict[str, Any]], history_gap: bool) -> str:
