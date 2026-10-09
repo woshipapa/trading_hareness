@@ -31,6 +31,7 @@ export default defineComponent({
         <template #header><div class="card-header"><div><span>LarkAgentX WebSocket 监听</span><small class="realtime-refresh-time">消息统计来自持久化事件账本，热部署/重启后保留；连接状态和待处理队列为实时值。</small></div><el-space><el-select v-model="larkHistoryFormat" size="small" style="width: 140px"><el-option value="transcript" label="AI 转录 (txt)"/><el-option value="ndjson" label="原始 (jsonl)"/></el-select><el-select v-model="larkHistoryDays" size="small" style="width: 125px"><el-option :value="1" label="最近 1 天"/><el-option :value="7" label="最近 7 天"/><el-option :value="30" label="最近 30 天"/></el-select><el-tag :type="larkAgentXStateType(groupRelayStatus.larkagentx?.websocket?.state)">{{ larkAgentXStateText(groupRelayStatus.larkagentx?.websocket?.state) }}</el-tag></el-space></div></template>
         <el-alert v-if="groupRelayStatus.larkagentx?.route_catalog_error" type="error" :closable="false" show-icon :title="`动态源群路由目录不可用：${groupRelayStatus.larkagentx.route_catalog_error}`" class="section-gap" />
         <el-descriptions :column="mobileLayout ? 1 : 6" border size="small">
+          <el-descriptions-item label="账号 / 会话"><el-tag :type="authStateType(groupRelayStatus.larkagentx?.auth?.state)">{{ authStateText(groupRelayStatus.larkagentx?.auth?.state) }}</el-tag><div class="group-relay-age">{{ groupRelayStatus.larkagentx?.auth?.user_id ? `user ${groupRelayStatus.larkagentx.auth.user_id}` : '未登录' }}<template v-if="groupRelayStatus.larkagentx?.auth?.credential_age_hours != null"> · 凭证 {{ groupRelayStatus.larkagentx.auth.credential_age_hours }}h</template></div><el-button size="small" type="primary" link @click="startQrLogin">扫码登录 / 续期</el-button></el-descriptions-item>
           <el-descriptions-item label="连接状态"><el-tag :type="larkAgentXStateType(groupRelayStatus.larkagentx?.status)">{{ larkAgentXStateText(groupRelayStatus.larkagentx?.status) }}</el-tag></el-descriptions-item>
           <el-descriptions-item label="监听群数">{{ groupRelayStatus.larkagentx?.listen_chat_count ?? 0 }}</el-descriptions-item>
           <el-descriptions-item label="动态源群">{{ groupRelayStatus.larkagentx?.route_catalog_count ?? 0 }} 个已注册 / {{ Object.keys(groupRelayStatus.larkagentx?.dynamic_routes ?? {}).length }} 个已绑定</el-descriptions-item>
@@ -99,5 +100,13 @@ export default defineComponent({
       </el-table>
     </template>
   </el-card>
+  <el-dialog v-model="qrDialog" title="扫码登录 LarkAgentX" width="340" @closed="stopQrPolling">
+    <div style="text-align: center">
+      <img v-if="qrSession.qr_png" :src="qrSession.qr_png" alt="登录二维码" style="width: 240px; height: 240px"/>
+      <el-alert v-else-if="qrSession.qr_content" type="info" :closable="false" :title="`二维码内容：${qrSession.qr_content}`" />
+      <p style="margin-top: 12px">{{ qrStatusName }}</p>
+      <el-text size="small" type="info">用本机登录的飞书账号扫码；登录态仅保存在边缘服务，用于驱动个人会话监听。</el-text>
+    </div>
+  </el-dialog>
   <el-card shadow="never"><template #header><div class="card-header"><span>导入事件</span><el-select v-model="eventFilter" size="small" class="event-filter"><el-option label="全部状态" value="all"/><el-option label="已完成" value="已完成"/><el-option label="失败" value="失败"/><el-option label="处理中" value="已接收，处理中"/></el-select></div></template><el-empty v-if="!visibleEvents.length" description="暂无事件"/><el-timeline v-else><el-timeline-item v-for="event in visibleEvents" :key="event.event_id" :timestamp="dateText(event.received_at)" :type="event.n8n_status === '失败' ? 'danger' : 'primary'"><el-card shadow="never"><div class="event-title"><strong>{{ event.message_type || 'message' }}</strong><el-tag size="small">{{ event.n8n_status || '未知' }}</el-tag></div><p v-if="event.text">{{ event.text }}</p><el-text type="info">{{ event.source_label || '无来源备注' }}{{ event.n8n_error ? ` · ${event.n8n_error}` : '' }}</el-text></el-card></el-timeline-item></el-timeline></el-card>
 </template>

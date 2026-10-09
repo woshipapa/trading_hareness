@@ -34,6 +34,8 @@ export type ExportHistoryOptions = {
 
 export const groupRelayApi = {
   status: <T>() => getJson<T>('/api/group-relay/status'),
+  qrInit: <T>() => postJson<T>('/api/group-relay/larkagentx/qr/init'),
+  qrPoll: <T>(sessionId: string) => postJson<T>('/api/group-relay/larkagentx/qr/poll', { session_id: sessionId }),
   listExportBookmarks: () => getJson<{ bookmarks: ExportBookmark[] }>('/api/group-relay/larkagentx/export-bookmarks'),
   exportLarkAgentXHistory: async (chatId: string, options: ExportHistoryOptions = {}) => {
     const format: ExportFormat = options.format ?? 'transcript';

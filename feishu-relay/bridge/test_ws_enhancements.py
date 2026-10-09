@@ -274,22 +274,40 @@ class AuthStateMachineTests(unittest.TestCase):
 		self.assertTrue(instance._ensure_client())
 		self.assertIs(instance.client, sentinel)
 
-	def test_auth_status_never_leaks_credential_values(self):
+	def _auth_instance(self, **overrides):
 		import time as _time
 		instance = bridge.Bridge.__new__(bridge.Bridge)
-		instance.client = None
-		instance.auth_state = "needs_login"
+		instance.client = overrides.get("client")
+		instance.auth_state = overrides.get("auth_state", "needs_login")
 		instance.last_auth_error = None
+		instance.auth_probe_ok = overrides.get("probe_ok")
+		instance.auth_probe_at = None
+		instance.auth_probe_error = overrides.get("probe_error")
+		instance.auth_probe_seconds = 600
 		instance.auth = type("A", (), {"saved_at": _time.time() - 3600, "cookies": {"session": "SECRET"},
 		                               "user_id": "u1"})()
 		instance.qr_login = type("Q", (), {"stats": lambda _self: {"login_count": 0}})()
-		status = instance.auth_status()
+		return instance
+
+	def test_auth_status_never_leaks_credential_values(self):
+		status = self._auth_instance().auth_status()
 		self.assertEqual(status["state"], "needs_login")
 		self.assertFalse(status["logged_in"])
 		self.assertTrue(status["has_credentials"])
 		self.assertEqual(status["user_id"], "u1")
 		self.assertAlmostEqual(status["credential_age_hours"], 1.0, delta=0.2)
 		self.assertNotIn("SECRET", json.dumps(status))
+
+	def test_auth_status_reports_degrading_when_probe_fails_while_connected(self):
+		status = self._auth_instance(client=object(), auth_state="authed",
+		                             probe_ok=False, probe_error="ticket 探针失败").auth_status()
+		self.assertEqual(status["state"], "degrading")
+		self.assertTrue(status["logged_in"])
+		self.assertEqual(status["probe_error"], "ticket 探针失败")
+
+	def test_auth_status_stays_authed_when_probe_ok(self):
+		status = self._auth_instance(client=object(), auth_state="authed", probe_ok=True).auth_status()
+		self.assertEqual(status["state"], "authed")
 
 
 if __name__ == "__main__":

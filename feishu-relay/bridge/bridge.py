@@ -62,6 +62,8 @@ MAX_PRIVATE_TAIL_REPAIR_SECONDS = 600
 DEFAULT_PRIVATE_TAIL_REPAIR_WINDOW = 16
 DEFAULT_QR_MAX_SESSIONS = 4
 DEFAULT_QR_SESSION_TTL_SECONDS = 180
+DEFAULT_AUTH_PROBE_SECONDS = 600
+MIN_AUTH_PROBE_SECONDS = 120
 # Feishu's open-dev messenger is the surface the harvested web session drives.
 QR_LOGIN_REDIRECT_URI = "https://open-dev.feishu.cn/next/messenger"
 PAPER_COMMAND_RE = re.compile(
@@ -845,6 +847,10 @@ class Bridge:
 		self.client: RecoveringLarkClient | None = None
 		self.auth_state = "needs_login"
 		self.last_auth_error: str | None = None
+		self.auth_probe_seconds = bounded_int_env("LARKX_AUTH_PROBE_SECONDS", DEFAULT_AUTH_PROBE_SECONDS, MIN_AUTH_PROBE_SECONDS, 3600)
+		self.auth_probe_ok: bool | None = None
+		self.auth_probe_at: str | None = None
+		self.auth_probe_error: str | None = None
 		self._loop: asyncio.AbstractEventLoop | None = None
 		self._relogin_event: asyncio.Event | None = None
 		self.qr_login = QrLoginService(
@@ -1165,15 +1171,44 @@ class Bridge:
 		"""
 		saved_at = float(getattr(self.auth, "saved_at", 0) or 0)
 		age_hours = round((time.time() - saved_at) / 3600, 1) if saved_at else None
+		# "degrading": the socket is still up but the last ticket probe failed,
+		# so the session is dying and the operator should re-scan before it drops.
+		display_state = self.auth_state
+		if self.auth_state == "authed" and self.auth_probe_ok is False:
+			display_state = "degrading"
 		return {
-			"state": self.auth_state,
+			"state": display_state,
 			"logged_in": self.client is not None,
 			"has_credentials": bool(getattr(self.auth, "cookies", None)),
 			"user_id": str(getattr(self.auth, "user_id", "") or "") or None,
 			"credential_age_hours": age_hours,
 			"last_error": self.last_auth_error,
+			"probe_ok": self.auth_probe_ok,
+			"probe_at": self.auth_probe_at,
+			"probe_error": self.auth_probe_error,
+			"probe_seconds": self.auth_probe_seconds,
 			"qr_login": self.qr_login.stats(),
 		}
+
+	async def auth_probe_forever(self) -> None:
+		"""Periodically verify the session with a read-only ticket probe.
+
+		``auth.validate()`` hits the ticket endpoint without writing anything, so
+		a dying session surfaces on the health page (and to the alerting loop)
+		before the WebSocket actually drops.  Never logs or stores cookies.
+		"""
+		while True:
+			await asyncio.sleep(self.auth_probe_seconds)
+			if self.client is None:
+				continue
+			try:
+				ok, message = await asyncio.to_thread(self.auth.validate)
+				self.auth_probe_ok = bool(ok)
+				self.auth_probe_error = None if ok else str(message)[:240]
+			except Exception as error:  # noqa: BLE001 - a probe failure is data, not a crash
+				self.auth_probe_ok = False
+				self.auth_probe_error = str(error)[:240]
+			self.auth_probe_at = datetime.now(timezone.utc).isoformat()
 
 	def on_websocket_connected(self) -> None:
 		"""Mark the socket healthy at handshake time, before the first event."""
@@ -2014,6 +2049,7 @@ class Bridge:
 		spool_task = asyncio.create_task(self.replay_spool_forever())
 		route_catalog_task = asyncio.create_task(self.refresh_route_catalog_forever()) if self.dynamic_route_discovery and self.route_catalog_url else None
 		tail_repair_task = asyncio.create_task(self.private_tail_repair_forever()) if self.private_tail_repair_enabled else None
+		auth_probe_task = asyncio.create_task(self.auth_probe_forever())
 		try:
 			while True:
 				if not self._ensure_client():
@@ -2057,12 +2093,14 @@ class Bridge:
 					await asyncio.sleep(10)
 		finally:
 			spool_task.cancel()
+			auth_probe_task.cancel()
 			if route_catalog_task:
 				route_catalog_task.cancel()
 			if tail_repair_task:
 				tail_repair_task.cancel()
 			await asyncio.gather(
 				spool_task,
+				auth_probe_task,
 				*( [route_catalog_task] if route_catalog_task else []),
 				*( [tail_repair_task] if tail_repair_task else []),
 				return_exceptions=True,

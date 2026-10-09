@@ -1572,6 +1572,10 @@ async function larkAgentXDashboardStatus() {
 				ignored_by_chat: raw.ignored_by_chat && typeof raw.ignored_by_chat === 'object' ? raw.ignored_by_chat : {},
 				position_stats: raw.position_stats && typeof raw.position_stats === 'object' ? raw.position_stats : {},
 				position_summary: raw.position_summary && typeof raw.position_summary === 'object' ? raw.position_summary : { missing_position_count: 0, gap_event_count: 0, out_of_order_count: 0, recovered_position_count: 0, unresolved_position_count: 0 },
+			auth: raw.auth && typeof raw.auth === 'object' ? raw.auth : null,
+			ws_notify_cmds: Array.isArray(raw.ws_notify_cmds) ? raw.ws_notify_cmds : [],
+			ws_notify_count: Number(raw.ws_notify_count ?? 0), last_ws_notify: raw.last_ws_notify ?? null,
+			private_tail_repair_chat_ids: Array.isArray(raw.private_tail_repair_chat_ids) ? raw.private_tail_repair_chat_ids : [],
 			decode_error_count: Number(raw.decode_error_count ?? 0), decode_fallback_count: Number(raw.decode_fallback_count ?? 0), unknown_field_count: Number(raw.unknown_field_count ?? 0),
 			partial_frame_count: Number(raw.partial_frame_count ?? 0), retry_count: Number(raw.retry_count ?? 0), last_observed_chat_id: raw.last_observed_chat_id ?? null,
 			last_observed_message_type: raw.last_observed_message_type ?? null, event_spool: {
@@ -1680,6 +1684,42 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 	} catch (error) {
 		if (!response.headersSent) response.writeHead(502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		if (!response.writableEnded) response.end(JSON.stringify({ status: 'error', message: `LarkAgentX 历史导出不可用：${error instanceof Error ? error.message : String(error)}` }));
+	}
+}
+
+async function handleLarkAgentXQr(request, response, action) {
+	// Browser-facing QR login: the adapter holds the bridge token and injects
+	// it, so the operator's browser never needs a secret. init opens a login
+	// session (returns a rendered QR PNG + token); poll reports its status and,
+	// on a successful scan, the bridge persists the session and reconnects.
+	if (!larkAgentXIngressToken || !larkAgentXHealthUrl) {
+		response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message: 'LarkAgentX 登录服务未配置' }));
+		return;
+	}
+	try {
+		const bridgeUrl = new URL(larkAgentXHealthUrl);
+		bridgeUrl.pathname = action === 'init' ? '/qr/init' : '/qr/poll';
+		bridgeUrl.search = '';
+		let body = '{}';
+		if (action === 'poll') {
+			const payload = await readJsonBody(request, 4 * 1024);
+			const sessionId = String(payload?.session_id ?? '').trim();
+			if (!sessionId || sessionId.length > 128) throw new Error('session_id 不能为空');
+			body = JSON.stringify({ session_id: sessionId });
+		}
+		const upstream = await fetch(bridgeUrl, {
+			method: 'POST',
+			headers: { 'x-larkagentx-token': larkAgentXIngressToken, 'content-type': 'application/json' },
+			body,
+			signal: AbortSignal.timeout(20_000),
+		});
+		const text = await upstream.text();
+		response.writeHead(upstream.ok ? 200 : (upstream.status === 401 ? 502 : upstream.status), { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(text || JSON.stringify({ status: upstream.ok ? 'ok' : 'error' }));
+	} catch (error) {
+		if (!response.headersSent) response.writeHead(502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		if (!response.writableEnded) response.end(JSON.stringify({ status: 'error', message: `LarkAgentX 登录不可用：${error instanceof Error ? error.message : String(error)}` }));
 	}
 }
 
@@ -1863,6 +1903,14 @@ const dashboard = createServer((request, response) => {
 	}
 	if (url.pathname === '/api/group-relay/larkagentx/history/export' && request.method === 'GET') {
 		void handleLarkAgentXHistoryExport(request, response, url);
+		return;
+	}
+	if (url.pathname === '/api/group-relay/larkagentx/qr/init' && request.method === 'POST') {
+		void handleLarkAgentXQr(request, response, 'init');
+		return;
+	}
+	if (url.pathname === '/api/group-relay/larkagentx/qr/poll' && request.method === 'POST') {
+		void handleLarkAgentXQr(request, response, 'poll');
 		return;
 	}
 	if (url.pathname === '/api/group-relay/larkagentx/export-bookmarks' && request.method === 'GET') {
