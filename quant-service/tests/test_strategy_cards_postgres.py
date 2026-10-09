@@ -105,6 +105,45 @@ class StrategyCardsSqlTests(unittest.TestCase):
         self.assertEqual(mcs.rows_for(first[1], ["699902.SH"])["699902.SH"], rows[1])
         self.assertEqual(len(mcs.day_documents(connection, SESSION)), 2)
 
+    def test_the_backfill_converts_verifies_deletes_and_replays_on_the_real_schema(self) -> None:
+        import json
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        from app import minute_cross_section_backfill as backfill
+
+        connection = self.connection
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self):
+                        return connection
+
+                    def __exit__(self, *exc):
+                        return False
+                return Context()
+
+        first = datetime(2099, 3, 4, 9, 31, tzinfo=ZoneInfo("Asia/Shanghai"))
+        for offset in range(2):
+            minute = first + timedelta(minutes=offset)
+            for index, symbol in enumerate(("699901.SH", "699902.SH")):
+                row = {"symbol": symbol, "ts_code": symbol, "price": 10.0 + offset, "pct_change": 2.5 * (index + 1),
+                       "turnover": 1e6 * (offset + 1), "provider_key": "fuyao_ths",
+                       "capability": "a_share_prices_snapshot", "record_index": index}
+                connection.execute(
+                    """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,
+                                                                  available_at,payload_sha256,normalized,payload)
+                       VALUES('fuyao_ths','a_share_prices_snapshot','cn',%s,%s,%s,%s,%s::jsonb,%s::jsonb)""",
+                    (symbol, minute, minute, f"test-{offset}-{index}", json.dumps(row), json.dumps(row)))
+        database = Database()
+        self.assertEqual(backfill.convert_day(database, SESSION, apply=True)["written"], 2)
+        self.assertTrue(backfill.verify_day(database, SESSION)["ok"])
+        replay = backfill.replay_radar(database, SESSION, apply=True)
+        self.assertEqual((replay["minutes"], replay["stored"]), (2, 2))
+        self.assertEqual(backfill.delete_day(database, SESSION, apply=True, pause=lambda _s: None)["deleted"], 4)
+        self.assertEqual(backfill.legacy_minutes(connection, SESSION), [])
+
     def test_the_limit_detail_and_radar_reads_run_on_the_real_schema(self) -> None:
         from app.limit_detail_read_model import limit_detail_day
         from app.market_radar_runtime import radar_day
