@@ -72,6 +72,28 @@ def session_limits(connection: Any, trade_date: date) -> dict[str, tuple[float |
             for row in (dict(item) for item in rows)}
 
 
+def _main_net_point(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    payload = _payload(row["payload"])
+    items = [item for item in payload.get("items") or []
+             if isinstance(item, Mapping) and item.get("taxonomy_key") in INDUSTRY_TAXONOMIES]
+    # One snapshot's industry boards come from one vendor; a mix would
+    # double-count the market, so only the vendor with the most boards counts.
+    by_taxonomy: dict[str, list[float]] = {}
+    for item in items:
+        value = net_inflow_cny(item, payload.get("unit"))
+        if value is not None:
+            by_taxonomy.setdefault(str(item["taxonomy_key"]), []).append(value)
+    if not by_taxonomy:
+        return None
+    taxonomy, numbers = max(by_taxonomy.items(), key=lambda pair: len(pair[1]))
+    provider = (payload.get("providers") or {}).get("industry")
+    return {
+        "observed_at": row["observed_at"].isoformat() if hasattr(row["observed_at"], "isoformat") else row["observed_at"],
+        "main_net": round(sum(numbers), 2), "boards": len(numbers), "taxonomy_key": taxonomy,
+        "source": provider, "upstream": UPSTREAMS.get(str(provider)), "status": row["status"],
+    }
+
+
 def main_net_series(connection: Any, trade_date: date) -> list[dict[str, Any]]:
     """The market's main net inflow per board-flow snapshot: the sum of its industry boards."""
     start, end = _day_bounds(trade_date)
@@ -80,28 +102,32 @@ def main_net_series(connection: Any, trade_date: date) -> list[dict[str, Any]]:
             WHERE observed_at>=%s AND observed_at<%s ORDER BY snapshot_minute""",
         (start, end),
     ).fetchall()
-    series = []
-    for row in (dict(item) for item in rows):
-        payload = _payload(row["payload"])
-        items = [item for item in payload.get("items") or []
-                 if isinstance(item, Mapping) and item.get("taxonomy_key") in INDUSTRY_TAXONOMIES]
-        # One snapshot's industry boards come from one vendor; a mix would
-        # double-count the market, so only the vendor with the most boards counts.
-        by_taxonomy: dict[str, list[float]] = {}
-        for item in items:
-            value = net_inflow_cny(item, payload.get("unit"))
-            if value is not None:
-                by_taxonomy.setdefault(str(item["taxonomy_key"]), []).append(value)
-        if not by_taxonomy:
-            continue
-        taxonomy, numbers = max(by_taxonomy.items(), key=lambda pair: len(pair[1]))
-        provider = (payload.get("providers") or {}).get("industry")
-        series.append({
-            "observed_at": row["observed_at"].isoformat() if hasattr(row["observed_at"], "isoformat") else row["observed_at"],
-            "main_net": round(sum(numbers), 2), "boards": len(numbers), "taxonomy_key": taxonomy,
-            "source": provider, "upstream": UPSTREAMS.get(str(provider)), "status": row["status"],
-        })
-    return series
+    return [point for point in (_main_net_point(dict(item)) for item in rows) if point is not None]
+
+
+def latest_main_net(connection: Any, trade_date: date) -> dict[str, Any] | None:
+    """The day's most recent snapshot that carries industry boards."""
+    start, end = _day_bounds(trade_date)
+    rows = connection.execute(
+        """SELECT snapshot_minute,observed_at,status,payload FROM quant.intraday_board_flow_snapshots
+            WHERE observed_at>=%s AND observed_at<%s
+              AND coalesce((coverage->'industry'->>'flow_boards')::int,0)>0
+            ORDER BY snapshot_minute DESC LIMIT 5""",
+        (start, end),
+    ).fetchall()
+    return next((point for point in (_main_net_point(dict(item)) for item in rows) if point is not None), None)
+
+
+def latest_point(connection: Any, trade_date: date) -> dict[str, Any] | None:
+    start, end = _day_bounds(trade_date)
+    row = connection.execute(
+        """SELECT normalized FROM quant.raw_market_observations
+            WHERE capability=%s AND symbol IS NULL AND provider_key=%s
+              AND effective_at>=%s AND effective_at<%s
+            ORDER BY effective_at DESC LIMIT 1""",
+        (CAPABILITY, PROVIDER_KEY, start, end),
+    ).fetchone()
+    return _payload(dict(row)["normalized"]) if row else None
 
 
 def radar_day(connection: Any, trade_date: date, *, include_entered: bool = False) -> dict[str, Any]:
@@ -171,5 +197,6 @@ class MarketRadarRuntime:
 
 __all__ = [
     "CAPABILITY", "INDUSTRY_TAXONOMIES", "MarketRadarDependencies", "MarketRadarRuntime",
-    "PROVIDER_KEY", "main_net_series", "radar_day", "session_limits", "stored_points",
+    "PROVIDER_KEY", "latest_main_net", "latest_point", "main_net_series", "radar_day", "session_limits",
+    "stored_points",
 ]

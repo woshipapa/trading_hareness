@@ -1,0 +1,64 @@
+"""Run the strategy cards, limit detail and radar reads against a real PostgreSQL schema.
+
+The unit tests answer the SQL with a fake. This one executes every statement
+the cards issue: ledger, per-symbol quote probes, limits, signals, point-in-
+time concepts, events, the limit review, the leaderboard, the radar gate
+and the regime. Each runs inside one transaction that is rolled back, and the
+sessions are dated 2099 so nothing collides with real rows.
+"""
+
+from __future__ import annotations
+
+import os
+import unittest
+from datetime import date
+
+SESSION, AS_OF, EARLIER = date(2099, 3, 4), date(2099, 3, 3), date(2099, 3, 2)
+
+
+@unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
+class StrategyCardsSqlTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import psycopg
+        from psycopg.rows import dict_row
+        self.connection = psycopg.connect(
+            host=os.getenv("PGHOST"), port=os.getenv("PGPORT", "5432"), dbname=os.getenv("PGDATABASE", "n8n"),
+            user=os.getenv("PGUSER", "n8n"), password=os.getenv("PGPASSWORD", ""), row_factory=dict_row,
+        )
+        self.connection.execute(
+            """INSERT INTO quant.instruments(symbol,exchange,name) VALUES
+                 ('699901.SH','SSE','卡片甲'),('699902.SH','SSE','卡片乙') ON CONFLICT(symbol) DO NOTHING""")
+        for day, symbol, line in ((AS_OF, "699901.SH", "launch_radar"), (AS_OF, "699902.SH", "launch_radar"),
+                                  (AS_OF, "699901.SH", "post_close_base_ready"),
+                                  (EARLIER, "699902.SH", "launch_radar")):
+            self.connection.execute(
+                """INSERT INTO quant.strategy_daily_candidates(strategy_key,as_of_date,symbol,source_table,rank,
+                                                                raw_score,score_scale)
+                   VALUES(%s,%s,%s,'test',1,1,'0-100')""", (line, day, symbol))
+
+    def tearDown(self) -> None:
+        self.connection.rollback()
+        self.connection.close()
+
+    def test_every_card_statement_runs_on_the_real_schema(self) -> None:
+        from app.strategy_cards_read_model import strategy_cards
+
+        day = strategy_cards(self.connection, SESSION, per_line=5)
+        self.assertEqual(day["picks_as_of"], AS_OF.isoformat())
+        cards = {card["strategy_key"]: card for card in day["cards"]}
+        self.assertEqual(sorted(cards), ["launch_radar", "post_close_base_ready"])
+        pick = next(pick for pick in cards["launch_radar"]["picks"] if pick["symbol"] == "699901.SH")
+        self.assertEqual((pick["name"], pick["resonance"], pick["price"]), ("卡片甲", 2, None))
+        self.assertEqual(day["direction_gate"]["label"], "unknown")
+        self.assertEqual(cards["launch_radar"]["leaderboard"]["5"]["without_bar"], 1)
+
+    def test_the_limit_detail_and_radar_reads_run_on_the_real_schema(self) -> None:
+        from app.limit_detail_read_model import limit_detail_day
+        from app.market_radar_runtime import radar_day
+
+        self.assertEqual(limit_detail_day(self.connection, SESSION)["status"], "missing")
+        self.assertEqual(radar_day(self.connection, SESSION)["points"], [])
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

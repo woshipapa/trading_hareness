@@ -21,7 +21,8 @@ class _Connection:
         self.review_rows, self.pool_rows = review_rows, pool_rows
 
     def execute(self, _sql, params):
-        rows = self.review_rows if params[0] == REVIEW_CAPABILITY else self.pool_rows
+        assert "LIKE" not in _sql, "a LIKE prefix cannot use the capability index"
+        rows = self.review_rows if params[0] == [REVIEW_CAPABILITY] else self.pool_rows
         return SimpleNamespace(fetchall=lambda: rows)
 
 

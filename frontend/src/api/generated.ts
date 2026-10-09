@@ -3090,6 +3090,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategies/cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Strategy Cards Route */
+        get: operations["strategy_cards_route_api_v1_strategies_cards_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/strategies/xiaojie-leader-flow/message-features": {
         parameters: {
             query?: never;
@@ -10553,6 +10570,40 @@ export interface operations {
         parameters: {
             query?: {
                 trade_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    strategy_cards_route_api_v1_strategies_cards_get: {
+        parameters: {
+            query?: {
+                trade_date?: string | null;
+                per_line?: number;
             };
             header?: never;
             path?: never;

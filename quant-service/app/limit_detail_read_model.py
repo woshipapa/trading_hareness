@@ -26,6 +26,7 @@ from .datasources.sources.xuangubao_pool import decode_pool
 CN_TZ = ZoneInfo("Asia/Shanghai")
 REVIEW_CAPABILITY = "longhu:longhu_market_wide:GetPlateInfo_w38"
 POOL_CAPABILITY_PREFIX = "longhu:xuangubao:pool:"
+POOLS = ("limit_up", "limit_up_broken", "limit_down")
 AUCTION_SEAL = time(9, 25, 59)
 
 
@@ -39,13 +40,16 @@ def _payload(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _stored(connection: Any, capability_pattern: str, trade_date: date) -> list[dict[str, Any]]:
+def _stored(connection: Any, capabilities: list[str], trade_date: date) -> list[dict[str, Any]]:
+    # Exact capabilities, not LIKE: under the database's collation a LIKE
+    # prefix cannot use the capability index, and this table holds every
+    # all-A minute snapshot.
     rows = connection.execute(
         """SELECT capability,normalized FROM quant.raw_market_observations
-            WHERE provider_key='longhuvip' AND capability LIKE %s
+            WHERE capability=ANY(%s) AND provider_key='longhuvip'
               AND normalized->>'exchange_date'=%s
             ORDER BY available_at,capability""",
-        (capability_pattern, trade_date.isoformat()),
+        (capabilities, trade_date.isoformat()),
     ).fetchall()
     return [{"capability": dict(row)["capability"], **_payload(dict(row)["normalized"])} for row in rows]
 
@@ -101,7 +105,7 @@ def _page_on_session(page: Mapping[str, Any], trade_date: date) -> bool:
 
 def limit_detail_day(connection: Any, trade_date: date) -> dict[str, Any]:
     reviews, undated = [], 0
-    for row in _stored(connection, REVIEW_CAPABILITY, trade_date):
+    for row in _stored(connection, [REVIEW_CAPABILITY], trade_date):
         page = row.get("payload") if isinstance(row.get("payload"), Mapping) else None
         if page is None:
             continue
@@ -115,7 +119,7 @@ def limit_detail_day(connection: Any, trade_date: date) -> dict[str, Any]:
     longhu_rows = decode_review({"date": trade_date.isoformat(),
                                  "list": [row.get("payload") for row in reviews if isinstance(row.get("payload"), Mapping)]})
     pool_rows: list[dict[str, Any]] = []
-    for row in _stored(connection, POOL_CAPABILITY_PREFIX + "%", trade_date):
+    for row in _stored(connection, [POOL_CAPABILITY_PREFIX + pool for pool in POOLS], trade_date):
         pool_name = str(row["capability"]).removeprefix(POOL_CAPABILITY_PREFIX)
         if isinstance(row.get("payload"), Mapping):
             pool_rows.extend(decode_pool([row["payload"]], pool_name, trade_date))
@@ -132,4 +136,4 @@ def limit_detail_day(connection: Any, trade_date: date) -> dict[str, Any]:
     }
 
 
-__all__ = ["POOL_CAPABILITY_PREFIX", "REVIEW_CAPABILITY", "limit_detail_day", "merge_limit_detail"]
+__all__ = ["POOLS", "POOL_CAPABILITY_PREFIX", "REVIEW_CAPABILITY", "limit_detail_day", "merge_limit_detail"]

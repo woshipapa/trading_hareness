@@ -9,7 +9,7 @@
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
 | `main.py` top-level functions | 431 |
-| Python modules under `app/` | 518 |
+| Python modules under `app/` | 519 |
 | HTTP router modules | 48 |
 | Alembic migrations | 109 |
 | Frontend source files | 53 |
@@ -23,7 +23,7 @@ New behaviour should be owned by an existing domain package/owner.
 |---|---:|
 | `intraday` | 62 |
 | `async` | 41 |
-| `strategy` | 24 |
+| `strategy` | 25 |
 | `longhu` | 18 |
 | `analyst` | 17 |
 | `market` | 17 |
