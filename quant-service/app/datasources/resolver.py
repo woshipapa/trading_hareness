@@ -14,18 +14,25 @@ contract, so a consumer can never mistake a fallback for the primary.
 
 from __future__ import annotations
 
-import time
 import hashlib
 import json
+import math
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from .catalog import CAPABILITIES, bindings_for
 from .contracts import (
-    RETIRED, UNSUPPORTED, Binding, Capability, CapabilityEvidence, CapabilityRequest, QualityReceipt,
+    RETIRED,
+    UNSUPPORTED,
+    Binding,
+    Capability,
+    CapabilityEvidence,
+    CapabilityRequest,
+    QualityReceipt,
 )
-
 
 Fetcher = Callable[..., Awaitable[Any]]
 HealthGate = Callable[[str, str], Awaitable[bool]]
@@ -104,6 +111,18 @@ def _response_hash(rows: Any) -> str | None:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _field_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, Decimal):
+        return value.is_finite()
+    return True
+
+
 def _quality_receipt(rows: Any, envelope: CapabilityEvidence, request: CapabilityRequest) -> QualityReceipt:
     count = _row_count(rows)
     warnings = list(envelope.warnings)
@@ -116,7 +135,7 @@ def _quality_receipt(rows: Any, envelope: CapabilityEvidence, request: Capabilit
             if not isinstance(row, dict):
                 missing.update(request.required_fields)
                 continue
-            missing.update(field for field in request.required_fields if field not in row)
+            missing.update(field for field in request.required_fields if not _field_present(row.get(field)))
         if missing:
             warnings.append("missing_required_fields:" + ",".join(sorted(missing)))
 
@@ -126,9 +145,9 @@ def _quality_receipt(rows: Any, envelope: CapabilityEvidence, request: Capabilit
         warnings.append("row_count_unavailable")
     elif count == 0:
         status = "empty"
-    elif request.required_fields and any(item.startswith("missing_required_fields:") for item in warnings):
-        status = "invalid"
-    elif envelope.coverage is not None and not 0 <= envelope.coverage <= 1:
+    elif (
+        request.required_fields and any(item.startswith("missing_required_fields:") for item in warnings)
+    ) or (envelope.coverage is not None and not 0 <= envelope.coverage <= 1):
         status = "invalid"
     elif envelope.coverage is not None and envelope.coverage < 1:
         status = "partial"

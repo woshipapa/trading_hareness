@@ -8,6 +8,32 @@ from app.datasources.resolver import CapabilityResolver, CapabilityUnavailable
 
 
 class ResolverQualityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_null_empty_and_nonfinite_required_values_are_missing(self):
+        for value in (None, "", float("nan"), float("inf")):
+            with self.subTest(value=value):
+                resolver = CapabilityResolver()
+
+                async def fetch(measurement=value, **_params):
+                    return [{"symbol": "920001.BJ", "pe_ttm": measurement}]
+
+                resolver.bind("fuyao_ths", "quote.valuation", fetch)
+                with self.assertRaises(CapabilityUnavailable):
+                    await resolver.fetch("quote.valuation", request=CapabilityRequest(
+                        "quote.valuation", required_fields=("pe_ttm",)))
+
+    async def test_negative_and_zero_required_values_are_present(self):
+        for value in (-41.04, 0):
+            with self.subTest(value=value):
+                resolver = CapabilityResolver()
+
+                async def fetch(measurement=value, **_params):
+                    return [{"symbol": "920001.BJ", "pe_ttm": measurement}]
+
+                resolver.bind("fuyao_ths", "quote.valuation", fetch)
+                result = await resolver.fetch("quote.valuation", request=CapabilityRequest(
+                    "quote.valuation", required_fields=("pe_ttm",)))
+                self.assertEqual(result.quality.status, "complete")
+
     async def test_missing_required_fields_falls_through(self):
         resolver = CapabilityResolver()
 
