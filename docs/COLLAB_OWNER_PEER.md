@@ -20,7 +20,7 @@
 
 ## 规则
 
-服务端拦不住这些行为：这个私有仓库在免费套餐上，没有分支保护和规则集。所以靠约定，再由下面的工具兜底。
+仓库已于 2026-10-09 公开，所以规则集可用：仓库所有者开启规则 `main and collab: no force push, no deletion`（Settings → Rules → Rulesets，对 `main` 和 `collab/owner-peer` 勾选 Restrict deletions、Block force pushes）后，第 1 条由 GitHub 在服务端强制执行。下面的工具照样把关，作为第二道防线。
 
 1. **不改写历史。** 协作分支上不 rebase，不 amend 已推送的提交，不强推，不删分支。一旦改写，监听脚本会在群里告警，`check` 也会失败。
 2. **改动不再只留在镜像里。** peer 侧的改动先提交到协作分支，由我方合并、发布。如果紧急修复必须先上线，也要在 24 小时内把同样的改动提交到协作分支。在此之前，我方的发布指纹门禁会拦下发布。
@@ -31,6 +31,7 @@
    - 补交 0118、0119 这类已经在共享库上执行过的迁移时，要连同它们的前序迁移一起提交，保证空库也能从头初始化，release-path 测试会验证这一点。
 4. **不提交密钥。** `.env`、`*-secrets.env`、私钥、证书一律不进仓库，`check` 会拦下。
 5. **冲突在协作分支上用合并提交解决。** 冲突涉及对方的代码时，先在群里确认再解决。
+6. **仓库是公开的。** 任何人都能读全部历史，一旦推上来就收不回。除了密钥，主机地址与端口、凭据文件路径、个人数据也不要写进代码和文档；GitHub 的 secret scanning 推送保护开启后，会在推送时拦截常见的密钥格式。
 
 ## 日常流程
 
@@ -82,4 +83,4 @@ python3 scripts/collab_branch.py sync
 
 ## 权限
 
-仓库 `woshipapa/trading_hareness` 是私有的。对方要以协作者身份加入（Settings → Collaborators）才能推送；这一步由仓库所有者操作。
+仓库 `woshipapa/trading_hareness` 已公开，任何人都能读取和 clone。推送需要协作者身份（Settings → Collaborators），或带写权限的部署密钥，由仓库所有者开通。没有推送权限时，也可以 fork 后向 `collab/owner-peer` 提 Pull Request，由我方跑 `check` 后合并；合并检查对两种方式一视同仁。
