@@ -361,8 +361,9 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     # flow
     _bind("longhuvip_composite", "flow.stock_daily", 12, LIVE_VERIFIED, "stock_money_flow_daily:source=longhuvip_main_net",
           "app/longhu_market_sync.py", notes="全市场主力净额，每日约 5300 只"),
-    _bind("tushare_super_get", "flow.stock_daily", 15, LIVE_VERIFIED, "stock_money_flow_daily:source=moneyflow_dc",
-          "app/stock_money_flow_sync.py", notes="同表另有 source=moneyflow / moneyflow_ths；覆盖稀疏，口径与 Longhu 不同，不混用"),
+    _bind("tushare_super_get", "flow.stock_daily", 15, RETIRED, "stock_money_flow_daily:source=moneyflow_dc",
+          "app/stock_money_flow_sync.py",
+          notes="2026-10-08 停用 Tushare（决策 0005）；历史行仍在同表 source=moneyflow / moneyflow_dc / moneyflow_ths，口径与 Longhu 不同，不混用"),
     _bind("eastmoney_free", "flow.watch_intraday", 45, LIVE_VERIFIED, "intraday_quote_observations", "app/eastmoney_live_hydration.py",
           notes="研究用，不进决策"),
     _bind("derived_tick_flow", "flow.tick_derived", 90, DECLARED, _RAW + "tick_flow_daily",

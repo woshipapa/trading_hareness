@@ -1,87 +1,37 @@
-"""End-of-day per-stock capital flow ingestion.
+"""End-of-day per-stock capital flow: what is stored, and whether a session has it.
 
-Sector-level flow was already ingested (``ths_sector_flows``), but nothing in
-this codebase ever stored *per-stock* capital flow.  The only per-stock flow
-number available anywhere was ``main_net_inflow`` scraped live from a public
-Eastmoney endpoint during the intraday scan - a research-only value that is
-discarded once the scan ends, so no post-close study could ask whether main
-flow preceded anything.
+Per-stock flow is the Longhu close's main net amount (``longhuvip_main_net``),
+written by the full-market close through :func:`persist_flow_rows` for about
+5,300 names a session.  Until 2026-10-08 this stage also fetched Tushare's
+``moneyflow``, ``moneyflow_dc`` and ``moneyflow_ths`` cross-sections; Tushare
+was retired then (decision 0005) and those sources' history stays in the
+table under their own names.  The vendors' "main"/"large" order buckets are
+defined differently, so they were never merged and Longhu's is not presented
+as any of them.
 
-Three independent end-of-day cross-sections are stored, deliberately kept
-apart rather than merged, because each vendor defines "main"/"large" order
-buckets differently and averaging them would invent a number none of them
-published:
+The daily pipeline now only checks that the close stored a usable cross-
+section for the session, so its report says whether flow exists for the date.
 
-``moneyflow``      exchange-derived buy/sell volume and amount by order size
-``moneyflow_dc``   Eastmoney's net amount plus super-large/large/medium/small
-                   buckets and their percentage rates
-``moneyflow_ths``  THS's equivalent decomposition
-
-Boundary, stated plainly: **every one of these is end-of-day only**.  Probed
-against the ProMax gateway during the 2026-08-26 session, all three returned
-zero rows for that same day while returning full cross-sections (5546 / 6000 /
-5210 rows) for the prior session.  So this closes the *research* gap - main
-flow is now queryable for post-close and backtest work - and does not close
-the intraday one.  ``signal_rules``'s live ``main_net_inflow`` still has no
-licensed intraday source, and nothing here should be read as providing one.
+Boundary, stated plainly: this is end-of-day only.  ``signal_rules``'s live
+``main_net_inflow`` has no licensed intraday per-stock source, and nothing
+here should be read as providing one.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any, Awaitable, Callable
 
 from psycopg.types.json import Json
 
 
-FLOW_APIS = ("moneyflow", "moneyflow_dc", "moneyflow_ths")
-#: Below this the provider clearly returned a partial cross-section; a partial
-#: flow snapshot is worse than none because a missing symbol is silently read
-#: as "no flow" by any downstream aggregate.
+#: The close's per-stock flow source; see longhu_market_sync.FLOW_SOURCE.
+FLOW_SOURCE = "longhuvip_main_net"
+FLOW_PROVIDER = "longhuvip_composite"
+#: Below this the close clearly stored a partial cross-section; a partial flow
+#: snapshot is worse than none because a missing symbol is silently read as
+#: "no flow" by any downstream aggregate.
 MINIMUM_COVERAGE_RATIO = 0.80
-
-
-def _number(value: Any) -> float | None:
-    try:
-        return float(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
-        return None
-
-
-def normalize_flow_rows(api_name: str, rows: list[dict[str, Any]], trade_date: date,
-                        parse_date: Callable[[Any], date | None]) -> list[dict[str, Any]]:
-    """Keep one row per symbol for the requested date, preserving vendor units.
-
-    The raw payload is retained verbatim.  Only the fields every vendor agrees
-    on are promoted to columns; the vendor-specific bucket decomposition stays
-    in ``raw`` so a later study can use it without this module having to claim
-    the three schemas are equivalent.
-    """
-    by_symbol: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        symbol = str(row.get("ts_code") or "").upper()
-        if not symbol or parse_date(row.get("trade_date")) != trade_date:
-            continue
-        # moneyflow reports buy/sell legs; the DC/THS feeds report a net amount
-        # directly.  Derive the net only when the vendor did not supply one.
-        net = _number(row.get("net_amount"))
-        if net is None:
-            buy = _number(row.get("buy_elg_amount")) or 0.0
-            buy += _number(row.get("buy_lg_amount")) or 0.0
-            sell = _number(row.get("sell_elg_amount")) or 0.0
-            sell += _number(row.get("sell_lg_amount")) or 0.0
-            net = buy - sell if (buy or sell) else None
-        by_symbol[symbol] = {
-            "symbol": symbol, "trading_date": trade_date, "source": api_name,
-            "net_amount": net,
-            "net_amount_rate": _number(row.get("net_amount_rate")),
-            "buy_elg_amount": _number(row.get("buy_elg_amount")),
-            "buy_lg_amount": _number(row.get("buy_lg_amount")),
-            "buy_md_amount": _number(row.get("buy_md_amount")),
-            "buy_sm_amount": _number(row.get("buy_sm_amount")),
-            "raw": dict(row),
-        }
-    return list(by_symbol.values())
 
 
 def persist_flow_rows(connection: Any, rows: list[dict[str, Any]], provider: str,
@@ -116,63 +66,43 @@ def persist_flow_rows(connection: Any, rows: list[dict[str, Any]], provider: str
     return len(rows)
 
 
+def stored_flow_symbols(connection: Any, trade_date: date) -> int:
+    row = connection.execute(
+        """SELECT count(DISTINCT symbol)::int AS n FROM quant.stock_money_flow_daily
+            WHERE trading_date=%s AND source=%s""",
+        (trade_date, FLOW_SOURCE),
+    ).fetchone()
+    return int((row or {}).get("n") or 0)
+
+
 async def sync(
     trade_date: date,
     *,
-    call_tushare_api: Callable[..., Awaitable[Any]],
-    parse_date: Callable[[Any], date | None],
     expected_symbols: Callable[[date], int],
     run_database_blocking: Callable[..., Awaitable[Any]],
     db: Any,
-    safe_error_detail: Callable[[str, int], str],
 ) -> dict[str, Any]:
-    """Fetch and store one completed session's per-stock flow cross-sections.
-
-    Each source is independent: one vendor's outage never blocks the others,
-    and a cross-section that covers less than ``MINIMUM_COVERAGE_RATIO`` of the
-    session's known universe is rejected rather than stored, so a truncated
-    response cannot masquerade as "these symbols had no flow".
-    """
+    """Report whether the close stored one session's per-stock flow, against its universe."""
     expected = await run_database_blocking(expected_symbols, trade_date)
     if expected <= 0:
         return {"status": "blocked", "trade_date": str(trade_date),
                 "reason": "no daily bars for this date; flow would have no universe to check against"}
-    observed_at = datetime.now(timezone.utc)
-    fetched: dict[str, Any] = {}
-    errors: dict[str, str] = {}
-    for api_name in FLOW_APIS:
-        try:
-            result = await call_tushare_api(api_name, {"trade_date": trade_date.strftime("%Y%m%d")}, None, "auto")
-        except Exception as error:
-            errors[api_name] = safe_error_detail(str(error), 300)
-            continue
-        rows = normalize_flow_rows(api_name, result.rows, trade_date, parse_date)
-        if len(rows) < int(expected * MINIMUM_COVERAGE_RATIO):
-            errors[api_name] = (f"returned {len(rows)} rows for a {expected}-symbol session; "
-                                f"below the {MINIMUM_COVERAGE_RATIO:.0%} coverage floor")
-            continue
-        fetched[api_name] = {"provider": result.provider.key, "rows": rows}
-    if not fetched:
-        return {"status": "blocked", "trade_date": str(trade_date), "expected_symbols": expected,
-                "reason": "no per-stock flow cross-section passed its coverage gate", "errors": errors}
 
-    def persist() -> dict[str, int]:
-        stored: dict[str, int] = {}
+    def count() -> int:
         with db.transaction() as connection:
-            for api_name, payload in fetched.items():
-                stored[api_name] = persist_flow_rows(
-                    connection, payload["rows"], payload["provider"], observed_at,
-                )
-        return stored
+            return stored_flow_symbols(connection, trade_date)
 
-    stored = await run_database_blocking(persist, timeout_seconds=180)
-    return {"status": "completed" if not errors else "partial", "trade_date": str(trade_date),
-            "expected_symbols": expected, "rows": stored,
-            "providers": {name: payload["provider"] for name, payload in fetched.items()},
-            "errors": errors or None,
-            "boundary": "end_of_day_only; no licensed intraday per-stock flow exists"}
+    stored = await run_database_blocking(count, timeout_seconds=30)
+    complete = stored >= int(expected * MINIMUM_COVERAGE_RATIO)
+    return {"status": "completed" if complete else "missing", "trade_date": str(trade_date),
+            "expected_symbols": expected, "rows": {FLOW_SOURCE: stored},
+            "providers": {FLOW_SOURCE: FLOW_PROVIDER},
+            "reason": None if complete else (
+                f"the close stored flow for {stored} of {expected} symbols; "
+                f"below the {MINIMUM_COVERAGE_RATIO:.0%} coverage floor"),
+            "boundary": "end_of_day_only; vendor order-size classification, no licensed intraday per-stock flow"}
 
 
 __all__ = [
-    "FLOW_APIS", "MINIMUM_COVERAGE_RATIO", "normalize_flow_rows", "persist_flow_rows", "sync",
+    "FLOW_PROVIDER", "FLOW_SOURCE", "MINIMUM_COVERAGE_RATIO", "persist_flow_rows", "stored_flow_symbols", "sync",
 ]

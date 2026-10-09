@@ -10,163 +10,53 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 from app.main import db
-from app.stock_money_flow_sync import (
-    MINIMUM_COVERAGE_RATIO,
-    normalize_flow_rows,
-    persist_flow_rows,
-    sync,
-)
+from app.stock_money_flow_sync import FLOW_SOURCE, MINIMUM_COVERAGE_RATIO, persist_flow_rows, sync
 
 
-def _parse(value):
-    text = str(value or "")
-    return date(int(text[:4]), int(text[4:6]), int(text[6:8])) if len(text) == 8 and text.isdigit() else None
+class _Database:
+    def __init__(self, stored):
+        self.stored = stored
+        self.queries = []
+
+    @contextmanager
+    def transaction(self):
+        database = self
+
+        class Connection:
+            def execute(self, sql, params):
+                database.queries.append((sql, params))
+                return SimpleNamespace(fetchone=lambda: {"n": database.stored})
+
+        yield Connection()
 
 
-class NormalizeFlowRowTests(unittest.TestCase):
-    trade_date = date(2026, 8, 25)
+def run_sync(*, expected, stored):
+    async def run(action, *args, **_kwargs):
+        return action(*args)
 
-    def test_vendor_supplied_net_amount_is_kept_verbatim(self):
-        rows = normalize_flow_rows("moneyflow_dc", [{
-            "ts_code": "000001.SZ", "trade_date": "20260825", "net_amount": 947.77,
-            "net_amount_rate": 0.82, "buy_elg_amount": -5450.94, "buy_lg_amount": 6398.72,
-        }], self.trade_date, _parse)
-        self.assertEqual(rows[0]["net_amount"], 947.77)
-        self.assertEqual(rows[0]["net_amount_rate"], 0.82)
-        self.assertEqual(rows[0]["source"], "moneyflow_dc")
-
-    def test_net_is_derived_only_when_the_vendor_did_not_supply_one(self):
-        rows = normalize_flow_rows("moneyflow", [{
-            "ts_code": "000001.SZ", "trade_date": "20260825",
-            "buy_elg_amount": 100.0, "buy_lg_amount": 50.0,
-            "sell_elg_amount": 30.0, "sell_lg_amount": 20.0,
-        }], self.trade_date, _parse)
-        self.assertEqual(rows[0]["net_amount"], 100.0)
-
-    def test_no_flow_information_at_all_stays_null_rather_than_zero(self):
-        rows = normalize_flow_rows("moneyflow", [
-            {"ts_code": "000001.SZ", "trade_date": "20260825"},
-        ], self.trade_date, _parse)
-        self.assertIsNone(rows[0]["net_amount"],
-                          "absent flow must not be recorded as a real zero net")
-
-    def test_rows_from_another_date_are_dropped(self):
-        rows = normalize_flow_rows("moneyflow", [
-            {"ts_code": "000001.SZ", "trade_date": "20260824", "net_amount": 5.0},
-        ], self.trade_date, _parse)
-        self.assertEqual(rows, [])
-
-    def test_duplicate_symbols_collapse(self):
-        rows = normalize_flow_rows("moneyflow", [
-            {"ts_code": "000001.SZ", "trade_date": "20260825", "net_amount": 1.0},
-            {"ts_code": "000001.SZ", "trade_date": "20260825", "net_amount": 2.0},
-        ], self.trade_date, _parse)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["net_amount"], 2.0)
-
-    def test_raw_payload_is_retained_for_vendor_specific_buckets(self):
-        rows = normalize_flow_rows("moneyflow_ths", [{
-            "ts_code": "000001.SZ", "trade_date": "20260825", "net_amount": 1.0,
-            "vendor_only_field": "kept",
-        }], self.trade_date, _parse)
-        self.assertEqual(rows[0]["raw"]["vendor_only_field"], "kept")
+    database = _Database(stored)
+    result = asyncio.run(sync(date(2026, 10, 9), expected_symbols=lambda _day: expected,
+                              run_database_blocking=run, db=database))
+    return result, database
 
 
-class SyncCoverageGateTests(unittest.TestCase):
-    trade_date = date(2026, 8, 25)
-
-    class _FakeCursor:
-        """The batched write path groups by statement, so record each row."""
-
-        def __init__(self, connection):
-            self._connection = connection
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_exc):
-            return False
-
-        def executemany(self, statement, parameters, returning=False):
-            for item in parameters:
-                self._connection.statements.append((statement, tuple(item)))
-
-    class _FakeConnection:
-        def __init__(self):
-            self.statements = []
-
-        def cursor(self):
-            return SyncCoverageGateTests._FakeCursor(self)
-
-        def execute(self, statement, params=None):
-            self.statements.append((statement, params))
-            return self
-
-    class _FakeDb:
-        def __init__(self):
-            self.connection = SyncCoverageGateTests._FakeConnection()
-
-        @contextmanager
-        def transaction(self):
-            yield self.connection
-
-    def _sync(self, rows_by_api, expected=100):
-        calls = []
-
-        async def call_api(api_name, params, fields, preference):
-            calls.append(api_name)
-            rows = rows_by_api.get(api_name)
-            if isinstance(rows, Exception):
-                raise rows
-            return SimpleNamespace(rows=rows, provider=SimpleNamespace(key="tushare_test"))
-
-        async def run_blocking(fn, *args, **kwargs):
-            return fn(*args) if args else fn()
-
-        return asyncio.run(sync(
-            self.trade_date, call_tushare_api=call_api, parse_date=_parse,
-            expected_symbols=lambda _d: expected, run_database_blocking=run_blocking,
-            db=self._FakeDb(), safe_error_detail=lambda text, _n: text,
-        )), calls
-
-    @staticmethod
-    def _rows(count):
-        return [{"ts_code": f"{index:06d}.SZ", "trade_date": "20260825", "net_amount": 1.0}
-                for index in range(count)]
-
-    def test_a_truncated_cross_section_is_rejected_not_stored(self):
-        result, _ = self._sync({"moneyflow": self._rows(50), "moneyflow_dc": self._rows(90),
-                                "moneyflow_ths": self._rows(95)}, expected=100)
-        self.assertEqual(result["status"], "partial")
-        self.assertIn("moneyflow", result["errors"])
-        self.assertIn("coverage floor", result["errors"]["moneyflow"])
-        self.assertNotIn("moneyflow", result["rows"])
-        self.assertIn("moneyflow_dc", result["rows"])
-
-    def test_one_vendor_outage_does_not_block_the_others(self):
-        result, _ = self._sync({"moneyflow": RuntimeError("gateway down"),
-                                "moneyflow_dc": self._rows(95), "moneyflow_ths": self._rows(95)})
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["errors"]["moneyflow"], "gateway down")
-        self.assertEqual(set(result["rows"]), {"moneyflow_dc", "moneyflow_ths"})
-
-    def test_all_sources_failing_blocks_rather_than_storing_nothing_silently(self):
-        result, _ = self._sync({name: self._rows(1) for name in
-                                ("moneyflow", "moneyflow_dc", "moneyflow_ths")}, expected=100)
-        self.assertEqual(result["status"], "blocked")
-        self.assertIn("coverage gate", result["reason"])
-
-    def test_no_daily_universe_blocks_before_any_provider_call(self):
-        result, calls = self._sync({}, expected=0)
-        self.assertEqual(result["status"], "blocked")
-        self.assertEqual(calls, [], "the universe check must precede provider I/O")
-
-    def test_completed_run_states_the_end_of_day_boundary(self):
-        result, _ = self._sync({name: self._rows(95) for name in
-                                ("moneyflow", "moneyflow_dc", "moneyflow_ths")})
+class FlowCoverageTests(unittest.TestCase):
+    def test_a_close_with_its_flow_cross_section_is_completed(self):
+        result, database = run_sync(expected=5300, stored=5290)
         self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["rows"], {FLOW_SOURCE: 5290})
+        self.assertEqual(database.queries[0][1], (date(2026, 10, 9), FLOW_SOURCE))
         self.assertIn("end_of_day_only", result["boundary"])
-        self.assertEqual(MINIMUM_COVERAGE_RATIO, 0.80)
+
+    def test_a_short_cross_section_is_reported_missing_with_its_count(self):
+        result, _database = run_sync(expected=5300, stored=int(5300 * MINIMUM_COVERAGE_RATIO) - 1)
+        self.assertEqual(result["status"], "missing")
+        self.assertIn("of 5300 symbols", result["reason"])
+
+    def test_no_daily_universe_blocks_before_reading_flow(self):
+        result, database = run_sync(expected=0, stored=0)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(database.queries, [])
 
 
 @unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")

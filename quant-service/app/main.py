@@ -1228,11 +1228,9 @@ def settle_xiaojie_recent_sessions(as_of_date: date) -> dict[str, Any]:
 
 
 async def sync_stock_money_flow(trade_date: date) -> dict[str, Any]:
-    """Ingest one completed session's per-stock capital flow (end-of-day only)."""
+    """Report the per-stock flow the Longhu close stored for one session (end-of-day only)."""
     return await sync_stock_money_flow_isolated(
-        trade_date, call_tushare_api=call_tushare_api, parse_date=tushare_date,
-        expected_symbols=full_market_daily_row_count, run_database_blocking=run_database_blocking,
-        db=db, safe_error_detail=safe_error_detail,
+        trade_date, expected_symbols=full_market_daily_row_count, run_database_blocking=run_database_blocking, db=db,
     )
 
 
