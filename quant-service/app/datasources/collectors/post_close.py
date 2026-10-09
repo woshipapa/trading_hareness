@@ -65,6 +65,7 @@ class ArchiveDeps:
     previous_trading_day: Callable[[date], Awaitable[date | None]]
     margin_detail_enabled: bool = False
     max_tick_symbols: int = 60
+    project_valuations: Callable[[date], Awaitable[Mapping[str, Any]]] | None = None
 
 
 @dataclass
@@ -212,6 +213,9 @@ async def job_fuyao_valuation_index(deps: ArchiveDeps, state: ArchiveState, day:
     batches, dropped, failures = await fetch_code_batches(fetch, "a_share_valuations_snapshot", codes)
     valuations = [row for _codes, data in batches for row in fuyao_evidence.valuation_observations(data, now)]
     stored = await deps.collector.persist_observations("fuyao_ths", "a_share_valuations_snapshot", valuations) if valuations else 0
+    # Projection reads persisted evidence and verifies its session date; it
+    # cannot relabel a current snapshot as an older requested trading day.
+    projection = dict(await deps.project_valuations(day)) if deps.project_valuations else {"status": "disabled"}
     index_rows: list[dict[str, Any]] = []
     dropped_indices: list[str] = []
     for tag in ("cn_concept", "industry", "region", "tszs"):
@@ -226,7 +230,9 @@ async def job_fuyao_valuation_index(deps: ArchiveDeps, state: ArchiveState, day:
             index_rows.extend({**row, "index_tag": tag} for row in fuyao_evidence.index_quote_observations(data, now, names))
     index_stored = await deps.collector.persist_observations("fuyao_ths", "ths_index_prices_snapshot", index_rows) if index_rows else 0
     return {"valuations": len(valuations), "stored": stored, "dropped_codes": dropped[:20], "failures": failures[:5],
-            "index_quotes": len(index_rows), "index_stored": index_stored, "dropped_index_codes": dropped_indices[:20]}
+            "index_quotes": len(index_rows), "index_stored": index_stored, "dropped_index_codes": dropped_indices[:20],
+            "daily_valuation_projection": projection,
+            "status": "completed" if projection.get("status") in {"completed", "unchanged", "disabled"} else "pending"}
 
 
 async def job_tick_flow(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
@@ -302,8 +308,9 @@ async def run_due_jobs(deps: ArchiveDeps, state: ArchiveState, now: datetime, *,
         state.last_attempt[job.key] = time_module.monotonic()
         try:
             results[job.key] = {"status": "completed", **await RUNNERS[job.key](deps, state, day, now)}
-            state.done[job.key] = day.isoformat()
-            await deps.collector.record_health("public_archive", job.key, True, 1, None, None)
+            if results[job.key]["status"] == "completed":
+                state.done[job.key] = day.isoformat()
+                await deps.collector.record_health("public_archive", job.key, True, 1, None, None)
         except NotYetPublished as pending:
             results[job.key] = {"status": "pending", "reason": error_text(pending, 240)}
         except Exception as error:  # noqa: BLE001 - retried on the next window tick

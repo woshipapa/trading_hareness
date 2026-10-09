@@ -55,6 +55,7 @@ from .daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload
 from .daily_control_reconciliation import read_coverage as read_daily_control_coverage
 from .daily_control_reconciliation import reconcile as reconcile_daily_control_coverage
 from .owner_factor_repository import read_persisted_factor_controls, read_persisted_factor_window
+from .owner_daily_control_repository import read_persisted_control_rows
 from .async_provider_circuit_repository import open_capabilities as read_async_open_provider_capabilities
 from .async_provider_circuit_repository import open_provider_keys as read_async_open_provider_keys
 from .async_market_session_repository import (
@@ -1515,43 +1516,9 @@ def _read_persisted_factor_controls(trade_date: date) -> dict[str, Any]:
 
 
 def _read_persisted_control_rows(api_name: str, trade_date: date) -> dict[str, Any] | None:
-    """Read a complete owner projection before using a remote fallback."""
-    if api_name not in {"daily_basic", "stk_limit", "suspend_d"}:
-        return None
+    """Delegate dated projection reads; mixed daily-basic provenance stays per row."""
     with db.transaction() as connection:
-        table, date_column = {
-            "daily_basic": ("quant.daily_fundamentals", "trading_date"),
-            "stk_limit": ("quant.daily_trade_limits", "trading_date"),
-            "suspend_d": ("quant.security_suspensions", "suspend_date"),
-        }[api_name]
-        provider_row = connection.execute(
-            f"""SELECT provider,count(DISTINCT symbol)::int AS symbols
-                  FROM {table}
-                 WHERE {date_column}=%s
-                   AND available_at < (({date_column}+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                 GROUP BY provider ORDER BY symbols DESC,provider LIMIT 1""",
-            (trade_date,),
-        ).fetchone()
-        if not provider_row:
-            return None
-        provider = str(provider_row["provider"])
-        if api_name == "daily_basic":
-            projection = "symbol AS ts_code,to_char(trading_date,'YYYYMMDD') AS trade_date,close,turnover_rate,volume_ratio,pe,pb,total_share,float_share,total_mv,circ_mv"
-        elif api_name == "stk_limit":
-            projection = "symbol AS ts_code,to_char(trading_date,'YYYYMMDD') AS trade_date,limit_up,limit_down"
-        else:
-            projection = "symbol AS ts_code,to_char(suspend_date,'YYYYMMDD') AS trade_date,suspend_reason,resume_date"
-        rows = connection.execute(
-            f"""SELECT {projection}
-                  FROM {table}
-                 WHERE {date_column}=%s AND provider=%s
-                   AND available_at < (({date_column}+1)::timestamp AT TIME ZONE 'Asia/Shanghai')""",
-            (trade_date, provider),
-        ).fetchall()
-    return {
-        "rows": [dict(row) for row in rows], "provider": provider,
-        "trade_date": trade_date.isoformat(), "source": f"owner_persisted_{api_name}",
-    }
+        return read_persisted_control_rows(connection, api_name, trade_date)
 
 
 def upsert_sector_taxonomy(connection: Any, taxonomy_key: str, label: str, provider_key: str, metadata: dict[str, Any]) -> None:

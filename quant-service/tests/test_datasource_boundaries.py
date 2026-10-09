@@ -25,6 +25,7 @@ ALLOWED_APP_MODULES = frozenset({
     "market_rules",
     "http_clients", "http_retry", "network_health", "provider_health", "public_market_repository",
     "runtime_leases", "runtime_tasks", "database", "async_market_session_repository", "fuyao_provider",
+    "daily_valuation_repository",
 })
 
 
