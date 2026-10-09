@@ -25,6 +25,7 @@ from ..derived.market_sentiment import market_sentiment_snapshot
 from ..resolver import CapabilityResolver
 from ..sources import eastmoney_hot_rank, eastmoney_ztb, investor_qa, news_flash
 from ..sources.fuyao_evidence import fetch_all_pool_pages
+from ..error_text import error_text
 
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -158,7 +159,7 @@ async def capture_news(deps: CollectorDeps, state: CollectorState, now: datetime
             result[provider] = {"status": "completed", "received": len(flashes), "new": len(fresh), "stored": stored}
             await _health(deps, state, provider, "news_flash", True, len(flashes), latency, None)
         except Exception as error:  # noqa: BLE001 - one site outage must not stop the others
-            result[provider] = {"status": "failed", "error": str(error)[:200]}
+            result[provider] = {"status": "failed", "error": error_text(error, 200)}
             await _health(deps, state, provider, "news_flash", False, 0, None, str(error))
     return result
 
@@ -180,7 +181,7 @@ async def capture_investor_qa(deps: CollectorDeps, state: CollectorState, now: d
             result[provider] = {"status": "completed", "received": len(rows), "new": len(fresh), "stored": stored}
             await _health(deps, state, provider, "investor_qa", True, len(rows), latency, None)
         except Exception as error:  # noqa: BLE001
-            result[provider] = {"status": "failed", "error": str(error)[:200]}
+            result[provider] = {"status": "failed", "error": error_text(error, 200)}
             await _health(deps, state, provider, "investor_qa", False, 0, None, str(error))
     return result
 
@@ -205,7 +206,7 @@ async def capture_stock_changes(deps: CollectorDeps, state: CollectorState, now:
         return {"status": "completed", "received": len(rows), "new": len(fresh), "stored": stored}
     except Exception as error:  # noqa: BLE001
         await _health(deps, state, provider, "stock_change", False, 0, None, str(error))
-        return {"status": "failed", "error": str(error)[:200]}
+        return {"status": "failed", "error": error_text(error, 200)}
 
 
 async def capture_hot_ranks(deps: CollectorDeps, state: CollectorState, now: datetime) -> dict[str, Any]:
@@ -221,7 +222,7 @@ async def capture_hot_ranks(deps: CollectorDeps, state: CollectorState, now: dat
             result[kind] = {"status": "completed", "received": len(rows), "stored": stored}
             await _health(deps, state, provider, capability, True, len(rows), latency, None)
         except Exception as error:  # noqa: BLE001
-            result[kind] = {"status": "failed", "error": str(error)[:200]}
+            result[kind] = {"status": "failed", "error": error_text(error, 200)}
             await _health(deps, state, provider, capability, False, 0, None, str(error))
     return result
 
@@ -237,7 +238,7 @@ async def capture_board_changes(deps: CollectorDeps, state: CollectorState, now:
         return {"status": "completed", "received": len(boards), "stored": stored}
     except Exception as error:  # noqa: BLE001
         await _health(deps, state, provider, "board_change_snapshot", False, 0, None, str(error))
-        return {"status": "failed", "error": str(error)[:200]}
+        return {"status": "failed", "error": error_text(error, 200)}
 
 
 async def _concept_quotes(deps: CollectorDeps, state: CollectorState) -> dict[str, dict[str, Any]]:
@@ -301,7 +302,7 @@ async def capture_sentiment(deps: CollectorDeps, state: CollectorState, now: dat
                 "seal_rate": reading["seal_rate"]}
     except Exception as error:  # noqa: BLE001
         await _health(deps, state, SENTIMENT_PROVIDER_KEY, "market_sentiment_snapshot", False, 0, None, str(error))
-        return {"status": "failed", "error": str(error)[:200]}
+        return {"status": "failed", "error": error_text(error, 200)}
 
 
 CAPTURES: dict[str, Callable[[CollectorDeps, CollectorState, datetime], Awaitable[dict[str, Any]]]] = {
@@ -323,7 +324,7 @@ async def run_once(deps: CollectorDeps, state: CollectorState, now: datetime, *,
         try:
             results[key] = await CAPTURES[key](deps, state, now)
         except Exception as error:  # noqa: BLE001 - a capture bug must not stop the loop
-            results[key] = {"status": "failed", "error": str(error)[:200]}
+            results[key] = {"status": "failed", "error": error_text(error, 200)}
     return results
 
 

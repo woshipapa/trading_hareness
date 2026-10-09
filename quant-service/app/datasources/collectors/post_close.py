@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
 from ..sources.fuyao_evidence import fetch_code_batches
 from .intraday import CollectorDeps, CollectorState, SENTIMENT_PROVIDER_KEY, build_sentiment
+from ..error_text import error_text
 from ..sources.ticks import (
     capital_change_observations, fetch_tdx_capital_changes, fetch_tdx_ticks, fetch_tencent_ticks,
     tick_flow_observation,
@@ -167,7 +168,7 @@ async def job_eastmoney_datacenter(deps: ArchiveDeps, state: ArchiveState, day: 
             summary[key] = {"rows": len(rows), "stored": stored}
         except Exception as error:  # noqa: BLE001 - one report must not block the others
             failures += 1
-            summary[key] = {"status": "failed", "error": str(error)[:160]}
+            summary[key] = {"status": "failed", "error": error_text(error, 160)}
         await asyncio.sleep(0.3)
     if failures == len(DATACENTER_EVENT_REPORTS):
         raise RuntimeError(f"every datacenter report failed: {summary}")
@@ -287,7 +288,7 @@ async def run_due_jobs(deps: ArchiveDeps, state: ArchiveState, now: datetime, *,
             state.done[job.key] = day.isoformat()
             await deps.collector.record_health("public_archive", job.key, True, 1, None, None)
         except Exception as error:  # noqa: BLE001 - retried on the next window tick
-            results[job.key] = {"status": "failed", "error": str(error)[:240]}
+            results[job.key] = {"status": "failed", "error": error_text(error, 240)}
             try:
                 await deps.collector.record_health("public_archive", job.key, False, 0, None, str(error))
             except Exception:  # noqa: BLE001
