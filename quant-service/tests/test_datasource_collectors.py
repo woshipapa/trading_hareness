@@ -254,6 +254,41 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["tick_source"], "tencent_free")
         self.assertEqual(row["opening_auction"]["amount"], 1159)
 
+    async def test_valuation_projection_runs_after_raw_persistence_for_requested_date(self):
+        recorder = Recorder()
+        called = []
+
+        async def snapshot():
+            return [{"symbol": "920001.BJ"}], {}
+
+        async def fuyao(route, _params):
+            return {"item": [{"thscode": "920001.BJ", "pe_ttm": -4, "pb_mrq": 2}]} if route == "a_share_valuations_snapshot" else {"item": []}
+
+        async def project(day):
+            self.assertEqual(recorder.observations[0][1], "a_share_valuations_snapshot")
+            called.append(day)
+            return {"status": "partial", "inserted": 1}
+
+        deps = self._deps(recorder, fuyao_fetch=fuyao, fuyao_snapshot=snapshot)
+        deps.project_valuations = project
+        result = await post_close.job_fuyao_valuation_index(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(called, [date(2026, 10, 9)])
+        self.assertEqual(result["daily_valuation_projection"]["status"], "partial")
+        self.assertEqual(result["status"], "pending")
+
+    async def test_pending_archive_projection_is_retried_instead_of_marked_done(self):
+        recorder = Recorder()
+        state = post_close.ArchiveState()
+
+        async def pending(*_args):
+            return {"status": "pending", "daily_valuation_projection": {"status": "partial"}}
+
+        with patch.dict(post_close.RUNNERS, {"fuyao_valuation_index": pending}):
+            await post_close.run_due_jobs(self._deps(recorder), state, EVENING, trading_day=True,
+                enabled={job.key: job.key == "fuyao_valuation_index" for job in post_close.JOBS})
+        self.assertNotIn("fuyao_valuation_index", state.done)
+        self.assertFalse(recorder.health)
+
     async def test_run_due_jobs_marks_success_and_records_failure(self):
         recorder = Recorder()
         deps = self._deps(recorder)

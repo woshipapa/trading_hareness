@@ -30,22 +30,23 @@ MINIMUM_BAR_COVERAGE_RATIO = 0.95
 DEFAULT_SOURCE_PLAN: dict[str, dict[str, str]] = {
     "daily_bars": {
         "primary": "longhuvip_composite",
-        "fallback": "tushare_super_get",
+        "fallback": "none_retired",
         "store": "quant.canonical_bars_daily",
     },
     "daily_basic": {
-        "primary": "tushare_super_get",
-        "fallback": "longhuvip_composite",
+        "primary": "owner_persisted_multi_source",
+        "fallback": "none_retired",
         "store": "quant.daily_fundamentals",
+        "semantics": "per-symbol provenance; valuation-only records do not supply turnover or capital fields",
     },
     "adjustment_factor": {
         "primary": "longhu_qfq_derived",
-        "fallback": "tushare_super_get",
+        "fallback": "owner_persisted_historical_checkpoints",
         "store": "quant.daily_adjustment_factors",
     },
     "trade_limits": {
-        "primary": "longhuvip_composite",
-        "fallback": "tushare_super_get",
+        "primary": "owner_persisted_trade_limits",
+        "fallback": "none_retired",
         "store": "quant.daily_trade_limits",
     },
 }

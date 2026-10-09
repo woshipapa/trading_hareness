@@ -5,15 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import re
-import sys
+from pathlib import Path
 
 from verify_component_boundaries import ROOT, load_manifest
 
 
 def _compose_build_contract(compose: str, expected_dockerfile: str, compose_dir: Path, root: Path) -> bool:
-    dockerfile_name = str((root / expected_dockerfile).relative_to(compose_dir))
+    dockerfile_name = (root / expected_dockerfile).relative_to(compose_dir).as_posix()
     return bool(re.search(r"(?m)^\s*context:\s*\.\s*$", compose)) and bool(
         re.search(rf"(?m)^\s*dockerfile:\s*{re.escape(dockerfile_name)}\s*$", compose)
     )

@@ -3,6 +3,7 @@
     python -m app.datasources catalog [--capability limits.limit_up_pool] [--source fuyao_ths]
     python -m app.datasources validate
     python -m app.datasources collect [--tasks public_evidence_capture,post_close_public_archive]
+    python -m app.datasources project-valuations --trade-date YYYY-MM-DD [--apply]
 
 ``catalog``/``validate`` need nothing but this package.  ``collect`` needs the
 PG* environment and runs the collectors under the same durable leases as the
@@ -84,11 +85,25 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("validate")
     collect = commands.add_parser("collect")
     collect.add_argument("--tasks", default="public_evidence_capture,post_close_public_archive")
+    projection = commands.add_parser("project-valuations", help="preview dated persisted valuation gaps; --apply writes projections")
+    projection.add_argument("--trade-date", required=True, type=date.fromisoformat)
+    projection.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "catalog":
         return _catalog(args)
     if args.command == "validate":
         return _validate(args)
+    if args.command == "project-valuations":
+        from ..database import Database  # noqa: PLC0415 - only this command needs PostgreSQL
+        from ..daily_valuation_repository import project_valuations  # noqa: PLC0415
+        database = Database()
+        database.open()
+        try:
+            result = project_valuations(database, args.trade_date, apply=args.apply)
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+            return 2 if result["status"] in {"partial", "blocked"} else 0
+        finally:
+            database.close()
     from .runtime import COLLECTOR_TASKS  # noqa: PLC0415
     tasks = [task.strip() for task in args.tasks.split(",") if task.strip()]
     unknown = sorted(set(tasks) - set(COLLECTOR_TASKS))
