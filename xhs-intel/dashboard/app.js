@@ -431,12 +431,20 @@ function renderSingleNotes() {
   </div>`;
 }
 
+function keywordChips(label, values, extraClass = '') {
+  if (!values?.length) return '';
+  const chips = values.map((value) => `<span class="keyword-chip ${extraClass}">${escapeHtml(value)}</span>`).join('');
+  return `<div class="topic-keywords"><span class="topic-keywords-label">${escapeHtml(label)}</span>${chips}</div>`;
+}
+
 function renderTopics() {
   const topics = state.dashboard?.topics || [];
   const rows = topics.map((topic) => {
-    const searchKeywords = topic.policy?.search_keywords || [];
+    const policy = topic.policy || {};
+    const searchKeywords = policy.search_keywords || [];
     const searchInfo = searchKeywords.length ? `检索词 ${searchKeywords.length} 个` : '检索词回退主题名';
-    return `<div class="topic-row"><div><strong>${escapeHtml(topic.name)}</strong><code>${escapeHtml(topic.slug)} · v${topic.active_version} · ${escapeHtml(searchInfo)}</code></div><div class="topic-description">${escapeHtml(topic.description || topic.policy?.description || '暂无描述')}</div><button type="button" role="switch" aria-checked="${Boolean(topic.enabled)}" aria-label="${topic.enabled ? '停用' : '启用'} ${escapeHtml(topic.name)}" title="${topic.enabled ? '停用主题' : '启用主题'}" class="switch ${topic.enabled ? 'on' : ''}" data-action="toggle-topic" data-slug="${escapeHtml(topic.slug)}" data-enabled="${topic.enabled ? '1' : '0'}"></button><div class="topic-actions"><button type="button" class="button small secondary" data-action="edit-topic" data-slug="${escapeHtml(topic.slug)}">${icon('edit')}<span>编辑</span></button></div></div>`;
+    const keywords = `${keywordChips('检索', searchKeywords)}${keywordChips('包含', policy.include_keywords || [])}${keywordChips('排除', policy.exclude_keywords || [], 'negative')}`;
+    return `<div class="topic-row"><div><strong>${escapeHtml(topic.name)}</strong><code>${escapeHtml(topic.slug)} · v${topic.active_version} · ${escapeHtml(searchInfo)}</code></div><div class="topic-description"><div>${escapeHtml(topic.description || policy.description || '暂无描述')}</div>${keywords}</div><button type="button" role="switch" aria-checked="${Boolean(topic.enabled)}" aria-label="${topic.enabled ? '停用' : '启用'} ${escapeHtml(topic.name)}" title="${topic.enabled ? '停用主题' : '启用主题'}" class="switch ${topic.enabled ? 'on' : ''}" data-action="toggle-topic" data-slug="${escapeHtml(topic.slug)}" data-enabled="${topic.enabled ? '1' : '0'}"></button><div class="topic-actions"><button type="button" class="button small secondary" data-action="edit-topic" data-slug="${escapeHtml(topic.slug)}">${icon('edit')}<span>编辑</span></button></div></div>`;
   }).join('');
   const actions = `<button class="button secondary" data-action="run-topic-collection">${icon('scan')}<span>按主题采集</span></button><button class="button primary" data-action="new-topic">${icon('plus')}<span>新增主题</span></button>`;
   return `<section class="panel">
