@@ -17,6 +17,7 @@ from .backtest_execution_rules import a_share_exit_lag
 from .research_trial_repository import record_family
 from .owner_storage import eligible_cold_tables, tiered_relation_sql
 from .adjustment_factor_semantics import persisted_factor_semantics_sql
+from .industry_membership_preference import industry_preference_sql, industry_taxonomies_sql
 
 
 # Stable identity for the bounded SQL factor evaluator.  This remains a
@@ -170,9 +171,9 @@ def _industry_join_sql(membership_mode: str) -> tuple[str, str]:
                        SELECT member.sector_key
                          FROM quant.sector_membership_history member
                         WHERE member.symbol=bar.symbol
-                          AND member.taxonomy_key IN ('longhu_ths_industry','ths_index_i')
+                          AND member.taxonomy_key IN (""" + industry_taxonomies_sql() + """)
                           AND member.effective_to IS NULL
-                        ORDER BY CASE WHEN member.taxonomy_key='longhu_ths_industry' THEN 0 ELSE 1 END,
+                        ORDER BY """ + industry_preference_sql() + """,
                                  member.known_at DESC,member.sector_key
                         LIMIT 1
                  ) industry_history ON TRUE""", "current_backfill"
@@ -180,11 +181,11 @@ def _industry_join_sql(membership_mode: str) -> tuple[str, str]:
                        SELECT member.sector_key
                          FROM quant.sector_membership_history member
                         WHERE member.symbol=bar.symbol
-                          AND member.taxonomy_key IN ('ths_industry','ths_index_i')
+                          AND member.taxonomy_key IN (""" + industry_taxonomies_sql() + """)
                           AND member.effective_from<=bar.trading_date
                           AND (member.effective_to IS NULL OR member.effective_to>=bar.trading_date)
                           AND member.known_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                        ORDER BY CASE WHEN member.taxonomy_key='ths_industry' THEN 0 ELSE 1 END,
+                        ORDER BY """ + industry_preference_sql() + """,
                                  member.known_at DESC,member.effective_from DESC,member.sector_key
                         LIMIT 1
                  ) industry_history ON TRUE""", "point_in_time"

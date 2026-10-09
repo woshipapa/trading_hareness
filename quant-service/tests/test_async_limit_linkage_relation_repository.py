@@ -11,6 +11,7 @@ class _Result:
         return [{
             "symbol": "000001.SZ", "concept_keys": ["885001.TI", "885002.TI"],
             "concept_labels": ["测试概念"], "leader_symbols": ["000002.SZ"], "leader_names": ["领涨股"],
+            "leader_taxonomies": ["fuyao_ths_concept"], "candidate_taxonomies": ["ths_concept_flow"],
         }]
 
 
@@ -52,9 +53,17 @@ class AsyncLimitLinkageRelationRepositoryTests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(rows[0]["shared_concepts"], 2)
         query, params = database.connection.calls[0]
         self.assertIn("event.event_type='limit_up_pool'", query)
-        self.assertIn("taxonomy_key='ths_concept_flow'", query)
-        self.assertIn("HAVING count(*) BETWEEN 2 AND 200", query)
-        self.assertEqual(params, (trade_date,))
+        self.assertIn("HAVING count(DISTINCT symbol) BETWEEN 2 AND 200", query)
+        self.assertEqual(params, ("fuyao_ths_concept", "ths_concept_flow", trade_date, "fuyao_ths_concept", "ths_concept_flow"))
+
+    async def test_fuyao_membership_first_and_the_frozen_rows_only_for_symbols_fuyao_lacks(self) -> None:
+        database = _Database()
+        rows = await relations(database, date(2026, 10, 9))
+        query, _params = database.connection.calls[0]
+        self.assertIn("NOT EXISTS (SELECT 1 FROM live WHERE live.symbol=frozen.symbol)", query)
+        self.assertEqual(rows[0]["membership_taxonomies"], ["fuyao_ths_concept", "ths_concept_flow"])
+        self.assertTrue(rows[0]["frozen_membership"], "a relation that leaned on the frozen rows says so")
+        self.assertNotIn("leader_taxonomies", rows[0])
 
 
 if __name__ == "__main__":

@@ -16,6 +16,9 @@ from zoneinfo import ZoneInfo
 
 from .analyst_calibration import chronological_calibration
 from .point_in_time import exchange_day_end
+from .ths_concept_name_bridge import (
+    CATALOG_SQL, CATALOGS, CONCEPT_DAYS_SQL, THEME_ALIASES_SQL, build_bridge, concept_days_by_code, theme_board_codes,
+)
 
 
 CN = ZoneInfo("Asia/Shanghai")
@@ -477,23 +480,13 @@ def analyst_market_evaluation(database: Any, start_date: date | None = None, end
                   AND status='ready' AND observed_at<=%s
                 ORDER BY exchange_date,CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC""",
             (start, end, knowledge_cutoff)).fetchall()]
-        sector_days = [dict(row) for row in connection.execute(
-            """SELECT feature.sector_key,sector.label,feature.net_amount,feature.lhb_negative_count,feature.trading_date
-                FROM quant.sector_flow_daily_features feature JOIN quant.sectors sector
-                   ON sector.taxonomy_key=feature.taxonomy_key AND sector.sector_key=feature.sector_key
-                WHERE feature.taxonomy_key='ths_concept_flow' AND trading_date BETWEEN %s AND %s
-                  AND feature.status='ready' AND feature.available_at<=%s""",
-            (start, end, knowledge_cutoff)).fetchall()]
-        theme_board_map = {
-            str(row["theme_key"]): str(row["sector_key"])
-            for row in connection.execute(
-                """SELECT theme_key,sector_key
-                     FROM quant.analyst_theme_board_aliases
-                    WHERE status='approved' AND taxonomy_key='ths_concept_flow'"""
-            ).fetchall()
-        }
+        bridge = build_bridge("concept", connection.execute(CATALOG_SQL, (list(CATALOGS["concept"]),)).fetchall())
+        sector_days, sector_flow_source = concept_days_by_code(
+            connection.execute(CONCEPT_DAYS_SQL, (start, end, knowledge_cutoff)).fetchall(), bridge)
+        theme_board_map = theme_board_codes(connection.execute(THEME_ALIASES_SQL).fetchall())
     result = summarize_evaluation(observations=observations, opinions=opinions, outcomes=outcomes, intraday_outcomes=intraday_outcomes, author_action_outcomes=author_action_outcomes, market_days=market_days, sector_days=sector_days, market_days_for_baseline=market_days, theme_board_map=theme_board_map, start_date=start, end_date=end)
     result["analyst_id"] = analyst_id
+    result["sector_flow_source"] = sector_flow_source
     return result
 
 

@@ -11,16 +11,60 @@ from datetime import date, datetime
 from typing import Any
 
 from .sector_membership_repository import point_in_time_membership_predicate
+from .ths_concept_name_bridge import CATALOG_SQL, CATALOGS, FLOW_SOURCE, build_bridge
+
+
+def _live_concept_rows(connection: Any, as_of_date: date) -> list[dict[str, Any]]:
+    """The session's 同花顺 concept flow joined to point-in-time Fuyao membership by board name."""
+    flows = [dict(row) for row in connection.execute(
+        """SELECT sector_key,net_amount,change_pct,leading_label,provider_key,available_at
+             FROM quant.sector_market_observations
+            WHERE taxonomy_key='eastmoney_concept' AND trading_date=%s""",
+        (as_of_date,),
+    ).fetchall()]
+    if not flows:
+        return []
+    bridge = build_bridge("concept", connection.execute(CATALOG_SQL, (list(CATALOGS["concept"]),)).fetchall())
+    matched, _coverage = bridge.match(row["sector_key"] for row in flows)
+    flow_by_code: dict[str, dict[str, Any]] = {}
+    for row in flows:
+        code = matched.get(str(row["sector_key"]).strip())
+        if code is not None:
+            flow_by_code.setdefault(code, row)
+    if not flow_by_code:
+        return []
+    members = connection.execute(
+        f"""SELECT member.symbol,member.sector_key FROM quant.sector_membership_history member
+             WHERE member.taxonomy_key='fuyao_ths_concept' AND {point_in_time_membership_predicate("member")}
+               AND member.sector_key=ANY(%s)""",
+        (as_of_date, as_of_date, as_of_date, sorted(flow_by_code)),
+    ).fetchall()
+    rows = []
+    for member in members:
+        code = str(member["sector_key"])
+        flow = flow_by_code[code]
+        rows.append({
+            "symbol": member["symbol"], "sector_key": code, "label": bridge.name_for(code) or flow["sector_key"],
+            "net_amount": flow["net_amount"], "change_pct": flow["change_pct"], "leading_label": flow["leading_label"],
+            "provider_key": flow["provider_key"], "available_at": flow["available_at"],
+            "taxonomy_key": "fuyao_ths_concept", "flow_taxonomy_key": "eastmoney_concept",
+            "flow_board_name": flow["sector_key"], "flow_source": FLOW_SOURCE, "net_amount_unit": "100m_cny",
+        })
+    return rows
 
 
 def load_exact_board_context_rows(database: Any, as_of_date: date) -> list[dict[str, Any]]:
     """Return same-date exact board membership joined to saved board flow.
 
-    The preferred path remains point-in-time THS concept membership.  The
-    Longhu full-market close source supplies an exact THS industry ``plate_id``
-    on every saved stock-flow row, so it is a valid same-date fallback rather
-    than the former ``no_exact_ths_concept_mapping`` dead end.  Both branches
-    are persisted evidence reads; this function never calls a provider.
+    Concept flow first: the session's 同花顺 concept flow (stored as
+    ``eastmoney_concept``, keyed by board name) over point-in-time
+    ``fuyao_ths_concept`` membership, joined by name; the Tushare-era
+    ``ths_concept_flow`` rows still answer the sessions they cover.  The
+    Longhu full-market close source supplies an exact THS industry
+    ``plate_id`` on every saved stock-flow row, so it is a valid same-date
+    fallback for a symbol no concept covers.  Concept net amounts are in 亿元
+    and Longhu's in yuan; each row names its unit.  All branches are persisted
+    evidence reads; this function never calls a provider.
     """
     membership_predicate = point_in_time_membership_predicate("member")
     with database.transaction() as connection:
@@ -67,7 +111,11 @@ def load_exact_board_context_rows(database: Any, as_of_date: date) -> list[dict[
                 )""",
             (as_of_date, as_of_date, as_of_date, as_of_date, as_of_date, as_of_date),
         ).fetchall()
-    return [dict(row) for row in rows]
+        live = _live_concept_rows(connection, as_of_date)
+    covered = {row["symbol"] for row in live}
+    stored = [{**dict(row), "net_amount_unit": "yuan" if dict(row).get("taxonomy_key") == "longhu_ths_industry" else "100m_cny"}
+              for row in rows]
+    return live + [row for row in stored if not (row.get("taxonomy_key") == "longhu_ths_industry" and row["symbol"] in covered)]
 
 
 def lhb_event_rows(connection: Any, trade_date: date, *, available_by: datetime | None = None) -> list[dict[str, Any]]:

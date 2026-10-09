@@ -7,6 +7,9 @@ from typing import Any
 
 from .analyst_market_evaluation import CN, summarize_evaluation
 from .point_in_time import exchange_day_end
+from .ths_concept_name_bridge import (
+    CATALOG_SQL, CATALOGS, CONCEPT_DAYS_SQL, THEME_ALIASES_SQL, build_bridge, concept_days_by_code, theme_board_codes,
+)
 
 
 async def market_evaluation(
@@ -67,28 +70,18 @@ async def market_evaluation(
                 ORDER BY exchange_date,CASE cadence WHEN 'close' THEN 0 ELSE 1 END,observed_at DESC""",
             (start, end, knowledge_cutoff),
         )
-        sector_days_result = await connection.execute(
-            """SELECT feature.sector_key,sector.label,feature.net_amount,feature.lhb_negative_count,feature.trading_date
-                 FROM quant.sector_flow_daily_features feature JOIN quant.sectors sector
-                   ON sector.taxonomy_key=feature.taxonomy_key AND sector.sector_key=feature.sector_key
-                WHERE feature.taxonomy_key='ths_concept_flow' AND trading_date BETWEEN %s AND %s
-                  AND feature.status='ready' AND feature.available_at<=%s""",
-            (start, end, knowledge_cutoff),
-        )
-        aliases_result = await connection.execute(
-            """SELECT theme_key,sector_key
-                 FROM quant.analyst_theme_board_aliases
-                WHERE status='approved' AND taxonomy_key='ths_concept_flow'"""
-        )
+        sector_days_result = await connection.execute(CONCEPT_DAYS_SQL, (start, end, knowledge_cutoff))
+        aliases_result = await connection.execute(THEME_ALIASES_SQL)
+        catalog_result = await connection.execute(CATALOG_SQL, (list(CATALOGS["concept"]),))
         observations = [dict(row) for row in await observations_result.fetchall()]
         opinions = [dict(row) for row in await opinions_result.fetchall()]
         outcomes = [dict(row) for row in await outcomes_result.fetchall()]
         intraday_outcomes = [dict(row) for row in await intraday_result.fetchall()]
         author_action_outcomes = [dict(row) for row in await author_actions_result.fetchall()]
         market_days = [dict(row) for row in await market_days_result.fetchall()]
-        sector_days = [dict(row) for row in await sector_days_result.fetchall()]
-        theme_board_map = {str(row["theme_key"]): str(row["sector_key"])
-                           for row in await aliases_result.fetchall()}
+        sector_days, sector_flow_source = concept_days_by_code(
+            await sector_days_result.fetchall(), build_bridge("concept", await catalog_result.fetchall()))
+        theme_board_map = theme_board_codes(await aliases_result.fetchall())
     result = summarize_evaluation(
         observations=observations, opinions=opinions, outcomes=outcomes,
         intraday_outcomes=intraday_outcomes, author_action_outcomes=author_action_outcomes,
@@ -96,6 +89,7 @@ async def market_evaluation(
         theme_board_map=theme_board_map, start_date=start, end_date=end,
     )
     result["analyst_id"] = analyst_id
+    result["sector_flow_source"] = sector_flow_source
     return result
 
 

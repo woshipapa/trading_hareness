@@ -4,21 +4,6 @@ from provider_test_support import *  # noqa: F403
 
 
 class IntradayMarketMiningTests(unittest.TestCase):
-    def test_ths_concept_top_stocks_requires_exact_concept_code_membership(self):
-        flows = [{"sector_key": "885001.TI", "label": "精确概念", "net_amount": 321, "change_pct": 2.1, "trading_date": date(2026, 8, 10)}]
-        members = [{"sector_key": "885001.TI", "symbol": "000001.SZ"}, {"sector_key": "885001.TI", "symbol": "000002.SZ"},
-                   {"sector_key": "885999.TI", "symbol": "000003.SZ"}]
-        quotes = {
-            "000001.SZ": {"symbol": "000001.SZ", "main_net_inflow": 50, "turnover": 100},
-            "000002.SZ": {"symbol": "000002.SZ", "main_net_inflow": 150, "turnover": 50},
-            "000003.SZ": {"symbol": "000003.SZ", "main_net_inflow": 999, "turnover": 999},
-        }
-        items, coverage = ths_concept_top_stocks(flows, members, quotes, 10)
-        self.assertEqual(items[0]["taxonomy_key"], "ths_concept_flow")
-        self.assertEqual([stock["symbol"] for stock in items[0]["top_stocks"]], ["000002.SZ", "000001.SZ"])
-        self.assertEqual(items[0]["mapped_members"], 2)
-        self.assertEqual(coverage, {"flow_boards": 1, "boards_with_members": 1, "quoted_members": 2})
-
     def test_board_stock_mining_requires_complete_exact_membership_and_keeps_both_directions(self):
         exact_inflow = {
             "taxonomy_key": "eastmoney_industry", "sector_key": "gold", "label": "贵金属",
@@ -49,9 +34,11 @@ class IntradayMarketMiningTests(unittest.TestCase):
     def test_limit_linkage_mining_requires_exact_relation_flow_and_activity(self):
         relations = [
             {"symbol": "000001.SZ", "shared_concepts": 2, "concept_labels": ["低空经济"],
-             "leader_symbols": ["000002.SZ"], "leader_names": ["涨停龙头"]},
+             "leader_symbols": ["000002.SZ"], "leader_names": ["涨停龙头"],
+             "membership_taxonomies": ["fuyao_ths_concept"], "frozen_membership": False},
             {"symbol": "000003.SZ", "shared_concepts": 1, "concept_labels": ["低空经济"],
-             "leader_symbols": ["000002.SZ"], "leader_names": ["涨停龙头"]},
+             "leader_symbols": ["000002.SZ"], "leader_names": ["涨停龙头"],
+             "membership_taxonomies": ["fuyao_ths_concept", "ths_concept_flow"], "frozen_membership": True},
         ]
         quotes = {
             "000001.SZ": {"symbol": "000001.SZ", "name": "联动候选", "main_net_inflow": 80,
@@ -64,6 +51,8 @@ class IntradayMarketMiningTests(unittest.TestCase):
         self.assertEqual(candidates[0]["leader_symbols"], ["000002.SZ"])
         self.assertEqual(candidates[0]["risk_flags"], ["leader_linkage_research_only", "requires_minute_confirmation"])
         self.assertEqual(summary["anchors"], 1)
+        self.assertEqual(candidates[0]["evidence"]["membership_taxonomies"], ["fuyao_ths_concept"])
+        self.assertEqual(summary["frozen_membership_relations"], 1)
 
     def test_order_book_observation_uses_depth_and_nonnegative_cumulative_deltas(self):
         previous = {

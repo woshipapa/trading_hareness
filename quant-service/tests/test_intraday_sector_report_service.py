@@ -42,31 +42,35 @@ class _Db:
 
 
 class IntradaySectorReportServiceTests(TestCase):
-    def test_exact_membership_join_and_tushare_context_are_projected(self):
+    def test_a_ths_named_board_takes_the_fuyao_members_and_an_unmatched_one_the_eastmoney_label(self):
         db = _Db([
-            [{"sector_key": "pcb", "symbol": "000001.SZ", "label": "PCB"}],
-            [{"sector_key": "concept-1", "label": "概念一", "net_amount": 8, "change_pct": 2, "trading_date": date(2026, 8, 22)}],
-            [{"sector_key": "concept-1", "symbol": "000001.SZ"}],
-            [{"taxonomy_key": "ths_concept_flow", "latest_trade_date": date(2026, 8, 22), "rows": 1}],
-            [{"api_name": "moneyflow", "latest_trade_date": "20260822", "symbols": 1, "rows": 1}],
-            [{"api_name": "rt_k", "latest_available_at": "2026-08-22T01:00:00Z", "rows": 1}],
+            [{"taxonomy_key": "fuyao_ths_concept", "sector_key": "885959.TI", "label": "PCB"}],
+            [{"taxonomy_key": "fuyao_ths_concept", "sector_key": "885959.TI", "symbol": "000001.SZ"}],
+            [{"sector_key": "BK9999", "symbol": "000002.SZ", "label": "东财独有"}],
+            [{"taxonomy_key": "eastmoney_concept", "latest_trade_date": date(2026, 10, 9), "rows": 380}],
+            [{"api_name": "moneyflow", "latest_trade_date": "20261008", "symbols": 1, "rows": 1}],
+            [{"api_name": "rt_k", "latest_available_at": "2026-10-08T01:00:00Z", "rows": 1}],
         ])
-        quotes = {"000001.SZ": {"symbol": "000001.SZ", "main_net_inflow": 12, "turnover": 100}}
-
-        def ths_top(flow_rows, member_rows, quote_rows, top_n):
-            self.assertEqual(flow_rows[0]["sector_key"], "concept-1")
-            self.assertEqual(member_rows[0]["symbol"], "000001.SZ")
-            return ([{"taxonomy_key": "ths_concept_flow", "sector_key": "concept-1", "top_stocks": [quote_rows["000001.SZ"]]}], {"flow_boards": 1, "boards_with_members": 1, "quoted_members": 1})
-
+        quotes = {"000001.SZ": {"symbol": "000001.SZ", "main_net_inflow": 12, "turnover": 100},
+                  "000002.SZ": {"symbol": "000002.SZ", "main_net_inflow": 5, "turnover": 10}}
         report, coverage, sector_context, stock_context, realtime_context = build_intraday_sector_report_from_membership(
-            db, ("concept",), [[{"板块代码": "pcb", "板块名称": "PCB", "流入资金": 10, "流出资金": 3}]],
-            quotes, 10, date(2026, 8, 22), number=lambda value: float(value) if value is not None else None,
-            ths_top_stocks=ths_top,
+            db, ("concept",), [[{"行业": "ＰＣＢ", "流入资金": 10, "流出资金": 3},
+                                {"行业": "东财独有", "流入资金": 1, "流出资金": 2},
+                                {"行业": "没有成分", "流入资金": 1, "流出资金": 1}]],
+            quotes, 10, date(2026, 10, 9), number=lambda value: float(value) if value is not None else None,
         )
-        self.assertEqual(report[0]["net_inflow"], 7.0)
-        self.assertEqual(report[0]["mapped_members"], 1)
-        self.assertEqual(coverage["concept"]["boards_with_members"], 1)
-        self.assertEqual(coverage["ths_concept"]["quoted_members"], 1)
+        pcb, eastmoney_only, unmapped = report
+        self.assertEqual((pcb["sector_key"], pcb["membership_taxonomy_key"], pcb["membership_join"]),
+                         ("885959.TI", "fuyao_ths_concept", "ths_board_name"))
+        self.assertEqual(pcb["net_inflow"], 7.0)
+        self.assertEqual([stock["symbol"] for stock in pcb["top_stocks"]], ["000001.SZ"])
+        self.assertEqual(pcb["flow_source"], "ths_10jqka_via_akshare")
+        self.assertEqual((eastmoney_only["sector_key"], eastmoney_only["membership_join"]), ("BK9999", "eastmoney_board_label"))
+        self.assertEqual((unmapped["membership_join"], unmapped["mapped_members"]), ("unmapped", 0))
+        self.assertEqual(coverage["concept"]["boards_with_members"], 2)
+        self.assertEqual(coverage["concept"]["ths_name_join"]["unmatched"], ["东财独有", "没有成分"])
+        self.assertNotIn("ths_concept", coverage, "the frozen close section is gone")
+        self.assertEqual(sector_context[0]["taxonomy_key"], "eastmoney_concept")
         self.assertEqual(stock_context[0]["api_name"], "moneyflow")
         self.assertEqual(realtime_context[0]["api_name"], "rt_k")
 

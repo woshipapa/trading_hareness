@@ -48,7 +48,8 @@ def limit_linkage_candidates(
             "leader_names": (relation.get("leader_names") or [])[:5],
             "pct_change": pct_change, "main_net_inflow": main_flow, "volume_ratio": volume_ratio,
             "turnover_rate": turnover_rate,
-            "evidence": {"membership": "exact_ths_concept", "anchor": "eastmoney_limit_up_pool",
+            "evidence": {"membership": "exact_ths_concept", "anchor": "limit_up_pool",
+                         "membership_taxonomies": list(relation.get("membership_taxonomies") or []),
                          "quote_snapshot": "tencent_same_board_report",
                          "components": ["shared_concepts", "main_net_inflow", "volume_ratio", "turnover_rate", "pct_change"]},
             "risk_flags": ["leader_linkage_research_only", "requires_minute_confirmation"],
@@ -68,6 +69,8 @@ def limit_linkage_candidates(
     return selected, {
         "anchors": len({leader for item in relations for leader in item.get("leader_symbols") or []}),
         "exact_relation_rows": len(relations), "candidate_count": len(selected),
+        # Relations that needed the frozen Tushare-era membership for a symbol Fuyao does not list.
+        "frozen_membership_relations": sum(1 for item in relations if item.get("frozen_membership")),
         "model_version": "limit-linkage-mining-v1",
         "notice": "涨停股的精确概念关联候选，不是追板或自动买入指令；候选必须通过后续分钟确认。",
     }

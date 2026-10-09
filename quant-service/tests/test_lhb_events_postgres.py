@@ -149,5 +149,44 @@ class DragonTigerReadSqlTests(unittest.TestCase):
         self.assertEqual(row["lhb_negative_count"], 1)
 
 
+    def test_the_live_ths_concept_flow_reaches_fuyao_members_by_board_name(self) -> None:
+        from app.sector_flow_repository import rebuild_sector_flow_daily_features
+        from app.sector_membership_repository import persist_observed_snapshot
+
+        day = date(2099, 3, 2)
+        self.connection.execute("INSERT INTO quant.providers(provider_key,label) VALUES('test_sector','test') ON CONFLICT DO NOTHING")
+        for taxonomy in ("eastmoney_concept", "fuyao_ths_concept"):
+            self.connection.execute(
+                """INSERT INTO quant.sector_taxonomies(taxonomy_key,label,provider_key)
+                   VALUES(%s,'test','test_sector') ON CONFLICT DO NOTHING""", (taxonomy,))
+        # The flow is keyed by the 同花顺 board's name, its members by the board's code.
+        self.connection.execute(
+            """INSERT INTO quant.sectors(taxonomy_key,sector_key,label)
+               VALUES('eastmoney_concept','测试概念Ｘ','测试概念Ｘ'),('fuyao_ths_concept','886999.TI','测试概念X'),
+                     ('eastmoney_concept','无成分概念','无成分概念')
+               ON CONFLICT DO NOTHING""")
+        persist_observed_snapshot(self.connection, "fuyao_ths_concept", "886999.TI",
+                                  [{"code": "601086.SH"}, {"code": "600127.SH"}], "test_sector", _utc(2, 1),
+                                  member_symbol=lambda row: row["code"], ensure_instrument=lambda *_args: None)
+        for board, amount in (("测试概念Ｘ", 5.2), ("无成分概念", -1.0)):
+            self.connection.execute(
+                """INSERT INTO quant.sector_market_observations(
+                       taxonomy_key,sector_key,trading_date,provider_key,available_at,change_pct,net_amount)
+                   VALUES('eastmoney_concept',%s,%s,'test_sector',%s,1.5,%s)""", (board, day, _utc(2, 7), amount))
+        self._capture(_list("2099-03-02", {**GUOFANG, "net_value": -5000000.0}, JINJIAN), _utc(3, 9, 30))
+
+        result = rebuild_sector_flow_daily_features(self.database, day, day)
+
+        rows = {row["sector_key"]: row for row in self.connection.execute(
+            """SELECT sector_key,lhb_stock_count,lhb_net_amount,status,quality_flags FROM quant.sector_flow_daily_features
+                WHERE taxonomy_key='eastmoney_concept' AND trading_date=%s""", (day,)).fetchall()}
+        self.assertEqual(rows["测试概念Ｘ"]["lhb_stock_count"], 2)
+        self.assertAlmostEqual(float(rows["测试概念Ｘ"]["lhb_net_amount"]), -5000000.0 + 215363530.68, places=2)
+        self.assertIn("membership_name_unmatched", rows["无成分概念"]["quality_flags"])
+        self.assertEqual(rows["无成分概念"]["status"], "partial")
+        join = result["taxonomies"]["eastmoney_concept"]["membership_join"]
+        self.assertEqual((join["matched"], join["unmatched"]), (1, ["无成分概念"]))
+
+
 if __name__ == "__main__":
     unittest.main()

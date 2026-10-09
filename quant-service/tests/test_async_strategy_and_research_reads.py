@@ -238,8 +238,10 @@ class AsyncStrategyAndResearchReadTests(unittest.IsolatedAsyncioTestCase):
         database = Database()
         direct = await async_market_evaluation(database, start, end, "anqiang-touzi-riji")
         self.assertEqual(direct["quality_gate"]["live_strategy_effect"], "none")
-        self.assertEqual(len(database.connection.calls), 8)
+        # Seven evidence reads plus the 同花顺 catalog that keys the live concept flow by code.
+        self.assertEqual(len(database.connection.calls), 8 + 1)
         self.assertEqual(database.connection.calls[0][1], (start, end, "anqiang-touzi-riji", "anqiang-touzi-riji"))
+        self.assertEqual(direct["sector_flow_source"]["taxonomies"], ["eastmoney_concept", "ths_concept_flow"])
 
     async def test_analyst_stock_timeline_prefers_native_async_local_evidence(self) -> None:
         calls = []

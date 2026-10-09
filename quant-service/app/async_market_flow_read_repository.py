@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .market_flow_read_model import project_market_flow_features
+from .market_flow_read_model import SECTOR_DAILY_SQL, SECTOR_OUTCOME_SQL, project_market_flow_features
 
 
 async def market_flow_features(async_database: Any, trade_date: date | None = None, *, limit: int = 720) -> dict[str, Any]:
@@ -35,27 +35,10 @@ async def market_flow_features(async_database: Any, trade_date: date | None = No
                 LIMIT 20"""
         )
         sector_result = await connection.execute(
-            """SELECT feature.trading_date,feature.sector_key,sector.label,feature.provider_key,
-                      feature.status,feature.transition,feature.net_amount,feature.previous_net_amount,
-                      feature.net_change_amount,feature.net_acceleration,feature.rank_percentile,
-                      feature.flow_sign_streak,feature.change_pct,feature.price_flow_divergence,
-                      feature.lhb_stock_count,feature.lhb_net_amount,feature.lhb_negative_count,
-                      feature.lhb_sell_pressure_ratio,feature.limit_up_count,feature.quality_flags
-                 FROM quant.sector_flow_daily_features feature
-                 JOIN quant.sectors sector
-                   ON sector.taxonomy_key=feature.taxonomy_key AND sector.sector_key=feature.sector_key
-                WHERE feature.taxonomy_key='ths_concept_flow' AND feature.trading_date=%s
-                ORDER BY feature.rank_percentile DESC NULLS LAST,abs(feature.net_change_amount) DESC NULLS LAST
-                LIMIT 500""", (selected_date,),
+            SECTOR_DAILY_SQL, (selected_date, selected_date),
         )
         outcomes_result = await connection.execute(
-            """SELECT transition,horizon_days,count(*) FILTER (WHERE status='matured') AS matured,
-                      avg(directional_return) FILTER (WHERE status='matured') AS avg_directional_return,
-                      avg(cross_section_excess_return) FILTER (WHERE status='matured') AS avg_excess_return,
-                      avg((directional_return>0)::int) FILTER (WHERE status='matured') AS directional_hit_rate
-                 FROM quant.sector_flow_daily_outcomes
-                GROUP BY transition,horizon_days
-                ORDER BY horizon_days,transition"""
+            SECTOR_OUTCOME_SQL
         )
         readiness_result = await connection.execute(
             """SELECT (SELECT count(DISTINCT trading_date) FROM quant.sector_flow_daily_features) AS trading_days,

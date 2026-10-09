@@ -145,6 +145,8 @@ class FactorSqlLabTests(unittest.TestCase):
         self.assertIn("instrument.delist_date IS NULL OR instrument.delist_date>=bar.trading_date", create_sql)
         self.assertIn("sector_membership_history", create_sql)
         self.assertIn("member.known_at", create_sql)
+        # Longhu's boards first, the frozen Tushare-era rows only for dates before the live lists.
+        self.assertIn("WHEN 'longhu_ths_industry' THEN 0 WHEN 'fuyao_ths_industry' THEN 1 WHEN 'ths_industry' THEN 2", create_sql)
         self.assertIn("daily_adjustment_factors", create_sql)
         self.assertIn("adjustment.available_at", create_sql)
         self.assertNotIn("bar.adj_factor", create_sql)
@@ -161,7 +163,8 @@ class FactorSqlLabTests(unittest.TestCase):
         connection = RecordingConnection()
         panel = prepare_factor_panel(connection, "all_a", date(2023, 9, 1), date(2026, 9, 1), 5, "current_backfill")
         create_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_panel" in sql)
-        self.assertIn("'longhu_ths_industry','ths_index_i'", create_sql)
+        self.assertIn("'longhu_ths_industry','fuyao_ths_industry','ths_industry','ths_index_i'", create_sql)
+        self.assertIn("WHEN 'longhu_ths_industry' THEN 0 WHEN 'fuyao_ths_industry' THEN 1", create_sql)
         self.assertIn("member.effective_to IS NULL", create_sql)
         self.assertNotIn("member.known_at <", create_sql)                    # not point-in-time, by design
         self.assertIn("'current_backfill' END AS industry_quality", create_sql)
@@ -182,7 +185,9 @@ class FactorSqlLabTests(unittest.TestCase):
         prepare_factor_panel(connection, "all_a", date(2026, 1, 1), date(2026, 3, 1), 5)
         create_sql = next(sql for sql, _ in connection.calls if "CREATE TEMP TABLE factor_sql_panel" in sql)
         self.assertIn("log_market_cap_pit AS log_market_cap", create_sql)
-        self.assertNotIn("longhu_ths_industry", create_sql)
+        # Strict mode reads every industry list point in time, never the current-only backfill join.
+        self.assertNotIn("AND member.effective_to IS NULL\n", create_sql)
+        self.assertIn("member.known_at < ((bar.trading_date+1)::timestamp AT TIME ZONE 'Asia/Shanghai')", create_sql)
 
     def test_panel_uses_atomic_owner_cold_relations_after_cutover(self):
         connection = RecordingConnection()

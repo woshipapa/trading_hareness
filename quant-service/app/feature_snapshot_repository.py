@@ -1,4 +1,8 @@
-"""Canonical feature snapshot materialization on a caller-owned transaction."""
+"""Canonical feature snapshot materialization on a caller-owned transaction.
+
+A stock's industry comes from :mod:`industry_membership_preference` (Longhu first,
+then Fuyao 同花顺, then the frozen Tushare-era rows), part of multi-source-feature-v5.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,7 @@ from datetime import date, datetime
 from statistics import mean
 from typing import Any, Callable
 
+from .industry_membership_preference import industry_preference_sql, industry_taxonomies_sql
 from .stable_json import stable_dumps, stable_json
 from .point_in_time import availability_cutoff
 
@@ -49,11 +54,11 @@ def materialize_feature_snapshot(
                    SELECT member.sector_key
                      FROM quant.sector_membership_history member
                     WHERE member.symbol=membership.symbol
-                      AND member.taxonomy_key IN ('ths_industry','ths_index_i')
+                      AND member.taxonomy_key IN (""" + industry_taxonomies_sql() + """)
                       AND member.effective_from<=%s
                       AND (member.effective_to IS NULL OR member.effective_to>=%s)
                       AND member.known_at<%s
-                    ORDER BY CASE WHEN member.taxonomy_key='ths_industry' THEN 0 ELSE 1 END,
+                    ORDER BY """ + industry_preference_sql() + """,
                              member.known_at DESC,member.effective_from DESC,member.sector_key
                     LIMIT 1
              ) sector_history ON TRUE

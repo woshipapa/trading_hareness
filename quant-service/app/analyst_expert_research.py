@@ -71,6 +71,11 @@ def seed_exact_theme_aliases(connection: Any) -> int:
         # unmapped until a human approves a narrower board.
         ("remote:硬件科技", "硬件科技", "ths_index_i", "700338.TI"),
     )
+    # The same 同花顺 codes under the Fuyao-refreshed lists, which keep
+    # membership current after the Tushare-era rows froze on 2026-10-08.  The
+    # old aliases stay for opinions dated before the Fuyao lists existed.
+    live = {"ths_concept_flow": "fuyao_ths_concept", "ths_index_i": "fuyao_ths_industry"}
+    rows = rows + tuple((theme, label, live[taxonomy], code) for theme, label, taxonomy, code in rows)
     inserted = 0
     for theme_key, label, taxonomy_key, sector_key in rows:
         exists = connection.execute(
@@ -191,12 +196,19 @@ def _basket_symbols(connection: Any, opinion: dict[str, Any]) -> list[str]:
         return [str(opinion["subject_key"])]
     if opinion["scope"] == "market":
         return ["000001.SH"]
+    # The Fuyao-refreshed membership when it covers the theme at that date; the
+    # frozen Tushare-era rows never close, so they are read only before it does.
     rows = connection.execute(
-        """SELECT DISTINCT m.symbol FROM quant.analyst_theme_board_aliases a
-             JOIN quant.sector_membership_history m ON m.taxonomy_key=a.taxonomy_key AND m.sector_key=a.sector_key
-            WHERE a.theme_key=%s AND a.status='approved'
-              AND m.effective_from<=%s AND (m.effective_to IS NULL OR m.effective_to>=%s)
-              AND m.available_at<=%s AND m.known_at<=%s""",
+        """WITH members AS (
+               SELECT m.symbol,a.taxonomy_key FROM quant.analyst_theme_board_aliases a
+                 JOIN quant.sector_membership_history m ON m.taxonomy_key=a.taxonomy_key AND m.sector_key=a.sector_key
+                WHERE a.theme_key=%s AND a.status='approved'
+                  AND m.effective_from<=%s AND (m.effective_to IS NULL OR m.effective_to>=%s)
+                  AND m.available_at<=%s AND m.known_at<=%s
+           )
+           SELECT DISTINCT symbol FROM members
+            WHERE taxonomy_key LIKE 'fuyao_ths_%%'
+               OR NOT EXISTS (SELECT 1 FROM members live WHERE live.taxonomy_key LIKE 'fuyao_ths_%%')""",
         (opinion["subject_key"], opinion["opinion_date"], opinion["opinion_date"], opinion["available_at"], opinion["available_at"]),
     ).fetchall()
     return [str(row["symbol"]) for row in rows]

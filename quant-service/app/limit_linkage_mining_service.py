@@ -32,7 +32,7 @@ async def run(
     if not relations:
         return {
             "status": "blocked",
-            "reason": "no same-date Eastmoney limit-up anchors with exact THS concept membership",
+            "reason": "no same-date limit-up anchors with exact THS concept membership",
             "summary": summary,
         }
     try:

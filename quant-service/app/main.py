@@ -1684,36 +1684,6 @@ async def hydrate_eastmoney_live_board_members(kind: str, flows: list[dict[str, 
         provider_error=AkShareProviderError,
         safe_error_detail=safe_error_detail,
     )
-def ths_concept_top_stocks(flow_rows: list[dict[str, Any]], member_rows: list[dict[str, Any]],
-                           quotes: dict[str, dict[str, Any]], top_stocks: int) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Join Tushare concept flows and members by their common THS ``ts_code``.
-
-    Display names are never used as a cross-source membership key.  Tencent is
-    only the intraday stock-ranking cross-section after the exact THS join.
-    """
-    members_by_sector: dict[str, list[str]] = {}
-    for row in member_rows:
-        sector_key, symbol = str(row.get("sector_key") or ""), str(row.get("symbol") or "")
-        if sector_key and symbol:
-            members_by_sector.setdefault(sector_key, []).append(symbol)
-    items: list[dict[str, Any]] = []
-    mapped_boards = 0
-    quoted_members = 0
-    for flow in flow_rows:
-        sector_key = str(flow.get("sector_key") or "")
-        members = members_by_sector.get(sector_key, [])
-        stocks = [quotes[symbol] for symbol in members if symbol in quotes]
-        stocks.sort(key=lambda item: (item.get("main_net_inflow") is None, -(item.get("main_net_inflow") or 0), -(item.get("turnover") or 0)))
-        mapped_boards += int(bool(members))
-        quoted_members += len(stocks)
-        items.append({"taxonomy_key": "ths_concept_flow", "sector_key": sector_key,
-                      "label": flow.get("label") or sector_key, "net_inflow": intraday_number(flow.get("net_amount")),
-                      "change_pct": intraday_number(flow.get("change_pct")), "mapped_members": len(members),
-                      "quoted_members": len(stocks), "top_stocks": stocks[:top_stocks], "member_quotes": stocks,
-                      "trade_date": str(flow.get("trading_date") or "")})
-    return items, {"flow_boards": len(flow_rows), "boards_with_members": mapped_boards, "quoted_members": quoted_members}
-
-
 def build_intraday_sector_report_from_membership(
     kinds: tuple[str, ...],
     flow_parts: list[list[dict[str, Any]]],
@@ -1723,8 +1693,7 @@ def build_intraday_sector_report_from_membership(
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[Any], list[Any], list[Any]]:
     """Compatibility wrapper around the isolated point-in-time SQL join."""
     return build_intraday_sector_report_from_membership_isolated(
-        db, kinds, flow_parts, quotes, top_stocks, exchange_date,
-        number=intraday_number, ths_top_stocks=ths_concept_top_stocks,
+        db, kinds, flow_parts, quotes, top_stocks, exchange_date, number=intraday_number,
     )
 
 
@@ -5194,17 +5163,17 @@ def concept_limit_candidates(trade_date: date | None = None, limit: int = 100) -
     return sector_reads.concept_limit_candidates(db, trade_date, limit)
 
 
-def sector_flows(taxonomy_key: str = "ths_industry", trade_date: date | None = None, limit: int = 100) -> dict[str, Any]:
+def sector_flows(taxonomy_key: str = "longhu_ths_industry", trade_date: date | None = None, limit: int = 100) -> dict[str, Any]:
     """Compatibility export for the sector read model."""
     return sector_reads.sector_flows(db, taxonomy_key, trade_date, limit)
 
 
-def market_sectors(taxonomy_key: str = "ths_index_n", limit: int = 500, offset: int = 0) -> dict[str, Any]:
+def market_sectors(taxonomy_key: str = "fuyao_ths_concept", limit: int = 500, offset: int = 0) -> dict[str, Any]:
     """Compatibility export for the sector read model."""
     return sector_reads.market_sectors(db, taxonomy_key, limit, offset)
 
 
-def sector_members(sector_key: str, taxonomy_key: str = "ths_index_n", limit: int = 500, offset: int = 0) -> dict[str, Any]:
+def sector_members(sector_key: str, taxonomy_key: str = "fuyao_ths_concept", limit: int = 500, offset: int = 0) -> dict[str, Any]:
     """Compatibility export for the sector read model."""
     return sector_reads.sector_members(db, sector_key, taxonomy_key, limit, offset)
 
