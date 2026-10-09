@@ -268,6 +268,16 @@ PY
 PYTHONPATH="$project_root/bridge" python3 -m unittest discover \
   -s "$project_root/bridge" -p 'test_*.py' -q
 
+# Fail closed if the pinned upstream larkx on edge drifted from what the
+# bridge's overrides were reviewed against. RELAY_SKIP_PIN_CHECK=1 is the
+# documented emergency escape; rollback skips it like the other local gates.
+if [[ "${RELAY_SKIP_PIN_CHECK:-0}" != 1 && "$rollback_id" == "" ]]; then
+	bash "$project_root/scripts/edge/verify-larkx-pin.sh" || {
+		echo "larkx pin check failed; nothing was staged (set RELAY_SKIP_PIN_CHECK=1 to override)" >&2
+		exit 1
+	}
+fi
+
 head_sha="$(git -C "$repo_root" rev-parse --verify HEAD)"
 [[ "$head_sha" =~ ^[0-9a-fA-F]{7,64}$ ]] || { echo "cannot derive a valid git SHA" >&2; exit 2; }
 head_short="${head_sha:0:12}"

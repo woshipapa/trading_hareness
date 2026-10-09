@@ -1,0 +1,14 @@
+# Pinned upstream LarkAgentX files the bridge overrides or depends on.
+# The vendored checkout lives at /opt/larkagentx/source on 47edge (outside this
+# repo, like Spider_XHS for xhs-intel). The bridge's RecoveringLarkClient
+# overrides behaviour here instead of editing these; a drift means an override
+# (build_ws_url version spoof, _gateway_post headers, decode_push_messages cmd
+# gating, pull_history, QrLogin) may silently break and must be re-reviewed.
+# Regenerate after an intentional pin bump:
+#   bash feishu-relay/scripts/edge/verify-larkx-pin.sh --update
+8b2915f004b8485fdcf5699f8e37ef877b54cb07a5b8b7b4dca380fbe486bf24  larkx/client.py
+a6fd092ab4d8f00d3ab8a2c4eefe13b7a8316201fbfa5760a25e871730e9180a  larkx/auth.py
+28ca927e9bc58befa081c05d05d401fd09aef37a05ea895e2baa022a59c76559  larkx/proto/decoders.py
+2d2e5009590a53e8b16adca1e9da7d7841149b8c0fb178c44ac51aa343246a44  larkx/proto/builders.py
+c5a58b4defb3585a7cd146ad81a8d52af8be20ac7842deed30fef6b0822aad82  larkx/proto/gateway.py
+d4fd2b4bc9f46974e6333da6726ad0b0b9580b528f947b46bbea232c06b660b7  larkx/media.py
