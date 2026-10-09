@@ -202,6 +202,39 @@ API），官方 OAuth 应用只做精确补读与兜底。
 - 待验证：`image_key` 是应用作用域，用户在外部群（跨租户）发送是否被接受，需在自有测试群
   实测一次。
 
+### 5.2 协议层逆向进展（2026-10-09，静态分析）
+
+方法：按 `dev/proto_pipeline` 重新下载官方 web 客户端 worklet（公开 CDN，368 个 chunk）
+并重跑提取，再对 shared worklet 的 wasm（`static/js/1041e34c.wasm`，5.4MB）做字符串分析。
+
+**已确认**
+- 图片/文件上传**不在 JS 里**，在 Rust/WASM 模块 `lark-biz-resource` 内（JS 侧只有
+  `shared/resource/uploadSecureImage|uploadImFile` 的 RPC 外壳，请求类型为
+  `media.v1.UploadSecureImageRequest` / `UploadImFileRequest`）。
+- 重新提取的 8296 个 schema **仍不含 `media.v1` / `im.v1`**：这些请求体不是 JS 侧注册的
+  protobuf schema，因此无法靠重跑流水线得到字段定义。
+- wasm 内的“upload v2”字符串给出协议轮廓：目标主机是 `larkFile`
+  （`internal-api-lark-file.feishu.cn`，与 `media.py` 下载主机同一个）；
+  文件内容用 **blake3** 做指纹（头 `x-fingerprint-type`/`x-fingerprint`/`x-file-name`/
+  `x-file-size`），先 **pre-upload**（`x-pre-upload`，命中 swift 即秒传，无需传字节），
+  未命中则 **流式** `/stream?upload_id=&mime=` 或 **分片**
+  `/part?upload_id=&part_id=&offset=` → `/upload/complete`；图片另有 `/api/image/pre_upload/`、
+  `/files?type=file&client_file_key=`；支持 `zstd`（`x-compress-algorithm`）；
+  元数据有加密/解密（`EncryptMetadata`/`DecryptMetadata`，与 `ImageSetV2.crypto` 呼应）。
+- 同一 bundle 里 `/uni_api/upload/{create,part,complete,file}`（4MiB 分片 + crc32）是
+  **云文档 Drive** 的上传，不是 IM 图片路径，不要混用。
+
+**未确认（必须抓真实流量才能定）**
+- 各端点的确切方法/路径前缀、鉴权（cookie 之外是否需 `x-auth-*`/签名）、
+  pre-upload 请求体 schema、`x-fingerprint` 的编码、元数据加密密钥来源、
+  响应里的 `key`/`fsUnit`/`secureKey` 如何组装成 `PutMessageRequest` 的 `Content`。
+
+**下一步（需要人在浏览器里做一次）**：在已登录的飞书网页版（任意自有群，**只把一张小图放进
+输入框，不要点发送**——客户端在附加时就会 pre-upload），DevTools → Network → 勾选 Preserve log
+→ 导出 HAR；然后运行 `scripts/tools/analyze-upload-har.py capture.har`，它会脱敏 cookie/令牌
+并输出每个上传相关请求的方法、路径、头名、body 大小与 protobuf 字段树。拿到后再写
+`larkx` 侧的 `upload_image()` 并用测试群验证。
+
 ## 6. 可观测与前端整合
 
 - 面板补齐 bridge 新字段：`auth` 块、`ws_notify_cmds/count/last`、尾部巡检覆盖
