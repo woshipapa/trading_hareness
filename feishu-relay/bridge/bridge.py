@@ -191,12 +191,24 @@ class RawFrameCapture:
 	evidence instead of guesses.  Same privacy posture as ProtocolForensics:
 	local-only, 0700 directory, rotated by count.  Enabled only when both
 	``LARKX_RAW_CAPTURE_CHAT_IDS`` and ``LARKX_RAW_CAPTURE_DIR`` are set.
+
+	``LARKX_RAW_CAPTURE_ALL_FRAMES=1`` additionally keeps every *unexplained*
+	frame: non-push commands, push frames that decode to zero messages, and
+	frames both decoders reject.  Those are exactly the places a server-side
+	format change can hide (the cat-group cards never appear as decoded push
+	messages), while understood traffic for other chats stays uncaptured.
+	Tiny non-push frames (acks and heartbeats) are skipped so rotation cannot
+	flush the interesting samples.
 	"""
 
-	def __init__(self, chat_ids: set[str], path: str, max_files: int = 100) -> None:
+	MIN_UNEXPLAINED_FRAME_BYTES = 64
+
+	def __init__(self, chat_ids: set[str], path: str, max_files: int = 100,
+	             all_frames: bool = False) -> None:
 		self.chat_ids = {str(value).strip() for value in (chat_ids or set()) if str(value).strip()}
 		self.max_files = max(1, min(int(max_files or 100), 2000))
-		self.enabled = bool(self.chat_ids and str(path or "").strip())
+		self.all_frames = bool(all_frames)
+		self.enabled = bool((self.chat_ids or self.all_frames) and str(path or "").strip())
 		if not self.enabled:
 			return
 		self.path = Path(path).expanduser()
@@ -207,27 +219,40 @@ class RawFrameCapture:
 			self.enabled = False
 			LOG.warning("raw frame capture disabled: %s", error)
 
-	def capture(self, raw: bytes, messages: list[dict[str, Any]]) -> None:
+	def capture(self, raw: bytes, messages: list[dict[str, Any]], *,
+	            cmd: int | None = None, reason: str = "watched_chat") -> None:
 		if not self.enabled or not isinstance(raw, (bytes, bytearray)):
 			return
 		matched = [msg for msg in messages or [] if str(msg.get("chat_id", "")) in self.chat_ids]
-		if not matched or len(raw) > MAX_FORENSIC_FRAME_BYTES:
+		if reason == "watched_chat":
+			if not matched:
+				return
+		elif not self.all_frames:
+			return
+		elif len(raw) < self.MIN_UNEXPLAINED_FRAME_BYTES:
+			return
+		if len(raw) > MAX_FORENSIC_FRAME_BYTES:
 			return
 		try:
 			digest = hashlib.sha256(raw).hexdigest()
-			stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-			base = self.path / f"{stamp}-{digest[:16]}"
-			base.with_suffix(".bin").write_bytes(bytes(raw))
-			os.chmod(base.with_suffix(".bin"), 0o600)
-			base.with_suffix(".json").write_text(json.dumps({
+			stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+			# Build both names explicitly: a dotted timestamp plus with_suffix()
+			# silently collapsed every frame of the same second onto one path.
+			bin_path = self.path / f"{stamp}-{digest[:16]}.bin"
+			meta_path = self.path / f"{stamp}-{digest[:16]}.json"
+			bin_path.write_bytes(bytes(raw))
+			os.chmod(bin_path, 0o600)
+			meta_path.write_text(json.dumps({
 				"captured_at": datetime.now(timezone.utc).isoformat(),
 				"length": len(raw),
 				"sha256": digest,
+				"cmd": cmd,
+				"reason": reason,
 				"chat_ids": sorted({str(msg.get("chat_id", "")) for msg in matched}),
 				"message_ids": [str(msg.get("msg_id", "")) for msg in matched][:20],
 				"message_types": sorted({str(msg.get("msg_type_name", msg.get("msg_type", ""))) for msg in matched}),
 			}, ensure_ascii=False) + "\n", encoding="utf-8")
-			os.chmod(base.with_suffix(".json"), 0o600)
+			os.chmod(meta_path, 0o600)
 			files = sorted(self.path.glob("*.bin"), key=lambda item: item.stat().st_mtime, reverse=True)
 			for old in files[self.max_files:]:
 				old.unlink(missing_ok=True)
@@ -255,6 +280,7 @@ class RecoveringLarkClient(LarkClient):
 			chat_ids=set(parse_csv(os.environ.get("LARKX_RAW_CAPTURE_CHAT_IDS", ""))),
 			path=os.environ.get("LARKX_RAW_CAPTURE_DIR", ""),
 			max_files=int(os.environ.get("LARKX_RAW_CAPTURE_MAX", "100") or 100),
+			all_frames=os.environ.get("LARKX_RAW_CAPTURE_ALL_FRAMES", "").strip() == "1",
 		)
 
 	async def connect_websocket(self, on_message):
@@ -288,13 +314,16 @@ class RecoveringLarkClient(LarkClient):
 						if sid is not None:
 							await self.send_ack(ws, sid)
 						if cmd != 6:
+							self.raw_capture.capture(raw, messages, cmd=cmd, reason="non_push_cmd")
 							continue
-						self.raw_capture.capture(raw, messages)
+						self.raw_capture.capture(raw, messages, cmd=cmd,
+						                          reason="watched_chat" if messages else "no_messages")
 						for msg in messages:
 							if not msg.get('from_id'):
 								continue
 							asyncio.run_coroutine_threadsafe(self._dispatch(msg, on_message), self.loop)
 					except Exception as error:
+						self.raw_capture.capture(raw, [], cmd=None, reason="decode_error")
 						if self.on_decode_error:
 							try:
 								self.on_decode_error(error, raw)

@@ -64,6 +64,40 @@ class RawFrameCaptureTests(unittest.TestCase):
 		self.assertFalse(bridge.RawFrameCapture(set(), "/tmp/x", 10).enabled)
 		self.assertFalse(bridge.RawFrameCapture({"1"}, "", 10).enabled)
 
+	def test_all_frames_mode_keeps_unexplained_frames_and_skips_understood_traffic(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			capture = bridge.RawFrameCapture({"7684122107030031634"}, tmp, max_files=10, all_frames=True)
+			self.assertTrue(capture.enabled)
+			pad = b"x" * capture.MIN_UNEXPLAINED_FRAME_BYTES
+			# Understood push traffic for another chat stays uncaptured.
+			capture.capture(pad + b"-other", [{"chat_id": "999", "msg_id": "m0"}], cmd=6)
+			# Tiny non-push control frames (acks/heartbeats) stay uncaptured.
+			capture.capture(b"ack", [], cmd=4, reason="non_push_cmd")
+			# The three unexplained shapes are kept with cmd and reason in meta.
+			capture.capture(pad + b"-cmd9", [], cmd=9, reason="non_push_cmd")
+			capture.capture(pad + b"-empty", [], cmd=6, reason="no_messages")
+			capture.capture(pad + b"-broken", [], cmd=None, reason="decode_error")
+			metas = sorted(Path(tmp).glob("*.json"))
+			reasons = sorted(json.loads(item.read_text(encoding="utf-8"))["reason"] for item in metas)
+			self.assertEqual(reasons, ["decode_error", "no_messages", "non_push_cmd"])
+			cmd9 = next(json.loads(item.read_text(encoding="utf-8")) for item in metas
+			            if json.loads(item.read_text(encoding="utf-8"))["reason"] == "non_push_cmd")
+			self.assertEqual(cmd9["cmd"], 9)
+
+	def test_all_frames_mode_defaults_off_and_watched_capture_is_unchanged(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			capture = bridge.RawFrameCapture({"7684122107030031634"}, tmp, max_files=10)
+			capture.capture(b"y" * 80, [], cmd=6, reason="no_messages")
+			capture.capture(b"y" * 80, [], cmd=9, reason="non_push_cmd")
+			self.assertEqual(list(Path(tmp).glob("*.bin")), [])
+			capture.capture(b"watched", [{"chat_id": "7684122107030031634", "msg_id": "m1",
+			                              "msg_type_name": "CARD"}], cmd=6)
+			self.assertEqual(len(list(Path(tmp).glob("*.bin"))), 1)
+
+	def test_all_frames_mode_alone_enables_capture(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			self.assertTrue(bridge.RawFrameCapture(set(), tmp, 10, all_frames=True).enabled)
+
 
 if __name__ == "__main__":
 	unittest.main()

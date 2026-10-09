@@ -20,6 +20,23 @@ export const CARD_UNAVAILABLE_NOTICES = new Set([
 ]);
 
 const TEXT_TAGS = new Set(['text', 'markdown', 'plain_text', 'lark_md']);
+
+// Some bot senders plant anti-scrape decoy elements: garbled text pulled out
+// of the visible card with large negative margins (observed: "0px 0px -24px
+// -99px"), so real clients never show it while a naive text walk copies it.
+// A margin component at or below this threshold hides at least a text line,
+// which no legitimate layout tweak needs.
+const DECOY_MARGIN_PX = -12;
+
+function isDecoyHiddenElement(value) {
+	for (const margin of [value?.margin, value?.style?.margin]) {
+		if (typeof margin !== 'string') continue;
+		for (const part of margin.match(/-?\d+(?:\.\d+)?(?=px\b)/g) ?? []) {
+			if (Number(part) <= DECOY_MARGIN_PX) return true;
+		}
+	}
+	return false;
+}
 // Keys whose children can carry text or images, in the order they render.
 // Rich text wraps its blocks in a locale key ({zh_cn: {title, content}}), so
 // those are walked too.  LarkAgentX's CardContent decoder exposes the
@@ -68,6 +85,7 @@ export function cardText(content) {
 	const walk = (value) => {
 		if (Array.isArray(value)) { for (const item of value) walk(item); return; }
 		if (!value || typeof value !== 'object') return;
+		if (isDecoyHiddenElement(value)) return;
 		const tag = String(value.tag ?? '').toLowerCase();
 		if (TEXT_TAGS.has(tag)) {
 			append(directText(value));

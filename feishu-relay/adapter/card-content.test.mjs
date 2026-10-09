@@ -53,6 +53,26 @@ test('drops the client-upgrade banner and keeps nothing else from it', () => {
 	assert.equal(cardText(card), '');
 });
 
+test('skips anti-scrape decoy elements hidden by large negative margins', () => {
+	// Observed 2026-10-09 in the cat group (书房猫 bot, om_x100b63b37c1...):
+	// the decoy line carries garbled text and margin "0px 0px -24px -99px",
+	// which real clients render out of view behind the next element.
+	const card = { schema: '2.0', body: { direction: 'vertical', elements: [
+		{ element_id: '_2', margin: '0px 0px -24px -99px', tag: 'div',
+			text: { content: 'EQr?icQ:N 临盘$拉&了~欧盟$反+制', tag: 'plain_text' }, width: 'fill' },
+		{ element_id: '_4', tag: 'div',
+			text: { content: 'Eric:\n临盘拉了欧盟反制', tag: 'plain_text' }, width: 'fill' },
+	] } };
+	assert.equal(cardText(card), 'Eric:\n临盘拉了欧盟反制');
+});
+
+test('keeps elements whose small negative margins are layout tweaks', () => {
+	const card = { schema: '2.0', body: { elements: [
+		{ tag: 'div', margin: '0px 0px -4px 0px', text: { content: '正常紧凑排版', tag: 'plain_text' } },
+	] } };
+	assert.equal(cardText(card), '正常紧凑排版');
+});
+
 test('collects image keys under either name, once each', () => {
 	const card = { body: { elements: [{ tag: 'img', img_key: 'k2' }, { tag: 'img', img_key: 'k2' }, { tag: 'img', image_key: 'k1' }] } };
 	assert.deepEqual(cardImageKeys(card), ['k2', 'k1']);
