@@ -11,10 +11,13 @@ from zoneinfo import ZoneInfo
 
 from .. import research_catalog_read_model as read_model
 from .. import async_research_catalog_read_repository as async_read_model
+from ..read_cache import TTLCache
 
 
 def build_research_catalog_reads_router(database: Any, async_database: Any | None = None) -> APIRouter:
     router = APIRouter(tags=["research-catalog-reads"])
+    # Factor evaluations change after the close; one read serves the console for two minutes.
+    evaluations_cache = TTLCache(120.0)
 
     @router.get("/api/v1/universes/{universe_key}")
     async def universe(universe_key: str) -> dict[str, Any]:
@@ -30,7 +33,9 @@ def build_research_catalog_reads_router(database: Any, async_database: Any | Non
 
     @router.get("/api/v1/factors/evaluations")
     async def factor_evaluation_history(universe_key: str = "core", limit: int = 100) -> dict[str, Any]:
-        return await async_read_model.factor_evaluations(async_database, universe_key, limit) if async_database else read_model.factor_evaluations(database, universe_key, limit)
+        async def compute() -> dict[str, Any]:
+            return await async_read_model.factor_evaluations(async_database, universe_key, limit) if async_database else read_model.factor_evaluations(database, universe_key, limit)
+        return await evaluations_cache.get((universe_key, limit), compute)
 
     @router.get("/api/v1/strategies")
     async def strategies() -> dict[str, Any]:

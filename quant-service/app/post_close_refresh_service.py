@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from .minute_cross_section_export import export_day as export_minute_panel
 from .request_models import (
     AkShareProbeRequest,
     AnnouncementSyncRequest,
@@ -30,7 +31,7 @@ POST_CLOSE_STAGE_ORDER = (
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
     "watchlist_main_wave", "teacher_review_roll", "watch_daily_review", "xiaojie_outcomes", "research_snapshot",
-    "candidate_ledger",
+    "candidate_ledger", "minute_panel_export",
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
@@ -63,6 +64,8 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     "xiaojie_outcomes": 120.0,
     # Normalizes every strategy's own persisted output for the session into one ledger.
     "candidate_ledger": 180.0,
+    # A session's minute documents to one Parquet file (decision 0009); about 240 reads.
+    "minute_panel_export": 600.0,
 }
 
 POST_CLOSE_STAGE_DEPENDENCIES = {
@@ -317,6 +320,10 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             (lambda: dependencies.run_database(dependencies.materialize_candidate_ledger, trade_date, timeout_seconds=180))
             if dependencies.materialize_candidate_ledger is not None
             else (lambda: {"status": "skipped", "reason": "candidate ledger not wired", "research_only": True})
+        ),
+        # A session stored only per symbol (before the switch) has no documents and reports "missing".
+        "minute_panel_export": lambda: dependencies.run_database(
+            export_minute_panel, dependencies.database, trade_date, timeout_seconds=600,
         ),
     }
 

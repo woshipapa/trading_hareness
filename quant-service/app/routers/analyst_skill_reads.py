@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter
 
 from ..async_analyst_skill_read_repository import profiles as async_profiles
+from ..read_cache import TTLCache
 
 
 def build_analyst_skill_reads_router(
@@ -17,11 +18,15 @@ def build_analyst_skill_reads_router(
     async_profiles_fn: Callable[[Any, str | None, int], Awaitable[dict[str, Any]]] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["analyst-skill-reads"])
+    # Skill profiles are rebuilt after the close; one read serves the console for two minutes.
+    profiles_cache = TTLCache(120.0)
 
     @router.get("/api/v1/analyst-skills")
     async def profiles(analyst_id: str | None = None, limit: int = 20) -> dict[str, Any]:
-        if async_database is not None:
-            return await (async_profiles_fn or async_profiles)(async_database, analyst_id, limit)
-        return profiles_fn(database, analyst_id, limit)
+        async def compute() -> dict[str, Any]:
+            if async_database is not None:
+                return await (async_profiles_fn or async_profiles)(async_database, analyst_id, limit)
+            return profiles_fn(database, analyst_id, limit)
+        return await profiles_cache.get((analyst_id, limit), compute)
 
     return router

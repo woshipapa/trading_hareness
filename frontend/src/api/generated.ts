@@ -3141,6 +3141,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/minute-panel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Minute Panel Route
+         * @description Minute series of up to 50 symbols for one session (decision 0009); research, not polling.
+         */
+        get: operations["minute_panel_route_api_v1_market_minute_panel_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasources/board": {
         parameters: {
             query?: never;
@@ -10729,6 +10749,41 @@ export interface operations {
             query?: {
                 trade_date?: string | null;
                 keys?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    minute_panel_route_api_v1_market_minute_panel_get: {
+        parameters: {
+            query: {
+                trade_date: string;
+                symbols: string;
+                fields?: string | null;
             };
             header?: never;
             path?: never;

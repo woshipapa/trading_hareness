@@ -88,7 +88,8 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(captured["calendar"], "the forward calendar stage runs the wired sync")
         self.assertEqual(POST_CLOSE_STAGE_ORDER[:2], ("stale_fetch_runs", "trade_calendar"))
-        self.assertEqual(POST_CLOSE_STAGE_ORDER[-1], "candidate_ledger", "the ledger runs after every strategy stage")
+        self.assertEqual(POST_CLOSE_STAGE_ORDER[-2:], ("candidate_ledger", "minute_panel_export"),
+                         "the ledger runs after every strategy stage; the minute panel export closes the run")
         self.assertEqual(captured["ledger"], {"status": "completed"},
                          "the ledger stage is wired and runs through run_database")
         self.assertIn("post_close_strategy", POST_CLOSE_STAGE_DEPENDENCIES["candidate_ledger"])
