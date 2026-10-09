@@ -79,6 +79,38 @@ class RadarHealthTests(unittest.TestCase):
         self.assertEqual(indicator_status(_Connection(), "market.radar", DAY, at(9, 20))["status"], "pending")
 
 
+class LonghuMoodCrossCheckTests(unittest.TestCase):
+    def _connection(self, mood, *, observed=at(15, 0)):
+        point = {**POINT, "observed_at": observed.isoformat(), "breadth": {"up": 1080, "down": 4300, "flat": 120},
+                 "bands": {"2": {}, "limit": {"now_up": {"count": 43}, "now_down": {"count": 13}}}}
+        connection = _Connection(radar={"points": 240, "last_at": observed, "max_gap_seconds": 61}, point=point)
+        original = connection._rows
+
+        def rows(sql, params):
+            if "MoodNumCount" in str(params):
+                return [{"normalized": {"payload": {"list": mood}}}] if mood else []
+            return original(sql, params)
+        connection._rows = rows
+        return connection
+
+    def test_the_closing_counts_agree_with_longhu_within_a_few_percent(self):
+        mood = {"SZJS": 1075, "XDJS": 4369, "ZTJS": 43, "DTJS": 15}
+        checks = {c["name"]: c for c in indicator_status(self._connection(mood), "market.radar", DAY, at(18, 0))["checks"]}
+        self.assertEqual([checks[name]["status"] for name in
+                          ("rising_vs_longhu", "falling_vs_longhu", "limit_up_vs_longhu", "limit_down_vs_longhu")],
+                         ["ok", "ok", "ok", "ok"])
+
+    def test_a_large_disagreement_fails(self):
+        mood = {"SZJS": 2500, "XDJS": 2900, "ZTJS": 90, "DTJS": 13}
+        checks = {c["name"]: c for c in indicator_status(self._connection(mood), "market.radar", DAY, at(18, 0))["checks"]}
+        self.assertEqual((checks["rising_vs_longhu"]["status"], checks["limit_up_vs_longhu"]["status"]), ("fail", "fail"))
+
+    def test_an_intraday_point_is_not_compared_with_the_closing_tally(self):
+        mood = {"SZJS": 2500, "XDJS": 2900, "ZTJS": 90, "DTJS": 13}
+        status = indicator_status(self._connection(mood, observed=at(10, 30)), "market.radar", DAY, at(10, 31))
+        self.assertFalse(any(check["name"].endswith("_vs_longhu") for check in status["checks"]))
+
+
 class MainNetHealthTests(unittest.TestCase):
     def test_a_unit_error_is_implausible(self):
         # A Longhu industry row read as 亿 and scaled again: 1e8 times too large.

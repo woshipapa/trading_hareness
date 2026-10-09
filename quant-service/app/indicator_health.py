@@ -111,6 +111,46 @@ def radar_checks(connection: Any, trade_date: date, now: datetime) -> list[dict[
     if point.get("bands") is not None:
         checks.append(_check("limit_band", OK if "limit" in point["bands"] else WARN, "limit" in point["bands"], True,
                              "当日涨跌停价已读到，涨跌停带可用"))
+    checks.extend(longhu_mood_checks(connection, trade_date, point))
+    return checks
+
+
+MOOD_CAPABILITY = "longhu:longhu_market_wide:MoodNumCount"
+
+
+def longhu_mood_checks(connection: Any, trade_date: date, point: dict[str, Any]) -> list[dict[str, Any]]:
+    """The radar's closing breadth and limit counts against 开盘啦's own tally, archived after the close.
+
+    The two count the same market but not by one rulebook (suspensions, new
+    listings, timing), so a few percent apart is agreement. Only a point from
+    the closing auction is compared, because the archived tally is the closing one.
+    """
+    row = _one(connection, """SELECT normalized FROM quant.raw_market_observations
+                               WHERE capability=%s AND provider_key='longhuvip' AND normalized->>'exchange_date'=%s
+                               ORDER BY available_at DESC LIMIT 1""", (MOOD_CAPABILITY, trade_date.isoformat()))
+    mood = (((row.get("normalized") or {}).get("payload") or {}).get("list") or {}) if row else {}
+    observed = point.get("observed_at")
+    if not mood or not observed or datetime.fromisoformat(observed).astimezone(CN_TZ).time() < time(14, 57):
+        return []
+    breadth = point.get("breadth") or {}
+    limit_band = (point.get("bands") or {}).get("limit") or {}
+    pairs = (("rising_vs_longhu", breadth.get("up"), mood.get("SZJS"), 0.05, 0.15),
+             ("falling_vs_longhu", breadth.get("down"), mood.get("XDJS"), 0.05, 0.15),
+             ("limit_up_vs_longhu", (limit_band.get("now_up") or {}).get("count"), mood.get("ZTJS"), None, None),
+             ("limit_down_vs_longhu", (limit_band.get("now_down") or {}).get("count"), mood.get("DTJS"), None, None))
+    checks = []
+    for name, ours, theirs, ok_at, warn_at in pairs:
+        if ours is None or theirs is None:
+            continue
+        ours, theirs = int(ours), int(theirs)
+        if ok_at is None:   # small counts: a few names apart is agreement
+            gap = abs(ours - theirs)
+            status = OK if gap <= max(3, theirs * 0.1) else WARN if gap <= max(6, theirs * 0.25) else FAIL
+            value = gap
+        else:
+            value = round(abs(ours - theirs) / max(theirs, 1), 4)
+            status = _grade(value, ok_at, warn_at, lower_is_better=True)
+        checks.append(_check(name, status, value, "相对差" if ok_at else "只数差", f"雷达 {ours} vs 开盘啦 {theirs}"))
     return checks
 
 
