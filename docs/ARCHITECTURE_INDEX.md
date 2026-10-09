@@ -11,7 +11,7 @@
 | `main.py` top-level functions | 430 |
 | Python modules under `app/` | 538 |
 | HTTP router modules | 48 |
-| Alembic migrations | 109 |
+| Alembic migrations | 113 |
 | Frontend source files | 62 |
 
 ## Domain naming inventory

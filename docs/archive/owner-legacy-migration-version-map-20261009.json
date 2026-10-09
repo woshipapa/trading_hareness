@@ -1,0 +1,594 @@
+{
+  "status": "implementation_candidate_not_production_migrated",
+  "source_base": "32d99b9",
+  "immutable_history_inventory_base": "44f1e8074b41c950d36c981a59dd6eaee44929ef",
+  "same_revision_differences": [
+    {
+      "revision": "20260811_0001",
+      "owner": {
+        "file": "20260811_0001_existing_schema_baseline.py",
+        "sha256": "7e2e0d5e1b32f1ef1b98217022656e74b83a2a084ba4650198929c213e09f7ab",
+        "revision": "20260811_0001",
+        "down_revision": null
+      },
+      "peer": {
+        "file": "20260811_0001_existing_schema_baseline.py",
+        "sha256": "4fa9fb918941871d208151e1846c254fb7bafdcf91a86078f1a81400cb912ee0",
+        "revision": "20260811_0001",
+        "down_revision": null
+      },
+      "migration_functions_ast_equal": false,
+      "owner_title": "Record the pre-Alembic quant schema as an explicit baseline.",
+      "peer_title": "Record the pre-Alembic quant schema as an explicit baseline."
+    },
+    {
+      "revision": "20260812_0015",
+      "owner": {
+        "file": "20260812_0015_analyst_pit_research.py",
+        "sha256": "4f6dccf3c5c29c3c6c07a8289bcf2aac362bfb64496b100d2bf2ce3e523b2e98",
+        "revision": "20260812_0015",
+        "down_revision": "20260812_0014"
+      },
+      "peer": {
+        "file": "20260812_0015_analyst_pit_research.py",
+        "sha256": "2d64528834c12551d36a8af8e7056a58e1965f3ac17a44c00c65a0302c2778ec",
+        "revision": "20260812_0015",
+        "down_revision": "20260812_0014"
+      },
+      "migration_functions_ast_equal": false,
+      "owner_title": "Point-in-time analyst research ledger and sleeping-expert aggregates.",
+      "peer_title": "Point-in-time analyst research ledger and sleeping-expert aggregates."
+    },
+    {
+      "revision": "20260813_0017",
+      "owner": {
+        "file": "20260813_0017_analyst_messages.py",
+        "sha256": "dc3ba50c613f345c7019e7bd9e2b5d90ce263843bd8333946dc2f1be1b2ff31c",
+        "revision": "20260813_0017",
+        "down_revision": "20260812_0016"
+      },
+      "peer": {
+        "file": "20260813_0017_analyst_messages.py",
+        "sha256": "0418511b2e691785fa0499caccc135da1273fe43f5588414f04153d19739e1e7",
+        "revision": "20260813_0017",
+        "down_revision": "20260812_0016"
+      },
+      "migration_functions_ast_equal": false,
+      "owner_title": "Archive remote analyst messages with immutable strategy availability.",
+      "peer_title": "Archive remote analyst messages with immutable strategy availability."
+    },
+    {
+      "revision": "20260901_0081",
+      "owner": {
+        "file": "20260901_0081_longhu_full_market_provider.py",
+        "sha256": "673abf7c9ae7d1f2127dd8ea65856a487a40e394cafb60386c5bb2b734f179d6",
+        "revision": "20260901_0081",
+        "down_revision": "20260901_0080"
+      },
+      "peer": {
+        "file": "20260901_0081_longhu_full_market_provider.py",
+        "sha256": "d207f6cc4782b2d97bf35590c71dc10f2a6c576a5775459d4a6f53d0869d9939",
+        "revision": "20260901_0081",
+        "down_revision": "20260901_0080"
+      },
+      "migration_functions_ast_equal": false,
+      "owner_title": "Register the purchased Longhu/Tencent post-close composite provider.",
+      "peer_title": "Register the purchased Longhu/Tencent post-close composite provider."
+    },
+    {
+      "revision": "20260902_0084",
+      "owner": {
+        "file": "20260902_0084_hot_table_lookup_indexes.py",
+        "sha256": "bf6382401848c37b2cb561f4c51ec3f24b92a6e155016cd21061a0c1cf24eb82",
+        "revision": "20260902_0084",
+        "down_revision": "20260901_0083"
+      },
+      "peer": {
+        "file": "20260902_0084_raw_overflow_archive_ledger.py",
+        "sha256": "285a2ede05ae0892f358031c6dd6a1d76ed069aef597e460d03a9f9461ca764d",
+        "revision": "20260902_0084",
+        "down_revision": "20260901_0083"
+      },
+      "migration_functions_ast_equal": false,
+      "owner_title": "Add lookup indexes for the hottest intraday and raw-record tables.",
+      "peer_title": "Add durable raw overflow archive batches and offsets."
+    },
+    {
+      "revision": "20260902_0089",
+      "owner": {
+        "file": "20260902_0089_runtime_lease_fence.py",
+        "sha256": "2dd2cb4bc4abb7722ed7392ebba0cb71814dae64c1e143f1790e9a301154e4b9",
+        "revision": "20260902_0089",
+        "down_revision": "20260902_0088"
+      },
+      "peer": {
+        "file": "20260902_0089_legacy_owner_bridge.py",
+        "sha256": "036730672ec642a50a50d8543fed608a30e7c5db186bdbd1dacaf0ebeed65374",
+        "revision": "20260902_0089",
+        "down_revision": "20260901_0083"
+      },
+      "migration_functions_ast_equal": false,
+      "owner_title": "Add a monotonic fencing token to quant.runtime_leases.",
+      "peer_title": "Compatibility marker for the owner database's legacy 0089 revision."
+    },
+    {
+      "revision": "20260918_ds0001",
+      "owner": {
+        "file": "20260918_ds0001_public_evidence_sources.py",
+        "sha256": "6813c36cc77635fb76e5a225eb89c7c80af6a7a1ca5729e3ed12516676c7bf88",
+        "revision": "20260918_ds0001",
+        "down_revision": "20260906_0094"
+      },
+      "peer": {
+        "file": "20260918_ds0001_public_evidence_sources.py",
+        "sha256": "29129e0e68c5c69d3589317237ada71c4598ec63591ab802ed7099b5b210bf79",
+        "revision": "20260918_ds0001",
+        "down_revision": "20260906_0094"
+      },
+      "migration_functions_ast_equal": true,
+      "owner_title": "Register the token-free public evidence sources and their capabilities.",
+      "peer_title": "Register the token-free public evidence sources and their capabilities."
+    },
+    {
+      "revision": "20260923_0117",
+      "owner": {
+        "file": "20260923_0117_noon_recommendation_source.py",
+        "sha256": "e9bb42dd3d59cb670ef38eb426da5d55127ac87fc11319ec2617466b27a83c04",
+        "revision": "20260923_0117",
+        "down_revision": "20260923_0116"
+      },
+      "peer": {
+        "file": "20260926_0117_legacy_owner_bridge.py",
+        "sha256": "63e850fcd8e1ff82eb461d91a5ddb364b6a2064e448578c4e2450ade2738bb3a",
+        "revision": "20260923_0117",
+        "down_revision": "20260906_0094"
+      },
+      "migration_functions_ast_equal": false,
+      "owner_title": "Allow a recommendation decision to bind to either settled or noon scan.",
+      "peer_title": "Mark the pre-repository owner migration lineage as traversed."
+    },
+    {
+      "revision": "20261008_sep0002",
+      "owner": {
+        "file": "20261008_sep0002_drop_cross_component_ingestion_fk.py",
+        "sha256": "b6e9681340951f94a82ea8ad1dacf0526b73c9c042b17367589f332a6e97a4ec",
+        "revision": "20261008_sep0002",
+        "down_revision": "20261008_sep0001"
+      },
+      "peer": {
+        "file": "20261008_sep0002_drop_cross_component_ingestion_fk.py",
+        "sha256": "05ead1ba7317aae071b2e7ed77741cec68ac56483725cefc80415ec2d94dbd5e",
+        "revision": "20261008_sep0002",
+        "down_revision": "20261008_sep0001"
+      },
+      "migration_functions_ast_equal": true,
+      "owner_title": "Drop the only hard constraint that crossed a component boundary.",
+      "peer_title": "Drop the only hard constraint that crossed a component boundary."
+    }
+  ],
+  "owner_only": [
+    {
+      "file": "20260902_0085_retention_policies.py",
+      "sha256": "7dec867b526b122eec92ab51fa5697c1f08fe067f6fb7fbdee6b1eadaa788a34",
+      "revision": "20260902_0085",
+      "down_revision": "20260902_0084",
+      "title": "Configurable row retention for the unbounded minute/quote/raw tables.",
+      "static_object_references": [
+        "apply_retention_policy",
+        "retention_policies"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260902_0086_outcome_methodology_versioning.py",
+      "sha256": "b9f8f7a7da5bc5d5a1d26979b21c24e6e26795f993ec5028ba95c3c7993bcf9c",
+      "revision": "20260902_0086",
+      "down_revision": "20260902_0085",
+      "title": "Methodology-version stamping and pre-overwrite history for outcome tables.",
+      "static_object_references": [
+        "analyst_opinion_outcomes",
+        "analyst_opinion_outcomes_history"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260902_0087_sql_factor_lab_strategy_registry.py",
+      "sha256": "6097c1c1c28675fa53600c8992a5ed88fb53ab550a8407d88d991e487dfe8d77",
+      "revision": "20260902_0087",
+      "down_revision": "20260902_0086",
+      "title": "Register the SQL factor-lab evaluator so its trials can be ledgered.",
+      "static_object_references": [
+        "strategy_experiments",
+        "strategy_registry"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260902_0088_market_events_availability_basis.py",
+      "sha256": "b17214423b0b998c890df2d34a10d7250edf9c79b980d8f3f1bc3ca2a874e1cc",
+      "revision": "20260902_0088",
+      "down_revision": "20260902_0087",
+      "title": "Add availability_basis to market_events so LEAST() merges stay honest.",
+      "static_object_references": [
+        "market_events"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260910_0090_legacy_research_lookup.py",
+      "sha256": "1a6ca70aa9bdd51a3c812b06030bb67cf85fc5aececdf13d420e39e9fb59ac3d",
+      "revision": "20260910_0090",
+      "down_revision": "20260902_0089",
+      "title": "Index imported per-stock research without scanning million-row JSON history.",
+      "static_object_references": [
+        "legacy_research_code_idx",
+        "legacy_research_security_code_idx",
+        "legacy_source_records"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260911_0091_strategy_observation_ledger.py",
+      "sha256": "3870da004ef59e8e1cf0aa2316f1a06c30623454501f00dc43a18bed40dfdca3",
+      "revision": "20260911_0091",
+      "down_revision": "20260910_0090",
+      "title": "Freeze strategy discoveries independently of mutable latest-run projections.",
+      "static_object_references": [
+        "strategy_observation_evaluations",
+        "strategy_observation_origins"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260911_0092_strategy_governance.py",
+      "sha256": "b4d35519a17cd76fc12fb6cd653e09bd4a53a75ab04b2107020bb1531d71fb08",
+      "revision": "20260911_0092",
+      "down_revision": "20260911_0091",
+      "title": "Atomic strategy changes and append-only independent review evidence.",
+      "static_object_references": [
+        "strategy_governance_activations",
+        "strategy_governance_events",
+        "strategy_governance_items",
+        "strategy_governance_leases"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260911_0093_governance_diagnostics.py",
+      "sha256": "4462ae946bbd0b368e43c99e0ffde6320e533718b5ad480a3c1e55abc98e8f68",
+      "revision": "20260911_0093",
+      "down_revision": "20260911_0092",
+      "title": "Durable deduplicated governance waits, without pretending strategy progress.",
+      "static_object_references": [
+        "strategy_governance_diagnostics",
+        "strategy_governance_items"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260914_0094_intraday_strategy_scans.py",
+      "sha256": "50795a09add37912f98759dd879beeb9d5d5c7aea97b4099c6aa32459238d809",
+      "revision": "20260914_0094",
+      "down_revision": "20260911_0093",
+      "title": "Immutable-input intraday evidence runs, distinct from close results.",
+      "static_object_references": [
+        "intraday_strategy_scans"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260914_0095_intraday_reconciliation.py",
+      "sha256": "64c9d28fbaf13a382b45f4f44c8e6bcfd6f0a73c4069e482fa90351f03796cab",
+      "revision": "20260914_0095",
+      "down_revision": "20260914_0094",
+      "title": "Append-only source/close comparisons, never overwrite the source signal.",
+      "static_object_references": [
+        "intraday_scan_reconciliations",
+        "intraday_strategy_scans"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260914_0096_recommendation_decisions.py",
+      "sha256": "88bb4cd760c77d9f7e5f08f6feda7548d058f906aa11a6190884c3e84edde080",
+      "revision": "20260914_0096",
+      "down_revision": "20260914_0095",
+      "title": "Append-only human-attention decisions and frozen research input.",
+      "static_object_references": [
+        "post_close_strategy_runs",
+        "recommendation_pool_decisions"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260914_0097_event_research.py",
+      "sha256": "41fde7b541c184d8929ebb937fdb3c3b3b1bdcf7bdf1aa01100a13662ccc1637",
+      "revision": "20260914_0097",
+      "down_revision": "20260914_0096",
+      "title": "Point-in-time source documents and immutable event research runs.",
+      "static_object_references": [
+        "event_research_documents",
+        "event_research_runs"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260915_0098_broker_trade_records.py",
+      "sha256": "4be9cd3bdafacb64ef986636a0b93fd744997fb50a83412f34af7c317b413331",
+      "revision": "20260915_0098",
+      "down_revision": "20260914_0097",
+      "title": "Add immutable broker trade records parsed from client exports.",
+      "static_object_references": [
+        "broker_trade_records",
+        "instruments"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260916_0099_broker_order_history.py",
+      "sha256": "64102a18dd63b522eb71f74e566d0eb3d1dd189474bed57d15ad94838ef86b71",
+      "revision": "20260916_0099",
+      "down_revision": "20260915_0098",
+      "title": "Persist manual THS order-history exports.",
+      "static_object_references": [
+        "broker_order_account_bindings",
+        "broker_order_events",
+        "broker_order_imports",
+        "instruments"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260916_0100_raw_market_latest_and_backup_indexes.py",
+      "sha256": "cb48d6d6d3e5ff1d1fa22a6667e1626b205033ba46041f9e2b54f0757b04eed1",
+      "revision": "20260916_0100",
+      "down_revision": "20260916_0099",
+      "title": "Index the all-A latest-snapshot lookup and the incremental backup window.",
+      "static_object_references": [
+        "raw_market_observations"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260916_0101_raw_market_update_tracking.py",
+      "sha256": "a9ae9cc0a6f9a2a8ad1ae506d69393cf46292fef3fd5c4dff3658011d9b0cc82",
+      "revision": "20260916_0101",
+      "down_revision": "20260916_0100",
+      "title": "Record when a raw market observation row is modified after insertion.",
+      "static_object_references": [
+        "raw_market_observations",
+        "touch_raw_market_observation_updated_at"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260917_0102_agent_paper_trading.py",
+      "sha256": "2c94bf5a3cd65a48d716ca56c38a2c2538db08150cd5b32bd1d86834b8f56e45",
+      "revision": "20260917_0102",
+      "down_revision": "20260916_0101",
+      "title": "Agent-operated paper accounts compared against the human broker account.",
+      "static_object_references": [
+        "agent_paper_accounts",
+        "agent_paper_decisions",
+        "agent_paper_nav",
+        "agent_paper_orders",
+        "agent_paper_positions"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260917_0103_agent_paper_audit_trail.py",
+      "sha256": "a97d9b7362693b3917579c81aeace50f1e3104c881a7276211da0dc22a4fe690",
+      "revision": "20260917_0103",
+      "down_revision": "20260917_0102",
+      "title": "Audit trail for agent paper decisions: the exact input, the model transcript, order outcomes.",
+      "static_object_references": [
+        "agent_paper_decisions"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260917_0104_longhu_replaces_tencent.py",
+      "sha256": "246760cda9b524f75ef2fe6a91a79201f8528cfd3cc070fc67cedf4fe9c407ff",
+      "revision": "20260917_0104",
+      "down_revision": "20260917_0103",
+      "title": "Longhu replaces every Tencent read: register its intraday providers, retire Tencent.",
+      "static_object_references": [
+        "intraday_order_book_recent_idx",
+        "intraday_quote_observations",
+        "provider_api_capabilities",
+        "provider_capabilities",
+        "providers"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260918_0105_trade_discipline.py",
+      "sha256": "40c9ae94aa7ff7d2b0bc67d9eaa2def0df4dac43f953277629d6e13b0523667f",
+      "revision": "20260918_0105",
+      "down_revision": "20260917_0104",
+      "title": "Machine-derived trade discipline: plans, evaluations, compliance, reviews.",
+      "static_object_references": [
+        "discipline_compliance",
+        "discipline_evaluations",
+        "discipline_generation_runs",
+        "discipline_plans",
+        "discipline_reviews",
+        "instruments"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260919_0106_storage_tier_cutoff_indexes.py",
+      "sha256": "0f7151c48433be35ff01356c4d7b60e58a8bcc928a89956b2402cc1f0269f5b0",
+      "revision": "20260919_0106",
+      "down_revision": "20260918_0105",
+      "title": "Index the storage tier cutoff column of every tiered evidence table.",
+      "static_object_references": [
+        "edge_evidence_changes",
+        "intraday_quote_observations",
+        "intraday_rule_input_snapshots",
+        "raw_market_observations",
+        "tushare_raw_records"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260920_0107_owner_deploy_events.py",
+      "sha256": "57dc1a843b8f067276758362cd12c45c702119a83451aa6a70fe39ccfa0663be",
+      "revision": "20260920_0107",
+      "down_revision": "20260919_0106",
+      "title": "Announce owner deployments on the one channel that survives them.",
+      "static_object_references": [
+        "owner_deploy_events"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260920_0108_trade_thesis.py",
+      "sha256": "5f7babd4452f3db9b31f81428ea83cdef0644db343bfecad3503530129812ddb",
+      "revision": "20260920_0108",
+      "down_revision": "20260920_0107",
+      "title": "Persist immutable trade-thesis revisions, evaluations, and plan bindings.",
+      "static_object_references": [
+        "instruments",
+        "plan_thesis_bindings",
+        "trade_thesis_evaluations",
+        "trade_thesis_revisions"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260920_0109_discipline_alerts.py",
+      "sha256": "23af542d62a4aca4c30ba30a65f435b9c11900625335874e86ea99ac0daeb29a",
+      "revision": "20260920_0109",
+      "down_revision": "20260920_0108",
+      "title": "Durable transition/outbox state for trade-discipline notifications.",
+      "static_object_references": [
+        "discipline_alert_deliveries",
+        "discipline_alert_events",
+        "discipline_alert_line_states",
+        "discipline_alert_runtime_status",
+        "discipline_evaluations",
+        "discipline_plans"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260921_0110_intraday_advisory.py",
+      "sha256": "bb210209a455b2fe0f6d115b6d1f07b61d08e3aab712c5c6fdbf35b25c607e7f",
+      "revision": "20260921_0110",
+      "down_revision": "20260920_0109",
+      "title": "Durable account-scoped intraday advisory evidence.",
+      "static_object_references": [
+        "intraday_advisory_analysis_runs",
+        "intraday_advisory_deliveries",
+        "intraday_advisory_events",
+        "intraday_advisory_runtime_status"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260921_0111_intraday_advisory_cards.py",
+      "sha256": "10d831a9344c5e101daa948ecceab108d7d8e33ec140545e923d0714b9f18922",
+      "revision": "20260921_0111",
+      "down_revision": "20260921_0110",
+      "title": "Native Feishu card payloads for advisory deliveries.",
+      "static_object_references": [
+        "intraday_advisory_deliveries"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260921_0112_intraday_market_scope.py",
+      "sha256": "66487bab3e34d98ed83a51aeed561670b2ebe0075286f65c60894ed29f43393a",
+      "revision": "20260921_0112",
+      "down_revision": "20260921_0111",
+      "title": "Allow replayable market-index and sector advisory events.",
+      "static_object_references": [
+        "intraday_advisory_events"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260921_0113_discipline_alert_cards.py",
+      "sha256": "dd1c7269cf031120a5bcf3e31a9b339ce41cba313270efd711790c58a3264dd8",
+      "revision": "20260921_0113",
+      "down_revision": "20260921_0112",
+      "title": "Native Feishu cards for discipline deliveries.",
+      "static_object_references": [
+        "discipline_alert_deliveries"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260921_0114_negative_broker_average_cost.py",
+      "sha256": "fe99f77c57b9ef45f5e9df70663abf0009fa96c49db28d8489c23dd28fd69db0",
+      "revision": "20260921_0114",
+      "down_revision": "20260921_0113",
+      "title": "Preserve legitimate negative broker average costs.",
+      "static_object_references": [
+        "broker_position_snapshots"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260921_0115_factor_maintenance_audit.py",
+      "sha256": "9184b5fca076d5c9be0670e90185d6388f05ce8ce12f4afc62041a79102b9efc",
+      "revision": "20260921_0115",
+      "down_revision": "20260921_0114",
+      "title": "Transactional factor-maintenance journal; trusted peer keeps full access.",
+      "static_object_references": [
+        "capture_factor_maintenance_change",
+        "factor_maintenance_changes",
+        "factor_maintenance_changes_change_no_seq",
+        "factor_maintenance_runs",
+        "factor_run_id"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20260923_0116_intraday_holding_focus.py",
+      "sha256": "a5777fd72d3b6328608d85b8061a06cf02a92322d6175f2735e11d51e165dd7b",
+      "revision": "20260923_0116",
+      "down_revision": "20260921_0115",
+      "title": "Explicit, expiring manual focus for held stocks; no order authority.",
+      "static_object_references": [
+        "intraday_holding_focus"
+      ],
+      "proposal": "fold structural delta into new idempotent predecessor reconciliation; preserve original source as evidence"
+    },
+    {
+      "file": "20261008_0118_card_observations.py",
+      "sha256": "d9012ae2166c65214d3685dd5c43adf00e4f62872214a7a2ab447afcded5c88a",
+      "revision": "20261008_0118",
+      "down_revision": "20261008_sep0002",
+      "title": "Separate preview evidence from confirmed discipline evaluations.",
+      "static_object_references": [
+        "discipline_card_observation_deliveries",
+        "discipline_card_observation_events",
+        "discipline_card_observation_states",
+        "discipline_plans"
+      ],
+      "proposal": "preserve original body and review parent metadata"
+    },
+    {
+      "file": "20261009_0119_personal_review_reminders.py",
+      "sha256": "1f48e7ba80c23f4f5d290c7a10e5cb2395cb5d1f327bea5c259fbfd1749b425b",
+      "revision": "20261009_0119",
+      "down_revision": "20261008_0118",
+      "title": "Allow a standalone user reminder in the existing durable notification outbox.",
+      "static_object_references": [
+        "intraday_advisory_deliveries"
+      ],
+      "proposal": "preserve original body and review parent metadata"
+    }
+  ],
+  "agreed_parent_change": {
+    "revision": "20261008_0118",
+    "old_parent": "20261008_sep0002",
+    "new_parent": "20261010_ow0120",
+    "upgrade_and_downgrade_unchanged": true
+  },
+  "final_head": "20261010_ow0121"
+}
