@@ -22,9 +22,13 @@ OUTPUT = ROOT / "docs" / "services.html"
 
 # (分组, 名称, base URL, 形态, 说明, [(路径, 链接名), ...])
 REGISTRY: list[tuple[str, str, str, str, str, list[tuple[str, str]]]] = [
+    ("控制台", "服务索引（本页）", "http://127.0.0.1:8800",
+     "supervisor 服务（service-index）",
+     "常驻入口，加书签用这个地址；以 http 打开时左侧圆点是各服务的存活探测。",
+     [("/", "本页"), ("/health", "health")]),
     ("控制台", "飞书 Relay / Quant 控制台", "http://127.0.0.1:18300",
      "SSH 隧道 → 47edge（feishu-tunnel）",
-     "同源双应用：adapter 按路径路由 quant 研究控制台与 relay 运维面板。",
+     "同源双应用：adapter 按路径路由 quant 研究控制台与 relay 运维面板；owner（47 主机）量化数据的前端呈现就在这里。",
      [("/", "Quant 总览"), ("/research", "研究"), ("/personal", "个人决策"),
       ("/monitor", "群监听"), ("/workbench", "飞书工作台"), ("/relay", "转发台账")]),
     ("控制台", "XHS 情报控制台", "http://127.0.0.1:18790",
@@ -61,7 +65,7 @@ REGISTRY: list[tuple[str, str, str, str, str, list[tuple[str, str]]]] = [
      [("/health", "health")]),
     ("API / 健康", "Owner 读路径", "http://127.0.0.1:15682",
      "SSH 隧道 → 47owner（owner-tunnel）",
-     "47 owner 只读行情证据路径（LONGHU_* 配置存在时才运行）。",
+     "47 owner 只读行情证据路径（LONGHU_* 配置存在时才运行）；owner 无 Web 前端，其数据的页面入口是 :18300 控制台。",
      [("/health", "health")]),
 ]
 
@@ -90,9 +94,11 @@ def render() -> str:
             f'<a href="{esc(base + path)}">{esc(label)}</a>' for path, label in links)
         port = base.rsplit(":", 1)[-1]
         tunnel = "隧道" in kind
+        probe_path = next((path for path, _label in links if path == "/health"), links[0][0])
         cards.setdefault(group, []).append(
-            f'<article class="card">'
-            f'<header><h2>{esc(name)}</h2><span class="port">:{esc(port)}</span></header>'
+            f'<article class="card" data-probe="{esc(base + probe_path)}">'
+            f'<header><h2><span class="dot" title="存活探测"></span>{esc(name)}</h2>'
+            f'<span class="port">:{esc(port)}</span></header>'
             f'<span class="kind{" tunnel" if tunnel else ""}">{esc(kind)}</span>'
             f'<p>{esc(desc)}</p><nav>{anchors}</nav></article>')
 
@@ -149,7 +155,24 @@ section > h1 {{ margin: 0 0 12px; font-size: 15px; font-weight: 700; color: var(
 .notes {{ margin-top: 34px; padding: 14px 18px 14px 34px; background: var(--surface);
   border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }}
 .notes li {{ margin: 4px 0; }}
+.dot {{ display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 50%;
+  background: var(--line); vertical-align: 1px; }}
+.dot.up {{ background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }}
+.dot.down {{ background: #bf3040; box-shadow: 0 0 0 3px #fff0f1; }}
 </style>
+<script>
+// 存活点灯：仅在本页经 http 托管（:8800）时探测；file:// 打开保持中性灰点。
+// no-cors 的不透明响应足以区分"端口有服务"与"连接失败"。
+addEventListener('DOMContentLoaded', () => {{
+  if (location.protocol !== 'http:') return;
+  document.querySelectorAll('.card[data-probe]').forEach((card) => {{
+    const dot = card.querySelector('.dot');
+    fetch(card.dataset.probe, {{ mode: 'no-cors', cache: 'no-store' }})
+      .then(() => dot.classList.add('up'))
+      .catch(() => dot.classList.add('down'));
+  }});
+}});
+</script>
 </head>
 <body>
 <main>

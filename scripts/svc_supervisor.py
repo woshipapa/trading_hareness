@@ -123,6 +123,12 @@ TASKS = [
               "XHS_EDGE_URL": "http://127.0.0.1:18790",
               "XHS_COLLECTOR_TOKEN": _load_env_secret("XHS_COLLECTOR_TOKEN"),
               "XHS_AI_WORKER_ID": "mac-codex-teleai"}),
+    # 服务索引常驻入口：http://127.0.0.1:8800/ 一页点达全部本机/隧道服务。
+    dict(name="service-index", kind="daemon",
+         args=[PY, os.path.join(N8N, "scripts/serve_service_index.py")],
+         cwd=N8N, out=os.path.join(N8N, "logs/service-index.log"),
+         err=os.path.join(N8N, "logs/service-index.log"),
+         env={"PATH": PATH_ENV, "PYTHONUNBUFFERED": "1"}),
     # Paper-KB lives on this workstation while the always-on Feishu adapter
     # runs on edge.  Keep its command webhooks on a loopback-only reverse SSH
     # forward so 收录/查询/反馈 do not depend on an edge n8n workflow copy.

@@ -22,8 +22,29 @@ class ServiceIndexTests(unittest.TestCase):
 
     def test_known_core_entries_present(self):
         text = index.render()
-        for marker in (":18300", ":18790", ":5678", ":8787", ":15682", "/xhs/", "/monitor"):
+        for marker in (":18300", ":18790", ":5678", ":8787", ":15682", ":8800", "/xhs/", "/monitor"):
             self.assertIn(marker, text)
+
+    def test_served_entry_point_returns_the_page_and_health(self):
+        import json
+        import threading
+        import urllib.request
+        import serve_service_index as server
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_port}"
+            with urllib.request.urlopen(base + "/", timeout=3) as response:
+                page = response.read().decode("utf-8")
+                self.assertEqual(response.status, 200)
+                self.assertIn("服务索引", page)
+            with urllib.request.urlopen(base + "/health", timeout=3) as response:
+                self.assertEqual(json.load(response)["status"], "ok")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

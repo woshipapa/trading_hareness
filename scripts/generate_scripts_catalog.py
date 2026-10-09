@@ -51,6 +51,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("release-sync-status.sh", "release", "platform", "workstation"),
     ("workflow-status.sh", "release", "platform", "workstation"),
     ("sync_frontend_shared.py", "CI and checks", "platform", "workstation"),
+    ("serve_service_index.py", "workstation services", "platform", "workstation"),
     ("shared-peer/deploy-*.sh", "release", "quant-research", "workstation"),
     ("shared-peer/classify-owner-paths.sh", "release", "quant-research", "workstation"),
     ("shared-peer/package-peer-release.sh", "release", "quant-research", "workstation"),

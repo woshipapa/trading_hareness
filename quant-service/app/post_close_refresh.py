@@ -54,9 +54,20 @@ async def record_stage_with_receipt(
         result = action()
         if hasattr(result, "__await__"):
             result = await result
+    except asyncio.CancelledError:
+        # A stage that overran its budget is cancelled, which is not an
+        # Exception: on 2026-10-09 two receipts stayed "running" for good after
+        # their stage timed out. Mark it failed, then let the cancellation go on.
+        await asyncio.shield(run_database_blocking(
+            lambda: _fail_stage_receipt(db, run_id, TimeoutError("stage cancelled: it overran its time budget"),
+                                        safe_error_detail),
+            timeout_seconds=10,
+        ))
+        raise
     except Exception as error:
+        failure = error  # the lambda outlives the except-binding as far as linters can tell
         await run_database_blocking(
-            lambda: _fail_stage_receipt(db, run_id, error, safe_error_detail), timeout_seconds=10,
+            lambda: _fail_stage_receipt(db, run_id, failure, safe_error_detail), timeout_seconds=10,
         )
         raise
 
@@ -72,7 +83,9 @@ async def record_stage_with_receipt(
 def _fail_stage_receipt(db: Any, run_id: str, error: BaseException,
                         safe_error_detail: Callable[[str, int], str]) -> None:
     with db.transaction() as connection:
-        fail_run(connection, run_id, RuntimeError(safe_error_detail(str(error), 500)))
+        message = str(error).strip()
+        detail = f"{type(error).__name__}: {message}" if message else type(error).__name__
+        fail_run(connection, run_id, RuntimeError(safe_error_detail(detail, 500)))
 
 
 def _finish_stage_receipt(db: Any, run_id: str, status: str, result: Any) -> None:

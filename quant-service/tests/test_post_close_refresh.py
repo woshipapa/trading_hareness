@@ -337,6 +337,41 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(called)
         self.assertTrue(result["resumed_from_receipt"])
 
+    async def test_a_stage_cancelled_by_its_budget_leaves_a_failed_receipt_not_a_running_one(self):
+        import asyncio
+        from unittest.mock import patch
+
+        class Result:
+            def fetchone(self):
+                return {"run_id": "receipt-2", "status": "running", "output_summary": {}}
+
+        class Connection:
+            def execute(self, *_args, **_kwargs):
+                return Result()
+
+        class Database:
+            def transaction(self):
+                class Context:
+                    def __enter__(self): return Connection()
+                    def __exit__(self, *_args): return False
+                return Context()
+
+        async def run_db(action, *args, **_kwargs):
+            result = action(*args)
+            return await result if hasattr(result, "__await__") else result
+
+        async def slow_stage():
+            await asyncio.sleep(10)
+
+        failed = []
+        with patch("app.post_close_refresh.fail_run", side_effect=lambda _c, run_id, error: failed.append((run_id, str(error)))):
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(record_stage_with_receipt(
+                    "market_flow_features", date(2026, 10, 9), slow_stage, db=Database(),
+                    run_database_blocking=run_db, safe_error_detail=lambda value, _limit: value), timeout=0.05)
+        self.assertEqual(failed[0][0], "receipt-2")
+        self.assertIn("overran its time budget", failed[0][1])
+
     async def test_completed_receipt_repairs_legacy_null_summary_status(self):
         class Result:
             def fetchone(self):
