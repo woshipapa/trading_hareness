@@ -12,7 +12,8 @@
     "AGENTS.md",
     "workflows/paper-kb-automation.json",
     "workflows/runner-*.json",
-    "workflows/managed/**"
+    "workflows/managed/**",
+    "frontend-shared/**"
   ],
   "components": [
     {
