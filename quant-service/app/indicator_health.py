@@ -22,7 +22,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .indicator_registry import BY_KEY, INTRADAY_MINUTE, PREVIOUS_SESSION
+from .indicator_registry import BY_KEY, INTRADAY_MINUTE, PREVIOUS_SESSION, SESSION_OPEN
 from .limit_detail_read_model import limit_detail_day
 from .market_radar_runtime import latest_main_net, latest_point
 from .owner_storage import tiered_sql_builder
@@ -39,6 +39,8 @@ MAX_MAIN_NET_SHARE = 0.25
 #: The close pipeline's indicators are due by this time on the session.
 POST_CLOSE_DUE = time(17, 30)
 MINUTE_DUE = time(9, 26)
+#: The session's limit prices are written by the first 小杰 scan after the open.
+SESSION_OPEN_DUE = time(9, 35)
 CONTINUOUS = ((time(9, 31), time(11, 30)), (time(13, 1), time(15, 0)))
 
 
@@ -70,7 +72,8 @@ def _due(trade_date: date, now: datetime, availability: str) -> bool:
         return True
     if local.date() < trade_date:
         return False
-    return local.time() >= (MINUTE_DUE if availability == INTRADAY_MINUTE else POST_CLOSE_DUE)
+    due = {INTRADAY_MINUTE: MINUTE_DUE, SESSION_OPEN: SESSION_OPEN_DUE}.get(availability, POST_CLOSE_DUE)
+    return local.time() >= due
 
 
 def _one(connection: Any, sql: str, params: tuple[Any, ...]) -> dict[str, Any]:

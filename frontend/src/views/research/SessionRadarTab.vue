@@ -5,7 +5,7 @@ import VChart from 'vue-echarts';
 import { getJson } from '../../api/http';
 import {
   BAND_LABELS, GATE_LABELS, HEALTH_LABELS, HEALTH_TYPES, PHASE_LABELS, SEGMENT_LABELS, auctionRows, bandCounts, boardText,
-  breadthText, failingChecks, lineRankText,
+  breadthText, failingChecks, fieldHealthText, lineRankText,
   pctText, radarLegend,
   radarOption, radarRows, shanghaiTime, shanghaiToday, stars, tone, yi,
   type CardPick, type IndicatorHealth, type LimitDetailDay, type RadarDay, type StrategyCardsDay,
@@ -136,6 +136,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         <el-space wrap>
           <strong>战法卡片</strong>
           <el-tag :type="gateType">总方向 {{ GATE_LABELS[gate?.label ?? 'unknown'] }}</el-tag>
+          <el-tooltip :content="fieldHealthText(cards)" placement="top">
+            <el-tag :type="cards?.data_health?.all_eligible ? 'success' : 'warning'">数据{{ cards?.data_health?.all_eligible ? '可作决策' : '未全部就绪' }}</el-tag>
+          </el-tooltip>
           <el-text type="info" size="small">上/下比 {{ gate?.up_down_ratio ?? '-' }} · 净额 {{ yi(gate?.main_net) }} · 昨收格局 {{ cards?.previous_close_regime?.regime_label ?? '-' }} · 选股日 {{ cards?.picks_as_of ?? '-' }}</el-text>
         </el-space>
         <el-space>

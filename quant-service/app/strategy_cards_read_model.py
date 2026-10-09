@@ -40,6 +40,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .indicator_health import indicator_status
 from .limit_detail_read_model import limit_detail_day
 from .market_radar_runtime import latest_main_net, latest_point
 from .owner_storage import tiered_sql_builder
@@ -337,7 +338,27 @@ def _card_summary(picks: list[dict[str, Any]], direction: int) -> dict[str, Any]
     }
 
 
-def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10) -> dict[str, Any]:
+#: The indicators each card field rests on, and the session each is checked for.
+FIELD_INPUTS: dict[str, tuple[str, str]] = {
+    "since_open/auction/latest": ("market.radar", "trade_date"),
+    "limit flags": ("stock.limit_prices", "trade_date"),
+    "direction_gate": ("market.direction_gate", "trade_date"),
+    "picks": ("strategy.ledger", "trade_date"),
+    "themes": ("board.concept_strength", "as_of"),
+    "events": ("events.lhb", "trade_date"),
+}
+
+
+def data_health(connection: Any, trade_date: date, as_of: date, now: datetime) -> dict[str, Any]:
+    """Whether the indicators behind each card field may be used for a decision now."""
+    fields = {}
+    for field, (key, session) in FIELD_INPUTS.items():
+        status = indicator_status(connection, key, as_of if session == "as_of" else trade_date, now)
+        fields[field] = {"indicator": key, "status": status["status"], "decision_eligible": status["decision_eligible"]}
+    return {"fields": fields, "all_eligible": all(item["decision_eligible"] for item in fields.values())}
+
+
+def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10, now: datetime | None = None) -> dict[str, Any]:
     as_of = picks_as_of(connection, trade_date)
     base = {"trade_date": trade_date.isoformat(), "cards_version": CARDS_VERSION,
             "research_only": True, "live_effect": "none"}
@@ -385,6 +406,7 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10) -> 
     return {
         **base, "status": "completed" if cards else "missing", "picks_as_of": as_of.isoformat(),
         "per_line": per_line, "direction_gate": direction_gate(connection, trade_date),
+        "data_health": data_health(connection, trade_date, as_of, now or datetime.now(CN_TZ)),
         "previous_close_regime": dict(regime) if regime else None,
         "cards": cards, "leaderboard": ranking,
         "definitions": {
@@ -398,4 +420,4 @@ def strategy_cards(connection: Any, trade_date: date, *, per_line: int = 10) -> 
     }
 
 
-__all__ = ["CARDS_VERSION", "LINES", "direction_gate", "leaderboard", "strategy_cards"]
+__all__ = ["CARDS_VERSION", "FIELD_INPUTS", "LINES", "data_health", "direction_gate", "leaderboard", "strategy_cards"]

@@ -103,7 +103,7 @@ class _Connection:
 class StrategyCardTests(unittest.TestCase):
     def setUp(self):
         self.connection = _Connection()
-        self.day = strategy_cards(self.connection, SESSION, per_line=10)
+        self.day = strategy_cards(self.connection, SESSION, per_line=10, now=at(10, 31))
         self.cards = {card["strategy_key"]: card for card in self.day["cards"]}
 
     def test_the_large_percentage_is_the_return_from_the_open(self):
@@ -153,6 +153,14 @@ class StrategyCardTests(unittest.TestCase):
         gate = self.day["direction_gate"]
         self.assertEqual((gate["label"], gate["up_down_ratio"], gate["main_net"]), ("up", 1.5, 5e8))
         self.assertEqual(self.day["previous_close_regime"]["regime_label"], "mixed_transition")
+
+    def test_each_card_field_names_the_indicator_it_rests_on_and_its_health(self):
+        health = self.day["data_health"]
+        self.assertEqual(health["fields"]["since_open/auction/latest"]["indicator"], "market.radar")
+        self.assertEqual(health["fields"]["themes"]["indicator"], "board.concept_strength")
+        # The fake connection has no radar summary, so the radar is missing and nothing is decision-eligible.
+        self.assertEqual(health["fields"]["since_open/auction/latest"]["status"], "missing")
+        self.assertFalse(health["all_eligible"])
 
     def test_quotes_are_read_with_one_index_probe_per_symbol(self):
         self.assertFalse(any("DISTINCT ON (symbol) symbol,effective_at" in sql for sql in self.connection.sql))

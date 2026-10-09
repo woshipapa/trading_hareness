@@ -46,7 +46,7 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
 
         def read() -> dict[str, Any]:
             with database.transaction() as connection:
-                return strategy_cards(connection, day, per_line=per_line)
+                return strategy_cards(connection, day, per_line=per_line, now=datetime.now(CN_TZ))
 
         return await run_database_blocking(read, timeout_seconds=60)
 

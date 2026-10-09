@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auctionRows, bandCounts, breadthText, failingChecks, pctText, radarLegend, radarOption, radarRows, stars, tone, yi, type RadarDay } from './session-radar';
+import { auctionRows, bandCounts, breadthText, failingChecks, fieldHealthText, pctText, radarLegend, radarOption, radarRows, stars, tone, yi, type RadarDay } from './session-radar';
 
 const cell = (turnover: number, count = 1) => ({ turnover, count });
 const bands = (up: number, down: number, pool: number, nowUp = up, nowDown = down) => ({
@@ -65,6 +65,13 @@ describe('session radar', () => {
       { name: 'present', status: 'ok', value: 104 },
       { name: 'plausible', status: 'fail', value: 2e7, threshold: '<=0.25', detail: '|主力净额|/全池成交额' }] }))
       .toBe('plausible=20000000（|主力净额|/全池成交额）');
+  });
+
+  it('lists each card field with its indicator health', () => {
+    expect(fieldHealthText({ trade_date: '', status: 'completed', cards: [], data_health: { all_eligible: false, fields: {
+      themes: { indicator: 'board.concept_strength', status: 'ok', decision_eligible: true },
+      direction_gate: { indicator: 'market.direction_gate', status: 'pending', decision_eligible: false } } } }))
+      .toBe('themes：board.concept_strength 可用；direction_gate：market.direction_gate 未到时');
   });
 
   it('formats signed percentages, tones and event stars', () => {

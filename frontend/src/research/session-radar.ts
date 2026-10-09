@@ -217,6 +217,7 @@ export type DirectionGate = {
 export type StrategyCardsDay = {
   trade_date: string; status: string; reason?: string; picks_as_of?: string; direction_gate?: DirectionGate;
   previous_close_regime?: { regime_label?: string | null } | null; cards: StrategyCard[];
+  data_health?: { all_eligible: boolean; fields: Record<string, { indicator: string; status: string; decision_eligible: boolean }> };
   leaderboard?: Record<string, ({ strategy_key: string; name: string } & LeaderboardCell)[]>;
   definitions?: Record<string, string>;
 };
@@ -258,4 +259,11 @@ export const HEALTH_TYPES: Record<string, string> = { ok: 'success', warn: 'warn
 export function failingChecks(item: IndicatorStatus): string {
   return item.checks.filter((check) => check.status !== 'ok')
     .map((check) => `${check.name}=${check.value ?? '-'}（${check.detail || check.threshold || check.status}）`).join('；');
+}
+
+/** Each card field with its indicator's health, as one line. */
+export function fieldHealthText(day: StrategyCardsDay | null | undefined): string {
+  const fields = day?.data_health?.fields ?? {};
+  return Object.entries(fields)
+    .map(([field, item]) => `${field}：${item.indicator} ${HEALTH_LABELS[item.status] ?? item.status}`).join('；');
 }

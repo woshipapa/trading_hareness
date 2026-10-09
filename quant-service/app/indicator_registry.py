@@ -19,6 +19,7 @@ from typing import Any, Final
 
 #: When in the day an indicator should exist.
 INTRADAY_MINUTE: Final = "intraday_minute"        # from the 09:25 match, every minute
+SESSION_OPEN: Final = "session_open"              # once per session, shortly after the open
 POST_CLOSE: Final = "post_close"                  # after the close pipeline (about 16:00-17:00)
 PREVIOUS_SESSION: Final = "previous_session"      # the session before trade_date, available all day
 
@@ -66,8 +67,8 @@ INDICATORS: Final[tuple[Indicator, ...]] = (
               ("longhuvip 全市场收盘",), "stock_money_flow_daily: source=longhuvip_main_net",
               "/api/v1/data-readiness/features", POST_CLOSE, "开盘啦收盘全市场个股主力净额"),
     Indicator("stock.limit_prices", "涨跌停价", "stock", "session", "cny",
-              ("腾讯行情公布价（字段 47/48）",), "daily_trade_limits", "/api/v1/data-readiness/features", POST_CLOSE,
-              "交易所公布涨跌停价；北交所向内取整，沪深四舍五入"),
+              ("腾讯行情公布价（字段 47/48）",), "daily_trade_limits", "/api/v1/data-readiness/features", SESSION_OPEN,
+              "交易所公布涨跌停价；北交所向内取整，沪深四舍五入。盘中由小杰首轮扫描取当日价写入，收盘控制同步再对账"),
     Indicator("strategy.ledger", "策略线日候选台账", "strategy", "session", "rows",
               ("strategy_daily_candidate_ledger",), "strategy_daily_candidates", "/api/v1/strategies/cards",
               PREVIOUS_SESSION, "13 条策略线前一交易日收盘后的候选，次日开盘入场比较"),
@@ -83,4 +84,5 @@ def registry() -> list[dict[str, Any]]:
     return [{**asdict(item), "sources": list(item.sources), "live_effect": "none"} for item in INDICATORS]
 
 
-__all__ = ["BY_KEY", "INDICATORS", "INTRADAY_MINUTE", "Indicator", "POST_CLOSE", "PREVIOUS_SESSION", "registry"]
+__all__ = ["BY_KEY", "INDICATORS", "INTRADAY_MINUTE", "Indicator", "POST_CLOSE", "PREVIOUS_SESSION", "SESSION_OPEN",
+           "registry"]
