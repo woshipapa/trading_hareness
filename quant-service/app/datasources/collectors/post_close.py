@@ -290,7 +290,7 @@ async def run_due_jobs(deps: ArchiveDeps, state: ArchiveState, now: datetime, *,
         except Exception as error:  # noqa: BLE001 - retried on the next window tick
             results[job.key] = {"status": "failed", "error": error_text(error, 240)}
             try:
-                await deps.collector.record_health("public_archive", job.key, False, 0, None, str(error))
+                await deps.collector.record_health("public_archive", job.key, False, 0, None, error_text(error, 500))
             except Exception:  # noqa: BLE001
                 pass
     return results
