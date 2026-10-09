@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 from psycopg.types.json import Json
 
 from .longhu_market_repository import persist_full_market_close, persist_settled_trade_calendar
+from .longhu_critical_close import repair as repair_critical_close
 from .longhu_market_sync import PROVIDER_KEY, merge_cross_section
 from .longhu_vendor_source import LonghuVendorSource, direct_access_enabled
 
@@ -97,7 +98,11 @@ async def sync(
 
     prepared = await run_database_blocking(prepare)
     if prepared["unchanged"]:
-        return prepared["unchanged"]
+        critical=await repair_critical_close(trade_date,db=db,source_factory=source_factory,
+            run_public_blocking=run_public_blocking,run_database_blocking=run_database_blocking,
+            persist_rows=persist_rows)
+        return {**prepared["unchanged"],"critical_holdings":critical,
+                **({'status':'blocked','reason':critical['reason']} if critical['status']=='blocked' else {})}
     try:
         source = source_factory()
         evidence = await run_public_blocking(
@@ -130,8 +135,12 @@ async def sync(
                 )
 
         persisted = await run_database_blocking(persist, timeout_seconds=240)
+        critical=await repair_critical_close(trade_date,db=db,source_factory=source_factory,
+            run_public_blocking=run_public_blocking,run_database_blocking=run_database_blocking,
+            persist_rows=persist_rows)
         return {
-            "status": "completed", "trade_date": str(trade_date), "provider": PROVIDER_KEY,
+            "status": "blocked" if critical["status"]=="blocked" else "completed", "trade_date": str(trade_date), "provider": PROVIDER_KEY,
+            "critical_holdings": critical,
             "request_key": request_key, **persisted, "source_health": evidence["health"],
             "semantic_boundary": (
                 "main_net is vendor order-size classification; not institution identity or Level-2 order cancellation"
