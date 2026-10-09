@@ -189,36 +189,9 @@ class SharedLonghuFullMarketSource:
         """Public OHLC, which needs no licence and so is fetched directly."""
         return tencent_quote_batches(self._session, symbols, timeout_seconds=self._timeout_seconds)
 
-    def fetch_full_market_evidence(self, trade_date: date) -> dict[str, Any]:
-        catalog = self.industry_plate_catalog()
-        vendor, vendor_health = self.full_market_vendor_rows(
-            trade_date, plate_ids=[row["sector_key"] for row in catalog],
-        )
-        quotes, quote_health = self.tencent_quotes(vendor)
-        members_by_plate: dict[str, list[dict[str, Any]]] = {}
-        for row in vendor.values():
-            members_by_plate.setdefault(str(row["plate_id"]), []).append(row)
-        board_rows: list[dict[str, Any]] = []
-        for board in catalog:
-            members = members_by_plate.get(board["sector_key"], [])
-            leaders = sorted(
-                members,
-                key=lambda row: (float(row.get("main_net") or 0), float(row.get("pct_chg") or 0)),
-                reverse=True,
-            )[:10]
-            board_rows.append({
-                **board, "mapped_members": len(members), "quoted_members": len(members),
-                "top_stocks": [{
-                    "symbol": row["symbol"], "name": row["name"],
-                    "pct_change": row.get("pct_chg"), "net_inflow": row.get("main_net"),
-                } for row in leaders],
-                "source": "longhuvip_gateway:RealRankingInfo+ZhiShuStockList_W8",
-            })
-        return {
-            "trade_date": trade_date, "vendor_rows": vendor, "quote_rows": quotes,
-            "board_rows": board_rows,
-            "health": {"longhu": vendor_health, "tencent": quote_health},
-        }
+    def fetch_full_market_evidence(self, trade_date: date, extra_symbols: Iterable[str] = ()) -> dict[str, Any]:
+        from .longhu_settled_market import fetch
+        return fetch(self, trade_date, extra_symbols, quote_source=self._source)
 
 
 def shared_longhu_source_factory() -> SharedLonghuFullMarketSource:

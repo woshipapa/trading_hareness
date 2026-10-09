@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 from datetime import date
-from types import SimpleNamespace
 
 from app.longhu_shared_full_market import (
     MINIMUM_PLATES,
@@ -116,13 +115,18 @@ class SharedLonghuFullMarketTests(unittest.TestCase):
     def test_full_market_evidence_carries_boards_rows_and_quote_health(self):
         gateway = _Gateway(plates=104, members_per_plate=1)
         source = SharedLonghuFullMarketSource(gateway, workers=2)
-        source.tencent_quotes = lambda symbols: ([{"symbol": s} for s in symbols], {"coverage": 1.0})
-        evidence = source.fetch_full_market_evidence(TRADE_DATE)
+        from unittest.mock import patch
+        with patch("app.longhu_settled_quotes.fetch", return_value=([], {"received": 0})) as quotes:
+            evidence = source.fetch_full_market_evidence(TRADE_DATE, ["920002.BJ"])
+        self.assertIs(quotes.call_args.args[0], gateway)
+        self.assertIn("920002.BJ", quotes.call_args.args[1])
+        self.assertEqual(quotes.call_args.args[2], TRADE_DATE)
+        self.assertIn("licensed_ohlc", evidence["health"])
         self.assertEqual(evidence["trade_date"], TRADE_DATE)
         self.assertEqual(len(evidence["board_rows"]), 104)
         self.assertTrue(evidence["vendor_rows"])
         self.assertIn("longhu", evidence["health"])
-        self.assertTrue(evidence["board_rows"][0]["source"].startswith("longhuvip_gateway:"))
+        self.assertTrue(evidence["board_rows"][0]["source"].startswith("longhuvip:dated_member_aggregate"))
 
     def test_the_worker_count_stays_bounded_whatever_the_environment_says(self):
         self.assertEqual(gateway_workers({"QUANT_LONGHU_GATEWAY_WORKERS": "0"}), 1)

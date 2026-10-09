@@ -74,6 +74,29 @@ async def fetch_listing(fetch: Callable[[str, dict[str, Any]], Awaitable[dict[st
     raise RuntimeError(f"Fuyao ticker_list did not end within {MAX_PAGES} pages of {PAGE_SIZE}")
 
 
+def upsert_universe_members(connection: Any, universe_key: str, symbols: Any, *,
+                            provider: str, reference_date: Any) -> None:
+    """Persist a roster with one round trip while instrument locks are held.
+
+    Existing custom priorities remain unchanged, as in the prior per-row
+    upsert. A remote database must not turn a 5,000-symbol roster into 5,000
+    network round trips inside the instrument-registration transaction.
+    """
+    ordered = sorted(set(symbols))
+    if not ordered:
+        return
+    connection.execute(
+        """INSERT INTO quant.universe_members(universe_key,symbol,enabled,priority,source,metadata,updated_at)
+           SELECT %s,symbol,true,1000,'stock-basic-all-a',%s,now()
+             FROM unnest(%s::text[]) AS incoming(symbol)
+            ORDER BY symbol
+           ON CONFLICT(universe_key,symbol) DO UPDATE SET enabled=true,
+             source=EXCLUDED.source,metadata=EXCLUDED.metadata,updated_at=now()""",
+        (universe_key, Json({"provider": provider, "reference_date": str(reference_date)}), ordered),
+    )
+
+
+
 async def sync(
     request: Any,
     *,
@@ -123,13 +146,8 @@ async def sync(
         def persist_result() -> int:
             with db.transaction() as connection:
                 normalized = persist_rows(connection, "stock_basic", request_key, valid_rows, PROVIDER_KEY, observed_at)
-                for symbol in valid_by_symbol:
-                    connection.execute(
-                        """INSERT INTO quant.universe_members(universe_key,symbol,enabled,priority,source,metadata,updated_at)
-                           VALUES(%s,%s,true,1000,'stock-basic-all-a',%s,now())
-                           ON CONFLICT(universe_key,symbol) DO UPDATE SET enabled=true,source=EXCLUDED.source,metadata=EXCLUDED.metadata,updated_at=now()""",
-                        (request.universe_key, symbol, Json({"provider": PROVIDER_KEY, "reference_date": str(exchange_date)})),
-                    )
+                upsert_universe_members(connection, request.universe_key, valid_by_symbol,
+                                        provider=PROVIDER_KEY, reference_date=exchange_date)
                 connection.execute(
                     """UPDATE quant.universe_members SET enabled=false,updated_at=now()
                          WHERE universe_key=%s AND source='stock-basic-all-a' AND enabled

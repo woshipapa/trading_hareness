@@ -23,6 +23,12 @@ def _decimal(value: Any) -> Decimal | None:
         return None
 
 
+def _cny_to_thousand_cny(value: Any) -> str | None:
+    amount = _decimal(value)
+    return None if amount is None else str(amount / Decimal("1000"))
+
+
+
 @dataclass(frozen=True)
 class MergedCrossSection:
     daily_rows: list[dict[str, Any]]
@@ -31,6 +37,7 @@ class MergedCrossSection:
     quote_rows: list[dict[str, Any]]
     coverage: float
     close_conflicts: tuple[dict[str, Any], ...]
+    off_plate_rows: int = 0
 
 
 def merge_cross_section(
@@ -38,7 +45,18 @@ def merge_cross_section(
     vendor_rows: Mapping[str, Mapping[str, Any]],
     quote_rows: list[dict[str, Any]],
 ) -> MergedCrossSection:
-    """Require same-session OHLC and retain the exact vendor flow convention."""
+    """Require same-session OHLC and retain the exact vendor flow convention.
+
+    A symbol with a licensed quote but no industry-plate row still gets a daily
+    bar.  The plate cross-section is enrichment -- name, turnover, valuation,
+    main-net flow -- while the bar is the price fact, and tying the bar to plate
+    membership silently dropped most of the Beijing exchange: on 2026-09-18 the
+    vendor's plates carried 90 of 345 BSE names, so 255 were never even asked
+    for, and the whole exchange had sat at ~29 bars a day since 2026-09-04.
+    Those rows carry no fundamentals or flow, which is honest; they are counted
+    in ``off_plate_rows`` and excluded from ``coverage`` so the existing
+    coverage gate keeps measuring exactly what it measured before.
+    """
     expected_date = trade_date.strftime("%Y%m%d")
     quotes = {
         str(row.get("ts_code") or "").upper(): row
@@ -50,28 +68,51 @@ def merge_cross_section(
     flows: list[dict[str, Any]] = []
     snapshots: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
-    for symbol, vendor in sorted(vendor_rows.items()):
+    off_plate = 0
+    ordered = sorted(vendor_rows) + sorted(set(quotes) - set(vendor_rows))
+    for symbol in ordered:
+        vendor: Mapping[str, Any] = vendor_rows.get(symbol) or {}
         quote = quotes.get(symbol)
         if not quote:
             continue
-        vendor_close, quote_close = _decimal(vendor.get("close")), _decimal(quote.get("close"))
-        if vendor_close is None or quote_close is None or quote_close <= 0:
+        quote_close = _decimal(quote.get("close"))
+        if quote_close is None or quote_close <= 0:
             continue
-        difference = abs(vendor_close - quote_close) / quote_close
-        if difference > Decimal("0.005"):
-            conflicts.append({
-                "symbol": symbol, "vendor_close": str(vendor_close),
-                "tencent_close": str(quote_close), "relative_difference": str(difference),
-            })
-            continue
+        vendor_close = _decimal(vendor.get("close"))
+        if vendor:
+            # Only a plate row can be cross-checked; an absent one is not a
+            # conflict, and must not be treated as a close of zero.
+            if vendor_close is None:
+                continue
+            difference = abs(vendor_close - quote_close) / quote_close
+            if difference > Decimal("0.005"):
+                conflicts.append({
+                    "symbol": symbol, "vendor_close": str(vendor_close),
+                    "ohlc_close": str(quote_close), "relative_difference": str(difference),
+                })
+                continue
+        else:
+            off_plate += 1
         name = str(vendor.get("name") or quote.get("name") or symbol)
         daily.append({
             "ts_code": symbol, "trade_date": expected_date, "name": name,
             "open": quote.get("open"), "high": quote.get("high"), "low": quote.get("low"),
             "close": quote.get("close"), "pre_close": quote.get("pre_close"),
-            "vol": quote.get("vol"), "amount": quote.get("amount"),
+            # Longhu kline ``vol`` is already board lots but ``bal`` is CNY. The
+            # canonical daily contract is lots / thousand CNY: convert at this
+            # boundary, or the unit guard quarantines every amount.
+            "vol": quote.get("vol"), "amount": _cny_to_thousand_cny(quote.get("amount")),
             "up_limit": quote.get("up_limit"), "down_limit": quote.get("down_limit"),
         })
+        if not vendor:
+            # No plate row means no valuation, turnover or flow evidence.
+            # Emitting empty ones would publish absence as measurement.
+            snapshots.append({
+                **quote, "ts_code": symbol, "name": name,
+                "provider_basis": "longhuvip_licensed_dated_ohlc",
+                "coverage_note": "off_plate_price_only_no_vendor_cross_section",
+            })
+            continue
         fundamentals.append({
             "ts_code": symbol, "trade_date": expected_date, "close": quote.get("close"),
             "turnover_rate": vendor.get("turnover_rate"), "volume_ratio": vendor.get("volume_ratio"),
@@ -99,11 +140,13 @@ def merge_cross_section(
             **quote, "ts_code": symbol, "name": name,
             "pct_chg": vendor.get("pct_chg") if vendor.get("pct_chg") is not None else quote.get("pct_chg"),
             "turnover_rate": vendor.get("turnover_rate"), "volume_ratio": vendor.get("volume_ratio"),
-            "main_net": vendor.get("main_net"), "provider_basis": "longhuvip+tencent",
+            "main_net": vendor.get("main_net"), "provider_basis": "longhuvip_licensed_dated_ohlc",
             "flow_convention": vendor.get("flow_convention"),
         })
-    coverage = len(daily) / len(vendor_rows) if vendor_rows else 0.0
-    return MergedCrossSection(daily, fundamentals, flows, snapshots, coverage, tuple(conflicts))
+    coverage = (len(daily) - off_plate) / len(vendor_rows) if vendor_rows else 0.0
+    return MergedCrossSection(
+        daily, fundamentals, flows, snapshots, coverage, tuple(conflicts), off_plate,
+    )
 
 
 def _limit_ratio(symbol: str, name: str, trade_date: object = None) -> tuple[Decimal, str]:
