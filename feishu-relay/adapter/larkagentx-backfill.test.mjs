@@ -46,3 +46,25 @@ test('collects all pages before matching and refuses incomplete pagination', asy
 	await assert.rejects(readLarkAgentXBackfill(input, { chatId: 'oc_cat' }, { sourceApi }), /多个/);
 	await assert.rejects(readLarkAgentXBackfill(input, { chatId: 'oc_cat' }, { sourceApi: { async messageList() { return { data: { items: [candidate()], has_more: true, page_token: 'next' } }; } } }), /分页/);
 });
+
+test('a degraded card accepts the single same-type candidate in the window', () => {
+	const degraded = {
+		msg_id: 'ws_degraded', chat_id: '7684122107030031634', msg_type_name: 'CARD',
+		create_time: 1791514672, content: '[卡片]  ',
+		content_data: { richtext: { elements: { dictionary: {
+			1: { tag: 2, property: '\u00120img_v3_02ad_banner' },
+			4: { tag: 1, property: '\n5Upgrade to the latest app version to view the content' },
+		} } } },
+		_larkagentx_images: [{ image_id: 'img_v3_02ad_banner', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }],
+	};
+	const items = [{
+		message_id: 'om_real', msg_type: 'interactive', chat_id: 'oc_cat', create_time: '1791514672500',
+		body: { content: JSON.stringify({ elements: [{ tag: 'img', img_key: 'img_v3_real_content' }] }) },
+	}];
+	assert.equal(matchOAuthMessage(degraded, items, 'oc_cat', { degraded: true })?.message_id, 'om_real');
+	// Two candidates in the window: still refuse to guess.
+	const two = [...items, { ...items[0], message_id: 'om_other', create_time: '1791514671000' }];
+	assert.equal(matchOAuthMessage(degraded, two, 'oc_cat', { degraded: true }), null);
+	// Without the degraded flag the featureless event never matches.
+	assert.equal(matchOAuthMessage(degraded, items, 'oc_cat'), null);
+});

@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, parse_qsl as urllib_parse_qsl, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 import requests
@@ -148,6 +148,94 @@ class ProtocolForensics:
 			return {"captured": False, "reason": "write_failed"}
 
 
+def parse_ws_param_overrides(raw: str) -> dict[str, str]:
+	"""Parse ``LARKX_WS_PARAM_OVERRIDES`` (``sdk_version=7.93.0,lark_version=7.93.0``).
+
+	Feishu materializes cards server-side by the client version declared in the
+	WebSocket handshake; a too-old declaration receives the "upgrade your
+	client" placeholder instead of new-format card content.  The vendored
+	LarkAgentX checkout stays pinned — the declared versions are overridden
+	here, per environment, without editing upstream source.
+	"""
+	overrides: dict[str, str] = {}
+	for part in str(raw or "").split(","):
+		key, sep, value = part.strip().partition("=")
+		if sep and key.strip() and value.strip():
+			overrides[key.strip()] = value.strip()
+	return overrides
+
+
+def apply_ws_param_overrides(url: str, overrides: dict[str, str]) -> str:
+	if not overrides:
+		return url
+	base, sep, query = str(url).partition("?")
+	if not sep:
+		return url
+	pairs = urllib_parse_qsl(query, keep_blank_values=True)
+	seen: set[str] = set()
+	rewritten = []
+	for key, value in pairs:
+		rewritten.append((key, overrides[key]) if key in overrides else (key, value))
+		seen.add(key)
+	for key, value in overrides.items():
+		if key not in seen:
+			rewritten.append((key, value))
+	return base + "?" + urlencode(rewritten)
+
+
+class RawFrameCapture:
+	"""Bounded capture of successfully decoded frames for chosen chats.
+
+	This exists to collect real samples of new upstream payload formats (for
+	example the degraded Card 2.x variants) so the decoder can be extended from
+	evidence instead of guesses.  Same privacy posture as ProtocolForensics:
+	local-only, 0700 directory, rotated by count.  Enabled only when both
+	``LARKX_RAW_CAPTURE_CHAT_IDS`` and ``LARKX_RAW_CAPTURE_DIR`` are set.
+	"""
+
+	def __init__(self, chat_ids: set[str], path: str, max_files: int = 100) -> None:
+		self.chat_ids = {str(value).strip() for value in (chat_ids or set()) if str(value).strip()}
+		self.max_files = max(1, min(int(max_files or 100), 2000))
+		self.enabled = bool(self.chat_ids and str(path or "").strip())
+		if not self.enabled:
+			return
+		self.path = Path(path).expanduser()
+		try:
+			self.path.mkdir(parents=True, exist_ok=True, mode=0o700)
+			os.chmod(self.path, 0o700)
+		except OSError as error:
+			self.enabled = False
+			LOG.warning("raw frame capture disabled: %s", error)
+
+	def capture(self, raw: bytes, messages: list[dict[str, Any]]) -> None:
+		if not self.enabled or not isinstance(raw, (bytes, bytearray)):
+			return
+		matched = [msg for msg in messages or [] if str(msg.get("chat_id", "")) in self.chat_ids]
+		if not matched or len(raw) > MAX_FORENSIC_FRAME_BYTES:
+			return
+		try:
+			digest = hashlib.sha256(raw).hexdigest()
+			stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+			base = self.path / f"{stamp}-{digest[:16]}"
+			base.with_suffix(".bin").write_bytes(bytes(raw))
+			os.chmod(base.with_suffix(".bin"), 0o600)
+			base.with_suffix(".json").write_text(json.dumps({
+				"captured_at": datetime.now(timezone.utc).isoformat(),
+				"length": len(raw),
+				"sha256": digest,
+				"chat_ids": sorted({str(msg.get("chat_id", "")) for msg in matched}),
+				"message_ids": [str(msg.get("msg_id", "")) for msg in matched][:20],
+				"message_types": sorted({str(msg.get("msg_type_name", msg.get("msg_type", ""))) for msg in matched}),
+			}, ensure_ascii=False) + "\n", encoding="utf-8")
+			os.chmod(base.with_suffix(".json"), 0o600)
+			files = sorted(self.path.glob("*.bin"), key=lambda item: item.stat().st_mtime, reverse=True)
+			for old in files[self.max_files:]:
+				old.unlink(missing_ok=True)
+				old.with_suffix(".json").unlink(missing_ok=True)
+		except OSError as error:
+			LOG.warning("raw frame capture failed: %s", error)
+
+
 class RecoveringLarkClient(LarkClient):
 	"""Keep the upstream WebSocket client, but expose malformed-frame events.
 
@@ -162,10 +250,20 @@ class RecoveringLarkClient(LarkClient):
 		self.on_decode_error = on_decode_error
 		self.on_decode_fallback = on_decode_fallback
 		self.on_connected = on_connected
+		self.ws_param_overrides = parse_ws_param_overrides(os.environ.get("LARKX_WS_PARAM_OVERRIDES", ""))
+		self.raw_capture = RawFrameCapture(
+			chat_ids=set(parse_csv(os.environ.get("LARKX_RAW_CAPTURE_CHAT_IDS", ""))),
+			path=os.environ.get("LARKX_RAW_CAPTURE_DIR", ""),
+			max_files=int(os.environ.get("LARKX_RAW_CAPTURE_MAX", "100") or 100),
+		)
 
 	async def connect_websocket(self, on_message):
 		self._ensure_loop()
-		url = self.build_ws_url()
+		url = apply_ws_param_overrides(self.build_ws_url(), self.ws_param_overrides)
+		if self.ws_param_overrides:
+			logging.getLogger("larkagentx-bridge").info(
+				"WS 握手参数覆盖：%s",
+				",".join(f"{key}={value}" for key, value in sorted(self.ws_param_overrides.items())))
 		async with websockets.connect(url) as ws:
 			logging.getLogger("larkagentx-bridge").info("WS 已连接")
 			if self.on_connected:
@@ -191,6 +289,7 @@ class RecoveringLarkClient(LarkClient):
 							await self.send_ack(ws, sid)
 						if cmd != 6:
 							continue
+						self.raw_capture.capture(raw, messages)
 						for msg in messages:
 							if not msg.get('from_id'):
 								continue

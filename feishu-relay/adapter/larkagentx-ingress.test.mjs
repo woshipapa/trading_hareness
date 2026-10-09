@@ -192,7 +192,10 @@ test('decodes LarkAgentX internal richtext cards with text and encrypted images'
 	});
 });
 
-test('drops the protobuf-prefixed client upgrade banner from image-only cat cards', () => {
+test('an upgrade-banner card never relays its carried image, even with imageIds', () => {
+	// 2026-10-09 实证推翻了旧行为（剥掉横幅文字后按纯图转发）：猫群 9/24 起的
+	// 900+ 条降级卡片携带的是同一个固定 image id —— 那是横幅美术图，不是内容。
+	// 升级横幅卡片必须整体视为降级，改走官方补读专线。
 	const input = {
 		msg_id: 'om_cat_image_only', msg_type_name: 'CARD', content: '[卡片]  ',
 		content_data: {
@@ -207,15 +210,8 @@ test('drops the protobuf-prefixed client upgrade banner from image-only cat card
 		},
 		_larkagentx_images: [{ image_id: 'img_v3_cat_image', source_id: '1', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24) }],
 	};
-	assert.equal(isDirectLarkAgentXRelayType(input), true);
-	const message = normalizeLarkAgentXRelayMessage(input);
-	assert.equal(message.msg_type, 'post');
-	const rows = JSON.parse(message.body.content).zh_cn.content;
-	assert.equal(rows.some((row) => row.some((item) => item.text?.includes('Upgrade to the latest app version'))), false);
-	assert.deepEqual(rows.at(-1), [{
-		tag: 'img', image_key: 'img_v3_cat_image',
-		larkagentx_resource: input._larkagentx_images[0],
-	}]);
+	assert.equal(hasLarkAgentXCardPayload(input), false);
+	assert.equal(isDirectLarkAgentXRelayType(input), false);
 });
 
 test('marks incomplete LarkAgentX cards for the narrow official backfill lane', () => {
@@ -231,4 +227,51 @@ test('downgrades an unsupported WebSocket type without requiring OAuth backfill'
 	const message = normalizeLarkAgentXUnsupportedMessage({ msg_id: 'om_file_unsupported', msg_type_name: 'FILE', content: '[文件] fileKey=file_source' });
 	assert.equal(message.msg_type, 'text');
 	assert.match(JSON.parse(message.body.content).text, /^\[file\]/i);
+});
+
+test('a server-degraded card must not relay its banner image and goes to backfill', async () => {
+	const { larkAgentXCardIsDegraded } = await import('./larkagentx-ingress.mjs');
+	const degraded = {
+		msg_id: '7694496929497074904', chat_id: '7684122107030031634', from_id: 'ou_cat',
+		msg_type_name: 'CARD', create_time: 1791514672, content: '[卡片]  ',
+		content_data: {
+			cardVersion: 2,
+			richtext: {
+				elementIds: ['12'],
+				elements: {
+					dictionary: {
+						1: { tag: 2, property: '\u00120img_v3_02ad_banner-fixed-key' },
+						4: { tag: 1, property: '\n5Upgrade to the latest app version to view the content' },
+						7: { tag: 1, property: '\n\u0000' },
+					},
+				},
+			},
+		},
+		_larkagentx_images: [{ image_id: 'img_v3_02ad_banner-fixed-key', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24), source_id: '1' }],
+	};
+	assert.equal(larkAgentXCardIsDegraded(degraded), true);
+	assert.equal(hasLarkAgentXCardPayload(degraded), false);
+	assert.equal(isDirectLarkAgentXRelayType(degraded), false);
+});
+
+test('a complete rich-text card with real text keeps its image and the direct path', async () => {
+	const { larkAgentXCardIsDegraded } = await import('./larkagentx-ingress.mjs');
+	const complete = {
+		msg_id: '7694496929497074905', chat_id: '7684122107030031634', from_id: 'ou_cat',
+		msg_type_name: 'CARD', create_time: 1791514673, content: '[卡片] 盘面复盘',
+		content_data: {
+			richtext: {
+				elements: {
+					dictionary: {
+						1: { tag: 2, property: '\u00120img_v3_0215v_real-content-key' },
+						2: { tag: 1, property: '\n今日盘面三条主线' },
+					},
+				},
+			},
+		},
+		_larkagentx_images: [{ image_id: 'img_v3_0215v_real-content-key', key_hex: 'a'.repeat(64), iv_hex: 'b'.repeat(24), source_id: '1' }],
+	};
+	assert.equal(larkAgentXCardIsDegraded(complete), false);
+	assert.equal(hasLarkAgentXCardPayload(complete), true);
+	assert.equal(isDirectLarkAgentXRelayType(complete), true);
 });

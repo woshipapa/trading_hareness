@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { larkAgentXCardIsDegraded } from './larkagentx-ingress.mjs';
 
 function eventMillis(value) {
 	const n = Number(value);
@@ -32,26 +33,34 @@ function features(value) {
 
 // IDs are intentionally NOT matching features: the two APIs have separate
 // namespaces. Require positive content/resource evidence plus a narrow time
-// bound. Never use nearest-time or a lone placeholder as proof of identity.
-export function matchOAuthMessage(input, items, chatId) {
+// bound. Never use nearest-time or a lone placeholder as proof of identity —
+// except for a server-degraded card, which by definition carries no usable
+// features (only the "upgrade your client" banner and its fixed artwork):
+// there an exactly-one same-type candidate inside the ±2s window is accepted,
+// because refusing would lose the message entirely.
+export function matchOAuthMessage(input, items, chatId, { degraded = false } = {}) {
 	const eventTime = eventMillis(input?.create_time);
 	const upstream = String(input?.msg_type_name ?? '').toLowerCase();
 	const type = upstream === 'card' ? 'interactive' : upstream;
 	const source = features({ content_data: input?.content_data, _larkagentx_images: input?._larkagentx_images ?? [] });
 	const summary = normalizeText(input?.content);
 	const matches = new Map();
+	const windowCandidates = [];
 	for (const item of items) {
 		if (!item?.message_id || item.deleted || item.msg_type !== type || (item.chat_id && item.chat_id !== chatId)) continue;
 		let stamp; try { stamp = eventMillis(item.create_time); } catch { continue; }
 		if (Math.abs(stamp - eventTime) > 2000) continue;
 		let body; try { body = JSON.parse(item.body?.content ?? '{}'); } catch { continue; }
+		windowCandidates.push(item);
 		const target = features(body);
 		const resourceMatch = [...source.keys].some(key => target.keys.has(key));
 		const textMatch = target.text && [source.text, summary].some(text => text && text === target.text);
 		if (resourceMatch || textMatch) matches.set(String(item.message_id), item);
 	}
 	if (matches.size > 1) throw new Error(`OAuth 补读存在多个内容/时间相符候选（${matches.size}），拒绝猜测`);
-	return matches.values().next().value ?? null;
+	const matched = matches.values().next().value ?? null;
+	if (!matched && degraded && windowCandidates.length === 1) return windowCandidates[0];
+	return matched;
 }
 
 export async function readLarkAgentXBackfill(input, source, { sourceApi, sleep = delay, logger = console } = {}) {
@@ -79,7 +88,7 @@ export async function readLarkAgentXBackfill(input, source, { sourceApi, sleep =
 			pageToken = result.data.page_token;
 		}
 		candidateCount = items.length;
-		const message = matchOAuthMessage(input, items, chatId);
+		const message = matchOAuthMessage(input, items, chatId, { degraded: larkAgentXCardIsDegraded(input) });
 		if (message) {
 			logger.info(`LarkAgentX OAuth matched chat=${chatId} ws_message=${websocketId} oauth_message=${message.message_id}`);
 			// Keep the official ID for media download AND ledger deduplication with

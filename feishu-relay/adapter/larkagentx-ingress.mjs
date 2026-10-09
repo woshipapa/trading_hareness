@@ -178,7 +178,29 @@ function richTextCardText(input) {
 		.trim();
 }
 
+function richTextCardDegradedNotice(input) {
+	const data = input?.content_data;
+	const richText = data?.richtext ?? data?.richText ?? data?.rich_text;
+	const dictionary = richText?.elements?.dictionary ?? richText?.dictionary;
+	if (!dictionary || typeof dictionary !== 'object') return false;
+	const texts = Object.values(dictionary)
+		.filter((element) => element?.tag === undefined || Number(element?.tag) === 1)
+		.map((element) => richTextValueText(element?.property ?? element))
+		.filter(Boolean);
+	return texts.length > 0 && texts.some(isCardUnavailableNotice) && texts.every(isCardUnavailableNotice);
+}
+
+/** A server-degraded card: its only rendered text is the "upgrade your client"
+ * banner, so any image it carries is the banner artwork, never analyst
+ * content. Since 2026-09-24 these placeholders ship a fixed banner image which
+ * must not make the card look complete — it has to take the official backfill
+ * lane instead of relaying the meaningless banner picture. */
+export function larkAgentXCardIsDegraded(input) {
+	return ['CARD', 'INTERACTIVE'].includes(larkAgentXMessageType(input)) && richTextCardDegradedNotice(input);
+}
+
 function richTextCardImageResources(input) {
+	if (richTextCardDegradedNotice(input)) return [];
 	const data = input?.content_data;
 	const richText = data?.richtext ?? data?.richText ?? data?.rich_text;
 	const imageIds = Array.isArray(richText?.imageIds) ? richText.imageIds : [];
@@ -215,7 +237,8 @@ function richTextCardPost(input) {
 
 export function hasLarkAgentXCardPayload(input) {
 	return ['CARD', 'INTERACTIVE'].includes(larkAgentXMessageType(input))
-		&& (Boolean(cardContentFromLarkAgentX(input)) || Boolean(richTextCardPost(input)) || cardImageResourcesFromLarkAgentX(input).length > 0);
+		&& (Boolean(cardContentFromLarkAgentX(input)) || Boolean(richTextCardPost(input))
+			|| (!richTextCardDegradedNotice(input) && cardImageResourcesFromLarkAgentX(input).length > 0));
 }
 
 function imageKeyFromLarkAgentX(input) {
