@@ -72,5 +72,31 @@ class PostClosePatternCandidateTests(unittest.TestCase):
         self.assertIsNone(with_list["limit_context"]["lhb_context"]["institution_net_buy"])
 
 
+    def test_fuyao_close_pool_row_keeps_its_provenance_and_seal(self) -> None:
+        """The pool row is labelled by its provider, so the seal/float screen reports it unavailable."""
+        def features(_rows):
+            return {"status": "completed", "trading_date": "2026-09-18", "limit_pct": 10.0,
+                    "volume_multiple_5d": 1.6, "ground_to_sky_daily_shape": False}
+
+        row = {"ts_code": "603721.SH", "name": "中广天择", "trade_date": "20260918", "limit_type": "涨停池",
+               "status": "涨停", "price": 21.01, "pct_chg": 10.0, "limit_amount": 114685186.0,
+               "max_seal_money": 241522556.0, "turnover_rate": None, "open_num": None, "tag": "2连板",
+               "lu_desc": "AI语料+传媒内容+控股变更", "limit_up_time": "09:25", "event_type": "limit_up_pool"}
+        result = select_candidates(
+            date(2026, 9, 18), 4, 2,
+            limit_rows=[{"row_data": row, "provider_key": "market_events:fuyao_ths", "available_at": None}],
+            step_rows=[{"ts_code": "603721.SH", "nums": 2}], prior_limit_rows=[], control_rows=[],
+            daily_rows=[{"symbol": "603721.SH", "trading_date": date(2026, 9, 18)}],
+            boards={}, lhb_by_symbol={}, focus_symbols=None,
+            limit_daily_features=features, board_count=lambda tag: 2 if "2" in str(tag) else 1,
+        )
+
+        context = result["candidates"][0]["limit_context"]
+        self.assertEqual(context["provider_key"], "market_events:fuyao_ths")
+        self.assertEqual(context["streak_count"], 2)
+        self.assertEqual(context["continuation_watch"]["status"], "unavailable")
+        self.assertEqual(context["continuation_watch"]["reason"], "missing_tushare_limit_pool_fields")
+        self.assertGreater(result["candidates"][0]["selection_score"], 40)
+
 if __name__ == "__main__":
     unittest.main()

@@ -393,7 +393,8 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
 
     def test_limit_pool_union_never_truncates_to_replay_samples(self):
         result = merge_limit_pool_sources(
-            [{"row_data": {"ts_code": "600667.SH", "name": "太极实业", "tag": "首板"}, "provider_key": "tushare_super_sdk"}],
+            [{"row_data": {"ts_code": "600667.SH", "name": "太极实业", "tag": "首板", "limit_amount": 1.2e8},
+              "provider_key": "market_events:fuyao_ths"}],
             [{"symbol": "600667.SH", "body": '{"名称":"太极实业","连板数":1,"炸板次数":0}', "source": "akshare"},
              {"symbol": "600162.SH", "body": '{"名称":"香江控股","连板数":1}', "source": "akshare"}],
         )
@@ -401,7 +402,7 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["union_count"], 2)
         self.assertEqual(result["coverage"]["intersection_count"], 1)
         taiji = next(item for item in result["items"] if item["ts_code"] == "600667.SH")
-        self.assertEqual(len(taiji["sources"]), 2)
+        self.assertEqual(taiji["sources"], ["market_events:fuyao_ths", "eastmoney_stock_zt_pool_em"])
         self.assertEqual(taiji["open_num"], 0)
 
     def test_review_score_rewards_confirmed_evidence_and_penalizes_distribution(self):

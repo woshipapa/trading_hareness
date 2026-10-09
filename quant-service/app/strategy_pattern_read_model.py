@@ -7,7 +7,8 @@ from typing import Any, Callable
 
 from .limit_continuation_research import continuation_watch, rank_continuation_candidates
 from .dragon_leader_research import enrich_dragon_leader_watches, rank_dragon_leader_candidates
-from .limit_event_fallback import event_body, event_step_record
+from .limit_event_fallback import CHAIN_LADDER_SOURCE, POOL_TAG_LADDER_SOURCE
+from .limit_event_repository import load_close_limit_events
 
 
 def latest_strategy_pattern_mining(
@@ -19,7 +20,14 @@ def latest_strategy_pattern_mining(
     post_close_exact_board_context_fn: Callable[[Any], dict[str, Any]],
     post_close_tushare_lhb_context_fn: Callable[[Any], dict[str, Any]],
 ) -> dict[str, Any]:
-    """Project only already-persisted pattern evidence; never refresh sources."""
+    """Project only already-persisted pattern evidence; never refresh sources.
+
+    The pool is the Fuyao close snapshot (the THS pool the retired
+    ``limit_list_ths`` used to deliver) merged with the other sources'
+    ``limit_up_pool`` events of the day; the ladder is the Fuyao ladder for
+    names still in the close pool.  ``pool_coverage.close_snapshot`` says
+    which snapshot was used, or why none was.
+    """
     with database.transaction() as connection:
         run = connection.execute(
             """SELECT run_id,run_key,as_of_date,model_version,status,source_status,summary,created_at,updated_at
@@ -33,46 +41,8 @@ def latest_strategy_pattern_mining(
                       intraday_pattern,minute_source,risk_flags
                  FROM quant.strategy_pattern_samples WHERE run_id=%s ORDER BY rank""", (run["run_id"],)
         ).fetchall()
-        stamp = run["as_of_date"].strftime("%Y%m%d")
-        pool_records = connection.execute(
-            """SELECT DISTINCT ON(row_data->>'ts_code') row_data,provider_key,available_at
-                 FROM quant.tushare_raw_records
-                WHERE api_name='limit_list_ths' AND row_data->>'trade_date'=%s
-                  AND row_data->>'limit_type'='涨停池'
-                ORDER BY row_data->>'ts_code',available_at DESC""", (stamp,),
-        ).fetchall()
-        ladder_records = connection.execute(
-            """SELECT DISTINCT ON(row_data->>'ts_code') row_data,provider_key,available_at
-                 FROM quant.tushare_raw_records
-                WHERE api_name='limit_step' AND row_data->>'trade_date'=%s
-                ORDER BY row_data->>'ts_code',available_at DESC""", (stamp,),
-        ).fetchall()
-        eastmoney_records = connection.execute(
-            """SELECT DISTINCT ON(symbol) symbol,body,source,event_type,available_at
-                 FROM quant.market_events
-                WHERE event_type='limit_up_pool' AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s
-                ORDER BY symbol,created_at DESC""", (run["as_of_date"],),
-        ).fetchall()
-        chain_event_records = connection.execute(
-            """SELECT DISTINCT ON(symbol) symbol,body,source,available_at
-                 FROM quant.market_events
-                WHERE event_type='limit_chain' AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s
-                ORDER BY symbol,created_at DESC""", (run["as_of_date"],),
-        ).fetchall()
-    chain_board_counts = {
-        str(item["row_data"]["ts_code"]): int(item["row_data"]["nums"])
-        for item in (event_step_record(dict(record), trade_date=run["as_of_date"]) for record in chain_event_records)
-    }
-    event_pool_records = []
-    for record in eastmoney_records:
-        value = dict(record)
-        body = event_body(value)
-        board_num = chain_board_counts.get(str(value.get("symbol") or "").upper())
-        if board_num is not None:
-            body["连板数"] = board_num
-        value["body"] = body
-        event_pool_records.append(value)
-    union = merge_limit_pool_sources_fn([dict(record) for record in pool_records], event_pool_records)
+        events = load_close_limit_events(connection, run["as_of_date"])
+    union = merge_limit_pool_sources_fn(events.pool, events.others)
     pool = [{**item, "board_count": limit_board_count_fn(item.get("tag"))} for item in union["items"]]
     pool.sort(key=lambda item: (-int(item.get("board_count") or 0), -float(item.get("limit_amount") or 0), str(item.get("ts_code") or "")))
     symbols = [str(item.get("ts_code") or "") for item in pool]
@@ -107,11 +77,8 @@ def latest_strategy_pattern_mining(
     for symbol, context in pool_by_symbol.items():
         if int(context.get("board_count") or 0) >= 2:
             ladder_by_symbol[symbol] = {**context, "nums": int(context.get("board_count") or 0),
-                                         "ladder_sources": ["tushare_limit_list_ths_tag"]}
-    if not ladder_records:
-        ladder_records = [event_step_record(dict(record), trade_date=run["as_of_date"])
-                          for record in chain_event_records]
-    for record in ladder_records:
+                                         "ladder_sources": [POOL_TAG_LADDER_SOURCE]}
+    for record in events.ladder:
         item = strategy_json_safe_fn(dict(record["row_data"] or {}))
         symbol = str(item.get("ts_code") or "")
         context = pool_by_symbol.get(symbol, {})
@@ -124,14 +91,15 @@ def latest_strategy_pattern_mining(
             "volume_multiple_5d": context.get("volume_multiple_5d"), "volume_multiple_20d": context.get("volume_multiple_20d"),
             "board_context": context.get("board_context"), "lhb_context": context.get("lhb_context"),
             "ladder_sources": list(dict.fromkeys([*(ladder_by_symbol.get(symbol, {}).get("ladder_sources") or []),
-                                                     "tushare_limit_step"])),
+                                                     CHAIN_LADDER_SOURCE])),
         }
     ladder = list(ladder_by_symbol.values())
     ladder.sort(key=lambda item: (-int(item.get("nums") or 0), -float(item.get("limit_amount") or 0), str(item.get("ts_code") or "")))
     limit_ladder = [{**item, "rank": rank} for rank, item in enumerate(ladder, start=1)]
     continuation_candidates = rank_continuation_candidates(pool)
     dragon_leader_candidates = rank_dragon_leader_candidates(pool)
-    union["coverage"].update({"limit_step_count": len(ladder_records), "multi_board_union_count": len(limit_ladder)})
+    union["coverage"].update({"limit_step_count": len(events.ladder), "multi_board_union_count": len(limit_ladder),
+                              "close_snapshot": events.snapshot})
     sample_items = [dict(row) for row in rows]
     picks = [item for item in sample_items
              if (item.get("limit_context") or {}).get("sample_role") != "matched_near_limit_control"

@@ -13,7 +13,9 @@ from typing import Any
 @dataclass(frozen=True)
 class StrategyPatternMiningDependencies:
     latest_date: Callable[[], date | None]
-    refresh_sources: Callable[[date], Awaitable[dict[str, Any]]]
+    #: Reports the persisted limit-pool evidence of a date.  It used to refresh
+    #: the licensed pools before mining; since decision 0005 it requests nothing.
+    limit_evidence: Callable[[date], Awaitable[dict[str, Any]]]
     sample_candidates: Callable[[date, int, int, list[str] | None], dict[str, Any]]
     open_provider_capabilities: Callable[[str, list[str]], Awaitable[set[str]]]
     minute_capability: str
@@ -43,7 +45,7 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
     as_of_date = request.as_of_date or latest
     if as_of_date is None:
         return {"status": "blocked", "reason": "no daily bars are stored", "samples": []}
-    limit_sources = await dependencies.refresh_sources(as_of_date) if request.refresh_limit_sources else {"status": "skipped"}
+    limit_sources = await dependencies.limit_evidence(as_of_date) if request.refresh_limit_sources else {"status": "skipped"}
     selection = await dependencies.run_database(
         dependencies.sample_candidates, as_of_date, request.max_symbols, request.per_cohort, request.focus_symbols,
     )
@@ -115,10 +117,10 @@ async def run_strategy_pattern_mining(request: Any, dependencies: StrategyPatter
         "sample_role_counts": selection.get("sample_role_counts", {}),
         "control_coverage": selection.get("control_coverage", {}),
         "input_provenance": {
-            "limit_pool": "market_events_fallback" if any(
-                bool(item.get("limit_context", {}).get("source_fallback")) for item in samples
+            "limit_pool": sorted({
+                str(item.get("limit_context", {}).get("provider_key")) for item in samples
                 if item.get("limit_context", {}).get("sample_role") == "positive_limit_pool"
-            ) else "tushare_or_merged",
+            }),
             "minute": f"{dependencies.minute_source}_bounded_replay",
             "controls": "canonical_bars_daily_near_limit_non_sealed",
         },

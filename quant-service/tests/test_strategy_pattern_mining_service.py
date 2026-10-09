@@ -12,23 +12,22 @@ from app.strategy_pattern_mining_service import (
 
 class StrategyPatternMiningServiceTests(unittest.IsolatedAsyncioTestCase):
     def _request(self, **overrides):
-        return SimpleNamespace(
-            as_of_date=None, refresh_limit_sources=False, max_symbols=8,
-            per_cohort=2, focus_symbols=None, **overrides,
-        )
+        values = {"as_of_date": None, "refresh_limit_sources": False, "max_symbols": 8,
+                  "per_cohort": 2, "focus_symbols": None}
+        return SimpleNamespace(**{**values, **overrides})
 
-    def _dependencies(self, *, latest_date, candidates, capabilities, fetch_minutes, persist_run):
+    def _dependencies(self, *, latest_date, candidates, capabilities, fetch_minutes, persist_run, evidence=None):
         async def run_database(action, *args, **_kwargs):
             return action(*args)
 
-        async def no_refresh(_as_of_date):
-            return {"status": "completed"}
+        async def limit_evidence(as_of_date):
+            return evidence or {"status": "completed", "trade_date": as_of_date.isoformat()}
 
-        async def no_health(*_args):
+        def no_health(*_args):
             return None
 
         return StrategyPatternMiningDependencies(
-            latest_date=latest_date, refresh_sources=no_refresh, sample_candidates=candidates,
+            latest_date=latest_date, limit_evidence=limit_evidence, sample_candidates=candidates,
             open_provider_capabilities=capabilities, minute_capability="intraday_minute",
             minute_source="tencent_free", fetch_minutes=fetch_minutes,
             intraday_pattern=lambda _rows, _daily: {"status": "completed", "pattern_tags": []},
@@ -78,6 +77,34 @@ class StrategyPatternMiningServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetched, [])
         self.assertEqual(result["samples"][0]["risk_flags"], ["minute_replay_circuit_open"])
         self.assertEqual(persisted[0][2], "blocked")
+
+    async def test_requested_limit_evidence_and_pool_provenance_come_from_the_rows(self):
+        positive = {
+            "symbol": "603533.SH", "name": "掌阅科技", "primary_cohort": "consecutive_limit",
+            "cohorts": ["consecutive_limit"], "board_context": {},
+            "limit_context": {"sample_role": "positive_limit_pool", "provider_key": "market_events:fuyao_ths"},
+            "daily_features": {}, "risk_flags": [],
+        }
+        control = {**positive, "symbol": "000002.SZ",
+                   "limit_context": {"sample_role": "matched_near_limit_control", "provider_key": "canonical"}}
+        evidence = {"status": "blocked", "provider_requests": 0, "reason": "no limit-up pool snapshot"}
+
+        async def capabilities(_provider, _apis):
+            return set()
+
+        async def fetch_minutes(_symbol):
+            return [{"time": "09:30"}]
+
+        dependencies = self._dependencies(
+            latest_date=lambda: date(2026, 9, 18),
+            candidates=lambda *_args: {"candidates": [positive, control], "cohort_counts": {}},
+            capabilities=capabilities, fetch_minutes=fetch_minutes, persist_run=lambda *_args: "run-2",
+            evidence=evidence,
+        )
+        result = await run_strategy_pattern_mining(self._request(refresh_limit_sources=True), dependencies)
+
+        self.assertEqual(result["source_status"]["limit_sources"], evidence)
+        self.assertEqual(result["summary"]["input_provenance"]["limit_pool"], ["market_events:fuyao_ths"])
 
 
 if __name__ == "__main__":

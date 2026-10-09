@@ -223,6 +223,7 @@ from .post_close_candidate_screen import screen_candidates as pure_post_close_sc
 from .post_close_evidence import exact_board_context as pure_exact_board_context, lhb_context as pure_lhb_context
 from .post_close_evidence_repository import load_exact_board_context_rows, load_lhb_context_rows
 from .limit_pool_merge import merge_limit_pool_sources as merge_persisted_limit_pool_sources
+from .limit_event_repository import limit_event_evidence as read_limit_event_evidence
 from .strategy_pattern_sample_repository import (
     load_strategy_pattern_sample_inputs,
     persist_strategy_pattern_run as persist_strategy_pattern_run_isolated,
@@ -2130,19 +2131,9 @@ def intraday_limit_lift_pattern(rows: list[dict[str, Any]], daily: dict[str, Any
     )
 
 
-async def refresh_strategy_pattern_sources(as_of_date: date) -> dict[str, Any]:
-    """Refresh the small same-day limit ladder before selecting replay samples."""
-    stamp = as_of_date.strftime("%Y%m%d")
-    results: dict[str, Any] = {}
-    for api_name in ("limit_list_ths", "limit_step", "limit_cpt_list", "top_list", "top_inst"):
-        try:
-            outcome = await fetch_tushare_catalog(TushareFetchRequest(
-                api_name=api_name, provider="auto", params={"trade_date": stamp}, max_rows=3000, force_refresh=True,
-            ))
-            results[api_name] = {key: outcome.get(key) for key in ("status", "provider", "received", "stored", "request_key")}
-        except HTTPException as error:
-            results[api_name] = {"status": "failed", "error": str(error.detail)[:300]}
-    return results
+async def strategy_pattern_limit_evidence(as_of_date: date) -> dict[str, Any]:
+    """Report the captured limit-pool evidence before mining; nothing is fetched (decision 0005)."""
+    return await run_database_blocking(read_limit_event_evidence, db, as_of_date, timeout_seconds=30)
 
 
 def merge_limit_pool_sources(ths_rows: list[dict[str, Any]], eastmoney_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2196,7 +2187,7 @@ def persist_strategy_pattern_run(
 def _strategy_pattern_mining_dependencies() -> StrategyPatternMiningDependencies:
     """Compose bounded post-close minute research without owning a provider client."""
     return StrategyPatternMiningDependencies(
-        latest_date=latest_strategy_pattern_date, refresh_sources=refresh_strategy_pattern_sources,
+        latest_date=latest_strategy_pattern_date, limit_evidence=strategy_pattern_limit_evidence,
         sample_candidates=strategy_pattern_sample_candidates,
         open_provider_capabilities=open_provider_capabilities,
         minute_capability=TENCENT_INTRADAY_MINUTE_CAPABILITY, minute_source="tencent_free",
@@ -3965,7 +3956,7 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         load_core_symbols=_post_close_core_symbols, akshare_probe=akshare_probe,
         sync_ths_industry_flow=sync_ths_industry_moneyflow, sync_ths_concept_flow=sync_ths_concept_signals,
         rebuild_market_flow_features=rebuild_stored_market_flow_features,
-        refresh_pattern_sources=refresh_strategy_pattern_sources, run_pattern_mining=run_strategy_pattern_mining,
+        limit_evidence=strategy_pattern_limit_evidence, run_pattern_mining=run_strategy_pattern_mining,
         persist_settled_limit_pool=persist_settled_limit_pool,
         sync_daily_controls=sync_full_market_daily_controls,
         reconcile_daily_controls=reconcile_daily_controls,

@@ -105,7 +105,8 @@ class PostCloseRefreshDependencies:
     sync_ths_industry_flow: Callable[[Any], Awaitable[dict[str, Any]]]
     sync_ths_concept_flow: Callable[[Any], Awaitable[dict[str, Any]]]
     rebuild_market_flow_features: Callable[..., Any]
-    refresh_pattern_sources: Callable[[date], Awaitable[dict[str, Any]]]
+    # Reports the day's captured limit-pool evidence; nothing is requested.
+    limit_evidence: Callable[[date], Awaitable[dict[str, Any]]]
     persist_settled_limit_pool: Callable[[Any, date], dict[str, Any]]
     run_pattern_mining: Callable[[Any], Awaitable[dict[str, Any]]]
     sync_daily_controls: Callable[[date], Awaitable[dict[str, Any]]]
@@ -192,7 +193,9 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
                 dependencies.persist_settled_limit_pool, dependencies.database, trade_date,
                 timeout_seconds=60,
             )
-        return await dependencies.refresh_pattern_sources(trade_date)
+        # The pools were captured during the session; without a close snapshot
+        # the report is blocked, and so is the mining stage that depends on it.
+        return await dependencies.limit_evidence(trade_date)
 
     actions: dict[str, Callable[[], Any]] = {
         "stale_fetch_runs": lambda: dependencies.run_database(

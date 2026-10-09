@@ -47,8 +47,10 @@ def select_candidates(
         board = boards.get(symbol) or {"exact_member_mapping": False}
         lhb_context = lhb_by_symbol.get(symbol)
         streak = max(steps.get(symbol, 0), board_count(raw.get("tag")))
+        # The row's own provenance: the screen accepts only a pool that carries
+        # the final seal and free float, which a Fuyao pool row does not.
         continuation = continuation_watch(
-            {**raw, "streak_count": streak, "sources": ["tushare_limit_list_ths"]},
+            {**raw, "streak_count": streak, "sources": [stored.get("provider_key")]},
             number=lambda value: float(value) if value is not None else None,
             board_count=board_count,
         )

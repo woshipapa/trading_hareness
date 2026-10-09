@@ -309,6 +309,8 @@ class StrategyPatternMiningRequest(BaseModel):
     max_symbols: int = Field(default=20, ge=4, le=20)
     per_cohort: int = Field(default=6, ge=1, le=6)
     focus_symbols: list[str] = Field(default_factory=list, max_length=10)
+    # Name kept for the API: since decision 0005 nothing is refreshed, and True
+    # records the date's captured limit-pool evidence in the run's source status.
     refresh_limit_sources: bool = True
 
     @model_validator(mode="after")

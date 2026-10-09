@@ -8,7 +8,8 @@ from typing import Any
 
 from psycopg.types.json import Json
 
-from .limit_event_fallback import event_limit_record, event_step_record
+from .limit_event_fallback import enrich_pool_records
+from .limit_event_repository import load_close_limit_events, load_prior_close_pool
 
 
 @dataclass(frozen=True)
@@ -20,95 +21,23 @@ class StrategyPatternSampleInputs:
     daily_rows: list[dict[str, Any]]
 
 
-def _event_limit_rows(connection: Any, as_of_date: date) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Project generic persisted limit events into the legacy sample shape."""
-    current = connection.execute(
-        """SELECT DISTINCT ON(symbol) symbol,body,source,available_at
-             FROM quant.market_events
-            WHERE event_type='limit_up_pool'
-              AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s
-            ORDER BY symbol,available_at DESC""",
-        (as_of_date,),
-    ).fetchall()
-    chain = connection.execute(
-        """SELECT DISTINCT ON(symbol) symbol,body,source,available_at
-             FROM quant.market_events
-            WHERE event_type='limit_chain'
-              AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s
-            ORDER BY symbol,available_at DESC""", (as_of_date,),
-    ).fetchall()
-    chain_by_symbol = {
-        str(item["row_data"]["ts_code"]): int(item["row_data"]["nums"])
-        for item in (event_step_record(dict(row), trade_date=as_of_date) for row in chain)
-    }
-    prior_row = connection.execute(
-        """SELECT max((occurred_at AT TIME ZONE 'Asia/Shanghai')::date) AS prior_date
-             FROM quant.market_events
-            WHERE event_type='limit_up_pool'
-              AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date<%s""",
-        (as_of_date,),
-    ).fetchone()
-    prior_date = prior_row["prior_date"] if prior_row else None
-    prior = connection.execute(
-        """SELECT DISTINCT ON(symbol) symbol,body,source,available_at
-             FROM quant.market_events
-            WHERE event_type='limit_up_pool'
-              AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s
-            ORDER BY symbol,available_at DESC""",
-        (prior_date,),
-    ).fetchall() if prior_date else []
-
-    wrapped = [event_limit_record(dict(row), trade_date=as_of_date,
-                                  board_num=chain_by_symbol.get(str(row.get("symbol") or "").upper(), 1))
-               for row in current]
-    prior_projected = [event_limit_record(dict(row), trade_date=prior_date)
-                       ["row_data"] for row in prior] if prior_date else []
-    step_rows = [event_step_record(dict(row), trade_date=as_of_date)["row_data"] for row in chain]
-    return wrapped, step_rows, prior_projected
-
-
 def load_strategy_pattern_sample_inputs(database: Any, as_of_date: date) -> StrategyPatternSampleInputs:
     """Read only persisted same-date ladder inputs and a bounded daily window.
 
-    This repository deliberately does not refresh Tushare, minute bars, board
-    membership, or LHB evidence.  The caller owns those separate local
-    projections and passes all inputs to the deterministic selector.
+    The positives are the session's close limit-up pool as Fuyao captured it,
+    with its ladder; since ``limit_list_ths``/``limit_step`` stopped (decision
+    0005) nothing else is the THS pool.  Without a close snapshot there are no
+    positives: an intraday pool or another source's close-at-limit rows are a
+    different definition and are not substituted; they may only fill fields
+    the pool lacks, such as turnover.  This repository does not refresh any
+    provider, minute bars, board membership or LHB evidence; the caller passes
+    all inputs to the deterministic selector.
     """
-    stamp = as_of_date.strftime("%Y%m%d")
     with database.transaction() as connection:
-        limit_rows = connection.execute(
-            """SELECT DISTINCT ON(row_data->>'ts_code') row_data,provider_key,available_at
-                 FROM quant.tushare_raw_records WHERE api_name='limit_list_ths'
-                  AND row_data->>'trade_date'=%s AND row_data->>'limit_type'='涨停池'
-                ORDER BY row_data->>'ts_code',available_at DESC""", (stamp,),
-        ).fetchall()
-        step_rows = connection.execute(
-            """SELECT DISTINCT ON(row_data->>'ts_code') row_data,available_at
-                 FROM quant.tushare_raw_records WHERE api_name='limit_step' AND row_data->>'trade_date'=%s
-                ORDER BY row_data->>'ts_code',available_at DESC""", (stamp,),
-        ).fetchall()
-        prior_date_row = connection.execute(
-            """SELECT max(row_data->>'trade_date') prior_date FROM quant.tushare_raw_records
-                WHERE api_name='limit_list_ths' AND row_data->>'trade_date'<%s""", (stamp,),
-        ).fetchone()
-        prior_stamp = prior_date_row["prior_date"] if prior_date_row else None
-        prior_limit_rows = connection.execute(
-            """SELECT DISTINCT ON(row_data->>'ts_code') row_data
-                 FROM quant.tushare_raw_records WHERE api_name='limit_list_ths'
-                  AND row_data->>'trade_date'=%s AND row_data->>'limit_type'='涨停池'
-                ORDER BY row_data->>'ts_code',available_at DESC""", (prior_stamp,),
-        ).fetchall() if prior_stamp else []
-        if not limit_rows:
-            limit_rows, step_rows, prior_limit_rows = _event_limit_rows(connection, as_of_date)
-        if not step_rows and limit_rows:
-            chain_rows = connection.execute(
-                """SELECT DISTINCT ON(symbol) symbol,body,source,available_at
-                     FROM quant.market_events
-                    WHERE event_type='limit_chain'
-                      AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date=%s
-                    ORDER BY symbol,available_at DESC""", (as_of_date,),
-            ).fetchall()
-            step_rows = [event_step_record(dict(row), trade_date=as_of_date)["row_data"] for row in chain_rows]
+        events = load_close_limit_events(connection, as_of_date)
+        limit_rows = enrich_pool_records(events.pool, events.others, trade_date=as_of_date)
+        step_rows = events.ladder
+        prior_limit_rows = load_prior_close_pool(connection, as_of_date)
         positive_symbols = [str(row["row_data"].get("ts_code") or "").upper() for row in limit_rows]
         control_rows = connection.execute(
             """SELECT b.symbol,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,b.volume,b.amount,
