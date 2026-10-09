@@ -90,6 +90,33 @@ const supportedAlertReceiveIdTypes = new Set(['chat_id', 'open_id', 'user_id', '
 if (!supportedAlertReceiveIdTypes.has(feishuAlertReceiveIdType)) {
 	throw new Error('FEISHU_ALERT_RECEIVE_ID_TYPE must be chat_id, open_id, user_id, or union_id');
 }
+// Unified ops notifier: one debounced channel for "the relay needs a human"
+// signals (session needs re-scan, OAuth lane about to lapse, decode errors
+// spiking). Routes through the official alert bot (FEISHU_ALERT_RECEIVE_ID);
+// a dedicated LARKX_OPS_ALERT_RECEIVE_ID overrides the target. When neither is
+// configured it logs only. Per-key debounce avoids repeat spam.
+const opsAlertReceiveId = String(process.env.LARKX_OPS_ALERT_RECEIVE_ID ?? feishuAlertReceiveId ?? '').trim();
+const opsAlertDebounceMs = Math.max(60_000, Number(process.env.LARKX_OPS_ALERT_DEBOUNCE_SECONDS ?? 1800) * 1000);
+const opsAlertLastSent = new Map();
+async function notifyOps(key, text) {
+	const now = Date.now();
+	const last = opsAlertLastSent.get(key) ?? 0;
+	if (now - last < opsAlertDebounceMs) return false;
+	opsAlertLastSent.set(key, now);
+	console.warn(`[ops-alert ${key}] ${text}`);
+	if (!opsAlertReceiveId) return false;
+	try {
+		await larkClient.im.v1.message.create({
+			params: { receive_id_type: feishuAlertReceiveIdType },
+			data: { receive_id: opsAlertReceiveId, msg_type: 'text', content: JSON.stringify({ text: `[relay 运维] ${text}` }) },
+		});
+		return true;
+	} catch (error) {
+		console.error(`ops 告警投递失败 key=${key}：${error instanceof Error ? error.message : String(error)}`);
+		return false;
+	}
+}
+
 const dashboardPort = Number(process.env.DASHBOARD_PORT ?? 3000);
 const dashboardHost = String(process.env.DASHBOARD_HOST ?? '0.0.0.0').trim() || '0.0.0.0';
 const larkAgentXHealthUrl = String(process.env.LARKX_BRIDGE_HEALTH_URL ?? 'http://127.0.0.1:8090/health').trim();
@@ -453,6 +480,37 @@ if (oauthKeepaliveDays > 0) {
 		})();
 	}, 24 * 3600 * 1000).unref();
 }
+
+// Health watch: turn the silent-failure signals into one debounced ops alert.
+let needsLoginSince = 0;
+setInterval(() => {
+	void (async () => {
+		try {
+			const larkagentx = await larkAgentXDashboardStatus();
+			const authState = larkagentx?.auth?.state;
+			if (authState === 'needs_login') {
+				if (!needsLoginSince) needsLoginSince = Date.now();
+				if (Date.now() - needsLoginSince > 120_000) {
+					await notifyOps('needs_login', '个人会话已失效，需要在控制台扫码重新登录（监听已暂停）。');
+				}
+			} else {
+				needsLoginSince = 0;
+				if (authState === 'degrading') {
+					await notifyOps('auth_degrading', '个人会话票据探针失败，WS 仍在但即将失效，建议尽快重新扫码。');
+				}
+			}
+			const oauth = await feishuUserOauth.status();
+			if (oauth.configured && oauth.refresh_expires_at) {
+				const remainingMs = Date.parse(oauth.refresh_expires_at) - Date.now();
+				if (Number.isFinite(remainingMs) && remainingMs < 48 * 3600 * 1000) {
+					await notifyOps('oauth_expiry', `飞书用户 OAuth 补读授权将在 ${Math.max(0, Math.floor(remainingMs / 3600000))} 小时后过期，请在控制台重新授权。`);
+				}
+			}
+		} catch (error) {
+			console.error(`relay 健康自检失败：${error instanceof Error ? error.message : String(error)}`);
+		}
+	})();
+}, Math.max(60, Number(process.env.LARKX_HEALTH_WATCH_SECONDS ?? 60)) * 1000).unref();
 void reconcileNow().catch((error) => console.error(`启动对账失败：${error instanceof Error ? error.message : String(error)}`));
 const sourceRoutes = new Map((sourceRegistry.routes ?? []).map((route) => [String(route.tag).toLowerCase(), route]));
 const supportedMediaTypes = new Set([
