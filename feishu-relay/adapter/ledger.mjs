@@ -69,6 +69,7 @@ export function createLedger(connectionString) {
 				CREATE TABLE IF NOT EXISTS ingestion_errors (error_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), job_id uuid REFERENCES ingestion_jobs(job_id) ON DELETE SET NULL, execution_id text, workflow_id text, node_name text, http_status integer, error_class text, message text NOT NULL, payload jsonb NOT NULL DEFAULT '{}'::jsonb, created_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS analysis_jobs (analysis_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), job_id uuid NOT NULL UNIQUE REFERENCES ingestion_jobs(job_id) ON DELETE CASCADE, status text NOT NULL DEFAULT 'pending', result jsonb NOT NULL DEFAULT '{}'::jsonb, error_message text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS feishu_group_relay_sources (source_key text PRIMARY KEY, chat_id text NOT NULL, cursor_create_time bigint NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+				CREATE TABLE IF NOT EXISTS larkagentx_export_bookmarks (chat_id text PRIMARY KEY, next_sequence bigint NOT NULL DEFAULT 0, last_from_time double precision, last_to_time double precision, last_event_count integer NOT NULL DEFAULT 0, cumulative_events bigint NOT NULL DEFAULT 0, last_format text, last_export_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS feishu_group_relay_messages (source_message_id text PRIMARY KEY, source_key text NOT NULL, source_chat_id text NOT NULL, source_create_time bigint NOT NULL, target_chat_id text NOT NULL, route_tag text NOT NULL, message jsonb NOT NULL, status text NOT NULL, attempt_count integer NOT NULL DEFAULT 0, target_message_ids jsonb NOT NULL DEFAULT '[]'::jsonb, error_message text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), forwarded_at timestamptz);
 				CREATE TABLE IF NOT EXISTS feishu_group_relay_actions (action_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), source_message_id text NOT NULL REFERENCES feishu_group_relay_messages(source_message_id) ON DELETE CASCADE, action text NOT NULL, actor_open_id text, created_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS feishu_group_relay_routes (source_key text PRIMARY KEY, chat_id text NOT NULL, chat_name text NOT NULL, route_tag text NOT NULL, enabled boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
@@ -433,6 +434,39 @@ export function createLedger(connectionString) {
 				) failures ON true
 				ORDER BY source.source_key`);
 			return rows;
+		},
+		async listExportBookmarks() {
+			const { rows } = await pool.query(
+				`SELECT chat_id, next_sequence, last_from_time, last_to_time, last_event_count,
+					cumulative_events, last_format, last_export_at
+				FROM larkagentx_export_bookmarks ORDER BY chat_id`);
+			return rows;
+		},
+		async getExportBookmark(chatId) {
+			const { rows } = await pool.query(
+				'SELECT * FROM larkagentx_export_bookmarks WHERE chat_id=$1', [String(chatId)]);
+			return rows[0] ?? null;
+		},
+		async advanceExportBookmark(chatId, { nextSequence, fromTime, toTime, eventCount, format }) {
+			// An empty export keeps the prior covered range/cursor — that span is
+			// exactly what the UI shows as "last exported X..Y".
+			const { rows } = await pool.query(
+				`INSERT INTO larkagentx_export_bookmarks
+					(chat_id, next_sequence, last_from_time, last_to_time, last_event_count, cumulative_events, last_format, last_export_at)
+				VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+				ON CONFLICT (chat_id) DO UPDATE SET
+					next_sequence = EXCLUDED.next_sequence,
+					last_from_time = CASE WHEN EXCLUDED.last_event_count > 0 THEN EXCLUDED.last_from_time ELSE larkagentx_export_bookmarks.last_from_time END,
+					last_to_time = CASE WHEN EXCLUDED.last_event_count > 0 THEN EXCLUDED.last_to_time ELSE larkagentx_export_bookmarks.last_to_time END,
+					last_event_count = EXCLUDED.last_event_count,
+					cumulative_events = larkagentx_export_bookmarks.cumulative_events + EXCLUDED.last_event_count,
+					last_format = EXCLUDED.last_format,
+					last_export_at = now()
+				RETURNING *`,
+				[String(chatId), Number(nextSequence) || 0,
+					fromTime == null ? null : Number(fromTime), toTime == null ? null : Number(toTime),
+					Number(eventCount) || 0, Number(eventCount) || 0, String(format || 'ndjson')]);
+			return rows[0] ?? null;
 		},
 		async getJob(jobId) {
 			const { rows } = await pool.query(`SELECT j.*, coalesce(json_agg(a ORDER BY a.ordinal) FILTER (WHERE a.asset_id IS NOT NULL), '[]') AS assets FROM ingestion_jobs j LEFT JOIN ingestion_assets a ON a.job_id=j.job_id WHERE j.job_id=$1 GROUP BY j.job_id`, [jobId]);

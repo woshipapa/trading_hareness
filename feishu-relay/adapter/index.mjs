@@ -1594,7 +1594,16 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 	// Incremental export: `after_sequence` resumes from a caller-kept cursor,
 	// so a tool exports only what is new since last time. `days` stays as a
 	// convenience window; an explicit after_sequence takes precedence over it.
-	const afterSequenceRaw = String(url.searchParams.get('after_sequence') ?? '').trim();
+	// `mode=incremental` lets the browser use a durable server-side bookmark
+	// instead of carrying its own cursor: the bookmark supplies after_sequence
+	// and is advanced from the response headers after a successful export.
+	const mode = String(url.searchParams.get('mode') ?? '').trim().toLowerCase();
+	const useBookmark = mode === 'incremental';
+	let afterSequenceRaw = String(url.searchParams.get('after_sequence') ?? '').trim();
+	if (useBookmark) {
+		const bookmark = await ledger.getExportBookmark(chatId).catch(() => null);
+		afterSequenceRaw = String(bookmark?.next_sequence ?? 0);
+	}
 	const afterSequence = afterSequenceRaw === '' ? null : Number(afterSequenceRaw);
 	if (afterSequence !== null && (!Number.isInteger(afterSequence) || afterSequence < 0)) {
 		response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1638,9 +1647,21 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 			response.end(JSON.stringify({ status: 'error', message: `LarkAgentX 历史导出失败：${message || upstream.statusText}` }));
 			return;
 		}
+		if (useBookmark) {
+			// Headers are available before the body streams; advance the durable
+			// cursor now so the next incremental export resumes correctly even if
+			// the client aborts the download midway.
+			await ledger.advanceExportBookmark(chatId, {
+				nextSequence: Number(upstream.headers.get('x-larkagentx-next-sequence') ?? afterSequence ?? 0),
+				fromTime: upstream.headers.get('x-larkagentx-from-time') ?? null,
+				toTime: upstream.headers.get('x-larkagentx-to-time') ?? null,
+				eventCount: Number(upstream.headers.get('x-larkagentx-event-count') ?? 0),
+				format,
+			}).catch((error) => console.error(`导出书签推进失败 chat=${chatId}: ${error instanceof Error ? error.message : String(error)}`));
+		}
 		const safeFileChatId = chatId.replace(/[^0-9]/g, '');
 		const ext = format === 'transcript' ? 'txt' : 'jsonl';
-		const windowTag = afterSequence !== null ? `after-${afterSequence}` : `last-${days}d`;
+		const windowTag = useBookmark ? 'incremental' : (afterSequence !== null ? `after-${afterSequence}` : `last-${days}d`);
 		const passHeader = (name) => (upstream.headers.get(name) ? { [name]: upstream.headers.get(name) } : {});
 		response.writeHead(200, {
 			'content-type': format === 'transcript' ? 'text/plain; charset=utf-8' : 'application/x-ndjson; charset=utf-8',
@@ -1842,6 +1863,12 @@ const dashboard = createServer((request, response) => {
 	}
 	if (url.pathname === '/api/group-relay/larkagentx/history/export' && request.method === 'GET') {
 		void handleLarkAgentXHistoryExport(request, response, url);
+		return;
+	}
+	if (url.pathname === '/api/group-relay/larkagentx/export-bookmarks' && request.method === 'GET') {
+		void ledger.listExportBookmarks()
+			.then((bookmarks) => { response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ bookmarks })); })
+			.catch((error) => { response.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })); });
 		return;
 	}
 	if (url.pathname === '/api/group-relay/itougu/refresh' && request.method === 'POST') {

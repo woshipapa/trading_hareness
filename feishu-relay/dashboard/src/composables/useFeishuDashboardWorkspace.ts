@@ -91,7 +91,10 @@ export function useFeishuDashboardWorkspace() {
   }
 
   function loadActiveSection() {
-    if (activeSection.value === 'monitor') return feishuRelayWorkspace.loadGroupRelayStatus();
+    if (activeSection.value === 'monitor') {
+      void feishuRelayWorkspace.loadExportBookmarks();
+      return feishuRelayWorkspace.loadGroupRelayStatus();
+    }
     if (activeSection.value === 'workbench') return feishuRelayWorkspace.loadFeishuWorkbench();
     return Promise.resolve();
   }

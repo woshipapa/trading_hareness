@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-import { groupRelayApi } from '../api/group-relay';
+import { groupRelayApi, type ExportBookmark, type ExportFormat } from '../api/group-relay';
 import { feishuWorkbenchApi } from '../api/feishu-workbench';
 
 type OAuthScopeAudit = { required_scopes?: string[]; granted_scopes?: string[]; missing_scopes?: string[]; verified?: boolean | null };
@@ -37,7 +37,10 @@ export function useFeishuRelayWorkspace() {
   // Weekly packets are the normal unit handed to the analysis agent. Users
   // can still select the shorter/longer windows in the monitor toolbar.
   const larkHistoryDays = ref<1 | 7 | 30>(7);
+  // Transcript is the AI-ready default (flat text); ndjson keeps raw structure.
+  const larkHistoryFormat = ref<ExportFormat>('transcript');
   const larkHistoryExporting = ref('');
+  const exportBookmarks = ref<Record<string, ExportBookmark>>({});
   const groupRelayRouteForm = ref<GroupRelayRouteForm>(defaultRouteForm());
   const feishuWorkbench = ref<FeishuWorkbenchStatus>({ capabilities: [] });
   const feishuWorkbenchMessages = ref<FeishuWorkbenchMessage[]>([]);
@@ -99,11 +102,33 @@ export function useFeishuRelayWorkspace() {
       itouguRefreshing.value = false;
     }
   }
-  async function exportLarkAgentXHistory(chatId: string) {
+  async function loadExportBookmarks() {
+    try {
+      const result = await groupRelayApi.listExportBookmarks();
+      exportBookmarks.value = Object.fromEntries((result.bookmarks ?? []).map((item) => [item.chat_id, item]));
+    } catch { /* bookmarks are advisory; a failure must not break the monitor */ }
+  }
+  const bookmarkFor = (chatId: string): ExportBookmark | undefined => exportBookmarks.value[chatId];
+  const formatBookmarkRange = (chatId: string): string => {
+    const bookmark = exportBookmarks.value[chatId];
+    if (!bookmark || bookmark.last_from_time == null || bookmark.last_to_time == null) return '尚未增量导出';
+    const fmt = (epoch: number) => new Date(epoch * 1000).toLocaleString('zh-CN', { hour12: false });
+    return `上次覆盖 ${fmt(bookmark.last_from_time)} 至 ${fmt(bookmark.last_to_time)}`;
+  };
+  async function exportLarkAgentXHistory(chatId: string, incremental = false) {
     if (larkHistoryExporting.value) return;
     larkHistoryExporting.value = chatId;
     try {
-      const result = await groupRelayApi.exportLarkAgentXHistory(chatId, larkHistoryDays.value);
+      const result = await groupRelayApi.exportLarkAgentXHistory(chatId, {
+        format: larkHistoryFormat.value,
+        mode: incremental ? 'incremental' : 'window',
+        days: larkHistoryDays.value,
+      });
+      if (incremental && result.count === 0) {
+        ElMessage.info('没有新消息，无需导出');
+        await loadExportBookmarks();
+        return;
+      }
       const objectUrl = URL.createObjectURL(result.blob);
       const anchor = document.createElement('a');
       anchor.href = objectUrl;
@@ -112,7 +137,9 @@ export function useFeishuRelayWorkspace() {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
-      ElMessage.success(`已导出最近 ${larkHistoryDays.value} 天消息${result.count ? `，共 ${result.count} 条` : ''}`);
+      const scope = incremental ? '增量（自上次以来）' : `最近 ${larkHistoryDays.value} 天`;
+      ElMessage.success(`已导出${scope}${result.count ? `，共 ${result.count} 条` : ''}`);
+      if (incremental) await loadExportBookmarks();
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -205,7 +232,7 @@ export function useFeishuRelayWorkspace() {
   }
 
   return {
-    groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryExporting,
+    groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
     feishuWorkbench, feishuWorkbenchMessages, feishuWorkbenchLoading, feishuWorkbenchError, feishuWorkbenchAction, workbenchSearch, workbenchSearchResult, workbenchIntegrationDialog, workbenchIntegration,
     groupRelayStateType, groupRelayStateText, groupRelayMessageText, oauthAuditLabel, oauthAuditTagType, relayDeliveryLabel, relayDeliveryTagType, ingestionDeliveryLabel, ingestionDeliveryTagType, larkAgentXStateType, larkAgentXStateText, itouguStateType, itouguStateText, itouguKeywordText, webhookKeyword, applicationInspectionLabel, applicationInspectionTagType, targetChatInspectionLabel, targetChatInspectionTagType, capabilityAuthorizationLabel, capabilityAuthorizationTagType,
     loadGroupRelayStatus, forceItouguRefresh, exportLarkAgentXHistory, loadFeishuWorkbench, inspectFeishuApplication, workbenchMessageText, workbenchWorkflowText, runWorkbenchAction, searchFeishuMessages, openWorkbenchIntegration, runWorkbenchEndpoint, createWorkbenchDigest, createWorkbenchTab, submitWorkbenchIntegration, openCreateGroupRelayRoute, openEditGroupRelayRoute, saveGroupRelayRoute, setGroupRelayRouteEnabled, deleteGroupRelayRoute,
