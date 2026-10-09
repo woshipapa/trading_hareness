@@ -5,19 +5,36 @@ from __future__ import annotations
 from typing import Any, Callable
 
 
+#: CNY per unit of a board row's ``net_amount``. The 同花顺 public pages are
+#: in 亿元 and Longhu's industry report in yuan. A row that names no unit is
+#: from the THS-era tables, which were in 亿元.
+NET_AMOUNT_SCALE = {"100m_cny": 100_000_000.0, "yuan": 1.0, "cny": 1.0}
+
+
+def net_amount_cny(item: dict[str, Any]) -> float:
+    scale = NET_AMOUNT_SCALE.get(str(item.get("net_amount_unit") or "100m_cny"), 100_000_000.0)
+    return float(item.get("net_amount") or 0) * scale
+
+
 def exact_board_context(rows: list[dict[str, Any]], *, json_safe: Callable[[Any], Any]) -> dict[str, dict[str, Any]]:
+    """Each symbol's strongest board, and where its inflow ranks among the symbols.
+
+    Boards are compared in CNY. Before that, a symbol whose board came from
+    Longhu's report (yuan) outranked every symbol on a 同花顺 page (亿元),
+    whatever the actual flows were.
+    """
     contexts: dict[str, dict[str, Any]] = {}
     for row in rows:
         item = json_safe(dict(row))
+        item["net_amount_cny"] = net_amount_cny(item)
         symbol = str(item["symbol"])
         current = contexts.get(symbol)
-        if current is None or float(item.get("net_amount") or 0) > float(current.get("net_amount") or 0):
+        if current is None or item["net_amount_cny"] > current["net_amount_cny"]:
             contexts[symbol] = {**item, "exact_member_mapping": True}
-    positive_flows = sorted({float(item.get("net_amount") or 0) for item in contexts.values()
-                             if float(item.get("net_amount") or 0) > 0})
+    positive_flows = sorted({item["net_amount_cny"] for item in contexts.values() if item["net_amount_cny"] > 0})
     denominator = max(1, len(positive_flows) - 1)
     for item in contexts.values():
-        flow = float(item.get("net_amount") or 0)
+        flow = item["net_amount_cny"]
         item["flow_percentile"] = round(positive_flows.index(flow) / denominator, 4) if flow > 0 else 0.0
     return contexts
 

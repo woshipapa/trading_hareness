@@ -40,7 +40,8 @@ export function useCloseReviewSlice(shell: ResearchShell, market: Pick<MarketDat
   const patternCohortLabel = (value: string) => ({ focus: '重点研究', dragon_leader_watch: '龙头复核', limit_continuation_watch: '连板延续', ground_to_sky: '地天反转', preopen_market_leader: '盘前辨识度', market_leader: '盘后辨识度', board_leader: '板块龙头', consecutive_limit: '连板梯队', first_board: '首板' }[value] ?? value);
   const reviewTierText = (value?: string) => value === 'priority_review' ? '优先复核' : value === 'candidate_review' ? '候选复核' : '研究样本';
   const reviewConceptBoards = computed(() => (closeBoardReport.value?.payload?.items ?? [])
-    .filter((item) => item.taxonomy_key === 'ths_concept_flow' && item.mapped_members > 0)
+    // eastmoney_concept is the live 同花顺 concept flow (the key is historical); ths_concept_flow is the frozen THS-era list.
+    .filter((item) => (item.taxonomy_key === 'eastmoney_concept' || item.taxonomy_key === 'ths_concept_flow') && item.mapped_members > 0)
     .sort((left, right) => Number(right.net_inflow ?? -Infinity) - Number(left.net_inflow ?? -Infinity)));
   const selectedReviewBoard = computed(() => reviewConceptBoards.value.find((item) => item.sector_key === selectedReviewBoardKey.value) ?? reviewConceptBoards.value[0] ?? null);
   const selectedReviewBoardStocks = computed(() => selectedReviewBoard.value?.top_stocks ?? []);
