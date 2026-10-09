@@ -34,6 +34,18 @@ class LarkAgentXRecoveryTests(unittest.IsolatedAsyncioTestCase):
 		instance.groups_skipped = 0
 		instance.last_protocol_telemetry = None
 		instance.recovery_reasons = []
+		# on_websocket_connected now also consults the private-gap machinery
+		# and persists counters through the event spool; give the hand-built
+		# fixture those collaborators so it keeps matching the real class.
+		instance.private_gap_repair_enabled = False
+		instance.private_gap_repair_on_start = False
+		instance._private_startup_repair_started = True
+
+		class _SpoolStub:
+			def increment_counter(self, name, amount=1):
+				return None
+
+		instance.event_spool = _SpoolStub()
 
 		async def recover(reason):
 			instance.recovery_reasons.append(reason)

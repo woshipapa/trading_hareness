@@ -11,13 +11,23 @@
 // keys every message on a leading "#tag", reads a relayed card exactly as it
 // read the text bubble it replaces.
 
-// Feishu renders a card its message API cannot express as this fixed banner
-// plus an image key whose resource is already deleted.  It is a client-version
-// notice, never analyst content.
-export const CARD_UNAVAILABLE_NOTICES = new Set([
-	'请升级至最新版本客户端，以查看内容',
-	'请升级至最新版本客户端以查看内容',
-]);
+// Feishu renders a card its message API cannot express as a fixed
+// client-upgrade banner, never analyst content.  One tolerant matcher serves
+// every reader (cardText here, the LarkAgentX ingress degradation check):
+// both languages accept an optional protobuf text-marker digit prefix (the
+// observed WebSocket value is `5Upgrade...`) after control characters are
+// stripped, so the two call sites can never drift apart again.
+const CARD_UNAVAILABLE_RES = [
+	/^(?:\d+\s*)?upgrade to the latest app version to view the content$/iu,
+	/^(?:\d+\s*)?请升级至最新版本客户端，?以查看内容$/u,
+];
+
+export function isCardUnavailableNotice(value) {
+	const normalized = String(value ?? '')
+		.replace(/[\u0000-\u001f\u007f-\u009f��]/gu, '')
+		.trim();
+	return CARD_UNAVAILABLE_RES.some((pattern) => pattern.test(normalized));
+}
 
 const TEXT_TAGS = new Set(['text', 'markdown', 'plain_text', 'lark_md']);
 
@@ -80,7 +90,7 @@ export function cardText(content) {
 	const append = (value) => {
 		if (typeof value !== 'string') return;
 		const text = value.trim();
-		if (text && !CARD_UNAVAILABLE_NOTICES.has(text) && !chunks.includes(text)) chunks.push(text);
+		if (text && !isCardUnavailableNotice(text) && !chunks.includes(text)) chunks.push(text);
 	};
 	const walk = (value) => {
 		if (Array.isArray(value)) { for (const item of value) walk(item); return; }

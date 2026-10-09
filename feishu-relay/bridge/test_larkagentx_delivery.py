@@ -124,6 +124,7 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		instance.static_source_keys_by_chat = {"7661209668907207659": "anqiang"}
 		instance.route_bindings = {}
 		instance.anqiang_source_keys = {"anqiang"}
+		instance.anqiang_chat_ids = set()
 		instance.anqiang_block_keywords = {"般若星登山的川柏"}
 		instance.chat_stats = {"7661209668907207659": {"observed_count": 0, "filtered_count": 0, "failed_count": 0, "self_message_count": 0}}
 		instance.auth = Mock(user_id="another-user")

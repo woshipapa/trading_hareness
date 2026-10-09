@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildRelayCard, cardImageKeys, cardPayload, cardText } from './card-content.mjs';
+import { buildRelayCard, cardImageKeys, cardPayload, cardText, isCardUnavailableNotice } from './card-content.mjs';
 
 const V2 = { schema: '2.0', body: { elements: [{ tag: 'markdown', content: '长光华X回到了8月17日高点' }] } };
 
@@ -50,6 +50,19 @@ test('keeps an image-like internal imageID when it is a real resource key', () =
 
 test('drops the client-upgrade banner and keeps nothing else from it', () => {
 	const card = { title: null, elements: [[{ tag: 'img', image_key: 'img_dead' }, { tag: 'text', text: '请升级至最新版本客户端，以查看内容' }, { tag: 'text', text: '' }]] };
+	assert.equal(cardText(card), '');
+});
+
+test('one banner matcher covers both languages with the protobuf prefix tolerance', () => {
+	assert.ok(isCardUnavailableNotice('Upgrade to the latest app version to view the content'));
+	assert.ok(isCardUnavailableNotice('5Upgrade to the latest app version to view the content'));
+	assert.ok(isCardUnavailableNotice('请升级至最新版本客户端，以查看内容'));
+	assert.ok(isCardUnavailableNotice('请升级至最新版本客户端以查看内容'));
+	assert.ok(isCardUnavailableNotice('\u00125请升级至最新版本客户端，以查看内容'));
+	assert.ok(!isCardUnavailableNotice('临盘拉了欧盟反制'));
+	assert.ok(!isCardUnavailableNotice(''));
+	// cardText must drop the English banner too, not only the Chinese one.
+	const card = { title: null, elements: [[{ tag: 'text', text: 'Upgrade to the latest app version to view the content' }]] };
 	assert.equal(cardText(card), '');
 });
 

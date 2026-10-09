@@ -381,6 +381,45 @@ def tolerant_websocket_decode(raw: bytes) -> tuple[dict[str, Any], list[dict[str
 	return packet, messages
 
 
+# WebSocket command numbers whose packets carry PushMessagesRequest payloads.
+# cmd 6 is the classic message push; any further value is added per observed
+# evidence through LARKX_WS_PUSH_CMDS, never by guessing.
+DEFAULT_PUSH_CMDS = frozenset({6})
+
+
+def parse_notify_frame(raw: bytes) -> dict[str, Any] | None:
+	"""Read a lightweight new-message notification frame (observed cmd 7001).
+
+	The server does not push some messages (for example the cat group's bot
+	cards) as cmd 6 PushMessagesRequest frames at all.  Instead it emits a
+	small notification whose Packet reuses ``sid`` for the message id and
+	whose payload wraps the chat id as ``f1.f1``, leaving the content to be
+	pulled.  Returns None when the frame does not match that shape — the
+	caller treats None as "not a notification", never as an error.
+	"""
+	telemetry = new_telemetry()
+	try:
+		frame = _read_proto_fields(raw, "frame", telemetry)
+		packet_raw = _first_proto_field(frame, 8, 2)
+		if not isinstance(packet_raw, bytes):
+			return None
+		packet_fields = _read_proto_fields(packet_raw, "packet", telemetry)
+		cmd = int(_first_proto_field(packet_fields, 3, 0) or 0)
+		message_id = _proto_text(_first_proto_field(packet_fields, 1, 2) or "")
+		payload = _first_proto_field(packet_fields, 5, 2)
+		if not isinstance(payload, bytes):
+			return None
+		body = _first_proto_field(_read_proto_fields(payload, "notify", telemetry), 1, 2)
+		if not isinstance(body, bytes):
+			return None
+		chat_id = _proto_text(_first_proto_field(_read_proto_fields(body, "notify_body", telemetry), 1, 2) or "").strip()
+		if not chat_id.isdigit():
+			return None
+		return {"cmd": cmd, "chat_id": chat_id, "message_id": message_id.strip()}
+	except (TolerantProtoError, ValueError):
+		return None
+
+
 def _decompress_payload(raw: bytes, encoding: str) -> bytes:
 	"""Decode the compression named by Frame.payloadEncoding."""
 	name = (encoding or "").strip().lower()
@@ -391,7 +430,7 @@ def _decompress_payload(raw: bytes, encoding: str) -> bytes:
 	raise ValueError(f"unsupported payload encoding: {encoding[:32]}")
 
 
-def decode_primary_websocket(raw: bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def decode_primary_websocket(raw: bytes, push_cmds: frozenset[int] = DEFAULT_PUSH_CMDS) -> tuple[dict[str, Any], list[dict[str, Any]]]:
 	"""Decode normal frames, including compressed packet/push payloads.
 
 	Some gateway responses set Frame.payloadEncoding while keeping the outer
@@ -433,7 +472,7 @@ def decode_primary_websocket(raw: bytes) -> tuple[dict[str, Any], list[dict[str,
 		packet_frame_bytes = frame.SerializeToString()
 
 	packet_dict = decoders.protobuf_to_dict(packet)
-	if int(packet_dict.get("cmd", 0) or 0) != 6 or not packet.HasField("payload"):
+	if int(packet_dict.get("cmd", 0) or 0) not in push_cmds or not packet.HasField("payload"):
 		return packet_dict, []
 	try:
 		return packet_dict, _enrich_primary_card_messages(packet_frame_bytes, decoders.decode_push_messages(packet_frame_bytes))

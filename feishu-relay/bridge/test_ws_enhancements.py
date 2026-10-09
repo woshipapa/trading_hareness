@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 import tempfile
@@ -97,6 +98,131 @@ class RawFrameCaptureTests(unittest.TestCase):
 	def test_all_frames_mode_alone_enables_capture(self):
 		with tempfile.TemporaryDirectory() as tmp:
 			self.assertTrue(bridge.RawFrameCapture(set(), tmp, 10, all_frames=True).enabled)
+
+	def test_same_second_frames_keep_distinct_files(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			capture = bridge.RawFrameCapture({"7684122107030031634"}, tmp, max_files=10)
+			matched = [{"chat_id": "7684122107030031634", "msg_id": "m", "msg_type_name": "CARD"}]
+			for index in range(3):
+				capture.capture(f"same-second-{index}".encode(), matched)
+			self.assertEqual(len(list(Path(tmp).glob("*.bin"))), 3)
+			self.assertEqual(len(list(Path(tmp).glob("*.json"))), 3)
+
+
+@unittest.skipUnless(bridge is not None, f"supervisor larkx dependency unavailable: {BRIDGE_IMPORT_ERROR}")
+class CmdSetAndGatewayHeaderTests(unittest.TestCase):
+	def test_cmd_set_parses_csv_and_keeps_default_on_garbage(self):
+		self.assertEqual(bridge.parse_cmd_set("6,7001", frozenset({6})), frozenset({6, 7001}))
+		self.assertEqual(bridge.parse_cmd_set(" 7001 ", frozenset()), frozenset({7001}))
+		self.assertEqual(bridge.parse_cmd_set("", frozenset({6})), frozenset({6}))
+		self.assertEqual(bridge.parse_cmd_set("x,,", frozenset({6})), frozenset({6}))
+
+	def test_gateway_header_merge_is_case_insensitive_and_additive(self):
+		merged = bridge.merge_gateway_headers(
+			{"X-Web-Version": "3.9.32", "accept": "*/*"},
+			{"x-web-version": "7.93.0", "x-new": "1"})
+		self.assertEqual(merged["X-Web-Version"], "7.93.0")
+		self.assertEqual(merged["accept"], "*/*")
+		self.assertEqual(merged["x-new"], "1")
+		self.assertNotIn("x-web-version", merged)
+
+
+@unittest.skipUnless(bridge is not None, f"supervisor larkx dependency unavailable: {BRIDGE_IMPORT_ERROR}")
+class NotifyFrameTests(unittest.TestCase):
+	"""cmd 7001 notification frames: Packet.sid is the message id, payload
+	f1.f1 the chat id (observed 2026-10-09, frame sha 6edaa5431561ef6a)."""
+
+	@staticmethod
+	def build_notify_frame(cmd=7001, message_id="7694598379343236301", chat_id="7685029453386222794"):
+		from larkx.proto import proto_pb2 as P
+
+		def varint_field(number, value):
+			return bytes([number << 3]) + bytes([value])
+
+		def bytes_field(number, payload):
+			return bytes([(number << 3) | 2, len(payload)]) + payload
+
+		body = (bytes_field(1, chat_id.encode()) + varint_field(2, 0)
+			+ varint_field(3, 1) + varint_field(4, 0))
+		packet = P.Packet()
+		packet.cmd = cmd
+		packet.payloadType = 1
+		packet.sid = message_id
+		packet.payload = bytes_field(1, body)
+		frame = P.Frame()
+		frame.service = 1
+		frame.method = 1
+		frame.payload = packet.SerializeToString()
+		return frame.SerializeToString()
+
+	def test_parses_the_observed_notification_shape(self):
+		import proto_wire
+		raw = self.build_notify_frame()
+		notify = proto_wire.parse_notify_frame(raw)
+		self.assertEqual(notify, {"cmd": 7001, "chat_id": "7685029453386222794",
+		                          "message_id": "7694598379343236301"})
+
+	def test_rejects_frames_without_a_numeric_chat_id(self):
+		import proto_wire
+		self.assertIsNone(proto_wire.parse_notify_frame(b"\x00\x01garbage"))
+		raw = self.build_notify_frame(chat_id="oc_not_numeric")
+		self.assertIsNone(proto_wire.parse_notify_frame(raw))
+
+	def test_primary_decoder_gate_is_parameterized(self):
+		import proto_wire
+		raw = self.build_notify_frame()
+		packet, messages = proto_wire.decode_primary_websocket(raw)
+		self.assertEqual(int(packet.get("cmd")), 7001)
+		self.assertEqual(messages, [])
+
+
+@unittest.skipUnless(bridge is not None, f"supervisor larkx dependency unavailable: {BRIDGE_IMPORT_ERROR}")
+class WsNotifyBridgeTests(unittest.IsolatedAsyncioTestCase):
+	def make_bridge(self, allowed_chat="7684122107030031634"):
+		import threading
+		instance = bridge.Bridge.__new__(bridge.Bridge)
+		instance.ws_notify_count = 0
+		instance.last_ws_notify_at = None
+		instance.last_ws_notify = None
+		instance._notify_repair_in_flight = set()
+		instance._private_repair_lock = threading.Lock()
+		instance.private_gap_repair_enabled = True
+		instance.repairs = []
+
+		class _SpoolStub:
+			def increment_counter(self, name, amount=1):
+				return None
+
+		instance.event_spool = _SpoolStub()
+		instance._private_repair_allowed = lambda chat: chat == allowed_chat
+
+		async def repair(chat_id, reason):
+			instance.repairs.append((chat_id, reason))
+			return {"recovered": 1, "forwarded": 1, "failed": 0}
+
+		instance._repair_chat_tail = repair
+		return instance
+
+	async def test_notify_for_an_allowed_chat_pulls_its_tail_once(self):
+		from unittest import mock
+		instance = self.make_bridge()
+		notify = {"cmd": 7001, "chat_id": "7684122107030031634", "message_id": "m1"}
+		with mock.patch.object(bridge.asyncio, "sleep", new=mock.AsyncMock()):
+			instance.on_ws_notify(notify)
+			instance.on_ws_notify(notify)  # in-flight dedup: only one repair runs
+			await asyncio.gather(*[task for task in asyncio.all_tasks()
+			                       if task is not asyncio.current_task()])
+		self.assertEqual(instance.repairs, [("7684122107030031634", "ws_notify_tail_repair")])
+		self.assertEqual(instance.ws_notify_count, 2)
+		self.assertEqual(instance.last_ws_notify["message_id"], "m1")
+		self.assertEqual(instance._notify_repair_in_flight, set())
+
+	async def test_notify_for_an_unknown_chat_is_counted_but_never_pulled(self):
+		instance = self.make_bridge(allowed_chat="other")
+		instance.on_ws_notify({"cmd": 7001, "chat_id": "999", "message_id": "m2"})
+		await asyncio.sleep(0)
+		self.assertEqual(instance.repairs, [])
+		self.assertEqual(instance.ws_notify_count, 1)
 
 
 if __name__ == "__main__":

@@ -33,7 +33,8 @@ from larkx.auth import AuthExpired, LarkAuth
 from larkx.client import LarkClient
 from larkx.proto import decoders
 from larkagentx_image_property import extract_rich_text_image_resource
-from proto_wire import decode_primary_websocket, tolerant_websocket_decode_with_meta
+from proto_wire import (DEFAULT_PUSH_CMDS, decode_primary_websocket, parse_notify_frame,
+                        tolerant_websocket_decode_with_meta)
 from event_spool import EventSpool
 from history_archive import HistoryArchive
 from owner_lock import OwnerLock, profile_storage_paths
@@ -183,6 +184,51 @@ def apply_ws_param_overrides(url: str, overrides: dict[str, str]) -> str:
 	return base + "?" + urlencode(rewritten)
 
 
+def parse_cmd_set(raw: str, default: frozenset[int]) -> frozenset[int]:
+	"""Parse a csv of WebSocket command numbers (``LARKX_WS_PUSH_CMDS`` /
+	``LARKX_WS_NOTIFY_CMDS``).  Empty or malformed input keeps the default, so
+	a typo can never silence the classic push path."""
+	values: set[int] = set()
+	for part in str(raw or "").split(","):
+		part = part.strip()
+		if not part:
+			continue
+		try:
+			values.add(int(part))
+		except ValueError:
+			LOG.warning("忽略无法解析的 WebSocket 命令号：%r", part)
+	return frozenset(values) if values else default
+
+
+# Upstream larkx/client.py _gateway_post declares these fixed headers for the
+# private message gateway.  The checkout is pinned, so when a declared version
+# rots (the server may someday reject rather than degrade) the fix is
+# LARKX_GATEWAY_HEADER_OVERRIDES, never an upstream edit.  Keep this copy in
+# sync with /opt/larkagentx/source/larkx/client.py when the pin moves.
+UPSTREAM_GATEWAY_HEADERS = {
+	'content-type': 'application/x-protobuf',
+	'accept': '*/*',
+	'origin': 'https://open-dev.feishu.cn',
+	'referer': 'https://open-dev.feishu.cn/',
+	'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
+	'x-appid': '161471',
+	'x-command-version': '5.7.0',
+	'x-lgw-os-type': '1',
+	'x-lgw-terminal-type': '2',
+	'x-source': 'web',
+	'x-web-version': '3.9.32',
+}
+
+
+def merge_gateway_headers(base: dict[str, str], overrides: dict[str, str]) -> dict[str, str]:
+	"""Case-insensitively apply header overrides without duplicating names."""
+	merged = dict(base)
+	lowered = {key.lower(): key for key in merged}
+	for key, value in overrides.items():
+		merged[lowered.get(key.lower(), key)] = value
+	return merged
+
+
 class RawFrameCapture:
 	"""Bounded capture of successfully decoded frames for chosen chats.
 
@@ -270,18 +316,44 @@ class RecoveringLarkClient(LarkClient):
 	WebSocket delivery remains unchanged.
 	"""
 
-	def __init__(self, auth: LarkAuth, on_decode_error=None, on_decode_fallback=None, on_connected=None):
+	def __init__(self, auth: LarkAuth, on_decode_error=None, on_decode_fallback=None, on_connected=None,
+	             on_notify=None):
 		super().__init__(auth)
 		self.on_decode_error = on_decode_error
 		self.on_decode_fallback = on_decode_fallback
 		self.on_connected = on_connected
+		self.on_notify = on_notify
 		self.ws_param_overrides = parse_ws_param_overrides(os.environ.get("LARKX_WS_PARAM_OVERRIDES", ""))
+		self.gateway_header_overrides = parse_ws_param_overrides(
+			os.environ.get("LARKX_GATEWAY_HEADER_OVERRIDES", ""))
+		self.ws_push_cmds = parse_cmd_set(os.environ.get("LARKX_WS_PUSH_CMDS", ""), DEFAULT_PUSH_CMDS)
+		self.ws_notify_cmds = parse_cmd_set(os.environ.get("LARKX_WS_NOTIFY_CMDS", ""), frozenset())
 		self.raw_capture = RawFrameCapture(
 			chat_ids=set(parse_csv(os.environ.get("LARKX_RAW_CAPTURE_CHAT_IDS", ""))),
 			path=os.environ.get("LARKX_RAW_CAPTURE_DIR", ""),
 			max_files=int(os.environ.get("LARKX_RAW_CAPTURE_MAX", "100") or 100),
 			all_frames=os.environ.get("LARKX_RAW_CAPTURE_ALL_FRAMES", "").strip() == "1",
 		)
+
+	def _gateway_post(self, packet):
+		"""Upstream's gateway POST, with env-overridable declared versions.
+
+		Without LARKX_GATEWAY_HEADER_OVERRIDES this defers to the pinned
+		upstream implementation byte for byte.  With it, the request repeats
+		upstream's header set (UPSTREAM_GATEWAY_HEADERS) plus the overrides,
+		so a rotting declared version can be bumped without editing the pin.
+		"""
+		if not self.gateway_header_overrides:
+			return super()._gateway_post(packet)
+		from larkx.proto import builders
+		from larkx.proto.ids import generate_long_request_id
+		headers = merge_gateway_headers(UPSTREAM_GATEWAY_HEADERS, self.gateway_header_overrides)
+		headers["x-command"] = str(packet.cmd)
+		headers["x-request-id"] = generate_long_request_id()
+		response = requests.post(builders.GATEWAY_URL, headers=headers, cookies=self.auth.cookies,
+		                         data=packet.SerializeToString(), timeout=15)
+		response.raise_for_status()
+		return response.content
 
 	async def connect_websocket(self, on_message):
 		self._ensure_loop()
@@ -304,7 +376,7 @@ class RecoveringLarkClient(LarkClient):
 						used_fallback = False
 						proto_meta = None
 						try:
-							packet, messages = decode_primary_websocket(raw)
+							packet, messages = decode_primary_websocket(raw, push_cmds=self.ws_push_cmds)
 						except Exception as primary_error:
 							packet, messages, proto_meta = tolerant_websocket_decode_with_meta(raw)
 							used_fallback = True
@@ -313,8 +385,16 @@ class RecoveringLarkClient(LarkClient):
 						sid, cmd = (packet.get('sid'), packet.get('cmd'))
 						if sid is not None:
 							await self.send_ack(ws, sid)
-						if cmd != 6:
-							self.raw_capture.capture(raw, messages, cmd=cmd, reason="non_push_cmd")
+						if cmd not in self.ws_push_cmds:
+							notify = parse_notify_frame(raw) if cmd in self.ws_notify_cmds else None
+							if notify and self.on_notify:
+								try:
+									self.on_notify(notify)
+								except Exception as notify_error:
+									logging.getLogger("larkagentx-bridge").warning(
+										"WS 通知帧处理失败 cmd=%s：%s", cmd, notify_error)
+							self.raw_capture.capture(raw, messages, cmd=cmd,
+							                          reason="notify_cmd" if notify else "non_push_cmd")
 							continue
 						self.raw_capture.capture(raw, messages, cmd=cmd,
 						                          reason="watched_chat" if messages else "no_messages")
@@ -682,12 +762,17 @@ class Bridge:
 		self.private_tail_repair_count = 0
 		self.last_private_tail_repair_at = None
 		self.last_private_tail_repair_result = None
+		self.ws_notify_count = 0
+		self.last_ws_notify_at = None
+		self.last_ws_notify = None
+		self._notify_repair_in_flight: set[str] = set()
 		self._recovery_in_flight = False
 		self.client = RecoveringLarkClient(
 			self.auth,
 			on_decode_error=self.on_decode_error,
 			on_decode_fallback=self.on_decode_fallback,
 			on_connected=self.on_websocket_connected,
+			on_notify=self.on_ws_notify,
 		)
 		# WebSocket events use numeric chat ids. Keep official oc_ aliases in the
 		# configuration for documentation, but do not count them as live sockets.
@@ -1041,6 +1126,10 @@ class Bridge:
 			"private_tail_repair_count": self.private_tail_repair_count,
 			"last_private_tail_repair_at": self.last_private_tail_repair_at,
 			"last_private_tail_repair_result": self.last_private_tail_repair_result,
+			"ws_notify_cmds": sorted(self.client.ws_notify_cmds) if getattr(self, "client", None) else [],
+			"ws_notify_count": durable_counters.get("ws_notify_count", self.ws_notify_count),
+			"last_ws_notify_at": self.last_ws_notify_at,
+			"last_ws_notify": self.last_ws_notify,
 			"private_repair_count": durable_counters.get("private_repair_count", self.private_repair_count),
 			"private_repair_message_count": durable_counters.get("private_repair_message_count", self.private_repair_message_count),
 			"private_repair_failed_count": durable_counters.get("private_repair_failed_count", self.private_repair_failed_count),
@@ -1316,6 +1405,61 @@ class Bridge:
 			except Exception as error:
 				LOG.warning("LarkAgentX 启动私有缺口补读失败 chat_id=%s：%s", chat_id, error)
 
+	async def _repair_chat_tail(self, chat_id: str, reason: str) -> dict[str, Any] | None:
+		"""Pull the next bounded position range after one chat's durable cursor."""
+		stats = await asyncio.to_thread(self.event_spool.position_stats)
+		cursor = stats.get(chat_id, {}) if isinstance(stats, dict) else {}
+		last_position = int(cursor.get("last_position") or 0)
+		last_recovered = int(cursor.get("last_recovered_position") or 0)
+		start = max(last_position, last_recovered) + 1
+		if start <= 1:
+			return None
+		end = start + self.private_tail_repair_window - 1
+		chunk = await self.repair_private_positions(
+			{"chat_id": chat_id, "start": start, "end": end}, reason=reason)
+		chunk["start"], chunk["end"] = start, end
+		return chunk
+
+	def on_ws_notify(self, notify: dict[str, Any]) -> None:
+		"""React to a lightweight new-message notification frame (cmd 7001).
+
+		The server never pushes some messages as cmd 6 (the cat group's bot
+		cards arrive only this way); the notification names the chat, so an
+		immediate bounded tail pull turns an hours-long position-gap blind
+		spot into seconds.  Scope and dedup both reuse the private-repair
+		machinery; an unknown chat is counted but never pulled.
+		"""
+		chat_id = str(notify.get("chat_id") or "")
+		self.ws_notify_count += 1
+		self._persist_counter("ws_notify_count")
+		self.last_ws_notify_at = datetime.now(timezone.utc).isoformat()
+		self.last_ws_notify = {"cmd": notify.get("cmd"), "chat_id": chat_id,
+		                       "message_id": str(notify.get("message_id") or "")}
+		if not self.private_gap_repair_enabled or not self._private_repair_allowed(chat_id):
+			return
+		with self._private_repair_lock:
+			if chat_id in self._notify_repair_in_flight:
+				return
+			self._notify_repair_in_flight.add(chat_id)
+		LOG.info("WS 新消息通知 cmd=%s chat_id=%s message_id=%s → 立即私有尾部补读",
+		         notify.get("cmd"), chat_id, notify.get("message_id"))
+		asyncio.create_task(self._run_notify_tail_repair(chat_id))
+
+	async def _run_notify_tail_repair(self, chat_id: str) -> None:
+		try:
+			# Give the private gateway a beat to index the message the
+			# notification announced before pulling its position.
+			await asyncio.sleep(1.5)
+			chunk = await self._repair_chat_tail(chat_id, reason="ws_notify_tail_repair")
+			if chunk:
+				LOG.info("WS 通知触发的尾部补读完成 chat_id=%s：recovered=%s forwarded=%s failed=%s",
+				         chat_id, chunk.get("recovered"), chunk.get("forwarded"), chunk.get("failed"))
+		except Exception as error:
+			LOG.warning("WS 通知触发的尾部补读失败 chat_id=%s：%s", chat_id, error)
+		finally:
+			with self._private_repair_lock:
+				self._notify_repair_in_flight.discard(chat_id)
+
 	async def repair_private_tail_once(self) -> dict[str, Any]:
 		"""Boundedly reconcile each live WebSocket source's unseen position tail.
 
@@ -1343,24 +1487,15 @@ class Bridge:
 				if not self._private_tail_repair_allowed(chat_id):
 					continue
 				try:
-					stats = await asyncio.to_thread(self.event_spool.position_stats)
-					cursor = stats.get(chat_id, {}) if isinstance(stats, dict) else {}
-					last_position = int(cursor.get("last_position") or 0)
-					last_recovered = int(cursor.get("last_recovered_position") or 0)
-					start = max(last_position, last_recovered) + 1
-					if start <= 1:
+					chunk = await self._repair_chat_tail(chat_id, reason="periodic_private_tail_repair")
+					if chunk is None:
 						continue
-					end = start + self.private_tail_repair_window - 1
-					chunk = await self.repair_private_positions(
-						{"chat_id": chat_id, "start": start, "end": end},
-						reason="periodic_private_tail_repair",
-					)
 					for key in ("requested", "recovered", "forwarded", "duplicates", "filtered", "failed"):
 						result[key] += int(chunk.get(key) or 0)
 					result["sources"].append({
 						"chat_id": chat_id,
-						"start": start,
-						"end": end,
+						"start": chunk.get("start"),
+						"end": chunk.get("end"),
 						"requested": chunk.get("requested", 0),
 						"recovered": chunk.get("recovered", 0),
 						"forwarded": chunk.get("forwarded", 0),
