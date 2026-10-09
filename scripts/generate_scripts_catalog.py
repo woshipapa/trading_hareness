@@ -48,6 +48,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("release", "release", "platform", "workstation"),
     ("release_plan.py", "release", "platform", "workstation"),
     ("release_window.py", "release", "platform", "workstation"),
+    ("collab_branch.py", "release", "platform", "workstation"),
     ("release-sync-status.sh", "release", "platform", "workstation"),
     ("workflow-status.sh", "release", "platform", "workstation"),
     ("sync_frontend_shared.py", "CI and checks", "platform", "workstation"),
