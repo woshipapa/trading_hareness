@@ -115,6 +115,20 @@ class SingleNotePromptTests(unittest.TestCase):
         self.assertIn('昨日要点:vLLM 新版本', prompt)
         self.assertIn('KV cache 实践', prompt)
 
+    def test_digest_prompt_ends_with_the_output_directive(self):
+        prompt = local_worker.make_digest_prompt({'job_id': 'd', 'digest_date': '2026-10-09',
+                                                  'policy': {'topics': []}, 'notes': [{'title': 't'}]})
+        self.assertIn('第一行必须是 `## 今日导读`', prompt)
+        self.assertGreater(prompt.index('输出要求'), prompt.index('今日候选笔记'))
+
+    def test_digest_summary_must_be_a_digest_not_a_plan(self):
+        with self.assertRaises(ValueError):
+            local_worker.validate_digest_summary('我会先按可核验程度筛选候选笔记……')
+        with self.assertRaises(ValueError):
+            local_worker.validate_digest_summary('## 今日导读\n太短')
+        good = '## 今日导读\n' + ('- 要点\n' * 100)
+        self.assertEqual(local_worker.validate_digest_summary(good), good)
+
     def test_daily_digest_jobs_use_the_text_only_builder(self):
         job = {'job_id': 'xhs-digest-2026-10-08', 'job_type': 'daily_digest'}
         with mock.patch.object(local_worker, 'run_with_heartbeat',

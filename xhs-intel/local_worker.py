@@ -331,6 +331,12 @@ def make_digest_prompt(job):
             f"正文:{str(note.get('text', ''))[:3000]}",
             "",
         ])
+    # 候选列表很长，模型容易只回一句"计划"。收尾处重申输出要求。
+    lines.extend([
+        "=== 输出要求 ===",
+        "现在直接输出完整简报 Markdown,第一行必须是 `## 今日导读`。",
+        "禁止输出计划、前言、确认语或对这段指令的复述。",
+    ])
     return "\n".join(lines)[:100000]
 
 
@@ -341,10 +347,25 @@ def summarize(job):
                             chain=model_chain(job))
 
 
+def validate_digest_summary(text):
+    """A digest must be the digest, not the model's plan to write one.
+
+    2026-10-09 实测:gpt-5.6-sol 对 60 篇候选曾只回了一句 100 字的筛选计划,
+    旧校验(非空且 <=20000 字)照单放行并投递到了飞书。结构校验让这种输出
+    变成可重试的失败而不是"成功"。
+    """
+    value = str(text or "")
+    if "今日导读" not in value or len(value) < 500:
+        raise ValueError("digest_missing_structure")
+    return value
+
+
 def build_digest(job):
     # The digest covers up to dozens of already-screened notes; it stays
     # text-only so one job cannot fan out into hundreds of image downloads.
-    return _request_summary(make_digest_prompt(job), chain=model_chain(job))
+    result = _request_summary(make_digest_prompt(job), chain=model_chain(job))
+    validate_digest_summary(result.get("summary"))
+    return result
 
 
 def analyze_single_note(job):
