@@ -46,5 +46,25 @@ class LonghuMarketSyncTests(unittest.TestCase):
         self.assertEqual(controls["adj_factor"], [])
 
 
+    def test_published_limits_are_used_and_only_a_missing_one_is_derived(self):
+        daily = [
+            # 2026-10-09: BSE rounds inward, so +30% on 98.85 is published as 128.50, not 128.51.
+            {"ts_code": "920438.BJ", "trade_date": "20261009", "pre_close": 98.85, "name": "戈碧迦",
+             "up_limit": 128.5, "down_limit": 69.2},
+            {"ts_code": "600664.SH", "trade_date": "20261009", "pre_close": 10, "name": "哈药股份"},
+        ]
+        by_symbol = {row["ts_code"]: row for row in build_control_rows(daily)["stk_limit"]}
+        self.assertEqual((by_symbol["920438.BJ"]["up_limit"], by_symbol["920438.BJ"]["down_limit"]), ("128.5", "69.2"))
+        self.assertEqual(by_symbol["920438.BJ"]["derivation"], "exchange_published_via_tencent_quote")
+        self.assertEqual(by_symbol["600664.SH"]["up_limit"], "11.00")
+        self.assertEqual(by_symbol["600664.SH"]["derivation"], "preclose_times_board_limit_ratio")
+
+    def test_the_merge_carries_the_quote_s_published_limits_into_the_daily_row(self):
+        vendor = {"600664.SH": {"symbol": "600664.SH", "name": "哈药股份", "close": 9.49}}
+        quotes = [{"ts_code": "600664.SH", "trade_date": "20260901", "close": 9.49, "pre_close": 9.29,
+                   "up_limit": 10.22, "down_limit": 8.36}]
+        row = merge_cross_section(date(2026, 9, 1), vendor, quotes).daily_rows[0]
+        self.assertEqual((row["up_limit"], row["down_limit"]), (10.22, 8.36))
+
 if __name__ == "__main__":
     unittest.main()

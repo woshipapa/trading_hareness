@@ -36,10 +36,9 @@ from .longhu_sector_membership import (
     member_request,
 )
 from .longhu_vendor_source import (
-    MAX_TENCENT_BATCH_SIZE,
     SharedLonghuReadSource,
     parse_industry_stock_row,
-    parse_tencent_quote_text,
+    tencent_quote_batches,
 )
 
 #: The vendor publishes about 104 industry boards.  Fewer than this means a
@@ -51,7 +50,6 @@ MINIMUM_PLATES = 90
 DEFAULT_WORKERS = 4
 
 MEMBER_MAX_PAGES = 10
-TENCENT_URL = "https://qt.gtimg.cn/q="
 
 
 def _number(value: Any) -> float | None:
@@ -187,33 +185,9 @@ class SharedLonghuFullMarketSource:
         }
         return by_symbol, health
 
-    @staticmethod
-    def _tencent_key(symbol: str) -> str:
-        code, exchange = symbol.split(".")
-        return ("sh" if exchange == "SH" else "sz" if exchange == "SZ" else "bj") + code
-
     def tencent_quotes(self, symbols: Iterable[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Public OHLC, which needs no licence and so is fetched directly."""
-        ordered = sorted(set(symbols))
-        rows: list[dict[str, Any]] = []
-        errors: list[str] = []
-        for start in range(0, len(ordered), MAX_TENCENT_BATCH_SIZE):
-            batch = ordered[start:start + MAX_TENCENT_BATCH_SIZE]
-            requested = {self._tencent_key(symbol): symbol for symbol in batch}
-            try:
-                response = self._session.get(TENCENT_URL + ",".join(requested),
-                                             timeout=self._timeout_seconds)
-                response.raise_for_status()
-                rows.extend(parse_tencent_quote_text(
-                    response.content.decode("gb18030", errors="replace"), requested,
-                ))
-            except Exception as error:  # noqa: BLE001 - coverage is reported, not raised
-                errors.append(f"batch={start // MAX_TENCENT_BATCH_SIZE}:{type(error).__name__}:{error}")
-        return rows, {
-            "requested": len(ordered), "received": len(rows),
-            "coverage": len(rows) / len(ordered) if ordered else 0.0,
-            "batch_size": MAX_TENCENT_BATCH_SIZE, "errors": errors[:20],
-        }
+        return tencent_quote_batches(self._session, symbols, timeout_seconds=self._timeout_seconds)
 
     def fetch_full_market_evidence(self, trade_date: date) -> dict[str, Any]:
         catalog = self.industry_plate_catalog()

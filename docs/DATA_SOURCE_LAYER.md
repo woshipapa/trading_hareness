@@ -137,7 +137,7 @@ live 阈值或订单路径。
 | `post_close_strategy_service` | 直读 `tushare_raw_records` daily_basic、`source='longhuvip_main_net'` | 读 canonical `daily_fundamentals`（按目录优先级）；资金流来源由目录给出 | 不变（owner 库 9-16/9-17 逐行比对一致） |
 | `watchlist_countertrend_rebound` | 复权因子优先两个 Tushare 源；`taxonomy_key='ths_industry'` | 目录来源顺序（当前 `longhu_qfq_derived` 优先，Tushare 仅作已落库 checkpoint）；策略登记的口径 | 研究价 fail-closed；先按 provider 优先级选 Longhu，再在同源内按 `available_at` 选最新 |
 | `strategy_pattern_mining_service` | 分钟回放写死腾讯 | 组合根注入 `minute_source` | 不变 |
-| `xiaojie_reference_repository` | `call_tushare_api('stk_limit',…)`；口径优先级写死 | `limits.prices` 适配器（分页契约在 `sources/tushare_limits.py`）；口径来自策略登记 | 不变 |
+| `xiaojie_reference_repository` | `call_tushare_api('stk_limit',…)`；口径优先级写死 | `limits.prices` 适配器（完整性契约在 `sources/tencent_limits.py`：交易所公布值，取不全即报错重试）；口径来自策略登记 | 不变 |
 | 盘中扫描同业集合（两处仓库查询） | `('ths_concept_flow','ths_index_n','ths_industry')` | 策略登记的口径 | 不变 |
 
 口径是**策略参数**：`CapabilityRequirement.taxonomies` 记录该策略基于哪几个板块口径校准，测试要求它们在口径表里且为

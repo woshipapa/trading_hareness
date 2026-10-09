@@ -7,9 +7,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
-from app.main import db, offline_import_recovery_action, offline_minute_import_stale_seconds
+from app.main import db, offline_minute_import_stale_seconds
 from app.numeric_utils import decimal_or_none
-from app.offline_minute_import_service import import_csv, sha256_file, source_available_at
+from app.offline_minute_import_service import import_csv, recovery_action, sha256_file, source_available_at
 
 
 class OfflineMinuteImportRecoveryTests(unittest.TestCase):
@@ -19,23 +19,23 @@ class OfflineMinuteImportRecoveryTests(unittest.TestCase):
 
     def test_terminal_files_are_not_reimported_and_failures_can_resume(self) -> None:
         now = datetime(2026, 8, 22, 8, 0, tzinfo=timezone.utc)
-        self.assertEqual(offline_import_recovery_action(None, now=now, stale_seconds=900), "create")
-        self.assertEqual(offline_import_recovery_action({"status": "completed"}, now=now, stale_seconds=900), "unchanged")
-        self.assertEqual(offline_import_recovery_action({"status": "partial"}, now=now, stale_seconds=900), "unchanged")
-        self.assertEqual(offline_import_recovery_action({"status": "failed"}, now=now, stale_seconds=900), "resume_failed")
+        self.assertEqual(recovery_action(None, now=now, stale_after_seconds=900), "create")
+        self.assertEqual(recovery_action({"status": "completed"}, now=now, stale_after_seconds=900), "unchanged")
+        self.assertEqual(recovery_action({"status": "partial"}, now=now, stale_after_seconds=900), "unchanged")
+        self.assertEqual(recovery_action({"status": "failed"}, now=now, stale_after_seconds=900), "resume_failed")
 
     def test_running_import_has_a_real_stale_boundary(self) -> None:
         now = datetime(2026, 8, 22, 8, 0, tzinfo=timezone.utc)
         self.assertEqual(
-            offline_import_recovery_action({"status": "running", "started_at": now - timedelta(seconds=899)}, now=now, stale_seconds=900),
+            recovery_action({"status": "running", "started_at": now - timedelta(seconds=899)}, now=now, stale_after_seconds=900),
             "in_progress",
         )
         self.assertEqual(
-            offline_import_recovery_action({"status": "running", "started_at": now - timedelta(seconds=900)}, now=now, stale_seconds=900),
+            recovery_action({"status": "running", "started_at": now - timedelta(seconds=900)}, now=now, stale_after_seconds=900),
             "resume_stale_running",
         )
         self.assertEqual(
-            offline_import_recovery_action({"status": "running", "started_at": None}, now=now, stale_seconds=900),
+            recovery_action({"status": "running", "started_at": None}, now=now, stale_after_seconds=900),
             "resume_stale_running",
         )
 

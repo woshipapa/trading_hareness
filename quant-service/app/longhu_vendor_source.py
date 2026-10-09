@@ -733,6 +733,42 @@ def parse_industry_stock_row(row: Any, trade_date: date, plate_id: str) -> dict[
     }
 
 
+TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
+
+
+def tencent_quote_key(symbol: str) -> str:
+    code, exchange = symbol.split(".")
+    return ("sh" if exchange == "SH" else "sz" if exchange == "SZ" else "bj") + code
+
+
+def tencent_quote_batches(session: Any, symbols: Iterable[str], *,
+                          timeout_seconds: float) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Public quotes in batches of ``MAX_TENCENT_BATCH_SIZE``; coverage is reported, not raised."""
+    ordered = sorted(set(symbols))
+    rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for start in range(0, len(ordered), MAX_TENCENT_BATCH_SIZE):
+        batch = ordered[start:start + MAX_TENCENT_BATCH_SIZE]
+        requested = {tencent_quote_key(symbol): symbol for symbol in batch}
+        try:
+            response = session.get(TENCENT_QUOTE_URL + ",".join(requested), timeout=timeout_seconds)
+            response.raise_for_status()
+            rows.extend(parse_tencent_quote_text(response.content.decode("gb18030", errors="replace"), requested))
+        except Exception as error:  # noqa: BLE001 - coverage is reported, not raised
+            errors.append(f"batch={start // MAX_TENCENT_BATCH_SIZE}:{type(error).__name__}:{error}")
+    return rows, {
+        "requested": len(ordered), "received": len(rows),
+        "coverage": len(rows) / len(ordered) if ordered else 0.0,
+        "batch_size": MAX_TENCENT_BATCH_SIZE, "errors": errors[:20],
+    }
+
+
+def tencent_quotes_blocking(symbols: Iterable[str], *, timeout_seconds: float = 8.0) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """One fresh session's batched Tencent quotes, for a caller without a source object."""
+    with requests.Session() as session:
+        return tencent_quote_batches(session, symbols, timeout_seconds=timeout_seconds)
+
+
 def parse_tencent_quote_text(text: str, requested: Mapping[str, str]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for match in re.finditer(r'v_([a-z0-9]+)="([^"]*)";', text, re.IGNORECASE):
@@ -758,8 +794,17 @@ def parse_tencent_quote_text(text: str, requested: Mapping[str, str]) -> list[di
             # composite provider; the source label prevents unit ambiguity.
             "amount": (_number(fields[37]) * 10_000 if _number(fields[37]) is not None else None),
             "pct_chg": _number(fields[32]),
+            # Fields 47/48 relay the exchange's own published limit prices,
+            # which a rule cannot always reproduce (the BSE rounds inward).
+            "up_limit": _positive(fields[47]) if len(fields) > 48 else None,
+            "down_limit": _positive(fields[48]) if len(fields) > 48 else None,
         })
     return result
+
+
+def _positive(value: Any) -> float | None:
+    number = _number(value)
+    return number if number is not None and number > 0 else None
 
 
 class LonghuVendorSource:
@@ -1018,32 +1063,8 @@ class LonghuVendorSource:
         }
         return by_symbol, health
 
-    @staticmethod
-    def _tencent_key(symbol: str) -> str:
-        code, exchange = symbol.split(".")
-        return ("sh" if exchange == "SH" else "sz" if exchange == "SZ" else "bj") + code
-
     def tencent_quotes(self, symbols: Iterable[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        ordered = sorted(set(symbols))
-        rows: list[dict[str, Any]] = []
-        errors: list[str] = []
-        for start in range(0, len(ordered), MAX_TENCENT_BATCH_SIZE):
-            batch = ordered[start:start + MAX_TENCENT_BATCH_SIZE]
-            requested = {self._tencent_key(symbol): symbol for symbol in batch}
-            try:
-                response = self._session.get(
-                    "https://qt.gtimg.cn/q=" + ",".join(requested),
-                    timeout=self.config.timeout_seconds,
-                )
-                response.raise_for_status()
-                rows.extend(parse_tencent_quote_text(response.content.decode("gb18030", errors="replace"), requested))
-            except Exception as error:
-                errors.append(f"batch={start // MAX_TENCENT_BATCH_SIZE}:{type(error).__name__}:{error}")
-        return rows, {
-            "requested": len(ordered), "received": len(rows),
-            "coverage": len(rows) / len(ordered) if ordered else 0.0,
-            "batch_size": MAX_TENCENT_BATCH_SIZE, "errors": errors[:20],
-        }
+        return tencent_quote_batches(self._session, symbols, timeout_seconds=self.config.timeout_seconds)
 
     def fetch_full_market_evidence(self, trade_date: date) -> dict[str, Any]:
         catalog = self.industry_plate_catalog()

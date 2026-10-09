@@ -379,7 +379,7 @@ from .auction_pulse_runtime import AuctionPulseDependencies, run_auction_pulse_s
 from .level1_snapshot_runtime import Level1CaptureDependencies, run_level1_capture_service
 from .datasources import runtime as datasource_runtime
 from .datasources.catalog import health_capability
-from .datasources.sources.tushare_limits import fetch_limit_cross_section as fetch_tushare_limit_cross_section
+from .datasources.sources.tencent_limits import session_limit_cross_section
 from .study_realtime import looks_like_response_header, realtime_rows_are_current
 from .provider_health import (
     provider_error_availability,
@@ -638,6 +638,7 @@ from .longhu_schema_profile_repository import schema_profile as longhu_schema_pr
 from .longhu_vendor_source import (
     configured as longhu_vendor_configured,
     intraday_source as longhu_intraday_source,
+    tencent_quotes_blocking,
 )
 from .longhu_limits import intraday_longhu_max_symbols
 from .full_market_daily_controls_sync import sync as sync_full_market_daily_controls_isolated
@@ -1353,12 +1354,6 @@ def offline_minute_import_stale_seconds(environ: Mapping[str, str] | None = None
     return offline_minute_import_service.stale_seconds(environ)
 
 
-def offline_import_recovery_action(existing: Mapping[str, Any] | None, *, now: datetime,
-                                   stale_seconds: int) -> str:
-    """Classify an idempotent local-file import without trusting client state."""
-    return offline_minute_import_service.recovery_action(existing, now=now, stale_after_seconds=stale_seconds)
-
-
 def import_offline_minute_csv(request: OfflineMinuteImportRequest) -> dict[str, Any]:
     """Stream a locally mounted minute CSV into PostgreSQL in bounded batches."""
     return offline_minute_import_service.import_csv(
@@ -1989,7 +1984,9 @@ async def intraday_watch_flow_reference(
 xiaojie_leader_flow = XiaojieLeaderFlowRuntime(XiaojieLeaderFlowDependencies(
     run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs),
     with_connection=lambda action: _with_connection(action),
-    fetch_limit_cross_section=lambda day: fetch_tushare_limit_cross_section(call_tushare_api, day),
+    fetch_limit_cross_section=lambda day: session_limit_cross_section(
+        day, universe_symbols=lambda: run_database_blocking(snapshot_universe_symbols, "all_a", timeout_seconds=15),
+        fetch_quotes=lambda symbols: run_akshare_blocking(tencent_quotes_blocking, symbols, timeout_seconds=180)),
     refresh_confluence=lambda trading_date, observed_at, candidates: _refresh_strategy_confluence(
         trading_date, observed_at, candidates),
     teacher_plan=lambda trading_date, symbol: strategy_confluence.teacher_plan(trading_date, symbol),

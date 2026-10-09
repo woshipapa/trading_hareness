@@ -70,6 +70,7 @@ def merge_cross_section(
             "open": quote.get("open"), "high": quote.get("high"), "low": quote.get("low"),
             "close": quote.get("close"), "pre_close": quote.get("pre_close"),
             "vol": quote.get("vol"), "amount": quote.get("amount"),
+            "up_limit": quote.get("up_limit"), "down_limit": quote.get("down_limit"),
         })
         fundamentals.append({
             "ts_code": symbol, "trade_date": expected_date, "close": quote.get("close"),
@@ -120,10 +121,23 @@ def _limit_ratio(symbol: str, name: str, trade_date: object = None) -> tuple[Dec
 
 
 def build_control_rows(daily_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Build transparent same-day controls without claiming corporate-action history."""
+    """Build transparent same-day controls without claiming corporate-action history.
+
+    The exchange's published limit prices, relayed by the Tencent quote, are
+    used when the row carries them; only a row without them is derived from
+    the pre-close and the board's ratio.
+    """
     limits: list[dict[str, Any]] = []
     for row in daily_rows:
         symbol, name = str(row["ts_code"]), str(row.get("name") or "")
+        published_up, published_down = _decimal(row.get("up_limit")), _decimal(row.get("down_limit"))
+        if published_up is not None and published_down is not None and published_up > published_down > 0:
+            limits.append({
+                "ts_code": symbol, "trade_date": row["trade_date"],
+                "up_limit": str(published_up), "down_limit": str(published_down),
+                "derivation": "exchange_published_via_tencent_quote",
+            })
+            continue
         pre_close = _decimal(row.get("pre_close"))
         if pre_close is None or pre_close <= 0:
             continue

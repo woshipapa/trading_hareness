@@ -28,8 +28,8 @@ LOOKBACK_SESSIONS = 20
 MA_SESSIONS = 5
 
 #: The session's limit prices are a full-market cross-section of ~5,700 rows.
-#: How a source pages that set is its own contract (see
-#: ``app/datasources/sources/tushare_limits.py``); this module only checks the
+#: How a source proves that set complete is its own contract (see
+#: ``app/datasources/sources/tencent_limits.py``); this module only checks the
 #: result.
 
 #: Any complete A-share cross-section spans both main exchanges. The check is
