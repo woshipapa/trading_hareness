@@ -33,8 +33,13 @@ class StockStudyReadinessRepositoryTests(unittest.TestCase):
         result = stock_window_readiness(database, "600000.SH", date(2026, 8, 1), date(2026, 8, 21))
         self.assertFalse(result["decision_ready"])
         self.assertEqual(result["blockers"], ["daily_basic"])
-        self.assertEqual(len(result["items"]), 10)
+        self.assertEqual([item["api_name"] for item in result["items"]],
+                         ["daily", "daily_basic", "stk_limit", "stock_flow", "adj_factor"])
         self.assertTrue(all("FROM quant." in sql for sql, _ in database.connection.calls))
+        # The retired Tushare sets are no longer counted; flow is the Longhu close's.
+        self.assertFalse([sql for sql, _ in database.connection.calls if "tushare_raw_records" in sql])
+        flow_sql = next(sql for sql, _ in database.connection.calls if "stock_money_flow_daily" in sql)
+        self.assertIn("source='longhuvip_main_net'", flow_sql)
         factor_sql = next(sql for sql, _ in database.connection.calls if "daily_adjustment_factors" in sql)
         self.assertIn("count(DISTINCT trading_date)", factor_sql)
         self.assertIn("FROM quant.daily_adjustment_factors factor", factor_sql)

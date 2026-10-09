@@ -473,7 +473,6 @@ from .feature_read_repository import analyst_feature as read_analyst_feature
 from .feature_read_repository import market_regime as read_market_regime
 from .analyst_text_features import DEFAULT_FACTOR_VERSION, analyst_text_factor_summary as read_analyst_text_factor_summary
 from .stock_study_readiness_repository import (
-    raw_api_window_summary as read_raw_api_window_summary,
     stock_study_claims as read_stock_study_claims,
     stock_window_readiness as read_stock_window_readiness,
 )
@@ -4179,11 +4178,6 @@ def study_date_key(row: dict[str, Any]) -> str:
 
 def latest_study_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(rows, key=study_date_key) if rows else None
-
-
-def raw_api_window_summary(connection: Any, api_name: str, symbol: str, start_date: date, end_date: date) -> dict[str, Any]:
-    """Compatibility export for the isolated stock-study readiness repository."""
-    return read_raw_api_window_summary(connection, api_name, symbol, start_date, end_date)
 
 
 def stock_window_readiness(symbol: str, start_date: date, end_date: date) -> dict[str, Any]:

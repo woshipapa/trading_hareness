@@ -8,29 +8,16 @@ from typing import Any
 from .adjustment_factor_semantics import persisted_factor_semantics_sql
 
 
+#: What a stock-study window needs, from what is still written.  Tushare's
+#: flow, chip and factor sets (moneyflow*, cyq_*, stk_factor_pro) were retired
+#: on 2026-10-08 (decision 0005); the P0 flow is now the Longhu close's.
 _SPECS = (
     ("daily", "日线行情", "P0"),
     ("daily_basic", "估值与换手", "P0"),
     ("stk_limit", "涨跌停价格", "P0"),
-    ("moneyflow_dc", "东财主力/散户资金", "P0"),
+    ("stock_flow", "主力资金净额（Longhu）", "P0"),
     ("adj_factor", "复权因子", "P1"),
-    ("moneyflow", "Tushare资金流", "P1"),
-    ("moneyflow_ths", "同花顺资金流", "P1"),
-    ("cyq_perf", "筹码胜率摘要", "P1"),
-    ("cyq_chips", "筹码分布明细", "P1"),
-    ("stk_factor_pro", "专业技术因子", "P1"),
 )
-
-
-def raw_api_window_summary(connection: Any, api_name: str, symbol: str, start_date: date, end_date: date) -> dict[str, Any]:
-    row = connection.execute(
-        """SELECT count(*)::int rows,max(row_data->>'trade_date') latest_date
-             FROM quant.tushare_raw_records
-            WHERE api_name=%s AND row_data->>'ts_code'=%s
-              AND row_data->>'trade_date' BETWEEN %s AND %s""",
-        (api_name, symbol, start_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d")),
-    ).fetchone()
-    return {"rows": int(row["rows"] or 0), "latest_date": row["latest_date"]}
 
 
 def stock_window_readiness(database: Any, symbol: str, start_date: date, end_date: date) -> dict[str, Any]:
@@ -55,6 +42,14 @@ def stock_window_readiness(database: Any, symbol: str, start_date: date, end_dat
                     (symbol, start_date, end_date),
                 ).fetchone()
                 rows, latest_date = int(row["rows"] or 0), row["latest_date"]
+            elif api_name == "stock_flow":
+                row = connection.execute(
+                    """SELECT count(*)::int rows,max(trading_date) latest_date
+                         FROM quant.stock_money_flow_daily
+                        WHERE symbol=%s AND trading_date BETWEEN %s AND %s AND source='longhuvip_main_net'""",
+                    (symbol, start_date, end_date),
+                ).fetchone()
+                rows, latest_date = int(row["rows"] or 0), row["latest_date"]
             elif table is not None:
                 row = connection.execute(
                     f"""SELECT count(*)::int rows,max(trading_date) latest_date
@@ -63,9 +58,8 @@ def stock_window_readiness(database: Any, symbol: str, start_date: date, end_dat
                     (symbol, start_date, end_date),
                 ).fetchone()
                 rows, latest_date = int(row["rows"] or 0), row["latest_date"]
-            else:
-                summary = raw_api_window_summary(connection, api_name, symbol, start_date, end_date)
-                rows, latest_date = summary["rows"], summary["latest_date"]
+            else:  # pragma: no cover - every spec above has a table
+                raise KeyError(api_name)
             items.append({"api_name": api_name, "label": label, "priority": priority, "rows": rows,
                           "latest_date": str(latest_date) if latest_date else None,
                           "status": "ready" if rows > 0 else "missing"})
@@ -101,4 +95,4 @@ def stock_study_claims(database: Any, symbol: str) -> tuple[list[dict[str, Any]]
     }
 
 
-__all__ = ["raw_api_window_summary", "stock_study_claims", "stock_window_readiness"]
+__all__ = ["stock_study_claims", "stock_window_readiness"]
