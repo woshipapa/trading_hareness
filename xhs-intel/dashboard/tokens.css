@@ -1,0 +1,33 @@
+/* 控制台设计 token。
+ *
+ * canonical：frontend-shared/src/tokens.css；各应用的 vendored 副本由
+ * scripts/sync_frontend_shared.py 分发，不要直接改副本。
+ * 只定义 CSS 自定义属性，不含任何元素样式；accent/品牌色属于各应用自身，
+ * 不在此定义（quant 控制台的青绿、XHS 控制台的红各自保留）。
+ */
+:root {
+  /* 字体 */
+  --font-ui: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, monospace;
+  /* 中性色 */
+  --ink: #172033;
+  --muted: #738198;
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-soft: #f7f9fc;
+  --line: #e3e8f0;
+  --line-strong: #cbd1d8;
+  /* 状态色 */
+  --green: #18865c;
+  --green-soft: #e9f7f1;
+  --amber: #9a6414;
+  --amber-soft: #fff6df;
+  --blue: #2f6f9f;
+  --blue-soft: #edf5fb;
+  --red: #e94b57;
+  --red-dark: #bf3040;
+  --red-soft: #fff0f1;
+  --danger: #bd2f3b;
+  /* 效果 */
+  --shadow: 0 8px 24px rgba(22, 30, 38, 0.06);
+}

@@ -84,6 +84,11 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "ok")
         self.assertIn("topics", payload)
+        with self.browser.open(self.base + "/xhs/tokens.css", timeout=3) as response:
+            tokens = response.read().decode()
+            self.assertEqual(response.status, 200)
+            self.assertIn("--ink:", tokens)
+            self.assertIn("frontend-shared", tokens)
 
     def test_dashboard_source_respects_the_strict_style_policy(self):
         source = (edge_api.DASHBOARD_ROOT / "app.js").read_text(encoding="utf-8")

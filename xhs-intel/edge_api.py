@@ -123,6 +123,7 @@ def serve_dashboard(handler, path):
         "/xhs/": ("index.html", "text/html; charset=utf-8"),
         "/xhs/app.js": ("app.js", "text/javascript; charset=utf-8"),
         "/xhs/style.css": ("style.css", "text/css; charset=utf-8"),
+        "/xhs/tokens.css": ("tokens.css", "text/css; charset=utf-8"),
     }
     asset = assets.get(path)
     if not asset:
