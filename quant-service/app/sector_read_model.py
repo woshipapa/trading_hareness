@@ -1,16 +1,54 @@
 """Bounded read-only projections for persisted sector, concept, and member evidence.
 
-The concept-member backfill status reports the Fuyao THS membership refresh,
-which replaced Tushare's ``ths_member`` backfill (decision 0005).
+Tushare's THS concept flow, limit strength and ``ths_member`` backfill were
+retired with Tushare (decision 0005).  The concept reads now serve their
+replacements -- Eastmoney concept flow, Fuyao-served THS concept candidates
+and the Fuyao membership refresh -- and fall back to the THS rows only for a
+session that has nothing newer, always naming the taxonomy they served.
 """
 
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 
+#: Concept flow, replacement first; the THS rows remain readable history.
+CONCEPT_FLOW_TAXONOMIES = ("eastmoney_concept", "ths_concept_flow")
+#: Only the THS concept flow shares board codes with a limit-strength taxonomy.
+STRENGTH_FOR_FLOW = {"ths_concept_flow": "ths_limit_strength"}
+CANDIDATE_TAXONOMIES = ("fuyao_ths_concept", "ths_concept_flow")
+#: The board flow each candidate taxonomy can be joined to by exact code.
+FLOW_FOR_CANDIDATES = {"ths_concept_flow": "ths_concept_flow"}
 MEMBERSHIP_TAXONOMIES = ("fuyao_ths_concept", "fuyao_ths_industry", "fuyao_ths_region")
+#: THS taxonomies whose Tushare writer is retired, and what replaced each.
+SUPERSEDED_TAXONOMIES = {
+    "ths_industry": "longhu_ths_industry", "ths_concept_flow": "eastmoney_concept",
+    "ths_limit_strength": "fuyao_ths_concept_limit_strength",
+}
+
+
+def select_taxonomy(latest: Mapping[str, date | None], preference: Sequence[str]) -> tuple[str, date | None]:
+    """The taxonomy with the newest session; the preferred one on a tie.
+
+    ``latest`` maps each candidate to its newest session (or, for a requested
+    date, to that date when it has rows).  Without any rows the preferred
+    taxonomy is named with no date.
+    """
+    dated = [(latest[key], -index, key) for index, key in enumerate(preference) if latest.get(key) is not None]
+    if not dated:
+        return preference[0], None
+    selected = max(dated)
+    return selected[2], selected[0]
+
+
+def superseded_notice(taxonomy_key: str) -> dict[str, str]:
+    replacement = SUPERSEDED_TAXONOMIES.get(taxonomy_key)
+    if replacement is None:
+        return {}
+    return {"superseded_by": replacement,
+            "notice": f"{taxonomy_key} is no longer written (Tushare retired, decision 0005); "
+                      f"newer sessions are under {replacement}, a different vendor's taxonomy."}
 
 
 def project_concept_member_backfill_status(
@@ -137,34 +175,93 @@ def project_membership_refresh_status(
     }
 
 
+def latest_sessions_sql(table: str) -> str:
+    """Newest session per candidate taxonomy, or the requested session if it has rows.
+
+    ``table`` is one of this module's two fixed relations, never request input.
+    """
+    return f"""SELECT taxonomy_key,max(trading_date) latest FROM {table}
+                WHERE taxonomy_key=ANY(%s) AND (%s::date IS NULL OR trading_date=%s)
+                GROUP BY taxonomy_key"""
+
+
+CONCEPT_SIGNALS_SQL = """
+    WITH concept AS (
+        SELECT o.sector_key,s.label,o.close,o.change_pct,o.net_amount,o.net_buy_amount,o.net_sell_amount,
+               o.constituent_count,o.leading_label,o.provider_key,o.available_at,o.raw,
+               percent_rank() OVER (ORDER BY o.net_amount NULLS FIRST) AS flow_percentile
+          FROM quant.sector_market_observations o
+          JOIN quant.sectors s ON s.taxonomy_key=o.taxonomy_key AND s.sector_key=o.sector_key
+         WHERE o.taxonomy_key=%s AND o.trading_date=%s
+    )
+    SELECT c.*,ls.provider_key strength_provider,ls.raw strength_raw,
+           nullif(ls.raw->>'up_nums','')::numeric up_nums,
+           nullif(ls.raw->>'cons_nums','')::numeric strength_constituents,
+           nullif(ls.raw->>'days','')::numeric streak_days
+      FROM concept c
+ LEFT JOIN quant.sector_market_observations ls
+        ON ls.taxonomy_key=%s AND ls.trading_date=%s AND ls.sector_key=c.sector_key
+     ORDER BY c.net_amount DESC NULLS LAST,c.label LIMIT %s
+"""
+CONCEPT_CANDIDATES_SQL = """
+    SELECT c.sector_key,s.label concept_label,c.symbol,c.name,c.limit_tag,c.limit_type,c.pct_change,c.price,c.limit_amount,
+           c.turnover_rate,c.open_num,c.status,c.description,c.provider_key,c.available_at,c.taxonomy_key,
+           coalesce(c.raw->>'membership_fetch_status','unknown') membership_status,
+           flow.net_amount board_net_amount,flow.change_pct board_change_pct,flow.leading_label board_leading_label,
+           (c.raw->'concept'->>'limit_up_count')::int board_limit_up_count,
+           (c.raw->'concept'->>'rank')::int board_strength_rank
+      FROM quant.sector_limit_candidates c
+      JOIN quant.sectors s ON s.taxonomy_key=c.taxonomy_key AND s.sector_key=c.sector_key
+ LEFT JOIN quant.sector_market_observations flow ON flow.taxonomy_key=%s AND flow.sector_key=c.sector_key
+           AND flow.trading_date=c.trading_date
+     WHERE c.taxonomy_key=%s AND c.trading_date=%s
+     ORDER BY board_strength_rank NULLS LAST,flow.net_amount DESC NULLS LAST,c.limit_amount DESC NULLS LAST,c.symbol
+     LIMIT %s
+"""
+
+
+def _latest_sessions(connection: Any, table: str, taxonomies: Sequence[str], trade_date: date | None) -> dict[str, Any]:
+    rows = connection.execute(latest_sessions_sql(table), (list(taxonomies), trade_date, trade_date)).fetchall()
+    return {str(row["taxonomy_key"]): row["latest"] for row in rows}
+
+
+def concept_flow_source(taxonomy_key: str) -> dict[str, Any]:
+    """Which concept flow a scan served, and whether limit strength joins it."""
+    if taxonomy_key == "ths_concept_flow":
+        return {"taxonomy_key": taxonomy_key, "source": "tushare:moneyflow_cnt_ths (history, retired 2026-10-08)",
+                "strength": {"status": "joined", "taxonomy_key": "ths_limit_strength"}}
+    return {
+        "taxonomy_key": taxonomy_key, "requested_taxonomy_key": "ths_concept_flow",
+        "source": "eastmoney concept board flow, closing-window snapshot",
+        "strength": {"status": "not_joined", "taxonomy_key": "fuyao_ths_concept_limit_strength",
+                     "reason": "limit strength is keyed by THS concept codes; Eastmoney concept boards are not, "
+                               "and boards are never matched by name"},
+    }
+
+
+def concept_candidate_source(taxonomy_key: str) -> dict[str, Any]:
+    if taxonomy_key == "ths_concept_flow":
+        return {"taxonomy_key": taxonomy_key, "source": "tushare:ths_member x limit_list_ths (history, retired 2026-10-08)",
+                "matching_rule": "same-day THS concept member code equals THS limit-up-pool stock code"}
+    return {"taxonomy_key": taxonomy_key, "requested_taxonomy_key": "ths_concept_flow",
+            "source": "fuyao_ths:limit_up_pool x fuyao_ths_concept",
+            "matching_rule": "same-session fuyao_ths_concept member code equals Fuyao limit-up-pool stock code",
+            "board_context": "board_limit_up_count / board_strength_rank; no THS concept net flow exists"}
+
+
 def concept_sector_signals(database: Any, trade_date: date | None, limit: int) -> dict[str, Any]:
-    """Return a transparent persisted THS concept scan without provider calls."""
+    """Return a transparent persisted concept-flow scan without provider calls."""
     with database.transaction() as connection:
-        selected_date = trade_date or connection.execute(
-            "SELECT max(trading_date) latest FROM quant.sector_market_observations WHERE taxonomy_key='ths_concept_flow'"
-        ).fetchone()["latest"]
+        latest = _latest_sessions(connection, "quant.sector_market_observations", CONCEPT_FLOW_TAXONOMIES, trade_date)
+        taxonomy_key, selected_date = select_taxonomy(latest, CONCEPT_FLOW_TAXONOMIES)
         if selected_date is None:
-            return {"trade_date": None, "items": [], "scoring": {"decision_eligible": False}}
+            return {"trade_date": None, "items": [], "scoring": {"decision_eligible": False},
+                    **concept_flow_source(taxonomy_key)}
         rows = connection.execute(
-            """WITH concept AS (
-                   SELECT o.sector_key,s.label,o.close,o.change_pct,o.net_amount,o.net_buy_amount,o.net_sell_amount,
-                          o.constituent_count,o.leading_label,o.provider_key,o.available_at,o.raw,
-                          percent_rank() OVER (ORDER BY o.net_amount NULLS FIRST) AS flow_percentile
-                     FROM quant.sector_market_observations o
-                     JOIN quant.sectors s ON s.taxonomy_key=o.taxonomy_key AND s.sector_key=o.sector_key
-                    WHERE o.taxonomy_key='ths_concept_flow' AND o.trading_date=%s
-                 )
-                 SELECT c.*,ls.provider_key strength_provider,ls.raw strength_raw,
-                        nullif(ls.raw->>'up_nums','')::numeric up_nums,
-                        nullif(ls.raw->>'cons_nums','')::numeric strength_constituents,
-                        nullif(ls.raw->>'days','')::numeric streak_days
-                   FROM concept c
-              LEFT JOIN quant.sector_market_observations ls
-                     ON ls.taxonomy_key='ths_limit_strength' AND ls.trading_date=%s AND ls.sector_key=c.sector_key
-                  ORDER BY c.net_amount DESC NULLS LAST,c.label LIMIT %s""",
-            (selected_date, selected_date, max(1, min(limit, 1000))),
+            CONCEPT_SIGNALS_SQL,
+            (taxonomy_key, selected_date, STRENGTH_FOR_FLOW.get(taxonomy_key), selected_date, max(1, min(limit, 1000))),
         ).fetchall()
-    return project_concept_sector_signals(rows, selected_date)
+    return {**project_concept_sector_signals(rows, selected_date), **concept_flow_source(taxonomy_key)}
 
 
 def project_concept_sector_signals(rows: list[Any], selected_date: date) -> dict[str, Any]:
@@ -195,26 +292,16 @@ def project_concept_sector_signals(rows: list[Any], selected_date: date) -> dict
 
 def concept_limit_candidates(database: Any, trade_date: date | None, limit: int) -> dict[str, Any]:
     with database.transaction() as connection:
-        selected_date = trade_date or connection.execute(
-            "SELECT max(trading_date) latest FROM quant.sector_limit_candidates WHERE taxonomy_key='ths_concept_flow'"
-        ).fetchone()["latest"]
+        latest = _latest_sessions(connection, "quant.sector_limit_candidates", CANDIDATE_TAXONOMIES, trade_date)
+        taxonomy_key, selected_date = select_taxonomy(latest, CANDIDATE_TAXONOMIES)
         if selected_date is None:
-            return {"trade_date": None, "items": [], "decision_eligible": False}
+            return {"trade_date": None, "items": [], "decision_eligible": False, **concept_candidate_source(taxonomy_key)}
         rows = connection.execute(
-            """SELECT c.sector_key,s.label concept_label,c.symbol,c.name,c.limit_tag,c.limit_type,c.pct_change,c.price,c.limit_amount,
-                      c.turnover_rate,c.open_num,c.status,c.description,c.provider_key,c.available_at,
-                      coalesce(c.raw->>'membership_fetch_status','unknown') membership_status,
-                      flow.net_amount board_net_amount,flow.change_pct board_change_pct,flow.leading_label board_leading_label
-                 FROM quant.sector_limit_candidates c
-                 JOIN quant.sectors s ON s.taxonomy_key=c.taxonomy_key AND s.sector_key=c.sector_key
-            LEFT JOIN quant.sector_market_observations flow ON flow.taxonomy_key='ths_concept_flow' AND flow.sector_key=c.sector_key
-                      AND flow.trading_date=c.trading_date
-                WHERE c.taxonomy_key='ths_concept_flow' AND c.trading_date=%s
-                ORDER BY flow.net_amount DESC NULLS LAST,c.limit_amount DESC NULLS LAST,c.symbol LIMIT %s""",
-            (selected_date, max(1, min(limit, 200))),
+            CONCEPT_CANDIDATES_SQL,
+            (FLOW_FOR_CANDIDATES.get(taxonomy_key), taxonomy_key, selected_date, max(1, min(limit, 200))),
         ).fetchall()
     return {"trade_date": str(selected_date), "items": rows, "decision_eligible": False,
-            "matching_rule": "same-day THS concept member code equals THS limit-up-pool stock code"}
+            **concept_candidate_source(taxonomy_key)}
 
 
 def sector_flows(database: Any, taxonomy_key: str, trade_date: date | None, limit: int) -> dict[str, Any]:
@@ -223,7 +310,7 @@ def sector_flows(database: Any, taxonomy_key: str, trade_date: date | None, limi
             "SELECT max(trading_date) latest FROM quant.sector_market_observations WHERE taxonomy_key=%s", (taxonomy_key,)
         ).fetchone()["latest"]
         if selected_date is None:
-            return {"taxonomy_key": taxonomy_key, "trade_date": None, "items": []}
+            return {"taxonomy_key": taxonomy_key, "trade_date": None, "items": [], **superseded_notice(taxonomy_key)}
         rows = connection.execute(
             """SELECT o.taxonomy_key,o.sector_key,s.label,o.trading_date,o.close,o.change_pct,o.net_amount,o.net_buy_amount,o.net_sell_amount,
                       o.constituent_count,o.leading_symbol,o.leading_label,o.provider_key,o.available_at
@@ -232,7 +319,8 @@ def sector_flows(database: Any, taxonomy_key: str, trade_date: date | None, limi
                 ORDER BY o.net_amount DESC NULLS LAST,s.label LIMIT %s""",
             (taxonomy_key, selected_date, max(1, min(limit, 500))),
         ).fetchall()
-    return {"taxonomy_key": taxonomy_key, "trade_date": str(selected_date), "items": rows}
+    return {"taxonomy_key": taxonomy_key, "trade_date": str(selected_date), "items": rows,
+            **superseded_notice(taxonomy_key)}
 
 
 def market_sectors(database: Any, taxonomy_key: str, limit: int, offset: int) -> dict[str, Any]:
@@ -271,8 +359,11 @@ def sector_members(database: Any, sector_key: str, taxonomy_key: str, limit: int
 
 
 __all__ = [
-    "ACTIVE_MAPPING_SQL", "MEMBERSHIP_PROGRESS_SQL", "MEMBERSHIP_TAXONOMIES", "SYNC_STATES_SQL",
-    "concept_limit_candidates", "concept_member_backfill_status", "concept_sector_signals",
-    "market_sectors", "project_concept_member_backfill_status", "project_concept_sector_signals",
-    "project_membership_refresh_status", "sector_flows", "sector_members",
+    "ACTIVE_MAPPING_SQL", "CANDIDATE_TAXONOMIES", "CONCEPT_CANDIDATES_SQL", "CONCEPT_FLOW_TAXONOMIES",
+    "CONCEPT_SIGNALS_SQL", "FLOW_FOR_CANDIDATES", "MEMBERSHIP_PROGRESS_SQL", "MEMBERSHIP_TAXONOMIES",
+    "STRENGTH_FOR_FLOW", "SUPERSEDED_TAXONOMIES", "SYNC_STATES_SQL", "concept_candidate_source",
+    "concept_flow_source", "concept_limit_candidates", "concept_member_backfill_status", "concept_sector_signals",
+    "latest_sessions_sql", "market_sectors", "project_concept_member_backfill_status",
+    "project_concept_sector_signals", "project_membership_refresh_status", "sector_flows", "sector_members",
+    "select_taxonomy", "superseded_notice",
 ]

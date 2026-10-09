@@ -66,10 +66,7 @@ from .async_market_session_repository import sse_calendar_status as read_async_s
 from .daily_bar_repository import exchange_for, recent_daily_bars, upsert_daily_bar, upsert_daily_bars
 from .instrument_registry import InstrumentRecord, ensure_instrument as ensure_registry_instrument, ensure_instruments as ensure_registry_instruments
 from .sector_catalog_repository import upsert_sectors
-from .sector_membership_repository import (
-    persist_observed_snapshot as persist_observed_sector_snapshot,
-    persist_ths_snapshot as persist_ths_sector_snapshot,
-)
+from .sector_membership_repository import persist_observed_snapshot as persist_observed_sector_snapshot
 from .public_market_repository import (
     persist_free_daily as _persist_free_daily,
     persist_free_quote as _persist_free_quote,
@@ -761,11 +758,6 @@ from .fuyao_ths_membership import (
 from .concept_limit_candidate_service import (
     ConceptLimitCandidateDependencies,
     run as run_concept_limit_candidates_isolated,
-)
-from .concept_limit_candidate_repository import (
-    persist_candidates as persist_concept_limit_candidates,
-    persist_members as persist_concept_limit_members,
-    select_concepts as select_concept_limit_concepts,
 )
 from .tushare_official import (
     REALTIME_MARKET_HOURS_APIS,
@@ -1578,15 +1570,6 @@ def upsert_sector(connection: Any, taxonomy_key: str, sector_key: str, label: st
            VALUES(%s,%s,%s,%s)
            ON CONFLICT(taxonomy_key,sector_key) DO UPDATE SET label=EXCLUDED.label,metadata=EXCLUDED.metadata,updated_at=now()""",
         (taxonomy_key, sector_key, label, Json(metadata)),
-    )
-
-
-def persist_ths_sector_members(connection: Any, taxonomy_key: str, sector_key: str, rows: list[dict[str, Any]],
-                               provider_key: str, available_at: datetime) -> int:
-    """Persist one complete response without inventing a historical start date."""
-    return persist_ths_sector_snapshot(
-        connection, taxonomy_key, sector_key, rows, provider_key, available_at,
-        ensure_instrument=ensure_tushare_instrument, parse_date=tushare_date,
     )
 
 
@@ -3528,22 +3511,15 @@ async def run_strategy_decision(request: StrategyDecisionRequest) -> dict[str, A
     )
 
 async def sync_ths_industry_moneyflow(request: SectorFlowSyncRequest) -> dict[str, Any]:
-    """Compatibility entry point backed by isolated THS industry flow sync."""
-    return await sync_ths_industry_isolated(
-        request, trade_date=cn_today, fetch_catalog=fetch_tushare_catalog, fetch_request=TushareFetchRequest,
-        load_rows=lambda request_key: run_database_blocking(tushare_rows_for_request, request_key),
-        run_database_blocking=run_database_blocking, db=db, upsert_taxonomy=upsert_sector_taxonomy, upsert_sector=upsert_sector,
-        decimal_or_none=decimal_or_none, json_value=Json, observed_at=lambda: datetime.now(timezone.utc),
-    )
+    """The session's industry flow: Longhu's close boards (``longhu_ths_industry``), not THS's."""
+    return await sync_ths_industry_isolated(request, trade_date=cn_today, run_database_blocking=run_database_blocking, db=db)
 
 
 async def sync_ths_concept_signals(request: SectorFlowSyncRequest) -> dict[str, Any]:
-    """Compatibility entry point backed by isolated THS concept flow sync."""
+    """Eastmoney concept flow plus Fuyao-derived concept limit strength for one session."""
     return await sync_ths_concept_signals_isolated(
-        request, trade_date=cn_today, fetch_catalog=fetch_tushare_catalog, fetch_request=TushareFetchRequest,
-        load_rows=lambda request_key: run_database_blocking(tushare_rows_for_request, request_key),
-        run_database_blocking=run_database_blocking, db=db, upsert_taxonomy=upsert_sector_taxonomy, upsert_sector=upsert_sector,
-        decimal_or_none=decimal_or_none, json_value=Json, observed_at=lambda: datetime.now(timezone.utc), http_exception=HTTPException,
+        request, trade_date=cn_today, run_database_blocking=run_database_blocking, db=db,
+        now_utc=lambda: datetime.now(timezone.utc),
     )
 
 
@@ -3623,38 +3599,9 @@ async def ths_concept_member_backfill_loop() -> None:
 
 
 async def sync_concept_limit_candidates(request: ConceptCandidateSyncRequest) -> dict[str, Any]:
-    """Build exact concept/limit-up candidates through the isolated service."""
-    async def select_concepts(trade_date: date | None, top_concepts: int) -> tuple[date | None, list[Any]]:
-        return await run_database_blocking(select_concept_limit_concepts, db, trade_date, top_concepts)
-
-    async def load_rows(request_key: str) -> list[dict[str, Any]]:
-        return await run_database_blocking(tushare_rows_for_request, request_key)
-
-    async def persist_members(sector_key: str, rows: list[dict[str, Any]], provider: str, observed_at: datetime) -> int:
-        return await run_database_blocking(
-            persist_concept_limit_members, db, sector_key, rows, provider, observed_at,
-            persist_ths_sector_members,
-        )
-
-    async def persist_candidates(
-        selected_date: date, concepts: list[Any], concept_keys: list[str], limit_provider: str,
-        limit_by_symbol: dict[str, dict[str, Any]], membership_status: dict[str, str], observed_at: datetime,
-        leaders_per_concept: int,
-    ) -> tuple[int, list[dict[str, Any]]]:
-        return await run_database_blocking(
-            persist_concept_limit_candidates, db, selected_date, concepts, concept_keys, limit_provider,
-            limit_by_symbol, membership_status, observed_at, leaders_per_concept,
-            study_number, decimal_or_none, Json,
-        )
-
+    """Fuyao limit-up pool x ``fuyao_ths_concept`` candidates, from stored evidence only."""
     return await run_concept_limit_candidates_isolated(
-        request,
-        ConceptLimitCandidateDependencies(
-            select_concepts=select_concepts, now_utc=lambda: datetime.now(timezone.utc),
-            fetch_catalog=fetch_tushare_catalog, request=TushareFetchRequest, load_rows=load_rows,
-            persist_members=persist_members, persist_candidates=persist_candidates,
-            http_exception=HTTPException,
-        ),
+        request, ConceptLimitCandidateDependencies(run_database=run_database_blocking, database=db),
     )
 
 
@@ -4109,13 +4056,6 @@ async def stock_study_free_fetch(label: str, provider: str, capability: str, fet
             request_errors=(httpx.HTTPError, FreeProviderError, AkShareProviderError, ValueError),
         ),
     )
-
-
-def study_number(value: Any) -> float | None:
-    try:
-        return float(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
-        return None
 
 
 def study_date_key(row: dict[str, Any]) -> str:

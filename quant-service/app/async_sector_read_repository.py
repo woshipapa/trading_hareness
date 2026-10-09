@@ -1,13 +1,20 @@
-"""Native-async projections for persisted sector, concept and member evidence."""
+"""Native-async projections for persisted sector, concept and member evidence.
+
+The SQL and the projections are the synchronous read model's
+(``sector_read_model``), so both paths serve the same taxonomy for the same
+request; only the driver differs.
+"""
 
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Sequence
 
 from .sector_read_model import (
-    ACTIVE_MAPPING_SQL, MEMBERSHIP_PROGRESS_SQL, MEMBERSHIP_TAXONOMIES, SYNC_STATES_SQL, project_concept_sector_signals,
-    project_membership_refresh_status,
+    ACTIVE_MAPPING_SQL, CANDIDATE_TAXONOMIES, CONCEPT_CANDIDATES_SQL, CONCEPT_FLOW_TAXONOMIES, CONCEPT_SIGNALS_SQL,
+    FLOW_FOR_CANDIDATES, MEMBERSHIP_PROGRESS_SQL, MEMBERSHIP_TAXONOMIES, STRENGTH_FOR_FLOW, SYNC_STATES_SQL,
+    concept_candidate_source, concept_flow_source, latest_sessions_sql, project_concept_sector_signals,
+    project_membership_refresh_status, select_taxonomy, superseded_notice,
 )
 
 
@@ -17,6 +24,12 @@ async def _latest_date(connection: Any, table: str, taxonomy_key: str) -> date |
     )
     row = await result.fetchone()
     return row["latest"] if row else None
+
+
+async def _latest_sessions(connection: Any, table: str, taxonomies: Sequence[str],
+                           trade_date: date | None) -> dict[str, Any]:
+    result = await connection.execute(latest_sessions_sql(table), (list(taxonomies), trade_date, trade_date))
+    return {str(row["taxonomy_key"]): row["latest"] for row in await result.fetchall()}
 
 
 async def concept_member_backfill_status(
@@ -55,60 +68,40 @@ async def concept_member_backfill_status(
 
 async def concept_sector_signals(async_database: Any, trade_date: date | None, limit: int) -> dict[str, Any]:
     async with async_database.transaction() as connection:
-        selected_date = trade_date or await _latest_date(connection, "quant.sector_market_observations", "ths_concept_flow")
+        latest = await _latest_sessions(connection, "quant.sector_market_observations", CONCEPT_FLOW_TAXONOMIES, trade_date)
+        taxonomy_key, selected_date = select_taxonomy(latest, CONCEPT_FLOW_TAXONOMIES)
         if selected_date is None:
-            return {"trade_date": None, "items": [], "scoring": {"decision_eligible": False}}
+            return {"trade_date": None, "items": [], "scoring": {"decision_eligible": False},
+                    **concept_flow_source(taxonomy_key)}
         result = await connection.execute(
-            """WITH concept AS (
-                   SELECT o.sector_key,s.label,o.close,o.change_pct,o.net_amount,o.net_buy_amount,o.net_sell_amount,
-                          o.constituent_count,o.leading_label,o.provider_key,o.available_at,o.raw,
-                          percent_rank() OVER (ORDER BY o.net_amount NULLS FIRST) AS flow_percentile
-                     FROM quant.sector_market_observations o
-                     JOIN quant.sectors s ON s.taxonomy_key=o.taxonomy_key AND s.sector_key=o.sector_key
-                    WHERE o.taxonomy_key='ths_concept_flow' AND o.trading_date=%s
-                 )
-                 SELECT c.*,ls.provider_key strength_provider,ls.raw strength_raw,
-                        nullif(ls.raw->>'up_nums','')::numeric up_nums,
-                        nullif(ls.raw->>'cons_nums','')::numeric strength_constituents,
-                        nullif(ls.raw->>'days','')::numeric streak_days
-                   FROM concept c
-              LEFT JOIN quant.sector_market_observations ls
-                     ON ls.taxonomy_key='ths_limit_strength' AND ls.trading_date=%s AND ls.sector_key=c.sector_key
-                  ORDER BY c.net_amount DESC NULLS LAST,c.label LIMIT %s""",
-            (selected_date, selected_date, max(1, min(int(limit), 1000))),
+            CONCEPT_SIGNALS_SQL,
+            (taxonomy_key, selected_date, STRENGTH_FOR_FLOW.get(taxonomy_key), selected_date,
+             max(1, min(int(limit), 1000))),
         )
         rows = [dict(row) for row in await result.fetchall()]
-    return project_concept_sector_signals(rows, selected_date)
+    return {**project_concept_sector_signals(rows, selected_date), **concept_flow_source(taxonomy_key)}
 
 
 async def concept_limit_candidates(async_database: Any, trade_date: date | None, limit: int) -> dict[str, Any]:
     async with async_database.transaction() as connection:
-        selected_date = trade_date or await _latest_date(connection, "quant.sector_limit_candidates", "ths_concept_flow")
+        latest = await _latest_sessions(connection, "quant.sector_limit_candidates", CANDIDATE_TAXONOMIES, trade_date)
+        taxonomy_key, selected_date = select_taxonomy(latest, CANDIDATE_TAXONOMIES)
         if selected_date is None:
-            return {"trade_date": None, "items": [], "decision_eligible": False}
+            return {"trade_date": None, "items": [], "decision_eligible": False, **concept_candidate_source(taxonomy_key)}
         result = await connection.execute(
-            """SELECT c.sector_key,s.label concept_label,c.symbol,c.name,c.limit_tag,c.limit_type,c.pct_change,c.price,c.limit_amount,
-                      c.turnover_rate,c.open_num,c.status,c.description,c.provider_key,c.available_at,
-                      coalesce(c.raw->>'membership_fetch_status','unknown') membership_status,
-                      flow.net_amount board_net_amount,flow.change_pct board_change_pct,flow.leading_label board_leading_label
-                 FROM quant.sector_limit_candidates c
-                 JOIN quant.sectors s ON s.taxonomy_key=c.taxonomy_key AND s.sector_key=c.sector_key
-            LEFT JOIN quant.sector_market_observations flow ON flow.taxonomy_key='ths_concept_flow' AND flow.sector_key=c.sector_key
-                      AND flow.trading_date=c.trading_date
-                WHERE c.taxonomy_key='ths_concept_flow' AND c.trading_date=%s
-                ORDER BY flow.net_amount DESC NULLS LAST,c.limit_amount DESC NULLS LAST,c.symbol LIMIT %s""",
-            (selected_date, max(1, min(int(limit), 200))),
+            CONCEPT_CANDIDATES_SQL,
+            (FLOW_FOR_CANDIDATES.get(taxonomy_key), taxonomy_key, selected_date, max(1, min(int(limit), 200))),
         )
         rows = [dict(row) for row in await result.fetchall()]
     return {"trade_date": str(selected_date), "items": rows, "decision_eligible": False,
-            "matching_rule": "same-day THS concept member code equals THS limit-up-pool stock code"}
+            **concept_candidate_source(taxonomy_key)}
 
 
 async def sector_flows(async_database: Any, taxonomy_key: str, trade_date: date | None, limit: int) -> dict[str, Any]:
     async with async_database.transaction() as connection:
         selected_date = trade_date or await _latest_date(connection, "quant.sector_market_observations", taxonomy_key)
         if selected_date is None:
-            return {"taxonomy_key": taxonomy_key, "trade_date": None, "items": []}
+            return {"taxonomy_key": taxonomy_key, "trade_date": None, "items": [], **superseded_notice(taxonomy_key)}
         result = await connection.execute(
             """SELECT o.taxonomy_key,o.sector_key,s.label,o.trading_date,o.close,o.change_pct,o.net_amount,o.net_buy_amount,o.net_sell_amount,
                       o.constituent_count,o.leading_symbol,o.leading_label,o.provider_key,o.available_at
@@ -118,7 +111,8 @@ async def sector_flows(async_database: Any, taxonomy_key: str, trade_date: date 
             (taxonomy_key, selected_date, max(1, min(int(limit), 500))),
         )
         rows = [dict(row) for row in await result.fetchall()]
-    return {"taxonomy_key": taxonomy_key, "trade_date": str(selected_date), "items": rows}
+    return {"taxonomy_key": taxonomy_key, "trade_date": str(selected_date), "items": rows,
+            **superseded_notice(taxonomy_key)}
 
 
 async def market_sectors(async_database: Any, taxonomy_key: str, limit: int, offset: int) -> dict[str, Any]:

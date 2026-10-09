@@ -82,8 +82,8 @@ curl -fsS -m 5 http://127.0.0.1:15682/health | python3 -c "import json,sys; d=js
 | 全 A 最新横截面 | `GET /api/v1/market/level1/latest?limit=6000` | 最新一笔 Level-1：价格、涨跌幅、成交额 |
 | 涨停池、炸板池等市场事件 | `GET /api/v1/events/market?event_type=limit_up_pool&trade_date=YYYY-MM-DD&limit=500` | Fuyao 涨停池从 09:26 起每分钟一个快照。统计板块涨停数要用**最新快照**，不能对全天取并集 |
 | 龙虎榜 / 公告 | `GET /api/v1/events/lhb?trade_date=`、`GET /api/v1/events/announcements?symbol=` | 龙虎榜当日可能还没入库 |
-| 板块资金流 / 成分 / 盘中曲线 | `GET /api/v1/market/sectors/flows?taxonomy_key=ths_industry&trade_date=`<br>`GET /api/v1/market/sectors/{sector_key}/members`<br>`GET /api/v1/market/sectors/intraday/curves?trade_date=&taxonomy=industry` | Longhu 行业 104 个板块；盘中曲线每分钟一个点 |
-| 概念板块 | `GET /api/v1/market/sectors/concepts?trade_date=` | 当日可能为 0 行，属于缺口 |
+| 板块资金流 / 成分 / 盘中曲线 | `GET /api/v1/market/sectors/flows?taxonomy_key=longhu_ths_industry&trade_date=`<br>`GET /api/v1/market/sectors/{sector_key}/members`<br>`GET /api/v1/market/sectors/intraday/curves?trade_date=&taxonomy=industry` | Longhu 行业 104 个板块（净流入单位为元）；`ths_industry` 只剩 2026-10-08 前的 Tushare 历史，响应带 `superseded_by`；盘中曲线每分钟一个点 |
+| 概念板块 | `GET /api/v1/market/sectors/concepts?trade_date=` | 东财概念资金流（`eastmoney_concept`，收盘窗口快照，不是同花顺概念）；响应的 `taxonomy_key` 写明实际口径，当日可能为 0 行，属于缺口 |
 | 收盘板块复盘 | `GET /api/v1/market/sectors/review/report/latest` | 板块 Top10 的复盘证据 |
 | 老师计划与结算 | `GET /api/v1/teacher-review/cohort`<br>`GET /api/v1/teacher-review/settlements?limit=5` | 结算包括：预判命中、盘中触发、晋级延续 / 观察 / 退出（`roll.lifecycle`） |
 | 观察池（含老师计划） | `GET /api/v1/intraday/watchlists` | `metadata.teacher_review` 里有计划的状态 `status` / `lifecycle` |
@@ -212,9 +212,9 @@ curl -fsS -m 5 http://127.0.0.1:15682/health | python3 -c "import json,sys; d=js
 |---|---|---|
 | `/api/v1/market/sectors` | taxonomy_key, limit, offset | 板块目录 |
 | `/api/v1/market/sectors/{sector_key}/members` | sector_key*, taxonomy_key, limit, offset | 成分股 |
-| `/api/v1/market/sectors/flows` | taxonomy_key, trade_date, limit | 板块资金流（默认 `ths_industry`） |
+| `/api/v1/market/sectors/flows` | taxonomy_key, trade_date, limit | 板块资金流（默认 `ths_industry` 已停更，用 `longhu_ths_industry`、`eastmoney_concept`、`fuyao_ths_concept_limit_strength`） |
 | `/api/v1/market/sectors/concepts` | trade_date, limit | 概念板块 |
-| `/api/v1/market/sectors/concepts/candidates` | trade_date, limit | 概念候选 |
+| `/api/v1/market/sectors/concepts/candidates` | trade_date, limit | 概念涨停候选（Fuyao 涨停池 × `fuyao_ths_concept` 成分，按概念涨停数排序） |
 | `/api/v1/market/sectors/concepts/members/backfill/status` | trade_date | Fuyao 同花顺概念/行业/地域成分刷新进度 |
 | `/api/v1/market/sectors/intraday/curves` | trade_date, taxonomy, since | 盘中板块资金流曲线（每分钟一个点） |
 | `/api/v1/market/sectors/review/report/latest` | | 收盘板块复盘报告 |

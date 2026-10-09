@@ -21,6 +21,8 @@ class AsyncStrategyAndResearchReadTests(unittest.IsolatedAsyncioTestCase):
 
             async def execute(self, sql, params=()):
                 self.calls.append((sql, params))
+                if "GROUP BY taxonomy_key" in sql:
+                    return Result(rows=[{"taxonomy_key": "eastmoney_concept", "latest": date(2026, 8, 10)}])
                 if "percent_rank" in sql:
                     return Result(rows=[{
                         "flow_percentile": 1.0, "change_pct": 2.0, "up_nums": None,
@@ -52,7 +54,14 @@ class AsyncStrategyAndResearchReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(concepts["items"][0]["aggregate_score"], 86.0)
         self.assertEqual(sectors["limit"], 1000)
         self.assertEqual(members["total"], 3)
-        self.assertEqual(database.connection.calls[0][1], (date(2026, 8, 10), date(2026, 8, 10), 1000))
+        # The newest concept flow is Eastmoney's; it shares no board code with
+        # a limit-strength taxonomy, so none is joined (the parameter is NULL).
+        self.assertEqual(database.connection.calls[0][1],
+                         (["eastmoney_concept", "ths_concept_flow"], date(2026, 8, 10), date(2026, 8, 10)))
+        self.assertEqual(database.connection.calls[1][1],
+                         ("eastmoney_concept", date(2026, 8, 10), None, date(2026, 8, 10), 1000))
+        self.assertEqual(concepts["taxonomy_key"], "eastmoney_concept")
+        self.assertEqual(concepts["strength"]["status"], "not_joined")
 
     def test_concept_mapping_status_separates_active_exact_coverage_from_receipts(self) -> None:
         payload = project_concept_member_backfill_status(

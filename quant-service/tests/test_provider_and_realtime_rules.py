@@ -793,6 +793,11 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
         self.assertEqual(rows[1]["is_new"], "Y")
 
     def test_ths_membership_count_excludes_historical_constituents(self):
+        # The writer that filled ths_concept_flow from Tushare ths_member; its
+        # rows remain readable history after the 2026-10-08 retirement.
+        from app.main import tushare_date
+        from app.sector_membership_repository import persist_ths_snapshot
+
         class Connection:
             def __init__(self):
                 self.calls = []
@@ -806,11 +811,10 @@ class ProviderAndRealtimeRuleTests(unittest.TestCase):
             {"con_code": "000001.SZ", "in_date": "20200101", "out_date": None},
             {"con_code": "000002.SZ", "in_date": "20200101", "out_date": "20250701"},
         ]
-        with patch("app.main.ensure_tushare_instrument"):
-            members = persist_ths_sector_members(
-                connection, "ths_concept_flow", "885001.TI", rows,
-                "tushare_super_sdk", observed_at,
-            )
+        members = persist_ths_snapshot(
+            connection, "ths_concept_flow", "885001.TI", rows, "tushare_super_sdk", observed_at,
+            ensure_instrument=lambda *_args: None, parse_date=tushare_date,
+        )
         self.assertEqual(members, 1)
         self.assertEqual(connection.calls[-1][1][-1], ["000001.SZ"])
 

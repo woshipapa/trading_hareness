@@ -388,42 +388,47 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         ])
         self.assertEqual(result["stock_drill"]["status"], "idle")
 
-    def test_ths_industry_moneyflow_uses_database_executor_for_rows_and_persistence(self):
-        outcome = {"status": "completed", "request_key": "industry", "provider": "tushare_super_sdk"}
-        rows = [{"ts_code": "885001.TI", "industry": "测试行业", "close": 1, "pct_change": 2}]
+    def test_ths_industry_moneyflow_materializes_the_longhu_close_through_the_database_executor(self):
+        observed_at = datetime(2026, 10, 9, 8, 5, tzinfo=timezone.utc)
+        boards = [{"sector_key": "881121", "label": "半导体", "change_pct": 3.45, "net_inflow": 4.5e8,
+                   "mapped_members": 160, "taxonomy_key": "longhu_ths_industry"}]
 
         async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(side_effect=[rows, None])
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(return_value=outcome)), \
-                 patch("app.main.run_database_blocking", new=blocking):
-                result = await sync_ths_industry_moneyflow(SectorFlowSyncRequest())
+            blocking = AsyncMock(side_effect=[(observed_at, boards), 1])
+            with patch("app.main.run_database_blocking", new=blocking):
+                result = await sync_ths_industry_moneyflow(SectorFlowSyncRequest(trade_date=date(2026, 10, 9)))
             return result, blocking
 
         result, blocking = asyncio.run(check())
-        self.assertEqual(result["sectors"], 1)
-        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
-            "tushare_rows_for_request", "persist_industry_flow",
+        self.assertEqual((result["status"], result["sectors"]), ("completed", 1))
+        self.assertEqual((result["taxonomy_key"], result["requested_taxonomy_key"]), ("longhu_ths_industry", "ths_industry"))
+        self.assertEqual([_action_name(call) for call in blocking.await_args_list], [
+            "longhu_close_boards", "persist_board_observations",
         ])
 
     def test_ths_concept_flows_and_strength_use_database_executor(self):
-        outcomes = [
-            {"status": "completed", "request_key": "concept", "provider": "tushare_super_sdk"},
-            {"status": "completed", "request_key": "strength", "provider": "tushare_super_sdk"},
-        ]
-        concept_rows = [{"ts_code": "885001.TI", "name": "测试概念", "industry_index": 1, "pct_change": 2}]
-        strength_rows = [{"ts_code": "885001.TI", "name": "测试概念", "pct_chg": 2, "cons_nums": 1}]
+        snapshot_at = datetime(2026, 10, 9, 6, 59, tzinfo=timezone.utc)
+        items = [{"taxonomy_key": "eastmoney_concept", "sector_key": "人形机器人", "label": "人形机器人",
+                  "net_inflow": 12.35, "change_pct": 3.21}]
+        pool = {"000981.SZ": {"thscode": "000981.SZ", "name": "山子高科", "continue_day_cnt": 1, "max_seal_money": 8.0e7}}
 
         async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(side_effect=[concept_rows, None, strength_rows, None])
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(side_effect=outcomes)), \
-                 patch("app.main.run_database_blocking", new=blocking):
-                result = await sync_ths_concept_signals(SectorFlowSyncRequest())
+            blocking = AsyncMock(side_effect=[
+                (snapshot_at, items, {"unit": "100m_cny", "provider": "eastmoney_free"}), 1,
+                (date(2026, 10, 9), snapshot_at, pool),
+                ([{"sector_key": "885431.TI", "symbol": "000981.SZ"}], {"885431.TI": 120}, {"885431.TI": "新能源汽车"}), 1,
+            ])
+            with patch("app.main.run_database_blocking", new=blocking):
+                result = await sync_ths_concept_signals(SectorFlowSyncRequest(trade_date=date(2026, 10, 9)))
             return result, blocking
 
         result, blocking = asyncio.run(check())
         self.assertEqual(result["status"], "completed")
-        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
-            "tushare_rows_for_request", "persist_concept_flow", "tushare_rows_for_request", "persist_limit_strength",
+        self.assertEqual(result["sources"]["concept_flow"]["taxonomy_key"], "eastmoney_concept")
+        self.assertEqual(result["sources"]["limit_strength"]["taxonomy_key"], "fuyao_ths_concept_limit_strength")
+        self.assertEqual([_action_name(call) for call in blocking.await_args_list], [
+            "concept_close_snapshot", "persist_board_observations", "latest_limit_up_pool", "concept_memberships",
+            "persist_board_observations",
         ])
 
     def test_ths_concept_members_fetch_fuyao_constituents_through_the_database_executor(self):
@@ -495,25 +500,24 @@ class IngestionAndProviderRuntimeTests(unittest.TestCase):
         self.assertEqual(boards, [("885431.TI", "新能源汽车")])
         self.assertEqual(skipped, 3)
 
-    def test_concept_limit_candidates_use_database_executor_for_exact_join_and_write(self):
-        selected = (date(2026, 8, 11), [{"sector_key": "885001.TI", "label": "测试概念", "net_amount": 100}])
-        outcomes = [
-            {"status": "completed", "request_key": "member", "provider": "tushare_super_sdk"},
-            {"status": "completed", "request_key": "limit", "provider": "tushare_super_sdk"},
-        ]
-        limit_rows = [{"ts_code": "000001.SZ", "limit_type": "涨停池", "name": "测试股"}]
+    def test_concept_limit_candidates_read_stored_evidence_through_the_database_executor(self):
+        snapshot_at = datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc)
+        pool = {"000001.SZ": {"thscode": "000001.SZ", "name": "测试股", "continue_day_cnt": 1, "max_seal_money": 1.0e7}}
 
         async def check() -> tuple[dict[str, object], AsyncMock]:
-            blocking = AsyncMock(side_effect=[selected, [{"ts_code": "000001.SZ"}], 1, limit_rows, (1, [{"sector_key": "885001.TI"}])])
-            with patch("app.main.fetch_tushare_catalog", new=AsyncMock(side_effect=outcomes)), \
-                 patch("app.main.run_database_blocking", new=blocking):
-                result = await sync_concept_limit_candidates(ConceptCandidateSyncRequest(trade_date=date(2026, 8, 11), top_concepts=1))
+            blocking = AsyncMock(side_effect=[
+                (date(2026, 10, 9), snapshot_at, pool),
+                ([{"sector_key": "885001.TI", "symbol": "000001.SZ"}], {"885001.TI": 30}, {"885001.TI": "测试概念"}),
+                (1, [{"sector_key": "885001.TI", "stored": 1}]),
+            ])
+            with patch("app.main.run_database_blocking", new=blocking):
+                result = await sync_concept_limit_candidates(ConceptCandidateSyncRequest(trade_date=date(2026, 10, 9), top_concepts=1))
             return result, blocking
 
         result, blocking = asyncio.run(check())
-        self.assertEqual(result["candidates"], 1)
-        self.assertEqual([call.args[0].__name__ for call in blocking.await_args_list], [
-            "select_concepts", "tushare_rows_for_request", "persist_members", "tushare_rows_for_request", "persist_candidates",
+        self.assertEqual((result["candidates"], result["taxonomy_key"]), (1, "fuyao_ths_concept"))
+        self.assertEqual([_action_name(call) for call in blocking.await_args_list], [
+            "latest_limit_up_pool", "concept_memberships", "persist_candidates",
         ])
 
     def test_watchlist_history_reads_local_close_bars_and_persists_the_snapshot(self):
