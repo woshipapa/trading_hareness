@@ -43,6 +43,15 @@ class PureFunctionTests(unittest.TestCase):
         # oldest first in the list
         self.assertLess(text.index("aaaaaaa"), text.index("bbbbbbb run"))
 
+    def test_zero_failure_counts_are_not_attention_but_failed_selections_are(self):
+        attn = watch.needs_attention
+        self.assertFalse(attn("run: 锁频选档 1170 短 campaign（GPU4，audit pass，check 0 FAIL）"))
+        self.assertFalse(attn("run: 门禁 static_2sm 重跑 PASS（0 失败）"))
+        self.assertTrue(attn("run: 锁频选档格文件与 decide 结果（chosen=null，三档均未过，阳性对照有效）"))
+        self.assertTrue(attn("run: 门禁 static_2sm FAIL（复现 3/3）"))
+        self.assertTrue(attn("run: check 10 FAIL"))
+        self.assertTrue(attn("run: 2 个失败"))
+
     def test_message_stays_within_the_feishu_limit(self):
         executor = [commit(chr(97 + i % 26), "run: " + "长" * 300) for i in range(60)]
         text = watch.build_message(executor, history_gap=False)

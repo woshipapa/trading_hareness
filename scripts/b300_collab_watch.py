@@ -43,8 +43,12 @@ WEBHOOK_PREFIX = "https://open.feishu.cn/open-apis/bot/v2/hook/"
 PER_PAGE = 50
 LIMIT = 3500          # 飞书单条文本上限（与 notify.LIMIT 相同）
 SUBJECT_LIMIT = 160
-# 提交标题里出现这些词时，单列为"需要审查方处理"。
-ATTENTION = ("FAIL", "等修复", "需返工", "proposal:", "停", "阻塞", "求助", "问题", "不可达")
+# 提交标题里出现这些词时，单列为"需要审查方处理"。"check 0 FAIL"、"0 失败"这类零计数
+# 是通过，不算（2026-10-09：锁频选档的 7 个正常运行因此被误列，而真正要裁定的
+# "chosen=null，三档均未过"没被列出）。
+ATTENTION = ("FAIL", "失败", "等修复", "需返工", "proposal:", "停", "阻塞", "求助", "问题", "不可达",
+             "未过", "未通过", "不通过", "chosen=null")
+ZERO_COUNT_RE = re.compile(r"(?<![\d.])0\s*(?:个\s*)?(?:FAIL|失败)")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
@@ -88,7 +92,8 @@ def clean(subject: str) -> str:
 
 
 def needs_attention(subject: str) -> bool:
-    return any(word in subject for word in ATTENTION)
+    text = ZERO_COUNT_RE.sub("", subject)
+    return any(word in text for word in ATTENTION)
 
 
 def build_message(executor: list[dict[str, Any]], history_gap: bool) -> str:
