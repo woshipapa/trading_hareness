@@ -144,7 +144,7 @@
 | `run-post-close-pipeline.sh` | quant-research | workstation | Post-close daily pipeline runner. |
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
 
-## CI and checks (15)
+## CI and checks (16)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -152,6 +152,7 @@
 | `generate-api-types.mjs` | platform | workstation and CI |  |
 | `generate_architecture_index.py` | platform | workstation and CI | Generate a small, deterministic map for humans and maintenance agents. |
 | `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
+| `generate_service_index.py` | platform | workstation and CI | Generate docs/services.html: one clickable index of every local service port. |
 | `generate_workflows_catalog.py` | platform | workstation and CI | Generate workflows/CATALOG.md: every n8n workflow, where it runs, how it ships. |
 | `sync_frontend_shared.py` | platform | workstation | Sync the frontend-shared canonical sources into each app's vendored copy. |
 | `verify-api-contract.mjs` | platform | workstation and CI |  |
