@@ -23,6 +23,9 @@ FUYAO_RETRY_BUSINESS_CODES = {4001, 5001, 5002, 5003}
 FUYAO_TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
 FUYAO_MAX_ATTEMPTS = 3
 FUYAO_ALL_A_MAX_AGE_SECONDS = 45.0
+#: A Fuyao call waits this long for its local start slot before it is refused:
+#: the all-A snapshot's two pages and the event pools arrive in bursts.
+FUYAO_SLOT_MAX_WAIT_SECONDS = 15.0
 
 
 class FuyaoProviderError(RuntimeError):
@@ -78,7 +81,7 @@ async def fetch_envelope(capability: str, params: dict[str, Any] | None = None) 
     path = validate_capability_query(capability, safe_params)
     last_transport_error: Exception | None = None
     try:
-        await acquire_public_provider_slot(FUYAO_PROVIDER_KEY)
+        await acquire_public_provider_slot(FUYAO_PROVIDER_KEY, max_wait_seconds=FUYAO_SLOT_MAX_WAIT_SECONDS)
     except PublicProviderRateLimited as error:
         raise FuyaoProviderError(str(error)) from error
     async with provider_http_client(FUYAO_PROVIDER_KEY, "") as client:

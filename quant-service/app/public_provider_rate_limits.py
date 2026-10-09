@@ -1,9 +1,18 @@
-"""Non-blocking per-provider request admission for public data sources.
+"""Per-provider request admission for public data sources.
 
 The owner is the only realtime writer, so a process-local guard is enough for
-these token-free HTTP sources.  A caller that arrives before the next reserved
-slot is rejected immediately; it must record ``rate_limited`` and use its
-documented fallback instead of building an unbounded wait queue.
+these token-free HTTP sources.  Slots start ``60 / rate`` seconds apart.  By
+default a caller that arrives before the next slot is rejected immediately;
+it must record ``rate_limited`` and use its documented fallback instead of
+building an unbounded wait queue.
+
+A caller may instead wait a bounded time for its slot.  Fuyao needs that: the
+all-A snapshot is two back-to-back pages and the event capture asks for
+several pools at once, so on 2026-10-09 the owner rejected 615 Fuyao calls in
+three hours - most minutes' all-A capture failed - while the whole demand was
+about 15 calls a minute against a budget of 60.  The pacing is unchanged;
+only the burst now queues, and a slot further off than the bound is still
+rejected.
 """
 
 from __future__ import annotations
@@ -85,9 +94,29 @@ class PublicProviderRateLimiter:
             slot.next_allowed_at = now + spacing
             return True
 
-    async def acquire(self, provider_key: str, rate_limit_per_minute: int) -> None:
-        if not await self.try_acquire(provider_key, rate_limit_per_minute):
+    async def reserve(self, provider_key: str, rate_limit_per_minute: int, max_wait_seconds: float) -> float | None:
+        """Reserve the next start slot: the wait until it, or None when it is further off than allowed."""
+        spacing = 60.0 / max(1, int(rate_limit_per_minute))
+        now = time.monotonic()
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            if self._loop is not loop:
+                self._slots.clear()
+                self._loop = loop
+            slot = self._slots.setdefault(provider_key, _Slot())
+            start = max(now, slot.next_allowed_at)
+            if start - now > max(0.0, max_wait_seconds):
+                return None
+            slot.next_allowed_at = start + spacing
+            return start - now
+
+    async def acquire(self, provider_key: str, rate_limit_per_minute: int, *,
+                      max_wait_seconds: float = 0.0) -> None:
+        wait = await self.reserve(provider_key, rate_limit_per_minute, max_wait_seconds)
+        if wait is None:
             raise PublicProviderRateLimited(provider_key)
+        if wait > 0:
+            await asyncio.sleep(wait)
 
     def reset(self) -> None:
         self._slots.clear()
@@ -96,8 +125,10 @@ class PublicProviderRateLimiter:
 public_provider_rate_limiter = PublicProviderRateLimiter()
 
 
-async def acquire_public_provider_slot(provider_key: str) -> None:
-    await public_provider_rate_limiter.acquire(provider_key, configured_rate_limit(provider_key))
+async def acquire_public_provider_slot(provider_key: str, *, max_wait_seconds: float = 0.0) -> None:
+    await public_provider_rate_limiter.acquire(
+        provider_key, configured_rate_limit(provider_key), max_wait_seconds=max_wait_seconds,
+    )
 
 
 __all__ = [
