@@ -9,8 +9,8 @@
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
 | `main.py` top-level functions | 435 |
-| Python modules under `app/` | 510 |
-| HTTP router modules | 47 |
+| Python modules under `app/` | 513 |
+| HTTP router modules | 48 |
 | Alembic migrations | 109 |
 | Frontend source files | 53 |
 
@@ -26,7 +26,7 @@ New behaviour should be owned by an existing domain package/owner.
 | `strategy` | 24 |
 | `longhu` | 18 |
 | `analyst` | 17 |
-| `market` | 15 |
+| `market` | 17 |
 | `research` | 15 |
 | `post` | 13 |
 | `board` | 11 |
@@ -67,6 +67,7 @@ New behaviour should be owned by an existing domain package/owner.
 - `routers/longhu_replay_reads.py`
 - `routers/market_actions.py`
 - `routers/market_flow_reads.py`
+- `routers/market_radar_reads.py`
 - `routers/market_result_reads.py`
 - `routers/owner_storage.py`
 - `routers/paper_actions.py`

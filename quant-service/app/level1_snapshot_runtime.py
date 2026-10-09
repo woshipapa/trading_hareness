@@ -21,8 +21,13 @@ async def capture_level1_snapshot(
     session_open: Callable[[datetime], Awaitable[bool]],
     persist_health: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     now: datetime | None = None,
+    on_persisted: Callable[[datetime, list[dict[str, Any]]], Awaitable[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
-    """Capture one all-A snapshot, returning a secret-free health result."""
+    """Capture one all-A snapshot, returning a secret-free health result.
+
+    ``on_persisted`` derives from the stored cross-section (the market radar);
+    its failure is reported in the result and never fails the capture.
+    """
     observed_at = now or datetime.now(timezone.utc)
     # Some application session adapters return ``(active, reason)`` while the
     # collector contract historically accepted a bare bool.  Normalize both
@@ -56,6 +61,11 @@ async def capture_level1_snapshot(
         "freshness_status": metadata.get("status") or metadata.get("freshness_status") or "unknown",
         "cross_sectional": bool(metadata.get("cross_sectional", False)),
     }
+    if on_persisted is not None and payloads:
+        try:
+            result["derived"] = await on_persisted(observed_at, payloads)
+        except Exception as error:  # noqa: BLE001 - a derived view must not cost the evidence
+            result["derived"] = {"status": "failed", "error": f"{type(error).__name__}: {str(error)[:200]}"}
     if persist_health is not None:
         await persist_health(result)
     return result
@@ -90,6 +100,8 @@ class Level1CaptureDependencies:
     record_success: Callable[..., Any]
     record_failure: Callable[..., Any]
     safe_error: Callable[[str, int], str]
+    #: Derives from each stored cross-section (the market radar); optional.
+    on_persisted: Callable[[datetime, list[dict[str, Any]]], Awaitable[dict[str, Any]]] | None = None
 
 
 def level1_capture(deps: Level1CaptureDependencies) -> Callable[[], Awaitable[dict[str, Any]]]:
@@ -120,7 +132,8 @@ def level1_capture(deps: Level1CaptureDependencies) -> Callable[[], Awaitable[di
     async def capture() -> dict[str, Any]:
         try:
             return await capture_level1_snapshot(fetch_snapshot=deps.fetch_snapshot, persist=persist,
-                                                 persist_health=persist_health, session_open=session_open)
+                                                 persist_health=persist_health, session_open=session_open,
+                                                 on_persisted=deps.on_persisted)
         except Exception as error:  # noqa: BLE001 - health must see provider errors
             await persist_health({"status": "failed", "error": deps.safe_error(str(error), 300)})
             raise
