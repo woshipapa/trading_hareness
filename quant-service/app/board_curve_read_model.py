@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from statistics import median
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
+from .dashboard_transport_sql import board_curve_payload_sql
 
 
 def _number(value: Any) -> float | None:
@@ -84,10 +85,11 @@ def intraday_board_flow_curves(
     window_end = datetime.combine(selected_date, time(15, 1), tzinfo=china).astimezone(timezone.utc)
     if since is not None:
         since = since.replace(tzinfo=timezone.utc) if since.tzinfo is None else since.astimezone(timezone.utc)
-    values: tuple[Any, ...] = (window_start, window_end, since, since)
+    values: tuple[Any, ...] = (f'eastmoney_{taxonomy}', window_start, window_end, since, since)
+    payload_column=board_curve_payload_sql()
     with database.transaction() as connection:
         curve_rows = connection.execute(
-            """SELECT observed_at,status,coverage,payload,'minute_curve' AS source
+            f"""SELECT observed_at,status,coverage,{payload_column},'minute_curve' AS source
                  FROM quant.intraday_board_flow_snapshots
                 WHERE observed_at>=%s AND observed_at<%s AND status IN ('completed','partial')
                   AND (%s::timestamptz IS NULL OR observed_at>%s)
@@ -95,7 +97,7 @@ def intraday_board_flow_curves(
             values,
         ).fetchall()
         legacy_rows = connection.execute(
-            """SELECT observed_at,status,payload->'coverage' AS coverage,payload,'strategy_report' AS source
+            f"""SELECT observed_at,status,payload->'coverage' AS coverage,{payload_column},'strategy_report' AS source
                  FROM quant.intraday_board_reports
                 WHERE observed_at>=%s AND observed_at<%s AND status IN ('completed','partial')
                   AND (%s::timestamptz IS NULL OR observed_at>%s)

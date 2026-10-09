@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from .dashboard_transport_sql import counter_summary_sql
 
 from .strategy_read_model import compact_post_close_run
 
@@ -36,14 +37,15 @@ async def latest_strategy_review(async_database: Any, session: str | None) -> di
 
 
 async def latest_post_close_strategy(async_database: Any) -> dict[str, Any]:
+    summary_column=counter_summary_sql()
     async with async_database.transaction() as connection:
         attempt_result = await connection.execute(
-            """SELECT run_id,run_key,as_of_date,model_version,status,source_status,summary,created_at,updated_at
+            f"""SELECT run_id,run_key,as_of_date,model_version,status,source_status,{summary_column},created_at,updated_at
                  FROM quant.post_close_strategy_runs ORDER BY as_of_date DESC,updated_at DESC LIMIT 1"""
         )
         latest_attempt = await attempt_result.fetchone()
         completed_result = await connection.execute(
-            """SELECT run_id,run_key,as_of_date,model_version,status,source_status,summary,created_at,updated_at
+            f"""SELECT run_id,run_key,as_of_date,model_version,status,source_status,{summary_column},created_at,updated_at
                  FROM quant.post_close_strategy_runs WHERE status IN ('completed','partial')
                  ORDER BY as_of_date DESC,updated_at DESC LIMIT 1"""
         )

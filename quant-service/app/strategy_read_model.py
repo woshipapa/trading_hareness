@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from .dashboard_transport_sql import counter_summary_sql
 
 
 _POST_CLOSE_SUMMARY_SCALARS = (
@@ -50,13 +51,14 @@ def latest_strategy_review(database: Any, session: str | None) -> dict[str, Any]
 
 
 def latest_post_close_strategy(database: Any) -> dict[str, Any]:
+    summary_column=counter_summary_sql()
     with database.transaction() as connection:
         latest_attempt = connection.execute(
-            """SELECT run_id,run_key,as_of_date,model_version,status,source_status,summary,created_at,updated_at
+            f"""SELECT run_id,run_key,as_of_date,model_version,status,source_status,{summary_column},created_at,updated_at
                  FROM quant.post_close_strategy_runs ORDER BY as_of_date DESC,updated_at DESC LIMIT 1"""
         ).fetchone()
         latest_completed = connection.execute(
-            """SELECT run_id,run_key,as_of_date,model_version,status,source_status,summary,created_at,updated_at
+            f"""SELECT run_id,run_key,as_of_date,model_version,status,source_status,{summary_column},created_at,updated_at
                  FROM quant.post_close_strategy_runs WHERE status IN ('completed','partial')
                  ORDER BY as_of_date DESC,updated_at DESC LIMIT 1"""
         ).fetchone()

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
+from .dashboard_transport_sql import board_curve_payload_sql
 
 from .board_curve_read_model import (
     project_intraday_board_flow_curves,
@@ -41,10 +42,11 @@ async def intraday_board_flow_curves(
     normalized_since = since
     if normalized_since is not None:
         normalized_since = normalized_since.replace(tzinfo=timezone.utc) if normalized_since.tzinfo is None else normalized_since.astimezone(timezone.utc)
-    values: tuple[Any, ...] = (window_start, window_end, normalized_since, normalized_since)
+    values: tuple[Any, ...] = (f'eastmoney_{taxonomy}', window_start, window_end, normalized_since, normalized_since)
+    payload_column=board_curve_payload_sql()
     async with async_database.transaction() as connection:
         curves_result = await connection.execute(
-            """SELECT observed_at,status,coverage,payload,'minute_curve' AS source
+            f"""SELECT observed_at,status,coverage,{payload_column},'minute_curve' AS source
                  FROM quant.intraday_board_flow_snapshots
                 WHERE observed_at>=%s AND observed_at<%s AND status IN ('completed','partial')
                   AND (%s::timestamptz IS NULL OR observed_at>%s)
@@ -52,7 +54,7 @@ async def intraday_board_flow_curves(
             values,
         )
         legacy_result = await connection.execute(
-            """SELECT observed_at,status,payload->'coverage' AS coverage,payload,'strategy_report' AS source
+            f"""SELECT observed_at,status,payload->'coverage' AS coverage,{payload_column},'strategy_report' AS source
                  FROM quant.intraday_board_reports
                 WHERE observed_at>=%s AND observed_at<%s AND status IN ('completed','partial')
                   AND (%s::timestamptz IS NULL OR observed_at>%s)
