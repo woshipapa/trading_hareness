@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from app.market_radar import CN_TZ, RadarState, radar_point
 from app.market_radar_runtime import (
-    BOARD_FLOW_UNIT, CAPABILITY, PROVIDER_KEY, MarketRadarDependencies, MarketRadarRuntime, radar_day,
+    CAPABILITY, PROVIDER_KEY, MarketRadarDependencies, MarketRadarRuntime, radar_day,
 )
 
 DAY = date(2026, 10, 9)
@@ -95,8 +95,21 @@ class ReadTests(unittest.TestCase):
         day = radar_day(_Connection(points=[point], flows=flows), DAY)
         self.assertEqual(len(day["points"]), 1)
         self.assertNotIn("entered", day["points"][0])
-        self.assertEqual(day["main_net"], [{"observed_at": at(9, 31).isoformat(), "main_net": -1.0 * BOARD_FLOW_UNIT,
-                                            "boards": 2, "source": "eastmoney_free", "status": "completed"}])
+        self.assertEqual(day["main_net"], [{
+            "observed_at": at(9, 31).isoformat(), "main_net": -100_000_000.0, "boards": 2,
+            "taxonomy_key": "eastmoney_industry", "source": "eastmoney_free",
+            "upstream": "同花顺 data.10jqka.com.cn（akshare stock_fund_flow_*）", "status": "completed"}])
+
+    def test_longhu_rows_are_in_cny_whatever_the_snapshot_declared(self):
+        flows = [{"snapshot_minute": at(10, 0), "observed_at": at(10, 0), "status": "completed", "payload": {
+            "unit": "100m_cny", "providers": {"industry": "longhuvip"},
+            # Stored before items carried a unit: the taxonomy says it was CNY.
+            "items": [{"taxonomy_key": "longhu_ths_industry", "net_inflow": 17_498_330_031.0},
+                      {"taxonomy_key": "longhu_ths_industry", "net_inflow": -2_000_000_000.0, "unit": "cny"},
+                      {"taxonomy_key": "eastmoney_industry", "net_inflow": 3.0}]}}]
+        series = radar_day(_Connection(points=[], flows=flows), DAY)["main_net"]
+        self.assertEqual(series[0]["main_net"], 15_498_330_031.0, "only one vendor's boards count, each in CNY")
+        self.assertEqual((series[0]["boards"], series[0]["taxonomy_key"]), (2, "longhu_ths_industry"))
 
 
 class WiringTests(unittest.TestCase):

@@ -54,7 +54,7 @@ def board_flow_items(rows: Iterable[Any]) -> list[dict[str, Any]]:
             "taxonomy_key": TAXONOMY_KEY,
             "sector_key": sector_key,
             "label": label,
-            "net_inflow": round(net_inflow, 6),
+            "net_inflow": round(net_inflow, 6), "unit": "cny",
             "change_pct": _number(row[_CHANGE_PCT]),
             "strength": _number(row[_STRENGTH]),
             "amount": _number(row[_AMOUNT]),

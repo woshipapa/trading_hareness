@@ -62,7 +62,9 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
                "app/fuyao_provider.py", ("HITHINK_FINANCE_API_KEY", "FUYAO_API_KEY", "FUYAO_TOKEN"),
                "官方未发计费条款，按运行动态限流；无分钟K/tick/新闻公告原文；thscodes≤100 且一个坏代码整批失败；池默认分页 50"),
     # -- public web -----------------------------------------------------------
-    DataSource("eastmoney_free", "东方财富公开行情（板块资金流/观察池资金流）", "push2.eastmoney.com", "public_web", "http_json", "free",
+    # The board-flow capture records its health under this key, but akshare's
+    # board fund-flow functions read 同花顺 (data.10jqka.com.cn); see board_flow_units.
+    DataSource("eastmoney_free", "东方财富公开行情（观察池资金流）；板块资金流沿用此键，上游实为同花顺公开页", "push2.eastmoney.com", "public_web", "http_json", "free",
                "app/free_market_providers.py", risks=_EASTMONEY_RISK),
     DataSource("xuangubao", "选股宝公开涨停/炸板/跌停池", "flash-api.xuangubao.com.cn", "public_web", "http_json", "free",
                "app/datasources/sources/xuangubao_pool.py",
@@ -171,7 +173,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("sector.membership", "板块/概念成分（PIT）", "reference", "board", "taxonomy_key sector_key symbol known_at",
          "known_at 之后才可用；盘中刷新只对下一场生效"),
     _cap("sector.index_quote", "板块/概念指数行情", "daily", "board", "index_code last_price pct_change volume turnover", _OBSERVED),
-    _cap("sector.flow_curve", "板块资金流曲线", "intraday", "board", "sector net_inflow:yuan", _OBSERVED),
+    _cap("sector.flow_curve", "板块资金流曲线", "intraday", "board", "sector net_inflow:per-item unit (cny|100m_cny)", _OBSERVED),
     _cap("sector.anomaly", "板块异动", "intraday", "board", "board_code pct_change main_net_inflow change_counts", _OBSERVED),
     # flow
     _cap("flow.stock_daily", "个股资金流（日）", "daily", "all_a", "main_net:yuan super_large large medium small", "effective=交易日"),
@@ -366,9 +368,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="东财成分函数在 owner 出口不可用"),
     _bind("fuyao_ths", "sector.index_quote", 12, DECLARED, _RAW + "ths_index_prices_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", limits="thscodes≤100"),
-    _bind("eastmoney_free", "sector.flow_curve", 45, LIVE_VERIFIED, "intraday_board_flow_snapshots", "app/board_flow_capture_actions.py"),
+    _bind("eastmoney_free", "sector.flow_curve", 45, LIVE_VERIFIED, "intraday_board_flow_snapshots", "app/board_flow_capture_actions.py",
+          notes="上游实为同花顺公开资金流页 data.10jqka.com.cn（akshare stock_fund_flow_concept/industry，"
+                "owner akshare 1.18.96 于 2026-10-09 核实）；键 eastmoney_free 与 eastmoney_* 板块口径是历史名；"
+                "板块键为同花顺板块名，净额=流入-流出，单位亿元"),
     _bind("longhuvip", "sector.flow_curve", 10, DECLARED, "intraday_board_flow_snapshots", "app/longhu_board_flow.py",
-          notes="部分数值列待字段/单位校验，不冒充净资金"),
+          notes="净额列（位置 6）单位为元，条目带 unit=cny（快照级 unit 只对公开条目成立）；其余数值列待字段校验，不冒充净资金"),
     _bind("eastmoney_ztb", "sector.anomaly", 50, DECLARED, _RAW + "board_change_snapshot",
           "app/datasources/sources/eastmoney_ztb.py:fetch_board_changes"),
     # flow

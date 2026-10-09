@@ -1,14 +1,17 @@
 """Bounded one-minute board-flow capture, licensed source first.
 
 Industry flow comes from the licensed Longhu ranking when it answers and from
-Eastmoney otherwise; concept flow has no licensed equivalent and stays on
-Eastmoney.  The licensed path is preferred because it is the paid contract and
-because the public one was returning "public HTTP GET request failed after
-bounded retry" during the 2026-09-17 session while the gateway answered every
-call.
+the public pages otherwise; concept flow has no licensed equivalent and stays
+public.  The "public" pages are 同花顺's (data.10jqka.com.cn through akshare),
+although they are stored under the provider key ``eastmoney_free`` and the
+``eastmoney_*`` taxonomies - see board_flow_units, which also says why each
+item carries its own unit.  The licensed path is preferred because it is the
+paid contract and because the public one was returning "public HTTP GET
+request failed after bounded retry" during the 2026-09-17 session while the
+gateway answered every call.
 
 Board identity is never mixed: Longhu rows keep ``longhu_ths_industry`` and
-Eastmoney rows keep ``eastmoney_industry``.  The two vendors do not agree on
+public rows keep ``eastmoney_industry``.  The two vendors do not agree on
 what a board is, and folding their keys into one series would make a rotation
 look like it crossed boards when it only crossed providers.
 """
@@ -20,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
+from .board_flow_units import UPSTREAMS
 from .stable_json import tolerant_json
 
 from .akshare_provider import akshare_eastmoney_board_flow
@@ -148,11 +152,16 @@ class BoardFlowCaptureActions:
             "completed" if failures == 0 else "failed"
         )
         payload = {
-            "items": items, "rank_by": "eastmoney_net_inflow", "unit": "100m_cny",
+            "items": items, "rank_by": "net_inflow", "unit": "100m_cny",
+            "unit_scope": "public items; every item carries its own unit (Longhu industry rows are cny)",
             "missing_value_policy": "missing_is_not_zero",
             "providers": {
                 "concept": "eastmoney_free",
                 "industry": "longhuvip" if licensed_industry is not None else "eastmoney_free",
+            },
+            "upstream": {
+                "concept": UPSTREAMS["eastmoney_free"],
+                "industry": UPSTREAMS["longhuvip" if licensed_industry is not None else "eastmoney_free"],
             },
         }
 

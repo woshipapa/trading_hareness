@@ -9,10 +9,11 @@ taxonomy and never presented as THS:
 * industry flow - the Longhu full-market close's industry boards
   (``longhu_ths_industry``, ``longhuvip_composite``; net inflow in yuan,
   order-size classified, where THS reported 亿元);
-* concept flow - the closing-window snapshot of the one-minute Eastmoney
-  concept board capture (``eastmoney_concept``; net inflow in 亿元).  Its
-  board keys are that capture's, not THS concept codes, so it is never joined
-  to a THS concept;
+* concept flow - the closing-window snapshot of the one-minute public concept
+  board capture (``eastmoney_concept``; net inflow in 亿元).  Despite the key
+  it is 同花顺's own fund-flow page (akshare reads data.10jqka.com.cn), and
+  its board keys are 同花顺 board names, not THS concept codes, so joining it
+  to a THS concept takes a name match;
 * concept limit strength - sealed members per THS concept, counted from the
   captured Fuyao limit-up pool and the stored ``fuyao_ths_concept`` membership
   (``fuyao_ths_concept_limit_strength``), not THS's own list.
@@ -78,17 +79,17 @@ async def _concept_flow(day: date, run_database_blocking: Callable[..., Awaitabl
     snapshot_at, items, context = await run_database_blocking(concept_close_snapshot, db, day)
     if snapshot_at is None or not items:
         return {**base, "status": "unavailable", "sectors": 0, **context,
-                "reason": "no Eastmoney concept board snapshot in the session's closing window (14:55-15:00)"}
+                "reason": "no public (同花顺 10jqka) concept board snapshot in the session's closing window (14:55-15:00)"}
     unit = context.get("unit") or "100m_cny"
     rows = [{
         "sector_key": str(item["sector_key"]), "label": item.get("label"), "change_pct": item.get("change_pct"),
         "net_amount": item.get("net_inflow"),
-        "raw": {**item, "net_amount_unit": unit, "snapshot_observed_at": snapshot_at.isoformat()},
+        "raw": {**item, "net_amount_unit": item.get("unit") or unit, "snapshot_observed_at": snapshot_at.isoformat()},
     } for item in items]
     stored = await run_database_blocking(partial(
-        persist_board_observations, db, taxonomy_key=CONCEPT_FLOW_TAXONOMY, taxonomy_label="东方财富概念板块",
+        persist_board_observations, db, taxonomy_key=CONCEPT_FLOW_TAXONOMY, taxonomy_label="同花顺概念资金流（公开页，键沿用 eastmoney_concept）",
         provider_key=context["provider"], trade_date=day, available_at=snapshot_at, rows=rows,
-        owns_taxonomy=False, taxonomy_metadata={"source": "eastmoney", "kind": "concept"},
+        owns_taxonomy=False, taxonomy_metadata={"source": "ths_10jqka_via_akshare", "provider_key": "eastmoney_free", "kind": "concept"},
     ), timeout_seconds=CONCEPT_PERSIST_TIMEOUT_SECONDS)
     return {**base, "status": "completed", "sectors": stored, "provider": context["provider"],
             "snapshot_observed_at": snapshot_at.isoformat(), "units": {"net_amount": unit}}

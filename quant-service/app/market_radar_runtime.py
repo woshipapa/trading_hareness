@@ -9,9 +9,11 @@ stock the moment it first went beyond a band.
 
 The read side returns a day's points and lines them up with the market's
 main net inflow, which a price snapshot does not carry: it is the sum of the
-industry boards in the board-flow capture, and which vendor's definition
-that is (Eastmoney's f62, or Longhu's when the licensed industry flow is up)
-is reported beside it.  Research evidence, never an order.
+industry boards in the board-flow capture, each converted to CNY by its own
+unit (board_flow_units), and whose definition that is - Longhu's licensed
+industry ranking, or 同花顺's public fund-flow page (流入-流出) when the
+licensed one is down - is reported beside it.  Research evidence, never an
+order.
 """
 
 from __future__ import annotations
@@ -22,14 +24,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
+from .board_flow_units import UPSTREAMS, net_inflow_cny
 from .market_radar import CN_TZ, RADAR_VERSION, RadarState, radar_point
 
 PROVIDER_KEY = "local_derived"
 CAPABILITY = "market_radar"
 #: Industry taxonomies whose boards partition the market, so their sum is its main net flow.
 INDUSTRY_TAXONOMIES = ("eastmoney_industry", "longhu_ths_industry")
-#: Board-flow values are stored in 100 million CNY.
-BOARD_FLOW_UNIT = 100_000_000.0
 #: How often a day still missing its limit prices asks for them again.
 LIMIT_RETRY_SECONDS = 300.0
 
@@ -82,15 +83,23 @@ def main_net_series(connection: Any, trade_date: date) -> list[dict[str, Any]]:
     series = []
     for row in (dict(item) for item in rows):
         payload = _payload(row["payload"])
-        values = [item.get("net_inflow") for item in payload.get("items") or []
-                  if isinstance(item, Mapping) and item.get("taxonomy_key") in INDUSTRY_TAXONOMIES]
-        numbers = [float(value) for value in values if isinstance(value, (int, float))]
-        if not numbers:
+        items = [item for item in payload.get("items") or []
+                 if isinstance(item, Mapping) and item.get("taxonomy_key") in INDUSTRY_TAXONOMIES]
+        # One snapshot's industry boards come from one vendor; a mix would
+        # double-count the market, so only the vendor with the most boards counts.
+        by_taxonomy: dict[str, list[float]] = {}
+        for item in items:
+            value = net_inflow_cny(item, payload.get("unit"))
+            if value is not None:
+                by_taxonomy.setdefault(str(item["taxonomy_key"]), []).append(value)
+        if not by_taxonomy:
             continue
+        taxonomy, numbers = max(by_taxonomy.items(), key=lambda pair: len(pair[1]))
+        provider = (payload.get("providers") or {}).get("industry")
         series.append({
             "observed_at": row["observed_at"].isoformat() if hasattr(row["observed_at"], "isoformat") else row["observed_at"],
-            "main_net": round(sum(numbers) * BOARD_FLOW_UNIT, 2), "boards": len(numbers),
-            "source": (payload.get("providers") or {}).get("industry"), "status": row["status"],
+            "main_net": round(sum(numbers), 2), "boards": len(numbers), "taxonomy_key": taxonomy,
+            "source": provider, "upstream": UPSTREAMS.get(str(provider)), "status": row["status"],
         })
     return series
 
@@ -109,7 +118,8 @@ def radar_day(connection: Any, trade_date: date, *, include_entered: bool = Fals
             "middle": "全池总额减去两侧累计（轧差）；now_middle 为即时口径",
             "limit": "以当日公布涨跌停价为阈值的同一组带",
             "auction": "09:25 撮合前只有虚拟价：报告各阈值外的股票数，不计入当日集合",
-            "main_net": "行业板块主力净额之和（来源见 source：eastmoney_free 为东财 f62，longhuvip 为开盘啦口径）",
+            "main_net": "行业板块净额之和，逐条按其单位换算为元（来源见 source/upstream：longhuvip 为开盘啦授权行业排行；"
+                        "eastmoney_free 实为同花顺公开资金流页 data.10jqka.com.cn，净额=流入-流出）",
         },
         "research_only": True, "live_effect": "none",
     }
@@ -160,6 +170,6 @@ class MarketRadarRuntime:
 
 
 __all__ = [
-    "BOARD_FLOW_UNIT", "CAPABILITY", "INDUSTRY_TAXONOMIES", "MarketRadarDependencies", "MarketRadarRuntime",
+    "CAPABILITY", "INDUSTRY_TAXONOMIES", "MarketRadarDependencies", "MarketRadarRuntime",
     "PROVIDER_KEY", "main_net_series", "radar_day", "session_limits", "stored_points",
 ]

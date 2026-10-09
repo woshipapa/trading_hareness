@@ -1,4 +1,9 @@
-"""One minute's Eastmoney board cross-section, normalized for the board-flow curve.
+"""One minute's public board cross-section, normalized for the board-flow curve.
+
+The name is historical: akshare's ``stock_fund_flow_concept`` / ``_industry``
+read 同花顺's data.10jqka.com.cn, not Eastmoney. The rows keep the
+``eastmoney_*`` taxonomy keys they have always been stored under, and their
+net inflow is in 100 million CNY (see board_flow_units).
 
 Pure; moved out of main.py (docs/decisions/0008).
 """
@@ -12,7 +17,7 @@ from .numeric_utils import intraday_number
 
 
 def intraday_board_flow_curve_items(kind: str, flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize one Eastmoney board cross-section without stock-level joins.
+    """Normalize one public (同花顺) board cross-section without stock-level joins.
 
     The public response can repeat a display board while paginating.  One
     minute stores one value per exact upstream key/label; the median makes a
@@ -41,7 +46,7 @@ def intraday_board_flow_curve_items(kind: str, flows: list[dict[str, Any]]) -> l
         change_values = [float(row["change_pct"]) for row in rows if row["change_pct"] is not None]
         items.append({
             "taxonomy_key": f"eastmoney_{kind}", "sector_key": sector_key, "label": label,
-            "net_inflow": round(median(net_values), 6),
+            "net_inflow": round(median(net_values), 6), "unit": "100m_cny",
             "change_pct": round(median(change_values), 6) if change_values else None,
         })
     items.sort(key=lambda item: (-float(item["net_inflow"]), str(item["sector_key"])))
