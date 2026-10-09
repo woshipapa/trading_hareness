@@ -5,10 +5,11 @@
 > 顶层 authored JSON 是人工编写的源（两者通过 id 关联，见「authored 源」标注）。
 > 归属与发布单元遵循 `workflows/AGENTS.md` 与 `config/components.json`。
 
-## 本机 n8n（workstation，compose `n8n`，127.0.0.1:5678）— 12 个
+## 本机 n8n（workstation，compose `n8n`，127.0.0.1:5678）— 15 个
 
 | id | 名称 | active | 触发 | 归属组件 | 源文件 | 发布 / 维护 |
 | --- | --- | --- | --- | --- | --- | --- |
+| `19326e4b-a76d-411f-acd5-aec69af5d0a7` | 论文库：定时任务与飞书日报 | ✅ | cron `0 9 * * 1`；cron `0 10 * * 1`；cron `0 21 * * *`；webhook POST `/paper-ingest`；webhook POST `/paper-search`；webhook POST `/paper-feedback`；cron `30 20 * * 2`；cron `30 20 * * 1` | platform（integration） | `workflows/managed/workflows/19326e4b-a76d-411f-acd5-aec69af5d0a7.json`<br>authored 源：`workflows/paper-kb-automation.json` | 手动 import 到本机 n8n |
 | `ingestionError1234` | 统一错误记录：本地 ingestion | ✅ | error trigger | platform（integration） | `workflows/managed/workflows/ingestionError1234.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
 | `localReconcile123` | 本地队列：定时对账 | 停用 | interval {"field": "minutes", "minutesInterval": 5} | platform（integration） | `workflows/managed/workflows/localReconcile123.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
 | `mediaFinalize123` | 媒体原生：完成提交 | ✅ | webhook POST `/feishu-media-finalize` | platform（integration） | `workflows/managed/workflows/mediaFinalize123.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
@@ -18,8 +19,10 @@
 | `quantDailyResearch123` | 市场研究：收盘后候选池 | ✅ | cron `50 18 * * 1-5` | platform（integration） | `workflows/managed/workflows/quantDailyResearch123.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
 | `quantFactorResearch123` | 量化研究：每周因子与回测 | ✅ | cron `30 10 * * 6` | platform（integration） | `workflows/managed/workflows/quantFactorResearch123.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
 | `quantIntradayAlerts123` | 市场研究：盘中观察池异常提醒 | 停用 | cron `*/1 9-11 * * 1-5`；cron `*/1 13-14 * * 1-5`；cron `*/5 9-11 * * 1-5`；cron `*/5 13-14 * * 1-5` | quant-research | `workflows/managed/workflows/quantIntradayAlerts123.json`<br>authored 源：`workflows/quant-intraday-alerts.json` | `node scripts/hot-publish-quant-workflows.mjs` / `scripts/converge-*.sh` |
-| `quantMarketSnapshots123` | 市场研究：全市场午盘与收盘快照 | ✅ | cron `5 9 * * 1-5`；cron `35 11 * * 1-5`；cron `10 9 * * 1-5`；cron `0 10 * * 1-5`；cron `10 15 * * 1-5`；cron `10 18 * * 1-5`；cron `20 18 * * 1-5`；cron `25 18 * * 1-5`；cron `35 18 * * 1-5`；cron `45 18 * * 1-5` | quant-research | `workflows/managed/workflows/quantMarketSnapshots123.json`<br>authored 源：`workflows/quant-market-snapshots.json` | `node scripts/hot-publish-quant-workflows.mjs` / `scripts/converge-*.sh` |
-| `remoteArchiveSync123` | 市场研究：同步远端分析师报告 | ✅ | cron `20 18 * * 1-5` | platform（integration） | `workflows/managed/workflows/remoteArchiveSync123.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
+| `quantMarketSnapshots123` | 市场研究：全市场午盘与收盘快照 | ✅ | cron `5 9 * * 1-5`；cron `35 11 * * 1-5`；cron `10 9 * * 1-5`；cron `10 15 * * 1-5`；cron `10 18 * * 1-5`；cron `20 18 * * 1-5`；cron `25 18 * * 1-5`；cron `35 18 * * 1-5`；cron `45 18 * * 1-5` | quant-research | `workflows/managed/workflows/quantMarketSnapshots123.json`<br>authored 源：`workflows/quant-market-snapshots.json` | `node scripts/hot-publish-quant-workflows.mjs` / `scripts/converge-*.sh` |
+| `remoteArchiveMessages123` | 市场研究：同步远端分析师消息 | ✅ | cron `2-59/15 9-11,13-14 * * 1-5`；cron `22 18 * * 1-5`；manual | platform（integration） | `workflows/managed/workflows/remoteArchiveMessages123.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
+| `remoteArchiveReports123` | 市场研究：同步远端分析师报告 | ✅ | cron `*/15 9-11,13-14 * * 1-5`；cron `20 18 * * 1-5`；manual | platform（integration） | `workflows/managed/workflows/remoteArchiveReports123.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
+| `remoteArchiveSync123` | 市场研究：同步远端分析师文字 | 停用 | cron `*/15 9-11,13-14 * * 1-5`；cron `20 18 * * 1-5` | platform（integration） | `workflows/managed/workflows/remoteArchiveSync123.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
 | `xo3AHKRr4MFXrzFA` | 飞书入口：文本汇聚 | ✅ | webhook POST `/feishu-market-text` | platform（integration） | `workflows/managed/workflows/xo3AHKRr4MFXrzFA.json` | 镜像；`scripts/export-n8n-workflow-source.sh --replace` 刷新 |
 
 ## 边缘 n8n（47edge，容器 `feishu-relay-edge-n8n`）— 5 个
@@ -32,14 +35,13 @@
 | `xo3AHKRr4MFXrzFA` | 飞书入口：文本汇聚 | ✅ | webhook POST `/feishu-market-text` | feishu-relay | `workflows/edge-relay/workflows/xo3AHKRr4MFXrzFA.json` | `scripts/release edge workflows`；核验 `scripts/verify-edge-relay-workflows.sh` |
 | `xhs-intel-edge-daily-v1` | 小红书：每日采集与本地 AI 摘要 | ✅ | cron `0 8 * * *`；cron `20 8 * * *`；cron `*/30 * * * *`；cron `40 7 * * *`；cron `50 7 * * *`；cron `30 9 * * *`；webhook POST `/xhs-command` | xhs-intel | `workflows/xhs-intel-edge.json` | `xhs-intel/scripts/publish-xhs-workflow-edge.sh --apply` |
 
-## 仅 authored、当前不在任一实例镜像中 — 4 个
+## 仅 authored、当前不在任一实例镜像中 — 3 个
 
 > 这些源文件没有对应的运行时镜像行：要么尚未导入，要么实例侧已删除。
 > 用 `bash scripts/workflow-status.sh` 核对真实运行态。
 
 | id | 名称 | active | 触发 | 归属组件 | 源文件 | 发布 / 维护 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `19326e4b-a76d-411f-acd5-aec69af5d0a7` | 论文库：定时任务与飞书日报 | — | cron `0 9 * * 1`；cron `0 10 * * 1`；cron `0 21 * * *`；webhook POST `/paper-ingest`；webhook POST `/paper-search`；webhook POST `/paper-feedback`；cron `30 20 * * 2`；cron `30 20 * * 1` | platform（integration） | `workflows/paper-kb-automation.json` | 手动 import 到本机 n8n |
 | `codeDiag12345678` | 诊断：Webhook Code 节点 | 停用 | webhook POST `/runner-code-diagnostic` | platform（integration，诊断用） | `workflows/runner-code-diagnostic.json` | 手动 import 到本机 n8n |
 | `quantEdgeSyncMonitor123` | 市场研究：远端证据同步监控 | ✅ | cron `*/5 * * * *` | quant-research | `workflows/quant-edge-sync-monitor.json` | `node scripts/hot-publish-quant-workflows.mjs` / `scripts/converge-*.sh` |
 | `runnerdiag123456` | 诊断：Webhook 原生节点 | 停用 | webhook POST `/runner-diagnostic` | platform（integration，诊断用） | `workflows/runner-diagnostic.json` | 手动 import 到本机 n8n |

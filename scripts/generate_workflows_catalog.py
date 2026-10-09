@@ -119,8 +119,14 @@ def render() -> str:
 
     managed_dir = WORKFLOWS / "managed" / "workflows"
     matched_authored: set[str] = set()
+    if not managed_dir.is_dir():
+        # The workstation mirror is a gitignored export artifact; on a machine
+        # without it the local-instance table cannot be rendered.
+        out += ["## 本机 n8n（workstation）", "",
+                "> `workflows/managed/` 未导出（该目录是 gitignored 的本地审计镜像）。",
+                "> 在工作站运行 `bash scripts/export-n8n-workflow-source.sh --replace` 后重新生成本目录。", ""]
     rows = []
-    for path in sorted(managed_dir.glob("*.json")):
+    for path in sorted(managed_dir.glob("*.json")) if managed_dir.is_dir() else []:
         workflow = _load_workflows(path)[0]
         workflow_id = str(workflow.get("id"))
         extra = ""
@@ -136,7 +142,8 @@ def render() -> str:
             ]) + " |")
             continue
         rows.append(_row(workflow, f"managed/workflows/{path.name}"))
-    out += [f"## 本机 n8n（workstation，compose `n8n`，127.0.0.1:5678）— {len(rows)} 个", "", *HEADER, *rows, ""]
+    if managed_dir.is_dir():
+        out += [f"## 本机 n8n（workstation，compose `n8n`，127.0.0.1:5678）— {len(rows)} 个", "", *HEADER, *rows, ""]
 
     rows = []
     edge_dir = WORKFLOWS / "edge-relay" / "workflows"

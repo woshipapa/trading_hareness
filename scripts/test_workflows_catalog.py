@@ -11,6 +11,10 @@ import generate_workflows_catalog as catalog  # noqa: E402
 
 class WorkflowsCatalogTests(unittest.TestCase):
     def test_committed_catalog_matches_the_generator(self):
+        if not (ROOT / "workflows" / "managed" / "workflows").is_dir():
+            # The workstation mirror is gitignored; without it the committed
+            # catalog (generated where the mirror exists) cannot be reproduced.
+            self.skipTest("workflows/managed not exported on this machine")
         self.assertTrue(catalog.OUTPUT.exists(), "workflows/CATALOG.md is missing")
         self.assertEqual(catalog.OUTPUT.read_text(encoding="utf-8"), catalog.render(),
                          "workflows/CATALOG.md is stale; run python3 scripts/generate_workflows_catalog.py")
