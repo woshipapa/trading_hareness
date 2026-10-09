@@ -3837,7 +3837,7 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         recompute_intraday_outcomes=recompute_analyst_intraday_outcomes_for_date,
         recompute_scorecards=recompute_scorecards, rebuild_analyst_research=rebuild_analyst_research_for_date,
         run_post_close_strategy=run_post_close_strategy, persist_watchlist_main_wave=persist_watchlist_main_wave_research,
-        refresh_decision_research=refresh_decision_research_and_plans,
+        refresh_decision_research=refresh_decision_research_and_plans, materialize_candidate_ledger=materialize_strategy_daily_candidate_ledger,
         build_research_snapshot=build_snapshot, run_orchestrator=run_post_close_refresh_orchestrated,
         record_stage=record_stage_with_receipt, lease_key=POST_CLOSE_REFRESH_LEASE_KEY,
         lease_seconds=post_close_refresh_lease_seconds, acquire_lease=acquire_runtime_lease,

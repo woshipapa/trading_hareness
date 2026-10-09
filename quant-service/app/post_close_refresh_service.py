@@ -30,6 +30,7 @@ POST_CLOSE_STAGE_ORDER = (
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
     "watchlist_main_wave", "teacher_review_roll", "watch_daily_review", "xiaojie_outcomes", "research_snapshot",
+    "candidate_ledger",
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
@@ -60,6 +61,8 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     # Settles the session's 小杰 observations and refreshes the previous
     # session, whose next-open/next-close columns only exist from today.
     "xiaojie_outcomes": 120.0,
+    # Normalizes every strategy's own persisted output for the session into one ledger.
+    "candidate_ledger": 180.0,
 }
 
 POST_CLOSE_STAGE_DEPENDENCIES = {
@@ -81,6 +84,9 @@ POST_CLOSE_STAGE_DEPENDENCIES = {
     "teacher_review_roll": ("full_market_daily", "daily_control_reconciliation"),
     "watch_daily_review": ("full_market_daily", "daily_control_reconciliation"),
     "xiaojie_outcomes": ("full_market_daily", "daily_control_reconciliation"),
+    # The ledger reads what the strategy stages persisted; before them it would
+    # record a session with half its lines missing.
+    "candidate_ledger": ("daily_control_reconciliation", "post_close_strategy", "limit_lift_pattern_mining"),
 }
 
 
@@ -132,6 +138,7 @@ class PostCloseRefreshDependencies:
     safe_error_detail: Callable[[str, int], str]
     json_safe: Callable[[Any], Any]
     longhu_supplemental_sync: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    materialize_candidate_ledger: Callable[[date], Any] | None = None
     teacher_review_roll: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     watch_daily_review: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     xiaojie_outcomes: Callable[[date], Awaitable[dict[str, Any]]] | None = None
@@ -303,6 +310,13 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         ),
         "research_snapshot": lambda: dependencies.run_database(
             dependencies.build_research_snapshot, SnapshotRequest(as_of_date=trade_date),
+        ),
+        # Until 2026-10-09 only the daily pipeline built the ledger, and nothing ran that
+        # every session: the last ledger days were 09-18, 09-21, 09-22 and 09-29.
+        "candidate_ledger": (
+            (lambda: dependencies.run_database(dependencies.materialize_candidate_ledger, trade_date, timeout_seconds=180))
+            if dependencies.materialize_candidate_ledger is not None
+            else (lambda: {"status": "skipped", "reason": "candidate ledger not wired", "research_only": True})
         ),
     }
 

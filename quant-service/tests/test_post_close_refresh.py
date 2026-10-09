@@ -54,6 +54,7 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             await kwargs["actions"]["full_market_daily"]()
             await kwargs["actions"]["akshare_supplements"]()
             await kwargs["actions"]["cninfo_announcements"]()
+            captured["ledger"] = await kwargs["actions"]["candidate_ledger"]()
             return {"status": "completed", "stages": {}}
 
         dependencies = PostCloseRefreshDependencies(
@@ -79,6 +80,7 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             acquire_lease=lambda *_: True, renew_lease=lambda *_: True, release_lease=lambda *_: None,
             safe_error_detail=lambda value, _limit: value, json_safe=lambda value: value,
             sync_forward_calendar=calendar,
+            materialize_candidate_ledger=lambda day: {"post_close_base_ready": 3, "day": day},
         )
 
         result = await run_post_close_refresh(
@@ -86,6 +88,10 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(captured["calendar"], "the forward calendar stage runs the wired sync")
         self.assertEqual(POST_CLOSE_STAGE_ORDER[:2], ("stale_fetch_runs", "trade_calendar"))
+        self.assertEqual(POST_CLOSE_STAGE_ORDER[-1], "candidate_ledger", "the ledger runs after every strategy stage")
+        self.assertEqual(captured["ledger"], {"status": "completed"},
+                         "the ledger stage is wired and runs through run_database")
+        self.assertIn("post_close_strategy", POST_CLOSE_STAGE_DEPENDENCIES["candidate_ledger"])
         self.assertNotIn("trade_calendar", POST_CLOSE_STAGE_DEPENDENCIES)
 
         self.assertEqual(result["status"], "completed")
