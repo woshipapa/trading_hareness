@@ -24,6 +24,11 @@ FILES: dict[str, dict[str, str]] = {
         "frontend": "frontend/src/shared/http.ts",
         "feishu-dashboard": "feishu-relay/dashboard/src/shared/http.ts",
     },
+    "tokens.css": {
+        "frontend": "frontend/src/tokens.css",
+        "feishu-dashboard": "feishu-relay/dashboard/src/tokens.css",
+        "xhs-dashboard": "xhs-intel/dashboard/tokens.css",
+    },
 }
 
 
