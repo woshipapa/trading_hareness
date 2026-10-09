@@ -2,7 +2,7 @@
 
 import unittest
 from datetime import date, datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.datasources.collectors import intraday, post_close
 from app.datasources.derived.tick_flow import Tick
@@ -271,7 +271,11 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
 
         deps = self._deps(recorder, fuyao_fetch=fuyao, fuyao_snapshot=snapshot)
         deps.project_valuations = project
-        result = await post_close.job_fuyao_valuation_index(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        state = post_close.ArchiveState()
+        archived = await post_close.job_fuyao_valuation_index(deps, state, date(2026, 10, 9), EVENING)
+        self.assertEqual(called, [])
+        self.assertEqual(archived['status'], 'completed')
+        result = await post_close.job_daily_valuation_projection(deps, state, date(2026, 10, 9), EVENING)
         self.assertEqual(called, [date(2026, 10, 9)])
         self.assertEqual(result["daily_valuation_projection"]["status"], "partial")
         self.assertEqual(result["status"], "pending")
@@ -279,15 +283,39 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
     async def test_pending_archive_projection_is_retried_instead_of_marked_done(self):
         recorder = Recorder()
         state = post_close.ArchiveState()
+        deps = self._deps(recorder)
+        deps.project_valuations = AsyncMock(side_effect=[{'status':'partial'}, {'status':'completed'}])
+        capture = AsyncMock(return_value={'status':'completed', 'stored':10})
+        enabled = {job.key: job.key in {'fuyao_valuation_index','daily_valuation_projection'} for job in post_close.JOBS}
+        with patch.dict(post_close.RUNNERS, {'fuyao_valuation_index':capture}), patch.object(post_close.time_module, 'monotonic') as clock:
+            clock.return_value = 1000
+            first = await post_close.run_due_jobs(deps,state,EVENING,trading_day=True,enabled=enabled)
+            self.assertEqual(first['daily_valuation_projection']['status'],'pending')
+            self.assertIn('fuyao_valuation_index',state.done)
+            self.assertNotIn('daily_valuation_projection',state.done)
+            clock.return_value = 1601
+            second = await post_close.run_due_jobs(deps,state,EVENING,trading_day=True,enabled=enabled)
+        self.assertNotIn('fuyao_valuation_index',second)
+        self.assertEqual(capture.await_count,1)
+        self.assertEqual(deps.project_valuations.await_count,2)
+        self.assertIn('daily_valuation_projection',state.done)
 
-        async def pending(*_args):
-            return {"status": "pending", "daily_valuation_projection": {"status": "partial"}}
+    async def test_projection_restarts_from_database_without_any_provider(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        deps.project_valuations = AsyncMock(return_value={'status':'completed'})
+        deps.collector.fuyao_fetch = AsyncMock(side_effect=AssertionError('projection must not fetch'))
+        result = await post_close.run_due_jobs(deps,post_close.ArchiveState(),EVENING,trading_day=True,
+            enabled={job.key:job.key=='daily_valuation_projection' for job in post_close.JOBS})
+        self.assertEqual(result['daily_valuation_projection']['status'],'completed')
+        deps.collector.fuyao_fetch.assert_not_awaited()
 
-        with patch.dict(post_close.RUNNERS, {"fuyao_valuation_index": pending}):
-            await post_close.run_due_jobs(self._deps(recorder), state, EVENING, trading_day=True,
-                enabled={job.key: job.key == "fuyao_valuation_index" for job in post_close.JOBS})
-        self.assertNotIn("fuyao_valuation_index", state.done)
-        self.assertFalse(recorder.health)
+    async def test_projection_job_is_absent_when_default_callback_disabled(self):
+        recorder = Recorder()
+        result = await post_close.run_due_jobs(self._deps(recorder),post_close.ArchiveState(),EVENING,trading_day=True,
+            enabled={job.key:job.key=='daily_valuation_projection' for job in post_close.JOBS})
+        self.assertEqual(result,{})
+        self.assertEqual(recorder.health,[])
 
     async def test_run_due_jobs_marks_success_and_records_failure(self):
         recorder = Recorder()
