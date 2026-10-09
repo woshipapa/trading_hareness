@@ -71,8 +71,10 @@ if [[ "$apply" != true ]]; then
 fi
 
 ssh_command=(ssh -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+# 0755：候选文件要被 n8n 容器里的非 root 用户读取；内容是已提交的 workflow
+# JSON，不含机密。
 stage="/tmp/xhs-workflow-deploy-$(date -u +%Y%m%d%H%M%S)-$$"
-"${ssh_command[@]}" "$edge_host" "install -d -m 0700 '$stage' '$stage/cli'"
+"${ssh_command[@]}" "$edge_host" "install -d -m 0755 '$stage' '$stage/cli'"
 scp -i "$edge_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -q \
   "$workflow_file" "$edge_host:$stage/cli/candidate.json"
 
@@ -128,13 +130,13 @@ trap finish EXIT
 "${compose[@]}" stop n8n >/dev/null
 n8n_stopped=true
 workflow_cli=("${compose[@]}" run --rm --no-deps -v "$stage/cli:/xhs-deploy:ro" n8n)
-if "${workflow_cli[@]}" import:workflow --input=/xhs-deploy/candidate.json >/dev/null && \
-   "${workflow_cli[@]}" publish:workflow --id="$workflow_id" >/dev/null; then
+if "${workflow_cli[@]}" import:workflow --input=/xhs-deploy/candidate.json && \
+   "${workflow_cli[@]}" publish:workflow --id="$workflow_id"; then
   echo "XHS workflow published; backup=$workflow_backup"
 else
   if [ -f "$stage/cli/before.json" ]; then
-    "${workflow_cli[@]}" import:workflow --input=/xhs-deploy/before.json >/dev/null || true
-    "${workflow_cli[@]}" publish:workflow --id="$workflow_id" >/dev/null || true
+    "${workflow_cli[@]}" import:workflow --input=/xhs-deploy/before.json || true
+    "${workflow_cli[@]}" publish:workflow --id="$workflow_id" || true
   fi
   echo 'XHS workflow publication failed; restored the previous definition' >&2
   exit 1
