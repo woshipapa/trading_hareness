@@ -163,11 +163,23 @@ class RealtimeIndicatorsTests(unittest.TestCase):
     def test_a_short_window_degrades_kdj_without_suppressing_macd(self):
         # MACD needs no window at all, so a watchlist symbol with only a few
         # retained bars must still get its histogram.
-        result = self._call(prior_sessions=PRIOR_SESSIONS[:3])
+        result = self._call(prior_sessions=PRIOR_SESSIONS[-3:])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["degraded"], ["kdj"])
         self.assertIsNotNone(result["macd"])
         self.assertIsNone(result["kdj"])
+
+    def test_a_seed_older_than_the_previous_session_is_stale_not_advanced(self):
+        # 2026-10-09: the newest stk_factor_pro rows were from 2026-09-17.
+        later = [*PRIOR_SESSIONS[1:], {"trading_date": "20260916", "high": 48.0, "low": 46.5}]
+        result = self._call(prior_sessions=later)
+        self.assertEqual(result["status"], "seed_stale")
+        self.assertIn("20260915", result["reason"])
+        self.assertIn("20260916", result["reason"])
+        self.assertIsNone(result["macd"])
+
+    def test_without_any_prior_session_the_seed_cannot_be_trusted(self):
+        self.assertEqual(self._call(prior_sessions=[])["status"], "seed_stale")
 
     def test_no_factor_row_reports_the_missing_seed(self):
         self.assertEqual(self._call(factor_row=None)["status"], "seed_unavailable")

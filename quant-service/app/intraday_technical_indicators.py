@@ -195,8 +195,15 @@ def realtime_indicators(
     status forces each consumer to guess which fields exist this time, and the
     scan aggregates these across the whole basket where most entries are the
     unavailable ones.
+
+    A seed counts only when it is the symbol's previous session - the last of
+    ``prior_sessions``.  Advancing an older seed one step answers for a day
+    that never followed it: on 2026-10-09 the newest ``stk_factor_pro`` rows
+    were from 2026-09-17, three weeks of sessions earlier, and every reading
+    built on them looked complete.  Those report ``seed_stale`` instead.
     """
     _require_basis(basis)
+    prior_sessions = list(prior_sessions)
 
     def reading(status: str, *, reason: str | None = None,
                 macd: dict[str, Any] | None = None, kdj: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -224,6 +231,11 @@ def realtime_indicators(
     ) if bounds else None
     if macd is None and kdj is None:
         return reading("seed_unavailable", reason="the published row carries no usable factor")
+    seed_day = _trade_date_key(factor_row.get("trade_date"))
+    previous = _trade_date_key(prior_sessions[-1].get("trading_date")) if prior_sessions else None
+    if previous is None or seed_day != previous:
+        return reading("seed_stale", reason=(f"the newest published factor row is from {seed_day}; "
+                                             f"the previous session is {previous or 'unknown'}"))
     return reading("completed", macd=macd, kdj=kdj)
 
 
