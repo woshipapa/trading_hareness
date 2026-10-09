@@ -118,8 +118,12 @@ def datasource_board(connection: Any, now: datetime) -> dict[str, Any]:
     for key, source in SOURCES.items():
         bindings = capabilities_of(key)
         lifecycle = _lifecycle({binding.status for binding in bindings})
+        # Only a capability this source is the primary for sets its cadence: a
+        # fallback or a scheduled snapshot source (akshare's midday quote) is
+        # not expected to succeed every few minutes.
         grains = {CAPABILITIES[binding.capability].grain for binding in bindings
-                  if binding.capability in CAPABILITIES and binding.status in (LIVE_VERIFIED, DECLARED)}
+                  if binding.capability in CAPABILITIES and binding.status in (LIVE_VERIFIED, DECLARED)
+                  and (_primary(binding.capability)[0] or binding).source == key}
         rows = grouped.pop(key, [])
         verdict, reasons = source_verdict(lifecycle, grains, rows, now)
         successes = [row["last_success_at"] for row in rows if row["last_success_at"] is not None]

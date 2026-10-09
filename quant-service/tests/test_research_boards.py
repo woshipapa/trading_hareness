@@ -79,6 +79,13 @@ class DatasourceBoardTests(unittest.TestCase):
         self.assertEqual(alerts.get("tencent_free"), "circuit_open")
         self.assertNotIn("tushare_primary", alerts)
 
+    def test_only_a_primary_intraday_source_must_be_fresh_within_minutes(self):
+        rows = [health("longhuvip", "stock_quote", ok_ago=timedelta(minutes=40)),
+                health("tencent_free", "intraday_minute", ok_ago=timedelta(minutes=40))]
+        sources = {item["key"]: item for item in datasource_board(_Connection(rows), IN_SESSION)["sources"]}
+        self.assertEqual(sources["longhuvip"]["verdict"], "stale", "the primary watch quote went quiet")
+        self.assertEqual(sources["tencent_free"]["verdict"], "healthy", "a fallback minute source is not on a 15-minute clock")
+
     def test_capabilities_come_from_the_catalog_and_health_from_the_table(self):
         longhu = self.sources["longhuvip"]
         self.assertTrue(any(item["capability"] == "limits.seal_detail" for item in longhu["capabilities"]))
