@@ -116,7 +116,7 @@ class SyncTests(unittest.TestCase):
 
     def test_a_list_ending_today_passes_while_the_held_calendar_runs_a_month_ahead(self):
         result = self._sync_with_list_ending_today(date(2026, 12, 31))
-        self.assertEqual((result["status"], result["new_dates"]), ("completed", 0))
+        self.assertEqual((result["status"], result["new_dates"], result["reason"]), ("completed", 0, None))
         self.assertGreaterEqual(result["runway_sessions"], 20)
         self.assertEqual(result["calendar_through"], "2026-12-31")
 

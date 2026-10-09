@@ -173,7 +173,7 @@ async def sync_forward_calendar(
         # runway stays blocked, a month before the intraday gate would close.
         runway = sorted(day for day, is_open in held.items() if is_open and day > today)
         if plan.span and plan.span[1] <= today and len(runway) >= RUNWAY_SESSIONS:
-            return {**result, "status": "completed", "new_dates": 0, "runway_sessions": len(runway),
+            return {**result, "status": "completed", "reason": None, "new_dates": 0, "runway_sessions": len(runway),
                     "calendar_through": str(max(held)),
                     "note": f"vendor list ends at {plan.span[1]}; held calendar covers {len(runway)} sessions "
                             f"through {runway[-1]}"}
