@@ -25,7 +25,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .datasources.catalog import CAPABILITIES, SOURCES, bindings_for, capabilities_of
+from .datasources.catalog import CAPABILITIES, HEALTH_CAPABILITY_ALIASES, SOURCES, bindings_for, capabilities_of, health_capability
 from .datasources.contracts import DECLARED, DORMANT, LIVE_VERIFIED, RETIRED, UNSUPPORTED
 from .platform.strategy_data_needs import STRATEGY_DATA_NEEDS
 from .platform.strategy_registry import STRATEGY_CONTRACTS
@@ -178,6 +178,10 @@ def _health_item(row: dict[str, Any], now: datetime) -> dict[str, Any]:
     }
 
 
+def _parse(value: Any) -> datetime | None:
+    return datetime.fromisoformat(value) if isinstance(value, str) else value
+
+
 def _ledger_days(connection: Any, since: date) -> dict[str, dict[str, Any]]:
     rows = connection.execute(
         """SELECT DISTINCT ON (strategy_key) strategy_key,as_of_date,count(*) OVER (PARTITION BY strategy_key,as_of_date) AS n
@@ -191,24 +195,58 @@ def _ledger_days(connection: Any, since: date) -> dict[str, dict[str, Any]]:
 BLOCKING = {"circuit_open", "failing", "stale", "never_succeeded", "retired", "dormant", "unserved"}
 
 
+def _primary(capability: str) -> tuple[Any | None, list[Any]]:
+    """The binding a capability is read from now: live-verified first, then declared, by priority."""
+    serving = [binding for binding in bindings_for(capability) if binding.status in (LIVE_VERIFIED, DECLARED)]
+    serving.sort(key=lambda binding: (binding.status != LIVE_VERIFIED, binding.priority, binding.source))
+    return (serving[0] if serving else None), serving[1:]
+
+
+def need_verdict(source: str, capability: str, rows: list[dict[str, Any]], source_verdict_value: str,
+                 now: datetime) -> str:
+    """How healthy one capability of one source is, not the source as a whole.
+
+    A source's own row for the capability decides when there is one. Otherwise
+    the source verdict stands, unless every troubled row of the source
+    belongs to another catalog capability: then this capability is simply not
+    monitored on its own (腾讯's order-book failures say nothing about its
+    published limit prices).
+    """
+    physical = health_capability(source, capability)
+    own = [row for row in rows if row["capability"] == physical]
+    if own:
+        return source_verdict("active", {CAPABILITIES[capability].grain} if capability in CAPABILITIES else set(), own, now)[0]
+    if source_verdict_value in BLOCKING - {"retired", "dormant", "unserved"}:
+        others = {alias for (alias_source, alias_capability), alias in HEALTH_CAPABILITY_ALIASES.items()
+                  if alias_source == source and alias_capability != capability}
+        troubled = [row for row in rows if (row["consecutive_failures"] or 0) > 0
+                    or (row["circuit_open_until"] is not None and row["circuit_open_until"] > now)]
+        if troubled and all(row["capability"] in others for row in troubled):
+            return "unmonitored"
+    return source_verdict_value
+
+
 def strategy_board(connection: Any, now: datetime) -> dict[str, Any]:
     board = datasource_board(connection, now)
     verdicts = {item["key"]: item["verdict"] for item in board["sources"]}
+    raw_rows = {item["key"]: [{**row, "last_success_at": _parse(row["last_success_at"]),
+                               "circuit_open_until": _parse(row["circuit_open_until"])} for row in item["health"]]
+                for item in board["sources"]}
     ledger = _ledger_days(connection, now.astimezone(CN_TZ).date() - timedelta(days=45))
     strategies = []
     for key, contract in STRATEGY_CONTRACTS.items():
         needs = STRATEGY_DATA_NEEDS.get(key)
         inputs = []
         for need in needs.needs if needs else ():
-            serving = [binding for binding in bindings_for(need.capability) if binding.status in (LIVE_VERIFIED, DECLARED)]
-            primary = serving[0] if serving else None
+            primary, rest = _primary(need.capability)
             inputs.append({
                 "capability": need.capability, "label": CAPABILITIES[need.capability].label if need.capability in CAPABILITIES else need.capability,
                 "required": need.required, "purpose": need.purpose, "taxonomies": list(need.taxonomies),
                 "source": primary.source if primary else None, "binding_status": primary.status if primary else None,
-                "source_verdict": verdicts.get(primary.source, "unmonitored") if primary else "unserved",
+                "source_verdict": need_verdict(primary.source, need.capability, raw_rows.get(primary.source, []),
+                                               verdicts.get(primary.source, "unmonitored"), now) if primary else "unserved",
                 "fallbacks": [{"source": binding.source, "status": binding.status, "verdict": verdicts.get(binding.source)}
-                              for binding in serving[1:3]],
+                              for binding in rest[:2]],
             })
         required = [item for item in inputs if item["required"]]
         blocked = [item for item in required if item["source_verdict"] in BLOCKING]

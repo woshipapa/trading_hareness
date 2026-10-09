@@ -100,6 +100,22 @@ class StrategyBoardTests(unittest.TestCase):
             self.assertEqual(snapshot_needs[0]["source_verdict"], "failing")
             self.assertEqual(launch["readiness"], "blocked")
 
+    def test_a_failure_in_another_capability_of_the_source_does_not_block_this_one(self):
+        # 2026-10-09: 腾讯's order-book quote failed while its published limit prices landed fine.
+        rows = [health("tencent_free", "order_book_quote", ok_ago=timedelta(minutes=2), failures=5,
+                       circuit_for=timedelta(minutes=3)),
+                health("longhuvip", "stock_quote", ok_ago=timedelta(minutes=1))]
+        board = strategy_board(_Connection(rows), IN_SESSION)
+        limits = [item for strategy in board["strategies"] for item in strategy["inputs"]
+                  if item["capability"] == "limits.prices"]
+        self.assertTrue(limits)
+        self.assertTrue(all(item["source_verdict"] != "circuit_open" for item in limits))
+
+    def test_the_primary_is_the_live_verified_source_before_a_declared_one(self):
+        from app.research_boards import _primary
+        primary, _rest = _primary("bars.daily")
+        self.assertEqual((primary.source, primary.status), ("longhuvip_composite", "live_verified"))
+
     def test_every_registered_strategy_is_on_the_board(self):
         from app.platform.strategy_registry import STRATEGY_CONTRACTS
         board = strategy_board(_Connection([]), IN_SESSION)
