@@ -58,6 +58,8 @@ export const researchReads = new Map([
 	['/api/research/strategy/cards', '/api/v1/strategies/cards'],
 	['/api/research/indicators', '/api/v1/indicators'],
 	['/api/research/indicators/health', '/api/v1/indicators/health'],
+	['/api/research/datasources/board', '/api/v1/datasources/board'],
+	['/api/research/strategy/board', '/api/v1/strategies/board'],
 	['/api/research/strategy/reviews/latest', '/api/v1/strategy/reviews/latest'],
 	['/api/research/strategy/post-close/latest', '/api/v1/strategy/post-close/latest'],
 	['/api/research/strategy/ablation/latest', '/api/v1/strategy/ablation/latest'],

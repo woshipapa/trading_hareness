@@ -1,4 +1,4 @@
-"""Read-only session routes: the minute radar, the limit-up detail, the strategy cards and indicator health."""
+"""Read-only research boards: radar, limit-up detail, strategy cards, indicator health, data sources, strategies."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from ..indicator_health import indicator_health
 from ..indicator_registry import registry
 from ..limit_detail_read_model import limit_detail_day
 from ..market_radar_runtime import radar_day
+from ..research_boards import datasource_board, strategy_board
 from ..strategy_cards_read_model import strategy_cards
 
 
@@ -65,6 +66,22 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
                 return indicator_health(connection, day, now, wanted)
 
         return await run_database_blocking(read, timeout_seconds=60)
+
+    @router.get("/api/v1/datasources/board")
+    async def datasources_board_route() -> dict[str, Any]:
+        def read() -> dict[str, Any]:
+            with database.transaction() as connection:
+                return datasource_board(connection, datetime.now(CN_TZ))
+
+        return await run_database_blocking(read, timeout_seconds=30)
+
+    @router.get("/api/v1/strategies/board")
+    async def strategies_board_route() -> dict[str, Any]:
+        def read() -> dict[str, Any]:
+            with database.transaction() as connection:
+                return strategy_board(connection, datetime.now(CN_TZ))
+
+        return await run_database_blocking(read, timeout_seconds=30)
 
     return router
 

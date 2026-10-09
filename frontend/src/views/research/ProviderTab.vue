@@ -4,10 +4,11 @@ import { Refresh, WarningFilled } from '@element-plus/icons-vue';
 import VChart from 'vue-echarts';
 import { dashboardContextKey } from '../../dashboard-context';
 import RealtimeServicesPanel from '../../components/RealtimeServicesPanel.vue';
+import DatasourceBoardPanel from '../../components/DatasourceBoardPanel.vue';
 
 export default defineComponent({
   name: 'ProviderTab',
-  components: { Refresh, RealtimeServicesPanel, VChart, WarningFilled },
+  components: { DatasourceBoardPanel, Refresh, RealtimeServicesPanel, VChart, WarningFilled },
   setup() {
     const dashboard = inject(dashboardContextKey);
     if (!dashboard) throw new Error('research tab requires the dashboard shell context');
@@ -18,6 +19,7 @@ export default defineComponent({
 
 <template>
 
+  <DatasourceBoardPanel />
   <el-card shadow="never" header="实时数据源健康（独立证据）" class="section-gap">
     <el-alert :title="realtimeProviderHealth.evidence_mode === 'stored_observations' ? '仅读取最近一次已落库的源级观测；不会因为打开面板而探测上游。' : '当前部署版本尚未提供独立源级健康接口。'" type="info" :closable="false" show-icon />
     <el-descriptions :column="mobileLayout ? 1 : 4" border size="small" class="section-gap">

@@ -9,10 +9,10 @@
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
 | `main.py` top-level functions | 430 |
-| Python modules under `app/` | 523 |
+| Python modules under `app/` | 524 |
 | HTTP router modules | 48 |
 | Alembic migrations | 109 |
-| Frontend source files | 58 |
+| Frontend source files | 62 |
 
 ## Domain naming inventory
 
@@ -27,7 +27,7 @@ New behaviour should be owned by an existing domain package/owner.
 | `longhu` | 18 |
 | `analyst` | 17 |
 | `market` | 17 |
-| `research` | 15 |
+| `research` | 16 |
 | `post` | 13 |
 | `board` | 12 |
 | `limit` | 11 |
@@ -98,7 +98,9 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/api/generated.ts`
 - `frontend/src/api/http.test.ts`
 - `frontend/src/api/http.ts`
+- `frontend/src/components/DatasourceBoardPanel.vue`
 - `frontend/src/components/RealtimeServicesPanel.vue`
+- `frontend/src/components/StrategyBoardPanel.vue`
 - `frontend/src/components/TenDayLeaderRotationPanel.vue`
 - `frontend/src/composables/useDashboardWorkspace.test.ts`
 - `frontend/src/composables/useDashboardWorkspace.ts`
@@ -129,6 +131,8 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/main.ts`
 - `frontend/src/research/analyst-chart.test.ts`
 - `frontend/src/research/analyst-chart.ts`
+- `frontend/src/research/boards.test.ts`
+- `frontend/src/research/boards.ts`
 - `frontend/src/research/remote-runtime.test.ts`
 - `frontend/src/research/remote-runtime.ts`
 - `frontend/src/research/session-radar.test.ts`

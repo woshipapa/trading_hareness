@@ -63,6 +63,17 @@ class StrategyCardsSqlTests(unittest.TestCase):
         self.assertEqual(statuses["market.radar"], "missing")
         self.assertEqual(statuses["strategy.ledger"], "fail", "two lines on the previous session, below the warning floor of four")
 
+    def test_the_research_boards_run_on_the_real_schema(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from app.research_boards import datasource_board, strategy_board
+
+        now = datetime(2099, 3, 4, 18, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        self.assertTrue(datasource_board(self.connection, now)["sources"])
+        board = strategy_board(self.connection, now)
+        self.assertTrue(board["strategies"])
+
     def test_the_limit_detail_and_radar_reads_run_on_the_real_schema(self) -> None:
         from app.limit_detail_read_model import limit_detail_day
         from app.market_radar_runtime import radar_day
