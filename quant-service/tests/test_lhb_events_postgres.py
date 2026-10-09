@@ -187,6 +187,17 @@ class DragonTigerReadSqlTests(unittest.TestCase):
         join = result["taxonomies"]["eastmoney_concept"]["membership_join"]
         self.assertEqual((join["matched"], join["unmatched"]), (1, ["无成分概念"]))
 
+        # A second run with nothing new leaves every outcome row as it was. On
+        # 2026-10-09 the per-row rewrite of the whole history took most of an hour
+        # over the owner's tunnel and held its rows for the next run.
+        versions = """SELECT taxonomy_key,sector_key,horizon_days,status,ctid::text AS version
+                        FROM quant.sector_flow_daily_outcomes WHERE signal_date=%s"""
+        first = {tuple(row.values())[:4]: row["version"] for row in self.connection.execute(versions, (day,)).fetchall()}
+        rebuild_sector_flow_daily_features(self.database, day, day)
+        second = {tuple(row.values())[:4]: row["version"] for row in self.connection.execute(versions, (day,)).fetchall()}
+        self.assertTrue(first, "the first run settles outcome rows for the session")
+        self.assertEqual(first, second)
+
 
 if __name__ == "__main__":
     unittest.main()

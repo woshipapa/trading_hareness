@@ -226,6 +226,38 @@ def _rebuild_taxonomy(database: Any, taxonomy_key: str, membership_taxonomy: str
     return result
 
 
+#: Outcome rows sent per pipelined batch. The writer used one round trip a row:
+#: every evening it rewrites the whole history (tens of thousands of rows), which
+#: over the owner's tunnel (52 ms to the database) took most of an hour. On
+#: 2026-10-09 it overran the stage budget, and its thread kept the transaction open
+#: for 47 minutes, holding the rows the next run's stage was waiting to write.
+OUTCOME_BATCH = 2_000
+#: A row whose values did not change is left alone: no new row version, no index
+#: churn. Readers aggregate the outcomes and never look at updated_at.
+OUTCOME_UPSERT = """INSERT INTO quant.sector_flow_daily_outcomes(
+       taxonomy_key,sector_key,signal_date,horizon_days,transition,status,
+       entry_date,exit_date,entry_close,exit_close,raw_return,cross_section_excess_return,
+       directional_return,outcome_available_at,quality_flags)
+   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+   ON CONFLICT(taxonomy_key,sector_key,signal_date,horizon_days) DO UPDATE SET
+     transition=EXCLUDED.transition,status=EXCLUDED.status,entry_date=EXCLUDED.entry_date,
+     exit_date=EXCLUDED.exit_date,entry_close=EXCLUDED.entry_close,exit_close=EXCLUDED.exit_close,
+     raw_return=EXCLUDED.raw_return,cross_section_excess_return=EXCLUDED.cross_section_excess_return,
+     directional_return=EXCLUDED.directional_return,
+     outcome_available_at=EXCLUDED.outcome_available_at,quality_flags=EXCLUDED.quality_flags,
+     updated_at=now()
+   WHERE (quant.sector_flow_daily_outcomes.transition,quant.sector_flow_daily_outcomes.status,
+          quant.sector_flow_daily_outcomes.entry_date,quant.sector_flow_daily_outcomes.exit_date,
+          quant.sector_flow_daily_outcomes.entry_close,quant.sector_flow_daily_outcomes.exit_close,
+          quant.sector_flow_daily_outcomes.raw_return,quant.sector_flow_daily_outcomes.cross_section_excess_return,
+          quant.sector_flow_daily_outcomes.directional_return,quant.sector_flow_daily_outcomes.outcome_available_at,
+          quant.sector_flow_daily_outcomes.quality_flags)
+     IS DISTINCT FROM
+         (EXCLUDED.transition,EXCLUDED.status,EXCLUDED.entry_date,EXCLUDED.exit_date,EXCLUDED.entry_close,
+          EXCLUDED.exit_close,EXCLUDED.raw_return,EXCLUDED.cross_section_excess_return,EXCLUDED.directional_return,
+          EXCLUDED.outcome_available_at,EXCLUDED.quality_flags)"""
+
+
 def materialize_sector_flow_daily_outcomes(database: Any, as_of_date: date) -> dict[str, Any]:
     """Settle 1/3/5-observation close responses using only stored daily rows."""
     with database.transaction() as connection:
@@ -299,36 +331,26 @@ def materialize_sector_flow_daily_outcomes(database: Any, as_of_date: date) -> d
     for key, values in groups.items():
         medians[key] = median(values)
     status_counts: dict[str, int] = {}
-    with database.transaction() as connection:
-        for item in provisional:
-            if item["status"] == "matured":
-                benchmark = medians.get((item["taxonomy_key"], item["trading_date"], item["horizon_days"]))
-                evaluated = sector_flow_outcome(
-                    item["transition"], item["entry_close"], item["exit_close"],
-                    cross_section_median_return=benchmark,
-                )
-                item.update(evaluated)
-            connection.execute(
-                """INSERT INTO quant.sector_flow_daily_outcomes(
-                       taxonomy_key,sector_key,signal_date,horizon_days,transition,status,
-                       entry_date,exit_date,entry_close,exit_close,raw_return,cross_section_excess_return,
-                       directional_return,outcome_available_at,quality_flags)
-                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                   ON CONFLICT(taxonomy_key,sector_key,signal_date,horizon_days) DO UPDATE SET
-                     transition=EXCLUDED.transition,status=EXCLUDED.status,entry_date=EXCLUDED.entry_date,
-                     exit_date=EXCLUDED.exit_date,entry_close=EXCLUDED.entry_close,exit_close=EXCLUDED.exit_close,
-                     raw_return=EXCLUDED.raw_return,cross_section_excess_return=EXCLUDED.cross_section_excess_return,
-                     directional_return=EXCLUDED.directional_return,
-                     outcome_available_at=EXCLUDED.outcome_available_at,quality_flags=EXCLUDED.quality_flags,
-                     updated_at=now()""",
-                (
-                    item["taxonomy_key"],item["sector_key"],item["trading_date"],item["horizon_days"],
-                    item["transition"],item["status"],item["entry_date"],item["exit_date"],item["entry_close"],
-                    item["exit_close"],item.get("raw_return"),item.get("excess_return"),
-                    item.get("directional_return"),item["outcome_available_at"],Json(item["quality_flags"]),
-                ),
+    values: list[tuple[Any, ...]] = []
+    for item in provisional:
+        if item["status"] == "matured":
+            benchmark = medians.get((item["taxonomy_key"], item["trading_date"], item["horizon_days"]))
+            evaluated = sector_flow_outcome(
+                item["transition"], item["entry_close"], item["exit_close"],
+                cross_section_median_return=benchmark,
             )
-            status_counts[item["status"]] = status_counts.get(item["status"], 0) + 1
+            item.update(evaluated)
+        values.append((
+            item["taxonomy_key"],item["sector_key"],item["trading_date"],item["horizon_days"],
+            item["transition"],item["status"],item["entry_date"],item["exit_date"],item["entry_close"],
+            item["exit_close"],item.get("raw_return"),item.get("excess_return"),
+            item.get("directional_return"),item["outcome_available_at"],Json(item["quality_flags"]),
+        ))
+        status_counts[item["status"]] = status_counts.get(item["status"], 0) + 1
+    with database.transaction() as connection:
+        with connection.cursor() as cursor:
+            for first in range(0, len(values), OUTCOME_BATCH):
+                cursor.executemany(OUTCOME_UPSERT, values[first:first + OUTCOME_BATCH])
     return {"status": "completed", "as_of_date": str(as_of_date), "rows": len(provisional),
             "status_counts": status_counts, "horizons": list(horizons), "response_type": "close_to_later_close",
             "decision_eligible": False}
