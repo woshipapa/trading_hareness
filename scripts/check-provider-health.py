@@ -81,7 +81,6 @@ async def main(args):
     from app.free_market_providers import tencent_order_book_quotes, tencent_intraday_minutes, sina_quotes, eastmoney_watch_flow_quotes
     from app.fuyao_provider import all_a_snapshot_rows, configured as fuyao_configured
     from app.longhu_vendor_source import intraday_source, configured as longhu_configured
-    from app.tushare_providers import provider_configs, call_provider
     from app.http_clients import start_http_clients, close_http_clients
 
     symbols = list(dict.fromkeys(s.strip().upper() for s in args.symbols.split(",") if s.strip()))
@@ -133,20 +132,6 @@ async def main(args):
             await check("sina_free", "stock_quote", lambda: sina_quotes(sample), sample)
             await check("eastmoney_free", "watchlist_flow_quote", lambda: eastmoney_watch_flow_quotes(sample, max_symbols=3), sample, price_required=False)
             await check("fuyao_ths", "all_a_snapshot", all_a_snapshot_rows, [], fuyao_configured())
-            for provider in provider_configs().values():
-                for api in ("daily", "rt_k", "rt_min"):
-                    if not provider.configured:
-                        await check(provider.key, api, None, sample[:1], False)
-                        continue
-                    if not provider.supports(api):
-                        print(json.dumps({"provider": provider.key, "capability": api, "state": "unsupported_by_adapter"}), flush=True)
-                        continue
-                    params = {"ts_code": sample[0]}
-                    if api == "daily":
-                        params["trade_date"] = expected.replace("-", "")
-                    if api == "rt_min":
-                        params["freq"] = "1MIN"
-                    await check(provider.key, api, lambda p=provider,a=api,v=params: call_provider(p,a,v,None), sample[:1])
     finally:
         await close_http_clients()
 

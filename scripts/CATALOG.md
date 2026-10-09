@@ -24,13 +24,12 @@
 | `verify-ten-day-shadow-release.mjs` | quant-research | workstation |  |
 | `verify-zero-downtime-handoff.mjs` | quant-research | workstation |  |
 
-## owner runtime (13)
+## owner runtime (12)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
 | `cutover/export_intraday_watchlist.py` | quant-research | 47owner (inside the container) | Export only explicit intraday watchlist control rows as JSON. |
 | `cutover/import_intraday_watchlist.py` | quant-research | 47owner (inside the container) | Import explicit intraday watchlist control rows into the owner database. |
-| `cutover/probe_owner_providers.py` | quant-research | 47owner (inside the container) | Read-only provider smoke probe for the owner runtime. |
 | `cutover/verify_owner_longhu_priority.py` | quant-research | 47owner (inside the container) | Read-only in-container acceptance. Prints no credentials or private addresses. |
 | `peer-session-guard.sh` | quant-research | 47owner | Keep the peer's intraday collection usable, and say so before the session. |
 | `shared-peer/activate-peer-release.sh` | quant-research | 47owner | An env file that is a symlink into the central credential store |
@@ -178,11 +177,10 @@
 | `preflight-feishu-relay-handoff.sh` | feishu-relay | workstation | forwards to the copy under feishu-relay/scripts/ |
 | `verify-edge-relay-workflows.sh` | feishu-relay | workstation | forwards to the copy under feishu-relay/scripts/ |
 
-## retired (8)
+## retired (7)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
-| `audit-tushare-capabilities.py` | quant-research (Tushare, retired) | never run | Bounded, read-only Tushare provider capability audit. |
 | `converge-quant-edge-sync-monitor-workflow.sh` | quant-research (edge intraday, retired) | never run | Publish the lightweight n8n monitor without putting evidence transfer in n8n. |
 | `deploy-intraday-edge-release.sh` | quant-research (edge intraday, retired) | never run | Deploy one committed source revision into a retained edge release directory. |
 | `deploy-server.sh` | platform (compose.server.yaml template) | no host runs it |  |

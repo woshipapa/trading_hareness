@@ -32,7 +32,6 @@ RULES: list[tuple[str, str, str, str]] = [
     ("verify-edge-export-grants.mjs", "retired", "quant-research (edge intraday, retired)", "never run"),
     ("sync-watchlist-to-edge.sh", "retired", "quant-research (edge intraday, retired)", "never run"),
     ("converge-quant-edge-sync-monitor-workflow.sh", "retired", "quant-research (edge intraday, retired)", "never run"),
-    ("audit-tushare-capabilities.py", "retired", "quant-research (Tushare, retired)", "never run"),
     ("deploy-server.sh", "retired", "platform (compose.server.yaml template)", "no host runs it"),
     # forwarders kept at their old paths
     ("deploy-edge-relay-workflows.sh", "forwarders", "feishu-relay", "workstation"),
