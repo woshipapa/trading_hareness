@@ -205,7 +205,7 @@ export function ledgerMessageText(message) {
 
 function senderOf(row) {
 	const message = row.message ?? {};
-	return String(row.sender_name ?? message.sender_name ?? message.sender?.name ?? message.sender?.id ?? '未知').trim() || '未知';
+	return String(row.sender_name ?? message.sender_name ?? message.sender?.name ?? message.sender?.sender_id ?? message.sender?.id ?? '未知').trim() || '未知';
 }
 
 export function renderLedgerTranscript(rows) {

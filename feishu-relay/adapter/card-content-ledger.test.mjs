@@ -21,3 +21,8 @@ test('transcript is chronological, day-grouped, UTC+8 and speaker-labelled', () 
 	]);
 	assert.equal(out, '== 2026-10-10 ==\n00:30 A: first\n    line\n00:31 B: later');
 });
+
+test('a ledger row with only a sender id still labels the speaker', () => {
+	const out = renderLedgerTranscript([{ source_create_time: Date.UTC(2026, 9, 9, 4, 0), message: { sender: { sender_id: '768' }, msg_type: 'text', body: { content: JSON.stringify({ text: 'x' }) } } }]);
+	assert.match(out, /12:00 768: x/);
+});
