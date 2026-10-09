@@ -21,7 +21,6 @@ class FeatureSnapshotRuntimeDependencies:
     number: Callable[[Any], float]
     market_regime: Callable[[Any, date], str]
     analyst_text_factor_summary: Callable[..., dict[str, Any]]
-    latest_tushare_row: Callable[..., dict[str, Any] | None]
     analyst_feature: Callable[..., dict[str, Any]]
 
 
@@ -45,7 +44,6 @@ class FeatureSnapshotRuntime:
                 number=dependencies.number,
                 market_regime=dependencies.market_regime,
                 analyst_text_factor_summary=dependencies.analyst_text_factor_summary,
-                latest_tushare_row=dependencies.latest_tushare_row,
                 analyst_feature=dependencies.analyst_feature,
             )
 

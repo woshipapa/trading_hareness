@@ -18,29 +18,6 @@ def market_regime(connection: Any, as_of_date: date, number: Callable[[Any], flo
     return "risk_on" if number(rows[0]["close"]) >= number(rows[-1]["close"]) else "risk_off"
 
 
-def latest_tushare_row(
-    connection: Any, api_name: str, symbol: str, as_of_date: date,
-    available_before: datetime | None = None,
-) -> dict[str, Any] | None:
-    """Read persisted raw evidence visible at the decision cutoff.
-
-    ``trade_date`` is the observation's exchange date; ``available_at`` is the
-    provider/local availability clock.  Both constraints are required for a
-    point-in-time read.  The optional argument keeps older daily callers
-    source-compatible while defaulting them to the end of the exchange day.
-    """
-    cutoff = availability_cutoff(as_of_date, available_before)
-    rows = connection.execute(
-        """SELECT row_data FROM quant.tushare_raw_records
-           WHERE api_name=%s AND row_data->>'ts_code'=%s
-             AND coalesce(row_data->>'trade_date','')<=%s
-             AND available_at<=%s
-           ORDER BY coalesce(row_data->>'trade_date','') DESC,available_at DESC LIMIT 1""",
-        (api_name, symbol, as_of_date.strftime("%Y%m%d"), cutoff),
-    ).fetchall()
-    return dict(rows[0]["row_data"]) if rows else None
-
-
 def analyst_feature(
     connection: Any, symbol: str, as_of_date: date, number: Callable[[Any], float],
     available_before: datetime | None = None,

@@ -35,7 +35,6 @@ def materialize_feature_snapshot(
     knowledge_cutoff: datetime | None = None,
     number: Callable[[Any], float], market_regime: Callable[[Any, date], str],
     analyst_text_factor_summary: Callable[..., dict[str, Any]],
-    latest_tushare_row: Callable[..., dict[str, Any] | None],
     analyst_feature: Callable[..., dict[str, Any]],
 ) -> dict[str, Any]:
     cutoff = availability_cutoff(as_of_date, knowledge_cutoff)
@@ -150,17 +149,19 @@ def materialize_feature_snapshot(
             features["fundamentals"] = {key: number(fundamental[key]) for key in fundamental.keys()}
         else:
             flags.append("missing_fundamentals")
-        moneyflow = _call_with_cutoff(latest_tushare_row, connection, "moneyflow_dc", symbol, as_of_date, cutoff=cutoff)
-        if moneyflow:
-            features["moneyflow_dc"] = {"trade_date": moneyflow.get("trade_date"), "net_amount": number(moneyflow.get("net_amount")),
-                                         "net_amount_rate": number(moneyflow.get("net_amount_rate")), "buy_elg_amount": number(moneyflow.get("buy_elg_amount")),
-                                         "buy_sm_amount": number(moneyflow.get("buy_sm_amount"))}
+        # The session's own main net flow, from the Longhu close.  Tushare's
+        # moneyflow_dc/moneyflow rows stopped on 2026-09-18 and a "latest at or
+        # before" read kept serving them as current; only this session counts.
+        flow = connection.execute(
+            """SELECT net_amount,available_at FROM quant.stock_money_flow_daily
+               WHERE symbol=%s AND trading_date=%s AND source='longhuvip_main_net' AND available_at<=%s
+               ORDER BY available_at DESC LIMIT 1""", (symbol, as_of_date, cutoff)
+        ).fetchone()
+        if flow:
+            features["stock_flow"] = {"trade_date": str(as_of_date), "net_amount": number(flow["net_amount"]),
+                                      "source": "longhuvip_main_net"}
         else:
-            flags.append("missing_moneyflow_dc")
-        standard_flow = _call_with_cutoff(latest_tushare_row, connection, "moneyflow", symbol, as_of_date, cutoff=cutoff)
-        if standard_flow:
-            features["moneyflow"] = {"trade_date": standard_flow.get("trade_date"), "net_mf_amount": number(standard_flow.get("net_mf_amount")),
-                                      "net_mf_vol": number(standard_flow.get("net_mf_vol"))}
+            flags.append("missing_stock_flow")
         features["analyst"] = _call_with_cutoff(analyst_feature, connection, symbol, as_of_date, cutoff=cutoff)
         features["analyst_market_context"] = analyst_context["market"]
         features["market_regime"] = regime

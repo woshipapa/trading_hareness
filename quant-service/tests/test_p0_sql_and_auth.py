@@ -147,7 +147,7 @@ class WriteAuthenticationMiddlewareTests(unittest.TestCase):
                     return Result(rows=[{"symbol": "000001.SZ", "name": "Test", "industry": "Test", "is_st": False}])
                 if "FROM quant.canonical_bars_daily" in sql:
                     return Result(rows=self.bars_descending)
-                if "FROM quant.daily_fundamentals" in sql:
+                if "FROM quant.daily_fundamentals" in sql or "FROM quant.stock_money_flow_daily" in sql:
                     return Result(row=None)
                 if "INSERT INTO quant.feature_snapshots" in sql:
                     self.writes.append(sql)
@@ -159,7 +159,7 @@ class WriteAuthenticationMiddlewareTests(unittest.TestCase):
             connection, date(2026, 1, 21), "core", feature_version="p0-test",
             number=float, market_regime=lambda *_: "neutral",
             analyst_text_factor_summary=lambda *_: {"market": {}},
-            latest_tushare_row=lambda *_: None, analyst_feature=lambda *_: {},
+            analyst_feature=lambda *_: {},
         )
         feature = result["items"][0]["features"]
         self.assertEqual(feature["close"], 30.0)

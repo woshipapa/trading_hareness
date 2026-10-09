@@ -11,7 +11,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 import unittest
 
-from app.feature_read_repository import analyst_feature, latest_tushare_row
+from app.feature_read_repository import analyst_feature
 from app.feature_snapshot_repository import materialize_feature_snapshot
 from app.feature_snapshot_runtime import FeatureSnapshotRuntime, FeatureSnapshotRuntimeDependencies
 from app.point_in_time import availability_cutoff, exchange_day_end
@@ -47,7 +47,7 @@ class AvailabilityAwareFeatureReadTests(unittest.TestCase):
             connection, date(2026, 8, 27), "core", feature_version="pit-test", knowledge_cutoff=cutoff,
             number=float, market_regime=lambda *_: "neutral",
             analyst_text_factor_summary=lambda *_: {"market": {}},
-            latest_tushare_row=lambda *_: None, analyst_feature=lambda *_: {},
+            analyst_feature=lambda *_: {},
         )
 
         bar_sql, bar_params = next(item for item in connection.calls if "FROM quant.canonical_bars_daily" in item[0])
@@ -58,6 +58,12 @@ class AvailabilityAwareFeatureReadTests(unittest.TestCase):
         self.assertEqual(bar_params[0], cutoff)
         self.assertIn("available_at<=%s", fundamental_sql)
         self.assertEqual(fundamental_params[-1], cutoff)
+        # Flow is the session's own Longhu row, never an older one, and only once available.
+        flow_sql, flow_params = next(item for item in connection.calls if "FROM quant.stock_money_flow_daily" in item[0])
+        self.assertIn("trading_date=%s AND source='longhuvip_main_net' AND available_at<=%s", " ".join(flow_sql.split()))
+        self.assertEqual(flow_params, ("000001.SZ", date(2026, 8, 27), cutoff))
+        self.assertFalse([sql for sql, _ in connection.calls if "tushare_raw_records" in sql])
+
     def test_daily_cutoff_is_the_end_of_the_exchange_day_in_shanghai(self):
         cutoff = availability_cutoff(date(2026, 8, 27))
 
@@ -67,18 +73,6 @@ class AvailabilityAwareFeatureReadTests(unittest.TestCase):
     def test_naive_intraday_cutoff_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "timezone-aware"):
             availability_cutoff(date(2026, 8, 27), datetime(2026, 8, 27, 10, 15))
-
-    def test_latest_tushare_row_passes_an_explicit_availability_cutoff(self):
-        connection = mock.MagicMock()
-        connection.execute.return_value.fetchall.return_value = [{"row_data": {"ts_code": "000001.SZ"}}]
-        cutoff = datetime(2026, 8, 27, 10, 15, tzinfo=CN_TZ)
-
-        result = latest_tushare_row(connection, "moneyflow", "000001.SZ", date(2026, 8, 27), cutoff)
-
-        self.assertEqual(result, {"ts_code": "000001.SZ"})
-        sql, params = connection.execute.call_args.args
-        self.assertIn("available_at<=%s", sql)
-        self.assertEqual(params[-1], cutoff)
 
     def test_analyst_feature_uses_timestamp_cutoff_instead_of_exchange_date(self):
         connection = mock.MagicMock()
@@ -121,7 +115,6 @@ class AvailabilityAwareFeatureReadTests(unittest.TestCase):
             number=float,
             market_regime=lambda *_: "neutral",
             analyst_text_factor_summary=lambda *_: {},
-            latest_tushare_row=lambda *_: None,
             analyst_feature=lambda *_: {},
         ))
 

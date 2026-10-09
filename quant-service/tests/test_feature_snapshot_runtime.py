@@ -26,7 +26,7 @@ class FeatureSnapshotRuntimeTests(unittest.TestCase):
     def test_owner_recommendation_feature_contract_is_v4(self):
         from app.main import FEATURE_VERSION
 
-        self.assertEqual(FEATURE_VERSION, "multi-source-feature-v4")
+        self.assertEqual(FEATURE_VERSION, "multi-source-feature-v5")
 
     def test_materializes_through_one_transaction_with_explicit_contract_ports(self):
         connection = object()
@@ -44,7 +44,6 @@ class FeatureSnapshotRuntimeTests(unittest.TestCase):
             number=float,
             market_regime=lambda *_: "neutral",
             analyst_text_factor_summary=lambda *_: {"market": {}},
-            latest_tushare_row=lambda *_: None,
             analyst_feature=lambda *_: {},
         ))
 

@@ -470,7 +470,6 @@ from .release_metadata import release_metadata
 from .replay_readiness import historical_replay_readiness
 from . import research_capacity
 from .feature_read_repository import analyst_feature as read_analyst_feature
-from .feature_read_repository import latest_tushare_row as read_latest_tushare_row
 from .feature_read_repository import market_regime as read_market_regime
 from .analyst_text_features import DEFAULT_FACTOR_VERSION, analyst_text_factor_summary as read_analyst_text_factor_summary
 from .stock_study_readiness_repository import (
@@ -987,7 +986,7 @@ def recompute_scorecards(as_of_date: date | None = None) -> dict[str, Any]:
 # current-session close contract.  The snapshot repository already reads the
 # latest point-in-time bar at ``as_of_date``; keep the version explicit so old
 # v3 snapshots are never silently mixed with the new recommendation model.
-FEATURE_VERSION = "multi-source-feature-v4"
+FEATURE_VERSION = "multi-source-feature-v5"
 MODEL_VERSION = "multi-source-direction-v1"
 ANALYST_TEXT_FACTOR_VERSION = DEFAULT_FACTOR_VERSION
 
@@ -1029,13 +1028,6 @@ def market_regime(connection: Any, as_of_date: date) -> str:
     return read_market_regime(connection, as_of_date, number)
 
 
-def latest_tushare_row(
-    connection: Any, api_name: str, symbol: str, as_of_date: date,
-    available_before: datetime | None = None,
-) -> dict[str, Any] | None:
-    return read_latest_tushare_row(connection, api_name, symbol, as_of_date, available_before)
-
-
 def analyst_feature(
     connection: Any, symbol: str, as_of_date: date,
     available_before: datetime | None = None,
@@ -1065,7 +1057,6 @@ def build_feature_snapshot(
             number=number,
             market_regime=market_regime,
             analyst_text_factor_summary=analyst_text_factor_summary,
-            latest_tushare_row=latest_tushare_row,
             analyst_feature=analyst_feature,
         )).build(as_of_date, universe_key, knowledge_cutoff=knowledge_cutoff)
     except ValueError as error:
