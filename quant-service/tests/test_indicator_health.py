@@ -134,7 +134,12 @@ class MainNetHealthTests(unittest.TestCase):
         connection = _Connection(radar={"points": 60, "last_at": at(10, 30), "max_gap_seconds": 61}, point=POINT,
                                  flows=[flow(-1.6e10)])
         self.assertEqual(indicator_status(connection, "market.direction_gate", DAY, at(10, 31))["status"], "ok")
-        self.assertEqual(indicator_status(_Connection(point=POINT), "market.direction_gate", DAY, at(10, 31))["status"], "fail")
+        self.assertEqual(indicator_status(_Connection(point=POINT), "market.direction_gate", DAY, at(10, 31))["status"],
+                         "missing", "the radar has no points: the gate's worst input is missing")
+        warned = _Connection(radar={"points": 1, "last_at": at(10, 30), "max_gap_seconds": None}, point=POINT,
+                             flows=[flow(-1.6e10)])
+        self.assertEqual(indicator_status(warned, "market.direction_gate", DAY, at(10, 31))["status"], "warn",
+                         "a radar warning makes the gate a warning, not a failure")
 
 
 class SessionHealthTests(unittest.TestCase):

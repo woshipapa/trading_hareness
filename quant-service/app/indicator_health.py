@@ -30,6 +30,8 @@ from .stock_money_flow_sync import stored_flow_symbols
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
 OK, WARN, FAIL, PENDING, MISSING = "ok", "warn", "fail", "pending", "missing"
+#: Worst first, for a status built from several.
+SEVERITY = (FAIL, MISSING, PENDING, WARN, OK)
 #: The radar is fed once a minute; three missed captures is a warning, ten a failure.
 FRESH_SECONDS, STALE_SECONDS = 180, 600
 #: A-share common stocks number about 5,100-5,400; below this the cross-section is partial.
@@ -282,8 +284,8 @@ def indicator_status(connection: Any, key: str, trade_date: date, now: datetime)
     indicator = BY_KEY[key]
     if key in DERIVED:
         inputs = [indicator_status(connection, item, trade_date, now) for item in DERIVED[key]]
-        status = OK if all(item["status"] == OK for item in inputs) else PENDING if any(
-            item["status"] == PENDING for item in inputs) else FAIL
+        # As healthy as its least healthy input: a warning there is a warning here, not a failure.
+        status = min((item["status"] for item in inputs), key=SEVERITY.index)
         checks = [_check(f"input:{item['key']}", item["status"]) for item in inputs]
     elif not _due(trade_date, now, indicator.availability):
         status, checks = PENDING, [_check("due", PENDING, None, indicator.availability, "尚未到该指标应产出的时点")]
