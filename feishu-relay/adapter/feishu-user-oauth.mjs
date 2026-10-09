@@ -165,10 +165,21 @@ export function createFeishuUserOauth({ appId, appSecret, redirectUri, ledger, f
 		return responseBody;
 	}
 
+	function authorizeUrl(state = '') {
+		const query = new URLSearchParams({
+			client_id: appId,
+			redirect_uri: redirectUri,
+			scope: REQUIRED_RELAY_SCOPES.join(' '),
+			...(state ? { state } : {}),
+		});
+		return { authorize_url: `https://accounts.feishu.cn/open-apis/authen/v1/authorize?${query}`, redirect_uri: redirectUri };
+	}
+
 	return {
 		exchangeAuthorizationCode,
 		bootstrapRefreshToken,
 		forceRefresh,
+		authorizeUrl,
 		status,
 		sourceApi: {
 			chatSearch: (query) => userRequest('/im/v1/chats/search', { params: { query, page_size: 100 } }),

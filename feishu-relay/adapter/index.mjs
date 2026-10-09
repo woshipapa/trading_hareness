@@ -430,6 +430,29 @@ setInterval(() => {
 setInterval(() => { void cleanupUnreferencedMedia(); }, reconcileSeconds * 1000).unref();
 setInterval(runLocalAnalysisQueue, Math.max(30, Number(process.env.ANALYSIS_POLL_SECONDS ?? 60) * 1000)).unref();
 setInterval(() => { void runDeliveryQueue(); }, 10_000).unref();
+// OAuth keepalive: Feishu now grants only a ~7-day refresh window and rotates
+// it on use, so a quiet stretch with no backfill traffic can let it lapse.
+// Daily, if the refresh token is within FEISHU_OAUTH_KEEPALIVE_DAYS of expiry,
+// refresh it proactively (no-op when it is comfortably in the future or when
+// keepalive is disabled). Never throws into the loop.
+const oauthKeepaliveDays = Number(process.env.FEISHU_OAUTH_KEEPALIVE_DAYS ?? 3);
+if (oauthKeepaliveDays > 0) {
+	setInterval(() => {
+		void (async () => {
+			try {
+				const oauth = await feishuUserOauth.status();
+				if (!oauth.configured || !oauth.refresh_expires_at) return;
+				const remainingMs = Date.parse(oauth.refresh_expires_at) - Date.now();
+				if (Number.isFinite(remainingMs) && remainingMs < oauthKeepaliveDays * 24 * 3600 * 1000) {
+					await feishuUserOauth.forceRefresh();
+					console.log(`飞书用户 OAuth 保活：refresh token 临近过期，已主动续期`);
+				}
+			} catch (error) {
+				console.error(`飞书用户 OAuth 保活失败：${error instanceof Error ? error.message : String(error)}`);
+			}
+		})();
+	}, 24 * 3600 * 1000).unref();
+}
 void reconcileNow().catch((error) => console.error(`启动对账失败：${error instanceof Error ? error.message : String(error)}`));
 const sourceRoutes = new Map((sourceRegistry.routes ?? []).map((route) => [String(route.tag).toLowerCase(), route]));
 const supportedMediaTypes = new Set([
@@ -1510,6 +1533,7 @@ async function groupRelayDashboardStatus() {
 		interval_seconds: groupRelayConfig.intervalSeconds, stale_after_seconds: staleAfterSeconds,
 		user_oauth_configured: Boolean(oauth.configured), target_configured: Boolean(groupRelayConfig.targetChatId),
 		user_oauth_scope_audit: oauth.scope_audit ?? null,
+		user_oauth_refresh_expires_at: oauth.refresh_expires_at ?? null, user_oauth_access_expires_at: oauth.access_expires_at ?? null,
 		webhook_config: webhookConfigStatus(groupRelayWebhooksByChatId, groupRelayWebhookKeywordsByChatId),
 		larkagentx,
 		itougu,
@@ -1903,6 +1927,35 @@ const dashboard = createServer((request, response) => {
 	}
 	if (url.pathname === '/api/group-relay/larkagentx/history/export' && request.method === 'GET') {
 		void handleLarkAgentXHistoryExport(request, response, url);
+		return;
+	}
+	if (url.pathname === '/api/group-relay/larkagentx/oauth/authorize-url' && request.method === 'GET') {
+		try {
+			const state = String(url.searchParams.get('state') ?? '').slice(0, 200);
+			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify(feishuUserOauth.authorizeUrl(state)));
+		} catch (error) {
+			response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
+		}
+		return;
+	}
+	if (url.pathname === '/api/group-relay/larkagentx/oauth/exchange' && request.method === 'POST') {
+		// The adapter holds FEISHU_APP_SECRET and exchanges the code itself, so
+		// the browser never carries a secret (unlike /internal/feishu-user-oauth,
+		// which the CLI reaches with the quant write key).
+		void (async () => {
+			try {
+				const payload = await readJsonBody(request, 16 * 1024);
+				const code = String(payload?.authorization_code ?? '').trim();
+				if (!code) throw new Error('authorization_code 不能为空');
+				const token = await feishuUserOauth.exchangeAuthorizationCode(code, payload?.redirect_uri);
+				response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+				response.end(JSON.stringify({ status: 'stored', refresh_expires_at: token.refresh_expires_at, scopes: token.scopes }));
+			} catch (error) {
+				response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+				response.end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) }));
+			}
+		})();
 		return;
 	}
 	if (url.pathname === '/api/group-relay/larkagentx/qr/init' && request.method === 'POST') {

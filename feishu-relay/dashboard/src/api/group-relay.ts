@@ -36,6 +36,8 @@ export const groupRelayApi = {
   status: <T>() => getJson<T>('/api/group-relay/status'),
   qrInit: <T>() => postJson<T>('/api/group-relay/larkagentx/qr/init'),
   qrPoll: <T>(sessionId: string) => postJson<T>('/api/group-relay/larkagentx/qr/poll', { session_id: sessionId }),
+  oauthAuthorizeUrl: <T>() => getJson<T>('/api/group-relay/larkagentx/oauth/authorize-url'),
+  oauthExchange: <T>(code: string) => postJson<T>('/api/group-relay/larkagentx/oauth/exchange', { authorization_code: code }),
   listExportBookmarks: () => getJson<{ bookmarks: ExportBookmark[] }>('/api/group-relay/larkagentx/export-bookmarks'),
   exportLarkAgentXHistory: async (chatId: string, options: ExportHistoryOptions = {}) => {
     const format: ExportFormat = options.format ?? 'transcript';

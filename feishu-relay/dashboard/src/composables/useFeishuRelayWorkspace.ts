@@ -16,7 +16,7 @@ type LarkAgentXChatStats = { allowlisted?: boolean; observed_count?: number; sel
 type LarkAgentXStatus = { status?: string; observed_at?: string; release?: string | null; metrics_persisted?: boolean; metrics_source?: string | null; websocket?: { state?: string; attempt_count?: number; last_attempt_at?: string | null }; listen_chat_count?: number; listen_chat_ids?: string[]; websocket_chat_ids?: string[]; summary_chat_ids?: string[]; summary_ingress_configured?: boolean; gap_repair_enabled?: boolean; private_gap_repair_enabled?: boolean; private_gap_repair_on_start?: boolean; private_repair_count?: number; private_repair_message_count?: number; private_repair_failed_count?: number; dynamic_route_discovery?: boolean; route_catalog_count?: number; route_catalog_last_refresh_at?: string | null; route_catalog_error?: string | null; dynamic_routes?: Record<string, { source_key?: string; chat_name?: string; source_chat_id?: string }>; persisted_route_bindings?: Record<string, { source_key?: string; chat_id?: string; chat_name?: string; source_chat_id?: string }>; mapping_check_at?: string | null; mapping_check_error?: string | null; observed_count?: number; forwarded_count?: number; failed_count?: number; filtered_count?: number; ignored_count?: number; ignored_by_chat?: Record<string, { ignored_count?: number; last_position?: number | null }>; position_stats?: Record<string, { missing_position_count?: number; recovered_position_count?: number; unresolved_position_count?: number; last_gap_start?: number | null; last_gap_end?: number | null }>; position_summary?: { missing_position_count?: number; recovered_position_count?: number; unresolved_position_count?: number; gap_event_count?: number; out_of_order_count?: number }; decode_error_count?: number; decode_fallback_count?: number; unknown_field_count?: number; partial_frame_count?: number; retry_count?: number; last_observed_chat_id?: string | null; last_observed_message_type?: string | null; event_spool?: { queued?: number; processing?: number; pending?: number; failed?: number; delivered?: number }; auth?: { state?: string; logged_in?: boolean; has_credentials?: boolean; user_id?: string | null; credential_age_hours?: number | null; last_error?: string | null; probe_ok?: boolean | null; probe_at?: string | null; probe_error?: string | null }; ws_notify_cmds?: number[]; ws_notify_count?: number; last_ws_notify?: { cmd?: number; chat_id?: string; message_id?: string } | null; private_tail_repair_chat_ids?: string[]; chat_validation?: Record<string, LarkAgentXChatValidation>; chat_stats?: Record<string, LarkAgentXChatStats> };
 type ItouguProductTarget = { business_product_id?: string; name?: string; target_chat_ids?: string[]; article_target_chat_ids?: string[] };
 type ItouguStatus = { status?: string; state?: string; service?: string; observed_at?: string; updated_at?: string | null; started_at?: string | null; heartbeat_age_seconds?: number | null; stale_after_seconds?: number; message?: string | null; last_poll_started_at?: string | null; last_poll_completed_at?: string | null; last_success_at?: string | null; last_error?: string | null; last_trigger?: string | null; manual_refresh_count?: number; consecutive_error_count?: number; poll_count?: number; failure_count?: number; sent_count?: number; interval_seconds?: number; off_hours_interval_seconds?: number; midday_interval_seconds?: number; trading_hours_only?: boolean; current_window?: string | null; next_poll_in_seconds?: number; products?: { business_product_id?: string; name?: string }[]; product_targets?: ItouguProductTarget[]; target_chat_ids?: string[]; article_target_chat_ids?: string[]; webhook_config?: WebhookConfigStatus & { keyword_chat_ids?: string[] } };
-type GroupRelayStatus = { status?: string; observed_at?: string; enabled?: boolean; interval_seconds?: number; stale_after_seconds?: number; user_oauth_configured?: boolean; user_oauth_scope_audit?: OAuthScopeAudit | null; target_configured?: boolean; delivery_verified?: boolean; last_tick_started_at?: string | null; last_tick_completed_at?: string | null; last_tick_error?: string | null; writer?: RelayWriterStatus; delivery_outbox?: DeliveryOutboxStatus; webhook_config?: WebhookConfigStatus; larkagentx?: LarkAgentXStatus; itougu?: ItouguStatus; sources?: GroupRelaySourceStatus[]; summary_listener?: SummaryListenerStatus };
+type GroupRelayStatus = { status?: string; observed_at?: string; enabled?: boolean; interval_seconds?: number; stale_after_seconds?: number; user_oauth_configured?: boolean; user_oauth_scope_audit?: OAuthScopeAudit | null; user_oauth_refresh_expires_at?: string | null; user_oauth_access_expires_at?: string | null; target_configured?: boolean; delivery_verified?: boolean; last_tick_started_at?: string | null; last_tick_completed_at?: string | null; last_tick_error?: string | null; writer?: RelayWriterStatus; delivery_outbox?: DeliveryOutboxStatus; webhook_config?: WebhookConfigStatus; larkagentx?: LarkAgentXStatus; itougu?: ItouguStatus; sources?: GroupRelaySourceStatus[]; summary_listener?: SummaryListenerStatus };
 type GroupRelayRouteForm = { key: string; chat_name: string; chat_id: string; tag: string; target_chat_ids_text: string; target_chat_names_text: string; enabled: boolean };
 type FeishuCapability = { key: string; label: string; category: string; enabled: boolean; configured: boolean; resource_configured?: boolean; implementation_ready?: boolean; authorization_subject?: 'user' | 'tenant'; authorization_status?: 'verified' | 'missing' | 'unknown' | 'awaiting_verification' | 'not_required'; missing_user_scopes?: string[]; missing_tenant_scopes?: string[]; requires: string[]; note: string };
 type FeishuEventSubscription = { event_type: string; label: string; required_for: string; handler_registered: boolean; state: 'received' | 'awaiting_callback'; received_count?: number; last_received_at?: string | null };
@@ -165,6 +165,63 @@ export function useFeishuRelayWorkspace() {
     }
   }
 
+  const oauthDialog = ref(false);
+  const oauthAuthorizeUrl = ref('');
+  const oauthRedirectUri = ref('');
+  const oauthCode = ref('');
+  const oauthSubmitting = ref(false);
+  async function startOauthReauth() {
+    oauthCode.value = '';
+    oauthAuthorizeUrl.value = '';
+    try {
+      const result = await groupRelayApi.oauthAuthorizeUrl<{ authorize_url: string; redirect_uri: string }>();
+      oauthAuthorizeUrl.value = result.authorize_url;
+      oauthRedirectUri.value = result.redirect_uri;
+      oauthDialog.value = true;
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+  async function copyOauthUrl() {
+    try { await navigator.clipboard?.writeText(oauthAuthorizeUrl.value); ElMessage.success('已复制授权链接'); }
+    catch { ElMessage.warning('复制失败，请手动选中复制'); }
+  }
+  async function submitOauthCode() {
+    const code = oauthCode.value.trim();
+    if (!code) { ElMessage.warning('请粘贴回调地址里的 code 参数'); return; }
+    oauthSubmitting.value = true;
+    try {
+      const result = await groupRelayApi.oauthExchange<{ status?: string; refresh_expires_at?: string; message?: string }>(code);
+      if (result.status === 'stored') {
+        ElMessage.success(`授权已更新，refresh 有效期至 ${result.refresh_expires_at ?? '未知'}`);
+        oauthDialog.value = false;
+        await loadGroupRelayStatus();
+      } else {
+        ElMessage.error(result.message ?? '授权失败');
+      }
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      oauthSubmitting.value = false;
+    }
+  }
+  const oauthExpiryText = (): string => {
+    const at = groupRelayStatus.value.user_oauth_refresh_expires_at;
+    if (!at) return '未知';
+    const ms = new Date(at).getTime() - Date.now();
+    if (ms <= 0) return '已过期，请重新授权';
+    const days = Math.floor(ms / 86400000);
+    const hours = Math.floor((ms % 86400000) / 3600000);
+    return days > 0 ? `${days} 天后过期` : `${hours} 小时后过期`;
+  };
+  const oauthExpiryTagType = (): 'success' | 'warning' | 'danger' => {
+    const at = groupRelayStatus.value.user_oauth_refresh_expires_at;
+    if (!at) return 'warning';
+    const ms = new Date(at).getTime() - Date.now();
+    if (ms <= 0) return 'danger';
+    return ms < 48 * 3600000 ? 'warning' : 'success';
+  };
+
   async function loadExportBookmarks() {
     try {
       const result = await groupRelayApi.listExportBookmarks();
@@ -297,6 +354,7 @@ export function useFeishuRelayWorkspace() {
   return {
     groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
     qrDialog, qrSession, qrStatusName, qrPolling, startQrLogin, stopQrPolling, authStateType, authStateText,
+    oauthDialog, oauthAuthorizeUrl, oauthRedirectUri, oauthCode, oauthSubmitting, startOauthReauth, submitOauthCode, copyOauthUrl, oauthExpiryText, oauthExpiryTagType,
     feishuWorkbench, feishuWorkbenchMessages, feishuWorkbenchLoading, feishuWorkbenchError, feishuWorkbenchAction, workbenchSearch, workbenchSearchResult, workbenchIntegrationDialog, workbenchIntegration,
     groupRelayStateType, groupRelayStateText, groupRelayMessageText, oauthAuditLabel, oauthAuditTagType, relayDeliveryLabel, relayDeliveryTagType, ingestionDeliveryLabel, ingestionDeliveryTagType, larkAgentXStateType, larkAgentXStateText, itouguStateType, itouguStateText, itouguKeywordText, webhookKeyword, applicationInspectionLabel, applicationInspectionTagType, targetChatInspectionLabel, targetChatInspectionTagType, capabilityAuthorizationLabel, capabilityAuthorizationTagType,
     loadGroupRelayStatus, forceItouguRefresh, exportLarkAgentXHistory, loadFeishuWorkbench, inspectFeishuApplication, workbenchMessageText, workbenchWorkflowText, runWorkbenchAction, searchFeishuMessages, openWorkbenchIntegration, runWorkbenchEndpoint, createWorkbenchDigest, createWorkbenchTab, submitWorkbenchIntegration, openCreateGroupRelayRoute, openEditGroupRelayRoute, saveGroupRelayRoute, setGroupRelayRouteEnabled, deleteGroupRelayRoute,

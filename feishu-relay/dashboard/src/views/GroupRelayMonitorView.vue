@@ -21,7 +21,7 @@ export default defineComponent({
       <el-descriptions :column="mobileLayout ? 1 : 5" border size="small">
         <el-descriptions-item label="整体状态"><el-tag :type="groupRelayStateType(groupRelayStatus.status)">{{ groupRelayStateText(groupRelayStatus.status) }}</el-tag></el-descriptions-item>
         <el-descriptions-item label="轮询间隔">{{ groupRelayStatus.interval_seconds ?? '-' }} 秒</el-descriptions-item>
-        <el-descriptions-item label="用户读取授权"><el-tag :type="groupRelayStatus.user_oauth_configured ? oauthAuditTagType(groupRelayStatus.user_oauth_scope_audit) : 'danger'">{{ groupRelayStatus.user_oauth_configured ? oauthAuditLabel(groupRelayStatus.user_oauth_scope_audit) : '未配置' }}</el-tag></el-descriptions-item>
+        <el-descriptions-item label="用户读取授权"><el-tag :type="groupRelayStatus.user_oauth_configured ? oauthAuditTagType(groupRelayStatus.user_oauth_scope_audit) : 'danger'">{{ groupRelayStatus.user_oauth_configured ? oauthAuditLabel(groupRelayStatus.user_oauth_scope_audit) : '未配置' }}</el-tag><div v-if="groupRelayStatus.user_oauth_configured" class="group-relay-age"><el-tag size="small" :type="oauthExpiryTagType()">{{ oauthExpiryText() }}</el-tag></div><el-button size="small" type="primary" link @click="startOauthReauth">重新授权</el-button></el-descriptions-item>
         <el-descriptions-item label="最近全局轮询">{{ dateText(groupRelayStatus.last_tick_completed_at) }}</el-descriptions-item>
         <el-descriptions-item label="写入端"><el-tag :type="groupRelayStateType(groupRelayStatus.writer?.state)">{{ groupRelayStateText(groupRelayStatus.writer?.state) }}</el-tag><div class="group-relay-age">{{ groupRelayStatus.writer?.owner_id ?? groupRelayStatus.writer?.configured_id ?? '未声明' }} · generation {{ groupRelayStatus.writer?.generation ?? '-' }}</div></el-descriptions-item>
         <el-descriptions-item label="远端投递队列"><el-tag :type="groupRelayStatus.delivery_outbox?.failed ? 'danger' : groupRelayStatus.delivery_outbox?.depth ? 'warning' : 'success'">待投递 {{ groupRelayStatus.delivery_outbox?.depth ?? 0 }} · 终止失败 {{ groupRelayStatus.delivery_outbox?.failed ?? 0 }}</el-tag><div v-if="groupRelayStatus.delivery_outbox?.paused" class="group-relay-age">按操作暂停 {{ groupRelayStatus.delivery_outbox.paused }}（不自动重试）</div></el-descriptions-item>
@@ -107,6 +107,15 @@ export default defineComponent({
       <p style="margin-top: 12px">{{ qrStatusName }}</p>
       <el-text size="small" type="info">用本机登录的飞书账号扫码；登录态仅保存在边缘服务，用于驱动个人会话监听。</el-text>
     </div>
+  </el-dialog>
+  <el-dialog v-model="oauthDialog" title="重新授权飞书用户读取（官方补读通道）" width="520">
+    <el-steps :active="oauthCode ? 1 : 0" simple style="margin-bottom: 16px"><el-step title="打开授权链接并同意"/><el-step title="粘贴回调 code 提交"/></el-steps>
+    <p>1. 用本机登录的飞书账号打开授权链接并同意：</p>
+    <el-input :model-value="oauthAuthorizeUrl" readonly type="textarea" :autosize="{ minRows: 2, maxRows: 4 }"/>
+    <el-space style="margin: 8px 0"><el-button size="small" @click="copyOauthUrl">复制链接</el-button><el-link :href="oauthAuthorizeUrl" target="_blank" type="primary">在新标签打开</el-link></el-space>
+    <p>2. 同意后浏览器会跳到 <code>{{ oauthRedirectUri }}</code>，把地址里的 <code>code=</code> 参数值粘贴到下面：</p>
+    <el-input v-model="oauthCode" placeholder="粘贴 code 参数值" clearable/>
+    <template #footer><el-button @click="oauthDialog = false">取消</el-button><el-button type="primary" :loading="oauthSubmitting" @click="submitOauthCode">提交授权码</el-button></template>
   </el-dialog>
   <el-card shadow="never"><template #header><div class="card-header"><span>导入事件</span><el-select v-model="eventFilter" size="small" class="event-filter"><el-option label="全部状态" value="all"/><el-option label="已完成" value="已完成"/><el-option label="失败" value="失败"/><el-option label="处理中" value="已接收，处理中"/></el-select></div></template><el-empty v-if="!visibleEvents.length" description="暂无事件"/><el-timeline v-else><el-timeline-item v-for="event in visibleEvents" :key="event.event_id" :timestamp="dateText(event.received_at)" :type="event.n8n_status === '失败' ? 'danger' : 'primary'"><el-card shadow="never"><div class="event-title"><strong>{{ event.message_type || 'message' }}</strong><el-tag size="small">{{ event.n8n_status || '未知' }}</el-tag></div><p v-if="event.text">{{ event.text }}</p><el-text type="info">{{ event.source_label || '无来源备注' }}{{ event.n8n_error ? ` · ${event.n8n_error}` : '' }}</el-text></el-card></el-timeline-item></el-timeline></el-card>
 </template>
