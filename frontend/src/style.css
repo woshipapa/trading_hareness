@@ -1,3 +1,6 @@
+/* 共享设计 token（vendored 自 frontend-shared；变量可用，样式迁移按需渐进）。 */
+@import './tokens.css';
+
 :root {
   font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   color: #172033;
