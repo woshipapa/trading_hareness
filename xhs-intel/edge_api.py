@@ -481,6 +481,39 @@ def _start_following_screen_async(payload=None):
     return {'status': 'accepted', 'message': '关注账号筛选已在 Edge 后台启动，请稍后查询 candidates'}
 
 
+def run_topic_collection(payload=None):
+    """Search one bounded page per enabled topic keyword and queue the notes.
+
+    Every enabled topic keyword is searched on each run; there is no artificial
+    daily budget.  The per-request delay and collect()'s stop-on-error behavior
+    remain the protection for the logged-in session.
+    """
+    payload = dict(payload or {})
+    queries = STORE.topic_search_queries()
+    if not queries:
+        return {'status': 'idle', 'reason': 'no_enabled_topics', 'queries': 0}
+    day = time.strftime('%Y-%m-%d', time.gmtime(time.time() + 8 * 3600))
+    run_key = str(payload.get('run_key') or f'topics-{day}')
+    items = [{'query': row['keyword'], 'label': f"topic:{row['slug']}:{row['keyword']}"}
+             for row in queries]
+    result = collect(STORE, SOURCE_ROOT, COOKIE_FILE, items, limit=FETCH_LIMIT,
+                     request_key=run_key,
+                     delay=max(1, int(os.environ.get('XHS_REQUEST_DELAY', '3'))))
+    while STORE.enqueue_pending():
+        pass
+    return {**result, 'run_key': run_key,
+            'topic_count': len({row['slug'] for row in queries}),
+            'query_count': len(items),
+            'queue': STORE.status().get('jobs', {})}
+
+
+def _start_topic_collection_async(payload=None):
+    thread = threading.Thread(target=run_topic_collection, args=(payload or {},),
+                              name='xhs-topic-collection', daemon=True)
+    thread.start()
+    return {'status': 'accepted', 'message': '主题关键词采集已在 Edge 后台启动，请稍后查询 status'}
+
+
 def run_watch(payload=None):
     payload = dict(payload or {})
     users = STORE.list_watch_users()
@@ -603,6 +636,9 @@ def command_result(payload):
             user_id = _watch_user_id(command.split()[-1])
             STORE.reject_following_candidate(user_id, actor)
             text = f"已拒绝关注候选：{user_id}"
+        elif lowered in {"#xhs intel scan topics", "#xhs 主题采集"}:
+            _start_topic_collection_async({'trigger': 'feishu_command'})
+            text = "已启动主题关键词采集，完成后可使用 #xhs status 查看队列与运行记录。"
         elif lowered.startswith("#xhs intel scan recommendations") or lowered.startswith("#xhs intel scan reco"):
             parts = command.split()
             requested = int(parts[-1]) if parts and parts[-1].isdigit() else RECOMMEND_FETCH_LIMIT
@@ -783,6 +819,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/v1/dashboard/watch/run":
                 reply(self, 202, _start_watch_async(payload))
                 return
+            if path == "/v1/dashboard/topics/run":
+                reply(self, 202, _start_topic_collection_async(payload))
+                return
             if path == "/v1/dashboard/watch-users":
                 action = str(payload.get("action") or "add").strip().lower()
                 user_id = _watch_user_id(payload.get("user_id") or payload.get("url"))
@@ -864,6 +903,9 @@ class Handler(BaseHTTPRequestHandler):
                 while STORE.enqueue_pending():
                     pass
                 reply(self, 200, {**result, "queue": STORE.status().get("jobs", {})})
+                return
+            if path == "/v1/topics/run":
+                reply(self, 202, _start_topic_collection_async(payload))
                 return
             if path == "/v1/recommendations/run":
                 reply(self, 200, run_recommendation(payload))

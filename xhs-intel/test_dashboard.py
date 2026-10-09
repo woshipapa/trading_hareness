@@ -265,6 +265,30 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertEqual(payload["run_id"], "failed-dashboard")
         self.assertEqual(edge_api.STORE.recommendation_run("failed-dashboard")["status"], "filter_queued")
 
+    def test_topic_collection_routes_accept_dashboard_and_machine_calls(self):
+        self.browser.open(self.base + "/xhs/", timeout=3).close()
+        status, payload = self.browser_json("/v1/dashboard/topics/run", {"trigger": "dashboard"})
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["status"], "accepted")
+        status, payload = self.machine_json("/v1/topics/run", {"trigger": "n8n_topics_daily"})
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["status"], "accepted")
+
+    def test_topic_upsert_persists_search_keywords_for_the_collection_lane(self):
+        self.browser.open(self.base + "/xhs/", timeout=3).close()
+        status, payload = self.browser_json("/v1/dashboard/topics", {
+            "action": "upsert", "slug": "agents", "name": "智能体",
+            "search_keywords": ["Agent 框架", "多智能体"],
+            "include_keywords": ["Agent"], "threshold": 0.6,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "updated")
+        _, listing = self.browser_json("/v1/topics")
+        topic = next(row for row in listing["topics"] if row["slug"] == "agents")
+        self.assertEqual(topic["policy"]["search_keywords"], ["Agent 框架", "多智能体"])
+        queries = edge_api.STORE.topic_search_queries()
+        self.assertIn({"slug": "agents", "keyword": "多智能体"}, queries)
+
     def test_dashboard_recommendation_runs_do_not_reuse_hourly_scheduler_keys(self):
         first = edge_api._recommendation_run_id({"trigger": "dashboard"}, 50)
         second = edge_api._recommendation_run_id({"trigger": "dashboard"}, 50)

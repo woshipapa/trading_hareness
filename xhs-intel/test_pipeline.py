@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 from store import Store, Conflict
-from collector import (InvalidNoteLink, collect_single_note, ephemeral_note_link,
+from collector import (InvalidNoteLink, collect, collect_single_note, ephemeral_note_link,
                        normalize, parse_note_reference, remember_note_link)
 from local_worker import _load_note_images, _multimodal_items
 
@@ -329,6 +329,58 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(queued['job_id'], job['job_id'])
         self.assertEqual(result['include'], 1)
         self.assertEqual(self.store.list_profile_candidates()[0]['decision'], 'include')
+
+    def test_topic_search_queries_use_policy_keywords_and_fall_back_to_the_name(self):
+        queries = self.store.topic_search_queries()
+        self.assertIn({'slug': 'inference', 'keyword': 'vLLM'}, queries)
+        self.store.upsert_topic({'slug': 'quantum', 'name': '量子计算'})
+        queries = self.store.topic_search_queries()
+        self.assertIn({'slug': 'quantum', 'keyword': '量子计算'}, queries)
+        self.store.set_topic_enabled('quantum', False)
+        slugs = {row['slug'] for row in self.store.topic_search_queries()}
+        self.assertNotIn('quantum', slugs)
+
+    def test_active_policy_reflects_live_topic_versions(self):
+        self.store.upsert_topic({'slug': 'inference', 'name': '推理系统',
+                                 'include_keywords': ['vLLM'], 'search_keywords': ['投机解码'],
+                                 'threshold': 0.7})
+        policy = self.store.active_policy()
+        row = next(item for item in policy['topics'] if item['slug'] == 'inference')
+        self.assertEqual(row['threshold'], 0.7)
+        self.assertEqual(row['search_keywords'], ['投机解码'])
+        self.assertGreaterEqual(policy['version'], 2)
+
+    def test_collect_records_topic_labels_while_searching_the_raw_keyword(self):
+        class FakeApi:
+            def __init__(self):
+                self.searched = []
+
+            def search_note(self, keyword, page=1, sort_type_choice=1, note_time=1):  # noqa: ARG002
+                self.searched.append(keyword)
+                return True, 'ok', {'data': {'items': [{
+                    'id': 'c' * 24, 'model_type': 'note', 'xsec_token': 'tok',
+                }]}}
+
+            def get_note_info(self, _url):
+                return True, 'ok', {'data': {'items': [{'note_card': {
+                    'title': 'vLLM 调优', 'desc': 'KV cache', 'user': {'nickname': 'Infra'},
+                }}]}}
+
+        cookie = Path(self.tmp.name) / 'cookie-topics'
+        cookie.write_text('a1=fake; web_session=fake', encoding='utf-8')
+        api = FakeApi()
+        with mock.patch('collector._pc_api', return_value=api):
+            result = collect(self.store, '/tmp/source', cookie,
+                             [{'query': 'vLLM', 'label': 'topic:inference:vLLM'}],
+                             limit=5, request_key='topics-test', delay=0)
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(api.searched, ['vLLM'])
+        self.assertEqual(result['queries'][0]['query'], 'topic:inference:vLLM')
+        with self.store.connect() as db:
+            queries = {row[0] for row in db.execute('SELECT query FROM note_queries')}
+            runs = {row[0] for row in db.execute('SELECT query FROM runs')}
+        self.assertIn('topic:inference:vLLM', queries)
+        self.assertIn('topic:inference:vLLM', runs)
 
     def test_topic_versions_are_additive_and_disable_is_explicit(self):
         topic = self.store.upsert_topic({'slug': 'accelerator', 'name': '加速器',

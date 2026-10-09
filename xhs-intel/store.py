@@ -644,6 +644,7 @@ class Store:
             'slug': slug, 'name': name, 'description': str(row.get('description') or '')[:500],
             'include_keywords': [str(x)[:80] for x in row.get('include_keywords', []) if str(x).strip()],
             'exclude_keywords': [str(x)[:80] for x in row.get('exclude_keywords', []) if str(x).strip()],
+            'search_keywords': [str(x).strip()[:80] for x in row.get('search_keywords', []) if str(x).strip()][:20],
             'threshold': max(0.0, min(1.0, float(row.get('threshold', 0.65)))),
         }
         stamp = time.time()
@@ -665,6 +666,37 @@ class Store:
         with self.connect() as db:
             return bool(db.execute('UPDATE topics SET enabled=?,updated=? WHERE slug=?',
                                    (1 if enabled else 0, time.time(), str(slug))).rowcount)
+
+    def topic_search_queries(self):
+        """Return the enabled topics' search keywords as slug/keyword rows.
+
+        A topic version saved without search_keywords falls back to the topic's
+        display name, so enabling a topic always makes it collectable.
+        """
+        rows = []
+        for topic in self.list_topics(enabled=True):
+            policy = topic.get('policy') or {}
+            keywords = [str(value).strip() for value in (policy.get('search_keywords') or [])
+                        if str(value).strip()]
+            if not keywords:
+                keywords = [value for value in [str(topic.get('name') or '').strip()] if value]
+            for keyword in keywords:
+                rows.append({'slug': topic['slug'], 'keyword': keyword})
+        return rows
+
+    def active_policy(self):
+        """Policy snapshot built from the live, versioned topic rows."""
+        topics = []
+        version = 1
+        for row in self.list_topics(enabled=True):
+            policy = dict(row.get('policy') or {})
+            policy.setdefault('slug', row['slug'])
+            policy.setdefault('name', row['name'])
+            topics.append(policy)
+            version = max(version, int(row.get('active_version') or 1))
+        if not topics:
+            return policy_snapshot()
+        return policy_snapshot(topics=topics, version=version)
 
     def list_recommendation_items(self, run_id, states=None):
         with self.connect() as db:

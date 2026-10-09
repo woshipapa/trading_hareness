@@ -54,6 +54,7 @@
           <label><span>标识</span><input name="slug" required pattern="[a-z][a-z0-9_-]{1,63}" placeholder="inference_systems" /></label>
           <label><span>名称</span><input name="name" required maxlength="100" placeholder="推理系统" /></label>
           <label class="wide"><span>描述</span><textarea name="description" maxlength="500" rows="3"></textarea></label>
+          <label class="wide"><span>检索关键词（每日按此搜索，留空回退主题名）</span><input name="search_keywords" placeholder="大模型推理, vLLM, SGLang" /></label>
           <label class="wide"><span>包含关键词</span><input name="include_keywords" placeholder="vLLM, SGLang, KV Cache" /></label>
           <label class="wide"><span>排除关键词</span><input name="exclude_keywords" placeholder="培训, 招聘" /></label>
           <label><span>入选阈值</span><input name="threshold" type="number" min="0" max="1" step="0.05" value="0.65" /></label>

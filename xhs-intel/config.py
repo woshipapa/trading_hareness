@@ -17,6 +17,7 @@ DEFAULT_TOPICS = (
         "description": "GPU、数据中心、电力、散热、存储、网络和光互联",
         "include_keywords": ["GPU", "ASIC", "数据中心", "AIDC", "电力", "散热", "存储", "网络", "光模块", "CPO", "NVLink", "InfiniBand", "RoCE"],
         "exclude_keywords": ["美妆", "穿搭", "旅游", "情感", "美食", "泛消费"],
+        "search_keywords": ["AI 基础设施", "GPU 数据中心", "光模块 CPO"],
         "threshold": 0.65,
     },
     {
@@ -25,6 +26,7 @@ DEFAULT_TOPICS = (
         "description": "分布式训练、并行、通信、容错和检查点",
         "include_keywords": ["分布式训练", "数据并行", "张量并行", "流水线并行", "通信", "容错", "checkpoint", "ZeRO", "NCCL"],
         "exclude_keywords": [],
+        "search_keywords": ["分布式训练", "大模型训练"],
         "threshold": 0.65,
     },
     {
@@ -33,6 +35,7 @@ DEFAULT_TOPICS = (
         "description": "Serving、KV Cache、批处理、量化和推理引擎",
         "include_keywords": ["推理", "inference", "serving", "KV Cache", "量化", "投机解码", "SGLang", "vLLM", "TensorRT", "batching"],
         "exclude_keywords": [],
+        "search_keywords": ["大模型推理", "vLLM", "SGLang"],
         "threshold": 0.65,
     },
     {
@@ -41,6 +44,7 @@ DEFAULT_TOPICS = (
         "description": "CUDA、Triton、编译器、Kernel、Runtime 和图优化",
         "include_keywords": ["CUDA", "Triton", "编译器", "Kernel", "算子", "Runtime", "图优化", "Tensor"],
         "exclude_keywords": [],
+        "search_keywords": ["CUDA 优化", "算子优化", "Triton"],
         "threshold": 0.65,
     },
     {
@@ -49,6 +53,7 @@ DEFAULT_TOPICS = (
         "description": "LLM、VLM、MoE、Transformer、World Model 和 Agent",
         "include_keywords": ["大模型", "LLM", "VLM", "MoE", "Transformer", "World Model", "Agent", "模型", "预训练", "评测"],
         "exclude_keywords": [],
+        "search_keywords": ["大模型", "Agent 智能体", "MoE"],
         "threshold": 0.65,
     },
     {
@@ -57,6 +62,7 @@ DEFAULT_TOPICS = (
         "description": "论文、Benchmark、实验室、会议和复现",
         "include_keywords": ["论文", "paper", "Benchmark", "arXiv", "NeurIPS", "OSDI", "SOSP", "实验室", "复现", "科研"],
         "exclude_keywords": ["纯招聘", "求职广告"],
+        "search_keywords": ["AI 论文", "arXiv 论文解读"],
         "threshold": 0.65,
     },
     {
@@ -65,6 +71,7 @@ DEFAULT_TOPICS = (
         "description": "操作系统、容器、Kubernetes、调度和可观测性",
         "include_keywords": ["操作系统", "容器", "Kubernetes", "K8s", "调度", "可观测性", "Linux", "系统软件"],
         "exclude_keywords": [],
+        "search_keywords": ["Kubernetes", "可观测性"],
         "threshold": 0.65,
     },
 )

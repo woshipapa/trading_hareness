@@ -349,10 +349,15 @@ function renderSingleNotes() {
 
 function renderTopics() {
   const topics = state.dashboard?.topics || [];
-  const rows = topics.map((topic) => `<div class="topic-row"><div><strong>${escapeHtml(topic.name)}</strong><code>${escapeHtml(topic.slug)} · v${topic.active_version}</code></div><div class="topic-description">${escapeHtml(topic.description || topic.policy?.description || '暂无描述')}</div><button type="button" role="switch" aria-checked="${Boolean(topic.enabled)}" aria-label="${topic.enabled ? '停用' : '启用'} ${escapeHtml(topic.name)}" title="${topic.enabled ? '停用主题' : '启用主题'}" class="switch ${topic.enabled ? 'on' : ''}" data-action="toggle-topic" data-slug="${escapeHtml(topic.slug)}" data-enabled="${topic.enabled ? '1' : '0'}"></button><div class="topic-actions"><button type="button" class="button small secondary" data-action="edit-topic" data-slug="${escapeHtml(topic.slug)}">${icon('edit')}<span>编辑</span></button></div></div>`).join('');
+  const rows = topics.map((topic) => {
+    const searchKeywords = topic.policy?.search_keywords || [];
+    const searchInfo = searchKeywords.length ? `检索词 ${searchKeywords.length} 个` : '检索词回退主题名';
+    return `<div class="topic-row"><div><strong>${escapeHtml(topic.name)}</strong><code>${escapeHtml(topic.slug)} · v${topic.active_version} · ${escapeHtml(searchInfo)}</code></div><div class="topic-description">${escapeHtml(topic.description || topic.policy?.description || '暂无描述')}</div><button type="button" role="switch" aria-checked="${Boolean(topic.enabled)}" aria-label="${topic.enabled ? '停用' : '启用'} ${escapeHtml(topic.name)}" title="${topic.enabled ? '停用主题' : '启用主题'}" class="switch ${topic.enabled ? 'on' : ''}" data-action="toggle-topic" data-slug="${escapeHtml(topic.slug)}" data-enabled="${topic.enabled ? '1' : '0'}"></button><div class="topic-actions"><button type="button" class="button small secondary" data-action="edit-topic" data-slug="${escapeHtml(topic.slug)}">${icon('edit')}<span>编辑</span></button></div></div>`;
+  }).join('');
+  const actions = `<button class="button secondary" data-action="run-topic-collection">${icon('scan')}<span>按主题采集</span></button><button class="button primary" data-action="new-topic">${icon('plus')}<span>新增主题</span></button>`;
   return `<section class="panel">
-    ${sectionHeader('主题策略', `${topics.filter((item) => item.enabled).length} 个启用，${topics.length} 个版本入口`, `<button class="button primary" data-action="new-topic">${icon('plus')}<span>新增主题</span></button>`)}
-    <div class="topic-list">${rows || emptyState('暂无主题', '新增主题后，推荐筛选会读取最新启用版本。')}</div>
+    ${sectionHeader('主题策略', `${topics.filter((item) => item.enabled).length} 个启用，${topics.length} 个版本入口`, actions)}
+    <div class="topic-list">${rows || emptyState('暂无主题', '新增主题后，每日采集和推荐筛选会读取最新启用版本。')}</div>
   </section>`;
 }
 
@@ -493,6 +498,7 @@ function openTopicDialog(slug = '') {
     form.elements.slug.readOnly = true;
     form.elements.name.value = topic.name;
     form.elements.description.value = policy.description || topic.description || '';
+    form.elements.search_keywords.value = (policy.search_keywords || []).join(', ');
     form.elements.include_keywords.value = (policy.include_keywords || []).join(', ');
     form.elements.exclude_keywords.value = (policy.exclude_keywords || []).join(', ');
     form.elements.threshold.value = policy.threshold ?? 0.65;
@@ -545,6 +551,7 @@ document.addEventListener('click', async (event) => {
   if (action === 'new-topic') openTopicDialog();
   if (action === 'edit-topic') openTopicDialog(button.dataset.slug);
   if (action === 'toggle-topic') await runAction(button, '主题状态已更新', () => post('/v1/dashboard/topics', { action: button.dataset.enabled === '1' ? 'disable' : 'enable', slug: button.dataset.slug }));
+  if (action === 'run-topic-collection') await runAction(button, '主题采集已启动', () => post('/v1/dashboard/topics/run', { trigger: 'dashboard' }));
   if (action === 'following-tab') { state.followingTab = button.dataset.tab; render(); }
   if (action === 'new-watch') { document.querySelector('#watch-form').reset(); watchDialog.showModal(); }
   if (action === 'run-watch') await runAction(button, '监控名单扫描已启动', () => post('/v1/dashboard/watch/run', { trigger: 'dashboard' }));
@@ -618,6 +625,7 @@ document.querySelector('#topic-form').addEventListener('submit', async (event) =
   await runAction(event.submitter, '主题已保存', async () => {
     await post('/v1/dashboard/topics', {
       action: 'upsert', slug: data.get('slug'), name: data.get('name'), description: data.get('description'),
+      search_keywords: split(data.get('search_keywords')),
       include_keywords: split(data.get('include_keywords')), exclude_keywords: split(data.get('exclude_keywords')),
       threshold: Number(data.get('threshold')), enabled: data.get('enabled') === 'on',
     });

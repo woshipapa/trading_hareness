@@ -360,34 +360,48 @@ def collect_watched(store, source_root, cookie_file, watch_users, *, limit=8,
     return {'status': 'completed', 'users': results}
 
 
+def _query_items(queries):
+    """Normalize query inputs to (search term, durable query label) pairs.
+
+    A plain string is both the term and the label.  The topic lane passes
+    ``{'query': keyword, 'label': 'topic:<slug>:<keyword>'}`` so the durable
+    note_queries/runs rows record which topic requested the note.
+    """
+    items = []
+    for value in queries or []:
+        if isinstance(value, dict):
+            term = str(value.get('query') or '').strip()
+            label = str(value.get('label') or term).strip() or term
+        else:
+            term = str(value or '').strip()
+            label = term
+        if term:
+            items.append((term, label))
+    return items
+
+
 def collect(store, source_root, cookie_file, queries, *, limit=8, request_key=None, delay=3):
     day = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date().isoformat()
     results = []
+    pairs = _query_items(queries)
     cookie = Path(cookie_file).read_text().strip() if Path(cookie_file).is_file() else ''
     if not cookie:
-        for query in queries:
-            key = request_key + ':' + digest(query)[:12] if request_key else day + ':' + digest(query)[:12]
-            if store.start_run(key, query):
+        for _term, label in pairs:
+            key = (request_key or day) + ':' + digest(label)[:12]
+            if store.start_run(key, label):
                 store.end_run(key, 'blocked', 0, 0, 'missing_cookie')
         return {'status': 'blocked', 'reason': 'missing_cookie'}
-    sys.path.insert(0, str(source_root))
-    from loguru import logger
-    # Upstream logger.exception includes local variables/URLs. Persist our own
-    # sanitized observations instead; cookies and signed URLs never reach logs.
-    logger.remove()
-    from apis.xhs_pc_apis import XHS_Apis
-    from xhs_utils.xhs_pc import XHSPcAuth
     api = None
-    for query in queries:
-        key = request_key + ':' + digest(query)[:12] if request_key else day + ':' + digest(query)[:12]
-        if not store.start_run(key, query):
+    for term, label in pairs:
+        key = (request_key or day) + ':' + digest(label)[:12]
+        if not store.start_run(key, label):
             continue
         fetched = added = 0
         try:
             if api is None:
-                api = XHS_Apis(XHSPcAuth.from_cookie(cookie)).bootstrap()
+                api = _pc_api(source_root, cookie_file)
             # Exactly one bounded page; never follow an unbounded pagination loop.
-            ok, _message, body = api.search_note(query, page=1, sort_type_choice=1, note_time=1)
+            ok, _message, body = api.search_note(term, page=1, sort_type_choice=1, note_time=1)
             if not ok:
                 raise RuntimeError('search_failed')
             items = body.get('data', {}).get('items')
@@ -408,11 +422,11 @@ def collect(store, source_root, cookie_file, queries, *, limit=8, request_key=No
                 ok, _msg, detail = api.get_note_info(f'https://www.xiaohongshu.com/explore/{note_id}?' + urlencode({'xsec_token': token, 'xsec_source': 'pc_search'}))
                 if not ok:
                     raise RuntimeError('detail_failed')
-                note = normalize(item, query, detail['data']['items'][0])
+                note = normalize(item, label, detail['data']['items'][0])
                 fetched += 1
-                added += store.add_note(note, query)
+                added += store.add_note(note, label)
             store.end_run(key, 'completed', fetched, added)
-            results.append({'query': query, 'fetched': fetched, 'added': added})
+            results.append({'query': label, 'fetched': fetched, 'added': added})
         except Exception as exc:
             store.end_run(key, 'partial' if fetched else 'failed', fetched, added, error_code(exc))
             # Stop the entire batch on session/risk-control errors.
