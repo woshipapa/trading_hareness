@@ -38,16 +38,18 @@ CLI 默认只预览，必须显式 `--apply` 才写。真实 available_at 不倒
 - 本协作源码的 database_bootstrap 从空库初始化到 sep0002 通过。
 - 前端按协作分支 lockfile 安装，typecheck/build 通过；有现有大 chunk 提示。
 - 架构、组件边界、脚本目录、变更文件 Ruff、git diff --check 与新增内容脱敏检查通过。
-- 原生脚本测试：262 passed、7 failed、7 skipped、2 subtests passed。
-  7 项失败全部在现有 test_peer_session_guard.py 的 Bash 守护模拟测试；
-  Git Bash、UTF-8 和 LF 适配后仍失败。测试日志的重启文字来自假命令夹具，
-  未调用真实发布器或重启服务。
+- 原生脚本测试最终：269 passed、7 skipped、2 subtests passed，无失败。
+  此前 7 项 Bash 守护模拟失败已定位为 Windows 执行器差异：Linux PATH 分隔符、
+  Git Bash 包装器前置系统 PATH、带缩进的 shebang 在 Windows 的执行识别。
+  本地执行器统一 LF、选择真实 Bash 并保持假命令优先，规范化夹具的 shebang；
+  测试断言和发布脚本源码未改。守护专项 13 项及脚本全量均通过。
+  测试日志的重启文字来自假命令夹具，未调用真实发布器或重启服务。
 
 ## 维护方合并前必须完成
 
 本地没有 make，Docker Linux daemon 未运行，因此未执行正式 Docker 隔离门禁。
 原生 Windows 验证不能代替 `scripts/collab_branch.py check` 中的隔离全量检查。
-维护方需执行该检查，核实上述守护模拟测试在正式 Linux 环境通过；任一失败须先修复，
+维护方需执行该检查，核实全部测试在正式 Linux 环境通过；任一失败须先修复，
 不能跳过门禁合并或发布。
 
 迁移对齐另行先提交版本对照与结构差异供双方讨论，本候选不含迁移文件。
