@@ -33,21 +33,45 @@ async function read<T>(key: string, path: string): Promise<T | null> {
   }
 }
 
+function dayParam(): string {
+  return encodeURIComponent(tradeDate.value);
+}
+
+async function loadRadar() {
+  const segments = segment.value === 'all' ? '' : '&segments=true';
+  const radarDay = await read<RadarDay>('radar', `/api/research/market/radar?trade_date=${dayParam()}${segments}`);
+  if (radarDay) radar.value = radarDay;
+}
+
+async function loadCardsAndHealth() {
+  const [cardDay, healthDay] = await Promise.all([
+    read<StrategyCardsDay>('cards', `/api/research/strategy/cards?trade_date=${dayParam()}&per_line=${perLine.value}`),
+    read<IndicatorHealth>('health', `/api/research/indicators/health?trade_date=${dayParam()}`),
+  ]);
+  if (cardDay) cards.value = cardDay;
+  if (healthDay) health.value = healthDay;
+}
+
+// Everything at once on open, a date change or the refresh button.
 async function load() {
   loading.value = true;
   errors.value = {};
-  const day = encodeURIComponent(tradeDate.value);
-  const [radarDay, cardDay, limitDay, healthDay] = await Promise.all([
-    read<RadarDay>('radar', `/api/research/market/radar?trade_date=${day}`),
-    read<StrategyCardsDay>('cards', `/api/research/strategy/cards?trade_date=${day}&per_line=${perLine.value}`),
-    read<LimitDetailDay>('limits', `/api/research/market/limit-detail?trade_date=${day}`),
-    read<IndicatorHealth>('health', `/api/research/indicators/health?trade_date=${day}`),
+  const [, , limitDay] = await Promise.all([
+    loadRadar(), loadCardsAndHealth(),
+    read<LimitDetailDay>('limits', `/api/research/market/limit-detail?trade_date=${dayParam()}`),
   ]);
-  health.value = healthDay;
-  radar.value = radarDay;
-  cards.value = cardDay;
   limits.value = limitDay;
   loading.value = false;
+}
+
+// The owner database is busy with the minute capture: the radar refreshes every
+// minute, the cards and health every third minute, and the post-close limit detail
+// only on demand.
+let tick = 0;
+async function autoRefresh_() {
+  tick += 1;
+  await loadRadar();
+  if (tick % 3 === 0) await loadCardsAndHealth();
 }
 
 const rows = computed(() => radarRows(radar.value, band.value, segment.value));
@@ -78,10 +102,11 @@ function eventText(pick: CardPick): string {
 function schedule() {
   if (timer) clearInterval(timer);
   timer = undefined;
-  if (autoRefresh.value && tradeDate.value === shanghaiToday()) timer = setInterval(load, 60_000);
+  if (autoRefresh.value && tradeDate.value === shanghaiToday()) timer = setInterval(autoRefresh_, 60_000);
 }
 
 watch([tradeDate, perLine], () => { void load(); schedule(); });
+watch(segment, (value, previous) => { if (value === 'all' || previous === 'all') void loadRadar(); });
 watch(autoRefresh, schedule);
 onMounted(() => { void load(); schedule(); });
 onBeforeUnmount(() => { if (timer) clearInterval(timer); });
@@ -101,7 +126,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
           <el-select v-model="segment" size="small" style="width: 110px">
             <el-option v-for="(label, key) in SEGMENT_LABELS" :key="key" :label="label" :value="key" />
           </el-select>
-          <el-switch v-model="autoRefresh" active-text="每分钟刷新" />
+          <el-switch v-model="autoRefresh" active-text="自动刷新（雷达每分钟，卡片与健康每 3 分钟）" />
         </el-space>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
       </div>

@@ -21,12 +21,13 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
     router = APIRouter(tags=["market-radar"])
 
     @router.get("/api/v1/market/radar")
-    async def market_radar(trade_date: date | None = None, include_entered: bool = False) -> dict[str, Any]:
+    async def market_radar(trade_date: date | None = None, include_entered: bool = False,
+                           segments: bool = False) -> dict[str, Any]:
         day = trade_date or datetime.now(CN_TZ).date()
 
         def read() -> dict[str, Any]:
             with database.transaction() as connection:
-                return radar_day(connection, day, include_entered=include_entered)
+                return radar_day(connection, day, include_entered=include_entered, include_segments=segments)
 
         return await run_database_blocking(read, timeout_seconds=30)
 

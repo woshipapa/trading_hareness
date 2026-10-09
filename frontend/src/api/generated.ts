@@ -10605,6 +10605,7 @@ export interface operations {
             query?: {
                 trade_date?: string | null;
                 include_entered?: boolean;
+                segments?: boolean;
             };
             header?: never;
             path?: never;

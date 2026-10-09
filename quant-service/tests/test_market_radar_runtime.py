@@ -100,6 +100,12 @@ class ReadTests(unittest.TestCase):
             "taxonomy_key": "eastmoney_industry", "source": "eastmoney_free",
             "upstream": "同花顺 data.10jqka.com.cn（akshare stock_fund_flow_*）", "status": "completed"}])
 
+    def test_segments_are_returned_only_when_asked(self):
+        point = radar_point([{"ts_code": "600001.SH", "pct_change": 2.5, "turnover": 10.0}], RadarState(DAY),
+                            observed_at=at(9, 31))
+        self.assertNotIn("segments", radar_day(_Connection(points=[point], flows=[]), DAY)["points"][0])
+        self.assertIn("segments", radar_day(_Connection(points=[point], flows=[]), DAY, include_segments=True)["points"][0])
+
     def test_longhu_rows_are_in_cny_whatever_the_snapshot_declared(self):
         flows = [{"snapshot_minute": at(10, 0), "observed_at": at(10, 0), "status": "completed", "payload": {
             "unit": "100m_cny", "providers": {"industry": "longhuvip"},

@@ -130,10 +130,17 @@ def latest_point(connection: Any, trade_date: date) -> dict[str, Any] | None:
     return _payload(dict(row)["normalized"]) if row else None
 
 
-def radar_day(connection: Any, trade_date: date, *, include_entered: bool = False) -> dict[str, Any]:
+def radar_day(connection: Any, trade_date: date, *, include_entered: bool = False,
+              include_segments: bool = False) -> dict[str, Any]:
+    """The day's points; per-segment detail and entered lists only when asked.
+
+    A dashboard polls this every minute. The segment breakdown is most of
+    each point's size, and only the segment view needs it.
+    """
     points = stored_points(connection, trade_date)
-    if not include_entered:
-        points = [{key: value for key, value in point.items() if key != "entered"} for point in points]
+    dropped = {name for name, wanted in (("entered", include_entered), ("segments", include_segments)) if not wanted}
+    if dropped:
+        points = [{key: value for key, value in point.items() if key not in dropped} for point in points]
     return {
         "trade_date": trade_date.isoformat(), "radar_version": RADAR_VERSION, "points": points,
         "main_net": main_net_series(connection, trade_date),

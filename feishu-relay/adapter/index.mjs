@@ -1734,7 +1734,9 @@ async function updateRelayRoute(sourceKey, payload) {
 
 async function proxyResearch(path, search, response) {
 	if (!quantServiceUrl) throw new Error('量化研究服务未配置');
-	const readTimeoutMs = path === '/api/v1/strategy/post-close/latest' ? 45_000 : 15_000;
+	// 30 s: on 2026-10-09 the owner's minute writes queued reads that take 0.2-7 s alone past 15 s,
+	// and the console showed them as unavailable. The post-close report keeps its longer budget.
+	const readTimeoutMs = path === '/api/v1/strategy/post-close/latest' ? 45_000 : 30_000;
 	const upstream = await fetch(`${quantServiceUrl}${path}${search}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(readTimeoutMs) });
 	const body = await upstream.text();
 	response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });
