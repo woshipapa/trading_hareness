@@ -167,6 +167,12 @@ class MacPagingTests(unittest.TestCase):
         self.assertEqual((len(rows), rows[0]["code"], rows[149]["code"], rows[-1]["code"]), (153, "880000", "880149", "880152"))
         self.assertEqual([struct.unpack_from("<H", request, 18)[0] for request in client.requests], [0, 150])
 
+    def test_a_page_of_149_boards_ends_the_list(self):
+        client = FakeMacClient({tdx_mac.OP_BOARD: lambda request: board_page(
+            *[board_item(f"88{index:04d}", "b") for index in range(149)])})
+        self.assertEqual(len(client.board_list(0)), 149)
+        self.assertEqual(len(client.requests), 1)
+
     def test_a_short_board_page_ends_the_list(self):
         client = FakeMacClient({tdx_mac.OP_BOARD: lambda request: board_page(board_item("880001", "Coal"))})
         self.assertEqual(len(client.board_list(0)), 1)
@@ -230,7 +236,7 @@ class MacMembershipTests(unittest.TestCase):
                     asyncio.run(tdx_mac.fetch_membership(sector_key="880710", board_type=board_type))
 
     def test_a_malformed_board_key_raises_before_any_network_call_and_names_the_key(self):
-        for key in ("abc", "HKx", ""):
+        for key in ("abc", "HKx", "", "-5", "4294967296"):
             with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
                 with self.assertRaisesRegex(tdx_mac.TdxMacError, f"unknown MAC board key {key!r}"):
                     asyncio.run(tdx_mac.fetch_membership(sector_key=key, board_type=3))
@@ -258,6 +264,12 @@ class MacMembershipTests(unittest.TestCase):
 
 
 class MacProtocolTests(unittest.TestCase):
+    def test_a_board_key_is_six_digits_or_hk_and_up_to_five(self):
+        for key in ("-5", "+880710", " 880710", "880710 ", "4294967296", "88", "399", "HK", "HK123456", "abc", ""):
+            with self.assertRaisesRegex(tdx_mac.TdxMacError, "unknown MAC board key"):
+                tdx_mac.exchange_board_code(key)
+        self.assertEqual(tdx_mac.exchange_board_code("hk0700"), 20700)
+
     def test_board_codes_follow_gotdx(self):
         for key, code in (("881376", 21376), ("880761", 20761), ("399001", 30001), ("899001", 32001),
                           ("000001", 31001)):
@@ -393,6 +405,42 @@ class MacWatchSnapshotTests(unittest.TestCase):
             evidence = self.fetch(client, ["920000.BJ", "600519.SH"])
         self.assertEqual([row["symbol"] for row in evidence.rows], ["600519.SH"])
         self.assertIn("code_mismatch requested=(2, '920000') returned=(1, '600519')", logs.output[0])
+
+    def test_a_row_with_the_requested_code_under_another_market_is_dropped(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: [(1, stocks[0][1])])})
+        with self.assertLogs("app.datasources.sources.tdx_mac", "WARNING") as logs:
+            evidence = self.fetch(client, ["920000.BJ"])
+        self.assertEqual(evidence.rows, [])
+        self.assertIn("requested=(2, '920000') returned=(1, '920000')", logs.output[0])
+
+    def test_an_extra_row_is_a_count_mismatch_too(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: stocks + [(1, "600519")])})
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "3 rows for 2 requested"):
+            self.fetch(client, ["000001.SZ", "000002.SZ"])
+
+    def test_a_symbol_whose_code_is_not_six_digits_raises_before_any_network_call(self):
+        for symbol in ("1.SZ", "ABCDEF.SH", "0000012.SZ", "000001", "000001.XX"):
+            with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+                for adapter, params in ((tdx_mac.fetch_watch_snapshot, {"symbols": [symbol]}),
+                                        (tdx_mac.fetch_limit_prices, {"symbols": [symbol]}),
+                                        (tdx_mac.fetch_daily_bars, {"symbol": symbol, "count": 1}),
+                                        (tdx_mac.fetch_minute_bars, {"symbol": symbol, "count": 1})):
+                    with self.assertRaises(ValueError, msg=f"{adapter.__name__} {symbol}"):
+                        asyncio.run(adapter(**params))
+
+    def test_an_answer_that_leaves_out_a_quote_field_raises(self):
+        def answer(request):
+            bitmap = bytearray(request[12:32])
+            bitmap[0] &= ~0x10  # bit 4, close
+            return dynamic_body(bytes(bitmap), [(0, "000001", "n", quote_values())])
+
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: answer})
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "000001 lacks close"):
+            self.fetch(client, ["000001.SZ"])
+
+    def test_the_required_quote_fields_are_the_ones_the_binding_maps(self):
+        mapped = set(mac_binding("quote.watch_snapshot").spec.field_map)
+        self.assertEqual(set(tdx_mac.QUOTE_FIELDS), mapped - {"exchange_time"})
 
     def test_an_answer_that_leaves_out_the_server_time_raises(self):
         # A host that caps the dynamic fields echoes a smaller bitmap: here bits 0x13 and 0x14 are gone.
