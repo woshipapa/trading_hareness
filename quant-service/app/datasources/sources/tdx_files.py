@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import struct
-from typing import Any, Iterable
+from typing import Any
 import zipfile
 
 from . import tdx_protocol

@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 import struct
 from collections import Counter
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping
 
 from . import tdx_protocol
 from .tdx_zhb_extras import bj_rows_from_zhb, parse_bj_mapping, parse_tdxbjmore

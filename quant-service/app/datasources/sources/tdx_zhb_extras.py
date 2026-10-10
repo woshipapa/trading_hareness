@@ -7,11 +7,9 @@ shape; no row is promoted to a live strategy or order path.
 
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import date
 import math
 import re
-from typing import Any, Iterable
+from typing import Any
 
 from .tdx_protocol import decode_text
 
