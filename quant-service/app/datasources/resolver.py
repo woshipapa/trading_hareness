@@ -77,6 +77,7 @@ class CapabilityResult:
                 "available_at_max": self.quality.available_at_max.isoformat()
                 if self.quality.available_at_max else None,
                 "response_hash": self.quality.response_hash,
+                "schema": self.quality.schema,
                 "warnings": list(self.quality.warnings),
             }
         return {"capability": self.capability.key, "source": self.source, "status": self.binding.status,
@@ -179,6 +180,40 @@ def _quality_receipt(rows: Any, envelope: CapabilityEvidence, request: Capabilit
     )
 
 
+def _normalise_rows(rows: Any, binding: Binding) -> Any:
+    """Project source-native dictionaries into the canonical field contract."""
+    spec = binding.spec
+    if spec is None or not isinstance(rows, (list, tuple)):
+        return rows
+    normalised = []
+    for row in rows:
+        if not isinstance(row, dict):
+            normalised.append(row)
+            continue
+        projected = dict(row)
+        for native, canonical in spec.field_map.items():
+            if native in row:
+                if canonical != native:
+                    projected.pop(native, None)
+                projected[canonical] = row[native]
+        for field_name, factor in spec.unit_factors.items():
+            value = projected.get(field_name)
+            if value is None or isinstance(value, bool):
+                continue
+            try:
+                projected[field_name] = value * factor
+            except (TypeError, ValueError):
+                continue
+        normalised.append(projected)
+    return type(rows)(normalised)
+
+
+def _declared_fields(binding: Binding) -> set[str]:
+    if binding.spec is None or not binding.spec.field_map:
+        return set()
+    return set(binding.spec.field_map.values())
+
+
 class CapabilityResolver:
     def __init__(self, *, health_gate: HealthGate | None = None) -> None:
         self._fetchers: dict[tuple[str, str], Fetcher] = {}
@@ -228,6 +263,11 @@ class CapabilityResolver:
             if policy.require_decision_eligible and not binding.decision_eligible:
                 attempts.append({"source": binding.source, "status": "not_decision_eligible"})
                 continue
+            declared_fields = _declared_fields(binding)
+            if policy.required_fields and declared_fields and not set(policy.required_fields).issubset(declared_fields):
+                attempts.append({"source": binding.source, "status": "missing_required_fields",
+                                 "missing": sorted(set(policy.required_fields) - declared_fields)})
+                continue
             if self._health_gate is not None and not await self._health_gate(binding.source, capability):
                 attempts.append({"source": binding.source, "status": "circuit_open"})
                 continue
@@ -239,8 +279,10 @@ class CapabilityResolver:
                                  "ms": int((time.monotonic() - started) * 1000)})
                 continue
             rows, envelope = _unpack_evidence(raw)
+            rows = _normalise_rows(rows, binding)
             count = _row_count(rows)
             quality = _quality_receipt(rows, envelope, policy)
+            quality = QualityReceipt(**{**quality.__dict__, "schema": "canonical" if binding.spec else "native"})
             valid = quality.status not in {"invalid", "stale", "conflicted"}
             if policy.purpose in {"replay", "shadow"} and quality.status == "partial":
                 valid = False

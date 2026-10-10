@@ -8,6 +8,45 @@ from app.datasources.resolver import CapabilityResolver, CapabilityUnavailable
 
 
 class ResolverQualityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_binding_spec_projects_rows_and_marks_canonical_schema(self):
+        resolver = CapabilityResolver()
+
+        async def fetch(**_params):
+            return [{"native_price": 2.5, "native_volume": 3}]
+
+        resolver.bind("tdx_public", "ticks.session", fetch)
+        result = await resolver.fetch("ticks.session", request=CapabilityRequest(
+            "ticks.session", required_fields=("price", "volume")))
+        self.assertEqual(result.rows[0]["price"], 2.5)
+        self.assertEqual(result.rows[0]["volume"], 3.0)
+        self.assertEqual(result.quality.schema, "canonical")
+
+    async def test_required_fields_skip_spec_binding_before_fetch(self):
+        resolver = CapabilityResolver()
+        called = False
+
+        async def fetch(**_params):
+            nonlocal called
+            called = True
+            return [{"native_price": 2.5}]
+
+        resolver.bind("tdx_public", "ticks.session", fetch)
+        with self.assertRaises(CapabilityUnavailable) as raised:
+            await resolver.fetch("ticks.session", request=CapabilityRequest(
+                "ticks.session", required_fields=("unknown_field",)))
+        self.assertFalse(called)
+        self.assertEqual(raised.exception.attempts[0]["status"], "missing_required_fields")
+
+    async def test_legacy_binding_receipt_is_native(self):
+        resolver = CapabilityResolver()
+
+        async def fetch(**_params):
+            return [{"native": 1}]
+
+        resolver.bind("eastmoney_ztb", "limits.anomaly_tape", fetch)
+        result = await resolver.fetch("limits.anomaly_tape")
+        self.assertEqual(result.quality.schema, "native")
+
     async def test_null_empty_and_nonfinite_required_values_are_missing(self):
         for value in (None, "", float("nan"), float("inf")):
             with self.subTest(value=value):

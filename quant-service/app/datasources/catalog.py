@@ -16,7 +16,7 @@ from typing import Any, Final, Iterable
 
 from .contracts import (
     BINDING_STATES, CATEGORIES, DECLARED, DORMANT, GRAINS, LICENSES, LIVE_VERIFIED, RESOLVABLE_STATES,
-    RETIRED, SCOPES, UNSUPPORTED, Binding, Capability, DataSource, SourceLabel, Taxonomy,
+    RETIRED, SCOPES, UNSUPPORTED, Binding, BindingSpec, CanonicalSchema, Capability, DataSource, FieldSpec, SourceLabel, Taxonomy,
 )
 
 
@@ -118,7 +118,13 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
 
 
 def _cap(key: str, label: str, grain: str, scope: str, fields: str, time_semantics: str, description: str = "") -> Capability:
-    return Capability(key, key.split(".", 1)[0], label, grain, scope, tuple(fields.split()), time_semantics, description)
+    names = tuple(fields.split())
+    specs = tuple(
+        FieldSpec(name=item.split(":", 1)[0], unit=item.split(":", 1)[1] if ":" in item else None)
+        for item in names
+    )
+    return Capability(key, key.split(".", 1)[0], label, grain, scope, names, time_semantics, description,
+                      CanonicalSchema(specs))
 
 
 _OBSERVED = "effective=上游时间戳或采集时刻; available=采集时刻"
@@ -228,12 +234,21 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
 
 
 def _bind(source: str, capability: str, priority: int, status: str, store: str | None = None, adapter: str | None = None,
-          history: str = "", limits: str = "", notes: str = "", decision_eligible: bool = False) -> Binding:
-    return Binding(source, capability, priority, status, store, adapter, history, limits, notes, decision_eligible)
+          history: str = "", limits: str = "", notes: str = "", decision_eligible: bool = False,
+          spec: BindingSpec | None = None) -> Binding:
+    return Binding(source, capability, priority, status, store, adapter, history, limits, notes, decision_eligible, spec)
 
 
 _EVT = "market_events:event_type="
 _RAW = "raw_market_observations:capability="
+_TDX_TICKS_SPEC = BindingSpec(
+    field_map={"price": "price", "volume": "volume", "native_price": "price", "native_volume": "volume",
+               "side": "side", "time": "time"},
+    unit_factors={"volume": 1.0},
+    time_semantics="effective=成交时刻; available=采集时刻",
+    handshake_profile="login_one|legacy_3",
+    max_batch=2000,
+)
 
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot
@@ -310,7 +325,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     # ticks
     _bind("tdx_public", "ticks.session", 20, DECLARED, _RAW + "tick_flow_daily (summaries)",
           "app/datasources/sources/ticks.py:fetch_tdx_ticks", "近期任意交易日（含当日收盘后）", "2000 笔/请求",
-          "与 pytdx 逐笔一致；方向经腾讯逐分钟对账 100% 一致"),
+          "与 pytdx 逐笔一致；方向经腾讯逐分钟对账 100% 一致", spec=_TDX_TICKS_SPEC),
     _bind("tencent_free", "ticks.session", 30, DECLARED, _RAW + "tick_flow_daily (summaries)",
           "app/datasources/sources/ticks.py:fetch_tencent_ticks", "仅当日", notes="秒级时间戳"),
     # auction
@@ -481,6 +496,23 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     # deliberately retired
     _bind("longhuvip", "bars.daily", 26, RETIRED, notes="个股日K 接口（旧系统 id=7）恒空，下线；日K 走 longhuvip_composite"),
 )
+
+# Existing bindings without a structured spec remain routable for compatibility.
+# This is intentionally derived once from the baseline tuple: adding a new
+# binding without a spec cannot silently become grandfathered in validation.
+GRANDFATHER_BINDINGS: Final[frozenset[tuple[str, str]]] = frozenset(
+    (item.source, item.capability) for item in BINDINGS if item.spec is None
+)
+# P0 baseline: 119 legacy bindings have no spec. This ceiling may only go down.
+GRANDFATHER_BINDING_LIMIT: Final[int] = 119
+LEGACY_SOURCE_KEYS: Final[frozenset[str]] = frozenset({
+    "longhuvip", "longhuvip_composite", "longhuvip_index", "tushare_primary", "tushare_super_get",
+    "tushare_super_sdk", "tushare_backup", "fuyao_ths", "eastmoney_free", "xuangubao", "eastmoney_ztb",
+    "eastmoney_hot_rank", "eastmoney_datacenter", "eastmoney_flash", "tencent_free", "sina_free",
+    "cninfo_free", "cninfo_irm", "sse_einteract", "cls_telegraph", "jin10_flash", "ths_flash", "ttfund",
+    "tdx_public", "tdx_local", "akshare", "baostock", "derived_market_sentiment", "derived_tick_flow",
+    "derived_sentiment_cycle", "longhu_qfq_derived",
+})
 
 
 #: Provenance labels stored on quotes and flow fields.  Rules test these
@@ -655,6 +687,12 @@ def validate_catalog() -> list[str]:
         seen.add((item.source, item.capability))
         if item.decision_eligible and item.status not in {LIVE_VERIFIED}:
             problems.append(f"binding {item.source}->{item.capability}: decision eligible without live verification")
+        if item.spec is None and (item.source, item.capability) not in GRANDFATHER_BINDINGS:
+            problems.append(f"binding {item.source}->{item.capability}: missing BindingSpec outside grandfather list")
+        if item.spec is None and item.source not in LEGACY_SOURCE_KEYS:
+            problems.append(f"binding {item.source}->{item.capability}: new source requires BindingSpec")
+    if sum(item.spec is None for item in BINDINGS) > GRANDFATHER_BINDING_LIMIT:
+        problems.append("grandfather binding list may only shrink")
     for label in SOURCE_LABELS.values():
         if label.source not in SOURCES or label.capability not in CAPABILITIES:
             problems.append(f"label {label.label}: unknown source or capability")
@@ -677,10 +715,14 @@ def catalog_document() -> dict[str, Any]:
         "capabilities": [{
             "key": capability.key, "category": capability.category, "label": capability.label,
             "grain": capability.grain, "scope": capability.scope, "fields": list(capability.fields),
+            "schema": [{"name": field.name, "unit": field.unit, "dtype": field.dtype,
+                        "nullable": field.nullable, "note": field.note}
+                       for field in (capability.schema.fields if capability.schema else ())],
             "time_semantics": capability.time_semantics, "description": capability.description,
             "providers": [{"source": item.source, "priority": item.priority, "status": item.status, "store": item.store,
                            "history": item.history, "limits": item.limits, "notes": item.notes,
-                           "decision_eligible": item.decision_eligible}
+                           "decision_eligible": item.decision_eligible,
+                           "spec": item.spec.__dict__ if item.spec else None}
                           for item in bindings_for(capability.key, states=(LIVE_VERIFIED, DECLARED, DORMANT, UNSUPPORTED))],
         } for capability in sorted(CAPABILITIES.values(), key=lambda item: item.key)],
         "retired": [{"source": item.source, "capability": item.capability, "notes": item.notes}

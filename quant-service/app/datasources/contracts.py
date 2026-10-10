@@ -14,7 +14,7 @@ and tests without starting anything.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, Final, Mapping
 
 
 #: Binding states, from strongest to weakest evidence.
@@ -40,6 +40,40 @@ LICENSES: Final = (
 
 
 @dataclass(frozen=True)
+class FieldSpec:
+    name: str
+    unit: str | None = None
+    dtype: str = "any"
+    nullable: bool = True
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class CanonicalSchema:
+    """Canonical fields for one capability; ``fields`` remains a compatibility view."""
+
+    fields: tuple[FieldSpec, ...] = ()
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(item.name for item in self.fields)
+
+
+@dataclass(frozen=True)
+class BindingSpec:
+    """Source-specific contract kept separate from the canonical capability."""
+
+    params: Mapping[str, Any] = field(default_factory=dict)
+    field_map: Mapping[str, str] = field(default_factory=dict)
+    unit_factors: Mapping[str, float] = field(default_factory=dict)
+    paging: Any | None = None
+    max_batch: int | None = None
+    limits: Mapping[str, Any] = field(default_factory=dict)
+    time_semantics: str = ""
+    handshake_profile: str | None = None
+
+
+@dataclass(frozen=True)
 class Capability:
     """One interface a strategy can ask for, independent of who serves it."""
 
@@ -53,6 +87,7 @@ class Capability:
     #: Point-in-time rule: what ``effective_at`` and ``available_at`` mean.
     time_semantics: str
     description: str = ""
+    schema: CanonicalSchema | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +123,7 @@ class Binding:
     limits: str = ""
     notes: str = ""
     decision_eligible: bool = False
+    spec: BindingSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +213,7 @@ class QualityReceipt:
     available_at_max: Any | None
     response_hash: str | None
     warnings: tuple[str, ...] = ()
+    schema: str = "canonical"
 
 
 @dataclass(frozen=True)
@@ -207,8 +244,8 @@ class StrategyDataNeeds:
 
 
 __all__ = [
-    "BINDING_STATES", "Binding", "CATEGORIES", "Capability", "CapabilityEvidence", "CapabilityRequest",
+    "BINDING_STATES", "Binding", "BindingSpec", "CATEGORIES", "CanonicalSchema", "Capability", "CapabilityEvidence", "CapabilityRequest",
     "CapabilityRequirement", "DECLARED", "DORMANT", "DataSource", "GRAINS", "LICENSES", "LIVE_VERIFIED",
     "PURPOSES", "QUALITY_STATUSES", "QualityReceipt", "RESOLVABLE_STATES", "RETIRED", "SCOPES", "SourceLabel",
-    "StrategyDataNeeds", "Taxonomy", "UNSUPPORTED",
+    "StrategyDataNeeds", "FieldSpec", "Taxonomy", "UNSUPPORTED",
 ]

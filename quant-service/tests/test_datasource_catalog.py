@@ -9,6 +9,7 @@ from app.datasources.catalog import (
     evidence_locations, validate_catalog,
 )
 from app.datasources.contracts import RESOLVABLE_STATES, RETIRED, UNSUPPORTED
+from app.datasources.completeness import completeness_problems, public_fetch_functions
 from app.datasources.resolver import CapabilityResolver, CapabilityUnavailable
 from app.platform.strategy_data_needs import STRATEGY_DATA_NEEDS, strategy_data_needs_catalog
 from app.platform.strategy_registry import STRATEGY_CONTRACTS
@@ -21,6 +22,17 @@ REPO_ROOT = SERVICE_ROOT.parent
 class CatalogTests(unittest.TestCase):
     def test_catalog_is_internally_consistent(self):
         self.assertEqual(validate_catalog(), [])
+
+    def test_capabilities_have_canonical_schema_and_grandfather_is_bounded(self):
+        from app.datasources.catalog import GRANDFATHER_BINDING_LIMIT, GRANDFATHER_BINDINGS
+        self.assertEqual(CAPABILITIES["quote.watch_snapshot"].schema.names,
+                         tuple(field.split(":", 1)[0] for field in CAPABILITIES["quote.watch_snapshot"].fields))
+        self.assertEqual(len(GRANDFATHER_BINDINGS), GRANDFATHER_BINDING_LIMIT)
+        self.assertTrue(any(binding.spec for binding in BINDINGS))
+
+    def test_source_fetch_completeness_and_tdx_families(self):
+        self.assertTrue(public_fetch_functions())
+        self.assertEqual(completeness_problems(set(CAPABILITIES)), [])
 
     def test_tushare_ths_boards_are_retired_and_fuyao_stays_declared(self):
         membership = {binding.source: binding for binding in BINDINGS if binding.capability == "sector.membership"}
@@ -263,6 +275,17 @@ class ResolverTests(unittest.IsolatedAsyncioTestCase):
             resolver.bind("eastmoney_free", "quote.all_a_snapshot", rows)   # unsupported
         with self.assertRaises(ValueError):
             resolver.bind("longhuvip", "bars.daily", rows)                  # retired
+
+    def test_unsupported_is_never_routable_but_declared_is(self):
+        resolver = CapabilityResolver()
+
+        async def rows(**_params):
+            return [{"symbol": "000001.SZ"}]
+
+        with self.assertRaises(ValueError):
+            resolver.bind("eastmoney_free", "quote.all_a_snapshot", rows)
+        resolver.bind("tdx_public", "ticks.session", rows)
+        self.assertIn("tdx_public", resolver.bound_sources("ticks.session"))
 
     def test_package_bindings_cover_their_catalog_entries(self):
         from app.datasources.bindings import register_package_sources
