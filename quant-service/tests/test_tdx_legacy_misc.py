@@ -59,9 +59,9 @@ class LegacyMiscTests(unittest.TestCase):
 
     def test_rows_project_onto_the_canonical_snapshot(self):
         from app.datasources.catalog import bindings_for
-        from app.datasources.contracts import UNSUPPORTED
+        from app.datasources.contracts import BINDING_STATES
         from app.datasources.resolver import _normalise_rows
-        binding = next(item for item in bindings_for("quote.all_a_snapshot", states=(UNSUPPORTED,)) if item.source == "tdx_public")
+        binding = next(item for item in bindings_for("quote.all_a_snapshot", states=BINDING_STATES) if item.source == "tdx_public")
         rows, _warnings = legacy._all_a_snapshot(FakeClient())
         projected = _normalise_rows(rows, binding)
         self.assertTrue(projected.canonical)

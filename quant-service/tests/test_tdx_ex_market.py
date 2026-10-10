@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from app.datasources.catalog import bindings_for
-from app.datasources.contracts import UNSUPPORTED
+from app.datasources.contracts import BINDING_STATES
 from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_ex_market as ex
 
@@ -149,7 +149,7 @@ class TdxExMarketFixtures(unittest.TestCase):
         self.assertEqual(len(stock.rows), 1)
 
     def test_bars_project_onto_the_context_contract(self):
-        binding = next(item for item in bindings_for("context.bars_daily", states=(UNSUPPORTED,)))
+        binding = next(item for item in bindings_for("context.bars_daily", states=BINDING_STATES))
         projected = _normalise_rows(ex.parse_klines(IF_BARS, 4, 47, "IF2610"), binding)
         self.assertTrue(projected.canonical)
         self.assertEqual(projected.rows[1]["open_interest"], 50002)

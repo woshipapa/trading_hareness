@@ -19,15 +19,22 @@ the same keywords, so the resolver can fall through without translation):
 
 Sources that live outside this package (licensed gateways, the existing
 Tencent/Sina/Eastmoney quote paths) are bound by the composition root.
+
+The adapters of ``GENERIC_ADAPTER_MODULES`` are not listed here one by one: every resolvable binding whose catalog
+adapter string names a function in one of those modules is bound from that string, so moving such a binding
+from ``unsupported`` to ``declared`` is a change to ``catalog.py`` and nothing else.
 """
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import date, datetime, time, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from . import catalog
+from .contracts import RESOLVABLE_STATES
 from .derived.tick_flow import summarize_ticks
 from .resolver import CapabilityResolver
 from .sources import eastmoney_datacenter, eastmoney_hot_rank, eastmoney_ztb, investor_qa, news_flash, ticks, ttfund, xuangubao_pool
@@ -36,6 +43,15 @@ from .sources.fuyao_evidence import fetch_all_pool_pages
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
 FuyaoFetch = Callable[[str, dict[str, Any]], Awaitable[Mapping[str, Any]]]
+
+#: Modules under ``app/datasources/`` whose adapters are the fetchers themselves: one function per binding, keyword
+#: parameters as above.  A module is imported only when a resolvable binding names it, so one that is not written yet
+#: costs nothing while its bindings are ``unsupported`` and is an ImportError the day one of them is promoted.
+GENERIC_ADAPTER_MODULES = (
+    "sources/tdx_bars", "sources/tdx_reference_files", "sources/tdx_quotes", "sources/tdx_mac", "sources/tdx_legacy_misc",
+    "sources/tdx_microstructure", "sources/tdx_instruments", "sources/tdx_f10_finance", "sources/tdx_ex_market",
+    "sources/tdx_fin_history", "derived/limit_pools",
+)
 
 
 def _pool(pool: str) -> Callable[..., Awaitable[list[dict[str, Any]]]]:
@@ -79,8 +95,18 @@ def _fuyao_list(fuyao_fetch: FuyaoFetch, route: str, params: dict[str, Any]) -> 
     return fetch
 
 
+def _bind_generic_adapters(resolver: CapabilityResolver) -> None:
+    for binding in catalog.BINDINGS:
+        path, _, function = (binding.adapter or "").partition(":")
+        module = path.removeprefix("app/datasources/").removesuffix(".py")
+        if binding.status in RESOLVABLE_STATES and function and module in GENERIC_ADAPTER_MODULES:
+            resolver.bind(binding.source, binding.capability,
+                          getattr(importlib.import_module("." + module.replace("/", "."), __package__), function))
+
+
 def register_package_sources(resolver: CapabilityResolver, *, fuyao_fetch: FuyaoFetch | None = None) -> CapabilityResolver:
     """Bind every adapter implemented in this package; returns ``resolver``."""
+    _bind_generic_adapters(resolver)
     for capability, pool in (
         ("limits.limit_up_pool", "limit_up"), ("limits.seal_detail", "limit_up"), ("limits.broken_pool", "broken"),
         ("limits.limit_down_pool", "limit_down"), ("limits.previous_limit_up", "previous_limit_up"),

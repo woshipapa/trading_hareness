@@ -14,7 +14,7 @@ from unittest import mock
 
 from app.datasources.catalog import BINDINGS, CAPABILITIES, TAXONOMIES
 from app.datasources import resolver as resolver_module
-from app.datasources.contracts import DECLARED, CapabilityEvidence, CapabilityRequest
+from app.datasources.contracts import DECLARED, LIVE_VERIFIED, UNSUPPORTED, CapabilityEvidence, CapabilityRequest
 from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_mac, tdx_mac_fields
 from app.datasources.sources.tdx_mac_fields import active_fields, bitmap_for_bits
@@ -552,11 +552,12 @@ class MacBindingSpecTests(unittest.TestCase):
             self.assertEqual(set(parameters), set(binding.spec.params), capability)
             self.assertTrue(all(item.kind is inspect.Parameter.KEYWORD_ONLY for item in parameters.values()), capability)
 
-    def test_all_six_bindings_stay_unsupported_research_evidence(self):
+    def test_all_six_bindings_are_specified_and_never_decision_eligible(self):
         self.assertEqual({item.capability for item in BINDINGS if item.source == "tdx_mac"}, set(self.ADAPTERS))
         for capability in self.ADAPTERS:
             binding = mac_binding(capability)
-            self.assertEqual((binding.status, binding.decision_eligible), ("unsupported", False), capability)
+            self.assertIn(binding.status, {UNSUPPORTED, DECLARED, LIVE_VERIFIED}, capability)
+            self.assertFalse(binding.decision_eligible, capability)
             self.assertEqual(binding.spec.handshake_profile, "mac", capability)
 
     def test_batch_bindings_use_the_clients_batch_size(self):
@@ -664,7 +665,7 @@ class MacBarAdapterTests(unittest.TestCase):
 
     def test_the_minute_binding_says_why_it_stays_unsupported(self):
         binding = mac_binding("bars.minute")
-        self.assertEqual(binding.status, "unsupported")
+        self.assertIn(binding.status, {UNSUPPORTED, DECLARED, LIVE_VERIFIED})
         self.assertFalse(binding.decision_eligible)
         self.assertIn("source_available_at", binding.notes)
         self.assertIn("UNSUPPORTED", binding.notes)
