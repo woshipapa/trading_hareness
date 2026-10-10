@@ -28,9 +28,9 @@ this probe.
 | minute data (`分时`) | `0x0537` | both | 240 | price/average yuan; volume lots |
 | history minute data (`历史分时`) | `0x0feb` | both | 240 | price/average yuan; volume lots |
 
-The minute-series (0x0fb4) and minute-data (0x0537/0x0feb) records have no 
-timestamp field on the wire, so the parser computes a minute index from row 
-position.  Standard equity prices use a 100x wire scale; ETF prefixes 
+The minute-series (0x0fb4) and minute-data (0x0537/0x0feb) records have no
+timestamp field on the wire, so the parser computes a minute index from row
+position.  Standard equity prices use a 100x wire scale; ETF prefixes
 `15/51/56/58` use 1000x, matching the upstream parser.
 
 ## Correctness evidence
