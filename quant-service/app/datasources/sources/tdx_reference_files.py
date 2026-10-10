@@ -66,15 +66,15 @@ async def fetch_daily_basic(*, symbols: Sequence[str] = ()) -> CapabilityEvidenc
     return tdx_protocol.observed_evidence(rows, host)
 
 
-def _membership_rows(blocks: Sequence[dict[str, Any]], definitions: dict[str, dict[str, Any]], expected_type: int,
+def _membership_rows(blocks: Sequence[dict[str, Any]], definitions: dict[str, list[dict[str, Any]]], expected_type: int,
                      known_at: datetime) -> tuple[list[dict[str, Any]], list[str], list[str], int]:
     rows: list[dict[str, Any]] = []
     joined: set[str] = set()
     unmatched: set[str] = set()
     rejected = 0
     for block in blocks:
-        definition = definitions.get(block["name"])
-        if definition is None or definition["type"] != expected_type:
+        definition = next((item for item in definitions.get(block["name"], ()) if item["type"] == expected_type), None)
+        if definition is None:
             unmatched.add(block["name"])
             continue
         joined.add(block["name"])
@@ -95,7 +95,9 @@ async def fetch_membership() -> CapabilityEvidence:
 
     def read(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]], list[str], list[str], int]:
         files = tdx_files.parse_zhb_zip(tdx_files.download(client, "zhb.zip"))
-        definitions = {row["name"]: row for row in tdx_files.parse_tdxzs(files["tdxzs3.cfg"])}
+        definitions: dict[str, list[dict[str, Any]]] = {}
+        for row in tdx_files.parse_tdxzs(files["tdxzs3.cfg"]):
+            definitions.setdefault(row["name"], []).append(row)
         rows: list[dict[str, Any]] = []
         joined: list[str] = []
         unmatched: list[str] = []
