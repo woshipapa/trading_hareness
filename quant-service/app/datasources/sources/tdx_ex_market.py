@@ -17,7 +17,7 @@ from typing import Any, Iterable, Sequence
 
 from .tdx_protocol import TdxProtocolError
 
-PROVIDER_KEY = "tdx_ex_market"
+PROVIDER_KEY = "tdx_ext"
 UPSTREAM_SITE = "tdx-exhq:7727"
 DEFAULT_HOSTS = (
     ("112.74.214.43", 7727),
@@ -27,11 +27,11 @@ DEFAULT_HOSTS = (
     ("116.205.143.214", 7727),
     ("124.71.223.19", 7727),
 )
-MAC_EX_HOSTS = (("116.205.135.205", 7727), ("121.37.232.167", 7727))
 
 # Goods/category IDs returned by EXCATEGORYLIST.  The market byte is a
 # second-level exchange/venue ID and is intentionally kept separate.
-GOODS_TYPES = {
+#: Broad type in the first byte of a category row (delta 2, D6: the market id is the byte at offset 33).
+CATEGORY_TYPES = {
     1: "stock",
     2: "hk",
     3: "futures",
@@ -339,7 +339,7 @@ def parse_categories(data: bytes) -> list[dict[str, Any]]:
                 "market_id": goods,
                 "market_id_name": MARKET_IDS.get(goods, "unknown"),
                 "category": market,
-                "category_name": GOODS_TYPES.get(goods, "unknown"),
+                "category_name": CATEGORY_TYPES.get(market, "unknown"),
                 "name": name,
                 "abbr": abbr,
             }
@@ -681,10 +681,9 @@ async def fetch_bars_daily(
 __all__ = [
     "COMMANDS",
     "DEFAULT_HOSTS",
-    "MAC_EX_HOSTS",
     "EX_LOGIN_PAYLOAD",
     "EX_SETUP_PAYLOAD",
-    "GOODS_TYPES",
+    "CATEGORY_TYPES",
     "MARKET_IDS",
     "TdxExMarketClient",
     "TdxExMarketError",

@@ -21,12 +21,13 @@ class TdxExMarketFixtures(unittest.TestCase):
     def test_categories_and_instruments(self):
         data = bytearray(2 + 64)
         struct.pack_into("<H", data, 0, 1)
-        data[2] = 31
+        data[2] = 2              # broad type: HK (synthetic row in the layout of delta 2, D6)
         data[3 : 3 + 8] = "港股市场".encode("gbk")
-        data[35] = 2
+        data[35] = 31            # the market id requests use: HK main board
         data[36:38] = b"HK"
         category = ex.parse_categories(bytes(data))[0]
-        self.assertEqual(category["market_id"], 2)
+        self.assertEqual((category["market_id"], category["category"]), (31, 2))
+        self.assertEqual(category["market_id_name"], ex.MARKET_IDS[31])
         self.assertEqual(category["category_name"], "hk")
         self.assertEqual(category["abbr"], "HK")
 

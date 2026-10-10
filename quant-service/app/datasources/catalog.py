@@ -741,8 +741,9 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not any(item.capability == key for item in BINDINGS):
-            problems.append(f"{key}: no binding")
+        # A capability must stay routable; the only exception is one whose bindings all await evidence.
+        if not bindings_for(key) and not any(item.capability == key and item.status == UNSUPPORTED for item in BINDINGS):
+            problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
             problems.append(f"{source.key}: unknown license {source.license}")
