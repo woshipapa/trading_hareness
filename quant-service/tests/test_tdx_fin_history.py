@@ -63,24 +63,40 @@ class TdxFinancialHistoryTests(unittest.TestCase):
         self.assertFalse(verify_manifest_entry(ManifestEntry("x", hashlib.md5(b"abd").hexdigest(), 3), b"abc"))
         self.assertFalse(verify_manifest_entry(ManifestEntry("x", hashlib.md5(b"abc").hexdigest(), 2), b"abc"))
 
-    def test_gpcw_header_and_units(self):
-        values = [0.0] * 242
-        values[73] = 170_899_144_704.0
-        values[95] = 86_228_148_224.0
-        values[237] = 1_256_197_760.0
-        payload = struct.pack("<hI H 3L", 1, 20241231, 1, 0, len(values) * 4, 0)
-        payload += struct.pack("<6s1sL", b"600519", b"\0", struct.calcsize("<hI H 3L") + struct.calcsize("<6s1sL"))
-        payload += struct.pack("<" + "f" * len(values), *values)
-        row = parse_gpcw_dat(payload, filename="gpcw20241231.zip")[0]
-        self.assertEqual(row["report_period"], "2024-12-31")
-        self.assertEqual(row["field_count"], 242)
-        self.assertEqual(row["fields"]["其中：营业收入"], values[73])
-        self.assertEqual(row["fields"]["归属于母公司所有者的净利润"], values[95])
-        self.assertEqual(gpcw_field_unit(238), "shares")
+    def test_gpcw_record_fields_land_under_their_documented_names_and_units(self):
+        rows = parse_gpcw_dat(GPCW_DAT, filename="gpcw20241231.zip")
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual((row["code"], row["report_date"], row["report_period"], row["field_count"]),
+                         ("600519", 20241231, "2024-12-31", 242))
+        self.assertEqual(len(row["raw_values"]), 242)
+        self.assertEqual({name: value for name, value in row["fields"].items() if value}, {
+            "基本每股收益": 2.5, "净资产收益率": 15.5, "其中：营业收入": 1_000_000.0,
+            "归属于母公司所有者的净利润": 250_000.0, "总股本": 8_000_000.0, "股东人数(户)": 123_456.0})
+        self.assertEqual({name: row["field_units"][name] for name in (
+            "基本每股收益", "净资产收益率", "货币资金", "其中：营业收入", "总股本", "股东人数(户)", "col9", "col100")}, {
+            "基本每股收益": "yuan/share", "净资产收益率": "ratio", "货币资金": "yuan", "其中：营业收入": "yuan",
+            "总股本": "shares", "股东人数(户)": "count", "col9": None, "col100": None})
+        self.assertEqual(len(row["field_units"]), 242)
 
-    def test_tipinfo_keeps_candidate_unpromoted(self):
+    def test_the_period_falls_back_to_the_header_date_without_a_file_name(self):
+        self.assertEqual(parse_gpcw_dat(GPCW_DAT)[0]["report_period"], "2024-12-31")
+
+    def test_a_code_shorter_than_its_six_byte_field_ends_at_the_first_nul(self):
+        dat = bytes.fromhex(
+            "0100" "4fdb3401" "0100" "00000000" "10000000" "00000000"      # record size 16: four floats
+            "303031000000" "00" "1f000000"                                  # "001" and three NULs
+            "0000803f" "00000040" "00004040" "00008040")
+        row = parse_gpcw_dat(dat)[0]
+        self.assertEqual((row["code"], row["raw_values"]), ("001", (1.0, 2.0, 3.0, 4.0)))
+        self.assertEqual(row["fields"], {"基本每股收益": 1.0, "扣除非经常性损益每股收益": 2.0, "每股未分配利润": 3.0, "每股净资产": 4.0})
+
+    def test_tipinfo_fields_keep_their_positions_and_the_candidate_stays_unpromoted(self):
         row = parse_tipinfo(b"0|000001|20260630|1.24|20260815|20240221|x\n")[0]
-        self.assertEqual(row["announcement_date_candidate"], "20260815")
+        self.assertEqual(row, {
+            "market": "0", "code": "000001", "report_period": "20260630", "eps": 1.24,
+            "announcement_date_candidate": "20260815",
+            "raw_fields": ["0", "000001", "20260630", "1.24", "20260815", "20240221", "x"]})
         self.assertNotIn("available_at", row)
 
     def test_report_period_comes_from_the_file_name(self):
