@@ -390,6 +390,19 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("fuyao_attention_close", state.done)
         self.assertFalse([entry for entry in recorder.health if entry[1] == "fuyao_attention_close"])
 
+    async def test_tdx_tipinfo_uses_end_of_disclosure_day(self):
+        recorder = Recorder()
+        evidence = [{"market": "1", "code": "600519", "report_period": "20260630", "eps": 1.2,
+                     "first_disclosure_date": date(2026, 8, 29)}]
+        with patch("app.datasources.collectors.post_close.tdx_protocol.call",
+                   AsyncMock(return_value=(evidence, "h:7709/login_one"))):
+            result = await post_close.job_tdx_tipinfo(self._deps(recorder), post_close.ArchiveState(),
+                                                      date(2026, 9, 18), EVENING)
+        self.assertEqual(result["rows"], 1)
+        row = recorder.observations[0][2][0]
+        self.assertEqual(row["effective_at"], "2026-08-29T23:59:59+08:00")
+        self.assertEqual(row["available_at"], EVENING.isoformat())
+
 
 if __name__ == "__main__":
     unittest.main()

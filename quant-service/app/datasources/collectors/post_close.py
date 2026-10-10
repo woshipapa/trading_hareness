@@ -19,7 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
-from ..sources import tdx_instruments
+from ..sources import tdx_files, tdx_instruments, tdx_protocol, tdx_zhb_extras
 from ..sources.fuyao_evidence import fetch_code_batches
 from .intraday import CollectorDeps, CollectorState, SENTIMENT_PROVIDER_KEY, build_sentiment
 from ..error_text import error_text
@@ -58,6 +58,7 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("tick_flow", time(19, 0), time(23, 30), "观察池分笔资金流"),
     ArchiveJob("capital_changes", time(19, 30), time(23, 30), "观察池除权除息与股本变迁"),
     ArchiveJob("tdx_security_list", time(19, 40), time(23, 30), "通达信证券列表变更"),
+    ArchiveJob("tdx_tipinfo", time(19, 50), time(23, 30), "通达信财报首次披露日期"),
 )
 
 
@@ -307,6 +308,30 @@ async def job_tdx_security_list(deps: ArchiveDeps, state: ArchiveState, day: dat
     return {"rows": len(rows), "changed": len(changed), "stored": stored}
 
 
+async def job_tdx_tipinfo(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive every tipinfo disclosure row; a normal day stores about 5,600 rows once."""
+    started = time_module.monotonic()
+
+    def fetch(client):
+        files = tdx_files.parse_zhb_zip(tdx_files.download(client, "zhb.zip"))
+        return tdx_zhb_extras.parse_tipinfo(files["tipinfo.dat"])
+
+    rows, host = await tdx_protocol.call(fetch, handshake_profile="login_one")
+    observations = []
+    for row in rows:
+        market = int(row["market"])
+        symbol = tdx_protocol.symbol(market, row["code"])
+        effective = datetime.combine(row["first_disclosure_date"], time(23, 59, 59), CN_TZ)
+        observations.append({"ts_code": symbol, "market": market, "code": row["code"],
+                             "report_period": row["report_period"], "eps": row["eps"],
+                             "first_disclosure_date": row["first_disclosure_date"],
+                             "effective_at": effective.isoformat(), "available_at": now.isoformat()})
+    stored = await deps.collector.persist_observations("tdx_public", "tdx_tipinfo", observations)
+    await deps.collector.record_health("tdx_public", "tdx_tipinfo", True, len(rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"rows": len(rows), "stored": stored, "host": host}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -314,7 +339,7 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "eastmoney_margin": job_eastmoney_margin, "fuyao_valuation_index": job_fuyao_valuation_index,
     "daily_valuation_projection": job_daily_valuation_projection,
     "tick_flow": job_tick_flow, "capital_changes": job_capital_changes,
-    "tdx_security_list": job_tdx_security_list,
+    "tdx_security_list": job_tdx_security_list, "tdx_tipinfo": job_tdx_tipinfo,
 }
 
 
