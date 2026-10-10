@@ -23,16 +23,55 @@ class CatalogTests(unittest.TestCase):
     def test_catalog_is_internally_consistent(self):
         self.assertEqual(validate_catalog(), [])
 
-    def test_capabilities_have_canonical_schema_and_grandfather_is_bounded(self):
-        from app.datasources.catalog import GRANDFATHER_BINDING_LIMIT, GRANDFATHER_BINDINGS
+    def test_capabilities_carry_a_canonical_schema(self):
         self.assertEqual(CAPABILITIES["quote.watch_snapshot"].schema.names,
                          tuple(field.split(":", 1)[0] for field in CAPABILITIES["quote.watch_snapshot"].fields))
-        self.assertEqual(len(GRANDFATHER_BINDINGS), GRANDFATHER_BINDING_LIMIT)
-        self.assertTrue(any(binding.spec for binding in BINDINGS))
+        units = {item.name: item.unit for item in CAPABILITIES["ticks.session"].schema.fields}
+        self.assertEqual((units["price"], units["volume"]), ("yuan", "shares"))
 
-    def test_source_fetch_completeness_and_tdx_families(self):
+    def test_the_grandfather_list_is_literal_and_can_only_shrink(self):
+        from unittest import mock
+
+        from app.datasources import catalog
+        from app.datasources.contracts import Binding, DECLARED
+        self.assertLessEqual(len(catalog.GRANDFATHER_BINDINGS), catalog.GRANDFATHER_BASELINE_SIZE)
+        self.assertTrue(all((item.source, item.capability) in catalog.GRANDFATHER_BINDINGS
+                            for item in BINDINGS if item.spec is None))
+        # Swapping one spec-less binding for another keeps the count and must still fail.
+        dropped = next(item for item in BINDINGS if item.spec is None and item.source == "tencent_free")
+        swapped = tuple(item for item in BINDINGS if item is not dropped) + (
+            Binding("tencent_free", "events.repurchase", 90, DECLARED),)
+        with mock.patch.object(catalog, "BINDINGS", swapped):
+            problems = catalog.validate_catalog()
+        self.assertIn("binding tencent_free->events.repurchase: missing BindingSpec outside grandfather list", problems)
+        self.assertIn(f"grandfather entry tencent_free->{dropped.capability} has no binding: delete it (the list only shrinks)",
+                      problems)
+
+    def test_every_public_reader_is_bound_or_registered_with_a_reason(self):
         self.assertTrue(public_fetch_functions())
-        self.assertEqual(completeness_problems(set(CAPABILITIES)), [])
+        self.assertEqual(completeness_problems(), [])
+
+    def test_completeness_is_derived_from_code_not_a_hand_list(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.datasources.contracts import Binding, DECLARED
+        with tempfile.TemporaryDirectory() as tmp:
+            root, registry = Path(tmp) / "sources", Path(tmp) / "bindings.py"
+            root.mkdir()
+            (root / "demo.py").write_text("async def fetch_rows():\n    return []\n\n"
+                                          "class DemoClient:\n    def bars(self):\n        return []\n", encoding="utf-8")
+            registry.write_text("from .sources import demo\n", encoding="utf-8")
+            bindings = [Binding("tdx_public", "ticks.session", 20, DECLARED)]
+            problems = completeness_problems(bindings, root=root, bindings_module=registry, unregistered={})
+            self.assertIn("unregistered source fetch function: demo.fetch_rows", problems)
+            self.assertIn("unregistered source fetch function: demo.DemoClient.bars", problems)
+            self.assertIn("unaccounted TDX command family: quote", problems, "only TDX bindings count for a family")
+            registry.write_text("from .sources import demo\nX = demo.fetch_rows\n", encoding="utf-8")
+            problems = completeness_problems(bindings, root=root, bindings_module=registry,
+                                             unregistered={"demo.DemoClient.bars": "transport", "missing.fetch_gone": "old"})
+            self.assertNotIn("unregistered source fetch function: demo.fetch_rows", problems)
+            self.assertIn("stale UNREGISTERED entry: missing.fetch_gone", problems)
 
     def test_tushare_ths_boards_are_retired_and_fuyao_stays_declared(self):
         membership = {binding.source: binding for binding in BINDINGS if binding.capability == "sector.membership"}

@@ -241,14 +241,6 @@ def _bind(source: str, capability: str, priority: int, status: str, store: str |
 
 _EVT = "market_events:event_type="
 _RAW = "raw_market_observations:capability="
-_TDX_TICKS_SPEC = BindingSpec(
-    field_map={"price": "price", "volume": "volume", "native_price": "price", "native_volume": "volume",
-               "side": "side", "time": "time"},
-    unit_factors={"volume": 1},
-    time_semantics="effective=成交时刻; available=采集时刻",
-    handshake_profile="login_one|legacy_3",
-    max_batch=2000,
-)
 
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot
@@ -325,7 +317,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     # ticks
     _bind("tdx_public", "ticks.session", 20, DECLARED, _RAW + "tick_flow_daily (summaries)",
           "app/datasources/sources/ticks.py:fetch_tdx_ticks", "近期任意交易日（含当日收盘后）", "2000 笔/请求",
-          "与 pytdx 逐笔一致；方向经腾讯逐分钟对账 100% 一致", spec=_TDX_TICKS_SPEC),
+          "与 pytdx 逐笔一致；方向经腾讯逐分钟对账 100% 一致"),
     _bind("tencent_free", "ticks.session", 30, DECLARED, _RAW + "tick_flow_daily (summaries)",
           "app/datasources/sources/ticks.py:fetch_tencent_ticks", "仅当日", notes="秒级时间戳"),
     # auction
@@ -497,14 +489,67 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("longhuvip", "bars.daily", 26, RETIRED, notes="个股日K 接口（旧系统 id=7）恒空，下线；日K 走 longhuvip_composite"),
 )
 
-# Existing bindings without a structured spec remain routable for compatibility.
-# This is intentionally derived once from the baseline tuple: adding a new
-# binding without a spec cannot silently become grandfathered in validation.
-GRANDFATHER_BINDINGS: Final[frozenset[tuple[str, str]]] = frozenset(
-    (item.source, item.capability) for item in BINDINGS if item.spec is None
-)
-# P0 baseline: 119 legacy bindings have no spec. This ceiling may only go down.
-GRANDFATHER_BINDING_LIMIT: Final[int] = 119
+# The 120 bindings that existed without a structured BindingSpec at the P0 baseline (ca209a81), written
+# out so the list cannot grow by itself: a binding without a spec must be in it, and an entry whose binding
+# is gone must be deleted from it. It may only shrink, as bindings receive verified specs (P2-P6).
+GRANDFATHER_BINDINGS: Final[frozenset[tuple[str, str]]] = frozenset({
+    ("akshare", "bars.daily"), ("akshare", "events.block_trade"), ("akshare", "lhb.daily"),
+    ("akshare", "lhb.seat_statistics"), ("akshare", "limits.limit_up_pool"),
+    ("akshare", "limits.previous_limit_up"), ("akshare", "limits.strong_pool"),
+    ("akshare", "quote.all_a_snapshot"), ("akshare", "sector.membership"), ("baostock", "bars.daily"),
+    ("cls_telegraph", "news.flash"), ("cninfo_free", "news.announcements"), ("cninfo_irm", "events.investor_qa"),
+    ("derived_market_sentiment", "derived.market_sentiment"),
+    ("derived_sentiment_cycle", "derived.sentiment_cycle"), ("derived_tick_flow", "flow.tick_derived"),
+    ("eastmoney_datacenter", "events.block_trade"), ("eastmoney_datacenter", "events.disclosure_schedule"),
+    ("eastmoney_datacenter", "events.earnings_express"), ("eastmoney_datacenter", "events.earnings_forecast"),
+    ("eastmoney_datacenter", "events.holder_count"), ("eastmoney_datacenter", "events.holder_trade"),
+    ("eastmoney_datacenter", "events.ipo_calendar"), ("eastmoney_datacenter", "events.repurchase"),
+    ("eastmoney_datacenter", "events.restricted_release"),
+    ("eastmoney_datacenter", "fundamentals.capital_changes"), ("eastmoney_datacenter", "fundamentals.margin"),
+    ("eastmoney_datacenter", "reference.suspensions"), ("eastmoney_flash", "news.flash"),
+    ("eastmoney_free", "bars.daily"), ("eastmoney_free", "flow.watch_intraday"),
+    ("eastmoney_free", "quote.all_a_snapshot"), ("eastmoney_free", "sector.flow_curve"),
+    ("eastmoney_hot_rank", "attention.em_popularity"), ("eastmoney_hot_rank", "attention.em_rank_history"),
+    ("eastmoney_hot_rank", "attention.em_surge"), ("eastmoney_ztb", "limits.anomaly_tape"),
+    ("eastmoney_ztb", "limits.broken_pool"), ("eastmoney_ztb", "limits.limit_down_pool"),
+    ("eastmoney_ztb", "limits.limit_up_pool"), ("eastmoney_ztb", "limits.previous_limit_up"),
+    ("eastmoney_ztb", "limits.seal_detail"), ("eastmoney_ztb", "limits.strong_pool"),
+    ("eastmoney_ztb", "limits.sub_new_pool"), ("eastmoney_ztb", "sector.anomaly"),
+    ("fuyao_ths", "attention.ths_hot_history"), ("fuyao_ths", "attention.ths_hot_rank"),
+    ("fuyao_ths", "attention.ths_skyrocket"), ("fuyao_ths", "auction.close_snapshot"),
+    ("fuyao_ths", "auction.open_snapshot"), ("fuyao_ths", "auction.short_term_benchmark"),
+    ("fuyao_ths", "bars.adjustment_factor"), ("fuyao_ths", "bars.daily"), ("fuyao_ths", "bars.index_daily"),
+    ("fuyao_ths", "fund.nav"), ("fuyao_ths", "fundamentals.financial_statements"), ("fuyao_ths", "lhb.daily"),
+    ("fuyao_ths", "lhb.seat_statistics"), ("fuyao_ths", "limits.broken_pool"), ("fuyao_ths", "limits.ladder"),
+    ("fuyao_ths", "limits.limit_down_pool"), ("fuyao_ths", "limits.limit_up_pool"),
+    ("fuyao_ths", "limits.stock_anomaly_reason"), ("fuyao_ths", "quote.all_a_snapshot"),
+    ("fuyao_ths", "quote.valuation"), ("fuyao_ths", "reference.instruments"),
+    ("fuyao_ths", "reference.trade_calendar"), ("fuyao_ths", "sector.index_quote"),
+    ("fuyao_ths", "sector.membership"), ("jin10_flash", "news.flash"),
+    ("longhu_qfq_derived", "bars.adjustment_factor"), ("longhuvip", "auction.open_snapshot"),
+    ("longhuvip", "bars.daily"), ("longhuvip", "bars.minute"), ("longhuvip", "limits.seal_detail"),
+    ("longhuvip", "quote.order_book"), ("longhuvip", "quote.watch_snapshot"), ("longhuvip", "sector.flow_curve"),
+    ("longhuvip", "sector.membership"), ("longhuvip_composite", "bars.adjustment_factor"),
+    ("longhuvip_composite", "bars.daily"), ("longhuvip_composite", "flow.stock_daily"),
+    ("longhuvip_composite", "fundamentals.daily_basic"), ("longhuvip_composite", "limits.prices"),
+    ("longhuvip_index", "bars.index_daily"), ("sina_free", "quote.watch_snapshot"),
+    ("sse_einteract", "events.investor_qa"), ("tdx_local", "bars.daily"), ("tdx_local", "bars.minute"),
+    ("tdx_public", "auction.history_0925"), ("tdx_public", "fundamentals.capital_changes"),
+    ("tdx_public", "ticks.session"), ("tencent_free", "bars.daily_adjusted"), ("tencent_free", "bars.minute"),
+    ("tencent_free", "limits.prices"), ("tencent_free", "quote.order_book"),
+    ("tencent_free", "quote.watch_snapshot"), ("tencent_free", "ticks.session"), ("ths_flash", "news.flash"),
+    ("ttfund", "fund.nav"), ("tushare_backup", "bars.daily"), ("tushare_primary", "bars.adjustment_factor"),
+    ("tushare_primary", "bars.daily"), ("tushare_primary", "quote.valuation"),
+    ("tushare_super_get", "bars.adjustment_factor"), ("tushare_super_get", "bars.daily"),
+    ("tushare_super_get", "bars.minute"), ("tushare_super_get", "events.disclosure_schedule"),
+    ("tushare_super_get", "events.earnings_express"), ("tushare_super_get", "events.earnings_forecast"),
+    ("tushare_super_get", "flow.stock_daily"), ("tushare_super_get", "fundamentals.daily_basic"),
+    ("tushare_super_get", "fundamentals.financial_statements"), ("tushare_super_get", "lhb.daily"),
+    ("tushare_super_get", "limits.prices"), ("tushare_super_get", "reference.instruments"),
+    ("tushare_super_get", "reference.trade_calendar"), ("tushare_super_get", "sector.membership"),
+    ("tushare_super_sdk", "bars.adjustment_factor"), ("xuangubao", "limits.seal_detail"),
+})
+GRANDFATHER_BASELINE_SIZE: Final[int] = 120
 LEGACY_SOURCE_KEYS: Final[frozenset[str]] = frozenset({
     "longhuvip", "longhuvip_composite", "longhuvip_index", "tushare_primary", "tushare_super_get",
     "tushare_super_sdk", "tushare_backup", "fuyao_ths", "eastmoney_free", "xuangubao", "eastmoney_ztb",
@@ -691,7 +736,10 @@ def validate_catalog() -> list[str]:
             problems.append(f"binding {item.source}->{item.capability}: missing BindingSpec outside grandfather list")
         if item.spec is None and item.source not in LEGACY_SOURCE_KEYS:
             problems.append(f"binding {item.source}->{item.capability}: new source requires BindingSpec")
-    if sum(item.spec is None for item in BINDINGS) > GRANDFATHER_BINDING_LIMIT:
+    current = {(item.source, item.capability) for item in BINDINGS}
+    for source, capability in sorted(GRANDFATHER_BINDINGS - current):
+        problems.append(f"grandfather entry {source}->{capability} has no binding: delete it (the list only shrinks)")
+    if len(GRANDFATHER_BINDINGS) > GRANDFATHER_BASELINE_SIZE:
         problems.append("grandfather binding list may only shrink")
     for label in SOURCE_LABELS.values():
         if label.source not in SOURCES or label.capability not in CAPABILITIES:

@@ -23,7 +23,6 @@ from datetime import date, datetime
 
 from .catalog import bindings_for, capabilities_of, catalog_document, validate_catalog
 from .completeness import completeness_problems
-from .catalog import CAPABILITIES
 
 
 def _catalog(args: argparse.Namespace) -> int:
@@ -39,7 +38,7 @@ def _catalog(args: argparse.Namespace) -> int:
 
 
 def _validate(_args: argparse.Namespace) -> int:
-    problems = [*validate_catalog(), *completeness_problems(set(CAPABILITIES))]
+    problems = [*validate_catalog(), *completeness_problems()]
     for problem in problems:
         print(problem)
     print(json.dumps({"problems": len(problems)}))

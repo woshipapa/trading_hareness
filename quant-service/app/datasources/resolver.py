@@ -180,32 +180,45 @@ def _quality_receipt(rows: Any, envelope: CapabilityEvidence, request: Capabilit
     )
 
 
-def _normalise_rows(rows: Any, binding: Binding) -> Any:
-    """Project source-native dictionaries into the canonical field contract."""
+def _normalise_rows(rows: Any, binding: Binding) -> tuple[Any, bool, tuple[str, ...]]:
+    """Project source-native dictionaries into the canonical field contract.
+
+    Returns ``(rows, normalised, warnings)``. Only a binding with a spec is projected, and only when every
+    row is a dictionary. Rows of any other shape (dataclasses such as ``Tick``, tuples) stay native and say
+    so, so a receipt never calls them canonical. A unit factor applies to numbers only: multiplying the
+    string ``"123"`` by an integer factor would silently repeat it.
+    """
     spec = binding.spec
-    if spec is None or not isinstance(rows, (list, tuple)):
-        return rows
+    if spec is None:
+        return rows, False, ()
+    if not isinstance(rows, (list, tuple)) or any(not isinstance(row, dict) for row in rows):
+        return rows, False, ("rows_not_normalised",)
+    warnings: list[str] = []
     normalised = []
     for row in rows:
-        if not isinstance(row, dict):
-            normalised.append(row)
-            continue
         projected = dict(row)
+        assigned: dict[str, Any] = {}
         for native, canonical in spec.field_map.items():
-            if native in row:
-                if canonical != native:
-                    projected.pop(native, None)
-                projected[canonical] = row[native]
+            if native not in row:
+                continue
+            if canonical in assigned and assigned[canonical] != row[native]:
+                warnings.append(f"field_map_conflict:{canonical}")
+                continue
+            if canonical != native:
+                projected.pop(native, None)
+            projected[canonical] = assigned[canonical] = row[native]
         for field_name, factor in spec.unit_factors.items():
             value = projected.get(field_name)
-            if value is None or isinstance(value, bool):
+            if value is None:
                 continue
-            try:
-                projected[field_name] = value * factor
-            except (TypeError, ValueError):
+            if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+                warnings.append(f"unit_factor_skipped:{field_name}")
                 continue
+            if isinstance(value, Decimal) and isinstance(factor, float):
+                factor = Decimal(str(factor))
+            projected[field_name] = value * factor
         normalised.append(projected)
-    return type(rows)(normalised)
+    return type(rows)(normalised), True, tuple(dict.fromkeys(warnings))
 
 
 def _declared_fields(binding: Binding) -> set[str]:
@@ -279,10 +292,11 @@ class CapabilityResolver:
                                  "ms": int((time.monotonic() - started) * 1000)})
                 continue
             rows, envelope = _unpack_evidence(raw)
-            rows = _normalise_rows(rows, binding)
+            rows, normalised, normalise_warnings = _normalise_rows(rows, binding)
             count = _row_count(rows)
             quality = _quality_receipt(rows, envelope, policy)
-            quality = QualityReceipt(**{**quality.__dict__, "schema": "canonical" if binding.spec else "native"})
+            quality = QualityReceipt(**{**quality.__dict__, "schema": "canonical" if normalised else "native",
+                                        "warnings": quality.warnings + normalise_warnings})
             valid = quality.status not in {"invalid", "stale", "conflicted"}
             if policy.purpose in {"replay", "shadow"} and quality.status == "partial":
                 valid = False
