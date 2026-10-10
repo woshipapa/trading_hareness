@@ -41,11 +41,12 @@ class TdxFileParserTests(unittest.TestCase):
         self.assertEqual(zs[0]["fields"][-1], "future")
         sp = tdx_files.parse_spblock("#中证\n1000001\nignored\n".encode("gbk"))
         self.assertEqual(sp[0]["members"], ["1000001"])
-        stat = tdx_files.parse_tdxstat(("0|000001|x|12.5|20261009|3|1.2|x|x|20|3.4|" + "|".join(["x"] * 20) + "\n").encode("gbk"))
-        self.assertEqual(stat[0]["pe_ttm"], 12.5)
+        stat = tdx_files.parse_tdxstat(("0|000001|x|12.5|20261009|3|1.2|0.8|0.7|20|3.4|" + "|".join(["x"] * 20) + "\n").encode("gbk"))
+        self.assertEqual(stat[0]["pe_static"], 12.5)
+        self.assertEqual(stat[0]["pe_ttm"], 20.0)
         self.assertEqual(len(stat[0]["fields"]), 31)
-        stat2 = tdx_files.parse_tdxstat2(("0|000001|20261009|12|x|10|x|x|x|x|x|x|x|880001|x|x|9|20|10|x|x\n").encode("gbk"))
-        self.assertEqual(stat2[0]["block_index"], "880001")
+        stat2 = tdx_files.parse_tdxstat2(("0|000001|20261009|12|x|10|x|8|x|x|x|x|x|880001|x|x|9|20|10|x|x\n").encode("gbk"))
+        self.assertEqual(stat2[0]["amount_prev2_10k_yuan"], 8.0)
         self.assertEqual(stat2[0]["amount_10k_yuan"], 12.0)
 
     def test_zip_and_chunk_guards(self):
