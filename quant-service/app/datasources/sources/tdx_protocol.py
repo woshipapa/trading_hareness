@@ -82,6 +82,21 @@ class TdxProtocolError(RuntimeError):
     """The server closed, timed out or sent an undecodable response."""
 
 
+def decode_gbk(raw: bytes) -> str:
+    """A fixed-width protocol text field: GBK up to the first NUL. Never tried as UTF-8 first, because short
+    GBK names can be valid UTF-8 (\u901a22\u8f6c\u503a would decode to mojibake); a name cut inside a
+    character keeps a visible U+FFFD."""
+    return raw.split(b"\0", 1)[0].decode("gb18030", "replace")
+
+
+def decode_text(data: bytes) -> str:
+    """Decode TDX text members, accepting UTF-8 and GB18030 snapshots."""
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("gb18030", "replace")
+
+
 # -- decoding primitives (ported from pytdx.helper) -------------------------
 
 def decode_price(data: bytes | bytearray, pos: int) -> tuple[int, int]:
@@ -161,7 +176,7 @@ def build_quotes_request(stocks: Sequence[tuple[int, str]]) -> bytes:
     return header + b"".join(struct.pack("<B6s", market, _code(code)) for market, code in stocks)
 
 
-def parse_quotes(body: bytes) -> list[dict[str, Any]]:
+def parse_quotes(body: bytes, *, requested: Sequence[tuple[int, str]] | None = None) -> list[dict[str, Any]]:
     pos = 2
     (count,) = struct.unpack("<H", body[pos:pos + 2])
     pos += 2
@@ -206,7 +221,20 @@ def parse_quotes(body: bytes) -> list[dict[str, Any]]:
             quote[f"bid_vol{index}"] = bid_volume
             quote[f"ask_vol{index}"] = ask_volume
         quotes.append(quote)
-    return quotes
+    if requested is None:
+        return quotes
+    # R1 (delta-1 1c): the server answers one row per requested symbol, in order, and answers an unknown one
+    # (an old BJ code) with a placeholder row such as 600839 at 0.0. Compare by position, so a placeholder
+    # never passes because its code was also requested elsewhere.
+    if len(quotes) != len(requested):
+        raise TdxProtocolError(f"quote answer has {len(quotes)} rows for {len(requested)} requested symbols")
+    kept = []
+    for wanted, quote in zip(requested, quotes):
+        if (quote["market"], quote["code"]) == tuple(wanted):
+            kept.append(quote)
+        else:
+            _LOGGER.warning("code_mismatch requested=%s returned=%s", tuple(wanted), (quote["market"], quote["code"]))
+    return kept
 
 
 def build_bars_request(category: int, market: int, code: str, start: int, count: int) -> bytes:
@@ -383,7 +411,7 @@ class TdxClient:
         result = []
         for offset in range(0, len(stocks), MAX_QUOTES_PER_REQUEST):
             chunk = stocks[offset:offset + MAX_QUOTES_PER_REQUEST]
-            result.extend(parse_quotes(self._exchange(build_quotes_request(chunk))))
+            result.extend(parse_quotes(self._exchange(build_quotes_request(chunk)), requested=chunk))
         return result
 
     def bars(self, category: int, market: int, code: str, start: int = 0, count: int = MAX_BARS_PER_REQUEST) -> list[dict[str, Any]]:
@@ -483,6 +511,6 @@ __all__ = [
     "BAR_CATEGORIES", "DEFAULT_HOSTS", "HANDSHAKE_PROFILES", "MARKETS", "MINUTE_BAR_CATEGORIES", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
     "UPSTREAM_SITE", "XDXR_CATEGORIES", "build_bars_request", "build_history_ticks_request",
     "build_quotes_request", "build_ticks_request", "build_xdxr_request", "call", "call_sync",
-    "configured_hosts", "decode_price", "decode_volume", "market_code", "parse_bars", "parse_quotes",
+    "configured_hosts", "decode_gbk", "decode_price", "decode_volume", "market_code", "parse_bars", "parse_quotes",
     "parse_ticks", "parse_xdxr", "sweep_sync",
 ]

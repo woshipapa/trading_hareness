@@ -25,6 +25,16 @@ def encode_price(value: int) -> bytes:
     return bytes(out)
 
 
+def quote_answer(*quotes: tuple[int, str, int]) -> bytes:
+    """A 0x053e answer with one record per (market, code, price in cents), in parse_quotes' layout."""
+    body = struct.pack("<HH", 0, len(quotes))
+    for market, code, price in quotes:
+        body += struct.pack("<B6sH", market, code.encode(), 0) + encode_price(price) + encode_price(0) * 8
+        body += struct.pack("<I", 0) + encode_price(0) * 4 + encode_price(0) * 20 + struct.pack("<H", 0)
+        body += encode_price(0) * 4 + struct.pack("<hH", 0, 0)
+    return body
+
+
 class TdxPrimitiveTests(unittest.TestCase):
     def test_price_varint_round_trip(self):
         for value in (0, 1, -1, 63, 64, -64, 1159, -250, 123456, -987654):
@@ -233,6 +243,15 @@ class TdxClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tdx_protocol.market_code("600519")
 
+    def test_echo_check_is_positional_and_needs_one_row_per_request(self):
+        # R1: an old BJ code is answered with a 600839 placeholder at 0.0; here 600839 was also requested.
+        requested = [(1, "600839"), (2, "832000")]
+        with self.assertLogs(tdx_protocol.__name__, level="WARNING") as logs:
+            kept = tdx_protocol.parse_quotes(quote_answer((1, "600839", 412), (1, "600839", 0)), requested=requested)
+        self.assertEqual([(row["code"], row["price"]) for row in kept], [("600839", 4.12)])
+        self.assertIn("code_mismatch", logs.output[0])
+        with self.assertRaises(tdx_protocol.TdxProtocolError):
+            tdx_protocol.parse_quotes(quote_answer((1, "600839", 412)), requested=requested)
 
 class TdxLocalFileTests(unittest.TestCase):
     def test_day_and_minute_records(self):

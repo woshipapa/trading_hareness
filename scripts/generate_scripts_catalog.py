@@ -103,6 +103,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("audit-live-quant-callers.sh", "local n8n", "quant-research", "workstation"),
     # CI and contract checks
     ("verify_*.py", "CI and checks", "platform", "workstation and CI"),
+    ("verify-tdx-*.py", "research data", "quant-research", "workstation"),
     ("verify-*", "CI and checks", "platform", "workstation and CI"),
     ("generate-tdx-hosts.py", "research data", "quant-research", "workstation"),
     ("generate*", "CI and checks", "platform", "workstation and CI"),

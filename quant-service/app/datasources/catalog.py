@@ -219,6 +219,9 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
          "date category cash_dividend float_shares_after_10k total_shares_after_10k", "effective=变动日; available=采集时刻"),
     _cap("fundamentals.margin", "融资融券", "daily", "all_a", "rzye rzmre rqye net_buy", "effective=T 日; available=T+1 采集"),
     _cap("reference.instruments", "证券基础信息", "reference", "all_a", "symbol name list_date is_st", "effective=入库"),
+    _cap("reference.security_list", "TDX 证券列表", "reference", "all_a",
+         "symbol market code name instrument_type decimal_point pre_close:yuan is_st list_source source_host",
+         "effective=采集时刻; available=采集时刻（快照）"),
     _cap("reference.trade_calendar", "交易日历", "reference", "market", "exchange calendar_date is_open", "effective=入库"),
     _cap("reference.suspensions", "停复牌（按交易日）", "daily", "all_a", "symbol suspend_date suspend_reason",
          "effective=交易日; available=入库"),
@@ -470,6 +473,17 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/datasources/sources/eastmoney_datacenter.py:RPT_F10_EH_EQUITY"),
     _bind("eastmoney_datacenter", "fundamentals.margin", 50, DECLARED, _RAW + "margin_market",
           "app/datasources/collectors/post_close.py:job_eastmoney_margin", notes="明细默认关闭（~4000 行/日）"),
+    _bind("tdx_public", "reference.security_list", 20, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_instruments.py:fetch_security_list",
+          notes="登录模式：login_one；一台确定的主机；深沪各分页，北交所仅计数+zhb.zip",
+          decision_eligible=False,
+          spec=BindingSpec(time_semantics="effective=采集时刻; available=采集时刻（快照）")),
+    _bind("tdx_public", "reference.instruments", 19, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_instruments.py:fetch_instruments",
+          notes="从 reference.security_list 派生：仅股票类；TDX 不提供上市日期，list_date 为 None，绝不编造",
+          decision_eligible=False,
+          spec=BindingSpec(field_map={"symbol": "symbol", "name": "name", "list_date": "list_date", "is_st": "is_st"},
+                           time_semantics="effective=collection time; available=collection time (snapshot)")),
     _bind("fuyao_ths", "reference.instruments", 12, DECLARED, "instruments", "app/market_universe_sync.py",
           limits="ticker_list asset_type=a-share，每页 1000，翻到短页为止",
           notes="全 A 权威清单（可移出成员）：须达 minimum_rows 且沪深北齐全才落库；Longhu 收盘只增不删；2026-10-09 本机探测"),
@@ -730,7 +744,8 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key):
+        # A capability must stay routable; the only exception is one whose bindings all await evidence.
+        if not bindings_for(key) and not any(item.capability == key and item.status == UNSUPPORTED for item in BINDINGS):
             problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
