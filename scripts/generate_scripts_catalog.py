@@ -125,6 +125,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("probe-tdx-routes.py", "research data", "quant-research", "workstation"),
     ("probe-tdx-q-*.py", "research data", "quant-research", "workstation"),
     ("tdx-owner-probe.sh", "research data", "quant-research", "workstation"),
+    ("tdx-promote.py", "research data", "quant-research", "workstation"),
 ]
 GROUP_ORDER = ["release", "owner runtime", "owner Windows", "workstation services", "teacher review", "local n8n",
                "research data", "CI and checks", "forwarders", "retired"]
