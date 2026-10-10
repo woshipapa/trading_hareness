@@ -23,6 +23,29 @@ class CatalogTests(unittest.TestCase):
     def test_catalog_is_internally_consistent(self):
         self.assertEqual(validate_catalog(), [])
 
+    def test_catalog_rejects_zero_or_retired_only_bindings(self):
+        from unittest import mock
+        from app.datasources import catalog
+
+        without_quote = tuple(item for item in BINDINGS if item.capability != "quote.all_a_snapshot")
+        with mock.patch.object(catalog, "BINDINGS", without_quote):
+            self.assertIn("quote.all_a_snapshot: no resolvable binding", catalog.validate_catalog())
+
+        retired_only = tuple(item for item in BINDINGS if item.capability != "bars.daily")
+        retired = next(item for item in BINDINGS if item.source == "longhuvip" and item.capability == "bars.daily")
+        with mock.patch.object(catalog, "BINDINGS", retired_only + (retired,)):
+            self.assertIn("bars.daily: no resolvable binding", catalog.validate_catalog())
+
+    def test_catalog_allows_unsupported_only_binding(self):
+        from unittest import mock
+        from app.datasources import catalog
+
+        target = "quote.all_a_snapshot"
+        unsupported = next(item for item in BINDINGS if item.source == "eastmoney_free" and item.capability == target)
+        bindings = tuple(item for item in BINDINGS if item.capability != target) + (unsupported,)
+        with mock.patch.object(catalog, "BINDINGS", bindings):
+            self.assertNotIn(f"{target}: no resolvable binding", catalog.validate_catalog())
+
     def test_capabilities_carry_a_canonical_schema(self):
         self.assertEqual(CAPABILITIES["quote.watch_snapshot"].schema.names,
                          tuple(field.split(":", 1)[0] for field in CAPABILITIES["quote.watch_snapshot"].fields))

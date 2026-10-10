@@ -503,9 +503,10 @@ async def call(operation: Callable[[TdxClient], T], **kwargs: Any) -> tuple[T, s
 
 
 def market_code(symbol: str) -> tuple[int, str]:
+    """``"600519.SH"`` -> ``(1, "600519")``; anything but six ASCII digits and a known exchange is a ValueError."""
     code, _, exchange = symbol.upper().partition(".")
-    if exchange not in MARKETS:
-        raise ValueError("symbol must end with .SH, .SZ or .BJ")
+    if exchange not in MARKETS or len(code) != 6 or not (code.isascii() and code.isdigit()):
+        raise ValueError("symbol must be six digits followed by .SH, .SZ or .BJ")
     return MARKETS[exchange], code
 
 

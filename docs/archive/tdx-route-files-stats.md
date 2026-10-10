@@ -49,4 +49,3 @@ The repository already has local-file readers in
 does not edit or duplicate those bar readers. A parallel branch is adding
 local block/config readers, so consolidation should happen after that branch
 lands rather than silently changing ownership here.
-
