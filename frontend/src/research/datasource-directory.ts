@@ -38,13 +38,14 @@ export function filterCapabilities(
   capabilities: DatasourceCapability[], source: string, status: string, text: string,
 ): DatasourceCapability[] {
   const needle = text.trim().toLowerCase();
-  return capabilities.filter((capability) => {
-    const fromSource = (key: string) => !source || (source === TDX_SOURCE_FILTER ? TDX_SOURCES.has(key) : key === source);
+  const fromSource = (key: string) => !source || (source === TDX_SOURCE_FILTER ? TDX_SOURCES.has(key) : key === source);
+  return capabilities.flatMap((capability) => {
     const bindings = capability.bindings.filter((binding) => fromSource(binding.source) && (!status || binding.status === status));
-    if (!bindings.length) return false;
-    if (!needle) return true;
-    return `${capability.key} ${capability.label} ${capability.description} ${capability.category}`.toLowerCase().includes(needle)
+    if (!bindings.length) return [];
+    const matches = !needle
+      || `${capability.key} ${capability.label} ${capability.description} ${capability.category}`.toLowerCase().includes(needle)
       || bindings.some((binding) => `${binding.source} ${binding.notes}`.toLowerCase().includes(needle));
+    return matches ? [{ ...capability, bindings }] : [];
   });
 }
 
