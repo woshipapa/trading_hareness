@@ -204,6 +204,8 @@ def parse_quotes(body: bytes, *, requested: Sequence[tuple[int, str]] | None = N
             quote[f"ask_vol{index}"] = ask_volume
         if requested is None or (market, quote["code"]) in requested:
             quotes.append(quote)
+        elif requested is not None:
+            _LOGGER.warning(f"code_mismatch requested={list(requested)} returned={[(market, quote['code'])]}")
     return quotes
 
 
