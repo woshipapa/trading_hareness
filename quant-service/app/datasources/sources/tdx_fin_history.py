@@ -27,7 +27,6 @@ class TdxFinanceError(Exception):
     pass
 
 
-FINANCE_HOSTS = (("120.76.152.87", 7709), ("117.34.114.13", 7709))
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 _HEADER = "<hI H 3L"
 _ITEM = "<6s1sL"
@@ -242,7 +241,7 @@ def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cum
     return previous_fy + current_cumulative - prior_cumulative
 
 
-__all__ = ["FINANCE_HOSTS", "GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "TdxFinHistoryClient",
+__all__ = ["GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "TdxFinHistoryClient",
            "build_report_file_request", "download_report_file", "gpcw_field_name", "gpcw_field_unit", "manifest_changes",
            "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "parse_report_file", "parse_tipinfo",
            "ttm_from_cumulative", "verify_manifest_entry"]

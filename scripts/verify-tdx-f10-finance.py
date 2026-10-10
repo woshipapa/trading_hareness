@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
 
-from app.datasources.sources.tdx_f10_finance import TdxF10Client  # noqa: E402
-from app.datasources.sources.tdx_fin_history import download_report_file  # noqa: E402
+from app.datasources.sources import tdx_f10_finance as f10  # noqa: E402
+from app.datasources.sources import tdx_files, tdx_protocol  # noqa: E402
 
 
 HOSTS = (
@@ -21,6 +21,8 @@ HOSTS = (
     ("120.76.152.87", 7709), ("119.147.212.81", 7709),
 )
 SYMBOLS = ((0, "000001"), (1, "600519"))
+#: What a probe step may fail with: the connection, or a reply that does not parse.  Anything else is a bug.
+PROBE_ERRORS = (OSError, tdx_protocol.TdxProtocolError)
 
 
 def main() -> int:
@@ -30,35 +32,37 @@ def main() -> int:
     for host, port in HOSTS:
         print(f"HOST {host}:{port}")
         try:
-            with TdxF10Client(host, port, timeout_seconds=timeout) as client:
+            with tdx_protocol.TdxClient(host, port, timeout) as client:
                 if host in {"120.76.152.87", "119.147.212.81"}:
                     try:
-                        manifest = download_report_file(client, "tdxfin/gpcw.txt", max_bytes=65536)
+                        manifest = tdx_files.download(client, "tdxfin/gpcw.txt")
                         print(f"  gpcw.txt bytes={len(manifest)} preview={manifest[:100]!r}")
-                    except Exception as exc:
+                    except PROBE_ERRORS as exc:
                         print(f"  gpcw.txt ERROR {type(exc).__name__}: {exc}")
                 for market, code in SYMBOLS:
                     label = f"{code}.{'SZ' if market == 0 else 'SH'}"
                     try:
-                        finance = client.finance_info(market, code)
+                        finance = f10.parse_finance_info(client._exchange(f10.build_finance_info_request(market, code)))
                         usable += 1
                         print(f"  {label} finance fields={len(finance)} code={finance.get('code')} "
                               f"total_shares={finance.get('total_shares')} net_profit={finance.get('net_profit')} "
                               f"eps={finance.get('eps')}")
-                    except Exception as exc:
+                    except PROBE_ERRORS as exc:
                         print(f"  {label} finance ERROR {type(exc).__name__}: {exc}")
                     try:
-                        categories = client.company_categories(market, code)
+                        categories = f10.parse_company_categories(
+                            client._exchange(f10.build_company_categories_request(market, code)))
                         usable += bool(categories)
                         print(f"  {label} categories rows={len(categories)} "
                               f"first={categories[0] if categories else None}")
                         if categories:
                             item = categories[0]
-                            content = client.company_content(market, code, item["filename"], item["start"], min(item["length"], 256))
+                            content = f10.parse_company_content(client._exchange(f10.build_company_content_request(
+                                market, code, item["filename"], item["start"], min(item["length"], 256))))
                             print(f"  {label} content chars={len(content)} preview={content[:80]!r}")
-                    except Exception as exc:
+                    except PROBE_ERRORS as exc:
                         print(f"  {label} company ERROR {type(exc).__name__}: {exc}")
-        except Exception as exc:
+        except PROBE_ERRORS as exc:
             print(f"  CONNECT ERROR {type(exc).__name__}: {exc}")
     print("SECOND SOURCE Tencent quote field 73 total shares")
     for market, code in SYMBOLS:
