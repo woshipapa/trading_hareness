@@ -13,7 +13,7 @@ class GenerateTdxHostsTests(unittest.TestCase):
         namespace = {}
         namespace["__file__"] = str(SCRIPT)
         exec(SCRIPT.read_text(encoding="utf-8"), namespace)
-        payload = {"samples": [
+        payload = {"profile": "login_one", "samples": [
             {"probed_at_utc": "synthetic-1", "results": [
                 {"host": "10.0.0.1", "port": 7709, "connect_ms": 4, "usable": True},
                 {"host": "10.0.0.2", "port": 7709, "connect_ms": 5, "usable": True},
@@ -43,7 +43,7 @@ class GenerateTdxHostsTests(unittest.TestCase):
         namespace = {}
         namespace["__file__"] = str(SCRIPT)
         exec(SCRIPT.read_text(encoding="utf-8"), namespace)
-        payload = {"samples": [{"probed_at_utc": "synthetic", "results": [{"host": "1.2.3.4", "port": 7709, "connect_ms": 1, "usable": True}]}]}
+        payload = {"profile": "login_one", "samples": [{"probed_at_utc": "synthetic", "results": [{"host": "1.2.3.4", "port": 7709, "connect_ms": 1, "usable": True}]}]}
         with tempfile.TemporaryDirectory() as root:
             output = Path(root) / "hosts.py"
             output.write_text("stale\n", encoding="utf-8")

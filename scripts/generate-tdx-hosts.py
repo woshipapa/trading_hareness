@@ -12,25 +12,18 @@ DEFAULT_OUTPUT = ROOT / "quant-service/app/datasources/sources/tdx_hosts.py"
 
 
 def _samples(payload):
-    if "samples" in payload:
-        return payload["samples"]
-    return [{"probed_at_utc": payload.get("date", "unknown"), "results": payload.get("results", [])}]
+    return payload["samples"]
 
 
 def select_hosts(payload, limit=20):
     samples = _samples(payload)
-    required = set(payload.get("require", ("quotes", "bars", "ticks_hist")))
     by_host = {}
     for sample in samples:
         for row in sample.get("results", []):
             key = (row.get("host"), int(row.get("port", 7709)))
-            commands = row.get("commands", {})
-            usable = row.get("usable")
-            if usable is None:
-                usable = all(commands.get(name, {}).get("rows", 0) > 0 for name in required)
-            if not usable or row.get("connect_error"):
+            if not row["usable"]:
                 continue
-            by_host.setdefault(key, []).append(float(row.get("connect_ms") or 999999.0))
+            by_host.setdefault(key, []).append(float(row["connect_ms"]))
     needed = len(samples)
     ranked = [(statistics.median(values), host) for host, values in by_host.items() if len(values) == needed]
     ranked.sort(key=lambda item: (item[0], item[1]))
@@ -47,7 +40,7 @@ def select_hosts(payload, limit=20):
 
 
 def render(payload, selected):
-    source = payload.get("source", "probe JSON")
+    source = payload["_source_path"]
     egress = payload.get("egress", "unknown")
     probed = [sample.get("probed_at_utc") for sample in _samples(payload)]
     lines = [
@@ -58,7 +51,7 @@ def render(payload, selected):
     ]
     for (host, port), latency in selected:
         lines.append(f"    ({host!r}, {port}),  # median_connect_ms={latency}")
-    lines.extend([")", "LATENCY_MS = {", *[f"    {host!r}: {latency}," for (host, _port), latency in selected], "}", ""])
+    lines.extend([")", "LATENCY_MS = {", *[f"    {host + ':' + str(port)!r}: {latency}," for (host, port), latency in selected], "}", ""])
     return "\n".join(lines)
 
 
@@ -73,9 +66,13 @@ def main():
     except OSError as error:
         print(f"cannot read probe matrix: {error}", file=sys.stderr)
         return 2
-    if "samples" not in payload:
+    if "samples" not in payload or payload.get("profile") != "login_one":
         print("旧三包矩阵不能用于生成: expected v2 JSON with samples", file=sys.stderr)
         return 2
+    try:
+        payload["_source_path"] = str(args.matrix.resolve().relative_to(ROOT))
+    except ValueError:
+        payload["_source_path"] = args.matrix.name
     selected = select_hosts(payload)
     if not selected:
         print("no host usable in every sample", file=sys.stderr)
@@ -87,7 +84,9 @@ def main():
             return 1
         print(f"tdx host pool is current ({len(selected)} hosts)")
         return 0
-    args.output.write_text(rendered, encoding="utf-8")
+    temporary = args.output.with_suffix(args.output.suffix + ".tmp")
+    temporary.write_text(rendered, encoding="utf-8")
+    temporary.replace(args.output)
     print(f"wrote {args.output} ({len(selected)} hosts)")
     return 0
 

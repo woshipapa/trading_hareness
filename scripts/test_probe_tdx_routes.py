@@ -23,8 +23,8 @@ class ProbeRoutesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "hosts.txt"
             path.write_text("1.2.3.4:7709\n", encoding="utf-8")
-            def fake(host, port, timeout, profile, required, hist_date):
-                return {"host": host, "port": port, "connect_ms": 1, "profile": profile, "commands": {name: {"rows": 1, "usable": True} for name in required}, "usable": True}
+            def fake(host, port, timeout, handshake_profile, required, hist_date):
+                return {"host": host, "port": port, "connect_ms": 1, "profile": handshake_profile, "commands": {name: {"rows": 1, "usable": True} for name in required}, "usable": True}
             output, error = io.StringIO(), io.StringIO()
             with redirect_stdout(output), redirect_stderr(error):
                 code = MODULE.main(["--hosts-file", str(path), "--require", "quotes", "--output", str(Path(root) / "out.json")], fake)
