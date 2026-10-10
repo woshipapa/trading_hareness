@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from app.datasources.catalog import BINDINGS, TAXONOMIES
+from app.datasources.catalog import BINDINGS, CAPABILITIES, TAXONOMIES
 from app.datasources.contracts import CapabilityEvidence
 from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_mac, tdx_mac_fields
@@ -107,6 +107,11 @@ def mac_binding(capability: str):
     return next(item for item in BINDINGS if item.source == "tdx_mac" and item.capability == capability)
 
 
+def schema_fields(capability: str, *, without=()) -> set[str]:
+    """The canonical fields the capability promises, so a contract test follows a rename in the catalog."""
+    return set(CAPABILITIES[capability].schema.names) - set(without)
+
+
 def patched_call(client, host="mac-host:7709"):
     async def call(operation, **kwargs):
         return operation(client), host
@@ -143,6 +148,8 @@ class MacBoardCatalogTests(unittest.TestCase):
         self.assertEqual((projected.status, projected.warnings), (None, ()))
         self.assertEqual(projected.rows, [{"board_code": "881376", "name": "Coal", "board_type": 0},
                                           {"board_code": "880231", "name": "Area", "board_type": 5}])
+        for row in projected.rows:
+            self.assertLessEqual(schema_fields("sector.board_catalog"), set(row))
 
 
 class MacMembershipTests(unittest.TestCase):
@@ -200,6 +207,8 @@ class MacMembershipTests(unittest.TestCase):
         self.assertEqual({(row["taxonomy_key"], row["sector_key"], row["symbol"]) for row in projected.rows},
                          {("tdx_mac_type_3", "880710", "600519.SH"), ("tdx_mac_type_3", "880710", "000001.SZ")})
         self.assertTrue(all(row["known_at"].utcoffset() == timedelta(0) for row in projected.rows))
+        for row in projected.rows:
+            self.assertLessEqual(schema_fields("sector.membership"), set(row))
 
     def test_every_board_type_has_exactly_one_taxonomy(self):
         taxonomies = {key for key, item in TAXONOMIES.items() if item.source == "tdx_mac"}
@@ -330,6 +339,7 @@ class MacWatchSnapshotTests(unittest.TestCase):
                          (10.5, 123400, 1.25, 0.5, 25000000.0))
         self.assertEqual(row["exchange_time"], datetime(2026, 10, 9, 14, 59, 59, tzinfo=tdx_mac.CN_TZ))
         self.assertIsNotNone(row["exchange_time"].utcoffset())
+        self.assertLessEqual(schema_fields("quote.watch_snapshot"), set(row))
 
 
 class MacLimitPriceTests(unittest.TestCase):
@@ -364,6 +374,7 @@ class MacLimitPriceTests(unittest.TestCase):
         self.assertEqual((projected.status, projected.warnings), (None, ()))
         row = projected.rows[0]
         self.assertEqual((row["up_limit"], row["down_limit"], row["trade_date"]), (11.5, 9.5, date(2026, 10, 9)))
+        self.assertLessEqual(schema_fields("limits.prices"), set(row))
 
 
 class MacBindingSpecTests(unittest.TestCase):
@@ -443,6 +454,8 @@ class MacBarAdapterTests(unittest.TestCase):
         self.assertEqual([row["close"] for row in projected.rows], [105.0, 108.0, 109.0])
         for row, shares in zip(projected.rows, (2000.0, 4000.0, 6000.0)):
             self.assertAlmostEqual(row["volume"], shares / 100)
+            # the MAC answer carries no pre_close of its own, so the binding promises the rest
+            self.assertLessEqual(schema_fields("bars.daily", without=("pre_close",)), set(row))
 
     def test_a_minute_fixture_through_the_real_binding_keeps_shares_and_the_bar_time(self):
         evidence, _ = self.fetch(tdx_mac.fetch_minute_bars, symbol="000001.SZ", count=3)
@@ -452,6 +465,8 @@ class MacBarAdapterTests(unittest.TestCase):
         self.assertEqual([(row["bar_time"], row["volume"]) for row in projected.rows],
                          [(datetime(2026, 10, 9, 9, 30 + minute, tzinfo=tdx_mac.CN_TZ), shares)
                           for minute, shares in enumerate((2000.0, 4000.0, 6000.0))])
+        for row in projected.rows:
+            self.assertLessEqual(schema_fields("bars.minute"), set(row))
 
     def test_the_minute_binding_says_why_it_stays_unsupported(self):
         binding = mac_binding("bars.minute")
@@ -643,6 +658,7 @@ class ProbeScriptTests(unittest.TestCase):
 
     def test_verify_tdx_mac_fields_live_run_goes_through_the_module_client(self):
         script = load_script("verify-tdx-mac-fields")
+
         def plain(request):
             return bytes(10)  # any answer longer than two bytes is usable
 
