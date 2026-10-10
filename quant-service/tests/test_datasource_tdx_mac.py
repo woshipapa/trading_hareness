@@ -181,10 +181,11 @@ class MacMembershipTests(unittest.TestCase):
                 with self.assertRaisesRegex(tdx_mac.TdxMacError, f"unknown MAC board key '880710'.*type {board_type}"):
                     asyncio.run(tdx_mac.fetch_membership(sector_key="880710", board_type=board_type))
 
-    def test_a_malformed_board_key_raises_before_any_network_call(self):
-        with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
-            with self.assertRaisesRegex(ValueError, "(?i)abc"):
-                asyncio.run(tdx_mac.fetch_membership(sector_key="abc", board_type=3))
+    def test_a_malformed_board_key_raises_before_any_network_call_and_names_the_key(self):
+        for key in ("abc", "HKx", ""):
+            with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+                with self.assertRaisesRegex(tdx_mac.TdxMacError, f"unknown MAC board key {key!r}"):
+                    asyncio.run(tdx_mac.fetch_membership(sector_key=key, board_type=3))
 
     def test_an_unknown_market_id_in_the_answer_raises(self):
         client = FakeMacClient({tdx_mac.OP_MEMBERS: lambda request: members_page(member_item(7, "600519", "Moutai"))})
@@ -225,7 +226,9 @@ class MacProtocolTests(unittest.TestCase):
         self.assertEqual((belong[0], flow[0]), (1, 2))
         self.assertEqual({struct.unpack_from("<H", request, 10)[0] for request in (belong, flow)}, {tdx_mac.OP_BELONG_BOARD})
         self.assertIn(b"Stock_GLHQ", belong)
-        self.assertIn(b"Stock_ZJLX", flow)
+        # the request scripts/probe-tdx-q-flow.py sent when it reconciled 0x38 and 0x6b with 0x1218
+        self.assertEqual(flow, tdx_mac.build_request(
+            tdx_mac.OP_BELONG_BOARD, struct.pack("<H8s16s21s", 0, b"000001", b"", b"Stock_ZJLX"), head=2))
 
     def test_member_quote_request_carries_sort_filter_and_the_quote_bit(self):
         request = tdx_mac.build_board_members_request(20812, quotes=True, sort_type=1, sort_order=0, filter_byte=4)

@@ -65,9 +65,12 @@ class TdxMacError(RuntimeError):
 
 def exchange_board_code(symbol: str) -> int:
     value = symbol.upper()
+    try:
+        n = int(value[2:] if value.startswith("HK") else value)
+    except ValueError as error:
+        raise TdxMacError(f"unknown MAC board key {symbol!r}") from error
     if value.startswith("HK"):
-        return 20000 + int(value[2:])
-    n = int(value)
+        return 20000 + n
     if value.startswith("000"):
         return 31000 + n
     if value.startswith("399"):
