@@ -62,7 +62,8 @@ class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
         row.update({"updated_date": 20260815, "field_units": {"total_assets": "元"}})
         with mock.patch.object(f10, "finance_info", return_value=row):
             result = await f10.fetch_financial_summary(symbol="000001.SZ")
-        self.assertEqual(result, [{"symbol": "000001.SZ", "report_period": "20260815",
+        # updated_date moves after disclosure (delta-1 D4): it is neither the report period nor available_at.
+        self.assertEqual(result, [{"symbol": "000001.SZ", "report_period": None,
                                    "statement_items": {name: row[name] for name in f10.FINANCE_FIELDS},
                                    "field_units": row["field_units"]}])
 

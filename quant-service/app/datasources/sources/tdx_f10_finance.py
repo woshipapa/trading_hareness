@@ -166,10 +166,12 @@ def finance_info(market: int, code: str, *, hosts: Any = None, timeout_seconds: 
 
 
 async def fetch_financial_summary(*, symbol: str) -> list[dict[str, Any]]:
+    """The latest 0x0010 summary. It carries no report period: ``updated_date`` keeps moving after the
+    disclosure (delta-1 D4), so it is neither the period nor ``available_at``. The period and the first
+    disclosure date come from tipinfo columns 2 and 4 (delta-3 Q1/Q2), joined by the I4 collector."""
     market, code = tdx_protocol.market_code(symbol)
     row = await asyncio.to_thread(finance_info, market, code)
-    report_period = str(row["updated_date"])
-    return [{"symbol": symbol, "report_period": report_period,
+    return [{"symbol": symbol, "report_period": None,
              "statement_items": {name: row[name] for name in FINANCE_FIELDS},
              "field_units": dict(row["field_units"])}]
 

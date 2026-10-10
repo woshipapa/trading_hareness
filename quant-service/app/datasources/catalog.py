@@ -467,10 +467,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="2026-10-08 停用 Tushare（决策 0005）；保留 dormant 只为历史存量仍可按来源读取"),
     _bind("tdx_public", "fundamentals.financial_statements", 80, UNSUPPORTED, None,
           "app/datasources/sources/tdx_f10_finance.py:fetch_financial_summary", history="latest 0x0010 summary only",
-          notes="金额和股本已在解析器中换算；available_at 为采集时刻，不使用 updated_date",
+          notes="金额和股本已在解析器中换算；0x0010 不带报告期，report_period 为 None，"
+                "须与 tipinfo 第 2 列（报告期）和第 4 列（首次披露日）关联后才可用；绝不使用 updated_date",
           spec=BindingSpec(params={"symbol": "(market, code)"},
                            field_map={"statement_items": "statement_items", "report_period": "report_period"},
-                           time_semantics="effective=report_period; available=collection time (never updated_date)")),
+                           time_semantics="effective=report period from the tipinfo join (unknown here); "
+                                          "available=collection time; never updated_date")),
     _bind("tdx_public", "fundamentals.company_profile", 80, UNSUPPORTED, None,
           "app/datasources/sources/tdx_f10_finance.py:fetch_company_profile", notes="F10 GBK 文本；available_at 为采集时刻",
           spec=BindingSpec(params={"symbol": "(market, code)"},
