@@ -113,6 +113,8 @@ def reading(binding: Binding, record: Mapping[str, Any]) -> tuple[list[dict[str,
     """The sampled rows as the resolver projects them, and why they cannot be compared (empty when they can)."""
     if record["error"]:
         return [], f"{record['source']} probe failed: {record['error']}"
+    if not all(isinstance(row, dict) for row in record["sample"]):
+        return [], f"{record['source']} sampled rows that are not mappings"
     projected = _normalise_rows(record["sample"], binding)
     if projected.status:
         return [], f"{record['source']} sample is {projected.status}: {', '.join(projected.warnings)}"

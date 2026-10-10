@@ -105,6 +105,9 @@ class CheckTests(unittest.TestCase):
         short = verdicts(tencent_free=record("tencent_free", REFERENCE_ROWS[:1]))
         self.assertEqual((failing(short), short["agreement"]["detail"]),
                          (["agreement"], "price: sampled 2 rows against 1; volume: sampled 2 rows against 1"))
+        shaped = verdicts(tencent_free=record("tencent_free", [[{"price": 10.0}], {"fetched": 1}]))     # an adapter that returns a tuple
+        self.assertEqual((failing(shaped), shaped["agreement"]["detail"].count("tencent_free sampled rows that are not mappings")),
+                         (["agreement"], 2))
         gone = verdicts(tencent_free=record("tencent_free", [], error="OSError: refused"))
         self.assertEqual((failing(gone), gone["agreement"]["detail"].count("tencent_free probe failed: OSError: refused")),
                          (["agreement"], 2))
