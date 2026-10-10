@@ -28,8 +28,8 @@ binds to no capability.
 | 11-12 | bid_price, ask_price | float32 / yuan | NO_REFERENCE | |
 | 13-14 | server_update_date, server_update_time | uint32 | NO_REFERENCE | |
 | 16 | bit_0x16 | int32 / count | UNKNOWN (delta-3 Q5) | |
-| 1d | bit_0x1d | float32 / percent | UNKNOWN (delta-3 Q5) | |
 | 1b | turnover | float32 / percent | MATCH when float shares are trusted | `quote.watch_snapshot` |
+| 1d | bit_0x1d | float32 / percent | UNKNOWN (delta-3 Q5) | |
 | 20-21 | buy_price_limit, sell_price_limit | float32 / yuan | MATCH (pre-close and board ratio) | `limits.ladder`, `limits.stock_anomaly_reason`, `limits.prices` |
 | 24 | pre_iopv | float32 / yuan | MATCH on ETF 510300 | `fund.nav` |
 | 25-26 | speed_pct, avg_price | float32 | NO_REFERENCE / MATCH (amount/vol) | `quote.watch_snapshot` |
