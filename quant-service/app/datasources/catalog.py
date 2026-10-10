@@ -215,7 +215,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("fundamentals.daily_basic", "每日指标（换手/量比/市值/股本）", "daily", "all_a",
          "turnover_rate volume_ratio total_mv float_mv float_share", "effective=交易日"),
     _cap("fundamentals.financial_statements", "三大报表与财务指标", "periodic", "per_symbol", "report_period statement_items", "按公告日可得"),
-    _cap("fundamentals.company_profile", "公司 F10 文本资料", "periodic", "per_symbol", "category filename content", "effective=报告期; available=首次采集时刻"),
+    _cap("fundamentals.company_profile", "公司 F10 文本资料", "periodic", "per_symbol", "category filename content", "effective=collection time; available=collection time"),
     _cap("fundamentals.capital_changes", "除权除息与股本变迁", "event", "per_symbol",
          "date category cash_dividend float_shares_after_10k total_shares_after_10k", "effective=变动日; available=采集时刻"),
     _cap("fundamentals.margin", "融资融券", "daily", "all_a", "rzye rzmre rqye net_buy", "effective=T 日; available=T+1 采集"),

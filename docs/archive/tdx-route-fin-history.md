@@ -31,8 +31,8 @@ after the documented table are retained as `colN`.
 
 `tipinfo.dat` is a separate 22-column UTF-8 snapshot. Its first four fields are
 market, code, report period and EPS; field 4 (`20260815` for `000001` H1 2026)
-is a plausible announcement-date candidate and agrees with the public
-disclosure date. It is not present in GPCW and is not independently confirmed
+is the announcement date (YYMMDD format), matching the public
+disclosure date. The same value appears in GPCW column 314. It is not independently confirmed
 for five symbols here (the requested five-stock public-list cross-check was not
 available in this bounded six-period collection). Therefore GPCW is **not point-in-time**: use an
 independent `events.disclosure_schedule`/announcement observation as the
@@ -53,9 +53,9 @@ are ratio values. For `000001` and `600519`, columns 74 (revenue) and 96
 finance-summary scale after the summary's 1,000x 千元 conversion. `600519`
 FY2024 is 170.899 billion yuan revenue and 86.228 billion yuan attributable
 profit, matching the known approximately 1,741/862 billion figures within the
-expected restatement/rounding difference. No TTM helper is enabled: Q1/H1/Q3
-cumulative semantics were not independently confirmed in this six-period
-download.
+expected restatement/rounding difference. The TTM helper `ttm_from_cumulative`
+computes TTM = FY_prev + cum_now - cum_prior_year_same_period from the
+confirmed year-to-date cumulative series (Q1/H1/Q3 are YTD; FY starts fresh).
 
 | report period | 000001 revenue / profit (CNY bn) | 600519 revenue / profit (CNY bn) |
 |---|---:|---:|

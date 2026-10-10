@@ -53,8 +53,8 @@ On 2026-10-10, `120.76.152.87:7709` served `gpcw.txt` and the newest archive con
 | 600519 | 1.00000005 | 0.9586 | 1.00000007 | 1.00000000 | 20260815 |
 | 300750 | 1.00000000 | 0.9164 | 1.00000000 | 1.00000000 | 20260925 |
 
-The approximately 1.0 ratios validate `千元 -> 元` for monetary fields. The equity exceptions are report-period/restatement differences: the archive is 20260630 while the summary carries a later `updated_date`; the summary must therefore be labeled with that date and must not be treated as a same-period GPCW row.
+The approximately 1.0 ratios validate `千元 -> 元` for monetary fields. The equity exceptions are report-period/restatement differences: the archive is 20260630 while the summary carries a later `updated_date`; the summary must be combined with announcement metadata (via tipinfo) to establish the report period, and the `updated_date` field must never be used as a period proxy.
 
 ## Capability fit
 
-The output can support research-only enrichment for the existing `fundamentals.financial_statements` capability (currently bound to `fuyao_ths`) and the existing `fundamentals.capital_changes` capability only indirectly for share-count context. The 0x0010 summary is not a replacement for `fundamentals.daily_basic`, whose catalog binding is `longhuvip_composite`; F10 text/categories have no current catalog capability. Catalog and bindings were intentionally not modified.
+The output can support research-only enrichment for the existing `fundamentals.financial_statements` capability (currently bound to `fuyao_ths`) and the existing `fundamentals.capital_changes` capability only indirectly for share-count context. The 0x0010 summary is not a replacement for `fundamentals.daily_basic`, whose catalog binding is `longhuvip_composite`. The company_profile capability carries F10 text/categories with effective=collection time (no report period semantic). Catalog bindings have been added with UNSUPPORTED status pending independent verification.
