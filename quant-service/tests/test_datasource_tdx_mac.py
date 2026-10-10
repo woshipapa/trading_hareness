@@ -303,6 +303,12 @@ class MacProtocolTests(unittest.TestCase):
         for name, request, expected in golden:
             self.assertEqual(request.hex(), expected, name)
 
+    def test_requests_reject_a_bad_bitmap_and_an_oversized_code_before_sending(self):
+        with self.assertRaises(ValueError):
+            tdx_mac.build_batch_quotes_request([(0, "000001")], bytes(19))
+        with self.assertRaises(ValueError):
+            tdx_mac.build_batch_quotes_request([(0, "0" * 23)])
+
     def test_member_quote_request_carries_sort_filter_and_the_quote_bit(self):
         request = tdx_mac.build_board_members_request(20812, quotes=True, sort_type=1, sort_order=0, filter_byte=4)
         sort_type = struct.unpack_from("<H", request, 25)[0]
@@ -688,6 +694,11 @@ class MacFailoverTests(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("a:TdxMacError: MAC response failed to decompress", message)
         self.assertIn("b:TdxMacError: truncated board list item 0", message)
+
+    def test_a_connection_closed_inside_an_answer_is_a_host_failure_that_says_so(self):
+        cut_short = mac_frame(board_page(board_item("881376", "Coal")))[:-10]
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "a:TdxMacError: MAC server closed connection"):
+            self.call({"a": [cut_short]}, lambda client: client.board_list(0))
 
     def test_a_refused_connection_moves_on_to_the_next_host(self):
         def create_connection(address, timeout):
