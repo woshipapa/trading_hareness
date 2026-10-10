@@ -3,6 +3,54 @@
  "zhb_zip_md5": "fa3f6929fb22eeec5240b01b9d40922f",
  "observed_at_utc": "2026-10-10T15:18:14.269945+00:00",
  "files": {
+  "tdxstat.cfg": {
+   "source_bytes": 1370149,
+   "source_md5": "5694a6d11e6c19c4bf6776090bb455d4",
+   "source_lines": 8081,
+   "excerpt": "first 40 lines"
+  },
+  "tdxstat2.cfg": {
+   "source_bytes": 915028,
+   "source_md5": "1b4518e8322dbbfc8839b8ba76375fac",
+   "source_lines": 8081,
+   "excerpt": "first 40 lines"
+  },
+  "tdxzs.cfg": {
+   "source_bytes": 18272,
+   "source_md5": "1439654ce176f70d9d406930130d1260",
+   "source_lines": 605,
+   "excerpt": "first 60 lines"
+  },
+  "tdxzs3.cfg": {
+   "source_bytes": 32730,
+   "source_md5": "0ea07db3c3bfe7bd65dff5d18ce611f5",
+   "source_lines": 1072,
+   "excerpt": "first 60 lines"
+  },
+  "xgsg.cfg": {
+   "source_bytes": 1807,
+   "source_md5": "07b59a041a880d18fbbe160e84dd743b",
+   "source_lines": 16,
+   "excerpt": "whole file"
+  },
+  "othersg.cfg": {
+   "source_bytes": 1087,
+   "source_md5": "d0d1e6eda8062f21390b96fa57dd9876",
+   "source_lines": 13,
+   "excerpt": "whole file"
+  },
+  "needini.dat": {
+   "source_bytes": 3850,
+   "source_md5": "a31c202168517a934b5a436e827924d3",
+   "source_lines": 43,
+   "excerpt": "whole file"
+  },
+  "hqrule.dat": {
+   "source_bytes": 217,
+   "source_md5": "36e9613bc304ac4bc3e53ea88a06872d",
+   "source_lines": 19,
+   "excerpt": "whole file"
+  },
   "tipinfo.dat": {
    "source_bytes": 646382,
    "source_md5": "e446860a83408205000d14cce8804b0b",

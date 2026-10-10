@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (54)
+## research data (55)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -153,6 +153,7 @@
 | `probe-tdx-q-extcodes.py` | quant-research | workstation | Probe TDX extended market (7727) codes, metadata, quotes and bars. |
 | `probe-tdx-q-flow.py` | quant-research | workstation | Probe TDX stock capital-flow fields against ticks and public references. |
 | `probe-tdx-q-limitfields.py` | quant-research | workstation | Read-only MAC dynamic-field probe for the Q-LIMIT research record. |
+| `probe-tdx-q-stats.py` | quant-research | workstation | Recompute the headline hit-rates of the tdxstat.cfg and tdxstat2.cfg column dictionary. |
 | `probe-tdx-q-units.py` | quant-research | workstation | Read-only live evidence probe for TDX volume, amount and time units. |
 | `probe-tdx-routes.py` | quant-research | workstation | Probe TDX routes; output a versioned, fail-closed route matrix. |
 | `refresh-watchlist-from-proposals.py` | quant-research | workstation | Post-close watchlist refresh: admit today's proposals, retire the inactive. |

@@ -23,9 +23,12 @@ the same keywords, so the resolver can fall through without translation):
 * ``bars.minute``: ``symbol`` (market+code), ``count`` (at least 1; MAC 1-minute bars use the same keywords)
 * ``bars.index_daily``: ``symbol`` (index or board market+code), ``count`` (1..800)
 * ``breadth.index_daily``: ``symbol`` (the same index or board code), ``count`` (1..800; the same index-bars request)
+* ``quote.valuation``, ``fundamentals.daily_basic`` (TDX files): ``symbols`` (optional symbol filter)
 * ``sector.board_catalog``: no parameters; returns the MAC board types of ``tdx_mac.BOARD_TYPES``
-* ``sector.index_quote`` (TDX): ``symbols``, board symbols such as 880005.SH
-* ``sector.membership``: ``sector_key`` (MAC also takes the catalog row's ``board_type``)
+* ``sector.index_quote`` (TDX): ``symbols``, board symbols such as 880491.SH
+* ``sector.membership``: ``sector_key`` for MAC (which also takes the catalog row's ``board_type``); no parameters for
+  the TDX file snapshot
+* ``reference.trade_calendar``, ``events.ipo_calendar`` (TDX files): no parameters
 
 Every TDX adapter that takes a symbol requests an old BJ code as its 920xxx code (``tdx_protocol.market_code``). A
 batch adapter adds ``source_symbol``, the symbol as requested, to the row of each symbol it translated; a

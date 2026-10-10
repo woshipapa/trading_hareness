@@ -1,0 +1,257 @@
+{
+ "observed_at_utc": "2026-10-10T15:18:14.269945+00:00",
+ "egress": "Mac (residential broadband)",
+ "code_sha": "ee4b235b",
+ "downloads": {
+  "zhb.zip": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 1332578,
+   "md5": "fa3f6929fb22eeec5240b01b9d40922f"
+  },
+  "tdxstat.cfg": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 0,
+   "md5": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "tdxstat2.cfg": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 0,
+   "md5": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "block_gn.dat": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 757083,
+   "md5": "309210e4393227312f33cee82bd7635c"
+  },
+  "block_fg.dat": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 453279,
+   "md5": "8462d088ab85fb4f4193503d236cbf63"
+  },
+  "block_zs.dat": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 329507,
+   "md5": "d55baa358a43c2ea23ffc062dca5707c"
+  },
+  "spblock.dat": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 0,
+   "md5": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "tdxzs.cfg": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 0,
+   "md5": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "tdxzs3.cfg": {
+   "host": "115.238.56.198:7709/login_one",
+   "bytes": 0,
+   "md5": "d41d8cd98f00b204e9800998ecf8427e"
+  }
+ },
+ "zhb_members_bytes": {
+  "addedcode_bj.cfg": 15353,
+  "brkcomp.dat": 29595,
+  "brkseat.dat": 32698,
+  "csiblock.dat": 13808,
+  "hkblock.dat": 71979,
+  "hkzsinfo.cfg": 3007,
+  "hqrule.dat": 217,
+  "hspy.dat": 325,
+  "ihelp.dat": 118766,
+  "ilong.dat": 24057,
+  "importzs.cfg": 553,
+  "incon.dat": 67543,
+  "jjblock.dat": 56873,
+  "mgblock.dat": 46922,
+  "nacomte.dat": 9636,
+  "nbcomte.dat": 9636,
+  "needini.dat": 3850,
+  "neednote.dat": 4412,
+  "nscomte.dat": 1358,
+  "nscomte_std.dat": 1487,
+  "nvcomte.dat": 6927,
+  "nzcomte.dat": 2475,
+  "othersg.cfg": 1087,
+  "profile.dat": 314752,
+  "pttab.dat": 33604,
+  "relation.dat": 97788,
+  "sbblock.dat": 28342,
+  "sgxblock.dat": 623,
+  "spblock.dat": 317476,
+  "tdxadr.cfg": 726,
+  "tdxahrate.cfg": 23,
+  "tdxbjmore.cfg": 8695,
+  "tdxbk.cfg": 1451,
+  "tdxchain.cfg": 1984,
+  "tdxdszs.cfg": 14801,
+  "tdxhkag.cfg": 6648,
+  "tdxmgag.cfg": 14136,
+  "tdxpkmore.cfg": 50459,
+  "tdxsbzs.cfg": 186,
+  "tdxstat.cfg": 1370149,
+  "tdxstat2.cfg": 915028,
+  "tdxzs.cfg": 18272,
+  "tdxzs3.cfg": 32730,
+  "tend_std.cfg": 15641,
+  "tipinfo.dat": 646382,
+  "ukblock.dat": 1652,
+  "xgsg.cfg": 1807
+ },
+ "tdxstat": {
+  "rows": 8080,
+  "dates": [
+   [
+    "20261009",
+    8032
+   ],
+   [
+    "20261008",
+    10
+   ],
+   [
+    "20260930",
+    8
+   ]
+  ],
+  "markets": [
+   [
+    0,
+    4132
+   ],
+   [
+    1,
+    3596
+   ],
+   [
+    2,
+    352
+   ]
+  ]
+ },
+ "tdxstat2": {
+  "rows": 8080,
+  "dates": [
+   [
+    "20261009",
+    8032
+   ],
+   [
+    "20261008",
+    10
+   ],
+   [
+    "20260930",
+    8
+   ]
+  ]
+ },
+ "tdxzs": {
+  "rows": 604,
+  "type_counts": [
+   [
+    2,
+    145
+   ],
+   [
+    3,
+    32
+   ],
+   [
+    4,
+    269
+   ],
+   [
+    5,
+    158
+   ]
+  ]
+ },
+ "tdxzs3": {
+  "rows": 1071,
+  "type_counts": [
+   [
+    2,
+    145
+   ],
+   [
+    3,
+    32
+   ],
+   [
+    4,
+    269
+   ],
+   [
+    5,
+    158
+   ],
+   [
+    12,
+    467
+   ]
+  ],
+  "type_subtype_counts": [
+   [
+    2,
+    1,
+    144
+   ],
+   [
+    2,
+    2,
+    1
+   ],
+   [
+    3,
+    1,
+    32
+   ],
+   [
+    4,
+    1,
+    6
+   ],
+   [
+    4,
+    2,
+    263
+   ],
+   [
+    5,
+    1,
+    80
+   ],
+   [
+    5,
+    2,
+    78
+   ],
+   [
+    12,
+    1,
+    464
+   ],
+   [
+    12,
+    2,
+    3
+   ]
+  ]
+ },
+ "block_files": {
+  "block_gn.dat": 269,
+  "block_fg.dat": 161,
+  "block_zs.dat": 117
+ },
+ "spblock_boards": 35,
+ "ipo": {
+  "equity": 15,
+  "other": 12
+ },
+ "findings": [
+  "tdxstat.cfg, tdxstat2.cfg, tdxzs.cfg, tdxzs3.cfg and spblock.dat are members of zhb.zip; asking the server for them by name returns 0 bytes and tdx_files.download returns b'' without an error (a silent empty file).",
+  "tdxstat.cfg and tdxstat2.cfg carry a per-row date column: 8,032 rows are dated 20261009 (the last session), 10 rows 20261008 and 8 rows 20260930 (rows of securities that did not trade keep their last date), so each row has its own effective date and the file has no single one.",
+  "Both tdxstat files have 8,080 rows; tdxzs.cfg 604 and tdxzs3.cfg 1,071 rows."
+ ]
+}

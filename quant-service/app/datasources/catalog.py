@@ -363,6 +363,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("fuyao_ths", "quote.valuation", 12, DECLARED, _RAW + "a_share_valuations_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", "盘后逐日", "thscodes≤100",
           notes="可按交易日投影到 daily_fundamentals 缺失记录；pe=TTM、pb=MRQ；非完整每日指标，自动投影默认关闭"),
+    _bind("tdx_public", "quote.valuation", 80, UNSUPPORTED, _RAW + "tdxstat_valuation",
+          "app/datasources/sources/tdx_reference_files.py:fetch_valuation", history="20261009 snapshot",
+          notes="zhb.zip 内存解析；仅 confirmed tdxstat columns 3,9,10,11,18,20,21,26,27,28,30；其余保留 fields/raw",
+          spec=BindingSpec(params={"symbols": "optional canonical symbols"}, field_map={"pe_ttm": "pe_ttm"},
+                           time_semantics="effective=tdxstat row date; available=collection time; row date is not collection date",
+                           handshake_profile="login_one")),
     _bind("tushare_primary", "quote.valuation", 20, RETIRED, "daily_fundamentals", "app/tushare_providers.py", notes="主源已下线；仅保留历史证据"),
     # bars
     _bind("tushare_super_get", "bars.daily", 15, DORMANT, "canonical_bars_daily", "app/tushare_providers.py", "多年",
@@ -561,6 +567,13 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "ths_index_list 按 tag + ths_index_constituents 每指数一次；请求间隔 1.5 秒，共用进程内 Fuyao 限频",
           notes="概念 390 + 行业 320 + 地域 33（fuyao_ths_concept/_industry/_region）；ths_member_backfill 循环 15:10-18:00 分批，"
                 "只记变化（新成员 known_at=观测时刻，盘中刷新对盘中读者次日生效）"),
+    _bind("tdx_public", "sector.membership", 80, UNSUPPORTED, "sector_membership_history:taxonomy_key=tdx_files_*",
+          "app/datasources/sources/tdx_reference_files.py:fetch_membership", history="20261009 snapshot",
+          notes="block_gn -> tdxzs3 type 4 concept and block_fg -> type 5 style/event only; block_zs index lists and spblock special lists are excluded; "
+                "ashare_symbol keeps A-share equities only, counts rejected members, and does not claim industry or region membership",
+          spec=BindingSpec(params={}, field_map={"taxonomy_key": "taxonomy_key", "sector_key": "sector_key", "symbol": "symbol", "known_at": "known_at"},
+                           time_semantics="effective=collection snapshot; available=collection time; known_at=collection UTC",
+                           handshake_profile="login_one")),
     _bind("akshare", "sector.membership", 60, DORMANT, "sector_membership_history", "app/akshare_provider.py",
           notes="东财成分函数在 owner 出口不可用"),
     _bind("tdx_mac", "sector.board_catalog", 70, UNSUPPORTED, _RAW + "tdx_mac_board_catalog",
@@ -672,6 +685,14 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/tushare_providers.py", notes="2026-10-08 停用 Tushare（决策 0005）；保留 dormant 只为历史存量仍可按来源读取"),
     _bind("longhuvip_composite", "fundamentals.daily_basic", 25, LIVE_VERIFIED, "daily_fundamentals:provider=longhuvip_composite",
           "app/longhu_shared_full_market.py", notes="2026-09-16/17 覆盖 5129/5153 只"),
+    _bind("tdx_public", "fundamentals.daily_basic", 80, UNSUPPORTED, _RAW + "tdxstat2_daily_basic",
+          "app/datasources/sources/tdx_reference_files.py:fetch_daily_basic", history="20261009 snapshot",
+          notes="joins tdxstat.cfg and tdxstat2.cfg by (market, code, date); research-only columns have no canonical daily_basic mapping; "
+                "confirmed columns only, with unconfirmed columns retained only in parser raw fields",
+          spec=BindingSpec(params={"symbols": "optional canonical symbols"},
+                           field_map={},
+                           time_semantics="effective=tdxstat2 row date; available=collection time; row date is not collection date",
+                           handshake_profile="login_one")),
     _bind("fuyao_ths", "fundamentals.financial_statements", 12, DECLARED, None, "app/fuyao_catalog.py:a_share_*_statements"),
     _bind("tushare_super_get", "fundamentals.financial_statements", 15, DORMANT, "tushare_raw_records", "app/tushare_providers.py",
           notes="2026-10-08 停用 Tushare（决策 0005）；保留 dormant 只为历史存量仍可按来源读取"),
@@ -713,6 +734,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tushare_super_get", "reference.trade_calendar", 15, DORMANT, "market_trade_calendar", "app/tushare_providers.py",
           notes="2026-10-08 停用 Tushare（决策 0005）；保留 dormant 只为历史存量仍可按来源读取"),
     _bind("fuyao_ths", "reference.trade_calendar", 20, DECLARED, None, "app/fuyao_catalog.py:a_share_trading_days"),
+    _bind("tdx_public", "reference.trade_calendar", 80, UNSUPPORTED, _RAW + "tdx_holidays",
+          "app/datasources/sources/tdx_reference_files.py:fetch_trade_calendar", history="declared holiday years",
+          notes="needini.dat holiday rows only plus hqrule.dat rules; no open days are fabricated",
+          spec=BindingSpec(params={}, field_map={"exchange": "exchange", "calendar_date": "calendar_date", "is_open": "is_open"},
+                           time_semantics="effective=declared holiday date; available=collection time", handshake_profile="login_one")),
     _bind("ttfund", "fund.nav", 50, DECLARED, _RAW + "fund_nav", "app/datasources/sources/ttfund.py:fetch_nav_history"),
     _bind("fuyao_ths", "fund.nav", 12, DECLARED, None, "app/fuyao_catalog.py:fund_performance_nav"),
     _bind("tdx_mac", "fund.iopv", 70, UNSUPPORTED, _RAW + "tdx_mac_iopv",
@@ -730,6 +756,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
               time_semantics="effective=exchange_time (bits 0x13 date and 0x14 time of the quote row, Asia/Shanghai; the "
                              "IOPV's own clock is not in the row); available=collection",
               handshake_profile="mac")),
+    _bind("tdx_public", "events.ipo_calendar", 80, UNSUPPORTED, _RAW + "tdx_ipo_subscriptions",
+          "app/datasources/sources/tdx_reference_files.py:fetch_ipo_calendar", history="declared subscription dates",
+          notes="xgsg.cfg and othersg.cfg subscription rows; no listing/open dates are inferred",
+          spec=BindingSpec(params={}, field_map={"symbol": "symbol", "apply_date": "apply_date", "issue_price": "issue_price"},
+                           time_semantics="effective=declared subscription date; available=collection time", handshake_profile="login_one")),
     # derived
     _bind("derived_market_sentiment", "derived.market_sentiment", 90, DECLARED, _RAW + "market_sentiment_snapshot",
           "app/datasources/collectors/intraday.py:capture_sentiment"),
@@ -866,6 +897,10 @@ TAXONOMIES: Final[dict[str, Taxonomy]] = {item.key: item for item in (
     Taxonomy("tdx_mac_type_3", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 73),
     Taxonomy("tdx_mac_type_4", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 74),
     Taxonomy("tdx_mac_type_5", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 75),
+    Taxonomy("tdx_files_concept", "tdx_public", "tdx_concept", UNSUPPORTED, 80,
+             "tdxzs3 type 4; block files joined by board name; snapshot only"),
+    Taxonomy("tdx_files_style_event", "tdx_public", "tdx_style_event", UNSUPPORTED, 81,
+             "tdxzs3 type 5; block files joined by board name; snapshot only"),
 )}
 
 #: Groups in the THS concept tables whose membership is a qualification, not a
