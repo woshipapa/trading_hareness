@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import dataclasses
 import importlib.util
 import inspect
 import io
@@ -12,7 +13,8 @@ from pathlib import Path
 from unittest import mock
 
 from app.datasources.catalog import BINDINGS, CAPABILITIES, TAXONOMIES
-from app.datasources.contracts import CapabilityEvidence
+from app.datasources import resolver as resolver_module
+from app.datasources.contracts import DECLARED, CapabilityEvidence, CapabilityRequest
 from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_mac, tdx_mac_fields
 from app.datasources.sources.tdx_mac_fields import active_fields, bitmap_for_bits
@@ -409,6 +411,37 @@ BARS = [
     (20261009, 34260, 105.0, 111.0, 101.0, 108.0, 2000.0, 4000.0, 30.0),
     (20261009, 34320, 108.0, 112.0, 104.0, 109.0, 3000.0, 6000.0, 30.0),
 ]
+
+
+class MacResolverTests(unittest.TestCase):
+    """The adapters behind the resolver, as if their bindings were promoted from UNSUPPORTED."""
+
+    CASES = {
+        "quote.watch_snapshot": (tdx_mac.fetch_watch_snapshot, {"symbols": ["000001.SZ"]}, ()),
+        "limits.prices": (tdx_mac.fetch_limit_prices, {"symbols": ["000001.SZ"]}, ()),
+        "sector.board_catalog": (tdx_mac.fetch_board_catalog, {}, ()),
+        "sector.membership": (tdx_mac.fetch_membership, {"sector_key": "880710", "board_type": 3}, ()),
+        "bars.daily": (tdx_mac.fetch_daily_bars, {"symbol": "000001.SZ", "count": 3}, ("pre_close",)),
+        "bars.minute": (tdx_mac.fetch_minute_bars, {"symbol": "000001.SZ", "count": 3}, ()),
+    }
+
+    def test_every_adapter_passes_the_resolver_with_all_its_canonical_fields_required(self):
+        client = FakeMacClient({
+            tdx_mac.OP_BATCH_QUOTES: quote_answer(),
+            tdx_mac.OP_BOARD: lambda request: board_page(board_item("881376", "Coal")),
+            tdx_mac.OP_MEMBERS: lambda request: members_page(member_item(1, "600519", "Moutai")),
+            tdx_mac.OP_BARS: lambda request: bars_body([SENTINEL, *BARS]),
+        })
+        for capability, (adapter, params, without) in self.CASES.items():
+            binding = dataclasses.replace(mac_binding(capability), status=DECLARED)
+            request = CapabilityRequest(capability=capability,
+                                        required_fields=tuple(sorted(schema_fields(capability, without=without))))
+            with patched_call(client), mock.patch.object(resolver_module, "bindings_for", lambda *a, **k: [binding]):
+                resolver = resolver_module.CapabilityResolver()
+                resolver.bind("tdx_mac", capability, adapter)
+                result = asyncio.run(resolver.fetch(capability, request=request, **params))
+            self.assertEqual((result.quality.status, result.quality.schema), ("complete", "canonical"), capability)
+            self.assertTrue(result.rows, capability)
 
 
 class MacBarAdapterTests(unittest.TestCase):

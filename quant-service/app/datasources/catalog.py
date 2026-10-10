@@ -309,7 +309,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                 "exchange_time 由适配器按 0x13 日期 + 0x14 时间组成 Asia/Shanghai 感知时间；回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）",
           spec=BindingSpec(
               params={"symbols": "symbols such as 000001.SZ"},
-              field_map={"close": "price", "vol": "volume", "vol_ratio": "volume_ratio", "turnover": "turnover_rate"},
+              field_map={"close": "price", "vol": "volume", "amount": "amount", "vol_ratio": "volume_ratio",
+                         "turnover": "turnover_rate", "exchange_time": "exchange_time"},
               unit_factors={"volume": 100}, paging="batch", max_batch=80,
               time_semantics="effective=exchange_time (bits 0x13 date and 0x14 time, Asia/Shanghai); available=collection",
               handshake_profile="mac")),
