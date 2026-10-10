@@ -371,7 +371,9 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
                       "available_at": now.isoformat()}
                      for entry in manifest]
     manifest_stored = await deps.collector.persist_observations("tdx_public", "tdx_gpcw_manifest", manifest_rows)
-    tipinfo = await deps.observation_payloads("tdx_public", "tdx_tipinfo") if deps.observation_payloads else []
+    tipinfo_payloads = await deps.observation_payloads("tdx_public", "tdx_tipinfo") if deps.observation_payloads else []
+    tipinfo = [{**row, "first_disclosure_date": date.fromisoformat(str(row["first_disclosure_date"]))}
+               for row in tipinfo_payloads]
     stored = 0
     downloaded = 0
     undated = 0

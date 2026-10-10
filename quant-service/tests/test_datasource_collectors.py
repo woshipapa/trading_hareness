@@ -1,5 +1,6 @@
 """Cadence, de-duplication and archive windows of the data-source collectors."""
 
+import json
 import unittest
 from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -422,7 +423,8 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
 
         async def payloads(_provider, capability):
             return [{"filename": "gpcw20260630.zip", "md5": "a" * 32, "size": 10}] if capability == "tdx_gpcw_manifest" else [
-                {"code": "600519", "report_period": "20260630", "first_disclosure_date": date(2026, 8, 29)}]
+                json.loads(json.dumps({"code": "600519", "report_period": "20260630",
+                                       "first_disclosure_date": date(2026, 8, 29)}, default=str))]
 
         deps.observation_payloads = payloads
         gpcw_row = {"code": "600519", "report_period": "2026-06-30", "fields": {"基本每股收益": 1.2, "col9": 3.0},
