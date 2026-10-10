@@ -17,7 +17,7 @@ connection and subprocess helpers, the builtin ``open``, a file read/write/listi
 call in ``bindings.py``: through lambdas, helper functions defined in that file, and the for-loop over a
 module registry such as ``news_flash.FETCHERS``. A reference anywhere else in that file does not count.
 A catalog ``adapter`` string ``app/datasources/sources/<module>.py:<function>`` also counts, and must
-name a function that exists.
+name a function that exists; so must the ``reference_adapter`` (``app/<module path>.py:<function>``) of an agreement entry.
 
 A TDX command family counts as covered only when a TDX source binds a capability of that family;
 otherwise it must be listed in ``UNREGISTERED``. The exemptions are checked too: an empty reason, a name
@@ -29,11 +29,15 @@ The check parses the files and imports none of them, so it runs without credenti
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .contracts import ADAPTER_PATTERN
+
 PACKAGE_ROOT = Path(__file__).parent
+SERVICE_ROOT = PACKAGE_ROOT.parents[1]
 SOURCE_ROOT = PACKAGE_ROOT / "sources"
 BINDINGS_MODULE = PACKAGE_ROOT / "bindings.py"
 SOURCES_PREFIX = "app/datasources/sources/"
@@ -417,6 +421,24 @@ def referenced_by_catalog(adapters: Iterable[str | None], root: Path = SOURCE_RO
     return found, missing
 
 
+def reference_adapter_problems(bindings: Iterable[object], service_root: Path = SERVICE_ROOT) -> list[str]:
+    """``reference_adapter`` strings of agreement entries (``BindingSpec.agreement``) must name a top-level function
+    of an app module: ``app/<module path>.py:<function>``, read from the file."""
+    problems = []
+    for item in bindings:
+        spec = getattr(item, "spec", None)
+        for field_name, entry in (spec.agreement if spec else {}).items():
+            adapter = entry.get("reference_adapter") if isinstance(entry, Mapping) else None
+            path, _, name = (adapter or "").partition(":")
+            source = service_root / path
+            exists = adapter is None or (re.fullmatch(ADAPTER_PATTERN, adapter) and source.is_file() and any(
+                isinstance(node, _DEFS) and node.name == name for node in ast.parse(source.read_text(encoding="utf-8")).body))
+            if not exists:
+                problems.append(f"binding {item.source}->{item.capability}: agreement for {field_name!r}: "
+                                f"reference_adapter {adapter!r} names no function")
+    return problems
+
+
 def completeness_problems(
     bindings: Iterable[object] | None = None,
     *,
@@ -433,6 +455,7 @@ def completeness_problems(
     from_catalog, missing = referenced_by_catalog((getattr(item, "adapter", None) for item in bindings), root)
     bound = referenced_by_bindings(bindings_module, root) | from_catalog
     problems = [f"catalog adapter {adapter} names no function in that module" for adapter in missing]
+    problems += reference_adapter_problems(bindings)
     problems += [f"unregistered source fetch function: {name}"
                  for name in readers if name not in bound and name not in unregistered]
     tdx = [(getattr(item, "source", ""), getattr(item, "capability", "")) for item in bindings
@@ -460,4 +483,4 @@ def completeness_problems(
 
 
 __all__ = ["IO_ATTRIBUTES", "IO_MODULES", "TDX_COMMAND_FAMILIES", "UNREGISTERED", "completeness_problems",
-           "public_fetch_functions", "referenced_by_bindings", "referenced_by_catalog"]
+           "public_fetch_functions", "reference_adapter_problems", "referenced_by_bindings", "referenced_by_catalog"]

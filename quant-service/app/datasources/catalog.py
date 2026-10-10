@@ -12,7 +12,7 @@ binding's status here -- and nowhere else -- when that changes.
 
 from __future__ import annotations
 
-from typing import Any, Final, Iterable
+from typing import Any, Final, Iterable, Mapping
 
 from .contracts import (
     BINDING_STATES, CATEGORIES, DECLARED, DORMANT, GRAINS, LICENSES, LIVE_VERIFIED, RESOLVABLE_STATES,
@@ -876,8 +876,53 @@ def evidence_locations(capability: str) -> list[dict[str, Any]]:
     return result
 
 
+#: The keys of an agreement entry (``contracts.BindingSpec.agreement``), and the row identities its ``key`` may use besides
+#: the capability's own canonical fields.
+AGREEMENT_KEYS: Final = frozenset({"reference", "reference_adapter", "reference_params", "reference_fixed", "key", "rel_tol",
+                                   "abs_tol", "min_coverage"})
+AGREEMENT_IDENTITY: Final = frozenset({"symbol", "trade_date"})
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _agreement_problems(item: Binding, names: set[str]) -> list[str]:
+    """What is wrong with the agreement entries of ``item``'s spec."""
+    problems = []
+    for field_name, entry in item.spec.agreement.items():
+        where = f"binding {item.source}->{item.capability}: agreement for {field_name!r}"
+        if field_name not in names:
+            problems.append(f"{where} is not a canonical field of the capability")
+        if not isinstance(entry, Mapping):
+            problems.append(f"{where} must be a mapping, got {entry!r}")
+            continue
+        if unknown := sorted(set(entry) - AGREEMENT_KEYS):
+            problems.append(f"{where} has unknown keys {unknown}")
+        reference = entry.get("reference")
+        if reference not in SOURCES:
+            problems.append(f"{where}: reference {reference!r} is not a catalogued source")
+        elif "reference_adapter" not in entry and not any(b.source == reference and b.capability == item.capability for b in BINDINGS):
+            problems.append(f"{where}: {reference} has no binding for {item.capability}; name a reference_adapter")
+        for tolerance in ("rel_tol", "abs_tol"):
+            if not (_is_number(entry.get(tolerance, 0)) and entry.get(tolerance, 0) >= 0):
+                problems.append(f"{where}: {tolerance} must be a number that is not negative, got {entry[tolerance]!r}")
+        coverage = entry.get("min_coverage", 1)
+        if not (_is_number(coverage) and 0 < coverage <= 1):
+            problems.append(f"{where}: min_coverage must be a number above 0 and at most 1, got {coverage!r}")
+        key = entry.get("key")
+        if not (isinstance(key, (list, tuple)) and key and set(key) <= names | AGREEMENT_IDENTITY):
+            problems.append(f"{where}: key must list canonical fields (or symbol, trade_date), got {key!r}")
+        renames = entry.get("reference_params")
+        if renames is not None and not (isinstance(renames, Mapping) and set(renames.values()) <= set(item.spec.params)):
+            problems.append(f"{where}: reference_params must map keywords to parameters of the binding {sorted(item.spec.params)}")
+        if not isinstance(entry.get("reference_fixed", {}), Mapping):
+            problems.append(f"{where}: reference_fixed must be a mapping of keywords to values")
+    return problems
+
+
 def _spec_problems(item: Binding) -> list[str]:
-    """A spec may only name canonical fields of its capability, and scale them by plain numbers."""
+    """A spec may only name canonical fields of its capability, scale them by plain numbers and agree with a catalogued reference."""
     label = f"binding {item.source}->{item.capability}"
     capability = CAPABILITIES.get(item.capability)
     names = set(capability.schema.names) if capability is not None and capability.schema is not None else set()
@@ -889,7 +934,7 @@ def _spec_problems(item: Binding) -> list[str]:
             problems.append(f"{label}: unit factor for {field_name!r}, not a canonical field (factors apply after field_map)")
         if isinstance(factor, bool) or not isinstance(factor, (int, float)) or not factor:
             problems.append(f"{label}: unit factor for {field_name!r} must be a non-zero int or float, got {factor!r}")
-    return problems
+    return [*problems, *_agreement_problems(item, names)]
 
 
 def validate_catalog() -> list[str]:

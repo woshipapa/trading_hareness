@@ -136,6 +136,32 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn(RETIRED, {provider["status"] for capability in document["capabilities"]
                                    for provider in capability["providers"]})
 
+    def test_agreement_entries_are_checked(self):
+        from app.datasources.contracts import Binding, BindingSpec
+
+        def problems(field="close", drop=(), **changes):
+            entry = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_intraday_minutes",
+                     "reference_params": {"symbol": "symbol"}, "key": ["symbol", "bar_time"], "rel_tol": 0.001, "min_coverage": 0.9}
+            entry = {key: value for key, value in {**entry, **changes}.items() if key not in drop}
+            spec = BindingSpec(params={"symbol": "market+code", "count": "count"}, agreement={field: entry})
+            return "\n".join(catalog_module._spec_problems(Binding("tdx_mac", "bars.minute", 70, UNSUPPORTED, spec=spec)))
+
+        self.assertEqual(problems(), "")
+        self.assertIn("'vwap' is not a canonical field", problems(field="vwap"))
+        self.assertIn("unknown keys ['reltol']", problems(reltol=0.1))
+        self.assertIn("reference 'nobody' is not a catalogued source", problems(reference="nobody"))
+        self.assertIn("eastmoney_ztb has no binding for bars.minute", problems(reference="eastmoney_ztb", drop=("reference_adapter",)))
+        self.assertEqual(problems(reference="eastmoney_ztb"), "", "a reader named by its adapter needs no binding of its source")
+        self.assertIn("rel_tol must be a number that is not negative", problems(rel_tol=-1))
+        self.assertIn("abs_tol must be a number that is not negative", problems(abs_tol="1"))
+        self.assertIn("min_coverage must be a number above 0 and at most 1", problems(min_coverage=0))
+        self.assertIn("min_coverage must be a number above 0 and at most 1", problems(min_coverage=1.5))
+        self.assertIn("key must list canonical fields", problems(key=[]))
+        self.assertIn("key must list canonical fields", problems(key=["symbol", "vwap"]))
+        self.assertIn("reference_params must map keywords to parameters of the binding ['count', 'symbol']",
+                      problems(reference_params={"symbol": "ticker"}))
+        self.assertIn("reference_fixed must be a mapping", problems(reference_fixed=["pool"]))
+
     def test_every_reference_reader_of_an_agreement_accepts_what_the_check_gives_it(self):
         import importlib
         import inspect
