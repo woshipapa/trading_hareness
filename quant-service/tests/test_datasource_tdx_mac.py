@@ -280,6 +280,29 @@ class MacProtocolTests(unittest.TestCase):
         self.assertEqual(flow, tdx_mac.build_request(
             tdx_mac.OP_BELONG_BOARD, struct.pack("<H8s16s21s", 0, b"000001", b"", b"Stock_ZJLX"), head=2))
 
+    def test_requests_keep_the_bytes_of_the_duplicate_builders_they_replaced(self):
+        # Golden bytes produced by the removed tdx_mac_fields builders (and tdx_mac's own, which were equal) for
+        # 000001.SZ and board 880812, before the duplicates were deleted.
+        symbol_args = (0, "000001")
+        golden = [
+            ("auction", tdx_mac.build_aux_request(tdx_mac.OP_AUCTION, *symbol_args),
+             "0100000000012c002c003d1200003030303030310000000000000000000000000000000000000000f401000000000000000000000000"),
+            ("tick charts", tdx_mac.build_aux_request(tdx_mac.OP_TICK_CHARTS, *symbol_args),
+             "010000000001280028003e120000303030303031000000000000000000000000000000000000000005000100000000000000"),
+            ("market monitor", tdx_mac.build_aux_request(tdx_mac.OP_MARKET_MONITOR, *symbol_args),
+             "010000000001180018003712000000000000f40100000100c8001e0028003200c800"),
+            ("belong board", tdx_mac.build_aux_request(tdx_mac.OP_BELONG_BOARD, *symbol_args),
+             "010000000001310031001812000030303030303100000000000000000000000000000000000053746f636b5f474c48510000000000000000000000"),
+            ("capital flow", tdx_mac_fields.build_capital_flow_request("000001.SZ"),
+             "020000000001310031001812000030303030303100000000000000000000000000000000000053746f636b5f5a4a4c580000000000000000000000"),
+            ("member quotes", tdx_mac.build_board_members_request(20812, quotes=True, sort_type=1, sort_order=0, filter_byte=4),
+             "0100000000012d002d002c124c51000000000000000000000001000000000050000000fffcf9cc3f080301000000000000000000040001"),
+            ("member quotes by default", tdx_mac.build_board_members_request(20812, quotes=True),
+             "0100000000012d002d002c124c5100000000000000000000000e000000000050000100fffcf9cc3f080301000000000000000000000001"),
+        ]
+        for name, request, expected in golden:
+            self.assertEqual(request.hex(), expected, name)
+
     def test_member_quote_request_carries_sort_filter_and_the_quote_bit(self):
         request = tdx_mac.build_board_members_request(20812, quotes=True, sort_type=1, sort_order=0, filter_byte=4)
         sort_type = struct.unpack_from("<H", request, 25)[0]
