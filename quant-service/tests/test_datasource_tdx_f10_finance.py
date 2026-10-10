@@ -1,5 +1,6 @@
 import struct
 import unittest
+from unittest import mock
 
 from app.datasources.sources import tdx_f10_finance as f10
 from app.datasources.sources.tdx_fin_history import parse_report_file
@@ -48,6 +49,17 @@ class TdxF10Fixtures(unittest.TestCase):
         content = b"\0" * 10 + struct.pack("<H", len(text)) + text + b"tail"
         self.assertEqual(f10.parse_company_content(content), "主营业务：白酒")
         self.assertEqual(parse_report_file(struct.pack("<I", 3) + b"abcjunk"), (3, b"abc"))
+
+
+class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
+    async def test_financial_summary_shape_uses_normalized_fields(self):
+        row = {name: index for index, name in enumerate(f10.FINANCE_FIELDS)}
+        row.update({"updated_date": 20260815, "field_units": {"total_assets": "元"}})
+        with mock.patch.object(f10, "finance_info", return_value=row):
+            result = await f10.fetch_financial_summary(symbol="000001.SZ")
+        self.assertEqual(result, [{"symbol": "000001.SZ", "report_period": "20260815",
+                                   "statement_items": {name: row[name] for name in f10.FINANCE_FIELDS},
+                                   "field_units": row["field_units"]}])
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ GPCW field units and must not share one scale factor.
 from __future__ import annotations
 
 import struct
+import asyncio
 from typing import Any
 
 from . import tdx_protocol
@@ -185,15 +186,34 @@ def gpcw(filename: str, *, hosts: Any = None, timeout_seconds: float = 5.0) -> l
     return _call(lambda client: client.gpcw(filename), hosts=hosts, timeout_seconds=timeout_seconds)
 
 
-def financial_statements(*, filename: str | None = None, market: int | None = None, code: str | None = None,
-                         hosts: Any = None, timeout_seconds: float = 5.0) -> Any:
-    if filename is not None:
-        return gpcw(filename, hosts=hosts, timeout_seconds=timeout_seconds)
-    return finance_info(market, code, hosts=hosts, timeout_seconds=timeout_seconds)
+async def fetch_financial_summary(*, symbol: str) -> list[dict[str, Any]]:
+    market, code = tdx_protocol.market_code(symbol)
+    row = await asyncio.to_thread(finance_info, market, code)
+    report_period = str(row["updated_date"])
+    return [{"symbol": symbol, "report_period": report_period,
+             "statement_items": {name: row[name] for name in FINANCE_FIELDS},
+             "field_units": dict(row["field_units"])}]
+
+
+def _company_profile_sync(symbol: str) -> list[dict[str, Any]]:
+    market, code = tdx_protocol.market_code(symbol)
+
+    def fetch(client: TdxF10Client) -> list[dict[str, Any]]:
+        categories = client.company_categories(market, code)
+        return [{"symbol": symbol, "category": category["name"], "filename": category["filename"],
+                 "content": client.company_content(market, code, category["filename"], category["start"], category["length"])}
+                for category in categories]
+
+    return _call(fetch)
+
+
+async def fetch_company_profile(*, symbol: str) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_company_profile_sync, symbol)
 
 
 __all__ = [
     "FINANCE_FIELDS", "FINANCE_HOSTS", "TdxF10Client", "build_company_categories_request",
     "build_company_content_request", "build_finance_info_request", "company_categories", "company_content",
-    "finance_info", "financial_statements", "gpcw", "parse_company_categories", "parse_company_content", "parse_finance_info",
+    "finance_info", "fetch_company_profile", "fetch_financial_summary", "gpcw", "parse_company_categories",
+    "parse_company_content", "parse_finance_info",
 ]
