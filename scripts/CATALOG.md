@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (47)
+## research data (48)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -160,6 +160,7 @@
 | `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe from the owner egress over ssh stdin; it writes nothing on the owner. |
 | `tdx-quant-export.py` | quant-research | owner-windows | Export read-only TdxQuant market data to the offline CSV contracts. |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
+| `verify-tdx-ex-market.py` | quant-research | workstation | Probe up to six pooled extended-market hosts and map one usable ExHq service. |
 | `verify-tdx-files.py` | quant-research | workstation | Probe TDX board/report files once per host and print JSON evidence. |
 | `verify-tdx-instruments.py` | quant-research | workstation | Bounded, step-isolated TDX instrument verification. |
 | `verify-tdx-legacy-misc.py` | quant-research | workstation | Probe the supported legacy TDX ranking and index-overview commands. |

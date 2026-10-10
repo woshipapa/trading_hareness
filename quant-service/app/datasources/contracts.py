@@ -30,7 +30,7 @@ QUALITY_STATUSES: Final = ("complete", "partial", "empty", "stale", "invalid", "
 
 CATEGORIES: Final = (
     "quote", "bars", "ticks", "auction", "limits", "sector", "flow", "lhb", "attention",
-    "news", "events", "fundamentals", "fund", "reference", "derived",
+    "news", "events", "fundamentals", "fund", "reference", "derived", "context",
 )
 GRAINS: Final = ("realtime", "intraday", "daily", "event", "reference", "periodic")
 SCOPES: Final = ("all_a", "watchlist", "per_symbol", "market", "board", "fund")

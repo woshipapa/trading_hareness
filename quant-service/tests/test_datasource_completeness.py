@@ -156,6 +156,17 @@ class SpecValidationTests(unittest.TestCase):
         self.assertIn(f"{label}: unit factor for 'price' must be a non-zero int or float, got '100'", problems)
         self.assertIn(f"{label}: unit factor for 'volume' must be a non-zero int or float, got Decimal('100')", problems)
 
+    def test_a_capability_needs_a_resolvable_binding_unless_all_await_evidence(self):
+        from app.datasources.contracts import RETIRED, UNSUPPORTED
+        pending = tuple(item for item in BINDINGS if item.capability != "context.quote") + (
+            Binding("tdx_ext", "context.quote", 90, UNSUPPORTED, spec=BindingSpec(field_map={"price": "price"})),)
+        with mock.patch.object(catalog, "BINDINGS", pending):
+            self.assertNotIn("context.quote: no resolvable binding", catalog.validate_catalog())
+        retired = tuple(item for item in BINDINGS if item.capability != "context.quote") + (
+            Binding("tdx_ext", "context.quote", 90, RETIRED, spec=BindingSpec(field_map={"price": "price"})),)
+        with mock.patch.object(catalog, "BINDINGS", retired):
+            self.assertIn("context.quote: no resolvable binding", catalog.validate_catalog())
+
     def test_catalog_cli_prints_bindings_that_carry_a_spec(self):
         from app.datasources import __main__ as cli
         binding = Binding("tdx_public", "ticks.session", 20, DECLARED, spec=BindingSpec(field_map={"price": "price"}))

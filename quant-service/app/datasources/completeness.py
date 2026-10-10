@@ -68,7 +68,14 @@ UNREGISTERED: dict[str, str] = {
     "family:boards": "verified in the plan; board capabilities arrive in P3",
     "family:capital flow": "MAC capital flow semantics unverified (delta 1b); research projection only, P3",
     "family:MAC": "MAC protocol bindings arrive in P3, all UNSUPPORTED until the evidence gates",
-    "family:extended": "7727 extended-market handshake is unsolved (plan F7, P9)",
+    "tdx_ex_market.TdxExMarketClient.categories": "category list (type and market id per group); not called in adapter path",
+    "tdx_ex_market.TdxExMarketClient.count": "transport for fetch_instruments only",
+    "tdx_ex_market.TdxExMarketClient.instruments": "transport for fetch_instruments only",
+    "tdx_ex_market.TdxExMarketClient.instrument_pages": "transport for fetch_instruments only",
+    "tdx_ex_market.TdxExMarketClient.klines": "transport for fetch_bars_daily",
+    "tdx_ex_market.TdxExMarketClient.login": "transport for all fetch_* adapters",
+    "tdx_ex_market.TdxExMarketClient.quote": "transport for fetch_quote",
+    "tdx_ex_market.call_sync": "transport for all fetch_* adapters",
 }
 
 #: family -> (capability prefixes, source keys that count as TDX for it)
