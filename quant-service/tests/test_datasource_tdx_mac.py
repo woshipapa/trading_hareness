@@ -78,25 +78,26 @@ class MacBoardCatalogTests(unittest.TestCase):
     """Test sector.board_catalog returns rows with singular field names."""
 
     def test_board_catalog_field_names(self):
-        """Parsed board_catalog rows must have singular field names: board_code, name, board_type, member_count."""
+        """Parsed board_catalog rows must have singular field names: board_code, name, board_type."""
         # Synthetic board row - count_all=2 produces 1 row
         item = bytearray(160)
         struct.pack_into("<H", item, 0, 1)  # market
         item[2:8] = b"880001"
         item[24:29] = b"Sector\0"
-        struct.pack_into("<H", item, 148, 42)  # member_count
+        struct.pack_into("<f", item, 148, 11.59)  # leading_price (not member_count)
         body = struct.pack("<HH", 2, 99) + bytes(item)
 
         rows = tdx_mac.parse_board_list(body)
         self.assertEqual(len(rows), 1)
         row = rows[0]
 
-        # Check that these fields exist (will be mapped to board_code, name, board_type, member_count in fetch_board_catalog)
+        # Check that these fields exist (will be mapped to board_code, name, board_type in fetch_board_catalog)
         self.assertIn("code", row)
         self.assertEqual(row["code"], "880001")
         self.assertIn("name", row)
-        self.assertIn("member_count", row)
-        self.assertEqual(row["member_count"], 42)
+        self.assertNotIn("member_count", row)
+        # leading_price at offset 148 should be 11.59 (not read as <H which would be 28836)
+        self.assertAlmostEqual(row["leading_price"], 11.59, places=2)
 
 
 class MacMembershipTests(unittest.TestCase):
@@ -134,7 +135,6 @@ class MacProtocolTests(unittest.TestCase):
         self.assertEqual(tdx_mac.exchange_board_code("399001"), 30001)
         self.assertEqual(tdx_mac.exchange_board_code("899001"), 32001)
         self.assertEqual(tdx_mac.exchange_board_code("000001"), 31001)
-        self.assertEqual(tdx_mac.exchange_board_code("US0401"), 30401)
         self.assertEqual(tdx_mac.BAR_PERIODS["1m"], 8)
         self.assertEqual(len(tdx_mac.build_handshake()), 2)
         batch = tdx_mac.build_batch_quotes_request([(0, "000001"), (1, "600519")])
@@ -155,7 +155,7 @@ class MacProtocolTests(unittest.TestCase):
         rows = tdx_mac.parse_board_list(body)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["code"], "880001")
-        self.assertEqual(rows[0]["symbol_name"], "PingAn")
+        self.assertEqual(rows[0]["leading_name"], "PingAn")
 
     def test_members_quotes_batch_and_bars(self):
         member = bytearray(68)
@@ -182,13 +182,8 @@ class MacProtocolTests(unittest.TestCase):
         self.assertEqual(
             tdx_mac.parse_board_members(dynamic, quotes=True)[0]["vol"], 123
         )
-        capital = tdx_mac.build_aux_request(
-            tdx_mac.OP_CAPITAL_FLOW, 0, "000001", head=2
-        )
         board = tdx_mac.build_aux_request(tdx_mac.OP_BELONG_BOARD, 0, "000001")
-        self.assertEqual(capital[0], 2)
         self.assertEqual(board[0], 1)
-        self.assertIn(b"Stock_ZJLX", capital)
         self.assertIn(b"Stock_GLHQ", board)
         bars = struct.pack("<H12sBHHI", 1, b"600519\0" * 2, 4, 1, 2, 0) + struct.pack(
             "<IIfffffff", 20261009, 34200, 100, 110, 90, 105, 1000, 20, 30

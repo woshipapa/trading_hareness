@@ -27,12 +27,12 @@ class MacFieldRegistryTests(unittest.TestCase):
         self.assertIsNone(MAC_FIELDS[0x5E].canonical_key)
 
     def test_dynamic_row_uses_bit_order_and_signed_formats(self):
-        bitmap = bitmap_for_bits([0, 22, 5, 140])
-        payload = struct.pack("<fIi i", 12.5, 17, 123, -4)
+        bitmap = bitmap_for_bits([0, 43, 5, 140])
+        payload = struct.pack("<fIi i", 12.5, 17, 1, -4)
         values, end = decode_dynamic_row(payload, bitmap)
         self.assertEqual(end, 16)
         self.assertEqual(values["pre_close"], 12.5)
-        self.assertEqual(values["board_strength"], 123)
+        self.assertEqual(values["flag_kcb"], 1)
         self.assertEqual(values["vol"], 17)
         self.assertEqual(values["bid_ask_diff"], -4)
 
