@@ -186,6 +186,7 @@ BINDINGS = (
           "app/datasources/sources/tdx_legacy_misc.py:fetch_all_a_snapshot",
           notes="全 A 快照；decision_eligible 不变"),
     "说明", _bind("tdx_public", "quote.index_overview", 80, DECLARED, None, decision_eligible=False),
+    _bind("tdx_public", "quote.watch_snapshot", 70, UNSUPPORTED, None),
     _bind("fuyao_ths", "quote.all_a_snapshot", 12, LIVE_VERIFIED, "store", decision_eligible=True),
     *(_bind("eastmoney_datacenter", f"events.{key}", 50, DECLARED, key) for key in ("a", "b")),
 )
@@ -235,6 +236,17 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("  agreement: agreement detail", printed)
         self.assertNotIn("intraday", printed)
         self.assertTrue(printed.endswith("\nEOF\n"))
+
+    def test_apply_takes_the_file_check_wrote(self):
+        written = run_check("owner", answers())
+        with scratch_repository() as root:
+            path = root / "scripts" / "data" / written.names[0]
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(written.evidence[0]), encoding="utf-8")
+            printed = run_apply(root, path)
+            promoted = (root / "catalog.py").read_text(encoding="utf-8")
+        self.assertIn("Promote tdx_public quote.watch_snapshot from UNSUPPORTED to DECLARED", printed)
+        self.assertIn('_bind("tdx_public", "quote.watch_snapshot", 70, DECLARED, None),', promoted)
 
     def test_the_status_column_is_found_after_multibyte_text_on_its_line(self):
         with scratch_repository() as root:
