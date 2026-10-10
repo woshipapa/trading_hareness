@@ -98,7 +98,7 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
     # -- unofficial protocol / local files -------------------------------------
     DataSource("tdx_public", "通达信公开行情主站", "tdx hq hosts :7709", "unofficial_protocol", "tcp_tdx", "free",
                "app/datasources/sources/tdx_protocol.py",
-               risks="非官方社区主站；2026-09-18 起仅历史分笔与除权除息可用，实时行情与 K 线命令被拒"),
+               risks="非官方社区主站；LOGIN_ONE 为默认握手，单主机失败回退 legacy_3；主机池由探测矩阵生成并按主机冷却，结果保留 host:port/profile；收盘后证券列表、服务器文件与 K 线等仅作研究证据，事实见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json 与 scripts/data/tdx_server_files_2026-10-10_mac.json"),
     DataSource("tdx_mac", "通达信 MAC 行情服务", "MAC 0x12xx hosts :7709", "unofficial_protocol", "tcp_tdx_mac", "free",
                "app/datasources/sources/tdx_mac.py", risks="研究证据；MAC 字段与协议为非官方实现"),
     DataSource("tdx_ext", "通达信扩展行情", "tdx extended hq :7727", "unofficial_protocol", "tcp_tdx", "free",
