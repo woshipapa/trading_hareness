@@ -270,6 +270,17 @@ def _bind(source: str, capability: str, priority: int, status: str, store: str |
 _EVT = "market_events:event_type="
 _RAW = "raw_market_observations:capability="
 
+# What scripts/tdx-promote.py compares a TDX binding with: Tencent's public endpoints, read at the same moment.  The
+# tolerances are starting values for the first intraday check to tune; the one measured basis is the minute volume
+# (scripts/data/tdx_f7_1m_volume_2026-10-10_mac.json: 238 of 240 minutes equal after lots * 100, the others being the
+# opening-auction minute and a denormal near zero, so a check of minute bars asks for a window after the first minute).
+_TENCENT_MINUTES = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_intraday_minutes",
+                    "reference_params": {"symbol": "symbol"}, "key": ["symbol", "bar_time"]}
+_TENCENT_QUOTES = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_order_book_quotes",
+                   "reference_params": {"symbols": "symbols"}, "key": ["symbol"]}
+_TENCENT_LIMITS = {"reference": "tencent_free", "reference_adapter": "app/longhu_vendor_source.py:tencent_quotes_blocking",
+                   "reference_params": {"symbols": "symbols"}, "key": ["symbol", "trade_date"]}
+
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot
     _bind("fuyao_ths", "quote.all_a_snapshot", 12, LIVE_VERIFIED, _RAW + "a_share_prices_snapshot",
@@ -314,7 +325,9 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                          "turnover": "turnover_rate", "exchange_time": "exchange_time"},
               unit_factors={"volume": 100}, paging="batch", max_batch=80,
               time_semantics="effective=exchange_time (bits 0x13 date and 0x14 time, Asia/Shanghai); available=collection",
-              handshake_profile="mac")),
+              handshake_profile="mac",
+              agreement={"price": {**_TENCENT_QUOTES, "rel_tol": 0.005}, "volume": {**_TENCENT_QUOTES, "rel_tol": 0.02},
+                         "amount": {**_TENCENT_QUOTES, "rel_tol": 0.02}})),
     # Both providers persist depth observations in the shared quote table.  The
     # source discriminator is part of the storage contract; there is no
     # separate intraday_order_book_observations relation.
@@ -368,7 +381,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           spec=BindingSpec(
               params={"symbol": "market+code", "count": "count (period 8)"}, field_map={},
               time_semantics="effective=bar_time (wire date + seconds, Asia/Shanghai); available=none, the source gives no source_available_at",
-              handshake_profile="mac")),
+              handshake_profile="mac",
+              agreement={"close": {**_TENCENT_MINUTES, "rel_tol": 0.005}, "volume": {**_TENCENT_MINUTES, "abs_tol": 100}})),
     _bind("longhuvip_index", "bars.index_daily", 45, DORMANT, "canonical_bars_daily", "app/longhu_market_service.py"),
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),
     _bind("tushare_primary", "bars.adjustment_factor", 10, RETIRED, "daily_adjustment_factors:provider=tushare_primary",
@@ -443,7 +457,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           spec=BindingSpec(
               params={"symbols": "symbols such as 000001.SZ"}, field_map={"limit_up": "up_limit", "limit_down": "down_limit"},
               paging="batch", max_batch=80, time_semantics="effective=trade_date (bit 0x13, Asia/Shanghai date); available=collection",
-              handshake_profile="mac")),
+              handshake_profile="mac",
+              agreement={"up_limit": {**_TENCENT_LIMITS, "abs_tol": 0.005}, "down_limit": {**_TENCENT_LIMITS, "abs_tol": 0.005}})),
     _bind("fuyao_ths", "limits.limit_up_pool", 12, LIVE_VERIFIED, _EVT + "limit_up_pool", "app/market_event_capture.py",
           "近期", "默认分页 50（此前只存了第一页，已修为翻页）"),
     _bind("eastmoney_ztb", "limits.limit_up_pool", 50, DECLARED, _RAW + "limit_pool_limit_up",

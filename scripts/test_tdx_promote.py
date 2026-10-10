@@ -34,14 +34,21 @@ OWN = Binding("tdx_public", CAPABILITY, 70, UNSUPPORTED, spec=BindingSpec(
     agreement={"price": {"reference": "tencent_free", "key": KEY, "rel_tol": 0.001},
                "volume": {"reference": "tencent_free", "key": KEY}}))
 REFERENCE = Binding("tencent_free", CAPABILITY, 30, LIVE_VERIFIED)
+TENCENT_MINUTES = "app/free_market_providers.py:tencent_intraday_minutes"
+FETCH_POOL = "app/datasources/sources/eastmoney_ztb.py:fetch_pool"
+MINUTES = {"reference": "tencent_free", "reference_adapter": TENCENT_MINUTES, "reference_params": {"symbol": "symbol"},
+           "key": ["symbol", "bar_time"]}
+BARS = Binding("tdx_mac", "bars.minute", 70, UNSUPPORTED, spec=BindingSpec(
+    agreement={"close": {**MINUTES, "rel_tol": 0.005}, "volume": {**MINUTES, "abs_tol": 100}}))
+TENCENT = Binding("tencent_free", "bars.minute", 50, LIVE_VERIFIED, adapter="app/intraday_minute_capture_actions.py")
 SYMBOLS = [f"{number:06d}.SZ" for number in range(20)]
 OWN_ROWS = [{"symbol": symbol, "price": 10.0, "vol": 3} for symbol in SYMBOLS]                  # volume in lots
 REFERENCE_ROWS = [{"symbol": symbol, "price": 10.0, "volume": 300} for symbol in reversed(SYMBOLS)]    # in shares, another order
 REFERENCE_ROWS[0]["price"] = 10.005       # inside the relative tolerance, outside the absolute one (none is declared)
 
 
-def record(source, rows, times=MORNING, error=None):
-    base = {"source": source, "capability": CAPABILITY, "params": {}, "started_utc": times[0], "finished_utc": times[1]}
+def record(source, rows, times=MORNING, error=None, capability=CAPABILITY):
+    base = {"source": source, "capability": capability, "params": {}, "started_utc": times[0], "finished_utc": times[1]}
     if error:
         return {**base, "error": error}
     return {**base, "rows": len(rows), "coverage": None, "warnings": ["tdx_host=1.2.3.4:7709/login_one"],
@@ -52,22 +59,22 @@ def answers(**changes):
     return {"tdx_public": record("tdx_public", OWN_ROWS), "tencent_free": record("tencent_free", REFERENCE_ROWS), **changes}
 
 
-def run_check(egress, probes, bindings=(OWN, REFERENCE), params=None):
-    """``check`` on fake probe records, in a scratch repository."""
+def run_check(egress, probes, bindings=(OWN, REFERENCE), params=None, source="tdx_public", capability=CAPABILITY):
+    """``check`` on fake probe records (by the label of the read), in a scratch repository."""
     with tempfile.TemporaryDirectory() as scratch:
         root = Path(scratch).resolve()
         (root / "data").mkdir()
         calls = []
 
-        def probe(egress_taken, source, _capability, _params, **options):
-            calls.append((egress_taken, source, options))
-            return probes[source]
+        def probe(egress_taken, read_source, _capability, asked, *, adapter=None, all_rows=False):
+            calls.append((egress_taken, read_source, asked, adapter, all_rows))
+            return probes[adapter or read_source]
 
         out = io.StringIO()
         with mock.patch.multiple(MODULE, ROOT=root, DATA_DIR=root / "data", run_probe=probe,
                                  bindings_for=lambda capability, states: [b for b in bindings if b.capability == capability]), \
                 mock.patch.dict(os.environ, SETTINGS), contextlib.redirect_stdout(out):
-            code = MODULE.main(["check", "tdx_public", CAPABILITY, "--egress", egress, "--params", json.dumps(params or {})])
+            code = MODULE.main(["check", source, capability, "--egress", egress, "--params", json.dumps(params or {})])
         files = sorted((root / "data").glob("*.json"))
         return SimpleNamespace(code=code, names=[path.name for path in files], calls=calls, stdout=out.getvalue(),
                                evidence=[json.loads(path.read_text(encoding="utf-8")) for path in files])
@@ -101,7 +108,7 @@ class CheckTests(unittest.TestCase):
         self.assertEqual((evidence["schema"], evidence["catalog_status"], evidence["decision_eligible"], evidence["egress"]),
                          ("tdx-promote-v2", "unsupported", False, "owner"))
         self.assertEqual(evidence["session"]["inside"], {"tdx_public": True, "tencent_free": True})
-        self.assertEqual(result.calls, [("owner", "tdx_public", {"all_rows": True}), ("owner", "tencent_free", {"all_rows": True})])
+        self.assertEqual(result.calls, [("owner", "tdx_public", {}, None, True), ("owner", "tencent_free", {}, None, True)])
         self.assertIn("agreement: pass", result.stdout)
 
     def test_the_evidence_keeps_the_first_rows_and_the_hash_of_all_of_them(self):
@@ -174,9 +181,67 @@ class CheckTests(unittest.TestCase):
     def test_a_binding_without_tolerances_has_nothing_to_agree_with(self):
         plain = Binding("tdx_public", CAPABILITY, 70, UNSUPPORTED, spec=BindingSpec())
         result = run_check("owner", answers(), bindings=(plain,))
-        self.assertEqual(result.calls, [("owner", "tdx_public", {"all_rows": False})], "no reference is probed")
+        self.assertEqual(result.calls, [("owner", "tdx_public", {}, None, False)], "no reference is probed")
         verdict = result.evidence[0]["verdicts"]["agreement"]
         self.assertTrue(verdict["pass"] and verdict["detail"].startswith("not applicable"), verdict)
+
+    def test_a_reference_reader_gets_the_renamed_parameters_and_its_rows_are_projected(self):
+        own = [{"symbol": "000001.SZ", "bar_time": f"2026-10-12T09:3{n}:00+08:00", "close": 11.0 + n / 100,
+                "amount": 1000.0 * n, "volume": 100.0 * n} for n in range(1, 6)]            # volume in shares
+        tape = [{"ts_code": "000001.SZ", "time": f"093{n}", "close": 11.0 + n / 100, "volume_lot": n, "amount": 1000.0 * n,
+                 "is_complete": True} for n in range(1, 6)]
+        tape.append({**tape[-1], "time": "0936", "is_complete": False})                      # the minute still running
+        probes = {"tdx_mac": record("tdx_mac", own, capability="bars.minute"),
+                  TENCENT_MINUTES: record("tencent_free", tape, capability="bars.minute")}
+        result = run_check("owner", probes, bindings=(BARS, TENCENT), source="tdx_mac", capability="bars.minute",
+                           params={"symbol": "000001.SZ", "count": 5})
+        evidence = result.evidence[0]
+        self.assertEqual(result.calls, [("owner", "tdx_mac", {"symbol": "000001.SZ", "count": 5}, None, True),
+                                        ("owner", "tencent_free", {"symbol": "000001.SZ"}, TENCENT_MINUTES, True)])
+        self.assertEqual(failing(evidence), [])
+        close, volume = evidence["comparison"]["close"], evidence["comparison"]["volume"]
+        self.assertEqual((close["matched"], close["only_right"], volume["matched"], volume["max_abs_dev"]), (5, 0, 5, 0))
+        self.assertEqual(list(evidence["probes"]), ["tdx_mac", TENCENT_MINUTES])
+
+    def test_each_tencent_reader_is_projected_onto_the_canonical_fields_of_its_capability(self):
+        def project(reader, capability, sample):
+            return MODULE.PROJECTIONS[(reader, capability)]({"finished_utc": MORNING[1], "sample": sample})
+
+        minutes = [{"ts_code": "000001.SZ", "time": "0931", "close": 11.5, "volume_lot": 7, "amount": 80500.0, "is_complete": True}]
+        self.assertEqual(project(TENCENT_MINUTES, "bars.minute", minutes), [
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:31:00+08:00", "close": 11.5, "volume": 700, "amount": 80500.0}])
+        quotes = [{"ts_code": "600519.SH", "price": 1450.0, "cumulative_volume_lot": 35111, "cumulative_amount": 5.1e9}]
+        self.assertEqual(project("app/free_market_providers.py:tencent_order_book_quotes", "quote.watch_snapshot", quotes), [
+            {"symbol": "600519.SH", "price": 1450.0, "volume": 3511100, "amount": 5.1e9}])
+        index = [{"ts_code": "000300.SH", "trade_date": "20261009", "open": "4600.5", "close": "4610.25", "vol": "1"}]
+        self.assertEqual(project("app/free_market_providers.py:tencent_index_daily", "bars.index_daily", index), [
+            {"symbol": "000300.SH", "trade_date": "2026-10-09", "open": 4600.5, "close": 4610.25}])
+        limits = [[{"ts_code": "920438.BJ", "trade_date": "20261008", "up_limit": 128.5, "down_limit": 68.99}], {"coverage": 1.0}]
+        self.assertEqual(project("app/longhu_vendor_source.py:tencent_quotes_blocking", "limits.prices", limits), [
+            {"symbol": "920438.BJ", "trade_date": "2026-10-08", "up_limit": 128.5, "down_limit": 68.99}])
+
+    def test_a_pool_reference_takes_a_fixed_pool_and_the_trade_date_and_needs_no_projection(self):
+        entry = {"reference": "eastmoney_ztb", "reference_adapter": FETCH_POOL, "reference_params": {"trade_date": "trade_date"},
+                 "reference_fixed": {"pool": "limit_up"}, "key": ["symbol"]}
+        self.assertEqual(MODULE.reference_kwargs(entry, {"trade_date": "2026-10-12", "count": 5}),
+                         {"trade_date": "2026-10-12", "pool": "limit_up"})
+        self.assertEqual(MODULE.reference_kwargs({"reference": "tencent_free"}, {"symbols": ["000001.SZ"]}),
+                         {"symbols": ["000001.SZ"]}, "without a mapping the reference gets the same parameters")
+        pool = Binding("tdx_public", "limits.limit_up_pool", 90, UNSUPPORTED, spec=BindingSpec(agreement={
+            "board_count": {**entry, "abs_tol": 0}}))
+        rows = [{"symbol": "000001.SZ", "board_count": 2}, {"symbol": "600519.SH", "board_count": 1}]
+        probes = {"tdx_public": record("tdx_public", rows, capability="limits.limit_up_pool"),
+                  FETCH_POOL: record("eastmoney_ztb", rows[::-1], capability="limits.limit_up_pool")}
+        result = run_check("owner", probes, bindings=(pool, Binding("eastmoney_ztb", "limits.limit_up_pool", 30, LIVE_VERIFIED)),
+                           capability="limits.limit_up_pool", params={"trade_date": "2026-10-12"})
+        self.assertEqual(result.calls[1], ("owner", "eastmoney_ztb", {"trade_date": "2026-10-12", "pool": "limit_up"}, FETCH_POOL, True))
+        self.assertEqual(result.evidence[0]["comparison"]["board_count"]["matched"], 2)
+
+    def test_entries_may_not_read_one_reader_with_different_parameters(self):
+        agreement = {"close": {"reference": "tencent_free", "reference_adapter": TENCENT_MINUTES, "reference_params": {"symbol": "symbol"}},
+                     "volume": {"reference": "tencent_free", "reference_adapter": TENCENT_MINUTES, "reference_params": {"symbol": "other"}}}
+        with self.assertRaisesRegex(SystemExit, "read app/free_market_providers.py:tencent_intraday_minutes with different parameters"):
+            MODULE.reference_reads(agreement, {"symbol": "000001.SZ", "other": "600519.SH"})
 
     def test_a_session_is_a_weekday_morning_or_afternoon_window(self):
         def inside(text):
@@ -206,11 +271,11 @@ class ProbeTransportTests(unittest.TestCase):
             env = {"PATH": root, "ARGS_FILE": f"{root}/args", "STDIN_FILE": f"{root}/stdin", **SETTINGS,
                    "PROBE_JSON": json.dumps(record("tdx_public", [{"price": 1.0}]))}
             with mock.patch.dict(os.environ, env, clear=True):
-                taken = MODULE.run_probe("owner", "tdx_public", "quote.all_a_snapshot", {}, all_rows=True)
+                taken = MODULE.run_probe("owner", "tdx_public", "quote.all_a_snapshot", {}, adapter=TENCENT_MINUTES, all_rows=True)
             args = Path(root, "args").read_text(encoding="utf-8").split("\n")
             script = Path(root, "stdin").read_text(encoding="utf-8")
         command = ("docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public "
-                   "quote.all_a_snapshot --params '{}' --all-rows")
+                   f"quote.all_a_snapshot --params '{{}}' --adapter {TENCENT_MINUTES} --all-rows")
         self.assertEqual(taken["command"], command)
         self.assertEqual(taken["rows"], 1)
         self.assertEqual(args[-4:], ["synthetic-user@synthetic-host", "bash", "-s", ""])

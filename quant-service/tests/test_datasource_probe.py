@@ -4,12 +4,12 @@ import contextlib
 import io
 import json
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest import mock
 
 from app.datasources import __main__ as cli
 from app.datasources import catalog
-from app.datasources.contracts import BINDING_STATES, Binding, CapabilityEvidence
+from app.datasources.contracts import BINDING_STATES, LIVE_VERIFIED, Binding, CapabilityEvidence
 from app.datasources.sources import tdx_legacy_misc
 from app.datasources.sources.tdx_protocol import TdxProtocolError
 
@@ -53,6 +53,38 @@ class ProbeTests(unittest.TestCase):
             _, every = probe("tdx_public", "quote.index_overview", "--all-rows")
         self.assertEqual((len(few["sample"]), len(every["sample"]), every["rows"]),
                          (cli.SAMPLE_ROWS, cli.SAMPLE_ROWS + 3, cli.SAMPLE_ROWS + 3))
+
+    def test_an_explicit_adapter_stands_in_for_a_catalog_adapter_that_is_only_a_module(self):
+        calls = []
+
+        async def answer(**params):
+            calls.append(params)
+            return [{"symbol": "000001.SZ"}]
+
+        reference = (Binding("tencent_free", "quote.watch_snapshot", 50, LIVE_VERIFIED, adapter="app/free_market_providers.py"),)
+        with mock.patch.object(tdx_legacy_misc, "fetch_index_overview", answer), mock.patch.object(catalog, "BINDINGS", reference):
+            code, record = probe("tencent_free", "quote.watch_snapshot", "--adapter", ADAPTER, "--params", '{"symbols": ["000001.SZ"]}')
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as refused:
+                cli.main(["probe", "tencent_free", "quote.watch_snapshot"])
+        self.assertEqual((code, calls, record["source"], record["adapter"]), (0, [{"symbols": ["000001.SZ"]}], "tencent_free", ADAPTER))
+        self.assertEqual(refused.exception.code, 2, "without it the module-only adapter names no function")
+
+    def test_an_explicit_adapter_must_be_a_function_of_an_app_module(self):
+        for adapter in ("os:system", "app/datasources/__main__.py", "../app/x.py:f"):
+            with self.subTest(adapter=adapter), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as refused:
+                cli.main(["probe", "tdx_public", "quote.index_overview", "--adapter", adapter])
+            self.assertEqual(refused.exception.code, 2)
+
+    def test_a_plain_function_is_called_as_it_is_and_iso_strings_become_dates(self):
+        seen = []
+
+        def answer(*, trade_date: date, symbol: str):
+            seen.append((trade_date, symbol))
+            return [{"symbol": symbol}]
+
+        with mock.patch.object(tdx_legacy_misc, "fetch_index_overview", answer):
+            code, record = probe("tdx_public", "quote.index_overview", "--params", '{"trade_date": "2026-10-12", "symbol": "2026-10-12"}')
+        self.assertEqual((code, record["rows"], seen), (0, 1, [(date(2026, 10, 12), "2026-10-12")]))
 
     def test_plain_rows_are_an_answer_without_coverage_or_clocks(self):
         async def answer(**_params):

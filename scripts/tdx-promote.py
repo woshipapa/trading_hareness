@@ -8,9 +8,11 @@
 quant-research container over ssh (``owner``: a read-only ``docker exec`` reached with the LONGHU_SSH_* settings). The
 exec runs the code baked into the image: a code-only overlay (QUANT_HOTFIX_ENABLED) is on the service's PYTHONPATH, not
 on the exec's, so the image itself needs the probe command and the adapters. When the binding's BindingSpec declares
-agreement tolerances, ``check`` reads every row of the binding and of each reference source the same way, with the
-same parameters, projects both sides as the resolver projects them (field_map, unit_factors), joins them on the entry's
-key and compares each field on every common row. It writes
+agreement tolerances, ``check`` reads every row of the binding and of each reference the same way (a reference whose
+entry names a ``reference_adapter`` is read through ``probe --adapter``, with the parameters ``reference_params`` and
+``reference_fixed`` give it; a reader whose rows are not canonical gets the projection registered for it in PROJECTIONS),
+projects both sides as the resolver projects them (field_map, unit_factors), joins them on the entry's key and compares
+each field on every common row. It writes
 scripts/data/tdx_promote_<capability>_<source>_<date>_<egress>_<hash of the params>.json (date in Asia/Shanghai) with
 every input, the probes (their first rows and a hash of all printed rows), the comparison (row counts, the largest
 deviations, examples) and one verdict per gate, and exits 0 whatever the verdicts:
@@ -36,7 +38,7 @@ import os
 import shlex
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any
@@ -85,10 +87,12 @@ def ssh_argv() -> list[str]:
             f"{env['LONGHU_SSH_USER']}@{env['LONGHU_SSH_HOST']}", "bash", "-s"]
 
 
-def run_probe(egress: str, source: str, capability: str, params: Mapping[str, Any], *,
+def run_probe(egress: str, source: str, capability: str, params: Mapping[str, Any], *, adapter: str | None = None,
               all_rows: bool = False) -> dict[str, Any]:
-    """The probe record of one binding, taken on ``egress``; the command that took it is added."""
+    """The probe record of one binding (or of ``adapter``, a reference's reader), taken on ``egress``."""
     probe = ["python", "-m", "app.datasources", "probe", source, capability, "--params", json.dumps(params)]
+    if adapter:
+        probe += ["--adapter", adapter]
     if all_rows:
         probe.append("--all-rows")
     if egress == "mac":
@@ -119,13 +123,75 @@ def probed_in_session(record: Mapping[str, Any]) -> bool:
     return all(in_session(datetime.fromisoformat(record[key])) for key in ("started_utc", "finished_utc"))
 
 
-def reading(binding: Binding, record: Mapping[str, Any]) -> tuple[list[dict[str, Any]], str]:
-    """The printed rows as the resolver projects them, and why they cannot be compared (empty when they can)."""
+def iso_date(compact: str) -> str:
+    return f"{compact[:4]}-{compact[4:6]}-{compact[6:]}"
+
+
+def tencent_minutes(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """tencent_intraday_minutes: today's finished minutes as bars.minute rows (the tape carries no date)."""
+    day = datetime.fromisoformat(record["finished_utc"]).astimezone(CN).date().isoformat()
+    return [{"symbol": row["ts_code"], "bar_time": f"{day}T{row['time'][:2]}:{row['time'][2:]}:00+08:00",
+             "close": row["close"], "volume": row["volume_lot"] * 100, "amount": row["amount"]}
+            for row in record["sample"] if row["is_complete"]]
+
+
+def tencent_quotes(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """tencent_order_book_quotes: the day's cumulative volume (lots) and amount as quote.watch_snapshot rows."""
+    return [{"symbol": row["ts_code"], "price": row["price"], "volume": row["cumulative_volume_lot"] * 100,
+             "amount": row["cumulative_amount"]} for row in record["sample"]]
+
+
+def tencent_index(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """tencent_index_daily: bars.index_daily rows; its volume unit is not confirmed, so only the prices are kept."""
+    return [{"symbol": row["ts_code"], "trade_date": iso_date(row["trade_date"]), "open": float(row["open"]),
+             "close": float(row["close"])} for row in record["sample"]]
+
+
+def tencent_limits(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """tencent_quotes_blocking answers (rows, health); the exchange's limit prices are quote fields 47 and 48."""
+    rows, _health = record["sample"]
+    return [{"symbol": row["ts_code"], "trade_date": iso_date(row["trade_date"]), "up_limit": row["up_limit"],
+             "down_limit": row["down_limit"]} for row in rows]
+
+
+#: (reader, capability) -> rows in the capability's canonical fields, for a reference reader whose own rows are not.
+PROJECTIONS = {
+    ("app/free_market_providers.py:tencent_intraday_minutes", "bars.minute"): tencent_minutes,
+    ("app/free_market_providers.py:tencent_order_book_quotes", "quote.watch_snapshot"): tencent_quotes,
+    ("app/free_market_providers.py:tencent_index_daily", "bars.index_daily"): tencent_index,
+    ("app/longhu_vendor_source.py:tencent_quotes_blocking", "limits.prices"): tencent_limits,
+}
+
+
+def reference_kwargs(entry: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    """What the entry's reference is asked: the check's parameters, or those ``reference_params`` renames, and the fixed ones."""
+    named = entry.get("reference_params")
+    asked = dict(params) if named is None else {keyword: params[name] for keyword, name in named.items()}
+    return {**asked, **entry.get("reference_fixed", {})}
+
+
+def reference_reads(agreement: Mapping[str, Mapping[str, Any]], params: Mapping[str, Any]) -> dict[str, tuple[str, str | None, dict]]:
+    """Label -> (reference source, reader, keyword arguments) for every distinct read the entries need."""
+    reads: dict[str, tuple[str, str | None, dict]] = {}
+    for entry in agreement.values():
+        adapter = entry.get("reference_adapter")
+        wanted = (entry["reference"], adapter, reference_kwargs(entry, params))
+        label = adapter or entry["reference"]
+        if reads.setdefault(label, wanted) != wanted:
+            sys.exit(f"the agreement entries read {label} with different parameters")
+    return reads
+
+
+def reading(binding: Binding, record: Mapping[str, Any],
+            projection: Callable[[Mapping[str, Any]], list[dict[str, Any]]] | None = None) -> tuple[list[dict[str, Any]], str]:
+    """The printed rows as the resolver (or the reader's projection) gives them, and why they cannot be compared."""
     label, rows = record["source"], record.get("sample")
     if record["error"]:
         return [], f"{label} probe failed: {record['error']}"
     if len(rows) != record["rows"]:
         return [], f"{label} printed {len(rows)} of its {record['rows']} rows"
+    if projection:
+        return projection(record), ""
     if not all(isinstance(row, dict) for row in rows):
         return [], f"{label} printed rows that are not mappings"
     projected = _normalise_rows(rows, binding)
@@ -198,8 +264,9 @@ def compare(source: str, agreement: Mapping[str, Mapping[str, Any]], bindings: M
     mine, mine_why = reading(bindings[source], probes[source])
     result = {}
     for name, entry in agreement.items():
-        reference = entry["reference"]
-        theirs, their_why = reading(bindings[reference], probes[reference])
+        reference, adapter = entry["reference"], entry.get("reference_adapter")
+        projection = PROJECTIONS.get((adapter, probes[source]["capability"]))
+        theirs, their_why = reading(bindings[reference], probes[adapter or reference], projection)
         left, left_why = keyed(mine, entry["key"], source)
         right, right_why = keyed(theirs, entry["key"], reference)
         result[name] = compare_field(name, entry, left, right, mine_why or their_why or left_why or right_why)
@@ -241,10 +308,12 @@ def run_check(args: argparse.Namespace) -> int:
     bindings = {args.source: lookup(args.source, args.capability)}
     spec = bindings[args.source].spec
     agreement = spec.agreement if spec else {}
-    for reference in sorted({item["reference"] for item in agreement.values()}):
+    reads = reference_reads(agreement, args.params)
+    for reference, _adapter, _kwargs in reads.values():
         bindings[reference] = lookup(reference, args.capability)
-    probes = {source: run_probe(args.egress, source, args.capability, args.params, all_rows=bool(agreement))
-              for source in bindings}
+    probes = {args.source: run_probe(args.egress, args.source, args.capability, args.params, all_rows=bool(agreement))}
+    for label, (reference, adapter, kwargs) in reads.items():
+        probes[label] = run_probe(args.egress, reference, args.capability, kwargs, adapter=adapter, all_rows=True)
     comparison = compare(args.source, agreement, bindings, probes)
     inside = {source: probed_in_session(record) for source, record in probes.items()}
     evidence = {

@@ -5,6 +5,7 @@
     python -m app.datasources collect [--tasks public_evidence_capture,post_close_public_archive]
     python -m app.datasources project-valuations --trade-date YYYY-MM-DD [--apply]
     python -m app.datasources probe <source> <capability> [--params '{"symbol": "999999.SH"}'] [--all-rows]
+                                    [--adapter app/free_market_providers.py:tencent_intraday_minutes]
 
 ``catalog``/``validate`` need nothing but this package.  ``collect`` needs the
 PG* environment and runs the collectors under the same durable leases as the
@@ -14,8 +15,11 @@ on the service, or simply let the lease decide).  Live source probing lives in
 ``scripts/probe-public-sources.py``.
 
 ``probe`` calls the adapter the catalog names for one binding, whatever the
-binding's status, once, with ``--params`` (a JSON object) as its keyword
-arguments, and prints one JSON object: what was asked, when, how many rows,
+binding's status (or the function ``--adapter`` names, for a reference whose
+catalog adapter is only a module), once, with ``--params`` (a JSON object) as
+its keyword arguments (ISO strings become dates for the parameters annotated
+``date``; a plain function is called as it is), and prints one JSON object:
+what was asked, when, how many rows,
 coverage, the effective and available ranges, the warnings (they carry the
 answering host), the first rows (all of them with ``--all-rows``) and the error
 if the adapter raised (exit 1).  It writes nothing.  ``scripts/tdx-promote.py`` runs it on the Mac or inside the
@@ -28,9 +32,11 @@ import argparse
 import asyncio
 import dataclasses
 import importlib
+import inspect
 import json
+import re
 import sys
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -75,20 +81,29 @@ def _validate(_args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
-def _adapter(binding: Binding) -> Callable[..., Awaitable[object]]:
-    """The function the catalog names for ``binding`` (``app/<module path>.py:<function>``)."""
-    path, _, name = binding.adapter.partition(":")
+def _function(adapter: str) -> Callable[..., object]:
+    """The function ``app/<module path>.py:<function>`` names."""
+    path, _, name = adapter.partition(":")
     return getattr(importlib.import_module(path.removesuffix(".py").replace("/", ".")), name)
 
 
-async def _call(binding: Binding, params: dict[str, Any], printed: int | None) -> dict[str, Any]:
-    """Call the binding's adapter once and describe the answer, printing ``printed`` rows (None: all of them).
+def _typed(function: Callable[..., object], params: dict[str, Any]) -> dict[str, Any]:
+    """``params`` with the ISO strings given for ``date`` parameters turned into dates (JSON has none)."""
+    parameters = inspect.signature(function).parameters
+    return {name: date.fromisoformat(value) if isinstance(value, str) and name in parameters
+            and parameters[name].annotation in (date, "date") else value for name, value in params.items()}
+
+
+async def _call(binding: Binding, adapter: str, params: dict[str, Any], printed: int | None) -> dict[str, Any]:
+    """Call ``adapter`` once and describe the answer, printing ``printed`` rows (None: all of them).
 
     An adapter that raises is reported, not hidden."""
-    record: dict[str, Any] = {"source": binding.source, "capability": binding.capability, "params": params,
-                              "started_utc": datetime.now(timezone.utc).isoformat()}
+    record: dict[str, Any] = {"source": binding.source, "capability": binding.capability, "adapter": adapter,
+                              "params": params, "started_utc": datetime.now(timezone.utc).isoformat()}
     try:
-        rows, evidence = _unpack_evidence(await _adapter(binding)(**params))
+        function = _function(adapter)
+        answer = function(**_typed(function, params))
+        rows, evidence = _unpack_evidence(await answer if inspect.isawaitable(answer) else answer)
     except Exception as error:  # noqa: BLE001 - the probe's answer is whatever the adapter raised
         record["error"] = f"{type(error).__name__}: {error}"
     else:
@@ -103,9 +118,14 @@ async def _call(binding: Binding, params: dict[str, Any], printed: int | None) -
 def _probe(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     binding = next((item for item in bindings_for(args.capability, states=BINDING_STATES)
                     if item.source == args.source), None)
-    if binding is None or ":" not in (binding.adapter or ""):
-        parser.error(f"{args.source} -> {args.capability}: no such binding, or its adapter names no function")
-    record = asyncio.run(_call(binding, args.params, None if args.all_rows else SAMPLE_ROWS))
+    if binding is None:
+        parser.error(f"{args.source} -> {args.capability}: no such binding")
+    if args.adapter and not re.fullmatch(r"app/[\w/]+\.py:\w+", args.adapter):
+        parser.error(f"--adapter must be app/<module path>.py:<function>, not {args.adapter!r}")
+    adapter = args.adapter or binding.adapter
+    if ":" not in (adapter or ""):
+        parser.error(f"{args.source} -> {args.capability}: its adapter names no function; give one with --adapter")
+    record = asyncio.run(_call(binding, adapter, args.params, None if args.all_rows else SAMPLE_ROWS))
     print(json.dumps(record, ensure_ascii=False, indent=2, default=_jsonable))
     return 1 if record["error"] else 0
 
@@ -159,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     probe.add_argument("capability")
     probe.add_argument("--params", type=json.loads, default={}, help="JSON object: the adapter's keyword arguments")
     probe.add_argument("--all-rows", action="store_true", help=f"print every row, not the first {SAMPLE_ROWS}")
+    probe.add_argument("--adapter", help="call this function (app/<module path>.py:<function>) instead of the binding's adapter")
     args = parser.parse_args(argv)
     if args.command == "catalog":
         return _catalog(args)

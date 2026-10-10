@@ -74,7 +74,11 @@ class BindingSpec:
     #: What this binding must agree with before it is promoted, per canonical field (the names ``field_map``
     #: produces, after ``unit_factors``), e.g.
     #: ``{"close": {"reference": "tencent_free", "key": ["symbol", "bar_time"], "rel_tol": 0.0001}}``.
-    #: ``reference`` is the source whose binding of the same capability is asked with the same parameters.
+    #: ``reference`` is the source whose binding of the same capability is asked with the same parameters; when that
+    #: binding's catalog adapter is only a module, ``reference_adapter`` (``app/<module path>.py:<function>``) names
+    #: the function that is read instead, ``reference_params`` ({the function's keyword: the name of a parameter of
+    #: this binding}; every parameter under its own name when absent) says what it is given from the check's
+    #: parameters and ``reference_fixed`` ({keyword: value}) adds what is constant.
     #: ``key`` names the fields that identify a row (``symbol`` and ``trade_date`` besides the capability's own
     #: fields).  ``scripts/tdx-promote.py check`` reads every row of both sides, joins them on the key and compares the
     #: field on every common row: it agrees when each is within ``rel_tol`` / ``abs_tol`` (the ``math.isclose``
