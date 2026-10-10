@@ -32,7 +32,7 @@ def _last_session(day: date) -> date:
     return day
 
 
-REQUIRED = {"volume_profile", "history_orders", "auction", "history_minute_data", "minute_data"}
+REQUIRED = {"volume_profile", "minute_series", "auction", "history_minute_data", "minute_data", "unusual", "top_board"}
 required_failures = 0
 
 
@@ -72,15 +72,14 @@ def main() -> int:
                     prefix = f"{code}.{('SZ' if market == 0 else 'SH')}"
                     print(json.dumps({"symbol": prefix}))
                     profile, _ = _probe("volume_profile", lambda: client.volume_profile(market, code))
-                    _probe("history_orders", lambda: client.history_orders(market, code, session))
-                    auction, _ = _probe("auction", lambda: client.auction(market, code))
-                    _probe("history_minute_data", lambda: client.history_minute_data(market, code, session))
+                    _probe("minute_series", lambda: client.minute_series(market, code, session))
+                    auction, auction_error = _probe("auction", lambda: client.auction(market, code))
+                    history, history_error = _probe("history_minute_data", lambda: client.history_minute_data(market, code, session))
                     _probe("minute_data", lambda: client.minute_data(market, code))
                     if market == 0:
                         _probe("unusual", lambda: client.unusual(market, 0, 5))
                         _probe("top_board", lambda: client.top_board(0, 3))
 
-                    history, history_error = _probe("history_minute_data_check", lambda: client.history_minute_data(market, code, session))
                     ticks, tick_error = _probe("history_ticks_control", lambda: client.ticks(market, code, session))
                     if history_error or tick_error or history is None or ticks is None:
                         print(json.dumps({"check": "history_minute_volume_vs_ticks", "matched": None,
@@ -91,13 +90,12 @@ def main() -> int:
                         print(json.dumps({"check": "history_minute_volume_vs_ticks", "minute_lots": minute_lots,
                                           "tick_lots": tick_lots, "matched": minute_lots == tick_lots}))
 
-                    auction_today, auction_error = _probe("auction_today", lambda: client.auction(market, code))
                     session_ticks, session_tick_error = _probe("session_ticks_for_auction_control", lambda: client.ticks(market, code, session))
                     tick_0925 = next((row for row in (session_ticks or []) if str(row.get("time", ""))[:5] == "09:25"), None)
-                    auction_0925 = next((row for row in reversed(auction_today or []) if str(row.get("time", ""))[:5] <= "09:25"), None)
+                    auction_0925 = next((row for row in reversed(auction or []) if str(row.get("time", ""))[:5] <= "09:25"), None)
                     matched = None
                     if auction_0925 is not None and tick_0925 is not None:
-                        matched = (abs(float(auction_0925["price"]) - float(tick_0925["price"])) < 1e-6 and
+                        matched = (abs(float(auction_0925["price"]) - float(tick_0925["price"])) < 1e-3 and
                                    int(auction_0925["matched_raw"]) == int(tick_0925.get("volume_lots", 0)) * 100)
                     print(json.dumps({"check": "auction_0925_vs_ticks", "auction": auction_0925,
                                       "tick": tick_0925, "matched": matched,

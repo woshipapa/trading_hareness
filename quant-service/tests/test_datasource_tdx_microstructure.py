@@ -21,7 +21,7 @@ class TdxMicrostructureTests(unittest.TestCase):
     def test_builders_use_expected_opcode_and_payload(self):
         checks = [
             (micro.build_volume_profile_request(1, "600519"), micro.VOLUME_PROFILE),
-            (micro.build_history_orders_request(1, "600519", "2026-10-08"), micro.HISTORY_ORDERS),
+            (micro.build_minute_series_request(1, "600519", "2026-10-08"), micro.MINUTE_SERIES),
             (micro.build_auction_request(1, "600519"), micro.AUCTION),
             (micro.build_unusual_request(0, 2, 3), micro.UNUSUAL),
             (micro.build_top_board_request(6, 4), micro.TOP_BOARD),
@@ -47,10 +47,10 @@ class TdxMicrostructureTests(unittest.TestCase):
         self.assertAlmostEqual(result["close"], 12.34)
         self.assertEqual(result["profiles"][1]["price"], 12.36)
 
-    def test_history_orders_and_auction(self):
-        orders = struct.pack("<Hf", 2, 12.34) + encode_price(1234) + encode_price(7) + encode_price(100)
-        orders += encode_price(1) + encode_price(8) + encode_price(20)
-        rows = micro.parse_history_orders(orders)
+    def test_minute_series_and_auction(self):
+        series = struct.pack("<Hf", 2, 12.34) + encode_price(1234) + encode_price(7) + encode_price(100)
+        series += encode_price(1) + encode_price(8) + encode_price(20)
+        rows = micro.parse_minute_series(series)
         self.assertEqual([row["price"] for row in rows], [12.34, 12.35])
         auction = struct.pack("<HHfIiBB", 1, 9 * 60 + 25, 12.34, 1000, -200, 0, 30)
         row = micro.parse_auction(auction)[0]
@@ -59,7 +59,9 @@ class TdxMicrostructureTests(unittest.TestCase):
 
     def test_auction_curve_keeps_unconfirmed_quantities_raw_and_ends_before_0925(self):
         body = struct.pack("<HHfIiBB", 1, 9 * 60 + 24, 12.34, 1000, 200, 0, 57)
-        row = micro.parse_auction(body)[0]
+        rows = micro.parse_auction(body)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
         self.assertEqual(row["time"], "09:24:57")
         self.assertEqual(row["matched_raw"], 1000)
         self.assertEqual(row["unmatched_raw"], 200)
@@ -88,7 +90,72 @@ class TdxMicrostructureTests(unittest.TestCase):
         self.assertEqual(rows[1]["price"], 10.05)
         self.assertEqual(rows[1]["volume_lots"], 20)
         history = struct.pack("<HII", 1, 0, 0) + encode_price(1000) + encode_price(100000) + encode_price(20)
-        self.assertEqual(micro.parse_history_minute_data(history, "600519")[0]["avg"], 10.0)
+        self.assertEqual(micro.parse_history_minute_data(history, "600519")[0]["average"], 10.0)
+
+    def test_profile_delta_normalization_detects_mutation(self):
+        body = struct.pack("<HB6sH", 2, 1, b"600519", 7)
+        body += b"".join(encode_price(v) for v in (1234, -10, 5, 20, -30, 100, 15, 10000, 500))
+        body += struct.pack("<f", 123456.5)
+        body += b"".join(encode_price(v) for v in (300, 400, 50, 60))
+        for i in range(3):
+            body += b"".join(encode_price(v) for v in (i + 1, i + 2, 100 + i, 200 + i))
+        body += struct.pack("<H", 42)
+        body += b"".join(encode_price(v) for v in (1234, 100, 40, 60, 2, 20, 8, 12))
+        result = micro.parse_volume_profile(body)
+        self.assertAlmostEqual(result["profiles"][0]["price"], 12.34)
+        self.assertNotEqual(result["profiles"][0]["price"], 12.35)
+
+    def test_minute_prices_are_cumulative(self):
+        body = struct.pack("<HH", 2, 0)
+        body += encode_price(1000) + encode_price(100000) + encode_price(10)
+        body += encode_price(5) + encode_price(100) + encode_price(20)
+        rows = micro.parse_minute_data(body, "600519")
+        self.assertEqual(rows[1]["price"], 10.05)
+        self.assertEqual(rows[0]["price"], 10.0)
+
+    def test_pre_close_is_preserved(self):
+        series = struct.pack("<Hf", 2, 12.34) + encode_price(1234) + encode_price(7) + encode_price(100)
+        series += encode_price(1) + encode_price(8) + encode_price(20)
+        rows = micro.parse_minute_series(series)
+        self.assertNotEqual(rows[0]["pre_close"], 0.0)
+        self.assertAlmostEqual(rows[0]["pre_close"], 12.34, places=5)
+
+    def test_volume_profile_bid_ask_asymmetry(self):
+        body = struct.pack("<HB6sH", 2, 1, b"600519", 7)
+        body += b"".join(encode_price(v) for v in (1234, -10, 5, 20, -30, 100, 15, 10000, 500))
+        body += struct.pack("<f", 123456.5)
+        body += b"".join(encode_price(v) for v in (300, 400, 50, 60))
+        for i in range(3):
+            body += b"".join(encode_price(v) for v in (i + 1, i + 2, 100 + i, 200 + i))
+        body += struct.pack("<H", 42)
+        body += b"".join(encode_price(v) for v in (1234, 100, 40, 60, 2, 20, 8, 12))
+        result = micro.parse_volume_profile(body)
+        self.assertNotEqual(result["bid_levels"][0]["price"], result["ask_levels"][0]["price"])
+
+    def test_auction_no_invented_0925_row(self):
+        body = struct.pack("<HHfIiBB", 1, 9 * 60 + 24, 12.34, 1000, 200, 0, 57)
+        rows = micro.parse_auction(body)
+        self.assertEqual(len(rows), 1)
+        times = [row["time"] for row in rows]
+        self.assertNotIn("09:25:00", times)
+
+    def test_unusual_encodes_unknown_event_types(self):
+        record = struct.pack("<H6sBBBHHBfffBBH", 1, b"600000", 0, 0x14, 0, 12, 0, 0,
+                             0.0123, 0.0, 0.0, 0, 9, 3015)
+        unusual = micro.parse_unusual(struct.pack("<H", 1) + record)[0]
+        self.assertIn("payload_raw", unusual)
+        self.assertEqual(unusual["event_type"], 0x14)
+
+    def test_unusual_distinguishes_event_types(self):
+        record1 = struct.pack("<H6sBBBHHBfffBBH", 1, b"600000", 0, 0x14, 0, 12, 0, 0,
+                              0.0123, 0.0, 0.0, 0, 9, 3015)
+        record2 = struct.pack("<H6sBBBHHBfffBBH", 1, b"600000", 0, 0x15, 0, 12, 0, 0,
+                              0.0456, 0.0, 0.0, 0, 9, 3015)
+        unusual1 = micro.parse_unusual(struct.pack("<H", 1) + record1)[0]
+        unusual2 = micro.parse_unusual(struct.pack("<H", 1) + record2)[0]
+        self.assertEqual(unusual1["event_type"], 0x14)
+        self.assertEqual(unusual2["event_type"], 0x15)
+        self.assertNotEqual(unusual1.get("payload_raw"), unusual2.get("payload_raw"))
 
 
 if __name__ == "__main__":

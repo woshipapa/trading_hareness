@@ -3,7 +3,9 @@
 This is a research-only protocol note.  The implementation is in
 `quant-service/app/datasources/sources/tdx_microstructure.py`; it subclasses
 the existing stdlib `TdxClient` so setup, timeout, response framing and zlib
-handling remain shared.  No catalog binding was changed.
+handling remain shared.  Capability `microstructure.minute_series` was added
+for 0x0fb4 minute-series data; 0x0537/0x0feb minute data and unusual/top-board
+capabilities remain research-only.
 
 ## Wire commands observed
 
@@ -19,17 +21,17 @@ this probe.
 | command | opcode | observed hosts | rows / shape | units |
 | --- | ---: | --- | --- | --- |
 | volume profile (`成交量分布`) | `0x051a` | `117.34.114.13`, `60.191.117.167` | 29 profiles for 000001.SZ; 1241 for 600519.SH, plus quote header and 3+3 levels | price yuan; volume/buy/sell lots; amount yuan (float32) |
-| history orders (`历史委托`) | `0x0fb4` | both | 240 | price yuan; volume lots; `unknown` raw signed field |
-| auction (`集合竞价`) | `0x056a` | both | 77 for 000001.SZ; 131 for 600519.SH | price yuan; matched/unmatched values are raw server units (kept as `*_shares` pending independent unit confirmation); flag B/S |
-| unusual (`主力监控`) | `0x0563` | both | 5 with request count 5 | code/market; event time; event type; decoded description/value where known |
+| minute series (`历史分时`) | `0x0fb4` | both | 240 | price yuan; volume lots; `unknown` raw signed field; indexed by minute (09:31..11:30, 13:01..15:00) |
+| auction (`集合竞价`) | `0x056a` | both | 77 for 000001.SZ; 131 for 600519.SH | price yuan; matched/unmatched values are raw server units; unmatched side B/S |
+| unusual (`主力监控`) | `0x0563` | both | 5 with request count 5 | code/market; event time; event type; decoded description/value where known; unknown types kept as hex in `payload_raw` |
 | top board (`排行榜`) | `0x053f` | both | 27 with size 3 (9 categories x 3) | price/value float32; category-specific value semantics |
 | minute data (`分时`) | `0x0537` | both | 240 | price/average yuan; volume lots |
 | history minute data (`历史分时`) | `0x0feb` | both | 240 | price/average yuan; volume lots |
 
-The minute records have no timestamp field on the wire, so the parser keeps
-the zero-based server order as `index`.  Standard equity prices use a 100x
-wire scale; ETF prefixes `15/51/56/58` use 1000x, matching the upstream
-parser.
+The minute-series (0x0fb4) and minute-data (0x0537/0x0feb) records have no 
+timestamp field on the wire, so the parser computes a minute index from row 
+position.  Standard equity prices use a 100x wire scale; ETF prefixes 
+`15/51/56/58` use 1000x, matching the upstream parser.
 
 ## Correctness evidence
 

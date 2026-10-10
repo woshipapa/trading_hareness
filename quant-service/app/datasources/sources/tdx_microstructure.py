@@ -21,7 +21,7 @@ HISTORY_MINUTE_TIME_DATA = 0x0FEB
 AUCTION = 0x056A
 TOP_BOARD = 0x053F
 UNUSUAL = 0x0563
-HISTORY_ORDERS = 0x0FB4
+MINUTE_SERIES = 0x0FB4
 
 _REQUEST_SEQUENCE = 0x01010817
 _REQUEST_PACKET_TYPE = 1
@@ -117,24 +117,27 @@ def parse_volume_profile(body: bytes) -> dict[str, Any]:
     }
 
 
-def build_history_orders_request(market: int, code: str, trade_date: date | str | int) -> bytes:
-    return _request(HISTORY_ORDERS, struct.pack("<IB6s", _date_number(trade_date), market, tdx_protocol._code(code)))
+def build_minute_series_request(market: int, code: str, trade_date: date | str | int) -> bytes:
+    return _request(MINUTE_SERIES, struct.pack("<IB6s", _date_number(trade_date), market, tdx_protocol._code(code)))
 
 
-def parse_history_orders(body: bytes) -> list[dict[str, Any]]:
+def parse_minute_series(body: bytes) -> list[dict[str, Any]]:
     if len(body) < 6:
-        raise ValueError("short history orders response")
+        raise ValueError("short minute series response")
     count = struct.unpack_from("<H", body, 0)[0]
     pre_close = struct.unpack_from("<f", body, 2)[0]
     pos, price = 6, 0
     rows = []
-    for _ in range(count):
+    for index in range(count):
         delta, pos = tdx_protocol.decode_price(body, pos)
         unknown, pos = tdx_protocol.decode_price(body, pos)
         volume, pos = tdx_protocol.decode_price(body, pos)
         price += delta
-        rows.append({"price": price / 100.0, "unknown": unknown, "volume_lots": volume,
-                     "vol": volume, "pre_close": pre_close})
+        minute = 571 + index if index < 120 else 781 + index
+        hour, minute_part = divmod(minute, 60)
+        rows.append({"minute_index": index, "time": f"{hour:02d}:{minute_part:02d}:00",
+                     "price": price / 100.0, "unknown": unknown, "volume_lots": volume,
+                     "pre_close": pre_close})
     return rows
 
 
@@ -160,8 +163,7 @@ def parse_auction(body: bytes) -> list[dict[str, Any]]:
         rows.append({"time": f"{minute // 60:02d}:{minute % 60:02d}:{second:02d}",
                      "price": price, "matched_raw": matched,
                      "unmatched_raw": abs(unmatched_raw),
-                     "unmatched_side": "B" if unmatched_raw >= 0 else "S",
-                     "flag": 1 if unmatched_raw >= 0 else -1})
+                     "unmatched_side": "B" if unmatched_raw >= 0 else "S"})
     return rows
 
 
@@ -169,47 +171,49 @@ def build_unusual_request(market: int, start: int = 0, count: int = 600) -> byte
     return _request(UNUSUAL, struct.pack("<HII", market, int(start), int(count)))
 
 
-def _unusual_label(event_type: int, payload: bytes) -> tuple[str, str]:
-    if len(payload) < 13:
-        return "", ""
+def _unusual_label(event_type: int, payload: bytes) -> tuple[str, str, bytes | None]:
     first = payload[0]
     v2, v3, v4 = struct.unpack_from("<fff", payload, 1)
     if event_type == 0x03:
-        return ("主力买入" if first == 0 else "主力卖出"), f"{v2:.2f}/{v3:.2f}"
+        return ("主力买入" if first == 0 else "主力卖出"), f"{v2:.2f}/{v3:.2f}", None
     if event_type == 0x04:
-        return "加速拉升", f"{v2 * 100:.2f}%"
+        return "加速拉升", f"{v2 * 100:.2f}%", None
     if event_type == 0x05:
-        return "加速下跌", ""
+        return "加速下跌", "", None
     if event_type == 0x06:
-        return "低位反弹", f"{v2 * 100:.2f}%"
+        return "低位反弹", f"{v2 * 100:.2f}%", None
     if event_type == 0x07:
-        return "高位回落", f"{v2 * 100:.2f}%"
+        return "高位回落", f"{v2 * 100:.2f}%", None
     if event_type == 0x08:
-        return "撑杆跳高", f"{v2 * 100:.2f}%"
+        return "撑杆跳高", f"{v2 * 100:.2f}%", None
     if event_type == 0x09:
-        return "平台跳水", f"{v2 * 100:.2f}%"
+        return "平台跳水", f"{v2 * 100:.2f}%", None
     if event_type == 0x0A:
-        return ("单笔冲跌" if v2 < 0 else "单笔冲涨"), f"{v2 * 100:.2f}%"
+        return ("单笔冲跌" if v2 < 0 else "单笔冲涨"), f"{v2 * 100:.2f}%", None
     if event_type == 0x0B:
         suffix = "平" if v3 == 0 else ("跌" if v3 < 0 else "涨")
-        return "区间放量" + suffix, f"{v2:.1f}倍{v3 * 100:.2f}%"
+        return "区间放量" + suffix, f"{v2:.1f}倍{v3 * 100:.2f}%", None
     if event_type == 0x0C:
-        return "区间缩量", ""
+        return "区间缩量", "", None
     if event_type == 0x10:
-        return "大单托盘", f"{v4:.2f}/{v3:.2f}"
+        return "大单托盘", f"{v4:.2f}/{v3:.2f}", None
     if event_type == 0x11:
-        return "大单压盘", f"{v2:.2f}/{v3:.2f}"
+        return "大单压盘", f"{v2:.2f}/{v3:.2f}", None
     if event_type == 0x12:
-        return "大单锁盘", ""
+        return "大单锁盘", "", None
     if event_type == 0x13:
-        return "竞价试买", f"{v2:.2f}/{v3:.2f}"
+        return "竞价试买", f"{v2:.2f}/{v3:.2f}", None
+    if event_type == 0x14:
+        return "接近涨停/跌停", "", payload
+    if event_type == 0x15:
+        return "尾盘", "", payload
     if event_type == 0x16:
-        return ("盘中弱势" if v2 < 0 else "盘中强势"), f"{v2 * 100:.2f}%"
+        return ("盘中弱势" if v2 < 0 else "盘中强势"), f"{v2 * 100:.2f}%", None
     if event_type == 0x1D:
-        return "急速拉升", f"{v2 * 100:.2f}%"
+        return "急速拉升", f"{v2 * 100:.2f}%", None
     if event_type == 0x1E:
-        return "急速下跌", f"{v2 * 100:.2f}%"
-    return "", ""
+        return "急速下跌", f"{v2 * 100:.2f}%", None
+    return f"unknown_0x{event_type:02x}", "", payload
 
 
 def parse_unusual(body: bytes) -> list[dict[str, Any]]:
@@ -225,12 +229,15 @@ def parse_unusual(body: bytes) -> list[dict[str, Any]]:
         code = _text(body[pos + 2:pos + 8])
         event_type = body[pos + 9]
         sequence = struct.unpack_from("<H", body, pos + 11)[0]
-        desc, value = _unusual_label(event_type, body[pos + 15:pos + 28])
+        desc, value, payload_raw_bytes = _unusual_label(event_type, body[pos + 15:pos + 28])
         hour = body[pos + 29]
         minute_second = struct.unpack_from("<H", body, pos + 30)[0]
-        rows.append({"index": sequence, "market": market, "code": code,
-                     "time": f"{hour:02d}:{minute_second // 100:02d}:{minute_second % 100:02d}",
-                     "description": desc, "value": value, "event_type": event_type})
+        row = {"index": sequence, "market": market, "code": code,
+               "time": f"{hour:02d}:{minute_second // 100:02d}:{minute_second % 100:02d}",
+               "description": desc, "value": value, "event_type": event_type}
+        if payload_raw_bytes:
+            row["payload_raw"] = payload_raw_bytes.hex()
+        rows.append(row)
     return rows
 
 
@@ -285,8 +292,8 @@ def _parse_minute_rows(body: bytes, code: str, history: bool) -> list[dict[str, 
             first_price = price
         if not first_avg:
             first_avg = avg
-        rows.append({"index": index, "price": price / unit, "avg": avg / (unit * 100),
-                     "average": avg / (unit * 100), "volume_lots": volume, "vol": volume})
+        rows.append({"index": index, "price": price / unit, "average": avg / (unit * 100),
+                     "volume_lots": volume})
     return rows
 
 
@@ -309,8 +316,8 @@ class TdxMicrostructureClient(tdx_protocol.TdxClient):
     def volume_profile(self, market: int, code: str) -> dict[str, Any]:
         return parse_volume_profile(self._exchange(build_volume_profile_request(market, code)))
 
-    def history_orders(self, market: int, code: str, trade_date: date | str | int) -> list[dict[str, Any]]:
-        return parse_history_orders(self._exchange(build_history_orders_request(market, code, trade_date)))
+    def minute_series(self, market: int, code: str, trade_date: date | str | int) -> list[dict[str, Any]]:
+        return parse_minute_series(self._exchange(build_minute_series_request(market, code, trade_date)))
 
     def auction(self, market: int, code: str) -> list[dict[str, Any]]:
         return parse_auction(self._exchange(build_auction_request(market, code)))
@@ -331,49 +338,70 @@ class TdxMicrostructureClient(tdx_protocol.TdxClient):
 T = TypeVar("T")
 
 
-def call_sync(operation: Callable[[TdxMicrostructureClient], T], *,
-              hosts: Iterable[tuple[str, int]] | None = None, timeout_seconds: float = 5.0) -> tuple[T, str]:
-    errors = []
-    for host, port in hosts or tdx_protocol.configured_hosts():
-        try:
-            with TdxMicrostructureClient(host, port, timeout_seconds) as client:
-                return operation(client), f"{host}:{port}"
-        except (OSError, tdx_protocol.TdxProtocolError, struct.error, IndexError, ValueError) as error:
-            errors.append(f"{host}:{type(error).__name__}")
-    raise tdx_protocol.TdxProtocolError("no TDX host answered: " + ", ".join(errors[-4:]))
+def call_sync(operation: Callable[[TdxMicrostructureClient], T], *, hosts: Iterable[tuple[str, int]] | None = None,
+              timeout_seconds: float = 5.0, handshake_profile: str = "login_one") -> tuple[T, str]:
+    """Run an operation with deterministic host ordering and same-host profile fallback."""
+    errors: list[str] = []
+    for host, port in tdx_protocol._ordered_hosts(hosts or tdx_protocol.configured_hosts()):
+        profiles = (handshake_profile, "legacy_3") if handshake_profile == "login_one" else (handshake_profile,)
+        transport_failed = False
+        for attempt, attempt_profile in enumerate(profiles):
+            client = TdxMicrostructureClient(host, port, timeout_seconds, handshake_profile=attempt_profile)
+            try:
+                with client:
+                    result = operation(client)
+                return result, f"{host}:{port}/{attempt_profile}"
+            except (OSError, tdx_protocol.TdxProtocolError, struct.error, IndexError, ValueError) as error:
+                errors.append(f"{host}:{attempt_profile}:{type(error).__name__}")
+                transport_failed = transport_failed or isinstance(error, (OSError, tdx_protocol.TdxProtocolError))
+                if attempt == 0 and len(profiles) == 2 and client._connected:
+                    continue
+                if attempt == 0 and len(profiles) == 2 and not client._connected:
+                    break
+        if transport_failed:
+            tdx_protocol._mark_cooldown((host, port))
+    raise tdx_protocol.TdxProtocolError("no TDX host answered: " + ", ".join(errors[-8:]))
 
 
-async def _fetch(operation: Callable[[TdxMicrostructureClient], T]) -> T:
-    value, _host = await asyncio.to_thread(call_sync, operation)
-    return value
+async def fetch_volume_profile(*, market: int, code: str) -> list[dict[str, Any]]:
+    result, _host = await asyncio.to_thread(call_sync, lambda client: client.volume_profile(market, code))
+    return result.get("profiles", [])
 
 
-async def fetch_volume_profile(*, market: int, code: str) -> dict[str, Any]:
-    return await _fetch(lambda client: client.volume_profile(market, code))
-
-
-async def fetch_history_orders(*, market: int, code: str, trade_date: date | str | int) -> list[dict[str, Any]]:
-    return await _fetch(lambda client: client.history_orders(market, code, trade_date))
+async def fetch_minute_series(*, market: int, code: str, trade_date: date | str | int) -> list[dict[str, Any]]:
+    result, _host = await asyncio.to_thread(call_sync, lambda client: client.minute_series(market, code, trade_date))
+    return result
 
 
 async def fetch_auction_curve(*, market: int, code: str) -> list[dict[str, Any]]:
-    return await _fetch(lambda client: client.auction(market, code))
+    result, _host = await asyncio.to_thread(call_sync, lambda client: client.auction(market, code))
+    return result
 
 
 async def fetch_unusual(*, market: int, start: int = 0, count: int = 600) -> list[dict[str, Any]]:
-    return await _fetch(lambda client: client.unusual(market, start, count))
+    result, _host = await asyncio.to_thread(call_sync, lambda client: client.unusual(market, start, count))
+    return result
 
 
-async def fetch_top_board(*, category: int = 0, size: int = 20) -> dict[str, Any]:
-    return await _fetch(lambda client: client.top_board(category, size))
+async def fetch_top_board(*, category: int = 0, size: int = 20) -> list[dict[str, Any]]:
+    result, _host = await asyncio.to_thread(call_sync, lambda client: client.top_board(category, size))
+    names = ("increase", "decrease", "amplitude", "rise_speed", "fall_speed",
+             "volume_ratio", "positive_commission_ratio", "negative_commission_ratio", "turnover")
+    rows = []
+    for name in names:
+        for row in result.get(name, []):
+            row_copy = dict(row)
+            row_copy["category"] = name
+            rows.append(row_copy)
+    return rows
 
 
 __all__ = [
-    "AUCTION", "HISTORY_MINUTE_TIME_DATA", "HISTORY_ORDERS", "MINUTE_TIME_DATA", "TOP_BOARD",
+    "AUCTION", "HISTORY_MINUTE_TIME_DATA", "MINUTE_SERIES", "MINUTE_TIME_DATA", "TOP_BOARD",
     "UNUSUAL", "VOLUME_PROFILE", "TdxMicrostructureClient", "build_auction_request",
-    "build_history_minute_data_request", "build_history_orders_request", "build_minute_data_request",
+    "build_history_minute_data_request", "build_minute_series_request", "build_minute_data_request",
     "build_top_board_request", "build_unusual_request", "build_volume_profile_request", "call_sync",
-    "fetch_auction_curve", "fetch_history_orders", "fetch_top_board", "fetch_unusual", "fetch_volume_profile",
-    "parse_auction", "parse_history_minute_data", "parse_history_orders", "parse_minute_data",
+    "fetch_auction_curve", "fetch_minute_series", "fetch_top_board", "fetch_unusual", "fetch_volume_profile",
+    "parse_auction", "parse_history_minute_data", "parse_minute_series", "parse_minute_data",
     "parse_top_board", "parse_unusual", "parse_volume_profile",
 ]
