@@ -327,7 +327,7 @@ class MacWatchSnapshotTests(unittest.TestCase):
 
     def test_an_invalid_server_date_raises(self):
         client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "server_update_date": 0})})
-        with self.assertRaisesRegex(tdx_mac.TdxMacError, "invalid MAC date/time 0"):
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "invalid MAC date 0"):
             self.fetch(client, ["000001.SZ"])
 
     def test_a_fixture_row_through_the_real_binding_yields_price_and_an_aware_exchange_time(self):
@@ -385,6 +385,77 @@ class MacBindingSpecTests(unittest.TestCase):
             self.assertEqual(spec.max_batch, tdx_mac.MAX_BATCH)
             self.assertEqual(set(spec.params), {"symbols"})
             self.assertEqual(set(inspect.signature(adapter).parameters), {"symbols"})
+
+
+SENTINEL = (20261008, 0, 99.0, 99.0, 99.0, 100.0, 500.0, 50.0, 9.0)
+BARS = [
+    (20261009, 34200, 100.0, 110.0, 90.0, 105.0, 1000.0, 2000.0, 30.0),
+    (20261009, 34260, 105.0, 111.0, 101.0, 108.0, 2000.0, 4000.0, 30.0),
+    (20261009, 34320, 108.0, 112.0, 104.0, 109.0, 3000.0, 6000.0, 30.0),
+]
+
+
+class MacBarAdapterTests(unittest.TestCase):
+    def fetch(self, adapter, bars=BARS, **params):
+        client = FakeMacClient({tdx_mac.OP_BARS: lambda request: bars_body([SENTINEL, *bars])})
+        with patched_call(client):
+            return asyncio.run(adapter(**params)), client.requests
+
+    def test_minute_rows_carry_the_symbol_and_an_aware_bar_time_for_every_bar(self):
+        evidence, requests = self.fetch(tdx_mac.fetch_minute_bars, symbol="000001.SZ", count=3)
+        shanghai = tdx_mac.CN_TZ
+        self.assertEqual(evidence.rows, [
+            {"symbol": "000001.SZ", "bar_time": datetime(2026, 10, 9, 9, 30, tzinfo=shanghai),
+             "open": 100.0, "high": 110.0, "low": 90.0, "close": 105.0, "amount": 1000.0, "volume": 2000.0},
+            {"symbol": "000001.SZ", "bar_time": datetime(2026, 10, 9, 9, 31, tzinfo=shanghai),
+             "open": 105.0, "high": 111.0, "low": 101.0, "close": 108.0, "amount": 2000.0, "volume": 4000.0},
+            {"symbol": "000001.SZ", "bar_time": datetime(2026, 10, 9, 9, 32, tzinfo=shanghai),
+             "open": 108.0, "high": 112.0, "low": 104.0, "close": 109.0, "amount": 3000.0, "volume": 6000.0},
+        ])
+        self.assertEqual(evidence.warnings, ("tdx_host=mac-host:7709",))
+        self.assertEqual(str(evidence.rows[0]["bar_time"].tzinfo), "Asia/Shanghai")
+        # one-minute period, and one more bar than asked for because the first is the sentinel
+        self.assertEqual([(struct.unpack_from("<H", request, 36)[0], struct.unpack_from("<H", request, 44)[0])
+                          for request in requests], [(tdx_mac.BAR_PERIODS["1m"], 4)])
+
+    def test_a_bar_time_beyond_the_day_raises(self):
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "invalid MAC time 24:00:00"):
+            self.fetch(tdx_mac.fetch_minute_bars, bars=[(20261009, 86400, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)],
+                       symbol="000001.SZ", count=1)
+
+    def test_daily_rows_carry_the_symbol_and_every_bar(self):
+        evidence, requests = self.fetch(tdx_mac.fetch_daily_bars, symbol="600519.SH", count=3)
+        self.assertEqual([(row["symbol"], row["date"], row["close"], row["volume"]) for row in evidence.rows],
+                         [("600519.SH", "2026-10-09", 105.0, 2000.0), ("600519.SH", "2026-10-09", 108.0, 4000.0),
+                          ("600519.SH", "2026-10-09", 109.0, 6000.0)])
+        self.assertEqual([(struct.unpack_from("<H", request, 36)[0], struct.unpack_from("<H", request, 44)[0])
+                          for request in requests], [(tdx_mac.BAR_PERIODS["1d"], 4)])
+
+    def test_a_daily_fixture_through_the_real_binding_yields_lots(self):
+        evidence, _ = self.fetch(tdx_mac.fetch_daily_bars, symbol="600519.SH", count=3)
+        projected = _normalise_rows(evidence.rows, mac_binding("bars.daily"))
+        self.assertTrue(projected.canonical)
+        self.assertEqual((projected.status, projected.warnings), (None, ()))
+        self.assertEqual([row["close"] for row in projected.rows], [105.0, 108.0, 109.0])
+        for row, shares in zip(projected.rows, (2000.0, 4000.0, 6000.0)):
+            self.assertAlmostEqual(row["volume"], shares / 100)
+
+    def test_a_minute_fixture_through_the_real_binding_keeps_shares_and_the_bar_time(self):
+        evidence, _ = self.fetch(tdx_mac.fetch_minute_bars, symbol="000001.SZ", count=3)
+        projected = _normalise_rows(evidence.rows, mac_binding("bars.minute"))
+        self.assertTrue(projected.canonical)
+        self.assertEqual((projected.status, projected.warnings), (None, ()))
+        self.assertEqual([(row["bar_time"], row["volume"]) for row in projected.rows],
+                         [(datetime(2026, 10, 9, 9, 30 + minute, tzinfo=tdx_mac.CN_TZ), shares)
+                          for minute, shares in enumerate((2000.0, 4000.0, 6000.0))])
+
+    def test_the_minute_binding_says_why_it_stays_unsupported(self):
+        binding = mac_binding("bars.minute")
+        self.assertEqual(binding.status, "unsupported")
+        self.assertFalse(binding.decision_eligible)
+        self.assertIn("source_available_at", binding.notes)
+        self.assertIn("UNSUPPORTED", binding.notes)
+        self.assertIn("available=none", binding.spec.time_semantics)
 
 
 class MacBarParserTests(unittest.TestCase):

@@ -14,7 +14,7 @@ import os
 import socket
 import struct
 import zlib
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 from zoneinfo import ZoneInfo
 
@@ -286,7 +286,7 @@ def parse_bars(body: bytes) -> list[dict[str, Any]]:
         ymd, seconds = struct.unpack_from("<II", body, pos)
         rows.append(
             {
-                "date": f"{ymd // 10000:04d}-{ymd // 100 % 100:02d}-{ymd % 100:02d}",
+                "date": _ymd(ymd).isoformat(),
                 "seconds": seconds,
                 "open": _float(body, pos + 8),
                 "high": _float(body, pos + 12),
@@ -451,12 +451,20 @@ async def call(operation: Callable[[TdxMacClient], T], **kwargs: Any):
     return await asyncio.to_thread(call_sync, operation, **kwargs)
 
 
-def _shanghai_time(ymd: int, hour: int, minute: int, second: int) -> datetime:
-    """A MAC (YYYYMMDD, time of day) pair as an Asia/Shanghai-aware time."""
+def _ymd(value: int) -> date:
+    """A MAC YYYYMMDD number as a date."""
     try:
-        return datetime(ymd // 10000, ymd // 100 % 100, ymd % 100, hour, minute, second, tzinfo=CN_TZ)
+        return date(value // 10000, value // 100 % 100, value % 100)
     except ValueError as error:
-        raise TdxMacError(f"invalid MAC date/time {ymd} {hour:02d}:{minute:02d}:{second:02d}") from error
+        raise TdxMacError(f"invalid MAC date {value}") from error
+
+
+def _shanghai_time(day: date, hour: int, minute: int, second: int) -> datetime:
+    """A date and a time of day as an Asia/Shanghai-aware time."""
+    try:
+        return datetime(day.year, day.month, day.day, hour, minute, second, tzinfo=CN_TZ)
+    except ValueError as error:
+        raise TdxMacError(f"invalid MAC time {hour:02d}:{minute:02d}:{second:02d} on {day}") from error
 
 
 def _quote_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -466,7 +474,7 @@ def _quote_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "symbol": tdx_protocol.symbol(row["market"], row["symbol"]),
         "exchange_time": _shanghai_time(
-            row["server_update_date"], update_time // 10000, update_time // 100 % 100, update_time % 100),
+            _ymd(row["server_update_date"]), update_time // 10000, update_time // 100 % 100, update_time % 100),
         **{key: value for key, value in row.items() if key not in consumed},
     }
 
@@ -474,9 +482,19 @@ def _quote_row(row: dict[str, Any]) -> dict[str, Any]:
 def _limit_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "symbol": tdx_protocol.symbol(row["market"], row["symbol"]),
-        "trade_date": _shanghai_time(row["server_update_date"], 0, 0, 0).date(),
+        "trade_date": _ymd(row["server_update_date"]),
         "limit_up": row["buy_price_limit"],
         "limit_down": row["sell_price_limit"],
+    }
+
+
+def _minute_bar_row(symbol: str, row: dict[str, Any]) -> dict[str, Any]:
+    """A decoded 0x122e row with its symbol and ``bar_time`` from the wire date and seconds since midnight."""
+    seconds = row["seconds"]
+    return {
+        "symbol": symbol,
+        "bar_time": _shanghai_time(date.fromisoformat(row["date"]), seconds // 3600, seconds // 60 % 60, seconds % 60),
+        **{key: value for key, value in row.items() if key not in ("date", "seconds")},
     }
 
 
@@ -544,13 +562,15 @@ async def fetch_daily_bars(*, symbol: str, count: int) -> CapabilityEvidence:
     rows, host = await call(
         lambda client: client.bars(market, code, BAR_PERIODS["1d"], 0, count)
     )
-    return tdx_protocol.observed_evidence(rows, host)
+    full_symbol = tdx_protocol.symbol(market, code)
+    return tdx_protocol.observed_evidence([{"symbol": full_symbol, **row} for row in rows], host)
 
 
 async def fetch_minute_bars(*, symbol: str, count: int) -> CapabilityEvidence:
     market, code = tdx_protocol.market_code(symbol)
+    full_symbol = tdx_protocol.symbol(market, code)
     rows, host = await call(
-        lambda client: client.bars(market, code, BAR_PERIODS["1m"], 0, count)
+        lambda client: [_minute_bar_row(full_symbol, row) for row in client.bars(market, code, BAR_PERIODS["1m"], 0, count)]
     )
     return tdx_protocol.observed_evidence(rows, host)
 

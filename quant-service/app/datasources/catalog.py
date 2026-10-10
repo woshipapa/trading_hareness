@@ -360,9 +360,13 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tdx_local", "bars.minute", 35, DECLARED, "market_bars_minute (offline import)",
           "app/datasources/sources/tdx_local_files.py:parse_minute_bytes", "客户端保留的全部分钟线"),
     _bind("tdx_mac", "bars.minute", 70, UNSUPPORTED, _RAW + "tdx_mac_minute_bars",
-          "app/datasources/sources/tdx_mac.py:fetch_minute_bars", spec=BindingSpec(
+          "app/datasources/sources/tdx_mac.py:fetch_minute_bars",
+          notes="bars.minute 要求显式 source_available_at（本地入库时间不可替代）；MAC K 线只给 bar 时间（日期 + 当日秒数，"
+                "适配器组成 Asia/Shanghai 感知的 bar_time），本绑定给不出 source_available_at，因此保持 UNSUPPORTED",
+          spec=BindingSpec(
               params={"symbol": "market+code", "count": "count (period 8)"}, field_map={},
-              time_semantics="effective=bar time; available=collection", handshake_profile="mac")),
+              time_semantics="effective=bar_time (wire date + seconds, Asia/Shanghai); available=none, the source gives no source_available_at",
+              handshake_profile="mac")),
     _bind("longhuvip_index", "bars.index_daily", 45, DORMANT, "canonical_bars_daily", "app/longhu_market_service.py"),
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),
     _bind("tushare_primary", "bars.adjustment_factor", 10, RETIRED, "daily_adjustment_factors:provider=tushare_primary",
