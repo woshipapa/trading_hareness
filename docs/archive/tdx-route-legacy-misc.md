@@ -1,5 +1,9 @@
 # TDX legacy-misc route
 
+**Superseded by integration branches:** this report documents an older exploration phase.
+For current implementation, see `.claude/plan/tdx-integration-delta-2.md` (section 1, D1/D2),
+`.claude/plan/tdx-integration-delta-3.md` (Q6/Q7), and the binding specs in `catalog.py`.
+
 This route is research-only. It does not register a provider binding or feed a
 live threshold/order path. The implementation is in
 `quant-service/app/datasources/sources/tdx_legacy_misc.py`; the bounded probe is
