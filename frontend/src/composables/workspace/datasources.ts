@@ -22,7 +22,7 @@ export function useDatasourcesSlice(shell: ResearchShell) {
   }
 
   function readDatasource(source: string, capability: string, query: string) {
-    return getJson<DatasourceRead>(`/api/research/datasources/read/${source}/${capability}${query ? `?${query}` : ''}`);
+    return getJson<DatasourceRead>(`/api/research/datasources/read/${source}/${capability}` + (query ? `?${query}` : ''));
   }
 
   return { datasourceCatalog, datasourceCatalogLoading, datasourceCatalogError, loadDatasourceCatalog, readDatasource };
