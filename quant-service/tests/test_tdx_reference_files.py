@@ -79,8 +79,10 @@ class TdxReferenceFileAdapterTests(unittest.IsolatedAsyncioTestCase):
             daily_basic = await tdx_reference_files.fetch_daily_basic(symbols=("000001.SZ",))
         self.assertEqual(valuation.rows[0]["effective_date"], "20261009")
         self.assertEqual(valuation.rows[0]["pe_ttm"], 5.18)
+        self.assertNotIn("trend_days", valuation.rows[0])
         self.assertEqual(daily_basic.rows[0]["effective_date"], "20261009")
         self.assertEqual(daily_basic.rows[0]["amount_10k_yuan"], 125971.71)
+        self.assertNotIn("block_index", daily_basic.rows[0])
         self.assertEqual([call["handshake_profile"] for call in self.calls], ["login_one", "login_one"])
 
     async def test_membership_joins_taxonomies_and_sets_utc_known_at(self):

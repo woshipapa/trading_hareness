@@ -34,9 +34,9 @@ def _selected(symbols: Sequence[str], row: dict[str, Any]) -> bool:
     return not symbols or _symbol(row["market"], row["code"]) in symbols
 
 
-def _stat_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {"symbol": _symbol(row["market"], row["code"]), "effective_date": row["date"],
-            **{key: value for key, value in row.items() if key not in {"market", "code", "date"}}}
+def _stat_row(row: dict[str, Any], names: frozenset[str]) -> dict[str, Any]:
+    return {"symbol": _symbol(row["market"], row["code"]), "effective_date": row["date"], "fields": row["fields"],
+            **{key: row[key] for key in names if row[key] is not None}}
 
 
 async def _zip_files() -> tuple[dict[str, bytes], str]:
@@ -46,13 +46,18 @@ async def _zip_files() -> tuple[dict[str, bytes], str]:
 
 async def fetch_valuation(*, symbols: Sequence[str] = ()) -> CapabilityEvidence:
     files, host = await _zip_files()
-    rows = [_stat_row(row) for row in tdx_files.parse_tdxstat(files["tdxstat.cfg"]) if _selected(symbols, row)]
+    names = frozenset({"pe_ttm", "pe_static", "dividend_yield_pct", "amount_10k_yuan", "change_20d_pct",
+                       "change_60d_pct", "change_ytd_pct", "annual_limit_up_days", "change_1y_pct",
+                       "change_5d_pct", "change_10d_pct"})
+    rows = [_stat_row(row, names) for row in tdx_files.parse_tdxstat(files["tdxstat.cfg"]) if _selected(symbols, row)]
     return tdx_protocol.observed_evidence(rows, host)
 
 
 async def fetch_daily_basic(*, symbols: Sequence[str] = ()) -> CapabilityEvidence:
     files, host = await _zip_files()
-    rows = [_stat_row(row) for row in tdx_files.parse_tdxstat2(files["tdxstat2.cfg"]) if _selected(symbols, row)]
+    names = frozenset({"amount_10k_yuan", "amount_prev_10k_yuan", "amount_alt_10k_yuan", "change_pct",
+                       "change_range_pct", "auction_amount_10k_yuan", "high_52w_yuan", "low_52w_yuan"})
+    rows = [_stat_row(row, names) for row in tdx_files.parse_tdxstat2(files["tdxstat2.cfg"]) if _selected(symbols, row)]
     return tdx_protocol.observed_evidence(rows, host)
 
 
