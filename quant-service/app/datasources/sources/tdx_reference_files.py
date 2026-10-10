@@ -16,7 +16,6 @@ from . import tdx_files, tdx_protocol
 from .tdx_zhb_extras import parse_holiday_calendar, parse_ipo_subscriptions
 
 
-_MARKET_SUFFIX = {"0": "SZ", "1": "SH", "2": "BJ"}
 _TAXONOMIES = {2: "tdx_files_industry_l1", 3: "tdx_files_region", 4: "tdx_files_concept",
                5: "tdx_files_style_event", 12: "tdx_files_industry_l2_l3"}
 
