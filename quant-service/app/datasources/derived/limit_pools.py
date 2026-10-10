@@ -9,8 +9,12 @@ vendor pool for a decision.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Iterable, Mapping
+
+from ...market_rules import cn_today
+from ..contracts import CapabilityEvidence
+from ..sources import tdx_legacy_misc, tdx_mac
 
 
 def _cents(price: float) -> int:
@@ -60,4 +64,27 @@ def derive_limit_pools(snapshot_rows: Iterable[Mapping[str, Any]], limit_rows: I
     return members, without_limit
 
 
-__all__ = ["derive_limit_pools"]
+async def fetch_limit_pools(*, trade_date: date) -> CapabilityEvidence:
+    """Read the all-A snapshot, then the limit prices of exactly its symbols, and derive the three pools.
+
+    The snapshot is live, so only the current session can be derived.  ``coverage`` is the share of snapshot
+    securities that have a limit price; ``available_at`` is the later of the two collection times.
+    """
+    today = cn_today()
+    if trade_date != today:
+        raise ValueError(
+            f"limit pools are derived from the live all-A snapshot, so only the current session ({today}) can be derived, "
+            f"not {trade_date}")
+    snapshot = await tdx_legacy_misc.fetch_all_a_snapshot()
+    limits = await tdx_mac.fetch_limit_prices(symbols=[row["symbol"] for row in snapshot.rows])
+    members, without_limit = derive_limit_pools(snapshot.rows, limits.rows, snapshot.available_at_max)
+    warnings = (*snapshot.warnings, *limits.warnings)
+    if without_limit:
+        warnings += (f"limit_price_missing={without_limit}",)
+    available_at = max(snapshot.available_at_max, limits.available_at_max)
+    return CapabilityEvidence(
+        members, coverage=(len(snapshot.rows) - without_limit) / len(snapshot.rows),
+        available_at_min=available_at, available_at_max=available_at, warnings=warnings)
+
+
+__all__ = ["derive_limit_pools", "fetch_limit_pools"]
