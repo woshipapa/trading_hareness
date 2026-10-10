@@ -668,7 +668,8 @@ class MacBarAdapterTests(unittest.TestCase):
         self.assertFalse(binding.decision_eligible)
         self.assertIn("source_available_at", binding.notes)
         self.assertIn("UNSUPPORTED", binding.notes)
-        self.assertIn("available=none", binding.spec.time_semantics)
+        self.assertEqual(binding.spec.time_semantics,
+                         "effective=bar_time (wire date + seconds, Asia/Shanghai); available=response receive time (CapabilityEvidence available_at_min/max), never the local ingest time")
 
 
 class MacEvidenceTests(unittest.TestCase):

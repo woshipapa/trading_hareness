@@ -388,7 +388,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="MAC K 线只给 bar 时间（日期 + 当日秒数，适配器组成 Asia/Shanghai 感知的 bar_time）；source_available_at 是响应接收时间，available_at_min/max 记录该时间；保持 UNSUPPORTED",
           spec=BindingSpec(
               params={"symbol": "market+code", "count": "count (period 8)"}, field_map={},
-              time_semantics="effective=bar_time (wire date + seconds, Asia/Shanghai); available=none as a wire field, available=response receive time in CapabilityEvidence available_at_min/max, never local ingest time",
+              time_semantics="effective=bar_time (wire date + seconds, Asia/Shanghai); available=response receive time (CapabilityEvidence available_at_min/max), never the local ingest time",
               handshake_profile="mac")),
     _bind("longhuvip_index", "bars.index_daily", 45, DORMANT, "canonical_bars_daily", "app/longhu_market_service.py"),
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),
