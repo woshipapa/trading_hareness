@@ -14,6 +14,8 @@ the same keywords, so the resolver can fall through without translation):
 * ``limits.prices``: ``symbols``
 * ``bars.daily``: ``symbol``, ``count``
 * ``bars.minute``: ``symbol``, ``count`` (MAC 1-minute bars)
+* ``bars.index_daily``: ``symbol``, ``count`` (index or board code)
+* ``breadth.index_daily``: ``symbol``, ``count`` (the same index-bars request)
 * ``sector.board_catalog``: no parameters; returns the MAC board types of ``tdx_mac.BOARD_TYPES``
 * ``sector.membership``: ``sector_key`` (MAC also takes the catalog row's ``board_type``)
 
