@@ -119,14 +119,22 @@ def parse_company_content(body: bytes) -> str:
     return body[12:12 + length].decode("gb18030", "replace")
 
 
+def _finance_info(client: tdx_protocol.TdxClient, market: int, code: str) -> dict[str, Any]:
+    """One 0x0010 summary, which must echo the requested market and code (delta-1 R1); a host that answers
+    for another security raises, so tdx_protocol.call moves on to the next host."""
+    row = parse_finance_info(client._exchange(build_finance_info_request(market, code)))
+    if (row["market"], row["code"]) != (market, code):
+        raise tdx_protocol.TdxProtocolError(
+            f"code_mismatch requested=({market}, {code}) returned=({row['market']}, {row['code']})")
+    return row
+
+
 async def fetch_financial_summary(*, symbol: str) -> CapabilityEvidence:
     """The latest 0x0010 summary. It carries no report period: ``updated_date`` keeps moving after the
     disclosure (delta-1 D4), so it is neither the period nor ``available_at``. The period and the first
     disclosure date come from tipinfo columns 2 and 4 (delta-3 Q1/Q2), joined by the I4 collector."""
     market, code = tdx_protocol.market_code(symbol)
-    row, host = await tdx_protocol.call(
-        lambda client: parse_finance_info(client._exchange(build_finance_info_request(market, code))),
-        handshake_profile="login_one")
+    row, host = await tdx_protocol.call(lambda client: _finance_info(client, market, code), handshake_profile="login_one")
     return tdx_protocol.observed_evidence([{
         "symbol": tdx_protocol.symbol(market, code), "report_period": None,
         "statement_items": {name: row[name] for name in FINANCE_FIELDS}, "field_units": row["field_units"]}], host)

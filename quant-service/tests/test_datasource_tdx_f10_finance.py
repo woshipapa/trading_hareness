@@ -153,6 +153,12 @@ class FakeSocket:
 
 
 class TdxF10Fixtures(unittest.TestCase):
+    def test_a_summary_for_another_security_is_rejected(self):
+        client = mock.Mock(_exchange=lambda request: FINANCE_BODY_SH)
+        self.assertEqual(f10._finance_info(client, 1, "600519")["code"], "600519")
+        with self.assertRaisesRegex(tdx_protocol.TdxProtocolError, "code_mismatch"):
+            f10._finance_info(client, 0, "000001")
+
     def test_builders_match_wire_layouts(self):
         for symbol, market, code in (("000001.SZ", 0, "000001"), ("600519.SH", 1, "600519")):
             with self.subTest(symbol=symbol):

@@ -541,8 +541,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                 "须与 tipinfo 第 2 列（报告期）和第 4 列（首次披露日）关联后才可用；绝不使用 updated_date",
           spec=BindingSpec(params={"symbol": "(market, code)"},
                            field_map={"statement_items": "statement_items", "report_period": "report_period"},
-                           time_semantics="effective=report period from the tipinfo join (unknown here); "
-                                          "available=collection time; never updated_date")),
+                           time_semantics="effective=报告期（来自 tipinfo 关联，本适配器不知道）; "
+                                          "available=采集时刻；绝不用 updated_date")),
     _bind("tdx_public", "fundamentals.company_profile", 80, UNSUPPORTED, None,
           "app/datasources/sources/tdx_f10_finance.py:fetch_company_profile", notes="F10 GBK 文本；available_at 为采集时刻",
           spec=BindingSpec(params={"symbol": "(market, code)"},
