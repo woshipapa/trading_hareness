@@ -438,6 +438,8 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
             result = await post_close.job_tdx_gpcw(deps, post_close.ArchiveState(), date(2026, 9, 18), EVENING)
         self.assertEqual(result["downloaded"], 1)
         self.assertEqual(result["rejected"], 1)
+        manifest_rows = [rows for _provider, capability, rows in recorder.observations if capability == "tdx_gpcw_manifest"][0]
+        self.assertEqual(manifest_rows[0]["observation_symbol"], "gpcw20260630.zip")
         stored = [rows for _provider, capability, rows in recorder.observations if capability == "tdx_gpcw"][0]
         self.assertEqual(stored[0]["availability_basis"], "tipinfo_first_disclosure")
         self.assertEqual(stored[0]["fields"], {"基本每股收益": 1.2})

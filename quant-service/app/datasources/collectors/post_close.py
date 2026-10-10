@@ -356,13 +356,13 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
         handshake_profile="login_one",
     )
     manifest = tdx_fin_history.parse_manifest(manifest_text)
-    previous_payloads = await deps.observation_payloads("tdx_public", "tdx_gpcw_manifest") if deps.observation_payloads else []
+    previous_payloads = await deps.latest_observation_payloads("tdx_public", "tdx_gpcw_manifest") if deps.latest_observation_payloads else {}
     previous = [tdx_fin_history.ManifestEntry(item["filename"], item["md5"], int(item["size"]))
-                for item in previous_payloads]
+                for item in previous_payloads.values()]
     changes = tdx_fin_history.manifest_changes(previous, manifest)
     changed_names = sorted(set(changes["added"]) | set(changes["changed"]))[-deps.max_gpcw_periods:]
     entries = {entry.filename: entry for entry in manifest}
-    manifest_rows = [{"ts_code": "000000.SH", "filename": entry.filename, "md5": entry.md5, "size": entry.size,
+    manifest_rows = [{"observation_symbol": entry.filename, "filename": entry.filename, "md5": entry.md5, "size": entry.size,
                       "effective_at": datetime.combine(date.fromisoformat(entry.filename[4:12]), time(15, 0), CN_TZ).isoformat(),
                       "available_at": now.isoformat()}
                      for entry in manifest]
