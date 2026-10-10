@@ -180,15 +180,13 @@
 | `verify-tdx-protocol.py` | quant-research | workstation | Check ``app.datasources.sources.tdx_protocol`` against pytdx on a live host. |
 | `verify-tdx-zhb-extras.py` | quant-research | workstation | Inventory and verify every member in a downloaded TDX ``zhb.zip``. |
 
-## CI and checks (17)
+## CI and checks (15)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
 | `export_component.py` | platform | workstation and CI | Export one logical component as a secret-free standalone project archive. |
 | `generate-api-types.mjs` | platform | workstation and CI |  |
 | `generate_architecture_index.py` | platform | workstation and CI | Generate a small, deterministic map for humans and maintenance agents. |
-| `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
-| `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
 | `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
 | `generate_service_index.py` | platform | workstation and CI | Generate docs/services.html: one clickable index of every local service port. |
 | `generate_workflows_catalog.py` | platform | workstation and CI | Generate workflows/CATALOG.md: every n8n workflow, where it runs, how it ships. |
