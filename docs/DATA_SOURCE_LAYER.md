@@ -304,7 +304,7 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 
 十个任务挂在 `post_close_public_archive` 循环里（`quant-service/app/datasources/collectors/post_close.py`），与其余盘后任务不同，**默认全部关闭**：单项开关是 `PUBLIC_ARCHIVE_<键大写>_ENABLED`（例如 `PUBLIC_ARCHIVE_TDX_GPCW_ENABLED`），取值 `1`、`true`、`yes`、`on` 为开（`runtime.py` 的 `opt_in_keys`）；总开关 `POST_CLOSE_PUBLIC_ARCHIVE_ENABLED` 仍要开着。窗口按 Asia/Shanghai 本地时间；只在交易日运行（日历取不到就跳过，不猜）；每个交易日成功一次，窗口内失败每 10 分钟重试，到 23:30 为止。
 
-写入走 `persist_timed_observations`（`public_market_repository.py`）：唯一键是 (来源, 能力, 证券, 生效时间, 载荷哈希)，`effective_at`、`available_at`、`availability_basis`、`observation_symbol` 不入哈希，同一事实再采到会被忽略。所以重启只重复请求，不重复证据，也不会把 `available_at` 往后移。板块成分类任务改走成分变化写入：只记开、平仓，空回答不改任何东西。
+写入走 `persist_timed_observations`（`public_market_repository.py`）：唯一键是 (来源, 能力, 证券, 生效时间, 载荷哈希)，`effective_at`、`available_at`、`availability_basis`、`observation_symbol` 不入哈希，同一事实再采到会被忽略。所以重启只重复请求，不重复证据，也不会把 `available_at` 往后移（证券为空的行例外，见本节末的已知问题）。板块成分类任务改走成分变化写入：只记开、平仓，空回答不改任何东西。
 
 | 键（开关 `PUBLIC_ARCHIVE_<键大写>_ENABLED`） | 窗口 | 内容 | 正常一天的行数（函数 docstring） | 幂等与备注 |
 |---|---|---|---|---|
@@ -317,7 +317,7 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 | `tdx_host_probe` | 20:40–23:30 | 主机周探针，见下 | 每台主机一条健康记录 | 每个 ISO 周一次 |
 | `tdx_stat_snapshot` | 20:50–23:30 | `tdxstat.cfg`、`tdxstat2.cfg` 快照，能力 `tdx_stat_valuation`、`tdx_stat_daily_basic` | 完整快照日各约 8,000 行 | `effective_at` = 行自带日期当天 15:00，行日期不是采集日期 |
 | `tdx_files_membership` | 21:00–23:30 | 服务器文件的板块成分（`block_gn`、`block_fg`，taxonomy `tdx_files_*`） | 每个返回的成分一行观察；没变的成分不存新区间 | 成分只记开、平仓 |
-| `tdx_calendar_ipo` | 21:10–23:30 | 节假日与新股申购日，能力 `tdx_trade_calendar`、`tdx_ipo_calendar` | 几十行日历，加一小批新股 | `effective_at` = 日期当天 15:00 |
+| `tdx_calendar_ipo` | 21:10–23:30 | 节假日与新股申购日，能力 `tdx_trade_calendar`、`tdx_ipo_calendar` | docstring 写几十行日历加一小批新股；用整文件夹具 `quant-service/tests/fixtures/tdx_zhb_20261009/needini.dat` 解析是 680 个节假日（1991-01-01 至 2030-10-07，40 个声明年），申购行 15 + 12（`tdx_server_files`） | `effective_at` = 日期当天 15:00 |
 
 **`tdx_gpcw` 的预算与日期**
 
@@ -460,17 +460,17 @@ python scripts/probe-tdx-disclosure-timing.py --polls <N> --interval 10 --output
 - `scripts/data/<名称>_2026-10-10_mac.json`：实测记录，下表只写 `<名称>`（如 `tdx_bars_legacy_vs_mac`）；
 - `docs/archive/tdx-*.md`：归档说明，写全路径。
 
-除另注外，证据于 2026-10-10（周六）从 Mac 出口（家宽）读取，行情是 2026-10-09 收盘后的状态；盘中的延迟与新鲜度没有测过（周一验收，见第 7.1 节）。
+除另注外，证据于周末从 Mac 出口（家宽）读取（证据文件名里的 2026-10-10 是 UTC 日期，个别文件的采集时刻已过北京时间 10-11 零点），行情是 2026-10-09 收盘后的状态；盘中的延迟与新鲜度没有测过（周一验收，见第 7.1 节）。
 
 ### 10.1 K 线与分笔
 
 | 项 | 事实 | 证据 |
 |---|---|---|
 | legacy K 线价格 | 整数 /1000，K 线不需要按证券换算。5 个样本——600519.SH（沪主板）、300750.SZ（创业板）、688981.SH（科创板）、510300.SH（ETF）、920000.BJ（北交所）——都是 /1000（510300 为 4.369，920000 为 13.90）。需要按证券换算的只有 0x053e 报价（10.3） | `tdx_bars_legacy_vs_mac` |
-| 分钟 volume、amount | 两个 IEEE float32：volume 的单位是股，amount 是元；接近 0 的非正规数（0 < x < 1e-20）按 0 处理。旧解析器把这两个值当 pytdx 的压缩数去解码，得到无意义的数 | `docs/archive/tdx-q-units.md`；`tdx_f7_1m_volume`（000001.SZ 14:59 读到 5.877e-39） |
+| 分钟 volume、amount | 分钟类 K 线（category 0、1、2、3、8）的 volume、amount 是两个 IEEE float32：volume 的单位是股，amount 是元；绝对值小于 1e-20 的非正规数按 0 处理（`tdx_protocol._float32`）。日线及更长周期的 K 线保持 TDX 的压缩格式（`decode_volume`）。旧解析器把分钟线的这两个值也当 pytdx 的压缩数去解码，得到无意义的数 | `docs/archive/tdx-q-units.md`；`tdx_f7_1m_volume`（000001.SZ 14:59 读到 5.877e-39） |
 | 分钟线对 MAC | 同上 5 个样本、2026-10-09 的全部 240 根（09:31 … 15:00）：legacy 与 MAC 的 volume、amount 逐位相同，OHLC 只差 float32 舍入（最大绝对差 5.9e-05）。MAC 0x122e 的请求多要一根，回包第一行是昨收哨兵（240 根分钟线回 241 行），解析时丢弃；上市不足所要根数的证券没有哨兵，解析时最老的一根也被丢掉。它的 `seconds` 是当日 0 点起的秒数，是 bar 标签，不是成交时刻 | `tdx_bars_legacy_vs_mac`；`docs/archive/tdx-q-units.md`；`quant-service/app/datasources/sources/tdx_mac.py` 的 `parse_bars` |
 | 分钟 volume 对腾讯 | TDX 分钟 volume 是腾讯分钟手数的 100 倍（比值中位数 100.0）。000001.SZ、600519.SH 的 240 根里分别有 238、237 根换算后相等，其余是首根 09:31（含 09:25 开盘集合竞价成交）和 14:58–14:59 收盘集合竞价里本应为 0 的 float32 非正规数 | `tdx_f7_1m_volume`；`docs/archive/tdx-q-units.md` |
-| 日线 volume | legacy：整手，奇数股被截断（600519 在 2026-10-09 为 35,110 手，MAC 为 3,511,051 股）；MAC：float32 的股，约 7 位有效数字（510300 为 1,276,733,184）；amount 两边相等。`tdx_mac` 的 `bars.daily` 用 `unit_factors` volume ×0.01 把股换成手 | `tdx_bars_legacy_vs_mac`；`catalog.py` |
+| 日线 volume | legacy：沿用压缩格式，给出整手，奇数股被截断（600519 在 2026-10-09 为 35,110 手，MAC 为 3,511,051 股）；MAC：float32 的股，约 7 位有效数字（510300 为 1,276,733,184）；amount 两边相等。`tdx_mac` 的 `bars.daily` 用 `unit_factors` volume ×0.01 把股换成手 | `tdx_bars_legacy_vs_mac`；`catalog.py` |
 | 全日成交量的口径 | 交易所口径的日成交量是日线和 MAC 批量行情给的值，不是全部逐笔之和，逐笔里有盘后成交：000001.SZ 逐笔共 1,078,143 手，日线是 1,078,105 手 | `docs/archive/tdx-q-units.md` |
 | 分笔 | `ticks.session`：volume 的单位是手；方向码 0 买、1 卖、2 中性、5 盘后固定价（P）、8 集合竞价指示（A）。价格高于上一笔为 B，低于为 S，相等为中性，除非供应商给 5 或 8；2026-10-09 的样本里 8 只出现在零成交的竞价指示上，5 只出现在盘后成交上 | `docs/archive/tdx-q-units.md` |
 | 时间约定 | 全部是 Asia/Shanghai 的交易所本地时间；legacy 分钟线的标签从 09:31 到 15:00；持久化的时间戳保持带时区的 UTC | `docs/archive/tdx-q-units.md` |
@@ -501,7 +501,7 @@ python scripts/probe-tdx-disclosure-timing.py --polls <N> --interval 10 --output
 |---|---|---|
 | 构成 | 证券列表（市场 1）里的 880xxx 共 652 个：604 个是 `tdxzs3.cfg` 的板块（最小 880081），48 个不是 | `tdx_market_stat_codes` |
 | 那 48 个 | 880001–880079 里的市场统计（总市值、流通市值、活筹市值、平均股价、成交均价、涨跌家数 880005、停板家数、全 A 等权与中位，以及主板、创业、科创、北证各自的同类项）和 880096–880099（ETF 等权、REITs、可转债、通用回购）。代码里归为 `market_stat`，不是 `board` | `tdx_market_stat_codes`；`tdx_instruments.py` 的 `instrument_type` |
-| 880005 | 2026-10-09 的收盘价 3297.0 等于同会话 0x054b 全 A 的上涨家数（全 A 5,578 行，3,297 涨/2,155 跌/126 平）。它的 bar 字段含义没有依据（UNKNOWN），不绑定；`bars.index_daily` 只收 `index`、`board` | `tdx_bars_legacy_vs_mac`；`tdx_market_stat_codes`；`docs/archive/tdx-q-breadth.md` |
+| 880005 | 2026-10-09 的收盘价 3297.0 等于同会话 0x054b 全 A 的上涨家数（那次完整排序的全 A 是 5,578 行，3,297 涨/2,155 跌/126 平；`tdx_mac_limits_all_a` 里滤掉 16 个无成交行后的快照是 5,562 行）。它的 bar 字段含义没有依据（UNKNOWN），不绑定；`bars.index_daily` 只收 `index`、`board` | `tdx_bars_legacy_vs_mac`；`tdx_market_stat_codes`；`docs/archive/tdx-q-breadth.md` |
 
 ### 10.5 北交所代码迁移
 
@@ -513,7 +513,7 @@ python scripts/probe-tdx-disclosure-timing.py --polls <N> --interval 10 --output
 
 ### 10.6 MAC 0x122b 动态字段
 
-注册表是 `quant-service/app/datasources/sources/tdx_mac_fields.py`（160 个位，`0x00`–`0x9f`）：每置一位回 4 个字节，按位序排列；没有条目的位叫 `bit_0xNN`，没有单位和 canonical 键。请求要拆成小位图，有些 MAC 主机会静默截断一次回包里的动态值个数（`docs/archive/tdx-route-mac-fields.md`）。下表只列有结论的位；状态沿用注册表的 MATCH、NO_REFERENCE。
+注册表是 `quant-service/app/datasources/sources/tdx_mac_fields.py`（160 个位，`0x00`–`0x9f`）：每置一位回 4 个字节，按位序排列；没有条目的位叫 `bit_0xNN`，没有单位和 canonical 键。请求要拆成小位图，有些 MAC 主机会静默截断一次回包里的动态值个数（`docs/archive/tdx-route-mac-fields.md`）。下表只列有结论的位；状态里 MATCH、NO_REFERENCE 是注册表的记法，CONFIRMED 是归档说明的判定，两者不同时两个都写。
 
 | 位 | 名称 | 单位、符号、窗口 | 状态与说明 | 证据 |
 |---|---|---|---|---|
@@ -521,14 +521,14 @@ python scripts/probe-tdx-disclosure-timing.py --polls <N> --interval 10 --output
 | `0x05` | vol | uint32，**手**。MAC K 线 0x122e 的 volume 是股，批量行情的 0x05 是手，canonical 股 = ×100。例：600519.SH 在 2026-10-09 位 0x05 = 35110 手，同日 MAC 日线 3,511,051 股 | MATCH（对日线） | `tdx_mac_adapters_live`；`tdx_bars_legacy_vs_mac`；`docs/archive/tdx-q-units.md` |
 | `0x13`、`0x14` | server_update_date、server_update_time | uint32 | 行情更新的日期、时间（Asia/Shanghai）；适配器用来组成 `exchange_time`，`limits.prices` 的 `trade_date` 取位 0x13（2026-10-09 的 5,562 行全是该日）。注册表对这两位仍记 NO_REFERENCE | `tdx_mac_limits_all_a`；`catalog.py` |
 | `0x1b` | turnover | float32，% | MATCH（流通股本可信时）：= 位 0x05 的手数 / 位 0x0b 的万股 | `docs/archive/tdx-q-limitfields.md`；`catalog.py` |
-| `0x20`、`0x21` | buy_price_limit、sell_price_limit，即涨停价、跌停价 | float32，元。按板块比例，取整到 0.01 元：主板 10 %，创业板、科创板 20 %（含 ST），北交所 30 %；沪深主板 ST 自 2026-07-06 起为 10 %，此前 5 %（`app/market_rules.py`） | MATCH。2026-10-09 全 A 快照的 5,562 行都有限价行（覆盖率 1.0），日期都是 2026-10-09。**无价格限制的证券两个限价都回 0.0**（001246.SZ、301716.SZ 两只新股，和上市首日的 920157.BJ），0.0 是“无限价”，不是价格。限价/昨收 − 1 与板块比例差 0.001–0.003，来自限价取整到 0.01；float32 的 12.96 读成 12.960000038146973，比较要按 0.01 元的整数分 | `tdx_mac_limits_all_a`；`quant-service/app/market_rules.py`；`quant-service/app/datasources/derived/limit_pools.py` |
+| `0x20`、`0x21` | buy_price_limit、sell_price_limit，即涨停价、跌停价 | float32，元。按板块比例，取整到 0.01 元：主板 10 %，创业板、科创板 20 %（含 ST），北交所 30 %；沪深主板 ST 自 2026-07-06 起为 10 %，此前 5 %（`app/market_rules.py`） | MATCH。2026-10-09 全 A 快照的 5,562 行都有限价行（覆盖率 1.0），日期都是 2026-10-09。**无价格限制的证券两个限价都回 0.0**（001246.SZ、301716.SZ 两只新股，和上市首日的 920157.BJ），0.0 是“无限价”，不是价格。限价/昨收 − 1 与板块比例的偏差多在 0.001–0.003，证据文件归因于限价取整到 0.01，只有科创板 ST 的两行偏差更大（0.204、0.207），文件没有解释；float32 的 12.96 读成 12.960000038146973，比较要按 0.01 元的整数分 | `tdx_mac_limits_all_a`；`quant-service/app/market_rules.py`；`quant-service/app/datasources/derived/limit_pools.py` |
 | `0x24` | pre_iopv | float32，元 | NO_REFERENCE：收盘后 510300 读到 0.0、159915 读到 305.58，都不是 3–4 元 ETF 的前一日 IOPV；非基金代码上这一位是别的数（600519 读到 1250081664.0，000001 读到 5.61，300750 读到 18.82）。`fund.iopv` 不读它 | `tdx_mac_iopv`；`tdx_mac_adapters_live` |
 | `0x27` | iopv | float32，元 | 紧邻 ETF 的收盘价：510300 为 4.3898（收盘 4.385），159915 为 3.0639（收盘 3.064）。只有 510300 对账为 MATCH。`exchange_time` 取同一行位 0x13/0x14 的行情更新时间，IOPV 自己的时刻不在行内。非基金代码上也是别的数，所以适配器只收 ETF、LOF、基金类代码 | `tdx_mac_iopv`；`docs/archive/tdx-route-mac-fields.md`；`catalog.py` |
-| `0x38`、`0x6b` | main_net_amount 及其副本 | float32，元，正为主力净流入 | CONFIRMED：= `0x1218` 第 0 行的 [主力流入 − 主力流出]，8 只样本逐个相等（舍入残差最大 512 元）。是供应商口径，不是由逐笔重建的主动买卖净额（已测的方向码、涨跌、金额和手数阈值都对不上）；920000.BJ 为 0（北交所覆盖不全）。目前没有 TDX 的资金流绑定 | `docs/archive/tdx-q-flow.md` |
+| `0x38`、`0x6b` | main_net_amount 及其副本 | float32，元，正为主力净流入 | CONFIRMED（归档判定；注册表仍记 NO_REFERENCE）：= `0x1218` 第 0 行的 [主力流入 − 主力流出]，8 只样本逐个相等（舍入残差最大 512 元）。是供应商口径，不是由逐笔重建的主动买卖净额（已测的方向码、涨跌、金额和手数阈值都对不上）；920000.BJ 为 0（北交所覆盖不全）。目前没有 TDX 的资金流绑定 | `docs/archive/tdx-q-flow.md` |
 | `0x3b` | 20 日涨跌幅 | float32，% | 注册表里这一位没有条目，按默认的 uint32 读：000001.SZ 读成 3199079547，按 float32 读是 −0.34，等于 tdxstat 第 18 列。**未结事项**（基线 `6f691ad0` 的注册表未改） | `tdx_stat_columns_vs_mac`；`docs/archive/tdx-q-stats.md` |
 | `0x58` | annual_limit_up_days | int32，天。窗口是日历年（2026 年），不是滚动 250 根 | MATCH：36 只样本里 30 只与日线复算相等，其余 6 只由年界解释；新股无涨跌停的交易日要排除 | `docs/archive/tdx-q-limitfields.md` |
-| `0x5c` | close_streak | int32，天，带符号：连涨为 +n，连跌为 −n | CONFIRMED：36/36 与日线相符 | `docs/archive/tdx-q-limitfields.md` |
-| `0x88`–`0x8b` | up_count、down_count | uint32，家 | 板块成分股的上涨、下跌家数；880761、880842、881376、880231 四个板块逐个与成分报价的涨跌家数相符 | `docs/archive/tdx-q-limitfields.md` |
+| `0x5c` | close_streak | int32，天，带符号：连涨为 +n，连跌为 −n | MATCH（归档判定 CONFIRMED）：36/36 与日线相符 | `docs/archive/tdx-q-limitfields.md` |
+| `0x88`、`0x8b` | up_count（0x88）、down_count（0x8b） | uint32，家 | MATCH（归档判定 CONFIRMED）：板块成分股的上涨、下跌家数；880761、880842、881376、880231 四个板块逐个与成分报价的涨跌家数相符。`0x89`、`0x8a` 是 ask3_volume、ask4_volume，不是家数 | `docs/archive/tdx-q-limitfields.md`；`tdx_mac_fields.py` |
 | `0x90`–`0x96` | change_at_1000、change_at_1030、change_at_1100、change_at_1130、change_at_1330、change_at_1400、change_at_1430 | float32，% | 日内采样快照：等于当日一分钟线在该时刻或相邻一分钟的涨跌，不要求恰好同一格；盘中含义等周一取样（计划第 4 节 4.4） | `docs/archive/tdx-q-limitfields.md`；`docs/archive/tdx-route-mac-fields.md` |
 | 批量回包 | — | — | 服务器按请求顺序答，不列的代码就不回：请求 80 个沪市代码（600000–600079）回 57 行，缺的 23 个都是已退市代码。不是“请求里还没轮到的代码”（别的代码、重复、乱序）的行被丢弃并记 `code_mismatch`；一行都对不上则整包报错并换下一台主机；没回行的证券由适配器在 warnings 里报告 | `tdx_mac_batch_omission`；`quant-service/app/datasources/sources/tdx_mac.py` |
 
