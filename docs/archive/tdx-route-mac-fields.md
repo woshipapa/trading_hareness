@@ -17,7 +17,7 @@ are `NO_REFERENCE`.
 | Bit | Name | Format / unit | Status | Capability IDs |
 | --- | --- | --- | --- | --- |
 | 00-04 | pre_close, open, high, low, close | float32 / yuan | MATCH (daily bars) | `quote.watch_snapshot`, `auction.open_snapshot` |
-| 05 | vol | uint32 / shares | MATCH (daily bars) | `quote.watch_snapshot`, `flow.stock_daily` |
+| 05 | vol | uint32 / lots | MATCH (daily bars) | `quote.watch_snapshot`, `flow.stock_daily` |
 | 06 | vol_ratio | float32 / ratio | NO_REFERENCE | |
 | 07 | amount | float32 / yuan | MATCH (daily bars) | `quote.watch_snapshot`, `flow.stock_daily` |
 | 08-09 | inside_volume, outside_volume | uint32 / shares | NO_REFERENCE | |
@@ -26,7 +26,7 @@ are `NO_REFERENCE`.
 | 13-14 | server_update_date, server_update_time | uint32 | NO_REFERENCE | |
 | 16 | board_strength | int32 / count | NO_REFERENCE | |
 | 1b | turnover | float32 / percent | MATCH when float shares are trusted | `quote.watch_snapshot` |
-| 20-21 | buy_price_limit, sell_price_limit | float32 / yuan | MATCH (pre-close and board ratio) | `limits.ladder`, `limits.stock_anomaly_reason` |
+| 20-21 | buy_price_limit, sell_price_limit | float32 / yuan | MATCH (pre-close and board ratio) | `limits.ladder`, `limits.stock_anomaly_reason`, `limits.prices` |
 | 24 | pre_iopv | float32 / yuan | MATCH on ETF 510300 | `fund.nav` |
 | 25-26 | speed_pct, avg_price | float32 | NO_REFERENCE / MATCH (amount/vol) | `quote.watch_snapshot` |
 | 27 | iopv | float32 / yuan | MATCH on ETF 510300 | `fund.nav` |
@@ -35,7 +35,7 @@ are `NO_REFERENCE`.
 | 40-41 | mtd_pct, change_1y_pct | float32 / percent | MATCH against bar closes where window exists | `quote.watch_snapshot` |
 | 43-47 | change_3d/60d/5d/10d/prev2_pct | float32 / percent | MATCH for computable windows; otherwise NO_REFERENCE | `quote.watch_snapshot` |
 | 57 | open_amount | float32 / yuan | MATCH when auction rows exist | `auction.open_snapshot` |
-| 5c | consecutive_up_days | int32 / days | MATCH against 60 daily bars | `limits.stock_anomaly_reason` |
+| 5c | close_streak | int32 / days | MATCH against 60 daily bars (rising +n, falling -n) | `quote.watch_snapshot` |
 | 5d-5e | limit_up_count, limit_down_count | uint32 / count | MATCH for board member aggregate | `sector.index_quote` |
 | 66-67 | auction_buy_limit, auction_sell_limit | float32 / yuan | MATCH when auction rows exist | `auction.open_snapshot` |
 | 6b-72 | main/retail net amount windows | float32 / yuan | NO_REFERENCE (no trusted flow source) | `flow.stock_daily` |

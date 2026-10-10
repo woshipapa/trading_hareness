@@ -65,7 +65,7 @@ UNREGISTERED: dict[str, str] = {
     "tdx_mac.TdxMacClient.batch_quotes": "transport primitive used by MAC quote adapters",
     "tdx_mac.TdxMacClient.bars": "transport primitive used by MAC bar adapters",
     "tdx_mac.TdxMacClient.auxiliary": "transport primitive for unbound MAC auxiliary commands",
-    "family:quote": "legacy quotes bind in P2 after the instrument model (delta D2); MAC 0x122b in P3",
+    "family:quote": "legacy quotes bind through quote.watch_snapshot; MAC batch quotes (0x122b) under integration via sector.board_catalog",
     "family:F10": "verified in the plan; company-profile capability arrives in P5",
     "family:finance": "verified in the plan; financial-statements capability arrives in P5",
     "family:files": "verified in the plan; server-file capabilities arrive in P4",

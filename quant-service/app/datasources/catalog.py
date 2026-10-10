@@ -180,7 +180,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     # sector
     _cap("sector.membership", "板块/概念成分（PIT）", "reference", "board", "taxonomy_key sector_key symbol known_at",
          "known_at 之后才可用；盘中刷新只对下一场生效"),
-    _cap("sector.board_catalog", "MAC 板块目录", "reference", "board", "board_code:str name board_type:int member_count:int",
+    _cap("sector.board_catalog", "板块目录", "reference", "board", "board_code name board_type",
          "effective=采集时刻; available=采集时刻"),
     _cap("sector.index_quote", "板块/概念指数行情", "daily", "board", "index_code last_price pct_change volume turnover", _OBSERVED),
     _cap("sector.flow_curve", "板块资金流曲线", "intraday", "board", "sector net_inflow:per-item unit (cny|100m_cny)", _OBSERVED),
