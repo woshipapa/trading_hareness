@@ -140,6 +140,8 @@ export const researchActions = new Map([
 // Routes with a path parameter, or with a method of their own.
 export const researchTemplateRoutes = [
 	{ method: 'GET', path: '/api/research/research-runs/{research_run_id}', upstream: '/api/v1/research/runs/{research_run_id}' },
+	{ method: 'GET', path: '/api/research/datasources/capabilities/{capability}', upstream: '/api/v1/datasources/capabilities/{capability}' },
+	{ method: 'GET', path: '/api/research/datasources/read/{source}/{capability}', upstream: '/api/v1/datasources/read/{source}/{capability}' },
 	{ method: 'GET', path: '/api/research/intraday/decision-cards/{symbol}', upstream: '/api/v1/intraday/decision-cards/{symbol}' },
 	{ method: 'PUT', path: '/api/research/paper/accounts', upstream: '/api/v1/paper/accounts' },
 	{ method: 'POST', path: '/api/research/paper/decisions/{decision_id}/accept', upstream: '/api/v1/paper/decisions/{decision_id}/accept' },
@@ -156,6 +158,8 @@ const PARAMS = {
 	candidate_id: { pattern: UUID },
 	review_id: { pattern: UUID },
 	variant_key: { pattern: 'strict_action|scenario_context|risk_first' },
+	capability: { pattern: '[a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+', lowercase: true },
+	source: { pattern: '[a-z][a-z0-9_]*', lowercase: true },
 	symbol: { pattern: String.raw`\d{6}\.(?:SH|SZ|BJ)`, upper: true },
 };
 
@@ -181,6 +185,7 @@ export function matchResearchRoute(method, pathname) {
 		if (route.method !== method) continue;
 		const match = route.regex.exec(pathname);
 		if (!match) continue;
+		if (route.names.some((name, index) => PARAMS[name].lowercase && match[index + 1] !== match[index + 1].toLowerCase())) continue;
 		let upstream = route.upstream;
 		route.names.forEach((name, index) => {
 			const value = PARAMS[name].upper ? match[index + 1].toUpperCase() : match[index + 1];
