@@ -394,6 +394,17 @@ class MacWatchSnapshotTests(unittest.TestCase):
         self.assertEqual([row["symbol"] for row in evidence.rows], ["600519.SH"])
         self.assertIn("code_mismatch requested=(2, '920000') returned=(1, '600519')", logs.output[0])
 
+    def test_an_answer_that_leaves_out_the_server_time_raises(self):
+        # A host that caps the dynamic fields echoes a smaller bitmap: here bits 0x13 and 0x14 are gone.
+        def answer(request):
+            bitmap = bytearray(request[12:32])
+            bitmap[2] &= ~0x18
+            return dynamic_body(bytes(bitmap), [(0, "000001", "n", quote_values())])
+
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: answer})
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "000001 lacks server_update_date, server_update_time"):
+            self.fetch(client, ["000001.SZ"])
+
     def test_an_invalid_server_date_raises(self):
         client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "server_update_date": 0})})
         with self.assertRaisesRegex(tdx_mac.TdxMacError, "invalid MAC date 0"):
@@ -427,6 +438,16 @@ class MacLimitPriceTests(unittest.TestCase):
         self.assertEqual(evidence.rows, [{"symbol": "000001.SZ", "trade_date": date(2026, 10, 9),
                                           "limit_up": 11.5, "limit_down": 9.5}])
         self.assertEqual(client.requests[0][12:32], tdx_mac.LIMITS_BITMAP)
+
+    def test_an_answer_that_leaves_out_a_limit_raises(self):
+        def answer(request):
+            bitmap = bytearray(request[12:32])
+            bitmap[4] &= ~0x02  # bit 0x21, the limit-down price
+            return dynamic_body(bytes(bitmap), [(0, "000001", "n", quote_values())])
+
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: answer})
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "000001 lacks sell_price_limit"):
+            self.fetch(client, ["000001.SZ"])
 
     def test_81_symbols_make_two_requests_and_a_foreign_row_is_dropped(self):
         symbols = [f"{number:06d}.SZ" for number in range(1, 82)]

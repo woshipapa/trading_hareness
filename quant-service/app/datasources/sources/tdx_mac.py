@@ -470,24 +470,33 @@ def _shanghai_time(day: date, hour: int, minute: int, second: int) -> datetime:
         raise TdxMacError(f"invalid MAC time {hour:02d}:{minute:02d}:{second:02d} on {day}") from error
 
 
+def _fields(row: dict[str, Any], *names: str) -> list[Any]:
+    """The named values of a decoded dynamic row; a host that capped the answer leaves some fields out."""
+    absent = [name for name in names if name not in row]
+    if absent:
+        raise TdxMacError(f"MAC answer for {row['symbol']} lacks {', '.join(absent)}")
+    return [row[name] for name in names]
+
+
 def _quote_row(row: dict[str, Any]) -> dict[str, Any]:
     """A decoded 0x122b row with its full symbol and ``exchange_time`` built from bits 0x13 and 0x14."""
-    update_time = row["server_update_time"]
+    update_date, update_time = _fields(row, "server_update_date", "server_update_time")
     consumed = ("symbol", "server_update_date", "server_update_time")
     return {
         "symbol": tdx_protocol.symbol(row["market"], row["symbol"]),
         "exchange_time": _shanghai_time(
-            _ymd(row["server_update_date"]), update_time // 10000, update_time // 100 % 100, update_time % 100),
+            _ymd(update_date), update_time // 10000, update_time // 100 % 100, update_time % 100),
         **{key: value for key, value in row.items() if key not in consumed},
     }
 
 
 def _limit_row(row: dict[str, Any]) -> dict[str, Any]:
+    update_date, limit_up, limit_down = _fields(row, "server_update_date", "buy_price_limit", "sell_price_limit")
     return {
         "symbol": tdx_protocol.symbol(row["market"], row["symbol"]),
-        "trade_date": _ymd(row["server_update_date"]),
-        "limit_up": row["buy_price_limit"],
-        "limit_down": row["sell_price_limit"],
+        "trade_date": _ymd(update_date),
+        "limit_up": limit_up,
+        "limit_down": limit_down,
     }
 
 
