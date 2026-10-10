@@ -1,0 +1,199 @@
+"""Stdlib TDX F10 and historical financial-file client.
+
+The command builders/parsers are deliberately independent of the quote client;
+``TdxF10Client`` only reuses its connected socket and ``_exchange`` framing.
+All monetary values in the 0x0010 summary are normalized to yuan, share counts
+to shares, and per-share values to yuan/share.  The finance summary uses
+千元 for monetary floats and 万股 for capital floats; these differ from the
+GPCW field units and must not share one scale factor.
+"""
+
+from __future__ import annotations
+
+import struct
+from typing import Any
+
+from . import tdx_protocol
+from .tdx_fin_history import FINANCE_HOSTS, download_report_file, parse_gpcw_zip
+
+
+
+FINANCE_FIELDS = (
+    "float_shares", "province", "industry", "updated_date", "ipo_date",
+    "total_shares", "state_shares", "sponsor_legal_shares", "legal_shares",
+    "b_shares", "h_shares", "eps", "total_assets", "current_assets",
+    "fixed_assets", "intangible_assets", "shareholder_count",
+    "current_liabilities", "long_term_liabilities", "capital_reserve",
+    "total_equity", "operating_revenue", "operating_cost",
+    "accounts_receivable", "operating_profit", "investment_income",
+    "net_cash_flow", "total_cash_inflow", "inventory", "total_profit",
+    "after_tax_profit", "net_profit", "undistributed_profit",
+    "net_assets_per_share", "reserved2",
+)
+
+FINANCE_METADATA_FIELDS = {"province", "industry", "updated_date", "ipo_date"}
+FINANCE_SHARE_FIELDS = {
+    "float_shares", "total_shares", "state_shares", "sponsor_legal_shares",
+    "legal_shares", "b_shares", "h_shares", "zhigonggu",
+}
+FINANCE_PER_SHARE_FIELDS = {"eps", "net_assets_per_share", "reserved2"}
+FINANCE_COUNT_FIELDS = {"shareholder_count"}
+FINANCE_MONEY_FIELDS = set(FINANCE_FIELDS) - FINANCE_METADATA_FIELDS - FINANCE_SHARE_FIELDS - FINANCE_PER_SHARE_FIELDS - FINANCE_COUNT_FIELDS
+
+# The public mootdx table is indexed as col1 = columns[1] (columns[0] is the
+# report date).  Keep the stable, high-value part here and return colN for
+# vendor extensions whose labels differ between TDX releases.
+def _code(code: str) -> bytes:
+    raw = code.encode("ascii")
+    if len(raw) != 6 or not raw.isdigit():
+        raise ValueError("TDX codes are six ASCII digits")
+    return raw
+
+
+def _market(market: int) -> int:
+    if market not in (0, 1, 2):
+        raise ValueError("market must be 0 (SZ), 1 (SH), or 2 (BJ)")
+    return market
+
+
+def build_finance_info_request(market: int, code: str) -> bytes:
+    return bytes.fromhex("0c 1f 18 76 00 01 0b 00 0b 00 10 00 01 00") + struct.pack("<B6s", _market(market), _code(code))
+
+
+def build_company_categories_request(market: int, code: str) -> bytes:
+    return bytes.fromhex("0c 0f 10 9b 00 01 0e 00 0e 00 cf 02") + struct.pack("<H6sI", _market(market), _code(code), 0)
+
+
+def build_company_content_request(market: int, code: str, filename: str, start: int, length: int) -> bytes:
+    name = filename.encode("ascii")
+    if len(name) > 80 or start < 0 or length < 0 or length > 0xFFFFFFFF:
+        raise ValueError("invalid F10 filename/range")
+    return bytes.fromhex("0c 07 10 9c 00 01 68 00 68 00 d0 02") + struct.pack(
+        "<H6sH80sIII", _market(market), _code(code), 0, name.ljust(80, b"\0"), start, length, 0
+    )
+
+
+def _fixed(raw: bytes, encoding: str = "gbk") -> str:
+    return raw.split(b"\0", 1)[0].decode(encoding, errors="replace").strip()
+
+
+def parse_finance_info(body: bytes) -> dict[str, Any]:
+    if len(body) < 2 + 7:
+        raise ValueError("short finance response")
+    count, market = struct.unpack_from("<HB", body, 0)
+    code = _fixed(body[3:9], "ascii")
+    fmt = "<fHHII" + "f" * 30
+    size = struct.calcsize(fmt)
+    if len(body) < 9 + size:
+        raise ValueError("short finance record")
+    values = struct.unpack_from(fmt, body, 9)
+    result: dict[str, Any] = {"count": count, "market": market, "code": code}
+    for name, value in zip(FINANCE_FIELDS, values):
+        if name in {"province", "industry", "updated_date", "ipo_date"}:
+            result[name] = value
+        elif name in FINANCE_PER_SHARE_FIELDS:
+            result[name] = float(value)
+        elif name in FINANCE_COUNT_FIELDS:
+            result[name] = float(value)
+        elif name in FINANCE_SHARE_FIELDS:
+            result[name] = float(value) * 10000.0
+        else:
+            result[name] = float(value) * 1000.0
+    result["field_units"] = {
+        name: ("股" if name in FINANCE_SHARE_FIELDS else "元/股" if name in FINANCE_PER_SHARE_FIELDS
+               else "户" if name in FINANCE_COUNT_FIELDS else "code" if name in {"province", "industry"}
+               else "YYYYMMDD" if name in {"updated_date", "ipo_date"}
+               else "元") for name in FINANCE_FIELDS
+    }
+    result["units"] = {"shares": "股", "amounts": "元", "per_share": "元/股", "eps": "元/股",
+                       "finance_raw_money": "千元", "finance_raw_shares": "万股"}
+    return result
+
+
+def parse_company_categories(body: bytes) -> list[dict[str, Any]]:
+    if len(body) < 2:
+        return []
+    count = struct.unpack_from("<H", body)[0]
+    rows = []
+    for index in range(count):
+        pos = 2 + index * 152
+        if pos + 152 > len(body):
+            break
+        name, filename, start, length = struct.unpack_from("<64s80sII", body, pos)
+        rows.append({"name": _fixed(name), "filename": _fixed(filename, "ascii"), "start": start, "length": length})
+    return rows
+
+
+def parse_company_content(body: bytes) -> str:
+    if len(body) < 12:
+        return ""
+    length = struct.unpack_from("<H", body, 10)[0]
+    return body[12:12 + length].decode("gbk", errors="replace")
+
+
+def parse_report_file(body: bytes) -> tuple[int, bytes]:
+    if len(body) < 4:
+        return 0, b""
+    size = struct.unpack_from("<I", body)[0]
+    return size, body[4:4 + size]
+
+class TdxF10Client(tdx_protocol.TdxClient):
+    """Connected TDX client for F10 and finance summary."""
+
+    def finance_info(self, market: int, code: str) -> dict[str, Any]:
+        return parse_finance_info(self._exchange(build_finance_info_request(market, code)))
+
+    def company_categories(self, market: int, code: str) -> list[dict[str, Any]]:
+        return parse_company_categories(self._exchange(build_company_categories_request(market, code)))
+
+    def company_content(self, market: int, code: str, filename: str, start: int, length: int) -> str:
+        return parse_company_content(self._exchange(build_company_content_request(market, code, filename, start, length)))
+
+    def report_file(self, filename: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
+        return download_report_file(self, filename, max_bytes=max_bytes)
+
+    def gpcw(self, filename: str) -> list[dict[str, Any]]:
+        return parse_gpcw_zip(self.report_file("tdxfin/" + filename), filename=filename)
+
+
+def _call(operation: Any, *, hosts: Any = None, timeout_seconds: float = 5.0) -> Any:
+    errors = []
+    for host, port in hosts or FINANCE_HOSTS:
+        try:
+            with TdxF10Client(host, port, timeout_seconds) as client:
+                return operation(client)
+        except (OSError, tdx_protocol.TdxProtocolError, struct.error, IndexError, ValueError) as error:
+            errors.append(f"{host}:{type(error).__name__}")
+    raise tdx_protocol.TdxProtocolError("no TDX F10 host answered: " + ", ".join(errors[-4:]))
+
+
+def finance_info(market: int, code: str, *, hosts: Any = None, timeout_seconds: float = 5.0) -> dict[str, Any]:
+    return _call(lambda client: client.finance_info(market, code), hosts=hosts, timeout_seconds=timeout_seconds)
+
+
+def company_categories(market: int, code: str, *, hosts: Any = None, timeout_seconds: float = 5.0) -> list[dict[str, Any]]:
+    return _call(lambda client: client.company_categories(market, code), hosts=hosts, timeout_seconds=timeout_seconds)
+
+
+def company_content(market: int, code: str, filename: str, start: int, length: int, *, hosts: Any = None,
+                    timeout_seconds: float = 5.0) -> str:
+    return _call(lambda client: client.company_content(market, code, filename, start, length), hosts=hosts,
+                 timeout_seconds=timeout_seconds)
+
+
+def gpcw(filename: str, *, hosts: Any = None, timeout_seconds: float = 5.0) -> list[dict[str, Any]]:
+    return _call(lambda client: client.gpcw(filename), hosts=hosts, timeout_seconds=timeout_seconds)
+
+
+def financial_statements(*, filename: str | None = None, market: int | None = None, code: str | None = None,
+                         hosts: Any = None, timeout_seconds: float = 5.0) -> Any:
+    if filename is not None:
+        return gpcw(filename, hosts=hosts, timeout_seconds=timeout_seconds)
+    return finance_info(market, code, hosts=hosts, timeout_seconds=timeout_seconds)
+
+
+__all__ = [
+    "FINANCE_FIELDS", "FINANCE_HOSTS", "TdxF10Client", "build_company_categories_request",
+    "build_company_content_request", "build_finance_info_request", "company_categories", "company_content",
+    "finance_info", "financial_statements", "gpcw", "parse_company_categories", "parse_company_content", "parse_finance_info",
+]
