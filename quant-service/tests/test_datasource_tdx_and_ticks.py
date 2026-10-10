@@ -13,6 +13,7 @@ from app.datasources.derived.tick_flow import Tick, parse_tencent_detail, summar
 from app.datasources.sources import tdx_bj_codes, tdx_local_files, tdx_protocol
 
 BJ_EVIDENCE = Path(__file__).resolve().parents[2] / "scripts" / "data" / "tdx_quote_scale_and_bj_2026-10-10_mac.json"
+BJ_HISTORY_EVIDENCE = Path(__file__).resolve().parents[2] / "scripts" / "data" / "tdx_bj_history_2026-10-10_mac.json"
 
 
 def encode_price(value: int) -> bytes:
@@ -259,6 +260,10 @@ class TdxClientTests(unittest.TestCase):
         self.assertEqual(len(tdx_bj_codes.OLD_TO_NEW), measured["old_to_new_rows"])
         for old, new in measured["sample"]:
             self.assertEqual(tdx_bj_codes.OLD_TO_NEW[old], new)
+
+    def test_the_securities_of_the_history_evidence_are_requested_under_their_new_codes(self):
+        for row in json.loads(BJ_HISTORY_EVIDENCE.read_text(encoding="utf-8"))["rows"]:
+            self.assertEqual(tdx_protocol.market_code(f"{row['old']}.BJ"), (2, row["new"]))
 
     def test_echo_check_is_positional_and_needs_one_row_per_request(self):
         # R1: an old BJ code is answered with a 600839 placeholder at 0.0; here 600839 was also requested.

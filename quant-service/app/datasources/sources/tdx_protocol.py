@@ -508,7 +508,9 @@ async def call(operation: Callable[[TdxClient], T], **kwargs: Any) -> tuple[T, s
 
 def market_code(symbol: str) -> tuple[int, str]:
     """``"600519.SH"`` -> ``(1, "600519")``; an old BJ code is requested as its 920xxx code (tdx_bj_codes), so every
-    TDX adapter that takes a symbol serves it; anything but six ASCII digits and a known exchange is a ValueError."""
+    TDX adapter that takes a symbol serves it. The server answers a migrated security's whole history under the new
+    code and nothing under the old one (scripts/data/tdx_bj_history_2026-10-10_mac.json), so no history is lost.
+    Anything but six ASCII digits and a known exchange is a ValueError."""
     code, _, exchange = symbol.upper().partition(".")
     if exchange not in MARKETS or len(code) != 6 or not (code.isascii() and code.isdigit()):
         raise ValueError("symbol must be six digits followed by .SH, .SZ or .BJ")
