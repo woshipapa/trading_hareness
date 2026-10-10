@@ -324,6 +324,20 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tencent_free", "quote.order_book", 50, LIVE_VERIFIED,
           "intraday_quote_observations:source_name=tencent_order_book",
           "app/intraday_order_book_service.py", notes="五档；source_name=tencent_order_book"),
+    _bind("tdx_public", "quote.order_book", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_quotes.py:fetch_order_book",
+          notes="0x053e 五档：bid1..5/ask1..5（元）、bid_vol1..5/ask_vol1..5（手）；收盘后与腾讯收盘盘口逐档一致（沪、深、北个股，"
+                "价格与手数相同，scripts/data/tdx_quote_order_book_2026-10-10_mac.json）；只接受主板、创业板、科创板和北交所个股，"
+                "价格按固定 /100（这些类型小数位为 2，scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json）；"
+                "指数、板块、ETF、基金、可转债等其他代码在联网前以 ValueError 拒绝（ETF、可转债和基金由 MAC 批量行情给 float 价格）；"
+                "旧北交所代码按 920xxx 请求，行带 source_symbol；回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）；"
+                "盘中延迟与新鲜度未测",
+          spec=BindingSpec(
+              params={"symbols": "stock symbols such as 600519.SH (main board, ChiNext, STAR, BJ)"},
+              field_map={},
+              paging="batch", max_batch=80,
+              time_semantics="effective/available=collection time; the row carries no decoded exchange clock",
+              handshake_profile="login_one")),
     _bind("fuyao_ths", "quote.valuation", 12, DECLARED, _RAW + "a_share_valuations_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", "盘后逐日", "thscodes≤100",
           notes="可按交易日投影到 daily_fundamentals 缺失记录；pe=TTM、pb=MRQ；非完整每日指标，自动投影默认关闭"),

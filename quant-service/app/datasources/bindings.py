@@ -12,6 +12,7 @@ the same keywords, so the resolver can fall through without translation):
 * ``fund.nav``: ``fund_code``
 * ``quote.watch_snapshot``: ``symbols``
 * ``limits.prices``: ``symbols``
+* ``quote.order_book`` (TDX): ``symbols``, stock symbols such as 600519.SH
 * ``sector.index_quote`` (TDX): ``symbols``, board symbols such as 880005.SH
 * every TDX adapter that takes a symbol requests an old BJ code as its 920xxx code; a batch adapter adds
   ``source_symbol`` (the symbol as requested) to the row of each symbol it translated

@@ -116,8 +116,40 @@ class BoardIndexQuoteTests(unittest.TestCase):
         self.assertTrue({"volume", "turnover"}.isdisjoint(row), "no evidence gives their units")
 
 
+class OrderBookTests(unittest.TestCase):
+    def fetch(self, symbols, quotes):
+        client = FakeClient(quote_body(quotes))
+        with patched_call(client):
+            return asyncio.run(tdx_quotes.fetch_order_book(symbols=symbols)), client
+
+    def test_rows_equal_the_closing_book_of_the_evidence_level_by_level(self):
+        quotes = evidence_quotes()
+        symbols = ["600519.SH", "000001.SZ", "920000.BJ"]
+        evidence, _client = self.fetch(symbols, [quotes[symbol[:6]] for symbol in symbols])
+        self.assertEqual([row["symbol"] for row in evidence.rows], symbols)
+        for row, symbol in zip(evidence.rows, symbols):
+            self.assertEqual({name: value for name, value in row.items() if name != "symbol"}, quotes[symbol[:6]][4])
+        self.assertEqual((evidence.coverage, evidence.warnings), (1.0, ("tdx_host=h:7709/login_one",)))
+
+    def test_every_stock_board_is_served_and_an_old_bj_code_is_requested_as_its_920_code(self):
+        _market, _code, price, last_close, book = evidence_quotes()["600519"]
+        served = [(1, "600519", price, last_close, book), (0, "300750", price, last_close, book),
+                  (1, "688981", price, last_close, book), (2, "920017", price, last_close, book)]
+        evidence, client = self.fetch(["600519.SH", "300750.SZ", "688981.SH", "430017.BJ"], served)
+        self.assertEqual([(row["symbol"], row.get("source_symbol")) for row in evidence.rows],
+                         [("600519.SH", None), ("300750.SZ", None), ("688981.SH", None), ("920017.BJ", "430017.BJ")])
+        self.assertEqual(client.requests[0][22:], b"".join(bytes([market]) + code.encode() for market, code, *_ in served))
+
+    def test_index_board_fund_and_bond_codes_are_refused_before_the_network(self):
+        with mock.patch.object(tdx_protocol, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+            for symbol in ("999999.SH", "399300.SZ", "880005.SH", "510300.SH", "159915.SZ", "161121.SZ", "127045.SZ",
+                           "113709.SH", "900901.SH"):
+                with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, "takes only stock_"):
+                    asyncio.run(tdx_quotes.fetch_order_book(symbols=["600519.SH", symbol]))
+
+
 class QuoteBindingTests(unittest.TestCase):
-    ADAPTERS = {"sector.index_quote": tdx_quotes.fetch_index_quote}
+    ADAPTERS = {"sector.index_quote": tdx_quotes.fetch_index_quote, "quote.order_book": tdx_quotes.fetch_order_book}
 
     def test_each_binding_documents_the_keyword_only_parameters_of_its_adapter(self):
         for capability, adapter in self.ADAPTERS.items():
