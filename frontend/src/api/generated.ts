@@ -3992,6 +3992,10 @@ export interface components {
             description: string;
             /** Bindings */
             bindings: components["schemas"]["BindingResponse"][];
+            /** Evidence Locations */
+            evidence_locations?: {
+                [key: string]: unknown;
+            }[];
         };
         /** CatalogResponse */
         CatalogResponse: {

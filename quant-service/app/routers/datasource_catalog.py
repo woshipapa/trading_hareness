@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..datasources import catalog
 
@@ -57,6 +57,7 @@ class CapabilityResponse(BaseModel):
     time_semantics: str
     description: str
     bindings: list[BindingResponse]
+    evidence_locations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DataSourceResponse(BaseModel):
@@ -126,6 +127,7 @@ def _capability(item: Any, bindings: list[Any]) -> dict[str, Any]:
         "time_semantics": item.time_semantics,
         "description": item.description,
         "bindings": [_binding(binding) for binding in bindings],
+        "evidence_locations": catalog.evidence_locations(item.key),
     }
 
 
