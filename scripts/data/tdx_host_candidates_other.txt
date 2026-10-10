@@ -1,0 +1,98 @@
+# Public host candidates copied from open-source clients (read-only research).
+# These are not validated by this repository; do not promote directly to a live
+# threshold/order path.  Provenance includes the source file and observed date.
+# Existing quant-service DEFAULT_HOSTS were omitted unless the project exposed
+# a different port/dialect.
+
+# Bit-Shine/zytdx hosts.go (MIT), fetched 2026-10-09; TdxExHq extended market.
+112.74.214.43:7727
+120.25.218.6:7727
+43.139.173.246:7727
+159.75.90.107:7727
+106.52.170.195:7727
+175.24.47.69:7727
+139.9.191.175:7727
+150.158.9.199:7727
+150.158.20.127:7727
+49.235.119.116:7727
+49.234.13.160:7727
+116.205.143.214:7727
+124.71.223.19:7727
+123.60.173.210:7727
+113.45.175.47:7727
+118.89.69.202:7727
+116.205.135.205:7727  # MAC extended
+121.37.232.167:7727  # MAC extended
+
+# Bit-Shine/zytdx hosts.go (MIT), MAC standard-market dialect.
+121.36.248.138:7709
+123.60.47.136:7709
+121.37.207.165:7709
+
+# iOSleep/dart_tdx lib/src/constants.dart (MIT), fetched 2026-10-09.
+# Extended-market entries use port 7720 (different from TdxExHq 7727).
+47.112.95.207:7720
+218.75.75.18:7720
+58.49.110.76:7720
+120.76.152.87:7709  # dedicated financial-data route
+
+# Representative novel standard-market entries from Bit-Shine/zytdx hosts.go
+# (the file also contains many overlaps with the current 7709 pool).
+110.41.4.4:7709
+47.113.94.204:7709
+8.129.174.169:7709
+110.41.154.219:7709
+124.70.176.52:7709
+47.100.236.28:7709
+123.60.186.45:7709
+123.60.164.122:7709
+47.116.105.28:7709
+121.36.54.217:7709
+121.36.81.195:7709
+123.249.15.60:7709
+124.71.85.110:7709
+139.9.51.18:7709
+139.159.239.163:7709
+106.14.201.131:7709
+106.14.190.242:7709
+47.107.64.168:7709
+47.107.228.47:7719
+120.46.186.223:7709
+124.70.22.210:7709
+139.9.133.247:7709
+
+# Node interstellarmt/node-tdx server-list.ts (MIT), fetched 2026-10-09.
+# Its 7727 list is the same public TdxExHq family above; no additional port
+# was found.  Standard entries not already in the current pool:
+122.51.120.217:7709
+122.51.232.182:7709
+118.25.98.114:7709
+62.234.50.143:7709
+81.70.151.186:7709
+101.42.240.54:7709
+101.43.159.194:7709
+120.53.8.251:7709
+152.136.191.169:7709
+49.232.15.141:7709
+82.156.174.84:7709
+101.42.164.241:7709
+111.230.186.52:7709
+101.33.225.16:7709
+175.178.112.197:7709
+175.178.128.227:7709
+43.139.95.83:7709
+159.75.29.111:7709
+43.139.18.171:7709
+81.71.32.47:7709
+129.204.230.128:7709
+
+# Michaol/mitdx python/mitdx/consts.py (MIT), fetched 2026-10-09.
+8.129.13.54:7709
+120.24.149.49:7709
+114.115.234.36:7709
+119.147.212.81:7709  # also its secondary financial-data route
+
+# PyPI ten2net-tdxapi 0.1.0 tdxapi/protocol/constants.py (MIT), downloaded
+# 2026-10-09. Its declared GitHub repository URL returned 404 during research.
+180.153.39.51:7709
+119.147.212.82:7709
