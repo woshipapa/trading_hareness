@@ -314,7 +314,9 @@ async def job_tdx_security_list(deps: ArchiveDeps, state: ArchiveState, day: dat
     rows = evidence.rows
     previous = await deps.latest_observation_payloads("tdx_public", "tdx_security_list") if deps.latest_observation_payloads else {}
     changed = [dict(row, effective_at=now.isoformat(), available_at=now.isoformat())
-               for row in rows if previous.get(row["symbol"]) != row]
+               for row in rows
+               if {key: value for key, value in previous.get(row["symbol"], {}).items()
+                   if key not in {"provider_key", "capability"}} != row]
     stored = await deps.collector.persist_observations("tdx_public", "tdx_security_list", changed) if changed else 0
     await deps.collector.record_health("tdx_public", "tdx_security_list", True, len(rows),
                                        round((time_module.monotonic() - started) * 1000), None)

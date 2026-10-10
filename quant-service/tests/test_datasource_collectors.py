@@ -403,6 +403,19 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["effective_at"], "2026-08-29T23:59:59+08:00")
         self.assertEqual(row["available_at"], EVENING.isoformat())
 
+    async def test_tdx_security_list_skips_unchanged_payload_metadata(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        row = {"symbol": "600519.SH", "name": "Moutai", "instrument_type": "stock_main",
+               "decimal_point": 2, "is_st": False, "list_source": "server_list"}
+        deps.latest_observation_payloads = AsyncMock(return_value={"600519.SH": {**row, "provider_key": "tdx_public",
+                                                                                   "capability": "tdx_security_list"}})
+        with patch("app.datasources.collectors.post_close.tdx_instruments.fetch_security_list",
+                   AsyncMock(return_value=type("Evidence", (), {"rows": [row]})())):
+            result = await post_close.job_tdx_security_list(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(result["changed"], 0)
+        self.assertEqual(recorder.observations, [])
+
     async def test_tdx_gpcw_limits_periods_and_splits_dated_rows(self):
         recorder = Recorder()
         deps = self._deps(recorder)
