@@ -227,3 +227,13 @@ The direct convertible-bond calendar sample has 12 rows.
 | 9 | placement rate/value (ratio) | CONFIRMED | 100% | placement field |
 | 10 | result/listing milestone (date) | UNKNOWN | 0% | blank/non-uniform |
 | 11 | bond name (text) | CONFIRMED | 100% | GB18030 name |
+
+## 更正（2026-10-11）：Q1 的两个“例外”
+
+Q1 里的两个“例外”（`002107`：tipinfo 为 20261010、H1 实际披露 20260716；`002731`：tipinfo 为 20251028、响应里没有 H1 实际披露）不是第 4 列出错，而是 `tipinfo.dat` 里这两只证券的行属于另一个报告期。原文照旧保留。
+
+- 同一次下载里（`zhb.zip` md5 `fa3f6929fb22eeec5240b01b9d40922f`，其中 `tipinfo.dat` md5 `e446860a83408205000d14cce8804b0b`，见 `quant-service/tests/fixtures/tdx_zhb_20261009/PROVENANCE.json`），`002107` 的行是报告期 `20260930`、第 4 列 `20261010`，`002731` 的行是报告期 `20250930`、第 4 列 `20251028`。
+- 文件每只证券只留最新一期：`scripts/data/tdx_tipinfo_2026-10-10_mac.json` 记 5,652 行里 5,649 行的报告期是 `20260630`，另有 `20260930`、`20250930`、`20260331` 各 1 行；第 4 列的范围是 `20251028`–`20261010`，两端正是这两个例外的日期。
+- 上文 Q1 按证券代码连接，把这两行当成了 H1 的行。按 (代码, 报告期) 连接，它们没有 H1 行可比，不再有对不上的行；东财 `REPORT_DATE=2026-06-30` 的 5,551 只里，其余 5,549 只的第 4 列都等于实际披露日。
+
+所以“可能滞后或后移（`002107`）”的说法不成立。Q1 结论的另一半不变：第 4 列是披露日，不是通用的 PIT 可得时钟——只有日期没有时刻，且 `tipinfo.dat` 只给最新一期定日期，更早的期没有日期（`tdx_fin_history.date_gpcw_rows` 把这些期计为无日期）。

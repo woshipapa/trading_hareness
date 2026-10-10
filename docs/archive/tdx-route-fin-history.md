@@ -87,3 +87,12 @@ support `fundamentals.daily_basic` only for share/count fields. It cannot by
 itself back `events.earnings_forecast`, `events.earnings_express`, or
 `events.disclosure_schedule`; those remain event-source capabilities whose
 timestamps establish PIT availability.
+
+## 更正（2026-10-11）：可得时间与 PIT 结论
+
+上文 “Availability and PIT verdict” 一节被部分取代，原文照旧保留。
+
+- **tipinfo 第 4 列已被确认。** 原文说它没有独立确认；之后的 `docs/archive/tdx-q-disclosure.md` 用东财 `RPT_PUBLIC_BS_APPOIN` 的 5,551 只对过，相等 5,549 只（99.96 %），其中两个“例外”其实是另一报告期的行（见该文末尾的更正）。它是首次披露日，只有日期，没有时刻。
+- **GPCW 现在有一部分行能定可得时间。** `tdx_fin_history.date_gpcw_rows(rows, tipinfo_rows)` 按 (代码, 报告期) 用 `tipinfo.dat` 第 4 列（`tdx_zhb_extras.parse_tipinfo` 的 `first_disclosure_date`）给 GPCW 行设 `available_at` = 首次披露日当天 23:59:59（Asia/Shanghai），下一个交易日起可用，并返回仍无日期的行数。所以“GPCW **不是** point-in-time”不再对每一行成立。
+- **更早的期仍无日期。** `tipinfo.dat` 每只证券只留最新一期（`scripts/data/tdx_tipinfo_2026-10-10_mac.json`：5,652 行里 5,649 行的报告期是 20260630），更早的期，以及它没列的证券，`available_at` 只能是采集时刻。盘后任务 `tdx_gpcw` 把这两种行分别记成 `availability_basis` = `tipinfo_first_disclosure` 和 `collection_time_undated`（`quant-service/app/datasources/collectors/post_close.py`）。要给更早的期定日期，得把每次下载的 (代码, 报告期, 首次披露日) 累积起来；盘后任务 `tdx_tipinfo` 按日归档，`tdx_gpcw` 读这些已归档的行。
+- **仍然成立：** GPCW 文件本身没有公告时间戳，值是最新或重述后的快照，同一期可能被重述；第 4 列只有日期；`events.earnings_forecast`、`events.earnings_express`、`events.disclosure_schedule` 仍由事件源的时间戳定可得时间。

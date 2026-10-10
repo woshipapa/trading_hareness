@@ -82,3 +82,13 @@ legacy category/sort/filter requests.  Read-only sibling-module evidence used
 the existing field registry, protocol builders/parsers, and security-list
 classification helpers.  No provider value is promoted into a threshold or
 execution path.
+
+## 更正（2026-10-11）：ST 涨跌停比例
+
+上文两处“ST 用 1.05”（结论表 `0x20` / `0x21` 一行，以及 “0x58 recount details” 里的比例说明）已过期。原文照旧保留。
+
+- 沪深主板 ST 的涨跌幅自 2026-07-06 起是 10 %，此前是 5 %（`quant-service/app/market_rules.py` 的 `MAIN_BOARD_ST_TEN_PERCENT_FROM`）；创业板、科创板的 ST 一直是 20 %，北交所是 30 %，ST 不另设比例（同一文件）。
+- 证据：`scripts/data/tdx_mac_limits_all_a_2026-10-10_mac.json`。2026-10-09 会话全 A 快照的 5,562 行都有 MAC 涨跌停价（覆盖率 1.0，日期都是 2026-10-09）。按“限价 / 昨收 − 1”算，主板 ST 是 0.100（76 行）、0.101（25 行）、0.099（18 行）等，创业板与科创板的 ST 在 0.2 上下，北交所的 ST 在 0.3 上下。
+- 没有价格限制的证券（新股、北交所首日）两个限价都回 0.0：001246.SZ、301716.SZ、920157.BJ。
+
+所以按比例复算 `0x20` / `0x21` 或涨停天数时，ST 的比例要按交易日取：2026-07-06 之前的主板 ST 交易日用 1.05，之后用 1.10，其他板块的 ST 与非 ST 相同。上文 `0x58` 的 30/36 是按固定的 1.05 算的，本更正不重算它。
