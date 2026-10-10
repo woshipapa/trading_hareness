@@ -64,6 +64,7 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("tdx_index_bars", time(20, 10), time(23, 30), "通达信指数日线与涨跌家数"),
     ArchiveJob("tdx_mac_boards", time(20, 20), time(23, 30), "通达信板块目录与成分"),
     ArchiveJob("tdx_limit_pools", time(20, 30), time(23, 30), "通达信衍生涨跌停池"),
+    ArchiveJob("tdx_host_probe", time(20, 40), time(23, 30), "通达信主机周探针"),
 )
 
 
@@ -87,6 +88,7 @@ TDX_INDEX_SYMBOLS = ("999999.SH", "399001.SZ", "399006.SZ", "399300.SZ", "000688
 @dataclass
 class ArchiveState:
     done: dict[str, str] = field(default_factory=dict)
+    weekly_done: dict[str, str] = field(default_factory=dict)
     last_attempt: dict[str, float] = field(default_factory=dict)
     collector_state: CollectorState = field(default_factory=CollectorState)
 
@@ -458,6 +460,31 @@ async def job_tdx_limit_pools(deps: ArchiveDeps, state: ArchiveState, day: date,
     return {"counts": counts, "stored": stored}
 
 
+async def job_tdx_host_probe(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Probe every configured TDX host weekly; a normal run writes one health row per host."""
+    week = f"{day.isocalendar().year}-W{day.isocalendar().week:02d}"
+    if state.weekly_done.get("tdx_host_probe") == week:
+        return {"status": "skipped", "week": week}
+    results = []
+    for host in tdx_protocol.configured_hosts():
+        started = time_module.monotonic()
+        try:
+            count, receipt = await asyncio.to_thread(
+                tdx_protocol.call_sync,
+                lambda client: tdx_instruments.security_count(client, 0), hosts=[host], handshake_profile="login_one",
+            )
+            latency = round((time_module.monotonic() - started) * 1000)
+            await deps.collector.record_health("tdx_public", f"tdx_host:{receipt}", True, int(count), latency, None)
+            results.append({"host": receipt, "ok": True, "latency_ms": latency, "count": count})
+        except Exception as error:  # noqa: BLE001 - one host failure must not hide other host health
+            latency = round((time_module.monotonic() - started) * 1000)
+            label = f"{host[0]}:{host[1]}"
+            await deps.collector.record_health("tdx_public", f"tdx_host:{label}", False, 0, latency, type(error).__name__)
+            results.append({"host": label, "ok": False, "latency_ms": latency, "error": type(error).__name__})
+    state.weekly_done["tdx_host_probe"] = week
+    return {"status": "completed", "week": week, "hosts": results}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -469,6 +496,7 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "tdx_index_bars": job_tdx_index_bars,
     "tdx_mac_boards": job_tdx_mac_boards,
     "tdx_limit_pools": job_tdx_limit_pools,
+    "tdx_host_probe": job_tdx_host_probe,
 }
 
 

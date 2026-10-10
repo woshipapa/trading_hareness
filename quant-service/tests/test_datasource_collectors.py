@@ -493,6 +493,20 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({capability for _provider, capability, _rows in recorder.observations},
                          {"tdx_limit_up_pool", "tdx_broken_pool", "tdx_limit_down_pool"})
 
+    async def test_tdx_host_probe_runs_once_per_iso_week_and_records_each_host(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        with patch("app.datasources.collectors.post_close.tdx_protocol.configured_hosts",
+                   return_value=(("one", 7709), ("two", 7709))), \
+             patch("app.datasources.collectors.post_close.tdx_protocol.call_sync",
+                   side_effect=[(10, "one:7709/login_one"), OSError("down")]):
+            state = post_close.ArchiveState()
+            first = await post_close.job_tdx_host_probe(deps, state, date(2026, 10, 12), EVENING)
+            second = await post_close.job_tdx_host_probe(deps, state, date(2026, 10, 13), EVENING)
+        self.assertEqual(first["status"], "completed")
+        self.assertEqual(second["status"], "skipped")
+        self.assertEqual(len(recorder.health_details), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
