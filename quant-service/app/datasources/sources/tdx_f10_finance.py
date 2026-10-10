@@ -24,7 +24,7 @@ FINANCE_FIELDS = (
     "b_shares", "h_shares", "eps", "total_assets", "current_assets",
     "fixed_assets", "intangible_assets", "shareholder_count",
     "current_liabilities", "long_term_liabilities", "capital_reserve",
-    "total_equity", "operating_revenue", "operating_cost",
+    "parent_equity", "operating_revenue", "main_business_profit",
     "accounts_receivable", "operating_profit", "investment_income",
     "net_cash_flow", "total_cash_inflow", "inventory", "total_profit",
     "after_tax_profit", "net_profit", "undistributed_profit",
@@ -34,42 +34,41 @@ FINANCE_FIELDS = (
 FINANCE_METADATA_FIELDS = {"province", "industry", "updated_date", "ipo_date"}
 FINANCE_SHARE_FIELDS = {
     "float_shares", "total_shares", "state_shares", "sponsor_legal_shares",
-    "legal_shares", "b_shares", "h_shares", "zhigonggu",
+    "legal_shares", "b_shares", "h_shares",
 }
 FINANCE_PER_SHARE_FIELDS = {"eps", "net_assets_per_share", "reserved2"}
 FINANCE_COUNT_FIELDS = {"shareholder_count"}
-FINANCE_MONEY_FIELDS = set(FINANCE_FIELDS) - FINANCE_METADATA_FIELDS - FINANCE_SHARE_FIELDS - FINANCE_PER_SHARE_FIELDS - FINANCE_COUNT_FIELDS
-
-# The public mootdx table is indexed as col1 = columns[1] (columns[0] is the
-# report date).  Keep the stable, high-value part here and return colN for
-# vendor extensions whose labels differ between TDX releases.
-def _code(code: str) -> bytes:
-    raw = code.encode("ascii")
-    if len(raw) != 6 or not raw.isdigit():
-        raise ValueError("TDX codes are six ASCII digits")
-    return raw
-
-
-def _market(market: int) -> int:
-    if market not in (0, 1, 2):
-        raise ValueError("market must be 0 (SZ), 1 (SH), or 2 (BJ)")
-    return market
 
 
 def build_finance_info_request(market: int, code: str) -> bytes:
-    return bytes.fromhex("0c 1f 18 76 00 01 0b 00 0b 00 10 00 01 00") + struct.pack("<B6s", _market(market), _code(code))
+    raw_code = code.encode("ascii")
+    if len(raw_code) != 6 or not raw_code.isdigit():
+        raise ValueError("TDX codes are six ASCII digits")
+    if market not in (0, 1, 2):
+        raise ValueError("market must be 0 (SZ), 1 (SH), or 2 (BJ)")
+    return bytes.fromhex("0c 1f 18 76 00 01 0b 00 0b 00 10 00 01 00") + struct.pack("<B6s", market, raw_code)
 
 
 def build_company_categories_request(market: int, code: str) -> bytes:
-    return bytes.fromhex("0c 0f 10 9b 00 01 0e 00 0e 00 cf 02") + struct.pack("<H6sI", _market(market), _code(code), 0)
+    raw_code = code.encode("ascii")
+    if len(raw_code) != 6 or not raw_code.isdigit():
+        raise ValueError("TDX codes are six ASCII digits")
+    if market not in (0, 1, 2):
+        raise ValueError("market must be 0 (SZ), 1 (SH), or 2 (BJ)")
+    return bytes.fromhex("0c 0f 10 9b 00 01 0e 00 0e 00 cf 02") + struct.pack("<H6sI", market, raw_code, 0)
 
 
 def build_company_content_request(market: int, code: str, filename: str, start: int, length: int) -> bytes:
+    raw_code = code.encode("ascii")
+    if len(raw_code) != 6 or not raw_code.isdigit():
+        raise ValueError("TDX codes are six ASCII digits")
+    if market not in (0, 1, 2):
+        raise ValueError("market must be 0 (SZ), 1 (SH), or 2 (BJ)")
     name = filename.encode("ascii")
     if len(name) > 80 or start < 0 or length < 0 or length > 0xFFFFFFFF:
         raise ValueError("invalid F10 filename/range")
     return bytes.fromhex("0c 07 10 9c 00 01 68 00 68 00 d0 02") + struct.pack(
-        "<H6sH80sIII", _market(market), _code(code), 0, name.ljust(80, b"\0"), start, length, 0
+        "<H6sH80sIII", market, raw_code, 0, name.ljust(80, b"\0"), start, length, 0
     )
 
 
@@ -137,6 +136,7 @@ def parse_report_file(body: bytes) -> tuple[int, bytes]:
     size = struct.unpack_from("<I", body)[0]
     return size, body[4:4 + size]
 
+
 class TdxF10Client(tdx_protocol.TdxClient):
     """Connected TDX client for F10 and finance summary."""
 
@@ -150,19 +150,9 @@ class TdxF10Client(tdx_protocol.TdxClient):
         return parse_company_content(self._exchange(build_company_content_request(market, code, filename, start, length)))
 
 
-def _call(operation: Any, *, hosts: Any = None, timeout_seconds: float = 5.0) -> Any:
-    errors = []
-    for host, port in hosts or FINANCE_HOSTS:
-        try:
-            with TdxF10Client(host, port, timeout_seconds) as client:
-                return operation(client)
-        except (OSError, tdx_protocol.TdxProtocolError, struct.error, IndexError, ValueError) as error:
-            errors.append(f"{host}:{type(error).__name__}")
-    raise tdx_protocol.TdxProtocolError("no TDX F10 host answered: " + ", ".join(errors[-4:]))
-
-
-def finance_info(market: int, code: str, *, hosts: Any = None, timeout_seconds: float = 5.0) -> dict[str, Any]:
-    return _call(lambda client: client.finance_info(market, code), hosts=hosts, timeout_seconds=timeout_seconds)
+def finance_info(market: int, code: str, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
+    result, _ = tdx_protocol.call_sync(lambda client: client.finance_info(market, code), timeout_seconds=timeout_seconds)
+    return result
 
 
 async def fetch_financial_summary(*, symbol: str) -> list[dict[str, Any]]:
@@ -185,7 +175,8 @@ def _company_profile_sync(symbol: str) -> list[dict[str, Any]]:
                  "content": client.company_content(market, code, category["filename"], category["start"], category["length"])}
                 for category in categories]
 
-    return _call(fetch)
+    result, _ = tdx_protocol.call_sync(fetch)
+    return result
 
 
 async def fetch_company_profile(*, symbol: str) -> list[dict[str, Any]]:
