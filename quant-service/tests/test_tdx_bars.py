@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.datasources.catalog import BINDINGS
+from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_bars, tdx_instruments, tdx_mac, tdx_protocol
 
 
@@ -44,9 +46,15 @@ class IndexBarTests(unittest.TestCase):
         with patch.object(tdx_bars.tdx_protocol, "call", call):
             evidence = asyncio.run(tdx_bars.fetch_index_daily(symbol="999999.SH", count=3))
         self.assertEqual(evidence.rows[-1]["up_count"], 1341)
+        self.assertEqual(evidence.rows[-1]["volume_raw"], 5351499)
         self.assertEqual(evidence.warnings, ("tdx_host=fixture-host:7709",))
         self.assertIsNotNone(evidence.available_at_min)
         self.assertEqual(evidence.available_at_min, evidence.available_at_max)
+        binding = next(item for item in BINDINGS if item.source == "tdx_public" and item.capability == "bars.index_daily")
+        projected = _normalise_rows(evidence.rows, binding)
+        self.assertTrue(projected.canonical)
+        self.assertEqual({key: projected.rows[-1][key] for key in ("high", "low", "up_count", "down_count")},
+                         {key: evidence.rows[-1][key] for key in ("high", "low", "up_count", "down_count")})
 
 
 class LegacyBarTests(unittest.TestCase):
