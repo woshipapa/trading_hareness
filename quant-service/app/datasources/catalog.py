@@ -487,8 +487,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
               params={}, field_map={},
               time_semantics="effective/available=collection", handshake_profile="mac")),
     _bind("tdx_mac", "sector.membership", 70, UNSUPPORTED, "sector_membership_history:taxonomy_key=tdx_mac_*",
-          "app/datasources/sources/tdx_mac.py:fetch_membership", spec=BindingSpec(
-              params={"sector_key": "MAC board code (returned by fetch_board_catalog)"},
+          "app/datasources/sources/tdx_mac.py:fetch_membership",
+          notes="board_type 取自 fetch_board_catalog 的同一行，调用时不扫描板块列表；类型 2（无板块）和 6（与其余类型重复）不读取；未知类型在联网前报错并点名板块键",
+          spec=BindingSpec(
+              params={"sector_key": "board_code of a fetch_board_catalog row",
+                      "board_type": "board_type of the same row (selects the tdx_mac_type_N taxonomy)"},
               field_map={},
               time_semantics="known_at=collection UTC-aware", handshake_profile="mac")),
     _bind("fuyao_ths", "sector.index_quote", 12, DECLARED, _RAW + "ths_index_prices_snapshot",
@@ -731,15 +734,15 @@ TAXONOMIES: Final[dict[str, Taxonomy]] = {item.key: item for item in (
              "390 个概念全量成分，盘后自动刷新；作为 ths_concept_flow 的候选替代，待策略侧验证"),
     Taxonomy("fuyao_ths_industry", "fuyao_ths", "ths_industry", DECLARED, 40, "320 个行业"),
     Taxonomy("fuyao_ths_region", "fuyao_ths", "ths_region", DECLARED, 50, "33 个地域"),
-    # MAC board types (0-6); names from MAC documentation where available, else tdx_mac_type_N
-    # MAC board types, named by number: the MAC report (docs/archive/tdx-route-mac.md) gives counts and sample
-    # codes but no meaning; type 2 returned no boards. Unverified, so never offered by taxonomies_for().
+    # MAC board types 0, 1, 3, 4 and 5 (tdx_mac.BOARD_TYPES), named by number: the MAC report
+    # (docs/archive/tdx-route-mac.md) gives counts and sample codes but no meaning.  Type 2 returned no boards
+    # and type 6 repeats boards of the others, so neither has a taxonomy.  Unverified, so never offered by
+    # taxonomies_for().
     Taxonomy("tdx_mac_type_0", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 70),
     Taxonomy("tdx_mac_type_1", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 71),
     Taxonomy("tdx_mac_type_3", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 73),
     Taxonomy("tdx_mac_type_4", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 74),
     Taxonomy("tdx_mac_type_5", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 75),
-    Taxonomy("tdx_mac_type_6", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 76),
 )}
 
 #: Groups in the THS concept tables whose membership is a qualification, not a

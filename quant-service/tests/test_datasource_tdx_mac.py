@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from app.datasources.catalog import BINDINGS
+from app.datasources.catalog import BINDINGS, TAXONOMIES
 from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_mac, tdx_mac_fields
 from app.datasources.sources.tdx_mac_fields import active_fields, bitmap_for_bits
@@ -82,6 +82,9 @@ class FakeMacClient(tdx_mac.TdxMacClient):
     def _exchange(self, request: bytes) -> bytes:
         self.requests.append(request)
         return self.answers[struct.unpack_from("<H", request, 10)[0]](request)
+
+    def opcodes(self) -> list[int]:
+        return [struct.unpack_from("<H", request, 10)[0] for request in self.requests]
 
 
 def quote_values():
@@ -155,12 +158,12 @@ class MacAdapterSignatureTests(unittest.TestCase):
                           and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)]
         self.assertEqual(len(required_params), 0)
 
-    def test_fetch_membership_accepts_sector_key_keyword(self):
-        """fetch_membership must accept sector_key as keyword-only parameter."""
-        import inspect
+    def test_fetch_membership_accepts_sector_key_and_board_type_keywords(self):
+        """fetch_membership takes the catalog row's board_code and board_type as keyword-only parameters."""
         sig = inspect.signature(tdx_mac.fetch_membership)
-        self.assertIn('sector_key', sig.parameters)
-        self.assertEqual(sig.parameters['sector_key'].kind, inspect.Parameter.KEYWORD_ONLY)
+        for name in ("sector_key", "board_type"):
+            self.assertIn(name, sig.parameters)
+            self.assertEqual(sig.parameters[name].kind, inspect.Parameter.KEYWORD_ONLY)
 
 
 class MacBoardCatalogTests(unittest.TestCase):
@@ -188,28 +191,94 @@ class MacBoardCatalogTests(unittest.TestCase):
         # leading_price at offset 148 should be 11.59 (not read as <H which would be 28836)
         self.assertAlmostEqual(row["leading_price"], 11.59, places=2)
 
+    def catalog_client(self, boards_by_type):
+        return FakeMacClient({tdx_mac.OP_BOARD: lambda request: board_page(
+            *[board_item(code, name) for code, name in boards_by_type[struct.unpack_from("<H", request, 14)[0]]])})
+
+    def test_adapter_rows_are_board_code_name_and_board_type_and_skip_types_2_and_6(self):
+        client = self.catalog_client({0: [("881376", "Coal")], 1: [("881377", "Gas")], 3: [("880710", "Chip")],
+                                      4: [("880842", "Bank")], 5: [("880231", "Area")]})
+        with patched_call(client):
+            evidence = asyncio.run(tdx_mac.fetch_board_catalog())
+        self.assertEqual(evidence.rows, [
+            {"board_code": "881376", "name": "Coal", "board_type": 0},
+            {"board_code": "881377", "name": "Gas", "board_type": 1},
+            {"board_code": "880710", "name": "Chip", "board_type": 3},
+            {"board_code": "880842", "name": "Bank", "board_type": 4},
+            {"board_code": "880231", "name": "Area", "board_type": 5}])
+        self.assertEqual(evidence.warnings, ("tdx_host=mac-host:7709",))
+        self.assertEqual([struct.unpack_from("<H", request, 14)[0] for request in client.requests], [0, 1, 3, 4, 5])
+
+    def test_a_fixture_through_the_real_binding_keeps_board_code_name_and_board_type(self):
+        client = self.catalog_client({0: [("881376", "Coal")], 1: [], 3: [], 4: [], 5: [("880231", "Area")]})
+        with patched_call(client):
+            evidence = asyncio.run(tdx_mac.fetch_board_catalog())
+        projected = _normalise_rows(evidence.rows, mac_binding("sector.board_catalog"))
+        self.assertTrue(projected.canonical)
+        self.assertEqual((projected.status, projected.warnings), (None, ()))
+        self.assertEqual(projected.rows, [{"board_code": "881376", "name": "Coal", "board_type": 0},
+                                          {"board_code": "880231", "name": "Area", "board_type": 5}])
+
 
 class MacMembershipTests(unittest.TestCase):
     """sector.membership rows carry the four canonical fields, known_at being the UTC collection time."""
 
-    def test_adapter_rows_carry_taxonomy_sector_symbol_and_a_utc_known_at(self):
-        client = FakeMacClient({
-            tdx_mac.OP_BOARD: lambda request: board_page(board_item("881376", "Coal")),
-            tdx_mac.OP_MEMBERS: lambda request: members_page(
-                member_item(1, "600519", "Moutai"), member_item(0, "000001", "PingAn")),
-        })
-        before = datetime.now(timezone.utc)
+    MEMBERS = {tdx_mac.OP_MEMBERS: lambda request: members_page(
+        member_item(1, "600519", "Moutai"), member_item(0, "000001", "PingAn"))}
+
+    def fetch(self, client, **params):
         with patched_call(client):
-            evidence = asyncio.run(tdx_mac.fetch_membership(sector_key="881376"))
+            return asyncio.run(tdx_mac.fetch_membership(**params))
+
+    def test_adapter_rows_carry_taxonomy_sector_symbol_and_a_utc_known_at(self):
+        client = FakeMacClient(self.MEMBERS)
+        before = datetime.now(timezone.utc)
+        evidence = self.fetch(client, sector_key="880710", board_type=3)
         after = datetime.now(timezone.utc)
         rows = evidence.rows
         self.assertEqual(evidence.warnings, ("tdx_host=mac-host:7709",))
         self.assertEqual([row["symbol"] for row in rows], ["600519.SH", "000001.SZ"])
         for row in rows:
             self.assertEqual(set(row), {"taxonomy_key", "sector_key", "symbol", "known_at"})
-            self.assertEqual((row["taxonomy_key"], row["sector_key"]), ("tdx_mac_type_0", "881376"))
+            self.assertEqual((row["taxonomy_key"], row["sector_key"]), ("tdx_mac_type_3", "880710"))
             self.assertEqual(row["known_at"].utcoffset(), timedelta(0))
             self.assertTrue(before <= row["known_at"] <= after)
+
+    def test_the_board_type_comes_from_the_catalog_row_and_no_board_list_is_read(self):
+        client = FakeMacClient(self.MEMBERS)
+        self.fetch(client, sector_key="880710", board_type=3)
+        self.assertEqual(client.opcodes(), [tdx_mac.OP_MEMBERS])
+        self.assertEqual(struct.unpack_from("<I", client.requests[0], 12)[0], tdx_mac.exchange_board_code("880710"))
+
+    def test_an_unknown_board_type_raises_before_any_network_call_and_names_the_key(self):
+        for board_type in (2, 6, 9):
+            with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+                with self.assertRaisesRegex(tdx_mac.TdxMacError, f"unknown MAC board key '880710'.*type {board_type}"):
+                    asyncio.run(tdx_mac.fetch_membership(sector_key="880710", board_type=board_type))
+
+    def test_a_malformed_board_key_raises_before_any_network_call(self):
+        with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+            with self.assertRaisesRegex(ValueError, "(?i)abc"):
+                asyncio.run(tdx_mac.fetch_membership(sector_key="abc", board_type=3))
+
+    def test_an_unknown_market_id_in_the_answer_raises(self):
+        client = FakeMacClient({tdx_mac.OP_MEMBERS: lambda request: members_page(member_item(7, "600519", "Moutai"))})
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "unknown market id: 7"):
+            self.fetch(client, sector_key="880710", board_type=3)
+
+    def test_a_fixture_through_the_real_binding_keeps_the_four_canonical_fields(self):
+        evidence = self.fetch(FakeMacClient(self.MEMBERS), sector_key="880710", board_type=3)
+        projected = _normalise_rows(evidence.rows, mac_binding("sector.membership"))
+        self.assertTrue(projected.canonical)
+        self.assertEqual((projected.status, projected.warnings), (None, ()))
+        self.assertEqual({(row["taxonomy_key"], row["sector_key"], row["symbol"]) for row in projected.rows},
+                         {("tdx_mac_type_3", "880710", "600519.SH"), ("tdx_mac_type_3", "880710", "000001.SZ")})
+        self.assertTrue(all(row["known_at"].utcoffset() == timedelta(0) for row in projected.rows))
+
+    def test_every_board_type_has_exactly_one_taxonomy(self):
+        taxonomies = {key for key, item in TAXONOMIES.items() if item.source == "tdx_mac"}
+        self.assertEqual(taxonomies, {f"tdx_mac_type_{board_type}" for board_type in tdx_mac.BOARD_TYPES})
+        self.assertEqual(tdx_mac.BOARD_TYPES, (0, 1, 3, 4, 5))
 
 
 class MacProtocolTests(unittest.TestCase):

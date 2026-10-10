@@ -36,6 +36,9 @@ OP_AUCTION = 0x123D
 OP_TICK_CHARTS = 0x123E
 OP_MARKET_MONITOR = 0x1237
 OP_BELONG_BOARD = 0x1218
+#: The board types the catalog lists.  Type 2 answered no boards and type 6 repeats boards of the others
+#: (docs/archive/tdx-route-mac.md), so neither is read; the catalog has one tdx_mac_type_N taxonomy per type here.
+BOARD_TYPES = (0, 1, 3, 4, 5)
 BAR_PERIODS = {
     "5m": 0,
     "15m": 1,
@@ -372,27 +375,23 @@ class TdxMacClient:
                 break
         return rows
 
-    def board_members(self, board_symbol: str):
-        return self._board_members(board_symbol, quotes=False)
+    def board_members(self, board_code: int):
+        return self._board_members(board_code, quotes=False)
 
-    def _board_members(self, board_symbol: str, *, quotes: bool):
+    def _board_members(self, board_code: int, *, quotes: bool):
         rows = []
-        board_code = exchange_board_code(board_symbol)
         for start in range(0, 10000, 80):
             body = self._exchange(
                 build_board_members_request(board_code, start=start, quotes=quotes)
             )
             page = parse_board_members(body, quotes=quotes)
             rows.extend(page)
-            total = (
-                struct.unpack_from("<I", body, 20)[0] if len(body) >= 24 else len(rows)
-            )
-            if len(rows) >= total or len(page) < 80:
+            if len(rows) >= struct.unpack_from("<I", body, 20)[0] or len(page) < 80:
                 break
         return rows
 
-    def board_member_quotes(self, board_symbol: str):
-        return self._board_members(board_symbol, quotes=True)
+    def board_member_quotes(self, board_code: int):
+        return self._board_members(board_code, quotes=True)
 
     def batch_quotes(self, stocks: Sequence[tuple[int, str]], bitmap: bytes = DEFAULT_BITMAP):
         rows = []
@@ -512,47 +511,30 @@ async def fetch_limit_prices(*, symbols: Sequence[str]) -> CapabilityEvidence:
 
 async def fetch_board_catalog() -> CapabilityEvidence:
     def collect(client):
-        rows = []
-        for board_type in range(7):
-            if board_type == 2 or board_type == 6:
-                continue
-            rows.extend({"board_code": row["code"], "name": row["name"],
-                         "board_type": board_type}
-                        for row in client.board_list(board_type))
-        return rows
+        return [{"board_code": row["code"], "name": row["name"], "board_type": board_type}
+                for board_type in BOARD_TYPES for row in client.board_list(board_type)]
     rows, host = await call(collect)
     return tdx_protocol.observed_evidence(rows, host)
 
 
-async def fetch_membership(*, sector_key: str) -> CapabilityEvidence:
-    def collect(client):
-        # Find board_type from catalog (skip type 6 to avoid duplication)
-        board_type = None
-        for bt in range(7):
-            if bt == 6:
-                continue
-            for row in client.board_list(bt):
-                if row["code"] == sector_key:
-                    board_type = bt
-                    break
-            if board_type is not None:
-                break
-        if board_type is None:
-            raise TdxMacError(f"unknown board key: {sector_key}")
+def _member_symbol(member: dict[str, Any]) -> str:
+    if member["market"] not in tdx_protocol.EXCHANGES:
+        raise TdxMacError(f"unknown market id: {member['market']}")
+    return tdx_protocol.symbol(member["market"], member["symbol"])
 
-        members = client.board_members(sector_key)
+
+async def fetch_membership(*, sector_key: str, board_type: int) -> CapabilityEvidence:
+    """The members of one board.  ``sector_key`` and ``board_type`` are the ``board_code`` and ``board_type`` of a
+    fetch_board_catalog row, so the call never has to search the board lists for the type."""
+    if board_type not in BOARD_TYPES:
+        raise TdxMacError(f"unknown MAC board key {sector_key!r}: board type {board_type!r} has no tdx_mac_type taxonomy")
+    board_code = exchange_board_code(sector_key)
+
+    def collect(client):
+        members = client.board_members(board_code)
         known_at = datetime.now(timezone.utc)
-        rows = []
-        for row in members:
-            if row["market"] not in tdx_protocol.EXCHANGES:
-                raise TdxMacError(f"unknown market id: {row['market']}")
-            rows.append({
-                "taxonomy_key": f"tdx_mac_type_{board_type}",
-                "sector_key": sector_key,
-                "symbol": tdx_protocol.symbol(row["market"], row["symbol"]),
-                "known_at": known_at,
-            })
-        return rows
+        return [{"taxonomy_key": f"tdx_mac_type_{board_type}", "sector_key": sector_key,
+                 "symbol": _member_symbol(member), "known_at": known_at} for member in members]
     rows, host = await call(collect)
     return tdx_protocol.observed_evidence(rows, host)
 

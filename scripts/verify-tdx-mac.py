@@ -20,8 +20,9 @@ def main() -> int:
                 boards = client.board_list(board_type)
                 results[f"board_type_{board_type}"] = len(boards)
                 results[f"board_type_{board_type}_sample"] = ",".join(row["code"] for row in boards[:3])
-            results["board_members_881376"] = len(client.board_members("881376"))
-            results["board_member_quotes_881376"] = len(client.board_member_quotes("881376"))
+            board_code = tdx_mac.exchange_board_code("881376")
+            results["board_members_881376"] = len(client.board_members(board_code))
+            results["board_member_quotes_881376"] = len(client.board_member_quotes(board_code))
             for symbol in SYMBOLS:
                 market, code = tdx_protocol.market_code(symbol)
                 results[f"{symbol}.batch_quotes"] = len(client.batch_quotes([(market, code)]))

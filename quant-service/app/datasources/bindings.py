@@ -15,7 +15,7 @@ the same keywords, so the resolver can fall through without translation):
 * ``bars.daily``: ``symbol``, ``count``
 * ``bars.minute``: ``symbol``, ``count`` (MAC 1-minute bars)
 * ``sector.board_catalog``: no parameters; returns all MAC board types
-* ``sector.membership``: ``sector_key``
+* ``sector.membership``: ``sector_key`` (MAC also takes the catalog row's ``board_type``)
 
 Sources that live outside this package (licensed gateways, the existing
 Tencent/Sina/Eastmoney quote paths) are bound by the composition root.
