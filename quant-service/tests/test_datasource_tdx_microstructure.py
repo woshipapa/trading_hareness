@@ -1,8 +1,10 @@
 import asyncio
+import inspect
 import struct
 import unittest
 from unittest import mock
 
+from app.datasources.catalog import BINDINGS
 from app.datasources.sources import tdx_microstructure as micro
 
 
@@ -32,6 +34,92 @@ def top_board_body(size: int = 1) -> bytes:
     for _ in range(9 * size):
         body += bytes([1]) + b"600000" + struct.pack("<ff", 12.34, 1.23)
     return body
+
+
+def volume_profile_body() -> bytes:
+    """A 0x051a answer: the quote header (close 12.34) and two profile rows."""
+    body = struct.pack("<HB6sH", 2, 1, b"600519", 7)
+    body += b"".join(encode_price(v) for v in (1234, -10, 5, 20, -30, 100, 15, 10000, 500))
+    body += struct.pack("<f", 123456.5)
+    body += b"".join(encode_price(v) for v in (300, 400, 50, 60))
+    for i in range(3):
+        body += b"".join(encode_price(v) for v in (i + 1, i + 2, 100 + i, 200 + i))
+    body += struct.pack("<H", 42)
+    return body + b"".join(encode_price(v) for v in (1234, 100, 40, 60, 2, 20, 8, 12))
+
+
+def minute_series_body() -> bytes:
+    """A 0x0fb4 answer of two minutes."""
+    body = struct.pack("<Hf", 2, 12.34) + encode_price(1234) + encode_price(7) + encode_price(100)
+    return body + encode_price(1) + encode_price(8) + encode_price(20)
+
+
+def auction_body() -> bytes:
+    """A 0x056a answer of one row."""
+    return struct.pack("<HHfIiBB", 1, 9 * 60 + 24, 12.34, 1000, -200, 0, 57)
+
+
+class RecordingClient:
+    """Answers by opcode and keeps the requests."""
+
+    def __init__(self, answers):
+        self.answers, self.requests = answers, []
+
+    def _exchange(self, request):
+        self.requests.append(request)
+        return self.answers[struct.unpack_from("<H", request, 10)[0]]
+
+
+def patched_call(client):
+    async def call(operation, **kwargs):
+        return operation(client), "h:7709/login_one"
+    return mock.patch.object(micro.tdx_protocol, "call", call)
+
+
+class SymbolReaderTests(unittest.TestCase):
+    """The three readers that take a symbol: volume profile, minute series and auction curve."""
+
+    def readers(self, symbol):
+        return [micro.fetch_volume_profile(symbol=symbol), micro.fetch_minute_series(symbol=symbol, trade_date="2026-10-09"),
+                micro.fetch_auction_curve(symbol=symbol)]
+
+    def test_an_old_bj_code_is_requested_as_its_920_code_and_every_row_carries_the_new_symbol(self):
+        client = RecordingClient({micro.VOLUME_PROFILE: volume_profile_body(), micro.MINUTE_SERIES: minute_series_body(),
+                                  micro.AUCTION: auction_body()})
+
+        async def run_all():
+            return [await reader for reader in self.readers("430017.BJ")]
+
+        with patched_call(client):
+            profile, series, auction = asyncio.run(run_all())
+        for evidence in (profile, series, auction):
+            self.assertEqual({row["symbol"] for row in evidence.rows}, {"920017.BJ"})
+            self.assertEqual(evidence.warnings, ("tdx_host=h:7709/login_one",))
+        volume_profile, minute_series, auction_curve = client.requests
+        self.assertEqual((struct.unpack_from("<H", volume_profile, 12)[0], volume_profile[14:20]), (2, b"920017"))
+        self.assertEqual((minute_series[16], minute_series[17:23]), (2, b"920017"))
+        self.assertEqual((struct.unpack_from("<H", auction_curve, 12)[0], auction_curve[14:20]), (2, b"920017"))
+
+    def test_a_symbol_that_is_not_six_digits_and_an_exchange_is_refused_before_the_network(self):
+        with mock.patch.object(micro.tdx_protocol, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+            for symbol in ("600519", "60051.SH", "600519.XX"):
+                for reader in self.readers(symbol):
+                    with self.subTest(symbol=symbol), self.assertRaises(ValueError):
+                        asyncio.run(reader)
+
+
+class MicrostructureBindingTests(unittest.TestCase):
+    ADAPTERS = {"microstructure.volume_profile": micro.fetch_volume_profile, "microstructure.minute_series": micro.fetch_minute_series,
+                "microstructure.auction_curve": micro.fetch_auction_curve, "microstructure.unusual": micro.fetch_unusual,
+                "microstructure.top_board": micro.fetch_top_board}
+
+    def test_every_adapter_takes_exactly_the_keyword_only_parameters_its_binding_documents(self):
+        for capability, adapter in self.ADAPTERS.items():
+            item = next(binding for binding in BINDINGS if binding.source == "tdx_public" and binding.capability == capability)
+            parameters = inspect.signature(adapter).parameters
+            self.assertEqual(item.adapter, f"app/datasources/sources/tdx_microstructure.py:{adapter.__name__}")
+            self.assertEqual(set(parameters), set(item.spec.params), capability)
+            self.assertTrue(all(parameter.kind is inspect.Parameter.KEYWORD_ONLY for parameter in parameters.values()), capability)
 
 
 class TdxMicrostructureTests(unittest.TestCase):

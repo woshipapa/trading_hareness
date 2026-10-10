@@ -314,21 +314,24 @@ def parse_history_minute_data(body: bytes, code: str) -> list[dict[str, Any]]:
     return _parse_minute_rows(body, code, True)
 
 
-async def fetch_volume_profile(*, market: int, code: str) -> CapabilityEvidence:
+async def fetch_volume_profile(*, symbol: str) -> CapabilityEvidence:
+    market, code = tdx_protocol.market_code(symbol)
     result, host = await tdx_protocol.call(
         lambda client: parse_volume_profile(client._exchange(build_volume_profile_request(market, code))),
         handshake_profile="login_one")
     return tdx_protocol.observed_evidence([{"symbol": tdx_protocol.symbol(market, code), **row} for row in result["profiles"]], host)
 
 
-async def fetch_minute_series(*, market: int, code: str, trade_date: date | str | int) -> CapabilityEvidence:
+async def fetch_minute_series(*, symbol: str, trade_date: date | str | int) -> CapabilityEvidence:
+    market, code = tdx_protocol.market_code(symbol)
     rows, host = await tdx_protocol.call(
         lambda client: parse_minute_series(client._exchange(build_minute_series_request(market, code, trade_date))),
         handshake_profile="login_one")
     return tdx_protocol.observed_evidence([{"symbol": tdx_protocol.symbol(market, code), **row} for row in rows], host)
 
 
-async def fetch_auction_curve(*, market: int, code: str) -> CapabilityEvidence:
+async def fetch_auction_curve(*, symbol: str) -> CapabilityEvidence:
+    market, code = tdx_protocol.market_code(symbol)
     rows, host = await tdx_protocol.call(
         lambda client: parse_auction(client._exchange(build_auction_request(market, code))),
         handshake_profile="login_one")
