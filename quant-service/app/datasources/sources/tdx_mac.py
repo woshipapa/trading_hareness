@@ -260,9 +260,9 @@ def parse_board_members(body: bytes, *, quotes: bool = False) -> list[dict[str, 
 def parse_batch_quotes(body: bytes, requested: Sequence[tuple[int, str]]) -> list[dict[str, Any]]:
     """Decode a 0x122b answer and check it by position against ``requested`` (delta-1 R1).
 
-    The server answers one row per requested symbol, in order, and a placeholder row for one it does not know
-    (an old BJ code comes back as another stock's code at price 0).  A row count that differs raises; a row whose
-    market and code differ from its position is dropped and logged as ``code_mismatch``."""
+    The server answers one row per requested symbol, in order; a symbol it does not know can come back as a
+    placeholder row for another code.  A row count that differs raises; a row whose market and code differ from
+    its position is dropped and logged as ``code_mismatch``."""
     from .tdx_mac_fields import decode_dynamic_response
 
     rows = decode_dynamic_response(body)
@@ -270,22 +270,24 @@ def parse_batch_quotes(body: bytes, requested: Sequence[tuple[int, str]]) -> lis
         raise TdxMacError(f"quote answer has {len(rows)} rows for {len(requested)} requested symbols")
     kept = []
     for wanted, row in zip(requested, rows):
-        if (row["market"], row["symbol"]) == tuple(wanted):
+        if (row["market"], row["symbol"]) == wanted:
             kept.append(row)
         else:
-            _LOGGER.warning("code_mismatch requested=%s returned=%s", tuple(wanted), (row["market"], row["symbol"]))
+            _LOGGER.warning("code_mismatch requested=%s returned=%s", wanted, (row["market"], row["symbol"]))
     return kept
 
 
 def parse_bars(body: bytes) -> list[dict[str, Any]]:
+    """The bars of a 0x122e answer, oldest first.  The request asks for one bar more than wanted and the first row
+    of the answer is that extra bar, the pre-close sentinel, so it is not decoded."""
     if len(body) < 33:
         raise TdxMacError(f"truncated bars response: need 33 bytes, got {len(body)}")
     count = struct.unpack_from("<H", body, 27)[0]
+    if len(body) < 33 + 36 * count:
+        raise TdxMacError(f"truncated bars response: {count} bars need {33 + 36 * count} bytes, got {len(body)}")
     rows = []
-    for i in range(count):
+    for i in range(1, count):
         pos = 33 + i * 36
-        if pos + 36 > len(body):
-            raise TdxMacError(f"truncated bar {i}: need {pos + 36} bytes, got {len(body)}")
         ymd, seconds = struct.unpack_from("<II", body, pos)
         rows.append(
             {
@@ -299,7 +301,7 @@ def parse_bars(body: bytes) -> list[dict[str, Any]]:
                 "volume": _float(body, pos + 28),
             }
         )
-    return rows[1:]
+    return rows
 
 
 def parse_auxiliary_count(opcode: int, body: bytes) -> int:
@@ -541,11 +543,11 @@ async def fetch_membership(*, sector_key: str, board_type: int) -> CapabilityEvi
 
 async def fetch_daily_bars(*, symbol: str, count: int) -> CapabilityEvidence:
     market, code = tdx_protocol.market_code(symbol)
-    rows, host = await call(
-        lambda client: client.bars(market, code, BAR_PERIODS["1d"], 0, count)
-    )
     full_symbol = tdx_protocol.symbol(market, code)
-    return tdx_protocol.observed_evidence([{"symbol": full_symbol, **row} for row in rows], host)
+    rows, host = await call(
+        lambda client: [{"symbol": full_symbol, **row} for row in client.bars(market, code, BAR_PERIODS["1d"], 0, count)]
+    )
+    return tdx_protocol.observed_evidence(rows, host)
 
 
 async def fetch_minute_bars(*, symbol: str, count: int) -> CapabilityEvidence:

@@ -501,6 +501,13 @@ class MacBarParserTests(unittest.TestCase):
              ("2026-10-12", 34260, 105.0, 108.0, 2000.0, 40.0),
              ("2026-10-13", 34320, 108.0, 109.0, 3000.0, 60.0)])
 
+    def test_the_sentinel_row_is_not_decoded(self):
+        # The row that is dropped may carry no valid date; it must not fail the answer.
+        body = bars_body([(0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), (20261009, 34200, 1.0, 2.0, 0.5, 1.5, 3.0, 4.0, 5.0)])
+        self.assertEqual([row["date"] for row in tdx_mac.parse_bars(body)], ["2026-10-09"])
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "invalid MAC date 0"):
+            tdx_mac.parse_bars(bars_body([(20261009, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), (0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)]))
+
     def test_a_header_only_answer_has_no_rows(self):
         self.assertEqual(tdx_mac.parse_bars(bars_body([])), [])
 
