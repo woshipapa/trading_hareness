@@ -3,8 +3,8 @@
 
 Every --interval minutes zhb.zip is downloaded and the (security, report period, column-4 date) rows of tipinfo.dat
 that the last good poll did not have are logged with the poll time (the first poll is the baseline: nothing is new
-yet). After the last of --polls the app's cninfo reader is asked, for every new row with a YYYYMMDD date and a
-quarter-end period, for the announcements of the security from one day before that date to one day after it. It
+yet). After the last of --polls the app's cninfo reader is asked, for every new row of a quarter-end period
+(tdx_zhb_extras.parse_tipinfo refuses a row without a valid column-4 date), for the announcements of the security from one day before that date to one day after it. It
 queries by code and dates, not by period, so each announcement carries whether its title names the period (<year>年
 plus the report name); a row whose lookup failed keeps the error for a manual check. The times of cninfo are what its
 list gives (a date may be all it holds); all times are written with the Asia/Shanghai offset. Read-only.
@@ -18,7 +18,6 @@ so far are still written.
 import argparse
 import asyncio
 import json
-import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -36,7 +35,6 @@ import tdx_probe_failures as failures  # noqa: E402 - sibling module, after the 
 CN_TZ = ZoneInfo("Asia/Shanghai")
 #: The report name that follows "<year>年" in the title of the periodic report of a period end (MMDD).
 REPORT_NAMES = {"0331": "第一季度报告", "0630": "半年度报告", "0930": "第三季度报告", "1231": "年度报告"}
-DATE = re.compile(r"20\d{6}")
 LOOKUP_DAYS = 1
 #: What a poll raises when the network, a host or the file misbehaves; anything else is a bug and ends the run.
 TRANSIENT = (OSError, tdx_protocol.TdxProtocolError, ValueError)
@@ -129,7 +127,7 @@ def main(argv=None):
         if "stopped" in payload:
             break
     dated = [(symbol, period, date) for symbol, period, date in sorted(appeared)
-             if DATE.fullmatch(date) and period[4:] in REPORT_NAMES]
+             if period[4:] in REPORT_NAMES]
     payload["lookups"] = asyncio.run(look_up(dated, appeared))
     emit(payload, args.output)
     failed = sum("lookup_error" in entry for entry in payload["lookups"])

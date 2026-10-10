@@ -36,13 +36,20 @@ finally:
 TdxProtocolError = MODULE.tdx_protocol.TdxProtocolError
 START = 1000.0
 HOST = "1.2.3.4:7709/login_one"
+
+
+def tipinfo(*rows: str) -> bytes:
+    """tipinfo.dat lines as served: 22 columns each (scripts/data/tdx_tipinfo_2026-10-10_mac.json)."""
+    return b"".join(("|".join(row.split("|") + [""] * (22 - len(row.split("|")))) + "\n").encode() for row in rows)
+
+
 #: tipinfo.dat as three polls saw it: 000001 reports its Q3 and 600519 appears (poll 2), 000002 follows (poll 3).
 SNAPSHOTS = [
-    b"0|000001|20260630|1.24|20260815|\n1|600000|20260630|0.90|20260820|\n0|000002|20260630|0.10||\n",
-    b"0|000001|20260930|1.30|20261012|\n1|600000|20260630|0.90|20260820|\n0|000002|20260630|0.10||\n"
-    b"1|600519|20260630|5.00|20260730|\n",
-    b"0|000001|20260930|1.30|20261012|\n1|600000|20260630|0.90|20260820|\n0|000002|20260930|0.10|20261012|\n"
-    b"1|600519|20260630|5.00|20260730|\n",
+    tipinfo("0|000001|20260630|1.24|20260815", "1|600000|20260630|0.90|20260820", "0|000002|20260630|0.10|20260828"),
+    tipinfo("0|000001|20260930|1.30|20261012", "1|600000|20260630|0.90|20260820", "0|000002|20260630|0.10|20260828",
+            "1|600519|20260630|5.00|20260730"),
+    tipinfo("0|000001|20260930|1.30|20261012", "1|600000|20260630|0.90|20260820", "0|000002|20260930|0.10|20261012",
+            "1|600519|20260630|5.00|20260730"),
 ]
 
 
@@ -136,23 +143,19 @@ class DisclosureTimingTests(unittest.TestCase):
         async def cninfo(symbol, start, end, *, page_size=30, max_pages=3):
             return []
 
-        without, with_row = SNAPSHOTS[0], SNAPSHOTS[0] + b"1|600519|20260630|5.00|20260730|\n"
+        without, with_row = SNAPSHOTS[0], SNAPSHOTS[0] + tipinfo("1|600519|20260630|5.00|20260730")
         payload, _, _, _ = self.run_main([without, with_row, without, with_row], cninfo, "--polls", "4")
         self.assertEqual([bool(poll["new"]) for poll in payload["polls"][1:]], [True, False, True])
         self.assertEqual([entry["appeared_between"] for entry in payload["lookups"]], [["t0", "t600"]])
 
-    def test_a_row_without_a_date_is_logged_but_not_looked_up(self):
-        calls = []
-
+    def test_a_tipinfo_row_without_a_date_fails_its_poll_and_the_polling_goes_on(self):
         async def cninfo(symbol, start, end, *, page_size=30, max_pages=3):
-            calls.append(symbol)
             return []
 
-        undated = b"0|000001|20260630|1.24|20260815|\n"
-        sentinel = b"0|000001|20260630|1.24|20260815|\n0|000002|20260930|0.10|0|\n1|600000|20260930|0.90||\n"
-        payload, _, _, _ = self.run_main([undated, sentinel], cninfo, "--polls", "2")
-        self.assertEqual([row["symbol"] for row in payload["polls"][1]["new"]], ["000002.SZ", "600000.SH"])
-        self.assertEqual((calls, payload["lookups"]), ([], []))
+        sentinel = tipinfo("0|000001|20260630|1.24|20260815", "0|000002|20260930|0.10|0")
+        payload, _, status, _ = self.run_main([SNAPSHOTS[0], sentinel, SNAPSHOTS[1]], cninfo, "--polls", "3")
+        self.assertEqual((status, payload["errors"], payload["polls"][1]["error"]), (0, 1, "TdxFileError"))
+        self.assertEqual(sorted(row["symbol"] for row in payload["polls"][2]["new"]), ["000001.SZ", "600519.SH"])
 
     def test_a_failed_poll_is_an_entry_and_the_next_good_poll_compares_with_the_last_good_one(self):
         async def cninfo(symbol, start, end, *, page_size=30, max_pages=3):
