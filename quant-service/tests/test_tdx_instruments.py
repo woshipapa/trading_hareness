@@ -24,12 +24,6 @@ class InstrumentTests(unittest.TestCase):
             self.assertEqual(ti.instrument_type(market, code, name), expected)
         self.assertTrue(ti.classify_instrument(1, "600000", "*ST风险")["is_st"])
 
-    def test_scale_is_list_decimal_point(self):
-        quote = {"price": 11697.1, "last_close": 11600.0, "bid1": 11700.0}
-        self.assertAlmostEqual(ti.scale_quote(quote, 4)["price"], 116.971)
-        self.assertAlmostEqual(ti.scale_quote({"price": 43.85}, 3)["price"], 4.385)
-        self.assertEqual(ti.price_scale(2), 100.0)
-
     def test_a_reader_requests_only_the_types_it_serves_under_their_translated_codes(self):
         self.assertEqual(ti.requested_of_types(["430017.BJ", "600519.SH"], ti.STOCK_TYPES), [(2, "920017"), (1, "600519")])
         self.assertEqual(ti.requested_of_types(["510300.SH", "161121.SZ", "500001.SH"], ti.FUND_TYPES),
@@ -39,21 +33,6 @@ class InstrumentTests(unittest.TestCase):
                 ti.requested_of_types(["600519.SH", symbol], ti.STOCK_TYPES)
         with self.assertRaisesRegex(ValueError, "must not be empty"):
             ti.requested_of_types([], ti.STOCK_TYPES)
-
-    def test_a_missing_or_invalid_decimal_point_has_no_scale(self):
-        # The BJ rows of the list carry none (scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json).
-        for decimal_point in (None, -1, 7):
-            with self.subTest(decimal_point=decimal_point):
-                with self.assertRaises(ValueError):
-                    ti.price_scale(decimal_point)
-                with self.assertRaises(ValueError):
-                    ti.scale_quote({"price": 43.85}, decimal_point)
-
-    def test_scale_quote_rescales_prices_not_volumes(self):
-        scaled = ti.scale_quote({"price": 43.85, "bid1": 43.84, "bid_vol1": 1200, "ask_vol1": 800}, 3)
-        self.assertAlmostEqual(scaled["price"], 4.385)
-        self.assertAlmostEqual(scaled["bid1"], 4.384)
-        self.assertEqual((scaled["bid_vol1"], scaled["ask_vol1"]), (1200, 800))
 
     def test_index_bars_never_guess_another_layout(self):
         record = struct.pack("<I", 20261009) + b"\x00" * 4 + struct.pack("<IIHH", 0, 0, 1341, 956)

@@ -2,12 +2,6 @@
 
 Instrument discovery uses the legacy 0x044e/0x0450 commands on the shared
 ``tdx_protocol.TdxClient`` with the LOGIN_ONE handshake profile.
-
-Prices in a security-list quote are integer values whose decimal point is a
-per-instrument list field.  The quote parser in ``tdx_protocol`` exposes the
-legacy /100 value, so :func:`scale_quote` converts all price fields by
-``10 ** (2 - decimal_point)``.  This is why convertible bonds and ETFs cannot
-share the stock-only /100 rule.
 """
 
 from __future__ import annotations
@@ -204,33 +198,6 @@ async def fetch_instruments() -> CapabilityEvidence:
         for row in evidence.rows if row["instrument_type"] in STOCK_TYPES])
 
 
-def price_scale(decimal_point: int | None) -> float:
-    """Return the divisor for integer quote prices.
-
-    The list's decimal_point is authoritative.  A security without a valid one (the BJ rows carry none)
-    has no divisor: that is a ValueError, never the stock /100.
-    """
-    if decimal_point is None or not 0 <= decimal_point <= 6:
-        raise ValueError(f"quote decimal point must be 0 to 6, got {decimal_point!r}")
-    return float(10 ** decimal_point)
-
-
-_QUOTE_PRICE_KEYS = frozenset({"price", "last_close", "open", "high", "low",
-                               *(f"{side}{level}" for side in ("bid", "ask") for level in range(1, 6))})
-
-
-def scale_quote(quote: Mapping[str, Any], decimal_point: int | None) -> dict[str, Any]:
-    factor = 100.0 / price_scale(decimal_point)
-    result = dict(quote)
-    for key, value in quote.items():
-        if key in _QUOTE_PRICE_KEYS:
-            if isinstance(value, (int, float)):
-                result[key] = value * factor
-    result["decimal_point"] = decimal_point
-    result["price_divisor"] = price_scale(decimal_point)
-    return result
-
-
 def parse_index_bars(body: bytes, *, category: int = 9) -> list[dict[str, Any]]:
     """Index and board bars (delta-1 1c R2): the stock bar record followed by uint16 up/down counts.
 
@@ -281,4 +248,4 @@ def type_counts(rows: Iterable[Mapping[str, Any]]) -> Counter[str]:
 __all__ = ["FUND_TYPES", "SECURITY_COUNT", "SECURITY_LIST", "STOCK_TYPES", "bar_layout", "build_security_count_request",
            "build_security_list_request", "classify_instrument", "fetch_security_list", "fetch_instruments", "instrument_type",
            "parse_bj_mapping", "parse_tdxbjmore", "bj_rows_from_zhb", "parse_index_bars", "parse_security_count", "parse_security_list",
-           "security_count", "security_list", "index_bars", "price_scale", "requested_of_types", "scale_quote", "type_counts"]
+           "security_count", "security_list", "index_bars", "requested_of_types", "type_counts"]
