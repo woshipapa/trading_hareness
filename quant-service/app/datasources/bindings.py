@@ -14,7 +14,7 @@ the same keywords, so the resolver can fall through without translation):
 * ``limits.prices``: ``symbols``
 * ``bars.daily``: ``symbol``, ``count``
 * ``bars.minute``: ``symbol``, ``count`` (MAC 1-minute bars)
-* ``sector.board_catalog``: no parameters; returns all MAC board types
+* ``sector.board_catalog``: no parameters; returns the MAC board types of ``tdx_mac.BOARD_TYPES``
 * ``sector.membership``: ``sector_key`` (MAC also takes the catalog row's ``board_type``)
 
 Sources that live outside this package (licensed gateways, the existing

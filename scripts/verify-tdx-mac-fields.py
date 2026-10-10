@@ -70,7 +70,7 @@ def run_live(timeout: float) -> int:
             0x1218: mac.build_capital_flow_request("000001.SZ"),
             0x123D: tdx_mac.build_aux_request(tdx_mac.OP_AUCTION, market, code),
             0x123E: tdx_mac.build_aux_request(tdx_mac.OP_TICK_CHARTS, market, code),
-            0x1237: tdx_mac.build_aux_request(tdx_mac.OP_MARKET_MONITOR, market, code),
+            0x1237: tdx_mac.build_aux_request(tdx_mac.OP_MARKET_MONITOR, market, code, count=600),
         }
         for opcode, request in probes.items():
             body = client._exchange(request)

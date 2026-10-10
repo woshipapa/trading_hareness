@@ -865,6 +865,8 @@ class ProbeScriptTests(unittest.TestCase):
         self.assertEqual(status, 0, report)
         for opcode in (0x122A, 0x122F, 0x120F, 0x1218, 0x123D, 0x123E, 0x1237):
             self.assertIn(f"0x{opcode:04x},bytes=10,MATCH", report)
+        monitor = next(request for request in client.requests if struct.unpack_from("<H", request, 10)[0] == 0x1237)
+        self.assertEqual(struct.unpack_from("<H", monitor, 18)[0], 600, "the probe asked for 600 events before the rewrite")
         variants = [request for request in client.requests if struct.unpack_from("<H", request, 10)[0] == tdx_mac.OP_MEMBERS]
         self.assertEqual([(struct.unpack_from("<H", request, 25)[0], request[33], request[35 + 17]) for request in variants],
                          [(14, 1, 0), (14, 0, 0), (1, 1, 0), (14, 1, 1), (14, 1, 2), (14, 1, 4)])
