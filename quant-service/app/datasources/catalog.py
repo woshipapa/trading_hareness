@@ -304,12 +304,15 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/free_market_providers.py",
           notes="无时间戳契约，仅兜底；owner 出口访问 hq.sinajs.cn 返回 403（2026-09-21 起，健康表从未成功）"),
     _bind("tdx_mac", "quote.watch_snapshot", 70, UNSUPPORTED, _RAW + "tdx_mac_watch_snapshot",
-          "app/datasources/sources/tdx_mac.py:fetch_watch_snapshot", spec=BindingSpec(
-              params={"stocks": "market+symbol", "turnover_formula": "0x05 lots / 0x0b 10k_shares"},
-              field_map={"vol": "volume", "vol_ratio": "volume_ratio", "turnover": "turnover_rate",
-                         "server_update_time": "exchange_time"},
+          "app/datasources/sources/tdx_mac.py:fetch_watch_snapshot",
+          notes="0x122b；close(0x04)=price；vol(0x05) 为手，canonical shares 乘 100；换手 0x1b = 0x05 手 / 0x0b 万股；"
+                "exchange_time 由适配器按 0x13 日期 + 0x14 时间组成 Asia/Shanghai 感知时间；回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）",
+          spec=BindingSpec(
+              params={"symbols": "symbols such as 000001.SZ"},
+              field_map={"close": "price", "vol": "volume", "vol_ratio": "volume_ratio", "turnover": "turnover_rate"},
               unit_factors={"volume": 100}, paging="batch", max_batch=80,
-              time_semantics="effective=exchange_date/time; available=collection", handshake_profile="mac")),
+              time_semantics="effective=exchange_time (bits 0x13 date and 0x14 time, Asia/Shanghai); available=collection",
+              handshake_profile="mac")),
     # Both providers persist depth observations in the shared quote table.  The
     # source discriminator is part of the storage contract; there is no
     # separate intraday_order_book_observations relation.
@@ -429,9 +432,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("longhuvip_composite", "limits.prices", 25, LIVE_VERIFIED, "daily_trade_limits", "app/longhu_shared_full_market.py",
           notes="16:00 左右才落库，盘中不可依赖；优先用同批腾讯行情里的公布值，缺失时才按板块比例推算"),
     _bind("tdx_mac", "limits.prices", 70, UNSUPPORTED, _RAW + "tdx_mac_limits",
-          "app/datasources/sources/tdx_mac.py:fetch_limit_prices", spec=BindingSpec(
-              params={"stocks": "market+symbol"}, field_map={"limit_up": "up_limit", "limit_down": "down_limit"},
-              paging="batch", max_batch=80, time_semantics="effective=exchange date; available=collection",
+          "app/datasources/sources/tdx_mac.py:fetch_limit_prices",
+          notes="0x122b 位 0x20/0x21（δ3 Q5：按板块比例，ST 1.05）；trade_date 取位 0x13；回包按位置核对（δ1 R1）",
+          spec=BindingSpec(
+              params={"symbols": "symbols such as 000001.SZ"}, field_map={"limit_up": "up_limit", "limit_down": "down_limit"},
+              paging="batch", max_batch=80, time_semantics="effective=trade_date (bit 0x13, Asia/Shanghai date); available=collection",
               handshake_profile="mac")),
     _bind("fuyao_ths", "limits.limit_up_pool", 12, LIVE_VERIFIED, _EVT + "limit_up_pool", "app/market_event_capture.py",
           "近期", "默认分页 50（此前只存了第一页，已修为翻页）"),

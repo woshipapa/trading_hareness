@@ -9,16 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import socket
 import struct
 import zlib
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Sequence, TypeVar
+from zoneinfo import ZoneInfo
 
 from ..contracts import CapabilityEvidence
 from . import tdx_protocol
 
+CN_TZ = ZoneInfo("Asia/Shanghai")
+_LOGGER = logging.getLogger(__name__)
 MAC_HOSTS = (
     ("121.36.248.138", 7709),
     ("123.60.47.136", 7709),
@@ -46,6 +50,10 @@ BAR_PERIODS = {
 DEFAULT_BITMAP = bytes.fromhex(
     "ff fc f9 cc 3f 08 03 01 00 00 00 00 00 00 00 00 00 00 00 00"
 )
+#: The bits fetch_limit_prices asks for: 0x13 (server_update_date) and the limit prices 0x20 and 0x21.
+LIMITS_BITMAP = bytes.fromhex("00 00 08 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
+#: The most symbols one 0x122b request carries.
+MAX_BATCH = 80
 
 
 class TdxMacError(RuntimeError):
@@ -246,10 +254,24 @@ def parse_board_members(body: bytes, *, quotes: bool = False) -> list[dict[str, 
     return rows
 
 
-def parse_batch_quotes(body: bytes) -> list[dict[str, Any]]:
+def parse_batch_quotes(body: bytes, requested: Sequence[tuple[int, str]]) -> list[dict[str, Any]]:
+    """Decode a 0x122b answer and check it by position against ``requested`` (delta-1 R1).
+
+    The server answers one row per requested symbol, in order, and a placeholder row for one it does not know
+    (an old BJ code comes back as another stock's code at price 0).  A row count that differs raises; a row whose
+    market and code differ from its position is dropped and logged as ``code_mismatch``."""
     from .tdx_mac_fields import decode_dynamic_response
 
-    return decode_dynamic_response(body)
+    rows = decode_dynamic_response(body)
+    if len(rows) != len(requested):
+        raise TdxMacError(f"quote answer has {len(rows)} rows for {len(requested)} requested symbols")
+    kept = []
+    for wanted, row in zip(requested, rows):
+        if (row["market"], row["symbol"]) == tuple(wanted):
+            kept.append(row)
+        else:
+            _LOGGER.warning("code_mismatch requested=%s returned=%s", tuple(wanted), (row["market"], row["symbol"]))
+    return kept
 
 
 def parse_bars(body: bytes) -> list[dict[str, Any]]:
@@ -372,8 +394,12 @@ class TdxMacClient:
     def board_member_quotes(self, board_symbol: str):
         return self._board_members(board_symbol, quotes=True)
 
-    def batch_quotes(self, stocks: Sequence[tuple[int, str]]):
-        return parse_batch_quotes(self._exchange(build_batch_quotes_request(stocks)))
+    def batch_quotes(self, stocks: Sequence[tuple[int, str]], bitmap: bytes = DEFAULT_BITMAP):
+        rows = []
+        for offset in range(0, len(stocks), MAX_BATCH):
+            chunk = stocks[offset:offset + MAX_BATCH]
+            rows.extend(parse_batch_quotes(self._exchange(build_batch_quotes_request(chunk, bitmap)), chunk))
+        return rows
 
     def bars(
         self, market: int, code: str, period: int = 4, start: int = 0, count: int = 800
@@ -425,24 +451,45 @@ async def call(operation: Callable[[TdxMacClient], T], **kwargs: Any):
     return await asyncio.to_thread(call_sync, operation, **kwargs)
 
 
+def _shanghai_time(ymd: int, hour: int, minute: int, second: int) -> datetime:
+    """A MAC (YYYYMMDD, time of day) pair as an Asia/Shanghai-aware time."""
+    try:
+        return datetime(ymd // 10000, ymd // 100 % 100, ymd % 100, hour, minute, second, tzinfo=CN_TZ)
+    except ValueError as error:
+        raise TdxMacError(f"invalid MAC date/time {ymd} {hour:02d}:{minute:02d}:{second:02d}") from error
+
+
+def _quote_row(row: dict[str, Any]) -> dict[str, Any]:
+    """A decoded 0x122b row with its full symbol and ``exchange_time`` built from bits 0x13 and 0x14."""
+    update_time = row["server_update_time"]
+    consumed = ("symbol", "server_update_date", "server_update_time")
+    return {
+        "symbol": tdx_protocol.symbol(row["market"], row["symbol"]),
+        "exchange_time": _shanghai_time(
+            row["server_update_date"], update_time // 10000, update_time // 100 % 100, update_time % 100),
+        **{key: value for key, value in row.items() if key not in consumed},
+    }
+
+
+def _limit_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "symbol": tdx_protocol.symbol(row["market"], row["symbol"]),
+        "trade_date": _shanghai_time(row["server_update_date"], 0, 0, 0).date(),
+        "limit_up": row["buy_price_limit"],
+        "limit_down": row["sell_price_limit"],
+    }
+
+
 async def fetch_watch_snapshot(*, symbols: Sequence[str]) -> CapabilityEvidence:
     stocks = [tdx_protocol.market_code(symbol) for symbol in symbols]
-    rows, host = await call(lambda client: client.batch_quotes(stocks))
+    rows, host = await call(lambda client: [_quote_row(row) for row in client.batch_quotes(stocks)])
     return tdx_protocol.observed_evidence(rows, host)
 
 
 async def fetch_limit_prices(*, symbols: Sequence[str]) -> CapabilityEvidence:
     stocks = [tdx_protocol.market_code(symbol) for symbol in symbols]
-    rows, host = await call(lambda client: client.batch_quotes(stocks))
-    return tdx_protocol.observed_evidence([
-        {
-            "market": row["market"],
-            "symbol": row["symbol"],
-            "limit_up": row["buy_price_limit"],
-            "limit_down": row["sell_price_limit"],
-        }
-        for row in rows
-    ], host)
+    rows, host = await call(lambda client: [_limit_row(row) for row in client.batch_quotes(stocks, LIMITS_BITMAP)])
+    return tdx_protocol.observed_evidence(rows, host)
 
 
 async def fetch_board_catalog() -> CapabilityEvidence:
@@ -511,7 +558,9 @@ async def fetch_minute_bars(*, symbol: str, count: int) -> CapabilityEvidence:
 __all__ = [
     "BAR_PERIODS",
     "DEFAULT_BITMAP",
+    "LIMITS_BITMAP",
     "MAC_HOSTS",
+    "MAX_BATCH",
     "TdxMacClient",
     "TdxMacError",
     "build_aux_request",

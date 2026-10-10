@@ -1,16 +1,19 @@
 import asyncio
 import contextlib
 import importlib.util
+import inspect
 import io
 import struct
 import unittest
 import zlib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+from app.datasources.catalog import BINDINGS
+from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_mac, tdx_mac_fields
-from app.datasources.sources.tdx_mac_fields import active_fields
+from app.datasources.sources.tdx_mac_fields import active_fields, bitmap_for_bits
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 
@@ -79,6 +82,25 @@ class FakeMacClient(tdx_mac.TdxMacClient):
     def _exchange(self, request: bytes) -> bytes:
         self.requests.append(request)
         return self.answers[struct.unpack_from("<H", request, 10)[0]](request)
+
+
+def quote_values():
+    """Field values of one 2026-10-09 14:59:59 snapshot (exactly representable as float32)."""
+    return {"close": 10.5, "vol": 1234, "vol_ratio": 1.25, "amount": 25000000.0, "turnover": 0.5,
+            "buy_price_limit": 11.5, "sell_price_limit": 9.5,
+            "server_update_date": 20261009, "server_update_time": 145959}
+
+
+def quote_answer(values=None, answer_for=lambda stocks: stocks):
+    """A 0x122b answer: one row per symbol ``answer_for`` returns for the requested ones, in the requested bitmap."""
+    def answer(request):
+        return dynamic_body(request[12:32], [
+            (market, code, f"name{code}", values or quote_values()) for market, code in answer_for(requested_stocks(request))])
+    return answer
+
+
+def mac_binding(capability: str):
+    return next(item for item in BINDINGS if item.source == "tdx_mac" and item.capability == capability)
 
 
 def patched_call(client, host="mac-host:7709"):
@@ -252,7 +274,7 @@ class MacProtocolTests(unittest.TestCase):
             + b"\0" * 44
             + struct.pack("<I", 123)
         )
-        self.assertEqual(tdx_mac.parse_batch_quotes(batch)[0]["vol"], 123)
+        self.assertEqual(tdx_mac.parse_batch_quotes(batch, [(1, "600519")])[0]["vol"], 123)
         dynamic = (
             bitmap
             + struct.pack("<IH", 1, 1)
@@ -266,6 +288,103 @@ class MacProtocolTests(unittest.TestCase):
         board = tdx_mac.build_aux_request(tdx_mac.OP_BELONG_BOARD, 0, "000001")
         self.assertEqual(board[0], 1)
         self.assertIn(b"Stock_GLHQ", board)
+
+
+class MacWatchSnapshotTests(unittest.TestCase):
+    def fetch(self, client, symbols):
+        with patched_call(client):
+            return asyncio.run(tdx_mac.fetch_watch_snapshot(symbols=symbols))
+
+    def test_rows_carry_the_full_symbol_and_an_aware_shanghai_exchange_time(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+        evidence = self.fetch(client, ["000001.SZ", "600519.SH"])
+        self.assertEqual([row["symbol"] for row in evidence.rows], ["000001.SZ", "600519.SH"])
+        stamp = evidence.rows[0]["exchange_time"]
+        self.assertEqual(stamp, datetime(2026, 10, 9, 14, 59, 59, tzinfo=tdx_mac.CN_TZ))
+        self.assertEqual((str(stamp.tzinfo), stamp.utcoffset()), ("Asia/Shanghai", timedelta(hours=8)))
+        self.assertTrue({"server_update_date", "server_update_time"}.isdisjoint(evidence.rows[0]))
+        self.assertEqual(evidence.warnings, ("tdx_host=mac-host:7709",))
+
+    def test_81_symbols_make_two_requests(self):
+        symbols = [f"{number:06d}.SZ" for number in range(1, 82)]
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+        evidence = self.fetch(client, symbols)
+        self.assertEqual([len(requested_stocks(request)) for request in client.requests], [80, 1])
+        self.assertEqual([row["symbol"] for row in evidence.rows], symbols)
+
+    def test_a_count_mismatch_raises(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: stocks[:-1])})
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "1 rows for 2 requested"):
+            self.fetch(client, ["000001.SZ", "600519.SH"])
+
+    def test_a_row_for_another_code_is_dropped_by_position_and_logged(self):
+        # The placeholder repeats the code requested at position 1; a lookup by code would keep it.
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: [stocks[1], stocks[1]])})
+        with self.assertLogs("app.datasources.sources.tdx_mac", "WARNING") as logs:
+            evidence = self.fetch(client, ["920000.BJ", "600519.SH"])
+        self.assertEqual([row["symbol"] for row in evidence.rows], ["600519.SH"])
+        self.assertIn("code_mismatch requested=(2, '920000') returned=(1, '600519')", logs.output[0])
+
+    def test_an_invalid_server_date_raises(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "server_update_date": 0})})
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "invalid MAC date/time 0"):
+            self.fetch(client, ["000001.SZ"])
+
+    def test_a_fixture_row_through_the_real_binding_yields_price_and_an_aware_exchange_time(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+        evidence = self.fetch(client, ["000001.SZ"])
+        projected = _normalise_rows(evidence.rows, mac_binding("quote.watch_snapshot"))
+        self.assertTrue(projected.canonical)
+        self.assertEqual((projected.status, projected.warnings), (None, ()))
+        row = projected.rows[0]
+        self.assertEqual((row["price"], row["volume"], row["volume_ratio"], row["turnover_rate"], row["amount"]),
+                         (10.5, 123400, 1.25, 0.5, 25000000.0))
+        self.assertEqual(row["exchange_time"], datetime(2026, 10, 9, 14, 59, 59, tzinfo=tdx_mac.CN_TZ))
+        self.assertIsNotNone(row["exchange_time"].utcoffset())
+
+
+class MacLimitPriceTests(unittest.TestCase):
+    def fetch(self, client, symbols):
+        with patched_call(client):
+            return asyncio.run(tdx_mac.fetch_limit_prices(symbols=symbols))
+
+    def test_the_limits_bitmap_is_the_date_and_the_two_limit_prices(self):
+        self.assertEqual(tdx_mac.LIMITS_BITMAP, bitmap_for_bits([0x13, 0x20, 0x21]))
+
+    def test_rows_carry_the_symbol_the_limits_and_the_trade_date_and_ask_only_for_those_bits(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+        evidence = self.fetch(client, ["000001.SZ"])
+        self.assertEqual(evidence.rows, [{"symbol": "000001.SZ", "trade_date": date(2026, 10, 9),
+                                          "limit_up": 11.5, "limit_down": 9.5}])
+        self.assertEqual(client.requests[0][12:32], tdx_mac.LIMITS_BITMAP)
+
+    def test_81_symbols_make_two_requests_and_a_foreign_row_is_dropped(self):
+        symbols = [f"{number:06d}.SZ" for number in range(1, 82)]
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(
+            answer_for=lambda stocks: [(1, "600839")] + stocks[1:] if len(stocks) == 80 else stocks)})
+        with self.assertLogs("app.datasources.sources.tdx_mac", "WARNING"):
+            evidence = self.fetch(client, symbols)
+        self.assertEqual([len(requested_stocks(request)) for request in client.requests], [80, 1])
+        self.assertEqual([row["symbol"] for row in evidence.rows], symbols[1:])
+
+    def test_a_fixture_row_through_the_real_binding_yields_up_limit_down_limit_and_trade_date(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+        evidence = self.fetch(client, ["000001.SZ"])
+        projected = _normalise_rows(evidence.rows, mac_binding("limits.prices"))
+        self.assertTrue(projected.canonical)
+        self.assertEqual((projected.status, projected.warnings), (None, ()))
+        row = projected.rows[0]
+        self.assertEqual((row["up_limit"], row["down_limit"], row["trade_date"]), (11.5, 9.5, date(2026, 10, 9)))
+
+
+class MacBindingSpecTests(unittest.TestCase):
+    def test_batch_bindings_use_the_clients_batch_size_and_name_the_adapters_parameters(self):
+        for capability, adapter in (("quote.watch_snapshot", tdx_mac.fetch_watch_snapshot),
+                                    ("limits.prices", tdx_mac.fetch_limit_prices)):
+            spec = mac_binding(capability).spec
+            self.assertEqual(spec.max_batch, tdx_mac.MAX_BATCH)
+            self.assertEqual(set(spec.params), {"symbols"})
+            self.assertEqual(set(inspect.signature(adapter).parameters), {"symbols"})
 
 
 class MacBarParserTests(unittest.TestCase):
