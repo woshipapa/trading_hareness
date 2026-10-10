@@ -147,6 +147,23 @@ class CloseAgreementTests(unittest.TestCase):
         stored = intraday.read(self.connection, day3)
         self.assertEqual((stored["source"], [item["share"] for item in stored["samples"]]), ("stored", [0.25, 1.0]))
 
+    def test_the_last_document_before_the_auction_stands_in_for_the_close(self) -> None:
+        # The capture stops at about 14:59; the share is taken against the bars' whole-day turnover.
+        from app import derived_daily_readings
+        from app.market_temperature_runtime import CAPABILITY as DAILY
+        day3 = self.DAYS[2]
+        self._capture(day3, time(10, 0, 4), [_row(self.SEALER, 12.5, 12.1, turnover=250.0)])
+        self._capture(day3, time(14, 59, 30), [_row(self.SEALER, 13.31, 12.1, turnover=1000.0)])
+        derived_daily_readings.store(self.database, DAILY, [{"trade_date": day3.isoformat(), "turnover_cny": 2000.0}])
+        result = intraday.refresh(self.database, day3)
+        self.assertEqual((result["samples"], result["close_observed_at"][11:19]), (2, "14:59:30"))
+        self.assertEqual(result["reason"], "2 of 49 five-minute samples; 40 needed")
+        stored = intraday.read(self.connection, day3)
+        self.assertEqual([(item["time"], item["share"]) for item in stored["samples"]], [("10:00", 0.125), ("15:00", 0.5)])
+        self._capture(self.DAYS[1], time(14, 50, 0), [_row(self.SEALER, 12.1, 11.0)])
+        early = intraday.refresh(self.database, self.DAYS[1], apply=False)
+        self.assertIsNone(early["close_observed_at"], "a last document before 14:55 is not a close")
+
     def test_the_backfill_walks_the_sessions_oldest_first(self) -> None:
         self._capture(self.DAYS[2], time(10, 0, 4), [_row(self.SEALER, 12.5, 12.1)])
         results = intraday.backfill(self.database, self.DAYS[0], self.DAYS[2], apply=False)

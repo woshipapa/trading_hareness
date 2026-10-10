@@ -94,7 +94,8 @@ def marker(temperature: float | None, ratio: float | None, index_change: float |
 def daily_series(connection: Any, *, days: int = 120, end: date | None = None) -> dict[str, Any]:
     """The newest stored reading of each session, oldest first, with its flow and marker."""
     last = end or datetime.now(CN_TZ).date()
-    first = last - timedelta(days=days * 7 // 5 + 14)
+    # About 242 sessions a year: 7/5 calendar days per session left 250 days at 240 sessions (2026-10-10).
+    first = last - timedelta(days=days * 3 // 2 + 20)
     readings = derived_daily_readings.newest(connection, CAPABILITY, first, last)
     flows = {item["trade_date"]: item for item in derived_daily_readings.newest(
         connection, broad_etf_flow.FLOW_CAPABILITY, first, last)}

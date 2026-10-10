@@ -32,6 +32,14 @@ class RefreshTests(unittest.TestCase):
         self.assertGreaterEqual(sessions, WINDOW + runtime.KEEP_SESSIONS + TURNOVER_BASE + 30,
                                 "the oldest reading re-stored each evening must still see a full window")
 
+    def test_the_read_window_holds_the_requested_sessions(self):
+        windows = []
+        with mock.patch.object(runtime.derived_daily_readings, "newest",
+                               side_effect=lambda _c, _cap, first, last: windows.append((first, last)) or []):
+            runtime.daily_series(object(), days=250, end=date(2026, 10, 9))
+        first, last = windows[0]
+        self.assertGreaterEqual((last - first).days * 242 / 365, 250, "about 242 sessions a year")
+
     def test_refresh_keeps_the_latest_scored_readings_and_completes_only_with_the_session(self):
         end = date(2099, 3, 10)
         readings = [_reading(end - timedelta(days=i), None if i > 40 else 50.0 + i) for i in range(60, -1, -1)]

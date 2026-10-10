@@ -26,16 +26,22 @@ owner. Only when fewer than 250 readings are stored (before the backfill) are
 the bars aggregated again.
 
 Samples run 09:30-11:30 and 13:05-15:00, every five minutes; the lunch break
-is a gap, not a line. A finished session is stored after the close as
-``market_temperature_intraday``, one reading holding its samples. The session
-in progress is computed on request, and each settled sample is kept in this
-process.
+is a gap, not a line. The minute capture stops at about 14:59, before the
+closing auction prints, so the 15:00 sample is the session's last document
+from 14:55 on; its own ``observed_at`` says when that was. Each sample's share
+of the day's turnover is taken against the bars' whole-day turnover, which
+includes the auction.
+
+A finished session is stored after the close as ``market_temperature_intraday``,
+one reading holding its samples. It counts as complete with 40 of the 49
+samples and a closing one. The session in progress is computed on request,
+and each settled sample is kept in this process.
 
     python -m app.market_temperature_intraday --start 2026-09-01 --end 2026-10-09 [--apply]
 
 backfills past sessions oldest first, so later ones can use the turnover
-profile of the earlier ones. A session takes about 15 s: its 49 minute
-documents and the 420-day daily history.
+profile of the earlier ones. A session takes about 10 s: its 49 minute
+documents, and the daily history read from storage.
 """
 
 from __future__ import annotations
@@ -59,6 +65,9 @@ CAPABILITY = "market_temperature_intraday"
 STEP = timedelta(minutes=5)
 SESSIONS = ((time(9, 30), time(11, 30)), (time(13, 5), time(15, 0)))
 CLOSE = time(15, 0)
+# The minute capture stops at about 14:59, before the closing auction prints at 15:00 (2026-09-18 to 10-09:
+# last documents 14:56:45-14:59:44), so the session's last document from 14:55 on stands in for the close.
+CLOSE_FROM = time(14, 55)
 SAMPLE_WINDOW = timedelta(minutes=3)       # a sample is the first minute captured within this after its time
 LOOKBACK_DAYS = 600                        # daily history, as in market_temperature_runtime: a full 250-session window
 PROFILE_SESSIONS, PROFILE_MIN = 20, 5
@@ -175,9 +184,8 @@ def daily_context(connection: Any, day: date) -> dict[str, Any]:
 
 def _document_at(connection: Any, day: date, moment: time) -> tuple[datetime, dict[str, Any]] | None:
     if moment == CLOSE:
-        found = minute_cross_section.latest(connection, day)        # the closing auction prints after 15:00
-        if found and found[0] >= datetime.combine(day, CLOSE, CN_TZ):
-            return found
+        found = minute_cross_section.latest(connection, day)
+        return found if found and found[0] >= datetime.combine(day, CLOSE_FROM, CN_TZ) else None
     start = datetime.combine(day, moment, CN_TZ)
     return minute_cross_section.first_between(connection, start, start + SAMPLE_WINDOW)
 
@@ -193,7 +201,7 @@ def sample(connection: Any, day: date, moment: time, context: Mapping[str, Any])
     values = components_of({**totals, "turnover_ratio": ratio})
     scores, temperature = score(values, context["history"])
     return {
-        "time": moment.strftime("%H:%M"), "observed_at": observed_at.isoformat(), "temperature": temperature,
+        "time": moment.strftime("%H:%M"), "observed_at": observed_at.astimezone(CN_TZ).isoformat(), "temperature": temperature,
         "band": band_of(temperature), "scores": scores, "values": values,
         "counts": {key: totals[key] for key in COUNT_KEYS}, "turnover_cny": round(totals["turnover_cny"]),
         "limits_ok": totals["limits_ok"],
@@ -230,17 +238,28 @@ def refresh(database: Any, day: date, *, apply: bool = True) -> dict[str, Any]:
     """After the close: compute every sample of ``day`` and store them, each with its share of the day's turnover."""
     with database.transaction() as connection:
         series = intraday_series(connection, day, now=datetime.combine(day, time(23, 59), CN_TZ))
+        daily = derived_daily_readings.newest(connection, DAILY_CAPABILITY, day, day)
     samples = [dict(item) for item in series["samples"]]
     close = next((item for item in samples if item["time"] == CLOSE.strftime("%H:%M")), None)
+    # The share's denominator is the day's whole turnover from the bars: the last document (about 14:59)
+    # misses the closing auction. Without a stored daily reading, the closing sample stands in.
+    full_day = (daily[-1].get("turnover_cny") if daily else None) or (close["turnover_cny"] if close else None)
     for item in samples:
-        item["share"] = round(item["turnover_cny"] / close["turnover_cny"], 5) if close and close["turnover_cny"] else None
-    complete = len(samples) >= MIN_SAMPLES and close is not None and close["temperature"] is not None
+        item["share"] = round(item["turnover_cny"] / full_day, 5) if full_day else None
+    if len(samples) < MIN_SAMPLES:
+        reason = f"{len(samples)} of {len(SAMPLE_TIMES)} five-minute samples; {MIN_SAMPLES} needed"
+    elif close is None:
+        reason = f"no minute document from {CLOSE_FROM.strftime('%H:%M')} on to stand in for the close"
+    elif close["temperature"] is None:
+        reason = "no temperature at the close: the session's limit prices or the daily history are missing"
+    else:
+        reason = None
     reading = {key: value for key, value in series.items() if key != "samples"} | {"samples": samples}
     counts = derived_daily_readings.store(database, CAPABILITY, [reading]) if apply and samples else {"stored": 0, "unchanged": 0}
     return {
-        "status": "completed" if complete else "blocked", "trade_date": day.isoformat(), "samples": len(samples), **counts,
+        "status": "blocked" if reason else "completed", "trade_date": day.isoformat(), "samples": len(samples), **counts,
         "close_temperature": close["temperature"] if close else None,
-        "reason": None if complete else "too few minute samples, or no limit prices stored for the session",
+        "close_observed_at": close["observed_at"] if close else None, "reason": reason,
         "research_only": True, "live_effect": "none",
     }
 
