@@ -2,18 +2,14 @@
 
 The post-close stage ``market_temperature`` calls ``refresh``. It recomputes the
 series over the last ``LOOKBACK_DAYS`` calendar days in one PostgreSQL pass
-(about 13 s on the owner database) and stores the recent readings.
+(about 13 s on the owner database) and stores the recent readings as
+``market_temperature_daily`` (see ``derived_daily_readings``).
 
-Each reading is a ``market_temperature_daily`` observation (provider
-``local_derived``, no symbol), one per session, with ``effective_at`` set to
-that session's close. A changed reading, after the bars were repaired, is
-stored beside the old one, and the read takes the newest.
-
-A reading identical to the newest one already stored is skipped here. The
-table's unique key cannot do it: it includes the symbol, and NULLs never
-conflict, so re-storing 30 readings a night would have added 30 duplicates.
-
-The request path only reads stored rows; it never rescans the bars.
+The read joins the broad-ETF flow of the same sessions and marks the
+research signal "冰点资金共振": a cold reading (temperature <= 40) on a day the
+basket turnover ran at least 1.5x its 20-session mean. It is "逆势放量" when
+the index also fell that day. The request path only reads stored rows; it
+never rescans the bars.
 
     python -m app.market_temperature_runtime --end 2026-10-09 [--keep 400] [--apply]
 
@@ -25,30 +21,27 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
+from . import broad_etf_flow, derived_daily_readings
+from .derived_daily_readings import CN_TZ
 from .market_temperature import BOILING, COMPONENTS, FREEZING, VERSION, temperature_series
 from .market_temperature_repository import daily_rows
-from .public_market_repository import persist_timed_observations
 
-PROVIDER_KEY = "local_derived"
 CAPABILITY = "market_temperature_daily"
 LOOKBACK_DAYS = 420          # about 290 sessions: the 250-session window plus warm-up
-KEEP_SESSIONS = 30           # readings re-stored each evening; identical ones are skipped
-CN_TZ = ZoneInfo("Asia/Shanghai")
+KEEP_SESSIONS = 30           # readings re-stored each evening; unchanged ones are skipped
+COLD_CEILING = 40.0          # 冷 and 冰点
 
-READ_SQL = """
-SELECT DISTINCT ON (effective_at) effective_at, normalized
-  FROM quant.raw_market_observations
- WHERE provider_key=%s AND capability=%s AND symbol IS NULL AND effective_at >= %s AND effective_at <= %s
- ORDER BY effective_at, available_at DESC
-"""
-
-
-def session_close(day: date) -> datetime:
-    return datetime.combine(day, time(15, 0), CN_TZ)
+# The 2025-04-03..2026-10-09 read-only backtest behind the marker (decision 0013).
+# Shown beside it so nobody mistakes ten days for a law.
+MARKER_EVIDENCE = {
+    "window": "2025-04-03..2026-10-09", "benchmark": "000001.SH close to close",
+    "cold_with_surge": {"days": 10, "up_1d": 0.9, "up_3d": 0.9, "up_5d": 0.9},
+    "cold_all": {"days": 131, "up_1d": 0.6, "up_3d": 0.57, "up_5d": 0.6},
+    "caveat": "four or five independent episodes; an index rebalance or a new listing can also raise ETF turnover",
+}
 
 
 def compute(connection: Any, end: date, *, lookback_days: int = LOOKBACK_DAYS) -> list[dict[str, Any]]:
@@ -56,66 +49,58 @@ def compute(connection: Any, end: date, *, lookback_days: int = LOOKBACK_DAYS) -
     return temperature_series(daily_rows(connection, end - timedelta(days=lookback_days), end))
 
 
-VOLATILE = frozenset({"effective_at", "available_at", "provider_key", "capability"})
-
-
-def _content(reading: dict[str, Any]) -> str:
-    """A reading as comparable text: what was computed, not when it was stored."""
-    return json.dumps({key: value for key, value in reading.items() if key not in VOLATILE},
-                      sort_keys=True, ensure_ascii=False, default=str)
-
-
-def _stored_newest(connection: Any, first: date, last: date) -> dict[str, str]:
-    rows = connection.execute(READ_SQL, (PROVIDER_KEY, CAPABILITY, session_close(first), session_close(last))).fetchall()
-    newest = {}
-    for row in rows:
-        payload = dict(row)["normalized"]
-        payload = json.loads(payload) if isinstance(payload, str) else dict(payload)
-        newest[str(payload.get("trade_date"))] = _content(payload)
-    return newest
-
-
 def refresh(database: Any, end: date, *, keep: int = KEEP_SESSIONS, apply: bool = True) -> dict[str, Any]:
-    """Recompute and store the last ``keep`` readings that changed; ``completed`` only when ``end`` itself has one."""
+    """Recompute and store the last ``keep`` readings; ``completed`` only when ``end`` itself has one."""
     with database.transaction() as connection:
         readings = compute(connection, end)
-        scored = [reading for reading in readings if reading["temperature"] is not None][-keep:]
-        stored = _stored_newest(connection, date.fromisoformat(scored[0]["trade_date"]), end) if scored else {}
-    now = datetime.now(timezone.utc).isoformat()
-    rows = []
-    for reading in scored:
-        row = {**reading, "version": VERSION, "research_only": True, "live_effect": "none"}
-        if stored.get(reading["trade_date"]) == _content(row):
-            continue
-        rows.append({**row, "effective_at": session_close(date.fromisoformat(reading["trade_date"])).isoformat(),
-                     "available_at": now})
-    written = persist_timed_observations(database, PROVIDER_KEY, CAPABILITY, rows) if apply and rows else 0
+    scored = [{**reading, "version": VERSION, "research_only": True, "live_effect": "none"}
+              for reading in readings if reading["temperature"] is not None][-keep:]
+    counts = derived_daily_readings.store(database, CAPABILITY, scored) if apply else {"stored": 0, "unchanged": 0}
     latest = scored[-1] if scored else None
     status = "completed" if latest and latest["trade_date"] == end.isoformat() else "blocked"
     return {
-        "status": status, "trade_date": end.isoformat(), "stored": written, "unchanged": len(scored) - len(rows),
-        "readings": len(scored),
+        "status": status, "trade_date": end.isoformat(), **counts, "readings": len(scored),
         "latest": {key: latest[key] for key in ("trade_date", "temperature", "band")} if latest else None,
         "reason": None if status == "completed" else "no temperature for the session yet: its bars or limits are missing",
         "research_only": True, "live_effect": "none",
     }
 
 
+def marker(temperature: float | None, ratio: float | None, index_change: float | None) -> dict[str, Any] | None:
+    """The research marker for one session, or None."""
+    if temperature is None or ratio is None or temperature > COLD_CEILING or ratio < broad_etf_flow.SURGE_RATIO:
+        return None
+    counter_trend = index_change is not None and index_change < 0
+    return {"kind": "cold_with_etf_surge", "label": "逆势放量" if counter_trend else "冰点资金共振",
+            "counter_trend": counter_trend}
+
+
 def daily_series(connection: Any, *, days: int = 120, end: date | None = None) -> dict[str, Any]:
-    """The newest stored reading of each session, oldest first, the last ``days`` of them."""
+    """The newest stored reading of each session, oldest first, with its flow and marker."""
     last = end or datetime.now(CN_TZ).date()
-    since = session_close(last - timedelta(days=days * 7 // 5 + 14))
-    rows = connection.execute(READ_SQL, (PROVIDER_KEY, CAPABILITY, since, session_close(last))).fetchall()
-    readings = []
-    for row in rows:
-        payload = dict(row)["normalized"]
-        payload = json.loads(payload) if isinstance(payload, str) else dict(payload)
-        readings.append({key: value for key, value in payload.items() if key not in {"provider_key", "capability"}})
+    first = last - timedelta(days=days * 7 // 5 + 14)
+    readings = derived_daily_readings.newest(connection, CAPABILITY, first, last)
+    flows = {item["trade_date"]: item for item in derived_daily_readings.newest(
+        connection, broad_etf_flow.FLOW_CAPABILITY, first, last)}
+    previous_close = None
+    for reading in readings:
+        close = reading.get("index_close")
+        change = (close / previous_close - 1) * 100 if close and previous_close else None
+        previous_close = close or previous_close
+        flow = flows.get(reading["trade_date"])
+        ratio = flow.get("ratio") if flow else None
+        reading.update({
+            "index_change_pct": round(change, 3) if change is not None else None,
+            "etf_flow": {key: flow.get(key) for key in ("ratio", "basket_turnover_cny", "codes", "amount_estimated")}
+            if flow else None,
+            "marker": marker(reading.get("temperature"), ratio, change),
+        })
     return {
         "version": VERSION, "readings": readings[-days:],
-        "thresholds": {"freezing": FREEZING, "boiling": BOILING},
+        "thresholds": {"freezing": FREEZING, "boiling": BOILING, "cold_ceiling": COLD_CEILING,
+                       "etf_surge_ratio": broad_etf_flow.SURGE_RATIO},
         "components": [{"key": item.key, "label": item.label, "direction": item.direction} for item in COMPONENTS],
-        "research_only": True, "live_effect": "none",
+        "marker_evidence": MARKER_EVIDENCE, "research_only": True, "live_effect": "none",
     }
 
 
@@ -138,5 +123,5 @@ if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
 
 
-__all__ = ["CAPABILITY", "KEEP_SESSIONS", "LOOKBACK_DAYS", "PROVIDER_KEY", "compute", "daily_series", "main", "refresh",
-           "session_close"]
+__all__ = ["CAPABILITY", "COLD_CEILING", "KEEP_SESSIONS", "LOOKBACK_DAYS", "compute", "daily_series", "main", "marker",
+           "refresh"]

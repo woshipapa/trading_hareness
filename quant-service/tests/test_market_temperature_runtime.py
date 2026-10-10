@@ -15,17 +15,10 @@ def _reading(day: date, temperature: float | None, band: str | None = "中性") 
             "scores": {}, "values": {}, "index_close": 3900.0, "limits_ok": True}
 
 
-class _Connection:
-    def execute(self, *_args, **_kwargs):
-        class Result:
-            def fetchall(self_inner): return []
-        return Result()
-
-
 class _Database:
     def transaction(self):
         class Context:
-            def __enter__(self_inner): return _Connection()
+            def __enter__(self_inner): return object()
             def __exit__(self_inner, *exc): return False
         return Context()
 
@@ -36,15 +29,25 @@ class RefreshTests(unittest.TestCase):
         readings = [_reading(end - timedelta(days=i), None if i > 40 else 50.0 + i) for i in range(60, -1, -1)]
         stored = []
         with mock.patch.object(runtime, "compute", return_value=readings), \
-                mock.patch.object(runtime, "persist_timed_observations",
-                                  side_effect=lambda _db, provider, capability, rows: stored.extend(rows) or len(rows)):
+                mock.patch.object(runtime.derived_daily_readings, "store",
+                                  side_effect=lambda _db, capability, rows: stored.extend(rows) or {"stored": len(rows), "unchanged": 0}):
             result = runtime.refresh(_Database(), end, keep=5)
         self.assertEqual((result["status"], result["stored"], result["latest"]["trade_date"]), ("completed", 5, end.isoformat()))
-        self.assertEqual([row["trade_date"] for row in stored][-1], end.isoformat())
-        self.assertTrue(all(row["effective_at"].endswith("15:00:00+08:00") for row in stored))
+        self.assertEqual(stored[-1]["trade_date"], end.isoformat())
+        self.assertTrue(all(row["live_effect"] == "none" and row["version"] for row in stored))
         with mock.patch.object(runtime, "compute", return_value=readings[:-1]), \
-                mock.patch.object(runtime, "persist_timed_observations", return_value=0):
+                mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 0, "unchanged": 5}):
             self.assertEqual(runtime.refresh(_Database(), end, keep=5)["status"], "blocked")
+
+
+class MarkerTests(unittest.TestCase):
+    def test_cold_with_a_surge_is_marked_and_an_index_fall_makes_it_counter_trend(self):
+        self.assertEqual(runtime.marker(35.0, 1.6, 0.4)["label"], "冰点资金共振")
+        self.assertEqual(runtime.marker(12.0, 1.5, -1.2), {"kind": "cold_with_etf_surge", "label": "逆势放量",
+                                                          "counter_trend": True})
+        self.assertIsNone(runtime.marker(41.0, 3.0, -1.0), "warmer than cold")
+        self.assertIsNone(runtime.marker(15.0, 1.49, -1.0), "no surge")
+        self.assertIsNone(runtime.marker(15.0, None, -1.0), "no flow reading")
 
 
 @unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
@@ -86,9 +89,24 @@ class StoredSeriesTests(unittest.TestCase):
         count = self.connection.execute(
             """SELECT count(*) AS n FROM quant.raw_market_observations
                 WHERE provider_key='local_derived' AND capability='market_temperature_daily' AND effective_at >= %s""",
-            (runtime.session_close(end - timedelta(days=2)),)).fetchone()["n"]
+            (runtime.derived_daily_readings.session_close(end - timedelta(days=2)),)).fetchone()["n"]
         self.assertEqual(count, 4)
-        self.assertEqual(series["thresholds"], {"freezing": 20.0, "boiling": 80.0})
+        self.assertEqual((series["thresholds"]["freezing"], series["thresholds"]["boiling"]), (20.0, 80.0))
+
+    def test_the_series_joins_the_etf_flow_and_marks_a_cold_surge(self) -> None:
+        from app import broad_etf_flow, derived_daily_readings
+        end = date(2099, 3, 10)
+        day1, day2 = end - timedelta(days=1), end
+        readings = [{**_reading(day1, 45.0), "index_close": 4000.0}, {**_reading(day2, 18.0, "冰点"), "index_close": 3960.0}]
+        with mock.patch.object(runtime, "compute", return_value=readings):
+            runtime.refresh(self.database, end)
+        derived_daily_readings.store(self.database, broad_etf_flow.FLOW_CAPABILITY, [
+            {"trade_date": day1.isoformat(), "ratio": 2.0, "codes": 12}, {"trade_date": day2.isoformat(), "ratio": 1.8, "codes": 12}])
+        series = runtime.daily_series(self.connection, days=10, end=end)
+        first, second = series["readings"]
+        self.assertIsNone(first["marker"], "45 is not cold, whatever the flow")
+        self.assertEqual((second["index_change_pct"], second["etf_flow"]["ratio"], second["marker"]["label"]),
+                         (-1.0, 1.8, "逆势放量"))
 
 
 if __name__ == "__main__":  # pragma: no cover
