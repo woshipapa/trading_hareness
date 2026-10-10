@@ -360,6 +360,74 @@ PYTHONPATH=<pytdx 解包> python ../scripts/verify-tdx-protocol.py   # 与 pytdx
 迁移 `20260918_ds0001`（owner 库已记录一条本仓库没有的 0095–0105 迁移线，故用不占序号的 ID）登记新 provider/能力/路由。
 2026-09-18 已在 owner 库直接执行其幂等插入（13 个 provider / 18 条能力 / 33 条路由），未改 alembic_version；两条迁移线合并时再补合并迁移。
 
+### 7.1 通达信：探测、升级与周一验收
+
+下面的命令在仓库根目录执行（`python -m app.datasources` 要在 `quant-service/` 下执行）。脚本只读上游；写文件的只有 `--output` 指定的结果、`tdx-promote.py check` 的证据文件，以及 `refresh-tdx-hosts.sh` 对 `tdx_hosts.py` 的改写。
+
+**探测一个绑定**（`python -m app.datasources probe`）
+
+```bash
+# 不管状态，调一次该绑定的适配器，打印一个 JSON，不写任何东西；适配器抛错时退出码为 1
+(cd quant-service && python -m app.datasources probe tdx_public bars.index_daily --params '{"symbol": "999999.SH", "count": 5}')
+(cd quant-service && python -m app.datasources probe tdx_mac limits.prices --params '{"symbols": ["000001.SZ"]}' --all-rows)
+# --adapter 改调指定函数（app/<模块路径>.py:<函数>），给目录里只有模块名的参考源用
+(cd quant-service && python -m app.datasources probe tencent_free bars.minute --adapter app/free_market_providers.py:tencent_intraday_minutes --params '{"symbol": "600519.SH"}')
+```
+
+输出的 JSON 有：来源、能力、适配器、参数，起止时间（UTC），行数，`coverage`，生效与可得时间的最小、最大值，`warnings`（带应答主机 `tdx_host=…`），前 5 行（`sample`；`--all-rows` 给全部行），适配器抛错时的 `error`。`--params` 是 JSON 对象，`date` 型参数写 ISO 字符串，`probe` 会转成日期。
+
+**升级一个绑定**（`scripts/tdx-promote.py`）
+
+```bash
+python scripts/tdx-promote.py check tdx_mac quote.watch_snapshot --params '{"symbols": ["600519.SH", "000001.SZ"]}' --egress owner
+python scripts/tdx-promote.py apply scripts/data/tdx_promote_<能力>_<来源>_<日期>_<出口>_<参数哈希>.json [...]
+```
+
+- `check` 在本机（`--egress mac`）或 owner 的 quant-research 容器里（`--egress owner`）跑 `python -m app.datasources probe`。owner 出口经 ssh 连到 owner，再只读地 `docker exec trading-hareness-peer-quant-research-1 …`，需要先设置 `LONGHU_SSH_HOST`、`LONGHU_SSH_PORT`、`LONGHU_SSH_USER`、`LONGHU_SSH_KEY_PATH`（这里只写变量名；值不进文档、日志和证据文件）。exec 跑的是镜像里的代码：`QUANT_HOTFIX_ENABLED` 的代码覆盖层只在服务进程的 `PYTHONPATH` 上，不在 exec 里，所以镜像本身要带 `probe` 命令和被探的适配器。
+- 证据写到 `scripts/data/tdx_promote_<能力>_<来源>_<日期>_<出口>_<参数哈希>.json`（日期取 Asia/Shanghai；参数哈希是 params JSON 的 sha256 前 8 位；schema `tdx-promote-v2`），记录所有输入、每次探测（前 5 行和全部行的哈希）、对账结果（行数、最大偏差、例子）和三道门的判定。`check` 不管判定如何都退出 0。
+- 三道门：
+  - `owner_egress`：探测在 owner 容器里跑，并且有行；
+  - `agreement`：`BindingSpec.agreement` 声明的每个容差都成立。两侧的行按声明的 key 连接，逐个公共行比较，公共行占本绑定行数的比例不得低于 `min_coverage`（默认 0.95）。**没有声明容差的绑定，这道门直接通过**，证据里写 not applicable。基线上只有 3 个绑定声明了容差，参照都是腾讯：`tdx_mac` 的 `bars.minute`（close、volume）、`limits.prices`（up_limit、down_limit）、`quote.watch_snapshot`（price、volume、amount）；容差是留给第一次盘中检查去调的起始值（`catalog.py` 的注释）；
+  - `intraday`：每次探测的开始和结束都在上交所（XSHG）交易时段内，含午休和节假日，用运行脚本的 Mac 上的 `exchange_calendars` 判定，证据里写日历名和版本。
+- `apply` 取同一个绑定的证据文件，**每个文件**都过了这一步要的门才改：`UNSUPPORTED` → `DECLARED` 要 `owner_egress` 和 `agreement`；`DECLARED` → `LIVE_VERIFIED` 另要 `intraday`。它只把 `catalog.py` 里该绑定的状态记号改一格，从不碰 `decision_eligible`；不提交，只打印 `git commit -F - -- quant-service/app/datasources/catalog.py` 命令，提交信息引用各证据文件和它们的 sha256。顺序是先提交证据，再单独提交状态改动。
+- `apply` 要求 `catalog.py` 里该绑定恰有一处字面的 `_bind("<来源>", "<能力>", …)` 调用，否则退出。基线上 `derived_tdx_limits` 的三个池由生成式产生，满足不了这个条件，`apply` 对它们会退出。
+
+**owner 出口的路由探测与主机池**
+
+```bash
+# scripts/probe-tdx-routes.py 连同候选主机文件经 ssh 送进 owner 的 quant-research 容器里跑（docker exec -i … python -B -），owner 上不写任何东西
+bash scripts/tdx-owner-probe.sh --output <矩阵.json> [--profile login_one|legacy_3] [--require <命令,…>] [--min-usable-hosts N] [--samples N] [--interval 秒] [--hist-date YYYY-MM-DD]
+# 重跑 owner 探测，重新生成 tdx_hosts.py，打印它的 git diff；不提交
+bash scripts/refresh-tdx-hosts.sh
+```
+
+- `tdx-owner-probe.sh` 同样需要上面四个 `LONGHU_SSH_*` 变量，`--output` 必填；低于阈值的扫描退出码为 2，但已打印的矩阵仍会保留下来（那就是证据）。
+- `refresh-tdx-hosts.sh` 把矩阵交给 `scripts/generate-tdx-hosts.py`：只取每个样本里都可用的主机，按连接延迟中位数排序，同一 /16 最多 3 台，取前 20 台，写入 `quant-service/app/datasources/sources/tdx_hosts.py`。盘后的 `tdx_host_probe` 只记健康，不重写主机池（第 6.1 节）。
+
+**周一盘中验收**（计划第 4 节；输出文件名沿用 `scripts/data/<主题>_<日期>_<出口>.json` 的写法）
+
+```bash
+python scripts/probe-tdx-cadence.py --rates 1,2,5 --seconds 10 --output scripts/data/tdx_cadence_<日期>_mac.json                  # 4.1 节奏与速率
+python scripts/probe-tdx-ext-delay.py --seconds 1800 --output scripts/data/tdx_ext_delay_<日期>_mac.json                          # 4.2 扩展行情延迟，09:30 开始
+python scripts/tdx-promote.py check <来源> <能力> --params '<JSON>' --egress owner                                               # 4.3 owner 出口逐绑定探测与对账，随后 apply
+python scripts/probe-tdx-q-flow.py --samples <N> --interval 60 --output scripts/data/tdx_q_flow_<日期>_mac.json                   # 4.4 0x90–0x96 与资金流位的盘中取样
+python scripts/probe-tdx-disclosure-timing.py --polls <N> --interval 10 --output scripts/data/tdx_disclosure_timing_<日期>_mac.json  # 4.5 披露日当天
+```
+
+- **4.1 `probe-tdx-cadence.py`**：三类请求（legacy 0x054b 全 A 一页 80 只，MAC 0x122b 批量 80 只，legacy 0x053e 报价 80 只），每台主机、每个速率各跑 `--seconds` 秒，先在一条保持打开的连接上跑，再每个请求新开连接跑一遍。请求按序发出，晚了不补发。输出每次运行的失败率、应答请求的 p50、p95 延迟，以及行摘要变化的次数（缓存陈旧的主机永不变化）。默认 `--rates 1,2,5`、`--seconds 10`、`--host-count 3`（取 `tdx_hosts.py` 的前 3 台）、`--timeout 5`；MAC 那一类固定跑 MAC 主机；高于 10 次/秒的速率被拒绝。`--egress mac|owner` 只是写进结果的标签，不改变出口。采集器的节奏由这份结果定。
+- **4.2 `probe-tdx-ext-delay.py`**：每秒向每台扩展行情主机读 `(27, HZ5017)` 和 `(47, IF2610)`，同时读腾讯的 `hkHSTECH`，每个读数带本机到达时间。延迟是使价格变化最多重合的整秒平移（正数表示该序列更晚显示价格），同时给出所依据的变化次数。`HZ5017` 对腾讯比；`IF2610` 没有公共参照（应用既不读新浪也不读腾讯的期货报价，新浪的 `nf_IF2610` 只在 `docs/archive/tdx-q-extcodes.md` 里手工核对过一次），所以后面的主机对第一台比。默认主机是 `113.45.175.47:7727`（登录标记 `TDX_DS`，实时候选）和 `139.9.191.175:7727`（标记 `TDX延时全`，延时候选），默认 `--seconds 1800`、`--max-lag 1200`；超过 `--max-lag` 或超过运行时长的延迟测不出来。读失败写成带异常类名和消息的条目，连续 `--max-consecutive-errors`（默认 5）秒失败则停，结果里记 `stopped`，退出码为 1。要定的是 `TDX延时全` 主机是否排除。
+- **4.3 `tdx-promote.py`**：见上。新绑定都是 `unsupported`，所以第一步是 `UNSUPPORTED` → `DECLARED`（`owner_egress` + `agreement`），在交易时段内跑出的证据才能再走 `DECLARED` → `LIVE_VERIFIED`（另要 `intraday`）。
+- **4.4 `probe-tdx-q-flow.py`**：不带参数是 2026-10-09 会话的一次性对比。`--samples N --interval 秒`（默认 60）取 N 个盘中样本，每个样本新开一个 MAC 连接，读 MAC 0x122b 的资金流位与 0x90–0x96、`0x1218` 的资金流 JSON，以及东财 `push2 ulist.np/get` 的个股主力资金（`f62` 净流入额，`f184` 占比，占比的单位未确认），三块各带接收时间；数字原样记录，不做解读。每个样本之后重写 `--output`；失败的样本写成条目，连续 `--max-consecutive-errors` 个失败则停。MAC 主机和 8 只证券是脚本里的常量；东财参照经 `curl` 读取，脚本注释写明要从家宽出口读。
+- **4.5 `probe-tdx-disclosure-timing.py`**：`--polls N`（必填）、`--interval` 分钟（默认 10）。每隔 `--interval` 分钟下载一次 `zhb.zip`，记录上一次成功轮询没有的 (证券, 报告期, 第 4 列日期) 行和轮询时间（第一次轮询只作基线）。最后一次轮询之后，对每条季末报告期的新行，用应用的 cninfo 读取器查该证券从第 4 列日期前一天到后一天的公告，记下每条公告的标题是否含“<年>年<报告名>”，以及 Asia/Shanghai 时间（cninfo 列表只给日期时，时间就只有日期）；逐条查询，按读取器的限速。失败的轮询写成条目，连续 `--max-consecutive-errors` 次失败则停。
+
+**三条 API 路由**（`quant-service/app/routers/datasource_catalog.py`、`datasource_reads.py`；控制台经 relay 用 `/api/research/datasources/…`）
+
+| 路由 | 作用 |
+|---|---|
+| `GET /api/v1/datasources/catalog?source=&category=&status=` | 整份目录：来源、能力、绑定（含 BindingSpec 全字段、`research_readable`）、口径、退役项 |
+| `GET /api/v1/datasources/capabilities/{capability}` | 一个能力和它的全部绑定，另带 `evidence_locations`；未知能力返回 404 |
+| `GET /api/v1/datasources/read/{source}/{capability}?<适配器参数>` | 研究试读（开关和边界见第 6.2 节） |
+
 ## 8. 本次顺带修复的现存问题（均有测试）
 
 | 问题 | 影响 | 修复 |
