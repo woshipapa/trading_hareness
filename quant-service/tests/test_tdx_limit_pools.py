@@ -34,12 +34,13 @@ def symbols_by_pool(members):
 
 
 # Limit prices as the MAC host delivered them for 2026-10-09 (scripts/data/tdx_mac_adapters_live_2026-10-10_mac*.json):
-# 000001.SZ, 300750.SZ (a 20 % band), 600000.SH, 600004.SH and 600519.SH. The 600603.SH row is hand-built: a 5 % band
-# around 5.13. So is the 688002.SH row: no evidence file shows how the MAC host marks a security without limits.
+# 000001.SZ, 300750.SZ (a 20 % band), 600000.SH, 600004.SH and 600519.SH. Hand-built: the 600603.SH row (a 5 % band
+# around 5.13), the 600005.SH row (the band of 600004.SH) and the 688002.SH row, because no evidence file shows how the
+# MAC host marks a security without limits.
 LIMITS = [
     limit_row("000001.SZ", 12.96, 10.60), limit_row("300750.SZ", 344.10, 229.40), limit_row("600603.SH", 5.39, 4.87),
     limit_row("600000.SH", 10.67, 8.73), limit_row("600519.SH", 1381.37, 1130.21), limit_row("600004.SH", 8.44, 6.90),
-    limit_row("688002.SH", 0.0, 0.0),
+    limit_row("600005.SH", 8.44, 6.90), limit_row("688002.SH", 0.0, 0.0),
 ]
 SNAPSHOT = [
     snapshot_row("000001.SZ", 12.96, 12.96),      # sealed at the up limit
@@ -48,6 +49,7 @@ SNAPSHOT = [
     snapshot_row("600000.SH", 10.40, 10.67),      # touched the up limit and is below it now
     snapshot_row("600519.SH", 1130.21, 1180.00),  # sealed at the down limit
     snapshot_row("600004.SH", 8.43, 8.43),        # one tick below the up limit
+    snapshot_row("600005.SH", 6.91, 6.91),        # one tick above the down limit
     snapshot_row("688001.SH", 50.00, 50.00),      # no limit row
     snapshot_row("688002.SH", 44.00, 44.00),      # a limit row without a limit
 ]
@@ -92,14 +94,14 @@ class LimitPoolAdapterTests(unittest.TestCase):
 
         async def limits(*, symbols):
             requested.append(symbols)
-            return CapabilityEvidence(LIMITS, coverage=7 / 8, available_at_min=later, available_at_max=later,
+            return CapabilityEvidence(LIMITS, coverage=8 / 9, available_at_min=later, available_at_max=later,
                                       warnings=("tdx_host=limit-host:7709", "missing_symbols=1: 688001.SH"))
 
         evidence = self.fetch(TODAY, snapshot, limits)
         self.assertEqual(requested, [[row["symbol"] for row in SNAPSHOT]])
         self.assertEqual(symbols_by_pool(evidence.rows), EXPECTED)
         self.assertEqual({row["observed_at"] for row in evidence.rows}, {OBSERVED})
-        self.assertEqual(evidence.coverage, 6 / 8)
+        self.assertEqual(evidence.coverage, 7 / 9)
         self.assertEqual((evidence.available_at_min, evidence.available_at_max), (later, later))
         self.assertEqual(evidence.warnings, ("tdx_host=snapshot-host:7709/login_one", "no_trade_rows=2",
                                              "tdx_host=limit-host:7709", "missing_symbols=1: 688001.SH",
