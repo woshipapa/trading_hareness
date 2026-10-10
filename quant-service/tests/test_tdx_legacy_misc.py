@@ -53,6 +53,20 @@ class LegacyMiscTests(unittest.TestCase):
         self.assertEqual(len(rows), 81)
         self.assertEqual(client.requests, [(0, 80), (80, 80)])
 
+    def test_a_page_holding_a_no_trade_row_is_still_a_full_page(self):
+        requests = []
+
+        def exchange(request: bytes) -> bytes:
+            start = struct.unpack_from("<H", request, 16)[0]
+            requests.append(start)
+            count = {0: 80, 80: 80, 160: 5}[start]
+            return b"\x00\x00" + struct.pack("<H", count) + b"".join(
+                quote_row(start + offset, price=0 if start + offset == 7 else 1000) for offset in range(count))
+
+        rows, no_trade = legacy._all_a_snapshot(mock.Mock(_exchange=exchange))
+        self.assertEqual((len(rows), no_trade, requests), (164, 1, [0, 80, 160]))
+        self.assertEqual(len({row["code"] for row in rows}), 164)
+
     def test_a_request_never_asks_for_more_than_80_rows(self):
         start, count = struct.unpack_from("<HH", legacy.build_quotes_list_request(6, 0, 0, 200), 16)
         self.assertEqual((start, count), (0, 80))

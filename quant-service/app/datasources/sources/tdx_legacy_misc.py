@@ -227,21 +227,23 @@ def parse_index_info(body: bytes, request_market: int | None = None, request_cod
 
 
 def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]], int]:
-    """All A shares with a trade, 80 rows per page, and the count of no-trade rows left out."""
+    """All A shares with a trade, 80 rows per page, and the count of no-trade rows left out.
+
+    Pages advance by the rows the server served, kept or not: a page holding a no-trade row is still full.
+    """
     rows: list[dict[str, Any]] = []
     total_no_trade = 0
-    page_count = 0
-    while page_count < MAX_SNAPSHOT_PAGES:
-        request = build_quotes_list_request(QUOTE_CATEGORIES["all_a"], QUOTE_SORT_TYPES["code"], len(rows))
+    start = 0
+    for _ in range(MAX_SNAPSHOT_PAGES):
+        request = build_quotes_list_request(QUOTE_CATEGORIES["all_a"], QUOTE_SORT_TYPES["code"], start)
         page, no_trade_count = parse_quotes_list(client._exchange(request))
         rows.extend(page)
         total_no_trade += no_trade_count
-        page_count += 1
-        if len(page) < RANKING_PAGE_SIZE:
-            break
-    if page_count >= MAX_SNAPSHOT_PAGES:
-        raise tdx_protocol.TdxProtocolError(f"0x054b all_a snapshot did not end within {MAX_SNAPSHOT_PAGES} pages")
-    return rows, total_no_trade
+        served = len(page) + no_trade_count
+        start += served
+        if served < RANKING_PAGE_SIZE:
+            return rows, total_no_trade
+    raise tdx_protocol.TdxProtocolError(f"0x054b all_a snapshot did not end within {MAX_SNAPSHOT_PAGES} pages")
 
 
 async def fetch_all_a_snapshot() -> CapabilityEvidence:
