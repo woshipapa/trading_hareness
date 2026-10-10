@@ -90,7 +90,9 @@ TDX_COMMAND_FAMILIES: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 IO_MODULES = ("socket", "ssl", "urllib.request", "http.client", "httpx", "requests", "aiohttp", "subprocess", "ftplib",
               "asyncio.open_connection", "asyncio.create_subprocess_exec", "asyncio.create_subprocess_shell")
 #: Method names that are input/output whatever object they are called on.
-IO_ATTRIBUTES = frozenset({"read_text", "read_bytes", "write_text", "write_bytes", "open", "iterdir", "glob", "rglob",
+#: ``_exchange`` is the request/response primitive of every TDX client; a helper that receives a client as a
+#: parameter (``download_report_file(client, ...)``) does network input/output through it.
+IO_ATTRIBUTES = frozenset({"_exchange", "read_text", "read_bytes", "write_text", "write_bytes", "open", "iterdir", "glob", "rglob",
                            "send", "sendall", "recv", "recv_into", "urlopen"})
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -101,6 +103,7 @@ class _Module:
     tree: ast.Module
     functions: dict[str, ast.AST] = field(default_factory=dict)    # "f" and "Class.method"
     classes: dict[str, list[str]] = field(default_factory=dict)    # class -> method names
+    bases: dict[str, list[ast.expr]] = field(default_factory=dict)  # class -> base class expressions
     modules: dict[str, str] = field(default_factory=dict)          # local alias -> internal module
     names: dict[str, str] = field(default_factory=dict)            # local alias -> internal "module.name"
     external: dict[str, str] = field(default_factory=dict)         # local alias -> external dotted name
@@ -128,6 +131,7 @@ def _load(package_root: Path) -> dict[str, _Module]:
             elif isinstance(node, ast.ClassDef):
                 methods = [item.name for item in node.body if isinstance(item, _DEFS)]
                 info.classes[node.name] = methods
+                info.bases[node.name] = list(node.bases)
                 for item in node.body:
                     if isinstance(item, _DEFS):
                         info.functions[f"{node.name}.{item.name}"] = item
@@ -150,6 +154,45 @@ def _load(package_root: Path) -> dict[str, _Module]:
                     for alias in node.names:
                         info.external[alias.asname or alias.name] = f"{node.module}.{alias.name}"
     return modules
+
+
+def _resolve_class(modules: dict[str, _Module], info: _Module, expr: ast.AST) -> tuple[str, str] | None:
+    """``(module, class)`` of a class expression inside ``info``, when the class is in the analysed package."""
+    if isinstance(expr, ast.Name):
+        if expr.id in info.classes:
+            return info.name, expr.id
+        if expr.id in info.names:
+            module, _, attr = info.names[expr.id].rpartition(".")
+            return (module, attr) if attr in getattr(modules.get(module), "classes", {}) else None
+    chain = _attribute_chain(expr) if isinstance(expr, ast.Attribute) else None
+    if chain is not None and chain[0] in info.modules and len(chain[1]) == 1:
+        module = info.modules[chain[0]]
+        return (module, chain[1][0]) if chain[1][0] in modules[module].classes else None
+    return None
+
+
+def _class_chain(modules: dict[str, _Module], module: str, cls: str) -> list[tuple[str, str]]:
+    """The class followed by its analysed base classes, depth first (enough for TDX's single inheritance)."""
+    chain, pending = [], [(module, cls)]
+    while pending:
+        current = pending.pop(0)
+        if current in chain:
+            continue
+        chain.append(current)
+        info = modules[current[0]]
+        pending += [base for base in (_resolve_class(modules, info, expr) for expr in info.bases.get(current[1], ()))
+                    if base is not None]
+    return chain
+
+
+def _all_methods(modules: dict[str, _Module], module: str, cls: str) -> set[str]:
+    return {f"{owner_module}:{owner}.{method}" for owner_module, owner in _class_chain(modules, module, cls)
+            for method in modules[owner_module].classes[owner]}
+
+
+def _method_of(modules: dict[str, _Module], module: str, cls: str, method: str) -> str | None:
+    return next((f"{owner_module}:{owner}.{method}" for owner_module, owner in _class_chain(modules, module, cls)
+                 if method in modules[owner_module].classes[owner]), None)
 
 
 def _is_io_name(dotted: str) -> bool:
@@ -176,8 +219,9 @@ def _edges(modules: dict[str, _Module], info: _Module, owner: str | None, node: 
             name = expr.id
             if name in info.functions:
                 found.add(f"{info.name}:{name}")
-            if name in info.classes:
-                found |= {f"{info.name}:{name}.{method}" for method in info.classes[name]}
+            resolved = _resolve_class(modules, info, expr)
+            if resolved is not None:                    # constructing a class can run any of its methods
+                found |= _all_methods(modules, *resolved)
             if name in info.names:
                 module, _, attr = info.names[name].rpartition(".")
                 target = modules.get(module)
@@ -187,7 +231,7 @@ def _edges(modules: dict[str, _Module], info: _Module, owner: str | None, node: 
         if chain is not None:
             root, attrs = chain
             if root in {"self", "cls"} and owner is not None and attrs:
-                found.add(f"{info.name}:{owner}.{attrs[0]}")
+                found.add(_method_of(modules, info.name, owner, attrs[0]) or f"{info.name}:{owner}.{attrs[0]}")
             elif root in info.modules and attrs:
                 target = modules[info.modules[root]]
                 found |= {f"{target.name}:{key}" for key in target.functions if key == attrs[0] or key.startswith(attrs[0] + ".")}
