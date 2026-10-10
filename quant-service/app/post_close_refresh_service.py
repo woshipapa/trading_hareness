@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from .market_temperature_runtime import refresh as refresh_market_temperature
 from .minute_cross_section_export import export_day as export_minute_panel
 from .request_models import (
     AkShareProbeRequest,
@@ -31,7 +32,7 @@ POST_CLOSE_STAGE_ORDER = (
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
     "watchlist_main_wave", "teacher_review_roll", "watch_daily_review", "xiaojie_outcomes", "research_snapshot",
-    "candidate_ledger", "minute_panel_export",
+    "market_temperature", "candidate_ledger", "minute_panel_export",
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
@@ -66,6 +67,7 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     "candidate_ledger": 180.0,
     # A session's minute documents to one Parquet file (decision 0009); about 240 reads.
     "minute_panel_export": 600.0,
+    "market_temperature": 180.0,
 }
 
 POST_CLOSE_STAGE_DEPENDENCIES = {
@@ -324,6 +326,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         # A session stored only per symbol (before the switch) has no documents and reports "missing".
         "minute_panel_export": lambda: dependencies.run_database(
             export_minute_panel, dependencies.database, trade_date, timeout_seconds=600,
+        ),
+        # Decision 0013. It reads the bars and limits already stored for the session,
+        # whichever pipeline wrote them, so it waits on no stage receipt.
+        "market_temperature": lambda: dependencies.run_database(
+            refresh_market_temperature, dependencies.database, trade_date, timeout_seconds=180,
         ),
     }
 

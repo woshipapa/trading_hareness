@@ -13,6 +13,7 @@ from ..indicator_health import indicator_health
 from ..indicator_registry import registry
 from ..limit_detail_read_model import limit_detail_day
 from ..market_radar_runtime import radar_day
+from ..market_temperature_runtime import daily_series as temperature_daily_series
 from ..research_boards import datasource_board, strategy_board
 from ..minute_cross_section_export import panel as minute_panel
 from ..strategy_cards_read_model import strategy_cards
@@ -79,6 +80,14 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
             return minute_panel(database, trade_date, wanted, chosen)
 
         return await run_database_blocking(read, timeout_seconds=120)
+
+    @router.get("/api/v1/market/temperature/daily")
+    async def market_temperature_daily(days: int = Query(120, ge=5, le=400), end: date | None = None) -> dict[str, Any]:
+        """Decision 0013: the stored daily sentiment temperature, oldest first, with its components."""
+        def read() -> dict[str, Any]:
+            with database.transaction() as connection:
+                return temperature_daily_series(connection, days=days, end=end)
+        return await run_database_blocking(read, timeout_seconds=30)
 
     @router.get("/api/v1/datasources/board")
     async def datasources_board_route() -> dict[str, Any]:
