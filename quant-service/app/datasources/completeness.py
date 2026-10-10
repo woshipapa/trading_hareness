@@ -52,8 +52,7 @@ UNREGISTERED: dict[str, str] = {
                                                   "(daily_trade_limits) before the first intraday scan; not resolver-routed",
     "tdx_protocol.TdxClient.quotes": "legacy quote command 0x053e; quote.watch_snapshot binds the MAC batch quote 0x122b "
                                      "(tdx_mac.fetch_watch_snapshot), not this command",
-    "tdx_protocol.TdxClient.bars": "legacy bar command 0x052d; bars.daily and bars.minute bind the MAC bars command 0x122e "
-                                   "(tdx_mac.fetch_daily_bars, fetch_minute_bars), not this command",
+    "tdx_protocol.TdxClient.bars": "legacy bar transport for tdx_bars.fetch_daily and fetch_minute",
     "tdx_protocol.TdxClient.ticks": "transport for ticks.fetch_tdx_ticks, which is the bound reader",
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
     "tdx_fin_history.download_report_file": "sized transport for the gpcw period files (manifest size and md5 change detection, "
@@ -62,7 +61,7 @@ UNREGISTERED: dict[str, str] = {
                             "backfill job (delta-1 D8), never the request path",
     "tdx_instruments.security_count": "transport behind the bound fetch_security_list (0x044e count per market)",
     "tdx_instruments.security_list": "transport behind the bound fetch_security_list (0x044e count and 0x0450 pages)",
-    "tdx_instruments.index_bars": "index/board bars with constituent breadth (delta-3 Q10); bars.index_daily binds it in I3",
+    "tdx_instruments.index_bars": "index/board bar transport helper; tdx_bars.fetch_index_daily owns the capability binding",
     "tdx_files.download": "server file transport; fetch_security_list reads zhb.zip through it, file capabilities bind in I4",
     "tdx_files.file_size": "server file transport behind tdx_files.download",
     "tdx_files.parse_zhb_zip": "parses a zhb.zip already downloaded into memory; its archive.open() reads those bytes",
