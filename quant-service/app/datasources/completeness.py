@@ -56,6 +56,8 @@ UNREGISTERED: dict[str, str] = {
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
                                "and security-list capabilities of P2 bind its sections",
+    "tdx_legacy_misc.fetch_all_a_snapshot": "0x054b reader awaiting the I2 catalog binding",
+    "tdx_legacy_misc.fetch_index_overview": "0x051d reader awaiting the I2 catalog binding",
     "family:quote": "legacy quotes bind in P2 after the instrument model (delta D2); MAC 0x122b in P3",
     "family:F10": "verified in the plan; company-profile capability arrives in P5",
     "family:finance": "verified in the plan; financial-statements capability arrives in P5",
