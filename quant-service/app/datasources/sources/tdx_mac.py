@@ -16,6 +16,7 @@ import zlib
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 
+from ..contracts import CapabilityEvidence
 from . import tdx_protocol
 
 MAC_HOSTS = (
@@ -194,8 +195,8 @@ def _float(data: bytes, offset: int) -> float:
 
 
 def parse_board_list(body: bytes) -> list[dict[str, Any]]:
-    if len(body) < 6:
-        return []
+    if len(body) < 4:
+        raise TdxMacError(f"truncated board list response: need 4 bytes, got {len(body)}")
     count_all, _total = struct.unpack_from("<HH", body, 0)
     count = count_all // 2 if count_all // 2 != 0 else count_all
     rows = []
@@ -253,13 +254,13 @@ def parse_batch_quotes(body: bytes) -> list[dict[str, Any]]:
 
 def parse_bars(body: bytes) -> list[dict[str, Any]]:
     if len(body) < 33:
-        return []
+        raise TdxMacError(f"truncated bars response: need 33 bytes, got {len(body)}")
     count = struct.unpack_from("<H", body, 27)[0]
     rows = []
     for i in range(count):
         pos = 33 + i * 36
         if pos + 36 > len(body):
-            break
+            raise TdxMacError(f"truncated bar {i}: need {pos + 36} bytes, got {len(body)}")
         ymd, seconds = struct.unpack_from("<II", body, pos)
         rows.append(
             {
@@ -273,7 +274,7 @@ def parse_bars(body: bytes) -> list[dict[str, Any]]:
                 "volume": _float(body, pos + 28),
             }
         )
-    return rows[1:] if rows else rows
+    return rows[1:]
 
 
 def parse_auxiliary_count(opcode: int, body: bytes) -> int:
@@ -331,7 +332,12 @@ class TdxMacClient:
         header = self._recv(16)
         zipped, plain = struct.unpack_from("<HH", header, 12)
         body = self._recv(zipped)
-        return zlib.decompress(body) if zipped != plain else body
+        if zipped == plain:
+            return body
+        try:
+            return zlib.decompress(body)
+        except zlib.error as error:
+            raise TdxMacError("MAC response failed to decompress") from error
 
     def board_list(self, board_type: int = 0):
         rows = []
@@ -410,10 +416,8 @@ def call_sync(
         try:
             with TdxMacClient(host, port, timeout_seconds) as client:
                 return operation(client), f"{host}:{port}"
-        except (struct.error, zlib.error) as exc:
-            raise TdxMacError(f"decode error at {host}:{port}: {exc}") from exc
         except (OSError, TdxMacError) as exc:
-            errors.append(f"{host}:{type(exc).__name__}")
+            errors.append(f"{host}:{type(exc).__name__}: {exc}")
     raise TdxMacError("no MAC host answered: " + ", ".join(errors[-4:]))
 
 
@@ -421,16 +425,16 @@ async def call(operation: Callable[[TdxMacClient], T], **kwargs: Any):
     return await asyncio.to_thread(call_sync, operation, **kwargs)
 
 
-async def fetch_watch_snapshot(*, symbols: Sequence[str]) -> list[dict[str, Any]]:
+async def fetch_watch_snapshot(*, symbols: Sequence[str]) -> CapabilityEvidence:
     stocks = [tdx_protocol.market_code(symbol) for symbol in symbols]
-    rows, _ = await call(lambda client: client.batch_quotes(stocks))
-    return rows
+    rows, host = await call(lambda client: client.batch_quotes(stocks))
+    return tdx_protocol.observed_evidence(rows, host)
 
 
-async def fetch_limit_prices(*, symbols: Sequence[str]) -> list[dict[str, Any]]:
+async def fetch_limit_prices(*, symbols: Sequence[str]) -> CapabilityEvidence:
     stocks = [tdx_protocol.market_code(symbol) for symbol in symbols]
-    rows, _ = await call(lambda client: client.batch_quotes(stocks))
-    return [
+    rows, host = await call(lambda client: client.batch_quotes(stocks))
+    return tdx_protocol.observed_evidence([
         {
             "market": row["market"],
             "symbol": row["symbol"],
@@ -438,10 +442,10 @@ async def fetch_limit_prices(*, symbols: Sequence[str]) -> list[dict[str, Any]]:
             "limit_down": row["sell_price_limit"],
         }
         for row in rows
-    ]
+    ], host)
 
 
-async def fetch_board_catalog() -> list[dict[str, Any]]:
+async def fetch_board_catalog() -> CapabilityEvidence:
     def collect(client):
         rows = []
         for board_type in range(7):
@@ -451,11 +455,11 @@ async def fetch_board_catalog() -> list[dict[str, Any]]:
                          "board_type": board_type}
                         for row in client.board_list(board_type))
         return rows
-    rows, _ = await call(collect)
-    return rows
+    rows, host = await call(collect)
+    return tdx_protocol.observed_evidence(rows, host)
 
 
-async def fetch_membership(*, sector_key: str) -> list[dict[str, Any]]:
+async def fetch_membership(*, sector_key: str) -> CapabilityEvidence:
     def collect(client):
         # Find board_type from catalog (skip type 6 to avoid duplication)
         board_type = None
@@ -484,24 +488,24 @@ async def fetch_membership(*, sector_key: str) -> list[dict[str, Any]]:
                 "known_at": known_at,
             })
         return rows
-    rows, _ = await call(collect)
-    return rows
+    rows, host = await call(collect)
+    return tdx_protocol.observed_evidence(rows, host)
 
 
-async def fetch_daily_bars(*, symbol: str, count: int) -> list[dict[str, Any]]:
+async def fetch_daily_bars(*, symbol: str, count: int) -> CapabilityEvidence:
     market, code = tdx_protocol.market_code(symbol)
-    rows, _ = await call(
+    rows, host = await call(
         lambda client: client.bars(market, code, BAR_PERIODS["1d"], 0, count)
     )
-    return rows
+    return tdx_protocol.observed_evidence(rows, host)
 
 
-async def fetch_minute_bars(*, symbol: str, count: int) -> list[dict[str, Any]]:
+async def fetch_minute_bars(*, symbol: str, count: int) -> CapabilityEvidence:
     market, code = tdx_protocol.market_code(symbol)
-    rows, _ = await call(
+    rows, host = await call(
         lambda client: client.bars(market, code, BAR_PERIODS["1m"], 0, count)
     )
-    return rows
+    return tdx_protocol.observed_evidence(rows, host)
 
 
 __all__ = [

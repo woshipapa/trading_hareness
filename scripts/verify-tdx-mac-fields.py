@@ -6,7 +6,6 @@ import argparse
 from datetime import date
 import struct
 import sys
-import zlib
 
 ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
@@ -98,7 +97,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         return run_fixture() if args.fixture else run_live(args.timeout)
-    except (OSError, RuntimeError, struct.error, ValueError, zlib.error) as exc:
+    except (OSError, RuntimeError, struct.error, ValueError) as exc:
         print(f"MAC verification failed: {exc}", file=sys.stderr)
         return 1
 

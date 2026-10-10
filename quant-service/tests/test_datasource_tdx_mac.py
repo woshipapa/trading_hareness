@@ -4,6 +4,7 @@ import importlib.util
 import io
 import struct
 import unittest
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -177,8 +178,10 @@ class MacMembershipTests(unittest.TestCase):
         })
         before = datetime.now(timezone.utc)
         with patched_call(client):
-            rows = asyncio.run(tdx_mac.fetch_membership(sector_key="881376"))
+            evidence = asyncio.run(tdx_mac.fetch_membership(sector_key="881376"))
         after = datetime.now(timezone.utc)
+        rows = evidence.rows
+        self.assertEqual(evidence.warnings, ("tdx_host=mac-host:7709",))
         self.assertEqual([row["symbol"] for row in rows], ["600519.SH", "000001.SZ"])
         for row in rows:
             self.assertEqual(set(row), {"taxonomy_key", "sector_key", "symbol", "known_at"})
@@ -263,12 +266,105 @@ class MacProtocolTests(unittest.TestCase):
         board = tdx_mac.build_aux_request(tdx_mac.OP_BELONG_BOARD, 0, "000001")
         self.assertEqual(board[0], 1)
         self.assertIn(b"Stock_GLHQ", board)
-        bars = struct.pack("<H12sBHHI", 1, b"600519\0" * 2, 4, 1, 2, 0) + struct.pack(
-            "<IIfffffff", 20261009, 34200, 100, 110, 90, 105, 1000, 20, 30
-        )
+
+
+class MacBarParserTests(unittest.TestCase):
+    def test_the_first_row_is_the_sentinel_and_every_other_row_is_kept(self):
+        body = bars_body([
+            (20261008, 0, 99.0, 99.0, 99.0, 100.0, 500.0, 50.0, 9.0),
+            (20261009, 34200, 100.0, 110.0, 90.0, 105.0, 1000.0, 20.0, 30.0),
+            (20261012, 34260, 105.0, 111.0, 101.0, 108.0, 2000.0, 40.0, 30.0),
+            (20261013, 34320, 108.0, 112.0, 104.0, 109.0, 3000.0, 60.0, 30.0),
+        ])
+        rows = tdx_mac.parse_bars(body)
         self.assertEqual(
-            len(tdx_mac.parse_bars(bars)), 0
-        )  # first MAC row is the pre-close sentinel
+            [(row["date"], row["seconds"], row["open"], row["close"], row["amount"], row["volume"]) for row in rows],
+            [("2026-10-09", 34200, 100.0, 105.0, 1000.0, 20.0),
+             ("2026-10-12", 34260, 105.0, 108.0, 2000.0, 40.0),
+             ("2026-10-13", 34320, 108.0, 109.0, 3000.0, 60.0)])
+
+    def test_a_header_only_answer_has_no_rows(self):
+        self.assertEqual(tdx_mac.parse_bars(bars_body([])), [])
+
+    def test_a_short_or_truncated_answer_raises(self):
+        with self.assertRaises(tdx_mac.TdxMacError):
+            tdx_mac.parse_bars(bytes(32))
+        with self.assertRaises(tdx_mac.TdxMacError):
+            tdx_mac.parse_bars(bars_body([(20261009, 0, 1, 1, 1, 1, 1, 1, 1)] * 3)[:-1])
+
+    def test_a_short_board_list_answer_raises(self):
+        with self.assertRaises(tdx_mac.TdxMacError):
+            tdx_mac.parse_board_list(bytes(3))
+        self.assertEqual(tdx_mac.parse_board_list(board_page()), [])
+
+
+def mac_frame(body: bytes, compressed: bool = False) -> bytes:
+    """A MAC answer: a 16-byte header with the sent and plain sizes at offset 12, then the body."""
+    sent = zlib.compress(body) if compressed else body
+    return struct.pack("<IIIHH", 0, 0, 0, len(sent), len(body)) + sent
+
+
+class FakeSocket:
+    """Answers each request with the next canned reply."""
+
+    def __init__(self, replies):
+        self.replies, self.pending = list(replies), b""
+
+    def sendall(self, data: bytes) -> None:
+        self.pending += self.replies.pop(0)
+
+    def recv(self, size: int) -> bytes:
+        chunk, self.pending = self.pending[:size], self.pending[size:]
+        return chunk
+
+    def close(self) -> None:
+        pass
+
+
+class MacFailoverTests(unittest.TestCase):
+    HANDSHAKE = [mac_frame(b"ok"), mac_frame(b"ok")]
+    CORRUPT = struct.pack("<IIIHH", 0, 0, 0, 10, 99) + b"not zlib!!"
+
+    def call(self, replies_by_host, operation):
+        sockets = {host: FakeSocket(self.HANDSHAKE + replies) for host, replies in replies_by_host.items()}
+        with mock.patch.object(tdx_mac.socket, "create_connection", lambda address, timeout: sockets[address[0]]):
+            return tdx_mac.call_sync(operation, hosts=[(host, 7709) for host in replies_by_host])
+
+    def test_a_corrupt_compressed_answer_moves_on_to_the_next_host(self):
+        good = mac_frame(board_page(board_item("881376", "Coal")), compressed=True)
+        rows, host = self.call({"a": [self.CORRUPT], "b": [good]}, lambda client: client.board_list(0))
+        self.assertEqual((host, [row["code"] for row in rows]), ("b:7709", ["881376"]))
+
+    def test_a_truncated_answer_moves_on_to_the_next_host(self):
+        truncated = mac_frame(board_page(board_item("881376", "Coal"))[:-1])
+        good = mac_frame(board_page(board_item("880710", "Gas")))
+        rows, host = self.call({"a": [truncated], "b": [good]}, lambda client: client.board_list(0))
+        self.assertEqual((host, [row["code"] for row in rows]), ("b:7709", ["880710"]))
+
+    def test_every_host_failing_raises_with_each_cause(self):
+        truncated = mac_frame(board_page(board_item("881376", "Coal"))[:-1])
+        with self.assertRaises(tdx_mac.TdxMacError) as caught:
+            self.call({"a": [self.CORRUPT], "b": [truncated]}, lambda client: client.board_list(0))
+        message = str(caught.exception)
+        self.assertIn("a:TdxMacError: MAC response failed to decompress", message)
+        self.assertIn("b:TdxMacError: truncated board list item 0", message)
+
+    def test_a_refused_connection_moves_on_to_the_next_host(self):
+        def create_connection(address, timeout):
+            if address[0] == "down":
+                raise OSError("connection refused")
+            return FakeSocket(self.HANDSHAKE + [mac_frame(board_page(board_item("881376", "Coal")))])
+
+        with mock.patch.object(tdx_mac.socket, "create_connection", create_connection):
+            rows, host = tdx_mac.call_sync(lambda client: client.board_list(0), hosts=[("down", 7709), ("up", 7709)])
+        self.assertEqual((host, len(rows)), ("up:7709", 1))
+
+    def test_a_caller_error_is_not_a_host_failure(self):
+        def operation(client):
+            raise ValueError("symbol must end with .SH, .SZ or .BJ")
+
+        with self.assertRaises(ValueError):
+            self.call({"a": []}, operation)
 
 
 def load_script(name: str):
