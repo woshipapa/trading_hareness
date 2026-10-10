@@ -230,6 +230,74 @@ class MigrationPinTests(unittest.TestCase):
         self.assertEqual(health_capability("tencent_free", "quote.order_book"), "order_book_quote")
 
 
+class ValidateRuleTests(unittest.TestCase):
+    """Test that validation rule handles UNSUPPORTED bindings correctly."""
+
+    def test_capability_with_zero_bindings_fails_validation(self):
+        """Capability with no bindings at all should be flagged."""
+        from unittest import mock
+        from app.datasources import catalog
+        from app.datasources.contracts import Capability, CanonicalSchema, FieldSpec
+
+        # Create a fake capability with no bindings
+        test_capability = Capability("test.phantom", "test", "Test", "daily", "all_a", ("field1",), "", "",
+                                     CanonicalSchema((FieldSpec("field1"),)))
+        test_bindings = tuple(b for b in BINDINGS if b.capability != "test.phantom")
+
+        with mock.patch.object(catalog, "CAPABILITIES", {**CAPABILITIES, "test.phantom": test_capability}):
+            with mock.patch.object(catalog, "BINDINGS", test_bindings):
+                problems = catalog.validate_catalog()
+        self.assertIn("test.phantom: no resolvable binding", problems)
+
+    def test_capability_with_only_retired_bindings_fails_validation(self):
+        """Capability with only RETIRED bindings should be flagged."""
+        from unittest import mock
+        from app.datasources import catalog
+        from app.datasources.contracts import Binding, RETIRED
+
+        test_bindings = list(BINDINGS)
+        # Add a capability with only RETIRED binding
+        test_bindings.append(Binding("tdx_public", "test.phantom", 70, RETIRED))
+
+        test_capability = CAPABILITIES.get("test.phantom")
+        if not test_capability:
+            from app.datasources.contracts import Capability, CanonicalSchema, FieldSpec
+            test_capability = Capability("test.phantom", "test", "Test", "daily", "all_a", ("field1",), "", "",
+                                         CanonicalSchema((FieldSpec("field1"),)))
+
+        with mock.patch.object(catalog, "CAPABILITIES", {**CAPABILITIES, "test.phantom": test_capability}):
+            with mock.patch.object(catalog, "BINDINGS", tuple(test_bindings)):
+                problems = catalog.validate_catalog()
+        self.assertIn("test.phantom: no resolvable binding", problems)
+
+    def test_capability_with_only_unsupported_bindings_passes_validation(self):
+        """Capability with only UNSUPPORTED bindings should NOT be flagged."""
+        from unittest import mock
+        from app.datasources import catalog
+        from app.datasources.contracts import Binding, UNSUPPORTED
+
+        test_bindings = list(BINDINGS)
+        # Add a capability with only UNSUPPORTED binding
+        test_bindings.append(Binding("tdx_mac", "test.phantom", 70, UNSUPPORTED))
+
+        test_capability = CAPABILITIES.get("test.phantom")
+        if not test_capability:
+            from app.datasources.contracts import Capability, CanonicalSchema, FieldSpec
+            test_capability = Capability("test.phantom", "test", "Test", "daily", "all_a", ("field1",), "", "",
+                                         CanonicalSchema((FieldSpec("field1"),)))
+
+        with mock.patch.object(catalog, "CAPABILITIES", {**CAPABILITIES, "test.phantom": test_capability}):
+            with mock.patch.object(catalog, "BINDINGS", tuple(test_bindings)):
+                problems = catalog.validate_catalog()
+        # Should NOT be in problems - UNSUPPORTED bindings are allowed
+        binding_problems = [p for p in problems if "test.phantom" in p and "no resolvable binding" in p]
+        self.assertEqual(len(binding_problems), 0)
+
+    def test_production_catalog_validates_clean(self):
+        """The production catalog should have no validation problems."""
+        self.assertEqual(validate_catalog(), [])
+
+
 class ResolverTests(unittest.IsolatedAsyncioTestCase):
     async def test_priority_fallback_and_provenance(self):
         resolver = CapabilityResolver()
