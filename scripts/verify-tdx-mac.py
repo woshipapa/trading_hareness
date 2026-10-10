@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "quant-service"))
-from app.datasources.sources import tdx_mac
+from app.datasources.sources import tdx_mac, tdx_protocol
 
 SYMBOLS = ("000001.SZ", "600519.SH")
 
@@ -23,7 +23,7 @@ def main() -> int:
             results["board_members_881376"] = len(client.board_members("881376"))
             results["board_member_quotes_881376"] = len(client.board_member_quotes("881376"))
             for symbol in SYMBOLS:
-                market, code = tdx_mac.market_code(symbol)
+                market, code = tdx_protocol.market_code(symbol)
                 results[f"{symbol}.batch_quotes"] = len(client.batch_quotes([(market, code)]))
                 results[f"{symbol}.bars"] = len(client.bars(market, code, count=5))
             for opcode, name in ((tdx_mac.OP_AUCTION, "auction"), (tdx_mac.OP_TICK_CHARTS, "tick_charts"), (tdx_mac.OP_MARKET_MONITOR, "market_monitor"), (tdx_mac.OP_BELONG_BOARD, "belong_board")):

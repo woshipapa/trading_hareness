@@ -11,17 +11,10 @@ from dataclasses import dataclass
 import json
 import math
 import struct
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable
 
-from .tdx_mac import (
-    DEFAULT_BITMAP,
-    TdxMacError,
-    _fixed,
-    _text,
-    build_request,
-    exchange_board_code,
-    market_code,
-)
+from . import tdx_protocol
+from .tdx_mac import TdxMacError, _fixed, _float, build_request
 
 MAC_FIELD_BYTES = 20
 MAC_FIELD_BITS = MAC_FIELD_BYTES * 8
@@ -654,42 +647,6 @@ _BASIC = {
 for _bit, _args in _BASIC.items():
     _add(_bit, *_args)
 
-# Upstream calls these fields unknown or only describes them as placeholders.
-# Keep their canonical key unset, even when the wire format is known.
-for _bit in (
-    47,
-    50,
-    51,
-    52,
-    53,
-    54,
-    61,
-    62,
-    63,
-    76,
-    77,
-    78,
-    79,
-    80,
-    81,
-    82,
-    83,
-    84,
-    85,
-    86,
-    108,
-    109,
-    110,
-    111,
-    112,
-    113,
-    114,
-    116,
-    117,
-    118,
-):
-    _KNOWN.pop(_bit, None)
-
 # Preserve the upstream wire format even when the semantic name is unknown.
 _UNKNOWN_FORMATS = {
     47: "float32",
@@ -797,8 +754,8 @@ def decode_dynamic_response(body: bytes) -> list[dict[str, Any]]:
         start = 26 + index * row_size
         row = {
             "market": struct.unpack_from("<H", body, start)[0],
-            "symbol": _text(body[start + 2 : start + 24]),
-            "name": _text(body[start + 24 : start + 68]),
+            "symbol": tdx_protocol.decode_gbk(body[start + 2 : start + 24]),
+            "name": tdx_protocol.decode_gbk(body[start + 24 : start + 68]),
             "total": total,
         }
         values, _ = decode_dynamic_row(body, bitmap, start + 68)
@@ -807,11 +764,8 @@ def decode_dynamic_response(body: bytes) -> list[dict[str, Any]]:
     return rows
 
 
-build_mac_request = build_request
-
-
 def build_symbol_info_request(symbol: str) -> bytes:
-    market, code = market_code(symbol)
+    market, code = tdx_protocol.market_code(symbol)
     return build_request(
         0x122A, struct.pack("<H22sI12s", market, _fixed(code, 22), 1, b"")
     )
@@ -820,8 +774,8 @@ def build_symbol_info_request(symbol: str) -> bytes:
 def build_transactions_request(
     symbol: str, query_date: int, start: int = 0, count: int = 1000
 ) -> bytes:
-    market, code = market_code(symbol)
-    return build_mac_request(
+    market, code = tdx_protocol.market_code(symbol)
+    return build_request(
         0x122F,
         struct.pack(
             "<H22sI I H10s", market, _fixed(code, 22), query_date, start, count, b""
@@ -833,80 +787,18 @@ def build_server_info_request() -> bytes:
     payload = bytearray(68)
     payload[:4] = b"\x04\x00\x2d\x31"
     payload[12:16] = b"\x00\x27\x06\x0e"
-    return build_mac_request(0x120F, bytes(payload))
+    return build_request(0x120F, bytes(payload))
 
 
-def build_capital_flow_request(symbol: str, query: str = "Stock_ZJLX") -> bytes:
-    market, code = market_code(symbol)
-    return build_mac_request(
+def build_capital_flow_request(symbol: str) -> bytes:
+    """The capital-flow query: 0x1218 with head=2 and ``Stock_ZJLX``.  The belong-board query is the same opcode
+    with head=1 and ``Stock_GLHQ``; ``tdx_mac.build_aux_request`` builds that one."""
+    market, code = tdx_protocol.market_code(symbol)
+    return build_request(
         0x1218,
-        struct.pack("<H8s16s21s", market, _fixed(code, 8), b"", _fixed(query, 21)),
+        struct.pack("<H8s16s21s", market, _fixed(code, 8), b"", _fixed("Stock_ZJLX", 21)),
         head=2,
     )
-
-
-def build_belong_board_request(symbol: str, query: str = "Stock_GLHQ") -> bytes:
-    market, code = market_code(symbol)
-    return build_mac_request(
-        0x1218,
-        struct.pack("<H8s16s21s", market, _fixed(code, 8), b"", _fixed(query, 21)),
-    )
-
-
-def build_auction_request(symbol: str, start: int = 0, count: int = 500) -> bytes:
-    market, code = market_code(symbol)
-    return build_mac_request(
-        0x123D, struct.pack("<H22sII10s", market, _fixed(code, 22), start, count, b"")
-    )
-
-
-def build_tick_charts_request(symbol: str, days: int = 5) -> bytes:
-    market, code = market_code(symbol)
-    return build_mac_request(
-        0x123E, struct.pack("<H22sIHH6s", market, _fixed(code, 22), 0, days, 1, b"")
-    )
-
-
-def build_market_monitor_request(
-    market: int = 0,
-    start: int = 0,
-    count: int = 600,
-    mode: int = 1,
-    limits: Sequence[int] = (200, 30, 40, 50, 200),
-) -> bytes:
-    if len(limits) != 5:
-        raise ValueError("market monitor needs five limits")
-    return build_mac_request(
-        0x1237, struct.pack("<HHHHHH5H", market, start, 0, count, 0, mode, *limits)
-    )
-
-
-def build_board_member_quotes_request(
-    board: str = "880812",
-    start: int = 0,
-    page_size: int = 80,
-    sort_type: int = 14,
-    sort_order: int = 1,
-    filter_byte: int = 0,
-    bitmap: bytes = DEFAULT_BITMAP,
-) -> bytes:
-    if len(bitmap) != MAC_FIELD_BYTES:
-        raise ValueError("MAC bitmap must be exactly 20 bytes")
-    fields = bytearray(bitmap)
-    fields[17] = filter_byte & 0xFF
-    fields[19] |= 1
-    payload = struct.pack(
-        "<I9sHIHBB20s",
-        exchange_board_code(board),
-        b"",
-        sort_type,
-        start,
-        page_size,
-        sort_order,
-        0,
-        bytes(fields),
-    )
-    return build_mac_request(0x122C, payload)
 
 
 def parse_json_rows(body: bytes, prefix: int = 27) -> list[list[Any]]:
@@ -919,34 +811,30 @@ def parse_json_rows(body: bytes, prefix: int = 27) -> list[list[Any]]:
     return value if isinstance(value, list) else []
 
 
-def _f32(data: bytes, offset: int) -> float:
-    return struct.unpack_from("<f", data, offset)[0]
-
-
 def parse_symbol_info(body: bytes) -> dict[str, Any]:
     if len(body) < 194:
         return {}
     return {
         "market": struct.unpack_from("<H", body, 8)[0],
-        "code": _text(body[10:32]),
-        "name": _text(body[32:76]),
+        "code": tdx_protocol.decode_gbk(body[10:32]),
+        "name": tdx_protocol.decode_gbk(body[32:76]),
         "date": struct.unpack_from("<I", body, 96)[0],
         "time": struct.unpack_from("<I", body, 100)[0],
         "activity": struct.unpack_from("<I", body, 104)[0],
-        "pre_close": _f32(body, 108),
-        "open": _f32(body, 112),
-        "high": _f32(body, 116),
-        "low": _f32(body, 120),
-        "close": _f32(body, 124),
-        "momentum": _f32(body, 128),
+        "pre_close": _float(body, 108),
+        "open": _float(body, 112),
+        "high": _float(body, 116),
+        "low": _float(body, 120),
+        "close": _float(body, 124),
+        "momentum": _float(body, 128),
         "vol": struct.unpack_from("<I", body, 132)[0],
-        "amount": _f32(body, 136),
+        "amount": _float(body, 136),
         "inside_volume": struct.unpack_from("<I", body, 140)[0],
         "outside_volume": struct.unpack_from("<I", body, 144)[0],
         "decimal": struct.unpack_from("<H", body, 148)[0],
-        "vr": _f32(body, 182),
-        "turnover": _f32(body, 186),
-        "avg": _f32(body, 190),
+        "vr": _float(body, 182),
+        "turnover": _float(body, 186),
+        "avg": _float(body, 190),
     }
 
 
@@ -962,7 +850,7 @@ def parse_transactions(body: bytes) -> list[dict[str, Any]]:
         rows.append(
             {
                 "seconds": struct.unpack_from("<I", body, pos)[0],
-                "price": _f32(body, pos + 4),
+                "price": _float(body, pos + 4),
                 "vol": struct.unpack_from("<I", body, pos + 8)[0],
                 "trade_count": struct.unpack_from("<I", body, pos + 12)[0],
                 "buy_or_sell": struct.unpack_from("<H", body, pos + 16)[0],
@@ -1004,7 +892,7 @@ def parse_auction(body: bytes) -> list[dict[str, Any]]:
         rows.append(
             {
                 "seconds": struct.unpack_from("<I", body, pos)[0],
-                "price": _f32(body, pos + 4),
+                "price": _float(body, pos + 4),
                 "matched": struct.unpack_from("<I", body, pos + 8)[0],
                 "unmatched": struct.unpack_from("<i", body, pos + 12)[0],
             }
@@ -1017,11 +905,11 @@ def parse_tick_charts_header(body: bytes) -> dict[str, Any]:
         return {}
     return {
         "market": struct.unpack_from("<H", body, 0)[0],
-        "code": _text(body[2:24]),
+        "code": tdx_protocol.decode_gbk(body[2:24]),
         "dates": [
             struct.unpack_from("<I", body, 24 + index * 4)[0] for index in range(5)
         ],
-        "pre_closes": [_f32(body, 44 + index * 4) for index in range(5)],
+        "pre_closes": [_float(body, 44 + index * 4) for index in range(5)],
         "count": struct.unpack_from("<H", body, 64)[0],
         "total": struct.unpack_from("<H", body, 69)[0],
     }
@@ -1034,7 +922,7 @@ def parse_market_monitor(body: bytes) -> list[dict[str, Any]]:
     return [
         {
             "market": struct.unpack_from("<H", body, 2 + index * 32)[0],
-            "code": _text(body[4 + index * 32 : 10 + index * 32]),
+            "code": tdx_protocol.decode_gbk(body[4 + index * 32 : 10 + index * 32]),
             "unusual_type": body[11 + index * 32],
         }
         for index in range(count)
@@ -1065,7 +953,6 @@ __all__ = [
     "MACField",
     "MAC_FIELDS",
     "FIELD_BY_BIT",
-    "DEFAULT_BITMAP",
     "MATCH",
     "MISMATCH",
     "NO_REFERENCE",
@@ -1074,18 +961,10 @@ __all__ = [
     "decode_dynamic_row",
     "decode_dynamic_response",
     "reconcile",
-    "build_mac_request",
     "build_symbol_info_request",
     "build_transactions_request",
     "build_server_info_request",
     "build_capital_flow_request",
-    "build_belong_board_request",
-    "build_auction_request",
-    "build_tick_charts_request",
-    "build_market_monitor_request",
-    "build_board_member_quotes_request",
-    "exchange_board_code",
-    "market_code",
     "parse_json_rows",
     "parse_symbol_info",
     "parse_transactions",

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
-import socket
 import struct
 import sys
 import zlib
 
 ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
-from app.datasources.sources import tdx_mac_fields as mac  # noqa: E402
+from app.datasources.sources import tdx_mac, tdx_mac_fields as mac, tdx_protocol  # noqa: E402
 
 HOST = "121.36.248.138"
 PORT = 7709
@@ -20,41 +19,8 @@ PORT = 7709
 SYMBOLS = ("000001.SZ", "600519.SH", "300750.SZ", "688981.SH", "920000.BJ", "600539.SH")
 
 
-def _frame(body: bytes) -> bytes:
-    return struct.pack("<BIBHH", 1, 0, 1, len(body), len(body)) + body
-
-
-class MacSocket:
-    def __init__(self, host: str, port: int, timeout: float) -> None:
-        self.sock = socket.create_connection((host, port), timeout=timeout)
-
-    def close(self) -> None:
-        self.sock.close()
-
-    def exchange(self, request: bytes) -> bytes:
-        self.sock.sendall(request)
-        header = self._read(16)
-        zipped, plain = struct.unpack_from("<HH", header, 12)
-        body = self._read(zipped)
-        return zlib.decompress(body) if zipped != plain else body
-
-    def _read(self, size: int) -> bytes:
-        out = bytearray()
-        while len(out) < size:
-            chunk = self.sock.recv(size - len(out))
-            if not chunk:
-                raise OSError("MAC host closed connection")
-            out.extend(chunk)
-        return bytes(out)
-
-
 def _batch_request(bits: list[int]) -> bytes:
-    bitmap = mac.bitmap_for_bits(bits)
-    payload = bytearray(bitmap) + struct.pack("<H", len(SYMBOLS))
-    for symbol in SYMBOLS:
-        market, code = mac.market_code(symbol)
-        payload += struct.pack("<H22s", market, code.encode() + bytes(22 - len(code)))
-    return mac.build_mac_request(0x122B, bytes(payload))
+    return tdx_mac.build_batch_quotes_request([tdx_protocol.market_code(symbol) for symbol in SYMBOLS], mac.bitmap_for_bits(bits))
 
 
 def fixture_rows() -> list[dict[str, object]]:
@@ -82,12 +48,11 @@ def run_fixture() -> int:
 
 
 def run_live(timeout: float) -> int:
-    client = MacSocket(HOST, PORT, timeout)
-    try:
+    with tdx_mac.TdxMacClient(HOST, PORT, timeout) as client:
         all_rows: list[dict[str, object]] = []
         # Keep requests small; hosts commonly cap the number of returned fields.
         for start in range(0, 160, 32):
-            response = client.exchange(_batch_request(list(range(start, min(start + 32, 160)))))
+            response = client._exchange(_batch_request(list(range(start, min(start + 32, 160)))))
             rows = mac.decode_dynamic_response(response)
             if not rows:
                 raise RuntimeError(f"0x122b returned no usable rows for bits {start}:{start + 32}")
@@ -98,38 +63,32 @@ def run_live(timeout: float) -> int:
             value = next((row.get(field.name) for row in all_rows if field.name in row), "")
             caps = ";".join(field.capability_ids)
             print(f"0x{field.bit:02x},{field.name},{value},{field.reconciliation},{caps}")
+        market, code = tdx_protocol.market_code("000001.SZ")
         probes = {
             0x122A: mac.build_symbol_info_request("000001.SZ"),
             0x122F: mac.build_transactions_request("000001.SZ", int(date.today().strftime("%Y%m%d"))),
             0x120F: mac.build_server_info_request(),
             0x1218: mac.build_capital_flow_request("000001.SZ"),
-            0x123D: mac.build_auction_request("000001.SZ"),
-            0x123E: mac.build_tick_charts_request("000001.SZ"),
-            0x1237: mac.build_market_monitor_request(),
+            0x123D: tdx_mac.build_aux_request(tdx_mac.OP_AUCTION, market, code),
+            0x123E: tdx_mac.build_aux_request(tdx_mac.OP_TICK_CHARTS, market, code),
+            0x1237: tdx_mac.build_aux_request(tdx_mac.OP_MARKET_MONITOR, market, code),
         }
         for opcode, request in probes.items():
-            body = client.exchange(request)
+            body = client._exchange(request)
             usable = bool(body) and (len(body) > 2)
             print(f"0x{opcode:04x},bytes={len(body)},{'MATCH' if usable else 'NO_ROWS'}")
-            if opcode == 0x1215 and len(body) >= 41:
-                offset, size = struct.unpack_from("<II", body, 0)
-                print(f"file_offer,offset={offset},size={size},flag={body[8]},hash={body[9:41].rstrip(b'\\0').decode('ascii', 'replace')}")
-            if opcode == 0x1217 and len(body) >= 8:
-                index, size = struct.unpack_from("<II", body, 0)
-                print(f"file_download,index={index},size={size},payload_bytes={len(body) - 8}")
             if not usable:
                 return 1
         print("sort_type,sort_order,filter,rows")
+        board_code = tdx_mac.exchange_board_code("880812")
         for sort_type, sort_order, filter_byte in ((14, 1, 0), (14, 0, 0), (1, 1, 0), (14, 1, 1), (14, 1, 2), (14, 1, 4)):
-            body = client.exchange(mac.build_board_member_quotes_request("880812", sort_type=sort_type,
-                                                                          sort_order=sort_order, filter_byte=filter_byte))
+            body = client._exchange(tdx_mac.build_board_members_request(
+                board_code, quotes=True, sort_type=sort_type, sort_order=sort_order, filter_byte=filter_byte))
             rows = mac.decode_dynamic_response(body)
             print(f"{sort_type},{sort_order},{filter_byte},{len(rows)}")
             if not rows:
                 return 1
         return 0
-    finally:
-        client.close()
 
 
 def main() -> int:

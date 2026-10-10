@@ -57,7 +57,7 @@ The new module includes request layouts and parsers/building primitives for:
 | `0x122a` | symbol info | 194-byte summary; fixed offsets for OHLC, volume, amount, turnover, average |
 | `0x122f` | transactions | 18-byte prints; date/start/count paging |
 | `0x120f` | server info | 68-byte request; response carries two groups of four trading sessions |
-| `0x1215` / `0x1217` | file list/download | list metadata then one bounded download; compare archive members with legacy `zhb.zip` |
+| `0x1215` / `0x1217` | file list/download | UNSUPPORTED (delta-3 Q11): every MAC host offers an empty file; no builder or parser is kept |
 | `0x1218` head=2 | capital flow | JSON rows: today `[main in, main out, retail in, retail out]`, five-day six-row aggregate |
 | `0x1218` | belong-board | query `Stock_GLHQ`; response is JSON board rows, kept separate from flow |
 | `0x123d` | auction curve | 16-byte points: seconds, price, matched, unmatched |
@@ -74,8 +74,8 @@ The 2026-10-09 live run returned 30 dynamic rows (six symbols across five
 bitmap chunks), 12 rows for each of the six board sort/filter variants, and
 usable responses for every opcode.  The file-list response was 42 bytes and
 the single bounded download response was 8 bytes with no payload; therefore no
-`zhb.zip` member comparison was claimed.  The verifier prints the returned
-offset/size/hash fields when a host offers a file.
+`zhb.zip` member comparison was claimed.  The verifier no longer probes the
+file commands.
 
 ## Sort/filter notes
 

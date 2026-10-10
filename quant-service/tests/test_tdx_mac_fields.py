@@ -1,8 +1,8 @@
 import struct
 import unittest
 
+from app.datasources.sources.tdx_mac import DEFAULT_BITMAP
 from app.datasources.sources.tdx_mac_fields import (
-    DEFAULT_BITMAP,
     MAC_FIELDS,
     MATCH,
     NO_REFERENCE,

@@ -1,8 +1,8 @@
 """Small stdlib client for the MAC (0x12xx) TDX protocol.
 
 The MAC service is separate from the legacy 0x05xx quote service.  Payloads
-are little-endian and strings are fixed-width UTF-8/GBK-compatible ASCII.
-Results are research evidence only; this module is intentionally unbound.
+are little-endian and strings are fixed-width GBK.
+Results are research evidence only: every catalog binding of this source is UNSUPPORTED.
 """
 
 from __future__ import annotations
@@ -16,12 +16,13 @@ import zlib
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 
+from . import tdx_protocol
+
 MAC_HOSTS = (
     ("121.36.248.138", 7709),
     ("123.60.47.136", 7709),
     ("121.37.207.165", 7709),
 )
-MARKETS = {"SZ": 0, "SH": 1, "BJ": 2}
 OP_BOARD = 0x1231
 OP_MEMBERS = 0x122C
 OP_BATCH_QUOTES = 0x122B
@@ -73,23 +74,6 @@ def _fixed(value: str, size: int) -> bytes:
     return raw + bytes(size - len(raw))
 
 
-def _text(raw: bytes) -> str:
-    raw = raw.split(b"\0", 1)[0]
-    for encoding in ("utf-8", "gbk"):
-        try:
-            return raw.decode(encoding).strip()
-        except UnicodeDecodeError:
-            pass
-    return raw.decode("utf-8", "replace").strip()
-
-
-def market_code(symbol: str) -> tuple[int, str]:
-    code, dot, exchange = symbol.upper().partition(".")
-    if not dot or exchange not in MARKETS or len(code) != 6 or not code.isdigit():
-        raise ValueError("symbol must be six digits with .SH, .SZ or .BJ")
-    return MARKETS[exchange], code
-
-
 def build_request(opcode: int, payload: bytes = b"", *, head: int = 1) -> bytes:
     body = struct.pack("<H", opcode) + payload
     return struct.pack("<BIBHH", head, 0, 1, len(body), len(body)) + body
@@ -118,13 +102,21 @@ def build_board_members_request(
     *,
     quotes: bool = False,
     bitmap: bytes = DEFAULT_BITMAP,
+    sort_type: int = 14,
+    sort_order: int = 1,
+    filter_byte: int = 0,
 ) -> bytes:
+    """Board members (0x122c): names only, or with ``quotes`` the dynamic quote fields of ``bitmap``.
+
+    ``sort_type``, ``sort_order`` and ``filter_byte`` (copied into bitmap byte 17) belong to the quote form."""
     if quotes:
+        if len(bitmap) != 20:
+            raise ValueError("MAC field bitmap must be 20 bytes")
         fields = bytearray(bitmap)
-        fields[17] = 0
+        fields[17] = filter_byte
         fields[19] |= 1
         payload = struct.pack(
-            "<I9sHIHBB20s", board_code, b"", 14, start, page_size, 1, 0, bytes(fields)
+            "<I9sHIHBB20s", board_code, b"", sort_type, start, page_size, sort_order, 0, bytes(fields)
         )
     else:
         payload = struct.pack(
@@ -214,14 +206,14 @@ def parse_board_list(body: bytes) -> list[dict[str, Any]]:
         rows.append(
             {
                 "market": struct.unpack_from("<H", body, pos)[0],
-                "code": _text(body[pos + 2 : pos + 8]),
-                "name": _text(body[pos + 24 : pos + 68]),
+                "code": tdx_protocol.decode_gbk(body[pos + 2 : pos + 8]),
+                "name": tdx_protocol.decode_gbk(body[pos + 24 : pos + 68]),
                 "price": _float(body, pos + 68),
                 "rise_speed": _float(body, pos + 72),
                 "pre_close": _float(body, pos + 76),
                 "leading_market": struct.unpack_from("<H", body, pos + 80)[0],
-                "leading_code": _text(body[pos + 82 : pos + 88]),
-                "leading_name": _text(body[pos + 104 : pos + 148]),
+                "leading_code": tdx_protocol.decode_gbk(body[pos + 82 : pos + 88]),
+                "leading_name": tdx_protocol.decode_gbk(body[pos + 104 : pos + 148]),
                 "leading_price": _float(body, pos + 148),
                 "leading_rise_speed": _float(body, pos + 152),
                 "leading_pre_close": _float(body, pos + 156),
@@ -246,8 +238,8 @@ def parse_board_members(body: bytes, *, quotes: bool = False) -> list[dict[str, 
             raise TdxMacError(f"truncated board members item {i}: need {pos + stride} bytes, got {len(body)}")
         row = {
             "market": struct.unpack_from("<H", body, pos)[0],
-            "symbol": _text(body[pos + 2 : pos + 8]),
-            "name": _text(body[pos + 24 : pos + (48 if quotes else 40)]),
+            "symbol": tdx_protocol.decode_gbk(body[pos + 2 : pos + 8]),
+            "name": tdx_protocol.decode_gbk(body[pos + 24 : pos + 40]),
         }
         rows.append(row)
     return rows
@@ -430,13 +422,13 @@ async def call(operation: Callable[[TdxMacClient], T], **kwargs: Any):
 
 
 async def fetch_watch_snapshot(*, symbols: Sequence[str]) -> list[dict[str, Any]]:
-    stocks = [market_code(symbol) for symbol in symbols]
+    stocks = [tdx_protocol.market_code(symbol) for symbol in symbols]
     rows, _ = await call(lambda client: client.batch_quotes(stocks))
     return rows
 
 
 async def fetch_limit_prices(*, symbols: Sequence[str]) -> list[dict[str, Any]]:
-    stocks = [market_code(symbol) for symbol in symbols]
+    stocks = [tdx_protocol.market_code(symbol) for symbol in symbols]
     rows, _ = await call(lambda client: client.batch_quotes(stocks))
     return [
         {
@@ -483,15 +475,12 @@ async def fetch_membership(*, sector_key: str) -> list[dict[str, Any]]:
         known_at = datetime.now(timezone.utc)
         rows = []
         for row in members:
-            market = row["market"]
-            market_name = {0: "SZ", 1: "SH", 2: "BJ"}.get(market)
-            if market_name is None:
-                raise TdxMacError(f"unknown market id: {market}")
-            symbol = f"{row['symbol']}.{market_name}"
+            if row["market"] not in tdx_protocol.EXCHANGES:
+                raise TdxMacError(f"unknown market id: {row['market']}")
             rows.append({
                 "taxonomy_key": f"tdx_mac_type_{board_type}",
                 "sector_key": sector_key,
-                "symbol": symbol,
+                "symbol": tdx_protocol.symbol(row["market"], row["symbol"]),
                 "known_at": known_at,
             })
         return rows
@@ -500,7 +489,7 @@ async def fetch_membership(*, sector_key: str) -> list[dict[str, Any]]:
 
 
 async def fetch_daily_bars(*, symbol: str, count: int) -> list[dict[str, Any]]:
-    market, code = market_code(symbol)
+    market, code = tdx_protocol.market_code(symbol)
     rows, _ = await call(
         lambda client: client.bars(market, code, BAR_PERIODS["1d"], 0, count)
     )
@@ -508,7 +497,7 @@ async def fetch_daily_bars(*, symbol: str, count: int) -> list[dict[str, Any]]:
 
 
 async def fetch_minute_bars(*, symbol: str, count: int) -> list[dict[str, Any]]:
-    market, code = market_code(symbol)
+    market, code = tdx_protocol.market_code(symbol)
     rows, _ = await call(
         lambda client: client.bars(market, code, BAR_PERIODS["1m"], 0, count)
     )
@@ -531,7 +520,6 @@ __all__ = [
     "call_sync",
     "configured_hosts",
     "exchange_board_code",
-    "market_code",
     "parse_auxiliary_count",
     "parse_bars",
     "parse_batch_quotes",
