@@ -38,7 +38,7 @@ class TdxFinancialHistoryTests(unittest.TestCase):
 
     def test_period_and_ttm(self):
         self.assertEqual(normalize_report_period("gpcw20101231.zip"), "2010-12-31")
-        self.assertEqual(ttm_from_cumulative(10, 4, 3), 11)
+        self.assertEqual(ttm_from_cumulative(100, 80, 50), 130)
 
 
 if __name__ == "__main__":
