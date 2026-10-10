@@ -9,40 +9,48 @@ some MAC hosts silently cap the number of dynamic values in one response.
 ## Registry and reconciliation
 
 `MAC_FIELDS` is the authoritative full table (`bit`, name, format, unit,
-canonical key, confidence, status, capability IDs).  The following table lists
-every field with a trusted or potentially useful business interpretation; all
-other positions are deliberately named `bit_0xNN`, have no canonical key and
-are `NO_REFERENCE`.
+canonical key, confidence, status, capability IDs, note).  The following table
+lists every field with a trusted or potentially useful business interpretation,
+and the fields delta-3 Q4/Q5 closed as UNKNOWN; all other positions are
+deliberately named `bit_0xNN`, have no canonical key and are `NO_REFERENCE`.
+A row whose name is `bit_0xNN` is an UNKNOWN field: gotdx guesses a meaning, no
+reconciliation supports it, so it keeps its wire name, has no canonical key and
+binds to no capability.
 
 | Bit | Name | Format / unit | Status | Capability IDs |
 | --- | --- | --- | --- | --- |
 | 00-04 | pre_close, open, high, low, close | float32 / yuan | MATCH (daily bars) | `quote.watch_snapshot`, `auction.open_snapshot` |
-| 05 | vol | uint32 / lots | MATCH (daily bars) | `quote.watch_snapshot`, `flow.stock_daily` |
+| 05 | vol | uint32 / lots | MATCH (daily bars) | `quote.watch_snapshot` |
 | 06 | vol_ratio | float32 / ratio | NO_REFERENCE | |
 | 07 | amount | float32 / yuan | MATCH (daily bars) | `quote.watch_snapshot`, `flow.stock_daily` |
 | 08-09 | inside_volume, outside_volume | uint32 / shares | NO_REFERENCE | |
 | 0a-0d | total_shares, float_shares, eps, net_assets | float32 | NO_REFERENCE | |
 | 11-12 | bid_price, ask_price | float32 / yuan | NO_REFERENCE | |
 | 13-14 | server_update_date, server_update_time | uint32 | NO_REFERENCE | |
-| 16 | board_strength | int32 / count | NO_REFERENCE | |
+| 16 | bit_0x16 | int32 / count | UNKNOWN (delta-3 Q5) | |
+| 1d | bit_0x1d | float32 / percent | UNKNOWN (delta-3 Q5) | |
 | 1b | turnover | float32 / percent | MATCH when float shares are trusted | `quote.watch_snapshot` |
 | 20-21 | buy_price_limit, sell_price_limit | float32 / yuan | MATCH (pre-close and board ratio) | `limits.ladder`, `limits.stock_anomaly_reason`, `limits.prices` |
 | 24 | pre_iopv | float32 / yuan | MATCH on ETF 510300 | `fund.nav` |
 | 25-26 | speed_pct, avg_price | float32 | NO_REFERENCE / MATCH (amount/vol) | `quote.watch_snapshot` |
 | 27 | iopv | float32 / yuan | MATCH on ETF 510300 | `fund.nav` |
-| 38 | main_net_amount | float32 / yuan | NO_REFERENCE (provider semantics) | `flow.stock_daily` |
-| 3b-3c | change_20d_pct, ytd_pct | float32 / percent | MATCH against bar closes where window exists | `quote.watch_snapshot` |
+| 38 | main_net_amount | float32 / yuan | NO_REFERENCE (provider-defined main_in - main_out, yuan; delta-3 Q4) | `flow.stock_daily` |
+| 3c | ytd_pct | float32 / percent | MATCH against bar closes where window exists | `quote.watch_snapshot` |
 | 40-41 | mtd_pct, change_1y_pct | float32 / percent | MATCH against bar closes where window exists | `quote.watch_snapshot` |
-| 43-47 | change_3d/60d/5d/10d/prev2_pct | float32 / percent | MATCH for computable windows; otherwise NO_REFERENCE | `quote.watch_snapshot` |
+| 43-47 | change_3d_pct, change_60d_pct, change_5d_pct, change_10d_pct, prev2_change_pct | float32 / percent | MATCH for computable windows; otherwise NO_REFERENCE | `quote.watch_snapshot` |
 | 57 | open_amount | float32 / yuan | MATCH when auction rows exist | `auction.open_snapshot` |
+| 58 | annual_limit_up_days | int32 / days | MATCH against a daily-bar recount (limit-up days in the calendar year, not a rolling window; delta-3 Q5) | |
+| 59 | bit_0x59 | uint32 | UNKNOWN (delta-3 Q5) | |
 | 5c | close_streak | int32 / days | MATCH against 60 daily bars (rising +n, falling -n) | `quote.watch_snapshot` |
-| 5d-5e | limit_up_count, limit_down_count | uint32 / count | MATCH for board member aggregate | `sector.index_quote` |
+| 5d-5e | bit_0x5d, bit_0x5e | uint32 | UNKNOWN (delta-3 Q5); the board aggregates that matched are 88 and 8b | |
 | 66-67 | auction_buy_limit, auction_sell_limit | float32 / yuan | MATCH when auction rows exist | `auction.open_snapshot` |
-| 6b-72 | main/retail net amount windows | float32 / yuan | NO_REFERENCE (no trusted flow source) | `flow.stock_daily` |
-| 73-76 | DDX, DDY, DDZ, DDF | float32 / ratio | NO_REFERENCE | `flow.stock_daily` |
-| 7a | auction_vol_ratio | float32 / ratio | NO_REFERENCE | `auction.open_snapshot` |
+| 6b | main_net_amount_copy | float32 / yuan | NO_REFERENCE (equals 38: provider-defined main_in - main_out, yuan; delta-3 Q4) | `flow.stock_daily` |
+| 6c-72 | bit_0x6c, bit_0x6d, bit_0x6e, bit_0x6f, bit_0x70, bit_0x71, bit_0x72 | float32 | UNKNOWN (delta-3 Q4) | |
+| 73 | ddx | float32 / ratio | NO_REFERENCE (plausible as DDX; delta-3 Q4) | `flow.stock_daily` |
+| 74-76 | bit_0x74, bit_0x75, bit_0x76 | float32 | UNKNOWN (delta-3 Q4) | |
+| 7a | bit_0x7a | float32 / ratio | UNKNOWN (delta-3 Q5) | |
 | 88-8b | up_count, down_count | uint32 / count | MATCH against board members | `sector.index_quote` |
-| 90-96 | intraday change snapshots | float32 / percent | NO_REFERENCE without same-day bars | |
+| 90-96 | change_at_1000, change_at_1030, change_at_1100, change_at_1130, change_at_1330, change_at_1400, change_at_1430 | float32 / percent | MATCH (sampled intraday change: equals a same-day 1-minute bar at or next to the named time, so slot equality is not expected; delta-3 Q5) | |
 
 The registry marks `MISMATCH` only after a value and an independent reference
 are both present.  A provider-only value remains `NO_REFERENCE`; it is never

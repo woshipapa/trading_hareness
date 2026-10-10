@@ -33,6 +33,7 @@ class MACField:
     confidence: str
     reconciliation: str = NO_REFERENCE
     capability_ids: tuple[str, ...] = ()
+    note: str = ""
 
 
 def _field(
@@ -44,37 +45,23 @@ def _field(
     confidence: str = "medium",
     reconciliation: str = NO_REFERENCE,
     capabilities: Iterable[str] = (),
+    note: str = "",
 ) -> MACField:
     return MACField(
-        bit, name, fmt, unit, canonical, confidence, reconciliation, tuple(capabilities)
+        bit, name, fmt, unit, canonical, confidence, reconciliation, tuple(capabilities), note
     )
 
+
+_MAIN_FLOW_NOTE = "provider-defined main_in - main_out, yuan"
+_SAMPLED_NOTE = (
+    "sampled intraday change: equals a 1-minute bar at or next to the named time, "
+    "not necessarily the same slot"
+)
 
 # Names and formats are transcribed from gotdx's mac_board_members_dynamic.go.
 # Sparse bits are retained below as wire names, which makes full-bit probes safe.
-_KNOWN: dict[int, MACField] = {}
-
-
-def _add(
-    bit: int,
-    name: str,
-    fmt: str = "float32",
-    unit: str = "",
-    canonical: str | None = None,
-    confidence: str = "medium",
-    reconciliation: str = NO_REFERENCE,
-    capabilities: Iterable[str] = (),
-) -> None:
-    _KNOWN[bit] = _field(
-        bit,
-        name,
-        fmt,
-        unit,
-        canonical or name,
-        confidence,
-        reconciliation,
-        capabilities,
-    )
+# Each entry is (name, format, unit, canonical key, confidence, reconciliation, capabilities[, note]); a
+# canonical key of None stays None, so a field no source documents is never offered under a business key.
 
 
 _BASIC = {
@@ -328,6 +315,7 @@ _BASIC = {
         "medium",
         NO_REFERENCE,
         ("flow.stock_daily",),
+        _MAIN_FLOW_NOTE,
     ),
     57: (
         "bid_ask_ratio",
@@ -433,7 +421,16 @@ _BASIC = {
         MATCH,
         ("auction.open_snapshot",),
     ),
-    88: ("annual_limit_up_days", "int32", "days", None, "plausible", NO_REFERENCE, ()),
+    88: (
+        "annual_limit_up_days",
+        "int32",
+        "days",
+        "annual_limit_up_days",
+        "medium",
+        MATCH,
+        (),
+        "limit-up days in the calendar year, not a rolling window",
+    ),
     89: ("bit_0x59", "uint32", "", None, "unknown", NO_REFERENCE, ()),
     91: (
         "dividend_yield_rate",
@@ -501,6 +498,7 @@ _BASIC = {
         "medium",
         NO_REFERENCE,
         ("flow.stock_daily",),
+        _MAIN_FLOW_NOTE,
     ),
     115: (
         "ddx",
@@ -586,8 +584,9 @@ _BASIC = {
         "percent",
         "change_at_1000",
         "medium",
-        NO_REFERENCE,
+        MATCH,
         (),
+        _SAMPLED_NOTE,
     ),
     145: (
         "change_at_1030",
@@ -595,8 +594,9 @@ _BASIC = {
         "percent",
         "change_at_1030",
         "medium",
-        NO_REFERENCE,
+        MATCH,
         (),
+        _SAMPLED_NOTE,
     ),
     146: (
         "change_at_1100",
@@ -604,8 +604,9 @@ _BASIC = {
         "percent",
         "change_at_1100",
         "medium",
-        NO_REFERENCE,
+        MATCH,
         (),
+        _SAMPLED_NOTE,
     ),
     147: (
         "change_at_1130",
@@ -613,8 +614,9 @@ _BASIC = {
         "percent",
         "change_at_1130",
         "medium",
-        NO_REFERENCE,
+        MATCH,
         (),
+        _SAMPLED_NOTE,
     ),
     148: (
         "change_at_1330",
@@ -622,8 +624,9 @@ _BASIC = {
         "percent",
         "change_at_1330",
         "medium",
-        NO_REFERENCE,
+        MATCH,
         (),
+        _SAMPLED_NOTE,
     ),
     149: (
         "change_at_1400",
@@ -631,8 +634,9 @@ _BASIC = {
         "percent",
         "change_at_1400",
         "medium",
-        NO_REFERENCE,
+        MATCH,
         (),
+        _SAMPLED_NOTE,
     ),
     150: (
         "change_at_1430",
@@ -640,12 +644,12 @@ _BASIC = {
         "percent",
         "change_at_1430",
         "medium",
-        NO_REFERENCE,
+        MATCH,
         (),
+        _SAMPLED_NOTE,
     ),
 }
-for _bit, _args in _BASIC.items():
-    _add(_bit, *_args)
+_KNOWN: dict[int, MACField] = {bit: _field(bit, *args) for bit, args in _BASIC.items()}
 
 # Preserve the upstream wire format even when the semantic name is unknown.
 _UNKNOWN_FORMATS = {
@@ -677,21 +681,6 @@ MAC_FIELDS: tuple[MACField, ...] = tuple(
         ),
     )
     for bit in range(MAC_FIELD_BITS)
-)
-MAC_FIELDS = tuple(
-    _field(
-        field.bit,
-        field.name,
-        field.format,
-        field.unit,
-        None,
-        field.confidence,
-        field.reconciliation,
-        field.capability_ids,
-    )
-    if field.bit in (0x58, 0x59, 0x5D, 0x5E)
-    else field
-    for field in MAC_FIELDS
 )
 FIELD_BY_BIT = {field.bit: field for field in MAC_FIELDS}
 
