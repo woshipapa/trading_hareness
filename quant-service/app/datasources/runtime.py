@@ -20,7 +20,7 @@ from datetime import date
 from typing import Any
 
 from ..provider_health import record_provider_failure, record_provider_success
-from ..public_market_repository import latest_observation_payloads, persist_market_events, persist_timed_observations
+from ..public_market_repository import observation_payloads, latest_observation_payloads, persist_market_events, persist_timed_observations
 from ..daily_valuation_repository import project_valuations
 from ..runtime_leases import (
     acquire_runtime_lease, background_loop_lease_seconds, release_runtime_lease, renew_runtime_lease,
@@ -105,6 +105,9 @@ def build_archive_deps(database: Any, collector: intraday.CollectorDeps, *, run_
     async def latest(provider: str, capability: str) -> dict[str, dict[str, Any]]:
         return await run(latest_observation_payloads, database, provider, capability, timeout_seconds=30)
 
+    async def all_payloads(provider: str, capability: str) -> list[dict[str, Any]]:
+        return await run(observation_payloads, database, provider, capability, timeout_seconds=60)
+
     async def project(day: date) -> Mapping[str, Any]:
         return await run(project_valuations, database, day, apply=True, timeout_seconds=90)
 
@@ -118,6 +121,8 @@ def build_archive_deps(database: Any, collector: intraday.CollectorDeps, *, run_
         in {"1", "true", "yes", "on"},
         max_tick_symbols=max_tick_symbols,
         latest_observation_payloads=latest,
+        observation_payloads=all_payloads,
+        max_gpcw_periods=max(1, int(values.get("PUBLIC_ARCHIVE_TDX_GPCW_MAX_PERIODS", "2") or 2)),
         # Enable on the agreed projection writer only, after shared-stage
         # lease adoption. Merely deploying this code must not start a writer.
         project_valuations=project if str(values.get("DAILY_VALUATION_PROJECTION_ENABLED", "false")).strip().lower()

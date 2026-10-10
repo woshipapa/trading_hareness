@@ -111,20 +111,22 @@ def persist_timed_observations(database: Any, provider: str, capability: str,
     parameters = []
     fallback = datetime.now(timezone.utc)
     for row in rows:
-        payload = {key: value for key, value in row.items() if key not in {"effective_at", "available_at"}}
+        payload = {key: value for key, value in row.items()
+                   if key not in {"effective_at", "available_at", "availability_basis"}}
+        availability_basis = row.get("availability_basis")
         effective = as_utc(datetime.fromisoformat(str(row["effective_at"]))) if row.get("effective_at") else fallback
         available = as_utc(datetime.fromisoformat(str(row["available_at"]))) if row.get("available_at") else fallback
         payload.update({"provider_key": provider, "capability": capability})
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
         parameters.append((provider, capability, _observation_symbol(row.get("ts_code")), effective, available,
-                           hashlib.sha256(serialized.encode()).hexdigest(), Json(payload), Json(payload)))
+                           availability_basis, hashlib.sha256(serialized.encode()).hexdigest(), Json(payload), Json(payload)))
     if not parameters:
         return 0
     with database.transaction() as connection:
         with connection.cursor() as cursor:
             cursor.executemany(
-                """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
-                   VALUES(%s,%s,'cn',%s,%s,%s,%s,%s,%s)
+                """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,availability_basis,payload_sha256,normalized,payload)
+                   VALUES(%s,%s,'cn',%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT(provider_key,capability,market,symbol,effective_at,payload_sha256) DO NOTHING""",
                 parameters,
             )
@@ -142,6 +144,18 @@ def latest_observation_payloads(database: Any, provider: str, capability: str) -
             (provider, capability),
         ).fetchall()
     return {str(row["symbol"]): dict(row["normalized"]) for row in rows}
+
+
+def observation_payloads(database: Any, provider: str, capability: str) -> list[dict[str, Any]]:
+    """Read all stored normalized payloads for one public capability."""
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT normalized FROM quant.raw_market_observations
+               WHERE provider_key=%s AND capability=%s
+               ORDER BY effective_at,created_at""",
+            (provider, capability),
+        ).fetchall()
+    return [dict(row["normalized"]) for row in rows]
 
 
 def persist_free_daily(

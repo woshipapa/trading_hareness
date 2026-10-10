@@ -19,7 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
-from ..sources import tdx_files, tdx_instruments, tdx_protocol, tdx_zhb_extras
+from ..sources import tdx_files, tdx_fin_history, tdx_instruments, tdx_protocol, tdx_zhb_extras
 from ..sources.fuyao_evidence import fetch_code_batches
 from .intraday import CollectorDeps, CollectorState, SENTIMENT_PROVIDER_KEY, build_sentiment
 from ..error_text import error_text
@@ -59,6 +59,7 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("capital_changes", time(19, 30), time(23, 30), "观察池除权除息与股本变迁"),
     ArchiveJob("tdx_security_list", time(19, 40), time(23, 30), "通达信证券列表变更"),
     ArchiveJob("tdx_tipinfo", time(19, 50), time(23, 30), "通达信财报首次披露日期"),
+    ArchiveJob("tdx_gpcw", time(20, 0), time(23, 30), "通达信历史财务报表"),
 )
 
 
@@ -71,6 +72,8 @@ class ArchiveDeps:
     max_tick_symbols: int = 60
     project_valuations: Callable[[date], Awaitable[Mapping[str, Any]]] | None = None
     latest_observation_payloads: Callable[[str, str], Awaitable[dict[str, dict[str, Any]]]] | None = None
+    observation_payloads: Callable[[str, str], Awaitable[list[dict[str, Any]]]] | None = None
+    max_gpcw_periods: int = 2
 
 
 @dataclass
@@ -332,6 +335,53 @@ async def job_tdx_tipinfo(deps: ArchiveDeps, state: ArchiveState, day: date, now
     return {"rows": len(rows), "stored": stored, "host": host}
 
 
+async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive at most two changed GPCW periods per day; the complete history is intentionally opt-in."""
+    started = time_module.monotonic()
+    manifest_text, host = await tdx_protocol.call(
+        lambda client: tdx_protocol.decode_text(tdx_files.download(client, "tdxfin/gpcw.txt")),
+        handshake_profile="login_one",
+    )
+    manifest = tdx_fin_history.parse_manifest(manifest_text)
+    previous_payloads = await deps.observation_payloads("tdx_public", "tdx_gpcw_manifest") if deps.observation_payloads else []
+    previous = [tdx_fin_history.ManifestEntry(item["filename"], item["md5"], int(item["size"]))
+                for item in previous_payloads]
+    changes = tdx_fin_history.manifest_changes(previous, manifest)
+    changed_names = sorted(set(changes["added"]) | set(changes["changed"]))[-deps.max_gpcw_periods:]
+    entries = {entry.filename: entry for entry in manifest}
+    manifest_rows = [{"filename": entry.filename, "md5": entry.md5, "size": entry.size,
+                      "effective_at": datetime.combine(date.fromisoformat(entry.filename[4:12]), time(15, 0), CN_TZ).isoformat(),
+                      "available_at": now.isoformat()}
+                     for entry in manifest]
+    manifest_stored = await deps.collector.persist_observations("tdx_public", "tdx_gpcw_manifest", manifest_rows)
+    tipinfo = await deps.observation_payloads("tdx_public", "tdx_tipinfo") if deps.observation_payloads else []
+    stored = 0
+    downloaded = 0
+    undated = 0
+    for filename in changed_names:
+        entry = entries[filename]
+        rows, _period_host = await tdx_protocol.call(
+            lambda client, name=filename, item=entry: tdx_fin_history.gpcw(client, name, item),
+            handshake_profile="login_one",
+        )
+        undated += tdx_fin_history.date_gpcw_rows(rows, tipinfo)
+        observations = []
+        for row in rows:
+            named_fields = {name: value for name, value in row["fields"].items() if name in tdx_fin_history.GPCW_FIELD_NAMES.values()}
+            report_period = row["report_period"]
+            effective = datetime.combine(date.fromisoformat(report_period), time(15, 0), CN_TZ)
+            available = row.get("available_at", now)
+            observations.append({"code": row["code"], "report_period": report_period,
+                                "fields": named_fields, "field_units": {key: row["field_units"][key] for key in named_fields},
+                                "effective_at": effective.isoformat(), "available_at": available.isoformat(),
+                                "availability_basis": "tipinfo_first_disclosure" if "available_at" in row else "collection_time_undated"})
+        stored += await deps.collector.persist_observations("tdx_public", "tdx_gpcw", observations) if observations else 0
+        downloaded += 1
+    await deps.collector.record_health("tdx_public", "tdx_gpcw", True, stored, round((time_module.monotonic() - started) * 1000), None)
+    return {"manifest": len(manifest), "manifest_stored": manifest_stored, "changed": changed_names,
+            "downloaded": downloaded, "rows_stored": stored, "undated": undated, "host": host}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -339,7 +389,7 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "eastmoney_margin": job_eastmoney_margin, "fuyao_valuation_index": job_fuyao_valuation_index,
     "daily_valuation_projection": job_daily_valuation_projection,
     "tick_flow": job_tick_flow, "capital_changes": job_capital_changes,
-    "tdx_security_list": job_tdx_security_list, "tdx_tipinfo": job_tdx_tipinfo,
+    "tdx_security_list": job_tdx_security_list, "tdx_tipinfo": job_tdx_tipinfo, "tdx_gpcw": job_tdx_gpcw,
 }
 
 
