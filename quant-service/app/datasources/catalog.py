@@ -99,6 +99,8 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
     DataSource("tdx_public", "通达信公开行情主站", "tdx hq hosts :7709", "unofficial_protocol", "tcp_tdx", "free",
                "app/datasources/sources/tdx_protocol.py",
                risks="非官方社区主站；2026-09-18 起仅历史分笔与除权除息可用，实时行情与 K 线命令被拒"),
+    DataSource("tdx_mac", "通达信 MAC 行情服务", "MAC 0x12xx hosts :7709", "unofficial_protocol", "tcp_tdx_mac", "free",
+               "app/datasources/sources/tdx_mac.py", risks="研究证据；MAC 字段与协议为非官方实现"),
     DataSource("tdx_local", "通达信客户端盘后数据（vipdoc）", "owner workstation TDX client", "local_files", "files", "free",
                "app/datasources/sources/tdx_local_files.py", risks="依赖 owner 手工/定时盘后下载", deploy="owner_workstation_cli"),
     # -- aggregators ----------------------------------------------------------
@@ -178,6 +180,8 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     # sector
     _cap("sector.membership", "板块/概念成分（PIT）", "reference", "board", "taxonomy_key sector_key symbol known_at",
          "known_at 之后才可用；盘中刷新只对下一场生效"),
+    _cap("sector.board_catalog", "MAC 板块目录", "reference", "board", "ids names types counts",
+         "effective=采集时刻; available=采集时刻"),
     _cap("sector.index_quote", "板块/概念指数行情", "daily", "board", "index_code last_price pct_change volume turnover", _OBSERVED),
     _cap("sector.flow_curve", "板块资金流曲线", "intraday", "board", "sector net_inflow:per-item unit (cny|100m_cny)", _OBSERVED),
     _cap("sector.anomaly", "板块异动", "intraday", "board", "board_code pct_change main_net_inflow change_counts", _OBSERVED),
@@ -259,6 +263,13 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("sina_free", "quote.watch_snapshot", 55, UNSUPPORTED, "intraday_quote_observations",
           "app/free_market_providers.py",
           notes="无时间戳契约，仅兜底；owner 出口访问 hq.sinajs.cn 返回 403（2026-09-21 起，健康表从未成功）"),
+    _bind("tdx_mac", "quote.watch_snapshot", 70, UNSUPPORTED, _RAW + "tdx_mac_watch_snapshot",
+          "app/datasources/sources/tdx_mac.py:fetch_watch_snapshot", spec=BindingSpec(
+              params={"stocks": "market+symbol", "turnover_formula": "0x05 lots / 0x0b 10k_shares"},
+              field_map={"vol": "volume", "vol_ratio": "volume_ratio", "turnover": "turnover_rate",
+                         "server_update_time": "exchange_time"},
+              unit_factors={"volume": 100}, paging="batch", max_batch=80,
+              time_semantics="effective=exchange_date/time; available=collection", handshake_profile="mac")),
     # Both providers persist depth observations in the shared quote table.  The
     # source discriminator is part of the storage contract; there is no
     # separate intraday_order_book_observations relation.
@@ -287,6 +298,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tdx_local", "bars.daily", 35, DECLARED, "offline CSV (research)", "app/datasources/sources/tdx_local_files.py:parse_day_bytes",
           "客户端下载的全部历史", notes="owner 工作站 CLI，不直接写 canonical"),
     _bind("fuyao_ths", "bars.daily", 20, DECLARED, None, "app/fuyao_bulk_dump_capture.py", "10 年日K + 复权因子全量导出"),
+    _bind("tdx_mac", "bars.daily", 70, UNSUPPORTED, _RAW + "tdx_mac_daily_bars",
+          "app/datasources/sources/tdx_mac.py:fetch_daily_bars", spec=BindingSpec(
+              params={"symbol": "market+code", "period": 4}, field_map={"volume": "volume"},
+              unit_factors={"volume": 0.01}, paging="start/count", max_batch=800,
+              time_semantics="effective=bar date; available=collection", handshake_profile="mac")),
     _bind("tencent_free", "bars.daily_adjusted", 50, LIVE_VERIFIED, "research_adjusted_bars_daily", "app/free_market_providers.py",
           notes="前复权，研究参考"),
     _bind("longhuvip", "bars.minute", 10, LIVE_VERIFIED, "intraday_minute_sessions", "app/intraday_minute_capture_actions.py",
@@ -300,6 +316,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="rt_min；2026-10-08 停用 Tushare（决策 0005）；保留 dormant 只为历史存量仍可按来源读取"),
     _bind("tdx_local", "bars.minute", 35, DECLARED, "market_bars_minute (offline import)",
           "app/datasources/sources/tdx_local_files.py:parse_minute_bytes", "客户端保留的全部分钟线"),
+    _bind("tdx_mac", "bars.minute", 70, UNSUPPORTED, _RAW + "tdx_mac_minute_bars",
+          "app/datasources/sources/tdx_mac.py:fetch_minute_bars", spec=BindingSpec(
+              params={"symbol": "market+code", "period": "0=5m,7/8=1m"}, field_map={"volume": "volume"},
+              unit_factors={"volume": 1}, paging="start/count", max_batch=800,
+              time_semantics="effective=bar time; available=collection", handshake_profile="mac")),
     _bind("longhuvip_index", "bars.index_daily", 45, DORMANT, "canonical_bars_daily", "app/longhu_market_service.py"),
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),
     _bind("tushare_primary", "bars.adjustment_factor", 10, RETIRED, "daily_adjustment_factors:provider=tushare_primary",
@@ -338,6 +359,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           limits="stk_limit 全市场必须分页", notes="2026-10-08 停用 Tushare（决策 0005），盘中改由腾讯公布值替代"),
     _bind("longhuvip_composite", "limits.prices", 25, LIVE_VERIFIED, "daily_trade_limits", "app/longhu_shared_full_market.py",
           notes="16:00 左右才落库，盘中不可依赖；优先用同批腾讯行情里的公布值，缺失时才按板块比例推算"),
+    _bind("tdx_mac", "limits.prices", 70, UNSUPPORTED, _RAW + "tdx_mac_limits",
+          "app/datasources/sources/tdx_mac.py:fetch_limit_prices", spec=BindingSpec(
+              params={"stocks": "market+symbol"}, field_map={"limit_up": "up_limit", "limit_down": "down_limit"},
+              paging="batch", max_batch=80, time_semantics="effective=exchange date; available=collection",
+              handshake_profile="mac")),
     _bind("fuyao_ths", "limits.limit_up_pool", 12, LIVE_VERIFIED, _EVT + "limit_up_pool", "app/market_event_capture.py",
           "近期", "默认分页 50（此前只存了第一页，已修为翻页）"),
     _bind("eastmoney_ztb", "limits.limit_up_pool", 50, DECLARED, _RAW + "limit_pool_limit_up",
@@ -378,6 +404,16 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                 "只记变化（新成员 known_at=观测时刻，盘中刷新对盘中读者次日生效）"),
     _bind("akshare", "sector.membership", 60, DORMANT, "sector_membership_history", "app/akshare_provider.py",
           notes="东财成分函数在 owner 出口不可用"),
+    _bind("tdx_mac", "sector.board_catalog", 70, UNSUPPORTED, _RAW + "tdx_mac_board_catalog",
+          "app/datasources/sources/tdx_mac.py:fetch_board_catalog", spec=BindingSpec(
+              params={"board_type": "0..6"}, field_map={"code": "ids", "name": "names", "market": "types"},
+              paging="start/page_size", max_batch=150,
+              time_semantics="effective/available=collection", handshake_profile="mac")),
+    _bind("tdx_mac", "sector.membership", 70, UNSUPPORTED, "sector_membership_history:taxonomy_key=tdx_mac",
+          "app/datasources/sources/tdx_mac.py:fetch_membership", spec=BindingSpec(
+              params={"board": "MAC board symbol"}, field_map={"symbol": "symbol"},
+              paging="start/total", max_batch=80,
+              time_semantics="known_at=collection", handshake_profile="mac")),
     _bind("fuyao_ths", "sector.index_quote", 12, DECLARED, _RAW + "ths_index_prices_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", limits="thscodes≤100"),
     _bind("eastmoney_free", "sector.flow_curve", 45, LIVE_VERIFIED, "intraday_board_flow_snapshots", "app/board_flow_capture_actions.py",
@@ -730,7 +766,7 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key):
+        if not bindings_for(key) and not any(item.capability == key for item in BINDINGS):
             problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:

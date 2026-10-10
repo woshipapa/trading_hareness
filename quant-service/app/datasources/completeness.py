@@ -56,13 +56,20 @@ UNREGISTERED: dict[str, str] = {
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
                                "and security-list capabilities of P2 bind its sections",
+    "tdx_mac.call": "transport primitive; MAC fetch_* adapters are the bound readers",
+    "tdx_mac.call_sync": "transport primitive; MAC fetch_* adapters are the bound readers",
+    "tdx_mac.TdxMacClient.handshake": "transport primitive used by MAC fetch_* adapters",
+    "tdx_mac.TdxMacClient.board_list": "transport primitive used by fetch_board_catalog",
+    "tdx_mac.TdxMacClient.board_members": "transport primitive used by fetch_membership",
+    "tdx_mac.TdxMacClient.board_member_quotes": "transport primitive for dynamic member quotes",
+    "tdx_mac.TdxMacClient.batch_quotes": "transport primitive used by MAC quote adapters",
+    "tdx_mac.TdxMacClient.bars": "transport primitive used by MAC bar adapters",
+    "tdx_mac.TdxMacClient.auxiliary": "transport primitive for unbound MAC auxiliary commands",
     "family:quote": "legacy quotes bind in P2 after the instrument model (delta D2); MAC 0x122b in P3",
     "family:F10": "verified in the plan; company-profile capability arrives in P5",
     "family:finance": "verified in the plan; financial-statements capability arrives in P5",
     "family:files": "verified in the plan; server-file capabilities arrive in P4",
-    "family:boards": "verified in the plan; board capabilities arrive in P3",
     "family:capital flow": "MAC capital flow semantics unverified (delta 1b); research projection only, P3",
-    "family:MAC": "MAC protocol bindings arrive in P3, all UNSUPPORTED until the evidence gates",
     "family:extended": "7727 extended-market handshake is unsolved (plan F7, P9)",
 }
 
