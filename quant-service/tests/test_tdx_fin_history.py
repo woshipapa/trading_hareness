@@ -83,14 +83,16 @@ class TdxFinancialHistoryTests(unittest.TestCase):
         self.assertEqual(row["announcement_date_candidate"], "20260815")
         self.assertNotIn("available_at", row)
 
-    def test_period_and_ttm(self):
+    def test_report_period_comes_from_the_file_name(self):
         self.assertEqual(normalize_report_period("gpcw20101231.zip"), "2010-12-31")
-        self.assertEqual(ttm_from_cumulative(100, 80, 50), 130)
-        # TTM for 2025-06-30 from FY2024 + H1 2025 - H1 2024
-        # FY2024=100, H1 2025=80 (cumulative), H1 2024=50 (prior year same period)
-        self.assertEqual(ttm_from_cumulative(100, 80, 50), 130)
-        # Different FY gives different TTM: FY2025=150 instead of FY2024=100
-        self.assertEqual(ttm_from_cumulative(150, 80, 50), 180)
+        self.assertEqual(normalize_report_period("tdxfin/gpcw20250630.zip"), "2025-06-30")
+        self.assertEqual(normalize_report_period(20241231), "2024-12-31")
+
+    def test_ttm_at_2025_06_30_is_fy2024_plus_h1_2025_minus_h1_2024(self):
+        # Year-to-date revenue by report period: Q1, H1 and Q3 accumulate and the series restarts each year.
+        # FY2025 differs from FY2024 on purpose: taking it instead would give 1,450, not 1,150.
+        ytd = {"2024-06-30": 450.0, "2024-12-31": 1000.0, "2025-06-30": 600.0, "2025-12-31": 1300.0}
+        self.assertEqual(ttm_from_cumulative(ytd["2024-12-31"], ytd["2025-06-30"], ytd["2024-06-30"]), 1150.0)
 
 
 class TdxFinanceErrorTests(unittest.TestCase):
