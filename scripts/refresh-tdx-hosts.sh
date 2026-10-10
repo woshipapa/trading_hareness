@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run the owner TDX probe, regenerate the local host pool, and print its diff.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

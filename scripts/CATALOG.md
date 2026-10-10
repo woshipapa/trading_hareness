@@ -154,7 +154,7 @@
 | `probe-tdx-q-limitfields.py` | quant-research | workstation | Read-only MAC dynamic-field probe for the Q-LIMIT research record. |
 | `probe-tdx-q-units.py` | quant-research | workstation | Read-only live evidence probe for TDX volume, amount and time units. |
 | `probe-tdx-routes.py` | quant-research | workstation | Probe TDX routes; output a versioned, fail-closed route matrix. |
-| `refresh-tdx-hosts.sh` | quant-research | workstation |  |
+| `refresh-tdx-hosts.sh` | quant-research | workstation | Run the owner TDX probe, regenerate the local host pool, and print its diff. |
 | `refresh-watchlist-from-proposals.py` | quant-research | workstation | Post-close watchlist refresh: admit today's proposals, retire the inactive. |
 | `run-post-close-pipeline.sh` | quant-research | workstation | Post-close daily pipeline runner. |
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
