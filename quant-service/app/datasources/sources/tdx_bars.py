@@ -28,12 +28,6 @@ def _bar_pages(client: tdx_protocol.TdxClient, category: int, market: int, code:
     return sorted(unique.values(), key=lambda row: row["datetime"])[-count:]
 
 
-def _index_pages(client: tdx_protocol.TdxClient, market: int, code: str, count: int) -> list[dict[str, Any]]:
-    return tdx_instruments.parse_index_bars(
-        client._exchange(tdx_protocol.build_bars_request(9, market, code, 0, count))
-    )
-
-
 async def _fetch_index_bars(symbol: str, count: int) -> CapabilityEvidence:
     market, code = tdx_protocol.market_code(symbol)
     if tdx_instruments.instrument_type(market, code) not in ("index", "board"):
@@ -42,7 +36,7 @@ async def _fetch_index_bars(symbol: str, count: int) -> CapabilityEvidence:
         raise ValueError("count must be between 1 and 800")
     canonical = tdx_protocol.symbol(market, code)
     rows, host = await tdx_protocol.call(
-        lambda client: _index_pages(client, market, code, count), handshake_profile="login_one"
+        lambda client: tdx_instruments.index_bars(client, market, code, 0, count), handshake_profile="login_one"
     )
     normalized = [
         {
@@ -53,7 +47,7 @@ async def _fetch_index_bars(symbol: str, count: int) -> CapabilityEvidence:
             "low": row["low"],
             "close": row["close"],
             "amount": row["amount"],
-            "volume_raw": row["volume_raw"],
+            "volume_raw": row["volume"],
             "up_count": row["up_count"],
             "down_count": row["down_count"],
         }

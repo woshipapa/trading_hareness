@@ -15,10 +15,12 @@ FIXTURE = Path(__file__).parent / "fixtures" / "tdx_bars_20261009.json"
 class IndexBarTests(unittest.TestCase):
     def test_index_fixture_has_constituent_breadth(self):
         fixture = json.loads(FIXTURE.read_text())
-        for symbol, expected in (("999999.SH", (1341, 956)), ("399300.SZ", (179, 113))):
+        for symbol, expected, volume in (("999999.SH", (1341, 956), 5351499.0), ("399300.SZ", (179, 113), 1991874.0)):
             body = base64.b64decode(fixture["index_daily"][symbol]["body_b64"])
             rows = tdx_instruments.parse_index_bars(body)
             self.assertEqual((rows[-1]["up_count"], rows[-1]["down_count"]), expected)
+            self.assertNotIn("volume_raw", rows[-1])
+            self.assertEqual(rows[-1]["volume"], volume)
 
     def test_index_symbol_validation_precedes_network(self):
         async def fail(*_args, **_kwargs):
