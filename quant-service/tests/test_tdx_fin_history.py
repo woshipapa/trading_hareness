@@ -9,9 +9,10 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+from app.datasources.sources.tdx_files import TdxFileError, build_report_file_request, parse_file_chunk
 from app.datasources.sources.tdx_fin_history import (
-    ManifestEntry, TdxFinanceError, build_report_file_request, download_report_file, gpcw, gpcw_field_unit,
-    manifest_changes, normalize_report_period, parse_gpcw_dat, parse_gpcw_zip, parse_manifest, parse_report_file,
+    ManifestEntry, TdxFinanceError, download_report_file, gpcw, gpcw_field_unit,
+    manifest_changes, normalize_report_period, parse_gpcw_dat, parse_gpcw_zip, parse_manifest,
     parse_tipinfo, ttm_from_cumulative, verify_manifest_entry,
 )
 
@@ -252,11 +253,11 @@ class ReportFileDownloadTests(unittest.TestCase):
                 build_report_file_request(*args)
 
     def test_a_reply_is_its_declared_length_and_a_zero_length_is_the_end(self):
-        self.assertEqual(parse_report_file(bytes.fromhex("03000000" "616263" "6a756e6b")), b"abc")
-        self.assertEqual(parse_report_file(bytes.fromhex("00000000")), b"")
+        self.assertEqual(parse_file_chunk(bytes.fromhex("03000000" "616263" "6a756e6b")), b"abc")
+        self.assertEqual(parse_file_chunk(bytes.fromhex("00000000")), b"")
         for label, body in {"no length": bytes.fromhex("030000"), "chunk cut short": bytes.fromhex("05000000" "616263")}.items():
-            with self.subTest(label), self.assertRaises(TdxFinanceError):
-                parse_report_file(body)
+            with self.subTest(label), self.assertRaises(TdxFileError):
+                parse_file_chunk(body)
 
     def test_the_whole_file_is_fetched_in_requests_for_30000_bytes(self):
         host = ReportHost(self.FILE)
@@ -294,7 +295,7 @@ class ReportFileDownloadTests(unittest.TestCase):
     def test_a_reply_shorter_than_its_declared_length_raises(self):
         host = ReportHost(self.FILE)
         host._exchange = lambda request: bytes.fromhex("10270000") + b"x" * 100       # declares 10,000, carries 100
-        with self.assertRaisesRegex(TdxFinanceError, "shorter than its declared length 10000"):
+        with self.assertRaisesRegex(TdxFileError, "length exceeds response"):
             download_report_file(host, "tdxfin/x.zip", len(self.FILE))
 
     def test_an_empty_file_is_empty_without_a_request(self):
