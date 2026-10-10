@@ -38,8 +38,9 @@ def derive_limit_pools(snapshot_rows: Iterable[Mapping[str, Any]], limit_rows: I
     * ``broken``: the day high equals the up limit and the price is below it;
     * ``limit_down``: the price equals the down limit.
 
-    A security with no limit row, or whose limit row has no positive limit, is left out and counted; no evidence
-    file holds the limit row of a security without limits, so a limit that is not a price is what counts as none.
+    A security with no limit row, or whose limit row lacks a positive up or down limit, is left out and counted; no
+    evidence file holds the limit row of a security without limits, so a limit that is not a price is what counts
+    as none.
     A row whose price is not positive is never a member.  A member carries ``symbol``, ``price``, ``high``,
     ``up_limit`` (``down_limit`` in ``limit_down``) in yuan, and ``observed_at``.
     """
