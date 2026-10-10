@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (55)
+## research data (56)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -148,6 +148,7 @@
 | `marketdata/verify_cold_read.py` | quant-research | workstation (some on the edge) | Prove a cold-tier parquet answers the same query as the local copy. |
 | `probe-public-sources.py` | quant-research | workstation | Data-free live check of every token-free public evidence source. |
 | `probe-tdx-cadence.py` | quant-research | workstation | Probe TDX request rates: failure rate, latency and data change per host at fixed requests per second. |
+| `probe-tdx-disclosure-timing.py` | quant-research | workstation | Log when tipinfo.dat rows appear in zhb.zip during a day and look up the cninfo announcement time of each. |
 | `probe-tdx-ext-delay.py` | quant-research | workstation | Measure how far TDX extended-market hosts run behind Tencent, one reading per second. |
 | `probe-tdx-q-breadth.py` | quant-research | workstation | Probe TDX breadth, MAC dead commands, offset info and chart sampling. |
 | `probe-tdx-q-disclosure.py` | quant-research | workstation | Probe TDX disclosure and IPO fields against public Eastmoney rows. |
