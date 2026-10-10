@@ -10,6 +10,12 @@ the same keywords, so the resolver can fall through without translation):
 * ``events.*`` (datacenter): ``start: date``, ``end: date``
 * ``news.flash``: none;  ``events.investor_qa``: ``observed_at``
 * ``fund.nav``: ``fund_code``
+* ``quote.watch_snapshot``: ``symbols``
+* ``limits.prices``: ``symbols``
+* ``bars.daily``: ``symbol``, ``count``
+* ``bars.minute``: ``symbol``, ``count`` (MAC 1-minute bars)
+* ``sector.board_catalog``: no parameters; returns the MAC board types of ``tdx_mac.BOARD_TYPES``
+* ``sector.membership``: ``sector_key`` (MAC also takes the catalog row's ``board_type``)
 
 Sources that live outside this package (licensed gateways, the existing
 Tencent/Sina/Eastmoney quote paths) are bound by the composition root.

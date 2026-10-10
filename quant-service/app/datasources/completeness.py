@@ -50,26 +50,42 @@ UNREGISTERED: dict[str, str] = {
                                          "no capability of its own",
     "tencent_limits.session_limit_cross_section": "composition-root path: main.py stores the session's limit prices "
                                                   "(daily_trade_limits) before the first intraday scan; not resolver-routed",
-    "tdx_protocol.TdxClient.quotes": "legacy quote command 0x053e; bound in P2 after the instrument model (delta D2)",
-    "tdx_protocol.TdxClient.bars": "legacy bar command 0x052d; bound in P2 after the instrument model (delta D2)",
+    "tdx_protocol.TdxClient.quotes": "legacy quote command 0x053e; quote.watch_snapshot binds the MAC batch quote 0x122b "
+                                     "(tdx_mac.fetch_watch_snapshot), not this command",
+    "tdx_protocol.TdxClient.bars": "legacy bar command 0x052d; bars.daily and bars.minute bind the MAC bars command 0x122e "
+                                   "(tdx_mac.fetch_daily_bars, fetch_minute_bars), not this command",
     "tdx_protocol.TdxClient.ticks": "transport for ticks.fetch_tdx_ticks, which is the bound reader",
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
     "tdx_fin_history.download_report_file": "sized transport for the gpcw period files (manifest size and md5 change detection, "
                                             "delta-1 D8); the planned backfill job calls it, never the request path",
     "tdx_fin_history.gpcw": "downloads one gpcw period ZIP against its manifest entry and parses it; for the planned "
                             "backfill job (delta-1 D8), never the request path",
-    "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
-                               "and security-list capabilities of P2 bind its sections",
     "tdx_instruments.security_count": "transport behind the bound fetch_security_list (0x044e count per market)",
     "tdx_instruments.security_list": "transport behind the bound fetch_security_list (0x044e count and 0x0450 pages)",
     "tdx_instruments.index_bars": "index/board bars with constituent breadth (delta-3 Q10); bars.index_daily binds it in I3",
     "tdx_files.download": "server file transport; fetch_security_list reads zhb.zip through it, file capabilities bind in I4",
     "tdx_files.file_size": "server file transport behind tdx_files.download",
     "tdx_files.parse_zhb_zip": "parses a zhb.zip already downloaded into memory; its archive.open() reads those bytes",
+    "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); "
+                               "tdx_instruments.fetch_security_list and fetch_instruments (reference.security_list, "
+                               "reference.instruments) read through it and are the bound readers",
+    "tdx_mac.call": "transport with host failover; the six MAC fetch_* adapters (fetch_watch_snapshot, fetch_limit_prices, "
+                    "fetch_board_catalog, fetch_membership, fetch_daily_bars, fetch_minute_bars) are the bound readers",
+    "tdx_mac.call_sync": "the blocking half of tdx_mac.call; the MAC fetch_* adapters are the bound readers",
+    "tdx_mac.TdxMacClient.handshake": "the two setup packets sent when a MAC connection opens; not a reader of its own",
+    "tdx_mac.TdxMacClient.board_list": "board list command 0x1231, read by fetch_board_catalog (sector.board_catalog)",
+    "tdx_mac.TdxMacClient.board_members": "board members command 0x122c, read by fetch_membership (sector.membership)",
+    "tdx_mac.TdxMacClient.board_member_quotes": "dynamic member quotes of command 0x122c; no capability binds them, "
+                                                "only scripts/verify-tdx-mac.py reads them",
+    "tdx_mac.TdxMacClient.batch_quotes": "batch quote command 0x122b, read by fetch_watch_snapshot (quote.watch_snapshot) "
+                                         "and fetch_limit_prices (limits.prices)",
+    "tdx_mac.TdxMacClient.bars": "bars command 0x122e, read by fetch_daily_bars (bars.daily) and fetch_minute_bars (bars.minute)",
+    "tdx_mac.TdxMacClient.auxiliary": "research commands 0x1218, 0x123d, 0x123e and 0x1237; no capability binds them, "
+                                      "only scripts/verify-tdx-mac.py reads them",
     "family:files": "verified in the plan; server-file capabilities arrive in P4",
-    "family:boards": "verified in the plan; board capabilities arrive in P3",
-    "family:capital flow": "MAC capital flow semantics unverified (delta 1b); research projection only, P3",
-    "family:MAC": "MAC protocol bindings arrive in P3, all UNSUPPORTED until the evidence gates",
+    "family:capital flow": "MAC capital flow (0x1218 head=2; fields 0x38 and 0x6b) is confirmed only as the provider's "
+                           "own main_in - main_out (delta-3 Q4); no flow capability binds it until its coverage and "
+                           "stability are established",
     "tdx_ex_market.TdxExMarketClient.categories": "category list (type and market id per group); not called in adapter path",
     "tdx_ex_market.TdxExMarketClient.count": "transport for fetch_instruments only",
     "tdx_ex_market.TdxExMarketClient.instruments": "transport for fetch_instruments only",
