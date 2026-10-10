@@ -136,6 +136,25 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn(RETIRED, {provider["status"] for capability in document["capabilities"]
                                    for provider in capability["providers"]})
 
+    def test_every_reference_reader_of_an_agreement_accepts_what_the_check_gives_it(self):
+        import importlib
+        import inspect
+
+        from app.datasources.contracts import reference_keywords
+
+        entries = [(item, entry) for item in BINDINGS if item.spec for entry in item.spec.agreement.values()
+                   if entry.get("reference_adapter")]
+        self.assertTrue(entries)
+        for item, entry in entries:
+            path, _, name = entry["reference_adapter"].partition(":")
+            parameters = inspect.signature(getattr(importlib.import_module(path.removesuffix(".py").replace("/", ".")), name)).parameters
+            given = set(reference_keywords(entry, dict.fromkeys(item.spec.params)))
+            required = {key for key, parameter in parameters.items() if parameter.default is parameter.empty
+                        and parameter.kind not in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)}
+            where = f"{item.source}->{item.capability} {entry['reference_adapter']}"
+            self.assertLessEqual(given, set(parameters), where)
+            self.assertLessEqual(required, given, where)
+
     def test_i2_legacy_bindings_are_fully_specified_whatever_their_promotion_state(self):
         snapshot = next(item for item in BINDINGS
                         if item.source == "tdx_public" and item.capability == "quote.all_a_snapshot")

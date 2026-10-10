@@ -25,6 +25,8 @@ UNSUPPORTED: Final = "unsupported"       # the upstream refuses it (kept to re-p
 RETIRED: Final = "retired"               # deliberately taken out of resolution
 BINDING_STATES: Final = (LIVE_VERIFIED, DECLARED, DORMANT, UNSUPPORTED, RETIRED)
 RESOLVABLE_STATES: Final = frozenset({LIVE_VERIFIED, DECLARED, DORMANT})
+#: A function an adapter string names: ``app/<module path>.py:<function>``.
+ADAPTER_PATTERN: Final = r"app/[\w/]+\.py:\w+"
 PURPOSES: Final = ("research", "replay", "shadow")
 QUALITY_STATUSES: Final = ("complete", "partial", "empty", "stale", "invalid", "conflicted")
 
@@ -85,6 +87,16 @@ class BindingSpec:
     #: tolerances; one that is missing counts as 0) and the common rows are at least ``min_coverage`` (default 0.95)
     #: of this binding's rows.  An empty mapping means the binding is promoted without a cross-source comparison.
     agreement: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+
+def reference_keywords(entry: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    """The keywords an agreement entry's reference reader is called with, given the parameters of the check.
+
+    Those ``reference_params`` renames (all the parameters under their own names when it is absent), and the
+    constants ``reference_fixed`` adds."""
+    named = entry.get("reference_params")
+    asked = dict(params) if named is None else {keyword: params[name] for keyword, name in named.items()}
+    return {**asked, **entry.get("reference_fixed", {})}
 
 
 @dataclass(frozen=True)
@@ -258,8 +270,8 @@ class StrategyDataNeeds:
 
 
 __all__ = [
-    "BINDING_STATES", "Binding", "BindingSpec", "CATEGORIES", "CanonicalSchema", "Capability", "CapabilityEvidence", "CapabilityRequest",
+    "ADAPTER_PATTERN", "BINDING_STATES", "Binding", "BindingSpec", "CATEGORIES", "CanonicalSchema", "Capability", "CapabilityEvidence", "CapabilityRequest",
     "CapabilityRequirement", "DECLARED", "DORMANT", "DataSource", "GRAINS", "LICENSES", "LIVE_VERIFIED",
     "PURPOSES", "QUALITY_STATUSES", "QualityReceipt", "RESOLVABLE_STATES", "RETIRED", "SCOPES", "SourceLabel",
-    "StrategyDataNeeds", "FieldSpec", "Taxonomy", "UNSUPPORTED",
+    "StrategyDataNeeds", "FieldSpec", "Taxonomy", "UNSUPPORTED", "reference_keywords",
 ]

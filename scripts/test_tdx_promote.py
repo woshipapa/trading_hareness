@@ -36,6 +36,7 @@ OWN = Binding("tdx_public", CAPABILITY, 70, UNSUPPORTED, spec=BindingSpec(
                "volume": {"reference": "tencent_free", "key": KEY}}))
 REFERENCE = Binding("tencent_free", CAPABILITY, 30, LIVE_VERIFIED)
 TENCENT_MINUTES = "app/free_market_providers.py:tencent_intraday_minutes"
+TENCENT_INDEX = "app/free_market_providers.py:tencent_index_daily"
 FETCH_POOL = "app/datasources/sources/eastmoney_ztb.py:fetch_pool"
 MINUTES = {"reference": "tencent_free", "reference_adapter": TENCENT_MINUTES, "reference_params": {"symbol": "symbol"},
            "key": ["symbol", "bar_time"]}
@@ -235,9 +236,9 @@ class CheckTests(unittest.TestCase):
     def test_a_pool_reference_takes_a_fixed_pool_and_the_trade_date_and_needs_no_projection(self):
         entry = {"reference": "eastmoney_ztb", "reference_adapter": FETCH_POOL, "reference_params": {"trade_date": "trade_date"},
                  "reference_fixed": {"pool": "limit_up"}, "key": ["symbol"]}
-        self.assertEqual(MODULE.reference_kwargs(entry, {"trade_date": "2026-10-12", "count": 5}),
+        self.assertEqual(MODULE.reference_keywords(entry, {"trade_date": "2026-10-12", "count": 5}),
                          {"trade_date": "2026-10-12", "pool": "limit_up"})
-        self.assertEqual(MODULE.reference_kwargs({"reference": "tencent_free"}, {"symbols": ["000001.SZ"]}),
+        self.assertEqual(MODULE.reference_keywords({"reference": "tencent_free"}, {"symbols": ["000001.SZ"]}),
                          {"symbols": ["000001.SZ"]}, "without a mapping the reference gets the same parameters")
         pool = Binding("tdx_public", "limits.limit_up_pool", 90, UNSUPPORTED, spec=BindingSpec(agreement={
             "board_count": {**entry, "abs_tol": 0}}))
@@ -248,6 +249,22 @@ class CheckTests(unittest.TestCase):
                            capability="limits.limit_up_pool", params={"trade_date": "2026-10-12"})
         self.assertEqual(result.calls[1], ("owner", "eastmoney_ztb", {"trade_date": "2026-10-12", "pool": "limit_up"}, FETCH_POOL, True))
         self.assertEqual(result.evidence[0]["comparison"]["board_count"]["matched"], 2)
+
+    def test_a_reader_named_by_its_adapter_needs_no_binding_of_the_reference_source(self):
+        entry = {"reference": "tencent_free", "reference_adapter": TENCENT_INDEX, "reference_params": {"symbol": "symbol"},
+                 "reference_fixed": {"start": "19900101", "end": "29991231"}, "key": ["symbol", "trade_date"], "abs_tol": 0.005}
+        index = Binding("tdx_public", "bars.index_daily", 80, UNSUPPORTED, spec=BindingSpec(
+            agreement={"open": entry, "close": entry}))
+        own = [{"symbol": "000300.SH", "trade_date": f"2026-10-0{day}", "open": 4600.5 + day, "close": 4610.25 + day} for day in (7, 8, 9)]
+        tape = [{"ts_code": "000300.SH", "trade_date": f"2026100{day}", "open": str(4600.5 + day), "close": str(4610.25 + day),
+                 "vol": "1", "amount": None} for day in (9, 8, 7)]
+        probes = {"tdx_public": record("tdx_public", own, capability="bars.index_daily"),
+                  TENCENT_INDEX: record("tencent_free", tape, capability="bars.index_daily")}
+        result = run_check("owner", probes, bindings=(index,), capability="bars.index_daily", params={"symbol": "000300.SH"})
+        self.assertEqual(result.calls[1], ("owner", "tencent_free", {"symbol": "000300.SH", "start": "19900101", "end": "29991231"},
+                                           TENCENT_INDEX, True))
+        comparison = result.evidence[0]["comparison"]
+        self.assertEqual((comparison["open"]["matched"], comparison["close"]["matched"], failing(result.evidence[0])), (3, 3, []))
 
     def test_entries_may_not_read_one_reader_with_different_parameters(self):
         agreement = {"close": {"reference": "tencent_free", "reference_adapter": TENCENT_MINUTES, "reference_params": {"symbol": "symbol"}},

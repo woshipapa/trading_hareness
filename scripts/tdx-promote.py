@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
 from app.datasources.catalog import bindings_for  # noqa: E402
-from app.datasources.contracts import BINDING_STATES, Binding  # noqa: E402
+from app.datasources.contracts import BINDING_STATES, UNSUPPORTED, Binding, reference_keywords  # noqa: E402
 from app.datasources.resolver import _normalise_rows  # noqa: E402
 
 SCHEMA = "tdx-promote-v2"
@@ -105,11 +105,8 @@ def run_probe(egress: str, source: str, capability: str, params: Mapping[str, An
     return {"command": command, **json.loads(done.stdout)}
 
 
-def lookup(source: str, capability: str) -> Binding:
-    found = [item for item in bindings_for(capability, states=BINDING_STATES) if item.source == source]
-    if not found:
-        sys.exit(f"no binding {source} -> {capability} in the catalog")
-    return found[0]
+def find(source: str, capability: str) -> Binding | None:
+    return next((item for item in bindings_for(capability, states=BINDING_STATES) if item.source == source), None)
 
 
 def xshg() -> tuple[Any, str]:
@@ -162,19 +159,12 @@ PROJECTIONS = {
 }
 
 
-def reference_kwargs(entry: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
-    """What the entry's reference is asked: the check's parameters, or those ``reference_params`` renames, and the fixed ones."""
-    named = entry.get("reference_params")
-    asked = dict(params) if named is None else {keyword: params[name] for keyword, name in named.items()}
-    return {**asked, **entry.get("reference_fixed", {})}
-
-
 def reference_reads(agreement: Mapping[str, Mapping[str, Any]], params: Mapping[str, Any]) -> dict[str, tuple[str, str | None, dict]]:
     """Label -> (reference source, reader, keyword arguments) for every distinct read the entries need."""
     reads: dict[str, tuple[str, str | None, dict]] = {}
     for entry in agreement.values():
         adapter = entry.get("reference_adapter")
-        wanted = (entry["reference"], adapter, reference_kwargs(entry, params))
+        wanted = (entry["reference"], adapter, reference_keywords(entry, params))
         label = adapter or entry["reference"]
         if reads.setdefault(label, wanted) != wanted:
             sys.exit(f"the agreement entries read {label} with different parameters")
@@ -304,12 +294,16 @@ def run_check(args: argparse.Namespace) -> int:
     missing = [name for name in OWNER_SETTINGS if not os.environ.get(name)]
     if args.egress == "owner" and missing:
         sys.exit("the owner egress needs these settings (names only): " + ", ".join(missing))
-    bindings = {args.source: lookup(args.source, args.capability)}
+    binding = find(args.source, args.capability)
+    if binding is None:
+        sys.exit(f"no binding {args.source} -> {args.capability} in the catalog")
+    bindings = {args.source: binding}
     spec = bindings[args.source].spec
     agreement = spec.agreement if spec else {}
     reads = reference_reads(agreement, args.params)
     for reference, _adapter, _kwargs in reads.values():
-        bindings[reference] = lookup(reference, args.capability)
+        # A reader named by its adapter needs no catalog binding; without one its rows are taken as it gives them.
+        bindings[reference] = find(reference, args.capability) or Binding(reference, args.capability, 0, UNSUPPORTED)
     probes = {args.source: run_probe(args.egress, args.source, args.capability, args.params, all_rows=bool(agreement))}
     for label, (reference, adapter, kwargs) in reads.items():
         probes[label] = run_probe(args.egress, reference, args.capability, kwargs, adapter=adapter, all_rows=True)

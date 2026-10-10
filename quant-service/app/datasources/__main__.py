@@ -42,7 +42,7 @@ from typing import Any
 
 from .catalog import bindings_for, capabilities_of, catalog_document, validate_catalog
 from .completeness import completeness_problems
-from .contracts import BINDING_STATES, Binding
+from .contracts import ADAPTER_PATTERN, BINDING_STATES
 from .resolver import _unpack_evidence
 
 #: Rows of an adapter's answer that ``probe`` prints.
@@ -94,11 +94,11 @@ def _typed(function: Callable[..., object], params: dict[str, Any]) -> dict[str,
             and parameters[name].annotation in (date, "date") else value for name, value in params.items()}
 
 
-async def _call(binding: Binding, adapter: str, params: dict[str, Any], printed: int | None) -> dict[str, Any]:
+async def _call(source: str, capability: str, adapter: str, params: dict[str, Any], printed: int | None) -> dict[str, Any]:
     """Call ``adapter`` once and describe the answer, printing ``printed`` rows (None: all of them).
 
     An adapter that raises is reported, not hidden."""
-    record: dict[str, Any] = {"source": binding.source, "capability": binding.capability, "adapter": adapter,
+    record: dict[str, Any] = {"source": source, "capability": capability, "adapter": adapter,
                               "params": params, "started_utc": datetime.now(timezone.utc).isoformat()}
     try:
         function = _function(adapter)
@@ -118,14 +118,12 @@ async def _call(binding: Binding, adapter: str, params: dict[str, Any], printed:
 def _probe(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     binding = next((item for item in bindings_for(args.capability, states=BINDING_STATES)
                     if item.source == args.source), None)
-    if binding is None:
-        parser.error(f"{args.source} -> {args.capability}: no such binding")
-    if args.adapter and not re.fullmatch(r"app/[\w/]+\.py:\w+", args.adapter):
+    if args.adapter and not re.fullmatch(ADAPTER_PATTERN, args.adapter):
         parser.error(f"--adapter must be app/<module path>.py:<function>, not {args.adapter!r}")
-    adapter = args.adapter or binding.adapter
+    adapter = args.adapter or (binding.adapter if binding else None)
     if ":" not in (adapter or ""):
-        parser.error(f"{args.source} -> {args.capability}: its adapter names no function; give one with --adapter")
-    record = asyncio.run(_call(binding, adapter, args.params, None if args.all_rows else SAMPLE_ROWS))
+        parser.error(f"{args.source} -> {args.capability}: no such binding, or its adapter names no function (--adapter names one)")
+    record = asyncio.run(_call(args.source, args.capability, adapter, args.params, None if args.all_rows else SAMPLE_ROWS))
     print(json.dumps(record, ensure_ascii=False, indent=2, default=_jsonable))
     return 1 if record["error"] else 0
 

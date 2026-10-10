@@ -68,6 +68,9 @@ class ProbeTests(unittest.TestCase):
                 cli.main(["probe", "tencent_free", "quote.watch_snapshot"])
         self.assertEqual((code, calls, record["source"], record["adapter"]), (0, [{"symbols": ["000001.SZ"]}], "tencent_free", ADAPTER))
         self.assertEqual(refused.exception.code, 2, "without it the module-only adapter names no function")
+        with mock.patch.object(tdx_legacy_misc, "fetch_index_overview", answer), mock.patch.object(catalog, "BINDINGS", reference):
+            code, record = probe("tencent_free", "bars.index_daily", "--adapter", ADAPTER)
+        self.assertEqual((code, record["capability"]), (0, "bars.index_daily"), "a reader needs no binding of its source")
 
     def test_an_explicit_adapter_must_be_a_function_of_an_app_module(self):
         for adapter in ("os:system", "app/datasources/__main__.py", "../app/x.py:f"):
