@@ -26,6 +26,13 @@ class MacFieldRegistryTests(unittest.TestCase):
         self.assertIsNone(MAC_FIELDS[0x5D].canonical_key)
         self.assertIsNone(MAC_FIELDS[0x5E].canonical_key)
 
+    def test_index_bits_are_named_as_gotdx_names_them(self):
+        # gotdx mac_board_members_dynamic.go:113,116 -- 0x37 index_metric (float32), 0x3a non_index_flag (uint32)
+        self.assertEqual((MAC_FIELDS[0x37].name, MAC_FIELDS[0x37].format), ("index_metric", "float32"))
+        self.assertEqual((MAC_FIELDS[0x3A].name, MAC_FIELDS[0x3A].format), ("non_index_flag", "uint32"))
+        values, _ = decode_dynamic_row(struct.pack("<I", 3), bitmap_for_bits([0x3A]))
+        self.assertEqual(values, {"non_index_flag": 3})
+
     def test_dynamic_row_uses_bit_order_and_signed_formats(self):
         bitmap = bitmap_for_bits([0, 43, 5, 140])
         payload = struct.pack("<fIi i", 12.5, 17, 1, -4)

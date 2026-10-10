@@ -326,7 +326,7 @@ _BASIC = {
     ),
     48: ("pe_ttm", "float32", "ratio", "pe_ttm", "medium", NO_REFERENCE, ()),
     49: ("pe_static", "float32", "ratio", "pe_static", "medium", NO_REFERENCE, ()),
-    55: ("index_metric_buy_count", "float32", "", "index_metric_buy_count", "low", NO_REFERENCE, ()),
+    55: ("index_metric", "float32", "", "index_metric", "low", NO_REFERENCE, ()),
     56: (
         "main_net_amount",
         "float32",
@@ -345,7 +345,7 @@ _BASIC = {
         NO_REFERENCE,
         (),
     ),
-    58: ("index_metric_sell_count", "float32", "", "index_metric_sell_count", "low", NO_REFERENCE, ()),
+    58: ("non_index_flag", "uint32", "flag", "non_index_flag", "low", NO_REFERENCE, ()),
     60: (
         "ytd_pct",
         "float32",

@@ -6,7 +6,7 @@
 
 ## Implementation
 
-`quant-service/app/datasources/sources/tdx_mac.py` is an isolated stdlib client with pure request builders/parsers and a blocking failover client. It is intentionally not added to datasource bindings or the catalog. `scripts/verify-tdx-mac.py` is a read-only probe for board data and `000001.SZ`/`600519.SH` quotes and K-lines.
+`quant-service/app/datasources/sources/tdx_mac.py` is an isolated stdlib client with pure request builders/parsers and a blocking failover client. Every catalog binding of the source is UNSUPPORTED, so the resolver cannot route to it: the module is research evidence. `scripts/verify-tdx-mac.py` is a read-only probe for board data and `000001.SZ`/`600519.SH` quotes and K-lines.
 
 ## Machine observation
 
@@ -16,4 +16,4 @@ Batch quotes returned one row for each `000001.SZ` and `600519.SH`. For `000001.
 
 The unreliable single-symbol `0x122d` method was removed from the operational probe: its apparent price/close equals pre-close (`11.78`) instead of the real last (`11.59`). Batch `0x122b` is the supported quote path. MAC daily bars returned 5 requested rows for both symbols. Their last five closes matched legacy host `117.34.114.13:7709` for both `000001.SZ` (`11.30, 11.35, 11.57, 11.78, 11.59`) and `600519.SH` (`1243.88, 1235.58, 1258.62, 1255.79, 1263.00`).
 
-Remaining MAC probes on the same host reported auction 58 rows, capital-flow JSON 14 rows, tick charts 1200 ticks, K-line offset returned a one-byte empty response (0 parsed entries), market monitor 500 rows, and symbol-belong-board JSON 14 rows. Both extended hosts `116.205.135.205:7727` and `121.37.232.167:7727` failed the MAC handshake. Go was unavailable, so gotdx row-for-row comparison was skipped.
+Remaining MAC probes on the same host reported auction 58 rows, tick charts 1200 ticks, K-line offset returned a one-byte empty response (0 parsed entries), market monitor 500 rows, and symbol-belong-board JSON 14 rows. The "capital-flow JSON 14 rows" first listed here were those belong-board rows: capital flow is a separate query (`0x1218` head=2, `Stock_ZJLX`) and its answer is described in `docs/archive/tdx-q-flow.md`. Both extended hosts `116.205.135.205:7727` and `121.37.232.167:7727` failed the MAC handshake. Go was unavailable, so gotdx row-for-row comparison was skipped.

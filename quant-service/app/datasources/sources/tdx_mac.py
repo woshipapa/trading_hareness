@@ -13,6 +13,7 @@ import os
 import socket
 import struct
 import zlib
+from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 
 MAC_HOSTS = (
@@ -478,8 +479,10 @@ async def fetch_membership(*, sector_key: str) -> list[dict[str, Any]]:
         if board_type is None:
             raise TdxMacError(f"unknown board key: {sector_key}")
 
+        members = client.board_members(sector_key)
+        known_at = datetime.now(timezone.utc)
         rows = []
-        for row in client.board_members(sector_key):
+        for row in members:
             market = row["market"]
             market_name = {0: "SZ", 1: "SH", 2: "BJ"}.get(market)
             if market_name is None:
@@ -488,7 +491,8 @@ async def fetch_membership(*, sector_key: str) -> list[dict[str, Any]]:
             rows.append({
                 "taxonomy_key": f"tdx_mac_type_{board_type}",
                 "sector_key": sector_key,
-                "symbol": symbol
+                "symbol": symbol,
+                "known_at": known_at,
             })
         return rows
     rows, _ = await call(collect)

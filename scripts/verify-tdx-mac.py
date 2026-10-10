@@ -26,11 +26,9 @@ def main() -> int:
                 market, code = tdx_mac.market_code(symbol)
                 results[f"{symbol}.batch_quotes"] = len(client.batch_quotes([(market, code)]))
                 results[f"{symbol}.bars"] = len(client.bars(market, code, count=5))
-            for opcode, name in ((tdx_mac.OP_AUCTION, "auction"), (tdx_mac.OP_CAPITAL_FLOW, "capital_flow"), (tdx_mac.OP_TICK_CHARTS, "tick_charts"), (tdx_mac.OP_MARKET_MONITOR, "market_monitor"), (tdx_mac.OP_BELONG_BOARD, "belong_board")):
+            for opcode, name in ((tdx_mac.OP_AUCTION, "auction"), (tdx_mac.OP_TICK_CHARTS, "tick_charts"), (tdx_mac.OP_MARKET_MONITOR, "market_monitor"), (tdx_mac.OP_BELONG_BOARD, "belong_board")):
                 try:
-                    results[name] = tdx_mac.parse_auxiliary_count(
-                        opcode, client.auxiliary(opcode, 0, "000001", head=2 if name == "capital_flow" else 1)
-                    )
+                    results[name] = tdx_mac.parse_auxiliary_count(opcode, client.auxiliary(opcode, 0, "000001"))
                 except Exception as exc:
                     results[name] = f"error:{type(exc).__name__}"
             return results

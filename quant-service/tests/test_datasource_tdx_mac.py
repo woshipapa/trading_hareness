@@ -1,8 +1,86 @@
+import asyncio
+import contextlib
+import importlib.util
+import io
 import struct
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest import mock
 
 from app.datasources.sources import tdx_mac
+from app.datasources.sources.tdx_mac_fields import active_fields
+
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+
+
+def board_item(code: str, name: str) -> bytes:
+    item = bytearray(160)
+    struct.pack_into("<H", item, 0, 1)
+    item[2:8] = code.encode()
+    item[24:24 + len(name)] = name.encode()
+    return bytes(item)
+
+
+def board_page(*items: bytes) -> bytes:
+    return struct.pack("<HH", 2 * len(items), len(items)) + b"".join(items)
+
+
+def member_item(market: int, code: str, name: str) -> bytes:
+    item = bytearray(68)
+    struct.pack_into("<H", item, 0, market)
+    item[2:8] = code.encode()
+    item[24:24 + len(name)] = name.encode()
+    return bytes(item)
+
+
+def members_page(*items: bytes) -> bytes:
+    return bytes(20) + struct.pack("<IH", len(items), len(items)) + b"".join(items)
+
+
+def dynamic_body(bitmap: bytes, quotes) -> bytes:
+    """A dynamic 0x122b/0x122c answer; ``quotes`` are (market, code, name, {field name: value}) and every set bit
+    carries a four-byte value, 0 unless given."""
+    fields = active_fields(bitmap)
+    body = bitmap + struct.pack("<IH", len(quotes), len(quotes))
+    for market, code, name, values in quotes:
+        body += struct.pack("<H22s44s", market, code.encode(), name.encode())
+        for field in fields:
+            body += struct.pack({"float32": "<f", "int32": "<i", "uint32": "<I"}[field.format], values.get(field.name, 0))
+    return body
+
+
+def requested_stocks(request: bytes) -> list[tuple[int, str]]:
+    """The (market, code) pairs of a 0x122b request, which carries a 20-byte bitmap and a count first."""
+    count = struct.unpack_from("<H", request, 32)[0]
+    return [(struct.unpack_from("<H", request, 34 + 24 * index)[0],
+             request[36 + 24 * index:58 + 24 * index].rstrip(b"\0").decode()) for index in range(count)]
+
+
+def bars_body(bars) -> bytes:
+    """A 0x122e answer: the 33-byte header (row count at offset 27) and 36-byte rows of
+    (yyyymmdd, seconds, open, high, low, close, amount, volume, float shares)."""
+    header = bytearray(33)
+    struct.pack_into("<H", header, 27, len(bars))
+    return bytes(header) + b"".join(struct.pack("<IIfffffff", *bar) for bar in bars)
+
+
+class FakeMacClient(tdx_mac.TdxMacClient):
+    """The real client logic over canned answers: each request is recorded and answered by its opcode."""
+
+    def __init__(self, answers):
+        super().__init__("fake-host")
+        self.answers, self.requests = answers, []
+
+    def _exchange(self, request: bytes) -> bytes:
+        self.requests.append(request)
+        return self.answers[struct.unpack_from("<H", request, 10)[0]](request)
+
+
+def patched_call(client, host="mac-host:7709"):
+    async def call(operation, **kwargs):
+        return operation(client), host
+    return mock.patch.object(tdx_mac, "call", call)
 
 
 class MacAdapterSignatureTests(unittest.TestCase):
@@ -101,30 +179,24 @@ class MacBoardCatalogTests(unittest.TestCase):
 
 
 class MacMembershipTests(unittest.TestCase):
-    """Test sector.membership returns rows with all 4 canonical fields."""
+    """sector.membership rows carry the four canonical fields, known_at being the UTC collection time."""
 
-    def test_membership_has_all_canonical_fields(self):
-        """Membership rows must have: taxonomy_key, sector_key, symbol, known_at."""
-        member = bytearray(68)
-        member[2:8] = b"600519"
-        member[24:31] = b"Moutai\0"
-        members = b"\0" * 24 + struct.pack("<H", 1) + bytes(member)
-
-        rows = tdx_mac.parse_board_members(members)
-        self.assertEqual(len(rows), 1)
-        row = rows[0]
-
-        # Basic check that symbol is present (taxonomy_key and known_at added by fetch_membership)
-        self.assertIn("symbol", row)
-        self.assertEqual(row["symbol"], "600519")
-
-    def test_membership_known_at_is_utc_aware(self):
-        """known_at field must be UTC-aware datetime."""
-        # This will be tested in the fetch_membership function
-        # which adds known_at = datetime.now(timezone.utc)
-        now_utc = datetime.now(timezone.utc)
-        self.assertIsNotNone(now_utc.tzinfo)
-        self.assertEqual(now_utc.tzinfo, timezone.utc)
+    def test_adapter_rows_carry_taxonomy_sector_symbol_and_a_utc_known_at(self):
+        client = FakeMacClient({
+            tdx_mac.OP_BOARD: lambda request: board_page(board_item("881376", "Coal")),
+            tdx_mac.OP_MEMBERS: lambda request: members_page(
+                member_item(1, "600519", "Moutai"), member_item(0, "000001", "PingAn")),
+        })
+        before = datetime.now(timezone.utc)
+        with patched_call(client):
+            rows = asyncio.run(tdx_mac.fetch_membership(sector_key="881376"))
+        after = datetime.now(timezone.utc)
+        self.assertEqual([row["symbol"] for row in rows], ["600519.SH", "000001.SZ"])
+        for row in rows:
+            self.assertEqual(set(row), {"taxonomy_key", "sector_key", "symbol", "known_at"})
+            self.assertEqual((row["taxonomy_key"], row["sector_key"]), ("tdx_mac_type_0", "881376"))
+            self.assertEqual(row["known_at"].utcoffset(), timedelta(0))
+            self.assertTrue(before <= row["known_at"] <= after)
 
 
 class MacProtocolTests(unittest.TestCase):
@@ -191,6 +263,46 @@ class MacProtocolTests(unittest.TestCase):
         self.assertEqual(
             len(tdx_mac.parse_bars(bars)), 0
         )  # first MAC row is the pre-close sentinel
+
+
+def load_script(name: str):
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), SCRIPTS / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class ProbeScriptTests(unittest.TestCase):
+    """The probe scripts are code too: a round deleted a constant that one of them still used."""
+
+    def test_verify_tdx_mac_runs_every_probe_it_lists_against_the_client(self):
+        script = load_script("verify-tdx-mac")
+        client = FakeMacClient({
+            tdx_mac.OP_BOARD: lambda request: board_page(board_item("881376", "Coal")),
+            tdx_mac.OP_MEMBERS: lambda request: (
+                dynamic_body(request[35:55], [(1, "600519", "Moutai", {})]) if request[-1] & 1
+                else members_page(member_item(1, "600519", "Moutai"))),
+            tdx_mac.OP_BATCH_QUOTES: lambda request: dynamic_body(
+                request[12:32], [(market, code, "n", {}) for market, code in requested_stocks(request)]),
+            tdx_mac.OP_BARS: lambda request: bars_body([(20261009, 0, 1, 1, 1, 1, 1, 1, 1)] * 6),
+            tdx_mac.OP_AUCTION: lambda request: bytes(24) + struct.pack("<I", 58) + bytes(8),
+            tdx_mac.OP_TICK_CHARTS: lambda request: bytes(69) + struct.pack("<H", 5) + bytes(2),
+            tdx_mac.OP_MARKET_MONITOR: lambda request: struct.pack("<H", 500),
+            tdx_mac.OP_BELONG_BOARD: lambda request: bytes(27) + b'[["a"], ["b"]]',
+        })
+
+        def call_sync(operation, **kwargs):
+            return operation(client), "mac-host:7709"
+
+        out = io.StringIO()
+        with mock.patch.object(tdx_mac, "call_sync", call_sync), contextlib.redirect_stdout(out):
+            status = script.main()
+        report = out.getvalue()
+        self.assertEqual(status, 0, report)
+        for name in ("auction", "tick_charts", "market_monitor", "belong_board"):
+            self.assertRegex(report, rf"{name}: \d+ rows")
+        self.assertNotIn("error:", report)
+        self.assertNotIn("capital_flow", report)
 
 
 if __name__ == "__main__":
