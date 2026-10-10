@@ -1,9 +1,12 @@
 import hashlib
+import io
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).with_name("generate-tdx-bj-codes.py")
 # The shape of the server file: a count row, then pipe rows of market, old code, new code, name, date (GBK).
@@ -30,6 +33,24 @@ class GenerateTdxBjCodesTests(unittest.TestCase):
         self.assertIn("# source=addedcode_bj.cfg\n", text)
         self.assertIn(f"# md5={hashlib.md5(ADDEDCODE).hexdigest()}\n", text)
         self.assertRegex(text, r"# generated_at_utc=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00\n")
+
+    def test_without_an_input_it_downloads_zhb_zip_and_names_the_host_that_answered(self):
+        namespace = {"__file__": str(SCRIPT)}
+        exec(SCRIPT.read_text(encoding="utf-8"), namespace)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("addedcode_bj.cfg", ADDEDCODE)
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / "tdx_bj_codes.py"
+            with mock.patch.object(namespace["tdx_files"], "download", return_value=archive.getvalue()) as download, \
+                    mock.patch.object(namespace["tdx_protocol"], "call_sync",
+                                      lambda operation: (operation("client"), "h:7709/login_one")), \
+                    mock.patch.object(sys, "argv", ["generate-tdx-bj-codes.py", "--output", str(output)]):
+                self.assertEqual(namespace["main"](), 0)
+            text = output.read_text(encoding="utf-8")
+        download.assert_called_once_with("client", "zhb.zip")
+        self.assertIn("# source=zhb.zip member addedcode_bj.cfg from h:7709/login_one\n", text)
+        self.assertIn("'832000': '920000'", text)
 
     def test_an_input_without_a_pair_writes_nothing(self):
         with tempfile.TemporaryDirectory() as root:
