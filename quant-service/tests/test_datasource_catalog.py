@@ -151,7 +151,10 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(all(item.spec is not None and not item.decision_eligible for item in bindings))
         auction = CAPABILITIES["microstructure.auction_curve"]
         self.assertEqual(auction.schema.names, ("time", "price", "matched_raw", "unmatched_raw", "unmatched_side"))
-        self.assertFalse(any(item.source == "tdx_public" and item.capability == "bars.minute" for item in BINDINGS))
+        legacy_minute = next(item for item in BINDINGS
+                             if item.source == "tdx_public" and item.capability == "bars.minute")
+        self.assertEqual(legacy_minute.status, UNSUPPORTED)
+        self.assertFalse(legacy_minute.decision_eligible)
 
 
 class NonSectorGroupTests(unittest.TestCase):
