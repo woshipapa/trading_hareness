@@ -56,11 +56,16 @@ DEFAULT_BITMAP = bytes.fromhex(
 )
 #: The bits fetch_limit_prices asks for: 0x13 (server_update_date) and the limit prices 0x20 and 0x21.
 LIMITS_BITMAP = bytes.fromhex("00 00 08 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
+#: The bits fetch_iopv asks for: 0x13 and 0x14 (server_update_date and server_update_time) and the IOPV pair 0x24
+#: (pre_iopv) and 0x27 (iopv).
+IOPV_BITMAP = bytes.fromhex("00 00 18 00 90 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
 #: The most symbols one 0x122b request carries.
 MAX_BATCH = 80
 #: The MAC fields the quote.watch_snapshot binding maps (close -> price, vol -> volume, ...); fetch_watch_snapshot
 #: rejects an answer that lacks one of them, or the date and time its exchange_time is built from.
 QUOTE_FIELDS = ("close", "vol", "amount", "vol_ratio", "turnover")
+#: The MAC fields the fund.iopv binding maps; fetch_iopv rejects an answer that lacks one of them.
+IOPV_FIELDS = ("pre_iopv", "iopv")
 
 
 class TdxMacError(RuntimeError):
@@ -488,9 +493,9 @@ def _require(row: dict[str, Any], *names: str) -> None:
         raise TdxMacError(f"MAC answer for {row['symbol']} lacks {', '.join(absent)}")
 
 
-def _quote_row(row: dict[str, Any]) -> dict[str, Any]:
-    """A decoded 0x122b row with its full symbol and ``exchange_time`` built from bits 0x13 and 0x14."""
-    _require(row, "server_update_date", "server_update_time", *QUOTE_FIELDS)
+def _quote_row(row: dict[str, Any], fields: Sequence[str]) -> dict[str, Any]:
+    """A decoded 0x122b row with its full symbol and ``exchange_time`` built from bits 0x13 and 0x14; it must hold ``fields``."""
+    _require(row, "server_update_date", "server_update_time", *fields)
     update_time = row["server_update_time"]
     consumed = ("symbol", "server_update_date", "server_update_time")
     return {
@@ -523,13 +528,21 @@ def _minute_bar_row(symbol: str, row: dict[str, Any]) -> dict[str, Any]:
 
 async def fetch_watch_snapshot(*, symbols: Sequence[str]) -> CapabilityEvidence:
     stocks = tdx_protocol.requested_stocks(symbols)
-    rows, host = await call(lambda client: [_quote_row(row) for row in client.batch_quotes(stocks)])
+    rows, host = await call(lambda client: [_quote_row(row, QUOTE_FIELDS) for row in client.batch_quotes(stocks)])
     return tdx_protocol.batch_evidence(rows, symbols, host)
 
 
 async def fetch_limit_prices(*, symbols: Sequence[str]) -> CapabilityEvidence:
     stocks = tdx_protocol.requested_stocks(symbols)
     rows, host = await call(lambda client: [_limit_row(row) for row in client.batch_quotes(stocks, LIMITS_BITMAP)])
+    return tdx_protocol.batch_evidence(rows, symbols, host)
+
+
+async def fetch_iopv(*, symbols: Sequence[str]) -> CapabilityEvidence:
+    """The intraday reference net value (IOPV) of ETFs: pre_iopv and iopv in yuan, with the quote's exchange_time."""
+    stocks = tdx_protocol.requested_stocks(symbols)
+    rows, host = await call(
+        lambda client: [_quote_row(row, IOPV_FIELDS) for row in client.batch_quotes(stocks, IOPV_BITMAP)])
     return tdx_protocol.batch_evidence(rows, symbols, host)
 
 
@@ -584,6 +597,8 @@ async def fetch_minute_bars(*, symbol: str, count: int) -> CapabilityEvidence:
 __all__ = [
     "BAR_PERIODS",
     "DEFAULT_BITMAP",
+    "IOPV_BITMAP",
+    "IOPV_FIELDS",
     "LIMITS_BITMAP",
     "MAC_HOSTS",
     "MAX_BATCH",
@@ -607,6 +622,7 @@ __all__ = [
     "parse_board_members",
     "fetch_watch_snapshot",
     "fetch_limit_prices",
+    "fetch_iopv",
     "fetch_board_catalog",
     "fetch_membership",
     "fetch_daily_bars",

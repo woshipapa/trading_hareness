@@ -70,16 +70,17 @@ UNREGISTERED: dict[str, str] = {
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); "
                                "tdx_instruments.fetch_security_list and fetch_instruments (reference.security_list, "
                                "reference.instruments) read through it and are the bound readers",
-    "tdx_mac.call": "transport with host failover; the six MAC fetch_* adapters (fetch_watch_snapshot, fetch_limit_prices, "
-                    "fetch_board_catalog, fetch_membership, fetch_daily_bars, fetch_minute_bars) are the bound readers",
+    "tdx_mac.call": "transport with host failover; the seven MAC fetch_* adapters (fetch_watch_snapshot, fetch_limit_prices, "
+                    "fetch_iopv, fetch_board_catalog, fetch_membership, fetch_daily_bars, fetch_minute_bars) are the bound "
+                    "readers",
     "tdx_mac.call_sync": "the blocking half of tdx_mac.call; the MAC fetch_* adapters are the bound readers",
     "tdx_mac.TdxMacClient.handshake": "the two setup packets sent when a MAC connection opens; not a reader of its own",
     "tdx_mac.TdxMacClient.board_list": "board list command 0x1231, read by fetch_board_catalog (sector.board_catalog)",
     "tdx_mac.TdxMacClient.board_members": "board members command 0x122c, read by fetch_membership (sector.membership)",
     "tdx_mac.TdxMacClient.board_member_quotes": "dynamic member quotes of command 0x122c; no capability binds them, "
                                                 "only scripts/verify-tdx-mac.py reads them",
-    "tdx_mac.TdxMacClient.batch_quotes": "batch quote command 0x122b, read by fetch_watch_snapshot (quote.watch_snapshot) "
-                                         "and fetch_limit_prices (limits.prices)",
+    "tdx_mac.TdxMacClient.batch_quotes": "batch quote command 0x122b, read by fetch_watch_snapshot (quote.watch_snapshot), "
+                                         "fetch_limit_prices (limits.prices) and fetch_iopv (fund.iopv)",
     "tdx_mac.TdxMacClient.bars": "bars command 0x122e, read by fetch_daily_bars (bars.daily) and fetch_minute_bars (bars.minute)",
     "tdx_mac.TdxMacClient.auxiliary": "research commands 0x1218, 0x123d, 0x123e and 0x1237; no capability binds them, "
                                       "only scripts/verify-tdx-mac.py reads them",
