@@ -1,6 +1,6 @@
 # 数据源层（app/datasources）
 
-更新：2026-09-20。所有“实测”均指从 owner peer（47.110.79.189）出口、收盘后的只读探测与不落库干跑；当前工作树新增的策略能力 facade 已完成本地回归，远端重启回读待 peer 运维会话。
+更新：2026-10-11（第 3.1、6.1–6.2、7.1 节与第 10 节为通达信增补，代码事实取自 `6f691ad0`）；其余内容 2026-09-20。所有“实测”均指从 owner peer（47.110.79.189）出口、收盘后的只读探测与不落库干跑；当前工作树新增的策略能力 facade 已完成本地回归，远端重启回读待 peer 运维会话。**例外：第 3.1、7.1、10 节的通达信解码证据来自 Mac 出口（家宽），不是 owner 出口**，每条都指向 `scripts/data/` 或 `docs/archive/` 下的证据文件。
 
 ## 1. 目标与边界
 
@@ -66,6 +66,71 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `fundamentals.margin` | eastmoney_datacenter(D) | 市场汇总默认开；个股明细默认关（约 4000 行/日） |
 | `fund.nav` | fuyao(D) → 天天基金(D) | QDII 晚 1-2 天，按净值日生效、按采集时刻可得 |
 | `derived.market_sentiment` | 自算（盘中 5 分钟 + 收盘） | 见第 5 节 |
+
+### 3.1 通达信（TDX）绑定
+
+通达信相关的来源有 5 个，`catalog.py` 里共 40 个绑定（基线 `6f691ad0`；现值见本节末的三种看法）。
+
+| 来源 | 上游 | 说明 |
+|---|---|---|
+| `tdx_public` | 公开行情主站 :7709，legacy 命令；`LOGIN_ONE` 握手，按主机保留 `legacy_3` 回退 | 行情、K 线、证券列表、服务器文件（`zhb.zip` 等）、F10、分笔 |
+| `tdx_mac` | MAC 0x12xx 主机 :7709 | 批量行情、涨跌停价、IOPV、板块目录与成分、K 线 |
+| `tdx_ext` | 扩展行情 :7727 | 期货、港股、美股等；A 股决策路径不得使用 |
+| `tdx_local` | owner 工作站的通达信客户端（vipdoc），CLI 导出为离线文件 | 日线、分钟线；依赖手工或定时的盘后下载 |
+| `derived_tdx_limits` | 自算：`tdx_public` 的 `quote.all_a_snapshot` + `tdx_mac` 的 `limits.prices` | 涨停、炸板、跌停池，只有快照时刻的成员关系 |
+
+**状态怎么读。** 5 个旧绑定是 `declared`：`tdx_public` 的 `ticks.session`、`auction.history_0925`、`fundamentals.capital_changes`，`tdx_local` 的 `bars.daily`、`bars.minute`。通达信集成新增的其余 35 个绑定**一律 `unsupported`**；40 个绑定的 `decision_eligible` 都是 `False`。新绑定的 `unsupported` 是证据门（还没有 owner 出口的探测与对账记录），不是上游拒绝；解析器不走这个状态，研究试读（第 6.2 节）可以读。
+
+状态只经 `scripts/tdx-promote.py` 在已记录的证据上移动：`check` 把探测写成 `scripts/data/tdx_promote_*.json`，`apply` 把 `catalog.py` 里该绑定的状态记号改一格（`UNSUPPORTED` → `DECLARED` → `LIVE_VERIFIED`）。升级就是 `catalog.py` 里一个记号的改动，单独提交；`decision_eligible` 不在同一提交里动。门条件见第 7.1 节。
+
+下表按能力排序，优先级数字小者先试（只对可解析状态有意义）；“返回”和“主要限制”取自 catalog 的 `notes` 与 BindingSpec，价格、单位的证据见第 10 节。
+
+| 能力 | 来源 | 优先级 | 状态 | 返回 | 主要限制 |
+|---|---|---|---|---|---|
+| `auction.history_0925` | `tdx_public` | 20 | `declared` | 历史每日 09:25 竞价成交与 09:15–09:25 虚拟撮合曲线 | 旧绑定；近期任意交易日 |
+| `bars.daily` | `tdx_public` | 65 | `unsupported` | legacy 0x052d category 9 日线；volume 为手，amount 为元；每页 800 根 | `LOGIN_ONE`；价格 /1000；可得时间 = 响应接收时间 |
+| `bars.daily` | `tdx_mac` | 70 | `unsupported` | MAC 0x122e 日线（period 4）；`unit_factors` volume ×0.01 | 日线 volume 是 float32 的股，约 7 位有效数字 |
+| `bars.daily` | `tdx_local` | 35 | `declared` | 客户端 `.day` 日线，下载过的全部历史 | owner 工作站 CLI 导出的离线文件，不直接写 canonical |
+| `bars.index_daily` | `tdx_public` | 65 | `unsupported` | 指数、板块日线（0x052d category 9 的指数布局）；canonical 只映射 open、close、amount，high、low、volume_raw、up_count、down_count 留作源字段 | count 为 1..800；`880005` 等非普通指数不进；volume_raw 单位未知 |
+| `bars.minute` | `tdx_public` | 65 | `unsupported` | legacy 0x052d category 8 一分钟线；volume 为股，amount 为元；每页 800 根 | 价格 /1000；可得时间 = 响应接收时间 |
+| `bars.minute` | `tdx_mac` | 70 | `unsupported` | MAC 0x122e 一分钟线（period 8） | 只给日期加当日秒数，适配器组成 Asia/Shanghai 的 bar_time；可得时间 = 响应接收时间；声明了对腾讯分钟线 close、volume 的容差 |
+| `bars.minute` | `tdx_local` | 35 | `declared` | 客户端 `.lc1/.lc5` 分钟线，离线导入 `market_bars_minute` | 客户端保留多久就有多久 |
+| `breadth.index_daily` | `tdx_public` | 65 | `unsupported` | 指数成分股的上涨、下跌家数（按日） | 与 `bars.index_daily` 共用一次请求；成分股口径，不得与全 A 快照宽度混用 |
+| `context.bars_daily` | `tdx_ext` | 90 | `unsupported` | 扩展市场日线，含 open_interest、settlement | A 股决策路径不得使用；volume_raw 的单位随市场而异 |
+| `context.instruments` | `tdx_ext` | 90 | `unsupported` | 扩展市场品种列表（market_id、code、name、category） | 同上 |
+| `context.quote` | `tdx_ext` | 90 | `unsupported` | 扩展市场快照（price、pre_close、open、high、low、volume、amount、open_interest） | 同上；报价不带服务器时间，生效时间 = 采集时刻 |
+| `events.ipo_calendar` | `tdx_public` | 80 | `unsupported` | `xgsg.cfg`、`othersg.cfg` 的申购行（symbol、apply_date、issue_price） | 只有申购日，不推断上市日；`zhb.zip` 成员 |
+| `fund.iopv` | `tdx_mac` | 70 | `unsupported` | MAC 0x122b 位 0x27 的 IOPV（float32，元）和同一行的行情更新时间；批 80 | 不是 `fund.nav` 的披露净值；只收 ETF、LOF、基金类代码；位 0x24 不读 |
+| `fundamentals.capital_changes` | `tdx_public` | 20 | `declared` | 除权除息与股本变迁 | 旧绑定；上市以来全部；与 pytdx 一致 |
+| `fundamentals.company_profile` | `tdx_public` | 80 | `unsupported` | F10 公司资料的 GBK 文本（category、filename、content） | 可得时间 = 采集时刻 |
+| `fundamentals.daily_basic` | `tdx_public` | 80 | `unsupported` | `tdxstat.cfg` 与 `tdxstat2.cfg` 按 (market, code, date) 连接的已确认列 | 20261009 快照；行日期不是采集日期；没有 canonical 映射的列只留在解析器的 raw 字段 |
+| `fundamentals.financial_statements` | `tdx_public` | 80 | `unsupported` | F10 0x0010 财务摘要，仅最新一期 | 不带报告期（`report_period` 为 None），须与 `tipinfo` 的第 2、4 列关联才可用；绝不用 `updated_date` |
+| `limits.limit_up_pool`、`limits.broken_pool`、`limits.limit_down_pool` | `derived_tdx_limits` | 90 | `unsupported` | 0x054b 快照与 MAC 0x122b 涨跌停价按 0.01 元整数分比较自算，三个池各一个绑定 | 仅当前会话快照；无首封、末封时间、原因、连板数、封单额；炸板池没有 open_times；无涨跌停价的证券不入池；永不替代供应商池作决策 |
+| `limits.prices` | `tdx_mac` | 70 | `unsupported` | MAC 0x122b 位 0x20/0x21 的涨跌停价（元），交易日取位 0x13；批 80 | 无价格限制的证券两个限价都回 0.0；主板 ST 自 2026-07-06 起为 10 %；声明了对腾讯的容差 |
+| `microstructure.auction_curve` | `tdx_public` | 90 | `unsupported` | 0x056a 集合竞价曲线 | 到 09:24:57 截止，没有 09:25 行；matched_raw、unmatched_raw 的单位未确认 |
+| `microstructure.minute_series` | `tdx_public` | 90 | `unsupported` | 0x0fb4 指定日期的历史分时，每交易分钟一行；价格 /100，量为手 | 只收个股；第二个变长字段含义未知；覆盖率核对前不进决策 |
+| `microstructure.top_board` | `tdx_public` | 90 | `unsupported` | 0x053f 排名榜 | 永不替代涨停池；覆盖率核对前不进决策 |
+| `microstructure.unusual` | `tdx_public` | 90 | `unsupported` | 0x0563 异动事件 | 覆盖率核对前不进决策；`limits.anomaly_tape` 可在核对后作第二来源 |
+| `microstructure.volume_profile` | `tdx_public` | 90 | `unsupported` | 0x051a 分价成交量（价格 /100，量为手，含 buy_lots、sell_lots） | 只收个股；覆盖率核对前不进决策 |
+| `quote.all_a_snapshot` | `tdx_public` | 80 | `unsupported` | 0x054b 全 A L1 排序列表：price、pct_change、volume、turnover；每页 80 只 | volume 是手，canonical 股 ×100；price≤0 的行已滤掉；coverage 为 None（证券列表接入前分母未知）；ST 要用证券列表，不能用 0x054b 的名称 |
+| `quote.index_overview` | `tdx_public` | 80 | `unsupported` | 0x051d 指数概况：OHLC（点数）、amount（元）、volume_raw、up_count、down_count | 涨跌家数是指数成分口径，与 0x054b 排序的宽度口径不同；volume_raw 单位未测 |
+| `quote.order_book` | `tdx_public` | 80 | `unsupported` | 0x053e 五档：bid1..5、ask1..5（元），bid_vol、ask_vol（手）；批 80 | 只收主板、创业板、科创板、北交所个股，价格固定 /100；指数、板块、ETF、基金、可转债在联网前以 ValueError 拒绝；旧北交所代码按 920xxx 请求，行带 `source_symbol`；盘中延迟与新鲜度未测 |
+| `quote.valuation` | `tdx_public` | 80 | `unsupported` | `tdxstat.cfg` 的已确认列；canonical 只映射 `pe_ttm`（第 9 列） | 20261009 快照；行日期不是采集日期 |
+| `quote.watch_snapshot` | `tdx_mac` | 70 | `unsupported` | MAC 0x122b 批量行情：price、volume、amount、volume_ratio、turnover_rate、exchange_time；批 80 | 位 0x05 是手，canonical 股 ×100；回包按位置核对，代码不符的行丢弃并记 `code_mismatch`；声明了对腾讯 price、volume、amount 的容差 |
+| `reference.instruments` | `tdx_public` | 19 | `unsupported` | 从 `reference.security_list` 派生的股票类基础信息（symbol、name、list_date、is_st） | TDX 不给上市日期，`list_date` 为 None |
+| `reference.security_list` | `tdx_public` | 20 | `unsupported` | TDX 证券列表（symbol、market、code、name、instrument_type、decimal_point、pre_close、is_st、list_source、source_host） | `LOGIN_ONE`，一台确定的主机；深沪分页，北交所只取计数并用 `zhb.zip`；decimal_point 要逐只取 |
+| `reference.trade_calendar` | `tdx_public` | 80 | `unsupported` | `needini.dat` 节假日加 `hqrule.dat` 规则 | 只有休市日，不编造开市日 |
+| `sector.board_catalog` | `tdx_mac` | 70 | `unsupported` | MAC 板块目录（board_code、name、board_type），类型 0、1、3、4、5 | 类型 2 无板块、类型 6 与其余重复，不读 |
+| `sector.index_quote` | `tdx_public` | 80 | `unsupported` | 0x053e 板块码（880xxx、881xxx）的 last_price、pre_close；pct_change 由适配器算出 | 价格固定 /100；volume_raw、amount_raw 单位无证据，保持 raw；买卖盘字段不是盘口，不读；只收板块码 |
+| `sector.membership` | `tdx_mac` | 70 | `unsupported` | MAC 板块成分，`known_at` = 采集时刻（UTC） | board_type 取自 `sector.board_catalog` 的同一行；未知类型在联网前报错 |
+| `sector.membership` | `tdx_public` | 80 | `unsupported` | `block_gn.dat` → `tdxzs3` 类型 4（概念）、`block_fg.dat` → 类型 5（风格、事件）的成分 | 不含 `block_zs`（指数成分表）和 `spblock`；只留 A 股权益并计数被拒的成员；不声称行业或地域；快照，`known_at` = 采集时刻 |
+| `ticks.session` | `tdx_public` | 20 | `declared` | 历史分笔，带主动买卖方向 | 旧绑定；2000 笔/请求；方向与腾讯逐分钟 100 % 一致 |
+
+看现值（上表是基线快照，状态、优先级、说明以现值为准）：
+
+- `GET /api/v1/datasources/catalog`（可按 `source`、`category`、`status` 过滤；每个绑定带 `research_readable` 和 BindingSpec 全字段）与 `GET /api/v1/datasources/capabilities/{capability}`；
+- 控制台页签“数据源 Doctor” → “数据源能力目录”卡片（来源筛选里有“TDX（全部通达信来源）”；`research_readable` 的绑定带“研究试读”按钮）；
+- `python -m app.datasources catalog [--capability <键> | --source <来源>]`：不带参数输出整份目录；带参数列出该能力或该来源的绑定，含 `unsupported`。
 
 ## 4. 策略怎么用
 
@@ -268,7 +333,7 @@ PYTHONPATH=<pytdx 解包> python ../scripts/verify-tdx-protocol.py   # 与 pytdx
 | 开盘啦 longhuvip | 保留为授权主源（盘口/分钟/行业/竞价）；个股 K 线（id=7）下线 |
 | 乘风（含 kpl_archive 榜单） | 不在本平台；其日 K、集合竞价、指数、同花顺热榜、龙虎榜、概念成分由 fuyao 对应能力整体替代 |
 | 通达信客户端 .day/.lc1/.lc5 | `tdx_local`：owner 工作站 CLI 导出到离线导入契约；GPJY 财务包未解析（后续项） |
-| TDX public protocol | `tdx_public`：使用 LOGIN_ONE 握手，按主机保留 legacy-3 回退；主机池由探测矩阵生成，进程内传输失败冷却，结果回执带 `host:port/profile`。LOGIN_ONE 下行情和 K 线命令可用，绑定待 P2；当前接入的是历史分笔和除权除息，失败时 fail closed。 |
+| TDX public protocol | `tdx_public`：使用 LOGIN_ONE 握手，按主机保留 legacy-3 回退；主机池由探测矩阵生成，进程内传输失败冷却，结果回执带 `host:port/profile`。LOGIN_ONE 下行情和 K 线命令可用，绑定待 P2；当前接入的是历史分笔和除权除息，失败时 fail closed。（2026-10-11 补：之后新增的通达信绑定见第 3.1 节，除上述旧绑定外均为 `unsupported`，不参与解析；解码事实见第 10 节。） |
 | 腾讯 qt / fqkline / 分笔 | 观察池报价、五档、分钟、当日分笔 |
 | 东财 push2 / datacenter / 天天基金 | 板块资金流（已有）+ 涨停板专题、盘口异动、人气榜、datacenter 事件、两融、基金净值（新增）；clist 全市场在 owner 出口被断连 |
 | 同花顺事件 + 问财 | 未接：问财需登录态且有反爬；由 fuyao 热榜/飙升榜/异动原因覆盖“抢手名单”类需求 |
