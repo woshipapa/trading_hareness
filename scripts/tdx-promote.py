@@ -19,8 +19,8 @@ deviations, examples) and one verdict per gate, and exits 0 whatever the verdict
 
     owner_egress  the probe ran inside the owner container and answered with rows
     agreement     every declared tolerance holds (nothing to hold when none is declared)
-    intraday      every probe started and finished inside a trading session (Asia/Shanghai, weekdays 09:30-11:30 and
-                  13:00-15:00; holidays are not read from reference.trade_calendar)
+    intraday      every probe started and finished inside a session of the XSHG calendar of exchange_calendars (the
+                  Mac's, which knows the holidays and the lunch break; the evidence names the calendar and its version)
 
 ``apply`` takes the evidence files of one binding and moves the status token of that binding in catalog.py (never
 ``decision_eligible``) one step when every file passed the gates of the step: UNSUPPORTED -> DECLARED needs owner_egress and
@@ -39,7 +39,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -59,8 +59,6 @@ OWNER_SETTINGS = ("LONGHU_SSH_HOST", "LONGHU_SSH_PORT", "LONGHU_SSH_USER", "LONG
 OWNER_DOCKER = ('export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"\n'
                 'export DOCKER_HOST="${DOCKER_HOST:-unix://$XDG_RUNTIME_DIR/docker.sock}"\n')
 CN = ZoneInfo("Asia/Shanghai")
-SESSIONS = ((time(9, 30), time(11, 30)), (time(13, 0), time(15, 0)))
-NO_HOLIDAYS = "holidays not checked: every weekday counts as a trading day"
 #: Status token in catalog.py -> (the token after the step, the gates every evidence file must have passed).
 STEPS = {"UNSUPPORTED": ("DECLARED", ("owner_egress", "agreement")),
          "DECLARED": ("LIVE_VERIFIED", ("owner_egress", "agreement", "intraday"))}
@@ -114,13 +112,14 @@ def lookup(source: str, capability: str) -> Binding:
     return found[0]
 
 
-def in_session(instant: datetime) -> bool:
-    local = instant.astimezone(CN)
-    return local.weekday() < 5 and any(start <= local.time() < end for start, end in SESSIONS)
+def xshg() -> tuple[Any, str]:
+    """The Shanghai exchange's calendar and the name that goes into the evidence; only the Mac has the library."""
+    import exchange_calendars  # noqa: PLC0415 - not installed where this script is only imported (CI)
+    return exchange_calendars.get_calendar("XSHG"), f"exchange_calendars {exchange_calendars.__version__} XSHG"
 
 
-def probed_in_session(record: Mapping[str, Any]) -> bool:
-    return all(in_session(datetime.fromisoformat(record[key])) for key in ("started_utc", "finished_utc"))
+def probed_in_session(calendar: Any, record: Mapping[str, Any]) -> bool:
+    return all(calendar.is_open_on_minute(datetime.fromisoformat(record[key])) for key in ("started_utc", "finished_utc"))
 
 
 def iso_date(compact: str) -> str:
@@ -282,7 +281,7 @@ def compact(record: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def verdicts(egress: str, source: str, probes: Mapping[str, Mapping[str, Any]], comparison: Mapping[str, Any],
-             inside: Mapping[str, bool]) -> dict[str, dict[str, Any]]:
+             inside: Mapping[str, bool], calendar: str) -> dict[str, dict[str, Any]]:
     own = probes[source]
     disagreeing = [f"{name}: {item['why']}" for name, item in comparison.items() if not item["agree"]]
     outside = [name for name, in_it in inside.items() if not in_it]
@@ -297,7 +296,7 @@ def verdicts(egress: str, source: str, probes: Mapping[str, Mapping[str, Any]], 
         "intraday": {
             "pass": not outside,
             "detail": (f"outside a session: {', '.join(outside)}" if outside else "every probe ran inside a session")
-            + f"; {NO_HOLIDAYS}"},
+            + f" ({calendar})"},
     }
 
 
@@ -315,7 +314,8 @@ def run_check(args: argparse.Namespace) -> int:
     for label, (reference, adapter, kwargs) in reads.items():
         probes[label] = run_probe(args.egress, reference, args.capability, kwargs, adapter=adapter, all_rows=True)
     comparison = compare(args.source, agreement, bindings, probes)
-    inside = {source: probed_in_session(record) for source, record in probes.items()}
+    calendar, calendar_name = xshg()
+    inside = {label: probed_in_session(calendar, record) for label, record in probes.items()}
     evidence = {
         "schema": SCHEMA, "source": args.source, "capability": args.capability, "params": args.params,
         "egress": args.egress, "catalog_status": bindings[args.source].status,
@@ -324,9 +324,8 @@ def run_check(args: argparse.Namespace) -> int:
         "projections": {source: {"field_map": binding.spec.field_map, "unit_factors": binding.spec.unit_factors}
                         for source, binding in bindings.items() if binding.spec},
         "probes": {source: compact(record) for source, record in probes.items()}, "comparison": comparison,
-        "session": {"timezone": "Asia/Shanghai", "windows": "weekdays 09:30-11:30 and 13:00-15:00", "holidays": NO_HOLIDAYS,
-                    "inside": inside},
-        "verdicts": verdicts(args.egress, args.source, probes, comparison, inside),
+        "session": {"calendar": calendar_name, "inside": inside},
+        "verdicts": verdicts(args.egress, args.source, probes, comparison, inside, calendar_name),
     }
     day = datetime.fromisoformat(probes[args.source]["finished_utc"]).astimezone(CN).date()
     digest = hashlib.sha256(json.dumps(args.params, sort_keys=True).encode("utf-8")).hexdigest()[:8]

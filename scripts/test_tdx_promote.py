@@ -9,10 +9,11 @@ import os
 import re
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 SCRIPT = Path(__file__).with_name("tdx-promote.py")
 SPEC = importlib.util.spec_from_file_location("tdx_promote", SCRIPT)
@@ -47,6 +48,14 @@ REFERENCE_ROWS = [{"symbol": symbol, "price": 10.0, "volume": 300} for symbol in
 REFERENCE_ROWS[0]["price"] = 10.005       # inside the relative tolerance, outside the absolute one (none is declared)
 
 
+class WeekdaySessions:
+    """What exchange_calendars' XSHG is to the harness: weekdays, 09:30-11:30 and 13:00-15:00 in Shanghai (no holidays)."""
+
+    def is_open_on_minute(self, instant):
+        local = instant.astimezone(ZoneInfo("Asia/Shanghai"))
+        return local.weekday() < 5 and any(start <= local.time() < end for start, end in ((time(9, 30), time(11, 30)), (time(13, 0), time(15, 0))))
+
+
 def record(source, rows, times=MORNING, error=None, capability=CAPABILITY):
     base = {"source": source, "capability": capability, "params": {}, "started_utc": times[0], "finished_utc": times[1]}
     if error:
@@ -71,7 +80,7 @@ def run_check(egress, probes, bindings=(OWN, REFERENCE), params=None, source="td
             return probes[adapter or read_source]
 
         out = io.StringIO()
-        with mock.patch.multiple(MODULE, ROOT=root, DATA_DIR=root / "data", run_probe=probe,
+        with mock.patch.multiple(MODULE, ROOT=root, DATA_DIR=root / "data", run_probe=probe, xshg=lambda: (WeekdaySessions(), "fake XSHG"),
                                  bindings_for=lambda capability, states: [b for b in bindings if b.capability == capability]), \
                 mock.patch.dict(os.environ, SETTINGS), contextlib.redirect_stdout(out):
             code = MODULE.main(["check", source, capability, "--egress", egress, "--params", json.dumps(params or {})])
@@ -107,7 +116,8 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(evidence["projections"], {"tdx_public": {"field_map": {"vol": "volume"}, "unit_factors": {"volume": 100}}})
         self.assertEqual((evidence["schema"], evidence["catalog_status"], evidence["decision_eligible"], evidence["egress"]),
                          ("tdx-promote-v2", "unsupported", False, "owner"))
-        self.assertEqual(evidence["session"]["inside"], {"tdx_public": True, "tencent_free": True})
+        self.assertEqual(evidence["session"], {"calendar": "fake XSHG", "inside": {"tdx_public": True, "tencent_free": True}})
+        self.assertIn("(fake XSHG)", evidence["verdicts"]["intraday"]["detail"])
         self.assertEqual(result.calls, [("owner", "tdx_public", {}, None, True), ("owner", "tencent_free", {}, None, True)])
         self.assertIn("agreement: pass", result.stdout)
 
@@ -127,6 +137,8 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(failing(evidence_of("mac")), ["owner_egress"])
         self.assertEqual(failing(evidence_of(tdx_public=record("tdx_public", OWN_ROWS, LUNCH))), ["intraday"])
         self.assertEqual(failing(evidence_of(tdx_public=record("tdx_public", OWN_ROWS, CLOSING))), ["intraday"])
+        self.assertEqual(failing(evidence_of(tencent_free=record("tencent_free", REFERENCE_ROWS, LUNCH))), ["intraday"],
+                         "the reference is read in the session too")
         off = evidence_of(tdx_public=record("tdx_public", [{**OWN_ROWS[0], "price": 10.1}, *OWN_ROWS[1:]]))
         self.assertEqual(failing(off), ["agreement"])
         self.assertEqual((off["comparison"]["price"]["agree"], off["comparison"]["volume"]["agree"]), (False, True))
@@ -243,16 +255,6 @@ class CheckTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "read app/free_market_providers.py:tencent_intraday_minutes with different parameters"):
             MODULE.reference_reads(agreement, {"symbol": "000001.SZ", "other": "600519.SH"})
 
-    def test_a_session_is_a_weekday_morning_or_afternoon_window(self):
-        def inside(text):
-            return MODULE.in_session(datetime.fromisoformat(text + "+08:00"))
-
-        for text in ("2026-10-12T09:30:00", "2026-10-12T11:29:59", "2026-10-12T13:00:00", "2026-10-12T14:59:59"):
-            self.assertTrue(inside(text), text)
-        for text in ("2026-10-12T09:29:59", "2026-10-12T11:30:00", "2026-10-12T12:30:00", "2026-10-12T15:00:00",
-                     "2026-10-10T10:00:00"):          # the last one is a Saturday
-            self.assertFalse(inside(text), text)
-
     def test_the_owner_egress_is_refused_naming_only_the_missing_settings(self):
         partial = {name: value for name, value in SETTINGS.items() if name != "LONGHU_SSH_KEY_PATH"}
         with mock.patch.dict(os.environ, partial, clear=True), mock.patch.object(MODULE, "run_probe") as probe, \
@@ -260,6 +262,27 @@ class CheckTests(unittest.TestCase):
             MODULE.main(["check", "tdx_public", CAPABILITY, "--egress", "owner"])
         self.assertEqual(str(refused.exception), "the owner egress needs these settings (names only): LONGHU_SSH_KEY_PATH")
         probe.assert_not_called()
+
+
+@unittest.skipUnless(importlib.util.find_spec("exchange_calendars"), "exchange_calendars is installed on the Mac, not in CI")
+class SessionCalendarTests(unittest.TestCase):
+    def test_the_xshg_calendar_knows_the_holidays_and_the_lunch_break_a_weekday_rule_would_miss(self):
+        calendar, name = MODULE.xshg()
+        self.assertRegex(name, r"^exchange_calendars \d+\.\d+\.\d+ XSHG$")
+
+        def open_at(text):
+            return calendar.is_open_on_minute(datetime.fromisoformat(text + "+08:00"))
+
+        for text in ("2026-10-12T09:30:00", "2026-10-12T11:29:59", "2026-10-12T13:00:00", "2026-10-12T14:59:59"):
+            self.assertTrue(open_at(text), text)
+        for text in ("2026-10-12T09:29:59", "2026-10-12T11:30:00", "2026-10-12T12:30:00", "2026-10-12T15:00:00",
+                     "2026-10-10T10:00:00", "2026-10-01T10:00:00"):      # a Saturday, and the National Day holiday
+            self.assertFalse(open_at(text), text)
+
+    def test_a_probe_must_start_and_finish_inside_a_session(self):
+        calendar, _ = MODULE.xshg()
+        for times, expected in ((MORNING, True), (LUNCH, False), (CLOSING, False)):
+            self.assertEqual(MODULE.probed_in_session(calendar, record("tdx_public", [], times)), expected, times)
 
 
 class ProbeTransportTests(unittest.TestCase):
