@@ -294,7 +294,8 @@ class MacProtocolTests(unittest.TestCase):
 
     def test_requests_keep_the_bytes_of_the_duplicate_builders_they_replaced(self):
         # Golden bytes produced by the removed tdx_mac_fields builders (and tdx_mac's own, which were equal) for
-        # 000001.SZ and board 880812, before the duplicates were deleted.
+        # 000001.SZ and board 880812, before the duplicates were deleted.  The market monitor was asked for 500
+        # events; the removed builder's own default, which the fields probe used, was 600 (the probe asks for 600).
         symbol_args = (0, "000001")
         golden = [
             ("auction", tdx_mac.build_aux_request(tdx_mac.OP_AUCTION, *symbol_args),
