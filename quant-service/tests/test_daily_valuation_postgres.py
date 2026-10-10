@@ -112,6 +112,29 @@ class ValuationPostgresTests(unittest.TestCase):
             result = project_valuations(TestDatabase(), DAY, apply=True, projected_at=NOW)
             self.assertEqual(result["status"], "blocked")
 
+    def test_each_statement_is_timed_and_the_transaction_budget_is_enforced_between_them(self):
+        from app.daily_valuation_repository import StatementBudget
+        self.raw()
+        preview = project_valuations(TestDatabase(), DAY, projected_at=NOW)
+        self.assertEqual((set(preview["timings_seconds"]), preview["budget_seconds"]), ({"coverage_before", "evidence"}, 60.0))
+        ticks = iter([0.0, 1.0, 1.0, 2.0, 100.0])   # the first statement runs; the clock then passes the budget
+        with self.assertRaisesRegex(TimeoutError, "60s budget before evidence"):
+            project_valuations(TestDatabase(), DAY, apply=True, projected_at=NOW,
+                               budget=StatementBudget(60.0, clock=lambda: next(ticks)))
+        with psycopg.connect(DSN) as c:
+            written = c.execute("SELECT count(*) FROM quant.daily_fundamentals WHERE trading_date=%s AND provider='fuyao_ths'",
+                                (DAY,)).fetchone()[0]
+        self.assertEqual(written, 0, "the transaction rolled back")
+
+    def test_a_statement_over_its_cap_is_cancelled_and_named(self):
+        from unittest import mock
+        import app.daily_valuation_repository as repository
+        self.raw()
+        with mock.patch.dict(repository.STATEMENT_CAPS, {"evidence": 0.2}), \
+                mock.patch.object(repository, "SOURCE_SQL", "SELECT pg_sleep(2), %(day)s::date AS day"):
+            with self.assertRaisesRegex(TimeoutError, r"evidence exceeded its 0\.2s statement limit"):
+                project_valuations(TestDatabase(), DAY, projected_at=NOW)
+
     def test_multi_source_selection_prefers_complete_existing_row_and_keeps_one_row_per_stock(self):
         with psycopg.connect(DSN) as c:
             c.execute("""INSERT INTO quant.daily_fundamentals(symbol,trading_date,pe,pb,provider,available_at)
