@@ -259,9 +259,11 @@ class ReportFileDownloadTests(unittest.TestCase):
         self.assertEqual(len(host.requests), 3)
 
     def test_a_file_longer_than_its_advertised_size_raises(self):
-        host = ReportHost(self.FILE)
         with self.assertRaisesRegex(TdxFinanceError, "runs past its advertised 65000 bytes"):
-            download_report_file(host, "tdxfin/x.zip", 65_000)
+            download_report_file(ReportHost(self.FILE), "tdxfin/x.zip", 65_000)
+        with self.assertRaisesRegex(TdxFinanceError, "runs past its advertised 99 bytes"):      # one byte too many
+            download_report_file(ReportHost(bytes(100)), "tdxfin/x.zip", 99)
+        self.assertEqual(download_report_file(ReportHost(bytes(100)), "tdxfin/x.zip", 100), bytes(100))
 
     def test_a_reply_shorter_than_its_declared_length_raises(self):
         host = ReportHost(self.FILE)
