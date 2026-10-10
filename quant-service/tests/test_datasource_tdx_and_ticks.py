@@ -240,8 +240,10 @@ class TdxClientTests(unittest.TestCase):
     def test_market_codes(self):
         self.assertEqual(tdx_protocol.market_code("600519.SH"), (1, "600519"))
         self.assertEqual(tdx_protocol.market_code("920819.BJ"), (2, "920819"))
-        with self.assertRaises(ValueError):
-            tdx_protocol.market_code("600519")
+        self.assertEqual(tdx_protocol.market_code("000001.sz"), (0, "000001"))
+        for bad in ("600519", "60051X.SH", "60051.SH", "6005190.SH", "\uff16\uff10\uff10\uff15\uff11\uff19.SH", "600519.XX", ".SH"):
+            with self.subTest(symbol=bad), self.assertRaises(ValueError):
+                tdx_protocol.market_code(bad)
 
     def test_echo_check_is_positional_and_needs_one_row_per_request(self):
         # R1: an old BJ code is answered with a 600839 placeholder at 0.0; here 600839 was also requested.
