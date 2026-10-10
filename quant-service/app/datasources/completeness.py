@@ -59,6 +59,8 @@ UNREGISTERED: dict[str, str] = {
     "tdx_instruments.TdxInstrumentClient.security_count": "harvested, binds in I1b/I2/I3/I4",
     "tdx_instruments.TdxInstrumentClient.security_list": "harvested, binds in I1b/I2/I3/I4",
     "tdx_instruments.TdxInstrumentClient.index_bars": "harvested, binds in I1b/I2/I3/I4",
+    "tdx_files.TdxFilesClient.file_size": "harvested, binds in I1b/I2/I3/I4",
+    "tdx_files.TdxFilesClient.download": "harvested, binds in I1b/I2/I3/I4",
     "family:quote": "legacy quotes bind in P2 after the instrument model (delta D2); MAC 0x122b in P3",
     "family:F10": "verified in the plan; company-profile capability arrives in P5",
     "family:finance": "verified in the plan; financial-statements capability arrives in P5",
