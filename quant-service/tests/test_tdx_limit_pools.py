@@ -8,7 +8,7 @@ from unittest import mock
 
 from app.datasources import resolver as resolver_module
 from app.datasources.catalog import BINDINGS
-from app.datasources.contracts import DECLARED, UNSUPPORTED, CapabilityEvidence, CapabilityRequest
+from app.datasources.contracts import DECLARED, LIVE_VERIFIED, UNSUPPORTED, CapabilityEvidence, CapabilityRequest
 from app.datasources.derived import limit_pools
 from app.datasources.derived.limit_pools import (
     derive_limit_pools, fetch_broken_pool, fetch_limit_down_pool, fetch_limit_up_pool)
@@ -147,14 +147,15 @@ class LimitPoolAdapterTests(unittest.TestCase):
 
 
 class LimitPoolBindingTests(unittest.TestCase):
-    def test_each_binding_names_its_adapter_stays_unsupported_and_says_what_the_pools_lack(self):
+    def test_each_binding_names_its_adapter_and_says_what_the_pools_lack(self):
         for capability, adapter in ADAPTERS.values():
             binding = derived_binding(capability)
             parameters = inspect.signature(adapter).parameters
             self.assertTrue(all(item.kind is inspect.Parameter.KEYWORD_ONLY for item in parameters.values()), capability)
             self.assertEqual(binding.adapter, f"app/datasources/derived/limit_pools.py:{adapter.__name__}", capability)
             self.assertEqual(set(parameters), set(binding.spec.params), capability)
-            self.assertEqual((binding.status, binding.decision_eligible), (UNSUPPORTED, False), capability)
+            self.assertIn(binding.status, {UNSUPPORTED, DECLARED, LIVE_VERIFIED}, capability)
+            self.assertFalse(binding.decision_eligible, capability)
             for lack in ("首封/末封时间", "原因", "连板数", "封单额", "永不替代供应商池"):
                 self.assertIn(lack, binding.notes, capability)
 

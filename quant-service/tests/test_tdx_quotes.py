@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from app.datasources.catalog import BINDINGS
+from app.datasources.contracts import DECLARED, LIVE_VERIFIED, UNSUPPORTED
 from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_protocol, tdx_quotes
 
@@ -167,10 +168,11 @@ class QuoteBindingTests(unittest.TestCase):
             self.assertEqual(set(parameters), set(item.spec.params), capability)
             self.assertTrue(all(parameter.kind is inspect.Parameter.KEYWORD_ONLY for parameter in parameters.values()), capability)
 
-    def test_the_bindings_stay_unsupported_research_evidence_in_the_clients_batch_size(self):
+    def test_the_bindings_are_research_evidence_in_the_clients_batch_size(self):
         for capability in self.ADAPTERS:
             item = binding(capability)
-            self.assertEqual((item.status, item.decision_eligible), ("unsupported", False), capability)
+            self.assertIn(item.status, {UNSUPPORTED, DECLARED, LIVE_VERIFIED}, capability)
+            self.assertFalse(item.decision_eligible, capability)
             self.assertEqual((item.spec.handshake_profile, item.spec.paging, item.spec.max_batch),
                              ("login_one", "batch", tdx_protocol.MAX_QUOTES_PER_REQUEST), capability)
 

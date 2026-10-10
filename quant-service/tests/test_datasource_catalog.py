@@ -3,12 +3,14 @@
 import re
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from app.datasources import catalog as catalog_module
 from app.datasources.catalog import (
     BINDINGS, CAPABILITIES, NON_SECTOR_GROUPS, NON_SECTOR_LABEL_PATTERN, SOURCES, bindings_for, catalog_document,
     evidence_locations, validate_catalog,
 )
-from app.datasources.contracts import RESOLVABLE_STATES, RETIRED, UNSUPPORTED
+from app.datasources.contracts import DECLARED, LIVE_VERIFIED, RESOLVABLE_STATES, RETIRED, UNSUPPORTED
 from app.datasources.completeness import completeness_problems, public_fetch_functions
 from app.datasources.resolver import CapabilityResolver, CapabilityUnavailable
 from app.platform.strategy_data_needs import STRATEGY_DATA_NEEDS, strategy_data_needs_catalog
@@ -17,6 +19,8 @@ from app.sector_membership_repository import sector_group_predicate
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = SERVICE_ROOT.parent
+#: The statuses a TDX binding passes through; promoting one (scripts/tdx-promote.py) must not break a test.
+PROMOTION_PATH = frozenset({UNSUPPORTED, DECLARED, LIVE_VERIFIED})
 
 
 class CatalogTests(unittest.TestCase):
@@ -132,28 +136,76 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn(RETIRED, {provider["status"] for capability in document["capabilities"]
                                    for provider in capability["providers"]})
 
-    def test_i2_legacy_bindings_are_unsupported_and_fully_specified(self):
+    def test_agreement_entries_are_checked(self):
+        from app.datasources.contracts import Binding, BindingSpec
+
+        def problems(field="close", drop=(), **changes):
+            entry = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_intraday_minutes",
+                     "reference_params": {"symbol": "symbol"}, "key": ["symbol", "bar_time"], "rel_tol": 0.001, "min_coverage": 0.9}
+            entry = {key: value for key, value in {**entry, **changes}.items() if key not in drop}
+            spec = BindingSpec(params={"symbol": "market+code", "count": "count"}, agreement={field: entry})
+            return "\n".join(catalog_module._spec_problems(Binding("tdx_mac", "bars.minute", 70, UNSUPPORTED, spec=spec)))
+
+        self.assertEqual(problems(), "")
+        self.assertIn("'vwap' is not a canonical field", problems(field="vwap"))
+        self.assertIn("unknown keys ['reltol']", problems(reltol=0.1))
+        self.assertIn("reference 'nobody' is not a catalogued source", problems(reference="nobody"))
+        self.assertIn("eastmoney_ztb has no binding for bars.minute", problems(reference="eastmoney_ztb", drop=("reference_adapter",)))
+        self.assertEqual(problems(reference="eastmoney_ztb"), "", "a reader named by its adapter needs no binding of its source")
+        self.assertIn("rel_tol must be a number that is not negative", problems(rel_tol=-1))
+        self.assertIn("abs_tol must be a number that is not negative", problems(abs_tol="1"))
+        self.assertIn("min_coverage must be a number above 0 and at most 1", problems(min_coverage=0))
+        self.assertIn("min_coverage must be a number above 0 and at most 1", problems(min_coverage=1.5))
+        self.assertIn("key must list canonical fields", problems(key=[]))
+        self.assertIn("key must list canonical fields", problems(key=["symbol", "vwap"]))
+        self.assertIn("reference_params must map keywords to parameters of the binding ['count', 'symbol']",
+                      problems(reference_params={"symbol": "ticker"}))
+        self.assertIn("reference_fixed must be a mapping", problems(reference_fixed=["pool"]))
+
+    def test_every_reference_reader_of_an_agreement_accepts_what_the_check_gives_it(self):
+        import importlib
+        import inspect
+
+        from app.datasources.contracts import reference_keywords
+
+        entries = [(item, entry) for item in BINDINGS if item.spec for entry in item.spec.agreement.values()
+                   if entry.get("reference_adapter")]
+        self.assertTrue(entries)
+        for item, entry in entries:
+            path, _, name = entry["reference_adapter"].partition(":")
+            parameters = inspect.signature(getattr(importlib.import_module(path.removesuffix(".py").replace("/", ".")), name)).parameters
+            given = set(reference_keywords(entry, dict.fromkeys(item.spec.params)))
+            required = {key for key, parameter in parameters.items() if parameter.default is parameter.empty
+                        and parameter.kind not in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)}
+            where = f"{item.source}->{item.capability} {entry['reference_adapter']}"
+            self.assertLessEqual(given, set(parameters), where)
+            self.assertLessEqual(required, given, where)
+
+    def test_i2_legacy_bindings_are_fully_specified_whatever_their_promotion_state(self):
         snapshot = next(item for item in BINDINGS
                         if item.source == "tdx_public" and item.capability == "quote.all_a_snapshot")
         overview = next(item for item in BINDINGS
                         if item.source == "tdx_public" and item.capability == "quote.index_overview")
-        self.assertEqual((snapshot.status, overview.status), (UNSUPPORTED, UNSUPPORTED))
-        self.assertFalse(snapshot.decision_eligible or overview.decision_eligible)
+        for binding in (snapshot, overview):
+            self.assertIn(binding.status, PROMOTION_PATH)
+            self.assertIsNotNone(binding.spec)
+            self.assertFalse(binding.decision_eligible)
         self.assertEqual(snapshot.spec.max_batch, 80)
         self.assertEqual(snapshot.spec.unit_factors["volume"], 100)
         self.assertIn("排序宽度", overview.notes)
 
-    def test_microstructure_bindings_are_unsupported_and_raw_auction_is_explicit(self):
+    def test_microstructure_bindings_are_specified_and_raw_auction_is_explicit(self):
         keys = {"microstructure.volume_profile", "microstructure.minute_series", "microstructure.auction_curve",
                 "microstructure.unusual", "microstructure.top_board"}
         bindings = [item for item in BINDINGS if item.capability in keys]
-        self.assertEqual({item.status for item in bindings}, {UNSUPPORTED})
+        self.assertEqual({item.capability for item in bindings}, keys)
+        self.assertLessEqual({item.status for item in bindings}, PROMOTION_PATH)
         self.assertTrue(all(item.spec is not None and not item.decision_eligible for item in bindings))
         auction = CAPABILITIES["microstructure.auction_curve"]
         self.assertEqual(auction.schema.names, ("time", "price", "matched_raw", "unmatched_raw", "unmatched_side"))
         legacy_minute = next(item for item in BINDINGS
                              if item.source == "tdx_public" and item.capability == "bars.minute")
-        self.assertEqual(legacy_minute.status, UNSUPPORTED)
+        self.assertIn(legacy_minute.status, PROMOTION_PATH)
         self.assertFalse(legacy_minute.decision_eligible)
 
 
@@ -433,6 +485,37 @@ class ResolverTests(unittest.IsolatedAsyncioTestCase):
                     and not binding.adapter.startswith(("app/datasources/collectors/", "scripts/")):
                 self.assertIn(binding.source, resolver.bound_sources(binding.capability),
                               f"{binding.source}->{binding.capability} has no implementation bound")
+
+    def test_promoting_a_binding_of_a_listed_module_needs_no_registration(self):
+        import dataclasses
+
+        from app.datasources import bindings
+
+        def listed(item):
+            module = item.adapter.partition(":")[0].removeprefix("app/datasources/").removesuffix(".py")
+            return module in bindings.GENERIC_ADAPTER_MODULES
+
+        flipped = tuple(dataclasses.replace(item, status=DECLARED) if item.adapter and ":" in item.adapter and listed(item)
+                        and item.status in PROMOTION_PATH else item for item in BINDINGS)
+        promoted = [item for item in flipped if item.status == DECLARED and item.adapter and listed(item)]
+        self.assertIn("tdx_mac", {item.source for item in promoted})
+        with mock.patch.object(catalog_module, "BINDINGS", flipped):
+            resolver = bindings.register_package_sources(CapabilityResolver())
+            for item in promoted:
+                self.assertIn(item.source, resolver.bound_sources(item.capability), f"{item.source}->{item.capability}")
+
+    def test_a_listed_module_that_is_not_written_yet_matters_only_to_a_resolvable_binding(self):
+        from app.datasources import bindings
+        from app.datasources.contracts import Binding
+
+        adapter = "app/datasources/sources/not_written_yet.py:fetch"
+        with mock.patch.object(bindings, "GENERIC_ADAPTER_MODULES", ("sources/not_written_yet",)):
+            parked = (*BINDINGS, Binding("tdx_public", "quote.watch_snapshot", 80, UNSUPPORTED, adapter=adapter))
+            with mock.patch.object(catalog_module, "BINDINGS", parked):
+                bindings.register_package_sources(CapabilityResolver())
+            promoted = (*BINDINGS, Binding("tdx_public", "quote.watch_snapshot", 80, DECLARED, adapter=adapter))
+            with mock.patch.object(catalog_module, "BINDINGS", promoted), self.assertRaises(ModuleNotFoundError):
+                bindings.register_package_sources(CapabilityResolver())
 
 
 if __name__ == "__main__":

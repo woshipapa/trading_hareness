@@ -12,7 +12,7 @@ binding's status here -- and nowhere else -- when that changes.
 
 from __future__ import annotations
 
-from typing import Any, Final, Iterable
+from typing import Any, Final, Iterable, Mapping
 
 from .contracts import (
     BINDING_STATES, CATEGORIES, DECLARED, DORMANT, GRAINS, LICENSES, LIVE_VERIFIED, RESOLVABLE_STATES,
@@ -292,6 +292,17 @@ _TDX_POOL_NOTE = (
     "任一涨跌停价行的 trade_date（位 0x13）与请求日期不符即报错；"
     "无涨跌停价的证券（两个限价都回 0.0，如新股、北交所首日）不入池，计入 coverage 与 warnings 的 limit_price_missing")
 
+# What scripts/tdx-promote.py compares a TDX binding with: Tencent's public endpoints, read at the same moment.  The
+# tolerances are starting values for the first intraday check to tune; the one measured basis is the minute volume
+# (scripts/data/tdx_f7_1m_volume_2026-10-10_mac.json: 238 of 240 minutes equal after lots * 100, the others being the
+# opening-auction minute and a denormal near zero, so a check of minute bars asks for a window after the first minute).
+_TENCENT_MINUTES = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_intraday_minutes",
+                    "reference_params": {"symbol": "symbol"}, "key": ["symbol", "bar_time"]}
+_TENCENT_QUOTES = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_order_book_quotes",
+                   "reference_params": {"symbols": "symbols"}, "key": ["symbol"]}
+_TENCENT_LIMITS = {"reference": "tencent_free", "reference_adapter": "app/longhu_vendor_source.py:tencent_quotes_blocking",
+                   "reference_params": {"symbols": "symbols"}, "key": ["symbol", "trade_date"]}
+
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot
     _bind("fuyao_ths", "quote.all_a_snapshot", 12, LIVE_VERIFIED, _RAW + "a_share_prices_snapshot",
@@ -336,7 +347,9 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                          "turnover": "turnover_rate", "exchange_time": "exchange_time"},
               unit_factors={"volume": 100}, paging="batch", max_batch=80,
               time_semantics="effective=exchange_time (bits 0x13 date and 0x14 time, Asia/Shanghai); available=collection",
-              handshake_profile="mac")),
+              handshake_profile="mac",
+              agreement={"price": {**_TENCENT_QUOTES, "rel_tol": 0.005}, "volume": {**_TENCENT_QUOTES, "rel_tol": 0.02},
+                         "amount": {**_TENCENT_QUOTES, "rel_tol": 0.02}})),
     # Both providers persist depth observations in the shared quote table.  The
     # source discriminator is part of the storage contract; there is no
     # separate intraday_order_book_observations relation.
@@ -421,11 +434,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                            handshake_profile="login_one")),
     _bind("tdx_mac", "bars.minute", 70, UNSUPPORTED, _RAW + "tdx_mac_minute_bars",
           "app/datasources/sources/tdx_mac.py:fetch_minute_bars",
-          notes="MAC K 线只给 bar 时间（日期 + 当日秒数，适配器组成 Asia/Shanghai 感知的 bar_time）；source_available_at 是响应接收时间，available_at_min/max 记录该时间；保持 UNSUPPORTED",
+          notes="MAC K 线只给 bar 时间（日期 + 当日秒数，适配器组成 Asia/Shanghai 感知的 bar_time）；source_available_at 是响应接收时间，available_at_min/max 记录该时间",
           spec=BindingSpec(
               params={"symbol": "market+code", "count": "count (period 8)"}, field_map={},
               time_semantics="effective=bar_time (wire date + seconds, Asia/Shanghai); available=response receive time (CapabilityEvidence available_at_min/max), never the local ingest time",
-              handshake_profile="mac")),
+              handshake_profile="mac",
+              agreement={"close": {**_TENCENT_MINUTES, "rel_tol": 0.005}, "volume": {**_TENCENT_MINUTES, "abs_tol": 100}})),
     _bind("longhuvip_index", "bars.index_daily", 45, DORMANT, "canonical_bars_daily", "app/longhu_market_service.py"),
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),
     _bind("tdx_public", "bars.index_daily", 65, UNSUPPORTED, _RAW + "tdx_index_daily_bars",
@@ -521,7 +535,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           spec=BindingSpec(
               params={"symbols": "symbols such as 000001.SZ"}, field_map={"limit_up": "up_limit", "limit_down": "down_limit"},
               paging="batch", max_batch=80, time_semantics="effective=trade_date (bit 0x13, Asia/Shanghai date); available=collection",
-              handshake_profile="mac")),
+              handshake_profile="mac",
+              agreement={"up_limit": {**_TENCENT_LIMITS, "abs_tol": 0.005}, "down_limit": {**_TENCENT_LIMITS, "abs_tol": 0.005}})),
     _bind("fuyao_ths", "limits.limit_up_pool", 12, LIVE_VERIFIED, _EVT + "limit_up_pool", "app/market_event_capture.py",
           "近期", "默认分页 50（此前只存了第一页，已修为翻页）"),
     _bind("eastmoney_ztb", "limits.limit_up_pool", 50, DECLARED, _RAW + "limit_pool_limit_up",
@@ -1004,8 +1019,53 @@ def evidence_locations(capability: str) -> list[dict[str, Any]]:
     return result
 
 
+#: The keys of an agreement entry (``contracts.BindingSpec.agreement``), and the row identities its ``key`` may use besides
+#: the capability's own canonical fields.
+AGREEMENT_KEYS: Final = frozenset({"reference", "reference_adapter", "reference_params", "reference_fixed", "key", "rel_tol",
+                                   "abs_tol", "min_coverage"})
+AGREEMENT_IDENTITY: Final = frozenset({"symbol", "trade_date"})
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _agreement_problems(item: Binding, names: set[str]) -> list[str]:
+    """What is wrong with the agreement entries of ``item``'s spec."""
+    problems = []
+    for field_name, entry in item.spec.agreement.items():
+        where = f"binding {item.source}->{item.capability}: agreement for {field_name!r}"
+        if field_name not in names:
+            problems.append(f"{where} is not a canonical field of the capability")
+        if not isinstance(entry, Mapping):
+            problems.append(f"{where} must be a mapping, got {entry!r}")
+            continue
+        if unknown := sorted(set(entry) - AGREEMENT_KEYS):
+            problems.append(f"{where} has unknown keys {unknown}")
+        reference = entry.get("reference")
+        if reference not in SOURCES:
+            problems.append(f"{where}: reference {reference!r} is not a catalogued source")
+        elif "reference_adapter" not in entry and not any(b.source == reference and b.capability == item.capability for b in BINDINGS):
+            problems.append(f"{where}: {reference} has no binding for {item.capability}; name a reference_adapter")
+        for tolerance in ("rel_tol", "abs_tol"):
+            if not (_is_number(entry.get(tolerance, 0)) and entry.get(tolerance, 0) >= 0):
+                problems.append(f"{where}: {tolerance} must be a number that is not negative, got {entry[tolerance]!r}")
+        coverage = entry.get("min_coverage", 1)
+        if not (_is_number(coverage) and 0 < coverage <= 1):
+            problems.append(f"{where}: min_coverage must be a number above 0 and at most 1, got {coverage!r}")
+        key = entry.get("key")
+        if not (isinstance(key, (list, tuple)) and key and set(key) <= names | AGREEMENT_IDENTITY):
+            problems.append(f"{where}: key must list canonical fields (or symbol, trade_date), got {key!r}")
+        renames = entry.get("reference_params")
+        if renames is not None and not (isinstance(renames, Mapping) and set(renames.values()) <= set(item.spec.params)):
+            problems.append(f"{where}: reference_params must map keywords to parameters of the binding {sorted(item.spec.params)}")
+        if not isinstance(entry.get("reference_fixed", {}), Mapping):
+            problems.append(f"{where}: reference_fixed must be a mapping of keywords to values")
+    return problems
+
+
 def _spec_problems(item: Binding) -> list[str]:
-    """A spec may only name canonical fields of its capability, and scale them by plain numbers."""
+    """A spec may only name canonical fields of its capability, scale them by plain numbers and agree with a catalogued reference."""
     label = f"binding {item.source}->{item.capability}"
     capability = CAPABILITIES.get(item.capability)
     names = set(capability.schema.names) if capability is not None and capability.schema is not None else set()
@@ -1017,7 +1077,7 @@ def _spec_problems(item: Binding) -> list[str]:
             problems.append(f"{label}: unit factor for {field_name!r}, not a canonical field (factors apply after field_map)")
         if isinstance(factor, bool) or not isinstance(factor, (int, float)) or not factor:
             problems.append(f"{label}: unit factor for {field_name!r} must be a non-zero int or float, got {factor!r}")
-    return problems
+    return [*problems, *_agreement_problems(item, names)]
 
 
 def validate_catalog() -> list[str]:
