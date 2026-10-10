@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from app.datasources.catalog import BINDINGS, TAXONOMIES
+from app.datasources.contracts import CapabilityEvidence
 from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_mac, tdx_mac_fields
 from app.datasources.sources.tdx_mac_fields import active_fields, bitmap_for_bits
@@ -22,7 +23,7 @@ def board_item(code: str, name: str) -> bytes:
     item = bytearray(160)
     struct.pack_into("<H", item, 0, 1)
     item[2:8] = code.encode()
-    item[24:24 + len(name)] = name.encode()
+    item[24:24 + len(name.encode("gbk"))] = name.encode("gbk")
     return bytes(item)
 
 
@@ -34,7 +35,7 @@ def member_item(market: int, code: str, name: str) -> bytes:
     item = bytearray(68)
     struct.pack_into("<H", item, 0, market)
     item[2:8] = code.encode()
-    item[24:24 + len(name)] = name.encode()
+    item[24:24 + len(name.encode("gbk"))] = name.encode("gbk")
     return bytes(item)
 
 
@@ -48,7 +49,7 @@ def dynamic_body(bitmap: bytes, quotes) -> bytes:
     fields = active_fields(bitmap)
     body = bitmap + struct.pack("<IH", len(quotes), len(quotes))
     for market, code, name, values in quotes:
-        body += struct.pack("<H22s44s", market, code.encode(), name.encode())
+        body += struct.pack("<H22s44s", market, code.encode(), name.encode("gbk"))
         for field in fields:
             body += struct.pack({"float32": "<f", "int32": "<i", "uint32": "<I"}[field.format], values.get(field.name, 0))
     return body
@@ -112,84 +113,8 @@ def patched_call(client, host="mac-host:7709"):
     return mock.patch.object(tdx_mac, "call", call)
 
 
-class MacAdapterSignatureTests(unittest.TestCase):
-    """Test that adapters accept canonical keyword-only parameters."""
-
-    def test_fetch_watch_snapshot_accepts_symbols_keyword(self):
-        """fetch_watch_snapshot must accept symbols as keyword-only parameter."""
-        import inspect
-        sig = inspect.signature(tdx_mac.fetch_watch_snapshot)
-        # Check that symbols is keyword-only and no positional args before it
-        self.assertIn('symbols', sig.parameters)
-        self.assertEqual(sig.parameters['symbols'].kind, inspect.Parameter.KEYWORD_ONLY)
-
-    def test_fetch_limit_prices_accepts_symbols_keyword(self):
-        """fetch_limit_prices must accept symbols as keyword-only parameter."""
-        import inspect
-        sig = inspect.signature(tdx_mac.fetch_limit_prices)
-        self.assertIn('symbols', sig.parameters)
-        self.assertEqual(sig.parameters['symbols'].kind, inspect.Parameter.KEYWORD_ONLY)
-
-    def test_fetch_daily_bars_accepts_symbol_count_keywords(self):
-        """fetch_daily_bars must accept symbol and count as keyword-only parameters."""
-        import inspect
-        sig = inspect.signature(tdx_mac.fetch_daily_bars)
-        self.assertIn('symbol', sig.parameters)
-        self.assertIn('count', sig.parameters)
-        self.assertEqual(sig.parameters['symbol'].kind, inspect.Parameter.KEYWORD_ONLY)
-        self.assertEqual(sig.parameters['count'].kind, inspect.Parameter.KEYWORD_ONLY)
-
-    def test_fetch_minute_bars_accepts_symbol_count_keywords(self):
-        """fetch_minute_bars must accept symbol and count as keyword-only parameters."""
-        import inspect
-        sig = inspect.signature(tdx_mac.fetch_minute_bars)
-        self.assertIn('symbol', sig.parameters)
-        self.assertIn('count', sig.parameters)
-        self.assertEqual(sig.parameters['symbol'].kind, inspect.Parameter.KEYWORD_ONLY)
-        self.assertEqual(sig.parameters['count'].kind, inspect.Parameter.KEYWORD_ONLY)
-
-    def test_fetch_board_catalog_has_no_parameters(self):
-        """fetch_board_catalog must have no required parameters."""
-        import inspect
-        sig = inspect.signature(tdx_mac.fetch_board_catalog)
-        # Should have no required parameters (no *args, **kwargs in signature)
-        required_params = [p for p in sig.parameters.values()
-                          if p.default == inspect.Parameter.empty
-                          and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)]
-        self.assertEqual(len(required_params), 0)
-
-    def test_fetch_membership_accepts_sector_key_and_board_type_keywords(self):
-        """fetch_membership takes the catalog row's board_code and board_type as keyword-only parameters."""
-        sig = inspect.signature(tdx_mac.fetch_membership)
-        for name in ("sector_key", "board_type"):
-            self.assertIn(name, sig.parameters)
-            self.assertEqual(sig.parameters[name].kind, inspect.Parameter.KEYWORD_ONLY)
-
-
 class MacBoardCatalogTests(unittest.TestCase):
-    """Test sector.board_catalog returns rows with singular field names."""
-
-    def test_board_catalog_field_names(self):
-        """Parsed board_catalog rows must have singular field names: board_code, name, board_type."""
-        # Synthetic board row - count_all=2 produces 1 row
-        item = bytearray(160)
-        struct.pack_into("<H", item, 0, 1)  # market
-        item[2:8] = b"880001"
-        item[24:29] = b"Sector\0"
-        struct.pack_into("<f", item, 148, 11.59)  # leading_price (not member_count)
-        body = struct.pack("<HH", 2, 99) + bytes(item)
-
-        rows = tdx_mac.parse_board_list(body)
-        self.assertEqual(len(rows), 1)
-        row = rows[0]
-
-        # Check that these fields exist (will be mapped to board_code, name, board_type in fetch_board_catalog)
-        self.assertIn("code", row)
-        self.assertEqual(row["code"], "880001")
-        self.assertIn("name", row)
-        self.assertNotIn("member_count", row)
-        # leading_price at offset 148 should be 11.59 (not read as <H which would be 28836)
-        self.assertAlmostEqual(row["leading_price"], 11.59, places=2)
+    """sector.board_catalog rows are exactly board_code, name and board_type."""
 
     def catalog_client(self, boards_by_type):
         return FakeMacClient({tdx_mac.OP_BOARD: lambda request: board_page(
@@ -282,19 +207,25 @@ class MacMembershipTests(unittest.TestCase):
 
 
 class MacProtocolTests(unittest.TestCase):
-    def test_builders_and_market(self):
-        self.assertEqual(tdx_mac.exchange_board_code("881376"), 21376)
-        self.assertEqual(tdx_mac.exchange_board_code("880761"), 20761)
-        self.assertEqual(tdx_mac.exchange_board_code("399001"), 30001)
-        self.assertEqual(tdx_mac.exchange_board_code("899001"), 32001)
-        self.assertEqual(tdx_mac.exchange_board_code("000001"), 31001)
+    def test_board_codes_follow_gotdx(self):
+        for key, code in (("881376", 21376), ("880761", 20761), ("399001", 30001), ("899001", 32001),
+                          ("000001", 31001)):
+            self.assertEqual(tdx_mac.exchange_board_code(key), code)
+
+    def test_requests_carry_their_opcode_and_count(self):
         self.assertEqual(tdx_mac.BAR_PERIODS["1m"], 8)
         self.assertEqual(len(tdx_mac.build_handshake()), 2)
         batch = tdx_mac.build_batch_quotes_request([(0, "000001"), (1, "600519")])
-        self.assertEqual(
-            struct.unpack_from("<H", batch, 10)[0], tdx_mac.OP_BATCH_QUOTES
-        )
+        self.assertEqual(struct.unpack_from("<H", batch, 10)[0], tdx_mac.OP_BATCH_QUOTES)
         self.assertEqual(struct.unpack_from("<H", batch, 32)[0], 2)
+
+    def test_the_belong_board_and_capital_flow_queries_differ_in_head_and_query(self):
+        belong = tdx_mac.build_aux_request(tdx_mac.OP_BELONG_BOARD, 0, "000001")
+        flow = tdx_mac_fields.build_capital_flow_request("000001.SZ")
+        self.assertEqual((belong[0], flow[0]), (1, 2))
+        self.assertEqual({struct.unpack_from("<H", request, 10)[0] for request in (belong, flow)}, {tdx_mac.OP_BELONG_BOARD})
+        self.assertIn(b"Stock_GLHQ", belong)
+        self.assertIn(b"Stock_ZJLX", flow)
 
     def test_member_quote_request_carries_sort_filter_and_the_quote_bit(self):
         request = tdx_mac.build_board_members_request(20812, quotes=True, sort_type=1, sort_order=0, filter_byte=4)
@@ -315,48 +246,34 @@ class MacProtocolTests(unittest.TestCase):
             for name in names:
                 self.assertFalse(hasattr(module, name), f"{module.__name__}.{name}")
 
-    def test_board_list_fixture(self):
+    def test_a_board_list_row_decodes_every_field_at_its_offset(self):
         item = bytearray(160)
         struct.pack_into("<H", item, 0, 1)
         item[2:8] = b"880001"
         item[24:29] = b"Coal\0"
-        struct.pack_into("<fff", item, 68, 10.5, 0.8, 10.0)
+        struct.pack_into("<fff", item, 68, 10.5, 0.75, 10.0)
         item[82:88] = b"000001"
         item[104:111] = b"PingAn\0"
-        body = struct.pack("<HH", 2, 99) + bytes(item)
-        rows = tdx_mac.parse_board_list(body)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["code"], "880001")
-        self.assertEqual(rows[0]["leading_name"], "PingAn")
+        struct.pack_into("<fff", item, 148, 11.5, 1.25, 11.0)
+        self.assertEqual(tdx_mac.parse_board_list(struct.pack("<HH", 2, 99) + bytes(item)), [{
+            "market": 1, "code": "880001", "name": "Coal", "price": 10.5, "rise_speed": 0.75, "pre_close": 10.0,
+            "leading_market": 0, "leading_code": "000001", "leading_name": "PingAn",
+            "leading_price": 11.5, "leading_rise_speed": 1.25, "leading_pre_close": 11.0}])
 
-    def test_members_quotes_batch_and_bars(self):
-        member = bytearray(68)
-        member[2:8] = b"600519"
-        member[24:31] = b"Moutai\0"
-        members = b"\0" * 24 + struct.pack("<H", 1) + bytes(member)
-        self.assertEqual(tdx_mac.parse_board_members(members)[0]["symbol"], "600519")
-        bitmap = bytes([1 << 5]) + b"\0" * 19
-        batch = (
-            bitmap
-            + struct.pack("<IH", 1, 1)
-            + struct.pack("<H22s", 1, b"600519" + b"\0" * 16)
-            + b"\0" * 44
-            + struct.pack("<I", 123)
-        )
-        self.assertEqual(tdx_mac.parse_batch_quotes(batch, [(1, "600519")])[0]["vol"], 123)
-        dynamic = (
-            bitmap
-            + struct.pack("<IH", 1, 1)
-            + struct.pack("<H22s", 1, b"600519" + b"\0" * 16)
-            + b"\0" * 44
-            + struct.pack("<I", 123)
-        )
-        self.assertEqual(
-            tdx_mac.parse_board_members(dynamic, quotes=True)[0]["vol"], 123
-        )
-        board = tdx_mac.build_aux_request(tdx_mac.OP_BELONG_BOARD, 0, "000001")
-        self.assertEqual(board[0], 1)
-        self.assertIn(b"Stock_GLHQ", board)
+    def test_names_are_read_as_gbk_even_when_the_bytes_are_also_valid_utf8(self):
+        # The GBK bytes of 通22转债 are valid UTF-8 too and decode to other characters if UTF-8 is tried first.
+        self.assertEqual(tdx_mac.parse_board_list(board_page(board_item("880001", "通22转债")))[0]["name"], "通22转债")
+        self.assertEqual(tdx_mac.parse_board_members(members_page(member_item(1, "600519", "贵州茅台")))[0]["name"], "贵州茅台")
+
+    def test_static_member_rows_are_market_symbol_and_name(self):
+        rows = tdx_mac.parse_board_members(members_page(member_item(1, "600519", "Moutai"), member_item(0, "000001", "PingAn")))
+        self.assertEqual(rows, [{"market": 1, "symbol": "600519", "name": "Moutai"},
+                                {"market": 0, "symbol": "000001", "name": "PingAn"}])
+
+    def test_dynamic_rows_decode_for_batch_quotes_and_member_quotes(self):
+        body = dynamic_body(bitmap_for_bits([5]), [(1, "600519", "Moutai", {"vol": 123})])
+        self.assertEqual(tdx_mac.parse_batch_quotes(body, [(1, "600519")])[0]["vol"], 123)
+        self.assertEqual(tdx_mac.parse_board_members(body, quotes=True)[0]["vol"], 123)
 
 
 class MacWatchSnapshotTests(unittest.TestCase):
@@ -447,13 +364,28 @@ class MacLimitPriceTests(unittest.TestCase):
 
 
 class MacBindingSpecTests(unittest.TestCase):
-    def test_batch_bindings_use_the_clients_batch_size_and_name_the_adapters_parameters(self):
-        for capability, adapter in (("quote.watch_snapshot", tdx_mac.fetch_watch_snapshot),
-                                    ("limits.prices", tdx_mac.fetch_limit_prices)):
-            spec = mac_binding(capability).spec
-            self.assertEqual(spec.max_batch, tdx_mac.MAX_BATCH)
-            self.assertEqual(set(spec.params), {"symbols"})
-            self.assertEqual(set(inspect.signature(adapter).parameters), {"symbols"})
+    ADAPTERS = {"quote.watch_snapshot": tdx_mac.fetch_watch_snapshot, "limits.prices": tdx_mac.fetch_limit_prices,
+                "sector.board_catalog": tdx_mac.fetch_board_catalog, "sector.membership": tdx_mac.fetch_membership,
+                "bars.daily": tdx_mac.fetch_daily_bars, "bars.minute": tdx_mac.fetch_minute_bars}
+
+    def test_every_adapter_takes_exactly_the_keyword_only_parameters_its_binding_documents(self):
+        for capability, adapter in self.ADAPTERS.items():
+            binding = mac_binding(capability)
+            parameters = inspect.signature(adapter).parameters
+            self.assertEqual(binding.adapter, f"app/datasources/sources/tdx_mac.py:{adapter.__name__}")
+            self.assertEqual(set(parameters), set(binding.spec.params), capability)
+            self.assertTrue(all(item.kind is inspect.Parameter.KEYWORD_ONLY for item in parameters.values()), capability)
+
+    def test_all_six_bindings_stay_unsupported_research_evidence(self):
+        self.assertEqual({item.capability for item in BINDINGS if item.source == "tdx_mac"}, set(self.ADAPTERS))
+        for capability in self.ADAPTERS:
+            binding = mac_binding(capability)
+            self.assertEqual((binding.status, binding.decision_eligible), ("unsupported", False), capability)
+            self.assertEqual(binding.spec.handshake_profile, "mac", capability)
+
+    def test_batch_bindings_use_the_clients_batch_size(self):
+        for capability in ("quote.watch_snapshot", "limits.prices"):
+            self.assertEqual(mac_binding(capability).spec.max_batch, tdx_mac.MAX_BATCH)
 
 
 SENTINEL = (20261008, 0, 99.0, 99.0, 99.0, 100.0, 500.0, 50.0, 9.0)
@@ -525,6 +457,33 @@ class MacBarAdapterTests(unittest.TestCase):
         self.assertIn("source_available_at", binding.notes)
         self.assertIn("UNSUPPORTED", binding.notes)
         self.assertIn("available=none", binding.spec.time_semantics)
+
+
+class MacEvidenceTests(unittest.TestCase):
+    def test_every_adapter_returns_evidence_that_names_the_answering_host(self):
+        client = FakeMacClient({
+            tdx_mac.OP_BATCH_QUOTES: quote_answer(),
+            tdx_mac.OP_BOARD: lambda request: board_page(board_item("881376", "Coal")),
+            tdx_mac.OP_MEMBERS: lambda request: members_page(member_item(1, "600519", "Moutai")),
+            tdx_mac.OP_BARS: lambda request: bars_body([SENTINEL, *BARS]),
+        })
+
+        async def run_all():
+            return [await tdx_mac.fetch_watch_snapshot(symbols=["000001.SZ"]),
+                    await tdx_mac.fetch_limit_prices(symbols=["000001.SZ"]),
+                    await tdx_mac.fetch_board_catalog(),
+                    await tdx_mac.fetch_membership(sector_key="880710", board_type=3),
+                    await tdx_mac.fetch_daily_bars(symbol="000001.SZ", count=3),
+                    await tdx_mac.fetch_minute_bars(symbol="000001.SZ", count=3)]
+
+        with patched_call(client, host="second-host:7709"):
+            results = asyncio.run(run_all())
+        self.assertEqual(len(results), len(MacBindingSpecTests.ADAPTERS))
+        for evidence in results:
+            self.assertIsInstance(evidence, CapabilityEvidence)
+            self.assertEqual(evidence.warnings, ("tdx_host=second-host:7709",))
+            self.assertIsNotNone(evidence.available_at_min)
+            self.assertTrue(evidence.rows)
 
 
 class MacBarParserTests(unittest.TestCase):
