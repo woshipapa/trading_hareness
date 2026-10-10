@@ -47,6 +47,23 @@ class CompletenessTests(unittest.TestCase):
                          {"demo.query_rows", "demo.uses_query", "demo.QuoteProvider.quotes", "demo.uses_provider",
                           "sub.deep.load"})
 
+    def test_readers_inherit_input_output_from_base_classes(self):
+        root, _ = self._tree({
+            "sources/__init__.py": "",
+            "sources/transport.py": ("import socket\n\n"
+                                     "class Client:\n    def __enter__(self):\n        self.s = socket.create_connection(('h', 1))\n"
+                                     "        return self\n\n    def __exit__(self, *_):\n        return False\n\n"
+                                     "    def _exchange(self, request):\n        self.s.sendall(request)\n        return b''\n"),
+            "sources/finance.py": ("from . import transport\n\n"
+                                   "class FinanceClient(transport.Client):\n    def gpcw(self, name):\n        return self._exchange(name)\n\n"
+                                   "def download(client, name):\n    return client._exchange(name)\n\n"
+                                   "def latest(name):\n    with FinanceClient() as client:\n        return client\n"),
+        })
+        readers = set(public_fetch_functions(root))
+        self.assertIn("finance.FinanceClient.gpcw", readers, "self._exchange resolves to the base class")
+        self.assertIn("finance.download", readers, "_exchange on a client passed in is input/output")
+        self.assertIn("finance.latest", readers, "constructing a client runs its inherited __enter__")
+
     def test_only_references_reachable_from_bind_count_as_bound(self):
         root, registry = self._tree({
             "sources/__init__.py": "",
