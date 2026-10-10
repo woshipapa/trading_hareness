@@ -214,8 +214,7 @@ def parse_index_momentum(body: bytes) -> list[int]:
     if len(body) < 2:
         raise tdx_protocol.TdxProtocolError("truncated 0x051c response header")
     count = struct.unpack_from("<H", body, 0)[0]
-    pos = total = 0
-    pos = 2
+    pos, total = 2, 0
     values = []
     try:
         for _ in range(count):
