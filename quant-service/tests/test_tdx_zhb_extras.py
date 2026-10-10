@@ -54,12 +54,16 @@ class TdxZhbExtrasTests(unittest.TestCase):
                                                "25224.80|20150521|59880.24|||||").split("|"))
         self.assertTrue(all(row["first_disclosure_date"].strftime("%Y%m%d") == row["field_4"] for row in rows))
 
-    def test_tipinfo_row_with_a_bad_eps_or_first_disclosure_date_raises_instead_of_being_skipped(self):
-        good = b"0|000001|20260630|1.24|20260815|\n"
+    def test_tipinfo_row_with_a_bad_eps_date_or_width_raises_instead_of_being_skipped(self):
+        def row(*fields: str) -> bytes:
+            return "|".join(fields + ("",) * (22 - len(fields))).encode() + b"\n"
+        good = row("0", "000001", "20260630", "1.24", "20260815")
         with self.assertRaisesRegex(TdxFileError, "000002: EPS 'nan' is not a number"):
-            parse_tipinfo(good + b"0|000002|20260630|nan|20260828|\n")
+            parse_tipinfo(good + row("0", "000002", "20260630", "nan", "20260828"))
         with self.assertRaisesRegex(TdxFileError, "000002: column 4 '2026828' is not a date"):
-            parse_tipinfo(good + b"0|000002|20260630|-1.25|2026828|\n")
+            parse_tipinfo(good + row("0", "000002", "20260630", "-1.25", "2026828"))
+        with self.assertRaisesRegex(TdxFileError, "tipinfo row has 21 columns, not 22"):
+            parse_tipinfo(good + good[:-2] + b"\n")
 
     def test_binary_inspection_does_not_claim_semantics(self):
         result = inspect_binary_member(bytes(range(256)) * 2)

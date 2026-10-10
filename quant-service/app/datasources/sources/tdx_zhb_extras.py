@@ -165,11 +165,13 @@ def parse_tipinfo(data: bytes) -> list[dict[str, Any]]:
     without a time of day: it equals Eastmoney's actual publication date for 5,549 of 5,551
     securities (docs/archive/tdx-q-disclosure.md, Q1). The file holds each security's latest report
     only (scripts/data/tdx_tipinfo_2026-10-10_mac.json), so it dates no older period. Columns 5-21
-    stay raw (``field_N``). A row whose EPS is not a number or whose column 4 is not a date raises
-    ``TdxFileError``.
+    stay raw (``field_N``). A row without exactly 22 columns, whose EPS is not a number or whose
+    column 4 is not a date raises ``TdxFileError``.
     """
     rows = []
-    for fields in _pipe_rows(data, 5):
+    for fields in _pipe_rows(data):
+        if len(fields) != 22:
+            raise TdxFileError(f"tipinfo row has {len(fields)} columns, not 22: {'|'.join(fields)[:40]!r}")
         eps = _number(fields[3])
         if eps is None:
             raise TdxFileError(f"tipinfo {fields[1]}: EPS {fields[3]!r} is not a number")
