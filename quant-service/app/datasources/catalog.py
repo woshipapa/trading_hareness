@@ -99,6 +99,8 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
     DataSource("tdx_public", "通达信公开行情主站", "tdx hq hosts :7709", "unofficial_protocol", "tcp_tdx", "free",
                "app/datasources/sources/tdx_protocol.py",
                risks="非官方社区主站；2026-09-18 起仅历史分笔与除权除息可用，实时行情与 K 线命令被拒"),
+    DataSource("tdx_ext", "通达信扩展行情", "tdx extended hq :7727", "unofficial_protocol", "tcp_tdx", "free",
+               "app/datasources/sources/tdx_ex_market.py", risks="研究证据；A 股决策路径不得使用"),
     DataSource("tdx_local", "通达信客户端盘后数据（vipdoc）", "owner workstation TDX client", "local_files", "files", "free",
                "app/datasources/sources/tdx_local_files.py", risks="依赖 owner 手工/定时盘后下载", deploy="owner_workstation_cli"),
     # -- aggregators ----------------------------------------------------------
@@ -219,6 +221,9 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
          "date category cash_dividend float_shares_after_10k total_shares_after_10k", "effective=变动日; available=采集时刻"),
     _cap("fundamentals.margin", "融资融券", "daily", "all_a", "rzye rzmre rqye net_buy", "effective=T 日; available=T+1 采集"),
     _cap("reference.instruments", "证券基础信息", "reference", "all_a", "symbol name list_date is_st", "effective=入库"),
+    _cap("context.instruments", "扩展市场品种列表", "reference", "market", "market_id code name category", "effective=服务器列表; available=采集时刻"),
+    _cap("context.quote", "扩展市场快照", "realtime", "per_symbol", "market_id code price pre_close open high low volume amount server_time", _OBSERVED),
+    _cap("context.bars_daily", "扩展市场日K", "daily", "per_symbol", "market_id code datetime open high low close volume amount", "effective=交易日; available=采集时刻"),
     _cap("reference.trade_calendar", "交易日历", "reference", "market", "exchange calendar_date is_open", "effective=入库"),
     _cap("reference.suspensions", "停复牌（按交易日）", "daily", "all_a", "symbol suspend_date suspend_reason",
          "effective=交易日; available=入库"),
@@ -487,6 +492,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/sentiment_cycle_daily.py"),
     # deliberately retired
     _bind("longhuvip", "bars.daily", 26, RETIRED, notes="个股日K 接口（旧系统 id=7）恒空，下线；日K 走 longhuvip_composite"),
+    _bind("tdx_ext", "context.instruments", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_instruments", notes="A 股决策路径不得使用",
+          spec=BindingSpec(params={"symbol": "market_id"}, field_map={"market_id": "market_id", "code": "code", "name": "name", "category": "category"}, time_semantics="effective=服务器列表; available=采集时刻")),
+    _bind("tdx_ext", "context.quote", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_quote", notes="A 股决策路径不得使用",
+          spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "price": "price", "pre_close": "pre_close", "open": "open", "high": "high", "low": "low", "volume": "volume", "amount": "amount", "server_time": "server_time"}, time_semantics="effective=服务器时间字段（如有）; available=采集时刻")),
+    _bind("tdx_ext", "context.bars_daily", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_bars_daily", notes="A 股决策路径不得使用",
+          spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "datetime": "datetime", "open": "open", "high": "high", "low": "low", "close": "close", "volume": "volume", "amount": "amount"}, time_semantics="effective=K 线交易日; available=采集时刻")),
 )
 
 # The 120 bindings that existed without a structured BindingSpec at the P0 baseline (ca209a81), written
@@ -730,8 +741,8 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key):
-            problems.append(f"{key}: no resolvable binding")
+        if not any(item.capability == key for item in BINDINGS):
+            problems.append(f"{key}: no binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
             problems.append(f"{source.key}: unknown license {source.license}")

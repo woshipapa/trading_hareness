@@ -63,7 +63,20 @@ UNREGISTERED: dict[str, str] = {
     "family:boards": "verified in the plan; board capabilities arrive in P3",
     "family:capital flow": "MAC capital flow semantics unverified (delta 1b); research projection only, P3",
     "family:MAC": "MAC protocol bindings arrive in P3, all UNSUPPORTED until the evidence gates",
-    "family:extended": "7727 extended-market handshake is unsolved (plan F7, P9)",
+    "tdx_ex_market.TdxExMarketClient.categories": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.count": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.history_tick_chart": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.history_transactions": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.instruments": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.instrument_pages": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.klines": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.klines2": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.login": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.quote": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.quotes": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.table": "harvested, binds in step 3",
+    "tdx_ex_market.TdxExMarketClient.tick_chart": "harvested, binds in step 3",
+    "tdx_ex_market.call_sync": "harvested, binds in step 3",
 }
 
 #: family -> (capability prefixes, source keys that count as TDX for it)
