@@ -131,6 +131,19 @@ def persist_timed_observations(database: Any, provider: str, capability: str,
     return len(parameters)
 
 
+def latest_observation_payloads(database: Any, provider: str, capability: str) -> dict[str, dict[str, Any]]:
+    """Return the latest stored payload for each symbol of one public capability."""
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT DISTINCT ON (symbol) symbol,normalized
+               FROM quant.raw_market_observations
+               WHERE provider_key=%s AND capability=%s AND symbol IS NOT NULL
+               ORDER BY symbol,effective_at DESC,created_at DESC""",
+            (provider, capability),
+        ).fetchall()
+    return {str(row["symbol"]): dict(row["normalized"]) for row in rows}
+
+
 def persist_free_daily(
     database: Any,
     provider: str,

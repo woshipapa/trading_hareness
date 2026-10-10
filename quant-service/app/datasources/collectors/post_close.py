@@ -19,6 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
+from ..sources import tdx_instruments
 from ..sources.fuyao_evidence import fetch_code_batches
 from .intraday import CollectorDeps, CollectorState, SENTIMENT_PROVIDER_KEY, build_sentiment
 from ..error_text import error_text
@@ -56,6 +57,7 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("daily_valuation_projection", time(18, 30), time(23, 30), "复用已归档估值补齐每日记录"),
     ArchiveJob("tick_flow", time(19, 0), time(23, 30), "观察池分笔资金流"),
     ArchiveJob("capital_changes", time(19, 30), time(23, 30), "观察池除权除息与股本变迁"),
+    ArchiveJob("tdx_security_list", time(19, 40), time(23, 30), "通达信证券列表变更"),
 )
 
 
@@ -67,6 +69,7 @@ class ArchiveDeps:
     margin_detail_enabled: bool = False
     max_tick_symbols: int = 60
     project_valuations: Callable[[date], Awaitable[Mapping[str, Any]]] | None = None
+    latest_observation_payloads: Callable[[str, str], Awaitable[dict[str, dict[str, Any]]]] | None = None
 
 
 @dataclass
@@ -290,6 +293,20 @@ async def job_capital_changes(deps: ArchiveDeps, state: ArchiveState, day: date,
     return {"symbols": len(symbols), "rows": len(rows), "stored": stored, "failures": failures[:10]}
 
 
+async def job_tdx_security_list(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive the TDX instrument list; a normal day stores 52,000 rows initially and only changed symbols later."""
+    started = time_module.monotonic()
+    evidence = await tdx_instruments.fetch_security_list()
+    rows = evidence.rows
+    previous = await deps.latest_observation_payloads("tdx_public", "tdx_security_list") if deps.latest_observation_payloads else {}
+    changed = [dict(row, effective_at=now.isoformat(), available_at=now.isoformat())
+               for row in rows if previous.get(row["symbol"]) != row]
+    stored = await deps.collector.persist_observations("tdx_public", "tdx_security_list", changed) if changed else 0
+    await deps.collector.record_health("tdx_public", "tdx_security_list", True, len(rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"rows": len(rows), "changed": len(changed), "stored": stored}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -297,6 +314,7 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "eastmoney_margin": job_eastmoney_margin, "fuyao_valuation_index": job_fuyao_valuation_index,
     "daily_valuation_projection": job_daily_valuation_projection,
     "tick_flow": job_tick_flow, "capital_changes": job_capital_changes,
+    "tdx_security_list": job_tdx_security_list,
 }
 
 

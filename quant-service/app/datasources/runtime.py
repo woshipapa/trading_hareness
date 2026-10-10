@@ -20,7 +20,7 @@ from datetime import date
 from typing import Any
 
 from ..provider_health import record_provider_failure, record_provider_success
-from ..public_market_repository import persist_market_events, persist_timed_observations
+from ..public_market_repository import latest_observation_payloads, persist_market_events, persist_timed_observations
 from ..daily_valuation_repository import project_valuations
 from ..runtime_leases import (
     acquire_runtime_lease, background_loop_lease_seconds, release_runtime_lease, renew_runtime_lease,
@@ -39,10 +39,12 @@ async def _to_thread(action: Callable[..., Any], *args: Any, timeout_seconds: fl
     return await asyncio.wait_for(asyncio.to_thread(action, *args), timeout=timeout_seconds)
 
 
-def env_flags(prefix: str, keys: Sequence[str], environ: Mapping[str, str] | None = None) -> dict[str, bool]:
-    """``<PREFIX>_<KEY>_ENABLED=false`` switches one source/job off; default on."""
+def env_flags(prefix: str, keys: Sequence[str], environ: Mapping[str, str] | None = None,
+              opt_in_keys: set[str] = frozenset()) -> dict[str, bool]:
+    """Read per-key switches, with selected keys defaulting off."""
     values = os.environ if environ is None else environ
-    return {key: str(values.get(f"{prefix}_{key.upper()}_ENABLED", "true")).strip().lower() in {"1", "true", "yes", "on"}
+    return {key: str(values.get(f"{prefix}_{key.upper()}_ENABLED", "false" if key in opt_in_keys else "true")).strip().lower()
+            in {"1", "true", "yes", "on"}
             for key in keys}
 
 
@@ -100,6 +102,9 @@ def build_archive_deps(database: Any, collector: intraday.CollectorDeps, *, run_
     async def previous_day(day: date) -> date | None:
         return await run(storage.previous_trading_day, database, day, timeout_seconds=15)
 
+    async def latest(provider: str, capability: str) -> dict[str, dict[str, Any]]:
+        return await run(latest_observation_payloads, database, provider, capability, timeout_seconds=30)
+
     async def project(day: date) -> Mapping[str, Any]:
         return await run(project_valuations, database, day, apply=True, timeout_seconds=90)
 
@@ -112,6 +117,7 @@ def build_archive_deps(database: Any, collector: intraday.CollectorDeps, *, run_
         margin_detail_enabled=str(values.get("PUBLIC_ARCHIVE_MARGIN_DETAIL_ENABLED", "false")).strip().lower()
         in {"1", "true", "yes", "on"},
         max_tick_symbols=max_tick_symbols,
+        latest_observation_payloads=latest,
         # Enable on the agreed projection writer only, after shared-stage
         # lease adoption. Merely deploying this code must not start a writer.
         project_valuations=project if str(values.get("DAILY_VALUATION_PROJECTION_ENABLED", "false")).strip().lower()
@@ -133,7 +139,9 @@ def collector_loops(
             collector, session_open=session_open, enabled=env_flags("PUBLIC_EVIDENCE", list(intraday.CADENCES), environ)),
         "post_close_public_archive": lambda: post_close.run_loop(
             archive, trading_day=trading_day,
-            enabled=env_flags("PUBLIC_ARCHIVE", [job.key for job in post_close.JOBS], environ)),
+            enabled=env_flags("PUBLIC_ARCHIVE", [job.key for job in post_close.JOBS], environ,
+                              opt_in_keys={"tdx_security_list", "tdx_tipinfo", "tdx_gpcw", "tdx_index_bars",
+                                           "tdx_mac_boards", "tdx_limit_pools", "tdx_host_probe"})),
     }
 
 
