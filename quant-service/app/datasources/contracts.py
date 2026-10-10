@@ -23,7 +23,8 @@ DECLARED: Final = "declared"             # documented and probed, not yet sessio
 DORMANT: Final = "dormant"               # implemented but no scheduled caller
 UNSUPPORTED: Final = "unsupported"       # the upstream refuses it (kept to re-probe)
 RETIRED: Final = "retired"               # deliberately taken out of resolution
-BINDING_STATES: Final = (LIVE_VERIFIED, DECLARED, DORMANT, UNSUPPORTED, RETIRED)
+UNVERIFIED: Final = "unverified"         # not yet verified (taxonomy only)
+BINDING_STATES: Final = (LIVE_VERIFIED, DECLARED, DORMANT, UNSUPPORTED, RETIRED, UNVERIFIED)
 RESOLVABLE_STATES: Final = frozenset({LIVE_VERIFIED, DECLARED, DORMANT})
 PURPOSES: Final = ("research", "replay", "shadow")
 QUALITY_STATUSES: Final = ("complete", "partial", "empty", "stale", "invalid", "conflicted")
@@ -247,5 +248,5 @@ __all__ = [
     "BINDING_STATES", "Binding", "BindingSpec", "CATEGORIES", "CanonicalSchema", "Capability", "CapabilityEvidence", "CapabilityRequest",
     "CapabilityRequirement", "DECLARED", "DORMANT", "DataSource", "GRAINS", "LICENSES", "LIVE_VERIFIED",
     "PURPOSES", "QUALITY_STATUSES", "QualityReceipt", "RESOLVABLE_STATES", "RETIRED", "SCOPES", "SourceLabel",
-    "StrategyDataNeeds", "FieldSpec", "Taxonomy", "UNSUPPORTED",
+    "StrategyDataNeeds", "FieldSpec", "Taxonomy", "UNVERIFIED", "UNSUPPORTED",
 ]
