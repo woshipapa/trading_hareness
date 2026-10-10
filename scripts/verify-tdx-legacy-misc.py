@@ -17,7 +17,6 @@ sys.path.insert(0, str(ROOT / "quant-service"))
 from app.datasources.sources import tdx_legacy_misc as legacy  # noqa: E402
 from app.datasources.sources import tdx_protocol  # noqa: E402
 
-HOSTS = (("60.191.117.167", 7709), ("218.75.126.9", 7709), ("117.34.114.13", 7709))
 COMMAND_ERRORS = (OSError, socket.timeout, tdx_protocol.TdxProtocolError, ValueError, IndexError, struct.error)
 
 
@@ -32,32 +31,24 @@ def _run(result: dict, name: str, fn):
     return value
 
 
-def _ranking(client: tdx_protocol.TdxClient) -> list[dict]:
-    rows: list[dict] = []
-    for start in range(0, 80 * 100, 80):
-        page = legacy.parse_quotes_list(client._exchange(
-            legacy.build_quotes_list_request(legacy.QUOTE_CATEGORIES["all_a"],
-                                             legacy.QUOTE_SORT_TYPES["change_pct"], start, 80, True)))
-        rows.extend(page)
-        if len(page) < legacy.RANKING_PAGE_SIZE:
-            return rows
-    return rows
-
-
 def _probe_host(host: str, port: int, timeout: float) -> dict:
     result: dict = {"host": f"{host}:{port}", "commands": {}}
     try:
         with tdx_protocol.TdxClient(host, port, timeout, handshake_profile="login_one") as client:
-            rows = _run(result, "0x054b", lambda: _ranking(client))
+            # Run the adapter's own sweep (finding 9)
+            rows, warnings_dict = _run(result, "0x054b", lambda: legacy._all_a_snapshot(client))
+            if rows:
+                result["0x054b_row_count"] = len(rows)
+                result["0x054b_warnings"] = warnings_dict
+            # Index overview with R1 echo check (finding 1)
             index = _run(result, "0x051d", lambda: legacy.parse_index_info(
-                client._exchange(legacy.build_index_info_request(1, "000001"))))
-            momentum = _run(result, "0x051c", lambda: legacy.parse_index_momentum(
-                client._exchange(legacy.build_index_momentum_request(1, "000001"))))
-            ping = _run(result, "0x0015", lambda: client._exchange(legacy._header(legacy.KMSG_PING, packet_type=0)))
-            heartbeat = _run(result, "0x0004", lambda: client._exchange(legacy._header(legacy.KMSG_HEARTBEAT)))
-            result["usable"] = bool(rows) and bool(index) and momentum is not None and ping is not None and heartbeat is not None
+                client._exchange(legacy.build_index_info_request(1, "999999")),
+                request_market=1, request_code="999999"))
             if index:
                 result["index_fields"] = sorted(index)
+            # Heartbeat with packet type 1 (finding 9)
+            heartbeat = _run(result, "0x0004", lambda: client._exchange(legacy._header(legacy.KMSG_INDEXINFO, packet_type=1)))
+            result["usable"] = bool(rows) and bool(index) and heartbeat is not None
     except COMMAND_ERRORS as exc:
         result["error"] = type(exc).__name__
         result["usable"] = False
@@ -68,7 +59,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout", type=float, default=5.0)
     args = parser.parse_args()
-    reports = [_probe_host(host, port, args.timeout) for host, port in HOSTS]
+    # Use generated host pool (finding 9)
+    hosts = tdx_protocol.DEFAULT_HOSTS
+    reports = [_probe_host(host, port, args.timeout) for host, port in hosts]
     for report in reports:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0 if any(report.get("usable") for report in reports) else 1

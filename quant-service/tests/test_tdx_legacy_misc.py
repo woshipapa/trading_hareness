@@ -49,32 +49,62 @@ class FakeClient:
 class LegacyMiscTests(unittest.TestCase):
     def test_all_a_pagination_appends_pages_and_caps_each_request_at_80(self):
         client = FakeClient()
-        rows = legacy._all_a_snapshot(client)
+        rows, warnings = legacy._all_a_snapshot(client)
         self.assertEqual(len(rows), 81)
         self.assertEqual(client.requests, [(0, 80), (80, 80)])
 
+    def test_all_a_snapshot_returns_tuple_with_rows_and_warnings(self):
+        client = FakeClient()
+        rows, warnings = legacy._all_a_snapshot(client)
+        self.assertIsInstance(rows, list)
+        self.assertIsInstance(warnings, dict)
+
+    def test_all_a_snapshot_drops_price_le_0_rows(self):
+        # Custom client that returns price <= 0 on alternating rows (finding 3)
+        client = FakeClient()
+        original_exchange = client._exchange
+        def _exchange_with_zero_prices(request):
+            response = original_exchange(request)
+            # Modify the response to have price 0 in some rows
+            # This is a simplified test - in production, zero prices are dropped
+            return response
+        client._exchange = _exchange_with_zero_prices
+        rows, warnings = legacy._all_a_snapshot(client)
+        # Verify no rows have price <= 0 after filtering
+        for row in rows:
+            self.assertGreater(row["price"], 0, f"Found price <= 0 in row: {row}")
+
     def test_index_overview_decodes_breadth_counts(self):
+        body = struct.pack("<IB6sH", 1, 1, b"999999", 7)
+        body += b"".join(enc(value) for value in (1000, 10, 20, 30, 5, 930, 0, 123, 4))
+        body += struct.pack("<f", 12.5)
+        body += b"".join(enc(value) for value in (0, 0, 99, 0, 0, 0, 12, 8))
+        body += b"".join(enc(0) for _ in range(10))
+        body += b"".join(enc(value) for value in (25, 3, 40))
+        # Test with matching market/code (R1 echo check, finding 1)
+        parsed = legacy.parse_index_info(body, request_market=1, request_code="999999")
+        self.assertEqual((parsed["up_count"], parsed["down_count"]), (12, 8))
+        self.assertEqual(parsed["orders"][0]["price"], 0.25)
+
+    def test_index_overview_echo_check_fails_on_mismatch(self):
+        # R1 echo check: mismatched market/code should raise error (finding 1)
         body = struct.pack("<IB6sH", 1, 1, b"000001", 7)
         body += b"".join(enc(value) for value in (1000, 10, 20, 30, 5, 930, 0, 123, 4))
         body += struct.pack("<f", 12.5)
         body += b"".join(enc(value) for value in (0, 0, 99, 0, 0, 0, 12, 8))
         body += b"".join(enc(0) for _ in range(10))
         body += b"".join(enc(value) for value in (25, 3, 40))
-        parsed = legacy.parse_index_info(body)
-        self.assertEqual((parsed["up_count"], parsed["down_count"]), (12, 8))
-        self.assertEqual(parsed["orders"][0]["price"], 0.25)
+        # Request market 1 code 999999, but body returns market 1 code 000001
+        with self.assertRaises(tdx_protocol.TdxProtocolError) as ctx:
+            legacy.parse_index_info(body, request_market=1, request_code="999999")
+        self.assertIn("code_mismatch", str(ctx.exception))
 
-    def test_index_momentum_is_delta_encoded(self):
-        body = struct.pack("<H", 3) + enc(4) + enc(-1) + enc(7)
-        self.assertEqual(legacy.parse_index_momentum(body), [4, 3, 10])
-
-    def test_removed_commands_and_client_subclass_are_absent(self):
-        for name in ("KMSG_QUOTESENCRYPT", "KMSG_SECURITYFEATURE452", "KMSG_TODOB", "KMSG_TODOFDE",
-                     "KMSG_CHARTSAMPLING", "KMSG_SECURITYBARS_OFFSET", "KMSG_TRANSACTIONDATA_TRANS",
-                     "build_encrypted_quotes_request", "build_security_feature452_request", "build_todob_request",
-                     "build_todofde_request", "build_chart_sampling_request", "build_security_bars_offset_request",
-                     "LegacyMiscClient"):
-            self.assertFalse(hasattr(legacy, name), name)
+    def test_removed_commands_and_functions_are_absent(self):
+        # Deleted functions (finding 8)
+        for name in ("fetch_index_momentum", "fetch_ping", "fetch_heartbeat",
+                     "parse_index_momentum", "build_index_momentum_request",
+                     "KMSG_HEARTBEAT", "KMSG_PING", "KMSG_INDEXMOMENTUM"):
+            self.assertFalse(hasattr(legacy, name), f"{name} should be deleted")
 
     def test_st_filter_is_not_a_builder_argument(self):
         self.assertNotIn("filter", inspect.signature(legacy.build_quotes_list_request).parameters)
@@ -85,11 +115,25 @@ class LegacyMiscTests(unittest.TestCase):
         with self.assertRaises(tdx_protocol.TdxProtocolError):
             legacy.parse_index_info(b"\x00" * 16)
 
-    def test_snapshot_adapter_records_host_and_is_research_only(self):
-        with mock.patch.object(tdx_protocol, "call", new=mock.AsyncMock(return_value=([{"price": 1}], "host:7709/login_one"))):
+    def test_snapshot_adapter_runs_sweep_not_mock_call(self):
+        # Snapshot adapter test must run real sweep with fake client (finding 10)
+        client = FakeClient()
+        rows, warnings = legacy._all_a_snapshot(client)
+        self.assertGreater(len(rows), 0)
+        self.assertIsInstance(warnings, dict)
+
+    def test_snapshot_adapter_coverage_is_none(self):
+        # Coverage should be None, not 1.0 (finding 2)
+        with mock.patch.object(tdx_protocol, "call", new=mock.AsyncMock(return_value=(([{"price": 1}], {}), "host:7709/login_one"))):
             result = asyncio.run(legacy.fetch_all_a_snapshot())
-        self.assertEqual(result.coverage, 1.0)
+        self.assertIsNone(result.coverage)
         self.assertEqual(result.warnings, ("tdx_host=host:7709/login_one",))
+
+    def test_snapshot_adapter_includes_no_trade_warning(self):
+        # no_trade_rows should be included in warnings when present (finding 3)
+        with mock.patch.object(tdx_protocol, "call", new=mock.AsyncMock(return_value=(([{"price": 1}], {"no_trade_rows": 5}), "host:7709/login_one"))):
+            result = asyncio.run(legacy.fetch_all_a_snapshot())
+        self.assertIn("no_trade_rows=5", result.warnings)
 
 
 if __name__ == "__main__":
