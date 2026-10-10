@@ -453,7 +453,9 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="16:00 左右才落库，盘中不可依赖；优先用同批腾讯行情里的公布值，缺失时才按板块比例推算"),
     _bind("tdx_mac", "limits.prices", 70, UNSUPPORTED, _RAW + "tdx_mac_limits",
           "app/datasources/sources/tdx_mac.py:fetch_limit_prices",
-          notes="0x122b 位 0x20/0x21（δ3 Q5：按板块比例，ST 1.05）；trade_date 取位 0x13；回包按位置核对（δ1 R1）",
+          notes="0x122b 位 0x20/0x21（δ3 Q5：按板块比例；主板 ST 自 2026-07-06 起为 10%，见 app/market_rules.py 与 "
+                "scripts/data/tdx_mac_limits_all_a_2026-10-10_mac.json，旧注的 ST 1.05 已过期）；无价格限制的证券（新股、北交所首日）"
+                "两个限价都回 0.0；trade_date 取位 0x13；回包按位置核对（δ1 R1）",
           spec=BindingSpec(
               params={"symbols": "symbols such as 000001.SZ"}, field_map={"limit_up": "up_limit", "limit_down": "down_limit"},
               paging="batch", max_batch=80, time_semantics="effective=trade_date (bit 0x13, Asia/Shanghai date); available=collection",
