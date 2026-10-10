@@ -38,6 +38,7 @@ from proto_wire import (DEFAULT_PUSH_CMDS, decode_primary_websocket, parse_notif
 from event_spool import EventSpool
 from history_archive import HistoryArchive
 from send_gate import SendConflict, SendGate, SendRateLimited
+from repair_scope import repair_allowed
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
@@ -1457,17 +1458,15 @@ class Bridge:
 		)
 
 	def _private_repair_allowed(self, chat_id: str) -> bool:
-		chat_id = str(chat_id or "").strip()
-		return (
-			chat_id.isdigit()
-			and chat_id in self.websocket_chat_ids
-			and (not self.private_gap_repair_chat_ids or chat_id in self.private_gap_repair_chat_ids)
+		return repair_allowed(
+			chat_id, websocket_chat_ids=self.websocket_chat_ids,
+			configured_chat_ids=self.private_gap_repair_chat_ids, dynamic_chat_ids=self.dynamic_routes,
 		)
 
 	def _private_tail_repair_allowed(self, chat_id: str) -> bool:
 		return (
 			self._private_repair_allowed(chat_id)
-			and (not self.private_tail_repair_chat_ids or chat_id in self.private_tail_repair_chat_ids)
+			and (not self.private_tail_repair_chat_ids or chat_id in self.private_tail_repair_chat_ids or chat_id in self.dynamic_routes)
 		)
 
 	def _private_repair_chunks(self, start: int, end: int) -> list[tuple[int, int]]:
