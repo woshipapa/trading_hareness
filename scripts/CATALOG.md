@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (40)
+## research data (41)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -147,6 +147,7 @@
 | `marketdata/upload_to_pan.py` | quant-research | workstation (some on the edge) | Push warm-tier parquet into the Baidu Pan cold tier and record it in the catalog. |
 | `marketdata/verify_cold_read.py` | quant-research | workstation (some on the edge) | Prove a cold-tier parquet answers the same query as the local copy. |
 | `probe-public-sources.py` | quant-research | workstation | Data-free live check of every token-free public evidence source. |
+| `probe-tdx-q-breadth.py` | quant-research | workstation | Probe TDX breadth, MAC dead commands, offset info and chart sampling. |
 | `probe-tdx-q-disclosure.py` | quant-research | workstation | Probe TDX disclosure and IPO fields against public Eastmoney rows. |
 | `probe-tdx-q-flow.py` | quant-research | workstation | Probe TDX stock capital-flow fields against ticks and public references. |
 | `probe-tdx-q-limitfields.py` | quant-research | workstation | Read-only MAC dynamic-field probe for the Q-LIMIT research record. |
