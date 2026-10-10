@@ -183,7 +183,6 @@ def build_aux_request(
     market: int,
     code: str,
     *,
-    head: int = 1,
     start: int = 0,
     count: int = 500,
 ) -> bytes:
@@ -201,7 +200,7 @@ def build_aux_request(
         )
     else:
         raise ValueError(f"unsupported MAC opcode {opcode:#x}")
-    return build_request(opcode, payload, head=head)
+    return build_request(opcode, payload)
 
 
 def _float(data: bytes, offset: int) -> float:
