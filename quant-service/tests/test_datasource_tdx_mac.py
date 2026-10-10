@@ -155,6 +155,44 @@ class MacBoardCatalogTests(unittest.TestCase):
             self.assertLessEqual(schema_fields("sector.board_catalog"), set(row))
 
 
+class MacPagingTests(unittest.TestCase):
+    def test_a_full_board_page_is_followed_by_the_next_page(self):
+        def answer(request):
+            start = struct.unpack_from("<H", request, 18)[0]
+            return board_page(*[board_item(f"88{start + index:04d}", f"b{start + index}")
+                                for index in range(150 if start == 0 else 3)])
+
+        client = FakeMacClient({tdx_mac.OP_BOARD: answer})
+        rows = client.board_list(3)
+        self.assertEqual((len(rows), rows[0]["code"], rows[149]["code"], rows[-1]["code"]), (153, "880000", "880149", "880152"))
+        self.assertEqual([struct.unpack_from("<H", request, 18)[0] for request in client.requests], [0, 150])
+
+    def test_a_short_board_page_ends_the_list(self):
+        client = FakeMacClient({tdx_mac.OP_BOARD: lambda request: board_page(board_item("880001", "Coal"))})
+        self.assertEqual(len(client.board_list(0)), 1)
+        self.assertEqual(len(client.requests), 1)
+
+    def members_client(self, total):
+        def answer(request):
+            start = struct.unpack_from("<I", request, 27)[0]
+            body = bytearray(members_page(*[member_item(1, f"6{start + index:05d}", "m")
+                                            for index in range(min(80, total - start))]))
+            struct.pack_into("<I", body, 20, total)
+            return bytes(body)
+        return FakeMacClient({tdx_mac.OP_MEMBERS: answer})
+
+    def test_board_members_page_until_the_announced_total(self):
+        client = self.members_client(100)
+        rows = client.board_members(20710)
+        self.assertEqual((len(rows), rows[0]["symbol"], rows[-1]["symbol"]), (100, "600000", "600099"))
+        self.assertEqual([struct.unpack_from("<I", request, 27)[0] for request in client.requests], [0, 80])
+
+    def test_board_members_stop_when_the_first_page_holds_the_total(self):
+        client = self.members_client(80)
+        self.assertEqual(len(client.board_members(20710)), 80)
+        self.assertEqual(len(client.requests), 1)
+
+
 class MacMembershipTests(unittest.TestCase):
     """sector.membership rows carry the four canonical fields, known_at being the UTC collection time."""
 
