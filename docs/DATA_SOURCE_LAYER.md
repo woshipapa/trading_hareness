@@ -146,6 +146,20 @@ live 阈值或订单路径。
 先用它，入库前的历史场次仍读 `ths_concept_flow`；按并集取的读者（盘中同业集合）两者都读，同一概念代码的同一组成员只计一次。
 其余 fuyao 口径不会被策略自动选中。
 
+### 4.2 P0 消费者盘点（按当前代码事实）
+
+- 经 resolver 读取：独立运行时在 `quant-service/app/datasources/runtime.py:82` 组装
+  `CapabilityResolver`；盘中异动采集在 `quant-service/app/datasources/collectors/intraday.py:195`
+  通过 `limits.anomaly_tape` 读取；策略能力 facade 在
+  `quant-service/app/platform/strategy_data_context.py:211` 统一调用
+  `resolver.fetch`。
+- 组合根直连：盘中采集在 resolver 未注入时于
+  `quant-service/app/datasources/collectors/intraday.py:192-194` 直接调用
+  `eastmoney_ztb.fetch_stock_changes`；其余 Fuyao 盘后/板块任务通过注入的
+  `fuyao_fetch` 读取（装配入口为 `quant-service/app/datasources/runtime.py:82`）。
+  `quant-service/app/datasources/bindings.py:76-155` 是 resolver 的组合根绑定表，
+  不属于消费者。
+
 v7 回放对比（owner 库冻结输入，v6 规则 vs v7 规则）：随机 1,279 条 0 差异；开盘窗口 10 条候选 0 差异——
 因为这些 Longhu 报价在开盘窗口的新鲜度全是 `invalid_timestamp`（见下），v7 的放开要配合时钟修复才会生效。
 
@@ -254,7 +268,7 @@ PYTHONPATH=<pytdx 解包> python ../scripts/verify-tdx-protocol.py   # 与 pytdx
 | 开盘啦 longhuvip | 保留为授权主源（盘口/分钟/行业/竞价）；个股 K 线（id=7）下线 |
 | 乘风（含 kpl_archive 榜单） | 不在本平台；其日 K、集合竞价、指数、同花顺热榜、龙虎榜、概念成分由 fuyao 对应能力整体替代 |
 | 通达信客户端 .day/.lc1/.lc5 | `tdx_local`：owner 工作站 CLI 导出到离线导入契约；GPJY 财务包未解析（后续项） |
-| pytdx | `tdx_public`：历史分笔 + 除权除息可用；实时行情与 K 线命令已被公开主站关闭 |
+| TDX public protocol | `tdx_public`：使用 LOGIN_ONE 握手，按主机保留 legacy-3 回退；主机池由探测矩阵生成，进程内传输失败冷却，结果回执带 `host:port/profile`。LOGIN_ONE 下行情和 K 线命令可用，绑定待 P2；当前接入的是历史分笔和除权除息，失败时 fail closed。 |
 | 腾讯 qt / fqkline / 分笔 | 观察池报价、五档、分钟、当日分笔 |
 | 东财 push2 / datacenter / 天天基金 | 板块资金流（已有）+ 涨停板专题、盘口异动、人气榜、datacenter 事件、两融、基金净值（新增）；clist 全市场在 owner 出口被断连 |
 | 同花顺事件 + 问财 | 未接：问财需登录态且有反爬；由 fuyao 热榜/飙升榜/异动原因覆盖“抢手名单”类需求 |

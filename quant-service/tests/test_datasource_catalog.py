@@ -9,6 +9,7 @@ from app.datasources.catalog import (
     evidence_locations, validate_catalog,
 )
 from app.datasources.contracts import RESOLVABLE_STATES, RETIRED, UNSUPPORTED
+from app.datasources.completeness import completeness_problems, public_fetch_functions
 from app.datasources.resolver import CapabilityResolver, CapabilityUnavailable
 from app.platform.strategy_data_needs import STRATEGY_DATA_NEEDS, strategy_data_needs_catalog
 from app.platform.strategy_registry import STRATEGY_CONTRACTS
@@ -21,6 +22,57 @@ REPO_ROOT = SERVICE_ROOT.parent
 class CatalogTests(unittest.TestCase):
     def test_catalog_is_internally_consistent(self):
         self.assertEqual(validate_catalog(), [])
+
+    def test_catalog_rejects_zero_or_retired_only_bindings(self):
+        from unittest import mock
+        from app.datasources import catalog
+
+        without_quote = tuple(item for item in BINDINGS if item.capability != "quote.all_a_snapshot")
+        with mock.patch.object(catalog, "BINDINGS", without_quote):
+            self.assertIn("quote.all_a_snapshot: no resolvable binding", catalog.validate_catalog())
+
+        retired_only = tuple(item for item in BINDINGS if item.capability != "bars.daily")
+        retired = next(item for item in BINDINGS if item.source == "longhuvip" and item.capability == "bars.daily")
+        with mock.patch.object(catalog, "BINDINGS", retired_only + (retired,)):
+            self.assertIn("bars.daily: no resolvable binding", catalog.validate_catalog())
+
+    def test_catalog_allows_unsupported_only_binding(self):
+        from unittest import mock
+        from app.datasources import catalog
+
+        target = "quote.all_a_snapshot"
+        unsupported = next(item for item in BINDINGS if item.source == "eastmoney_free" and item.capability == target)
+        bindings = tuple(item for item in BINDINGS if item.capability != target) + (unsupported,)
+        with mock.patch.object(catalog, "BINDINGS", bindings):
+            self.assertNotIn(f"{target}: no resolvable binding", catalog.validate_catalog())
+
+    def test_capabilities_carry_a_canonical_schema(self):
+        self.assertEqual(CAPABILITIES["quote.watch_snapshot"].schema.names,
+                         tuple(field.split(":", 1)[0] for field in CAPABILITIES["quote.watch_snapshot"].fields))
+        units = {item.name: item.unit for item in CAPABILITIES["ticks.session"].schema.fields}
+        self.assertEqual((units["price"], units["volume"]), ("yuan", "shares"))
+
+    def test_the_grandfather_list_is_literal_and_can_only_shrink(self):
+        from unittest import mock
+
+        from app.datasources import catalog
+        from app.datasources.contracts import Binding, DECLARED
+        self.assertLessEqual(len(catalog.GRANDFATHER_BINDINGS), catalog.GRANDFATHER_BASELINE_SIZE)
+        self.assertTrue(all((item.source, item.capability) in catalog.GRANDFATHER_BINDINGS
+                            for item in BINDINGS if item.spec is None))
+        # Swapping one spec-less binding for another keeps the count and must still fail.
+        dropped = next(item for item in BINDINGS if item.spec is None and item.source == "tencent_free")
+        swapped = tuple(item for item in BINDINGS if item is not dropped) + (
+            Binding("tencent_free", "events.repurchase", 90, DECLARED),)
+        with mock.patch.object(catalog, "BINDINGS", swapped):
+            problems = catalog.validate_catalog()
+        self.assertIn("binding tencent_free->events.repurchase: missing BindingSpec outside grandfather list", problems)
+        self.assertIn(f"grandfather entry tencent_free->{dropped.capability} has no binding: delete it (the list only shrinks)",
+                      problems)
+
+    def test_every_public_reader_is_bound_or_registered_with_a_reason(self):
+        self.assertTrue(public_fetch_functions())
+        self.assertEqual(completeness_problems(), [])
 
     def test_tushare_ths_boards_are_retired_and_fuyao_stays_declared(self):
         membership = {binding.source: binding for binding in BINDINGS if binding.capability == "sector.membership"}
@@ -79,6 +131,27 @@ class CatalogTests(unittest.TestCase):
         self.assertIn(UNSUPPORTED, {provider["status"] for provider in snapshot["providers"]})
         self.assertNotIn(RETIRED, {provider["status"] for capability in document["capabilities"]
                                    for provider in capability["providers"]})
+
+    def test_i2_legacy_bindings_are_unsupported_and_fully_specified(self):
+        snapshot = next(item for item in BINDINGS
+                        if item.source == "tdx_public" and item.capability == "quote.all_a_snapshot")
+        overview = next(item for item in BINDINGS
+                        if item.source == "tdx_public" and item.capability == "quote.index_overview")
+        self.assertEqual((snapshot.status, overview.status), (UNSUPPORTED, UNSUPPORTED))
+        self.assertFalse(snapshot.decision_eligible or overview.decision_eligible)
+        self.assertEqual(snapshot.spec.max_batch, 80)
+        self.assertEqual(snapshot.spec.unit_factors["volume"], 100)
+        self.assertIn("排序宽度", overview.notes)
+
+    def test_microstructure_bindings_are_unsupported_and_raw_auction_is_explicit(self):
+        keys = {"microstructure.volume_profile", "microstructure.minute_series", "microstructure.auction_curve",
+                "microstructure.unusual", "microstructure.top_board"}
+        bindings = [item for item in BINDINGS if item.capability in keys]
+        self.assertEqual({item.status for item in bindings}, {UNSUPPORTED})
+        self.assertTrue(all(item.spec is not None and not item.decision_eligible for item in bindings))
+        auction = CAPABILITIES["microstructure.auction_curve"]
+        self.assertEqual(auction.schema.names, ("time", "price", "matched_raw", "unmatched_raw", "unmatched_side"))
+        self.assertFalse(any(item.source == "tdx_public" and item.capability == "bars.minute" for item in BINDINGS))
 
 
 class NonSectorGroupTests(unittest.TestCase):
@@ -201,6 +274,74 @@ class MigrationPinTests(unittest.TestCase):
         self.assertEqual(health_capability("tencent_free", "quote.order_book"), "order_book_quote")
 
 
+class ValidateRuleTests(unittest.TestCase):
+    """Test that validation rule handles UNSUPPORTED bindings correctly."""
+
+    def test_capability_with_zero_bindings_fails_validation(self):
+        """Capability with no bindings at all should be flagged."""
+        from unittest import mock
+        from app.datasources import catalog
+        from app.datasources.contracts import Capability, CanonicalSchema, FieldSpec
+
+        # Create a fake capability with no bindings
+        test_capability = Capability("test.phantom", "test", "Test", "daily", "all_a", ("field1",), "", "",
+                                     CanonicalSchema((FieldSpec("field1"),)))
+        test_bindings = tuple(b for b in BINDINGS if b.capability != "test.phantom")
+
+        with mock.patch.object(catalog, "CAPABILITIES", {**CAPABILITIES, "test.phantom": test_capability}):
+            with mock.patch.object(catalog, "BINDINGS", test_bindings):
+                problems = catalog.validate_catalog()
+        self.assertIn("test.phantom: no resolvable binding", problems)
+
+    def test_capability_with_only_retired_bindings_fails_validation(self):
+        """Capability with only RETIRED bindings should be flagged."""
+        from unittest import mock
+        from app.datasources import catalog
+        from app.datasources.contracts import Binding, RETIRED
+
+        test_bindings = list(BINDINGS)
+        # Add a capability with only RETIRED binding
+        test_bindings.append(Binding("tdx_public", "test.phantom", 70, RETIRED))
+
+        test_capability = CAPABILITIES.get("test.phantom")
+        if not test_capability:
+            from app.datasources.contracts import Capability, CanonicalSchema, FieldSpec
+            test_capability = Capability("test.phantom", "test", "Test", "daily", "all_a", ("field1",), "", "",
+                                         CanonicalSchema((FieldSpec("field1"),)))
+
+        with mock.patch.object(catalog, "CAPABILITIES", {**CAPABILITIES, "test.phantom": test_capability}):
+            with mock.patch.object(catalog, "BINDINGS", tuple(test_bindings)):
+                problems = catalog.validate_catalog()
+        self.assertIn("test.phantom: no resolvable binding", problems)
+
+    def test_capability_with_only_unsupported_bindings_passes_validation(self):
+        """Capability with only UNSUPPORTED bindings should NOT be flagged."""
+        from unittest import mock
+        from app.datasources import catalog
+        from app.datasources.contracts import Binding, UNSUPPORTED
+
+        test_bindings = list(BINDINGS)
+        # Add a capability with only UNSUPPORTED binding
+        test_bindings.append(Binding("tdx_mac", "test.phantom", 70, UNSUPPORTED))
+
+        test_capability = CAPABILITIES.get("test.phantom")
+        if not test_capability:
+            from app.datasources.contracts import Capability, CanonicalSchema, FieldSpec
+            test_capability = Capability("test.phantom", "test", "Test", "daily", "all_a", ("field1",), "", "",
+                                         CanonicalSchema((FieldSpec("field1"),)))
+
+        with mock.patch.object(catalog, "CAPABILITIES", {**CAPABILITIES, "test.phantom": test_capability}):
+            with mock.patch.object(catalog, "BINDINGS", tuple(test_bindings)):
+                problems = catalog.validate_catalog()
+        # Should NOT be in problems - UNSUPPORTED bindings are allowed
+        binding_problems = [p for p in problems if "test.phantom" in p and "no resolvable binding" in p]
+        self.assertEqual(len(binding_problems), 0)
+
+    def test_production_catalog_validates_clean(self):
+        """The production catalog should have no validation problems."""
+        self.assertEqual(validate_catalog(), [])
+
+
 class ResolverTests(unittest.IsolatedAsyncioTestCase):
     async def test_priority_fallback_and_provenance(self):
         resolver = CapabilityResolver()
@@ -263,6 +404,17 @@ class ResolverTests(unittest.IsolatedAsyncioTestCase):
             resolver.bind("eastmoney_free", "quote.all_a_snapshot", rows)   # unsupported
         with self.assertRaises(ValueError):
             resolver.bind("longhuvip", "bars.daily", rows)                  # retired
+
+    def test_unsupported_is_never_routable_but_declared_is(self):
+        resolver = CapabilityResolver()
+
+        async def rows(**_params):
+            return [{"symbol": "000001.SZ"}]
+
+        with self.assertRaises(ValueError):
+            resolver.bind("eastmoney_free", "quote.all_a_snapshot", rows)
+        resolver.bind("tdx_public", "ticks.session", rows)
+        self.assertIn("tdx_public", resolver.bound_sources("ticks.session"))
 
     def test_package_bindings_cover_their_catalog_entries(self):
         from app.datasources.bindings import register_package_sources

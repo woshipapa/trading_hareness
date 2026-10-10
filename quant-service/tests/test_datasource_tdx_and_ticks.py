@@ -4,6 +4,8 @@ import struct
 import tempfile
 import unittest
 import zlib
+import importlib
+import sys
 from pathlib import Path
 
 from app.datasources.derived.tick_flow import Tick, parse_tencent_detail, summarize_ticks, ticks_from_tdx
@@ -23,12 +25,41 @@ def encode_price(value: int) -> bytes:
     return bytes(out)
 
 
+def quote_answer(*quotes: tuple[int, str, int]) -> bytes:
+    """A 0x053e answer with one record per (market, code, price in cents), in parse_quotes' layout."""
+    body = struct.pack("<HH", 0, len(quotes))
+    for market, code, price in quotes:
+        body += struct.pack("<B6sH", market, code.encode(), 0) + encode_price(price) + encode_price(0) * 8
+        body += struct.pack("<I", 0) + encode_price(0) * 4 + encode_price(0) * 20 + struct.pack("<H", 0)
+        body += encode_price(0) * 4 + struct.pack("<hH", 0, 0)
+    return body
+
+
 class TdxPrimitiveTests(unittest.TestCase):
     def test_price_varint_round_trip(self):
         for value in (0, 1, -1, 63, 64, -64, 1159, -250, 123456, -987654):
             decoded, position = tdx_protocol.decode_price(encode_price(value) + b"\xff", 0)
             self.assertEqual(decoded, value)
             self.assertEqual(position, len(encode_price(value)))
+
+    def test_minute_bars_read_float32_volume_and_closing_call_denormals_as_zero(self):
+        # Synthetic records in the layout of delta 3 Q8; the 09:31 values are 000001.SZ on 2026-10-09 (F7 check).
+        def record(minutes, volume_bits, amount_bits):
+            zipday = ((2026 - 2004) << 11) + 1009
+            prices = encode_price(11590) + encode_price(10) + encode_price(20) + encode_price(-10)
+            return struct.pack("<HH", zipday, minutes) + prices + struct.pack("<II", volume_bits, amount_bits)
+
+        def f32(value):
+            return struct.unpack("<I", struct.pack("<f", value))[0]
+
+        body = struct.pack("<H", 2) + record(571, f32(6234400.0), f32(73792584.0)) + record(899, 0x00400000, 0x00400000)
+        first, closing = tdx_protocol.parse_bars(8, body)
+        self.assertEqual((first["datetime"], first["volume"], first["amount"]), ("2026-10-09 09:31", 6234400.0, 73792584.0))
+        self.assertEqual((closing["volume"], closing["amount"]), (0.0, 0.0), "the 5.877e-39 denormal of a zero minute")
+        daily_record = (struct.pack("<I", 20261009) + encode_price(11590) + encode_price(10) + encode_price(20)
+                        + encode_price(-10) + struct.pack("<II", f32(6234400.0), f32(73792584.0)))
+        daily = tdx_protocol.parse_bars(9, struct.pack("<H", 1) + daily_record)
+        self.assertEqual(daily[0]["volume"], tdx_protocol.decode_volume(f32(6234400.0)), "daily bars keep the packed format")
 
     def test_request_bytes_match_the_reference_client(self):
         # Captured from pytdx on the owner peer, 2026-09-18.
@@ -85,6 +116,37 @@ def frame(body: bytes, compress: bool = False) -> bytes:
 
 
 class TdxClientTests(unittest.TestCase):
+    def test_generated_host_module_is_optional(self):
+        original = sys.modules.get("app.datasources.sources.tdx_hosts")
+        sys.modules["app.datasources.sources.tdx_hosts"] = None
+        loaded = importlib.reload(tdx_protocol)
+        self.assertEqual(loaded._GENERATED_HOSTS, ())
+        fake = type(sys)("app.datasources.sources.tdx_hosts")
+        fake.HOSTS = (("synthetic", 7709),)
+        sys.modules["app.datasources.sources.tdx_hosts"] = fake
+        try:
+            loaded = importlib.reload(tdx_protocol)
+            self.assertEqual(loaded.DEFAULT_HOSTS, fake.HOSTS)
+        finally:
+            if original is None:
+                sys.modules.pop("app.datasources.sources.tdx_hosts", None)
+            else:
+                sys.modules["app.datasources.sources.tdx_hosts"] = original
+            importlib.reload(tdx_protocol)
+
+    def test_handshake_profiles_send_expected_setup_packets(self):
+        original = tdx_protocol.socket.create_connection
+        try:
+            for profile, expected in (("login_one", tdx_protocol._SETUP_COMMANDS[:1]),
+                                      ("legacy_3", tdx_protocol._SETUP_COMMANDS)):
+                fake = FakeSocket([frame(b"") for _ in expected])
+                tdx_protocol.socket.create_connection = lambda *_args, _fake=fake, **_kwargs: _fake
+                with tdx_protocol.TdxClient("host", 7709, handshake_profile=profile):
+                    pass
+                self.assertEqual(fake.sent, list(expected))
+        finally:
+            tdx_protocol.socket.create_connection = original
+
     def test_exchange_decompresses_and_pages_ticks_oldest_first(self):
         def page(minute: int, count: int) -> bytes:
             body = struct.pack("<H", count) + b"\x00" * 4
@@ -119,12 +181,79 @@ class TdxClientTests(unittest.TestCase):
             tdx_protocol.TdxClient = original
         self.assertEqual(attempts, ["a", "b"])
 
+    def test_a_connected_host_falls_back_to_legacy_3_before_the_next_host(self):
+        attempts = []
+
+        class ClosesAfterConnect(tdx_protocol.TdxClient):
+            def __enter__(self):
+                attempts.append((self.host, self.handshake_profile))
+                self._connected = True
+                raise tdx_protocol.TdxProtocolError("TDX server closed the connection")
+
+        original = tdx_protocol.TdxClient
+        tdx_protocol.TdxClient = ClosesAfterConnect
+        tdx_protocol._COOLDOWN_UNTIL.clear()
+        try:
+            with self.assertRaises(tdx_protocol.TdxProtocolError):
+                tdx_protocol.call_sync(lambda client: None, hosts=[("a", 1), ("b", 2)])
+            self.assertIn(("a", 1), tdx_protocol._COOLDOWN_UNTIL, "a transport failure cools the host down")
+        finally:
+            tdx_protocol.TdxClient = original
+            tdx_protocol._COOLDOWN_UNTIL.clear()
+        self.assertEqual(attempts, [("a", "login_one"), ("a", "legacy_3"), ("b", "login_one"), ("b", "legacy_3")])
+
+    def test_receipt_has_profile_and_decode_failure_does_not_cool(self):
+        class Refusing(tdx_protocol.TdxClient):
+            def __enter__(self):
+                raise struct.error("bad response")
+
+        original = tdx_protocol.TdxClient
+        tdx_protocol.TdxClient = Refusing
+        tdx_protocol._COOLDOWN_UNTIL.clear()
+        try:
+            with self.assertRaises(tdx_protocol.TdxProtocolError):
+                tdx_protocol.call_sync(lambda _client: None, hosts=[("a", 1)], handshake_profile="legacy_3")
+            self.assertNotIn(("a", 1), tdx_protocol._COOLDOWN_UNTIL)
+        finally:
+            tdx_protocol.TdxClient = original
+
+    def test_sweep_uses_a_new_connection_for_each_section(self):
+        calls = []
+
+        class FakeClient:
+            def __init__(self, host, port, _timeout, *, handshake_profile):
+                calls.append((host, port, handshake_profile))
+            def __enter__(self): return self
+            def __exit__(self, *_args): pass
+
+        original = tdx_protocol.TdxClient
+        tdx_protocol.TdxClient = FakeClient
+        try:
+            result = tdx_protocol.sweep_sync({"quotes": lambda _c: [1], "bars": lambda _c: [2, 3]},
+                                             host=("fixed", 7709), handshake_profile="legacy_3")
+        finally:
+            tdx_protocol.TdxClient = original
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["host"], "fixed:7709")
+        self.assertEqual(result["sections"]["bars"]["rows"], 2)
+
     def test_market_codes(self):
         self.assertEqual(tdx_protocol.market_code("600519.SH"), (1, "600519"))
         self.assertEqual(tdx_protocol.market_code("920819.BJ"), (2, "920819"))
-        with self.assertRaises(ValueError):
-            tdx_protocol.market_code("600519")
+        self.assertEqual(tdx_protocol.market_code("000001.sz"), (0, "000001"))
+        for bad in ("600519", "60051X.SH", "60051.SH", "6005190.SH", "\uff16\uff10\uff10\uff15\uff11\uff19.SH", "600519.XX", ".SH"):
+            with self.subTest(symbol=bad), self.assertRaises(ValueError):
+                tdx_protocol.market_code(bad)
 
+    def test_echo_check_is_positional_and_needs_one_row_per_request(self):
+        # R1: an old BJ code is answered with a 600839 placeholder at 0.0; here 600839 was also requested.
+        requested = [(1, "600839"), (2, "832000")]
+        with self.assertLogs(tdx_protocol.__name__, level="WARNING") as logs:
+            kept = tdx_protocol.parse_quotes(quote_answer((1, "600839", 412), (1, "600839", 0)), requested=requested)
+        self.assertEqual([(row["code"], row["price"]) for row in kept], [("600839", 4.12)])
+        self.assertIn("code_mismatch", logs.output[0])
+        with self.assertRaises(tdx_protocol.TdxProtocolError):
+            tdx_protocol.parse_quotes(quote_answer((1, "600839", 412)), requested=requested)
 
 class TdxLocalFileTests(unittest.TestCase):
     def test_day_and_minute_records(self):

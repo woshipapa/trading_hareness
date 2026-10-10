@@ -77,6 +77,7 @@ class CapabilityResult:
                 "available_at_max": self.quality.available_at_max.isoformat()
                 if self.quality.available_at_max else None,
                 "response_hash": self.quality.response_hash,
+                "schema": self.quality.schema,
                 "warnings": list(self.quality.warnings),
             }
         return {"capability": self.capability.key, "source": self.source, "status": self.binding.status,
@@ -179,6 +180,91 @@ def _quality_receipt(rows: Any, envelope: CapabilityEvidence, request: Capabilit
     )
 
 
+def _same_value(left: Any, right: Any) -> bool:
+    """Equality that treats two NaNs as the same reading."""
+    if isinstance(left, float) and isinstance(right, float) and math.isnan(left) and math.isnan(right):
+        return True
+    return left == right
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float, Decimal)) and not isinstance(value, bool)
+
+
+def _scaled(value: Any, factor: int | float) -> Any:
+    """``value * factor``; a Decimal reading stays exact (``Decimal * float`` is a TypeError).
+
+    Factors are non-zero ints or floats: ``validate_catalog`` rejects anything else.
+    """
+    return value * Decimal(str(factor)) if isinstance(value, Decimal) else value * factor
+
+
+@dataclass(frozen=True)
+class _Normalised:
+    rows: Any
+    canonical: bool
+    warnings: tuple[str, ...] = ()
+    #: ``conflicted`` or ``invalid`` when the projection cannot be trusted; such a result is never returned.
+    status: str | None = None
+
+
+def _normalise_rows(rows: Any, binding: Binding) -> _Normalised:
+    """Project source-native dictionaries into the canonical field contract.
+
+    Only a binding with a spec is projected, and only non-empty lists of dictionaries; rows of any other
+    shape (``Tick`` dataclasses, tuples) stay native and say so. Each projected row is rebuilt from the
+    source row: unmapped native fields are copied, then every mapped native field is written under its
+    canonical name. Two values for one canonical field (two native names, or a mapped name colliding
+    with an unmapped native field) make the result ``conflicted`` whatever the field_map order. A unit
+    factor scales numbers only; any other value leaves the field in source units, so the result is
+    ``invalid``. Rows in which no mapped field occurs are not called canonical.
+    """
+    spec = binding.spec
+    if spec is None:
+        return _Normalised(rows, False)
+    if not isinstance(rows, (list, tuple)) or any(not isinstance(row, dict) for row in rows):
+        return _Normalised(rows, False, ("rows_not_normalised",))
+    if not rows:
+        return _Normalised(rows, False)
+    warnings: list[str] = []
+    conflicted = invalid = False
+    matched = not spec.field_map
+    mapped = set(spec.field_map)
+    projected_rows = []
+    for row in rows:
+        projected = {key: value for key, value in row.items() if key not in mapped}
+        for native, canonical in spec.field_map.items():
+            if native not in row:
+                continue
+            matched = True
+            value = row[native]
+            if canonical in projected and not _same_value(projected[canonical], value):
+                warnings.append(f"field_map_conflict:{canonical}")
+                conflicted = True
+                continue
+            projected[canonical] = value
+        for field_name, factor in spec.unit_factors.items():
+            value = projected.get(field_name)
+            if value is None:
+                continue
+            if not _is_number(value):
+                warnings.append(f"unit_factor_skipped:{field_name}")
+                invalid = True
+                continue
+            projected[field_name] = _scaled(value, factor)
+        projected_rows.append(projected)
+    if not matched:
+        return _Normalised(rows, False, ("field_map_unmatched",))
+    status = "conflicted" if conflicted else "invalid" if invalid else None
+    return _Normalised(type(rows)(projected_rows), True, tuple(dict.fromkeys(warnings)), status)
+
+
+def _declared_fields(binding: Binding) -> set[str]:
+    if binding.spec is None or not binding.spec.field_map:
+        return set()
+    return set(binding.spec.field_map.values())
+
+
 class CapabilityResolver:
     def __init__(self, *, health_gate: HealthGate | None = None) -> None:
         self._fetchers: dict[tuple[str, str], Fetcher] = {}
@@ -228,6 +314,11 @@ class CapabilityResolver:
             if policy.require_decision_eligible and not binding.decision_eligible:
                 attempts.append({"source": binding.source, "status": "not_decision_eligible"})
                 continue
+            declared_fields = _declared_fields(binding)
+            if policy.required_fields and declared_fields and not set(policy.required_fields).issubset(declared_fields):
+                attempts.append({"source": binding.source, "status": "missing_required_fields",
+                                 "missing": sorted(set(policy.required_fields) - declared_fields)})
+                continue
             if self._health_gate is not None and not await self._health_gate(binding.source, capability):
                 attempts.append({"source": binding.source, "status": "circuit_open"})
                 continue
@@ -239,8 +330,20 @@ class CapabilityResolver:
                                  "ms": int((time.monotonic() - started) * 1000)})
                 continue
             rows, envelope = _unpack_evidence(raw)
+            try:
+                normalised = _normalise_rows(rows, binding)
+            except Exception as error:  # noqa: BLE001 - a bad spec fails this attempt, not the fallback chain
+                attempts.append({"source": binding.source, "status": "failed",
+                                 "error": f"normalise:{type(error).__name__}: {str(error)[:160]}",
+                                 "ms": int((time.monotonic() - started) * 1000)})
+                continue
+            rows = normalised.rows
             count = _row_count(rows)
             quality = _quality_receipt(rows, envelope, policy)
+            quality = QualityReceipt(**{**quality.__dict__, "schema": "canonical" if normalised.canonical else "native",
+                                        "warnings": (*quality.warnings, *normalised.warnings)})
+            if normalised.status is not None and quality.status not in {"invalid", "stale"}:
+                quality = QualityReceipt(**{**quality.__dict__, "status": normalised.status})
             valid = quality.status not in {"invalid", "stale", "conflicted"}
             if policy.purpose in {"replay", "shadow"} and quality.status == "partial":
                 valid = False

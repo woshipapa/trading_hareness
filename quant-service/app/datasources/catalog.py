@@ -16,7 +16,7 @@ from typing import Any, Final, Iterable
 
 from .contracts import (
     BINDING_STATES, CATEGORIES, DECLARED, DORMANT, GRAINS, LICENSES, LIVE_VERIFIED, RESOLVABLE_STATES,
-    RETIRED, SCOPES, UNSUPPORTED, Binding, Capability, DataSource, SourceLabel, Taxonomy,
+    RETIRED, SCOPES, UNSUPPORTED, Binding, BindingSpec, CanonicalSchema, Capability, DataSource, FieldSpec, SourceLabel, Taxonomy,
 )
 
 
@@ -99,6 +99,10 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
     DataSource("tdx_public", "通达信公开行情主站", "tdx hq hosts :7709", "unofficial_protocol", "tcp_tdx", "free",
                "app/datasources/sources/tdx_protocol.py",
                risks="非官方社区主站；2026-09-18 起仅历史分笔与除权除息可用，实时行情与 K 线命令被拒"),
+    DataSource("tdx_mac", "通达信 MAC 行情服务", "MAC 0x12xx hosts :7709", "unofficial_protocol", "tcp_tdx_mac", "free",
+               "app/datasources/sources/tdx_mac.py", risks="研究证据；MAC 字段与协议为非官方实现"),
+    DataSource("tdx_ext", "通达信扩展行情", "tdx extended hq :7727", "unofficial_protocol", "tcp_tdx", "free",
+               "app/datasources/sources/tdx_ex_market.py", risks="研究证据；A 股决策路径不得使用"),
     DataSource("tdx_local", "通达信客户端盘后数据（vipdoc）", "owner workstation TDX client", "local_files", "files", "free",
                "app/datasources/sources/tdx_local_files.py", risks="依赖 owner 手工/定时盘后下载", deploy="owner_workstation_cli"),
     # -- aggregators ----------------------------------------------------------
@@ -117,8 +121,15 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
 )}
 
 
-def _cap(key: str, label: str, grain: str, scope: str, fields: str, time_semantics: str, description: str = "") -> Capability:
-    return Capability(key, key.split(".", 1)[0], label, grain, scope, tuple(fields.split()), time_semantics, description)
+def _cap(key: str, label: str, grain: str, scope: str, fields: str, time_semantics: str, description: str = "",
+         category: str | None = None) -> Capability:
+    names = tuple(fields.split())
+    specs = tuple(
+        FieldSpec(name=item.split(":", 1)[0], unit=item.split(":", 1)[1] if ":" in item else None)
+        for item in names
+    )
+    return Capability(key, category or key.split(".", 1)[0], label, grain, scope, names, time_semantics, description,
+                      CanonicalSchema(specs))
 
 
 _OBSERVED = "effective=上游时间戳或采集时刻; available=采集时刻"
@@ -130,6 +141,9 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     # quote
     _cap("quote.all_a_snapshot", "全 A L1 快照", "realtime", "all_a",
          "price:yuan pct_change:pct volume:shares turnover:yuan", _OBSERVED, "3 秒级 L1，无主力资金语义"),
+    _cap("quote.index_overview", "指数概况与涨跌家数", "realtime", "market",
+         "open:points high:points low:points close:points amount:yuan volume_raw up_count:count down_count:count",
+         _OBSERVED, "0x051d 指数概况；涨跌家数口径不同于 0x054b 排序宽度"),
     _cap("quote.watch_snapshot", "观察池报价（交易所时间戳）", "realtime", "watchlist",
          "price:yuan volume:shares amount:yuan volume_ratio turnover_rate:pct exchange_time", _OBSERVED),
     _cap("quote.order_book", "盘口五档/十档", "realtime", "watchlist", "bid1..10:yuan ask1..10:yuan bid_vol:lots", _OBSERVED),
@@ -153,6 +167,17 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("auction.short_term_benchmark", "竞价短线基准", "daily", "market", "symbol auction_pct tags", _OBSERVED),
     _cap("auction.history_0925", "历史每日 09:25 竞价成交", "daily", "per_symbol",
          "price:yuan volume:shares amount:yuan auction_curve", _SESSION_CLOSE),
+    _cap("microstructure.volume_profile", "分价成交量", "intraday", "per_symbol",
+         "price:yuan volume_lots buy_lots sell_lots", _OBSERVED, category="derived"),
+    _cap("microstructure.minute_series", "历史分时K线（指定日期）", "daily", "per_symbol",
+         "time price:yuan volume_lots pre_close:yuan", _SESSION_CLOSE, category="derived"),
+    _cap("microstructure.auction_curve", "集合竞价曲线", "intraday", "per_symbol",
+         "time price:yuan matched_raw unmatched_raw unmatched_side", _OBSERVED,
+         "TDX 流在 09:24:57 截止；数量单位未确认，保留 raw 命名", category="derived"),
+    _cap("microstructure.unusual", "TDX 异动事件", "intraday", "all_a",
+         "market code time event_type description value", _OBSERVED, category="derived"),
+    _cap("microstructure.top_board", "TDX 排名榜", "intraday", "market",
+         "category code price:yuan value", _OBSERVED, "研究来源；永不替代涨停池", category="derived"),
     # limits
     _cap("limits.prices", "涨跌停价", "daily", "all_a", "up_limit:yuan down_limit:yuan", "effective=交易日; available=入库时刻"),
     _cap("limits.limit_up_pool", "涨停池", "intraday", "all_a",
@@ -172,6 +197,8 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     # sector
     _cap("sector.membership", "板块/概念成分（PIT）", "reference", "board", "taxonomy_key sector_key symbol known_at",
          "known_at 之后才可用；盘中刷新只对下一场生效"),
+    _cap("sector.board_catalog", "板块目录", "reference", "board", "board_code name board_type",
+         "effective=采集时刻; available=采集时刻"),
     _cap("sector.index_quote", "板块/概念指数行情", "daily", "board", "index_code last_price pct_change volume turnover", _OBSERVED),
     _cap("sector.flow_curve", "板块资金流曲线", "intraday", "board", "sector net_inflow:per-item unit (cny|100m_cny)", _OBSERVED),
     _cap("sector.anomaly", "板块异动", "intraday", "board", "board_code pct_change main_net_inflow change_counts", _OBSERVED),
@@ -209,10 +236,17 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("fundamentals.daily_basic", "每日指标（换手/量比/市值/股本）", "daily", "all_a",
          "turnover_rate volume_ratio total_mv float_mv float_share", "effective=交易日"),
     _cap("fundamentals.financial_statements", "三大报表与财务指标", "periodic", "per_symbol", "report_period statement_items", "按公告日可得"),
+    _cap("fundamentals.company_profile", "公司 F10 文本资料", "periodic", "per_symbol", "category filename content", "effective=采集时刻; available=采集时刻"),
     _cap("fundamentals.capital_changes", "除权除息与股本变迁", "event", "per_symbol",
          "date category cash_dividend float_shares_after_10k total_shares_after_10k", "effective=变动日; available=采集时刻"),
     _cap("fundamentals.margin", "融资融券", "daily", "all_a", "rzye rzmre rqye net_buy", "effective=T 日; available=T+1 采集"),
     _cap("reference.instruments", "证券基础信息", "reference", "all_a", "symbol name list_date is_st", "effective=入库"),
+    _cap("reference.security_list", "TDX 证券列表", "reference", "all_a",
+         "symbol market code name instrument_type decimal_point pre_close:yuan is_st list_source source_host",
+         "effective=采集时刻; available=采集时刻（快照）"),
+    _cap("context.instruments", "扩展市场品种列表", "reference", "market", "market_id code name category", "effective=服务器列表; available=采集时刻"),
+    _cap("context.quote", "扩展市场快照", "realtime", "per_symbol", "market_id code price pre_close open high low volume amount open_interest", _OBSERVED),
+    _cap("context.bars_daily", "扩展市场日K", "daily", "per_symbol", "market_id code datetime open high low close volume_raw amount open_interest settlement", "effective=交易日; available=采集时刻"),
     _cap("reference.trade_calendar", "交易日历", "reference", "market", "exchange calendar_date is_open", "effective=入库"),
     _cap("reference.suspensions", "停复牌（按交易日）", "daily", "all_a", "symbol suspend_date suspend_reason",
          "effective=交易日; available=入库"),
@@ -228,8 +262,9 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
 
 
 def _bind(source: str, capability: str, priority: int, status: str, store: str | None = None, adapter: str | None = None,
-          history: str = "", limits: str = "", notes: str = "", decision_eligible: bool = False) -> Binding:
-    return Binding(source, capability, priority, status, store, adapter, history, limits, notes, decision_eligible)
+          history: str = "", limits: str = "", notes: str = "", decision_eligible: bool = False,
+          spec: BindingSpec | None = None) -> Binding:
+    return Binding(source, capability, priority, status, store, adapter, history, limits, notes, decision_eligible, spec)
 
 
 _EVT = "market_events:event_type="
@@ -244,6 +279,23 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/akshare_provider.py:akshare_tencent_all_a_spot", "实时",
           notes="腾讯公开全 A 现货 fallback；无逐票交易所时间戳，仅补充研究覆盖"),
     _bind("eastmoney_free", "quote.all_a_snapshot", 45, UNSUPPORTED, notes="push2 clist 在 owner 出口被断连（2026-09-18）"),
+    _bind("tdx_public", "quote.all_a_snapshot", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_legacy_misc.py:fetch_all_a_snapshot",
+          notes="0x054b 排序列表；主机与握手 profile 写入 CapabilityEvidence warnings；coverage=None 待 I1 证券列表能力接入（分母未知）；ST 需要证券列表而非 0x054b 名称（δ1 Q6）；price≤0 行已过滤；legacy volume 单位为手，canonical shares 乘 100；rows carry market+code, add symbol field at resolver",
+          spec=BindingSpec(params={},
+                           field_map={"price": "price", "pct_change": "pct_change", "volume_lots": "volume", "amount": "turnover"},
+                           unit_factors={"volume": 100}, paging={"kind": "offset", "page_size": 80}, max_batch=80,
+                           time_semantics="server_time_raw=TDX quote server time; available=collection time",
+                           handshake_profile="login_one")),
+    _bind("tdx_public", "quote.index_overview", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_legacy_misc.py:fetch_index_overview",
+          notes="0x051d；涨跌家数与 0x054b 排序宽度口径不同（δ2 D4）；OHLC 为指数点数非元；coverage=None 待 I1（分母未知）；R1 echo check 已实现（δ1 R1）；成交量单位未经实测，保留为 volume_raw",
+          spec=BindingSpec(params={"symbol": "market_code"},
+                           field_map={"open": "open", "high": "high", "low": "low", "close": "close",
+                                      "amount": "amount", "volume_lots": "volume_raw", "up_count": "up_count",
+                                      "down_count": "down_count"},
+                           time_semantics="server_time_raw=TDX index server time; available=collection time",
+                           handshake_profile="login_one")),
     # quote.watch_snapshot / order book / fast confirmation
     _bind("longhuvip", "quote.watch_snapshot", 10, LIVE_VERIFIED, "intraday_quote_observations",
           "app/longhu_vendor_source.py", limits="≤300 只/逻辑请求", decision_eligible=True),
@@ -252,6 +304,17 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("sina_free", "quote.watch_snapshot", 55, UNSUPPORTED, "intraday_quote_observations",
           "app/free_market_providers.py",
           notes="无时间戳契约，仅兜底；owner 出口访问 hq.sinajs.cn 返回 403（2026-09-21 起，健康表从未成功）"),
+    _bind("tdx_mac", "quote.watch_snapshot", 70, UNSUPPORTED, _RAW + "tdx_mac_watch_snapshot",
+          "app/datasources/sources/tdx_mac.py:fetch_watch_snapshot",
+          notes="0x122b；close(0x04)=price；vol(0x05) 为手，canonical shares 乘 100；换手 0x1b = 0x05 手 / 0x0b 万股；"
+                "exchange_time 由适配器按 0x13 日期 + 0x14 时间组成 Asia/Shanghai 感知时间；回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）",
+          spec=BindingSpec(
+              params={"symbols": "symbols such as 000001.SZ"},
+              field_map={"close": "price", "vol": "volume", "amount": "amount", "vol_ratio": "volume_ratio",
+                         "turnover": "turnover_rate", "exchange_time": "exchange_time"},
+              unit_factors={"volume": 100}, paging="batch", max_batch=80,
+              time_semantics="effective=exchange_time (bits 0x13 date and 0x14 time, Asia/Shanghai); available=collection",
+              handshake_profile="mac")),
     # Both providers persist depth observations in the shared quote table.  The
     # source discriminator is part of the storage contract; there is no
     # separate intraday_order_book_observations relation.
@@ -280,6 +343,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tdx_local", "bars.daily", 35, DECLARED, "offline CSV (research)", "app/datasources/sources/tdx_local_files.py:parse_day_bytes",
           "客户端下载的全部历史", notes="owner 工作站 CLI，不直接写 canonical"),
     _bind("fuyao_ths", "bars.daily", 20, DECLARED, None, "app/fuyao_bulk_dump_capture.py", "10 年日K + 复权因子全量导出"),
+    _bind("tdx_mac", "bars.daily", 70, UNSUPPORTED, _RAW + "tdx_mac_daily_bars",
+          "app/datasources/sources/tdx_mac.py:fetch_daily_bars", spec=BindingSpec(
+              params={"symbol": "market+code", "count": "count (period 4 = daily)"}, field_map={},
+              unit_factors={"volume": 0.01},
+              time_semantics="effective=bar date; available=collection", handshake_profile="mac")),
     _bind("tencent_free", "bars.daily_adjusted", 50, LIVE_VERIFIED, "research_adjusted_bars_daily", "app/free_market_providers.py",
           notes="前复权，研究参考"),
     _bind("longhuvip", "bars.minute", 10, LIVE_VERIFIED, "intraday_minute_sessions", "app/intraday_minute_capture_actions.py",
@@ -293,6 +361,14 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="rt_min；2026-10-08 停用 Tushare（决策 0005）；保留 dormant 只为历史存量仍可按来源读取"),
     _bind("tdx_local", "bars.minute", 35, DECLARED, "market_bars_minute (offline import)",
           "app/datasources/sources/tdx_local_files.py:parse_minute_bytes", "客户端保留的全部分钟线"),
+    _bind("tdx_mac", "bars.minute", 70, UNSUPPORTED, _RAW + "tdx_mac_minute_bars",
+          "app/datasources/sources/tdx_mac.py:fetch_minute_bars",
+          notes="bars.minute 要求显式 source_available_at（本地入库时间不可替代）；MAC K 线只给 bar 时间（日期 + 当日秒数，"
+                "适配器组成 Asia/Shanghai 感知的 bar_time），本绑定给不出 source_available_at，因此保持 UNSUPPORTED",
+          spec=BindingSpec(
+              params={"symbol": "market+code", "count": "count (period 8)"}, field_map={},
+              time_semantics="effective=bar_time (wire date + seconds, Asia/Shanghai); available=none, the source gives no source_available_at",
+              handshake_profile="mac")),
     _bind("longhuvip_index", "bars.index_daily", 45, DORMANT, "canonical_bars_daily", "app/longhu_market_service.py"),
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),
     _bind("tushare_primary", "bars.adjustment_factor", 10, RETIRED, "daily_adjustment_factors:provider=tushare_primary",
@@ -323,6 +399,36 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/market_event_capture.py"),
     _bind("tdx_public", "auction.history_0925", 20, DECLARED, _RAW + "tick_flow_daily",
           "app/datasources/bindings.py:opening_auction", "近期任意交易日", notes="含 09:15-09:25 竞价虚拟撮合曲线"),
+    _bind("tdx_public", "microstructure.volume_profile", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_volume_profile",
+          notes="0x051a；覆盖率核对前不进入决策；成交量单位为 lots",
+          spec=BindingSpec(params={"market": "market", "code": "code"},
+                           field_map={"price": "price", "volume_lots": "volume_lots", "buy_lots": "buy_lots", "sell_lots": "sell_lots"},
+                           time_semantics="server_time_raw 是源字段；effective=采集时刻")),
+    _bind("tdx_public", "microstructure.minute_series", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_minute_series",
+          notes="0x0fb4；one row per trading minute (09:31..11:30, 13:01..15:00)；第二个变长字段含义未知，保留为 unknown；覆盖率核对前不进入决策",
+          spec=BindingSpec(params={"market": "market", "code": "code", "trade_date": "trade_date"},
+                           field_map={"time": "time", "price": "price", "volume_lots": "volume_lots", "pre_close": "pre_close"},
+                           time_semantics="effective=trade_date; available=采集时刻")),
+    _bind("tdx_public", "microstructure.auction_curve", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_auction_curve",
+          notes="0x056a；09:24:57 截止，无字面 09:25 行；数量单位未确认",
+          spec=BindingSpec(params={"market": "market", "code": "code"},
+                           field_map={"time": "time", "price": "price", "matched_raw": "matched_raw", "unmatched_raw": "unmatched_raw", "unmatched_side": "unmatched_side"},
+                           time_semantics="effective=auction time; available=采集时刻")),
+    _bind("tdx_public", "microstructure.unusual", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_unusual",
+          notes="0x0563；覆盖率核对前不进入决策；limits.anomaly_tape 可在覆盖率核对后作为第二来源",
+          spec=BindingSpec(params={"market": "market", "start": "start", "count": "count"},
+                           field_map={"market": "market", "code": "code", "time": "time", "event_type": "event_type", "description": "description", "value": "value"},
+                           time_semantics="effective=event time; available=采集时刻")),
+    _bind("tdx_public", "microstructure.top_board", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_top_board",
+          notes="0x053f；覆盖率核对前不进入决策；top_board 永不替代涨停池",
+          spec=BindingSpec(params={"category": "category", "size": "size"},
+                           field_map={"code": "code", "price": "price", "value": "value"},
+                           time_semantics="effective=采集时刻; available=采集时刻")),
     # limits
     _bind("tencent_free", "limits.prices", 12, DECLARED, "daily_trade_limits:provider=tencent_free",
           "app/datasources/sources/tencent_limits.py", limits="全市场约 68 批、每批 80 只；不足 95% 或仍是前一交易日行情即报错重试",
@@ -331,6 +437,13 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           limits="stk_limit 全市场必须分页", notes="2026-10-08 停用 Tushare（决策 0005），盘中改由腾讯公布值替代"),
     _bind("longhuvip_composite", "limits.prices", 25, LIVE_VERIFIED, "daily_trade_limits", "app/longhu_shared_full_market.py",
           notes="16:00 左右才落库，盘中不可依赖；优先用同批腾讯行情里的公布值，缺失时才按板块比例推算"),
+    _bind("tdx_mac", "limits.prices", 70, UNSUPPORTED, _RAW + "tdx_mac_limits",
+          "app/datasources/sources/tdx_mac.py:fetch_limit_prices",
+          notes="0x122b 位 0x20/0x21（δ3 Q5：按板块比例，ST 1.05）；trade_date 取位 0x13；回包按位置核对（δ1 R1）",
+          spec=BindingSpec(
+              params={"symbols": "symbols such as 000001.SZ"}, field_map={"limit_up": "up_limit", "limit_down": "down_limit"},
+              paging="batch", max_batch=80, time_semantics="effective=trade_date (bit 0x13, Asia/Shanghai date); available=collection",
+              handshake_profile="mac")),
     _bind("fuyao_ths", "limits.limit_up_pool", 12, LIVE_VERIFIED, _EVT + "limit_up_pool", "app/market_event_capture.py",
           "近期", "默认分页 50（此前只存了第一页，已修为翻页）"),
     _bind("eastmoney_ztb", "limits.limit_up_pool", 50, DECLARED, _RAW + "limit_pool_limit_up",
@@ -371,6 +484,18 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                 "只记变化（新成员 known_at=观测时刻，盘中刷新对盘中读者次日生效）"),
     _bind("akshare", "sector.membership", 60, DORMANT, "sector_membership_history", "app/akshare_provider.py",
           notes="东财成分函数在 owner 出口不可用"),
+    _bind("tdx_mac", "sector.board_catalog", 70, UNSUPPORTED, _RAW + "tdx_mac_board_catalog",
+          "app/datasources/sources/tdx_mac.py:fetch_board_catalog", spec=BindingSpec(
+              params={}, field_map={},
+              time_semantics="effective/available=collection", handshake_profile="mac")),
+    _bind("tdx_mac", "sector.membership", 70, UNSUPPORTED, "sector_membership_history:taxonomy_key=tdx_mac_*",
+          "app/datasources/sources/tdx_mac.py:fetch_membership",
+          notes="board_type 取自 fetch_board_catalog 的同一行，调用时不扫描板块列表；类型 2（无板块）和 6（与其余类型重复）不读取；未知类型在联网前报错并点名板块键",
+          spec=BindingSpec(
+              params={"sector_key": "board_code of a fetch_board_catalog row",
+                      "board_type": "board_type of the same row (selects the tdx_mac_type_N taxonomy)"},
+              field_map={},
+              time_semantics="known_at=collection UTC-aware", handshake_profile="mac")),
     _bind("fuyao_ths", "sector.index_quote", 12, DECLARED, _RAW + "ths_index_prices_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", limits="thscodes≤100"),
     _bind("eastmoney_free", "sector.flow_curve", 45, LIVE_VERIFIED, "intraday_board_flow_snapshots", "app/board_flow_capture_actions.py",
@@ -457,12 +582,36 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("fuyao_ths", "fundamentals.financial_statements", 12, DECLARED, None, "app/fuyao_catalog.py:a_share_*_statements"),
     _bind("tushare_super_get", "fundamentals.financial_statements", 15, DORMANT, "tushare_raw_records", "app/tushare_providers.py",
           notes="2026-10-08 停用 Tushare（决策 0005）；保留 dormant 只为历史存量仍可按来源读取"),
+    _bind("tdx_public", "fundamentals.financial_statements", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_f10_finance.py:fetch_financial_summary", history="latest 0x0010 summary only",
+          notes="金额和股本已在解析器中换算；0x0010 不带报告期，report_period 为 None，"
+                "须与 tipinfo 第 2 列（报告期）和第 4 列（首次披露日）关联后才可用；绝不使用 updated_date",
+          spec=BindingSpec(params={"symbol": "(market, code)"},
+                           field_map={"statement_items": "statement_items", "report_period": "report_period"},
+                           time_semantics="effective=报告期（来自 tipinfo 关联，本适配器不知道）; "
+                                          "available=采集时刻；绝不用 updated_date")),
+    _bind("tdx_public", "fundamentals.company_profile", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_f10_finance.py:fetch_company_profile", notes="F10 GBK 文本；available_at 为采集时刻",
+          spec=BindingSpec(params={"symbol": "(market, code)"},
+                           field_map={"category": "category", "filename": "filename", "content": "content"},
+                           time_semantics="effective=采集时刻; available=采集时刻")),
     _bind("tdx_public", "fundamentals.capital_changes", 20, DECLARED, _RAW + "capital_changes",
           "app/datasources/sources/ticks.py:fetch_tdx_capital_changes", "上市以来全部", notes="与 pytdx 一致"),
     _bind("eastmoney_datacenter", "fundamentals.capital_changes", 50, DECLARED, None,
           "app/datasources/sources/eastmoney_datacenter.py:RPT_F10_EH_EQUITY"),
     _bind("eastmoney_datacenter", "fundamentals.margin", 50, DECLARED, _RAW + "margin_market",
           "app/datasources/collectors/post_close.py:job_eastmoney_margin", notes="明细默认关闭（~4000 行/日）"),
+    _bind("tdx_public", "reference.security_list", 20, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_instruments.py:fetch_security_list",
+          notes="登录模式：login_one；一台确定的主机；深沪各分页，北交所仅计数+zhb.zip",
+          decision_eligible=False,
+          spec=BindingSpec(time_semantics="effective=采集时刻; available=采集时刻（快照）")),
+    _bind("tdx_public", "reference.instruments", 19, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_instruments.py:fetch_instruments",
+          notes="从 reference.security_list 派生：仅股票类；TDX 不提供上市日期，list_date 为 None，绝不编造",
+          decision_eligible=False,
+          spec=BindingSpec(field_map={"symbol": "symbol", "name": "name", "list_date": "list_date", "is_st": "is_st"},
+                           time_semantics="effective=collection time; available=collection time (snapshot)")),
     _bind("fuyao_ths", "reference.instruments", 12, DECLARED, "instruments", "app/market_universe_sync.py",
           limits="ticker_list asset_type=a-share，每页 1000，翻到短页为止",
           notes="全 A 权威清单（可移出成员）：须达 minimum_rows 且沪深北齐全才落库；Longhu 收盘只增不删；2026-10-09 本机探测"),
@@ -480,7 +629,83 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/sentiment_cycle_daily.py"),
     # deliberately retired
     _bind("longhuvip", "bars.daily", 26, RETIRED, notes="个股日K 接口（旧系统 id=7）恒空，下线；日K 走 longhuvip_composite"),
+    _bind("tdx_ext", "context.instruments", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_instruments", notes="A 股决策路径不得使用",
+          spec=BindingSpec(field_map={"market_id": "market_id", "code": "code", "name": "name", "category": "category"}, time_semantics="effective=服务器列表; available=采集时刻")),
+    _bind("tdx_ext", "context.quote", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_quote", notes="A 股决策路径不得使用",
+          spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "price": "price", "pre_close": "pre_close", "open": "open", "high": "high", "low": "low", "volume": "volume", "amount": "amount", "open_interest": "open_interest"}, time_semantics="effective=采集时刻（报价不带服务器时间）; available=采集时刻")),
+    _bind("tdx_ext", "context.bars_daily", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_bars_daily", notes="A 股决策路径不得使用",
+          spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "datetime": "datetime", "open": "open", "high": "high", "low": "low", "close": "close", "volume_raw": "volume_raw", "amount": "amount", "open_interest": "open_interest", "settlement": "settlement"}, time_semantics="effective=K 线交易日（期货夜盘归下一交易日）; available=采集时刻")),
 )
+
+# The 120 bindings that existed without a structured BindingSpec at the P0 baseline (ca209a81), written
+# out so the list cannot grow by itself: a binding without a spec must be in it, and an entry whose binding
+# is gone must be deleted from it. It may only shrink, as bindings receive verified specs (P2-P6).
+GRANDFATHER_BINDINGS: Final[frozenset[tuple[str, str]]] = frozenset({
+    ("akshare", "bars.daily"), ("akshare", "events.block_trade"), ("akshare", "lhb.daily"),
+    ("akshare", "lhb.seat_statistics"), ("akshare", "limits.limit_up_pool"),
+    ("akshare", "limits.previous_limit_up"), ("akshare", "limits.strong_pool"),
+    ("akshare", "quote.all_a_snapshot"), ("akshare", "sector.membership"), ("baostock", "bars.daily"),
+    ("cls_telegraph", "news.flash"), ("cninfo_free", "news.announcements"), ("cninfo_irm", "events.investor_qa"),
+    ("derived_market_sentiment", "derived.market_sentiment"),
+    ("derived_sentiment_cycle", "derived.sentiment_cycle"), ("derived_tick_flow", "flow.tick_derived"),
+    ("eastmoney_datacenter", "events.block_trade"), ("eastmoney_datacenter", "events.disclosure_schedule"),
+    ("eastmoney_datacenter", "events.earnings_express"), ("eastmoney_datacenter", "events.earnings_forecast"),
+    ("eastmoney_datacenter", "events.holder_count"), ("eastmoney_datacenter", "events.holder_trade"),
+    ("eastmoney_datacenter", "events.ipo_calendar"), ("eastmoney_datacenter", "events.repurchase"),
+    ("eastmoney_datacenter", "events.restricted_release"),
+    ("eastmoney_datacenter", "fundamentals.capital_changes"), ("eastmoney_datacenter", "fundamentals.margin"),
+    ("eastmoney_datacenter", "reference.suspensions"), ("eastmoney_flash", "news.flash"),
+    ("eastmoney_free", "bars.daily"), ("eastmoney_free", "flow.watch_intraday"),
+    ("eastmoney_free", "quote.all_a_snapshot"), ("eastmoney_free", "sector.flow_curve"),
+    ("eastmoney_hot_rank", "attention.em_popularity"), ("eastmoney_hot_rank", "attention.em_rank_history"),
+    ("eastmoney_hot_rank", "attention.em_surge"), ("eastmoney_ztb", "limits.anomaly_tape"),
+    ("eastmoney_ztb", "limits.broken_pool"), ("eastmoney_ztb", "limits.limit_down_pool"),
+    ("eastmoney_ztb", "limits.limit_up_pool"), ("eastmoney_ztb", "limits.previous_limit_up"),
+    ("eastmoney_ztb", "limits.seal_detail"), ("eastmoney_ztb", "limits.strong_pool"),
+    ("eastmoney_ztb", "limits.sub_new_pool"), ("eastmoney_ztb", "sector.anomaly"),
+    ("fuyao_ths", "attention.ths_hot_history"), ("fuyao_ths", "attention.ths_hot_rank"),
+    ("fuyao_ths", "attention.ths_skyrocket"), ("fuyao_ths", "auction.close_snapshot"),
+    ("fuyao_ths", "auction.open_snapshot"), ("fuyao_ths", "auction.short_term_benchmark"),
+    ("fuyao_ths", "bars.adjustment_factor"), ("fuyao_ths", "bars.daily"), ("fuyao_ths", "bars.index_daily"),
+    ("fuyao_ths", "fund.nav"), ("fuyao_ths", "fundamentals.financial_statements"), ("fuyao_ths", "lhb.daily"),
+    ("fuyao_ths", "lhb.seat_statistics"), ("fuyao_ths", "limits.broken_pool"), ("fuyao_ths", "limits.ladder"),
+    ("fuyao_ths", "limits.limit_down_pool"), ("fuyao_ths", "limits.limit_up_pool"),
+    ("fuyao_ths", "limits.stock_anomaly_reason"), ("fuyao_ths", "quote.all_a_snapshot"),
+    ("fuyao_ths", "quote.valuation"), ("fuyao_ths", "reference.instruments"),
+    ("fuyao_ths", "reference.trade_calendar"), ("fuyao_ths", "sector.index_quote"),
+    ("fuyao_ths", "sector.membership"), ("jin10_flash", "news.flash"),
+    ("longhu_qfq_derived", "bars.adjustment_factor"), ("longhuvip", "auction.open_snapshot"),
+    ("longhuvip", "bars.daily"), ("longhuvip", "bars.minute"), ("longhuvip", "limits.seal_detail"),
+    ("longhuvip", "quote.order_book"), ("longhuvip", "quote.watch_snapshot"), ("longhuvip", "sector.flow_curve"),
+    ("longhuvip", "sector.membership"), ("longhuvip_composite", "bars.adjustment_factor"),
+    ("longhuvip_composite", "bars.daily"), ("longhuvip_composite", "flow.stock_daily"),
+    ("longhuvip_composite", "fundamentals.daily_basic"), ("longhuvip_composite", "limits.prices"),
+    ("longhuvip_index", "bars.index_daily"), ("sina_free", "quote.watch_snapshot"),
+    ("sse_einteract", "events.investor_qa"), ("tdx_local", "bars.daily"), ("tdx_local", "bars.minute"),
+    ("tdx_public", "auction.history_0925"), ("tdx_public", "fundamentals.capital_changes"),
+    ("tdx_public", "ticks.session"), ("tencent_free", "bars.daily_adjusted"), ("tencent_free", "bars.minute"),
+    ("tencent_free", "limits.prices"), ("tencent_free", "quote.order_book"),
+    ("tencent_free", "quote.watch_snapshot"), ("tencent_free", "ticks.session"), ("ths_flash", "news.flash"),
+    ("ttfund", "fund.nav"), ("tushare_backup", "bars.daily"), ("tushare_primary", "bars.adjustment_factor"),
+    ("tushare_primary", "bars.daily"), ("tushare_primary", "quote.valuation"),
+    ("tushare_super_get", "bars.adjustment_factor"), ("tushare_super_get", "bars.daily"),
+    ("tushare_super_get", "bars.minute"), ("tushare_super_get", "events.disclosure_schedule"),
+    ("tushare_super_get", "events.earnings_express"), ("tushare_super_get", "events.earnings_forecast"),
+    ("tushare_super_get", "flow.stock_daily"), ("tushare_super_get", "fundamentals.daily_basic"),
+    ("tushare_super_get", "fundamentals.financial_statements"), ("tushare_super_get", "lhb.daily"),
+    ("tushare_super_get", "limits.prices"), ("tushare_super_get", "reference.instruments"),
+    ("tushare_super_get", "reference.trade_calendar"), ("tushare_super_get", "sector.membership"),
+    ("tushare_super_sdk", "bars.adjustment_factor"), ("xuangubao", "limits.seal_detail"),
+})
+GRANDFATHER_BASELINE_SIZE: Final[int] = 120
+LEGACY_SOURCE_KEYS: Final[frozenset[str]] = frozenset({
+    "longhuvip", "longhuvip_composite", "longhuvip_index", "tushare_primary", "tushare_super_get",
+    "tushare_super_sdk", "tushare_backup", "fuyao_ths", "eastmoney_free", "xuangubao", "eastmoney_ztb",
+    "eastmoney_hot_rank", "eastmoney_datacenter", "eastmoney_flash", "tencent_free", "sina_free",
+    "cninfo_free", "cninfo_irm", "sse_einteract", "cls_telegraph", "jin10_flash", "ths_flash", "ttfund",
+    "tdx_public", "tdx_local", "akshare", "baostock", "derived_market_sentiment", "derived_tick_flow",
+    "derived_sentiment_cycle", "longhu_qfq_derived",
+})
 
 
 #: Provenance labels stored on quotes and flow fields.  Rules test these
@@ -524,6 +749,15 @@ TAXONOMIES: Final[dict[str, Taxonomy]] = {item.key: item for item in (
              "390 个概念全量成分，盘后自动刷新；作为 ths_concept_flow 的候选替代，待策略侧验证"),
     Taxonomy("fuyao_ths_industry", "fuyao_ths", "ths_industry", DECLARED, 40, "320 个行业"),
     Taxonomy("fuyao_ths_region", "fuyao_ths", "ths_region", DECLARED, 50, "33 个地域"),
+    # MAC board types 0, 1, 3, 4 and 5 (tdx_mac.BOARD_TYPES), named by number: the MAC report
+    # (docs/archive/tdx-route-mac.md) gives counts and sample codes but no meaning.  Type 2 returned no boards
+    # and type 6 repeats boards of the others, so neither has a taxonomy.  Unverified, so never offered by
+    # taxonomies_for().
+    Taxonomy("tdx_mac_type_0", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 70),
+    Taxonomy("tdx_mac_type_1", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 71),
+    Taxonomy("tdx_mac_type_3", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 73),
+    Taxonomy("tdx_mac_type_4", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 74),
+    Taxonomy("tdx_mac_type_5", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 75),
 )}
 
 #: Groups in the THS concept tables whose membership is a qualification, not a
@@ -627,6 +861,22 @@ def evidence_locations(capability: str) -> list[dict[str, Any]]:
     return result
 
 
+def _spec_problems(item: Binding) -> list[str]:
+    """A spec may only name canonical fields of its capability, and scale them by plain numbers."""
+    label = f"binding {item.source}->{item.capability}"
+    capability = CAPABILITIES.get(item.capability)
+    names = set(capability.schema.names) if capability is not None and capability.schema is not None else set()
+    spec = item.spec
+    problems = [f"{label}: field_map targets {target!r}, not a canonical field of the capability"
+                for target in sorted(set(spec.field_map.values()) - names)]
+    for field_name, factor in spec.unit_factors.items():
+        if field_name not in names:
+            problems.append(f"{label}: unit factor for {field_name!r}, not a canonical field (factors apply after field_map)")
+        if isinstance(factor, bool) or not isinstance(factor, (int, float)) or not factor:
+            problems.append(f"{label}: unit factor for {field_name!r} must be a non-zero int or float, got {factor!r}")
+    return problems
+
+
 def validate_catalog() -> list[str]:
     """Referential and vocabulary checks; returns problems (empty is valid)."""
     problems = []
@@ -637,7 +887,8 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key):
+        # A capability must stay routable; the only exception is one whose bindings all await evidence.
+        if not bindings_for(key) and not any(item.capability == key and item.status == UNSUPPORTED for item in BINDINGS):
             problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
@@ -655,6 +906,21 @@ def validate_catalog() -> list[str]:
         seen.add((item.source, item.capability))
         if item.decision_eligible and item.status not in {LIVE_VERIFIED}:
             problems.append(f"binding {item.source}->{item.capability}: decision eligible without live verification")
+        if item.spec is None and (item.source, item.capability) not in GRANDFATHER_BINDINGS:
+            problems.append(f"binding {item.source}->{item.capability}: missing BindingSpec outside grandfather list")
+        if item.spec is None and item.source not in LEGACY_SOURCE_KEYS:
+            problems.append(f"binding {item.source}->{item.capability}: new source requires BindingSpec")
+    current = {(item.source, item.capability) for item in BINDINGS}
+    for source, capability in sorted(GRANDFATHER_BINDINGS - current):
+        problems.append(f"grandfather entry {source}->{capability} has no binding: delete it (the list only shrinks)")
+    for item in BINDINGS:
+        if item.spec is None:
+            continue
+        if (item.source, item.capability) in GRANDFATHER_BINDINGS:
+            problems.append(f"grandfather entry {item.source}->{item.capability} has a BindingSpec now: delete it")
+        problems.extend(_spec_problems(item))
+    if len(GRANDFATHER_BINDINGS) > GRANDFATHER_BASELINE_SIZE:
+        problems.append("grandfather binding list may only shrink")
     for label in SOURCE_LABELS.values():
         if label.source not in SOURCES or label.capability not in CAPABILITIES:
             problems.append(f"label {label.label}: unknown source or capability")
@@ -677,10 +943,14 @@ def catalog_document() -> dict[str, Any]:
         "capabilities": [{
             "key": capability.key, "category": capability.category, "label": capability.label,
             "grain": capability.grain, "scope": capability.scope, "fields": list(capability.fields),
+            "schema": [{"name": field.name, "unit": field.unit, "dtype": field.dtype,
+                        "nullable": field.nullable, "note": field.note}
+                       for field in (capability.schema.fields if capability.schema else ())],
             "time_semantics": capability.time_semantics, "description": capability.description,
             "providers": [{"source": item.source, "priority": item.priority, "status": item.status, "store": item.store,
                            "history": item.history, "limits": item.limits, "notes": item.notes,
-                           "decision_eligible": item.decision_eligible}
+                           "decision_eligible": item.decision_eligible,
+                           "spec": item.spec.__dict__ if item.spec else None}
                           for item in bindings_for(capability.key, states=(LIVE_VERIFIED, DECLARED, DORMANT, UNSUPPORTED))],
         } for capability in sorted(CAPABILITIES.values(), key=lambda item: item.key)],
         "retired": [{"source": item.source, "capability": item.capability, "notes": item.notes}
