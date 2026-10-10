@@ -208,22 +208,6 @@ def gpcw(client: tdx_protocol.TdxClient, filename: str, entry: ManifestEntry) ->
     return parse_gpcw_zip(payload, filename=filename)
 
 
-def parse_tipinfo(data: bytes) -> list[dict[str, Any]]:
-    """Parse the observed 22-column tipinfo shape; field 4 is only a candidate."""
-    rows = []
-    for line in data.decode("utf-8", "replace").splitlines():
-        fields = line.strip("\0\r").split("|")
-        if len(fields) < 4 or not re.fullmatch(r"\d{6}", fields[1]):
-            continue
-        try:
-            eps = float(fields[3])
-        except ValueError:
-            eps = None
-        rows.append({"market": fields[0], "code": fields[1], "report_period": fields[2], "eps": eps,
-                     "announcement_date_candidate": fields[4] if len(fields) > 4 else "", "raw_fields": fields})
-    return rows
-
-
 def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cumulative: float) -> float:
     """Compute TTM from the confirmed year-to-date cumulative series.
 
@@ -233,4 +217,4 @@ def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cum
 
 
 __all__ = ["GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "download_report_file", "gpcw", "gpcw_field_name", "gpcw_field_unit",
-           "manifest_changes", "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "parse_tipinfo", "ttm_from_cumulative", "verify_manifest_entry"]
+           "manifest_changes", "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "ttm_from_cumulative", "verify_manifest_entry"]

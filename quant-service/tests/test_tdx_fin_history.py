@@ -13,7 +13,7 @@ from app.datasources.sources.tdx_files import TdxFileError, build_report_file_re
 from app.datasources.sources.tdx_fin_history import (
     ManifestEntry, TdxFinanceError, download_report_file, gpcw, gpcw_field_unit,
     manifest_changes, normalize_report_period, parse_gpcw_dat, parse_gpcw_zip, parse_manifest,
-    parse_tipinfo, ttm_from_cumulative, verify_manifest_entry,
+    ttm_from_cumulative, verify_manifest_entry,
 )
 
 VERIFY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "verify-tdx-fin-history.py"
@@ -105,14 +105,6 @@ class TdxFinancialHistoryTests(unittest.TestCase):
         row = parse_gpcw_dat(dat)[0]
         self.assertEqual((row["code"], row["raw_values"]), ("001", (1.0, 2.0, 3.0, 4.0)))
         self.assertEqual(row["fields"], {"基本每股收益": 1.0, "扣除非经常性损益每股收益": 2.0, "每股未分配利润": 3.0, "每股净资产": 4.0})
-
-    def test_tipinfo_fields_keep_their_positions_and_the_candidate_stays_unpromoted(self):
-        row = parse_tipinfo(b"0|000001|20260630|1.24|20260815|20240221|x\n")[0]
-        self.assertEqual(row, {
-            "market": "0", "code": "000001", "report_period": "20260630", "eps": 1.24,
-            "announcement_date_candidate": "20260815",
-            "raw_fields": ["0", "000001", "20260630", "1.24", "20260815", "20240221", "x"]})
-        self.assertNotIn("available_at", row)
 
     def test_report_period_comes_from_the_file_name(self):
         self.assertEqual(normalize_report_period("gpcw20101231.zip"), "2010-12-31")
