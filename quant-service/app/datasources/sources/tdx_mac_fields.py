@@ -327,6 +327,17 @@ _BASIC = {
         (),
     ),
     58: ("non_index_flag", "uint32", "flag", "non_index_flag", "low", NO_REFERENCE, ()),
+    # 20-day change on adjusted prices (scripts/data/tdx_mac_bit_0x3b_2026-10-11_mac.json): equal to the 20-bar
+    # change of daily closes unless an ex-dividend falls inside the window.
+    59: (
+        "change_20d_pct",
+        "float32",
+        "percent",
+        "change_20d_pct",
+        "medium",
+        MATCH,
+        ("quote.watch_snapshot",),
+    ),
     60: (
         "ytd_pct",
         "float32",

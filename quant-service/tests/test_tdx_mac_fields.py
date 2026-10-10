@@ -42,6 +42,14 @@ class MacFieldRegistryTests(unittest.TestCase):
             self.assertEqual((MAC_FIELDS[bit].name, MAC_FIELDS[bit].format), identity, hex(bit))
         self.assertEqual((MAC_FIELDS[0x20].canonical_key, MAC_FIELDS[0x21].canonical_key), ("limit_up", "limit_down"))
 
+    def test_bit_0x3b_is_the_float32_20_day_change(self):
+        # 000001.SZ on 2026-10-09: the wire word 3199079547 is the float32 -0.34 (%) that tdxstat column 18 also gives;
+        # the registry decoded it as uint32 before (scripts/data/tdx_mac_bit_0x3b_2026-10-11_mac.json).
+        field = MAC_FIELDS[0x3B]
+        self.assertEqual((field.name, field.format, field.unit, field.reconciliation), ("change_20d_pct", "float32", "percent", MATCH))
+        row, _end = decode_dynamic_row(struct.pack("<I", 3199079547), bitmap_for_bits([0x3B]))
+        self.assertAlmostEqual(row["change_20d_pct"], -0.34, places=2)
+
     def test_the_iopv_bits_feed_fund_iopv_not_the_published_nav(self):
         self.assertEqual([(MAC_FIELDS[bit].name, MAC_FIELDS[bit].format, MAC_FIELDS[bit].capability_ids) for bit in (0x24, 0x27)],
                          [("pre_iopv", "float32", ()), ("iopv", "float32", ("fund.iopv",))])

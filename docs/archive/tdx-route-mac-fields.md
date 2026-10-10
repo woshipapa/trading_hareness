@@ -36,6 +36,7 @@ to no capability.
 | 25-26 | speed_pct, avg_price | float32 | NO_REFERENCE / MATCH (amount/vol) | `quote.watch_snapshot` |
 | 27 | iopv | float32 / yuan | MATCH on ETF 510300 | `fund.iopv` |
 | 38 | main_net_amount | float32 / yuan | NO_REFERENCE (provider-defined main_in - main_out, yuan; delta-3 Q4) | `flow.stock_daily` |
+| 3b | change_20d_pct | float32 / percent | MATCH (20-bar change of daily closes on adjusted prices; scripts/data/tdx_mac_bit_0x3b_2026-10-11_mac.json; the registry read it as uint32 before 2026-10-11) | `quote.watch_snapshot` |
 | 3c | ytd_pct | float32 / percent | MATCH against bar closes where window exists | `quote.watch_snapshot` |
 | 40-41 | mtd_pct, change_1y_pct | float32 / percent | MATCH against bar closes where window exists | `quote.watch_snapshot` |
 | 43-47 | change_3d_pct, change_60d_pct, change_5d_pct, change_10d_pct, prev2_change_pct | float32 / percent | MATCH for computable windows; otherwise NO_REFERENCE | `quote.watch_snapshot` |
