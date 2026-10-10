@@ -77,12 +77,14 @@ class LegacyBarTests(unittest.TestCase):
 
         class Client:
             def _exchange(self, request):
+                opcode = struct.unpack_from("<H", request, 10)[0]
+                category = struct.unpack_from("<H", request, 20)[0]
                 start, count = struct.unpack_from("<HH", request, 24)
-                requests.append((start, count))
+                requests.append((opcode, category, start, count))
                 return b"answer"
 
         def parse(_category, _body):
-            start = requests[-1][0]
+            start = requests[-1][2]
             return [{"datetime": f"2026-01-{index + 1:04d}", "open": 1, "high": 1, "low": 1,
                      "close": 1, "volume": 1, "amount": 1} for index in range(start, start + (800 if start == 0 else 200))]
 
@@ -91,10 +93,26 @@ class LegacyBarTests(unittest.TestCase):
 
         with patch.object(tdx_bars.tdx_protocol, "parse_bars", parse), patch.object(tdx_bars.tdx_protocol, "call", call):
             evidence = asyncio.run(tdx_bars.fetch_daily(symbol="600519.SH", count=1000))
-        self.assertEqual(requests, [(0, 800), (800, 800)])
+        self.assertEqual(requests, [(0x052D, 9, 0, 800), (0x052D, 9, 800, 800)])
         self.assertEqual(len(evidence.rows), 1000)
         self.assertEqual(evidence.rows[0]["trade_date"], "2026-01-0001")
         self.assertEqual(evidence.rows[-1]["trade_date"], "2026-01-1000")
+
+    def test_short_page_stops_paging(self):
+        requests = []
+
+        class Client:
+            def _exchange(self, request):
+                requests.append(struct.unpack_from("<H", request, 24)[0])
+                return b"answer"
+
+        with patch.object(tdx_bars.tdx_protocol, "parse_bars", return_value=[
+            {"datetime": "2026-01-01", "open": 1, "high": 1, "low": 1,
+             "close": 1, "volume": 2, "amount": 3}
+        ]), patch.object(tdx_bars.tdx_protocol, "call", lambda operation, **_kwargs: _call(operation, Client(), "fixture-host:7709")):
+            evidence = asyncio.run(tdx_bars.fetch_daily(symbol="600519.SH", count=1000))
+        self.assertEqual(requests, [0])
+        self.assertEqual(len(evidence.rows), 1)
 
     def test_legacy_symbol_and_count_validation_precedes_network(self):
         async def fail(*_args, **_kwargs):
@@ -120,3 +138,7 @@ class LegacyBarTests(unittest.TestCase):
             evidence = asyncio.run(tdx_bars.fetch_minute(symbol="600519.SH", count=1))
         self.assertEqual(evidence.warnings, ("tdx_host=fixture-host:7709",))
         self.assertEqual(evidence.available_at_min, evidence.available_at_max)
+
+
+async def _call(operation, client, host):
+    return operation(client), host
