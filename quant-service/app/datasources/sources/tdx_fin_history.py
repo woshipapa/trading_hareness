@@ -149,7 +149,7 @@ def parse_gpcw_dat(data: bytes, *, filename: str | None = None) -> list[dict[str
         if item_pos + item_size > len(data):
             break
         raw_code, _flag, offset = struct.unpack_from(_ITEM, data, item_pos)
-        if offset < 0 or offset + record_size > len(data):
+        if offset + record_size > len(data):
             continue
         code = raw_code.split(b"\0", 1)[0].decode("ascii", "replace")
         values = struct.unpack_from("<" + "f" * field_count, data, offset)
