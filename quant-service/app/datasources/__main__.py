@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import dataclasses
-import importlib
 import inspect
 import json
 import re
@@ -40,6 +39,7 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime, timezone
 from typing import Any
 
+from .adapter_calls import adapter_function
 from .catalog import bindings_for, capabilities_of, catalog_document, validate_catalog
 from .completeness import completeness_problems
 from .contracts import ADAPTER_PATTERN, BINDING_STATES
@@ -81,12 +81,6 @@ def _validate(_args: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
-def _function(adapter: str) -> Callable[..., object]:
-    """The function ``app/<module path>.py:<function>`` names."""
-    path, _, name = adapter.partition(":")
-    return getattr(importlib.import_module(path.removesuffix(".py").replace("/", ".")), name)
-
-
 def _typed(function: Callable[..., object], params: dict[str, Any]) -> dict[str, Any]:
     """``params`` with the ISO strings given for ``date`` parameters turned into dates (JSON has none)."""
     parameters = inspect.signature(function).parameters
@@ -101,7 +95,7 @@ async def _call(source: str, capability: str, adapter: str, params: dict[str, An
     record: dict[str, Any] = {"source": source, "capability": capability, "adapter": adapter,
                               "params": params, "started_utc": datetime.now(timezone.utc).isoformat()}
     try:
-        function = _function(adapter)
+        function = adapter_function(adapter)
         answer = function(**_typed(function, params))
         rows, evidence = _unpack_evidence(await answer if inspect.isawaitable(answer) else answer)
     except Exception as error:  # noqa: BLE001 - the probe's answer is whatever the adapter raised

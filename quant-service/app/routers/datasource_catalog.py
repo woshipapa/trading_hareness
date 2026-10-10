@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..datasources import catalog
@@ -21,6 +22,7 @@ class BindingSpecResponse(BaseModel):
     limits: dict[str, Any]
     time_semantics: str
     handshake_profile: str | None = None
+    agreement: dict[str, Any] = Field(default_factory=dict)
 
 
 class BindingResponse(BaseModel):
@@ -47,13 +49,15 @@ class TaxonomyResponse(BaseModel):
 
 
 class CapabilityResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     key: str
     category: str
     label: str
     grain: str
     scope: str
     fields: list[str]
-    schema: list[dict[str, Any]]
+    schema_: list[dict[str, Any]] = Field(alias="schema")
     time_semantics: str
     description: str
     bindings: list[BindingResponse]
@@ -102,16 +106,8 @@ def _binding(item: Any) -> dict[str, Any]:
         "spec": None,
     }
     if item.spec is not None:
-        payload["spec"] = {
-            "params": dict(item.spec.params),
-            "field_map": dict(item.spec.field_map),
-            "unit_factors": dict(item.spec.unit_factors),
-            "paging": item.spec.paging,
-            "max_batch": item.spec.max_batch,
-            "limits": dict(item.spec.limits),
-            "time_semantics": item.spec.time_semantics,
-            "handshake_profile": item.spec.handshake_profile,
-        }
+        # Every BindingSpec field, so a field added to the contract appears here without a code change.
+        payload["spec"] = dataclasses.asdict(item.spec)
     return payload
 
 
@@ -171,8 +167,6 @@ def build_datasource_catalog_router() -> APIRouter:
     async def datasource_capability(capability: str) -> dict[str, Any]:
         item = catalog.CAPABILITIES.get(capability)
         if item is None:
-            from fastapi import HTTPException
-
             raise HTTPException(status_code=404, detail="unknown datasource capability")
         bindings = [binding for binding in catalog.BINDINGS if binding.capability == capability]
         return {

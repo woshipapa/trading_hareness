@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, get_args, get_origin, get_type_hints
+from typing import Any, get_origin, get_type_hints
 
 from . import catalog
 from .contracts import CapabilityEvidence
@@ -34,16 +34,19 @@ def research_reads_enabled() -> bool:
     return os.getenv("DATASOURCE_RESEARCH_READ_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 
 
-def _adapter_parts(adapter: str | None) -> tuple[str, str] | None:
+def adapter_function(adapter: str) -> Any:
+    """The function an ``app/<module path>.py:<function>`` adapter string names."""
+    path, _, name = adapter.partition(":")
+    return getattr(importlib.import_module(path.removesuffix(".py").replace("/", ".")), name, None)
+
+
+def _research_readable(adapter: str | None) -> bool:
+    """Only the TDX package adapters answer research reads; licensed and vendor sources have their own routes."""
     if not adapter or ":" not in adapter:
-        return None
-    path, function = adapter.split(":", 1)
-    path_obj = Path(path)
-    if path_obj.parent.name == "sources" and path_obj.name.startswith("tdx_") and path_obj.suffix == ".py":
-        return ".".join(path_obj.with_suffix("").parts), function
-    if path == "app/datasources/derived/limit_pools.py":
-        return "app.datasources.derived.limit_pools", function
-    return None
+        return False
+    path = Path(adapter.partition(":")[0])
+    return (path.parent.name == "sources" and path.name.startswith("tdx_") and path.suffix == ".py") or \
+        path.as_posix() == "app/datasources/derived/limit_pools.py"
 
 
 def resolve_adapter(source: str, capability: str) -> tuple[Any, Any]:
@@ -51,12 +54,9 @@ def resolve_adapter(source: str, capability: str) -> tuple[Any, Any]:
     if not bindings:
         raise AdapterCallError(404, "source/capability binding not found")
     binding = bindings[0]
-    parts = _adapter_parts(binding.adapter)
-    if parts is None:
+    if not _research_readable(binding.adapter):
         raise AdapterCallError(404, "this binding is served by a licensed or vendor route")
-    module_name, function_name = parts
-    module = importlib.import_module(module_name)
-    function = getattr(module, function_name, None)
+    function = adapter_function(binding.adapter)
     if not callable(function):
         raise AdapterCallError(404, "catalog adapter is not callable")
     signature = inspect.signature(function)
@@ -66,18 +66,14 @@ def resolve_adapter(source: str, capability: str) -> tuple[Any, Any]:
 
 
 def _parse_value(name: str, value: str, annotation: Any) -> Any:
-    origin = get_origin(annotation)
-    args = get_args(annotation)
-    if origin in {Sequence, list, tuple} or annotation in {Sequence[str], list[str], tuple[str, ...]}:
-        return [part for item in value.split(",") for part in item.split(",") if part]
+    if get_origin(annotation) in {Sequence, list, tuple}:
+        return [part for part in value.split(",") if part]
     if annotation is int:
         return int(value)
     if annotation is date:
         return date.fromisoformat(value)
     if annotation is str or annotation is Any or annotation is inspect.Parameter.empty:
         return value
-    if origin is not None and args and args[0] is str and origin in {Sequence, list, tuple}:
-        return value.split(",")
     raise AdapterCallError(422, f"unsupported query parameter type for {name}")
 
 
@@ -96,7 +92,7 @@ def parse_query(function: Any, query: dict[str, list[str]]) -> dict[str, Any]:
             result[name] = parameter.default
             continue
         annotation = hints.get(name, parameter.annotation)
-        if get_origin(annotation) in {Sequence, list, tuple} or annotation in {Sequence[str], list[str], tuple[str, ...]}:
+        if get_origin(annotation) in {Sequence, list, tuple}:
             value = ",".join(values)
         elif len(values) == 1:
             value = values[0]

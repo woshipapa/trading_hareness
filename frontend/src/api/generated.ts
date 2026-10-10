@@ -3838,6 +3838,10 @@ export interface components {
             time_semantics: string;
             /** Handshake Profile */
             handshake_profile?: string | null;
+            /** Agreement */
+            agreement?: {
+                [key: string]: unknown;
+            };
         } & {
             [key: string]: unknown;
         };
