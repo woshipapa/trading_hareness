@@ -19,6 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..derived import limit_pools
+from ..http import ashare_symbol
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
 from ..sources import tdx_bars, tdx_files, tdx_fin_history, tdx_instruments, tdx_mac, tdx_protocol, tdx_zhb_extras
 from ..sources.fuyao_evidence import fetch_code_batches
@@ -83,11 +84,6 @@ class ArchiveDeps:
 
 
 TDX_INDEX_SYMBOLS = ("999999.SH", "399001.SZ", "399006.SZ", "399300.SZ", "000688.SH", "899050.BJ")
-
-
-def _tdx_stock_symbol(code: str) -> str:
-    exchange = "SH" if str(code).startswith(("5", "6")) else "BJ" if str(code).startswith(("4", "8", "9")) else "SZ"
-    return f"{str(code).zfill(6)}.{exchange}"
 
 
 @dataclass
@@ -377,6 +373,7 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
     stored = 0
     downloaded = 0
     undated = 0
+    rejected = 0
     for filename in changed_names:
         entry = entries[filename]
         rows, _period_host = await tdx_protocol.call(
@@ -386,11 +383,15 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
         undated += tdx_fin_history.date_gpcw_rows(rows, tipinfo)
         observations = []
         for row in rows:
+            symbol = ashare_symbol(row["code"])
+            if symbol is None:
+                rejected += 1
+                continue
             named_fields = {name: value for name, value in row["fields"].items() if name in tdx_fin_history.GPCW_FIELD_NAMES.values()}
             report_period = row["report_period"]
             effective = datetime.combine(date.fromisoformat(report_period), time(15, 0), CN_TZ)
             available = row.get("available_at", now)
-            observations.append({"ts_code": _tdx_stock_symbol(row["code"]), "code": row["code"], "report_period": report_period,
+            observations.append({"ts_code": symbol, "code": row["code"], "report_period": report_period,
                                 "fields": named_fields, "field_units": {key: row["field_units"][key] for key in named_fields},
                                 "effective_at": effective.isoformat(), "available_at": available.isoformat(),
                                 "availability_basis": "tipinfo_first_disclosure" if "available_at" in row else "collection_time_undated"})
@@ -398,7 +399,7 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
         downloaded += 1
     await deps.collector.record_health("tdx_public", "tdx_gpcw", True, stored, round((time_module.monotonic() - started) * 1000), None)
     return {"manifest": len(manifest), "manifest_stored": manifest_stored, "changed": changed_names,
-            "downloaded": downloaded, "rows_stored": stored, "undated": undated, "host": host}
+            "downloaded": downloaded, "rows_stored": stored, "undated": undated, "rejected": rejected, "host": host}
 
 
 async def job_tdx_index_bars(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:

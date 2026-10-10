@@ -429,13 +429,15 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         deps.observation_payloads = payloads
         gpcw_row = {"code": "600519", "report_period": "2026-06-30", "fields": {"基本每股收益": 1.2, "col9": 3.0},
                     "field_units": {"基本每股收益": "yuan/share", "col9": None}}
+        rejected_row = {**gpcw_row, "code": "900901"}
         with patch("app.datasources.collectors.post_close.tdx_protocol.call",
                    AsyncMock(side_effect=[("gpcw20260630.zip," + "b" * 32 + ",10", "h:7709/login_one"),
-                                          ([gpcw_row], "h:7709/login_one")])), \
+                                          ([gpcw_row, rejected_row], "h:7709/login_one")])), \
              patch("app.datasources.collectors.post_close.tdx_fin_history.gpcw",
                    return_value=[gpcw_row]):
             result = await post_close.job_tdx_gpcw(deps, post_close.ArchiveState(), date(2026, 9, 18), EVENING)
         self.assertEqual(result["downloaded"], 1)
+        self.assertEqual(result["rejected"], 1)
         stored = [rows for _provider, capability, rows in recorder.observations if capability == "tdx_gpcw"][0]
         self.assertEqual(stored[0]["availability_basis"], "tipinfo_first_disclosure")
         self.assertEqual(stored[0]["fields"], {"基本每股收益": 1.2})
