@@ -14,8 +14,10 @@ the same keywords, so the resolver can fall through without translation):
 * ``limits.prices``: ``symbols``
 * ``bars.daily``: ``symbol``, ``count``
 * ``bars.minute``: ``symbol``, ``count`` (MAC 1-minute bars)
+* ``quote.valuation``, ``fundamentals.daily_basic``: ``symbols`` (optional symbol filter)
 * ``sector.board_catalog``: no parameters; returns the MAC board types of ``tdx_mac.BOARD_TYPES``
-* ``sector.membership``: ``sector_key`` (MAC also takes the catalog row's ``board_type``)
+* ``sector.membership``: no parameters for the TDX file snapshot; ``sector_key`` for MAC
+* ``reference.trade_calendar``, ``events.ipo_calendar``: no parameters
 
 Sources that live outside this package (licensed gateways, the existing
 Tencent/Sina/Eastmoney quote paths) are bound by the composition root.
@@ -30,7 +32,7 @@ from zoneinfo import ZoneInfo
 
 from .derived.tick_flow import summarize_ticks
 from .resolver import CapabilityResolver
-from .sources import eastmoney_datacenter, eastmoney_hot_rank, eastmoney_ztb, investor_qa, news_flash, ticks, ttfund, xuangubao_pool
+from .sources import eastmoney_datacenter, eastmoney_hot_rank, eastmoney_ztb, investor_qa, news_flash, tdx_reference_files, ticks, ttfund, xuangubao_pool
 from .sources.fuyao_evidence import fetch_all_pool_pages
 
 
@@ -141,6 +143,11 @@ def register_package_sources(resolver: CapabilityResolver, *, fuyao_fetch: Fuyao
     resolver.bind("tdx_public", "auction.history_0925", opening_auction)
     resolver.bind("tencent_free", "ticks.session", tencent_ticks)
     resolver.bind("tdx_public", "fundamentals.capital_changes", capital_changes)
+    resolver.bind("tdx_public", "quote.valuation", tdx_reference_files.fetch_valuation)
+    resolver.bind("tdx_public", "fundamentals.daily_basic", tdx_reference_files.fetch_daily_basic)
+    resolver.bind("tdx_public", "sector.membership", tdx_reference_files.fetch_membership)
+    resolver.bind("tdx_public", "reference.trade_calendar", tdx_reference_files.fetch_trade_calendar)
+    resolver.bind("tdx_public", "events.ipo_calendar", tdx_reference_files.fetch_ipo_calendar)
 
     async def eastmoney_capital(*, symbol: str) -> list[dict[str, Any]]:
         return await eastmoney_datacenter.fetch_report("share_capital", extra_filter=f'(SECUCODE="{symbol}")', max_pages=2)

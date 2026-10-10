@@ -63,7 +63,7 @@ UNREGISTERED: dict[str, str] = {
     "tdx_instruments.security_count": "transport behind the bound fetch_security_list (0x044e count per market)",
     "tdx_instruments.security_list": "transport behind the bound fetch_security_list (0x044e count and 0x0450 pages)",
     "tdx_instruments.index_bars": "index/board bars with constituent breadth (delta-3 Q10); bars.index_daily binds it in I3",
-    "tdx_files.download": "server file transport; fetch_security_list reads zhb.zip through it, file capabilities bind in I4",
+    "tdx_files.download": "server-file transport used by the bound tdx_reference_files adapters; it has no capability contract of its own",
     "tdx_files.file_size": "server file transport behind tdx_files.download",
     "tdx_files.parse_zhb_zip": "parses a zhb.zip already downloaded into memory; its archive.open() reads those bytes",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); "
@@ -82,7 +82,6 @@ UNREGISTERED: dict[str, str] = {
     "tdx_mac.TdxMacClient.bars": "bars command 0x122e, read by fetch_daily_bars (bars.daily) and fetch_minute_bars (bars.minute)",
     "tdx_mac.TdxMacClient.auxiliary": "research commands 0x1218, 0x123d, 0x123e and 0x1237; no capability binds them, "
                                       "only scripts/verify-tdx-mac.py reads them",
-    "family:files": "verified in the plan; server-file capabilities arrive in P4",
     "family:capital flow": "MAC capital flow (0x1218 head=2; fields 0x38 and 0x6b) is confirmed only as the provider's "
                            "own main_in - main_out (delta-3 Q4); no flow capability binds it until its coverage and "
                            "stability are established",
