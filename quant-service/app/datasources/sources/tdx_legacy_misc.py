@@ -222,7 +222,6 @@ def parse_index_info(body: bytes, request_market: int | None = None, request_cod
 
 
 def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    import math
     rows: list[dict[str, Any]] = []
     warnings: dict[str, Any] = {}
     total_no_trade = 0
@@ -246,10 +245,10 @@ def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]
 
 async def fetch_all_a_snapshot() -> CapabilityEvidence:
     result, host = await tdx_protocol.call(_all_a_snapshot, handshake_profile="login_one")
-    rows, no_trade_count = result
+    rows, warnings_dict = result
     warnings = [f"tdx_host={host}"]
-    if no_trade_count > 0:
-        warnings.append(f"no_trade_rows={no_trade_count}")
+    if warnings_dict.get("no_trade_rows", 0) > 0:
+        warnings.append(f"no_trade_rows={warnings_dict['no_trade_rows']}")
     # Coverage is None until security list (I1) gives denominator (finding 2)
     return CapabilityEvidence(rows, coverage=None, warnings=tuple(warnings))
 
