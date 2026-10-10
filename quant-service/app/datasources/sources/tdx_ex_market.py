@@ -12,8 +12,7 @@ import asyncio
 import socket
 import struct
 import zlib
-from datetime import date
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable
 
 from .tdx_protocol import TdxProtocolError
 
@@ -28,9 +27,6 @@ DEFAULT_HOSTS = (
     ("124.71.223.19", 7727),
 )
 
-# Goods/category IDs returned by EXCATEGORYLIST.  The market byte is a
-# second-level exchange/venue ID and is intentionally kept separate.
-#: Broad type in the first byte of a category row (delta 2, D6: the market id is the byte at offset 33).
 CATEGORY_TYPES = {
     1: "stock",
     2: "hk",
@@ -54,7 +50,7 @@ MARKET_IDS = {
     5: "Dalian futures options",
     6: "Shanghai futures options",
     7: "CFFEX options",
-    8: "HK funds",
+    8: "Shanghai stock options",
     9: "SZ stock options",
     10: "basic forex",
     11: "cross forex",
@@ -105,24 +101,11 @@ MARKET_IDS = {
 
 COMMANDS = {
     "login": 0x2454,
-    "server_info": 0x2455,
     "count": 0x23F0,
     "categories": 0x23F4,
     "instruments": 0x23F5,
     "kline": 0x23FF,
-    "history_transaction": 0x2412,
-    "table": 0x2422,
-    "table_detail": 0x2423,
-    "file_meta": 0x2458,
-    "file_download": 0x2459,
     "quote_single": 0x23FA,
-    "quotes": 0x248A,
-    "quotes2": 0x23FB,
-    "kline2": 0x2489,
-    "tick_chart": 0x248B,
-    "history_tick_chart": 0x248C,
-    "chart_sampling": 0x254D,
-    "board_list": 0x1231,
 }
 
 EX_LOGIN_PAYLOAD = bytes.fromhex(
@@ -186,20 +169,6 @@ def build_quote(market: int, code: str) -> bytes:
     return _frame(COMMANDS["quote_single"], struct.pack("<B9s", market, _code(code)))
 
 
-def build_quotes(stocks: Sequence[tuple[int, str]]) -> bytes:
-    payload = struct.pack("<B7xH", 5, len(stocks))
-    return _frame(
-        COMMANDS["quotes"],
-        payload + b"".join(struct.pack("<B23s", m, _code(c, 23)) for m, c in stocks),
-    )
-
-
-def build_quotes2(stocks: Sequence[tuple[int, str]]) -> bytes:
-    payload = struct.pack("<HHHHH", 2, 3148, 0, 600, len(stocks))
-    return _frame(
-        COMMANDS["quotes2"],
-        payload + b"".join(struct.pack("<B23s", m, _code(c, 23)) for m, c in stocks),
-    )
 
 
 def build_kline(
@@ -213,55 +182,14 @@ def build_kline(
     )
 
 
-def build_kline2(
-    category: int, market: int, code: str, start: int = 0, count: int = 800
-) -> bytes:
-    return _frame(
-        COMMANDS["kline2"],
-        struct.pack(
-            "<B9sHHIH", market, _code(code), category, 1, start, min(count, 800)
-        ),
-    )
 
 
-def build_tick_chart(market: int, code: str) -> bytes:
-    return _frame(
-        COMMANDS["tick_chart"], struct.pack("<B23s8x", market, _code(code, 23))
-    )
+def _category_for_market(market_id: int) -> int:
+    """Get the kline category (9 for daily equities, 4 for futures daily)."""
+    futures_markets = {28, 29, 30, 47, 60, 66, 67}
+    return 4 if market_id in futures_markets else 9
 
 
-def build_history_tick_chart(market: int, code: str, trade_date: date | int) -> bytes:
-    stamp = (
-        int(trade_date.strftime("%Y%m%d"))
-        if isinstance(trade_date, date)
-        else int(trade_date)
-    )
-    return _frame(
-        COMMANDS["history_tick_chart"],
-        struct.pack("<IB23s6xH", stamp, market, _code(code, 23), 0),
-    )
-
-
-def build_history_transaction(
-    market: int, code: str, trade_date: date | int, count: int = 120
-) -> bytes:
-    stamp = (
-        int(trade_date.strftime("%Y%m%d"))
-        if isinstance(trade_date, date)
-        else int(trade_date)
-    )
-    return _frame(
-        COMMANDS["history_transaction"],
-        struct.pack("<IB43sH", stamp, market, _code(code, 43), count),
-    )
-
-
-def build_table(start: int = 0, *, detail: bool = False) -> bytes:
-    token = bytes.fromhex("00781f0e6a37447b502b7c0d01404c0a")
-    payload = struct.pack(
-        "<II16s85sB16x", start, 0, token, b"\0" * 85, 0 if detail else 1
-    )
-    return _frame(COMMANDS["table_detail" if detail else "table"], payload)
 
 
 def _quote(data: bytes, *, code_len: int = 9) -> dict[str, Any]:
@@ -272,18 +200,23 @@ def _quote(data: bytes, *, code_len: int = 9) -> dict[str, Any]:
     pos = 1 + code_len
     if code_len == 9:
         pos += 4  # single-quote response has a four-byte reserved field
-    if len(data) < pos + 136:
-        return {"market_id": market, "code": code, "price": 0.0, "amount": None, "server_time": None, "partial": True}
+    if len(data) < pos + 140:
+        raise TdxExMarketError("short quote response")
     pre, op, hi, lo, price = struct.unpack_from("<5f", data, pos)
     pos += 20
-    kai = struct.unpack_from("<I", data, pos)[0]
-    pos += 8
+    # Reserved field at +20
+    pos += 4
+    # Unknown field at +24
+    pos += 4
     total, current = struct.unpack_from("<II", data, pos)
     pos += 8
+    amount = struct.unpack_from("<f", data, pos)[0]
     pos += 4
     inner, outer = struct.unpack_from("<II", data, pos)
     pos += 8
     hold = struct.unpack_from("<I", data, pos)[0]
+    pos += 4
+    open_interest = struct.unpack_from("<I", data, pos)[0]
     pos += 4
     bid = list(struct.unpack_from("<5f", data, pos))
     pos += 20
@@ -300,9 +233,9 @@ def _quote(data: bytes, *, code_len: int = 9) -> dict[str, Any]:
         "high": hi,
         "low": lo,
         "price": price,
-        "open_interest": kai,
+        "open_interest": open_interest,
         "volume": total,
-        "amount": None,
+        "amount": amount,
         "server_time": None,
         "current_volume": current,
         "inner_volume": inner,
@@ -328,7 +261,7 @@ def parse_categories(data: bytes) -> list[dict[str, Any]]:
         p = 2 + i * 64
         if p + 64 > len(data):
             break
-        market, name, goods, abbr = (
+        category_type, name, market_id, abbr = (
             data[p],
             _text(data[p + 1 : p + 33]),
             data[p + 33],
@@ -336,10 +269,10 @@ def parse_categories(data: bytes) -> list[dict[str, Any]]:
         )
         out.append(
             {
-                "market_id": goods,
-                "market_id_name": MARKET_IDS.get(goods, "unknown"),
-                "category": market,
-                "category_name": CATEGORY_TYPES.get(market, "unknown"),
+                "market_id": market_id,
+                "market_id_name": MARKET_IDS.get(market_id, "unknown"),
+                "category": category_type,
+                "category_name": CATEGORY_TYPES.get(category_type, "unknown"),
                 "name": name,
                 "abbr": abbr,
             }
@@ -378,7 +311,7 @@ def _kline_time(raw: bytes, category: int) -> str:
     return f"{stamp // 10000:04d}-{stamp % 10000 // 100:02d}-{stamp % 100:02d}"
 
 
-def parse_klines(data: bytes, category: int) -> list[dict[str, Any]]:
+def parse_klines(data: bytes, category: int, market_id: int | None = None, code: str | None = None) -> list[dict[str, Any]]:
     if len(data) < 20:
         return []
     n = struct.unpack_from("<H", data, 18)[0]
@@ -392,108 +325,30 @@ def parse_klines(data: bytes, category: int) -> list[dict[str, Any]]:
         position = struct.unpack_from("<I", data, p + 20)[0]
         volume = struct.unpack_from("<I", data, p + 24)[0]
         aux = struct.unpack_from("<f", data, p + 28)[0]
-        out.append(
-            {
-                "datetime": stamp,
-                "open": op,
-                "high": hi,
-                "low": lo,
-                "close": cl,
-                "amount": amount,
-                "volume": volume,
-                "position": position,
-                "price": aux,
-            }
-        )
+        row = {
+            "datetime": stamp,
+            "open": op,
+            "high": hi,
+            "low": lo,
+            "close": cl,
+            "volume_raw": volume,
+            "position": position,
+            "price": aux,
+        }
+        if category == 4:
+            # Futures: 'amount' field holds open-interest bits
+            row["open_interest"] = struct.unpack_from("<I", struct.pack("<f", amount))[0]
+        else:
+            row["amount"] = amount
+        if market_id is not None:
+            row["market_id"] = market_id
+        if code is not None:
+            row["code"] = code
+        out.append(row)
         p += 32
     return out
 
 
-def parse_tick_chart(data: bytes) -> list[dict[str, Any]]:
-    if len(data) < 34:
-        return []
-    n = struct.unpack_from("<H", data, 32)[0]
-    out = []
-    p = 34
-    for _ in range(n):
-        if p + 18 > len(data):
-            break
-        minutes, price, avg, volume, open_interest = struct.unpack_from(
-            "<HffII", data, p
-        )
-        out.append(
-            {
-                "time": f"{minutes // 60:02d}:{minutes % 60:02d}",
-                "price": price,
-                "avg_price": avg,
-                "volume": volume,
-                "open_interest": open_interest,
-            }
-        )
-        p += 18
-    return out
-
-
-def parse_history_transactions(data: bytes, market: int) -> list[dict[str, Any]]:
-    if len(data) < 58:
-        return []
-    n = struct.unpack_from("<H", data, 56)[0]
-    out = []
-    p = 58
-    for _ in range(n):
-        if p + 16 > len(data):
-            break
-        minutes, price, volume, zeng, action = struct.unpack_from("<HIIiH", data, p)
-        side = "BUY" if action == 0 else "SELL" if action == 1 else "NEUTRAL"
-        out.append(
-            {
-                "time": f"{minutes // 60:02d}:{minutes % 60:02d}",
-                "price": price / 1000 if market in (31, 48) else price,
-                "volume": volume,
-                "zengcang": zeng,
-                "action": side,
-                "action_code": action,
-            }
-        )
-        p += 16
-    return out
-
-
-def parse_history_tick_chart(data: bytes) -> list[dict[str, Any]]:
-    """Parse EXHISTORYTICKCHART response (42-byte header, 18-byte rows)."""
-    if len(data) < 42:
-        return []
-    n = struct.unpack_from("<H", data, 40)[0]
-    out = []
-    p = 42
-    for _ in range(n):
-        if p + 18 > len(data):
-            break
-        minutes, price, avg, volume, open_interest = struct.unpack_from(
-            "<HffII", data, p
-        )
-        out.append(
-            {
-                "time": f"{minutes // 60:02d}:{minutes % 60:02d}",
-                "price": price,
-                "avg_price": avg,
-                "volume": volume,
-                "open_interest": open_interest,
-            }
-        )
-        p += 18
-    return out
-
-
-def parse_table(data: bytes) -> dict[str, Any]:
-    """Parse the common EXTABLE/EXTABLEDETAIL envelope and UTF-8/GBK content."""
-    if len(data) < 169:
-        return {"start": 0, "count": 0, "content": "", "partial": True}
-    return {
-        "start": struct.unpack_from("<I", data, 35)[0],
-        "count": struct.unpack_from("<I", data, 161)[0],
-        "content": _text(data[169:]),
-    }
 
 
 class TdxExMarketClient:
@@ -510,6 +365,7 @@ class TdxExMarketClient:
             (self.host, self.port), timeout=self.timeout
         )
         self._exchange(build_setup())
+        self.login()
         return self
 
     def __exit__(self, *_exc: object) -> None:
@@ -541,17 +397,8 @@ class TdxExMarketClient:
             body = zlib.decompress(body)
         return body
 
-    def login(self) -> dict[str, Any]:
-        body = self._exchange(build_login())
-        return (
-            {
-                "server_name": _text(body[61:82]),
-                "description": _text(body[93:244]),
-                "ip": _text(body[242:]),
-            }
-            if len(body) >= 294
-            else {"bytes": len(body)}
-        )
+    def login(self) -> None:
+        self._exchange(build_login())
 
     def count(self) -> int:
         return parse_count(self._exchange(build_count()))
@@ -582,51 +429,12 @@ class TdxExMarketClient:
     def quote(self, market: int, code: str) -> dict[str, Any]:
         return _quote(self._exchange(build_quote(market, code)))
 
-    def quotes(
-        self, stocks: Sequence[tuple[int, str]], *, variant: int = 1
-    ) -> list[dict[str, Any]]:
-        request = build_quotes(stocks) if variant == 1 else build_quotes2(stocks)
-        data = self._exchange(request)
-        n = struct.unpack_from("<H", data, 8)[0] if len(data) >= 10 else 0
-        return [
-            _quote(data[10 + i * 314 : 10 + (i + 1) * 314], code_len=23)
-            for i in range(min(n, (len(data) - 10) // 314))
-        ]
-
     def klines(
         self, category: int, market: int, code: str, start: int = 0, count: int = 800
     ) -> list[dict[str, Any]]:
         return parse_klines(
-            self._exchange(build_kline(category, market, code, start, count)), category
+            self._exchange(build_kline(category, market, code, start, count)), category, market, code
         )
-
-    def klines2(
-        self, category: int, market: int, code: str, start: int = 0, count: int = 800
-    ) -> list[dict[str, Any]]:
-        return parse_klines(
-            self._exchange(build_kline2(category, market, code, start, count)), category
-        )
-
-    def tick_chart(self, market: int, code: str) -> list[dict[str, Any]]:
-        return parse_tick_chart(self._exchange(build_tick_chart(market, code)))
-
-    def history_tick_chart(
-        self, market: int, code: str, trade_date: date | int
-    ) -> list[dict[str, Any]]:
-        return parse_history_tick_chart(
-            self._exchange(build_history_tick_chart(market, code, trade_date))
-        )
-
-    def history_transactions(
-        self, market: int, code: str, trade_date: date | int, count: int = 120
-    ) -> list[dict[str, Any]]:
-        return parse_history_transactions(
-            self._exchange(build_history_transaction(market, code, trade_date, count)),
-            market,
-        )
-
-    def table(self, start: int = 0, *, detail: bool = False) -> dict[str, Any]:
-        return parse_table(self._exchange(build_table(start, detail=detail)))
 
 
 def call_sync(
@@ -645,7 +453,6 @@ def call_sync(
             TdxExMarketError,
             struct.error,
             zlib.error,
-            ValueError,
         ) as error:
             errors.append(f"{host}:{type(error).__name__}")
     raise TdxExMarketError("no extended-market host answered: " + ", ".join(errors))
@@ -662,18 +469,19 @@ async def fetch_instruments(
 
 async def fetch_quote(
     *, market_id: int, code: str, hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
     row, _host = await asyncio.to_thread(
         lambda: call_sync(lambda client: client.quote(market_id, code), hosts=hosts)
     )
-    return row
+    return [row]
 
 
 async def fetch_bars_daily(
     *, market_id: int, code: str, hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS
 ) -> list[dict[str, Any]]:
+    category = _category_for_market(market_id)
     rows, _host = await asyncio.to_thread(
-        lambda: call_sync(lambda client: client.klines(9, market_id, code), hosts=hosts)
+        lambda: call_sync(lambda client: client.klines(category, market_id, code), hosts=hosts)
     )
     return rows
 
@@ -693,22 +501,11 @@ __all__ = [
     "build_categories",
     "build_instruments",
     "build_quote",
-    "build_quotes",
-    "build_quotes2",
     "build_kline",
-    "build_kline2",
-    "build_tick_chart",
-    "build_history_tick_chart",
-    "build_history_transaction",
-    "build_table",
     "parse_count",
     "parse_categories",
     "parse_instruments",
     "parse_klines",
-    "parse_tick_chart",
-    "parse_history_tick_chart",
-    "parse_history_transactions",
-    "parse_table",
     "call_sync",
     "fetch_instruments",
     "fetch_quote",
