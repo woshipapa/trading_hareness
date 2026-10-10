@@ -131,8 +131,9 @@ def _finance_info(client: tdx_protocol.TdxClient, market: int, code: str) -> dic
 
 async def fetch_financial_summary(*, symbol: str) -> CapabilityEvidence:
     """The latest 0x0010 summary. It carries no report period: ``updated_date`` keeps moving after the
-    disclosure (delta-1 D4), so it is neither the period nor ``available_at``. The period and the first
-    disclosure date come from tipinfo columns 2 and 4 (delta-3 Q1/Q2), joined by the I4 collector."""
+    disclosure (delta-1 D4), so it is neither the period nor ``available_at``. The row is available at the
+    collection time. ``tipinfo.dat`` columns 2 and 4 (delta-3 Q1/Q2) give each security's latest report period
+    and its first disclosure date; they date the GPCW history (``tdx_fin_history.date_gpcw_rows``), not this summary."""
     market, code = tdx_protocol.market_code(symbol)
     row, host = await tdx_protocol.call(lambda client: _finance_info(client, market, code), handshake_profile="login_one")
     return tdx_protocol.observed_evidence([{

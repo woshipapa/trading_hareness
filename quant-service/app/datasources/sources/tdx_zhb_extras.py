@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import date
 from typing import Any
 
+from .tdx_files import TdxFileError
 from .tdx_protocol import decode_text
 
 
@@ -156,19 +158,30 @@ def parse_industry_stock_references(data: bytes) -> list[dict[str, Any]]:
 
 
 def parse_tipinfo(data: bytes) -> list[dict[str, Any]]:
-    """Parse 22-column per-stock report/rights metadata from ``tipinfo.dat``.
+    """Parse the 22 columns of ``tipinfo.dat``: one row per security, for its latest report only.
 
-    Columns 0-3 are market (0 SZ, 1 SH), code, report period and EPS. Column 4 is the
-    first disclosure date of the periodic report, date only (verified in delta-3 Q1:
-    5,549/5,551 equal to Eastmoney); it, not the finance summary's ``updated_date``,
-    is the report's ``available_at`` day. The other columns stay ``field_N``.
+    Columns 0-3 are market (0 SZ, 1 SH; BJ rows use the vendor market code), code, report period and
+    EPS. Column 4 is the first disclosure date of that report (``first_disclosure_date``), a date
+    without a time of day: it equals Eastmoney's actual publication date for 5,549 of 5,551
+    securities (docs/archive/tdx-q-disclosure.md, Q1). The file holds each security's latest report
+    only (scripts/data/tdx_tipinfo_2026-10-10_mac.json), so it dates no older period. Columns 5-21
+    stay raw (``field_N``). A row without exactly 22 columns, whose EPS is not a number or whose
+    column 4 is not a date raises ``TdxFileError``.
     """
     rows = []
-    for fields in _pipe_rows(data, 4):
+    for fields in _pipe_rows(data):
+        if len(fields) != 22:
+            raise TdxFileError(f"tipinfo row has {len(fields)} columns, not 22: {'|'.join(fields)[:40]!r}")
+        eps = _number(fields[3])
+        if eps is None:
+            raise TdxFileError(f"tipinfo {fields[1]}: EPS {fields[3]!r} is not a number")
+        try:
+            first_disclosure_date = date.fromisoformat(fields[4])
+        except ValueError as error:
+            raise TdxFileError(f"tipinfo {fields[1]}: column 4 {fields[4]!r} is not a date") from error
         row = {f"field_{i}": value for i, value in enumerate(fields)}
-        row.update({"market": fields[0], "code": fields[1], "report_period": fields[2],
-                    "eps": _number(fields[3]), "announcement_date_candidate": fields[4] if len(fields) > 4 else "",
-                    "raw_fields": fields})
+        row.update({"market": fields[0], "code": fields[1], "report_period": fields[2], "eps": eps,
+                    "first_disclosure_date": first_disclosure_date, "raw_fields": fields})
         rows.append(row)
     return rows
 

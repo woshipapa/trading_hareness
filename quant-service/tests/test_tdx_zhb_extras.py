@@ -1,5 +1,8 @@
 import unittest
+from datetime import date
+from pathlib import Path
 
+from app.datasources.sources.tdx_files import TdxFileError
 from app.datasources.sources.tdx_zhb_extras import (
     inspect_binary_member,
     parse_adr_ah_pairs,
@@ -12,6 +15,8 @@ from app.datasources.sources.tdx_zhb_extras import (
     parse_ipo_subscriptions,
     parse_tipinfo,
 )
+
+TIPINFO = Path(__file__).parent / "fixtures" / "tdx_zhb_20261009" / "tipinfo.dat"
 
 
 class TdxZhbExtrasTests(unittest.TestCase):
@@ -34,11 +39,31 @@ class TdxZhbExtrasTests(unittest.TestCase):
         self.assertEqual(refs[0]["industry_codes"], ["A01"])
 
     def test_remaining_text_shapes(self):
-        self.assertEqual(parse_tipinfo(b"0|000001|20260630|1.24|20260815|\n")[0]["eps"], 1.24)
         self.assertEqual(parse_chain_boards(b"880506|CYL00210|5G\n")[0]["board_code"], "880506")
         pairs = parse_adr_ah_pairs(b"Name|03660|QFIN|2\n", b"Name|002594|01211|1\n")
         self.assertEqual(pairs["ah"][0]["a_code"], "002594")
         self.assertEqual(parse_hspy(b"0|002839|ZJGH\n")[0]["abbreviation"], "ZJGH")
+
+    def test_tipinfo_excerpt_gives_each_row_its_first_disclosure_date(self):
+        rows = parse_tipinfo(TIPINFO.read_bytes())
+        self.assertEqual(len(rows), 60)
+        first = rows[0]
+        self.assertEqual((first["market"], first["code"], first["report_period"], first["eps"], first["first_disclosure_date"]),
+                         ("0", "000001", "20260630", 1.24, date(2026, 8, 15)))
+        self.assertEqual(first["raw_fields"], ("0|000001|20260630|1.240000|20260815|20240221|20240221||||20150119|||20180521|"
+                                               "25224.80|20150521|59880.24|||||").split("|"))
+        self.assertTrue(all(row["first_disclosure_date"].strftime("%Y%m%d") == row["field_4"] for row in rows))
+
+    def test_tipinfo_row_with_a_bad_eps_date_or_width_raises_instead_of_being_skipped(self):
+        def row(*fields: str) -> bytes:
+            return "|".join(fields + ("",) * (22 - len(fields))).encode() + b"\n"
+        good = row("0", "000001", "20260630", "1.24", "20260815")
+        with self.assertRaisesRegex(TdxFileError, "000002: EPS 'nan' is not a number"):
+            parse_tipinfo(good + row("0", "000002", "20260630", "nan", "20260828"))
+        with self.assertRaisesRegex(TdxFileError, "000002: column 4 '2026828' is not a date"):
+            parse_tipinfo(good + row("0", "000002", "20260630", "-1.25", "2026828"))
+        with self.assertRaisesRegex(TdxFileError, "tipinfo row has 21 columns, not 22"):
+            parse_tipinfo(good + good[:-2] + b"\n")
 
     def test_binary_inspection_does_not_claim_semantics(self):
         result = inspect_binary_member(bytes(range(256)) * 2)

@@ -1,16 +1,17 @@
 """Read-only TDX GPCW historical financial statements.
 
-TDX publishes one ZIP per report period.  A GPCW row is a vendor snapshot:
-the report-period header is not an availability timestamp and values may be
-restated in a later snapshot.  Callers must therefore keep ``report_period``
-and collection time separate and must not use this source as PIT evidence
-without an independent disclosure event.
+TDX publishes one ZIP per report period.  A GPCW row is a vendor snapshot: the report-period header is not an
+availability timestamp and values may be restated in a later snapshot.  A row carries no ``available_at`` until
+:func:`date_gpcw_rows` sets it from the first disclosure date in ``tipinfo.dat`` (the evidence for that date is
+in ``tdx_zhb_extras.parse_tipinfo``).  ``tipinfo.dat`` dates each security's latest report only, so every older
+period stays undated and is not point-in-time evidence.  Callers keep ``report_period`` and collection time
+separate.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time
 from io import BytesIO
 import hashlib
 import re
@@ -18,6 +19,7 @@ import struct
 from typing import Any, Iterable
 import zipfile
 import zlib
+from zoneinfo import ZoneInfo
 
 from . import tdx_files, tdx_protocol
 
@@ -26,6 +28,7 @@ class TdxFinanceError(tdx_files.TdxFileError):
     """Typed error for GPCW parsing and download issues."""
 
 
+CN_TZ = ZoneInfo("Asia/Shanghai")
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 _HEADER = "<hI H 3L"
 _ITEM = "<6s1sL"
@@ -199,7 +202,10 @@ def download_report_file(client: tdx_protocol.TdxClient, filename: str, size: in
 
 
 def gpcw(client: tdx_protocol.TdxClient, filename: str, entry: ManifestEntry) -> list[dict[str, Any]]:
-    """Download one period ZIP against its manifest entry, check size and MD5, and parse it."""
+    """Download one period ZIP against its manifest entry, check size and MD5, and parse it.
+
+    The rows carry no ``available_at``: :func:`date_gpcw_rows` sets it where ``tipinfo.dat`` dates the row.
+    """
     if entry.filename != filename:
         raise TdxFinanceError(f"manifest entry {entry.filename} is not the entry of {filename}")
     payload = download_report_file(client, "tdxfin/" + filename, entry.size)
@@ -208,20 +214,25 @@ def gpcw(client: tdx_protocol.TdxClient, filename: str, entry: ManifestEntry) ->
     return parse_gpcw_zip(payload, filename=filename)
 
 
-def parse_tipinfo(data: bytes) -> list[dict[str, Any]]:
-    """Parse the observed 22-column tipinfo shape; field 4 is only a candidate."""
-    rows = []
-    for line in data.decode("utf-8", "replace").splitlines():
-        fields = line.strip("\0\r").split("|")
-        if len(fields) < 4 or not re.fullmatch(r"\d{6}", fields[1]):
-            continue
-        try:
-            eps = float(fields[3])
-        except ValueError:
-            eps = None
-        rows.append({"market": fields[0], "code": fields[1], "report_period": fields[2], "eps": eps,
-                     "announcement_date_candidate": fields[4] if len(fields) > 4 else "", "raw_fields": fields})
-    return rows
+def date_gpcw_rows(rows: list[dict[str, Any]], tipinfo_rows: list[dict[str, Any]]) -> int:
+    """Set ``available_at`` on the GPCW rows whose (code, report period) ``tipinfo.dat`` dates; return how many stay undated.
+
+    ``rows`` is :func:`parse_gpcw_dat` output and ``tipinfo_rows`` is ``tdx_zhb_extras.parse_tipinfo`` output.
+    A dated row is available from the end of its report's first disclosure day in Asia/Shanghai (23:59:59), so it
+    is usable from the next session. ``tipinfo.dat`` lists each security's latest report only: every older period,
+    and a security it does not list, keeps no ``available_at``. The date is that of the report's first
+    disclosure, not of the snapshot's values, which a later snapshot may restate.
+    """
+    first_disclosure = {(item["code"], normalize_report_period(item["report_period"])): item["first_disclosure_date"]
+                        for item in tipinfo_rows}
+    undated = 0
+    for row in rows:
+        day = first_disclosure.get((row["code"], row["report_period"]))
+        if day is None:
+            undated += 1
+        else:
+            row["available_at"] = datetime.combine(day, time(23, 59, 59), tzinfo=CN_TZ)
+    return undated
 
 
 def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cumulative: float) -> float:
@@ -232,5 +243,5 @@ def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cum
     return previous_fy + current_cumulative - prior_cumulative
 
 
-__all__ = ["GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "download_report_file", "gpcw", "gpcw_field_name", "gpcw_field_unit",
-           "manifest_changes", "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "parse_tipinfo", "ttm_from_cumulative", "verify_manifest_entry"]
+__all__ = ["GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "date_gpcw_rows", "download_report_file", "gpcw", "gpcw_field_name", "gpcw_field_unit",
+           "manifest_changes", "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "ttm_from_cumulative", "verify_manifest_entry"]

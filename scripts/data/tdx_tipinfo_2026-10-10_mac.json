@@ -1,0 +1,41 @@
+{
+ "observed_at_utc": "2026-10-10T15:18:14.269945+00:00",
+ "egress": "Mac (residential broadband)",
+ "code_sha": "ee4b235b",
+ "source": "zhb.zip member tipinfo.dat (md5 of zip fa3f6929fb22eeec5240b01b9d40922f)",
+ "rows": 5652,
+ "columns": [
+  [
+   22,
+   5652
+  ]
+ ],
+ "report_periods": [
+  [
+   "20260630",
+   5649
+  ],
+  [
+   "20260930",
+   1
+  ],
+  [
+   "20250930",
+   1
+  ],
+  [
+   "20260331",
+   1
+  ]
+ ],
+ "column4_yyyymmdd_rows": 5652,
+ "eps_non_numeric_rows": 0,
+ "column4_range": [
+  "20251028",
+  "20261010"
+ ],
+ "findings": [
+  "tipinfo.dat holds one row per security for its latest report only: 5,649 of 5,652 rows are period 20260630, so it dates the latest period and nothing earlier.",
+  "Every row has 22 columns, a numeric EPS and an eight-digit column 4."
+ ]
+}

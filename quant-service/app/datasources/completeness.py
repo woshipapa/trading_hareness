@@ -59,7 +59,8 @@ UNREGISTERED: dict[str, str] = {
     "tdx_fin_history.download_report_file": "sized transport for the gpcw period files (manifest size and md5 change detection, "
                                             "delta-1 D8); the planned backfill job calls it, never the request path",
     "tdx_fin_history.gpcw": "downloads one gpcw period ZIP against its manifest entry and parses it; for the planned "
-                            "backfill job (delta-1 D8), never the request path",
+                            "backfill job (delta-1 D8), which then sets available_at with date_gpcw_rows from tipinfo's "
+                            "first disclosure date; never the request path",
     "tdx_instruments.security_count": "transport behind the bound fetch_security_list (0x044e count per market)",
     "tdx_instruments.security_list": "transport behind the bound fetch_security_list (0x044e count and 0x0450 pages)",
     "tdx_instruments.index_bars": "index/board bars with constituent breadth (delta-3 Q10); bars.index_daily binds it in I3",
