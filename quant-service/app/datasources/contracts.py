@@ -71,6 +71,13 @@ class BindingSpec:
     limits: Mapping[str, Any] = field(default_factory=dict)
     time_semantics: str = ""
     handshake_profile: str | None = None
+    #: What this binding must agree with before it is promoted, per canonical field (the names ``field_map``
+    #: produces, after ``unit_factors``): ``{"close": {"reference": "tencent_free", "rel_tol": 0.0001}}``.
+    #: ``reference`` is the source whose binding of the same capability is asked with the same parameters;
+    #: ``rel_tol`` and ``abs_tol`` are the ``math.isclose`` tolerances (one that is missing counts as 0).
+    #: ``scripts/tdx-promote.py check`` compares the rows both probes sampled, field by field, against
+    #: them; an empty mapping means the binding is promoted without a cross-source comparison.
+    agreement: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
