@@ -100,9 +100,12 @@ async def fetch_membership() -> CapabilityEvidence:
 async def fetch_trade_calendar() -> CapabilityEvidence:
     files, host = await _zip_files()
     calendar = parse_holiday_calendar(files["needini.dat"], files["hqrule.dat"])
-    rows = [{"exchange": "CN", "calendar_date": day, "is_open": False, "row_type": "holiday"}
+    rows = [{"exchange": "CN", "calendar_date": day, "is_open": False, "row_type": "holiday",
+             "source_file": "needini.dat"}
             for day in calendar["holidays"]]
-    return tdx_protocol.observed_evidence(rows, host, warnings=("rows=declared holidays only; open days are not fabricated",))
+    return tdx_protocol.observed_evidence(
+        rows, host, warnings=(f"declared_year_count={calendar['declared_year_count']}",
+                              "rows=declared holidays only; open days are not fabricated"))
 
 
 async def fetch_ipo_calendar() -> CapabilityEvidence:
@@ -111,11 +114,12 @@ async def fetch_ipo_calendar() -> CapabilityEvidence:
     rows = []
     for item in parsed["equity"]:
         rows.append({"symbol": _symbol(int(item["market"]), item["code"]), "apply_date": item["subscription_date"],
-                     "issue_price": item["price"], "event_type": "equity_subscription", "raw_fields": item["raw_fields"]})
+                     "issue_price": item["price"], "event_type": "equity_subscription", "source_file": "xgsg.cfg",
+                     "raw_fields": item["raw_fields"]})
     for item in parsed["other"]:
         rows.append({"symbol": _symbol(int(item["market"]), item["stock_code"]), "apply_date": item["subscription_date"],
-                     "issue_price": item["price"], "event_type": "other_subscription", "bond_code": item["bond_code"],
-                     "raw_fields": item["raw_fields"]})
+                     "issue_price": item["price"], "event_type": "other_subscription", "source_file": "othersg.cfg",
+                     "bond_code": item["bond_code"], "raw_fields": item["raw_fields"]})
     return tdx_protocol.observed_evidence(rows, host, warnings=("rows=declared subscription dates; no listing/open dates inferred",))
 
 
