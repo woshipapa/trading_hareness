@@ -137,6 +137,7 @@ SETTINGS: dict[str, Setting] = {item.name: item for item in [
         ("TEACHER_REVIEW_ENABLED", "true", "run teacher-review settlement and plans"),
         ("TEACHER_REVIEW_MINUTE_EXTRA", "0", "extra minute-bar requests for teacher review, bounded by its maximum"),
         ("TEACHER_REVIEW_API", "http://127.0.0.1:8000", "base URL the teacher-review CLI calls"),
+        ("DATASOURCE_RESEARCH_READ_ENABLED", "true", "allow bounded research reads of package datasource adapters"),
     ),
     *_settings(
         "storage and archives",

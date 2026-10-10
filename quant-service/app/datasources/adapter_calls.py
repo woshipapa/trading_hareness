@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
-import os
 import time
 from collections.abc import Sequence
 from datetime import date, datetime, timezone
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 
 from . import catalog
+from .. import settings
 from .contracts import CapabilityEvidence
 
 _READ_SEMAPHORE = asyncio.Semaphore(2)
@@ -31,7 +31,7 @@ class AdapterCallError(Exception):
 
 
 def research_reads_enabled() -> bool:
-    return os.getenv("DATASOURCE_RESEARCH_READ_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
+    return settings.flag("DATASOURCE_RESEARCH_READ_ENABLED")
 
 
 def _adapter_parts(adapter: str | None) -> tuple[str, str] | None:
