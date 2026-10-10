@@ -18,6 +18,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ..derived import limit_pools
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
 from ..sources import tdx_bars, tdx_files, tdx_fin_history, tdx_instruments, tdx_mac, tdx_protocol, tdx_zhb_extras
 from ..sources.fuyao_evidence import fetch_code_batches
@@ -62,6 +63,7 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("tdx_gpcw", time(20, 0), time(23, 30), "通达信历史财务报表"),
     ArchiveJob("tdx_index_bars", time(20, 10), time(23, 30), "通达信指数日线与涨跌家数"),
     ArchiveJob("tdx_mac_boards", time(20, 20), time(23, 30), "通达信板块目录与成分"),
+    ArchiveJob("tdx_limit_pools", time(20, 30), time(23, 30), "通达信衍生涨跌停池"),
 )
 
 
@@ -439,6 +441,23 @@ async def job_tdx_mac_boards(deps: ArchiveDeps, state: ArchiveState, day: date, 
             "opened": opened, "closed": closed}
 
 
+async def job_tdx_limit_pools(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive the three derived TDX limit pools once after close; a normal day stores one row per pool member."""
+    started = time_module.monotonic()
+    pools = await limit_pools._read_limit_pools(trade_date=day)
+    effective = _close_of(day).isoformat()
+    stored: dict[str, int] = {}
+    counts: dict[str, int] = {}
+    for pool_name, evidence in pools.items():
+        rows = [{**row, "ts_code": row["symbol"], "trade_date": day.isoformat(),
+                 "effective_at": effective, "available_at": now.isoformat()} for row in evidence.rows]
+        counts[pool_name] = len(rows)
+        stored[pool_name] = await deps.collector.persist_observations("tdx_public", f"tdx_{pool_name}_pool", rows)
+    await deps.collector.record_health("tdx_public", "tdx_limit_pools", True, sum(counts.values()),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"counts": counts, "stored": stored}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -449,6 +468,7 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "tdx_security_list": job_tdx_security_list, "tdx_tipinfo": job_tdx_tipinfo, "tdx_gpcw": job_tdx_gpcw,
     "tdx_index_bars": job_tdx_index_bars,
     "tdx_mac_boards": job_tdx_mac_boards,
+    "tdx_limit_pools": job_tdx_limit_pools,
 }
 
 

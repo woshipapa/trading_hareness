@@ -479,6 +479,20 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["opened"], 2)
         self.assertEqual(len(calls), 2)
 
+    async def test_tdx_limit_pools_reads_once_and_stores_three_capabilities(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        from app.datasources.contracts import CapabilityEvidence
+        pools = {name: CapabilityEvidence([{"symbol": "600519.SH", "price": 1}])
+                 for name in ("limit_up", "broken", "limit_down")}
+        with patch("app.datasources.collectors.post_close.limit_pools._read_limit_pools",
+                   AsyncMock(return_value=pools)) as read:
+            result = await post_close.job_tdx_limit_pools(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        read.assert_awaited_once()
+        self.assertEqual(result["counts"], {"limit_up": 1, "broken": 1, "limit_down": 1})
+        self.assertEqual({capability for _provider, capability, _rows in recorder.observations},
+                         {"tdx_limit_up_pool", "tdx_broken_pool", "tdx_limit_down_pool"})
+
 
 if __name__ == "__main__":
     unittest.main()
