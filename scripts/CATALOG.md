@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (34)
+## research data (35)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -151,6 +151,7 @@
 | `run-post-close-pipeline.sh` | quant-research | workstation | Post-close daily pipeline runner. |
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
 | `tdx-owner-probe.sh` | quant-research | workstation |  |
+| `tdx-quant-export.py` | quant-research | owner-windows | Export read-only TdxQuant market data to the offline CSV contracts. |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
 
 ## CI and checks (17)
