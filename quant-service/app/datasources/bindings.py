@@ -10,17 +10,19 @@ the same keywords, so the resolver can fall through without translation):
 * ``events.*`` (datacenter): ``start: date``, ``end: date``
 * ``news.flash``: none;  ``events.investor_qa``: ``observed_at``
 * ``fund.nav``: ``fund_code``
-* ``quote.watch_snapshot``: ``symbols``
-* ``limits.prices``: ``symbols``
 * ``fund.iopv`` (TDX MAC): ``symbols``, ETF symbols such as 510300.SH
+* ``quote.watch_snapshot``: ``symbols``
 * ``quote.order_book`` (TDX): ``symbols``, stock symbols such as 600519.SH
-* ``sector.index_quote`` (TDX): ``symbols``, board symbols such as 880005.SH
-* every TDX adapter that takes a symbol requests an old BJ code as its 920xxx code; a batch adapter adds
-  ``source_symbol`` (the symbol as requested) to the row of each symbol it translated
+* ``limits.prices``: ``symbols``
 * ``bars.daily``: ``symbol``, ``count``
 * ``bars.minute``: ``symbol``, ``count`` (MAC 1-minute bars)
 * ``sector.board_catalog``: no parameters; returns the MAC board types of ``tdx_mac.BOARD_TYPES``
+* ``sector.index_quote`` (TDX): ``symbols``, board symbols such as 880005.SH
 * ``sector.membership``: ``sector_key`` (MAC also takes the catalog row's ``board_type``)
+
+Every TDX adapter that takes a symbol requests an old BJ code as its 920xxx code (``tdx_protocol.market_code``). A
+batch adapter adds ``source_symbol``, the symbol as requested, to the row of each symbol it translated; a
+single-symbol adapter returns the new symbol.
 
 Sources that live outside this package (licensed gateways, the existing
 Tencent/Sina/Eastmoney quote paths) are bound by the composition root.

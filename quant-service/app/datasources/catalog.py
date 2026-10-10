@@ -331,7 +331,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="0x053e 五档：bid1..5/ask1..5（元）、bid_vol1..5/ask_vol1..5（手）；收盘后与腾讯收盘盘口逐档一致（沪、深、北个股，"
                 "价格与手数相同，scripts/data/tdx_quote_order_book_2026-10-10_mac.json）；只接受主板、创业板、科创板和北交所个股，"
                 "价格按固定 /100（这些类型小数位为 2，scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json）；"
-                "指数、板块、ETF、基金、可转债等其他代码在联网前以 ValueError 拒绝（ETF、可转债和基金由 MAC 批量行情给 float 价格）；"
+                "指数、板块、ETF、基金、可转债等其他代码在联网前以 ValueError 拒绝（ETF、可转债和基金的价格另由 MAC 批量行情以 float 给出）；"
                 "旧北交所代码按 920xxx 请求，行带 source_symbol；回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）；"
                 "盘中延迟与新鲜度未测",
           spec=BindingSpec(
