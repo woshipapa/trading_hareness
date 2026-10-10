@@ -83,7 +83,8 @@ class CheckTests(unittest.TestCase):
                          {"owner_egress": True, "agreement": True, "intraday": True})
         self.assertEqual(evidence["comparison"]["volume"]["pairs"], [[300, 300], [500, 500]], "lots became shares first")
         self.assertEqual(evidence["projections"], {"tdx_public": {"field_map": {"vol": "volume"}, "unit_factors": {"volume": 100}}})
-        self.assertEqual((evidence["schema"], evidence["catalog_status"], evidence["egress"]), ("tdx-promote-v1", "unsupported", "owner"))
+        self.assertEqual((evidence["schema"], evidence["catalog_status"], evidence["decision_eligible"], evidence["egress"]),
+                         ("tdx-promote-v1", "unsupported", False, "owner"))
         self.assertEqual(evidence["session"]["inside"], {"tdx_public": True, "tencent_free": True})
         self.assertEqual(result.calls, [("owner", "tdx_public"), ("owner", "tencent_free")])
         self.assertIn("agreement: pass", result.stdout)
