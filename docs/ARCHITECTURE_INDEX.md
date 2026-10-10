@@ -9,10 +9,10 @@
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
 | `main.py` top-level functions | 430 |
-| Python modules under `app/` | 563 |
-| HTTP router modules | 48 |
+| Python modules under `app/` | 566 |
+| HTTP router modules | 50 |
 | Alembic migrations | 113 |
-| Frontend source files | 65 |
+| Frontend source files | 68 |
 
 ## Domain naming inventory
 
@@ -53,6 +53,8 @@ New behaviour should be owned by an existing domain package/owner.
 - `routers/board_curve_reads.py`
 - `routers/board_rotation_reads.py`
 - `routers/board_stock_mining_reads.py`
+- `routers/datasource_catalog.py`
+- `routers/datasource_reads.py`
 - `routers/event_reads.py`
 - `routers/ingestion_actions.py`
 - `routers/intraday_actions.py`
@@ -133,6 +135,8 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/research/analyst-chart.ts`
 - `frontend/src/research/boards.test.ts`
 - `frontend/src/research/boards.ts`
+- `frontend/src/research/datasource-directory.test.ts`
+- `frontend/src/research/datasource-directory.ts`
 - `frontend/src/research/remote-runtime.test.ts`
 - `frontend/src/research/remote-runtime.ts`
 - `frontend/src/research/sentiment-temperature.test.ts`
@@ -148,6 +152,7 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/views/research/AnalystEvidenceTab.vue`
 - `frontend/src/views/research/ClaimReviewTab.vue`
 - `frontend/src/views/research/CloseReviewTab.vue`
+- `frontend/src/views/research/DatasourceDirectory.vue`
 - `frontend/src/views/research/FactorLabTab.vue`
 - `frontend/src/views/research/MarketSnapshotsTab.vue`
 - `frontend/src/views/research/ProviderTab.vue`

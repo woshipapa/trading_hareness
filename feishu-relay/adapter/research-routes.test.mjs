@@ -18,6 +18,8 @@ test('static reads answer GET only and static actions POST only', () => {
 test('template routes copy their parameters into the upstream', () => {
 	const cases = [
 		['GET', `/api/research/research-runs/${UUID}`, 'read', `/api/v1/research/runs/${UUID}`],
+		['GET', '/api/research/datasources/capabilities/bars.minute', 'read', '/api/v1/datasources/capabilities/bars.minute'],
+		['GET', '/api/research/datasources/read/tdx_public/bars.minute', 'read', '/api/v1/datasources/read/tdx_public/bars.minute'],
 		['GET', '/api/research/intraday/decision-cards/000001.sz', 'read', '/api/v1/intraday/decision-cards/000001.SZ'],
 		['PUT', '/api/research/paper/accounts', 'action', '/api/v1/paper/accounts'],
 		['POST', `/api/research/paper/decisions/${UUID}/accept`, 'action', `/api/v1/paper/decisions/${UUID}/accept`],
@@ -38,6 +40,8 @@ test('parameters of the wrong shape, or the wrong method, do not match', () => {
 		['POST', '/api/research/analyst-prompt-lab/evaluate/anything_else'],
 		['POST', '/api/research/stocks/600000.SH%2F..%2Fadmin/study'],
 		['GET', `/api/research/claim-review/${UUID}`],
+		['GET', '/api/research/datasources/capabilities/Bars.minute'],
+		['GET', '/api/research/datasources/read/tdx-public/bars.minute'],
 		['DELETE', '/api/research/paper/accounts'],
 		['GET', '/api/v2/whatever'],
 	]) {
