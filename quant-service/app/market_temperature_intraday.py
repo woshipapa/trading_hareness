@@ -20,6 +20,11 @@ the 250 sessions before, the daily temperature's own history. Intraday and
 daily therefore share one scale, and the 15:00 sample is the day's reading
 less one day of ranking history.
 
+That history is read from the stored daily readings, in milliseconds. The
+console relay gives a read 30 s, and the bars SQL takes about 13 s on a busy
+owner. Only when fewer than 250 readings are stored (before the backfill) are
+the bars aggregated again.
+
 Samples run 09:30-11:30 and 13:05-15:00, every five minutes; the lunch break
 is a gap, not a line. A finished session is stored after the close as
 ``market_temperature_intraday``, one reading holding its samples. The session
@@ -44,10 +49,11 @@ from typing import Any
 
 from . import derived_daily_readings, minute_cross_section
 from .derived_daily_readings import CN_TZ
-from .market_temperature import TURNOVER_BASE, VERSION, band_of, components_of, history_for, score
+from .market_temperature import KEYS, TURNOVER_BASE, VERSION, WINDOW, band_of, components_of, history_for, score
 from .market_temperature_repository import (
     LIMIT_TOLERANCE, LIMITS_OK_SHARE, daily_rows, prior_streaks, session_limits, sessions_between,
 )
+from .market_temperature_runtime import CAPABILITY as DAILY_CAPABILITY
 
 CAPABILITY = "market_temperature_intraday"
 STEP = timedelta(minutes=5)
@@ -130,15 +136,33 @@ _CONTEXTS: dict[date, dict[str, Any]] = {}
 _SAMPLES: dict[tuple[date, str], dict[str, Any]] = {}
 
 
+def stored_history(connection: Any, day: date) -> tuple[dict[str, list[float]], float | None] | None:
+    """The ranking history and turnover base from the stored daily readings, or None while too few are stored."""
+    stored = derived_daily_readings.newest(connection, DAILY_CAPABILITY, day - timedelta(days=LOOKBACK_DAYS),
+                                           day - timedelta(days=1))
+    recent = [reading.get("turnover_cny") for reading in stored[-TURNOVER_BASE:]]
+    if len(stored) < WINDOW or None in recent:
+        return None
+    history = {key: [float(reading["values"][key]) for reading in stored
+                     if (reading.get("values") or {}).get(key) is not None][-WINDOW:] for key in KEYS}
+    return history, fmean(float(value) for value in recent)
+
+
+def bars_history(connection: Any, day: date) -> tuple[dict[str, list[float]], float | None]:
+    """The same from the bars: one pass of the daily SQL, about 13 s on the owner."""
+    rows = daily_rows(connection, day - timedelta(days=LOOKBACK_DAYS), day - timedelta(days=1))
+    turnovers = [float(row["turnover_cny"]) for row in rows if row.get("turnover_cny")][-TURNOVER_BASE:]
+    return history_for(rows), fmean(turnovers) if len(turnovers) == TURNOVER_BASE else None
+
+
 def daily_context(connection: Any, day: date) -> dict[str, Any]:
     """Everything a sample of ``day`` is ranked or matched against; kept once the session's limits are stored."""
     if day in _CONTEXTS:
         return _CONTEXTS[day]
-    rows = daily_rows(connection, day - timedelta(days=LOOKBACK_DAYS), day - timedelta(days=1))
-    turnovers = [float(row["turnover_cny"]) for row in rows if row.get("turnover_cny")][-TURNOVER_BASE:]
+    history, turnover_base = stored_history(connection, day) or bars_history(connection, day)
     previous, prior = prior_streaks(connection, day)
     context = {
-        "history": history_for(rows), "turnover_base": fmean(turnovers) if len(turnovers) == TURNOVER_BASE else None,
+        "history": history, "turnover_base": turnover_base,
         "previous_session": previous, "prior": prior, "limits": session_limits(connection, day),
         "profile": share_profile(connection, day),
     }

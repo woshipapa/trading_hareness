@@ -161,7 +161,7 @@ def temperature_series(rows: Iterable[Mapping[str, Any]], *, window: int = WINDO
         readings.append({
             "trade_date": str(row["trading_date"]), "temperature": temperature, "band": band_of(temperature),
             "scores": scores, "values": values, "index_close": _number(row.get("index_close")),
-            "limits_ok": bool(row.get("limits_ok")),
+            "turnover_cny": _number(row.get("turnover_cny")), "limits_ok": bool(row.get("limits_ok")),
         })
     return readings
 

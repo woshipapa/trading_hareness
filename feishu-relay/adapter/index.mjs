@@ -1783,7 +1783,8 @@ async function proxyResearch(path, search, response) {
 	if (!quantServiceUrl) throw new Error('量化研究服务未配置');
 	// 30 s: on 2026-10-09 the owner's minute writes queued reads that take 0.2-7 s alone past 15 s,
 	// and the console showed them as unavailable. The post-close report keeps its longer budget.
-	const readTimeoutMs = path === '/api/v1/strategy/post-close/latest' ? 45_000 : 30_000;
+	// The intraday temperature's first read of a session may read up to 49 minute documents (decision 0013).
+	const readTimeoutMs = path === '/api/v1/strategy/post-close/latest' || path === '/api/v1/market/temperature/intraday' ? 45_000 : 30_000;
 	const upstream = await fetch(`${quantServiceUrl}${path}${search}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(readTimeoutMs) });
 	const body = await upstream.text();
 	response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' });

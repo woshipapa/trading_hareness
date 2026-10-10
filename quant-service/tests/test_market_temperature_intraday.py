@@ -30,6 +30,22 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(totals["turnover_cny"], 5000.0, "a row without volume is suspended and left out")
         self.assertFalse(totals["limits_ok"], "4 of 5 traded rows have limits: below 90%")
 
+    def test_the_history_comes_from_stored_readings_once_a_year_is_stored(self):
+        from unittest import mock
+        day = date(2099, 6, 1)
+        readings = [{"trade_date": (day - timedelta(days=300 - i)).isoformat(), "turnover_cny": float(i),
+                     "values": {"limit_up": float(i), "premium": None if i % 2 else 1.0}} for i in range(260)]
+        with mock.patch.object(intraday.derived_daily_readings, "newest", return_value=readings):
+            history, base = intraday.stored_history(object(), day)
+        self.assertEqual((len(history["limit_up"]), history["limit_up"][-1], len(history["premium"])), (250, 259.0, 130))
+        self.assertEqual(base, sum(range(240, 260)) / 20)
+        with mock.patch.object(intraday.derived_daily_readings, "newest", return_value=readings[:249]):
+            self.assertIsNone(intraday.stored_history(object(), day), "before the backfill: the bars")
+        older = [dict(item) for item in readings]
+        older[-1].pop("turnover_cny")
+        with mock.patch.object(intraday.derived_daily_readings, "newest", return_value=older):
+            self.assertIsNone(intraday.stored_history(object(), day), "readings stored before turnover_cny was kept")
+
     def test_samples_skip_the_lunch_break(self):
         times = [moment.strftime("%H:%M") for moment in intraday.SAMPLE_TIMES]
         self.assertEqual((len(times), times[0], times[24], times[25], times[-1]), (49, "09:30", "11:30", "13:05", "15:00"))
