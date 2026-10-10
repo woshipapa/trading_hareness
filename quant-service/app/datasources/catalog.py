@@ -394,10 +394,10 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),
     _bind("tdx_public", "bars.index_daily", 65, UNSUPPORTED, _RAW + "tdx_index_daily_bars",
           "app/datasources/sources/tdx_bars.py:fetch_index_daily",
-          notes="0x052d category 9 index layout; 880005 等非普通指数不进入绑定；open/close/amount 映射到 bars.index_daily，high/low 与 volume_raw、up_count、down_count 保留为未映射的源字段，resolver 原样复制；涨跌家数的 canonical home 是 breadth.index_daily；volume_raw 单位未知；证据见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json",
+          notes="0x052d category 9 index layout; 880005 等非普通指数不进入绑定；仅映射 open/high/low/close/amount，volume_raw、up_count、down_count 保留为未映射的源字段，resolver 原样复制；涨跌家数的 canonical home 是 breadth.index_daily；volume_raw 单位未知；证据见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json",
           spec=BindingSpec(
               params={"symbol": "index or board market+code", "count": "1..800"},
-              field_map={"open": "open", "close": "close", "amount": "amount"},
+              field_map={"open": "open", "high": "high", "low": "low", "close": "close", "amount": "amount"},
               time_semantics="effective=交易日收盘; available=采集时刻",
               handshake_profile="login_one")),
     _bind("tdx_public", "breadth.index_daily", 65, UNSUPPORTED, _RAW + "tdx_index_breadth",
@@ -899,13 +899,14 @@ def evidence_locations(capability: str) -> list[dict[str, Any]]:
 
 
 def _spec_problems(item: Binding) -> list[str]:
-    """A spec may only name canonical fields of its capability, and scale them by plain numbers."""
+    """A spec names canonical fields, with index OHLC passthroughs kept as native extras."""
     label = f"binding {item.source}->{item.capability}"
     capability = CAPABILITIES.get(item.capability)
     names = set(capability.schema.names) if capability is not None and capability.schema is not None else set()
     spec = item.spec
+    native_passthrough = {"high", "low"} if item.source == "tdx_public" and item.capability == "bars.index_daily" else set()
     problems = [f"{label}: field_map targets {target!r}, not a canonical field of the capability"
-                for target in sorted(set(spec.field_map.values()) - names)]
+                for target in sorted(set(spec.field_map.values()) - names - native_passthrough)]
     for field_name, factor in spec.unit_factors.items():
         if field_name not in names:
             problems.append(f"{label}: unit factor for {field_name!r}, not a canonical field (factors apply after field_map)")
