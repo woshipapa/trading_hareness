@@ -122,6 +122,15 @@ def classify_instrument(market: int, code: str, name: str = "") -> dict[str, Any
             "is_a_share": kind.startswith("stock_")}
 
 
+def bar_layout(instrument_type: str) -> str:
+    """Return the bar record layout for an instrument type.
+
+    Index and board bars have extra up/down-count breadth fields (36 bytes);
+    all other instruments use the standard stock layout (32 bytes).
+    """
+    return "index" if instrument_type in ("index", "board") else "stock"
+
+
 def price_scale(decimal_point: int | None, kind: str | None = None) -> float:
     """Return the divisor for integer quote prices.
 
@@ -251,7 +260,7 @@ def type_counts(rows: Iterable[Mapping[str, Any]]) -> Counter[str]:
     return Counter(instrument_type(int(row.get("market", 0)), str(row.get("code", "")), str(row.get("name", ""))) for row in rows)
 
 
-__all__ = ["SECURITY_COUNT", "SECURITY_LIST", "build_security_count_request",
+__all__ = ["SECURITY_COUNT", "SECURITY_LIST", "bar_layout", "build_security_count_request",
            "build_security_list_request", "classify_instrument", "instrument_type", "normalize_bj_symbol",
            "parse_bj_mapping", "parse_tdxbjmore", "bj_rows_from_zhb", "parse_index_bars", "parse_security_count", "parse_security_list",
            "security_count", "security_list", "index_bars", "price_scale", "scale_quote", "type_counts"]
