@@ -110,6 +110,15 @@ class DisclosureTimingTests(unittest.TestCase):
         self.assertEqual(second["lookup_error"], "rate_limited:cninfo_free")
         self.assertTrue(third["announcements"][0]["matches_period"], "the summary title names the half-year report")
 
+    def test_a_row_that_comes_back_keeps_the_bracket_of_its_first_appearance(self):
+        async def cninfo(symbol, start, end, *, page_size=30, max_pages=3):
+            return []
+
+        without, with_row = SNAPSHOTS[0], SNAPSHOTS[0] + b"1|600519|20260630|5.00|20260730|\n"
+        payload, _, _ = self.run_main([without, with_row, without, with_row], cninfo, "--polls", "4")
+        self.assertEqual([bool(poll["new"]) for poll in payload["polls"][1:]], [True, False, True])
+        self.assertEqual([entry["appeared_between"] for entry in payload["lookups"]], [["t0", "t600"]])
+
     def test_a_row_without_a_date_is_logged_but_not_looked_up(self):
         calls = []
 

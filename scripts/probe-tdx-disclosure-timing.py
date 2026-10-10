@@ -96,7 +96,7 @@ def main(argv=None):
         polled_at = now()
         new = None if previous is None else sorted(rows - previous)
         for row in new or ():
-            appeared[row] = [previous_at, polled_at]
+            appeared.setdefault(row, [previous_at, polled_at])
         polls.append({"polled_at": polled_at, "host": host, "rows": len(rows),
                       "new": None if new is None else [dict(zip(("symbol", "period", "date"), row)) for row in new]})
         previous, previous_at = rows, polled_at
