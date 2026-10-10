@@ -60,10 +60,11 @@ def _board_symbol(code: str) -> str:
     return _symbol_from_code(code) if len(code) == 6 else _symbol(int(code[0]), code[1:])
 
 
-def _membership_rows(blocks: Sequence[dict[str, Any]], definitions: dict[str, dict[str, Any]], known_at: datetime) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+def _membership_rows(blocks: Sequence[dict[str, Any]], definitions: dict[str, dict[str, Any]], known_at: datetime) -> tuple[list[dict[str, Any]], list[str], list[str], dict[str, int]]:
     rows: list[dict[str, Any]] = []
     joined: set[str] = set()
     unmatched: set[str] = set()
+    counts: dict[str, int] = {key: 0 for key in _TAXONOMIES.values()}
     for block in blocks:
         definition = definitions.get(block["name"])
         if definition is None or definition["type"] not in _TAXONOMIES:
@@ -75,13 +76,14 @@ def _membership_rows(blocks: Sequence[dict[str, Any]], definitions: dict[str, di
             rows.append({"taxonomy_key": taxonomy_key, "sector_key": definition["code"],
                          "sector_name": block["name"], "board_type": definition["type"],
                          "symbol": _board_symbol(code), "known_at": known_at})
-    return rows, sorted(joined), sorted(unmatched)
+            counts[taxonomy_key] += 1
+    return rows, sorted(joined), sorted(unmatched), counts
 
 
 async def fetch_membership() -> CapabilityEvidence:
     collection_time = datetime.now(timezone.utc)
 
-    def read(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    def read(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]], list[str], list[str], dict[str, int]]:
         files = tdx_files.parse_zhb_zip(tdx_files.download(client, "zhb.zip"))
         blocks = [block for filename in ("block_gn.dat", "block_fg.dat", "block_zs.dat")
                   for block in tdx_files.parse_block_file(tdx_files.download(client, filename))]
@@ -89,8 +91,9 @@ async def fetch_membership() -> CapabilityEvidence:
         definitions = {row["name"]: row for row in tdx_files.parse_tdxzs(files["tdxzs3.cfg"])}
         return _membership_rows(blocks, definitions, collection_time)
 
-    (rows, joined, unmatched), host = await tdx_protocol.call(read, handshake_profile="login_one")
-    warnings = (f"joined_boards={','.join(joined)}", f"unmatched_boards={','.join(unmatched)}")
+    (rows, joined, unmatched, counts), host = await tdx_protocol.call(read, handshake_profile="login_one")
+    warnings = (f"joined_boards={','.join(joined)}", f"unmatched_boards={','.join(unmatched)}",
+                f"joined_member_counts={','.join(f'{key}:{counts[key]}' for key in sorted(counts))}")
     return tdx_protocol.observed_evidence(rows, host, warnings=warnings)
 
 
