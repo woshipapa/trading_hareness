@@ -261,6 +261,8 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
          "effective=交易日; available=入库"),
     _cap("fund.nav", "基金单位/累计净值", "daily", "fund", "fund_code nav_date unit_nav accumulated_nav daily_growth_pct",
          "effective=净值日; available=采集时刻"),
+    _cap("fund.iopv", "ETF 盘中参考净值 IOPV", "realtime", "fund", "fund_code iopv:yuan pre_iopv:yuan exchange_time", _OBSERVED,
+         "行情推送的盘中参考净值，不是披露的单位净值 fund.nav；fund_code 为带交易所后缀的代码（510300.SH）"),
     # derived
     _cap("derived.market_sentiment", "自算短线情绪（涨跌停/封板率/分层晋级率/昨涨停溢价/涨跌分布/量能/板块强度）",
          "intraday", "market", "limit_up_count seal_rate promotion prior_limit_up_today distribution turnover concept_strength",
@@ -344,6 +346,20 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tencent_free", "quote.order_book", 50, LIVE_VERIFIED,
           "intraday_quote_observations:source_name=tencent_order_book",
           "app/intraday_order_book_service.py", notes="五档；source_name=tencent_order_book"),
+    _bind("tdx_public", "quote.order_book", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_quotes.py:fetch_order_book",
+          notes="0x053e 五档：bid1..5/ask1..5（元）、bid_vol1..5/ask_vol1..5（手）；收盘后与腾讯收盘盘口逐档一致（沪、深、北个股，"
+                "价格与手数相同，scripts/data/tdx_quote_order_book_2026-10-10_mac.json）；只接受主板、创业板、科创板和北交所个股，"
+                "价格按固定 /100（这些类型小数位为 2，scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json）；"
+                "指数、板块、ETF、基金、可转债等其他代码在联网前以 ValueError 拒绝（ETF、可转债和基金的价格另由 MAC 批量行情以 float 给出）；"
+                "旧北交所代码按 920xxx 请求，行带 source_symbol；回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）；"
+                "盘中延迟与新鲜度未测",
+          spec=BindingSpec(
+              params={"symbols": "stock symbols such as 600519.SH (main board, ChiNext, STAR, BJ)"},
+              field_map={},
+              paging="batch", max_batch=80,
+              time_semantics="effective/available=collection time; the row carries no decoded exchange clock",
+              handshake_profile="login_one")),
     _bind("fuyao_ths", "quote.valuation", 12, DECLARED, _RAW + "a_share_valuations_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", "盘后逐日", "thscodes≤100",
           notes="可按交易日投影到 daily_fundamentals 缺失记录；pe=TTM、pb=MRQ；非完整每日指标，自动投影默认关闭"),
@@ -452,20 +468,23 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/datasources/bindings.py:opening_auction", "近期任意交易日", notes="含 09:15-09:25 竞价虚拟撮合曲线"),
     _bind("tdx_public", "microstructure.volume_profile", 90, UNSUPPORTED,
           adapter="app/datasources/sources/tdx_microstructure.py:fetch_volume_profile",
-          notes="0x051a；覆盖率核对前不进入决策；成交量单位为 lots",
-          spec=BindingSpec(params={"market": "market", "code": "code"},
+          notes="0x051a；覆盖率核对前不进入决策；成交量单位为 lots；价格按 /100，路线记录（docs/archive/tdx-route-microstructure.md）"
+                "只在个股上有证据，所以只接受个股代码，ETF、可转债等其他类型在联网前以 ValueError 拒绝",
+          spec=BindingSpec(params={"symbol": "stock symbol such as 600519.SH"},
                            field_map={"price": "price", "volume_lots": "volume_lots", "buy_lots": "buy_lots", "sell_lots": "sell_lots"},
                            time_semantics="server_time_raw 是源字段；effective=采集时刻")),
     _bind("tdx_public", "microstructure.minute_series", 90, UNSUPPORTED,
           adapter="app/datasources/sources/tdx_microstructure.py:fetch_minute_series",
-          notes="0x0fb4；one row per trading minute (09:31..11:30, 13:01..15:00)；第二个变长字段含义未知，保留为 unknown；覆盖率核对前不进入决策",
-          spec=BindingSpec(params={"market": "market", "code": "code", "trade_date": "trade_date"},
+          notes="0x0fb4；one row per trading minute (09:31..11:30, 13:01..15:00)；第二个变长字段含义未知，保留为 unknown；覆盖率核对前不进入决策；"
+                "价格按 /100，路线记录（docs/archive/tdx-route-microstructure.md）只在个股上有证据，所以只接受个股代码，ETF、可转债等其他类型"
+                "在联网前以 ValueError 拒绝",
+          spec=BindingSpec(params={"symbol": "stock symbol such as 600519.SH", "trade_date": "trade_date"},
                            field_map={"time": "time", "price": "price", "volume_lots": "volume_lots", "pre_close": "pre_close"},
                            time_semantics="effective=trade_date; available=采集时刻")),
     _bind("tdx_public", "microstructure.auction_curve", 90, UNSUPPORTED,
           adapter="app/datasources/sources/tdx_microstructure.py:fetch_auction_curve",
           notes="0x056a；09:24:57 截止，无字面 09:25 行；数量单位未确认",
-          spec=BindingSpec(params={"market": "market", "code": "code"},
+          spec=BindingSpec(params={"symbol": "symbol such as 600519.SH"},
                            field_map={"time": "time", "price": "price", "matched_raw": "matched_raw", "unmatched_raw": "unmatched_raw", "unmatched_side": "unmatched_side"},
                            time_semantics="effective=auction time; available=采集时刻")),
     _bind("tdx_public", "microstructure.unusual", 90, UNSUPPORTED,
@@ -558,6 +577,20 @@ BINDINGS: Final[tuple[Binding, ...]] = (
               time_semantics="known_at=collection UTC-aware", handshake_profile="mac")),
     _bind("fuyao_ths", "sector.index_quote", 12, DECLARED, _RAW + "ths_index_prices_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", limits="thscodes≤100"),
+    _bind("tdx_public", "sector.index_quote", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_quotes.py:fetch_index_quote",
+          notes="0x053e 读 880xxx/881xxx 板块指数：last_price、pre_close，pct_change 由这两者算出（pre_close 为 0 时为 None）；volume_raw、amount_raw 的单位无证据，"
+                "保持 raw，不映射到 volume/turnover；板块码的买卖盘字段不是盘口（scripts/data/tdx_quote_order_book_2026-10-10_mac.json），"
+                "不读取；只接受板块码，其他代码在联网前以 ValueError 拒绝；价格按固定 /100（板块码小数位 2，"
+                "scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json）；回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）；"
+                "盘中延迟与新鲜度未测",
+          spec=BindingSpec(
+              params={"symbols": "board symbols such as 880005.SH"},
+              field_map={"symbol": "index_code"},
+              limits={"derived": {"pct_change": "(last_price / pre_close - 1) * 100, computed by the adapter; None when pre_close is 0"}},
+              paging="batch", max_batch=80,
+              time_semantics="effective/available=collection time; the row carries no decoded exchange clock",
+              handshake_profile="login_one")),
     _bind("eastmoney_free", "sector.flow_curve", 45, LIVE_VERIFIED, "intraday_board_flow_snapshots", "app/board_flow_capture_actions.py",
           notes="上游实为同花顺公开资金流页 data.10jqka.com.cn（akshare stock_fund_flow_concept/industry，"
                 "owner akshare 1.18.96 于 2026-10-09 核实）；键 eastmoney_free 与 eastmoney_* 板块口径是历史名；"
@@ -682,6 +715,20 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("fuyao_ths", "reference.trade_calendar", 20, DECLARED, None, "app/fuyao_catalog.py:a_share_trading_days"),
     _bind("ttfund", "fund.nav", 50, DECLARED, _RAW + "fund_nav", "app/datasources/sources/ttfund.py:fetch_nav_history"),
     _bind("fuyao_ths", "fund.nav", 12, DECLARED, None, "app/fuyao_catalog.py:fund_performance_nav"),
+    _bind("tdx_mac", "fund.iopv", 70, UNSUPPORTED, _RAW + "tdx_mac_iopv",
+          "app/datasources/sources/tdx_mac.py:fetch_iopv",
+          notes="0x122b 位 0x24 pre_iopv、0x27 iopv（float32，元），不是 fund.nav 的披露净值；只有 ETF 510300 对账为 MATCH"
+                "（docs/archive/tdx-route-mac-fields.md）；非基金代码的这两位是别的数（scripts/data/tdx_mac_adapters_live_2026-10-10_mac.json），"
+                "所以只接受 ETF、LOF 和基金类代码（etf、lof、fund），其他类型在联网前以 ValueError 拒绝；"
+                "exchange_time 取同一行位 0x13/0x14 的行情更新时间，IOPV 自身的时刻不在行内；"
+                "回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）",
+          spec=BindingSpec(
+              params={"symbols": "fund symbols such as 510300.SH (ETF, LOF, fund)"},
+              field_map={"symbol": "fund_code", "iopv": "iopv", "pre_iopv": "pre_iopv", "exchange_time": "exchange_time"},
+              paging="batch", max_batch=80,
+              time_semantics="effective=exchange_time (bits 0x13 date and 0x14 time of the quote row, Asia/Shanghai; the "
+                             "IOPV's own clock is not in the row); available=collection",
+              handshake_profile="mac")),
     # derived
     _bind("derived_market_sentiment", "derived.market_sentiment", 90, DECLARED, _RAW + "market_sentiment_snapshot",
           "app/datasources/collectors/intraday.py:capture_sentiment"),

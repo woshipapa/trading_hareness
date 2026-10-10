@@ -1,5 +1,6 @@
 """TDX wire format, TDX client files and the tick-flow summary."""
 
+import json
 import struct
 import tempfile
 import unittest
@@ -9,7 +10,10 @@ import sys
 from pathlib import Path
 
 from app.datasources.derived.tick_flow import Tick, parse_tencent_detail, summarize_ticks, ticks_from_tdx
-from app.datasources.sources import tdx_local_files, tdx_protocol
+from app.datasources.sources import tdx_bj_codes, tdx_local_files, tdx_protocol
+
+BJ_EVIDENCE = Path(__file__).resolve().parents[2] / "scripts" / "data" / "tdx_quote_scale_and_bj_2026-10-10_mac.json"
+BJ_HISTORY_EVIDENCE = Path(__file__).resolve().parents[2] / "scripts" / "data" / "tdx_bj_history_2026-10-10_mac.json"
 
 
 def encode_price(value: int) -> bytes:
@@ -244,6 +248,22 @@ class TdxClientTests(unittest.TestCase):
         for bad in ("600519", "60051X.SH", "60051.SH", "6005190.SH", "\uff16\uff10\uff10\uff15\uff11\uff19.SH", "600519.XX", ".SH"):
             with self.subTest(symbol=bad), self.assertRaises(ValueError):
                 tdx_protocol.market_code(bad)
+
+    def test_an_old_bj_code_is_requested_as_its_920_code(self):
+        self.assertEqual(tdx_protocol.market_code("430017.BJ"), (2, "920017"))
+        self.assertEqual(tdx_protocol.market_code("430017.bj"), (2, "920017"))
+        self.assertEqual(tdx_protocol.market_code("920017.BJ"), (2, "920017"))
+        self.assertEqual(tdx_protocol.market_code("430017.SZ"), (0, "430017"), "the table belongs to the BJ exchange")
+
+    def test_the_bj_table_is_the_one_the_evidence_measured(self):
+        measured = json.loads(BJ_EVIDENCE.read_text(encoding="utf-8"))["bj_mapping"]
+        self.assertEqual(len(tdx_bj_codes.OLD_TO_NEW), measured["old_to_new_rows"])
+        for old, new in measured["sample"]:
+            self.assertEqual(tdx_bj_codes.OLD_TO_NEW[old], new)
+
+    def test_the_securities_of_the_history_evidence_are_requested_under_their_new_codes(self):
+        for row in json.loads(BJ_HISTORY_EVIDENCE.read_text(encoding="utf-8"))["rows"]:
+            self.assertEqual(tdx_protocol.market_code(f"{row['old']}.BJ"), (2, row["new"]))
 
     def test_echo_check_is_positional_and_needs_one_row_per_request(self):
         # R1: an old BJ code is answered with a 600839 placeholder at 0.0; here 600839 was also requested.

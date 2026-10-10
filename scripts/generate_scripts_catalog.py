@@ -105,7 +105,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("verify_*.py", "CI and checks", "platform", "workstation and CI"),
     ("verify-tdx-*.py", "research data", "quant-research", "workstation"),
     ("verify-*", "CI and checks", "platform", "workstation and CI"),
-    ("generate-tdx-hosts.py", "research data", "quant-research", "workstation"),
+    ("generate-tdx-*.py", "research data", "quant-research", "workstation"),
     ("generate*", "CI and checks", "platform", "workstation and CI"),
     ("export_component.py", "CI and checks", "platform", "workstation and CI"),
     # research data tools
