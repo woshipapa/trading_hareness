@@ -15,6 +15,7 @@ from typing import Any, get_origin, get_type_hints
 
 from . import catalog
 from .contracts import CapabilityEvidence
+from .sources.tdx_protocol import TdxProtocolError
 
 _READ_SEMAPHORE = asyncio.Semaphore(2)
 _RATE_LOCK = asyncio.Lock()
@@ -146,8 +147,15 @@ async def read_adapter(source: str, capability: str, query: dict[str, list[str]]
         _LAST_READ[key] = now
     started = datetime.now(timezone.utc)
     async with _READ_SEMAPHORE:
-        result = function(**params)
-        evidence = await result if inspect.isawaitable(result) else result
+        try:
+            result = function(**params)
+            evidence = await result if inspect.isawaitable(result) else result
+        # The HTTP boundary: an adapter refusing the request (a non-index symbol, limit rows of another session) is the
+        # caller's 422, an upstream that did not answer is a 502; both keep the adapter's reason.
+        except ValueError as error:
+            raise AdapterCallError(422, f"{type(error).__name__}: {error}") from error
+        except (OSError, TdxProtocolError) as error:
+            raise AdapterCallError(502, f"{type(error).__name__}: {error}") from error
     finished = datetime.now(timezone.utc)
     if isinstance(evidence, CapabilityEvidence):
         rows = list(evidence.rows)

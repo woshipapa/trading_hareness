@@ -42,6 +42,22 @@ class DatasourceReadRouterTests(unittest.TestCase):
         self.assertEqual(client().get(READ, params={"count": "2"}).status_code, 422)
         self.assertEqual(client().get(READ, params={"symbol": "600519.SH", "count": "801"}).status_code, 422)
 
+    def test_an_adapter_refusal_is_422_and_an_upstream_failure_502_with_the_reason(self):
+        from app.datasources.sources.tdx_protocol import TdxProtocolError
+
+        async def refuse(*, symbol: str, count: int) -> CapabilityEvidence:
+            raise ValueError("8 of 8 limit rows are not dated 2026-10-11")
+
+        async def down(*, symbol: str, count: int) -> CapabilityEvidence:
+            raise TdxProtocolError("no TDX host answered")
+
+        for fake, status, reason in ((refuse, 422, "ValueError: 8 of 8"), (down, 502, "TdxProtocolError: no TDX host")):
+            adapter_calls._LAST_READ.clear()
+            with mock.patch.object(tdx_bars, "fetch_daily", fake):
+                response = client().get(READ, params={"symbol": "600519.SH", "count": "1"})
+            self.assertEqual(response.status_code, status)
+            self.assertTrue(response.json()["detail"].startswith(reason))
+
     def test_a_vendor_binding_is_404_the_switch_is_503_and_a_second_read_within_a_second_is_429(self):
         self.assertEqual(client().get("/api/v1/datasources/read/tushare_primary/bars.daily").status_code, 404)
         with mock.patch.object(adapter_calls, "research_reads_enabled", lambda: False):
