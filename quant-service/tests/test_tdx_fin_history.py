@@ -232,11 +232,11 @@ class ReportFileDownloadTests(unittest.TestCase):
             with self.subTest(label), self.assertRaises(TdxFinanceError):
                 parse_report_file(body)
 
-    def test_the_whole_file_is_fetched_in_chunks_of_at_most_30000_bytes(self):
+    def test_the_whole_file_is_fetched_in_requests_for_30000_bytes(self):
         host = ReportHost(self.FILE)
         self.assertEqual(download_report_file(host, "tdxfin/x.zip", len(self.FILE)), self.FILE)
         self.assertEqual([(offset, size) for _, offset, size in host.requests],
-                         [(0, 30000), (30000, 30000), (60000, 10144)])
+                         [(0, 30000), (30000, 30000), (60000, 30000)])
         self.assertEqual({name for name, _, _ in host.requests}, {"tdxfin/x.zip"})
 
     def test_a_server_that_returns_shorter_chunks_is_followed_from_where_it_stopped(self):
@@ -258,10 +258,10 @@ class ReportFileDownloadTests(unittest.TestCase):
             download_report_file(host, "tdxfin/x.zip", len(self.FILE))
         self.assertEqual(len(host.requests), 3)
 
-    def test_a_server_that_sends_more_than_it_was_asked_for_raises(self):
-        host = ReportHost(self.FILE, send=lambda chunk, size: self.FILE[:size + 1])
-        with self.assertRaisesRegex(TdxFinanceError, "sent 30001 bytes for a request of 30000"):
-            download_report_file(host, "tdxfin/x.zip", len(self.FILE))
+    def test_a_file_longer_than_its_advertised_size_raises(self):
+        host = ReportHost(self.FILE)
+        with self.assertRaisesRegex(TdxFinanceError, "runs past its advertised 65000 bytes"):
+            download_report_file(host, "tdxfin/x.zip", 65_000)
 
     def test_a_reply_shorter_than_its_declared_length_raises(self):
         host = ReportHost(self.FILE)

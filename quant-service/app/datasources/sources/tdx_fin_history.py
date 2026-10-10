@@ -199,19 +199,19 @@ def download_report_file(client: tdx_protocol.TdxClient, filename: str, size: in
 
     ``size`` is what the server advertises in ``tdxfin/gpcw.txt``: a 0x06b9 reply carries only the length of its
     own chunk, and report files have no size query.  A file over ``max_bytes`` is refused before the first
-    request; one that ends early, or runs past ``size``, raises.
+    request; one that ends early, or runs past ``size``, raises.  Every request asks for a full
+    ``REPORT_CHUNK_BYTES``, as the clients this was checked against do; the last reply is what remains.
     """
     if size > max_bytes:
         raise TdxFinanceError(f"{filename}: advertised size {size} exceeds the {max_bytes}-byte cap")
     chunks: list[bytes] = []
     offset = 0
     while offset < size:
-        requested = min(REPORT_CHUNK_BYTES, size - offset)
-        chunk = parse_report_file(client._exchange(build_report_file_request(filename, offset, requested)))
+        chunk = parse_report_file(client._exchange(build_report_file_request(filename, offset)))
         if not chunk:
             raise TdxFinanceError(f"{filename} ended at byte {offset} of {size}")
-        if len(chunk) > requested:
-            raise TdxFinanceError(f"{filename}: the server sent {len(chunk)} bytes for a request of {requested}")
+        if offset + len(chunk) > size:
+            raise TdxFinanceError(f"{filename} runs past its advertised {size} bytes")
         chunks.append(chunk)
         offset += len(chunk)
     return b"".join(chunks)
