@@ -53,13 +53,15 @@ class LegacyBarTests(unittest.TestCase):
     def test_legacy_minute_matches_mac_fixture(self):
         fixture = json.loads(FIXTURE.read_text())
         for symbol in fixture["legacy_minute"]:
-            legacy = tdx_protocol.parse_bars(
+            legacy = [tdx_bars._normalize_bar(symbol, row, minute=True) for row in tdx_protocol.parse_bars(
                 8, base64.b64decode(fixture["legacy_minute"][symbol]["body_b64"])
-            )
-            mac = tdx_mac.parse_bars(base64.b64decode(fixture["mac_minute"][symbol]["body_b64"]))
+            )]
+            mac = [tdx_mac._minute_bar_row(symbol, row) for row in tdx_mac.parse_bars(
+                base64.b64decode(fixture["mac_minute"][symbol]["body_b64"])
+            )]
             self.assertEqual(len(legacy), len(mac))
             for left, right in zip(legacy, mac):
-                self.assertEqual(left["datetime"], f'{right["date"]} {right["seconds"] // 3600:02d}:{right["seconds"] // 60 % 60:02d}')
+                self.assertEqual(left["bar_time"], right["bar_time"])
                 self.assertEqual(left["volume"], right["volume"])
                 self.assertEqual(left["amount"], right["amount"])
                 for field in ("open", "high", "low", "close"):
