@@ -15,7 +15,7 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "tdx_zhb_20261009"
 def _block_file(name: str, block_type: int, members: list[str]) -> bytes:
     data = bytearray(384) + struct.pack("<H", 1)
     data += name.encode("ascii").ljust(9, b"\0") + struct.pack("<HH", len(members), block_type)
-    data += b"".join(member.encode("ascii") for member in members)
+    data += b"".join(member.encode("ascii").ljust(7, b"\0") for member in members)
     data += b"\0" * (400 * 7 - len(members) * 7)
     return bytes(data)
 
@@ -61,7 +61,7 @@ class TdxReferenceFileAdapterTests(unittest.IsolatedAsyncioTestCase):
             b"region|880003|3|1|0|region\nindustry|880004|12|1|0|industry\n",
             "spblock.dat": b"#region\n2000001\n",
         })
-        self.files["block_gn.dat"] = _block_file("concept", 4, ["000001"])
+        self.files["block_gn.dat"] = _block_file("concept", 4, ["000001", "900901"])
         self.files["block_fg.dat"] = _block_file("style", 5, ["600000"])
         self.files["block_zs.dat"] = _block_file("industry", 12, ["300001"])
         self.files["zhb.zip"] = _zip_files({
@@ -96,10 +96,11 @@ class TdxReferenceFileAdapterTests(unittest.IsolatedAsyncioTestCase):
         rows = {row["sector_key"]: row for row in evidence.rows}
         self.assertEqual(rows["880001"]["taxonomy_key"], "tdx_files_concept")
         self.assertEqual(rows["880002"]["symbol"], "600000.SH")
-        self.assertEqual(rows["880003"]["symbol"], "000001.BJ")
-        self.assertEqual(rows["880004"]["symbol"], "300001.SZ")
+        self.assertNotIn("880003", rows)
+        self.assertNotIn("880004", rows)
         self.assertEqual(rows["880001"]["known_at"].tzinfo, timezone.utc)
         self.assertTrue(any("unmatched_boards=" in warning for warning in evidence.warnings))
+        self.assertIn("rejected_members=1", evidence.warnings)
 
     async def test_calendar_and_ipo_keep_declared_file_meaning(self):
         self.files["zhb.zip"] = _zip_files({

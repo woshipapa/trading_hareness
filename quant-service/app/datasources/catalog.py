@@ -490,7 +490,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                 "只记变化（新成员 known_at=观测时刻，盘中刷新对盘中读者次日生效）"),
     _bind("tdx_public", "sector.membership", 80, UNSUPPORTED, "sector_membership_history:taxonomy_key=tdx_files_*",
           "app/datasources/sources/tdx_reference_files.py:fetch_membership", history="20261009 snapshot",
-          notes="block_gn/fg/zs + spblock joined to tdxzs3; known_at is collection UTC; unmatched board names are reported and omitted",
+          notes="block_gn -> tdxzs3 type 4 concept and block_fg -> type 5 style/event only; block_zs index lists and spblock special lists are excluded; "
+                "ashare_symbol keeps A-share equities only, counts rejected members, and does not claim industry or region membership",
           spec=BindingSpec(params={}, field_map={"taxonomy_key": "taxonomy_key", "sector_key": "sector_key", "symbol": "symbol", "known_at": "known_at"},
                            time_semantics="effective=collection snapshot; available=collection time; known_at=collection UTC",
                            handshake_profile="login_one")),
@@ -792,12 +793,6 @@ TAXONOMIES: Final[dict[str, Taxonomy]] = {item.key: item for item in (
              "tdxzs3 type 4; block files joined by board name; snapshot only"),
     Taxonomy("tdx_files_style_event", "tdx_public", "tdx_style_event", UNSUPPORTED, 81,
              "tdxzs3 type 5; block files joined by board name; snapshot only"),
-    Taxonomy("tdx_files_region", "tdx_public", "tdx_region", UNSUPPORTED, 82,
-             "tdxzs3 type 3; block files joined by board name; snapshot only"),
-    Taxonomy("tdx_files_industry_l1", "tdx_public", "tdx_industry_l1", UNSUPPORTED, 83,
-             "tdxzs3 type 2; block files joined by board name; snapshot only"),
-    Taxonomy("tdx_files_industry_l2_l3", "tdx_public", "tdx_industry_l2_l3", UNSUPPORTED, 84,
-             "tdxzs3 type 12; block files joined by board name; snapshot only"),
 )}
 
 #: Groups in the THS concept tables whose membership is a qualification, not a
