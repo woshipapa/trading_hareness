@@ -452,3 +452,164 @@ python scripts/probe-tdx-disclosure-timing.py --polls <N> --interval 10 --output
 | 金十快讯 | 已接，不含 VIP |
 | 同花顺官方 API（fuyao） | 59 条路由白名单，已采：全 A 快照、池子、天梯、竞价、热榜、飙升榜、异动、龙虎榜、估值、848 指数行情与成分；按“现在免费、以后未必”对待，关键能力均有第二来源 |
 | 东财人气榜、巨潮/上证 e 互动、财联社 | 均已接入 |
+
+## 10. TDX 解码字段字典（单位、符号、窗口）
+
+本节只收有证据的解码事实，每条给出证据。证据没有确认的单位或含义保持 `*_raw`、`field_N`、`bit_0xNN`，或标 UNKNOWN，不在代码里起名。证据分两类：
+
+- `scripts/data/<名称>_2026-10-10_mac.json`：实测记录，下表只写 `<名称>`（如 `tdx_bars_legacy_vs_mac`）；
+- `docs/archive/tdx-*.md`：归档说明，写全路径。
+
+除另注外，证据于 2026-10-10（周六）从 Mac 出口（家宽）读取，行情是 2026-10-09 收盘后的状态；盘中的延迟与新鲜度没有测过（周一验收，见第 7.1 节）。
+
+### 10.1 K 线与分笔
+
+| 项 | 事实 | 证据 |
+|---|---|---|
+| legacy K 线价格 | 整数 /1000，K 线不需要按证券换算。5 个样本——600519.SH（沪主板）、300750.SZ（创业板）、688981.SH（科创板）、510300.SH（ETF）、920000.BJ（北交所）——都是 /1000（510300 为 4.369，920000 为 13.90）。需要按证券换算的只有 0x053e 报价（10.3） | `tdx_bars_legacy_vs_mac` |
+| 分钟 volume、amount | 两个 IEEE float32：volume 的单位是股，amount 是元；接近 0 的非正规数（0 < x < 1e-20）按 0 处理。旧解析器把这两个值当 pytdx 的压缩数去解码，得到无意义的数 | `docs/archive/tdx-q-units.md`；`tdx_f7_1m_volume`（000001.SZ 14:59 读到 5.877e-39） |
+| 分钟线对 MAC | 同上 5 个样本、2026-10-09 的全部 240 根（09:31 … 15:00）：legacy 与 MAC 的 volume、amount 逐位相同，OHLC 只差 float32 舍入（最大绝对差 5.9e-05）。MAC 0x122e 的请求多要一根，回包第一行是昨收哨兵（240 根分钟线回 241 行），解析时丢弃；上市不足所要根数的证券没有哨兵，解析时最老的一根也被丢掉。它的 `seconds` 是当日 0 点起的秒数，是 bar 标签，不是成交时刻 | `tdx_bars_legacy_vs_mac`；`docs/archive/tdx-q-units.md`；`quant-service/app/datasources/sources/tdx_mac.py` 的 `parse_bars` |
+| 分钟 volume 对腾讯 | TDX 分钟 volume 是腾讯分钟手数的 100 倍（比值中位数 100.0）。000001.SZ、600519.SH 的 240 根里分别有 238、237 根换算后相等，其余是首根 09:31（含 09:25 开盘集合竞价成交）和 14:58–14:59 收盘集合竞价里本应为 0 的 float32 非正规数 | `tdx_f7_1m_volume`；`docs/archive/tdx-q-units.md` |
+| 日线 volume | legacy：整手，奇数股被截断（600519 在 2026-10-09 为 35,110 手，MAC 为 3,511,051 股）；MAC：float32 的股，约 7 位有效数字（510300 为 1,276,733,184）；amount 两边相等。`tdx_mac` 的 `bars.daily` 用 `unit_factors` volume ×0.01 把股换成手 | `tdx_bars_legacy_vs_mac`；`catalog.py` |
+| 全日成交量的口径 | 交易所口径的日成交量是日线和 MAC 批量行情给的值，不是全部逐笔之和，逐笔里有盘后成交：000001.SZ 逐笔共 1,078,143 手，日线是 1,078,105 手 | `docs/archive/tdx-q-units.md` |
+| 分笔 | `ticks.session`：volume 的单位是手；方向码 0 买、1 卖、2 中性、5 盘后固定价（P）、8 集合竞价指示（A）。价格高于上一笔为 B，低于为 S，相等为中性，除非供应商给 5 或 8；2026-10-09 的样本里 8 只出现在零成交的竞价指示上，5 只出现在盘后成交上 | `docs/archive/tdx-q-units.md` |
+| 时间约定 | 全部是 Asia/Shanghai 的交易所本地时间；legacy 分钟线的标签从 09:31 到 15:00；持久化的时间戳保持带时区的 UTC | `docs/archive/tdx-q-units.md` |
+
+### 10.2 指数 K 线与涨跌家数
+
+| 项 | 事实 | 证据 |
+|---|---|---|
+| 价格与成交额 | 指数日线（0x052d category 9 的指数布局）：OHLC 是点数，amount 是元。999999 在 2026-10-09 的 amount 888,561,205,248 等于同日 0x053e 指数报价的 amount | `tdx_bars_legacy_vs_mac` |
+| `volume_raw` | 单位未知（999999 在 2026-10-09 为 5,351,499），所以 `bars.index_daily` 不映射它 | `tdx_bars_legacy_vs_mac`；`catalog.py` |
+| 涨跌家数 | 每个交易日都带 `up_count`、`down_count`，是**该指数成分股**的上涨、下跌家数，不是全 A 宽度。2026-10-09：999999 为 1,341/956，399300 为 179/113，399001 为 1,698/1,166，399006 为 708/677，000688 为 270/341，899050 为 308/37 | `tdx_bars_legacy_vs_mac` |
+| 与 0x054b 的宽度不等 | 同会话 0x054b 的 SH-A 是 2,320 行 1,316 涨/947 跌/57 平，与 999999 的 1,341/956 不相等，已测的 0x054b 分类没有一个能复现指数的数；0x051d 的涨跌家数同样是指数成分口径 | `docs/archive/tdx-q-breadth.md` |
+
+### 10.3 0x053e 报价与五档
+
+| 项 | 事实 | 证据 |
+|---|---|---|
+| 价格 | 整数，小数点位置属于每只证券，解析器固定 /100。证券列表（52,331 行）里个股（主板 3,198、创业板 1,412、科创板 618 行）、板块码（1,119 行）和指数（557 行）的 `decimal_point` 全是 2，所以对它们 /100 正确；北交所个股在列表里没有 `decimal_point`（352 行为空），报价按两位小数（920000.BJ 14.19 = 腾讯） | `tdx_quote_scale_and_bj`；`tdx_quote_order_book` |
+| ETF、可转债 | ETF 的 `decimal_point` 是 3（1,427 行），可转债是 4（571 行）：固定 /100 对 ETF 高 10 倍（510300 为 43.85，应为 4.385；159915 为 30.64，应为 3.064），对可转债高 100 倍（127045 为 11,697.1，应为 116.971；113709 为 18,185.9，应为 181.859）。所以 legacy 报价适配器只收小数位为 2 的类型，ETF、可转债、基金的价格走 MAC 批量行情的 float 价格 | `tdx_quote_scale_and_bj`；`quant-service/app/datasources/sources/tdx_quotes.py` |
+| 小数位不是类型的函数 | `b_share` 有 2 和 3，`fund`、`lof` 有 3 和 4，`other` 有 2、3、4，要逐只取证券列表里的值 | `tdx_quote_scale_and_bj` |
+| 五档 | bid1..5、ask1..5 是元，bid_vol、ask_vol 是手。沪（600519）、深（000001）、北（920000）个股与腾讯收盘盘口逐档一致，价格和手数相同 | `tdx_quote_order_book` |
+| 指数、板块码没有盘口 | 它们的买卖盘字段装的是别的数：999999 的 bid1 为 376,755.31，不是价格；880005 的 bid_vol1/ask_vol1（2494/1658）等于它的指数日线 up/down 家数；880491 的 ask_vol4 为 999999。永远不对指数或板块码暴露盘口字段 | `tdx_quote_scale_and_bj`；`tdx_quote_order_book` |
+| 0x054b 全 A 排序列表 | 价格是元，volume 是手（canonical 股 ×100），成交额是元；每页 80 只，price≤0 的行滤掉 | `catalog.py`（`quote.all_a_snapshot` 的说明） |
+
+### 10.4 880xxx：板块与市场统计
+
+| 项 | 事实 | 证据 |
+|---|---|---|
+| 构成 | 证券列表（市场 1）里的 880xxx 共 652 个：604 个是 `tdxzs3.cfg` 的板块（最小 880081），48 个不是 | `tdx_market_stat_codes` |
+| 那 48 个 | 880001–880079 里的市场统计（总市值、流通市值、活筹市值、平均股价、成交均价、涨跌家数 880005、停板家数、全 A 等权与中位，以及主板、创业、科创、北证各自的同类项）和 880096–880099（ETF 等权、REITs、可转债、通用回购）。代码里归为 `market_stat`，不是 `board` | `tdx_market_stat_codes`；`tdx_instruments.py` 的 `instrument_type` |
+| 880005 | 2026-10-09 的收盘价 3297.0 等于同会话 0x054b 全 A 的上涨家数（全 A 5,578 行，3,297 涨/2,155 跌/126 平）。它的 bar 字段含义没有依据（UNKNOWN），不绑定；`bars.index_daily` 只收 `index`、`board` | `tdx_bars_legacy_vs_mac`；`tdx_market_stat_codes`；`docs/archive/tdx-q-breadth.md` |
+
+### 10.5 北交所代码迁移
+
+| 项 | 事实 | 证据 |
+|---|---|---|
+| 映射 | `zhb.zip` 的 `addedcode_bj.cfg` 把 351 个旧代码（43xxxx、83xxxx、87xxxx）映射到 920xxx；证券列表里 920xxx 行有 352 个，来自 zhb 的 `tdxbjmore`，没有 `decimal_point` | `tdx_quote_scale_and_bj` |
+| 历史在新代码下 | 服务器在新代码下给迁移证券的全部历史，旧代码下什么也没有：920017 有 800 根日线，最早 2023-06-19（代码切换之前），旧代码 430017 为 0 根；920047 同；920288（旧 874709）有 25 根，自 2026-08-28，是新近上市 | `tdx_bj_history` |
+| 实现 | 在 TDX 边界把旧码译成新码，不丢历史：`tdx_protocol.market_code` 按 `tdx_bj_codes.OLD_TO_NEW` 把旧 BJ 代码译为 920xxx，批量适配器返回的行带 `source_symbol`（请求时的写法）。映射表由 `scripts/generate-tdx-bj-codes.py` 从 `addedcode_bj.cfg` 生成 | `tdx_bj_history`；代码 |
+
+### 10.6 MAC 0x122b 动态字段
+
+注册表是 `quant-service/app/datasources/sources/tdx_mac_fields.py`（160 个位，`0x00`–`0x9f`）：每置一位回 4 个字节，按位序排列；没有条目的位叫 `bit_0xNN`，没有单位和 canonical 键。请求要拆成小位图，有些 MAC 主机会静默截断一次回包里的动态值个数（`docs/archive/tdx-route-mac-fields.md`）。下表只列有结论的位；状态沿用注册表的 MATCH、NO_REFERENCE。
+
+| 位 | 名称 | 单位、符号、窗口 | 状态与说明 | 证据 |
+|---|---|---|---|---|
+| `0x00`–`0x04` | pre_close、open、high、low、close | float32，元 | MATCH（对日线） | `docs/archive/tdx-route-mac-fields.md` |
+| `0x05` | vol | uint32，**手**。MAC K 线 0x122e 的 volume 是股，批量行情的 0x05 是手，canonical 股 = ×100。例：600519.SH 在 2026-10-09 位 0x05 = 35110 手，同日 MAC 日线 3,511,051 股 | MATCH（对日线） | `tdx_mac_adapters_live`；`tdx_bars_legacy_vs_mac`；`docs/archive/tdx-q-units.md` |
+| `0x13`、`0x14` | server_update_date、server_update_time | uint32 | 行情更新的日期、时间（Asia/Shanghai）；适配器用来组成 `exchange_time`，`limits.prices` 的 `trade_date` 取位 0x13（2026-10-09 的 5,562 行全是该日）。注册表对这两位仍记 NO_REFERENCE | `tdx_mac_limits_all_a`；`catalog.py` |
+| `0x1b` | turnover | float32，% | MATCH（流通股本可信时）：= 位 0x05 的手数 / 位 0x0b 的万股 | `docs/archive/tdx-q-limitfields.md`；`catalog.py` |
+| `0x20`、`0x21` | buy_price_limit、sell_price_limit，即涨停价、跌停价 | float32，元。按板块比例，取整到 0.01 元：主板 10 %，创业板、科创板 20 %（含 ST），北交所 30 %；沪深主板 ST 自 2026-07-06 起为 10 %，此前 5 %（`app/market_rules.py`） | MATCH。2026-10-09 全 A 快照的 5,562 行都有限价行（覆盖率 1.0），日期都是 2026-10-09。**无价格限制的证券两个限价都回 0.0**（001246.SZ、301716.SZ 两只新股，和上市首日的 920157.BJ），0.0 是“无限价”，不是价格。限价/昨收 − 1 与板块比例差 0.001–0.003，来自限价取整到 0.01；float32 的 12.96 读成 12.960000038146973，比较要按 0.01 元的整数分 | `tdx_mac_limits_all_a`；`quant-service/app/market_rules.py`；`quant-service/app/datasources/derived/limit_pools.py` |
+| `0x24` | pre_iopv | float32，元 | NO_REFERENCE：收盘后 510300 读到 0.0、159915 读到 305.58，都不是 3–4 元 ETF 的前一日 IOPV；非基金代码上这一位是别的数（600519 读到 1250081664.0，000001 读到 5.61，300750 读到 18.82）。`fund.iopv` 不读它 | `tdx_mac_iopv`；`tdx_mac_adapters_live` |
+| `0x27` | iopv | float32，元 | 紧邻 ETF 的收盘价：510300 为 4.3898（收盘 4.385），159915 为 3.0639（收盘 3.064）。只有 510300 对账为 MATCH。`exchange_time` 取同一行位 0x13/0x14 的行情更新时间，IOPV 自己的时刻不在行内。非基金代码上也是别的数，所以适配器只收 ETF、LOF、基金类代码 | `tdx_mac_iopv`；`docs/archive/tdx-route-mac-fields.md`；`catalog.py` |
+| `0x38`、`0x6b` | main_net_amount 及其副本 | float32，元，正为主力净流入 | CONFIRMED：= `0x1218` 第 0 行的 [主力流入 − 主力流出]，8 只样本逐个相等（舍入残差最大 512 元）。是供应商口径，不是由逐笔重建的主动买卖净额（已测的方向码、涨跌、金额和手数阈值都对不上）；920000.BJ 为 0（北交所覆盖不全）。目前没有 TDX 的资金流绑定 | `docs/archive/tdx-q-flow.md` |
+| `0x3b` | 20 日涨跌幅 | float32，% | 注册表里这一位没有条目，按默认的 uint32 读：000001.SZ 读成 3199079547，按 float32 读是 −0.34，等于 tdxstat 第 18 列。**未结事项**（基线 `6f691ad0` 的注册表未改） | `tdx_stat_columns_vs_mac`；`docs/archive/tdx-q-stats.md` |
+| `0x58` | annual_limit_up_days | int32，天。窗口是日历年（2026 年），不是滚动 250 根 | MATCH：36 只样本里 30 只与日线复算相等，其余 6 只由年界解释；新股无涨跌停的交易日要排除 | `docs/archive/tdx-q-limitfields.md` |
+| `0x5c` | close_streak | int32，天，带符号：连涨为 +n，连跌为 −n | CONFIRMED：36/36 与日线相符 | `docs/archive/tdx-q-limitfields.md` |
+| `0x88`–`0x8b` | up_count、down_count | uint32，家 | 板块成分股的上涨、下跌家数；880761、880842、881376、880231 四个板块逐个与成分报价的涨跌家数相符 | `docs/archive/tdx-q-limitfields.md` |
+| `0x90`–`0x96` | change_at_1000、change_at_1030、change_at_1100、change_at_1130、change_at_1330、change_at_1400、change_at_1430 | float32，% | 日内采样快照：等于当日一分钟线在该时刻或相邻一分钟的涨跌，不要求恰好同一格；盘中含义等周一取样（计划第 4 节 4.4） | `docs/archive/tdx-q-limitfields.md`；`docs/archive/tdx-route-mac-fields.md` |
+| 批量回包 | — | — | 服务器按请求顺序答，不列的代码就不回：请求 80 个沪市代码（600000–600079）回 57 行，缺的 23 个都是已退市代码。不是“请求里还没轮到的代码”（别的代码、重复、乱序）的行被丢弃并记 `code_mismatch`；一行都对不上则整包报错并换下一台主机；没回行的证券由适配器在 warnings 里报告 | `tdx_mac_batch_omission`；`quant-service/app/datasources/sources/tdx_mac.py` |
+
+### 10.7 tdxstat.cfg 与 tdxstat2.cfg
+
+两个文件是 `zhb.zip` 的成员：`tdxstat.cfg` 35 列、`tdxstat2.cfg` 21 列，各 8,080 行，UTF-8。市场列：0 SZ 4,132 行、1 SH 3,596 行、2 BJ 352 行。**每行有自己的日期**，文件没有单一的生效日：8,032 行是 20261009，10 行是 20261008，8 行是 20260930（没成交的证券保留最后日期）。`-1` 只出现在 tdxstat 第 5 列，是有效的“连跌 1 天”，不是哨兵；空字段不当 0 用。
+
+证据：`docs/archive/tdx-q-stats.md`（420 只样本对 MAC 日线、MAC 批量行情的位和腾讯，判定 CONFIRMED 要命中 ≥ 95 %；标 probe 的列可由 `scripts/probe-tdx-q-stats.py` 复算）；`tdx_stat_columns_vs_mac`（再取 80 只沪深股票，每第 60 行一只，对 MAC 位 45、48、49、53、54、59、60、65、68、69、87、88，除另注外 80/80 相符）。
+
+tdxstat.cfg 的已确认列（解析器 `tdx_files.parse_tdxstat`；命中率取自归档，括号内是样本数）：
+
+| 列 | 含义 | 单位、符号 | 解析器字段 | 命中率与参照 |
+|---|---|---|---|---|
+| 3 | 静态市盈率 | 倍 | `pe_static` | 99.7 %（389/390），MAC 位 49 |
+| 4 | 最近交易日 | YYYYMMDD | `date` | 100 %（420/420） |
+| 5 | 连续涨跌天数 | 天，正为连涨、负为连跌 | `streak` | 95.2 %（400/420），刚过线 |
+| 6 | 当日涨跌幅 | % | `change_pct` | 100 %（420/420） |
+| 7 | 前一日涨跌幅 | % | `change_prev_day_pct` | 99.3 %（417/420），MAC 位 66 |
+| 8 | 前二日涨跌幅 | % | `change_prev2_day_pct` | 99.3 %（417/420），MAC 位 71 |
+| 9 | 市盈率 TTM | 倍 | `pe_ttm` | 100 %（390/390），MAC 位 48 |
+| 10 | 股息率 | % | `dividend_yield_pct` | 100 %（390/390），MAC 位 91 |
+| 11 | 与 MAC 位 45 `circulating_capital_z` 完全相同 | 单位未对上，含义 UNKNOWN（见下） | `circulating_capital_z_raw` | 100 %（390/390），只是恒等 |
+| 18 | 20 日涨跌幅 | % | `change_20d_pct` | 99.8 %（419/420），MAC 位 0x3b（59）按 float32 读 |
+| 20 | 60 日涨跌幅 | % | `change_60d_pct` | 99.8 %（419/420），MAC 位 68 |
+| 21 | 年初至今涨跌幅 | % | `change_ytd_pct` | 100 %（420/420），MAC 位 60 |
+| 23 | 与 MAC 位 125 完全相同 | 含义 UNKNOWN | 不解析 | 100 %（420/420），只是恒等 |
+| 26 | 年内涨停天数 | 天 | `annual_limit_up_days` | 100 %（390/390），MAC 位 88 |
+| 27 | 4 日涨跌幅 | % | `change_4d_pct` | 98.1 %（412/420），按日线收盘 |
+| 28 | 5 日涨跌幅 | % | `change_5d_pct` | 100 %（420/420），MAC 位 69 |
+| 30 | 10 日涨跌幅 | % | `change_10d_pct` | 100 %（420/420），MAC 位 70 |
+
+另有第 0 列（市场）和第 1 列（代码）已确认。
+
+tdxstat2.cfg 的已确认列（解析器 `tdx_files.parse_tdxstat2`）：
+
+| 列 | 含义 | 单位、符号 | 解析器字段 | 命中率与参照 |
+|---|---|---|---|---|
+| 2 | 最近交易日 | YYYYMMDD | `date` | 100 %（420/420） |
+| 3 | 当日成交额 | **万元**（元 / 1e4） | `amount_10k_yuan` | 100 %（420/420），日线 amount / 1e4 |
+| 5 | 前一日成交额 | 万元 | `amount_prev_10k_yuan` | 100 %（420/420） |
+| 7 | 前二日成交额 | 万元 | `amount_prev2_10k_yuan` | 100 %（420/420） |
+| 11 | 当月涨跌幅 | % | `change_mtd_pct` | 99.3 %（417/420），对上月最后一个收盘 |
+| 12 | 1 年涨跌幅 | % | `change_1y_pct` | 100 %（420/420），MAC 位 65 |
+| 14 | 集合竞价金额 | 万元 | `auction_amount_10k_yuan` | 99.5 %（403/405），MAC 位 87 / 1e4 |
+| 17 | 52 周最高 | 元 | `high_52w_yuan` | 100 %（420/420），MAC 位 53 |
+| 18 | 52 周最低 | 元 | `low_52w_yuan` | 100 %（420/420），MAC 位 54 |
+
+另有第 0 列（市场）和第 1 列（代码）已确认。
+
+- **PE 的两列别弄反**：第 3 列是静态市盈率（`pe_static`），第 9 列是 TTM 市盈率（`pe_ttm`）。`origin/main` 上的 `parse_tdxstat` 曾把两者命名反了，基线上已改正（`tdx_stat_columns_vs_mac`）。
+- **第 11 列**：与 MAC 位 45 的值完全相同（000001 为 816,056.56，600519 为 54,094.90，300750 为 282,052.32，688981 为 180,066.49），注册表里该位的单位是万股（置信度低）。600519 的 54,094.90 约为其总股本 125,619.78（万股）的 43 %，000001 约 42 %，像自由流通股本，但没有参照比对：除了恒等，含义 UNKNOWN，解析器只留 `circulating_capital_z_raw`。
+- **第 27 列不是一年涨跌幅**（那是 tdxstat2 第 12 列），是 4 日涨跌幅。
+- **窗口基准日未定**：PLAUSIBLE 的窗口列——tdxstat 第 17 列（约 20 日，91.4 %）、第 19 列（约 60 日，80.7 %）、第 29 列（9 日，94.8 %），tdxstat2 第 19 列（约 30 日，90.0 %）、第 20 列（30 日，89.2 %）——与 MAC 的涨跌幅位不完全相等：MAC 位 0x3b 对第 18 列是 99.8 %，而按“19 根前的收盘”算只有 91.4 %，基准日的约定没有定下来。这五列不解析。
+- 两个文件共 56 列：CONFIRMED 30、PLAUSIBLE 5、UNKNOWN 21（tdxstat 13 个、tdxstat2 8 个）；UNKNOWN 的列保持 raw，不起名。第 14–16、24–25 列（tdxstat）和第 9–10 列（tdxstat2）与 MAC 主力净流入的 Spearman 相关在 −0.18 到 0.00 之间、符号一致率 36–50 %，不是主力净流入，只能说量级像元或万元的金额。
+
+### 10.8 tipinfo.dat
+
+- **形状**：22 列，每只证券一行，**只含最新一期报告**。2026-10-10 下载的 5,652 行里，5,649 行的报告期是 20260630，另有 20260930、20250930、20260331 各 1 行；EPS 全是数，第 4 列全是 8 位日期，取值范围 20251028–20261010（`tdx_tipinfo`）。所以它只给每只证券的最新一期定日期，更早的期没有日期。
+- **列 0–3**：市场（0 SZ、1 SH；北交所行用供应商的市场码）、代码、报告期、EPS（元/股）。
+- **第 4 列**是该期报告的**首次披露日**，只有日期，没有时刻（解析器字段 `first_disclosure_date`）。与东财 `RPT_PUBLIC_BS_APPOIN` 的实际披露日相比，5,551 只里有 5,549 只相等（99.96 %）；两个“例外”（`002107`、`002731`）其实是另一报告期的行，不是第 4 列出错，见 `docs/archive/tdx-q-disclosure.md` 末尾 2026-10-11 的更正。它是披露日，不是通用的 PIT 可得时钟：没有时刻，且只覆盖最新一期。第 5–7 列都不是披露日（对实际披露日的精确命中为 56/5,296、43/5,513、0/494）。
+- **解析与用法**：`tdx_zhb_extras.parse_tipinfo` 要求恰好 22 列、EPS 是数、第 4 列是日期，否则抛 `TdxFileError`。`tdx_fin_history.date_gpcw_rows` 按 (代码, 报告期) 给 GPCW 行定 `available_at` = 首次披露日当天 23:59:59（Asia/Shanghai），下一个交易日起可用；tipinfo 里没有的期保持无日期（`availability_basis` 见第 6.1 节）。
+- **第 5–21 列**保持 `field_N`，见 10.10。
+
+### 10.9 zhb.zip 的成员与可单独下载的文件
+
+- `zhb.zip`（0x06b9 报告文件下载）1,332,578 字节，47 个非空成员，md5 `fa3f6929fb22eeec5240b01b9d40922f`。`tdxstat.cfg`、`tdxstat2.cfg`、`tdxzs.cfg`、`tdxzs3.cfg`、`spblock.dat` **是它的成员**：按名字单独向服务器要，这五个都答 0 字节（`tdx_server_files`）。`tipinfo.dat`、`xgsg.cfg`、`needini.dat` 等其余成员也在 zip 里；计划第 7 节把它们也算作“按名字要得 0 字节”，证据文件只记了上面五个。
+- 可单独下载的是 `block_gn.dat`（757,083 字节，269 个板块）、`block_fg.dat`（453,279 字节，161 个）、`block_zs.dat`（329,507 字节，117 个）。
+- `tdx_files.download` 对 0 字节的答复现在抛 `TdxFileError`（“TDX file is empty or not served”），此前静默返回 `b''`（一个静默的空文件）。
+- 板块定义：`tdxzs.cfg` 604 行（类型 2 为 145、3 为 32、4 为 269、5 为 158），`tdxzs3.cfg` 1,071 行（多出类型 12 的 467 行）；`spblock.dat` 35 个特殊名单。`block_gn.dat` 对 `tdxzs3` 类型 4（概念），`block_fg.dat` 对类型 5（风格、事件）；`block_zs.dat`（指数成分表）和 `spblock.dat` 不是板块，不进 `sector.membership`。
+
+### 10.10 保持 UNKNOWN 的事项
+
+这些事项没有证据，代码和文档里都保持原始名字（`*_raw`、`field_N`、`bit_0xNN`），不绑定、不起名。前七项是计划第 5 节列出的，最后一项是归档里另有记载的。
+
+| 事项 | 现状 | 来源 |
+|---|---|---|
+| MAC 位 `0x5d`、`0x5e`、`0x16`、`0x1d`、`0x7a` | 没有稳定的复算，也没有独立参照。`0x5d`、`0x5e` 的取值从个位数到 38,508、22,188，不等于涨跌停事件数、累计涨跌逐笔数、上市天数、成交笔数或涨跌成交量；`0x16` 是带符号整数（含 0），没有独立的强弱参照；`0x1d` 是随行业重复的合理百分数，没有独立的行业汇总；`0x7a` 是合理的比值，但竞价曲线没有给出独立的 09:25 分母 | `docs/archive/tdx-q-limitfields.md`；`docs/archive/tdx-route-mac-fields.md` |
+| tipinfo 第 5–21 列 | 归档的最终字典把这些列全记 UNKNOWN（命中率低于阈值；第 8、13、14 列分别是 0.24 %、0.02 %、0 %）；归档的结构表里第 8、13、14 列是 PLAUSIBLE，依据只是成对出现的日期、数量形状，没有做公开数据连接。计划第 5 节写的是第 8 列、第 13 列（解禁日期，78 %）、第 14 列（解禁股数，86 %）为 PLAUSIBLE；这两个比率在本树里没有记录文件可引 | `docs/archive/tdx-q-disclosure.md`；计划第 5 节 |
+| `importzs.cfg` 的值列（第 3–7 列） | 五个指数统计值，单位不明，没有成分重算可对；第 0–2 列（代码、快照日期、成分数）已确认 | `docs/archive/tdx-q-disclosure.md` |
+| legacy 0x056a 的数量单位 | matched、unmatched 是原始服务器数量，单位不明：在 5 个股票、ETF 样本上没有一个统一的倍数能对上 09:25 的逐笔成交量；MAC 0x123d 的竞价数量同样。保持 `matched_raw`、`unmatched_raw`，不标手或股。竞价流到 09:24:57 止，没有字面 09:25 行 | `docs/archive/tdx-q-units.md` |
+| 扩展行情 K 线与指数的成交量单位 | 扩展行情日线的 `volume_raw` 单位随市场而异：00700 的报价量 20,422,500 对日线 2,042，AAPL 的 37,881,199 对 378,811，IF2610 的 36,158 对 36,158；期货日线的 amount 槽放的是持仓量，最后一个字是结算价。指数（legacy 0x052d 的指数布局、0x051d）的 `volume_raw` 同样单位未知 | `docs/archive/tdx-route-ext-market.md`；`docs/archive/tdx-q-extcodes.md`；`tdx_bars_legacy_vs_mac` |
+| `brkseat.dat` 与不透明的 zhb 成员 | `brkseat.dat` 的前两列（券商 id、席位或类型码）只是 PLAUSIBLE，没有席位名。`profile.dat`、`relation.dat` 和六个 `*comte*.dat`（`nacomte`、`nbcomte`、`nscomte`、`nscomte_std`、`nvcomte`、`nzcomte`）没有解出编码、校验、记录长度或语义；归档逐个列出 8 个，计划第 5 节写作 7 个 | `docs/archive/tdx-route-zhb-extras.md`；计划第 5 节 |
+| `gbbq` 与其他本地文件 | `tdx_local_extra.py` 只有合成字节的单测，没有拿真实客户端的文件对过；公开代码（rainx/pytdx、mootdx、tdxpy）只是读法参考，不算 owner 数据证据 | `docs/archive/tdx-route-local-files.md` |
+| 归档里另有记载的 | MAC 位 `0x59`（整数分值，20 只样本在 420–4,800，对不上成交量、成交额、换手、笔数）；MAC 资金流位 `0x39`、`0x6c`–`0x72`、`0x74`–`0x76`（UNKNOWN；`0x6f`–`0x71` 只有名字 PLAUSIBLE，数值仍 UNKNOWN）和 `0x73`（DDX，PLAUSIBLE）；tdxstat 的 13 列和 tdxstat2 的 8 列（10.7）；`tdxpkmore.cfg` 的第 7 列（24 行有 10.00、5.00、2.00、1.00、0.10 的覆盖值，没有 60 % 的规则）和全部标志列；0x054b 的排序类型 18–30（有数据，但没有独立的字段映射） | `docs/archive/tdx-q-limitfields.md`；`docs/archive/tdx-q-flow.md`；`docs/archive/tdx-q-disclosure.md` |
