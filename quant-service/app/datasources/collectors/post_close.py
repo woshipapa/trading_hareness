@@ -19,7 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
-from ..sources import tdx_files, tdx_fin_history, tdx_instruments, tdx_protocol, tdx_zhb_extras
+from ..sources import tdx_bars, tdx_files, tdx_fin_history, tdx_instruments, tdx_protocol, tdx_zhb_extras
 from ..sources.fuyao_evidence import fetch_code_batches
 from .intraday import CollectorDeps, CollectorState, SENTIMENT_PROVIDER_KEY, build_sentiment
 from ..error_text import error_text
@@ -60,6 +60,7 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("tdx_security_list", time(19, 40), time(23, 30), "通达信证券列表变更"),
     ArchiveJob("tdx_tipinfo", time(19, 50), time(23, 30), "通达信财报首次披露日期"),
     ArchiveJob("tdx_gpcw", time(20, 0), time(23, 30), "通达信历史财务报表"),
+    ArchiveJob("tdx_index_bars", time(20, 10), time(23, 30), "通达信指数日线与涨跌家数"),
 )
 
 
@@ -74,6 +75,9 @@ class ArchiveDeps:
     latest_observation_payloads: Callable[[str, str], Awaitable[dict[str, dict[str, Any]]]] | None = None
     observation_payloads: Callable[[str, str], Awaitable[list[dict[str, Any]]]] | None = None
     max_gpcw_periods: int = 2
+
+
+TDX_INDEX_SYMBOLS = ("999999.SH", "399001.SZ", "399006.SZ", "399300.SZ", "000688.SH", "899050.BJ")
 
 
 @dataclass
@@ -382,6 +386,30 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
             "downloaded": downloaded, "rows_stored": stored, "undated": undated, "host": host}
 
 
+async def job_tdx_index_bars(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive six index series; each symbol stores 800 rows once and five rows on normal later days."""
+    started = time_module.monotonic()
+    daily_rows: list[dict[str, Any]] = []
+    breadth_rows: list[dict[str, Any]] = []
+    previous = await deps.latest_observation_payloads("tdx_public", "tdx_index_daily_bars") if deps.latest_observation_payloads else {}
+    for symbol in TDX_INDEX_SYMBOLS:
+        count = 5 if symbol in previous else 800
+        daily = await tdx_bars.fetch_index_daily(symbol=symbol, count=count)
+        breadth = await tdx_bars.fetch_index_breadth(symbol=symbol, count=count)
+        for row in daily.rows:
+            effective = datetime.combine(date.fromisoformat(row["trade_date"]), time(15, 0), CN_TZ)
+            daily_rows.append({**row, "ts_code": symbol, "effective_at": effective.isoformat(), "available_at": now.isoformat()})
+        for row in breadth.rows:
+            effective = datetime.combine(date.fromisoformat(row["trade_date"]), time(15, 0), CN_TZ)
+            breadth_rows.append({**row, "ts_code": symbol, "effective_at": effective.isoformat(), "available_at": now.isoformat()})
+    stored_daily = await deps.collector.persist_observations("tdx_public", "tdx_index_daily_bars", daily_rows)
+    stored_breadth = await deps.collector.persist_observations("tdx_public", "tdx_index_breadth", breadth_rows)
+    await deps.collector.record_health("tdx_public", "tdx_index_daily_bars", True, len(daily_rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"symbols": len(TDX_INDEX_SYMBOLS), "daily_rows": len(daily_rows), "breadth_rows": len(breadth_rows),
+            "stored_daily": stored_daily, "stored_breadth": stored_breadth}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -390,6 +418,7 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "daily_valuation_projection": job_daily_valuation_projection,
     "tick_flow": job_tick_flow, "capital_changes": job_capital_changes,
     "tdx_security_list": job_tdx_security_list, "tdx_tipinfo": job_tdx_tipinfo, "tdx_gpcw": job_tdx_gpcw,
+    "tdx_index_bars": job_tdx_index_bars,
 }
 
 

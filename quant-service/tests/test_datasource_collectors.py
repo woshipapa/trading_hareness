@@ -425,6 +425,35 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored[0]["availability_basis"], "tipinfo_first_disclosure")
         self.assertEqual(stored[0]["fields"], {"基本每股收益": 1.2})
 
+    async def test_tdx_index_bars_backfill_once_then_request_five(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        requested = []
+
+        async def latest(_provider, capability):
+            return {"999999.SH": {}} if capability == "tdx_index_daily_bars" else {}
+
+        async def daily(*, symbol, count):
+            requested.append(("daily", symbol, count))
+            from app.datasources.contracts import CapabilityEvidence
+            return CapabilityEvidence([{"symbol": symbol, "trade_date": "2026-10-09", "close": 1, "open": 1,
+                                        "high": 1, "low": 1, "amount": 1, "volume_raw": 1,
+                                        "up_count": 2, "down_count": 1}])
+
+        async def breadth(*, symbol, count):
+            requested.append(("breadth", symbol, count))
+            from app.datasources.contracts import CapabilityEvidence
+            return CapabilityEvidence([{"symbol": symbol, "trade_date": "2026-10-09", "up_count": 2, "down_count": 1}])
+
+        deps.latest_observation_payloads = latest
+        with patch("app.datasources.collectors.post_close.tdx_bars.fetch_index_daily", daily), \
+             patch("app.datasources.collectors.post_close.tdx_bars.fetch_index_breadth", breadth):
+            await post_close.job_tdx_index_bars(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(requested[0][2], 5)
+        self.assertEqual(requested[2][2], 800)
+        self.assertEqual({capability for _provider, capability, _rows in recorder.observations},
+                         {"tdx_index_daily_bars", "tdx_index_breadth"})
+
 
 if __name__ == "__main__":
     unittest.main()
