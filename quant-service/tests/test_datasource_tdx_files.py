@@ -48,9 +48,8 @@ class TdxFileParserTests(unittest.TestCase):
         self.assertEqual(tdx_files.parse_file_chunk(struct.pack("<I", 3) + b"abcTAIL"), b"abc")
 
     def test_bounded_client_downloads_block_and_report_chunks(self):
-        class FakeClient(tdx_files.TdxFilesClient):
+        class FakeClient:
             def __init__(self):
-                super().__init__("host", 7709)
                 self.requests = []
 
             def _exchange(self, request):
@@ -66,8 +65,8 @@ class TdxFileParserTests(unittest.TestCase):
                 return struct.pack("<I", len(payload)) + payload
 
         client = FakeClient()
-        self.assertEqual(client.download("block_gn.dat"), b"hello")
-        self.assertEqual(client.download("zhb.zip"), b"report")
+        self.assertEqual(tdx_files.download(client, "block_gn.dat"), b"hello")
+        self.assertEqual(tdx_files.download(client, "zhb.zip"), b"report")
         self.assertEqual(len(client.requests), 3)
 
 

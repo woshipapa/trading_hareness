@@ -13,13 +13,8 @@ import math
 import re
 from typing import Any, Iterable
 
+from .tdx_protocol import decode_text
 
-def decode_text(data: bytes) -> str:
-    """Decode TDX text, preferring UTF-8 and falling back to GB18030."""
-    try:
-        return data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        return data.decode("gb18030", "replace")
 
 
 def _lines(data: bytes) -> list[str]:
@@ -74,6 +69,17 @@ def _pipe_rows(data: bytes, minimum: int = 1) -> list[list[str]]:
 
 def parse_bj_mapping(addedcode: bytes, bjmore: bytes = b"") -> dict[str, Any]:
     """Parse legacy-to-current Beijing code migration and BJ metadata rows."""
+    if not bjmore:
+        mapping: dict[str, str] = {}
+        for line in _lines(addedcode):
+            codes = re.findall(r"(?<!\d)(\d{6})(?!\d)", line)
+            if len(codes) >= 2:
+                old, new = codes[:2]
+                if old.startswith(("43", "83", "87")) and new.startswith("92"):
+                    mapping[old] = new
+                elif new.startswith(("43", "83", "87")) and old.startswith("92"):
+                    mapping[new] = old
+        return mapping
     header: list[str] = []
     rows = []
     for line in _lines(addedcode):
@@ -90,6 +96,22 @@ def parse_bj_mapping(addedcode: bytes, bjmore: bytes = b"") -> dict[str, Any]:
                          "name": fields[3], "status": fields[4] if len(fields) > 4 else "",
                          "raw_fields": fields})
     return {"header": header, "migrations": rows, "metadata": metadata}
+
+
+def parse_tdxbjmore(data: bytes) -> list[dict[str, Any]]:
+    rows = []
+    for fields in _pipe_rows(data, 4):
+        rows.append({"market": int(fields[0]), "code": fields[1], "name": fields[3], "kind": fields[2],
+                     "source": "zhb_tdxbjmore", "fields": fields})
+    return rows
+
+
+def bj_rows_from_zhb(files: dict[str, bytes]) -> list[dict[str, Any]]:
+    rows = parse_tdxbjmore(files.get("tdxbjmore.cfg", b""))
+    mapping = parse_bj_mapping(files.get("addedcode_bj.cfg", b""))
+    for row in rows:
+        row["old_codes"] = [old for old, new in mapping.items() if new == row["code"]]
+    return rows
 
 
 def parse_ipo_subscriptions(xgsg: bytes, othersg: bytes = b"") -> dict[str, list[dict[str, Any]]]:
@@ -148,23 +170,12 @@ def parse_industry_stock_references(data: bytes) -> list[dict[str, Any]]:
     return rows
 
 
-def parse_price_limit_ratios(data: bytes) -> list[dict[str, Any]]:
-    """Parse ``tdxpkmore.cfg``; position 7 is the observed limit percentage."""
-    rows = []
-    for fields in _pipe_rows(data, 5):
-        rows.append({"market": fields[0], "code": fields[1], "name": fields[2],
-                     "limit_ratio_pct": _number(fields[7]) if len(fields) > 7 and fields[7] else None,
-                     "raw_fields": fields})
-    return rows
-
-
 def parse_tipinfo(data: bytes) -> list[dict[str, Any]]:
     """Parse 22-column per-stock report/rights metadata from ``tipinfo.dat``.
 
-    Columns 0-3 are market, code, report period and EPS.  Column 4 is the
-    likely announcement date (it agrees with the H1-2026 disclosure timing for
-    000001); all remaining positions stay named ``field_N`` pending an
-    independent vendor schema.
+    Columns 0-3 are market, code, report period and EPS.  Column 4 is a
+    plausible first-disclosure date, not an available-at timestamp; all
+    remaining positions stay named ``field_N`` pending an independent schema.
     """
     rows = []
     for fields in _pipe_rows(data, 4):

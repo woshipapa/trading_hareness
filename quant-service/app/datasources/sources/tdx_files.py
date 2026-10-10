@@ -80,10 +80,6 @@ def parse_file_chunk(body: bytes) -> bytes:
     return body[4:4 + size]
 
 
-def _text(data: bytes) -> str:
-    return data.decode("gbk", "replace")
-
-
 def _field(fields: list[str], index: int, default: str = "") -> str:
     return fields[index] if index < len(fields) else default
 
@@ -131,7 +127,7 @@ def parse_block_file(data: bytes) -> list[dict[str, Any]]:
 def parse_tdxzs(data: bytes) -> list[dict[str, Any]]:
     """Parse ``tdxzs.cfg``/``tdxzs3.cfg``; unknown columns remain in ``fields``."""
     rows = []
-    for line in _text(data).splitlines():
+    for line in tdx_protocol.decode_text(data).splitlines():
         if not line or line.startswith("#"):
             continue
         fields = line.split("|")
@@ -145,7 +141,7 @@ def parse_tdxzs(data: bytes) -> list[dict[str, Any]]:
 def parse_spblock(data: bytes) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
-    for line in _text(data).splitlines():
+    for line in tdx_protocol.decode_text(data).splitlines():
         line = line.strip("\x00\r ")
         if not line:
             continue
@@ -162,7 +158,7 @@ def parse_spblock(data: bytes) -> list[dict[str, Any]]:
 def parse_tdxstat(data: bytes) -> list[dict[str, Any]]:
     """Parse ``tdxstat.cfg`` with documented fields plus all raw columns."""
     rows = []
-    for line in _text(data).splitlines():
+    for line in tdx_protocol.decode_text(data).splitlines():
         if not line or line.startswith("#"):
             continue
         fields = line.split("|")
@@ -182,7 +178,7 @@ def parse_tdxstat(data: bytes) -> list[dict[str, Any]]:
 def parse_tdxstat2(data: bytes) -> list[dict[str, Any]]:
     """Parse ``tdxstat2.cfg``; preserve unverified capital-flow columns raw."""
     rows = []
-    for line in _text(data).splitlines():
+    for line in tdx_protocol.decode_text(data).splitlines():
         if not line or line.startswith("#"):
             continue
         fields = line.split("|")
@@ -216,55 +212,53 @@ def parse_zhb_zip(data: bytes, *, max_uncompressed: int = MAX_ZIP_UNCOMPRESSED) 
     return out
 
 
-class TdxFilesClient(tdx_protocol.TdxClient):
-    """A standard-library TDX client for bounded server file downloads."""
+def file_size(client: tdx_protocol.TdxClient, filename: str) -> int:
+    size = parse_file_size(client._exchange(build_file_meta_request(filename)))
+    if size > MAX_FILE_SIZE:
+        raise TdxFileError(f"TDX file exceeds size cap: {size}")
+    return size
 
-    def file_size(self, filename: str) -> int:
-        size = parse_file_size(self._exchange(build_file_meta_request(filename)))
-        if size > MAX_FILE_SIZE:
-            raise TdxFileError(f"TDX file exceeds size cap: {size}")
-        return size
 
-    def _download_block(self, filename: str, size: int) -> bytes:
-        if size < 0 or size > MAX_FILE_SIZE:
-            raise TdxFileError("invalid TDX file size")
-        out = bytearray()
-        offset = 0
-        while offset < size:
-            requested = min(FILE_CHUNK_SIZE, size - offset)
-            chunk = parse_file_chunk(self._exchange(build_file_chunk_request(filename, offset, requested)))
-            if not chunk:
-                raise TdxFileError("TDX block file ended before advertised size")
-            out.extend(chunk)
-            offset += len(chunk)
-            if len(chunk) > requested:
-                raise TdxFileError("TDX block chunk exceeded request")
-        return bytes(out[:size])
+def _download_block(client: tdx_protocol.TdxClient, filename: str, size: int) -> bytes:
+    if size < 0 or size > MAX_FILE_SIZE:
+        raise TdxFileError("invalid TDX file size")
+    out = bytearray()
+    offset = 0
+    while offset < size:
+        requested = min(FILE_CHUNK_SIZE, size - offset)
+        chunk = parse_file_chunk(client._exchange(build_file_chunk_request(filename, offset, requested)))
+        if not chunk:
+            raise TdxFileError("TDX block file ended before advertised size")
+        out.extend(chunk)
+        offset += len(chunk)
+        if len(chunk) > requested:
+            raise TdxFileError("TDX block chunk exceeded request")
+    return bytes(out[:size])
 
-    def _download_report(self, filename: str) -> bytes:
-        out = bytearray()
-        offset = 0
-        while offset <= MAX_FILE_SIZE:
-            chunk = parse_file_chunk(self._exchange(build_report_file_request(filename, offset)))
-            if not chunk:
-                break
-            if len(out) + len(chunk) > MAX_FILE_SIZE:
-                raise TdxFileError("TDX report exceeds size cap")
-            out.extend(chunk)
-            offset += len(chunk)
-            if len(chunk) < FILE_CHUNK_SIZE:
-                break
-        return bytes(out)
+def _download_report(client: tdx_protocol.TdxClient, filename: str) -> bytes:
+    out = bytearray()
+    offset = 0
+    while offset <= MAX_FILE_SIZE:
+        chunk = parse_file_chunk(client._exchange(build_report_file_request(filename, offset)))
+        if not chunk:
+            break
+        if len(out) + len(chunk) > MAX_FILE_SIZE:
+            raise TdxFileError("TDX report exceeds size cap")
+        out.extend(chunk)
+        offset += len(chunk)
+        if len(chunk) < FILE_CHUNK_SIZE:
+            break
+    return bytes(out)
 
-    def download(self, filename: str) -> bytes:
-        """Download one file; block/config files use the size-query path."""
-        if filename in BLOCK_FILES:
-            return self._download_block(filename, self.file_size(filename))
-        return self._download_report(filename)
+def download(client: tdx_protocol.TdxClient, filename: str) -> bytes:
+    """Download one file; block/config files use the size-query path."""
+    if filename in BLOCK_FILES:
+        return _download_block(client, filename, file_size(client, filename))
+    return _download_report(client, filename)
 
 
 __all__ = [
-    "BLOCK_FILES", "FILE_CHUNK_SIZE", "MAX_FILE_SIZE", "REPORT_FILES", "TdxFileError", "TdxFilesClient",
+    "BLOCK_FILES", "FILE_CHUNK_SIZE", "MAX_FILE_SIZE", "REPORT_FILES", "TdxFileError", "file_size", "download",
     "build_file_chunk_request", "build_file_meta_request", "build_file_size_request", "build_report_file_request",
     "parse_block_file",
     "parse_file_chunk", "parse_file_size", "parse_spblock", "parse_tdxstat", "parse_tdxstat2", "parse_tdxzs",

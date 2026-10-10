@@ -18,7 +18,7 @@ for candidate in (Path.cwd(), Path(__file__).resolve().parents[1] / "quant-servi
         sys.path.insert(0, str(candidate))
         break
 
-from app.datasources.sources import tdx_files  # noqa: E402
+from app.datasources.sources import tdx_files, tdx_protocol  # noqa: E402
 
 
 HOSTS = (
@@ -75,10 +75,10 @@ def main() -> int:
     for host, port in HOSTS:
         report: dict[str, object] = {"host": f"{host}:{port}", "files": []}
         try:
-            with tdx_files.TdxFilesClient(host, port, timeout_seconds=5.0) as client:
+            with tdx_protocol.TdxClient(host, port, timeout_seconds=5.0) as client:
                 for filename in (*BLOCK_NAMES, "zhb.zip"):
                     try:
-                        data = client.download(filename)
+                        data = tdx_files.download(client, filename)
                         report["files"].append(_summary(filename, data))
                     except Exception as error:  # noqa: BLE001 - per-file availability is evidence
                         report["files"].append({"file": filename, "error": type(error).__name__ + ": " + str(error)})

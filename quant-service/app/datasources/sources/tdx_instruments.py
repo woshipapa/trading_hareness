@@ -20,11 +20,11 @@ from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
 
 from . import tdx_protocol
+from .tdx_zhb_extras import bj_rows_from_zhb, parse_bj_mapping, parse_tdxbjmore
 
 
 SECURITY_COUNT = 0x044E
 SECURITY_LIST = 0x0450
-SECURITY_LIST_NEW = 0x044D
 SECURITY_PAGE_SIZE = 1000
 SECURITY_ROW_SIZE = 29
 
@@ -36,15 +36,13 @@ def build_security_count_request(market: int) -> bytes:
             + struct.pack("<H", market) + bytes.fromhex("75 c7 33 01"))
 
 
-def build_security_list_request(market: int, start: int = 0, count: int = SECURITY_PAGE_SIZE,
-                                *, new: bool = False) -> bytes:
+def build_security_list_request(market: int, start: int = 0, count: int = SECURITY_PAGE_SIZE) -> bytes:
     if market not in tdx_protocol.MARKETS.values() or start < 0 or count <= 0 or count > SECURITY_PAGE_SIZE:
         raise ValueError("invalid security-list bounds")
     # The legacy command has a fixed 1000-row page; ``count`` is retained in
     # the API for callers that page the final partial block.
-    command = SECURITY_LIST_NEW if new else SECURITY_LIST
     return (bytes.fromhex("0c 01 18 64 01 01 06 00 06 00")
-            + struct.pack("<H", command) + struct.pack("<HH", market, start))
+            + struct.pack("<H", SECURITY_LIST) + struct.pack("<HH", market, start))
 
 
 def parse_security_count(body: bytes) -> int:
@@ -55,10 +53,6 @@ def parse_security_count(body: bytes) -> int:
     if count > 100000:
         raise ValueError("security count is implausible")
     return count
-
-
-def _gbk(raw: bytes) -> str:
-    return raw.split(b"\x00", 1)[0].decode("gbk", "replace").strip()
 
 
 def parse_security_list(body: bytes, *, market: int | None = None) -> list[dict[str, Any]]:
@@ -77,7 +71,7 @@ def parse_security_list(body: bytes, *, market: int | None = None) -> list[dict[
             "<6sH8s4sBI4s", body, pos)
         pos += SECURITY_ROW_SIZE
         code = code_raw.decode("ascii", "ignore").rstrip("\x00")
-        row = {"market": market, "code": code, "name": _gbk(name_raw), "vol_unit": vol_unit,
+        row = {"market": market, "code": code, "name": tdx_protocol.decode_text(name_raw.split(b"\x00", 1)[0]).strip(), "vol_unit": vol_unit,
                "decimal_point": decimal_point, "pre_close_raw": pre_close_raw,
                "pre_close": pre_close_raw / (10 ** decimal_point) if decimal_point < 10 else None}
         rows.append(row)
@@ -228,55 +222,6 @@ def parse_index_bars(body: bytes, *, category: int = 9) -> list[dict[str, Any]]:
     return rows
 
 
-def parse_bj_mapping(data: bytes) -> dict[str, str]:
-    """Parse ``addedcode_bj.cfg``/``tdxbjmore.cfg`` in either delimiter style."""
-    mapping: dict[str, str] = {}
-    text = data.decode("gbk", "replace")
-    for line in text.splitlines():
-        codes = re.findall(r"(?<!\d)(\d{6})(?!\d)", line)
-        if len(codes) < 2:
-            continue
-        old, new = codes[0], codes[1]
-        if old.startswith(("43", "83", "87")) and new.startswith("92"):
-            mapping[old] = new
-        elif new.startswith(("43", "83", "87")) and old.startswith("92"):
-            mapping[new] = old
-    return mapping
-
-
-def parse_tdxbjmore(data: bytes) -> list[dict[str, Any]]:
-    """Parse ``tdxbjmore.cfg`` rows from ``zhb.zip``.
-
-    The current format is pipe-delimited, for example
-    ``44|920000|2|安徽凤凰|1|``.  Extra columns are retained for auditability.
-    """
-    rows: list[dict[str, Any]] = []
-    for raw_line in data.decode("gbk", "replace").splitlines():
-        line = raw_line.strip("\x00\r \t")
-        if not line or line.startswith("#"):
-            continue
-        fields = line.split("|")
-        if len(fields) < 4 or not re.fullmatch(r"\d{6}", fields[1].strip()):
-            continue
-        try:
-            market = int(fields[0])
-        except ValueError:
-            market = 2
-        rows.append({"market": market, "code": fields[1].strip(), "name": fields[3].strip(),
-                     "kind": fields[2].strip(), "source": "zhb_tdxbjmore", "fields": fields})
-    return rows
-
-
-def bj_rows_from_zhb(files: Mapping[str, bytes]) -> list[dict[str, Any]]:
-    """Build the BJ universe from zhb config, preferring tdxbjmore rows."""
-    raw = files.get("tdxbjmore.cfg", b"")
-    rows = parse_tdxbjmore(raw)
-    mapping = parse_bj_mapping(files.get("addedcode_bj.cfg", b""))
-    for row in rows:
-        row["old_codes"] = [old for old, new in mapping.items() if new == row["code"]]
-    return rows
-
-
 def normalize_bj_symbol(old: str, mapping: Mapping[str, str] | None = None) -> str:
     code = str(old).upper().replace(".BJ", "")
     if not re.fullmatch(r"\d{6}", code):
@@ -285,36 +230,28 @@ def normalize_bj_symbol(old: str, mapping: Mapping[str, str] | None = None) -> s
     return f"{new}.BJ"
 
 
-class TdxInstrumentClient(tdx_protocol.TdxClient):
-    """Restricted legacy-session client for security lists and index bars."""
+def security_count(client: tdx_protocol.TdxClient, market: int) -> int:
+    return parse_security_count(client._exchange(build_security_count_request(market)))
 
-    def __enter__(self) -> "TdxInstrumentClient":
-        self._socket = __import__("socket").create_connection((self.host, self.port), timeout=self.timeout)
-        self._exchange(tdx_protocol._SETUP_COMMANDS[0])
-        return self
 
-    def security_count(self, market: int) -> int:
-        return parse_security_count(self._exchange(build_security_count_request(market)))
+def security_list(client: tdx_protocol.TdxClient, market: int, *, page_size: int = SECURITY_PAGE_SIZE) -> list[dict[str, Any]]:
+    total = security_count(client, market)
+    rows: list[dict[str, Any]] = []
+    for start in range(0, total, page_size):
+        body = client._exchange(build_security_list_request(market, start, min(page_size, total - start)))
+        rows.extend(parse_security_list(body, market=market))
+    return rows
 
-    def security_list(self, market: int, *, use_new: bool = False, page_size: int = SECURITY_PAGE_SIZE) -> list[dict[str, Any]]:
-        if page_size <= 0 or page_size > SECURITY_PAGE_SIZE:
-            raise ValueError("invalid security-list page size")
-        total = self.security_count(market)
-        rows: list[dict[str, Any]] = []
-        for start in range(0, total, page_size):
-            body = self._exchange(build_security_list_request(market, start, min(page_size, total - start), new=use_new))
-            rows.extend(parse_security_list(body, market=market))
-        return rows
 
-    def index_bars(self, market: int, code: str, start: int = 0, count: int = 800) -> list[dict[str, Any]]:
-        return parse_index_bars(self._exchange(tdx_protocol.build_bars_request(9, market, code, start, count)))
+def index_bars(client: tdx_protocol.TdxClient, market: int, code: str, start: int = 0, count: int = 800) -> list[dict[str, Any]]:
+    return parse_index_bars(client._exchange(tdx_protocol.build_bars_request(9, market, code, start, count)))
 
 
 def type_counts(rows: Iterable[Mapping[str, Any]]) -> Counter[str]:
     return Counter(instrument_type(int(row.get("market", 0)), str(row.get("code", "")), str(row.get("name", ""))) for row in rows)
 
 
-__all__ = ["SECURITY_COUNT", "SECURITY_LIST", "SECURITY_LIST_NEW", "TdxInstrumentClient", "build_security_count_request",
+__all__ = ["SECURITY_COUNT", "SECURITY_LIST", "build_security_count_request",
            "build_security_list_request", "classify_instrument", "instrument_type", "normalize_bj_symbol",
-           "parse_bj_mapping", "parse_index_bars", "parse_security_count", "parse_security_list", "parse_tdxbjmore",
-           "bj_rows_from_zhb", "price_scale", "scale_quote", "type_counts"]
+           "parse_bj_mapping", "parse_tdxbjmore", "bj_rows_from_zhb", "parse_index_bars", "parse_security_count", "parse_security_list",
+           "security_count", "security_list", "index_bars", "price_scale", "scale_quote", "type_counts"]

@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
-from app.datasources.sources import tdx_instruments as ti  # noqa: E402
+from app.datasources.sources import tdx_instruments as ti, tdx_protocol  # noqa: E402
 
 REQUIRED = [(1, "999999"), (1, "880761"), (0, "399300"), (0, "510300"), (0, "127045"), (2, "920000")]
 
@@ -36,8 +36,8 @@ def _step(steps: dict[str, str], name: str, fn: Callable[[], Any], *, required: 
         return None
 
 
-def _with_client(host: str, port: int, fn: Callable[[ti.TdxInstrumentClient], Any]) -> Any:
-    with ti.TdxInstrumentClient(host, port) as client:
+def _with_client(host: str, port: int, fn: Callable[[tdx_protocol.TdxClient], Any]) -> Any:
+    with tdx_protocol.TdxClient(host, port, handshake_profile="login_one") as client:
         return fn(client)
 
 
@@ -50,7 +50,7 @@ def live(host: str, port: int, zhb_path: str | None) -> tuple[dict[str, object],
     counts: dict[str, int] = {}
     for market, label in ((0, "SZ"), (1, "SH"), (2, "BJ")):
         value = _step(steps, f"security_count_{label}",
-                      lambda market=market: _with_client(host, port, lambda c: c.security_count(market)))
+                      lambda market=market: _with_client(host, port, lambda c: ti.security_count(c, market)))
         if value is None:
             required_failed = True
         else:
@@ -63,7 +63,7 @@ def live(host: str, port: int, zhb_path: str | None) -> tuple[dict[str, object],
     for new, page in ((False, 1000), (False, 100), (True, 1000), (True, 100)):
         label = f"bj_list_{'044d' if new else '0450'}_page{page}"
         def variant(new=new, page=page) -> list[dict[str, Any]]:
-            return _with_client(host, port, lambda c: c.security_list(2, use_new=new, page_size=page))
+            return _with_client(host, port, lambda c: ti.security_list(c, 2, page_size=page))
         value = _step(steps, label, variant, required=False)
         bj_variants[label] = f"rows:{len(value)}" if value is not None else steps[label]
     result["bj_list_variants"] = bj_variants
@@ -71,7 +71,7 @@ def live(host: str, port: int, zhb_path: str | None) -> tuple[dict[str, object],
     lists: dict[str, list[dict[str, Any]]] = {}
     for market, label in ((0, "SZ"), (1, "SH")):
         value = _step(steps, f"security_list_{label}",
-                      lambda market=market: _with_client(host, port, lambda c: c.security_list(market)))
+                      lambda market=market: _with_client(host, port, lambda c: ti.security_list(c, market)))
         if value is None:
             required_failed = True
         else:
@@ -93,9 +93,9 @@ def live(host: str, port: int, zhb_path: str | None) -> tuple[dict[str, object],
     required_results: dict[str, dict[str, Any]] = {}
     for market, code in REQUIRED:
         def probe(market=market, code=code) -> dict[str, Any]:
-            def do(c: ti.TdxInstrumentClient) -> dict[str, Any]:
+            def do(c: tdx_protocol.TdxClient) -> dict[str, Any]:
                 quote = c.quotes([(market, code)])
-                bars = c.index_bars(market, code, count=5) if code in {"999999", "880761", "399300", "510300"} else []
+                bars = ti.index_bars(c, market, code, count=5) if code in {"999999", "880761", "399300", "510300"} else []
                 if not quote:
                     raise RuntimeError("quote returned no rows")
                 if code in {"999999", "880761", "399300", "510300"} and not bars:

@@ -10,7 +10,6 @@ from app.datasources.sources.tdx_zhb_extras import (
     parse_industry_definitions,
     parse_industry_stock_references,
     parse_ipo_subscriptions,
-    parse_price_limit_ratios,
     parse_tipinfo,
 )
 
@@ -27,7 +26,6 @@ class TdxZhbExtrasTests(unittest.TestCase):
         ipo = parse_ipo_subscriptions(b"0|001381|20261019|11.20||||||||001381||||Name|\n", b"0|301149|123288|96000|9.16|0.01|371149|1000|20260929|0.0017||Bond\n")
         self.assertEqual(ipo["equity"][0]["price"], 11.2)
         self.assertEqual(ipo["other"][0]["bond_code"], "123288")
-        self.assertEqual(parse_price_limit_ratios(b"0|000301|A|0|000301|||10.00|1|1\n")[0]["limit_ratio_pct"], 10.0)
 
     def test_industry_tree_and_stock_reference(self):
         rows = parse_industry_definitions(b"#ZJHHY\nA|Agriculture\nA01|Farming\n")
