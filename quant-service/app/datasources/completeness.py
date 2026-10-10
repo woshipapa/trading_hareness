@@ -56,9 +56,6 @@ UNREGISTERED: dict[str, str] = {
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
                                "and security-list capabilities of P2 bind its sections",
-    "tdx_legacy_misc.fetch_index_momentum": "0x051c has no catalog capability; retain as research-only evidence",
-    "tdx_legacy_misc.fetch_ping": "0x0015 has no catalog capability; retain as transport evidence",
-    "tdx_legacy_misc.fetch_heartbeat": "0x0004 has no catalog capability; retain as transport evidence",
     "family:F10": "verified in the plan; company-profile capability arrives in P5",
     "family:finance": "verified in the plan; financial-statements capability arrives in P5",
     "family:files": "verified in the plan; server-file capabilities arrive in P4",

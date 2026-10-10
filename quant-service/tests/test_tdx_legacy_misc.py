@@ -53,11 +53,21 @@ class LegacyMiscTests(unittest.TestCase):
         self.assertEqual(len(rows), 81)
         self.assertEqual(client.requests, [(0, 80), (80, 80)])
 
-    def test_all_a_snapshot_returns_tuple_with_rows_and_warnings(self):
-        client = FakeClient()
-        rows, warnings = legacy._all_a_snapshot(client)
-        self.assertIsInstance(rows, list)
-        self.assertIsInstance(warnings, dict)
+    def test_a_request_never_asks_for_more_than_80_rows(self):
+        start, count = struct.unpack_from("<HH", legacy.build_quotes_list_request(6, 0, 0, 200), 16)
+        self.assertEqual((start, count), (0, 80))
+
+    def test_rows_project_onto_the_canonical_snapshot(self):
+        from app.datasources.catalog import bindings_for
+        from app.datasources.contracts import UNSUPPORTED
+        from app.datasources.resolver import _normalise_rows
+        binding = next(item for item in bindings_for("quote.all_a_snapshot", states=(UNSUPPORTED,)) if item.source == "tdx_public")
+        rows, _warnings = legacy._all_a_snapshot(FakeClient())
+        projected = _normalise_rows(rows, binding)
+        self.assertTrue(projected.canonical)
+        self.assertEqual(projected.rows[0]["volume"], rows[0]["volume_lots"] * 100, "lots to canonical shares")
+        self.assertEqual(projected.rows[0]["turnover"], rows[0]["amount"])
+        self.assertTrue(projected.rows[0]["symbol"].endswith((".SZ", ".SH", ".BJ")))
 
     def test_all_a_snapshot_drops_price_le_0_rows(self):
         # Custom client that returns price <= 0 on alternating rows (finding 3)
@@ -114,13 +124,6 @@ class LegacyMiscTests(unittest.TestCase):
             legacy.parse_quotes_list(b"\x00")
         with self.assertRaises(tdx_protocol.TdxProtocolError):
             legacy.parse_index_info(b"\x00" * 16)
-
-    def test_snapshot_adapter_runs_sweep_not_mock_call(self):
-        # Snapshot adapter test must run real sweep with fake client (finding 10)
-        client = FakeClient()
-        rows, warnings = legacy._all_a_snapshot(client)
-        self.assertGreater(len(rows), 0)
-        self.assertIsInstance(warnings, dict)
 
     def test_snapshot_adapter_coverage_is_none(self):
         # Coverage should be None, not 1.0 (finding 2)

@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import struct
+from datetime import datetime, timezone
 from typing import Any
 
 from ..contracts import CapabilityEvidence
 from . import tdx_protocol
 from .tdx_protocol import _code
+
+#: 0x054b gives no total up front, so the sweep ends on a short page. This cap (9,600 rows) sits far above
+#: the ~5,600 A shares of 2026 (delta-2 D1) and only stops a host that keeps answering full pages.
+MAX_SNAPSHOT_PAGES = 120
+_EXCHANGE = {market: exchange for exchange, market in tdx_protocol.MARKETS.items()}
 
 
 KMSG_INDEXINFO = 0x051D
@@ -96,6 +102,7 @@ def _parse_quote_item(data: bytes, pos: int) -> tuple[dict[str, Any], int]:
     pre_close = (base + pre_diff) / 100
     price = base / 100
     return {
+        "symbol": f"{code}.{_EXCHANGE[market]}",
         "market": market,
         "code": code,
         "active1": active1,
@@ -225,10 +232,8 @@ def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]
     rows: list[dict[str, Any]] = []
     warnings: dict[str, Any] = {}
     total_no_trade = 0
-    # Cap loop at ceil(5578 / 80) + 1 = 71 pages (finding 4, delta-2 D1)
-    max_pages = 71
     page_count = 0
-    while page_count < max_pages:
+    while page_count < MAX_SNAPSHOT_PAGES:
         request = build_quotes_list_request(QUOTE_CATEGORIES["all_a"], QUOTE_SORT_TYPES["code"], len(rows))
         page, no_trade_count = parse_quotes_list(client._exchange(request))
         rows.extend(page)
@@ -236,8 +241,8 @@ def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]
         page_count += 1
         if len(page) < RANKING_PAGE_SIZE:
             break
-    if page_count >= max_pages:
-        raise tdx_protocol.TdxProtocolError(f"0x054b all_a snapshot exceeded page cap {max_pages}")
+    if page_count >= MAX_SNAPSHOT_PAGES:
+        raise tdx_protocol.TdxProtocolError(f"0x054b all_a snapshot did not end within {MAX_SNAPSHOT_PAGES} pages")
     if total_no_trade > 0:
         warnings["no_trade_rows"] = total_no_trade
     return rows, warnings
@@ -249,8 +254,10 @@ async def fetch_all_a_snapshot() -> CapabilityEvidence:
     warnings = [f"tdx_host={host}"]
     if warnings_dict.get("no_trade_rows", 0) > 0:
         warnings.append(f"no_trade_rows={warnings_dict['no_trade_rows']}")
-    # Coverage is None until security list (I1) gives denominator (finding 2)
-    return CapabilityEvidence(rows, coverage=None, warnings=tuple(warnings))
+    # Coverage stays None until the security list (I1) gives the denominator.
+    observed = datetime.now(timezone.utc)
+    return CapabilityEvidence(rows, coverage=None, available_at_min=observed, available_at_max=observed,
+                              warnings=tuple(warnings))
 
 
 async def fetch_index_overview(symbol: str = "999999.SH") -> CapabilityEvidence:
@@ -263,8 +270,9 @@ async def fetch_index_overview(symbol: str = "999999.SH") -> CapabilityEvidence:
         return row
 
     row, host = await tdx_protocol.call(_fetch_index, handshake_profile="login_one")
-    # Coverage is None until security list (I1) gives denominator (finding 2)
-    return CapabilityEvidence([row], coverage=None, warnings=(f"tdx_host={host}",))
+    observed = datetime.now(timezone.utc)
+    return CapabilityEvidence([row], coverage=None, available_at_min=observed, available_at_max=observed,
+                              warnings=(f"tdx_host={host}",))
 
 
 
