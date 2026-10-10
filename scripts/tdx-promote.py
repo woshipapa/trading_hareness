@@ -5,12 +5,13 @@
     tdx-promote.py apply <evidence.json>...
 
 ``check`` runs ``python -m app.datasources probe`` for the binding, on this machine (``mac``) or inside the owner
-quant-research container over ssh (``owner``: a read-only ``docker exec`` reached with the LONGHU_SSH_* settings; the
-container's image must have the probe command). When the binding's BindingSpec declares agreement tolerances it probes
-each reference source the same way, with the same parameters, and compares the sampled rows pair by pair, field by field,
-with both sides projected as the resolver projects them (field_map, unit_factors). It writes
-scripts/data/tdx_promote_<capability>_<source>_<date>_<egress>.json (date in Asia/Shanghai) with every input, the probes,
-the comparison and one verdict per gate, and exits 0 whatever the verdicts:
+quant-research container over ssh (``owner``: a read-only ``docker exec`` reached with the LONGHU_SSH_* settings). The
+exec runs the code baked into the image: a code-only overlay (QUANT_HOTFIX_ENABLED) is on the service's PYTHONPATH, not
+on the exec's, so the image itself needs the probe command and the adapters. When the binding's BindingSpec declares
+agreement tolerances, ``check`` probes each reference source the same way, with the same parameters, and compares the
+sampled rows pair by pair, field by field, with both sides projected as the resolver projects them (field_map,
+unit_factors). It writes scripts/data/tdx_promote_<capability>_<source>_<date>_<egress>.json (date in Asia/Shanghai) with
+every input, the probes, the comparison and one verdict per gate, and exits 0 whatever the verdicts:
 
     owner_egress  the probe ran inside the owner container and answered with rows
     agreement     every declared tolerance holds (nothing to hold when none is declared)
