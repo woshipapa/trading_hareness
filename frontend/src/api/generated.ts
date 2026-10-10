@@ -1615,6 +1615,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasources/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Datasource Catalog */
+        get: operations["datasource_catalog_api_v1_datasources_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasources/capabilities/{capability}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Datasource Capability */
+        get: operations["datasource_capability_api_v1_datasources_capabilities__capability__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasources/read/{source}/{capability}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Datasource Read */
+        get: operations["datasource_read_api_v1_datasources_read__source___capability__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/intraday/outcomes/latest": {
         parameters: {
             query?: never;
@@ -3737,6 +3788,59 @@ export interface components {
              */
             separator: string;
         };
+        /** BindingResponse */
+        BindingResponse: {
+            /** Source */
+            source: string;
+            /** Capability */
+            capability: string;
+            /** Priority */
+            priority: number;
+            /** Status */
+            status: string;
+            /** Store */
+            store?: string | null;
+            /** Adapter */
+            adapter?: string | null;
+            /** History */
+            history: string;
+            /** Limits */
+            limits: string;
+            /** Notes */
+            notes: string;
+            /** Decision Eligible */
+            decision_eligible: boolean;
+            spec?: components["schemas"]["BindingSpecResponse"] | null;
+        };
+        /** BindingSpecResponse */
+        BindingSpecResponse: {
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Field Map */
+            field_map: {
+                [key: string]: unknown;
+            };
+            /** Unit Factors */
+            unit_factors: {
+                [key: string]: unknown;
+            };
+            /** Paging */
+            paging?: unknown | null;
+            /** Max Batch */
+            max_batch?: number | null;
+            /** Limits */
+            limits: {
+                [key: string]: unknown;
+            };
+            /** Time Semantics */
+            time_semantics: string;
+            /** Handshake Profile */
+            handshake_profile?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** BoardResearchRunRequest */
         BoardResearchRunRequest: {
             /** Trade Date */
@@ -3832,6 +3936,79 @@ export interface components {
             position_weight_pct?: number | string | null;
             /** Metadata */
             metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /** CapabilityDetailResponse */
+        CapabilityDetailResponse: {
+            /** Key */
+            key: string;
+            /** Category */
+            category: string;
+            /** Label */
+            label: string;
+            /** Grain */
+            grain: string;
+            /** Scope */
+            scope: string;
+            /** Fields */
+            fields: string[];
+            /** Schema */
+            schema: {
+                [key: string]: unknown;
+            }[];
+            /** Time Semantics */
+            time_semantics: string;
+            /** Description */
+            description: string;
+            /** Bindings */
+            bindings: components["schemas"]["BindingResponse"][];
+            /** Evidence Locations */
+            evidence_locations: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** CapabilityResponse */
+        CapabilityResponse: {
+            /** Key */
+            key: string;
+            /** Category */
+            category: string;
+            /** Label */
+            label: string;
+            /** Grain */
+            grain: string;
+            /** Scope */
+            scope: string;
+            /** Fields */
+            fields: string[];
+            /** Schema */
+            schema: {
+                [key: string]: unknown;
+            }[];
+            /** Time Semantics */
+            time_semantics: string;
+            /** Description */
+            description: string;
+            /** Bindings */
+            bindings: components["schemas"]["BindingResponse"][];
+        };
+        /** CatalogResponse */
+        CatalogResponse: {
+            /** Version */
+            version: string;
+            /** Sources */
+            sources: components["schemas"]["DataSourceResponse"][];
+            /** Capabilities */
+            capabilities: components["schemas"]["CapabilityResponse"][];
+            /** Taxonomies */
+            taxonomies: components["schemas"]["TaxonomyResponse"][];
+            /** Retired */
+            retired: {
+                [key: string]: unknown;
+            }[];
+            /** Non Sector Groups */
+            non_sector_groups: {
                 [key: string]: unknown;
             };
         };
@@ -3964,6 +4141,76 @@ export interface components {
             source: string;
             /** Available At */
             available_at?: string | null;
+        };
+        /** DataSourceResponse */
+        DataSourceResponse: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Upstream */
+            upstream: string;
+            /** License */
+            license: string;
+            /** Protocol */
+            protocol: string;
+            /** Cost */
+            cost: string;
+            /** Module */
+            module: string;
+            /** Credential Env */
+            credential_env: string[];
+            /** Risks */
+            risks: string;
+            /** Deploy */
+            deploy: string;
+            /** Capabilities */
+            capabilities: string[];
+        };
+        /** DatasourceReadResponse */
+        DatasourceReadResponse: {
+            /** Source */
+            source: string;
+            /** Capability */
+            capability: string;
+            /** Status */
+            status: string;
+            /** Decision Eligible */
+            decision_eligible: boolean;
+            /** Decision Eligible Reason */
+            decision_eligible_reason: string;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Finished At
+             * Format: date-time
+             */
+            finished_at: string;
+            /** Coverage */
+            coverage: number | null;
+            /** Effective At Min */
+            effective_at_min: unknown | null;
+            /** Effective At Max */
+            effective_at_max: unknown | null;
+            /** Available At Min */
+            available_at_min: unknown | null;
+            /** Available At Max */
+            available_at_max: unknown | null;
+            /** Warnings */
+            warnings: string[];
+            /** Rows */
+            rows: {
+                [key: string]: unknown;
+            }[];
+            /** Truncated */
+            truncated: boolean;
         };
         /** EastmoneyBoardMemberSyncRequest */
         EastmoneyBoardMemberSyncRequest: {
@@ -4738,6 +4985,21 @@ export interface components {
              */
             persist: boolean;
         };
+        /** TaxonomyResponse */
+        TaxonomyResponse: {
+            /** Key */
+            key: string;
+            /** Source */
+            source: string;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Preference */
+            preference: number;
+            /** Notes */
+            notes: string;
+        };
         /**
          * TeacherReviewPackImportRequest
          * @description Import one reviewed analyst/teacher pack (schema ``teacher-review-pack/v1``).
@@ -4938,6 +5200,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /**
          * WatchlistMainWaveResearchRequest
@@ -7824,6 +8090,102 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    datasource_catalog_api_v1_datasources_catalog_get: {
+        parameters: {
+            query?: {
+                source?: string | null;
+                category?: string | null;
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    datasource_capability_api_v1_datasources_capabilities__capability__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                capability: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    datasource_read_api_v1_datasources_read__source___capability__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source: string;
+                capability: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourceReadResponse"];
                 };
             };
             /** @description Validation Error */
