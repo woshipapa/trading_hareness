@@ -27,6 +27,7 @@ class TdxFinanceError(Exception):
 
 
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
+REPORT_CHUNK_BYTES = 30000      # the longest 0x06b9 chunk asked for
 _HEADER = "<hI H 3L"
 _ITEM = "<6s1sL"
 
@@ -174,7 +175,7 @@ def parse_gpcw_zip(data: bytes, *, filename: str | None = None, max_uncompressed
         raise TdxFinanceError(f"GPCW ZIP format error: {error}") from error
 
 
-def build_report_file_request(filename: str, offset: int = 0, chunk_size: int = 30000) -> bytes:
+def build_report_file_request(filename: str, offset: int = 0, chunk_size: int = REPORT_CHUNK_BYTES) -> bytes:
     encoded = filename.encode("ascii")
     if len(encoded) > 100 or offset < 0 or chunk_size <= 0:
         raise ValueError("invalid report-file range")
@@ -182,41 +183,48 @@ def build_report_file_request(filename: str, offset: int = 0, chunk_size: int = 
     return bytes.fromhex("0c 12 34 00 00 00") + struct.pack("<HH", len(raw), len(raw)) + raw
 
 
-def parse_report_file(body: bytes) -> tuple[int, bytes]:
+def parse_report_file(body: bytes) -> bytes:
+    """One 0x06b9 reply: the ``<I`` length of this chunk, then the chunk; a zero length is the end of the file."""
     if len(body) < 4:
-        return 0, b""
-    size = struct.unpack_from("<I", body)[0]
-    return size, body[4:4 + size]
+        raise TdxFinanceError("TDX report-file reply is shorter than its length field")
+    (length,) = struct.unpack_from("<I", body)
+    if length > len(body) - 4:
+        raise TdxFinanceError(f"TDX report-file chunk is shorter than its declared length {length}")
+    return body[4:4 + length]
 
 
-def download_report_file(client: Any, filename: str, *, max_bytes: int = MAX_DOWNLOAD_BYTES) -> bytes:
+def download_report_file(client: tdx_protocol.TdxClient, filename: str, size: int, *,
+                         max_bytes: int = MAX_DOWNLOAD_BYTES) -> bytes:
+    """The ``size`` bytes of one server file, never a prefix of it.
+
+    ``size`` is what the server advertises in ``tdxfin/gpcw.txt``: a 0x06b9 reply carries only the length of its
+    own chunk, and report files have no size query.  A file over ``max_bytes`` is refused before the first
+    request; one that ends early, or runs past ``size``, raises.
+    """
+    if size > max_bytes:
+        raise TdxFinanceError(f"{filename}: advertised size {size} exceeds the {max_bytes}-byte cap")
     chunks: list[bytes] = []
     offset = 0
-    while offset < max_bytes:
-        size, chunk = parse_report_file(client._exchange(build_report_file_request(filename, offset)))
-        if not size:
-            break
-        if offset + size > max_bytes:
-            raise TdxFinanceError("TDX report exceeds download cap")
-        if len(chunk) < size:
-            raise TdxFinanceError("TDX report chunk shorter than declared size")
+    while offset < size:
+        requested = min(REPORT_CHUNK_BYTES, size - offset)
+        chunk = parse_report_file(client._exchange(build_report_file_request(filename, offset, requested)))
+        if not chunk:
+            raise TdxFinanceError(f"{filename} ended at byte {offset} of {size}")
+        if len(chunk) > requested:
+            raise TdxFinanceError(f"{filename}: the server sent {len(chunk)} bytes for a request of {requested}")
         chunks.append(chunk)
-        offset += size
+        offset += len(chunk)
     return b"".join(chunks)
 
 
-class TdxFinHistoryClient(tdx_protocol.TdxClient):
-    """One bounded connection for a manifest or a period ZIP."""
-
-    def report_file(self, filename: str, *, max_bytes: int = MAX_DOWNLOAD_BYTES) -> bytes:
-        return download_report_file(self, filename, max_bytes=max_bytes)
-
-    def gpcw(self, filename: str, manifest_entry: ManifestEntry | None = None) -> list[dict[str, Any]]:
-        payload = self.report_file("tdxfin/" + filename)
-        if manifest_entry:
-            if not verify_manifest_entry(manifest_entry, payload):
-                raise TdxFinanceError(f"GPCW manifest mismatch for {filename}")
-        return parse_gpcw_zip(payload, filename=filename)
+def gpcw(client: tdx_protocol.TdxClient, filename: str, entry: ManifestEntry) -> list[dict[str, Any]]:
+    """Download one period ZIP against its manifest entry, check size and MD5, and parse it."""
+    if entry.filename != filename:
+        raise TdxFinanceError(f"manifest entry {entry.filename} is not the entry of {filename}")
+    payload = download_report_file(client, "tdxfin/" + filename, entry.size)
+    if not verify_manifest_entry(entry, payload):
+        raise TdxFinanceError(f"GPCW manifest mismatch for {filename}")
+    return parse_gpcw_zip(payload, filename=filename)
 
 
 def parse_tipinfo(data: bytes) -> list[dict[str, Any]]:
@@ -243,7 +251,7 @@ def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cum
     return previous_fy + current_cumulative - prior_cumulative
 
 
-__all__ = ["GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "TdxFinHistoryClient",
-           "build_report_file_request", "download_report_file", "gpcw_field_name", "gpcw_field_unit", "manifest_changes",
-           "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "parse_report_file", "parse_tipinfo",
-           "ttm_from_cumulative", "verify_manifest_entry"]
+__all__ = ["GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "REPORT_CHUNK_BYTES", "TdxFinanceError",
+           "build_report_file_request", "download_report_file", "gpcw", "gpcw_field_name", "gpcw_field_unit",
+           "manifest_changes", "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest",
+           "parse_report_file", "parse_tipinfo", "ttm_from_cumulative", "verify_manifest_entry"]

@@ -54,9 +54,10 @@ UNREGISTERED: dict[str, str] = {
     "tdx_protocol.TdxClient.bars": "legacy bar command 0x052d; bound in P2 after the instrument model (delta D2)",
     "tdx_protocol.TdxClient.ticks": "transport for ticks.fetch_tdx_ticks, which is the bound reader",
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
-    "tdx_fin_history.TdxFinHistoryClient.report_file": "gpcw backfill transport: period files of ~5 MB for all stocks, fetched by a backfill job with manifest md5 change detection (delta-1 D8), never the request path",
-    "tdx_fin_history.download_report_file": "gpcw backfill transport: period files of ~5 MB for all stocks, fetched by a backfill job with manifest md5 change detection (delta-1 D8), never the request path",
-    "tdx_fin_history.TdxFinHistoryClient.gpcw": "period files of ~5 MB for all stocks; a backfill job with manifest md5 change detection (delta-1 D8), never the request path",
+    "tdx_fin_history.download_report_file": "sized transport for the gpcw period files (manifest size and md5 change detection, "
+                                            "delta-1 D8); the planned backfill job calls it, never the request path",
+    "tdx_fin_history.gpcw": "downloads one gpcw period ZIP against its manifest entry and parses it; for the planned "
+                            "backfill job (delta-1 D8), never the request path",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
                                "and security-list capabilities of P2 bind its sections",
     "tdx_instruments.security_count": "transport behind the bound fetch_security_list (0x044e count per market)",

@@ -10,8 +10,9 @@ from pathlib import Path
 from unittest import mock
 
 from app.datasources.sources.tdx_fin_history import (
-    ManifestEntry, TdxFinanceError, gpcw_field_unit, manifest_changes, normalize_report_period,
-    parse_gpcw_dat, parse_gpcw_zip, parse_manifest, parse_tipinfo, ttm_from_cumulative, verify_manifest_entry,
+    ManifestEntry, TdxFinanceError, build_report_file_request, download_report_file, gpcw, gpcw_field_unit,
+    manifest_changes, normalize_report_period, parse_gpcw_dat, parse_gpcw_zip, parse_manifest, parse_report_file,
+    parse_tipinfo, ttm_from_cumulative, verify_manifest_entry,
 )
 
 VERIFY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "verify-tdx-fin-history.py"
@@ -37,6 +38,20 @@ def gpcw_zip(dat=GPCW_DAT, member="gpcw20241231.dat"):
 
 def manifest_line(filename, payload):
     return f"{filename},{hashlib.md5(payload).hexdigest()},{len(payload)}\n"
+
+
+class ReportHost:
+    """A TDX host serving one file over 0x06b9: every reply is the <I length of the slice asked for, then the slice."""
+
+    def __init__(self, content, *, send=lambda chunk, size: chunk, limit=20):
+        self.content, self.send, self.limit, self.requests = content, send, limit, []
+
+    def _exchange(self, request):
+        assert len(self.requests) < self.limit, "the downloader keeps asking"      # fail, do not hang
+        offset, size = struct.unpack_from("<II", request, 12)            # a request: header, opcode, offset, size, name
+        self.requests.append((request[20:120].rstrip(b"\0").decode("ascii"), offset, size))
+        chunk = self.send(self.content[offset:offset + size], size)
+        return len(chunk).to_bytes(4, "little") + chunk
 
 
 class TdxFinancialHistoryTests(unittest.TestCase):
@@ -182,6 +197,90 @@ class GpcwZipTests(unittest.TestCase):
             parse_gpcw_zip(payload)
         with mock.patch("app.datasources.sources.tdx_fin_history.MAX_DOWNLOAD_BYTES", len(payload)):
             self.assertEqual(len(parse_gpcw_zip(payload)), 1)
+
+
+class ReportFileDownloadTests(unittest.TestCase):
+    FILE = bytes(range(256)) * 274           # 70,144 bytes
+
+    def test_the_request_is_the_documented_0x06b9_frame(self):
+        self.assertEqual(
+            build_report_file_request("tdxfin/gpcw.txt", 30000, 8574).hex(),
+            "0c1234000000" "6e00" "6e00" "b906" "30750000" "7e210000" "74647866696e2f677063772e747874" + "00" * 85)
+
+    def test_a_reply_is_its_declared_length_and_a_zero_length_is_the_end(self):
+        self.assertEqual(parse_report_file(bytes.fromhex("03000000" "616263" "6a756e6b")), b"abc")
+        self.assertEqual(parse_report_file(bytes.fromhex("00000000")), b"")
+        for label, body in {"no length": bytes.fromhex("030000"), "chunk cut short": bytes.fromhex("05000000" "616263")}.items():
+            with self.subTest(label), self.assertRaises(TdxFinanceError):
+                parse_report_file(body)
+
+    def test_the_whole_file_is_fetched_in_chunks_of_at_most_30000_bytes(self):
+        host = ReportHost(self.FILE)
+        self.assertEqual(download_report_file(host, "tdxfin/x.zip", len(self.FILE)), self.FILE)
+        self.assertEqual([(offset, size) for _, offset, size in host.requests],
+                         [(0, 30000), (30000, 30000), (60000, 10144)])
+        self.assertEqual({name for name, _, _ in host.requests}, {"tdxfin/x.zip"})
+
+    def test_a_server_that_returns_shorter_chunks_is_followed_from_where_it_stopped(self):
+        host = ReportHost(self.FILE, send=lambda chunk, size: chunk[:20000])
+        self.assertEqual(download_report_file(host, "tdxfin/x.zip", len(self.FILE)), self.FILE)
+        self.assertEqual([offset for _, offset, _ in host.requests], [0, 20000, 40000, 60000])
+
+    def test_a_file_over_the_cap_is_refused_before_anything_is_downloaded(self):
+        host = ReportHost(bytes(102_400))
+        with self.assertRaisesRegex(TdxFinanceError, "exceeds the 60000-byte cap"):
+            download_report_file(host, "tdxfin/x.zip", 102_400, max_bytes=60_000)
+        self.assertEqual(host.requests, [])
+        # Exactly at the cap is allowed, and the whole file comes back, not 60,000 bytes of a longer one.
+        self.assertEqual(len(download_report_file(ReportHost(bytes(60_000)), "tdxfin/x.zip", 60_000, max_bytes=60_000)), 60_000)
+
+    def test_a_file_that_ends_before_its_advertised_size_raises(self):
+        host = ReportHost(self.FILE[:50_000])
+        with self.assertRaisesRegex(TdxFinanceError, "ended at byte 50000 of 70144"):
+            download_report_file(host, "tdxfin/x.zip", len(self.FILE))
+        self.assertEqual(len(host.requests), 3)
+
+    def test_a_server_that_sends_more_than_it_was_asked_for_raises(self):
+        host = ReportHost(self.FILE, send=lambda chunk, size: self.FILE[:size + 1])
+        with self.assertRaisesRegex(TdxFinanceError, "sent 30001 bytes for a request of 30000"):
+            download_report_file(host, "tdxfin/x.zip", len(self.FILE))
+
+    def test_a_reply_shorter_than_its_declared_length_raises(self):
+        host = ReportHost(self.FILE)
+        host._exchange = lambda request: bytes.fromhex("10270000") + b"x" * 100       # declares 10,000, carries 100
+        with self.assertRaisesRegex(TdxFinanceError, "shorter than its declared length 10000"):
+            download_report_file(host, "tdxfin/x.zip", len(self.FILE))
+
+    def test_an_empty_file_is_empty_without_a_request(self):
+        host = ReportHost(b"")
+        self.assertEqual(download_report_file(host, "tdxfin/x.zip", 0), b"")
+        self.assertEqual(host.requests, [])
+
+
+class GpcwPeriodTests(unittest.TestCase):
+    def entry_and_host(self, filename="gpcw20241231.zip"):
+        payload = gpcw_zip()
+        return ManifestEntry(filename, hashlib.md5(payload).hexdigest(), len(payload)), ReportHost(payload)
+
+    def test_the_period_zip_is_downloaded_checked_and_parsed(self):
+        entry, host = self.entry_and_host()
+        rows = gpcw(host, "gpcw20241231.zip", entry)
+        self.assertEqual([(row["code"], row["report_period"]) for row in rows], [("600519", "2024-12-31")])
+        self.assertEqual({name for name, _, _ in host.requests}, {"tdxfin/gpcw20241231.zip"})
+
+    def test_a_download_that_does_not_match_its_manifest_md5_is_rejected(self):
+        entry, host = self.entry_and_host()
+        tampered = ManifestEntry(entry.filename, "0" * 32, entry.size)
+        with self.assertRaisesRegex(TdxFinanceError, "manifest mismatch for gpcw20241231.zip"):
+            gpcw(host, "gpcw20241231.zip", tampered)
+
+    def test_the_manifest_entry_is_required_and_must_be_the_files_own(self):
+        entry, host = self.entry_and_host("gpcw20250630.zip")
+        with self.assertRaisesRegex(TdxFinanceError, "not the entry of gpcw20241231.zip"):
+            gpcw(host, "gpcw20241231.zip", entry)
+        self.assertEqual(host.requests, [])
+        with self.assertRaises(TypeError):
+            gpcw(host, "gpcw20241231.zip")
 
 
 class VerifyCacheScriptTests(unittest.TestCase):

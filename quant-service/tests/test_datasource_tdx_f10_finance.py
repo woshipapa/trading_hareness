@@ -5,7 +5,6 @@ from unittest import mock
 
 from app.datasources.sources import tdx_f10_finance as f10
 from app.datasources.sources import tdx_protocol
-from app.datasources.sources.tdx_fin_history import parse_report_file
 
 # The wire bytes below are written out by hand from the documented layouts (pytdx get_finance_info /
 # get_company_info_*), not packed with the parsers' own struct formats, so a wrong field order, offset or
@@ -196,9 +195,6 @@ class TdxF10Fixtures(unittest.TestCase):
         for body in (b"", CONTENT_BODIES[0][:11], CONTENT_BODIES[0][:12 + 13]):
             with self.subTest(length=len(body)), self.assertRaises(tdx_protocol.TdxProtocolError):
                 f10.parse_company_content(body)
-
-    def test_report_file_chunk_is_its_declared_length(self):
-        self.assertEqual(parse_report_file(bytes.fromhex("03000000" "616263" "6a756e6b")), (3, b"abc"))
 
 
 class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
