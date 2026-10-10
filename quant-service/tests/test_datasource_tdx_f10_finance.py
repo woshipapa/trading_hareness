@@ -168,6 +168,11 @@ class TdxF10Fixtures(unittest.TestCase):
         self.assertEqual(f10.parse_finance_info(FINANCE_BODY_SH)["market"], 1)
         self.assertEqual(f10.parse_finance_info(FINANCE_BODY_SH)["code"], "600519")
 
+    def test_the_code_ends_at_its_sixth_byte(self):
+        # float_shares (0x42c60001) starts with a non-zero byte, right after the code.
+        body = FINANCE_BODY[:9] + bytes.fromhex("0100c642") + FINANCE_BODY[13:]
+        self.assertEqual(f10.parse_finance_info(body)["code"], "000001")
+
     def test_finance_summary_rejects_a_reply_that_is_too_short(self):
         for length in (0, 8, len(FINANCE_BODY) - 1):
             with self.subTest(length=length), self.assertRaises(tdx_protocol.TdxProtocolError):

@@ -79,6 +79,20 @@ class TdxFinancialHistoryTests(unittest.TestCase):
             "总股本": "shares", "股东人数(户)": "count", "col9": None, "col100": None})
         self.assertEqual(len(row["field_units"]), 242)
 
+    def test_a_header_with_no_index_entries_has_no_rows(self):
+        header_only = bytes.fromhex("0100" "4fdb3401" "0000" "00000000" "10000000" "00000000")
+        self.assertEqual(parse_gpcw_dat(header_only), [])
+
+    def test_each_index_entry_points_at_its_own_record(self):
+        dat = bytes.fromhex(
+            "0100" "4fdb3401" "0200" "00000000" "08000000" "00000000"      # two entries, two floats per record
+            "303030303031" "00" "2a000000"                                  # "000001", record at 42
+            "363030353139" "00" "32000000"                                  # "600519", record at 50
+            "0000803f" "00000040"                                           # 1.0, 2.0
+            "00004040" "00008040")                                          # 3.0, 4.0
+        self.assertEqual([(row["code"], row["raw_values"]) for row in parse_gpcw_dat(dat)],
+                         [("000001", (1.0, 2.0)), ("600519", (3.0, 4.0))])
+
     def test_the_period_falls_back_to_the_header_date_without_a_file_name(self):
         self.assertEqual(parse_gpcw_dat(GPCW_DAT)[0]["report_period"], "2024-12-31")
 
@@ -224,6 +238,18 @@ class ReportFileDownloadTests(unittest.TestCase):
         self.assertEqual(
             build_report_file_request("tdxfin/gpcw.txt", 30000, 8574).hex(),
             "0c1234000000" "6e00" "6e00" "b906" "30750000" "7e210000" "74647866696e2f677063772e747874" + "00" * 85)
+
+    def test_the_request_defaults_to_the_start_of_the_file_and_a_full_chunk(self):
+        self.assertEqual(
+            build_report_file_request("tdxfin/gpcw.txt").hex(),
+            "0c1234000000" "6e00" "6e00" "b906" "00000000" "30750000" "74647866696e2f677063772e747874" + "00" * 85)
+
+    def test_the_request_refuses_what_does_not_fit_its_fields(self):
+        self.assertEqual(len(build_report_file_request("a" * 100, 0, 1)), 6 + 4 + 110)       # a 100-byte name fits
+        for label, args in {"name over 100 bytes": ("a" * 101, 0, 1), "negative offset": ("tdxfin/x", -1, 1),
+                            "empty chunk": ("tdxfin/x", 0, 0)}.items():
+            with self.subTest(label), self.assertRaises(ValueError):
+                build_report_file_request(*args)
 
     def test_a_reply_is_its_declared_length_and_a_zero_length_is_the_end(self):
         self.assertEqual(parse_report_file(bytes.fromhex("03000000" "616263" "6a756e6b")), b"abc")

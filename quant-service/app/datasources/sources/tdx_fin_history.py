@@ -179,7 +179,7 @@ def build_report_file_request(filename: str, offset: int = 0, chunk_size: int = 
     encoded = filename.encode("ascii")
     if len(encoded) > 100 or offset < 0 or chunk_size <= 0:
         raise ValueError("invalid report-file range")
-    raw = struct.pack("<H2I100s", 0x06B9, offset, chunk_size, encoded.ljust(100, b"\0"))
+    raw = struct.pack("<H2I100s", 0x06B9, offset, chunk_size, encoded)
     return bytes.fromhex("0c 12 34 00 00 00") + struct.pack("<HH", len(raw), len(raw)) + raw
 
 
