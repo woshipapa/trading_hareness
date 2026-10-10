@@ -3,16 +3,34 @@ import importlib.util
 import io
 import json
 import socket
+import sys
 import tempfile
+import types
 import unittest
 from datetime import date
 from pathlib import Path
 from unittest import mock
 
+class FreeProviderError(RuntimeError):
+    pass
+
+
+# CI installs only pytest and the real reader needs httpx, so the script is loaded against a stand-in for its module.
+READER_NAME = "app.free_market_providers"
+READER = types.ModuleType(READER_NAME)
+READER.FreeProviderError, READER.cninfo_announcements = FreeProviderError, None
 SCRIPT = Path(__file__).with_name("probe-tdx-disclosure-timing.py")
 SPEC = importlib.util.spec_from_file_location("probe_tdx_disclosure_timing", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(MODULE)
+REAL_READER = sys.modules.get(READER_NAME)
+sys.modules[READER_NAME] = READER
+try:
+    SPEC.loader.exec_module(MODULE)
+finally:
+    if REAL_READER is None:
+        del sys.modules[READER_NAME]
+    else:
+        sys.modules[READER_NAME] = REAL_READER
 
 START = 1000.0
 HOST = "1.2.3.4:7709/login_one"
@@ -83,7 +101,7 @@ class DisclosureTimingTests(unittest.TestCase):
         async def cninfo(symbol, start, end, *, page_size=30, max_pages=3):
             calls.append((symbol, start, end, max_pages))
             if symbol == "000002.SZ":
-                raise MODULE.FreeProviderError("rate_limited:cninfo_free")
+                raise FreeProviderError("rate_limited:cninfo_free")
             title = "平安银行2026年第三季度报告" if symbol == "000001.SZ" else "2026年半年度报告摘要"
             return [{"title": title, "published_at": "2026-10-11T16:00:00+00:00"},
                     {"title": "关于召开股东会的通知", "published_at": "2026-10-12T02:30:00+00:00"}]
