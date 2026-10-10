@@ -3161,6 +3161,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/temperature/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Market Temperature Daily
+         * @description Decision 0013: the stored daily sentiment temperature, oldest first, with its components.
+         */
+        get: operations["market_temperature_daily_api_v1_market_temperature_daily_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/temperature/intraday": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Market Temperature Intraday
+         * @description Decision 0013: the five-minute temperature of a session; the one in progress is computed now.
+         */
+        get: operations["market_temperature_intraday_api_v1_market_temperature_intraday_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasources/board": {
         parameters: {
             query?: never;
@@ -10784,6 +10824,73 @@ export interface operations {
                 trade_date: string;
                 symbols: string;
                 fields?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    market_temperature_daily_api_v1_market_temperature_daily_get: {
+        parameters: {
+            query?: {
+                days?: number;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    market_temperature_intraday_api_v1_market_temperature_intraday_get: {
+        parameters: {
+            query?: {
+                trade_date?: string | null;
             };
             header?: never;
             path?: never;
