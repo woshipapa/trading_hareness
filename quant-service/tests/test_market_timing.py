@@ -79,6 +79,18 @@ class RefreshTests(unittest.TestCase):
         later = asyncio.run(timing.refresh(object(), last + timedelta(days=1), run_database=run_database, fetch=fetch))
         self.assertEqual(later["status"], "blocked")
 
+    def test_the_fetch_window_follows_days(self):
+        windows = []
+
+        async def fetch(start, end):
+            windows.append((end - start).days)
+            return {"bars": [], "errors": ["primary: no rows"]}
+
+        async def run_database(*_args, **_kwargs):
+            raise AssertionError("nothing to store")
+        result = asyncio.run(timing.refresh(object(), date(2099, 3, 4), run_database=run_database, fetch=fetch, days=1000))
+        self.assertEqual((windows, result["status"], result["stored"]), ([1000], "blocked", 0))
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

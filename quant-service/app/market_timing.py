@@ -17,10 +17,18 @@ The post-close stage ``market_timing`` does three things:
   mix in VOL5/VOL60;
 - replays the state across the window;
 - stores the last ``KEEP_SESSIONS`` readings as ``market_timing_daily``.
+
+    python -m app.market_timing --end 2026-10-09 [--days 1000 --keep 400] [--apply]
+
+``--days 1000 --keep 400`` backfills the whole history once; Fuyao's index
+history starts in 2024.
 """
 
 from __future__ import annotations
 
+import argparse
+import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 from statistics import fmean
@@ -103,9 +111,9 @@ def timing_states(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 async def refresh(database: Any, trade_date: date, *, run_database: Callable[..., Awaitable[Any]],
                   fetch: Callable[[date, date], Awaitable[dict[str, Any]]] | None = None,
-                  keep: int = KEEP_SESSIONS, apply: bool = True) -> dict[str, Any]:
+                  keep: int = KEEP_SESSIONS, apply: bool = True, days: int = FETCH_DAYS) -> dict[str, Any]:
     """Fetch, replay and store; ``completed`` only when the session itself has a state."""
-    fetched = await (fetch or fetch_index)(trade_date - timedelta(days=FETCH_DAYS), trade_date)
+    fetched = await (fetch or fetch_index)(trade_date - timedelta(days=days), trade_date)
     bars = [bar for bar in fetched["bars"] if bar["trade_date"] <= trade_date.isoformat()]
     readings = [{**reading, "version": VERSION, "research_only": True, "live_effect": "none"}
                 for reading in timing_states(bars)][-keep:]
@@ -123,5 +131,33 @@ async def refresh(database: Any, trade_date: date, *, run_database: Callable[...
     }
 
 
-__all__ = ["CAPABILITY", "INDEX_CODE", "VERSION", "fetch_index", "fuyao_index_bars", "refresh", "tencent_index_bars",
-           "timing_states"]
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="golden / silver finger state (decision 0013)")
+    parser.add_argument("--end", type=date.fromisoformat, required=True)
+    parser.add_argument("--days", type=int, default=FETCH_DAYS, help="calendar days fetched; 1000 for a backfill")
+    parser.add_argument("--keep", type=int, default=KEEP_SESSIONS)
+    parser.add_argument("--apply", action="store_true")
+    args = parser.parse_args(argv)
+
+    async def run() -> dict[str, Any]:
+        database = None
+        if args.apply:
+            from .database import Database
+            database = Database()
+            database.open()
+
+        async def run_database(function: Callable[..., Any], *values: Any, timeout_seconds: float) -> Any:
+            return await asyncio.wait_for(asyncio.to_thread(function, *values), timeout_seconds)
+        return await refresh(database, args.end, run_database=run_database, keep=args.keep, apply=args.apply,
+                             days=args.days)
+    result = asyncio.run(run())
+    print(json.dumps(result, ensure_ascii=False, default=str))
+    return 0 if result["status"] == "completed" else 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
+
+
+__all__ = ["CAPABILITY", "INDEX_CODE", "VERSION", "fetch_index", "fuyao_index_bars", "main", "refresh",
+           "tencent_index_bars", "timing_states"]

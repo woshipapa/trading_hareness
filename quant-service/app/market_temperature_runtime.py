@@ -15,10 +15,11 @@ The read joins two other series of the same sessions:
 
 The request path only reads stored rows; it never rescans the bars.
 
-    python -m app.market_temperature_runtime --end 2026-10-09 [--keep 400] [--apply]
+    python -m app.market_temperature_runtime --end 2026-10-09 [--keep 400 --lookback-days 700] [--apply]
 
-Without ``--apply`` it only prints the latest readings. ``--keep 400`` stores the
-whole history once (a backfill).
+Without ``--apply`` it only prints the latest readings. ``--keep 400
+--lookback-days 700`` stores the whole history once (a backfill: the bars start
+in 2025-01, and the first 60 sessions are warm-up).
 """
 
 from __future__ import annotations
@@ -59,10 +60,11 @@ def compute(connection: Any, end: date, *, lookback_days: int = LOOKBACK_DAYS) -
     return temperature_series(daily_rows(connection, end - timedelta(days=lookback_days), end))
 
 
-def refresh(database: Any, end: date, *, keep: int = KEEP_SESSIONS, apply: bool = True) -> dict[str, Any]:
+def refresh(database: Any, end: date, *, keep: int = KEEP_SESSIONS, apply: bool = True,
+            lookback_days: int = LOOKBACK_DAYS) -> dict[str, Any]:
     """Recompute and store the last ``keep`` readings; ``completed`` only when ``end`` itself has one."""
     with database.transaction() as connection:
-        readings = compute(connection, end)
+        readings = compute(connection, end, lookback_days=lookback_days)
     scored = [{**reading, "version": VERSION, "research_only": True, "live_effect": "none"}
               for reading in readings if reading["temperature"] is not None][-keep:]
     counts = derived_daily_readings.store(database, CAPABILITY, scored) if apply else {"stored": 0, "unchanged": 0}
@@ -123,13 +125,14 @@ def main(argv: list[str] | None = None, *, database: Any = None) -> int:
     parser = argparse.ArgumentParser(description="daily sentiment temperature (decision 0013)")
     parser.add_argument("--end", type=date.fromisoformat, required=True)
     parser.add_argument("--keep", type=int, default=KEEP_SESSIONS)
+    parser.add_argument("--lookback-days", type=int, default=LOOKBACK_DAYS)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
     if database is None:
         from .database import Database
         database = Database()
         database.open()
-    result = refresh(database, args.end, keep=args.keep, apply=args.apply)
+    result = refresh(database, args.end, keep=args.keep, apply=args.apply, lookback_days=args.lookback_days)
     print(json.dumps(result, ensure_ascii=False, default=str))
     return 0 if result["status"] == "completed" else 1
 

@@ -132,6 +132,13 @@ def daily_rows(connection: Any, start: date, end: date, *, index_symbol: str = I
     return result
 
 
+def sessions_between(connection: Any, start: date, end: date, *, index_symbol: str = INDEX_SYMBOL) -> list[date]:
+    rows = connection.execute("""SELECT trading_date FROM quant.canonical_bars_daily
+                                  WHERE symbol=%s AND trading_date BETWEEN %s AND %s ORDER BY trading_date""",
+                              (index_symbol, start, end)).fetchall()
+    return [dict(row)["trading_date"] for row in rows]
+
+
 def previous_session(connection: Any, day: date, *, index_symbol: str = INDEX_SYMBOL) -> date | None:
     row = connection.execute(PREVIOUS_SESSION_SQL, (index_symbol, day)).fetchone()
     return dict(row)["day"] if row else None
@@ -153,4 +160,4 @@ def session_limits(connection: Any, day: date) -> dict[str, tuple[float, float |
 
 
 __all__ = ["DAILY_SQL", "INDEX_SYMBOL", "LIMIT_TOLERANCE", "LIMITS_OK_SHARE", "PRIOR_SEALED_SQL", "STREAK_CTES",
-           "UNIT_RATIO", "daily_rows", "previous_session", "prior_streaks", "session_limits"]
+           "UNIT_RATIO", "daily_rows", "previous_session", "prior_streaks", "session_limits", "sessions_between"]

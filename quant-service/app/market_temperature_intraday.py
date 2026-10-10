@@ -25,10 +25,18 @@ is a gap, not a line. A finished session is stored after the close as
 ``market_temperature_intraday``, one reading holding its samples. The session
 in progress is computed on request, and each settled sample is kept in this
 process.
+
+    python -m app.market_temperature_intraday --start 2026-09-01 --end 2026-10-09 [--apply]
+
+backfills past sessions oldest first, so later ones can use the turnover
+profile of the earlier ones. A session takes about 15 s: its 49 minute
+documents and the 420-day daily history.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
 from statistics import fmean, median
@@ -37,7 +45,9 @@ from typing import Any
 from . import derived_daily_readings, minute_cross_section
 from .derived_daily_readings import CN_TZ
 from .market_temperature import TURNOVER_BASE, VERSION, band_of, components_of, history_for, score
-from .market_temperature_repository import LIMIT_TOLERANCE, LIMITS_OK_SHARE, daily_rows, prior_streaks, session_limits
+from .market_temperature_repository import (
+    LIMIT_TOLERANCE, LIMITS_OK_SHARE, daily_rows, prior_streaks, session_limits, sessions_between,
+)
 
 CAPABILITY = "market_temperature_intraday"
 STEP = timedelta(minutes=5)
@@ -220,5 +230,32 @@ def read(connection: Any, day: date | None = None) -> dict[str, Any]:
     return {**intraday_series(connection, day), "source": "live"}
 
 
-__all__ = ["CAPABILITY", "SAMPLE_TIMES", "aggregate", "daily_context", "intraday_series", "read", "refresh", "sample",
-           "share_profile"]
+def backfill(database: Any, start: date, end: date, *, apply: bool = True) -> list[dict[str, Any]]:
+    """``refresh`` for every session in ``[start, end]``, oldest first."""
+    with database.transaction() as connection:
+        days = sessions_between(connection, start, end)
+    return [refresh(database, day, apply=apply) for day in days]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="intraday sentiment temperature backfill (decision 0013)")
+    parser.add_argument("--start", type=date.fromisoformat, required=True)
+    parser.add_argument("--end", type=date.fromisoformat, required=True)
+    parser.add_argument("--apply", action="store_true")
+    args = parser.parse_args(argv)
+    from .database import Database
+    database = Database()
+    database.open()
+    results = backfill(database, args.start, args.end, apply=args.apply)
+    for result in results:
+        print(json.dumps({key: result[key] for key in ("trade_date", "status", "samples", "stored", "close_temperature")},
+                         ensure_ascii=False, default=str))
+    return 0 if results and all(result["status"] == "completed" for result in results) else 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
+
+
+__all__ = ["CAPABILITY", "SAMPLE_TIMES", "aggregate", "backfill", "daily_context", "intraday_series", "main", "read",
+           "refresh", "sample", "share_profile"]

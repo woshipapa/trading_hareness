@@ -131,6 +131,12 @@ class CloseAgreementTests(unittest.TestCase):
         stored = intraday.read(self.connection, day3)
         self.assertEqual((stored["source"], [item["share"] for item in stored["samples"]]), ("stored", [0.25, 1.0]))
 
+    def test_the_backfill_walks_the_sessions_oldest_first(self) -> None:
+        self._capture(self.DAYS[2], time(10, 0, 4), [_row(self.SEALER, 12.5, 12.1)])
+        results = intraday.backfill(self.database, self.DAYS[0], self.DAYS[2], apply=False)
+        self.assertEqual([item["trade_date"] for item in results], [day.isoformat() for day in self.DAYS])
+        self.assertEqual([item["samples"] for item in results], [0, 0, 1])
+
     def test_the_profile_needs_five_sessions(self) -> None:
         from app import derived_daily_readings
         day = date(2099, 4, 20)

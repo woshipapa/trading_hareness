@@ -177,3 +177,18 @@
    - **存储与读取**：盘后阶段 `market_temperature_intraday` 存下当天全部采样；进行中的交易日由 `GET /api/v1/market/temperature/intraday` 现算，已稳定的采样在进程内缓存。
 4. ~~金 / 银指回测与每日状态~~（V2；盘后阶段 `market_timing`，扶摇上证日线、整段失败时改用腾讯；与回测的 5468 个交易日逐日一致）；阴阳谱（站上 20 日线的股票占比）、两融：先回测，再决定是否展示；高度板已是温度分项（最高连板）
 5. ~~控制台图表~~：研究台“情绪温度”标签页——日线温度叠加上证、金银指红绿背景与金/银信号、冰点资金共振标记；分时温度（午休断开，今天每 5 分钟刷新）；日线与分时分项表；回测样本数与注意事项。四个指标已登记到指标注册表并有健康检查；边缘转发加了 `/api/research/market/temperature/daily` 与 `/intraday`。上线需要 owner 发布与 edge 控制台发布
+
+## 上线步骤
+
+owner 发布之后按顺序执行。这些步骤只写派生观测，不改表结构。命令在 owner 的 quant-research 容器里运行，由我们在发布窗口内执行（北京时间 09:00–15:00 不发布）。`<T>` 是最近一个交易日。
+
+1. **日线温度**：`python -m app.market_temperature_runtime --end <T> --keep 400 --lookback-days 700 --apply`。日线从 2025-01 开始，前 60 个交易日是预热期。
+2. **宽基 ETF 放量**：`python -m app.broad_etf_flow --end <T> --days 600 --keep 400 --apply`
+3. **金 / 银指**：`python -m app.market_timing --end <T> --days 1000 --keep 400 --apply`。扶摇的指数历史从 2024 年开始。
+4. **分时温度**：`python -m app.market_temperature_intraday --start <最早有分钟截面的交易日> --end <T> --apply`。每个交易日约 15 秒。要跑两遍，第二遍让较早的交易日也用上成交额占比曲线。
+5. **读回核对**：
+   - `GET /api/v1/market/temperature/daily?days=250` 与回测逐日一致。2026-10-09 应为：温度 72.6，ETF 放量比 1.54，银指。
+   - `GET /api/v1/indicators/health?keys=market.temperature,market.broad_etf_flow,market.timing` 全部为 ok。
+6. **edge 控制台发布**：新的“情绪温度”标签页，以及两条转发路由。
+
+此后，盘后流程每晚自动更新这四个阶段：`market_temperature`、`market_temperature_intraday`、`broad_etf_flow`、`market_timing`。
