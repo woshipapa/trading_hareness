@@ -13,6 +13,7 @@ import os
 import socket
 import struct
 import zlib
+from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 
 MAC_HOSTS = (
@@ -227,6 +228,7 @@ def parse_board_list(body: bytes) -> list[dict[str, Any]]:
                 "pre_close": _float(body, pos + 76),
                 "symbol_code": _text(body[pos + 82 : pos + 88]),
                 "symbol_name": _text(body[pos + 104 : pos + 148]),
+                "member_count": struct.unpack_from("<H", body, pos + 148)[0],
             }
         )
     return rows
@@ -429,14 +431,14 @@ async def call(operation: Callable[[TdxMacClient], T], **kwargs: Any):
     return await asyncio.to_thread(call_sync, operation, **kwargs)
 
 
-async def fetch_watch_snapshot(
-    stocks: Sequence[tuple[int, str]],
-) -> list[dict[str, Any]]:
+async def fetch_watch_snapshot(*, symbols: Sequence[str]) -> list[dict[str, Any]]:
+    stocks = [market_code(symbol) for symbol in symbols]
     rows, _ = await call(lambda client: client.batch_quotes(stocks))
     return rows
 
 
-async def fetch_limit_prices(stocks: Sequence[tuple[int, str]]) -> list[dict[str, Any]]:
+async def fetch_limit_prices(*, symbols: Sequence[str]) -> list[dict[str, Any]]:
+    stocks = [market_code(symbol) for symbol in symbols]
     rows, _ = await call(lambda client: client.batch_quotes(stocks))
     return [
         {
@@ -449,30 +451,42 @@ async def fetch_limit_prices(stocks: Sequence[tuple[int, str]]) -> list[dict[str
     ]
 
 
-async def fetch_board_catalog(board_type: int = 0) -> list[dict[str, Any]]:
-    rows, _ = await call(lambda client: client.board_list(board_type))
+async def fetch_board_catalog() -> list[dict[str, Any]]:
+    def collect(client):
+        rows = []
+        for board_type in range(7):
+            rows.extend({"board_code": row["code"], "name": row["name"],
+                         "board_type": board_type, "member_count": row["member_count"]}
+                        for row in client.board_list(board_type))
+        return rows
+    rows, _ = await call(collect)
     return rows
 
 
-async def fetch_membership(board_symbol: str) -> list[dict[str, Any]]:
-    rows, _ = await call(lambda client: client.board_members(board_symbol))
+async def fetch_membership(*, sector_key: str) -> list[dict[str, Any]]:
+    def collect(client):
+        board_type = next(board_type for board_type in range(7)
+                          if any(row["code"] == sector_key for row in client.board_list(board_type)))
+        known_at = datetime.now(timezone.utc)
+        return [{"taxonomy_key": f"tdx_mac_type_{board_type}", "sector_key": sector_key,
+                 "symbol": row["symbol"], "known_at": known_at}
+                for row in client.board_members(sector_key)]
+    rows, _ = await call(collect)
     return rows
 
 
-async def fetch_daily_bars(
-    market: int, code: str, start: int = 0, count: int = 800
-) -> list[dict[str, Any]]:
+async def fetch_daily_bars(*, symbol: str, count: int) -> list[dict[str, Any]]:
+    market, code = market_code(symbol)
     rows, _ = await call(
-        lambda client: client.bars(market, code, BAR_PERIODS["1d"], start, count)
+        lambda client: client.bars(market, code, BAR_PERIODS["1d"], 0, count)
     )
     return rows
 
 
-async def fetch_minute_bars(
-    market: int, code: str, period: str = "1m", start: int = 0, count: int = 800
-) -> list[dict[str, Any]]:
+async def fetch_minute_bars(*, symbol: str, count: int) -> list[dict[str, Any]]:
+    market, code = market_code(symbol)
     rows, _ = await call(
-        lambda client: client.bars(market, code, BAR_PERIODS[period], start, count)
+        lambda client: client.bars(market, code, BAR_PERIODS["1m"], 0, count)
     )
     return rows
 
