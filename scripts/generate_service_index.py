@@ -41,8 +41,10 @@ REGISTRY: list[tuple[str, str, str, str, str, list[tuple[str, str]]]] = [
      [("/", "工作流编辑器")]),
     ("控制台", "Paper KB", "http://127.0.0.1:8787",
      "supervisor 服务（paperkb.server）",
-     "论文知识库：卡片、主题包、图谱与阅读工作流。",
-     [("/index.html", "知识库首页")]),
+     "论文知识库前端：检索与问答、论文页（PDF、Deepread、对话、对比/导出）、学习、流水线与研究面板；"
+     "静态卡片索引是旧入口，点论文打开的是 md 卡片。",
+     [("/", "前端（搜索）"), ("/#browse", "浏览"), ("/#learning", "学习"), ("/#pipeline", "流水线"),
+      ("/#research", "研究"), ("/#features", "功能总览"), ("/index.html", "静态卡片索引（md）")]),
     ("控制台", "Agent Skills", "http://127.0.0.1:8790",
      "supervisor 服务（agent-skills.web）",
      "技能库浏览与编辑（~/codebase/agent-skills）。",
