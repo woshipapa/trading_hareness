@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from datetime import date, timedelta
 from typing import Any
 
+from .market_flow_repository import REBUILD_BUDGET_SECONDS
 from .market_temperature_intraday import refresh as refresh_intraday_temperature
 from .market_temperature_runtime import refresh as refresh_market_temperature
 from .minute_cross_section_export import export_day as export_minute_panel
@@ -255,8 +257,10 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             if longhu_mode else
             dependencies.sync_ths_concept_flow(SectorFlowSyncRequest(trade_date=trade_date, provider="super"))
         ),
+        # The rebuild ends itself inside its budget: a timed-out caller cannot stop the executor thread.
         "market_flow_features": lambda: dependencies.run_database(
-            dependencies.rebuild_market_flow_features, dependencies.database, trade_date, trade_date, timeout_seconds=90,
+            partial(dependencies.rebuild_market_flow_features, budget_seconds=REBUILD_BUDGET_SECONDS),
+            dependencies.database, trade_date, trade_date, timeout_seconds=90,
         ),
         "limit_ladder": limit_ladder_stage,
         "limit_lift_pattern_mining": lambda: dependencies.run_pattern_mining(
