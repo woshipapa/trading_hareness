@@ -19,12 +19,13 @@ class InstrumentTests(unittest.TestCase):
         cases = [(1, "600000", "平安" , "stock_main"), (1, "688001", "科创", "stock_star"),
                  (0, "300001", "创业", "stock_chinext"), (2, "920000", "北证", "stock_bj"),
                  (1, "510300", "ETF", "etf"), (0, "127045", "转债", "cb"),
-                 (1, "999999", "指数", "index"), (1, "880761", "板块", "board")]
+                 (1, "999999", "指数", "index"), (1, "880761", "板块", "board"), (1, "880081", "轮动趋势", "board"),
+                 (1, "880005", "涨跌家数", "market_stat"), (1, "880098", "可转债", "market_stat")]
         for market, code, name, expected in cases:
             self.assertEqual(ti.instrument_type(market, code, name), expected)
         self.assertTrue(ti.classify_instrument(1, "600000", "*ST风险")["is_st"])
         self.assertEqual([ti.classify_instrument(market, code, name)["is_a_share"] for market, code, name, _ in cases],
-                         [True, True, True, True, False, False, False, False])
+                         [True, True, True, True, False, False, False, False, False, False, False])
 
     def test_a_reader_requests_only_the_types_it_serves_under_their_translated_codes(self):
         self.assertEqual(ti.requested_of_types(["430017.BJ", "600519.SH"], ti.STOCK_TYPES), [(2, "920017"), (1, "600519")])

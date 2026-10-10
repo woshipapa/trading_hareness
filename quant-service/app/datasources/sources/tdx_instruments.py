@@ -79,10 +79,16 @@ def instrument_type(market: int, code: str, name: str = "") -> str:
 
     ``stock_main``, ``stock_star``, ``stock_chinext`` and ``stock_bj`` are
     equity classes; ``index`` and ``board`` are non-tradable references;
+    ``market_stat`` are TDX statistics and composites that are not boards
+    (880001-880079: value, breadth, limit counts, equal-weight and median
+    levels; 880096-880099: ETF/REITs/CB/repo composites; none is in tdxzs3.cfg,
+    scripts/data/tdx_market_stat_codes_2026-10-10_mac.json);
     ``etf``, ``lof``, ``fund``, ``cb``, ``bond`` and ``b_share`` are products.
     """
     code = str(code).zfill(6)
     upper = name.upper().replace("＊", "*")
+    if market == 1 and (880001 <= int(code) <= 880079 or 880096 <= int(code) <= 880099):
+        return "market_stat"
     if code.startswith(("880", "881")) and market == 1:
         return "board"
     if (market == 1 and code.startswith(("000", "999"))) or (market == 0 and code.startswith("399")):
@@ -135,7 +141,7 @@ def bar_layout(instrument_type: str) -> str:
     Index and board bars have extra up/down-count breadth fields (36 bytes);
     all other instruments use the standard stock layout (32 bytes).
     """
-    return "index" if instrument_type in ("index", "board") else "stock"
+    return "index" if instrument_type in ("index", "board", "market_stat") else "stock"
 
 
 def _list_section(market: int) -> Callable[[tdx_protocol.TdxClient], tuple[int, list[dict[str, Any]]]]:

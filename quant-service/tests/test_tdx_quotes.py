@@ -89,8 +89,8 @@ class BoardIndexQuoteTests(unittest.TestCase):
             return asyncio.run(tdx_quotes.fetch_index_quote(symbols=symbols)), client
 
     def test_rows_carry_prices_a_computed_change_and_raw_volume_and_amount_but_no_book(self):
-        evidence, _client = self.fetch(["880005.SH", "880491.SH"])
-        self.assertEqual([row["symbol"] for row in evidence.rows], ["880005.SH", "880491.SH"])
+        evidence, _client = self.fetch(["880491.SH"])
+        self.assertEqual([row["symbol"] for row in evidence.rows], ["880491.SH"])
         for row in evidence.rows:
             _market, _code, price, last_close, _book = evidence_quotes()[row["symbol"][:6]]
             self.assertEqual(set(row), {"symbol", "last_price", "pre_close", "pct_change", "volume_raw", "amount_raw"})
@@ -100,26 +100,27 @@ class BoardIndexQuoteTests(unittest.TestCase):
         self.assertEqual((evidence.coverage, evidence.warnings), (1.0, ("tdx_host=h:7709/login_one",)))
 
     def test_a_board_with_a_zero_previous_close_has_no_change(self):
-        _market, code, price, _last_close, book = evidence_quotes()["880005"]
+        _market, code, price, _last_close, book = evidence_quotes()["880491"]
         with patched_call(FakeClient(quote_body([(1, code, price, 0.0, book)]))):
-            evidence = asyncio.run(tdx_quotes.fetch_index_quote(symbols=["880005.SH"]))
+            evidence = asyncio.run(tdx_quotes.fetch_index_quote(symbols=["880491.SH"]))
         self.assertEqual((evidence.rows[0]["last_price"], evidence.rows[0]["pre_close"], evidence.rows[0]["pct_change"]),
                          (price, 0.0, None))
 
     def test_any_other_code_is_refused_before_the_network(self):
         with mock.patch.object(tdx_protocol, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
-            for symbol in ("999999.SH", "399300.SZ", "600519.SH", "510300.SH", "127045.SZ", "920000.BJ"):
-                with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, "takes only board"):
-                    asyncio.run(tdx_quotes.fetch_index_quote(symbols=["880005.SH", symbol]))
+            # 880005 is a market statistic (its close is the all-A advancer count), not a board.
+            for symbol in ("880005.SH", "999999.SH", "399300.SZ", "600519.SH", "510300.SH", "127045.SZ", "920000.BJ"):
+                with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, f"{symbol} .*takes only board"):
+                    asyncio.run(tdx_quotes.fetch_index_quote(symbols=["880491.SH", symbol]))
             with self.assertRaisesRegex(ValueError, "must not be empty"):
                 asyncio.run(tdx_quotes.fetch_index_quote(symbols=[]))
 
     def test_the_binding_gives_the_index_code_and_the_prices_but_no_unitless_volume(self):
-        evidence, _client = self.fetch(["880005.SH"])
+        evidence, _client = self.fetch(["880491.SH"])
         projected = _normalise_rows(evidence.rows, binding("sector.index_quote"))
         self.assertTrue(projected.canonical)
         row = projected.rows[0]
-        self.assertEqual((row["index_code"], row["last_price"]), ("880005.SH", evidence_quotes()["880005"][2]))
+        self.assertEqual((row["index_code"], row["last_price"]), ("880491.SH", evidence_quotes()["880491"][2]))
         self.assertTrue({"volume", "turnover"}.isdisjoint(row), "no evidence gives their units")
 
 
