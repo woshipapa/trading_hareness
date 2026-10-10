@@ -14,7 +14,8 @@ class TdxFinancialHistoryTests(unittest.TestCase):
         new = parse_manifest("gpcw20241231.zip," + "b" * 32 + ",11\ngpcw20251231.zip," + "c" * 32 + ",12\n")
         self.assertEqual(manifest_changes(old, new), {"added": ["gpcw20251231.zip"], "removed": [], "changed": ["gpcw20241231.zip"]})
         self.assertTrue(verify_manifest_entry(ManifestEntry("x", hashlib.md5(b"abc").hexdigest(), 3), b"abc"))
-        self.assertFalse(verify_manifest_entry(ManifestEntry("x", hashlib.md5(b"abc").hexdigest(), 3), b"abd"))
+        self.assertFalse(verify_manifest_entry(ManifestEntry("x", hashlib.md5(b"abd").hexdigest(), 3), b"abc"))
+        self.assertFalse(verify_manifest_entry(ManifestEntry("x", hashlib.md5(b"abc").hexdigest(), 2), b"abc"))
 
     def test_gpcw_header_and_units(self):
         values = [0.0] * 242
@@ -39,6 +40,11 @@ class TdxFinancialHistoryTests(unittest.TestCase):
     def test_period_and_ttm(self):
         self.assertEqual(normalize_report_period("gpcw20101231.zip"), "2010-12-31")
         self.assertEqual(ttm_from_cumulative(100, 80, 50), 130)
+        # TTM for 2025-06-30 from FY2024 + H1 2025 - H1 2024
+        # FY2024=100, H1 2025=80 (cumulative), H1 2024=50 (prior year same period)
+        self.assertEqual(ttm_from_cumulative(100, 80, 50), 130)
+        # Different FY gives different TTM: FY2025=150 instead of FY2024=100
+        self.assertEqual(ttm_from_cumulative(150, 80, 50), 180)
 
 
 if __name__ == "__main__":

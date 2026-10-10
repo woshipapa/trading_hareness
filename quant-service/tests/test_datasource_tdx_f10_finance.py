@@ -51,6 +51,14 @@ class TdxF10Fixtures(unittest.TestCase):
         self.assertEqual(f10.parse_company_content(content), "主营业务：白酒")
         self.assertEqual(parse_report_file(struct.pack("<I", 3) + b"abcjunk"), (3, b"abc"))
 
+    def test_build_finance_request_validates_market_and_code(self):
+        with self.assertRaises(ValueError):
+            f10.build_finance_info_request(3, "000001")  # invalid market
+        with self.assertRaises(ValueError):
+            f10.build_finance_info_request(0, "00000")  # valid market but code too short
+        with self.assertRaises(ValueError):
+            f10.build_finance_info_request(0, "00000a")  # valid market but code has non-digit
+
 
 class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
     def test_bound_adapters_are_async(self):
@@ -70,17 +78,21 @@ class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
     async def test_company_profile_reads_each_category_content_range(self):
         class FakeClient:
             def company_categories(self, market, code):
-                self.requested = (market, code)
+                self.requested_market = market
+                self.requested_code = code
                 return [{"name": "简介", "filename": "a.txt", "start": 1, "length": 2},
                         {"name": "行业", "filename": "b.txt", "start": 3, "length": 4}]
 
             def company_content(self, market, code, filename, start, length):
                 return f"{filename}:{start}:{length}"
 
-        with mock.patch.object(f10, "_call", side_effect=lambda operation, **_: operation(FakeClient())):
+        fake_client = FakeClient()
+        with mock.patch.object(f10.tdx_protocol, "call_sync", side_effect=lambda operation, **_: (operation(fake_client), "test:host")):
             result = await f10.fetch_company_profile(symbol="000001.SZ")
         self.assertEqual([row["content"] for row in result], ["a.txt:1:2", "b.txt:3:4"])
         self.assertEqual(len(result), 2)
+        self.assertEqual(fake_client.requested_market, 0)  # SZ = market 0
+        self.assertEqual(fake_client.requested_code, "000001")
 
 
 if __name__ == "__main__":
