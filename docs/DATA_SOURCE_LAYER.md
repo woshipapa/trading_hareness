@@ -300,6 +300,50 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 
 不引入新依赖：通达信协议为标准库实现（pytdx 只有 sdist 且依赖 cryptography，进不了 peer 的离线 wheelhouse）。
 
+### 6.1 通达信盘后归档任务（十个，默认关闭）
+
+十个任务挂在 `post_close_public_archive` 循环里（`quant-service/app/datasources/collectors/post_close.py`），与其余盘后任务不同，**默认全部关闭**：单项开关是 `PUBLIC_ARCHIVE_<键大写>_ENABLED`（例如 `PUBLIC_ARCHIVE_TDX_GPCW_ENABLED`），取值 `1`、`true`、`yes`、`on` 为开（`runtime.py` 的 `opt_in_keys`）；总开关 `POST_CLOSE_PUBLIC_ARCHIVE_ENABLED` 仍要开着。窗口按 Asia/Shanghai 本地时间；只在交易日运行（日历取不到就跳过，不猜）；每个交易日成功一次，窗口内失败每 10 分钟重试，到 23:30 为止。
+
+写入走 `persist_timed_observations`（`public_market_repository.py`）：唯一键是 (来源, 能力, 证券, 生效时间, 载荷哈希)，`effective_at`、`available_at`、`availability_basis`、`observation_symbol` 不入哈希，同一事实再采到会被忽略。所以重启只重复请求，不重复证据，也不会把 `available_at` 往后移。板块成分类任务改走成分变化写入：只记开、平仓，空回答不改任何东西。
+
+| 键（开关 `PUBLIC_ARCHIVE_<键大写>_ENABLED`） | 窗口 | 内容 | 正常一天的行数（函数 docstring） | 幂等与备注 |
+|---|---|---|---|---|
+| `tdx_security_list` | 19:40–23:30 | 证券列表（`reference.security_list`），能力 `tdx_security_list` | 首次约 52,000 行，之后只存有变化的证券 | 与库里每只证券的最近一行比较，只写变化的行；见下面的已知问题 |
+| `tdx_tipinfo` | 19:50–23:30 | `tipinfo.dat` 的全部披露行，能力 `tdx_tipinfo` | 约 5,600 行，一次 | `effective_at` = 首次披露日 23:59:59+08:00，`available_at` = 采集时刻 |
+| `tdx_gpcw` | 20:00–23:30 | 历史财务报表：清单 `tdxfin/gpcw.txt` 入 `tdx_gpcw_manifest`，变化的期入 `tdx_gpcw` | 每天最多 2 期，完整历史有意不自动取 | 预算与日期见下 |
+| `tdx_index_bars` | 20:10–23:30 | 6 个指数的日线与涨跌家数：`999999.SH`、`399001.SZ`、`399006.SZ`、`399300.SZ`、`000688.SH`、`899050.BJ`；能力 `tdx_index_daily_bars`、`tdx_index_breadth` | 每个指数首次 800 行，之后每个交易日 5 行 | 库里已有该指数就只取最近 5 根；`effective_at` = 交易日 15:00 |
+| `tdx_mac_boards` | 20:20–23:30 | MAC 板块目录（`tdx_mac_board_catalog`）与成分变化（taxonomy `tdx_mac_type_<类型>`） | 一轮 5 次目录请求，加每个板块 1 次成分请求 | 成分只记开、平仓 |
+| `tdx_limit_pools` | 20:30–23:30 | 三个派生涨跌停池，能力 `tdx_limit_up_pool`、`tdx_broken_pool`、`tdx_limit_down_pool` | 每个池一行一个成员 | 三个池共用一次读取；只能取当日会话，涨跌停价行的日期不是当日就报错，等重试 |
+| `tdx_host_probe` | 20:40–23:30 | 主机周探针，见下 | 每台主机一条健康记录 | 每个 ISO 周一次 |
+| `tdx_stat_snapshot` | 20:50–23:30 | `tdxstat.cfg`、`tdxstat2.cfg` 快照，能力 `tdx_stat_valuation`、`tdx_stat_daily_basic` | 完整快照日各约 8,000 行 | `effective_at` = 行自带日期当天 15:00，行日期不是采集日期 |
+| `tdx_files_membership` | 21:00–23:30 | 服务器文件的板块成分（`block_gn`、`block_fg`，taxonomy `tdx_files_*`） | 每个返回的成分一行观察；没变的成分不存新区间 | 成分只记开、平仓 |
+| `tdx_calendar_ipo` | 21:10–23:30 | 节假日与新股申购日，能力 `tdx_trade_calendar`、`tdx_ipo_calendar` | 几十行日历，加一小批新股 | `effective_at` = 日期当天 15:00 |
+
+**`tdx_gpcw` 的预算与日期**
+
+- 每天最多取 `PUBLIC_ARCHIVE_TDX_GPCW_MAX_PERIODS` 期（默认 2，下限 1）。先把清单整体落库，再把“新增或 md5、大小变了”的期名排序，取最后 N 个（文件名按日期排序，即最新的 N 期）下载。
+- 清单在下载各期之前就已落库：预算之外的期、以及下载中途失败的期，下一次运行时清单已没有变化，不会再被取到，除非它的 md5 或大小变了。要拿更早的期，得在第一次运行前把预算调大。（读代码得出，未在库里核对。）
+- 每行财报的 `availability_basis` 有两种：
+  - `tipinfo_first_disclosure`（有日期）：库里已落的 `tdx_tipinfo` 行里有同一个 (代码, 报告期)，`available_at` = 首次披露日 23:59:59+08:00，下一个交易日起可用；
+  - `collection_time_undated`（无日期）：`tipinfo.dat` 每只证券只留最新一期，更早的期和它没列的证券拿不到日期，`available_at` = 采集时刻。任务返回里的 `undated` 是这类行的个数。
+- 日期来自库里已落的 `tdx_tipinfo` 行，所以要先开 `tdx_tipinfo`（窗口也排在它之后）；没开时所有行都是 `collection_time_undated`。代码不是有效 A 股代码的行被拒，计入返回里的 `rejected`。
+
+**主机周探针（`tdx_host_probe`）**：对 `tdx_protocol.configured_hosts()` 的每台主机用 `LOGIN_ONE` 握手各取一次证券计数（`security_count`，市场 0），写成 `tdx_public` 的 provider 健康记录：成功记在 `tdx_host:<主机:端口/握手>` 下（计数与耗时），失败记在 `tdx_host:<主机:端口>` 下（异常类名）；一台失败不影响别的主机。周状态只在进程内存里。它**不**重写主机池，主机池由 `scripts/refresh-tdx-hosts.sh` 手动刷新（第 7.1 节）。主机列表默认取 `tdx_hosts.py`，可用 `TDX_HQ_HOSTS=host:port,host:port` 覆盖；MAC 主机可用 `TDX_MAC_HOSTS` 覆盖。
+
+已知问题（读代码得出，未在库里核对；基线 `6f691ad0`）：`tdx_security_list` 的行没有 `ts_code` 或 `observation_symbol`，写入后 `raw_market_observations.symbol` 为空。唯一键对空值不去重，而读回上一版的 `latest_observation_payloads` 只读 `symbol` 非空的行，所以“只存有变化的证券”在真实库里大概不成立，每个交易日可能重复存整张表。
+
+### 6.2 研究试读：开关与边界
+
+`GET /api/v1/datasources/read/{source}/{capability}` 用目录里该绑定的适配器现场读一次上游并返回行，只用于研究看数，**永远 `decision_eligible=false`**（`decision_eligible_reason`：research reads are evidence-only and never decision eligible）。开关是 `DATASOURCE_RESEARCH_READ_ENABLED`（默认 `true`；`0`、`false`、`no`、`off` 为关，关了返回 503）。边界在 `quant-service/app/datasources/adapter_calls.py`：
+
+- 只服务 TDX 包内的适配器：适配器在 `app/datasources/sources/tdx_*.py`，或是 `app/datasources/derived/limit_pools.py`，并且参数全是关键字参数；其他绑定（持牌、供应商）返回 404。基线上 40 个 TDX 绑定里 34 个可试读，不可试读的 6 个是 `tdx_public` 的 `ticks.session`、`auction.history_0925`、`fundamentals.capital_changes`、`quote.index_overview` 和 `tdx_local` 的 `bars.daily`、`bars.minute`；目录里每个绑定的 `research_readable` 说明能否试读。
+- 同一 (来源, 能力) 每秒最多一次，超了返回 429；全进程最多 2 个读并发。
+- 查询参数就是适配器的关键字参数：未知参数、缺必填参数、标量参数重复都是 422；列表参数用逗号分隔，`symbols` 最多 80 个、`count` 最多 800，超了 422；日期用 ISO 格式。
+- 最多返回 2000 行，超出时 `truncated=true`。
+- 回包带 `coverage`、`effective_at_min`/`effective_at_max`、`available_at_min`/`available_at_max`、`warnings`（含应答主机 `tdx_host=…`）和起止时间。
+
+控制台的“研究试读”按钮调用的就是这条路由（经 relay 的 `/api/research/datasources/read/{source}/{capability}`）。
+
 ## 7. 运维命令
 
 ```bash
