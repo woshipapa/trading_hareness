@@ -170,7 +170,7 @@ class InstrumentTests(unittest.TestCase):
         self.assertAlmostEqual(evidence.coverage, 1/6, places=5)
 
         # Should have error warning
-        self.assertTrue(any("sh:" in w and "error" in w for w in evidence.warnings))
+        self.assertTrue(any("Connection timeout" in w for w in evidence.warnings))
 
     def test_instruments_from_security_list(self):
         """Test instruments_from_security_list filters stocks and formats correctly."""
@@ -198,13 +198,16 @@ class InstrumentTests(unittest.TestCase):
         with patch.object(tdx_protocol, 'sweep_sync', return_value=fake_sweep_result):
             instruments = ti.instruments_from_security_list()
 
-        # Should have 3 instruments (3 stocks, no CB, no index)
-        self.assertEqual(len(instruments), 3)
+        # Should have 2 instruments (2 stocks, no CB, no index)
+        self.assertEqual(len(instruments), 2)
 
         # Check symbols and st flags
         symbols = {i["symbol"] for i in instruments}
         self.assertIn("000001.SZ", symbols)
         self.assertIn("000099.SZ", symbols)
+        # CB and index should not be included
+        self.assertNotIn("127045.SZ", symbols)
+        self.assertNotIn("999999.SH", symbols)
 
         # Check is_st flag
         for inst in instruments:

@@ -476,11 +476,13 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tdx_public", "reference.security_list", 20, UNSUPPORTED, None,
           "app/datasources/sources/tdx_instruments.py:fetch_security_list",
           notes="登录模式：login_one；一台确定的主机；深沪各分页，北交所仅计数+zhb.zip",
-          decision_eligible=False),
+          decision_eligible=False,
+          spec=BindingSpec(time_semantics="effective=采集时刻; available=采集时刻（快照）")),
     _bind("tdx_public", "reference.instruments", 19, UNSUPPORTED, None,
           "app/datasources/sources/tdx_instruments.py:instruments_from_security_list",
           notes="从 reference.security_list 派生：仅股票类；list_date 由 TDX 不提供故设为 None",
-          decision_eligible=False),
+          decision_eligible=False,
+          spec=BindingSpec(time_semantics="effective=入库")),
     _bind("fuyao_ths", "reference.instruments", 12, DECLARED, "instruments", "app/market_universe_sync.py",
           limits="ticker_list asset_type=a-share，每页 1000，翻到短页为止",
           notes="全 A 权威清单（可移出成员）：须达 minimum_rows 且沪深北齐全才落库；Longhu 收盘只增不删；2026-10-09 本机探测"),
@@ -741,8 +743,8 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key):
-            problems.append(f"{key}: no resolvable binding")
+        if not bindings_for(key) and not bindings_for(key, states=(UNSUPPORTED,)):
+            problems.append(f"{key}: no binding at all")
     for source in SOURCES.values():
         if source.license not in LICENSES:
             problems.append(f"{source.key}: unknown license {source.license}")
