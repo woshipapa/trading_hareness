@@ -30,6 +30,16 @@ class InstrumentTests(unittest.TestCase):
         self.assertAlmostEqual(ti.scale_quote({"price": 43.85}, 3)["price"], 4.385)
         self.assertEqual(ti.price_scale(2), 100.0)
 
+    def test_a_reader_requests_only_the_types_it_serves_under_their_translated_codes(self):
+        self.assertEqual(ti.requested_of_types(["430017.BJ", "600519.SH"], ti.STOCK_TYPES), [(2, "920017"), (1, "600519")])
+        self.assertEqual(ti.requested_of_types(["510300.SH", "161121.SZ", "500001.SH"], ti.FUND_TYPES),
+                         [(1, "510300"), (0, "161121"), (1, "500001")])
+        for symbol in ("510300.SH", "127045.SZ", "999999.SH", "880005.SH"):
+            with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, f"{symbol} is a"):
+                ti.requested_of_types(["600519.SH", symbol], ti.STOCK_TYPES)
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            ti.requested_of_types([], ti.STOCK_TYPES)
+
     def test_a_missing_or_invalid_decimal_point_has_no_scale(self):
         # The BJ rows of the list carry none (scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json).
         for decimal_point in (None, -1, 7):

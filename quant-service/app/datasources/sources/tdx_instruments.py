@@ -17,7 +17,7 @@ import dataclasses
 import asyncio
 import struct
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, Iterable, Mapping
 
 from . import tdx_protocol, tdx_files
@@ -29,6 +29,9 @@ SECURITY_COUNT = 0x044E
 SECURITY_LIST = 0x0450
 SECURITY_PAGE_SIZE = 1000
 SECURITY_ROW_SIZE = 29
+#: The instrument types of A-share stocks and of funds, as instrument_type names them.
+STOCK_TYPES = frozenset({"stock_main", "stock_chinext", "stock_star", "stock_bj"})
+FUND_TYPES = frozenset({"etf", "lof", "fund"})
 
 
 def build_security_count_request(market: int) -> bytes:
@@ -118,7 +121,18 @@ def classify_instrument(market: int, code: str, name: str = "") -> dict[str, Any
     upper = name.upper().replace("＊", "*")
     return {"market": market, "code": code, "name": name, "type": kind,
             "is_st": upper.startswith("ST") or upper.startswith("*ST") or "ST" in upper[:4],
-            "is_a_share": kind.startswith("stock_")}
+            "is_a_share": kind in STOCK_TYPES}
+
+
+def requested_of_types(symbols: Sequence[str], kinds: frozenset[str]) -> list[tuple[int, str]]:
+    """The (market, code) pairs a reader requests for ``symbols``, each of an instrument type in ``kinds``. A symbol of any
+    other type is a ValueError, so a reader calls this before it connects."""
+    stocks = tdx_protocol.requested_stocks(symbols)
+    for item, (market, code) in zip(symbols, stocks):
+        kind = instrument_type(market, code)
+        if kind not in kinds:
+            raise ValueError(f"{item} is a {kind} code; this reader takes only {', '.join(sorted(kinds))}")
+    return stocks
 
 
 def bar_layout(instrument_type: str) -> str:
@@ -187,7 +201,7 @@ async def fetch_instruments() -> CapabilityEvidence:
     evidence = await fetch_security_list()
     return dataclasses.replace(evidence, rows=[
         {"symbol": row["symbol"], "name": row["name"], "list_date": None, "is_st": row["is_st"]}
-        for row in evidence.rows if row["instrument_type"].startswith("stock_")])
+        for row in evidence.rows if row["instrument_type"] in STOCK_TYPES])
 
 
 def price_scale(decimal_point: int | None) -> float:
@@ -264,7 +278,7 @@ def type_counts(rows: Iterable[Mapping[str, Any]]) -> Counter[str]:
     return Counter(instrument_type(int(row.get("market", 0)), str(row.get("code", "")), str(row.get("name", ""))) for row in rows)
 
 
-__all__ = ["SECURITY_COUNT", "SECURITY_LIST", "bar_layout", "build_security_count_request",
+__all__ = ["FUND_TYPES", "SECURITY_COUNT", "SECURITY_LIST", "STOCK_TYPES", "bar_layout", "build_security_count_request",
            "build_security_list_request", "classify_instrument", "fetch_security_list", "fetch_instruments", "instrument_type",
            "parse_bj_mapping", "parse_tdxbjmore", "bj_rows_from_zhb", "parse_index_bars", "parse_security_count", "parse_security_list",
-           "security_count", "security_list", "index_bars", "price_scale", "scale_quote", "type_counts"]
+           "security_count", "security_list", "index_bars", "price_scale", "requested_of_types", "scale_quote", "type_counts"]
