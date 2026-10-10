@@ -1,5 +1,6 @@
 import struct
 import unittest
+import inspect
 from unittest import mock
 
 from app.datasources.sources import tdx_f10_finance as f10
@@ -52,6 +53,10 @@ class TdxF10Fixtures(unittest.TestCase):
 
 
 class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
+    def test_bound_adapters_are_async(self):
+        self.assertTrue(inspect.iscoroutinefunction(f10.fetch_financial_summary))
+        self.assertTrue(inspect.iscoroutinefunction(f10.fetch_company_profile))
+
     async def test_financial_summary_shape_uses_normalized_fields(self):
         row = {name: index for index, name in enumerate(f10.FINANCE_FIELDS)}
         row.update({"updated_date": 20260815, "field_units": {"total_assets": "元"}})
