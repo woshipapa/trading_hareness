@@ -584,6 +584,18 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         valuation = [rows for _provider, capability, rows in recorder.observations if capability == "tdxstat_valuation"][0][0]
         self.assertEqual(valuation["effective_at"], "2026-10-09T15:00:00+08:00")
 
+    async def test_file_membership_uses_tdx_public_provider(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        from app.datasources.contracts import CapabilityEvidence
+        deps.persist_membership_delta = AsyncMock(return_value={"members": 1, "opened": 1, "closed": 0})
+        with patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_membership",
+                   AsyncMock(return_value=CapabilityEvidence([{"taxonomy_key": "tdx_files_concept", "sector_key": "880001",
+                                                               "symbol": "600519.SH"}]))):
+            await post_close.job_tdx_files_membership(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        deps.persist_membership_delta.assert_awaited_once_with("tdx_files_concept", "880001", {"600519.SH": {
+            "taxonomy_key": "tdx_files_concept", "sector_key": "880001", "symbol": "600519.SH"}}, EVENING)
+
 
 if __name__ == "__main__":
     unittest.main()

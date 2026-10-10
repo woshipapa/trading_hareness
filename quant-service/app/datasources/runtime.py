@@ -129,7 +129,8 @@ def build_archive_deps(database: Any, collector: intraday.CollectorDeps, *, run_
         max_gpcw_periods=max(1, int(values.get("PUBLIC_ARCHIVE_TDX_GPCW_MAX_PERIODS", "2") or 2)),
         persist_membership_delta=persist_membership_delta or (
             lambda taxonomy_key, sector_key, members, observed_at:
-            run(persist_tdx_membership_delta, database, taxonomy_key, sector_key, members, observed_at, timeout_seconds=60)
+            run(persist_tdx_membership_delta, database, taxonomy_key, sector_key, members, observed_at,
+                "tdx_public" if taxonomy_key.startswith("tdx_files_") else "tdx_mac", timeout_seconds=60)
         ),
         # Enable on the agreed projection writer only, after shared-stage
         # lease adoption. Merely deploying this code must not start a writer.
