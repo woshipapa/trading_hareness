@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (41)
+## research data (42)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -149,6 +149,7 @@
 | `probe-public-sources.py` | quant-research | workstation | Data-free live check of every token-free public evidence source. |
 | `probe-tdx-q-breadth.py` | quant-research | workstation | Probe TDX breadth, MAC dead commands, offset info and chart sampling. |
 | `probe-tdx-q-disclosure.py` | quant-research | workstation | Probe TDX disclosure and IPO fields against public Eastmoney rows. |
+| `probe-tdx-q-extcodes.py` | quant-research | workstation | Probe TDX extended market (7727) codes, metadata, quotes and bars. |
 | `probe-tdx-q-flow.py` | quant-research | workstation | Probe TDX stock capital-flow fields against ticks and public references. |
 | `probe-tdx-q-limitfields.py` | quant-research | workstation | Read-only MAC dynamic-field probe for the Q-LIMIT research record. |
 | `probe-tdx-q-units.py` | quant-research | workstation | Read-only live evidence probe for TDX volume, amount and time units. |
