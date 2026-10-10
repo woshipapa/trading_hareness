@@ -17,8 +17,15 @@ import re
 import struct
 from typing import Any, Iterable
 import zipfile
+import zlib
 
 from . import tdx_protocol
+
+
+class TdxFinanceError(Exception):
+    """Typed error for GPCW parsing and download issues."""
+    pass
+
 
 FINANCE_HOSTS = (("120.76.152.87", 7709), ("117.34.114.13", 7709))
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
@@ -75,6 +82,8 @@ def parse_manifest(data: str | bytes) -> list[ManifestEntry]:
         if size < 0 or size > MAX_DOWNLOAD_BYTES:
             raise ValueError("manifest size exceeds bounded downloader limit")
         entries.append(ManifestEntry(parts[0], parts[1].lower(), size))
+    if not entries:
+        raise ValueError("empty GPCW manifest")
     return entries
 
 
@@ -131,6 +140,7 @@ def parse_gpcw_dat(data: bytes, *, filename: str | None = None) -> list[dict[str
         raise ValueError("invalid GPCW record size")
     field_count = record_size // 4
     report_period = normalize_report_period(filename or report_date)
+    units = {gpcw_field_name(col): gpcw_field_unit(col) for col in range(1, field_count + 1)}
     rows: list[dict[str, Any]] = []
     for index in range(count):
         item_pos = header_size + index * item_size
@@ -142,7 +152,6 @@ def parse_gpcw_dat(data: bytes, *, filename: str | None = None) -> list[dict[str
         code = raw_code.split(b"\0", 1)[0].decode("ascii", "replace")
         values = struct.unpack_from("<" + "f" * field_count, data, offset)
         fields = {gpcw_field_name(col): value for col, value in enumerate(values, 1)}
-        units = {gpcw_field_name(col): gpcw_field_unit(col) for col in range(1, field_count + 1)}
         rows.append({"code": code, "report_date": report_date, "report_period": report_period,
                      "field_count": field_count, "raw_values": values, "fields": fields, "field_units": units})
     return rows
@@ -150,15 +159,18 @@ def parse_gpcw_dat(data: bytes, *, filename: str | None = None) -> list[dict[str
 
 def parse_gpcw_zip(data: bytes, *, filename: str | None = None, max_uncompressed: int = MAX_DOWNLOAD_BYTES) -> list[dict[str, Any]]:
     if len(data) > MAX_DOWNLOAD_BYTES:
-        raise ValueError("GPCW ZIP exceeds download cap")
-    with zipfile.ZipFile(BytesIO(data)) as archive:
-        members = [info for info in archive.infolist() if not info.is_dir() and info.filename.lower().endswith(".dat")]
-        if len(members) != 1:
-            raise ValueError("GPCW ZIP must contain exactly one .dat member")
-        info = members[0]
-        if info.file_size > max_uncompressed:
-            raise ValueError("GPCW member exceeds size cap")
-        return parse_gpcw_dat(archive.read(info), filename=filename or info.filename)
+        raise TdxFinanceError("GPCW ZIP exceeds download cap")
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as archive:
+            members = [info for info in archive.infolist() if not info.is_dir() and info.filename.lower().endswith(".dat")]
+            if len(members) != 1:
+                raise TdxFinanceError("GPCW ZIP must contain exactly one .dat member")
+            info = members[0]
+            if info.file_size > max_uncompressed:
+                raise TdxFinanceError("GPCW member exceeds size cap")
+            return parse_gpcw_dat(archive.read(info), filename=filename or info.filename)
+    except (zipfile.BadZipFile, zlib.error) as error:
+        raise TdxFinanceError(f"GPCW ZIP format error: {error}") from error
 
 
 def build_report_file_request(filename: str, offset: int = 0, chunk_size: int = 30000) -> bytes:
@@ -184,8 +196,10 @@ def download_report_file(client: Any, filename: str, *, max_bytes: int = MAX_DOW
         if not size:
             break
         if offset + size > max_bytes:
-            raise ValueError("TDX report exceeds download cap")
-        chunks.append(chunk[:size])
+            raise TdxFinanceError("TDX report exceeds download cap")
+        if len(chunk) < size:
+            raise TdxFinanceError("TDX report chunk shorter than declared size")
+        chunks.append(chunk)
         offset += size
     return b"".join(chunks)
 
@@ -196,8 +210,11 @@ class TdxFinHistoryClient(tdx_protocol.TdxClient):
     def report_file(self, filename: str, *, max_bytes: int = MAX_DOWNLOAD_BYTES) -> bytes:
         return download_report_file(self, filename, max_bytes=max_bytes)
 
-    def gpcw(self, filename: str) -> list[dict[str, Any]]:
+    def gpcw(self, filename: str, manifest_entry: ManifestEntry | None = None) -> list[dict[str, Any]]:
         payload = self.report_file("tdxfin/" + filename)
+        if manifest_entry:
+            if not verify_manifest_entry(manifest_entry, payload):
+                raise TdxFinanceError(f"GPCW manifest mismatch for {filename}")
         return parse_gpcw_zip(payload, filename=filename)
 
 
@@ -217,12 +234,15 @@ def parse_tipinfo(data: bytes) -> list[dict[str, Any]]:
     return rows
 
 
-def ttm_from_cumulative(current_fy: float, current_cumulative: float, prior_cumulative: float) -> float:
-    """Compute TTM from the confirmed year-to-date cumulative series."""
-    return current_fy + current_cumulative - prior_cumulative
+def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cumulative: float) -> float:
+    """Compute TTM from the confirmed year-to-date cumulative series.
+
+    Formula: TTM = FY_prev + cum_now - cum_prior_year_same_period
+    """
+    return previous_fy + current_cumulative - prior_cumulative
 
 
-__all__ = ["FINANCE_HOSTS", "GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinHistoryClient", "build_report_file_request",
-           "download_report_file", "gpcw_field_name", "gpcw_field_unit", "manifest_changes", "normalize_report_period",
-           "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "parse_report_file", "parse_tipinfo",
+__all__ = ["FINANCE_HOSTS", "GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "TdxFinHistoryClient",
+           "build_report_file_request", "download_report_file", "gpcw_field_name", "gpcw_field_unit", "manifest_changes",
+           "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "parse_report_file", "parse_tipinfo",
            "ttm_from_cumulative", "verify_manifest_entry"]
