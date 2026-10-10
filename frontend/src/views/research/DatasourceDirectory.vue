@@ -3,7 +3,7 @@ import { computed, inject, onMounted, ref } from 'vue';
 import { dashboardContextKey } from '../../dashboard-context';
 import type { useDatasourcesSlice } from '../../composables/workspace/datasources';
 import {
-  categoryLabel, filterCapabilities, isResearchReadable, queryFromForm, statusLabel, statusType,
+  TDX_SOURCE_FILTER, categoryLabel, filterCapabilities, isResearchReadable, queryFromForm, statusLabel, statusType,
   type DatasourceBinding, type DatasourceCapability, type DatasourceRead,
 } from '../../research/datasource-directory';
 
@@ -59,7 +59,7 @@ onMounted(loadCatalog);
     <el-alert v-if="error" :title="`数据源目录读取失败：${error}`" type="error" show-icon :closable="false" class="section-gap" />
     <el-alert title="目录展示的是研究能力与证据状态；研究试读不会进入策略或订单路径。" type="info" show-icon :closable="false" class="section-gap" />
     <el-form inline class="section-gap" @submit.prevent>
-      <el-form-item label="来源"><el-select v-model="sourceFilter" clearable filterable placeholder="全部来源" style="width: 210px"><el-option label="TDX" value="tdx_public" /><el-option v-for="source in catalog?.sources ?? []" :key="source.key" :label="source.label" :value="source.key" /></el-select></el-form-item>
+      <el-form-item label="来源"><el-select v-model="sourceFilter" clearable filterable placeholder="全部来源" style="width: 210px"><el-option label="TDX（全部通达信来源）" :value="TDX_SOURCE_FILTER" /><el-option v-for="source in catalog?.sources ?? []" :key="source.key" :label="source.label" :value="source.key" /></el-select></el-form-item>
       <el-form-item label="状态"><el-select v-model="statusFilter" clearable placeholder="全部状态" style="width: 170px"><el-option v-for="status in ['live_verified', 'declared', 'dormant', 'unsupported', 'retired']" :key="status" :label="statusLabel(status)" :value="status" /></el-select></el-form-item>
       <el-form-item label="搜索"><el-input v-model="textFilter" clearable placeholder="能力、来源或说明" style="width: 240px" /></el-form-item>
     </el-form>

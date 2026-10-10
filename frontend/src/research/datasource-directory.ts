@@ -5,6 +5,10 @@ export type DatasourceCapability = components['schemas']['CapabilityResponse'];
 export type DatasourceBinding = components['schemas']['BindingResponse'];
 export type DatasourceRead = components['schemas']['DatasourceReadResponse'];
 
+/** The quick "TDX" source filter: every TDX-backed source, the MAC, extended-market, local-file and derived ones too. */
+export const TDX_SOURCE_FILTER = 'tdx';
+const TDX_SOURCES = new Set(['tdx_public', 'tdx_mac', 'tdx_ext', 'tdx_local', 'derived_tdx_limits']);
+
 export const CATEGORY_LABELS: Record<string, string> = {
   quote: '行情', bars: 'K线', ticks: '分笔', auction: '竞价', limits: '涨跌停', sector: '板块', flow: '资金流',
   lhb: '龙虎榜', attention: '关注度', news: '新闻', events: '事件', fundamentals: '基本面', fund: '基金',
@@ -35,7 +39,8 @@ export function filterCapabilities(
 ): DatasourceCapability[] {
   const needle = text.trim().toLowerCase();
   return capabilities.filter((capability) => {
-    const bindings = capability.bindings.filter((binding) => (!source || binding.source === source) && (!status || binding.status === status));
+    const fromSource = (key: string) => !source || (source === TDX_SOURCE_FILTER ? TDX_SOURCES.has(key) : key === source);
+    const bindings = capability.bindings.filter((binding) => fromSource(binding.source) && (!status || binding.status === status));
     if (!bindings.length) return false;
     if (!needle) return true;
     return `${capability.key} ${capability.label} ${capability.description} ${capability.category}`.toLowerCase().includes(needle)

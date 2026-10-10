@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterCapabilities, isResearchReadable, queryFromForm, statusLabel } from './datasource-directory';
+import { TDX_SOURCE_FILTER, filterCapabilities, isResearchReadable, queryFromForm, statusLabel } from './datasource-directory';
 
 const capability = {
   key: 'bars.minute', category: 'bars', label: '分钟K', grain: 'intraday', scope: 'per_symbol', fields: [], schema: [],
@@ -11,6 +11,13 @@ describe('datasource directory helpers', () => {
   it('filters by source, status and text', () => {
     expect(filterCapabilities([capability], 'tdx_public', 'unsupported', '分钟')).toHaveLength(1);
     expect(filterCapabilities([capability], 'tdx_mac', '', '')).toHaveLength(0);
+  });
+
+  it('keeps every TDX-backed source under the TDX filter and nothing else', () => {
+    const sources = ['tdx_public', 'tdx_mac', 'tdx_ext', 'tdx_local', 'derived_tdx_limits', 'tencent_free'];
+    const mixed = { ...capability, bindings: sources.map((source) => ({ ...capability.bindings[0], source })) };
+    const [kept] = filterCapabilities([mixed], TDX_SOURCE_FILTER, '', '');
+    expect(kept.bindings.map((binding: { source: string }) => binding.source)).toEqual(sources.slice(0, 5));
   });
 
   it('identifies readable package adapters and serializes form values', () => {
