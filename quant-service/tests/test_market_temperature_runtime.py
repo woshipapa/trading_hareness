@@ -24,6 +24,14 @@ class _Database:
 
 
 class RefreshTests(unittest.TestCase):
+    def test_the_lookback_gives_every_re_stored_reading_a_full_ranking_window(self):
+        from app.market_temperature import TURNOVER_BASE, WINDOW
+        # Sessions are about 5/7 of calendar days, less about 15 holidays a year. The margin of 30
+        # covers sessions where a component is unknown (no limit prices, no prior limit-ups).
+        sessions = runtime.LOOKBACK_DAYS * 5 / 7 - 15 * runtime.LOOKBACK_DAYS / 365
+        self.assertGreaterEqual(sessions, WINDOW + runtime.KEEP_SESSIONS + TURNOVER_BASE + 30,
+                                "the oldest reading re-stored each evening must still see a full window")
+
     def test_refresh_keeps_the_latest_scored_readings_and_completes_only_with_the_session(self):
         end = date(2099, 3, 10)
         readings = [_reading(end - timedelta(days=i), None if i > 40 else 50.0 + i) for i in range(60, -1, -1)]

@@ -35,7 +35,11 @@ from .market_temperature import BOILING, COMPONENTS, FREEZING, VERSION, temperat
 from .market_temperature_repository import daily_rows
 
 CAPABILITY = "market_temperature_daily"
-LOOKBACK_DAYS = 420          # about 290 sessions: the 250-session window plus warm-up
+# About 410 sessions, so every reading re-stored each evening (the last KEEP_SESSIONS) is ranked
+# against a full WINDOW of sessions, after the 20-session turnover base and the gaps where a
+# component is unknown. With 420 days, 16 of the last 30 readings came out different from a
+# full-history backfill (2026-10-10), and each evening would have overwritten them.
+LOOKBACK_DAYS = 600
 KEEP_SESSIONS = 30           # readings re-stored each evening; unchanged ones are skipped
 COLD_CEILING = 40.0          # 冷 and 冰点
 

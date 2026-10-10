@@ -60,7 +60,7 @@ STEP = timedelta(minutes=5)
 SESSIONS = ((time(9, 30), time(11, 30)), (time(13, 5), time(15, 0)))
 CLOSE = time(15, 0)
 SAMPLE_WINDOW = timedelta(minutes=3)       # a sample is the first minute captured within this after its time
-LOOKBACK_DAYS = 420                        # daily history: 250 sessions plus the turnover base and warm-up
+LOOKBACK_DAYS = 600                        # daily history, as in market_temperature_runtime: a full 250-session window
 PROFILE_SESSIONS, PROFILE_MIN = 20, 5
 MIN_SAMPLES = 40                           # of 49, for a stored session to count as complete
 COUNT_KEYS = ("stocks", "with_limits", "limit_up", "touched", "limit_down", "advancers", "decliners",
