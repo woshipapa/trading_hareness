@@ -160,35 +160,45 @@ class TdxF10Fixtures(unittest.TestCase):
                         f10.build_company_content_request(market, code, "000001.txt", start, length).hex(),
                         CONTENT_REQUESTS[(symbol, start)])
 
-    def test_finance_summary_scaling_and_units(self):
-        values = [1.5, 2, 3, 20240930, 19910403] + [2] * 30
-        body = struct.pack("<HB6s", 1, 0, b"000001") + struct.pack("<fHHII" + "f" * 30, *values)
-        row = f10.parse_finance_info(body)
-        self.assertEqual(row["code"], "000001")
-        self.assertEqual(row["float_shares"], 15000.0)
-        self.assertEqual(row["total_shares"], 20000.0)
-        self.assertEqual(row["eps"], 2.0)
-        self.assertEqual(row["total_assets"], 2000.0)
-        self.assertEqual(row["net_profit"], 2000.0)
-        self.assertEqual(row["field_units"]["total_assets"], "元")
-        self.assertEqual(row["field_units"]["province"], "code")
-        self.assertEqual(row["field_units"]["updated_date"], "YYYYMMDD")
-        self.assertEqual(row["units"]["amounts"], "元")
+    def test_finance_summary_fields_keep_their_names_scales_and_units(self):
+        row = f10.parse_finance_info(FINANCE_BODY)
+        self.assertEqual(row, {
+            "count": 1, "market": 0, "code": "000001", **FINANCE_ITEMS, "field_units": FINANCE_UNITS,
+            "units": {"shares": "股", "amounts": "元", "per_share": "元/股", "eps": "元/股",
+                      "finance_raw_money": "千元", "finance_raw_shares": "万股"}})
+        self.assertEqual(f10.parse_finance_info(FINANCE_BODY_SH)["market"], 1)
+        self.assertEqual(f10.parse_finance_info(FINANCE_BODY_SH)["code"], "600519")
 
-    def test_finance_money_fixture_is_thousand_yuan(self):
-        values = [0.0, 0, 0, 20260815, 20200101] + [0.0] * 30
-        values[12] = 6028785152.0  # raw total_assets, normalized to yuan
-        body = struct.pack("<HB6s", 1, 0, b"000001") + struct.pack("<fHHII" + "f" * 30, *values)
-        self.assertEqual(f10.parse_finance_info(body)["total_assets"], 6028785152000.0)
+    def test_finance_summary_rejects_a_reply_that_is_too_short(self):
+        for length in (0, 8, len(FINANCE_BODY) - 1):
+            with self.subTest(length=length), self.assertRaises(tdx_protocol.TdxProtocolError):
+                f10.parse_finance_info(FINANCE_BODY[:length])
 
-    def test_categories_content_and_report(self):
-        name = "公司简介".encode("gbk")
-        body = struct.pack("<H", 1) + struct.pack("<64s80sII", name, b"000001.txt", 4, 99)
-        self.assertEqual(f10.parse_company_categories(body)[0]["name"], "公司简介")
-        text = "主营业务：白酒".encode("gbk")
-        content = b"\0" * 10 + struct.pack("<H", len(text)) + text + b"tail"
-        self.assertEqual(f10.parse_company_content(content), "主营业务：白酒")
-        self.assertEqual(parse_report_file(struct.pack("<I", 3) + b"abcjunk"), (3, b"abc"))
+    def test_categories_are_read_in_order_with_their_text_ranges(self):
+        self.assertEqual(f10.parse_company_categories(CATEGORIES_BODY), [
+            {"name": "最新提示", "filename": "000001.txt", "start": 0, "length": 29},
+            {"name": "公司概况", "filename": "000001.txt", "start": 29, "length": 56}])
+        self.assertEqual(f10.parse_company_categories(bytes.fromhex("0000")), [])
+
+    def test_categories_reject_a_short_or_truncated_reply(self):
+        for body in (b"", b"\x02", CATEGORIES_BODY[:-1], CATEGORIES_BODY[:2 + 152]):
+            with self.subTest(length=len(body)), self.assertRaises(tdx_protocol.TdxProtocolError):
+                f10.parse_company_categories(body)
+
+    def test_content_is_the_gbk_text_after_the_prefix_and_length(self):
+        self.assertEqual(f10.parse_company_content(CONTENT_BODIES[0]), "最新提示：分红")
+        self.assertEqual(f10.parse_company_content(CONTENT_BODIES[29]), "公司概况：银行")
+        self.assertEqual(f10.parse_company_content(bytes.fromhex("0102030405060708090a" "0000")), "")
+        # A byte that is not GBK stays visible as U+FFFD instead of vanishing.
+        self.assertEqual(f10.parse_company_content(bytes.fromhex("0102030405060708090a" "0100" "ff")), "\ufffd")
+
+    def test_content_rejects_a_short_or_truncated_reply(self):
+        for body in (b"", CONTENT_BODIES[0][:11], CONTENT_BODIES[0][:12 + 13]):
+            with self.subTest(length=len(body)), self.assertRaises(tdx_protocol.TdxProtocolError):
+                f10.parse_company_content(body)
+
+    def test_report_file_chunk_is_its_declared_length(self):
+        self.assertEqual(parse_report_file(bytes.fromhex("03000000" "616263" "6a756e6b")), (3, b"abc"))
 
 
 class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
