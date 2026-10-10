@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (34)
+## research data (51)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -124,6 +124,7 @@
 | `backfill-full-market-daily.sh` | quant-research | workstation | Deepen the all-A daily history the post-close screens need. |
 | `check-provider-health.py` | quant-research | workstation | Opt-in bounded provider smoke checks using the deployed app adapters. |
 | `fill-longhu-sector-membership.py` | quant-research | quant container | Refresh the sector map from Longhu, inside the quant-service container. |
+| `generate-tdx-hosts.py` | quant-research | workstation | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `import-adjusted-research-bars.py` | quant-research | workstation | Import the latest stock-brain qfq research panel into PostgreSQL. |
 | `import-stock-brain-database.py` | quant-research | workstation | Snapshot and migrate durable stock-brain SQLite data into PostgreSQL. |
 | `import-stock-brain-portfolio.py` | quant-research | workstation | Dry-run or publish the latest verified stock-brain CITIC snapshot. |
@@ -146,20 +147,35 @@
 | `marketdata/upload_to_pan.py` | quant-research | workstation (some on the edge) | Push warm-tier parquet into the Baidu Pan cold tier and record it in the catalog. |
 | `marketdata/verify_cold_read.py` | quant-research | workstation (some on the edge) | Prove a cold-tier parquet answers the same query as the local copy. |
 | `probe-public-sources.py` | quant-research | workstation | Data-free live check of every token-free public evidence source. |
+| `probe-tdx-q-breadth.py` | quant-research | workstation | Probe TDX breadth, MAC dead commands, offset info and chart sampling. |
+| `probe-tdx-q-disclosure.py` | quant-research | workstation | Probe TDX disclosure and IPO fields against public Eastmoney rows. |
+| `probe-tdx-q-extcodes.py` | quant-research | workstation | Probe TDX extended market (7727) codes, metadata, quotes and bars. |
+| `probe-tdx-q-flow.py` | quant-research | workstation | Probe TDX stock capital-flow fields against ticks and public references. |
+| `probe-tdx-q-limitfields.py` | quant-research | workstation | Read-only MAC dynamic-field probe for the Q-LIMIT research record. |
+| `probe-tdx-q-units.py` | quant-research | workstation | Read-only live evidence probe for TDX volume, amount and time units. |
 | `probe-tdx-routes.py` | quant-research | workstation | Probe TDX routes; output a versioned, fail-closed route matrix. |
 | `refresh-watchlist-from-proposals.py` | quant-research | workstation | Post-close watchlist refresh: admit today's proposals, retire the inactive. |
 | `run-post-close-pipeline.sh` | quant-research | workstation | Post-close daily pipeline runner. |
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
-| `tdx-owner-probe.sh` | quant-research | workstation |  |
+| `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe from the owner egress over ssh stdin; it writes nothing on the owner. |
+| `tdx-quant-export.py` | quant-research | owner-windows | Export read-only TdxQuant market data to the offline CSV contracts. |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
+| `verify-tdx-ex-market.py` | quant-research | workstation | Probe up to six pooled extended-market hosts and map one usable ExHq service. |
+| `verify-tdx-f10-finance.py` | quant-research | workstation | Read-only TDX F10/finance probe (never sends trading commands). |
+| `verify-tdx-files.py` | quant-research | workstation | Probe TDX board/report files once per host and print JSON evidence. |
+| `verify-tdx-fin-history.py` | quant-research | workstation | Verify a bounded local GPCW history cache and fail on unusable rows. |
+| `verify-tdx-instruments.py` | quant-research | workstation | Bounded, step-isolated TDX instrument verification. |
+| `verify-tdx-legacy-misc.py` | quant-research | workstation | Probe the supported legacy TDX ranking and index-overview commands. |
+| `verify-tdx-microstructure.py` | quant-research | workstation | Read-only probes for the legacy TDX microstructure command family. |
+| `verify-tdx-protocol.py` | quant-research | workstation | Check ``app.datasources.sources.tdx_protocol`` against pytdx on a live host. |
+| `verify-tdx-zhb-extras.py` | quant-research | workstation | Inventory and verify every member in a downloaded TDX ``zhb.zip``. |
 
-## CI and checks (19)
+## CI and checks (15)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
 | `export_component.py` | platform | workstation and CI | Export one logical component as a secret-free standalone project archive. |
 | `generate-api-types.mjs` | platform | workstation and CI |  |
-| `generate-tdx-hosts.py` | platform | workstation and CI | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `generate_architecture_index.py` | platform | workstation and CI | Generate a small, deterministic map for humans and maintenance agents. |
 | `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
 | `generate_service_index.py` | platform | workstation and CI | Generate docs/services.html: one clickable index of every local service port. |
@@ -169,9 +185,6 @@
 | `verify-platform.sh` | platform | workstation and CI | One bounded, reproducible verification command for humans and maintenance |
 | `verify-quant-gateway-caller-contract.mjs` | platform | workstation and CI |  |
 | `verify-stock-brain-migration.py` | platform | workstation and CI | Real PostgreSQL acceptance check for the stock-brain migration path. |
-| `verify-tdx-f10-finance.py` | platform | workstation and CI | Read-only TDX F10/finance probe (never sends trading commands). |
-| `verify-tdx-fin-history.py` | platform | workstation and CI | Verify a bounded local GPCW history cache and fail on unusable rows. |
-| `verify-tdx-protocol.py` | platform | workstation and CI | Check ``app.datasources.sources.tdx_protocol`` against pytdx on a live host. |
 | `verify_architecture.py` | platform | workstation and CI | Fast, dependency-free architecture regression guard for local CI/agents. |
 | `verify_component_boundaries.py` | platform | workstation and CI | Validate the repository's logical component map and report impacted units. |
 | `verify_component_runtimes.py` | platform | workstation and CI | Check that every logical component has an isolated runtime contract. |

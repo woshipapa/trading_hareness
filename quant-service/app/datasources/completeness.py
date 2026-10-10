@@ -63,12 +63,24 @@ UNREGISTERED: dict[str, str] = {
     "tdx_fin_history.TdxFinHistoryClient.gpcw": "period files of ~5 MB for all stocks; a backfill job with manifest md5 change detection (delta-1 D8), never the request path",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
                                "and security-list capabilities of P2 bind its sections",
-    "family:quote": "legacy quotes bind in P2 after the instrument model (delta D2); MAC 0x122b in P3",
+    "tdx_instruments.security_count": "transport behind the bound fetch_security_list (0x044e count per market)",
+    "tdx_instruments.security_list": "transport behind the bound fetch_security_list (0x044e count and 0x0450 pages)",
+    "tdx_instruments.index_bars": "index/board bars with constituent breadth (delta-3 Q10); bars.index_daily binds it in I3",
+    "tdx_files.download": "server file transport; fetch_security_list reads zhb.zip through it, file capabilities bind in I4",
+    "tdx_files.file_size": "server file transport behind tdx_files.download",
+    "tdx_files.parse_zhb_zip": "parses a zhb.zip already downloaded into memory; its archive.open() reads those bytes",
     "family:files": "verified in the plan; server-file capabilities arrive in P4",
     "family:boards": "verified in the plan; board capabilities arrive in P3",
     "family:capital flow": "MAC capital flow semantics unverified (delta 1b); research projection only, P3",
     "family:MAC": "MAC protocol bindings arrive in P3, all UNSUPPORTED until the evidence gates",
-    "family:extended": "7727 extended-market handshake is unsolved (plan F7, P9)",
+    "tdx_ex_market.TdxExMarketClient.categories": "category list (type and market id per group); not called in adapter path",
+    "tdx_ex_market.TdxExMarketClient.count": "transport for fetch_instruments only",
+    "tdx_ex_market.TdxExMarketClient.instruments": "transport for fetch_instruments only",
+    "tdx_ex_market.TdxExMarketClient.instrument_pages": "transport for fetch_instruments only",
+    "tdx_ex_market.TdxExMarketClient.klines": "transport for fetch_bars_daily",
+    "tdx_ex_market.TdxExMarketClient.login": "transport for all fetch_* adapters",
+    "tdx_ex_market.TdxExMarketClient.quote": "transport for fetch_quote",
+    "tdx_ex_market.call_sync": "transport for all fetch_* adapters",
 }
 
 #: family -> (capability prefixes, source keys that count as TDX for it)

@@ -14,7 +14,7 @@ EVENING = datetime(2026, 9, 18, 11, 5, tzinfo=timezone.utc)       # 19:05 Shangh
 
 class Recorder:
     def __init__(self):
-        self.events, self.observations, self.health = [], [], []
+        self.events, self.observations, self.health, self.health_details = [], [], [], []
 
     async def persist_events(self, provider, rows):
         self.events.append((provider, rows))
@@ -26,6 +26,8 @@ class Recorder:
 
     async def record_health(self, provider, capability, ok, rows, latency_ms, error):
         self.health.append((provider, capability, ok))
+        self.health_details.append({"provider": provider, "capability": capability, "ok": ok, "rows": rows,
+                                    "error": error})
 
     def deps(self, **kwargs):
         return intraday.CollectorDeps(persist_events=self.persist_events, persist_observations=self.persist_observations,
@@ -253,6 +255,48 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         row = recorder.observations[0][2][0]
         self.assertEqual(row["tick_source"], "tencent_free")
         self.assertEqual(row["opening_auction"]["amount"], 1159)
+        health = recorder.health_details[-1]
+        self.assertEqual((health["capability"], health["ok"], health["rows"]), ("ticks.session", False, 0))
+        self.assertEqual(health["error"], "000001.SZ:OSError,600519.SH:OSError", "Tencent covering a symbol is still a TDX failure")
+
+    async def test_tick_flow_and_capital_log_record_tdx_health(self):
+        recorder = Recorder()
+
+        async def tdx_ticks(symbol, _day):
+            if symbol == "600519.SH":
+                raise OSError("no host")
+            return [Tick("09:25:00", 11.59, 100, 1159, "B"), Tick("09:31:00", 11.6, 1000, 11600, "B")], "h:7709/login_one"
+
+        async def tencent(_symbol):
+            return [Tick("09:31:00", 1500.0, 10, 15000, "B")]
+
+        async def capital(symbol):
+            if symbol == "600519.SH":
+                raise OSError("no host")
+            return [], "h:7709/login_one"
+
+        deps = self._deps(recorder)
+        with patch.object(post_close, "fetch_tdx_ticks", tdx_ticks), patch.object(post_close, "fetch_tencent_ticks", tencent), \
+                patch.object(post_close, "fetch_tdx_capital_changes", capital):
+            await post_close.job_tick_flow(deps, post_close.ArchiveState(), date(2026, 9, 18), EVENING)
+            with self.assertRaises(RuntimeError):     # one symbol answered without changes, the other failed: no rows
+                await post_close.job_capital_changes(deps, post_close.ArchiveState(), date(2026, 9, 18), EVENING)
+        ticks, capital_log = recorder.health_details
+        self.assertEqual((ticks["ok"], ticks["rows"], ticks["error"]), (True, 2, "600519.SH:OSError"))
+        self.assertEqual((capital_log["capability"], capital_log["ok"], capital_log["error"]),
+                         ("fundamentals.capital_changes", True, "600519.SH:OSError"), "TDX answered one of two symbols")
+
+    async def test_tdx_health_is_not_recorded_without_symbols(self):
+        recorder = Recorder()
+
+        async def nothing():
+            return []
+
+        deps = post_close.ArchiveDeps(collector=recorder.deps(), watch_symbols=nothing,
+                                      previous_trading_day=self._deps(recorder).previous_trading_day)
+        await post_close.job_tick_flow(deps, post_close.ArchiveState(), date(2026, 9, 18), EVENING)
+        await post_close.job_capital_changes(deps, post_close.ArchiveState(), date(2026, 9, 18), EVENING)
+        self.assertEqual(recorder.health_details, [], "an empty watchlist is not a TDX failure")
 
     async def test_valuation_projection_runs_after_raw_persistence_for_requested_date(self):
         recorder = Recorder()

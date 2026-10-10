@@ -242,13 +242,16 @@ async def job_daily_valuation_projection(deps: ArchiveDeps, state: ArchiveState,
 
 
 async def job_tick_flow(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    started = time_module.monotonic()
     symbols = list(await deps.watch_symbols())[:deps.max_tick_symbols]
-    observations, sources, failures = [], {"tdx_public": 0, "tencent_free": 0}, []
+    observations, sources, failures, tdx_failures, tdx_rows = [], {"tdx_public": 0, "tencent_free": 0}, [], [], 0
     for symbol in symbols:
         try:
             ticks, _host = await fetch_tdx_ticks(symbol, day)
             source = "tdx_public"
+            tdx_rows += len(ticks)
         except Exception as tdx_error:  # noqa: BLE001 - Tencent covers today's prints
+            tdx_failures.append(f"{symbol}:{type(tdx_error).__name__}")
             try:
                 ticks, source = await fetch_tencent_ticks(symbol), "tencent_free"
             except Exception as tencent_error:  # noqa: BLE001
@@ -258,12 +261,17 @@ async def job_tick_flow(deps: ArchiveDeps, state: ArchiveState, day: date, now: 
             observations.append(tick_flow_observation(symbol, day, ticks, source=source, observed_at=now))
             sources[source] += 1
     stored = await deps.collector.persist_observations("derived_tick_flow", "tick_flow_daily", observations) if observations else 0
+    if symbols:
+        await deps.collector.record_health("tdx_public", "ticks.session", sources["tdx_public"] > 0, tdx_rows,
+                                           round((time_module.monotonic() - started) * 1000),
+                                           ",".join(tdx_failures[:5]) or None)
     if symbols and not observations:
         raise RuntimeError(f"no tick source answered: {failures[:5]}")
     return {"symbols": len(symbols), "stored": stored, "sources": sources, "failures": failures[:10]}
 
 
 async def job_capital_changes(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    started = time_module.monotonic()
     symbols = list(await deps.watch_symbols())[:deps.max_tick_symbols]
     rows, failures = [], []
     for symbol in symbols:
@@ -273,6 +281,10 @@ async def job_capital_changes(deps: ArchiveDeps, state: ArchiveState, day: date,
         except Exception as error:  # noqa: BLE001
             failures.append(f"{symbol}:{type(error).__name__}")
     stored = await deps.collector.persist_observations("tdx_public", "capital_changes", rows) if rows else 0
+    if symbols:
+        await deps.collector.record_health("tdx_public", "fundamentals.capital_changes", len(failures) < len(symbols),
+                                           len(rows), round((time_module.monotonic() - started) * 1000),
+                                           ",".join(failures[:5]) or None)
     if symbols and not rows:
         raise RuntimeError(f"no TDX host answered the capital log: {failures[:5]}")
     return {"symbols": len(symbols), "rows": len(rows), "stored": stored, "failures": failures[:10]}
