@@ -11,7 +11,8 @@ python3 - "$ROOT" "$tmp" <<'PY'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1]); out = pathlib.Path(sys.argv[2])
 protocol = (root / "quant-service/app/datasources/sources/tdx_protocol.py").read_text(encoding="utf-8")
-candidates = (root / "scripts/data/tdx_host_candidates.txt").read_text(encoding="utf-8")
+candidates = "\n".join((root / name).read_text(encoding="utf-8") for name in (
+    "scripts/data/tdx_host_candidates.txt", "scripts/data/tdx_host_candidates_other.txt"))
 driver = (root / "scripts/probe-tdx-routes.py").read_text(encoding="utf-8")
 out.write_text(protocol + "\nEMBEDDED_HOSTS_TEXT = " + repr(candidates) + "\n" + driver + "\n", encoding="utf-8")
 PY
