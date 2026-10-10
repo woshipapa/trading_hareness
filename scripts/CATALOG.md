@@ -154,7 +154,7 @@
 | `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe from the owner egress over ssh stdin; it writes nothing on the owner. |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
 
-## CI and checks (16)
+## CI and checks (19)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -169,7 +169,10 @@
 | `verify-platform.sh` | platform | workstation and CI | One bounded, reproducible verification command for humans and maintenance |
 | `verify-quant-gateway-caller-contract.mjs` | platform | workstation and CI |  |
 | `verify-stock-brain-migration.py` | platform | workstation and CI | Real PostgreSQL acceptance check for the stock-brain migration path. |
+| `verify-tdx-files.py` | platform | workstation and CI | Probe TDX board/report files once per host and print JSON evidence. |
+| `verify-tdx-instruments.py` | platform | workstation and CI | Bounded, step-isolated TDX instrument verification. |
 | `verify-tdx-protocol.py` | platform | workstation and CI | Check ``app.datasources.sources.tdx_protocol`` against pytdx on a live host. |
+| `verify-tdx-zhb-extras.py` | platform | workstation and CI | Inventory and verify every member in a downloaded TDX ``zhb.zip``. |
 | `verify_architecture.py` | platform | workstation and CI | Fast, dependency-free architecture regression guard for local CI/agents. |
 | `verify_component_boundaries.py` | platform | workstation and CI | Validate the repository's logical component map and report impacted units. |
 | `verify_component_runtimes.py` | platform | workstation and CI | Check that every logical component has an isolated runtime contract. |
