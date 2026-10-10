@@ -16,7 +16,7 @@ from typing import Any, Final, Iterable
 
 from .contracts import (
     BINDING_STATES, CATEGORIES, DECLARED, DORMANT, GRAINS, LICENSES, LIVE_VERIFIED, RESOLVABLE_STATES,
-    RETIRED, SCOPES, UNVERIFIED, UNSUPPORTED, Binding, BindingSpec, CanonicalSchema, Capability, DataSource, FieldSpec, SourceLabel, Taxonomy,
+    RETIRED, SCOPES, UNSUPPORTED, Binding, BindingSpec, CanonicalSchema, Capability, DataSource, FieldSpec, SourceLabel, Taxonomy,
 )
 
 
@@ -636,13 +636,14 @@ TAXONOMIES: Final[dict[str, Taxonomy]] = {item.key: item for item in (
     Taxonomy("fuyao_ths_industry", "fuyao_ths", "ths_industry", DECLARED, 40, "320 个行业"),
     Taxonomy("fuyao_ths_region", "fuyao_ths", "ths_region", DECLARED, 50, "33 个地域"),
     # MAC board types (0-6); names from MAC documentation where available, else tdx_mac_type_N
-    Taxonomy("tdx_mac_type_0", "tdx_mac", "tdx_mac_board", UNVERIFIED, 70),
-    Taxonomy("tdx_mac_type_1", "tdx_mac", "tdx_mac_board", UNVERIFIED, 71),
-    Taxonomy("tdx_mac_type_2", "tdx_mac", "tdx_mac_board", UNVERIFIED, 72),
-    Taxonomy("tdx_mac_type_3", "tdx_mac", "tdx_mac_board", UNVERIFIED, 73),
-    Taxonomy("tdx_mac_type_4", "tdx_mac", "tdx_mac_board", UNVERIFIED, 74),
-    Taxonomy("tdx_mac_type_5", "tdx_mac", "tdx_mac_board", UNVERIFIED, 75),
-    Taxonomy("tdx_mac_type_6", "tdx_mac", "tdx_mac_board", UNVERIFIED, 76),
+    # MAC board types, named by number: the MAC report (docs/archive/tdx-route-mac.md) gives counts and sample
+    # codes but no meaning; type 2 returned no boards. Unverified, so never offered by taxonomies_for().
+    Taxonomy("tdx_mac_type_0", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 70),
+    Taxonomy("tdx_mac_type_1", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 71),
+    Taxonomy("tdx_mac_type_3", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 73),
+    Taxonomy("tdx_mac_type_4", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 74),
+    Taxonomy("tdx_mac_type_5", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 75),
+    Taxonomy("tdx_mac_type_6", "tdx_mac", "tdx_mac_board", UNSUPPORTED, 76),
 )}
 
 #: Groups in the THS concept tables whose membership is a qualification, not a

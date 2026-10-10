@@ -444,8 +444,8 @@ async def fetch_limit_prices(*, symbols: Sequence[str]) -> list[dict[str, Any]]:
         {
             "market": row["market"],
             "symbol": row["symbol"],
-            "limit_up": row.get("buy_price_limit"),
-            "limit_down": row.get("sell_price_limit"),
+            "limit_up": row["buy_price_limit"],
+            "limit_down": row["sell_price_limit"],
         }
         for row in rows
     ]
