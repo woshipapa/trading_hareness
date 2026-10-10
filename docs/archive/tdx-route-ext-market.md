@@ -131,3 +131,35 @@ charts. Suggested research-only capability keys are:
 All values should remain raw/research evidence with explicit `observed_at` and
 `available_at`; nothing from this route should feed a live threshold or order
 path without a separate promotion record.
+
+## Live check, 2026-10-10 (Claude, Mac egress)
+
+`python scripts/verify-tdx-ex-market.py` ran at 08:49 UTC on Saturday 2026-10-10 (raw output:
+`scripts/data/tdx_ex_market_verify_2026-10-10_mac.jsonl`).
+- The first candidate, 47.107.228.47:7719, timed out.
+- The next one, 112.74.214.43:7727, completed setup and login, then answered:
+  - count 107,163 instruments;
+  - 51 categories;
+  - 6,400 instrument rows in the bounded scan of 64 pages.
+
+The category rows confirm delta 2, D6:
+- The first byte is the broad type: 2 HK, 3 futures, 5 index, 13 US, 14 Germany, 15 Singapore.
+- The byte at offset 33 is the market id that requests use:
+  - 31 HK main board, 48 HK GEM, 49 HK funds, 98 HK dark pool;
+  - 47 CFFEX, 60 main contracts, 30/29/28 SHFE/DCE/CZCE;
+  - 74 US stocks, 73 Germany, 78 Singapore;
+  - 12 international indices.
+
+The parser reads them that way since 18bdb8eb.
+
+| sample | market id | price | pre-close | last two daily closes |
+| --- | ---: | ---: | ---: | --- |
+| 00700 | 31 | 424.80 | 411.40 | 2026-10-08 411.40, 2026-10-09 424.80 |
+| AAPL | 74 | 336.64 | 340.42 | 2026-10-08 340.42, 2026-10-09 336.64 |
+| IF2610 | 47 | 4,307.80 | 4,294.00 | 2026-10-08 4,304.00, 2026-10-09 4,307.80 |
+
+- 00700 and the IF2610 price equal the values recorded in delta 2, D3.
+- Prices arrive as float32 (424.8000183105469). A consumer must round them to the instrument's
+  precision.
+- The other host groups, the owner egress and an intraday cadence check were not part of this
+  run, so all context.* bindings stay UNSUPPORTED.

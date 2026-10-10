@@ -18,22 +18,13 @@ sys.path.insert(0, str(ROOT / "quant-service"))
 from app.datasources.sources.tdx_ex_market import TdxExMarketClient, TdxExMarketError  # noqa: E402
 
 PORTS = {7727, 7720, 7719, 7615}
-POOLS = (
-    Path(
-        "/Users/papa/codebase/.codex-wt/n8n-tdx-hostpool/scripts/data/tdx_host_candidates.txt"
-    ),
-    Path(
-        "/Users/papa/codebase/.codex-wt/n8n-tdx-other-clients/scripts/data/tdx_host_candidates_other.txt"
-    ),
-)
+POOLS = (ROOT / "scripts/data/tdx_host_candidates.txt", ROOT / "scripts/data/tdx_host_candidates_other.txt")
 
 
 def candidates() -> list[tuple[str, int]]:
     seen = set()
     out = []
     for path in POOLS:
-        if not path.exists():
-            continue
         for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
             value = raw.split("#", 1)[0].strip()
             if not value or ":" not in value:
@@ -95,9 +86,9 @@ def main() -> int:
                 if future:
                     samples["if"] = {
                         "instrument": future,
-                        "quote": client.quote(future["market"], future["code"]),
+                        "quote": client.quote(future["market_id"], future["code"]),
                         "bars": client.klines(
-                            4, future["market"], future["code"], 0, 5
+                            4, future["market_id"], future["code"], 0, 5
                         ),
                     }
                 index = _pick(
@@ -109,7 +100,7 @@ def main() -> int:
                 if index:
                     samples["international_index"] = {
                         "instrument": index,
-                        "quote": client.quote(index["market"], index["code"]),
+                        "quote": client.quote(index["market_id"], index["code"]),
                     }
                 fx = _pick(
                     instruments,
@@ -120,7 +111,7 @@ def main() -> int:
                 if fx:
                     samples["usd_cnh"] = {
                         "instrument": fx,
-                        "quote": client.quote(fx["market"], fx["code"]),
+                        "quote": client.quote(fx["market_id"], fx["code"]),
                     }
                 print(
                     json.dumps(
