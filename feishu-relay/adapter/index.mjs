@@ -30,7 +30,7 @@ import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { parseXhsCommand } from './xhs-command.mjs';
 import { matchResearchRoute } from './research-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
-import { hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
+import { createRouteBinder, hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import { resolveFrontendAssetPath } from './frontend-assets.mjs';
@@ -120,6 +120,7 @@ async function notifyOps(key, text) {
 const dashboardPort = Number(process.env.DASHBOARD_PORT ?? 3000);
 const dashboardHost = String(process.env.DASHBOARD_HOST ?? '0.0.0.0').trim() || '0.0.0.0';
 const larkAgentXHealthUrl = String(process.env.LARKX_BRIDGE_HEALTH_URL ?? 'http://127.0.0.1:8090/health').trim();
+const routeBinder = createRouteBinder({ baseUrl: larkAgentXHealthUrl, token: larkAgentXIngressToken });
 const longConnectionEnabled = String(process.env.FEISHU_LONG_CONNECTION_ENABLED ?? 'true').toLowerCase() !== 'false';
 const frontendDist = process.env.FRONTEND_DIST ?? '/app/frontend-dist';
 const quantFrontendDistConfigured = process.env.QUANT_FRONTEND_DIST ?? '/app/quant-frontend-dist';
@@ -2138,9 +2139,10 @@ const dashboard = createServer((request, response) => {
 		return;
 	}
 	if (url.pathname === '/api/group-relay/routes' && request.method === 'POST') {
-		void readJsonBody(request, 16 * 1024).then(createRelayRoute).then((route) => {
+		void readJsonBody(request, 16 * 1024).then(createRelayRoute).then(async (route) => {
+			const websocketBinding = await routeBinder.bind(route);
 			response.writeHead(201, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ route: publicRelayRoute(route) }));
+			response.end(JSON.stringify({ route: publicRelayRoute(route), websocket_binding: websocketBinding }));
 		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
 		return;
 	}
@@ -2148,14 +2150,30 @@ const dashboard = createServer((request, response) => {
 	if (relayRouteMatch && request.method === 'PUT') {
 		void readJsonBody(request, 16 * 1024).then((payload) => updateRelayRoute(relayRouteMatch[1], payload)).then((route) => {
 			if (!route) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '源群不存在' })); return; }
-			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-			response.end(JSON.stringify({ route: publicRelayRoute(route) }));
+			return routeBinder.bind(route).then((websocketBinding) => {
+				response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+				response.end(JSON.stringify({ route: publicRelayRoute(route), websocket_binding: websocketBinding }));
+			});
 		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
 		return;
 	}
+	const relayRouteBindMatch = /^\/api\/group-relay\/routes\/([A-Za-z0-9_-]+)\/bind$/.exec(url.pathname);
+	if (relayRouteBindMatch && request.method === 'POST') {
+		// Manual retry: bind an already-saved route (for example after a login
+		// expiry made the first attempt fail).
+		void ledger.relayRoutes().then(async (routes) => {
+			const route = routes.find((item) => item.key === relayRouteBindMatch[1]);
+			if (!route) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '源群不存在' })); return; }
+			const websocketBinding = await routeBinder.bind(route);
+			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ route: publicRelayRoute(route), websocket_binding: websocketBinding }));
+		}).catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
+		return;
+	}
 	if (relayRouteMatch && request.method === 'DELETE') {
-		void ledger.deleteRelayRoute(relayRouteMatch[1]).then((deleted) => {
+		void ledger.deleteRelayRoute(relayRouteMatch[1]).then(async (deleted) => {
 			if (!deleted) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '源群不存在' })); return; }
+			await routeBinder.unbind(relayRouteMatch[1]);
 			response.writeHead(204, { 'cache-control': 'no-store' }).end();
 		}).catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
 		return;

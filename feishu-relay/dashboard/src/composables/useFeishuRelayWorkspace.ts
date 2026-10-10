@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-import { groupRelayApi, type ExportBookmark, type ExportFormat } from '../api/group-relay';
+import { groupRelayApi, type ExportBookmark, type ExportFormat, type WebsocketBinding } from '../api/group-relay';
 import { feishuWorkbenchApi } from '../api/feishu-workbench';
 
 type OAuthScopeAudit = { required_scopes?: string[]; granted_scopes?: string[]; missing_scopes?: string[]; verified?: boolean | null };
@@ -342,10 +342,24 @@ export function useFeishuRelayWorkspace() {
   async function saveGroupRelayRoute() {
     const form = groupRelayRouteForm.value; groupRelayRouteSaving.value = true;
     try {
-      await groupRelayApi.upsertRoute<{ route: GroupRelaySourceStatus }>(form.key, { chat_name: form.chat_name, chat_id: form.chat_id || undefined, tag: form.tag, target_chat_ids: form.target_chat_ids_text.split(',').map((value) => value.trim()).filter(Boolean), target_chat_names: form.target_chat_names_text.split(',').map((value) => value.trim()).filter(Boolean), enabled: form.enabled });
-      groupRelayRouteDialog.value = false; ElMessage.success(form.key ? '源群配置已更新' : '源群已注册；发送一条新消息后将自动绑定 LarkAgentX WebSocket'); await loadGroupRelayStatus();
+      const saved = await groupRelayApi.upsertRoute<{ route: GroupRelaySourceStatus; websocket_binding?: WebsocketBinding }>(form.key, { chat_name: form.chat_name, chat_id: form.chat_id || undefined, tag: form.tag, target_chat_ids: form.target_chat_ids_text.split(',').map((value) => value.trim()).filter(Boolean), target_chat_names: form.target_chat_names_text.split(',').map((value) => value.trim()).filter(Boolean), enabled: form.enabled });
+      groupRelayRouteDialog.value = false; reportWebsocketBinding(saved.websocket_binding, form.key ? '源群配置已更新' : '源群已注册'); await loadGroupRelayStatus();
     } catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
     finally { groupRelayRouteSaving.value = false; }
+  }
+  // The route is already saved when this runs; a failed bind only means the
+  // group will be bound by its first message instead, so it is a warning.
+  function reportWebsocketBinding(binding: WebsocketBinding | undefined, saved: string) {
+    if (!binding || binding.status === 'unbound' || binding.status === 'not_bound') { ElMessage.success(saved); return; }
+    if (binding.status === 'bound') { ElMessage.success(`${saved}；已绑定 WebSocket 群 ${binding.chat_id}`); return; }
+    ElMessage.warning(`${saved}；WebSocket 绑定未完成（${binding.message ?? binding.status}），该群的首条消息到达时会自动绑定`);
+  }
+  async function rebindGroupRelayRoute(route: GroupRelaySourceStatus) {
+    try {
+      const result = await groupRelayApi.bindRoute<{ websocket_binding?: WebsocketBinding }>(route.key);
+      reportWebsocketBinding(result.websocket_binding, `“${route.chat_name}”`);
+      await loadGroupRelayStatus();
+    } catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
   }
   async function setGroupRelayRouteEnabled(route: GroupRelaySourceStatus, enabled: boolean) {
     try { await groupRelayApi.upsertRoute(route.key, { chat_name: route.chat_name, tag: route.tag, enabled }); ElMessage.success(enabled ? '已启用，下一次轮询生效' : '已停用该源群'); await loadGroupRelayStatus(); }
@@ -358,6 +372,7 @@ export function useFeishuRelayWorkspace() {
 
   return {
     groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistorySource, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
+    rebindGroupRelayRoute,
     qrDialog, qrSession, qrStatusName, qrPolling, startQrLogin, stopQrPolling, authStateType, authStateText,
     oauthDialog, oauthAuthorizeUrl, oauthRedirectUri, oauthCode, oauthSubmitting, startOauthReauth, submitOauthCode, copyOauthUrl, oauthExpiryText, oauthExpiryTagType,
     feishuWorkbench, feishuWorkbenchMessages, feishuWorkbenchLoading, feishuWorkbenchError, feishuWorkbenchAction, workbenchSearch, workbenchSearchResult, workbenchIntegrationDialog, workbenchIntegration,

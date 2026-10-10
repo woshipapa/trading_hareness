@@ -47,6 +47,13 @@ export type SendStats = {
   last_failure: { id: number; chat_id: string; error: string | null; created_at: number } | null;
 };
 
+export type WebsocketBinding = {
+  status: 'bound' | 'unbound' | 'not_bound' | 'failed' | 'unavailable';
+  chat_id?: string | null;
+  chat_name?: string | null;
+  message?: string;
+};
+
 export type SendInput = { chat_id: string; text: string; root_id?: string; idempotency_key?: string };
 
 export const groupRelayApi = {
@@ -87,5 +94,6 @@ export const groupRelayApi = {
       ? putJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}`, input)
       : postJson<T>('/api/group-relay/routes', input)
   ),
+  bindRoute: <T>(key: string) => postJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}/bind`, {}),
   removeRoute: <T>(key: string) => deleteJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}`),
 };

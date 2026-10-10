@@ -482,3 +482,43 @@ export function normalizeLarkAgentXUnsupportedMessage(input, { now = Date.now } 
 		sender: { sender_id: String(input.from_id ?? input.sender_id ?? '') },
 	};
 }
+
+/** Client for the bridge's /routes/bind and /routes/unbind endpoints.
+ *
+ * Saving a route resolves its group name to the WebSocket chat id in the
+ * bridge and persists the mapping at once. Failure is reported, never thrown:
+ * an unbound route still falls back to first-message binding. */
+export function createRouteBinder({ baseUrl, token, fetchImpl = fetch }) {
+	const configured = Boolean(baseUrl && token);
+	async function call(pathname, payload, timeoutMs) {
+		const url = new URL(baseUrl);
+		url.pathname = pathname;
+		url.search = '';
+		return fetchImpl(url, {
+			method: 'POST',
+			headers: { 'x-larkagentx-token': token, 'content-type': 'application/json' },
+			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(timeoutMs),
+		});
+	}
+	return {
+		async bind(route) {
+			if (!configured) return { status: 'unavailable', message: 'LarkAgentX 桥接未配置' };
+			// A disabled route must not keep a WebSocket subscription.
+			const enabled = route.enabled !== false;
+			try {
+				const upstream = await call(enabled ? '/routes/bind' : '/routes/unbind',
+					{ source_key: route.key, chat_name: route.chatName, source_chat_id: route.chatId ?? '' }, 25_000);
+				const body = await upstream.json().catch(() => ({}));
+				if (upstream.ok) return { status: body.status ?? 'bound', chat_id: body.chat_id ?? null, chat_name: body.chat_name ?? null };
+				return { status: 'failed', message: String(body.message ?? upstream.statusText ?? '绑定失败').slice(0, 240) };
+			} catch (error) {
+				return { status: 'unavailable', message: `LarkAgentX 桥接不可用：${error instanceof Error ? error.message : String(error)}`.slice(0, 240) };
+			}
+		},
+		async unbind(sourceKey) {
+			if (!configured) return;
+			try { await call('/routes/unbind', { source_key: sourceKey }, 10_000); } catch { /* the route is gone; a stale binding is inert */ }
+		},
+	};
+}

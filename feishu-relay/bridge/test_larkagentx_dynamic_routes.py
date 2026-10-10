@@ -133,5 +133,98 @@ class LarkAgentXDynamicRouteTests(unittest.TestCase):
 			self.assertEqual(bindings["relay_persisted"]["chat_name"], "持久化测试群")
 
 
+	def _binding_instance(self, directory, *, search, names, static=()):
+		instance = bridge.Bridge.__new__(bridge.Bridge)
+		instance.dynamic_routes = {}
+		instance.static_listen_chats = set(static)
+		instance.listen_chats = set(static)
+		instance.websocket_chat_ids = {c for c in static if c.isdigit()}
+		instance.chat_validation = {}
+		instance.chat_stats = {}
+		instance.route_bindings = {}
+		instance.route_bindings_lock = threading.RLock()
+		instance.route_bindings_path = Path(directory) / "route-bindings.json"
+		instance.client = type("Client", (), {
+			"search": lambda _self, query: search,
+			"get_chat_info": lambda _self, chat_id: {"name": names.get(chat_id, "")},
+		})()
+		return instance
+
+	def test_bind_route_resolves_websocket_id_from_the_typed_name_and_persists_it(self):
+		with tempfile.TemporaryDirectory() as directory:
+			instance = self._binding_instance(
+				directory,
+				search=[{"type": "group", "id": "9000000000000000010", "title": "<h>小杰夜报B</h>"}],
+				names={"9000000000000000010": "小杰夜报B"},
+			)
+			result = instance.bind_route({"source_key": "relay_x", "chat_name": "小杰夜报B", "source_chat_id": "oc_demo"})
+
+			self.assertEqual(result["status"], "bound")
+			self.assertEqual(result["chat_id"], "9000000000000000010")
+			self.assertIn("9000000000000000010", instance.websocket_chat_ids)
+			self.assertEqual(instance.dynamic_routes["9000000000000000010"]["source_chat_id"], "oc_demo")
+			reloaded = bridge.Bridge.__new__(bridge.Bridge)
+			reloaded.route_bindings_path = instance.route_bindings_path
+			self.assertEqual(reloaded._load_route_bindings()["relay_x"]["chat_id"], "9000000000000000010")
+
+	def test_bind_route_refuses_ambiguous_or_mismatched_names(self):
+		from group_lookup import GroupLookupError
+		with tempfile.TemporaryDirectory() as directory:
+			twin = self._binding_instance(
+				directory,
+				search=[{"type": "group", "id": "1", "title": "同名"}, {"type": "group", "id": "2", "title": "同名"}],
+				names={"1": "同名", "2": "同名"},
+			)
+			with self.assertRaises(GroupLookupError):
+				twin.bind_route({"source_key": "relay_x", "chat_name": "同名"})
+			self.assertFalse(twin.websocket_chat_ids)
+			mismatch = self._binding_instance(
+				directory,
+				search=[{"type": "group", "id": "3", "title": "目标群"}],
+				names={"3": "另一个群"},
+			)
+			with self.assertRaises(GroupLookupError):
+				mismatch.bind_route({"source_key": "relay_x", "chat_name": "目标群"})
+			self.assertFalse(mismatch.route_bindings)
+
+	def test_rebinding_a_route_drops_the_old_subscription_but_never_an_env_owned_one(self):
+		with tempfile.TemporaryDirectory() as directory:
+			instance = self._binding_instance(
+				directory, static={"9000000000000000099"},
+				search=[{"type": "group", "id": "9000000000000000011", "title": "新群"}],
+				names={"9000000000000000011": "新群"},
+			)
+			# the route was bound to a dashboard-added group first
+			instance._register_runtime_route("9000000000000000020", {"source_key": "relay_x", "chat_name": "旧群"})
+			instance.route_bindings["relay_x"] = {"source_key": "relay_x", "chat_id": "9000000000000000020", "chat_name": "旧群", "source_chat_id": ""}
+
+			result = instance.bind_route({"source_key": "relay_x", "chat_name": "新群"})
+
+			self.assertEqual(result["replaced_chat_id"], "9000000000000000020")
+			self.assertNotIn("9000000000000000020", instance.websocket_chat_ids)
+			self.assertIn("9000000000000000011", instance.websocket_chat_ids)
+			# an env-owned chat survives an unbind of the route that points at it
+			instance.route_bindings["relay_env"] = {"source_key": "relay_env", "chat_id": "9000000000000000099", "chat_name": "env群", "source_chat_id": ""}
+			instance.unbind_route({"source_key": "relay_env"})
+			self.assertIn("9000000000000000099", instance.websocket_chat_ids)
+
+	def test_unbind_route_removes_the_persisted_mapping(self):
+		with tempfile.TemporaryDirectory() as directory:
+			instance = self._binding_instance(
+				directory,
+				search=[{"type": "group", "id": "9000000000000000012", "title": "临时群"}],
+				names={"9000000000000000012": "临时群"},
+			)
+			instance.bind_route({"source_key": "relay_t", "chat_name": "临时群"})
+			result = instance.unbind_route({"source_key": "relay_t"})
+
+			self.assertEqual(result["status"], "unbound")
+			self.assertNotIn("9000000000000000012", instance.websocket_chat_ids)
+			reloaded = bridge.Bridge.__new__(bridge.Bridge)
+			reloaded.route_bindings_path = instance.route_bindings_path
+			self.assertNotIn("relay_t", reloaded._load_route_bindings())
+			self.assertEqual(instance.unbind_route({"source_key": "relay_t"})["status"], "not_bound")
+
+
 if __name__ == "__main__":
 	unittest.main()

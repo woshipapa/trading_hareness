@@ -275,3 +275,45 @@ test('a complete rich-text card with real text keeps its image and the direct pa
 	assert.equal(hasLarkAgentXCardPayload(complete), true);
 	assert.equal(isDirectLarkAgentXRelayType(complete), true);
 });
+
+import { createRouteBinder } from './larkagentx-ingress.mjs';
+
+function fakeBridge(responses) {
+	const calls = [];
+	const fetchImpl = async (url, init) => {
+		calls.push({ path: new URL(url).pathname, body: JSON.parse(init.body), token: init.headers['x-larkagentx-token'] });
+		const next = responses.shift();
+		if (next instanceof Error) throw next;
+		return { ok: next.ok, statusText: next.statusText ?? '', json: async () => next.body };
+	};
+	return { calls, fetchImpl };
+}
+
+test('a saved route is bound to its WebSocket chat id and the result is reported', async () => {
+	const bridge = fakeBridge([{ ok: true, body: { status: 'bound', chat_id: '7694956403840011216', chat_name: '小杰夜报B' } }]);
+	const binder = createRouteBinder({ baseUrl: 'http://127.0.0.1:8090/health', token: 'secret', fetchImpl: bridge.fetchImpl });
+	const result = await binder.bind({ key: 'relay_x', chatName: '小杰夜报B', chatId: 'oc_demo', enabled: true });
+	assert.deepEqual(result, { status: 'bound', chat_id: '7694956403840011216', chat_name: '小杰夜报B' });
+	assert.equal(bridge.calls[0].path, '/routes/bind');
+	assert.deepEqual(bridge.calls[0].body, { source_key: 'relay_x', chat_name: '小杰夜报B', source_chat_id: 'oc_demo' });
+	assert.equal(bridge.calls[0].token, 'secret');
+});
+
+test('a disabled route is unbound instead of kept subscribed', async () => {
+	const bridge = fakeBridge([{ ok: true, body: { status: 'unbound' } }]);
+	const binder = createRouteBinder({ baseUrl: 'http://127.0.0.1:8090/health', token: 't', fetchImpl: bridge.fetchImpl });
+	await binder.bind({ key: 'relay_x', chatName: 'A', enabled: false });
+	assert.equal(bridge.calls[0].path, '/routes/unbind');
+});
+
+test('a refused or unreachable bind is reported without throwing', async () => {
+	const refused = fakeBridge([{ ok: false, body: { message: '有 2 个同名群，拒绝自动绑定：A' } }]);
+	const binder = createRouteBinder({ baseUrl: 'http://127.0.0.1:8090/health', token: 't', fetchImpl: refused.fetchImpl });
+	const failed = await binder.bind({ key: 'k', chatName: 'A' });
+	assert.equal(failed.status, 'failed');
+	assert.match(failed.message, /同名群/);
+	const down = fakeBridge([new Error('ECONNREFUSED')]);
+	const offline = createRouteBinder({ baseUrl: 'http://127.0.0.1:8090/health', token: 't', fetchImpl: down.fetchImpl });
+	assert.equal((await offline.bind({ key: 'k', chatName: 'A' })).status, 'unavailable');
+	assert.equal((await createRouteBinder({ baseUrl: '', token: '' }).bind({ key: 'k', chatName: 'A' })).status, 'unavailable');
+});

@@ -39,6 +39,7 @@ from event_spool import EventSpool
 from history_archive import HistoryArchive
 from send_gate import SendConflict, SendGate, SendRateLimited
 from repair_scope import repair_allowed
+from group_lookup import GroupLookupError, unique_group_id
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
@@ -708,6 +709,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				result = self.bridge.send(payload)
 				self.send_json(200, result)
 				return
+			if self.path == "/routes/bind":
+				self.send_json(200, self.bridge.bind_route(payload))
+				return
+			if self.path == "/routes/unbind":
+				self.send_json(200, self.bridge.unbind_route(payload))
+				return
 			if self.path == "/private-gap-repair":
 				result = asyncio.run(self.bridge.repair_private_positions(payload, reason="manual_private_gap_repair"))
 				self.send_json(200, result)
@@ -723,6 +730,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				self.send_json(200, self.bridge.qr_login.poll(session_id))
 				return
 			self.send_json(404, {"status": "not_found"})
+		except GroupLookupError as error:
+			LOG.warning("route bind refused path=%s: %s", self.path, error)
+			self.send_json(422, {"status": "unresolved", "message": str(error)[:240]})
 		except SendRateLimited as error:
 			LOG.warning("send rate limited scope=%s retry_after=%s", error.scope, error.retry_after)
 			self.send_json(429, {"status": "rate_limited", "scope": error.scope, "retry_after": error.retry_after, "message": str(error)}, {"retry-after": str(error.retry_after)})
@@ -768,6 +778,7 @@ class Bridge:
 			xhs_enabled=self.xhs_command_lane_enabled,
 			xhs_commands=self.xhs_command_chat_ids,
 		)
+		self.static_listen_chats = set(self.listen_chats)
 		self.send_chats = csv_env("LARKX_SEND_CHAT_IDS")
 		if not self.listen_chats:
 			raise RuntimeError("LARKX_LISTEN_CHAT_IDS must contain at least one chat ID")
@@ -1034,13 +1045,72 @@ class Bridge:
 		try:
 			with self.route_bindings_lock:
 				self.route_bindings[source_key] = binding
-				self.route_bindings_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-				temporary = self.route_bindings_path.with_name(f".{self.route_bindings_path.name}.{os.getpid()}.tmp")
-				temporary.write_text(json.dumps({"version": 1, "bindings": self.route_bindings}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-				os.chmod(temporary, 0o600)
-				os.replace(temporary, self.route_bindings_path)
+				self._flush_route_bindings_locked()
 		except OSError as error:
 			LOG.warning("持久化 LarkAgentX 路由绑定失败 source_key=%s：%s", source_key, error)
+
+	def _flush_route_bindings_locked(self) -> None:
+		self.route_bindings_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+		temporary = self.route_bindings_path.with_name(f".{self.route_bindings_path.name}.{os.getpid()}.tmp")
+		temporary.write_text(json.dumps({"version": 1, "bindings": self.route_bindings}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+		os.chmod(temporary, 0o600)
+		os.replace(temporary, self.route_bindings_path)
+
+	def _unregister_runtime_route(self, chat_id: str) -> None:
+		chat_id = str(chat_id or "").strip()
+		self.dynamic_routes.pop(chat_id, None)
+		if chat_id in getattr(self, "static_listen_chats", set()):
+			return  # owned by LARKX_LISTEN_CHAT_IDS: stays subscribed
+		self.listen_chats.discard(chat_id)
+		self.websocket_chat_ids.discard(chat_id)
+		if hasattr(self, "chat_validation"):
+			self.chat_validation.pop(chat_id, None)
+		if hasattr(self, "chat_stats"):
+			self.chat_stats.pop(chat_id, None)
+
+	def bind_route(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""Resolve a typed group name to its WebSocket chat id and persist the mapping now."""
+		source_key = str(payload.get("source_key", "")).strip()
+		chat_name = str(payload.get("chat_name", "")).strip()
+		source_chat_id = str(payload.get("source_chat_id", "")).strip()
+		if not source_key or len(source_key) > 128:
+			raise ValueError("source_key 不能为空且不能超过 128 字符")
+		if not chat_name or len(chat_name) > 120:
+			raise ValueError("chat_name 必须是 1–120 字")
+		if self.client is None:
+			raise RuntimeError("尚未登录(needs_login),无法解析群;请先完成扫码登录")
+		chat_id = unique_group_id(self.client.search(chat_name), chat_name)
+		info = self.client.get_chat_info(chat_id) or {}
+		verified_name = str(info.get("name") or "").strip()
+		if verified_name != chat_name:
+			raise GroupLookupError(f"数字 ID {chat_id} 的群名是「{verified_name or '未知'}」，与「{chat_name}」不符，拒绝绑定")
+		with self.route_bindings_lock:
+			for other_key, other in self.route_bindings.items():
+				if other_key != source_key and str(other.get("chat_id", "")) == chat_id:
+					raise GroupLookupError(f"该群已绑定到另一条路由 {other_key}，拒绝重复绑定")
+			previous = str(self.route_bindings.get(source_key, {}).get("chat_id", ""))
+		route = {"source_key": source_key, "chat_name": chat_name, "source_chat_id": source_chat_id}
+		if previous and previous != chat_id:
+			self._unregister_runtime_route(previous)
+		self._register_runtime_route(chat_id, route)
+		self._persist_route_binding(chat_id, route)
+		self.chat_validation[chat_id] = {"state": "verified", "name": verified_name, "checked_at": datetime.now(timezone.utc).isoformat(), "error": None}
+		LOG.info("手动绑定 LarkAgentX 源群 chat_id=%s name=%s source_key=%s", chat_id, verified_name, source_key)
+		return {"status": "bound", "source_key": source_key, "chat_id": chat_id, "chat_name": verified_name, "replaced_chat_id": previous if previous and previous != chat_id else None}
+
+	def unbind_route(self, payload: dict[str, Any]) -> dict[str, Any]:
+		source_key = str(payload.get("source_key", "")).strip()
+		if not source_key:
+			raise ValueError("source_key 不能为空")
+		with self.route_bindings_lock:
+			binding = self.route_bindings.pop(source_key, None)
+			if binding is not None:
+				self._flush_route_bindings_locked()
+		if binding is None:
+			return {"status": "not_bound", "source_key": source_key}
+		self._unregister_runtime_route(binding.get("chat_id", ""))
+		LOG.info("解除 LarkAgentX 源群绑定 chat_id=%s source_key=%s", binding.get("chat_id"), source_key)
+		return {"status": "unbound", "source_key": source_key, "chat_id": binding.get("chat_id")}
 
 	def _apply_catalog_bindings(self, routes: list[dict[str, str]]) -> None:
 		for route in routes:
@@ -1460,13 +1530,13 @@ class Bridge:
 	def _private_repair_allowed(self, chat_id: str) -> bool:
 		return repair_allowed(
 			chat_id, websocket_chat_ids=self.websocket_chat_ids,
-			configured_chat_ids=self.private_gap_repair_chat_ids, dynamic_chat_ids=self.dynamic_routes,
+			configured_chat_ids=self.private_gap_repair_chat_ids, dynamic_chat_ids=getattr(self, "dynamic_routes", {}),
 		)
 
 	def _private_tail_repair_allowed(self, chat_id: str) -> bool:
 		return (
 			self._private_repair_allowed(chat_id)
-			and (not self.private_tail_repair_chat_ids or chat_id in self.private_tail_repair_chat_ids or chat_id in self.dynamic_routes)
+			and (not self.private_tail_repair_chat_ids or chat_id in self.private_tail_repair_chat_ids or chat_id in getattr(self, "dynamic_routes", {}))
 		)
 
 	def _private_repair_chunks(self, start: int, end: int) -> list[tuple[int, int]]:

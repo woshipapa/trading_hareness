@@ -34,7 +34,7 @@ const dashboard = useFeishuDashboardWorkspace();
 
   <el-dialog v-model="dashboard.groupRelayRouteDialog" :title="dashboard.groupRelayRouteForm.key ? '编辑源群' : '新增源群'" width="520px" destroy-on-close>
     <el-form label-position="top" @submit.prevent="dashboard.saveGroupRelayRoute">
-      <el-alert title="保存时会用用户读取权限搜索群名；新增源群会等待下一条消息自动绑定 LarkAgentX WebSocket。" type="info" :closable="false" show-icon class="section-gap" />
+      <el-alert title="保存时会用用户读取权限按群名解析 chat_id，并立即解析 WebSocket 数字 ID、保存映射；群名重复或不在本账号群列表时会提示，首条消息到达时仍会自动绑定。" type="info" :closable="false" show-icon class="section-gap" />
       <el-form-item label="源群名称" required><el-input v-model="dashboard.groupRelayRouteForm.chat_name" maxlength="120" placeholder="例如：新野人哥会员群【禁言】" /></el-form-item>
       <el-form-item label="转发标签" required><el-input v-model="dashboard.groupRelayRouteForm.tag" maxlength="32" placeholder="例如：quanneng"><template #prepend>#</template></el-input></el-form-item>
       <el-form-item label="群 chat_id（可选）"><el-input v-model="dashboard.groupRelayRouteForm.chat_id" placeholder="oc_xxx" /></el-form-item>
