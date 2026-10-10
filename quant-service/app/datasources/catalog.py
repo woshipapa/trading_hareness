@@ -244,7 +244,7 @@ _RAW = "raw_market_observations:capability="
 _TDX_TICKS_SPEC = BindingSpec(
     field_map={"price": "price", "volume": "volume", "native_price": "price", "native_volume": "volume",
                "side": "side", "time": "time"},
-    unit_factors={"volume": 1.0},
+    unit_factors={"volume": 1},
     time_semantics="effective=成交时刻; available=采集时刻",
     handshake_profile="login_one|legacy_3",
     max_batch=2000,

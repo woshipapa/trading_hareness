@@ -18,7 +18,7 @@ class ResolverQualityTests(unittest.IsolatedAsyncioTestCase):
         result = await resolver.fetch("ticks.session", request=CapabilityRequest(
             "ticks.session", required_fields=("price", "volume")))
         self.assertEqual(result.rows[0]["price"], 2.5)
-        self.assertEqual(result.rows[0]["volume"], 3.0)
+        self.assertEqual(result.rows[0]["volume"], 3)
         self.assertEqual(result.quality.schema, "canonical")
 
     async def test_required_fields_skip_spec_binding_before_fetch(self):
