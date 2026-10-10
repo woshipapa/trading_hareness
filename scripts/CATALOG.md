@@ -153,7 +153,7 @@
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
 | `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe from the owner egress over ssh stdin; it writes nothing on the owner. |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
-| `verify-tdx-legacy-misc.py` | quant-research | workstation | Probe legacy TDX commands and emit bounded, read-only JSON evidence. |
+| `verify-tdx-legacy-misc.py` | quant-research | workstation | Probe the supported legacy TDX ranking and index-overview commands. |
 
 ## CI and checks (16)
 
