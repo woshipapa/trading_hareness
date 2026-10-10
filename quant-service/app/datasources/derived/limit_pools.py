@@ -28,8 +28,9 @@ def _cents(price: float) -> int:
 
 
 def derive_limit_pools(snapshot_rows: Iterable[Mapping[str, Any]], limit_rows: Iterable[Mapping[str, Any]],
-                       observed_at: datetime) -> tuple[list[dict[str, Any]], int]:
-    """The members of the three pools, each row tagged ``pool``, and how many snapshot securities were left out.
+                       observed_at: datetime) -> tuple[dict[str, list[dict[str, Any]]], int]:
+    """The members of the three pools, keyed ``limit_up``, ``broken`` and ``limit_down``, and how many snapshot
+    securities were left out.
 
     ``snapshot_rows`` (``symbol``, ``price``, ``high``) and ``limit_rows`` (``symbol``, ``limit_up``,
     ``limit_down``) are joined by symbol and compared in cents:
@@ -45,7 +46,7 @@ def derive_limit_pools(snapshot_rows: Iterable[Mapping[str, Any]], limit_rows: I
     ``up_limit`` (``down_limit`` in ``limit_down``) in yuan, and ``observed_at``.
     """
     bands = {row["symbol"]: (_cents(row["limit_up"]), _cents(row["limit_down"])) for row in limit_rows}
-    members: list[dict[str, Any]] = []
+    pools: dict[str, list[dict[str, Any]]] = {"limit_up": [], "broken": [], "limit_down": []}
     without_limit = 0
     for row in snapshot_rows:
         up, down = bands.get(row["symbol"], (0, 0))
@@ -57,21 +58,24 @@ def derive_limit_pools(snapshot_rows: Iterable[Mapping[str, Any]], limit_rows: I
             continue
         member = {"symbol": row["symbol"], "price": price / 100, "high": high / 100, "observed_at": observed_at}
         if price == up:
-            members.append({"pool": "limit_up", **member, "up_limit": up / 100})
+            pools["limit_up"].append({**member, "up_limit": up / 100})
         if high == up and price < up:
-            members.append({"pool": "broken", **member, "up_limit": up / 100})
+            pools["broken"].append({**member, "up_limit": up / 100})
         if price == down:
-            members.append({"pool": "limit_down", **member, "down_limit": down / 100})
-    return members, without_limit
+            pools["limit_down"].append({**member, "down_limit": down / 100})
+    return pools, without_limit
 
 
-async def fetch_limit_pools(*, trade_date: date) -> CapabilityEvidence:
-    """Read the all-A snapshot, then the limit prices of exactly its symbols, and derive the three pools.
+async def _read_limit_pools(*, trade_date: date) -> dict[str, CapabilityEvidence]:
+    """Read the all-A snapshot, then the limit prices of exactly its symbols, once, and derive the three pools.
 
-    ``rows`` are the members of all three pools, each tagged ``pool``.  The snapshot is live, so only the current
-    session can be derived: ``trade_date`` is compared with the Asia/Shanghai date, and on a day without a session
-    the snapshot is the last close.  ``coverage`` is the share of snapshot securities that have a limit price;
-    ``available_at`` is the later of the two collection times.
+    One evidence per pool, keyed like ``derive_limit_pools`` and sharing the coverage, the warnings and
+    ``available_at``: ``coverage`` is the share of snapshot securities that have a limit price, ``available_at``
+    the later of the two collection times.  The three adapters return one each; a collector that stores all
+    three pools calls this once instead.
+
+    The snapshot is live, so only the current session can be derived: ``trade_date`` is compared with the
+    Asia/Shanghai date, and on a day without a session the snapshot is the last close.
     """
     today = cn_today()
     if trade_date != today:
@@ -80,14 +84,30 @@ async def fetch_limit_pools(*, trade_date: date) -> CapabilityEvidence:
             f"not {trade_date}")
     snapshot = await tdx_legacy_misc.fetch_all_a_snapshot()
     limits = await tdx_mac.fetch_limit_prices(symbols=[row["symbol"] for row in snapshot.rows])
-    members, without_limit = derive_limit_pools(snapshot.rows, limits.rows, snapshot.available_at_max)
+    pools, without_limit = derive_limit_pools(snapshot.rows, limits.rows, snapshot.available_at_max)
     warnings = (*snapshot.warnings, *limits.warnings)
     if without_limit:
         warnings += (f"limit_price_missing={without_limit}",)
     available_at = max(snapshot.available_at_max, limits.available_at_max)
-    return CapabilityEvidence(
-        members, coverage=(len(snapshot.rows) - without_limit) / len(snapshot.rows),
-        available_at_min=available_at, available_at_max=available_at, warnings=warnings)
+    coverage = (len(snapshot.rows) - without_limit) / len(snapshot.rows)
+    return {pool: CapabilityEvidence(members, coverage=coverage, available_at_min=available_at,
+                                     available_at_max=available_at, warnings=warnings)
+            for pool, members in pools.items()}
 
 
-__all__ = ["derive_limit_pools", "fetch_limit_pools"]
+async def fetch_limit_up_pool(*, trade_date: date) -> CapabilityEvidence:
+    """The securities whose price is at the up limit at the snapshot moment."""
+    return (await _read_limit_pools(trade_date=trade_date))["limit_up"]
+
+
+async def fetch_broken_pool(*, trade_date: date) -> CapabilityEvidence:
+    """The securities whose day high touched the up limit and whose price is below it."""
+    return (await _read_limit_pools(trade_date=trade_date))["broken"]
+
+
+async def fetch_limit_down_pool(*, trade_date: date) -> CapabilityEvidence:
+    """The securities whose price is at the down limit at the snapshot moment."""
+    return (await _read_limit_pools(trade_date=trade_date))["limit_down"]
+
+
+__all__ = ["derive_limit_pools", "fetch_broken_pool", "fetch_limit_down_pool", "fetch_limit_up_pool"]

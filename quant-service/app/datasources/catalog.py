@@ -272,7 +272,7 @@ def _bind(source: str, capability: str, priority: int, status: str, store: str |
 
 _EVT = "market_events:event_type="
 _RAW = "raw_market_observations:capability="
-#: The three pools derived from the TDX snapshot and the MAC limit prices come from one read of one adapter.
+#: The three pools derived from the TDX snapshot and the MAC limit prices share one contract.
 _TDX_POOL_SPEC = BindingSpec(
     params={"trade_date": "current session only; any other date is a ValueError"},
     field_map={"symbol": "symbol"},
@@ -280,7 +280,8 @@ _TDX_POOL_SPEC = BindingSpec(
 _TDX_POOL_NOTE = (
     "tdx_public quote.all_a_snapshot（0x054b）与 tdx_mac limits.prices（0x122b）按 0.01 元整数分比较自算；"
     "只有快照时刻的成员关系：无首封/末封时间、无原因、无连板数、无封单额；永不替代供应商池作决策；"
-    "一次读取返回三个池的全部成员（行带 pool 字段）；无涨跌停价的证券不入池，计入 coverage 与 warnings 的 limit_price_missing")
+    "三个池的适配器各自读一次上游、只返回自己池的成员，三个池要同源一致须由采集器读一次后分别落库；"
+    "无涨跌停价的证券不入池，计入 coverage 与 warnings 的 limit_price_missing")
 
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot
@@ -465,11 +466,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("eastmoney_ztb", "limits.broken_pool", 50, DECLARED, _RAW + "limit_pool_broken", "app/datasources/sources/eastmoney_ztb.py"),
     _bind("fuyao_ths", "limits.limit_down_pool", 12, DECLARED, _EVT + "limit_down_pool", "app/market_event_capture.py"),
     _bind("eastmoney_ztb", "limits.limit_down_pool", 50, DECLARED, _RAW + "limit_pool_limit_down", "app/datasources/sources/eastmoney_ztb.py"),
-    *(_bind("derived_tdx_limits", capability, 90, UNSUPPORTED, None, "app/datasources/derived/limit_pools.py:fetch_limit_pools",
-            "仅当前会话快照，无历史", notes=rule + _TDX_POOL_NOTE, spec=_TDX_POOL_SPEC) for capability, rule in (
-        ("limits.limit_up_pool", "涨停池：现价等于涨停价（limit_up_time、reason、board_count、seal_money 不可得）；"),
-        ("limits.broken_pool", "炸板池：最高价等于涨停价且现价低于涨停价，炸板后已回封的在涨停池（open_times 不可得）；"),
-        ("limits.limit_down_pool", "跌停池：现价等于跌停价（seal_money 不可得）；"),
+    *(_bind("derived_tdx_limits", capability, 90, UNSUPPORTED, None, f"app/datasources/derived/limit_pools.py:{adapter}",
+            "仅当前会话快照，无历史", notes=rule + _TDX_POOL_NOTE, spec=_TDX_POOL_SPEC)
+      for capability, adapter, rule in (
+        ("limits.limit_up_pool", "fetch_limit_up_pool", "涨停池：现价等于涨停价（limit_up_time、reason、board_count、seal_money 不可得）；"),
+        ("limits.broken_pool", "fetch_broken_pool", "炸板池：最高价等于涨停价且现价低于涨停价，炸板后已回封的在涨停池（open_times 不可得）；"),
+        ("limits.limit_down_pool", "fetch_limit_down_pool", "跌停池：现价等于跌停价（seal_money 不可得）；"),
     )),
     _bind("fuyao_ths", "limits.ladder", 12, LIVE_VERIFIED, _EVT + "limit_chain", "app/market_event_capture.py"),
     _bind("longhuvip", "limits.seal_detail", 10, DECLARED, _RAW + "longhu:longhu_market_wide:GetPlateInfo_w38",

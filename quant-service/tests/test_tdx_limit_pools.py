@@ -1,19 +1,24 @@
 import asyncio
+import dataclasses
 import inspect
 import struct
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
+from app.datasources import resolver as resolver_module
 from app.datasources.catalog import BINDINGS
-from app.datasources.contracts import UNSUPPORTED, CapabilityEvidence
+from app.datasources.contracts import DECLARED, UNSUPPORTED, CapabilityEvidence, CapabilityRequest
 from app.datasources.derived import limit_pools
-from app.datasources.derived.limit_pools import derive_limit_pools, fetch_limit_pools
-from app.datasources.resolver import _normalise_rows
+from app.datasources.derived.limit_pools import (
+    derive_limit_pools, fetch_broken_pool, fetch_limit_down_pool, fetch_limit_up_pool)
 
 TODAY = date(2026, 10, 12)
 OBSERVED = datetime(2026, 10, 12, 1, 31, 5, tzinfo=timezone.utc)
-POOLS = ("limit_up", "broken", "limit_down")
+LATER = OBSERVED + timedelta(seconds=7)
+ADAPTERS = {"limit_up": ("limits.limit_up_pool", fetch_limit_up_pool),
+            "broken": ("limits.broken_pool", fetch_broken_pool),
+            "limit_down": ("limits.limit_down_pool", fetch_limit_down_pool)}
 
 
 def f32(price):
@@ -27,10 +32,6 @@ def snapshot_row(symbol, price, high):
 
 def limit_row(symbol, up, down):
     return {"symbol": symbol, "trade_date": TODAY, "limit_up": f32(up), "limit_down": f32(down)}
-
-
-def symbols_by_pool(members):
-    return {pool: [row["symbol"] for row in members if row["pool"] == pool] for pool in POOLS}
 
 
 # Limit prices as the MAC host delivered them for 2026-10-09 (scripts/data/tdx_mac_adapters_live_2026-10-10_mac*.json):
@@ -56,79 +57,106 @@ SNAPSHOT = [
 EXPECTED = {"limit_up": ["000001.SZ", "300750.SZ", "600603.SH"], "broken": ["600000.SH"], "limit_down": ["600519.SH"]}
 
 
+def symbols(rows):
+    return [row["symbol"] for row in rows]
+
+
+class FakeInputs:
+    """The snapshot and limit-price readers, patched in for one run; ``calls`` records what was read."""
+
+    def __init__(self, limit_rows=LIMITS):
+        self.limit_rows, self.calls = limit_rows, []
+
+    async def snapshot(self):
+        self.calls.append("snapshot")
+        return CapabilityEvidence(SNAPSHOT, available_at_min=OBSERVED, available_at_max=OBSERVED,
+                                  warnings=("tdx_host=snapshot-host:7709/login_one", "no_trade_rows=2"))
+
+    async def limits(self, *, symbols):
+        self.calls.append(("limits", symbols))
+        return CapabilityEvidence(self.limit_rows, coverage=8 / 9, available_at_min=LATER, available_at_max=LATER,
+                                  warnings=("tdx_host=limit-host:7709", "missing_symbols=1: 688001.SH"))
+
+    def run(self, call, **params):
+        with (mock.patch.object(limit_pools, "cn_today", return_value=TODAY),
+              mock.patch.object(limit_pools.tdx_legacy_misc, "fetch_all_a_snapshot", self.snapshot),
+              mock.patch.object(limit_pools.tdx_mac, "fetch_limit_prices", self.limits)):
+            return asyncio.run(call(**params))
+
+
+def derived_binding(capability):
+    return next(item for item in BINDINGS if (item.source, item.capability) == ("derived_tdx_limits", capability))
+
+
 class LimitPoolRuleTests(unittest.TestCase):
     def test_pools_compare_prices_at_the_exchange_tick(self):
-        members, _ = derive_limit_pools(SNAPSHOT, LIMITS, OBSERVED)
-        self.assertEqual(symbols_by_pool(members), EXPECTED)
-        self.assertIn({"pool": "limit_up", "symbol": "000001.SZ", "price": 12.96, "high": 12.96, "up_limit": 12.96,
-                       "observed_at": OBSERVED}, members)
-        self.assertIn({"pool": "broken", "symbol": "600000.SH", "price": 10.4, "high": 10.67, "up_limit": 10.67,
-                       "observed_at": OBSERVED}, members)
-        self.assertIn({"pool": "limit_down", "symbol": "600519.SH", "price": 1130.21, "high": 1180.0,
-                       "down_limit": 1130.21, "observed_at": OBSERVED}, members)
+        pools, _ = derive_limit_pools(SNAPSHOT, LIMITS, OBSERVED)
+        self.assertEqual({pool: symbols(rows) for pool, rows in pools.items()}, EXPECTED)
+        self.assertIn({"symbol": "000001.SZ", "price": 12.96, "high": 12.96, "up_limit": 12.96,
+                       "observed_at": OBSERVED}, pools["limit_up"])
+        self.assertIn({"symbol": "600000.SH", "price": 10.4, "high": 10.67, "up_limit": 10.67,
+                       "observed_at": OBSERVED}, pools["broken"])
+        self.assertIn({"symbol": "600519.SH", "price": 1130.21, "high": 1180.0, "down_limit": 1130.21,
+                       "observed_at": OBSERVED}, pools["limit_down"])
 
     def test_securities_without_a_limit_are_counted(self):
         _, without_limit = derive_limit_pools(SNAPSHOT, LIMITS, OBSERVED)
         self.assertEqual(without_limit, 2)
 
     def test_a_row_without_a_positive_price_is_never_a_member(self):
-        members, without_limit = derive_limit_pools(
-            [snapshot_row("000001.SZ", 0.0, 12.96)], [limit_row("000001.SZ", 12.96, 10.60)], OBSERVED)
-        self.assertEqual((members, without_limit), ([], 0))
+        result = derive_limit_pools([snapshot_row("000001.SZ", 0.0, 12.96)], [limit_row("000001.SZ", 12.96, 10.60)], OBSERVED)
+        self.assertEqual(result, ({"limit_up": [], "broken": [], "limit_down": []}, 0))
 
 
 class LimitPoolAdapterTests(unittest.TestCase):
-    def fetch(self, trade_date, snapshot, limits):
-        with (mock.patch.object(limit_pools, "cn_today", return_value=TODAY),
-              mock.patch.object(limit_pools.tdx_legacy_misc, "fetch_all_a_snapshot", snapshot),
-              mock.patch.object(limit_pools.tdx_mac, "fetch_limit_prices", limits)):
-            return asyncio.run(fetch_limit_pools(trade_date=trade_date))
+    def test_the_private_reader_reads_each_input_once_and_the_three_pools_share_the_evidence(self):
+        inputs = FakeInputs()
+        evidences = inputs.run(limit_pools._read_limit_pools, trade_date=TODAY)
+        self.assertEqual(inputs.calls, ["snapshot", ("limits", symbols(SNAPSHOT))])
+        self.assertEqual({pool: symbols(evidence.rows) for pool, evidence in evidences.items()}, EXPECTED)
+        self.assertEqual({row["observed_at"] for evidence in evidences.values() for row in evidence.rows}, {OBSERVED})
+        for pool, evidence in evidences.items():
+            self.assertEqual(evidence.coverage, 7 / 9, pool)
+            self.assertEqual((evidence.available_at_min, evidence.available_at_max), (LATER, LATER), pool)
+            self.assertEqual(evidence.warnings, ("tdx_host=snapshot-host:7709/login_one", "no_trade_rows=2",
+                                                 "tdx_host=limit-host:7709", "missing_symbols=1: 688001.SH",
+                                                 "limit_price_missing=2"), pool)
 
-    def test_the_limits_of_the_snapshot_symbols_are_read_and_the_evidence_reports_the_later_read(self):
-        later = OBSERVED + timedelta(seconds=7)
-        requested = []
-
-        async def snapshot():
-            return CapabilityEvidence(SNAPSHOT, available_at_min=OBSERVED, available_at_max=OBSERVED,
-                                      warnings=("tdx_host=snapshot-host:7709/login_one", "no_trade_rows=2"))
-
-        async def limits(*, symbols):
-            requested.append(symbols)
-            return CapabilityEvidence(LIMITS, coverage=8 / 9, available_at_min=later, available_at_max=later,
-                                      warnings=("tdx_host=limit-host:7709", "missing_symbols=1: 688001.SH"))
-
-        evidence = self.fetch(TODAY, snapshot, limits)
-        self.assertEqual(requested, [[row["symbol"] for row in SNAPSHOT]])
-        self.assertEqual(symbols_by_pool(evidence.rows), EXPECTED)
-        self.assertEqual({row["observed_at"] for row in evidence.rows}, {OBSERVED})
-        self.assertEqual(evidence.coverage, 7 / 9)
-        self.assertEqual((evidence.available_at_min, evidence.available_at_max), (later, later))
-        self.assertEqual(evidence.warnings, ("tdx_host=snapshot-host:7709/login_one", "no_trade_rows=2",
-                                             "tdx_host=limit-host:7709", "missing_symbols=1: 688001.SH",
-                                             "limit_price_missing=2"))
+    def test_each_adapter_returns_the_rows_of_its_own_pool_with_the_shared_evidence(self):
+        evidences = FakeInputs().run(limit_pools._read_limit_pools, trade_date=TODAY)
+        for pool, (_, adapter) in ADAPTERS.items():
+            self.assertEqual(FakeInputs().run(adapter, trade_date=TODAY), evidences[pool], pool)
 
     def test_a_date_other_than_the_current_session_is_refused_before_any_read(self):
-        snapshot, limits = mock.AsyncMock(), mock.AsyncMock()
+        inputs = FakeInputs()
         with self.assertRaisesRegex(ValueError, r"only the current session \(2026-10-12\) can be derived, not 2026-10-09"):
-            self.fetch(date(2026, 10, 9), snapshot, limits)
-        snapshot.assert_not_awaited()
-        limits.assert_not_awaited()
+            inputs.run(fetch_limit_up_pool, trade_date=date(2026, 10, 9))
+        self.assertEqual(inputs.calls, [])
 
 
 class LimitPoolBindingTests(unittest.TestCase):
-    def test_the_three_bindings_are_unsupported_and_say_what_the_pools_lack(self):
-        parameters = inspect.signature(fetch_limit_pools).parameters
-        self.assertTrue(all(item.kind is inspect.Parameter.KEYWORD_ONLY for item in parameters.values()))
-        members, _ = derive_limit_pools(SNAPSHOT, LIMITS, OBSERVED)
-        for capability in ("limits.limit_up_pool", "limits.broken_pool", "limits.limit_down_pool"):
-            binding = next(item for item in BINDINGS if (item.source, item.capability) == ("derived_tdx_limits", capability))
-            self.assertEqual((binding.status, binding.decision_eligible), (UNSUPPORTED, False), capability)
-            self.assertEqual(binding.adapter, f"app/datasources/derived/limit_pools.py:{fetch_limit_pools.__name__}")
+    def test_each_binding_names_its_adapter_stays_unsupported_and_says_what_the_pools_lack(self):
+        for capability, adapter in ADAPTERS.values():
+            binding = derived_binding(capability)
+            parameters = inspect.signature(adapter).parameters
+            self.assertTrue(all(item.kind is inspect.Parameter.KEYWORD_ONLY for item in parameters.values()), capability)
+            self.assertEqual(binding.adapter, f"app/datasources/derived/limit_pools.py:{adapter.__name__}", capability)
             self.assertEqual(set(parameters), set(binding.spec.params), capability)
+            self.assertEqual((binding.status, binding.decision_eligible), (UNSUPPORTED, False), capability)
             for lack in ("首封/末封时间", "原因", "连板数", "封单额", "永不替代供应商池"):
                 self.assertIn(lack, binding.notes, capability)
-            projected = _normalise_rows(members, binding)
-            self.assertEqual((projected.canonical, projected.status, projected.warnings), (True, None, ()), capability)
+
+    def test_a_promoted_resolver_call_returns_the_rows_of_its_own_pool_only(self):
+        for pool, (capability, adapter) in ADAPTERS.items():
+            binding = dataclasses.replace(derived_binding(capability), status=DECLARED)
+            request = CapabilityRequest(capability=capability, required_fields=("symbol",))
+            with mock.patch.object(resolver_module, "bindings_for", lambda *args, **kwargs: [binding]):
+                resolver = resolver_module.CapabilityResolver()
+                resolver.bind("derived_tdx_limits", capability, adapter)
+                result = FakeInputs().run(lambda **params: resolver.fetch(capability, request=request, **params),
+                                          trade_date=TODAY)
+            self.assertEqual(symbols(result.rows), EXPECTED[pool], capability)
+            self.assertEqual((result.quality.status, result.quality.schema), ("partial", "canonical"), capability)
 
 
 if __name__ == "__main__":
