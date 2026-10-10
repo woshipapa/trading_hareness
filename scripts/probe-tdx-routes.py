@@ -1,89 +1,159 @@
 #!/usr/bin/env python3
-"""Probe candidate TDX routes with the repository's stdlib client.
-
-Read-only market-data requests.  Each host gets one connection and each
-operation is represented by a row count or exception class in the JSON output.
-"""
-
-from __future__ import annotations
+"""Probe TDX routes; output a versioned, fail-closed route matrix."""
 
 import argparse
+import concurrent.futures
 import json
+import socket
 import sys
 import time
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-for candidate in (Path.cwd(), Path(__file__).resolve().parents[1] / "quant-service"):
-    if (candidate / "app").is_dir():
-        sys.path.insert(0, str(candidate))
-        break
-
-from app.datasources.sources.tdx_protocol import TdxClient, market_code  # noqa: E402
-
-
-def read_hosts(path: Path) -> list[tuple[str, int]]:
-    result = []
-    seen = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        value = line.split("#", 1)[0].strip()
-        if not value or ":" not in value:
-            continue
-        host, port = value.rsplit(":", 1)
-        item = (host, int(port))
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
+if "TdxClient" not in globals():
+    for candidate in (Path.cwd(), Path(__file__).resolve().parents[1] / "quant-service"):
+        if (candidate / "app").is_dir():
+            sys.path.insert(0, str(candidate))
+            break
+    from app.datasources.sources.tdx_protocol import TdxClient, market_code
 
 
-def operation(client: TdxClient, name: str):
+COMMANDS = ("quotes", "bars", "bars_1m", "ticks_today", "ticks_hist", "xdxr")
+
+
+def read_hosts(paths):
+    hosts, seen = [], set()
+    for path in paths:
+        if str(path) == "embedded":
+            text = globals().get("EMBEDDED_HOSTS_TEXT", "")
+        else:
+            text = Path(path).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            value = line.split("#", 1)[0].strip()
+            if not value or ":" not in value:
+                continue
+            host, port = value.rsplit(":", 1)
+            item = (host, int(port))
+            if item not in seen:
+                seen.add(item)
+                hosts.append(item)
+    return hosts
+
+
+def default_hist_date(today=None):
+    day = today or (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+    day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+def _valid_quote(rows, market, code):
+    if not rows:
+        return False, "empty"
+    for row in rows:
+        if row.get("market") != market or row.get("code") != code:
+            return False, "code_mismatch"
+        if float(row.get("price", 0)) <= 0:
+            return False, "nonpositive_price"
+    return True, None
+
+
+def _valid_bars(rows):
+    if not rows:
+        return False, "empty"
+    for row in rows:
+        try:
+            if min(float(row[k]) for k in ("open", "high", "low", "close")) <= 0:
+                return False, "nonpositive_ohlc"
+            if float(row["high"]) < float(row["low"]):
+                return False, "high_below_low"
+            datetime.fromisoformat(str(row["datetime"]))
+        except (KeyError, TypeError, ValueError):
+            return False, "invalid_bar"
+    return True, None
+
+
+def operation(client, name, hist_date):
     sz = market_code("000001.SZ")
-    sh = market_code("600519.SH")
     if name == "quotes":
-        return client.quotes([sz, sh])
-    if name == "daily_bars":
-        return client.bars(9, *sz, 0, 5)
-    if name == "1m_bars":
-        return client.bars(8, *sz, 0, 5)
-    if name == "today_ticks":
-        return client.ticks(*sz, date.today(), max_requests=2)
+        return client.quotes([sz, market_code("600519.SH")])
+    if name == "bars":
+        return client.bars(9, sz[0], sz[1], 0, 5)
+    if name == "bars_1m":
+        return client.bars(8, sz[0], sz[1], 0, 5)
+    if name == "ticks_today":
+        return client.ticks(sz[0], sz[1], None, max_requests=2)
+    if name == "ticks_hist":
+        return client.ticks(sz[0], sz[1], hist_date, max_requests=2)
     if name == "xdxr":
-        return client.xdxr(*sz)
+        return client.xdxr(sz[0], sz[1])
     raise ValueError(name)
 
 
-def probe(host: str, port: int, timeout: float) -> dict:
-    row = {"host": host, "port": port, "connect_ms": None, "commands": {}}
+def probe_host(host, port, timeout, profile, required, hist_date, client_factory=TdxClient):
+    row = {"host": host, "port": port, "connect_ms": None, "profile": profile, "commands": {}, "usable": False}
     started = time.monotonic()
     try:
-        with TdxClient(host, port, timeout) as client:
+        with client_factory(host, port, timeout, profile=profile) as client:
             row["connect_ms"] = round((time.monotonic() - started) * 1000, 1)
-            for name in ("quotes", "daily_bars", "1m_bars", "today_ticks", "xdxr"):
+            for name in required:
+                command_started = time.monotonic()
                 try:
-                    value = operation(client, name)
-                    row["commands"][name] = {"rows": len(value)}
-                except Exception as error:  # protocol differences are matrix data
-                    row["commands"][name] = {"error": type(error).__name__}
-    except Exception as error:
+                    value = operation(client, name, hist_date)
+                    valid, error = (_valid_quote(value, 0, "000001") if name == "quotes" else
+                                    _valid_bars(value) if name in ("bars", "bars_1m") else
+                                    (bool(value), "empty" if not value else None))
+                    entry = {"rows": len(value), "usable": valid, "ms": round((time.monotonic() - command_started) * 1000, 1)}
+                    if error:
+                        entry["error"] = error
+                    row["commands"][name] = entry
+                except Exception as error:
+                    row["commands"][name] = {"rows": 0, "usable": False, "ms": round((time.monotonic() - command_started) * 1000, 1), "error": type(error).__name__}
+    except (OSError, socket.timeout, TimeoutError) as error:
         row["connect_ms"] = round((time.monotonic() - started) * 1000, 1)
         row["connect_error"] = type(error).__name__
+    row["usable"] = all(row["commands"].get(name, {}).get("usable", False) for name in required)
     return row
 
 
-def main() -> int:
+def main(argv=None, probe_fn=probe_host):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--hosts", type=Path, default=Path(__file__).parent / "data/tdx_host_candidates.txt")
-    parser.add_argument("--output", type=Path)
+    parser.add_argument("--hosts-file", action="append", type=Path)
+    parser.add_argument("--profile", choices=("login_one", "legacy_3"), default="login_one")
+    parser.add_argument("--require", default="quotes,bars,ticks_hist")
+    parser.add_argument("--min-usable-hosts", type=int, default=1)
+    parser.add_argument("--egress", choices=("mac", "owner"), default="mac")
+    parser.add_argument("--hist-date", type=date.fromisoformat, default=default_hist_date())
     parser.add_argument("--timeout", type=float, default=5.0)
-    args = parser.parse_args()
-    results = [probe(host, port, args.timeout) for host, port in read_hosts(args.hosts)]
-    payload = {"date": date.today().isoformat(), "results": results}
+    parser.add_argument("--threads", type=int, default=12)
+    parser.add_argument("--samples", type=int, default=1)
+    parser.add_argument("--interval", type=float, default=0.0)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args(argv)
+    required = [name.strip() for name in args.require.split(",") if name.strip()]
+    unknown = sorted(set(required) - set(COMMANDS))
+    if unknown:
+        parser.error("unknown --require: " + ", ".join(unknown))
+    paths = args.hosts_file or [Path(__file__).parent / "data/tdx_host_candidates.txt"]
+    hosts = read_hosts(paths)
+    samples = []
+    for sample_index in range(max(1, args.samples)):
+        if sample_index and args.interval:
+            time.sleep(args.interval)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, max(1, args.threads))) as pool:
+            futures = [pool.submit(probe_fn, host, port, args.timeout, args.profile, required, args.hist_date) for host, port in hosts]
+            results = [future.result() for future in futures]
+        samples.append({"probed_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "results": results})
+    payload = {"schema": "tdx-route-matrix-v2", "egress": args.egress, "profile": args.profile, "require": required,
+               "timeout_s": args.timeout, "threads": min(12, max(1, args.threads)), "hist_date": args.hist_date.isoformat(), "samples": samples}
     text = json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
     if args.output:
         args.output.write_text(text, encoding="utf-8")
+    counts = {name: sum(1 for sample in samples for row in sample["results"] if row["commands"].get(name, {}).get("usable")) for name in required}
+    print(f"egress={args.egress} profile={args.profile} hist_date={args.hist_date.isoformat()} usable=" + ",".join(f"{k}:{v}" for k, v in counts.items()), file=sys.stderr)
     print(text, end="")
-    return 0
+    return 0 if sum(1 for row in samples[-1]["results"] if row["usable"]) >= args.min_usable_hosts else 2
 
 
 if __name__ == "__main__":
