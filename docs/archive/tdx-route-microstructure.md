@@ -30,8 +30,9 @@ this probe.
 
 The minute-series (0x0fb4) and minute-data (0x0537/0x0feb) records have no
 timestamp field on the wire, so the parser computes a minute index from row
-position.  Standard equity prices use a 100x wire scale; ETF prefixes
-`15/51/56/58` use 1000x, matching the upstream parser.
+position.  Equity prices use a 100x wire scale.  The upstream parser scales ETF
+prefixes `15/51/56/58` by 1000x, but this probe held no ETF, so the readers take
+stock symbols only and refuse every other type before the network.
 
 ## Correctness evidence
 

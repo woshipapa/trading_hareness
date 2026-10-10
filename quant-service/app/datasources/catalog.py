@@ -417,14 +417,17 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/datasources/bindings.py:opening_auction", "近期任意交易日", notes="含 09:15-09:25 竞价虚拟撮合曲线"),
     _bind("tdx_public", "microstructure.volume_profile", 90, UNSUPPORTED,
           adapter="app/datasources/sources/tdx_microstructure.py:fetch_volume_profile",
-          notes="0x051a；覆盖率核对前不进入决策；成交量单位为 lots",
-          spec=BindingSpec(params={"symbol": "symbol such as 600519.SH"},
+          notes="0x051a；覆盖率核对前不进入决策；成交量单位为 lots；价格按 /100，路线记录（docs/archive/tdx-route-microstructure.md）"
+                "只在个股上有证据，所以只接受个股代码，ETF、可转债等其他类型在联网前以 ValueError 拒绝",
+          spec=BindingSpec(params={"symbol": "stock symbol such as 600519.SH"},
                            field_map={"price": "price", "volume_lots": "volume_lots", "buy_lots": "buy_lots", "sell_lots": "sell_lots"},
                            time_semantics="server_time_raw 是源字段；effective=采集时刻")),
     _bind("tdx_public", "microstructure.minute_series", 90, UNSUPPORTED,
           adapter="app/datasources/sources/tdx_microstructure.py:fetch_minute_series",
-          notes="0x0fb4；one row per trading minute (09:31..11:30, 13:01..15:00)；第二个变长字段含义未知，保留为 unknown；覆盖率核对前不进入决策",
-          spec=BindingSpec(params={"symbol": "symbol such as 600519.SH", "trade_date": "trade_date"},
+          notes="0x0fb4；one row per trading minute (09:31..11:30, 13:01..15:00)；第二个变长字段含义未知，保留为 unknown；覆盖率核对前不进入决策；"
+                "价格按 /100，路线记录（docs/archive/tdx-route-microstructure.md）只在个股上有证据，所以只接受个股代码，ETF、可转债等其他类型"
+                "在联网前以 ValueError 拒绝",
+          spec=BindingSpec(params={"symbol": "stock symbol such as 600519.SH", "trade_date": "trade_date"},
                            field_map={"time": "time", "price": "price", "volume_lots": "volume_lots", "pre_close": "pre_close"},
                            time_semantics="effective=trade_date; available=采集时刻")),
     _bind("tdx_public", "microstructure.auction_curve", 90, UNSUPPORTED,

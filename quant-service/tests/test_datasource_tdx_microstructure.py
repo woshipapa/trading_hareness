@@ -100,6 +100,21 @@ class SymbolReaderTests(unittest.TestCase):
         self.assertEqual((minute_series[16], minute_series[17:23]), (2, b"920017"))
         self.assertEqual((struct.unpack_from("<H", auction_curve, 12)[0], auction_curve[14:20]), (2, b"920017"))
 
+    def test_the_readers_that_decode_integer_prices_take_stocks_only(self):
+        client = RecordingClient({micro.VOLUME_PROFILE: volume_profile_body(), micro.MINUTE_SERIES: minute_series_body()})
+        with patched_call(client):
+            for symbol in ("600519.SH", "300750.SZ", "688981.SH", "920000.BJ"):  # main board, ChiNext, STAR, BJ
+                profile = asyncio.run(micro.fetch_volume_profile(symbol=symbol))
+                series = asyncio.run(micro.fetch_minute_series(symbol=symbol, trade_date="2026-10-09"))
+                self.assertEqual({row["symbol"] for row in profile.rows + series.rows}, {symbol})
+        with mock.patch.object(micro.tdx_protocol, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+            for symbol in ("510300.SH", "159915.SZ", "127045.SZ", "113709.SH", "999999.SH", "880005.SH", "500001.SH",
+                           "161121.SZ"):  # ETFs, convertible bonds, an index, a board, a fund and a LOF
+                for reader in (micro.fetch_volume_profile(symbol=symbol),
+                               micro.fetch_minute_series(symbol=symbol, trade_date="2026-10-09")):
+                    with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, "takes only stock_"):
+                        asyncio.run(reader)
+
     def test_a_symbol_that_is_not_six_digits_and_an_exchange_is_refused_before_the_network(self):
         with mock.patch.object(micro.tdx_protocol, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
             for symbol in ("600519", "60051.SH", "600519.XX"):
@@ -190,12 +205,12 @@ class TdxMicrostructureTests(unittest.TestCase):
         body = struct.pack("<HH", 2, 0)
         body += encode_price(1000) + encode_price(100000) + encode_price(10)
         body += encode_price(5) + encode_price(100) + encode_price(20)
-        rows = micro.parse_minute_data(body, "600519")
+        rows = micro.parse_minute_data(body)
         self.assertEqual(rows[0]["price"], 10.0)
         self.assertEqual(rows[1]["price"], 10.05)
         self.assertEqual(rows[1]["volume_lots"], 20)
         history = struct.pack("<HII", 1, 0, 0) + encode_price(1000) + encode_price(100000) + encode_price(20)
-        self.assertEqual(micro.parse_history_minute_data(history, "600519")[0]["average"], 10.0)
+        self.assertEqual(micro.parse_history_minute_data(history)[0]["average"], 10.0)
 
     def test_profile_delta_normalization_detects_mutation(self):
         body = struct.pack("<HB6sH", 2, 1, b"600519", 7)
@@ -214,7 +229,7 @@ class TdxMicrostructureTests(unittest.TestCase):
         body = struct.pack("<HH", 2, 0)
         body += encode_price(1000) + encode_price(100000) + encode_price(10)
         body += encode_price(5) + encode_price(100) + encode_price(20)
-        rows = micro.parse_minute_data(body, "600519")
+        rows = micro.parse_minute_data(body)
         self.assertEqual(rows[1]["price"], 10.05)
         self.assertEqual(rows[0]["price"], 10.0)
 

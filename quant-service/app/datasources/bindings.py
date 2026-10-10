@@ -7,8 +7,9 @@ the same keywords, so the resolver can fall through without translation):
 * ``limits.anomaly_tape``, ``sector.anomaly``, ``attention.*`` lists: none
 * ``attention.em_rank_history``, ``fundamentals.capital_changes``: ``symbol``
 * ``ticks.session``, ``auction.history_0925``: ``symbol`` and ``trade_date``
-* ``microstructure.volume_profile``, ``microstructure.auction_curve`` (TDX): ``symbol``
-* ``microstructure.minute_series`` (TDX): ``symbol`` and ``trade_date``
+* ``microstructure.volume_profile`` (TDX): ``symbol``, a stock symbol
+* ``microstructure.minute_series`` (TDX): ``symbol``, a stock symbol, and ``trade_date``
+* ``microstructure.auction_curve`` (TDX): ``symbol``
 * ``microstructure.unusual`` (TDX, a whole-market list): ``market``, ``start``, ``count``
 * ``microstructure.top_board`` (TDX): ``category``, ``size``
 * ``events.*`` (datacenter): ``start: date``, ``end: date``

@@ -12,7 +12,7 @@ from datetime import date
 from typing import Any
 
 from ..contracts import CapabilityEvidence
-from . import tdx_protocol
+from . import tdx_instruments, tdx_protocol
 
 
 VOLUME_PROFILE = 0x051A
@@ -41,8 +41,12 @@ def _request(opcode: int, payload: bytes) -> bytes:
                        length, length, opcode) + payload
 
 
-def _unit(code: str) -> float:
-    return 1000.0 if code[:2] in {"15", "51", "56", "58"} else 100.0
+def _stock(symbol: str) -> tuple[int, str]:
+    """The (market, code) of a stock symbol; any other type is a ValueError before the network. The integer prices of
+    these commands are /100, which the route note (docs/archive/tdx-route-microstructure.md) evidences on stocks
+    only: its probe held no ETF, the 1000x it names for ETF prefixes is the upstream parser's rule, and a
+    convertible bond quotes in 1/10,000 yuan (scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json)."""
+    return tdx_instruments.requested_of_types([symbol], tdx_instruments.STOCK_TYPES)[0]
 
 
 def _profile_delta(value: int) -> int:
@@ -277,13 +281,12 @@ def build_minute_data_request(market: int, code: str, start: int = 0, count: int
     return _request(MINUTE_TIME_DATA, struct.pack("<H6sHH", market, tdx_protocol._code(code), start, count))
 
 
-def _parse_minute_rows(body: bytes, code: str, history: bool) -> list[dict[str, Any]]:
+def _parse_minute_rows(body: bytes, history: bool) -> list[dict[str, Any]]:
     minimum = 10 if history else 4
     if len(body) < minimum:
         raise tdx_protocol.TdxProtocolError("short minute response")
     count = struct.unpack_from("<H", body, 0)[0]
     pos = 10 if history else 4
-    unit = _unit(code)
     first_price = first_avg = 0
     rows = []
     for index in range(count):
@@ -296,13 +299,12 @@ def _parse_minute_rows(body: bytes, code: str, history: bool) -> list[dict[str, 
             first_price = price
         if not first_avg:
             first_avg = avg
-        rows.append({"index": index, "price": price / unit, "average": avg / (unit * 100),
-                     "volume_lots": volume})
+        rows.append({"index": index, "price": price / 100.0, "average": avg / 10000.0, "volume_lots": volume})
     return rows
 
 
-def parse_minute_data(body: bytes, code: str) -> list[dict[str, Any]]:
-    return _parse_minute_rows(body, code, False)
+def parse_minute_data(body: bytes) -> list[dict[str, Any]]:
+    return _parse_minute_rows(body, False)
 
 
 def build_history_minute_data_request(market: int, code: str, trade_date: date | str | int) -> bytes:
@@ -310,12 +312,12 @@ def build_history_minute_data_request(market: int, code: str, trade_date: date |
     return _request(HISTORY_MINUTE_TIME_DATA, payload)
 
 
-def parse_history_minute_data(body: bytes, code: str) -> list[dict[str, Any]]:
-    return _parse_minute_rows(body, code, True)
+def parse_history_minute_data(body: bytes) -> list[dict[str, Any]]:
+    return _parse_minute_rows(body, True)
 
 
 async def fetch_volume_profile(*, symbol: str) -> CapabilityEvidence:
-    market, code = tdx_protocol.market_code(symbol)
+    market, code = _stock(symbol)
     result, host = await tdx_protocol.call(
         lambda client: parse_volume_profile(client._exchange(build_volume_profile_request(market, code))),
         handshake_profile="login_one")
@@ -323,7 +325,7 @@ async def fetch_volume_profile(*, symbol: str) -> CapabilityEvidence:
 
 
 async def fetch_minute_series(*, symbol: str, trade_date: date | str | int) -> CapabilityEvidence:
-    market, code = tdx_protocol.market_code(symbol)
+    market, code = _stock(symbol)
     rows, host = await tdx_protocol.call(
         lambda client: parse_minute_series(client._exchange(build_minute_series_request(market, code, trade_date))),
         handshake_profile="login_one")

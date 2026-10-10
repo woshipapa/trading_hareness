@@ -76,8 +76,8 @@ def main() -> int:
                         client._exchange(micro.build_minute_series_request(market, code, session))))
                     auction, auction_error = _probe("auction", lambda: micro.parse_auction(client._exchange(micro.build_auction_request(market, code))))
                     history, history_error = _probe("history_minute_data", lambda: micro.parse_history_minute_data(
-                        client._exchange(micro.build_history_minute_data_request(market, code, session)), code))
-                    _probe("minute_data", lambda: micro.parse_minute_data(client._exchange(micro.build_minute_data_request(market, code)), code))
+                        client._exchange(micro.build_history_minute_data_request(market, code, session))))
+                    _probe("minute_data", lambda: micro.parse_minute_data(client._exchange(micro.build_minute_data_request(market, code))))
                     if market == 0:
                         _probe("unusual", lambda: micro.parse_unusual(client._exchange(micro.build_unusual_request(market, 0, 5))))
                         _probe("top_board", lambda: micro.parse_top_board(client._exchange(micro.build_top_board_request(0, 3))))
