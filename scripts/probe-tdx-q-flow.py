@@ -4,6 +4,10 @@
 Without options: the one-shot comparison of the 2026-10-09 session. With --samples N: N intraday samples, --interval
 seconds apart, of the MAC fields 0x90-0x96 and the flow fields next to the Eastmoney per-stock fund flow, each
 block with the time it was received; the numbers are recorded as they came, with no reading of them.
+
+A sample that fails is written as an entry with the error's class and message (the blocks read before the failure stay
+in it) and the run goes on. It ends after --max-consecutive-errors failed samples in a row (`stopped` in the output,
+exit status 1). An exception of another kind ends the run at once; the samples so far are still written.
 """
 from __future__ import annotations
 
@@ -21,7 +25,9 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.datasources.sources import tdx_mac, tdx_mac_fields, tdx_protocol  # noqa: E402
+import tdx_probe_failures as failures  # noqa: E402 - sibling module, after the path is set
 
 MAC_HOST = ("121.36.248.138", 7709)
 LEGACY_HOST = ("117.34.114.13", 7709)
@@ -36,6 +42,8 @@ FIELDS = {
 }
 #: 0x90-0x96, the registry's change_at_1000 ... change_at_1430.
 SAMPLED_BITS = tuple(range(0x90, 0x97))
+#: What a sample raises when the network or a host misbehaves; anything else is a bug and ends the run.
+TRANSIENT = (OSError, tdx_mac.TdxMacError, struct.error, zlib.error, ValueError, subprocess.CalledProcessError)
 #: The public per-stock fund-flow reference of the samples, read through curl from a residential egress (eastmoney()).
 REFERENCE = {
     "source": "Eastmoney push2 ulist.np/get, fltt=2, invt=2",
@@ -150,7 +158,10 @@ def eastmoney() -> list[dict[str, object]]:
         response = subprocess.run(["curl", "-fsS", "--max-time", "5", "-A", "Mozilla/5.0",
                                    "https://push2.eastmoney.com/api/qt/ulist.np/get?" + query],
                                   capture_output=True, text=True, check=True)
-        rows.extend(json.loads(response.stdout)["data"]["diff"])
+        data = json.loads(response.stdout).get("data")
+        if not data:
+            raise ValueError(f"Eastmoney answered without data: {response.stdout[:100]!r}")
+        rows.extend(data["diff"])
     return rows
 
 
@@ -162,19 +173,19 @@ def received() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
-def take_sample(client: MacClient) -> dict[str, object]:
-    """The MAC batch (flow fields and 0x90-0x96), the 0x1218 flows and the Eastmoney reference, each when received."""
+def take_sample(client: MacClient, sample: dict[str, object]) -> None:
+    """Fills ``sample`` block by block, each with the time it was received: the MAC batch (flow fields and
+    0x90-0x96), the 0x1218 flows and the Eastmoney reference. A failure leaves the blocks read before it."""
     bits = (*FIELDS, *SAMPLED_BITS)
     body = client.exchange(batch_request(bits))
     batch_at = received()
     if body[:20] != bitmap(bits):
         raise tdx_mac.TdxMacError("the MAC host answered another field bitmap than the one requested")
+    sample["mac_0x122b"] = {"received_at": batch_at, "rows": tdx_mac_fields.decode_dynamic_response(body)}
     flows = capital_flows(client)
-    flows_at = received()
+    sample["flow_0x1218"] = {"received_at": received(), "rows": flows}
     reference = eastmoney()
-    return {"mac_0x122b": {"received_at": batch_at, "rows": tdx_mac_fields.decode_dynamic_response(body)},
-            "flow_0x1218": {"received_at": flows_at, "rows": flows},
-            "eastmoney": {"received_at": received(), "rows": reference}}
+    sample["eastmoney"] = {"received_at": received(), "rows": reference}
 
 
 def emit(result: dict[str, object], output: Path | None) -> None:
@@ -185,22 +196,39 @@ def emit(result: dict[str, object], output: Path | None) -> None:
         print(text, end="")
 
 
-def sampling(count: int, interval: float, output: Path | None) -> None:
-    """``count`` samples, a new MAC connection for each; with ``output`` the file is rewritten after every sample."""
+def sampling(count: int, interval: float, max_errors: int, output: Path | None) -> bool:
+    """``count`` samples, a new MAC connection for each; with ``output`` the file is rewritten after every sample.
+    A sample that fails is an entry with the error; ``max_errors`` of them in a row stop the run, which is True."""
     samples: list[dict[str, object]] = []
     result = {"mode": "samples", "mac_host": f"{MAC_HOST[0]}:{MAC_HOST[1]}", "interval_s": interval,
               "symbols": list(SYMBOLS),
               "bits": {f"0x{bit:02x}": tdx_mac_fields.FIELD_BY_BIT[bit].name for bit in (*FIELDS, *SAMPLED_BITS)},
-              "reference": REFERENCE, "samples": samples}
+              "reference": REFERENCE, "errors": 0, "samples": samples}
     began = time.monotonic()
+    failed_in_a_row = 0
     for number in range(count):
         time.sleep(max(0.0, began + number * interval - time.monotonic()))
-        with MacClient() as client:
-            samples.append(take_sample(client))
+        sample: dict[str, object] = {}
+        try:
+            with MacClient() as client:
+                take_sample(client, sample)
+        except TRANSIENT as error:
+            sample.update(at=received(), **failures.failure(error))
+        samples.append(sample)
+        failed_in_a_row = failed_in_a_row + 1 if "error" in sample else 0
+        result["errors"] = sum("error" in item for item in samples)
+        if failed_in_a_row >= max_errors:
+            result["stopped"] = f"{failed_in_a_row} samples in a row failed"
         if output:
             emit(result, output)
+        if "stopped" in result:
+            break
     if not output:
         emit(result, None)
+    print(f"{result['errors']} of {len(samples)} samples failed", file=sys.stderr)
+    if "stopped" in result:
+        print(f"stopped: {result['stopped']}", file=sys.stderr)
+    return "stopped" in result
 
 
 def run() -> dict[str, object]:
@@ -221,11 +249,12 @@ def main() -> int:
     parser.add_argument("--fixture", action="store_true")
     parser.add_argument("--samples", type=int, default=0, help="take this many intraday samples instead of the one-shot run")
     parser.add_argument("--interval", type=float, default=60.0, help="seconds between the starts of two samples")
+    parser.add_argument("--max-consecutive-errors", type=int, default=failures.MAX_CONSECUTIVE_ERRORS,
+                        help="with --samples: failed samples in a row after which the run stops")
     parser.add_argument("--output", type=Path, help="write the JSON here instead of stdout; rewritten after every sample")
     args = parser.parse_args()
     if args.samples:
-        sampling(args.samples, args.interval, args.output)
-        return 0
+        return 1 if sampling(args.samples, args.interval, args.max_consecutive_errors, args.output) else 0
     result = ({"fields": decode_batch(bitmap(tuple(FIELDS)) + struct.pack("<IH", 1, 1)
               + struct.pack("<H22s44s", 0, b"000001", b"fixture") + b"\0" * (len(FIELDS) * 4))}
               if args.fixture else run())
