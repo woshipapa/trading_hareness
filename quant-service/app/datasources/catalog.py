@@ -274,13 +274,14 @@ _EVT = "market_events:event_type="
 _RAW = "raw_market_observations:capability="
 #: The three pools derived from the TDX snapshot and the MAC limit prices share one contract.
 _TDX_POOL_SPEC = BindingSpec(
-    params={"trade_date": "current session only; any other date is a ValueError"},
+    params={"trade_date": "current session only; any other date, or limit rows not dated trade_date, is a ValueError"},
     field_map={"symbol": "symbol"},
     time_semantics="effective=snapshot collection time; available=later of the snapshot and limit-price collection times")
 _TDX_POOL_NOTE = (
     "tdx_public quote.all_a_snapshot（0x054b）与 tdx_mac limits.prices（0x122b）按 0.01 元整数分比较自算；"
     "只有快照时刻的成员关系：无首封/末封时间、无原因、无连板数、无封单额；永不替代供应商池作决策；"
     "三个池的适配器各自读一次上游、只返回自己池的成员，三个池要同源一致须由采集器读一次后分别落库；"
+    "任一涨跌停价行的 trade_date（位 0x13）与请求日期不符即报错；"
     "无涨跌停价的证券不入池，计入 coverage 与 warnings 的 limit_price_missing")
 
 BINDINGS: Final[tuple[Binding, ...]] = (

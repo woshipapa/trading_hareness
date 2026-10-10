@@ -64,8 +64,8 @@ def symbols(rows):
 class FakeInputs:
     """The snapshot and limit-price readers, patched in for one run; ``calls`` records what was read."""
 
-    def __init__(self, limit_rows=LIMITS):
-        self.limit_rows, self.calls = limit_rows, []
+    def __init__(self, limit_rows=LIMITS, today=TODAY):
+        self.limit_rows, self.today, self.calls = limit_rows, today, []
 
     async def snapshot(self):
         self.calls.append("snapshot")
@@ -78,7 +78,7 @@ class FakeInputs:
                                   warnings=("tdx_host=limit-host:7709", "missing_symbols=1: 688001.SH"))
 
     def run(self, call, **params):
-        with (mock.patch.object(limit_pools, "cn_today", return_value=TODAY),
+        with (mock.patch.object(limit_pools, "cn_today", return_value=self.today),
               mock.patch.object(limit_pools.tdx_legacy_misc, "fetch_all_a_snapshot", self.snapshot),
               mock.patch.object(limit_pools.tdx_mac, "fetch_limit_prices", self.limits)):
             return asyncio.run(call(**params))
@@ -132,6 +132,16 @@ class LimitPoolAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"only the current session \(2026-10-12\) can be derived, not 2026-10-09"):
             inputs.run(fetch_limit_up_pool, trade_date=date(2026, 10, 9))
         self.assertEqual(inputs.calls, [])
+
+    def test_limit_rows_of_another_session_fail_naming_the_dates_and_the_count(self):
+        earlier = [{**LIMITS[1], "trade_date": date(2026, 10, 8)}, {**LIMITS[2], "trade_date": date(2026, 10, 9)},
+                   {**LIMITS[3], "trade_date": date(2026, 10, 8)}]
+        with self.assertRaisesRegex(ValueError, r"3 of 8 limit rows are not dated 2026-10-12: 2026-10-08 \(2\), 2026-10-09 \(1\)"):
+            FakeInputs([LIMITS[0], *earlier, *LIMITS[4:]]).run(fetch_limit_up_pool, trade_date=TODAY)
+        saturday = date(2026, 10, 10)  # the host still answers with Friday's session
+        friday = [{**row, "trade_date": date(2026, 10, 9)} for row in LIMITS]
+        with self.assertRaisesRegex(ValueError, r"8 of 8 limit rows are not dated 2026-10-10: 2026-10-09 \(8\)"):
+            FakeInputs(friday, today=saturday).run(fetch_limit_up_pool, trade_date=saturday)
 
 
 class LimitPoolBindingTests(unittest.TestCase):

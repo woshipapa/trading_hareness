@@ -9,6 +9,7 @@ vendor pool for a decision.
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date, datetime
 from typing import Any, Iterable, Mapping
 
@@ -74,8 +75,10 @@ async def _read_limit_pools(*, trade_date: date) -> dict[str, CapabilityEvidence
     the later of the two collection times.  The three adapters return one each; a collector that stores all
     three pools calls this once instead.
 
-    The snapshot is live, so only the current session can be derived: ``trade_date`` is compared with the
-    Asia/Shanghai date, and on a day without a session the snapshot is the last close.
+    The snapshot is live, so only the current session can be derived.  ``trade_date`` must be the Asia/Shanghai
+    date, else nothing is read; and every limit row must carry that date (bit 0x13, the session the host's prices
+    belong to), else the call raises.  On a day without a session the rows are dated the last session, so a call
+    for that day's date fails.
     """
     today = cn_today()
     if trade_date != today:
@@ -84,6 +87,10 @@ async def _read_limit_pools(*, trade_date: date) -> dict[str, CapabilityEvidence
             f"not {trade_date}")
     snapshot = await tdx_legacy_misc.fetch_all_a_snapshot()
     limits = await tdx_mac.fetch_limit_prices(symbols=[row["symbol"] for row in snapshot.rows])
+    stale = Counter(row["trade_date"] for row in limits.rows if row["trade_date"] != trade_date)
+    if stale:
+        found = ", ".join(f"{day} ({count})" for day, count in sorted(stale.items()))
+        raise ValueError(f"{sum(stale.values())} of {len(limits.rows)} limit rows are not dated {trade_date}: {found}")
     pools, without_limit = derive_limit_pools(snapshot.rows, limits.rows, snapshot.available_at_max)
     warnings = (*snapshot.warnings, *limits.warnings)
     if without_limit:
