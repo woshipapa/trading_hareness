@@ -132,6 +132,31 @@ def bar_layout(instrument_type: str) -> str:
     return "index" if instrument_type in ("index", "board") else "stock"
 
 
+def instruments_from_security_list() -> list[dict[str, Any]]:
+    """Derive reference.instruments from reference.security_list.
+
+    Filters to stocks only (instrument_type starts with 'stock_');
+    keeps symbol, name, is_st; sets list_date to None (TDX does not provide it).
+    """
+    evidence = fetch_security_list()
+    instruments = []
+    for row in evidence.rows:
+        inst_type = row.get("instrument_type", "")
+        if inst_type.startswith("stock_"):
+            code = row.get("code", "")
+            market = row.get("market", "")
+            market_code = {0: "SZ", 1: "SH", 2: "BJ"}.get(market, "")
+            if market_code and code:
+                symbol = f"{code}.{market_code}"
+                instruments.append({
+                    "symbol": symbol,
+                    "name": row.get("name", ""),
+                    "is_st": row.get("is_st", False),
+                    "list_date": None
+                })
+    return instruments
+
+
 def fetch_security_list() -> CapabilityEvidence:
     """Fetch the full TDX security list from one deterministic host.
 
@@ -354,6 +379,6 @@ def type_counts(rows: Iterable[Mapping[str, Any]]) -> Counter[str]:
 
 
 __all__ = ["SECURITY_COUNT", "SECURITY_LIST", "bar_layout", "build_security_count_request",
-           "build_security_list_request", "classify_instrument", "fetch_security_list", "instrument_type", "normalize_bj_symbol",
+           "build_security_list_request", "classify_instrument", "fetch_security_list", "instruments_from_security_list", "instrument_type", "normalize_bj_symbol",
            "parse_bj_mapping", "parse_tdxbjmore", "bj_rows_from_zhb", "parse_index_bars", "parse_security_count", "parse_security_list",
            "security_count", "security_list", "index_bars", "price_scale", "scale_quote", "type_counts"]
