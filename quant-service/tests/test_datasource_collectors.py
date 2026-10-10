@@ -1,9 +1,11 @@
 """Cadence, de-duplication and archive windows of the data-source collectors."""
 
+import json
 import unittest
 from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+from app.datasources import runtime
 from app.datasources.collectors import intraday, post_close
 from app.datasources.derived.tick_flow import Tick
 
@@ -35,6 +37,11 @@ class Recorder:
 
 
 class CadenceTests(unittest.TestCase):
+    def test_new_archive_keys_are_opt_in(self):
+        flags = runtime.env_flags("PUBLIC_ARCHIVE", ["tdx_stat_snapshot", "tick_flow"], environ={},
+                                  opt_in_keys={"tdx_stat_snapshot"})
+        self.assertEqual(flags, {"tdx_stat_snapshot": False, "tick_flow": True})
+
     def test_windows(self):
         self.assertTrue(intraday.in_window("session", SESSION, session_open=True))
         self.assertFalse(intraday.in_window("session", SESSION, session_open=False))
@@ -389,6 +396,161 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results["fuyao_attention_close"]["status"], "pending")
         self.assertNotIn("fuyao_attention_close", state.done)
         self.assertFalse([entry for entry in recorder.health if entry[1] == "fuyao_attention_close"])
+
+    async def test_tdx_tipinfo_uses_end_of_disclosure_day(self):
+        recorder = Recorder()
+        evidence = [{"market": "1", "code": "600519", "report_period": "20260630", "eps": 1.2,
+                     "first_disclosure_date": date(2026, 8, 29)}]
+        with patch("app.datasources.collectors.post_close.tdx_protocol.call",
+                   AsyncMock(return_value=(evidence, "h:7709/login_one"))):
+            result = await post_close.job_tdx_tipinfo(self._deps(recorder), post_close.ArchiveState(),
+                                                      date(2026, 9, 18), EVENING)
+        self.assertEqual(result["rows"], 1)
+        row = recorder.observations[0][2][0]
+        self.assertEqual(row["effective_at"], "2026-08-29T23:59:59+08:00")
+        self.assertEqual(row["available_at"], EVENING.isoformat())
+
+    async def test_tdx_security_list_skips_unchanged_payload_metadata(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        row = {"symbol": "600519.SH", "name": "Moutai", "instrument_type": "stock_main",
+               "decimal_point": 2, "is_st": False, "list_source": "server_list"}
+        deps.latest_observation_payloads = AsyncMock(return_value={"600519.SH": {**row, "provider_key": "tdx_public",
+                                                                                   "capability": "tdx_security_list"}})
+        with patch("app.datasources.collectors.post_close.tdx_instruments.fetch_security_list",
+                   AsyncMock(return_value=type("Evidence", (), {"rows": [row]})())):
+            result = await post_close.job_tdx_security_list(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(result["changed"], 0)
+        self.assertEqual(recorder.observations, [])
+
+    async def test_tdx_gpcw_limits_periods_and_splits_dated_rows(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+
+        async def payloads(_provider, capability):
+            return [{"filename": "gpcw20260630.zip", "md5": "a" * 32, "size": 10}] if capability == "tdx_gpcw_manifest" else [
+                json.loads(json.dumps({"code": "600519", "report_period": "20260630",
+                                       "first_disclosure_date": date(2026, 8, 29)}, default=str))]
+
+        deps.observation_payloads = payloads
+        gpcw_row = {"code": "600519", "report_period": "2026-06-30", "fields": {"基本每股收益": 1.2, "col9": 3.0},
+                    "field_units": {"基本每股收益": "yuan/share", "col9": None}}
+        rejected_row = {**gpcw_row, "code": "900901"}
+        with patch("app.datasources.collectors.post_close.tdx_protocol.call",
+                   AsyncMock(side_effect=[("gpcw20260630.zip," + "b" * 32 + ",10", "h:7709/login_one"),
+                                          ([gpcw_row, rejected_row], "h:7709/login_one")])), \
+             patch("app.datasources.collectors.post_close.tdx_fin_history.gpcw",
+                   return_value=[gpcw_row]):
+            result = await post_close.job_tdx_gpcw(deps, post_close.ArchiveState(), date(2026, 9, 18), EVENING)
+        self.assertEqual(result["downloaded"], 1)
+        self.assertEqual(result["rejected"], 1)
+        manifest_rows = [rows for _provider, capability, rows in recorder.observations if capability == "tdx_gpcw_manifest"][0]
+        self.assertEqual(manifest_rows[0]["observation_symbol"], "gpcw20260630.zip")
+        stored = [rows for _provider, capability, rows in recorder.observations if capability == "tdx_gpcw"][0]
+        self.assertEqual(stored[0]["availability_basis"], "tipinfo_first_disclosure")
+        self.assertEqual(stored[0]["fields"], {"基本每股收益": 1.2})
+
+    async def test_tdx_index_bars_backfill_once_then_request_five(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        requested = []
+
+        async def latest(_provider, capability):
+            return {"999999.SH": {}} if capability == "tdx_index_daily_bars" else {}
+
+        async def daily(*, symbol, count):
+            requested.append(("daily", symbol, count))
+            from app.datasources.contracts import CapabilityEvidence
+            return CapabilityEvidence([{"symbol": symbol, "trade_date": "2026-10-09", "close": 1, "open": 1,
+                                        "high": 1, "low": 1, "amount": 1, "volume_raw": 1,
+                                        "up_count": 2, "down_count": 1}])
+
+        deps.latest_observation_payloads = latest
+        with patch("app.datasources.collectors.post_close.tdx_bars.fetch_index_daily", daily), \
+             patch("app.datasources.collectors.post_close.tdx_bars.fetch_index_breadth", AsyncMock(side_effect=AssertionError("second request"))):
+            await post_close.job_tdx_index_bars(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(requested[0][2], 5)
+        self.assertEqual(requested[1][2], 800)
+        self.assertEqual({capability for _provider, capability, _rows in recorder.observations},
+                         {"tdx_index_daily_bars", "tdx_index_breadth"})
+
+    async def test_tdx_mac_boards_persists_catalog_and_delta_membership(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        from app.datasources.contracts import CapabilityEvidence
+        catalog = CapabilityEvidence([{"board_code": "880710", "name": "Industry", "board_type": 3},
+                                      {"board_code": "880001", "name": "Concept", "board_type": 0}])
+        calls = []
+
+        async def membership(*, sector_key, board_type):
+            calls.append((sector_key, board_type))
+            return CapabilityEvidence([{"symbol": "600519.SH", "name": "Moutai"}])
+
+        async def delta(taxonomy, sector, members, observed_at):
+            self.assertEqual((taxonomy, sector), ("tdx_mac_type_3", "880710")
+                             if sector == "880710" else ("tdx_mac_type_0", "880001"))
+            return {"members": len(members), "opened": 1, "closed": 0}
+
+        deps.persist_membership_delta = delta
+        with patch("app.datasources.collectors.post_close.tdx_mac.fetch_board_catalog", AsyncMock(return_value=catalog)), \
+             patch("app.datasources.collectors.post_close.tdx_mac.fetch_membership", membership):
+            result = await post_close.job_tdx_mac_boards(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(result["membership_requests"], 2)
+        self.assertEqual(result["opened"], 2)
+        self.assertEqual(len(calls), 2)
+
+    async def test_tdx_limit_pools_reads_once_and_stores_three_capabilities(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        from app.datasources.contracts import CapabilityEvidence
+        pools = {name: CapabilityEvidence([{"symbol": "600519.SH", "price": 1}])
+                 for name in ("limit_up", "broken", "limit_down")}
+        with patch("app.datasources.collectors.post_close.limit_pools._read_limit_pools",
+                   AsyncMock(return_value=pools)) as read:
+            result = await post_close.job_tdx_limit_pools(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        read.assert_awaited_once()
+        self.assertEqual(result["counts"], {"limit_up": 1, "broken": 1, "limit_down": 1})
+        self.assertEqual({capability for _provider, capability, _rows in recorder.observations},
+                         {"tdx_limit_up_pool", "tdx_broken_pool", "tdx_limit_down_pool"})
+
+    async def test_tdx_host_probe_runs_once_per_iso_week_and_records_each_host(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        with patch("app.datasources.collectors.post_close.tdx_protocol.configured_hosts",
+                   return_value=(("one", 7709), ("two", 7709))), \
+             patch("app.datasources.collectors.post_close.tdx_protocol.call_sync",
+                   side_effect=[(10, "one:7709/login_one"), OSError("down")]):
+            state = post_close.ArchiveState()
+            first = await post_close.job_tdx_host_probe(deps, state, date(2026, 10, 12), EVENING)
+            second = await post_close.job_tdx_host_probe(deps, state, date(2026, 10, 13), EVENING)
+        self.assertEqual(first["status"], "completed")
+        self.assertEqual(second["status"], "skipped")
+        self.assertEqual(len(recorder.health_details), 2)
+
+    async def test_tdx_reference_file_jobs_timestamp_rows_and_use_membership_delta(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        from app.datasources.contracts import CapabilityEvidence
+        deps.persist_membership_delta = AsyncMock(return_value={"members": 1, "opened": 1, "closed": 0})
+        with patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_valuation",
+                   AsyncMock(return_value=CapabilityEvidence([{"symbol": "600519.SH", "effective_date": "20261009", "pe_ttm": 1}]))), \
+             patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_daily_basic",
+                   AsyncMock(return_value=CapabilityEvidence([{"symbol": "600519.SH", "effective_date": "20261009", "change_pct": 1}]))), \
+             patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_membership",
+                   AsyncMock(return_value=CapabilityEvidence([{"taxonomy_key": "tdx_files_concept", "sector_key": "880001",
+                                                               "symbol": "600519.SH"}]))), \
+             patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_trade_calendar",
+                   AsyncMock(return_value=CapabilityEvidence([{"calendar_date": "2026-10-01", "is_open": False}]))), \
+             patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_ipo_calendar",
+                   AsyncMock(return_value=CapabilityEvidence([{"symbol": "001381.SZ", "apply_date": "2026-10-19"}]))):
+            stats = await post_close.job_tdx_stat_snapshot(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+            membership = await post_close.job_tdx_files_membership(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+            calendar = await post_close.job_tdx_calendar_ipo(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(stats["valuation_rows"], 1)
+        self.assertEqual(membership["opened"], 1)
+        self.assertEqual(calendar["calendar_rows"], 1)
+        valuation = [rows for _provider, capability, rows in recorder.observations if capability == "tdx_stat_valuation"][0][0]
+        self.assertEqual(valuation["effective_at"], "2026-10-09T15:00:00+08:00")
 
 
 if __name__ == "__main__":

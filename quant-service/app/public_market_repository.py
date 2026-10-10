@@ -24,6 +24,15 @@ from .instrument_registry import InstrumentRecord, ensure_instruments
 from .market_flow_features import market_event_identity_key
 
 
+def persist_tdx_membership_delta(database: Any, taxonomy_key: str, sector_key: str,
+                                 members: dict[str, dict[str, Any]], observed_at: datetime) -> dict[str, int]:
+    from .sector_membership_repository import persist_observed_snapshot_delta
+
+    with database.transaction() as connection:
+        return persist_observed_snapshot_delta(connection, taxonomy_key, sector_key, members, "tdx_mac", observed_at,
+                                               instrument_source="tdx_mac")
+
+
 def persist_free_quote(database: Any, provider: str, symbol: str, quote: dict[str, Any] | None) -> int:
     if not quote:
         return 0
@@ -111,24 +120,52 @@ def persist_timed_observations(database: Any, provider: str, capability: str,
     parameters = []
     fallback = datetime.now(timezone.utc)
     for row in rows:
-        payload = {key: value for key, value in row.items() if key not in {"effective_at", "available_at"}}
+        payload = {key: value for key, value in row.items()
+                   if key not in {"effective_at", "available_at", "availability_basis", "observation_symbol"}}
+        availability_basis = row.get("availability_basis")
         effective = as_utc(datetime.fromisoformat(str(row["effective_at"]))) if row.get("effective_at") else fallback
         available = as_utc(datetime.fromisoformat(str(row["available_at"]))) if row.get("available_at") else fallback
         payload.update({"provider_key": provider, "capability": capability})
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-        parameters.append((provider, capability, _observation_symbol(row.get("ts_code")), effective, available,
-                           hashlib.sha256(serialized.encode()).hexdigest(), Json(payload), Json(payload)))
+        parameters.append((provider, capability, str(row.get("observation_symbol") or _observation_symbol(row.get("ts_code")) or "") or None,
+                           effective, available,
+                           availability_basis, hashlib.sha256(serialized.encode()).hexdigest(), Json(payload), Json(payload)))
     if not parameters:
         return 0
     with database.transaction() as connection:
         with connection.cursor() as cursor:
             cursor.executemany(
-                """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,payload_sha256,normalized,payload)
-                   VALUES(%s,%s,'cn',%s,%s,%s,%s,%s,%s)
+                """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,availability_basis,payload_sha256,normalized,payload)
+                   VALUES(%s,%s,'cn',%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT(provider_key,capability,market,symbol,effective_at,payload_sha256) DO NOTHING""",
                 parameters,
             )
     return len(parameters)
+
+
+def latest_observation_payloads(database: Any, provider: str, capability: str) -> dict[str, dict[str, Any]]:
+    """Return the latest stored payload for each symbol of one public capability."""
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT DISTINCT ON (symbol) symbol,normalized
+               FROM quant.raw_market_observations
+               WHERE provider_key=%s AND capability=%s AND symbol IS NOT NULL
+               ORDER BY symbol,effective_at DESC,created_at DESC""",
+            (provider, capability),
+        ).fetchall()
+    return {str(row["symbol"]): dict(row["normalized"]) for row in rows}
+
+
+def observation_payloads(database: Any, provider: str, capability: str) -> list[dict[str, Any]]:
+    """Read all stored normalized payloads for one public capability."""
+    with database.transaction() as connection:
+        rows = connection.execute(
+            """SELECT normalized FROM quant.raw_market_observations
+               WHERE provider_key=%s AND capability=%s
+               ORDER BY effective_at,created_at""",
+            (provider, capability),
+        ).fetchall()
+    return [dict(row["normalized"]) for row in rows]
 
 
 def persist_free_daily(

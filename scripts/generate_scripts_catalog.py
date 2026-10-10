@@ -104,8 +104,9 @@ RULES: list[tuple[str, str, str, str]] = [
     # CI and contract checks
     ("verify_*.py", "CI and checks", "platform", "workstation and CI"),
     ("verify-tdx-*.py", "research data", "quant-research", "workstation"),
-    ("verify-*", "CI and checks", "platform", "workstation and CI"),
     ("generate-tdx-*.py", "research data", "quant-research", "workstation"),
+    ("verify-*", "CI and checks", "platform", "workstation and CI"),
+    ("generate-tdx-hosts.py", "research data", "quant-research", "workstation"),
     ("generate*", "CI and checks", "platform", "workstation and CI"),
     ("export_component.py", "CI and checks", "platform", "workstation and CI"),
     # research data tools
@@ -122,9 +123,12 @@ RULES: list[tuple[str, str, str, str]] = [
     ("tdx-local-export.py", "research data", "quant-research", "workstation"),
     ("tdx-quant-export.py", "research data", "quant-research", "owner-windows"),
     ("tdx_handshake_experiments.py", "research data", "quant-research", "workstation"),
+    ("probe-tdx-routes.py", "research data", "quant-research", "workstation"),
     ("probe-tdx-*.py", "research data", "quant-research", "workstation"),
-    ("tdx_probe_failures.py", "research data", "quant-research", "workstation"),
+    ("probe-tdx-q-*.py", "research data", "quant-research", "workstation"),
     ("tdx-owner-probe.sh", "research data", "quant-research", "workstation"),
+    ("refresh-tdx-hosts.sh", "research data", "quant-research", "workstation"),
+    ("tdx_probe_failures.py", "research data", "quant-research", "workstation"),
     ("tdx-promote.py", "research data", "quant-research", "workstation"),
 ]
 GROUP_ORDER = ["release", "owner runtime", "owner Windows", "workstation services", "teacher review", "local n8n",

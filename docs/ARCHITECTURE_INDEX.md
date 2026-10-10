@@ -12,7 +12,7 @@
 | Python modules under `app/` | 566 |
 | HTTP router modules | 50 |
 | Alembic migrations | 113 |
-| Frontend source files | 68 |
+| Frontend source files | 69 |
 
 ## Domain naming inventory
 
@@ -115,6 +115,7 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/composables/workspace/analyst-timeline.ts`
 - `frontend/src/composables/workspace/board-flow.ts`
 - `frontend/src/composables/workspace/close-review.ts`
+- `frontend/src/composables/workspace/datasources.ts`
 - `frontend/src/composables/workspace/factor-lab.ts`
 - `frontend/src/composables/workspace/format.ts`
 - `frontend/src/composables/workspace/market-data.ts`

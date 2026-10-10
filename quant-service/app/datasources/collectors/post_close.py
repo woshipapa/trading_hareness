@@ -18,7 +18,13 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ..derived import limit_pools
+from ..http import ashare_symbol
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
+from ..sources import (
+    tdx_bars, tdx_files, tdx_fin_history, tdx_instruments, tdx_mac, tdx_protocol, tdx_reference_files,
+    tdx_zhb_extras,
+)
 from ..sources.fuyao_evidence import fetch_code_batches
 from .intraday import CollectorDeps, CollectorState, SENTIMENT_PROVIDER_KEY, build_sentiment
 from ..error_text import error_text
@@ -56,6 +62,16 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("daily_valuation_projection", time(18, 30), time(23, 30), "复用已归档估值补齐每日记录"),
     ArchiveJob("tick_flow", time(19, 0), time(23, 30), "观察池分笔资金流"),
     ArchiveJob("capital_changes", time(19, 30), time(23, 30), "观察池除权除息与股本变迁"),
+    ArchiveJob("tdx_security_list", time(19, 40), time(23, 30), "通达信证券列表变更"),
+    ArchiveJob("tdx_tipinfo", time(19, 50), time(23, 30), "通达信财报首次披露日期"),
+    ArchiveJob("tdx_gpcw", time(20, 0), time(23, 30), "通达信历史财务报表"),
+    ArchiveJob("tdx_index_bars", time(20, 10), time(23, 30), "通达信指数日线与涨跌家数"),
+    ArchiveJob("tdx_mac_boards", time(20, 20), time(23, 30), "通达信板块目录与成分"),
+    ArchiveJob("tdx_limit_pools", time(20, 30), time(23, 30), "通达信衍生涨跌停池"),
+    ArchiveJob("tdx_host_probe", time(20, 40), time(23, 30), "通达信主机周探针"),
+    ArchiveJob("tdx_stat_snapshot", time(20, 50), time(23, 30), "通达信估值与每日统计快照"),
+    ArchiveJob("tdx_files_membership", time(21, 0), time(23, 30), "通达信文件板块成分"),
+    ArchiveJob("tdx_calendar_ipo", time(21, 10), time(23, 30), "通达信节假日与新股日历"),
 )
 
 
@@ -67,11 +83,19 @@ class ArchiveDeps:
     margin_detail_enabled: bool = False
     max_tick_symbols: int = 60
     project_valuations: Callable[[date], Awaitable[Mapping[str, Any]]] | None = None
+    latest_observation_payloads: Callable[[str, str], Awaitable[dict[str, dict[str, Any]]]] | None = None
+    observation_payloads: Callable[[str, str], Awaitable[list[dict[str, Any]]]] | None = None
+    max_gpcw_periods: int = 2
+    persist_membership_delta: Callable[[str, str, dict[str, dict[str, Any]], datetime], Awaitable[dict[str, int]]] | None = None
+
+
+TDX_INDEX_SYMBOLS = ("999999.SH", "399001.SZ", "399006.SZ", "399300.SZ", "000688.SH", "899050.BJ")
 
 
 @dataclass
 class ArchiveState:
     done: dict[str, str] = field(default_factory=dict)
+    weekly_done: dict[str, str] = field(default_factory=dict)
     last_attempt: dict[str, float] = field(default_factory=dict)
     collector_state: CollectorState = field(default_factory=CollectorState)
 
@@ -290,6 +314,254 @@ async def job_capital_changes(deps: ArchiveDeps, state: ArchiveState, day: date,
     return {"symbols": len(symbols), "rows": len(rows), "stored": stored, "failures": failures[:10]}
 
 
+async def job_tdx_security_list(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive the TDX instrument list; a normal day stores 52,000 rows initially and only changed symbols later."""
+    started = time_module.monotonic()
+    evidence = await tdx_instruments.fetch_security_list()
+    rows = evidence.rows
+    previous = await deps.latest_observation_payloads("tdx_public", "tdx_security_list") if deps.latest_observation_payloads else {}
+    changed = [dict(row, effective_at=now.isoformat(), available_at=now.isoformat())
+               for row in rows
+               if {key: value for key, value in previous.get(row["symbol"], {}).items()
+                   if key not in {"provider_key", "capability"}} != row]
+    stored = await deps.collector.persist_observations("tdx_public", "tdx_security_list", changed) if changed else 0
+    await deps.collector.record_health("tdx_public", "tdx_security_list", True, len(rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"rows": len(rows), "changed": len(changed), "stored": stored}
+
+
+async def job_tdx_tipinfo(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive every tipinfo disclosure row; a normal day stores about 5,600 rows once."""
+    started = time_module.monotonic()
+
+    def fetch(client):
+        files = tdx_files.parse_zhb_zip(tdx_files.download(client, "zhb.zip"))
+        return tdx_zhb_extras.parse_tipinfo(files["tipinfo.dat"])
+
+    rows, host = await tdx_protocol.call(fetch, handshake_profile="login_one")
+    observations = []
+    for row in rows:
+        market = int(row["market"])
+        symbol = tdx_protocol.symbol(market, row["code"])
+        effective = datetime.combine(row["first_disclosure_date"], time(23, 59, 59), CN_TZ)
+        observations.append({"ts_code": symbol, "market": market, "code": row["code"],
+                             "report_period": row["report_period"], "eps": row["eps"],
+                             "first_disclosure_date": row["first_disclosure_date"],
+                             "effective_at": effective.isoformat(), "available_at": now.isoformat()})
+    stored = await deps.collector.persist_observations("tdx_public", "tdx_tipinfo", observations)
+    await deps.collector.record_health("tdx_public", "tdx_tipinfo", True, len(rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"rows": len(rows), "stored": stored, "host": host}
+
+
+async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive at most two changed GPCW periods per day; the complete history is intentionally opt-in."""
+    started = time_module.monotonic()
+    manifest_text, host = await tdx_protocol.call(
+        lambda client: tdx_protocol.decode_text(tdx_files.download(client, "tdxfin/gpcw.txt")),
+        handshake_profile="login_one",
+    )
+    manifest = tdx_fin_history.parse_manifest(manifest_text)
+    previous_payloads = await deps.latest_observation_payloads("tdx_public", "tdx_gpcw_manifest") if deps.latest_observation_payloads else {}
+    previous = [tdx_fin_history.ManifestEntry(item["filename"], item["md5"], int(item["size"]))
+                for item in previous_payloads.values()]
+    changes = tdx_fin_history.manifest_changes(previous, manifest)
+    changed_names = sorted(set(changes["added"]) | set(changes["changed"]))[-deps.max_gpcw_periods:]
+    entries = {entry.filename: entry for entry in manifest}
+    manifest_rows = [{"observation_symbol": entry.filename, "filename": entry.filename, "md5": entry.md5, "size": entry.size,
+                      "effective_at": datetime.combine(date.fromisoformat(entry.filename[4:12]), time(15, 0), CN_TZ).isoformat(),
+                      "available_at": now.isoformat()}
+                     for entry in manifest]
+    manifest_stored = await deps.collector.persist_observations("tdx_public", "tdx_gpcw_manifest", manifest_rows)
+    tipinfo_payloads = await deps.observation_payloads("tdx_public", "tdx_tipinfo") if deps.observation_payloads else []
+    tipinfo = [{**row, "first_disclosure_date": date.fromisoformat(str(row["first_disclosure_date"]))}
+               for row in tipinfo_payloads]
+    stored = 0
+    downloaded = 0
+    undated = 0
+    rejected = 0
+    for filename in changed_names:
+        entry = entries[filename]
+        rows, _period_host = await tdx_protocol.call(
+            lambda client, name=filename, item=entry: tdx_fin_history.gpcw(client, name, item),
+            handshake_profile="login_one",
+        )
+        undated += tdx_fin_history.date_gpcw_rows(rows, tipinfo)
+        observations = []
+        for row in rows:
+            symbol = ashare_symbol(row["code"])
+            if symbol is None:
+                rejected += 1
+                continue
+            named_fields = {name: value for name, value in row["fields"].items() if name in tdx_fin_history.GPCW_FIELD_NAMES.values()}
+            report_period = row["report_period"]
+            effective = datetime.combine(date.fromisoformat(report_period), time(15, 0), CN_TZ)
+            available = row.get("available_at", now)
+            observations.append({"ts_code": symbol, "code": row["code"], "report_period": report_period,
+                                "fields": named_fields, "field_units": {key: row["field_units"][key] for key in named_fields},
+                                "effective_at": effective.isoformat(), "available_at": available.isoformat(),
+                                "availability_basis": "tipinfo_first_disclosure" if "available_at" in row else "collection_time_undated"})
+        stored += await deps.collector.persist_observations("tdx_public", "tdx_gpcw", observations) if observations else 0
+        downloaded += 1
+    await deps.collector.record_health("tdx_public", "tdx_gpcw", True, stored, round((time_module.monotonic() - started) * 1000), None)
+    return {"manifest": len(manifest), "manifest_stored": manifest_stored, "changed": changed_names,
+            "downloaded": downloaded, "rows_stored": stored, "undated": undated, "rejected": rejected, "host": host}
+
+
+async def job_tdx_index_bars(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive six index series; each symbol stores 800 rows once and five rows on normal later days."""
+    started = time_module.monotonic()
+    daily_rows: list[dict[str, Any]] = []
+    breadth_rows: list[dict[str, Any]] = []
+    previous = await deps.latest_observation_payloads("tdx_public", "tdx_index_daily_bars") if deps.latest_observation_payloads else {}
+    for symbol in TDX_INDEX_SYMBOLS:
+        count = 5 if symbol in previous else 800
+        daily = await tdx_bars.fetch_index_daily(symbol=symbol, count=count)
+        for row in daily.rows:
+            effective = datetime.combine(date.fromisoformat(row["trade_date"]), time(15, 0), CN_TZ)
+            daily_rows.append({**row, "ts_code": symbol, "effective_at": effective.isoformat(), "available_at": now.isoformat()})
+            breadth_rows.append({key: row[key] for key in ("symbol", "trade_date", "up_count", "down_count")}
+                                | {"ts_code": symbol, "effective_at": effective.isoformat(), "available_at": now.isoformat()})
+    stored_daily = await deps.collector.persist_observations("tdx_public", "tdx_index_daily_bars", daily_rows)
+    stored_breadth = await deps.collector.persist_observations("tdx_public", "tdx_index_breadth", breadth_rows)
+    await deps.collector.record_health("tdx_public", "tdx_index_daily_bars", True, len(daily_rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"symbols": len(TDX_INDEX_SYMBOLS), "daily_rows": len(daily_rows), "breadth_rows": len(breadth_rows),
+            "stored_daily": stored_daily, "stored_breadth": stored_breadth}
+
+
+async def job_tdx_mac_boards(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive MAC board metadata and observed membership; a full pass is five plus one request per board."""
+    started = time_module.monotonic()
+    catalog = await tdx_mac.fetch_board_catalog()
+    effective = _close_of(day).isoformat()
+    catalog_rows = [{**row, "ts_code": f"{row['board_code']}.SH", "effective_at": effective,
+                     "available_at": now.isoformat()} for row in catalog.rows]
+    stored_catalog = await deps.collector.persist_observations("tdx_mac", "tdx_mac_board_catalog", catalog_rows)
+    membership_requests = 0
+    opened = 0
+    closed = 0
+    for board in catalog.rows:
+        evidence = await tdx_mac.fetch_membership(sector_key=board["board_code"], board_type=board["board_type"])
+        members = {row["symbol"]: row for row in evidence.rows}
+        membership_requests += 1
+        if deps.persist_membership_delta is not None:
+            delta = await deps.persist_membership_delta(
+                f"tdx_mac_type_{board['board_type']}", board["board_code"], members, now,
+            )
+            opened += delta["opened"]
+            closed += delta["closed"]
+    await deps.collector.record_health("tdx_mac", "sector.membership", True, len(catalog.rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"boards": len(catalog.rows), "catalog_requests": len(tdx_mac.BOARD_TYPES),
+            "membership_requests": membership_requests, "stored_catalog": stored_catalog,
+            "opened": opened, "closed": closed}
+
+
+async def job_tdx_limit_pools(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive the three derived TDX limit pools once after close; a normal day stores one row per pool member."""
+    started = time_module.monotonic()
+    pools = await limit_pools._read_limit_pools(trade_date=day)
+    effective = _close_of(day).isoformat()
+    stored: dict[str, int] = {}
+    counts: dict[str, int] = {}
+    for pool_name, evidence in pools.items():
+        rows = [{**row, "ts_code": row["symbol"], "trade_date": day.isoformat(),
+                 "effective_at": effective, "available_at": now.isoformat()} for row in evidence.rows]
+        counts[pool_name] = len(rows)
+        stored[pool_name] = await deps.collector.persist_observations("tdx_public", f"tdx_{pool_name}_pool", rows)
+    await deps.collector.record_health("tdx_public", "tdx_limit_pools", True, sum(counts.values()),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"counts": counts, "stored": stored}
+
+
+async def job_tdx_host_probe(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Probe every configured TDX host weekly; a normal run writes one health row per host."""
+    week = f"{day.isocalendar().year}-W{day.isocalendar().week:02d}"
+    if state.weekly_done.get("tdx_host_probe") == week:
+        return {"status": "skipped", "week": week}
+    results = []
+    for host in tdx_protocol.configured_hosts():
+        started = time_module.monotonic()
+        try:
+            count, receipt = await asyncio.to_thread(
+                tdx_protocol.call_sync,
+                lambda client: tdx_instruments.security_count(client, 0), hosts=[host], handshake_profile="login_one",
+            )
+            latency = round((time_module.monotonic() - started) * 1000)
+            await deps.collector.record_health("tdx_public", f"tdx_host:{receipt}", True, int(count), latency, None)
+            results.append({"host": receipt, "ok": True, "latency_ms": latency, "count": count})
+        except Exception as error:  # noqa: BLE001 - one host failure must not hide other host health
+            latency = round((time_module.monotonic() - started) * 1000)
+            label = f"{host[0]}:{host[1]}"
+            await deps.collector.record_health("tdx_public", f"tdx_host:{label}", False, 0, latency, type(error).__name__)
+            results.append({"host": label, "ok": False, "latency_ms": latency, "error": type(error).__name__})
+    state.weekly_done["tdx_host_probe"] = week
+    return {"status": "completed", "week": week, "hosts": results}
+
+
+def _tdx_date(value: Any) -> date:
+    text = str(value)
+    return date.fromisoformat(text if "-" in text else f"{text[:4]}-{text[4:6]}-{text[6:8]}")
+
+
+async def job_tdx_stat_snapshot(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive about 8,000 valuation and 8,000 daily-basic rows on a normal full snapshot day."""
+    started = time_module.monotonic()
+    valuation = await tdx_reference_files.fetch_valuation()
+    daily_basic = await tdx_reference_files.fetch_daily_basic()
+    valuation_rows = [{**row, "ts_code": row["symbol"],
+                       "effective_at": _close_of(_tdx_date(row["effective_date"])).isoformat(),
+                       "available_at": now.isoformat()} for row in valuation.rows]
+    daily_rows = [{**row, "ts_code": row["symbol"],
+                   "effective_at": _close_of(_tdx_date(row["effective_date"])).isoformat(),
+                   "available_at": now.isoformat()} for row in daily_basic.rows]
+    stored_valuation = await deps.collector.persist_observations("tdx_public", "tdx_stat_valuation", valuation_rows)
+    stored_daily = await deps.collector.persist_observations("tdx_public", "tdx_stat_daily_basic", daily_rows)
+    await deps.collector.record_health("tdx_public", "tdx_stat_snapshot", True, len(valuation_rows) + len(daily_rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"valuation_rows": len(valuation_rows), "daily_basic_rows": len(daily_rows),
+            "stored_valuation": stored_valuation, "stored_daily_basic": stored_daily}
+
+
+async def job_tdx_files_membership(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive one observed row per returned TDX file member; unchanged members store no new interval."""
+    started = time_module.monotonic()
+    evidence = await tdx_reference_files.fetch_membership()
+    grouped: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for row in evidence.rows:
+        grouped.setdefault((row["taxonomy_key"], row["sector_key"]), {})[row["symbol"]] = row
+    opened = closed = 0
+    for (taxonomy_key, sector_key), members in grouped.items():
+        if deps.persist_membership_delta is None:
+            continue
+        delta = await deps.persist_membership_delta(taxonomy_key, sector_key, members, now)
+        opened += delta["opened"]
+        closed += delta["closed"]
+    await deps.collector.record_health("tdx_public", "tdx_files_membership", True, len(evidence.rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"rows": len(evidence.rows), "taxonomies": len(grouped), "opened": opened, "closed": closed}
+
+
+async def job_tdx_calendar_ipo(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive declared holiday and IPO application dates, normally dozens of calendar rows and a small IPO set."""
+    started = time_module.monotonic()
+    calendar = await tdx_reference_files.fetch_trade_calendar()
+    ipo = await tdx_reference_files.fetch_ipo_calendar()
+    calendar_rows = [{**row, "observation_symbol": f"holiday:{row['calendar_date']}",
+                      "effective_at": _close_of(_tdx_date(row["calendar_date"])).isoformat(),
+                      "available_at": now.isoformat()} for row in calendar.rows]
+    ipo_rows = [{**row, "ts_code": row["symbol"],
+                 "effective_at": _close_of(_tdx_date(row["apply_date"])).isoformat(),
+                 "available_at": now.isoformat()} for row in ipo.rows]
+    stored_calendar = await deps.collector.persist_observations("tdx_public", "tdx_trade_calendar", calendar_rows)
+    stored_ipo = await deps.collector.persist_observations("tdx_public", "tdx_ipo_calendar", ipo_rows)
+    await deps.collector.record_health("tdx_public", "tdx_calendar_ipo", True, len(calendar_rows) + len(ipo_rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"calendar_rows": len(calendar_rows), "ipo_rows": len(ipo_rows),
+            "stored_calendar": stored_calendar, "stored_ipo": stored_ipo}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -297,6 +569,13 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "eastmoney_margin": job_eastmoney_margin, "fuyao_valuation_index": job_fuyao_valuation_index,
     "daily_valuation_projection": job_daily_valuation_projection,
     "tick_flow": job_tick_flow, "capital_changes": job_capital_changes,
+    "tdx_security_list": job_tdx_security_list, "tdx_tipinfo": job_tdx_tipinfo, "tdx_gpcw": job_tdx_gpcw,
+    "tdx_index_bars": job_tdx_index_bars,
+    "tdx_mac_boards": job_tdx_mac_boards,
+    "tdx_limit_pools": job_tdx_limit_pools,
+    "tdx_host_probe": job_tdx_host_probe,
+    "tdx_stat_snapshot": job_tdx_stat_snapshot, "tdx_files_membership": job_tdx_files_membership,
+    "tdx_calendar_ipo": job_tdx_calendar_ipo,
 }
 
 
