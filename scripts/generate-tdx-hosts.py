@@ -68,7 +68,11 @@ def main():
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    payload = json.loads(args.matrix.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(args.matrix.read_text(encoding="utf-8"))
+    except OSError as error:
+        print(f"cannot read probe matrix: {error}", file=sys.stderr)
+        return 2
     if "samples" not in payload:
         print("旧三包矩阵不能用于生成: expected v2 JSON with samples", file=sys.stderr)
         return 2
