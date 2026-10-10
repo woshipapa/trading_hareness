@@ -146,6 +146,20 @@ live 阈值或订单路径。
 先用它，入库前的历史场次仍读 `ths_concept_flow`；按并集取的读者（盘中同业集合）两者都读，同一概念代码的同一组成员只计一次。
 其余 fuyao 口径不会被策略自动选中。
 
+### 4.2 P0 消费者盘点（按当前代码事实）
+
+- 经 resolver 读取：独立运行时在 `quant-service/app/datasources/runtime.py:82` 组装
+  `CapabilityResolver`；盘中异动采集在 `quant-service/app/datasources/collectors/intraday.py:195`
+  通过 `limits.anomaly_tape` 读取；策略能力 facade 在
+  `quant-service/app/platform/strategy_data_context.py:211` 统一调用
+  `resolver.fetch`。
+- 组合根直连：盘中采集在 resolver 未注入时于
+  `quant-service/app/datasources/collectors/intraday.py:192-194` 直接调用
+  `eastmoney_ztb.fetch_stock_changes`；其余 Fuyao 盘后/板块任务通过注入的
+  `fuyao_fetch` 读取（装配入口为 `quant-service/app/datasources/runtime.py:82`）。
+  `quant-service/app/datasources/bindings.py:76-155` 是 resolver 的组合根绑定表，
+  不属于消费者。
+
 v7 回放对比（owner 库冻结输入，v6 规则 vs v7 规则）：随机 1,279 条 0 差异；开盘窗口 10 条候选 0 差异——
 因为这些 Longhu 报价在开盘窗口的新鲜度全是 `invalid_timestamp`（见下），v7 的放开要配合时钟修复才会生效。
 
