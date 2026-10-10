@@ -12,8 +12,10 @@ the same keywords, so the resolver can fall through without translation):
 * ``fund.nav``: ``fund_code``
 * ``quote.watch_snapshot``: ``symbols``
 * ``limits.prices``: ``symbols``
-* ``bars.daily``: ``symbol``, ``count``
-* ``bars.minute``: ``symbol``, ``count`` (MAC 1-minute bars)
+* ``bars.daily``: ``symbol`` (market+code), ``count`` (at least 1)
+* ``bars.minute``: ``symbol`` (market+code), ``count`` (at least 1; MAC 1-minute bars use the same keywords)
+* ``bars.index_daily``: ``symbol`` (index or board market+code), ``count`` (1..800)
+* ``breadth.index_daily``: ``symbol`` (the same index or board code), ``count`` (1..800; the same index-bars request)
 * ``sector.board_catalog``: no parameters; returns the MAC board types of ``tdx_mac.BOARD_TYPES``
 * ``sector.membership``: ``sector_key`` (MAC also takes the catalog row's ``board_type``)
 

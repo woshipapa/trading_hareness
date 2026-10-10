@@ -238,7 +238,8 @@ def parse_index_bars(body: bytes, *, category: int = 9) -> list[dict[str, Any]]:
         opening = open_diff + base
         rows.append({"datetime": stamp, "open": opening / 1000, "close": (opening + close_diff) / 1000,
                      "high": (opening + high_diff) / 1000, "low": (opening + low_diff) / 1000,
-                     "volume": tdx_protocol.decode_volume(volume_raw), "amount": tdx_protocol.decode_volume(amount_raw),
+                     "volume": tdx_protocol.decode_volume(volume_raw),
+                     "amount": tdx_protocol.decode_volume(amount_raw),
                      "up_count": up, "down_count": down})
         base = opening + close_diff
     if pos != len(payload):
