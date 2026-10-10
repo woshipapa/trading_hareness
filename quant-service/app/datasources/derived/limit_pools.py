@@ -68,8 +68,10 @@ def derive_limit_pools(snapshot_rows: Iterable[Mapping[str, Any]], limit_rows: I
 async def fetch_limit_pools(*, trade_date: date) -> CapabilityEvidence:
     """Read the all-A snapshot, then the limit prices of exactly its symbols, and derive the three pools.
 
-    The snapshot is live, so only the current session can be derived.  ``coverage`` is the share of snapshot
-    securities that have a limit price; ``available_at`` is the later of the two collection times.
+    ``rows`` are the members of all three pools, each tagged ``pool``.  The snapshot is live, so only the current
+    session can be derived: ``trade_date`` is compared with the Asia/Shanghai date, and on a day without a session
+    the snapshot is the last close.  ``coverage`` is the share of snapshot securities that have a limit price;
+    ``available_at`` is the later of the two collection times.
     """
     today = cn_today()
     if trade_date != today:
