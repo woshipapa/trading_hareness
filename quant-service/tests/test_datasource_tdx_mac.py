@@ -450,6 +450,16 @@ class MacWatchSnapshotTests(unittest.TestCase):
                     with self.assertRaises(ValueError, msg=f"{adapter.__name__} {symbol}"):
                         asyncio.run(adapter(**params))
 
+    def test_an_old_bj_code_is_requested_as_its_920_code_and_its_row_keeps_the_requested_symbol(self):
+        for adapter in (tdx_mac.fetch_watch_snapshot, tdx_mac.fetch_limit_prices):
+            client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+            with patched_call(client):
+                evidence = asyncio.run(adapter(symbols=["430017.BJ", "600519.SH"]))
+            self.assertEqual(requested_stocks(client.requests[0]), [(2, "920017"), (1, "600519")], adapter.__name__)
+            self.assertEqual([(row["symbol"], row.get("source_symbol")) for row in evidence.rows],
+                             [("920017.BJ", "430017.BJ"), ("600519.SH", None)], adapter.__name__)
+            self.assertEqual(evidence.coverage, 1.0)
+
     def test_an_answer_that_leaves_out_a_quote_field_raises(self):
         def answer(request):
             bitmap = bytearray(request[12:32])
@@ -625,6 +635,13 @@ class MacBarAdapterTests(unittest.TestCase):
         # one-minute period, and one more bar than asked for because the first is the sentinel
         self.assertEqual([(struct.unpack_from("<H", request, 36)[0], struct.unpack_from("<H", request, 44)[0])
                           for request in requests], [(tdx_mac.BAR_PERIODS["1m"], 4)])
+
+    def test_an_old_bj_code_is_requested_as_its_920_code_and_the_rows_carry_the_new_symbol(self):
+        for adapter in (tdx_mac.fetch_daily_bars, tdx_mac.fetch_minute_bars):
+            evidence, requests = self.fetch(adapter, symbol="430017.BJ", count=3)
+            self.assertEqual({row["symbol"] for row in evidence.rows}, {"920017.BJ"}, adapter.__name__)
+            self.assertEqual((struct.unpack_from("<H", requests[0], 12)[0], requests[0][14:36].rstrip(b"\0")),
+                             (2, b"920017"), adapter.__name__)
 
     def test_a_bar_time_beyond_the_day_raises(self):
         with self.assertRaisesRegex(tdx_mac.TdxMacError, "invalid MAC time 24:00:00"):

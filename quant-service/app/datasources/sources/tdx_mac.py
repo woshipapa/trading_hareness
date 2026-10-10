@@ -521,31 +521,16 @@ def _minute_bar_row(symbol: str, row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _requested_stocks(symbols: Sequence[str]) -> list[tuple[int, str]]:
-    if not symbols:
-        raise ValueError("symbols must not be empty")
-    return [tdx_protocol.market_code(symbol) for symbol in symbols]
-
-
-def _batch_evidence(rows: list[dict[str, Any]], stocks: Sequence[tuple[int, str]], host: str) -> CapabilityEvidence:
-    """Coverage is the share of requested symbols that came back; the ones left out are named."""
-    returned = {row["symbol"] for row in rows}
-    missing = [symbol for symbol in (tdx_protocol.symbol(*stock) for stock in stocks) if symbol not in returned]
-    warnings = (f"missing_symbols={len(missing)}: {', '.join(missing[:10])}{' ...' if len(missing) > 10 else ''}",
-                ) if missing else ()
-    return tdx_protocol.observed_evidence(rows, host, coverage=len(rows) / len(stocks), warnings=warnings)
-
-
 async def fetch_watch_snapshot(*, symbols: Sequence[str]) -> CapabilityEvidence:
-    stocks = _requested_stocks(symbols)
+    stocks = tdx_protocol.requested_stocks(symbols)
     rows, host = await call(lambda client: [_quote_row(row) for row in client.batch_quotes(stocks)])
-    return _batch_evidence(rows, stocks, host)
+    return tdx_protocol.batch_evidence(rows, symbols, host)
 
 
 async def fetch_limit_prices(*, symbols: Sequence[str]) -> CapabilityEvidence:
-    stocks = _requested_stocks(symbols)
+    stocks = tdx_protocol.requested_stocks(symbols)
     rows, host = await call(lambda client: [_limit_row(row) for row in client.batch_quotes(stocks, LIMITS_BITMAP)])
-    return _batch_evidence(rows, stocks, host)
+    return tdx_protocol.batch_evidence(rows, symbols, host)
 
 
 async def fetch_board_catalog() -> CapabilityEvidence:

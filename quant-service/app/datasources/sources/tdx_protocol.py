@@ -30,6 +30,7 @@ from datetime import date, datetime, timezone
 import logging
 
 from ..contracts import CapabilityEvidence
+from .tdx_bj_codes import OLD_TO_NEW
 import time
 from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Sequence, TypeVar
@@ -503,10 +504,13 @@ async def call(operation: Callable[[TdxClient], T], **kwargs: Any) -> tuple[T, s
 
 
 def market_code(symbol: str) -> tuple[int, str]:
-    """``"600519.SH"`` -> ``(1, "600519")``; anything but six ASCII digits and a known exchange is a ValueError."""
+    """``"600519.SH"`` -> ``(1, "600519")``; an old BJ code is requested as its 920xxx code (tdx_bj_codes), so every
+    TDX adapter that takes a symbol serves it; anything but six ASCII digits and a known exchange is a ValueError."""
     code, _, exchange = symbol.upper().partition(".")
     if exchange not in MARKETS or len(code) != 6 or not (code.isascii() and code.isdigit()):
         raise ValueError("symbol must be six digits followed by .SH, .SZ or .BJ")
+    if exchange == "BJ":
+        code = OLD_TO_NEW.get(code, code)
     return MARKETS[exchange], code
 
 
@@ -526,10 +530,31 @@ def observed_evidence(rows: list[dict[str, Any]], host: str, *, coverage: float 
                               warnings=(f"tdx_host={host}", *warnings))
 
 
+def requested_stocks(symbols: Sequence[str]) -> list[tuple[int, str]]:
+    """The (market, code) pairs a batch adapter requests for ``symbols``; an empty request is a ValueError."""
+    if not symbols:
+        raise ValueError("symbols must not be empty")
+    return [market_code(item) for item in symbols]
+
+
+def batch_evidence(rows: list[dict[str, Any]], symbols: Sequence[str], host: str) -> CapabilityEvidence:
+    """The rows a batch adapter read for ``symbols``. Coverage is the share of requested symbols that came back and the
+    ones left out are named. The row of a symbol market_code translated (an old BJ code) carries source_symbol, the
+    symbol as requested."""
+    requested = [(item, symbol(*market_code(item))) for item in symbols]
+    returned = {row["symbol"] for row in rows}
+    missing = [item for item, answer in requested if answer not in returned]
+    warnings = (f"missing_symbols={len(missing)}: {', '.join(missing[:10])}{' ...' if len(missing) > 10 else ''}",
+                ) if missing else ()
+    translated = {answer: item for item, answer in requested if item.upper() != answer}
+    rows = [{**row, "source_symbol": translated[row["symbol"]]} if row["symbol"] in translated else row for row in rows]
+    return observed_evidence(rows, host, coverage=len(rows) / len(symbols), warnings=warnings)
+
+
 __all__ = [
     "BAR_CATEGORIES", "DEFAULT_HOSTS", "EXCHANGES", "HANDSHAKE_PROFILES", "MARKETS", "MINUTE_BAR_CATEGORIES", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
-    "UPSTREAM_SITE", "XDXR_CATEGORIES", "build_bars_request", "build_history_ticks_request",
+    "UPSTREAM_SITE", "XDXR_CATEGORIES", "batch_evidence", "build_bars_request", "build_history_ticks_request",
     "build_quotes_request", "build_ticks_request", "build_xdxr_request", "call", "call_sync",
     "configured_hosts", "decode_gbk", "decode_price", "decode_volume", "market_code", "observed_evidence", "parse_bars", "parse_quotes",
-    "parse_ticks", "parse_xdxr", "sweep_sync", "symbol",
+    "parse_ticks", "parse_xdxr", "requested_stocks", "sweep_sync", "symbol",
 ]

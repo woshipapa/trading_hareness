@@ -15,7 +15,6 @@ from __future__ import annotations
 import dataclasses
 
 import asyncio
-import re
 import struct
 from collections import Counter
 from collections.abc import Callable
@@ -246,14 +245,6 @@ def parse_index_bars(body: bytes, *, category: int = 9) -> list[dict[str, Any]]:
     return rows
 
 
-def normalize_bj_symbol(old: str, mapping: Mapping[str, str] | None = None) -> str:
-    code = str(old).upper().replace(".BJ", "")
-    if not re.fullmatch(r"\d{6}", code):
-        raise ValueError("BJ symbol must be six digits")
-    new = (mapping or {}).get(code, code)
-    return f"{new}.BJ"
-
-
 def security_count(client: tdx_protocol.TdxClient, market: int) -> int:
     return parse_security_count(client._exchange(build_security_count_request(market)))
 
@@ -274,6 +265,6 @@ def type_counts(rows: Iterable[Mapping[str, Any]]) -> Counter[str]:
 
 
 __all__ = ["SECURITY_COUNT", "SECURITY_LIST", "bar_layout", "build_security_count_request",
-           "build_security_list_request", "classify_instrument", "fetch_security_list", "fetch_instruments", "instrument_type", "normalize_bj_symbol",
+           "build_security_list_request", "classify_instrument", "fetch_security_list", "fetch_instruments", "instrument_type",
            "parse_bj_mapping", "parse_tdxbjmore", "bj_rows_from_zhb", "parse_index_bars", "parse_security_count", "parse_security_list",
            "security_count", "security_list", "index_bars", "price_scale", "scale_quote", "type_counts"]

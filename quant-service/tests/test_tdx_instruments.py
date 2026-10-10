@@ -63,7 +63,6 @@ class InstrumentTests(unittest.TestCase):
     def test_bj_config_mapping_tolerates_delimiters(self):
         mapping = ti.parse_bj_mapping("832000|920000\n920001=830001\n# ignored\n".encode())
         self.assertEqual(mapping, {"832000": "920000", "830001": "920001"})
-        self.assertEqual(ti.normalize_bj_symbol("832000.BJ", mapping), "920000.BJ")
 
     def test_tdxbjmore_rows_are_source_tagged(self):
         rows = ti.parse_tdxbjmore("44|920000|2|安徽凤凰|1|\n".encode("gbk"))
