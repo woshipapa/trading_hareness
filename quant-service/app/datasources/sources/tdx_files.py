@@ -167,6 +167,8 @@ def parse_tdxstat(data: bytes) -> list[dict[str, Any]]:
             "market": _int(fields, 0), "code": fields[1], "date": _field(fields, 4),
             "pe_ttm": _float(fields, 3), "trend_days": _int(fields, 5), "change_pct": _float(fields, 6),
             "pe_static": _float(fields, 9), "dividend_yield_pct": _float(fields, 10),
+            "amount_10k_yuan": _float(fields, 11), "annual_limit_up_days": _int(fields, 26),
+            "change_1y_pct": _float(fields, 27),
             "change_5d_pct": _float(fields, 28), "change_10d_pct": _float(fields, 30),
             "change_20d_pct": _float(fields, 18), "change_60d_pct": _float(fields, 20),
             "change_ytd_pct": _float(fields, 21), "fields": fields,
@@ -186,6 +188,8 @@ def parse_tdxstat2(data: bytes) -> list[dict[str, Any]]:
         rows.append({
             "market": _int(fields, 0), "code": fields[1], "date": _field(fields, 2),
             "amount_10k_yuan": _float(fields, 3), "amount_prev_10k_yuan": _float(fields, 5),
+            "amount_alt_10k_yuan": _float(fields, 7), "change_pct": _float(fields, 11),
+            "change_range_pct": _float(fields, 12), "auction_amount_10k_yuan": _float(fields, 14),
             "block_index": _field(fields, 13), "ipo_price_yuan": _float(fields, 16),
             "high_52w_yuan": _float(fields, 17), "low_52w_yuan": _float(fields, 18),
             "fields": fields,
