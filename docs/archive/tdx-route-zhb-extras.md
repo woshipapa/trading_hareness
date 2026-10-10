@@ -122,3 +122,9 @@ No codec, checksum, record length, or semantic decoder is claimed.
 The verification script `scripts/verify-tdx-zhb-extras.py` fails non-zero for a
 missing/empty ZIP, missing/empty member, malformed archive, or unexpected
 member set.
+
+## 更正（2026-10-11）：ST 比例与未验证的比例对照
+
+“Independent checks” 里“预期的合理性分类是……ST 5%”已过期，原文照旧保留：沪深主板 ST 自 2026-07-06 起是 10 %（此前 5 %，`quant-service/app/market_rules.py`），创业板、科创板的 ST 是 20 %，北交所是 30 %。
+
+同一段还说当时没有发 MAC 报价请求，“五只活股的比例对照”未验证。之后 2026-10-09 会话的全 A 快照（5,562 行）已逐行对过：MAC 涨跌停价覆盖率 1.0，主板 ST 的“限价 / 昨收 − 1”是 0.100（76 行）、0.101（25 行）、0.099（18 行）等（`scripts/data/tdx_mac_limits_all_a_2026-10-10_mac.json`）。
