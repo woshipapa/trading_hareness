@@ -1,10 +1,11 @@
 """Read-only TDX GPCW historical financial statements.
 
-TDX publishes one ZIP per report period.  A GPCW row is a vendor snapshot:
-the report-period header is not an availability timestamp and values may be
-restated in a later snapshot.  Callers must therefore keep ``report_period``
-and collection time separate and must not use this source as PIT evidence
-without an independent disclosure event.
+TDX publishes one ZIP per report period.  A GPCW row is a vendor snapshot: the report-period header is not an
+availability timestamp and values may be restated in a later snapshot.  A row carries no ``available_at`` until
+:func:`date_gpcw_rows` sets it from the first disclosure date in ``tipinfo.dat`` (the evidence for that date is
+in ``tdx_zhb_extras.parse_tipinfo``).  ``tipinfo.dat`` dates each security's latest report only, so every older
+period stays undated and is not point-in-time evidence.  Callers keep ``report_period`` and collection time
+separate.
 """
 
 from __future__ import annotations
@@ -201,7 +202,10 @@ def download_report_file(client: tdx_protocol.TdxClient, filename: str, size: in
 
 
 def gpcw(client: tdx_protocol.TdxClient, filename: str, entry: ManifestEntry) -> list[dict[str, Any]]:
-    """Download one period ZIP against its manifest entry, check size and MD5, and parse it."""
+    """Download one period ZIP against its manifest entry, check size and MD5, and parse it.
+
+    The rows carry no ``available_at``: :func:`date_gpcw_rows` sets it where ``tipinfo.dat`` dates the row.
+    """
     if entry.filename != filename:
         raise TdxFinanceError(f"manifest entry {entry.filename} is not the entry of {filename}")
     payload = download_report_file(client, "tdxfin/" + filename, entry.size)
