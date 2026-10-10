@@ -5,11 +5,15 @@ series over the last ``LOOKBACK_DAYS`` calendar days in one PostgreSQL pass
 (about 13 s on the owner database) and stores the recent readings as
 ``market_temperature_daily`` (see ``derived_daily_readings``).
 
-The read joins the broad-ETF flow of the same sessions and marks the
-research signal "冰点资金共振": a cold reading (temperature <= 40) on a day the
-basket turnover ran at least 1.5x its 20-session mean. It is "逆势放量" when
-the index also fell that day. The request path only reads stored rows; it
-never rescans the bars.
+The read joins two other series of the same sessions:
+- the broad-ETF flow. With it the read marks the research signal
+  "冰点资金共振": a cold reading (temperature <= 40) on a day the basket
+  turnover ran at least 1.5x its 20-session mean. It is "逆势放量" when the
+  index also fell that day.
+- the golden / silver finger state, shown as trend context beside the
+  marker, never combined with it.
+
+The request path only reads stored rows; it never rescans the bars.
 
     python -m app.market_temperature_runtime --end 2026-10-09 [--keep 400] [--apply]
 
@@ -24,7 +28,7 @@ import json
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from . import broad_etf_flow, derived_daily_readings
+from . import broad_etf_flow, derived_daily_readings, market_timing
 from .derived_daily_readings import CN_TZ
 from .market_temperature import BOILING, COMPONENTS, FREEZING, VERSION, temperature_series
 from .market_temperature_repository import daily_rows
@@ -41,6 +45,12 @@ MARKER_EVIDENCE = {
     "cold_with_surge": {"days": 10, "up_1d": 0.9, "up_3d": 0.9, "up_5d": 0.9},
     "cold_all": {"days": 131, "up_1d": 0.6, "up_3d": 0.57, "up_5d": 0.6},
     "caveat": "four or five independent episodes; an index rebalance or a new listing can also raise ETF turnover",
+}
+TIMING_EVIDENCE = {
+    "window": "2004-01..2026-10", "rule": "MA5 above MA25, entered once VOL5 > VOL60 (2560, fixed 5/25/60)",
+    "max_drawdown": {"buy_and_hold": -0.72, "golden_only": -0.39},
+    "caveat": "a trend context: since 2015 it says little about the next few days, and the cold-day marker did best "
+              "in silver states, so the two are never combined",
 }
 
 
@@ -82,6 +92,8 @@ def daily_series(connection: Any, *, days: int = 120, end: date | None = None) -
     readings = derived_daily_readings.newest(connection, CAPABILITY, first, last)
     flows = {item["trade_date"]: item for item in derived_daily_readings.newest(
         connection, broad_etf_flow.FLOW_CAPABILITY, first, last)}
+    timing = {item["trade_date"]: item for item in derived_daily_readings.newest(
+        connection, market_timing.CAPABILITY, first, last)}
     previous_close = None
     for reading in readings:
         close = reading.get("index_close")
@@ -94,13 +106,16 @@ def daily_series(connection: Any, *, days: int = 120, end: date | None = None) -
             "etf_flow": {key: flow.get(key) for key in ("ratio", "basket_turnover_cny", "codes", "amount_estimated")}
             if flow else None,
             "marker": marker(reading.get("temperature"), ratio, change),
+            "timing": {key: timing[reading["trade_date"]].get(key) for key in ("state", "event")}
+            if reading["trade_date"] in timing else None,
         })
     return {
         "version": VERSION, "readings": readings[-days:],
         "thresholds": {"freezing": FREEZING, "boiling": BOILING, "cold_ceiling": COLD_CEILING,
                        "etf_surge_ratio": broad_etf_flow.SURGE_RATIO},
         "components": [{"key": item.key, "label": item.label, "direction": item.direction} for item in COMPONENTS],
-        "marker_evidence": MARKER_EVIDENCE, "research_only": True, "live_effect": "none",
+        "marker_evidence": MARKER_EVIDENCE, "timing_evidence": TIMING_EVIDENCE,
+        "research_only": True, "live_effect": "none",
     }
 
 

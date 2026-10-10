@@ -32,7 +32,7 @@ POST_CLOSE_STAGE_ORDER = (
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
     "watchlist_main_wave", "teacher_review_roll", "watch_daily_review", "xiaojie_outcomes", "research_snapshot",
-    "market_temperature", "broad_etf_flow", "candidate_ledger", "minute_panel_export",
+    "market_temperature", "broad_etf_flow", "market_timing", "candidate_ledger", "minute_panel_export",
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
@@ -69,6 +69,7 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     "minute_panel_export": 600.0,
     "market_temperature": 180.0,
     "broad_etf_flow": 180.0,
+    "market_timing": 120.0,
 }
 
 POST_CLOSE_STAGE_DEPENDENCIES = {
@@ -153,6 +154,8 @@ class PostCloseRefreshDependencies:
     sync_forward_calendar: Callable[[], Awaitable[dict[str, Any]]] | None = None
     # Decision 0013: the broad-ETF basket bars and their daily turnover ratio.
     refresh_broad_etf_flow: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    # Decision 0013: the golden / silver finger (2560) state of the SSE composite.
+    refresh_market_timing: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -339,6 +342,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             (lambda: dependencies.refresh_broad_etf_flow(trade_date))
             if dependencies.refresh_broad_etf_flow is not None
             else (lambda: {"status": "skipped", "reason": "broad-ETF flow not wired", "research_only": True})
+        ),
+        "market_timing": (
+            (lambda: dependencies.refresh_market_timing(trade_date))
+            if dependencies.refresh_market_timing is not None
+            else (lambda: {"status": "skipped", "reason": "market timing not wired", "research_only": True})
         ),
     }
 

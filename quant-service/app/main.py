@@ -80,6 +80,7 @@ from .public_market_repository import (
 from .factor_sql_lab import MULTI_FACTOR_MODEL_VERSION, evaluate_factor_set, run_multi_factor_strategy_sql
 from .board_flow_drill import MODEL_VERSION as BOARD_FLOW_DRILL_MODEL_VERSION
 from .broad_etf_flow import refresh as refresh_broad_etf_flow
+from .market_timing import refresh as refresh_market_timing
 from .dragon_leader_research import MODEL_VERSION as DRAGON_LEADER_MODEL_VERSION
 from .research_experiment_service import (
     ResearchExperimentDependencies,
@@ -3821,6 +3822,8 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
             settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
         sync_forward_calendar=sync_forward_trade_calendar,
         refresh_broad_etf_flow=lambda trade_date: refresh_broad_etf_flow(
+            db, trade_date, run_database=run_database_blocking),
+        refresh_market_timing=lambda trade_date: refresh_market_timing(
             db, trade_date, run_database=run_database_blocking),
     )
 

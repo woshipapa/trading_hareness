@@ -94,7 +94,7 @@ class StoredSeriesTests(unittest.TestCase):
         self.assertEqual((series["thresholds"]["freezing"], series["thresholds"]["boiling"]), (20.0, 80.0))
 
     def test_the_series_joins_the_etf_flow_and_marks_a_cold_surge(self) -> None:
-        from app import broad_etf_flow, derived_daily_readings
+        from app import broad_etf_flow, derived_daily_readings, market_timing
         end = date(2099, 3, 10)
         day1, day2 = end - timedelta(days=1), end
         readings = [{**_reading(day1, 45.0), "index_close": 4000.0}, {**_reading(day2, 18.0, "冰点"), "index_close": 3960.0}]
@@ -102,9 +102,12 @@ class StoredSeriesTests(unittest.TestCase):
             runtime.refresh(self.database, end)
         derived_daily_readings.store(self.database, broad_etf_flow.FLOW_CAPABILITY, [
             {"trade_date": day1.isoformat(), "ratio": 2.0, "codes": 12}, {"trade_date": day2.isoformat(), "ratio": 1.8, "codes": 12}])
+        derived_daily_readings.store(self.database, market_timing.CAPABILITY, [
+            {"trade_date": day2.isoformat(), "state": "silver", "event": "silver"}])
         series = runtime.daily_series(self.connection, days=10, end=end)
         first, second = series["readings"]
         self.assertIsNone(first["marker"], "45 is not cold, whatever the flow")
+        self.assertEqual((first["timing"], second["timing"]), (None, {"state": "silver", "event": "silver"}))
         self.assertEqual((second["index_change_pct"], second["etf_flow"]["ratio"], second["marker"]["label"]),
                          (-1.0, 1.8, "逆势放量"))
 
