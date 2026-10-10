@@ -8,7 +8,7 @@ the existing setup, framing, timeout and decompression behavior.
 from __future__ import annotations
 
 import struct
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Any
 
 from ..contracts import CapabilityEvidence
@@ -41,10 +41,6 @@ def _request(opcode: int, payload: bytes) -> bytes:
                        length, length, opcode) + payload
 
 
-def _text(raw: bytes) -> str:
-    return raw.split(b"\x00", 1)[0].decode("gbk", "replace").strip()
-
-
 def _unit(code: str) -> float:
     return 1000.0 if code[:2] in {"15", "51", "56", "58"} else 100.0
 
@@ -64,7 +60,7 @@ def parse_volume_profile(body: bytes) -> dict[str, Any]:
     if len(body) < 13:
         raise tdx_protocol.TdxProtocolError("short volume profile response")
     count, market = struct.unpack_from("<HB", body, 0)
-    code = _text(body[3:9])
+    code = tdx_protocol.decode_gbk(body[3:9])
     active = struct.unpack_from("<H", body, 9)[0]
     pos = 11
     fields = []
@@ -235,7 +231,7 @@ def parse_unusual(body: bytes) -> list[dict[str, Any]]:
         if pos + 32 > len(body):
             raise tdx_protocol.TdxProtocolError("truncated unusual response")
         market = struct.unpack_from("<H", body, pos)[0]
-        code = _text(body[pos + 2:pos + 8])
+        code = tdx_protocol.decode_gbk(body[pos + 2:pos + 8])
         event_type = body[pos + 9]
         sequence = struct.unpack_from("<H", body, pos + 11)[0]
         desc, value, payload_raw_bytes = _unusual_label(event_type, body[pos + 15:pos + 28])
@@ -269,7 +265,7 @@ def parse_top_board(body: bytes) -> dict[str, list[dict[str, Any]]]:
             if pos + 15 > len(body):
                 raise tdx_protocol.TdxProtocolError("truncated top board response")
             market = body[pos]
-            code = _text(body[pos + 1:pos + 7])
+            code = tdx_protocol.decode_gbk(body[pos + 1:pos + 7])
             price = struct.unpack_from("<f", body, pos + 7)[0]
             value = struct.unpack_from("<f", body, pos + 11)[0]
             result[name].append({"market": market, "code": code, "price": price, "value": value})
@@ -318,51 +314,39 @@ def parse_history_minute_data(body: bytes, code: str) -> list[dict[str, Any]]:
     return _parse_minute_rows(body, code, True)
 
 
-_EXCHANGE = {market: exchange for exchange, market in tdx_protocol.MARKETS.items()}
-
-
-def _symbol(market: int, code: str) -> str:
-    return f"{code}.{_EXCHANGE[market]}"
-
-
-def _evidence(rows: list[dict[str, Any]], host: str) -> CapabilityEvidence:
-    observed = datetime.now(timezone.utc)
-    return CapabilityEvidence(rows, available_at_min=observed, available_at_max=observed, warnings=(f"tdx_host={host}",))
-
-
 async def fetch_volume_profile(*, market: int, code: str) -> CapabilityEvidence:
     result, host = await tdx_protocol.call(
         lambda client: parse_volume_profile(client._exchange(build_volume_profile_request(market, code))),
         handshake_profile="login_one")
-    return _evidence([{"symbol": _symbol(market, code), **row} for row in result["profiles"]], host)
+    return tdx_protocol.observed_evidence([{"symbol": tdx_protocol.symbol(market, code), **row} for row in result["profiles"]], host)
 
 
 async def fetch_minute_series(*, market: int, code: str, trade_date: date | str | int) -> CapabilityEvidence:
     rows, host = await tdx_protocol.call(
         lambda client: parse_minute_series(client._exchange(build_minute_series_request(market, code, trade_date))),
         handshake_profile="login_one")
-    return _evidence([{"symbol": _symbol(market, code), **row} for row in rows], host)
+    return tdx_protocol.observed_evidence([{"symbol": tdx_protocol.symbol(market, code), **row} for row in rows], host)
 
 
 async def fetch_auction_curve(*, market: int, code: str) -> CapabilityEvidence:
     rows, host = await tdx_protocol.call(
         lambda client: parse_auction(client._exchange(build_auction_request(market, code))),
         handshake_profile="login_one")
-    return _evidence([{"symbol": _symbol(market, code), **row} for row in rows], host)
+    return tdx_protocol.observed_evidence([{"symbol": tdx_protocol.symbol(market, code), **row} for row in rows], host)
 
 
 async def fetch_unusual(*, market: int, start: int = 0, count: int = 600) -> CapabilityEvidence:
     rows, host = await tdx_protocol.call(
         lambda client: parse_unusual(client._exchange(build_unusual_request(market, start, count))),
         handshake_profile="login_one")
-    return _evidence([{"symbol": _symbol(row["market"], row["code"]), **row} for row in rows], host)
+    return tdx_protocol.observed_evidence([{"symbol": tdx_protocol.symbol(row["market"], row["code"]), **row} for row in rows], host)
 
 
 async def fetch_top_board(*, category: int = 0, size: int = 20) -> CapabilityEvidence:
     boards, host = await tdx_protocol.call(
         lambda client: parse_top_board(client._exchange(build_top_board_request(category, size))),
         handshake_profile="login_one")
-    return _evidence([{"symbol": _symbol(row["market"], row["code"]), "category": name, **row}
+    return tdx_protocol.observed_evidence([{"symbol": tdx_protocol.symbol(row["market"], row["code"]), "category": name, **row}
                       for name, rows in boards.items() for row in rows], host)
 
 

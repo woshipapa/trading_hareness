@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import struct
-from datetime import datetime, timezone
 from typing import Any
 
 from ..contracts import CapabilityEvidence
@@ -13,7 +12,6 @@ from .tdx_protocol import _code
 #: 0x054b gives no total up front, so the sweep ends on a short page. This cap (9,600 rows) sits far above
 #: the ~5,600 A shares of 2026 (delta-2 D1) and only stops a host that keeps answering full pages.
 MAX_SNAPSHOT_PAGES = 120
-_EXCHANGE = {market: exchange for exchange, market in tdx_protocol.MARKETS.items()}
 
 
 KMSG_INDEXINFO = 0x051D
@@ -77,7 +75,7 @@ def _parse_quote_item(data: bytes, pos: int) -> tuple[dict[str, Any], int]:
     neg_price, pos = tdx_protocol.decode_price(data, pos)
     volume, pos = tdx_protocol.decode_price(data, pos)
     current_volume, pos = tdx_protocol.decode_price(data, pos)
-    # Amount is IEEE float32 in 0x054b, not the custom decode_volume format used in parse_quotes (finding 8).
+    # Amount is IEEE float32 in 0x054b, not the custom decode_volume format used in parse_quotes.
     # Test fixture quote_row confirms: struct.pack("<f", 12.5)
     amount = struct.unpack_from("<f", data, pos)[0]
     pos += 4
@@ -102,7 +100,7 @@ def _parse_quote_item(data: bytes, pos: int) -> tuple[dict[str, Any], int]:
     pre_close = (base + pre_diff) / 100
     price = base / 100
     return {
-        "symbol": f"{code}.{_EXCHANGE[market]}",
+        "symbol": tdx_protocol.symbol(market, code),
         "market": market,
         "code": code,
         "active1": active1,
@@ -146,7 +144,7 @@ def parse_quotes_list(body: bytes) -> tuple[list[dict[str, Any]], int]:
     try:
         for _ in range(count):
             row, pos = _parse_quote_item(body, pos)
-            # Drop rows with price ≤ 0 (no trade: suspended or pre-open); count them (finding 3)
+            # Drop rows with price ≤ 0 (no trade: suspended or pre-open); count them
             if row["price"] <= 0:
                 no_trade_rows += 1
             else:
@@ -228,9 +226,9 @@ def parse_index_info(body: bytes, request_market: int | None = None, request_cod
     }
 
 
-def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]], int]:
+    """All A shares with a trade, 80 rows per page, and the count of no-trade rows left out."""
     rows: list[dict[str, Any]] = []
-    warnings: dict[str, Any] = {}
     total_no_trade = 0
     page_count = 0
     while page_count < MAX_SNAPSHOT_PAGES:
@@ -243,36 +241,23 @@ def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]
             break
     if page_count >= MAX_SNAPSHOT_PAGES:
         raise tdx_protocol.TdxProtocolError(f"0x054b all_a snapshot did not end within {MAX_SNAPSHOT_PAGES} pages")
-    if total_no_trade > 0:
-        warnings["no_trade_rows"] = total_no_trade
-    return rows, warnings
+    return rows, total_no_trade
 
 
 async def fetch_all_a_snapshot() -> CapabilityEvidence:
-    result, host = await tdx_protocol.call(_all_a_snapshot, handshake_profile="login_one")
-    rows, warnings_dict = result
-    warnings = [f"tdx_host={host}"]
-    if warnings_dict.get("no_trade_rows", 0) > 0:
-        warnings.append(f"no_trade_rows={warnings_dict['no_trade_rows']}")
-    # Coverage stays None until the security list (I1) gives the denominator.
-    observed = datetime.now(timezone.utc)
-    return CapabilityEvidence(rows, coverage=None, available_at_min=observed, available_at_max=observed,
-                              warnings=tuple(warnings))
+    (rows, no_trade), host = await tdx_protocol.call(_all_a_snapshot, handshake_profile="login_one")
+    # Coverage stays None until the snapshot is checked against reference.security_list.
+    return tdx_protocol.observed_evidence(rows, host, warnings=(f"no_trade_rows={no_trade}",) if no_trade else ())
 
 
 async def fetch_index_overview(symbol: str = "999999.SH") -> CapabilityEvidence:
     market, code = tdx_protocol.market_code(symbol)
 
-    def _fetch_index(client: tdx_protocol.TdxClient) -> dict[str, Any]:
-        row = parse_index_info(client._exchange(build_index_info_request(market, code)),
-                               request_market=market, request_code=code)
-        # R1 echo check: parse_index_info will raise TdxProtocolError on mismatch (finding 1)
-        return row
-
-    row, host = await tdx_protocol.call(_fetch_index, handshake_profile="login_one")
-    observed = datetime.now(timezone.utc)
-    return CapabilityEvidence([row], coverage=None, available_at_min=observed, available_at_max=observed,
-                              warnings=(f"tdx_host={host}",))
+    row, host = await tdx_protocol.call(
+        lambda client: parse_index_info(client._exchange(build_index_info_request(market, code)),
+                                        request_market=market, request_code=code),
+        handshake_profile="login_one")
+    return tdx_protocol.observed_evidence([row], host)
 
 
 

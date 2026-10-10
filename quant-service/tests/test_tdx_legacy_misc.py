@@ -21,9 +21,9 @@ def enc(value: int) -> bytes:
     return bytes(out)
 
 
-def quote_row(number: int) -> bytes:
+def quote_row(number: int, price: int = 1000) -> bytes:
     row = struct.pack("<B6sH", number % 2, f"{number:06d}".encode(), 1)
-    row += b"".join(enc(value) for value in (1000, 10, 20, 30, 5, 930, 0, 123, 4))
+    row += b"".join(enc(value) for value in (price, 10, 20, 30, 5, 930, 0, 123, 4))
     row += struct.pack("<f", 12.5)
     row += b"".join(enc(value) for value in (0, 0, 99, 0, 1, 2, 3, 4))
     row += struct.pack("<Hhh", 0, 0, 0)
@@ -69,20 +69,10 @@ class LegacyMiscTests(unittest.TestCase):
         self.assertEqual(projected.rows[0]["turnover"], rows[0]["amount"])
         self.assertTrue(projected.rows[0]["symbol"].endswith((".SZ", ".SH", ".BJ")))
 
-    def test_all_a_snapshot_drops_price_le_0_rows(self):
-        # Custom client that returns price <= 0 on alternating rows (finding 3)
-        client = FakeClient()
-        original_exchange = client._exchange
-        def _exchange_with_zero_prices(request):
-            response = original_exchange(request)
-            # Modify the response to have price 0 in some rows
-            # This is a simplified test - in production, zero prices are dropped
-            return response
-        client._exchange = _exchange_with_zero_prices
-        rows, warnings = legacy._all_a_snapshot(client)
-        # Verify no rows have price <= 0 after filtering
-        for row in rows:
-            self.assertGreater(row["price"], 0, f"Found price <= 0 in row: {row}")
+    def test_all_a_snapshot_counts_and_drops_no_trade_rows(self):
+        page = b"\x00\x00" + struct.pack("<H", 3) + quote_row(1) + quote_row(2, price=0) + quote_row(3, price=0)
+        rows, no_trade = legacy._all_a_snapshot(mock.Mock(_exchange=lambda request: page))
+        self.assertEqual(([row["code"] for row in rows], no_trade), (["000001"], 2))
 
     def test_index_overview_decodes_breadth_counts(self):
         body = struct.pack("<IB6sH", 1, 1, b"999999", 7)
@@ -91,13 +81,13 @@ class LegacyMiscTests(unittest.TestCase):
         body += b"".join(enc(value) for value in (0, 0, 99, 0, 0, 0, 12, 8))
         body += b"".join(enc(0) for _ in range(10))
         body += b"".join(enc(value) for value in (25, 3, 40))
-        # Test with matching market/code (R1 echo check, finding 1)
+        # Test with matching market/code (R1 echo check)
         parsed = legacy.parse_index_info(body, request_market=1, request_code="999999")
         self.assertEqual((parsed["up_count"], parsed["down_count"]), (12, 8))
         self.assertEqual(parsed["orders"][0]["price"], 0.25)
 
     def test_index_overview_echo_check_fails_on_mismatch(self):
-        # R1 echo check: mismatched market/code should raise error (finding 1)
+        # R1 echo check: mismatched market/code should raise error
         body = struct.pack("<IB6sH", 1, 1, b"000001", 7)
         body += b"".join(enc(value) for value in (1000, 10, 20, 30, 5, 930, 0, 123, 4))
         body += struct.pack("<f", 12.5)
@@ -110,7 +100,7 @@ class LegacyMiscTests(unittest.TestCase):
         self.assertIn("code_mismatch", str(ctx.exception))
 
     def test_removed_commands_and_functions_are_absent(self):
-        # Deleted functions (finding 8)
+        # Unbound commands were deleted rather than carried (delta-2 section 4).
         for name in ("fetch_index_momentum", "fetch_ping", "fetch_heartbeat",
                      "parse_index_momentum", "build_index_momentum_request",
                      "KMSG_HEARTBEAT", "KMSG_PING", "KMSG_INDEXMOMENTUM"):
@@ -126,15 +116,15 @@ class LegacyMiscTests(unittest.TestCase):
             legacy.parse_index_info(b"\x00" * 16)
 
     def test_snapshot_adapter_coverage_is_none(self):
-        # Coverage should be None, not 1.0 (finding 2)
-        with mock.patch.object(tdx_protocol, "call", new=mock.AsyncMock(return_value=(([{"price": 1}], {}), "host:7709/login_one"))):
+        # Coverage should be None, not 1.0
+        with mock.patch.object(tdx_protocol, "call", new=mock.AsyncMock(return_value=(([{"price": 1}], 0), "host:7709/login_one"))):
             result = asyncio.run(legacy.fetch_all_a_snapshot())
         self.assertIsNone(result.coverage)
         self.assertEqual(result.warnings, ("tdx_host=host:7709/login_one",))
 
     def test_snapshot_adapter_includes_no_trade_warning(self):
-        # no_trade_rows should be included in warnings when present (finding 3)
-        with mock.patch.object(tdx_protocol, "call", new=mock.AsyncMock(return_value=(([{"price": 1}], {"no_trade_rows": 5}), "host:7709/login_one"))):
+        # no_trade_rows should be included in warnings when present
+        with mock.patch.object(tdx_protocol, "call", new=mock.AsyncMock(return_value=(([{"price": 1}], 5), "host:7709/login_one"))):
             result = asyncio.run(legacy.fetch_all_a_snapshot())
         self.assertIn("no_trade_rows=5", result.warnings)
 

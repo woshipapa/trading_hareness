@@ -26,8 +26,10 @@ import os
 import socket
 import struct
 import zlib
-from datetime import date
+from datetime import date, datetime, timezone
 import logging
+
+from ..contracts import CapabilityEvidence
 import time
 from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Sequence, TypeVar
@@ -85,8 +87,8 @@ class TdxProtocolError(RuntimeError):
 def decode_gbk(raw: bytes) -> str:
     """A fixed-width protocol text field: GBK up to the first NUL. Never tried as UTF-8 first, because short
     GBK names can be valid UTF-8 (\u901a22\u8f6c\u503a would decode to mojibake); a name cut inside a
-    character keeps a visible U+FFFD."""
-    return raw.split(b"\0", 1)[0].decode("gb18030", "replace")
+    character keeps a visible U+FFFD. Padding spaces are stripped."""
+    return raw.split(b"\0", 1)[0].decode("gb18030", "replace").strip()
 
 
 def decode_text(data: bytes) -> str:
@@ -507,10 +509,26 @@ def market_code(symbol: str) -> tuple[int, str]:
     return MARKETS[exchange], code
 
 
+EXCHANGES = {market: exchange for exchange, market in MARKETS.items()}
+
+
+def symbol(market: int, code: str) -> str:
+    """The inverse of market_code: (0, "000001") -> "000001.SZ"."""
+    return f"{code}.{EXCHANGES[market]}"
+
+
+def observed_evidence(rows: list[dict[str, Any]], host: str, *, coverage: float | None = None,
+                      warnings: tuple[str, ...] = ()) -> CapabilityEvidence:
+    """Rows read just now from one host: available at collection time, the host label first."""
+    observed = datetime.now(timezone.utc)
+    return CapabilityEvidence(rows, coverage=coverage, available_at_min=observed, available_at_max=observed,
+                              warnings=(f"tdx_host={host}", *warnings))
+
+
 __all__ = [
-    "BAR_CATEGORIES", "DEFAULT_HOSTS", "HANDSHAKE_PROFILES", "MARKETS", "MINUTE_BAR_CATEGORIES", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
+    "BAR_CATEGORIES", "DEFAULT_HOSTS", "EXCHANGES", "HANDSHAKE_PROFILES", "MARKETS", "MINUTE_BAR_CATEGORIES", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
     "UPSTREAM_SITE", "XDXR_CATEGORIES", "build_bars_request", "build_history_ticks_request",
     "build_quotes_request", "build_ticks_request", "build_xdxr_request", "call", "call_sync",
-    "configured_hosts", "decode_gbk", "decode_price", "decode_volume", "market_code", "parse_bars", "parse_quotes",
-    "parse_ticks", "parse_xdxr", "sweep_sync",
+    "configured_hosts", "decode_gbk", "decode_price", "decode_volume", "market_code", "observed_evidence", "parse_bars", "parse_quotes",
+    "parse_ticks", "parse_xdxr", "sweep_sync", "symbol",
 ]

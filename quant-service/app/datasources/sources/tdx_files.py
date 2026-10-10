@@ -27,7 +27,6 @@ MAX_FILE_SIZE = 64 * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED = 128 * 1024 * 1024
 FILENAME_BYTES = 100
 BLOCK_FILES = frozenset({"block_gn.dat", "block_fg.dat", "block_zs.dat", "block_hy.dat", "block.dat"})
-REPORT_FILES = frozenset({"zhb.zip"})
 
 
 class TdxFileError(tdx_protocol.TdxProtocolError):
@@ -69,7 +68,6 @@ def parse_file_size(body: bytes) -> int:
     return struct.unpack_from("<I", body)[0]
 
 
-build_file_size_request = build_file_meta_request
 
 
 def parse_file_chunk(body: bytes) -> bytes:
@@ -109,7 +107,7 @@ def parse_block_file(data: bytes) -> list[dict[str, Any]]:
     for _ in range(count):
         if pos + 13 > len(data):
             break
-        name = tdx_protocol.decode_gbk(data[pos:pos + 9]).strip()
+        name = tdx_protocol.decode_gbk(data[pos:pos + 9])
         member_count, block_type = struct.unpack_from("<HH", data, pos + 9)
         members_pos = pos + 13
         members: list[str] = []
@@ -268,8 +266,8 @@ def download(client: tdx_protocol.TdxClient, filename: str) -> bytes:
 
 
 __all__ = [
-    "BLOCK_FILES", "FILE_CHUNK_SIZE", "MAX_FILE_SIZE", "REPORT_FILES", "TdxFileError", "file_size", "download",
-    "build_file_chunk_request", "build_file_meta_request", "build_file_size_request", "build_report_file_request",
+    "BLOCK_FILES", "FILE_CHUNK_SIZE", "MAX_FILE_SIZE", "TdxFileError", "file_size", "download",
+    "build_file_chunk_request", "build_file_meta_request", "build_report_file_request",
     "parse_block_file",
     "parse_file_chunk", "parse_file_size", "parse_spblock", "parse_tdxstat", "parse_tdxstat2", "parse_tdxzs",
     "parse_zhb_zip",

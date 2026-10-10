@@ -35,20 +35,16 @@ def _probe_host(host: str, port: int, timeout: float) -> dict:
     result: dict = {"host": f"{host}:{port}", "commands": {}}
     try:
         with tdx_protocol.TdxClient(host, port, timeout, handshake_profile="login_one") as client:
-            # Run the adapter's own sweep (finding 9)
-            rows, warnings_dict = _run(result, "0x054b", lambda: legacy._all_a_snapshot(client))
-            if rows:
-                result["0x054b_row_count"] = len(rows)
-                result["0x054b_warnings"] = warnings_dict
-            # Index overview with R1 echo check (finding 1)
+            snapshot = _run(result, "0x054b", lambda: legacy._all_a_snapshot(client))
+            if snapshot:
+                result["0x054b_rows"], result["0x054b_no_trade_rows"] = len(snapshot[0]), snapshot[1]
+            # The 0x051d answer must echo the requested index (delta-1 R1).
             index = _run(result, "0x051d", lambda: legacy.parse_index_info(
                 client._exchange(legacy.build_index_info_request(1, "999999")),
                 request_market=1, request_code="999999"))
             if index:
                 result["index_fields"] = sorted(index)
-            # Heartbeat with packet type 1 (finding 9)
-            heartbeat = _run(result, "0x0004", lambda: client._exchange(legacy._header(legacy.KMSG_INDEXINFO, packet_type=1)))
-            result["usable"] = bool(rows) and bool(index) and heartbeat is not None
+            result["usable"] = bool(snapshot and snapshot[0]) and bool(index)
     except COMMAND_ERRORS as exc:
         result["error"] = type(exc).__name__
         result["usable"] = False
@@ -59,7 +55,6 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout", type=float, default=5.0)
     args = parser.parse_args()
-    # Use generated host pool (finding 9)
     hosts = tdx_protocol.DEFAULT_HOSTS
     reports = [_probe_host(host, port, args.timeout) for host, port in hosts]
     for report in reports:

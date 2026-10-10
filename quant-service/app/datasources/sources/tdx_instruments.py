@@ -12,6 +12,8 @@ share the stock-only /100 rule.
 
 from __future__ import annotations
 
+import dataclasses
+
 import asyncio
 import re
 import struct
@@ -70,7 +72,7 @@ def parse_security_list(body: bytes, *, market: int | None = None) -> list[dict[
         pos += SECURITY_ROW_SIZE
         code = code_raw.decode("ascii", "ignore").rstrip("\x00")
         # pre_close is TDX's packed float (pytdx get_volume): 0x418C999A is 17.575, whatever the decimal point.
-        row = {"market": market, "code": code, "name": tdx_protocol.decode_gbk(name_raw).strip(), "vol_unit": vol_unit,
+        row = {"market": market, "code": code, "name": tdx_protocol.decode_gbk(name_raw), "vol_unit": vol_unit,
                "decimal_point": decimal_point, "pre_close": tdx_protocol.decode_volume(pre_close_raw)}
         rows.append(row)
     return rows
@@ -129,9 +131,6 @@ def bar_layout(instrument_type: str) -> str:
     return "index" if instrument_type in ("index", "board") else "stock"
 
 
-_EXCHANGE = {market: exchange for exchange, market in tdx_protocol.MARKETS.items()}
-
-
 def _list_section(market: int) -> Callable[[tdx_protocol.TdxClient], tuple[int, list[dict[str, Any]]]]:
     return lambda client: security_list(client, market)
 
@@ -143,7 +142,7 @@ def _zhb_bj_rows(client: tdx_protocol.TdxClient) -> list[dict[str, Any]]:
 def _security_row(market: int, code: str, name: str, decimal_point: int | None, pre_close: float | None,
                   list_source: str, host: str) -> dict[str, Any]:
     kind = classify_instrument(market, code, name)
-    return {"symbol": f"{code}.{_EXCHANGE[market]}", "market": market, "code": code, "name": name,
+    return {"symbol": tdx_protocol.symbol(market, code), "market": market, "code": code, "name": name,
             "instrument_type": kind["type"], "decimal_point": decimal_point, "pre_close": pre_close,
             "is_st": kind["is_st"], "list_source": list_source, "source_host": host}
 
@@ -160,7 +159,7 @@ def _security_list() -> CapabilityEvidence:
     bj_count = sections["BJ"]["result"]
     rows = [_security_row(row["market"], row["code"], row["name"], row["decimal_point"], row["pre_close"],
                           "server_list", host) for row in sz_rows + sh_rows]
-    warnings = [f"host={host}"]
+    warnings = []
     if "error" in sections["zhb"]:
         warnings.append(f"zhb_failed: {sections['zhb']['error']}")
     else:
@@ -170,7 +169,8 @@ def _security_list() -> CapabilityEvidence:
     bj_rows = len(rows) - len(sz_rows) - len(sh_rows)
     if bj_rows != bj_count:
         warnings.append(f"bj_missing={bj_count - bj_rows}")
-    return CapabilityEvidence(rows=rows, coverage=len(rows) / (sz_count + sh_count + bj_count), warnings=tuple(warnings))
+    return tdx_protocol.observed_evidence(rows, host, coverage=len(rows) / (sz_count + sh_count + bj_count),
+                                          warnings=tuple(warnings))
 
 
 async def fetch_security_list() -> CapabilityEvidence:
@@ -186,9 +186,9 @@ async def fetch_security_list() -> CapabilityEvidence:
 async def fetch_instruments() -> CapabilityEvidence:
     """The stocks of the security list in the reference.instruments shape; TDX sends no list date."""
     evidence = await fetch_security_list()
-    return CapabilityEvidence(rows=[{"symbol": row["symbol"], "name": row["name"], "list_date": None, "is_st": row["is_st"]}
-                                    for row in evidence.rows if row["instrument_type"].startswith("stock_")],
-                              coverage=evidence.coverage, warnings=evidence.warnings)
+    return dataclasses.replace(evidence, rows=[
+        {"symbol": row["symbol"], "name": row["name"], "list_date": None, "is_st": row["is_st"]}
+        for row in evidence.rows if row["instrument_type"].startswith("stock_")])
 
 
 def price_scale(decimal_point: int | None) -> float:

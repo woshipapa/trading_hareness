@@ -12,11 +12,10 @@ import asyncio
 import socket
 import struct
 import zlib
-from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, TypeVar
 
 from ..contracts import CapabilityEvidence
-from .tdx_protocol import TdxProtocolError
+from .tdx_protocol import TdxProtocolError, decode_gbk, observed_evidence
 
 PROVIDER_KEY = "tdx_ext"
 UPSTREAM_SITE = "tdx-exhq:7727"
@@ -127,10 +126,6 @@ class TdxExMarketError(TdxProtocolError):
     pass
 
 
-def _text(raw: bytes) -> str:
-    return raw.split(b"\0", 1)[0].decode("gbk", "replace").strip()
-
-
 def _frame(method: int, payload: bytes = b"", *, control: int = 1) -> bytes:
     body = struct.pack("<H", method) + payload
     return struct.pack("<BIBHH", 0x01, 0, control, len(body), len(body)) + body
@@ -200,7 +195,7 @@ def _quote(data: bytes) -> dict[str, Any]:
     except struct.error as error:
         raise TdxExMarketError(f"short quote response: {len(data)} bytes") from error
     row = {
-        "market_id": data[0], "code": _text(data[1:10]),
+        "market_id": data[0], "code": decode_gbk(data[1:10]),
         "pre_close": pre, "open": open_, "high": high, "low": low, "price": price,
         "volume": volume, "current_volume": current, "amount": amount,
         "inner_volume": inner, "outer_volume": outer,
@@ -232,9 +227,9 @@ def parse_categories(data: bytes) -> list[dict[str, Any]]:
         p = 2 + i * 64
         category_type, name, market_id, abbr = (
             data[p],
-            _text(data[p + 1 : p + 33]),
+            decode_gbk(data[p + 1 : p + 33]),
             data[p + 33],
-            _text(data[p + 34 : p + 36]),
+            decode_gbk(data[p + 34 : p + 36]),
         )
         out.append(
             {
@@ -257,9 +252,9 @@ def parse_instruments(data: bytes) -> list[dict[str, Any]]:
             {
                 "category": data[p],
                 "market_id": data[p + 1],
-                "code": _text(data[p + 5 : p + 14]),
-                "name": _text(data[p + 14 : p + 31]),
-                "desc": _text(data[p + 31 : p + 40]),
+                "code": decode_gbk(data[p + 5 : p + 14]),
+                "name": decode_gbk(data[p + 14 : p + 31]),
+                "desc": decode_gbk(data[p + 31 : p + 40]),
             }
         )
     return out
@@ -396,9 +391,7 @@ def call_sync(operation: Callable[[TdxExMarketClient], T], *, hosts: Iterable[tu
 async def _evidence(operation: Callable[[TdxExMarketClient], list[dict[str, Any]]],
                     hosts: Iterable[tuple[str, int]]) -> CapabilityEvidence:
     rows, host = await asyncio.to_thread(call_sync, operation, hosts=hosts)
-    observed = datetime.now(timezone.utc)
-    return CapabilityEvidence(rows, available_at_min=observed, available_at_max=observed,
-                              warnings=(f"tdx_host={host}",))
+    return observed_evidence(rows, host)
 
 
 async def fetch_instruments(*, hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS) -> CapabilityEvidence:

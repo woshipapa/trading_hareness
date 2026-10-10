@@ -106,7 +106,7 @@ class InstrumentTests(unittest.TestCase):
             evidence = asyncio.run(ti.fetch_security_list())
         self.assertAlmostEqual(evidence.coverage, 4 / 6, msg="SZ said 3 and sent 2: a missing page lowers coverage")
         self.assertIn("bj_missing=1", evidence.warnings)
-        self.assertIn("host=1.2.3.4:7709/login_one", evidence.warnings)
+        self.assertIn("tdx_host=1.2.3.4:7709/login_one", evidence.warnings)
         rows = {row["symbol"]: row for row in evidence.rows}
         self.assertEqual(rows["920000.BJ"]["market"], 2, "tdxbjmore's own market number 44 is not the protocol market")
         self.assertEqual((rows["920000.BJ"]["decimal_point"], rows["920000.BJ"]["list_source"]), (None, "zhb_tdxbjmore"))
