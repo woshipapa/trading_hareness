@@ -97,7 +97,7 @@ class TdxExMarketFixtures(unittest.TestCase):
         self.assertAlmostEqual(future["bid"][0], 4307.6, places=2)
         self.assertAlmostEqual(future["ask"][0], 4307.8, places=2)
         self.assertEqual((future["bid_volume"][0], future["ask_volume"][0]), (1, 2))
-        self.assertEqual(stock["open_interest"], 0)
+        self.assertNotIn("open_interest", stock)
         self.assertAlmostEqual(stock["bid"][0], 335.55, places=2)
         self.assertAlmostEqual(stock["ask"][0], 336.09, places=2)
         self.assertEqual((stock["bid_volume"][0], stock["ask_volume"][0]), (201, 287))

@@ -188,7 +188,8 @@ def build_kline(
 #: A quote after market (1 byte), code (9) and the active word (4), as gotdx parseExQuoteItem: pre_close,
 #: open, high, low, price; open and added position (skipped); volume, current volume; amount; inner and
 #: outer volume; an unknown word; open interest; five bid prices, bid volumes, ask prices, ask volumes.
-#: The IF pre_close is the prior settlement price.
+#: The IF pre_close is the prior settlement price. The open-interest word is kept for futures only: HK
+#: 00700 carries 3,209,381,148 there (live run 2026-10-10 10:43 UTC).
 _QUOTE = struct.Struct("<5f8x2If2I4xI5f5I5f5I")
 
 
@@ -198,13 +199,16 @@ def _quote(data: bytes) -> dict[str, Any]:
             _QUOTE.unpack_from(data, 14))
     except struct.error as error:
         raise TdxExMarketError(f"short quote response: {len(data)} bytes") from error
-    return {
+    row = {
         "market_id": data[0], "code": _text(data[1:10]),
         "pre_close": pre, "open": open_, "high": high, "low": low, "price": price,
         "volume": volume, "current_volume": current, "amount": amount,
-        "inner_volume": inner, "outer_volume": outer, "open_interest": open_interest,
+        "inner_volume": inner, "outer_volume": outer,
         "bid": book[0:5], "bid_volume": book[5:10], "ask": book[10:15], "ask_volume": book[15:20],
     }
+    if data[0] in FUTURES_MARKETS:
+        row["open_interest"] = open_interest
+    return row
 
 
 def _item_count(data: bytes, count_at: int, first: int, size: int, what: str) -> int:
