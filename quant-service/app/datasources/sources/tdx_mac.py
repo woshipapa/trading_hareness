@@ -13,7 +13,6 @@ import os
 import socket
 import struct
 import zlib
-from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 
 MAC_HOSTS = (
