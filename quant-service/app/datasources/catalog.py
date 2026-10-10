@@ -155,7 +155,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("bars.daily_adjusted", "复权日K（研究）", "daily", "per_symbol", "open:yuan close adj_basis", "effective=交易日"),
     _cap("bars.minute", "分钟K", "intraday", "watchlist",
          "symbol bar_time open:yuan high:yuan low:yuan close:yuan volume:shares amount:yuan",
-         "effective=bar_time; available=explicit source_available_at only（本地入库时间不可替代）"),
+         "effective=bar_time; available=explicit source_available_at（上游时钟或响应接收时间，绝不使用本地入库时间）"),
     _cap("bars.index_daily", "指数日K", "daily", "market",
          "symbol trade_date open:points high:points low:points close:points amount:yuan volume_raw up_count:count down_count:count",
          "effective=交易日收盘; available=采集时刻"),
@@ -387,11 +387,10 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                            handshake_profile="login_one")),
     _bind("tdx_mac", "bars.minute", 70, UNSUPPORTED, _RAW + "tdx_mac_minute_bars",
           "app/datasources/sources/tdx_mac.py:fetch_minute_bars",
-          notes="bars.minute 要求显式 source_available_at（本地入库时间不可替代）；MAC K 线只给 bar 时间（日期 + 当日秒数，"
-                "适配器组成 Asia/Shanghai 感知的 bar_time），本绑定给不出 source_available_at，因此保持 UNSUPPORTED",
+          notes="MAC K 线只给 bar 时间（日期 + 当日秒数，适配器组成 Asia/Shanghai 感知的 bar_time）；available_at_min/max 是响应接收时间",
           spec=BindingSpec(
               params={"symbol": "market+code", "count": "count (period 8)"}, field_map={},
-              time_semantics="effective=bar_time (wire date + seconds, Asia/Shanghai); available=none, the source gives no source_available_at",
+              time_semantics="effective=bar_time (wire date + seconds, Asia/Shanghai); available=response receive time in CapabilityEvidence available_at_min/max, never local ingest time",
               handshake_profile="mac")),
     _bind("longhuvip_index", "bars.index_daily", 45, DORMANT, "canonical_bars_daily", "app/longhu_market_service.py"),
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),

@@ -104,3 +104,19 @@ class LegacyBarTests(unittest.TestCase):
             for symbol, count in (("bad", 1), ("600519.SH", 0)):
                 with self.assertRaises(ValueError):
                     asyncio.run(tdx_bars.fetch_minute(symbol=symbol, count=count))
+
+    def test_legacy_minute_evidence_has_host_and_receive_time(self):
+        class Client:
+            def _exchange(self, _request):
+                return b"answer"
+
+        async def call(operation, **_kwargs):
+            return operation(Client()), "fixture-host:7709"
+
+        with patch.object(tdx_bars.tdx_protocol, "parse_bars", return_value=[
+            {"datetime": "2026-10-09 15:00", "open": 1, "high": 1, "low": 1,
+             "close": 1, "volume": 2, "amount": 3}
+        ]), patch.object(tdx_bars.tdx_protocol, "call", call):
+            evidence = asyncio.run(tdx_bars.fetch_minute(symbol="600519.SH", count=1))
+        self.assertEqual(evidence.warnings, ("tdx_host=fixture-host:7709",))
+        self.assertEqual(evidence.available_at_min, evidence.available_at_max)
