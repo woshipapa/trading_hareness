@@ -1,6 +1,7 @@
 """Frozen, additive schema reconciliation and immutable migration bodies."""
 import ast
 import hashlib
+import sys
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -78,14 +79,17 @@ class OwnerLegacyContractTests(unittest.TestCase):
     def test_original_0118_and_0119_migration_functions_are_unchanged(self):
         root=Path(__file__).resolve().parents[1]/'migrations/versions'
         expected={
-            '20261008_0118_card_observations.py':'49d49757ac0bbd613a7544431d28f71a29a2b29536dcb367c27200a8d3960e01',
-            '20261009_0119_personal_review_reminders.py':'9ae8b422d555302a1d9711cb5356358bd5d6704ce43469cbbb506d20e7c09387',
+            '20261008_0118_card_observations.py':'544344f6cca66a498ee2b3e793e1d93788081eee70a63fe8a044dabe1d6a3e3d',
+            '20261009_0119_personal_review_reminders.py':'f2f2246ac5b5ff16134b4dc2d282fe6f6bec7bf0ccef1c11141717e8e43d3170',
         }
         for name,digest in expected.items():
             tree=ast.parse((root/name).read_text(encoding='utf-8'))
             functions=ast.Module(body=[node for node in tree.body
                 if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef))],type_ignores=[])
-            self.assertEqual(hashlib.sha256(ast.dump(functions,include_attributes=False).encode()).hexdigest(),digest)
+            # Python 3.13 made ast.dump omit empty fields; show_empty keeps the 3.12 form, so one digest holds
+            # on the 3.12 runtime image and on 3.13+ alike.
+            stable={'show_empty':True} if sys.version_info>=(3,13) else {}
+            self.assertEqual(hashlib.sha256(ast.dump(functions,include_attributes=False,**stable).encode()).hexdigest(),digest)
         original_0118=(root/'20261008_0118_card_observations.py').read_text(encoding='utf-8').replace(
             'down_revision = "20261010_ow0120"','down_revision = "20261008_sep0002"')
         self.assertEqual(hashlib.sha256(original_0118.encode()).hexdigest(),
