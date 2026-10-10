@@ -531,6 +531,7 @@ from .routers.limit_linkage_mining_reads import build_limit_linkage_mining_reads
 from .routers.board_curve_reads import build_board_curve_reads_router
 from .routers.research_catalog_reads import build_research_catalog_reads_router
 from .routers.datasource_catalog import build_datasource_catalog_router
+from .routers.datasource_reads import build_datasource_reads_router
 from .routers.intraday_outcome_reads import build_intraday_outcome_reads_router
 from .routers.sector_reads import build_sector_reads_router
 from .routers.intraday_evidence_reads import build_intraday_evidence_reads_router
@@ -4353,6 +4354,7 @@ app.include_router(build_board_curve_reads_router(
 app.include_router(build_market_flow_reads_router(db, async_database=async_db))
 app.include_router(build_research_catalog_reads_router(db, async_db))
 app.include_router(build_datasource_catalog_router())
+app.include_router(build_datasource_reads_router())
 app.include_router(build_intraday_outcome_reads_router(
     db, intraday_point_in_time_market_context_batch, intraday_signal_attribution, intraday_outcome_attribution_summary,
     async_database=async_db,
