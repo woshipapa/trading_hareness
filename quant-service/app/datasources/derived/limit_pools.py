@@ -40,11 +40,11 @@ def derive_limit_pools(snapshot_rows: Iterable[Mapping[str, Any]], limit_rows: I
     * ``broken``: the day high equals the up limit and the price is below it;
     * ``limit_down``: the price equals the down limit.
 
-    A security with no limit row, or whose limit row lacks a positive up or down limit, is left out and counted; no
-    evidence file holds the limit row of a security without limits, so a limit that is not a price is what counts
-    as none.
-    A row whose price is not positive is never a member.  A member carries ``symbol``, ``price``, ``high``,
-    ``up_limit`` (``down_limit`` in ``limit_down``) in yuan, and ``observed_at``.
+    A security with no limit row, or whose limit row lacks a positive up or down limit, is left out and counted.  A
+    security without a price limit (a new listing, a Beijing first day) answers 0.0 for both limits
+    (scripts/data/tdx_mac_limits_all_a_2026-10-10_mac.json).  A row whose price is not positive is never a member.
+    A member carries ``symbol``, ``price``, ``high``, ``up_limit`` (``down_limit`` in ``limit_down``) in yuan, and
+    ``observed_at``.
     """
     bands = {row["symbol"]: (_cents(row["limit_up"]), _cents(row["limit_down"])) for row in limit_rows}
     pools: dict[str, list[dict[str, Any]]] = {"limit_up": [], "broken": [], "limit_down": []}

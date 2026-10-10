@@ -282,7 +282,7 @@ _TDX_POOL_NOTE = (
     "只有快照时刻的成员关系：无首封/末封时间、无原因、无连板数、无封单额；永不替代供应商池作决策；"
     "三个池的适配器各自读一次上游、只返回自己池的成员，三个池要同源一致须由采集器读一次后分别落库；"
     "任一涨跌停价行的 trade_date（位 0x13）与请求日期不符即报错；"
-    "无涨跌停价的证券不入池，计入 coverage 与 warnings 的 limit_price_missing")
+    "无涨跌停价的证券（两个限价都回 0.0，如新股、北交所首日）不入池，计入 coverage 与 warnings 的 limit_price_missing")
 
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot

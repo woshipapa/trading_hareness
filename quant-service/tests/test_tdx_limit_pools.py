@@ -34,25 +34,27 @@ def limit_row(symbol, up, down):
     return {"symbol": symbol, "trade_date": TODAY, "limit_up": f32(up), "limit_down": f32(down)}
 
 
-# Limit prices as the MAC host delivered them for 2026-10-09 (scripts/data/tdx_mac_adapters_live_2026-10-10_mac*.json):
-# 000001.SZ, 300750.SZ (a 20 % band), 600000.SH, 600004.SH and 600519.SH. Hand-built: the 600603.SH row (a 5 % band
-# around 5.13), the 600005.SH row (the band of 600004.SH) and the 688002.SH row, because no evidence file shows how the
-# MAC host marks a security without limits.
+# Limit prices as the MAC host delivered them for 2026-10-09
+# (scripts/data/tdx_mac_adapters_live_2026-10-10_mac*.json): 000001.SZ, 300750.SZ (a 20 % band), 600000.SH, 600004.SH
+# and 600519.SH. From scripts/data/tdx_mac_limits_all_a_2026-10-10_mac.json: the 301716.SZ row, a new listing (C鸿富诚)
+# whose limits are 0.0 and 0.0 (its price is the file's, its high is set to the price). Hand-built: the 600603.SH row,
+# a main-board ST band of 10 % around 5.50 (the file's up_ratio_by_board.main_st is 0.100 for 76 of its 137 rows, as
+# app/market_rules.py says since 2026-07-06), and the 600005.SH row, the band of 600004.SH.
 LIMITS = [
-    limit_row("000001.SZ", 12.96, 10.60), limit_row("300750.SZ", 344.10, 229.40), limit_row("600603.SH", 5.39, 4.87),
+    limit_row("000001.SZ", 12.96, 10.60), limit_row("300750.SZ", 344.10, 229.40), limit_row("600603.SH", 6.05, 4.95),
     limit_row("600000.SH", 10.67, 8.73), limit_row("600519.SH", 1381.37, 1130.21), limit_row("600004.SH", 8.44, 6.90),
-    limit_row("600005.SH", 8.44, 6.90), limit_row("688002.SH", 0.0, 0.0),
+    limit_row("600005.SH", 8.44, 6.90), limit_row("301716.SZ", 0.0, 0.0),
 ]
 SNAPSHOT = [
     snapshot_row("000001.SZ", 12.96, 12.96),      # sealed at the up limit
     snapshot_row("300750.SZ", 344.10, 344.10),    # sealed at a 20 % up limit
-    snapshot_row("600603.SH", 5.39, 5.39),        # sealed at a 5 % up limit
+    snapshot_row("600603.SH", 6.05, 6.05),        # sealed at a 10 % up limit (main-board ST)
     snapshot_row("600000.SH", 10.40, 10.67),      # touched the up limit and is below it now
     snapshot_row("600519.SH", 1130.21, 1180.00),  # sealed at the down limit
     snapshot_row("600004.SH", 8.43, 8.43),        # one tick below the up limit
     snapshot_row("600005.SH", 6.91, 6.91),        # one tick above the down limit
     snapshot_row("688001.SH", 50.00, 50.00),      # no limit row
-    snapshot_row("688002.SH", 44.00, 44.00),      # a limit row without a limit
+    snapshot_row("301716.SZ", 541.00, 541.00),    # a new listing: its limit row holds 0.0 and 0.0
 ]
 EXPECTED = {"limit_up": ["000001.SZ", "300750.SZ", "600603.SH"], "broken": ["600000.SH"], "limit_down": ["600519.SH"]}
 
