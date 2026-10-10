@@ -92,10 +92,10 @@ class FakeMacClient(tdx_mac.TdxMacClient):
 
 
 def quote_values():
-    """Field values of one 2026-10-09 14:59:59 snapshot (exactly representable as float32)."""
+    """Field values of one 2026-10-09 14:58:57 snapshot (exactly representable as float32)."""
     return {"close": 10.5, "vol": 1234, "vol_ratio": 1.25, "amount": 25000000.0, "turnover": 0.5,
             "buy_price_limit": 11.5, "sell_price_limit": 9.5,
-            "server_update_date": 20261009, "server_update_time": 145959}
+            "server_update_date": 20261009, "server_update_time": 145857}
 
 
 def quote_answer(values=None, answer_for=lambda stocks: stocks):
@@ -301,7 +301,7 @@ class MacWatchSnapshotTests(unittest.TestCase):
         evidence = self.fetch(client, ["000001.SZ", "600519.SH"])
         self.assertEqual([row["symbol"] for row in evidence.rows], ["000001.SZ", "600519.SH"])
         stamp = evidence.rows[0]["exchange_time"]
-        self.assertEqual(stamp, datetime(2026, 10, 9, 14, 59, 59, tzinfo=tdx_mac.CN_TZ))
+        self.assertEqual(stamp, datetime(2026, 10, 9, 14, 58, 57, tzinfo=tdx_mac.CN_TZ))
         self.assertEqual((str(stamp.tzinfo), stamp.utcoffset()), ("Asia/Shanghai", timedelta(hours=8)))
         self.assertTrue({"server_update_date", "server_update_time"}.isdisjoint(evidence.rows[0]))
         self.assertEqual(evidence.warnings, ("tdx_host=mac-host:7709",))
@@ -340,7 +340,7 @@ class MacWatchSnapshotTests(unittest.TestCase):
         row = projected.rows[0]
         self.assertEqual((row["price"], row["volume"], row["volume_ratio"], row["turnover_rate"], row["amount"]),
                          (10.5, 123400, 1.25, 0.5, 25000000.0))
-        self.assertEqual(row["exchange_time"], datetime(2026, 10, 9, 14, 59, 59, tzinfo=tdx_mac.CN_TZ))
+        self.assertEqual(row["exchange_time"], datetime(2026, 10, 9, 14, 58, 57, tzinfo=tdx_mac.CN_TZ))
         self.assertIsNotNone(row["exchange_time"].utcoffset())
         self.assertLessEqual(schema_fields("quote.watch_snapshot"), set(row))
 
@@ -408,7 +408,7 @@ class MacBindingSpecTests(unittest.TestCase):
 SENTINEL = (20261008, 0, 99.0, 99.0, 99.0, 100.0, 500.0, 50.0, 9.0)
 BARS = [
     (20261009, 34200, 100.0, 110.0, 90.0, 105.0, 1000.0, 2000.0, 30.0),
-    (20261009, 34260, 105.0, 111.0, 101.0, 108.0, 2000.0, 4000.0, 30.0),
+    (20261009, 34261, 105.0, 111.0, 101.0, 108.0, 2000.0, 4000.0, 30.0),
     (20261009, 34320, 108.0, 112.0, 104.0, 109.0, 3000.0, 6000.0, 30.0),
 ]
 
@@ -456,7 +456,7 @@ class MacBarAdapterTests(unittest.TestCase):
         self.assertEqual(evidence.rows, [
             {"symbol": "000001.SZ", "bar_time": datetime(2026, 10, 9, 9, 30, tzinfo=shanghai),
              "open": 100.0, "high": 110.0, "low": 90.0, "close": 105.0, "amount": 1000.0, "volume": 2000.0},
-            {"symbol": "000001.SZ", "bar_time": datetime(2026, 10, 9, 9, 31, tzinfo=shanghai),
+            {"symbol": "000001.SZ", "bar_time": datetime(2026, 10, 9, 9, 31, 1, tzinfo=shanghai),
              "open": 105.0, "high": 111.0, "low": 101.0, "close": 108.0, "amount": 2000.0, "volume": 4000.0},
             {"symbol": "000001.SZ", "bar_time": datetime(2026, 10, 9, 9, 32, tzinfo=shanghai),
              "open": 108.0, "high": 112.0, "low": 104.0, "close": 109.0, "amount": 3000.0, "volume": 6000.0},
@@ -497,8 +497,9 @@ class MacBarAdapterTests(unittest.TestCase):
         self.assertTrue(projected.canonical)
         self.assertEqual((projected.status, projected.warnings), (None, ()))
         self.assertEqual([(row["bar_time"], row["volume"]) for row in projected.rows],
-                         [(datetime(2026, 10, 9, 9, 30 + minute, tzinfo=tdx_mac.CN_TZ), shares)
-                          for minute, shares in enumerate((2000.0, 4000.0, 6000.0))])
+                         [(datetime(2026, 10, 9, 9, 30, 0, tzinfo=tdx_mac.CN_TZ), 2000.0),
+                          (datetime(2026, 10, 9, 9, 31, 1, tzinfo=tdx_mac.CN_TZ), 4000.0),
+                          (datetime(2026, 10, 9, 9, 32, 0, tzinfo=tdx_mac.CN_TZ), 6000.0)])
         for row in projected.rows:
             self.assertLessEqual(schema_fields("bars.minute"), set(row))
 

@@ -32,6 +32,16 @@ class MacFieldRegistryTests(unittest.TestCase):
         self.assertIsNone(MAC_FIELDS[0x5D].canonical_key)
         self.assertIsNone(MAC_FIELDS[0x5E].canonical_key)
 
+    def test_the_bits_the_quote_and_limit_adapters_read_keep_their_gotdx_identity(self):
+        # fetch_watch_snapshot and fetch_limit_prices read these by name; a swapped limit pair would flip up and down.
+        expected = {0x04: ("close", "float32"), 0x05: ("vol", "uint32"), 0x06: ("vol_ratio", "float32"),
+                    0x07: ("amount", "float32"), 0x13: ("server_update_date", "uint32"),
+                    0x14: ("server_update_time", "uint32"), 0x1B: ("turnover", "float32"),
+                    0x20: ("buy_price_limit", "float32"), 0x21: ("sell_price_limit", "float32")}
+        for bit, identity in expected.items():
+            self.assertEqual((MAC_FIELDS[bit].name, MAC_FIELDS[bit].format), identity, hex(bit))
+        self.assertEqual((MAC_FIELDS[0x20].canonical_key, MAC_FIELDS[0x21].canonical_key), ("limit_up", "limit_down"))
+
     def test_index_bits_are_named_as_gotdx_names_them(self):
         # gotdx mac_board_members_dynamic.go:113,116 -- 0x37 index_metric (float32), 0x3a non_index_flag (uint32)
         self.assertEqual((MAC_FIELDS[0x37].name, MAC_FIELDS[0x37].format), ("index_metric", "float32"))
