@@ -1,6 +1,7 @@
 """The source-reader inventory and spec validation of the data-source layer (TDX plan P0)."""
 
 import argparse
+import ast
 import contextlib
 import io
 import re
@@ -11,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from app.datasources import catalog
+from app.datasources import completeness as completeness_module
 from app.datasources.catalog import BINDINGS
 from app.datasources.completeness import (
     TDX_COMMAND_FAMILIES, UNREGISTERED, completeness_problems, public_fetch_functions, referenced_by_bindings,
@@ -134,6 +136,15 @@ class CompletenessTests(unittest.TestCase):
         self.assertIn("stale UNREGISTERED entry: demo.pure (not a reader under sources/)", problems)
         self.assertIn("stale UNREGISTERED entry: demo.fetch_gone (not a reader under sources/)", problems)
         self.assertIn("stale UNREGISTERED entry: family:ticks (a TDX binding covers it now; delete the entry)", problems)
+
+    def test_each_exemption_is_written_once(self):
+        # A dict literal silently keeps the last of two equal keys; on 2026-10-10 that hid a stale
+        # tdx_protocol.sweep_sync entry behind a newer one.
+        source = Path(completeness_module.__file__).read_text(encoding="utf-8")
+        table = next(node.value for node in ast.parse(source).body
+                     if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "UNREGISTERED")
+        keys = [key.value for key in table.keys]
+        self.assertEqual(sorted({key for key in keys if keys.count(key) > 1}), [])
 
     def test_exemption_reasons_describe_the_current_state(self):
         # Plan phases P2 and P3 are finished; a reason that still sends a reader there is stale.
