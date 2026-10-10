@@ -1,10 +1,7 @@
 # TDX extended-market route (7727)
 
-“全部主机超时”的结论来自探索时沙箱的网络限制，并不成立，实测结果见 Claude 后续补充的小节。
-
-Status: protocol implementation and synthetic parsers verified; live route not
-verified in this environment. The probe is read-only and exits non-zero unless a
-host returns both a non-empty category list and instrument rows.
+Status: protocol implementation and parsers verified against live evidence,
+2026-10-10. See “Live check, 2026-10-10” section below for latest data.
 
 ## Wire contract
 
@@ -42,21 +39,16 @@ ack before requesting markets. No credential or broker session is involved.
 ## Commands and parsers
 
 `tdx_ex_market.py` implements setup/login, count (`0x23f0`), category list
-(`0x23f4`), paged instrument list (`0x23f5`), single and batch quotes
-(`0x23fa`, `0x248a`, `0x23fb`), K-lines (`0x23ff`, `0x2489`), current and
-historical tick charts (`0x248b`, `0x248c`), historical transactions (`0x2412`),
-and table/detail responses (`0x2422`, `0x2423`). Category-list rows are 64
-bytes (`market`, 32-byte name, goods/category byte, two-byte abbreviation);
-instrument rows are 64 bytes with only the first 40 bytes meaningful. Quote
-rows are 300 bytes for a single quote and 314 bytes for a batch quote. K-line
-rows are 32 bytes; the amount field is the float representation at the same
-offset used by the protocol's position field, so both raw `position` and the
-float `amount` are retained.
+(`0x23f4`), paged instrument list (`0x23f5`), and single quotes
+(`0x23fa`). Category-list rows are 64 bytes with the broad type at offset 0 and
+the market id at offset 33; instrument rows are 64 bytes with only the first 40
+bytes meaningful. Quote rows are 300 bytes; the amount field is a float and
+pre_close is the prior settlement price (for futures, the settlement date of
+the prior trading day).
 
 Daily K-line category is market-dependent: use category `9` for HK/US equities
-and category `4` for futures. Minute categories are `7`/`8`. HK transaction
-prices (markets 31/48) are in thousandths and are divided by 1000; other
-markets retain the protocol integer price.
+and category `4` for futures. K-line rows carry market_id and code; for futures
+the amount field holds open-interest bits.
 
 ## Market IDs
 
@@ -91,24 +83,10 @@ dark-pool IDs without guessing an instrument's asset class.
 
 ## Probe evidence
 
-Command:
-
-```text
-PYTHONPATH=quant-service python3 scripts/verify-tdx-ex-market.py
-```
-
-The bounded run attempted six distinct `:7727` hosts from the supplied pools
-(`112.74.214.43`, `120.25.218.6`, `47.107.75.159`, `47.106.204.218`,
-`47.106.209.131`, `119.97.185.5`). Every attempt timed out before usable
-category/instrument rows. The two known MACEx addresses
-(`116.205.135.205`, `121.37.232.167`) were not retried after that six-host
-budget was exhausted. Therefore no live market enumeration, quote, bar, or
-TDX/Tencent scale equality is claimed here.
-
-Independent public cross-check baseline (not TDX evidence):
-`qt.gtimg.cn/q=hk00700` returned `00700` last `424.800` HKD at
-`2026/10/09 16:08:14`. A future successful 7727 probe should compare this
-value to market `31`, code `00700` and record the observed raw/decoded units.
+See "Live check, 2026-10-10" section below for current evidence. An earlier
+exploration run (archived) attempted six distinct `:7727` hosts from the supplied
+pools but ran out of budget before completing. The successful run is documented
+with live data.
 
 ## What the platform lacks
 
