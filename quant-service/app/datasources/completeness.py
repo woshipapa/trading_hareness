@@ -54,6 +54,8 @@ UNREGISTERED: dict[str, str] = {
     "tdx_protocol.TdxClient.bars": "legacy bar command 0x052d; bound in P2 after the instrument model (delta D2)",
     "tdx_protocol.TdxClient.ticks": "transport for ticks.fetch_tdx_ticks, which is the bound reader",
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
+    "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
+                               "and security-list capabilities of P2 bind its sections",
     "family:quote": "legacy quotes bind in P2 after the instrument model (delta D2); MAC 0x122b in P3",
     "family:F10": "verified in the plan; company-profile capability arrives in P5",
     "family:finance": "verified in the plan; financial-statements capability arrives in P5",
