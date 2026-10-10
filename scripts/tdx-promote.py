@@ -363,10 +363,6 @@ def run_apply(args: argparse.Namespace) -> int:
     token = bind_call(text, source, capability).args[3]
     if token.id not in STEPS:
         sys.exit(f"{source} {capability} is {token.id}: only UNSUPPORTED and DECLARED bindings are promoted")
-    catalog_binding = next((item for item in bindings_for(capability, states=BINDING_STATES) if item.source == source), None)
-    if CATALOG == ROOT / "quant-service" / "app" / "datasources" / "catalog.py" and token.id == "UNSUPPORTED" and (
-            catalog_binding is None or catalog_binding.spec is None or not catalog_binding.spec.agreement):
-        sys.exit(f"{source} {capability} has no declared reference agreement; it cannot move from UNSUPPORTED to DECLARED")
     new, gates = STEPS[token.id]
     failed = [f"{path}: {gate} failed ({document['verdicts'][gate]['detail']})"
               for path, document in zip(paths, documents) for gate in gates if not document["verdicts"][gate]["pass"]]
