@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..datasources import catalog
+from ..datasources import adapter_calls, catalog
 
 
 class BindingSpecResponse(BaseModel):
@@ -36,6 +36,7 @@ class BindingResponse(BaseModel):
     limits: str
     notes: str
     decision_eligible: bool
+    research_readable: bool
     spec: BindingSpecResponse | None = None
 
 
@@ -103,6 +104,7 @@ def _binding(item: Any) -> dict[str, Any]:
         "limits": item.limits,
         "notes": item.notes,
         "decision_eligible": item.decision_eligible,
+        "research_readable": adapter_calls.research_readable(item),
         "spec": None,
     }
     if item.spec is not None:

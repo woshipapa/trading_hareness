@@ -49,9 +49,6 @@ export function filterCapabilities(
   });
 }
 
-export function isResearchReadable(binding: DatasourceBinding): boolean {
-  return Boolean(binding.adapter && (/^app\/datasources\/sources\/tdx_[^/]+\.py:/u.test(binding.adapter) || binding.adapter.startsWith('app/datasources/derived/limit_pools.py:')));
-}
 
 export function queryFromForm(values: Record<string, string>): string {
   const query = new URLSearchParams();

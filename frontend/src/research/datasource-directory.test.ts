@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TDX_SOURCE_FILTER, filterCapabilities, isResearchReadable, queryFromForm, statusLabel } from './datasource-directory';
+import { TDX_SOURCE_FILTER, filterCapabilities, queryFromForm, statusLabel } from './datasource-directory';
 
 const capability = {
   key: 'bars.minute', category: 'bars', label: '分钟K', grain: 'intraday', scope: 'per_symbol', fields: [], schema: [],
@@ -20,8 +20,7 @@ describe('datasource directory helpers', () => {
     expect(kept.bindings.map((binding: { source: string }) => binding.source)).toEqual(sources.slice(0, 5));
   });
 
-  it('identifies readable package adapters and serializes form values', () => {
-    expect(isResearchReadable(capability.bindings[0])).toBe(true);
+  it('serializes form values and labels statuses', () => {
     expect(queryFromForm({ symbol: '600519.SH', count: '80', empty: ' ' })).toBe('symbol=600519.SH&count=80');
     expect(statusLabel('live_verified')).toBe('LIVE_VERIFIED');
   });

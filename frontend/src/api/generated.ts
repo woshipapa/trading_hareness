@@ -3810,6 +3810,8 @@ export interface components {
             notes: string;
             /** Decision Eligible */
             decision_eligible: boolean;
+            /** Research Readable */
+            research_readable: boolean;
             spec?: components["schemas"]["BindingSpecResponse"] | null;
         };
         /** BindingSpecResponse */

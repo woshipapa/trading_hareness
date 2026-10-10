@@ -39,6 +39,13 @@ class DatasourceCatalogRouterTests(unittest.TestCase):
         self.assertIsInstance(payload["evidence_locations"], list)
         self.assertIn("schema", payload)
 
+    def test_a_binding_says_whether_the_research_read_route_serves_it(self):
+        payload = client().get("/api/v1/datasources/capabilities/bars.daily").json()
+        readable = {item["source"]: item["research_readable"] for item in payload["bindings"]}
+        self.assertTrue(readable["tdx_public"])
+        self.assertFalse(readable["tdx_local"], "a bytes parser of local files is not a research read")
+        self.assertFalse(readable["longhuvip_composite"], "vendor routes keep their own reads")
+
     def test_an_unknown_capability_is_404(self):
         self.assertEqual(client().get("/api/v1/datasources/capabilities/no.such.capability").status_code, 404)
 

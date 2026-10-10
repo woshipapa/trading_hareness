@@ -3,7 +3,7 @@ import { computed, inject, onMounted, ref } from 'vue';
 import { dashboardContextKey } from '../../dashboard-context';
 import type { useDatasourcesSlice } from '../../composables/workspace/datasources';
 import {
-  TDX_SOURCE_FILTER, categoryLabel, filterCapabilities, isResearchReadable, queryFromForm, statusLabel, statusType,
+  TDX_SOURCE_FILTER, categoryLabel, filterCapabilities, queryFromForm, statusLabel, statusType,
   type DatasourceBinding, type DatasourceCapability, type DatasourceRead,
 } from '../../research/datasource-directory';
 
@@ -77,7 +77,7 @@ onMounted(loadCatalog);
                 <span class="binding-source">{{ sourceLabels[binding.source] ?? binding.source }}</span>
                 <span>优先级 {{ binding.priority }}</span>
                 <span>{{ binding.decision_eligible ? '决策可用' : '仅证据' }}</span>
-                <el-button v-if="isResearchReadable(binding)" link type="primary" @click="openRead(binding)">研究试读</el-button>
+                <el-button v-if="binding.research_readable" link type="primary" @click="openRead(binding)">研究试读</el-button>
                 <div v-if="binding.notes" class="muted">{{ binding.notes }}</div>
                 <div v-if="binding.spec" class="muted">参数 {{ Object.keys(binding.spec.params).join('、') || '无' }}；{{ binding.spec.time_semantics || '时间语义未声明' }}</div>
               </div>

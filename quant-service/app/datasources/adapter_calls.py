@@ -49,20 +49,31 @@ def _research_readable(adapter: str | None) -> bool:
         path.as_posix() == "app/datasources/derived/limit_pools.py"
 
 
+def _research_function(binding: Any) -> tuple[Any, str]:
+    """The adapter a research read of ``binding`` calls, or None and the reason there is none."""
+    if not _research_readable(binding.adapter):
+        return None, "this binding is served by a licensed or vendor route"
+    function = adapter_function(binding.adapter)
+    if not callable(function):
+        return None, "catalog adapter is not callable"
+    if any(parameter.kind is not inspect.Parameter.KEYWORD_ONLY for parameter in inspect.signature(function).parameters.values()):
+        return None, "catalog adapter does not expose a keyword-only research signature"
+    return function, ""
+
+
+def research_readable(binding: Any) -> bool:
+    """Whether GET /api/v1/datasources/read serves ``binding``: the catalog says so to the console."""
+    return _research_function(binding)[0] is not None
+
+
 def resolve_adapter(source: str, capability: str) -> tuple[Any, Any]:
     bindings = [item for item in catalog.BINDINGS if item.source == source and item.capability == capability]
     if not bindings:
         raise AdapterCallError(404, "source/capability binding not found")
-    binding = bindings[0]
-    if not _research_readable(binding.adapter):
-        raise AdapterCallError(404, "this binding is served by a licensed or vendor route")
-    function = adapter_function(binding.adapter)
-    if not callable(function):
-        raise AdapterCallError(404, "catalog adapter is not callable")
-    signature = inspect.signature(function)
-    if any(parameter.kind is not inspect.Parameter.KEYWORD_ONLY for parameter in signature.parameters.values()):
-        raise AdapterCallError(404, "catalog adapter does not expose a keyword-only research signature")
-    return binding, function
+    function, reason = _research_function(bindings[0])
+    if function is None:
+        raise AdapterCallError(404, reason)
+    return bindings[0], function
 
 
 def _parse_value(name: str, value: str, annotation: Any) -> Any:
