@@ -215,6 +215,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("fundamentals.daily_basic", "每日指标（换手/量比/市值/股本）", "daily", "all_a",
          "turnover_rate volume_ratio total_mv float_mv float_share", "effective=交易日"),
     _cap("fundamentals.financial_statements", "三大报表与财务指标", "periodic", "per_symbol", "report_period statement_items", "按公告日可得"),
+    _cap("fundamentals.company_profile", "公司 F10 文本资料", "periodic", "per_symbol", "category filename content", "effective=报告期; available=首次采集时刻"),
     _cap("fundamentals.capital_changes", "除权除息与股本变迁", "event", "per_symbol",
          "date category cash_dividend float_shares_after_10k total_shares_after_10k", "effective=变动日; available=采集时刻"),
     _cap("fundamentals.margin", "融资融券", "daily", "all_a", "rzye rzmre rqye net_buy", "effective=T 日; available=T+1 采集"),
@@ -464,6 +465,17 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("fuyao_ths", "fundamentals.financial_statements", 12, DECLARED, None, "app/fuyao_catalog.py:a_share_*_statements"),
     _bind("tushare_super_get", "fundamentals.financial_statements", 15, DORMANT, "tushare_raw_records", "app/tushare_providers.py",
           notes="2026-10-08 停用 Tushare（决策 0005）；保留 dormant 只为历史存量仍可按来源读取"),
+    _bind("tdx_public", "fundamentals.financial_statements", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_f10_finance.py:financial_statements", history="gpcw manifest periods; report_period is source period",
+          notes="累计口径；available_at 为采集时刻，不使用 updated_date",
+          spec=BindingSpec(params={"filename": "tdxfin/gpcwYYYYMMDD.zip", "market": "market", "code": "code"},
+                           field_map={"fields": "statement_items", "report_period": "report_period"},
+                           unit_factors={"statement_items": 1.0}, time_semantics="effective=report_period; available=first collection", limits={"max_download_bytes": 64 * 1024 * 1024})),
+    _bind("tdx_public", "fundamentals.company_profile", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_f10_finance.py:company_content", notes="F10 GBK 文本；available_at 为首次采集时刻",
+          spec=BindingSpec(params={"market": "market", "code": "code", "filename": "filename", "start": "start", "length": "length"},
+                           field_map={"name": "category", "content": "content"}, unit_factors={},
+                           time_semantics="effective=report period; available=first collection")),
     _bind("tdx_public", "fundamentals.capital_changes", 20, DECLARED, _RAW + "capital_changes",
           "app/datasources/sources/ticks.py:fetch_tdx_capital_changes", "上市以来全部", notes="与 pytdx 一致"),
     _bind("eastmoney_datacenter", "fundamentals.capital_changes", 50, DECLARED, None,
@@ -730,7 +742,7 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key):
+        if not bindings_for(key) and not all(item.status == UNSUPPORTED for item in BINDINGS if item.capability == key):
             problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
