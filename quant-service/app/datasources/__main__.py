@@ -17,21 +17,33 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import json
 import sys
+from collections.abc import Mapping
 from datetime import date, datetime
 
 from .catalog import bindings_for, capabilities_of, catalog_document, validate_catalog
 from .completeness import completeness_problems
 
 
+def _jsonable(value: object) -> object:
+    """``json.dumps`` default for a binding's BindingSpec, its mappings and Decimal factors."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return dataclasses.asdict(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return str(value)
+
+
 def _catalog(args: argparse.Namespace) -> int:
     if args.capability:
         rows = [binding.__dict__ for binding in bindings_for(args.capability, states=(
             "live_verified", "declared", "dormant", "unsupported"))]
-        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        print(json.dumps(rows, ensure_ascii=False, indent=2, default=_jsonable))
     elif args.source:
-        print(json.dumps([binding.__dict__ for binding in capabilities_of(args.source)], ensure_ascii=False, indent=2))
+        print(json.dumps([binding.__dict__ for binding in capabilities_of(args.source)], ensure_ascii=False, indent=2,
+                         default=_jsonable))
     else:
         print(json.dumps(catalog_document(), ensure_ascii=False, indent=2))
     return 0

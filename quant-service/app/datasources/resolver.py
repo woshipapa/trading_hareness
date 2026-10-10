@@ -180,45 +180,83 @@ def _quality_receipt(rows: Any, envelope: CapabilityEvidence, request: Capabilit
     )
 
 
-def _normalise_rows(rows: Any, binding: Binding) -> tuple[Any, bool, tuple[str, ...]]:
+def _same_value(left: Any, right: Any) -> bool:
+    """Equality that treats two NaNs as the same reading."""
+    if isinstance(left, float) and isinstance(right, float) and math.isnan(left) and math.isnan(right):
+        return True
+    return left == right
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float, Decimal)) and not isinstance(value, bool)
+
+
+def _scaled(value: Any, factor: int | float) -> Any:
+    """``value * factor``; a Decimal reading stays exact (``Decimal * float`` is a TypeError).
+
+    Factors are non-zero ints or floats: ``validate_catalog`` rejects anything else.
+    """
+    return value * Decimal(str(factor)) if isinstance(value, Decimal) else value * factor
+
+
+@dataclass(frozen=True)
+class _Normalised:
+    rows: Any
+    canonical: bool
+    warnings: tuple[str, ...] = ()
+    #: ``conflicted`` or ``invalid`` when the projection cannot be trusted; such a result is never returned.
+    status: str | None = None
+
+
+def _normalise_rows(rows: Any, binding: Binding) -> _Normalised:
     """Project source-native dictionaries into the canonical field contract.
 
-    Returns ``(rows, normalised, warnings)``. Only a binding with a spec is projected, and only when every
-    row is a dictionary. Rows of any other shape (dataclasses such as ``Tick``, tuples) stay native and say
-    so, so a receipt never calls them canonical. A unit factor applies to numbers only: multiplying the
-    string ``"123"`` by an integer factor would silently repeat it.
+    Only a binding with a spec is projected, and only non-empty lists of dictionaries; rows of any other
+    shape (``Tick`` dataclasses, tuples) stay native and say so. Each projected row is rebuilt from the
+    source row: unmapped native fields are copied, then every mapped native field is written under its
+    canonical name. Two values for one canonical field (two native names, or a mapped name colliding
+    with an unmapped native field) make the result ``conflicted`` whatever the field_map order. A unit
+    factor scales numbers only; any other value leaves the field in source units, so the result is
+    ``invalid``. Rows in which no mapped field occurs are not called canonical.
     """
     spec = binding.spec
     if spec is None:
-        return rows, False, ()
+        return _Normalised(rows, False)
     if not isinstance(rows, (list, tuple)) or any(not isinstance(row, dict) for row in rows):
-        return rows, False, ("rows_not_normalised",)
+        return _Normalised(rows, False, ("rows_not_normalised",))
+    if not rows:
+        return _Normalised(rows, False)
     warnings: list[str] = []
-    normalised = []
+    conflicted = invalid = False
+    matched = not spec.field_map
+    mapped = set(spec.field_map)
+    projected_rows = []
     for row in rows:
-        projected = dict(row)
-        assigned: dict[str, Any] = {}
+        projected = {key: value for key, value in row.items() if key not in mapped}
         for native, canonical in spec.field_map.items():
             if native not in row:
                 continue
-            if canonical in assigned and assigned[canonical] != row[native]:
+            matched = True
+            value = row[native]
+            if canonical in projected and not _same_value(projected[canonical], value):
                 warnings.append(f"field_map_conflict:{canonical}")
+                conflicted = True
                 continue
-            if canonical != native:
-                projected.pop(native, None)
-            projected[canonical] = assigned[canonical] = row[native]
+            projected[canonical] = value
         for field_name, factor in spec.unit_factors.items():
             value = projected.get(field_name)
             if value is None:
                 continue
-            if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+            if not _is_number(value):
                 warnings.append(f"unit_factor_skipped:{field_name}")
+                invalid = True
                 continue
-            if isinstance(value, Decimal) and isinstance(factor, float):
-                factor = Decimal(str(factor))
-            projected[field_name] = value * factor
-        normalised.append(projected)
-    return type(rows)(normalised), True, tuple(dict.fromkeys(warnings))
+            projected[field_name] = _scaled(value, factor)
+        projected_rows.append(projected)
+    if not matched:
+        return _Normalised(rows, False, ("field_map_unmatched",))
+    status = "conflicted" if conflicted else "invalid" if invalid else None
+    return _Normalised(type(rows)(projected_rows), True, tuple(dict.fromkeys(warnings)), status)
 
 
 def _declared_fields(binding: Binding) -> set[str]:
@@ -292,11 +330,20 @@ class CapabilityResolver:
                                  "ms": int((time.monotonic() - started) * 1000)})
                 continue
             rows, envelope = _unpack_evidence(raw)
-            rows, normalised, normalise_warnings = _normalise_rows(rows, binding)
+            try:
+                normalised = _normalise_rows(rows, binding)
+            except Exception as error:  # noqa: BLE001 - a bad spec fails this attempt, not the fallback chain
+                attempts.append({"source": binding.source, "status": "failed",
+                                 "error": f"normalise:{type(error).__name__}: {str(error)[:160]}",
+                                 "ms": int((time.monotonic() - started) * 1000)})
+                continue
+            rows = normalised.rows
             count = _row_count(rows)
             quality = _quality_receipt(rows, envelope, policy)
-            quality = QualityReceipt(**{**quality.__dict__, "schema": "canonical" if normalised else "native",
-                                        "warnings": quality.warnings + normalise_warnings})
+            quality = QualityReceipt(**{**quality.__dict__, "schema": "canonical" if normalised.canonical else "native",
+                                        "warnings": (*quality.warnings, *normalised.warnings)})
+            if normalised.status is not None and quality.status not in {"invalid", "stale"}:
+                quality = QualityReceipt(**{**quality.__dict__, "status": normalised.status})
             valid = quality.status not in {"invalid", "stale", "conflicted"}
             if policy.purpose in {"replay", "shadow"} and quality.status == "partial":
                 valid = False

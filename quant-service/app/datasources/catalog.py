@@ -704,6 +704,22 @@ def evidence_locations(capability: str) -> list[dict[str, Any]]:
     return result
 
 
+def _spec_problems(item: Binding) -> list[str]:
+    """A spec may only name canonical fields of its capability, and scale them by plain numbers."""
+    label = f"binding {item.source}->{item.capability}"
+    capability = CAPABILITIES.get(item.capability)
+    names = set(capability.schema.names) if capability is not None and capability.schema is not None else set()
+    spec = item.spec
+    problems = [f"{label}: field_map targets {target!r}, not a canonical field of the capability"
+                for target in sorted(set(spec.field_map.values()) - names)]
+    for field_name, factor in spec.unit_factors.items():
+        if field_name not in names:
+            problems.append(f"{label}: unit factor for {field_name!r}, not a canonical field (factors apply after field_map)")
+        if isinstance(factor, bool) or not isinstance(factor, (int, float)) or not factor:
+            problems.append(f"{label}: unit factor for {field_name!r} must be a non-zero int or float, got {factor!r}")
+    return problems
+
+
 def validate_catalog() -> list[str]:
     """Referential and vocabulary checks; returns problems (empty is valid)."""
     problems = []
@@ -739,6 +755,12 @@ def validate_catalog() -> list[str]:
     current = {(item.source, item.capability) for item in BINDINGS}
     for source, capability in sorted(GRANDFATHER_BINDINGS - current):
         problems.append(f"grandfather entry {source}->{capability} has no binding: delete it (the list only shrinks)")
+    for item in BINDINGS:
+        if item.spec is None:
+            continue
+        if (item.source, item.capability) in GRANDFATHER_BINDINGS:
+            problems.append(f"grandfather entry {item.source}->{item.capability} has a BindingSpec now: delete it")
+        problems.extend(_spec_problems(item))
     if len(GRANDFATHER_BINDINGS) > GRANDFATHER_BASELINE_SIZE:
         problems.append("grandfather binding list may only shrink")
     for label in SOURCE_LABELS.values():

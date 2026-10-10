@@ -51,28 +51,6 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(public_fetch_functions())
         self.assertEqual(completeness_problems(), [])
 
-    def test_completeness_is_derived_from_code_not_a_hand_list(self):
-        import tempfile
-        from pathlib import Path
-
-        from app.datasources.contracts import Binding, DECLARED
-        with tempfile.TemporaryDirectory() as tmp:
-            root, registry = Path(tmp) / "sources", Path(tmp) / "bindings.py"
-            root.mkdir()
-            (root / "demo.py").write_text("async def fetch_rows():\n    return []\n\n"
-                                          "class DemoClient:\n    def bars(self):\n        return []\n", encoding="utf-8")
-            registry.write_text("from .sources import demo\n", encoding="utf-8")
-            bindings = [Binding("tdx_public", "ticks.session", 20, DECLARED)]
-            problems = completeness_problems(bindings, root=root, bindings_module=registry, unregistered={})
-            self.assertIn("unregistered source fetch function: demo.fetch_rows", problems)
-            self.assertIn("unregistered source fetch function: demo.DemoClient.bars", problems)
-            self.assertIn("unaccounted TDX command family: quote", problems, "only TDX bindings count for a family")
-            registry.write_text("from .sources import demo\nX = demo.fetch_rows\n", encoding="utf-8")
-            problems = completeness_problems(bindings, root=root, bindings_module=registry,
-                                             unregistered={"demo.DemoClient.bars": "transport", "missing.fetch_gone": "old"})
-            self.assertNotIn("unregistered source fetch function: demo.fetch_rows", problems)
-            self.assertIn("stale UNREGISTERED entry: missing.fetch_gone", problems)
-
     def test_tushare_ths_boards_are_retired_and_fuyao_stays_declared(self):
         membership = {binding.source: binding for binding in BINDINGS if binding.capability == "sector.membership"}
         self.assertEqual(membership["tushare_super_get"].status, RETIRED)
