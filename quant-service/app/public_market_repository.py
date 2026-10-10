@@ -25,12 +25,12 @@ from .market_flow_features import market_event_identity_key
 
 
 def persist_tdx_membership_delta(database: Any, taxonomy_key: str, sector_key: str,
-                                 members: dict[str, dict[str, Any]], observed_at: datetime) -> dict[str, int]:
+                                 members: dict[str, dict[str, Any]], observed_at: datetime, provider: str) -> dict[str, int]:
     from .sector_membership_repository import persist_observed_snapshot_delta
 
     with database.transaction() as connection:
-        return persist_observed_snapshot_delta(connection, taxonomy_key, sector_key, members, "tdx_mac", observed_at,
-                                               instrument_source="tdx_mac")
+        return persist_observed_snapshot_delta(connection, taxonomy_key, sector_key, members, provider, observed_at,
+                                               instrument_source=provider)
 
 
 def persist_free_quote(database: Any, provider: str, symbol: str, quote: dict[str, Any] | None) -> int:

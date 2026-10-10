@@ -98,7 +98,7 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
     # -- unofficial protocol / local files -------------------------------------
     DataSource("tdx_public", "通达信公开行情主站", "tdx hq hosts :7709", "unofficial_protocol", "tcp_tdx", "free",
                "app/datasources/sources/tdx_protocol.py",
-               risks="非官方社区主站；2026-09-18 起仅历史分笔与除权除息可用，实时行情与 K 线命令被拒"),
+               risks="非官方社区主站；LOGIN_ONE 为默认握手，单主机失败回退 legacy_3；主机池由探测矩阵生成并按主机冷却，结果保留 host:port/profile；收盘后证券列表、服务器文件与 K 线等仅作研究证据，事实见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json 与 scripts/data/tdx_server_files_2026-10-10_mac.json"),
     DataSource("tdx_mac", "通达信 MAC 行情服务", "MAC 0x12xx hosts :7709", "unofficial_protocol", "tcp_tdx_mac", "free",
                "app/datasources/sources/tdx_mac.py", risks="研究证据；MAC 字段与协议为非官方实现"),
     DataSource("tdx_ext", "通达信扩展行情", "tdx extended hq :7727", "unofficial_protocol", "tcp_tdx", "free",
@@ -302,6 +302,10 @@ _TENCENT_QUOTES = {"reference": "tencent_free", "reference_adapter": "app/free_m
                    "reference_params": {"symbols": "symbols"}, "key": ["symbol"]}
 _TENCENT_LIMITS = {"reference": "tencent_free", "reference_adapter": "app/longhu_vendor_source.py:tencent_quotes_blocking",
                    "reference_params": {"symbols": "symbols"}, "key": ["symbol", "trade_date"]}
+_TENCENT_INDEX_DAILY = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_index_daily",
+                        "reference_params": {"symbol": "symbol"},
+                        "reference_fixed": {"start": "2026-01-01", "end": "2026-12-31"},
+                        "key": ["symbol", "trade_date"]}
 
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot
@@ -399,13 +403,15 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "客户端下载的全部历史", notes="owner 工作站 CLI，不直接写 canonical"),
     _bind("fuyao_ths", "bars.daily", 20, DECLARED, None, "app/fuyao_bulk_dump_capture.py", "10 年日K + 复权因子全量导出"),
     _bind("tdx_public", "bars.daily", 65, UNSUPPORTED, _RAW + "tdx_legacy_daily_bars",
-          "app/datasources/sources/tdx_bars.py:fetch_daily", notes="0x052d category 9；volume 单位为手；/1000 价格缩放适用于 ETF 与北交所；证据见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json",
+          "app/datasources/sources/tdx_bars.py:fetch_daily", notes="0x052d category 9；volume 单位为手；/1000 价格缩放适用于 ETF 与北交所；与 tdx_mac 是跨协议而非跨供应商对账，只比较 close 和 amount；legacy daily volume 保持整手；证据见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json",
           spec=BindingSpec(params={"symbol": "market+code", "count": "count >= 1"},
                            field_map={"open": "open", "high": "high", "low": "low", "close": "close",
                                       "volume": "volume", "amount": "amount"},
                            paging={"kind": "offset", "page_size": 800},
                            time_semantics="effective=bar date; available=the time the response was received (CapabilityEvidence available_at_min/max)",
-                           handshake_profile="login_one")),
+                           handshake_profile="login_one",
+                           agreement={"close": {"reference": "tdx_mac", "key": ["symbol", "trade_date"], "rel_tol": 0.005},
+                                      "amount": {"reference": "tdx_mac", "key": ["symbol", "trade_date"], "rel_tol": 0.02}})),
     _bind("tdx_mac", "bars.daily", 70, UNSUPPORTED, _RAW + "tdx_mac_daily_bars",
           "app/datasources/sources/tdx_mac.py:fetch_daily_bars", spec=BindingSpec(
               params={"symbol": "market+code", "count": "count (period 4 = daily)"}, field_map={},
@@ -431,7 +437,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                                       "volume": "volume", "amount": "amount"},
                            paging={"kind": "offset", "page_size": 800},
                            time_semantics="effective=bar_time, the bar's end minute in Asia/Shanghai; available=the time the response was received (CapabilityEvidence available_at_min/max)",
-                           handshake_profile="login_one")),
+                           handshake_profile="login_one",
+                           agreement={"close": {**_TENCENT_MINUTES, "rel_tol": 0.005}})),
     _bind("tdx_mac", "bars.minute", 70, UNSUPPORTED, _RAW + "tdx_mac_minute_bars",
           "app/datasources/sources/tdx_mac.py:fetch_minute_bars",
           notes="MAC K 线只给 bar 时间（日期 + 当日秒数，适配器组成 Asia/Shanghai 感知的 bar_time）；source_available_at 是响应接收时间，available_at_min/max 记录该时间",
@@ -449,7 +456,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
               params={"symbol": "index or board market+code", "count": "1..800"},
               field_map={"open": "open", "close": "close", "amount": "amount"},
               time_semantics="effective=交易日收盘; available=采集时刻",
-              handshake_profile="login_one")),
+              handshake_profile="login_one",
+              agreement={"close": {**_TENCENT_INDEX_DAILY, "rel_tol": 0.005}})),
     _bind("tdx_public", "breadth.index_daily", 65, UNSUPPORTED, _RAW + "tdx_index_breadth",
           "app/datasources/sources/tdx_bars.py:fetch_index_breadth",
           notes="与 bars.index_daily 共用一次 0x052d category 9 请求；上涨/下跌家数是该指数成分股口径，不得混入全 A 快照宽度",
@@ -546,13 +554,18 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("eastmoney_ztb", "limits.broken_pool", 50, DECLARED, _RAW + "limit_pool_broken", "app/datasources/sources/eastmoney_ztb.py"),
     _bind("fuyao_ths", "limits.limit_down_pool", 12, DECLARED, _EVT + "limit_down_pool", "app/market_event_capture.py"),
     _bind("eastmoney_ztb", "limits.limit_down_pool", 50, DECLARED, _RAW + "limit_pool_limit_down", "app/datasources/sources/eastmoney_ztb.py"),
-    *(_bind("derived_tdx_limits", capability, 90, UNSUPPORTED, None, f"app/datasources/derived/limit_pools.py:{adapter}",
-            "仅当前会话快照，无历史", notes=rule + _TDX_POOL_NOTE, spec=_TDX_POOL_SPEC)
-      for capability, adapter, rule in (
-        ("limits.limit_up_pool", "fetch_limit_up_pool", "涨停池：现价等于涨停价（limit_up_time、reason、board_count、seal_money 不可得）；"),
-        ("limits.broken_pool", "fetch_broken_pool", "炸板池：最高价等于涨停价且现价低于涨停价，炸板后已回封的在涨停池（open_times 不可得）；"),
-        ("limits.limit_down_pool", "fetch_limit_down_pool", "跌停池：现价等于跌停价（seal_money 不可得）；"),
-    )),
+    _bind("derived_tdx_limits", "limits.limit_up_pool", 90, UNSUPPORTED, None,
+          "app/datasources/derived/limit_pools.py:fetch_limit_up_pool", "仅当前会话快照，无历史",
+          notes="涨停池：现价等于涨停价（limit_up_time、reason、board_count、seal_money 不可得）；" + _TDX_POOL_NOTE,
+          spec=_TDX_POOL_SPEC),
+    _bind("derived_tdx_limits", "limits.broken_pool", 90, UNSUPPORTED, None,
+          "app/datasources/derived/limit_pools.py:fetch_broken_pool", "仅当前会话快照，无历史",
+          notes="炸板池：最高价等于涨停价且现价低于涨停价，炸板后已回封的在涨停池（open_times 不可得）；" + _TDX_POOL_NOTE,
+          spec=_TDX_POOL_SPEC),
+    _bind("derived_tdx_limits", "limits.limit_down_pool", 90, UNSUPPORTED, None,
+          "app/datasources/derived/limit_pools.py:fetch_limit_down_pool", "仅当前会话快照，无历史",
+          notes="跌停池：现价等于跌停价（seal_money 不可得）；" + _TDX_POOL_NOTE,
+          spec=_TDX_POOL_SPEC),
     _bind("fuyao_ths", "limits.ladder", 12, LIVE_VERIFIED, _EVT + "limit_chain", "app/market_event_capture.py"),
     _bind("longhuvip", "limits.seal_detail", 10, DECLARED, _RAW + "longhu:longhu_market_wide:GetPlateInfo_w38",
           "app/datasources/sources/longhu_limit_review.py:decode_review",

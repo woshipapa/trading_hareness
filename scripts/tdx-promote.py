@@ -280,9 +280,9 @@ def verdicts(egress: str, source: str, probes: Mapping[str, Mapping[str, Any]], 
             "pass": egress == "owner" and not own["error"] and own["rows"] > 0,
             "detail": f"egress {egress}, " + (f"failed: {own['error']}" if own["error"] else f"{own['rows']} rows")},
         "agreement": {
-            "pass": not disagreeing,
+            "pass": bool(comparison) and not disagreeing,
             "detail": "; ".join(disagreeing) or (f"{len(comparison)} fields agree on their common rows" if comparison
-                                                 else "not applicable: the binding declares no agreement tolerances")},
+                                                 else "not applicable: no declared reference agreement; promotion is blocked")},
         "intraday": {
             "pass": not outside,
             "detail": (f"outside a session: {', '.join(outside)}" if outside else "every probe ran inside a session")
@@ -363,6 +363,10 @@ def run_apply(args: argparse.Namespace) -> int:
     token = bind_call(text, source, capability).args[3]
     if token.id not in STEPS:
         sys.exit(f"{source} {capability} is {token.id}: only UNSUPPORTED and DECLARED bindings are promoted")
+    catalog_binding = next((item for item in bindings_for(capability, states=BINDING_STATES) if item.source == source), None)
+    if CATALOG == ROOT / "quant-service" / "app" / "datasources" / "catalog.py" and token.id == "UNSUPPORTED" and (
+            catalog_binding is None or catalog_binding.spec is None or not catalog_binding.spec.agreement):
+        sys.exit(f"{source} {capability} has no declared reference agreement; it cannot move from UNSUPPORTED to DECLARED")
     new, gates = STEPS[token.id]
     failed = [f"{path}: {gate} failed ({document['verdicts'][gate]['detail']})"
               for path, document in zip(paths, documents) for gate in gates if not document["verdicts"][gate]["pass"]]
