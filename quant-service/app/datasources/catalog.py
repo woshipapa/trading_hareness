@@ -16,7 +16,7 @@ from typing import Any, Final, Iterable
 
 from .contracts import (
     BINDING_STATES, CATEGORIES, DECLARED, DORMANT, GRAINS, LICENSES, LIVE_VERIFIED, RESOLVABLE_STATES,
-    RETIRED, SCOPES, UNSUPPORTED, Binding, BindingSpec, CanonicalSchema, Capability, DataSource, FieldSpec, SourceLabel, Taxonomy,
+    RETIRED, SCOPES, UNVERIFIED, UNSUPPORTED, Binding, BindingSpec, CanonicalSchema, Capability, DataSource, FieldSpec, SourceLabel, Taxonomy,
 )
 
 
@@ -180,7 +180,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     # sector
     _cap("sector.membership", "板块/概念成分（PIT）", "reference", "board", "taxonomy_key sector_key symbol known_at",
          "known_at 之后才可用；盘中刷新只对下一场生效"),
-    _cap("sector.board_catalog", "MAC 板块目录", "reference", "board", "ids names types counts",
+    _cap("sector.board_catalog", "MAC 板块目录", "reference", "board", "board_code:str name board_type:int member_count:int",
          "effective=采集时刻; available=采集时刻"),
     _cap("sector.index_quote", "板块/概念指数行情", "daily", "board", "index_code last_price pct_change volume turnover", _OBSERVED),
     _cap("sector.flow_curve", "板块资金流曲线", "intraday", "board", "sector net_inflow:per-item unit (cny|100m_cny)", _OBSERVED),
@@ -300,8 +300,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("fuyao_ths", "bars.daily", 20, DECLARED, None, "app/fuyao_bulk_dump_capture.py", "10 年日K + 复权因子全量导出"),
     _bind("tdx_mac", "bars.daily", 70, UNSUPPORTED, _RAW + "tdx_mac_daily_bars",
           "app/datasources/sources/tdx_mac.py:fetch_daily_bars", spec=BindingSpec(
-              params={"symbol": "market+code", "period": 4}, field_map={"volume": "volume"},
-              unit_factors={"volume": 0.01}, paging="start/count", max_batch=800,
+              params={"symbol": "market+code", "count": "count (period 4 = daily)"}, field_map={},
+              unit_factors={"volume": 0.01},
               time_semantics="effective=bar date; available=collection", handshake_profile="mac")),
     _bind("tencent_free", "bars.daily_adjusted", 50, LIVE_VERIFIED, "research_adjusted_bars_daily", "app/free_market_providers.py",
           notes="前复权，研究参考"),
@@ -318,8 +318,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/datasources/sources/tdx_local_files.py:parse_minute_bytes", "客户端保留的全部分钟线"),
     _bind("tdx_mac", "bars.minute", 70, UNSUPPORTED, _RAW + "tdx_mac_minute_bars",
           "app/datasources/sources/tdx_mac.py:fetch_minute_bars", spec=BindingSpec(
-              params={"symbol": "market+code", "period": "0=5m,7/8=1m"}, field_map={"volume": "volume"},
-              unit_factors={"volume": 1}, paging="start/count", max_batch=800,
+              params={"symbol": "market+code", "count": "count (period 8)"}, field_map={},
               time_semantics="effective=bar time; available=collection", handshake_profile="mac")),
     _bind("longhuvip_index", "bars.index_daily", 45, DORMANT, "canonical_bars_daily", "app/longhu_market_service.py"),
     _bind("fuyao_ths", "bars.index_daily", 20, DECLARED, None, "app/fuyao_catalog.py:ths_index_prices_historical"),
@@ -406,14 +405,13 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="东财成分函数在 owner 出口不可用"),
     _bind("tdx_mac", "sector.board_catalog", 70, UNSUPPORTED, _RAW + "tdx_mac_board_catalog",
           "app/datasources/sources/tdx_mac.py:fetch_board_catalog", spec=BindingSpec(
-              params={"board_type": "0..6"}, field_map={"code": "ids", "name": "names", "market": "types"},
-              paging="start/page_size", max_batch=150,
+              params={}, field_map={},
               time_semantics="effective/available=collection", handshake_profile="mac")),
-    _bind("tdx_mac", "sector.membership", 70, UNSUPPORTED, "sector_membership_history:taxonomy_key=tdx_mac",
+    _bind("tdx_mac", "sector.membership", 70, UNSUPPORTED, "sector_membership_history:taxonomy_key=tdx_mac_*",
           "app/datasources/sources/tdx_mac.py:fetch_membership", spec=BindingSpec(
-              params={"board": "MAC board symbol"}, field_map={"symbol": "symbol"},
-              paging="start/total", max_batch=80,
-              time_semantics="known_at=collection", handshake_profile="mac")),
+              params={"sector_key": "MAC board code (returned by fetch_board_catalog)"},
+              field_map={},
+              time_semantics="known_at=collection UTC-aware", handshake_profile="mac")),
     _bind("fuyao_ths", "sector.index_quote", 12, DECLARED, _RAW + "ths_index_prices_snapshot",
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", limits="thscodes≤100"),
     _bind("eastmoney_free", "sector.flow_curve", 45, LIVE_VERIFIED, "intraday_board_flow_snapshots", "app/board_flow_capture_actions.py",
@@ -637,6 +635,14 @@ TAXONOMIES: Final[dict[str, Taxonomy]] = {item.key: item for item in (
              "390 个概念全量成分，盘后自动刷新；作为 ths_concept_flow 的候选替代，待策略侧验证"),
     Taxonomy("fuyao_ths_industry", "fuyao_ths", "ths_industry", DECLARED, 40, "320 个行业"),
     Taxonomy("fuyao_ths_region", "fuyao_ths", "ths_region", DECLARED, 50, "33 个地域"),
+    # MAC board types (0-6); names from MAC documentation where available, else tdx_mac_type_N
+    Taxonomy("tdx_mac_type_0", "tdx_mac", "tdx_mac_board", UNVERIFIED, 70),
+    Taxonomy("tdx_mac_type_1", "tdx_mac", "tdx_mac_board", UNVERIFIED, 71),
+    Taxonomy("tdx_mac_type_2", "tdx_mac", "tdx_mac_board", UNVERIFIED, 72),
+    Taxonomy("tdx_mac_type_3", "tdx_mac", "tdx_mac_board", UNVERIFIED, 73),
+    Taxonomy("tdx_mac_type_4", "tdx_mac", "tdx_mac_board", UNVERIFIED, 74),
+    Taxonomy("tdx_mac_type_5", "tdx_mac", "tdx_mac_board", UNVERIFIED, 75),
+    Taxonomy("tdx_mac_type_6", "tdx_mac", "tdx_mac_board", UNVERIFIED, 76),
 )}
 
 #: Groups in the THS concept tables whose membership is a qualification, not a
@@ -766,7 +772,7 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key) and not any(item.capability == key for item in BINDINGS):
+        if not bindings_for(key) and not any(item.capability == key and item.status == UNSUPPORTED for item in BINDINGS):
             problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
