@@ -119,13 +119,14 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
 )}
 
 
-def _cap(key: str, label: str, grain: str, scope: str, fields: str, time_semantics: str, description: str = "") -> Capability:
+def _cap(key: str, label: str, grain: str, scope: str, fields: str, time_semantics: str, description: str = "",
+         category: str | None = None) -> Capability:
     names = tuple(fields.split())
     specs = tuple(
         FieldSpec(name=item.split(":", 1)[0], unit=item.split(":", 1)[1] if ":" in item else None)
         for item in names
     )
-    return Capability(key, key.split(".", 1)[0], label, grain, scope, names, time_semantics, description,
+    return Capability(key, category or key.split(".", 1)[0], label, grain, scope, names, time_semantics, description,
                       CanonicalSchema(specs))
 
 
@@ -164,6 +165,17 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("auction.short_term_benchmark", "竞价短线基准", "daily", "market", "symbol auction_pct tags", _OBSERVED),
     _cap("auction.history_0925", "历史每日 09:25 竞价成交", "daily", "per_symbol",
          "price:yuan volume:shares amount:yuan auction_curve", _SESSION_CLOSE),
+    _cap("microstructure.volume_profile", "分价成交量", "intraday", "per_symbol",
+         "price:yuan volume_lots buy_lots sell_lots", _OBSERVED, category="derived"),
+    _cap("microstructure.minute_series", "历史分时K线（指定日期）", "daily", "per_symbol",
+         "time price:yuan volume_lots pre_close:yuan", _SESSION_CLOSE, category="derived"),
+    _cap("microstructure.auction_curve", "集合竞价曲线", "intraday", "per_symbol",
+         "time price:yuan matched_raw unmatched_raw unmatched_side", _OBSERVED,
+         "TDX 流在 09:24:57 截止；数量单位未确认，保留 raw 命名", category="derived"),
+    _cap("microstructure.unusual", "TDX 异动事件", "intraday", "all_a",
+         "market code time event_type description value", _OBSERVED, category="derived"),
+    _cap("microstructure.top_board", "TDX 排名榜", "intraday", "market",
+         "category code price:yuan value", _OBSERVED, "研究来源；永不替代涨停池", category="derived"),
     # limits
     _cap("limits.prices", "涨跌停价", "daily", "all_a", "up_limit:yuan down_limit:yuan", "effective=交易日; available=入库时刻"),
     _cap("limits.limit_up_pool", "涨停池", "intraday", "all_a",
@@ -358,6 +370,36 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/market_event_capture.py"),
     _bind("tdx_public", "auction.history_0925", 20, DECLARED, _RAW + "tick_flow_daily",
           "app/datasources/bindings.py:opening_auction", "近期任意交易日", notes="含 09:15-09:25 竞价虚拟撮合曲线"),
+    _bind("tdx_public", "microstructure.volume_profile", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_volume_profile",
+          notes="0x051a；覆盖率核对前不进入决策；成交量单位为 lots",
+          spec=BindingSpec(params={"market": "market", "code": "code"},
+                           field_map={"price": "price", "volume_lots": "volume_lots", "buy_lots": "buy_lots", "sell_lots": "sell_lots"},
+                           time_semantics="server_time_raw 是源字段；effective=采集时刻")),
+    _bind("tdx_public", "microstructure.minute_series", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_minute_series",
+          notes="0x0fb4；one row per trading minute (09:31..11:30, 13:01..15:00)；第二个变长字段含义未知，保留为 unknown；覆盖率核对前不进入决策",
+          spec=BindingSpec(params={"market": "market", "code": "code", "trade_date": "trade_date"},
+                           field_map={"time": "time", "price": "price", "volume_lots": "volume_lots", "pre_close": "pre_close"},
+                           time_semantics="effective=trade_date; available=采集时刻")),
+    _bind("tdx_public", "microstructure.auction_curve", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_auction_curve",
+          notes="0x056a；09:24:57 截止，无字面 09:25 行；数量单位未确认",
+          spec=BindingSpec(params={"market": "market", "code": "code"},
+                           field_map={"time": "time", "price": "price", "matched_raw": "matched_raw", "unmatched_raw": "unmatched_raw", "unmatched_side": "unmatched_side"},
+                           time_semantics="effective=auction time; available=采集时刻")),
+    _bind("tdx_public", "microstructure.unusual", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_unusual",
+          notes="0x0563；覆盖率核对前不进入决策；limits.anomaly_tape 可在覆盖率核对后作为第二来源",
+          spec=BindingSpec(params={"market": "market", "start": "start", "count": "count"},
+                           field_map={"market": "market", "code": "code", "time": "time", "event_type": "event_type", "description": "description", "value": "value"},
+                           time_semantics="effective=event time; available=采集时刻")),
+    _bind("tdx_public", "microstructure.top_board", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_top_board",
+          notes="0x053f；覆盖率核对前不进入决策；top_board 永不替代涨停池",
+          spec=BindingSpec(params={"category": "category", "size": "size"},
+                           field_map={"code": "code", "price": "price", "value": "value"},
+                           time_semantics="effective=采集时刻; available=采集时刻")),
     # limits
     _bind("tencent_free", "limits.prices", 12, DECLARED, "daily_trade_limits:provider=tencent_free",
           "app/datasources/sources/tencent_limits.py", limits="全市场约 68 批、每批 80 只；不足 95% 或仍是前一交易日行情即报错重试",

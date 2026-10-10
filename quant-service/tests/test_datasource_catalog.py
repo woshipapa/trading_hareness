@@ -120,6 +120,16 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(snapshot.spec.unit_factors["volume"], 100)
         self.assertIn("排序宽度", overview.notes)
 
+    def test_microstructure_bindings_are_unsupported_and_raw_auction_is_explicit(self):
+        keys = {"microstructure.volume_profile", "microstructure.minute_series", "microstructure.auction_curve",
+                "microstructure.unusual", "microstructure.top_board"}
+        bindings = [item for item in BINDINGS if item.capability in keys]
+        self.assertEqual({item.status for item in bindings}, {UNSUPPORTED})
+        self.assertTrue(all(item.spec is not None and not item.decision_eligible for item in bindings))
+        auction = CAPABILITIES["microstructure.auction_curve"]
+        self.assertEqual(auction.schema.names, ("time", "price", "matched_raw", "unmatched_raw", "unmatched_side"))
+        self.assertFalse(any(item.source == "tdx_public" and item.capability == "bars.minute" for item in BINDINGS))
+
 
 class NonSectorGroupTests(unittest.TestCase):
     """Qualification lists never stand in for a sector (2026-09-18 labels)."""
