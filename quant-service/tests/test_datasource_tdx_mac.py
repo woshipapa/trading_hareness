@@ -460,6 +460,11 @@ class MacWatchSnapshotTests(unittest.TestCase):
                              [("920017.BJ", "430017.BJ"), ("600519.SH", None)], adapter.__name__)
             self.assertEqual(evidence.coverage, 1.0)
 
+    def test_an_old_bj_code_the_server_leaves_out_is_named_as_it_was_requested(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: [])})
+        evidence = self.fetch(client, ["430017.BJ"])
+        self.assertIn("missing_symbols=1: 430017.BJ", evidence.warnings)
+
     def test_an_answer_that_leaves_out_a_quote_field_raises(self):
         def answer(request):
             bitmap = bytearray(request[12:32])
