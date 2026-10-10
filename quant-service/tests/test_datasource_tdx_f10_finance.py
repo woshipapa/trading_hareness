@@ -1,6 +1,10 @@
+import contextlib
+import importlib.util
 import inspect
+import io
 import struct
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from app.datasources.sources import tdx_f10_finance as f10
@@ -260,6 +264,55 @@ class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["content"] for row in profile.rows], ["最新提示：分红", "公司概况：银行"])
         self.assertEqual(summary.warnings, ("tdx_host=h:7709/login_one",))
         self.assertEqual(len(host.requests), 4)       # the setup frame is answered by FakeSocket itself
+
+
+class ProbeHost(F10Host):
+    """F10Host that also serves the gpcw.txt manifest the probe reads from the two candidate finance hosts."""
+    MANIFEST = b"gpcw20260630.zip,0123456789abcdef0123456789abcdef,5755893\n"
+
+    def _exchange(self, request):
+        if struct.unpack_from("<H", request, 10)[0] == 0x06B9:
+            chunk = self.MANIFEST[struct.unpack_from("<I", request, 12)[0]:]
+            return len(chunk).to_bytes(4, "little") + chunk
+        return super()._exchange(request)
+
+
+class ProbeScriptTests(unittest.TestCase):
+    """scripts/verify-tdx-f10-finance.py drives the same builders and parsers against live hosts; here a fake one."""
+
+    def test_the_probe_reads_every_command_from_a_plain_client(self):
+        spec = importlib.util.spec_from_file_location(
+            "verify_tdx_f10_finance", Path(__file__).resolve().parents[2] / "scripts" / "verify-tdx-f10-finance.py")
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+
+        class Quote:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return ('v_sz000001="1~name~' + "~".join(["x"] * 80) + '";').encode()
+
+        out = io.StringIO()
+        host = ProbeHost()
+        with mock.patch.object(tdx_protocol.socket, "create_connection", lambda *args, **kwargs: FakeSocket(host)), \
+                mock.patch.object(probe.urllib.request, "urlopen", lambda *args, **kwargs: Quote()), \
+                contextlib.redirect_stdout(out):
+            code = probe.main()
+        lines = out.getvalue().splitlines()
+        self.assertEqual(code, 0)
+        self.assertNotIn("ERROR", out.getvalue())
+        self.assertEqual(sum(line.startswith("HOST ") for line in lines), 6)
+        self.assertEqual(lines.count("  000001.SZ finance fields=40 code=000001 total_shares=10000.0 net_profit=27000.0 eps=7.0"), 6)
+        self.assertEqual(sum(line.startswith("  600519.SH content chars=7 ") for line in lines), 6)
+        self.assertEqual(sum(line.startswith("  gpcw.txt bytes=58 ") for line in lines), 2)       # the two finance hosts
+        sent = [request.hex() for request in host.requests]
+        for symbol in ("000001.SZ", "600519.SH"):
+            for expected in (FINANCE_REQUESTS[symbol], CATEGORIES_REQUESTS[symbol], CONTENT_REQUESTS[(symbol, 0)]):
+                self.assertEqual(sent.count(expected), 6, expected[:40])             # once per host
 
 
 if __name__ == "__main__":
