@@ -22,7 +22,7 @@ _BOOK_FIELDS = tuple(f"{name}{level}" for level in range(1, 6) for name in ("bid
 def _board_row(quote: dict[str, Any]) -> dict[str, Any]:
     return {"symbol": tdx_protocol.symbol(quote["market"], quote["code"]),
             "last_price": quote["price"], "pre_close": quote["last_close"],
-            "pct_change": (quote["price"] / quote["last_close"] - 1) * 100,
+            "pct_change": None if quote["last_close"] == 0 else (quote["price"] / quote["last_close"] - 1) * 100,
             "volume_raw": quote["volume_lots"], "amount_raw": quote["amount"]}
 
 
@@ -32,8 +32,8 @@ def _book_row(quote: dict[str, Any]) -> dict[str, Any]:
 
 async def fetch_index_quote(*, symbols: Sequence[str]) -> CapabilityEvidence:
     """Board index quotes (880xxx and 881xxx codes). The bid and ask fields of a board code are not a book, so they are
-    not read; ``pct_change`` is computed from the last price and the previous close; volume and amount keep raw names
-    because no evidence gives their units."""
+    not read; ``pct_change`` is computed from the last price and the previous close, None when that is 0; volume and
+    amount keep raw names because no evidence gives their units."""
     stocks = tdx_instruments.requested_of_types(symbols, _BOARDS)
     quotes, host = await tdx_protocol.call(lambda client: client.quotes(stocks), handshake_profile="login_one")
     return tdx_protocol.batch_evidence([_board_row(quote) for quote in quotes], symbols, host)

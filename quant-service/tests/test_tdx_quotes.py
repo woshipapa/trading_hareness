@@ -99,6 +99,13 @@ class BoardIndexQuoteTests(unittest.TestCase):
             self.assertAlmostEqual(row["amount_raw"], 17.575, places=3)
         self.assertEqual((evidence.coverage, evidence.warnings), (1.0, ("tdx_host=h:7709/login_one",)))
 
+    def test_a_board_with_a_zero_previous_close_has_no_change(self):
+        _market, code, price, _last_close, book = evidence_quotes()["880005"]
+        with patched_call(FakeClient(quote_body([(1, code, price, 0.0, book)]))):
+            evidence = asyncio.run(tdx_quotes.fetch_index_quote(symbols=["880005.SH"]))
+        self.assertEqual((evidence.rows[0]["last_price"], evidence.rows[0]["pre_close"], evidence.rows[0]["pct_change"]),
+                         (price, 0.0, None))
+
     def test_any_other_code_is_refused_before_the_network(self):
         with mock.patch.object(tdx_protocol, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
             for symbol in ("999999.SH", "399300.SZ", "600519.SH", "510300.SH", "127045.SZ", "920000.BJ"):

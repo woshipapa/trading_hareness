@@ -516,7 +516,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/datasources/collectors/post_close.py:job_fuyao_valuation_index", limits="thscodes≤100"),
     _bind("tdx_public", "sector.index_quote", 80, UNSUPPORTED, None,
           "app/datasources/sources/tdx_quotes.py:fetch_index_quote",
-          notes="0x053e 读 880xxx/881xxx 板块指数：last_price、pre_close，pct_change 由这两者算出；volume_raw、amount_raw 的单位无证据，"
+          notes="0x053e 读 880xxx/881xxx 板块指数：last_price、pre_close，pct_change 由这两者算出（pre_close 为 0 时为 None）；volume_raw、amount_raw 的单位无证据，"
                 "保持 raw，不映射到 volume/turnover；板块码的买卖盘字段不是盘口（scripts/data/tdx_quote_order_book_2026-10-10_mac.json），"
                 "不读取；只接受板块码，其他代码在联网前以 ValueError 拒绝；价格按固定 /100（板块码小数位 2，"
                 "scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json）；回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）；"
@@ -524,7 +524,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           spec=BindingSpec(
               params={"symbols": "board symbols such as 880005.SH"},
               field_map={"symbol": "index_code"},
-              limits={"derived": {"pct_change": "(last_price / pre_close - 1) * 100, computed by the adapter"}},
+              limits={"derived": {"pct_change": "(last_price / pre_close - 1) * 100, computed by the adapter; None when pre_close is 0"}},
               paging="batch", max_batch=80,
               time_semantics="effective/available=collection time; the row carries no decoded exchange clock",
               handshake_profile="login_one")),
