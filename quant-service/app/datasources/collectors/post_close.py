@@ -355,7 +355,7 @@ async def job_tdx_tipinfo(deps: ArchiveDeps, state: ArchiveState, day: date, now
 
 
 async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
-    """Archive at most two changed GPCW periods per day; the complete history is intentionally opt-in."""
+    """On the first enabled run archive the newest two periods; later runs drain the remaining backlog two at a time."""
     started = time_module.monotonic()
     manifest_text, host = await tdx_protocol.call(
         lambda client: tdx_protocol.decode_text(tdx_files.download(client, "tdxfin/gpcw.txt")),
@@ -366,13 +366,8 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
     previous = [tdx_fin_history.ManifestEntry(item["filename"], item["md5"], int(item["size"]))
                 for item in previous_payloads.values()]
     changes = tdx_fin_history.manifest_changes(previous, manifest)
-    changed_names = sorted(set(changes["added"]) | set(changes["changed"]))[-deps.max_gpcw_periods:]
+    changed_names = sorted(set(changes["added"]) | set(changes["changed"]), reverse=True)[:deps.max_gpcw_periods]
     entries = {entry.filename: entry for entry in manifest}
-    manifest_rows = [{"observation_symbol": entry.filename, "filename": entry.filename, "md5": entry.md5, "size": entry.size,
-                      "effective_at": datetime.combine(date.fromisoformat(entry.filename[4:12]), time(15, 0), CN_TZ).isoformat(),
-                      "available_at": now.isoformat()}
-                     for entry in manifest]
-    manifest_stored = await deps.collector.persist_observations("tdx_public", "tdx_gpcw_manifest", manifest_rows)
     tipinfo_payloads = await deps.observation_payloads("tdx_public", "tdx_tipinfo") if deps.observation_payloads else []
     tipinfo = [{**row, "first_disclosure_date": date.fromisoformat(str(row["first_disclosure_date"]))}
                for row in tipinfo_payloads]
@@ -380,6 +375,7 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
     downloaded = 0
     undated = 0
     rejected = 0
+    manifest_stored = 0
     for filename in changed_names:
         entry = entries[filename]
         rows, _period_host = await tdx_protocol.call(
@@ -401,8 +397,15 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
                                 "fields": named_fields, "field_units": {key: row["field_units"][key] for key in named_fields},
                                 "effective_at": effective.isoformat(), "available_at": available.isoformat(),
                                 "availability_basis": "tipinfo_first_disclosure" if "available_at" in row else "collection_time_undated"})
-        stored += await deps.collector.persist_observations("tdx_public", "tdx_gpcw", observations) if observations else 0
-        downloaded += 1
+        period_stored = await deps.collector.persist_observations("tdx_public", "tdx_gpcw", observations) if observations else 0
+        stored += period_stored
+        if period_stored:
+            manifest_stored += await deps.collector.persist_observations(
+                "tdx_public", "tdx_gpcw_manifest", [{"observation_symbol": entry.filename, "filename": entry.filename,
+                "md5": entry.md5, "size": entry.size,
+                "effective_at": datetime.combine(date.fromisoformat(entry.filename[4:12]), time(15, 0), CN_TZ).isoformat(),
+                "available_at": now.isoformat()}])
+            downloaded += 1
     await deps.collector.record_health("tdx_public", "tdx_gpcw", True, stored, round((time_module.monotonic() - started) * 1000), None)
     return {"manifest": len(manifest), "manifest_stored": manifest_stored, "changed": changed_names,
             "downloaded": downloaded, "rows_stored": stored, "undated": undated, "rejected": rejected, "host": host}

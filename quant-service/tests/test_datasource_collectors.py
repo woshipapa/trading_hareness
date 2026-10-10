@@ -460,6 +460,18 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored[0]["availability_basis"], "tipinfo_first_disclosure")
         self.assertEqual(stored[0]["fields"], {"基本每股收益": 1.2})
 
+    async def test_tdx_gpcw_failed_period_is_not_marked_in_manifest(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        deps.latest_observation_payloads = AsyncMock(return_value={})
+        deps.observation_payloads = AsyncMock(return_value=[])
+        manifest = "gpcw20260630.zip," + "a" * 32 + ",10"
+        with patch("app.datasources.collectors.post_close.tdx_protocol.call",
+                   AsyncMock(side_effect=[(manifest, "h:7709/login_one"), RuntimeError("download failed")])), \
+             self.assertRaises(RuntimeError):
+            await post_close.job_tdx_gpcw(deps, post_close.ArchiveState(), date(2026, 9, 18), EVENING)
+        self.assertFalse([item for item in recorder.observations if item[1] == "tdx_gpcw_manifest"])
+
     async def test_tdx_index_bars_backfill_once_then_request_five(self):
         recorder = Recorder()
         deps = self._deps(recorder)
