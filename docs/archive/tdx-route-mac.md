@@ -17,3 +17,23 @@ Batch quotes returned one row for each `000001.SZ` and `600519.SH`. For `000001.
 The unreliable single-symbol `0x122d` method was removed from the operational probe: its apparent price/close equals pre-close (`11.78`) instead of the real last (`11.59`). Batch `0x122b` is the supported quote path. MAC daily bars returned 5 requested rows for both symbols. Their last five closes matched legacy host `117.34.114.13:7709` for both `000001.SZ` (`11.30, 11.35, 11.57, 11.78, 11.59`) and `600519.SH` (`1243.88, 1235.58, 1258.62, 1255.79, 1263.00`).
 
 Remaining MAC probes on the same host reported auction 58 rows, tick charts 1200 ticks, K-line offset returned a one-byte empty response (0 parsed entries), market monitor 500 rows, and symbol-belong-board JSON 14 rows. The "capital-flow JSON 14 rows" first listed here were those belong-board rows: capital flow is a separate query (`0x1218` head=2, `Stock_ZJLX`) and its answer is described in `docs/archive/tdx-q-flow.md`. Both extended hosts `116.205.135.205:7727` and `121.37.232.167:7727` failed the MAC handshake. Go was unavailable, so gotdx row-for-row comparison was skipped.
+
+## Live check of the six adapters, 2026-10-10 13:04-13:08 UTC (Mac egress)
+
+Run by Claude against the MAC pool. 121.36.248.138:7709 answered every call. It was a Saturday, so the values are the 2026-10-09 session.
+
+- **Quotes and limits (0x122b).** Four symbols (600519.SH, 000001.SZ, 300750.SZ, 688981.SH) gave four quote rows and four limit rows; the strict decode, which rejects trailing bytes, held on both answers.
+  - 600519.SH: exchange_time 2026-10-09 15:30:02+08:00, from bits 0x13/0x14. Pre_close 1,255.79, close 1,263.00. Limits 1,381.37 / 1,130.21, which are pre_close x1.1 / x0.9, with trade_date 2026-10-09.
+  - 000001.SZ: close 11.59, limits 12.96 / 10.60.
+- **Unknown codes are left out, not answered with placeholders.** One request for 600000-600079.SH returned 57 rows:
+  - every row was a requested code, in request order, with no repeats;
+  - the 23 codes left out include 600001, 600002, 600003 and 600005, all delisted.
+
+  At 13:04 the positional R1 check raised on all three hosts. After 515545d4, the 81-symbol call (13:07) returned 58 rows with coverage 0.716 and named the 23 missing symbols.
+- **Board catalog.** 932 boards: type 0: 128, 1: 345, 3: 269, 4: 158, 5: 32. Members of 880710 (type 3): 13.
+- **Bars.** Daily and minute bars of 600519.SH: 5 rows each.
+
+Evidence:
+- `scripts/data/tdx_mac_adapters_live_2026-10-10_mac.json` (13:04);
+- `scripts/data/tdx_mac_adapters_live_2026-10-10_mac_after_omission_fix.json` (13:07);
+- `scripts/data/tdx_mac_batch_omission_2026-10-10_mac.json` (13:08).

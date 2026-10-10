@@ -1,0 +1,331 @@
+{
+ "egress": "mac",
+ "observed_at_utc": "2026-10-10T13:04:55.394274+00:00",
+ "hosts": [
+  [
+   "121.36.248.138",
+   7709
+  ],
+  [
+   "123.60.47.136",
+   7709
+  ],
+  [
+   "121.37.207.165",
+   7709
+  ]
+ ],
+ "records": [
+  {
+   "step": "watch_snapshot_4",
+   "ok": true,
+   "rows": 4,
+   "warnings": [
+    "tdx_host=121.36.248.138:7709"
+   ],
+   "sample": [
+    {
+     "symbol": "600519.SH",
+     "exchange_time": "2026-10-09T15:30:02+08:00",
+     "market": 1,
+     "name": "贵州茅台",
+     "total": 4,
+     "pre_close": 1255.7900390625,
+     "open": 1255.4200439453125,
+     "high": 1282.0,
+     "low": 1255.4200439453125,
+     "close": 1263.0,
+     "vol": 35110,
+     "vol_ratio": 1.1756433248519897,
+     "amount": 4453223424.0,
+     "total_shares": 125008.15625,
+     "float_shares": 125008.15625,
+     "eps": 35.56999969482422,
+     "net_assets": 200.99000549316406,
+     "security_type_price": 6.0,
+     "total_market_cap_ab": 1578853072896.0,
+     "pe_dynamic": 17.733196258544922,
+     "lot_size_info": 0,
+     "bit_0x16": 0,
+     "dividend_yield": -0.016621222719550133,
+     "last_volume": 386,
+     "turnover": 0.28086167573928833,
+     "stock_tag_flags": 7,
+     "decimal_point": 2,
+     "buy_price_limit": 1381.3699951171875,
+     "sell_price_limit": 1130.2099609375,
+     "price_decimal_info": 0,
+     "lot_size": 29,
+     "pre_iopv": 1250081664.0,
+     "speed_pct": -0.016621222719550133,
+     "flag_kcb": 0,
+     "pe_ttm": 19.179443359375,
+     "pe_static": 19.388134002685547,
+     "main_net_amount": 214378112.0
+    },
+    {
+     "symbol": "000001.SZ",
+     "exchange_time": "2026-10-09T15:33:18+08:00",
+     "market": 0,
+     "name": "平安银行",
+     "total": 4,
+     "pre_close": 11.779999732971191,
+     "open": 11.779999732971191,
+     "high": 11.890000343322754,
+     "low": 11.579999923706055,
+     "close": 11.59000015258789,
+     "vol": 1078105,
+     "vol_ratio": 1.0830473899841309,
+     "amount": 1259717120.0,
+     "total_shares": 1940591.875,
+     "float_shares": 1940568.5,
+     "eps": 1.2400000095367432,
+     "net_assets": 24.1299991607666,
+     "security_type_price": 6.0,
+     "total_market_cap_ab": 224914604032.0,
+     "pe_dynamic": 4.37645149230957,
+     "lot_size_info": 0,
+     "bit_0x16": 0,
+     "dividend_yield": -0.08620887249708176,
+     "last_volume": 11213,
+     "turnover": 0.5555614233016968,
+     "stock_tag_flags": 11,
+     "decimal_point": 2,
+     "buy_price_limit": 12.960000038146973,
+     "sell_price_limit": 10.600000381469727,
+     "price_decimal_info": 0,
+     "lot_size": 18,
+     "pre_iopv": 5.610000133514404,
+     "speed_pct": -0.08620887249708176,
+     "flag_kcb": 0,
+     "pe_ttm": 5.275598526000977,
+     "pe_static": 5.175328254699707,
+     "main_net_amount": -36053088.0
+    },
+    {
+     "symbol": "300750.SZ",
+     "exchange_time": "2026-10-09T15:33:18+08:00",
+     "market": 0,
+     "name": "宁德时代",
+     "total": 4,
+     "pre_close": 286.75,
+     "open": 292.0,
+     "high": 301.4200134277344,
+     "low": 289.0,
+     "close": 297.75,
+     "vol": 541526,
+     "vol_ratio": 1.7117340564727783,
+     "amount": 16028123136.0,
+     "total_shares": 462724.96875,
+     "float_shares": 426061.71875,
+     "eps": 9.510000228881836,
+     "net_assets": 81.99299621582031,
+     "security_type_price": 6.0,
+     "total_market_cap_ab": 1377763590144.0,
+     "pe_dynamic": 15.915390968322754,
+     "lot_size_info": 0,
+     "bit_0x16": 0,
+     "dividend_yield": -0.03692518547177315,
+     "last_volume": 4575,
+     "turnover": 1.2710036039352417,
+     "stock_tag_flags": 11,
+     "decimal_point": 2,
+     "buy_price_limit": 344.1000061035156,
+     "sell_price_limit": 229.39999389648438,
+     "price_decimal_info": 0,
+     "lot_size": 20,
+     "pre_iopv": 18.81999969482422,
+     "speed_pct": -0.03692518547177315,
+     "flag_kcb": 0,
+     "pe_ttm": 19.082258224487305,
+     "pe_static": 16.208955764770508,
+     "main_net_amount": 2263170560.0
+    }
+   ],
+   "started_utc": "2026-10-10T13:04:53.891372+00:00"
+  },
+  {
+   "step": "limit_prices_4",
+   "ok": true,
+   "rows": 4,
+   "warnings": [
+    "tdx_host=121.36.248.138:7709"
+   ],
+   "sample": [
+    {
+     "symbol": "600519.SH",
+     "trade_date": "2026-10-09",
+     "limit_up": 1381.3699951171875,
+     "limit_down": 1130.2099609375
+    },
+    {
+     "symbol": "000001.SZ",
+     "trade_date": "2026-10-09",
+     "limit_up": 12.960000038146973,
+     "limit_down": 10.600000381469727
+    },
+    {
+     "symbol": "300750.SZ",
+     "trade_date": "2026-10-09",
+     "limit_up": 344.1000061035156,
+     "limit_down": 229.39999389648438
+    }
+   ],
+   "started_utc": "2026-10-10T13:04:53.976956+00:00"
+  },
+  {
+   "step": "watch_snapshot_81",
+   "ok": false,
+   "error": "TdxMacError: no MAC host answered: 121.36.248.138:TdxMacError: quote answer has 57 rows for 80 requested symbols, 123.60.47.136:TdxMacError: quote answer has 57 rows for 80 requested symbols, 121.37.207.165:TdxMacError: quote answer has 57 rows for 80 requested symbols",
+   "started_utc": "2026-10-10T13:04:54.069889+00:00",
+   "code_mismatch_logged": 0
+  },
+  {
+   "step": "board_catalog",
+   "ok": true,
+   "rows": 932,
+   "warnings": [
+    "tdx_host=121.36.248.138:7709"
+   ],
+   "sample": [
+    {
+     "board_code": "881376",
+     "name": "数字媒体",
+     "board_type": 0
+    },
+    {
+     "board_code": "881373",
+     "name": "影视院线",
+     "board_type": 0
+    },
+    {
+     "board_code": "881106",
+     "name": "种植业",
+     "board_type": 0
+    }
+   ],
+   "started_utc": "2026-10-10T13:04:54.391489+00:00",
+   "by_type": {
+    "0": 128,
+    "1": 345,
+    "3": 269,
+    "4": 158,
+    "5": 32
+   }
+  },
+  {
+   "step": "membership_880710_type3",
+   "ok": true,
+   "rows": 13,
+   "warnings": [
+    "tdx_host=121.36.248.138:7709"
+   ],
+   "sample": [
+    {
+     "taxonomy_key": "tdx_mac_type_3",
+     "sector_key": "880710",
+     "symbol": "920087.BJ",
+     "known_at": "2026-10-10T13:04:55.259612+00:00"
+    },
+    {
+     "taxonomy_key": "tdx_mac_type_3",
+     "sector_key": "880710",
+     "symbol": "300189.SZ",
+     "known_at": "2026-10-10T13:04:55.259612+00:00"
+    },
+    {
+     "taxonomy_key": "tdx_mac_type_3",
+     "sector_key": "880710",
+     "symbol": "600354.SH",
+     "known_at": "2026-10-10T13:04:55.259612+00:00"
+    }
+   ],
+   "started_utc": "2026-10-10T13:04:55.193221+00:00"
+  },
+  {
+   "step": "daily_bars_600519_5",
+   "ok": true,
+   "rows": 5,
+   "warnings": [
+    "tdx_host=121.36.248.138:7709"
+   ],
+   "sample": [
+    {
+     "symbol": "600519.SH",
+     "date": "2026-09-28",
+     "seconds": 0,
+     "open": 1236.0,
+     "high": 1244.010009765625,
+     "low": 1228.0999755859375,
+     "close": 1243.8800048828125,
+     "amount": 3488720640.0,
+     "volume": 2821830.0
+    },
+    {
+     "symbol": "600519.SH",
+     "date": "2026-09-29",
+     "seconds": 0,
+     "open": 1244.5999755859375,
+     "high": 1245.8699951171875,
+     "low": 1230.8800048828125,
+     "close": 1235.5799560546875,
+     "amount": 3260057856.0,
+     "volume": 2636630.0
+    },
+    {
+     "symbol": "600519.SH",
+     "date": "2026-09-30",
+     "seconds": 0,
+     "open": 1239.530029296875,
+     "high": 1268.0,
+     "low": 1236.050048828125,
+     "close": 1258.6199951171875,
+     "amount": 4797246464.0,
+     "volume": 3833098.0
+    }
+   ],
+   "started_utc": "2026-10-10T13:04:55.259988+00:00"
+  },
+  {
+   "step": "minute_bars_600519_5",
+   "ok": true,
+   "rows": 5,
+   "warnings": [
+    "tdx_host=121.36.248.138:7709"
+   ],
+   "sample": [
+    {
+     "symbol": "600519.SH",
+     "bar_time": "2026-10-09T14:56:00+08:00",
+     "open": 1263.31005859375,
+     "high": 1263.52001953125,
+     "low": 1263.030029296875,
+     "close": 1263.52001953125,
+     "amount": 13453949.0,
+     "volume": 10600.0
+    },
+    {
+     "symbol": "600519.SH",
+     "bar_time": "2026-10-09T14:57:00+08:00",
+     "open": 1263.3199462890625,
+     "high": 1263.469970703125,
+     "low": 1263.050048828125,
+     "close": 1263.449951171875,
+     "amount": 25454228.0,
+     "volume": 20200.0
+    },
+    {
+     "symbol": "600519.SH",
+     "bar_time": "2026-10-09T14:58:00+08:00",
+     "open": 1263.449951171875,
+     "high": 1263.449951171875,
+     "low": 1263.449951171875,
+     "close": 1263.449951171875,
+     "amount": 0.0,
+     "volume": 0.0
+    }
+   ],
+   "started_utc": "2026-10-10T13:04:55.325029+00:00"
+  }
+ ]
+}
