@@ -202,5 +202,28 @@ class SpecValidationTests(unittest.TestCase):
         self.assertIn('"field_map"', out.getvalue())
 
 
+class ReferenceAdapterTests(unittest.TestCase):
+    def test_a_reference_adapter_must_name_a_top_level_function_of_an_app_module(self):
+        from app.datasources.completeness import reference_adapter_problems
+        from app.datasources.contracts import Binding, BindingSpec, UNSUPPORTED
+
+        def problems(adapter):
+            agreement = {"close": {"reference": "tencent_free", "reference_adapter": adapter, "key": ["symbol"]}}
+            return reference_adapter_problems([Binding("tdx_mac", "bars.minute", 70, UNSUPPORTED, spec=BindingSpec(agreement=agreement))])
+
+        self.assertEqual(problems("app/free_market_providers.py:tencent_intraday_minutes"), [])
+        for adapter in ("app/free_market_providers.py:no_such_reader", "app/no_such_module.py:read", "os:system",
+                        "app/../app/free_market_providers.py:tencent_intraday_minutes", "app/free_market_providers.py"):
+            self.assertEqual(len(problems(adapter)), 1, adapter)
+            self.assertIn(f"reference_adapter {adapter!r} names no function", problems(adapter)[0])
+        self.assertEqual(reference_adapter_problems([Binding("tdx_mac", "bars.minute", 70, UNSUPPORTED)]), [], "no spec, no entries")
+
+    def test_the_catalog_has_none_of_those_problems(self):
+        from app.datasources.catalog import BINDINGS
+        from app.datasources.completeness import reference_adapter_problems
+
+        self.assertEqual(reference_adapter_problems(BINDINGS), [])
+
+
 if __name__ == "__main__":
     unittest.main()

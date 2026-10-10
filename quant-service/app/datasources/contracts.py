@@ -25,6 +25,8 @@ UNSUPPORTED: Final = "unsupported"       # the upstream refuses it (kept to re-p
 RETIRED: Final = "retired"               # deliberately taken out of resolution
 BINDING_STATES: Final = (LIVE_VERIFIED, DECLARED, DORMANT, UNSUPPORTED, RETIRED)
 RESOLVABLE_STATES: Final = frozenset({LIVE_VERIFIED, DECLARED, DORMANT})
+#: A function an adapter string names: ``app/<module path>.py:<function>``.
+ADAPTER_PATTERN: Final = r"app/[\w/]+\.py:\w+"
 PURPOSES: Final = ("research", "replay", "shadow")
 QUALITY_STATUSES: Final = ("complete", "partial", "empty", "stale", "invalid", "conflicted")
 
@@ -71,6 +73,30 @@ class BindingSpec:
     limits: Mapping[str, Any] = field(default_factory=dict)
     time_semantics: str = ""
     handshake_profile: str | None = None
+    #: What this binding must agree with before it is promoted, per canonical field (the names ``field_map``
+    #: produces, after ``unit_factors``), e.g.
+    #: ``{"close": {"reference": "tencent_free", "key": ["symbol", "bar_time"], "rel_tol": 0.0001}}``.
+    #: ``reference`` is the source whose binding of the same capability is asked with the same parameters; when that
+    #: binding's catalog adapter is only a module, ``reference_adapter`` (``app/<module path>.py:<function>``) names
+    #: the function that is read instead, ``reference_params`` ({the function's keyword: the name of a parameter of
+    #: this binding}; every parameter under its own name when absent) says what it is given from the check's
+    #: parameters and ``reference_fixed`` ({keyword: value}) adds what is constant.
+    #: ``key`` names the fields that identify a row (``symbol`` and ``trade_date`` besides the capability's own
+    #: fields).  ``scripts/tdx-promote.py check`` reads every row of both sides, joins them on the key and compares the
+    #: field on every common row: it agrees when each is within ``rel_tol`` / ``abs_tol`` (the ``math.isclose``
+    #: tolerances; one that is missing counts as 0) and the common rows are at least ``min_coverage`` (default 0.95)
+    #: of this binding's rows.  An empty mapping means the binding is promoted without a cross-source comparison.
+    agreement: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+
+def reference_keywords(entry: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    """The keywords an agreement entry's reference reader is called with, given the parameters of the check.
+
+    Those ``reference_params`` renames (all the parameters under their own names when it is absent), and the
+    constants ``reference_fixed`` adds."""
+    named = entry.get("reference_params")
+    asked = dict(params) if named is None else {keyword: params[name] for keyword, name in named.items()}
+    return {**asked, **entry.get("reference_fixed", {})}
 
 
 @dataclass(frozen=True)
@@ -244,8 +270,8 @@ class StrategyDataNeeds:
 
 
 __all__ = [
-    "BINDING_STATES", "Binding", "BindingSpec", "CATEGORIES", "CanonicalSchema", "Capability", "CapabilityEvidence", "CapabilityRequest",
+    "ADAPTER_PATTERN", "BINDING_STATES", "Binding", "BindingSpec", "CATEGORIES", "CanonicalSchema", "Capability", "CapabilityEvidence", "CapabilityRequest",
     "CapabilityRequirement", "DECLARED", "DORMANT", "DataSource", "GRAINS", "LICENSES", "LIVE_VERIFIED",
     "PURPOSES", "QUALITY_STATUSES", "QualityReceipt", "RESOLVABLE_STATES", "RETIRED", "SCOPES", "SourceLabel",
-    "StrategyDataNeeds", "FieldSpec", "Taxonomy", "UNSUPPORTED",
+    "StrategyDataNeeds", "FieldSpec", "Taxonomy", "UNSUPPORTED", "reference_keywords",
 ]

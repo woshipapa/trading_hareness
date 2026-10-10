@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (54)
+## research data (61)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -124,6 +124,7 @@
 | `backfill-full-market-daily.sh` | quant-research | workstation | Deepen the all-A daily history the post-close screens need. |
 | `check-provider-health.py` | quant-research | workstation | Opt-in bounded provider smoke checks using the deployed app adapters. |
 | `fill-longhu-sector-membership.py` | quant-research | quant container | Refresh the sector map from Longhu, inside the quant-service container. |
+| `generate-tdx-bj-codes.py` | quant-research | workstation | Generate the old-to-new BJ stock code table of the TDX server from its addedcode_bj.cfg. |
 | `generate-tdx-hosts.py` | quant-research | workstation | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `import-adjusted-research-bars.py` | quant-research | workstation | Import the latest stock-brain qfq research panel into PostgreSQL. |
 | `import-stock-brain-database.py` | quant-research | workstation | Snapshot and migrate durable stock-brain SQLite data into PostgreSQL. |
@@ -147,20 +148,26 @@
 | `marketdata/upload_to_pan.py` | quant-research | workstation (some on the edge) | Push warm-tier parquet into the Baidu Pan cold tier and record it in the catalog. |
 | `marketdata/verify_cold_read.py` | quant-research | workstation (some on the edge) | Prove a cold-tier parquet answers the same query as the local copy. |
 | `probe-public-sources.py` | quant-research | workstation | Data-free live check of every token-free public evidence source. |
+| `probe-tdx-cadence.py` | quant-research | workstation | Probe TDX request rates: failure rate, latency and data change per host at fixed requests per second. |
+| `probe-tdx-disclosure-timing.py` | quant-research | workstation | Log when tipinfo.dat rows appear in zhb.zip during a day and look up the cninfo announcement time of each. |
+| `probe-tdx-ext-delay.py` | quant-research | workstation | Measure how far TDX extended-market hosts run behind Tencent, one reading per second. |
 | `probe-tdx-q-breadth.py` | quant-research | workstation | Probe TDX breadth, MAC dead commands, offset info and chart sampling. |
 | `probe-tdx-q-disclosure.py` | quant-research | workstation | Probe TDX disclosure and IPO fields against public Eastmoney rows. |
 | `probe-tdx-q-extcodes.py` | quant-research | workstation | Probe TDX extended market (7727) codes, metadata, quotes and bars. |
 | `probe-tdx-q-flow.py` | quant-research | workstation | Probe TDX stock capital-flow fields against ticks and public references. |
 | `probe-tdx-q-limitfields.py` | quant-research | workstation | Read-only MAC dynamic-field probe for the Q-LIMIT research record. |
+| `probe-tdx-q-stats.py` | quant-research | workstation | Recompute the headline hit-rates of the tdxstat.cfg and tdxstat2.cfg column dictionary. |
 | `probe-tdx-q-units.py` | quant-research | workstation | Read-only live evidence probe for TDX volume, amount and time units. |
 | `probe-tdx-routes.py` | quant-research | workstation | Probe TDX routes; output a versioned, fail-closed route matrix. |
 | `refresh-tdx-hosts.sh` | quant-research | workstation | Run the owner TDX probe, regenerate the local host pool, and print its diff. |
 | `refresh-watchlist-from-proposals.py` | quant-research | workstation | Post-close watchlist refresh: admit today's proposals, retire the inactive. |
 | `run-post-close-pipeline.sh` | quant-research | workstation | Post-close daily pipeline runner. |
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
-| `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe from the owner egress over ssh stdin; it writes nothing on the owner. |
+| `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe inside the owner quant-research container, over ssh; it writes nothing on the owner. |
+| `tdx-promote.py` | quant-research | workstation | Promote a TDX binding on recorded evidence: check observes it, apply moves its status one step. |
 | `tdx-quant-export.py` | quant-research | owner-windows | Export read-only TdxQuant market data to the offline CSV contracts. |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
+| `tdx_probe_failures.py` | quant-research | workstation | Failure bookkeeping of the long TDX probes: an error is written into the run where it happened. |
 | `verify-tdx-ex-market.py` | quant-research | workstation | Probe up to six pooled extended-market hosts and map one usable ExHq service. |
 | `verify-tdx-f10-finance.py` | quant-research | workstation | Read-only TDX F10/finance probe (never sends trading commands). |
 | `verify-tdx-files.py` | quant-research | workstation | Probe TDX board/report files once per host and print JSON evidence. |
@@ -173,13 +180,15 @@
 | `verify-tdx-protocol.py` | quant-research | workstation | Check ``app.datasources.sources.tdx_protocol`` against pytdx on a live host. |
 | `verify-tdx-zhb-extras.py` | quant-research | workstation | Inventory and verify every member in a downloaded TDX ``zhb.zip``. |
 
-## CI and checks (15)
+## CI and checks (17)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
 | `export_component.py` | platform | workstation and CI | Export one logical component as a secret-free standalone project archive. |
 | `generate-api-types.mjs` | platform | workstation and CI |  |
 | `generate_architecture_index.py` | platform | workstation and CI | Generate a small, deterministic map for humans and maintenance agents. |
+| `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
+| `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
 | `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
 | `generate_service_index.py` | platform | workstation and CI | Generate docs/services.html: one clickable index of every local service port. |
 | `generate_workflows_catalog.py` | platform | workstation and CI | Generate workflows/CATALOG.md: every n8n workflow, where it runs, how it ships. |

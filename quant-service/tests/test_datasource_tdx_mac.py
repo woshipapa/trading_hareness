@@ -14,7 +14,7 @@ from unittest import mock
 
 from app.datasources.catalog import BINDINGS, CAPABILITIES, TAXONOMIES
 from app.datasources import resolver as resolver_module
-from app.datasources.contracts import DECLARED, CapabilityEvidence, CapabilityRequest
+from app.datasources.contracts import DECLARED, LIVE_VERIFIED, UNSUPPORTED, CapabilityEvidence, CapabilityRequest
 from app.datasources.resolver import _normalise_rows
 from app.datasources.sources import tdx_mac, tdx_mac_fields
 from app.datasources.sources.tdx_mac_fields import active_fields, bitmap_for_bits
@@ -450,6 +450,21 @@ class MacWatchSnapshotTests(unittest.TestCase):
                     with self.assertRaises(ValueError, msg=f"{adapter.__name__} {symbol}"):
                         asyncio.run(adapter(**params))
 
+    def test_an_old_bj_code_is_requested_as_its_920_code_and_its_row_keeps_the_requested_symbol(self):
+        for adapter in (tdx_mac.fetch_watch_snapshot, tdx_mac.fetch_limit_prices):
+            client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+            with patched_call(client):
+                evidence = asyncio.run(adapter(symbols=["430017.BJ", "600519.SH"]))
+            self.assertEqual(requested_stocks(client.requests[0]), [(2, "920017"), (1, "600519")], adapter.__name__)
+            self.assertEqual([(row["symbol"], row.get("source_symbol")) for row in evidence.rows],
+                             [("920017.BJ", "430017.BJ"), ("600519.SH", None)], adapter.__name__)
+            self.assertEqual(evidence.coverage, 1.0)
+
+    def test_an_old_bj_code_the_server_leaves_out_is_named_as_it_was_requested(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: [])})
+        evidence = self.fetch(client, ["430017.BJ"])
+        self.assertIn("missing_symbols=1: 430017.BJ", evidence.warnings)
+
     def test_an_answer_that_leaves_out_a_quote_field_raises(self):
         def answer(request):
             bitmap = bytearray(request[12:32])
@@ -539,8 +554,66 @@ class MacLimitPriceTests(unittest.TestCase):
         self.assertLessEqual(schema_fields("limits.prices"), set(row))
 
 
+class MacIopvTests(unittest.TestCase):
+    def fetch(self, client, symbols):
+        with patched_call(client):
+            return asyncio.run(tdx_mac.fetch_iopv(symbols=symbols))
+
+    def test_the_iopv_bitmap_is_the_quote_time_and_the_two_iopv_bits(self):
+        self.assertEqual(tdx_mac.IOPV_BITMAP, bitmap_for_bits([0x13, 0x14, 0x27]))
+
+    def test_rows_carry_the_symbol_the_iopv_and_an_aware_exchange_time_and_ask_only_for_those_bits(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "iopv": 4.40625})})
+        evidence = self.fetch(client, ["510300.SH", "159915.SZ"])
+        stamp = datetime(2026, 10, 9, 14, 58, 57, tzinfo=tdx_mac.CN_TZ)
+        self.assertEqual([(row["symbol"], row["iopv"], row["exchange_time"]) for row in evidence.rows],
+                         [("510300.SH", 4.40625, stamp), ("159915.SZ", 4.40625, stamp)])
+        self.assertTrue(all("pre_iopv" not in row for row in evidence.rows))
+        self.assertEqual(client.requests[0][12:32], tdx_mac.IOPV_BITMAP)
+
+    def test_every_fund_type_is_served_and_any_other_type_is_refused_before_the_network(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+        evidence = self.fetch(client, ["510300.SH", "161121.SZ", "500001.SH"])  # an ETF, a LOF and a fund
+        self.assertEqual([row["symbol"] for row in evidence.rows], ["510300.SH", "161121.SZ", "500001.SH"])
+        with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+            for symbol in ("600519.SH", "000001.SZ", "300750.SZ", "430017.BJ", "999999.SH", "880005.SH", "127045.SZ"):
+                with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, "takes only etf, fund, lof"):
+                    asyncio.run(tdx_mac.fetch_iopv(symbols=["510300.SH", symbol]))
+
+    def test_81_symbols_make_two_requests(self):
+        symbols = [f"{number:06d}.SZ" for number in range(159001, 159082)]
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+        evidence = self.fetch(client, symbols)
+        self.assertEqual([len(requested_stocks(request)) for request in client.requests], [80, 1])
+        self.assertEqual([row["symbol"] for row in evidence.rows], symbols)
+
+    def test_an_answer_that_leaves_out_the_iopv_raises(self):
+        def answer(request):
+            bitmap = bytearray(request[12:32])
+            bitmap[4] &= ~0x80  # bit 0x27, iopv
+            return dynamic_body(bytes(bitmap), [(1, "510300", "n", quote_values())])
+
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: answer})
+        with self.assertRaisesRegex(tdx_mac.TdxMacError, "510300 lacks iopv"):
+            self.fetch(client, ["510300.SH"])
+
+    def test_a_fixture_row_through_the_real_binding_yields_fund_code_the_iopv_and_exchange_time(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "iopv": 4.40625})})
+        projected = _normalise_rows(self.fetch(client, ["510300.SH"]).rows, mac_binding("fund.iopv"))
+        self.assertTrue(projected.canonical)
+        self.assertEqual((projected.status, projected.warnings), (None, ()))
+        row = projected.rows[0]
+        self.assertEqual((row["fund_code"], row["iopv"]), ("510300.SH", 4.40625))
+        self.assertLessEqual(schema_fields("fund.iopv"), set(row))
+
+    def test_the_required_iopv_fields_are_the_ones_the_binding_maps(self):
+        mapped = set(mac_binding("fund.iopv").spec.field_map)
+        self.assertEqual(set(tdx_mac.IOPV_FIELDS), mapped - {"symbol", "exchange_time"})
+
+
 class MacBindingSpecTests(unittest.TestCase):
     ADAPTERS = {"quote.watch_snapshot": tdx_mac.fetch_watch_snapshot, "limits.prices": tdx_mac.fetch_limit_prices,
+                "fund.iopv": tdx_mac.fetch_iopv,
                 "sector.board_catalog": tdx_mac.fetch_board_catalog, "sector.membership": tdx_mac.fetch_membership,
                 "bars.daily": tdx_mac.fetch_daily_bars, "bars.minute": tdx_mac.fetch_minute_bars}
 
@@ -552,15 +625,16 @@ class MacBindingSpecTests(unittest.TestCase):
             self.assertEqual(set(parameters), set(binding.spec.params), capability)
             self.assertTrue(all(item.kind is inspect.Parameter.KEYWORD_ONLY for item in parameters.values()), capability)
 
-    def test_all_six_bindings_stay_unsupported_research_evidence(self):
+    def test_all_mac_bindings_are_specified_and_never_decision_eligible(self):
         self.assertEqual({item.capability for item in BINDINGS if item.source == "tdx_mac"}, set(self.ADAPTERS))
         for capability in self.ADAPTERS:
             binding = mac_binding(capability)
-            self.assertEqual((binding.status, binding.decision_eligible), ("unsupported", False), capability)
+            self.assertIn(binding.status, {UNSUPPORTED, DECLARED, LIVE_VERIFIED}, capability)
+            self.assertFalse(binding.decision_eligible, capability)
             self.assertEqual(binding.spec.handshake_profile, "mac", capability)
 
     def test_batch_bindings_use_the_clients_batch_size(self):
-        for capability in ("quote.watch_snapshot", "limits.prices"):
+        for capability in ("quote.watch_snapshot", "limits.prices", "fund.iopv"):
             self.assertEqual(mac_binding(capability).spec.max_batch, tdx_mac.MAX_BATCH)
 
 
@@ -578,6 +652,7 @@ class MacResolverTests(unittest.TestCase):
     CASES = {
         "quote.watch_snapshot": (tdx_mac.fetch_watch_snapshot, {"symbols": ["000001.SZ"]}, ()),
         "limits.prices": (tdx_mac.fetch_limit_prices, {"symbols": ["000001.SZ"]}, ()),
+        "fund.iopv": (tdx_mac.fetch_iopv, {"symbols": ["510300.SH"]}, ()),
         "sector.board_catalog": (tdx_mac.fetch_board_catalog, {}, ()),
         "sector.membership": (tdx_mac.fetch_membership, {"sector_key": "880710", "board_type": 3}, ()),
         "bars.daily": (tdx_mac.fetch_daily_bars, {"symbol": "000001.SZ", "count": 3}, ("pre_close",)),
@@ -626,6 +701,13 @@ class MacBarAdapterTests(unittest.TestCase):
         self.assertEqual([(struct.unpack_from("<H", request, 36)[0], struct.unpack_from("<H", request, 44)[0])
                           for request in requests], [(tdx_mac.BAR_PERIODS["1m"], 4)])
 
+    def test_an_old_bj_code_is_requested_as_its_920_code_and_the_rows_carry_the_new_symbol(self):
+        for adapter in (tdx_mac.fetch_daily_bars, tdx_mac.fetch_minute_bars):
+            evidence, requests = self.fetch(adapter, symbol="430017.BJ", count=3)
+            self.assertEqual({row["symbol"] for row in evidence.rows}, {"920017.BJ"}, adapter.__name__)
+            self.assertEqual((struct.unpack_from("<H", requests[0], 12)[0], requests[0][14:36].rstrip(b"\0")),
+                             (2, b"920017"), adapter.__name__)
+
     def test_a_bar_time_beyond_the_day_raises(self):
         with self.assertRaisesRegex(tdx_mac.TdxMacError, "invalid MAC time 24:00:00"):
             self.fetch(tdx_mac.fetch_minute_bars, bars=[(20261009, 86400, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)],
@@ -662,12 +744,11 @@ class MacBarAdapterTests(unittest.TestCase):
         for row in projected.rows:
             self.assertLessEqual(schema_fields("bars.minute"), set(row))
 
-    def test_the_minute_binding_says_why_it_stays_unsupported(self):
+    def test_the_minute_binding_documents_its_receive_time_availability(self):
         binding = mac_binding("bars.minute")
-        self.assertEqual(binding.status, "unsupported")
+        self.assertIn(binding.status, {UNSUPPORTED, DECLARED, LIVE_VERIFIED})
         self.assertFalse(binding.decision_eligible)
         self.assertIn("source_available_at", binding.notes)
-        self.assertIn("UNSUPPORTED", binding.notes)
         self.assertEqual(binding.spec.time_semantics,
                          "effective=bar_time (wire date + seconds, Asia/Shanghai); available=response receive time (CapabilityEvidence available_at_min/max), never the local ingest time")
 
@@ -684,6 +765,7 @@ class MacEvidenceTests(unittest.TestCase):
         async def run_all():
             return [await tdx_mac.fetch_watch_snapshot(symbols=["000001.SZ"]),
                     await tdx_mac.fetch_limit_prices(symbols=["000001.SZ"]),
+                    await tdx_mac.fetch_iopv(symbols=["510300.SH"]),
                     await tdx_mac.fetch_board_catalog(),
                     await tdx_mac.fetch_membership(sector_key="880710", board_type=3),
                     await tdx_mac.fetch_daily_bars(symbol="000001.SZ", count=3),

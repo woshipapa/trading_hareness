@@ -261,7 +261,7 @@ _BASIC = {
         (),
     ),
     35: ("lot_size", "uint32", "shares", "lot_size", "medium", NO_REFERENCE, ()),
-    36: ("pre_iopv", "float32", "yuan", "pre_iopv", "medium", MATCH, ("fund.nav",)),
+    36: ("pre_iopv", "float32", "yuan", "pre_iopv", "low", NO_REFERENCE, ()),
     37: ("speed_pct", "float32", "percent", "speed_pct", "medium", NO_REFERENCE, ()),
     38: (
         "avg_price",
@@ -272,7 +272,7 @@ _BASIC = {
         MATCH,
         ("quote.watch_snapshot",),
     ),
-    39: ("iopv", "float32", "yuan", "iopv", "medium", MATCH, ("fund.nav",)),
+    39: ("iopv", "float32", "yuan", "iopv", "medium", MATCH, ("fund.iopv",)),
     40: ("pe_ttm_vol_related", "float32", "ratio", None, "low", NO_REFERENCE, ()),
     41: ("ex_price_placeholder", "float32", "yuan", None, "low", NO_REFERENCE, ()),
     42: (

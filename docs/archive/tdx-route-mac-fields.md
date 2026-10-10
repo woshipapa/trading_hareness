@@ -32,9 +32,9 @@ to no capability.
 | 1b | turnover | float32 / percent | MATCH when float shares are trusted | `quote.watch_snapshot` |
 | 1d | bit_0x1d | float32 | UNKNOWN (delta-3 Q5) | |
 | 20-21 | buy_price_limit, sell_price_limit | float32 / yuan | MATCH (pre-close and board ratio) | `limits.ladder`, `limits.stock_anomaly_reason`, `limits.prices` |
-| 24 | pre_iopv | float32 / yuan | MATCH on ETF 510300 | `fund.nav` |
+| 24 | pre_iopv | float32 / yuan | NO_REFERENCE (after the 2026-10-09 close: 510300 0.0, 159915 305.58; scripts/data/tdx_mac_iopv_2026-10-10_mac.json) | |
 | 25-26 | speed_pct, avg_price | float32 | NO_REFERENCE / MATCH (amount/vol) | `quote.watch_snapshot` |
-| 27 | iopv | float32 / yuan | MATCH on ETF 510300 | `fund.nav` |
+| 27 | iopv | float32 / yuan | MATCH on ETF 510300 | `fund.iopv` |
 | 38 | main_net_amount | float32 / yuan | NO_REFERENCE (provider-defined main_in - main_out, yuan; delta-3 Q4) | `flow.stock_daily` |
 | 3c | ytd_pct | float32 / percent | MATCH against bar closes where window exists | `quote.watch_snapshot` |
 | 40-41 | mtd_pct, change_1y_pct | float32 / percent | MATCH against bar closes where window exists | `quote.watch_snapshot` |

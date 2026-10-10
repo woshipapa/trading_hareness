@@ -155,7 +155,7 @@ def parse_spblock(data: bytes) -> list[dict[str, Any]]:
 
 
 def parse_tdxstat(data: bytes) -> list[dict[str, Any]]:
-    """Parse ``tdxstat.cfg`` with documented fields plus all raw columns."""
+    """Parse ``tdxstat.cfg`` using docs/archive/tdx-q-stats.md and scripts/data/tdx_stat_columns_vs_mac_2026-10-10_mac.json."""
     rows = []
     for line in tdx_protocol.decode_text(data).splitlines():
         if not line or line.startswith("#"):
@@ -165,8 +165,11 @@ def parse_tdxstat(data: bytes) -> list[dict[str, Any]]:
             continue
         rows.append({
             "market": _int(fields, 0), "code": fields[1], "date": _field(fields, 4),
-            "pe_ttm": _float(fields, 3), "trend_days": _int(fields, 5), "change_pct": _float(fields, 6),
-            "pe_static": _float(fields, 9), "dividend_yield_pct": _float(fields, 10),
+            "pe_static": _float(fields, 3), "streak": _int(fields, 5), "change_pct": _float(fields, 6),
+            "change_prev_day_pct": _float(fields, 7), "change_prev2_day_pct": _float(fields, 8),
+            "pe_ttm": _float(fields, 9), "dividend_yield_pct": _float(fields, 10),
+            "circulating_capital_z_raw": _float(fields, 11), "annual_limit_up_days": _int(fields, 26),
+            "change_4d_pct": _float(fields, 27),
             "change_5d_pct": _float(fields, 28), "change_10d_pct": _float(fields, 30),
             "change_20d_pct": _float(fields, 18), "change_60d_pct": _float(fields, 20),
             "change_ytd_pct": _float(fields, 21), "fields": fields,
@@ -175,7 +178,7 @@ def parse_tdxstat(data: bytes) -> list[dict[str, Any]]:
 
 
 def parse_tdxstat2(data: bytes) -> list[dict[str, Any]]:
-    """Parse ``tdxstat2.cfg``; preserve unverified capital-flow columns raw."""
+    """Parse ``tdxstat2.cfg`` using docs/archive/tdx-q-stats.md and scripts/data/tdx_stat_columns_vs_mac_2026-10-10_mac.json."""
     rows = []
     for line in tdx_protocol.decode_text(data).splitlines():
         if not line or line.startswith("#"):
@@ -186,7 +189,8 @@ def parse_tdxstat2(data: bytes) -> list[dict[str, Any]]:
         rows.append({
             "market": _int(fields, 0), "code": fields[1], "date": _field(fields, 2),
             "amount_10k_yuan": _float(fields, 3), "amount_prev_10k_yuan": _float(fields, 5),
-            "block_index": _field(fields, 13), "ipo_price_yuan": _float(fields, 16),
+            "amount_prev2_10k_yuan": _float(fields, 7), "change_mtd_pct": _float(fields, 11),
+            "change_1y_pct": _float(fields, 12), "auction_amount_10k_yuan": _float(fields, 14),
             "high_52w_yuan": _float(fields, 17), "low_52w_yuan": _float(fields, 18),
             "fields": fields,
         })
@@ -261,8 +265,12 @@ def _download_report(client: tdx_protocol.TdxClient, filename: str) -> bytes:
 def download(client: tdx_protocol.TdxClient, filename: str) -> bytes:
     """Download one file; block/config files use the size-query path."""
     if filename in BLOCK_FILES:
-        return _download_block(client, filename, file_size(client, filename))
-    return _download_report(client, filename)
+        content = _download_block(client, filename, file_size(client, filename))
+    else:
+        content = _download_report(client, filename)
+    if not content:
+        raise TdxFileError(f"TDX file is empty or not served: {filename}")
+    return content
 
 
 __all__ = [

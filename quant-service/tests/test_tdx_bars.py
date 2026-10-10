@@ -29,8 +29,9 @@ class IndexBarTests(unittest.TestCase):
             raise AssertionError("network path reached")
 
         with patch.object(tdx_bars.tdx_protocol, "call", fail):
-            with self.assertRaises(ValueError):
-                asyncio.run(tdx_bars.fetch_index_daily(symbol="600519.SH", count=1))
+            for symbol in ("600519.SH", "880005.SH"):
+                with self.subTest(symbol=symbol), self.assertRaises(ValueError):
+                    asyncio.run(tdx_bars.fetch_index_daily(symbol=symbol, count=1))
 
     def test_index_adapter_returns_host_and_receive_time(self):
         fixture = json.loads(FIXTURE.read_text())

@@ -2,12 +2,6 @@
 
 Instrument discovery uses the legacy 0x044e/0x0450 commands on the shared
 ``tdx_protocol.TdxClient`` with the LOGIN_ONE handshake profile.
-
-Prices in a security-list quote are integer values whose decimal point is a
-per-instrument list field.  The quote parser in ``tdx_protocol`` exposes the
-legacy /100 value, so :func:`scale_quote` converts all price fields by
-``10 ** (2 - decimal_point)``.  This is why convertible bonds and ETFs cannot
-share the stock-only /100 rule.
 """
 
 from __future__ import annotations
@@ -15,10 +9,9 @@ from __future__ import annotations
 import dataclasses
 
 import asyncio
-import re
 import struct
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, Iterable, Mapping
 
 from . import tdx_protocol, tdx_files
@@ -30,6 +23,9 @@ SECURITY_COUNT = 0x044E
 SECURITY_LIST = 0x0450
 SECURITY_PAGE_SIZE = 1000
 SECURITY_ROW_SIZE = 29
+#: The instrument types of A-share stocks and of funds, as instrument_type names them.
+STOCK_TYPES = frozenset({"stock_main", "stock_chinext", "stock_star", "stock_bj"})
+FUND_TYPES = frozenset({"etf", "lof", "fund"})
 
 
 def build_security_count_request(market: int) -> bytes:
@@ -83,10 +79,16 @@ def instrument_type(market: int, code: str, name: str = "") -> str:
 
     ``stock_main``, ``stock_star``, ``stock_chinext`` and ``stock_bj`` are
     equity classes; ``index`` and ``board`` are non-tradable references;
+    ``market_stat`` are TDX statistics and composites that are not boards
+    (880001-880079: value, breadth, limit counts, equal-weight and median
+    levels; 880096-880099: ETF/REITs/CB/repo composites; none is in tdxzs3.cfg,
+    scripts/data/tdx_market_stat_codes_2026-10-10_mac.json);
     ``etf``, ``lof``, ``fund``, ``cb``, ``bond`` and ``b_share`` are products.
     """
     code = str(code).zfill(6)
     upper = name.upper().replace("＊", "*")
+    if market == 1 and (880001 <= int(code) <= 880079 or 880096 <= int(code) <= 880099):
+        return "market_stat"
     if code.startswith(("880", "881")) and market == 1:
         return "board"
     if (market == 1 and code.startswith(("000", "999"))) or (market == 0 and code.startswith("399")):
@@ -119,7 +121,18 @@ def classify_instrument(market: int, code: str, name: str = "") -> dict[str, Any
     upper = name.upper().replace("＊", "*")
     return {"market": market, "code": code, "name": name, "type": kind,
             "is_st": upper.startswith("ST") or upper.startswith("*ST") or "ST" in upper[:4],
-            "is_a_share": kind.startswith("stock_")}
+            "is_a_share": kind in STOCK_TYPES}
+
+
+def requested_of_types(symbols: Sequence[str], kinds: frozenset[str]) -> list[tuple[int, str]]:
+    """The (market, code) pairs a reader requests for ``symbols``, each of an instrument type in ``kinds``. A symbol of any
+    other type is a ValueError, so a reader calls this before it connects."""
+    stocks = tdx_protocol.requested_stocks(symbols)
+    for item, (market, code) in zip(symbols, stocks):
+        kind = instrument_type(market, code)
+        if kind not in kinds:
+            raise ValueError(f"{item} is a {kind} code; this reader takes only {', '.join(sorted(kinds))}")
+    return stocks
 
 
 def bar_layout(instrument_type: str) -> str:
@@ -128,7 +141,7 @@ def bar_layout(instrument_type: str) -> str:
     Index and board bars have extra up/down-count breadth fields (36 bytes);
     all other instruments use the standard stock layout (32 bytes).
     """
-    return "index" if instrument_type in ("index", "board") else "stock"
+    return "index" if instrument_type in ("index", "board", "market_stat") else "stock"
 
 
 def _list_section(market: int) -> Callable[[tdx_protocol.TdxClient], tuple[int, list[dict[str, Any]]]]:
@@ -188,34 +201,7 @@ async def fetch_instruments() -> CapabilityEvidence:
     evidence = await fetch_security_list()
     return dataclasses.replace(evidence, rows=[
         {"symbol": row["symbol"], "name": row["name"], "list_date": None, "is_st": row["is_st"]}
-        for row in evidence.rows if row["instrument_type"].startswith("stock_")])
-
-
-def price_scale(decimal_point: int | None) -> float:
-    """Return the divisor for integer quote prices.
-
-    The list's decimal_point is authoritative.  Missing/invalid metadata falls
-    back to the ordinary stock /100 convention and is marked by callers.
-    """
-    if decimal_point is None or not 0 <= int(decimal_point) <= 6:
-        return 100.0
-    return float(10 ** int(decimal_point))
-
-
-_QUOTE_PRICE_KEYS = frozenset({"price", "last_close", "open", "high", "low",
-                               *(f"{side}{level}" for side in ("bid", "ask") for level in range(1, 6))})
-
-
-def scale_quote(quote: Mapping[str, Any], decimal_point: int | None) -> dict[str, Any]:
-    factor = 100.0 / price_scale(decimal_point)
-    result = dict(quote)
-    for key, value in quote.items():
-        if key in _QUOTE_PRICE_KEYS:
-            if isinstance(value, (int, float)):
-                result[key] = value * factor
-    result["decimal_point"] = decimal_point
-    result["price_divisor"] = price_scale(decimal_point)
-    return result
+        for row in evidence.rows if row["instrument_type"] in STOCK_TYPES])
 
 
 def parse_index_bars(body: bytes, *, category: int = 9) -> list[dict[str, Any]]:
@@ -247,14 +233,6 @@ def parse_index_bars(body: bytes, *, category: int = 9) -> list[dict[str, Any]]:
     return rows
 
 
-def normalize_bj_symbol(old: str, mapping: Mapping[str, str] | None = None) -> str:
-    code = str(old).upper().replace(".BJ", "")
-    if not re.fullmatch(r"\d{6}", code):
-        raise ValueError("BJ symbol must be six digits")
-    new = (mapping or {}).get(code, code)
-    return f"{new}.BJ"
-
-
 def security_count(client: tdx_protocol.TdxClient, market: int) -> int:
     return parse_security_count(client._exchange(build_security_count_request(market)))
 
@@ -274,7 +252,7 @@ def type_counts(rows: Iterable[Mapping[str, Any]]) -> Counter[str]:
     return Counter(instrument_type(int(row.get("market", 0)), str(row.get("code", "")), str(row.get("name", ""))) for row in rows)
 
 
-__all__ = ["SECURITY_COUNT", "SECURITY_LIST", "bar_layout", "build_security_count_request",
-           "build_security_list_request", "classify_instrument", "fetch_security_list", "fetch_instruments", "instrument_type", "normalize_bj_symbol",
+__all__ = ["FUND_TYPES", "SECURITY_COUNT", "SECURITY_LIST", "STOCK_TYPES", "bar_layout", "build_security_count_request",
+           "build_security_list_request", "classify_instrument", "fetch_security_list", "fetch_instruments", "instrument_type",
            "parse_bj_mapping", "parse_tdxbjmore", "bj_rows_from_zhb", "parse_index_bars", "parse_security_count", "parse_security_list",
-           "security_count", "security_list", "index_bars", "price_scale", "scale_quote", "type_counts"]
+           "security_count", "security_list", "index_bars", "requested_of_types", "type_counts"]

@@ -42,6 +42,10 @@ class MacFieldRegistryTests(unittest.TestCase):
             self.assertEqual((MAC_FIELDS[bit].name, MAC_FIELDS[bit].format), identity, hex(bit))
         self.assertEqual((MAC_FIELDS[0x20].canonical_key, MAC_FIELDS[0x21].canonical_key), ("limit_up", "limit_down"))
 
+    def test_the_iopv_bits_feed_fund_iopv_not_the_published_nav(self):
+        self.assertEqual([(MAC_FIELDS[bit].name, MAC_FIELDS[bit].format, MAC_FIELDS[bit].capability_ids) for bit in (0x24, 0x27)],
+                         [("pre_iopv", "float32", ()), ("iopv", "float32", ("fund.iopv",))])
+
     def test_index_bits_are_named_as_gotdx_names_them(self):
         # gotdx mac_board_members_dynamic.go:113,116 -- 0x37 index_metric (float32), 0x3a non_index_flag (uint32)
         self.assertEqual((MAC_FIELDS[0x37].name, MAC_FIELDS[0x37].format), ("index_metric", "float32"))

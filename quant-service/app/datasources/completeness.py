@@ -17,7 +17,7 @@ connection and subprocess helpers, the builtin ``open``, a file read/write/listi
 call in ``bindings.py``: through lambdas, helper functions defined in that file, and the for-loop over a
 module registry such as ``news_flash.FETCHERS``. A reference anywhere else in that file does not count.
 A catalog ``adapter`` string ``app/datasources/sources/<module>.py:<function>`` also counts, and must
-name a function that exists.
+name a function that exists; so must the ``reference_adapter`` (``app/<module path>.py:<function>``) of an agreement entry.
 
 A TDX command family counts as covered only when a TDX source binds a capability of that family;
 otherwise it must be listed in ``UNREGISTERED``. The exemptions are checked too: an empty reason, a name
@@ -29,11 +29,15 @@ The check parses the files and imports none of them, so it runs without credenti
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .contracts import ADAPTER_PATTERN
+
 PACKAGE_ROOT = Path(__file__).parent
+SERVICE_ROOT = PACKAGE_ROOT.parents[1]
 SOURCE_ROOT = PACKAGE_ROOT / "sources"
 BINDINGS_MODULE = PACKAGE_ROOT / "bindings.py"
 SOURCES_PREFIX = "app/datasources/sources/"
@@ -50,8 +54,9 @@ UNREGISTERED: dict[str, str] = {
                                          "no capability of its own",
     "tencent_limits.session_limit_cross_section": "composition-root path: main.py stores the session's limit prices "
                                                   "(daily_trade_limits) before the first intraday scan; not resolver-routed",
-    "tdx_protocol.TdxClient.quotes": "legacy quote command 0x053e; quote.watch_snapshot binds the MAC batch quote 0x122b "
-                                     "(tdx_mac.fetch_watch_snapshot), not this command",
+    "tdx_protocol.TdxClient.quotes": "legacy quote command 0x053e, read by tdx_quotes.fetch_index_quote (sector.index_quote) "
+                                     "and fetch_order_book (quote.order_book); quote.watch_snapshot binds the MAC batch quote "
+                                     "0x122b (tdx_mac.fetch_watch_snapshot), not this command",
     "tdx_protocol.TdxClient.bars": "legacy bar transport for tdx_bars.fetch_daily and fetch_minute",
     "tdx_protocol.TdxClient.ticks": "transport for ticks.fetch_tdx_ticks, which is the bound reader",
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
@@ -63,26 +68,26 @@ UNREGISTERED: dict[str, str] = {
     "tdx_instruments.security_count": "transport behind the bound fetch_security_list (0x044e count per market)",
     "tdx_instruments.security_list": "transport behind the bound fetch_security_list (0x044e count and 0x0450 pages)",
     "tdx_instruments.index_bars": "index/board bar transport helper; tdx_bars.fetch_index_daily owns the capability binding",
-    "tdx_files.download": "server file transport; fetch_security_list reads zhb.zip through it, file capabilities bind in I4",
+    "tdx_files.download": "server-file transport used by the bound tdx_reference_files adapters; it has no capability contract of its own",
     "tdx_files.file_size": "server file transport behind tdx_files.download",
     "tdx_files.parse_zhb_zip": "parses a zhb.zip already downloaded into memory; its archive.open() reads those bytes",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); "
                                "tdx_instruments.fetch_security_list and fetch_instruments (reference.security_list, "
                                "reference.instruments) read through it and are the bound readers",
-    "tdx_mac.call": "transport with host failover; the six MAC fetch_* adapters (fetch_watch_snapshot, fetch_limit_prices, "
-                    "fetch_board_catalog, fetch_membership, fetch_daily_bars, fetch_minute_bars) are the bound readers",
+    "tdx_mac.call": "transport with host failover; the seven MAC fetch_* adapters (fetch_watch_snapshot, fetch_limit_prices, "
+                    "fetch_iopv, fetch_board_catalog, fetch_membership, fetch_daily_bars, fetch_minute_bars) are the bound "
+                    "readers",
     "tdx_mac.call_sync": "the blocking half of tdx_mac.call; the MAC fetch_* adapters are the bound readers",
     "tdx_mac.TdxMacClient.handshake": "the two setup packets sent when a MAC connection opens; not a reader of its own",
     "tdx_mac.TdxMacClient.board_list": "board list command 0x1231, read by fetch_board_catalog (sector.board_catalog)",
     "tdx_mac.TdxMacClient.board_members": "board members command 0x122c, read by fetch_membership (sector.membership)",
     "tdx_mac.TdxMacClient.board_member_quotes": "dynamic member quotes of command 0x122c; no capability binds them, "
                                                 "only scripts/verify-tdx-mac.py reads them",
-    "tdx_mac.TdxMacClient.batch_quotes": "batch quote command 0x122b, read by fetch_watch_snapshot (quote.watch_snapshot) "
-                                         "and fetch_limit_prices (limits.prices)",
+    "tdx_mac.TdxMacClient.batch_quotes": "batch quote command 0x122b, read by fetch_watch_snapshot (quote.watch_snapshot), "
+                                         "fetch_limit_prices (limits.prices) and fetch_iopv (fund.iopv)",
     "tdx_mac.TdxMacClient.bars": "bars command 0x122e, read by fetch_daily_bars (bars.daily) and fetch_minute_bars (bars.minute)",
     "tdx_mac.TdxMacClient.auxiliary": "research commands 0x1218, 0x123d, 0x123e and 0x1237; no capability binds them, "
                                       "only scripts/verify-tdx-mac.py reads them",
-    "family:files": "verified in the plan; server-file capabilities arrive in P4",
     "family:capital flow": "MAC capital flow (0x1218 head=2; fields 0x38 and 0x6b) is confirmed only as the provider's "
                            "own main_in - main_out (delta-3 Q4); no flow capability binds it until its coverage and "
                            "stability are established",
@@ -417,6 +422,24 @@ def referenced_by_catalog(adapters: Iterable[str | None], root: Path = SOURCE_RO
     return found, missing
 
 
+def reference_adapter_problems(bindings: Iterable[object], service_root: Path = SERVICE_ROOT) -> list[str]:
+    """``reference_adapter`` strings of agreement entries (``BindingSpec.agreement``) must name a top-level function
+    of an app module: ``app/<module path>.py:<function>``, read from the file."""
+    problems = []
+    for item in bindings:
+        spec = getattr(item, "spec", None)
+        for field_name, entry in (spec.agreement if spec else {}).items():
+            adapter = entry.get("reference_adapter") if isinstance(entry, Mapping) else None
+            path, _, name = (adapter or "").partition(":")
+            source = service_root / path
+            exists = adapter is None or (re.fullmatch(ADAPTER_PATTERN, adapter) and source.is_file() and any(
+                isinstance(node, _DEFS) and node.name == name for node in ast.parse(source.read_text(encoding="utf-8")).body))
+            if not exists:
+                problems.append(f"binding {item.source}->{item.capability}: agreement for {field_name!r}: "
+                                f"reference_adapter {adapter!r} names no function")
+    return problems
+
+
 def completeness_problems(
     bindings: Iterable[object] | None = None,
     *,
@@ -433,6 +456,7 @@ def completeness_problems(
     from_catalog, missing = referenced_by_catalog((getattr(item, "adapter", None) for item in bindings), root)
     bound = referenced_by_bindings(bindings_module, root) | from_catalog
     problems = [f"catalog adapter {adapter} names no function in that module" for adapter in missing]
+    problems += reference_adapter_problems(bindings)
     problems += [f"unregistered source fetch function: {name}"
                  for name in readers if name not in bound and name not in unregistered]
     tdx = [(getattr(item, "source", ""), getattr(item, "capability", "")) for item in bindings
@@ -460,4 +484,4 @@ def completeness_problems(
 
 
 __all__ = ["IO_ATTRIBUTES", "IO_MODULES", "TDX_COMMAND_FAMILIES", "UNREGISTERED", "completeness_problems",
-           "public_fetch_functions", "referenced_by_bindings", "referenced_by_catalog"]
+           "public_fetch_functions", "reference_adapter_problems", "referenced_by_bindings", "referenced_by_catalog"]

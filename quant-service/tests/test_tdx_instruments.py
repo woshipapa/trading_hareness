@@ -19,22 +19,23 @@ class InstrumentTests(unittest.TestCase):
         cases = [(1, "600000", "平安" , "stock_main"), (1, "688001", "科创", "stock_star"),
                  (0, "300001", "创业", "stock_chinext"), (2, "920000", "北证", "stock_bj"),
                  (1, "510300", "ETF", "etf"), (0, "127045", "转债", "cb"),
-                 (1, "999999", "指数", "index"), (1, "880761", "板块", "board")]
+                 (1, "999999", "指数", "index"), (1, "880761", "板块", "board"), (1, "880081", "轮动趋势", "board"),
+                 (1, "880005", "涨跌家数", "market_stat"), (1, "880098", "可转债", "market_stat")]
         for market, code, name, expected in cases:
             self.assertEqual(ti.instrument_type(market, code, name), expected)
         self.assertTrue(ti.classify_instrument(1, "600000", "*ST风险")["is_st"])
+        self.assertEqual([ti.classify_instrument(market, code, name)["is_a_share"] for market, code, name, _ in cases],
+                         [True, True, True, True, False, False, False, False, False, False, False])
 
-    def test_scale_is_list_decimal_point(self):
-        quote = {"price": 11697.1, "last_close": 11600.0, "bid1": 11700.0}
-        self.assertAlmostEqual(ti.scale_quote(quote, 4)["price"], 116.971)
-        self.assertAlmostEqual(ti.scale_quote({"price": 43.85}, 3)["price"], 4.385)
-        self.assertEqual(ti.price_scale(2), 100.0)
-
-    def test_scale_quote_rescales_prices_not_volumes(self):
-        scaled = ti.scale_quote({"price": 43.85, "bid1": 43.84, "bid_vol1": 1200, "ask_vol1": 800}, 3)
-        self.assertAlmostEqual(scaled["price"], 4.385)
-        self.assertAlmostEqual(scaled["bid1"], 4.384)
-        self.assertEqual((scaled["bid_vol1"], scaled["ask_vol1"]), (1200, 800))
+    def test_a_reader_requests_only_the_types_it_serves_under_their_translated_codes(self):
+        self.assertEqual(ti.requested_of_types(["430017.BJ", "600519.SH"], ti.STOCK_TYPES), [(2, "920017"), (1, "600519")])
+        self.assertEqual(ti.requested_of_types(["510300.SH", "161121.SZ", "500001.SH"], ti.FUND_TYPES),
+                         [(1, "510300"), (0, "161121"), (1, "500001")])
+        for symbol in ("510300.SH", "127045.SZ", "999999.SH", "880005.SH"):
+            with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, f"{symbol} is a"):
+                ti.requested_of_types(["600519.SH", symbol], ti.STOCK_TYPES)
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            ti.requested_of_types([], ti.STOCK_TYPES)
 
     def test_index_bars_never_guess_another_layout(self):
         record = struct.pack("<I", 20261009) + b"\x00" * 4 + struct.pack("<IIHH", 0, 0, 1341, 956)
@@ -63,7 +64,6 @@ class InstrumentTests(unittest.TestCase):
     def test_bj_config_mapping_tolerates_delimiters(self):
         mapping = ti.parse_bj_mapping("832000|920000\n920001=830001\n# ignored\n".encode())
         self.assertEqual(mapping, {"832000": "920000", "830001": "920001"})
-        self.assertEqual(ti.normalize_bj_symbol("832000.BJ", mapping), "920000.BJ")
 
     def test_tdxbjmore_rows_are_source_tagged(self):
         rows = ti.parse_tdxbjmore("44|920000|2|安徽凤凰|1|\n".encode("gbk"))
