@@ -19,6 +19,17 @@ from .tdx_zhb_extras import parse_holiday_calendar, parse_ipo_subscriptions
 _TAXONOMIES = {2: "tdx_files_industry_l1", 3: "tdx_files_region", 4: "tdx_files_concept",
                5: "tdx_files_style_event", 12: "tdx_files_industry_l2_l3"}
 
+_VALUATION_FIELDS = ("pe_ttm", "pe_static", "dividend_yield_pct")
+_DAILY_BASIC_STAT_FIELDS = (
+    "change_pct", "change_prev_day_pct", "change_prev2_day_pct", "streak", "change_4d_pct", "change_5d_pct",
+    "change_10d_pct", "change_20d_pct", "change_60d_pct", "change_ytd_pct", "annual_limit_up_days",
+    "circulating_capital_z_raw",
+)
+_DAILY_BASIC_STAT2_FIELDS = (
+    "amount_10k_yuan", "amount_prev_10k_yuan", "amount_prev2_10k_yuan", "change_mtd_pct", "change_1y_pct",
+    "auction_amount_10k_yuan", "high_52w_yuan", "low_52w_yuan",
+)
+
 
 def _symbol(market: int, code: str) -> str:
     return tdx_protocol.symbol(market, code)
@@ -33,9 +44,9 @@ def _selected(symbols: Sequence[str], row: dict[str, Any]) -> bool:
     return not symbols or _symbol(row["market"], row["code"]) in symbols
 
 
-def _stat_row(row: dict[str, Any], names: frozenset[str]) -> dict[str, Any]:
-    return {"symbol": _symbol(row["market"], row["code"]), "effective_date": row["date"], "fields": row["fields"],
-            **{key: row[key] for key in names if row[key] is not None}}
+def _project(row: dict[str, Any], names: Sequence[str]) -> dict[str, Any]:
+    return {"symbol": _symbol(row["market"], row["code"]), "effective_date": row["date"],
+            **{name: row[name] for name in names}}
 
 
 async def _zip_files() -> tuple[dict[str, bytes], str]:
@@ -45,18 +56,22 @@ async def _zip_files() -> tuple[dict[str, bytes], str]:
 
 async def fetch_valuation(*, symbols: Sequence[str] = ()) -> CapabilityEvidence:
     files, host = await _zip_files()
-    names = frozenset({"pe_ttm", "pe_static", "dividend_yield_pct", "amount_10k_yuan", "change_20d_pct",
-                       "change_60d_pct", "change_ytd_pct", "annual_limit_up_days", "change_1y_pct",
-                       "change_5d_pct", "change_10d_pct"})
-    rows = [_stat_row(row, names) for row in tdx_files.parse_tdxstat(files["tdxstat.cfg"]) if _selected(symbols, row)]
+    rows = [_project(row, _VALUATION_FIELDS) for row in tdx_files.parse_tdxstat(files["tdxstat.cfg"])
+            if _selected(symbols, row)]
     return tdx_protocol.observed_evidence(rows, host)
 
 
 async def fetch_daily_basic(*, symbols: Sequence[str] = ()) -> CapabilityEvidence:
     files, host = await _zip_files()
-    names = frozenset({"amount_10k_yuan", "amount_prev_10k_yuan", "amount_alt_10k_yuan", "change_pct",
-                       "change_range_pct", "auction_amount_10k_yuan", "high_52w_yuan", "low_52w_yuan"})
-    rows = [_stat_row(row, names) for row in tdx_files.parse_tdxstat2(files["tdxstat2.cfg"]) if _selected(symbols, row)]
+    statistics = {(row["market"], row["code"], row["date"]): row for row in tdx_files.parse_tdxstat(files["tdxstat.cfg"])}
+    rows = []
+    for row in tdx_files.parse_tdxstat2(files["tdxstat2.cfg"]):
+        stat = statistics.get((row["market"], row["code"], row["date"]))
+        if stat is None or not _selected(symbols, row):
+            continue
+        rows.append({"symbol": _symbol(row["market"], row["code"]), "effective_date": row["date"],
+                     **{name: stat[name] for name in _DAILY_BASIC_STAT_FIELDS},
+                     **{name: row[name] for name in _DAILY_BASIC_STAT2_FIELDS}})
     return tdx_protocol.observed_evidence(rows, host)
 
 

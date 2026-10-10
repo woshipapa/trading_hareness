@@ -593,8 +593,10 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/longhu_shared_full_market.py", notes="2026-09-16/17 覆盖 5129/5153 只"),
     _bind("tdx_public", "fundamentals.daily_basic", 80, UNSUPPORTED, _RAW + "tdxstat2_daily_basic",
           "app/datasources/sources/tdx_reference_files.py:fetch_daily_basic", history="20261009 snapshot",
-          notes="zhb.zip 内存解析；仅 confirmed tdxstat2 columns 3,5,7,11,12,14,17,18；未确认列保持 fields/raw",
+          notes="joins tdxstat.cfg and tdxstat2.cfg by (market, code, date); research-only columns have no canonical daily_basic mapping; "
+                "confirmed columns only, with unconfirmed columns retained only in parser raw fields",
           spec=BindingSpec(params={"symbols": "optional canonical symbols"},
+                           field_map={},
                            time_semantics="effective=tdxstat2 row date; available=collection time; row date is not collection date",
                            handshake_profile="login_one")),
     _bind("fuyao_ths", "fundamentals.financial_statements", 12, DECLARED, None, "app/fuyao_catalog.py:a_share_*_statements"),
