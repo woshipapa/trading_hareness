@@ -12,6 +12,9 @@ the same keywords, so the resolver can fall through without translation):
 * ``fund.nav``: ``fund_code``
 * ``quote.watch_snapshot``: ``symbols``
 * ``limits.prices``: ``symbols``
+* ``sector.index_quote`` (TDX): ``symbols``, board symbols such as 880005.SH
+* every TDX adapter that takes a symbol requests an old BJ code as its 920xxx code; a batch adapter adds
+  ``source_symbol`` (the symbol as requested) to the row of each symbol it translated
 * ``bars.daily``: ``symbol``, ``count``
 * ``bars.minute``: ``symbol``, ``count`` (MAC 1-minute bars)
 * ``sector.board_catalog``: no parameters; returns the MAC board types of ``tdx_mac.BOARD_TYPES``

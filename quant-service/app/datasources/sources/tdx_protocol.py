@@ -180,6 +180,9 @@ def build_quotes_request(stocks: Sequence[tuple[int, str]]) -> bytes:
 
 
 def parse_quotes(body: bytes, *, requested: Sequence[tuple[int, str]] | None = None) -> list[dict[str, Any]]:
+    """Decode a 0x053e answer, its prices divided by 100. That holds only for a security whose list decimal point is 2
+    (stocks, index and board codes) and is wrong for ETFs and convertible bonds
+    (scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json); the readers in tdx_quotes take only the former."""
     pos = 2
     (count,) = struct.unpack("<H", body[pos:pos + 2])
     pos += 2

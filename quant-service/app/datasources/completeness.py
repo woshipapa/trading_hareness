@@ -50,8 +50,9 @@ UNREGISTERED: dict[str, str] = {
                                          "no capability of its own",
     "tencent_limits.session_limit_cross_section": "composition-root path: main.py stores the session's limit prices "
                                                   "(daily_trade_limits) before the first intraday scan; not resolver-routed",
-    "tdx_protocol.TdxClient.quotes": "legacy quote command 0x053e; quote.watch_snapshot binds the MAC batch quote 0x122b "
-                                     "(tdx_mac.fetch_watch_snapshot), not this command",
+    "tdx_protocol.TdxClient.quotes": "legacy quote command 0x053e, read by tdx_quotes.fetch_index_quote (sector.index_quote); "
+                                     "quote.watch_snapshot binds the MAC batch quote 0x122b (tdx_mac.fetch_watch_snapshot), "
+                                     "not this command",
     "tdx_protocol.TdxClient.bars": "legacy bar command 0x052d; bars.daily and bars.minute bind the MAC bars command 0x122e "
                                    "(tdx_mac.fetch_daily_bars, fetch_minute_bars), not this command",
     "tdx_protocol.TdxClient.ticks": "transport for ticks.fetch_tdx_ticks, which is the bound reader",
