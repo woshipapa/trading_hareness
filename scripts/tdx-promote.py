@@ -8,10 +8,12 @@
 quant-research container over ssh (``owner``: a read-only ``docker exec`` reached with the LONGHU_SSH_* settings). The
 exec runs the code baked into the image: a code-only overlay (QUANT_HOTFIX_ENABLED) is on the service's PYTHONPATH, not
 on the exec's, so the image itself needs the probe command and the adapters. When the binding's BindingSpec declares
-agreement tolerances, ``check`` probes each reference source the same way, with the same parameters, and compares the
-sampled rows pair by pair, field by field, with both sides projected as the resolver projects them (field_map,
-unit_factors). It writes scripts/data/tdx_promote_<capability>_<source>_<date>_<egress>.json (date in Asia/Shanghai) with
-every input, the probes, the comparison and one verdict per gate, and exits 0 whatever the verdicts:
+agreement tolerances, ``check`` reads every row of the binding and of each reference source the same way, with the
+same parameters, projects both sides as the resolver projects them (field_map, unit_factors), joins them on the entry's
+key and compares each field on every common row. It writes
+scripts/data/tdx_promote_<capability>_<source>_<date>_<egress>_<hash of the params>.json (date in Asia/Shanghai) with
+every input, the probes (their first rows and a hash of all printed rows), the comparison (row counts, the largest
+deviations, examples) and one verdict per gate, and exits 0 whatever the verdicts:
 
     owner_egress  the probe ran inside the owner container and answered with rows
     agreement     every declared tolerance holds (nothing to hold when none is declared)
@@ -30,7 +32,6 @@ import argparse
 import ast
 import hashlib
 import json
-import math
 import os
 import shlex
 import subprocess
@@ -47,7 +48,7 @@ from app.datasources.catalog import bindings_for  # noqa: E402
 from app.datasources.contracts import BINDING_STATES, Binding  # noqa: E402
 from app.datasources.resolver import _normalise_rows  # noqa: E402
 
-SCHEMA = "tdx-promote-v1"
+SCHEMA = "tdx-promote-v2"
 DATA_DIR = ROOT / "scripts" / "data"
 CATALOG = ROOT / "quant-service" / "app" / "datasources" / "catalog.py"
 CONTAINER = "trading-hareness-peer-quant-research-1"
@@ -61,6 +62,12 @@ NO_HOLIDAYS = "holidays not checked: every weekday counts as a trading day"
 #: Status token in catalog.py -> (the token after the step, the gates every evidence file must have passed).
 STEPS = {"UNSUPPORTED": ("DECLARED", ("owner_egress", "agreement")),
          "DECLARED": ("LIVE_VERIFIED", ("owner_egress", "agreement", "intraday"))}
+#: Rows of a probe kept in the evidence file; the printed rows as a whole are represented by their hash.
+EVIDENCE_ROWS = 5
+#: Mismatched rows listed per field in the evidence file.
+EXAMPLES = 5
+#: The share of the binding's rows that must have a counterpart in the reference when the entry does not say.
+MIN_COVERAGE = 0.95
 
 
 def redacted(text: str) -> str:
@@ -78,9 +85,12 @@ def ssh_argv() -> list[str]:
             f"{env['LONGHU_SSH_USER']}@{env['LONGHU_SSH_HOST']}", "bash", "-s"]
 
 
-def run_probe(egress: str, source: str, capability: str, params: Mapping[str, Any]) -> dict[str, Any]:
+def run_probe(egress: str, source: str, capability: str, params: Mapping[str, Any], *,
+              all_rows: bool = False) -> dict[str, Any]:
     """The probe record of one binding, taken on ``egress``; the command that took it is added."""
     probe = ["python", "-m", "app.datasources", "probe", source, capability, "--params", json.dumps(params)]
+    if all_rows:
+        probe.append("--all-rows")
     if egress == "mac":
         command, argv, cwd, script = shlex.join(probe), [sys.executable, *probe[1:]], ROOT / "quant-service", None
     else:
@@ -110,48 +120,98 @@ def probed_in_session(record: Mapping[str, Any]) -> bool:
 
 
 def reading(binding: Binding, record: Mapping[str, Any]) -> tuple[list[dict[str, Any]], str]:
-    """The sampled rows as the resolver projects them, and why they cannot be compared (empty when they can)."""
+    """The printed rows as the resolver projects them, and why they cannot be compared (empty when they can)."""
+    label, rows = record["source"], record.get("sample")
     if record["error"]:
-        return [], f"{record['source']} probe failed: {record['error']}"
-    if not all(isinstance(row, dict) for row in record["sample"]):
-        return [], f"{record['source']} sampled rows that are not mappings"
-    projected = _normalise_rows(record["sample"], binding)
+        return [], f"{label} probe failed: {record['error']}"
+    if len(rows) != record["rows"]:
+        return [], f"{label} printed {len(rows)} of its {record['rows']} rows"
+    if not all(isinstance(row, dict) for row in rows):
+        return [], f"{label} printed rows that are not mappings"
+    projected = _normalise_rows(rows, binding)
     if projected.status:
-        return [], f"{record['source']} sample is {projected.status}: {', '.join(projected.warnings)}"
+        return [], f"{label} rows are {projected.status}: {', '.join(projected.warnings)}"
     return projected.rows, ""
 
 
-def close(left: Any, right: Any, rel_tol: float, abs_tol: float) -> bool:
-    numbers = all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (left, right))
-    return numbers and math.isclose(left, right, rel_tol=rel_tol, abs_tol=abs_tol)
+def keyed(rows: list[dict[str, Any]], key: list[str], label: str) -> tuple[dict[tuple, dict[str, Any]], str]:
+    """The rows by key, and why they cannot be joined (empty when they can)."""
+    if any(name not in row for row in rows for name in key):
+        return {}, f"{label} rows lack the key fields {key}"
+    index = {tuple(row[name] for name in key): row for row in rows}
+    if len(index) != len(rows):
+        return {}, f"{label} has {len(rows) - len(index)} rows with a repeated key {key}"
+    return index, ""
 
 
-def compare_field(name: str, tolerance: Mapping[str, Any], mine: list[dict[str, Any]], theirs: list[dict[str, Any]],
-                  unusable: str) -> dict[str, Any]:
-    """One field of the two sampled readings, paired in order; ``why`` is empty when they agree."""
-    rel_tol, abs_tol = tolerance.get("rel_tol", 0.0), tolerance.get("abs_tol", 0.0)
-    pairs = [[left.get(name), right.get(name)] for left, right in zip(mine, theirs)]
-    outside = sum(not close(left, right, rel_tol, abs_tol) for left, right in pairs)
+def gaps(left: Any, right: Any) -> tuple[float, float] | None:
+    """The absolute and the relative difference of two numbers; None when either is not a number."""
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (left, right)):
+        return None
+    absolute = abs(left - right)
+    scale = max(abs(left), abs(right))
+    return absolute, absolute / scale if scale else 0.0
+
+
+def agrees(left: Any, right: Any, rel_tol: float, abs_tol: float) -> bool:
+    gap = gaps(left, right)
+    if gap is None:
+        return left is not None and left == right
+    return gap[0] <= abs_tol or gap[1] <= rel_tol
+
+
+def compare_field(name: str, entry: Mapping[str, Any], left: Mapping[tuple, dict[str, Any]],
+                  right: Mapping[tuple, dict[str, Any]], unusable: str) -> dict[str, Any]:
+    """One field over the rows both sides have; ``why`` is empty when the field agrees."""
+    rel_tol, abs_tol = entry.get("rel_tol", 0.0), entry.get("abs_tol", 0.0)
+    min_coverage = entry.get("min_coverage", MIN_COVERAGE)
+    summary = {"reference": entry["reference"], "key": list(entry["key"]), "rel_tol": rel_tol, "abs_tol": abs_tol,
+               "min_coverage": min_coverage}
     if unusable:
-        why = unusable
-    elif len(mine) != len(theirs) or not pairs:
-        why = f"sampled {len(mine)} rows against {len(theirs)}"
-    else:
-        why = f"{outside} of {len(pairs)} pairs outside the tolerance" if outside else ""
-    return {"reference": tolerance["reference"], "rel_tol": rel_tol, "abs_tol": abs_tol, "pairs": pairs,
+        return {**summary, "agree": False, "why": unusable}
+    common = [key for key in left if key in right]
+    pairs = [(key, left[key].get(name), right[key].get(name)) for key in common]
+    wrong = [pair for pair in pairs if not agrees(pair[1], pair[2], rel_tol, abs_tol)]
+    measured = [(gap, key) for key, one, other in pairs if (gap := gaps(one, other)) is not None]
+    widest = max(measured, key=lambda item: item[0][0], default=None)
+    coverage = len(common) / len(left) if left else 0.0
+    reasons = []
+    if not left:
+        reasons.append("the binding returned no rows")
+    elif coverage < min_coverage:
+        reasons.append(f"the common rows are {coverage:.3f} of the binding's {len(left)}, below {min_coverage}")
+    if wrong:
+        reasons.append(f"{len(wrong)} of {len(common)} common rows are outside the tolerance")
+    why = "; ".join(reasons)
+    return {**summary, "left_rows": len(left), "right_rows": len(right), "matched": len(common) - len(wrong),
+            "mismatched": len(wrong), "only_left": len(left) - len(common), "only_right": len(right) - len(common),
+            "coverage": coverage, "max_abs_dev": widest[0][0] if widest else None,
+            "max_rel_dev": max((gap[1] for gap, _ in measured), default=None),
+            "worst_key": list(widest[1]) if widest else None,
+            "examples": [{"key": list(key), "left": one, "right": other} for key, one, other in wrong[:EXAMPLES]],
             "agree": not why, "why": why}
 
 
 def compare(source: str, agreement: Mapping[str, Mapping[str, Any]], bindings: Mapping[str, Binding],
             probes: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    """Each agreement field of ``source`` against the reference that field names."""
+    """Each agreement field of ``source`` against the reference that field names, joined on the entry's key."""
     mine, mine_why = reading(bindings[source], probes[source])
     result = {}
-    for name, tolerance in agreement.items():
-        reference = tolerance["reference"]
+    for name, entry in agreement.items():
+        reference = entry["reference"]
         theirs, their_why = reading(bindings[reference], probes[reference])
-        result[name] = compare_field(name, tolerance, mine, theirs, mine_why or their_why)
+        left, left_why = keyed(mine, entry["key"], source)
+        right, right_why = keyed(theirs, entry["key"], reference)
+        result[name] = compare_field(name, entry, left, right, mine_why or their_why or left_why or right_why)
     return result
+
+
+def compact(record: Mapping[str, Any]) -> dict[str, Any]:
+    """A probe record for the evidence file: its first rows, and the hash of all the rows it printed."""
+    if record["error"]:
+        return dict(record)
+    digest = hashlib.sha256(json.dumps(record["sample"], ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return {**record, "sample": record["sample"][:EVIDENCE_ROWS], "sample_sha256": digest}
 
 
 def verdicts(egress: str, source: str, probes: Mapping[str, Mapping[str, Any]], comparison: Mapping[str, Any],
@@ -165,7 +225,7 @@ def verdicts(egress: str, source: str, probes: Mapping[str, Mapping[str, Any]], 
             "detail": f"egress {egress}, " + (f"failed: {own['error']}" if own["error"] else f"{own['rows']} rows")},
         "agreement": {
             "pass": not disagreeing,
-            "detail": "; ".join(disagreeing) or (f"{len(comparison)} fields within tolerance" if comparison
+            "detail": "; ".join(disagreeing) or (f"{len(comparison)} fields agree on their common rows" if comparison
                                                  else "not applicable: the binding declares no agreement tolerances")},
         "intraday": {
             "pass": not outside,
@@ -183,7 +243,8 @@ def run_check(args: argparse.Namespace) -> int:
     agreement = spec.agreement if spec else {}
     for reference in sorted({item["reference"] for item in agreement.values()}):
         bindings[reference] = lookup(reference, args.capability)
-    probes = {source: run_probe(args.egress, source, args.capability, args.params) for source in bindings}
+    probes = {source: run_probe(args.egress, source, args.capability, args.params, all_rows=bool(agreement))
+              for source in bindings}
     comparison = compare(args.source, agreement, bindings, probes)
     inside = {source: probed_in_session(record) for source, record in probes.items()}
     evidence = {
@@ -193,13 +254,14 @@ def run_check(args: argparse.Namespace) -> int:
         "checked_utc": datetime.now(timezone.utc).isoformat(), "agreement_spec": agreement,
         "projections": {source: {"field_map": binding.spec.field_map, "unit_factors": binding.spec.unit_factors}
                         for source, binding in bindings.items() if binding.spec},
-        "probes": probes, "comparison": comparison,
+        "probes": {source: compact(record) for source, record in probes.items()}, "comparison": comparison,
         "session": {"timezone": "Asia/Shanghai", "windows": "weekdays 09:30-11:30 and 13:00-15:00", "holidays": NO_HOLIDAYS,
                     "inside": inside},
         "verdicts": verdicts(args.egress, args.source, probes, comparison, inside),
     }
     day = datetime.fromisoformat(probes[args.source]["finished_utc"]).astimezone(CN).date()
-    path = DATA_DIR / f"tdx_promote_{args.capability}_{args.source}_{day.isoformat()}_{args.egress}.json"
+    digest = hashlib.sha256(json.dumps(args.params, sort_keys=True).encode("utf-8")).hexdigest()[:8]
+    path = DATA_DIR / f"tdx_promote_{args.capability}_{args.source}_{day.isoformat()}_{args.egress}_{digest}.json"
     path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"{args.source} {args.capability} on the {args.egress} egress -> {path.relative_to(ROOT)}")
     for gate, verdict in evidence["verdicts"].items():

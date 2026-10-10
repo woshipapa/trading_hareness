@@ -44,6 +44,16 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual((record["available_at_min"], record["effective_at_min"]), ("2026-10-12T01:31:00+00:00", None))
         self.assertLessEqual(record["started_utc"], record["finished_utc"])
 
+    def test_all_rows_prints_every_row_instead_of_the_first_few(self):
+        async def answer(**_params):
+            return [{"close": float(index)} for index in range(cli.SAMPLE_ROWS + 3)]
+
+        with mock.patch.object(tdx_legacy_misc, "fetch_index_overview", answer):
+            _, few = probe("tdx_public", "quote.index_overview")
+            _, every = probe("tdx_public", "quote.index_overview", "--all-rows")
+        self.assertEqual((len(few["sample"]), len(every["sample"]), every["rows"]),
+                         (cli.SAMPLE_ROWS, cli.SAMPLE_ROWS + 3, cli.SAMPLE_ROWS + 3))
+
     def test_plain_rows_are_an_answer_without_coverage_or_clocks(self):
         async def answer(**_params):
             return [{"close": 4000.0}]

@@ -72,11 +72,14 @@ class BindingSpec:
     time_semantics: str = ""
     handshake_profile: str | None = None
     #: What this binding must agree with before it is promoted, per canonical field (the names ``field_map``
-    #: produces, after ``unit_factors``): ``{"close": {"reference": "tencent_free", "rel_tol": 0.0001}}``.
-    #: ``reference`` is the source whose binding of the same capability is asked with the same parameters;
-    #: ``rel_tol`` and ``abs_tol`` are the ``math.isclose`` tolerances (one that is missing counts as 0).
-    #: ``scripts/tdx-promote.py check`` compares the rows both probes sampled, field by field, against
-    #: them; an empty mapping means the binding is promoted without a cross-source comparison.
+    #: produces, after ``unit_factors``), e.g.
+    #: ``{"close": {"reference": "tencent_free", "key": ["symbol", "bar_time"], "rel_tol": 0.0001}}``.
+    #: ``reference`` is the source whose binding of the same capability is asked with the same parameters.
+    #: ``key`` names the fields that identify a row (``symbol`` and ``trade_date`` besides the capability's own
+    #: fields).  ``scripts/tdx-promote.py check`` reads every row of both sides, joins them on the key and compares the
+    #: field on every common row: it agrees when each is within ``rel_tol`` / ``abs_tol`` (the ``math.isclose``
+    #: tolerances; one that is missing counts as 0) and the common rows are at least ``min_coverage`` (default 0.95)
+    #: of this binding's rows.  An empty mapping means the binding is promoted without a cross-source comparison.
     agreement: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 

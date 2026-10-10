@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 from datetime import datetime
@@ -27,12 +28,16 @@ SETTINGS = {"LONGHU_SSH_HOST": "synthetic-host", "LONGHU_SSH_PORT": "22", "LONGH
 MORNING = ("2026-10-12T01:40:00+00:00", "2026-10-12T01:40:02+00:00")    # Monday 09:40 in Shanghai
 LUNCH = ("2026-10-12T04:30:00+00:00", "2026-10-12T04:30:02+00:00")      # Monday 12:30
 CLOSING = ("2026-10-12T03:29:58+00:00", "2026-10-12T03:30:02+00:00")    # starts at 11:29:58, ends after the morning session
+KEY = ["symbol"]
 OWN = Binding("tdx_public", CAPABILITY, 70, UNSUPPORTED, spec=BindingSpec(
     field_map={"vol": "volume"}, unit_factors={"volume": 100},
-    agreement={"price": {"reference": "tencent_free", "rel_tol": 0.001}, "volume": {"reference": "tencent_free"}}))
+    agreement={"price": {"reference": "tencent_free", "key": KEY, "rel_tol": 0.001},
+               "volume": {"reference": "tencent_free", "key": KEY}}))
 REFERENCE = Binding("tencent_free", CAPABILITY, 30, LIVE_VERIFIED)
-OWN_ROWS = [{"price": 10.0, "vol": 3}, {"price": 20.0, "vol": 5}]                    # volume in lots
-REFERENCE_ROWS = [{"price": 10.005, "volume": 300}, {"price": 20.0, "volume": 500}]  # volume in shares
+SYMBOLS = [f"{number:06d}.SZ" for number in range(20)]
+OWN_ROWS = [{"symbol": symbol, "price": 10.0, "vol": 3} for symbol in SYMBOLS]                  # volume in lots
+REFERENCE_ROWS = [{"symbol": symbol, "price": 10.0, "volume": 300} for symbol in reversed(SYMBOLS)]    # in shares, another order
+REFERENCE_ROWS[0]["price"] = 10.005       # inside the relative tolerance, outside the absolute one (none is declared)
 
 
 def record(source, rows, times=MORNING, error=None):
@@ -47,25 +52,33 @@ def answers(**changes):
     return {"tdx_public": record("tdx_public", OWN_ROWS), "tencent_free": record("tencent_free", REFERENCE_ROWS), **changes}
 
 
-def run_check(egress, probes, bindings=(OWN, REFERENCE)):
+def run_check(egress, probes, bindings=(OWN, REFERENCE), params=None):
     """``check`` on fake probe records, in a scratch repository."""
     with tempfile.TemporaryDirectory() as scratch:
         root = Path(scratch).resolve()
         (root / "data").mkdir()
         calls = []
 
-        def probe(egress_taken, source, _capability, _params):
-            calls.append((egress_taken, source))
+        def probe(egress_taken, source, _capability, _params, **options):
+            calls.append((egress_taken, source, options))
             return probes[source]
 
         out = io.StringIO()
         with mock.patch.multiple(MODULE, ROOT=root, DATA_DIR=root / "data", run_probe=probe,
                                  bindings_for=lambda capability, states: [b for b in bindings if b.capability == capability]), \
                 mock.patch.dict(os.environ, SETTINGS), contextlib.redirect_stdout(out):
-            code = MODULE.main(["check", "tdx_public", CAPABILITY, "--egress", egress])
+            code = MODULE.main(["check", "tdx_public", CAPABILITY, "--egress", egress, "--params", json.dumps(params or {})])
         files = sorted((root / "data").glob("*.json"))
         return SimpleNamespace(code=code, names=[path.name for path in files], calls=calls, stdout=out.getvalue(),
                                evidence=[json.loads(path.read_text(encoding="utf-8")) for path in files])
+
+
+def evidence_of(egress="owner", **changes):
+    return run_check(egress, answers(**changes)).evidence[0]
+
+
+def failing(evidence):
+    return sorted(gate for gate, item in evidence["verdicts"].items() if not item["pass"])
 
 
 def fake_ssh(root, body):
@@ -77,49 +90,91 @@ def fake_ssh(root, body):
 class CheckTests(unittest.TestCase):
     def test_an_agreeing_owner_probe_inside_a_session_passes_every_gate(self):
         result = run_check("owner", answers())
-        self.assertEqual((result.code, result.names), (0, ["tdx_promote_quote.watch_snapshot_tdx_public_2026-10-12_owner.json"]))
+        self.assertRegex(result.names[0], r"^tdx_promote_quote\.watch_snapshot_tdx_public_2026-10-12_owner_[0-9a-f]{8}\.json$")
         evidence = result.evidence[0]
         self.assertEqual({gate: item["pass"] for gate, item in evidence["verdicts"].items()},
                          {"owner_egress": True, "agreement": True, "intraday": True})
-        self.assertEqual(evidence["comparison"]["volume"]["pairs"], [[300, 300], [500, 500]], "lots became shares first")
+        volume = evidence["comparison"]["volume"]
+        self.assertEqual((volume["matched"], volume["mismatched"], volume["only_left"], volume["only_right"], volume["max_abs_dev"]),
+                         (20, 0, 0, 0, 0), "lots became shares, and the order of the rows did not matter")
         self.assertEqual(evidence["projections"], {"tdx_public": {"field_map": {"vol": "volume"}, "unit_factors": {"volume": 100}}})
         self.assertEqual((evidence["schema"], evidence["catalog_status"], evidence["decision_eligible"], evidence["egress"]),
-                         ("tdx-promote-v1", "unsupported", False, "owner"))
+                         ("tdx-promote-v2", "unsupported", False, "owner"))
         self.assertEqual(evidence["session"]["inside"], {"tdx_public": True, "tencent_free": True})
-        self.assertEqual(result.calls, [("owner", "tdx_public"), ("owner", "tencent_free")])
+        self.assertEqual(result.calls, [("owner", "tdx_public", {"all_rows": True}), ("owner", "tencent_free", {"all_rows": True})])
         self.assertIn("agreement: pass", result.stdout)
 
+    def test_the_evidence_keeps_the_first_rows_and_the_hash_of_all_of_them(self):
+        probe = run_check("owner", answers()).evidence[0]["probes"]["tdx_public"]
+        self.assertEqual((probe["rows"], probe["sample"]), (20, OWN_ROWS[:5]))
+        self.assertEqual(probe["sample_sha256"],
+                         hashlib.sha256(json.dumps(OWN_ROWS, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest())
+
+    def test_two_checks_with_other_parameters_do_not_share_an_evidence_file(self):
+        names = {json.dumps(params): run_check("owner", answers(), params=params).names[0]
+                 for params in ({}, {"symbols": ["000001.SZ"]}, {"symbols": ["600519.SH"]})}
+        self.assertEqual(len(set(names.values())), 3, names)
+        self.assertEqual(len({re.sub(r"_[0-9a-f]{8}\.json$", "", name) for name in names.values()}), 1)
+
     def test_each_gate_fails_for_its_own_reason(self):
-        def verdicts(egress="owner", **changes):
-            return run_check(egress, answers(**changes)).evidence[0]["verdicts"]
-
-        def failing(items):
-            return sorted(gate for gate, item in items.items() if not item["pass"])
-
-        self.assertEqual(failing(verdicts("mac")), ["owner_egress"])
-        self.assertEqual(failing(verdicts(tdx_public=record("tdx_public", OWN_ROWS, LUNCH))), ["intraday"])
-        self.assertEqual(failing(verdicts(tdx_public=record("tdx_public", OWN_ROWS, CLOSING))), ["intraday"])
-        off = verdicts(tdx_public=record("tdx_public", [{"price": 10.1, "vol": 3}, OWN_ROWS[1]]))
-        self.assertEqual((failing(off), off["agreement"]["detail"]), (["agreement"], "price: 1 of 2 pairs outside the tolerance"))
-        inexact = verdicts(tencent_free=record("tencent_free", [{"price": 10.005, "volume": 301}, REFERENCE_ROWS[1]]))
-        self.assertEqual((failing(inexact), inexact["agreement"]["detail"]),
-                         (["agreement"], "volume: 1 of 2 pairs outside the tolerance"), "no tolerance given means equal")
-        short = verdicts(tencent_free=record("tencent_free", REFERENCE_ROWS[:1]))
-        self.assertEqual((failing(short), short["agreement"]["detail"]),
-                         (["agreement"], "price: sampled 2 rows against 1; volume: sampled 2 rows against 1"))
-        shaped = verdicts(tencent_free=record("tencent_free", [[{"price": 10.0}], {"fetched": 1}]))     # an adapter that returns a tuple
-        self.assertEqual((failing(shaped), shaped["agreement"]["detail"].count("tencent_free sampled rows that are not mappings")),
-                         (["agreement"], 2))
-        gone = verdicts(tencent_free=record("tencent_free", [], error="OSError: refused"))
-        self.assertEqual((failing(gone), gone["agreement"]["detail"].count("tencent_free probe failed: OSError: refused")),
-                         (["agreement"], 2))
-        down = verdicts(tdx_public=record("tdx_public", [], error="TdxProtocolError: no TDX host answered"))
+        self.assertEqual(failing(evidence_of("mac")), ["owner_egress"])
+        self.assertEqual(failing(evidence_of(tdx_public=record("tdx_public", OWN_ROWS, LUNCH))), ["intraday"])
+        self.assertEqual(failing(evidence_of(tdx_public=record("tdx_public", OWN_ROWS, CLOSING))), ["intraday"])
+        off = evidence_of(tdx_public=record("tdx_public", [{**OWN_ROWS[0], "price": 10.1}, *OWN_ROWS[1:]]))
+        self.assertEqual(failing(off), ["agreement"])
+        self.assertEqual((off["comparison"]["price"]["agree"], off["comparison"]["volume"]["agree"]), (False, True))
+        absent = evidence_of(tdx_public=record("tdx_public", [{"symbol": s, "vol": 3} for s in SYMBOLS]),
+                             tencent_free=record("tencent_free", [{"symbol": s, "volume": 300} for s in SYMBOLS]))
+        self.assertEqual((failing(absent), absent["comparison"]["price"]["mismatched"]), (["agreement"], 20),
+                         "a value neither side has agrees with nothing")
+        gone = evidence_of(tencent_free=record("tencent_free", [], error="OSError: refused"))
+        self.assertEqual(failing(gone), ["agreement"])
+        self.assertEqual(gone["verdicts"]["agreement"]["detail"].count("tencent_free probe failed: OSError: refused"), 2)
+        down = evidence_of(tdx_public=record("tdx_public", [], error="TdxProtocolError: no TDX host answered"))
         self.assertEqual(failing(down), ["agreement", "owner_egress"])
+
+    def test_rows_are_joined_on_the_key_and_every_common_row_is_counted(self):
+        # The reference misses the first symbol, has one the binding lacks and quotes the last symbol 1% higher.
+        reference = [{**row, "price": 10.1} if row["symbol"] == SYMBOLS[-1] else row for row in REFERENCE_ROWS[:-1]]
+        reference.append({"symbol": "999999.SZ", "price": 5.0, "volume": 100})
+        price = evidence_of(tencent_free=record("tencent_free", reference))["comparison"]["price"]
+        self.assertEqual({name: price[name] for name in ("left_rows", "right_rows", "matched", "mismatched", "only_left", "only_right")},
+                         {"left_rows": 20, "right_rows": 20, "matched": 18, "mismatched": 1, "only_left": 1, "only_right": 1})
+        self.assertEqual((price["coverage"], price["worst_key"], price["agree"]), (0.95, [SYMBOLS[-1]], False))
+        self.assertEqual(price["examples"], [{"key": [SYMBOLS[-1]], "left": 10.0, "right": 10.1}])
+        self.assertAlmostEqual(price["max_abs_dev"], 0.1)
+        self.assertAlmostEqual(price["max_rel_dev"], 0.1 / 10.1)
+
+    def test_the_common_rows_must_cover_the_share_the_entry_asks_for(self):
+        def agree(missing, binding=OWN):
+            reference = record("tencent_free", REFERENCE_ROWS[:len(REFERENCE_ROWS) - missing])
+            result = run_check("owner", answers(tencent_free=reference), bindings=(binding, REFERENCE))
+            return result.evidence[0]["comparison"]["price"]["agree"]
+
+        self.assertTrue(agree(1), "19 of 20 is the default 0.95")
+        self.assertFalse(agree(2), "18 of 20 is not")
+        lenient = {"price": {"reference": "tencent_free", "key": KEY, "rel_tol": 0.001, "min_coverage": 0.5}}
+        self.assertTrue(agree(2, Binding("tdx_public", CAPABILITY, 70, UNSUPPORTED, spec=BindingSpec(agreement=lenient))))
+
+    def test_rows_that_cannot_be_joined_fail_the_agreement_with_the_reason(self):
+        def why(**changes):
+            agreement = evidence_of(**changes)["verdicts"]["agreement"]
+            self.assertFalse(agreement["pass"])
+            return agreement["detail"]
+
+        self.assertIn("tencent_free printed 20 of its 21 rows",
+                      why(tencent_free={**record("tencent_free", REFERENCE_ROWS), "rows": 21}))
+        self.assertIn("tencent_free printed rows that are not mappings",
+                      why(tencent_free=record("tencent_free", [[{"price": 10.0}], {"fetched": 1}])))     # an adapter that returns a tuple
+        self.assertIn("tencent_free rows lack the key fields ['symbol']",
+                      why(tencent_free=record("tencent_free", [{"price": 10.0, "volume": 300}])))
+        self.assertIn("tencent_free has 1 rows with a repeated key ['symbol']",
+                      why(tencent_free=record("tencent_free", [*REFERENCE_ROWS, REFERENCE_ROWS[0]])))
 
     def test_a_binding_without_tolerances_has_nothing_to_agree_with(self):
         plain = Binding("tdx_public", CAPABILITY, 70, UNSUPPORTED, spec=BindingSpec())
         result = run_check("owner", answers(), bindings=(plain,))
-        self.assertEqual(result.calls, [("owner", "tdx_public")], "no reference is probed")
+        self.assertEqual(result.calls, [("owner", "tdx_public", {"all_rows": False})], "no reference is probed")
         verdict = result.evidence[0]["verdicts"]["agreement"]
         self.assertTrue(verdict["pass"] and verdict["detail"].startswith("not applicable"), verdict)
 
@@ -151,10 +206,11 @@ class ProbeTransportTests(unittest.TestCase):
             env = {"PATH": root, "ARGS_FILE": f"{root}/args", "STDIN_FILE": f"{root}/stdin", **SETTINGS,
                    "PROBE_JSON": json.dumps(record("tdx_public", [{"price": 1.0}]))}
             with mock.patch.dict(os.environ, env, clear=True):
-                taken = MODULE.run_probe("owner", "tdx_public", "quote.all_a_snapshot", {})
+                taken = MODULE.run_probe("owner", "tdx_public", "quote.all_a_snapshot", {}, all_rows=True)
             args = Path(root, "args").read_text(encoding="utf-8").split("\n")
             script = Path(root, "stdin").read_text(encoding="utf-8")
-        command = "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public quote.all_a_snapshot --params '{}'"
+        command = ("docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public "
+                   "quote.all_a_snapshot --params '{}' --all-rows")
         self.assertEqual(taken["command"], command)
         self.assertEqual(taken["rows"], 1)
         self.assertEqual(args[-4:], ["synthetic-user@synthetic-host", "bash", "-s", ""])
@@ -198,7 +254,7 @@ def evidence_file(root, name, source, capability, **passes):
     gates = {"owner_egress": True, "agreement": True, "intraday": True, **passes}
     path = root / "scripts" / "data" / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema": "tdx-promote-v1", "source": source, "capability": capability,
+    path.write_text(json.dumps({"schema": MODULE.SCHEMA, "source": source, "capability": capability,
                                 "verdicts": {gate: {"pass": ok, "detail": f"{gate} detail"} for gate, ok in gates.items()}}),
                     encoding="utf-8")
     return path

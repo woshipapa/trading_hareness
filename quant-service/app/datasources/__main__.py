@@ -4,7 +4,7 @@
     python -m app.datasources validate
     python -m app.datasources collect [--tasks public_evidence_capture,post_close_public_archive]
     python -m app.datasources project-valuations --trade-date YYYY-MM-DD [--apply]
-    python -m app.datasources probe <source> <capability> [--params '{"symbol": "999999.SH"}']
+    python -m app.datasources probe <source> <capability> [--params '{"symbol": "999999.SH"}'] [--all-rows]
 
 ``catalog``/``validate`` need nothing but this package.  ``collect`` needs the
 PG* environment and runs the collectors under the same durable leases as the
@@ -17,8 +17,8 @@ on the service, or simply let the lease decide).  Live source probing lives in
 binding's status, once, with ``--params`` (a JSON object) as its keyword
 arguments, and prints one JSON object: what was asked, when, how many rows,
 coverage, the effective and available ranges, the warnings (they carry the
-answering host), the first rows and the error if the adapter raised (exit 1).
-It writes nothing.  ``scripts/tdx-promote.py`` runs it on the Mac or inside the
+answering host), the first rows (all of them with ``--all-rows``) and the error
+if the adapter raised (exit 1).  It writes nothing.  ``scripts/tdx-promote.py`` runs it on the Mac or inside the
 owner container and records the answer as promotion evidence.
 """
 
@@ -81,8 +81,10 @@ def _adapter(binding: Binding) -> Callable[..., Awaitable[object]]:
     return getattr(importlib.import_module(path.removesuffix(".py").replace("/", ".")), name)
 
 
-async def _call(binding: Binding, params: dict[str, Any]) -> dict[str, Any]:
-    """Call the binding's adapter once and describe the answer; an adapter that raises is reported, not hidden."""
+async def _call(binding: Binding, params: dict[str, Any], printed: int | None) -> dict[str, Any]:
+    """Call the binding's adapter once and describe the answer, printing ``printed`` rows (None: all of them).
+
+    An adapter that raises is reported, not hidden."""
     record: dict[str, Any] = {"source": binding.source, "capability": binding.capability, "params": params,
                               "started_utc": datetime.now(timezone.utc).isoformat()}
     try:
@@ -93,7 +95,7 @@ async def _call(binding: Binding, params: dict[str, Any]) -> dict[str, Any]:
         record |= {"rows": len(rows), "coverage": evidence.coverage,
                    "effective_at_min": evidence.effective_at_min, "effective_at_max": evidence.effective_at_max,
                    "available_at_min": evidence.available_at_min, "available_at_max": evidence.available_at_max,
-                   "warnings": list(evidence.warnings), "sample": rows[:SAMPLE_ROWS], "error": None}
+                   "warnings": list(evidence.warnings), "sample": rows[:printed], "error": None}
     record["finished_utc"] = datetime.now(timezone.utc).isoformat()
     return record
 
@@ -103,7 +105,7 @@ def _probe(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                     if item.source == args.source), None)
     if binding is None or ":" not in (binding.adapter or ""):
         parser.error(f"{args.source} -> {args.capability}: no such binding, or its adapter names no function")
-    record = asyncio.run(_call(binding, args.params))
+    record = asyncio.run(_call(binding, args.params, None if args.all_rows else SAMPLE_ROWS))
     print(json.dumps(record, ensure_ascii=False, indent=2, default=_jsonable))
     return 1 if record["error"] else 0
 
@@ -156,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     probe.add_argument("source")
     probe.add_argument("capability")
     probe.add_argument("--params", type=json.loads, default={}, help="JSON object: the adapter's keyword arguments")
+    probe.add_argument("--all-rows", action="store_true", help=f"print every row, not the first {SAMPLE_ROWS}")
     args = parser.parse_args(argv)
     if args.command == "catalog":
         return _catalog(args)
