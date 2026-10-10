@@ -11,12 +11,14 @@ from unittest import mock
 
 from app.datasources.sources.tdx_files import TdxFileError, build_report_file_request, parse_file_chunk
 from app.datasources.sources.tdx_fin_history import (
-    ManifestEntry, TdxFinanceError, download_report_file, gpcw, gpcw_field_unit,
+    ManifestEntry, TdxFinanceError, date_gpcw_rows, download_report_file, gpcw, gpcw_field_unit,
     manifest_changes, normalize_report_period, parse_gpcw_dat, parse_gpcw_zip, parse_manifest,
     ttm_from_cumulative, verify_manifest_entry,
 )
+from app.datasources.sources.tdx_zhb_extras import parse_tipinfo
 
 VERIFY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "verify-tdx-fin-history.py"
+TIPINFO = Path(__file__).parent / "fixtures" / "tdx_zhb_20261009" / "tipinfo.dat"
 
 # One GPCW .dat written out byte by byte: a 20-byte header (kind, report_date 20241231, count 1, unknown,
 # record_size 968 = 242 floats, reserved), one 11-byte index entry ("600519", flag, record offset 31) and the
@@ -39,6 +41,14 @@ def gpcw_zip(dat=GPCW_DAT, member="gpcw20241231.dat"):
 
 def manifest_line(filename, payload):
     return f"{filename},{hashlib.md5(payload).hexdigest()},{len(payload)}\n"
+
+
+def gpcw_rows(period, *codes):
+    """What parse_gpcw_dat gives for the file of ``period`` (YYYYMMDD) that lists ``codes``, one float per record."""
+    header = struct.pack("<hIH3L", 1, int(period), len(codes), 0, 4, 0)
+    first_record = len(header) + 11 * len(codes)
+    index = b"".join(struct.pack("<6s1sL", code.encode(), b"\0", first_record + 4 * n) for n, code in enumerate(codes))
+    return parse_gpcw_dat(header + index + struct.pack(f"<{len(codes)}f", *range(len(codes))), filename=f"gpcw{period}.zip")
 
 
 class ReportHost:
@@ -320,6 +330,19 @@ class GpcwPeriodTests(unittest.TestCase):
         self.assertEqual(host.requests, [])
         with self.assertRaises(TypeError):
             gpcw(host, "gpcw20241231.zip")
+
+
+class GpcwAvailabilityTests(unittest.TestCase):
+    def test_tipinfo_dates_a_report_to_the_end_of_its_first_disclosure_day_and_nothing_else(self):
+        tipinfo = parse_tipinfo(TIPINFO.read_bytes())       # 60 securities, each with its 2026-06-30 report only
+        h1 = gpcw_rows("20260630", "000001", "600519")
+        q1 = gpcw_rows("20260331", "000001")
+
+        self.assertEqual(date_gpcw_rows(h1 + q1, tipinfo), 2)
+
+        self.assertEqual(h1[0]["available_at"].isoformat(), "2026-08-15T23:59:59+08:00")
+        self.assertNotIn("available_at", h1[1])      # 600519 is not among the 60 securities
+        self.assertNotIn("available_at", q1[0])      # 000001's report in tipinfo is the 2026-06-30 one: this period is older
 
 
 class VerifyCacheScriptTests(unittest.TestCase):

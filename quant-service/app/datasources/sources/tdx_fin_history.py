@@ -10,7 +10,7 @@ without an independent disclosure event.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time
 from io import BytesIO
 import hashlib
 import re
@@ -18,6 +18,7 @@ import struct
 from typing import Any, Iterable
 import zipfile
 import zlib
+from zoneinfo import ZoneInfo
 
 from . import tdx_files, tdx_protocol
 
@@ -26,6 +27,7 @@ class TdxFinanceError(tdx_files.TdxFileError):
     """Typed error for GPCW parsing and download issues."""
 
 
+CN_TZ = ZoneInfo("Asia/Shanghai")
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 _HEADER = "<hI H 3L"
 _ITEM = "<6s1sL"
@@ -208,6 +210,27 @@ def gpcw(client: tdx_protocol.TdxClient, filename: str, entry: ManifestEntry) ->
     return parse_gpcw_zip(payload, filename=filename)
 
 
+def date_gpcw_rows(rows: list[dict[str, Any]], tipinfo_rows: list[dict[str, Any]]) -> int:
+    """Set ``available_at`` on the GPCW rows whose (code, report period) ``tipinfo.dat`` dates; return how many stay undated.
+
+    ``rows`` is :func:`parse_gpcw_dat` output and ``tipinfo_rows`` is ``tdx_zhb_extras.parse_tipinfo`` output.
+    A dated row is available from the end of its report's first disclosure day in Asia/Shanghai (23:59:59), so it
+    is usable from the next session. ``tipinfo.dat`` lists each security's latest report only: every older period,
+    and a security it does not list, keeps no ``available_at``. The date is that of the report's first
+    disclosure, not of the snapshot's values, which a later snapshot may restate.
+    """
+    first_disclosure = {(item["code"], normalize_report_period(item["report_period"])): item["first_disclosure_date"]
+                        for item in tipinfo_rows}
+    undated = 0
+    for row in rows:
+        day = first_disclosure.get((row["code"], row["report_period"]))
+        if day is None:
+            undated += 1
+        else:
+            row["available_at"] = datetime.combine(day, time(23, 59, 59), tzinfo=CN_TZ)
+    return undated
+
+
 def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cumulative: float) -> float:
     """Compute TTM from the confirmed year-to-date cumulative series.
 
@@ -216,5 +239,5 @@ def ttm_from_cumulative(previous_fy: float, current_cumulative: float, prior_cum
     return previous_fy + current_cumulative - prior_cumulative
 
 
-__all__ = ["GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "download_report_file", "gpcw", "gpcw_field_name", "gpcw_field_unit",
+__all__ = ["GPCW_FIELD_NAMES", "MAX_DOWNLOAD_BYTES", "ManifestEntry", "TdxFinanceError", "date_gpcw_rows", "download_report_file", "gpcw", "gpcw_field_name", "gpcw_field_unit",
            "manifest_changes", "normalize_report_period", "parse_gpcw_dat", "parse_gpcw_zip", "parse_manifest", "ttm_from_cumulative", "verify_manifest_entry"]
