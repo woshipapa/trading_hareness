@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable, Sequence, TypeVar
 from zoneinfo import ZoneInfo
 
 from ..contracts import CapabilityEvidence
-from . import tdx_protocol
+from . import tdx_instruments, tdx_protocol
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
 _LOGGER = logging.getLogger(__name__)
@@ -539,8 +539,10 @@ async def fetch_limit_prices(*, symbols: Sequence[str]) -> CapabilityEvidence:
 
 
 async def fetch_iopv(*, symbols: Sequence[str]) -> CapabilityEvidence:
-    """The intraday reference net value (IOPV) of ETFs: pre_iopv and iopv in yuan, with the quote's exchange_time."""
-    stocks = tdx_protocol.requested_stocks(symbols)
+    """The intraday reference net value (IOPV) of funds: pre_iopv and iopv in yuan, with the quote's exchange_time.
+    Bits 0x24 and 0x27 hold other numbers for a stock, so a symbol that is not an ETF, LOF or fund is a ValueError
+    before the network."""
+    stocks = tdx_instruments.requested_of_types(symbols, tdx_instruments.FUND_TYPES)
     rows, host = await call(
         lambda client: [_quote_row(row, IOPV_FIELDS) for row in client.batch_quotes(stocks, IOPV_BITMAP)])
     return tdx_protocol.batch_evidence(rows, symbols, host)

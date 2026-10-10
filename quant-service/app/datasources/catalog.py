@@ -655,11 +655,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tdx_mac", "fund.iopv", 70, UNSUPPORTED, _RAW + "tdx_mac_iopv",
           "app/datasources/sources/tdx_mac.py:fetch_iopv",
           notes="0x122b 位 0x24 pre_iopv、0x27 iopv（float32，元），不是 fund.nav 的披露净值；只有 ETF 510300 对账为 MATCH"
-                "（docs/archive/tdx-route-mac-fields.md），非基金代码的这两位是别的数（scripts/data/tdx_mac_adapters_live_2026-10-10_mac.json），"
-                "调用方只传 ETF；exchange_time 取同一行位 0x13/0x14 的行情更新时间，IOPV 自身的时刻不在行内；"
+                "（docs/archive/tdx-route-mac-fields.md）；非基金代码的这两位是别的数（scripts/data/tdx_mac_adapters_live_2026-10-10_mac.json），"
+                "所以只接受 ETF、LOF 和基金类代码（etf、lof、fund），其他类型在联网前以 ValueError 拒绝；"
+                "exchange_time 取同一行位 0x13/0x14 的行情更新时间，IOPV 自身的时刻不在行内；"
                 "回包按位置核对，代码不符的行丢弃并记 code_mismatch（δ1 R1）",
           spec=BindingSpec(
-              params={"symbols": "ETF symbols such as 510300.SH"},
+              params={"symbols": "fund symbols such as 510300.SH (ETF, LOF, fund)"},
               field_map={"symbol": "fund_code", "iopv": "iopv", "pre_iopv": "pre_iopv", "exchange_time": "exchange_time"},
               paging="batch", max_batch=80,
               time_semantics="effective=exchange_time (bits 0x13 date and 0x14 time of the quote row, Asia/Shanghai; the "

@@ -10,7 +10,7 @@ the same keywords, so the resolver can fall through without translation):
 * ``events.*`` (datacenter): ``start: date``, ``end: date``
 * ``news.flash``: none;  ``events.investor_qa``: ``observed_at``
 * ``fund.nav``: ``fund_code``
-* ``fund.iopv`` (TDX MAC): ``symbols``, ETF symbols such as 510300.SH
+* ``fund.iopv`` (TDX MAC): ``symbols``, fund symbols such as 510300.SH (ETF, LOF, fund)
 * ``quote.watch_snapshot``: ``symbols``
 * ``quote.order_book`` (TDX): ``symbols``, stock symbols such as 600519.SH
 * ``limits.prices``: ``symbols``

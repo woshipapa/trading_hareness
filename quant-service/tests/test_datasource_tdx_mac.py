@@ -451,7 +451,7 @@ class MacWatchSnapshotTests(unittest.TestCase):
                         asyncio.run(adapter(**params))
 
     def test_an_old_bj_code_is_requested_as_its_920_code_and_its_row_keeps_the_requested_symbol(self):
-        for adapter in (tdx_mac.fetch_watch_snapshot, tdx_mac.fetch_limit_prices, tdx_mac.fetch_iopv):
+        for adapter in (tdx_mac.fetch_watch_snapshot, tdx_mac.fetch_limit_prices):
             client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
             with patched_call(client):
                 evidence = asyncio.run(adapter(symbols=["430017.BJ", "600519.SH"]))
@@ -569,6 +569,15 @@ class MacIopvTests(unittest.TestCase):
         self.assertEqual([(row["symbol"], row["pre_iopv"], row["iopv"], row["exchange_time"]) for row in evidence.rows],
                          [("510300.SH", 4.375, 4.40625, stamp), ("159915.SZ", 4.375, 4.40625, stamp)])
         self.assertEqual(client.requests[0][12:32], tdx_mac.IOPV_BITMAP)
+
+    def test_every_fund_type_is_served_and_any_other_type_is_refused_before_the_network(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
+        evidence = self.fetch(client, ["510300.SH", "161121.SZ", "500001.SH"])  # an ETF, a LOF and a fund
+        self.assertEqual([row["symbol"] for row in evidence.rows], ["510300.SH", "161121.SZ", "500001.SH"])
+        with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+            for symbol in ("600519.SH", "000001.SZ", "300750.SZ", "430017.BJ", "999999.SH", "880005.SH", "127045.SZ"):
+                with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, "takes only etf, fund, lof"):
+                    asyncio.run(tdx_mac.fetch_iopv(symbols=["510300.SH", symbol]))
 
     def test_81_symbols_make_two_requests(self):
         symbols = [f"{number:06d}.SZ" for number in range(159001, 159082)]
