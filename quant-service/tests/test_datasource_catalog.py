@@ -109,6 +109,17 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn(RETIRED, {provider["status"] for capability in document["capabilities"]
                                    for provider in capability["providers"]})
 
+    def test_i2_legacy_bindings_are_unsupported_and_fully_specified(self):
+        snapshot = next(item for item in BINDINGS
+                        if item.source == "tdx_public" and item.capability == "quote.all_a_snapshot")
+        overview = next(item for item in BINDINGS
+                        if item.source == "tdx_public" and item.capability == "quote.index_overview")
+        self.assertEqual((snapshot.status, overview.status), (UNSUPPORTED, UNSUPPORTED))
+        self.assertFalse(snapshot.decision_eligible or overview.decision_eligible)
+        self.assertEqual(snapshot.spec.max_batch, 80)
+        self.assertEqual(snapshot.spec.unit_factors["volume"], 100)
+        self.assertIn("排序宽度", overview.notes)
+
 
 class NonSectorGroupTests(unittest.TestCase):
     """Qualification lists never stand in for a sector (2026-09-18 labels)."""

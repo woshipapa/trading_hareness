@@ -62,7 +62,6 @@ UNREGISTERED: dict[str, str] = {
     "tdx_files.parse_zhb_zip": "parses a zhb.zip already downloaded into memory; its archive.open() reads those bytes",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
                                "and security-list capabilities of P2 bind its sections",
-    "family:quote": "legacy quotes bind in P2 after the instrument model (delta D2); MAC 0x122b in P3",
     "family:F10": "verified in the plan; company-profile capability arrives in P5",
     "family:finance": "verified in the plan; financial-statements capability arrives in P5",
     "family:files": "verified in the plan; server-file capabilities arrive in P4",

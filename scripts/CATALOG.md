@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (46)
+## research data (47)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -162,6 +162,7 @@
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
 | `verify-tdx-files.py` | quant-research | workstation | Probe TDX board/report files once per host and print JSON evidence. |
 | `verify-tdx-instruments.py` | quant-research | workstation | Bounded, step-isolated TDX instrument verification. |
+| `verify-tdx-legacy-misc.py` | quant-research | workstation | Probe the supported legacy TDX ranking and index-overview commands. |
 | `verify-tdx-protocol.py` | quant-research | workstation | Check ``app.datasources.sources.tdx_protocol`` against pytdx on a live host. |
 | `verify-tdx-zhb-extras.py` | quant-research | workstation | Inventory and verify every member in a downloaded TDX ``zhb.zip``. |
 
