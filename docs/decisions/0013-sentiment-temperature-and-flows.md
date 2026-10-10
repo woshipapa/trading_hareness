@@ -205,7 +205,7 @@ owner 发布之后按顺序执行。这些步骤只写派生观测，不改表�
 1. **日线温度**：`python -m app.market_temperature_runtime --end <T> --keep 400 --lookback-days 700 --apply`。日线从 2025-01 开始，前 60 个交易日是预热期。
 2. **宽基 ETF 放量**：`python -m app.broad_etf_flow --end <T> --days 600 --keep 400 --apply`
 3. **金 / 银指**：`python -m app.market_timing --end <T> --days 1000 --keep 400 --apply`。扶摇的指数历史从 2024 年开始。
-4. **分时温度**：`python -m app.market_temperature_intraday --start <最早有分钟截面的交易日> --end <T> --apply`。每个交易日约 15 秒。要跑两遍，第二遍让较早的交易日也用上成交额占比曲线。
+4. **分时温度**：`python -m app.market_temperature_intraday --start <最早有分钟截面的交易日> --end <T> --apply`。每个交易日约 10 秒。只需跑一遍：从早到晚逐日写入，每天的成交额占比曲线只用此前已存的交易日；第二遍算出的结果完全相同（10-10 实测写入 0 条）。分钟采集每天约 14:59 停止，所以收盘点是 14:55 以后的最后一份截面。
 5. **读回核对**：
    - `GET /api/v1/market/temperature/daily?days=250` 与回测逐日一致。2026-10-09 应为：温度 72.6，ETF 放量比 1.54，银指。
    - `GET /api/v1/indicators/health?keys=market.temperature,market.broad_etf_flow,market.timing` 全部为 ok。
