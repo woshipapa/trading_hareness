@@ -27,7 +27,6 @@ OP_MEMBERS = 0x122C
 OP_BATCH_QUOTES = 0x122B
 OP_BARS = 0x122E
 OP_AUCTION = 0x123D
-OP_CAPITAL_FLOW = 0x1218
 OP_TICK_CHARTS = 0x123E
 OP_MARKET_MONITOR = 0x1237
 OP_BELONG_BOARD = 0x1218
@@ -43,7 +42,7 @@ BAR_PERIODS = {
     "1m": 8,
 }
 DEFAULT_BITMAP = bytes.fromhex(
-    "ff fc e1 cc 3f 08 03 01 00 00 00 00 00 00 00 00 00 00 00 00"
+    "ff fc f9 cc 3f 08 03 01 00 00 00 00 00 00 00 00 00 00 00 00"
 )
 
 
@@ -53,8 +52,6 @@ class TdxMacError(RuntimeError):
 
 def exchange_board_code(symbol: str) -> int:
     value = symbol.upper()
-    if value.startswith("US"):
-        return 30000 + int(value[2:])
     if value.startswith("HK"):
         return 20000 + int(value[2:])
     n = int(value)
@@ -187,10 +184,6 @@ def build_aux_request(
         payload = struct.pack("<H22sII10s", market, _fixed(code, 22), start, count, b"")
     elif opcode == OP_TICK_CHARTS:
         payload = struct.pack("<H22sIHH6s", market, _fixed(code, 22), 0, 5, 1, b"")
-    elif opcode == OP_CAPITAL_FLOW and head == 2:
-        payload = struct.pack(
-            "<H8s16s21s", market, _fixed(code, 8), b"", _fixed("Stock_ZJLX", 21)
-        )
     elif opcode == OP_BELONG_BOARD:
         payload = struct.pack(
             "<H8s16s21s", market, _fixed(code, 8), b"", _fixed("Stock_GLHQ", 21)
@@ -212,12 +205,12 @@ def parse_board_list(body: bytes) -> list[dict[str, Any]]:
     if len(body) < 6:
         return []
     count_all, _total = struct.unpack_from("<HH", body, 0)
-    count = count_all // 2
+    count = count_all // 2 if count_all // 2 != 0 else count_all
     rows = []
     for i in range(count):
         pos = 4 + i * 160
         if pos + 160 > len(body):
-            break
+            raise TdxMacError(f"truncated board list item {i}: need {pos + 160} bytes, got {len(body)}")
         rows.append(
             {
                 "market": struct.unpack_from("<H", body, pos)[0],
@@ -226,9 +219,12 @@ def parse_board_list(body: bytes) -> list[dict[str, Any]]:
                 "price": _float(body, pos + 68),
                 "rise_speed": _float(body, pos + 72),
                 "pre_close": _float(body, pos + 76),
-                "symbol_code": _text(body[pos + 82 : pos + 88]),
-                "symbol_name": _text(body[pos + 104 : pos + 148]),
-                "member_count": struct.unpack_from("<H", body, pos + 148)[0],
+                "leading_market": struct.unpack_from("<H", body, pos + 80)[0],
+                "leading_code": _text(body[pos + 82 : pos + 88]),
+                "leading_name": _text(body[pos + 104 : pos + 148]),
+                "leading_price": _float(body, pos + 148),
+                "leading_rise_speed": _float(body, pos + 152),
+                "leading_pre_close": _float(body, pos + 156),
             }
         )
     return rows
@@ -236,7 +232,7 @@ def parse_board_list(body: bytes) -> list[dict[str, Any]]:
 
 def parse_board_members(body: bytes, *, quotes: bool = False) -> list[dict[str, Any]]:
     if len(body) < 26:
-        return []
+        raise TdxMacError(f"truncated board members response: need 26 bytes, got {len(body)}")
     if quotes:
         from .tdx_mac_fields import decode_dynamic_response
 
@@ -247,7 +243,7 @@ def parse_board_members(body: bytes, *, quotes: bool = False) -> list[dict[str, 
     for i in range(count):
         pos = 26 + i * stride
         if pos + stride > len(body):
-            break
+            raise TdxMacError(f"truncated board members item {i}: need {pos + stride} bytes, got {len(body)}")
         row = {
             "market": struct.unpack_from("<H", body, pos)[0],
             "symbol": _text(body[pos + 2 : pos + 8]),
@@ -295,7 +291,7 @@ def parse_auxiliary_count(opcode: int, body: bytes) -> int:
         return struct.unpack_from("<H", body, 69)[0]
     if opcode == OP_MARKET_MONITOR and len(body) >= 2:
         return struct.unpack_from("<H", body, 0)[0]
-    if opcode in (OP_CAPITAL_FLOW, OP_BELONG_BOARD) and len(body) >= 27:
+    if opcode == OP_BELONG_BOARD and len(body) >= 27:
         try:
             value = json.loads(body[27:].decode("gbk", "replace"))
             return len(value) if isinstance(value, list) else 0
@@ -422,7 +418,9 @@ def call_sync(
         try:
             with TdxMacClient(host, port, timeout_seconds) as client:
                 return operation(client), f"{host}:{port}"
-        except (OSError, TdxMacError, struct.error, ValueError, zlib.error) as exc:
+        except (struct.error, zlib.error) as exc:
+            raise TdxMacError(f"decode error at {host}:{port}: {exc}") from exc
+        except (OSError, TdxMacError) as exc:
             errors.append(f"{host}:{type(exc).__name__}")
     raise TdxMacError("no MAC host answered: " + ", ".join(errors[-4:]))
 
@@ -455,8 +453,10 @@ async def fetch_board_catalog() -> list[dict[str, Any]]:
     def collect(client):
         rows = []
         for board_type in range(7):
+            if board_type == 2 or board_type == 6:
+                continue
             rows.extend({"board_code": row["code"], "name": row["name"],
-                         "board_type": board_type, "member_count": row["member_count"]}
+                         "board_type": board_type}
                         for row in client.board_list(board_type))
         return rows
     rows, _ = await call(collect)
@@ -465,12 +465,33 @@ async def fetch_board_catalog() -> list[dict[str, Any]]:
 
 async def fetch_membership(*, sector_key: str) -> list[dict[str, Any]]:
     def collect(client):
-        board_type = next(board_type for board_type in range(7)
-                          if any(row["code"] == sector_key for row in client.board_list(board_type)))
-        known_at = datetime.now(timezone.utc)
-        return [{"taxonomy_key": f"tdx_mac_type_{board_type}", "sector_key": sector_key,
-                 "symbol": row["symbol"], "known_at": known_at}
-                for row in client.board_members(sector_key)]
+        # Find board_type from catalog (skip type 6 to avoid duplication)
+        board_type = None
+        for bt in range(7):
+            if bt == 6:
+                continue
+            for row in client.board_list(bt):
+                if row["code"] == sector_key:
+                    board_type = bt
+                    break
+            if board_type is not None:
+                break
+        if board_type is None:
+            raise TdxMacError(f"unknown board key: {sector_key}")
+
+        rows = []
+        for row in client.board_members(sector_key):
+            market = row["market"]
+            market_name = {0: "SZ", 1: "SH", 2: "BJ"}.get(market)
+            if market_name is None:
+                raise TdxMacError(f"unknown market id: {market}")
+            symbol = f"{row['symbol']}.{market_name}"
+            rows.append({
+                "taxonomy_key": f"tdx_mac_type_{board_type}",
+                "sector_key": sector_key,
+                "symbol": symbol
+            })
+        return rows
     rows, _ = await call(collect)
     return rows
 
