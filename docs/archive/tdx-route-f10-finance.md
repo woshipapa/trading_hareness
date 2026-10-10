@@ -23,7 +23,7 @@ copied into this repository.
 | F10 content | `0x02d0` | `<H6sH80sIII>` market/code/padding/file/start/length/reserved | 10-byte prefix + `<H>` byte length + GBK |
 | Report file | `0x06b9` | offset, max chunk (30,000), 100-byte filename | `<I>` chunk size + bytes |
 
-`finance_info()` uses separate raw scales: monetary floats are 千元 and are multiplied by 1,000; capital floats are 万股 and are multiplied by 10,000. EPS and net-assets-per-share remain 元/股; shareholder count is a count; province, industry and dates are integer codes (`YYYYMMDD`). `field_units` exposes the normalized unit and the raw-unit metadata. The FINVALUE/GPCW source documentation says unmarked GPCW money is yuan and capital is shares; explicit `(万元)`, `(万股)`, per-share and percentage fields retain those stated units.
+`parse_finance_info()` uses separate raw scales: monetary floats are 千元 and are multiplied by 1,000; capital floats are 万股 and are multiplied by 10,000. EPS and net-assets-per-share remain 元/股; shareholder count is a count; province, industry and dates are integer codes (`YYYYMMDD`). `field_units` exposes the normalized unit and the raw-unit metadata. The FINVALUE/GPCW source documentation says unmarked GPCW money is yuan and capital is shares; explicit `(万元)`, `(万股)`, per-share and percentage fields retain those stated units.
 
 ## GPCW parser
 
@@ -47,14 +47,14 @@ The probe reads Tencent quote field 73 as a comparison for TDX `total_shares`; t
 
 On 2026-10-10, `120.76.152.87:7709` served `gpcw.txt` and the newest archive containing the requested symbols, `gpcw20260630.zip` (the newer `gpcw20260930.zip` contained only one unrelated row). The parsed report date was `20260630`. Comparing `finance_info` from `117.34.114.13:7709` with GPCW columns `col40`, `col72`, `col74`, and `col96` gave these finance/GPCW ratios after the fix:
 
-| Code | Total assets | Equity | Revenue | Net profit | Finance `updated_date` |
+| Code | Total assets | Parent equity / `col72` | Revenue | Net profit | Finance `updated_date` |
 | --- | ---: | ---: | ---: | ---: | --- |
 | 000001 | 1.00000001 | 1.00000000 | 1.00000003 | 1.00000000 | 20260815 |
 | 600519 | 1.00000005 | 0.9586 | 1.00000007 | 1.00000000 | 20260815 |
 | 300750 | 1.00000000 | 0.9164 | 1.00000000 | 1.00000000 | 20260925 |
 
-The approximately 1.0 ratios validate `千元 -> 元` for monetary fields. The equity exceptions are report-period/restatement differences: the archive is 20260630 while the summary carries a later `updated_date`; the summary must be combined with announcement metadata (via tipinfo) to establish the report period, and the `updated_date` field must never be used as a period proxy.
+The approximately 1.0 ratios validate `千元 -> 元` for monetary fields. The equity ratios compare two different quantities and are not a report-period or restatement difference: the summary field is `parent_equity`, the equity attributable to the parent (GPCW column 271), while `col72` is total equity, which includes minority interests. Separately, the archive is 20260630 while the summary carries a later `updated_date`; the summary must be combined with announcement metadata (via tipinfo) to establish the report period, and the `updated_date` field must never be used as a period proxy.
 
 ## Capability fit
 
-The output can support research-only enrichment for the existing `fundamentals.financial_statements` capability (currently bound to `fuyao_ths`) and the existing `fundamentals.capital_changes` capability only indirectly for share-count context. The 0x0010 summary is not a replacement for `fundamentals.daily_basic`, whose catalog binding is `longhuvip_composite`. The company_profile capability carries F10 text/categories with effective=collection time (no report period semantic). Catalog bindings have been added with UNSUPPORTED status pending independent verification.
+The output can support research-only enrichment for the existing `fundamentals.financial_statements` capability (currently bound to `fuyao_ths`) and the existing `fundamentals.capital_changes` capability only indirectly for share-count context. The 0x0010 summary is not a replacement for `fundamentals.daily_basic`, whose catalog binding is `longhuvip_composite`. The company_profile capability carries F10 text/categories with effective=collection time (no report period semantic). Catalog bindings have been added with the UNSUPPORTED status, which `quant-service/app/datasources/contracts.py` defines as "the upstream refuses it (kept to re-probe)"; the resolver does not route to a binding in that status.

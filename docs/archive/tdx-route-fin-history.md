@@ -30,9 +30,11 @@ after the documented table are retained as `colN`.
 ## Availability and PIT verdict
 
 `tipinfo.dat` is a separate 22-column UTF-8 snapshot. Its first four fields are
-market, code, report period and EPS; field 4 (`20260815` for `000001` H1 2026)
-is the announcement date (YYMMDD format), matching the public
-disclosure date. The same value appears in GPCW column 314. It is not independently confirmed
+market, code, report period and EPS; field 4 (`20260815` for `000001` H1 2026,
+eight digits, YYYYMMDD) is the announcement date, matching the public
+disclosure date. GPCW column 314 carries the same date in its own six-digit
+YYMMDD form: a GPCW cell is a float32, which cannot hold an eight-digit date such
+as `20260815` exactly. It is not independently confirmed
 for five symbols here (the requested five-stock public-list cross-check was not
 available in this bounded six-period collection). Therefore GPCW is **not point-in-time**: use an
 independent `events.disclosure_schedule`/announcement observation as the
@@ -76,8 +78,9 @@ revisions and comparing the same-period ZIP hashes/rows.
 The manifest implies 148 logical period downloads and 275.99 MB compressed
 bytes (the 148 listed sizes). With the implementation's 30,000-byte TDX
 chunks this is approximately 9,201 transport requests, plus one manifest
-request. A bounded downloader rejects a response over 64 MiB and verifies
-manifest MD5/size before caching.
+request. The bounded downloader refuses a period whose manifest size is over the 64 MiB
+cap before requesting it, raises when a file ends before that size, and `gpcw()`
+verifies the manifest MD5/size before parsing.
 
 This route can back research-only `fundamentals.financial_statements` and can
 support `fundamentals.daily_basic` only for share/count fields. It cannot by
