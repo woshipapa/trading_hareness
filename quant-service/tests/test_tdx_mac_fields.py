@@ -54,7 +54,8 @@ class MacFieldRegistryTests(unittest.TestCase):
             field = MAC_FIELDS[bit]
             self.assertEqual(field.name, f"bit_0x{bit:02x}")
             self.assertIsNone(field.canonical_key, field.name)
-            self.assertEqual((field.capability_ids, field.reconciliation), ((), NO_REFERENCE), field.name)
+            self.assertEqual((field.unit, field.confidence, field.capability_ids, field.reconciliation),
+                             ("", "unknown", (), NO_REFERENCE), field.name)
 
     def test_a_field_without_a_canonical_key_binds_to_no_capability(self):
         for field in MAC_FIELDS:

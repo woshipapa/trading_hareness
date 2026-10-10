@@ -178,7 +178,7 @@ _BASIC = {
     22: (
         "bit_0x16",
         "int32",
-        "count",
+        "",
         None,
         "unknown",
         NO_REFERENCE,
@@ -209,7 +209,7 @@ _BASIC = {
     29: (
         "bit_0x1d",
         "float32",
-        "percent",
+        "",
         None,
         "unknown",
         NO_REFERENCE,
@@ -514,7 +514,7 @@ _BASIC = {
     122: (
         "bit_0x7a",
         "float32",
-        "ratio",
+        "",
         None,
         "unknown",
         NO_REFERENCE,
@@ -649,6 +649,12 @@ _BASIC = {
         _SAMPLED_NOTE,
     ),
 }
+# delta-3 Q4 closed the flow windows 0x6c-0x72 and the DD indicators 0x74-0x76 as UNKNOWN, like the Q5 bits above:
+# wire name, no unit, no canonical key, no capability.
+_BASIC.update({
+    bit: (f"bit_0x{bit:02x}", "float32", "", None, "unknown", NO_REFERENCE, ())
+    for bit in (*range(0x6C, 0x73), 0x74, 0x75, 0x76)
+})
 _KNOWN: dict[int, MACField] = {bit: _field(bit, *args) for bit, args in _BASIC.items()}
 
 # Preserve the upstream wire format even when the semantic name is unknown.
@@ -663,10 +669,6 @@ _UNKNOWN_FORMATS = {
     62: "uint32",
     63: "uint32",
     **{bit: "float32" for bit in range(76, 87)},
-    **{bit: "float32" for bit in range(108, 115)},
-    116: "float32",
-    117: "float32",
-    118: "float32",
 }
 MAC_FIELDS: tuple[MACField, ...] = tuple(
     _KNOWN.get(

@@ -10,12 +10,13 @@ some MAC hosts silently cap the number of dynamic values in one response.
 
 `MAC_FIELDS` is the authoritative full table (`bit`, name, format, unit,
 canonical key, confidence, status, capability IDs, note).  The following table
-lists every field with a trusted or potentially useful business interpretation,
-and the fields delta-3 Q4/Q5 closed as UNKNOWN; all other positions are
-deliberately named `bit_0xNN`, have no canonical key and are `NO_REFERENCE`.
-A row whose name is `bit_0xNN` is an UNKNOWN field: gotdx guesses a meaning, no
-reconciliation supports it, so it keeps its wire name, has no canonical key and
-binds to no capability.
+lists the fields with a trusted or potentially useful business interpretation,
+and the fields delta-3 Q4/Q5 closed as UNKNOWN.  The other entries of the
+registry carry gotdx's name and `NO_REFERENCE`; a position with no entry is
+named `bit_0xNN`, has no canonical key and is `NO_REFERENCE`.  A row whose name
+is `bit_0xNN` is an UNKNOWN field: gotdx guesses a meaning, no reconciliation
+supports it, so it keeps its wire name, has no unit or canonical key and binds
+to no capability.
 
 | Bit | Name | Format / unit | Status | Capability IDs |
 | --- | --- | --- | --- | --- |
@@ -27,9 +28,9 @@ binds to no capability.
 | 0a-0d | total_shares, float_shares, eps, net_assets | float32 | NO_REFERENCE | |
 | 11-12 | bid_price, ask_price | float32 / yuan | NO_REFERENCE | |
 | 13-14 | server_update_date, server_update_time | uint32 | NO_REFERENCE | |
-| 16 | bit_0x16 | int32 / count | UNKNOWN (delta-3 Q5) | |
+| 16 | bit_0x16 | int32 | UNKNOWN (delta-3 Q5) | |
 | 1b | turnover | float32 / percent | MATCH when float shares are trusted | `quote.watch_snapshot` |
-| 1d | bit_0x1d | float32 / percent | UNKNOWN (delta-3 Q5) | |
+| 1d | bit_0x1d | float32 | UNKNOWN (delta-3 Q5) | |
 | 20-21 | buy_price_limit, sell_price_limit | float32 / yuan | MATCH (pre-close and board ratio) | `limits.ladder`, `limits.stock_anomaly_reason`, `limits.prices` |
 | 24 | pre_iopv | float32 / yuan | MATCH on ETF 510300 | `fund.nav` |
 | 25-26 | speed_pct, avg_price | float32 | NO_REFERENCE / MATCH (amount/vol) | `quote.watch_snapshot` |
@@ -48,7 +49,7 @@ binds to no capability.
 | 6c-72 | bit_0x6c, bit_0x6d, bit_0x6e, bit_0x6f, bit_0x70, bit_0x71, bit_0x72 | float32 | UNKNOWN (delta-3 Q4) | |
 | 73 | ddx | float32 / ratio | NO_REFERENCE (plausible as DDX; delta-3 Q4) | `flow.stock_daily` |
 | 74-76 | bit_0x74, bit_0x75, bit_0x76 | float32 | UNKNOWN (delta-3 Q4) | |
-| 7a | bit_0x7a | float32 / ratio | UNKNOWN (delta-3 Q5) | |
+| 7a | bit_0x7a | float32 | UNKNOWN (delta-3 Q5) | |
 | 88-8b | up_count, down_count | uint32 / count | MATCH against board members | `sector.index_quote` |
 | 90-96 | change_at_1000, change_at_1030, change_at_1100, change_at_1130, change_at_1330, change_at_1400, change_at_1430 | float32 / percent | MATCH (sampled intraday change: equals a same-day 1-minute bar at or next to the named time, so slot equality is not expected; delta-3 Q5) | |
 
