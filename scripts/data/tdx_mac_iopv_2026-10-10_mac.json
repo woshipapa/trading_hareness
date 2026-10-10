@@ -1,0 +1,14 @@
+{
+ "observed_at_utc": "2026-10-10T16:21:00+00:00",
+ "egress": "Mac (residential broadband)",
+ "host": "121.36.248.138:7709",
+ "method": "tdx_mac.fetch_iopv (0x122b with bits 0x13, 0x14, 0x24, 0x27) on the integration branch b6316100, Saturday after the 2026-10-09 session",
+ "rows": [
+  {"symbol": "510300.SH", "iopv_bit_0x27": 4.389800071716309, "pre_iopv_bit_0x24": 0.0, "exchange_time": "2026-10-09 15:30:00+08:00", "close": 4.385},
+  {"symbol": "159915.SZ", "iopv_bit_0x27": 3.0639002323150635, "pre_iopv_bit_0x24": 305.5799865722656, "exchange_time": "2026-10-09 15:33:18+08:00", "close": 3.064}
+ ],
+ "findings": [
+  "Bit 0x27 (iopv) sits next to each ETF's close (4.3898 vs 4.385, 3.0639 vs 3.064), as an IOPV should.",
+  "Bit 0x24 (registered as pre_iopv, MATCH on 510300) reads 0.0 for 510300 and 305.58 for 159915: neither is a previous IOPV of a 4-yuan or 3-yuan ETF. Without an independent previous-IOPV reference the bit is NO_REFERENCE, and fund.iopv no longer reads it."
+ ]
+}

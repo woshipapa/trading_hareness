@@ -44,7 +44,7 @@ class MacFieldRegistryTests(unittest.TestCase):
 
     def test_the_iopv_bits_feed_fund_iopv_not_the_published_nav(self):
         self.assertEqual([(MAC_FIELDS[bit].name, MAC_FIELDS[bit].format, MAC_FIELDS[bit].capability_ids) for bit in (0x24, 0x27)],
-                         [("pre_iopv", "float32", ("fund.iopv",)), ("iopv", "float32", ("fund.iopv",))])
+                         [("pre_iopv", "float32", ()), ("iopv", "float32", ("fund.iopv",))])
 
     def test_index_bits_are_named_as_gotdx_names_them(self):
         # gotdx mac_board_members_dynamic.go:113,116 -- 0x37 index_metric (float32), 0x3a non_index_flag (uint32)

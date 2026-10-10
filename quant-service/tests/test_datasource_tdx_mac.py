@@ -560,14 +560,15 @@ class MacIopvTests(unittest.TestCase):
             return asyncio.run(tdx_mac.fetch_iopv(symbols=symbols))
 
     def test_the_iopv_bitmap_is_the_quote_time_and_the_two_iopv_bits(self):
-        self.assertEqual(tdx_mac.IOPV_BITMAP, bitmap_for_bits([0x13, 0x14, 0x24, 0x27]))
+        self.assertEqual(tdx_mac.IOPV_BITMAP, bitmap_for_bits([0x13, 0x14, 0x27]))
 
-    def test_rows_carry_the_symbol_both_iopv_values_and_an_aware_exchange_time_and_ask_only_for_those_bits(self):
-        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "pre_iopv": 4.375, "iopv": 4.40625})})
+    def test_rows_carry_the_symbol_the_iopv_and_an_aware_exchange_time_and_ask_only_for_those_bits(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "iopv": 4.40625})})
         evidence = self.fetch(client, ["510300.SH", "159915.SZ"])
         stamp = datetime(2026, 10, 9, 14, 58, 57, tzinfo=tdx_mac.CN_TZ)
-        self.assertEqual([(row["symbol"], row["pre_iopv"], row["iopv"], row["exchange_time"]) for row in evidence.rows],
-                         [("510300.SH", 4.375, 4.40625, stamp), ("159915.SZ", 4.375, 4.40625, stamp)])
+        self.assertEqual([(row["symbol"], row["iopv"], row["exchange_time"]) for row in evidence.rows],
+                         [("510300.SH", 4.40625, stamp), ("159915.SZ", 4.40625, stamp)])
+        self.assertTrue(all("pre_iopv" not in row for row in evidence.rows))
         self.assertEqual(client.requests[0][12:32], tdx_mac.IOPV_BITMAP)
 
     def test_every_fund_type_is_served_and_any_other_type_is_refused_before_the_network(self):
@@ -596,13 +597,13 @@ class MacIopvTests(unittest.TestCase):
         with self.assertRaisesRegex(tdx_mac.TdxMacError, "510300 lacks iopv"):
             self.fetch(client, ["510300.SH"])
 
-    def test_a_fixture_row_through_the_real_binding_yields_fund_code_both_values_and_exchange_time(self):
-        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "pre_iopv": 4.375, "iopv": 4.40625})})
+    def test_a_fixture_row_through_the_real_binding_yields_fund_code_the_iopv_and_exchange_time(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer({**quote_values(), "iopv": 4.40625})})
         projected = _normalise_rows(self.fetch(client, ["510300.SH"]).rows, mac_binding("fund.iopv"))
         self.assertTrue(projected.canonical)
         self.assertEqual((projected.status, projected.warnings), (None, ()))
         row = projected.rows[0]
-        self.assertEqual((row["fund_code"], row["pre_iopv"], row["iopv"]), ("510300.SH", 4.375, 4.40625))
+        self.assertEqual((row["fund_code"], row["iopv"]), ("510300.SH", 4.40625))
         self.assertLessEqual(schema_fields("fund.iopv"), set(row))
 
     def test_the_required_iopv_fields_are_the_ones_the_binding_maps(self):

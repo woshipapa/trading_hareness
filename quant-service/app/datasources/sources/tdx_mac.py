@@ -56,16 +56,17 @@ DEFAULT_BITMAP = bytes.fromhex(
 )
 #: The bits fetch_limit_prices asks for: 0x13 (server_update_date) and the limit prices 0x20 and 0x21.
 LIMITS_BITMAP = bytes.fromhex("00 00 08 00 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
-#: The bits fetch_iopv asks for: 0x13 and 0x14 (server_update_date and server_update_time) and the IOPV pair 0x24
-#: (pre_iopv) and 0x27 (iopv).
-IOPV_BITMAP = bytes.fromhex("00 00 18 00 90 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
+#: The bits fetch_iopv asks for: 0x13 and 0x14 (server_update_date and server_update_time) and 0x27 (iopv).  Bit
+#: 0x24 (pre_iopv) is not read: after the 2026-10-09 close it gave 510300 0.0 and 159915 305.58
+#: (scripts/data/tdx_mac_iopv_2026-10-10_mac.json).
+IOPV_BITMAP = bytes.fromhex("00 00 18 00 80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
 #: The most symbols one 0x122b request carries.
 MAX_BATCH = 80
 #: The MAC fields the quote.watch_snapshot binding maps (close -> price, vol -> volume, ...); fetch_watch_snapshot
 #: rejects an answer that lacks one of them, or the date and time its exchange_time is built from.
 QUOTE_FIELDS = ("close", "vol", "amount", "vol_ratio", "turnover")
 #: The MAC fields the fund.iopv binding maps; fetch_iopv rejects an answer that lacks one of them.
-IOPV_FIELDS = ("pre_iopv", "iopv")
+IOPV_FIELDS = ("iopv",)
 
 
 class TdxMacError(RuntimeError):
@@ -539,7 +540,7 @@ async def fetch_limit_prices(*, symbols: Sequence[str]) -> CapabilityEvidence:
 
 
 async def fetch_iopv(*, symbols: Sequence[str]) -> CapabilityEvidence:
-    """The intraday reference net value (IOPV) of funds: pre_iopv and iopv in yuan, with the quote's exchange_time.
+    """The intraday reference net value (IOPV) of funds in yuan, with the quote's exchange_time.
     Bits 0x24 and 0x27 hold other numbers for a stock, so a symbol that is not an ETF, LOF or fund is a ValueError
     before the network."""
     stocks = tdx_instruments.requested_of_types(symbols, tdx_instruments.FUND_TYPES)
