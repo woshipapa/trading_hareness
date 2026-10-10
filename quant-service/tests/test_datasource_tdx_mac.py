@@ -347,9 +347,10 @@ class MacProtocolTests(unittest.TestCase):
                                 {"market": 0, "symbol": "000001", "name": "PingAn"}])
 
     def test_dynamic_rows_decode_for_batch_quotes_and_member_quotes(self):
-        body = dynamic_body(bitmap_for_bits([5]), [(1, "600519", "Moutai", {"vol": 123})])
-        self.assertEqual(tdx_mac.parse_batch_quotes(body, [(1, "600519")])[0]["vol"], 123)
-        self.assertEqual(tdx_mac.parse_board_members(body, quotes=True)[0]["vol"], 123)
+        body = dynamic_body(bitmap_for_bits([5]), [(1, "600519", "贵州茅台", {"vol": 123})])
+        row = {"market": 1, "symbol": "600519", "name": "贵州茅台", "total": 1, "vol": 123}
+        self.assertEqual(tdx_mac.parse_batch_quotes(body, [(1, "600519")]), [row])
+        self.assertEqual(tdx_mac.parse_board_members(body, quotes=True), [row])
 
 
 class MacWatchSnapshotTests(unittest.TestCase):
