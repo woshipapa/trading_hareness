@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import io
 import subprocess
@@ -40,15 +41,18 @@ class GenerateTdxBjCodesTests(unittest.TestCase):
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as zipped:
             zipped.writestr("addedcode_bj.cfg", ADDEDCODE)
+        printed = io.StringIO()
         with tempfile.TemporaryDirectory() as root:
             output = Path(root) / "tdx_bj_codes.py"
             with mock.patch.object(namespace["tdx_files"], "download", return_value=archive.getvalue()) as download, \
                     mock.patch.object(namespace["tdx_protocol"], "call_sync",
                                       lambda operation: (operation("client"), "h:7709/login_one")), \
-                    mock.patch.object(sys, "argv", ["generate-tdx-bj-codes.py", "--output", str(output)]):
+                    mock.patch.object(sys, "argv", ["generate-tdx-bj-codes.py", "--output", str(output)]), \
+                    contextlib.redirect_stdout(printed):
                 self.assertEqual(namespace["main"](), 0)
             text = output.read_text(encoding="utf-8")
         download.assert_called_once_with("client", "zhb.zip")
+        self.assertIn("(2 codes)", printed.getvalue())
         self.assertIn("# source=zhb.zip member addedcode_bj.cfg from h:7709/login_one\n", text)
         self.assertIn("'832000': '920000'", text)
 
