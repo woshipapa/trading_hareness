@@ -36,7 +36,8 @@ LIMITS_OK_SHARE = 0.9            # a session counts as having limit prices when 
 #: amounts in CNY. A handful a day lifted the all-A total to 25 trillion; they are scaled back here.
 UNIT_RATIO = 50
 
-DAILY_SQL = """
+#: Sessions, limit fallback, unit guard, flags and streaks: shared by the daily aggregate and the intraday prior set.
+STREAK_CTES = """
 WITH sessions AS (
   SELECT trading_date, lag(trading_date) OVER (ORDER BY trading_date) AS prev_day
     FROM (SELECT DISTINCT trading_date FROM quant.canonical_bars_daily
@@ -78,6 +79,9 @@ streaks AS (
                                OVER (PARTITION BY symbol, breaks ORDER BY trading_date)
               ELSE 0 END AS streak
     FROM lagged)
+"""
+
+DAILY_SQL = STREAK_CTES + """
 SELECT s.trading_date,
        count(*) AS stocks,
        count(*) FILTER (WHERE limit_up > 0) AS with_limits,
@@ -99,12 +103,27 @@ SELECT s.trading_date,
 """
 
 
+#: The previous session's sealed stocks and their streaks: what the intraday reading compares today with.
+PRIOR_SEALED_SQL = STREAK_CTES + """
+SELECT symbol, streak::int AS streak FROM streaks WHERE trading_date = %(end)s AND sealed
+"""
+
+PREVIOUS_SESSION_SQL = """SELECT max(trading_date) AS day FROM quant.canonical_bars_daily
+                           WHERE symbol=%s AND trading_date < %s"""
+
+#: The session's limit prices, stored before its first intraday scan (decision 0005), newest provider row first.
+SESSION_LIMITS_SQL = """SELECT DISTINCT ON (symbol) symbol, limit_up, limit_down FROM quant.daily_trade_limits
+                         WHERE trading_date=%s AND limit_up > 0 ORDER BY symbol, available_at DESC"""
+
+
+def _parameters(start: date, end: date, index_symbol: str) -> dict[str, Any]:
+    return {"start": start, "end": end, "warmup": start - timedelta(days=STREAK_WARMUP_DAYS),
+            "index": index_symbol, "tol": LIMIT_TOLERANCE, "unit_ratio": UNIT_RATIO}
+
+
 def daily_rows(connection: Any, start: date, end: date, *, index_symbol: str = INDEX_SYMBOL) -> list[dict[str, Any]]:
     """One aggregate row per session in ``[start, end]``; ``turnover_cny`` is in CNY (bars store thousand CNY)."""
-    rows = connection.execute(DAILY_SQL, {
-        "start": start, "end": end, "warmup": start - timedelta(days=STREAK_WARMUP_DAYS),
-        "index": index_symbol, "tol": LIMIT_TOLERANCE, "unit_ratio": UNIT_RATIO,
-    }).fetchall()
+    rows = connection.execute(DAILY_SQL, _parameters(start, end, index_symbol)).fetchall()
     result = []
     for row in rows:
         item = dict(row)
@@ -113,4 +132,25 @@ def daily_rows(connection: Any, start: date, end: date, *, index_symbol: str = I
     return result
 
 
-__all__ = ["DAILY_SQL", "INDEX_SYMBOL", "LIMIT_TOLERANCE", "UNIT_RATIO", "daily_rows"]
+def previous_session(connection: Any, day: date, *, index_symbol: str = INDEX_SYMBOL) -> date | None:
+    row = connection.execute(PREVIOUS_SESSION_SQL, (index_symbol, day)).fetchone()
+    return dict(row)["day"] if row else None
+
+
+def prior_streaks(connection: Any, day: date, *, index_symbol: str = INDEX_SYMBOL) -> tuple[date | None, dict[str, int]]:
+    """The session before ``day`` and its sealed stocks with their streaks (1 for a first board)."""
+    previous = previous_session(connection, day, index_symbol=index_symbol)
+    if previous is None:
+        return None, {}
+    rows = connection.execute(PRIOR_SEALED_SQL, _parameters(previous, previous, index_symbol)).fetchall()
+    return previous, {dict(row)["symbol"]: int(dict(row)["streak"]) for row in rows}
+
+
+def session_limits(connection: Any, day: date) -> dict[str, tuple[float, float | None]]:
+    rows = connection.execute(SESSION_LIMITS_SQL, (day,)).fetchall()
+    return {item["symbol"]: (float(item["limit_up"]), float(item["limit_down"]) if item["limit_down"] else None)
+            for item in (dict(row) for row in rows)}
+
+
+__all__ = ["DAILY_SQL", "INDEX_SYMBOL", "LIMIT_TOLERANCE", "LIMITS_OK_SHARE", "PRIOR_SEALED_SQL", "STREAK_CTES",
+           "UNIT_RATIO", "daily_rows", "previous_session", "prior_streaks", "session_limits"]

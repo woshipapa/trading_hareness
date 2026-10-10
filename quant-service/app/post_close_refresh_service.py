@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from .market_temperature_intraday import refresh as refresh_intraday_temperature
 from .market_temperature_runtime import refresh as refresh_market_temperature
 from .minute_cross_section_export import export_day as export_minute_panel
 from .request_models import (
@@ -32,7 +33,8 @@ POST_CLOSE_STAGE_ORDER = (
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
     "watchlist_main_wave", "teacher_review_roll", "watch_daily_review", "xiaojie_outcomes", "research_snapshot",
-    "market_temperature", "broad_etf_flow", "market_timing", "candidate_ledger", "minute_panel_export",
+    "market_temperature", "market_temperature_intraday", "broad_etf_flow", "market_timing", "candidate_ledger",
+    "minute_panel_export",
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
@@ -68,6 +70,7 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     # A session's minute documents to one Parquet file (decision 0009); about 240 reads.
     "minute_panel_export": 600.0,
     "market_temperature": 180.0,
+    "market_temperature_intraday": 300.0,
     "broad_etf_flow": 180.0,
     "market_timing": 120.0,
 }
@@ -337,6 +340,10 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         # whichever pipeline wrote them, so it waits on no stage receipt.
         "market_temperature": lambda: dependencies.run_database(
             refresh_market_temperature, dependencies.database, trade_date, timeout_seconds=180,
+        ),
+        # The session's five-minute samples, stored so a finished day reads back without its minute documents.
+        "market_temperature_intraday": lambda: dependencies.run_database(
+            refresh_intraday_temperature, dependencies.database, trade_date, timeout_seconds=300,
         ),
         "broad_etf_flow": (
             (lambda: dependencies.refresh_broad_etf_flow(trade_date))

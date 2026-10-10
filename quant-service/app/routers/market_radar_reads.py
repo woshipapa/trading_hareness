@@ -13,6 +13,7 @@ from ..indicator_health import indicator_health
 from ..indicator_registry import registry
 from ..limit_detail_read_model import limit_detail_day
 from ..market_radar_runtime import radar_day
+from ..market_temperature_intraday import read as temperature_intraday_read
 from ..market_temperature_runtime import daily_series as temperature_daily_series
 from ..research_boards import datasource_board, strategy_board
 from ..minute_cross_section_export import panel as minute_panel
@@ -88,6 +89,14 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
             with database.transaction() as connection:
                 return temperature_daily_series(connection, days=days, end=end)
         return await run_database_blocking(read, timeout_seconds=30)
+
+    @router.get("/api/v1/market/temperature/intraday")
+    async def market_temperature_intraday(trade_date: date | None = None) -> dict[str, Any]:
+        """Decision 0013: the five-minute temperature of a session; the one in progress is computed now."""
+        def read() -> dict[str, Any]:
+            with database.transaction() as connection:
+                return temperature_intraday_read(connection, trade_date)
+        return await run_database_blocking(read, timeout_seconds=120)
 
     @router.get("/api/v1/datasources/board")
     async def datasources_board_route() -> dict[str, Any]:
