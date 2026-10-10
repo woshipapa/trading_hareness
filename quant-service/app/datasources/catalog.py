@@ -162,8 +162,8 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
          "price:yuan volume:shares amount:yuan auction_curve", _SESSION_CLOSE),
     _cap("microstructure.volume_profile", "分价成交量", "intraday", "per_symbol",
          "price:yuan volume_lots buy_lots sell_lots", _OBSERVED, category="derived"),
-    _cap("microstructure.history_orders", "历史逐价委托汇总", "daily", "per_symbol",
-         "price:yuan volume_lots pre_close:yuan", _SESSION_CLOSE, category="derived"),
+    _cap("microstructure.minute_series", "历史分时K线（指定日期）", "daily", "per_symbol",
+         "time price:yuan average:yuan volume_lots pre_close:yuan", _SESSION_CLOSE, category="derived"),
     _cap("microstructure.auction_curve", "集合竞价曲线", "intraday", "per_symbol",
          "time price:yuan matched_raw unmatched_raw unmatched_side", _OBSERVED,
          "TDX 流在 09:24:57 截止；数量单位未确认，保留 raw 命名", category="derived"),
@@ -348,11 +348,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           spec=BindingSpec(params={"market": "market", "code": "code"},
                            field_map={"price": "price", "volume_lots": "volume_lots", "buy_lots": "buy_lots", "sell_lots": "sell_lots"},
                            time_semantics="server_time_raw 是源字段；effective=采集时刻")),
-    _bind("tdx_public", "microstructure.history_orders", 90, UNSUPPORTED,
-          adapter="app/datasources/sources/tdx_microstructure.py:fetch_history_orders",
-          notes="0x0fb4；覆盖率核对前不进入决策",
+    _bind("tdx_public", "microstructure.minute_series", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_minute_series",
+          notes="0x0fb4；one row per trading minute (09:31..11:30, 13:01..15:00); 覆盖率核对前不进入决策",
           spec=BindingSpec(params={"market": "market", "code": "code", "trade_date": "trade_date"},
-                           field_map={"price": "price", "volume_lots": "volume_lots", "pre_close": "pre_close"},
+                           field_map={"time": "time", "price": "price", "average": "average", "volume_lots": "volume_lots", "pre_close": "pre_close"},
                            time_semantics="effective=trade_date; available=采集时刻")),
     _bind("tdx_public", "microstructure.auction_curve", 90, UNSUPPORTED,
           adapter="app/datasources/sources/tdx_microstructure.py:fetch_auction_curve",
@@ -772,7 +772,7 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key) and not any(item.capability == key for item in BINDINGS):
+        if not bindings_for(key) and not any(item.capability == key and item.status == UNSUPPORTED for item in BINDINGS):
             problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
