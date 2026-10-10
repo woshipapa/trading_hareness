@@ -31,21 +31,12 @@ _DAILY_BASIC_STAT2_FIELDS = (
 )
 
 
-def _symbol(market: int, code: str) -> str:
-    return tdx_protocol.symbol(market, code)
-
-
-def _symbol_from_code(code: str) -> str:
-    suffix = "SH" if code.startswith(("6", "68")) else "BJ" if code.startswith(("4", "8", "9")) else "SZ"
-    return f"{code}.{suffix}"
-
-
 def _selected(symbols: Sequence[str], row: dict[str, Any]) -> bool:
-    return not symbols or _symbol(row["market"], row["code"]) in symbols
+    return not symbols or tdx_protocol.symbol(row["market"], row["code"]) in symbols
 
 
 def _project(row: dict[str, Any], names: Sequence[str]) -> dict[str, Any]:
-    return {"symbol": _symbol(row["market"], row["code"]), "effective_date": row["date"],
+    return {"symbol": tdx_protocol.symbol(row["market"], row["code"]), "effective_date": row["date"],
             **{name: row[name] for name in names}}
 
 
@@ -69,7 +60,7 @@ async def fetch_daily_basic(*, symbols: Sequence[str] = ()) -> CapabilityEvidenc
         stat = statistics.get((row["market"], row["code"], row["date"]))
         if stat is None or not _selected(symbols, row):
             continue
-        rows.append({"symbol": _symbol(row["market"], row["code"]), "effective_date": row["date"],
+        rows.append({"symbol": tdx_protocol.symbol(row["market"], row["code"]), "effective_date": row["date"],
                      **{name: stat[name] for name in _DAILY_BASIC_STAT_FIELDS},
                      **{name: row[name] for name in _DAILY_BASIC_STAT2_FIELDS}})
     return tdx_protocol.observed_evidence(rows, host)
@@ -140,11 +131,11 @@ async def fetch_ipo_calendar() -> CapabilityEvidence:
     parsed = parse_ipo_subscriptions(files["xgsg.cfg"], files["othersg.cfg"])
     rows = []
     for item in parsed["equity"]:
-        rows.append({"symbol": _symbol(int(item["market"]), item["code"]), "apply_date": item["subscription_date"],
+        rows.append({"symbol": tdx_protocol.symbol(int(item["market"]), item["code"]), "apply_date": item["subscription_date"],
                      "issue_price": item["price"], "event_type": "equity_subscription", "source_file": "xgsg.cfg",
                      "raw_fields": item["raw_fields"]})
     for item in parsed["other"]:
-        rows.append({"symbol": _symbol(int(item["market"]), item["stock_code"]), "apply_date": item["subscription_date"],
+        rows.append({"symbol": tdx_protocol.symbol(int(item["market"]), item["stock_code"]), "apply_date": item["subscription_date"],
                      "issue_price": item["price"], "event_type": "other_subscription", "source_file": "othersg.cfg",
                      "bond_code": item["bond_code"], "raw_fields": item["raw_fields"]})
     return tdx_protocol.observed_evidence(rows, host, warnings=("rows=declared subscription dates; no listing/open dates inferred",))
