@@ -85,6 +85,19 @@ def frame(body: bytes, compress: bool = False) -> bytes:
 
 
 class TdxClientTests(unittest.TestCase):
+    def test_handshake_profiles_send_expected_setup_packets(self):
+        original = tdx_protocol.socket.create_connection
+        try:
+            for profile, expected in (("login_one", tdx_protocol._SETUP_COMMANDS[:1]),
+                                      ("legacy_3", tdx_protocol._SETUP_COMMANDS)):
+                fake = FakeSocket([frame(b"") for _ in expected])
+                tdx_protocol.socket.create_connection = lambda *_args, _fake=fake, **_kwargs: _fake
+                with tdx_protocol.TdxClient("host", 7709, profile=profile):
+                    pass
+                self.assertEqual(fake.sent, list(expected))
+        finally:
+            tdx_protocol.socket.create_connection = original
+
     def test_exchange_decompresses_and_pages_ticks_oldest_first(self):
         def page(minute: int, count: int) -> bytes:
             body = struct.pack("<H", count) + b"\x00" * 4
@@ -117,7 +130,42 @@ class TdxClientTests(unittest.TestCase):
                 tdx_protocol.call_sync(lambda client: None, hosts=[("a", 1), ("b", 2)])
         finally:
             tdx_protocol.TdxClient = original
-        self.assertEqual(attempts, ["a", "b"])
+        self.assertEqual(attempts, ["a", "a", "b", "b"])
+
+    def test_receipt_has_profile_and_decode_failure_does_not_cool(self):
+        class Refusing(tdx_protocol.TdxClient):
+            def __enter__(self):
+                raise struct.error("bad response")
+
+        original = tdx_protocol.TdxClient
+        tdx_protocol.TdxClient = Refusing
+        tdx_protocol._COOLDOWN_UNTIL.clear()
+        try:
+            with self.assertRaises(tdx_protocol.TdxProtocolError):
+                tdx_protocol.call_sync(lambda _client: None, hosts=[("a", 1)], profile="legacy_3")
+            self.assertNotIn(("a", 1), tdx_protocol._COOLDOWN_UNTIL)
+        finally:
+            tdx_protocol.TdxClient = original
+
+    def test_sweep_uses_a_new_connection_for_each_section(self):
+        calls = []
+
+        class FakeClient:
+            def __init__(self, host, port, _timeout, *, profile):
+                calls.append((host, port, profile))
+            def __enter__(self): return self
+            def __exit__(self, *_args): pass
+
+        original = tdx_protocol.TdxClient
+        tdx_protocol.TdxClient = FakeClient
+        try:
+            result = tdx_protocol.sweep_sync({"quotes": lambda _c: [1], "bars": lambda _c: [2, 3]},
+                                             host=("fixed", 7709), profile="legacy_3")
+        finally:
+            tdx_protocol.TdxClient = original
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["host"], "fixed:7709")
+        self.assertEqual(result["sections"]["bars"]["rows"], 2)
 
     def test_market_codes(self):
         self.assertEqual(tdx_protocol.market_code("600519.SH"), (1, "600519"))

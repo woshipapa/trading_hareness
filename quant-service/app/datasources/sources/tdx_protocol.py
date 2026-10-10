@@ -14,14 +14,9 @@ server by ``scripts/verify-tdx-protocol.py``.
 The public quote hosts are community-listed and unofficial: every result is
 research evidence, and the client fails over across hosts on any error.
 
-Live status (probed from the owner peer, 2026-09-18 after the close): the
-public hosts answer the *historical tick* and *ex-rights* commands normally
-(identical to pytdx, row for row), but return no rows for batch quotes and a
-2-byte error for every K-line category -- pytdx fails the same way, so the
-servers have closed those commands to third-party clients.  The platform
-therefore uses TDX only for historical ticks (including the same day after
-the close) and the ex-rights/share-capital log; quotes and bars stay here,
-unverified, so a re-opened server can be re-probed without new code.
+The client uses LOGIN_ONE (the first setup packet) by default, with a
+legacy-three-packet fallback on the same host when a handshake or operation
+fails. Results retain the selected profile in provenance.
 """
 
 from __future__ import annotations
@@ -32,6 +27,9 @@ import socket
 import struct
 import zlib
 from datetime import date
+import logging
+import time
+from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Sequence, TypeVar
 
 
@@ -40,12 +38,17 @@ UPSTREAM_SITE = "tdx-hq:7709"
 #: Hosts that answered the historical-tick and ex-rights commands from the
 #: owner peer on 2026-09-18 (the first three were compared row by row with
 #: pytdx).  Override with ``TDX_HQ_HOSTS=host:port,host:port``.
-DEFAULT_HOSTS: tuple[tuple[str, int], ...] = (
-    ("60.191.117.167", 7709), ("218.75.126.9", 7709), ("123.125.108.14", 7709),
-    ("115.238.56.198", 7709), ("180.153.18.170", 7709), ("124.71.187.122", 7709),
-    ("123.60.73.44", 7709), ("183.60.224.178", 7709), ("115.238.90.165", 7709),
-    ("111.229.247.189", 7709), ("110.41.147.114", 7709), ("116.205.183.150", 7709),
-)
+try:
+    from .tdx_hosts import HOSTS as _GENERATED_HOSTS
+except ImportError:  # owner probe concatenates this module without package imports
+    _GENERATED_HOSTS: tuple[tuple[str, int], ...] = ()
+
+DEFAULT_HOSTS: tuple[tuple[str, int], ...] = _GENERATED_HOSTS or (
+        ("60.191.117.167", 7709), ("218.75.126.9", 7709), ("123.125.108.14", 7709),
+        ("115.238.56.198", 7709), ("180.153.18.170", 7709), ("124.71.187.122", 7709),
+        ("123.60.73.44", 7709), ("183.60.224.178", 7709), ("115.238.90.165", 7709),
+        ("111.229.247.189", 7709), ("110.41.147.114", 7709), ("116.205.183.150", 7709),
+    )
 MARKETS = {"SZ": 0, "SH": 1, "BJ": 2}
 MAX_QUOTES_PER_REQUEST = 80
 MAX_TICKS_PER_REQUEST = 2000
@@ -69,6 +72,10 @@ _SETUP_COMMANDS = (
         " 40 13 00 00 d5 00 c9 cc bd f0 d7 ea 00 00 00 02"
     ).replace(" ", "")),
 )
+HANDSHAKE_PROFILES = {"login_one", "legacy_3"}
+_COOLDOWN_SECONDS = 300.0
+_COOLDOWN_UNTIL: dict[tuple[str, int], float] = {}
+_LOGGER = logging.getLogger(__name__)
 
 
 class TdxProtocolError(RuntimeError):
@@ -315,13 +322,16 @@ def configured_hosts(environ: dict[str, str] | None = None) -> tuple[tuple[str, 
 class TdxClient:
     """One blocking connection; use :func:`call` for failover and threading."""
 
-    def __init__(self, host: str, port: int, timeout_seconds: float = 5.0) -> None:
-        self.host, self.port, self.timeout = host, port, timeout_seconds
+    def __init__(self, host: str, port: int, timeout_seconds: float = 5.0, *, profile: str = "login_one") -> None:
+        if profile not in HANDSHAKE_PROFILES:
+            raise ValueError(f"unknown TDX handshake profile: {profile}")
+        self.host, self.port, self.timeout, self.profile = host, port, timeout_seconds, profile
         self._socket: socket.socket | None = None
 
     def __enter__(self) -> "TdxClient":
         self._socket = socket.create_connection((self.host, self.port), timeout=self.timeout)
-        for command in _SETUP_COMMANDS:
+        commands = _SETUP_COMMANDS[:1] if self.profile == "login_one" else _SETUP_COMMANDS
+        for command in commands:
             self._exchange(command)
         return self
 
@@ -390,17 +400,55 @@ class TdxClient:
 T = TypeVar("T")
 
 
+def _ordered_hosts(hosts: Iterable[tuple[str, int]]) -> list[tuple[str, int]]:
+    now = time.monotonic()
+    values = list(hosts)
+    return [item[1] for item in sorted(enumerate(values),
+                                       key=lambda item: (_COOLDOWN_UNTIL.get(item[1], 0.0) > now, item[0]))]
+
+
+def _mark_cooldown(host: tuple[str, int]) -> None:
+    _COOLDOWN_UNTIL[host] = time.monotonic() + _COOLDOWN_SECONDS
+
+
 def call_sync(operation: Callable[[TdxClient], T], *, hosts: Iterable[tuple[str, int]] | None = None,
-              timeout_seconds: float = 5.0) -> tuple[T, str]:
-    """Run ``operation`` on the first host that answers; return ``(result, host)``."""
-    errors = []
-    for host, port in hosts or configured_hosts():
+              timeout_seconds: float = 5.0, profile: str = "login_one") -> tuple[T, str]:
+    """Run an operation with deterministic host ordering and same-host profile fallback."""
+    if profile not in HANDSHAKE_PROFILES:
+        raise ValueError(f"unknown TDX handshake profile: {profile}")
+    errors: list[str] = []
+    for host, port in _ordered_hosts(hosts or configured_hosts()):
+        profiles = (profile, "legacy_3") if profile == "login_one" else (profile,)
+        for attempt, attempt_profile in enumerate(profiles):
+            try:
+                with TdxClient(host, port, timeout_seconds, profile=attempt_profile) as client:
+                    result = operation(client)
+                return result, f"{host}:{port}/{attempt_profile}"
+            except (OSError, TdxProtocolError, struct.error, IndexError, ValueError) as error:
+                errors.append(f"{host}:{attempt_profile}:{type(error).__name__}")
+                if attempt == 0 and len(profiles) == 2:
+                    _LOGGER.info("TDX profile fallback host=%s:%s first=%s fallback=legacy_3 error=%s",
+                                 host, port, profile, type(error).__name__)
+                    continue
+                if isinstance(error, (OSError, TdxProtocolError)):
+                    _mark_cooldown((host, port))
+    raise TdxProtocolError("no TDX host answered: " + ", ".join(errors[-8:]))
+
+
+def sweep_sync(sections: Mapping[str, Callable[[TdxClient], Any]] | Iterable[tuple[str, Callable[[TdxClient], Any]]], *,
+               host: tuple[str, int] | None = None, profile: str = "login_one",
+               timeout_seconds: float = 5.0) -> dict[str, Any]:
+    """Run independent sections on one selected host, with a new connection per section."""
+    items = sections.items() if isinstance(sections, Mapping) else sections
+    selected = host or _ordered_hosts(configured_hosts())[0]
+    result: dict[str, Any] = {"host": f"{selected[0]}:{selected[1]}", "profile": profile, "sections": {}}
+    for name, operation in items:
         try:
-            with TdxClient(host, port, timeout_seconds) as client:
-                return operation(client), f"{host}:{port}"
-        except (OSError, TdxProtocolError, struct.error, IndexError, ValueError) as error:
-            errors.append(f"{host}:{type(error).__name__}")
-    raise TdxProtocolError("no TDX host answered: " + ", ".join(errors[-4:]))
+            rows, receipt = call_sync(operation, hosts=[selected], profile=profile, timeout_seconds=timeout_seconds)
+            result["sections"][name] = {"rows": len(rows) if hasattr(rows, "__len__") else rows, "receipt": receipt}
+        except Exception as error:  # each timeout is isolated to its section
+            result["sections"][name] = {"error": type(error).__name__}
+    return result
 
 
 async def call(operation: Callable[[TdxClient], T], **kwargs: Any) -> tuple[T, str]:
@@ -415,9 +463,9 @@ def market_code(symbol: str) -> tuple[int, str]:
 
 
 __all__ = [
-    "BAR_CATEGORIES", "DEFAULT_HOSTS", "MARKETS", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
+    "BAR_CATEGORIES", "DEFAULT_HOSTS", "HANDSHAKE_PROFILES", "MARKETS", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
     "UPSTREAM_SITE", "XDXR_CATEGORIES", "build_bars_request", "build_history_ticks_request",
     "build_quotes_request", "build_ticks_request", "build_xdxr_request", "call", "call_sync",
     "configured_hosts", "decode_price", "decode_volume", "market_code", "parse_bars", "parse_quotes",
-    "parse_ticks", "parse_xdxr",
+    "parse_ticks", "parse_xdxr", "sweep_sync",
 ]
