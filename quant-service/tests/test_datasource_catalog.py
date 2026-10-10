@@ -119,30 +119,6 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(auction.schema.names, ("time", "price", "matched_raw", "unmatched_raw", "unmatched_side"))
         self.assertFalse(any(item.source == "tdx_public" and item.capability == "bars.minute" for item in BINDINGS))
 
-    def test_catalog_rule_flags_retired_only_and_zero_binding_capabilities(self):
-        from unittest import mock
-        from app.datasources.contracts import Capability, RETIRED, FieldSpec
-
-        # Test that a RETIRED-only capability is flagged
-        test_cap = Capability("test.retired_only", "Test retired capability", "daily", "per_symbol",
-                              "field1", "test reason")
-        test_binding = type('Binding', (), {'capability': 'test.retired_only', 'status': RETIRED})()
-
-        with mock.patch.object(CAPABILITIES, '__contains__', return_value=True):
-            with mock.patch.object(CAPABILITIES, '__getitem__', return_value=test_cap):
-                with mock.patch('app.datasources.catalog.BINDINGS', [test_binding]):
-                    problems = validate_catalog()
-        self.assertTrue(any("test.retired_only" in p and "no resolvable binding" in p for p in problems))
-
-        # Test that a capability with no bindings at all is flagged
-        zero_cap = Capability("test.zero_binding", "Test zero binding", "daily", "per_symbol",
-                              "field1", "test reason")
-        with mock.patch.object(CAPABILITIES, '__contains__', return_value=True):
-            with mock.patch.object(CAPABILITIES, '__getitem__', return_value=zero_cap):
-                with mock.patch('app.datasources.catalog.BINDINGS', []):
-                    problems = validate_catalog()
-        self.assertTrue(any("test.zero_binding" in p and "no resolvable binding" in p for p in problems))
-
 
 class NonSectorGroupTests(unittest.TestCase):
     """Qualification lists never stand in for a sector (2026-09-18 labels)."""

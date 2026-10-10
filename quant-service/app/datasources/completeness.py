@@ -64,8 +64,6 @@ UNREGISTERED: dict[str, str] = {
     "family:capital flow": "MAC capital flow semantics unverified (delta 1b); research projection only, P3",
     "family:MAC": "MAC protocol bindings arrive in P3, all UNSUPPORTED until the evidence gates",
     "family:extended": "7727 extended-market handshake is unsolved (plan F7, P9)",
-    "tdx_microstructure.TdxMicrostructureClient.minute_data": "0x0537 intraday minute K-lines; not bars.minute (which uses daily bars re-timestamped per 1-minute periods). minute-series volume differs from ticks by after-close prints (delta-3 Q9); research evidence only",
-    "tdx_microstructure.TdxMicrostructureClient.history_minute_data": "0x0feb dated minute K-lines; not bars.minute. volume discrepancy with ticks remains unexplained (delta-3 Q9); research evidence only",
 }
 
 #: family -> (capability prefixes, source keys that count as TDX for it)

@@ -1,5 +1,7 @@
+import asyncio
 import struct
 import unittest
+from unittest import mock
 
 from app.datasources.sources import tdx_microstructure as micro
 
@@ -15,6 +17,21 @@ def encode_price(value: int) -> bytes:
         magnitude >>= 7
         out.append(byte | (0x80 if magnitude else 0))
     return bytes(out)
+
+
+
+def unusual_record(event_type: int, payload: bytes, market: int = 1, code: bytes = b"600000") -> bytes:
+    """One 32-byte 0x0563 row: market, code, event type at 9, sequence, 13-byte payload at 15, time."""
+    assert len(payload) == 13
+    return (struct.pack("<H6sBBBHH", market, code, 0, event_type, 0, 12, 0) + payload
+            + struct.pack("<BBH", 0, 9, 3015))
+
+
+def top_board_body(size: int = 1) -> bytes:
+    body = bytes([size])
+    for _ in range(9 * size):
+        body += bytes([1]) + b"600000" + struct.pack("<ff", 12.34, 1.23)
+    return body
 
 
 class TdxMicrostructureTests(unittest.TestCase):
@@ -139,24 +156,61 @@ class TdxMicrostructureTests(unittest.TestCase):
         times = [row["time"] for row in rows]
         self.assertNotIn("09:25:00", times)
 
-    def test_unusual_encodes_unknown_event_types(self):
-        record = struct.pack("<H6sBBBHHBfffBBH", 1, b"600000", 0, 0x14, 0, 12, 0, 0,
-                             0.0123, 0.0, 0.0, 0, 9, 3015)
-        unusual = micro.parse_unusual(struct.pack("<H", 1) + record)[0]
-        self.assertIn("payload_raw", unusual)
-        self.assertEqual(unusual["event_type"], 0x14)
+    def test_limit_events_decode_direction_and_subtype_as_gotdx(self):
+        sealed_up = micro.parse_unusual(struct.pack("<H", 1) + unusual_record(
+            0x14, b"\x00\x02" + struct.pack("<ff", 12.34, 5000.0) + bytes(3)))[0]
+        self.assertEqual((sealed_up["description"], sealed_up["value"]), ("封涨停板", "12.34/5000.00"))
+        self.assertNotIn("payload_raw", sealed_up)
+        opened_down = micro.parse_unusual(struct.pack("<H", 1) + unusual_record(
+            0x14, b"\x01\x05" + struct.pack("<ff", 9.87, 10.0) + bytes(3)))[0]
+        self.assertEqual(opened_down["description"], "打开跌停")
+        unknown_sub = micro.parse_unusual(struct.pack("<H", 1) + unusual_record(
+            0x14, b"\x00\x03" + bytes(11)))[0]
+        self.assertEqual(unknown_sub["description"], "unknown_0x14_03")
+        self.assertEqual(unknown_sub["payload_raw"], "0003" + "00" * 11)
 
-    def test_unusual_distinguishes_event_types(self):
-        record1 = struct.pack("<H6sBBBHHBfffBBH", 1, b"600000", 0, 0x14, 0, 12, 0, 0,
-                              0.0123, 0.0, 0.0, 0, 9, 3015)
-        record2 = struct.pack("<H6sBBBHHBfffBBH", 1, b"600000", 0, 0x15, 0, 12, 0, 0,
-                              0.0456, 0.0, 0.0, 0, 9, 3015)
-        unusual1 = micro.parse_unusual(struct.pack("<H", 1) + record1)[0]
-        unusual2 = micro.parse_unusual(struct.pack("<H", 1) + record2)[0]
-        self.assertEqual(unusual1["event_type"], 0x14)
-        self.assertEqual(unusual2["event_type"], 0x15)
-        self.assertNotEqual(unusual1.get("payload_raw"), unusual2.get("payload_raw"))
+    def test_close_events_decode_by_first_byte(self):
+        pulled_up = micro.parse_unusual(struct.pack("<H", 1) + unusual_record(
+            0x15, b"\x02" + struct.pack("<fff", 0.0125, 3.5, 0.0)))[0]
+        self.assertEqual((pulled_up["description"], pulled_up["value"]), ("尾盘拉升", "1.25%/3.50"))
+        unnamed = micro.parse_unusual(struct.pack("<H", 1) + unusual_record(
+            0x15, b"\x00" + struct.pack("<fff", 0.0125, 3.5, 0.0)))[0]
+        self.assertEqual(unnamed["description"], "unknown_0x15_00")
+        self.assertIn("payload_raw", unnamed)
 
+    def test_unknown_event_types_keep_their_payload(self):
+        payload = bytes(range(13))
+        row = micro.parse_unusual(struct.pack("<H", 1) + unusual_record(0x1F, payload))[0]
+        self.assertEqual((row["description"], row["payload_raw"]), ("unknown_0x1f", payload.hex()))
+
+    def test_minute_series_skips_the_lunch_break(self):
+        body = struct.pack("<Hf", 240, 12.34) + encode_price(1234) + encode_price(0) + encode_price(1)
+        body += (encode_price(0) * 3) * 239
+        times = [row["time"] for row in micro.parse_minute_series(body)]
+        self.assertEqual((times[0], times[119], times[120], times[239]), ("09:31:00", "11:30:00", "13:01:00", "15:00:00"))
+
+    def test_adapters_add_symbols_and_the_answering_host(self):
+        answers = {micro.TOP_BOARD: top_board_body(), micro.UNUSUAL: struct.pack("<H", 1) + unusual_record(
+            0x1F, bytes(13), market=0, code=b"000001")}
+
+        class Client:
+            def _exchange(self, request):
+                return answers[struct.unpack_from("<H", request, 10)[0]]
+
+        async def call(operation, **kwargs):
+            self.assertEqual(kwargs, {"handshake_profile": "login_one"})
+            return operation(Client()), "h:7709/login_one"
+
+        with mock.patch.object(micro.tdx_protocol, "call", call):
+            board = asyncio.run(micro.fetch_top_board(category=0, size=1))
+            events = asyncio.run(micro.fetch_unusual(market=0))
+        self.assertEqual(len(board.rows), 9)
+        self.assertEqual({row["category"] for row in board.rows}, {
+            "increase", "decrease", "amplitude", "rise_speed", "fall_speed", "volume_ratio",
+            "positive_commission_ratio", "negative_commission_ratio", "turnover"})
+        self.assertEqual(board.rows[0]["symbol"], "600000.SH")
+        self.assertEqual(events.rows[0]["symbol"], "000001.SZ")
+        self.assertEqual(board.warnings, ("tdx_host=h:7709/login_one",))
 
 if __name__ == "__main__":
     unittest.main()

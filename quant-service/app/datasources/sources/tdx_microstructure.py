@@ -7,11 +7,11 @@ the existing setup, framing, timeout and decompression behavior.
 
 from __future__ import annotations
 
-import asyncio
 import struct
-from datetime import date
-from typing import Any, Callable, Iterable, TypeVar
+from datetime import date, datetime, timezone
+from typing import Any
 
+from ..contracts import CapabilityEvidence
 from . import tdx_protocol
 
 
@@ -62,7 +62,7 @@ def build_volume_profile_request(market: int, code: str) -> bytes:
 
 def parse_volume_profile(body: bytes) -> dict[str, Any]:
     if len(body) < 13:
-        raise ValueError("short volume profile response")
+        raise tdx_protocol.TdxProtocolError("short volume profile response")
     count, market = struct.unpack_from("<HB", body, 0)
     code = _text(body[3:9])
     active = struct.unpack_from("<H", body, 9)[0]
@@ -73,7 +73,7 @@ def parse_volume_profile(body: bytes) -> dict[str, Any]:
         fields.append(value)
     base, pre_diff, open_diff, high_diff, low_diff, server_time, neg_price, volume, current_volume = fields
     if pos + 4 > len(body):
-        raise ValueError("short volume profile amount")
+        raise tdx_protocol.TdxProtocolError("short volume profile amount")
     amount = struct.unpack_from("<f", body, pos)[0]
     pos += 4
     extras = []
@@ -90,7 +90,7 @@ def parse_volume_profile(body: bytes) -> dict[str, Any]:
         bid_levels.append({"price": (base + bid) / 100.0, "volume_lots": bid_vol})
         ask_levels.append({"price": (base + ask) / 100.0, "volume_lots": ask_vol})
     if pos + 2 > len(body):
-        raise ValueError("short volume profile footer")
+        raise tdx_protocol.TdxProtocolError("short volume profile footer")
     unknown = struct.unpack_from("<H", body, pos)[0]
     pos += 2
     profiles: list[dict[str, Any]] = []
@@ -123,7 +123,7 @@ def build_minute_series_request(market: int, code: str, trade_date: date | str |
 
 def parse_minute_series(body: bytes) -> list[dict[str, Any]]:
     if len(body) < 6:
-        raise ValueError("short minute series response")
+        raise tdx_protocol.TdxProtocolError("short minute series response")
     count = struct.unpack_from("<H", body, 0)[0]
     pre_close = struct.unpack_from("<f", body, 2)[0]
     pos, price = 6, 0
@@ -133,7 +133,7 @@ def parse_minute_series(body: bytes) -> list[dict[str, Any]]:
         unknown, pos = tdx_protocol.decode_price(body, pos)
         volume, pos = tdx_protocol.decode_price(body, pos)
         price += delta
-        minute = 571 + index if index < 120 else 781 + index
+        minute = 571 + index if index < 120 else 661 + index  # 09:31..11:30, then 13:01..15:00
         hour, minute_part = divmod(minute, 60)
         rows.append({"minute_index": index, "time": f"{hour:02d}:{minute_part:02d}:00",
                      "price": price / 100.0, "unknown": unknown, "volume_lots": volume,
@@ -148,13 +148,13 @@ def build_auction_request(market: int, code: str, start: int = 0, count: int = 5
 
 def parse_auction(body: bytes) -> list[dict[str, Any]]:
     if len(body) < 2:
-        raise ValueError("short auction response")
+        raise tdx_protocol.TdxProtocolError("short auction response")
     count = struct.unpack_from("<H", body, 0)[0]
     rows = []
     for index in range(count):
         pos = 2 + index * 16
         if pos + 16 > len(body):
-            raise ValueError("truncated auction response")
+            raise tdx_protocol.TdxProtocolError("truncated auction response")
         minute, = struct.unpack_from("<H", body, pos)
         price = struct.unpack_from("<f", body, pos + 2)[0]
         matched = struct.unpack_from("<I", body, pos + 6)[0]
@@ -204,9 +204,18 @@ def _unusual_label(event_type: int, payload: bytes) -> tuple[str, str, bytes | N
     if event_type == 0x13:
         return "竞价试买", f"{v2:.2f}/{v3:.2f}", None
     if event_type == 0x14:
-        return "接近涨停/跌停", "", payload
+        # gotdx: byte 0 is the direction, byte 1 the sub-type, then two floats.
+        side = "涨" if first == 0 else "跌"
+        label = {1: "逼近{}停", 2: "封{}停板", 4: "封{}大减", 5: "打开{}停"}.get(payload[1])
+        u2, u3 = struct.unpack_from("<ff", payload, 2)
+        if label is None:
+            return f"unknown_0x14_{payload[1]:02x}", f"{u2:.2f}/{u3:.2f}", payload
+        return label.format(side), f"{u2:.2f}/{u3:.2f}", None
     if event_type == 0x15:
-        return "尾盘", "", payload
+        # gotdx leaves byte 0 = 0 unnamed ("尾盘??") and calls every value above 2 打压.
+        if first == 0:
+            return "unknown_0x15_00", f"{v2 * 100:.2f}%/{v3:.2f}", payload
+        return {1: "尾盘对倒", 2: "尾盘拉升"}.get(first, "尾盘打压"), f"{v2 * 100:.2f}%/{v3:.2f}", None
     if event_type == 0x16:
         return ("盘中弱势" if v2 < 0 else "盘中强势"), f"{v2 * 100:.2f}%", None
     if event_type == 0x1D:
@@ -218,13 +227,13 @@ def _unusual_label(event_type: int, payload: bytes) -> tuple[str, str, bytes | N
 
 def parse_unusual(body: bytes) -> list[dict[str, Any]]:
     if len(body) < 2:
-        raise ValueError("short unusual response")
+        raise tdx_protocol.TdxProtocolError("short unusual response")
     count = struct.unpack_from("<H", body, 0)[0]
     rows = []
     for index in range(count):
         pos = 2 + index * 32
         if pos + 32 > len(body):
-            raise ValueError("truncated unusual response")
+            raise tdx_protocol.TdxProtocolError("truncated unusual response")
         market = struct.unpack_from("<H", body, pos)[0]
         code = _text(body[pos + 2:pos + 8])
         event_type = body[pos + 9]
@@ -247,25 +256,24 @@ def build_top_board_request(category: int, size: int = 20) -> bytes:
     return _request(TOP_BOARD, payload)
 
 
-def parse_top_board(body: bytes) -> dict[str, Any]:
+def parse_top_board(body: bytes) -> dict[str, list[dict[str, Any]]]:
     if len(body) < 1:
-        raise ValueError("short top board response")
+        raise tdx_protocol.TdxProtocolError("short top board response")
     size = body[0]
     names = ("increase", "decrease", "amplitude", "rise_speed", "fall_speed",
              "volume_ratio", "positive_commission_ratio", "negative_commission_ratio", "turnover")
-    result: dict[str, Any] = {name: [] for name in names}
+    result: dict[str, list[dict[str, Any]]] = {name: [] for name in names}
     pos = 1
     for name in names:
         for _ in range(size):
             if pos + 15 > len(body):
-                raise ValueError("truncated top board response")
+                raise tdx_protocol.TdxProtocolError("truncated top board response")
             market = body[pos]
             code = _text(body[pos + 1:pos + 7])
             price = struct.unpack_from("<f", body, pos + 7)[0]
             value = struct.unpack_from("<f", body, pos + 11)[0]
             result[name].append({"market": market, "code": code, "price": price, "value": value})
             pos += 15
-    result["size"] = size  # type: ignore[assignment]
     return result
 
 
@@ -276,7 +284,7 @@ def build_minute_data_request(market: int, code: str, start: int = 0, count: int
 def _parse_minute_rows(body: bytes, code: str, history: bool) -> list[dict[str, Any]]:
     minimum = 10 if history else 4
     if len(body) < minimum:
-        raise ValueError("short minute response")
+        raise tdx_protocol.TdxProtocolError("short minute response")
     count = struct.unpack_from("<H", body, 0)[0]
     pos = 10 if history else 4
     unit = _unit(code)
@@ -310,98 +318,59 @@ def parse_history_minute_data(body: bytes, code: str) -> list[dict[str, Any]]:
     return _parse_minute_rows(body, code, True)
 
 
-class TdxMicrostructureClient(tdx_protocol.TdxClient):
-    """TDX client with the microstructure command family."""
-
-    def volume_profile(self, market: int, code: str) -> dict[str, Any]:
-        return parse_volume_profile(self._exchange(build_volume_profile_request(market, code)))
-
-    def minute_series(self, market: int, code: str, trade_date: date | str | int) -> list[dict[str, Any]]:
-        return parse_minute_series(self._exchange(build_minute_series_request(market, code, trade_date)))
-
-    def auction(self, market: int, code: str) -> list[dict[str, Any]]:
-        return parse_auction(self._exchange(build_auction_request(market, code)))
-
-    def unusual(self, market: int, start: int = 0, count: int = 600) -> list[dict[str, Any]]:
-        return parse_unusual(self._exchange(build_unusual_request(market, start, count)))
-
-    def top_board(self, category: int = 0, size: int = 20) -> dict[str, Any]:
-        return parse_top_board(self._exchange(build_top_board_request(category, size)))
-
-    def minute_data(self, market: int, code: str) -> list[dict[str, Any]]:
-        return parse_minute_data(self._exchange(build_minute_data_request(market, code)), code)
-
-    def history_minute_data(self, market: int, code: str, trade_date: date | str | int) -> list[dict[str, Any]]:
-        return parse_history_minute_data(self._exchange(build_history_minute_data_request(market, code, trade_date)), code)
+_EXCHANGE = {market: exchange for exchange, market in tdx_protocol.MARKETS.items()}
 
 
-T = TypeVar("T")
+def _symbol(market: int, code: str) -> str:
+    return f"{code}.{_EXCHANGE[market]}"
 
 
-def call_sync(operation: Callable[[TdxMicrostructureClient], T], *, hosts: Iterable[tuple[str, int]] | None = None,
-              timeout_seconds: float = 5.0, handshake_profile: str = "login_one") -> tuple[T, str]:
-    """Run an operation with deterministic host ordering and same-host profile fallback."""
-    errors: list[str] = []
-    for host, port in tdx_protocol._ordered_hosts(hosts or tdx_protocol.configured_hosts()):
-        profiles = (handshake_profile, "legacy_3") if handshake_profile == "login_one" else (handshake_profile,)
-        transport_failed = False
-        for attempt, attempt_profile in enumerate(profiles):
-            client = TdxMicrostructureClient(host, port, timeout_seconds, handshake_profile=attempt_profile)
-            try:
-                with client:
-                    result = operation(client)
-                return result, f"{host}:{port}/{attempt_profile}"
-            except (OSError, tdx_protocol.TdxProtocolError, struct.error, IndexError, ValueError) as error:
-                errors.append(f"{host}:{attempt_profile}:{type(error).__name__}")
-                transport_failed = transport_failed or isinstance(error, (OSError, tdx_protocol.TdxProtocolError))
-                if attempt == 0 and len(profiles) == 2 and client._connected:
-                    continue
-                if attempt == 0 and len(profiles) == 2 and not client._connected:
-                    break
-        if transport_failed:
-            tdx_protocol._mark_cooldown((host, port))
-    raise tdx_protocol.TdxProtocolError("no TDX host answered: " + ", ".join(errors[-8:]))
+def _evidence(rows: list[dict[str, Any]], host: str) -> CapabilityEvidence:
+    observed = datetime.now(timezone.utc)
+    return CapabilityEvidence(rows, available_at_min=observed, available_at_max=observed, warnings=(f"tdx_host={host}",))
 
 
-async def fetch_volume_profile(*, market: int, code: str) -> list[dict[str, Any]]:
-    result, _host = await asyncio.to_thread(call_sync, lambda client: client.volume_profile(market, code))
-    return result.get("profiles", [])
+async def fetch_volume_profile(*, market: int, code: str) -> CapabilityEvidence:
+    result, host = await tdx_protocol.call(
+        lambda client: parse_volume_profile(client._exchange(build_volume_profile_request(market, code))),
+        handshake_profile="login_one")
+    return _evidence([{"symbol": _symbol(market, code), **row} for row in result["profiles"]], host)
 
 
-async def fetch_minute_series(*, market: int, code: str, trade_date: date | str | int) -> list[dict[str, Any]]:
-    result, _host = await asyncio.to_thread(call_sync, lambda client: client.minute_series(market, code, trade_date))
-    return result
+async def fetch_minute_series(*, market: int, code: str, trade_date: date | str | int) -> CapabilityEvidence:
+    rows, host = await tdx_protocol.call(
+        lambda client: parse_minute_series(client._exchange(build_minute_series_request(market, code, trade_date))),
+        handshake_profile="login_one")
+    return _evidence([{"symbol": _symbol(market, code), **row} for row in rows], host)
 
 
-async def fetch_auction_curve(*, market: int, code: str) -> list[dict[str, Any]]:
-    result, _host = await asyncio.to_thread(call_sync, lambda client: client.auction(market, code))
-    return result
+async def fetch_auction_curve(*, market: int, code: str) -> CapabilityEvidence:
+    rows, host = await tdx_protocol.call(
+        lambda client: parse_auction(client._exchange(build_auction_request(market, code))),
+        handshake_profile="login_one")
+    return _evidence([{"symbol": _symbol(market, code), **row} for row in rows], host)
 
 
-async def fetch_unusual(*, market: int, start: int = 0, count: int = 600) -> list[dict[str, Any]]:
-    result, _host = await asyncio.to_thread(call_sync, lambda client: client.unusual(market, start, count))
-    return result
+async def fetch_unusual(*, market: int, start: int = 0, count: int = 600) -> CapabilityEvidence:
+    rows, host = await tdx_protocol.call(
+        lambda client: parse_unusual(client._exchange(build_unusual_request(market, start, count))),
+        handshake_profile="login_one")
+    return _evidence([{"symbol": _symbol(row["market"], row["code"]), **row} for row in rows], host)
 
 
-async def fetch_top_board(*, category: int = 0, size: int = 20) -> list[dict[str, Any]]:
-    result, _host = await asyncio.to_thread(call_sync, lambda client: client.top_board(category, size))
-    names = ("increase", "decrease", "amplitude", "rise_speed", "fall_speed",
-             "volume_ratio", "positive_commission_ratio", "negative_commission_ratio", "turnover")
-    rows = []
-    for name in names:
-        for row in result.get(name, []):
-            row_copy = dict(row)
-            row_copy["category"] = name
-            rows.append(row_copy)
-    return rows
+async def fetch_top_board(*, category: int = 0, size: int = 20) -> CapabilityEvidence:
+    boards, host = await tdx_protocol.call(
+        lambda client: parse_top_board(client._exchange(build_top_board_request(category, size))),
+        handshake_profile="login_one")
+    return _evidence([{"symbol": _symbol(row["market"], row["code"]), "category": name, **row}
+                      for name, rows in boards.items() for row in rows], host)
 
 
 __all__ = [
-    "AUCTION", "HISTORY_MINUTE_TIME_DATA", "MINUTE_SERIES", "MINUTE_TIME_DATA", "TOP_BOARD",
-    "UNUSUAL", "VOLUME_PROFILE", "TdxMicrostructureClient", "build_auction_request",
-    "build_history_minute_data_request", "build_minute_series_request", "build_minute_data_request",
-    "build_top_board_request", "build_unusual_request", "build_volume_profile_request", "call_sync",
+    "AUCTION", "HISTORY_MINUTE_TIME_DATA", "MINUTE_SERIES", "MINUTE_TIME_DATA", "TOP_BOARD", "UNUSUAL", "VOLUME_PROFILE",
+    "build_auction_request", "build_history_minute_data_request", "build_minute_data_request",
+    "build_minute_series_request", "build_top_board_request", "build_unusual_request", "build_volume_profile_request",
     "fetch_auction_curve", "fetch_minute_series", "fetch_top_board", "fetch_unusual", "fetch_volume_profile",
-    "parse_auction", "parse_history_minute_data", "parse_minute_series", "parse_minute_data",
+    "parse_auction", "parse_history_minute_data", "parse_minute_data", "parse_minute_series",
     "parse_top_board", "parse_unusual", "parse_volume_profile",
 ]

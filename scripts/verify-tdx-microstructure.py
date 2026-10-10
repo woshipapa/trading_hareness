@@ -18,10 +18,10 @@ for candidate in (Path.cwd(), Path(__file__).resolve().parents[1] / "quant-servi
         sys.path.insert(0, str(candidate))
         break
 
-from app.datasources.sources import tdx_microstructure  # noqa: E402
+from app.datasources.sources import tdx_microstructure as micro, tdx_protocol  # noqa: E402
 
 
-HOSTS = [("117.34.114.13", 7709), ("60.191.117.167", 7709)]
+HOSTS = list(tdx_protocol.configured_hosts())[:2]
 SYMBOLS = [(0, "000001"), (1, "600519")]
 
 
@@ -43,7 +43,7 @@ def _probe(name: str, operation):
         if isinstance(value, dict):
             rows = value.get("profiles", value)
             count = len(rows) if isinstance(rows, (list, tuple)) else sum(
-                len(item) for key, item in value.items() if key != "size" and isinstance(item, list)
+                len(item) for item in value.values() if isinstance(item, list)
             )
         else:
             count = len(value) if isinstance(value, (list, tuple)) else 1
@@ -67,18 +67,20 @@ def main() -> int:
     for host, port in HOSTS:
         print(json.dumps({"host": f"{host}:{port}"}))
         try:
-            with tdx_microstructure.TdxMicrostructureClient(host, port, 5.0) as client:
+            with tdx_protocol.TdxClient(host, port, 5.0, handshake_profile="login_one") as client:
                 for market, code in SYMBOLS:
                     prefix = f"{code}.{('SZ' if market == 0 else 'SH')}"
                     print(json.dumps({"symbol": prefix}))
-                    profile, _ = _probe("volume_profile", lambda: client.volume_profile(market, code))
-                    _probe("minute_series", lambda: client.minute_series(market, code, session))
-                    auction, auction_error = _probe("auction", lambda: client.auction(market, code))
-                    history, history_error = _probe("history_minute_data", lambda: client.history_minute_data(market, code, session))
-                    _probe("minute_data", lambda: client.minute_data(market, code))
+                    profile, _ = _probe("volume_profile", lambda: micro.parse_volume_profile(client._exchange(micro.build_volume_profile_request(market, code))))
+                    _probe("minute_series", lambda: micro.parse_minute_series(
+                        client._exchange(micro.build_minute_series_request(market, code, session))))
+                    auction, auction_error = _probe("auction", lambda: micro.parse_auction(client._exchange(micro.build_auction_request(market, code))))
+                    history, history_error = _probe("history_minute_data", lambda: micro.parse_history_minute_data(
+                        client._exchange(micro.build_history_minute_data_request(market, code, session)), code))
+                    _probe("minute_data", lambda: micro.parse_minute_data(client._exchange(micro.build_minute_data_request(market, code)), code))
                     if market == 0:
-                        _probe("unusual", lambda: client.unusual(market, 0, 5))
-                        _probe("top_board", lambda: client.top_board(0, 3))
+                        _probe("unusual", lambda: micro.parse_unusual(client._exchange(micro.build_unusual_request(market, 0, 5))))
+                        _probe("top_board", lambda: micro.parse_top_board(client._exchange(micro.build_top_board_request(0, 3))))
 
                     ticks, tick_error = _probe("history_ticks_control", lambda: client.ticks(market, code, session))
                     if history_error or tick_error or history is None or ticks is None:
