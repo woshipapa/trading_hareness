@@ -434,14 +434,20 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recorder.observations, [])
 
     async def test_tdx_security_list_supplies_repository_symbol_key(self):
+        from app.public_market_repository import persist_timed_observations
+        from test_datasource_sentiment_and_capture import RecordingDatabase
+        database = RecordingDatabase()
         recorder = Recorder()
         deps = self._deps(recorder)
+        async def persist(provider, capability, rows):
+            return persist_timed_observations(database, provider, capability, rows)
+        deps.collector.persist_observations = persist
         row = {"symbol": "600519.SH", "name": "Moutai", "instrument_type": "stock_main",
                "decimal_point": 2, "is_st": False, "list_source": "server_list"}
         with patch("app.datasources.collectors.post_close.tdx_instruments.fetch_security_list",
                    AsyncMock(return_value=type("Evidence", (), {"rows": [row]})())):
             await post_close.job_tdx_security_list(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
-        self.assertEqual(recorder.observations[0][2][0]["ts_code"], "600519.SH")
+        self.assertEqual(database.calls[0][1][0][2], "600519.SH")
 
     async def test_tdx_gpcw_limits_periods_and_splits_dated_rows(self):
         recorder = Recorder()

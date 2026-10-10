@@ -196,7 +196,8 @@ class CheckTests(unittest.TestCase):
         result = run_check("owner", answers(), bindings=(plain,))
         self.assertEqual(result.calls, [("owner", "tdx_public", {}, None, False)], "no reference is probed")
         verdict = result.evidence[0]["verdicts"]["agreement"]
-        self.assertTrue(verdict["pass"] and verdict["detail"].startswith("not applicable"), verdict)
+        self.assertFalse(verdict["pass"])
+        self.assertIn("promotion is blocked", verdict["detail"])
 
     def test_a_reference_reader_gets_the_renamed_parameters_and_its_rows_are_projected(self):
         own = [{"symbol": "000001.SZ", "bar_time": f"2026-10-12T09:3{n}:00+08:00", "close": 11.0 + n / 100,

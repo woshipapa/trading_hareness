@@ -302,6 +302,10 @@ _TENCENT_QUOTES = {"reference": "tencent_free", "reference_adapter": "app/free_m
                    "reference_params": {"symbols": "symbols"}, "key": ["symbol"]}
 _TENCENT_LIMITS = {"reference": "tencent_free", "reference_adapter": "app/longhu_vendor_source.py:tencent_quotes_blocking",
                    "reference_params": {"symbols": "symbols"}, "key": ["symbol", "trade_date"]}
+_TENCENT_INDEX_DAILY = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_index_daily",
+                        "reference_params": {"symbol": "symbol"},
+                        "reference_fixed": {"start": "2026-01-01", "end": "2026-12-31"},
+                        "key": ["symbol", "trade_date"]}
 
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot
@@ -399,13 +403,15 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "客户端下载的全部历史", notes="owner 工作站 CLI，不直接写 canonical"),
     _bind("fuyao_ths", "bars.daily", 20, DECLARED, None, "app/fuyao_bulk_dump_capture.py", "10 年日K + 复权因子全量导出"),
     _bind("tdx_public", "bars.daily", 65, UNSUPPORTED, _RAW + "tdx_legacy_daily_bars",
-          "app/datasources/sources/tdx_bars.py:fetch_daily", notes="0x052d category 9；volume 单位为手；/1000 价格缩放适用于 ETF 与北交所；证据见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json",
+          "app/datasources/sources/tdx_bars.py:fetch_daily", notes="0x052d category 9；volume 单位为手；/1000 价格缩放适用于 ETF 与北交所；与 tdx_mac 是跨协议而非跨供应商对账，只比较 close 和 amount；legacy daily volume 保持整手；证据见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json",
           spec=BindingSpec(params={"symbol": "market+code", "count": "count >= 1"},
                            field_map={"open": "open", "high": "high", "low": "low", "close": "close",
                                       "volume": "volume", "amount": "amount"},
                            paging={"kind": "offset", "page_size": 800},
                            time_semantics="effective=bar date; available=the time the response was received (CapabilityEvidence available_at_min/max)",
-                           handshake_profile="login_one")),
+                           handshake_profile="login_one",
+                           agreement={"close": {"reference": "tdx_mac", "key": ["symbol", "trade_date"], "rel_tol": 0.005},
+                                      "amount": {"reference": "tdx_mac", "key": ["symbol", "trade_date"], "rel_tol": 0.02}})),
     _bind("tdx_mac", "bars.daily", 70, UNSUPPORTED, _RAW + "tdx_mac_daily_bars",
           "app/datasources/sources/tdx_mac.py:fetch_daily_bars", spec=BindingSpec(
               params={"symbol": "market+code", "count": "count (period 4 = daily)"}, field_map={},
@@ -431,7 +437,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                                       "volume": "volume", "amount": "amount"},
                            paging={"kind": "offset", "page_size": 800},
                            time_semantics="effective=bar_time, the bar's end minute in Asia/Shanghai; available=the time the response was received (CapabilityEvidence available_at_min/max)",
-                           handshake_profile="login_one")),
+                           handshake_profile="login_one",
+                           agreement={"close": {**_TENCENT_MINUTES, "rel_tol": 0.005}})),
     _bind("tdx_mac", "bars.minute", 70, UNSUPPORTED, _RAW + "tdx_mac_minute_bars",
           "app/datasources/sources/tdx_mac.py:fetch_minute_bars",
           notes="MAC K 线只给 bar 时间（日期 + 当日秒数，适配器组成 Asia/Shanghai 感知的 bar_time）；source_available_at 是响应接收时间，available_at_min/max 记录该时间",
@@ -449,7 +456,8 @@ BINDINGS: Final[tuple[Binding, ...]] = (
               params={"symbol": "index or board market+code", "count": "1..800"},
               field_map={"open": "open", "close": "close", "amount": "amount"},
               time_semantics="effective=交易日收盘; available=采集时刻",
-              handshake_profile="login_one")),
+              handshake_profile="login_one",
+              agreement={"close": {**_TENCENT_INDEX_DAILY, "rel_tol": 0.005}})),
     _bind("tdx_public", "breadth.index_daily", 65, UNSUPPORTED, _RAW + "tdx_index_breadth",
           "app/datasources/sources/tdx_bars.py:fetch_index_breadth",
           notes="与 bars.index_daily 共用一次 0x052d category 9 请求；上涨/下跌家数是该指数成分股口径，不得混入全 A 快照宽度",
