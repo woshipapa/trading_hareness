@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (53)
+## research data (54)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -124,6 +124,7 @@
 | `backfill-full-market-daily.sh` | quant-research | workstation | Deepen the all-A daily history the post-close screens need. |
 | `check-provider-health.py` | quant-research | workstation | Opt-in bounded provider smoke checks using the deployed app adapters. |
 | `fill-longhu-sector-membership.py` | quant-research | quant container | Refresh the sector map from Longhu, inside the quant-service container. |
+| `generate-tdx-bj-codes.py` | quant-research | workstation | Generate the old-to-new BJ stock code table of the TDX server from its addedcode_bj.cfg. |
 | `generate-tdx-hosts.py` | quant-research | workstation | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `import-adjusted-research-bars.py` | quant-research | workstation | Import the latest stock-brain qfq research panel into PostgreSQL. |
 | `import-stock-brain-database.py` | quant-research | workstation | Snapshot and migrate durable stock-brain SQLite data into PostgreSQL. |
