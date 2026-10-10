@@ -61,6 +61,21 @@ class TdxF10Adapters(unittest.IsolatedAsyncioTestCase):
                                    "statement_items": {name: row[name] for name in f10.FINANCE_FIELDS},
                                    "field_units": row["field_units"]}])
 
+    async def test_company_profile_reads_each_category_content_range(self):
+        class FakeClient:
+            def company_categories(self, market, code):
+                self.requested = (market, code)
+                return [{"name": "简介", "filename": "a.txt", "start": 1, "length": 2},
+                        {"name": "行业", "filename": "b.txt", "start": 3, "length": 4}]
+
+            def company_content(self, market, code, filename, start, length):
+                return f"{filename}:{start}:{length}"
+
+        with mock.patch.object(f10, "_call", side_effect=lambda operation, **_: operation(FakeClient())):
+            result = await f10.fetch_company_profile(symbol="000001.SZ")
+        self.assertEqual([row["content"] for row in result], ["a.txt:1:2", "b.txt:3:4"])
+        self.assertEqual(len(result), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
