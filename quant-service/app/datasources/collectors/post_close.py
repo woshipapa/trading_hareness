@@ -519,8 +519,8 @@ async def job_tdx_stat_snapshot(deps: ArchiveDeps, state: ArchiveState, day: dat
     daily_rows = [{**row, "ts_code": row["symbol"],
                    "effective_at": _close_of(_tdx_date(row["effective_date"])).isoformat(),
                    "available_at": now.isoformat()} for row in daily_basic.rows]
-    stored_valuation = await deps.collector.persist_observations("tdx_public", "tdx_stat_valuation", valuation_rows)
-    stored_daily = await deps.collector.persist_observations("tdx_public", "tdx_stat_daily_basic", daily_rows)
+    stored_valuation = await deps.collector.persist_observations("tdx_public", "tdxstat_valuation", valuation_rows)
+    stored_daily = await deps.collector.persist_observations("tdx_public", "tdxstat2_daily_basic", daily_rows)
     await deps.collector.record_health("tdx_public", "tdx_stat_snapshot", True, len(valuation_rows) + len(daily_rows),
                                        round((time_module.monotonic() - started) * 1000), None)
     return {"valuation_rows": len(valuation_rows), "daily_basic_rows": len(daily_rows),
@@ -557,8 +557,8 @@ async def job_tdx_calendar_ipo(deps: ArchiveDeps, state: ArchiveState, day: date
     ipo_rows = [{**row, "ts_code": row["symbol"],
                  "effective_at": _close_of(_tdx_date(row["apply_date"])).isoformat(),
                  "available_at": now.isoformat()} for row in ipo.rows]
-    stored_calendar = await deps.collector.persist_observations("tdx_public", "tdx_trade_calendar", calendar_rows)
-    stored_ipo = await deps.collector.persist_observations("tdx_public", "tdx_ipo_calendar", ipo_rows)
+    stored_calendar = await deps.collector.persist_observations("tdx_public", "tdx_holidays", calendar_rows)
+    stored_ipo = await deps.collector.persist_observations("tdx_public", "tdx_ipo_subscriptions", ipo_rows)
     await deps.collector.record_health("tdx_public", "tdx_calendar_ipo", True, len(calendar_rows) + len(ipo_rows),
                                        round((time_module.monotonic() - started) * 1000), None)
     return {"calendar_rows": len(calendar_rows), "ipo_rows": len(ipo_rows),

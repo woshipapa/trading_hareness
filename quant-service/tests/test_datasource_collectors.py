@@ -42,6 +42,16 @@ class CadenceTests(unittest.TestCase):
                                   opt_in_keys={"tdx_stat_snapshot"})
         self.assertEqual(flags, {"tdx_stat_snapshot": False, "tick_flow": True})
 
+    def test_tdx_archive_store_names_match_catalog_bindings(self):
+        from app.datasources.catalog import bindings_for
+        expected = {
+            "tdxstat_valuation": ("quote.valuation",), "tdxstat2_daily_basic": ("fundamentals.daily_basic",),
+            "tdx_holidays": ("reference.trade_calendar",), "tdx_ipo_subscriptions": ("events.ipo_calendar",),
+        }
+        for store, capabilities in expected.items():
+            self.assertTrue(any(item.store and store in item.store for capability in capabilities
+                                for item in bindings_for(capability, states=("unsupported", "declared", "live_verified", "dormant"))))
+
     def test_windows(self):
         self.assertTrue(intraday.in_window("session", SESSION, session_open=True))
         self.assertFalse(intraday.in_window("session", SESSION, session_open=False))
@@ -571,7 +581,7 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["valuation_rows"], 1)
         self.assertEqual(membership["opened"], 1)
         self.assertEqual(calendar["calendar_rows"], 1)
-        valuation = [rows for _provider, capability, rows in recorder.observations if capability == "tdx_stat_valuation"][0][0]
+        valuation = [rows for _provider, capability, rows in recorder.observations if capability == "tdxstat_valuation"][0][0]
         self.assertEqual(valuation["effective_at"], "2026-10-09T15:00:00+08:00")
 
 
