@@ -45,7 +45,7 @@ The probe reads Tencent quote field 73 as a comparison for TDX `total_shares`; t
 
 ## Unit cross-check
 
-On 2026-10-10, `120.76.152.87:7709` served `gpcw.txt` and the newest archive containing the requested symbols, `gpcw20260630.zip` (the newer `gpcw20260930.zip` contained only one unrelated row). The parsed report date was `20260630`. Comparing `finance_info` from `117.34.114.13:7709` with GPCW columns `col40`, `col72`, `col74`, and `col96` gave these finance/GPCW ratios after the fix:
+On 2026-10-10, `120.76.152.87:7709` served `gpcw.txt` and the newest archive containing the requested symbols, `gpcw20260630.zip` (the newer `gpcw20260930.zip` contained only one unrelated row). The parsed report date was `20260630`. Comparing the 0x0010 summary from `117.34.114.13:7709` with GPCW columns `col40`, `col72`, `col74`, and `col96` gave these finance/GPCW ratios after the fix:
 
 | Code | Total assets | Parent equity / `col72` | Revenue | Net profit | Finance `updated_date` |
 | --- | ---: | ---: | ---: | ---: | --- |
