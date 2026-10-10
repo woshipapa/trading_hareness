@@ -268,7 +268,7 @@ PYTHONPATH=<pytdx 解包> python ../scripts/verify-tdx-protocol.py   # 与 pytdx
 | 开盘啦 longhuvip | 保留为授权主源（盘口/分钟/行业/竞价）；个股 K 线（id=7）下线 |
 | 乘风（含 kpl_archive 榜单） | 不在本平台；其日 K、集合竞价、指数、同花顺热榜、龙虎榜、概念成分由 fuyao 对应能力整体替代 |
 | 通达信客户端 .day/.lc1/.lc5 | `tdx_local`：owner 工作站 CLI 导出到离线导入契约；GPJY 财务包未解析（后续项） |
-| pytdx | `tdx_public`：历史分笔 + 除权除息可用；实时行情与 K 线命令已被公开主站关闭 |
+| TDX public protocol | `tdx_public`：使用 LOGIN_ONE 握手，按主机保留 legacy-3 回退；主机池由探测矩阵生成，进程内传输失败冷却，结果回执带 `host:port/profile`。行情、K 线、历史分笔和除权除息均通过同一研究证据层读取，失败时 fail closed。 |
 | 腾讯 qt / fqkline / 分笔 | 观察池报价、五档、分钟、当日分笔 |
 | 东财 push2 / datacenter / 天天基金 | 板块资金流（已有）+ 涨停板专题、盘口异动、人气榜、datacenter 事件、两融、基金净值（新增）；clist 全市场在 owner 出口被断连 |
 | 同花顺事件 + 问财 | 未接：问财需登录态且有反爬；由 fuyao 热榜/飙升榜/异动原因覆盖“抢手名单”类需求 |

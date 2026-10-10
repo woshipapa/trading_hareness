@@ -4,6 +4,8 @@ import struct
 import tempfile
 import unittest
 import zlib
+import importlib
+import sys
 from pathlib import Path
 
 from app.datasources.derived.tick_flow import Tick, parse_tencent_detail, summarize_ticks, ticks_from_tdx
@@ -85,6 +87,22 @@ def frame(body: bytes, compress: bool = False) -> bytes:
 
 
 class TdxClientTests(unittest.TestCase):
+    def test_generated_host_module_is_optional(self):
+        self.assertEqual(getattr(tdx_protocol, "_GENERATED_HOSTS", ()), ())
+        original = sys.modules.get("app.datasources.sources.tdx_hosts")
+        fake = type(sys)("app.datasources.sources.tdx_hosts")
+        fake.HOSTS = (("synthetic", 7709),)
+        sys.modules["app.datasources.sources.tdx_hosts"] = fake
+        try:
+            loaded = importlib.reload(tdx_protocol)
+            self.assertEqual(loaded.DEFAULT_HOSTS, fake.HOSTS)
+        finally:
+            if original is None:
+                sys.modules.pop("app.datasources.sources.tdx_hosts", None)
+            else:
+                sys.modules["app.datasources.sources.tdx_hosts"] = original
+            importlib.reload(tdx_protocol)
+
     def test_handshake_profiles_send_expected_setup_packets(self):
         original = tdx_protocol.socket.create_connection
         try:

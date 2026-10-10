@@ -419,6 +419,7 @@ def call_sync(operation: Callable[[TdxClient], T], *, hosts: Iterable[tuple[str,
     errors: list[str] = []
     for host, port in _ordered_hosts(hosts or configured_hosts()):
         profiles = (profile, "legacy_3") if profile == "login_one" else (profile,)
+        transport_failed = False
         for attempt, attempt_profile in enumerate(profiles):
             try:
                 with TdxClient(host, port, timeout_seconds, profile=attempt_profile) as client:
@@ -426,12 +427,13 @@ def call_sync(operation: Callable[[TdxClient], T], *, hosts: Iterable[tuple[str,
                 return result, f"{host}:{port}/{attempt_profile}"
             except (OSError, TdxProtocolError, struct.error, IndexError, ValueError) as error:
                 errors.append(f"{host}:{attempt_profile}:{type(error).__name__}")
+                transport_failed = transport_failed or isinstance(error, (OSError, TdxProtocolError))
                 if attempt == 0 and len(profiles) == 2:
                     _LOGGER.info("TDX profile fallback host=%s:%s first=%s fallback=legacy_3 error=%s",
                                  host, port, profile, type(error).__name__)
                     continue
-                if isinstance(error, (OSError, TdxProtocolError)):
-                    _mark_cooldown((host, port))
+        if transport_failed:
+            _mark_cooldown((host, port))
     raise TdxProtocolError("no TDX host answered: " + ", ".join(errors[-8:]))
 
 

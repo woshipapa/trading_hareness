@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (33)
+## research data (34)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -146,18 +146,20 @@
 | `marketdata/upload_to_pan.py` | quant-research | workstation (some on the edge) | Push warm-tier parquet into the Baidu Pan cold tier and record it in the catalog. |
 | `marketdata/verify_cold_read.py` | quant-research | workstation (some on the edge) | Prove a cold-tier parquet answers the same query as the local copy. |
 | `probe-public-sources.py` | quant-research | workstation | Data-free live check of every token-free public evidence source. |
-| `probe-tdx-routes.py` | quant-research | workstation | Probe candidate TDX routes with the repository's stdlib client. |
+| `probe-tdx-routes.py` | quant-research | workstation | Probe TDX routes; output a versioned, fail-closed route matrix. |
 | `refresh-watchlist-from-proposals.py` | quant-research | workstation | Post-close watchlist refresh: admit today's proposals, retire the inactive. |
 | `run-post-close-pipeline.sh` | quant-research | workstation | Post-close daily pipeline runner. |
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
+| `tdx-owner-probe.sh` | quant-research | workstation |  |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
 
-## CI and checks (16)
+## CI and checks (17)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
 | `export_component.py` | platform | workstation and CI | Export one logical component as a secret-free standalone project archive. |
 | `generate-api-types.mjs` | platform | workstation and CI |  |
+| `generate-tdx-hosts.py` | platform | workstation and CI | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `generate_architecture_index.py` | platform | workstation and CI | Generate a small, deterministic map for humans and maintenance agents. |
 | `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
 | `generate_service_index.py` | platform | workstation and CI | Generate docs/services.html: one clickable index of every local service port. |
