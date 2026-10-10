@@ -19,7 +19,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
-from ..sources import tdx_bars, tdx_files, tdx_fin_history, tdx_instruments, tdx_protocol, tdx_zhb_extras
+from ..sources import tdx_bars, tdx_files, tdx_fin_history, tdx_instruments, tdx_mac, tdx_protocol, tdx_zhb_extras
 from ..sources.fuyao_evidence import fetch_code_batches
 from .intraday import CollectorDeps, CollectorState, SENTIMENT_PROVIDER_KEY, build_sentiment
 from ..error_text import error_text
@@ -61,6 +61,7 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("tdx_tipinfo", time(19, 50), time(23, 30), "通达信财报首次披露日期"),
     ArchiveJob("tdx_gpcw", time(20, 0), time(23, 30), "通达信历史财务报表"),
     ArchiveJob("tdx_index_bars", time(20, 10), time(23, 30), "通达信指数日线与涨跌家数"),
+    ArchiveJob("tdx_mac_boards", time(20, 20), time(23, 30), "通达信板块目录与成分"),
 )
 
 
@@ -75,6 +76,7 @@ class ArchiveDeps:
     latest_observation_payloads: Callable[[str, str], Awaitable[dict[str, dict[str, Any]]]] | None = None
     observation_payloads: Callable[[str, str], Awaitable[list[dict[str, Any]]]] | None = None
     max_gpcw_periods: int = 2
+    persist_membership_delta: Callable[[str, str, dict[str, dict[str, Any]], datetime], Awaitable[dict[str, int]]] | None = None
 
 
 TDX_INDEX_SYMBOLS = ("999999.SH", "399001.SZ", "399006.SZ", "399300.SZ", "000688.SH", "899050.BJ")
@@ -410,6 +412,33 @@ async def job_tdx_index_bars(deps: ArchiveDeps, state: ArchiveState, day: date, 
             "stored_daily": stored_daily, "stored_breadth": stored_breadth}
 
 
+async def job_tdx_mac_boards(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive MAC board metadata and observed membership; a full pass is five plus one request per board."""
+    started = time_module.monotonic()
+    catalog = await tdx_mac.fetch_board_catalog()
+    effective = _close_of(day).isoformat()
+    catalog_rows = [{**row, "effective_at": effective, "available_at": now.isoformat()} for row in catalog.rows]
+    stored_catalog = await deps.collector.persist_observations("tdx_mac", "tdx_mac_board_catalog", catalog_rows)
+    membership_requests = 0
+    opened = 0
+    closed = 0
+    for board in catalog.rows:
+        evidence = await tdx_mac.fetch_membership(sector_key=board["board_code"], board_type=board["board_type"])
+        members = {row["symbol"]: row for row in evidence.rows}
+        membership_requests += 1
+        if deps.persist_membership_delta is not None:
+            delta = await deps.persist_membership_delta(
+                f"tdx_mac_type_{board['board_type']}", board["board_code"], members, now,
+            )
+            opened += delta["opened"]
+            closed += delta["closed"]
+    await deps.collector.record_health("tdx_mac", "sector.membership", True, len(catalog.rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"boards": len(catalog.rows), "catalog_requests": len(tdx_mac.BOARD_TYPES),
+            "membership_requests": membership_requests, "stored_catalog": stored_catalog,
+            "opened": opened, "closed": closed}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -419,6 +448,7 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "tick_flow": job_tick_flow, "capital_changes": job_capital_changes,
     "tdx_security_list": job_tdx_security_list, "tdx_tipinfo": job_tdx_tipinfo, "tdx_gpcw": job_tdx_gpcw,
     "tdx_index_bars": job_tdx_index_bars,
+    "tdx_mac_boards": job_tdx_mac_boards,
 }
 
 

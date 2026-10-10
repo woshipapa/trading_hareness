@@ -454,6 +454,31 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({capability for _provider, capability, _rows in recorder.observations},
                          {"tdx_index_daily_bars", "tdx_index_breadth"})
 
+    async def test_tdx_mac_boards_persists_catalog_and_delta_membership(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        from app.datasources.contracts import CapabilityEvidence
+        catalog = CapabilityEvidence([{"board_code": "880710", "name": "Industry", "board_type": 3},
+                                      {"board_code": "880001", "name": "Concept", "board_type": 0}])
+        calls = []
+
+        async def membership(*, sector_key, board_type):
+            calls.append((sector_key, board_type))
+            return CapabilityEvidence([{"symbol": "600519.SH", "name": "Moutai"}])
+
+        async def delta(taxonomy, sector, members, observed_at):
+            self.assertEqual((taxonomy, sector), ("tdx_mac_type_3", "880710")
+                             if sector == "880710" else ("tdx_mac_type_0", "880001"))
+            return {"members": len(members), "opened": 1, "closed": 0}
+
+        deps.persist_membership_delta = delta
+        with patch("app.datasources.collectors.post_close.tdx_mac.fetch_board_catalog", AsyncMock(return_value=catalog)), \
+             patch("app.datasources.collectors.post_close.tdx_mac.fetch_membership", membership):
+            result = await post_close.job_tdx_mac_boards(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(result["membership_requests"], 2)
+        self.assertEqual(result["opened"], 2)
+        self.assertEqual(len(calls), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
