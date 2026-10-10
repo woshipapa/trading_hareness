@@ -320,7 +320,7 @@ async def job_tdx_security_list(deps: ArchiveDeps, state: ArchiveState, day: dat
     evidence = await tdx_instruments.fetch_security_list()
     rows = evidence.rows
     previous = await deps.latest_observation_payloads("tdx_public", "tdx_security_list") if deps.latest_observation_payloads else {}
-    changed = [dict(row, effective_at=now.isoformat(), available_at=now.isoformat())
+    changed = [dict(row, ts_code=row["symbol"], effective_at=now.isoformat(), available_at=now.isoformat())
                for row in rows
                if {key: value for key, value in previous.get(row["symbol"], {}).items()
                    if key not in {"provider_key", "capability"}} != row]
