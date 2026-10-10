@@ -11,12 +11,11 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-if "TdxClient" not in globals():
-    for candidate in (Path.cwd(), Path(__file__).resolve().parents[1] / "quant-service"):
-        if (candidate / "app").is_dir():
-            sys.path.insert(0, str(candidate))
-            break
-    from app.datasources.sources.tdx_protocol import TdxClient, market_code
+# tdx-owner-probe.sh prefixes EMBEDDED_HOSTS_TEXT and pipes the driver, read from stdin, into the owner container, whose
+# working directory holds the image's app package. Run as a file, the app package is the checkout's.
+if "EMBEDDED_HOSTS_TEXT" not in globals():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "quant-service"))
+from app.datasources.sources.tdx_protocol import TdxClient, market_code  # noqa: E402
 
 
 COMMANDS = ("quotes", "bars", "bars_1m", "ticks_today", "ticks_hist", "xdxr")

@@ -160,7 +160,7 @@
 | `refresh-watchlist-from-proposals.py` | quant-research | workstation | Post-close watchlist refresh: admit today's proposals, retire the inactive. |
 | `run-post-close-pipeline.sh` | quant-research | workstation | Post-close daily pipeline runner. |
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
-| `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe from the owner egress over ssh stdin; it writes nothing on the owner. |
+| `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe inside the owner quant-research container, over ssh; it writes nothing on the owner. |
 | `tdx-quant-export.py` | quant-research | owner-windows | Export read-only TdxQuant market data to the offline CSV contracts. |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
 | `tdx_probe_failures.py` | quant-research | workstation | Failure bookkeeping of the long TDX probes: an error is written into the run where it happened. |
