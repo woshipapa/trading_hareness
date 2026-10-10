@@ -451,7 +451,7 @@ class MacWatchSnapshotTests(unittest.TestCase):
                         asyncio.run(adapter(**params))
 
     def test_an_old_bj_code_is_requested_as_its_920_code_and_its_row_keeps_the_requested_symbol(self):
-        for adapter in (tdx_mac.fetch_watch_snapshot, tdx_mac.fetch_limit_prices):
+        for adapter in (tdx_mac.fetch_watch_snapshot, tdx_mac.fetch_limit_prices, tdx_mac.fetch_iopv):
             client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer()})
             with patched_call(client):
                 evidence = asyncio.run(adapter(symbols=["430017.BJ", "600519.SH"]))
