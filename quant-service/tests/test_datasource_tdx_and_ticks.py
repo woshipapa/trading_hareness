@@ -32,6 +32,25 @@ class TdxPrimitiveTests(unittest.TestCase):
             self.assertEqual(decoded, value)
             self.assertEqual(position, len(encode_price(value)))
 
+    def test_minute_bars_read_float32_volume_and_closing_call_denormals_as_zero(self):
+        # Synthetic records in the layout of delta 3 Q8; the 09:31 values are 000001.SZ on 2026-10-09 (F7 check).
+        def record(minutes, volume_bits, amount_bits):
+            zipday = ((2026 - 2004) << 11) + 1009
+            prices = encode_price(11590) + encode_price(10) + encode_price(20) + encode_price(-10)
+            return struct.pack("<HH", zipday, minutes) + prices + struct.pack("<II", volume_bits, amount_bits)
+
+        def f32(value):
+            return struct.unpack("<I", struct.pack("<f", value))[0]
+
+        body = struct.pack("<H", 2) + record(571, f32(6234400.0), f32(73792584.0)) + record(899, 0x00400000, 0x00400000)
+        first, closing = tdx_protocol.parse_bars(8, body)
+        self.assertEqual((first["datetime"], first["volume"], first["amount"]), ("2026-10-09 09:31", 6234400.0, 73792584.0))
+        self.assertEqual((closing["volume"], closing["amount"]), (0.0, 0.0), "the 5.877e-39 denormal of a zero minute")
+        daily_record = (struct.pack("<I", 20261009) + encode_price(11590) + encode_price(10) + encode_price(20)
+                        + encode_price(-10) + struct.pack("<II", f32(6234400.0), f32(73792584.0)))
+        daily = tdx_protocol.parse_bars(9, struct.pack("<H", 1) + daily_record)
+        self.assertEqual(daily[0]["volume"], tdx_protocol.decode_volume(f32(6234400.0)), "daily bars keep the packed format")
+
     def test_request_bytes_match_the_reference_client(self):
         # Captured from pytdx on the owner peer, 2026-09-18.
         self.assertEqual(tdx_protocol.build_bars_request(9, 0, "000001", 0, 50).hex(),

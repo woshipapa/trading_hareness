@@ -125,6 +125,17 @@ def decode_volume(raw: int) -> float:
     return xmm6 + xmm4 + xmm3 + xmm1
 
 
+#: Minute-level K-line categories. Their records carry volume (shares) and amount (yuan) as IEEE float32;
+#: daily and longer bars keep TDX's packed format (TDX plan delta 3, Q8; scripts/probe-tdx-q-units.py).
+MINUTE_BAR_CATEGORIES = frozenset({0, 1, 2, 3, 8})
+
+
+def _float32(raw: int) -> float:
+    """IEEE float32 bits; a zero minute of the closing call arrives as a denormal (5.877e-39), read as 0."""
+    (value,) = struct.unpack("<f", struct.pack("<I", raw))
+    return 0.0 if abs(value) < 1e-20 else value
+
+
 def _bar_datetime(category: int, data: bytes, pos: int) -> tuple[str, int]:
     if category < 4 or category in (7, 8):
         zipday, minutes = struct.unpack("<HH", data[pos:pos + 4])
@@ -208,6 +219,7 @@ def parse_bars(category: int, body: bytes) -> list[dict[str, Any]]:
     pos = 2
     bars = []
     base = 0
+    decode = _float32 if category in MINUTE_BAR_CATEGORIES else decode_volume
     for _ in range(count):
         stamp, pos = _bar_datetime(category, body, pos)
         open_diff, pos = decode_price(body, pos)
@@ -220,7 +232,7 @@ def parse_bars(category: int, body: bytes) -> list[dict[str, Any]]:
         bars.append({
             "datetime": stamp, "open": open_value / 1000, "close": (open_value + close_diff) / 1000,
             "high": (open_value + high_diff) / 1000, "low": (open_value + low_diff) / 1000,
-            "volume": decode_volume(volume_raw), "amount": decode_volume(amount_raw),
+            "volume": decode(volume_raw), "amount": decode(amount_raw),
         })
         base = open_value + close_diff
     return bars
@@ -468,7 +480,7 @@ def market_code(symbol: str) -> tuple[int, str]:
 
 
 __all__ = [
-    "BAR_CATEGORIES", "DEFAULT_HOSTS", "HANDSHAKE_PROFILES", "MARKETS", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
+    "BAR_CATEGORIES", "DEFAULT_HOSTS", "HANDSHAKE_PROFILES", "MARKETS", "MINUTE_BAR_CATEGORIES", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
     "UPSTREAM_SITE", "XDXR_CATEGORIES", "build_bars_request", "build_history_ticks_request",
     "build_quotes_request", "build_ticks_request", "build_xdxr_request", "call", "call_sync",
     "configured_hosts", "decode_price", "decode_volume", "market_code", "parse_bars", "parse_quotes",
