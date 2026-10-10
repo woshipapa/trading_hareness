@@ -459,17 +459,12 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
                                         "high": 1, "low": 1, "amount": 1, "volume_raw": 1,
                                         "up_count": 2, "down_count": 1}])
 
-        async def breadth(*, symbol, count):
-            requested.append(("breadth", symbol, count))
-            from app.datasources.contracts import CapabilityEvidence
-            return CapabilityEvidence([{"symbol": symbol, "trade_date": "2026-10-09", "up_count": 2, "down_count": 1}])
-
         deps.latest_observation_payloads = latest
         with patch("app.datasources.collectors.post_close.tdx_bars.fetch_index_daily", daily), \
-             patch("app.datasources.collectors.post_close.tdx_bars.fetch_index_breadth", breadth):
+             patch("app.datasources.collectors.post_close.tdx_bars.fetch_index_breadth", AsyncMock(side_effect=AssertionError("second request"))):
             await post_close.job_tdx_index_bars(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
         self.assertEqual(requested[0][2], 5)
-        self.assertEqual(requested[2][2], 800)
+        self.assertEqual(requested[1][2], 800)
         self.assertEqual({capability for _provider, capability, _rows in recorder.observations},
                          {"tdx_index_daily_bars", "tdx_index_breadth"})
 

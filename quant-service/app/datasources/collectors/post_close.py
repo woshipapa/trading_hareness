@@ -411,13 +411,11 @@ async def job_tdx_index_bars(deps: ArchiveDeps, state: ArchiveState, day: date, 
     for symbol in TDX_INDEX_SYMBOLS:
         count = 5 if symbol in previous else 800
         daily = await tdx_bars.fetch_index_daily(symbol=symbol, count=count)
-        breadth = await tdx_bars.fetch_index_breadth(symbol=symbol, count=count)
         for row in daily.rows:
             effective = datetime.combine(date.fromisoformat(row["trade_date"]), time(15, 0), CN_TZ)
             daily_rows.append({**row, "ts_code": symbol, "effective_at": effective.isoformat(), "available_at": now.isoformat()})
-        for row in breadth.rows:
-            effective = datetime.combine(date.fromisoformat(row["trade_date"]), time(15, 0), CN_TZ)
-            breadth_rows.append({**row, "ts_code": symbol, "effective_at": effective.isoformat(), "available_at": now.isoformat()})
+            breadth_rows.append({key: row[key] for key in ("symbol", "trade_date", "up_count", "down_count")}
+                                | {"ts_code": symbol, "effective_at": effective.isoformat(), "available_at": now.isoformat()})
     stored_daily = await deps.collector.persist_observations("tdx_public", "tdx_index_daily_bars", daily_rows)
     stored_breadth = await deps.collector.persist_observations("tdx_public", "tdx_index_breadth", breadth_rows)
     await deps.collector.record_health("tdx_public", "tdx_index_daily_bars", True, len(daily_rows),
