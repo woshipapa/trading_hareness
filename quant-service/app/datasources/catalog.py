@@ -479,10 +479,11 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           decision_eligible=False,
           spec=BindingSpec(time_semantics="effective=采集时刻; available=采集时刻（快照）")),
     _bind("tdx_public", "reference.instruments", 19, UNSUPPORTED, None,
-          "app/datasources/sources/tdx_instruments.py:instruments_from_security_list",
-          notes="从 reference.security_list 派生：仅股票类；list_date 由 TDX 不提供故设为 None",
+          "app/datasources/sources/tdx_instruments.py:fetch_instruments",
+          notes="从 reference.security_list 派生：仅股票类；TDX 不提供上市日期，list_date 为 None，绝不编造",
           decision_eligible=False,
-          spec=BindingSpec(time_semantics="effective=入库")),
+          spec=BindingSpec(field_map={"symbol": "symbol", "name": "name", "list_date": "list_date", "is_st": "is_st"},
+                           time_semantics="effective=collection time; available=collection time (snapshot)")),
     _bind("fuyao_ths", "reference.instruments", 12, DECLARED, "instruments", "app/market_universe_sync.py",
           limits="ticker_list asset_type=a-share，每页 1000，翻到短页为止",
           notes="全 A 权威清单（可移出成员）：须达 minimum_rows 且沪深北齐全才落库；Longhu 收盘只增不删；2026-10-09 本机探测"),
@@ -743,8 +744,9 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not bindings_for(key) and not bindings_for(key, states=(UNSUPPORTED,)):
-            problems.append(f"{key}: no binding at all")
+        # A capability must stay routable; the only exception is one whose bindings all await evidence.
+        if not bindings_for(key) and not any(item.capability == key and item.status == UNSUPPORTED for item in BINDINGS):
+            problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
             problems.append(f"{source.key}: unknown license {source.license}")

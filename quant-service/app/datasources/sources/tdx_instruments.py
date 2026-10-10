@@ -14,9 +14,11 @@ share the stock-only /100 rule.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import struct
 from collections import Counter
+from collections.abc import Callable
 from typing import Any, Iterable, Mapping
 
 from . import tdx_protocol, tdx_files
@@ -132,121 +134,72 @@ def bar_layout(instrument_type: str) -> str:
     return "index" if instrument_type in ("index", "board") else "stock"
 
 
-def instruments_from_security_list() -> list[dict[str, Any]]:
-    """Derive reference.instruments from reference.security_list.
+_EXCHANGE = {market: exchange for exchange, market in tdx_protocol.MARKETS.items()}
 
-    Filters to stocks only (instrument_type starts with 'stock_');
-    keeps symbol, name, is_st; sets list_date to None (TDX does not provide it).
+
+def _list_section(market: int) -> Callable[[tdx_protocol.TdxClient], tuple[int, list[dict[str, Any]]]]:
+    """One market's server list: its 0x044e count and every 0x0450 page."""
+    def section(client: tdx_protocol.TdxClient) -> tuple[int, list[dict[str, Any]]]:
+        count = security_count(client, market)
+        return count, [row for start in range(0, count, SECURITY_PAGE_SIZE)
+                       for row in parse_security_list(client._exchange(build_security_list_request(
+                           market, start, min(SECURITY_PAGE_SIZE, count - start))), market=market)]
+    return section
+
+
+def _zhb_bj_rows(client: tdx_protocol.TdxClient) -> list[dict[str, Any]]:
+    return bj_rows_from_zhb(tdx_files.parse_zhb_zip(tdx_files.download(client, "zhb.zip")))
+
+
+def _security_row(market: int, code: str, name: str, decimal_point: int | None, pre_close: float | None,
+                  list_source: str, host: str) -> dict[str, Any]:
+    kind = classify_instrument(market, code, name)
+    return {"symbol": f"{code}.{_EXCHANGE[market]}", "market": market, "code": code, "name": name,
+            "instrument_type": kind["type"], "decimal_point": decimal_point, "pre_close": pre_close,
+            "is_st": kind["is_st"], "list_source": list_source, "source_host": host}
+
+
+def _security_list() -> CapabilityEvidence:
+    sweep = tdx_protocol.sweep_sync({"SZ": _list_section(0), "SH": _list_section(1),
+                                     "BJ": lambda client: security_count(client, 2), "zhb": _zhb_bj_rows},
+                                    handshake_profile="login_one")
+    host, sections = f"{sweep['host']}/{sweep['profile']}", sweep["sections"]
+    lost = [f"{name}: {sections[name]['error']}" for name in ("SZ", "SH", "BJ") if "error" in sections[name]]
+    if lost:
+        raise tdx_protocol.TdxProtocolError(f"security list sweep on {host} lost a market: " + "; ".join(lost))
+    (sz_count, sz_rows), (sh_count, sh_rows) = sections["SZ"]["result"], sections["SH"]["result"]
+    bj_count = sections["BJ"]["result"]
+    rows = [_security_row(row["market"], row["code"], row["name"], row["decimal_point"], row["pre_close"],
+                          "server_list", host) for row in sz_rows + sh_rows]
+    warnings = [f"host={host}"]
+    if "error" in sections["zhb"]:
+        warnings.append(f"zhb_failed: {sections['zhb']['error']}")
+    else:
+        # tdxbjmore has no decimal point or pre-close, and its first column is the file's own market number.
+        rows += [_security_row(2, row["code"], row["name"], None, None, "zhb_tdxbjmore", host)
+                 for row in sections["zhb"]["result"]]
+    bj_rows = len(rows) - len(sz_rows) - len(sh_rows)
+    if bj_rows != bj_count:
+        warnings.append(f"bj_missing={bj_count - bj_rows}")
+    return CapabilityEvidence(rows=rows, coverage=len(rows) / (sz_count + sh_count + bj_count), warnings=tuple(warnings))
+
+
+async def fetch_security_list() -> CapabilityEvidence:
+    """Every SZ/SH/BJ security from one deterministic host, one connection per section (delta-1 D1, D5).
+
+    Losing the SZ, SH or BJ count section fails the attempt; losing zhb.zip only leaves the BJ rows out,
+    which shows in the coverage and the bj_missing warning. Server counts, not returned rows, are the
+    denominator, so a missing page lowers the coverage too.
     """
-    evidence = fetch_security_list()
-    instruments = []
-    for row in evidence.rows:
-        inst_type = row.get("instrument_type", "")
-        if inst_type.startswith("stock_"):
-            code = row.get("code", "")
-            market = row.get("market", "")
-            market_code = {0: "SZ", 1: "SH", 2: "BJ"}.get(market, "")
-            if market_code and code:
-                symbol = f"{code}.{market_code}"
-                instruments.append({
-                    "symbol": symbol,
-                    "name": row.get("name", ""),
-                    "is_st": row.get("is_st", False),
-                    "list_date": None
-                })
-    return instruments
+    return await asyncio.to_thread(_security_list)
 
 
-def fetch_security_list() -> CapabilityEvidence:
-    """Fetch the full TDX security list from one deterministic host.
-
-    Collects SZ and SH lists via 0x044e/0x0450, BJ count only (0x0450 times
-    out), and Beijing securities from zhb.zip tdxbjmore.cfg via tdx_files.
-
-    Returns a CapabilityEvidence with all rows tagged with source_host and
-    list_source; coverage = rows / (sz_count + sh_count + bj_count); warnings
-    include bj_missing (the gap between BJ count and tdxbjmore rows).
-    """
-    def sz_section(client: tdx_protocol.TdxClient) -> list[dict[str, Any]]:
-        count = security_count(client, 0)
-        rows = []
-        for start in range(0, count, SECURITY_PAGE_SIZE):
-            body = client._exchange(build_security_list_request(0, start, min(SECURITY_PAGE_SIZE, count - start)))
-            page = parse_security_list(body, market=0)
-            for row in page:
-                row["list_source"] = "server_list"
-                row["source_host"] = f"{client.host}:{client.port}"
-            rows.extend(page)
-        return rows
-
-    def sh_section(client: tdx_protocol.TdxClient) -> list[dict[str, Any]]:
-        count = security_count(client, 1)
-        rows = []
-        for start in range(0, count, SECURITY_PAGE_SIZE):
-            body = client._exchange(build_security_list_request(1, start, min(SECURITY_PAGE_SIZE, count - start)))
-            page = parse_security_list(body, market=1)
-            for row in page:
-                row["list_source"] = "server_list"
-                row["source_host"] = f"{client.host}:{client.port}"
-            rows.extend(page)
-        return rows
-
-    def bj_count_section(client: tdx_protocol.TdxClient) -> int:
-        return security_count(client, 2)
-
-    def zhb_section(client: tdx_protocol.TdxClient) -> list[dict[str, Any]]:
-        zhb_data = tdx_files.download(client, "zhb.zip")
-        zhb_files = tdx_files.parse_zhb_zip(zhb_data)
-        rows = bj_rows_from_zhb(zhb_files)
-        for row in rows:
-            row["list_source"] = "zhb_tdxbjmore"
-            row["source_host"] = f"{client.host}:{client.port}"
-        return rows
-
-    sweep_result = tdx_protocol.sweep_sync(
-        {"sz": sz_section, "sh": sh_section, "bj_count": bj_count_section, "zhb": zhb_section},
-        handshake_profile="login_one"
-    )
-
-    rows = []
-    sz_count = 0
-    sh_count = 0
-    bj_count = 0
-    host_label = sweep_result.get("host", "unknown")
-    warnings = [f"host={host_label}/{sweep_result.get('profile', 'unknown')}"]
-
-    for section_name, section_result in sweep_result.get("sections", {}).items():
-        if "error" in section_result:
-            if section_name == "bj_count":
-                warnings.append(f"{section_name}: {section_result['error']}")
-            else:
-                warnings.append(f"{section_name}: {section_result['error']}")
-        else:
-            value = section_result.get("result")
-            if section_name == "sz":
-                rows.extend(value if isinstance(value, list) else [])
-                sz_count = len([r for r in (value if isinstance(value, list) else []) if r.get("list_source") == "server_list"])
-            elif section_name == "sh":
-                rows.extend(value if isinstance(value, list) else [])
-                sh_count = len([r for r in (value if isinstance(value, list) else []) if r.get("list_source") == "server_list"])
-            elif section_name == "bj_count":
-                bj_count = value if isinstance(value, int) else 0
-            elif section_name == "zhb":
-                rows.extend(value if isinstance(value, list) else [])
-
-    bj_from_zhb = len([r for r in rows if r.get("list_source") == "zhb_tdxbjmore"])
-    bj_missing = bj_count - bj_from_zhb
-    if bj_missing != 0:
-        warnings.append(f"bj_missing={bj_missing}")
-
-    total_count = sz_count + sh_count + bj_count
-    coverage = len(rows) / total_count if total_count > 0 else 0.0
-
-    return CapabilityEvidence(
-        rows=rows,
-        coverage=coverage,
-        warnings=tuple(warnings)
-    )
+async def fetch_instruments() -> CapabilityEvidence:
+    """The stocks of the security list in the reference.instruments shape; TDX sends no list date."""
+    evidence = await fetch_security_list()
+    return CapabilityEvidence(rows=[{"symbol": row["symbol"], "name": row["name"], "list_date": None, "is_st": row["is_st"]}
+                                    for row in evidence.rows if row["instrument_type"].startswith("stock_")],
+                              coverage=evidence.coverage, warnings=evidence.warnings)
 
 
 def price_scale(decimal_point: int | None, kind: str | None = None) -> float:
@@ -379,6 +332,6 @@ def type_counts(rows: Iterable[Mapping[str, Any]]) -> Counter[str]:
 
 
 __all__ = ["SECURITY_COUNT", "SECURITY_LIST", "bar_layout", "build_security_count_request",
-           "build_security_list_request", "classify_instrument", "fetch_security_list", "instruments_from_security_list", "instrument_type", "normalize_bj_symbol",
+           "build_security_list_request", "classify_instrument", "fetch_security_list", "fetch_instruments", "instrument_type", "normalize_bj_symbol",
            "parse_bj_mapping", "parse_tdxbjmore", "bj_rows_from_zhb", "parse_index_bars", "parse_security_count", "parse_security_list",
            "security_count", "security_list", "index_bars", "price_scale", "scale_quote", "type_counts"]

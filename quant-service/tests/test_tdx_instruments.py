@@ -83,143 +83,48 @@ class InstrumentTests(unittest.TestCase):
         # Board: index layout
         self.assertEqual(ti.bar_layout("board"), "index")
 
-    def test_fetch_security_list_mocked_sections(self):
-        """Test fetch_security_list coverage and warning calculations."""
-        # Mock sweep_sync to return fake results
-        fake_sweep_result = {
-            "host": "127.0.0.1:7709",
-            "profile": "login_one",
-            "sections": {
-                "sz": {
-                    "result": [
-                        {"market": 0, "code": "000001", "name": "平安", "instrument_type": "stock_main",
-                         "list_source": "server_list", "source_host": "127.0.0.1:7709"}
-                    ],
-                    "rows": 1,
-                },
-                "sh": {
-                    "result": [
-                        {"market": 1, "code": "600519", "name": "贵州茅台", "instrument_type": "stock_main",
-                         "list_source": "server_list", "source_host": "127.0.0.1:7709"}
-                    ],
-                    "rows": 1,
-                },
-                "bj_count": {
-                    "result": 10,
-                    "rows": 10,
-                },
-                "zhb": {
-                    "result": [
-                        {"market": 2, "code": "920000", "name": "测试", "instrument_type": "stock_bj",
-                         "list_source": "zhb_tdxbjmore", "source_host": "127.0.0.1:7709"}
-                    ],
-                    "rows": 1,
-                },
-            }
-        }
+    def _sweep(self, *, sz=None, zhb=None):
+        """A synthetic sweep result in tdx_protocol.sweep_sync's shape."""
+        def server(market, code, name):
+            return {"market": market, "code": code, "name": name, "decimal_point": 2, "pre_close": 10.0}
 
-        with patch.object(tdx_protocol, 'sweep_sync', return_value=fake_sweep_result):
-            evidence = ti.fetch_security_list()
+        return {"host": "1.2.3.4:7709", "profile": "login_one", "sections": {
+            "SZ": sz or {"result": (3, [server(0, "000001", "平安银行"), server(0, "000099", "*ST测试")])},
+            "SH": {"result": (1, [server(1, "999999", "上证指数")])},
+            "BJ": {"result": 2},
+            "zhb": zhb or {"result": [{"market": 44, "code": "920000", "name": "安徽凤凰"}]},
+        }}
 
-        # Should have 3 rows (1 SZ + 1 SH + 1 BJ)
-        self.assertEqual(len(evidence.rows), 3)
+    def test_security_list_counts_against_the_server_and_flags_the_bj_gap(self):
+        import asyncio
+        with patch.object(tdx_protocol, "sweep_sync", return_value=self._sweep()):
+            evidence = asyncio.run(ti.fetch_security_list())
+        self.assertAlmostEqual(evidence.coverage, 4 / 6, msg="SZ said 3 and sent 2: a missing page lowers coverage")
+        self.assertIn("bj_missing=1", evidence.warnings)
+        self.assertIn("host=1.2.3.4:7709/login_one", evidence.warnings)
+        rows = {row["symbol"]: row for row in evidence.rows}
+        self.assertEqual(rows["920000.BJ"]["market"], 2, "tdxbjmore's own market number 44 is not the protocol market")
+        self.assertEqual((rows["920000.BJ"]["decimal_point"], rows["920000.BJ"]["list_source"]), (None, "zhb_tdxbjmore"))
+        self.assertEqual((rows["000099.SZ"]["is_st"], rows["999999.SH"]["instrument_type"]), (True, "index"))
+        self.assertEqual(rows["000001.SZ"]["source_host"], "1.2.3.4:7709/login_one")
 
-        # Coverage should be 3 / (1 + 1 + 10) = 0.25
-        self.assertAlmostEqual(evidence.coverage, 0.25)
+    def test_a_lost_market_fails_the_attempt_and_a_lost_zhb_only_lowers_coverage(self):
+        import asyncio
+        with patch.object(tdx_protocol, "sweep_sync", return_value=self._sweep(sz={"error": "timeout"})):
+            with self.assertRaises(tdx_protocol.TdxProtocolError):
+                asyncio.run(ti.fetch_security_list())
+        with patch.object(tdx_protocol, "sweep_sync", return_value=self._sweep(zhb={"error": "closed"})):
+            evidence = asyncio.run(ti.fetch_security_list())
+        self.assertIn("zhb_failed: closed", evidence.warnings)
+        self.assertIn("bj_missing=2", evidence.warnings)
+        self.assertAlmostEqual(evidence.coverage, 3 / 6)
 
-        # Should have warning about 9 missing BJ rows (10 - 1)
-        self.assertTrue(any("bj_missing=9" in w for w in evidence.warnings))
-
-        # Should have host info warning
-        self.assertTrue(any("host=127.0.0.1:7709/login_one" in w for w in evidence.warnings))
-
-    def test_fetch_security_list_with_error_sections(self):
-        """Test fetch_security_list handles section errors gracefully."""
-        fake_sweep_result = {
-            "host": "127.0.0.1:7709",
-            "profile": "login_one",
-            "sections": {
-                "sz": {
-                    "result": [
-                        {"market": 0, "code": "000001", "name": "平安", "instrument_type": "stock_main",
-                         "list_source": "server_list", "source_host": "127.0.0.1:7709"}
-                    ],
-                    "rows": 1,
-                },
-                "sh": {
-                    "error": "Connection timeout"
-                },
-                "bj_count": {
-                    "result": 5,
-                    "rows": 5,
-                },
-                "zhb": {
-                    "result": [],
-                    "rows": 0,
-                },
-            }
-        }
-
-        with patch.object(tdx_protocol, 'sweep_sync', return_value=fake_sweep_result):
-            evidence = ti.fetch_security_list()
-
-        # Should have 1 row (only SZ succeeded)
-        self.assertEqual(len(evidence.rows), 1)
-
-        # Coverage should be 1 / (1 + 0 + 5) = 1/6
-        self.assertAlmostEqual(evidence.coverage, 1/6, places=5)
-
-        # Should have error warning
-        self.assertTrue(any("Connection timeout" in w for w in evidence.warnings))
-
-    def test_instruments_from_security_list(self):
-        """Test instruments_from_security_list filters stocks and formats correctly."""
-        fake_sweep_result = {
-            "host": "127.0.0.1:7709",
-            "profile": "login_one",
-            "sections": {
-                "sz": {"result": [
-                    {"market": 0, "code": "000001", "name": "平安", "instrument_type": "stock_main", "is_st": False,
-                     "list_source": "server_list", "source_host": "127.0.0.1:7709"},
-                    {"market": 0, "code": "000099", "name": "*ST浪潮", "instrument_type": "stock_main", "is_st": True,
-                     "list_source": "server_list", "source_host": "127.0.0.1:7709"},
-                    {"market": 0, "code": "127045", "name": "可转债", "instrument_type": "cb", "is_st": False,
-                     "list_source": "server_list", "source_host": "127.0.0.1:7709"},
-                ], "rows": 3},
-                "sh": {"result": [
-                    {"market": 1, "code": "999999", "name": "指数", "instrument_type": "index", "is_st": False,
-                     "list_source": "server_list", "source_host": "127.0.0.1:7709"},
-                ], "rows": 1},
-                "bj_count": {"result": 0, "rows": 0},
-                "zhb": {"result": [], "rows": 0},
-            }
-        }
-
-        with patch.object(tdx_protocol, 'sweep_sync', return_value=fake_sweep_result):
-            instruments = ti.instruments_from_security_list()
-
-        # Should have 2 instruments (2 stocks, no CB, no index)
-        self.assertEqual(len(instruments), 2)
-
-        # Check symbols and st flags
-        symbols = {i["symbol"] for i in instruments}
-        self.assertIn("000001.SZ", symbols)
-        self.assertIn("000099.SZ", symbols)
-        # CB and index should not be included
-        self.assertNotIn("127045.SZ", symbols)
-        self.assertNotIn("999999.SH", symbols)
-
-        # Check is_st flag
-        for inst in instruments:
-            if inst["symbol"] == "000099.SZ":
-                self.assertTrue(inst["is_st"])
-            else:
-                self.assertFalse(inst["is_st"])
-
-        # Check list_date is None
-        for inst in instruments:
-            self.assertIsNone(inst["list_date"])
-
-
+    def test_instruments_keep_stocks_only_and_never_invent_a_list_date(self):
+        import asyncio
+        with patch.object(tdx_protocol, "sweep_sync", return_value=self._sweep()):
+            evidence = asyncio.run(ti.fetch_instruments())
+        self.assertEqual({row["symbol"] for row in evidence.rows}, {"000001.SZ", "000099.SZ", "920000.BJ"})
+        self.assertTrue(all(row["list_date"] is None for row in evidence.rows))
+        self.assertAlmostEqual(evidence.coverage, 4 / 6)
 if __name__ == "__main__":
     unittest.main()
