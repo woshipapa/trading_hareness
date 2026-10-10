@@ -79,6 +79,18 @@ class TdxFileParserTests(unittest.TestCase):
         self.assertEqual(tdx_files.download(client, "zhb.zip"), b"report")
         self.assertEqual(len(client.requests), 3)
 
+    def test_empty_download_names_the_unserved_file(self):
+        class EmptyClient:
+            def _exchange(self, request):
+                if request.startswith(bytes.fromhex("0c391869")):
+                    return struct.pack("<I", 0)
+                return struct.pack("<I", 0)
+
+        with self.assertRaisesRegex(tdx_files.TdxFileError, "zhb\\.zip"):
+            tdx_files.download(EmptyClient(), "zhb.zip")
+        with self.assertRaisesRegex(tdx_files.TdxFileError, "block_gn\\.dat"):
+            tdx_files.download(EmptyClient(), "block_gn.dat")
+
 
 if __name__ == "__main__":
     unittest.main()

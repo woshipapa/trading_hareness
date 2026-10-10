@@ -261,8 +261,12 @@ def _download_report(client: tdx_protocol.TdxClient, filename: str) -> bytes:
 def download(client: tdx_protocol.TdxClient, filename: str) -> bytes:
     """Download one file; block/config files use the size-query path."""
     if filename in BLOCK_FILES:
-        return _download_block(client, filename, file_size(client, filename))
-    return _download_report(client, filename)
+        content = _download_block(client, filename, file_size(client, filename))
+    else:
+        content = _download_report(client, filename)
+    if not content:
+        raise TdxFileError(f"TDX file is empty or not served: {filename}")
+    return content
 
 
 __all__ = [
