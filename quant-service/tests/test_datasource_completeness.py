@@ -3,6 +3,7 @@
 import argparse
 import contextlib
 import io
+import re
 import tempfile
 import unittest
 from decimal import Decimal
@@ -12,7 +13,7 @@ from unittest import mock
 from app.datasources import catalog
 from app.datasources.catalog import BINDINGS
 from app.datasources.completeness import (
-    TDX_COMMAND_FAMILIES, completeness_problems, public_fetch_functions, referenced_by_bindings,
+    TDX_COMMAND_FAMILIES, UNREGISTERED, completeness_problems, public_fetch_functions, referenced_by_bindings,
 )
 from app.datasources.contracts import DECLARED, Binding, BindingSpec
 
@@ -133,6 +134,20 @@ class CompletenessTests(unittest.TestCase):
         self.assertIn("stale UNREGISTERED entry: demo.pure (not a reader under sources/)", problems)
         self.assertIn("stale UNREGISTERED entry: demo.fetch_gone (not a reader under sources/)", problems)
         self.assertIn("stale UNREGISTERED entry: family:ticks (a TDX binding covers it now; delete the entry)", problems)
+
+    def test_exemption_reasons_describe_the_current_state(self):
+        # Plan phases P2 and P3 are finished; a reason that still sends a reader there is stale.
+        for name, reason in UNREGISTERED.items():
+            self.assertIsNone(re.search(r"\bP[23]\b", reason), name)
+        # The MAC reasons name only adapters and capabilities the catalog really binds to tdx_mac.
+        adapters = {item.adapter.split(":", 1)[1] for item in BINDINGS if item.source == "tdx_mac"}
+        capabilities = {item.capability for item in BINDINGS if item.source == "tdx_mac"}
+        for name, reason in UNREGISTERED.items():
+            if name.startswith("tdx_mac."):
+                for function in re.findall(r"\bfetch_[a-z_]+", reason):
+                    self.assertIn(function, adapters, name)
+                for capability in re.findall(r"\b(?:quote|limits|sector|bars)\.[a-z_]+", reason):
+                    self.assertIn(capability, capabilities, name)
 
     def test_the_production_inventory_is_complete(self):
         self.assertIn("tdx_local_files.write_csv", public_fetch_functions(), "found by its file write, not its name")
