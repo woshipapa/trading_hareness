@@ -193,12 +193,12 @@ async def fetch_instruments() -> CapabilityEvidence:
 def price_scale(decimal_point: int | None) -> float:
     """Return the divisor for integer quote prices.
 
-    The list's decimal_point is authoritative.  Missing/invalid metadata falls
-    back to the ordinary stock /100 convention and is marked by callers.
+    The list's decimal_point is authoritative.  A security without a valid one (the BJ rows carry none)
+    has no divisor: that is a ValueError, never the stock /100.
     """
-    if decimal_point is None or not 0 <= int(decimal_point) <= 6:
-        return 100.0
-    return float(10 ** int(decimal_point))
+    if decimal_point is None or not 0 <= decimal_point <= 6:
+        raise ValueError(f"quote decimal point must be 0 to 6, got {decimal_point!r}")
+    return float(10 ** decimal_point)
 
 
 _QUOTE_PRICE_KEYS = frozenset({"price", "last_close", "open", "high", "low",

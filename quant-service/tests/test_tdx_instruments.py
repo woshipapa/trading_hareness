@@ -30,6 +30,15 @@ class InstrumentTests(unittest.TestCase):
         self.assertAlmostEqual(ti.scale_quote({"price": 43.85}, 3)["price"], 4.385)
         self.assertEqual(ti.price_scale(2), 100.0)
 
+    def test_a_missing_or_invalid_decimal_point_has_no_scale(self):
+        # The BJ rows of the list carry none (scripts/data/tdx_quote_scale_and_bj_2026-10-10_mac.json).
+        for decimal_point in (None, -1, 7):
+            with self.subTest(decimal_point=decimal_point):
+                with self.assertRaises(ValueError):
+                    ti.price_scale(decimal_point)
+                with self.assertRaises(ValueError):
+                    ti.scale_quote({"price": 43.85}, decimal_point)
+
     def test_scale_quote_rescales_prices_not_volumes(self):
         scaled = ti.scale_quote({"price": 43.85, "bid1": 43.84, "bid_vol1": 1200, "ask_vol1": 800}, 3)
         self.assertAlmostEqual(scaled["price"], 4.385)
