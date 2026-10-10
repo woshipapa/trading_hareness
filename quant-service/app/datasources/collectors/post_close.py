@@ -85,6 +85,11 @@ class ArchiveDeps:
 TDX_INDEX_SYMBOLS = ("999999.SH", "399001.SZ", "399006.SZ", "399300.SZ", "000688.SH", "899050.BJ")
 
 
+def _tdx_stock_symbol(code: str) -> str:
+    exchange = "SH" if str(code).startswith(("5", "6")) else "BJ" if str(code).startswith(("4", "8", "9")) else "SZ"
+    return f"{str(code).zfill(6)}.{exchange}"
+
+
 @dataclass
 class ArchiveState:
     done: dict[str, str] = field(default_factory=dict)
@@ -361,7 +366,7 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
     changes = tdx_fin_history.manifest_changes(previous, manifest)
     changed_names = sorted(set(changes["added"]) | set(changes["changed"]))[-deps.max_gpcw_periods:]
     entries = {entry.filename: entry for entry in manifest}
-    manifest_rows = [{"filename": entry.filename, "md5": entry.md5, "size": entry.size,
+    manifest_rows = [{"ts_code": "000000.SH", "filename": entry.filename, "md5": entry.md5, "size": entry.size,
                       "effective_at": datetime.combine(date.fromisoformat(entry.filename[4:12]), time(15, 0), CN_TZ).isoformat(),
                       "available_at": now.isoformat()}
                      for entry in manifest]
@@ -383,7 +388,7 @@ async def job_tdx_gpcw(deps: ArchiveDeps, state: ArchiveState, day: date, now: d
             report_period = row["report_period"]
             effective = datetime.combine(date.fromisoformat(report_period), time(15, 0), CN_TZ)
             available = row.get("available_at", now)
-            observations.append({"code": row["code"], "report_period": report_period,
+            observations.append({"ts_code": _tdx_stock_symbol(row["code"]), "code": row["code"], "report_period": report_period,
                                 "fields": named_fields, "field_units": {key: row["field_units"][key] for key in named_fields},
                                 "effective_at": effective.isoformat(), "available_at": available.isoformat(),
                                 "availability_basis": "tipinfo_first_disclosure" if "available_at" in row else "collection_time_undated"})
@@ -423,7 +428,8 @@ async def job_tdx_mac_boards(deps: ArchiveDeps, state: ArchiveState, day: date, 
     started = time_module.monotonic()
     catalog = await tdx_mac.fetch_board_catalog()
     effective = _close_of(day).isoformat()
-    catalog_rows = [{**row, "effective_at": effective, "available_at": now.isoformat()} for row in catalog.rows]
+    catalog_rows = [{**row, "ts_code": f"{row['board_code']}.SH", "effective_at": effective,
+                     "available_at": now.isoformat()} for row in catalog.rows]
     stored_catalog = await deps.collector.persist_observations("tdx_mac", "tdx_mac_board_catalog", catalog_rows)
     membership_requests = 0
     opened = 0
