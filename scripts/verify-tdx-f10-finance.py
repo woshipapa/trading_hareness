@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
 
 from app.datasources.sources.tdx_f10_finance import TdxF10Client  # noqa: E402
+from app.datasources.sources.tdx_fin_history import download_report_file  # noqa: E402
 
 
 HOSTS = (
@@ -32,7 +33,7 @@ def main() -> int:
             with TdxF10Client(host, port, timeout_seconds=timeout) as client:
                 if host in {"120.76.152.87", "119.147.212.81"}:
                     try:
-                        manifest = client.report_file("tdxfin/gpcw.txt", max_bytes=65536)
+                        manifest = download_report_file(client, "tdxfin/gpcw.txt", max_bytes=65536)
                         print(f"  gpcw.txt bytes={len(manifest)} preview={manifest[:100]!r}")
                     except Exception as exc:
                         print(f"  gpcw.txt ERROR {type(exc).__name__}: {exc}")

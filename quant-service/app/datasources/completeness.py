@@ -54,7 +54,12 @@ UNREGISTERED: dict[str, str] = {
     "tdx_protocol.TdxClient.bars": "legacy bar command 0x052d; bound in P2 after the instrument model (delta D2)",
     "tdx_protocol.TdxClient.ticks": "transport for ticks.fetch_tdx_ticks, which is the bound reader",
     "tdx_protocol.TdxClient.xdxr": "transport for ticks.fetch_tdx_capital_changes, which is the bound reader",
-    "tdx_f10_finance.gpcw": "period files of ~5 MB for all stocks; a backfill job with manifest md5 change detection (delta-1 D8), never the request path",
+    "tdx_f10_finance.TdxF10Client.company_categories": "transport behind the bound fetch_company_profile",
+    "tdx_f10_finance.TdxF10Client.company_content": "transport behind the bound fetch_company_profile",
+    "tdx_f10_finance.TdxF10Client.finance_info": "transport behind the bound fetch_financial_summary",
+    "tdx_f10_finance.finance_info": "host-failover call behind the bound fetch_financial_summary",
+    "tdx_fin_history.TdxFinHistoryClient.report_file": "gpcw backfill transport: period files of ~5 MB for all stocks, fetched by a backfill job with manifest md5 change detection (delta-1 D8), never the request path",
+    "tdx_fin_history.download_report_file": "gpcw backfill transport: period files of ~5 MB for all stocks, fetched by a backfill job with manifest md5 change detection (delta-1 D8), never the request path",
     "tdx_fin_history.TdxFinHistoryClient.gpcw": "period files of ~5 MB for all stocks; a backfill job with manifest md5 change detection (delta-1 D8), never the request path",
     "tdx_protocol.sweep_sync": "per-section transport over one deterministic host (delta D1/D5); the instrument "
                                "and security-list capabilities of P2 bind its sections",
@@ -290,11 +295,7 @@ def _readers(package_root: Path, source_package: str) -> tuple[list[str], dict[s
 
 def public_fetch_functions(root: Path = SOURCE_ROOT) -> tuple[str, ...]:
     """Readers under ``root`` as ``module.function`` / ``module.Class.method`` (sub-packages dotted)."""
-    readers = _readers(root.parent, root.name)[0]
-    for name in ("tdx_f10_finance.gpcw", "tdx_fin_history.TdxFinHistoryClient.gpcw"):
-        if name not in readers and (root / (name.split(".", 1)[0] + ".py")).exists():
-            readers.append(name)
-    return tuple(sorted(readers))
+    return tuple(_readers(root.parent, root.name)[0])
 
 
 def _registry_members(root: Path, module: str, name: str) -> set[str]:

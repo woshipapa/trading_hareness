@@ -15,8 +15,7 @@ import asyncio
 from typing import Any
 
 from . import tdx_protocol
-from .tdx_fin_history import FINANCE_HOSTS, download_report_file, parse_gpcw_zip
-
+from .tdx_fin_history import FINANCE_HOSTS
 
 
 FINANCE_FIELDS = (
@@ -150,12 +149,6 @@ class TdxF10Client(tdx_protocol.TdxClient):
     def company_content(self, market: int, code: str, filename: str, start: int, length: int) -> str:
         return parse_company_content(self._exchange(build_company_content_request(market, code, filename, start, length)))
 
-    def report_file(self, filename: str, *, max_bytes: int = 64 * 1024 * 1024) -> bytes:
-        return download_report_file(self, filename, max_bytes=max_bytes)
-
-    def gpcw(self, filename: str) -> list[dict[str, Any]]:
-        return parse_gpcw_zip(self.report_file("tdxfin/" + filename), filename=filename)
-
 
 def _call(operation: Any, *, hosts: Any = None, timeout_seconds: float = 5.0) -> Any:
     errors = []
@@ -170,20 +163,6 @@ def _call(operation: Any, *, hosts: Any = None, timeout_seconds: float = 5.0) ->
 
 def finance_info(market: int, code: str, *, hosts: Any = None, timeout_seconds: float = 5.0) -> dict[str, Any]:
     return _call(lambda client: client.finance_info(market, code), hosts=hosts, timeout_seconds=timeout_seconds)
-
-
-def company_categories(market: int, code: str, *, hosts: Any = None, timeout_seconds: float = 5.0) -> list[dict[str, Any]]:
-    return _call(lambda client: client.company_categories(market, code), hosts=hosts, timeout_seconds=timeout_seconds)
-
-
-def company_content(market: int, code: str, filename: str, start: int, length: int, *, hosts: Any = None,
-                    timeout_seconds: float = 5.0) -> str:
-    return _call(lambda client: client.company_content(market, code, filename, start, length), hosts=hosts,
-                 timeout_seconds=timeout_seconds)
-
-
-def gpcw(filename: str, *, hosts: Any = None, timeout_seconds: float = 5.0) -> list[dict[str, Any]]:
-    return _call(lambda client: client.gpcw(filename), hosts=hosts, timeout_seconds=timeout_seconds)
 
 
 async def fetch_financial_summary(*, symbol: str) -> list[dict[str, Any]]:
@@ -213,7 +192,7 @@ async def fetch_company_profile(*, symbol: str) -> list[dict[str, Any]]:
 
 __all__ = [
     "FINANCE_FIELDS", "FINANCE_HOSTS", "TdxF10Client", "build_company_categories_request",
-    "build_company_content_request", "build_finance_info_request", "company_categories", "company_content",
-    "finance_info", "fetch_company_profile", "fetch_financial_summary", "gpcw", "parse_company_categories",
+    "build_company_content_request", "build_finance_info_request",
+    "finance_info", "fetch_company_profile", "fetch_financial_summary", "parse_company_categories",
     "parse_company_content", "parse_finance_info",
 ]
