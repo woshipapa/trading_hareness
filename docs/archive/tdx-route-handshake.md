@@ -135,3 +135,38 @@ changing existing bytes in place:
 The live evidence supports `LOGIN_ONE`-only as the minimal behavior change for
 quotes, daily bars, and one-minute bars. It does **not** support replacing
 `0x052d` with another K-line opcode to obtain those rows.
+
+## Re-check 2026-10-10 under LOGIN_ONE (plan fact F7)
+
+Measured by Claude from the Mac egress at 2026-10-10 06:53 UTC, a Saturday. The host was
+`60.191.117.167:7709`, handshake `login_one`. The data is the last session, 2026-10-09: the legacy
+`0x052d` request with category 8 (1-minute bars) for 000001.SZ and 600519.SH. The reference is
+Tencent `minute/query`, where per-minute lots are the difference of consecutive cumulative rows.
+Raw numbers: `scripts/data/tdx_f7_1m_volume_2026-10-10_mac.json`.
+
+| | 000001.SZ | 600519.SH |
+| --- | ---: | ---: |
+| TDX bars / Tencent rows | 240 / 267 | 240 / 267 |
+| median TDX volume ÷ Tencent lots | 100.0 | 100.0 |
+| minutes equal after ÷100 | 238 of 240 | 237 of 240 |
+| TDX day total, lots | 1,078,106 | 35,111 |
+| Tencent cumulative at 15:00 / 15:30, lots | 1,078,106 / 1,078,143 | 35,111 / 35,113 |
+
+Under LOGIN_ONE the 1-minute volume is not garbled. It is in shares, and through 15:00 it adds up
+to Tencent's lots exactly. The minutes that differ are explained:
+
+- **09:31** carries the opening auction. TDX's first bar is 62,344 lots, which equals Tencent's
+  separate 09:30 row (7,508, the 09:25 match) plus its 09:31 row (54,836). For 600519.SH the two rows
+  are 195 and 1,400, and TDX's first bar is 1,595.
+- **Zero-volume minutes of the closing call auction** decode as `5.877471754111438e-39` for both
+  volume and amount, not as 0. This is 14:59 for 000001.SZ, and 14:58 and 14:59 for 600519.SH. A
+  parser must read such a denormal value as zero; that is a P2 rule for the `bars.minute` adapter.
+- **The remaining 37 and 2 lots** are Tencent increments after the close: from 15:11 for 000001.SZ
+  and from 15:18 for 600519.SH, up to 15:30. The minute bars end at 15:00 and do not contain them.
+
+The same 1,078,106 vs 1,078,143 gap is quoted in delta-1 D6 for the minute series `0x0537`/`0x0feb`.
+It is probably this after-close volume rather than a decode loss. `0x0537` was not re-measured here.
+
+The F7 note "legacy 1-minute volume still garbled" described the restricted `legacy_3` session.
+Binding `bars.minute` still waits for P2, which needs the two rules above, a byte fixture and the
+evidence gates.

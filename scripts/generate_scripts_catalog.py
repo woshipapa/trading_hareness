@@ -103,7 +103,9 @@ RULES: list[tuple[str, str, str, str]] = [
     ("audit-live-quant-callers.sh", "local n8n", "quant-research", "workstation"),
     # CI and contract checks
     ("verify_*.py", "CI and checks", "platform", "workstation and CI"),
+    ("verify-tdx-*.py", "research data", "quant-research", "workstation"),
     ("verify-*", "CI and checks", "platform", "workstation and CI"),
+    ("generate-tdx-hosts.py", "research data", "quant-research", "workstation"),
     ("generate*", "CI and checks", "platform", "workstation and CI"),
     ("export_component.py", "CI and checks", "platform", "workstation and CI"),
     # research data tools
@@ -118,9 +120,10 @@ RULES: list[tuple[str, str, str, str]] = [
     ("refresh-watchlist-from-proposals.py", "research data", "quant-research", "workstation"),
     ("run-post-close-pipeline.sh", "research data", "quant-research", "workstation"),
     ("tdx-local-export.py", "research data", "quant-research", "workstation"),
+    ("tdx-quant-export.py", "research data", "quant-research", "owner-windows"),
     ("tdx_handshake_experiments.py", "research data", "quant-research", "workstation"),
-    ("generate-tdx-hosts.py", "research data", "quant-research", "workstation"),
     ("probe-tdx-routes.py", "research data", "quant-research", "workstation"),
+    ("probe-tdx-q-*.py", "research data", "quant-research", "workstation"),
     ("tdx-owner-probe.sh", "research data", "quant-research", "workstation"),
 ]
 GROUP_ORDER = ["release", "owner runtime", "owner Windows", "workstation services", "teacher review", "local n8n",

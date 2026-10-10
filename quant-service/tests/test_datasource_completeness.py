@@ -47,6 +47,23 @@ class CompletenessTests(unittest.TestCase):
                          {"demo.query_rows", "demo.uses_query", "demo.QuoteProvider.quotes", "demo.uses_provider",
                           "sub.deep.load"})
 
+    def test_readers_inherit_input_output_from_base_classes(self):
+        root, _ = self._tree({
+            "sources/__init__.py": "",
+            "sources/transport.py": ("import socket\n\n"
+                                     "class Client:\n    def __enter__(self):\n        self.s = socket.create_connection(('h', 1))\n"
+                                     "        return self\n\n    def __exit__(self, *_):\n        return False\n\n"
+                                     "    def _exchange(self, request):\n        self.s.sendall(request)\n        return b''\n"),
+            "sources/finance.py": ("from . import transport\n\n"
+                                   "class FinanceClient(transport.Client):\n    def gpcw(self, name):\n        return self._exchange(name)\n\n"
+                                   "def download(client, name):\n    return client._exchange(name)\n\n"
+                                   "def latest(name):\n    with FinanceClient() as client:\n        return client\n"),
+        })
+        readers = set(public_fetch_functions(root))
+        self.assertIn("finance.FinanceClient.gpcw", readers, "self._exchange resolves to the base class")
+        self.assertIn("finance.download", readers, "_exchange on a client passed in is input/output")
+        self.assertIn("finance.latest", readers, "constructing a client runs its inherited __enter__")
+
     def test_only_references_reachable_from_bind_count_as_bound(self):
         root, registry = self._tree({
             "sources/__init__.py": "",
@@ -138,6 +155,17 @@ class SpecValidationTests(unittest.TestCase):
                       problems)
         self.assertIn(f"{label}: unit factor for 'price' must be a non-zero int or float, got '100'", problems)
         self.assertIn(f"{label}: unit factor for 'volume' must be a non-zero int or float, got Decimal('100')", problems)
+
+    def test_a_capability_needs_a_resolvable_binding_unless_all_await_evidence(self):
+        from app.datasources.contracts import RETIRED, UNSUPPORTED
+        pending = tuple(item for item in BINDINGS if item.capability != "context.quote") + (
+            Binding("tdx_ext", "context.quote", 90, UNSUPPORTED, spec=BindingSpec(field_map={"price": "price"})),)
+        with mock.patch.object(catalog, "BINDINGS", pending):
+            self.assertNotIn("context.quote: no resolvable binding", catalog.validate_catalog())
+        retired = tuple(item for item in BINDINGS if item.capability != "context.quote") + (
+            Binding("tdx_ext", "context.quote", 90, RETIRED, spec=BindingSpec(field_map={"price": "price"})),)
+        with mock.patch.object(catalog, "BINDINGS", retired):
+            self.assertIn("context.quote: no resolvable binding", catalog.validate_catalog())
 
     def test_catalog_cli_prints_bindings_that_carry_a_spec(self):
         from app.datasources import __main__ as cli

@@ -26,8 +26,10 @@ import os
 import socket
 import struct
 import zlib
-from datetime import date
+from datetime import date, datetime, timezone
 import logging
+
+from ..contracts import CapabilityEvidence
 import time
 from collections.abc import Mapping
 from typing import Any, Callable, Iterable, Sequence, TypeVar
@@ -82,6 +84,21 @@ class TdxProtocolError(RuntimeError):
     """The server closed, timed out or sent an undecodable response."""
 
 
+def decode_gbk(raw: bytes) -> str:
+    """A fixed-width protocol text field: GBK up to the first NUL. Never tried as UTF-8 first, because short
+    GBK names can be valid UTF-8 (\u901a22\u8f6c\u503a would decode to mojibake); a name cut inside a
+    character keeps a visible U+FFFD. Padding spaces are stripped."""
+    return raw.split(b"\0", 1)[0].decode("gb18030", "replace").strip()
+
+
+def decode_text(data: bytes) -> str:
+    """Decode TDX text members, accepting UTF-8 and GB18030 snapshots."""
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("gb18030", "replace")
+
+
 # -- decoding primitives (ported from pytdx.helper) -------------------------
 
 def decode_price(data: bytes | bytearray, pos: int) -> tuple[int, int]:
@@ -125,6 +142,17 @@ def decode_volume(raw: int) -> float:
     return xmm6 + xmm4 + xmm3 + xmm1
 
 
+#: Minute-level K-line categories. Their records carry volume (shares) and amount (yuan) as IEEE float32;
+#: daily and longer bars keep TDX's packed format (TDX plan delta 3, Q8; scripts/probe-tdx-q-units.py).
+MINUTE_BAR_CATEGORIES = frozenset({0, 1, 2, 3, 8})
+
+
+def _float32(raw: int) -> float:
+    """IEEE float32 bits; a zero minute of the closing call arrives as a denormal (5.877e-39), read as 0."""
+    (value,) = struct.unpack("<f", struct.pack("<I", raw))
+    return 0.0 if abs(value) < 1e-20 else value
+
+
 def _bar_datetime(category: int, data: bytes, pos: int) -> tuple[str, int]:
     if category < 4 or category in (7, 8):
         zipday, minutes = struct.unpack("<HH", data[pos:pos + 4])
@@ -150,7 +178,7 @@ def build_quotes_request(stocks: Sequence[tuple[int, str]]) -> bytes:
     return header + b"".join(struct.pack("<B6s", market, _code(code)) for market, code in stocks)
 
 
-def parse_quotes(body: bytes) -> list[dict[str, Any]]:
+def parse_quotes(body: bytes, *, requested: Sequence[tuple[int, str]] | None = None) -> list[dict[str, Any]]:
     pos = 2
     (count,) = struct.unpack("<H", body[pos:pos + 2])
     pos += 2
@@ -195,7 +223,20 @@ def parse_quotes(body: bytes) -> list[dict[str, Any]]:
             quote[f"bid_vol{index}"] = bid_volume
             quote[f"ask_vol{index}"] = ask_volume
         quotes.append(quote)
-    return quotes
+    if requested is None:
+        return quotes
+    # R1 (delta-1 1c): the server answers one row per requested symbol, in order, and answers an unknown one
+    # (an old BJ code) with a placeholder row such as 600839 at 0.0. Compare by position, so a placeholder
+    # never passes because its code was also requested elsewhere.
+    if len(quotes) != len(requested):
+        raise TdxProtocolError(f"quote answer has {len(quotes)} rows for {len(requested)} requested symbols")
+    kept = []
+    for wanted, quote in zip(requested, quotes):
+        if (quote["market"], quote["code"]) == tuple(wanted):
+            kept.append(quote)
+        else:
+            _LOGGER.warning("code_mismatch requested=%s returned=%s", tuple(wanted), (quote["market"], quote["code"]))
+    return kept
 
 
 def build_bars_request(category: int, market: int, code: str, start: int, count: int) -> bytes:
@@ -208,6 +249,7 @@ def parse_bars(category: int, body: bytes) -> list[dict[str, Any]]:
     pos = 2
     bars = []
     base = 0
+    decode = _float32 if category in MINUTE_BAR_CATEGORIES else decode_volume
     for _ in range(count):
         stamp, pos = _bar_datetime(category, body, pos)
         open_diff, pos = decode_price(body, pos)
@@ -220,7 +262,7 @@ def parse_bars(category: int, body: bytes) -> list[dict[str, Any]]:
         bars.append({
             "datetime": stamp, "open": open_value / 1000, "close": (open_value + close_diff) / 1000,
             "high": (open_value + high_diff) / 1000, "low": (open_value + low_diff) / 1000,
-            "volume": decode_volume(volume_raw), "amount": decode_volume(amount_raw),
+            "volume": decode(volume_raw), "amount": decode(amount_raw),
         })
         base = open_value + close_diff
     return bars
@@ -322,15 +364,17 @@ def configured_hosts(environ: dict[str, str] | None = None) -> tuple[tuple[str, 
 class TdxClient:
     """One blocking connection; use :func:`call` for failover and threading."""
 
-    def __init__(self, host: str, port: int, timeout_seconds: float = 5.0, *, profile: str = "login_one") -> None:
-        if profile not in HANDSHAKE_PROFILES:
-            raise ValueError(f"unknown TDX handshake profile: {profile}")
-        self.host, self.port, self.timeout, self.profile = host, port, timeout_seconds, profile
+    def __init__(self, host: str, port: int, timeout_seconds: float = 5.0, *, handshake_profile: str = "login_one") -> None:
+        if handshake_profile not in HANDSHAKE_PROFILES:
+            raise ValueError(f"unknown TDX handshake profile: {handshake_profile}")
+        self.host, self.port, self.timeout, self.handshake_profile = host, port, timeout_seconds, handshake_profile
         self._socket: socket.socket | None = None
+        self._connected = False
 
     def __enter__(self) -> "TdxClient":
         self._socket = socket.create_connection((self.host, self.port), timeout=self.timeout)
-        commands = _SETUP_COMMANDS[:1] if self.profile == "login_one" else _SETUP_COMMANDS
+        self._connected = True
+        commands = _SETUP_COMMANDS[:1] if self.handshake_profile == "login_one" else _SETUP_COMMANDS
         for command in commands:
             self._exchange(command)
         return self
@@ -369,7 +413,7 @@ class TdxClient:
         result = []
         for offset in range(0, len(stocks), MAX_QUOTES_PER_REQUEST):
             chunk = stocks[offset:offset + MAX_QUOTES_PER_REQUEST]
-            result.extend(parse_quotes(self._exchange(build_quotes_request(chunk))))
+            result.extend(parse_quotes(self._exchange(build_quotes_request(chunk)), requested=chunk))
         return result
 
     def bars(self, category: int, market: int, code: str, start: int = 0, count: int = MAX_BARS_PER_REQUEST) -> list[dict[str, Any]]:
@@ -412,44 +456,45 @@ def _mark_cooldown(host: tuple[str, int]) -> None:
 
 
 def call_sync(operation: Callable[[TdxClient], T], *, hosts: Iterable[tuple[str, int]] | None = None,
-              timeout_seconds: float = 5.0, profile: str = "login_one") -> tuple[T, str]:
+              timeout_seconds: float = 5.0, handshake_profile: str = "login_one") -> tuple[T, str]:
     """Run an operation with deterministic host ordering and same-host profile fallback."""
-    if profile not in HANDSHAKE_PROFILES:
-        raise ValueError(f"unknown TDX handshake profile: {profile}")
     errors: list[str] = []
     for host, port in _ordered_hosts(hosts or configured_hosts()):
-        profiles = (profile, "legacy_3") if profile == "login_one" else (profile,)
+        profiles = (handshake_profile, "legacy_3") if handshake_profile == "login_one" else (handshake_profile,)
         transport_failed = False
         for attempt, attempt_profile in enumerate(profiles):
+            client = TdxClient(host, port, timeout_seconds, handshake_profile=attempt_profile)
             try:
-                with TdxClient(host, port, timeout_seconds, profile=attempt_profile) as client:
+                with client:
                     result = operation(client)
                 return result, f"{host}:{port}/{attempt_profile}"
             except (OSError, TdxProtocolError, struct.error, IndexError, ValueError) as error:
                 errors.append(f"{host}:{attempt_profile}:{type(error).__name__}")
                 transport_failed = transport_failed or isinstance(error, (OSError, TdxProtocolError))
-                if attempt == 0 and len(profiles) == 2:
+                if attempt == 0 and len(profiles) == 2 and client._connected:
                     _LOGGER.info("TDX profile fallback host=%s:%s first=%s fallback=legacy_3 error=%s",
-                                 host, port, profile, type(error).__name__)
+                                 host, port, handshake_profile, type(error).__name__)
                     continue
+                if attempt == 0 and len(profiles) == 2 and not client._connected:
+                    break
         if transport_failed:
             _mark_cooldown((host, port))
     raise TdxProtocolError("no TDX host answered: " + ", ".join(errors[-8:]))
 
 
 def sweep_sync(sections: Mapping[str, Callable[[TdxClient], Any]] | Iterable[tuple[str, Callable[[TdxClient], Any]]], *,
-               host: tuple[str, int] | None = None, profile: str = "login_one",
+               host: tuple[str, int] | None = None, handshake_profile: str = "login_one",
                timeout_seconds: float = 5.0) -> dict[str, Any]:
     """Run independent sections on one selected host, with a new connection per section."""
     items = sections.items() if isinstance(sections, Mapping) else sections
     selected = host or _ordered_hosts(configured_hosts())[0]
-    result: dict[str, Any] = {"host": f"{selected[0]}:{selected[1]}", "profile": profile, "sections": {}}
+    result: dict[str, Any] = {"host": f"{selected[0]}:{selected[1]}", "profile": handshake_profile, "sections": {}}
     for name, operation in items:
         try:
-            rows, receipt = call_sync(operation, hosts=[selected], profile=profile, timeout_seconds=timeout_seconds)
-            result["sections"][name] = {"rows": len(rows) if hasattr(rows, "__len__") else rows, "receipt": receipt}
-        except Exception as error:  # each timeout is isolated to its section
-            result["sections"][name] = {"error": type(error).__name__}
+            value, receipt = call_sync(operation, hosts=[selected], handshake_profile=handshake_profile, timeout_seconds=timeout_seconds)
+            result["sections"][name] = {"result": value, "rows": len(value) if hasattr(value, "__len__") else value, "receipt": receipt}
+        except TdxProtocolError as error:
+            result["sections"][name] = {"error": str(error)}
     return result
 
 
@@ -464,10 +509,26 @@ def market_code(symbol: str) -> tuple[int, str]:
     return MARKETS[exchange], code
 
 
+EXCHANGES = {market: exchange for exchange, market in MARKETS.items()}
+
+
+def symbol(market: int, code: str) -> str:
+    """The inverse of market_code: (0, "000001") -> "000001.SZ"."""
+    return f"{code}.{EXCHANGES[market]}"
+
+
+def observed_evidence(rows: list[dict[str, Any]], host: str, *, coverage: float | None = None,
+                      warnings: tuple[str, ...] = ()) -> CapabilityEvidence:
+    """Rows read just now from one host: available at collection time, the host label first."""
+    observed = datetime.now(timezone.utc)
+    return CapabilityEvidence(rows, coverage=coverage, available_at_min=observed, available_at_max=observed,
+                              warnings=(f"tdx_host={host}", *warnings))
+
+
 __all__ = [
-    "BAR_CATEGORIES", "DEFAULT_HOSTS", "HANDSHAKE_PROFILES", "MARKETS", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
+    "BAR_CATEGORIES", "DEFAULT_HOSTS", "EXCHANGES", "HANDSHAKE_PROFILES", "MARKETS", "MINUTE_BAR_CATEGORIES", "PROVIDER_KEY", "TdxClient", "TdxProtocolError",
     "UPSTREAM_SITE", "XDXR_CATEGORIES", "build_bars_request", "build_history_ticks_request",
     "build_quotes_request", "build_ticks_request", "build_xdxr_request", "call", "call_sync",
-    "configured_hosts", "decode_price", "decode_volume", "market_code", "parse_bars", "parse_quotes",
-    "parse_ticks", "parse_xdxr", "sweep_sync",
+    "configured_hosts", "decode_gbk", "decode_price", "decode_volume", "market_code", "observed_evidence", "parse_bars", "parse_quotes",
+    "parse_ticks", "parse_xdxr", "sweep_sync", "symbol",
 ]

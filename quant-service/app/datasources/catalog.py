@@ -101,6 +101,8 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
                risks="非官方社区主站；2026-09-18 起仅历史分笔与除权除息可用，实时行情与 K 线命令被拒"),
     DataSource("tdx_mac", "通达信 MAC 行情服务", "MAC 0x12xx hosts :7709", "unofficial_protocol", "tcp_tdx_mac", "free",
                "app/datasources/sources/tdx_mac.py", risks="研究证据；MAC 字段与协议为非官方实现"),
+    DataSource("tdx_ext", "通达信扩展行情", "tdx extended hq :7727", "unofficial_protocol", "tcp_tdx", "free",
+               "app/datasources/sources/tdx_ex_market.py", risks="研究证据；A 股决策路径不得使用"),
     DataSource("tdx_local", "通达信客户端盘后数据（vipdoc）", "owner workstation TDX client", "local_files", "files", "free",
                "app/datasources/sources/tdx_local_files.py", risks="依赖 owner 手工/定时盘后下载", deploy="owner_workstation_cli"),
     # -- aggregators ----------------------------------------------------------
@@ -119,13 +121,14 @@ SOURCES: Final[dict[str, DataSource]] = {source.key: source for source in (
 )}
 
 
-def _cap(key: str, label: str, grain: str, scope: str, fields: str, time_semantics: str, description: str = "") -> Capability:
+def _cap(key: str, label: str, grain: str, scope: str, fields: str, time_semantics: str, description: str = "",
+         category: str | None = None) -> Capability:
     names = tuple(fields.split())
     specs = tuple(
         FieldSpec(name=item.split(":", 1)[0], unit=item.split(":", 1)[1] if ":" in item else None)
         for item in names
     )
-    return Capability(key, key.split(".", 1)[0], label, grain, scope, names, time_semantics, description,
+    return Capability(key, category or key.split(".", 1)[0], label, grain, scope, names, time_semantics, description,
                       CanonicalSchema(specs))
 
 
@@ -138,6 +141,9 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     # quote
     _cap("quote.all_a_snapshot", "全 A L1 快照", "realtime", "all_a",
          "price:yuan pct_change:pct volume:shares turnover:yuan", _OBSERVED, "3 秒级 L1，无主力资金语义"),
+    _cap("quote.index_overview", "指数概况与涨跌家数", "realtime", "market",
+         "open:points high:points low:points close:points amount:yuan volume_raw up_count:count down_count:count",
+         _OBSERVED, "0x051d 指数概况；涨跌家数口径不同于 0x054b 排序宽度"),
     _cap("quote.watch_snapshot", "观察池报价（交易所时间戳）", "realtime", "watchlist",
          "price:yuan volume:shares amount:yuan volume_ratio turnover_rate:pct exchange_time", _OBSERVED),
     _cap("quote.order_book", "盘口五档/十档", "realtime", "watchlist", "bid1..10:yuan ask1..10:yuan bid_vol:lots", _OBSERVED),
@@ -161,6 +167,17 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("auction.short_term_benchmark", "竞价短线基准", "daily", "market", "symbol auction_pct tags", _OBSERVED),
     _cap("auction.history_0925", "历史每日 09:25 竞价成交", "daily", "per_symbol",
          "price:yuan volume:shares amount:yuan auction_curve", _SESSION_CLOSE),
+    _cap("microstructure.volume_profile", "分价成交量", "intraday", "per_symbol",
+         "price:yuan volume_lots buy_lots sell_lots", _OBSERVED, category="derived"),
+    _cap("microstructure.minute_series", "历史分时K线（指定日期）", "daily", "per_symbol",
+         "time price:yuan volume_lots pre_close:yuan", _SESSION_CLOSE, category="derived"),
+    _cap("microstructure.auction_curve", "集合竞价曲线", "intraday", "per_symbol",
+         "time price:yuan matched_raw unmatched_raw unmatched_side", _OBSERVED,
+         "TDX 流在 09:24:57 截止；数量单位未确认，保留 raw 命名", category="derived"),
+    _cap("microstructure.unusual", "TDX 异动事件", "intraday", "all_a",
+         "market code time event_type description value", _OBSERVED, category="derived"),
+    _cap("microstructure.top_board", "TDX 排名榜", "intraday", "market",
+         "category code price:yuan value", _OBSERVED, "研究来源；永不替代涨停池", category="derived"),
     # limits
     _cap("limits.prices", "涨跌停价", "daily", "all_a", "up_limit:yuan down_limit:yuan", "effective=交易日; available=入库时刻"),
     _cap("limits.limit_up_pool", "涨停池", "intraday", "all_a",
@@ -223,6 +240,12 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
          "date category cash_dividend float_shares_after_10k total_shares_after_10k", "effective=变动日; available=采集时刻"),
     _cap("fundamentals.margin", "融资融券", "daily", "all_a", "rzye rzmre rqye net_buy", "effective=T 日; available=T+1 采集"),
     _cap("reference.instruments", "证券基础信息", "reference", "all_a", "symbol name list_date is_st", "effective=入库"),
+    _cap("reference.security_list", "TDX 证券列表", "reference", "all_a",
+         "symbol market code name instrument_type decimal_point pre_close:yuan is_st list_source source_host",
+         "effective=采集时刻; available=采集时刻（快照）"),
+    _cap("context.instruments", "扩展市场品种列表", "reference", "market", "market_id code name category", "effective=服务器列表; available=采集时刻"),
+    _cap("context.quote", "扩展市场快照", "realtime", "per_symbol", "market_id code price pre_close open high low volume amount open_interest", _OBSERVED),
+    _cap("context.bars_daily", "扩展市场日K", "daily", "per_symbol", "market_id code datetime open high low close volume_raw amount open_interest settlement", "effective=交易日; available=采集时刻"),
     _cap("reference.trade_calendar", "交易日历", "reference", "market", "exchange calendar_date is_open", "effective=入库"),
     _cap("reference.suspensions", "停复牌（按交易日）", "daily", "all_a", "symbol suspend_date suspend_reason",
          "effective=交易日; available=入库"),
@@ -255,6 +278,23 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/akshare_provider.py:akshare_tencent_all_a_spot", "实时",
           notes="腾讯公开全 A 现货 fallback；无逐票交易所时间戳，仅补充研究覆盖"),
     _bind("eastmoney_free", "quote.all_a_snapshot", 45, UNSUPPORTED, notes="push2 clist 在 owner 出口被断连（2026-09-18）"),
+    _bind("tdx_public", "quote.all_a_snapshot", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_legacy_misc.py:fetch_all_a_snapshot",
+          notes="0x054b 排序列表；主机与握手 profile 写入 CapabilityEvidence warnings；coverage=None 待 I1 证券列表能力接入（分母未知）；ST 需要证券列表而非 0x054b 名称（δ1 Q6）；price≤0 行已过滤；legacy volume 单位为手，canonical shares 乘 100；rows carry market+code, add symbol field at resolver",
+          spec=BindingSpec(params={},
+                           field_map={"price": "price", "pct_change": "pct_change", "volume_lots": "volume", "amount": "turnover"},
+                           unit_factors={"volume": 100}, paging={"kind": "offset", "page_size": 80}, max_batch=80,
+                           time_semantics="server_time_raw=TDX quote server time; available=collection time",
+                           handshake_profile="login_one")),
+    _bind("tdx_public", "quote.index_overview", 80, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_legacy_misc.py:fetch_index_overview",
+          notes="0x051d；涨跌家数与 0x054b 排序宽度口径不同（δ2 D4）；OHLC 为指数点数非元；coverage=None 待 I1（分母未知）；R1 echo check 已实现（δ1 R1）；成交量单位未经实测，保留为 volume_raw",
+          spec=BindingSpec(params={"symbol": "market_code"},
+                           field_map={"open": "open", "high": "high", "low": "low", "close": "close",
+                                      "amount": "amount", "volume_lots": "volume_raw", "up_count": "up_count",
+                                      "down_count": "down_count"},
+                           time_semantics="server_time_raw=TDX index server time; available=collection time",
+                           handshake_profile="login_one")),
     # quote.watch_snapshot / order book / fast confirmation
     _bind("longhuvip", "quote.watch_snapshot", 10, LIVE_VERIFIED, "intraday_quote_observations",
           "app/longhu_vendor_source.py", limits="≤300 只/逻辑请求", decision_eligible=True),
@@ -350,6 +390,36 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/market_event_capture.py"),
     _bind("tdx_public", "auction.history_0925", 20, DECLARED, _RAW + "tick_flow_daily",
           "app/datasources/bindings.py:opening_auction", "近期任意交易日", notes="含 09:15-09:25 竞价虚拟撮合曲线"),
+    _bind("tdx_public", "microstructure.volume_profile", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_volume_profile",
+          notes="0x051a；覆盖率核对前不进入决策；成交量单位为 lots",
+          spec=BindingSpec(params={"market": "market", "code": "code"},
+                           field_map={"price": "price", "volume_lots": "volume_lots", "buy_lots": "buy_lots", "sell_lots": "sell_lots"},
+                           time_semantics="server_time_raw 是源字段；effective=采集时刻")),
+    _bind("tdx_public", "microstructure.minute_series", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_minute_series",
+          notes="0x0fb4；one row per trading minute (09:31..11:30, 13:01..15:00)；第二个变长字段含义未知，保留为 unknown；覆盖率核对前不进入决策",
+          spec=BindingSpec(params={"market": "market", "code": "code", "trade_date": "trade_date"},
+                           field_map={"time": "time", "price": "price", "volume_lots": "volume_lots", "pre_close": "pre_close"},
+                           time_semantics="effective=trade_date; available=采集时刻")),
+    _bind("tdx_public", "microstructure.auction_curve", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_auction_curve",
+          notes="0x056a；09:24:57 截止，无字面 09:25 行；数量单位未确认",
+          spec=BindingSpec(params={"market": "market", "code": "code"},
+                           field_map={"time": "time", "price": "price", "matched_raw": "matched_raw", "unmatched_raw": "unmatched_raw", "unmatched_side": "unmatched_side"},
+                           time_semantics="effective=auction time; available=采集时刻")),
+    _bind("tdx_public", "microstructure.unusual", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_unusual",
+          notes="0x0563；覆盖率核对前不进入决策；limits.anomaly_tape 可在覆盖率核对后作为第二来源",
+          spec=BindingSpec(params={"market": "market", "start": "start", "count": "count"},
+                           field_map={"market": "market", "code": "code", "time": "time", "event_type": "event_type", "description": "description", "value": "value"},
+                           time_semantics="effective=event time; available=采集时刻")),
+    _bind("tdx_public", "microstructure.top_board", 90, UNSUPPORTED,
+          adapter="app/datasources/sources/tdx_microstructure.py:fetch_top_board",
+          notes="0x053f；覆盖率核对前不进入决策；top_board 永不替代涨停池",
+          spec=BindingSpec(params={"category": "category", "size": "size"},
+                           field_map={"code": "code", "price": "price", "value": "value"},
+                           time_semantics="effective=采集时刻; available=采集时刻")),
     # limits
     _bind("tencent_free", "limits.prices", 12, DECLARED, "daily_trade_limits:provider=tencent_free",
           "app/datasources/sources/tencent_limits.py", limits="全市场约 68 批、每批 80 只；不足 95% 或仍是前一交易日行情即报错重试",
@@ -504,6 +574,17 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/datasources/sources/eastmoney_datacenter.py:RPT_F10_EH_EQUITY"),
     _bind("eastmoney_datacenter", "fundamentals.margin", 50, DECLARED, _RAW + "margin_market",
           "app/datasources/collectors/post_close.py:job_eastmoney_margin", notes="明细默认关闭（~4000 行/日）"),
+    _bind("tdx_public", "reference.security_list", 20, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_instruments.py:fetch_security_list",
+          notes="登录模式：login_one；一台确定的主机；深沪各分页，北交所仅计数+zhb.zip",
+          decision_eligible=False,
+          spec=BindingSpec(time_semantics="effective=采集时刻; available=采集时刻（快照）")),
+    _bind("tdx_public", "reference.instruments", 19, UNSUPPORTED, None,
+          "app/datasources/sources/tdx_instruments.py:fetch_instruments",
+          notes="从 reference.security_list 派生：仅股票类；TDX 不提供上市日期，list_date 为 None，绝不编造",
+          decision_eligible=False,
+          spec=BindingSpec(field_map={"symbol": "symbol", "name": "name", "list_date": "list_date", "is_st": "is_st"},
+                           time_semantics="effective=collection time; available=collection time (snapshot)")),
     _bind("fuyao_ths", "reference.instruments", 12, DECLARED, "instruments", "app/market_universe_sync.py",
           limits="ticker_list asset_type=a-share，每页 1000，翻到短页为止",
           notes="全 A 权威清单（可移出成员）：须达 minimum_rows 且沪深北齐全才落库；Longhu 收盘只增不删；2026-10-09 本机探测"),
@@ -521,6 +602,12 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           "app/sentiment_cycle_daily.py"),
     # deliberately retired
     _bind("longhuvip", "bars.daily", 26, RETIRED, notes="个股日K 接口（旧系统 id=7）恒空，下线；日K 走 longhuvip_composite"),
+    _bind("tdx_ext", "context.instruments", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_instruments", notes="A 股决策路径不得使用",
+          spec=BindingSpec(field_map={"market_id": "market_id", "code": "code", "name": "name", "category": "category"}, time_semantics="effective=服务器列表; available=采集时刻")),
+    _bind("tdx_ext", "context.quote", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_quote", notes="A 股决策路径不得使用",
+          spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "price": "price", "pre_close": "pre_close", "open": "open", "high": "high", "low": "low", "volume": "volume", "amount": "amount", "open_interest": "open_interest"}, time_semantics="effective=采集时刻（报价不带服务器时间）; available=采集时刻")),
+    _bind("tdx_ext", "context.bars_daily", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_bars_daily", notes="A 股决策路径不得使用",
+          spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "datetime": "datetime", "open": "open", "high": "high", "low": "low", "close": "close", "volume_raw": "volume_raw", "amount": "amount", "open_interest": "open_interest", "settlement": "settlement"}, time_semantics="effective=K 线交易日（期货夜盘归下一交易日）; available=采集时刻")),
 )
 
 # The 120 bindings that existed without a structured BindingSpec at the P0 baseline (ca209a81), written
@@ -773,6 +860,7 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
+        # A capability must stay routable; the only exception is one whose bindings all await evidence.
         if not bindings_for(key) and not any(item.capability == key and item.status == UNSUPPORTED for item in BINDINGS):
             problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():

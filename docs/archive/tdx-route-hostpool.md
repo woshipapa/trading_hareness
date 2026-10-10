@@ -45,3 +45,48 @@ remaining candidates either timed out during setup or rejected the protocol
 setup.  The result supports the hypothesis that the restriction is pool
 specific rather than universal, while remaining only local-Mac evidence.
 
+
+## LOGIN_ONE sweep, 2026-10-10 (Mac and owner egress)
+
+Run by Claude with the P1 probe. Both sweeps used the same settings:
+- profile `login_one`, timeout 5 s, 12 threads, one connection per host;
+- required commands: quotes (echo-checked, R1), daily bars and history ticks for 2026-10-09;
+- candidates: `tdx_host_candidates.txt` plus `tdx_host_candidates_other.txt`, 212 after deduplication.
+
+The commands were:
+
+```
+python scripts/probe-tdx-routes.py --hosts-file scripts/data/tdx_host_candidates.txt \
+  --hosts-file scripts/data/tdx_host_candidates_other.txt --profile login_one --egress mac \
+  --output scripts/data/tdx_route_matrix_login_one_2026-10-10_mac.json
+bash scripts/tdx-owner-probe.sh --profile login_one \
+  --output scripts/data/tdx_route_matrix_login_one_2026-10-10_owner.json
+```
+
+| | Mac egress | owner egress |
+| --- | ---: | ---: |
+| observed (UTC) | 2026-10-10 08:21:37 | 2026-10-10 08:21:46 |
+| candidates / connected / usable | 212 / 75 / 74 | 212 / 75 / 74 |
+| usable for quotes, bars, ticks_hist | 74, 74, 74 | 74, 74, 74 |
+| connect errors | TdxProtocolError 101, TimeoutError 36 | TimeoutError 90, TdxProtocolError 26, ConnectionRefusedError 13, ConnectionResetError 5, OSError 2 |
+| connect ms of usable hosts, min / median / max | 26.8 / 74.85 / 2,474.2 | 15.0 / 62.0 / 125.9 |
+
+Both egresses found the same 74 usable hosts, all on port 7709. This replaces the 4-host figure
+above, which came from the old three-packet handshake with a 0.5 s timeout.
+
+The runtime pool `quant-service/app/datasources/sources/tdx_hosts.py` is generated from the owner
+matrix with `scripts/generate-tdx-hosts.py`. It holds the 20 fastest hosts that were usable in
+every sample, at most 3 per /16 network. Their median connect times run from 15.0 to 33.3 ms. The
+`TDX_HQ_HOSTS` environment variable still overrides it.
+
+Owner evidence record:
+- target: the owner egress, reached by `ssh stockpeer@47.110.79.189 -p 3535 'python3 -I -'`. This
+  is not the 15682 read path; the probe source was sent over stdin and nothing was written on the
+  owner.
+- trading date for the history ticks: 2026-10-09; observed 08:21:46 UTC on Saturday 2026-10-10.
+- provider: the public TDX quote hosts, `tdx_public`.
+- coverage: 212 candidates, 74 usable.
+- freshness: a weekend snapshot of reachability, not of intraday cadence.
+- `decision_eligible`: false.
+
+An intraday probe on a trading day (evidence gate 4) is still pending.

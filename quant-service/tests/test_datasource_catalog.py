@@ -109,6 +109,27 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn(RETIRED, {provider["status"] for capability in document["capabilities"]
                                    for provider in capability["providers"]})
 
+    def test_i2_legacy_bindings_are_unsupported_and_fully_specified(self):
+        snapshot = next(item for item in BINDINGS
+                        if item.source == "tdx_public" and item.capability == "quote.all_a_snapshot")
+        overview = next(item for item in BINDINGS
+                        if item.source == "tdx_public" and item.capability == "quote.index_overview")
+        self.assertEqual((snapshot.status, overview.status), (UNSUPPORTED, UNSUPPORTED))
+        self.assertFalse(snapshot.decision_eligible or overview.decision_eligible)
+        self.assertEqual(snapshot.spec.max_batch, 80)
+        self.assertEqual(snapshot.spec.unit_factors["volume"], 100)
+        self.assertIn("排序宽度", overview.notes)
+
+    def test_microstructure_bindings_are_unsupported_and_raw_auction_is_explicit(self):
+        keys = {"microstructure.volume_profile", "microstructure.minute_series", "microstructure.auction_curve",
+                "microstructure.unusual", "microstructure.top_board"}
+        bindings = [item for item in BINDINGS if item.capability in keys]
+        self.assertEqual({item.status for item in bindings}, {UNSUPPORTED})
+        self.assertTrue(all(item.spec is not None and not item.decision_eligible for item in bindings))
+        auction = CAPABILITIES["microstructure.auction_curve"]
+        self.assertEqual(auction.schema.names, ("time", "price", "matched_raw", "unmatched_raw", "unmatched_side"))
+        self.assertFalse(any(item.source == "tdx_public" and item.capability == "bars.minute" for item in BINDINGS))
+
 
 class NonSectorGroupTests(unittest.TestCase):
     """Qualification lists never stand in for a sector (2026-09-18 labels)."""
