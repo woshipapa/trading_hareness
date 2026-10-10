@@ -322,15 +322,17 @@ def configured_hosts(environ: dict[str, str] | None = None) -> tuple[tuple[str, 
 class TdxClient:
     """One blocking connection; use :func:`call` for failover and threading."""
 
-    def __init__(self, host: str, port: int, timeout_seconds: float = 5.0, *, profile: str = "login_one") -> None:
-        if profile not in HANDSHAKE_PROFILES:
-            raise ValueError(f"unknown TDX handshake profile: {profile}")
-        self.host, self.port, self.timeout, self.profile = host, port, timeout_seconds, profile
+    def __init__(self, host: str, port: int, timeout_seconds: float = 5.0, *, handshake_profile: str = "login_one") -> None:
+        if handshake_profile not in HANDSHAKE_PROFILES:
+            raise ValueError(f"unknown TDX handshake profile: {handshake_profile}")
+        self.host, self.port, self.timeout, self.handshake_profile = host, port, timeout_seconds, handshake_profile
         self._socket: socket.socket | None = None
+        self._connected = False
 
     def __enter__(self) -> "TdxClient":
         self._socket = socket.create_connection((self.host, self.port), timeout=self.timeout)
-        commands = _SETUP_COMMANDS[:1] if self.profile == "login_one" else _SETUP_COMMANDS
+        self._connected = True
+        commands = _SETUP_COMMANDS[:1] if self.handshake_profile == "login_one" else _SETUP_COMMANDS
         for command in commands:
             self._exchange(command)
         return self
@@ -412,44 +414,45 @@ def _mark_cooldown(host: tuple[str, int]) -> None:
 
 
 def call_sync(operation: Callable[[TdxClient], T], *, hosts: Iterable[tuple[str, int]] | None = None,
-              timeout_seconds: float = 5.0, profile: str = "login_one") -> tuple[T, str]:
+              timeout_seconds: float = 5.0, handshake_profile: str = "login_one") -> tuple[T, str]:
     """Run an operation with deterministic host ordering and same-host profile fallback."""
-    if profile not in HANDSHAKE_PROFILES:
-        raise ValueError(f"unknown TDX handshake profile: {profile}")
     errors: list[str] = []
     for host, port in _ordered_hosts(hosts or configured_hosts()):
-        profiles = (profile, "legacy_3") if profile == "login_one" else (profile,)
+        profiles = (handshake_profile, "legacy_3") if handshake_profile == "login_one" else (handshake_profile,)
         transport_failed = False
         for attempt, attempt_profile in enumerate(profiles):
+            client = TdxClient(host, port, timeout_seconds, handshake_profile=attempt_profile)
             try:
-                with TdxClient(host, port, timeout_seconds, profile=attempt_profile) as client:
+                with client:
                     result = operation(client)
                 return result, f"{host}:{port}/{attempt_profile}"
             except (OSError, TdxProtocolError, struct.error, IndexError, ValueError) as error:
                 errors.append(f"{host}:{attempt_profile}:{type(error).__name__}")
                 transport_failed = transport_failed or isinstance(error, (OSError, TdxProtocolError))
-                if attempt == 0 and len(profiles) == 2:
+                if attempt == 0 and len(profiles) == 2 and client._connected:
                     _LOGGER.info("TDX profile fallback host=%s:%s first=%s fallback=legacy_3 error=%s",
-                                 host, port, profile, type(error).__name__)
+                                 host, port, handshake_profile, type(error).__name__)
                     continue
+                if attempt == 0 and len(profiles) == 2 and not client._connected:
+                    break
         if transport_failed:
             _mark_cooldown((host, port))
     raise TdxProtocolError("no TDX host answered: " + ", ".join(errors[-8:]))
 
 
 def sweep_sync(sections: Mapping[str, Callable[[TdxClient], Any]] | Iterable[tuple[str, Callable[[TdxClient], Any]]], *,
-               host: tuple[str, int] | None = None, profile: str = "login_one",
+               host: tuple[str, int] | None = None, handshake_profile: str = "login_one",
                timeout_seconds: float = 5.0) -> dict[str, Any]:
     """Run independent sections on one selected host, with a new connection per section."""
     items = sections.items() if isinstance(sections, Mapping) else sections
     selected = host or _ordered_hosts(configured_hosts())[0]
-    result: dict[str, Any] = {"host": f"{selected[0]}:{selected[1]}", "profile": profile, "sections": {}}
+    result: dict[str, Any] = {"host": f"{selected[0]}:{selected[1]}", "profile": handshake_profile, "sections": {}}
     for name, operation in items:
         try:
-            rows, receipt = call_sync(operation, hosts=[selected], profile=profile, timeout_seconds=timeout_seconds)
-            result["sections"][name] = {"rows": len(rows) if hasattr(rows, "__len__") else rows, "receipt": receipt}
-        except Exception as error:  # each timeout is isolated to its section
-            result["sections"][name] = {"error": type(error).__name__}
+            value, receipt = call_sync(operation, hosts=[selected], handshake_profile=handshake_profile, timeout_seconds=timeout_seconds)
+            result["sections"][name] = {"result": value, "rows": len(value) if hasattr(value, "__len__") else value, "receipt": receipt}
+        except TdxProtocolError as error:
+            result["sections"][name] = {"error": str(error)}
     return result
 
 

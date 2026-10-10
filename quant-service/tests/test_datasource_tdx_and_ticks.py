@@ -88,8 +88,10 @@ def frame(body: bytes, compress: bool = False) -> bytes:
 
 class TdxClientTests(unittest.TestCase):
     def test_generated_host_module_is_optional(self):
-        self.assertEqual(getattr(tdx_protocol, "_GENERATED_HOSTS", ()), ())
         original = sys.modules.get("app.datasources.sources.tdx_hosts")
+        sys.modules["app.datasources.sources.tdx_hosts"] = None
+        loaded = importlib.reload(tdx_protocol)
+        self.assertEqual(loaded._GENERATED_HOSTS, ())
         fake = type(sys)("app.datasources.sources.tdx_hosts")
         fake.HOSTS = (("synthetic", 7709),)
         sys.modules["app.datasources.sources.tdx_hosts"] = fake
@@ -110,7 +112,7 @@ class TdxClientTests(unittest.TestCase):
                                       ("legacy_3", tdx_protocol._SETUP_COMMANDS)):
                 fake = FakeSocket([frame(b"") for _ in expected])
                 tdx_protocol.socket.create_connection = lambda *_args, _fake=fake, **_kwargs: _fake
-                with tdx_protocol.TdxClient("host", 7709, profile=profile):
+                with tdx_protocol.TdxClient("host", 7709, handshake_profile=profile):
                     pass
                 self.assertEqual(fake.sent, list(expected))
         finally:
@@ -148,7 +150,7 @@ class TdxClientTests(unittest.TestCase):
                 tdx_protocol.call_sync(lambda client: None, hosts=[("a", 1), ("b", 2)])
         finally:
             tdx_protocol.TdxClient = original
-        self.assertEqual(attempts, ["a", "a", "b", "b"])
+        self.assertEqual(attempts, ["a", "b"])
 
     def test_receipt_has_profile_and_decode_failure_does_not_cool(self):
         class Refusing(tdx_protocol.TdxClient):
@@ -160,7 +162,7 @@ class TdxClientTests(unittest.TestCase):
         tdx_protocol._COOLDOWN_UNTIL.clear()
         try:
             with self.assertRaises(tdx_protocol.TdxProtocolError):
-                tdx_protocol.call_sync(lambda _client: None, hosts=[("a", 1)], profile="legacy_3")
+                tdx_protocol.call_sync(lambda _client: None, hosts=[("a", 1)], handshake_profile="legacy_3")
             self.assertNotIn(("a", 1), tdx_protocol._COOLDOWN_UNTIL)
         finally:
             tdx_protocol.TdxClient = original
@@ -169,8 +171,8 @@ class TdxClientTests(unittest.TestCase):
         calls = []
 
         class FakeClient:
-            def __init__(self, host, port, _timeout, *, profile):
-                calls.append((host, port, profile))
+            def __init__(self, host, port, _timeout, *, handshake_profile):
+                calls.append((host, port, handshake_profile))
             def __enter__(self): return self
             def __exit__(self, *_args): pass
 
@@ -178,7 +180,7 @@ class TdxClientTests(unittest.TestCase):
         tdx_protocol.TdxClient = FakeClient
         try:
             result = tdx_protocol.sweep_sync({"quotes": lambda _c: [1], "bars": lambda _c: [2, 3]},
-                                             host=("fixed", 7709), profile="legacy_3")
+                                             host=("fixed", 7709), handshake_profile="legacy_3")
         finally:
             tdx_protocol.TdxClient = original
         self.assertEqual(len(calls), 2)
