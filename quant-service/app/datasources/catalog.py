@@ -137,7 +137,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("quote.all_a_snapshot", "全 A L1 快照", "realtime", "all_a",
          "price:yuan pct_change:pct volume:shares turnover:yuan", _OBSERVED, "3 秒级 L1，无主力资金语义"),
     _cap("quote.index_overview", "指数概况与涨跌家数", "realtime", "market",
-         "open:yuan high:yuan low:yuan close:yuan amount:yuan volume:shares up_count:count down_count:count",
+         "open:points high:points low:points close:points amount:yuan volume:shares up_count:count down_count:count",
          _OBSERVED, "0x051d 指数概况；涨跌家数口径不同于 0x054b 排序宽度"),
     _cap("quote.watch_snapshot", "观察池报价（交易所时间戳）", "realtime", "watchlist",
          "price:yuan volume:shares amount:yuan volume_ratio turnover_rate:pct exchange_time", _OBSERVED),
@@ -255,21 +255,21 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           notes="腾讯公开全 A 现货 fallback；无逐票交易所时间戳，仅补充研究覆盖"),
     _bind("eastmoney_free", "quote.all_a_snapshot", 45, UNSUPPORTED, notes="push2 clist 在 owner 出口被断连（2026-09-18）"),
     _bind("tdx_public", "quote.all_a_snapshot", 80, UNSUPPORTED, None,
-          "app/datasources/sources/tdx_legacy_misc.py:fetch_all_a_snapshot", limits="每页最多 80 行",
-          notes="0x054b 排序列表；主机与握手 profile 写入 CapabilityEvidence warnings；coverage 暂以返回行数/返回行数计算，待 I1 证券列表能力接入；ST 由名称判断；legacy volume 单位为手，canonical shares 乘 100",
-          spec=BindingSpec(params={"category": "all_a", "sort_type": "code", "start": "offset", "count": 80},
-                           field_map={"price": "price", "pct_change": "pct_change", "volume_lots": "volume", "amount": "turnover"},
+          "app/datasources/sources/tdx_legacy_misc.py:fetch_all_a_snapshot",
+          notes="0x054b 排序列表；主机与握手 profile 写入 CapabilityEvidence warnings；coverage=None 待 I1 证券列表能力接入（分母未知）；ST 需要证券列表而非 0x054b 名称（δ1 Q6）；price≤0 行已过滤；legacy volume 单位为手，canonical shares 乘 100",
+          spec=BindingSpec(params={},
+                           field_map={"price": "price", "pct_change": "pct_change", "volume_lots": "volume", "amount": "turnover", "symbol": "symbol"},
                            unit_factors={"volume": 100}, paging={"kind": "offset", "page_size": 80}, max_batch=80,
-                           limits={"page_size": 80}, time_semantics="server_time_raw=TDX quote server time; available=collection time",
+                           time_semantics="server_time_raw=TDX quote server time; available=collection time",
                            handshake_profile="login_one")),
     _bind("tdx_public", "quote.index_overview", 80, UNSUPPORTED, None,
           "app/datasources/sources/tdx_legacy_misc.py:fetch_index_overview",
-          notes="0x051d 的 up/down_count 与 0x054b 排序宽度口径不同，不可拼接为同一序列；主机与握手 profile 写入 CapabilityEvidence warnings；legacy volume 单位为手，canonical shares 乘 100",
-          spec=BindingSpec(params={"symbol": "market_code", "default": "000001.SH"},
+          notes="0x051d；涨跌家数与 0x054b 排序宽度口径不同（δ2 D4）；OHLC 为指数点数非元；coverage=None 待 I1（分母未知）；R1 echo check 已实现（δ1 R1）；legacy volume 单位为手，canonical shares 乘 100",
+          spec=BindingSpec(params={"symbol": "market_code"},
                            field_map={"open": "open", "high": "high", "low": "low", "close": "close",
                                       "amount": "amount", "volume_lots": "volume", "up_count": "up_count",
                                       "down_count": "down_count"},
-                           unit_factors={"volume": 100}, limits={"scope": "market"},
+                           unit_factors={"volume": 100},
                            time_semantics="server_time_raw=TDX index server time; available=collection time",
                            handshake_profile="login_one")),
     # quote.watch_snapshot / order book / fast confirmation
@@ -751,8 +751,9 @@ def validate_catalog() -> list[str]:
             problems.append(f"{key}: unknown grain {capability.grain}")
         if capability.scope not in SCOPES:
             problems.append(f"{key}: unknown scope {capability.scope}")
-        if not any(item.capability == key and item.status != RETIRED for item in BINDINGS):
-            problems.append(f"{key}: no binding")
+        # Catalog rule: flag if no resolvable binding and not RETIRED-only (finding 11)
+        if not bindings_for(key) and not any(item.capability == key and item.status == UNSUPPORTED for item in BINDINGS):
+            problems.append(f"{key}: no resolvable binding")
     for source in SOURCES.values():
         if source.license not in LICENSES:
             problems.append(f"{source.key}: unknown license {source.license}")
