@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref } from 'vue';
 import { dashboardContextKey } from '../../dashboard-context';
+import type { useDatasourcesSlice } from '../../composables/workspace/datasources';
 import {
   categoryLabel, filterCapabilities, isResearchReadable, queryFromForm, statusLabel, statusType,
-  type DatasourceBinding, type DatasourceCapability, type DatasourceCatalog, type DatasourceRead,
+  type DatasourceBinding, type DatasourceCapability, type DatasourceRead,
 } from '../../research/datasource-directory';
 
 const dashboard = inject(dashboardContextKey);
 if (!dashboard) throw new Error('datasource directory requires the dashboard shell context');
-const getJson = (dashboard as any).transport.getJson as <T>(path: string) => Promise<T>;
-const catalog = ref<DatasourceCatalog | null>(null);
-const loading = ref(false);
-const error = ref('');
+const {
+  datasourceCatalog: catalog, datasourceCatalogLoading: loading, datasourceCatalogError: error,
+  loadDatasourceCatalog: loadCatalog, readDatasource,
+} = dashboard as unknown as ReturnType<typeof useDatasourcesSlice>;
 const sourceFilter = ref('');
 const statusFilter = ref('');
 const textFilter = ref('');
@@ -28,13 +29,6 @@ const groupedCapabilities = computed(() => filteredCapabilities.value.reduce<Rec
   return groups;
 }, {}));
 
-async function loadCatalog() {
-  loading.value = true; error.value = '';
-  try { catalog.value = await getJson<DatasourceCatalog>('/api/research/datasources/catalog'); }
-  catch (reason) { error.value = reason instanceof Error ? reason.message : String(reason); }
-  finally { loading.value = false; }
-}
-
 function openRead(binding: DatasourceBinding) {
   selectedBinding.value = binding; readResult.value = null; readError.value = '';
   formValues.value = Object.fromEntries(Object.keys(binding.spec?.params ?? {}).map((key) => [key, '']));
@@ -45,9 +39,7 @@ async function runRead(capability: DatasourceCapability) {
   if (!binding) return;
   readLoading.value = true; readError.value = ''; readResult.value = null;
   try {
-    const query = queryFromForm(formValues.value);
-    const suffix = query ? `?${query}` : '';
-    readResult.value = await getJson<DatasourceRead>('/api/research/datasources/read/' + binding.source + '/' + capability.key + suffix);
+    readResult.value = await readDatasource(binding.source, capability.key, queryFromForm(formValues.value));
   } catch (reason) {
     readError.value = reason instanceof Error ? reason.message : String(reason);
   } finally { readLoading.value = false; }

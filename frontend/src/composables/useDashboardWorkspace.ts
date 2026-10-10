@@ -8,6 +8,7 @@ import { useAnalystEvidenceSlice } from './workspace/analyst-evidence';
 import { useAnalystTimelineSlice } from './workspace/analyst-timeline';
 import { useBoardFlowSlice } from './workspace/board-flow';
 import { useCloseReviewSlice } from './workspace/close-review';
+import { useDatasourcesSlice } from './workspace/datasources';
 import { useFactorLabSlice } from './workspace/factor-lab';
 import { formatters } from './workspace/format';
 import { useMarketDataSlice } from './workspace/market-data';
@@ -54,6 +55,7 @@ export function useDashboardWorkspace() {
   const strategyPool = useStrategyPoolSlice(shell, { overview, closeReview, outcomes, governance, stockStudy, analystTimeline });
   const factorLab = useFactorLabSlice(shell);
   const providers = useProvidersSlice(shell);
+  const datasources = useDatasourcesSlice(shell);
   const { loadResearch } = useResearchLoader(shell, { overview, marketData, closeReview, outcomes, strategyPool, factorLab, analystEvidence, governance, providers });
 
   // Lifecycle: load the active section, poll research while it is shown, cancel on leave.
@@ -102,13 +104,13 @@ export function useDashboardWorkspace() {
 
   const dashboardBindings = {
     ...shellBindings, ...formatters, ...overview, ...marketData, ...closeReview, ...outcomes, ...boardFlow, ...strategyPool,
-    ...governance, ...factorLab, ...stockStudy, ...analystEvidence, ...analystTimeline, ...providers, loadResearch,
+    ...governance, ...factorLab, ...stockStudy, ...analystEvidence, ...analystTimeline, ...providers, ...datasources, loadResearch,
   };
   // Keep this list in step with the spread above.
   type BindingsAreDisjoint = AssertNoSharedKeys<SharedKeys<[
     typeof shellBindings, typeof formatters, typeof overview, typeof marketData, typeof closeReview, typeof outcomes,
     typeof boardFlow, typeof strategyPool, typeof governance, typeof factorLab, typeof stockStudy, typeof analystEvidence,
-    typeof analystTimeline, typeof providers, { loadResearch: typeof loadResearch },
+    typeof analystTimeline, typeof providers, typeof datasources, { loadResearch: typeof loadResearch },
   ]>>;
   provide(dashboardContextKey, dashboardBindings);
   return proxyRefs(dashboardBindings);
