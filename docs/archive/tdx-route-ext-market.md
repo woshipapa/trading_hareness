@@ -141,3 +141,29 @@ The parser reads them that way since 18bdb8eb.
   precision.
 - The other host groups, the owner egress and an intraday cadence check were not part of this
   run, so all context.* bindings stay UNSUPPORTED.
+
+## Re-check after the gotdx quote layout fix, 2026-10-10 10:44 UTC
+
+Run by Claude from the Mac egress: `scripts/verify-tdx-ex-market.py` at the commit after 012dd785 (quote open interest kept for futures only). 47.107.228.47:7719 failed; 112.74.214.43:7727 answered with count 107,163 and 51 categories. The run was on a Saturday, so the values are the 2026-10-09 session. Evidence: `scripts/data/tdx_ex_market_verify_2026-10-10_mac_gotdx_layout.jsonl`.
+
+- IF2610 (market 47):
+  - The quote gives price 4,307.8, pre_close 4,294.0 (the prior settlement), open interest 50,002, best bid 4,307.6 x 1 and best ask 4,307.8 x 2.
+  - Its volume of 36,158 equals the 2026-10-09 bar's volume.
+  - The bars' amount slot holds open interest: 50,020 on 2026-10-08 and 50,002 on 2026-10-09. The last word holds the settlement price: 4,294.0 and 4,313.6.
+- AAPL (market 74):
+  - The best bid is 335.55 x 201 and the best ask 336.09 x 287.
+  - The quote amount 12,679,452,672 equals the 2026-10-09 bar's amount exactly.
+- 00700 (market 31):
+  - The quote amount 8,610,387,968 equals the 2026-10-09 bar's amount exactly.
+  - The order book is all zero.
+  - The open-interest word reads 3,209,381,148, so the decoder keeps open interest for futures markets only.
+- All 15 bars (5 per symbol) satisfy low <= open, close <= high.
+- Bar volume units differ by market:
+
+  | symbol | quote volume | 2026-10-09 bar volume_raw |
+  |---|---|---|
+  | 00700 | 20,422,500 | 2,042 |
+  | AAPL | 37,881,199 | 378,811 |
+  | IF2610 | 36,158 | 36,158 |
+
+  context.bars_daily therefore keeps `volume_raw`.
