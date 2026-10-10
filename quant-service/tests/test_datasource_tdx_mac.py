@@ -3,6 +3,7 @@ import contextlib
 import importlib.util
 import inspect
 import io
+import os
 import struct
 import unittest
 import zlib
@@ -601,6 +602,17 @@ class MacFailoverTests(unittest.TestCase):
         with mock.patch.object(tdx_mac.socket, "create_connection", create_connection):
             rows, host = tdx_mac.call_sync(lambda client: client.board_list(0), hosts=[("down", 7709), ("up", 7709)])
         self.assertEqual((host, len(rows)), ("up:7709", 1))
+
+    def test_an_adapter_fails_over_through_the_real_transport_and_names_the_host_that_answered(self):
+        quotes = dynamic_body(tdx_mac.LIMITS_BITMAP, [(0, "000001", "PingAn", quote_values())])
+        sockets = {"a": FakeSocket(self.HANDSHAKE + [self.CORRUPT]),
+                   "b": FakeSocket(self.HANDSHAKE + [mac_frame(quotes, compressed=True)])}
+        with mock.patch.dict(os.environ, {"TDX_MAC_HOSTS": "a:7709,b:7709"}), \
+                mock.patch.object(tdx_mac.socket, "create_connection", lambda address, timeout: sockets[address[0]]):
+            evidence = asyncio.run(tdx_mac.fetch_limit_prices(symbols=["000001.SZ"]))
+        self.assertEqual(evidence.warnings, ("tdx_host=b:7709",))
+        self.assertEqual(evidence.rows, [{"symbol": "000001.SZ", "trade_date": date(2026, 10, 9),
+                                          "limit_up": 11.5, "limit_down": 9.5}])
 
     def test_a_caller_error_is_not_a_host_failure(self):
         def operation(client):
