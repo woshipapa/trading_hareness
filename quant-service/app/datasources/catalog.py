@@ -223,7 +223,7 @@ CAPABILITIES: Final[dict[str, Capability]] = {cap.key: cap for cap in (
     _cap("reference.instruments", "证券基础信息", "reference", "all_a", "symbol name list_date is_st", "effective=入库"),
     _cap("context.instruments", "扩展市场品种列表", "reference", "market", "market_id code name category", "effective=服务器列表; available=采集时刻"),
     _cap("context.quote", "扩展市场快照", "realtime", "per_symbol", "market_id code price pre_close open high low volume amount server_time", _OBSERVED),
-    _cap("context.bars_daily", "扩展市场日K", "daily", "per_symbol", "market_id code datetime open high low close volume_raw amount open_interest", "effective=交易日; available=采集时刻"),
+    _cap("context.bars_daily", "扩展市场日K", "daily", "per_symbol", "market_id code datetime open high low close volume_raw amount open_interest settlement", "effective=交易日; available=采集时刻"),
     _cap("reference.trade_calendar", "交易日历", "reference", "market", "exchange calendar_date is_open", "effective=入库"),
     _cap("reference.suspensions", "停复牌（按交易日）", "daily", "all_a", "symbol suspend_date suspend_reason",
          "effective=交易日; available=入库"),
@@ -497,7 +497,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tdx_ext", "context.quote", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_quote", notes="A 股决策路径不得使用",
           spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "price": "price", "pre_close": "pre_close", "open": "open", "high": "high", "low": "low", "volume": "volume", "amount": "amount", "server_time": "server_time"}, time_semantics="effective=服务器时间字段（如有）; available=采集时刻")),
     _bind("tdx_ext", "context.bars_daily", 90, UNSUPPORTED, adapter="app/datasources/sources/tdx_ex_market.py:fetch_bars_daily", notes="A 股决策路径不得使用",
-          spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "datetime": "datetime", "open": "open", "high": "high", "low": "low", "close": "close", "volume_raw": "volume_raw", "amount": "amount", "open_interest": "open_interest"}, time_semantics="effective=K 线交易日; available=采集时刻")),
+          spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "datetime": "datetime", "open": "open", "high": "high", "low": "low", "close": "close", "volume_raw": "volume_raw", "amount": "amount", "open_interest": "open_interest", "settlement": "settlement"}, time_semantics="effective=K 线交易日（期货夜盘归下一交易日）; available=采集时刻")),
 )
 
 # The 120 bindings that existed without a structured BindingSpec at the P0 baseline (ca209a81), written

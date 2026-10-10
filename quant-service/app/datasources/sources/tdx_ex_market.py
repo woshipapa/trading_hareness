@@ -12,8 +12,10 @@ import asyncio
 import socket
 import struct
 import zlib
-from typing import Any, Iterable
+from datetime import datetime, timezone
+from typing import Any, Callable, Iterable, TypeVar
 
+from ..contracts import CapabilityEvidence
 from .tdx_protocol import TdxProtocolError
 
 PROVIDER_KEY = "tdx_ext"
@@ -44,6 +46,9 @@ CATEGORY_TYPES = {
     14: "germany",
     15: "singapore",
 }
+#: Futures market ids of delta-2 D3. Their daily bars use category 4 (category 9 is the daily bar of
+#: HK and US stocks), and their bar's amount slot holds open interest.
+FUTURES_MARKETS = frozenset({28, 29, 30, 47, 60})
 MARKET_IDS = {
     2: "HK alternate",
     4: "Zhengzhou futures options",
@@ -169,8 +174,6 @@ def build_quote(market: int, code: str) -> bytes:
     return _frame(COMMANDS["quote_single"], struct.pack("<B9s", market, _code(code)))
 
 
-
-
 def build_kline(
     category: int, market: int, code: str, start: int = 0, count: int = 800
 ) -> bytes:
@@ -182,85 +185,47 @@ def build_kline(
     )
 
 
+#: A quote after market (1 byte), code (9) and the active word (4), as gotdx parseExQuoteItem: pre_close,
+#: open, high, low, price; open and added position (skipped); volume, current volume; amount; inner and
+#: outer volume; an unknown word; open interest; five bid prices, bid volumes, ask prices, ask volumes.
+#: The IF pre_close is the prior settlement price.
+_QUOTE = struct.Struct("<5f8x2If2I4xI5f5I5f5I")
 
 
-def _category_for_market(market_id: int) -> int:
-    """Get the kline category (9 for daily equities, 4 for futures daily)."""
-    futures_markets = {28, 29, 30, 47, 60, 66, 67}
-    return 4 if market_id in futures_markets else 9
-
-
-
-
-def _quote(data: bytes, *, code_len: int = 9) -> dict[str, Any]:
-    if len(data) < 1 + code_len:
-        raise TdxExMarketError("short quote response")
-    market = data[0]
-    code = _text(data[1 : 1 + code_len])
-    pos = 1 + code_len
-    if code_len == 9:
-        pos += 4  # single-quote response has a four-byte reserved field
-    if len(data) < pos + 140:
-        raise TdxExMarketError("short quote response")
-    pre, op, hi, lo, price = struct.unpack_from("<5f", data, pos)
-    pos += 20
-    # Reserved field at +20
-    pos += 4
-    # Unknown field at +24
-    pos += 4
-    total, current = struct.unpack_from("<II", data, pos)
-    pos += 8
-    amount = struct.unpack_from("<f", data, pos)[0]
-    pos += 4
-    inner, outer = struct.unpack_from("<II", data, pos)
-    pos += 8
-    hold = struct.unpack_from("<I", data, pos)[0]
-    pos += 4
-    open_interest = struct.unpack_from("<I", data, pos)[0]
-    pos += 4
-    bid = list(struct.unpack_from("<5f", data, pos))
-    pos += 20
-    bid_vol = list(struct.unpack_from("<5I", data, pos))
-    pos += 20
-    ask = list(struct.unpack_from("<5f", data, pos))
-    pos += 20
-    ask_vol = list(struct.unpack_from("<5I", data, pos))
+def _quote(data: bytes) -> dict[str, Any]:
+    try:
+        pre, open_, high, low, price, volume, current, amount, inner, outer, open_interest, *book = (
+            _QUOTE.unpack_from(data, 14))
+    except struct.error as error:
+        raise TdxExMarketError(f"short quote response: {len(data)} bytes") from error
     return {
-        "market_id": market,
-        "code": code,
-        "pre_close": pre,
-        "open": op,
-        "high": hi,
-        "low": lo,
-        "price": price,
-        "open_interest": open_interest,
-        "volume": total,
-        "amount": amount,
-        "server_time": None,
-        "current_volume": current,
-        "inner_volume": inner,
-        "outer_volume": outer,
-        "hold_position": hold,
-        "bid": bid,
-        "bid_volume": bid_vol,
-        "ask": ask,
-        "ask_volume": ask_vol,
+        "market_id": data[0], "code": _text(data[1:10]),
+        "pre_close": pre, "open": open_, "high": high, "low": low, "price": price,
+        "volume": volume, "current_volume": current, "amount": amount,
+        "inner_volume": inner, "outer_volume": outer, "open_interest": open_interest,
+        "bid": book[0:5], "bid_volume": book[5:10], "ask": book[10:15], "ask_volume": book[15:20],
     }
 
 
+def _item_count(data: bytes, count_at: int, first: int, size: int, what: str) -> int:
+    if len(data) < count_at + 2:
+        raise TdxExMarketError(f"short {what} response: {len(data)} bytes")
+    count = struct.unpack_from("<H", data, count_at)[0]
+    if len(data) < first + count * size:
+        raise TdxExMarketError(f"truncated {what} response: {count} items in {len(data)} bytes")
+    return count
+
+
 def parse_count(data: bytes) -> int:
-    return struct.unpack_from("<I", data, 19)[0] if len(data) >= 23 else 0
+    if len(data) < 23:
+        raise TdxExMarketError(f"short count response: {len(data)} bytes")
+    return struct.unpack_from("<I", data, 19)[0]
 
 
 def parse_categories(data: bytes) -> list[dict[str, Any]]:
-    if len(data) < 2:
-        return []
-    n = struct.unpack_from("<H", data)[0]
     out = []
-    for i in range(n):
+    for i in range(_item_count(data, 0, 2, 64, "categories")):
         p = 2 + i * 64
-        if p + 64 > len(data):
-            break
         category_type, name, market_id, abbr = (
             data[p],
             _text(data[p + 1 : p + 33]),
@@ -281,14 +246,9 @@ def parse_categories(data: bytes) -> list[dict[str, Any]]:
 
 
 def parse_instruments(data: bytes) -> list[dict[str, Any]]:
-    if len(data) < 6:
-        return []
-    n = struct.unpack_from("<H", data, 4)[0]
     out = []
-    for i in range(n):
+    for i in range(_item_count(data, 4, 6, 64, "instruments")):
         p = 6 + i * 64
-        if p + 64 > len(data):
-            break
         out.append(
             {
                 "category": data[p],
@@ -311,44 +271,29 @@ def _kline_time(raw: bytes, category: int) -> str:
     return f"{stamp // 10000:04d}-{stamp % 10000 // 100:02d}-{stamp % 100:02d}"
 
 
-def parse_klines(data: bytes, category: int, market_id: int | None = None, code: str | None = None) -> list[dict[str, Any]]:
-    if len(data) < 20:
-        return []
-    n = struct.unpack_from("<H", data, 18)[0]
-    out = []
-    p = 20
-    for _ in range(n):
-        if p + 32 > len(data):
-            break
-        stamp = _kline_time(data[p : p + 4], category)
-        op, hi, lo, cl, amount = struct.unpack_from("<5f", data, p + 4)
-        position = struct.unpack_from("<I", data, p + 20)[0]
-        volume = struct.unpack_from("<I", data, p + 24)[0]
-        aux = struct.unpack_from("<f", data, p + 28)[0]
-        row = {
-            "datetime": stamp,
-            "open": op,
-            "high": hi,
-            "low": lo,
-            "close": cl,
-            "volume_raw": volume,
-            "position": position,
-            "price": aux,
-        }
-        if category == 4:
-            # Futures: 'amount' field holds open-interest bits
-            row["open_interest"] = struct.unpack_from("<I", struct.pack("<f", amount))[0]
+def parse_klines(data: bytes, category: int, market_id: int, code: str) -> list[dict[str, Any]]:
+    """Decode 32-byte bars: time, open, high, low, close, amount, volume, one more word.
+
+    Futures bars hold open interest in the amount slot and the settlement price in the last word: the
+    IF2610 bar of 2026-10-08 carries 4294.0 there, the next day's prior settlement (live run of
+    scripts/data/tdx_ex_market_verify_2026-10-10_mac.jsonl). The last word of other markets is unknown.
+    Volume units differ by market and stay raw.
+    """
+    futures = market_id in FUTURES_MARKETS
+    rows = []
+    for index in range(_item_count(data, 18, 20, 32, "kline")):
+        pos = 20 + index * 32
+        open_, high, low, close, amount = struct.unpack_from("<5f", data, pos + 4)
+        volume, last = struct.unpack_from("<If", data, pos + 24)
+        row = {"market_id": market_id, "code": code, "datetime": _kline_time(data[pos:pos + 4], category),
+               "open": open_, "high": high, "low": low, "close": close, "volume_raw": volume}
+        if futures:
+            row["open_interest"] = struct.unpack_from("<I", data, pos + 20)[0]
+            row["settlement"] = last
         else:
             row["amount"] = amount
-        if market_id is not None:
-            row["market_id"] = market_id
-        if code is not None:
-            row["code"] = code
-        out.append(row)
-        p += 32
-    return out
-
-
+        rows.append(row)
+    return rows
 
 
 class TdxExMarketClient:
@@ -409,19 +354,11 @@ class TdxExMarketClient:
     def instruments(self, start: int = 0, count: int = 100) -> list[dict[str, Any]]:
         return parse_instruments(self._exchange(build_instruments(start, count)))
 
-    def instrument_pages(
-        self, page_size: int = 100, max_pages: int | None = None
-    ) -> list[dict[str, Any]]:
-        self.login()
-        total = self.count()
-        rows = []
-        pages = 0
-        for start in range(0, total, page_size):
-            if max_pages is not None and pages >= max_pages:
-                break
+    def instrument_pages(self, page_size: int = 100) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for start in range(0, self.count(), page_size):
             chunk = self.instruments(start, page_size)
             rows.extend(chunk)
-            pages += 1
             if len(chunk) < page_size:
                 break
         return rows
@@ -437,53 +374,42 @@ class TdxExMarketClient:
         )
 
 
-def call_sync(
-    operation,
-    *,
-    hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS,
-    timeout_seconds: float = 5.0,
-):
+T = TypeVar("T")
+
+
+def call_sync(operation: Callable[[TdxExMarketClient], T], *, hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS,
+              timeout_seconds: float = 5.0) -> tuple[T, str]:
     errors = []
     for host, port in hosts:
         try:
             with TdxExMarketClient(host, port, timeout_seconds) as client:
                 return operation(client), f"{host}:{port}"
-        except (
-            OSError,
-            TdxExMarketError,
-            struct.error,
-            zlib.error,
-        ) as error:
+        except (OSError, TdxExMarketError, struct.error, zlib.error) as error:
             errors.append(f"{host}:{type(error).__name__}")
     raise TdxExMarketError("no extended-market host answered: " + ", ".join(errors))
 
 
-async def fetch_instruments(
-    *, hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS
-) -> list[dict[str, Any]]:
-    rows, _host = await asyncio.to_thread(
-        lambda: call_sync(lambda client: client.instrument_pages(), hosts=hosts)
-    )
-    return rows
+async def _evidence(operation: Callable[[TdxExMarketClient], list[dict[str, Any]]],
+                    hosts: Iterable[tuple[str, int]]) -> CapabilityEvidence:
+    rows, host = await asyncio.to_thread(call_sync, operation, hosts=hosts)
+    observed = datetime.now(timezone.utc)
+    return CapabilityEvidence(rows, available_at_min=observed, available_at_max=observed,
+                              warnings=(f"tdx_host={host}",))
 
 
-async def fetch_quote(
-    *, market_id: int, code: str, hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS
-) -> list[dict[str, Any]]:
-    row, _host = await asyncio.to_thread(
-        lambda: call_sync(lambda client: client.quote(market_id, code), hosts=hosts)
-    )
-    return [row]
+async def fetch_instruments(*, hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS) -> CapabilityEvidence:
+    return await _evidence(lambda client: client.instrument_pages(), hosts)
 
 
-async def fetch_bars_daily(
-    *, market_id: int, code: str, hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS
-) -> list[dict[str, Any]]:
-    category = _category_for_market(market_id)
-    rows, _host = await asyncio.to_thread(
-        lambda: call_sync(lambda client: client.klines(category, market_id, code), hosts=hosts)
-    )
-    return rows
+async def fetch_quote(*, market_id: int, code: str,
+                      hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS) -> CapabilityEvidence:
+    return await _evidence(lambda client: [client.quote(market_id, code)], hosts)
+
+
+async def fetch_bars_daily(*, market_id: int, code: str,
+                           hosts: Iterable[tuple[str, int]] = DEFAULT_HOSTS) -> CapabilityEvidence:
+    category = 4 if market_id in FUTURES_MARKETS else 9
+    return await _evidence(lambda client: client.klines(category, market_id, code), hosts)
 
 
 __all__ = [
@@ -493,6 +419,7 @@ __all__ = [
     "EX_SETUP_PAYLOAD",
     "CATEGORY_TYPES",
     "MARKET_IDS",
+    "FUTURES_MARKETS",
     "TdxExMarketClient",
     "TdxExMarketError",
     "build_setup",

@@ -58,7 +58,6 @@ def main() -> int:
         print(json.dumps({"probe": f"{host}:{port}"}), flush=True)
         try:
             with TdxExMarketClient(host, port, 5.0) as client:
-                login = client.login()
                 count = client.count()
                 categories = client.categories()
                 instruments = _instrument_scan(client, count)
@@ -117,7 +116,6 @@ def main() -> int:
                     json.dumps(
                         {
                             "host": f"{host}:{port}",
-                            "login": login,
                             "count": count,
                             "categories": categories,
                             "instrument_rows": len(instruments),
