@@ -420,34 +420,41 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["effective_at"], "2026-08-29T23:59:59+08:00")
         self.assertEqual(row["available_at"], EVENING.isoformat())
 
-    async def test_tdx_security_list_skips_unchanged_payload_metadata(self):
-        recorder = Recorder()
-        deps = self._deps(recorder)
-        row = {"symbol": "600519.SH", "name": "Moutai", "instrument_type": "stock_main",
-               "decimal_point": 2, "is_st": False, "list_source": "server_list"}
-        deps.latest_observation_payloads = AsyncMock(return_value={"600519.SH": {**row, "provider_key": "tdx_public",
-                                                                                   "capability": "tdx_security_list"}})
-        with patch("app.datasources.collectors.post_close.tdx_instruments.fetch_security_list",
-                   AsyncMock(return_value=type("Evidence", (), {"rows": [row]})())):
-            result = await post_close.job_tdx_security_list(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
-        self.assertEqual(result["changed"], 0)
-        self.assertEqual(recorder.observations, [])
-
-    async def test_tdx_security_list_supplies_repository_symbol_key(self):
+    async def test_tdx_security_list_stores_reference_fields_once_and_then_only_changes(self):
         from app.public_market_repository import persist_timed_observations
         from test_datasource_sentiment_and_capture import RecordingDatabase
         database = RecordingDatabase()
-        recorder = Recorder()
-        deps = self._deps(recorder)
+        deps = self._deps(Recorder())
+
         async def persist(provider, capability, rows):
             return persist_timed_observations(database, provider, capability, rows)
         deps.collector.persist_observations = persist
-        row = {"symbol": "600519.SH", "name": "Moutai", "instrument_type": "stock_main",
-               "decimal_point": 2, "is_st": False, "list_source": "server_list"}
-        with patch("app.datasources.collectors.post_close.tdx_instruments.fetch_security_list",
-                   AsyncMock(return_value=type("Evidence", (), {"rows": [row]})())):
-            await post_close.job_tdx_security_list(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
-        self.assertEqual(database.calls[0][1][0][2], "600519.SH")
+        stored: dict[str, dict] = {}
+
+        async def latest(_provider, _capability):
+            return stored
+        deps.latest_observation_payloads = latest
+        row = {"symbol": "600519.SH", "market": 1, "code": "600519", "name": "贵州茅台", "instrument_type": "stock_main",
+               "decimal_point": 2, "pre_close": 1255.79, "is_st": False, "list_source": "server_list",
+               "source_host": "115.238.56.198:7709/login_one"}
+
+        async def run(rows):
+            database.calls.clear()
+            with patch("app.datasources.collectors.post_close.tdx_instruments.fetch_security_list",
+                       AsyncMock(return_value=type("Evidence", (), {"rows": rows})())):
+                result = await post_close.job_tdx_security_list(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+            for parameters in (database.calls[0][1] if database.calls else []):
+                # what the database hands back: the normalized JSON of the stored row, keyed by the stored symbol
+                stored[parameters[2]] = json.loads(json.dumps(parameters[7].obj, default=str))
+            return result
+
+        first = await run([row])
+        self.assertEqual((first["changed"], database.calls[0][1][0][2]), (1, "600519.SH"))
+        self.assertNotIn("pre_close", stored["600519.SH"])
+        moved = {**row, "pre_close": 1263.0, "source_host": "218.75.126.9:7709/login_one"}
+        self.assertEqual((await run([moved]))["changed"], 0, "a new pre_close or host is not a change")
+        renamed = {**moved, "name": "ST茅台", "is_st": True}
+        self.assertEqual((await run([renamed]))["changed"], 1)
 
     async def test_tdx_gpcw_limits_periods_and_splits_dated_rows(self):
         recorder = Recorder()

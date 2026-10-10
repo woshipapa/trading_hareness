@@ -314,16 +314,23 @@ async def job_capital_changes(deps: ArchiveDeps, state: ArchiveState, day: date,
     return {"symbols": len(symbols), "rows": len(rows), "stored": stored, "failures": failures[:10]}
 
 
+#: The reference fields of a security-list row; its pre_close moves every day and its answering host every run.
+TDX_SECURITY_FIELDS = ("symbol", "market", "code", "name", "instrument_type", "decimal_point", "is_st", "list_source")
+
+
 async def job_tdx_security_list(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
-    """Archive the TDX instrument list; a normal day stores 52,000 rows initially and only changed symbols later."""
+    """Archive the reference fields of the TDX security list: the first run stores every security (about 52,000 rows),
+    later runs only the securities whose name, type, decimal point, ST flag or list source changed."""
     started = time_module.monotonic()
     evidence = await tdx_instruments.fetch_security_list()
     rows = evidence.rows
     previous = await deps.latest_observation_payloads("tdx_public", "tdx_security_list") if deps.latest_observation_payloads else {}
-    changed = [dict(row, ts_code=row["symbol"], effective_at=now.isoformat(), available_at=now.isoformat())
-               for row in rows
-               if {key: value for key, value in previous.get(row["symbol"], {}).items()
-                   if key not in {"provider_key", "capability"}} != row]
+    changed = []
+    for row in rows:
+        reference = {key: row[key] for key in TDX_SECURITY_FIELDS}
+        stored = previous.get(row["symbol"], {})
+        if {key: stored.get(key) for key in TDX_SECURITY_FIELDS} != reference:
+            changed.append({**reference, "ts_code": row["symbol"], "effective_at": now.isoformat(), "available_at": now.isoformat()})
     stored = await deps.collector.persist_observations("tdx_public", "tdx_security_list", changed) if changed else 0
     await deps.collector.record_health("tdx_public", "tdx_security_list", True, len(rows),
                                        round((time_module.monotonic() - started) * 1000), None)
