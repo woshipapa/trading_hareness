@@ -304,13 +304,13 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 
 十个任务挂在 `post_close_public_archive` 循环里（`quant-service/app/datasources/collectors/post_close.py`），与其余盘后任务不同，**默认全部关闭**：单项开关是 `PUBLIC_ARCHIVE_<键大写>_ENABLED`（例如 `PUBLIC_ARCHIVE_TDX_GPCW_ENABLED`），取值 `1`、`true`、`yes`、`on` 为开（`runtime.py` 的 `opt_in_keys`）；总开关 `POST_CLOSE_PUBLIC_ARCHIVE_ENABLED` 仍要开着。窗口按 Asia/Shanghai 本地时间；只在交易日运行（日历取不到就跳过，不猜）；每个交易日成功一次，窗口内失败每 10 分钟重试，到 23:30 为止。
 
-写入走 `persist_timed_observations`（`public_market_repository.py`）：唯一键是 (来源, 能力, 证券, 生效时间, 载荷哈希)，`effective_at`、`available_at`、`availability_basis`、`observation_symbol` 不入哈希，同一事实再采到会被忽略。所以重启只重复请求，不重复证据，也不会把 `available_at` 往后移（证券为空的行例外，见本节末的已知问题）。板块成分类任务改走成分变化写入：只记开、平仓，空回答不改任何东西。
+写入走 `persist_timed_observations`（`public_market_repository.py`）：唯一键是 (来源, 能力, 证券, 生效时间, 载荷哈希)，`effective_at`、`available_at`、`availability_basis`、`observation_symbol` 不入哈希，同一事实再采到会被忽略。所以重启只重复请求，不重复证据，也不会把 `available_at` 往后移。板块成分类任务改走成分变化写入：只记开、平仓，空回答不改任何东西。
 
 | 键（开关 `PUBLIC_ARCHIVE_<键大写>_ENABLED`） | 窗口 | 内容 | 正常一天的行数（函数 docstring） | 幂等与备注 |
 |---|---|---|---|---|
-| `tdx_security_list` | 19:40–23:30 | 证券列表（`reference.security_list`），能力 `tdx_security_list` | 首次约 52,000 行，之后只存有变化的证券 | 与库里每只证券的最近一行比较，只写变化的行；见下面的已知问题 |
+| `tdx_security_list` | 19:40–23:30 | 证券列表（`reference.security_list`），能力 `tdx_security_list` | 首次约 52,000 行，之后只存有变化的证券 | 只存参考字段（代码、市场、名称、类型、小数位、ST、来源；不存每天都变的昨收和应答主机），与库里每只证券的最近一行比较，只写参考字段变了的行 |
 | `tdx_tipinfo` | 19:50–23:30 | `tipinfo.dat` 的全部披露行，能力 `tdx_tipinfo` | 约 5,600 行，一次 | `effective_at` = 首次披露日 23:59:59+08:00，`available_at` = 采集时刻 |
-| `tdx_gpcw` | 20:00–23:30 | 历史财务报表：清单 `tdxfin/gpcw.txt` 入 `tdx_gpcw_manifest`，变化的期入 `tdx_gpcw` | 每天最多 2 期，完整历史有意不自动取 | 预算与日期见下 |
+| `tdx_gpcw` | 20:00–23:30 | 历史财务报表：清单 `tdxfin/gpcw.txt` 入 `tdx_gpcw_manifest`，变化的期入 `tdx_gpcw` | 首次开启存最新 2 期，之后每次再补 2 期积压 | 预算与日期见下 |
 | `tdx_index_bars` | 20:10–23:30 | 6 个指数的日线与涨跌家数：`999999.SH`、`399001.SZ`、`399006.SZ`、`399300.SZ`、`000688.SH`、`899050.BJ`；能力 `tdx_index_daily_bars`、`tdx_index_breadth` | 每个指数首次 800 行，之后每个交易日 5 行 | 库里已有该指数就只取最近 5 根；`effective_at` = 交易日 15:00 |
 | `tdx_mac_boards` | 20:20–23:30 | MAC 板块目录（`tdx_mac_board_catalog`）与成分变化（taxonomy `tdx_mac_type_<类型>`） | 一轮 5 次目录请求，加每个板块 1 次成分请求 | 成分只记开、平仓 |
 | `tdx_limit_pools` | 20:30–23:30 | 三个派生涨跌停池，能力 `tdx_limit_up_pool`、`tdx_broken_pool`、`tdx_limit_down_pool` | 每个池一行一个成员 | 三个池共用一次读取；只能取当日会话，涨跌停价行的日期不是当日就报错，等重试 |
@@ -321,8 +321,8 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 
 **`tdx_gpcw` 的预算与日期**
 
-- 每天最多取 `PUBLIC_ARCHIVE_TDX_GPCW_MAX_PERIODS` 期（默认 2，下限 1）。先把清单整体落库，再把“新增或 md5、大小变了”的期名排序，取最后 N 个（文件名按日期排序，即最新的 N 期）下载。
-- 清单在下载各期之前就已落库：预算之外的期、以及下载中途失败的期，下一次运行时清单已没有变化，不会再被取到，除非它的 md5 或大小变了。要拿更早的期，得在第一次运行前把预算调大。（读代码得出，未在库里核对。）
+- 每次运行最多取 `PUBLIC_ARCHIVE_TDX_GPCW_MAX_PERIODS` 期（默认 2，下限 1）：“新增或 md5、大小变了”的期按文件名（即报告期）从新到旧取。
+- 清单条目只在该期的数据落库之后才落库（`bd5b26ae`）：预算之外的期和下载失败的期，下一次运行仍算变化，会再被取到。所以首次开启只存最新的 N 期，其余积压每次运行补 N 期，直到完整历史（148 期）补齐；以后只取新出的或被重述的期。
 - 每行财报的 `availability_basis` 有两种：
   - `tipinfo_first_disclosure`（有日期）：库里已落的 `tdx_tipinfo` 行里有同一个 (代码, 报告期)，`available_at` = 首次披露日 23:59:59+08:00，下一个交易日起可用；
   - `collection_time_undated`（无日期）：`tipinfo.dat` 每只证券只留最新一期，更早的期和它没列的证券拿不到日期，`available_at` = 采集时刻。任务返回里的 `undated` 是这类行的个数。
@@ -330,7 +330,6 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 
 **主机周探针（`tdx_host_probe`）**：对 `tdx_protocol.configured_hosts()` 的每台主机用 `LOGIN_ONE` 握手各取一次证券计数（`security_count`，市场 0），写成 `tdx_public` 的 provider 健康记录：成功记在 `tdx_host:<主机:端口/握手>` 下（计数与耗时），失败记在 `tdx_host:<主机:端口>` 下（异常类名）；一台失败不影响别的主机。周状态只在进程内存里。它**不**重写主机池，主机池由 `scripts/refresh-tdx-hosts.sh` 手动刷新（第 7.1 节）。主机列表默认取 `tdx_hosts.py`，可用 `TDX_HQ_HOSTS=host:port,host:port` 覆盖；MAC 主机可用 `TDX_MAC_HOSTS` 覆盖。
 
-已知问题（读代码得出，未在库里核对；基线 `6f691ad0`）：`tdx_security_list` 的行没有 `ts_code` 或 `observation_symbol`，写入后 `raw_market_observations.symbol` 为空。唯一键对空值不去重，而读回上一版的 `latest_observation_payloads` 只读 `symbol` 非空的行，所以“只存有变化的证券”在真实库里大概不成立，每个交易日可能重复存整张表。
 
 ### 6.2 研究试读：开关与边界
 
@@ -387,10 +386,10 @@ python scripts/tdx-promote.py apply scripts/data/tdx_promote_<能力>_<来源>_<
 - 证据写到 `scripts/data/tdx_promote_<能力>_<来源>_<日期>_<出口>_<参数哈希>.json`（日期取 Asia/Shanghai；参数哈希是 params JSON 的 sha256 前 8 位；schema `tdx-promote-v2`），记录所有输入、每次探测（前 5 行和全部行的哈希）、对账结果（行数、最大偏差、例子）和三道门的判定。`check` 不管判定如何都退出 0。
 - 三道门：
   - `owner_egress`：探测在 owner 容器里跑，并且有行；
-  - `agreement`：`BindingSpec.agreement` 声明的每个容差都成立。两侧的行按声明的 key 连接，逐个公共行比较，公共行占本绑定行数的比例不得低于 `min_coverage`（默认 0.95）。**没有声明容差的绑定，这道门直接通过**，证据里写 not applicable。基线上只有 3 个绑定声明了容差，参照都是腾讯：`tdx_mac` 的 `bars.minute`（close、volume）、`limits.prices`（up_limit、down_limit）、`quote.watch_snapshot`（price、volume、amount）；容差是留给第一次盘中检查去调的起始值（`catalog.py` 的注释）；
+  - `agreement`：`BindingSpec.agreement` 声明的每个容差都成立。两侧的行按声明的 key 连接，逐个公共行比较，公共行占本绑定行数的比例不得低于 `min_coverage`（默认 0.95）。**没有声明参照的绑定，这道门不通过**（证据里写 not applicable，并注明 promotion is blocked），所以它不能从 UNSUPPORTED 升到 DECLARED（`c06fbad8`）。声明了参照的绑定：`tdx_mac` 的 `bars.minute`（close、volume）、`limits.prices`（up_limit、down_limit）、`quote.watch_snapshot`（price、volume、amount），参照都是腾讯；`tdx_public` 的 `bars.minute`（腾讯分钟线）、`bars.daily`（参照 `tdx_mac`，只比 close 与 amount；这是跨协议而不跨厂商，旧协议日线成交量是整手）、`bars.index_daily`（腾讯指数收盘）；容差是留给第一次盘中检查去调的起始值（`catalog.py` 的注释）；
   - `intraday`：每次探测的开始和结束都在上交所（XSHG）交易时段内，含午休和节假日，用运行脚本的 Mac 上的 `exchange_calendars` 判定，证据里写日历名和版本。
 - `apply` 取同一个绑定的证据文件，**每个文件**都过了这一步要的门才改：`UNSUPPORTED` → `DECLARED` 要 `owner_egress` 和 `agreement`；`DECLARED` → `LIVE_VERIFIED` 另要 `intraday`。它只把 `catalog.py` 里该绑定的状态记号改一格，从不碰 `decision_eligible`；不提交，只打印 `git commit -F - -- quant-service/app/datasources/catalog.py` 命令，提交信息引用各证据文件和它们的 sha256。顺序是先提交证据，再单独提交状态改动。
-- `apply` 要求 `catalog.py` 里该绑定恰有一处字面的 `_bind("<来源>", "<能力>", …)` 调用，否则退出。基线上 `derived_tdx_limits` 的三个池由生成式产生，满足不了这个条件，`apply` 对它们会退出。
+- `apply` 要求 `catalog.py` 里该绑定恰有一处字面的 `_bind("<来源>", "<能力>", …)` 调用，否则退出。`derived_tdx_limits` 的三个池已改成三处字面的 `_bind(...)`（`e41e4dba`），`apply` 能改它们的状态；它们还没有声明参照，比对门不会通过。
 
 **owner 出口的路由探测与主机池**
 
