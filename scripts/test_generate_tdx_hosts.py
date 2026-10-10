@@ -9,6 +9,35 @@ SCRIPT = Path(__file__).with_name("generate-tdx-hosts.py")
 
 
 class GenerateTdxHostsTests(unittest.TestCase):
+    def _generate(self, root, payload):
+        matrix = Path(root) / "synthetic_matrix.json"
+        matrix.write_text(json.dumps(payload), encoding="utf-8")
+        output = Path(root) / "tdx_hosts.py"
+        result = subprocess.run([sys.executable, str(SCRIPT), str(matrix), "--output", str(output)],
+                                capture_output=True, text=True)
+        return result, output
+
+    def test_only_login_one_matrices_generate_a_pool(self):
+        sample = {"probed_at_utc": "synthetic", "results": [{"host": "1.2.3.4", "port": 7709, "connect_ms": 1, "usable": True}]}
+        with tempfile.TemporaryDirectory() as root:
+            result, output = self._generate(root, {"profile": "legacy_3", "samples": [sample]})
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(output.exists())
+
+    def test_header_names_the_file_read_and_latency_is_keyed_by_host_and_port(self):
+        sample = {"probed_at_utc": "synthetic", "results": [
+            {"host": "1.2.3.4", "port": 7709, "connect_ms": 3, "usable": True},
+            {"host": "1.2.3.4", "port": 7719, "connect_ms": 5, "usable": True}]}
+        with tempfile.TemporaryDirectory() as root:
+            result, output = self._generate(root, {"profile": "login_one", "egress": "owner", "source": "forged",
+                                                   "samples": [sample]})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = output.read_text(encoding="utf-8")
+        self.assertIn("synthetic_matrix.json", text)
+        self.assertNotIn("forged", text, "the JSON's own source field is never trusted")
+        self.assertIn("'1.2.3.4:7709': 3", text)
+        self.assertIn("'1.2.3.4:7719': 5", text)
+
     def test_selects_hosts_available_in_every_sample_and_caps_subnets(self):
         namespace = {}
         namespace["__file__"] = str(SCRIPT)

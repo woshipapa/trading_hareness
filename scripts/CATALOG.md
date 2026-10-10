@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (34)
+## research data (35)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -124,6 +124,7 @@
 | `backfill-full-market-daily.sh` | quant-research | workstation | Deepen the all-A daily history the post-close screens need. |
 | `check-provider-health.py` | quant-research | workstation | Opt-in bounded provider smoke checks using the deployed app adapters. |
 | `fill-longhu-sector-membership.py` | quant-research | quant container | Refresh the sector map from Longhu, inside the quant-service container. |
+| `generate-tdx-hosts.py` | quant-research | workstation | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `import-adjusted-research-bars.py` | quant-research | workstation | Import the latest stock-brain qfq research panel into PostgreSQL. |
 | `import-stock-brain-database.py` | quant-research | workstation | Snapshot and migrate durable stock-brain SQLite data into PostgreSQL. |
 | `import-stock-brain-portfolio.py` | quant-research | workstation | Dry-run or publish the latest verified stock-brain CITIC snapshot. |
@@ -150,16 +151,15 @@
 | `refresh-watchlist-from-proposals.py` | quant-research | workstation | Post-close watchlist refresh: admit today's proposals, retire the inactive. |
 | `run-post-close-pipeline.sh` | quant-research | workstation | Post-close daily pipeline runner. |
 | `tdx-local-export.py` | quant-research | workstation | Export TDX client files (vipdoc) to the platform's offline CSV contracts. |
-| `tdx-owner-probe.sh` | quant-research | workstation |  |
+| `tdx-owner-probe.sh` | quant-research | workstation | Run the TDX route probe from the owner egress over ssh stdin; it writes nothing on the owner. |
 | `tdx_handshake_experiments.py` | quant-research | workstation | Read-only TDX handshake/opcode probe. |
 
-## CI and checks (17)
+## CI and checks (16)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
 | `export_component.py` | platform | workstation and CI | Export one logical component as a secret-free standalone project archive. |
 | `generate-api-types.mjs` | platform | workstation and CI |  |
-| `generate-tdx-hosts.py` | platform | workstation and CI | Generate the ranked, research-only TDX host pool from probe JSON. |
 | `generate_architecture_index.py` | platform | workstation and CI | Generate a small, deterministic map for humans and maintenance agents. |
 | `generate_scripts_catalog.py` | platform | workstation and CI | Generate scripts/CATALOG.md: what each script is for, who owns it, where it runs. |
 | `generate_service_index.py` | platform | workstation and CI | Generate docs/services.html: one clickable index of every local service port. |

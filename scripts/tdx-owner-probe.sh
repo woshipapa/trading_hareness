@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run the TDX route probe from the owner egress over ssh stdin; it writes nothing on the owner.
 set -euo pipefail
 missing=()
 for name in LONGHU_SSH_HOST LONGHU_SSH_PORT LONGHU_SSH_USER LONGHU_SSH_KEY_PATH; do
@@ -32,9 +33,18 @@ done
 [[ -n $output ]] || { echo "missing required --output" >&2; exit 2; }
 ssh_args=(-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20
   -i "$LONGHU_SSH_KEY_PATH" -p "$LONGHU_SSH_PORT" "$LONGHU_SSH_USER@$LONGHU_SSH_HOST" 'python3 -I -')
-if ssh "${ssh_args[@]}" "${args[@]}" < "$tmp" > "$tmpdir/output" 2>"$err"; then
-  mv "$tmpdir/output" "$output"
-else
-  code=$?
-  exit "$code"
-fi
+status=0
+ssh "${ssh_args[@]}" "${args[@]}" < "$tmp" > "$tmpdir/output" 2>"$err" || status=$?
+# A sweep below its threshold exits 2 but still printed its matrix: keep it, it is the evidence.
+if [[ -s $tmpdir/output ]]; then mv "$tmpdir/output" "$output"; fi
+# The remote summary and any ssh error go to stderr with the connection values replaced literally.
+python3 -c '
+import os, sys
+text = sys.stdin.read()
+key = os.environ["LONGHU_SSH_KEY_PATH"]
+for value, label in ((os.path.expanduser(key), "[ssh-key]"), (key, "[ssh-key]"),
+                     (os.environ["LONGHU_SSH_HOST"], "[ssh-host]"), (os.environ["LONGHU_SSH_USER"], "[ssh-user]")):
+    text = text.replace(value, label)
+sys.stderr.write(text)
+' < "$err"
+exit "$status"

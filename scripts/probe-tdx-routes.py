@@ -155,10 +155,18 @@ def main(argv=None, probe_fn=probe_host):
     text = json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
     if args.output:
         args.output.write_text(text, encoding="utf-8")
-    counts = {name: sum(1 for sample in samples for row in sample["results"] if row["commands"].get(name, {}).get("usable")) for name in required}
-    print(f"egress={args.egress} profile={args.profile} hist_date={args.hist_date.isoformat()} usable=" + ",".join(f"{k}:{v}" for k, v in counts.items()), file=sys.stderr)
+    def usable_in_every_sample(predicate):
+        return set.intersection(*({(row["host"], row["port"]) for row in sample["results"] if predicate(row)}
+                                  for sample in samples))
+
+    counts = {name: len(usable_in_every_sample(lambda row, name=name: row["commands"].get(name, {}).get("usable")))
+              for name in required}
+    usable = len(usable_in_every_sample(lambda row: row["usable"]))
+    print(f"egress={args.egress} profile={args.profile} hist_date={args.hist_date.isoformat()} "
+          f"probed_at_utc={samples[-1]['probed_at_utc']} hosts={len(hosts)} samples={len(samples)} usable_hosts={usable} "
+          "usable_by_command=" + ",".join(f"{k}:{v}" for k, v in counts.items()), file=sys.stderr)
     print(text, end="")
-    return 0 if sum(1 for row in samples[-1]["results"] if row["usable"]) >= args.min_usable_hosts else 2
+    return 0 if usable >= args.min_usable_hosts else 2
 
 
 if __name__ == "__main__":

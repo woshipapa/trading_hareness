@@ -152,6 +152,27 @@ class TdxClientTests(unittest.TestCase):
             tdx_protocol.TdxClient = original
         self.assertEqual(attempts, ["a", "b"])
 
+    def test_a_connected_host_falls_back_to_legacy_3_before_the_next_host(self):
+        attempts = []
+
+        class ClosesAfterConnect(tdx_protocol.TdxClient):
+            def __enter__(self):
+                attempts.append((self.host, self.handshake_profile))
+                self._connected = True
+                raise tdx_protocol.TdxProtocolError("TDX server closed the connection")
+
+        original = tdx_protocol.TdxClient
+        tdx_protocol.TdxClient = ClosesAfterConnect
+        tdx_protocol._COOLDOWN_UNTIL.clear()
+        try:
+            with self.assertRaises(tdx_protocol.TdxProtocolError):
+                tdx_protocol.call_sync(lambda client: None, hosts=[("a", 1), ("b", 2)])
+            self.assertIn(("a", 1), tdx_protocol._COOLDOWN_UNTIL, "a transport failure cools the host down")
+        finally:
+            tdx_protocol.TdxClient = original
+            tdx_protocol._COOLDOWN_UNTIL.clear()
+        self.assertEqual(attempts, [("a", "login_one"), ("a", "legacy_3"), ("b", "login_one"), ("b", "legacy_3")])
+
     def test_receipt_has_profile_and_decode_failure_does_not_cool(self):
         class Refusing(tdx_protocol.TdxClient):
             def __enter__(self):

@@ -104,6 +104,7 @@ RULES: list[tuple[str, str, str, str]] = [
     # CI and contract checks
     ("verify_*.py", "CI and checks", "platform", "workstation and CI"),
     ("verify-*", "CI and checks", "platform", "workstation and CI"),
+    ("generate-tdx-hosts.py", "research data", "quant-research", "workstation"),
     ("generate*", "CI and checks", "platform", "workstation and CI"),
     ("export_component.py", "CI and checks", "platform", "workstation and CI"),
     # research data tools
@@ -119,7 +120,6 @@ RULES: list[tuple[str, str, str, str]] = [
     ("run-post-close-pipeline.sh", "research data", "quant-research", "workstation"),
     ("tdx-local-export.py", "research data", "quant-research", "workstation"),
     ("tdx_handshake_experiments.py", "research data", "quant-research", "workstation"),
-    ("generate-tdx-hosts.py", "research data", "quant-research", "workstation"),
     ("probe-tdx-routes.py", "research data", "quant-research", "workstation"),
     ("tdx-owner-probe.sh", "research data", "quant-research", "workstation"),
 ]
