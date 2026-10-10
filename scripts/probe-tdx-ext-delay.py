@@ -66,8 +66,11 @@ def lag(points, reference, max_lag):
     most price changes of ``points`` recur, with the same price, among the changes of ``reference``. Equal counts
     go to the shift nearer zero."""
     changes, reference_changes = price_changes(points), price_changes(reference)
-    votes = Counter(round(at - reference_at) for at, price in changes for reference_at, reference_price in reference_changes
-                    if price == reference_price and abs(at - reference_at) <= max_lag)
+    reference_times = {}
+    for reference_at, price in reference_changes:
+        reference_times.setdefault(price, []).append(reference_at)
+    votes = Counter(round(at - reference_at) for at, price in changes for reference_at in reference_times.get(price, ())
+                    if abs(at - reference_at) <= max_lag)
     shift, matched = max(votes.items(), key=lambda vote: (vote[1], -abs(vote[0])), default=(None, 0))
     return {"lag_s": shift, "matched_changes": matched, "changes": len(changes),
             "reference_changes": len(reference_changes)}
@@ -107,8 +110,8 @@ def emit(payload, output):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--hosts", type=hosts_arg, default=DEFAULT_HOSTS, help="host:port,host:port, port included")
-    parser.add_argument("--seconds", type=int, default=600, help="number of readings, one per second")
-    parser.add_argument("--max-lag", type=float, default=300.0, help="largest lag looked for, in seconds")
+    parser.add_argument("--seconds", type=int, default=1800, help="number of readings, one per second")
+    parser.add_argument("--max-lag", type=float, default=1200.0, help="largest lag looked for, in seconds")
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--egress", choices=("mac", "owner"), default="mac")
     parser.add_argument("--output", type=Path)
