@@ -47,7 +47,7 @@ async function runRead(capability: DatasourceCapability) {
   try {
     const query = queryFromForm(formValues.value);
     const suffix = query ? `?${query}` : '';
-    readResult.value = await getJson<DatasourceRead>(`/api/research/datasources/read/${binding.source}/${capability.key}${suffix}`);
+    readResult.value = await getJson<DatasourceRead>('/api/research/datasources/read/' + binding.source + '/' + capability.key + suffix);
   } catch (reason) {
     readError.value = reason instanceof Error ? reason.message : String(reason);
   } finally { readLoading.value = false; }

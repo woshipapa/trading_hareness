@@ -24,6 +24,7 @@ export const researchReads = new Map([
 	// Keep the generated OpenAPI path readable through the edge as well as the dashboard alias.
 	['/api/v1/providers/realtime-health', '/api/v1/providers/realtime-health'],
 	['/api/research/provider-capabilities', '/api/v1/providers/capabilities'],
+	['/api/research/datasources/catalog', '/api/v1/datasources/catalog'],
 	['/api/research/quality', '/api/v1/data-quality/issues'],
 	['/api/research/recommendations', '/api/v1/recommendations/latest'],
 	['/api/research/universes/core', '/api/v1/universes/core'],
