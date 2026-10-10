@@ -20,9 +20,8 @@ class TdxZhbExtrasTests(unittest.TestCase):
         self.assertEqual(result["holidays"], ["2026-10-01", "2026-10-02"])
         self.assertEqual(result["rules"]["RULE.CYBZDRatio"], "0.20")
 
-    def test_bj_ipo_and_limits(self):
-        bj = parse_bj_mapping(b"000000,0,1,20261009,\n44|832000|920000|A|20251009\n", b"44|920000|2|A|1|")
-        self.assertEqual(bj["migrations"][0]["new_code"], "920000")
+    def test_bj_mapping_and_ipo(self):
+        self.assertEqual(parse_bj_mapping(b"000000,0,1,20261009,\n44|832000|920000|A|20251009\n"), {"832000": "920000"})
         ipo = parse_ipo_subscriptions(b"0|001381|20261019|11.20||||||||001381||||Name|\n", b"0|301149|123288|96000|9.16|0.01|371149|1000|20260929|0.0017||Bond\n")
         self.assertEqual(ipo["equity"][0]["price"], 11.2)
         self.assertEqual(ipo["other"][0]["bond_code"], "123288")

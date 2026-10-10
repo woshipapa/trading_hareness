@@ -15,6 +15,7 @@ from io import BytesIO
 import struct
 from typing import Any
 import zipfile
+import zlib
 
 from . import tdx_protocol
 
@@ -108,7 +109,7 @@ def parse_block_file(data: bytes) -> list[dict[str, Any]]:
     for _ in range(count):
         if pos + 13 > len(data):
             break
-        name = data[pos:pos + 9].split(b"\x00", 1)[0].decode("gbk", "replace").strip()
+        name = tdx_protocol.decode_gbk(data[pos:pos + 9]).strip()
         member_count, block_type = struct.unpack_from("<HH", data, pos + 9)
         members_pos = pos + 13
         members: list[str] = []
@@ -195,20 +196,29 @@ def parse_tdxstat2(data: bytes) -> list[dict[str, Any]]:
 
 
 def parse_zhb_zip(data: bytes, *, max_uncompressed: int = MAX_ZIP_UNCOMPRESSED) -> dict[str, bytes]:
-    """Read a bounded ``zhb.zip`` into basename -> bytes, rejecting traversal."""
+    """Read ``zhb.zip`` into basename -> bytes, rejecting traversal.
+
+    Members are streamed against one budget, so a member that inflates past its declared size cannot
+    exhaust memory; a corrupt or truncated archive is a TdxFileError, which the host failover handles.
+    """
     out: dict[str, bytes] = {}
-    total = 0
-    with zipfile.ZipFile(BytesIO(data)) as archive:
-        for info in archive.infolist():
-            name = info.filename.replace("\\", "/")
-            if name.startswith("/") or ".." in name.split("/"):
-                raise TdxFileError("unsafe path in zhb.zip")
-            if info.is_dir():
-                continue
-            total += info.file_size
-            if total > max_uncompressed:
-                raise TdxFileError("zhb.zip exceeds uncompressed size cap")
-            out[name.rsplit("/", 1)[-1]] = archive.read(info)
+    budget = max_uncompressed
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as archive:
+            for info in archive.infolist():
+                name = info.filename.replace("\\", "/")
+                if name.startswith("/") or ".." in name.split("/"):
+                    raise TdxFileError("unsafe path in zhb.zip")
+                if info.is_dir():
+                    continue
+                with archive.open(info) as member:
+                    content = member.read(budget + 1)
+                if len(content) > budget:
+                    raise TdxFileError("zhb.zip exceeds the uncompressed size cap")
+                budget -= len(content)
+                out[name.rsplit("/", 1)[-1]] = content
+    except (zipfile.BadZipFile, zlib.error, EOFError) as error:
+        raise TdxFileError(f"corrupt zhb.zip: {error}") from error
     return out
 
 

@@ -63,7 +63,7 @@ def live(host: str, port: int, zhb_path: str | None) -> tuple[dict[str, object],
     for new, page in ((False, 1000), (False, 100), (True, 1000), (True, 100)):
         label = f"bj_list_{'044d' if new else '0450'}_page{page}"
         def variant(new=new, page=page) -> list[dict[str, Any]]:
-            return _with_client(host, port, lambda c: ti.security_list(c, 2, page_size=page))
+            return _with_client(host, port, lambda c: ti.security_list(c, 2))
         value = _step(steps, label, variant, required=False)
         bj_variants[label] = f"rows:{len(value)}" if value is not None else steps[label]
     result["bj_list_variants"] = bj_variants

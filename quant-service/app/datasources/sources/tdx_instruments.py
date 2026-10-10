@@ -1,9 +1,7 @@
 """TDX security lists, instrument taxonomy, and index/board bars.
 
-This module deliberately subclasses :class:`tdx_protocol.TdxClient` instead of
-changing the shared client.  Instrument discovery uses the legacy 0x044e/0x0450
-commands and the client sends only ``_SETUP_COMMANDS[0]``: the additional setup
-packets put some servers in a restricted mode.
+Instrument discovery uses the legacy 0x044e/0x0450 commands on the shared
+``tdx_protocol.TdxClient`` with the LOGIN_ONE handshake profile.
 
 Prices in a security-list quote are integer values whose decimal point is a
 per-instrument list field.  The quote parser in ``tdx_protocol`` exposes the
@@ -39,11 +37,8 @@ def build_security_count_request(market: int) -> bytes:
             + struct.pack("<H", market) + bytes.fromhex("75 c7 33 01"))
 
 
-def build_security_list_request(market: int, start: int = 0, count: int = SECURITY_PAGE_SIZE) -> bytes:
-    if market not in tdx_protocol.MARKETS.values() or start < 0 or count <= 0 or count > SECURITY_PAGE_SIZE:
-        raise ValueError("invalid security-list bounds")
-    # The legacy command has a fixed 1000-row page; ``count`` is retained in
-    # the API for callers that page the final partial block.
+def build_security_list_request(market: int, start: int = 0) -> bytes:
+    """One 0x0450 page; the server returns up to SECURITY_PAGE_SIZE rows from ``start``."""
     return (bytes.fromhex("0c 01 18 64 01 01 06 00 06 00")
             + struct.pack("<H", SECURITY_LIST) + struct.pack("<HH", market, start))
 
@@ -74,9 +69,9 @@ def parse_security_list(body: bytes, *, market: int | None = None) -> list[dict[
             "<6sH8s4sBI4s", body, pos)
         pos += SECURITY_ROW_SIZE
         code = code_raw.decode("ascii", "ignore").rstrip("\x00")
-        row = {"market": market, "code": code, "name": tdx_protocol.decode_text(name_raw.split(b"\x00", 1)[0]).strip(), "vol_unit": vol_unit,
-               "decimal_point": decimal_point, "pre_close_raw": pre_close_raw,
-               "pre_close": pre_close_raw / (10 ** decimal_point) if decimal_point < 10 else None}
+        # pre_close is TDX's packed float (pytdx get_volume): 0x418C999A is 17.575, whatever the decimal point.
+        row = {"market": market, "code": code, "name": tdx_protocol.decode_gbk(name_raw).strip(), "vol_unit": vol_unit,
+               "decimal_point": decimal_point, "pre_close": tdx_protocol.decode_volume(pre_close_raw)}
         rows.append(row)
     return rows
 
@@ -138,13 +133,7 @@ _EXCHANGE = {market: exchange for exchange, market in tdx_protocol.MARKETS.items
 
 
 def _list_section(market: int) -> Callable[[tdx_protocol.TdxClient], tuple[int, list[dict[str, Any]]]]:
-    """One market's server list: its 0x044e count and every 0x0450 page."""
-    def section(client: tdx_protocol.TdxClient) -> tuple[int, list[dict[str, Any]]]:
-        count = security_count(client, market)
-        return count, [row for start in range(0, count, SECURITY_PAGE_SIZE)
-                       for row in parse_security_list(client._exchange(build_security_list_request(
-                           market, start, min(SECURITY_PAGE_SIZE, count - start))), market=market)]
-    return section
+    return lambda client: security_list(client, market)
 
 
 def _zhb_bj_rows(client: tdx_protocol.TdxClient) -> list[dict[str, Any]]:
@@ -202,7 +191,7 @@ async def fetch_instruments() -> CapabilityEvidence:
                               coverage=evidence.coverage, warnings=evidence.warnings)
 
 
-def price_scale(decimal_point: int | None, kind: str | None = None) -> float:
+def price_scale(decimal_point: int | None) -> float:
     """Return the divisor for integer quote prices.
 
     The list's decimal_point is authoritative.  Missing/invalid metadata falls
@@ -213,11 +202,15 @@ def price_scale(decimal_point: int | None, kind: str | None = None) -> float:
     return float(10 ** int(decimal_point))
 
 
+_QUOTE_PRICE_KEYS = frozenset({"price", "last_close", "open", "high", "low",
+                               *(f"{side}{level}" for side in ("bid", "ask") for level in range(1, 6))})
+
+
 def scale_quote(quote: Mapping[str, Any], decimal_point: int | None) -> dict[str, Any]:
     factor = 100.0 / price_scale(decimal_point)
     result = dict(quote)
     for key, value in quote.items():
-        if key in {"price", "last_close", "open", "high", "low"} or key.startswith(("bid", "ask")):
+        if key in _QUOTE_PRICE_KEYS:
             if isinstance(value, (int, float)):
                 result[key] = value * factor
     result["decimal_point"] = decimal_point
@@ -226,79 +219,30 @@ def scale_quote(quote: Mapping[str, Any], decimal_point: int | None) -> dict[str
 
 
 def parse_index_bars(body: bytes, *, category: int = 9) -> list[dict[str, Any]]:
-    """Parse index/board bars with the trailing up/down breadth counters.
+    """Index and board bars (delta-1 1c R2): the stock bar record followed by uint16 up/down counts.
 
-    The legacy index record is the normal 32-byte bar followed by two uint16
-    counters (36 bytes total): date, OHLC integer deltas, volume, amount,
-    up_count, down_count.  Some servers omit counters; those records are
-    accepted as a fallback and expose ``None`` counters.
+    The counts are per day and count the index's constituents (delta-3 Q10): never mix them with all-A
+    breadth. Only this layout is verified; an answer that does not fill it exactly is an error, never
+    a guess at another layout (that guess turned 510300 ETF bars into dates like 89161-91-46).
     """
-    if len(body) < 2:
-        return []
     count = struct.unpack_from("<H", body)[0]
-    payload = body[2:]
-    # This is the pytdx/gotdx wire layout: compressed datetime and four
-    # signed price deltas, followed by packed volume/amount and two breadth
-    # counters.  It is the same bar stream as 0x0164 with four extra bytes.
-    try:
-        pos, base = 0, 0
-        decoded: list[dict[str, Any]] = []
-        for _ in range(count):
-            stamp, pos = tdx_protocol._bar_datetime(category, payload, pos)
-            open_diff, pos = tdx_protocol.decode_price(payload, pos)
-            close_diff, pos = tdx_protocol.decode_price(payload, pos)
-            high_diff, pos = tdx_protocol.decode_price(payload, pos)
-            low_diff, pos = tdx_protocol.decode_price(payload, pos)
-            volume_raw, amount_raw = struct.unpack_from("<II", payload, pos)
-            pos += 8
-            up, down = struct.unpack_from("<HH", payload, pos)
-            pos += 4
-            opening = open_diff + base
-            decoded.append({"datetime": stamp, "open": opening / 1000, "close": (opening + close_diff) / 1000,
-                            "high": (opening + high_diff) / 1000, "low": (opening + low_diff) / 1000,
-                            "volume": tdx_protocol.decode_volume(volume_raw), "amount": tdx_protocol.decode_volume(amount_raw),
-                            "up_count": up, "down_count": down})
-            base = opening + close_diff
-        if pos == len(payload):
-            return decoded
-    except (IndexError, struct.error, ValueError):
-        pass
-    # A small number of mirrors serve fixed records; retain a bounded fallback
-    # for captured fixtures and old file bridges.
-    # ``GetIndexBars`` is commonly fixed-float (36 bytes); a few mirrors use
-    # compact integer OHLC (also 36 bytes including the breadth counters).
-    record_size = 36 if count and len(payload) >= count * 36 else 32
-    float_layout = False
-    if record_size == 36:
-        try:
-            sample = struct.unpack_from("<IfffffIIHH", payload)
-            float_layout = all(abs(value) < 1e9 for value in sample[1:6]) and sample[8] < 100000 and sample[9] < 100000
-        except struct.error:
-            pass
-    rows: list[dict[str, Any]] = []
-    pos, base = 0, 0
+    payload, pos, base, rows = body[2:], 0, 0, []
     for _ in range(count):
-        if pos + record_size > len(payload):
-            break
-        if float_layout:
-            packed, opening, high, low, closing, amount, volume, _reserved, up, down = struct.unpack_from("<IfffffIIHH", payload, pos)
-            pos += 36
-            rows.append({"datetime": f"{packed // 10000:04d}-{packed % 10000 // 100:02d}-{packed % 100:02d}",
-                         "open": opening, "close": closing, "high": high, "low": low,
-                         "volume": volume, "amount": amount, "up_count": up, "down_count": down})
-            continue
-        packed, open_diff, close_diff, high_diff, low_diff, volume, amount, _reserved = struct.unpack_from("<IiiiiIII", payload, pos)
-        pos += 32
-        up = down = None
-        if record_size == 36:
-            up, down = struct.unpack_from("<HH", payload, pos)
-            pos += 4
-        stamp = f"{packed // 10000:04d}-{packed % 10000 // 100:02d}-{packed % 100:02d}"
+        stamp, pos = tdx_protocol._bar_datetime(category, payload, pos)
+        open_diff, pos = tdx_protocol.decode_price(payload, pos)
+        close_diff, pos = tdx_protocol.decode_price(payload, pos)
+        high_diff, pos = tdx_protocol.decode_price(payload, pos)
+        low_diff, pos = tdx_protocol.decode_price(payload, pos)
+        volume_raw, amount_raw, up, down = struct.unpack_from("<IIHH", payload, pos)
+        pos += 12
         opening = open_diff + base
         rows.append({"datetime": stamp, "open": opening / 1000, "close": (opening + close_diff) / 1000,
                      "high": (opening + high_diff) / 1000, "low": (opening + low_diff) / 1000,
-                     "volume": volume, "amount": amount, "up_count": up, "down_count": down})
+                     "volume": tdx_protocol.decode_volume(volume_raw), "amount": tdx_protocol.decode_volume(amount_raw),
+                     "up_count": up, "down_count": down})
         base = opening + close_diff
+    if pos != len(payload):
+        raise tdx_protocol.TdxProtocolError(f"index bar answer has {len(payload) - pos} bytes after {count} records")
     return rows
 
 
@@ -314,13 +258,11 @@ def security_count(client: tdx_protocol.TdxClient, market: int) -> int:
     return parse_security_count(client._exchange(build_security_count_request(market)))
 
 
-def security_list(client: tdx_protocol.TdxClient, market: int, *, page_size: int = SECURITY_PAGE_SIZE) -> list[dict[str, Any]]:
-    total = security_count(client, market)
-    rows: list[dict[str, Any]] = []
-    for start in range(0, total, page_size):
-        body = client._exchange(build_security_list_request(market, start, min(page_size, total - start)))
-        rows.extend(parse_security_list(body, market=market))
-    return rows
+def security_list(client: tdx_protocol.TdxClient, market: int) -> tuple[int, list[dict[str, Any]]]:
+    """The server's 0x044e count for ``market`` and every 0x0450 page of its list (pages are fixed-size)."""
+    count = security_count(client, market)
+    return count, [row for start in range(0, count, SECURITY_PAGE_SIZE)
+                   for row in parse_security_list(client._exchange(build_security_list_request(market, start)), market=market)]
 
 
 def index_bars(client: tdx_protocol.TdxClient, market: int, code: str, start: int = 0, count: int = 800) -> list[dict[str, Any]]:

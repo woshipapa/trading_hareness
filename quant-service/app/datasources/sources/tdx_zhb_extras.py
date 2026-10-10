@@ -65,36 +65,23 @@ def _pipe_rows(data: bytes, minimum: int = 1) -> list[list[str]]:
             for fields in [line.split("|")] if len(fields) >= minimum]
 
 
-def parse_bj_mapping(addedcode: bytes, bjmore: bytes = b"") -> dict[str, Any]:
-    """Parse legacy-to-current Beijing code migration and BJ metadata rows."""
-    if not bjmore:
-        mapping: dict[str, str] = {}
-        for line in _lines(addedcode):
-            codes = re.findall(r"(?<!\d)(\d{6})(?!\d)", line)
-            if len(codes) >= 2:
-                old, new = codes[:2]
-                if old.startswith(("43", "83", "87")) and new.startswith("92"):
-                    mapping[old] = new
-                elif new.startswith(("43", "83", "87")) and old.startswith("92"):
-                    mapping[new] = old
-        return mapping
-    header: list[str] = []
-    rows = []
-    for line in _lines(addedcode):
-        if "|" not in line:
-            header = line.rstrip(",").split(",")
-            continue
-        fields = line.split("|")
-        rows.append({"market": fields[0], "old_code": fields[1], "new_code": fields[2],
-                     "name": fields[3], "effective_date": fields[4] if len(fields) > 4 else "",
-                     "raw_fields": fields})
-    metadata = []
-    for fields in _pipe_rows(bjmore, 4):
-        metadata.append({"market": fields[0], "code": fields[1], "security_type": fields[2],
-                         "name": fields[3], "status": fields[4] if len(fields) > 4 else "",
-                         "raw_fields": fields})
-    return {"header": header, "migrations": rows, "metadata": metadata}
+def parse_bj_mapping(addedcode: bytes) -> dict[str, str]:
+    """``addedcode_bj.cfg`` as {old code: current 920xxx code}.
 
+    Rows come in pipe form (``44|832000|920000|name|date``) and in older delimiter styles;
+    taking the first two six-digit codes of a line covers both (dates have eight digits).
+    """
+    mapping: dict[str, str] = {}
+    for line in _lines(addedcode):
+        codes = re.findall(r"(?<!\d)(\d{6})(?!\d)", line)
+        if len(codes) < 2:
+            continue
+        old, new = codes[:2]
+        if old.startswith(("43", "83", "87")) and new.startswith("92"):
+            mapping[old] = new
+        elif new.startswith(("43", "83", "87")) and old.startswith("92"):
+            mapping[new] = old
+    return mapping
 
 def parse_tdxbjmore(data: bytes) -> list[dict[str, Any]]:
     rows = []
@@ -171,9 +158,10 @@ def parse_industry_stock_references(data: bytes) -> list[dict[str, Any]]:
 def parse_tipinfo(data: bytes) -> list[dict[str, Any]]:
     """Parse 22-column per-stock report/rights metadata from ``tipinfo.dat``.
 
-    Columns 0-3 are market, code, report period and EPS.  Column 4 is a
-    plausible first-disclosure date, not an available-at timestamp; all
-    remaining positions stay named ``field_N`` pending an independent schema.
+    Columns 0-3 are market (0 SZ, 1 SH), code, report period and EPS. Column 4 is the
+    first disclosure date of the periodic report, date only (verified in delta-3 Q1:
+    5,549/5,551 equal to Eastmoney); it, not the finance summary's ``updated_date``,
+    is the report's ``available_at`` day. The other columns stay ``field_N``.
     """
     rows = []
     for fields in _pipe_rows(data, 4):

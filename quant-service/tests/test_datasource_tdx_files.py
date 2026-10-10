@@ -7,6 +7,16 @@ from app.datasources.sources import tdx_files
 
 
 class TdxFileParserTests(unittest.TestCase):
+    def test_zip_members_stream_against_the_budget_and_corruption_is_typed(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("a.cfg", b"x" * 4096)
+        self.assertEqual(tdx_files.parse_zhb_zip(buffer.getvalue())["a.cfg"], b"x" * 4096)
+        with self.assertRaises(tdx_files.TdxFileError):
+            tdx_files.parse_zhb_zip(buffer.getvalue(), max_uncompressed=1024)
+        with self.assertRaises(tdx_files.TdxFileError):
+            tdx_files.parse_zhb_zip(b"PK\x03\x04 not a zip archive")
+
     def test_request_layouts(self):
         meta = tdx_files.build_file_meta_request("block_gn.dat")
         self.assertEqual(meta[:12], bytes.fromhex("0c39186900012a002a00c502"))

@@ -9,11 +9,11 @@ class InstrumentTests(unittest.TestCase):
     def test_security_request_and_rows(self):
         self.assertEqual(ti.build_security_count_request(0)[10:12], b"N\x04")
         self.assertEqual(ti.build_security_list_request(1, 1000).hex(), "0c01186401010600060050040100e803")
-        row = struct.pack("<6sH8s4sBI4s", b"688001", 100, "ST测试".encode("gbk").ljust(8, b"\0"), b"\0" * 4, 3, 123456, b"\0" * 4)
-        parsed = ti.parse_security_list(struct.pack("<H", 1) + row, market=1)
-        self.assertEqual(parsed[0]["code"], "688001")
-        self.assertEqual(parsed[0]["name"], "ST测试")
-        self.assertEqual(parsed[0]["pre_close"], 123.456)
+        # 通22转债 is 8 GBK bytes that also happen to be valid UTF-8; 0x418C999A is pytdx's sample pre-close.
+        row = struct.pack("<6sH8s4sBI4s", b"127045", 10, "通22转债".encode("gbk"), b"\0" * 4, 3, 0x418C999A, b"\0" * 4)
+        parsed = ti.parse_security_list(struct.pack("<H", 1) + row, market=0)
+        self.assertEqual((parsed[0]["code"], parsed[0]["name"]), ("127045", "通22转债"), "GBK, never UTF-8 first")
+        self.assertAlmostEqual(parsed[0]["pre_close"], 17.575, places=3, msg="a packed float, not raw / 10**decimal_point")
 
     def test_taxonomy_covers_requested_families(self):
         cases = [(1, "600000", "平安" , "stock_main"), (1, "688001", "科创", "stock_star"),
@@ -30,12 +30,17 @@ class InstrumentTests(unittest.TestCase):
         self.assertAlmostEqual(ti.scale_quote({"price": 43.85}, 3)["price"], 4.385)
         self.assertEqual(ti.price_scale(2), 100.0)
 
-    def test_index_float_bars_with_breadth(self):
-        record = struct.pack("<IfffffIIHH", 20261009, 3800.0, 3810.0, 3790.0, 3805.0, 123456.0, 789, 0, 1200, 800)
-        rows = ti.parse_index_bars(struct.pack("<H", 1) + record)
-        self.assertEqual(rows[0]["datetime"], "2026-10-09")
-        self.assertEqual((rows[0]["up_count"], rows[0]["down_count"]), (1200, 800))
-        self.assertEqual(rows[0]["close"], 3805.0)
+    def test_scale_quote_rescales_prices_not_volumes(self):
+        scaled = ti.scale_quote({"price": 43.85, "bid1": 43.84, "bid_vol1": 1200, "ask_vol1": 800}, 3)
+        self.assertAlmostEqual(scaled["price"], 4.385)
+        self.assertAlmostEqual(scaled["bid1"], 4.384)
+        self.assertEqual((scaled["bid_vol1"], scaled["ask_vol1"]), (1200, 800))
+
+    def test_index_bars_never_guess_another_layout(self):
+        record = struct.pack("<I", 20261009) + b"\x00" * 4 + struct.pack("<IIHH", 0, 0, 1341, 956)
+        self.assertEqual(ti.parse_index_bars(struct.pack("<H", 1) + record)[0]["up_count"], 1341)
+        with self.assertRaises(tdx_protocol.TdxProtocolError):
+            ti.parse_index_bars(struct.pack("<H", 1) + record + b"\x00" * 4)
 
     def test_index_compressed_bars_with_breadth(self):
         def enc(value):
