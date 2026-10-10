@@ -1,0 +1,16 @@
+{
+  "source_base": "32d99b9",
+  "shared_readonly_head": "20261009_0119",
+  "target_head": "20261010_ow0121",
+  "production_migrated": false,
+  "business_rows_exported": false,
+  "native_postgres_starting_points": {
+    "empty": {"missing": 0, "different": 0},
+    "peer_sep0002": {"missing": 0, "different": 0},
+    "owner_0119_schema_copy": {"missing": 0, "different": 0, "ddl_or_table_lock_statements": 0}
+  },
+  "additional_objects_accepted": true,
+  "temporary_databases_removed": true,
+  "temporary_roles_removed": true,
+  "formal_maintainer_docker_gate": "required_after_submission"
+}

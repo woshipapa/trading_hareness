@@ -53,6 +53,7 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("eastmoney_datacenter", time(18, 0), time(23, 30), "东财解禁/股东/大宗/业绩/回购/新股"),
     ArchiveJob("eastmoney_margin", time(18, 10), time(23, 30), "两融汇总与明细（前一交易日）"),
     ArchiveJob("fuyao_valuation_index", time(18, 30), time(23, 30), "全 A 估值与同花顺指数收盘"),
+    ArchiveJob("daily_valuation_projection", time(18, 30), time(23, 30), "复用已归档估值补齐每日记录"),
     ArchiveJob("tick_flow", time(19, 0), time(23, 30), "观察池分笔资金流"),
     ArchiveJob("capital_changes", time(19, 30), time(23, 30), "观察池除权除息与股本变迁"),
 )
@@ -213,9 +214,6 @@ async def job_fuyao_valuation_index(deps: ArchiveDeps, state: ArchiveState, day:
     batches, dropped, failures = await fetch_code_batches(fetch, "a_share_valuations_snapshot", codes)
     valuations = [row for _codes, data in batches for row in fuyao_evidence.valuation_observations(data, now)]
     stored = await deps.collector.persist_observations("fuyao_ths", "a_share_valuations_snapshot", valuations) if valuations else 0
-    # Projection reads persisted evidence and verifies its session date; it
-    # cannot relabel a current snapshot as an older requested trading day.
-    projection = dict(await deps.project_valuations(day)) if deps.project_valuations else {"status": "disabled"}
     index_rows: list[dict[str, Any]] = []
     dropped_indices: list[str] = []
     for tag in ("cn_concept", "industry", "region", "tszs"):
@@ -231,8 +229,16 @@ async def job_fuyao_valuation_index(deps: ArchiveDeps, state: ArchiveState, day:
     index_stored = await deps.collector.persist_observations("fuyao_ths", "ths_index_prices_snapshot", index_rows) if index_rows else 0
     return {"valuations": len(valuations), "stored": stored, "dropped_codes": dropped[:20], "failures": failures[:5],
             "index_quotes": len(index_rows), "index_stored": index_stored, "dropped_index_codes": dropped_indices[:20],
-            "daily_valuation_projection": projection,
-            "status": "completed" if projection.get("status") in {"completed", "unchanged", "disabled"} else "pending"}
+            "status": "completed"}
+
+
+async def job_daily_valuation_projection(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Retry persisted-evidence projection independently of provider capture."""
+    if deps.project_valuations is None:
+        raise RuntimeError('daily valuation projection is disabled')
+    projection = dict(await deps.project_valuations(day))
+    return {'daily_valuation_projection': projection,
+            'status': 'completed' if projection.get('status') in {'completed', 'unchanged'} else 'pending'}
 
 
 async def job_tick_flow(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
@@ -277,6 +283,7 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
     "fuyao_dragon_tiger": job_fuyao_dragon_tiger, "eastmoney_datacenter": job_eastmoney_datacenter,
     "eastmoney_margin": job_eastmoney_margin, "fuyao_valuation_index": job_fuyao_valuation_index,
+    "daily_valuation_projection": job_daily_valuation_projection,
     "tick_flow": job_tick_flow, "capital_changes": job_capital_changes,
 }
 
@@ -305,6 +312,8 @@ async def run_due_jobs(deps: ArchiveDeps, state: ArchiveState, now: datetime, *,
     results: dict[str, Any] = {}
     day = now.astimezone(CN_TZ).date()
     for job in due_jobs(state, now, trading_day=trading_day, monotonic=time_module.monotonic(), enabled=enabled):
+        if job.key == 'daily_valuation_projection' and deps.project_valuations is None:
+            continue
         state.last_attempt[job.key] = time_module.monotonic()
         try:
             results[job.key] = {"status": "completed", **await RUNNERS[job.key](deps, state, day, now)}
