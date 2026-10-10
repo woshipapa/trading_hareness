@@ -5,6 +5,7 @@ import unittest
 from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+from app.datasources import runtime
 from app.datasources.collectors import intraday, post_close
 from app.datasources.derived.tick_flow import Tick
 
@@ -36,6 +37,11 @@ class Recorder:
 
 
 class CadenceTests(unittest.TestCase):
+    def test_new_archive_keys_are_opt_in(self):
+        flags = runtime.env_flags("PUBLIC_ARCHIVE", ["tdx_stat_snapshot", "tick_flow"], environ={},
+                                  opt_in_keys={"tdx_stat_snapshot"})
+        self.assertEqual(flags, {"tdx_stat_snapshot": False, "tick_flow": True})
+
     def test_windows(self):
         self.assertTrue(intraday.in_window("session", SESSION, session_open=True))
         self.assertFalse(intraday.in_window("session", SESSION, session_open=False))
@@ -520,6 +526,31 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["status"], "completed")
         self.assertEqual(second["status"], "skipped")
         self.assertEqual(len(recorder.health_details), 2)
+
+    async def test_tdx_reference_file_jobs_timestamp_rows_and_use_membership_delta(self):
+        recorder = Recorder()
+        deps = self._deps(recorder)
+        from app.datasources.contracts import CapabilityEvidence
+        deps.persist_membership_delta = AsyncMock(return_value={"members": 1, "opened": 1, "closed": 0})
+        with patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_valuation",
+                   AsyncMock(return_value=CapabilityEvidence([{"symbol": "600519.SH", "effective_date": "20261009", "pe_ttm": 1}]))), \
+             patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_daily_basic",
+                   AsyncMock(return_value=CapabilityEvidence([{"symbol": "600519.SH", "effective_date": "20261009", "change_pct": 1}]))), \
+             patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_membership",
+                   AsyncMock(return_value=CapabilityEvidence([{"taxonomy_key": "tdx_files_concept", "sector_key": "880001",
+                                                               "symbol": "600519.SH"}]))), \
+             patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_trade_calendar",
+                   AsyncMock(return_value=CapabilityEvidence([{"calendar_date": "2026-10-01", "is_open": False}]))), \
+             patch("app.datasources.collectors.post_close.tdx_reference_files.fetch_ipo_calendar",
+                   AsyncMock(return_value=CapabilityEvidence([{"symbol": "001381.SZ", "apply_date": "2026-10-19"}]))):
+            stats = await post_close.job_tdx_stat_snapshot(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+            membership = await post_close.job_tdx_files_membership(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+            calendar = await post_close.job_tdx_calendar_ipo(deps, post_close.ArchiveState(), date(2026, 10, 9), EVENING)
+        self.assertEqual(stats["valuation_rows"], 1)
+        self.assertEqual(membership["opened"], 1)
+        self.assertEqual(calendar["calendar_rows"], 1)
+        valuation = [rows for _provider, capability, rows in recorder.observations if capability == "tdx_stat_valuation"][0][0]
+        self.assertEqual(valuation["effective_at"], "2026-10-09T15:00:00+08:00")
 
 
 if __name__ == "__main__":

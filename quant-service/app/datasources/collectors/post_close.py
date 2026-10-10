@@ -21,7 +21,10 @@ from zoneinfo import ZoneInfo
 from ..derived import limit_pools
 from ..http import ashare_symbol
 from ..sources import eastmoney_datacenter, eastmoney_ztb, fuyao_evidence
-from ..sources import tdx_bars, tdx_files, tdx_fin_history, tdx_instruments, tdx_mac, tdx_protocol, tdx_zhb_extras
+from ..sources import (
+    tdx_bars, tdx_files, tdx_fin_history, tdx_instruments, tdx_mac, tdx_protocol, tdx_reference_files,
+    tdx_zhb_extras,
+)
 from ..sources.fuyao_evidence import fetch_code_batches
 from .intraday import CollectorDeps, CollectorState, SENTIMENT_PROVIDER_KEY, build_sentiment
 from ..error_text import error_text
@@ -66,6 +69,9 @@ JOBS: tuple[ArchiveJob, ...] = (
     ArchiveJob("tdx_mac_boards", time(20, 20), time(23, 30), "通达信板块目录与成分"),
     ArchiveJob("tdx_limit_pools", time(20, 30), time(23, 30), "通达信衍生涨跌停池"),
     ArchiveJob("tdx_host_probe", time(20, 40), time(23, 30), "通达信主机周探针"),
+    ArchiveJob("tdx_stat_snapshot", time(20, 50), time(23, 30), "通达信估值与每日统计快照"),
+    ArchiveJob("tdx_files_membership", time(21, 0), time(23, 30), "通达信文件板块成分"),
+    ArchiveJob("tdx_calendar_ipo", time(21, 10), time(23, 30), "通达信节假日与新股日历"),
 )
 
 
@@ -494,6 +500,68 @@ async def job_tdx_host_probe(deps: ArchiveDeps, state: ArchiveState, day: date, 
     return {"status": "completed", "week": week, "hosts": results}
 
 
+def _tdx_date(value: Any) -> date:
+    text = str(value)
+    return date.fromisoformat(text if "-" in text else f"{text[:4]}-{text[4:6]}-{text[6:8]}")
+
+
+async def job_tdx_stat_snapshot(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive about 8,000 valuation and 8,000 daily-basic rows on a normal full snapshot day."""
+    started = time_module.monotonic()
+    valuation = await tdx_reference_files.fetch_valuation()
+    daily_basic = await tdx_reference_files.fetch_daily_basic()
+    valuation_rows = [{**row, "ts_code": row["symbol"],
+                       "effective_at": _close_of(_tdx_date(row["effective_date"])).isoformat(),
+                       "available_at": now.isoformat()} for row in valuation.rows]
+    daily_rows = [{**row, "ts_code": row["symbol"],
+                   "effective_at": _close_of(_tdx_date(row["effective_date"])).isoformat(),
+                   "available_at": now.isoformat()} for row in daily_basic.rows]
+    stored_valuation = await deps.collector.persist_observations("tdx_public", "tdx_stat_valuation", valuation_rows)
+    stored_daily = await deps.collector.persist_observations("tdx_public", "tdx_stat_daily_basic", daily_rows)
+    await deps.collector.record_health("tdx_public", "tdx_stat_snapshot", True, len(valuation_rows) + len(daily_rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"valuation_rows": len(valuation_rows), "daily_basic_rows": len(daily_rows),
+            "stored_valuation": stored_valuation, "stored_daily_basic": stored_daily}
+
+
+async def job_tdx_files_membership(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive one observed row per returned TDX file member; unchanged members store no new interval."""
+    started = time_module.monotonic()
+    evidence = await tdx_reference_files.fetch_membership()
+    grouped: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for row in evidence.rows:
+        grouped.setdefault((row["taxonomy_key"], row["sector_key"]), {})[row["symbol"]] = row
+    opened = closed = 0
+    for (taxonomy_key, sector_key), members in grouped.items():
+        if deps.persist_membership_delta is None:
+            continue
+        delta = await deps.persist_membership_delta(taxonomy_key, sector_key, members, now)
+        opened += delta["opened"]
+        closed += delta["closed"]
+    await deps.collector.record_health("tdx_public", "tdx_files_membership", True, len(evidence.rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"rows": len(evidence.rows), "taxonomies": len(grouped), "opened": opened, "closed": closed}
+
+
+async def job_tdx_calendar_ipo(deps: ArchiveDeps, state: ArchiveState, day: date, now: datetime) -> dict[str, Any]:
+    """Archive declared holiday and IPO application dates, normally dozens of calendar rows and a small IPO set."""
+    started = time_module.monotonic()
+    calendar = await tdx_reference_files.fetch_trade_calendar()
+    ipo = await tdx_reference_files.fetch_ipo_calendar()
+    calendar_rows = [{**row, "observation_symbol": f"holiday:{row['calendar_date']}",
+                      "effective_at": _close_of(_tdx_date(row["calendar_date"])).isoformat(),
+                      "available_at": now.isoformat()} for row in calendar.rows]
+    ipo_rows = [{**row, "ts_code": row["symbol"],
+                 "effective_at": _close_of(_tdx_date(row["apply_date"])).isoformat(),
+                 "available_at": now.isoformat()} for row in ipo.rows]
+    stored_calendar = await deps.collector.persist_observations("tdx_public", "tdx_trade_calendar", calendar_rows)
+    stored_ipo = await deps.collector.persist_observations("tdx_public", "tdx_ipo_calendar", ipo_rows)
+    await deps.collector.record_health("tdx_public", "tdx_calendar_ipo", True, len(calendar_rows) + len(ipo_rows),
+                                       round((time_module.monotonic() - started) * 1000), None)
+    return {"calendar_rows": len(calendar_rows), "ipo_rows": len(ipo_rows),
+            "stored_calendar": stored_calendar, "stored_ipo": stored_ipo}
+
+
 RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitable[dict[str, Any]]]] = {
     "eastmoney_pools": job_eastmoney_pools, "eastmoney_change_summary": job_eastmoney_change_summary,
     "sentiment_close": job_sentiment_close, "fuyao_attention_close": job_fuyao_attention_close,
@@ -506,6 +574,8 @@ RUNNERS: dict[str, Callable[[ArchiveDeps, ArchiveState, date, datetime], Awaitab
     "tdx_mac_boards": job_tdx_mac_boards,
     "tdx_limit_pools": job_tdx_limit_pools,
     "tdx_host_probe": job_tdx_host_probe,
+    "tdx_stat_snapshot": job_tdx_stat_snapshot, "tdx_files_membership": job_tdx_files_membership,
+    "tdx_calendar_ipo": job_tdx_calendar_ipo,
 }
 
 

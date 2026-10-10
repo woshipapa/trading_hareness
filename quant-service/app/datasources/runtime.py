@@ -154,7 +154,8 @@ def collector_loops(
             archive, trading_day=trading_day,
             enabled=env_flags("PUBLIC_ARCHIVE", [job.key for job in post_close.JOBS], environ,
                               opt_in_keys={"tdx_security_list", "tdx_tipinfo", "tdx_gpcw", "tdx_index_bars",
-                                           "tdx_mac_boards", "tdx_limit_pools", "tdx_host_probe"})),
+                                           "tdx_mac_boards", "tdx_limit_pools", "tdx_host_probe", "tdx_stat_snapshot",
+                                           "tdx_files_membership", "tdx_calendar_ipo"})),
     }
 
 
