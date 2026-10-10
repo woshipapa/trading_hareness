@@ -1,11 +1,42 @@
-import struct
-import unittest
+import contextlib
 import hashlib
+import importlib.util
+import io
+import struct
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from unittest import mock
 
 from app.datasources.sources.tdx_fin_history import (
-    ManifestEntry, gpcw_field_unit, manifest_changes, normalize_report_period,
-    parse_gpcw_dat, parse_manifest, parse_tipinfo, ttm_from_cumulative, verify_manifest_entry,
+    ManifestEntry, TdxFinanceError, gpcw_field_unit, manifest_changes, normalize_report_period,
+    parse_gpcw_dat, parse_gpcw_zip, parse_manifest, parse_tipinfo, ttm_from_cumulative, verify_manifest_entry,
 )
+
+VERIFY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "verify-tdx-fin-history.py"
+
+# One GPCW .dat written out byte by byte: a 20-byte header (kind, report_date 20241231, count 1, unknown,
+# record_size 968 = 242 floats, reserved), one 11-byte index entry ("600519", flag, record offset 31) and the
+# record.  Nearly every float is 0.0; the non-zero ones are col 1 = 2.5, col 6 = 15.5, col 74 = 1,000,000.0,
+# col 96 = 250,000.0, col 238 = 8,000,000.0 and col 242 = 123,456.0.
+GPCW_DAT = bytes.fromhex(
+    "0100" "4fdb3401" "0100" "00000000" "c8030000" "00000000"
+    "363030353139" "00" "1f000000"
+    "00002040" + "00000000" * 4 + "00007841" + "00000000" * 67 + "00247449" + "00000000" * 21
+    + "00247448" + "00000000" * 141 + "0024f44a" + "00000000" * 3 + "0020f147"
+)
+
+
+def gpcw_zip(dat=GPCW_DAT, member="gpcw20241231.dat"):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(member, dat)
+    return buffer.getvalue()
+
+
+def manifest_line(filename, payload):
+    return f"{filename},{hashlib.md5(payload).hexdigest()},{len(payload)}\n"
 
 
 class TdxFinancialHistoryTests(unittest.TestCase):
@@ -45,6 +76,159 @@ class TdxFinancialHistoryTests(unittest.TestCase):
         self.assertEqual(ttm_from_cumulative(100, 80, 50), 130)
         # Different FY gives different TTM: FY2025=150 instead of FY2024=100
         self.assertEqual(ttm_from_cumulative(150, 80, 50), 180)
+
+
+class TdxFinanceErrorTests(unittest.TestCase):
+    def test_manifest_rejects_every_malformed_form(self):
+        md5 = "a" * 32
+        for label, text in {
+            "too few columns": f"gpcw20241231.zip,{md5}",
+            "too many columns": f"gpcw20241231.zip,{md5},10,x",
+            "file name": f"gpcw2024.zip,{md5},10",
+            "short md5": f"gpcw20241231.zip,{'a' * 31},10",
+            "non-hex md5": f"gpcw20241231.zip,{'g' * 32},10",
+            "size not a number": f"gpcw20241231.zip,{md5},ten",
+            "negative size": f"gpcw20241231.zip,{md5},-1",
+            "size over the cap": f"gpcw20241231.zip,{md5},{64 * 1024 * 1024 + 1}",
+            "empty": "",
+            "blank lines only": "\n  \n",
+            "non-ASCII byte": f"gpcw20241231.zip,{md5},10\u00e9",
+        }.items():
+            with self.subTest(label), self.assertRaises(TdxFinanceError):
+                parse_manifest(text)
+        with self.assertRaises(TdxFinanceError):
+            parse_manifest(b"gpcw20241231.zip," + b"a" * 32 + b",10\xff")
+
+    def test_manifest_accepts_crlf_blank_lines_and_either_md5_case(self):
+        text = f"gpcw20241231.zip,{'A' * 32},10\r\n\r\ngpcw20250630.zip, {'b' * 32} ,{64 * 1024 * 1024}\r\n"
+        self.assertEqual(parse_manifest(text), [ManifestEntry("gpcw20241231.zip", "a" * 32, 10),
+                                                ManifestEntry("gpcw20250630.zip", "b" * 32, 64 * 1024 * 1024)])
+        self.assertEqual(parse_manifest(text.encode("ascii")), parse_manifest(text))
+
+    def test_gpcw_dat_rejects_a_short_header_and_a_record_size_that_is_not_floats(self):
+        header = "0100" "4fdb3401" "0100" "00000000" "{}" "00000000"
+        for label, data in {
+            "short header": GPCW_DAT[:19],
+            "record size 0": bytes.fromhex(header.format("00000000")),
+            "record size 6": bytes.fromhex(header.format("06000000")),
+        }.items():
+            with self.subTest(label), self.assertRaises(TdxFinanceError):
+                parse_gpcw_dat(data)
+
+    def test_report_period_rejects_what_is_not_a_date(self):
+        for value in ("gpcw2024.zip", "", "gpcw20241331.zip", "gpcw20240230.zip", 2024):
+            with self.subTest(value=value), self.assertRaises(TdxFinanceError):
+                normalize_report_period(value)
+
+    def test_vendor_columns_have_no_unit_and_keep_their_raw_value(self):
+        self.assertEqual({col: gpcw_field_unit(col) for col in (1, 6, 8, 74, 96, 238, 242)}, {
+            1: "yuan/share", 6: "ratio", 8: "yuan", 74: "yuan", 96: "yuan", 238: "shares", 242: "count"})
+        for col in (9, 243, 314, 584):
+            self.assertIsNone(gpcw_field_unit(col), col)
+        # A record of 314 floats: all zero but col 314, a vendor column.
+        record_314 = bytes.fromhex(
+            "0100" "4fdb3401" "0100" "00000000" "e8040000" "00000000" "363030353139" "00" "1f000000"
+            + "00000000" * 313 + "0000e040")
+        row = parse_gpcw_dat(record_314)[0]
+        self.assertEqual((row["fields"]["col314"], row["field_units"]["col314"]), (7.0, None))
+        self.assertIsNone(row["field_units"]["col9"])
+        self.assertEqual(row["field_units"]["总股本"], "shares")
+
+
+class GpcwZipTests(unittest.TestCase):
+    def test_a_zip_with_one_dat_member_gives_its_rows_for_the_named_period(self):
+        rows = parse_gpcw_zip(gpcw_zip(), filename="gpcw20250630.zip")
+        self.assertEqual([(row["code"], row["report_period"], row["field_count"]) for row in rows],
+                         [("600519", "2025-06-30", 242)])
+
+    def test_bytes_that_are_not_a_zip_raise_the_typed_error(self):
+        with self.assertRaisesRegex(TdxFinanceError, "GPCW ZIP format error"):
+            parse_gpcw_zip(b"PK-this-is-not-a-zip")
+
+    def test_a_member_that_fails_its_crc_raises_the_typed_error(self):
+        data = bytearray(gpcw_zip())
+        data[data.index(b"PK\x03\x04") + 14] ^= 0xFF        # the stored CRC-32 in the local header
+        central = data.index(b"PK\x01\x02") + 16
+        data[central] ^= 0xFF                                # and in the central directory
+        with self.assertRaisesRegex(TdxFinanceError, "GPCW ZIP format error"):
+            parse_gpcw_zip(bytes(data))
+
+    def test_a_corrupt_deflate_stream_raises_the_typed_error(self):
+        data = bytearray(gpcw_zip())
+        data[30 + len("gpcw20241231.dat")] |= 0x06           # first deflate block type 11 is invalid
+        with self.assertRaisesRegex(TdxFinanceError, "GPCW ZIP format error"):
+            parse_gpcw_zip(bytes(data))
+
+    def test_a_zip_needs_exactly_one_dat_member(self):
+        for label, members in {
+            "none": {},
+            "only a text member": {"gpcw20241231.txt": b"x"},
+            "two data members": {"a.dat": GPCW_DAT, "b.dat": GPCW_DAT},
+        }.items():
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                for name, payload in members.items():
+                    archive.writestr(name, payload)
+            with self.subTest(label), self.assertRaisesRegex(TdxFinanceError, "exactly one .dat member"):
+                parse_gpcw_zip(buffer.getvalue(), filename="gpcw20241231.zip")
+
+    def test_size_caps_apply_to_the_zip_and_to_the_member(self):
+        with self.assertRaisesRegex(TdxFinanceError, "member exceeds size cap"):
+            parse_gpcw_zip(gpcw_zip(), max_uncompressed=len(GPCW_DAT) - 1)
+        self.assertEqual(len(parse_gpcw_zip(gpcw_zip(), max_uncompressed=len(GPCW_DAT))), 1)
+        payload = gpcw_zip()
+        with mock.patch("app.datasources.sources.tdx_fin_history.MAX_DOWNLOAD_BYTES", len(payload) - 1), \
+                self.assertRaisesRegex(TdxFinanceError, "exceeds download cap"):
+            parse_gpcw_zip(payload)
+        with mock.patch("app.datasources.sources.tdx_fin_history.MAX_DOWNLOAD_BYTES", len(payload)):
+            self.assertEqual(len(parse_gpcw_zip(payload)), 1)
+
+
+class VerifyCacheScriptTests(unittest.TestCase):
+    """scripts/verify-tdx-fin-history.py reads a local cache: a bad period is reported and skipped."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("verify_tdx_fin_history", VERIFY_SCRIPT)
+        cls.script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.script)
+
+    def run_script(self, manifest_text, cache_files):
+        with tempfile.TemporaryDirectory() as root:
+            manifest = Path(root) / "gpcw.txt"
+            manifest.write_text(manifest_text, encoding="ascii")
+            cache = Path(root) / "cache"
+            cache.mkdir()
+            for name, payload in cache_files.items():
+                (cache / name).write_bytes(payload)
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch("sys.argv", ["verify", str(manifest), str(cache)]), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = self.script.main()
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_period_that_cannot_be_read_is_skipped_and_the_next_one_is_verified(self):
+        good, bad_zip, other = gpcw_zip(), b"PK-this-is-not-a-zip", gpcw_zip(member="gpcw20250630.dat")
+        manifest = (manifest_line("gpcw20240630.zip", bad_zip) + manifest_line("gpcw20241231.zip", good)
+                    + "gpcw20250331.zip," + "0" * 32 + f",{len(other)}\n" + manifest_line("gpcw20250630.zip", other)
+                    + manifest_line("gpcw20250930.zip", b"never cached"))
+        code, out, err = self.run_script(manifest, {
+            "gpcw20240630.zip": bad_zip, "gpcw20241231.zip": good, "gpcw20250331.zip": other,
+            "gpcw20250630.zip": other, "gpcw20250930.zip": b""})
+        self.assertEqual(code, 0)
+        self.assertIn("gpcw20241231.zip: rows=1 fields=242\n", out)
+        self.assertIn("verified 2 periods", out)
+        self.assertIn("gpcw20240630.zip: unusable: GPCW ZIP format error", err)
+        self.assertIn("gpcw20250331.zip: manifest MD5/size mismatch", err)
+
+    def test_nothing_usable_fails_and_a_bad_manifest_is_reported(self):
+        bad_zip = b"PK-this-is-not-a-zip"
+        code, out, err = self.run_script(manifest_line("gpcw20240630.zip", bad_zip), {"gpcw20240630.zip": bad_zip})
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no usable GPCW rows", err)
+        code, _, err = self.run_script("not,a,manifest\n", {})
+        self.assertEqual(code, 2)
+        self.assertIn("manifest unusable: invalid GPCW manifest row", err)
 
 
 if __name__ == "__main__":

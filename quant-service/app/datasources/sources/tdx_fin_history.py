@@ -24,7 +24,6 @@ from . import tdx_protocol
 
 class TdxFinanceError(Exception):
     """Typed error for GPCW parsing and download issues."""
-    pass
 
 
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
@@ -74,15 +73,17 @@ def parse_manifest(data: str | bytes) -> list[ManifestEntry]:
             continue
         parts = [part.strip() for part in line.split(",")]
         if len(parts) != 3 or not re.fullmatch(r"gpcw\d{8}\.zip", parts[0], re.I):
-            raise ValueError(f"invalid GPCW manifest row: {line!r}")
+            raise TdxFinanceError(f"invalid GPCW manifest row: {line!r}")
         if not re.fullmatch(r"[0-9a-fA-F]{32}", parts[1]):
-            raise ValueError(f"invalid GPCW md5: {parts[1]!r}")
+            raise TdxFinanceError(f"invalid GPCW md5: {parts[1]!r}")
+        if not re.fullmatch(r"[0-9]+", parts[2]):
+            raise TdxFinanceError(f"invalid GPCW size: {parts[2]!r}")
         size = int(parts[2])
-        if size < 0 or size > MAX_DOWNLOAD_BYTES:
-            raise ValueError("manifest size exceeds bounded downloader limit")
+        if size > MAX_DOWNLOAD_BYTES:
+            raise TdxFinanceError("manifest size exceeds bounded downloader limit")
         entries.append(ManifestEntry(parts[0], parts[1].lower(), size))
     if not entries:
-        raise ValueError("empty GPCW manifest")
+        raise TdxFinanceError("empty GPCW manifest")
     return entries
 
 
@@ -104,19 +105,20 @@ def verify_manifest_entry(entry: ManifestEntry, payload: bytes) -> bool:
 def normalize_report_period(value: str | int) -> str:
     match = re.search(r"(\d{8})", str(value))
     if not match:
-        raise ValueError(f"invalid report period: {value!r}")
+        raise TdxFinanceError(f"invalid report period: {value!r}")
     raw = match.group(1)
     try:
         return date(int(raw[:4]), int(raw[4:6]), int(raw[6:])).isoformat()
     except ValueError as error:
-        raise ValueError(f"invalid report period: {value!r}") from error
+        raise TdxFinanceError(f"invalid report period: {value!r}") from error
 
 
 def gpcw_field_name(index: int) -> str:
     return GPCW_FIELD_NAMES.get(index, f"col{index}")
 
 
-def gpcw_field_unit(index: int) -> str:
+def gpcw_field_unit(index: int) -> str | None:
+    """The unit of a documented column; None for the vendor columns no source documents (they stay raw)."""
     if index in _SHARE_COLUMNS:
         return "shares"
     if index in _COUNT_COLUMNS:
@@ -125,7 +127,7 @@ def gpcw_field_unit(index: int) -> str:
         return "ratio"
     if index in _PER_SHARE_COLUMNS:
         return "yuan/share"
-    return "yuan"
+    return "yuan" if index in GPCW_FIELD_NAMES else None
 
 
 def parse_gpcw_dat(data: bytes, *, filename: str | None = None) -> list[dict[str, Any]]:
@@ -133,10 +135,10 @@ def parse_gpcw_dat(data: bytes, *, filename: str | None = None) -> list[dict[str
     header_size = struct.calcsize(_HEADER)
     item_size = struct.calcsize(_ITEM)
     if len(data) < header_size:
-        raise ValueError("short GPCW header")
+        raise TdxFinanceError("short GPCW header")
     _kind, report_date, count, _unknown, record_size, _reserved = struct.unpack_from(_HEADER, data)
     if record_size <= 0 or record_size % 4:
-        raise ValueError("invalid GPCW record size")
+        raise TdxFinanceError("invalid GPCW record size")
     field_count = record_size // 4
     report_period = normalize_report_period(filename or report_date)
     units = {gpcw_field_name(col): gpcw_field_unit(col) for col in range(1, field_count + 1)}

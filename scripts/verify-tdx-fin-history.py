@@ -6,11 +6,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
-from app.datasources.sources.tdx_fin_history import parse_gpcw_zip, parse_manifest, verify_manifest_entry  # noqa: E402
+from app.datasources.sources.tdx_fin_history import (  # noqa: E402
+    TdxFinanceError, parse_gpcw_zip, parse_manifest, verify_manifest_entry,
+)
 
 
 def main() -> int:
@@ -19,8 +20,8 @@ def main() -> int:
     parser.add_argument("cache", type=Path)
     args = parser.parse_args()
     try:
-        entries = parse_manifest(args.manifest.read_text(encoding="ascii"))
-    except (OSError, ValueError) as error:
+        entries = parse_manifest(args.manifest.read_bytes())
+    except (OSError, TdxFinanceError) as error:
         print(f"manifest unusable: {error}", file=sys.stderr)
         return 2
     usable = 0
@@ -34,7 +35,7 @@ def main() -> int:
                 print(f"{entry.filename}: manifest MD5/size mismatch", file=sys.stderr)
                 continue
             rows = parse_gpcw_zip(payload, filename=entry.filename)
-        except (OSError, ValueError, zipfile.BadZipFile) as error:
+        except (OSError, TdxFinanceError) as error:
             print(f"{entry.filename}: unusable: {error}", file=sys.stderr)
             continue
         if rows:
