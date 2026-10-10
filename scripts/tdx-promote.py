@@ -189,8 +189,10 @@ def run_check(args: argparse.Namespace) -> int:
     evidence = {
         "schema": SCHEMA, "source": args.source, "capability": args.capability, "params": args.params,
         "egress": args.egress, "catalog_status": bindings[args.source].status,
-        "checked_utc": datetime.now(timezone.utc).isoformat(), "agreement_spec": agreement, "probes": probes,
-        "comparison": comparison,
+        "checked_utc": datetime.now(timezone.utc).isoformat(), "agreement_spec": agreement,
+        "projections": {source: {"field_map": binding.spec.field_map, "unit_factors": binding.spec.unit_factors}
+                        for source, binding in bindings.items() if binding.spec},
+        "probes": probes, "comparison": comparison,
         "session": {"timezone": "Asia/Shanghai", "windows": "weekdays 09:30-11:30 and 13:00-15:00", "holidays": NO_HOLIDAYS,
                     "inside": inside},
         "verdicts": verdicts(args.egress, args.source, probes, comparison, inside),
