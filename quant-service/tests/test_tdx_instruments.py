@@ -1,7 +1,8 @@
 import struct
 import unittest
+from unittest.mock import patch
 
-from app.datasources.sources import tdx_instruments as ti
+from app.datasources.sources import tdx_instruments as ti, tdx_protocol
 
 
 class InstrumentTests(unittest.TestCase):
@@ -63,6 +64,158 @@ class InstrumentTests(unittest.TestCase):
         rows = ti.parse_tdxbjmore("44|920000|2|安徽凤凰|1|\n".encode("gbk"))
         self.assertEqual(rows[0]["source"], "zhb_tdxbjmore")
         self.assertEqual(rows[0]["name"], "安徽凤凰")
+
+    def test_bar_layout_for_instrument_types(self):
+        # ETF: stock layout
+        self.assertEqual(ti.bar_layout("etf"), "stock")
+        # Convertible bond: stock layout
+        self.assertEqual(ti.bar_layout("cb"), "stock")
+        # Beijing stock: stock layout
+        self.assertEqual(ti.bar_layout("stock_bj"), "stock")
+        # STAR: stock layout
+        self.assertEqual(ti.bar_layout("stock_star"), "stock")
+        # ChiNext: stock layout
+        self.assertEqual(ti.bar_layout("stock_chinext"), "stock")
+        # Main board: stock layout
+        self.assertEqual(ti.bar_layout("stock_main"), "stock")
+        # Index: index layout
+        self.assertEqual(ti.bar_layout("index"), "index")
+        # Board: index layout
+        self.assertEqual(ti.bar_layout("board"), "index")
+
+    def test_fetch_security_list_mocked_sections(self):
+        """Test fetch_security_list coverage and warning calculations."""
+        # Mock sweep_sync to return fake results
+        fake_sweep_result = {
+            "host": "127.0.0.1:7709",
+            "profile": "login_one",
+            "sections": {
+                "sz": {
+                    "result": [
+                        {"market": 0, "code": "000001", "name": "平安", "instrument_type": "stock_main",
+                         "list_source": "server_list", "source_host": "127.0.0.1:7709"}
+                    ],
+                    "rows": 1,
+                },
+                "sh": {
+                    "result": [
+                        {"market": 1, "code": "600519", "name": "贵州茅台", "instrument_type": "stock_main",
+                         "list_source": "server_list", "source_host": "127.0.0.1:7709"}
+                    ],
+                    "rows": 1,
+                },
+                "bj_count": {
+                    "result": 10,
+                    "rows": 10,
+                },
+                "zhb": {
+                    "result": [
+                        {"market": 2, "code": "920000", "name": "测试", "instrument_type": "stock_bj",
+                         "list_source": "zhb_tdxbjmore", "source_host": "127.0.0.1:7709"}
+                    ],
+                    "rows": 1,
+                },
+            }
+        }
+
+        with patch.object(tdx_protocol, 'sweep_sync', return_value=fake_sweep_result):
+            evidence = ti.fetch_security_list()
+
+        # Should have 3 rows (1 SZ + 1 SH + 1 BJ)
+        self.assertEqual(len(evidence.rows), 3)
+
+        # Coverage should be 3 / (1 + 1 + 10) = 0.25
+        self.assertAlmostEqual(evidence.coverage, 0.25)
+
+        # Should have warning about 9 missing BJ rows (10 - 1)
+        self.assertTrue(any("bj_missing=9" in w for w in evidence.warnings))
+
+        # Should have host info warning
+        self.assertTrue(any("host=127.0.0.1:7709/login_one" in w for w in evidence.warnings))
+
+    def test_fetch_security_list_with_error_sections(self):
+        """Test fetch_security_list handles section errors gracefully."""
+        fake_sweep_result = {
+            "host": "127.0.0.1:7709",
+            "profile": "login_one",
+            "sections": {
+                "sz": {
+                    "result": [
+                        {"market": 0, "code": "000001", "name": "平安", "instrument_type": "stock_main",
+                         "list_source": "server_list", "source_host": "127.0.0.1:7709"}
+                    ],
+                    "rows": 1,
+                },
+                "sh": {
+                    "error": "Connection timeout"
+                },
+                "bj_count": {
+                    "result": 5,
+                    "rows": 5,
+                },
+                "zhb": {
+                    "result": [],
+                    "rows": 0,
+                },
+            }
+        }
+
+        with patch.object(tdx_protocol, 'sweep_sync', return_value=fake_sweep_result):
+            evidence = ti.fetch_security_list()
+
+        # Should have 1 row (only SZ succeeded)
+        self.assertEqual(len(evidence.rows), 1)
+
+        # Coverage should be 1 / (1 + 0 + 5) = 1/6
+        self.assertAlmostEqual(evidence.coverage, 1/6, places=5)
+
+        # Should have error warning
+        self.assertTrue(any("sh:" in w and "error" in w for w in evidence.warnings))
+
+    def test_instruments_from_security_list(self):
+        """Test instruments_from_security_list filters stocks and formats correctly."""
+        fake_sweep_result = {
+            "host": "127.0.0.1:7709",
+            "profile": "login_one",
+            "sections": {
+                "sz": {"result": [
+                    {"market": 0, "code": "000001", "name": "平安", "instrument_type": "stock_main", "is_st": False,
+                     "list_source": "server_list", "source_host": "127.0.0.1:7709"},
+                    {"market": 0, "code": "000099", "name": "*ST浪潮", "instrument_type": "stock_main", "is_st": True,
+                     "list_source": "server_list", "source_host": "127.0.0.1:7709"},
+                    {"market": 0, "code": "127045", "name": "可转债", "instrument_type": "cb", "is_st": False,
+                     "list_source": "server_list", "source_host": "127.0.0.1:7709"},
+                ], "rows": 3},
+                "sh": {"result": [
+                    {"market": 1, "code": "999999", "name": "指数", "instrument_type": "index", "is_st": False,
+                     "list_source": "server_list", "source_host": "127.0.0.1:7709"},
+                ], "rows": 1},
+                "bj_count": {"result": 0, "rows": 0},
+                "zhb": {"result": [], "rows": 0},
+            }
+        }
+
+        with patch.object(tdx_protocol, 'sweep_sync', return_value=fake_sweep_result):
+            instruments = ti.instruments_from_security_list()
+
+        # Should have 3 instruments (3 stocks, no CB, no index)
+        self.assertEqual(len(instruments), 3)
+
+        # Check symbols and st flags
+        symbols = {i["symbol"] for i in instruments}
+        self.assertIn("000001.SZ", symbols)
+        self.assertIn("000099.SZ", symbols)
+
+        # Check is_st flag
+        for inst in instruments:
+            if inst["symbol"] == "000099.SZ":
+                self.assertTrue(inst["is_st"])
+            else:
+                self.assertFalse(inst["is_st"])
+
+        # Check list_date is None
+        for inst in instruments:
+            self.assertIsNone(inst["list_date"])
 
 
 if __name__ == "__main__":
