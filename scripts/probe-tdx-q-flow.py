@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""Probe TDX stock capital-flow fields against ticks and public references."""
+"""Probe TDX stock capital-flow fields against ticks and public references.
+
+Without options: the one-shot comparison of the 2026-10-09 session. With --samples N: N intraday samples, --interval
+seconds apart, of the MAC fields 0x90-0x96 and the flow fields next to the Eastmoney per-stock fund flow, each
+block with the time it was received; the numbers are recorded as they came, with no reading of them.
+"""
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 import socket
 import struct
 import subprocess
 import sys
+import time
 import urllib.parse
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
-from app.datasources.sources import tdx_protocol
+from app.datasources.sources import tdx_mac, tdx_mac_fields, tdx_protocol  # noqa: E402
 
 MAC_HOST = ("121.36.248.138", 7709)
 LEGACY_HOST = ("117.34.114.13", 7709)
@@ -27,6 +33,14 @@ FIELDS = {
     108: "field_0x6c", 109: "field_0x6d", 110: "field_0x6e",
     111: "field_0x6f", 112: "field_0x70", 113: "field_0x71",
     114: "field_0x72", 115: "ddx", 116: "ddy", 117: "ddz", 118: "ddf",
+}
+#: 0x90-0x96, the registry's change_at_1000 ... change_at_1430.
+SAMPLED_BITS = tuple(range(0x90, 0x97))
+#: The public per-stock fund-flow reference of the samples, read through curl from a residential egress (eastmoney()).
+REFERENCE = {
+    "source": "Eastmoney push2 ulist.np/get, fltt=2, invt=2",
+    "fields": {"f62": "main net inflow of the session so far, yuan (the unit docs/archive/tdx-q-flow.md compares with)",
+               "f184": "main_net_inflow_ratio of the app's reader; its unit is not confirmed by repo evidence"},
 }
 
 
@@ -79,8 +93,7 @@ class LoginOneClient(tdx_protocol.TdxClient):
         return self
 
 
-def batch_request() -> bytes:
-    bits = tuple(FIELDS)
+def batch_request(bits: tuple[int, ...] = tuple(FIELDS)) -> bytes:
     payload = bytearray(bitmap(bits)) + struct.pack("<H", len(SYMBOLS))
     for symbol in SYMBOLS:
         market, code = market_code(symbol)
@@ -141,10 +154,59 @@ def eastmoney() -> list[dict[str, object]]:
     return rows
 
 
+def capital_flows(client: MacClient) -> dict[str, object]:
+    return {symbol: json.loads(client.exchange(flow_request(symbol))[27:].decode("gbk")) for symbol in SYMBOLS}
+
+
+def received() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def take_sample(client: MacClient) -> dict[str, object]:
+    """The MAC batch (flow fields and 0x90-0x96), the 0x1218 flows and the Eastmoney reference, each when received."""
+    bits = (*FIELDS, *SAMPLED_BITS)
+    body = client.exchange(batch_request(bits))
+    batch_at = received()
+    if body[:20] != bitmap(bits):
+        raise tdx_mac.TdxMacError("the MAC host answered another field bitmap than the one requested")
+    flows = capital_flows(client)
+    flows_at = received()
+    reference = eastmoney()
+    return {"mac_0x122b": {"received_at": batch_at, "rows": tdx_mac_fields.decode_dynamic_response(body)},
+            "flow_0x1218": {"received_at": flows_at, "rows": flows},
+            "eastmoney": {"received_at": received(), "rows": reference}}
+
+
+def emit(result: dict[str, object], output: Path | None) -> None:
+    text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    if output:
+        output.write_text(text, encoding="utf-8")
+    else:
+        print(text, end="")
+
+
+def sampling(count: int, interval: float, output: Path | None) -> None:
+    """``count`` samples, a new MAC connection for each; with ``output`` the file is rewritten after every sample."""
+    samples: list[dict[str, object]] = []
+    result = {"mode": "samples", "mac_host": f"{MAC_HOST[0]}:{MAC_HOST[1]}", "interval_s": interval,
+              "symbols": list(SYMBOLS),
+              "bits": {f"0x{bit:02x}": tdx_mac_fields.FIELD_BY_BIT[bit].name for bit in (*FIELDS, *SAMPLED_BITS)},
+              "reference": REFERENCE, "samples": samples}
+    began = time.monotonic()
+    for number in range(count):
+        time.sleep(max(0.0, began + number * interval - time.monotonic()))
+        with MacClient() as client:
+            samples.append(take_sample(client))
+        if output:
+            emit(result, output)
+    if not output:
+        emit(result, None)
+
+
 def run() -> dict[str, object]:
     with MacClient() as client:
         fields = decode_batch(client.exchange(batch_request()))
-        flows = {symbol: json.loads(client.exchange(flow_request(symbol))[27:].decode("gbk")) for symbol in SYMBOLS}
+        flows = capital_flows(client)
     ticks = {}
     with LoginOneClient(*LEGACY_HOST, timeout_seconds=5) as client:
         for symbol in SYMBOLS:
@@ -155,13 +217,19 @@ def run() -> dict[str, object]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--fixture", action="store_true")
+    parser.add_argument("--samples", type=int, default=0, help="take this many intraday samples instead of the one-shot run")
+    parser.add_argument("--interval", type=float, default=60.0, help="seconds between the starts of two samples")
+    parser.add_argument("--output", type=Path, help="write the JSON here instead of stdout; rewritten after every sample")
     args = parser.parse_args()
+    if args.samples:
+        sampling(args.samples, args.interval, args.output)
+        return 0
     result = ({"fields": decode_batch(bitmap(tuple(FIELDS)) + struct.pack("<IH", 1, 1)
               + struct.pack("<H22s44s", 0, b"000001", b"fixture") + b"\0" * (len(FIELDS) * 4))}
               if args.fixture else run())
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    emit(result, args.output)
     return 0 if result["fields"] else 1
 
 
