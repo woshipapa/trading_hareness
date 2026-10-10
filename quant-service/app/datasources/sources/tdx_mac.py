@@ -263,22 +263,29 @@ def parse_board_members(body: bytes, *, quotes: bool = False) -> list[dict[str, 
 
 
 def parse_batch_quotes(body: bytes, requested: Sequence[tuple[int, str]]) -> list[dict[str, Any]]:
-    """Decode a 0x122b answer and check it by position against ``requested`` (delta-1 R1).
+    """Decode a 0x122b answer and check it against ``requested`` (delta-1 R1).
 
-    The server answers one row per requested symbol, in order; a symbol it does not know can come back as a
-    placeholder row for another code.  A row count that differs raises; a row whose market and code differ from
-    its position is dropped and logged as ``code_mismatch``."""
+    The server answers in request order and leaves out the codes it does not list: on 2026-10-10 it
+    returned 57 rows for 600000-600079.SH, every missing code a delisted one. A row that is not a requested
+    symbol still to come (another code, a repeat, or out of order) is dropped and logged as
+    ``code_mismatch``. An answer with rows of which none was requested raises, so the next host is tried.
+    The adapters report the symbols left without a row."""
     from .tdx_mac_fields import decode_dynamic_response
 
     rows = decode_dynamic_response(body)
-    if len(rows) != len(requested):
-        raise TdxMacError(f"quote answer has {len(rows)} rows for {len(requested)} requested symbols")
-    kept = []
-    for wanted, row in zip(requested, rows):
-        if (row["market"], row["symbol"]) == wanted:
-            kept.append(row)
-        else:
-            _LOGGER.warning("code_mismatch requested=%s returned=%s", wanted, (row["market"], row["symbol"]))
+    position = {wanted: index for index, wanted in enumerate(requested)}
+    kept: list[dict[str, Any]] = []
+    following = 0
+    for row in rows:
+        returned = (row["market"], row["symbol"])
+        index = position.get(returned)
+        if index is None or index < following:
+            _LOGGER.warning("code_mismatch returned=%s is not a requested symbol still to come", returned)
+            continue
+        kept.append(row)
+        following = index + 1
+    if rows and not kept:
+        raise TdxMacError(f"none of the {len(rows)} quote rows answers a requested symbol")
     return kept
 
 
@@ -514,16 +521,31 @@ def _minute_bar_row(symbol: str, row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _requested_stocks(symbols: Sequence[str]) -> list[tuple[int, str]]:
+    if not symbols:
+        raise ValueError("symbols must not be empty")
+    return [tdx_protocol.market_code(symbol) for symbol in symbols]
+
+
+def _batch_evidence(rows: list[dict[str, Any]], stocks: Sequence[tuple[int, str]], host: str) -> CapabilityEvidence:
+    """Coverage is the share of requested symbols that came back; the ones left out are named."""
+    returned = {row["symbol"] for row in rows}
+    missing = [symbol for symbol in (tdx_protocol.symbol(*stock) for stock in stocks) if symbol not in returned]
+    warnings = (f"missing_symbols={len(missing)}: {', '.join(missing[:10])}{' ...' if len(missing) > 10 else ''}",
+                ) if missing else ()
+    return tdx_protocol.observed_evidence(rows, host, coverage=len(rows) / len(stocks), warnings=warnings)
+
+
 async def fetch_watch_snapshot(*, symbols: Sequence[str]) -> CapabilityEvidence:
-    stocks = [tdx_protocol.market_code(symbol) for symbol in symbols]
+    stocks = _requested_stocks(symbols)
     rows, host = await call(lambda client: [_quote_row(row) for row in client.batch_quotes(stocks)])
-    return tdx_protocol.observed_evidence(rows, host)
+    return _batch_evidence(rows, stocks, host)
 
 
 async def fetch_limit_prices(*, symbols: Sequence[str]) -> CapabilityEvidence:
-    stocks = [tdx_protocol.market_code(symbol) for symbol in symbols]
+    stocks = _requested_stocks(symbols)
     rows, host = await call(lambda client: [_limit_row(row) for row in client.batch_quotes(stocks, LIMITS_BITMAP)])
-    return tdx_protocol.observed_evidence(rows, host)
+    return _batch_evidence(rows, stocks, host)
 
 
 async def fetch_board_catalog() -> CapabilityEvidence:

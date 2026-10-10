@@ -394,10 +394,25 @@ class MacWatchSnapshotTests(unittest.TestCase):
         self.assertEqual([len(requested_stocks(request)) for request in client.requests], [80, 1])
         self.assertEqual([row["symbol"] for row in evidence.rows], symbols)
 
-    def test_a_count_mismatch_raises(self):
+    def test_codes_the_server_leaves_out_are_reported_missing(self):
+        # Live 2026-10-10: 600000-600079.SH came back as 57 rows in request order, the delisted codes left out.
         client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: stocks[:-1])})
-        with self.assertRaisesRegex(tdx_mac.TdxMacError, "1 rows for 2 requested"):
-            self.fetch(client, ["000001.SZ", "600519.SH"])
+        evidence = self.fetch(client, ["000001.SZ", "600519.SH"])
+        self.assertEqual([row["symbol"] for row in evidence.rows], ["000001.SZ"])
+        self.assertEqual(evidence.coverage, 0.5)
+        self.assertIn("missing_symbols=1: 600519.SH", evidence.warnings)
+
+    def test_an_answer_that_leaves_every_code_out_is_empty_not_an_error(self):
+        client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: [])})
+        evidence = self.fetch(client, ["600001.SH", "600002.SH"])
+        self.assertEqual((evidence.rows, evidence.coverage), ([], 0.0))
+        self.assertIn("missing_symbols=2: 600001.SH, 600002.SH", evidence.warnings)
+
+    def test_no_symbols_is_refused_before_any_network_call(self):
+        with mock.patch.object(tdx_mac, "call", mock.AsyncMock(side_effect=AssertionError("network"))):
+            for adapter in (tdx_mac.fetch_watch_snapshot, tdx_mac.fetch_limit_prices):
+                with self.assertRaisesRegex(ValueError, "must not be empty"):
+                    asyncio.run(adapter(symbols=[]))
 
     def test_a_row_for_another_code_is_dropped_by_position_and_logged(self):
         # The placeholder repeats the code requested at position 1; a lookup by code would keep it.
@@ -405,19 +420,25 @@ class MacWatchSnapshotTests(unittest.TestCase):
         with self.assertLogs("app.datasources.sources.tdx_mac", "WARNING") as logs:
             evidence = self.fetch(client, ["920000.BJ", "600519.SH"])
         self.assertEqual([row["symbol"] for row in evidence.rows], ["600519.SH"])
-        self.assertIn("code_mismatch requested=(2, '920000') returned=(1, '600519')", logs.output[0])
+        self.assertIn("code_mismatch returned=(1, '600519') is not a requested symbol still to come", logs.output[0])
+        self.assertEqual(evidence.coverage, 0.5)
+        self.assertIn("missing_symbols=1: 920000.BJ", evidence.warnings)
 
-    def test_a_row_with_the_requested_code_under_another_market_is_dropped(self):
+    def test_an_answer_with_rows_but_none_requested_fails_over(self):
+        # The requested code under another market: the host answered for a different security.
         client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: [(1, stocks[0][1])])})
         with self.assertLogs("app.datasources.sources.tdx_mac", "WARNING") as logs:
-            evidence = self.fetch(client, ["920000.BJ"])
-        self.assertEqual(evidence.rows, [])
-        self.assertIn("requested=(2, '920000') returned=(1, '920000')", logs.output[0])
+            with self.assertRaisesRegex(tdx_mac.TdxMacError, "none of the 1 quote rows answers a requested symbol"):
+                self.fetch(client, ["920000.BJ"])
+        self.assertIn("returned=(1, '920000')", logs.output[0])
 
-    def test_an_extra_row_is_a_count_mismatch_too(self):
+    def test_a_row_for_a_code_not_requested_is_dropped(self):
         client = FakeMacClient({tdx_mac.OP_BATCH_QUOTES: quote_answer(answer_for=lambda stocks: stocks + [(1, "600519")])})
-        with self.assertRaisesRegex(tdx_mac.TdxMacError, "3 rows for 2 requested"):
-            self.fetch(client, ["000001.SZ", "000002.SZ"])
+        with self.assertLogs("app.datasources.sources.tdx_mac", "WARNING") as logs:
+            evidence = self.fetch(client, ["000001.SZ", "000002.SZ"])
+        self.assertEqual([row["symbol"] for row in evidence.rows], ["000001.SZ", "000002.SZ"])
+        self.assertEqual((evidence.coverage, evidence.warnings), (1.0, ("tdx_host=mac-host:7709",)))
+        self.assertIn("returned=(1, '600519')", logs.output[0])
 
     def test_a_symbol_whose_code_is_not_six_digits_raises_before_any_network_call(self):
         for symbol in ("1.SZ", "ABCDEF.SH", "0000012.SZ", "000001", "000001.XX"):
