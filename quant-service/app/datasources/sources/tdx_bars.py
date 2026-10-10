@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -62,15 +63,8 @@ async def fetch_index_daily(*, symbol: str, count: int) -> CapabilityEvidence:
 
 async def fetch_index_breadth(*, symbol: str, count: int) -> CapabilityEvidence:
     evidence = await _fetch_index_bars(symbol, count)
-    return CapabilityEvidence(
-        [{key: row[key] for key in ("symbol", "trade_date", "up_count", "down_count")} for row in evidence.rows],
-        coverage=evidence.coverage,
-        effective_at_min=evidence.effective_at_min,
-        effective_at_max=evidence.effective_at_max,
-        available_at_min=evidence.available_at_min,
-        available_at_max=evidence.available_at_max,
-        warnings=evidence.warnings,
-    )
+    return replace(evidence, rows=[{key: row[key] for key in ("symbol", "trade_date", "up_count", "down_count")}
+                                   for row in evidence.rows])
 
 
 def _normalize_bar(symbol: str, row: dict[str, Any], *, minute: bool) -> dict[str, Any]:
