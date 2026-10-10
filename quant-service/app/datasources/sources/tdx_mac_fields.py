@@ -15,6 +15,7 @@ from typing import Any, Iterable, Sequence
 
 from .tdx_mac import (
     DEFAULT_BITMAP,
+    TdxMacError,
     _fixed,
     _text,
     build_request,
@@ -195,11 +196,11 @@ _BASIC = {
     ),
     21: ("lot_size_info", "uint32", "", None, "low", NO_REFERENCE, ()),
     22: (
-        "board_strength",
+        "bit_0x16",
         "int32",
         "count",
-        "board_strength",
-        "medium",
+        None,
+        "unknown",
         NO_REFERENCE,
         (),
     ),
@@ -226,11 +227,11 @@ _BASIC = {
     ),
     28: ("industry", "uint32", "code", "industry", "medium", NO_REFERENCE, ()),
     29: (
-        "industry_change_up",
+        "bit_0x1d",
         "float32",
         "percent",
-        "industry_change_up",
-        "low",
+        None,
+        "unknown",
         NO_REFERENCE,
         (),
     ),
@@ -259,7 +260,7 @@ _BASIC = {
         "limit_up",
         "high",
         MATCH,
-        ("limits.ladder", "limits.stock_anomaly_reason"),
+        ("limits.ladder", "limits.stock_anomaly_reason", "limits.prices"),
     ),
     33: (
         "sell_price_limit",
@@ -268,7 +269,7 @@ _BASIC = {
         "limit_down",
         "high",
         MATCH,
-        ("limits.ladder", "limits.stock_anomaly_reason"),
+        ("limits.ladder", "limits.stock_anomaly_reason", "limits.prices"),
     ),
     34: (
         "price_decimal_info",
@@ -325,7 +326,7 @@ _BASIC = {
     ),
     48: ("pe_ttm", "float32", "ratio", "pe_ttm", "medium", NO_REFERENCE, ()),
     49: ("pe_static", "float32", "ratio", "pe_static", "medium", NO_REFERENCE, ()),
-    55: ("index_metric", "float32", "", "index_metric", "low", NO_REFERENCE, ()),
+    55: ("index_metric_buy_count", "float32", "", "index_metric_buy_count", "low", NO_REFERENCE, ()),
     56: (
         "main_net_amount",
         "float32",
@@ -344,7 +345,7 @@ _BASIC = {
         NO_REFERENCE,
         (),
     ),
-    58: ("index_metric", "float32", "", "index_metric", "low", NO_REFERENCE, ()),
+    58: ("index_metric_sell_count", "float32", "", "index_metric_sell_count", "low", NO_REFERENCE, ()),
     60: (
         "ytd_pct",
         "float32",
@@ -508,69 +509,6 @@ _BASIC = {
         NO_REFERENCE,
         ("flow.stock_daily",),
     ),
-    108: (
-        "main_net_ratio",
-        "float32",
-        "percent",
-        "main_net_ratio",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
-    109: (
-        "retail_net_amount",
-        "float32",
-        "yuan",
-        "retail_net_amount",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
-    110: (
-        "main_net_5m_amount",
-        "float32",
-        "yuan",
-        "main_net_5m_amount",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
-    111: (
-        "main_net_3d_amount",
-        "float32",
-        "yuan",
-        "main_net_3d_amount",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
-    112: (
-        "main_net_5d_amount",
-        "float32",
-        "yuan",
-        "main_net_5d_amount",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
-    113: (
-        "main_net_10d_amount",
-        "float32",
-        "yuan",
-        "main_net_10d_amount",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
-    114: (
-        "main_buy_net_amount",
-        "float32",
-        "yuan",
-        "main_buy_net_amount",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
     115: (
         "ddx",
         "float32",
@@ -580,43 +518,16 @@ _BASIC = {
         NO_REFERENCE,
         ("flow.stock_daily",),
     ),
-    116: (
-        "ddy",
-        "float32",
-        "ratio",
-        "ddy",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
-    117: (
-        "ddz",
-        "float32",
-        "ratio",
-        "ddz",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
-    118: (
-        "ddf",
-        "float32",
-        "ratio",
-        "ddf",
-        "medium",
-        NO_REFERENCE,
-        ("flow.stock_daily",),
-    ),
     119: ("stock_flag_a", "float32", "flag", "stock_flag_a", "low", NO_REFERENCE, ()),
     120: ("stock_flag_b", "float32", "flag", "stock_flag_b", "low", NO_REFERENCE, ()),
     122: (
-        "auction_vol_ratio",
+        "bit_0x7a",
         "float32",
         "ratio",
-        "auction_vol_ratio",
-        "medium",
+        None,
+        "unknown",
         NO_REFERENCE,
-        ("auction.open_snapshot",),
+        (),
     ),
     123: ("prev_amount", "float32", "yuan", "prev_amount", "medium", NO_REFERENCE, ()),
     125: (
@@ -766,6 +677,16 @@ for _bit in (
     84,
     85,
     86,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    116,
+    117,
+    118,
 ):
     _KNOWN.pop(_bit, None)
 
@@ -781,6 +702,10 @@ _UNKNOWN_FORMATS = {
     62: "uint32",
     63: "uint32",
     **{bit: "float32" for bit in range(76, 87)},
+    **{bit: "float32" for bit in range(108, 115)},
+    116: "float32",
+    117: "float32",
+    118: "float32",
 }
 MAC_FIELDS: tuple[MACField, ...] = tuple(
     _KNOWN.get(
@@ -855,7 +780,7 @@ def decode_dynamic_row(
 def decode_dynamic_response(body: bytes) -> list[dict[str, Any]]:
     """Decode the common 20-byte bitmap/total/count response envelope."""
     if len(body) < 26:
-        return []
+        raise TdxMacError(f"truncated response envelope: need 26 bytes, got {len(body)}")
     bitmap, total, count = (
         body[:20],
         struct.unpack_from("<I", body, 20)[0],
@@ -863,10 +788,13 @@ def decode_dynamic_response(body: bytes) -> list[dict[str, Any]]:
     )
     row_size = 68 + 4 * len(active_fields(bitmap))
     rows: list[dict[str, Any]] = []
+    expected_size = 26 + count * row_size
+    if len(body) < expected_size:
+        raise TdxMacError(f"truncated response: need {expected_size} bytes, got {len(body)}")
+    if len(body) > expected_size:
+        raise TdxMacError(f"trailing bytes in response: got {len(body)}, expected {expected_size}")
     for index in range(count):
         start = 26 + index * row_size
-        if start + row_size > len(body):
-            break
         row = {
             "market": struct.unpack_from("<H", body, start)[0],
             "symbol": _text(body[start + 2 : start + 24]),
