@@ -10,9 +10,6 @@ from . import tdx_protocol
 from .tdx_protocol import _code
 
 
-KMSG_HEARTBEAT = 0x0004
-KMSG_PING = 0x0015
-KMSG_INDEXMOMENTUM = 0x051C
 KMSG_INDEXINFO = 0x051D
 KMSG_QUOTESLIST = 0x054B
 
@@ -40,7 +37,11 @@ QUOTE_SORT_TYPES = {
     "amount": 10,
     "last_volume": 11,
     "change": 12,
+    "turnover": 13,  # usable sort code (delta-3 Q7)
     "change_pct": 14,
+    "amplitude": 15,  # usable sort code (delta-3 Q7)
+    "volume_ratio": 16,  # usable sort code (delta-3 Q7)
+    "speed": 17,  # usable sort code (delta-3 Q7)
 }
 
 
@@ -70,6 +71,8 @@ def _parse_quote_item(data: bytes, pos: int) -> tuple[dict[str, Any], int]:
     neg_price, pos = tdx_protocol.decode_price(data, pos)
     volume, pos = tdx_protocol.decode_price(data, pos)
     current_volume, pos = tdx_protocol.decode_price(data, pos)
+    # Amount is IEEE float32 in 0x054b, not the custom decode_volume format used in parse_quotes (finding 8).
+    # Test fixture quote_row confirms: struct.pack("<f", 12.5)
     amount = struct.unpack_from("<f", data, pos)[0]
     pos += 4
     inner, pos = tdx_protocol.decode_price(data, pos)
@@ -126,32 +129,44 @@ def _parse_quote_item(data: bytes, pos: int) -> tuple[dict[str, Any], int]:
     }, pos
 
 
-def parse_quotes_list(body: bytes) -> list[dict[str, Any]]:
+def parse_quotes_list(body: bytes) -> tuple[list[dict[str, Any]], int]:
     if len(body) < 4:
         raise tdx_protocol.TdxProtocolError("truncated 0x054b response header")
     count = struct.unpack_from("<H", body, 2)[0]
     pos = 4
     rows = []
+    no_trade_rows = 0
     try:
         for _ in range(count):
             row, pos = _parse_quote_item(body, pos)
-            rows.append(row)
+            # Drop rows with price ≤ 0 (no trade: suspended or pre-open); count them (finding 3)
+            if row["price"] <= 0:
+                no_trade_rows += 1
+            else:
+                rows.append(row)
     except (IndexError, UnicodeDecodeError, struct.error) as error:
         raise tdx_protocol.TdxProtocolError("truncated 0x054b quote row") from error
-    return rows
+    return rows, no_trade_rows
 
 
 def build_index_info_request(market: int, code: str) -> bytes:
     return _header(KMSG_INDEXINFO, struct.pack("<H6sI", market, _code(code), 0))
 
 
-def parse_index_info(body: bytes) -> dict[str, Any]:
+def parse_index_info(body: bytes, request_market: int | None = None, request_code: str | None = None) -> dict[str, Any]:
     if len(body) < 16:
         raise tdx_protocol.TdxProtocolError("truncated 0x051d response header")
     try:
         order_count = struct.unpack_from("<I", body, 0)[0]
         market = body[4]
         code = body[5:11].decode("ascii")
+        # R1 echo check: verify the response matches the request (delta-1c)
+        if request_market is not None and request_code is not None:
+            if market != request_market or code != request_code:
+                raise tdx_protocol.TdxProtocolError(
+                    f"code_mismatch requested=(market={request_market}, code={request_code}) "
+                    f"returned=(market={market}, code={code})"
+                )
         active = struct.unpack_from("<H", body, 11)[0]
         pos = 13
         close, pos = tdx_protocol.decode_price(body, pos)
@@ -206,91 +221,65 @@ def parse_index_info(body: bytes) -> dict[str, Any]:
     }
 
 
-def build_index_momentum_request(market: int, code: str) -> bytes:
-    return _header(KMSG_INDEXMOMENTUM, struct.pack("<H6s", market, _code(code)))
-
-
-def parse_index_momentum(body: bytes) -> list[int]:
-    if len(body) < 2:
-        raise tdx_protocol.TdxProtocolError("truncated 0x051c response header")
-    count = struct.unpack_from("<H", body, 0)[0]
-    pos, total = 2, 0
-    values = []
-    try:
-        for _ in range(count):
-            delta, pos = tdx_protocol.decode_price(body, pos)
-            total += delta
-            values.append(total)
-    except IndexError as error:
-        raise tdx_protocol.TdxProtocolError("truncated 0x051c response body") from error
-    return values
-
-
-def _all_a_snapshot(client: tdx_protocol.TdxClient) -> list[dict[str, Any]]:
+def _all_a_snapshot(client: tdx_protocol.TdxClient) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    import math
     rows: list[dict[str, Any]] = []
-    while True:
+    warnings: dict[str, Any] = {}
+    total_no_trade = 0
+    # Cap loop at ceil(5578 / 80) + 1 = 71 pages (finding 4, delta-2 D1)
+    max_pages = 71
+    page_count = 0
+    while page_count < max_pages:
         request = build_quotes_list_request(QUOTE_CATEGORIES["all_a"], QUOTE_SORT_TYPES["code"], len(rows))
-        page = parse_quotes_list(client._exchange(request))
+        page, no_trade_count = parse_quotes_list(client._exchange(request))
         rows.extend(page)
+        total_no_trade += no_trade_count
+        page_count += 1
         if len(page) < RANKING_PAGE_SIZE:
-            return rows
+            break
+    if page_count >= max_pages:
+        raise tdx_protocol.TdxProtocolError(f"0x054b all_a snapshot exceeded page cap {max_pages}")
+    if total_no_trade > 0:
+        warnings["no_trade_rows"] = total_no_trade
+    return rows, warnings
 
 
 async def fetch_all_a_snapshot() -> CapabilityEvidence:
-    rows, host = await tdx_protocol.call(_all_a_snapshot, handshake_profile="login_one")
-    return CapabilityEvidence(rows, coverage=1.0, warnings=(f"tdx_host={host}",))
+    result, host = await tdx_protocol.call(_all_a_snapshot, handshake_profile="login_one")
+    rows, no_trade_count = result
+    warnings = [f"tdx_host={host}"]
+    if no_trade_count > 0:
+        warnings.append(f"no_trade_rows={no_trade_count}")
+    # Coverage is None until security list (I1) gives denominator (finding 2)
+    return CapabilityEvidence(rows, coverage=None, warnings=tuple(warnings))
 
 
-async def fetch_index_overview(symbol: str = "000001.SH") -> CapabilityEvidence:
+async def fetch_index_overview(symbol: str = "999999.SH") -> CapabilityEvidence:
     market, code = tdx_protocol.market_code(symbol)
-    row, host = await tdx_protocol.call(
-        lambda client: parse_index_info(client._exchange(build_index_info_request(market, code))),
-        handshake_profile="login_one",
-    )
-    return CapabilityEvidence([row], coverage=1.0, warnings=(f"tdx_host={host}",))
+
+    def _fetch_index(client: tdx_protocol.TdxClient) -> dict[str, Any]:
+        row = parse_index_info(client._exchange(build_index_info_request(market, code)),
+                               request_market=market, request_code=code)
+        # R1 echo check: parse_index_info will raise TdxProtocolError on mismatch (finding 1)
+        return row
+
+    row, host = await tdx_protocol.call(_fetch_index, handshake_profile="login_one")
+    # Coverage is None until security list (I1) gives denominator (finding 2)
+    return CapabilityEvidence([row], coverage=None, warnings=(f"tdx_host={host}",))
 
 
-async def fetch_index_momentum(symbol: str = "000001.SH") -> dict[str, Any]:
-    market, code = tdx_protocol.market_code(symbol)
-    values, host = await tdx_protocol.call(
-        lambda client: parse_index_momentum(client._exchange(build_index_momentum_request(market, code))),
-        handshake_profile="login_one",
-    )
-    return {"host": host, "values": values}
-
-
-async def fetch_ping() -> dict[str, Any]:
-    body, host = await tdx_protocol.call(lambda client: client._exchange(_header(KMSG_PING, packet_type=0)),
-                                         handshake_profile="login_one")
-    return {"host": host, "raw_length": len(body)}
-
-
-async def fetch_heartbeat() -> dict[str, Any]:
-    body, host = await tdx_protocol.call(lambda client: client._exchange(_header(KMSG_HEARTBEAT, packet_type=1)),
-                                         handshake_profile="login_one")
-    if len(body) < 10:
-        raise tdx_protocol.TdxProtocolError("truncated 0x0004 response")
-    return {"host": host, "date": struct.unpack_from("<I", body, 6)[0]}
 
 
 __all__ = [
-    "KMSG_HEARTBEAT",
     "KMSG_INDEXINFO",
-    "KMSG_INDEXMOMENTUM",
-    "KMSG_PING",
     "KMSG_QUOTESLIST",
     "QUOTE_CATEGORIES",
     "QUOTE_SORT_TYPES",
     "RANKING_PAGE_SIZE",
     "build_index_info_request",
-    "build_index_momentum_request",
     "build_quotes_list_request",
     "fetch_all_a_snapshot",
-    "fetch_heartbeat",
-    "fetch_index_momentum",
     "fetch_index_overview",
-    "fetch_ping",
     "parse_index_info",
-    "parse_index_momentum",
     "parse_quotes_list",
 ]
