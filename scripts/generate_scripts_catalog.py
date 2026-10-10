@@ -119,6 +119,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("refresh-watchlist-from-proposals.py", "research data", "quant-research", "workstation"),
     ("run-post-close-pipeline.sh", "research data", "quant-research", "workstation"),
     ("tdx-local-export.py", "research data", "quant-research", "workstation"),
+    ("tdx-quant-export.py", "research data", "quant-research", "owner-windows"),
     ("tdx_handshake_experiments.py", "research data", "quant-research", "workstation"),
     ("probe-tdx-routes.py", "research data", "quant-research", "workstation"),
     ("tdx-owner-probe.sh", "research data", "quant-research", "workstation"),
