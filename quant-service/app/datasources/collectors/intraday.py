@@ -1,10 +1,16 @@
 """Always-on collector for the token-free public evidence sources.
 
-One loop, many cadences.  Each source has its own interval and active window
-(news all day, the tape only in session), a bounded "already seen" memory so
-an unchanged page costs no database round trip, and throttled provider-health
-bookkeeping (the owner database is 52ms away; health is written on a state
-change or at most every ten minutes per provider/capability).
+One clock, one task per source.  Each source has its own interval and active
+window (news all day, the tape only in session), a bounded "already seen"
+memory so an unchanged page costs no database round trip, and throttled
+provider-health bookkeeping (the owner database is 52ms away; health is
+written on a state change or at most every ten minutes per provider/capability).
+
+The clock only starts what is due and never waits for it, and the sites
+inside one source are read side by side, so a throttled upstream costs its
+own readings and nobody else's.  An upstream read gets its source's interval
+as its time limit: a read that is not back when the next one is due has
+failed, and says so in provider health.
 
 Nothing here decides anything: every row is research evidence with its own
 provenance, and a source failure only degrades that source.
@@ -94,6 +100,8 @@ class CollectorState:
     seen: dict[str, SeenIds] = field(default_factory=dict)
     health: dict[tuple[str, str], tuple[bool, float]] = field(default_factory=dict)
     concept_codes: dict[str, str] = field(default_factory=dict)
+    #: Sources whose capture is still running; they are not started again.
+    in_flight: set[str] = field(default_factory=set)
 
     def seen_for(self, key: str, capacity: int = 5000) -> SeenIds:
         return self.seen.setdefault(key, SeenIds(capacity))
@@ -134,17 +142,23 @@ async def _health(deps: CollectorDeps, state: CollectorState, provider: str, cap
         deps.log(f"public evidence health write failed: {str(health_error)[:200]}")
 
 
-async def _timed(coroutine: Awaitable[Any]) -> tuple[Any, int]:
+async def _timed(coroutine: Awaitable[Any], source: str) -> tuple[Any, int]:
+    """Await one upstream read of ``source`` within that source's interval."""
     started = time_module.monotonic()
-    result = await coroutine
+    async with asyncio.timeout(CADENCES[source].interval_seconds):
+        result = await coroutine
     return result, int((time_module.monotonic() - started) * 1000)
 
 
+async def _side_by_side(captures: Mapping[str, Awaitable[dict[str, Any]]]) -> dict[str, Any]:
+    """Run the sites of one source together; each one reports under its own name."""
+    return dict(zip(captures, await asyncio.gather(*captures.values())))
+
+
 async def capture_news(deps: CollectorDeps, state: CollectorState, now: datetime) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for provider, fetch in deps.fetch_flashes.items():
+    async def site(provider: str, fetch: Callable[[], Awaitable[list[dict[str, Any]]]]) -> dict[str, Any]:
         try:
-            flashes, latency = await _timed(fetch())
+            flashes, latency = await _timed(fetch(), "news_flash")
             seen = state.seen_for(f"news:{provider}")
             fresh_ids = seen.unseen([item["flash_id"] for item in flashes])
             fresh = [flash for flash in flashes if flash["flash_id"] in fresh_ids]
@@ -156,43 +170,44 @@ async def capture_news(deps: CollectorDeps, state: CollectorState, now: datetime
                 if events:
                     await deps.persist_events(provider, events)
                 seen.add([flash["flash_id"] for flash in fresh])
-            result[provider] = {"status": "completed", "received": len(flashes), "new": len(fresh), "stored": stored}
             await _health(deps, state, provider, "news_flash", True, len(flashes), latency, None)
-        except Exception as error:  # noqa: BLE001 - one site outage must not stop the others
-            result[provider] = {"status": "failed", "error": error_text(error, 200)}
+            return {"status": "completed", "received": len(flashes), "new": len(fresh), "stored": stored}
+        except Exception as error:  # noqa: BLE001 - a site outage is that site's failed reading
             await _health(deps, state, provider, "news_flash", False, 0, None, str(error))
-    return result
+            return {"status": "failed", "error": error_text(error, 200)}
+
+    return await _side_by_side({provider: site(provider, fetch) for provider, fetch in deps.fetch_flashes.items()})
 
 
 async def capture_investor_qa(deps: CollectorDeps, state: CollectorState, now: datetime) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    sources: dict[str, Callable[[], Awaitable[list[dict[str, Any]]]]] = {
-        "cninfo_irm": lambda: investor_qa.fetch_cninfo(page_size=50),
-        "sse_einteract": lambda: investor_qa.fetch_sse(now, page_size=30),
-    }
-    for provider, fetch in sources.items():
+    async def site(provider: str, fetch: Awaitable[list[dict[str, Any]]]) -> dict[str, Any]:
         try:
-            rows, latency = await _timed(fetch())
+            rows, latency = await _timed(fetch, "investor_qa")
             seen = state.seen_for(f"qa:{provider}")
             fresh_ids = seen.unseen([row["qa_id"] for row in rows])
             fresh = [row for row in rows if row["qa_id"] in fresh_ids]
             stored = await deps.persist_events(provider, investor_qa.qa_events(fresh)) if fresh else 0
             seen.add([row["qa_id"] for row in fresh])
-            result[provider] = {"status": "completed", "received": len(rows), "new": len(fresh), "stored": stored}
             await _health(deps, state, provider, "investor_qa", True, len(rows), latency, None)
+            return {"status": "completed", "received": len(rows), "new": len(fresh), "stored": stored}
         except Exception as error:  # noqa: BLE001
-            result[provider] = {"status": "failed", "error": error_text(error, 200)}
             await _health(deps, state, provider, "investor_qa", False, 0, None, str(error))
-    return result
+            return {"status": "failed", "error": error_text(error, 200)}
+
+    return await _side_by_side({
+        "cninfo_irm": site("cninfo_irm", investor_qa.fetch_cninfo(page_size=50)),
+        "sse_einteract": site("sse_einteract", investor_qa.fetch_sse(now, page_size=30)),
+    })
 
 
 async def capture_stock_changes(deps: CollectorDeps, state: CollectorState, now: datetime) -> dict[str, Any]:
     provider = eastmoney_ztb.PROVIDER_KEY
     try:
         if deps.resolver is None:
-            rows, latency = await _timed(eastmoney_ztb.fetch_stock_changes())
+            rows, latency = await _timed(eastmoney_ztb.fetch_stock_changes(), "stock_changes")
         else:
-            resolved, latency = await _timed(deps.resolver.fetch("limits.anomaly_tape", accept_empty=True))
+            resolved, latency = await _timed(deps.resolver.fetch("limits.anomaly_tape", accept_empty=True),
+                                             "stock_changes")
             provider = resolved.source
             rows = resolved.rows
         trade_date = now.astimezone(CN_TZ).date()
@@ -215,7 +230,7 @@ async def capture_hot_ranks(deps: CollectorDeps, state: CollectorState, now: dat
     for kind in eastmoney_hot_rank.RANK_LISTS:
         capability = f"hot_rank_{kind}"
         try:
-            rows, latency = await _timed(eastmoney_hot_rank.fetch_rank_list(kind))
+            rows, latency = await _timed(eastmoney_hot_rank.fetch_rank_list(kind), "hot_rank")
             observations = [{**row, "ts_code": row["symbol"], "effective_at": now.isoformat(),
                              "available_at": now.isoformat()} for row in rows]
             stored = await deps.persist_observations(provider, capability, observations) if observations else 0
@@ -230,7 +245,7 @@ async def capture_hot_ranks(deps: CollectorDeps, state: CollectorState, now: dat
 async def capture_board_changes(deps: CollectorDeps, state: CollectorState, now: datetime) -> dict[str, Any]:
     provider = eastmoney_ztb.PROVIDER_KEY
     try:
-        (boards, stamp), latency = await _timed(eastmoney_ztb.fetch_board_changes(300))
+        (boards, stamp), latency = await _timed(eastmoney_ztb.fetch_board_changes(300), "board_changes")
         observation = {"ts_code": None, "upstream_stamp": stamp, "boards": boards,
                        "effective_at": now.isoformat(), "available_at": now.isoformat()}
         stored = await deps.persist_observations(provider, "board_change_snapshot", [observation]) if boards else 0
@@ -293,7 +308,7 @@ async def build_sentiment(deps: CollectorDeps, state: CollectorState, now: datet
 
 async def capture_sentiment(deps: CollectorDeps, state: CollectorState, now: datetime) -> dict[str, Any]:
     try:
-        reading, latency = await _timed(build_sentiment(deps, state, now))
+        reading, latency = await _timed(build_sentiment(deps, state, now), "sentiment")
         stored = await deps.persist_observations(SENTIMENT_PROVIDER_KEY, "market_sentiment_snapshot", [{
             **reading, "ts_code": None, "effective_at": now.isoformat(), "available_at": now.isoformat(),
         }])
@@ -311,21 +326,35 @@ CAPTURES: dict[str, Callable[[CollectorDeps, CollectorState, datetime], Awaitabl
 }
 
 
+def claim_due(state: CollectorState, now: datetime, *, session_open: bool,
+              enabled: Mapping[str, bool] | None = None) -> list[str]:
+    """The sources to start now, marked as started; one still running is not due."""
+    monotonic = time_module.monotonic()
+    keys = [key for key, cadence in CADENCES.items()
+            if (enabled is None or enabled.get(key, True)) and key not in state.in_flight
+            and due(state, cadence, now, session_open=session_open, monotonic=monotonic)]
+    for key in keys:
+        state.last_run[key] = monotonic
+        state.in_flight.add(key)
+    return keys
+
+
+async def run_capture(deps: CollectorDeps, state: CollectorState, key: str, now: datetime) -> dict[str, Any]:
+    """Run one claimed source to its end and release the claim."""
+    try:
+        result = await CAPTURES[key](deps, state, now)
+    finally:
+        state.in_flight.discard(key)
+    if result.get("status") == "failed":
+        deps.log(f"public evidence capture degraded: {str({key: result})[:500]}")
+    return result
+
+
 async def run_once(deps: CollectorDeps, state: CollectorState, now: datetime, *, session_open: bool,
                    enabled: Mapping[str, bool] | None = None) -> dict[str, Any]:
-    results: dict[str, Any] = {}
-    monotonic = time_module.monotonic()
-    for key, cadence in CADENCES.items():
-        if enabled is not None and not enabled.get(key, True):
-            continue
-        if not due(state, cadence, now, session_open=session_open, monotonic=monotonic):
-            continue
-        state.last_run[key] = monotonic
-        try:
-            results[key] = await CAPTURES[key](deps, state, now)
-        except Exception as error:  # noqa: BLE001 - a capture bug must not stop the loop
-            results[key] = {"status": "failed", "error": error_text(error, 200)}
-    return results
+    """Start every due source together and wait for all of them."""
+    keys = claim_due(state, now, session_open=session_open, enabled=enabled)
+    return dict(zip(keys, await asyncio.gather(*(run_capture(deps, state, key, now) for key in keys))))
 
 
 async def run_loop(
@@ -336,21 +365,21 @@ async def run_loop(
     tick_seconds: int = 30,
 ) -> None:
     state = CollectorState()
-    while True:
-        now = datetime.now(timezone.utc)
-        try:
-            active = await session_open(now)
-        except Exception:  # noqa: BLE001 - calendar outage keeps news flowing
-            active = False
-        results = await run_once(deps, state, now, session_open=bool(active), enabled=enabled)
-        degraded = {key: value for key, value in results.items()
-                    if isinstance(value, dict) and value.get("status") == "failed"}
-        if degraded:
-            deps.log(f"public evidence capture degraded: {str(degraded)[:500]}")
-        await asyncio.sleep(max(10, tick_seconds))
+    # The group owns the captures: when this loop is cancelled (the lease is lost, or the service stops) they
+    # are cancelled with it, so nothing keeps writing without the lease.
+    async with asyncio.TaskGroup() as captures:
+        while True:
+            now = datetime.now(timezone.utc)
+            try:
+                active = await session_open(now)
+            except Exception:  # noqa: BLE001 - calendar outage keeps news flowing
+                active = False
+            for key in claim_due(state, now, session_open=bool(active), enabled=enabled):
+                captures.create_task(run_capture(deps, state, key, now), name=f"public_evidence:{key}")
+            await asyncio.sleep(max(10, tick_seconds))
 
 
 __all__ = [
     "CADENCES", "CAPTURES", "CollectorDeps", "CollectorState", "SENTIMENT_PROVIDER_KEY", "SeenIds",
-    "SourceCadence", "build_sentiment", "due", "in_window", "run_loop", "run_once",
+    "SourceCadence", "build_sentiment", "claim_due", "due", "in_window", "run_capture", "run_loop", "run_once",
 ]

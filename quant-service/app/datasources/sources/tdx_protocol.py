@@ -77,6 +77,10 @@ _SETUP_COMMANDS = (
 )
 HANDSHAKE_PROFILES = {"login_one", "legacy_3"}
 _COOLDOWN_SECONDS = 300.0
+#: How long one call keeps moving to the next host.  A pool that is throttling answers no host of the
+#: twenty, and walking all of them takes 200 s (two profiles of 5 s each); a reading that late is of no
+#: use, and the hosts it did not reach are tried first by the next call.
+FAILOVER_SECONDS = 15.0
 _COOLDOWN_UNTIL: dict[tuple[str, int], float] = {}
 _LOGGER = logging.getLogger(__name__)
 
@@ -460,10 +464,19 @@ def _mark_cooldown(host: tuple[str, int]) -> None:
 
 
 def call_sync(operation: Callable[[TdxClient], T], *, hosts: Iterable[tuple[str, int]] | None = None,
-              timeout_seconds: float = 5.0, handshake_profile: str = "login_one") -> tuple[T, str]:
-    """Run an operation with deterministic host ordering and same-host profile fallback."""
+              timeout_seconds: float = 5.0, handshake_profile: str = "login_one",
+              failover_seconds: float = FAILOVER_SECONDS) -> tuple[T, str]:
+    """Run an operation with deterministic host ordering and same-host profile fallback.
+
+    No further host is started once ``failover_seconds`` have passed; an operation that is running is
+    never cut short by it.
+    """
     errors: list[str] = []
+    last_start = time.monotonic() + failover_seconds
     for host, port in _ordered_hosts(hosts or configured_hosts()):
+        if errors and time.monotonic() > last_start:
+            errors.append(f"stopped after {failover_seconds:g}s")
+            break
         profiles = (handshake_profile, "legacy_3") if handshake_profile == "login_one" else (handshake_profile,)
         transport_failed = False
         for attempt, attempt_profile in enumerate(profiles):

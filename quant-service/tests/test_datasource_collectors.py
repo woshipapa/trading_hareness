@@ -1,5 +1,6 @@
 """Cadence, de-duplication and archive windows of the data-source collectors."""
 
+import asyncio
 import json
 import unittest
 from datetime import date, datetime, timezone
@@ -108,6 +109,95 @@ class NewsCaptureTests(unittest.IsolatedAsyncioTestCase):
         results = await intraday.run_once(deps, intraday.CollectorState(), NIGHT, session_open=False,
                                           enabled={"investor_qa": False})
         self.assertEqual(set(results), {"news_flash"})    # tape/ranks need a session; Q&A switched off
+
+
+class SourceIndependenceTests(unittest.IsolatedAsyncioTestCase):
+    """A throttled upstream costs its own readings and nobody else's."""
+
+    async def test_a_stalled_site_does_not_hold_the_other_sites_of_its_source(self):
+        recorder = Recorder()
+        stalled = asyncio.Event()
+
+        async def throttled():
+            await stalled.wait()
+            return []
+
+        async def answering():
+            return [{"provider": "ths_flash", "flash_id": "1", "published_at": SESSION.isoformat(), "title": "t",
+                     "content": "c", "importance": "normal", "symbols": [], "tags": [], "url": None,
+                     "upstream_site": "news.10jqka.com.cn"}]
+
+        deps = recorder.deps(fetch_flashes={"jin10_flash": throttled, "ths_flash": answering})
+        capture = asyncio.create_task(intraday.capture_news(deps, intraday.CollectorState(), SESSION))
+        for _ in range(20):
+            await asyncio.sleep(0)
+        self.assertEqual([provider for provider, _capability, _rows in recorder.observations], ["ths_flash"])
+        self.assertFalse(capture.done())
+        stalled.set()
+        self.assertEqual({site: reading["status"] for site, reading in (await capture).items()},
+                         {"jin10_flash": "completed", "ths_flash": "completed"})
+
+    async def test_a_read_that_outlasts_its_interval_is_a_failed_reading(self):
+        recorder = Recorder()
+
+        async def throttled():
+            await asyncio.Event().wait()
+
+        deps = recorder.deps(fetch_flashes={"jin10_flash": throttled})
+        with patch.dict(intraday.CADENCES, {"news_flash": intraday.SourceCadence("news_flash", 0.01, "always")}):
+            result = await intraday.capture_news(deps, intraday.CollectorState(), SESSION)
+        self.assertEqual(result["jin10_flash"], {"status": "failed", "error": "TimeoutError"})
+        self.assertEqual(recorder.health, [("jin10_flash", "news_flash", False)])
+
+    async def test_the_clock_keeps_starting_other_sources_while_one_is_stalled(self):
+        started = {"stalled": 0, "answering": 0}
+        cancelled = []
+
+        async def stalled(_deps, _state, _now):
+            started["stalled"] += 1
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.append("stalled")
+                raise
+
+        async def answering(_deps, _state, _now):
+            started["answering"] += 1
+            return {"status": "completed"}
+
+        async def session_open(_now):
+            return True
+
+        real_sleep = asyncio.sleep
+        cadences = {"stalled": intraday.SourceCadence("stalled", 0, "always"),
+                    "answering": intraday.SourceCadence("answering", 0, "always")}
+        with patch.dict(intraday.CADENCES, cadences, clear=True), \
+                patch.dict(intraday.CAPTURES, {"stalled": stalled, "answering": answering}, clear=True), \
+                patch.object(intraday.asyncio, "sleep", lambda _seconds: real_sleep(0)):
+            loop = asyncio.create_task(intraday.run_loop(Recorder().deps(), session_open=session_open))
+            while started["answering"] < 3:
+                await real_sleep(0)
+            loop.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await loop
+        self.assertEqual(started["stalled"], 1)            # still running, so never started again
+        self.assertEqual(cancelled, ["stalled"])           # and it ends with the loop that holds the lease
+
+    async def test_database_work_of_side_by_side_sources_takes_one_slot(self):
+        running, most = 0, 0
+
+        async def run_blocking(_action, *_args, timeout_seconds):
+            nonlocal running, most
+            running += 1
+            most = max(most, running)
+            await asyncio.sleep(0)
+            running -= 1
+            return 1
+
+        deps = runtime.build_collector_deps(object(), run_blocking=run_blocking)
+        await asyncio.gather(deps.persist_events("a", [{}]), deps.persist_observations("b", "c", [{}]),
+                             deps.record_health("d", "e", True, 1, None, None))
+        self.assertEqual(most, 1)
 
 
 class SentimentBuildTests(unittest.IsolatedAsyncioTestCase):

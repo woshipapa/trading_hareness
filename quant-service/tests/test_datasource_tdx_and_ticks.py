@@ -185,6 +185,25 @@ class TdxClientTests(unittest.TestCase):
             tdx_protocol.TdxClient = original
         self.assertEqual(attempts, ["a", "b"])
 
+    def test_a_call_stops_moving_to_further_hosts_after_its_failover_time(self):
+        attempts = []
+
+        class Refusing(tdx_protocol.TdxClient):
+            def __enter__(self):
+                attempts.append(self.host)
+                raise OSError("timed out")
+
+        original = tdx_protocol.TdxClient
+        tdx_protocol.TdxClient = Refusing
+        tdx_protocol._COOLDOWN_UNTIL.clear()
+        try:
+            with self.assertRaisesRegex(tdx_protocol.TdxProtocolError, "stopped after 0s"):
+                tdx_protocol.call_sync(lambda client: None, hosts=[("a", 1), ("b", 2), ("c", 3)], failover_seconds=0)
+        finally:
+            tdx_protocol.TdxClient = original
+            tdx_protocol._COOLDOWN_UNTIL.clear()
+        self.assertEqual(attempts, ["a"])                   # the first host is always tried
+
     def test_a_connected_host_falls_back_to_legacy_3_before_the_next_host(self):
         attempts = []
 

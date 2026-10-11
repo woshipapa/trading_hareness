@@ -59,7 +59,14 @@ def build_collector_deps(
     fuyao_snapshot: Callable[[], Awaitable[tuple[list[dict[str, Any]], dict[str, Any]]]] | None = None,
     log: Callable[[str], None] = print,
 ) -> intraday.CollectorDeps:
-    run = run_blocking or _to_thread
+    blocking = run_blocking or _to_thread
+    one_at_a_time = asyncio.Lock()
+
+    async def run(action: Callable[..., Any], *args: Any, timeout_seconds: float) -> Any:
+        # The intraday sources run side by side; their database work still goes through one slot of the
+        # service's bounded database executor, as it did when the sources took turns.
+        async with one_at_a_time:
+            return await blocking(action, *args, timeout_seconds=timeout_seconds)
 
     async def persist_events(provider: str, rows: list[dict[str, Any]]) -> int:
         return await run(persist_market_events, database, provider, rows, timeout_seconds=60)
