@@ -1,0 +1,604 @@
+{
+ "observed_at_utc": "2026-10-10T15:14:30.320955+00:00",
+ "egress": "Mac (residential broadband)",
+ "code_sha": "ee4b235b",
+ "trade_date": "2026-10-09",
+ "method": "LOGIN_ONE handshake; legacy 0x052d category 8 (1m) count 240 and category 9 (1d); MAC 0x122e periods 1m/1d via tdx_mac.call_sync; read-only",
+ "minute_legacy_vs_mac": {
+  "600519.SH": {
+   "legacy_host": "115.238.56.198:7709/login_one",
+   "legacy_rows": 240,
+   "mac_rows": 240,
+   "common_minutes": 240,
+   "only_legacy": [],
+   "only_mac": [],
+   "fields": {
+    "open": {
+     "equal_minutes": 240,
+     "max_abs_diff": 5.859375005456968e-05
+    },
+    "high": {
+     "equal_minutes": 240,
+     "max_abs_diff": 5.859375005456968e-05
+    },
+    "low": {
+     "equal_minutes": 240,
+     "max_abs_diff": 5.859375005456968e-05
+    },
+    "close": {
+     "equal_minutes": 240,
+     "max_abs_diff": 5.859375005456968e-05
+    },
+    "volume": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    },
+    "amount": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    }
+   },
+   "first": {
+    "datetime": "2026-10-09 09:31",
+    "open": 1255.42,
+    "close": 1263.91,
+    "high": 1265.2,
+    "low": 1255.42,
+    "volume": 159500.0,
+    "amount": 201192400.0
+   },
+   "last": {
+    "datetime": "2026-10-09 15:00",
+    "open": 1263.0,
+    "close": 1263.0,
+    "high": 1263.0,
+    "low": 1263.0,
+    "volume": 38600.0,
+    "amount": 48696228.0
+   }
+  },
+  "300750.SZ": {
+   "legacy_host": "115.238.56.198:7709/login_one",
+   "legacy_rows": 240,
+   "mac_rows": 240,
+   "common_minutes": 240,
+   "only_legacy": [],
+   "only_mac": [],
+   "fields": {
+    "open": {
+     "equal_minutes": 240,
+     "max_abs_diff": 1.464843751364242e-05
+    },
+    "high": {
+     "equal_minutes": 240,
+     "max_abs_diff": 1.464843751364242e-05
+    },
+    "low": {
+     "equal_minutes": 240,
+     "max_abs_diff": 1.464843751364242e-05
+    },
+    "close": {
+     "equal_minutes": 240,
+     "max_abs_diff": 1.464843751364242e-05
+    },
+    "volume": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    },
+    "amount": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    }
+   },
+   "first": {
+    "datetime": "2026-10-09 09:31",
+    "open": 292.0,
+    "close": 294.97,
+    "high": 295.03,
+    "low": 289.0,
+    "volume": 3920700.0,
+    "amount": 1145762688.0
+   },
+   "last": {
+    "datetime": "2026-10-09 15:00",
+    "open": 297.75,
+    "close": 297.75,
+    "high": 297.75,
+    "low": 297.75,
+    "volume": 457500.0,
+    "amount": 136199488.0
+   }
+  },
+  "688981.SH": {
+   "legacy_host": "115.238.56.198:7709/login_one",
+   "legacy_rows": 240,
+   "mac_rows": 240,
+   "common_minutes": 240,
+   "only_legacy": [],
+   "only_mac": [],
+   "fields": {
+    "open": {
+     "equal_minutes": 240,
+     "max_abs_diff": 3.662109378410605e-06
+    },
+    "high": {
+     "equal_minutes": 240,
+     "max_abs_diff": 3.662109378410605e-06
+    },
+    "low": {
+     "equal_minutes": 240,
+     "max_abs_diff": 3.662109378410605e-06
+    },
+    "close": {
+     "equal_minutes": 240,
+     "max_abs_diff": 3.662109378410605e-06
+    },
+    "volume": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    },
+    "amount": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    }
+   },
+   "first": {
+    "datetime": "2026-10-09 09:31",
+    "open": 106.0,
+    "close": 105.74,
+    "high": 106.6,
+    "low": 105.01,
+    "volume": 1284300.0,
+    "amount": 136005952.0
+   },
+   "last": {
+    "datetime": "2026-10-09 15:00",
+    "open": 108.42,
+    "close": 108.42,
+    "high": 108.42,
+    "low": 108.42,
+    "volume": 215300.0,
+    "amount": 23337514.0
+   }
+  },
+  "510300.SH": {
+   "legacy_host": "115.238.56.198:7709/login_one",
+   "legacy_rows": 240,
+   "mac_rows": 240,
+   "common_minutes": 240,
+   "only_legacy": [],
+   "only_mac": [],
+   "fields": {
+    "open": {
+     "equal_minutes": 240,
+     "max_abs_diff": 2.365112301561112e-07
+    },
+    "high": {
+     "equal_minutes": 240,
+     "max_abs_diff": 2.365112301561112e-07
+    },
+    "low": {
+     "equal_minutes": 240,
+     "max_abs_diff": 2.365112301561112e-07
+    },
+    "close": {
+     "equal_minutes": 240,
+     "max_abs_diff": 2.365112301561112e-07
+    },
+    "volume": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    },
+    "amount": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    }
+   },
+   "first": {
+    "datetime": "2026-10-09 09:31",
+    "open": 4.369,
+    "close": 4.376,
+    "high": 4.378,
+    "low": 4.366,
+    "volume": 19803000.0,
+    "amount": 86606376.0
+   },
+   "last": {
+    "datetime": "2026-10-09 15:00",
+    "open": 4.385,
+    "close": 4.385,
+    "high": 4.385,
+    "low": 4.385,
+    "volume": 11105500.0,
+    "amount": 48697616.0
+   }
+  },
+  "920000.BJ": {
+   "legacy_host": "115.238.56.198:7709/login_one",
+   "legacy_rows": 240,
+   "mac_rows": 240,
+   "common_minutes": 240,
+   "only_legacy": [],
+   "only_mac": [],
+   "fields": {
+    "open": {
+     "equal_minutes": 240,
+     "max_abs_diff": 4.5776367230132564e-07
+    },
+    "high": {
+     "equal_minutes": 240,
+     "max_abs_diff": 4.5776367230132564e-07
+    },
+    "low": {
+     "equal_minutes": 240,
+     "max_abs_diff": 4.5776367230132564e-07
+    },
+    "close": {
+     "equal_minutes": 240,
+     "max_abs_diff": 4.5776367230132564e-07
+    },
+    "volume": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    },
+    "amount": {
+     "equal_minutes": 240,
+     "max_abs_diff": 0.0
+    }
+   },
+   "first": {
+    "datetime": "2026-10-09 09:31",
+    "open": 13.9,
+    "close": 14.01,
+    "high": 14.01,
+    "low": 13.78,
+    "volume": 13200.0,
+    "amount": 183600.875
+   },
+   "last": {
+    "datetime": "2026-10-09 15:00",
+    "open": 14.19,
+    "close": 14.19,
+    "high": 14.19,
+    "low": 14.19,
+    "volume": 22200.0,
+    "amount": 314876.09375
+   }
+  }
+ },
+ "daily_legacy_vs_mac": {
+  "600519.SH": [
+   {
+    "date": "2026-10-08",
+    "legacy_open": 1252.9,
+    "legacy_close": 1255.79,
+    "legacy_volume": 25167.0,
+    "legacy_amount": 3145413120.0,
+    "mac_open": 1252.9000244140625,
+    "mac_close": 1255.7900390625,
+    "mac_volume": 2516757.0,
+    "mac_amount": 3145413120.0
+   },
+   {
+    "date": "2026-10-09",
+    "legacy_open": 1255.42,
+    "legacy_close": 1263.0,
+    "legacy_volume": 35110.0,
+    "legacy_amount": 4453223424.0,
+    "mac_open": 1255.4200439453125,
+    "mac_close": 1263.0,
+    "mac_volume": 3511051.0,
+    "mac_amount": 4453223424.0
+   }
+  ],
+  "300750.SZ": [
+   {
+    "date": "2026-10-08",
+    "legacy_open": 292.0,
+    "legacy_close": 286.75,
+    "legacy_volume": 366824.0,
+    "legacy_amount": 10594534400.0,
+    "mac_open": 292.0,
+    "mac_close": 286.75,
+    "mac_volume": 36682464.0,
+    "mac_amount": 10594534400.0
+   },
+   {
+    "date": "2026-10-09",
+    "legacy_open": 292.0,
+    "legacy_close": 297.75,
+    "legacy_volume": 541526.0,
+    "legacy_amount": 16028123136.0,
+    "mac_open": 292.0,
+    "mac_close": 297.75,
+    "mac_volume": 54152672.0,
+    "mac_amount": 16028123136.0
+   }
+  ],
+  "688981.SH": [
+   {
+    "date": "2026-10-08",
+    "legacy_open": 112.0,
+    "legacy_close": 107.08,
+    "legacy_volume": 481539.0,
+    "legacy_amount": 5234115584.0,
+    "mac_open": 112.0,
+    "mac_close": 107.08000183105469,
+    "mac_volume": 48153936.0,
+    "mac_amount": 5234115584.0
+   },
+   {
+    "date": "2026-10-09",
+    "legacy_open": 106.0,
+    "legacy_close": 108.42,
+    "legacy_volume": 461044.0,
+    "legacy_amount": 4868002816.0,
+    "mac_open": 106.0,
+    "mac_close": 108.41999816894531,
+    "mac_volume": 46104484.0,
+    "mac_amount": 4868002816.0
+   }
+  ],
+  "510300.SH": [
+   {
+    "date": "2026-10-08",
+    "legacy_open": 4.418,
+    "legacy_close": 4.389,
+    "legacy_volume": 7508725.0,
+    "legacy_amount": 3307953920.0,
+    "mac_open": 4.418000221252441,
+    "mac_close": 4.388999938964844,
+    "mac_volume": 750872512.0,
+    "mac_amount": 3307953920.0
+   },
+   {
+    "date": "2026-10-09",
+    "legacy_open": 4.369,
+    "legacy_close": 4.385,
+    "legacy_volume": 12767332.0,
+    "legacy_amount": 5564821504.0,
+    "mac_open": 4.36899995803833,
+    "mac_close": 4.385000228881836,
+    "mac_volume": 1276733184.0,
+    "mac_amount": 5564821504.0
+   }
+  ],
+  "920000.BJ": [
+   {
+    "date": "2026-10-08",
+    "legacy_open": 14.36,
+    "legacy_close": 13.9,
+    "legacy_volume": 5415.0,
+    "legacy_amount": 7641124.5,
+    "mac_open": 14.359999656677246,
+    "mac_close": 13.899999618530273,
+    "mac_volume": 541535.0,
+    "mac_amount": 7641124.5
+   },
+   {
+    "date": "2026-10-09",
+    "legacy_open": 13.9,
+    "legacy_close": 14.19,
+    "legacy_volume": 7060.0,
+    "legacy_amount": 9923736.0,
+    "mac_open": 13.899999618530273,
+    "mac_close": 14.1899995803833,
+    "mac_volume": 706075.0,
+    "mac_amount": 9923736.0
+   }
+  ]
+ },
+ "index_daily_breadth": {
+  "1:999999": {
+   "host": "115.238.56.198:7709/login_one",
+   "rows": [
+    {
+     "date": "2026-09-30",
+     "close": 3842.19,
+     "up_count": 1223,
+     "down_count": 1065,
+     "volume_raw": 4145602.0,
+     "amount": 679398998016.0
+    },
+    {
+     "date": "2026-10-08",
+     "close": 3811.9,
+     "up_count": 762,
+     "down_count": 1543,
+     "volume_raw": 4822017.0,
+     "amount": 811183112192.0
+    },
+    {
+     "date": "2026-10-09",
+     "close": 3813.79,
+     "up_count": 1341,
+     "down_count": 956,
+     "volume_raw": 5351499.0,
+     "amount": 888561205248.0
+    }
+   ]
+  },
+  "0:399300": {
+   "host": "115.238.56.198:7709/login_one",
+   "rows": [
+    {
+     "date": "2026-09-30",
+     "close": 4357.62,
+     "up_count": 218,
+     "down_count": 78,
+     "volume_raw": 1629496.0,
+     "amount": 356491558912.0
+    },
+    {
+     "date": "2026-10-08",
+     "close": 4310.28,
+     "up_count": 125,
+     "down_count": 170,
+     "volume_raw": 1915527.0,
+     "amount": 446208245760.0
+    },
+    {
+     "date": "2026-10-09",
+     "close": 4317.25,
+     "up_count": 179,
+     "down_count": 113,
+     "volume_raw": 1991874.0,
+     "amount": 496179118080.0
+    }
+   ]
+  },
+  "0:399001": {
+   "host": "115.238.56.198:7709/login_one",
+   "rows": [
+    {
+     "date": "2026-09-30",
+     "close": 12887.62,
+     "up_count": 1170,
+     "down_count": 1665,
+     "volume_raw": 4947152.0,
+     "amount": 758619111424.0
+    },
+    {
+     "date": "2026-10-08",
+     "close": 12620.9,
+     "up_count": 892,
+     "down_count": 1973,
+     "volume_raw": 5331683.0,
+     "amount": 870943817728.0
+    },
+    {
+     "date": "2026-10-09",
+     "close": 12641.86,
+     "up_count": 1698,
+     "down_count": 1166,
+     "volume_raw": 6326578.0,
+     "amount": 1011994198016.0
+    }
+   ]
+  },
+  "0:399006": {
+   "host": "115.238.56.198:7709/login_one",
+   "rows": [
+    {
+     "date": "2026-09-30",
+     "close": 3135.28,
+     "up_count": 423,
+     "down_count": 961,
+     "volume_raw": 1393715.0,
+     "amount": 368971644928.0
+    },
+    {
+     "date": "2026-10-08",
+     "close": 3036.66,
+     "up_count": 331,
+     "down_count": 1053,
+     "volume_raw": 1540885.0,
+     "amount": 425271853056.0
+    },
+    {
+     "date": "2026-10-09",
+     "close": 3043.33,
+     "up_count": 708,
+     "down_count": 677,
+     "volume_raw": 1970562.0,
+     "amount": 494823538688.0
+    }
+   ]
+  },
+  "1:000688": {
+   "host": "115.238.56.198:7709/login_one",
+   "rows": [
+    {
+     "date": "2026-09-30",
+     "close": 1530.01,
+     "up_count": 206,
+     "down_count": 408,
+     "volume_raw": 73170.0,
+     "amount": 71878696960.0
+    },
+    {
+     "date": "2026-10-08",
+     "close": 1456.32,
+     "up_count": 83,
+     "down_count": 532,
+     "volume_raw": 87874.0,
+     "amount": 82397683712.0
+    },
+    {
+     "date": "2026-10-09",
+     "close": 1457.27,
+     "up_count": 270,
+     "down_count": 341,
+     "volume_raw": 95407.0,
+     "amount": 91972935680.0
+    }
+   ]
+  },
+  "2:899050": {
+   "host": "115.238.56.198:7709/login_one",
+   "rows": [
+    {
+     "date": "2026-09-30",
+     "close": 1039.61,
+     "up_count": 221,
+     "down_count": 111,
+     "volume_raw": 60840.0,
+     "amount": 12241495040.0
+    },
+    {
+     "date": "2026-10-08",
+     "close": 1012.1,
+     "up_count": 64,
+     "down_count": 282,
+     "volume_raw": 62906.0,
+     "amount": 12363921408.0
+    },
+    {
+     "date": "2026-10-09",
+     "close": 1037.31,
+     "up_count": 308,
+     "down_count": 37,
+     "volume_raw": 84064.0,
+     "amount": 16326814720.0
+    }
+   ]
+  },
+  "1:880005": {
+   "host": "115.238.56.198:7709/login_one",
+   "rows": [
+    {
+     "date": "2026-09-30",
+     "close": 2567.0,
+     "up_count": 2187,
+     "down_count": 2309,
+     "volume_raw": 9149770.0,
+     "amount": 1450089512960.0
+    },
+    {
+     "date": "2026-10-08",
+     "close": 1698.0,
+     "up_count": 1345,
+     "down_count": 2592,
+     "volume_raw": 10212528.0,
+     "amount": 1694291197952.0
+    },
+    {
+     "date": "2026-10-09",
+     "close": 3297.0,
+     "up_count": 2494,
+     "down_count": 1658,
+     "volume_raw": 11758208.0,
+     "amount": 1916708585472.0
+    }
+   ]
+  }
+ },
+ "findings": [
+  "1m bars: legacy 0x052d category 8 equals MAC 0x122e period 1m on all 240 minutes of 2026-10-09 for 600519.SH, 300750.SZ, 688981.SH, 510300.SH (ETF) and 920000.BJ: volume (shares) and amount (yuan) bit-identical, OHLC within float32 rounding of the MAC values; minute stamps identical (09:31 .. 15:00).",
+  "Legacy bar prices use /1000 for the ETF 510300 and the BJ stock too (4.369, 13.90): no per-instrument scale is needed for bars, only for 0x053e quotes.",
+  "1d bars: legacy volume is whole lots (odd shares truncated: 600519 35,110 lots vs MAC 3,511,051 shares); MAC daily volume is float32 shares, about 7 significant digits (510300: 1,276,733,184); amounts equal.",
+  "Index daily bars (category 9) carry per-day constituent breadth: 999999 2026-10-09 up 1,341 / down 956; 399300 179/113; 399001 1,698/1,166; 399006 708/677; 000688 270/341; 899050 308/37.",
+  "880005 is not an ordinary index: its 2026-10-09 close is 3297.0, equal to the all-A advancer count of the 0x054b pass (delta-2 D1); meaning of its fields is UNKNOWN, do not bind.",
+  "Index volume unit stays unknown (999999 2026-10-09 volume_raw 5,351,499); amount 888,561,205,248 equals the 0x053e quote amount of the same index."
+ ]
+}

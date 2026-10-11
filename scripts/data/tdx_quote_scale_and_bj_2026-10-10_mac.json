@@ -1,0 +1,231 @@
+{
+ "observed_at_utc": "2026-10-10T15:14:30.320955+00:00",
+ "egress": "Mac (residential broadband)",
+ "code_sha": "ee4b235b",
+ "security_list": {
+  "rows": 52331,
+  "coverage": 0.9993507113530029,
+  "type_decimal_point_rows": [
+   [
+    "b_share",
+    2,
+    37
+   ],
+   [
+    "b_share",
+    3,
+    41
+   ],
+   [
+    "board",
+    2,
+    1119
+   ],
+   [
+    "bond",
+    4,
+    5167
+   ],
+   [
+    "cb",
+    4,
+    571
+   ],
+   [
+    "etf",
+    3,
+    1427
+   ],
+   [
+    "fund",
+    3,
+    222
+   ],
+   [
+    "fund",
+    4,
+    2822
+   ],
+   [
+    "index",
+    2,
+    557
+   ],
+   [
+    "lof",
+    3,
+    344
+   ],
+   [
+    "lof",
+    4,
+    876
+   ],
+   [
+    "other",
+    2,
+    44
+   ],
+   [
+    "other",
+    3,
+    519
+   ],
+   [
+    "other",
+    4,
+    33005
+   ],
+   [
+    "stock_bj",
+    null,
+    352
+   ],
+   [
+    "stock_chinext",
+    2,
+    1412
+   ],
+   [
+    "stock_main",
+    2,
+    3198
+   ],
+   [
+    "stock_star",
+    2,
+    618
+   ]
+  ],
+  "bj_920_rows": 352
+ },
+ "bj_mapping": {
+  "source": "zhb.zip member addedcode_bj.cfg via 0x06b9 report-file download",
+  "host": "115.238.56.198:7709/login_one",
+  "zip_bytes": 1332578,
+  "members": 47,
+  "old_to_new_rows": 351,
+  "sample": [
+   [
+    "430017",
+    "920017"
+   ],
+   [
+    "430047",
+    "920047"
+   ],
+   [
+    "430090",
+    "920090"
+   ],
+   [
+    "874709",
+    "920288"
+   ],
+   [
+    "874747",
+    "920176"
+   ],
+   [
+    "874772",
+    "920298"
+   ]
+  ]
+ },
+ "legacy_quote_fixed_div100": {
+  "host": "115.238.56.198:7709/login_one",
+  "rows": [
+   {
+    "market": 1,
+    "code": "600519",
+    "price": 1263.0,
+    "last_close": 1255.79,
+    "open": 1255.42,
+    "high": 1282.0,
+    "low": 1255.42,
+    "bid1": 1263.0,
+    "ask1": 1263.06,
+    "amount": 4453223424.0
+   },
+   {
+    "market": 1,
+    "code": "510300",
+    "price": 43.85,
+    "last_close": 43.89,
+    "open": 43.69,
+    "high": 44.0,
+    "low": 43.09,
+    "bid1": 43.85,
+    "ask1": 43.86,
+    "amount": 5564821504.0
+   },
+   {
+    "market": 0,
+    "code": "127045",
+    "price": 11697.1,
+    "last_close": 11618.8,
+    "open": 11616.7,
+    "high": 11755.6,
+    "low": 11544.0,
+    "bid1": 11697.1,
+    "ask1": 11700.0,
+    "amount": 148823088.0
+   },
+   {
+    "market": 0,
+    "code": "159915",
+    "price": 30.64,
+    "last_close": 30.53,
+    "open": 30.29,
+    "high": 30.74,
+    "low": 29.52,
+    "bid1": 30.64,
+    "ask1": 30.65,
+    "amount": 8210662400.0
+   },
+   {
+    "market": 1,
+    "code": "113709",
+    "price": 18185.9,
+    "last_close": 17026.4,
+    "open": 17244.4,
+    "high": 18640.0,
+    "low": 16550.0,
+    "bid1": 18207.9,
+    "ask1": 18210.0,
+    "amount": 1396513152.0
+   },
+   {
+    "market": 1,
+    "code": "999999",
+    "price": 3813.79,
+    "last_close": 3811.9,
+    "open": 3804.09,
+    "high": 3824.71,
+    "low": 3754.14,
+    "bid1": 376755.31,
+    "ask1": 3813.79,
+    "amount": 888561205248.0
+   },
+   {
+    "market": 0,
+    "code": "399300",
+    "price": 4317.25,
+    "last_close": 4310.27,
+    "open": 4297.24,
+    "high": 4330.73,
+    "low": 4239.73,
+    "bid1": 4317.25,
+    "ask1": 4317.25,
+    "amount": 496179118080.0
+   }
+  ]
+ },
+ "findings": [
+  "decimal_point is not a function of instrument type: b_share has 2 and 3, fund/lof 3 and 4, other 2/3/4; the per-security value from the 0x0450 list is required.",
+  "BJ rows (from zhb tdxbjmore) carry no decimal_point (352 rows, None).",
+  "0x053e quotes divided by a fixed 100 are 10x too high for ETFs (510300 43.85 for 4.385, 159915 30.64 for 3.064) and 100x for convertible bonds (127045 11,697.1 for 116.971; 113709 18,185.9 for 181.859); list decimal_point 3 (ETF) and 4 (cb) give the right values via tdx_instruments.scale_quote.",
+  "Index quotes have no order book: 999999 bid1 376,755.31 is not a price.",
+  "addedcode_bj.cfg maps 351 old BJ codes (43xxxx/83xxxx/87xxxx) to 920xxx codes."
+ ]
+}

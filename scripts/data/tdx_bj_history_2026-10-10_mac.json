@@ -1,0 +1,15 @@
+{
+ "observed_at_utc": "2026-10-10T16:05:00+00:00",
+ "egress": "Mac (residential broadband)",
+ "host": "115.238.56.198:7709/login_one",
+ "method": "legacy 0x052d category 9, start 0, count 800, market 2, under the new 920xxx code and under the old code of addedcode_bj.cfg",
+ "rows": [
+  {"new": "920017", "old": "430017", "new_rows": 800, "new_first": "2023-06-19", "new_last": "2026-10-09", "old_rows": 0},
+  {"new": "920047", "old": "430047", "new_rows": 800, "new_first": "2023-06-19", "new_last": "2026-10-09", "old_rows": 0},
+  {"new": "920288", "old": "874709", "new_rows": 25, "new_first": "2026-08-28", "new_last": "2026-10-09", "old_rows": 0}
+ ],
+ "findings": [
+  "The server answers a migrated BJ security's history under its 920xxx code (800 daily bars back to 2023-06-19 for 920017, before the code switch) and nothing under the old code, so translating old codes to new ones at the TDX boundary loses no history.",
+  "920288 (old 874709) has 25 bars from 2026-08-28: its BJ listing is recent."
+ ]
+}

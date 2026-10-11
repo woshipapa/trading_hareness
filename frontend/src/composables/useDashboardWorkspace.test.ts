@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { defineComponent, h, inject, isReadonly, isRef, unref } from 'vue';
+import { defineComponent, h, inject, isReadonly, isRef, provide, unref, type Ref } from 'vue';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
 import { dashboardContextKey } from '../dashboard-context';
 import { useDashboardWorkspace } from './useDashboardWorkspace';
+import DatasourceDirectory from '../views/research/DatasourceDirectory.vue';
 
 // The bindings the research tabs inject, by kind.  Captured from the
 // single-file composable before it was split into ./workspace/ slices; a
@@ -14,27 +15,27 @@ const PUBLIC_BINDINGS = {
     'analystAnnotationAreaStartIndex', 'analystAnnotationLabel', 'analystAnnotationLower',
     'analystAnnotationPointIndex', 'analystAnnotationPrice', 'analystAnnotationSelectionMode',
     'analystAnnotationUpper', 'analystChartAnnotations', 'analystDailyReview', 'analystMarketEvaluation',
-    'analystObservations', 'analystPromptLab', 'analystReadiness', 'analystResearchStatus',
-    'analystReviewRunning', 'analystReviewRuns', 'analystScorecards', 'analystSkills', 'analystStockTimeline',
-    'analystStockTimelineError', 'analystStockTimelineLoading', 'analystSyncHealth', 'analystTimelineAnalyst',
-    'analystTimelineDate', 'analystWeeklyReview', 'announcements', 'attributionValidationGate',
-    'automationRuns', 'backtestForm', 'boardFlowCursor', 'boardFlowDate', 'boardFlowDisplaySlots',
-    'boardFlowError', 'boardFlowFocus', 'boardFlowIsExchangeToday', 'boardFlowLoading', 'boardFlowNotice',
-    'boardFlowSeries', 'boardFlowSnapshots', 'boardFlowTaxonomy', 'boardRotationEvents', 'boardStockMining',
-    'claimReviews', 'claims', 'closeBoardReport', 'closeStrategyReview', 'conceptBackfill', 'conceptCandidates',
-    'conceptSignals', 'dailyStrategySummary', 'factorEvaluations', 'factorHorizon', 'factors', 'featureItems',
-    'frameworks', 'intradayAttributionSummary', 'intradayOutcomeSummary', 'intradayOutcomes', 'lhbEvents',
-    'limitLinkageMining', 'loading', 'mainWaveExperiments', 'marketFlow', 'marketFlowError', 'marketSnapshots',
-    'minuteDirectory', 'minuteImports', 'mobileLayout', 'overview', 'paperStatus', 'postCloseCandidates',
-    'postCloseRefresh', 'postCloseStrategyRun', 'providerApiCapabilities', 'providerHealth', 'qualityIssues',
-    'realtimeError', 'realtimeLoading', 'realtimeProviderHealth', 'realtimeServices', 'recommendations',
-    'remoteMessages', 'replayReadiness', 'reports', 'researchError', 'researchRuns', 'reviewSymbol',
-    'runtimeHealth', 'sectorFlowDate', 'sectorFlows', 'sectorMemberLimit', 'sectorMemberOffset', 'sectors',
-    'selectedFactors', 'selectedReviewBoardKey', 'stockStudy', 'strategies', 'strategyAblation',
-    'strategyContinuationCandidates', 'strategyDragonLeaderCandidates', 'strategyDragonLeaderMarket',
-    'strategyExperiments', 'strategyFunnel', 'strategyGovernance', 'strategyHealth', 'strategyLimitLadder',
-    'strategyLimitPool', 'strategyPatternPicks', 'strategyPatternRun', 'strategyPatternSamples',
-    'strategyPoolCoverage', 'studyError', 'studyLoading', 'studyLookback', 'studySymbol',
+    'analystObservations', 'analystPromptLab', 'analystReadiness', 'analystResearchStatus', 'analystReviewRunning',
+    'analystReviewRuns', 'analystScorecards', 'analystSkills', 'analystStockTimeline', 'analystStockTimelineError',
+    'analystStockTimelineLoading', 'analystSyncHealth', 'analystTimelineAnalyst', 'analystTimelineDate',
+    'analystWeeklyReview', 'announcements', 'attributionValidationGate', 'automationRuns', 'backtestForm',
+    'boardFlowCursor', 'boardFlowDate', 'boardFlowDisplaySlots', 'boardFlowError', 'boardFlowFocus',
+    'boardFlowIsExchangeToday', 'boardFlowLoading', 'boardFlowNotice', 'boardFlowSeries', 'boardFlowSnapshots',
+    'boardFlowTaxonomy', 'boardRotationEvents', 'boardStockMining', 'claimReviews', 'claims', 'closeBoardReport',
+    'closeStrategyReview', 'conceptBackfill', 'conceptCandidates', 'conceptSignals', 'dailyStrategySummary',
+    'datasourceCatalog', 'datasourceCatalogError', 'datasourceCatalogLoading', 'factorEvaluations', 'factorHorizon',
+    'factors', 'featureItems', 'frameworks', 'intradayAttributionSummary', 'intradayOutcomeSummary',
+    'intradayOutcomes', 'lhbEvents', 'limitLinkageMining', 'loading', 'mainWaveExperiments', 'marketFlow',
+    'marketFlowError', 'marketSnapshots', 'minuteDirectory', 'minuteImports', 'mobileLayout', 'overview',
+    'paperStatus', 'postCloseCandidates', 'postCloseRefresh', 'postCloseStrategyRun', 'providerApiCapabilities',
+    'providerHealth', 'qualityIssues', 'realtimeError', 'realtimeLoading', 'realtimeProviderHealth',
+    'realtimeServices', 'recommendations', 'remoteMessages', 'replayReadiness', 'reports', 'researchError',
+    'researchRuns', 'reviewSymbol', 'runtimeHealth', 'sectorFlowDate', 'sectorFlows', 'sectorMemberLimit',
+    'sectorMemberOffset', 'sectors', 'selectedFactors', 'selectedReviewBoardKey', 'stockStudy', 'strategies',
+    'strategyAblation', 'strategyContinuationCandidates', 'strategyDragonLeaderCandidates',
+    'strategyDragonLeaderMarket', 'strategyExperiments', 'strategyFunnel', 'strategyGovernance', 'strategyHealth',
+    'strategyLimitLadder', 'strategyLimitPool', 'strategyPatternPicks', 'strategyPatternRun',
+    'strategyPatternSamples', 'strategyPoolCoverage', 'studyError', 'studyLoading', 'studyLookback', 'studySymbol',
     'tenDayLeaderRotation', 'trainingRoadmap', 'universe', 'universePriority', 'universeText',
   ],
   computed: [
@@ -54,24 +55,23 @@ const PUBLIC_BINDINGS = {
     'attributionCohortLabel', 'attributionDimensionLabel', 'attributionStatusType', 'boardRotationDeliveryText',
     'boardRotationKind', 'boardRotationStateText', 'boardRotationStateType', 'bytesText', 'chinaDateTime',
     'chinaMinute', 'claimDirection', 'clearAnalystChartAnnotations', 'count', 'dateText', 'decideReview',
-    'displayValue', 'featureRecord', 'featureStatusType', 'handleAnalystChartClick', 'healthState',
-    'indexLabel', 'loadAnalystStockTimeline', 'loadBoardFlowCurves', 'loadBoardRotationEvents',
-    'loadBoardStockMining', 'loadLimitLinkageMining', 'loadMarketFlowFeatures', 'loadRealtimeServices',
+    'displayValue', 'featureRecord', 'featureStatusType', 'handleAnalystChartClick', 'healthState', 'indexLabel',
+    'loadAnalystStockTimeline', 'loadBoardFlowCurves', 'loadBoardRotationEvents', 'loadBoardStockMining',
+    'loadDatasourceCatalog', 'loadLimitLinkageMining', 'loadMarketFlowFeatures', 'loadRealtimeServices',
     'loadResearch', 'marketFlowStateLabel', 'marketFlowStateType', 'metricNumber', 'moneyWan', 'nestedNumber',
-    'nestedValue', 'openAnalystStockInTonghuashun', 'openStrategyEvidence', 'outcomePercent',
-    'outcomeStatusType', 'paperSectorExposureItems', 'patternCohortLabel', 'postCloseCandidateLabel',
-    'postCloseCandidateType', 'probeAkshareMacroSupplement', 'probeAkshareSupplement', 'readinessType',
+    'nestedValue', 'openAnalystStockInTonghuashun', 'openStrategyEvidence', 'outcomePercent', 'outcomeStatusType',
+    'paperSectorExposureItems', 'patternCohortLabel', 'postCloseCandidateLabel', 'postCloseCandidateType',
+    'probeAkshareMacroSupplement', 'probeAkshareSupplement', 'readDatasource', 'readinessType',
     'realtimeDeliveryDetail', 'realtimeProviderStateType', 'realtimeStateText', 'realtimeStateType',
     'recommendationDirection', 'recommendationType', 'recomputeAnalystScorecards', 'reconcileStaleFetchRuns',
     'refreshCloseReview', 'resetBoardFlowCurves', 'reviewTierText', 'rowText', 'runAction',
-    'runAnalystMarketReview', 'runBoardResearch', 'runFactorEvaluation', 'runMainWaveResearch',
-    'runMarketSnapshot', 'runPostCloseRefresh', 'runPostCloseStrategy', 'runStockStudy', 'runStrategyBacktest',
+    'runAnalystMarketReview', 'runBoardResearch', 'runFactorEvaluation', 'runMainWaveResearch', 'runMarketSnapshot',
+    'runPostCloseRefresh', 'runPostCloseStrategy', 'runStockStudy', 'runStrategyBacktest',
     'runStrategyPatternMining', 'runTenDayLeaderRotation', 'saveUniverse', 'sectorFlowTransitionLabel',
     'sectorFlowTransitionType', 'selectActiveSection', 'settleIntradayOutcomes', 'snapshotType', 'sourceType',
     'storageText', 'strategyEvidenceAlignmentType', 'studyConceptCandidate', 'studyMarketRecord', 'studyStance',
-    'studyType', 'syncAllMarketUniverse', 'syncCninfoAnnouncements', 'syncConceptCandidates',
-    'syncConceptSignals', 'syncFullMarketDaily', 'syncMobileLayout', 'syncSectorDirectory', 'syncSectorFlows',
-    'syncSectorMembers',
+    'studyType', 'syncAllMarketUniverse', 'syncCninfoAnnouncements', 'syncConceptCandidates', 'syncConceptSignals',
+    'syncFullMarketDaily', 'syncMobileLayout', 'syncSectorDirectory', 'syncSectorFlows', 'syncSectorMembers',
   ],
   value: ['initialPath', 'mobileMediaQuery', 'polling', 'sharedResearchParams', 'sharedResearchSymbol', 'sharedResearchTab'],
 };
@@ -191,6 +191,14 @@ describe('useDashboardWorkspace', () => {
     }
     for (const names of Object.values(kinds)) names.sort();
     expect(kinds).toEqual(PUBLIC_BINDINGS);
+  });
+
+  it('serves the datasource directory from the workspace context it mounts on', async () => {
+    const directory = mount(defineComponent({ setup() { provide(dashboardContextKey, context); return () => h(DatasourceDirectory); } }));
+    await flushPromises();
+    expect(requested).toContain('/api/research/datasources/catalog');
+    expect((context.datasourceCatalog as Ref<{ from?: string }>).value?.from).toBe('/api/research/datasources/catalog');
+    directory.unmount();
   });
 
   it('returns the provided bindings to the shell with refs unwrapped', () => {

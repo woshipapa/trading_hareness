@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from datetime import date, timedelta
 from typing import Any
 
+from .market_flow_repository import REBUILD_BUDGET_SECONDS
+from .market_temperature_intraday import refresh as refresh_intraday_temperature
+from .market_temperature_runtime import refresh as refresh_market_temperature
 from .minute_cross_section_export import export_day as export_minute_panel
 from .request_models import (
     AkShareProbeRequest,
@@ -31,7 +35,8 @@ POST_CLOSE_STAGE_ORDER = (
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
     "analyst_scorecards", "analyst_expert_research", "post_close_strategy", "decision_research_closure",
     "watchlist_main_wave", "teacher_review_roll", "watch_daily_review", "xiaojie_outcomes", "research_snapshot",
-    "candidate_ledger", "minute_panel_export",
+    "market_temperature", "market_temperature_intraday", "broad_etf_flow", "market_timing", "candidate_ledger",
+    "minute_panel_export",
 )
 
 POST_CLOSE_TIMEOUT_OVERRIDES = {
@@ -66,6 +71,10 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     "candidate_ledger": 180.0,
     # A session's minute documents to one Parquet file (decision 0009); about 240 reads.
     "minute_panel_export": 600.0,
+    "market_temperature": 180.0,
+    "market_temperature_intraday": 300.0,
+    "broad_etf_flow": 180.0,
+    "market_timing": 120.0,
 }
 
 POST_CLOSE_STAGE_DEPENDENCIES = {
@@ -148,6 +157,10 @@ class PostCloseRefreshDependencies:
     reconcile_daily_controls: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     # Forward exchange calendar (Tushare trade_cal's replacement since 2026-10-08).
     sync_forward_calendar: Callable[[], Awaitable[dict[str, Any]]] | None = None
+    # Decision 0013: the broad-ETF basket bars and their daily turnover ratio.
+    refresh_broad_etf_flow: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    # Decision 0013: the golden / silver finger (2560) state of the SSE composite.
+    refresh_market_timing: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -244,8 +257,10 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             if longhu_mode else
             dependencies.sync_ths_concept_flow(SectorFlowSyncRequest(trade_date=trade_date, provider="super"))
         ),
+        # The rebuild ends itself inside its budget: a timed-out caller cannot stop the executor thread.
         "market_flow_features": lambda: dependencies.run_database(
-            dependencies.rebuild_market_flow_features, dependencies.database, trade_date, trade_date, timeout_seconds=90,
+            partial(dependencies.rebuild_market_flow_features, budget_seconds=REBUILD_BUDGET_SECONDS),
+            dependencies.database, trade_date, trade_date, timeout_seconds=90,
         ),
         "limit_ladder": limit_ladder_stage,
         "limit_lift_pattern_mining": lambda: dependencies.run_pattern_mining(
@@ -324,6 +339,25 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         # A session stored only per symbol (before the switch) has no documents and reports "missing".
         "minute_panel_export": lambda: dependencies.run_database(
             export_minute_panel, dependencies.database, trade_date, timeout_seconds=600,
+        ),
+        # Decision 0013. It reads the bars and limits already stored for the session,
+        # whichever pipeline wrote them, so it waits on no stage receipt.
+        "market_temperature": lambda: dependencies.run_database(
+            refresh_market_temperature, dependencies.database, trade_date, timeout_seconds=180,
+        ),
+        # The session's five-minute samples, stored so a finished day reads back without its minute documents.
+        "market_temperature_intraday": lambda: dependencies.run_database(
+            refresh_intraday_temperature, dependencies.database, trade_date, timeout_seconds=300,
+        ),
+        "broad_etf_flow": (
+            (lambda: dependencies.refresh_broad_etf_flow(trade_date))
+            if dependencies.refresh_broad_etf_flow is not None
+            else (lambda: {"status": "skipped", "reason": "broad-ETF flow not wired", "research_only": True})
+        ),
+        "market_timing": (
+            (lambda: dependencies.refresh_market_timing(trade_date))
+            if dependencies.refresh_market_timing is not None
+            else (lambda: {"status": "skipped", "reason": "market timing not wired", "research_only": True})
         ),
     }
 

@@ -199,8 +199,9 @@ class BatchedPersistenceTests(unittest.TestCase):
         self.assertEqual(stored, 1)
         sql, rows = database.calls[0]
         self.assertIn("raw_market_observations", sql)
-        provider, capability, symbol, effective, available, _sha, payload, _normalized = rows[0]
+        provider, capability, symbol, effective, available, basis, _sha, payload, _normalized = rows[0]
         self.assertEqual((provider, capability, symbol), ("cls_telegraph", "news_flash", None))
+        self.assertIsNone(basis)
         self.assertEqual(effective.isoformat(), "2026-09-18T02:00:00+00:00")
         self.assertEqual(available.isoformat(), "2026-09-18T02:01:00+00:00")
         self.assertNotIn("available_at", payload.obj)     # identical facts hash identically

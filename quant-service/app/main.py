@@ -55,6 +55,7 @@ from .daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload
 from .daily_control_reconciliation import read_coverage as read_daily_control_coverage
 from .daily_control_reconciliation import reconcile as reconcile_daily_control_coverage
 from .owner_factor_repository import read_persisted_factor_controls, read_persisted_factor_window
+from .owner_daily_control_repository import read_persisted_control_rows
 from .async_provider_circuit_repository import open_capabilities as read_async_open_provider_capabilities
 from .async_provider_circuit_repository import open_provider_keys as read_async_open_provider_keys
 from .async_market_session_repository import (
@@ -78,6 +79,8 @@ from .public_market_repository import (
 )
 from .factor_sql_lab import MULTI_FACTOR_MODEL_VERSION, evaluate_factor_set, run_multi_factor_strategy_sql
 from .board_flow_drill import MODEL_VERSION as BOARD_FLOW_DRILL_MODEL_VERSION
+from .broad_etf_flow import refresh as refresh_broad_etf_flow
+from .market_timing import refresh as refresh_market_timing
 from .dragon_leader_research import MODEL_VERSION as DRAGON_LEADER_MODEL_VERSION
 from .research_experiment_service import (
     ResearchExperimentDependencies,
@@ -527,6 +530,8 @@ from .routers.board_stock_mining_reads import build_board_stock_mining_reads_rou
 from .routers.limit_linkage_mining_reads import build_limit_linkage_mining_reads_router
 from .routers.board_curve_reads import build_board_curve_reads_router
 from .routers.research_catalog_reads import build_research_catalog_reads_router
+from .routers.datasource_catalog import build_datasource_catalog_router
+from .routers.datasource_reads import build_datasource_reads_router
 from .routers.intraday_outcome_reads import build_intraday_outcome_reads_router
 from .routers.sector_reads import build_sector_reads_router
 from .routers.intraday_evidence_reads import build_intraday_evidence_reads_router
@@ -1515,43 +1520,9 @@ def _read_persisted_factor_controls(trade_date: date) -> dict[str, Any]:
 
 
 def _read_persisted_control_rows(api_name: str, trade_date: date) -> dict[str, Any] | None:
-    """Read a complete owner projection before using a remote fallback."""
-    if api_name not in {"daily_basic", "stk_limit", "suspend_d"}:
-        return None
+    """Delegate dated projection reads; mixed daily-basic provenance stays per row."""
     with db.transaction() as connection:
-        table, date_column = {
-            "daily_basic": ("quant.daily_fundamentals", "trading_date"),
-            "stk_limit": ("quant.daily_trade_limits", "trading_date"),
-            "suspend_d": ("quant.security_suspensions", "suspend_date"),
-        }[api_name]
-        provider_row = connection.execute(
-            f"""SELECT provider,count(DISTINCT symbol)::int AS symbols
-                  FROM {table}
-                 WHERE {date_column}=%s
-                   AND available_at < (({date_column}+1)::timestamp AT TIME ZONE 'Asia/Shanghai')
-                 GROUP BY provider ORDER BY symbols DESC,provider LIMIT 1""",
-            (trade_date,),
-        ).fetchone()
-        if not provider_row:
-            return None
-        provider = str(provider_row["provider"])
-        if api_name == "daily_basic":
-            projection = "symbol AS ts_code,to_char(trading_date,'YYYYMMDD') AS trade_date,close,turnover_rate,volume_ratio,pe,pb,total_share,float_share,total_mv,circ_mv"
-        elif api_name == "stk_limit":
-            projection = "symbol AS ts_code,to_char(trading_date,'YYYYMMDD') AS trade_date,limit_up,limit_down"
-        else:
-            projection = "symbol AS ts_code,to_char(suspend_date,'YYYYMMDD') AS trade_date,suspend_reason,resume_date"
-        rows = connection.execute(
-            f"""SELECT {projection}
-                  FROM {table}
-                 WHERE {date_column}=%s AND provider=%s
-                   AND available_at < (({date_column}+1)::timestamp AT TIME ZONE 'Asia/Shanghai')""",
-            (trade_date, provider),
-        ).fetchall()
-    return {
-        "rows": [dict(row) for row in rows], "provider": provider,
-        "trade_date": trade_date.isoformat(), "source": f"owner_persisted_{api_name}",
-    }
+        return read_persisted_control_rows(connection, api_name, trade_date)
 
 
 def upsert_sector_taxonomy(connection: Any, taxonomy_key: str, label: str, provider_key: str, metadata: dict[str, Any]) -> None:
@@ -3852,6 +3823,10 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         xiaojie_outcomes=lambda trade_date: run_database_blocking(
             settle_xiaojie_recent_sessions, trade_date, timeout_seconds=110),
         sync_forward_calendar=sync_forward_trade_calendar,
+        refresh_broad_etf_flow=lambda trade_date: refresh_broad_etf_flow(
+            db, trade_date, run_database=run_database_blocking),
+        refresh_market_timing=lambda trade_date: refresh_market_timing(
+            db, trade_date, run_database=run_database_blocking),
     )
 
 
@@ -4378,6 +4353,8 @@ app.include_router(build_board_curve_reads_router(
 ))
 app.include_router(build_market_flow_reads_router(db, async_database=async_db))
 app.include_router(build_research_catalog_reads_router(db, async_db))
+app.include_router(build_datasource_catalog_router())
+app.include_router(build_datasource_reads_router())
 app.include_router(build_intraday_outcome_reads_router(
     db, intraday_point_in_time_market_context_batch, intraday_signal_attribution, intraday_outcome_attribution_summary,
     async_database=async_db,

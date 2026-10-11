@@ -1,0 +1,3056 @@
+{
+  "schema": "tdx-route-matrix-v2",
+  "egress": "owner",
+  "profile": "login_one",
+  "require": [
+    "quotes",
+    "bars",
+    "ticks_hist"
+  ],
+  "timeout_s": 5.0,
+  "threads": 12,
+  "hist_date": "2026-10-09",
+  "samples": [
+    {
+      "probed_at_utc": "2026-10-10T08:21:46.269774Z",
+      "results": [
+        {
+          "host": "218.85.139.19",
+          "port": 7709,
+          "connect_ms": 5007.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "218.85.139.20",
+          "port": 7709,
+          "connect_ms": 5008.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "58.23.131.163",
+          "port": 7709,
+          "connect_ms": 5007.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "218.6.170.47",
+          "port": 7709,
+          "connect_ms": 80.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 59.9
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 47.1
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 115.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "123.125.108.14",
+          "port": 7709,
+          "connect_ms": 61.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 32.0
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 44.4
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 107.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "180.153.18.170",
+          "port": 7709,
+          "connect_ms": 23.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 13.8
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 18.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 74.8
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "180.153.18.171",
+          "port": 7709,
+          "connect_ms": 5003.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "202.108.253.130",
+          "port": 7709,
+          "connect_ms": 5003.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "202.108.253.131",
+          "port": 7709,
+          "connect_ms": 5003.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "60.191.117.167",
+          "port": 7709,
+          "connect_ms": 25.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 14.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 19.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 86.8
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "115.238.56.198",
+          "port": 7709,
+          "connect_ms": 15.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 9.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 9.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 35.6
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "218.75.126.9",
+          "port": 7709,
+          "connect_ms": 15.4,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 10.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 10.4
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 48.3
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "115.238.90.165",
+          "port": 7709,
+          "connect_ms": 26.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 19.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 18.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 53.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "124.160.88.183",
+          "port": 7709,
+          "connect_ms": 5007.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "60.12.136.250",
+          "port": 7709,
+          "connect_ms": 26.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 10.6
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 10.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 69.6
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "218.108.98.244",
+          "port": 7709,
+          "connect_ms": 5004.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "218.108.47.69",
+          "port": 7709,
+          "connect_ms": 5010.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "223.94.89.115",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "218.57.11.101",
+          "port": 7709,
+          "connect_ms": 5003.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "58.58.33.123",
+          "port": 7709,
+          "connect_ms": 5005.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "14.17.75.71",
+          "port": 7709,
+          "connect_ms": 5005.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "114.80.63.12",
+          "port": 7709,
+          "connect_ms": 5005.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "114.80.63.35",
+          "port": 7709,
+          "connect_ms": 5005.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "180.153.39.51",
+          "port": 7709,
+          "connect_ms": 5005.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "119.147.212.81",
+          "port": 7709,
+          "connect_ms": 5005.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "221.231.141.60",
+          "port": 7709,
+          "connect_ms": 5005.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "101.227.73.20",
+          "port": 7709,
+          "connect_ms": 59.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "OSError"
+        },
+        {
+          "host": "101.227.77.254",
+          "port": 7709,
+          "connect_ms": 5004.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "14.215.128.18",
+          "port": 7709,
+          "connect_ms": 25.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "59.173.18.140",
+          "port": 7709,
+          "connect_ms": 5004.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "60.28.23.80",
+          "port": 7709,
+          "connect_ms": 5003.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "218.60.29.136",
+          "port": 7709,
+          "connect_ms": 5006.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "122.192.35.44",
+          "port": 7709,
+          "connect_ms": 5005.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "112.95.140.74",
+          "port": 7709,
+          "connect_ms": 5004.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "112.95.140.92",
+          "port": 7709,
+          "connect_ms": 5005.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "112.95.140.93",
+          "port": 7709,
+          "connect_ms": 5004.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "114.80.149.19",
+          "port": 7709,
+          "connect_ms": 9.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "114.80.149.21",
+          "port": 7709,
+          "connect_ms": 12.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "114.80.149.22",
+          "port": 7709,
+          "connect_ms": 5004.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "121.14.104.60",
+          "port": 7709,
+          "connect_ms": 5004.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "123.126.133.13",
+          "port": 7709,
+          "connect_ms": 5004.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "119.29.19.242",
+          "port": 7709,
+          "connect_ms": 74.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 39.0
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 38.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 116.0
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "183.60.224.177",
+          "port": 7709,
+          "connect_ms": 61.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 30.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 30.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 97.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "183.60.224.178",
+          "port": 7709,
+          "connect_ms": 58.6,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 37.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 37.3
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 100.8
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "113.105.92.100",
+          "port": 7709,
+          "connect_ms": 5003.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "113.105.92.101",
+          "port": 7709,
+          "connect_ms": 5001.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "117.34.114.13",
+          "port": 7709,
+          "connect_ms": 63.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 37.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 31.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 84.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "117.34.114.14",
+          "port": 7709,
+          "connect_ms": 69.7,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 31.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 31.3
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 108.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "117.34.114.15",
+          "port": 7709,
+          "connect_ms": 59.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 32.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 31.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 88.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "182.131.3.252",
+          "port": 7709,
+          "connect_ms": 39.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "58.63.254.247",
+          "port": 7709,
+          "connect_ms": 25.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "123.125.108.90",
+          "port": 7709,
+          "connect_ms": 57.8,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 35.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 29.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 155.1
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "175.6.5.153",
+          "port": 7709,
+          "connect_ms": 60.3,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 31.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 28.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 71.3
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "182.118.47.151",
+          "port": 7709,
+          "connect_ms": 73.5,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 37.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 37.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 106.1
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "182.131.3.245",
+          "port": 7709,
+          "connect_ms": 74.8,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 39.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 40.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 117.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "202.100.166.27",
+          "port": 7709,
+          "connect_ms": 125.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 68.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 69.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 191.5
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "58.63.254.191",
+          "port": 7709,
+          "connect_ms": 54.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 56.3
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 30.1
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 116.7
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "58.63.254.217",
+          "port": 7709,
+          "connect_ms": 54.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 29.6
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 35.1
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 125.0
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "202.100.166.21",
+          "port": 7709,
+          "connect_ms": 59.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "202.96.138.90",
+          "port": 7709,
+          "connect_ms": 23.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "218.106.92.182",
+          "port": 7709,
+          "connect_ms": 68.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 24.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 23.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 165.5
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "218.106.92.183",
+          "port": 7709,
+          "connect_ms": 47.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 24.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 24.3
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 163.0
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "220.178.55.71",
+          "port": 7709,
+          "connect_ms": 31.7,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 18.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 18.4
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 122.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "113.105.73.88",
+          "port": 7709,
+          "connect_ms": 5001.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "106.120.74.86",
+          "port": 7709,
+          "connect_ms": 5022.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "114.67.61.70",
+          "port": 7709,
+          "connect_ms": 5003.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "114.80.149.84",
+          "port": 7709,
+          "connect_ms": 9.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "114.80.80.222",
+          "port": 7709,
+          "connect_ms": 22.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "OSError"
+        },
+        {
+          "host": "117.184.140.156",
+          "port": 7709,
+          "connect_ms": 5005.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "119.147.164.60",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "119.147.171.206",
+          "port": 7709,
+          "connect_ms": 5006.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "119.29.51.30",
+          "port": 7709,
+          "connect_ms": 5005.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "121.14.104.70",
+          "port": 7709,
+          "connect_ms": 5006.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "121.14.104.72",
+          "port": 7709,
+          "connect_ms": 5004.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "121.14.110.194",
+          "port": 7709,
+          "connect_ms": 5005.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "121.14.2.7",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "123.125.108.23",
+          "port": 7709,
+          "connect_ms": 31.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "123.125.108.24",
+          "port": 7709,
+          "connect_ms": 30.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "180.153.18.17",
+          "port": 7709,
+          "connect_ms": 5005.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "218.108.50.178",
+          "port": 7709,
+          "connect_ms": 5001.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "218.9.148.108",
+          "port": 7709,
+          "connect_ms": 5003.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "221.194.181.176",
+          "port": 7709,
+          "connect_ms": 5000.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "59.173.18.69",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "60.28.29.69",
+          "port": 7709,
+          "connect_ms": 5004.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "61.135.142.73",
+          "port": 7709,
+          "connect_ms": 5005.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "61.135.142.88",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "110.41.147.114",
+          "port": 7709,
+          "connect_ms": 64.6,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 34.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 34.7
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 93.6
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "8.129.13.54",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "120.24.149.49",
+          "port": 7709,
+          "connect_ms": 5005.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.113.94.204",
+          "port": 7709,
+          "connect_ms": 5002.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "8.129.174.169",
+          "port": 7709,
+          "connect_ms": 5005.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "110.41.154.219",
+          "port": 7709,
+          "connect_ms": 5004.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "124.70.176.52",
+          "port": 7709,
+          "connect_ms": 5004.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.100.236.28",
+          "port": 7709,
+          "connect_ms": 5004.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "101.133.214.242",
+          "port": 7709,
+          "connect_ms": 5003.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.116.21.80",
+          "port": 7709,
+          "connect_ms": 5004.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.116.105.28",
+          "port": 7709,
+          "connect_ms": 10.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "124.70.199.56",
+          "port": 7709,
+          "connect_ms": 24.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 14.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 14.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 42.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "121.36.54.217",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "121.36.81.195",
+          "port": 7709,
+          "connect_ms": 5005.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "123.249.15.60",
+          "port": 7709,
+          "connect_ms": 5004.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "124.71.85.110",
+          "port": 7709,
+          "connect_ms": 5005.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "139.9.51.18",
+          "port": 7709,
+          "connect_ms": 5004.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "139.159.239.163",
+          "port": 7709,
+          "connect_ms": 5004.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "106.14.201.131",
+          "port": 7709,
+          "connect_ms": 5004.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "106.14.190.242",
+          "port": 7709,
+          "connect_ms": 5005.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "121.36.225.169",
+          "port": 7709,
+          "connect_ms": 29.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 16.9
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 21.1
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 47.6
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "123.60.70.228",
+          "port": 7709,
+          "connect_ms": 25.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 14.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 15.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 49.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "123.60.73.44",
+          "port": 7709,
+          "connect_ms": 26.6,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 21.0
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 21.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 48.5
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "124.70.133.119",
+          "port": 7709,
+          "connect_ms": 38.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 15.8
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 15.7
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 47.8
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "124.71.187.72",
+          "port": 7709,
+          "connect_ms": 25.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 16.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 15.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 49.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "124.71.187.122",
+          "port": 7709,
+          "connect_ms": 27.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 21.2
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 16.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 51.8
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "119.97.185.59",
+          "port": 7709,
+          "connect_ms": 43.6,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 27.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 23.4
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 60.5
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "47.107.64.168",
+          "port": 7709,
+          "connect_ms": 5013.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "124.70.75.113",
+          "port": 7709,
+          "connect_ms": 5005.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "124.71.9.153",
+          "port": 7709,
+          "connect_ms": 65.3,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 37.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 35.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 93.3
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "123.60.84.66",
+          "port": 7709,
+          "connect_ms": 33.6,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 21.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 19.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 62.1
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "47.107.228.47",
+          "port": 7719,
+          "connect_ms": 5003.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "120.46.186.223",
+          "port": 7709,
+          "connect_ms": 5003.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "124.70.22.210",
+          "port": 7709,
+          "connect_ms": 5003.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "139.9.133.247",
+          "port": 7709,
+          "connect_ms": 5005.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "116.205.163.254",
+          "port": 7709,
+          "connect_ms": 64.3,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 34.6
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 34.6
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 87.1
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "116.205.171.132",
+          "port": 7709,
+          "connect_ms": 62.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 33.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 33.6
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 83.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "116.205.183.150",
+          "port": 7709,
+          "connect_ms": 58.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 31.6
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 31.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 98.0
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "39.108.28.83",
+          "port": 7709,
+          "connect_ms": 70.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 34.3
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 34.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 82.5
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "58.249.119.236",
+          "port": 7709,
+          "connect_ms": 5010.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "183.240.166.230",
+          "port": 7709,
+          "connect_ms": 5003.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "61.49.50.190",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "39.105.251.234",
+          "port": 7709,
+          "connect_ms": 66.7,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 36.0
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 41.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 95.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "59.36.5.11",
+          "port": 7709,
+          "connect_ms": 56.7,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 30.2
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 30.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 75.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "117.34.114.18",
+          "port": 7709,
+          "connect_ms": 67.4,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 37.6
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 35.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 88.1
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "118.25.98.114",
+          "port": 7709,
+          "connect_ms": 32.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 18.0
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 18.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 53.0
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "122.51.120.217",
+          "port": 7709,
+          "connect_ms": 26.5,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 15.6
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 18.6
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 44.5
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "122.51.232.182",
+          "port": 7709,
+          "connect_ms": 35.4,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 19.2
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 19.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 52.1
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "124.223.163.242",
+          "port": 7709,
+          "connect_ms": 37.3,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 19.0
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 18.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 51.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "150.158.160.2",
+          "port": 7709,
+          "connect_ms": 25.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 14.9
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 14.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 47.7
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "101.35.121.35",
+          "port": 7709,
+          "connect_ms": 33.3,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 16.3
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 16.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 45.8
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "111.231.113.208",
+          "port": 7709,
+          "connect_ms": 27.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 17.9
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 14.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 43.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "62.234.50.143",
+          "port": 7709,
+          "connect_ms": 75.6,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 44.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 40.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 99.5
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "81.70.151.186",
+          "port": 7709,
+          "connect_ms": 62.3,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 33.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 33.6
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 85.1
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "101.42.240.54",
+          "port": 7709,
+          "connect_ms": 74.6,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 41.9
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 38.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 91.0
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "101.43.159.194",
+          "port": 7709,
+          "connect_ms": 77.5,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 37.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 36.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 87.5
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "120.53.8.251",
+          "port": 7709,
+          "connect_ms": 65.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 34.8
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 34.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 83.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "152.136.191.169",
+          "port": 7709,
+          "connect_ms": 64.8,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 34.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 37.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 90.6
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "49.232.15.141",
+          "port": 7709,
+          "connect_ms": 68.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 42.3
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 37.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 86.7
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "82.156.174.84",
+          "port": 7709,
+          "connect_ms": 84.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 43.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 43.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 104.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "101.42.164.241",
+          "port": 7709,
+          "connect_ms": 71.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 38.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 38.3
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 97.0
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "111.230.186.52",
+          "port": 7709,
+          "connect_ms": 77.8,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 42.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 44.1
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 95.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "101.33.225.16",
+          "port": 7709,
+          "connect_ms": 81.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 43.6
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 46.3
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 107.8
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "175.178.112.197",
+          "port": 7709,
+          "connect_ms": 76.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 43.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 45.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 101.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "175.178.128.227",
+          "port": 7709,
+          "connect_ms": 75.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 39.3
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 40.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 91.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "43.139.95.83",
+          "port": 7709,
+          "connect_ms": 87.7,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 40.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 45.3
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 98.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "159.75.29.111",
+          "port": 7709,
+          "connect_ms": 89.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 47.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 44.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 114.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "43.139.18.171",
+          "port": 7709,
+          "connect_ms": 72.3,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 38.4
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 39.4
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 102.7
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "81.71.32.47",
+          "port": 7709,
+          "connect_ms": 93.4,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 45.3
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 45.9
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 105.3
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "129.204.230.128",
+          "port": 7709,
+          "connect_ms": 94.7,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 43.7
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 43.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 100.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "121.36.248.138",
+          "port": 7709,
+          "connect_ms": 25.6,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 15.0
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 15.0
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 54.8
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "123.60.47.136",
+          "port": 7709,
+          "connect_ms": 27.7,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 16.3
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 16.3
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 49.9
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "121.37.207.165",
+          "port": 7709,
+          "connect_ms": 86.1,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 40.9
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 38.1
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 84.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "112.74.214.43",
+          "port": 7727,
+          "connect_ms": 60.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "120.25.218.6",
+          "port": 7727,
+          "connect_ms": 61.4,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "47.107.75.159",
+          "port": 7727,
+          "connect_ms": 5001.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.106.204.218",
+          "port": 7727,
+          "connect_ms": 5011.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.106.209.131",
+          "port": 7727,
+          "connect_ms": 5004.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "119.97.185.5",
+          "port": 7727,
+          "connect_ms": 5003.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.115.94.72",
+          "port": 7727,
+          "connect_ms": 5004.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "106.14.95.149",
+          "port": 7727,
+          "connect_ms": 5011.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.102.108.214",
+          "port": 7727,
+          "connect_ms": 19.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionResetError"
+        },
+        {
+          "host": "47.103.86.229",
+          "port": 7727,
+          "connect_ms": 5005.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "47.103.88.146",
+          "port": 7727,
+          "connect_ms": 5003.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "116.205.143.214",
+          "port": 7727,
+          "connect_ms": 59.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "124.71.223.19",
+          "port": 7727,
+          "connect_ms": 59.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "175.24.47.69",
+          "port": 7727,
+          "connect_ms": 24.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "150.158.9.199",
+          "port": 7727,
+          "connect_ms": 23.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "150.158.20.127",
+          "port": 7727,
+          "connect_ms": 24.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionResetError"
+        },
+        {
+          "host": "49.235.119.116",
+          "port": 7727,
+          "connect_ms": 27.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "49.234.13.160",
+          "port": 7727,
+          "connect_ms": 24.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "123.60.173.210",
+          "port": 7727,
+          "connect_ms": 18.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "118.89.69.202",
+          "port": 7727,
+          "connect_ms": 19.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "43.139.173.246",
+          "port": 7727,
+          "connect_ms": 67.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "159.75.90.107",
+          "port": 7727,
+          "connect_ms": 71.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "106.52.170.195",
+          "port": 7727,
+          "connect_ms": 70.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "139.9.191.175",
+          "port": 7727,
+          "connect_ms": 249.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionResetError"
+        },
+        {
+          "host": "113.45.175.47",
+          "port": 7727,
+          "connect_ms": 57.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "47.112.95.207",
+          "port": 7720,
+          "connect_ms": 30.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "218.75.75.18",
+          "port": 7720,
+          "connect_ms": 11.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionRefusedError"
+        },
+        {
+          "host": "58.49.110.76",
+          "port": 7720,
+          "connect_ms": 5004.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "120.76.152.87",
+          "port": 7709,
+          "connect_ms": 53.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 0,
+              "usable": false,
+              "ms": 26.8,
+              "error": "ConnectionResetError"
+            },
+            "bars": {
+              "rows": 0,
+              "usable": false,
+              "ms": 0.1,
+              "error": "BrokenPipeError"
+            },
+            "ticks_hist": {
+              "rows": 0,
+              "usable": false,
+              "ms": 0.1,
+              "error": "BrokenPipeError"
+            }
+          },
+          "usable": false
+        },
+        {
+          "host": "119.3.157.89",
+          "port": 7615,
+          "connect_ms": 21.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "139.9.211.159",
+          "port": 7615,
+          "connect_ms": 54.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionResetError"
+        },
+        {
+          "host": "121.37.193.4",
+          "port": 7615,
+          "connect_ms": 53.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "124.71.56.161",
+          "port": 7615,
+          "connect_ms": 58.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "123.60.69.160",
+          "port": 7615,
+          "connect_ms": 21.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "123.60.149.213",
+          "port": 7615,
+          "connect_ms": 25.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "118.25.106.154",
+          "port": 7615,
+          "connect_ms": 27.8,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "ConnectionResetError"
+        },
+        {
+          "host": "129.204.254.13",
+          "port": 7615,
+          "connect_ms": 77.9,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "159.75.115.35",
+          "port": 7615,
+          "connect_ms": 72.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "82.157.190.225",
+          "port": 7615,
+          "connect_ms": 63.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "121.36.192.253",
+          "port": 7615,
+          "connect_ms": 21.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "124.71.105.217",
+          "port": 7615,
+          "connect_ms": 55.6,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "hq.cjis.cn",
+          "port": 7709,
+          "connect_ms": 20037.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "hq1.daton.com.cn",
+          "port": 7709,
+          "connect_ms": 10.2,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "gaierror"
+        },
+        {
+          "host": "jstdx.gtjas.com",
+          "port": 7709,
+          "connect_ms": 89.2,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 17.8
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 17.8
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 50.2
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "shtdx.gtjas.com",
+          "port": 7709,
+          "connect_ms": 98.4,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 20.1
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 24.2
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 115.6
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "sztdx.gtjas.com",
+          "port": 7709,
+          "connect_ms": 78.9,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 37.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 31.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 100.4
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "116.205.135.205",
+          "port": 7727,
+          "connect_ms": 55.7,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "121.37.232.167",
+          "port": 7727,
+          "connect_ms": 66.0,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TdxProtocolError"
+        },
+        {
+          "host": "110.41.4.4",
+          "port": 7709,
+          "connect_ms": 5005.3,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "123.60.186.45",
+          "port": 7709,
+          "connect_ms": 5001.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "123.60.164.122",
+          "port": 7709,
+          "connect_ms": 24.0,
+          "profile": "login_one",
+          "commands": {
+            "quotes": {
+              "rows": 2,
+              "usable": true,
+              "ms": 14.5
+            },
+            "bars": {
+              "rows": 5,
+              "usable": true,
+              "ms": 14.5
+            },
+            "ticks_hist": {
+              "rows": 4000,
+              "usable": true,
+              "ms": 44.0
+            }
+          },
+          "usable": true
+        },
+        {
+          "host": "114.115.234.36",
+          "port": 7709,
+          "connect_ms": 5003.5,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        },
+        {
+          "host": "119.147.212.82",
+          "port": 7709,
+          "connect_ms": 5005.1,
+          "profile": "login_one",
+          "commands": {},
+          "usable": false,
+          "connect_error": "TimeoutError"
+        }
+      ]
+    }
+  ]
+}

@@ -8,6 +8,7 @@ const ResearchOverviewTab = defineAsyncComponent(() => import('./views/research/
 const MarketSnapshotsTab = defineAsyncComponent(() => import('./views/research/MarketSnapshotsTab.vue'));
 const CloseReviewTab = defineAsyncComponent(() => import('./views/research/CloseReviewTab.vue'));
 const SessionRadarTab = defineAsyncComponent(() => import('./views/research/SessionRadarTab.vue'));
+const SentimentTemperatureTab = defineAsyncComponent(() => import('./views/research/SentimentTemperatureTab.vue'));
 const StrategyTab = defineAsyncComponent(() => import('./views/research/StrategyTab.vue'));
 const FactorLabTab = defineAsyncComponent(() => import('./views/research/FactorLabTab.vue'));
 const StockStudyTab = defineAsyncComponent(() => import('./views/research/StockStudyTab.vue'));
@@ -43,6 +44,9 @@ const PersonalDecisionView = defineAsyncComponent(() => import('./views/Personal
             </el-tab-pane>
             <el-tab-pane label="盘面雷达与战法" name="session-radar" lazy>
               <SessionRadarTab />
+            </el-tab-pane>
+            <el-tab-pane label="情绪温度" name="sentiment-temperature" lazy>
+              <SentimentTemperatureTab />
             </el-tab-pane>
             <el-tab-pane label="收盘复盘" name="close-review">
               <CloseReviewTab />

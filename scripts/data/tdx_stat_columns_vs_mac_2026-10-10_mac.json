@@ -1,0 +1,27 @@
+{
+ "observed_at_utc": "2026-10-10T16:07:41+00:00",
+ "egress": "Mac (residential broadband)",
+ "files": "tdxstat.cfg and tdxstat2.cfg from zhb.zip (md5 fa3f6929fb22eeec5240b01b9d40922f), downloaded 2026-10-10 15:22 UTC; rows dated 20261009",
+ "mac_host": "121.36.248.138:7709",
+ "method": "every 60th SZ/SH equity row present in both files (80 securities); MAC 0x122b batch with bits 45, 48, 49, 53, 54, 59, 60, 65, 68, 69, 87, 88; a column matches a bit when |file - MAC| <= max(0.011, 0.2 %) (open_amount compared / 1e4)",
+ "matches_80_of_80_unless_noted": {
+  "tdxstat col 3": "pe_static (bit 49)",
+  "tdxstat col 9": "pe_ttm (bit 48)",
+  "tdxstat col 11": "circulating_capital_z (bit 45), identical values (000001 816,056.56; 600519 54,094.90; 300750 282,052.32; 688981 180,066.49)",
+  "tdxstat col 18": "bit 0x3b (59) read as float32 (the registry decodes it as uint32: 3199079547 for 000001 = float32 -0.34 = col 18)",
+  "tdxstat col 20": "change_60d_pct (bit 68)",
+  "tdxstat col 21": "ytd_pct (bit 60)",
+  "tdxstat col 26": "annual_limit_up_days (bit 88)",
+  "tdxstat col 28": "change_5d_pct (bit 69)",
+  "tdxstat2 col 12": "change_1y_pct (bit 65)",
+  "tdxstat2 col 14": "open_amount (bit 87) / 1e4, 79 of 80",
+  "tdxstat2 col 17": "bit 53 (52-week high per docs/archive/tdx-q-stats.md)",
+  "tdxstat2 col 18": "bit 54 (52-week low)"
+ },
+ "findings": [
+  "The column dictionary of docs/archive/tdx-q-stats.md holds on a fresh sample: tdxstat col 3 is PE static and col 9 PE TTM. tdx_files.parse_tdxstat on origin/main names them the other way round (pe_ttm = col 3, pe_static = col 9).",
+  "tdxstat col 11 equals MAC bit 45 'circulating_capital_z' (registry unit 10k shares, low confidence). It is not the float share count: 600519 54,094.90 is about 43 % of its 125,619.78 (10k) shares and 000001 about 42 %, which looks like free float, but no reference was compared: meaning UNKNOWN beyond the identity.",
+  "tdxstat col 27 is not change_1y (that is tdxstat2 col 12); the dictionary has it as the 4-day change.",
+  "MAC bit 0x3b is a float32 (the 20-day change), confirming the open item on its uint32 decoding."
+ ]
+}

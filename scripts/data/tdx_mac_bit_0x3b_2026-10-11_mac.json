@@ -1,0 +1,194 @@
+{
+ "observed_at_utc": "2026-10-10T17:31:56.775356+00:00",
+ "mac_host": "121.36.248.138:7709",
+ "rows": [
+  {
+   "symbol": "000001.SZ",
+   "bit_0x3b_float32": -0.34,
+   "bars_20d_pct": -2.441,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": false,
+   "capital_events_in_window": [
+    {
+     "date": "2026-09-24",
+     "category": "1"
+    }
+   ]
+  },
+  {
+   "symbol": "600519.SH",
+   "bit_0x3b_float32": -2.76,
+   "bars_20d_pct": -2.762,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": []
+  },
+  {
+   "symbol": "300750.SZ",
+   "bit_0x3b_float32": -14.81,
+   "bars_20d_pct": -14.807,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": [
+    {
+     "date": "2026-09-10",
+     "category": "5"
+    },
+    {
+     "date": "2026-09-11",
+     "category": "5"
+    },
+    {
+     "date": "2026-09-16",
+     "category": "5"
+    },
+    {
+     "date": "2026-09-21",
+     "category": "5"
+    },
+    {
+     "date": "2026-09-24",
+     "category": "5"
+    }
+   ]
+  },
+  {
+   "symbol": "688981.SH",
+   "bit_0x3b_float32": -12.47,
+   "bars_20d_pct": -12.473,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": [
+    {
+     "date": "2026-09-09",
+     "category": "5"
+    },
+    {
+     "date": "2026-09-10",
+     "category": "5"
+    },
+    {
+     "date": "2026-09-28",
+     "category": "5"
+    }
+   ]
+  },
+  {
+   "symbol": "601318.SH",
+   "bit_0x3b_float32": -7.35,
+   "bars_20d_pct": -8.914,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": false,
+   "capital_events_in_window": [
+    {
+     "date": "2026-09-10",
+     "category": "1"
+    }
+   ]
+  },
+  {
+   "symbol": "000858.SZ",
+   "bit_0x3b_float32": -0.17,
+   "bars_20d_pct": -0.17,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": []
+  },
+  {
+   "symbol": "002594.SZ",
+   "bit_0x3b_float32": -2.7,
+   "bars_20d_pct": -2.703,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": []
+  },
+  {
+   "symbol": "600036.SH",
+   "bit_0x3b_float32": 0.85,
+   "bars_20d_pct": 0.852,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": []
+  },
+  {
+   "symbol": "300059.SZ",
+   "bit_0x3b_float32": -5.58,
+   "bars_20d_pct": -5.576,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": []
+  },
+  {
+   "symbol": "601012.SH",
+   "bit_0x3b_float32": -3.93,
+   "bars_20d_pct": -3.932,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": []
+  },
+  {
+   "symbol": "920000.BJ",
+   "bit_0x3b_float32": -0.14,
+   "bars_20d_pct": -0.63,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": false,
+   "capital_events_in_window": [
+    {
+     "date": "2026-09-30",
+     "category": "1"
+    }
+   ]
+  },
+  {
+   "symbol": "510300.SH",
+   "bit_0x3b_float32": -5.11,
+   "bars_20d_pct": -5.107,
+   "window": [
+    "2026-09-03",
+    "2026-10-09"
+   ],
+   "match": true,
+   "capital_events_in_window": []
+  }
+ ],
+ "egress": "Mac (residential broadband)",
+ "code_sha": "6f691ad0 (codex/tdx-integration-2)",
+ "method": "MAC 0x122b with bit 0x3b only, its uint32 read back as IEEE float32; reference: 20-bar change of tdx_bars.fetch_daily closes (unadjusted), close[-1] / close[-21] - 1; capital changes from ticks.fetch_tdx_capital_changes (category 1 = ex-dividend/ex-rights, 5 = share-count change)",
+ "findings": [
+  "Bit 0x3b is an IEEE float32 percent, not a uint32: 9 of 12 symbols equal the 20-bar change of daily closes within 0.01.",
+  "The 3 others (000001.SZ, 601318.SH, 920000.BJ) each had a category-1 ex-dividend inside the 20-bar window, so the field is the 20-day change on adjusted prices; category-5 share changes (300750, 688981) leave it equal to the unadjusted change."
+ ]
+}

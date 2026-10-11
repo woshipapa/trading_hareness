@@ -1,0 +1,222 @@
+{
+ "observed_at_utc": "2026-10-10T06:53:11Z",
+ "tdx_host": "60.191.117.167:7709",
+ "profile": "login_one",
+ "symbols": {
+  "000001.SZ": {
+   "trade_date": "2026-10-09",
+   "tencent_date": "20261009",
+   "tdx_bars": 240,
+   "tencent_rows": 267,
+   "unit_ratio_median": 100.0,
+   "minutes_compared": 240,
+   "minutes_equal_after_unit": 238,
+   "largest_deviations_lots": [
+    [
+     7508.0,
+     "09:31",
+     6234400.0,
+     54836
+    ],
+    [
+     5.877471754111438e-41,
+     "14:59",
+     5.877471754111438e-39,
+     0
+    ],
+    [
+     0.0,
+     "15:00",
+     1121300.0,
+     11213
+    ],
+    [
+     0.0,
+     "14:58",
+     13200.0,
+     132
+    ],
+    [
+     0.0,
+     "14:57",
+     754400.0,
+     7544
+    ]
+   ],
+   "tdx_total_volume": 107810600.0,
+   "tdx_total_in_lots": 1078106.0,
+   "tencent_total_lots": 1078143,
+   "first_minutes": [
+    {
+     "minute": "09:31",
+     "tdx_volume": 6234400.0,
+     "tdx_amount": 73792584.0,
+     "tencent_lots": 54836
+    },
+    {
+     "minute": "09:32",
+     "tdx_volume": 1486700.0,
+     "tdx_amount": 17592880.0,
+     "tencent_lots": 14867
+    },
+    {
+     "minute": "09:33",
+     "tdx_volume": 1290000.0,
+     "tdx_amount": 15238006.0,
+     "tencent_lots": 12900
+    }
+   ],
+   "auction_minutes": [
+    {
+     "minute": "14:57",
+     "tdx_volume": 754400.0,
+     "tdx_amount": 8748444.0,
+     "tencent_lots": 7544
+    },
+    {
+     "minute": "14:58",
+     "tdx_volume": 13200.0,
+     "tdx_amount": 153252.0,
+     "tencent_lots": 132
+    },
+    {
+     "minute": "14:59",
+     "tdx_volume": 5.877471754111438e-39,
+     "tdx_amount": 5.877471754111438e-39,
+     "tencent_lots": 0
+    },
+    {
+     "minute": "15:00",
+     "tdx_volume": 1121300.0,
+     "tdx_amount": 12995809.0,
+     "tencent_lots": 11213
+    }
+   ],
+   "garbage_amounts": [
+    "14:59"
+   ]
+  },
+  "600519.SH": {
+   "trade_date": "2026-10-09",
+   "tencent_date": "20261009",
+   "tdx_bars": 240,
+   "tencent_rows": 267,
+   "unit_ratio_median": 100.0,
+   "minutes_compared": 240,
+   "minutes_equal_after_unit": 237,
+   "largest_deviations_lots": [
+    [
+     195.0,
+     "09:31",
+     159500.0,
+     1400
+    ],
+    [
+     5.877471754111438e-41,
+     "14:59",
+     5.877471754111438e-39,
+     0
+    ],
+    [
+     5.877471754111438e-41,
+     "14:58",
+     5.877471754111438e-39,
+     0
+    ],
+    [
+     0.0,
+     "15:00",
+     38600.0,
+     386
+    ],
+    [
+     0.0,
+     "14:57",
+     20200.0,
+     202
+    ]
+   ],
+   "tdx_total_volume": 3511100.0,
+   "tdx_total_in_lots": 35111.0,
+   "tencent_total_lots": 35113,
+   "first_minutes": [
+    {
+     "minute": "09:31",
+     "tdx_volume": 159500.0,
+     "tdx_amount": 201192400.0,
+     "tencent_lots": 1400
+    },
+    {
+     "minute": "09:32",
+     "tdx_volume": 50000.0,
+     "tdx_amount": 63234212.0,
+     "tencent_lots": 500
+    },
+    {
+     "minute": "09:33",
+     "tdx_volume": 30700.0,
+     "tdx_amount": 38720952.0,
+     "tencent_lots": 307
+    }
+   ],
+   "auction_minutes": [
+    {
+     "minute": "14:57",
+     "tdx_volume": 20200.0,
+     "tdx_amount": 25454228.0,
+     "tencent_lots": 202
+    },
+    {
+     "minute": "14:58",
+     "tdx_volume": 5.877471754111438e-39,
+     "tdx_amount": 5.877471754111438e-39,
+     "tencent_lots": 0
+    },
+    {
+     "minute": "14:59",
+     "tdx_volume": 5.877471754111438e-39,
+     "tdx_amount": 5.877471754111438e-39,
+     "tencent_lots": 0
+    },
+    {
+     "minute": "15:00",
+     "tdx_volume": 38600.0,
+     "tdx_amount": 48696228.0,
+     "tencent_lots": 386
+    }
+   ],
+   "garbage_amounts": [
+    "14:58",
+    "14:59"
+   ]
+  }
+ },
+ "tencent_after_close": {
+  "000001.SZ": {
+   "cum_lots_at_1500": 1078106,
+   "cum_lots_at_1530": 1078143,
+   "first_increments": [
+    [
+     "15:11",
+     1078114
+    ],
+    [
+     "15:12",
+     1078124
+    ]
+   ]
+  },
+  "600519.SH": {
+   "cum_lots_at_1500": 35111,
+   "cum_lots_at_1530": 35113,
+   "first_increments": [
+    [
+     "15:18",
+     35112
+    ]
+   ]
+  },
+  "checked_at_utc": "2026-10-10T06:55Z"
+ },
+ "method": "TDX legacy 0x052d category 8 (1-minute bars) under LOGIN_ONE from the Mac egress; Tencent web.ifzq.gtimg.cn minute/query cumulative lots, per-minute volume = difference of consecutive rows. Unit ratio = median(TDX volume / Tencent lots)."
+}

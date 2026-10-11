@@ -219,6 +219,41 @@ class Report:
         return "\n".join(lines)
 
 
+#: Files a generator writes from the whole tree. Both sides regenerate them, so they conflict whenever
+#: both add modules (2026-10-10: docs/ARCHITECTURE_INDEX.md). Such a conflict is resolved by running the
+#: generator on the merged tree; a conflict anywhere else still blocks.
+GENERATED = {
+    "docs/ARCHITECTURE_INDEX.md": ("scripts/generate_architecture_index.py",),
+    "scripts/CATALOG.md": ("scripts/generate_scripts_catalog.py",),
+}
+
+
+def resolve_generated(tree: Path, conflicts: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Regenerate conflicted generated files once nothing else conflicts; returns (regenerated, still conflicted)."""
+    if not conflicts or any(path not in GENERATED for path in conflicts):
+        return [], list(conflicts)
+    regenerated = []
+    for path in conflicts:
+        git("checkout", "--theirs", "--", path, cwd=tree)     # either side: the generator rewrites it whole
+        ok, _text = run([sys.executable, *GENERATED[path]], tree)
+        if not ok:
+            return regenerated, [item for item in conflicts if item not in regenerated]
+        git("add", "--", path, cwd=tree)
+        regenerated.append(path)
+    return regenerated, []
+
+
+def merge_attempt(tree: Path, other: str, report: Report) -> bool:
+    """Stage the merge of ``other`` into ``tree`` (uncommitted); True when nothing is left conflicted."""
+    attempt = git("merge", "--no-ff", "--no-commit", other, cwd=tree, check=False)
+    conflicts = git("diff", "--name-only", "--diff-filter=U", cwd=tree).stdout.split()
+    regenerated, conflicts = resolve_generated(tree, conflicts)
+    clean = not conflicts and (attempt.returncode == 0 or bool(regenerated))
+    detail = ", ".join(conflicts) or ("" if clean else (attempt.stderr or attempt.stdout).strip()[-300:])
+    report.add("merges without conflicts", clean, detail or (f"regenerated {', '.join(regenerated)}" if regenerated else ""))
+    return clean
+
+
 def regenerated_differs(tree: Path, path: str) -> bool:
     """Whether a regenerated file now differs from the trial merge's version of it.
 
@@ -267,11 +302,7 @@ def check_merge(tree: Path, cwd: Path, report: Report, *, skip_tests: bool, skip
     if incoming == "0":
         report.skip("merge", f"{COLLAB} has nothing that main lacks")
         return False
-    attempt = git("merge", "--no-ff", "--no-commit", collab, cwd=tree, check=False)
-    conflicts = git("diff", "--name-only", "--diff-filter=U", cwd=tree).stdout.split()
-    report.add("merges without conflicts", attempt.returncode == 0 and not conflicts,
-               ", ".join(conflicts) or (attempt.stderr or attempt.stdout).strip()[-300:])
-    if attempt.returncode != 0 or conflicts:
+    if not merge_attempt(tree, collab, report):
         return False
     problems = migration_problems(disk_migrations(tree))
     report.add("migration chain: one head, unique, resolvable", not problems, "; ".join(problems))
@@ -347,10 +378,7 @@ def command_sync(cwd: Path, args: argparse.Namespace) -> int:
             ok, detail = push(tree, COLLAB)
             print(f"{COLLAB} fast-forwarded to {MAIN}" if ok else f"push refused: {detail}")
             return 0 if ok else 2
-        attempt = git("merge", "--no-ff", "--no-commit", main, cwd=tree, check=False)
-        conflicts = git("diff", "--name-only", "--diff-filter=U", cwd=tree).stdout.split()
-        report.add("merges without conflicts", attempt.returncode == 0 and not conflicts,
-                   ", ".join(conflicts) or (attempt.stderr or attempt.stdout).strip()[-300:])
+        merge_attempt(tree, main, report)
         if report.ok:
             problems = migration_problems(disk_migrations(tree))
             report.add("migration chain: one head, unique, resolvable", not problems, "; ".join(problems))

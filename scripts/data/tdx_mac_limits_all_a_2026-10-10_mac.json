@@ -1,0 +1,219 @@
+{
+ "observed_at_utc": "2026-10-10T15:58:23.219195+00:00",
+ "egress": "Mac (residential broadband)",
+ "code_sha": "0c2f7e5d (codex/tdx-integration-2, with the all-A paging fix)",
+ "session": "2026-10-09 (read on Saturday 2026-10-10)",
+ "method": "tdx_legacy_misc.fetch_all_a_snapshot (0x054b, LOGIN_ONE) then tdx_mac.fetch_limit_prices for exactly the snapshot symbols; ratio = limit_up / snapshot pre_close - 1, rounded to 0.001; ST from the security-list name",
+ "snapshot": {
+  "rows": 5562,
+  "warnings": [
+   "tdx_host=115.238.56.198:7709/login_one",
+   "no_trade_rows=16"
+  ]
+ },
+ "limits": {
+  "rows": 5562,
+  "coverage": 1.0,
+  "trade_dates": [
+   [
+    "2026-10-09",
+    5562
+   ]
+  ],
+  "warnings": [
+   "tdx_host=121.36.248.138:7709"
+  ],
+  "row_keys": [
+   "limit_down",
+   "limit_up",
+   "symbol",
+   "trade_date"
+  ]
+ },
+ "no_limit_rows": [
+  {
+   "symbol": "001246.SZ",
+   "name": "C力勤",
+   "pre_close": 53.55,
+   "price": 45.05,
+   "up_limit": 0.0,
+   "down_limit": 0.0
+  },
+  {
+   "symbol": "301716.SZ",
+   "name": "C鸿富诚",
+   "pre_close": 504.0,
+   "price": 541.0,
+   "up_limit": 0.0,
+   "down_limit": 0.0
+  },
+  {
+   "symbol": "920157.BJ",
+   "name": "宇特光电",
+   "pre_close": 13.75,
+   "price": 75.55,
+   "up_limit": 0.0,
+   "down_limit": 0.0
+  }
+ ],
+ "up_ratio_by_board": {
+  "bj": [
+   [
+    0.3,
+    268
+   ],
+   [
+    0.299,
+    73
+   ],
+   [
+    0.298,
+    4
+   ]
+  ],
+  "bj_st": [
+   [
+    0.297,
+    1
+   ],
+   [
+    0.298,
+    1
+   ],
+   [
+    0.3,
+    1
+   ]
+  ],
+  "chinext": [
+   [
+    0.2,
+    1262
+   ],
+   [
+    0.201,
+    51
+   ],
+   [
+    0.199,
+    50
+   ],
+   [
+    0.198,
+    2
+   ]
+  ],
+  "chinext_st": [
+   [
+    0.2,
+    22
+   ],
+   [
+    0.199,
+    9
+   ],
+   [
+    0.201,
+    7
+   ],
+   [
+    0.197,
+    1
+   ],
+   [
+    0.202,
+    1
+   ]
+  ],
+  "main": [
+   [
+    0.1,
+    2446
+   ],
+   [
+    0.101,
+    361
+   ],
+   [
+    0.099,
+    193
+   ],
+   [
+    0.102,
+    31
+   ],
+   [
+    0.098,
+    9
+   ],
+   [
+    0.103,
+    4
+   ]
+  ],
+  "main_st": [
+   [
+    0.1,
+    76
+   ],
+   [
+    0.101,
+    25
+   ],
+   [
+    0.099,
+    18
+   ],
+   [
+    0.102,
+    8
+   ],
+   [
+    0.098,
+    6
+   ],
+   [
+    0.103,
+    4
+   ]
+  ],
+  "star": [
+   [
+    0.2,
+    597
+   ],
+   [
+    0.201,
+    5
+   ],
+   [
+    0.199,
+    3
+   ]
+  ],
+  "star_st": [
+   [
+    0.2,
+    10
+   ],
+   [
+    0.204,
+    1
+   ],
+   [
+    0.201,
+    1
+   ],
+   [
+    0.207,
+    1
+   ]
+  ]
+ },
+ "findings": [
+  "Securities without a price limit come back with limit_up = limit_down = 0.0: 001246.SZ (C力勤) and 301716.SZ (C鸿富诚), new listings, and 920157.BJ (宇特光电) on its first day.",
+  "Main-board ST limits are 10% on this session (main_st: 0.100 x76, 0.101 x25, 0.099 x18 ...), as app/market_rules.py says since 2026-07-06; the 1.05 ST ratio in older notes is out of date.",
+  "ChiNext and STAR limits 20% (ST included), BJ 30%; deviations of 0.001-0.003 are the rounding of the limit price to 0.01.",
+  "Every limit row is dated 2026-10-09 (bit 0x13), the last session."
+ ]
+}

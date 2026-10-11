@@ -9,10 +9,10 @@
 |---|---:|
 | Composition root | `quant-service/app/main.py` |
 | `main.py` top-level functions | 430 |
-| Python modules under `app/` | 535 |
-| HTTP router modules | 48 |
-| Alembic migrations | 109 |
-| Frontend source files | 62 |
+| Python modules under `app/` | 566 |
+| HTTP router modules | 50 |
+| Alembic migrations | 113 |
+| Frontend source files | 69 |
 
 ## Domain naming inventory
 
@@ -25,16 +25,16 @@ New behaviour should be owned by an existing domain package/owner.
 | `async` | 41 |
 | `strategy` | 25 |
 | `longhu` | 22 |
+| `market` | 22 |
 | `analyst` | 17 |
-| `market` | 17 |
 | `research` | 16 |
 | `post` | 13 |
 | `board` | 12 |
 | `limit` | 11 |
 | `teacher` | 11 |
 | `ten` | 11 |
+| `daily` | 9 |
 | `xiaojie` | 9 |
-| `daily` | 8 |
 | `paper` | 7 |
 | `sector` | 7 |
 | `tushare` | 6 |
@@ -53,6 +53,8 @@ New behaviour should be owned by an existing domain package/owner.
 - `routers/board_curve_reads.py`
 - `routers/board_rotation_reads.py`
 - `routers/board_stock_mining_reads.py`
+- `routers/datasource_catalog.py`
+- `routers/datasource_reads.py`
 - `routers/event_reads.py`
 - `routers/ingestion_actions.py`
 - `routers/intraday_actions.py`
@@ -113,6 +115,7 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/composables/workspace/analyst-timeline.ts`
 - `frontend/src/composables/workspace/board-flow.ts`
 - `frontend/src/composables/workspace/close-review.ts`
+- `frontend/src/composables/workspace/datasources.ts`
 - `frontend/src/composables/workspace/factor-lab.ts`
 - `frontend/src/composables/workspace/format.ts`
 - `frontend/src/composables/workspace/market-data.ts`
@@ -133,8 +136,12 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/research/analyst-chart.ts`
 - `frontend/src/research/boards.test.ts`
 - `frontend/src/research/boards.ts`
+- `frontend/src/research/datasource-directory.test.ts`
+- `frontend/src/research/datasource-directory.ts`
 - `frontend/src/research/remote-runtime.test.ts`
 - `frontend/src/research/remote-runtime.ts`
+- `frontend/src/research/sentiment-temperature.test.ts`
+- `frontend/src/research/sentiment-temperature.ts`
 - `frontend/src/research/session-radar.test.ts`
 - `frontend/src/research/session-radar.ts`
 - `frontend/src/research/strategy-evidence.test.ts`
@@ -146,12 +153,14 @@ New behaviour should be owned by an existing domain package/owner.
 - `frontend/src/views/research/AnalystEvidenceTab.vue`
 - `frontend/src/views/research/ClaimReviewTab.vue`
 - `frontend/src/views/research/CloseReviewTab.vue`
+- `frontend/src/views/research/DatasourceDirectory.vue`
 - `frontend/src/views/research/FactorLabTab.vue`
 - `frontend/src/views/research/MarketSnapshotsTab.vue`
 - `frontend/src/views/research/ProviderTab.vue`
 - `frontend/src/views/research/QualityTab.vue`
 - `frontend/src/views/research/RemoteRealtimeTab.vue`
 - `frontend/src/views/research/ResearchOverviewTab.vue`
+- `frontend/src/views/research/SentimentTemperatureTab.vue`
 - `frontend/src/views/research/SessionRadarTab.vue`
 - `frontend/src/views/research/StockStudyTab.vue`
 - `frontend/src/views/research/StrategyTab.vue`

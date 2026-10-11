@@ -1,0 +1,22 @@
+{
+ "observed_at_utc": "2026-10-10T15:21:47.886073+00:00",
+ "egress": "Mac (residential broadband)",
+ "code_sha": "ee4b235b",
+ "method": "legacy 0x053e via TdxClient.quotes (fixed /100) and Tencent qt.gtimg.cn for the same symbols, weekend after the 2026-10-09 close (both show the closing book)",
+ "raw_output": [
+  "observed 2026-10-10T15:21:47.886073+00:00 host 115.238.56.198:7709/login_one",
+  "tdx 1 600519 price 1263.0 last_close 1255.79 vol None cur_vol None {'bid1': 1263.0, 'ask1': 1263.06, 'bid_vol1': 73, 'ask_vol1': 1, 'bid2': 1262.99, 'ask2': 1263.11, 'bid_vol2': 2, 'ask_vol2': 3, 'bid3': 1262.98, 'ask3': 1263.43, 'bid_vol3': 3, 'ask_vol3': 1, 'bid4': 1262.88, 'ask4': 1263.44, 'bid_vol4': 1, 'ask_vol4': 1, 'bid5': 1262.83, 'ask5': 1263.45, 'bid_vol5': 8, 'ask_vol5': 3}",
+  "tdx 0 000001 price 11.59 last_close 11.78 vol None cur_vol None {'bid1': 11.59, 'ask1': 11.6, 'bid_vol1': 2967, 'ask_vol1': 461, 'bid2': 11.58, 'ask2': 11.61, 'bid_vol2': 5655, 'ask_vol2': 527, 'bid3': 11.57, 'ask3': 11.62, 'bid_vol3': 1454, 'ask_vol3': 338, 'bid4': 11.56, 'ask4': 11.63, 'bid_vol4': 1027, 'ask_vol4': 729, 'bid5': 11.55, 'ask5': 11.64, 'bid_vol5': 3819, 'ask_vol5': 454}",
+  "tdx 2 920000 price 14.19 last_close 13.9 vol None cur_vol None {'bid1': 14.16, 'ask1': 14.19, 'bid_vol1': 2, 'ask_vol1': 66, 'bid2': 14.15, 'ask2': 14.2, 'bid_vol2': 42, 'ask_vol2': 6, 'bid3': 14.12, 'ask3': 14.23, 'bid_vol3': 22, 'ask_vol3': 20, 'bid4': 14.08, 'ask4': 14.24, 'bid_vol4': 2, 'ask_vol4': 35, 'bid5': 14.07, 'ask5': 14.25, 'bid_vol5': 4, 'ask_vol5': 40}",
+  "tdx 1 880005 price 3297.0 last_close 2787.0 vol None cur_vol None {'bid1': 0.0, 'ask1': 2.0, 'bid_vol1': 2494, 'ask_vol1': 1658, 'bid2': 0.0, 'ask2': 0.0, 'bid_vol2': 478, 'ask_vol2': 322, 'bid3': 0.0, 'ask3': 0.0, 'bid_vol3': 161, 'ask_vol3': 118, 'bid4': 0.0, 'ask4': 0.0, 'bid_vol4': 164, 'ask_vol4': 47, 'bid5': 0.0, 'ask5': 2145.0, 'bid_vol5': 72, 'ask_vol5': 10}",
+  "tdx 1 880491 price 5118.62 last_close 5153.73 vol None cur_vol None {'bid1': 0.0, 'ask1': 2.0, 'bid_vol1': 42, 'ask_vol1': 156, 'bid2': 0.0, 'ask2': 0.0, 'bid_vol2': 0, 'ask_vol2': 0, 'bid3': 0.0, 'ask3': 0.0, 'bid_vol3': 0, 'ask_vol3': 0, 'bid4': 0.0, 'ask4': 0.0, 'bid_vol4': 1, 'ask_vol4': 999999, 'bid5': -0.07, 'ask5': 5087.17, 'bid_vol5': 42, 'ask_vol5': 156}",
+  "tencent 600519 price 1263.00 last_close 1255.79 vol(lots) 35111 bid1-5 [('1263.00', '73'), ('1262.99', '2'), ('1262.98', '3'), ('1262.88', '1'), ('1262.83', '8')] ask1-5 [('1263.06', '1'), ('1263.11', '3'), ('1263.43', '1'), ('1263.44', '1'), ('1263.45', '3')] time 20261009161459",
+  "tencent 000001 price 11.59 last_close 11.78 vol(lots) 1078106 bid1-5 [('11.59', '2967'), ('11.58', '5655'), ('11.57', '1454'), ('11.56', '1027'), ('11.55', '3819')] ask1-5 [('11.60', '461'), ('11.61', '527'), ('11.62', '338'), ('11.63', '729'), ('11.64', '454')] time 20261009161500",
+  "tencent 920000 price 14.19 last_close 13.90 vol(lots) 7061 bid1-5 [('14.16', '2'), ('14.15', '42'), ('14.12', '22'), ('14.08', '2'), ('14.07', '4')] ask1-5 [('14.19', '66'), ('14.20', '6'), ('14.23', '20'), ('14.24', '35'), ('14.25', '40')] time 20261009153542"
+ ],
+ "findings": [
+  "Legacy 0x053e five-level book equals Tencent's closing book level by level for 600519.SH, 000001.SZ and 920000.BJ: prices and volumes (lots) identical.",
+  "BJ stocks quote with two decimals: 920000.BJ price 14.19 with the /100 divisor, equal to Tencent.",
+  "Board index codes 880005 and 880491 answer prices (3297.0, 5118.62) but their bid/ask fields are not a book: 880005 bid_vol1/ask_vol1 2494/1658 equal its index-bar up/down counts, 880491 ask_vol4 999999; never expose book fields for index or board codes."
+ ]
+}

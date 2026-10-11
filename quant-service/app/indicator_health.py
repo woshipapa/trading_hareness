@@ -22,9 +22,13 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from . import derived_daily_readings
+from .broad_etf_flow import FLOW_CAPABILITY as ETF_FLOW_CAPABILITY, MIN_CODES as ETF_MIN_CODES
 from .indicator_registry import BY_KEY, INTRADAY_MINUTE, PREVIOUS_SESSION, SESSION_OPEN
 from .limit_detail_read_model import limit_detail_day
 from .market_radar_runtime import latest_main_net, latest_point
+from .market_temperature_runtime import CAPABILITY as TEMPERATURE_CAPABILITY
+from .market_timing import CAPABILITY as TIMING_CAPABILITY
 from .owner_storage import tiered_sql_builder
 from .stock_money_flow_sync import stored_flow_symbols
 
@@ -241,6 +245,41 @@ def limit_detail_checks(connection: Any, trade_date: date, now: datetime) -> lis
     return checks
 
 
+def _stored_reading(connection: Any, capability: str, day: date) -> dict[str, Any] | None:
+    readings = derived_daily_readings.newest(connection, capability, day, day)
+    return readings[-1] if readings else None
+
+
+def temperature_checks(connection: Any, trade_date: date, _now: datetime) -> list[dict[str, Any]]:
+    reading = _stored_reading(connection, TEMPERATURE_CAPABILITY, trade_date)
+    if reading is None or reading.get("temperature") is None:
+        return [_check("present", MISSING, None, "stored", "当日情绪温度未落库（盘后阶段 market_temperature）")]
+    scored = sum(value is not None for value in (reading.get("scores") or {}).values())
+    return [_check("present", OK, reading["temperature"], "stored"),
+            _check("components", _grade(scored, 8, 6), scored, ">=8", "参与平均的分项数（共 8 项）")]
+
+
+def broad_etf_flow_checks(connection: Any, trade_date: date, _now: datetime) -> list[dict[str, Any]]:
+    reading = _stored_reading(connection, ETF_FLOW_CAPABILITY, trade_date)
+    if reading is None or reading.get("ratio") is None:
+        return [_check("present", MISSING, None, "stored", "当日宽基 ETF 放量比未落库（盘后阶段 broad_etf_flow）")]
+    checks = [_check("present", OK, reading["ratio"], "stored"),
+              _check("coverage", _grade(reading.get("codes"), 12, ETF_MIN_CODES), reading.get("codes"), ">=12",
+                     "参与计算的宽基 ETF 数")]
+    if reading.get("amount_estimated"):
+        checks.append(_check("exact_turnover", WARN, True, "false", "有 ETF 的成交额由腾讯成交量估算（扶摇未取到）"))
+    return checks
+
+
+def timing_checks(connection: Any, trade_date: date, _now: datetime) -> list[dict[str, Any]]:
+    reading = _stored_reading(connection, TIMING_CAPABILITY, trade_date)
+    if reading is None:
+        return [_check("present", MISSING, None, "stored", "当日金/银指状态未落库（盘后阶段 market_timing）")]
+    return [_check("present", OK, reading.get("state"), "stored"),
+            _check("source", OK if reading.get("source") == "fuyao_ths" else WARN, reading.get("source"), "fuyao_ths",
+                   "腾讯是整段备用源")]
+
+
 def _count_check(connection: Any, sql: str, params: tuple[Any, ...], ok_at: int, warn_at: int, detail: str) -> list[dict[str, Any]]:
     value = int(_one(connection, sql, params).get("n") or 0)
     if not value:
@@ -305,12 +344,14 @@ def _session_checks(key: str) -> Callable[[Any, date, datetime], list[dict[str, 
 
 CHECKS: dict[str, Callable[[Any, date, datetime], list[dict[str, Any]]]] = {
     "market.radar": radar_checks, "market.main_net": main_net_checks, "limits.detail": limit_detail_checks,
-    "market.minute_documents": minute_document_checks,
+    "market.minute_documents": minute_document_checks, "market.temperature": temperature_checks,
+    "market.broad_etf_flow": broad_etf_flow_checks, "market.timing": timing_checks,
     **{key: _session_checks(key) for key in ("board.concept_strength", "board.concept_flow", "board.industry_flow",
                                              "stock.money_flow", "stock.limit_prices", "strategy.ledger", "events.lhb")},
 }
 #: Derived indicators are as healthy as their inputs.
-DERIVED = {"market.direction_gate": ("market.radar", "market.main_net")}
+DERIVED = {"market.direction_gate": ("market.radar", "market.main_net"),
+           "market.temperature_intraday": ("market.minute_documents", "stock.limit_prices")}
 
 
 def indicator_status(connection: Any, key: str, trade_date: date, now: datetime) -> dict[str, Any]:

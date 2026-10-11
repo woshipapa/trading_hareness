@@ -167,6 +167,30 @@ class BranchFlowTests(unittest.TestCase):
         self.box.write({"docs/ARCHITECTURE_INDEX.md": "what the generator would write\n"})
         self.assertTrue(cb.regenerated_differs(self.box.work, "docs/ARCHITECTURE_INDEX.md"))
 
+    def test_a_conflict_only_in_a_generated_index_is_resolved_by_regenerating_it(self):
+        generator = ("from pathlib import Path\n"
+                     "names = sorted(path.name for path in Path('app').glob('*.py'))\n"
+                     "Path('docs').mkdir(exist_ok=True)\n"
+                     "Path('docs/ARCHITECTURE_INDEX.md').write_text('\\n'.join(names) + '\\n')\n")
+        self.box.on("main", {"scripts/generate_architecture_index.py": generator, "docs/ARCHITECTURE_INDEX.md": "\n"},
+                    "generator")
+        self.box.git("push", "--quiet", "origin", f"origin/main:refs/heads/{cb.COLLAB}")
+        self.box.on(cb.COLLAB, {"app/peer.py": "", "docs/ARCHITECTURE_INDEX.md": "peer.py\n"}, "peer module")
+        self.box.on("main", {"app/ours.py": "", "docs/ARCHITECTURE_INDEX.md": "ours.py\n"}, "our module")
+        code, out = self.box.run("merge", *FAST)
+        self.assertEqual(code, 0, out)
+        self.assertIn("regenerated docs/ARCHITECTURE_INDEX.md", out)
+        self.assertEqual(self.box.git("show", "origin/main:docs/ARCHITECTURE_INDEX.md"), "ours.py\npeer.py\n")
+
+    def test_a_conflict_beside_a_generated_index_still_blocks(self):
+        self.box.on(cb.COLLAB, {"README.md": "peer\n", "docs/ARCHITECTURE_INDEX.md": "peer\n"}, "peer")
+        self.box.on("main", {"README.md": "ours\n", "docs/ARCHITECTURE_INDEX.md": "ours\n"}, "ours")
+        before = self.box.tip("main")
+        code, out = self.box.run("merge", *FAST)
+        self.assertNotEqual(code, 0, out)
+        self.assertIn("[FAIL] merges without conflicts", out)
+        self.assertEqual(self.box.tip("main"), before)
+
     def test_sync_merges_main_into_the_branch_without_rewriting_it(self):
         self.box.on(cb.COLLAB, {"peer.txt": "fix\n"}, "peer fix")
         peer_tip = self.box.tip(cb.COLLAB)
