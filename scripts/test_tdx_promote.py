@@ -191,13 +191,14 @@ class CheckTests(unittest.TestCase):
         self.assertIn("tencent_free has 1 rows with a repeated key ['symbol']",
                       why(tencent_free=record("tencent_free", [*REFERENCE_ROWS, REFERENCE_ROWS[0]])))
 
-    def test_a_binding_without_tolerances_has_nothing_to_agree_with(self):
+    def test_a_binding_without_a_reference_is_an_extension_capability_and_passes_the_agreement(self):
         plain = Binding("tdx_public", CAPABILITY, 70, UNSUPPORTED, spec=BindingSpec())
         result = run_check("owner", answers(), bindings=(plain,))
         self.assertEqual(result.calls, [("owner", "tdx_public", {}, None, False)], "no reference is probed")
-        verdict = result.evidence[0]["verdicts"]["agreement"]
-        self.assertFalse(verdict["pass"])
-        self.assertIn("promotion is blocked", verdict["detail"])
+        verdicts = result.evidence[0]["verdicts"]
+        self.assertTrue(verdicts["agreement"]["pass"])
+        self.assertIn("extension capability", verdicts["agreement"]["detail"])
+        self.assertTrue(verdicts["owner_egress"]["pass"], "it still has to answer from the owner egress")
 
     def test_a_reference_reader_gets_the_renamed_parameters_and_its_rows_are_projected(self):
         own = [{"symbol": "000001.SZ", "bar_time": f"2026-10-12T09:3{n}:00+08:00", "close": 11.0 + n / 100,

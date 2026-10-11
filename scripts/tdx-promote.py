@@ -18,7 +18,8 @@ every input, the probes (their first rows and a hash of all printed rows), the c
 deviations, examples) and one verdict per gate, and exits 0 whatever the verdicts:
 
     owner_egress  the probe ran inside the owner container and answered with rows
-    agreement     every declared tolerance holds (nothing to hold when none is declared)
+    agreement     every declared tolerance holds; a binding that declares no reference is an extension capability,
+                  which has no second source to agree with, and passes
     intraday      every probe started and finished inside a session of the XSHG calendar of exchange_calendars (the
                   Mac's, which knows the holidays and the lunch break; the evidence names the calendar and its version)
 
@@ -280,9 +281,9 @@ def verdicts(egress: str, source: str, probes: Mapping[str, Mapping[str, Any]], 
             "pass": egress == "owner" and not own["error"] and own["rows"] > 0,
             "detail": f"egress {egress}, " + (f"failed: {own['error']}" if own["error"] else f"{own['rows']} rows")},
         "agreement": {
-            "pass": bool(comparison) and not disagreeing,
+            "pass": not disagreeing,
             "detail": "; ".join(disagreeing) or (f"{len(comparison)} fields agree on their common rows" if comparison
-                                                 else "not applicable: no declared reference agreement; promotion is blocked")},
+                                                 else "extension capability: no reference is declared, nothing to compare")},
         "intraday": {
             "pass": not outside,
             "detail": (f"outside a session: {', '.join(outside)}" if outside else "every probe ran inside a session")
