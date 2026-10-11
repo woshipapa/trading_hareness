@@ -402,7 +402,7 @@ BINDINGS: Final[tuple[Binding, ...]] = (
     _bind("tdx_local", "bars.daily", 35, DECLARED, "offline CSV (research)", "app/datasources/sources/tdx_local_files.py:parse_day_bytes",
           "客户端下载的全部历史", notes="owner 工作站 CLI，不直接写 canonical"),
     _bind("fuyao_ths", "bars.daily", 20, DECLARED, None, "app/fuyao_bulk_dump_capture.py", "10 年日K + 复权因子全量导出"),
-    _bind("tdx_public", "bars.daily", 65, UNSUPPORTED, _RAW + "tdx_legacy_daily_bars",
+    _bind("tdx_public", "bars.daily", 65, DECLARED, _RAW + "tdx_legacy_daily_bars",
           "app/datasources/sources/tdx_bars.py:fetch_daily", notes="0x052d category 9；volume 单位为手；/1000 价格缩放适用于 ETF 与北交所；与 tdx_mac 是跨协议而非跨供应商对账，只比较 close 和 amount；legacy daily volume 保持整手；证据见 scripts/data/tdx_bars_legacy_vs_mac_2026-10-10_mac.json",
           spec=BindingSpec(params={"symbol": "market+code", "count": "count >= 1"},
                            field_map={"open": "open", "high": "high", "low": "low", "close": "close",

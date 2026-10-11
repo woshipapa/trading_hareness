@@ -79,7 +79,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `tdx_local` | owner 工作站的通达信客户端（vipdoc），CLI 导出为离线文件 | 日线、分钟线；依赖手工或定时的盘后下载 |
 | `derived_tdx_limits` | 自算：`tdx_public` 的 `quote.all_a_snapshot` + `tdx_mac` 的 `limits.prices` | 涨停、炸板、跌停池，只有快照时刻的成员关系 |
 
-**状态怎么读。** 5 个旧绑定是 `declared`：`tdx_public` 的 `ticks.session`、`auction.history_0925`、`fundamentals.capital_changes`，`tdx_local` 的 `bars.daily`、`bars.minute`。通达信集成新增的其余 35 个绑定原先一律 `unsupported`；2026-10-11 在 owner 出口逐条检查后，其中 26 个升为 `declared`（证据是 `scripts/data/tdx_promote_*_2026-10-11_owner_*.json`），解析器从此可以解析它们。40 个绑定的 `decision_eligible` 都是 `False`。仍是 `unsupported` 的 6 个不是上游拒绝，而是证据门还没过：`tdx_public`、`tdx_mac` 的 `bars.minute` 要在交易日才能与腾讯分时对账（腾讯分时不带日期）；`derived_tdx_limits` 的三个池只认当日快照，非交易日读不出；`tdx_public` 的 `bars.daily` 以 `tdx_mac` 为参照，要等 MAC 日线行改用 `trade_date` 的修复发布到 owner。解析器不走 `unsupported`，研究试读（第 6.2 节）可以读。
+**状态怎么读。** 5 个旧绑定是 `declared`：`tdx_public` 的 `ticks.session`、`auction.history_0925`、`fundamentals.capital_changes`，`tdx_local` 的 `bars.daily`、`bars.minute`。通达信集成新增的其余 35 个绑定原先一律 `unsupported`；2026-10-11 在 owner 出口逐条检查后，其中 27 个升为 `declared`（证据是 `scripts/data/tdx_promote_*_2026-10-11_owner_*.json`），解析器从此可以解析它们。40 个绑定的 `decision_eligible` 都是 `False`。仍是 `unsupported` 的 5 个不是上游拒绝，而是证据门还没过：`tdx_public`、`tdx_mac` 的 `bars.minute` 要在交易日才能与腾讯分时对账（腾讯分时不带日期）；`derived_tdx_limits` 的三个池只认当日快照，非交易日读不出。`tdx_public` 的 `bars.daily` 以 `tdx_mac` 为参照，在 MAC 日线行改用 `trade_date` 的修复随 owner-full-20261011-17 上线后通过。解析器不走 `unsupported`，研究试读（第 6.2 节）可以读。
 
 状态只经 `scripts/tdx-promote.py` 在已记录的证据上移动：`check` 把探测写成 `scripts/data/tdx_promote_*.json`，`apply` 把 `catalog.py` 里该绑定的状态记号改一格（`UNSUPPORTED` → `DECLARED` → `LIVE_VERIFIED`）。升级就是 `catalog.py` 里一个记号的改动，单独提交；`decision_eligible` 不在同一提交里动。门条件见第 7.1 节。
 
@@ -88,7 +88,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | 能力 | 来源 | 优先级 | 状态 | 返回 | 主要限制 |
 |---|---|---|---|---|---|
 | `auction.history_0925` | `tdx_public` | 20 | `declared` | 历史每日 09:25 竞价成交与 09:15–09:25 虚拟撮合曲线 | 旧绑定；近期任意交易日 |
-| `bars.daily` | `tdx_public` | 65 | `unsupported` | legacy 0x052d category 9 日线；volume 为手，amount 为元；每页 800 根 | `LOGIN_ONE`；价格 /1000；可得时间 = 响应接收时间 |
+| `bars.daily` | `tdx_public` | 65 | `declared` | legacy 0x052d category 9 日线；volume 为手，amount 为元；每页 800 根 | `LOGIN_ONE`；价格 /1000；可得时间 = 响应接收时间 |
 | `bars.daily` | `tdx_mac` | 70 | `declared` | MAC 0x122e 日线（period 4）；`unit_factors` volume ×0.01 | 日线 volume 是 float32 的股，约 7 位有效数字 |
 | `bars.daily` | `tdx_local` | 35 | `declared` | 客户端 `.day` 日线，下载过的全部历史 | owner 工作站 CLI 导出的离线文件，不直接写 canonical |
 | `bars.index_daily` | `tdx_public` | 65 | `declared` | 指数、板块日线（0x052d category 9 的指数布局）；canonical 只映射 open、close、amount，high、low、volume_raw、up_count、down_count 留作源字段 | count 为 1..800；`880005` 等非普通指数不进；volume_raw 单位未知 |
