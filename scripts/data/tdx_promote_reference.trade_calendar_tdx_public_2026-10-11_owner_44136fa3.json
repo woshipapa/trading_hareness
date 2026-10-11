@@ -1,0 +1,103 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "reference.trade_calendar",
+  "params": {},
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:51.203988+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "exchange": "exchange",
+        "calendar_date": "calendar_date",
+        "is_open": "is_open"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public reference.trade_calendar --params '{}'",
+      "source": "tdx_public",
+      "capability": "reference.trade_calendar",
+      "adapter": "app/datasources/sources/tdx_reference_files.py:fetch_trade_calendar",
+      "params": {},
+      "started_utc": "2026-10-11T03:18:49.027821+00:00",
+      "rows": 680,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:50.692594+00:00",
+      "available_at_max": "2026-10-11T03:18:50.692594+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one",
+        "declared_year_count=40",
+        "rows=declared holidays only; open days are not fabricated"
+      ],
+      "sample": [
+        {
+          "exchange": "CN",
+          "calendar_date": "1991-01-01",
+          "is_open": false,
+          "row_type": "holiday",
+          "source_file": "needini.dat"
+        },
+        {
+          "exchange": "CN",
+          "calendar_date": "1991-02-15",
+          "is_open": false,
+          "row_type": "holiday",
+          "source_file": "needini.dat"
+        },
+        {
+          "exchange": "CN",
+          "calendar_date": "1991-02-18",
+          "is_open": false,
+          "row_type": "holiday",
+          "source_file": "needini.dat"
+        },
+        {
+          "exchange": "CN",
+          "calendar_date": "1991-05-01",
+          "is_open": false,
+          "row_type": "holiday",
+          "source_file": "needini.dat"
+        },
+        {
+          "exchange": "CN",
+          "calendar_date": "1991-10-01",
+          "is_open": false,
+          "row_type": "holiday",
+          "source_file": "needini.dat"
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:50.692734+00:00",
+      "sample_sha256": "9e7ee5f9917969b10f0c968729df138862869e4f8fa3c6448e7eb66ce94f0c92"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 680 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

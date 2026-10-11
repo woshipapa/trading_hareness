@@ -1,0 +1,127 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "microstructure.unusual",
+  "params": {
+    "market": 0,
+    "start": 0,
+    "count": 50
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:54.516989+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "market": "market",
+        "code": "code",
+        "time": "time",
+        "event_type": "event_type",
+        "description": "description",
+        "value": "value"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public microstructure.unusual --params '{\"market\": 0, \"start\": 0, \"count\": 50}'",
+      "source": "tdx_public",
+      "capability": "microstructure.unusual",
+      "adapter": "app/datasources/sources/tdx_microstructure.py:fetch_unusual",
+      "params": {
+        "market": 0,
+        "start": 0,
+        "count": 50
+      },
+      "started_utc": "2026-10-11T03:17:53.877933+00:00",
+      "rows": 50,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:53.997325+00:00",
+      "available_at_max": "2026-10-11T03:17:53.997325+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "000678.SZ",
+          "index": 0,
+          "market": 0,
+          "code": "000678",
+          "time": "09:15:00",
+          "description": "封跌停板",
+          "value": "11.02/8405.00",
+          "event_type": 20
+        },
+        {
+          "symbol": "000697.SZ",
+          "index": 1,
+          "market": 0,
+          "code": "000697",
+          "time": "09:15:00",
+          "description": "封跌停板",
+          "value": "8.46/41.00",
+          "event_type": 20
+        },
+        {
+          "symbol": "001217.SZ",
+          "index": 2,
+          "market": 0,
+          "code": "001217",
+          "time": "09:15:00",
+          "description": "封跌停板",
+          "value": "10.19/54.00",
+          "event_type": 20
+        },
+        {
+          "symbol": "000710.SZ",
+          "index": 3,
+          "market": 0,
+          "code": "000710",
+          "time": "09:15:00",
+          "description": "封跌停板",
+          "value": "9.24/11031.00",
+          "event_type": 20
+        },
+        {
+          "symbol": "000869.SZ",
+          "index": 4,
+          "market": 0,
+          "code": "000869",
+          "time": "09:15:00",
+          "description": "逼近涨停",
+          "value": "20.64/1768.00",
+          "event_type": 20
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:53.997348+00:00",
+      "sample_sha256": "2dffe38522831d3e8ae6f7d60d1834d78cd90eaf5682d8d99e612877ffc0c98b"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 50 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

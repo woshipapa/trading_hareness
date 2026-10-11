@@ -1,0 +1,103 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "breadth.index_daily",
+  "params": {
+    "symbol": "999999.SH",
+    "count": 20
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:44.464985+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "symbol": "symbol",
+        "trade_date": "trade_date",
+        "up_count": "up_count",
+        "down_count": "down_count"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public breadth.index_daily --params '{\"symbol\": \"999999.SH\", \"count\": 20}'",
+      "source": "tdx_public",
+      "capability": "breadth.index_daily",
+      "adapter": "app/datasources/sources/tdx_bars.py:fetch_index_breadth",
+      "params": {
+        "symbol": "999999.SH",
+        "count": 20
+      },
+      "started_utc": "2026-10-11T03:17:43.857217+00:00",
+      "rows": 20,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:43.974763+00:00",
+      "available_at_max": "2026-10-11T03:17:43.974763+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "999999.SH",
+          "trade_date": "2026-09-04",
+          "up_count": 1041,
+          "down_count": 1228
+        },
+        {
+          "symbol": "999999.SH",
+          "trade_date": "2026-09-07",
+          "up_count": 1283,
+          "down_count": 982
+        },
+        {
+          "symbol": "999999.SH",
+          "trade_date": "2026-09-08",
+          "up_count": 1489,
+          "down_count": 817
+        },
+        {
+          "symbol": "999999.SH",
+          "trade_date": "2026-09-09",
+          "up_count": 879,
+          "down_count": 1413
+        },
+        {
+          "symbol": "999999.SH",
+          "trade_date": "2026-09-10",
+          "up_count": 462,
+          "down_count": 1841
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:43.974820+00:00",
+      "sample_sha256": "4cdc73558d5b5ad59ce0b57d280ad0c391f4816002461af364f72c749078c757"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 20 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

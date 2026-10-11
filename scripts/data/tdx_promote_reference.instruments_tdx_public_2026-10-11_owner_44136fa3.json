@@ -1,0 +1,98 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "reference.instruments",
+  "params": {},
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:43.094615+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "symbol": "symbol",
+        "name": "name",
+        "list_date": "list_date",
+        "is_st": "is_st"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public reference.instruments --params '{}'",
+      "source": "tdx_public",
+      "capability": "reference.instruments",
+      "adapter": "app/datasources/sources/tdx_instruments.py:fetch_instruments",
+      "params": {},
+      "started_utc": "2026-10-11T03:18:40.194101+00:00",
+      "rows": 5580,
+      "coverage": 0.9993507113530029,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:42.575345+00:00",
+      "available_at_max": "2026-10-11T03:18:42.575345+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one",
+        "bj_missing=34"
+      ],
+      "sample": [
+        {
+          "symbol": "000001.SZ",
+          "name": "平安银行",
+          "list_date": null,
+          "is_st": false
+        },
+        {
+          "symbol": "000002.SZ",
+          "name": "万 科Ａ",
+          "list_date": null,
+          "is_st": false
+        },
+        {
+          "symbol": "000006.SZ",
+          "name": "深振业Ａ",
+          "list_date": null,
+          "is_st": false
+        },
+        {
+          "symbol": "000007.SZ",
+          "name": "全新好",
+          "list_date": null,
+          "is_st": false
+        },
+        {
+          "symbol": "000008.SZ",
+          "name": "神州高铁",
+          "list_date": null,
+          "is_st": false
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:42.595171+00:00",
+      "sample_sha256": "6b08415a93c7f586eff7782cb93f5bcc9ea5de7245171cf4f194bba9227baae1"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 5580 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

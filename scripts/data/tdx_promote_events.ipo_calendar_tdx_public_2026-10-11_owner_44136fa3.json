@@ -1,0 +1,202 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "events.ipo_calendar",
+  "params": {},
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:29.316395+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "symbol": "symbol",
+        "apply_date": "apply_date",
+        "issue_price": "issue_price"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public events.ipo_calendar --params '{}'",
+      "source": "tdx_public",
+      "capability": "events.ipo_calendar",
+      "adapter": "app/datasources/sources/tdx_reference_files.py:fetch_ipo_calendar",
+      "params": {},
+      "started_utc": "2026-10-11T03:18:27.717927+00:00",
+      "rows": 27,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:28.796831+00:00",
+      "available_at_max": "2026-10-11T03:18:28.796831+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one",
+        "rows=declared subscription dates; no listing/open dates inferred"
+      ],
+      "sample": [
+        {
+          "symbol": "001381.SZ",
+          "apply_date": "20261019",
+          "issue_price": null,
+          "event_type": "equity_subscription",
+          "source_file": "xgsg.cfg",
+          "raw_fields": [
+            "0",
+            "001381",
+            "20261019",
+            "",
+            "5630.4768",
+            "1351.3000",
+            "",
+            "",
+            "",
+            "",
+            "001381",
+            "",
+            "20261021",
+            "",
+            "皇冠新材",
+            "",
+            "1.35",
+            ""
+          ]
+        },
+        {
+          "symbol": "920296.BJ",
+          "apply_date": "20261012",
+          "issue_price": 11.45,
+          "event_type": "equity_subscription",
+          "source_file": "xgsg.cfg",
+          "raw_fields": [
+            "2",
+            "920296",
+            "20261012",
+            "11.450",
+            "2000.0000",
+            "1700.0000",
+            "13.510",
+            "",
+            "",
+            "",
+            "920296",
+            "100.0000",
+            "",
+            "",
+            "文峰光电",
+            "11.45",
+            "100.00",
+            "13.51"
+          ]
+        },
+        {
+          "symbol": "301718.SZ",
+          "apply_date": "20261009",
+          "issue_price": 26.88,
+          "event_type": "equity_subscription",
+          "source_file": "xgsg.cfg",
+          "raw_fields": [
+            "0",
+            "301718",
+            "20261009",
+            "26.880",
+            "3645.0000",
+            "1038.8000",
+            "44.720",
+            "",
+            "",
+            "",
+            "301718",
+            "1.0000",
+            "20261013",
+            "",
+            "通则康威",
+            "26.88",
+            "1.00",
+            "44.72"
+          ]
+        },
+        {
+          "symbol": "301569.SZ",
+          "apply_date": "20260928",
+          "issue_price": 7.0,
+          "event_type": "equity_subscription",
+          "source_file": "xgsg.cfg",
+          "raw_fields": [
+            "0",
+            "301569",
+            "20260928",
+            "7.000",
+            "13373.9563",
+            "4372.0000",
+            "27.990",
+            "",
+            "",
+            "0.02536078",
+            "301569",
+            "1.8500",
+            "20260930",
+            "12067.4499",
+            "联亚药业",
+            "7.00",
+            "1.85",
+            "27.99"
+          ]
+        },
+        {
+          "symbol": "920196.BJ",
+          "apply_date": "20260928",
+          "issue_price": 14.21,
+          "event_type": "equity_subscription",
+          "source_file": "xgsg.cfg",
+          "raw_fields": [
+            "2",
+            "920196",
+            "20260928",
+            "14.210",
+            "3518.5185",
+            "2462.9630",
+            "11.990",
+            "",
+            "",
+            "0.02945205",
+            "920196",
+            "123.1400",
+            "",
+            "11883.2825",
+            "南方乳业",
+            "14.21",
+            "123.14",
+            "11.99"
+          ]
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:28.796959+00:00",
+      "sample_sha256": "2209f6f3894643b887459d6d426e38c801e4e3088dd1127845f753647e5d7078"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 27 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

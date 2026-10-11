@@ -1,0 +1,111 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "sector.membership",
+  "params": {},
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:21.563447+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "taxonomy_key": "taxonomy_key",
+        "sector_key": "sector_key",
+        "symbol": "symbol",
+        "known_at": "known_at"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public sector.membership --params '{}'",
+      "source": "tdx_public",
+      "capability": "sector.membership",
+      "adapter": "app/datasources/sources/tdx_reference_files.py:fetch_membership",
+      "params": {},
+      "started_utc": "2026-10-11T03:18:19.209179+00:00",
+      "rows": 52998,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:21.031277+00:00",
+      "available_at_max": "2026-10-11T03:18:21.031277+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one",
+        "joined_boards=block_gn.dat:3D打印,block_gn.dat:5G概念,block_gn.dat:6G概念,block_gn.dat:AIGC概念,block_gn.dat:AI手机PC,block_gn.dat:AI智能体,block_gn.dat:AI眼镜,block_gn.dat:AI营销,block_gn.dat:BC电池,block_gn.dat:BIPV概念,block_gn.dat:C2M概念,block_gn.dat:CPO概念,block_gn.dat:CXO概念,block_gn.dat:DRG-DIP,block_gn.dat:EDA概念,block_gn.dat:ETC概念,block_gn.dat:HJT电池,block_gn.dat:IP经济,block_gn.dat:MCU芯片,block_gn.dat:MLCC概念,block_gn.dat:MicroLED,block_gn.dat:MiniLED,block_gn.dat:NFT概念,block_gn.dat:NMN概念,block_gn.dat:OLED概念,block_gn.dat:PCB概念,block_gn.dat:PEEK材料,block_gn.dat:POE胶膜,block_gn.dat:PPP概念,block_gn.dat:PVDF概念,block_gn.dat:ST板块,block_gn.dat:Web3概念,block_gn.dat:一体压铸,block_gn.dat:一带一路,block_gn.dat:上海自贸,block_gn.dat:东数西算,block_gn.dat:中俄贸易,block_gn.dat:中特估,block_gn.dat:乡村振兴,block_gn.dat:云游戏,block_gn.dat:云计算,block_gn.dat:互联金融,block_gn.dat:人工智能,block_gn.dat:人脑工程,block_gn.dat:人造肉,block_gn.dat:代糖概念,block_gn.dat:仿制药,block_gn.dat:低空经济,block_gn.dat:体育概念,block_gn.dat:供销社,block_gn.dat:信创,block_gn.dat:信息安全,block_gn.dat:储能,block_gn.dat:充电桩,block_gn.dat:先进封装,block_gn.dat:光伏,block_gn.dat:光刻机,block_gn.dat:光热发电,block_gn.dat:光通信,block_gn.dat:免疫治疗,block_gn.dat:免税概念,block_gn.dat:养老概念,block_gn.dat:军民融合,block_gn.dat:军贸概念,block_gn.dat:冷链物流,block_gn.dat:减肥药,block_gn.dat:减速器,block_gn.dat:分散染料,block_gn.dat:创投概念,block_gn.dat:创新药,block_gn.dat:化肥概念,block_gn.dat:区块链,block_gn.dat:医废处理,block_gn.dat:医美概念,block_gn.dat:华为汽车,block_gn.dat:华为海思,block_gn.dat:华为算力,block_gn.dat:华为鸿蒙,block_gn.dat:博彩概念,block_gn.dat:卫星导航,block_gn.dat:口罩防护,block_gn.dat:可燃冰,block_gn.dat:合成生物,block_gn.dat:含B股,block_gn.dat:含GDR,block_gn.dat:含H股,block_gn.dat:含可转债,block_gn.dat:商业航天,block_gn.dat:固态电池,block_gn.dat:国产软件,block_gn.dat:国资云,block_gn.dat:国防军工,block_gn.dat:土地流转,block_gn.dat:地下管网,block_gn.dat:地热能,block_gn.dat:垃圾分类,block_gn.dat:培育钻石,block_gn.dat:基因概念,block_gn.dat:复合铜箔,block_gn.dat:多模态AI,block_gn.dat:大数据,block_gn.dat:大飞机,block_gn.dat:天然气,block_gn.dat:婴童概念,block_gn.dat:存储芯片,block_gn.dat:安防服务,block_gn.dat:宠物经济,block_gn.dat:家庭医生,block_gn.dat:小米概念,block_gn.dat:工业互联,block_gn.dat:工业大麻,block_gn.dat:工业母机,block_gn.dat:工业气体,block_gn.dat:工业软件,block_gn.dat:抖音概念,block_gn.dat:折叠屏,block_gn.dat:换电概念,block_gn.dat:操作系统,block_gn.dat:数字孪生,block_gn.dat:数字水印,block_gn.dat:数字货币,block_gn.dat:数据中心,block_gn.dat:数据确权,block_gn.dat:数据要素,block_gn.dat:新型城镇,block_gn.dat:新型烟草,block_gn.dat:新材料,block_gn.dat:新能源车,block_gn.dat:新零售,block_gn.dat:旅游概念,block_gn.dat:无人机,block_gn.dat:无人驾驶,block_gn.dat:无线耳机,block_gn.dat:星闪概念,block_gn.dat:智慧城市,block_gn.dat:智慧政务,block_gn.dat:智能交通,block_gn.dat:智能医疗,block_gn.dat:智能家居,block_gn.dat:智能电网,block_gn.dat:智能穿戴,block_gn.dat:智谱AI,block_gn.dat:机器视觉,block_gn.dat:核电核能,block_gn.dat:次新股,block_gn.dat:民营医院,block_gn.dat:氟概念,block_gn.dat:氢能源,block_gn.dat:水产品,block_gn.dat:水利建设,block_gn.dat:汽车拆解,block_gn.dat:汽车电子,block_gn.dat:汽车芯片,block_gn.dat:海南自贸,block_gn.dat:海峡西岸,block_gn.dat:海洋经济,block_gn.dat:混合现实,block_gn.dat:烟草概念,block_gn.dat:热泵概念,block_gn.dat:燃料电池,block_gn.dat:物联网,block_gn.dat:特高压,block_gn.dat:猪肉,block_gn.dat:玻璃基板,block_gn.dat:生物疫苗,block_gn.dat:生物质能,block_gn.dat:电子纸,block_gn.dat:白酒概念,block_gn.dat:百度概念,block_gn.dat:盐湖提锂,block_gn.dat:知识产权,block_gn.dat:知识付费,block_gn.dat:短剧游戏,block_gn.dat:石墨烯,block_gn.dat:碳中和,block_gn.dat:磷概念,block_gn.dat:种业,block_gn.dat:租购同权,block_gn.dat:稀土永磁,block_gn.dat:稀缺资源,block_gn.dat:算力租赁,block_gn.dat:粤港澳,block_gn.dat:粮食概念,block_gn.dat:维生素,block_gn.dat:绿色建筑,block_gn.dat:绿色电力,block_gn.dat:网红经济,block_gn.dat:网络游戏,block_gn.dat:职业教育,block_gn.dat:聚氨酯,block_gn.dat:肝炎概念,block_gn.dat:胎压监测,block_gn.dat:腾讯概念,block_gn.dat:航运概念,block_gn.dat:节能环保,block_gn.dat:芯片,block_gn.dat:苹果概念,block_gn.dat:草甘膦,block_gn.dat:虚拟现实,block_gn.dat:虚拟电厂,block_gn.dat:虫害防治,block_gn.dat:血氧仪,block_gn.dat:赛马概念,block_gn.dat:超导概念,block_gn.dat:超清视频,block_gn.dat:超级电容,block_gn.dat:跨境电商,block_gn.dat:车联网,block_gn.dat:辅助生殖,block_gn.dat:边缘计算,block_gn.dat:远程办公,block_gn.dat:通达信88,block_gn.dat:量子科技,block_gn.dat:钒电池,block_gn.dat:钛金属,block_gn.dat:钠电池,block_gn.dat:钴金属,block_gn.dat:锂矿,block_gn.dat:镍金属,block_gn.dat:阿里概念,block_gn.dat:降解塑料,block_gn.dat:雄安新区,block_gn.dat:页岩气,block_gn.dat:预制菜,block_gn.dat:风沙治理,block_gn.dat:风电,block_gn.dat:飞行汽车,block_gn.dat:食品安全,block_gn.dat:高压快充,block_gn.dat:高端装备,block_gn.dat:高铁,block_gn.dat:鸡肉,block_gn.dat:黄金概念,block_fg.dat:MSCI中盘,block_fg.dat:MSCI成份,block_fg.dat:QFII新进,block_fg.dat:QFII重仓,block_fg.dat:不活跃股,block_fg.dat:专精特新,block_fg.dat:专项贷款,block_fg.dat:业绩预升,block_fg.dat:业绩预增,block_fg.dat:业绩预降,block_fg.dat:两年新股,block_fg.dat:个人持股,block_fg.dat:中字头,block_fg.dat:中小银行,block_fg.dat:主营变更,block_fg.dat:久不分红,block_fg.dat:亏损股,block_fg.dat:低价股,block_fg.dat:低安全分,block_fg.dat:低市净率,block_fg.dat:低市盈率,block_fg.dat:保险新进,block_fg.dat:保险重仓,block_fg.dat:信托重仓,block_fg.dat:券商重仓,block_fg.dat:券商金股,block_fg.dat:化债AMC,block_fg.dat:北上重仓,block_fg.dat:即将解禁,block_fg.dat:历史新低,block_fg.dat:历史新高,block_fg.dat:参股新股,block_fg.dat:参股金融,block_fg.dat:发可转债,block_fg.dat:台资背景,block_fg.dat:员工持股,block_fg.dat:周期股,block_fg.dat:商誉减值,block_fg.dat:回购计划,block_fg.dat:国开持股,block_fg.dat:基金减仓,block_fg.dat:基金增仓,block_fg.dat:基金独门,block_fg.dat:基金重仓,block_fg.dat:壳资源,block_fg.dat:外资背景,block_fg.dat:大盘股,block_fg.dat:定增股,block_fg.dat:定增预案,block_fg.dat:宽基ETF,block_fg.dat:密集调研,block_fg.dat:已高送转,block_fg.dat:微利股,block_fg.dat:微小盘股,block_fg.dat:微盘精选,block_fg.dat:微盘股,block_fg.dat:户数减少,block_fg.dat:户数增加,block_fg.dat:扣非亏损,block_fg.dat:承诺不减,block_fg.dat:拟减持,block_fg.dat:拟增持,block_fg.dat:持续增长,block_fg.dat:摘帽,block_fg.dat:整体上市,block_fg.dat:昨ST连板,block_fg.dat:昨ST首板,block_fg.dat:昨成交20,block_fg.dat:昨收活跃,block_fg.dat:昨日上榜,block_fg.dat:昨日弱势,block_fg.dat:昨日强势,block_fg.dat:昨日振荡,block_fg.dat:昨日断板,block_fg.dat:昨日涨停,block_fg.dat:昨日突涨,block_fg.dat:昨日跌停,block_fg.dat:昨日较弱,block_fg.dat:昨日较强,block_fg.dat:昨日连板,block_fg.dat:昨日首板,block_fg.dat:昨曾涨停,block_fg.dat:昨曾跌停,block_fg.dat:昨高换手,block_fg.dat:最近多板,block_fg.dat:最近异动,block_fg.dat:机构吸筹,block_fg.dat:板块趋势,block_fg.dat:次新超跌,block_fg.dat:次新预增,block_fg.dat:活跃ETF,block_fg.dat:活跃股,block_fg.dat:海外业务,block_fg.dat:百元股,block_fg.dat:破净资产,block_fg.dat:破发行价,block_fg.dat:破增发价,block_fg.dat:社保新进,block_fg.dat:社保重仓,block_fg.dat:私募新进,block_fg.dat:私募重仓,block_fg.dat:绩优股,block_fg.dat:股东减持,block_fg.dat:股东增持,block_fg.dat:股权分散,block_fg.dat:股权激励,block_fg.dat:股权转让,block_fg.dat:股权集中,block_fg.dat:融资增加,block_fg.dat:行业龙头,block_fg.dat:被举牌,block_fg.dat:要约收购,block_fg.dat:轮动趋势,block_fg.dat:近已解禁,block_fg.dat:近期复牌,block_fg.dat:近期弱势,block_fg.dat:近期强势,block_fg.dat:近期新低,block_fg.dat:近期新高,block_fg.dat:近端次新,block_fg.dat:连续亏损,block_fg.dat:送转潜力,block_fg.dat:送转超跌,block_fg.dat:配股股,block_fg.dat:配股预案,block_fg.dat:非周期股,block_fg.dat:预计扭亏,block_fg.dat:预计转亏,block_fg.dat:预高送转,block_fg.dat:风险提示,block_fg.dat:高分红股,block_fg.dat:高商誉,block_fg.dat:高市净率,block_fg.dat:高市盈率,block_fg.dat:高应收款,block_fg.dat:高校背景,block_fg.dat:高股息股,block_fg.dat:高融资盘,block_fg.dat:高贝塔值,block_fg.dat:高负债率,block_fg.dat:高质押股",
+        "unmatched_boards=block_gn.dat:AI医疗,block_gn.dat:ChatGPT,block_gn.dat:DeepSeek,block_gn.dat:TOPCon,block_gn.dat:三代半导,block_gn.dat:临界发电,block_gn.dat:人形机器,block_gn.dat:元宇宙,block_gn.dat:军工信息,block_gn.dat:可控核变,block_gn.dat:外骨骼,block_gn.dat:小米汽车,block_gn.dat:小红书,block_gn.dat:幽门菌,block_gn.dat:新型工业,block_gn.dat:时空数据,block_gn.dat:智能机器,block_gn.dat:有机硅,block_gn.dat:核污防治,block_gn.dat:毫米雷达,block_gn.dat:消费电子,block_gn.dat:液冷服务,block_gn.dat:热管理,block_gn.dat:物业管理,block_gn.dat:特斯拉,block_gn.dat:电子身份,block_gn.dat:电池回收,block_gn.dat:碳纤维,block_gn.dat:英伟达,block_gn.dat:装配建筑,block_gn.dat:财税数字,block_gn.dat:跨境支付,block_gn.dat:钙钛矿,block_gn.dat:铜缆连接,block_gn.dat:锂电池,block_gn.dat:雅江水电,block_fg.dat:养老金,block_fg.dat:分拆上市,block_fg.dat:大基金,block_fg.dat:小盘国企,block_fg.dat:小盘非融,block_fg.dat:控制变更,block_fg.dat:新进成份,block_fg.dat:最近情绪,block_fg.dat:沪港通SH,block_fg.dat:活跃转债,block_fg.dat:深港通SZ,block_fg.dat:科创次新,block_fg.dat:科成长层,block_fg.dat:自由现金,block_fg.dat:融资融券,block_fg.dat:证金汇金,block_fg.dat:通达信热,block_fg.dat:重组股,block_fg.dat:重组预案,block_fg.dat:陆股通重",
+        "rejected_members=386",
+        "block_zs.dat and spblock.dat excluded: index/special lists are not sectors"
+      ],
+      "sample": [
+        {
+          "taxonomy_key": "tdx_files_concept",
+          "sector_key": "880515",
+          "sector_name": "通达信88",
+          "board_type": 4,
+          "symbol": "000408.SZ",
+          "known_at": "2026-10-11T03:18:19.522178+00:00"
+        },
+        {
+          "taxonomy_key": "tdx_files_concept",
+          "sector_key": "880515",
+          "sector_name": "通达信88",
+          "board_type": 4,
+          "symbol": "000538.SZ",
+          "known_at": "2026-10-11T03:18:19.522178+00:00"
+        },
+        {
+          "taxonomy_key": "tdx_files_concept",
+          "sector_key": "880515",
+          "sector_name": "通达信88",
+          "board_type": 4,
+          "symbol": "000708.SZ",
+          "known_at": "2026-10-11T03:18:19.522178+00:00"
+        },
+        {
+          "taxonomy_key": "tdx_files_concept",
+          "sector_key": "880515",
+          "sector_name": "通达信88",
+          "board_type": 4,
+          "symbol": "000792.SZ",
+          "known_at": "2026-10-11T03:18:19.522178+00:00"
+        },
+        {
+          "taxonomy_key": "tdx_files_concept",
+          "sector_key": "880515",
+          "sector_name": "通达信88",
+          "board_type": 4,
+          "symbol": "000895.SZ",
+          "known_at": "2026-10-11T03:18:19.522178+00:00"
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:21.031304+00:00",
+      "sample_sha256": "2d78fb39433d5d7042e67452877e3a524e72d1f932336f5ff14232fac90f37f9"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 52998 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

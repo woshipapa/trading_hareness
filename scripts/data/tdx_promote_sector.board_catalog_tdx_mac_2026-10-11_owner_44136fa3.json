@@ -1,0 +1,87 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_mac",
+  "capability": "sector.board_catalog",
+  "params": {},
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:23.886620+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_mac": {
+      "field_map": {},
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_mac": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_mac sector.board_catalog --params '{}'",
+      "source": "tdx_mac",
+      "capability": "sector.board_catalog",
+      "adapter": "app/datasources/sources/tdx_mac.py:fetch_board_catalog",
+      "params": {},
+      "started_utc": "2026-10-11T03:18:23.015159+00:00",
+      "rows": 932,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:23.398050+00:00",
+      "available_at_max": "2026-10-11T03:18:23.398050+00:00",
+      "warnings": [
+        "tdx_host=121.36.248.138:7709"
+      ],
+      "sample": [
+        {
+          "board_code": "881376",
+          "name": "数字媒体",
+          "board_type": 0
+        },
+        {
+          "board_code": "881373",
+          "name": "影视院线",
+          "board_type": 0
+        },
+        {
+          "board_code": "881106",
+          "name": "种植业",
+          "board_type": 0
+        },
+        {
+          "board_code": "881380",
+          "name": "出版业",
+          "board_type": 0
+        },
+        {
+          "board_code": "881075",
+          "name": "贵金属",
+          "board_type": 0
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:23.398076+00:00",
+      "sample_sha256": "25da34d79d916628ecb3b13afed7210fce9a03d022f2063da99cf59e40ca2f61"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_mac": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 932 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_mac (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

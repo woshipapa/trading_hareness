@@ -1,0 +1,143 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "quote.order_book",
+  "params": {
+    "symbols": [
+      "600519.SH",
+      "000001.SZ",
+      "300750.SZ"
+    ]
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:19.143706+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {},
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public quote.order_book --params '{\"symbols\": [\"600519.SH\", \"000001.SZ\", \"300750.SZ\"]}'",
+      "source": "tdx_public",
+      "capability": "quote.order_book",
+      "adapter": "app/datasources/sources/tdx_quotes.py:fetch_order_book",
+      "params": {
+        "symbols": [
+          "600519.SH",
+          "000001.SZ",
+          "300750.SZ"
+        ]
+      },
+      "started_utc": "2026-10-11T03:17:18.493355+00:00",
+      "rows": 3,
+      "coverage": 1.0,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:18.607011+00:00",
+      "available_at_max": "2026-10-11T03:17:18.607011+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "600519.SH",
+          "bid1": 1263.0,
+          "ask1": 1263.06,
+          "bid_vol1": 73,
+          "ask_vol1": 1,
+          "bid2": 1262.99,
+          "ask2": 1263.11,
+          "bid_vol2": 2,
+          "ask_vol2": 3,
+          "bid3": 1262.98,
+          "ask3": 1263.43,
+          "bid_vol3": 3,
+          "ask_vol3": 1,
+          "bid4": 1262.88,
+          "ask4": 1263.44,
+          "bid_vol4": 1,
+          "ask_vol4": 1,
+          "bid5": 1262.83,
+          "ask5": 1263.45,
+          "bid_vol5": 8,
+          "ask_vol5": 3
+        },
+        {
+          "symbol": "000001.SZ",
+          "bid1": 11.59,
+          "ask1": 11.6,
+          "bid_vol1": 2967,
+          "ask_vol1": 461,
+          "bid2": 11.58,
+          "ask2": 11.61,
+          "bid_vol2": 5655,
+          "ask_vol2": 527,
+          "bid3": 11.57,
+          "ask3": 11.62,
+          "bid_vol3": 1454,
+          "ask_vol3": 338,
+          "bid4": 11.56,
+          "ask4": 11.63,
+          "bid_vol4": 1027,
+          "ask_vol4": 729,
+          "bid5": 11.55,
+          "ask5": 11.64,
+          "bid_vol5": 3819,
+          "ask_vol5": 454
+        },
+        {
+          "symbol": "300750.SZ",
+          "bid1": 297.75,
+          "ask1": 297.76,
+          "bid_vol1": 146,
+          "ask_vol1": 85,
+          "bid2": 297.74,
+          "ask2": 297.77,
+          "bid_vol2": 2,
+          "ask_vol2": 28,
+          "bid3": 297.72,
+          "ask3": 297.78,
+          "bid_vol3": 5,
+          "ask_vol3": 17,
+          "bid4": 297.71,
+          "ask4": 297.79,
+          "bid_vol4": 8,
+          "ask_vol4": 7,
+          "bid5": 297.7,
+          "ask5": 297.8,
+          "bid_vol5": 91,
+          "ask_vol5": 19
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:18.607035+00:00",
+      "sample_sha256": "f0b7a92cd4fe3ce922ff236556ffe30ca75fa3d86a505d276a1c2a9d5a7e7cc0"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 3 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

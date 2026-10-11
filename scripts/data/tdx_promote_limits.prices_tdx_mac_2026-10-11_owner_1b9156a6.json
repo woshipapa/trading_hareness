@@ -1,0 +1,302 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_mac",
+  "capability": "limits.prices",
+  "params": {
+    "symbols": [
+      "600519.SH",
+      "000001.SZ",
+      "300750.SZ",
+      "601318.SH",
+      "000858.SZ"
+    ]
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:00.742759+00:00",
+  "agreement_spec": {
+    "up_limit": {
+      "reference": "tencent_free",
+      "reference_adapter": "app/longhu_vendor_source.py:tencent_quotes_blocking",
+      "reference_params": {
+        "symbols": "symbols"
+      },
+      "key": [
+        "symbol",
+        "trade_date"
+      ],
+      "abs_tol": 0.005
+    },
+    "down_limit": {
+      "reference": "tencent_free",
+      "reference_adapter": "app/longhu_vendor_source.py:tencent_quotes_blocking",
+      "reference_params": {
+        "symbols": "symbols"
+      },
+      "key": [
+        "symbol",
+        "trade_date"
+      ],
+      "abs_tol": 0.005
+    }
+  },
+  "projections": {
+    "tdx_mac": {
+      "field_map": {
+        "limit_up": "up_limit",
+        "limit_down": "down_limit"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_mac": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_mac limits.prices --params '{\"symbols\": [\"600519.SH\", \"000001.SZ\", \"300750.SZ\", \"601318.SH\", \"000858.SZ\"]}' --all-rows",
+      "source": "tdx_mac",
+      "capability": "limits.prices",
+      "adapter": "app/datasources/sources/tdx_mac.py:fetch_limit_prices",
+      "params": {
+        "symbols": [
+          "600519.SH",
+          "000001.SZ",
+          "300750.SZ",
+          "601318.SH",
+          "000858.SZ"
+        ]
+      },
+      "started_utc": "2026-10-11T03:17:58.110629+00:00",
+      "rows": 5,
+      "coverage": 1.0,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:58.276520+00:00",
+      "available_at_max": "2026-10-11T03:17:58.276520+00:00",
+      "warnings": [
+        "tdx_host=121.36.248.138:7709"
+      ],
+      "sample": [
+        {
+          "symbol": "600519.SH",
+          "trade_date": "2026-10-09",
+          "limit_up": 1381.3699951171875,
+          "limit_down": 1130.2099609375
+        },
+        {
+          "symbol": "000001.SZ",
+          "trade_date": "2026-10-09",
+          "limit_up": 12.960000038146973,
+          "limit_down": 10.600000381469727
+        },
+        {
+          "symbol": "300750.SZ",
+          "trade_date": "2026-10-09",
+          "limit_up": 344.1000061035156,
+          "limit_down": 229.39999389648438
+        },
+        {
+          "symbol": "601318.SH",
+          "trade_date": "2026-10-09",
+          "limit_up": 57.939998626708984,
+          "limit_down": 47.400001525878906
+        },
+        {
+          "symbol": "000858.SZ",
+          "trade_date": "2026-10-09",
+          "limit_up": 77.1500015258789,
+          "limit_down": 63.130001068115234
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:58.276575+00:00",
+      "sample_sha256": "fd8a86c5a45f87729b851c8805308eb11502c14e4c15833b5a093609ca8ee1e8"
+    },
+    "app/longhu_vendor_source.py:tencent_quotes_blocking": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tencent_free limits.prices --params '{\"symbols\": [\"600519.SH\", \"000001.SZ\", \"300750.SZ\", \"601318.SH\", \"000858.SZ\"]}' --adapter app/longhu_vendor_source.py:tencent_quotes_blocking --all-rows",
+      "source": "tencent_free",
+      "capability": "limits.prices",
+      "adapter": "app/longhu_vendor_source.py:tencent_quotes_blocking",
+      "params": {
+        "symbols": [
+          "600519.SH",
+          "000001.SZ",
+          "300750.SZ",
+          "601318.SH",
+          "000858.SZ"
+        ]
+      },
+      "started_utc": "2026-10-11T03:17:59.734584+00:00",
+      "rows": 2,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": null,
+      "available_at_max": null,
+      "warnings": [],
+      "sample": [
+        [
+          {
+            "ts_code": "000001.SZ",
+            "name": "平安银行",
+            "trade_date": "20261009",
+            "open": 11.78,
+            "high": 11.89,
+            "low": 11.58,
+            "close": 11.59,
+            "pre_close": 11.78,
+            "vol": 1078106.0,
+            "amount": 1259720000.0,
+            "pct_chg": -1.61,
+            "up_limit": 12.96,
+            "down_limit": 10.6
+          },
+          {
+            "ts_code": "000858.SZ",
+            "name": "五 粮 液",
+            "trade_date": "20261009",
+            "open": 70.15,
+            "high": 70.83,
+            "low": 69.97,
+            "close": 70.56,
+            "pre_close": 70.14,
+            "vol": 178629.0,
+            "amount": 1257910000.0,
+            "pct_chg": 0.6,
+            "up_limit": 77.15,
+            "down_limit": 63.13
+          },
+          {
+            "ts_code": "300750.SZ",
+            "name": "宁德时代",
+            "trade_date": "20261009",
+            "open": 292.0,
+            "high": 301.42,
+            "low": 289.0,
+            "close": 297.75,
+            "pre_close": 286.75,
+            "vol": 541527.0,
+            "amount": 16028120000.0,
+            "pct_chg": 3.84,
+            "up_limit": 344.1,
+            "down_limit": 229.4
+          },
+          {
+            "ts_code": "600519.SH",
+            "name": "贵州茅台",
+            "trade_date": "20261009",
+            "open": 1255.42,
+            "high": 1282.0,
+            "low": 1255.42,
+            "close": 1263.0,
+            "pre_close": 1255.79,
+            "vol": 35111.0,
+            "amount": 4453220000.0,
+            "pct_chg": 0.57,
+            "up_limit": 1381.37,
+            "down_limit": 1130.21
+          },
+          {
+            "ts_code": "601318.SH",
+            "name": "中国平安",
+            "trade_date": "20261009",
+            "open": 52.71,
+            "high": 53.15,
+            "low": 52.68,
+            "close": 52.83,
+            "pre_close": 52.67,
+            "vol": 595936.0,
+            "amount": 3153260000.0,
+            "pct_chg": 0.3,
+            "up_limit": 57.94,
+            "down_limit": 47.4
+          }
+        ],
+        {
+          "requested": 5,
+          "received": 5,
+          "coverage": 1.0,
+          "batch_size": 80,
+          "errors": []
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:00.226949+00:00",
+      "sample_sha256": "db1edf6cf71ae5cf51d6a9a330e12a6861f58ba4e90bf89ceffa566d5569ec86"
+    }
+  },
+  "comparison": {
+    "up_limit": {
+      "reference": "tencent_free",
+      "key": [
+        "symbol",
+        "trade_date"
+      ],
+      "rel_tol": 0.0,
+      "abs_tol": 0.005,
+      "min_coverage": 0.95,
+      "left_rows": 5,
+      "right_rows": 5,
+      "matched": 5,
+      "mismatched": 0,
+      "only_left": 0,
+      "only_right": 0,
+      "coverage": 1.0,
+      "max_abs_dev": 6.1035156022626325e-06,
+      "max_rel_dev": 2.3701950523839546e-08,
+      "worst_key": [
+        "300750.SZ",
+        "2026-10-09"
+      ],
+      "examples": [],
+      "agree": true,
+      "why": ""
+    },
+    "down_limit": {
+      "reference": "tencent_free",
+      "key": [
+        "symbol",
+        "trade_date"
+      ],
+      "rel_tol": 0.0,
+      "abs_tol": 0.005,
+      "min_coverage": 0.95,
+      "left_rows": 5,
+      "right_rows": 5,
+      "matched": 5,
+      "mismatched": 0,
+      "only_left": 0,
+      "only_right": 0,
+      "coverage": 1.0,
+      "max_abs_dev": 3.906250003637979e-05,
+      "max_rel_dev": 3.5987708791466974e-08,
+      "worst_key": [
+        "600519.SH",
+        "2026-10-09"
+      ],
+      "examples": [],
+      "agree": true,
+      "why": ""
+    }
+  },
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_mac": false,
+      "app/longhu_vendor_source.py:tencent_quotes_blocking": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 5 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "2 fields agree on their common rows"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_mac, app/longhu_vendor_source.py:tencent_quotes_blocking (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

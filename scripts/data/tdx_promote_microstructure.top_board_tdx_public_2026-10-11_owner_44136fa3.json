@@ -1,0 +1,106 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "microstructure.top_board",
+  "params": {},
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:56.631885+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "code": "code",
+        "price": "price",
+        "value": "value"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public microstructure.top_board --params '{}'",
+      "source": "tdx_public",
+      "capability": "microstructure.top_board",
+      "adapter": "app/datasources/sources/tdx_microstructure.py:fetch_top_board",
+      "params": {},
+      "started_utc": "2026-10-11T03:17:56.014146+00:00",
+      "rows": 180,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:56.149905+00:00",
+      "available_at_max": "2026-10-11T03:17:56.149905+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "688152.SH",
+          "category": "increase",
+          "market": 1,
+          "code": "688152",
+          "price": 45.849998474121094,
+          "value": 19.99476432800293
+        },
+        {
+          "symbol": "688244.SH",
+          "category": "increase",
+          "market": 1,
+          "code": "688244",
+          "price": 24.0,
+          "value": 16.222763061523438
+        },
+        {
+          "symbol": "688315.SH",
+          "category": "increase",
+          "market": 1,
+          "code": "688315",
+          "price": 21.729999542236328,
+          "value": 14.791332244873047
+        },
+        {
+          "symbol": "688661.SH",
+          "category": "increase",
+          "market": 1,
+          "code": "688661",
+          "price": 106.0,
+          "value": 14.101181983947754
+        },
+        {
+          "symbol": "688345.SH",
+          "category": "increase",
+          "market": 1,
+          "code": "688345",
+          "price": 51.900001525878906,
+          "value": 12.240483283996582
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:56.149930+00:00",
+      "sample_sha256": "cb29452d3ced9571c58c535574732b0b93c4c33bf3422e92c527798f8bce88d1"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 180 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

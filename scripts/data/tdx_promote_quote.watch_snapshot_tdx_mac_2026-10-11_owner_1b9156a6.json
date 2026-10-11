@@ -1,0 +1,923 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_mac",
+  "capability": "quote.watch_snapshot",
+  "params": {
+    "symbols": [
+      "600519.SH",
+      "000001.SZ",
+      "300750.SZ",
+      "601318.SH",
+      "000858.SZ"
+    ]
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:16.891048+00:00",
+  "agreement_spec": {
+    "price": {
+      "reference": "tencent_free",
+      "reference_adapter": "app/free_market_providers.py:tencent_order_book_quotes",
+      "reference_params": {
+        "symbols": "symbols"
+      },
+      "key": [
+        "symbol"
+      ],
+      "rel_tol": 0.005
+    },
+    "volume": {
+      "reference": "tencent_free",
+      "reference_adapter": "app/free_market_providers.py:tencent_order_book_quotes",
+      "reference_params": {
+        "symbols": "symbols"
+      },
+      "key": [
+        "symbol"
+      ],
+      "rel_tol": 0.02
+    },
+    "amount": {
+      "reference": "tencent_free",
+      "reference_adapter": "app/free_market_providers.py:tencent_order_book_quotes",
+      "reference_params": {
+        "symbols": "symbols"
+      },
+      "key": [
+        "symbol"
+      ],
+      "rel_tol": 0.02
+    }
+  },
+  "projections": {
+    "tdx_mac": {
+      "field_map": {
+        "close": "price",
+        "vol": "volume",
+        "amount": "amount",
+        "vol_ratio": "volume_ratio",
+        "turnover": "turnover_rate",
+        "exchange_time": "exchange_time"
+      },
+      "unit_factors": {
+        "volume": 100
+      }
+    }
+  },
+  "probes": {
+    "tdx_mac": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_mac quote.watch_snapshot --params '{\"symbols\": [\"600519.SH\", \"000001.SZ\", \"300750.SZ\", \"601318.SH\", \"000858.SZ\"]}' --all-rows",
+      "source": "tdx_mac",
+      "capability": "quote.watch_snapshot",
+      "adapter": "app/datasources/sources/tdx_mac.py:fetch_watch_snapshot",
+      "params": {
+        "symbols": [
+          "600519.SH",
+          "000001.SZ",
+          "300750.SZ",
+          "601318.SH",
+          "000858.SZ"
+        ]
+      },
+      "started_utc": "2026-10-11T03:17:14.160078+00:00",
+      "rows": 5,
+      "coverage": 1.0,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:14.329272+00:00",
+      "available_at_max": "2026-10-11T03:17:14.329272+00:00",
+      "warnings": [
+        "tdx_host=121.36.248.138:7709"
+      ],
+      "sample": [
+        {
+          "symbol": "600519.SH",
+          "exchange_time": "2026-10-09T15:30:02+08:00",
+          "market": 1,
+          "name": "贵州茅台",
+          "total": 5,
+          "pre_close": 1255.7900390625,
+          "open": 1255.4200439453125,
+          "high": 1282.0,
+          "low": 1255.4200439453125,
+          "close": 1263.0,
+          "vol": 35110,
+          "vol_ratio": 1.1756433248519897,
+          "amount": 4453223424.0,
+          "total_shares": 125008.15625,
+          "float_shares": 125008.15625,
+          "eps": 35.56999969482422,
+          "net_assets": 200.99000549316406,
+          "security_type_price": 6.0,
+          "total_market_cap_ab": 1578853072896.0,
+          "pe_dynamic": 17.733196258544922,
+          "lot_size_info": 0,
+          "bit_0x16": 0,
+          "dividend_yield": -0.016621222719550133,
+          "last_volume": 386,
+          "turnover": 0.28086167573928833,
+          "stock_tag_flags": 7,
+          "decimal_point": 2,
+          "buy_price_limit": 1381.3699951171875,
+          "sell_price_limit": 1130.2099609375,
+          "price_decimal_info": 0,
+          "lot_size": 29,
+          "pre_iopv": 1250081664.0,
+          "speed_pct": -0.016621222719550133,
+          "flag_kcb": 0,
+          "pe_ttm": 19.179443359375,
+          "pe_static": 19.388134002685547,
+          "main_net_amount": 214378112.0
+        },
+        {
+          "symbol": "000001.SZ",
+          "exchange_time": "2026-10-09T15:33:18+08:00",
+          "market": 0,
+          "name": "平安银行",
+          "total": 5,
+          "pre_close": 11.779999732971191,
+          "open": 11.779999732971191,
+          "high": 11.890000343322754,
+          "low": 11.579999923706055,
+          "close": 11.59000015258789,
+          "vol": 1078105,
+          "vol_ratio": 1.0830473899841309,
+          "amount": 1259717120.0,
+          "total_shares": 1940591.875,
+          "float_shares": 1940568.5,
+          "eps": 1.2400000095367432,
+          "net_assets": 24.1299991607666,
+          "security_type_price": 6.0,
+          "total_market_cap_ab": 224914604032.0,
+          "pe_dynamic": 4.37645149230957,
+          "lot_size_info": 0,
+          "bit_0x16": 0,
+          "dividend_yield": -0.08620887249708176,
+          "last_volume": 11213,
+          "turnover": 0.5555614233016968,
+          "stock_tag_flags": 11,
+          "decimal_point": 2,
+          "buy_price_limit": 12.960000038146973,
+          "sell_price_limit": 10.600000381469727,
+          "price_decimal_info": 0,
+          "lot_size": 18,
+          "pre_iopv": 5.610000133514404,
+          "speed_pct": -0.08620887249708176,
+          "flag_kcb": 0,
+          "pe_ttm": 5.275598526000977,
+          "pe_static": 5.175328254699707,
+          "main_net_amount": -36053088.0
+        },
+        {
+          "symbol": "300750.SZ",
+          "exchange_time": "2026-10-09T15:33:18+08:00",
+          "market": 0,
+          "name": "宁德时代",
+          "total": 5,
+          "pre_close": 286.75,
+          "open": 292.0,
+          "high": 301.4200134277344,
+          "low": 289.0,
+          "close": 297.75,
+          "vol": 541526,
+          "vol_ratio": 1.7117340564727783,
+          "amount": 16028123136.0,
+          "total_shares": 462724.96875,
+          "float_shares": 426061.71875,
+          "eps": 9.510000228881836,
+          "net_assets": 81.99299621582031,
+          "security_type_price": 6.0,
+          "total_market_cap_ab": 1377763590144.0,
+          "pe_dynamic": 15.915390968322754,
+          "lot_size_info": 0,
+          "bit_0x16": 0,
+          "dividend_yield": -0.03692518547177315,
+          "last_volume": 4575,
+          "turnover": 1.2710036039352417,
+          "stock_tag_flags": 11,
+          "decimal_point": 2,
+          "buy_price_limit": 344.1000061035156,
+          "sell_price_limit": 229.39999389648438,
+          "price_decimal_info": 0,
+          "lot_size": 20,
+          "pre_iopv": 18.81999969482422,
+          "speed_pct": -0.03692518547177315,
+          "flag_kcb": 0,
+          "pe_ttm": 19.082258224487305,
+          "pe_static": 16.208955764770508,
+          "main_net_amount": 2263170560.0
+        },
+        {
+          "symbol": "601318.SH",
+          "exchange_time": "2026-10-09T15:30:02+08:00",
+          "market": 1,
+          "name": "中国平安",
+          "total": 5,
+          "pre_close": 52.66999816894531,
+          "open": 52.709999084472656,
+          "high": 53.150001525878906,
+          "low": 52.68000030517578,
+          "close": 52.83000183105469,
+          "vol": 595936,
+          "vol_ratio": 1.0498151779174805,
+          "amount": 3153261312.0,
+          "total_shares": 1810764.25,
+          "float_shares": 1066006.5,
+          "eps": 5.300000190734863,
+          "net_assets": 56.779998779296875,
+          "security_type_price": 6.0,
+          "total_market_cap_ab": 956626763776.0,
+          "pe_dynamic": 5.166208267211914,
+          "lot_size_info": 0,
+          "bit_0x16": 0,
+          "dividend_yield": -0.1511964052915573,
+          "last_volume": 6225,
+          "turnover": 0.5590360164642334,
+          "stock_tag_flags": 7,
+          "decimal_point": 2,
+          "buy_price_limit": 57.939998626708984,
+          "sell_price_limit": 47.400001525878906,
+          "price_decimal_info": 0,
+          "lot_size": 18,
+          "pre_iopv": 10660065280.0,
+          "speed_pct": -0.1511964052915573,
+          "flag_kcb": 0,
+          "pe_ttm": 7.097796440124512,
+          "pe_static": 6.004587173461914,
+          "main_net_amount": 42947456.0
+        },
+        {
+          "symbol": "000858.SZ",
+          "exchange_time": "2026-10-09T15:33:18+08:00",
+          "market": 0,
+          "name": "五 粮 液",
+          "total": 5,
+          "pre_close": 70.13999938964844,
+          "open": 70.1500015258789,
+          "high": 70.83000183105469,
+          "low": 69.97000122070312,
+          "close": 70.55999755859375,
+          "vol": 178629,
+          "vol_ratio": 1.1783545017242432,
+          "amount": 1257907968.0,
+          "total_shares": 388160.8125,
+          "float_shares": 388151.34375,
+          "eps": 2.259999990463257,
+          "net_assets": 30.523000717163086,
+          "security_type_price": 6.0,
+          "total_market_cap_ab": 273886265344.0,
+          "pe_dynamic": 15.645380020141602,
+          "lot_size_info": 0,
+          "bit_0x16": 0,
+          "dividend_yield": 0.05672280117869377,
+          "last_volume": 1786,
+          "turnover": 0.46020448207855225,
+          "stock_tag_flags": 11,
+          "decimal_point": 2,
+          "buy_price_limit": 77.1500015258789,
+          "sell_price_limit": 63.130001068115234,
+          "price_decimal_info": 0,
+          "lot_size": 23,
+          "pre_iopv": 30.59000015258789,
+          "speed_pct": 0.05672280117869377,
+          "flag_kcb": 0,
+          "pe_ttm": 30.58726692199707,
+          "pe_static": 20.9339542388916,
+          "main_net_amount": 33108128.0
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:14.329298+00:00",
+      "sample_sha256": "4ee8c05affc5146382d5a077e8ac022d3536a6f5fc45d6ca60ad5ec3fa706a29"
+    },
+    "app/free_market_providers.py:tencent_order_book_quotes": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tencent_free quote.watch_snapshot --params '{\"symbols\": [\"600519.SH\", \"000001.SZ\", \"300750.SZ\", \"601318.SH\", \"000858.SZ\"]}' --adapter app/free_market_providers.py:tencent_order_book_quotes --all-rows",
+      "source": "tencent_free",
+      "capability": "quote.watch_snapshot",
+      "adapter": "app/free_market_providers.py:tencent_order_book_quotes",
+      "params": {
+        "symbols": [
+          "600519.SH",
+          "000001.SZ",
+          "300750.SZ",
+          "601318.SH",
+          "000858.SZ"
+        ]
+      },
+      "started_utc": "2026-10-11T03:17:15.667152+00:00",
+      "rows": 5,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": null,
+      "available_at_max": null,
+      "warnings": [],
+      "sample": [
+        {
+          "ts_code": "600519.SH",
+          "name": "贵州茅台",
+          "price": 1263.0,
+          "pre_close": 1255.79,
+          "cumulative_volume_lot": 35111.0,
+          "cumulative_amount": 4453223189.0,
+          "outer_volume_lot": 19932.0,
+          "inner_volume_lot": 15179.0,
+          "bids": [
+            {
+              "price": 1263.0,
+              "size": 73.0
+            },
+            {
+              "price": 1262.99,
+              "size": 2.0
+            },
+            {
+              "price": 1262.98,
+              "size": 3.0
+            },
+            {
+              "price": 1262.88,
+              "size": 1.0
+            },
+            {
+              "price": 1262.83,
+              "size": 8.0
+            }
+          ],
+          "asks": [
+            {
+              "price": 1263.06,
+              "size": 1.0
+            },
+            {
+              "price": 1263.11,
+              "size": 3.0
+            },
+            {
+              "price": 1263.43,
+              "size": 1.0
+            },
+            {
+              "price": 1263.44,
+              "size": 1.0
+            },
+            {
+              "price": 1263.45,
+              "size": 3.0
+            }
+          ],
+          "one_sided_book": false,
+          "book_side": "two_sided",
+          "seal_volume_lot": null,
+          "trade_time": "20261009161459",
+          "raw_fields": [
+            "1",
+            "贵州茅台",
+            "600519",
+            "1263.00",
+            "1255.79",
+            "1255.42",
+            "35111",
+            "19932",
+            "15179",
+            "1263.00",
+            "73",
+            "1262.99",
+            "2",
+            "1262.98",
+            "3",
+            "1262.88",
+            "1",
+            "1262.83",
+            "8",
+            "1263.06",
+            "1",
+            "1263.11",
+            "3",
+            "1263.43",
+            "1",
+            "1263.44",
+            "1",
+            "1263.45",
+            "3",
+            "",
+            "20261009161459",
+            "7.21",
+            "0.57",
+            "1282.00",
+            "1255.42",
+            "1263.00/35111/4453223189",
+            "35111",
+            "445322",
+            "0.28",
+            "19.39"
+          ],
+          "source": "tencent_order_book"
+        },
+        {
+          "ts_code": "000001.SZ",
+          "name": "平安银行",
+          "price": 11.59,
+          "pre_close": 11.78,
+          "cumulative_volume_lot": 1078106.0,
+          "cumulative_amount": 1259717108.0,
+          "outer_volume_lot": 440184.0,
+          "inner_volume_lot": 637921.0,
+          "bids": [
+            {
+              "price": 11.59,
+              "size": 2967.0
+            },
+            {
+              "price": 11.58,
+              "size": 5655.0
+            },
+            {
+              "price": 11.57,
+              "size": 1454.0
+            },
+            {
+              "price": 11.56,
+              "size": 1027.0
+            },
+            {
+              "price": 11.55,
+              "size": 3819.0
+            }
+          ],
+          "asks": [
+            {
+              "price": 11.6,
+              "size": 461.0
+            },
+            {
+              "price": 11.61,
+              "size": 527.0
+            },
+            {
+              "price": 11.62,
+              "size": 338.0
+            },
+            {
+              "price": 11.63,
+              "size": 729.0
+            },
+            {
+              "price": 11.64,
+              "size": 454.0
+            }
+          ],
+          "one_sided_book": false,
+          "book_side": "two_sided",
+          "seal_volume_lot": null,
+          "trade_time": "20261009161500",
+          "raw_fields": [
+            "51",
+            "平安银行",
+            "000001",
+            "11.59",
+            "11.78",
+            "11.78",
+            "1078106",
+            "440184",
+            "637921",
+            "11.59",
+            "2967",
+            "11.58",
+            "5655",
+            "11.57",
+            "1454",
+            "11.56",
+            "1027",
+            "11.55",
+            "3819",
+            "11.60",
+            "461",
+            "11.61",
+            "527",
+            "11.62",
+            "338",
+            "11.63",
+            "729",
+            "11.64",
+            "454",
+            "",
+            "20261009161500",
+            "-0.19",
+            "-1.61",
+            "11.89",
+            "11.58",
+            "11.59/1078106/1259717108",
+            "1078106",
+            "125972",
+            "0.56",
+            "5.18"
+          ],
+          "source": "tencent_order_book"
+        },
+        {
+          "ts_code": "300750.SZ",
+          "name": "宁德时代",
+          "price": 297.75,
+          "pre_close": 286.75,
+          "cumulative_volume_lot": 541527.0,
+          "cumulative_amount": 16028123330.0,
+          "outer_volume_lot": 304181.0,
+          "inner_volume_lot": 237346.0,
+          "bids": [
+            {
+              "price": 297.75,
+              "size": 146.0
+            },
+            {
+              "price": 297.74,
+              "size": 2.0
+            },
+            {
+              "price": 297.72,
+              "size": 5.0
+            },
+            {
+              "price": 297.71,
+              "size": 8.0
+            },
+            {
+              "price": 297.7,
+              "size": 91.0
+            }
+          ],
+          "asks": [
+            {
+              "price": 297.76,
+              "size": 85.0
+            },
+            {
+              "price": 297.77,
+              "size": 28.0
+            },
+            {
+              "price": 297.78,
+              "size": 17.0
+            },
+            {
+              "price": 297.79,
+              "size": 7.0
+            },
+            {
+              "price": 297.8,
+              "size": 19.0
+            }
+          ],
+          "one_sided_book": false,
+          "book_side": "two_sided",
+          "seal_volume_lot": null,
+          "trade_time": "20261009161433",
+          "raw_fields": [
+            "51",
+            "宁德时代",
+            "300750",
+            "297.75",
+            "286.75",
+            "292.00",
+            "541527",
+            "304181",
+            "237346",
+            "297.75",
+            "146",
+            "297.74",
+            "2",
+            "297.72",
+            "5",
+            "297.71",
+            "8",
+            "297.70",
+            "91",
+            "297.76",
+            "85",
+            "297.77",
+            "28",
+            "297.78",
+            "17",
+            "297.79",
+            "7",
+            "297.80",
+            "19",
+            "",
+            "20261009161433",
+            "11.00",
+            "3.84",
+            "301.42",
+            "289.00",
+            "297.75/541527/16028123330",
+            "541527",
+            "1602812",
+            "1.27",
+            "16.21"
+          ],
+          "source": "tencent_order_book"
+        },
+        {
+          "ts_code": "601318.SH",
+          "name": "中国平安",
+          "price": 52.83,
+          "pre_close": 52.67,
+          "cumulative_volume_lot": 595936.0,
+          "cumulative_amount": 3153261224.0,
+          "outer_volume_lot": 320058.0,
+          "inner_volume_lot": 275878.0,
+          "bids": [
+            {
+              "price": 52.83,
+              "size": 297.0
+            },
+            {
+              "price": 52.82,
+              "size": 764.0
+            },
+            {
+              "price": 52.81,
+              "size": 810.0
+            },
+            {
+              "price": 52.8,
+              "size": 1825.0
+            },
+            {
+              "price": 52.79,
+              "size": 103.0
+            }
+          ],
+          "asks": [
+            {
+              "price": 52.88,
+              "size": 8.0
+            },
+            {
+              "price": 52.89,
+              "size": 49.0
+            },
+            {
+              "price": 52.9,
+              "size": 204.0
+            },
+            {
+              "price": 52.91,
+              "size": 65.0
+            },
+            {
+              "price": 52.92,
+              "size": 27.0
+            }
+          ],
+          "one_sided_book": false,
+          "book_side": "two_sided",
+          "seal_volume_lot": null,
+          "trade_time": "20261009161443",
+          "raw_fields": [
+            "1",
+            "中国平安",
+            "601318",
+            "52.83",
+            "52.67",
+            "52.71",
+            "595936",
+            "320058",
+            "275878",
+            "52.83",
+            "297",
+            "52.82",
+            "764",
+            "52.81",
+            "810",
+            "52.80",
+            "1825",
+            "52.79",
+            "103",
+            "52.88",
+            "8",
+            "52.89",
+            "49",
+            "52.90",
+            "204",
+            "52.91",
+            "65",
+            "52.92",
+            "27",
+            "",
+            "20261009161443",
+            "0.16",
+            "0.30",
+            "53.15",
+            "52.68",
+            "52.83/595936/3153261224",
+            "595936",
+            "315326",
+            "0.56",
+            "6.00"
+          ],
+          "source": "tencent_order_book"
+        },
+        {
+          "ts_code": "000858.SZ",
+          "name": "五 粮 液",
+          "price": 70.56,
+          "pre_close": 70.14,
+          "cumulative_volume_lot": 178629.0,
+          "cumulative_amount": 1257907936.0,
+          "outer_volume_lot": 107704.0,
+          "inner_volume_lot": 70926.0,
+          "bids": [
+            {
+              "price": 70.56,
+              "size": 2.0
+            },
+            {
+              "price": 70.55,
+              "size": 530.0
+            },
+            {
+              "price": 70.54,
+              "size": 592.0
+            },
+            {
+              "price": 70.53,
+              "size": 339.0
+            },
+            {
+              "price": 70.52,
+              "size": 105.0
+            }
+          ],
+          "asks": [
+            {
+              "price": 70.57,
+              "size": 176.0
+            },
+            {
+              "price": 70.58,
+              "size": 140.0
+            },
+            {
+              "price": 70.59,
+              "size": 25.0
+            },
+            {
+              "price": 70.6,
+              "size": 179.0
+            },
+            {
+              "price": 70.61,
+              "size": 71.0
+            }
+          ],
+          "one_sided_book": false,
+          "book_side": "two_sided",
+          "seal_volume_lot": null,
+          "trade_time": "20261009161500",
+          "raw_fields": [
+            "51",
+            "五 粮 液",
+            "000858",
+            "70.56",
+            "70.14",
+            "70.15",
+            "178629",
+            "107704",
+            "70926",
+            "70.56",
+            "2",
+            "70.55",
+            "530",
+            "70.54",
+            "592",
+            "70.53",
+            "339",
+            "70.52",
+            "105",
+            "70.57",
+            "176",
+            "70.58",
+            "140",
+            "70.59",
+            "25",
+            "70.60",
+            "179",
+            "70.61",
+            "71",
+            "",
+            "20261009161500",
+            "0.42",
+            "0.60",
+            "70.83",
+            "69.97",
+            "70.56/178629/1257907936",
+            "178629",
+            "125791",
+            "0.46",
+            "20.93"
+          ],
+          "source": "tencent_order_book"
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:16.328119+00:00",
+      "sample_sha256": "4fc7b4a162b949a04cf28a7cc57bfc88061ef99145b71239ae5ef11719fce83d"
+    }
+  },
+  "comparison": {
+    "price": {
+      "reference": "tencent_free",
+      "key": [
+        "symbol"
+      ],
+      "rel_tol": 0.005,
+      "abs_tol": 0.0,
+      "min_coverage": 0.95,
+      "left_rows": 5,
+      "right_rows": 5,
+      "matched": 5,
+      "mismatched": 0,
+      "only_left": 0,
+      "only_right": 0,
+      "coverage": 1.0,
+      "max_abs_dev": 2.4414062522737368e-06,
+      "max_rel_dev": 3.4659372056447036e-08,
+      "worst_key": [
+        "000858.SZ"
+      ],
+      "examples": [],
+      "agree": true,
+      "why": ""
+    },
+    "volume": {
+      "reference": "tencent_free",
+      "key": [
+        "symbol"
+      ],
+      "rel_tol": 0.02,
+      "abs_tol": 0.0,
+      "min_coverage": 0.95,
+      "left_rows": 5,
+      "right_rows": 5,
+      "matched": 5,
+      "mismatched": 0,
+      "only_left": 0,
+      "only_right": 0,
+      "coverage": 1.0,
+      "max_abs_dev": 100.0,
+      "max_rel_dev": 2.8481102788299963e-05,
+      "worst_key": [
+        "600519.SH"
+      ],
+      "examples": [],
+      "agree": true,
+      "why": ""
+    },
+    "amount": {
+      "reference": "tencent_free",
+      "key": [
+        "symbol"
+      ],
+      "rel_tol": 0.02,
+      "abs_tol": 0.0,
+      "min_coverage": 0.95,
+      "left_rows": 5,
+      "right_rows": 5,
+      "matched": 5,
+      "mismatched": 0,
+      "only_left": 0,
+      "only_right": 0,
+      "coverage": 1.0,
+      "max_abs_dev": 235.0,
+      "max_rel_dev": 5.277076347292653e-08,
+      "worst_key": [
+        "600519.SH"
+      ],
+      "examples": [],
+      "agree": true,
+      "why": ""
+    }
+  },
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_mac": false,
+      "app/free_market_providers.py:tencent_order_book_quotes": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 5 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "3 fields agree on their common rows"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_mac, app/free_market_providers.py:tencent_order_book_quotes (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

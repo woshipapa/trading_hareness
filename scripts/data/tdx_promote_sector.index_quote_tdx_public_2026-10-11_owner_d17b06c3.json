@@ -1,0 +1,80 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "sector.index_quote",
+  "params": {
+    "symbols": [
+      "880491.SH"
+    ]
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:26.254078+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "symbol": "index_code"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public sector.index_quote --params '{\"symbols\": [\"880491.SH\"]}'",
+      "source": "tdx_public",
+      "capability": "sector.index_quote",
+      "adapter": "app/datasources/sources/tdx_quotes.py:fetch_index_quote",
+      "params": {
+        "symbols": [
+          "880491.SH"
+        ]
+      },
+      "started_utc": "2026-10-11T03:18:25.675096+00:00",
+      "rows": 1,
+      "coverage": 1.0,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:25.767622+00:00",
+      "available_at_max": "2026-10-11T03:18:25.767622+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "880491.SH",
+          "last_price": 5118.62,
+          "pre_close": 5153.73,
+          "pct_change": -0.6812541596086685,
+          "volume_raw": 37494040,
+          "amount_raw": 237727776768.0
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:25.767705+00:00",
+      "sample_sha256": "522842a55d0e3cf4b35ca4015efd8cdb1ae2c59cce563001ce81d01d09b133d1"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 1 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

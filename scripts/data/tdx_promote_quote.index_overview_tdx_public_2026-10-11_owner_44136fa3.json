@@ -1,0 +1,1292 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "quote.index_overview",
+  "params": {},
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:11.797905+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "open": "open",
+        "high": "high",
+        "low": "low",
+        "close": "close",
+        "amount": "amount",
+        "volume_lots": "volume_raw",
+        "up_count": "up_count",
+        "down_count": "down_count"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public quote.index_overview --params '{}'",
+      "source": "tdx_public",
+      "capability": "quote.index_overview",
+      "adapter": "app/datasources/sources/tdx_legacy_misc.py:fetch_index_overview",
+      "params": {},
+      "started_utc": "2026-10-11T03:17:11.189206+00:00",
+      "rows": 1,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:11.259488+00:00",
+      "available_at_max": "2026-10-11T03:17:11.259488+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "order_count": 240,
+          "market": 1,
+          "code": "999999",
+          "active": 4744,
+          "close": 3813.79,
+          "pre_close": 3811.9,
+          "open": 3804.09,
+          "high": 3824.71,
+          "low": 3754.14,
+          "server_time_raw": 14924422,
+          "after_hour": 1,
+          "volume_lots": 535149921,
+          "current_volume_lots": 0,
+          "amount": 888561205248.0,
+          "open_amount": 59706308,
+          "up_count": 1341,
+          "down_count": 956,
+          "orders": [
+            {
+              "price": 3806.44,
+              "unknown": -80542,
+              "volume_lots": 3418812
+            },
+            {
+              "price": 3800.08,
+              "unknown": -105928,
+              "volume_lots": 1585442
+            },
+            {
+              "price": 3797.43,
+              "unknown": -27703,
+              "volume_lots": 1360216
+            },
+            {
+              "price": 3795.27,
+              "unknown": -36033,
+              "volume_lots": 1201795
+            },
+            {
+              "price": 3795.95,
+              "unknown": -26685,
+              "volume_lots": 1164715
+            },
+            {
+              "price": 3793.11,
+              "unknown": -54709,
+              "volume_lots": 1121951
+            },
+            {
+              "price": 3796.64,
+              "unknown": 24167,
+              "volume_lots": 1060526
+            },
+            {
+              "price": 3794.13,
+              "unknown": -31250,
+              "volume_lots": 945160
+            },
+            {
+              "price": 3789.99,
+              "unknown": -27007,
+              "volume_lots": 886529
+            },
+            {
+              "price": 3787.99,
+              "unknown": -56917,
+              "volume_lots": 868996
+            },
+            {
+              "price": 3786.7,
+              "unknown": -6194,
+              "volume_lots": 889726
+            },
+            {
+              "price": 3799.58,
+              "unknown": 230942,
+              "volume_lots": 933930
+            },
+            {
+              "price": 3799.88,
+              "unknown": -12810,
+              "volume_lots": 782519
+            },
+            {
+              "price": 3798.19,
+              "unknown": -57588,
+              "volume_lots": 671838
+            },
+            {
+              "price": 3795.14,
+              "unknown": -49719,
+              "volume_lots": 579688
+            },
+            {
+              "price": 3797.02,
+              "unknown": 51699,
+              "volume_lots": 632487
+            },
+            {
+              "price": 3802.3,
+              "unknown": 116528,
+              "volume_lots": 630889
+            },
+            {
+              "price": 3802.35,
+              "unknown": 18010,
+              "volume_lots": 626103
+            },
+            {
+              "price": 3803.58,
+              "unknown": 17302,
+              "volume_lots": 564491
+            },
+            {
+              "price": 3801.32,
+              "unknown": -33420,
+              "volume_lots": 530470
+            },
+            {
+              "price": 3801.2,
+              "unknown": 18665,
+              "volume_lots": 587975
+            },
+            {
+              "price": 3797.04,
+              "unknown": -46562,
+              "volume_lots": 485908
+            },
+            {
+              "price": 3797.01,
+              "unknown": -26008,
+              "volume_lots": 472563
+            },
+            {
+              "price": 3796.43,
+              "unknown": -18665,
+              "volume_lots": 442715
+            },
+            {
+              "price": 3792.53,
+              "unknown": -85481,
+              "volume_lots": 481261
+            },
+            {
+              "price": 3790.78,
+              "unknown": -40579,
+              "volume_lots": 480035
+            },
+            {
+              "price": 3789.81,
+              "unknown": -45654,
+              "volume_lots": 550904
+            },
+            {
+              "price": 3787.0,
+              "unknown": -27649,
+              "volume_lots": 530391
+            },
+            {
+              "price": 3785.47,
+              "unknown": -26697,
+              "volume_lots": 528729
+            },
+            {
+              "price": 3785.94,
+              "unknown": -3350,
+              "volume_lots": 551107
+            },
+            {
+              "price": 3784.2,
+              "unknown": -13347,
+              "volume_lots": 535286
+            },
+            {
+              "price": 3785.04,
+              "unknown": 11709,
+              "volume_lots": 493161
+            },
+            {
+              "price": 3786.82,
+              "unknown": 26519,
+              "volume_lots": 460189
+            },
+            {
+              "price": 3783.43,
+              "unknown": -67708,
+              "volume_lots": 412412
+            },
+            {
+              "price": 3782.44,
+              "unknown": -27273,
+              "volume_lots": 429822
+            },
+            {
+              "price": 3781.4,
+              "unknown": -21360,
+              "volume_lots": 476323
+            },
+            {
+              "price": 3780.06,
+              "unknown": -26855,
+              "volume_lots": 443791
+            },
+            {
+              "price": 3777.43,
+              "unknown": -22976,
+              "volume_lots": 481291
+            },
+            {
+              "price": 3777.13,
+              "unknown": -9805,
+              "volume_lots": 459127
+            },
+            {
+              "price": 3777.47,
+              "unknown": -9102,
+              "volume_lots": 460381
+            },
+            {
+              "price": 3776.98,
+              "unknown": -29702,
+              "volume_lots": 496484
+            },
+            {
+              "price": 3775.97,
+              "unknown": -14302,
+              "volume_lots": 522028
+            },
+            {
+              "price": 3773.0,
+              "unknown": -35452,
+              "volume_lots": 463500
+            },
+            {
+              "price": 3771.26,
+              "unknown": -22090,
+              "volume_lots": 512276
+            },
+            {
+              "price": 3771.57,
+              "unknown": -6558,
+              "volume_lots": 524060
+            },
+            {
+              "price": 3770.05,
+              "unknown": 12766,
+              "volume_lots": 566414
+            },
+            {
+              "price": 3771.03,
+              "unknown": 2542,
+              "volume_lots": 424491
+            },
+            {
+              "price": 3775.01,
+              "unknown": 29910,
+              "volume_lots": 412983
+            },
+            {
+              "price": 3772.02,
+              "unknown": -41042,
+              "volume_lots": 463784
+            },
+            {
+              "price": 3774.32,
+              "unknown": 56182,
+              "volume_lots": 444300
+            },
+            {
+              "price": 3779.01,
+              "unknown": 75310,
+              "volume_lots": 501238
+            },
+            {
+              "price": 3776.09,
+              "unknown": -54729,
+              "volume_lots": 366020
+            },
+            {
+              "price": 3777.07,
+              "unknown": 20740,
+              "volume_lots": 324012
+            },
+            {
+              "price": 3772.51,
+              "unknown": -56941,
+              "volume_lots": 345359
+            },
+            {
+              "price": 3767.45,
+              "unknown": -61060,
+              "volume_lots": 449814
+            },
+            {
+              "price": 3766.02,
+              "unknown": -20076,
+              "volume_lots": 433349
+            },
+            {
+              "price": 3765.58,
+              "unknown": -2031,
+              "volume_lots": 389280
+            },
+            {
+              "price": 3765.59,
+              "unknown": 14717,
+              "volume_lots": 436996
+            },
+            {
+              "price": 3764.91,
+              "unknown": -16855,
+              "volume_lots": 349936
+            },
+            {
+              "price": 3762.7,
+              "unknown": -33860,
+              "volume_lots": 411762
+            },
+            {
+              "price": 3762.45,
+              "unknown": -26941,
+              "volume_lots": 470106
+            },
+            {
+              "price": 3763.43,
+              "unknown": -3516,
+              "volume_lots": 411928
+            },
+            {
+              "price": 3765.49,
+              "unknown": 45569,
+              "volume_lots": 380217
+            },
+            {
+              "price": 3764.23,
+              "unknown": -25400,
+              "volume_lots": 368375
+            },
+            {
+              "price": 3763.76,
+              "unknown": -3875,
+              "volume_lots": 283502
+            },
+            {
+              "price": 3768.17,
+              "unknown": 54512,
+              "volume_lots": 334493
+            },
+            {
+              "price": 3767.02,
+              "unknown": -19038,
+              "volume_lots": 331427
+            },
+            {
+              "price": 3765.24,
+              "unknown": -35317,
+              "volume_lots": 264319
+            },
+            {
+              "price": 3762.87,
+              "unknown": -21636,
+              "volume_lots": 264747
+            },
+            {
+              "price": 3761.09,
+              "unknown": -30708,
+              "volume_lots": 279294
+            },
+            {
+              "price": 3763.94,
+              "unknown": 33601,
+              "volume_lots": 314341
+            },
+            {
+              "price": 3767.63,
+              "unknown": 44194,
+              "volume_lots": 310366
+            },
+            {
+              "price": 3772.63,
+              "unknown": 78042,
+              "volume_lots": 329592
+            },
+            {
+              "price": 3773.79,
+              "unknown": 22961,
+              "volume_lots": 315062
+            },
+            {
+              "price": 3773.94,
+              "unknown": 19160,
+              "volume_lots": 268204
+            },
+            {
+              "price": 3772.41,
+              "unknown": -14382,
+              "volume_lots": 258649
+            },
+            {
+              "price": 3775.21,
+              "unknown": 44448,
+              "volume_lots": 246974
+            },
+            {
+              "price": 3774.05,
+              "unknown": -16279,
+              "volume_lots": 308355
+            },
+            {
+              "price": 3775.0,
+              "unknown": 22329,
+              "volume_lots": 243371
+            },
+            {
+              "price": 3778.4,
+              "unknown": 75205,
+              "volume_lots": 294901
+            },
+            {
+              "price": 3778.44,
+              "unknown": -26272,
+              "volume_lots": 340363
+            },
+            {
+              "price": 3775.41,
+              "unknown": -47600,
+              "volume_lots": 248790
+            },
+            {
+              "price": 3775.03,
+              "unknown": -12351,
+              "volume_lots": 214185
+            },
+            {
+              "price": 3774.89,
+              "unknown": -1201,
+              "volume_lots": 294436
+            },
+            {
+              "price": 3772.45,
+              "unknown": -25081,
+              "volume_lots": 210640
+            },
+            {
+              "price": 3773.34,
+              "unknown": 1702,
+              "volume_lots": 226074
+            },
+            {
+              "price": 3779.2,
+              "unknown": 81033,
+              "volume_lots": 293493
+            },
+            {
+              "price": 3780.6,
+              "unknown": 41821,
+              "volume_lots": 326788
+            },
+            {
+              "price": 3776.57,
+              "unknown": -61831,
+              "volume_lots": 233684
+            },
+            {
+              "price": 3774.05,
+              "unknown": -32073,
+              "volume_lots": 205299
+            },
+            {
+              "price": 3772.88,
+              "unknown": -28904,
+              "volume_lots": 226617
+            },
+            {
+              "price": 3771.86,
+              "unknown": -17996,
+              "volume_lots": 211455
+            },
+            {
+              "price": 3767.98,
+              "unknown": -53647,
+              "volume_lots": 275319
+            },
+            {
+              "price": 3765.79,
+              "unknown": -39412,
+              "volume_lots": 270755
+            },
+            {
+              "price": 3765.22,
+              "unknown": -14932,
+              "volume_lots": 252001
+            },
+            {
+              "price": 3763.87,
+              "unknown": -15457,
+              "volume_lots": 248484
+            },
+            {
+              "price": 3763.53,
+              "unknown": -17461,
+              "volume_lots": 253894
+            },
+            {
+              "price": 3761.35,
+              "unknown": -26499,
+              "volume_lots": 246169
+            },
+            {
+              "price": 3761.45,
+              "unknown": 8816,
+              "volume_lots": 252886
+            },
+            {
+              "price": 3759.86,
+              "unknown": -27007,
+              "volume_lots": 273444
+            },
+            {
+              "price": 3758.47,
+              "unknown": -33220,
+              "volume_lots": 275775
+            },
+            {
+              "price": 3758.03,
+              "unknown": -8408,
+              "volume_lots": 222581
+            },
+            {
+              "price": 3757.2,
+              "unknown": -13064,
+              "volume_lots": 227006
+            },
+            {
+              "price": 3755.05,
+              "unknown": -24216,
+              "volume_lots": 232497
+            },
+            {
+              "price": 3757.6,
+              "unknown": 26296,
+              "volume_lots": 254692
+            },
+            {
+              "price": 3756.77,
+              "unknown": -5610,
+              "volume_lots": 188793
+            },
+            {
+              "price": 3757.76,
+              "unknown": 3728,
+              "volume_lots": 243169
+            },
+            {
+              "price": 3756.52,
+              "unknown": -2136,
+              "volume_lots": 171952
+            },
+            {
+              "price": 3760.94,
+              "unknown": 80195,
+              "volume_lots": 235249
+            },
+            {
+              "price": 3764.05,
+              "unknown": 42739,
+              "volume_lots": 204288
+            },
+            {
+              "price": 3766.67,
+              "unknown": 36721,
+              "volume_lots": 211092
+            },
+            {
+              "price": 3767.46,
+              "unknown": 7529,
+              "volume_lots": 238977
+            },
+            {
+              "price": 3764.05,
+              "unknown": -46917,
+              "volume_lots": 191537
+            },
+            {
+              "price": 3761.73,
+              "unknown": -33032,
+              "volume_lots": 142549
+            },
+            {
+              "price": 3760.29,
+              "unknown": -17468,
+              "volume_lots": 146423
+            },
+            {
+              "price": 3764.87,
+              "unknown": 58059,
+              "volume_lots": 161740
+            },
+            {
+              "price": 3761.49,
+              "unknown": -45205,
+              "volume_lots": 152370
+            },
+            {
+              "price": 3759.9,
+              "unknown": -19373,
+              "volume_lots": 123413
+            },
+            {
+              "price": 3764.1,
+              "unknown": 53843,
+              "volume_lots": 144792
+            },
+            {
+              "price": 3765.72,
+              "unknown": 30789,
+              "volume_lots": 158720
+            },
+            {
+              "price": 3779.59,
+              "unknown": 211060,
+              "volume_lots": 833208
+            },
+            {
+              "price": 3782.01,
+              "unknown": 34539,
+              "volume_lots": 387085
+            },
+            {
+              "price": 3784.0,
+              "unknown": 28811,
+              "volume_lots": 312758
+            },
+            {
+              "price": 3785.68,
+              "unknown": 19990,
+              "volume_lots": 323206
+            },
+            {
+              "price": 3785.37,
+              "unknown": -2239,
+              "volume_lots": 267562
+            },
+            {
+              "price": 3781.51,
+              "unknown": -48677,
+              "volume_lots": 296708
+            },
+            {
+              "price": 3786.25,
+              "unknown": 67073,
+              "volume_lots": 266564
+            },
+            {
+              "price": 3790.72,
+              "unknown": 62500,
+              "volume_lots": 346017
+            },
+            {
+              "price": 3794.05,
+              "unknown": 56396,
+              "volume_lots": 333630
+            },
+            {
+              "price": 3791.97,
+              "unknown": -19365,
+              "volume_lots": 373277
+            },
+            {
+              "price": 3794.68,
+              "unknown": 15215,
+              "volume_lots": 350385
+            },
+            {
+              "price": 3790.91,
+              "unknown": -54060,
+              "volume_lots": 295324
+            },
+            {
+              "price": 3786.2,
+              "unknown": -49707,
+              "volume_lots": 245752
+            },
+            {
+              "price": 3785.43,
+              "unknown": -4492,
+              "volume_lots": 214769
+            },
+            {
+              "price": 3787.04,
+              "unknown": 11648,
+              "volume_lots": 279250
+            },
+            {
+              "price": 3792.75,
+              "unknown": 51523,
+              "volume_lots": 321155
+            },
+            {
+              "price": 3797.52,
+              "unknown": 51663,
+              "volume_lots": 376166
+            },
+            {
+              "price": 3799.62,
+              "unknown": 58047,
+              "volume_lots": 406455
+            },
+            {
+              "price": 3798.93,
+              "unknown": 7017,
+              "volume_lots": 338855
+            },
+            {
+              "price": 3797.44,
+              "unknown": -20393,
+              "volume_lots": 327764
+            },
+            {
+              "price": 3799.82,
+              "unknown": 23411,
+              "volume_lots": 335460
+            },
+            {
+              "price": 3798.92,
+              "unknown": -10967,
+              "volume_lots": 384172
+            },
+            {
+              "price": 3804.12,
+              "unknown": 103308,
+              "volume_lots": 471809
+            },
+            {
+              "price": 3801.28,
+              "unknown": -65132,
+              "volume_lots": 406777
+            },
+            {
+              "price": 3801.3,
+              "unknown": 7556,
+              "volume_lots": 276590
+            },
+            {
+              "price": 3802.55,
+              "unknown": 16035,
+              "volume_lots": 331374
+            },
+            {
+              "price": 3802.57,
+              "unknown": -3162,
+              "volume_lots": 279894
+            },
+            {
+              "price": 3806.98,
+              "unknown": 74382,
+              "volume_lots": 325423
+            },
+            {
+              "price": 3805.7,
+              "unknown": -20913,
+              "volume_lots": 320453
+            },
+            {
+              "price": 3802.83,
+              "unknown": -29980,
+              "volume_lots": 293530
+            },
+            {
+              "price": 3802.22,
+              "unknown": -17329,
+              "volume_lots": 308259
+            },
+            {
+              "price": 3799.56,
+              "unknown": -53049,
+              "volume_lots": 279832
+            },
+            {
+              "price": 3797.88,
+              "unknown": -9946,
+              "volume_lots": 222961
+            },
+            {
+              "price": 3802.17,
+              "unknown": 55110,
+              "volume_lots": 290460
+            },
+            {
+              "price": 3805.74,
+              "unknown": 46865,
+              "volume_lots": 227733
+            },
+            {
+              "price": 3805.89,
+              "unknown": 34033,
+              "volume_lots": 369231
+            },
+            {
+              "price": 3804.21,
+              "unknown": -27671,
+              "volume_lots": 250506
+            },
+            {
+              "price": 3808.03,
+              "unknown": 50701,
+              "volume_lots": 280996
+            },
+            {
+              "price": 3809.8,
+              "unknown": 33428,
+              "volume_lots": 316114
+            },
+            {
+              "price": 3809.41,
+              "unknown": 7915,
+              "volume_lots": 305910
+            },
+            {
+              "price": 3807.36,
+              "unknown": -31392,
+              "volume_lots": 293322
+            },
+            {
+              "price": 3806.72,
+              "unknown": -17776,
+              "volume_lots": 218971
+            },
+            {
+              "price": 3804.89,
+              "unknown": -32400,
+              "volume_lots": 243996
+            },
+            {
+              "price": 3806.17,
+              "unknown": 22898,
+              "volume_lots": 212981
+            },
+            {
+              "price": 3804.9,
+              "unknown": -7903,
+              "volume_lots": 220816
+            },
+            {
+              "price": 3806.86,
+              "unknown": 28145,
+              "volume_lots": 199210
+            },
+            {
+              "price": 3802.43,
+              "unknown": -66802,
+              "volume_lots": 274796
+            },
+            {
+              "price": 3799.04,
+              "unknown": -44624,
+              "volume_lots": 224090
+            },
+            {
+              "price": 3804.22,
+              "unknown": 46423,
+              "volume_lots": 214861
+            },
+            {
+              "price": 3806.14,
+              "unknown": 29890,
+              "volume_lots": 226602
+            },
+            {
+              "price": 3805.5,
+              "unknown": -12710,
+              "volume_lots": 176604
+            },
+            {
+              "price": 3804.72,
+              "unknown": -1055,
+              "volume_lots": 155943
+            },
+            {
+              "price": 3804.91,
+              "unknown": 2207,
+              "volume_lots": 162296
+            },
+            {
+              "price": 3803.63,
+              "unknown": -17817,
+              "volume_lots": 207051
+            },
+            {
+              "price": 3801.28,
+              "unknown": -34272,
+              "volume_lots": 202964
+            },
+            {
+              "price": 3802.51,
+              "unknown": 403,
+              "volume_lots": 164426
+            },
+            {
+              "price": 3802.72,
+              "unknown": 18472,
+              "volume_lots": 183060
+            },
+            {
+              "price": 3805.15,
+              "unknown": 27742,
+              "volume_lots": 156781
+            },
+            {
+              "price": 3805.93,
+              "unknown": 14443,
+              "volume_lots": 166766
+            },
+            {
+              "price": 3803.3,
+              "unknown": -21204,
+              "volume_lots": 181589
+            },
+            {
+              "price": 3802.69,
+              "unknown": 6094,
+              "volume_lots": 223636
+            },
+            {
+              "price": 3806.16,
+              "unknown": 51838,
+              "volume_lots": 215778
+            },
+            {
+              "price": 3808.48,
+              "unknown": 55493,
+              "volume_lots": 233619
+            },
+            {
+              "price": 3811.25,
+              "unknown": 40955,
+              "volume_lots": 250938
+            },
+            {
+              "price": 3812.99,
+              "unknown": 30498,
+              "volume_lots": 268216
+            },
+            {
+              "price": 3815.37,
+              "unknown": 45713,
+              "volume_lots": 364408
+            },
+            {
+              "price": 3816.78,
+              "unknown": 24133,
+              "volume_lots": 278387
+            },
+            {
+              "price": 3818.21,
+              "unknown": 32649,
+              "volume_lots": 344083
+            },
+            {
+              "price": 3818.63,
+              "unknown": 26250,
+              "volume_lots": 280519
+            },
+            {
+              "price": 3819.04,
+              "unknown": 4182,
+              "volume_lots": 347580
+            },
+            {
+              "price": 3820.65,
+              "unknown": 38945,
+              "volume_lots": 334220
+            },
+            {
+              "price": 3819.92,
+              "unknown": -2053,
+              "volume_lots": 327076
+            },
+            {
+              "price": 3819.11,
+              "unknown": -13301,
+              "volume_lots": 272537
+            },
+            {
+              "price": 3818.75,
+              "unknown": 5154,
+              "volume_lots": 312045
+            },
+            {
+              "price": 3817.83,
+              "unknown": 3462,
+              "volume_lots": 304406
+            },
+            {
+              "price": 3819.31,
+              "unknown": 38342,
+              "volume_lots": 320786
+            },
+            {
+              "price": 3820.58,
+              "unknown": 49878,
+              "volume_lots": 371951
+            },
+            {
+              "price": 3819.23,
+              "unknown": -28430,
+              "volume_lots": 332811
+            },
+            {
+              "price": 3821.99,
+              "unknown": 27205,
+              "volume_lots": 255593
+            },
+            {
+              "price": 3824.07,
+              "unknown": 8596,
+              "volume_lots": 326746
+            },
+            {
+              "price": 3821.64,
+              "unknown": -32681,
+              "volume_lots": 317119
+            },
+            {
+              "price": 3819.7,
+              "unknown": -25500,
+              "volume_lots": 226722
+            },
+            {
+              "price": 3820.46,
+              "unknown": 1636,
+              "volume_lots": 210206
+            },
+            {
+              "price": 3820.01,
+              "unknown": -6152,
+              "volume_lots": 190429
+            },
+            {
+              "price": 3820.71,
+              "unknown": 576,
+              "volume_lots": 218649
+            },
+            {
+              "price": 3821.68,
+              "unknown": 12876,
+              "volume_lots": 184415
+            },
+            {
+              "price": 3821.88,
+              "unknown": 7825,
+              "volume_lots": 214755
+            },
+            {
+              "price": 3822.69,
+              "unknown": 23420,
+              "volume_lots": 208036
+            },
+            {
+              "price": 3821.51,
+              "unknown": -19224,
+              "volume_lots": 244341
+            },
+            {
+              "price": 3818.46,
+              "unknown": -26899,
+              "volume_lots": 251456
+            },
+            {
+              "price": 3819.37,
+              "unknown": 12249,
+              "volume_lots": 258162
+            },
+            {
+              "price": 3820.59,
+              "unknown": 25217,
+              "volume_lots": 274735
+            },
+            {
+              "price": 3821.94,
+              "unknown": 24009,
+              "volume_lots": 234341
+            },
+            {
+              "price": 3822.61,
+              "unknown": -3538,
+              "volume_lots": 273141
+            },
+            {
+              "price": 3820.78,
+              "unknown": -5007,
+              "volume_lots": 224138
+            },
+            {
+              "price": 3821.75,
+              "unknown": 10549,
+              "volume_lots": 236227
+            },
+            {
+              "price": 3823.1,
+              "unknown": 4053,
+              "volume_lots": 217676
+            },
+            {
+              "price": 3821.46,
+              "unknown": -7527,
+              "volume_lots": 221769
+            },
+            {
+              "price": 3822.73,
+              "unknown": 12041,
+              "volume_lots": 235044
+            },
+            {
+              "price": 3823.27,
+              "unknown": 671,
+              "volume_lots": 271186
+            },
+            {
+              "price": 3823.23,
+              "unknown": 8098,
+              "volume_lots": 260708
+            },
+            {
+              "price": 3823.91,
+              "unknown": 7600,
+              "volume_lots": 264892
+            },
+            {
+              "price": 3822.44,
+              "unknown": -16858,
+              "volume_lots": 322729
+            },
+            {
+              "price": 3822.07,
+              "unknown": -4592,
+              "volume_lots": 244083
+            },
+            {
+              "price": 3822.13,
+              "unknown": 1799,
+              "volume_lots": 269660
+            },
+            {
+              "price": 3821.71,
+              "unknown": -803,
+              "volume_lots": 303702
+            },
+            {
+              "price": 3820.83,
+              "unknown": -9441,
+              "volume_lots": 325960
+            },
+            {
+              "price": 3819.77,
+              "unknown": -9583,
+              "volume_lots": 290655
+            },
+            {
+              "price": 3819.33,
+              "unknown": -2324,
+              "volume_lots": 326276
+            },
+            {
+              "price": 3818.67,
+              "unknown": -3638,
+              "volume_lots": 306012
+            },
+            {
+              "price": 3816.53,
+              "unknown": -22600,
+              "volume_lots": 412317
+            },
+            {
+              "price": 3815.97,
+              "unknown": 3440,
+              "volume_lots": 358982
+            },
+            {
+              "price": 3815.25,
+              "unknown": -6294,
+              "volume_lots": 365086
+            },
+            {
+              "price": 3814.98,
+              "unknown": -408,
+              "volume_lots": 360257
+            },
+            {
+              "price": 3814.54,
+              "unknown": -4312,
+              "volume_lots": 407793
+            },
+            {
+              "price": 3815.24,
+              "unknown": -5674,
+              "volume_lots": 450885
+            },
+            {
+              "price": 3815.72,
+              "unknown": 14795,
+              "volume_lots": 489776
+            },
+            {
+              "price": 3815.66,
+              "unknown": 2368,
+              "volume_lots": 26095
+            },
+            {
+              "price": 3815.66,
+              "unknown": 0,
+              "volume_lots": 0
+            },
+            {
+              "price": 3813.82,
+              "unknown": -469,
+              "volume_lots": 763489
+            }
+          ]
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:11.259511+00:00",
+      "sample_sha256": "8616f474aa84aa9056ff2ecb000dbc4a3833a662ff04964fc8906ac069f1ab49"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 1 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

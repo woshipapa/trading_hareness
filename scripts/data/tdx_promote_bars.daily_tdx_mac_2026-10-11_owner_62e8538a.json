@@ -1,0 +1,125 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_mac",
+  "capability": "bars.daily",
+  "params": {
+    "symbol": "600519.SH",
+    "count": 20
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:28.339538+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_mac": {
+      "field_map": {},
+      "unit_factors": {
+        "volume": 0.01
+      }
+    }
+  },
+  "probes": {
+    "tdx_mac": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_mac bars.daily --params '{\"symbol\": \"600519.SH\", \"count\": 20}'",
+      "source": "tdx_mac",
+      "capability": "bars.daily",
+      "adapter": "app/datasources/sources/tdx_mac.py:fetch_daily_bars",
+      "params": {
+        "symbol": "600519.SH",
+        "count": 20
+      },
+      "started_utc": "2026-10-11T03:17:27.682911+00:00",
+      "rows": 20,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:27.841801+00:00",
+      "available_at_max": "2026-10-11T03:17:27.841801+00:00",
+      "warnings": [
+        "tdx_host=121.36.248.138:7709"
+      ],
+      "sample": [
+        {
+          "symbol": "600519.SH",
+          "date": "2026-09-04",
+          "seconds": 0,
+          "open": 1295.8800048828125,
+          "high": 1338.8599853515625,
+          "low": 1295.5999755859375,
+          "close": 1330.0,
+          "amount": 6022594560.0,
+          "volume": 4541564.0
+        },
+        {
+          "symbol": "600519.SH",
+          "date": "2026-09-07",
+          "seconds": 0,
+          "open": 1324.0,
+          "high": 1333.5999755859375,
+          "low": 1312.6600341796875,
+          "close": 1316.010009765625,
+          "amount": 3336029440.0,
+          "volume": 2524962.0
+        },
+        {
+          "symbol": "600519.SH",
+          "date": "2026-09-08",
+          "seconds": 0,
+          "open": 1318.0,
+          "high": 1323.0,
+          "low": 1309.050048828125,
+          "close": 1309.300048828125,
+          "amount": 2302823680.0,
+          "volume": 1753404.0
+        },
+        {
+          "symbol": "600519.SH",
+          "date": "2026-09-09",
+          "seconds": 0,
+          "open": 1305.010009765625,
+          "high": 1309.300048828125,
+          "low": 1286.6800537109375,
+          "close": 1290.8800048828125,
+          "amount": 4168500480.0,
+          "volume": 3222611.0
+        },
+        {
+          "symbol": "600519.SH",
+          "date": "2026-09-10",
+          "seconds": 0,
+          "open": 1291.0,
+          "high": 1294.989990234375,
+          "low": 1282.0,
+          "close": 1285.1300048828125,
+          "amount": 2428698880.0,
+          "volume": 1890022.0
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:27.841897+00:00",
+      "sample_sha256": "773cb6dca45859d3c3d749d97832cbd850341d9e0eeb1e9371ee211ec39ac2f6"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_mac": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 20 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_mac (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "microstructure.volume_profile",
+  "params": {
+    "symbol": "600519.SH"
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:47.367299+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "price": "price",
+        "volume_lots": "volume_lots",
+        "buy_lots": "buy_lots",
+        "sell_lots": "sell_lots"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public microstructure.volume_profile --params '{\"symbol\": \"600519.SH\"}'",
+      "source": "tdx_public",
+      "capability": "microstructure.volume_profile",
+      "adapter": "app/datasources/sources/tdx_microstructure.py:fetch_volume_profile",
+      "params": {
+        "symbol": "600519.SH"
+      },
+      "started_utc": "2026-10-11T03:17:46.760434+00:00",
+      "rows": 1241,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:46.878137+00:00",
+      "available_at_max": "2026-10-11T03:17:46.878137+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "600519.SH",
+          "price": 1255.42,
+          "volume_lots": 195,
+          "buy_lots": 0,
+          "sell_lots": 0
+        },
+        {
+          "symbol": "600519.SH",
+          "price": 1258.41,
+          "volume_lots": 127,
+          "buy_lots": 127,
+          "sell_lots": 0
+        },
+        {
+          "symbol": "600519.SH",
+          "price": 1260.01,
+          "volume_lots": 238,
+          "buy_lots": 233,
+          "sell_lots": 5
+        },
+        {
+          "symbol": "600519.SH",
+          "price": 1260.23,
+          "volume_lots": 177,
+          "buy_lots": 171,
+          "sell_lots": 6
+        },
+        {
+          "symbol": "600519.SH",
+          "price": 1262.89,
+          "volume_lots": 62,
+          "buy_lots": 62,
+          "sell_lots": 0
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:46.878177+00:00",
+      "sample_sha256": "4c441322413b30df768121ee9205d1c9d1cef6c58c3274877617e70e1b1441fc"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 1241 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

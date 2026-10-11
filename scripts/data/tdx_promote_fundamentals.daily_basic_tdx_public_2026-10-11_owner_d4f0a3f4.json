@@ -1,0 +1,146 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "fundamentals.daily_basic",
+  "params": {
+    "symbols": [
+      "600519.SH",
+      "000001.SZ",
+      "300750.SZ"
+    ]
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:32.832977+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {},
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public fundamentals.daily_basic --params '{\"symbols\": [\"600519.SH\", \"000001.SZ\", \"300750.SZ\"]}'",
+      "source": "tdx_public",
+      "capability": "fundamentals.daily_basic",
+      "adapter": "app/datasources/sources/tdx_reference_files.py:fetch_daily_basic",
+      "params": {
+        "symbols": [
+          "600519.SH",
+          "000001.SZ",
+          "300750.SZ"
+        ]
+      },
+      "started_utc": "2026-10-11T03:18:30.857293+00:00",
+      "rows": 3,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:32.309570+00:00",
+      "available_at_max": "2026-10-11T03:18:32.309570+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "000001.SZ",
+          "effective_date": "20261009",
+          "change_pct": -1.61,
+          "change_prev_day_pct": 1.82,
+          "change_prev2_day_pct": 1.94,
+          "streak": -1,
+          "change_4d_pct": 2.57,
+          "change_5d_pct": 2.57,
+          "change_10d_pct": 2.02,
+          "change_20d_pct": -0.34,
+          "change_60d_pct": 13.18,
+          "change_ytd_pct": 7.31,
+          "annual_limit_up_days": 0,
+          "circulating_capital_z_raw": 816056.56,
+          "amount_10k_yuan": 125971.71,
+          "amount_prev_10k_yuan": 174340.25,
+          "amount_prev2_10k_yuan": 120581.49,
+          "change_mtd_pct": 0.17,
+          "change_1y_pct": 9.86,
+          "auction_amount_10k_yuan": 884.44,
+          "high_52w_yuan": 11.89,
+          "low_52w_yuan": 9.74
+        },
+        {
+          "symbol": "300750.SZ",
+          "effective_date": "20261009",
+          "change_pct": 3.84,
+          "change_prev_day_pct": -1.5,
+          "change_prev2_day_pct": 1.5,
+          "streak": 1,
+          "change_4d_pct": 1.97,
+          "change_5d_pct": 1.45,
+          "change_10d_pct": -2.15,
+          "change_20d_pct": -14.81,
+          "change_60d_pct": -20.41,
+          "change_ytd_pct": -17.04,
+          "annual_limit_up_days": 0,
+          "circulating_capital_z_raw": 282052.32,
+          "amount_10k_yuan": 1602812.31,
+          "amount_prev_10k_yuan": 1059453.44,
+          "amount_prev2_10k_yuan": 861393.0,
+          "change_mtd_pct": 2.28,
+          "change_1y_pct": -25.84,
+          "auction_amount_10k_yuan": 23503.08,
+          "high_52w_yuan": 467.34,
+          "low_52w_yuan": 285.17
+        },
+        {
+          "symbol": "600519.SH",
+          "effective_date": "20261009",
+          "change_pct": 0.57,
+          "change_prev_day_pct": -0.22,
+          "change_prev2_day_pct": 1.86,
+          "streak": 1,
+          "change_4d_pct": 1.54,
+          "change_5d_pct": 2.1,
+          "change_10d_pct": -0.31,
+          "change_20d_pct": -2.76,
+          "change_60d_pct": 6.84,
+          "change_ytd_pct": -6.39,
+          "annual_limit_up_days": 0,
+          "circulating_capital_z_raw": 54094.9,
+          "amount_10k_yuan": 445322.34,
+          "amount_prev_10k_yuan": 314541.31,
+          "amount_prev2_10k_yuan": 479724.65,
+          "change_mtd_pct": 0.35,
+          "change_1y_pct": -8.8,
+          "auction_amount_10k_yuan": 2448.07,
+          "high_52w_yuan": 1539.98,
+          "low_52w_yuan": 1151.01
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:32.320641+00:00",
+      "sample_sha256": "371c39370ba0e3dd161b699fbf41f50ce2caf4a960987097158bf45299af71f2"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 3 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

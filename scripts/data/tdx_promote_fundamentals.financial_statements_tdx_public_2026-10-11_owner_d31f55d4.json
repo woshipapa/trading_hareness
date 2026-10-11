@@ -1,0 +1,147 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "fundamentals.financial_statements",
+  "params": {
+    "symbol": "600519.SH"
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:35.586787+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "statement_items": "statement_items",
+        "report_period": "report_period"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public fundamentals.financial_statements --params '{\"symbol\": \"600519.SH\"}'",
+      "source": "tdx_public",
+      "capability": "fundamentals.financial_statements",
+      "adapter": "app/datasources/sources/tdx_f10_finance.py:fetch_financial_summary",
+      "params": {
+        "symbol": "600519.SH"
+      },
+      "started_utc": "2026-10-11T03:18:34.983068+00:00",
+      "rows": 1,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:35.056494+00:00",
+      "available_at_max": "2026-10-11T03:18:35.056494+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "600519.SH",
+          "report_period": null,
+          "statement_items": {
+            "float_shares": 1250081562.5,
+            "province": 29,
+            "industry": 37,
+            "updated_date": 20260815,
+            "ipo_date": 20010827,
+            "total_shares": 1250081562.5,
+            "state_shares": 12150000.0,
+            "sponsor_legal_shares": 454029600000.0,
+            "legal_shares": 893893520000.0,
+            "b_shares": 0.0,
+            "h_shares": 0.0,
+            "eps": 35.56999969482422,
+            "total_assets": 309050784000.0,
+            "current_assets": 260724656000.0,
+            "fixed_assets": 22220890000.0,
+            "intangible_assets": 8578744000.0,
+            "shareholder_count": 296404.0,
+            "current_liabilities": 46645076000.0,
+            "long_term_liabilities": 10842758000.0,
+            "capital_reserve": 1577000.0,
+            "parent_equity": 251253600000.0,
+            "operating_revenue": 90703264000.0,
+            "main_business_profit": 9473762000.0,
+            "accounts_receivable": 570800.048828125,
+            "operating_profit": 61411288000.0,
+            "investment_income": 1013799.9877929688,
+            "net_cash_flow": 70690752000.0,
+            "total_cash_inflow": 58387000000.0,
+            "inventory": 61317208000.0,
+            "total_profit": 61438420000.0,
+            "after_tax_profit": 46033328000.0,
+            "net_profit": 44516880000.0,
+            "undistributed_profit": 199683216000.0,
+            "net_assets_per_share": 200.99000549316406,
+            "reserved2": 6.0
+          },
+          "field_units": {
+            "float_shares": "股",
+            "province": "code",
+            "industry": "code",
+            "updated_date": "YYYYMMDD",
+            "ipo_date": "YYYYMMDD",
+            "total_shares": "股",
+            "state_shares": "股",
+            "sponsor_legal_shares": "股",
+            "legal_shares": "股",
+            "b_shares": "股",
+            "h_shares": "股",
+            "eps": "元/股",
+            "total_assets": "元",
+            "current_assets": "元",
+            "fixed_assets": "元",
+            "intangible_assets": "元",
+            "shareholder_count": "户",
+            "current_liabilities": "元",
+            "long_term_liabilities": "元",
+            "capital_reserve": "元",
+            "parent_equity": "元",
+            "operating_revenue": "元",
+            "main_business_profit": "元",
+            "accounts_receivable": "元",
+            "operating_profit": "元",
+            "investment_income": "元",
+            "net_cash_flow": "元",
+            "total_cash_inflow": "元",
+            "inventory": "元",
+            "total_profit": "元",
+            "after_tax_profit": "元",
+            "net_profit": "元",
+            "undistributed_profit": "元",
+            "net_assets_per_share": "元/股",
+            "reserved2": null
+          }
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:35.056521+00:00",
+      "sample_sha256": "37a21be7eaef88524ccdeef2c19ae5b947208ff43fd26aada0b1e7d40a84a0ec"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 1 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

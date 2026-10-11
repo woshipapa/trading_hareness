@@ -1,0 +1,256 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "bars.index_daily",
+  "params": {
+    "symbol": "000001.SH",
+    "count": 20
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:21:22.795852+00:00",
+  "agreement_spec": {
+    "close": {
+      "reference": "tencent_free",
+      "reference_adapter": "app/free_market_providers.py:tencent_index_daily",
+      "reference_params": {
+        "symbol": "symbol"
+      },
+      "reference_fixed": {
+        "start": "20260101",
+        "end": "20261231"
+      },
+      "key": [
+        "symbol",
+        "trade_date"
+      ],
+      "rel_tol": 0.005
+    }
+  },
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "open": "open",
+        "close": "close",
+        "amount": "amount"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public bars.index_daily --params '{\"symbol\": \"000001.SH\", \"count\": 20}' --all-rows",
+      "source": "tdx_public",
+      "capability": "bars.index_daily",
+      "adapter": "app/datasources/sources/tdx_bars.py:fetch_index_daily",
+      "params": {
+        "symbol": "000001.SH",
+        "count": 20
+      },
+      "started_utc": "2026-10-11T03:21:20.275851+00:00",
+      "rows": 20,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:21:20.405338+00:00",
+      "available_at_max": "2026-10-11T03:21:20.405338+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "000001.SH",
+          "trade_date": "2026-09-04",
+          "open": 3955.55,
+          "high": 3980.2,
+          "low": 3915.22,
+          "close": 3930.12,
+          "amount": 938255187968.0,
+          "volume_raw": 5372861.0,
+          "up_count": 1041,
+          "down_count": 1228
+        },
+        {
+          "symbol": "000001.SH",
+          "trade_date": "2026-09-07",
+          "open": 3942.51,
+          "high": 3948.42,
+          "low": 3916.49,
+          "close": 3932.7,
+          "amount": 897904017408.0,
+          "volume_raw": 4773752.0,
+          "up_count": 1283,
+          "down_count": 982
+        },
+        {
+          "symbol": "000001.SH",
+          "trade_date": "2026-09-08",
+          "open": 3935.55,
+          "high": 3951.32,
+          "low": 3925.72,
+          "close": 3940.55,
+          "amount": 915566231552.0,
+          "volume_raw": 5299927.0,
+          "up_count": 1489,
+          "down_count": 817
+        },
+        {
+          "symbol": "000001.SH",
+          "trade_date": "2026-09-09",
+          "open": 3943.92,
+          "high": 3958.12,
+          "low": 3933.47,
+          "close": 3951.51,
+          "amount": 873734864896.0,
+          "volume_raw": 5175043.0,
+          "up_count": 879,
+          "down_count": 1413
+        },
+        {
+          "symbol": "000001.SH",
+          "trade_date": "2026-09-10",
+          "open": 3939.09,
+          "high": 3949.25,
+          "low": 3927.35,
+          "close": 3934.4,
+          "amount": 779672682496.0,
+          "volume_raw": 4846751.0,
+          "up_count": 462,
+          "down_count": 1841
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:21:20.405363+00:00",
+      "sample_sha256": "818965e840973658d17cd4e74f3fa5c837baaee59a4b39e848b0b97140bf50a0"
+    },
+    "app/free_market_providers.py:tencent_index_daily": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tencent_free bars.index_daily --params '{\"symbol\": \"000001.SH\", \"start\": \"20260101\", \"end\": \"20261231\"}' --adapter app/free_market_providers.py:tencent_index_daily --all-rows",
+      "source": "tencent_free",
+      "capability": "bars.index_daily",
+      "adapter": "app/free_market_providers.py:tencent_index_daily",
+      "params": {
+        "symbol": "000001.SH",
+        "start": "20260101",
+        "end": "20261231"
+      },
+      "started_utc": "2026-10-11T03:21:21.662965+00:00",
+      "rows": 80,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": null,
+      "available_at_max": null,
+      "warnings": [],
+      "sample": [
+        {
+          "ts_code": "000001.SH",
+          "trade_date": "20260611",
+          "open": "3979.710",
+          "close": "3987.010",
+          "high": "3997.480",
+          "low": "3958.440",
+          "vol": "568545244.000",
+          "amount": null,
+          "price_basis": "unadjusted_index"
+        },
+        {
+          "ts_code": "000001.SH",
+          "trade_date": "20260612",
+          "open": "4017.860",
+          "close": "4031.510",
+          "high": "4060.270",
+          "low": "4008.180",
+          "vol": "743131092.000",
+          "amount": null,
+          "price_basis": "unadjusted_index"
+        },
+        {
+          "ts_code": "000001.SH",
+          "trade_date": "20260615",
+          "open": "4053.580",
+          "close": "4096.470",
+          "high": "4097.170",
+          "low": "4051.070",
+          "vol": "678907811.000",
+          "amount": null,
+          "price_basis": "unadjusted_index"
+        },
+        {
+          "ts_code": "000001.SH",
+          "trade_date": "20260616",
+          "open": "4094.210",
+          "close": "4091.890",
+          "high": "4103.930",
+          "low": "4077.870",
+          "vol": "615668296.000",
+          "amount": null,
+          "price_basis": "unadjusted_index"
+        },
+        {
+          "ts_code": "000001.SH",
+          "trade_date": "20260617",
+          "open": "4074.290",
+          "close": "4108.080",
+          "high": "4109.960",
+          "low": "4073.730",
+          "vol": "608077413.000",
+          "amount": null,
+          "price_basis": "unadjusted_index"
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:21:22.257771+00:00",
+      "sample_sha256": "a423e2432a45c2b2f0a866d974e1891af24d4eb69dee8078f73fb0769fd963e5"
+    }
+  },
+  "comparison": {
+    "close": {
+      "reference": "tencent_free",
+      "key": [
+        "symbol",
+        "trade_date"
+      ],
+      "rel_tol": 0.005,
+      "abs_tol": 0.0,
+      "min_coverage": 0.95,
+      "left_rows": 20,
+      "right_rows": 80,
+      "matched": 20,
+      "mismatched": 0,
+      "only_left": 0,
+      "only_right": 60,
+      "coverage": 1.0,
+      "max_abs_dev": 0.0,
+      "max_rel_dev": 0.0,
+      "worst_key": [
+        "000001.SH",
+        "2026-09-04"
+      ],
+      "examples": [],
+      "agree": true,
+      "why": ""
+    }
+  },
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false,
+      "app/free_market_providers.py:tencent_index_daily": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 20 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "1 fields agree on their common rows"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public, app/free_market_providers.py:tencent_index_daily (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "reference.security_list",
+  "params": {},
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:18:47.323097+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {},
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public reference.security_list --params '{}'",
+      "source": "tdx_public",
+      "capability": "reference.security_list",
+      "adapter": "app/datasources/sources/tdx_instruments.py:fetch_security_list",
+      "params": {},
+      "started_utc": "2026-10-11T03:18:44.552246+00:00",
+      "rows": 52331,
+      "coverage": 0.9993507113530029,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:18:46.769703+00:00",
+      "available_at_max": "2026-10-11T03:18:46.769703+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one",
+        "bj_missing=34"
+      ],
+      "sample": [
+        {
+          "symbol": "395001.SZ",
+          "market": 0,
+          "code": "395001",
+          "name": "主板Ａ股",
+          "instrument_type": "other",
+          "decimal_point": 2,
+          "pre_close": 1495.0,
+          "is_st": false,
+          "list_source": "server_list",
+          "source_host": "115.238.56.198:7709/login_one"
+        },
+        {
+          "symbol": "395002.SZ",
+          "market": 0,
+          "code": "395002",
+          "name": "主板Ｂ股",
+          "instrument_type": "other",
+          "decimal_point": 2,
+          "pre_close": 128.0,
+          "is_st": false,
+          "list_source": "server_list",
+          "source_host": "115.238.56.198:7709/login_one"
+        },
+        {
+          "symbol": "395004.SZ",
+          "market": 0,
+          "code": "395004",
+          "name": "创业板",
+          "instrument_type": "other",
+          "decimal_point": 2,
+          "pre_close": 1409.0,
+          "is_st": false,
+          "list_source": "server_list",
+          "source_host": "115.238.56.198:7709/login_one"
+        },
+        {
+          "symbol": "395005.SZ",
+          "market": 0,
+          "code": "395005",
+          "name": "主板DR",
+          "instrument_type": "other",
+          "decimal_point": 2,
+          "pre_close": 5.877471754111438e-39,
+          "is_st": false,
+          "list_source": "server_list",
+          "source_host": "115.238.56.198:7709/login_one"
+        },
+        {
+          "symbol": "395006.SZ",
+          "market": 0,
+          "code": "395006",
+          "name": "创业板DR",
+          "instrument_type": "other",
+          "decimal_point": 2,
+          "pre_close": 5.877471754111438e-39,
+          "is_st": false,
+          "list_source": "server_list",
+          "source_host": "115.238.56.198:7709/login_one"
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:18:46.783314+00:00",
+      "sample_sha256": "411e307078b088e87ad2349e69e132f9f04087a568c40e955af40623d15447f8"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 52331 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "microstructure.minute_series",
+  "params": {
+    "symbol": "600519.SH",
+    "trade_date": "2026-10-09"
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:50.077035+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "time": "time",
+        "price": "price",
+        "volume_lots": "volume_lots",
+        "pre_close": "pre_close"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public microstructure.minute_series --params '{\"symbol\": \"600519.SH\", \"trade_date\": \"2026-10-09\"}'",
+      "source": "tdx_public",
+      "capability": "microstructure.minute_series",
+      "adapter": "app/datasources/sources/tdx_microstructure.py:fetch_minute_series",
+      "params": {
+        "symbol": "600519.SH",
+        "trade_date": "2026-10-09"
+      },
+      "started_utc": "2026-10-11T03:17:49.429688+00:00",
+      "rows": 240,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:49.530383+00:00",
+      "available_at_max": "2026-10-11T03:17:49.530383+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "600519.SH",
+          "minute_index": 0,
+          "time": "09:31:00",
+          "price": 1263.91,
+          "unknown": -26027,
+          "volume_lots": 1595,
+          "pre_close": 1255.7900390625
+        },
+        {
+          "symbol": "600519.SH",
+          "minute_index": 1,
+          "time": "09:32:00",
+          "price": 1262.95,
+          "unknown": 3921,
+          "volume_lots": 500,
+          "pre_close": 1255.7900390625
+        },
+        {
+          "symbol": "600519.SH",
+          "minute_index": 2,
+          "time": "09:33:00",
+          "price": 1261.46,
+          "unknown": -306,
+          "volume_lots": 307,
+          "pre_close": 1255.7900390625
+        },
+        {
+          "symbol": "600519.SH",
+          "minute_index": 3,
+          "time": "09:34:00",
+          "price": 1264.0,
+          "unknown": 2511,
+          "volume_lots": 290,
+          "pre_close": 1255.7900390625
+        },
+        {
+          "symbol": "600519.SH",
+          "minute_index": 4,
+          "time": "09:35:00",
+          "price": 1262.84,
+          "unknown": 1101,
+          "volume_lots": 366,
+          "pre_close": 1255.7900390625
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:49.530408+00:00",
+      "sample_sha256": "c69e4002a34638bfbf2b29598592e6f056c4c9a5a64a85d026fc939e46077f0b"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 240 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

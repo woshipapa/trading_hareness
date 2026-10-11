@@ -1,0 +1,112 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "tdx_public",
+  "capability": "microstructure.auction_curve",
+  "params": {
+    "symbol": "600519.SH"
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-11T03:17:52.389863+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "tdx_public": {
+      "field_map": {
+        "time": "time",
+        "price": "price",
+        "matched_raw": "matched_raw",
+        "unmatched_raw": "unmatched_raw",
+        "unmatched_side": "unmatched_side"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "tdx_public": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe tdx_public microstructure.auction_curve --params '{\"symbol\": \"600519.SH\"}'",
+      "source": "tdx_public",
+      "capability": "microstructure.auction_curve",
+      "adapter": "app/datasources/sources/tdx_microstructure.py:fetch_auction_curve",
+      "params": {
+        "symbol": "600519.SH"
+      },
+      "started_utc": "2026-10-11T03:17:51.779483+00:00",
+      "rows": 131,
+      "coverage": null,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-11T03:17:51.909337+00:00",
+      "available_at_max": "2026-10-11T03:17:51.909337+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one"
+      ],
+      "sample": [
+        {
+          "symbol": "600519.SH",
+          "time": "09:15:02",
+          "price": 1255.7900390625,
+          "matched_raw": 13,
+          "unmatched_raw": 1,
+          "unmatched_side": "S"
+        },
+        {
+          "symbol": "600519.SH",
+          "time": "09:15:05",
+          "price": 1255.5799560546875,
+          "matched_raw": 16,
+          "unmatched_raw": 0,
+          "unmatched_side": "B"
+        },
+        {
+          "symbol": "600519.SH",
+          "time": "09:15:08",
+          "price": 1255.699951171875,
+          "matched_raw": 16,
+          "unmatched_raw": 1,
+          "unmatched_side": "B"
+        },
+        {
+          "symbol": "600519.SH",
+          "time": "09:15:20",
+          "price": 1255.7900390625,
+          "matched_raw": 18,
+          "unmatched_raw": 4,
+          "unmatched_side": "B"
+        },
+        {
+          "symbol": "600519.SH",
+          "time": "09:15:29",
+          "price": 1255.7900390625,
+          "matched_raw": 19,
+          "unmatched_raw": 3,
+          "unmatched_side": "B"
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-11T03:17:51.909361+00:00",
+      "sample_sha256": "d711cffffd84a549dc191c6b7fdfabc95b608b8ed288db1e0a3d706fc6e24b04"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "tdx_public": false
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 131 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": false,
+      "detail": "outside a session: tdx_public (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}
