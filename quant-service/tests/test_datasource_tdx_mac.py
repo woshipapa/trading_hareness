@@ -715,7 +715,7 @@ class MacBarAdapterTests(unittest.TestCase):
 
     def test_daily_rows_carry_the_symbol_and_every_bar(self):
         evidence, requests = self.fetch(tdx_mac.fetch_daily_bars, symbol="600519.SH", count=3)
-        self.assertEqual([(row["symbol"], row["date"], row["close"], row["volume"]) for row in evidence.rows],
+        self.assertEqual([(row["symbol"], row["trade_date"], row["close"], row["volume"]) for row in evidence.rows],
                          [("600519.SH", "2026-10-09", 105.0, 2000.0), ("600519.SH", "2026-10-09", 108.0, 4000.0),
                           ("600519.SH", "2026-10-09", 109.0, 6000.0)])
         self.assertEqual([(struct.unpack_from("<H", request, 36)[0], struct.unpack_from("<H", request, 44)[0])

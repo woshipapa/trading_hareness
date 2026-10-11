@@ -304,7 +304,7 @@ _TENCENT_LIMITS = {"reference": "tencent_free", "reference_adapter": "app/longhu
                    "reference_params": {"symbols": "symbols"}, "key": ["symbol", "trade_date"]}
 _TENCENT_INDEX_DAILY = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_index_daily",
                         "reference_params": {"symbol": "symbol"},
-                        "reference_fixed": {"start": "2026-01-01", "end": "2026-12-31"},
+                        "reference_fixed": {"start": "20260101", "end": "20261231"},
                         "key": ["symbol", "trade_date"]}
 
 BINDINGS: Final[tuple[Binding, ...]] = (

@@ -579,11 +579,17 @@ async def fetch_membership(*, sector_key: str, board_type: int) -> CapabilityEvi
     return tdx_protocol.observed_evidence(rows, host)
 
 
+def _daily_bar_row(symbol: str, row: dict[str, Any]) -> dict[str, Any]:
+    """A decoded 0x122e daily row with its symbol and ``trade_date``, the key the other bars.daily sources use."""
+    return {"symbol": symbol, "trade_date": row["date"],
+            **{key: value for key, value in row.items() if key not in ("date", "seconds")}}
+
+
 async def fetch_daily_bars(*, symbol: str, count: int) -> CapabilityEvidence:
     market, code = tdx_protocol.market_code(symbol)
     full_symbol = tdx_protocol.symbol(market, code)
     rows, host = await call(
-        lambda client: [{"symbol": full_symbol, **row} for row in client.bars(market, code, BAR_PERIODS["1d"], 0, count)]
+        lambda client: [_daily_bar_row(full_symbol, row) for row in client.bars(market, code, BAR_PERIODS["1d"], 0, count)]
     )
     return tdx_protocol.observed_evidence(rows, host)
 
