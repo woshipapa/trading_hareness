@@ -19,6 +19,7 @@ Pure and dependency-free: no larkx, no network. Name resolution is optional
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -86,6 +87,108 @@ def render_card_richtext(richtext: dict[str, Any]) -> str:
     return "\n".join(chunks)
 
 
+# Mirror of adapter/card-content.mjs cardText for the client-side card JSON the
+# archive keeps in ``content_data.jsonCard``.  When the sender's client is newer
+# than the session's, ``richtext`` holds only the upgrade banner and the real
+# content (text and links) lives under ``newBody`` here.
+_JSON_TEXT_TAGS = {"text", "markdown", "plain_text", "lark_md"}
+_JSON_CHILD_KEYS = (
+    "header", "body", "newBody", "elements", "columns", "fields", "content", "content_v2",
+    "note", "text", "zh_cn", "en_us", "ja_jp", "property", "markdownElements",
+)
+_JSON_URL_KEYS = ("url", "href", "pc_url", "pcUrl", "default_url", "defaultUrl")
+
+
+def _json_direct_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return ""
+    for key in ("content", "text"):
+        if isinstance(value.get(key), str):
+            return value[key]
+    prop = value.get("property")
+    if isinstance(prop, dict):
+        for key in ("content", "text"):
+            if isinstance(prop.get(key), str):
+                return prop[key]
+        return _json_direct_text(prop.get("text"))
+    return ""
+
+
+def _json_url(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return ""
+    for key in _JSON_URL_KEYS:
+        nested = _json_url(value.get(key))
+        if nested:
+            return nested
+    return ""
+
+
+def _json_decoy_hidden(node: dict[str, Any]) -> bool:
+    for margin in (node.get("margin"), (node.get("style") or {}).get("margin") if isinstance(node.get("style"), dict) else None):
+        if isinstance(margin, str) and any(float(part) <= _DECOY_MARGIN_PX for part in re.findall(r"-?\d+(?:\.\d+)?(?=px\b)", margin)):
+            return True
+    return False
+
+
+def render_json_card(card: Any) -> str:
+    """Collect visible text and link targets from a client-side card JSON document."""
+    if isinstance(card, str):
+        try:
+            card = json.loads(card)
+        except ValueError:
+            return ""
+    if not isinstance(card, dict):
+        return ""
+    chunks: list[str] = []
+
+    def append(value: Any) -> None:
+        text = clean_text(value) if isinstance(value, str) else ""
+        if text and not is_card_unavailable_notice(text) and text not in chunks:
+            chunks.append(text)
+
+    def walk(value: Any, depth: int = 0) -> None:
+        if depth > 40:  # a card is shallow; this only bounds malformed input
+            return
+        if isinstance(value, list):
+            for item in value:
+                walk(item, depth + 1)
+            return
+        if not isinstance(value, dict) or _json_decoy_hidden(value):
+            return
+        tag = str(value.get("tag") or "").lower()
+        prop = value.get("property") if isinstance(value.get("property"), dict) else {}
+        if tag in _JSON_TEXT_TAGS:
+            append(_json_direct_text(value))
+            for key in ("text", "content", "property"):
+                walk(value.get(key), depth + 1)
+            return
+        if tag in {"a", "link"}:
+            append(_json_direct_text(value.get("text") or value.get("content")) or _json_direct_text(value))
+            append(_json_url(value.get("href") or value.get("url") or prop.get("href") or prop.get("url")))
+            walk(value.get("property"), depth + 1)
+            return
+        if tag == "button":
+            append(_json_direct_text(value.get("text")) or _json_direct_text(value.get("content")))
+            append(_json_url(value.get("url") or value.get("multi_url") or (value.get("action") or {}).get("url") or prop.get("url") or prop.get("multi_url")))
+            walk(value.get("property"), depth + 1)
+            return
+        if tag == "img":
+            walk(value.get("property"), depth + 1)
+            return
+        if "title" in value:
+            walk(value.get("title"), depth + 1)
+        for key in _JSON_CHILD_KEYS:
+            walk(value.get(key), depth + 1)
+
+    walk(card)
+    return "\n".join(chunks)
+
+
 def _card_image_count(richtext: dict[str, Any]) -> int:
     dictionary = (richtext.get("elements") or {}).get("dictionary") or {}
     if not isinstance(dictionary, dict):
@@ -108,8 +211,9 @@ def message_text(payload: dict[str, Any]) -> str:
     """Type-aware readable text for one archived message."""
     msg_type = str(payload.get("msg_type_name") or payload.get("msg_type") or "").upper()
     if msg_type in {"CARD", "INTERACTIVE"}:
-        richtext = (payload.get("content_data") or {}).get("richtext") or {}
-        text = render_card_richtext(richtext)
+        content_data = payload.get("content_data") or {}
+        richtext = content_data.get("richtext") or {}
+        text = render_card_richtext(richtext) or render_json_card(content_data.get("jsonCard"))
         if text:
             return text
         images = _card_image_count(richtext) or len(_image_ids(payload))

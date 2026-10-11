@@ -84,6 +84,19 @@ function parseCard(content) {
 
 function labelOf(value) { return directText(value); }
 
+// A link target is a plain string in card JSON 1.0/2.0, but the client-side
+// 2.0 form nests it ({url: {url, pcUrl, ...}}).  Without this a card whose
+// whole body is one link reads as empty and is relayed as a bare tag.
+function urlOf(value) {
+	if (typeof value === 'string') return value;
+	if (!value || typeof value !== 'object') return '';
+	for (const key of ['url', 'href', 'pc_url', 'pcUrl', 'default_url', 'defaultUrl']) {
+		const nested = urlOf(value[key]);
+		if (nested) return nested;
+	}
+	return '';
+}
+
 export function cardText(content) {
 	const card = parseCard(content);
 	const chunks = [];
@@ -106,15 +119,16 @@ export function cardText(content) {
 			walk(value.property);
 			return;
 		}
-		if (tag === 'a') {
-			append(labelOf(value.text ?? value.content));
-			append(value.href ?? value.url ?? value.property?.href ?? value.property?.url);
+		// `link` is the client-side 2.0 name for what card JSON calls `a`.
+		if (tag === 'a' || tag === 'link') {
+			append(labelOf(value.text ?? value.content) || labelOf(value));
+			append(urlOf(value.href ?? value.url ?? value.property?.href ?? value.property?.url));
 			walk(value.property);
 			return;
 		}
 		if (tag === 'button') {
 			append(labelOf(value.text) || labelOf(value.content));
-			append(value.url ?? value.multi_url?.url ?? value.action?.url ?? value.property?.url);
+			append(urlOf(value.url ?? value.multi_url ?? value.action?.url ?? value.property?.url ?? value.property?.multi_url));
 			walk(value.property);
 			return;
 		}

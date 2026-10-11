@@ -1,4 +1,5 @@
 import sys
+import json
 import unittest
 from pathlib import Path
 
@@ -103,6 +104,52 @@ class TranscriptTests(unittest.TestCase):
     def test_keeps_system_when_requested(self):
         rows = [{"msg_type_name": "SYSTEM", "from_id": "1", "create_time": 1791524000, "content": "[系统消息] 入群"}]
         self.assertIn("入群", hr.render_transcript(rows, drop_system=False))
+
+
+class JsonCardTests(unittest.TestCase):
+    """The archive's jsonCard carries the real content when richtext is only the upgrade banner."""
+
+    BANNER = {"tag": "markdown", "property": {"elements": [{"tag": "plain_text", "property": {"content": "请升级至最新版本客户端，以查看内容"}}]}}
+
+    def card(self, *new_body_elements):
+        return {
+            "body": {"elements": [{"tag": "column_set", "property": {"columns": [{"tag": "column", "property": {"elements": [
+                {"tag": "img", "property": {"alt": {"tag": "plain_text", "property": {}}, "imageID": "16"}}, self.BANNER,
+            ]}}]}}]},
+            "newBody": {"tag": "body", "property": {"elements": [{"tag": "markdown", "property": {"elements": list(new_body_elements)}}]}},
+            "schema": "2.0",
+        }
+
+    def test_link_only_card_keeps_its_link_and_drops_the_banner(self):
+        link = {"tag": "link", "property": {"content": "http://liveplay.example.com/live/5060.m3u8", "url": {"url": "http://liveplay.example.com/live/5060.m3u8"}}}
+        self.assertEqual(hr.render_json_card(json.dumps(self.card(link))), "http://liveplay.example.com/live/5060.m3u8")
+
+    def test_labelled_link_keeps_label_and_target(self):
+        text = {"tag": "plain_text", "property": {"content": "8点上课链接"}}
+        link = {"tag": "link", "property": {"content": "点开观看", "url": {"url": "https://example.com/live"}}}
+        self.assertEqual(hr.render_json_card(self.card(text, link)), "8点上课链接\n点开观看\nhttps://example.com/live")
+
+    def test_decoy_and_malformed_input_are_ignored(self):
+        decoy = {"tag": "div", "margin": "0px 0px -24px -99px", "text": {"tag": "plain_text", "content": "garbled"}}
+        real = {"tag": "div", "text": {"tag": "plain_text", "content": "真内容"}}
+        self.assertEqual(hr.render_json_card({"body": {"elements": [decoy, real]}}), "真内容")
+        self.assertEqual(hr.render_json_card("{not json"), "")
+        self.assertEqual(hr.render_json_card(None), "")
+
+    def test_message_text_falls_back_to_json_card_when_richtext_is_only_the_banner(self):
+        text = {"tag": "plain_text", "property": {"content": "8点上课链接。点开观看即可"}}
+        payload = {"msg_type_name": "CARD", "content": "[卡片]", "content_data": {
+            "richtext": {"elementIds": ["1"], "elements": {"dictionary": {"1": {"tag": 2, "property": "img"}}}},
+            "jsonCard": json.dumps(self.card(text)),
+        }}
+        self.assertEqual(hr.message_text(payload), "8点上课链接。点开观看即可")
+
+    def test_image_only_card_without_json_text_still_renders_as_image(self):
+        payload = {"msg_type_name": "CARD", "content": "[卡片]", "content_data": {
+            "richtext": {"elementIds": ["1"], "elements": {"dictionary": {"1": {"tag": 2, "property": "img"}}}},
+            "jsonCard": json.dumps(self.card()),
+        }}
+        self.assertEqual(hr.message_text(payload), "[图片]")
 
 
 if __name__ == "__main__":

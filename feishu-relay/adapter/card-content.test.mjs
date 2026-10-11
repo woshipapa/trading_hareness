@@ -109,3 +109,34 @@ test('an already-tagged text is not tagged twice', () => {
 	assert.equal(buildRelayCard({ tag: 'liwei', text: '#liwei\n正文' }).body.elements[0].text.content, '#liwei\n正文');
 	assert.equal(buildRelayCard({ tag: 'liwei' }).body.elements[0].text.content, '#liwei');
 });
+
+// Observed 2026-10-11 from the anqiang source: the visible body is the client
+// upgrade banner and the real content is one link node under newBody.
+const linkOnlyClientCard = {
+	body: { elements: [{ tag: 'column_set', property: { columns: [{ tag: 'column', property: { elements: [
+		{ tag: 'img', property: { alt: { tag: 'plain_text', property: {} }, imageID: '16' } },
+		{ tag: 'markdown', property: { elements: [{ tag: 'plain_text', property: { content: '请升级至最新版本客户端，以查看内容' } }] } },
+	] } }] } }] },
+	newBody: { tag: 'body', property: { elements: [{ tag: 'markdown', property: { elements: [
+		{ tag: 'link', id: '_2_0', property: { content: 'http://liveplay.example.com/live/5060.m3u8', url: { url: 'http://liveplay.example.com/live/5060.m3u8' } } },
+	] } }] } },
+	schema: '2.0',
+};
+
+test('a client-side 2.0 card whose only content is a link node keeps the link', () => {
+	assert.equal(cardText(linkOnlyClientCard), 'http://liveplay.example.com/live/5060.m3u8');
+	assert.equal(cardText(JSON.stringify(linkOnlyClientCard)), 'http://liveplay.example.com/live/5060.m3u8');
+});
+
+test('a link node with a label keeps both the label and its nested target', () => {
+	const card = { newBody: { tag: 'body', property: { elements: [{ tag: 'markdown', property: { elements: [
+		{ tag: 'plain_text', property: { content: '8点上课链接' } },
+		{ tag: 'link', property: { content: '点开观看', url: { url: 'https://example.com/live', pcUrl: 'https://example.com/pc' } } },
+	] } }] } } };
+	assert.equal(cardText(card), '8点上课链接\n点开观看\nhttps://example.com/live');
+});
+
+test('card JSON anchors and buttons with object-valued urls are still read', () => {
+	assert.equal(cardText({ elements: [[{ tag: 'a', text: '原文', href: 'https://example.com/a' }]] }), '原文\nhttps://example.com/a');
+	assert.equal(cardText({ schema: '2.0', body: { elements: [{ tag: 'button', text: { tag: 'plain_text', content: '打开' }, multi_url: { url: 'https://example.com/b' } }] } }), '打开\nhttps://example.com/b');
+});

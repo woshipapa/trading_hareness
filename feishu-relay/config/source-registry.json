@@ -49,6 +49,22 @@
       "publisher_key": "xiaojie",
       "remote_analyst_id": "xiaojie",
       "enabled": true
+    },
+    {
+      "tag": "sanshu",
+      "label": "节奏三叔",
+      "topic_key": "market",
+      "publisher_key": "sanshu",
+      "remote_analyst_id": "sanshu",
+      "enabled": true
+    },
+    {
+      "tag": "jinli",
+      "label": "小锦鲤",
+      "topic_key": "market",
+      "publisher_key": "jinli",
+      "remote_analyst_id": "jinli",
+      "enabled": true
     }
   ]
 }
