@@ -146,6 +146,13 @@ class TdxShadowCaptureTests(unittest.TestCase):
             self.assertEqual(result["status"], "database_busy")
             self.assertEqual([call[0] for call in calls], [runtime.deps.session_gate, runtime.deps.persist_capture])
 
+    def test_the_service_gives_the_shadow_loop_only_its_own_database_runner(self):
+        from app import main
+
+        self.assertIs(main.tdx_shadow_runtime.deps.run_database, run_tdx_shadow_blocking)
+        self.assertIs(main.tdx_shadow_runtime.deps.storage_allowed, main.tdx_shadow_storage_allowed)
+        self.assertIs(main._tdx_shadow_storage_admission.run_database, run_tdx_shadow_blocking)
+
     def test_real_session_gate_and_persistence_run_on_the_shadow_worker(self):
         threads = []
 
