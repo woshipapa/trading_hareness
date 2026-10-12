@@ -232,10 +232,55 @@ def build_edge(local: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# Paper-KB 数据源采集器（47edge 上的 paper-sources.service，独立文件，最小权限）
+# 只放采集公共数据源需要的键；不含飞书/小红书/量化等任何别的凭据，
+# 也不含 Semantic Scholar 密钥（S2 周任务的状态在 Mac 上，密钥不外发）。
+# ═══════════════════════════════════════════════════════════════════════
+PAPER_EDGE_KEYS = (
+    "OPENALEX_API_KEY", "OPENCITATIONS_ACCESS_TOKEN", "CORE_API_KEY", "HF_TOKEN",
+    "OPENALEX_MAILTO", "UNPAYWALL_EMAIL", "PAPER_KB_CONTACT_EMAIL",
+    # 采集完成后由边缘直接发飞书群（群机器人 webhook，本身是 bearer 凭据）
+    "PAPER_KB_FEISHU_WEBHOOK_URL",
+)
+
+
+def build_paper_edge(local: dict) -> str:
+    """systemd EnvironmentFile 格式；只写 .env.local 里有值的键；值用双引号包住并转义。"""
+    lines = [
+        "# .env.paper-edge — 47edge paper-sources.service 凭据（由 .env.local 派生，勿手改）",
+        "# 推远端: bash config/secrets/sync-secrets.sh paper-edge  → /etc/paper-sources-edge.env (root 0600)",
+        "",
+    ]
+    for key in PAPER_EDGE_KEYS:
+        value = (local.get(key) or "").strip()
+        if not value:
+            continue
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        lines.append(f'{key}="{escaped}"')
+    return "\n".join(lines) + "\n"
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
     local = parse_env(LOCAL_ENV)
     print(f"从 {LOCAL_ENV} 读到 {len(local)} 个键")
+
+    if "--paper-edge" in sys.argv:
+        # 独立模式：只生成 .env.paper-edge，不重写 .env.owner / .env.edge
+        text = build_paper_edge(local)
+        names = [m.group(1) for m in (re.match(r"^([A-Z_][A-Z0-9_]*)=", ln) for ln in text.splitlines()) if m]
+        missing = [k for k in PAPER_EDGE_KEYS if k not in names]
+        print(f"paper-edge 子集 {len(names)} 个键: {', '.join(names) or '(无)'}")
+        print(f"  .env.local 中没有值（未写入）: {', '.join(missing) or '(无)'}")
+        if dry_run:
+            return
+        target = SECRETS_DIR / ".env.paper-edge"
+        target.write_text(text, encoding="utf-8")
+        os.chmod(target, 0o600)
+        print(f"✅ {target}")
+        print("\n下一步: bash config/secrets/sync-secrets.sh paper-edge")
+        return
 
     owner_text = build_owner(local)
     edge_text = build_edge(local)

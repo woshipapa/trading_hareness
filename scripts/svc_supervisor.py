@@ -106,6 +106,15 @@ TASKS = [
                "-N","-L","127.0.0.1:18300:127.0.0.1:18300","root@47.114.113.152"],
          cwd=HOME, out=os.path.join(N8N,"logs/feishu-tunnel.log"),
          err=os.path.join(N8N,"logs/feishu-tunnel.log"), env={}),
+    # Semantic Scholar 唯一出口：key、限流与冷却都在 edge 的 s2_gateway（127.0.0.1:18791）。
+    # Mac 侧调用经此转发；是否使用由 paper_kb/.s2_via_edge 标记文件决定。
+    dict(name="s2-gateway-tunnel", kind="daemon",
+         args=["ssh","-i",os.path.join(HOME,".ssh/feishu_relay_edge_ed25519"),
+               "-o","BatchMode=yes","-o","IdentitiesOnly=yes","-o","ServerAliveInterval=15",
+               "-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new",
+               "-N","-L","127.0.0.1:18791:127.0.0.1:18791","root@47.114.113.152"],
+         cwd=HOME, out=os.path.join(N8N,"logs/s2-gateway-tunnel.log"),
+         err=os.path.join(N8N,"logs/s2-gateway-tunnel.log"), env={}),
     # 小红书 edge API 的 loopback forward。采集器一直运行在 edge，本地只
     # 领取摘要任务并调用 Paper-KB 的 codex-teleai provider。
     dict(name="xhs-edge-tunnel", kind="daemon",
@@ -249,6 +258,12 @@ TASKS = [
     dict(name="paperkb.refresh", kind="interval", interval=120, run_at_load=True,
          args=[PY, os.path.join(PKB, "kb_refresh.py")],
          cwd=PKB, out=os.path.join(PKLOG, "refresh.log"), err=os.path.join(PKLOG, "refresh.log"), env={}),
+    # 扫描 Obsidian 阅读笔记：写了总结的论文标记为已学并进入复习。早于 08:30 的提醒，
+    # 直接跑脚本（不经 jobs.py），不产生额外的飞书状态消息。
+    dict(name="paperkb.notes-learned", kind="daily", hour=8, minute=20, run_at_load=True,
+         args=[PY, os.path.join(PKB, "note_learning.py"), "--json"],
+         cwd=PKB, out=os.path.join(PKLOG, "notes-learned.log"), err=os.path.join(PKLOG, "notes-learned.log"),
+         env={"PATH": PATH_ENV}),
     # 每日学习提醒统一由 supervisor 的 svc venv 启动；不要再为 paper-kb
     # 单独创建 launchd 项，避免解释器/环境和重启策略分叉。
     dict(name="paperkb.reminders", kind="daily", hour=8, minute=30, run_at_load=True,
@@ -344,6 +359,27 @@ def run_once(t):
     finally:
         outf.close()
         if errf is not outf: errf.close()
+
+EX_TEMPFAIL = 75  # paper_kb gates exit 75 when its network targets are unreachable
+TEMPFAIL_RETRY_DELAYS = (300, 900, 2700)
+
+def run_once_retry_tempfail(t, delays=TEMPFAIL_RETRY_DELAYS, sleep=None):
+    """run_once, but a job that says "network not ready" (exit 75) is retried after 5, 15, 45 min.
+
+    Only scheduled (daily/calendar) runs use this; the job decides what 75 means, the
+    supervisor just waits and tries again, stopping at once on shutdown.
+    """
+    rc = run_once(t)
+    for delay in delays:
+        if rc != EX_TEMPFAIL or _shutdown.is_set():
+            break
+        slog(f"{t['name']} exit 75 (network not ready), retry in {delay // 60} min")
+        if sleep is not None:
+            sleep(delay)
+        elif _shutdown.wait(delay):
+            break
+        rc = run_once(t)
+    return rc
 
 def daemon_loop(t):
     backoff = 1
@@ -455,7 +491,7 @@ def calendar_loop(t):
         scheduled_for = scheduled.date().isoformat()
         slog(f"run calendar catch-up {t['name']} scheduled_for={scheduled_for}")
         started = time.monotonic()
-        rc = run_once(t)
+        rc = run_once_retry_tempfail(t)
         duration = time.monotonic() - started
         _calendar_mark_run(
             t, scheduled_for, status='success' if rc == 0 else 'failed',
@@ -472,7 +508,7 @@ def calendar_loop(t):
         if not _shutdown.is_set():
             slog(f"run calendar {t['name']}")
             started = time.monotonic()
-            rc = run_once(t)
+            rc = run_once_retry_tempfail(t)
             duration = time.monotonic() - started
             _calendar_mark_run(
                 t, nxt.date().isoformat(), status='success' if rc == 0 else 'failed',
@@ -538,7 +574,7 @@ def daily_loop(t):
     if t.get("run_at_load") and now >= scheduled and _daily_last_run(t) != today and not _shutdown.is_set():
         slog(f"run daily catch-up {t['name']}")
         started = time.monotonic()
-        rc = run_once(t)
+        rc = run_once_retry_tempfail(t)
         duration = time.monotonic() - started
         status = 'success' if rc == 0 else 'failed'
         _daily_mark_run(t, today, status=status, exit_code=rc, duration_s=duration)
@@ -555,7 +591,7 @@ def daily_loop(t):
         if not _shutdown.is_set():
             slog(f"run daily {t['name']}")
             started = time.monotonic()
-            rc = run_once(t)
+            rc = run_once_retry_tempfail(t)
             duration = time.monotonic() - started
             _daily_mark_run(
                 t,

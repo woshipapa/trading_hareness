@@ -79,16 +79,53 @@ sync_edge() {
   sync_file "$env_file" "$EDGE_HOST" "$EDGE_PORT" "$EDGE_USER" "$EDGE_KEY" "$EDGE_REMOTE_DIR"
 }
 
+# paper-edge: 论文数据源采集器的最小凭据子集 → 47edge:/etc/paper-sources-edge.env (root 0600)
+# 经 ssh 标准输入传输（值不进命令行参数/进程列表），先写 .new 再原子 mv；只回显键名。
+sync_paper_edge_s2() {
+  # S2 keys are plain files next to the code (paper_kb/.s2_api_keys, .s2_api_key), not .env.local entries.
+  local src="${PAPER_KB_DIR:-$HOME/codebase/literature_maps/paper_kb}" remote_dir="/opt/paper-arxiv-edge/s2" f sent=0
+  ssh -o StrictHostKeyChecking=accept-new -p "$EDGE_PORT" -i "$EDGE_KEY" "$EDGE_USER@$EDGE_HOST" "install -d -m 0750 '$remote_dir'"
+  for f in .s2_api_keys .s2_api_key; do
+    [[ -s "$src/$f" ]] || continue
+    ssh -o StrictHostKeyChecking=accept-new -p "$EDGE_PORT" -i "$EDGE_KEY" "$EDGE_USER@$EDGE_HOST" \
+      "umask 077 && cat > '$remote_dir/$f.new' && chown root:root '$remote_dir/$f.new' && chmod 600 '$remote_dir/$f.new' && mv -f '$remote_dir/$f.new' '$remote_dir/$f'" \
+      < "$src/$f"
+    sent=$((sent+1))
+  done
+  [[ $sent -gt 0 ]] || { echo "⚠️  $src 下没有 .s2_api_keys/.s2_api_key" >&2; return 1; }
+  echo "   ✅ 远端文件、权限与行数（不显示值）:"
+  ssh -o StrictHostKeyChecking=accept-new -p "$EDGE_PORT" -i "$EDGE_KEY" "$EDGE_USER@$EDGE_HOST" \
+    "for f in '$remote_dir'/.s2_api_key*; do [ -f \"\$f\" ] && stat -c '   %U:%G %a %n' \"\$f\" && printf '   lines: ' && wc -l < \"\$f\"; done"
+}
+
+sync_paper_edge() {
+  local env_file="$SCRIPT_DIR/.env.paper-edge" remote="/etc/paper-sources-edge.env"
+  if [[ ! -f "$env_file" ]]; then
+    echo "⚠️  缺少 $env_file，先运行: python3 config/secrets/env-split.py --paper-edge" >&2
+    return 1
+  fi
+  echo "→ 推 $(basename "$env_file") → $EDGE_USER@$EDGE_HOST:$remote"
+  ssh -o StrictHostKeyChecking=accept-new -p "$EDGE_PORT" -i "$EDGE_KEY" "$EDGE_USER@$EDGE_HOST" \
+    "umask 077 && cat > '$remote.new' && chown root:root '$remote.new' && chmod 600 '$remote.new' && mv -f '$remote.new' '$remote'" \
+    < "$env_file"
+  echo "   ✅ 远端权限与键名（不显示值）:"
+  ssh -o StrictHostKeyChecking=accept-new -p "$EDGE_PORT" -i "$EDGE_KEY" "$EDGE_USER@$EDGE_HOST" \
+    "stat -c '   %U:%G %a %n' '$remote'; grep -oE '^[A-Z_][A-Z0-9_]*=' '$remote' | tr -d '=' | sed 's/^/   key: /'"
+}
+
 case "$TARGET" in
   owner) sync_owner ;;
   edge)  sync_edge ;;
+  paper-edge) sync_paper_edge ;;
+  paper-edge-s2) sync_paper_edge_s2 ;;
   all)   sync_owner; sync_edge ;;
   *)
-    echo "用法: $0 {owner|edge|all}" >&2
+    echo "用法: $0 {owner|edge|paper-edge|paper-edge-s2|all}" >&2
     echo "" >&2
     echo "  owner  推 .env.owner + certs/ → 47owner ($OWNER_REMOTE_DIR)" >&2
     echo "  edge   推 .env.edge → 47edge ($EDGE_REMOTE_DIR)" >&2
-    echo "  all    两个都推" >&2
+    echo "  paper-edge 推 .env.paper-edge → 47edge:/etc/paper-sources-edge.env（不包含在 all 里）" >&2
+    echo "  all    owner + edge" >&2
     exit 1
     ;;
 esac
