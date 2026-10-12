@@ -6,7 +6,9 @@ import { feishuWorkbenchApi } from '../api/feishu-workbench';
 
 type OAuthScopeAudit = { required_scopes?: string[]; granted_scopes?: string[]; missing_scopes?: string[]; verified?: boolean | null };
 type IngestionRouteStatus = { job_count?: number; completed_count?: number; failed_count?: number; paused_count?: number; state?: 'completed' | 'processing' | 'stalled' | 'failed' | 'filtered' | 'paused' | 'awaiting_message'; latest_status?: string | null; latest_stage?: string | null; remote_batch_id?: string | null; last_updated_at?: string | null; error_class?: string | null; error_message?: string | null; latest_failure_error?: string | null; latest_failure_at?: string | null };
-type GroupRelaySourceStatus = { key: string; tag: string; chat_name: string; source_chat_id?: string | null; target_chat_ids?: string[]; transport?: string; websocket_chat_ids?: string[]; websocket_observed_count?: number; websocket_forwarded_count?: number; websocket_failed_count?: number; websocket_last_observed_at?: string | null; websocket_last_forwarded_at?: string | null; enabled?: boolean; state: string; delivery_state?: 'verified' | 'awaiting_message' | 'failed'; last_polled_at?: string | null; poll_age_seconds?: number | null; last_source_message_at?: string | null; last_forwarded_at?: string | null; last_reconciled_at?: string | null; last_message_status?: string | null; failed_count?: number; ingestion?: IngestionRouteStatus | null; last_error?: string | null; last_resolved_error?: string | null; last_resolved_error_at?: string | null; membership?: GroupMembership | null; left_at?: string | null; archived?: boolean; archived_at?: string | null; membership_checked_at?: string | null; history?: GroupHistoryProgress | null };
+type GroupRelaySourceStatus = { key: string; tag: string; chat_name: string; source_chat_id?: string | null; target_chat_ids?: string[]; transport?: string; websocket_chat_ids?: string[]; websocket_observed_count?: number; websocket_forwarded_count?: number; websocket_failed_count?: number; websocket_last_observed_at?: string | null; websocket_last_forwarded_at?: string | null; enabled?: boolean; state: string; delivery_state?: 'verified' | 'awaiting_message' | 'failed'; last_polled_at?: string | null; poll_age_seconds?: number | null; last_source_message_at?: string | null; last_forwarded_at?: string | null; last_reconciled_at?: string | null; last_message_status?: string | null; failed_count?: number; ingestion?: IngestionRouteStatus | null; last_error?: string | null; last_resolved_error?: string | null; last_resolved_error_at?: string | null; membership?: GroupMembership | null; left_at?: string | null; archived?: boolean; archived_at?: string | null; membership_checked_at?: string | null; history?: GroupHistoryProgress | null; saved?: SavedGroupContent | null };
+// What is kept of a group the account has left: the stored history copy and the relayed messages.
+type SavedGroupContent = { history_messages: number; relayed_messages: number; first_message_at: string | null; last_message_at: string | null; chat_ids?: string[] };
 type SummaryListenerStatus = { enabled?: boolean; chat_configured?: boolean; state?: string; interval_seconds?: number; last_tick_completed_at?: string | null; last_success_at?: string | null; last_source_message_at?: string | null; poll_age_seconds?: number | null; processed_count?: number; duplicate_count?: number; ignored_count?: number; last_error?: string | null };
 type RelayWriterStatus = { configured_id?: string | null; state?: string; owner_id?: string | null; generation?: number | null; updated_at?: string | null };
 type DeliveryOutboxStatus = { depth?: number; failed?: number; paused?: number };
@@ -107,6 +109,17 @@ export function useFeishuRelayWorkspace() {
     finally { joinedGroupsLoading.value = false; }
   }
   const newJoinedGroups = computed(() => joinedGroups.value.filter((group) => group.is_new));
+  // A group the account has left is listed apart from the ones being listened to.
+  const isLeftSource = (source: GroupRelaySourceStatus) => Boolean(source.archived) || source.membership === 'left' || source.membership === 'dissolved';
+  const activeSources = computed(() => (groupRelayStatus.value.sources ?? []).filter((source) => !isLeftSource(source)));
+  const leftSources = computed(() => (groupRelayStatus.value.sources ?? []).filter(isLeftSource));
+  const leftChatIds = computed(() => new Set(leftSources.value.flatMap((source) => [...(source.saved?.chat_ids ?? []), ...(source.websocket_chat_ids ?? [])])));
+  const beijingDayOf = (value: string) => new Date(Date.parse(value) + 8 * 3_600_000).toISOString().slice(0, 10);
+  const savedHasContent = (source: GroupRelaySourceStatus) => (source.saved?.history_messages ?? 0) + (source.saved?.relayed_messages ?? 0) > 0;
+  const savedContentText = (source: GroupRelaySourceStatus) => !source.saved ? '统计中' : !savedHasContent(source) ? '没有保存内容'
+    : [source.saved.history_messages ? `群历史 ${source.saved.history_messages} 条` : '', source.saved.relayed_messages ? `已转发 ${source.saved.relayed_messages} 条` : ''].filter(Boolean).join(' · ');
+  const savedSpanText = (source: GroupRelaySourceStatus) => source.saved?.first_message_at && source.saved.last_message_at
+    ? `${beijingDayOf(source.saved.first_message_at)} 至 ${beijingDayOf(source.saved.last_message_at)}` : '';
   const pickableGroups = computed(() => joinedGroups.value.filter((group) => group.in_directory));
   const groupOptionLabel = (group: JoinedGroup) => `${group.name || group.chat_id}${group.is_new ? '（新加入）' : ''}${group.route_archived ? `（已退群的路由 #${group.route_tag ?? '?'}，会自动恢复）` : group.source_key ? `（已绑定 #${group.route_tag ?? '?'}）` : ''}`;
   // Target groups are the ones a webhook is configured for; adding one needs its webhook secret on the server.
@@ -406,7 +419,9 @@ export function useFeishuRelayWorkspace() {
   const beijingDay = (offsetDays = 0) => new Date(Date.now() + 8 * 3_600_000 + offsetDays * 86_400_000).toISOString().slice(0, 10);
   function openBundleDialog(route: GroupRelaySourceStatus) {
     bundleRoute.value = route;
-    bundleDates.value = [beijingDay(-6), beijingDay()];
+    // A left group has no recent days; open on the days its saved content covers.
+    bundleDates.value = isLeftSource(route) && route.saved?.first_message_at && route.saved.last_message_at
+      ? [beijingDayOf(route.saved.first_message_at), beijingDayOf(route.saved.last_message_at)] : [beijingDay(-6), beijingDay()];
     bundlePreview.value = null;
     bundleError.value = '';
     bundleDialog.value = true;
@@ -442,14 +457,14 @@ export function useFeishuRelayWorkspace() {
     catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
   }
   async function deleteGroupRelayRoute(route: GroupRelaySourceStatus) {
-    try { await ElMessageBox.confirm(`确认停止监听“${route.chat_name}”并删除其注册信息？已有转发记录会保留。`, '删除源群', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }); await groupRelayApi.removeRoute<Record<string, unknown>>(route.key); ElMessage.success('源群已删除，下一次轮询起停止监听'); await loadGroupRelayStatus(); }
+    try { await ElMessageBox.confirm(isLeftSource(route) ? `确认删除已退群的“${route.chat_name}”？删除后它不再出现在“已退群”列表里，也就不能再从这里导出它保存的内容。` : `确认停止监听“${route.chat_name}”并删除其注册信息？已有转发记录会保留。`, '删除源群', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }); await groupRelayApi.removeRoute<Record<string, unknown>>(route.key); ElMessage.success('源群已删除，下一次轮询起停止监听'); await loadGroupRelayStatus(); }
     catch (error) { if (error !== 'cancel' && error !== 'close') ElMessage.error(error instanceof Error ? error.message : String(error)); }
   }
 
   return {
     groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistorySource, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
     rebindGroupRelayRoute,
-    joinedGroups, joinedGroupsError, joinedGroupsLoading, loadJoinedGroups, refreshJoinedGroupsIfStale, newJoinedGroups, pickableGroups, groupOptionLabel, relayTargetOptions, pickRouteGroup, historyProgressText, historyProgressTagType,
+    joinedGroups, joinedGroupsError, joinedGroupsLoading, loadJoinedGroups, refreshJoinedGroupsIfStale, newJoinedGroups, activeSources, leftSources, leftChatIds, savedHasContent, savedContentText, savedSpanText, pickableGroups, groupOptionLabel, relayTargetOptions, pickRouteGroup, historyProgressText, historyProgressTagType,
     bundleDialog, bundleRoute, bundleDates, bundlePreview, bundleSource, bundleHasContent, bundleLoading, bundleError, openBundleDialog, previewBundle, downloadBundle,
     qrDialog, qrSession, qrStatusName, qrPolling, startQrLogin, stopQrPolling, authStateType, authStateText,
     oauthDialog, oauthAuthorizeUrl, oauthRedirectUri, oauthCode, oauthSubmitting, startOauthReauth, submitOauthCode, copyOauthUrl, oauthExpiryText, oauthExpiryTagType,

@@ -44,7 +44,7 @@ export default defineComponent({
           <el-descriptions-item label="position 缺口">观测 {{ groupRelayStatus.larkagentx?.position_summary?.missing_position_count ?? 0 }} / 已恢复 {{ groupRelayStatus.larkagentx?.position_summary?.recovered_position_count ?? 0 }}<div class="group-relay-age">未恢复 {{ groupRelayStatus.larkagentx?.position_summary?.unresolved_position_count ?? 0 }} · {{ groupRelayStatus.larkagentx?.position_summary?.gap_event_count ?? 0 }} 次</div></el-descriptions-item>
         </el-descriptions>
         <el-alert v-if="(groupRelayStatus.larkagentx?.position_summary?.unresolved_position_count ?? groupRelayStatus.larkagentx?.position_summary?.missing_position_count ?? 0) > 0" class="section-gap" type="warning" :closable="false" show-icon :title="`仍有 ${groupRelayStatus.larkagentx?.position_summary?.unresolved_position_count ?? groupRelayStatus.larkagentx?.position_summary?.missing_position_count ?? 0} 个未恢复 position 缺口，请按群级明细核对`" />
-        <el-table :data="Object.entries(groupRelayStatus.larkagentx?.chat_stats ?? {}).map(([chatId, stats]) => ({ chatId, stats, validation: groupRelayStatus.larkagentx?.chat_validation?.[chatId] }))" size="small" max-height="300" class="section-gap">
+        <el-table :data="Object.entries(groupRelayStatus.larkagentx?.chat_stats ?? {}).filter(([chatId]) => !leftChatIds.has(chatId)).map(([chatId, stats]) => ({ chatId, stats, validation: groupRelayStatus.larkagentx?.chat_validation?.[chatId] }))" size="small" max-height="300" class="section-gap">
           <el-table-column prop="chatId" label="WebSocket chat_id" min-width="190"/>
           <el-table-column label="群名/核验" min-width="175"><template #default="{ row }"><div>{{ row.validation?.name || '未返回群名' }}</div><el-tag size="small" :type="larkAgentXStateType(row.validation?.state)">{{ larkAgentXStateText(row.validation?.state) }}</el-tag></template></el-table-column>
           <el-table-column label="历史接收 / 转发 / 失败" width="190"><template #default="{ row }">{{ row.stats?.observed_count ?? 0 }} / {{ row.stats?.forwarded_count ?? 0 }} / {{ row.stats?.historical_failed_count ?? row.stats?.failed_count ?? 0 }}<small class="group-relay-age">过滤 {{ row.stats?.filtered_count ?? 0 }}</small></template></el-table-column>
@@ -86,9 +86,8 @@ export default defineComponent({
       <el-alert v-if="newJoinedGroups.length" class="section-gap" type="success" :closable="false" show-icon :title="`发现 ${newJoinedGroups.length} 个新加入、还没有建立映射的群`">
         <el-space wrap><el-button v-for="group in newJoinedGroups" :key="group.chat_id" size="small" type="primary" plain @click="openCreateGroupRelayRoute(group)">{{ group.name || group.chat_id }} · 建立映射</el-button></el-space>
       </el-alert>
-      <el-alert v-if="(groupRelayStatus.sources ?? []).some((source) => !source.archived && (source.membership === 'left' || source.membership === 'dissolved'))" class="section-gap" type="error" :closable="false" show-icon :title="`账号已不在这些源群里，收不到新消息：${(groupRelayStatus.sources ?? []).filter((source) => !source.archived && (source.membership === 'left' || source.membership === 'dissolved')).map((source) => source.chat_name).join('、')}。再确认一次仍不在群里，路由会自动停用并保留，标记为已退群。`" />
-      <el-alert v-if="(groupRelayStatus.sources ?? []).some((source) => source.archived)" class="section-gap" type="info" :closable="false" show-icon :title="`${(groupRelayStatus.sources ?? []).filter((source) => source.archived).length} 条路由因退群已自动停用：${(groupRelayStatus.sources ?? []).filter((source) => source.archived).map((source) => `${source.chat_name} #${source.tag}`).join('、')}`" description="它们保留在下表里，标记为已退群，仍可导出资料包；重新入群后会自动恢复监听。不再需要的可以手动删除。" />
-      <el-table :data="groupRelayStatus.sources ?? []" size="small" max-height="390" class="section-gap group-relay-table">
+      <el-alert v-if="leftSources.some((source) => !source.archived)" class="section-gap" type="warning" :closable="false" show-icon :title="`刚识别到账号已不在这些群里：${leftSources.filter((source) => !source.archived).map((source) => source.chat_name).join('、')}。已移到下方“已退群”列表，再确认一次后自动停用。`" />
+      <el-table :data="activeSources" size="small" max-height="390" class="section-gap group-relay-table">
         <el-table-column prop="chat_name" label="源群" min-width="190" show-overflow-tooltip/>
         <el-table-column label="源 chat_id" min-width="190" show-overflow-tooltip><template #default="{ row }">{{ row.source_chat_id || '-' }}</template></el-table-column>
         <el-table-column label="标签" width="110"><template #default="{ row }"><el-tag size="small" effect="plain">#{{ row.tag }}</el-tag></template></el-table-column>
@@ -105,6 +104,18 @@ export default defineComponent({
         <el-table-column label="已恢复错误" min-width="190" show-overflow-tooltip><template #default="{ row }"><div>{{ row.last_resolved_error || '-' }}</div><small v-if="row.last_resolved_error_at" class="group-relay-age">{{ dateText(row.last_resolved_error_at) }}</small></template></el-table-column>
         <el-table-column label="管理" width="320" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openBundleDialog(row)">导出资料包</el-button><el-button link type="primary" @click="openEditGroupRelayRoute(row)">编辑</el-button><el-button link type="primary" @click="rebindGroupRelayRoute(row)">重新绑定</el-button><el-button link :type="row.enabled === false ? 'success' : 'warning'" @click="setGroupRelayRouteEnabled(row, row.enabled === false)">{{ row.enabled === false ? '启用' : '停用' }}</el-button><el-button link type="danger" @click="deleteGroupRelayRoute(row)">删除</el-button></template></el-table-column>
       </el-table>
+      <el-card v-if="leftSources.length" shadow="never" class="section-gap">
+        <template #header><div class="card-header"><div><span>已退群</span><small class="realtime-refresh-time">账号已不在这些群里，监听已停止；之前保存的内容仍可导出。重新入群后会自动回到上面的列表。</small></div><el-tag type="info">{{ leftSources.length }} 个</el-tag></div></template>
+        <el-table :data="leftSources" size="small" max-height="320" class="group-relay-table">
+          <el-table-column prop="chat_name" label="源群" min-width="190" show-overflow-tooltip/>
+          <el-table-column label="标签" width="110"><template #default="{ row }"><el-tag size="small" effect="plain">#{{ row.tag }}</el-tag></template></el-table-column>
+          <el-table-column label="状态" width="130"><template #default="{ row }"><el-tag size="small" :type="row.membership === 'dissolved' ? 'info' : 'danger'">{{ row.membership === 'dissolved' ? '群已解散' : '已退群' }}</el-tag><small class="group-relay-age">{{ row.archived ? '已自动停用' : '待确认后停用' }}</small></template></el-table-column>
+          <el-table-column label="退群时间" min-width="165"><template #default="{ row }">{{ row.left_at ? dateText(row.left_at) : '-' }}<small class="group-relay-age">以系统识别到的时间为准</small></template></el-table-column>
+          <el-table-column label="原目标群" min-width="240"><template #default="{ row }"><div v-for="target in row.target_chat_ids ?? []" :key="target">{{ target }}</div><span v-if="!(row.target_chat_ids ?? []).length">-</span></template></el-table-column>
+          <el-table-column label="已保存内容" min-width="220"><template #default="{ row }"><el-text :type="savedHasContent(row) ? undefined : 'warning'">{{ savedContentText(row) }}</el-text><small v-if="savedSpanText(row)" class="group-relay-age">{{ savedSpanText(row) }}</small></template></el-table-column>
+          <el-table-column label="管理" width="170" fixed="right"><template #default="{ row }"><el-button link type="primary" :disabled="row.saved != null && !savedHasContent(row)" @click="openBundleDialog(row)">导出资料包</el-button><el-button link type="danger" @click="deleteGroupRelayRoute(row)">删除</el-button></template></el-table-column>
+        </el-table>
+      </el-card>
     </template>
   </el-card>
   <el-dialog v-model="qrDialog" title="扫码登录 LarkAgentX" width="340" @closed="stopQrPolling">

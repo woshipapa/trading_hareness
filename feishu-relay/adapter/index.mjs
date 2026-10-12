@@ -12,7 +12,7 @@ import { endWritable, writeChunk } from './stream-write.mjs';
 import { singleFlight } from './single-flight.mjs';
 import { createGroupSync, describeGroups, historyProgress } from './group-sync.mjs';
 import { createGroupRelay, decryptLarkAgentXImage } from './group-relay.mjs';
-import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, historyFallback, historyRow, historySourceNote, mergeHistoryRows, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
+import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, historyFallback, historyRow, historySourceNote, mergeHistoryRows, resolveRouteChatIds, savedContentSummary, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
 import { createWeChatGroupRelay } from './wechat-group-relay.mjs';
 import { createSummaryListener } from './summary-listener.mjs';
 import { createFeishuUserOauth } from './feishu-user-oauth.mjs';
@@ -1678,6 +1678,10 @@ async function groupRelayDashboardStatus() {
 			last_resolved_error_at: resolvedError ? asIsoString(resolvedErrorAt) : null,
 		};
 	});
+	// A group the account has left is listed apart from the live ones, with what was kept of it.
+	const savedByKey = await savedContentForRoutes(routes, sources.filter((source) => source.archived || ['left', 'dissolved'].includes(source.membership)).map((source) => source.key))
+		.catch((error) => { console.warn(`已退群的保存内容统计失败：${error instanceof Error ? error.message : String(error)}`); return new Map(); });
+	for (const source of sources) source.saved = savedByKey.get(source.key) ?? null;
 	const listenerLastSuccessAt = asIsoString(listenerRuntime.last_success_at);
 	const listenerPollAgeSeconds = listenerLastSuccessAt ? Math.max(0, Math.floor((now - Date.parse(listenerLastSuccessAt)) / 1000)) : null;
 	const listenerState = !listenerRuntime.enabled ? 'disabled'
@@ -2012,6 +2016,40 @@ async function bundleContext(rows, { names = true } = {}) {
 	return { cardImages, senderNames };
 }
 
+// The numeric group ids of every route, as an export needs them.  An archived
+// route keeps the ids it had, so its group's saved content is still found.
+async function exportNumericIdsByRoute(routes) {
+	const numericIdsByKey = await numericChatIdsByRoute();
+	for (const item of routes) if (item.archivedAt && item.archivedChatIds.length) numericIdsByKey.set(item.key, [...new Set([...(numericIdsByKey.get(item.key) ?? []), ...item.archivedChatIds])]);
+	return numericIdsByKey;
+}
+
+async function routeExportChatIds(route, routes, numericIdsByKey) {
+	return resolveRouteChatIds({ route, routes, numericIdsByKey, seenUnderKey: await ledger.relayChatIdsBySourceKey(route.key) });
+}
+
+// What an export of each left group can still contain.  Nothing is added to a
+// group the account is no longer in, so the answer is kept for a few minutes
+// instead of being counted on every dashboard refresh.
+const SAVED_CONTENT_TTL_MS = 5 * 60_000;
+let savedContentCache = { key: '', at: 0, value: new Map() };
+async function savedContentForRoutes(routes, sourceKeys) {
+	const keys = [...new Set(sourceKeys)].sort();
+	if (!keys.length) return new Map();
+	const cacheKey = keys.join(',');
+	if (savedContentCache.key === cacheKey && Date.now() - savedContentCache.at < SAVED_CONTENT_TTL_MS) return savedContentCache.value;
+	const numericIdsByKey = await exportNumericIdsByRoute(routes);
+	const chatIdsByKey = new Map();
+	for (const key of keys) {
+		const route = routes.find((item) => item.key === key);
+		if (route) chatIdsByKey.set(key, await routeExportChatIds(route, routes, numericIdsByKey));
+	}
+	const byChat = await ledger.savedContentByChat([...chatIdsByKey.values()].flat());
+	const value = new Map([...chatIdsByKey].map(([key, chatIds]) => [key, { ...savedContentSummary(chatIds, byChat), chat_ids: chatIds }]));
+	savedContentCache = { key: cacheKey, at: Date.now(), value };
+	return value;
+}
+
 // The group's own history, read through the bridge by position.  This is what
 // makes an export complete: it includes what the relay never forwarded and
 // what was said before the relay listened to the group.
@@ -2060,10 +2098,7 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 		const routes = await ledger.relayRoutes();
 		route = routes.find((item) => item.key === sourceKey);
 		if (!route) { fail(404, '源群不存在'); return; }
-		const numericIdsByKey = await numericChatIdsByRoute();
-		// An archived route keeps the group ids it had, so its group's stored history is still found.
-		for (const item of routes) if (item.archivedAt && item.archivedChatIds.length) numericIdsByKey.set(item.key, [...new Set([...(numericIdsByKey.get(item.key) ?? []), ...item.archivedChatIds])]);
-		chatIds = resolveRouteChatIds({ route, routes, numericIdsByKey, seenUnderKey: await ledger.relayChatIdsBySourceKey(route.key) });
+		chatIds = await routeExportChatIds(route, routes, await exportNumericIdsByRoute(routes));
 		rows = await ledger.relayMessagesByChatIdsWindow(chatIds, range.fromMs, range.toMs, MAX_BUNDLE_MESSAGES + 1);
 	} catch (error) {
 		fail(503, `读取转发账本失败：${error instanceof Error ? error.message : String(error)}`);

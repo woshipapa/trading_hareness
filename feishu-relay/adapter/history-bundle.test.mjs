@@ -3,7 +3,7 @@ import test from 'node:test';
 import { crc32, inflateRawSync } from 'node:zlib';
 import {
 	beijingClock, beijingDate, bundleBaseName, bundleEntries, bundleEntry, bundleRange, cardNeedsImageLookup, createZipWriter, historyFallback, historyRow, historySourceNote, mergeHistoryRows, renderJsonl, renderTranscript, unnamedSendersByChat,
-	resolveRouteChatIds, sniffImageExtension, writeHistoryBundle,
+	resolveRouteChatIds, savedContentSummary, sniffImageExtension, writeHistoryBundle,
 } from './history-bundle.mjs';
 
 // Reads back what the writer produced, the way an unzip tool would: from the
@@ -351,4 +351,20 @@ test('the note says which history an export was built from', () => {
 	assert.equal(historySourceNote({ source: 'full', historyOnly: 101, total: 181 }), '来源：从飞书读取的群完整历史，并合并已转发记录（其中 101 条只存在于群历史，80 条来自转发账本）');
 	assert.match(historySourceNote({ source: 'full', origin: 'stored', reason: '账号已不在该群', historyOnly: 5, total: 9 }), /^来源：已保存的群历史（当前无法从飞书读取：账号已不在该群），并合并已转发记录（其中 5 条只存在于群历史，4 条来自转发账本）$/);
 	assert.match(historySourceNote({ source: 'full', origin: 'relayed_only', reason: '账号已不在该群' }), /仅已转发的消息（账号已不在该群，也没有保存过该群的历史/);
+});
+
+test('what is kept of a left group is summed over its chat ids, with the days it spans', () => {
+	const byChat = new Map([
+		['7671915466855582674', { history_messages: 568, relayed_messages: 143, first_at: Date.parse('2026-08-03T01:30:00Z'), last_at: Date.parse('2026-10-09T08:44:01Z') }],
+		['oc_60784cb4697263a648e08e3f26eb737a', { history_messages: 0, relayed_messages: 210, first_at: Date.parse('2026-07-20T02:00:00Z'), last_at: Date.parse('2026-09-13T16:00:00Z') }],
+		['7000000000000000001', { history_messages: 9, relayed_messages: 9, first_at: 1, last_at: 2 }],
+	]);
+	assert.deepEqual(savedContentSummary(['7671915466855582674', 'oc_60784cb4697263a648e08e3f26eb737a'], byChat), {
+		history_messages: 568, relayed_messages: 353, first_message_at: '2026-07-20T02:00:00.000Z', last_message_at: '2026-10-09T08:44:01.000Z',
+	});
+});
+
+test('a left group nothing was kept of reports zero and no dates', () => {
+	const byChat = new Map([['7694956403840011216', { history_messages: 0, relayed_messages: 0, first_at: null, last_at: null }]]);
+	assert.deepEqual(savedContentSummary(['7694956403840011216', 'never-seen'], byChat), { history_messages: 0, relayed_messages: 0, first_message_at: null, last_message_at: null });
 });

@@ -382,6 +382,33 @@ export function createLedger(connectionString) {
 			[ids, from, to, Math.max(1, Math.min(50001, Number(limit) || 20000))]);
 			return rows.map((row) => ({ ...row, source_create_time: Number(row.source_create_time), from_history: true }));
 		},
+		// What is kept of some groups: the stored history copy and the relayed
+		// messages, each as a count and the time span it covers.
+		async savedContentByChat(chatIds) {
+			const ids = [...new Set((chatIds ?? []).map((value) => String(value ?? '').trim()).filter(Boolean))];
+			const byChat = new Map(ids.map((id) => [id, { history_messages: 0, relayed_messages: 0, first_at: null, last_at: null }]));
+			if (!ids.length) return byChat;
+			const [history, relayed] = await Promise.all([
+				pool.query(`SELECT source_chat_id, count(*)::int AS n, min(source_create_time)::bigint AS first_at, max(source_create_time)::bigint AS last_at
+					FROM feishu_group_history_messages WHERE source_chat_id = ANY($1::text[]) GROUP BY source_chat_id`, [ids]),
+				pool.query(`SELECT source_chat_id, count(*)::int AS n, min(source_create_time)::bigint AS first_at, max(source_create_time)::bigint AS last_at
+					FROM feishu_group_relay_messages WHERE source_chat_id = ANY($1::text[]) AND status='sent' GROUP BY source_chat_id`, [ids]),
+			]);
+			const add = (rows, field) => {
+				for (const row of rows) {
+					const item = byChat.get(String(row.source_chat_id));
+					if (!item) continue;
+					item[field] = Number(row.n);
+					const first = Number(row.first_at);
+					const last = Number(row.last_at);
+					if (Number.isFinite(first) && first > 0) item.first_at = item.first_at === null ? first : Math.min(item.first_at, first);
+					if (Number.isFinite(last) && last > 0) item.last_at = item.last_at === null ? last : Math.max(item.last_at, last);
+				}
+			};
+			add(history.rows, 'history_messages');
+			add(relayed.rows, 'relayed_messages');
+			return byChat;
+		},
 		async saveRelaySourceCursor({ sourceKey, chatId, cursorCreateTime }) {
 			await pool.query(`INSERT INTO feishu_group_relay_sources(source_key,chat_id,cursor_create_time) VALUES($1,$2,$3)
 				ON CONFLICT(source_key) DO UPDATE SET chat_id=EXCLUDED.chat_id,cursor_create_time=GREATEST(feishu_group_relay_sources.cursor_create_time,EXCLUDED.cursor_create_time),updated_at=now()`, [sourceKey, chatId, cursorCreateTime]);

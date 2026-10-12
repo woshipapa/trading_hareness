@@ -472,6 +472,26 @@ export function historyFallback({ gone, storedCount, relayedCount }) {
 	return 'fail';
 }
 
+/** What is kept of a route's group, summed over its chat ids: how much the
+ * stored history copy and the relay ledger hold, and the days they span.  This
+ * is what an export of a group the account has left can still contain. */
+export function savedContentSummary(chatIds, byChat) {
+	const summary = { history_messages: 0, relayed_messages: 0, first_message_at: null, last_message_at: null };
+	let first = null;
+	let last = null;
+	for (const chatId of chatIds ?? []) {
+		const item = byChat?.get(String(chatId));
+		if (!item) continue;
+		summary.history_messages += Number(item.history_messages) || 0;
+		summary.relayed_messages += Number(item.relayed_messages) || 0;
+		if (item.first_at !== null && item.first_at !== undefined) first = first === null ? Number(item.first_at) : Math.min(first, Number(item.first_at));
+		if (item.last_at !== null && item.last_at !== undefined) last = last === null ? Number(item.last_at) : Math.max(last, Number(item.last_at));
+	}
+	if (first !== null) summary.first_message_at = new Date(first).toISOString();
+	if (last !== null) summary.last_message_at = new Date(last).toISOString();
+	return summary;
+}
+
 export function historySourceNote({ source, origin = 'live', reason = '', historyOnly = 0, total = 0 }) {
 	if (source !== 'full') return '来源：仅已转发的消息（未转发的和监听之前的消息不在内）';
 	if (origin === 'relayed_only') return `来源：仅已转发的消息（${reason || '群历史读不到'}，也没有保存过该群的历史，所以未转发的消息不在内）`;
