@@ -10,7 +10,7 @@ ENV NODE_ENV=production FRONTEND_MODE=spa FRONTEND_DIST=/app/frontend-dist
 COPY feishu-relay/adapter/package.json ./
 RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund
 
-COPY feishu-relay/adapter/index.mjs feishu-relay/adapter/ledger.mjs feishu-relay/adapter/group-relay.mjs feishu-relay/adapter/history-bundle.mjs \
+COPY feishu-relay/adapter/index.mjs feishu-relay/adapter/ledger.mjs feishu-relay/adapter/group-relay.mjs feishu-relay/adapter/history-bundle.mjs feishu-relay/adapter/group-sync.mjs \
      feishu-relay/adapter/wechat-group-relay.mjs \
      feishu-relay/adapter/summary-listener.mjs feishu-relay/adapter/message-filter.mjs \
      feishu-relay/adapter/content-filter.mjs feishu-relay/adapter/card-content.mjs \

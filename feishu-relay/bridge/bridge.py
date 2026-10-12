@@ -44,6 +44,7 @@ from group_lookup import GroupLookupError, unique_group_id
 from rich_text_render import render_rich_text
 from export_support import NameCache, card_images_by_message
 from history_range import HistoryRangeError, PAGE_SIZE, locate_positions
+from chat_directory import FEED_PAGE_SIZE, membership_report, pull_joined_groups
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
@@ -374,6 +375,24 @@ class RecoveringLarkClient(LarkClient):
 	def _pull_raw(self, chat_id: str, positions: list[int]) -> dict[str, Any]:
 		response = self.api("messages.PullMessagesByPositionsRequest", {"chatId": str(chat_id), "positions": [int(p) for p in positions]})
 		return (response or {}).get("messages") or {}
+
+	def feed_page(self, feed: str, cursor: int | None) -> dict[str, Any]:
+		"""One page of the account's conversation list ("INBOX" or "DONE")."""
+		data: dict[str, Any] = {"type": feed, "pullType": "REFRESH" if cursor is None else "LOAD_MORE", "count": FEED_PAGE_SIZE}
+		if cursor is not None:
+			data["cursor"] = int(cursor)
+		return self.api("feed.PullFeedCardsRequest", data) or {}
+
+	def chat_roles(self, chat_ids: list[str]) -> dict[str, Any]:
+		return (self.api("chats.PullChatsRoleRequest", {"chatIds": [str(chat_id) for chat_id in chat_ids]}) or {}).get("roles") or {}
+
+	def chat_infos(self, chat_ids: list[str]) -> dict[str, dict[str, Any]]:
+		chats = (self.api("chats.PullChatsByIdsRequest", {"chatIds": [str(chat_id) for chat_id in chat_ids]}) or {}).get("chats") or {}
+		return {str(chat.get("id") or key): chat for key, chat in chats.items()}
+
+	def in_chat(self, chat_id: str, user_id: str) -> bool:
+		response = self.api("chats.CheckChattersInChatRequest", {"chatId": str(chat_id), "chatterIds": [str(user_id)]}) or {}
+		return bool((response.get("chatters") or {}).get(str(user_id)))
 
 	def history_times(self, chat_id: str, start: int, end: int) -> list[tuple[int, float]]:
 		"""(position, create_time) of the messages that exist in a position range, without decoding them."""
@@ -819,6 +838,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
 			if self.path == "/history/page":
 				self.send_json(200, self.bridge.history_page(payload))
 				return
+			if self.path == "/chats/joined":
+				self.send_json(200, self.bridge.joined_groups(payload))
+				return
+			if self.path == "/chats/membership":
+				self.send_json(200, self.bridge.chat_membership(payload))
+				return
 			if self.path == "/users/names":
 				self.send_json(200, self.bridge.user_names(payload))
 				return
@@ -1203,7 +1228,12 @@ class Bridge:
 			raise ValueError("chat_name 必须是 1–120 字")
 		if self.client is None:
 			raise RuntimeError("尚未登录(needs_login),无法解析群;请先完成扫码登录")
-		chat_id = unique_group_id(self.client.search(chat_name), chat_name)
+		# A group picked from the joined list arrives with its id; a typed name
+		# is searched.  Either way the name is verified against the id below.
+		requested_chat_id = str(payload.get("chat_id", "")).strip()
+		if requested_chat_id and not requested_chat_id.isdigit():
+			raise ValueError("chat_id 必须是数字 WebSocket 群 ID")
+		chat_id = requested_chat_id or unique_group_id(self.client.search(chat_name), chat_name)
 		info = self.client.get_chat_info(chat_id) or {}
 		verified_name = str(info.get("name") or "").strip()
 		if verified_name != chat_name:
@@ -1221,6 +1251,47 @@ class Bridge:
 		self.chat_validation[chat_id] = {"state": "verified", "name": verified_name, "checked_at": datetime.now(timezone.utc).isoformat(), "error": None}
 		LOG.info("手动绑定 LarkAgentX 源群 chat_id=%s name=%s source_key=%s", chat_id, verified_name, source_key)
 		return {"status": "bound", "source_key": source_key, "chat_id": chat_id, "chat_name": verified_name, "replaced_chat_id": previous if previous and previous != chat_id else None}
+
+	def _bound_chats(self) -> dict[str, dict[str, str]]:
+		"""Every chat a route is bound to, by numeric id: the env-declared ones and the saved bindings."""
+		bound: dict[str, dict[str, str]] = {}
+		validation = getattr(self, "chat_validation", {})
+		for chat_id, source_key in getattr(self, "static_source_keys_by_chat", {}).items():
+			if str(chat_id).isdigit() and source_key:
+				bound[str(chat_id)] = {"source_key": str(source_key), "chat_name": str((validation.get(chat_id) or {}).get("name") or "")}
+		for chat_id, route in getattr(self, "dynamic_routes", {}).items():
+			if str(chat_id).isdigit() and route.get("source_key"):
+				bound[str(chat_id)] = {"source_key": str(route.get("source_key")), "chat_name": str(route.get("chat_name") or "")}
+		return bound
+
+	def joined_groups(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""The groups the account is in, each with the route it is bound to, if any (read-only)."""
+		if self.client is None:
+			raise RuntimeError("尚未登录(needs_login),无法读取群列表")
+		cached = getattr(self, "_joined_groups_cache", None)
+		if payload.get("refresh") or cached is None or time.monotonic() - cached[0] > 60:
+			cached = (time.monotonic(), pull_joined_groups(self.client.feed_page))
+			self._joined_groups_cache = cached
+		bound = self._bound_chats()
+		groups = [{**group, "source_key": (bound.get(group["chat_id"]) or {}).get("source_key"), "listening": group["chat_id"] in self.websocket_chat_ids} for group in cached[1]]
+		return {"status": "ok", "groups": groups, "bound": [{"chat_id": chat_id, **route} for chat_id, route in sorted(bound.items())]}
+
+	def chat_membership(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""Whether the account is still in each given chat, with its position range (read-only)."""
+		chat_ids = payload.get("chat_ids")
+		if not isinstance(chat_ids, list) or len(chat_ids) > 100 or any(not str(chat_id).isdigit() for chat_id in chat_ids):
+			raise ValueError("chat_ids 必须是至多 100 个数字 WebSocket 群 ID")
+		if self.client is None:
+			raise RuntimeError("尚未登录(needs_login),无法核对群成员身份")
+		chat_ids = sorted({str(chat_id) for chat_id in chat_ids})
+		if not chat_ids:
+			return {"status": "ok", "chats": {}}
+		user_id = str(self.auth.user_id)
+		report = membership_report(
+			chat_ids, roles=self.client.chat_roles(chat_ids), infos=self.client.chat_infos(chat_ids),
+			confirm_in_chat=lambda chat_id: self.client.in_chat(chat_id, user_id),
+		)
+		return {"status": "ok", "chats": report}
 
 	def _history_chat(self, payload: dict[str, Any]) -> str:
 		chat_id = str(payload.get("chat_id", "")).strip()

@@ -5,6 +5,8 @@ import { deleteJson, getJson, postJson, putJson } from './http';
 export type GroupRelayRouteInput = {
   chat_name: string;
   chat_id?: string;
+  /** Numeric id of a group picked from the joined list; the route is bound to it without a name search. */
+  websocket_chat_id?: string;
   tag: string;
   target_chat_ids?: string[];
   target_chat_names?: string[];
@@ -12,6 +14,23 @@ export type GroupRelayRouteInput = {
 };
 
 export type ExportFormat = 'transcript' | 'ndjson';
+
+/** How much of a bound group's own history is stored locally. */
+export type GroupHistoryProgress = {
+  status: 'idle' | 'running' | 'complete' | 'failed';
+  synced_position: number | null; last_position: number | null; messages: number; percent: number | null; error: string | null; synced_at: string | null;
+};
+export type GroupMembership = 'member' | 'left' | 'dissolved';
+/** One group the account is in, or a bound one it has left. */
+export type JoinedGroup = {
+  chat_id: string; name: string; member_count: number | null; in_directory: boolean;
+  source_key: string | null; route_tag: string | null; membership: GroupMembership; left_at: string | null;
+  is_new: boolean; first_seen_at: string | null; history: GroupHistoryProgress | null;
+};
+export type JoinedGroupsResponse = {
+  observed_at: string; live: boolean; error: string | null; groups: JoinedGroup[];
+  sync: { last_tick_at: string | null; last_directory_at: string | null; last_error: string | null; joined_groups: number; bound_chats: number };
+};
 
 export type ExportBookmark = {
   chat_id: string;
@@ -111,6 +130,7 @@ export const groupRelayApi = {
   // go through fetch; the download itself is a plain navigation to bundleUrl.
   bundlePreview: (key: string, from: string, to: string, source: BundleSource = 'full') => getJson<BundlePreview>(`${bundlePath(key, from, to, source)}&dry_run=1`),
   bundleUrl: bundlePath,
+  chats: (refresh = false) => getJson<JoinedGroupsResponse>(`/api/group-relay/chats${refresh ? '?refresh=1' : ''}`),
   bindRoute: <T>(key: string) => postJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}/bind`, {}),
   removeRoute: <T>(key: string) => deleteJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}`),
 };

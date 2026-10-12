@@ -10,6 +10,7 @@ import { createLedger } from './ledger.mjs';
 import { releaseMetadata } from './release-metadata.mjs';
 import { endWritable, writeChunk } from './stream-write.mjs';
 import { singleFlight } from './single-flight.mjs';
+import { createGroupSync, describeGroups, historyProgress } from './group-sync.mjs';
 import { createGroupRelay, decryptLarkAgentXImage } from './group-relay.mjs';
 import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, historyRow, mergeHistoryRows, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
 import { createWeChatGroupRelay } from './wechat-group-relay.mjs';
@@ -355,6 +356,26 @@ const summaryListener = createSummaryListener({
 });
 setInterval(() => { void groupRelay.tick(); }, groupRelayIntervalSeconds * 1000).unref();
 void groupRelay.tick();
+// Keeps the joined-group directory, each bound group's membership and a stored
+// copy of its history current.  Read-only towards Feishu; a few gateway pages
+// per pass, so a newly bound group is read in the background, not in a burst.
+const historyRowFromBridge = (payload) => historyRow(payload, { normalize: normalizeLarkAgentXRelayMessage, describeUnsupported: normalizeLarkAgentXUnsupportedMessage, isDegradedCard: larkAgentXCardIsDegraded });
+const groupSync = createGroupSync({
+	ledger, toRow: historyRowFromBridge, log: (line) => console.log(line),
+	bridge: {
+		joined: () => bridgePostJson('/chats/joined', { refresh: true }, 60_000),
+		membership: (chatIds) => bridgePostJson('/chats/membership', { chat_ids: chatIds }, 60_000),
+		page: (chatId, start, end) => bridgePostJson('/history/page', { chat_id: chatId, start, end }, 60_000),
+	},
+});
+async function runGroupSync() {
+	if (!larkAgentXIngressToken) return;
+	// One writer keeps the stored state; a second adapter on the same database only reads it.
+	if (relayWriterFence && !(await relayWriterFence().catch(() => ({ allowed: false }))).allowed) return;
+	await groupSync.tick();
+}
+setInterval(() => { void runGroupSync(); }, 30_000).unref();
+setTimeout(() => { void runGroupSync(); }, 15_000).unref();
 if (baiduPanMarketArchive.enabled) {
 	setInterval(() => { void baiduPanMarketArchive.poll(); }, baiduPanMarketArchive.intervalMs).unref();
 	void baiduPanMarketArchive.poll();
@@ -1503,6 +1524,7 @@ async function groupRelayDashboardStatus() {
 	const [persistedSources, routes, oauth, ingestionSources, writer, delivery, larkagentx, itougu] = await Promise.all([ledger.relayStatus(), ledger.relayRoutes(), feishuUserOauth.status(), ledger.ingestionStatusBySource(), ledger.relayWriterStatus(), ledger.observability(), larkAgentXDashboardStatus(), itouguDashboardStatus()]);
 	const runtime = groupRelay.status();
 	const listenerRuntime = summaryListener.status();
+	const chatStateById = new Map((await ledger.groupChatStates().catch(() => [])).map((state) => [String(state.chat_id), state]));
 	const persistedByKey = new Map(persistedSources.map((source) => [source.source_key, source]));
 	const runtimeByKey = new Map(runtime.sources.map((source) => [source.key, source]));
 	const ingestionByTag = new Map(ingestionSources.map((source) => [source.source_tag, source]));
@@ -1563,8 +1585,13 @@ async function groupRelayDashboardStatus() {
 			? persisted?.latest_failure_error ?? ingestionRecord?.latest_failure_error ?? null : null;
 		const resolvedErrorAt = persisted?.latest_failure_at ?? ingestionRecord?.latest_failure_at ?? null;
 		const transport = websocketChatIds.length ? 'larkagentx_websocket' : groupRelayConfig.enabled ? 'oauth_poll' : larkAgentXDynamicRouteDiscoveryEnabled ? 'pending_websocket_discovery' : 'disabled';
+		// What the membership check and the history reader know about this route's group.
+		const chatStates = websocketChatIds.map((chatId) => chatStateById.get(chatId)).filter(Boolean);
+		const goneState = chatStates.length && chatStates.every((item) => item.membership !== 'member') ? chatStates[0] : null;
+		const historyState = chatStates.find((item) => item.membership === 'member') ?? chatStates[0] ?? null;
 		let state = 'healthy';
 		if (source.enabled === false || transport === 'disabled') state = 'disabled';
+		else if (goneState) state = goneState.membership;
 		else if (transport === 'pending_websocket_discovery') state = 'starting';
 		else if (transport === 'larkagentx_websocket') {
 			if (larkagentx.status !== 'healthy' || larkagentx.websocket?.state !== 'connected') state = 'unavailable';
@@ -1578,6 +1605,8 @@ async function groupRelayDashboardStatus() {
 		else if (failedCount > 0 || ingestionFailed) state = 'degraded';
 		return {
 			key: source.key, tag: source.tag, chat_name: source.chatName, source_chat_id: source.chatId ?? null, target_chat_ids: source.targetChatIds ?? [], enabled: source.enabled !== false,
+			membership: goneState ? goneState.membership : chatStates.length ? 'member' : null, left_at: asIsoString(goneState?.left_at),
+			membership_checked_at: asIsoString(historyState?.checked_at), history: historyState ? historyProgress(historyState) : null,
 			transport, websocket_chat_ids: websocketChatIds, websocket_observed_count: websocketObservedCount, websocket_forwarded_count: websocketForwardedCount,
 			websocket_failed_count: websocketFailedCount, websocket_last_observed_at: websocketLastObservedAt, websocket_last_forwarded_at: websocketLastForwardedAt,
 			state, last_polled_at: lastPolledAt, poll_age_seconds: pollAgeSeconds,
@@ -1611,7 +1640,7 @@ async function groupRelayDashboardStatus() {
 		: 'healthy';
 	const activeSources = sources.filter((source) => source.enabled && source.transport !== 'disabled');
 	const overall = activeSources.length > 0 && activeSources.every((source) => source.state === 'healthy') ? 'healthy'
-		: sources.some((source) => ['error', 'unavailable', 'delayed', 'degraded', 'not_configured', 'not_authorized'].includes(source.state)) ? 'degraded'
+		: sources.some((source) => ['error', 'unavailable', 'delayed', 'degraded', 'not_configured', 'not_authorized', 'left', 'dissolved'].includes(source.state)) ? 'degraded'
 		: 'starting';
 	const realtimeSummaryHealthy = larkagentx.status === 'healthy' && larkagentx.websocket?.state === 'connected' && larkagentx.summary_ingress_configured;
 	const itouguHealthy = itougu.status === 'healthy';
@@ -1997,8 +2026,12 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	// transports ran; one export should hold each once, whichever source it is.
 	rows = mergeHistoryRows(rows, []).rows;
 	const relayedCount = rows.length;
+	let historyOrigin = 'live';
 	if (source === 'full') {
 		try {
+			// A group the account has left cannot be read any more; its stored copy can.
+			const states = (await ledger.groupChatStates().catch(() => [])).filter((state) => chatIds.includes(String(state.chat_id)));
+			if (states.length && states.every((state) => state.membership !== 'member')) throw new Error('账号已不在该群');
 			const located = await locateGroupHistory(chatIds, range);
 			historyPositions = located.reduce((total, item) => total + item.count, 0);
 			// The preview only needs the size of the range; reading every page is for the real export.
@@ -2009,9 +2042,16 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 				if (rows.length > MAX_BUNDLE_MESSAGES) { fail(400, `该时间范围内消息超过 ${MAX_BUNDLE_MESSAGES} 条，请缩小范围后分段导出`); return; }
 			}
 		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			const stored = await ledger.groupHistoryRows(chatIds, range.fromMs, range.toMs, MAX_BUNDLE_MESSAGES + 1).catch(() => []);
 			// Fail rather than quietly export less than was asked for.
-			fail(502, `读取群历史失败：${error instanceof Error ? error.message : String(error)}。可以改选“仅已转发”导出。`);
-			return;
+			if (!stored.length) { fail(502, `读取群历史失败：${reason}，也没有已保存的群历史。可以改选“仅已转发”导出。`); return; }
+			historyOrigin = `stored:${reason}`;
+			historyPositions = stored.length;
+			const merged = mergeHistoryRows(rows, stored);
+			rows = merged.rows;
+			historyOnly = merged.from_history_only;
+			if (rows.length > MAX_BUNDLE_MESSAGES) { fail(400, `该时间范围内消息超过 ${MAX_BUNDLE_MESSAGES} 条，请缩小范围后分段导出`); return; }
 		}
 	}
 	// The preview needs the picture count but not the names (one gateway call
@@ -2023,7 +2063,7 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({
 			chat_name: route.chatName, from: range.from, to: range.to, filename: `${base}.zip`, chat_ids: chatIds,
-			source, relayed_messages: relayedCount, history_positions: historyPositions,
+			source, relayed_messages: relayedCount, history_positions: historyPositions, history_origin: historyOrigin.startsWith('stored') ? 'stored' : 'live',
 			messages: entries.length, images: entries.reduce((total, entry) => total + entryImageCount(entry), 0),
 			first_message_at: entries.length ? new Date(entries[0].time_ms).toISOString() : null,
 			last_message_at: entries.length ? new Date(entries.at(-1).time_ms).toISOString() : null,
@@ -2042,7 +2082,7 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 			title: route.chatName, from: range.from, to: range.to, rows, fetchImage: fetchBundleImage,
 			cardImages: context.cardImages, senderNames: context.senderNames,
 			note: source === 'full'
-				? `来源：从飞书读取的群完整历史，并合并已转发记录（其中 ${historyOnly} 条只存在于群历史，${rows.length - historyOnly} 条来自转发账本）`
+				? `来源：${historyOrigin.startsWith('stored') ? `已保存的群历史（当前无法从飞书读取：${historyOrigin.slice(7)}）` : '从飞书读取的群完整历史'}，并合并已转发记录（其中 ${historyOnly} 条只存在于群历史，${rows.length - historyOnly} 条来自转发账本）`
 				: '来源：仅已转发的消息（未转发的和监听之前的消息不在内）',
 			write: (chunk) => writeChunk(response, chunk),
 		});
@@ -2155,6 +2195,10 @@ async function resolveRelayRouteInput(payload, current = null) {
 	const allowPending = payload?.allow_pending === true;
 	const requestedChatId = String(payload?.chat_id ?? '').trim();
 	if (requestedChatId && !/^oc_[A-Za-z0-9]+$/.test(requestedChatId)) throw new Error('chat_id 格式无效');
+	// A group picked from the joined list comes with its WebSocket id.  That id
+	// is all the relay needs to listen, so nothing is looked up through OAuth.
+	const websocketChatId = String(payload?.websocket_chat_id ?? '').trim();
+	if (websocketChatId && !/^\d{6,24}$/.test(websocketChatId)) throw new Error('websocket_chat_id 必须是数字群 ID');
 	const rawTargets = payload?.target_chat_ids === undefined ? current?.targetChatIds ?? [] : payload.target_chat_ids;
 	if (!Array.isArray(rawTargets) || rawTargets.length > 8) throw new Error('目标群必须是至多 8 个 chat_id 的数组');
 	const targetChatIds = [...new Set(rawTargets.map((value) => String(value ?? '').trim()).filter(Boolean))];
@@ -2188,6 +2232,7 @@ async function resolveRelayRouteInput(payload, current = null) {
 	const uniqueTargetChatIds = [...new Set(targetChatIds)];
 	if (uniqueTargetChatIds.length > 8) throw new Error('目标群总数不能超过 8 个');
 	if (current && chatName === current.chatName && !requestedChatId) return { chatId: current.chatId, chatName, tag, targetChatIds: uniqueTargetChatIds, enabled };
+	if (websocketChatId) return { chatId: requestedChatId, chatName, tag, targetChatIds: uniqueTargetChatIds, enabled };
 	// A known chat ID is authoritative. Do not require source group search first:
 	// user OAuth can read a particular external chat while search/list visibility
 	// is administratively restricted.
@@ -2223,13 +2268,37 @@ async function resolveRelayRouteInput(payload, current = null) {
 
 async function createRelayRoute(payload) {
 	const route = await resolveRelayRouteInput(payload);
+	await refuseGroupBoundElsewhere(payload?.websocket_chat_id, null);
 	return ledger.createRelayRoute({ sourceKey: `relay_${randomUUID().replaceAll('-', '')}`, ...route });
+}
+
+// One group feeds one route.  Checked before the route is saved, so a refusal
+// does not leave a route behind that can never be bound.
+async function refuseGroupBoundElsewhere(websocketChatId, ownKey) {
+	const chatId = String(websocketChatId ?? '').trim();
+	if (!chatId) return;
+	const joined = await bridgePostJson('/chats/joined', {}, 60_000).catch(() => null);
+	const holder = (joined?.bound ?? []).find((item) => String(item.chat_id) === chatId && item.source_key !== ownKey);
+	if (!holder) return;
+	const route = (await ledger.relayRoutes()).find((item) => item.key === holder.source_key);
+	throw new Error(`该群已经绑定到路由 #${route?.tag ?? holder.source_key}（${route?.chatName ?? holder.chat_name ?? ''}），不能重复绑定`);
+}
+
+// Bind a saved route and have the directory re-read at once, so its
+// membership row exists and its history starts being read without a wait.
+async function bindRelayRoute(route, payload = null) {
+	const binding = await routeBinder.bind(route, { websocketChatId: String(payload?.websocket_chat_id ?? '').trim() });
+	groupSync.requestRefresh();
+	void runGroupSync();
+	return binding;
 }
 
 async function updateRelayRoute(sourceKey, payload) {
 	const current = (await ledger.relayRoutes()).find((route) => route.key === sourceKey);
 	if (!current) return null;
-	return ledger.updateRelayRoute(sourceKey, await resolveRelayRouteInput(payload, current));
+	const route = await resolveRelayRouteInput(payload, current);
+	await refuseGroupBoundElsewhere(payload?.websocket_chat_id, sourceKey);
+	return ledger.updateRelayRoute(sourceKey, route);
 }
 
 
@@ -2381,6 +2450,27 @@ const dashboard = createServer((request, response) => {
 		});
 		return;
 	}
+	if (url.pathname === '/api/group-relay/chats' && request.method === 'GET') {
+		// The groups the account is in, for picking a source group, with what is
+		// already bound.  When the bridge cannot be read the stored state is still
+		// returned, with the reason, so the page shows what it last knew.
+		void (async () => {
+			let live = null;
+			let error = null;
+			try { live = await bridgePostJson('/chats/joined', { refresh: url.searchParams.get('refresh') === '1' }, 60_000); }
+			catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
+			if (live?.groups) await ledger.recordJoinedGroups(live.groups).catch(() => {});
+			const [states, routes] = await Promise.all([ledger.groupChatStates(), ledger.relayRoutes()]);
+			const directory = live ?? groupSync.directory();
+			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({
+				observed_at: new Date().toISOString(), live: Boolean(live), error,
+				groups: describeGroups({ groups: directory.groups ?? [], bound: directory.bound ?? [], states, routes }),
+				sync: groupSync.status(),
+			}));
+		})().catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
+		return;
+	}
 	if (url.pathname === '/api/group-relay/routes' && request.method === 'GET') {
 		void ledger.relayRoutes().then((routes) => {
 			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -2389,8 +2479,9 @@ const dashboard = createServer((request, response) => {
 		return;
 	}
 	if (url.pathname === '/api/group-relay/routes' && request.method === 'POST') {
-		void readJsonBody(request, 16 * 1024).then(createRelayRoute).then(async (route) => {
-			const websocketBinding = await routeBinder.bind(route);
+		void readJsonBody(request, 16 * 1024).then(async (payload) => {
+			const route = await createRelayRoute(payload);
+			const websocketBinding = await bindRelayRoute(route, payload);
 			response.writeHead(201, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ route: publicRelayRoute(route), websocket_binding: websocketBinding }));
 		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
@@ -2398,9 +2489,10 @@ const dashboard = createServer((request, response) => {
 	}
 	const relayRouteMatch = /^\/api\/group-relay\/routes\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
 	if (relayRouteMatch && request.method === 'PUT') {
-		void readJsonBody(request, 16 * 1024).then((payload) => updateRelayRoute(relayRouteMatch[1], payload)).then((route) => {
+		void readJsonBody(request, 16 * 1024).then(async (payload) => {
+			const route = await updateRelayRoute(relayRouteMatch[1], payload);
 			if (!route) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '源群不存在' })); return; }
-			return routeBinder.bind(route).then((websocketBinding) => {
+			return bindRelayRoute(route, payload).then((websocketBinding) => {
 				response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 				response.end(JSON.stringify({ route: publicRelayRoute(route), websocket_binding: websocketBinding }));
 			});
@@ -2419,7 +2511,7 @@ const dashboard = createServer((request, response) => {
 		void ledger.relayRoutes().then(async (routes) => {
 			const route = routes.find((item) => item.key === relayRouteBindMatch[1]);
 			if (!route) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '源群不存在' })); return; }
-			const websocketBinding = await routeBinder.bind(route);
+			const websocketBinding = await bindRelayRoute(route);
 			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ route: publicRelayRoute(route), websocket_binding: websocketBinding }));
 		}).catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
@@ -2429,6 +2521,7 @@ const dashboard = createServer((request, response) => {
 		void ledger.deleteRelayRoute(relayRouteMatch[1]).then(async (deleted) => {
 			if (!deleted) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '源群不存在' })); return; }
 			await routeBinder.unbind(relayRouteMatch[1]);
+			groupSync.requestRefresh();
 			response.writeHead(204, { 'cache-control': 'no-store' }).end();
 		}).catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
 		return;

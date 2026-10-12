@@ -34,12 +34,24 @@ const dashboard = useFeishuDashboardWorkspace();
 
   <el-dialog v-model="dashboard.groupRelayRouteDialog" :title="dashboard.groupRelayRouteForm.key ? '编辑源群' : '新增源群'" width="520px" destroy-on-close>
     <el-form label-position="top" @submit.prevent="dashboard.saveGroupRelayRoute">
-      <el-alert title="保存时会用用户读取权限按群名解析 chat_id，并立即解析 WebSocket 数字 ID、保存映射；群名重复或不在本账号群列表时会提示，首条消息到达时仍会自动绑定。" type="info" :closable="false" show-icon class="section-gap" />
-      <el-form-item label="源群名称" required><el-input v-model="dashboard.groupRelayRouteForm.chat_name" maxlength="120" placeholder="例如：新野人哥会员群【禁言】" /></el-form-item>
+      <el-alert title="从本账号已加入的群里选源群，保存后立即开始监听，并在后台读取该群的全部历史。" type="info" :closable="false" show-icon class="section-gap" />
+      <el-alert v-if="dashboard.joinedGroupsError" :title="`群列表暂时读不到：${dashboard.joinedGroupsError}。仍可直接输入群名保存。`" type="warning" :closable="false" show-icon class="section-gap" />
+      <el-form-item label="源群" required>
+        <el-select :model-value="dashboard.groupRelayRouteForm.websocket_chat_id || dashboard.groupRelayRouteForm.chat_name" filterable allow-create default-first-option :loading="dashboard.joinedGroupsLoading" placeholder="选择已加入的群，或输入群名" style="width: 100%" @change="dashboard.pickRouteGroup">
+          <el-option v-for="group in dashboard.pickableGroups" :key="group.chat_id" :value="group.chat_id" :label="dashboard.groupOptionLabel(group)" :disabled="Boolean(group.source_key) && group.source_key !== dashboard.groupRelayRouteForm.key" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="转发标签" required><el-input v-model="dashboard.groupRelayRouteForm.tag" maxlength="32" placeholder="例如：quanneng"><template #prepend>#</template></el-input></el-form-item>
-      <el-form-item label="群 chat_id（可选）"><el-input v-model="dashboard.groupRelayRouteForm.chat_id" placeholder="oc_xxx" /></el-form-item>
-      <el-form-item label="额外转发目标群名"><el-input v-model="dashboard.groupRelayRouteForm.target_chat_names_text" placeholder="例如：anqiang分享群1, 复盘群" /></el-form-item>
-      <el-form-item label="已知目标群 chat_id"><el-input v-model="dashboard.groupRelayRouteForm.target_chat_ids_text" placeholder="oc_xxx, oc_yyy" /></el-form-item>
+      <el-form-item label="转发到的目标群">
+        <el-select v-model="dashboard.groupRelayRouteForm.target_chat_ids" multiple filterable allow-create default-first-option placeholder="选择目标群（可多选）" style="width: 100%">
+          <el-option v-for="target in dashboard.relayTargetOptions" :key="target.value" :value="target.value" :label="target.label" />
+        </el-select>
+        <el-text size="small" type="info">列表里是已配置好 webhook 的目标群；新增一个目标群需要先在服务器上配置它的 webhook。</el-text>
+      </el-form-item>
+      <el-collapse class="section-gap"><el-collapse-item title="高级（一般不用填）">
+        <el-form-item label="源群官方 chat_id（仅 OAuth 补读用）"><el-input v-model="dashboard.groupRelayRouteForm.chat_id" placeholder="oc_xxx" /></el-form-item>
+        <el-form-item label="按群名追加目标群（走 OAuth 解析）"><el-input v-model="dashboard.groupRelayRouteForm.target_chat_names_text" placeholder="例如：anqiang分享群1, 复盘群" /></el-form-item>
+      </el-collapse-item></el-collapse>
       <el-form-item label="状态"><el-switch v-model="dashboard.groupRelayRouteForm.enabled" active-text="启用监听" inactive-text="停用监听" /></el-form-item>
     </el-form>
     <template #footer><el-button @click="dashboard.groupRelayRouteDialog = false">取消</el-button><el-button type="primary" :loading="dashboard.groupRelayRouteSaving" @click="dashboard.saveGroupRelayRoute">保存</el-button></template>

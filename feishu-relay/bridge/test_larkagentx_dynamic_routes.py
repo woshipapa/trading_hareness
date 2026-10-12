@@ -167,6 +167,22 @@ class LarkAgentXDynamicRouteTests(unittest.TestCase):
 			reloaded.route_bindings_path = instance.route_bindings_path
 			self.assertEqual(reloaded._load_route_bindings()["relay_x"]["chat_id"], "9000000000000000010")
 
+	def test_bind_route_takes_a_group_picked_by_id_and_still_verifies_its_name(self):
+		from group_lookup import GroupLookupError
+		with tempfile.TemporaryDirectory() as directory:
+			# two groups share the name: a typed name is refused, a picked id is not
+			instance = self._binding_instance(
+				directory,
+				search=[{"type": "group", "id": "1", "title": "同名"}, {"type": "group", "id": "2", "title": "同名"}],
+				names={"1": "同名", "2": "同名"},
+			)
+			result = instance.bind_route({"source_key": "relay_x", "chat_name": "同名", "chat_id": "2"})
+			self.assertEqual((result["status"], result["chat_id"]), ("bound", "2"))
+			with self.assertRaises(GroupLookupError):
+				instance.bind_route({"source_key": "relay_y", "chat_name": "别的名字", "chat_id": "1"})
+			with self.assertRaises(ValueError):
+				instance.bind_route({"source_key": "relay_y", "chat_name": "同名", "chat_id": "oc_1"})
+
 	def test_bind_route_refuses_ambiguous_or_mismatched_names(self):
 		from group_lookup import GroupLookupError
 		with tempfile.TemporaryDirectory() as directory:

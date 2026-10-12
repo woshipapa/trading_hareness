@@ -540,13 +540,15 @@ export function createRouteBinder({ baseUrl, token, fetchImpl = fetch }) {
 		});
 	}
 	return {
-		async bind(route) {
+		// `websocketChatId` is the numeric id of a group picked from the joined
+		// list; without it the bridge finds the group by its name.
+		async bind(route, { websocketChatId = '' } = {}) {
 			if (!configured) return { status: 'unavailable', message: 'LarkAgentX 桥接未配置' };
 			// A disabled route must not keep a WebSocket subscription.
 			const enabled = route.enabled !== false;
 			try {
 				const upstream = await call(enabled ? '/routes/bind' : '/routes/unbind',
-					{ source_key: route.key, chat_name: route.chatName, source_chat_id: route.chatId ?? '' }, 25_000);
+					{ source_key: route.key, chat_name: route.chatName, source_chat_id: route.chatId ?? '', ...(enabled && websocketChatId ? { chat_id: String(websocketChatId) } : {}) }, 25_000);
 				const body = await upstream.json().catch(() => ({}));
 				if (upstream.ok) return { status: body.status ?? 'bound', chat_id: body.chat_id ?? null, chat_name: body.chat_name ?? null };
 				return { status: 'failed', message: String(body.message ?? upstream.statusText ?? '绑定失败').slice(0, 240) };

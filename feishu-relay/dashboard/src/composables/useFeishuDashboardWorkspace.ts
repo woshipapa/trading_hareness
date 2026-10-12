@@ -93,6 +93,7 @@ export function useFeishuDashboardWorkspace() {
   function loadActiveSection() {
     if (activeSection.value === 'monitor') {
       void feishuRelayWorkspace.loadExportBookmarks();
+      feishuRelayWorkspace.refreshJoinedGroupsIfStale();
       return feishuRelayWorkspace.loadGroupRelayStatus();
     }
     if (activeSection.value === 'workbench') return feishuRelayWorkspace.loadFeishuWorkbench();

@@ -209,6 +209,32 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 			post.assert_called_once()
 			self.assertEqual(post.call_args.args[0], "http://adapter/inbound")
 
+	def test_joined_groups_carry_their_binding_and_membership_is_checked_through_the_gateway(self):
+		instance = self._summary_instance(summary_chat_ids=set())
+		instance.static_source_keys_by_chat = {"7661209668907207659": "anqiang"}
+		instance.dynamic_routes = {"7694956403840011216": {"source_key": "relay_x", "chat_name": "小杰夜报B"}}
+		instance.chat_validation = {"7661209668907207659": {"name": "安强训练营"}}
+		instance.client = Mock()
+		instance.client.feed_page.side_effect = lambda feed, cursor: {"cards": [1], "nextCursor": 0, "chats": {
+			"a": {"id": "7694956403840011216", "type": 2, "name": "小杰夜报B", "memberCount": 4, "lastMessagePosition": 200},
+			"b": {"id": "7700000000000000001", "type": 2, "name": "新进的群"}}} if feed == "INBOX" else {"cards": [], "chats": {}}
+		listed = instance.joined_groups({})
+		self.assertEqual([(g["name"], g["source_key"], g["listening"]) for g in listed["groups"]], [("小杰夜报B", "relay_x", False), ("新进的群", None, False)])
+		# a bound chat that is no longer in the list (left) is still reported as bound
+		self.assertEqual([(b["chat_id"], b["source_key"]) for b in listed["bound"]], [("7661209668907207659", "anqiang"), ("7694956403840011216", "relay_x")])
+		instance.joined_groups({})
+		self.assertEqual(instance.client.feed_page.call_count, 2)  # second read came from the cache
+		instance.client.chat_roles.return_value = {"7694956403840011216": 1}
+		instance.client.chat_infos.return_value = {"7694956403840011216": {"name": "小杰夜报B", "lastMessagePosition": 200, "firstChatMessagePosition": -1}}
+		instance.client.in_chat.return_value = False
+		report = instance.chat_membership({"chat_ids": ["7694956403840011216", "7661209668907207659"]})["chats"]
+		self.assertEqual((report["7694956403840011216"]["member"], report["7694956403840011216"]["last_position"]), (True, 200))
+		self.assertIs(report["7661209668907207659"]["member"], False)
+		instance.client.in_chat.assert_called_once_with("7661209668907207659", "7000")
+		for bad in ({"chat_ids": "7661"}, {"chat_ids": ["oc_x"]}, {"chat_ids": [str(n) for n in range(101)]}):
+			with self.assertRaises(ValueError):
+				instance.chat_membership(bad)
+
 	def test_a_post_title_travels_with_the_rendered_text(self):
 		instance = self._summary_instance(summary_chat_ids=set())
 		node = b"\n\x06\xe6\xad\xa3\xe6\x96\x87"  # TextProperty{content: "正文"}

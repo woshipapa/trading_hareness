@@ -15,7 +15,7 @@ export default defineComponent({
 
 <template>
   <el-card shadow="never" class="group-relay-status-panel">
-    <template #header><div class="card-header"><div><span>群消息转发状态</span><small class="realtime-refresh-time">每 10 秒自动刷新；“最近源消息”与“最近成功轮询”分开显示。</small></div><el-space><el-button size="small" :icon="Refresh" :loading="groupRelayLoading" @click="loadGroupRelayStatus">刷新</el-button><el-button size="small" type="primary" @click="openCreateGroupRelayRoute">新增源群</el-button></el-space></div></template>
+    <template #header><div class="card-header"><div><span>群消息转发状态</span><small class="realtime-refresh-time">每 10 秒自动刷新；“最近源消息”与“最近成功轮询”分开显示。</small></div><el-space><el-button size="small" :icon="Refresh" :loading="groupRelayLoading" @click="loadGroupRelayStatus">刷新</el-button><el-button size="small" type="primary" @click="openCreateGroupRelayRoute()">新增源群</el-button></el-space></div></template>
     <el-alert v-if="groupRelayError" :title="groupRelayError" type="error" :closable="false" show-icon />
     <template v-else>
       <el-descriptions :column="mobileLayout ? 1 : 5" border size="small">
@@ -83,12 +83,17 @@ export default defineComponent({
         </el-table>
         <el-alert v-if="(groupRelayStatus.webhook_config?.missing_keyword_chat_ids?.length ?? 0) > 0" class="section-gap" type="error" :closable="false" :title="`缺少关键词：${groupRelayStatus.webhook_config?.missing_keyword_chat_ids?.join('、')}`"/>
       </el-card>
+      <el-alert v-if="newJoinedGroups.length" class="section-gap" type="success" :closable="false" show-icon :title="`发现 ${newJoinedGroups.length} 个新加入、还没有建立映射的群`">
+        <el-space wrap><el-button v-for="group in newJoinedGroups" :key="group.chat_id" size="small" type="primary" plain @click="openCreateGroupRelayRoute(group)">{{ group.name || group.chat_id }} · 建立映射</el-button></el-space>
+      </el-alert>
+      <el-alert v-if="(groupRelayStatus.sources ?? []).some((source) => source.membership === 'left' || source.membership === 'dissolved')" class="section-gap" type="error" :closable="false" show-icon :title="`账号已不在这些源群里，收不到新消息：${(groupRelayStatus.sources ?? []).filter((source) => source.membership === 'left' || source.membership === 'dissolved').map((source) => source.chat_name).join('、')}。已保存的历史仍可导出；确认不再需要可停用或删除该路由。`" />
       <el-table :data="groupRelayStatus.sources ?? []" size="small" max-height="390" class="section-gap group-relay-table">
         <el-table-column prop="chat_name" label="源群" min-width="190" show-overflow-tooltip/>
         <el-table-column label="源 chat_id" min-width="190" show-overflow-tooltip><template #default="{ row }">{{ row.source_chat_id || '-' }}</template></el-table-column>
         <el-table-column label="标签" width="110"><template #default="{ row }"><el-tag size="small" effect="plain">#{{ row.tag }}</el-tag></template></el-table-column>
         <el-table-column label="目标 / keyword" min-width="220"><template #default="{ row }"><div v-for="target in row.target_chat_ids ?? []" :key="target">{{ target }}</div><small v-for="target in row.target_chat_ids ?? []" :key="`${target}-keyword`" class="group-relay-age">#{{ webhookKeyword(target) }}</small></template></el-table-column>
         <el-table-column label="监听状态" width="118"><template #default="{ row }"><el-tag size="small" :type="groupRelayStateType(row.state)">{{ groupRelayStateText(row.state) }}</el-tag></template></el-table-column>
+        <el-table-column label="群成员 / 历史同步" min-width="190"><template #default="{ row }"><el-tag size="small" :type="row.membership === 'member' ? 'success' : row.membership ? 'danger' : 'info'">{{ row.membership === 'member' ? '在群' : row.membership === 'left' ? '已退群' : row.membership === 'dissolved' ? '群已解散' : '未核对' }}</el-tag><span v-if="row.left_at" class="group-relay-age"> {{ dateText(row.left_at) }} 发现</span><div><el-tag size="small" effect="plain" :type="historyProgressTagType(row.history)">{{ historyProgressText(row.history) }}</el-tag></div></template></el-table-column>
         <el-table-column label="实时传输" min-width="190"><template #default="{ row }"><el-tag size="small" :type="row.transport === 'larkagentx_websocket' ? 'success' : row.transport === 'pending_websocket_discovery' ? 'warning' : 'danger'">{{ row.transport === 'larkagentx_websocket' ? 'LarkAgentX WS' : row.transport === 'pending_websocket_discovery' ? '等待首条消息自动绑定 WS' : row.transport === 'oauth_poll' ? 'OAuth 轮询' : '未启用' }}</el-tag><div v-for="chatId in row.websocket_chat_ids ?? []" :key="chatId" class="group-relay-age">WS {{ chatId }}</div></template></el-table-column>
         <el-table-column label="最近接收" min-width="175"><template #default="{ row }"><div>{{ dateText(row.websocket_last_observed_at || row.last_source_message_at) }}</div><small class="group-relay-age">WS 接收 {{ row.websocket_observed_count ?? 0 }} · 旧轮询 {{ ageText(row.poll_age_seconds) }} 前</small></template></el-table-column>
         <el-table-column label="投递验收" min-width="145"><template #default="{ row }"><el-tag size="small" :type="relayDeliveryTagType(row.delivery_state)">{{ relayDeliveryLabel(row.delivery_state) }}</el-tag><div v-if="row.last_forwarded_at" class="group-relay-age">{{ dateText(row.last_forwarded_at) }}</div></template></el-table-column>

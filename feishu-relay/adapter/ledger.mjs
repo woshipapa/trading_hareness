@@ -74,6 +74,13 @@ export function createLedger(connectionString) {
 				CREATE TABLE IF NOT EXISTS feishu_group_relay_actions (action_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), source_message_id text NOT NULL REFERENCES feishu_group_relay_messages(source_message_id) ON DELETE CASCADE, action text NOT NULL, actor_open_id text, created_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS feishu_group_relay_routes (source_key text PRIMARY KEY, chat_id text NOT NULL, chat_name text NOT NULL, route_tag text NOT NULL, enabled boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 			CREATE TABLE IF NOT EXISTS feishu_group_relay_route_state (state_key text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now());
+			-- One row per group the personal session is, or was, in (numeric WebSocket id).
+			-- seeded: already there when the directory was first read, so not "newly joined".
+			CREATE TABLE IF NOT EXISTS feishu_group_chat_state (chat_id text PRIMARY KEY, chat_name text NOT NULL DEFAULT '', seeded boolean NOT NULL DEFAULT false, first_seen_at timestamptz NOT NULL DEFAULT now(), last_seen_at timestamptz, member_count integer, membership text NOT NULL DEFAULT 'member' CHECK (membership IN ('member','left','dissolved')), miss_count integer NOT NULL DEFAULT 0, left_at timestamptz, checked_at timestamptz, history_status text NOT NULL DEFAULT 'idle' CHECK (history_status IN ('idle','running','complete','failed')), history_first_position bigint, history_last_position bigint, history_synced_position bigint, history_message_count integer NOT NULL DEFAULT 0, history_error text, history_synced_at timestamptz, updated_at timestamptz NOT NULL DEFAULT now());
+			-- A bound group's own history, read through the WebSocket gateway: what an
+			-- export falls back on once the account is no longer in the group.
+			CREATE TABLE IF NOT EXISTS feishu_group_history_messages (source_chat_id text NOT NULL, source_message_id text NOT NULL, position bigint, source_create_time bigint NOT NULL, message jsonb NOT NULL, fetched_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (source_chat_id, source_message_id));
+			CREATE INDEX IF NOT EXISTS feishu_group_history_messages_time_idx ON feishu_group_history_messages(source_chat_id, source_create_time);
 			CREATE TABLE IF NOT EXISTS feishu_summary_listener_state (listener_key text PRIMARY KEY, chat_id text NOT NULL, cursor_create_time bigint NOT NULL, last_source_create_time bigint, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 			CREATE TABLE IF NOT EXISTS feishu_relay_writer_ownership (singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton), writer_id text NOT NULL, generation bigint NOT NULL CHECK (generation > 0), updated_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS feishu_user_oauth_tokens (token_key text PRIMARY KEY, access_ciphertext text NOT NULL, refresh_ciphertext text NOT NULL, access_expires_at timestamptz NOT NULL, refresh_expires_at timestamptz NOT NULL, scopes text NOT NULL DEFAULT '', updated_at timestamptz NOT NULL DEFAULT now());
@@ -287,6 +294,53 @@ export function createLedger(connectionString) {
 			return { key: row.source_key, chatId: row.chat_id, chatName: row.chat_name, tag: row.route_tag, targetChatIds: row.target_chat_ids, enabled: row.enabled !== false, created_at: row.created_at, updated_at: row.updated_at };
 		},
 		async deleteRelayRoute(sourceKey) { const { rowCount } = await pool.query('DELETE FROM feishu_group_relay_routes WHERE source_key=$1', [sourceKey]); return rowCount === 1; },
+		async groupChatStates() {
+			const { rows } = await pool.query('SELECT * FROM feishu_group_chat_state ORDER BY chat_name, chat_id');
+			return rows;
+		},
+		// Record the groups the account is in.  The first directory ever read is
+		// the baseline; a group that appears later is a newly joined one.
+		async recordJoinedGroups(groups) {
+			const list = (groups ?? []).filter((group) => /^\d+$/.test(String(group?.chat_id ?? '')));
+			if (!list.length) return 0;
+			const { rows: existing } = await pool.query('SELECT 1 FROM feishu_group_chat_state LIMIT 1');
+			const { rowCount } = await pool.query(`INSERT INTO feishu_group_chat_state(chat_id, chat_name, member_count, seeded, last_seen_at)
+				SELECT item->>'chat_id', coalesce(item->>'name',''), nullif(item->>'member_count','')::integer, $2, now() FROM jsonb_array_elements($1::jsonb) item
+				ON CONFLICT (chat_id) DO UPDATE SET chat_name=CASE WHEN EXCLUDED.chat_name <> '' THEN EXCLUDED.chat_name ELSE feishu_group_chat_state.chat_name END,
+					member_count=coalesce(EXCLUDED.member_count, feishu_group_chat_state.member_count), last_seen_at=now(), updated_at=now()`, [JSON.stringify(list), existing.length === 0]);
+			return rowCount;
+		},
+		async saveGroupChatState(chatId, patch) {
+			const columns = ['chat_name', 'membership', 'miss_count', 'left_at', 'checked_at', 'member_count', 'history_status', 'history_first_position', 'history_last_position', 'history_synced_position', 'history_message_count', 'history_error', 'history_synced_at'];
+			const names = columns.filter((column) => patch?.[column] !== undefined);
+			const values = names.map((column) => patch[column]);
+			// A bound chat the directory never listed (for example one already left) still gets a row.
+			await pool.query(`INSERT INTO feishu_group_chat_state(chat_id, seeded${names.map((name) => `, ${name}`).join('')}) VALUES($1, true${names.map((_, index) => `, $${index + 2}`).join('')})
+				ON CONFLICT (chat_id) DO UPDATE SET updated_at=now()${names.map((name) => `, ${name}=EXCLUDED.${name}`).join('')}`, [String(chatId), ...values]);
+		},
+		async upsertGroupHistory(chatId, rows) {
+			const list = (rows ?? []).filter((row) => row?.source_message_id && Number.isFinite(Number(row.source_create_time)));
+			if (!list.length) return 0;
+			const { rowCount } = await pool.query(`INSERT INTO feishu_group_history_messages(source_chat_id, source_message_id, position, source_create_time, message)
+				SELECT $1, item->>'source_message_id', nullif(item->>'position','')::bigint, (item->>'source_create_time')::bigint, item->'message' FROM jsonb_array_elements($2::jsonb) item
+				ON CONFLICT (source_chat_id, source_message_id) DO UPDATE SET position=EXCLUDED.position, source_create_time=EXCLUDED.source_create_time, message=EXCLUDED.message, fetched_at=now()`,
+			[String(chatId), JSON.stringify(list.map((row) => ({ source_message_id: String(row.source_message_id), position: row.position ?? null, source_create_time: Math.round(Number(row.source_create_time)), message: row.message })))]);
+			return rowCount;
+		},
+		async groupHistoryCount(chatId) {
+			const { rows } = await pool.query('SELECT count(*)::int AS n FROM feishu_group_history_messages WHERE source_chat_id=$1', [String(chatId)]);
+			return rows[0]?.n ?? 0;
+		},
+		async groupHistoryRows(chatIds, fromCreateTime, toCreateTime, limit = 20000) {
+			const ids = [...new Set((chatIds ?? []).map((value) => String(value ?? '').trim()).filter((value) => /^\d+$/.test(value)))];
+			if (!ids.length) return [];
+			const from = Math.max(0, Number(fromCreateTime) || 0);
+			const to = Math.max(from, Number(toCreateTime) || from);
+			const { rows } = await pool.query(`SELECT source_message_id, source_chat_id, source_create_time, message FROM feishu_group_history_messages
+				WHERE source_chat_id = ANY($1::text[]) AND source_create_time BETWEEN $2 AND $3 ORDER BY source_create_time ASC, source_message_id ASC LIMIT $4`,
+			[ids, from, to, Math.max(1, Math.min(50001, Number(limit) || 20000))]);
+			return rows.map((row) => ({ ...row, source_create_time: Number(row.source_create_time), from_history: true }));
+		},
 		async saveRelaySourceCursor({ sourceKey, chatId, cursorCreateTime }) {
 			await pool.query(`INSERT INTO feishu_group_relay_sources(source_key,chat_id,cursor_create_time) VALUES($1,$2,$3)
 				ON CONFLICT(source_key) DO UPDATE SET chat_id=EXCLUDED.chat_id,cursor_create_time=GREATEST(feishu_group_relay_sources.cursor_create_time,EXCLUDED.cursor_create_time),updated_at=now()`, [sourceKey, chatId, cursorCreateTime]);

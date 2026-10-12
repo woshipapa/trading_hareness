@@ -410,6 +410,7 @@ export function historyRow(payload, { normalize, describeUnsupported = null, isD
 	if (!Number.isFinite(created) || created <= 0) return null;
 	return {
 		source_message_id: String(payload.msg_id), source_chat_id: String(payload.chat_id ?? ''),
+		position: Number.isFinite(Number(payload.position)) ? Number(payload.position) : null,
 		source_create_time: created > 1e12 ? created : created * 1000, message, from_history: true,
 	};
 }

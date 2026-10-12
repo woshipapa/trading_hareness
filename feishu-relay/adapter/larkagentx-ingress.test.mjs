@@ -289,6 +289,17 @@ function fakeBridge(responses) {
 	return { calls, fetchImpl };
 }
 
+test('a group picked from the joined list is bound by its id, not searched by name', async () => {
+	const bridge = fakeBridge([{ ok: true, body: { status: 'bound', chat_id: '7700000000000000001', chat_name: '同名群' } }, { ok: true, body: { status: 'unbound' } }]);
+	const binder = createRouteBinder({ baseUrl: 'http://127.0.0.1:8090/health', token: 't', fetchImpl: bridge.fetchImpl });
+	await binder.bind({ key: 'relay_x', chatName: '同名群', chatId: '', enabled: true }, { websocketChatId: '7700000000000000001' });
+	assert.deepEqual(bridge.calls[0].body, { source_key: 'relay_x', chat_name: '同名群', source_chat_id: '', chat_id: '7700000000000000001' });
+	// a disabled route is unbound and never sends an id to bind
+	await binder.bind({ key: 'relay_x', chatName: '同名群', chatId: '', enabled: false }, { websocketChatId: '7700000000000000001' });
+	assert.equal(bridge.calls[1].path, '/routes/unbind');
+	assert.equal('chat_id' in bridge.calls[1].body, false);
+});
+
 test('a saved route is bound to its WebSocket chat id and the result is reported', async () => {
 	const bridge = fakeBridge([{ ok: true, body: { status: 'bound', chat_id: '7694956403840011216', chat_name: '小杰夜报B' } }]);
 	const binder = createRouteBinder({ baseUrl: 'http://127.0.0.1:8090/health', token: 'secret', fetchImpl: bridge.fetchImpl });
