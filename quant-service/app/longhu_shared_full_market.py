@@ -98,7 +98,6 @@ class SharedLonghuFullMarketSource:
         self._session = session or requests.Session()
         self._timeout_seconds = timeout_seconds
 
-    @property
     def quote_source(self) -> Any:
         """Gateway reader used by dated quote fetches."""
         return self._source

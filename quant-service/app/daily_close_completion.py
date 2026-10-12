@@ -5,9 +5,12 @@ from __future__ import annotations
 import collections
 import hashlib
 import json
+import math
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Any, Callable, Iterable, Mapping
+
+from psycopg.types.json import Json
 
 from .adjustment_factor_semantics import persisted_factor_eligible_sql
 from .longhu_market_sync import merge_cross_section
@@ -17,6 +20,7 @@ from .longhu_market_sync import PROVIDER_KEY
 RATIOS = (Decimal("0.05"), Decimal("0.10"), Decimal("0.20"), Decimal("0.30"))
 MINIMUM_AGREEMENT = 0.995
 FACTOR_PROVIDER = "longhu_qfq_derived"
+MAXIMUM_WORK_SET = 600
 
 
 def _symbol(row: Mapping[str, Any]) -> str:
@@ -122,9 +126,13 @@ def factor_rows(candidates: Iterable[Mapping[str, Any]], trade_date: date | None
 
 
 def completion_status(outcomes: Mapping[str, Iterable[Any]], *, limits_pending: Iterable[Any] = (),
-                      factor_pending: Iterable[Any] = ()) -> str:
+                      factor_pending: Iterable[Any] = (), other_pending: Iterable[Any] = ()) -> str:
     leftovers = any(outcomes.get(name) for name in ("adjusted_later", "unverified", "invalid", "failed"))
-    return "partial" if leftovers or list(limits_pending) or list(factor_pending) else "completed"
+    return "partial" if leftovers or list(limits_pending) or list(factor_pending) or list(other_pending) else "completed"
+
+
+def request_timeout_seconds(count: int) -> int:
+    return min(480, max(30, 30 + math.ceil(count / 6)))
 
 
 def _read_state(db: Any, day: date) -> dict[str, Any]:
@@ -133,50 +141,11 @@ def _read_state(db: Any, day: date) -> dict[str, Any]:
         "SELECT symbol FROM quant.universe_members WHERE universe_key='all_a' AND enabled ORDER BY symbol").fetchall()]
     rows = connection.execute(
         """SELECT b.symbol,b.trading_date,b.open,b.high,b.low,b.close,b.pre_close,
-                         b.limit_up,b.limit_down,b.adj_factor,b.is_suspended,b.quality_status,
-                  prev.ratios
+                         b.limit_up,b.limit_down,b.adj_factor,b.is_suspended,b.quality_status
              FROM quant.canonical_bars_daily b
              JOIN quant.universe_members u ON u.universe_key='all_a' AND u.enabled AND u.symbol=b.symbol
-             LEFT JOIN LATERAL (
-               SELECT array_agg(round(p.limit_up / p.pre_close - 1, 2) ORDER BY p.trading_date DESC) AS ratios
-                 FROM (SELECT p.trading_date,p.limit_up,p.pre_close
-                         FROM quant.canonical_bars_daily p
-                        WHERE p.symbol=b.symbol AND p.trading_date<b.trading_date
-                          AND p.trading_date>=b.trading_date-40 AND p.limit_up>0 AND p.pre_close>0
-                        ORDER BY p.trading_date DESC LIMIT 5) p
-             ) prev ON true
             WHERE b.trading_date=%s""", (day,)).fetchall()
-    ratios = connection.execute(
-        """SELECT u.symbol,coalesce(array_agg(round(p.limit_up / p.pre_close - 1, 2)
-                                      ORDER BY p.trading_date DESC),'{}') AS ratios
-             FROM quant.universe_members u
-             LEFT JOIN LATERAL (
-               SELECT p.trading_date,p.limit_up,p.pre_close
-                 FROM quant.canonical_bars_daily p
-                WHERE p.symbol=u.symbol AND p.trading_date<%s
-                  AND p.trading_date>=%s-40 AND p.limit_up>0 AND p.pre_close>0
-                ORDER BY p.trading_date DESC LIMIT 5
-             ) p ON true
-            WHERE u.universe_key='all_a' AND u.enabled
-            GROUP BY u.symbol""", (day, day)).fetchall()
-    factors = connection.execute(
-        f"""SELECT u.symbol,prev.trading_date AS prev_date,prev.adj_factor AS prev_factor,
-                         nxt.trading_date AS next_date,nxt.adj_factor AS next_factor
-                    FROM quant.universe_members u
-                    LEFT JOIN LATERAL (
-                      SELECT f.trading_date,f.adj_factor FROM quant.daily_adjustment_factors f
-                       WHERE f.symbol=u.symbol AND f.trading_date<%s AND f.provider=%s
-                         AND {persisted_factor_eligible_sql('f')}
-                       ORDER BY f.trading_date DESC LIMIT 1) prev ON true
-                    LEFT JOIN LATERAL (
-                      SELECT f.trading_date,f.adj_factor FROM quant.daily_adjustment_factors f
-                       WHERE f.symbol=u.symbol AND f.trading_date>%s AND f.provider=%s
-                         AND {persisted_factor_eligible_sql('f')}
-                       ORDER BY f.trading_date LIMIT 1) nxt ON true
-                   WHERE u.universe_key='all_a' AND u.enabled""",
-        (day, FACTOR_PROVIDER, day, FACTOR_PROVIDER)).fetchall()
-    return {"roster": roster, "bars": [dict(row) for row in rows], "factors": [dict(row) for row in factors],
-            "ratios": {str(row["symbol"]): list(row["ratios"] or []) for row in ratios}}
+    return {"roster": roster, "bars": [dict(row) for row in rows]}
 
 
 def _day_bars(connection: Any, day: date, symbols: Iterable[str] | None = None) -> list[dict[str, Any]]:
@@ -232,19 +201,28 @@ def _factor_state(connection: Any, day: date, symbols: Iterable[str]) -> list[di
     return [dict(row) for row in rows]
 
 
+def _persist_receipt(connection: Any, key: str, trade_date: date, status: str,
+                     metadata: Mapping[str, Any], observed_at: datetime) -> None:
+    connection.execute(
+        """INSERT INTO quant.fetch_runs(provider_key,capability,trade_date,request_key,status,attempt_count,
+                                          started_at,finished_at,row_count,metadata)
+           VALUES(%s,'daily_close_completion',%s,%s,%s,1,%s,%s,%s,%s)
+           ON CONFLICT(request_key) DO UPDATE SET status=EXCLUDED.status,finished_at=EXCLUDED.finished_at,
+             row_count=EXCLUDED.row_count,metadata=EXCLUDED.metadata""",
+        (PROVIDER_KEY, trade_date, key, status, observed_at, observed_at,
+         int(metadata.get("written", 0)), Json(dict(metadata))),
+    )
+
+
 def _write_receipt(database: Any, key: str, trade_date: date, status: str, metadata: Mapping[str, Any],
                    observed_at: datetime) -> dict[str, Any]:
     with database.transaction() as connection:
-        connection.execute(
-            """INSERT INTO quant.fetch_runs(provider_key,capability,trade_date,request_key,status,attempt_count,
-                                              started_at,finished_at,row_count,metadata)
-               VALUES(%s,'daily_close_completion',%s,%s,%s,1,%s,%s,%s,%s)
-               ON CONFLICT(request_key) DO UPDATE SET status=EXCLUDED.status,finished_at=EXCLUDED.finished_at,
-                 row_count=EXCLUDED.row_count,metadata=EXCLUDED.metadata""",
-            (PROVIDER_KEY, trade_date, key, status, observed_at, observed_at,
-             int(metadata.get("written", 0)), json.dumps(dict(metadata), default=str)),
-        )
+        _persist_receipt(connection, key, trade_date, status, metadata, observed_at)
     return {"written": int(metadata.get("written", 0))}
+
+
+def _error_detail(error: Exception) -> str:
+    return f"{type(error).__name__}: {error}"[:500]
 
 
 async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[..., Any],
@@ -258,7 +236,7 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
     bars_without_limits = sorted(symbol for symbol, row in bars_by_symbol.items()
                                  if row.get("limit_up") is None or row.get("limit_down") is None)
     bars_without_factor = sorted(symbol for symbol, row in bars_by_symbol.items()
-                                 if row.get("adj_factor") is None)
+                                 if row.get("adj_factor") is None or Decimal(str(row["adj_factor"])) <= 0)
     unusable_existing = sorted(symbol for symbol, row in bars_by_symbol.items()
                                if not row.get("is_suspended") and
                                (any(row.get(field) is None for field in ("open", "high", "low", "close")) or
@@ -274,18 +252,36 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
         receipt.update({"request_key": key, "written": int(receipt.get("written", 0))})
         return receipt
 
+    if len(request_symbols) > MAXIMUM_WORK_SET:
+        result = finish("blocked", reason="close_or_controls_not_landed",
+                        missing_bar_count=len(missing), missing_factor_count=len(bars_without_factor))
+        await run_database_blocking(
+            _write_receipt, db, key, trade_date, "blocked", result, observed_at, timeout_seconds=30,
+        )
+        return result
+
     try:
         source_owner = read_source_factory()
-        source = getattr(source_owner, "quote_source", source_owner)
+        source = source_owner if hasattr(source_owner, "raw_call") else source_owner.quote_source()
     except Exception as error:
-        result = finish("blocked", reason=f"{type(error).__name__}: {error}")
+        result = finish("blocked", reason=_error_detail(error))
         await run_database_blocking(_write_receipt, db, key, trade_date, "blocked", result, observed_at, timeout_seconds=30)
         return result
 
     empty_outcomes = {name: [] for name in ("filled", "not_traded", "adjusted_later", "unverified", "invalid", "failed")}
     if request_symbols:
-        quotes, health = await run_public_blocking(fetch_classified, source, request_symbols, trade_date,
-                                                   workers=6, timeout_seconds=120)
+        try:
+            quotes, health = await run_public_blocking(
+                fetch_classified, source, request_symbols, trade_date, workers=6,
+                timeout_seconds=request_timeout_seconds(len(request_symbols)),
+            )
+        except Exception as error:
+            result = finish("failed", reason=_error_detail(error), missing_bar_count=len(missing),
+                            missing_factor_count=len(bars_without_factor))
+            await run_database_blocking(
+                _write_receipt, db, key, trade_date, "failed", result, observed_at, timeout_seconds=30,
+            )
+            return result
     else:
         quotes, health = [], {"outcomes": empty_outcomes, "errors": {}, "ex_rights_on_day": {}}
     outcomes = health["outcomes"]
@@ -296,6 +292,8 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
         merged = merge_cross_section(trade_date, {}, quotes)
         current = {row["symbol"]: row for row in _day_bars(connection, trade_date)}
         daily_rows = [row for row in merged.daily_rows if row["ts_code"] not in current]
+        # The re-read and normalizer upsert are not atomic. The close is not writing at this time,
+        # and both use the same vendor series, which matched all seven fields on 150 repaired stocks.
         written = persist_rows(connection, "daily", key + ":daily", daily_rows, PROVIDER_KEY, observed_at)
         current = {row["symbol"]: row for row in _day_bars(connection, trade_date)}
         stored_filled = filled & set(current)
@@ -326,7 +324,9 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
         factor_candidates = [
             {**row, "ex_rights_on_day": health["ex_rights_on_day"].get(row["symbol"], False)}
             for row in _factor_state(connection, trade_date, stored_filled)
-            if row["symbol"] in stored_filled and current[row["symbol"]].get("adj_factor") is None
+            if row["symbol"] in stored_filled and
+            (current[row["symbol"]].get("adj_factor") is None or
+             Decimal(str(current[row["symbol"]]["adj_factor"])) <= 0)
         ]
         factors = factor_rows(factor_candidates, trade_date)
         written += persist_rows(connection, "adj_factor", key + ":adj_factor", factors["rows"], FACTOR_PROVIDER, observed_at)
@@ -335,19 +335,22 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
                     "limits_pending": limit_pending, "factor_pending": factor_pending,
                     "missing": missing, "bar_rejected": bar_rejected,
                     "unusable_existing": unusable_existing, "written": written}
-        status = "partial" if bar_rejected or unusable_existing or limit_pending or factor_pending or any(
-            outcomes.get(name) for name in ("adjusted_later", "unverified", "invalid", "failed")) else "completed"
-        connection.execute(
-            """INSERT INTO quant.fetch_runs(provider_key,capability,trade_date,request_key,status,attempt_count,
-                                              started_at,finished_at,row_count,metadata)
-               VALUES(%s,'daily_close_completion',%s,%s,%s,1,%s,%s,%s,%s)
-               ON CONFLICT(request_key) DO UPDATE SET status=EXCLUDED.status,finished_at=EXCLUDED.finished_at,
-                 row_count=EXCLUDED.row_count,metadata=EXCLUDED.metadata""",
-            (PROVIDER_KEY, trade_date, key, status, observed_at, observed_at, written, json.dumps(metadata, default=str)),
+        status = completion_status(
+            outcomes, limits_pending=limit_pending, factor_pending=factor_pending,
+            other_pending=bar_rejected + unusable_existing,
         )
+        _persist_receipt(connection, key, trade_date, status, metadata, observed_at)
         return {"status": status, **metadata}
 
-    persisted = await run_database_blocking(persist, db, timeout_seconds=120)
+    try:
+        persisted = await run_database_blocking(persist, db, timeout_seconds=120)
+    except Exception as error:
+        result = finish("failed", reason=_error_detail(error), missing_bar_count=len(missing),
+                        missing_factor_count=len(bars_without_factor))
+        await run_database_blocking(
+            _write_receipt, db, key, trade_date, "failed", result, observed_at, timeout_seconds=30,
+        )
+        return result
     return {"trade_date": str(trade_date), "request_key": key, **persisted}
 
 
