@@ -103,10 +103,6 @@ class SharedLonghuFullMarketSource:
         """Gateway reader used by dated quote fetches."""
         return self._source
 
-    @property
-    def gateway_reader(self) -> Any:
-        return self._source
-
     def industry_plate_catalog(self) -> list[dict[str, Any]]:
         """Every industry board, paged until the vendor's own Count is reached."""
         result: list[dict[str, Any]] = []
