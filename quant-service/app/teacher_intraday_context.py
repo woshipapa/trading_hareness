@@ -23,17 +23,10 @@ from .teacher_review_rules import (
     count_sector_limit_ups,
     divergence_plan_symbols,
 )
-from .auction_open_desk import accepts_snapshot_row
+from .auction_open_desk import accepts_snapshot_row, optional_float
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 DIVERGENCE_MAX_SYMBOLS = 10
-
-
-def optional_float(value: Any) -> float | None:
-    try:
-        return float(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
-        return None
 
 
 @dataclass(frozen=True)
@@ -98,9 +91,8 @@ class TeacherIntradayContext:
                 # The snapshot carries no date: it is today's only when it is final and its
                 # pre-close equals the plan's previous close (yesterday's row has the day before).
                 previous_close = optional_float(((plans.get(event["ts_code"]) or {}).get("levels") or {}).get("close"))
-                pre_close = optional_float(raw.get("pre_close_price"))
-                if previous_close is None or pre_close is None or not accepts_snapshot_row(raw, previous_close):
-                    rejected[event["ts_code"]] = f"{raw.get('data_status')}:pre_close={pre_close} vs {previous_close}"
+                if previous_close is None or not accepts_snapshot_row(raw, previous_close):
+                    rejected[event["ts_code"]] = f"{raw.get('data_status')}:pre_close={raw.get('pre_close_price')} vs {previous_close}"
                     continue
                 self.market_book.store_auction(event["ts_code"], observed_at, {
                     "amount": optional_float(raw.get("auction_amount")), "price": price,

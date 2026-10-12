@@ -56,3 +56,10 @@ class AuctionOpenDeskRulesTests(unittest.TestCase):
         self.assertTrue(accepts_snapshot_row({"data_status": "final", "pre_close_price": 100.1}, 100.0))
         self.assertFalse(accepts_snapshot_row({"data_status": "pending", "pre_close_price": 100.0}, 100.0))
         self.assertFalse(accepts_snapshot_row({"data_status": "final", "pre_close_price": 100.2}, 100.0))
+        self.assertFalse(accepts_snapshot_row({"data_status": "final"}, 100.0))
+        self.assertFalse(accepts_snapshot_row({"pre_close_price": 100.0}, 100.0))
+
+    def test_labels_do_not_claim_a_close_direction_inside_two_standard_errors(self) -> None:
+        for stats in BUCKET_STATISTICS.values():
+            if abs(stats["open_to_close_mean"]) < 2 * stats["open_to_close_se"]:
+                self.assertNotRegex(stats["label"], r"higher at the close|lower at the close")

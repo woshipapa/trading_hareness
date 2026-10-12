@@ -15,61 +15,84 @@ AUCTION_POOL_MAX_SYMBOLS = 200
 PRE_CLOSE_ABSOLUTE_TOLERANCE = 0.011
 PRE_CLOSE_RELATIVE_TOLERANCE = 0.001
 
+
+def optional_float(value: Any) -> float | None:
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
 BUCKET_STATISTICS: Mapping[str, Mapping[str, Any]] = MappingProxyType({
     "below_-5%": MappingProxyType({
         "label": "gap below -5%: on average higher at the close",
         "open_to_close_mean": 0.0183,
+        "open_to_close_se": 0.0043,
         "share_open_to_close_le_minus_5": 0.079,
         "open_to_next_open_mean": -0.0022,
+        "open_to_next_open_se": 0.0048,
         "n": 277,
     }),
     "-5..-2%": MappingProxyType({
         "label": "gap from -5% to -2%: on average higher at the close",
         "open_to_close_mean": 0.0097,
+        "open_to_close_se": 0.0024,
         "share_open_to_close_le_minus_5": 0.141,
         "open_to_next_open_mean": -0.0021,
+        "open_to_next_open_se": 0.0030,
         "n": 1146,
     }),
     "-2..0%": MappingProxyType({
-        "label": "gap from -2% to 0%: on average higher at the close",
+        "label": "gap from -2% to 0%: no clear drift to the close",
         "open_to_close_mean": 0.0003,
+        "open_to_close_se": 0.0017,
         "share_open_to_close_le_minus_5": 0.133,
         "open_to_next_open_mean": -0.0062,
+        "open_to_next_open_se": 0.0019,
         "n": 2424,
     }),
     "0..2%": MappingProxyType({
-        "label": "gap from 0% to 2%: on average higher at the close",
+        "label": "gap from 0% to 2%: no clear drift to the close",
         "open_to_close_mean": 0.0021,
+        "open_to_close_se": 0.0014,
         "share_open_to_close_le_minus_5": 0.126,
         "open_to_next_open_mean": -0.0017,
+        "open_to_next_open_se": 0.0018,
         "n": 3680,
     }),
     "2..5%": MappingProxyType({
-        "label": "gap from 2% to 5%: on average lower at the close",
+        "label": "gap from 2% to 5%: no clear drift to the close; large intraday drops were more frequent than in the flat buckets (17.2% against 12.6-13.3%)",
         "open_to_close_mean": -0.0011,
+        "open_to_close_se": 0.0016,
         "share_open_to_close_le_minus_5": 0.172,
         "open_to_next_open_mean": -0.0032,
+        "open_to_next_open_se": 0.0024,
         "n": 2557,
     }),
     "5..9%": MappingProxyType({
         "label": "gap from 5% to 9%: on average lower at the close",
         "open_to_close_mean": -0.0080,
+        "open_to_close_se": 0.0026,
         "share_open_to_close_le_minus_5": 0.247,
         "open_to_next_open_mean": -0.0046,
+        "open_to_next_open_se": 0.0039,
         "n": 1176,
     }),
     "9%+_not_at_limit": MappingProxyType({
         "label": "gap of 9% or more without opening at the limit: on average lower at the close",
         "open_to_close_mean": -0.0202,
+        "open_to_close_se": 0.0037,
         "share_open_to_close_le_minus_5": 0.271,
         "open_to_next_open_mean": -0.0068,
+        "open_to_next_open_se": 0.0063,
         "n": 299,
     }),
     "opens_at_limit": MappingProxyType({
         "label": "opens at the limit: on average lower at the close and higher at the next open",
         "open_to_close_mean": -0.0178,
+        "open_to_close_se": 0.0021,
         "share_open_to_close_le_minus_5": 0.155,
         "open_to_next_open_mean": 0.0238,
+        "open_to_next_open_se": 0.0044,
         "n": 754,
     }),
 })
@@ -134,9 +157,10 @@ def gap_bucket(gap: float, *, opened_at_limit: bool = False) -> str:
 
 def accepts_snapshot_row(row: Mapping[str, Any], previous_close: float) -> bool:
     """Accept only today's final snapshot matched to yesterday's close."""
-    pre_close = float(row["pre_close_price"])
+    pre_close = optional_float(row.get("pre_close_price"))
     return (
-        row["data_status"] == "final"
+        str(row.get("data_status") or "") == "final"
+        and pre_close is not None
         and abs(pre_close - previous_close) <= max(
             PRE_CLOSE_ABSOLUTE_TOLERANCE, previous_close * PRE_CLOSE_RELATIVE_TOLERANCE,
         )
@@ -146,5 +170,5 @@ def accepts_snapshot_row(row: Mapping[str, Any], previous_close: float) -> bool:
 __all__ = [
     "AUCTION_POOL_MAX_SYMBOLS", "BUCKET_STATISTICS", "PRE_CLOSE_ABSOLUTE_TOLERANCE",
     "PRE_CLOSE_RELATIVE_TOLERANCE", "VERSION", "accepts_snapshot_row", "auction_timetable",
-    "build_auction_pool", "gap_bucket", "open_gap", "next_auction_tick", "opens_at_limit",
+    "build_auction_pool", "gap_bucket", "open_gap", "next_auction_tick", "opens_at_limit", "optional_float",
 ]
