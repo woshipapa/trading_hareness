@@ -1,11 +1,13 @@
 import asyncio
+import threading
 import unittest
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.datasources.contracts import CapabilityEvidence
-from app.runtime_executors import ExecutorSaturatedError
+from app.runtime_executors import ExecutorSaturatedError, run_tdx_shadow_blocking
 from app.tdx_shadow_snapshot_runtime import (
     AGREEMENT_CAPABILITY,
     AGREEMENT_PROVIDER,
@@ -42,10 +44,8 @@ class TdxShadowCaptureTests(unittest.TestCase):
         async def fetch_snapshot():
             return await (fetch or (lambda: asyncio.sleep(0, result=evidence())))()
 
-        async def session_open(_now):
-            if isinstance(session, BaseException):
-                raise session
-            return session
+        def session_gate(_database, _now):
+            return session, "test session"
 
         async def storage_allowed():
             return storage, {"allow_nonessential_high_frequency": storage}
@@ -66,7 +66,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
             return {"document": {"rows": len(rows)}, "comparison": {"stored": 1}}
 
         deps = TdxShadowSnapshotDependencies(
-            fetch_snapshot=fetch_snapshot, session_open=session_open, run_database=run_db,
+            fetch_snapshot=fetch_snapshot, session_gate=session_gate, run_database=run_db,
             database=object(), recent_reference=lambda _now: recent,
             acquire_slot=acquire_slot, persist_capture=persist_capture, storage_allowed=storage_allowed,
         )
@@ -81,7 +81,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["provider"], SHADOW_PROVIDER)
         self.assertEqual(result["capability"], SHADOW_CAPABILITY)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual([call[0] for call in calls], [runtime.deps.session_gate, runtime.deps.persist_capture])
         self.assertEqual(persisted[0][2][0]["price_source"], "tdx_public_all_a_snapshot")
         self.assertEqual(persisted[0][4]["status"], "compared")
         self.assertEqual(persisted[0][4]["provider_key"], AGREEMENT_PROVIDER)
@@ -91,16 +91,20 @@ class TdxShadowCaptureTests(unittest.TestCase):
         runtime, calls = self.dependencies(session=False, fetch=lambda: (_ for _ in ()).throw(AssertionError()))
         result = asyncio.run(runtime.capture(NOW))
         self.assertEqual(result["status"], "outside_session")
-        self.assertEqual(calls, [])
+        self.assertEqual([call[0] for call in calls], [runtime.deps.session_gate])
 
-    def test_session_database_busy_does_not_read(self):
-        runtime, calls = self.dependencies(
-            session=ExecutorSaturatedError("tdx shadow calendar busy"),
-            fetch=lambda: (_ for _ in ()).throw(AssertionError()),
-        )
-        result = asyncio.run(runtime.capture(NOW))
-        self.assertEqual(result["status"], "database_busy")
-        self.assertEqual(calls, [])
+    def test_session_gate_refused_or_timed_out_does_not_read(self):
+        for error, text in ((ExecutorSaturatedError("tdx_shadow blocking executor is saturated"), "saturated"),
+                            (TimeoutError(), "TimeoutError")):
+            async def unavailable(_action, *_args, error=error, **_kwargs):
+                raise error
+
+            runtime, _ = self.dependencies(
+                run_database=unavailable, fetch=lambda: (_ for _ in ()).throw(AssertionError()),
+            )
+            result = asyncio.run(runtime.capture(NOW))
+            self.assertEqual(result["status"], "database_busy")
+            self.assertIn(text, result["error"])
 
     def test_storage_pause_does_not_read(self):
         runtime, calls = self.dependencies(
@@ -109,7 +113,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
         )
         result = asyncio.run(runtime.capture(NOW))
         self.assertEqual(result["status"], "storage_paused")
-        self.assertEqual(calls, [])
+        self.assertEqual([call[0] for call in calls], [runtime.deps.session_gate])
 
     def test_rate_limit_refusal_is_reported(self):
         async def refuse(_provider, *, max_wait_seconds):
@@ -128,15 +132,49 @@ class TdxShadowCaptureTests(unittest.TestCase):
         result = asyncio.run(runtime.capture(NOW))
         self.assertEqual(result["status"], "failed")
         self.assertIn("tdx down", result["error"])
-        self.assertEqual(calls, [])
+        self.assertEqual([call[0] for call in calls], [runtime.deps.session_gate])
 
-    def test_database_saturation_is_reported(self):
-        async def saturated(_action, *_args, **_kwargs):
-            raise ExecutorSaturatedError("tdx_shadow blocking executor is saturated")
+    def test_persistence_refused_or_timed_out_is_reported(self):
+        for error in (ExecutorSaturatedError("tdx_shadow blocking executor is saturated"), TimeoutError()):
+            async def persistence_unavailable(action, *args, error=error, **_kwargs):
+                if action is runtime.deps.session_gate:
+                    return action(*args)
+                raise error
 
-        runtime, _ = self.dependencies(run_database=saturated)
-        result = asyncio.run(runtime.capture(NOW))
-        self.assertEqual(result["status"], "database_busy")
+            runtime, calls = self.dependencies(run_database=persistence_unavailable)
+            result = asyncio.run(runtime.capture(NOW))
+            self.assertEqual(result["status"], "database_busy")
+            self.assertEqual([call[0] for call in calls], [runtime.deps.session_gate, runtime.deps.persist_capture])
+
+    def test_real_session_gate_and_persistence_run_on_the_shadow_worker(self):
+        threads = []
+
+        class OpenCalendar:
+            @contextmanager
+            def transaction(self):
+                threads.append(threading.current_thread().name)
+                yield SimpleNamespace(execute=lambda _sql, _params: SimpleNamespace(fetchone=lambda: {"is_open": True}))
+
+        def persist_capture(_database, _observed_at, rows, _metadata, _comparison):
+            threads.append(threading.current_thread().name)
+            return {"document": {"rows": len(rows)}, "comparison": {"stored": 1}}
+
+        async def allowed():
+            return True, {}
+
+        async def no_wait(_provider, *, max_wait_seconds):
+            return None
+
+        runtime = TdxShadowSnapshotRuntime(TdxShadowSnapshotDependencies(
+            fetch_snapshot=lambda: asyncio.sleep(0, result=evidence()), run_database=run_tdx_shadow_blocking,
+            database=OpenCalendar(), recent_reference=lambda _now: None, storage_allowed=allowed,
+            acquire_slot=no_wait, persist_capture=persist_capture,
+        ))
+        in_session = datetime(2026, 10, 12, 2, 0, tzinfo=timezone.utc)  # Monday 10:00 in Shanghai
+        result = asyncio.run(runtime.capture(in_session))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(threads), 2)
+        self.assertTrue(all(name.startswith("tdx-shadow") for name in threads))
 
     def test_no_reference_stores_a_no_reference_row(self):
         persisted = []

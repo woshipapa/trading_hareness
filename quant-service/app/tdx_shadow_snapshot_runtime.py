@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from .all_a_snapshot_sources import compare, project_tdx_snapshot_rows
 from .datasources.contracts import CapabilityEvidence
 from .error_detail import safe_error_detail
+from .market_session_repository import market_observation_session
 from .minute_cross_section import persist_document
 from .public_market_repository import persist_timed_observations
 from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
@@ -26,9 +27,17 @@ SHADOW_CAPABILITY = "a_share_minute_cross_section_shadow"
 AGREEMENT_PROVIDER = "local_derived"
 AGREEMENT_CAPABILITY = "all_a_snapshot_source_agreement"
 TDX_READ_TIMEOUT_SECONDS = 20.0
+SESSION_GATE_TIMEOUT_SECONDS = 10.0
+# The shadow boundary has one worker and no queue: a step that outlives its deadline keeps the worker
+# until its thread returns, and the next step is refused. Both are the same outcome for a capture.
+DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
 REFERENCE_MAX_AGE_SECONDS = 90.0
 SUMMARY_STATEMENT_TIMEOUT_SECONDS = 10.0
 CN_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _database_busy(error: BaseException) -> dict[str, Any]:
+    return {"status": "database_busy", "error": str(error) or type(error).__name__, "stored": 0}
 
 
 def _as_rows_and_metadata(result: CapabilityEvidence | list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -76,12 +85,12 @@ def persist_shadow_capture(database: Any, observed_at: datetime, rows: list[dict
 @dataclass(frozen=True)
 class TdxShadowSnapshotDependencies:
     fetch_snapshot: Callable[[], Awaitable[CapabilityEvidence | list[dict[str, Any]]]]
-    session_open: Callable[[datetime], Awaitable[bool | tuple[bool, str]]]
     run_database: Callable[..., Awaitable[Any]]
     database: Any
     recent_reference: Callable[[datetime], tuple[datetime, list[dict[str, Any]]] | None]
     storage_allowed: Callable[[], Awaitable[tuple[bool, dict[str, Any]]]]
     acquire_slot: Callable[..., Awaitable[None]] = acquire_public_provider_slot
+    session_gate: Callable[[Any, datetime], tuple[bool, str]] = market_observation_session
     persist_capture: Callable[[Any, datetime, list[dict[str, Any]], Mapping[str, Any], Mapping[str, Any]], dict[str, Any]] = persist_shadow_capture
 
 
@@ -102,13 +111,12 @@ class TdxShadowSnapshotRuntime:
     async def capture(self, observed_at: datetime | None = None) -> dict[str, Any]:
         observed = observed_at or datetime.now(timezone.utc)
         try:
-            session_result = await self.deps.session_open(observed)
-        except ExecutorSaturatedError as error:
-            return {"status": "database_busy", "error": str(error), "stored": 0}
-        active = bool(session_result[0]) if isinstance(session_result, tuple) else bool(session_result)
+            active, _reason = await self.deps.run_database(
+                self.deps.session_gate, self.deps.database, observed, timeout_seconds=SESSION_GATE_TIMEOUT_SECONDS,
+            )
+        except DATABASE_UNAVAILABLE as error:
+            return _database_busy(error)
         if not active:
-            if isinstance(session_result, tuple) and "capacity unavailable" in session_result[1]:
-                return {"status": "database_busy", "error": session_result[1], "stored": 0}
             return {"status": "outside_session", "stored": 0}
         if self._read_task is not None:
             if not self._read_task.done():
@@ -116,8 +124,8 @@ class TdxShadowSnapshotRuntime:
             self._read_task = None
         try:
             allowed, storage = await self.deps.storage_allowed()
-        except ExecutorSaturatedError as error:
-            return {"status": "database_busy", "error": str(error), "stored": 0}
+        except DATABASE_UNAVAILABLE as error:
+            return _database_busy(error)
         if not allowed:
             return {"status": "storage_paused", "storage": storage, "stored": 0}
         try:
@@ -155,8 +163,8 @@ class TdxShadowSnapshotRuntime:
                 self.deps.persist_capture, self.deps.database, observed, projected,
                 document_metadata, comparison_row, timeout_seconds=60,
             )
-        except ExecutorSaturatedError as error:
-            return {"status": "database_busy", "error": str(error), "stored": 0}
+        except DATABASE_UNAVAILABLE as error:
+            return _database_busy(error)
         except Exception as error:  # noqa: BLE001 - the next minute retries the failed write
             return {"status": "failed", "error": safe_error_detail(str(error), 300), "stored": 0}
         return {
