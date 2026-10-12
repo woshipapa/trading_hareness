@@ -12,7 +12,7 @@
 ## 决定
 
 - 47owner 的全量发布只用 `scripts/shared-peer/deploy-full-release.sh <sha> <label> --apply`。
-- 只发布 `origin/main` 上的提交。禁止重启的时间窗写成数据（`config/release-windows.json`，交易日 08:30–15:10，
+- 只发布 `origin/main` 上的提交。禁止重启的时间窗写成数据（`config/release-windows.json`，交易日 08:30–11:30 与 13:00–15:10，午间休市自 2026-10-12 起开放，
   scheduler 另加 18:45–22:05），所有会重启服务的发布脚本都先用 `scripts/release_window.py` 检查。
 - 发布前从主机上读出回滚点（上一个 release、wheelhouse、元数据、镜像），并给镜像
   打 `rollback-<label>` 标签。

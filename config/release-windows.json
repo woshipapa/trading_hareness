@@ -3,11 +3,18 @@
   "utc_offset_hours": 8,
   "windows": [
     {
-      "name": "trading-session",
+      "name": "morning-session",
       "from": "08:30",
+      "to": "11:30",
+      "surfaces": ["owner-quant-research", "owner-scheduler", "owner-windows-api", "edge-adapter"],
+      "why": "pre-open checks at 08:40 and 09:10, the call auction and the morning session"
+    },
+    {
+      "name": "afternoon-session",
+      "from": "13:00",
       "to": "15:10",
       "surfaces": ["owner-quant-research", "owner-scheduler", "owner-windows-api", "edge-adapter"],
-      "why": "pre-open checks at 08:40 and 09:10, the session itself, and the close"
+      "why": "the afternoon session and the close; the midday break between the two is open by operator decision of 2026-10-12"
     },
     {
       "name": "post-close-scheduler",

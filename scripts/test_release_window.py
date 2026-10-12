@@ -23,20 +23,23 @@ def check(clock: str, *surfaces: str, override: str | None = None) -> subprocess
 
 class ReleaseWindowTests(unittest.TestCase):
     def test_the_owner_windows_and_their_edges(self) -> None:
-        for clock, code in (("4 0829", 0), ("4 0830", 3), ("4 1200", 3), ("4 1510", 3), ("4 1511", 0),
+        for clock, code in (("4 0829", 0), ("4 0830", 3), ("4 1130", 3), ("4 1131", 0), ("4 1259", 0), ("4 1300", 3),
+                            ("4 1510", 3), ("4 1511", 0),
                             ("4 1844", 0), ("4 1845", 3), ("4 2205", 3), ("4 2206", 0), ("6 1000", 0), ("7 1900", 0)):
             self.assertEqual(check(clock, *OWNER).returncode, code, clock)
 
-    def test_the_edge_adapter_has_only_the_trading_session(self) -> None:
+    def test_the_edge_adapter_has_only_the_two_sessions(self) -> None:
         self.assertEqual(check("2 1000", "edge-adapter").returncode, 3)
+        self.assertEqual(check("2 1200", "edge-adapter").returncode, 0)
+        self.assertEqual(check("2 1400", "edge-adapter").returncode, 3)
         self.assertEqual(check("2 1900", "edge-adapter").returncode, 0)
 
     def test_a_refusal_names_the_window(self) -> None:
         result = check("1 0900", *OWNER)
-        self.assertIn("no-restart window: trading-session 08:30-15:10", result.stderr)
+        self.assertIn("no-restart window: morning-session 08:30-11:30", result.stderr)
 
     def test_an_override_must_name_the_window_it_passes(self) -> None:
-        self.assertEqual(check("4 1900", *OWNER, override="trading-session").returncode, 3)
+        self.assertEqual(check("4 1900", *OWNER, override="afternoon-session").returncode, 3)
         passed = check("4 1900", *OWNER, override="post-close-scheduler")
         self.assertEqual(passed.returncode, 0)
         self.assertIn("WARNING", passed.stderr)
