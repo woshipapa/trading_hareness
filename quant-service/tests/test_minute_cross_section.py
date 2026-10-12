@@ -102,6 +102,13 @@ class StorageTests(unittest.TestCase):
         stored = json.loads(params[5])
         self.assertEqual(mcs.rows_of(stored), ROWS)
 
+    def test_shadow_document_uses_explicit_provider_and_capability(self):
+        database = _Database()
+        mcs.persist_document(database, MINUTE, ROWS[:1], METADATA,
+                             provider="tdx_public", capability="a_share_minute_cross_section_shadow")
+        self.assertEqual(database.statements[1][1][:2], ("tdx_public", "a_share_minute_cross_section_shadow"))
+        self.assertEqual(database.statements[2][1][:2], ("tdx_public", "a_share_minute_cross_section_shadow"))
+
     def test_reads_take_the_newest_or_the_first_document_in_a_window(self):
         document = mcs.build_document(ROWS[:3], MINUTE)
         calls = []

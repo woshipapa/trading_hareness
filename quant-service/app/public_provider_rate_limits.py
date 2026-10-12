@@ -36,6 +36,7 @@ DEFAULT_RATE_LIMITS_PER_MINUTE = {
     "tencent_free": 60,
     "sina_free": 60,
     "fuyao_ths": 60,
+    "tdx_public": 60,
     "cninfo_free": 30,
 }
 

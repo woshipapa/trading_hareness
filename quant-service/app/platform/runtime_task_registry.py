@@ -89,6 +89,11 @@ RUNTIME_TASK_CONTRACTS: Final[dict[str, RuntimeTaskContract]] = {
         ("a_share_prices_snapshot",), ("raw_market_observations",),
         "complete all-A Level-1 raw snapshot for width/rank and validation windows", 120,
     ),
+    "tdx_all_a_shadow": RuntimeTaskContract(
+        "tdx_all_a_shadow", "intraday_edge", "60s during evidence observation session from 09:15",
+        ("a_share_minute_cross_section_shadow",), ("raw_market_observations",),
+        "TDX all-A shadow snapshot and minute-by-minute Fuyao agreement evidence", 120,
+    ),
     "strategy_review": RuntimeTaskContract(
         "strategy_review", "research", "scheduled checkpoints", ("daily", "board_flow"),
         ("analyst_market_reviews", "strategy_reviews"), "post-close descriptive strategy review",

@@ -26,6 +26,7 @@ import psycopg
 from psycopg.types.json import Json
 
 from . import settings
+from . import minute_cross_section
 from .akshare_provider import (
     AkShareProviderError,
     akshare_analyst_heat_supplements,
@@ -379,6 +380,10 @@ from .longhu_auction_capture import capture as capture_longhu_morning_auction
 from .market_event_runtime import MarketEventCaptureDependencies, run_market_event_capture_service
 from .auction_pulse_runtime import AuctionPulseDependencies, run_auction_pulse_service
 from .level1_snapshot_runtime import Level1CaptureDependencies, run_level1_capture_service
+from .tdx_shadow_snapshot_runtime import (
+    TdxShadowSnapshotDependencies, TdxShadowSnapshotRuntime, run_tdx_shadow_snapshot_loop,
+)
+from .datasources.sources.tdx_legacy_misc import fetch_all_a_snapshot as fetch_tdx_all_a_snapshot
 from .market_radar_runtime import MarketRadarDependencies, MarketRadarRuntime
 from .datasources import runtime as datasource_runtime
 from .datasources.catalog import health_capability
@@ -680,7 +685,7 @@ from .telemetry import (
 )
 from .runtime_executors import (
     ExecutorSaturatedError, run_akshare_blocking, run_database_blocking,
-    run_realtime_vendor_blocking, runtime_executor_status, shutdown_runtime_executors,
+    run_realtime_vendor_blocking, run_tdx_shadow_blocking, runtime_executor_status, shutdown_runtime_executors,
 )
 from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
 from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
@@ -3139,6 +3144,14 @@ market_radar = MarketRadarRuntime(MarketRadarDependencies(
     run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs), database=db,
     persist_timed_observations=lambda *args: persist_timed_observations(*args)))
 
+tdx_shadow_runtime = TdxShadowSnapshotRuntime(TdxShadowSnapshotDependencies(
+    fetch_snapshot=fetch_tdx_all_a_snapshot,
+    session_open=lambda now: market_observation_session_async(now=now),
+    run_database=run_tdx_shadow_blocking,
+    database=db,
+    recent_reference=minute_cross_section.recent,
+))
+
 
 async def all_a_level1_snapshot_capture_loop() -> None:
     """Persist one complete all-A Level-1 cross-section about every minute, and its market radar point."""
@@ -3149,6 +3162,11 @@ async def all_a_level1_snapshot_capture_loop() -> None:
         record_success=record_provider_success, record_failure=record_provider_failure, safe_error=safe_error_detail,
         on_persisted=lambda observed_at, rows: market_radar.observe(observed_at, rows),
     ))
+
+
+async def tdx_all_a_shadow_loop() -> None:
+    """Persist the TDX all-A shadow stream beside the level1 capture."""
+    await run_tdx_shadow_snapshot_loop(tdx_shadow_runtime)
 
 
 def intraday_flow_label(value: Any) -> str:
@@ -4119,6 +4137,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "market_event_capture": settings.flag("MARKET_EVENT_CAPTURE_ENABLED"),
             "auction_pulse": auction_pulse_enabled(),
             "all_a_level1_snapshot": settings.flag("ALL_A_LEVEL1_CAPTURE_ENABLED"),
+            "tdx_all_a_shadow": settings.flag("TDX_SHADOW_SNAPSHOT_ENABLED"),
             "public_evidence_capture": settings.flag("PUBLIC_EVIDENCE_CAPTURE_ENABLED"),
             "post_close_public_archive": settings.flag("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED"),
             "storage_tiering_mover": settings.flag("STORAGE_TIERING_MOVER_ENABLED"),
@@ -4135,6 +4154,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "market_event_capture": market_event_capture_loop,
             "auction_pulse": auction_pulse_loop,
             "all_a_level1_snapshot": all_a_level1_snapshot_capture_loop,
+            "tdx_all_a_shadow": tdx_all_a_shadow_loop,
             "public_evidence_capture": public_evidence_capture_loop,
             "post_close_public_archive": post_close_public_archive_loop,
             "storage_tiering_mover": storage_tiering_mover_loop,
