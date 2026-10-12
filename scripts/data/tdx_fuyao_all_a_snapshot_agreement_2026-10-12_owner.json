@@ -1,0 +1,201 @@
+{
+ "observed_utc": "2026-10-12T07:04:00.553755+00:00",
+ "fuyao": {
+  "rows": 5560,
+  "seconds": 1.19,
+  "meta": {
+   "status": "fresh",
+   "freshness_status": null,
+   "upstream_timestamp_ms": 1791788636000,
+   "total": 5579,
+   "matched_rows": 5560
+  }
+ },
+ "tdx": {
+  "rows": 5564,
+  "seconds": 1.19,
+  "warnings": [
+   "tdx_host=115.238.56.198:7709/login_one",
+   "no_trade_rows=15"
+  ]
+ },
+ "common": 5560,
+ "only_fuyao": 0,
+ "only_tdx": 4,
+ "only_fuyao_sample": [],
+ "only_tdx_sample": [
+  "600293.SH",
+  "601059.SH",
+  "601198.SH",
+  "688496.SH"
+ ],
+ "price": {
+  "n": 5560,
+  "within_0.01": 5560,
+  "share": 1.0,
+  "max_abs_diff": 0.0,
+  "ratio_median": 1.0,
+  "ratio_p01_p99": [
+   1.0,
+   1.0
+  ]
+ },
+ "pct_change": {
+  "n": 5560,
+  "within_0.02": 5560,
+  "share": 1.0,
+  "max_abs_diff": 0.0,
+  "ratio_median": 1.0,
+  "ratio_p01_p99": [
+   1.0,
+   1.0
+  ]
+ },
+ "volume_shares(tdx lots x100 vs fuyao volume)": {
+  "n": 5560,
+  "within_100.0": 5560,
+  "share": 1.0,
+  "max_abs_diff": 100.0,
+  "ratio_median": 0.999998,
+  "ratio_p01_p99": [
+   0.9998,
+   1.0
+  ]
+ },
+ "turnover_cny(tdx amount vs fuyao turnover)": {
+  "n": 5560,
+  "within_1000.0": 5560,
+  "share": 1.0,
+  "max_abs_diff": 632.0,
+  "ratio_median": 1.0,
+  "ratio_p01_p99": [
+   1.0,
+   1.0
+  ]
+ },
+ "open vs raw.open_price": {
+  "n": 5560,
+  "within_0.01": 5560,
+  "share": 1.0,
+  "max_abs_diff": 0.0,
+  "ratio_median": 1.0,
+  "ratio_p01_p99": [
+   1.0,
+   1.0
+  ]
+ },
+ "high vs raw.high_price": {
+  "n": 5560,
+  "within_0.01": 5560,
+  "share": 1.0,
+  "max_abs_diff": 0.0,
+  "ratio_median": 1.0,
+  "ratio_p01_p99": [
+   1.0,
+   1.0
+  ]
+ },
+ "low vs raw.low_price": {
+  "n": 5560,
+  "within_0.01": 5560,
+  "share": 1.0,
+  "max_abs_diff": 0.0,
+  "ratio_median": 1.0,
+  "ratio_p01_p99": [
+   1.0,
+   1.0
+  ]
+ },
+ "pre_close vs raw.prev_price": {
+  "n": 5560,
+  "within_0.01": 5560,
+  "share": 1.0,
+  "max_abs_diff": 0.0,
+  "ratio_median": 1.0,
+  "ratio_p01_p99": [
+   1.0,
+   1.0
+  ]
+ },
+ "price_change(tdx price - pre_close vs raw.price_change)": {
+  "n": 5560,
+  "within_0.011": 5560,
+  "share": 1.0,
+  "max_abs_diff": 0.0,
+  "ratio_median": 1.0,
+  "ratio_p01_p99": [
+   1.0,
+   1.0
+  ]
+ },
+ "zero_open_in_tdx": 0,
+ "zero_open_in_fuyao": 0,
+ "largest_price_gaps": [
+  {
+   "symbol": "000001.SZ",
+   "tdx": 11.73,
+   "fuyao": 11.73
+  },
+  {
+   "symbol": "000002.SZ",
+   "tdx": 3.77,
+   "fuyao": 3.77
+  },
+  {
+   "symbol": "000006.SZ",
+   "tdx": 7.12,
+   "fuyao": 7.12
+  },
+  {
+   "symbol": "000007.SZ",
+   "tdx": 10.88,
+   "fuyao": 10.88
+  }
+ ],
+ "tdx_fields": [
+  "active1",
+  "active2",
+  "amount",
+  "ask",
+  "ask_volume_lots",
+  "bid",
+  "bid_volume_lots",
+  "code",
+  "current_volume_lots",
+  "depth",
+  "high",
+  "inner_volume_lots",
+  "low",
+  "market",
+  "min2_amount",
+  "neg_price",
+  "open",
+  "open_amount",
+  "opening_rush",
+  "outer_volume_lots",
+  "pct_change",
+  "pre_close",
+  "price",
+  "rise_speed",
+  "s_amount",
+  "server_time_raw",
+  "short_turnover",
+  "symbol",
+  "unknown",
+  "vol_rise_speed",
+  "volume_lots"
+ ],
+ "fuyao_raw_fields": [
+  "high_price",
+  "last_price",
+  "low_price",
+  "open_price",
+  "prev_price",
+  "price_change",
+  "price_change_ratio_pct",
+  "thscode",
+  "ticker",
+  "turnover",
+  "volume"
+ ]
+}
