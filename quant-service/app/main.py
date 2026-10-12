@@ -1,4 +1,8 @@
 from __future__ import annotations
+import faulthandler
+
+faulthandler.enable(all_threads=True)
+
 import asyncio
 import functools
 import hashlib
