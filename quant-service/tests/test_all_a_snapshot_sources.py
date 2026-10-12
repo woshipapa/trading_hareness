@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.all_a_snapshot_sources import project_tdx_snapshot_rows
+from app.all_a_snapshot_sources import compare, project_tdx_snapshot_rows
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "all_a_snapshot_fuyao_tdx_20261012.json"
@@ -55,3 +55,43 @@ class TdxSnapshotProjectionTests(unittest.TestCase):
         rows = [{"symbol": "000001.SZ", "price": 0, "pre_close": 1, "pct_change": -100,
                  "volume_lots": 1, "amount": 1, "open": 1, "high": 1, "low": 1}]
         self.assertEqual(project_tdx_snapshot_rows(rows, self.observed_at), [])
+
+
+class TdxSnapshotComparisonTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        fixture = json.loads(FIXTURE.read_text())
+        cls.fuyao_rows = fixture["fuyao_rows"]
+        cls.tdx_rows = project_tdx_snapshot_rows(fixture["tdx_rows"], datetime(2026, 10, 12, tzinfo=timezone.utc))
+
+    def test_compares_fixture_without_verdict(self):
+        result = compare(self.fuyao_rows, self.tdx_rows, 2.5)
+
+        self.assertEqual(result["symbols_in_both"], 14)
+        self.assertEqual(result["only_in_fuyao"], [])
+        self.assertEqual(result["only_in_tdx"], ["600293.SH"])
+        self.assertEqual(result["price"]["within_one_tick"], 1.0)
+        self.assertEqual(result["price"]["within_0_1_pct"], 1.0)
+        self.assertEqual(result["price"]["within_0_5_pct"], 1.0)
+        self.assertEqual(result["price"]["largest_relative_gap"], 0.0)
+        self.assertEqual(result["price"]["largest_relative_gap_symbol"], "000001.SZ")
+        self.assertLess(result["pct_change"]["largest_absolute_gap"], 0.000001)
+        self.assertAlmostEqual(result["volume"]["median_ratio"], 0.9999990450538223)
+        self.assertEqual(result["volume"]["within_1_pct"], 1.0)
+        self.assertAlmostEqual(result["turnover"]["median_ratio"], 0.9999999892985673)
+        self.assertEqual(result["turnover"]["within_1_pct"], 1.0)
+        self.assertEqual(result["seconds_apart"], 2.5)
+
+    def test_moved_price_changes_only_price_measurements(self):
+        moved = [dict(row) for row in self.tdx_rows]
+        moved[0]["price"] = 11.80
+
+        result = compare(self.fuyao_rows, moved, 1.0)
+
+        self.assertEqual(result["price"]["within_one_tick"], 13 / 14)
+        self.assertEqual(result["price"]["within_0_1_pct"], 13 / 14)
+        self.assertEqual(result["price"]["within_0_5_pct"], 13 / 14)
+        self.assertAlmostEqual(result["price"]["largest_relative_gap"], 0.07 / 11.73)
+        self.assertEqual(result["price"]["largest_relative_gap_symbol"], "000001.SZ")
+        self.assertLess(result["pct_change"]["largest_absolute_gap"], 0.000001)
+        self.assertEqual(result["seconds_apart"], 1.0)

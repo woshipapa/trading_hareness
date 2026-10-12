@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from statistics import median
 from typing import Any, Iterable, Mapping
 
 from .datasources.catalog import BINDINGS
@@ -48,4 +49,56 @@ def project_tdx_snapshot_rows(rows: Iterable[Mapping[str, Any]], observed_at: da
         })
     return projected
 
-__all__ = ["project_tdx_snapshot_rows"]
+def _share(values: Iterable[bool]) -> float | None:
+    values = list(values)
+    return sum(values) / len(values) if values else None
+
+
+def _ratio_values(rows: Iterable[tuple[float, float]]) -> list[float]:
+    return [right / left for left, right in rows if left != 0]
+
+
+def compare(fuyao_rows: Iterable[Mapping[str, Any]], tdx_rows: Iterable[Mapping[str, Any]],
+            seconds_apart: float) -> dict[str, Any]:
+    """Measure the agreement of two all-A snapshots without applying a verdict."""
+    fuyao = {row["symbol"]: row for row in fuyao_rows}
+    tdx = {row["symbol"]: row for row in tdx_rows}
+    common = sorted(fuyao.keys() & tdx.keys())
+    pairs = [(fuyao[symbol], tdx[symbol]) for symbol in common]
+
+    price_gaps = [(abs(tdx_row["price"] - fuyao_row["price"]),
+                   abs(tdx_row["price"] - fuyao_row["price"]) / abs(fuyao_row["price"]), symbol)
+                  for symbol, (fuyao_row, tdx_row) in zip(common, pairs)]
+    pct_gaps = [abs(tdx_row["pct_change"] - fuyao_row["pct_change"])
+                for fuyao_row, tdx_row in pairs]
+    volume_ratios = _ratio_values((fuyao_row["volume"], tdx_row["volume"])
+                                  for fuyao_row, tdx_row in pairs)
+    turnover_ratios = _ratio_values((fuyao_row["turnover"], tdx_row["turnover"])
+                                    for fuyao_row, tdx_row in pairs)
+    largest_price_gap = max(price_gaps, default=None, key=lambda item: item[1])
+
+    return {
+        "symbols_in_both": len(common),
+        "only_in_fuyao": sorted(fuyao.keys() - tdx.keys()),
+        "only_in_tdx": sorted(tdx.keys() - fuyao.keys()),
+        "price": {
+            "within_one_tick": _share(gap[0] <= 0.01 for gap in price_gaps),
+            "within_0_1_pct": _share(gap[1] <= 0.001 for gap in price_gaps),
+            "within_0_5_pct": _share(gap[1] <= 0.005 for gap in price_gaps),
+            "largest_relative_gap": largest_price_gap[1] if largest_price_gap else None,
+            "largest_relative_gap_symbol": largest_price_gap[2] if largest_price_gap else None,
+        },
+        "pct_change": {"largest_absolute_gap": max(pct_gaps, default=None)},
+        "volume": {
+            "median_ratio": median(volume_ratios) if volume_ratios else None,
+            "within_1_pct": _share(abs(ratio - 1) <= 0.01 for ratio in volume_ratios),
+        },
+        "turnover": {
+            "median_ratio": median(turnover_ratios) if turnover_ratios else None,
+            "within_1_pct": _share(abs(ratio - 1) <= 0.01 for ratio in turnover_ratios),
+        },
+        "seconds_apart": seconds_apart,
+    }
+
+
+__all__ = ["compare", "project_tdx_snapshot_rows"]
