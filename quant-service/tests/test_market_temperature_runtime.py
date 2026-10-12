@@ -127,6 +127,16 @@ class StoredSeriesTests(unittest.TestCase):
         self.assertEqual((second["index_change_pct"], second["etf_flow"]["ratio"], second["marker"]["label"]),
                          (-1.0, 1.8, "逆势放量"))
 
+    def test_daily_coverage_round_trips_through_storage(self) -> None:
+        end = date(2099, 3, 10)
+        coverage = {"scored": 8, "missing": [], "counts": {"touched": 70, "advancers": 2500,
+                                                               "decliners": 2500, "prev_sealed": 50, "limits_ok": True}}
+        reading = {**_reading(end, 72.5, "热"), "coverage": coverage}
+        with mock.patch.object(runtime, "compute", return_value=[reading]):
+            runtime.refresh(self.database, end)
+        series = runtime.daily_series(self.connection, days=10, end=end)
+        self.assertEqual(series["readings"][0]["coverage"], coverage)
+
     def test_the_series_excludes_stale_versions_and_reports_the_count(self) -> None:
         end = date(2099, 3, 10)
         readings = [_reading(end - timedelta(days=1), 45.0), _reading(end, 18.0, "冰点")]

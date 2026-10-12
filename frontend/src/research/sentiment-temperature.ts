@@ -3,6 +3,11 @@
 
 export type Band = '冰点' | '冷' | '中性' | '热' | '沸点';
 export type TimingState = 'golden' | 'silver';
+export interface TemperatureCoverage {
+  scored: number;
+  missing: string[];
+  counts: Record<string, number | boolean | null>;
+}
 
 export interface TemperatureReading {
   trade_date: string;
@@ -15,6 +20,7 @@ export interface TemperatureReading {
   etf_flow?: { ratio: number | null; basket_turnover_cny: number | null; codes: number | null; amount_estimated: boolean | null } | null;
   marker?: { kind: string; label: string; counter_trend: boolean } | null;
   timing?: { state: TimingState | null; event: TimingState | null } | null;
+  coverage?: TemperatureCoverage;
 }
 
 export interface TemperatureComponent { key: string; label: string; direction: number }
@@ -43,6 +49,7 @@ export interface IntradaySample {
   values: Record<string, number | null>;
   counts?: Record<string, number>;
   turnover_cny?: number;
+  coverage?: TemperatureCoverage;
 }
 
 export interface TemperatureIntraday {

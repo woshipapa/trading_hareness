@@ -59,6 +59,23 @@ class ScoreTests(unittest.TestCase):
 
 
 class SeriesTests(unittest.TestCase):
+    def test_coverage_names_missing_limit_and_previous_sealed_components(self):
+        rows = _ordinary(80)
+        missing_limits = mt.temperature_series(rows + [_row(date(2099, 4, 1), limits_ok=False)])[-1]
+        missing_previous = mt.temperature_series(rows + [_row(date(2099, 4, 1), prev_sealed=0, premium=None)])[-1]
+        complete = mt.temperature_series(rows + [_row(date(2099, 4, 1))])[-1]
+        self.assertEqual(missing_limits["coverage"]["missing"], ["limit_up", "limit_down", "seal_rate", "promotion", "max_streak"])
+        self.assertEqual(missing_previous["coverage"]["missing"], ["premium", "promotion"])
+        self.assertEqual(complete["coverage"]["missing"], [])
+        self.assertNotEqual(missing_limits["coverage"], complete["coverage"])
+
+    def test_fewer_than_five_scored_components_still_reports_coverage(self):
+        rows = _ordinary(80)
+        row = _row(date(2099, 4, 1), limits_ok=False, advancers=0, decliners=0, prev_sealed=0, turnover=None)
+        reading = mt.temperature_series(rows + [row])[-1]
+        self.assertIsNone(reading["temperature"])
+        self.assertLess(reading["coverage"]["scored"], 5)
+        self.assertEqual(reading["coverage"]["missing"], ["limit_up", "limit_down", "seal_rate", "up_ratio", "premium", "promotion", "max_streak", "turnover_ratio"])
     def test_record_high_and_low_are_scored_against_prior_history(self):
         rows = _ordinary(60)
         high = _row(date(2099, 3, 2), limit_up=150)
