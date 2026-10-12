@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-import { groupRelayApi, type ExportBookmark, type ExportFormat, type WebsocketBinding } from '../api/group-relay';
+import { groupRelayApi, type BundlePreview, type ExportBookmark, type ExportFormat, type WebsocketBinding } from '../api/group-relay';
 import { feishuWorkbenchApi } from '../api/feishu-workbench';
 
 type OAuthScopeAudit = { required_scopes?: string[]; granted_scopes?: string[]; missing_scopes?: string[]; verified?: boolean | null };
@@ -361,6 +361,45 @@ export function useFeishuRelayWorkspace() {
       await loadGroupRelayStatus();
     } catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
   }
+  // History bundle: one group, one date range -> a zip with the transcript,
+  // structured lines and the image files.
+  const bundleDialog = ref(false);
+  const bundleRoute = ref<GroupRelaySourceStatus | null>(null);
+  const bundleDates = ref<[string, string] | null>(null);
+  const bundlePreview = ref<BundlePreview | null>(null);
+  const bundleLoading = ref(false);
+  const bundleError = ref('');
+  const beijingDay = (offsetDays = 0) => new Date(Date.now() + 8 * 3_600_000 + offsetDays * 86_400_000).toISOString().slice(0, 10);
+  function openBundleDialog(route: GroupRelaySourceStatus) {
+    bundleRoute.value = route;
+    bundleDates.value = [beijingDay(-6), beijingDay()];
+    bundlePreview.value = null;
+    bundleError.value = '';
+    bundleDialog.value = true;
+    void previewBundle();
+  }
+  async function previewBundle() {
+    bundlePreview.value = null;
+    bundleError.value = '';
+    if (!bundleRoute.value || !bundleDates.value) return;
+    const [from, to] = bundleDates.value;
+    bundleLoading.value = true;
+    try { bundlePreview.value = await groupRelayApi.bundlePreview(bundleRoute.value.key, from, to); }
+    catch (error) { bundleError.value = error instanceof Error ? error.message : String(error); }
+    finally { bundleLoading.value = false; }
+  }
+  function downloadBundle() {
+    if (!bundleRoute.value || !bundleDates.value || !bundlePreview.value?.messages) return;
+    const [from, to] = bundleDates.value;
+    const anchor = document.createElement('a');
+    anchor.href = groupRelayApi.bundleUrl(bundleRoute.value.key, from, to);
+    anchor.download = bundlePreview.value.filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    ElMessage.success(`开始下载 ${bundlePreview.value.filename}；图片较多时需要等一会儿`);
+    bundleDialog.value = false;
+  }
   async function setGroupRelayRouteEnabled(route: GroupRelaySourceStatus, enabled: boolean) {
     try { await groupRelayApi.upsertRoute(route.key, { chat_name: route.chat_name, tag: route.tag, enabled }); ElMessage.success(enabled ? '已启用，下一次轮询生效' : '已停用该源群'); await loadGroupRelayStatus(); }
     catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
@@ -373,6 +412,7 @@ export function useFeishuRelayWorkspace() {
   return {
     groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistorySource, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
     rebindGroupRelayRoute,
+    bundleDialog, bundleRoute, bundleDates, bundlePreview, bundleLoading, bundleError, openBundleDialog, previewBundle, downloadBundle,
     qrDialog, qrSession, qrStatusName, qrPolling, startQrLogin, stopQrPolling, authStateType, authStateText,
     oauthDialog, oauthAuthorizeUrl, oauthRedirectUri, oauthCode, oauthSubmitting, startOauthReauth, submitOauthCode, copyOauthUrl, oauthExpiryText, oauthExpiryTagType,
     feishuWorkbench, feishuWorkbenchMessages, feishuWorkbenchLoading, feishuWorkbenchError, feishuWorkbenchAction, workbenchSearch, workbenchSearchResult, workbenchIntegrationDialog, workbenchIntegration,

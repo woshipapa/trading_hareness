@@ -45,6 +45,26 @@ const dashboard = useFeishuDashboardWorkspace();
     <template #footer><el-button @click="dashboard.groupRelayRouteDialog = false">取消</el-button><el-button type="primary" :loading="dashboard.groupRelayRouteSaving" @click="dashboard.saveGroupRelayRoute">保存</el-button></template>
   </el-dialog>
 
+  <el-dialog v-model="dashboard.bundleDialog" :title="`导出资料包 · ${dashboard.bundleRoute?.chat_name ?? ''}`" width="560px" destroy-on-close>
+    <el-alert title="导出该群在所选日期内已转发的全部消息：transcript.md（按时间排列的正文）、messages.jsonl（结构化数据）和 images/ 目录里的图片文件，打包成 zip，可直接交给 AI 阅读。" type="info" :closable="false" show-icon class="section-gap" />
+    <el-form label-position="top">
+      <el-form-item label="时间范围（北京时间，含首尾两天）">
+        <el-date-picker v-model="dashboard.bundleDates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" class="full-width" @change="dashboard.previewBundle" />
+      </el-form-item>
+    </el-form>
+    <el-alert v-if="dashboard.bundleError" :title="dashboard.bundleError" type="error" :closable="false" show-icon />
+    <el-descriptions v-else-if="dashboard.bundlePreview" :column="1" border size="small">
+      <el-descriptions-item label="文件名">{{ dashboard.bundlePreview.filename }}</el-descriptions-item>
+      <el-descriptions-item label="消息">{{ dashboard.bundlePreview.messages }} 条</el-descriptions-item>
+      <el-descriptions-item label="图片">{{ dashboard.bundlePreview.images }} 张</el-descriptions-item>
+      <el-descriptions-item v-if="dashboard.bundlePreview.first_message_at" label="实际覆盖">{{ dashboard.dateText(dashboard.bundlePreview.first_message_at) }} 至 {{ dashboard.dateText(dashboard.bundlePreview.last_message_at) }}</el-descriptions-item>
+    </el-descriptions>
+    <template #footer>
+      <el-button @click="dashboard.bundleDialog = false">取消</el-button>
+      <el-button type="primary" :loading="dashboard.bundleLoading" :disabled="!dashboard.bundlePreview?.messages" @click="dashboard.downloadBundle">{{ dashboard.bundlePreview && !dashboard.bundlePreview.messages ? '该范围内没有消息' : '下载 zip' }}</el-button>
+    </template>
+  </el-dialog>
+
   <el-dialog v-model="dashboard.workbenchIntegrationDialog" :title="dashboard.workbenchIntegration.title" width="620px" destroy-on-close>
     <el-alert title="此操作会真实调用飞书 API，请确认后台权限已经发布。" type="warning" :closable="false" show-icon class="section-gap" />
     <el-form label-position="top"><el-form-item label="请求 JSON"><el-input v-model="dashboard.workbenchIntegration.payloadText" type="textarea" :rows="12" class="mono" /></el-form-item></el-form>

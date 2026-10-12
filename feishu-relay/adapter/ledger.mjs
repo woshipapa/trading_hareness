@@ -365,6 +365,24 @@ export function createLedger(connectionString) {
 				ORDER BY source_create_time ASC LIMIT $4`, [String(chatId), from, to, boundedLimit]);
 			return rows;
 		},
+		// History bundle: every relayed message of one group, whichever of its
+		// chat ids (oc_ or numeric) the row was recorded under.
+		async relayMessagesByChatIdsWindow(chatIds, fromCreateTime, toCreateTime, limit = 20000) {
+			const ids = [...new Set((chatIds ?? []).map((value) => String(value ?? '').trim()).filter(Boolean))];
+			if (!ids.length) return [];
+			const from = Math.max(0, Number(fromCreateTime) || 0);
+			const to = Math.max(from, Number(toCreateTime) || from);
+			const boundedLimit = Math.max(1, Math.min(50001, Number(limit) || 20000));
+			const { rows } = await pool.query(`SELECT source_message_id, source_chat_id, source_key, source_create_time, message
+				FROM feishu_group_relay_messages
+				WHERE source_chat_id = ANY($1::text[]) AND status='sent' AND source_create_time BETWEEN $2 AND $3
+				ORDER BY source_create_time ASC, source_message_id ASC LIMIT $4`, [ids, from, to, boundedLimit]);
+			return rows;
+		},
+		async relayChatIdsBySourceKey(sourceKey) {
+			const { rows } = await pool.query('SELECT DISTINCT source_chat_id FROM feishu_group_relay_messages WHERE source_key=$1', [String(sourceKey)]);
+			return rows.map((row) => row.source_chat_id);
+		},
 		async getRelayMessageByActionCard(actionCardMessageId) {
 			const { rows } = await pool.query(`SELECT message.*, route.chat_name AS source_chat_name
 				FROM feishu_group_relay_messages message

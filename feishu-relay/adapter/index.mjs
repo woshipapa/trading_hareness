@@ -10,7 +10,8 @@ import { createLedger } from './ledger.mjs';
 import { releaseMetadata } from './release-metadata.mjs';
 import { endWritable, writeChunk } from './stream-write.mjs';
 import { singleFlight } from './single-flight.mjs';
-import { createGroupRelay } from './group-relay.mjs';
+import { createGroupRelay, decryptLarkAgentXImage } from './group-relay.mjs';
+import { bundleBaseName, bundleEntry, bundleRange, entryImageCount, resolveRouteChatIds, writeHistoryBundle } from './history-bundle.mjs';
 import { createWeChatGroupRelay } from './wechat-group-relay.mjs';
 import { createSummaryListener } from './summary-listener.mjs';
 import { createFeishuUserOauth } from './feishu-user-oauth.mjs';
@@ -1814,6 +1815,119 @@ async function handleLarkAgentXHistoryExport(request, response, url) {
 	}
 }
 
+const MAX_BUNDLE_MESSAGES = 20_000;
+const MAX_BUNDLE_IMAGE_BYTES = 20 * 1024 * 1024;
+
+// Numeric WebSocket ids per route, from every place one can be recorded: the
+// static env map, what inbound messages taught this process, and the bridge's
+// persisted bindings.
+async function numericChatIdsByRoute() {
+	const byKey = new Map();
+	const add = (chatId, sourceKey) => {
+		const id = String(chatId ?? '').trim();
+		const key = String(sourceKey ?? '').trim();
+		if (!/^\d+$/.test(id) || !key) return;
+		if (!byKey.has(key)) byKey.set(key, []);
+		if (!byKey.get(key).includes(id)) byKey.get(key).push(id);
+	};
+	for (const chatId of new Set([...larkAgentXGroupRelayRoutes.keys(), ...larkAgentXDynamicGroupRelayRoutes.keys()])) add(chatId, larkAgentXSourceKeyForChat(chatId));
+	const bridge = await larkAgentXDashboardStatus().catch(() => null);
+	for (const [chatId, route] of Object.entries(bridge?.dynamic_routes ?? {})) add(chatId, route?.source_key);
+	for (const [sourceKey, binding] of Object.entries(bridge?.persisted_route_bindings ?? {})) add(binding?.chat_id, binding?.source_key ?? sourceKey);
+	return byKey;
+}
+
+async function readBounded(stream, limit) {
+	const chunks = [];
+	let size = 0;
+	for await (const chunk of stream) {
+		size += chunk.length;
+		if (size > limit) throw new Error(`图片超过 ${Math.floor(limit / 1024 / 1024)} MiB`);
+		chunks.push(Buffer.from(chunk));
+	}
+	return Buffer.concat(chunks);
+}
+
+// A WebSocket-era image is downloaded through the bridge and decrypted with
+// the key the ledger kept; an older, officially read one comes from the
+// message API with the user's token.
+async function fetchBundleImage(ref, row) {
+	if (ref.larkagentx) {
+		if (!larkAgentXResourceUrl) throw new Error('LarkAgentX 图片下载未配置');
+		const url = new URL(larkAgentXResourceUrl);
+		for (const [key, value] of Object.entries(ref.larkagentx)) {
+			if (value !== null && value !== undefined && String(value).trim()) url.searchParams.set(key, String(value));
+		}
+		const fetched = await fetch(url, { headers: { 'x-larkagentx-token': larkAgentXIngressToken }, signal: AbortSignal.timeout(60_000) });
+		if (!fetched.ok || !fetched.body) throw new Error(`LarkAgentX 图片资源 HTTP ${fetched.status}`);
+		return decryptLarkAgentXImage(await readBounded(Readable.fromWeb(fetched.body), MAX_BUNDLE_IMAGE_BYTES + 16), ref.larkagentx);
+	}
+	const messageId = String(row?.source_message_id ?? '');
+	if (!messageId.startsWith('om_')) throw new Error('该图片没有可用的下载凭据');
+	const resource = await feishuUserOauth.sourceApi.messageResourceGet({ messageId, fileKey: ref.key, type: 'image' });
+	return readBounded(resource.getReadableStream(), MAX_BUNDLE_IMAGE_BYTES);
+}
+
+async function handleRouteHistoryBundle(request, response, url, sourceKey) {
+	const fail = (status, message) => {
+		response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ status: 'error', message }));
+	};
+	let range;
+	let route;
+	let rows;
+	let chatIds;
+	try {
+		range = bundleRange(url.searchParams.get('from'), url.searchParams.get('to'));
+	} catch (error) {
+		fail(400, error instanceof Error ? error.message : String(error));
+		return;
+	}
+	try {
+		const routes = await ledger.relayRoutes();
+		route = routes.find((item) => item.key === sourceKey);
+		if (!route) { fail(404, '源群不存在'); return; }
+		chatIds = resolveRouteChatIds({ route, routes, numericIdsByKey: await numericChatIdsByRoute(), seenUnderKey: await ledger.relayChatIdsBySourceKey(route.key) });
+		rows = await ledger.relayMessagesByChatIdsWindow(chatIds, range.fromMs, range.toMs, MAX_BUNDLE_MESSAGES + 1);
+	} catch (error) {
+		fail(503, `读取转发账本失败：${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
+	if (rows.length > MAX_BUNDLE_MESSAGES) { fail(400, `该时间范围内消息超过 ${MAX_BUNDLE_MESSAGES} 条，请缩小范围后分段导出`); return; }
+	const base = bundleBaseName(route.chatName, range.from, range.to);
+	const entries = rows.map(bundleEntry).filter((entry) => entry.blocks.length);
+	if (url.searchParams.get('dry_run') === '1') {
+		// Counts first, so the dashboard can say what is about to be downloaded.
+		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({
+			chat_name: route.chatName, from: range.from, to: range.to, filename: `${base}.zip`, chat_ids: chatIds,
+			messages: entries.length, images: entries.reduce((total, entry) => total + entryImageCount(entry), 0),
+			first_message_at: entries.length ? new Date(entries[0].time_ms).toISOString() : null,
+			last_message_at: entries.length ? new Date(entries.at(-1).time_ms).toISOString() : null,
+		}));
+		return;
+	}
+	response.writeHead(200, {
+		'content-type': 'application/zip',
+		// An ASCII fallback plus the RFC 5987 form: group names are Chinese.
+		'content-disposition': `attachment; filename="group-history_${range.from}_${range.to}.zip"; filename*=UTF-8''${encodeURIComponent(`${base}.zip`)}`,
+		'cache-control': 'no-store',
+		'x-larkagentx-event-count': String(entries.length),
+	});
+	try {
+		const summary = await writeHistoryBundle({
+			title: route.chatName, from: range.from, to: range.to, rows, fetchImage: fetchBundleImage,
+			write: (chunk) => writeChunk(response, chunk),
+		});
+		console.log(`历史资料包已导出 source=${route.key} range=${range.from}..${range.to} messages=${summary.messages} images=${summary.images} failed_images=${summary.failed_images} bytes=${summary.bytes}`);
+		await endWritable(response);
+	} catch (error) {
+		// Headers are gone; a truncated archive is the only honest signal left.
+		console.error(`历史资料包导出中断 source=${route.key}: ${error instanceof Error ? error.message : String(error)}`);
+		response.destroy(error instanceof Error ? error : new Error(String(error)));
+	}
+}
+
 async function handleLarkAgentXSend(request, response, action) {
 	// Unified outbound text send: the adapter injects the bridge token; the
 	// bridge owns the whitelist, token bucket, idempotency and audit trail, so
@@ -2164,6 +2278,11 @@ const dashboard = createServer((request, response) => {
 				response.end(JSON.stringify({ route: publicRelayRoute(route), websocket_binding: websocketBinding }));
 			});
 		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
+		return;
+	}
+	const relayRouteBundleMatch = /^\/api\/group-relay\/routes\/([A-Za-z0-9_-]+)\/bundle$/.exec(url.pathname);
+	if (relayRouteBundleMatch && request.method === 'GET') {
+		void handleRouteHistoryBundle(request, response, url, relayRouteBundleMatch[1]);
 		return;
 	}
 	const relayRouteBindMatch = /^\/api\/group-relay\/routes\/([A-Za-z0-9_-]+)\/bind$/.exec(url.pathname);

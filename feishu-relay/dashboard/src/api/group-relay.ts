@@ -54,6 +54,14 @@ export type WebsocketBinding = {
   message?: string;
 };
 
+export type BundlePreview = {
+  chat_name: string; from: string; to: string; filename: string; chat_ids: string[];
+  messages: number; images: number; first_message_at: string | null; last_message_at: string | null;
+};
+
+const bundlePath = (key: string, from: string, to: string) =>
+  `/api/group-relay/routes/${encodeURIComponent(key)}/bundle?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+
 export type SendInput = { chat_id: string; text: string; root_id?: string; idempotency_key?: string };
 
 export const groupRelayApi = {
@@ -94,6 +102,10 @@ export const groupRelayApi = {
       ? putJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}`, input)
       : postJson<T>('/api/group-relay/routes', input)
   ),
+  // The zip is streamed straight to disk by the browser, so only the counts
+  // go through fetch; the download itself is a plain navigation to bundleUrl.
+  bundlePreview: (key: string, from: string, to: string) => getJson<BundlePreview>(`${bundlePath(key, from, to)}&dry_run=1`),
+  bundleUrl: bundlePath,
   bindRoute: <T>(key: string) => postJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}/bind`, {}),
   removeRoute: <T>(key: string) => deleteJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}`),
 };

@@ -211,7 +211,7 @@ function looksLikeImage(bytes) {
 		|| bytes.subarray(0, 6).toString() === 'GIF89a';
 }
 
-function decryptLarkAgentXImage(bytes, resource) {
+export function decryptLarkAgentXImage(bytes, resource) {
 	if (looksLikeImage(bytes)) return bytes;
 	const key = Buffer.from(String(resource?.key_hex ?? ''), 'hex');
 	const iv = Buffer.from(String(resource?.iv_hex ?? ''), 'hex');
