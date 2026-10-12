@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from .datasources.http import ashare_symbol
@@ -21,7 +21,7 @@ def _body(value: Any) -> dict[str, Any]:
 
 def _observations(connection: Any, provider: str, capability: str, day: date) -> dict[str, list[list[Any]]]:
     rows = connection.execute(
-        """SELECT symbol,payload FROM quant.raw_market_observations
+        """SELECT DISTINCT ON (symbol) symbol,payload FROM quant.raw_market_observations
            WHERE provider_key=%s AND capability=%s AND market='cn' AND effective_at=%s
            ORDER BY symbol,available_at DESC""",
         (provider, capability, session_close(day)),
@@ -55,9 +55,8 @@ def _symbols(lists: dict[str, list[list[Any]]]) -> list[str]:
 def read_inputs(connection: Any, day: date) -> dict[str, Any]:
     lists, list_source = read_lists(connection, day)
     symbols = _symbols(lists)
-    bars = {
-        str(row["symbol"]): dict(row)
-        for row in connection.execute(
+    bars = {}
+    for row in connection.execute(
             """SELECT b.symbol,b.open,b.close,b.pre_close,
                        CASE WHEN b.volume > 0 AND b.amount / (b.volume * b.close / 10.0) > %s
                             THEN b.amount / 1000 ELSE b.amount END AS amount,
@@ -71,8 +70,8 @@ def read_inputs(connection: Any, day: date) -> dict[str, Any]:
                 WHERE b.trading_date=%s AND b.symbol=ANY(%s)
                   AND NOT coalesce(b.is_suspended, false) AND b.pre_close > 0 AND b.open > 0""",
             (UNIT_RATIO, day, symbols),
-        ).fetchall()
-    }
+        ).fetchall():
+        bars[str(row["symbol"])] = {**dict(row), "prior_amounts": []}
     prior = connection.execute(
         """SELECT symbol,amount FROM (
                  SELECT symbol,
@@ -80,13 +79,14 @@ def read_inputs(connection: Any, day: date) -> dict[str, Any]:
                              THEN amount / 1000 ELSE amount END AS amount,
                         row_number() OVER (PARTITION BY symbol ORDER BY trading_date DESC) AS position
                    FROM quant.canonical_bars_daily
-                  WHERE symbol=ANY(%s) AND trading_date BETWEEN %s - interval '90 days' AND %s
+                  WHERE symbol=ANY(%s) AND trading_date BETWEEN %s AND %s
                     AND NOT coalesce(is_suspended, false) AND pre_close > 0 AND open > 0
              ) recent WHERE position<=20 ORDER BY symbol,position""",
-        (UNIT_RATIO, symbols, day, day),
+        (UNIT_RATIO, symbols, day - timedelta(days=90), day - timedelta(days=1)),
     ).fetchall()
     for row in prior:
-        bars.setdefault(str(row["symbol"]), {}).setdefault("prior_amounts", []).append(float(row["amount"]))
+        if str(row["symbol"]) in bars:
+            bars[str(row["symbol"])]["prior_amounts"].append(float(row["amount"]))
     return {"lists": lists, "list_source": list_source, "bars": bars}
 
 

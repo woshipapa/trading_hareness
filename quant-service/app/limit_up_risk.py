@@ -91,7 +91,7 @@ def score_day(
             if float(bar["close"]) < limit_up - 0.005:
                 coverage["not_at_limit"] += 1
                 continue
-            prior = list(bar["prior_amounts"])
+            prior = list(bar.get("prior_amounts") or [])
             if len(prior) < 10:
                 coverage["insufficient_history"] += 1
                 continue

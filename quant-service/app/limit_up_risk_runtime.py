@@ -63,10 +63,12 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
         ).fetchall()
         sessions = list(reversed(sessions))
         if not sessions:
-            return {"version": VERSION, "days": [], "research_only": True, "live_effect": "none"}
+            return {"version": VERSION, "days": [], "stale_versions": 0, "research_only": True, "live_effect": "none"}
         readings = derived_daily_readings.newest(
             connection, CAPABILITY, sessions[0]["calendar_date"], sessions[-1]["calendar_date"],
         )
+        stale_versions = len(readings) - sum(reading.get("version") == VERSION for reading in readings)
+        readings = [reading for reading in readings if reading.get("version") == VERSION]
         next_days = {row["calendar_date"]: row["next_day"] for row in sessions}
         needed = []
         for reading in readings:
@@ -80,7 +82,8 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
             last_day = max(day for _symbol, day in needed)
         bars = connection.execute(
             """SELECT symbol,trading_date,close FROM quant.canonical_bars_daily
-                 WHERE symbol=ANY(%s) AND trading_date BETWEEN %s AND %s""",
+                 WHERE symbol=ANY(%s) AND trading_date BETWEEN %s AND %s
+                   AND NOT coalesce(is_suspended, false) AND pre_close > 0 AND open > 0 AND close > 0""",
             (symbols, first_day, last_day),
         ).fetchall() if needed else []
         closes = {(str(row["symbol"]), row["trading_date"]): float(row["close"]) for row in bars}
@@ -96,7 +99,8 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
             comparison = fifth_comparison(rows, returns)
             if comparison is not None:
                 summaries.append({"trade_date": reading["trade_date"], **comparison})
-    return {"version": VERSION, "days": summaries, "research_only": True, "live_effect": "none"}
+    return {"version": VERSION, "days": summaries, "stale_versions": stale_versions,
+            "research_only": True, "live_effect": "none"}
 
 
 def _calendar_days(database: Any, start: date, end: date) -> list[date]:

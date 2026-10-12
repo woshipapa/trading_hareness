@@ -130,6 +130,16 @@ async def append_limit_performance(
         return {"status": "skipped", "reason": "trade_date is not the current exchange date", "trade_date": str(day)}
     if local_now.time() < time(15, 0):
         return {"status": "skipped", "reason": "current exchange session has not closed", "trade_date": str(day)}
+    def session_open() -> bool:
+        with database.transaction() as connection:
+            row = connection.execute(
+                "SELECT is_open FROM quant.market_trade_calendar WHERE exchange='SSE' AND calendar_date=%s",
+                (day,),
+            ).fetchone()
+        return bool(row and row["is_open"])
+
+    if not await run_database(session_open, timeout_seconds=60):
+        return {"status": "skipped", "reason": "trade_date is not an open SSE session", "trade_date": str(day)}
     lists = await longhu_limit_performance_live(call)(day)
     items = [DayList(LONGHU_LIVE_PROVIDER, LONGHU_LIVE_CAPABILITY, f"pid:{pid}") for pid in "12345"]
     if not any(lists.get(item.list_key, ([], {}))[0] for item in items):
@@ -139,8 +149,6 @@ async def append_limit_performance(
         written = 0
         with database.transaction() as connection:
             for item in items:
-                if stored(connection, item, day):
-                    continue
                 rows, meta = lists.get(item.list_key, ([], {}))
                 written += int(store(connection, item, day, rows, meta))
         return written

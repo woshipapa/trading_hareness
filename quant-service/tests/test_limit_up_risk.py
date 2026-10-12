@@ -4,6 +4,10 @@ import json
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest import mock
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app.limit_up_risk import fifth_comparison, score_day
 from app.limit_up_risk_repository import read_inputs, read_lists
@@ -17,16 +21,19 @@ class LimitUpRiskTests(unittest.TestCase):
     def test_fixture_parity(self):
         actual = score_day(FIXTURE["lists"], FIXTURE["bars"])
         expected = {row["symbol"]: row for row in FIXTURE["expected"]}
-        self.assertEqual(len(actual["rows"]), 76)
+        actual_symbols = [row["symbol"] for row in actual["rows"]]
+        self.assertEqual(len(actual_symbols), len(FIXTURE["expected"]))
+        self.assertEqual(set(actual_symbols), set(expected))
         self.assertEqual(actual["coverage"]["malformed"], 2)
         self.assertEqual(actual["coverage"]["excluded_code"], 1)
         self.assertEqual(actual["coverage"]["insufficient_history"], 1)
-        for row in actual["rows"]:
-            for key, value in expected[row["symbol"]].items():
+        actual_by_symbol = {row["symbol"]: row for row in actual["rows"]}
+        for symbol, expected_row in expected.items():
+            for key, value in expected_row.items():
                 if key in {"symbol", "sealed_from_open"}:
-                    self.assertEqual(row[key], value)
+                    self.assertEqual(actual_by_symbol[symbol][key], value)
                 else:
-                    self.assertAlmostEqual(float(row[key]), float(value), places=9, msg=f"{row['symbol']} {key}")
+                    self.assertAlmostEqual(float(actual_by_symbol[symbol][key]), float(value), places=9, msg=f"{symbol} {key}")
 
     def test_ties_and_small_days(self):
         lists = {f"pid:{pid}": [] for pid in "12345"}
@@ -53,6 +60,28 @@ class LimitUpRiskTests(unittest.TestCase):
         self.assertEqual(source, "history")
         self.assertEqual(lists["pid:1"], [["history"]])
 
+    def test_repository_returns_complete_t_day_bars_without_prior_only_symbols(self):
+        row = ["000001", "A", 0, "", 0, "S", 1, 1, 1, 1, 0, 2, "", 1, 1, 1, 0, 0, "", "", 0, 10, 10]
+
+        class Result:
+            def __init__(self, rows): self.rows = rows
+            def fetchall(self): return self.rows
+
+        class Connection:
+            def __init__(self, t_rows, prior_rows): self.t_rows, self.prior_rows = t_rows, prior_rows
+            def execute(self, sql, _params):
+                if "raw_market_observations" in sql:
+                    return Result([{"symbol": "pid:1", "payload": {"rows": [row]}}])
+                if "canonical_bars_daily b" in sql:
+                    return Result(self.t_rows)
+                return Result(self.prior_rows)
+
+        today = {"symbol": "000001.SZ", "open": 10, "close": 11, "pre_close": 10,
+                 "amount": 10, "limit_up": 11}
+        self.assertEqual(read_inputs(Connection([today], [{"symbol": "000002.SZ", "amount": 1}]), date(2026, 9, 18))["bars"],
+                         {"000001.SZ": {**today, "prior_amounts": []}})
+        self.assertEqual(read_inputs(Connection([], [{"symbol": "000001.SZ", "amount": 1}]), date(2026, 9, 18))["bars"], {})
+
     def test_fifth_comparison_skips_thin_days_and_handles_missing_next_session(self):
         rows = [{"symbol": f"000{i:03d}.SZ", "risk": float(i)} for i in range(20)]
         comparison = fifth_comparison(rows, {row["symbol"]: (-0.06 if i == 0 else 0.01) for i, row in enumerate(rows)})
@@ -78,12 +107,40 @@ class LimitUpRiskTests(unittest.TestCase):
         self.assertIn("NOT coalesce(b.is_suspended, false)", joined)
         self.assertIn("b.pre_close > 0 AND b.open > 0", joined)
         self.assertIn("coalesce(nullif(b.limit_up, 0), limits.limit_up)", joined)
-        self.assertIn("interval '90 days'", joined)
+        self.assertIn("trading_date BETWEEN %s AND %s", joined)
+        self.assertIn("DISTINCT ON (symbol)", joined)
 
     def test_market_radar_router_exposes_daily_and_track_routes(self):
         paths = {route.path for route in build_market_radar_router(object(), lambda *_args, **_kwargs: None).routes}
         self.assertIn("/api/v1/market/limit-up-risk/daily", paths)
         self.assertIn("/api/v1/market/limit-up-risk/track", paths)
+
+    def test_limit_up_risk_handlers_read_daily_and_track_payloads(self):
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self): return object()
+                    def __exit__(self, *_args): return False
+                return Tx()
+
+        async def run_database(action, *args, **_kwargs):
+            return action(*args)
+
+        app = FastAPI()
+        app.include_router(build_market_radar_router(Database(), run_database))
+        client = TestClient(app)
+        with mock.patch("app.routers.market_radar_reads.limit_up_risk_daily_series", side_effect=[
+            {"version": "limit-up-risk-v1", "reading": None, "stale_versions": 0,
+             "research_only": True, "live_effect": "none"},
+            {"version": "limit-up-risk-v1", "reading": {"trade_date": "2026-09-18"}, "stale_versions": 0,
+             "research_only": True, "live_effect": "none"},
+        ]), mock.patch("app.routers.market_radar_reads.limit_up_risk_track", return_value={
+            "version": "limit-up-risk-v1", "days": [], "stale_versions": 1,
+            "research_only": True, "live_effect": "none",
+        }):
+            self.assertIsNone(client.get("/api/v1/market/limit-up-risk/daily").json()["reading"])
+            self.assertEqual(client.get("/api/v1/market/limit-up-risk/daily?date=2026-09-18").json()["reading"]["trade_date"], "2026-09-18")
+            self.assertEqual(client.get("/api/v1/market/limit-up-risk/track?days=3").json()["stale_versions"], 1)
 
 
 if __name__ == "__main__":

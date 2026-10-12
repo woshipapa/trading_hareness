@@ -24,8 +24,9 @@ class Result:
 
 
 class FakeDatabase:
-    def __init__(self, stored_days=()):
-        self.stored_days, self.stored_items, self.inserts = set(stored_days), set(), []
+    def __init__(self, stored_days=(), *, calendar_open=True):
+        self.stored_days, self.stored_items, self.hashes, self.inserts = set(stored_days), set(), set(), []
+        self.calendar_open = calendar_open
 
     def transaction(self):
         database = self
@@ -39,10 +40,15 @@ class FakeDatabase:
         return Tx()
 
     def execute(self, sql, params=()):
+        if "quant.market_trade_calendar" in sql:
+            return Result({"is_open": self.calendar_open})
         if sql.lstrip().startswith("SELECT 1 FROM quant.raw_market_observations"):
             key = (params[0], params[1], params[2], params[3].date())
             return Result({"x": 1} if params[3].date() in self.stored_days or key in self.stored_items else None)
         if sql.lstrip().startswith("INSERT INTO quant.raw_market_observations"):
+            if params[5] in self.hashes:
+                return Result(None)
+            self.hashes.add(params[5])
             self.inserts.append(params)
             self.stored_items.add((params[0], params[1], params[2], params[3].date()))
             return Result({"observation_id": len(self.inserts)})
@@ -119,6 +125,39 @@ class MarketHistoryBackfillTests(unittest.TestCase):
         self.assertEqual(len(database.inserts), 5)
         self.assertTrue(all(params[1] == "limit_performance_live" for params in database.inserts))
         self.assertTrue(all(params[7].obj["meta"]["target"] == "longhu_quote" for params in database.inserts))
+
+    def test_live_limit_performance_changed_revision_is_stored(self):
+        database = FakeDatabase()
+        state = {"value": "first"}
+
+        async def fetch(_request):
+            return {"pages": [{"payload": {"info": [[[state["value"]] * 23]], "errcode": "0"}}]}
+
+        asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
+        ))
+        state["value"] = "second"
+        result = asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
+        ))
+        self.assertEqual(result["stored"], 5)
+        self.assertEqual(len(database.inserts), 10)
+
+    def test_live_limit_performance_skips_non_session_dates(self):
+        database = FakeDatabase(calendar_open=False)
+        calls = 0
+
+        async def fetch(_request):
+            nonlocal calls
+            calls += 1
+            return {"pages": [{"payload": {"info": [[ ["000917"] ]]}}]}
+
+        result = asyncio.run(append_limit_performance(
+            date(2026, 9, 19), fetch, database=database, run_database=run_database,
+            now=datetime(2026, 9, 19, 15, 1, tzinfo=CN),
+        ))
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual((calls, database.inserts), (0, []))
 
     def test_live_limit_performance_skips_past_days_and_before_close(self):
         database = FakeDatabase()
