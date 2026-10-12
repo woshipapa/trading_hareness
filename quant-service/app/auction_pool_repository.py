@@ -21,11 +21,22 @@ def _previous_reading(database: Any, session_date: date) -> tuple[date | None, d
 
 def read_scored_rows(database: Any, session_date: date) -> list[dict[str, Any]]:
     """Return the prior session's risk-reading rows in their stored order."""
-    _previous, reading = _previous_reading(database, session_date)
-    return [
-        {key: row[key] for key in ("symbol", "name", "boards", "risk_rank", "sealed_from_open")}
-        for row in (reading or {}).get("rows", [])
-    ]
+    previous, reading = _previous_reading(database, session_date)
+    scored = [{key: row[key] for key in ("symbol", "name", "boards", "risk_rank", "sealed_from_open")}
+              for row in (reading or {}).get("rows", [])]
+    if previous is None or not scored:
+        return scored
+    symbols = [row["symbol"] for row in scored]
+    with database.transaction() as connection:
+        closes = connection.execute(
+            """SELECT symbol,close FROM quant.canonical_bars_daily
+                WHERE trading_date=%s AND symbol=ANY(%s)
+                  AND NOT coalesce(is_suspended, false) AND pre_close > 0 AND open > 0 AND close > 0""",
+            (previous, symbols),
+        ).fetchall()
+    by_symbol = {str(row["symbol"]): float(row["close"]) for row in closes}
+    return [{**row, **({"previous_close": by_symbol[str(row["symbol"])]}
+                       if str(row["symbol"]) in by_symbol else {})} for row in scored]
 
 
 def _broken_board_symbols(database: Any, previous: date | None) -> list[str]:

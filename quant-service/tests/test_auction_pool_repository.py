@@ -82,6 +82,15 @@ class AuctionPoolRepositoryTests(unittest.TestCase):
                 "symbol": "000002.SZ", "name": "B", "boards": 1, "risk_rank": 20, "sealed_from_open": False,
             }])
 
+    def test_scored_rows_add_previous_close_from_valid_daily_bar(self):
+        database = Database([{"symbol": "000002.SZ", "close": 12.5}])
+        reading = {"rows": [{"symbol": "000002.SZ", "name": "B", "boards": 1, "risk_rank": 20,
+                             "sealed_from_open": False}]}
+        with patch("app.auction_pool_repository.previous_trading_day", return_value=self.PREVIOUS), \
+             patch("app.auction_pool_repository.limit_up_risk_runtime.daily", return_value=reading):
+            self.assertEqual(read_scored_rows(database, self.SESSION)[0]["previous_close"], 12.5)
+            self.assertIn("NOT coalesce(is_suspended, false)", database.connection.calls[-1][0])
+
 
 if __name__ == "__main__":
     unittest.main()

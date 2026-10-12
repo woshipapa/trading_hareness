@@ -385,7 +385,7 @@ from .tdx_shadow_snapshot_runtime import (
     TdxShadowSnapshotDependencies, TdxShadowSnapshotRuntime, run_tdx_shadow_snapshot_loop,
 )
 from .auction_pool_runtime import AuctionPoolCaptureDependencies, AuctionPoolCaptureRuntime, run_auction_pool_capture_loop
-from .auction_pool_repository import read_pool as read_auction_pool
+from .auction_pool_repository import read_pool as read_auction_pool, read_scored_rows as read_auction_scored_rows
 from .datasources.sources.tdx_microstructure import fetch_auction_curve
 from .datasources.sources.tdx_legacy_misc import fetch_all_a_snapshot as fetch_tdx_all_a_snapshot
 from .market_radar_runtime import MarketRadarDependencies, MarketRadarRuntime
@@ -3179,6 +3179,7 @@ auction_pool_runtime = AuctionPoolCaptureRuntime(AuctionPoolCaptureDependencies(
     database=db,
     storage_allowed=auction_capture_storage_allowed,
     read_pool=read_auction_pool,
+    read_scored_rows=read_auction_scored_rows,
 ))
 
 

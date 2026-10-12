@@ -9,7 +9,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .auction_open_desk import auction_timetable
+from . import derived_daily_readings
+from .auction_open_desk import VERSION, auction_timetable, auction_track_summary, build_auction_table
 from .datasources.sources.tdx_protocol import TdxProtocolError
 from .fuyao_provider import FuyaoProviderError
 from .licensed_stock_api import UpstreamStockApiError
@@ -25,6 +26,7 @@ CURVE_PROVIDER = "tdx_public"
 CURVE_CAPABILITY = "auction_curve_daily"
 BID_PROVIDER = "longhuvip"
 BID_CAPABILITY = "auction_bid_daily"
+TABLE_CAPABILITY = "auction_open_desk_daily"
 CN_TZ = ZoneInfo("Asia/Shanghai")
 DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
 SESSION_GATE_TIMEOUT_SECONDS = 10
@@ -57,6 +59,7 @@ class AuctionPoolCaptureDependencies:
     database: Any
     storage_allowed: Callable[[], Awaitable[tuple[bool, dict[str, Any]]]]
     read_pool: Callable[[Any, date], list[str]]
+    read_scored_rows: Callable[[Any, date], list[dict[str, Any]]] = lambda _database, _day: []
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
     session_gate: Callable[[Any, datetime], tuple[bool, str]] = market_observation_session
@@ -72,7 +75,13 @@ class AuctionPoolCaptureRuntime:
             timeout_seconds=PERSIST_TIMEOUT_SECONDS,
         )
 
-    async def _capture_tick(self, scheduled_at: datetime, pool: list[str]) -> dict[str, Any]:
+    async def _persist_table(self, reading: dict[str, Any]) -> dict[str, int]:
+        return await self.deps.run_database(
+            derived_daily_readings.store, self.deps.database, TABLE_CAPABILITY, [reading],
+            timeout_seconds=PERSIST_TIMEOUT_SECONDS,
+        )
+
+    async def _capture_tick(self, scheduled_at: datetime, pool: list[str], finality_symbols: list[str] | None = None) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
         status = "stored"
@@ -90,7 +99,7 @@ class AuctionPoolCaptureRuntime:
                 return await self._store_tick(scheduled_at, pool, rows, status, str(error))
             except asyncio.TimeoutError as error:
                 return await self._store_tick(scheduled_at, pool, rows, "failed", str(error) or "Fuyao request timed out")
-        status = "final" if _all_final(events, pool) else status
+        status = "final" if _all_final(events, finality_symbols or pool) else status
         return await self._store_tick(scheduled_at, pool, rows, status, None)
 
     async def _store_tick(
@@ -107,7 +116,7 @@ class AuctionPoolCaptureRuntime:
             stored = await self._persist(AUCTION_PROVIDER, AUCTION_CAPABILITY, document)
         except DATABASE_UNAVAILABLE as caught:
             return _database_busy(caught)
-        return {"status": status, "stored": int(stored), "final": status == "final", "rows": len(rows)}
+        return {"status": status, "stored": int(stored), "final": status == "final", "rows": len(rows), "rows_data": rows}
 
     async def _capture_curves(self, session_date: date, pool: list[str]) -> dict[str, int]:
         counts = {"stored": 0, "failed": 0}
@@ -188,22 +197,38 @@ class AuctionPoolCaptureRuntime:
             return _database_busy(error)
         if not pool:
             return {"status": "no_pool"}
+        try:
+            scored_rows = await self.deps.run_database(
+                self.deps.read_scored_rows, self.deps.database, trade_date, timeout_seconds=SESSION_GATE_TIMEOUT_SECONDS,
+            )
+        except DATABASE_UNAVAILABLE as error:
+            return _database_busy(error)
         summary = {"scheduled": 0, "stored": 0, "rate_limited": 0, "failed": 0, "curves": 0, "bids": 0}
+        table_stored = False
+        last_rows: list[dict[str, Any]] = []
+        scored_pool = [row for row in scored_rows if str(row["symbol"]) in pool]
         for scheduled_at in auction_timetable(trade_date):
             now = self.deps.now().astimezone(CN_TZ)
             if now >= scheduled_at:
                 continue
             await self.deps.sleep((scheduled_at - now).total_seconds())
             summary["scheduled"] += 1
-            result = await self._capture_tick(scheduled_at, pool)
+            result = await self._capture_tick(scheduled_at, pool, [str(row["symbol"]) for row in scored_pool])
+            last_rows = result.get("rows_data") or []
             summary["stored"] += int(result.get("stored") or 0)
             if result.get("status") in {"rate_limited", "failed"}:
                 summary[result["status"]] += 1
             if result.get("final"):
+                if scored_pool:
+                    reading = build_auction_table(scored_pool, last_rows, trade_date=trade_date)
+                    await self._persist_table(reading)
+                    table_stored = True
                 break
+        if scored_pool and not table_stored:
+            await self._persist_table(build_auction_table(scored_pool, last_rows, trade_date=trade_date))
         summary["curves"] = await self._capture_curves(trade_date, pool)
         summary["bids"] = await self._capture_bids(trade_date, pool)
-        return {"status": "completed", **summary}
+        return {"status": "completed", **summary, "table_stored": bool(scored_pool)}
 
 
 async def run_auction_pool_capture_loop(
@@ -233,7 +258,48 @@ async def run_auction_pool_capture_loop(
         await runtime.deps.sleep(max(0, (target - sleep_from).total_seconds()))
 
 
+def daily_series(database: Any, day: date | None = None) -> dict[str, Any]:
+    from . import derived_daily_readings
+    end = day or datetime.now(CN_TZ).date()
+    with database.transaction() as connection:
+        readings = derived_daily_readings.newest(connection, TABLE_CAPABILITY, end - timedelta(days=800), end)
+    valid = [reading for reading in readings if reading.get("version") == VERSION]
+    if day is not None:
+        valid = [reading for reading in valid if reading.get("trade_date") == day.isoformat()]
+    return {"version": VERSION, "reading": valid[-1] if valid else None,
+            "stale_versions": len(readings) - len(valid), "research_only": True, "live_effect": "none"}
+
+
+def track(database: Any, days: int = 120) -> dict[str, Any]:
+    from . import derived_daily_readings
+    with database.transaction() as connection:
+        sessions = list(reversed(connection.execute(
+            """SELECT calendar_date FROM quant.market_trade_calendar
+                 WHERE exchange='SSE' AND is_open ORDER BY calendar_date DESC LIMIT %s""", (days,)).fetchall()))
+        if not sessions:
+            return {"version": VERSION, "days": [], "stale_versions": 0, "research_only": True, "live_effect": "none"}
+        readings = derived_daily_readings.newest(connection, TABLE_CAPABILITY, sessions[0]["calendar_date"], sessions[-1]["calendar_date"])
+        stale = len(readings) - sum(reading.get("version") == VERSION for reading in readings)
+        readings = [reading for reading in readings if reading.get("version") == VERSION]
+        symbols, dates = [], []
+        for reading in readings:
+            day = reading["trade_date"]
+            for row in reading.get("rows") or []:
+                symbols.append(str(row["symbol"]))
+                dates.append(day)
+        bars = connection.execute(
+            """WITH wanted(symbol,trading_date) AS (SELECT * FROM unnest(%s::text[], %s::date[]))
+               SELECT b.symbol,b.trading_date,b.open,b.close
+                 FROM quant.canonical_bars_daily b JOIN wanted w
+                   ON w.symbol=b.symbol AND w.trading_date=b.trading_date
+                WHERE NOT coalesce(b.is_suspended, false) AND b.pre_close > 0 AND b.open > 0 AND b.close > 0""",
+            (symbols, dates),
+        ).fetchall() if symbols else []
+    return {**auction_track_summary(readings, bars), "stale_versions": stale}
+
+
 __all__ = [
     "AUCTION_CAPABILITY", "AUCTION_PROVIDER", "AuctionPoolCaptureDependencies", "AuctionPoolCaptureRuntime",
-    "BID_CAPABILITY", "BID_PROVIDER", "CURVE_CAPABILITY", "CURVE_PROVIDER", "run_auction_pool_capture_loop",
+    "BID_CAPABILITY", "BID_PROVIDER", "CURVE_CAPABILITY", "CURVE_PROVIDER", "TABLE_CAPABILITY", "daily_series",
+    "run_auction_pool_capture_loop", "track",
 ]

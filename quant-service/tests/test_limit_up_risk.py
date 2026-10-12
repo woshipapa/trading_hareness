@@ -146,6 +146,25 @@ class LimitUpRiskTests(unittest.TestCase):
             self.assertEqual(client.get("/api/v1/market/limit-up-risk/daily?date=2026-09-18").json()["reading"]["trade_date"], "2026-09-18")
             self.assertEqual(client.get("/api/v1/market/limit-up-risk/track?days=3").json()["stale_versions"], 1)
 
+    def test_auction_desk_handlers_expose_daily_and_track(self):
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self): return object()
+                    def __exit__(self, *_args): return False
+                return Tx()
+
+        async def run_database(action, *args, **_kwargs):
+            return action(*args)
+
+        app = FastAPI()
+        app.include_router(build_market_radar_router(Database(), run_database))
+        client = TestClient(app)
+        with mock.patch("app.routers.market_radar_reads.auction_open_desk_daily_series", return_value={"reading": None}), \
+             mock.patch("app.routers.market_radar_reads.auction_open_desk_track", return_value={"days": []}):
+            self.assertIsNone(client.get("/api/v1/market/auction-desk/daily").json()["reading"])
+            self.assertEqual(client.get("/api/v1/market/auction-desk/track?days=3").json()["days"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

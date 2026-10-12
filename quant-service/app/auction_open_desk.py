@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
+from .limit_up_risk import _limit_up
 from .strategy_outcome_measures import SEALED_TOLERANCE
 
 VERSION = "auction-desk-v1"
@@ -167,8 +168,68 @@ def accepts_snapshot_row(row: Mapping[str, Any], previous_close: float) -> bool:
     )
 
 
+def build_auction_table(
+    scored_rows: Sequence[Mapping[str, Any]], snapshot_rows: Sequence[Mapping[str, Any]],
+    *, trade_date: date | None = None,
+) -> dict[str, Any]:
+    """Build the research-only 09:25 table from one normalized tick."""
+    by_symbol = {str(row.get("thscode") or row.get("ts_code") or row.get("symbol")): row for row in snapshot_rows}
+    rows: list[dict[str, Any]] = []
+    for scored in scored_rows:
+        symbol = str(scored["symbol"])
+        previous_close = optional_float(scored.get("previous_close"))
+        snapshot = by_symbol.get(symbol)
+        if previous_close is None or snapshot is None or not accepts_snapshot_row(snapshot, previous_close):
+            continue
+        opening = optional_float(snapshot.get("open_price"))
+        if opening is None:
+            opening = optional_float(snapshot.get("auction_price"))
+        if opening is None:
+            continue
+        gap = open_gap(opening, previous_close)
+        limit_price = _limit_up(symbol.split(".", 1)[0], {"pre_close": previous_close})
+        at_limit = opens_at_limit(opening, limit_price)
+        bucket = gap_bucket(gap, opened_at_limit=at_limit)
+        rows.append({
+            "symbol": symbol, "name": scored.get("name"), "open": opening, "gap": gap,
+            "opens_at_limit": at_limit, "bucket": bucket,
+            "risk_rank": scored.get("risk_rank"), "boards": scored.get("boards"),
+            "sealed_from_open": scored.get("sealed_from_open"),
+            "amount": snapshot.get("auction_amount"), "volume": snapshot.get("auction_volume"),
+            "unmatched": snapshot.get("auction_unmatched"),
+        })
+    return {
+        "trade_date": trade_date.isoformat() if trade_date else None,
+        "version": VERSION, "rows": rows,
+        "bucket_statistics": {key: dict(value) for key, value in BUCKET_STATISTICS.items()},
+        "coverage": {"scored": len(scored_rows), "accepted": len(rows), "missing": len(scored_rows) - len(rows)},
+        "research_only": True, "live_effect": "none",
+    }
+
+
+def auction_track_summary(readings: Sequence[Mapping[str, Any]], bars: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Summarize realised open-to-close returns by session and auction bucket."""
+    by_pair = {(str(row["symbol"]), str(row["trading_date"])): row for row in bars}
+    sessions = []
+    for reading in readings:
+        day = str(reading["trade_date"])
+        buckets: dict[str, list[float]] = {}
+        for row in reading.get("rows") or []:
+            bar = by_pair.get((str(row["symbol"]), day))
+            opening, close = optional_float(row.get("open")), optional_float(bar.get("close")) if bar else None
+            if opening is not None and close is not None and opening > 0:
+                buckets.setdefault(str(row["bucket"]), []).append(close / opening - 1)
+        sessions.append({"trade_date": day, "buckets": {
+            bucket: {"stocks": len(values), "open_to_close_mean": sum(values) / len(values),
+                     "share_open_to_close_le_minus_5": sum(value <= -0.05 for value in values) / len(values)}
+            for bucket, values in buckets.items()
+        }})
+    return {"version": VERSION, "days": sessions, "research_only": True, "live_effect": "none"}
+
+
 __all__ = [
     "AUCTION_POOL_MAX_SYMBOLS", "BUCKET_STATISTICS", "PRE_CLOSE_ABSOLUTE_TOLERANCE",
     "PRE_CLOSE_RELATIVE_TOLERANCE", "VERSION", "accepts_snapshot_row", "auction_timetable",
     "build_auction_pool", "gap_bucket", "open_gap", "next_auction_tick", "opens_at_limit", "optional_float",
+    "auction_track_summary", "build_auction_table",
 ]

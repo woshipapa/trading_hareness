@@ -14,6 +14,8 @@ from app.auction_open_desk import (
     next_auction_tick,
     open_gap,
     opens_at_limit,
+    build_auction_table,
+    auction_track_summary,
 )
 
 
@@ -65,3 +67,23 @@ class AuctionOpenDeskRulesTests(unittest.TestCase):
         for stats in BUCKET_STATISTICS.values():
             if abs(stats["open_to_close_mean"]) < 2 * stats["open_to_close_se"]:
                 self.assertNotRegex(stats["label"], r"higher at the close|lower at the close")
+
+    def test_table_accepts_final_rows_and_falls_back_to_auction_price(self) -> None:
+        scored = [{"symbol": "000001.SZ", "name": "A", "boards": 1, "risk_rank": 10,
+                   "sealed_from_open": True, "previous_close": 10.0},
+                  {"symbol": "000002.SZ", "name": "B", "boards": 2, "risk_rank": 20,
+                   "sealed_from_open": False, "previous_close": 10.0}]
+        result = build_auction_table(scored, [
+            {"thscode": "000001.SZ", "data_status": "final", "pre_close_price": 10,
+             "open_price": "", "auction_price": 11, "auction_amount": 1, "auction_volume": 2, "auction_unmatched": 3},
+            {"thscode": "000002.SZ", "data_status": "pending", "pre_close_price": 10, "open_price": 10},
+        ], trade_date=date(2026, 10, 12))
+        self.assertEqual(result["coverage"], {"scored": 2, "accepted": 1, "missing": 1})
+        self.assertEqual(result["rows"][0]["open"], 11.0)
+        self.assertEqual(result["rows"][0]["bucket"], "opens_at_limit")
+
+    def test_track_summary_uses_only_matching_daily_bars(self) -> None:
+        reading = {"trade_date": "2026-10-12", "rows": [{"symbol": "000001.SZ", "bucket": "0..2%", "open": 10}]}
+        result = auction_track_summary([reading], [{"symbol": "000001.SZ", "trading_date": date(2026, 10, 12), "close": 9.5}])
+        self.assertEqual(result["days"][0]["buckets"]["0..2%"]["stocks"], 1)
+        self.assertEqual(result["days"][0]["buckets"]["0..2%"]["share_open_to_close_le_minus_5"], 1.0)

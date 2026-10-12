@@ -20,6 +20,7 @@ from typing import Any, Final
 #: When in the day an indicator should exist.
 INTRADAY_MINUTE: Final = "intraday_minute"        # from the 09:25 match, every minute
 SESSION_OPEN: Final = "session_open"              # once per session, shortly after the open
+AUCTION_OPEN: Final = "auction_open"              # opening-auction table after the first minutes
 POST_CLOSE: Final = "post_close"                  # after the close pipeline (about 16:00-17:00)
 PREVIOUS_SESSION: Final = "previous_session"      # the session before trade_date, available all day
 
@@ -53,6 +54,10 @@ INDICATORS: Final[tuple[Indicator, ...]] = (
               ("longhuvip limit-performance lists", "canonical_bars_daily / daily_trade_limits"),
               "raw_market_observations: local_derived/limit_up_risk_daily", "/api/v1/market/limit-up-risk/daily",
               POST_CLOSE, "固定 loss5 系数；仅研究用途，不产生操作效果"),
+    Indicator("market.auction_open_desk", "集合竞价开盘桌（研究证据）", "market", "session", "rows / return",
+              ("fuyao_ths a_share_auction_snapshot", "limit_up_risk_daily"),
+              "raw_market_observations: local_derived/auction_open_desk_daily", "/api/v1/market/auction-desk/daily",
+              AUCTION_OPEN, "按昨日涨停风险池与集合竞价终值构建；仅研究用途，不产生操作效果"),
     Indicator("market.temperature_intraday", "分时情绪温度（5 分钟，午休断开）", "market", "minute", "0-100",
               ("market.minute_documents", "stock.limit_prices", "market.temperature 的日线历史"),
               "raw_market_observations: local_derived/market_temperature_intraday（盘后存整日）",
@@ -113,5 +118,5 @@ def registry() -> list[dict[str, Any]]:
     return [{**asdict(item), "sources": list(item.sources), "live_effect": "none"} for item in INDICATORS]
 
 
-__all__ = ["BY_KEY", "INDICATORS", "INTRADAY_MINUTE", "Indicator", "POST_CLOSE", "PREVIOUS_SESSION", "SESSION_OPEN",
+__all__ = ["AUCTION_OPEN", "BY_KEY", "INDICATORS", "INTRADAY_MINUTE", "Indicator", "POST_CLOSE", "PREVIOUS_SESSION", "SESSION_OPEN",
            "registry"]
