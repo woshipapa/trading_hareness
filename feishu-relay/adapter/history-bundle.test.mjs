@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { crc32, inflateRawSync } from 'node:zlib';
 import {
-	beijingClock, beijingDate, bundleBaseName, bundleEntry, bundleRange, createZipWriter, renderJsonl, renderTranscript,
+	beijingClock, beijingDate, bundleBaseName, bundleEntries, bundleEntry, bundleRange, cardNeedsImageLookup, createZipWriter, renderJsonl, renderTranscript, unnamedSendersByChat,
 	resolveRouteChatIds, sniffImageExtension, writeHistoryBundle,
 } from './history-bundle.mjs';
 
@@ -178,4 +178,71 @@ test('a renamed route exports its own group, not the group that used to hold its
 	assert.deepEqual(resolveRouteChatIds({ route: routes[1], routes, numericIdsByKey, seenUnderKey: ['7678'] }), ['7678', 'oc_talk']);
 	// an older id nobody else claims stays with the route it was recorded under
 	assert.deepEqual(resolveRouteChatIds({ route: routes[2], routes, numericIdsByKey, seenUnderKey: ['7665', 'oc_legacy'] }), ['7665', 'oc_legacy']);
+});
+
+const KEY = 'ab'.repeat(32), IV = 'cd'.repeat(12);
+const clientCard = (text) => JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'img', property: { imageID: '5' } }, { tag: 'markdown', property: { elements: [{ tag: 'plain_text', property: { content: text } }] } }] } });
+const wsCardRow = (id, text, extra = {}) => ({ source_message_id: id, source_chat_id: '7684', source_create_time: T0, message: { msg_type: 'interactive', sender: { sender_id: '7001' }, body: { content: clientCard(text) }, ...extra } });
+
+test('card pictures come from the stored keys, else the bridge spool, else the official image keys', () => {
+	// 1. keys stored with the row (cards relayed from now on)
+	const stored = bundleEntry(wsCardRow('101', '研报摘要', { larkagentx_images: [{ image_id: 'img_stored', key_hex: KEY, iv_hex: IV }] }), { cardImages: new Map([['101', [{ image_id: 'img_spool', key_hex: KEY, iv_hex: IV }]]]) });
+	assert.deepEqual(stored.blocks, [{ kind: 'text', text: '研报摘要' }, { kind: 'image', ref: { key: 'img_stored', larkagentx: { image_id: 'img_stored', key_hex: KEY, iv_hex: IV } } }]);
+	// 2. an older row: keys looked up in the bridge spool
+	const spooled = bundleEntry(wsCardRow('102', '调研纪要'), { cardImages: new Map([['102', [{ image_id: 'img_spool', key_hex: KEY, iv_hex: IV }, { image_id: 'img_spool', key_hex: KEY, iv_hex: IV }, { image_id: 'bad', key_hex: 'x', iv_hex: 'y' }]]]) });
+	assert.deepEqual(spooled.blocks.filter((block) => block.kind === 'image').map((block) => block.ref.key), ['img_spool']);
+	// nothing known: the internal element number is not an image key, so no bogus image
+	assert.deepEqual(bundleEntry(wsCardRow('103', '只有文字能导出')).blocks, [{ kind: 'text', text: '只有文字能导出' }]);
+	// 3. a card read through the official API carries portable keys, fetched by message id
+	const official = bundleEntry({ source_message_id: 'om_1', source_chat_id: 'oc_1', source_create_time: T0, message: { msg_type: 'interactive', sender: { id: 'ou_1', sender_name: '杨宁' },
+		body: { content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'img', img_key: 'img_v3_official', alt: { tag: 'plain_text', content: '' } }, { tag: 'markdown', content: '盘前要点' }] } }) } } });
+	assert.deepEqual(official.blocks, [{ kind: 'text', text: '盘前要点' }, { kind: 'image', ref: { key: 'img_v3_official', larkagentx: null } }]);
+});
+
+test('the client-upgrade banner picture is never exported, in either card shape', () => {
+	const wsBanner = wsCardRow('104', '请升级至最新版本客户端，以查看内容', { larkagentx_images: [{ image_id: 'img_banner', key_hex: KEY, iv_hex: IV }] });
+	assert.deepEqual(bundleEntry(wsBanner, { cardImages: new Map([['104', [{ image_id: 'img_banner', key_hex: KEY, iv_hex: IV }]]]) }).blocks, []);
+	const officialBanner = { source_message_id: 'om_2', source_chat_id: 'oc_1', source_create_time: T0, message: { msg_type: 'interactive', body: { content: JSON.stringify({ title: null, elements: [[{ tag: 'img', image_key: 'img_v3_banner' }, { tag: 'text', text: 'Upgrade to the latest app version to view the content' }]] }) } } };
+	assert.deepEqual(bundleEntry(officialBanner).blocks, []);
+	assert.deepEqual(bundleEntries([wsBanner, officialBanner]), []);
+});
+
+test('only WebSocket-era cards that show a picture and lack stored keys are looked up', () => {
+	assert.equal(cardNeedsImageLookup(wsCardRow('105', 'x')), true);
+	assert.equal(cardNeedsImageLookup(wsCardRow('106', 'x', { larkagentx_images: [{ image_id: 'i', key_hex: KEY, iv_hex: IV }] })), false);
+	assert.equal(cardNeedsImageLookup({ source_message_id: 'om_3', source_chat_id: 'oc_1', message: { msg_type: 'interactive', body: { content: clientCard('x') } } }), false);
+	assert.equal(cardNeedsImageLookup({ source_message_id: '107', source_chat_id: '7684', message: { msg_type: 'interactive', body: { content: JSON.stringify({ schema: '2.0', body: { elements: [{ tag: 'markdown', content: '纯文字卡片' }] } }) } } }), false);
+	assert.equal(cardNeedsImageLookup({ source_message_id: '108', source_chat_id: '7684', message: { msg_type: 'text', body: { content: '{"text":"imageID"}' } } }), false);
+});
+
+test('resolved sender names fill in only where the message carries none', async () => {
+	const rows = [
+		{ source_message_id: '201', source_chat_id: '7684', source_create_time: T0, message: { msg_type: 'text', sender: { sender_id: '7001' }, body: { content: JSON.stringify({ text: '甲说' }) } } },
+		{ source_message_id: '202', source_chat_id: '7684', source_create_time: T0 + 1000, message: { msg_type: 'text', sender: { sender_id: '7002' }, body: { content: JSON.stringify({ text: '乙说' }) } } },
+		{ source_message_id: 'om_9', source_chat_id: 'oc_1', source_create_time: T0 + 2000, message: { msg_type: 'text', sender: { id: 'ou_9', sender_name: '已有名字' }, body: { content: JSON.stringify({ text: '丙说' }) } } },
+	];
+	assert.deepEqual([...unnamedSendersByChat(rows)], [['7684', ['7001', '7002']]]);
+	const out = collector();
+	await writeHistoryBundle({ title: 'g', from: '2026-10-10', to: '2026-10-10', rows, write: out.write, fetchImage: async () => JPEG, senderNames: new Map([['7001', '小刘老师'], ['ou_9', '不该覆盖']]) });
+	const files = readZip(out.buffer());
+	const transcript = files.get('g_2026-10-10_2026-10-10/transcript.md').toString('utf8');
+	assert.ok(transcript.includes('[16:54:03] 小刘老师\n甲说'));
+	assert.ok(transcript.includes('[16:54:04] 7002\n乙说'));
+	assert.ok(transcript.includes('[16:54:05] 已有名字\n丙说'));
+	assert.match(transcript, /发送者有名字时显示名字，否则显示为平台 ID/);
+	const lines = files.get('g_2026-10-10_2026-10-10/messages.jsonl').toString('utf8').trim().split('\n').map((line) => JSON.parse(line));
+	assert.deepEqual(lines.map((line) => [line.sender_id, line.sender_name]), [['7001', '小刘老师'], ['7002', null], ['ou_9', '已有名字']]);
+});
+
+test('a card with a picture is packed with its text first and the picture after it', async () => {
+	const out = collector();
+	const summary = await writeHistoryBundle({
+		title: '调研纪要', from: '2026-10-10', to: '2026-10-10', rows: [wsCardRow('301', '核心结论：景气度上行')], write: out.write,
+		cardImages: new Map([['301', [{ image_id: 'img_card', key_hex: KEY, iv_hex: IV }]]]),
+		fetchImage: async (ref) => { assert.deepEqual(ref, { key: 'img_card', larkagentx: { image_id: 'img_card', key_hex: KEY, iv_hex: IV } }); return PNG; },
+	});
+	assert.equal(summary.images, 1);
+	const files = readZip(out.buffer());
+	assert.ok(files.get('调研纪要_2026-10-10_2026-10-10/transcript.md').toString('utf8').includes('[16:54:03] 7001\n核心结论：景气度上行\n![图片](images/20261010-165403_0001_1.png)\n'));
+	assert.deepEqual(files.get('调研纪要_2026-10-10_2026-10-10/images/20261010-165403_0001_1.png'), PNG);
 });

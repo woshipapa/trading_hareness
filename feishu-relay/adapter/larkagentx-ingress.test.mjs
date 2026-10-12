@@ -427,3 +427,19 @@ test('agreeing, static-only and declared-only inputs resolve as before', () => {
 	assert.throws(() => resolveLarkAgentXSource({ chatId: '9', routes: ROUTES }), /未配置 LarkAgentX 源群/);
 	assert.throws(() => resolveLarkAgentXSource({ chatId: '9', configuredKey: 'gone', routes: ROUTES }), /未找到实时源路由/);
 });
+
+test('a relayed card keeps its real image keys beside the card JSON, and a banner card keeps none', () => {
+	const KEY = 'ab'.repeat(32), IV = 'cd'.repeat(12);
+	const base = {
+		msg_id: '7695597877444906163', msg_type_name: 'CARD', chat_id: '7684122107030031634', from_id: '7001', create_time: 1791765299,
+		content: '[卡片]', _larkagentx_images: [{ image_id: 'img_v3_card_1', key_hex: KEY, iv_hex: IV, source_id: '5' }],
+	};
+	const card = { schema: '2.0', body: { elements: [{ tag: 'img', property: { imageID: '5' } }, { tag: 'markdown', property: { elements: [{ tag: 'plain_text', property: { content: '研报摘要' } }] } }] } };
+	const withImage = normalizeLarkAgentXRelayMessage({ ...base, content_data: { jsonCard: JSON.stringify(card), richtext: { imageIds: ['5'], elements: { dictionary: { 1: { tag: 1, property: '研报摘要' }, 5: { tag: 2, property: 'x' } } } } } });
+	assert.equal(withImage.msg_type, 'interactive');
+	assert.deepEqual(withImage.larkagentx_images, [{ image_id: 'img_v3_card_1', key_hex: KEY, iv_hex: IV }]);
+	const banner = normalizeLarkAgentXRelayMessage({ ...base, content_data: { jsonCard: JSON.stringify(card), richtext: { imageIds: ['5'], elements: { dictionary: { 1: { tag: 1, property: '请升级至最新版本客户端，以查看内容' }, 5: { tag: 2, property: 'x' } } } } } });
+	assert.equal(banner.larkagentx_images, undefined);
+	const noKeys = normalizeLarkAgentXRelayMessage({ ...base, _larkagentx_images: [{ image_id: 'img_v3_card_1', key_hex: '[redacted]', iv_hex: '' }], content_data: { jsonCard: JSON.stringify(card) } });
+	assert.equal(noKeys.larkagentx_images, undefined);
+});

@@ -11,7 +11,7 @@ import { releaseMetadata } from './release-metadata.mjs';
 import { endWritable, writeChunk } from './stream-write.mjs';
 import { singleFlight } from './single-flight.mjs';
 import { createGroupRelay, decryptLarkAgentXImage } from './group-relay.mjs';
-import { bundleBaseName, bundleEntry, bundleRange, entryImageCount, resolveRouteChatIds, writeHistoryBundle } from './history-bundle.mjs';
+import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
 import { createWeChatGroupRelay } from './wechat-group-relay.mjs';
 import { createSummaryListener } from './summary-listener.mjs';
 import { createFeishuUserOauth } from './feishu-user-oauth.mjs';
@@ -1868,6 +1868,51 @@ async function fetchBundleImage(ref, row) {
 	return readBounded(resource.getReadableStream(), MAX_BUNDLE_IMAGE_BYTES);
 }
 
+async function bridgePostJson(pathname, payload, timeoutMs) {
+	if (!larkAgentXIngressToken || !larkAgentXHealthUrl) throw new Error('LarkAgentX 桥接未配置');
+	const bridgeUrl = new URL(larkAgentXHealthUrl);
+	bridgeUrl.pathname = pathname;
+	bridgeUrl.search = '';
+	const upstream = await fetch(bridgeUrl, {
+		method: 'POST', headers: { 'x-larkagentx-token': larkAgentXIngressToken, 'content-type': 'application/json' },
+		body: JSON.stringify(payload), signal: AbortSignal.timeout(timeoutMs),
+	});
+	const body = await upstream.json().catch(() => ({}));
+	if (!upstream.ok) throw new Error(String(body?.message ?? `bridge HTTP ${upstream.status}`).slice(0, 200));
+	return body;
+}
+
+// What only the bridge knows: the picture keys of older cards (kept in its
+// event spool) and the display name behind a numeric sender id.  Both are
+// extras: when the bridge cannot answer, the export goes out without them.
+async function bundleContext(rows, { names = true } = {}) {
+	const cardImages = new Map();
+	const senderNames = new Map();
+	const wanted = rows.filter(cardNeedsImageLookup).map((row) => ({ chat_id: String(row.source_chat_id), message_id: String(row.source_message_id) }));
+	try {
+		// The bridge accepts a 64 KiB body; 400 id pairs stay well inside it.
+		for (let start = 0; start < wanted.length; start += 400) {
+			const result = await bridgePostJson('/history/card-images', { messages: wanted.slice(start, start + 400) }, 30_000);
+			for (const [messageId, images] of Object.entries(result?.images ?? {})) cardImages.set(messageId, images);
+		}
+	} catch (error) {
+		console.warn(`资料包：卡片图片查询失败，卡片只导出文字：${error instanceof Error ? error.message : String(error)}`);
+	}
+	if (names) {
+		try {
+			for (const [chatId, userIds] of unnamedSendersByChat(rows)) {
+				for (let start = 0; start < userIds.length; start += 200) {
+					const result = await bridgePostJson('/users/names', { chat_id: chatId, user_ids: userIds.slice(start, start + 200) }, 120_000);
+					for (const [userId, name] of Object.entries(result?.names ?? {})) senderNames.set(userId, name);
+				}
+			}
+		} catch (error) {
+			console.warn(`资料包：发送者名字解析失败，以 ID 显示：${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	return { cardImages, senderNames };
+}
+
 async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	const fail = (status, message) => {
 		response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1895,8 +1940,12 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	}
 	if (rows.length > MAX_BUNDLE_MESSAGES) { fail(400, `该时间范围内消息超过 ${MAX_BUNDLE_MESSAGES} 条，请缩小范围后分段导出`); return; }
 	const base = bundleBaseName(route.chatName, range.from, range.to);
-	const entries = rows.map(bundleEntry).filter((entry) => entry.blocks.length);
-	if (url.searchParams.get('dry_run') === '1') {
+	const dryRun = url.searchParams.get('dry_run') === '1';
+	// The preview needs the picture count but not the names (one gateway call
+	// per unknown sender), so names are resolved only for the real export.
+	const context = await bundleContext(rows, { names: !dryRun });
+	const entries = bundleEntries(rows, context);
+	if (dryRun) {
 		// Counts first, so the dashboard can say what is about to be downloaded.
 		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({
@@ -1917,6 +1966,7 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	try {
 		const summary = await writeHistoryBundle({
 			title: route.chatName, from: range.from, to: range.to, rows, fetchImage: fetchBundleImage,
+			cardImages: context.cardImages, senderNames: context.senderNames,
 			write: (chunk) => writeChunk(response, chunk),
 		});
 		console.log(`历史资料包已导出 source=${route.key} range=${range.from}..${range.to} messages=${summary.messages} images=${summary.images} failed_images=${summary.failed_images} bytes=${summary.bytes}`);

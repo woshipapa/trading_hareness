@@ -851,6 +851,18 @@ class EventSpool:
             result.append({"event_id": row["event_id"], "payload": payload, "status": row["status"], "attempts": int(row["attempts"]), "last_error": row["last_error"], "created_at": row["created_at"]})
         return result
 
+    def payload(self, event_id: str) -> dict[str, Any] | None:
+        """The stored payload of one event, whatever its delivery state."""
+        with self._lock:
+            row = self._db.execute("SELECT payload_json FROM events WHERE event_id=?", (str(event_id),)).fetchone()
+        if row is None:
+            return None
+        try:
+            value = json.loads(row["payload_json"])
+        except ValueError:
+            return None
+        return value if isinstance(value, dict) else None
+
     def all_payloads(self) -> list[tuple[str, dict[str, Any]]]:
         """Return normalized events for one-time history-archive backfill."""
         with self._lock:

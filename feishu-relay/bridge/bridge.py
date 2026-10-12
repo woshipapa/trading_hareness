@@ -42,6 +42,7 @@ from send_gate import SendConflict, SendGate, SendRateLimited
 from repair_scope import repair_allowed
 from group_lookup import GroupLookupError, unique_group_id
 from rich_text_render import render_rich_text
+from export_support import NameCache, card_images_by_message
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
@@ -711,6 +712,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				result = self.bridge.send(payload)
 				self.send_json(200, result)
 				return
+			if self.path == "/users/names":
+				self.send_json(200, self.bridge.user_names(payload))
+				return
+			if self.path == "/history/card-images":
+				self.send_json(200, self.bridge.card_image_resources(payload))
+				return
 			if self.path == "/routes/bind":
 				self.send_json(200, self.bridge.bind_route(payload))
 				return
@@ -800,6 +807,7 @@ class Bridge:
 		self.event_spool = EventSpool(spool_path)
 		history_path = os.environ.get("LARKX_HISTORY_DB", str(Path(spool_path).with_name("history.db")))
 		self.history_archive = HistoryArchive(history_path)
+		self.name_cache = NameCache(os.environ.get("LARKX_USER_NAMES_FILE", str(auth_path.parent / "user-names.json")))
 		self.send_enabled = os.environ.get("LARKX_SEND_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 		self.send_gate = SendGate(
 			os.environ.get("LARKX_SEND_DB", str(Path(spool_path).with_name("send-audit.db"))),
@@ -1101,6 +1109,27 @@ class Bridge:
 		self.chat_validation[chat_id] = {"state": "verified", "name": verified_name, "checked_at": datetime.now(timezone.utc).isoformat(), "error": None}
 		LOG.info("手动绑定 LarkAgentX 源群 chat_id=%s name=%s source_key=%s", chat_id, verified_name, source_key)
 		return {"status": "bound", "source_key": source_key, "chat_id": chat_id, "chat_name": verified_name, "replaced_chat_id": previous if previous and previous != chat_id else None}
+
+	def user_names(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""Display names for sender ids of one chat, for the history bundle (read-only)."""
+		chat_id = str(payload.get("chat_id", "")).strip()
+		user_ids = payload.get("user_ids")
+		if not chat_id.isdigit():
+			raise ValueError("chat_id 必须是数字 WebSocket 群 ID")
+		if not isinstance(user_ids, list):
+			raise ValueError("user_ids 必须是数组")
+		if self.client is None:
+			raise RuntimeError("尚未登录(needs_login),无法解析发送者名字")
+		return {"status": "ok", "chat_id": chat_id, "names": self.name_cache.resolve(chat_id, user_ids, self.client.get_user_name)}
+
+	def card_image_resources(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""Image keys of spooled cards, by message id, for the history bundle.
+
+		The response carries AES-GCM parameters, exactly as every inbound card
+		payload to the adapter already does; it stays on the token-protected
+		loopback interface.
+		"""
+		return {"status": "ok", "images": card_images_by_message(payload.get("messages"), self.event_spool.payload)}
 
 	def unbind_route(self, payload: dict[str, Any]) -> dict[str, Any]:
 		source_key = str(payload.get("source_key", "")).strip()

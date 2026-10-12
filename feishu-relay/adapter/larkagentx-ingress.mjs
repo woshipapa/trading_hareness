@@ -383,6 +383,11 @@ export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) 
 				sender: { sender_id: String(input?.from_id ?? input?.sender_id ?? '') },
 			};
 		}
+		// The card JSON names its pictures only by an internal element number.
+		// Keep the real keys beside it: the ledger row is then enough to export
+		// the images later, without depending on how long the bridge spool lives.
+		const cardImages = richTextCardImageResources(input).map((image) => image.larkagentx_resource).filter(hasUsableImageResource)
+			.map((resource) => ({ image_id: resource.image_id, key_hex: resource.key_hex, iv_hex: resource.iv_hex }));
 		return {
 			message_id: messageId,
 			msg_type: 'interactive',
@@ -390,6 +395,7 @@ export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) 
 			update_time: input?.update_time ?? null,
 			body: { content: JSON.stringify(card) },
 			sender: { sender_id: String(input?.from_id ?? input?.sender_id ?? '') },
+			...(cardImages.length ? { larkagentx_images: cardImages } : {}),
 		};
 	}
 	if (upstreamType === 'IMAGE') {

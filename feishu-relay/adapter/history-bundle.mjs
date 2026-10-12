@@ -7,7 +7,7 @@
 // pure or takes its I/O as arguments, and the zip writer is hand-rolled: an
 // npm dependency would turn a source hot update into an image release.
 import { crc32, deflateRawSync } from 'node:zlib';
-import { cardText } from './card-content.mjs';
+import { cardImageKeys, cardText, isCardUnavailableNotice } from './card-content.mjs';
 
 const BEIJING_OFFSET_MS = 8 * 3_600_000;
 const DAY_MS = 86_400_000;
@@ -113,25 +113,91 @@ function senderOf(message) {
 	return { sender_id: id, sender_name: name };
 }
 
+// Any text node of the card that is the client-upgrade banner means the card's
+// picture is the banner artwork, never content.
+function cardShowsUpgradeBanner(card) {
+	let found = false;
+	const walk = (value) => {
+		if (found) return;
+		if (typeof value === 'string') { if (isCardUnavailableNotice(value)) found = true; return; }
+		if (Array.isArray(value)) { value.forEach(walk); return; }
+		if (value && typeof value === 'object') Object.values(value).forEach(walk);
+	};
+	walk(card);
+	return found;
+}
+
+const usableResource = (resource) => Boolean(resource && typeof resource === 'object' && String(resource.image_id ?? '').trim()
+	&& /^[0-9a-f]{64}$/i.test(String(resource.key_hex ?? '')) && /^[0-9a-f]{24}$/i.test(String(resource.iv_hex ?? '')));
+
+/** Where a card's pictures can come from, in order of preference:
+ *  the keys stored with the row; keys looked up in the bridge spool for an
+ *  older WebSocket-era row; or, for a card read through the official API,
+ *  its portable image keys (downloaded by message id). */
+function cardImageRefs(row, card, spooledImages) {
+	if (cardShowsUpgradeBanner(card)) return [];
+	const stored = (Array.isArray(row.message?.larkagentx_images) ? row.message.larkagentx_images : []).filter(usableResource);
+	const resources = stored.length ? stored : (spooledImages ?? []).filter(usableResource);
+	if (resources.length) {
+		const seen = new Set();
+		return resources.filter((resource) => !seen.has(resource.image_id) && seen.add(resource.image_id))
+			.map((resource) => ({ key: resource.image_id, larkagentx: { image_id: resource.image_id, key_hex: resource.key_hex, iv_hex: resource.iv_hex } }));
+	}
+	return cardImageKeys(card).map((key) => ({ key, larkagentx: null }));
+}
+
+/** True for a WebSocket-era card whose pictures must be looked up in the bridge spool. */
+export function cardNeedsImageLookup(row) {
+	const message = row?.message ?? {};
+	if (String(message.msg_type ?? '').toLowerCase() !== 'interactive') return false;
+	if (!/^\d+$/.test(String(row.source_message_id ?? '')) || !/^\d+$/.test(String(row.source_chat_id ?? ''))) return false;
+	if (Array.isArray(message.larkagentx_images) && message.larkagentx_images.some(usableResource)) return false;
+	const raw = String(message.body?.content ?? '');
+	return /"imageID"|"img_key"|"image_key"|"tag"\s*:\s*"img"/u.test(raw);
+}
+
 /** One ledger row as an ordered list of text and image blocks. */
-export function bundleEntry(row) {
+export function bundleEntry(row, { cardImages = new Map(), senderNames = new Map() } = {}) {
 	const message = row.message ?? {};
 	const type = String(message.msg_type ?? '').toLowerCase() || 'unknown';
 	const body = parseJson(message.body?.content);
 	let blocks = [];
 	if (type === 'text') blocks = [{ kind: 'text', text: String(body.text ?? '').trim() }];
 	else if (type === 'post') blocks = postBlocks(body);
-	else if (type === 'interactive') blocks = [{ kind: 'text', text: cardText(message.body?.content).trim() }];
+	else if (type === 'interactive') {
+		blocks = [{ kind: 'text', text: cardText(message.body?.content).trim() },
+			...cardImageRefs(row, body, cardImages.get(String(row.source_message_id ?? ''))).map((ref) => ({ kind: 'image', ref }))];
+	}
 	else if (type === 'image') { const ref = imageRef(body); blocks = ref ? [{ kind: 'image', ref }] : []; }
 	else blocks = [{ kind: 'text', text: `[${type}]` }];
+	const sender = senderOf(message);
+	if (!sender.sender_name && senderNames.get(sender.sender_id)) sender.sender_name = String(senderNames.get(sender.sender_id));
 	return {
 		message_id: String(row.source_message_id ?? message.message_id ?? ''),
 		source_chat_id: String(row.source_chat_id ?? ''),
 		time_ms: Number(row.source_create_time),
-		...senderOf(message),
+		...sender,
 		type,
 		blocks: blocks.filter((block) => block.kind === 'image' || block.text),
 	};
+}
+
+/** Rows as entries in time order; rows with nothing to show are dropped. */
+export function bundleEntries(rows, context = {}) {
+	return rows.map((row) => bundleEntry(row, context)).filter((entry) => entry.blocks.length).sort((a, b) => a.time_ms - b.time_ms);
+}
+
+/** Numeric sender ids that still have no name, grouped by the numeric chat they spoke in. */
+export function unnamedSendersByChat(rows) {
+	const byChat = new Map();
+	for (const row of rows) {
+		const chatId = String(row.source_chat_id ?? '');
+		const sender = senderOf(row.message ?? {});
+		if (!/^\d+$/.test(chatId) || !/^\d+$/.test(sender.sender_id) || sender.sender_name) continue;
+		if (!byChat.has(chatId)) byChat.set(chatId, new Set());
+		byChat.get(chatId).add(sender.sender_id);
+	}
+	return new Map([...byChat].map(([chatId, ids]) => [chatId, [...ids]]));
 }
 
 export function entryImageCount(entry) { return entry.blocks.filter((block) => block.kind === 'image').length; }
@@ -249,9 +315,9 @@ export function createZipWriter(write, { now = Date.now } = {}) {
  * A failed image never fails the export: the transcript says so in place and
  * export-errors.txt lists every one, because by the time an image fails the
  * response is already streaming. */
-export async function writeHistoryBundle({ title, from, to, rows, fetchImage, write, concurrency = 4, limits = DEFAULT_BUNDLE_LIMITS, now = Date.now }) {
+export async function writeHistoryBundle({ title, from, to, rows, fetchImage, write, cardImages = new Map(), senderNames = new Map(), concurrency = 4, limits = DEFAULT_BUNDLE_LIMITS, now = Date.now }) {
 	const base = bundleBaseName(title, from, to);
-	const entries = rows.map(bundleEntry).filter((entry) => entry.blocks.length).sort((a, b) => a.time_ms - b.time_ms);
+	const entries = bundleEntries(rows, { cardImages, senderNames });
 	const zip = createZipWriter(write, { now });
 	const errors = [];
 	const jobs = [];

@@ -84,6 +84,14 @@ class EventSpoolTests(unittest.TestCase):
             self.assertEqual(spool.stats()["delivered"], 1)
             spool.close()
 
+    def test_one_payload_can_be_read_back_by_event_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spool = EventSpool(Path(directory) / "events.sqlite3")
+            spool.enqueue("larkagentx:769:111", {"msg_id": "111", "_larkagentx_images": [{"image_id": "img"}]})
+            self.assertEqual(spool.payload("larkagentx:769:111")["_larkagentx_images"], [{"image_id": "img"}])
+            self.assertIsNone(spool.payload("larkagentx:769:999"))
+            spool.close()
+
     def test_failed_event_can_be_terminated_as_ignored(self):
         with tempfile.TemporaryDirectory() as directory:
             spool = EventSpool(Path(directory) / "events.sqlite3")
