@@ -17,6 +17,11 @@
 - This unit no longer builds or publishes the quant console. `frontend/` belongs
   to `quant-research` and ships via `scripts/edge/deploy-quant-console-edge.sh`.
   Do not re-add `quant-frontend-dist` here; the isolation guard fails if you do.
+- feishu-relay releases at any time: it is not bound by the owner's no-restart
+  windows (`config/release-windows.json` lists `edge-adapter` as unrestricted,
+  `docs/decisions/0014`). Do not pass `RELEASE_WINDOW_OVERRIDE` for it. A release
+  still restarts the adapter and the bridge, so the WebSocket is down for about
+  15 seconds.
 - Never name the owner host (`47.110.79.189`, `stockpeer`, `OWNER_PEER_*`) in an
   edge script. Edge deploys must not be able to reach 47owner.
 - The dirty-worktree check watches `feishu-relay` sources only. Never point it at

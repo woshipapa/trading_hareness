@@ -50,7 +50,8 @@ if [[ "$apply" != true ]]; then
   echo "dry run only; append --apply after the GHCR image is published"
   exit 0
 fi
-# Activation recreates the adapter (config/release-windows.json).
+# Activation recreates the adapter. feishu-relay is bound by no release window
+# (edge-adapter is unrestricted in config/release-windows.json, decision 0014).
 python3 "$repo_root/scripts/release_window.py" check edge-adapter || exit $?
 
 # GHCR blob delivery straight to this edge host has repeatedly stalled mid

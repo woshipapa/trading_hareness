@@ -1,6 +1,7 @@
 """No-restart windows as data, and every restarting release script asking them first."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -28,11 +29,26 @@ class ReleaseWindowTests(unittest.TestCase):
                             ("4 1844", 0), ("4 1845", 3), ("4 2205", 3), ("4 2206", 0), ("6 1000", 0), ("7 1900", 0)):
             self.assertEqual(check(clock, *OWNER).returncode, code, clock)
 
-    def test_the_edge_adapter_has_only_the_two_sessions(self) -> None:
-        self.assertEqual(check("2 1000", "edge-adapter").returncode, 3)
-        self.assertEqual(check("2 1200", "edge-adapter").returncode, 0)
-        self.assertEqual(check("2 1400", "edge-adapter").returncode, 3)
-        self.assertEqual(check("2 1900", "edge-adapter").returncode, 0)
+    def test_the_edge_adapter_is_known_and_bound_by_no_window(self) -> None:
+        # feishu-relay is its own release unit (decision 0014): every clock an
+        # owner surface is refused at must let the edge adapter through.
+        for clock in ("2 0830", "2 1000", "2 1130", "2 1200", "2 1300", "2 1400", "2 1510", "2 1900", "2 2100", "6 1000"):
+            result = check(clock, "edge-adapter")
+            self.assertEqual(result.returncode, 0, clock)
+            self.assertEqual(result.stderr, "", clock)
+
+    def test_an_unrestricted_surface_does_not_open_the_window_for_an_owner_surface(self) -> None:
+        result = check("2 1000", "edge-adapter", "owner-quant-research")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("morning-session", result.stderr)
+
+    def test_no_surface_is_both_windowed_and_unrestricted(self) -> None:
+        config = json.loads((ROOT / "config" / "release-windows.json").read_text(encoding="utf-8"))
+        windowed = {surface for window in config["windows"] for surface in window["surfaces"]}
+        unrestricted = {item["surface"] for item in config.get("unrestricted", [])}
+        self.assertEqual(windowed & unrestricted, set())
+        self.assertEqual(unrestricted, {"edge-adapter"})
+        self.assertTrue(all(item.get("why") for item in config["unrestricted"]))
 
     def test_a_refusal_names_the_window(self) -> None:
         result = check("1 0900", *OWNER)

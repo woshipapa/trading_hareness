@@ -75,8 +75,16 @@ class ReleasePlanTests(unittest.TestCase):
         out = self.plan(target, target, self.base, clock="2 1000")
         self.assertIn("edge adapter and dashboard: 1 changed path(s)", out)
         self.assertIn("edge edge workflows: 1 changed path(s)", out)
-        self.assertIn("window: not now: Beijing 10:00", out)
+        # feishu-relay is not bound by the owner's session windows (decision 0014).
+        self.assertIn("window: allowed now", out)
+        self.assertNotIn("not now", out)
         self.assertIn("owner: already at", out)
+
+    def test_an_owner_change_in_the_session_is_reported_as_not_now(self) -> None:
+        target = self.commit({"quant-service/app/main.py": "changed\n"}, "app change")
+        out = self.plan(target, self.base, target, clock="2 1000")
+        self.assertIn("owner: code-only overlay", out)
+        self.assertIn("window: not now: Beijing 10:00", out)
 
     def test_release_tooling_alone_never_reaches_the_owner(self) -> None:
         target = self.commit({"scripts/release_window.py": "# edited\n", "config/release-windows.json": "{}\n"}, "tooling")
@@ -95,8 +103,9 @@ class ReleaseEntryPointTests(unittest.TestCase):
         self.assertEqual(self.run_release("deploy").returncode, 2)
 
     def test_window_is_the_shared_checker(self) -> None:
-        self.assertEqual(self.run_release("window", "edge-adapter", clock="2 1000").returncode, 3)
-        self.assertEqual(self.run_release("window", "edge-adapter", clock="2 2300").returncode, 0)
+        self.assertEqual(self.run_release("window", "owner-quant-research", clock="2 1000").returncode, 3)
+        self.assertEqual(self.run_release("window", "owner-quant-research", clock="2 2300").returncode, 0)
+        self.assertEqual(self.run_release("window", "edge-adapter", clock="2 1000").returncode, 0)
 
     def test_every_verb_runs_an_existing_script_and_the_retired_one_is_absent(self) -> None:
         text = (ROOT / "scripts" / "release").read_text(encoding="utf-8")

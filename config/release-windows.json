@@ -1,19 +1,19 @@
 {
-  "description": "When each runtime surface must not be restarted. Times are Beijing (UTC+8), bounds inclusive, and the windows apply on every weekday - holidays included, deliberately: a calendar mistake must not open a window. Read by scripts/release_window.py; every script that restarts one of these surfaces asks it first.",
+  "description": "When each runtime surface must not be restarted. Times are Beijing (UTC+8), bounds inclusive, and the windows apply on every weekday - holidays included, deliberately: a calendar mistake must not open a window. Read by scripts/release_window.py; every script that restarts one of these surfaces asks it first. A surface listed under unrestricted is known to the checker and may be restarted at any time.",
   "utc_offset_hours": 8,
   "windows": [
     {
       "name": "morning-session",
       "from": "08:30",
       "to": "11:30",
-      "surfaces": ["owner-quant-research", "owner-scheduler", "owner-windows-api", "edge-adapter"],
+      "surfaces": ["owner-quant-research", "owner-scheduler", "owner-windows-api"],
       "why": "pre-open checks at 08:40 and 09:10, the call auction and the morning session"
     },
     {
       "name": "afternoon-session",
       "from": "13:00",
       "to": "15:10",
-      "surfaces": ["owner-quant-research", "owner-scheduler", "owner-windows-api", "edge-adapter"],
+      "surfaces": ["owner-quant-research", "owner-scheduler", "owner-windows-api"],
       "why": "the afternoon session and the close; the midday break between the two is open by operator decision of 2026-10-12"
     },
     {
@@ -22,6 +22,12 @@
       "to": "22:05",
       "surfaces": ["owner-scheduler"],
       "why": "the scheduler's post-close pipeline runs then; a restart abandons it half-way"
+    }
+  ],
+  "unrestricted": [
+    {
+      "surface": "edge-adapter",
+      "why": "feishu-relay (the edge adapter and its bridge) is its own release unit and is not bound by the owner's windows, by operator decision of 2026-10-12 (docs/decisions/0014)"
     }
   ]
 }

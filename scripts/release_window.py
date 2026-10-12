@@ -4,7 +4,9 @@
     release_window.py check <surface> [<surface> ...]   exit 0 if yes, 3 if a window forbids it
     release_window.py list                             print the windows
 
-The windows are data, in config/release-windows.json. RELEASE_CLOCK="<1-7> <HHMM>"
+The windows are data, in config/release-windows.json. A surface listed there
+under "unrestricted" has no window: the scripts that restart it still ask, and
+the answer is always yes. RELEASE_CLOCK="<1-7> <HHMM>"
 pins the clock (ISO weekday, Beijing time) for tests. RELEASE_WINDOW_OVERRIDE set
 to a window's name lets that one window pass with a warning - for an approved
 emergency, never as a default. Standard library only: it runs under the
@@ -39,8 +41,13 @@ def _minutes(text: str) -> int:
     return int(hours) * 60 + int(minutes)
 
 
+def unrestricted_surfaces(config: dict) -> set[str]:
+    """Surfaces the checker knows but no window binds."""
+    return {str(item["surface"]) for item in config.get("unrestricted", [])}
+
+
 def blocking_windows(config: dict, surfaces: list[str], weekday: int, minute: int) -> list[dict]:
-    known = {surface for window in config["windows"] for surface in window["surfaces"]}
+    known = {surface for window in config["windows"] for surface in window["surfaces"]} | unrestricted_surfaces(config)
     unknown = sorted(set(surfaces) - known)
     if unknown:
         raise ValueError(f"unknown surface(s): {', '.join(unknown)}; known: {', '.join(sorted(known))}")
@@ -58,6 +65,8 @@ def main(argv: list[str]) -> int:
     if argv[0] == "list":
         for window in config["windows"]:
             print(f"{window['name']}: weekdays {window['from']}-{window['to']} Beijing: {', '.join(window['surfaces'])}")
+        for item in config.get("unrestricted", []):
+            print(f"unrestricted: {item['surface']} ({item['why']})")
         return 0
     surfaces = argv[1:]
     weekday, minute = clock(config, os.environ.get("RELEASE_CLOCK"))
