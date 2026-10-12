@@ -156,6 +156,8 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("abs_tol must be a number that is not negative", problems(abs_tol="1"))
         self.assertIn("min_coverage must be a number above 0 and at most 1", problems(min_coverage=0))
         self.assertIn("min_coverage must be a number above 0 and at most 1", problems(min_coverage=1.5))
+        self.assertIn("reference_span must be a boolean", problems(reference_span="false"))
+        self.assertIn("reference_span must be a boolean", problems(reference_span=0))
         self.assertIn("key must list canonical fields", problems(key=[]))
         self.assertIn("key must list canonical fields", problems(key=["symbol", "vwap"]))
         self.assertIn("reference_params must map keywords to parameters of the binding ['count', 'symbol']",

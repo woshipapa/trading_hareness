@@ -255,21 +255,27 @@ def compare_field(name: str, entry: Mapping[str, Any], left: Mapping[tuple, dict
     measured = [(gap, key) for key, one, other in pairs if (gap := gaps(one, other)) is not None]
     widest = max(measured, key=lambda item: item[0][0], default=None)
     coverage = len(common) / len(left) if left else 0.0
+    reference_coverage = len(common) / len(right) if right else 0.0
     reasons = []
     if not left:
         reasons.append("the binding returned no rows")
     elif coverage < min_coverage:
         reasons.append(f"the common rows are {coverage:.3f} of the binding's {len(left)}, below {min_coverage}")
+    if reference_span is not None and right and reference_coverage < min_coverage:
+        reasons.append(f"the common rows are {reference_coverage:.3f} of the reference's {len(right)}, below {min_coverage}")
     if wrong:
         reasons.append(f"{len(wrong)} of {len(common)} common rows are outside the tolerance")
     why = "; ".join(reasons)
-    return {**summary, "left_rows": len(left), "right_rows": len(right), "matched": len(common) - len(wrong),
+    result = {**summary, "left_rows": len(left), "right_rows": len(right), "matched": len(common) - len(wrong),
             "mismatched": len(wrong), "only_left": len(left) - len(common), "only_right": len(right) - len(common),
             "coverage": coverage, "max_abs_dev": widest[0][0] if widest else None,
             "max_rel_dev": max((gap[1] for gap, _ in measured), default=None),
             "worst_key": list(widest[1]) if widest else None,
             "examples": [{"key": list(key), "left": one, "right": other} for key, one, other in wrong[:EXAMPLES]],
             "agree": not why, "why": why}
+    if reference_span is not None:
+        result["reference_coverage"] = reference_coverage
+    return result
 
 
 def compare(source: str, agreement: Mapping[str, Mapping[str, Any]], bindings: Mapping[str, Binding],

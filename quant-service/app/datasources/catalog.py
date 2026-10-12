@@ -1055,6 +1055,8 @@ def _agreement_problems(item: Binding, names: set[str]) -> list[str]:
             continue
         if unknown := sorted(set(entry) - AGREEMENT_KEYS):
             problems.append(f"{where} has unknown keys {unknown}")
+        if not isinstance(entry.get("reference_span", False), bool):
+            problems.append(f"{where}: reference_span must be a boolean")
         reference = entry.get("reference")
         if reference not in SOURCES:
             problems.append(f"{where}: reference {reference!r} is not a catalogued source")

@@ -141,7 +141,7 @@ class CheckTests(unittest.TestCase):
             "reference_rows": 2,
         })
 
-    def test_reference_span_still_fails_when_a_bar_is_missing_inside_the_span(self):
+    def test_reference_span_fails_when_the_reference_is_missing_a_bar_inside_the_span(self):
         own = [
             {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:31:00+08:00", "close": 10.0},
             {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:32:00+08:00", "close": 10.1},
@@ -159,6 +159,26 @@ class CheckTests(unittest.TestCase):
         comparison = result.evidence[0]["comparison"]["close"]
         self.assertFalse(comparison["agree"])
         self.assertEqual((comparison["left_rows"], comparison["matched"], comparison["coverage"]), (3, 2, 2 / 3))
+
+    def test_reference_span_fails_when_the_binding_is_missing_a_bar_inside_the_span(self):
+        own = [
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:31:00+08:00", "close": 10.0},
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:33:00+08:00", "close": 10.2},
+        ]
+        reference = [
+            {"ts_code": "000001.SZ", "time": "0931", "close": 10.0, "volume_lot": 1, "amount": 1, "is_complete": True},
+            {"ts_code": "000001.SZ", "time": "0932", "close": 10.1, "volume_lot": 1, "amount": 1, "is_complete": True},
+            {"ts_code": "000001.SZ", "time": "0933", "close": 10.2, "volume_lot": 1, "amount": 1, "is_complete": True},
+        ]
+        result = run_check("owner", {
+            "tdx_mac": record("tdx_mac", own, capability="bars.minute"),
+            TENCENT_MINUTES: record("tencent_free", reference, capability="bars.minute"),
+        }, bindings=(SPAN_BARS, TENCENT), source="tdx_mac", capability="bars.minute",
+           params={"symbol": "000001.SZ", "count": 3})
+        comparison = result.evidence[0]["comparison"]["close"]
+        self.assertFalse(comparison["agree"])
+        self.assertEqual((comparison["matched"], comparison["only_right"], comparison["reference_coverage"]), (2, 1, 2 / 3))
+        self.assertIn("reference's 3", comparison["why"])
 
     def test_forming_minute_is_excluded_at_the_earlier_probe_finish(self):
         finished = ("2026-10-12T01:40:00+00:00", "2026-10-12T01:40:30+00:00")
