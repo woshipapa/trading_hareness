@@ -3,9 +3,11 @@ from __future__ import annotations
 import os
 import unittest
 import uuid
+from unittest import mock
 
 from app.async_runtime_lease_repository import acquire as acquire_async
 from app.database import AsyncDatabase, Database
+from app.datasources import __main__ as collector_cli
 from app.runtime_leases import acquire_runtime_lease, runtime_lease_holder_id
 
 
@@ -16,6 +18,19 @@ class RuntimeLeaseIdentityTests(unittest.TestCase):
         self.assertEqual(holder, runtime_lease_holder_id("quant-container", 1))
         self.assertNotEqual(holder, runtime_lease_holder_id("quant-container", 2))
         self.assertNotEqual(holder, runtime_lease_holder_id("other-container", 1))
+
+
+class CollectTaskTests(unittest.TestCase):
+    def test_a_task_named_twice_runs_one_loop(self) -> None:
+        started: list[str] = []
+
+        async def collect(tasks: list[str]) -> None:
+            started.extend(tasks)
+
+        with mock.patch.object(collector_cli, "_collect", collect):
+            collector_cli.main(["collect", "--tasks", "public_evidence_capture,public_evidence_capture"])
+
+        self.assertEqual(started, ["public_evidence_capture"])
 
 
 def _disposable_database() -> bool:

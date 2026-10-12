@@ -191,7 +191,8 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             database.close()
     from .runtime import COLLECTOR_TASKS  # noqa: PLC0415
-    tasks = [task.strip() for task in args.tasks.split(",") if task.strip()]
+    # One loop a label: two in this process would share its lease holder and both take the lease.
+    tasks = list(dict.fromkeys(task.strip() for task in args.tasks.split(",") if task.strip()))
     unknown = sorted(set(tasks) - set(COLLECTOR_TASKS))
     if unknown:
         parser.error(f"unknown tasks: {', '.join(unknown)}")
