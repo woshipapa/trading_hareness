@@ -268,10 +268,9 @@ def daily_series(database: Any, day: date | None = None) -> dict[str, Any]:
     from . import derived_daily_readings
     end = day or datetime.now(CN_TZ).date()
     with database.transaction() as connection:
-        readings = derived_daily_readings.newest(connection, TABLE_CAPABILITY, end - timedelta(days=800), end)
+        # A requested day reads that day only; the newest table is looked for over two weeks, longer than any holiday.
+        readings = derived_daily_readings.newest(connection, TABLE_CAPABILITY, day or end - timedelta(days=14), end)
     valid = [reading for reading in readings if reading.get("version") == VERSION]
-    if day is not None:
-        valid = [reading for reading in valid if reading.get("trade_date") == day.isoformat()]
     return {"version": VERSION, "reading": valid[-1] if valid else None,
             "stale_versions": len(readings) - len(valid), "research_only": True, "live_effect": "none"}
 

@@ -35,18 +35,16 @@ def refresh(database: Any, trade_date: date, *, apply: bool = True) -> dict[str,
 
 
 def daily(database: Any, day: date | None = None) -> dict[str, Any] | None:
+    """The reading of ``day`` (the newest one when no day is given), or None."""
     with database.transaction() as connection:
-        end = day or datetime.now(CN_TZ).date()
-        readings = derived_daily_readings.newest(connection, CAPABILITY, end - timedelta(days=800), end)
-    return readings[0] if readings else None
+        return daily_series(connection, day)["reading"]
 
 
 def daily_series(connection: Any, day: date | None = None) -> dict[str, Any]:
     end = day or datetime.now(CN_TZ).date()
-    stored = derived_daily_readings.newest(connection, CAPABILITY, end - timedelta(days=800), end)
+    # A requested day reads that day only; the newest reading is looked for over two weeks, longer than any holiday.
+    stored = derived_daily_readings.newest(connection, CAPABILITY, day or end - timedelta(days=14), end)
     valid = [reading for reading in stored if reading.get("version") == VERSION]
-    if day is not None:
-        valid = [reading for reading in valid if reading.get("trade_date") == day.isoformat()]
     return {"version": VERSION, "reading": valid[-1] if valid else None,
             "stale_versions": len(stored) - len(valid), "research_only": True, "live_effect": "none"}
 

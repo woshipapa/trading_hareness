@@ -167,6 +167,29 @@ class LimitUpRiskTests(unittest.TestCase):
                                            "lowest": {"big_loss_rate": 0.0, "mean_next_day_return": 0.0},
                                            "highest": {"big_loss_rate": 0.0, "mean_next_day_return": 0.0}}])
 
+    def test_daily_returns_the_requested_session_not_the_oldest_stored_one(self):
+        from app import limit_up_risk_runtime
+        stored = [{"trade_date": "2024-08-05", "version": limit_up_risk_runtime.VERSION, "rows": ["old"]},
+                  {"trade_date": "2026-10-09", "version": limit_up_risk_runtime.VERSION, "rows": ["friday"]},
+                  {"trade_date": "2026-10-12", "version": limit_up_risk_runtime.VERSION, "rows": ["monday"]}]
+
+        def newest(_connection, _capability, first, last):
+            return [reading for reading in stored if first.isoformat() <= reading["trade_date"] <= last.isoformat()]
+
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self): return object()
+                    def __exit__(self, *_args): return False
+                return Tx()
+
+        with mock.patch("app.limit_up_risk_runtime.derived_daily_readings.newest", side_effect=newest):
+            self.assertEqual(limit_up_risk_runtime.daily(Database(), date(2026, 10, 9))["rows"], ["friday"])
+            self.assertIsNone(limit_up_risk_runtime.daily(Database(), date(2026, 10, 10)))
+            series = limit_up_risk_runtime.daily_series(object(), date(2026, 10, 12))
+        self.assertEqual(series["reading"]["rows"], ["monday"])
+        self.assertEqual(series["stale_versions"], 0)
+
     def test_track_empty_calendar_keeps_recent_shape(self):
         from app import limit_up_risk_runtime
         class Result:
