@@ -117,6 +117,8 @@ SETTINGS: dict[str, Setting] = {item.name: item for item in [
         ("MARKET_EVENT_CAPTURE_ENABLED", "true", "capture market events"),
         ("ALL_A_LEVEL1_CAPTURE_ENABLED", "true", "capture all-A level-1 snapshots"),
         ("TDX_SHADOW_SNAPSHOT_ENABLED", "true", "capture the TDX all-A shadow snapshot"),
+        ("AUCTION_POOL_CAPTURE_ENABLED", "true", "capture the bounded opening-auction pool"),
+        ("AUCTION_POOL_MAX_SYMBOLS", "200", "opening-auction pool cap, clamped to 1-300"),
         ("PUBLIC_EVIDENCE_CAPTURE_ENABLED", "true", "capture public evidence"),
         ("QUANT_CORE_INTRADAY_CAPTURE_AT_STOP", "false", "keep core intraday capture when storage is at its stop ratio"),
     ),

@@ -11,7 +11,7 @@ class BackgroundTaskCatalogTests(unittest.TestCase):
             "intraday_monitor", "strategy_review", "post_close_strategy",
             "ten_day_leader_rotation", "daily_strategy_summary", "ths_member_backfill",
             "all_board_member_backfill", "minute_profile_capture", "tencent_order_book", "board_flow_curve",
-            "tdx_all_a_shadow",
+            "tdx_all_a_shadow", "auction_pool_capture",
         )
         loops = {label: (lambda label=label: label) for label in labels}
         specs = build_specs(interval_seconds=20, enabled={label: label == "strategy_review" for label in labels}, loops=loops)

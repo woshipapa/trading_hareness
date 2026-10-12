@@ -384,6 +384,9 @@ from .level1_snapshot_runtime import Level1CaptureDependencies, run_level1_captu
 from .tdx_shadow_snapshot_runtime import (
     TdxShadowSnapshotDependencies, TdxShadowSnapshotRuntime, run_tdx_shadow_snapshot_loop,
 )
+from .auction_pool_runtime import AuctionPoolCaptureDependencies, AuctionPoolCaptureRuntime, run_auction_pool_capture_loop
+from .auction_pool_repository import read_pool as read_auction_pool
+from .datasources.sources.tdx_microstructure import fetch_auction_curve
 from .datasources.sources.tdx_legacy_misc import fetch_all_a_snapshot as fetch_tdx_all_a_snapshot
 from .market_radar_runtime import MarketRadarDependencies, MarketRadarRuntime
 from .datasources import runtime as datasource_runtime
@@ -686,7 +689,8 @@ from .telemetry import (
 )
 from .runtime_executors import (
     ExecutorSaturatedError, run_akshare_blocking, run_database_blocking,
-    run_realtime_vendor_blocking, run_tdx_shadow_blocking, runtime_executor_status, shutdown_runtime_executors,
+    run_auction_capture_blocking, run_realtime_vendor_blocking, run_tdx_shadow_blocking,
+    runtime_executor_status, shutdown_runtime_executors,
 )
 from .raw_overflow_archive import RawOverflowConfig, acknowledge as acknowledge_raw_overflow, failure as record_raw_overflow_failure, next_batch as next_raw_overflow_batch, status as raw_overflow_status
 from .routers.raw_overflow import RawOverflowDependencies, build_raw_overflow_router
@@ -829,6 +833,9 @@ _research_storage_admission = ResearchStorageAdmission(
 _tdx_shadow_storage_admission = ResearchStorageAdmission(
     status_fn=local_research_storage_governance, run_database=run_tdx_shadow_blocking,
 )
+_auction_capture_storage_admission = ResearchStorageAdmission(
+    status_fn=local_research_storage_governance, run_database=run_auction_capture_blocking,
+)
 
 
 async def nonessential_high_frequency_capture_allowed() -> tuple[bool, dict[str, Any]]:
@@ -843,6 +850,10 @@ async def nonessential_high_frequency_capture_allowed() -> tuple[bool, dict[str,
 
 async def tdx_shadow_storage_allowed() -> tuple[bool, dict[str, Any]]:
     return await _tdx_shadow_storage_admission.optional_high_frequency_allowed()
+
+
+async def auction_capture_storage_allowed() -> tuple[bool, dict[str, Any]]:
+    return await _auction_capture_storage_admission.optional_high_frequency_allowed()
 
 
 async def exempt_intraday_evidence_capture_allowed() -> tuple[bool, dict[str, Any]]:
@@ -3160,6 +3171,16 @@ tdx_shadow_runtime = TdxShadowSnapshotRuntime(TdxShadowSnapshotDependencies(
     storage_allowed=tdx_shadow_storage_allowed,
 ))
 
+auction_pool_runtime = AuctionPoolCaptureRuntime(AuctionPoolCaptureDependencies(
+    fetch_fuyao=fetch_fuyao_data,
+    fetch_curve=fetch_auction_curve,
+    call_longhu=shared_stock_api_call,
+    run_database=run_auction_capture_blocking,
+    database=db,
+    storage_allowed=auction_capture_storage_allowed,
+    read_pool=read_auction_pool,
+))
+
 
 async def all_a_level1_snapshot_capture_loop() -> None:
     """Persist one complete all-A Level-1 cross-section about every minute, and its market radar point."""
@@ -3175,6 +3196,10 @@ async def all_a_level1_snapshot_capture_loop() -> None:
 async def tdx_all_a_shadow_loop() -> None:
     """Persist the TDX all-A shadow stream beside the level1 capture."""
     await run_tdx_shadow_snapshot_loop(tdx_shadow_runtime)
+
+
+async def auction_pool_capture_loop() -> None:
+    await run_auction_pool_capture_loop(auction_pool_runtime)
 
 
 def intraday_flow_label(value: Any) -> str:
@@ -4149,6 +4174,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "auction_pulse": auction_pulse_enabled(),
             "all_a_level1_snapshot": settings.flag("ALL_A_LEVEL1_CAPTURE_ENABLED"),
             "tdx_all_a_shadow": settings.flag("TDX_SHADOW_SNAPSHOT_ENABLED"),
+            "auction_pool_capture": settings.flag("AUCTION_POOL_CAPTURE_ENABLED"),
             "public_evidence_capture": settings.flag("PUBLIC_EVIDENCE_CAPTURE_ENABLED"),
             "post_close_public_archive": settings.flag("POST_CLOSE_PUBLIC_ARCHIVE_ENABLED"),
             "storage_tiering_mover": settings.flag("STORAGE_TIERING_MOVER_ENABLED"),
@@ -4166,6 +4192,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
             "auction_pulse": auction_pulse_loop,
             "all_a_level1_snapshot": all_a_level1_snapshot_capture_loop,
             "tdx_all_a_shadow": tdx_all_a_shadow_loop,
+            "auction_pool_capture": auction_pool_capture_loop,
             "public_evidence_capture": public_evidence_capture_loop,
             "post_close_public_archive": post_close_public_archive_loop,
             "storage_tiering_mover": storage_tiering_mover_loop,

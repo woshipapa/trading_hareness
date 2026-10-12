@@ -18,6 +18,7 @@ def build_specs(*, interval_seconds: int, enabled: dict[str, bool], loops: dict[
             "auction_pulse",
             "all_a_level1_snapshot",
             "tdx_all_a_shadow",
+            "auction_pool_capture",
             "public_evidence_capture", "post_close_public_archive",
             "storage_tiering_mover", "peer_close_research",
     )
