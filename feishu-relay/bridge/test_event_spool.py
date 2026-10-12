@@ -40,6 +40,30 @@ class EventSpoolTests(unittest.TestCase):
             self.assertEqual(due[0]["last_error"], "network")
             spool.close()
 
+    def test_a_history_reread_refreshes_an_undelivered_payload_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spool = EventSpool(Path(directory) / "events.sqlite3")
+            lossy = {"msg_id": "m1", "chat_id": "7", "content": ""}
+            fixed = {"msg_id": "m1", "chat_id": "7", "content": "", "_larkagentx_rich_text": {"text": "https://example.com/x", "links": ["https://example.com/x"]}}
+            spool.enqueue("e1", lossy)
+            spool.claim("e1")
+            spool.mark_failed("e1", "缺少文本内容", retry_after=3600)
+            # a plain duplicate (WebSocket is at-least-once) keeps the stored payload
+            self.assertEqual(spool.enqueue("e1", fixed), "failed")
+            self.assertEqual(spool.all_payloads()[0][1], lossy)
+            # a deliberate re-read replaces it and makes it due at once
+            self.assertEqual(spool.enqueue("e1", fixed, refresh=True), "failed")
+            self.assertEqual(spool.due()[0]["payload"], fixed)
+            self.assertEqual(spool.claim("e1"), "claimed")
+            # in flight, then delivered: never rewritten
+            self.assertEqual(spool.enqueue("e1", lossy, refresh=True), "processing")
+            self.assertEqual(spool.all_payloads()[0][1], fixed)
+            spool.mark_delivered("e1")
+            self.assertEqual(spool.enqueue("e1", lossy, refresh=True), "delivered")
+            self.assertEqual(spool.all_payloads()[0][1], fixed)
+            self.assertEqual(spool.stats()["failed"], 0)
+            spool.close()
+
     def test_failed_event_can_be_terminated_as_ignored(self):
         with tempfile.TemporaryDirectory() as directory:
             spool = EventSpool(Path(directory) / "events.sqlite3")

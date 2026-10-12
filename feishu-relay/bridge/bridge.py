@@ -11,6 +11,7 @@ LarkAgentX currently has no media/card sender or remote receipt API.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -2076,7 +2077,9 @@ class Bridge:
 				LOG.error("记录 LarkAgentX 源过滤事件失败 message_id=%s：%s", message_id, error)
 				return {"status": "failed", "chat_id": chat_id, "message_id": message_id, "error": str(error)[:240]}
 		try:
-			spool_state = await asyncio.to_thread(self.event_spool.enqueue, event_id, payload)
+			# A history re-read carries a freshly decoded payload; let it replace
+			# an undelivered one that was stored before a decoding fix.
+			spool_state = await asyncio.to_thread(functools.partial(self.event_spool.enqueue, event_id, payload, refresh=recovered))
 			if spool_state == "delivered":
 				return {"status": "duplicate", "chat_id": chat_id, "message_id": message_id}
 			claim_state = await asyncio.to_thread(self.event_spool.claim, event_id)
