@@ -1,5 +1,5 @@
 import { createDecipheriv, createHash } from 'node:crypto';
-import { buildRelayCard, cardImageKeys, cardText } from './card-content.mjs';
+import { buildRelayCard, cardImageKeys, cardText, stampRelayPayload } from './card-content.mjs';
 import { isSystemMessage } from './message-filter.mjs';
 import { blockedMessageKeywords, blockedMessageReason } from './content-filter.mjs';
 
@@ -349,7 +349,7 @@ function uploadErrorMessage(resource, error) {
 	return `${resource}失败${code}：${detail}`;
 }
 
-export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = null, config, canWrite = null, logger = console }) {
+export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = null, config, canWrite = null, logger = console, now = Date.now }) {
 	let running = false;
 	const sourceConcurrency = Math.max(1, Math.min(8, Number(config.sourceConcurrency) || 3));
 	let lastUnavailableLogAt = 0;
@@ -595,7 +595,16 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		return { component: 'interactive-text-summary-v1', msgType: 'text', content: { text: taggedText(source.tag, `[interactive]\n${body}`) } };
 	}
 
+	// Every outbound copy leads with "#tag <Beijing time it is forwarded>".
+	// This is the forwarding clock, not the source message's own time, so a
+	// backfilled or corrected message shows when it reached the target group.
+	const relayTimestampEnabled = config.relayTimestampEnabled !== false;
 	async function relayPayload(message, source, options) {
+		const payload = await buildRelayPayload(message, source, options);
+		return relayTimestampEnabled ? stampRelayPayload(payload, source.tag, now()) : payload;
+	}
+
+	async function buildRelayPayload(message, source, options) {
 		if (!message?.message_id) throw new RelayUnsupportedError('源消息没有 message_id');
 		if (message.msg_type === 'post') return relayPostContent(message, source, options);
 		const directResource = resourceFromDirectMessage(message);

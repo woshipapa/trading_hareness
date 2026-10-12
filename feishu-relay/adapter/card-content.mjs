@@ -176,6 +176,55 @@ export function cardPayload(content) {
 	};
 }
 
+const BEIJING_CLOCK = new Intl.DateTimeFormat('en-CA', {
+	timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+	hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+});
+
+// Always Beijing time, whatever zone the host or container runs in.
+export function beijingTimestamp(at = Date.now()) {
+	const moment = new Date(at);
+	const parts = Object.fromEntries(BEIJING_CLOCK.formatToParts(Number.isNaN(moment.getTime()) ? new Date() : moment).map((part) => [part.type, part.value]));
+	return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+/** Turn the leading "#tag" of an outbound relay payload into
+ * "#tag YYYY-MM-DD HH:mm:ss" (the Beijing time it is being forwarded).
+ *
+ * Every payload builder already leads with a bare "#tag" (a text line, the
+ * first rich-text row, or the first card element), so this one function
+ * stamps them all.  The tag stays the first token and the time is in the
+ * form the summary ingestion already reads as a message time and removes
+ * from the content.  A payload that is already stamped, or does not lead
+ * with the tag, is returned unchanged. */
+export function stampRelayPayload(payload, tag, at = Date.now()) {
+	const prefix = `#${tag}`;
+	const header = `${prefix} ${beijingTimestamp(at)}`;
+	const stamped = (value) => {
+		if (value === prefix) return header;
+		if (typeof value === 'string' && value.startsWith(`${prefix}\n`)) return `${header}${value.slice(prefix.length)}`;
+		return null;
+	};
+	if (!tag || !payload?.content || typeof payload.content !== 'object') return payload;
+	const content = JSON.parse(JSON.stringify(payload.content));
+	let changed = false;
+	const apply = (holder, key) => {
+		const next = stamped(holder?.[key]);
+		if (next !== null) { holder[key] = next; changed = true; }
+	};
+	if (payload.msgType === 'text') apply(content, 'text');
+	else if (payload.msgType === 'post') {
+		for (const locale of Object.values(content)) {
+			const first = Array.isArray(locale?.content) ? locale.content[0]?.[0] : null;
+			if (first && first.tag === 'text') { apply(first, 'text'); break; }
+		}
+	} else if (payload.msgType === 'interactive') {
+		const first = content.body?.elements?.[0];
+		if (first?.text && typeof first.text === 'object') apply(first.text, 'content');
+	}
+	return changed ? { ...payload, content } : payload;
+}
+
 function taggedText(tag, text = '') {
 	const prefix = `#${tag}`;
 	const normalized = String(text ?? '');

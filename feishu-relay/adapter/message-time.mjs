@@ -33,6 +33,14 @@ function leadingMessageTime(content, referenceTime) {
 	return null;
 }
 
+// The relay header is "#tag YYYY-MM-DD HH:mm:ss"; readers that look at what
+// follows the tag (system placeholder, empty payload) must skip that time.
+export function stripLeadingMessageTime(content) {
+	const text = String(content ?? '');
+	const detected = leadingMessageTime(text, new Date().toISOString());
+	return detected ? text.slice(detected.length) : text;
+}
+
 export function extractImportContent(messageText, { referenceTime = new Date().toISOString() } = {}) {
 	const routeTag = String(messageText ?? '').match(/^#([a-z0-9-]+)\s*(?:\r?\n)?/i);
 	if (!routeTag) return { content: '' };

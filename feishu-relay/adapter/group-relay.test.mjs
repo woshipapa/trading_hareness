@@ -6,7 +6,7 @@ import { createGroupRelay } from './group-relay.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { normalizeLarkAgentXRelayMessage } from './larkagentx-ingress.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null, webhookKeywordsByChatId = null, larkAgentXResourceUrl = '', larkAgentXToken = '', messageList = null, initialSourceStates = null } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null, webhookKeywordsByChatId = null, larkAgentXResourceUrl = '', larkAgentXToken = '', messageList = null, initialSourceStates = null, relayTimestamp = null } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map(Object.entries(initialSourceStates ?? {}));
 	const sent = [];
@@ -90,7 +90,9 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 	const relay = createGroupRelay({
 		larkClient, sourceApi, ledger, workbench: { publishActionCard: async () => { throw new Error('action card should be off by default'); } }, logger: { info() {}, error() {}, warn() {}, ...(logger ?? {}) },
 		canWrite,
+		now: () => relayTimestamp ?? Date.now(),
 		config: {
+			relayTimestampEnabled: relayTimestamp !== null,
 			enabled: true, targetChatId: 'oc_summary', intervalSeconds: 10, sourceConcurrency, historyLookbackSeconds: 300, overlapSeconds: 30, outboundCard,
 			bootstrapMode: 'forward_existing', sources: sources ?? [{ key: 'anqiang', tag: 'anqiang', chatId: 'oc_source', chatName: '马安强 (1)', targetChatIds }],
 			webhooksByChatId: webhooksByChatId ? new Map(Object.entries(webhooksByChatId)) : undefined,
@@ -137,6 +139,32 @@ test('a LarkAgentX source message uses the existing relay ledger and fan-out', a
 	const duplicate = await relay.processInbound(message, source);
 	assert.equal(duplicate.status, 'duplicate');
 	assert.equal(sent.length, 1);
+});
+
+// 2026-10-12 11:45:03 in Beijing; the harness clock stands in for the edge clock.
+const FORWARDED_AT = Date.UTC(2026, 9, 12, 3, 45, 3);
+
+test('a relayed text leads with the tag and the Beijing time it was forwarded', async () => {
+	const { relay, sent } = createHarness([], { relayTimestamp: FORWARDED_AT });
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: '767_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	// the source message is two days old: the header is the forwarding time, not the message's own
+	const message = { message_id: 'larkx_stamp_1', msg_type: 'text', create_time: String(FORWARDED_AT - 2 * 86_400_000), body: { content: JSON.stringify({ text: '实时内容' }) } };
+	assert.equal((await relay.processInbound(message, source)).status, 'sent');
+	assert.equal(JSON.parse(sent[0].content).text, '#anqiang 2026-10-12 11:45:03\n实时内容');
+});
+
+test('relayed cards and rich-text posts carry the same stamped header', async () => {
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: '767_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	const asCard = createHarness([], { relayTimestamp: FORWARDED_AT, outboundCard: true });
+	await asCard.relay.processInbound({ message_id: 'larkx_stamp_2', msg_type: 'text', create_time: String(FORWARDED_AT), body: { content: JSON.stringify({ text: '卡片内容' }) } }, source);
+	assert.equal(asCard.sent[0].msg_type, 'interactive');
+	assert.equal(JSON.parse(asCard.sent[0].content).body.elements[0].text.content, '#anqiang 2026-10-12 11:45:03\n卡片内容');
+	const asPost = createHarness([], { relayTimestamp: FORWARDED_AT });
+	const post = { zh_cn: { title: '', content: [[{ tag: 'text', text: '第一行' }], [{ tag: 'a', href: 'https://example.com/x', text: 'https://example.com/x' }]] } };
+	await asPost.relay.processInbound({ message_id: 'larkx_stamp_3', msg_type: 'post', create_time: String(FORWARDED_AT), body: { content: JSON.stringify(post) } }, source);
+	const rows = JSON.parse(asPost.sent[0].content).zh_cn.content;
+	assert.deepEqual(rows[0], [{ tag: 'text', text: '#anqiang 2026-10-12 11:45:03' }]);
+	assert.deepEqual(rows[1], [{ tag: 'text', text: '第一行' }]);
 });
 
 test('a history correction resends a sent message only when its content really changed', async () => {

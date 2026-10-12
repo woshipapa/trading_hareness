@@ -140,3 +140,40 @@ test('card JSON anchors and buttons with object-valued urls are still read', () 
 	assert.equal(cardText({ elements: [[{ tag: 'a', text: '原文', href: 'https://example.com/a' }]] }), '原文\nhttps://example.com/a');
 	assert.equal(cardText({ schema: '2.0', body: { elements: [{ tag: 'button', text: { tag: 'plain_text', content: '打开' }, multi_url: { url: 'https://example.com/b' } }] } }), '打开\nhttps://example.com/b');
 });
+
+import { beijingTimestamp, stampRelayPayload } from './card-content.mjs';
+import { extractImportContent } from './message-time.mjs';
+
+test('the forwarding timestamp is Beijing wall-clock time regardless of the host zone', () => {
+	assert.equal(beijingTimestamp(Date.UTC(2026, 9, 12, 3, 45, 3)), '2026-10-12 11:45:03');
+	assert.equal(beijingTimestamp(Date.UTC(2026, 9, 12, 16, 0, 0)), '2026-10-13 00:00:00');
+	assert.equal(beijingTimestamp(Date.UTC(2026, 11, 31, 15, 59, 59)), '2026-12-31 23:59:59');
+	assert.match(beijingTimestamp(Number.NaN), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+});
+
+test('stamping rewrites only the leading tag of each outbound shape, once, without mutating its input', () => {
+	const at = Date.UTC(2026, 9, 12, 3, 45, 3);
+	const header = '#anqiang 2026-10-12 11:45:03';
+	const text = { component: 'text', msgType: 'text', content: { text: '#anqiang\n正文\n#anqiang 不是标签' } };
+	const stampedText = stampRelayPayload(text, 'anqiang', at);
+	assert.equal(stampedText.content.text, `${header}\n正文\n#anqiang 不是标签`);
+	assert.equal(text.content.text, '#anqiang\n正文\n#anqiang 不是标签');
+	assert.equal(stampRelayPayload(stampedText, 'anqiang', at + 60_000), stampedText);
+	const imageOnly = { msgType: 'post', content: { zh_cn: { title: '', content: [[{ tag: 'text', text: '#anqiang' }], [{ tag: 'img', image_key: 'img_1' }]] } } };
+	assert.deepEqual(stampRelayPayload(imageOnly, 'anqiang', at).content.zh_cn.content, [[{ tag: 'text', text: header }], [{ tag: 'img', image_key: 'img_1' }]]);
+	const card = { msgType: 'interactive', content: buildRelayCard({ tag: 'anqiang', text: '卡片正文', imageKeys: ['img_1'] }) };
+	const stampedCard = stampRelayPayload(card, 'anqiang', at);
+	assert.equal(cardText(stampedCard.content), `${header}\n卡片正文`);
+	assert.deepEqual(cardImageKeys(stampedCard.content), ['img_1']);
+	// a tag-only message, a different tag and a tagless payload
+	assert.equal(stampRelayPayload({ msgType: 'text', content: { text: '#anqiang' } }, 'anqiang', at).content.text, header);
+	const other = { msgType: 'text', content: { text: '#anqiangx\n正文' } };
+	assert.equal(stampRelayPayload(other, 'anqiang', at), other);
+	const file = { msgType: 'file', content: { file_key: 'file_1' } };
+	assert.equal(stampRelayPayload(file, 'anqiang', at), file);
+});
+
+test('summary ingestion reads the stamped header as tag plus message time and keeps the content clean', () => {
+	assert.deepEqual(extractImportContent('#anqiang 2026-10-12 11:45:03\n今天网络课改成8点'), { content: '今天网络课改成8点', content_date: '2026-10-12', content_time: '11:45' });
+	assert.deepEqual(extractImportContent('#anqiang 2026-10-12 11:45:03'), { content: '', content_date: '2026-10-12', content_time: '11:45' });
+});

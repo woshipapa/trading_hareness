@@ -265,6 +265,8 @@ const groupRelayConfig = {
 	intervalSeconds: groupRelayIntervalSeconds,
 	sourceConcurrency: Math.floor(groupRelaySourceConcurrency),
 	actionCardsEnabled: String(process.env.FEISHU_GROUP_RELAY_ACTION_CARDS_ENABLED ?? 'false').toLowerCase() === 'true',
+	// "#tag <Beijing forwarding time>" header on every relayed message.
+	relayTimestampEnabled: String(process.env.FEISHU_GROUP_RELAY_TIMESTAMP_ENABLED ?? 'true').toLowerCase() !== 'false',
 	// Outbound messages are card JSON 2.0; set to false to fall back to the
 	// text/post bubbles the relay sent before 2026-09-08.
 	outboundCard: String(process.env.FEISHU_GROUP_RELAY_OUTBOUND_CARD ?? 'true').toLowerCase() !== 'false',
