@@ -77,35 +77,36 @@ def fetch_classified(source, symbols, day, *, workers=6):
             index = keys.index(target)
             cq = payload.get('CQ')
             if cq is None or len(cq) != len(keys):
-                return symbol, 'unverified', None, False
+                return symbol, 'unverified', None, False, None
             ex_rights_on_day = bool(str(cq[index]).strip())
             if any(str(value).strip() for value in cq[index + 1:]):
-                return symbol, 'adjusted_later', None, ex_rights_on_day
+                return symbol, 'adjusted_later', None, ex_rights_on_day, None
             quote = normalized_quote(symbol, day, payload)
             if quote is None:
-                return symbol, 'invalid', None, ex_rights_on_day
+                return symbol, 'invalid', None, ex_rights_on_day, None
             quote['ex_rights_on_day'] = ex_rights_on_day
-            return symbol, 'filled', quote, ex_rights_on_day
-        return symbol, 'not_traded', None, False
+            return symbol, 'filled', quote, ex_rights_on_day, None
+        return symbol, 'not_traded', None, False, None
 
     def guarded(symbol):
         try:
             return one(symbol)
-        except Exception:
-            return symbol, 'failed', None, False
+        except Exception as error:
+            return symbol, 'failed', None, False, f'{type(error).__name__}: {error}'
 
     results = []
     with ThreadPoolExecutor(max_workers=max(1, min(workers, 6))) as pool:
         for result in pool.map(guarded, unique):
             results.append(result)
-    outcomes = {name: sorted(symbol for symbol, outcome, _quote, _marker in results if outcome == name)
+    outcomes = {name: sorted(symbol for symbol, outcome, _quote, _marker, _error in results if outcome == name)
                 for name in ('filled', 'not_traded', 'adjusted_later', 'unverified', 'invalid', 'failed')}
-    quotes = [quote for _symbol, outcome, quote, _marker in results if outcome == 'filled']
+    quotes = [quote for _symbol, outcome, quote, _marker, _error in results if outcome == 'filled']
     return quotes, {
         'provider': 'longhuvip:GetKLineDay_W14', 'trade_date': str(day),
         'requested': len(unique), 'received': len(quotes), 'outcomes': outcomes,
-        'classified': {symbol: outcome for symbol, outcome, _quote, _marker in results},
-        'errors': {symbol: 'request_failed' for symbol, outcome, _quote, _marker in results if outcome == 'failed'},
-        'ex_rights_on_day': {symbol: marker for symbol, outcome, _quote, marker in results
+        'classified': {symbol: outcome for symbol, outcome, _quote, _marker, _error in results},
+        'errors': dict(list((symbol, error) for symbol, outcome, _quote, _marker, error in results
+                            if outcome == 'failed')[:30]),
+        'ex_rights_on_day': {symbol: marker for symbol, outcome, _quote, marker, _error in results
                              if outcome == 'filled'},
     }
