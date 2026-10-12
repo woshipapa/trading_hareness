@@ -1,0 +1,106 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "derived_tdx_limits",
+  "capability": "limits.broken_pool",
+  "params": {
+    "trade_date": "2026-10-12"
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-12T02:50:19.986184+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "derived_tdx_limits": {
+      "field_map": {
+        "symbol": "symbol"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "derived_tdx_limits": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe derived_tdx_limits limits.broken_pool --params '{\"trade_date\": \"2026-10-12\"}'",
+      "source": "derived_tdx_limits",
+      "capability": "limits.broken_pool",
+      "adapter": "app/datasources/derived/limit_pools.py:fetch_broken_pool",
+      "params": {
+        "trade_date": "2026-10-12"
+      },
+      "started_utc": "2026-10-12T02:50:15.842482+00:00",
+      "rows": 24,
+      "coverage": 0.9996402877697842,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-12T02:50:19.720868+00:00",
+      "available_at_max": "2026-10-12T02:50:19.720868+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one",
+        "no_trade_rows=19",
+        "tdx_host=121.36.248.138:7709",
+        "limit_price_missing=2"
+      ],
+      "sample": [
+        {
+          "symbol": "000420.SZ",
+          "price": 3.96,
+          "high": 4.19,
+          "observed_at": "2026-10-12T02:50:17.104805+00:00",
+          "up_limit": 4.19
+        },
+        {
+          "symbol": "000582.SZ",
+          "price": 9.43,
+          "high": 9.87,
+          "observed_at": "2026-10-12T02:50:17.104805+00:00",
+          "up_limit": 9.87
+        },
+        {
+          "symbol": "000601.SZ",
+          "price": 6.53,
+          "high": 6.69,
+          "observed_at": "2026-10-12T02:50:17.104805+00:00",
+          "up_limit": 6.69
+        },
+        {
+          "symbol": "000892.SZ",
+          "price": 5.2,
+          "high": 5.34,
+          "observed_at": "2026-10-12T02:50:17.104805+00:00",
+          "up_limit": 5.34
+        },
+        {
+          "symbol": "001255.SZ",
+          "price": 27.56,
+          "high": 30.0,
+          "observed_at": "2026-10-12T02:50:17.104805+00:00",
+          "up_limit": 30.0
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-12T02:50:19.746100+00:00",
+      "sample_sha256": "04623ceaced94f19d03c3ab5c09523b329587e3d78965599cf201d92b615ff54"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "derived_tdx_limits": true
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 24 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": true,
+      "detail": "every probe ran inside a session (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}

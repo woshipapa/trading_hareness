@@ -79,7 +79,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `tdx_local` | owner 工作站的通达信客户端（vipdoc），CLI 导出为离线文件 | 日线、分钟线；依赖手工或定时的盘后下载 |
 | `derived_tdx_limits` | 自算：`tdx_public` 的 `quote.all_a_snapshot` + `tdx_mac` 的 `limits.prices` | 涨停、炸板、跌停池，只有快照时刻的成员关系 |
 
-**状态怎么读。** 5 个旧绑定是 `declared`：`tdx_public` 的 `ticks.session`、`auction.history_0925`、`fundamentals.capital_changes`，`tdx_local` 的 `bars.daily`、`bars.minute`。通达信集成新增的其余 35 个绑定原先一律 `unsupported`；2026-10-11 在 owner 出口逐条检查后，其中 27 个升为 `declared`（证据是 `scripts/data/tdx_promote_*_2026-10-11_owner_*.json`），解析器从此可以解析它们。40 个绑定的 `decision_eligible` 都是 `False`。仍是 `unsupported` 的 5 个不是上游拒绝，而是证据门还没过：`tdx_public`、`tdx_mac` 的 `bars.minute` 要在交易日才能与腾讯分时对账（腾讯分时不带日期）；`derived_tdx_limits` 的三个池只认当日快照，非交易日读不出。`tdx_public` 的 `bars.daily` 以 `tdx_mac` 为参照，在 MAC 日线行改用 `trade_date` 的修复随 owner-full-20261011-17 上线后通过。解析器不走 `unsupported`，研究试读（第 6.2 节）可以读。
+**状态怎么读。** 5 个旧绑定是 `declared`：`tdx_public` 的 `ticks.session`、`auction.history_0925`、`fundamentals.capital_changes`，`tdx_local` 的 `bars.daily`、`bars.minute`。通达信集成新增的其余 35 个绑定原先一律 `unsupported`；2026-10-11 在 owner 出口逐条检查后，其中 27 个升为 `declared`（证据是 `scripts/data/tdx_promote_*_2026-10-11_owner_*.json`），解析器从此可以解析它们。40 个绑定的 `decision_eligible` 都是 `False`。`derived_tdx_limits` 的三个池只认当日快照，2026-10-12 盘中在 owner 出口检查通过后升为 `declared`（证据是 `scripts/data/tdx_promote_limits.*_2026-10-12_owner_*.json`）。仍是 `unsupported` 的 2 个不是上游拒绝，而是证据门还没过：`tdx_public`、`tdx_mac` 的 `bars.minute` 与腾讯分时对账时，绑定返回跨两个交易日的 240 根而腾讯只有当日，覆盖率按 79/240 判了不合格；对账工具改成只比共同时间段后再查。`tdx_public` 的 `bars.daily` 以 `tdx_mac` 为参照，在 MAC 日线行改用 `trade_date` 的修复随 owner-full-20261011-17 上线后通过。解析器不走 `unsupported`，研究试读（第 6.2 节）可以读。
 
 状态只经 `scripts/tdx-promote.py` 在已记录的证据上移动：`check` 把探测写成 `scripts/data/tdx_promote_*.json`，`apply` 把 `catalog.py` 里该绑定的状态记号改一格（`UNSUPPORTED` → `DECLARED` → `LIVE_VERIFIED`）。升级就是 `catalog.py` 里一个记号的改动，单独提交；`decision_eligible` 不在同一提交里动。门条件见第 7.1 节。
 
@@ -105,7 +105,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `fundamentals.company_profile` | `tdx_public` | 80 | `declared` | F10 公司资料的 GBK 文本（category、filename、content） | 可得时间 = 采集时刻 |
 | `fundamentals.daily_basic` | `tdx_public` | 80 | `declared` | `tdxstat.cfg` 与 `tdxstat2.cfg` 按 (market, code, date) 连接的已确认列 | 20261009 快照；行日期不是采集日期；没有 canonical 映射的列只留在解析器的 raw 字段 |
 | `fundamentals.financial_statements` | `tdx_public` | 80 | `declared` | F10 0x0010 财务摘要，仅最新一期 | 不带报告期（`report_period` 为 None），须与 `tipinfo` 的第 2、4 列关联才可用；绝不用 `updated_date` |
-| `limits.limit_up_pool`、`limits.broken_pool`、`limits.limit_down_pool` | `derived_tdx_limits` | 90 | `unsupported` | 0x054b 快照与 MAC 0x122b 涨跌停价按 0.01 元整数分比较自算，三个池各一个绑定 | 仅当前会话快照；无首封、末封时间、原因、连板数、封单额；炸板池没有 open_times；无涨跌停价的证券不入池；永不替代供应商池作决策 |
+| `limits.limit_up_pool`、`limits.broken_pool`、`limits.limit_down_pool` | `derived_tdx_limits` | 90 | `declared` | 0x054b 快照与 MAC 0x122b 涨跌停价按 0.01 元整数分比较自算，三个池各一个绑定 | 仅当前会话快照；无首封、末封时间、原因、连板数、封单额；炸板池没有 open_times；无涨跌停价的证券不入池；永不替代供应商池作决策 |
 | `limits.prices` | `tdx_mac` | 70 | `declared` | MAC 0x122b 位 0x20/0x21 的涨跌停价（元），交易日取位 0x13；批 80 | 无价格限制的证券两个限价都回 0.0；主板 ST 自 2026-07-06 起为 10 %；声明了对腾讯的容差 |
 | `microstructure.auction_curve` | `tdx_public` | 90 | `declared` | 0x056a 集合竞价曲线 | 到 09:24:57 截止，没有 09:25 行；matched_raw、unmatched_raw 的单位未确认 |
 | `microstructure.minute_series` | `tdx_public` | 90 | `declared` | 0x0fb4 指定日期的历史分时，每交易分钟一行；价格 /100，量为手 | 只收个股；第二个变长字段含义未知；覆盖率核对前不进决策 |

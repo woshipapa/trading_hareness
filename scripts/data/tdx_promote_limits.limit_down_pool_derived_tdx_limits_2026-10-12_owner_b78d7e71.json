@@ -1,0 +1,106 @@
+{
+  "schema": "tdx-promote-v2",
+  "source": "derived_tdx_limits",
+  "capability": "limits.limit_down_pool",
+  "params": {
+    "trade_date": "2026-10-12"
+  },
+  "egress": "owner",
+  "catalog_status": "unsupported",
+  "decision_eligible": false,
+  "checked_utc": "2026-10-12T02:50:27.588362+00:00",
+  "agreement_spec": {},
+  "projections": {
+    "derived_tdx_limits": {
+      "field_map": {
+        "symbol": "symbol"
+      },
+      "unit_factors": {}
+    }
+  },
+  "probes": {
+    "derived_tdx_limits": {
+      "command": "docker exec trading-hareness-peer-quant-research-1 python -m app.datasources probe derived_tdx_limits limits.limit_down_pool --params '{\"trade_date\": \"2026-10-12\"}'",
+      "source": "derived_tdx_limits",
+      "capability": "limits.limit_down_pool",
+      "adapter": "app/datasources/derived/limit_pools.py:fetch_limit_down_pool",
+      "params": {
+        "trade_date": "2026-10-12"
+      },
+      "started_utc": "2026-10-12T02:50:23.484065+00:00",
+      "rows": 9,
+      "coverage": 0.9996402877697842,
+      "effective_at_min": null,
+      "effective_at_max": null,
+      "available_at_min": "2026-10-12T02:50:27.306576+00:00",
+      "available_at_max": "2026-10-12T02:50:27.306576+00:00",
+      "warnings": [
+        "tdx_host=115.238.56.198:7709/login_one",
+        "no_trade_rows=19",
+        "tdx_host=121.36.248.138:7709",
+        "limit_price_missing=2"
+      ],
+      "sample": [
+        {
+          "symbol": "000056.SZ",
+          "price": 2.43,
+          "high": 2.68,
+          "observed_at": "2026-10-12T02:50:24.975818+00:00",
+          "down_limit": 2.43
+        },
+        {
+          "symbol": "001336.SZ",
+          "price": 20.45,
+          "high": 23.88,
+          "observed_at": "2026-10-12T02:50:24.975818+00:00",
+          "down_limit": 20.45
+        },
+        {
+          "symbol": "002717.SZ",
+          "price": 0.45,
+          "high": 0.45,
+          "observed_at": "2026-10-12T02:50:24.975818+00:00",
+          "down_limit": 0.45
+        },
+        {
+          "symbol": "600664.SH",
+          "price": 6.65,
+          "high": 6.65,
+          "observed_at": "2026-10-12T02:50:24.975818+00:00",
+          "down_limit": 6.65
+        },
+        {
+          "symbol": "600722.SH",
+          "price": 15.19,
+          "high": 16.13,
+          "observed_at": "2026-10-12T02:50:24.975818+00:00",
+          "down_limit": 15.19
+        }
+      ],
+      "error": null,
+      "finished_utc": "2026-10-12T02:50:27.334947+00:00",
+      "sample_sha256": "4d3dac838ed0bdcb22d3f45d5609462892cd2165546c3bab9fd74e626beae6c1"
+    }
+  },
+  "comparison": {},
+  "session": {
+    "calendar": "exchange_calendars 4.13.2 XSHG",
+    "inside": {
+      "derived_tdx_limits": true
+    }
+  },
+  "verdicts": {
+    "owner_egress": {
+      "pass": true,
+      "detail": "egress owner, 9 rows"
+    },
+    "agreement": {
+      "pass": true,
+      "detail": "extension capability: no reference is declared, nothing to compare"
+    },
+    "intraday": {
+      "pass": true,
+      "detail": "every probe ran inside a session (exchange_calendars 4.13.2 XSHG)"
+    }
+  }
+}
