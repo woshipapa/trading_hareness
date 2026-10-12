@@ -16,7 +16,8 @@
 - 卖出若找不到可见的建仓记录（建仓早于订阅可见窗口），单独列出并**排除在收益统计之外**。
 - 上游只保留最近一段追加内容，因此每次跑完把流水并进 `ITOUGU_PERF_STATE_FILE` 的 ledger，
   窗口滚掉也不会丢失已配对的建仓价。
-- 同一天/同一周重复触发由 ledger 里的 `sent` 记录去重；`--force` 可显式重发。
+- 同一天/同一周重复触发由状态文件里的 `sent`（已发群）和 `recorded`（只记录）去重；`--force` 可显式重做。
+- 发群失败时不落留存记录，也不记为已处理，下次触发会重试。
 
 ## 自动化部署
 
@@ -37,7 +38,15 @@ scripts/deploy-itougu-perf-report.sh <git-sha-or-tag> --apply
 
 ## 配置（`/etc/itougu-perf-report.env`, 0600）
 
-见 `itougu-perf-report.env.example`。当前约定是尾盘掘金收益日报/周报发送到分析师发送汇总群，不发送到尾盘掘金专属群；目标群用
+见 `itougu-perf-report.env.example`。
+
+**当前约定（2026-10-12 起）：猎场擒龙、尾盘掘金的日报和周报都只记录、不发群**（`ITOUGU_PERF_DELIVERY=record`）。
+每份报告追加一行到 `ITOUGU_PERF_REPORT_LOG`（默认 `/var/lib/itougu-neican/perf-reports.jsonl`）：正文、
+本期与累计的平仓统计（笔数、胜负、胜率、平均、加总、最好/最差）、持仓数、发到了哪些群（只记录时为空）。
+发群模式下同样会记录。同一天/同一周只记录一次；`--no-send` 可对单次运行强制只记录。
+
+要恢复发群，把 `ITOUGU_PERF_DELIVERY` 改回 `send`。此前的约定是尾盘掘金发到分析师发送汇总群（不发尾盘掘金专属群）、
+猎场擒龙发到擒龙内参更新群1；目标群用
 `ITOUGU_PERF_TARGETS=<businessProductId>=<chat_id>[,<chat_id>][;<productId>=<chat_id>]` 配置；
 没有配任何目标群时脚本只打印不发送（fail closed）。
 

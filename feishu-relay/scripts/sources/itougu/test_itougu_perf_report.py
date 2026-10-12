@@ -273,5 +273,89 @@ class LedgerStateTests(unittest.TestCase):
         self.assertNotEqual(key, perf.delivery_key("weekly", "pid", date(2026, 9, 8)))
 
 
+class ReportRetentionTests(unittest.TestCase):
+    """Every report is kept on disk; sending it to a group is a separate, optional step."""
+
+    def setUp(self):
+        self.book = perf.pair_trades(perf.extract_trades([
+            item("1", "2026-09-04 10:08", name="神奇制药", code="600613", price=9.16, deal=0),
+            item("2", "2026-09-07 13:57", name="出版传媒", code="601999", price=7.07, deal=0),
+            item("3", "2026-09-08 09:30", name="出版传媒", code="601999", price=7.43, deal=1),
+            item("4", "2026-09-08 09:47", name="长飞光纤", code="601869", price=411.0, deal=0),
+        ]))
+        self.day = date(2026, 9, 8)
+        quotes = {symbol: {"last": 9.91, "prev_close": 9.41, "session_date": self.day}
+                  for symbol in ("sh600613", "sh601869", "sh601999", perf.INDEX_SYMBOL)}
+        self.sent = []
+        self._saved = (perf.build_book, perf.fetch_quotes, perf.deliver_to_chats)
+        perf.build_book = lambda *args, **kwargs: self.book
+        perf.fetch_quotes = lambda *args, **kwargs: quotes
+        perf.deliver_to_chats = lambda chat_ids, title, text, seed, sender=None: (self.sent.append((list(chat_ids), title)) or list(chat_ids))
+        self.directory = tempfile.TemporaryDirectory()
+        self.log = Path(self.directory.name) / "nested" / "perf-reports.jsonl"
+
+    def tearDown(self):
+        perf.build_book, perf.fetch_quotes, perf.deliver_to_chats = self._saved
+        self.directory.cleanup()
+
+    def rows(self):
+        return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
+
+    def run_report(self, state, kind="daily", **kwargs):
+        return perf.run_report(kind, "pid", "猎场擒龙内参", ["chat-a"], self.day, state, verbose=False, report_log=self.log, **kwargs)
+
+    def test_record_mode_keeps_the_report_and_sends_nothing(self):
+        state = perf.load_state(Path(self.directory.name) / "missing.json")
+        self.assertEqual(self.run_report(state, send=False), 0)
+        self.assertEqual(self.sent, [])
+        row, = self.rows()
+        self.assertEqual((row["key"], row["kind"], row["product_name"], row["delivered_to"]), ("daily:pid:2026-09-08", "daily", "猎场擒龙内参", []))
+        self.assertIn("出版传媒", row["text"])
+        self.assertEqual((row["period_start"], row["period_end"]), ("2026-09-08", "2026-09-08"))
+        self.assertEqual((row["period"]["count"], row["period"]["wins"], row["open_positions"]), (1, 1, 2))
+        self.assertAlmostEqual(row["period"]["sum_pct"], (7.43 - 7.07) / 7.07 * 100, places=6)
+        self.assertEqual(row["period"]["best"]["name"], "出版传媒")
+        self.assertEqual(set(row["period"]["best"]), {"name", "symbol", "return_pct"})  # plain numbers, no trade objects
+        # recorded once: the same period is not recorded again, and never counts as sent
+        self.assertEqual(self.run_report(state, send=False), 0)
+        self.assertEqual(len(self.rows()), 1)
+        self.assertFalse(perf.already_sent(state, row["key"]))
+        self.assertTrue(perf.already_done(state, row["key"]))
+
+    def test_send_mode_delivers_and_still_records_where_it_went(self):
+        state = {"ledger": {}, "sent": {}}
+        self.assertEqual(self.run_report(state), 1)
+        self.assertEqual(self.sent, [(["chat-a"], "[盘后] 猎场擒龙内参 · 操作与收益日报 2026-09-08")])
+        self.assertEqual(self.rows()[0]["delivered_to"], ["chat-a"])
+        self.assertTrue(perf.already_sent(state, "daily:pid:2026-09-08"))
+
+    def test_a_weekly_record_covers_the_week_and_a_period_without_closes_says_so(self):
+        state = {"ledger": {}, "sent": {}}
+        self.run_report(state, kind="weekly", send=False)
+        week = self.rows()[0]
+        self.assertEqual((week["period_start"], week["period_end"], week["period"]["count"]), ("2026-09-07", "2026-09-11", 1))
+        quiet = perf.report_record("daily", "pid", "n", date(2026, 9, 5), "t", "x", self.book, [])
+        self.assertEqual((quiet["period"]["count"], quiet["period"]["best"], quiet["cumulative"]["count"]), (0, None, 1))
+
+    def test_a_failed_delivery_records_nothing_so_the_period_is_retried(self):
+        def failing(*args, **kwargs):
+            raise RuntimeError("chat-a: 发送失败")
+        perf.deliver_to_chats = failing
+        state = {"ledger": {}, "sent": {}}
+        with self.assertRaises(RuntimeError):
+            self.run_report(state)
+        self.assertFalse(self.log.exists())
+        self.assertFalse(perf.already_done(state, "daily:pid:2026-09-08"))
+
+    def test_a_dry_run_neither_sends_nor_records(self):
+        state = {"ledger": {}, "sent": {}}
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.run_report(state, dry_run=True), 0)
+        self.assertEqual(self.sent, [])
+        self.assertFalse(self.log.exists())
+        self.assertFalse(perf.already_done(state, "daily:pid:2026-09-08"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,10 @@ DEFAULT_PRODUCTS = {
 STATE_FILE = Path(os.environ.get("ITOUGU_PERF_STATE_FILE",
                                  "/Users/papa/codebase/n8n/state/itougu-perf-report.json"))
 TARGETS_SPEC = os.environ.get("ITOUGU_PERF_TARGETS", "")
+# 每份日报/周报都落一行到这个文件（正文 + 结构化统计），发不发群都记。
+REPORT_LOG = Path(os.environ.get("ITOUGU_PERF_REPORT_LOG", str(STATE_FILE.with_name("perf-reports.jsonl"))))
+# send = 记录并发到目标群；record = 只记录，不发群（目标群配置保留，改回 send 即恢复）。
+DELIVERY_MODE = os.environ.get("ITOUGU_PERF_DELIVERY", "send").strip().lower() or "send"
 MAX_LEDGER_TRADES = 2000
 
 Book = namedtuple("Book", "trades closed open_positions orphan_sells")
@@ -300,11 +304,12 @@ def load_state(path=None):
     try:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"ledger": {}, "sent": {}}
+        return {"ledger": {}, "sent": {}, "recorded": {}}
     if not isinstance(state, dict):
-        return {"ledger": {}, "sent": {}}
+        return {"ledger": {}, "sent": {}, "recorded": {}}
     state.setdefault("ledger", {})
     state.setdefault("sent", {})
+    state.setdefault("recorded", {})
     return state
 
 
@@ -340,6 +345,18 @@ def delivery_key(kind, product_id, report_date):
 
 def already_sent(state, key):
     return key in (state.get("sent") or {})
+
+
+def already_done(state, key):
+    """A period is done once its report was sent, or recorded without sending."""
+    return already_sent(state, key) or key in (state.get("recorded") or {})
+
+
+def mark_recorded(state, key):
+    recorded = state.setdefault("recorded", {})
+    recorded[key] = datetime.now(timezone.utc).isoformat()
+    for stale in sorted(recorded)[:-400]:
+        recorded.pop(stale, None)
 
 
 def mark_sent(state, key):
@@ -519,6 +536,44 @@ def format_weekly(product_name, report_date, book, quotes):
     return title, "\n".join(lines)
 
 
+# ---------------- 报告留存 ----------------
+def _plain_stats(stats):
+    plain = {k: stats[k] for k in ("count", "wins", "losses", "win_rate_pct", "avg_pct", "sum_pct")}
+    for edge in ("best", "worst"):
+        trade = stats.get(edge)
+        plain[edge] = {"name": trade["name"], "symbol": trade["symbol"], "return_pct": trade["return_pct"]} if trade else None
+    return plain
+
+
+def report_record(kind, product_id, product_name, report_date, title, text, book, delivered_to, recorded_at=None):
+    """One report as a durable row: the text that was (or would have been) sent, plus its numbers.
+
+    The numbers are the same ones the text states, so a reader of the log does
+    not have to parse prose: closes inside the period, and the cumulative
+    figure over the visible ledger.
+    """
+    start, end = (report_date, report_date) if kind == "daily" else week_window(report_date)
+    in_period = [c for c in book.closed if start <= c["sell"]["at"].date() <= end]
+    return {
+        "key": delivery_key(kind, product_id, report_date), "kind": kind,
+        "product_id": product_id, "product_name": product_name,
+        "report_date": report_date.isoformat(), "period_start": start.isoformat(), "period_end": end.isoformat(),
+        "title": title, "text": text,
+        "period": _plain_stats(summarize(in_period)), "cumulative": _plain_stats(summarize(book.closed)),
+        "open_positions": len(book.open_positions), "orphan_sells": len(book.orphan_sells),
+        "delivered_to": list(delivered_to or []),
+        "recorded_at": (recorded_at or datetime.now(timezone.utc)).isoformat(),
+    }
+
+
+def append_report(path, record):
+    path = Path(path or REPORT_LOG)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return path
+
+
 # ---------------- 主流程 ----------------
 def build_book(product_id, state, as_of=None, verbose=False):
     """Refresh the durable ledger from upstream, then pair it as of a date."""
@@ -534,11 +589,11 @@ def build_book(product_id, state, as_of=None, verbose=False):
 
 
 def run_report(kind, product_id, product_name, chat_ids, report_date, state,
-               dry_run=False, force=False, verbose=True):
+               dry_run=False, force=False, verbose=True, send=True, report_log=None):
     key = delivery_key(kind, product_id, report_date)
-    if already_sent(state, key) and not force:
+    if already_done(state, key) and not force:
         if verbose:
-            print("已发送过 %s，跳过（--force 可重发）" % key, flush=True)
+            print("已处理过 %s，跳过（--force 可重做）" % key, flush=True)
         return 0
     window_end = report_date if kind == "daily" else week_window(report_date)[1]
     book = build_book(product_id, state, as_of=window_end, verbose=verbose)
@@ -554,16 +609,22 @@ def run_report(kind, product_id, product_name, chat_ids, report_date, state,
         print("行情可用 %d/%d，缺失项按'行情缺失'输出" % (len(marks), len(symbols) - 1), flush=True)
     formatter = format_daily if kind == "daily" else format_weekly
     title, text = formatter(product_name, report_date, book, marks)
-    if dry_run or not chat_ids:
+    if dry_run:
         print("── DRY [%s]\n%s\n%s\n" % (kind, title, text), flush=True)
-        if not chat_ids and not dry_run and verbose:
-            print("未配置目标群（ITOUGU_PERF_TARGETS），只打印不发送", flush=True)
         return 0
-    deliver_to_chats(chat_ids, title, text, "perf:%s" % key)
-    mark_sent(state, key)
+    # 发群是可选的，留存不是：报告先按配置发（或不发），再落盘。
+    delivered = deliver_to_chats(chat_ids, title, text, "perf:%s" % key) if send and chat_ids else []
+    path = append_report(report_log, report_record(kind, product_id, product_name, report_date, title, text, book, delivered))
+    if delivered:
+        mark_sent(state, key)
+    else:
+        mark_recorded(state, key)
     if verbose:
-        print("✅ 已发飞书 %s → %s" % (key, ",".join(chat_ids)), flush=True)
-    return 1
+        if delivered:
+            print("✅ 已发飞书 %s → %s，并记录到 %s" % (key, ",".join(delivered), path), flush=True)
+        else:
+            print("📝 已记录 %s → %s（%s，不发群）" % (key, path, "只记录模式" if not send else "未配置目标群"), flush=True)
+    return 1 if delivered else 0
 
 
 def main():
@@ -574,6 +635,8 @@ def main():
     parser.add_argument("--product", action="append", help="只处理指定 businessProductId")
     parser.add_argument("--chat-id", action="append", help="覆盖目标飞书群（测试用）")
     parser.add_argument("--dry-run", action="store_true", help="只打印不发送")
+    parser.add_argument("--no-send", action="store_true", help="只记录到报告留存文件，不发群（等同 ITOUGU_PERF_DELIVERY=record）")
+    parser.add_argument("--report-log", help="覆盖报告留存文件路径")
     parser.add_argument("--force", action="store_true", help="忽略已发送记录，重发")
     parser.add_argument("--state-file", help="覆盖状态文件路径")
     args = parser.parse_args()
@@ -587,7 +650,11 @@ def main():
     if args.product:
         targets = {p: targets.get(p, []) for p in args.product}
     if not targets:
-        targets = {next(iter(DEFAULT_PRODUCTS)): []}
+        # 没配目标群：已知产品都照常统计并记录，只是不发。
+        targets = {product_id: [] for product_id in DEFAULT_PRODUCTS}
+    if DELIVERY_MODE not in ("send", "record"):
+        parser.error("ITOUGU_PERF_DELIVERY 只能是 send 或 record")
+    send = DELIVERY_MODE == "send" and not args.no_send
 
     sent = 0
     for product_id, chat_ids in targets.items():
@@ -596,7 +663,7 @@ def main():
         for kind in [k for k in ("daily", "weekly") if getattr(args, k)]:
             try:
                 sent += run_report(kind, product_id, name, destinations, report_date, state,
-                                   dry_run=args.dry_run, force=args.force)
+                                   dry_run=args.dry_run, force=args.force, send=send, report_log=args.report_log)
             except Exception as exc:                           # noqa: BLE001 - one product must not block others
                 print("[%s] %s 报告失败: %s" % (name, kind, exc), flush=True)
     if not args.dry_run:
