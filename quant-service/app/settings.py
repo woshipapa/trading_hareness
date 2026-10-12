@@ -116,6 +116,7 @@ SETTINGS: dict[str, Setting] = {item.name: item for item in [
         ("AUCTION_PULSE_FEISHU_COOLDOWN_SECONDS", "30", "auction pulse alert cooldown, clamped to 5-300"),
         ("MARKET_EVENT_CAPTURE_ENABLED", "true", "capture market events"),
         ("ALL_A_LEVEL1_CAPTURE_ENABLED", "true", "capture all-A level-1 snapshots"),
+        ("TDX_SHADOW_SNAPSHOT_ENABLED", "true", "capture the TDX all-A shadow snapshot"),
         ("PUBLIC_EVIDENCE_CAPTURE_ENABLED", "true", "capture public evidence"),
         ("QUANT_CORE_INTRADAY_CAPTURE_AT_STOP", "false", "keep core intraday capture when storage is at its stop ratio"),
     ),

@@ -102,6 +102,13 @@ class StorageTests(unittest.TestCase):
         stored = json.loads(params[5])
         self.assertEqual(mcs.rows_of(stored), ROWS)
 
+    def test_shadow_document_uses_explicit_provider_and_capability(self):
+        database = _Database()
+        mcs.persist_document(database, MINUTE, ROWS[:1], METADATA,
+                             provider="tdx_public", capability="a_share_minute_cross_section_shadow")
+        self.assertEqual(database.statements[1][1][:2], ("tdx_public", "a_share_minute_cross_section_shadow"))
+        self.assertEqual(database.statements[2][1][:2], ("tdx_public", "a_share_minute_cross_section_shadow"))
+
     def test_reads_take_the_newest_or_the_first_document_in_a_window(self):
         document = mcs.build_document(ROWS[:3], MINUTE)
         calls = []
@@ -230,6 +237,34 @@ class LatestReadTests(unittest.TestCase):
         self.assertEqual(legacy["count"], 1)
         mcs.remember(datetime.now(timezone.utc), ROWS[:2])
         self.assertEqual(latest_all_a_level1(database(True), 10)["source"], "memory")
+
+    def test_all_document_readers_filter_the_shadow_capability(self):
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params=()):
+                calls.append((sql, params))
+                return SimpleNamespace(fetchone=lambda: None, fetchall=lambda: [])
+
+        connection = Connection()
+        mcs.latest(connection)
+        mcs.latest(connection, date(2026, 10, 9))
+        mcs.first_between(connection, MINUTE, MINUTE + timedelta(minutes=1))
+        mcs.day_documents(connection, date(2026, 10, 9))
+
+        class AsyncResult:
+            async def fetchone(self):
+                return None
+
+        class AsyncConnection:
+            async def execute(self, sql, params=()):
+                calls.append((sql, params))
+                return AsyncResult()
+
+        asyncio.run(mcs.latest_async(AsyncConnection()))
+        self.assertTrue(calls)
+        self.assertTrue(all("a_share_minute_cross_section_shadow" not in params for _, params in calls))
+        self.assertTrue(all(mcs.CAPABILITY in params for sql, params in calls if "raw_market_observations" in sql))
 
 
 if __name__ == "__main__":  # pragma: no cover

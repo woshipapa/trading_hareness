@@ -34,6 +34,7 @@
 ## 做法
 
 - 目录给 `tdx_public quote.all_a_snapshot` 声明以扶摇快照为参照的比对，这样交易时段内的升级检查会量出盘中差异。
+- 盘中先以影子采集接入：owner 的 `intraday_edge` quant-research 服务每分钟独立读取并保存 `tdx_public/a_share_minute_cross_section_shadow`，再保存与扶摇最近分钟的 `local_derived/all_a_snapshot_source_agreement`；这两条流只作研究测量，不被现有消费者读取。
 - 升级工具在 `declared → live_verified` 这一步可以带上本决策编号，把 `decision_eligible` 一并置为 `True`；
   不带就不动。
 - 下一个交易时段内对 `tdx_public quote.all_a_snapshot` 跑检查，通过后升级并置为可决策，随后发布。

@@ -36,6 +36,8 @@ DEFAULT_RATE_LIMITS_PER_MINUTE = {
     "tencent_free": 60,
     "sina_free": 60,
     "fuyao_ths": 60,
+    # Reserved for the TDX shadow loop's own calls; other TDX callers use tdx_protocol.call directly.
+    "tdx_public": 60,
     "cninfo_free": 30,
 }
 

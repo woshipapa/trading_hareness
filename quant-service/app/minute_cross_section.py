@@ -165,7 +165,8 @@ def rows_for(document: Mapping[str, Any], symbols: Sequence[str]) -> dict[str, d
 # -- storage ------------------------------------------------------------------
 
 def persist_document(database: Any, observed_at: datetime, rows: Sequence[Mapping[str, Any]],
-                     metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                     metadata: Mapping[str, Any] | None = None, *,
+                     provider: str = PROVIDER_KEY, capability: str = CAPABILITY) -> dict[str, Any]:
     """Write one capture as one row; returns its size so the capture can report it.
 
     A capture's key is (provider_key, capability, effective_at) with a NULL
@@ -182,20 +183,20 @@ def persist_document(database: Any, observed_at: datetime, rows: Sequence[Mappin
     digest = hashlib.sha256(text.encode()).hexdigest()
     payload = {"schema": SCHEMA, "rows": document["rows"], "sha256": digest, "metadata": document["metadata"]}
     instant = observed_at if observed_at.tzinfo else observed_at.replace(tzinfo=timezone.utc)
-    key = f"{PROVIDER_KEY}:{CAPABILITY}:{instant.astimezone(timezone.utc).isoformat()}"
+    key = f"{provider}:{capability}:{instant.astimezone(timezone.utc).isoformat()}"
     with database.transaction() as connection:
         connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
         existing = connection.execute(
             """SELECT payload_sha256 FROM quant.raw_market_observations
                 WHERE provider_key=%s AND capability=%s AND symbol IS NULL AND effective_at=%s LIMIT 1""",
-            (PROVIDER_KEY, CAPABILITY, observed_at)).fetchone()
+            (provider, capability, observed_at)).fetchone()
         if existing is None:
             connection.execute(
                 """INSERT INTO quant.raw_market_observations(provider_key,capability,market,symbol,effective_at,available_at,
                                                               payload_sha256,normalized,payload)
                    VALUES(%s,%s,'cn',NULL,%s,%s,%s,%s::jsonb,%s::jsonb)
                    ON CONFLICT DO NOTHING""",
-                (PROVIDER_KEY, CAPABILITY, observed_at, datetime.now(timezone.utc), digest, text,
+                (provider, capability, observed_at, datetime.now(timezone.utc), digest, text,
                  json.dumps(payload, ensure_ascii=False, default=str)))
     return {"rows": document["rows"], "bytes": len(text.encode()), "sha256": digest, "written": existing is None}
 
