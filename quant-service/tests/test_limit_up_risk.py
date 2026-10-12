@@ -9,7 +9,7 @@ from unittest import mock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.limit_up_risk import fifth_comparison, score_day
+from app.limit_up_risk import fifth_comparison, recent_status, score_day
 from app.limit_up_risk_repository import read_inputs, read_lists
 from app.routers.market_radar_reads import build_market_radar_router
 
@@ -91,6 +91,16 @@ class LimitUpRiskTests(unittest.TestCase):
         self.assertIsNone(fifth_comparison(rows[:19], {}))
         self.assertIsNone(fifth_comparison(rows, {}))
 
+    def test_recent_status_working_and_not_working(self):
+        working = [{"lowest": {"big_loss_rate": 0.08}, "highest": {"big_loss_rate": 0.13}} for _ in range(60)]
+        self.assertEqual(recent_status(working)["status"], "working")
+        not_working = [{"lowest": {"big_loss_rate": 0.10}, "highest": {"big_loss_rate": 0.11}} for _ in range(60)]
+        self.assertEqual(recent_status(not_working)["status"], "not_working_recently")
+
+    def test_recent_status_requires_sixty_sessions(self):
+        summaries = [{"lowest": {"big_loss_rate": 0.08}, "highest": {"big_loss_rate": 0.13}} for _ in range(59)]
+        self.assertEqual(recent_status(summaries)["status"], "insufficient_history")
+
     def test_repository_bar_sql_has_unit_filter_limit_resolution_and_bounded_history(self):
         statements = []
 
@@ -113,6 +123,26 @@ class LimitUpRiskTests(unittest.TestCase):
         self.assertIn("coalesce(nullif(b.limit_up, 0), limits.limit_up)", joined)
         self.assertIn("trading_date BETWEEN %s AND %s", joined)
         self.assertIn("DISTINCT ON (symbol)", joined)
+
+    def test_track_close_sql_joins_parallel_symbol_date_pairs(self):
+        from app import limit_up_risk_runtime
+        class Result:
+            def fetchall(self): return []
+        class Connection:
+            def __init__(self): self.statements = []
+            def execute(self, sql, _params): self.statements.append(sql); return Result()
+        class Database:
+            def __init__(self, connection): self.connection = connection
+            def transaction(self):
+                class Tx:
+                    def __init__(self, connection): self.connection = connection
+                    def __enter__(self): return self.connection
+                    def __exit__(self, *_args): return False
+                return Tx(self.connection)
+        connection = Connection()
+        with mock.patch.object(limit_up_risk_runtime.derived_daily_readings, "newest", return_value=[]):
+            limit_up_risk_runtime.track(Database(connection), 3)
+        self.assertFalse(any("BETWEEN" in sql and "canonical_bars_daily" in sql for sql in connection.statements))
 
     def test_market_radar_router_exposes_daily_and_track_routes(self):
         paths = {route.path for route in build_market_radar_router(object(), lambda *_args, **_kwargs: None).routes}
