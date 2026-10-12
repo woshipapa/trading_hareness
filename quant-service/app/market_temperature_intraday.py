@@ -55,7 +55,7 @@ from typing import Any
 
 from . import derived_daily_readings, minute_cross_section
 from .derived_daily_readings import CN_TZ
-from .market_temperature import KEYS, TURNOVER_BASE, VERSION, WINDOW, band_of, components_of, history_for, score
+from .market_temperature import KEYS, TURNOVER_BASE, VERSION, WINDOW, band_of, components_of, coverage, history_for, score
 from .market_temperature_repository import (
     LIMIT_TOLERANCE, LIMITS_OK_SHARE, daily_rows, prior_streaks, session_limits, sessions_between,
 )
@@ -203,6 +203,7 @@ def sample(connection: Any, day: date, moment: time, context: Mapping[str, Any])
     return {
         "time": moment.strftime("%H:%M"), "observed_at": observed_at.astimezone(CN_TZ).isoformat(), "temperature": temperature,
         "band": band_of(temperature), "scores": scores, "values": values,
+        "coverage": coverage(scores, totals),
         "counts": {key: totals[key] for key in COUNT_KEYS}, "turnover_cny": round(totals["turnover_cny"]),
         "limits_ok": totals["limits_ok"],
     }

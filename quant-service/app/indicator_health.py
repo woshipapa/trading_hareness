@@ -27,6 +27,7 @@ from .broad_etf_flow import FLOW_CAPABILITY as ETF_FLOW_CAPABILITY, MIN_CODES as
 from .indicator_registry import BY_KEY, INTRADAY_MINUTE, PREVIOUS_SESSION, SESSION_OPEN
 from .limit_detail_read_model import limit_detail_day
 from .market_radar_runtime import latest_main_net, latest_point
+from .market_temperature import VERSION as TEMPERATURE_VERSION
 from .market_temperature_runtime import CAPABILITY as TEMPERATURE_CAPABILITY
 from .market_timing import CAPABILITY as TIMING_CAPABILITY
 from .owner_storage import tiered_sql_builder
@@ -255,7 +256,10 @@ def temperature_checks(connection: Any, trade_date: date, _now: datetime) -> lis
     if reading is None or reading.get("temperature") is None:
         return [_check("present", MISSING, None, "stored", "当日情绪温度未落库（盘后阶段 market_temperature）")]
     scored = sum(value is not None for value in (reading.get("scores") or {}).values())
-    return [_check("present", OK, reading["temperature"], "stored"),
+    version = reading.get("version")
+    version_check = _check("version", OK, version, TEMPERATURE_VERSION) if version == TEMPERATURE_VERSION else _check(
+        "version", WARN, version, TEMPERATURE_VERSION, f"stored under {version}, backfill pending")
+    return [_check("present", OK, reading["temperature"], "stored"), version_check,
             _check("components", _grade(scored, 8, 6), scored, ">=8", "参与平均的分项数（共 8 项）")]
 
 

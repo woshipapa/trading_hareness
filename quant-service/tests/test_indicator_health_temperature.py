@@ -20,11 +20,17 @@ def _status(key: str, reading: dict | None) -> dict:
 
 class TemperatureHealthTests(unittest.TestCase):
     def test_a_full_reading_is_eligible_and_a_thin_one_warns(self):
-        full = {"temperature": 72.6, "scores": dict.fromkeys("abcdefgh", 50.0)}
+        full = {"temperature": 72.6, "scores": dict.fromkeys("abcdefgh", 50.0), "version": health.TEMPERATURE_VERSION}
         self.assertTrue(_status("market.temperature", full)["decision_eligible"])
         thin = {"temperature": 40.0, "scores": {**dict.fromkeys("abcdef", 50.0), "g": None, "h": None}}
         self.assertEqual(_status("market.temperature", thin)["status"], "warn")
         self.assertEqual(_status("market.temperature", None)["status"], "missing")
+
+    def test_an_old_version_warns_until_the_backfill(self):
+        reading = {"temperature": 72.6, "scores": dict.fromkeys("abcdefgh", 50.0), "version": "market-temperature-v1"}
+        result = _status("market.temperature", reading)
+        self.assertEqual(result["status"], "warn")
+        self.assertIn("stored under market-temperature-v1, backfill pending", result["checks"][1]["detail"])
 
     def test_etf_flow_needs_the_whole_basket_and_exact_turnover(self):
         self.assertEqual(_status("market.broad_etf_flow", {"ratio": 1.54, "codes": 12})["status"], "ok")

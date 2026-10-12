@@ -12,7 +12,7 @@ from app import market_temperature_runtime as runtime
 
 def _reading(day: date, temperature: float | None, band: str | None = "中性") -> dict:
     return {"trade_date": day.isoformat(), "temperature": temperature, "band": band if temperature is not None else None,
-            "scores": {}, "values": {}, "index_close": 3900.0, "limits_ok": True}
+            "scores": {}, "values": {}, "index_close": 3900.0, "limits_ok": True, "version": runtime.VERSION}
 
 
 class _Database:
@@ -126,6 +126,37 @@ class StoredSeriesTests(unittest.TestCase):
         self.assertEqual((first["timing"], second["timing"]), (None, {"state": "silver", "event": "silver"}))
         self.assertEqual((second["index_change_pct"], second["etf_flow"]["ratio"], second["marker"]["label"]),
                          (-1.0, 1.8, "逆势放量"))
+
+    def test_daily_coverage_round_trips_through_storage(self) -> None:
+        end = date(2099, 3, 10)
+        coverage = {"scored": 8, "missing": [], "counts": {"touched": 70, "advancers": 2500,
+                                                               "decliners": 2500, "prev_sealed": 50, "limits_ok": True}}
+        reading = {**_reading(end, 72.5, "热"), "coverage": coverage}
+        with mock.patch.object(runtime, "compute", return_value=[reading]):
+            runtime.refresh(self.database, end)
+        series = runtime.daily_series(self.connection, days=10, end=end)
+        self.assertEqual(series["readings"][0]["coverage"], coverage)
+
+    def test_the_series_excludes_stale_versions_and_reports_the_count(self) -> None:
+        end = date(2099, 3, 10)
+        readings = [_reading(end - timedelta(days=1), 45.0), _reading(end, 18.0, "冰点")]
+        readings[0]["version"] = "market-temperature-v1"
+        with mock.patch.object(runtime.derived_daily_readings, "newest", return_value=readings):
+            series = runtime.daily_series(object(), days=10, end=end)
+        self.assertEqual([item["trade_date"] for item in series["readings"]], [end.isoformat()])
+        self.assertEqual(series["stale_versions"], 1)
+
+    def test_the_index_change_of_a_reading_comes_from_the_session_before_it_whatever_its_version(self) -> None:
+        end = date(2099, 3, 10)
+        before, cold = _reading(end - timedelta(days=1), 45.0), _reading(end, 18.0, "冰点")
+        before.update({"version": "market-temperature-v1", "index_close": 100.0})
+        cold["index_close"] = 90.0
+        flows = [{"trade_date": end.isoformat(), "ratio": 1.6}]
+        with mock.patch.object(runtime.derived_daily_readings, "newest", side_effect=[[before, cold], flows, []]):
+            series = runtime.daily_series(object(), days=10, end=end)
+        reading = series["readings"][0]
+        self.assertEqual(reading["index_change_pct"], -10.0)
+        self.assertEqual(reading["marker"]["label"], "逆势放量")
 
 
 if __name__ == "__main__":  # pragma: no cover

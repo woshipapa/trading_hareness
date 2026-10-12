@@ -50,6 +50,27 @@ class AggregateTests(unittest.TestCase):
         times = [moment.strftime("%H:%M") for moment in intraday.SAMPLE_TIMES]
         self.assertEqual((len(times), times[0], times[24], times[25], times[-1]), (49, "09:30", "11:30", "13:05", "15:00"))
 
+    def test_intraday_sample_reports_component_coverage(self):
+        from unittest import mock
+        day = date(2099, 6, 1)
+        context = {"limits": {"A": (11.0, 9.0)}, "prior": {"A": 1}, "profile": {}, "turnover_base": None,
+                   "history": {key: [1.0] * 60 for key in intraday.KEYS}}
+        with mock.patch.object(intraday, "_document_at", return_value=(datetime.combine(day, time(10), CN_TZ), object())), \
+                mock.patch.object(intraday.minute_cross_section, "rows_of", return_value=[_row("A", 11.0, 10.0)]):
+            reading = intraday.sample(object(), day, time(10), context)
+        self.assertEqual(reading["coverage"]["missing"], ["turnover_ratio"])
+        self.assertEqual(reading["coverage"]["counts"]["limits_ok"], True)
+
+    def test_stored_pre_coverage_sample_reads_unchanged(self):
+        from unittest import mock
+        day = date(2099, 6, 1)
+        stored = {"trade_date": day.isoformat(), "version": "market-temperature-v1",
+                  "samples": [{"time": "10:00", "temperature": 50.0}]}
+        with mock.patch.object(intraday.derived_daily_readings, "newest", return_value=[stored]):
+            result = intraday.read(object(), day)
+        self.assertEqual(result["samples"], stored["samples"])
+        self.assertNotIn("coverage", result["samples"][0])
+
 
 @unittest.skipUnless(os.getenv("PGHOST"), "requires the compose PostgreSQL service")
 class CloseAgreementTests(unittest.TestCase):

@@ -59,6 +59,52 @@ class ScoreTests(unittest.TestCase):
 
 
 class SeriesTests(unittest.TestCase):
+    def test_coverage_names_missing_limit_and_previous_sealed_components(self):
+        rows = _ordinary(80)
+        missing_limits = mt.temperature_series(rows + [_row(date(2099, 4, 1), limits_ok=False)])[-1]
+        missing_previous = mt.temperature_series(rows + [_row(date(2099, 4, 1), prev_sealed=0, premium=None)])[-1]
+        complete = mt.temperature_series(rows + [_row(date(2099, 4, 1))])[-1]
+        self.assertEqual(missing_limits["coverage"]["missing"], ["limit_up", "limit_down", "seal_rate", "promotion", "max_streak"])
+        self.assertEqual(missing_previous["coverage"]["missing"], ["premium", "promotion"])
+        self.assertEqual(complete["coverage"]["missing"], [])
+        self.assertNotEqual(missing_limits["coverage"], complete["coverage"])
+
+    def test_fewer_than_five_scored_components_still_reports_coverage(self):
+        rows = _ordinary(80)
+        row = _row(date(2099, 4, 1), limits_ok=False, advancers=0, decliners=0, prev_sealed=0, turnover=None)
+        reading = mt.temperature_series(rows + [row])[-1]
+        self.assertIsNone(reading["temperature"])
+        self.assertLess(reading["coverage"]["scored"], 5)
+        self.assertEqual(reading["coverage"]["missing"], ["limit_up", "limit_down", "seal_rate", "up_ratio", "premium", "promotion", "max_streak", "turnover_ratio"])
+    def test_record_high_and_low_are_scored_against_prior_history(self):
+        rows = _ordinary(60)
+        high = _row(date(2099, 3, 2), limit_up=150)
+        low = _row(date(2099, 3, 3), limit_up=1)
+        high_reading = mt.temperature_series(rows + [high])[-1]
+        low_reading = mt.temperature_series(rows + [low])[-1]
+        self.assertEqual(high_reading["scores"]["limit_up"], 100.0)
+        self.assertEqual(low_reading["scores"]["limit_up"], 0.0)
+
+    def test_a_value_equal_to_every_prior_value_scores_fifty(self):
+        rows = [_row(date(2099, 1, 1) + timedelta(days=i), limit_up=50) for i in range(60)]
+        reading = mt.temperature_series(rows + [_row(date(2099, 3, 3), limit_up=50)])[-1]
+        self.assertEqual(reading["scores"]["limit_up"], 50.0)
+
+    def test_the_day_is_not_in_its_own_history(self):
+        rows = _ordinary(60)
+        last = _row(date(2099, 3, 2), limit_up=150)
+        reading = mt.temperature_series(rows + [last])[-1]
+        self.assertEqual(reading["scores"]["limit_up"], 100.0)
+
+    def test_the_last_reading_matches_the_prior_history_scoring_rule(self):
+        rows = _ordinary(80)
+        prepared = mt.with_turnover_ratio(rows)
+        values = mt.components_of(prepared[-1])
+        expected_scores, expected_temperature = mt.score(values, mt.history_for(rows[:-1]))
+        reading = mt.temperature_series(rows)[-1]
+        self.assertEqual(reading["scores"], expected_scores)
+        self.assertEqual(reading["temperature"], expected_temperature)
+
     def test_extreme_days_read_as_boiling_and_freezing(self):
         rows = _ordinary(120)
         hot = _row(date(2099, 6, 1), limit_up=150, touched=160, limit_down=0, advancers=4800, decliners=200,
