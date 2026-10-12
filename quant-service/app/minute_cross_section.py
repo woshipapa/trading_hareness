@@ -20,8 +20,9 @@ per-symbol rows see the same shape. Days before the switch still read the
 per-symbol rows through the legacy fallbacks here. The newest minute is also
 kept in this process's memory for the latest-snapshot read.
 
-No DDL: the documents live in the existing table under their own capability,
-so the hot/cold tiering and the overflow archive apply as they did.
+No DDL: the documents live in the existing table under their own capability.
+That document capability is not in the current hot/cold tiering or overflow
+archive allowlists, so documents remain hot; adding retention is a follow-up.
 """
 
 from __future__ import annotations
@@ -50,8 +51,8 @@ MEMORY_MAX_AGE = timedelta(seconds=150)
 
 
 def storage_mode() -> str:
-    mode = settings.text("LEVEL1_STORAGE").lower() or "both"
-    return mode if mode in STORAGE_MODES else "both"
+    mode = settings.text("LEVEL1_STORAGE").lower() or "document"
+    return mode if mode in STORAGE_MODES else "document"
 
 
 # -- the document -------------------------------------------------------------

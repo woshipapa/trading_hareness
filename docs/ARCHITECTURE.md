@@ -64,13 +64,16 @@ the previous pointer on failure. Dependency, Node, Python environment or
 base-image changes must use their immutable runtime release path.
 
 The edge Feishu adapter also runs a separate Baidu market-archive lane. Every
-30 seconds it reads the latest all-A Level-1 and strategy snapshots, commits an
+30 seconds it reads the latest all-A Level-1 minute document and strategy snapshots, commits an
 idempotent job to the PostgreSQL archive ledger, and returns to the polling
 cadence. A bounded uploader drains that ledger independently with leases,
 retries and per-object paths under the Baidu research root. Cloud I/O cannot
 hold the quant collector's provider/database executor or suppress a later
 snapshot read; a non-zero queue is visible through
 `/api/baidu-pan/market-archive/status` and is drained after transient failures.
+The live Level-1 collector stores one `a_share_minute_cross_section` document per
+minute by default; per-symbol `a_share_prices_snapshot` rows are an explicit
+compatibility mode and remain historical evidence.
 
 `quant-service/app/main.py` is the composition root.  It owns application
 lifespan, dependency assembly and router registration.  New behaviour belongs

@@ -176,15 +176,15 @@ class CaptureStorageTests(unittest.TestCase):
         self._capture("per_symbol")
         self.assertEqual(len(mcs.recent()[1]), 5)
 
-    def test_the_default_storage_is_both_until_the_owner_side_confirms(self):
+    def test_the_default_storage_is_document(self):
         with patch.dict("os.environ", {}, clear=False):
             import os
             os.environ.pop("LEVEL1_STORAGE", None)
-            self.assertEqual(mcs.storage_mode(), "both")
+            self.assertEqual(mcs.storage_mode(), "document")
         with patch.dict("os.environ", {"LEVEL1_STORAGE": "document"}):
             self.assertEqual(mcs.storage_mode(), "document")
         with patch.dict("os.environ", {"LEVEL1_STORAGE": "nonsense"}):
-            self.assertEqual(mcs.storage_mode(), "both")
+            self.assertEqual(mcs.storage_mode(), "document")
 
 
 class LatestReadTests(unittest.TestCase):
