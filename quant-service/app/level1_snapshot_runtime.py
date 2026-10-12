@@ -21,11 +21,11 @@ async def capture_level1_snapshot(
     fetch_snapshot: Callable[[], Awaitable[tuple[list[dict[str, Any]], Mapping[str, Any]]]],
     persist: Callable[[str, str, list[dict[str, Any]]], Awaitable[int]],
     session_open: Callable[[datetime], Awaitable[bool]],
+    storage: str,
     persist_health: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     now: datetime | None = None,
     on_persisted: Callable[[datetime, list[dict[str, Any]]], Awaitable[dict[str, Any]]] | None = None,
     persist_document: Callable[[datetime, list[dict[str, Any]], Mapping[str, Any]], Awaitable[dict[str, Any]]] | None = None,
-    storage: str = "per_symbol",
 ) -> dict[str, Any]:
     """Capture one all-A snapshot, returning a secret-free health result.
 

@@ -21,6 +21,7 @@ class Level1SnapshotRuntimeTests(unittest.TestCase):
 
         result = asyncio.run(capture_level1_snapshot(
             fetch_snapshot=fetch, persist=persist, session_open=open_session,
+            storage="per_symbol",
             now=datetime(2026, 8, 31, 1, 0, tzinfo=timezone.utc),
         ))
         self.assertEqual(result["status"], "completed")
@@ -49,11 +50,13 @@ class Level1SnapshotRuntimeTests(unittest.TestCase):
 
         moment = datetime(2026, 10, 9, 2, 0, tzinfo=timezone.utc)
         result = asyncio.run(capture_level1_snapshot(
-            fetch_snapshot=fetch, persist=persist, session_open=open_session, now=moment, on_persisted=derive))
+            fetch_snapshot=fetch, persist=persist, session_open=open_session, storage="per_symbol",
+            now=moment, on_persisted=derive))
         self.assertEqual(result["derived"], {"status": "stored"})
         self.assertEqual(seen, [(moment, ["000001.SZ"])])
         failed = asyncio.run(capture_level1_snapshot(
-            fetch_snapshot=fetch, persist=persist, session_open=open_session, now=moment, on_persisted=broken))
+            fetch_snapshot=fetch, persist=persist, session_open=open_session, storage="per_symbol",
+            now=moment, on_persisted=broken))
         self.assertEqual(failed["status"], "completed")
         self.assertEqual(failed["derived"]["status"], "failed")
 
@@ -69,6 +72,7 @@ class Level1SnapshotRuntimeTests(unittest.TestCase):
 
         result = asyncio.run(capture_level1_snapshot(
             fetch_snapshot=fail_fetch, persist=persist, session_open=open_session,
+            storage="per_symbol",
             now=datetime(2026, 8, 30, 1, 0, tzinfo=timezone.utc),
         ))
         self.assertEqual(result["status"], "outside_session")
@@ -85,6 +89,7 @@ class Level1SnapshotRuntimeTests(unittest.TestCase):
 
         result = asyncio.run(capture_level1_snapshot(
             fetch_snapshot=fail_fetch, persist=persist, session_open=open_session,
+            storage="per_symbol",
             now=datetime(2026, 8, 31, 9, 0, tzinfo=timezone.utc),
         ))
         self.assertEqual(result["status"], "outside_session")
@@ -106,7 +111,7 @@ class Level1SnapshotRuntimeTests(unittest.TestCase):
 
         result = asyncio.run(capture_level1_snapshot(
             fetch_snapshot=fetch, persist=persist, persist_health=persist_health,
-            session_open=open_session, now=datetime(2026, 8, 31, 1, 0, tzinfo=timezone.utc),
+            session_open=open_session, storage="per_symbol", now=datetime(2026, 8, 31, 1, 0, tzinfo=timezone.utc),
         ))
         self.assertEqual(result["status"], "completed")
         self.assertEqual(health[0]["freshness_status"], "unknown")

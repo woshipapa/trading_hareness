@@ -138,13 +138,18 @@ def level1_deps(*, fetch, health: list, session=(True, "open")):
     )
 
 
+def run_level1_capture(deps):
+    with patch.object(level1.minute_cross_section, "storage_mode", return_value="per_symbol"):
+        return asyncio.run(level1_capture(deps)())
+
+
 class Level1CaptureTests(unittest.TestCase):
     def test_a_completed_capture_records_provider_success(self):
         async def fetch():
             return [{"symbol": "000001.SZ"}, {"symbol": "600000.SH"}], {"status": "fresh"}
 
         health: list = []
-        result = asyncio.run(level1_capture(level1_deps(fetch=fetch, health=health))())
+        result = run_level1_capture(level1_deps(fetch=fetch, health=health))
         self.assertEqual((result["status"], result["stored"]), ("completed", 2))
         self.assertEqual(health, [("ok", "a_share_prices_snapshot", 2)])
 
@@ -154,7 +159,7 @@ class Level1CaptureTests(unittest.TestCase):
 
         health: list = []
         with self.assertRaises(RuntimeError):
-            asyncio.run(level1_capture(level1_deps(fetch=fetch, health=health))())
+            run_level1_capture(level1_deps(fetch=fetch, health=health))
         self.assertEqual(health, [("failed", "a_share_prices_snapshot", "fuyao 502")])
 
     def test_outside_the_session_nothing_is_fetched_or_recorded(self):
@@ -162,7 +167,7 @@ class Level1CaptureTests(unittest.TestCase):
             raise AssertionError("must not fetch outside the session")
 
         health: list = []
-        result = asyncio.run(level1_capture(level1_deps(fetch=fetch, health=health, session=(False, "closed")))())
+        result = run_level1_capture(level1_deps(fetch=fetch, health=health, session=(False, "closed")))
         self.assertEqual(result["status"], "outside_session")
         self.assertEqual(health, [])
 

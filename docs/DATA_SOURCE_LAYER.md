@@ -40,7 +40,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 
 | 能力 | 解析顺序（状态） | 说明 |
 |---|---|---|
-| `quote.all_a_snapshot` | fuyao_ths(LV) → akshare(Tencent spot, declared fallback) | Fuyao 是主源；AKShare 腾讯全 A 仅在 Fuyao 请求失败/熔断时补充研究覆盖，日期为会话推断且不提升决策资格；东财 clist 在 owner 出口被断连（unsupported） |
+| `quote.all_a_snapshot` | fuyao_ths(LV) → akshare(Tencent spot, declared fallback) | Fuyao 是主源；盘中默认只落一行 `a_share_minute_cross_section` 分钟文档，不再同时逐只写 `a_share_prices_snapshot`；AKShare 腾讯全 A 仅在 Fuyao 请求失败/熔断时补充研究覆盖，日期为会话推断且不提升决策资格；东财 clist 在 owner 出口被断连（unsupported） |
 | `quote.watch_snapshot` | longhuvip(LV) → tencent_free(LV) → sina_free(LV) | 仅 longhu/腾讯带交易所时间戳可进决策 |
 | `quote.order_book` | longhuvip 十档(LV) → tencent 五档(LV) | |
 | `quote.valuation` | fuyao 估值(D) → tushare daily_basic(LV) | 盘后全 A 5553 只/15.7 秒 |
