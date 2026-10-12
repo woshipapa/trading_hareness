@@ -21,8 +21,13 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_limit_performance_capture_is_after_full_market_daily(self):
         self.assertEqual(
-            POST_CLOSE_STAGE_ORDER.index("limit_performance_lists"),
+            POST_CLOSE_STAGE_ORDER.index("daily_close_completion"),
             POST_CLOSE_STAGE_ORDER.index("full_market_daily") + 1,
+        )
+        self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["daily_close_completion"], 600.0)
+        self.assertEqual(
+            POST_CLOSE_STAGE_ORDER.index("limit_performance_lists"),
+            POST_CLOSE_STAGE_ORDER.index("daily_close_completion") + 1,
         )
         self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["limit_performance_lists"], 120.0)
         self.assertEqual(
@@ -276,6 +281,20 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(calls, ["controls"])
         self.assertEqual(result["stages"]["core_daily_controls"]["status"], "completed")
+
+    async def test_daily_close_completion_partial_is_recorded_as_partial(self):
+        async def run_db(action, *args, **_kwargs):
+            return action(*args)
+
+        result = await run_refresh(
+            object(), db=object(), lease_key="lease", lease_seconds=lambda: 60,
+            run_database_blocking=run_db, acquire_lease=lambda *_: True,
+            renew_lease=lambda *_: True, release_lease=lambda *_: None,
+            actions={"daily_close_completion": lambda: {"status": "partial", "failed": ["000001.SZ"]}},
+            stage_order=("daily_close_completion",), trade_date=date(2026, 8, 21),
+            safe_error_detail=lambda value, _limit: value, json_safe=lambda value: value,
+        )
+        self.assertEqual(result["stages"]["daily_close_completion"]["status"], "partial")
 
     async def test_controls_execute_before_dependent_post_close_stages(self):
         calls: list[str] = []

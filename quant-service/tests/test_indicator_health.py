@@ -58,6 +58,45 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual({item.key for item in INDICATORS}, set(CHECKS) | set(DERIVED))
         self.assertTrue(all(item["read_api"].startswith("/api/v1/") and item["live_effect"] == "none" for item in registry()))
 
+    def test_daily_bars_completion_indicator_is_registered(self):
+        from app.indicator_health import CHECKS
+        self.assertIn("data.daily_bars_complete", CHECKS)
+
+
+class DailyBarsCompletionHealthTests(unittest.TestCase):
+    def _connection(self, receipt=None, is_open=True):
+        class Connection:
+            def execute(self, sql, params=()):
+                if "market_trade_calendar" in sql:
+                    return SimpleNamespace(fetchone=lambda: {"is_open": is_open})
+                if "daily_close_completion" in sql:
+                    return SimpleNamespace(fetchone=lambda: receipt)
+                return SimpleNamespace(fetchone=lambda: None)
+        return Connection()
+
+    def test_before_1845_is_pending(self):
+        status = indicator_status(self._connection(), "data.daily_bars_complete", DAY, at(18, 44))
+        self.assertEqual(status["status"], "pending")
+
+    def test_no_receipt_fails(self):
+        status = indicator_status(self._connection(), "data.daily_bars_complete", DAY, at(18, 46))
+        self.assertEqual(status["status"], "fail")
+
+    def test_partial_receipt_fails_with_leftover_detail(self):
+        receipt = {"status": "partial", "metadata": {"failed": ["000001.SZ"], "limits_pending": {"000002.SZ": "no_previous_close"}}}
+        status = indicator_status(self._connection(receipt), "data.daily_bars_complete", DAY, at(18, 46))
+        self.assertEqual(status["status"], "fail")
+        self.assertIn("limits_pending=1", status["checks"][0]["detail"])
+
+    def test_completed_receipt_is_eligible(self):
+        receipt = {"status": "completed", "metadata": {}}
+        status = indicator_status(self._connection(receipt), "data.daily_bars_complete", DAY, at(18, 46))
+        self.assertEqual(status["status"], "ok")
+
+    def test_closed_day_is_not_judged(self):
+        status = indicator_status(self._connection(is_open=False), "data.daily_bars_complete", DAY, at(19, 0))
+        self.assertEqual(status["status"], "pending")
+
 
 class RadarHealthTests(unittest.TestCase):
     def test_a_fresh_continuous_full_radar_is_eligible(self):

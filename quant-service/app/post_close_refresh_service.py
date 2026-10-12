@@ -30,7 +30,7 @@ from .request_models import (
 
 
 POST_CLOSE_STAGE_ORDER = (
-    "stale_fetch_runs", "trade_calendar", "analyst_text", "all_a_universe", "full_market_daily", "limit_performance_lists", "limit_up_risk", "core_daily_controls", "daily_control_reconciliation", "index_context",
+    "stale_fetch_runs", "trade_calendar", "analyst_text", "all_a_universe", "full_market_daily", "daily_close_completion", "limit_performance_lists", "limit_up_risk", "core_daily_controls", "daily_control_reconciliation", "index_context",
     "close_market_snapshot", "akshare_supplements", "ths_industry_flow", "ths_concept_flow_and_limit_strength",
     "market_flow_features", "limit_ladder", "limit_lift_pattern_mining", "cninfo_announcements",
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
@@ -48,6 +48,7 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     # One Fuyao request plus a held-calendar read; never on a provider's critical path.
     "trade_calendar": 60.0,
     "full_market_daily": 900.0,
+    "daily_close_completion": 600.0,
     "limit_performance_lists": 120.0,
     "limit_up_risk": 120.0,
     "akshare_supplements": 240.0,
@@ -166,6 +167,7 @@ class PostCloseRefreshDependencies:
     # Decision 0013: the golden / silver finger (2560) state of the SSE composite.
     refresh_market_timing: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     append_limit_performance: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    daily_close_completion: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -220,6 +222,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             return {"status": "skipped", "reason": "Longhu live limit-performance capture is disabled", "research_only": True}
         return await dependencies.append_limit_performance(trade_date)
 
+    async def daily_close_completion_stage() -> dict[str, Any]:
+        if dependencies.daily_close_completion is None:
+            return {"status": "blocked", "reason": "daily close completion is not wired"}
+        return await dependencies.daily_close_completion(trade_date)
+
     async def limit_ladder_stage() -> dict[str, Any]:
         if longhu_mode:
             return await dependencies.run_database(
@@ -244,6 +251,7 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         "full_market_daily": lambda: dependencies.sync_full_market_daily(
             FullMarketDailySyncRequest(trade_date=trade_date, provider=full_market_daily_provider),
         ),
+        "daily_close_completion": daily_close_completion_stage,
         "limit_performance_lists": limit_performance_stage,
         "limit_up_risk": lambda: dependencies.run_database(
             refresh_limit_up_risk,

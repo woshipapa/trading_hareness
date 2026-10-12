@@ -30,7 +30,7 @@ MINIMUM_BAR_COVERAGE_RATIO = 0.95
 DEFAULT_SOURCE_PLAN: dict[str, dict[str, str]] = {
     "daily_bars": {
         "primary": "longhuvip_composite",
-        "fallback": "none_retired",
+        "fallback": "longhu_dated_kline_per_symbol",
         "store": "quant.canonical_bars_daily",
     },
     "daily_basic": {
