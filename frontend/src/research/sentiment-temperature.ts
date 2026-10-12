@@ -29,6 +29,7 @@ export interface TemperatureDaily {
     cold_with_surge: { days: number; up_1d: number; up_3d: number; up_5d: number };
     cold_all: { days: number; up_1d: number; up_3d: number; up_5d: number };
     caveat: string;
+    computed_under?: string;
   };
   timing_evidence?: { window: string; rule: string; max_drawdown: { buy_and_hold: number; golden_only: number }; caveat: string };
 }

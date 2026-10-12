@@ -17,8 +17,8 @@ CNN's Fear & Greed Index), inverted where more means colder (limit-downs). The
 temperature is the mean of the available scores: 80 and above is a boiling
 point (沸点), 20 and below a freezing point (冰点).
 
-Scores are point in time: a day is ranked against itself and the sessions
-before it, never against later ones. A component whose inputs are missing is
+Scores are point in time: a day is ranked against the sessions before it,
+never against itself or later ones. A component whose inputs are missing is
 left out rather than read as zero. On 2026-08-27 and 2026-09-29 the daily bars
 carry no limit prices; counted as zero, those days became false freezing
 points and broke every limit-up streak.
@@ -33,7 +33,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-VERSION = "market-temperature-v1"
+VERSION = "market-temperature-v2"
 
 
 @dataclass(frozen=True)
@@ -148,16 +148,16 @@ def score(values: Mapping[str, float | None], history: Mapping[str, Sequence[flo
 
 def temperature_series(rows: Iterable[Mapping[str, Any]], *, window: int = WINDOW,
                        min_history: int = MIN_HISTORY) -> list[dict[str, Any]]:
-    """Aggregate rows in date order -> one reading a day, each ranked against itself and the days before it."""
+    """Aggregate rows in date order -> one reading a day, each ranked against prior days only."""
     history: dict[str, list[float]] = {key: [] for key in KEYS}
     readings = []
     for row in with_turnover_ratio(rows):
         values = components_of(row)
+        prior_history = {key: past[-window:] for key, past in history.items()}
+        scores, temperature = score(values, prior_history, min_history=min_history)
         for key, value in values.items():
             if value is not None:
                 history[key].append(value)
-        scores, temperature = score(values, {key: past[-window:] for key, past in history.items()},
-                                    min_history=min_history)
         readings.append({
             "trade_date": str(row["trading_date"]), "temperature": temperature, "band": band_of(temperature),
             "scores": scores, "values": values, "index_close": _number(row.get("index_close")),

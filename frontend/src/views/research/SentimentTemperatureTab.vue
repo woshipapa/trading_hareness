@@ -146,6 +146,7 @@ const timingEvidence = computed(() => daily.value?.timing_evidence ?? null);
         之后 1 / 3 / 5 日上涨 {{ percentText(markerEvidence.cold_with_surge.up_1d) }} / {{ percentText(markerEvidence.cold_with_surge.up_3d) }} / {{ percentText(markerEvidence.cold_with_surge.up_5d) }}；
         所有冷日是 {{ percentText(markerEvidence.cold_all.up_1d) }} / {{ percentText(markerEvidence.cold_all.up_3d) }} / {{ percentText(markerEvidence.cold_all.up_5d) }}。
         注意：只有四五次独立事件；指数调仓、新基金上市也会放大 ETF 成交额。
+        <span v-if="markerEvidence.computed_under && markerEvidence.computed_under !== daily?.version">上述回测按 {{ markerEvidence.computed_under }} 计算，当前曲线为 {{ daily?.version }}。</span>
       </p>
       <p v-if="timingEvidence">
         金 / 银指：{{ timingEvidence.window }}，只在金指时持有，最大回撤从 {{ percentText(timingEvidence.max_drawdown.buy_and_hold) }} 降到
