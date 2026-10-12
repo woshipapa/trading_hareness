@@ -202,6 +202,44 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		sent = post.call_args.args[2]
 		self.assertEqual(sent["_larkagentx_rich_text"], {"text": "正文", "links": [], "title": "午评"})
 
+	def test_history_times_and_an_empty_pull_are_read_without_decoding(self):
+		client = object.__new__(bridge.RecoveringLarkClient)
+		asked = []
+		def api(name, data):
+			asked.append((name, data))
+			return {"messages": {"101": {"position": 101, "createTime": 1791700000}, "103": {"createTime": "1791700120"}, "bad": {"createTime": 1}}} if data["positions"] else {}
+		client.api = api
+		self.assertEqual(sorted(client.history_times("769", 101, 104)), [(101, 1791700000.0), (103, 1791700120.0)])
+		self.assertEqual(asked[0], ("messages.PullMessagesByPositionsRequest", {"chatId": "769", "positions": [101, 102, 103, 104]}))
+		client.api = lambda name, data: {"messages": {}}
+		self.assertEqual(client.pull_history("769", [1, 2]), [])
+
+	def test_payload_extras_are_the_same_for_live_and_history_messages(self):
+		node = b"\n\x06\xe6\xad\xa3\xe6\x96\x87"  # TextProperty{content: "正文"}
+		href = b"\n\x13https://example.com"
+		message = {"msg_id": "1", "msg_type_name": "TEXT", "content": "正文", "content_data": {"richText": {"elementIds": ["t", "a"], "elements": {"dictionary": {"t": {"tag": 1, "property": node}, "a": {"tag": 6, "property": href}}}}}}
+		extras = bridge.payload_extras(message, "TEXT")
+		self.assertEqual(extras, {"_larkagentx_rich_text": {"text": "正文https://example.com", "links": ["https://example.com"]}})
+		self.assertEqual(bridge.payload_extras({"msg_id": "2", "content_data": {}}, "SYSTEM"), {})
+		self.assertEqual(bridge.payload_extras({"msg_id": "3", "content_data": {"richText": None}}, "POST"), {})
+
+	def test_history_export_is_limited_to_registered_chats_and_one_page(self):
+		instance = self._summary_instance(summary_chat_ids=set())
+		pulled = []
+		instance.client = Mock()
+		instance.client.pull_history.side_effect = lambda chat, positions: pulled.append((chat, positions)) or [{"msg_id": "9", "msg_type_name": "SYSTEM", "position": positions[0], "content": "x", "content_data": {"raw": b"\xff"}}]
+		page = instance.history_page({"chat_id": "7661209668907207659", "start": 10, "end": 12})
+		self.assertEqual(pulled, [("7661209668907207659", [10, 11, 12])])
+		self.assertEqual(page["messages"][0]["content_data"], {"raw": "\ufffd"})
+		for bad in ({"chat_id": "7000000000000000001", "start": 1, "end": 2}, {"chat_id": "oc_x", "start": 1, "end": 2},
+		            {"chat_id": "7661209668907207659", "start": 1, "end": 500}, {"chat_id": "7661209668907207659", "start": 5, "end": 4}):
+			with self.assertRaises(ValueError):
+				instance.history_page(bad)
+		instance.client.get_chat_info.return_value = {"name": "安强训练营1（50）", "firstChatMessagePosition": 1, "lastMessagePosition": 200}
+		instance.client.history_times.side_effect = lambda chat, start, end: [(p, 1791700000 + p * 60) for p in range(start, end + 1)]
+		located = instance.history_locate({"chat_id": "7661209668907207659", "from_time": 1791700000 + 50 * 60, "to_time": 1791700000 + 99 * 60})
+		self.assertEqual((located["start"], located["end"], located["count"], located["chat_name"]), (50, 99, 50, "安强训练营1（50）"))
+
 	def test_private_tail_repair_starts_after_recovered_cursor(self):
 		instance = object.__new__(bridge.Bridge)
 		instance.client = Mock()  # logged in; the tail pull is skipped when client is None

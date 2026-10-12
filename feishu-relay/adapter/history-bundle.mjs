@@ -214,7 +214,7 @@ export function sniffImageExtension(bytes) {
 const entryText = (entry) => entry.blocks.filter((block) => block.kind === 'text').map((block) => block.text).join('\n');
 const senderLabel = (entry) => entry.sender_name || entry.sender_id || '未知发送者';
 
-export function renderTranscript({ title, from, to, entries, failedImages = 0 }) {
+export function renderTranscript({ title, from, to, entries, failedImages = 0, note = '' }) {
 	const images = entries.reduce((total, entry) => total + entryImageCount(entry), 0);
 	const named = entries.some((entry) => entry.sender_name);
 	const lines = [
@@ -224,6 +224,7 @@ export function renderTranscript({ title, from, to, entries, failedImages = 0 })
 		'- 每条消息的格式：`[时:分:秒] 发送者`，下一行起是正文；图片以相对路径引用，文件在 images/ 目录',
 		`- 发送者${named ? '有名字时显示名字，否则' : ''}显示为平台 ID；同一个 ID 始终是同一个人`,
 		'- 结构化数据见 messages.jsonl（每行一条消息，字段含 time、sender_id、type、text、images）',
+		...(note ? [`- ${note}`] : []),
 	];
 	let day = null;
 	for (const entry of entries) {
@@ -315,7 +316,7 @@ export function createZipWriter(write, { now = Date.now } = {}) {
  * A failed image never fails the export: the transcript says so in place and
  * export-errors.txt lists every one, because by the time an image fails the
  * response is already streaming. */
-export async function writeHistoryBundle({ title, from, to, rows, fetchImage, write, cardImages = new Map(), senderNames = new Map(), concurrency = 4, limits = DEFAULT_BUNDLE_LIMITS, now = Date.now }) {
+export async function writeHistoryBundle({ title, from, to, rows, fetchImage, write, cardImages = new Map(), senderNames = new Map(), note = '', concurrency = 4, limits = DEFAULT_BUNDLE_LIMITS, now = Date.now }) {
 	const base = bundleBaseName(title, from, to);
 	const entries = bundleEntries(rows, { cardImages, senderNames });
 	const zip = createZipWriter(write, { now });
@@ -356,7 +357,7 @@ export async function writeHistoryBundle({ title, from, to, rows, fetchImage, wr
 			exported += 1;
 		}
 	}
-	await zip.addFile(`${base}/transcript.md`, renderTranscript({ title, from, to, entries, failedImages: errors.length }), { compress: true });
+	await zip.addFile(`${base}/transcript.md`, renderTranscript({ title, from, to, entries, failedImages: errors.length, note }), { compress: true });
 	await zip.addFile(`${base}/messages.jsonl`, renderJsonl(entries), { compress: true });
 	if (errors.length) await zip.addFile(`${base}/export-errors.txt`, `${errors.join('\n')}\n`, { compress: true });
 	await zip.finish();
@@ -379,4 +380,68 @@ export function resolveRouteChatIds({ route, routes = [], numericIdsByKey = new 
 		if (id && !claimedByOthers.has(id)) own.add(id);
 	}
 	return [...own].sort();
+}
+
+/** One message read back from the group's own history, as a ledger-shaped row.
+ *
+ * `normalize` is the same conversion the live relay applies, so a message
+ * exported from history reads exactly like one that was relayed.  A system
+ * event or a recalled (empty) message is not content and yields null; a type
+ * the relay cannot carry yields a one-line placeholder, so the reader can see
+ * that something was said there. */
+export function historyRow(payload, { normalize, describeUnsupported = null }) {
+	const type = String(payload?.msg_type_name ?? '').toUpperCase();
+	if (!payload?.msg_id || type === 'SYSTEM') return null;
+	let message;
+	try {
+		message = normalize(payload);
+	} catch (error) {
+		if (/缺少文本内容/u.test(String(error?.message ?? ''))) return null;
+		if (!describeUnsupported) return null;
+		try { message = describeUnsupported(payload); } catch { return null; }
+	}
+	if (!message || String(message.msg_type ?? '').toLowerCase() === 'system') return null;
+	const created = Number(payload.create_time);
+	if (!Number.isFinite(created) || created <= 0) return null;
+	return {
+		source_message_id: String(payload.msg_id), source_chat_id: String(payload.chat_id ?? ''),
+		source_create_time: created > 1e12 ? created : created * 1000, message, from_history: true,
+	};
+}
+
+const comparable = (row) => {
+	const entry = bundleEntry(row);
+	const text = entry.blocks.filter((block) => block.kind === 'text').map((block) => block.text).join('\n').replace(/\s+/gu, ' ').trim();
+	return `${text}|${entryImageCount(entry)}`;
+};
+
+/** The group's full history with the relay ledger laid over it.
+ *
+ * History is the backbone: it has what was never relayed, including what was
+ * said before the relay listened.  Where the ledger also has a message, the
+ * ledger row wins: it holds corrections, official card content backfilled for
+ * downgraded cards, and stored picture keys.  A ledger row from the official
+ * API era has a different id for the same message, so those are matched by
+ * content within three seconds instead of by id. */
+export function mergeHistoryRows(ledgerRows, historyRows) {
+	const byId = new Map(ledgerRows.map((row) => [String(row.source_message_id), row]));
+	const officialEra = new Map();
+	for (const row of ledgerRows) {
+		if (/^\d+$/.test(String(row.source_message_id))) continue;
+		const key = comparable(row);
+		if (!officialEra.has(key)) officialEra.set(key, []);
+		officialEra.get(key).push(Number(row.source_create_time));
+	}
+	const merged = [...ledgerRows];
+	let added = 0;
+	for (const row of historyRows) {
+		if (byId.has(String(row.source_message_id))) continue;
+		const twins = officialEra.size ? officialEra.get(comparable(row)) : null;
+		if (twins?.some((time) => Math.abs(time - Number(row.source_create_time)) <= 3_000)) continue;
+		byId.set(String(row.source_message_id), row);
+		merged.push(row);
+		added += 1;
+	}
+	merged.sort((a, b) => Number(a.source_create_time) - Number(b.source_create_time) || String(a.source_message_id).localeCompare(String(b.source_message_id)));
+	return { rows: merged, from_history_only: added, from_ledger: ledgerRows.length };
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { crc32, inflateRawSync } from 'node:zlib';
 import {
-	beijingClock, beijingDate, bundleBaseName, bundleEntries, bundleEntry, bundleRange, cardNeedsImageLookup, createZipWriter, renderJsonl, renderTranscript, unnamedSendersByChat,
+	beijingClock, beijingDate, bundleBaseName, bundleEntries, bundleEntry, bundleRange, cardNeedsImageLookup, createZipWriter, historyRow, mergeHistoryRows, renderJsonl, renderTranscript, unnamedSendersByChat,
 	resolveRouteChatIds, sniffImageExtension, writeHistoryBundle,
 } from './history-bundle.mjs';
 
@@ -245,4 +245,66 @@ test('a card with a picture is packed with its text first and the picture after 
 	const files = readZip(out.buffer());
 	assert.ok(files.get('调研纪要_2026-10-10_2026-10-10/transcript.md').toString('utf8').includes('[16:54:03] 7001\n核心结论：景气度上行\n![图片](images/20261010-165403_0001_1.png)\n'));
 	assert.deepEqual(files.get('调研纪要_2026-10-10_2026-10-10/images/20261010-165403_0001_1.png'), PNG);
+});
+
+import { normalizeLarkAgentXRelayMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
+
+const fromHistory = (payload) => historyRow(payload, { normalize: normalizeLarkAgentXRelayMessage, describeUnsupported: normalizeLarkAgentXUnsupportedMessage });
+const SECONDS = Math.floor(T0 / 1000);
+
+test('a message read back from history becomes a row the bundle reads like a relayed one', () => {
+	const row = fromHistory({ msg_id: '501', msg_type_name: 'TEXT', chat_id: '7694', from_id: '7001', create_time: SECONDS, content: '链接:  提取码',
+		_larkagentx_rich_text: { text: '链接: https://pan.example.com/s/1 提取码', links: ['https://pan.example.com/s/1'] } });
+	assert.equal(row.source_message_id, '501');
+	assert.equal(row.source_chat_id, '7694');
+	assert.equal(row.source_create_time, SECONDS * 1000);
+	assert.equal(row.from_history, true);
+	assert.deepEqual(bundleEntry(row).blocks, [{ kind: 'text', text: '链接: https://pan.example.com/s/1 提取码' }]);
+	assert.equal(bundleEntry(row).sender_id, '7001');
+	const image = fromHistory({ msg_id: '502', msg_type_name: 'IMAGE', chat_id: '7694', from_id: '7001', create_time: SECONDS, content: '[图片]',
+		content_data: { imageV2: { imageKey: 'img_v3_x' } }, _larkagentx_image: { image_id: 'img_v3_x', key_hex: KEY, iv_hex: IV } });
+	assert.deepEqual(bundleEntry(image).blocks.map((block) => block.ref.key), ['img_v3_x']);
+	assert.equal(bundleEntry(image).blocks[0].ref.larkagentx.key_hex, KEY);
+});
+
+test('system events and recalled messages are not content; an uncarried type leaves a placeholder', () => {
+	assert.equal(fromHistory({ msg_id: '503', msg_type_name: 'SYSTEM', chat_id: '7694', from_id: '0', create_time: SECONDS, content: '某人加入群聊' }), null);
+	assert.equal(fromHistory({ msg_id: '504', msg_type_name: 'TEXT', chat_id: '7694', from_id: '7001', create_time: SECONDS, content: '', content_data: {} }), null);
+	assert.equal(fromHistory({ msg_type_name: 'TEXT', content: 'no id' }), null);
+	assert.equal(fromHistory({ msg_id: '505', msg_type_name: 'TEXT', chat_id: '7694', from_id: '7001', content: 'no time' }), null);
+	const file = fromHistory({ msg_id: '506', msg_type_name: 'FILE', chat_id: '7694', from_id: '7001', create_time: SECONDS, content: '[文件] 研报.pdf' });
+	assert.match(bundleEntry(file).blocks[0].text, /^\[file\] \[文件\] 研报\.pdf$/);
+});
+
+test('history is the backbone and the ledger wins where it has the same message', () => {
+	const ledger = [
+		{ source_message_id: '601', source_chat_id: '7694', source_create_time: T0, message: { msg_type: 'text', sender: { sender_id: '7001' }, body: { content: JSON.stringify({ text: '账本里更正过的内容 https://x.example' }) } } },
+	];
+	const history = [
+		{ source_message_id: '600', source_chat_id: '7694', source_create_time: T0 - 60_000, from_history: true, message: { msg_type: 'text', sender: { sender_id: '7001' }, body: { content: JSON.stringify({ text: '监听之前说的' }) } } },
+		{ source_message_id: '601', source_chat_id: '7694', source_create_time: T0, from_history: true, message: { msg_type: 'text', sender: { sender_id: '7001' }, body: { content: JSON.stringify({ text: '历史里的旧内容' }) } } },
+		{ source_message_id: '602', source_chat_id: '7694', source_create_time: T0 + 60_000, from_history: true, message: { msg_type: 'text', sender: { sender_id: '7001' }, body: { content: JSON.stringify({ text: '被关键词过滤没转发的' }) } } },
+	];
+	const merged = mergeHistoryRows(ledger, history);
+	assert.deepEqual(merged.rows.map((row) => row.source_message_id), ['600', '601', '602']);
+	assert.equal(JSON.parse(merged.rows[1].message.body.content).text, '账本里更正过的内容 https://x.example');
+	assert.equal(merged.from_history_only, 2);
+	assert.equal(merged.from_ledger, 1);
+	// nothing from history: the ledger alone, unchanged
+	assert.deepEqual(mergeHistoryRows(ledger, []).rows, ledger);
+});
+
+test('a ledger row from the official-API era is matched to its history twin by content and time, not id', () => {
+	const official = { source_message_id: 'om_x1', source_chat_id: 'oc_1', source_create_time: T0 + 1_000, message: { msg_type: 'text', sender: { id: 'ou_1', sender_name: '杨宁' }, body: { content: JSON.stringify({ text: '盘前  要点' }) } } };
+	const twin = { source_message_id: '701', source_chat_id: '7694', source_create_time: T0, from_history: true, message: { msg_type: 'text', sender: { sender_id: '7001' }, body: { content: JSON.stringify({ text: '盘前 要点' }) } } };
+	const sameWordsLater = { ...twin, source_message_id: '702', source_create_time: T0 + 600_000 };
+	const merged = mergeHistoryRows([official], [twin, sameWordsLater]);
+	assert.deepEqual(merged.rows.map((row) => row.source_message_id), ['om_x1', '702']);
+	assert.equal(merged.from_history_only, 1);
+});
+
+test('the transcript states where its content came from', async () => {
+	const out = collector();
+	await writeHistoryBundle({ title: 'g', from: '2026-10-10', to: '2026-10-10', rows: [], write: out.write, fetchImage: async () => JPEG, note: '来源：从飞书读取的群完整历史，并合并已转发记录' });
+	assert.match(readZip(out.buffer()).get('g_2026-10-10_2026-10-10/transcript.md').toString('utf8'), /\n- 来源：从飞书读取的群完整历史，并合并已转发记录\n/);
 });

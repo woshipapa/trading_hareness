@@ -48,6 +48,12 @@ const dashboard = useFeishuDashboardWorkspace();
   <el-dialog v-model="dashboard.bundleDialog" :title="`导出资料包 · ${dashboard.bundleRoute?.chat_name ?? ''}`" width="560px" destroy-on-close>
     <el-alert title="导出该群在所选日期内已转发的全部消息：transcript.md（按时间排列的正文）、messages.jsonl（结构化数据）和 images/ 目录里的图片文件，打包成 zip，可直接交给 AI 阅读。" type="info" :closable="false" show-icon class="section-gap" />
     <el-form label-position="top">
+      <el-form-item label="导出内容">
+        <el-radio-group v-model="dashboard.bundleSource" @change="dashboard.previewBundle">
+          <el-radio value="full">完整历史（从飞书读取，含未转发的和监听之前的消息）</el-radio>
+          <el-radio value="relayed">仅已转发的消息</el-radio>
+        </el-radio-group>
+      </el-form-item>
       <el-form-item label="时间范围（北京时间，含首尾两天）">
         <el-date-picker v-model="dashboard.bundleDates" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" class="full-width" @change="dashboard.previewBundle" />
       </el-form-item>
@@ -55,13 +61,14 @@ const dashboard = useFeishuDashboardWorkspace();
     <el-alert v-if="dashboard.bundleError" :title="dashboard.bundleError" type="error" :closable="false" show-icon />
     <el-descriptions v-else-if="dashboard.bundlePreview" :column="1" border size="small">
       <el-descriptions-item label="文件名">{{ dashboard.bundlePreview.filename }}</el-descriptions-item>
-      <el-descriptions-item label="消息">{{ dashboard.bundlePreview.messages }} 条</el-descriptions-item>
-      <el-descriptions-item label="图片">{{ dashboard.bundlePreview.images }} 张</el-descriptions-item>
+      <el-descriptions-item v-if="dashboard.bundlePreview.source === 'full'" label="群历史">约 {{ dashboard.bundlePreview.history_positions ?? 0 }} 条（按消息位置估算，实际数量以导出为准）</el-descriptions-item>
+      <el-descriptions-item :label="dashboard.bundlePreview.source === 'full' ? '其中已转发' : '消息'">{{ dashboard.bundlePreview.messages }} 条</el-descriptions-item>
+      <el-descriptions-item :label="dashboard.bundlePreview.source === 'full' ? '已转发部分的图片' : '图片'">{{ dashboard.bundlePreview.images }} 张</el-descriptions-item>
       <el-descriptions-item v-if="dashboard.bundlePreview.first_message_at" label="实际覆盖">{{ dashboard.dateText(dashboard.bundlePreview.first_message_at) }} 至 {{ dashboard.dateText(dashboard.bundlePreview.last_message_at) }}</el-descriptions-item>
     </el-descriptions>
     <template #footer>
       <el-button @click="dashboard.bundleDialog = false">取消</el-button>
-      <el-button type="primary" :loading="dashboard.bundleLoading" :disabled="!dashboard.bundlePreview?.messages" @click="dashboard.downloadBundle">{{ dashboard.bundlePreview && !dashboard.bundlePreview.messages ? '该范围内没有消息' : '下载 zip' }}</el-button>
+      <el-button type="primary" :loading="dashboard.bundleLoading" :disabled="!dashboard.bundleHasContent" @click="dashboard.downloadBundle">{{ dashboard.bundlePreview && !dashboard.bundleHasContent ? '该范围内没有消息' : '下载 zip' }}</el-button>
     </template>
   </el-dialog>
 

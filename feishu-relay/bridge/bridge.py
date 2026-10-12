@@ -34,7 +34,7 @@ from larkx.auth import AuthExpired, LarkAuth, QrLogin
 from larkx.client import LarkClient
 from larkx.proto import decoders
 from larkagentx_image_property import extract_rich_text_image_resource
-from proto_wire import (DEFAULT_PUSH_CMDS, decode_primary_websocket, parse_notify_frame,
+from proto_wire import (DEFAULT_PUSH_CMDS, _enrich_card_content, decode_primary_websocket, parse_notify_frame,
                         tolerant_websocket_decode_with_meta)
 from event_spool import EventSpool
 from history_archive import HistoryArchive
@@ -43,6 +43,7 @@ from repair_scope import repair_allowed
 from group_lookup import GroupLookupError, unique_group_id
 from rich_text_render import render_rich_text
 from export_support import NameCache, card_images_by_message
+from history_range import HistoryRangeError, PAGE_SIZE, locate_positions
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
@@ -370,6 +371,68 @@ class RecoveringLarkClient(LarkClient):
 		response.raise_for_status()
 		return response.content
 
+	def _pull_raw(self, chat_id: str, positions: list[int]) -> dict[str, Any]:
+		response = self.api("messages.PullMessagesByPositionsRequest", {"chatId": str(chat_id), "positions": [int(p) for p in positions]})
+		return (response or {}).get("messages") or {}
+
+	def history_times(self, chat_id: str, start: int, end: int) -> list[tuple[int, float]]:
+		"""(position, create_time) of the messages that exist in a position range, without decoding them."""
+		found = []
+		for position, value in self._pull_raw(chat_id, list(range(int(start), int(end) + 1))).items():
+			try:
+				found.append((int(value.get("position") or position), float(value.get("createTime") or 0)))
+			except (TypeError, ValueError):
+				continue
+		return found
+
+	def pull_history(self, chat_id: str, positions, save_storage=None):
+		"""Upstream's pull_history, plus the card recovery the WebSocket path applies.
+
+		Upstream decodes a card with the pinned schema only, so a Card 2.0
+		whose JSON sits in a newer field comes back with no content.  The
+		live path already recovers it from the raw bytes; history must too, or
+		a card re-read after a disconnect is relayed as an empty placeholder.
+		The returned shape is upstream's, field for field.
+		"""
+		out = []
+		for pos_key, value in sorted(self._pull_raw(chat_id, list(positions)).items(), key=lambda item: int(item[0])):
+			message_type = decoders.enum_to_int(value.get("type", 0))
+			chat_type = decoders.enum_to_int(value.get("chatType", 0))
+			content = value.get("content", b"")
+			summary, data = decoders.decode_message_content(message_type, content)
+			type_name = decoders.MSG_TYPE_NAMES.get(message_type, str(message_type))
+			if type_name in {"CARD", "INTERACTIVE"}:
+				try:
+					recovered_summary, data = _enrich_card_content(content, data)
+					summary = recovered_summary or summary
+				except Exception as error:
+					LOG.debug("card recovery from history failed position=%s: %s", pos_key, error)
+			thread_id = value.get("threadId") or ""
+			root_id = value.get("rootId") or ""
+			if chat_type == 1:
+				scope, anchor = ("chat", "")
+			elif root_id and root_id != "0":
+				scope, anchor = ("topic", thread_id or root_id)
+			elif chat_type == 3:
+				scope, anchor = ("chat", value.get("id") or "")
+			else:
+				scope, anchor = ("chat", "")
+			message = {
+				"msg_id": value.get("id"), "msg_type": message_type, "msg_type_name": type_name,
+				"from_id": value.get("fromId"), "chat_id": value.get("chatId") or value.get("channelId") or str(chat_id),
+				"chat_type": chat_type, "chat_type_name": decoders.CHAT_TYPE_NAMES.get(chat_type, str(chat_type)),
+				"scope": scope, "anchor": anchor, "at_me": False, "root_id": root_id, "parent_id": value.get("parentId") or "",
+				"cid": value.get("cid") or "", "position": value.get("position") or int(pos_key),
+				"create_time": value.get("createTime"), "content": summary, "content_data": data,
+			}
+			out.append(message)
+			if save_storage is not None:
+				try:
+					save_storage.save_message(message)
+				except Exception:
+					pass
+		return out
+
 	async def connect_websocket(self, on_message):
 		self._ensure_loop()
 		url = apply_ws_param_overrides(self.build_ws_url(), self.ws_param_overrides)
@@ -499,6 +562,44 @@ def embedded_image_resources(message: dict[str, Any]) -> list[dict[str, str]]:
 			for child in value: visit(child)
 	visit(message.get("content_data") or {})
 	return found
+
+
+def payload_extras(message: dict[str, Any], message_type: str) -> dict[str, Any]:
+	"""What must be read from a decoded message while its protobuf bytes are still bytes.
+
+	Shared by the live path and the history export, so a message read back
+	from history carries exactly what it would have carried live.
+	"""
+	extras: dict[str, Any] = {}
+	message_type = str(message_type or "").upper()
+	# Card v2 image-only messages store their media and AES-GCM metadata in
+	# richtext element properties, just like POST images.
+	if message_type in {"IMAGE", "POST", "CARD", "INTERACTIVE"}:
+		image = image_resource_info(message)
+		if image.get("image_id"):
+			extras["_larkagentx_image"] = image
+		embedded = embedded_image_resources(message)
+		if embedded:
+			extras["_larkagentx_images"] = embedded
+	# The upstream summary drops anchor elements, so a typed link vanishes from
+	# TEXT/POST content.  Render the element tree from the raw property bytes.
+	if message_type in {"TEXT", "POST"}:
+		content_data = message.get("content_data")
+		rich_text = content_data.get("richText") if isinstance(content_data, dict) else None
+		try:
+			rendered = render_rich_text(rich_text)
+		except Exception as error:  # never let a rendering bug drop the message
+			LOG.warning("rich text render failed message_id=%s: %s", message.get("msg_id"), error)
+			rendered = {"text": "", "links": []}
+		if rendered["text"]:
+			# A POST's title sits beside the element tree, not in it.
+			title = content_data.get("title") if isinstance(content_data, dict) else None
+			if isinstance(title, (bytes, bytearray)):
+				title = bytes(title).decode("utf-8", errors="replace")
+			if isinstance(title, str) and title.strip():
+				rendered["title"] = title.strip()[:500]
+			extras["_larkagentx_rich_text"] = rendered
+	return extras
 
 
 def image_download_url(image_id: str) -> str:
@@ -712,6 +813,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				result = self.bridge.send(payload)
 				self.send_json(200, result)
 				return
+			if self.path == "/history/locate":
+				self.send_json(200, self.bridge.history_locate(payload))
+				return
+			if self.path == "/history/page":
+				self.send_json(200, self.bridge.history_page(payload))
+				return
 			if self.path == "/users/names":
 				self.send_json(200, self.bridge.user_names(payload))
 				return
@@ -741,8 +848,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				self.send_json(200, self.bridge.qr_login.poll(session_id))
 				return
 			self.send_json(404, {"status": "not_found"})
-		except GroupLookupError as error:
-			LOG.warning("route bind refused path=%s: %s", self.path, error)
+		except (GroupLookupError, HistoryRangeError) as error:
+			LOG.warning("request refused path=%s: %s", self.path, error)
 			self.send_json(422, {"status": "unresolved", "message": str(error)[:240]})
 		except SendRateLimited as error:
 			LOG.warning("send rate limited scope=%s retry_after=%s", error.scope, error.retry_after)
@@ -1109,6 +1216,43 @@ class Bridge:
 		self.chat_validation[chat_id] = {"state": "verified", "name": verified_name, "checked_at": datetime.now(timezone.utc).isoformat(), "error": None}
 		LOG.info("手动绑定 LarkAgentX 源群 chat_id=%s name=%s source_key=%s", chat_id, verified_name, source_key)
 		return {"status": "bound", "source_key": source_key, "chat_id": chat_id, "chat_name": verified_name, "replaced_chat_id": previous if previous and previous != chat_id else None}
+
+	def _history_chat(self, payload: dict[str, Any]) -> str:
+		chat_id = str(payload.get("chat_id", "")).strip()
+		if not chat_id.isdigit() or chat_id not in self.websocket_chat_ids:
+			raise ValueError("历史导出只支持已登记的 WebSocket 群")
+		if self.client is None:
+			raise RuntimeError("尚未登录(needs_login),无法读取历史")
+		return chat_id
+
+	def history_locate(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""Position range of one chat's messages inside a time range (read-only)."""
+		chat_id = self._history_chat(payload)
+		try:
+			from_time, to_time = float(payload.get("from_time")), float(payload.get("to_time"))
+		except (TypeError, ValueError) as error:
+			raise ValueError("from_time 和 to_time 必须是秒级时间戳") from error
+		info = self.client.get_chat_info(chat_id) or {}
+		first = int(info.get("firstChatMessagePosition") or 1)
+		last = int(info.get("lastMessagePosition") or 0)
+		located = locate_positions(lambda start, end: self.client.history_times(chat_id, start, end), max(1, first), last, from_time, to_time)
+		return {"status": "ok", "chat_id": chat_id, "chat_name": str(info.get("name") or ""), "first_position": first, "last_position": last, **located}
+
+	def history_page(self, payload: dict[str, Any]) -> dict[str, Any]:
+		"""One page of a chat's history, each message as the live path would have delivered it."""
+		chat_id = self._history_chat(payload)
+		try:
+			start, end = int(payload.get("start")), int(payload.get("end"))
+		except (TypeError, ValueError) as error:
+			raise ValueError("start 和 end 必须是整数 position") from error
+		if start < 1 or end < start or end - start + 1 > PAGE_SIZE:
+			raise ValueError(f"一页最多 {PAGE_SIZE} 个 position")
+		messages = []
+		for message in self.client.pull_history(chat_id, list(range(start, end + 1))):
+			item = json_safe(dict(message))
+			item.update(payload_extras(message, str(message.get("msg_type_name") or "")))
+			messages.append(item)
+		return {"status": "ok", "chat_id": chat_id, "start": start, "end": end, "messages": messages}
 
 	def user_names(self, payload: dict[str, Any]) -> dict[str, Any]:
 		"""Display names for sender ids of one chat, for the history bundle (read-only)."""
@@ -2064,32 +2208,7 @@ class Bridge:
 		# Card v2 image-only messages store their media and AES-GCM metadata in
 		# richtext element properties, just like POST images.  Extract them before
 		# json_safe() turns protobuf bytes into replacement-text strings.
-		if self.last_observed_message_type in {"IMAGE", "POST", "CARD", "INTERACTIVE"}:
-			image = image_resource_info(message)
-			if image.get("image_id"):
-				payload["_larkagentx_image"] = image
-			embedded = embedded_image_resources(message)
-			if embedded:
-				payload["_larkagentx_images"] = embedded
-		# The upstream summary drops anchor elements, so a typed link vanishes
-		# from TEXT/POST content.  Render the element tree from the raw property
-		# bytes here; after json_safe() they are no longer decodable.
-		if self.last_observed_message_type in {"TEXT", "POST"}:
-			content_data = message.get("content_data")
-			rich_text = content_data.get("richText") if isinstance(content_data, dict) else None
-			try:
-				rendered = render_rich_text(rich_text)
-			except Exception as error:  # never let a rendering bug drop the message
-				LOG.warning("rich text render failed message_id=%s: %s", message_id, error)
-				rendered = {"text": "", "links": []}
-			if rendered["text"]:
-				# A POST's title sits beside the element tree, not in it.
-				title = content_data.get("title") if isinstance(content_data, dict) else None
-				if isinstance(title, (bytes, bytearray)):
-					title = bytes(title).decode("utf-8", errors="replace")
-				if isinstance(title, str) and title.strip():
-					rendered["title"] = title.strip()[:500]
-				payload["_larkagentx_rich_text"] = rendered
+		payload.update(payload_extras(message, self.last_observed_message_type))
 		if correction:
 			# Operator-requested re-read after a decoding fix: the adapter resends
 			# only if the content differs from what it already relayed.

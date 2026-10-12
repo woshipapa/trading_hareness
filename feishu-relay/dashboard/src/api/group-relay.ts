@@ -57,10 +57,15 @@ export type WebsocketBinding = {
 export type BundlePreview = {
   chat_name: string; from: string; to: string; filename: string; chat_ids: string[];
   messages: number; images: number; first_message_at: string | null; last_message_at: string | null;
+  source: BundleSource; relayed_messages: number; history_positions: number | null;
 };
 
-const bundlePath = (key: string, from: string, to: string) =>
-  `/api/group-relay/routes/${encodeURIComponent(key)}/bundle?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+// 'full' reads the group's own history from Feishu and lays the relay ledger
+// over it; 'relayed' exports only what the relay forwarded.
+export type BundleSource = 'full' | 'relayed';
+
+const bundlePath = (key: string, from: string, to: string, source: BundleSource = 'full') =>
+  `/api/group-relay/routes/${encodeURIComponent(key)}/bundle?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&source=${source}`;
 
 export type SendInput = { chat_id: string; text: string; root_id?: string; idempotency_key?: string };
 
@@ -104,7 +109,7 @@ export const groupRelayApi = {
   ),
   // The zip is streamed straight to disk by the browser, so only the counts
   // go through fetch; the download itself is a plain navigation to bundleUrl.
-  bundlePreview: (key: string, from: string, to: string) => getJson<BundlePreview>(`${bundlePath(key, from, to)}&dry_run=1`),
+  bundlePreview: (key: string, from: string, to: string, source: BundleSource = 'full') => getJson<BundlePreview>(`${bundlePath(key, from, to, source)}&dry_run=1`),
   bundleUrl: bundlePath,
   bindRoute: <T>(key: string) => postJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}/bind`, {}),
   removeRoute: <T>(key: string) => deleteJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}`),

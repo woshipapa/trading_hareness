@@ -11,7 +11,7 @@ import { releaseMetadata } from './release-metadata.mjs';
 import { endWritable, writeChunk } from './stream-write.mjs';
 import { singleFlight } from './single-flight.mjs';
 import { createGroupRelay, decryptLarkAgentXImage } from './group-relay.mjs';
-import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
+import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, historyRow, mergeHistoryRows, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
 import { createWeChatGroupRelay } from './wechat-group-relay.mjs';
 import { createSummaryListener } from './summary-listener.mjs';
 import { createFeishuUserOauth } from './feishu-user-oauth.mjs';
@@ -1934,6 +1934,33 @@ async function bundleContext(rows, { names = true } = {}) {
 	return { cardImages, senderNames };
 }
 
+// The group's own history, read through the bridge by position.  This is what
+// makes an export complete: it includes what the relay never forwarded and
+// what was said before the relay listened to the group.
+async function locateGroupHistory(chatIds, range) {
+	const located = [];
+	for (const chatId of chatIds.filter((value) => /^\d+$/.test(value))) {
+		const result = await bridgePostJson('/history/locate', { chat_id: chatId, from_time: range.fromMs / 1000, to_time: range.toMs / 1000 }, 120_000);
+		if (Number(result?.count) > 0) located.push({ chatId, start: Number(result.start), end: Number(result.end), count: Number(result.count) });
+	}
+	return located;
+}
+
+async function readGroupHistory(located, range) {
+	const rows = [];
+	for (const { chatId, start, end } of located) {
+		for (let pageStart = start; pageStart <= end; pageStart += 50) {
+			const page = await bridgePostJson('/history/page', { chat_id: chatId, start: pageStart, end: Math.min(end, pageStart + 49) }, 60_000);
+			for (const payload of Array.isArray(page?.messages) ? page.messages : []) {
+				const row = historyRow(payload, { normalize: normalizeLarkAgentXRelayMessage, describeUnsupported: normalizeLarkAgentXUnsupportedMessage });
+				// Positions bracket the range; the time check is what decides.
+				if (row && row.source_create_time >= range.fromMs && row.source_create_time <= range.toMs) rows.push(row);
+			}
+		}
+	}
+	return rows;
+}
+
 async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	const fail = (status, message) => {
 		response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1943,6 +1970,8 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	let route;
 	let rows;
 	let chatIds;
+	const source = String(url.searchParams.get('source') ?? 'full').trim().toLowerCase();
+	if (!['full', 'relayed'].includes(source)) { fail(400, 'source 只支持 full（完整历史）或 relayed（仅已转发）'); return; }
 	try {
 		range = bundleRange(url.searchParams.get('from'), url.searchParams.get('to'));
 	} catch (error) {
@@ -1962,6 +1991,26 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	if (rows.length > MAX_BUNDLE_MESSAGES) { fail(400, `该时间范围内消息超过 ${MAX_BUNDLE_MESSAGES} 条，请缩小范围后分段导出`); return; }
 	const base = bundleBaseName(route.chatName, range.from, range.to);
 	const dryRun = url.searchParams.get('dry_run') === '1';
+	const relayedCount = rows.length;
+	let historyPositions = null;
+	let historyOnly = 0;
+	if (source === 'full') {
+		try {
+			const located = await locateGroupHistory(chatIds, range);
+			historyPositions = located.reduce((total, item) => total + item.count, 0);
+			// The preview only needs the size of the range; reading every page is for the real export.
+			if (!dryRun) {
+				const merged = mergeHistoryRows(rows, await readGroupHistory(located, range));
+				rows = merged.rows;
+				historyOnly = merged.from_history_only;
+				if (rows.length > MAX_BUNDLE_MESSAGES) { fail(400, `该时间范围内消息超过 ${MAX_BUNDLE_MESSAGES} 条，请缩小范围后分段导出`); return; }
+			}
+		} catch (error) {
+			// Fail rather than quietly export less than was asked for.
+			fail(502, `读取群历史失败：${error instanceof Error ? error.message : String(error)}。可以改选“仅已转发”导出。`);
+			return;
+		}
+	}
 	// The preview needs the picture count but not the names (one gateway call
 	// per unknown sender), so names are resolved only for the real export.
 	const context = await bundleContext(rows, { names: !dryRun });
@@ -1971,6 +2020,7 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({
 			chat_name: route.chatName, from: range.from, to: range.to, filename: `${base}.zip`, chat_ids: chatIds,
+			source, relayed_messages: relayedCount, history_positions: historyPositions,
 			messages: entries.length, images: entries.reduce((total, entry) => total + entryImageCount(entry), 0),
 			first_message_at: entries.length ? new Date(entries[0].time_ms).toISOString() : null,
 			last_message_at: entries.length ? new Date(entries.at(-1).time_ms).toISOString() : null,
@@ -1988,9 +2038,12 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 		const summary = await writeHistoryBundle({
 			title: route.chatName, from: range.from, to: range.to, rows, fetchImage: fetchBundleImage,
 			cardImages: context.cardImages, senderNames: context.senderNames,
+			note: source === 'full'
+				? `来源：从飞书读取的群完整历史，并合并已转发记录（其中 ${historyOnly} 条只存在于群历史，${relayedCount} 条来自转发账本）`
+				: '来源：仅已转发的消息（未转发的和监听之前的消息不在内）',
 			write: (chunk) => writeChunk(response, chunk),
 		});
-		console.log(`历史资料包已导出 source=${route.key} range=${range.from}..${range.to} messages=${summary.messages} images=${summary.images} failed_images=${summary.failed_images} bytes=${summary.bytes}`);
+		console.log(`历史资料包已导出 mode=${source} history_only=${historyOnly} source=${route.key} range=${range.from}..${range.to} messages=${summary.messages} images=${summary.images} failed_images=${summary.failed_images} bytes=${summary.bytes}`);
 		await endWritable(response);
 	} catch (error) {
 		// Headers are gone; a truncated archive is the only honest signal left.
