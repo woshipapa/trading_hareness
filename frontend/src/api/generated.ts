@@ -3252,6 +3252,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/limit-up-risk/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Limit Up Risk Daily */
+        get: operations["limit_up_risk_daily_api_v1_market_limit_up_risk_daily_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/limit-up-risk/track": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Limit Up Risk Track Route */
+        get: operations["limit_up_risk_track_route_api_v1_market_limit_up_risk_track_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasources/board": {
         parameters: {
             query?: never;
@@ -5210,10 +5244,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
         /**
          * WatchlistMainWaveResearchRequest
@@ -11263,6 +11293,72 @@ export interface operations {
         parameters: {
             query?: {
                 trade_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    limit_up_risk_daily_api_v1_market_limit_up_risk_daily_get: {
+        parameters: {
+            query?: {
+                trade_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    limit_up_risk_track_route_api_v1_market_limit_up_risk_track_get: {
+        parameters: {
+            query?: {
+                days?: number;
             };
             header?: never;
             path?: never;

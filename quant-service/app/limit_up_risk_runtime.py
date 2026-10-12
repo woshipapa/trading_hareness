@@ -8,7 +8,7 @@ from typing import Any
 
 from . import derived_daily_readings
 from .derived_daily_readings import CN_TZ
-from .limit_up_risk import VERSION, fifth_comparison, score_day
+from .limit_up_risk import VERSION, fifth_comparison, recent_status, score_day
 from .limit_up_risk_repository import read_inputs
 
 CAPABILITY = "limit_up_risk_daily"
@@ -35,18 +35,16 @@ def refresh(database: Any, trade_date: date, *, apply: bool = True) -> dict[str,
 
 
 def daily(database: Any, day: date | None = None) -> dict[str, Any] | None:
+    """The reading of ``day`` (the newest one when no day is given), or None."""
     with database.transaction() as connection:
-        end = day or datetime.now(CN_TZ).date()
-        readings = derived_daily_readings.newest(connection, CAPABILITY, end - timedelta(days=800), end)
-    return readings[0] if readings else None
+        return daily_series(connection, day)["reading"]
 
 
 def daily_series(connection: Any, day: date | None = None) -> dict[str, Any]:
     end = day or datetime.now(CN_TZ).date()
-    stored = derived_daily_readings.newest(connection, CAPABILITY, end - timedelta(days=800), end)
+    # A requested day reads that day only; the newest reading is looked for over two weeks, longer than any holiday.
+    stored = derived_daily_readings.newest(connection, CAPABILITY, day or end - timedelta(days=14), end)
     valid = [reading for reading in stored if reading.get("version") == VERSION]
-    if day is not None:
-        valid = [reading for reading in valid if reading.get("trade_date") == day.isoformat()]
     return {"version": VERSION, "reading": valid[-1] if valid else None,
             "stale_versions": len(stored) - len(valid), "research_only": True, "live_effect": "none"}
 
@@ -63,7 +61,8 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
         ).fetchall()
         sessions = list(reversed(sessions))
         if not sessions:
-            return {"version": VERSION, "days": [], "stale_versions": 0, "research_only": True, "live_effect": "none"}
+            return {"version": VERSION, "days": [], "recent": recent_status([]), "stale_versions": 0,
+                    "research_only": True, "live_effect": "none"}
         readings = derived_daily_readings.newest(
             connection, CAPABILITY, sessions[0]["calendar_date"], sessions[-1]["calendar_date"],
         )
@@ -75,16 +74,14 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
             day = date.fromisoformat(reading["trade_date"])
             next_day = next_days.get(day)
             needed.extend((row["symbol"], value) for row in (reading.get("rows") or []) for value in (day, next_day) if next_day)
-        symbols = sorted({symbol for symbol, _day in needed})
-        first_day = last_day = None
-        if needed:
-            first_day = min(day for _symbol, day in needed)
-            last_day = max(day for _symbol, day in needed)
+        symbols = [symbol for symbol, _day in needed]
+        dates = [day for _symbol, day in needed]
         bars = connection.execute(
-            """SELECT symbol,trading_date,close FROM quant.canonical_bars_daily
-                 WHERE symbol=ANY(%s) AND trading_date BETWEEN %s AND %s
-                   AND NOT coalesce(is_suspended, false) AND pre_close > 0 AND open > 0 AND close > 0""",
-            (symbols, first_day, last_day),
+            """SELECT b.symbol,b.trading_date,b.close FROM quant.canonical_bars_daily b
+                JOIN unnest(%s::text[], %s::date[]) AS needed(symbol,trading_date)
+                   ON needed.symbol=b.symbol AND needed.trading_date=b.trading_date
+                WHERE NOT coalesce(b.is_suspended, false) AND b.pre_close > 0 AND b.open > 0 AND b.close > 0""",
+            (symbols, dates),
         ).fetchall() if needed else []
         closes = {(str(row["symbol"]), row["trading_date"]): float(row["close"]) for row in bars}
         summaries = []
@@ -99,7 +96,7 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
             comparison = fifth_comparison(rows, returns)
             if comparison is not None:
                 summaries.append({"trade_date": reading["trade_date"], **comparison})
-    return {"version": VERSION, "days": summaries, "stale_versions": stale_versions,
+    return {"version": VERSION, "days": summaries, "recent": recent_status(summaries), "stale_versions": stale_versions,
             "research_only": True, "live_effect": "none"}
 
 
