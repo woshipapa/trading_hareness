@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import uuid
 from typing import Any, Mapping
 
@@ -28,6 +29,13 @@ def background_loop_lease_seconds(environ: Mapping[str, str] | None = None) -> i
         return 120
 
 
+def runtime_lease_holder_id(hostname: str | None = None, pid: int | None = None) -> uuid.UUID:
+    """Identify one process consistently across a same-container restart."""
+    host = socket.gethostname() if hostname is None else hostname
+    process_id = os.getpid() if pid is None else pid
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"quant-runtime-lease:{host}:{process_id}")
+
+
 def acquire_runtime_lease(database: Any, lease_key: str, holder_id: uuid.UUID, lease_seconds: int) -> bool:
     """Atomically take an expired durable lease in one short transaction."""
     with database.transaction() as connection:
@@ -37,6 +45,7 @@ def acquire_runtime_lease(database: Any, lease_key: str, holder_id: uuid.UUID, l
                ON CONFLICT(lease_key) DO UPDATE SET holder_id=EXCLUDED.holder_id,acquired_at=now(),
                  expires_at=EXCLUDED.expires_at,updated_at=now()
                WHERE quant.runtime_leases.expires_at <= now()
+                  OR quant.runtime_leases.holder_id = EXCLUDED.holder_id
                RETURNING holder_id""",
             (lease_key, holder_id, lease_seconds),
         ).fetchone()
@@ -72,4 +81,5 @@ __all__ = [
     "post_close_refresh_lease_seconds",
     "release_runtime_lease",
     "renew_runtime_lease",
+    "runtime_lease_holder_id",
 ]

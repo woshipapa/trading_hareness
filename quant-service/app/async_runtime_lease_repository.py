@@ -21,6 +21,7 @@ async def acquire(async_database: Any, lease_key: str, holder_id: uuid.UUID, lea
                ON CONFLICT(lease_key) DO UPDATE SET holder_id=EXCLUDED.holder_id,acquired_at=now(),
                  expires_at=EXCLUDED.expires_at,updated_at=now()
                WHERE quant.runtime_leases.expires_at <= now()
+                  OR quant.runtime_leases.holder_id = EXCLUDED.holder_id
                RETURNING holder_id""",
             (lease_key, holder_id, lease_seconds),
         )
