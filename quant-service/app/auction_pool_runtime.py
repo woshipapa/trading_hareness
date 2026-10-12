@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .auction_open_desk import auction_timetable
+from .datasources.sources.tdx_protocol import TdxProtocolError
+from .fuyao_provider import FuyaoProviderError
+from .licensed_stock_api import UpstreamStockApiError
+from .market_event_capture import normalize_fuyao_auction
 from .market_session_repository import market_observation_session
 from .public_market_repository import persist_timed_observations
 from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
@@ -25,16 +29,12 @@ CN_TZ = ZoneInfo("Asia/Shanghai")
 DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
 SESSION_GATE_TIMEOUT_SECONDS = 10
 PERSIST_TIMEOUT_SECONDS = 60
+FUYAO_REQUEST_TIMEOUT_SECONDS = 4
+TDX_SLOT_MAX_WAIT_SECONDS = 3
 
 
 def _database_busy(error: BaseException) -> dict[str, Any]:
     return {"status": "database_busy", "error": str(error) or type(error).__name__}
-
-
-def _payload_rows(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, Mapping):
-        return [row for row in payload.get("item") or [] if isinstance(row, dict)]
-    return [row for row in payload if isinstance(row, dict)] if isinstance(payload, list) else []
 
 
 def _all_final(rows: list[dict[str, Any]], pool: list[str]) -> bool:
@@ -76,16 +76,15 @@ class AuctionPoolCaptureRuntime:
         for offset in range(0, len(pool), 100):
             symbols = pool[offset:offset + 100]
             try:
-                payload = await self.deps.fetch_fuyao(
+                payload = await asyncio.wait_for(self.deps.fetch_fuyao(
                     "a_share_auction_snapshot", {"thscodes": ",".join(symbols)}, slot_wait_seconds=2,
-                )
-            except PublicProviderRateLimited as error:
-                status = "rate_limited"
+                ), timeout=FUYAO_REQUEST_TIMEOUT_SECONDS)
+                rows.extend(event["raw"] for event in normalize_fuyao_auction(payload, scheduled_at))
+            except FuyaoProviderError as error:
+                status = "rate_limited" if isinstance(error.__cause__, PublicProviderRateLimited) else "failed"
                 return await self._store_tick(scheduled_at, pool, rows, status, str(error))
-            except Exception as error:  # one batch must not stop the timetable
-                status = "rate_limited" if "rate_limited" in str(error) else "failed"
-                return await self._store_tick(scheduled_at, pool, rows, status, str(error))
-            rows.extend(_payload_rows(payload))
+            except asyncio.TimeoutError as error:
+                return await self._store_tick(scheduled_at, pool, rows, "failed", str(error) or "Fuyao request timed out")
         status = "final" if _all_final(rows, pool) else status
         return await self._store_tick(scheduled_at, pool, rows, status, None)
 
@@ -105,12 +104,12 @@ class AuctionPoolCaptureRuntime:
             return _database_busy(caught)
         return {"status": status, "stored": int(stored), "final": status == "final", "rows": len(rows)}
 
-    async def _capture_curves(self, session_date: date, pool: list[str]) -> int:
-        stored = 0
+    async def _capture_curves(self, session_date: date, pool: list[str]) -> dict[str, int]:
+        counts = {"stored": 0, "rate_limited": 0, "failed": 0}
         effective_at = datetime.combine(session_date, time(9, 26), tzinfo=CN_TZ).isoformat()
         for symbol in pool:
             try:
-                await self.deps.acquire_tdx_slot(CURVE_PROVIDER, max_wait_seconds=0)
+                await self.deps.acquire_tdx_slot(CURVE_PROVIDER, max_wait_seconds=TDX_SLOT_MAX_WAIT_SECONDS)
                 curve = await self.deps.fetch_curve(symbol=symbol)
                 payload = getattr(curve, "rows", curve)
                 await self._persist(CURVE_PROVIDER, CURVE_CAPABILITY, {
@@ -118,17 +117,19 @@ class AuctionPoolCaptureRuntime:
                     "research_only": True, "live_effect": "none", "effective_at": effective_at,
                     "available_at": self.deps.now().astimezone(timezone.utc).isoformat(),
                 })
-                stored += 1
-            except Exception:
-                continue
-        return stored
+                counts["stored"] += 1
+            except PublicProviderRateLimited:
+                counts["rate_limited"] += 1
+            except (TdxProtocolError, OSError, ValueError, ExecutorSaturatedError, TimeoutError):
+                counts["failed"] += 1
+        return counts
 
-    async def _capture_bids(self, session_date: date, pool: list[str]) -> int:
+    async def _capture_bids(self, session_date: date, pool: list[str]) -> dict[str, int]:
         start = datetime.combine(session_date, time(9, 30), tzinfo=CN_TZ)
         now = self.deps.now().astimezone(CN_TZ)
         if now < start:
             await self.deps.sleep((start - now).total_seconds())
-        stored = 0
+        counts = {"stored": 0, "rate_limited": 0, "failed": 0}
         effective_at = start.isoformat()
         next_call = start
         for symbol in pool:
@@ -146,16 +147,16 @@ class AuctionPoolCaptureRuntime:
                     "research_only": True, "live_effect": "none", "effective_at": effective_at,
                     "available_at": self.deps.now().astimezone(timezone.utc).isoformat(),
                 })
-                stored += 1
-            except Exception:
-                pass
+                counts["stored"] += 1
+            except (UpstreamStockApiError, ExecutorSaturatedError, TimeoutError):
+                counts["failed"] += 1
             next_call = max(next_call, self.deps.now().astimezone(CN_TZ)) + timedelta(seconds=1)
-        return stored
+        return counts
 
     async def capture_session(self, session_date: date | None = None) -> dict[str, Any]:
         observed = self.deps.now().astimezone(CN_TZ)
         trade_date = session_date or observed.date()
-        if observed.date() != trade_date or not (time(9, 14) <= observed.time() <= time(9, 30)):
+        if observed.date() != trade_date or not (time(9, 14) <= observed.time() <= time(11, 30)):
             return {"status": "outside_session"}
         first_tick = auction_timetable(trade_date)[0]
         try:
@@ -166,7 +167,10 @@ class AuctionPoolCaptureRuntime:
             return _database_busy(error)
         if not active:
             return {"status": "outside_session"}
-        allowed, storage = await self.deps.storage_allowed()
+        try:
+            allowed, storage = await self.deps.storage_allowed()
+        except DATABASE_UNAVAILABLE as error:
+            return _database_busy(error)
         if not allowed:
             return {"status": "storage_paused", "storage": storage}
         try:
@@ -200,17 +204,26 @@ async def run_auction_pool_capture_loop(
 ) -> None:
     while True:
         now = runtime.deps.now().astimezone(CN_TZ)
-        if now.weekday() < 5 and time(9, 14) <= now.time() <= time(9, 30):
+        if now.weekday() < 5 and time(9, 14) <= now.time() <= time(11, 30):
             result = await runtime.capture_session(now.date())
+            while result.get("status") == "database_busy":
+                retry_at = runtime.deps.now().astimezone(CN_TZ)
+                if retry_at.time() > time(11, 30):
+                    break
+                await runtime.deps.sleep(5)
+                result = await runtime.capture_session(retry_at.date())
             log("auction_pool_capture " + " ".join(f"{key}={result.get(key, 0)}" for key in (
                 "scheduled", "stored", "rate_limited", "failed", "curves", "bids",
             )))
-            target = datetime.combine(now.date() + timedelta(days=1), time(9, 14), tzinfo=CN_TZ)
+            after = runtime.deps.now().astimezone(CN_TZ)
+            target = datetime.combine(after.date() + timedelta(days=1), time(9, 14), tzinfo=CN_TZ)
+            sleep_from = after
         else:
             target = datetime.combine(now.date(), time(9, 14), tzinfo=CN_TZ)
             if now >= target:
                 target += timedelta(days=1)
-        await runtime.deps.sleep(max(0, (target - now).total_seconds()))
+            sleep_from = now
+        await runtime.deps.sleep(max(0, (target - sleep_from).total_seconds()))
 
 
 __all__ = [

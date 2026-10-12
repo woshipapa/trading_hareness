@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import date, datetime, time, timedelta
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from app.auction_pool_runtime import (
@@ -12,7 +12,9 @@ from app.auction_pool_runtime import (
     CURVE_CAPABILITY,
     AuctionPoolCaptureDependencies,
     AuctionPoolCaptureRuntime,
+    run_auction_pool_capture_loop,
 )
+from app.fuyao_provider import FuyaoProviderError
 from app.public_provider_rate_limits import PublicProviderRateLimited
 
 
@@ -103,9 +105,12 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
             nonlocal fetch_count
             fetch_count += 1
             if fetch_count == 1:
-                raise PublicProviderRateLimited("fuyao_ths")
+                try:
+                    raise PublicProviderRateLimited("fuyao_ths")
+                except PublicProviderRateLimited as error:
+                    raise FuyaoProviderError(str(error)) from error
             if fetch_count == 2:
-                raise RuntimeError("fuyao down")
+                raise FuyaoProviderError("fuyao down")
             return {"item": [{"thscode": symbols, "data_status": "pending"}]}
 
         runtime, clock, persisted, calls, _curves, _bids = self.dependencies(current=time(9, 15, 2), fetch=fetch)
@@ -120,8 +125,8 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
     def test_final_tick_stops_early_and_runs_curve_and_bid_passes(self):
         async def fetch(_symbols, slot_wait_seconds):
             self.assertEqual(slot_wait_seconds, 2)
-            return {"item": [{"thscode": "000001.SZ", "data_status": "final"},
-                              {"thscode": "000002.SZ", "data_status": "final"}]}
+            return {"data_status": "final", "item": [{"thscode": "000001.SZ"},
+                                                         {"thscode": "000002.SZ"}]}
 
         runtime, clock, persisted, calls, curves, bids = self.dependencies(
             current=time(9, 14), pool=["000001.SZ", "000002.SZ"], fetch=fetch,
@@ -142,6 +147,38 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
         self.assertIn(CURVE_CAPABILITY, [capability for _provider, capability, _rows in persisted])
         self.assertIn(BID_CAPABILITY, [capability for _provider, capability, _rows in persisted])
         self.assertGreaterEqual(clock.current.time(), time(9, 30))
+
+    def test_outer_loop_retries_database_busy_and_uses_post_session_clock(self):
+        runtime, clock, _persisted, _fuyao, _curves, _bids = self.dependencies()
+        capture = AsyncMock(side_effect=[{"status": "database_busy"}, {"status": "completed"}])
+        runtime.capture_session = capture
+        clock.current = datetime.combine(DAY, time(9, 14), tzinfo=CN)
+
+        class StopLoop(Exception):
+            pass
+
+        async def retry_then_stop(seconds):
+            clock.sleeps.append(seconds)
+            if len(clock.sleeps) == 1:
+                clock.current += timedelta(seconds=seconds)
+                return
+            raise StopLoop
+
+        object.__setattr__(runtime.deps, "sleep", retry_then_stop)
+        with self.assertRaises(StopLoop):
+            asyncio.run(run_auction_pool_capture_loop(runtime))
+        self.assertEqual(capture.await_count, 2)
+        self.assertEqual(clock.sleeps[0], 5)
+
+        clock.current = datetime.combine(DAY, time(9, 30), tzinfo=CN)
+        runtime.capture_session = AsyncMock(return_value={"status": "completed"})
+        async def stop_next(seconds):
+            clock.sleeps.append(seconds)
+            raise StopLoop
+        object.__setattr__(runtime.deps, "sleep", stop_next)
+        with self.assertRaises(StopLoop):
+            asyncio.run(run_auction_pool_capture_loop(runtime))
+        self.assertEqual(clock.sleeps[-1], 23 * 3600 + 44 * 60)
 
 
 if __name__ == "__main__":
