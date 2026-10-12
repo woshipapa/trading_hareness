@@ -23,6 +23,7 @@ from .teacher_review_rules import (
     count_sector_limit_ups,
     divergence_plan_symbols,
 )
+from .auction_open_desk import accepts_snapshot_row
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 DIVERGENCE_MAX_SYMBOLS = 10
@@ -98,8 +99,7 @@ class TeacherIntradayContext:
                 # pre-close equals the plan's previous close (yesterday's row has the day before).
                 previous_close = optional_float(((plans.get(event["ts_code"]) or {}).get("levels") or {}).get("close"))
                 pre_close = optional_float(raw.get("pre_close_price"))
-                if str(raw.get("data_status") or "") != "final" or previous_close is None or pre_close is None \
-                        or abs(pre_close - previous_close) > max(0.011, previous_close * 0.001):
+                if previous_close is None or pre_close is None or not accepts_snapshot_row(raw, previous_close):
                     rejected[event["ts_code"]] = f"{raw.get('data_status')}:pre_close={pre_close} vs {previous_close}"
                     continue
                 self.market_book.store_auction(event["ts_code"], observed_at, {

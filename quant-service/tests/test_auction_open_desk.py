@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+from datetime import date, datetime, time
+import unittest
+
+from app.auction_open_desk import (
+    AUCTION_POOL_MAX_SYMBOLS,
+    BUCKET_STATISTICS,
+    VERSION,
+    accepts_snapshot_row,
+    auction_timetable,
+    build_auction_pool,
+    gap_bucket,
+    next_auction_tick,
+    open_gap,
+    opens_at_limit,
+)
+
+
+class AuctionOpenDeskRulesTests(unittest.TestCase):
+    def test_timetable_contains_extra_ticks_five_second_phase_and_stop(self) -> None:
+        ticks = auction_timetable(date(2026, 10, 12))
+        times = {tick.timetz().replace(tzinfo=None) for tick in ticks}
+        self.assertEqual(ticks[0].timetz().replace(tzinfo=None), time(9, 15, 5))
+        for expected in (time(9, 19, 50), time(9, 20, 5), time(9, 24, 55)):
+            self.assertIn(expected, times)
+        self.assertEqual([tick.time() for tick in ticks if time(9, 25, 5) <= tick.time()][1], time(9, 25, 10))
+        self.assertEqual(ticks[-1].time(), time(9, 26))
+        self.assertTrue(all(tick.tzinfo is not None for tick in ticks))
+
+    def test_next_tick_is_strict_and_stops_after_last_tick(self) -> None:
+        tick = datetime(2026, 10, 12, 9, 19, 49, tzinfo=auction_timetable(date(2026, 10, 12))[0].tzinfo)
+        self.assertEqual(next_auction_tick(tick).time(), time(9, 19, 50))
+        self.assertEqual(next_auction_tick(datetime(2026, 10, 12, 9, 26, tzinfo=tick.tzinfo)), None)
+
+    def test_pool_preserves_source_order_deduplicates_and_caps(self) -> None:
+        pool = build_auction_pool(["a", "b"], ["b", "c"], ["a", "d"], cap=3)
+        self.assertEqual(pool, ["a", "b", "c"])
+        self.assertEqual(build_auction_pool([], [], [], cap=AUCTION_POOL_MAX_SYMBOLS), [])
+
+    def test_gap_and_bucket_edges(self) -> None:
+        self.assertAlmostEqual(open_gap(105, 100), 0.05)
+        edges = [
+            (-0.050001, "below_-5%"), (-0.05, "-5..-2%"), (-0.02, "-2..0%"),
+            (0, "0..2%"), (0.02, "2..5%"), (0.05, "5..9%"), (0.09, "9%+_not_at_limit"),
+        ]
+        for gap, bucket in edges:
+            self.assertEqual(gap_bucket(gap), bucket)
+        self.assertEqual(gap_bucket(0.20, opened_at_limit=True), "opens_at_limit")
+        self.assertEqual(len(BUCKET_STATISTICS), 8)
+        self.assertEqual(VERSION, "auction-desk-v1")
+
+    def test_open_limit_and_snapshot_acceptance_boundaries(self) -> None:
+        self.assertTrue(opens_at_limit(10.0, 10.005))
+        self.assertFalse(opens_at_limit(9.994, 10.0))
+        self.assertTrue(accepts_snapshot_row({"data_status": "final", "pre_close_price": 100.1}, 100.0))
+        self.assertFalse(accepts_snapshot_row({"data_status": "pending", "pre_close_price": 100.0}, 100.0))
+        self.assertFalse(accepts_snapshot_row({"data_status": "final", "pre_close_price": 100.2}, 100.0))
