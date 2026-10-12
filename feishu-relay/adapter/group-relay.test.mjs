@@ -45,6 +45,12 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			saved.set(sourceMessageId, { ...existing, status: 'failed', targetMessageIds: [], target_message_ids: [], errorMessage: reason });
 			return true;
 		},
+		correctRelayMessage: async (sourceMessageId, message, reason) => {
+			const existing = saved.get(sourceMessageId);
+			if (!existing || existing.status !== 'sent') return false;
+			saved.set(sourceMessageId, { ...existing, message, status: 'failed', targetMessageIds: [], target_message_ids: [], errorMessage: reason });
+			return true;
+		},
 		markRelayMessage: async (id, update) => saved.set(id, { ...saved.get(id), ...update, target_message_ids: update.targetMessageIds ?? saved.get(id)?.target_message_ids ?? [] }),
 		updateRelaySourceMessage: async (id, update) => { const next = { ...saved.get(id), ...update }; saved.set(id, next); return next; },
 	};
@@ -131,6 +137,26 @@ test('a LarkAgentX source message uses the existing relay ledger and fan-out', a
 	const duplicate = await relay.processInbound(message, source);
 	assert.equal(duplicate.status, 'duplicate');
 	assert.equal(sent.length, 1);
+});
+
+test('a history correction resends a sent message only when its content really changed', async () => {
+	const { relay, sent, saved } = createHarness([]);
+	const source = { key: 'anqiang', tag: 'anqiang', resolvedChatId: '767_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] };
+	const lossy = { message_id: 'larkx_link_1', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '链接:  提取码: q7sx' }) } };
+	const fixed = { ...lossy, body: { content: JSON.stringify({ text: '链接: https://pan.example.com/s/1?pwd=q7sx 提取码: q7sx' }) } };
+	assert.equal((await relay.processInbound(lossy, source)).status, 'sent');
+	// a plain re-read of the corrected content is still a duplicate
+	assert.equal((await relay.processInbound(fixed, source)).status, 'duplicate');
+	// an explicit correction with unchanged content is a duplicate too
+	assert.equal((await relay.processInbound(lossy, source, { correction: true })).status, 'duplicate');
+	assert.equal(sent.length, 1);
+	// an explicit correction with changed content is resent once, and the ledger keeps the corrected message
+	assert.equal((await relay.processInbound(fixed, source, { correction: true })).status, 'sent');
+	assert.equal(sent.length, 2);
+	assert.equal(JSON.parse(sent[1].content).text, '#anqiang\n链接: https://pan.example.com/s/1?pwd=q7sx 提取码: q7sx');
+	assert.equal(JSON.parse(saved.get('larkx_link_1').message.body.content).text, '链接: https://pan.example.com/s/1?pwd=q7sx 提取码: q7sx');
+	assert.equal((await relay.processInbound(fixed, source, { correction: true })).status, 'duplicate');
+	assert.equal(sent.length, 2);
 });
 
 test('a LarkAgentX history replay replaces only a previously sent card placeholder', async () => {

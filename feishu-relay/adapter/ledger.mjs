@@ -315,6 +315,16 @@ export function createLedger(connectionString) {
 				WHERE source_message_id=$1 AND status='sent'`, [sourceMessageId, reason]);
 			return rowCount === 1;
 		},
+		// Reopen a sent row with corrected content.  The corrected message is
+		// stored here, not only passed to the claim, so the periodic retry queue
+		// can never resend the old content; the back-dated updated_at makes the
+		// row claimable at once instead of waiting out the failure backoff.
+		async correctRelayMessage(sourceMessageId, message, reason = '历史重读更正内容') {
+			const { rowCount } = await pool.query(`UPDATE feishu_group_relay_messages
+				SET status='failed', message=$2, target_message_ids='[]'::jsonb, error_message=$3, attempt_count=0, updated_at=now() - interval '1 hour'
+				WHERE source_message_id=$1 AND status='sent'`, [sourceMessageId, message, reason]);
+			return rowCount === 1;
+		},
 		async markRelayMessage(sourceMessageId, { status, targetMessageIds = [], errorMessage = null }) {
 			await pool.query(`UPDATE feishu_group_relay_messages SET status=$2,target_message_ids=$3,error_message=$4,forwarded_at=CASE WHEN $2='sent' THEN now() ELSE forwarded_at END,updated_at=now() WHERE source_message_id=$1`, [sourceMessageId, status, JSON.stringify(targetMessageIds), errorMessage]);
 		},

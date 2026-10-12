@@ -710,7 +710,7 @@ class EventSpool:
             rows = self._db.execute("SELECT counter_name,counter_value FROM runtime_counters").fetchall()
         return {str(row["counter_name"]): int(row["counter_value"]) for row in rows}
 
-    def enqueue(self, event_id: str, payload: dict[str, Any], *, refresh: bool = False) -> str:
+    def enqueue(self, event_id: str, payload: dict[str, Any], *, refresh: bool = False, reopen: bool = False) -> str:
         """Queue one event.  A repeated event id keeps the stored payload.
 
         ``refresh=True`` is for a deliberate re-read of the source message: an
@@ -718,6 +718,11 @@ class EventSpool:
         payload, so a retry is not stuck replaying a payload that was decoded
         wrongly the first time.  A delivered or in-flight event is never
         rewritten.
+
+        ``reopen=True`` (with ``refresh``) is the operator's explicit correction:
+        a delivered event is queued again with the new payload so the adapter
+        can decide whether its content changed.  In-flight events are still
+        left alone.
         """
         event_id = str(event_id).strip()
         if not event_id or len(event_id) > 256:
@@ -745,6 +750,11 @@ class EventSpool:
                     "UPDATE events SET payload_json=?,available_at=?,updated_at=? WHERE event_id=? AND status IN ('queued','failed')",
                     (encoded, now, now, event_id),
                 )
+                if reopen:
+                    self._db.execute(
+                        "UPDATE events SET payload_json=?,status='queued',delivered_at=NULL,lease_until=NULL,available_at=?,updated_at=?,last_error=NULL WHERE event_id=? AND status='delivered'",
+                        (encoded, now, now, event_id),
+                    )
             self._db.commit()
             row = self._db.execute("SELECT status FROM events WHERE event_id=?", (event_id,)).fetchone()
             return str(row["status"] if row else "queued")

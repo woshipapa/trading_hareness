@@ -64,6 +64,26 @@ class EventSpoolTests(unittest.TestCase):
             self.assertEqual(spool.stats()["failed"], 0)
             spool.close()
 
+    def test_an_explicit_correction_reopens_a_delivered_event(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spool = EventSpool(Path(directory) / "events.sqlite3")
+            lossy = {"msg_id": "m1", "chat_id": "7", "content": "链接:  提取码"}
+            fixed = {"msg_id": "m1", "chat_id": "7", "content": "链接:  提取码", "_larkagentx_correction": True}
+            spool.enqueue("e1", lossy)
+            spool.claim("e1")
+            spool.mark_delivered("e1")
+            # a re-read alone never reopens a delivered event
+            self.assertEqual(spool.enqueue("e1", fixed, refresh=True), "delivered")
+            self.assertEqual(spool.all_payloads()[0][1], lossy)
+            self.assertEqual(spool.enqueue("e1", fixed, refresh=True, reopen=True), "queued")
+            self.assertEqual(spool.due()[0]["payload"], fixed)
+            self.assertEqual(spool.claim("e1"), "claimed")
+            # in flight: a second correction must not disturb the running delivery
+            self.assertEqual(spool.enqueue("e1", lossy, refresh=True, reopen=True), "processing")
+            spool.mark_delivered("e1")
+            self.assertEqual(spool.stats()["delivered"], 1)
+            spool.close()
+
     def test_failed_event_can_be_terminated_as_ignored(self):
         with tempfile.TemporaryDirectory() as directory:
             spool = EventSpool(Path(directory) / "events.sqlite3")

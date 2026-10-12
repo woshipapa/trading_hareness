@@ -718,7 +718,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
 				self.send_json(200, self.bridge.unbind_route(payload))
 				return
 			if self.path == "/private-gap-repair":
-				result = asyncio.run(self.bridge.repair_private_positions(payload, reason="manual_private_gap_repair"))
+				correction = payload.get("correction") is True
+				result = asyncio.run(self.bridge.repair_private_positions(
+					payload, reason="manual_private_correction" if correction else "manual_private_gap_repair", correction=correction))
 				self.send_json(200, result)
 				return
 			if self.path == "/qr/init":
@@ -1613,7 +1615,7 @@ class Bridge:
 			raise ValueError("一次私有缺口补读最多允许 1024 个 position")
 		return {chat_id: sorted(values) for chat_id, values in requests.items()}
 
-	async def repair_private_positions(self, payload: dict[str, Any], *, reason: str) -> dict[str, Any]:
+	async def repair_private_positions(self, payload: dict[str, Any], *, reason: str, correction: bool = False) -> dict[str, Any]:
 		"""Recover messages through LarkAgentX's private history gateway.
 
 		This path intentionally never calls the official message.list API.  Each
@@ -1651,7 +1653,7 @@ class Bridge:
 				if position not in requested:
 					continue
 				try:
-					delivery = await self.on_message(message, recovered=True)
+					delivery = await self.on_message(message, recovered=True, correction=correction)
 					status = str((delivery or {}).get("status", ""))
 					if status in {"delivered", "duplicate", "filtered"}:
 						await asyncio.to_thread(self.event_spool.record_recovered_position, chat_id, position)
@@ -1924,7 +1926,7 @@ class Bridge:
 		# avoids adding a second crypto implementation to the supervisor venv.
 		return encrypted, response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
 
-	async def on_message(self, message: dict[str, Any], *, recovered: bool = False) -> dict[str, Any]:
+	async def on_message(self, message: dict[str, Any], *, recovered: bool = False, correction: bool = False) -> dict[str, Any]:
 		# connect_websocket does not expose a separate connected callback.  Any
 		# decoded event is proof that the WebSocket session is receiving data.
 		self.websocket_state = "connected"
@@ -2047,6 +2049,10 @@ class Bridge:
 				rendered = {"text": "", "links": []}
 			if rendered["text"]:
 				payload["_larkagentx_rich_text"] = rendered
+		if correction:
+			# Operator-requested re-read after a decoding fix: the adapter resends
+			# only if the content differs from what it already relayed.
+			payload["_larkagentx_correction"] = True
 		payload["source_label"] = os.environ.get("LARKX_SOURCE_LABEL", "LarkAgentX 个人会话")
 		event_id = f"larkagentx:{chat_id}:{message_id}"
 		self.history_archive.append(event_id, payload)
@@ -2079,7 +2085,7 @@ class Bridge:
 		try:
 			# A history re-read carries a freshly decoded payload; let it replace
 			# an undelivered one that was stored before a decoding fix.
-			spool_state = await asyncio.to_thread(functools.partial(self.event_spool.enqueue, event_id, payload, refresh=recovered))
+			spool_state = await asyncio.to_thread(functools.partial(self.event_spool.enqueue, event_id, payload, refresh=recovered, reopen=recovered and correction))
 			if spool_state == "delivered":
 				return {"status": "duplicate", "chat_id": chat_id, "message_id": message_id}
 			claim_state = await asyncio.to_thread(self.event_spool.claim, event_id)

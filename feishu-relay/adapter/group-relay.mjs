@@ -711,7 +711,7 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		}
 	}
 
-	async function processInbound(message, source, { replacePlaceholder = false } = {}) {
+	async function processInbound(message, source, { replacePlaceholder = false, correction = false } = {}) {
 		if (!message?.message_id) throw new RelayUnsupportedError('实时源消息没有 message_id');
 		if (!source?.key || !source?.resolvedChatId) throw new Error('实时源消息缺少已映射的 source 或 chat_id');
 		if (source.targetChatIds.includes(source.resolvedChatId)) {
@@ -741,10 +741,18 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 		}
 		const existing = await ledger.getRelayMessage(message.message_id);
 		const replaceExistingPlaceholder = Boolean(replacePlaceholder && existing?.status === 'sent' && isPlaceholderCardRelay(existing.message));
-		if ((existing?.status === 'sent' || existing?.status === 'skipped_bootstrap' || existing?.status === 'filtered_system') && !replaceExistingPlaceholder) {
+		// A deliberate history re-read after a decoding fix (for example a link
+		// the first decode dropped).  Resend only when what the source says now
+		// differs from what was relayed; an unchanged message stays a duplicate.
+		const correctExisting = Boolean(correction && existing?.status === 'sent' && !replaceExistingPlaceholder
+			&& relayContentFingerprint(sourceFromRecord(existing)) !== relayContentFingerprint(message));
+		if ((existing?.status === 'sent' || existing?.status === 'skipped_bootstrap' || existing?.status === 'filtered_system') && !replaceExistingPlaceholder && !correctExisting) {
 			return { status: 'duplicate', message_id: message.message_id };
 		}
 		if (replaceExistingPlaceholder && (!ledger.resetRelayMessageForRetry || !(await ledger.resetRelayMessageForRetry(message.message_id, 'LarkAgentX 历史卡片回放替换占位内容')))) {
+			return { status: 'duplicate', message_id: message.message_id };
+		}
+		if (correctExisting && (!ledger.correctRelayMessage || !(await ledger.correctRelayMessage(message.message_id, message, 'LarkAgentX 历史重读更正内容')))) {
 			return { status: 'duplicate', message_id: message.message_id };
 		}
 		if (ledger.relayMessagesBySourceWindow) {
