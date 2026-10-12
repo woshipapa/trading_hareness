@@ -29,6 +29,8 @@ from .limit_detail_read_model import limit_detail_day
 from .market_radar_runtime import latest_main_net, latest_point
 from .market_temperature import VERSION as TEMPERATURE_VERSION
 from .market_temperature_runtime import CAPABILITY as TEMPERATURE_CAPABILITY
+from .limit_up_risk import VERSION as LIMIT_UP_RISK_VERSION
+from .limit_up_risk_runtime import CAPABILITY as LIMIT_UP_RISK_CAPABILITY
 from .market_timing import CAPABILITY as TIMING_CAPABILITY
 from .owner_storage import tiered_sql_builder
 from .stock_money_flow_sync import stored_flow_symbols
@@ -263,6 +265,18 @@ def temperature_checks(connection: Any, trade_date: date, _now: datetime) -> lis
             _check("components", _grade(scored, 8, 6), scored, ">=8", "参与平均的分项数（共 8 项）")]
 
 
+def limit_up_risk_checks(connection: Any, trade_date: date, _now: datetime) -> list[dict[str, Any]]:
+    reading = _stored_reading(connection, LIMIT_UP_RISK_CAPABILITY, trade_date)
+    if reading is None:
+        return [_check("present", MISSING, None, "stored", "当日涨停大亏风险未落库（盘后阶段 limit_up_risk）")]
+    if reading.get("version") != LIMIT_UP_RISK_VERSION:
+        return [_check("present", OK, len(reading.get("rows") or []), "stored"),
+                _check("version", WARN, reading.get("version"), LIMIT_UP_RISK_VERSION,
+                       f"stored under {reading.get('version')}, backfill pending")]
+    return [_check("present", OK, len(reading.get("rows") or []), "stored"),
+            _check("version", OK, LIMIT_UP_RISK_VERSION, LIMIT_UP_RISK_VERSION)]
+
+
 def broad_etf_flow_checks(connection: Any, trade_date: date, _now: datetime) -> list[dict[str, Any]]:
     reading = _stored_reading(connection, ETF_FLOW_CAPABILITY, trade_date)
     if reading is None or reading.get("ratio") is None:
@@ -350,6 +364,7 @@ CHECKS: dict[str, Callable[[Any, date, datetime], list[dict[str, Any]]]] = {
     "market.radar": radar_checks, "market.main_net": main_net_checks, "limits.detail": limit_detail_checks,
     "market.minute_documents": minute_document_checks, "market.temperature": temperature_checks,
     "market.broad_etf_flow": broad_etf_flow_checks, "market.timing": timing_checks,
+    "market.limit_up_risk": limit_up_risk_checks,
     **{key: _session_checks(key) for key in ("board.concept_strength", "board.concept_flow", "board.industry_flow",
                                              "stock.money_flow", "stock.limit_prices", "strategy.ledger", "events.lhb")},
 }
@@ -391,4 +406,4 @@ def indicator_health(connection: Any, trade_date: date, now: datetime, keys: lis
     }
 
 
-__all__ = ["CHECKS", "DERIVED", "indicator_health", "indicator_status"]
+__all__ = ["CHECKS", "DERIVED", "indicator_health", "indicator_status", "limit_up_risk_checks"]

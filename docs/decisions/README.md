@@ -19,6 +19,7 @@
 | [0013](0013-sentiment-temperature-and-flows.md) | 短线情绪温度（冰点 / 沸点）与资金流向配合 | 日频已实现；分时、金/银指、看板待实现 |
 | [0014](0014-feishu-relay-release-independent-of-owner-windows.md) | feishu-relay 的发布不受 owner 发布时间窗口限制 | 生效 |
 | [0015](0015-tdx-may-be-decision-evidence.md) | 通达信数据可以作为决策证据，并接入生产采集 | 生效 |
+| [0016](0016-limit-up-risk-score.md) | 涨停股次日大面风险分：只作研究展示 | 生效 |
 
 格式：
 
