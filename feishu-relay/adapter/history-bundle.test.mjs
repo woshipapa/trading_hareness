@@ -308,3 +308,31 @@ test('the transcript states where its content came from', async () => {
 	await writeHistoryBundle({ title: 'g', from: '2026-10-10', to: '2026-10-10', rows: [], write: out.write, fetchImage: async () => JPEG, note: '来源：从飞书读取的群完整历史，并合并已转发记录' });
 	assert.match(readZip(out.buffer()).get('g_2026-10-10_2026-10-10/transcript.md').toString('utf8'), /\n- 来源：从飞书读取的群完整历史，并合并已转发记录\n/);
 });
+
+import { larkAgentXCardIsDegraded } from './larkagentx-ingress.mjs';
+
+test('a card that reached history only as the upgrade banner is dropped, one that still has card JSON is kept', () => {
+	const options = { normalize: normalizeLarkAgentXRelayMessage, describeUnsupported: normalizeLarkAgentXUnsupportedMessage, isDegradedCard: larkAgentXCardIsDegraded };
+	const bannerOnly = { msg_id: '801', msg_type_name: 'CARD', chat_id: '7661', from_id: 'bot', create_time: SECONDS, content: '[卡片]',
+		_larkagentx_images: [{ image_id: 'img_v3_banner', key_hex: '', iv_hex: '' }],
+		content_data: { richtext: { imageIds: ['2'], elements: { dictionary: { 1: { tag: 1, property: '请升级至最新版本客户端，以查看内容' }, 2: { tag: 2, property: 'x' } } } } } };
+	assert.equal(historyRow(bannerOnly, options), null);
+	// without the predicate the same payload would have produced an empty post with a picture that cannot be fetched
+	assert.equal(historyRow(bannerOnly, { ...options, isDegradedCard: null }).message.msg_type, 'post');
+	const stillHasJson = { ...bannerOnly, msg_id: '802', content_data: { ...bannerOnly.content_data, jsonCard: JSON.stringify({ schema: '2.0',
+		body: { elements: [{ tag: 'markdown', property: { elements: [{ tag: 'plain_text', property: { content: '请升级至最新版本客户端，以查看内容' } }] } }] },
+		newBody: { tag: 'body', property: { elements: [{ tag: 'markdown', property: { elements: [{ tag: 'plain_text', property: { content: '今天网络课改成8点' } }] } }] } } }) } };
+	const kept = historyRow(stillHasJson, options);
+	assert.equal(kept.message.msg_type, 'interactive');
+	assert.deepEqual(bundleEntry(kept).blocks, [{ kind: 'text', text: '今天网络课改成8点' }]);
+});
+
+test('a message the ledger recorded under both id forms appears once, as its official row', () => {
+	const official = { source_message_id: 'om_y1', source_chat_id: 'oc_1', source_create_time: T0, message: { msg_type: 'text', sender: { id: 'ou_1', sender_name: '自定义机器人' }, body: { content: JSON.stringify({ text: '创业板今天应该小阴调整' }) } } };
+	const sameViaWebsocket = { source_message_id: '901', source_chat_id: '7661', source_create_time: T0 + 1_000, message: { msg_type: 'text', sender: { sender_id: '7001' }, body: { content: JSON.stringify({ text: '创业板今天应该小阴调整' }) } } };
+	const unrelated = { source_message_id: '902', source_chat_id: '7661', source_create_time: T0 + 120_000, message: { msg_type: 'text', sender: { sender_id: '7001' }, body: { content: JSON.stringify({ text: '另一条' }) } } };
+	const merged = mergeHistoryRows([official, sameViaWebsocket, unrelated], [{ ...sameViaWebsocket, from_history: true }]);
+	assert.deepEqual(merged.rows.map((row) => row.source_message_id), ['om_y1', '902']);
+	assert.equal(merged.from_ledger, 2);
+	assert.equal(merged.from_history_only, 0);
+});

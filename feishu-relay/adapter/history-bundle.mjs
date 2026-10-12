@@ -389,7 +389,7 @@ export function resolveRouteChatIds({ route, routes = [], numericIdsByKey = new 
  * event or a recalled (empty) message is not content and yields null; a type
  * the relay cannot carry yields a one-line placeholder, so the reader can see
  * that something was said there. */
-export function historyRow(payload, { normalize, describeUnsupported = null }) {
+export function historyRow(payload, { normalize, describeUnsupported = null, isDegradedCard = null }) {
 	const type = String(payload?.msg_type_name ?? '').toUpperCase();
 	if (!payload?.msg_id || type === 'SYSTEM') return null;
 	let message;
@@ -401,6 +401,11 @@ export function historyRow(payload, { normalize, describeUnsupported = null }) {
 		try { message = describeUnsupported(payload); } catch { return null; }
 	}
 	if (!message || String(message.msg_type ?? '').toLowerCase() === 'system') return null;
+	// A card that reached history as the client-upgrade banner has no content
+	// there: only the banner text and its artwork.  If its real content was
+	// ever obtained it is in the ledger.  A downgraded card that still carries
+	// card JSON stays; its real text may sit in newBody.
+	if (isDegradedCard?.(payload) && String(message.msg_type ?? '').toLowerCase() !== 'interactive') return null;
 	const created = Number(payload.create_time);
 	if (!Number.isFinite(created) || created <= 0) return null;
 	return {
@@ -424,7 +429,6 @@ const comparable = (row) => {
  * API era has a different id for the same message, so those are matched by
  * content within three seconds instead of by id. */
 export function mergeHistoryRows(ledgerRows, historyRows) {
-	const byId = new Map(ledgerRows.map((row) => [String(row.source_message_id), row]));
 	const officialEra = new Map();
 	for (const row of ledgerRows) {
 		if (/^\d+$/.test(String(row.source_message_id))) continue;
@@ -432,16 +436,24 @@ export function mergeHistoryRows(ledgerRows, historyRows) {
 		if (!officialEra.has(key)) officialEra.set(key, []);
 		officialEra.get(key).push(Number(row.source_create_time));
 	}
-	const merged = [...ledgerRows];
+	const hasOfficialTwin = (row) => {
+		const twins = officialEra.size ? officialEra.get(comparable(row)) : null;
+		return Boolean(twins?.some((time) => Math.abs(time - Number(row.source_create_time)) <= 3_000));
+	};
+	// While both transports ran, the ledger itself recorded some messages
+	// twice, once per id form; the official row is the one to keep.
+	const ledger = ledgerRows.filter((row) => !/^\d+$/.test(String(row.source_message_id)) || !hasOfficialTwin(row));
+	const byId = new Map(ledger.map((row) => [String(row.source_message_id), row]));
+	const droppedIds = new Set(ledgerRows.filter((row) => !ledger.includes(row)).map((row) => String(row.source_message_id)));
+	const merged = [...ledger];
 	let added = 0;
 	for (const row of historyRows) {
-		if (byId.has(String(row.source_message_id))) continue;
-		const twins = officialEra.size ? officialEra.get(comparable(row)) : null;
-		if (twins?.some((time) => Math.abs(time - Number(row.source_create_time)) <= 3_000)) continue;
-		byId.set(String(row.source_message_id), row);
+		const id = String(row.source_message_id);
+		if (byId.has(id) || droppedIds.has(id) || hasOfficialTwin(row)) continue;
+		byId.set(id, row);
 		merged.push(row);
 		added += 1;
 	}
 	merged.sort((a, b) => Number(a.source_create_time) - Number(b.source_create_time) || String(a.source_message_id).localeCompare(String(b.source_message_id)));
-	return { rows: merged, from_history_only: added, from_ledger: ledgerRows.length };
+	return { rows: merged, from_history_only: added, from_ledger: ledger.length };
 }

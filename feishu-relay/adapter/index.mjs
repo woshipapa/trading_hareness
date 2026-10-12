@@ -31,7 +31,7 @@ import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { parseXhsCommand } from './xhs-command.mjs';
 import { matchResearchRoute } from './research-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
-import { createRouteBinder, isSummaryChat, resolveLarkAgentXSource, hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
+import { createRouteBinder, isSummaryChat, resolveLarkAgentXSource, hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage, larkAgentXCardIsDegraded } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import { resolveFrontendAssetPath } from './frontend-assets.mjs';
@@ -1952,7 +1952,7 @@ async function readGroupHistory(located, range) {
 		for (let pageStart = start; pageStart <= end; pageStart += 50) {
 			const page = await bridgePostJson('/history/page', { chat_id: chatId, start: pageStart, end: Math.min(end, pageStart + 49) }, 60_000);
 			for (const payload of Array.isArray(page?.messages) ? page.messages : []) {
-				const row = historyRow(payload, { normalize: normalizeLarkAgentXRelayMessage, describeUnsupported: normalizeLarkAgentXUnsupportedMessage });
+				const row = historyRow(payload, { normalize: normalizeLarkAgentXRelayMessage, describeUnsupported: normalizeLarkAgentXUnsupportedMessage, isDegradedCard: larkAgentXCardIsDegraded });
 				// Positions bracket the range; the time check is what decides.
 				if (row && row.source_create_time >= range.fromMs && row.source_create_time <= range.toMs) rows.push(row);
 			}
@@ -1991,9 +1991,12 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	if (rows.length > MAX_BUNDLE_MESSAGES) { fail(400, `该时间范围内消息超过 ${MAX_BUNDLE_MESSAGES} 条，请缩小范围后分段导出`); return; }
 	const base = bundleBaseName(route.chatName, range.from, range.to);
 	const dryRun = url.searchParams.get('dry_run') === '1';
-	const relayedCount = rows.length;
 	let historyPositions = null;
 	let historyOnly = 0;
+	// The ledger recorded some messages under both id forms while both
+	// transports ran; one export should hold each once, whichever source it is.
+	rows = mergeHistoryRows(rows, []).rows;
+	const relayedCount = rows.length;
 	if (source === 'full') {
 		try {
 			const located = await locateGroupHistory(chatIds, range);
@@ -2039,7 +2042,7 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 			title: route.chatName, from: range.from, to: range.to, rows, fetchImage: fetchBundleImage,
 			cardImages: context.cardImages, senderNames: context.senderNames,
 			note: source === 'full'
-				? `来源：从飞书读取的群完整历史，并合并已转发记录（其中 ${historyOnly} 条只存在于群历史，${relayedCount} 条来自转发账本）`
+				? `来源：从飞书读取的群完整历史，并合并已转发记录（其中 ${historyOnly} 条只存在于群历史，${rows.length - historyOnly} 条来自转发账本）`
 				: '来源：仅已转发的消息（未转发的和监听之前的消息不在内）',
 			write: (chunk) => writeChunk(response, chunk),
 		});
