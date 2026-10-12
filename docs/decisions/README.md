@@ -18,6 +18,7 @@
 | [0010](0010-post-close-data-readiness-contract.md) | 盘后数据分别就绪、真实可用时间与公共阶段接管 | 草案，待双方确认 |
 | [0013](0013-sentiment-temperature-and-flows.md) | 短线情绪温度（冰点 / 沸点）与资金流向配合 | 日频已实现；分时、金/银指、看板待实现 |
 | [0014](0014-feishu-relay-release-independent-of-owner-windows.md) | feishu-relay 的发布不受 owner 发布时间窗口限制 | 生效 |
+| [0015](0015-tdx-may-be-decision-evidence.md) | 通达信数据可以作为决策证据，并接入生产采集 | 生效 |
 
 格式：
 
