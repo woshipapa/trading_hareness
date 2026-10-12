@@ -29,7 +29,7 @@ from .request_models import (
 
 
 POST_CLOSE_STAGE_ORDER = (
-    "stale_fetch_runs", "trade_calendar", "analyst_text", "all_a_universe", "full_market_daily", "core_daily_controls", "daily_control_reconciliation", "index_context",
+    "stale_fetch_runs", "trade_calendar", "analyst_text", "all_a_universe", "full_market_daily", "limit_performance_lists", "core_daily_controls", "daily_control_reconciliation", "index_context",
     "close_market_snapshot", "akshare_supplements", "ths_industry_flow", "ths_concept_flow_and_limit_strength",
     "market_flow_features", "limit_ladder", "limit_lift_pattern_mining", "cninfo_announcements",
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
@@ -47,6 +47,7 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     # One Fuyao request plus a held-calendar read; never on a provider's critical path.
     "trade_calendar": 60.0,
     "full_market_daily": 900.0,
+    "limit_performance_lists": 120.0,
     "akshare_supplements": 240.0,
     "limit_lift_pattern_mining": 120.0,
     # Four bounded full-market control APIs run sequentially so an individual
@@ -161,6 +162,7 @@ class PostCloseRefreshDependencies:
     refresh_broad_etf_flow: Callable[[date], Awaitable[dict[str, Any]]] | None = None
     # Decision 0013: the golden / silver finger (2560) state of the SSE composite.
     refresh_market_timing: Callable[[date], Awaitable[dict[str, Any]]] | None = None
+    append_limit_performance: Callable[[date], Awaitable[dict[str, Any]]] | None = None
 
 
 async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDependencies) -> dict[str, Any]:
@@ -210,6 +212,11 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             end_date=trade_date, max_pages_per_symbol=1,
         ))
 
+    async def limit_performance_stage() -> dict[str, Any]:
+        if dependencies.append_limit_performance is None or not longhu_mode:
+            return {"status": "skipped", "reason": "Longhu live limit-performance capture is disabled", "research_only": True}
+        return await dependencies.append_limit_performance(trade_date)
+
     async def limit_ladder_stage() -> dict[str, Any]:
         if longhu_mode:
             return await dependencies.run_database(
@@ -234,6 +241,7 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         "full_market_daily": lambda: dependencies.sync_full_market_daily(
             FullMarketDailySyncRequest(trade_date=trade_date, provider=full_market_daily_provider),
         ),
+        "limit_performance_lists": limit_performance_stage,
         "index_context": lambda: dependencies.sync_strategy_index_context(trade_date),
         "close_market_snapshot": lambda: dependencies.build_market_snapshot(
             # The close checkpoint is the owner-side collection boundary. Ask

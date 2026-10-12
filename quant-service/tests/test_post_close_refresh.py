@@ -19,6 +19,13 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["analyst_outcomes"], 300.0)
         self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["analyst_intraday_outcomes"], 180.0)
 
+    async def test_limit_performance_capture_is_after_full_market_daily(self):
+        self.assertEqual(
+            POST_CLOSE_STAGE_ORDER.index("limit_performance_lists"),
+            POST_CLOSE_STAGE_ORDER.index("full_market_daily") + 1,
+        )
+        self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["limit_performance_lists"], 120.0)
+
     async def test_service_assembles_same_date_stages_and_announcements_after_core_symbols(self):
         captured: dict[str, object] = {}
         providers: dict[str, object] = {}
@@ -43,6 +50,10 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             captured["daily_request"] = request
             return {"status": "completed"}
 
+        async def append_limit_performance(day):
+            captured["limit_performance_day"] = day
+            return {"status": "completed", "stored": 5}
+
         async def calendar():
             captured["calendar"] = True
             return {"status": "completed"}
@@ -52,6 +63,7 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             captured["dependencies"] = kwargs["stage_dependencies"]
             await kwargs["actions"]["trade_calendar"]()
             await kwargs["actions"]["full_market_daily"]()
+            captured["limit_performance"] = await kwargs["actions"]["limit_performance_lists"]()
             await kwargs["actions"]["akshare_supplements"]()
             await kwargs["actions"]["cninfo_announcements"]()
             captured["ledger"] = await kwargs["actions"]["candidate_ledger"]()
@@ -64,6 +76,7 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             run_database=completed, reconcile_stale_fetch_runs=lambda *_: None,
             reprocess_remote_reports=lambda *_: None, sync_market_universe=completed,
             sync_full_market_daily=full_market_daily, sync_strategy_index_context=completed,
+            append_limit_performance=append_limit_performance,
             build_market_snapshot=completed, load_core_symbols=load_core, akshare_probe=probe,
             sync_ths_industry_flow=completed, sync_ths_concept_flow=completed,
             rebuild_market_flow_features=lambda *_: None, limit_evidence=completed,
@@ -100,6 +113,9 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["dependencies"], POST_CLOSE_STAGE_DEPENDENCIES)
         self.assertEqual(captured["core_limit"], 7)
         self.assertEqual(captured["daily_request"].provider, "auto")
+        self.assertEqual(captured["limit_performance"], {
+            "status": "skipped", "reason": "Longhu live limit-performance capture is disabled", "research_only": True,
+        })
         self.assertEqual(captured["probe"].symbol, "000001.SZ")
         self.assertEqual(captured["announcements"].symbols, ["000001.SZ"])
         self.assertEqual(captured["announcements"].start_date, date(2026, 7, 7))
@@ -125,6 +141,7 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             PostCloseRefreshRequest(trade_date=date(2026, 8, 21), announcement_limit=7), dependencies,
         )
         self.assertEqual(captured["daily_request"].provider, "auto")
+        self.assertEqual(captured["limit_performance_day"], date(2026, 8, 21))
 
     async def test_close_snapshot_requests_provider_refresh_for_owner_fallback_chain(self):
         captured: dict[str, object] = {}

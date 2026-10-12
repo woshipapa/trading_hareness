@@ -53,6 +53,7 @@ from .akshare_provider import (
 from .fuyao_provider import FuyaoProviderError, all_a_snapshot_rows as fuyao_all_a_snapshot_rows
 from .fuyao_provider import fetch as fetch_fuyao_data
 from .limit_up_anchor import live_limit_up_pool_rows
+from .market_history_backfill import append_limit_performance as append_limit_performance_isolated
 from .launch_radar import MODEL_VERSION as LAUNCH_RADAR_MODEL_VERSION
 from .analysis import as_utc
 from .database import AsyncDatabase, Database
@@ -3857,6 +3858,9 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
             db, trade_date, run_database=run_database_blocking),
         refresh_market_timing=lambda trade_date: refresh_market_timing(
             db, trade_date, run_database=run_database_blocking),
+        append_limit_performance=lambda trade_date: append_limit_performance_isolated(
+            trade_date, shared_stock_api_call,
+            database=db, run_database=run_database_blocking),
     )
 
 

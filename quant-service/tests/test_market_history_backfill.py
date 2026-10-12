@@ -7,8 +7,9 @@ import unittest
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from app.market_history_backfill import (_info_rows, backfill_allowed, fuyao_limit_pools, longhu_limit_performance,
-                                         longhu_morning_bidding, walk_source)
+from app.market_history_backfill import (append_limit_performance, _info_rows, backfill_allowed,
+                                         fuyao_limit_pools, longhu_limit_performance,
+                                         longhu_limit_performance_live, longhu_morning_bidding, walk_source)
 
 CN = ZoneInfo("Asia/Shanghai")
 
@@ -23,7 +24,7 @@ class Result:
 
 class FakeDatabase:
     def __init__(self, stored_days=()):
-        self.stored_days, self.inserts = set(stored_days), []
+        self.stored_days, self.stored_items, self.inserts = set(stored_days), set(), []
 
     def transaction(self):
         database = self
@@ -38,9 +39,11 @@ class FakeDatabase:
 
     def execute(self, sql, params=()):
         if sql.lstrip().startswith("SELECT 1 FROM quant.raw_market_observations"):
-            return Result({"x": 1} if params[3].date() in self.stored_days else None)
+            key = (params[0], params[1], params[2], params[3].date())
+            return Result({"x": 1} if params[3].date() in self.stored_days or key in self.stored_items else None)
         if sql.lstrip().startswith("INSERT INTO quant.raw_market_observations"):
             self.inserts.append(params)
+            self.stored_items.add((params[0], params[1], params[2], params[3].date()))
             return Result({"observation_id": len(self.inserts)})
         raise AssertionError(sql)
 
@@ -63,6 +66,58 @@ class MarketHistoryBackfillTests(unittest.TestCase):
         self.assertEqual([params["PidType"] for params in calls], ["1", "2", "3", "4", "5"])
         self.assertTrue(all(params["Day"] == "2024-03-15" for params in calls))
         self.assertEqual(lists["pid:1"][0], [["000917", "电广传媒"]])
+
+    def test_live_limit_performance_uses_quote_target_without_day(self):
+        calls = []
+
+        async def call(request):
+            calls.append(request)
+            return {"pages": [{"payload": {"info": [[ ["000917", "电广传媒"] ]], "errcode": "0"}}]}
+
+        lists = asyncio.run(longhu_limit_performance_live(call)(date(2026, 9, 18)))
+        self.assertEqual(len(calls), 5)
+        self.assertTrue(all(request["target"] == "longhu_quote" for request in calls))
+        self.assertTrue(all(request["params"]["c"] == "HomeDingPan" for request in calls))
+        self.assertTrue(all("Day" not in request["params"] for request in calls))
+        self.assertEqual(lists["pid:1"][1]["target"], "longhu_quote")
+
+    def test_live_limit_performance_empty_day_is_not_stored_and_retries(self):
+        database = FakeDatabase()
+        calls = 0
+
+        async def fetch(_request):
+            nonlocal calls
+            calls += 1
+            return {"pages": [{"payload": {"info": [], "errcode": "0"}}]}
+
+        first = asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+        ))
+        second = asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+        ))
+        self.assertEqual(first["status"], "empty")
+        self.assertEqual(second["status"], "empty")
+        self.assertEqual(calls, 10)
+        self.assertEqual(database.inserts, [])
+
+    def test_live_limit_performance_non_empty_day_is_idempotent(self):
+        database = FakeDatabase()
+
+        async def fetch(_request):
+            return {"pages": [{"payload": {"info": [[ ["000917", "电广传媒"] ]], "errcode": "0"}}]}
+
+        first = asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+        ))
+        second = asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+        ))
+        self.assertEqual(first["stored"], 5)
+        self.assertEqual(second["stored"], 0)
+        self.assertEqual(len(database.inserts), 5)
+        self.assertTrue(all(params[1] == "limit_performance_live" for params in database.inserts))
+        self.assertTrue(all(params[7].obj["meta"]["target"] == "longhu_quote" for params in database.inserts))
 
     def test_pagination_stops_on_a_short_page(self):
         pages = []
@@ -102,6 +157,31 @@ class MarketHistoryBackfillTests(unittest.TestCase):
         self.assertEqual(report["stored"], 1)                       # only 2024-12-31
         self.assertIn("2024-12-30", report["stopped"])
         self.assertEqual(database.inserts[0][2], "auction")
+
+    def test_history_limit_performance_empty_day_is_reported_and_fetched_again(self):
+        database = FakeDatabase()
+        fetches = 0
+
+        async def allowed():
+            return True
+
+        async def fetch(_day):
+            nonlocal fetches
+            fetches += 1
+            return {f"pid:{pid}": ([], {}) for pid in "12345"}
+
+        report = asyncio.run(walk_source(
+            "longhu_limit_performance", [date(2026, 9, 18)], fetch,
+            database=database, run_database=run_database, allowed=allowed, pace_seconds=0,
+        ))
+        retry = asyncio.run(walk_source(
+            "longhu_limit_performance", [date(2026, 9, 18)], fetch,
+            database=database, run_database=run_database, allowed=allowed, pace_seconds=0,
+        ))
+        self.assertEqual(report["empty"], 1)
+        self.assertEqual(retry["empty"], 1)
+        self.assertEqual(fetches, 2)
+        self.assertEqual(database.inserts, [])
 
     def test_never_during_the_trading_session(self):
         self.assertFalse(backfill_allowed(datetime(2026, 9, 23, 10, 0, tzinfo=CN), True))
