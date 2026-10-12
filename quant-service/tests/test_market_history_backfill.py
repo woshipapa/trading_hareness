@@ -12,6 +12,7 @@ from app.market_history_backfill import (append_limit_performance, _info_rows, b
                                          longhu_limit_performance_live, longhu_morning_bidding, walk_source)
 
 CN = ZoneInfo("Asia/Shanghai")
+AFTER_CLOSE = datetime(2026, 9, 18, 15, 1, tzinfo=CN)
 
 
 class Result:
@@ -91,10 +92,10 @@ class MarketHistoryBackfillTests(unittest.TestCase):
             return {"pages": [{"payload": {"info": [], "errcode": "0"}}]}
 
         first = asyncio.run(append_limit_performance(
-            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+            date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
         ))
         second = asyncio.run(append_limit_performance(
-            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+            date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
         ))
         self.assertEqual(first["status"], "empty")
         self.assertEqual(second["status"], "empty")
@@ -108,16 +109,34 @@ class MarketHistoryBackfillTests(unittest.TestCase):
             return {"pages": [{"payload": {"info": [[ ["000917", "电广传媒"] ]], "errcode": "0"}}]}
 
         first = asyncio.run(append_limit_performance(
-            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+            date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
         ))
         second = asyncio.run(append_limit_performance(
-            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+            date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
         ))
         self.assertEqual(first["stored"], 5)
         self.assertEqual(second["stored"], 0)
         self.assertEqual(len(database.inserts), 5)
         self.assertTrue(all(params[1] == "limit_performance_live" for params in database.inserts))
         self.assertTrue(all(params[7].obj["meta"]["target"] == "longhu_quote" for params in database.inserts))
+
+    def test_live_limit_performance_skips_past_days_and_before_close(self):
+        database = FakeDatabase()
+        calls = 0
+
+        async def fetch(_request):
+            nonlocal calls
+            calls += 1
+            return {"pages": [{"payload": {"info": [[ ["000917"] ]]}}]}
+
+        past = asyncio.run(append_limit_performance(
+            date(2026, 9, 17), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
+        ))
+        before = asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database,
+            now=datetime(2026, 9, 18, 14, 59, tzinfo=CN),
+        ))
+        self.assertEqual((past["status"], before["status"], calls, database.inserts), ("skipped", "skipped", 0, []))
 
     def test_pagination_stops_on_a_short_page(self):
         pages = []

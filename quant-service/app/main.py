@@ -3860,7 +3860,7 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
             db, trade_date, run_database=run_database_blocking),
         append_limit_performance=lambda trade_date: append_limit_performance_isolated(
             trade_date, shared_stock_api_call,
-            database=db, run_database=run_database_blocking),
+            database=db, run_database=run_database_blocking, now=datetime.now(timezone.utc)),
     )
 
 

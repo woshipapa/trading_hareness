@@ -25,6 +25,12 @@ class PostCloseRefreshTests(unittest.IsolatedAsyncioTestCase):
             POST_CLOSE_STAGE_ORDER.index("full_market_daily") + 1,
         )
         self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["limit_performance_lists"], 120.0)
+        self.assertEqual(
+            POST_CLOSE_STAGE_ORDER.index("limit_up_risk"),
+            POST_CLOSE_STAGE_ORDER.index("limit_performance_lists") + 1,
+        )
+        self.assertEqual(POST_CLOSE_TIMEOUT_OVERRIDES["limit_up_risk"], 120.0)
+        self.assertEqual(POST_CLOSE_STAGE_DEPENDENCIES["limit_up_risk"], ("limit_performance_lists",))
 
     async def test_service_assembles_same_date_stages_and_announcements_after_core_symbols(self):
         captured: dict[str, object] = {}

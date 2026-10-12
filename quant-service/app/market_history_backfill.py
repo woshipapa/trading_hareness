@@ -33,6 +33,8 @@ from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json
 
+from .market_session_rules import exchange_date
+
 _CN = ZoneInfo("Asia/Shanghai")
 LONGHU_PROVIDER = "longhuvip_history"
 LONGHU_LIVE_PROVIDER = "longhuvip"
@@ -121,8 +123,13 @@ def longhu_limit_performance_live(call: Callable[[dict[str, Any]], Awaitable[Any
 
 async def append_limit_performance(
     day: date, call: Callable[[dict[str, Any]], Awaitable[Any]], *, database: Any,
-    run_database: Callable[..., Awaitable[Any]],
+    run_database: Callable[..., Awaitable[Any]], now: datetime,
 ) -> dict[str, Any]:
+    local_now = now.astimezone(_CN)
+    if day != exchange_date(now):
+        return {"status": "skipped", "reason": "trade_date is not the current exchange date", "trade_date": str(day)}
+    if local_now.time() < time(15, 0):
+        return {"status": "skipped", "reason": "current exchange session has not closed", "trade_date": str(day)}
     lists = await longhu_limit_performance_live(call)(day)
     items = [DayList(LONGHU_LIVE_PROVIDER, LONGHU_LIVE_CAPABILITY, f"pid:{pid}") for pid in "12345"]
     if not any(lists.get(item.list_key, ([], {}))[0] for item in items):
@@ -218,25 +225,19 @@ async def walk_source(name: str, days: list[date], fetch: Callable[[date], Await
             continue
 
         empty = not any(lists.get(item.list_key, ([], {}))[0] for item in items)
-        if name == "longhu_limit_performance" and empty:
-            report["empty"] += 1
-            if report["days"] % 25 == 0:
-                log(f"{name} at {day}: {report['days']} days, {report['stored']} lists stored, {report['empty']} empty days, "
-                    f"{len(report['errors'])} errors")
-            await asyncio.sleep(pace_seconds)
-            continue
 
-        def persist() -> int:
-            written = 0
-            with database.transaction() as connection:
-                for item in items:
-                    rows, meta = lists.get(item.list_key, ([], {}))
-                    written += int(store(connection, item, day, rows, meta))
-            return written
+        if not (name == "longhu_limit_performance" and empty):
+            def persist() -> int:
+                written = 0
+                with database.transaction() as connection:
+                    for item in items:
+                        rows, meta = lists.get(item.list_key, ([], {}))
+                        written += int(store(connection, item, day, rows, meta))
+                return written
 
+            report["stored"] += await run_database(persist, timeout_seconds=120)
         if empty:
             report["empty"] += 1
-        report["stored"] += await run_database(persist, timeout_seconds=120)
         if report["days"] % 25 == 0:
             log(f"{name} at {day}: {report['days']} days, {report['stored']} lists stored, {report['empty']} empty days, "
                 f"{len(report['errors'])} errors")

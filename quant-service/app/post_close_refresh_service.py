@@ -11,6 +11,7 @@ from typing import Any
 from .market_flow_repository import REBUILD_BUDGET_SECONDS
 from .market_temperature_intraday import refresh as refresh_intraday_temperature
 from .market_temperature_runtime import refresh as refresh_market_temperature
+from .limit_up_risk_runtime import refresh as refresh_limit_up_risk
 from .minute_cross_section_export import export_day as export_minute_panel
 from .request_models import (
     AkShareProbeRequest,
@@ -29,7 +30,7 @@ from .request_models import (
 
 
 POST_CLOSE_STAGE_ORDER = (
-    "stale_fetch_runs", "trade_calendar", "analyst_text", "all_a_universe", "full_market_daily", "limit_performance_lists", "core_daily_controls", "daily_control_reconciliation", "index_context",
+    "stale_fetch_runs", "trade_calendar", "analyst_text", "all_a_universe", "full_market_daily", "limit_performance_lists", "limit_up_risk", "core_daily_controls", "daily_control_reconciliation", "index_context",
     "close_market_snapshot", "akshare_supplements", "ths_industry_flow", "ths_concept_flow_and_limit_strength",
     "market_flow_features", "limit_ladder", "limit_lift_pattern_mining", "cninfo_announcements",
     "board_review", "close_strategy_decision", "close_review", "longhu_supplemental_evidence", "analyst_outcomes", "analyst_intraday_outcomes",
@@ -48,6 +49,7 @@ POST_CLOSE_TIMEOUT_OVERRIDES = {
     "trade_calendar": 60.0,
     "full_market_daily": 900.0,
     "limit_performance_lists": 120.0,
+    "limit_up_risk": 120.0,
     "akshare_supplements": 240.0,
     "limit_lift_pattern_mining": 120.0,
     # Four bounded full-market control APIs run sequentially so an individual
@@ -100,6 +102,7 @@ POST_CLOSE_STAGE_DEPENDENCIES = {
     # The ledger reads what the strategy stages persisted; before them it would
     # record a session with half its lines missing.
     "candidate_ledger": ("daily_control_reconciliation", "post_close_strategy", "limit_lift_pattern_mining"),
+    "limit_up_risk": ("limit_performance_lists",),
 }
 
 
@@ -242,6 +245,10 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
             FullMarketDailySyncRequest(trade_date=trade_date, provider=full_market_daily_provider),
         ),
         "limit_performance_lists": limit_performance_stage,
+        "limit_up_risk": lambda: dependencies.run_database(
+            refresh_limit_up_risk,
+            dependencies.database, trade_date, timeout_seconds=120,
+        ),
         "index_context": lambda: dependencies.sync_strategy_index_context(trade_date),
         "close_market_snapshot": lambda: dependencies.build_market_snapshot(
             # The close checkpoint is the owner-side collection boundary. Ask
