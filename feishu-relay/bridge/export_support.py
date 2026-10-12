@@ -5,9 +5,11 @@ Two lookups, both read-only against Feishu:
 * sender names: the WebSocket only carries ``from_id``; the gateway can turn
   one into the name the group shows.  Names rarely change, so they are cached
   on disk and a re-export costs no gateway calls.
-* card images: a card's image keys and AES-GCM parameters exist only in the
-  inbound payload the event spool kept (the history archive redacts them and
-  the private history gateway returns cards with no content at all).
+* card images: a card's image keys and AES-GCM parameters are read from the
+  inbound payload the event spool kept (the history archive redacts them).
+  Re-reading the card through the private history gateway also works for
+  most cards (69 of 71 sampled on 2026-10-12) and is the fallback to add if
+  the spool is ever pruned; it costs a gateway call per batch, the spool none.
 
 Kept free of larkx and of the bridge module so it is testable anywhere.
 """
