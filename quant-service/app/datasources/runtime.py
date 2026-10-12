@@ -27,6 +27,7 @@ from ..public_market_repository import (
 from ..daily_valuation_repository import project_valuations
 from ..runtime_leases import (
     acquire_runtime_lease, background_loop_lease_seconds, release_runtime_lease, renew_runtime_lease,
+    runtime_lease_holder_id,
 )
 from . import storage
 from .bindings import register_package_sources
@@ -172,7 +173,7 @@ async def run_leased(database: Any, label: str, factory: Callable[[], Awaitable[
     """Run one loop only while holding ``background_loop:<label>``."""
     from ..runtime_tasks import supervise_leased_loop  # noqa: PLC0415 - keeps imports light for catalog readers
 
-    holder = holder_id or uuid.uuid4()
+    holder = holder_id if holder_id is not None else runtime_lease_holder_id()
     lease_key = f"background_loop:{label}"
     seconds = background_loop_lease_seconds()
     await supervise_leased_loop(

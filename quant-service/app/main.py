@@ -1,4 +1,8 @@
 from __future__ import annotations
+import faulthandler
+
+faulthandler.enable(all_threads=True)
+
 import asyncio
 import functools
 import hashlib
@@ -722,6 +726,7 @@ from .runtime_leases import (
     post_close_refresh_lease_seconds,
     release_runtime_lease,
     renew_runtime_lease,
+    runtime_lease_holder_id,
 )
 from .tushare_catalog import CORE_NORMALIZED_APIS, TUSHARE_CATALOG
 from .tushare_catalog_fetch_service import CatalogFetchDependencies, fetch_catalog as run_catalog_fetch
@@ -4085,7 +4090,7 @@ def _start_application_background_tasks() -> dict[str, asyncio.Task[None]]:
         return {}
     watchdog = _start_async_pool_watchdog()
     interval_seconds = intraday_scan_interval_seconds()
-    lease_holder_id = uuid.uuid4()
+    lease_holder_id = runtime_lease_holder_id()
     lease_seconds = background_loop_lease_seconds()
     leased_background_loop = build_leased_task_runner(LeasedRuntimeDependencies(
         database=async_db,
