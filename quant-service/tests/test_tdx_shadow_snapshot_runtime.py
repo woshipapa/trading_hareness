@@ -1,6 +1,7 @@
 import asyncio
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.datasources.contracts import CapabilityEvidence
@@ -12,6 +13,7 @@ from app.tdx_shadow_snapshot_runtime import (
     SHADOW_PROVIDER,
     TdxShadowSnapshotDependencies,
     TdxShadowSnapshotRuntime,
+    day_summary,
 )
 
 
@@ -146,3 +148,62 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(busy["status"], "busy")
         self.assertEqual(timed_out["status"], "timeout")
         self.assertEqual(calls, ["fetch"])
+
+
+class TdxShadowSummaryTests(unittest.TestCase):
+    def test_indicator_health_document_check_does_not_read_shadow_documents(self):
+        from app.indicator_health import minute_document_checks
+
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params=()):
+                calls.append((sql, params))
+                return SimpleNamespace(fetchone=lambda: {"documents": 0})
+
+        minute_document_checks(Connection(), date(2026, 10, 12), NOW)
+        self.assertTrue(calls)
+        self.assertTrue(all("a_share_minute_cross_section_shadow" not in sql for sql, _ in calls))
+        self.assertTrue(all("fuyao_ths" in sql and "a_share_minute_cross_section" in sql for sql, _ in calls))
+
+    def test_summary_reads_only_shadow_streams_and_aggregates_comparisons(self):
+        docs = [{"effective_at": NOW, "normalized": {"rows": 2}}]
+        comparisons = [{
+            "effective_at": NOW, "normalized": {
+                "status": "compared", "comparison": {
+                    "price": {"within_one_tick": 1.0, "within_0_1_pct": 0.9, "within_0_5_pct": 1.0,
+                              "largest_relative_gap": 0.02, "largest_relative_gap_symbol": "000001.SZ"},
+                    "volume": {"median_ratio": 1.01, "within_1_pct": 0.8},
+                    "turnover": {"median_ratio": 0.99, "within_1_pct": 0.7},
+                    "seconds_apart": 2.0,
+                },
+            },
+        }, {
+            "effective_at": NOW + timedelta(minutes=1),
+            "normalized": {"status": "no_reference"},
+        }]
+
+        class Connection:
+            def execute(self, sql, params=()):
+                if "a_share_minute_cross_section_shadow" in sql:
+                    return SimpleNamespace(fetchall=lambda: docs)
+                return SimpleNamespace(fetchall=lambda: comparisons)
+
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self):
+                        return Connection()
+
+                    def __exit__(self, *_args):
+                        return False
+                return Tx()
+
+        result = day_summary(Database(), date(2026, 10, 12))
+        self.assertEqual(result["stored_minutes"], 1)
+        self.assertEqual(result["minutes_compared"], 1)
+        self.assertEqual(result["no_reference_minutes"], 1)
+        self.assertEqual(result["largest_price_gap"]["symbol"], "000001.SZ")
+        self.assertEqual(result["worst_price_within_one_tick"], 1.0)
+        self.assertEqual(result["median_volume_ratio"], 1.01)
+        self.assertEqual(result["largest_seconds_apart"], 2.0)

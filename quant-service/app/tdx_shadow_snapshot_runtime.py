@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
+import json
+from statistics import median
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .all_a_snapshot_sources import compare, project_tdx_snapshot_rows
 from .datasources.contracts import CapabilityEvidence
@@ -23,6 +27,8 @@ AGREEMENT_PROVIDER = "local_derived"
 AGREEMENT_CAPABILITY = "all_a_snapshot_source_agreement"
 TDX_READ_TIMEOUT_SECONDS = 20.0
 REFERENCE_MAX_AGE_SECONDS = 90.0
+SUMMARY_STATEMENT_TIMEOUT_SECONDS = 10.0
+CN_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _as_rows_and_metadata(result: CapabilityEvidence | list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -162,8 +168,104 @@ async def run_tdx_shadow_snapshot_loop(
         await sleep(max(10, min(300, int(interval_seconds))))
 
 
+def _day_bounds(trade_date: date) -> tuple[datetime, datetime]:
+    start = datetime.combine(trade_date, time(0), CN_TZ)
+    return start, start + timedelta(days=1)
+
+
+def _payload(value: Any) -> dict[str, Any]:
+    return json.loads(value) if isinstance(value, str) else dict(value)
+
+
+def _session_minutes(trade_date: date) -> int:
+    return 0 if trade_date.weekday() >= 5 else 257
+
+
+def day_summary(database: Any, trade_date: date, *, statement_timeout_seconds: float = SUMMARY_STATEMENT_TIMEOUT_SECONDS) -> dict[str, Any]:
+    """Read one day's shadow documents and comparisons with a bounded SQL statement."""
+    start, end = _day_bounds(trade_date)
+    with database.transaction() as connection:
+        connection.execute(f"SET LOCAL statement_timeout = '{int(statement_timeout_seconds * 1000)}ms'")
+        documents = connection.execute(
+            """SELECT effective_at,normalized FROM quant.raw_market_observations
+               WHERE provider_key='tdx_public' AND capability='a_share_minute_cross_section_shadow'
+                 AND symbol IS NULL AND effective_at>=%s AND effective_at<%s ORDER BY effective_at""",
+            (start, end),
+        ).fetchall()
+        comparisons = connection.execute(
+            """SELECT effective_at,normalized FROM quant.raw_market_observations
+               WHERE provider_key='local_derived' AND capability='all_a_snapshot_source_agreement'
+                 AND symbol IS NULL AND effective_at>=%s AND effective_at<%s ORDER BY effective_at""",
+            (start, end),
+        ).fetchall()
+    comparison_payloads = [_payload(row["normalized"]) for row in comparisons]
+    compared = [item for item in comparison_payloads if item.get("status") == "compared"]
+    metrics = [item["comparison"] for item in compared]
+    gaps = [
+        {"relative_gap": item["price"]["largest_relative_gap"],
+         "symbol": item["price"]["largest_relative_gap_symbol"]}
+        for item in metrics if item["price"].get("largest_relative_gap") is not None
+    ]
+
+    def metric_values(path: tuple[str, ...]) -> list[float]:
+        values = []
+        for item in metrics:
+            value: Any = item
+            for key in path:
+                value = value[key]
+            if value is not None:
+                values.append(float(value))
+        return values
+
+    def median_or_none(values: list[float]) -> float | None:
+        return median(values) if values else None
+
+    def min_or_none(values: list[float]) -> float | None:
+        return min(values) if values else None
+
+    return {
+        "trade_date": trade_date.isoformat(),
+        "shadow_documents": len(documents),
+        "stored_minutes": len(documents),
+        "session_minutes": _session_minutes(trade_date),
+        "documents_without_comparison": max(0, len(documents) - len(comparison_payloads)),
+        "minutes_compared": len(compared),
+        "no_reference_minutes": sum(item.get("status") == "no_reference" for item in comparison_payloads),
+        "largest_price_gap": max(gaps, key=lambda item: item["relative_gap"], default=None),
+        "median_price_within_one_tick": median_or_none(metric_values(("price", "within_one_tick"))),
+        "worst_price_within_one_tick": min_or_none(metric_values(("price", "within_one_tick"))),
+        "median_price_within_0_1_pct": median_or_none(metric_values(("price", "within_0_1_pct"))),
+        "worst_price_within_0_1_pct": min_or_none(metric_values(("price", "within_0_1_pct"))),
+        "median_price_within_0_5_pct": median_or_none(metric_values(("price", "within_0_5_pct"))),
+        "worst_price_within_0_5_pct": min_or_none(metric_values(("price", "within_0_5_pct"))),
+        "median_volume_ratio": median_or_none(metric_values(("volume", "median_ratio"))),
+        "median_turnover_ratio": median_or_none(metric_values(("turnover", "median_ratio"))),
+        "median_seconds_apart": median_or_none(metric_values(("seconds_apart",))),
+        "largest_seconds_apart": max(metric_values(("seconds_apart",)), default=None),
+        "research_only": True,
+        "live_effect": "none",
+    }
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="summarize the TDX all-A shadow stream")
+    parser.add_argument("--trade-date", required=True, type=date.fromisoformat)
+    args = parser.parse_args(argv)
+    from .database import Database
+
+    database = Database()
+    try:
+        print(json.dumps(day_summary(database, args.trade_date), ensure_ascii=False, sort_keys=True, default=str))
+    finally:
+        database.close()
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()
+
+
 __all__ = [
     "AGREEMENT_CAPABILITY", "AGREEMENT_PROVIDER", "SHADOW_CAPABILITY", "SHADOW_PROVIDER",
-    "TdxShadowSnapshotDependencies", "TdxShadowSnapshotRuntime",
+    "TdxShadowSnapshotDependencies", "TdxShadowSnapshotRuntime", "day_summary", "main",
     "persist_shadow_capture", "run_tdx_shadow_snapshot_loop",
 ]

@@ -238,6 +238,34 @@ class LatestReadTests(unittest.TestCase):
         mcs.remember(datetime.now(timezone.utc), ROWS[:2])
         self.assertEqual(latest_all_a_level1(database(True), 10)["source"], "memory")
 
+    def test_all_document_readers_filter_the_shadow_capability(self):
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params=()):
+                calls.append((sql, params))
+                return SimpleNamespace(fetchone=lambda: None, fetchall=lambda: [])
+
+        connection = Connection()
+        mcs.latest(connection)
+        mcs.latest(connection, date(2026, 10, 9))
+        mcs.first_between(connection, MINUTE, MINUTE + timedelta(minutes=1))
+        mcs.day_documents(connection, date(2026, 10, 9))
+
+        class AsyncResult:
+            async def fetchone(self):
+                return None
+
+        class AsyncConnection:
+            async def execute(self, sql, params=()):
+                calls.append((sql, params))
+                return AsyncResult()
+
+        asyncio.run(mcs.latest_async(AsyncConnection()))
+        self.assertTrue(calls)
+        self.assertTrue(all("a_share_minute_cross_section_shadow" not in params for _, params in calls))
+        self.assertTrue(all(mcs.CAPABILITY in params for sql, params in calls if "raw_market_observations" in sql))
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

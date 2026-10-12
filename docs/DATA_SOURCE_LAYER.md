@@ -112,7 +112,7 @@ app/platform/strategy_data_needs.py   每个策略需要哪些能力与板块口
 | `microstructure.top_board` | `tdx_public` | 90 | `declared` | 0x053f 排名榜 | 永不替代涨停池；覆盖率核对前不进决策 |
 | `microstructure.unusual` | `tdx_public` | 90 | `declared` | 0x0563 异动事件 | 覆盖率核对前不进决策；`limits.anomaly_tape` 可在核对后作第二来源 |
 | `microstructure.volume_profile` | `tdx_public` | 90 | `declared` | 0x051a 分价成交量（价格 /100，量为手，含 buy_lots、sell_lots） | 只收个股；覆盖率核对前不进决策 |
-| `quote.all_a_snapshot` | `tdx_public` | 80 | `declared` | 0x054b 全 A L1 排序列表：price、pct_change、volume、turnover；每页 80 只 | volume 是手，canonical 股 ×100；price≤0 的行已滤掉；coverage 为 None（证券列表接入前分母未知）；ST 要用证券列表，不能用 0x054b 的名称 |
+| `quote.all_a_snapshot` | `tdx_public` | 80 | `declared` | 0x054b 全 A L1 排序列表：price、pct_change、volume、turnover；每页 80 只 | volume 是手，canonical 股 ×100；price≤0 的行已滤掉；coverage 为 None（证券列表接入前分母未知）；ST 要用证券列表，不能用 0x054b 的名称；盘中 shadow loop 另存独立分钟流 |
 | `quote.index_overview` | `tdx_public` | 80 | `declared` | 0x051d 指数概况：OHLC（点数）、amount（元）、volume_raw、up_count、down_count | 涨跌家数是指数成分口径，与 0x054b 排序的宽度口径不同；volume_raw 单位未测 |
 | `quote.order_book` | `tdx_public` | 80 | `declared` | 0x053e 五档：bid1..5、ask1..5（元），bid_vol、ask_vol（手）；批 80 | 只收主板、创业板、科创板、北交所个股，价格固定 /100；指数、板块、ETF、基金、可转债在联网前以 ValueError 拒绝；旧北交所代码按 920xxx 请求，行带 `source_symbol`；盘中延迟与新鲜度未测 |
 | `quote.valuation` | `tdx_public` | 80 | `declared` | `tdxstat.cfg` 的已确认列；canonical 只映射 `pe_ttm`（第 9 列） | 20261009 快照；行日期不是采集日期 |
@@ -280,6 +280,9 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 涨停 77、炸板 25、封板率 75.5%、天梯 1 板 65 / 2 板 8 / 3 板 2 / 4 板 2、1→2 晋级 8/38。
 
 ## 6. 调度与部署
+
+盘中 shadow loop 与 `all_a_level1_snapshot` 同属 `intraday_edge` runtime profile，只在 owner 的 quant-research 服务运行；研究 profile 的 `quant-research-scheduler`、standalone 的 research profile 和其他 profile 都不会启动它。它有独立的一 worker、零队列数据库执行边界，避免 shadow 写入占住 level1 的共享执行器；TDX 读超时后任务仍占用自己的读槽位，下一分钟在任务结束前只报告 `busy`。
+按扶摇分钟文档的实测大小，shadow 文档每天约增加 90 MB，和扶摇文档一样留在 hot 表；保留策略等 phase B 决定后再跟进，不在本阶段新增 tiering 或归档。
 
 | 任务（租约键 `background_loop:<label>`） | 归属 profile | 内容 |
 |---|---|---|
