@@ -82,6 +82,14 @@ class AuctionOpenDeskRulesTests(unittest.TestCase):
         self.assertEqual(result["rows"][0]["open"], 11.0)
         self.assertEqual(result["rows"][0]["bucket"], "opens_at_limit")
 
+    def test_table_rejects_non_positive_open_and_auction_prices(self) -> None:
+        scored = [{"symbol": "000001.SZ", "previous_close": 10.0}]
+        for auction_price in (0, None):
+            result = build_auction_table(scored, [{"thscode": "000001.SZ", "data_status": "final",
+                                                    "pre_close_price": 10, "open_price": 0,
+                                                    "auction_price": auction_price}])
+            self.assertEqual(result["coverage"]["accepted"], 0)
+
     def test_track_summary_uses_only_matching_daily_bars(self) -> None:
         reading = {"trade_date": "2026-10-12", "rows": [{"symbol": "000001.SZ", "bucket": "0..2%", "open": 10}]}
         result = auction_track_summary([reading], [{"symbol": "000001.SZ", "trading_date": date(2026, 10, 12), "close": 9.5}])

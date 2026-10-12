@@ -62,7 +62,7 @@ def read_pool(database: Any, session_date: date) -> list[str]:
     scored = [str(row["symbol"]) for row in (reading or {}).get("rows", [])]
     broken = _broken_board_symbols(database, previous)
     watches = enabled_watch_symbols(database, limit=100)
-    cap = integer("AUCTION_POOL_MAX_SYMBOLS", minimum=1, maximum=300)
+    cap = integer("AUCTION_POOL_MAX_SYMBOLS", minimum=1, maximum=200)
     return build_auction_pool(
         scored, broken, watches, cap=cap,
     )

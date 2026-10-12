@@ -182,9 +182,9 @@ def build_auction_table(
         if previous_close is None or snapshot is None or not accepts_snapshot_row(snapshot, previous_close):
             continue
         opening = optional_float(snapshot.get("open_price"))
-        if opening is None:
+        if opening is None or opening <= 0:
             opening = optional_float(snapshot.get("auction_price"))
-        if opening is None:
+        if opening is None or opening <= 0:
             continue
         gap = open_gap(opening, previous_close)
         limit_price = _limit_up(symbol.split(".", 1)[0], {"pre_close": previous_close})

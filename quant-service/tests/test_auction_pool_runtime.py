@@ -131,8 +131,8 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
         ticks = (datetime.combine(DAY, time(9, 15, 5), tzinfo=CN), datetime.combine(DAY, time(9, 15, 10), tzinfo=CN))
         with patch("app.auction_pool_runtime.auction_timetable", return_value=ticks):
             result = asyncio.run(runtime.capture_session())
-        self.assertEqual(result["scheduled"], 1)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["scheduled"], 2)
+        self.assertEqual(len(calls), 2)
         self.assertEqual(curves, ["000001.SZ", "000002.SZ"])
         self.assertEqual(bids, [{"target": "longhu_quote", "path": "/w1/api/index.php", "params": {
             "a": "GetStockBid", "c": "StockL2Data", "PhoneOSNew": 1, "VerSion": "5.20.0.2",
@@ -144,6 +144,30 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
         self.assertIn(CURVE_CAPABILITY, [capability for _provider, capability, _rows in persisted])
         self.assertIn(BID_CAPABILITY, [capability for _provider, capability, _rows in persisted])
         self.assertGreaterEqual(clock.current.time(), time(9, 30))
+
+    def test_final_before_0925_does_not_stop_or_build_table(self):
+        async def fetch(_symbols, _slot_wait_seconds):
+            return {"data_status": "final", "item": [{"thscode": "000001.SZ"}]}
+
+        runtime, _clock, _persisted, calls, _curves, _bids = self.dependencies(fetch=fetch)
+        stored = AsyncMock()
+        runtime._persist_table = stored
+        tick = datetime.combine(DAY, time(9, 20, 5), tzinfo=CN)
+        with patch("app.auction_pool_runtime.auction_timetable", return_value=(tick,)):
+            result = asyncio.run(runtime.capture_session())
+        self.assertEqual(result["scheduled"], 1)
+        self.assertEqual(len(calls), 1)
+        stored.assert_not_awaited()
+
+    def test_restart_after_ticks_leaves_existing_table_untouched(self):
+        runtime, _clock, _persisted, _calls, curves, bids = self.dependencies(current=time(9, 30))
+        stored = AsyncMock()
+        runtime._persist_table = stored
+        result = asyncio.run(runtime.capture_session())
+        self.assertEqual(result["scheduled"], 0)
+        stored.assert_not_awaited()
+        self.assertEqual(curves, ["000001.SZ"])
+        self.assertEqual(len(bids), 1)
 
     def test_duplicate_final_row_does_not_hide_a_missing_pool_symbol(self):
         async def fetch(_symbols, _slot_wait_seconds):

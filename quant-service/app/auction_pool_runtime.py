@@ -99,7 +99,9 @@ class AuctionPoolCaptureRuntime:
                 return await self._store_tick(scheduled_at, pool, rows, status, str(error))
             except asyncio.TimeoutError as error:
                 return await self._store_tick(scheduled_at, pool, rows, "failed", str(error) or "Fuyao request timed out")
-        status = "final" if _all_final(events, finality_symbols or pool) else status
+        finality_pool = finality_symbols or pool
+        if scheduled_at.astimezone(CN_TZ).time() >= time(9, 25) and _all_final(events, finality_pool):
+            status = "final"
         return await self._store_tick(scheduled_at, pool, rows, status, None)
 
     async def _store_tick(
@@ -205,6 +207,8 @@ class AuctionPoolCaptureRuntime:
             return _database_busy(error)
         summary = {"scheduled": 0, "stored": 0, "rate_limited": 0, "failed": 0, "curves": 0, "bids": 0}
         table_stored = False
+        ran_tick = False
+        ran_table_tick = False
         last_rows: list[dict[str, Any]] = []
         scored_pool = [row for row in scored_rows if str(row["symbol"]) in pool]
         for scheduled_at in auction_timetable(trade_date):
@@ -212,6 +216,8 @@ class AuctionPoolCaptureRuntime:
             if now >= scheduled_at:
                 continue
             await self.deps.sleep((scheduled_at - now).total_seconds())
+            ran_tick = True
+            ran_table_tick = ran_table_tick or scheduled_at.astimezone(CN_TZ).time() >= time(9, 25)
             summary["scheduled"] += 1
             result = await self._capture_tick(scheduled_at, pool, [str(row["symbol"]) for row in scored_pool])
             last_rows = result.get("rows_data") or []
@@ -224,7 +230,7 @@ class AuctionPoolCaptureRuntime:
                     await self._persist_table(reading)
                     table_stored = True
                 break
-        if scored_pool and not table_stored:
+        if scored_pool and ran_tick and ran_table_tick and not table_stored:
             await self._persist_table(build_auction_table(scored_pool, last_rows, trade_date=trade_date))
         summary["curves"] = await self._capture_curves(trade_date, pool)
         summary["bids"] = await self._capture_bids(trade_date, pool)
