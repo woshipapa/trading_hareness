@@ -58,6 +58,8 @@ export const researchReads = new Map([
 	['/api/research/market/limit-detail', '/api/v1/market/limit-detail'],
 	['/api/research/market/temperature/daily', '/api/v1/market/temperature/daily'],
 	['/api/research/market/temperature/intraday', '/api/v1/market/temperature/intraday'],
+	['/api/research/market/limit-up-risk/daily', '/api/v1/market/limit-up-risk/daily'],
+	['/api/research/market/limit-up-risk/track', '/api/v1/market/limit-up-risk/track'],
 	['/api/research/strategy/cards', '/api/v1/strategies/cards'],
 	['/api/research/indicators', '/api/v1/indicators'],
 	['/api/research/indicators/health', '/api/v1/indicators/health'],
