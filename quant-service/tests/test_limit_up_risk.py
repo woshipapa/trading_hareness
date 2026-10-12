@@ -127,10 +127,13 @@ class LimitUpRiskTests(unittest.TestCase):
     def test_track_close_sql_joins_parallel_symbol_date_pairs(self):
         from app import limit_up_risk_runtime
         class Result:
-            def fetchall(self): return []
+            def __init__(self, rows): self.rows = rows
+            def fetchall(self): return self.rows
         class Connection:
             def __init__(self): self.statements = []
-            def execute(self, sql, _params): self.statements.append(sql); return Result()
+            def execute(self, sql, _params):
+                self.statements.append(sql)
+                return Result([{"calendar_date": date(2026, 9, 17), "next_day": date(2026, 9, 18)}] if "market_trade_calendar" in sql else [])
         class Database:
             def __init__(self, connection): self.connection = connection
             def transaction(self):
@@ -140,9 +143,12 @@ class LimitUpRiskTests(unittest.TestCase):
                     def __exit__(self, *_args): return False
                 return Tx(self.connection)
         connection = Connection()
-        with mock.patch.object(limit_up_risk_runtime.derived_daily_readings, "newest", return_value=[]):
+        reading = {"trade_date": "2026-09-17", "version": "limit-up-risk-v1", "rows": [{"symbol": "000001.SZ", "risk": 1}]}
+        with mock.patch.object(limit_up_risk_runtime.derived_daily_readings, "newest", return_value=[reading]):
             limit_up_risk_runtime.track(Database(connection), 3)
-        self.assertFalse(any("BETWEEN" in sql and "canonical_bars_daily" in sql for sql in connection.statements))
+        close_sql = next(sql for sql in connection.statements if "canonical_bars_daily" in sql)
+        self.assertIn("JOIN unnest", close_sql)
+        self.assertNotIn("BETWEEN", close_sql)
 
     def test_market_radar_router_exposes_daily_and_track_routes(self):
         paths = {route.path for route in build_market_radar_router(object(), lambda *_args, **_kwargs: None).routes}
