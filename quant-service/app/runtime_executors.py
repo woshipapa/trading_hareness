@@ -148,6 +148,8 @@ realtime_vendor_boundary = BlockingExecutorBoundary(
 )
 tdx_shadow_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tdx-shadow")
 tdx_shadow_boundary = BlockingExecutorBoundary("tdx_shadow", workers=1, queue_capacity=0)
+auction_capture_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="auction-capture")
+auction_capture_boundary = BlockingExecutorBoundary("auction_capture", workers=1, queue_capacity=0)
 db_blocking_tasks.labels("capacity").set(database_executor_workers)
 db_blocking_tasks.labels("queue_capacity").set(database_executor_queue_capacity)
 db_blocking_tasks.labels("inflight").set(0)
@@ -186,12 +188,18 @@ async def run_tdx_shadow_blocking(action: Any, *args: Any, timeout_seconds: floa
     return await tdx_shadow_boundary.run(tdx_shadow_executor, action, *args, timeout_seconds=timeout_seconds)
 
 
+async def run_auction_capture_blocking(action: Any, *args: Any, timeout_seconds: float) -> Any:
+    """Run auction capture database work on its isolated one-slot boundary."""
+    return await auction_capture_boundary.run(auction_capture_executor, action, *args, timeout_seconds=timeout_seconds)
+
+
 def runtime_executor_status() -> dict[str, dict[str, int]]:
     """Expose only local capacity state; never starts market or DB work."""
     return {
         "public_source": public_source_boundary.status(),
         "realtime_vendor": realtime_vendor_boundary.status(),
         "tdx_shadow": tdx_shadow_boundary.status(),
+        "auction_capture": auction_capture_boundary.status(),
         "database": database_executor_boundary.status(),
     }
 
@@ -201,6 +209,7 @@ def shutdown_runtime_executors() -> None:
     public_source_executor.shutdown(wait=False, cancel_futures=True)
     realtime_vendor_executor.shutdown(wait=False, cancel_futures=True)
     tdx_shadow_executor.shutdown(wait=False, cancel_futures=True)
+    auction_capture_executor.shutdown(wait=False, cancel_futures=True)
     database_executor.shutdown(wait=False, cancel_futures=True)
 
 
@@ -215,5 +224,6 @@ __all__ = [
     "run_database_blocking",
     "run_realtime_vendor_blocking",
     "run_tdx_shadow_blocking",
+    "run_auction_capture_blocking",
     "shutdown_runtime_executors",
 ]
