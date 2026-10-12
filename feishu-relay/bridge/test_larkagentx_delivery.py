@@ -192,6 +192,23 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 			self.assertEqual(post.call_args.args[0], "http://adapter/summary")
 		self.assertEqual(instance.self_message_count, 1)
 
+	def test_summary_group_stays_subscribed_when_its_ingestion_is_switched_off(self):
+		instance = self._summary_instance(summary_chat_ids={"7669744189332065542"})
+		instance.summary_ingestion_enabled = False
+		tagged = {"msg_id": "m-sum", "from_id": "8000", "msg_type_name": "TEXT", "content": "#liwei 盘前要点", "position": 9}
+		with patch.object(bridge, "post_json", return_value={"status": "accepted"}) as post:
+			held = asyncio.run(instance.on_message({**tagged, "chat_id": "7669744189332065542"}))
+			self.assertEqual((held["status"], held["filter_reason"]), ("filtered", "summary_ingestion_disabled"))
+			post.assert_not_called()
+			instance.event_spool.enqueue.assert_not_called()
+			# the position is still recorded, so the group has no gap to repair
+			instance.event_spool.record_position.assert_called_once()
+			self.assertEqual(instance.chat_stats["7669744189332065542"]["observed_count"], 1)
+			# a source group is not affected by the switch
+			asyncio.run(instance.on_message({**tagged, "msg_id": "m-src", "chat_id": "7661209668907207659"}))
+			post.assert_called_once()
+			self.assertEqual(post.call_args.args[0], "http://adapter/inbound")
+
 	def test_a_post_title_travels_with_the_rendered_text(self):
 		instance = self._summary_instance(summary_chat_ids=set())
 		node = b"\n\x06\xe6\xad\xa3\xe6\x96\x87"  # TextProperty{content: "正文"}

@@ -888,6 +888,11 @@ class Bridge:
 		self.summary_ingress_url = os.environ.get("LARKX_SUMMARY_INGRESS_URL", "").strip()
 		if self.summary_chat_ids and not self.summary_ingress_url:
 			raise RuntimeError("LARKX_SUMMARY_INGRESS_URL is required when LARKX_SUMMARY_CHAT_IDS is configured")
+		# Listening to the summary group and importing from it are separate
+		# decisions.  With this off the group stays subscribed (positions, gap
+		# repair, history export), but its messages are not handed to the
+		# ingestion lane, so no n8n import is requested for them.
+		self.summary_ingestion_enabled = os.environ.get("LARKX_SUMMARY_INGESTION_ENABLED", "true").strip().lower() != "false"
 		self.paper_command_lane_enabled = os.environ.get("LARKX_PAPER_KB_COMMANDS_ENABLED", "false").strip().lower() == "true"
 		self.xhs_command_lane_enabled = os.environ.get("LARKX_XHS_COMMANDS_ENABLED", "false").strip().lower() == "true"
 		self.xhs_command_chat_ids = csv_env("LARKX_XHS_COMMAND_CHAT_IDS")
@@ -1610,6 +1615,7 @@ class Bridge:
 			"last_private_repair_result": self.last_private_repair_result,
 			"summary_chat_ids": sorted(self.summary_chat_ids),
 			"summary_ingress_configured": bool(self.summary_ingress_url),
+			"summary_ingestion_enabled": bool(getattr(self, "summary_ingestion_enabled", True)),
 			"paper_command_lane_enabled": self.paper_command_lane_enabled,
 			"xhs_command_lane_enabled": self.xhs_command_lane_enabled,
 			"xhs_command_chat_ids": sorted(self.xhs_command_chat_ids),
@@ -2185,6 +2191,8 @@ class Bridge:
 		self.last_observed_chat_id = chat_id
 		self.last_observed_message_type = str(message.get("msg_type_name", message.get("msg_type", "UNKNOWN")))
 		stats["last_message_type"] = self.last_observed_message_type
+		if chat_id in getattr(self, "summary_chat_ids", ()) and not getattr(self, "summary_ingestion_enabled", True) and not command_lane:
+			return {"status": "filtered", "chat_id": chat_id, "message_id": str(message.get("msg_id", "")), "filter_reason": "summary_ingestion_disabled"}
 		message_id = str(message.get("msg_id", "")).strip()
 		if not message_id:
 			LOG.warning("dropping LarkAgentX message without msg_id")
