@@ -33,8 +33,12 @@ from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Json
 
+from .market_session_rules import exchange_date
+
 _CN = ZoneInfo("Asia/Shanghai")
 LONGHU_PROVIDER = "longhuvip_history"
+LONGHU_LIVE_PROVIDER = "longhuvip"
+LONGHU_LIVE_CAPABILITY = "limit_performance_live"
 FUYAO_PROVIDER = "fuyao_ths"
 
 
@@ -101,6 +105,59 @@ def longhu_limit_performance(call: Callable[[dict[str, Any]], Awaitable[Any]]):
             lists[f"pid:{pid}"] = (_info_rows(payload), {"errcode": payload.get("errcode"), "pid_type": pid})
         return lists
     return fetch
+
+
+def longhu_limit_performance_live(call: Callable[[dict[str, Any]], Awaitable[Any]]):
+    async def fetch(_day: date) -> dict[str, tuple[list[Any], dict[str, Any]]]:
+        lists = {}
+        for pid in ("1", "2", "3", "4", "5"):
+            payload = _payload(await call({"target": "longhu_quote", "params": {
+                "Order": "0", "st": "1000", "a": "DailyLimitPerformance", "c": "HomeDingPan", "PhoneOSNew": "1",
+                "VerSion": "5.7.0.12", "Index": "0", "PidType": pid, "apiv": "w31", "Type": "4"}}))
+            if payload.get("errcode") not in (None, "", 0, "0"):
+                raise RuntimeError(f"Longhu DailyLimitPerformance returned errcode={payload.get('errcode')}")
+            lists[f"pid:{pid}"] = (_info_rows(payload), {
+                "errcode": payload.get("errcode"), "pid_type": pid, "target": "longhu_quote",
+            })
+        return lists
+    return fetch
+
+
+async def append_limit_performance(
+    day: date, call: Callable[[dict[str, Any]], Awaitable[Any]], *, database: Any,
+    run_database: Callable[..., Awaitable[Any]], now: datetime,
+) -> dict[str, Any]:
+    local_now = now.astimezone(_CN)
+    if day != exchange_date(now):
+        return {"status": "skipped", "reason": "trade_date is not the current exchange date", "trade_date": str(day)}
+    if local_now.time() < time(15, 0):
+        return {"status": "skipped", "reason": "current exchange session has not closed", "trade_date": str(day)}
+    def session_open() -> bool:
+        with database.transaction() as connection:
+            row = connection.execute(
+                "SELECT is_open FROM quant.market_trade_calendar WHERE exchange='SSE' AND calendar_date=%s",
+                (day,),
+            ).fetchone()
+        return bool(row and row["is_open"])
+
+    if not await run_database(session_open, timeout_seconds=60):
+        return {"status": "skipped", "reason": "trade_date is not an open SSE session", "trade_date": str(day)}
+    lists = await longhu_limit_performance_live(call)(day)
+    items = [DayList(LONGHU_LIVE_PROVIDER, LONGHU_LIVE_CAPABILITY, f"pid:{pid}") for pid in "12345"]
+    if not any(lists.get(item.list_key, ([], {}))[0] for item in items):
+        return {"status": "empty", "trade_date": str(day), "stored": 0}
+
+    def persist() -> int:
+        written = 0
+        with database.transaction() as connection:
+            for item in items:
+                rows, meta = lists.get(item.list_key, ([], {}))
+                if rows:
+                    written += int(store(connection, item, day, rows, meta))
+        return written
+
+    written = await run_database(persist, timeout_seconds=120)
+    return {"status": "completed" if written else "unchanged", "trade_date": str(day), "stored": written}
 
 
 def longhu_morning_bidding(call: Callable[[dict[str, Any]], Awaitable[Any]], pages: int = 5):
@@ -178,16 +235,19 @@ async def walk_source(name: str, days: list[date], fetch: Callable[[date], Await
             await asyncio.sleep(pace_seconds)
             continue
 
-        def persist() -> int:
-            written = 0
-            with database.transaction() as connection:
-                for item in items:
-                    rows, meta = lists.get(item.list_key, ([], {}))
-                    written += int(store(connection, item, day, rows, meta))
-            return written
+        empty = not any(lists.get(item.list_key, ([], {}))[0] for item in items)
 
-        report["stored"] += await run_database(persist, timeout_seconds=120)
-        if not any(lists.get(item.list_key, ([], {}))[0] for item in items):
+        if not (name == "longhu_limit_performance" and empty):
+            def persist() -> int:
+                written = 0
+                with database.transaction() as connection:
+                    for item in items:
+                        rows, meta = lists.get(item.list_key, ([], {}))
+                        written += int(store(connection, item, day, rows, meta))
+                return written
+
+            report["stored"] += await run_database(persist, timeout_seconds=120)
+        if empty:
             report["empty"] += 1
         if report["days"] % 25 == 0:
             log(f"{name} at {day}: {report['days']} days, {report['stored']} lists stored, {report['empty']} empty days, "
@@ -273,5 +333,6 @@ if __name__ == "__main__":  # pragma: no cover
     main()
 
 
-__all__ = ["DayList", "SOURCES", "backfill_allowed", "fuyao_limit_pools", "longhu_limit_performance",
-           "longhu_morning_bidding", "market_breadth", "store", "stored", "walk_source"]
+__all__ = ["DayList", "SOURCES", "append_limit_performance", "backfill_allowed", "fuyao_limit_pools",
+           "longhu_limit_performance", "longhu_limit_performance_live", "longhu_morning_bidding", "market_breadth",
+           "store", "stored", "walk_source"]
