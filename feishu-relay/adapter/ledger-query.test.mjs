@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { completedAssetLookupSql, deliveryRetryDelaySeconds, ingestionStatusBySourceSql, observabilitySql } from './ledger.mjs';
+import { completedAssetLookupSql, deliveryRetryDelaySeconds, ingestionStatusBySourceSql, observabilitySql, relayRouteSeedSql, removedRouteMarker } from './ledger.mjs';
 
 test('only treats an asset as reusable after its parent remote batch completed', () => {
 	const sql = completedAssetLookupSql();
@@ -30,4 +30,11 @@ test('a completed source can retain its latest resolved transport error without 
 	assert.match(sql, /latest_failure_error/);
 	assert.match(sql, /status IN \('failed','retryable_failed'\)/);
 	assert.match(sql, /coalesce\(error_class,''\) <> 'operator_pause'/);
+});
+
+test('a removed route is not materialized again from the configuration on the next start', () => {
+	const sql = relayRouteSeedSql();
+	assert.match(sql, /WHERE NOT EXISTS \(SELECT 1 FROM feishu_group_relay_route_state WHERE state_key=\$7\)/);
+	assert.match(sql, /ON CONFLICT\(source_key\) DO NOTHING/);
+	assert.equal(removedRouteMarker('xiaojie'), 'removed:xiaojie');
 });

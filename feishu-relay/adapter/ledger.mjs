@@ -1,5 +1,16 @@
 import { Pool } from 'pg';
 
+// A config-declared route is materialized on every start, unless it was
+// removed (by the operator, or because the account left its group): a removed
+// route leaves a marker, and the marker keeps it from coming back.
+export const removedRouteMarker = (sourceKey) => `removed:${sourceKey}`;
+export function relayRouteSeedSql() {
+	return `INSERT INTO feishu_group_relay_routes(source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids)
+		SELECT $1::text,$2::text,$3::text,$4::text,$5::boolean,$6::jsonb
+		WHERE NOT EXISTS (SELECT 1 FROM feishu_group_relay_route_state WHERE state_key=$7)
+		ON CONFLICT(source_key) DO NOTHING`;
+}
+
 export function completedAssetLookupSql() {
 	return `SELECT DISTINCT a.content_sha256,a.remote_upload_id
 		FROM ingestion_assets a
@@ -81,6 +92,8 @@ export function createLedger(connectionString) {
 			-- export falls back on once the account is no longer in the group.
 			CREATE TABLE IF NOT EXISTS feishu_group_history_messages (source_chat_id text NOT NULL, source_message_id text NOT NULL, position bigint, source_create_time bigint NOT NULL, message jsonb NOT NULL, fetched_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (source_chat_id, source_message_id));
 			CREATE INDEX IF NOT EXISTS feishu_group_history_messages_time_idx ON feishu_group_history_messages(source_chat_id, source_create_time);
+			ALTER TABLE feishu_group_chat_state ADD COLUMN IF NOT EXISTS removed_route jsonb;
+			ALTER TABLE feishu_group_chat_state ADD COLUMN IF NOT EXISTS route_removed_at timestamptz;
 			CREATE TABLE IF NOT EXISTS feishu_summary_listener_state (listener_key text PRIMARY KEY, chat_id text NOT NULL, cursor_create_time bigint NOT NULL, last_source_create_time bigint, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 			CREATE TABLE IF NOT EXISTS feishu_relay_writer_ownership (singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton), writer_id text NOT NULL, generation bigint NOT NULL CHECK (generation > 0), updated_at timestamptz NOT NULL DEFAULT now());
 				CREATE TABLE IF NOT EXISTS feishu_user_oauth_tokens (token_key text PRIMARY KEY, access_ciphertext text NOT NULL, refresh_ciphertext text NOT NULL, access_expires_at timestamptz NOT NULL, refresh_expires_at timestamptz NOT NULL, scopes text NOT NULL DEFAULT '', updated_at timestamptz NOT NULL DEFAULT now());
@@ -274,7 +287,7 @@ export function createLedger(connectionString) {
 			// an upgrade without overwriting routes edited in the dashboard.
 			await pool.query(`INSERT INTO feishu_group_relay_route_state(state_key) VALUES('initialized') ON CONFLICT DO NOTHING`);
 			for (const route of routes) {
-				await pool.query(`INSERT INTO feishu_group_relay_routes(source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(source_key) DO NOTHING`, [route.key, route.chatId, route.chatName, route.tag, route.enabled !== false, JSON.stringify(route.targetChatIds ?? [])]);
+				await pool.query(relayRouteSeedSql(), [route.key, route.chatId, route.chatName, route.tag, route.enabled !== false, JSON.stringify(route.targetChatIds ?? []), removedRouteMarker(route.key)]);
 			}
 			return this.relayRoutes();
 		},
@@ -293,7 +306,11 @@ export function createLedger(connectionString) {
 			const row = rows[0];
 			return { key: row.source_key, chatId: row.chat_id, chatName: row.chat_name, tag: row.route_tag, targetChatIds: row.target_chat_ids, enabled: row.enabled !== false, created_at: row.created_at, updated_at: row.updated_at };
 		},
-		async deleteRelayRoute(sourceKey) { const { rowCount } = await pool.query('DELETE FROM feishu_group_relay_routes WHERE source_key=$1', [sourceKey]); return rowCount === 1; },
+		async deleteRelayRoute(sourceKey) {
+			const { rowCount } = await pool.query('DELETE FROM feishu_group_relay_routes WHERE source_key=$1', [sourceKey]);
+			if (rowCount === 1) await pool.query('INSERT INTO feishu_group_relay_route_state(state_key) VALUES($1) ON CONFLICT DO NOTHING', [removedRouteMarker(sourceKey)]);
+			return rowCount === 1;
+		},
 		async groupChatStates() {
 			const { rows } = await pool.query('SELECT * FROM feishu_group_chat_state ORDER BY chat_name, chat_id');
 			return rows;
@@ -311,7 +328,7 @@ export function createLedger(connectionString) {
 			return rowCount;
 		},
 		async saveGroupChatState(chatId, patch) {
-			const columns = ['chat_name', 'membership', 'miss_count', 'left_at', 'checked_at', 'member_count', 'history_status', 'history_first_position', 'history_last_position', 'history_synced_position', 'history_message_count', 'history_error', 'history_synced_at'];
+			const columns = ['chat_name', 'membership', 'miss_count', 'left_at', 'checked_at', 'member_count', 'history_status', 'history_first_position', 'history_last_position', 'history_synced_position', 'history_message_count', 'history_error', 'history_synced_at', 'removed_route', 'route_removed_at'];
 			const names = columns.filter((column) => patch?.[column] !== undefined);
 			const values = names.map((column) => patch[column]);
 			// A bound chat the directory never listed (for example one already left) still gets a row.

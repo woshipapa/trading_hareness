@@ -10,7 +10,7 @@ import { createLedger } from './ledger.mjs';
 import { releaseMetadata } from './release-metadata.mjs';
 import { endWritable, writeChunk } from './stream-write.mjs';
 import { singleFlight } from './single-flight.mjs';
-import { createGroupSync, describeGroups, historyProgress } from './group-sync.mjs';
+import { createGroupSync, describeGroups, historyProgress, removedRoutes } from './group-sync.mjs';
 import { createGroupRelay, decryptLarkAgentXImage } from './group-relay.mjs';
 import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, historyFallback, historyRow, historySourceNote, mergeHistoryRows, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
 import { createWeChatGroupRelay } from './wechat-group-relay.mjs';
@@ -362,12 +362,26 @@ void groupRelay.tick();
 const historyRowFromBridge = (payload) => historyRow(payload, { normalize: normalizeLarkAgentXRelayMessage, describeUnsupported: normalizeLarkAgentXUnsupportedMessage, isDegradedCard: larkAgentXCardIsDegraded });
 const groupSync = createGroupSync({
 	ledger, toRow: historyRowFromBridge, log: (line) => console.log(line),
+	// The account left the group: nothing can arrive on this route any more.
+	removeRoute: async (sourceKey) => {
+		const route = await removeRelayRoute(sourceKey);
+		return route ? { key: route.key, tag: route.tag, chat_name: route.chatName, target_chat_ids: route.targetChatIds ?? [], source_chat_id: route.chatId ?? '' } : null;
+	},
 	bridge: {
 		joined: () => joinedGroupsWithRoutes(true),
 		membership: (chatIds) => bridgePostJson('/chats/membership', { chat_ids: chatIds }, 60_000),
 		page: (chatId, start, end) => bridgePostJson('/history/page', { chat_id: chatId, start, end }, 60_000),
 	},
 });
+// Remove a route and its WebSocket binding.  The relayed messages and the
+// stored history of its group stay in the database.
+async function removeRelayRoute(sourceKey) {
+	const route = (await ledger.relayRoutes()).find((item) => item.key === sourceKey);
+	if (!route || !(await ledger.deleteRelayRoute(sourceKey))) return null;
+	await routeBinder.unbind(sourceKey);
+	return route;
+}
+
 // The bridge knows the bindings it saved; the routes declared in this
 // adapter's environment are known only here.  Both are bound groups, and only
 // a group whose route still exists counts.
@@ -2481,6 +2495,7 @@ const dashboard = createServer((request, response) => {
 			response.end(JSON.stringify({
 				observed_at: new Date().toISOString(), live: Boolean(live), error,
 				groups: describeGroups({ groups: directory.groups ?? [], bound: directory.bound ?? [], states, routes }),
+				removed_routes: removedRoutes(states),
 				sync: groupSync.status(),
 			}));
 		})().catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
@@ -2533,9 +2548,8 @@ const dashboard = createServer((request, response) => {
 		return;
 	}
 	if (relayRouteMatch && request.method === 'DELETE') {
-		void ledger.deleteRelayRoute(relayRouteMatch[1]).then(async (deleted) => {
+		void removeRelayRoute(relayRouteMatch[1]).then(async (deleted) => {
 			if (!deleted) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '源群不存在' })); return; }
-			await routeBinder.unbind(relayRouteMatch[1]);
 			groupSync.requestRefresh();
 			response.writeHead(204, { 'cache-control': 'no-store' }).end();
 		}).catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));

@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-import { groupRelayApi, type BundlePreview, type BundleSource, type ExportBookmark, type GroupHistoryProgress, type GroupMembership, type JoinedGroup, type ExportFormat, type WebsocketBinding } from '../api/group-relay';
+import { groupRelayApi, type BundlePreview, type BundleSource, type ExportBookmark, type GroupHistoryProgress, type GroupMembership, type JoinedGroup, type RemovedRoute, type ExportFormat, type WebsocketBinding } from '../api/group-relay';
 import { feishuWorkbenchApi } from '../api/feishu-workbench';
 
 type OAuthScopeAudit = { required_scopes?: string[]; granted_scopes?: string[]; missing_scopes?: string[]; verified?: boolean | null };
@@ -94,6 +94,7 @@ export function useFeishuRelayWorkspace() {
   // The groups the account is in: what a new source group is picked from, and
   // where a newly joined or a left group shows up without anyone looking for it.
   const joinedGroups = ref<JoinedGroup[]>([]);
+  const removedRelayRoutes = ref<RemovedRoute[]>([]);
   const joinedGroupsError = ref('');
   const joinedGroupsLoading = ref(false);
   let joinedGroupsLoadedAt = 0;
@@ -102,7 +103,7 @@ export function useFeishuRelayWorkspace() {
   function refreshJoinedGroupsIfStale() { if (Date.now() - joinedGroupsLoadedAt > 60_000) void loadJoinedGroups(); }
   async function loadJoinedGroups(refresh = false) {
     joinedGroupsLoadedAt = Date.now(); joinedGroupsLoading.value = true;
-    try { const result = await groupRelayApi.chats(refresh); joinedGroups.value = result.groups; joinedGroupsError.value = result.error ?? ''; }
+    try { const result = await groupRelayApi.chats(refresh); joinedGroups.value = result.groups; removedRelayRoutes.value = result.removed_routes ?? []; joinedGroupsError.value = result.error ?? ''; }
     catch (error) { joinedGroupsError.value = error instanceof Error ? error.message : String(error); }
     finally { joinedGroupsLoading.value = false; }
   }
@@ -449,7 +450,7 @@ export function useFeishuRelayWorkspace() {
   return {
     groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistorySource, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
     rebindGroupRelayRoute,
-    joinedGroups, joinedGroupsError, joinedGroupsLoading, loadJoinedGroups, refreshJoinedGroupsIfStale, newJoinedGroups, pickableGroups, groupOptionLabel, relayTargetOptions, pickRouteGroup, historyProgressText, historyProgressTagType,
+    joinedGroups, removedRelayRoutes, joinedGroupsError, joinedGroupsLoading, loadJoinedGroups, refreshJoinedGroupsIfStale, newJoinedGroups, pickableGroups, groupOptionLabel, relayTargetOptions, pickRouteGroup, historyProgressText, historyProgressTagType,
     bundleDialog, bundleRoute, bundleDates, bundlePreview, bundleSource, bundleHasContent, bundleLoading, bundleError, openBundleDialog, previewBundle, downloadBundle,
     qrDialog, qrSession, qrStatusName, qrPolling, startQrLogin, stopQrPolling, authStateType, authStateText,
     oauthDialog, oauthAuthorizeUrl, oauthRedirectUri, oauthCode, oauthSubmitting, startOauthReauth, submitOauthCode, copyOauthUrl, oauthExpiryText, oauthExpiryTagType,

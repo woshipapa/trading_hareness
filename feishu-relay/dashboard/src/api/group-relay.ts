@@ -27,8 +27,11 @@ export type JoinedGroup = {
   source_key: string | null; route_tag: string | null; membership: GroupMembership; left_at: string | null;
   is_new: boolean; first_seen_at: string | null; history: GroupHistoryProgress | null;
 };
+export type RemovedRoute = { chat_id: string; chat_name: string; tag: string | null; target_chat_ids: string[]; membership: GroupMembership; left_at: string | null; removed_at: string };
 export type JoinedGroupsResponse = {
   observed_at: string; live: boolean; error: string | null; groups: JoinedGroup[];
+  /** Routes removed automatically because the account left their group (recent ones). */
+  removed_routes?: RemovedRoute[];
   sync: { last_tick_at: string | null; last_directory_at: string | null; last_error: string | null; joined_groups: number; bound_chats: number };
 };
 

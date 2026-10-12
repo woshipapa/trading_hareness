@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGroupSync, describeGroups, historyProgress, membershipTransition, nextHistoryPage } from './group-sync.mjs';
+import { createGroupSync, describeGroups, historyProgress, membershipTransition, nextHistoryPage, removedRoutes, routesToRemove } from './group-sync.mjs';
 
 const NOW = Date.parse('2026-10-12T07:00:00Z');
 
@@ -176,4 +176,72 @@ test('the group with the least left to read is read first', async () => {
 	await sync.tick();
 	assert.deepEqual(pages, [['7002', 1, 50], ['7002', 51, 80], ['7001', 1, 50]]);
 	assert.equal(ledger.states.get('7002').history_status, 'complete');
+});
+
+test('a route is removed only when the account is confirmed out of every group that feeds it', () => {
+	assert.deepEqual(routesToRemove([
+		{ chat_id: '1', source_key: 'gone', membership: 'left', miss_count: 3 },
+		{ chat_id: '2', source_key: 'just_marked', membership: 'left', miss_count: 2 },
+		{ chat_id: '3', source_key: 'two_groups', membership: 'left', miss_count: 9 },
+		{ chat_id: '4', source_key: 'two_groups', membership: 'member', miss_count: 0 },
+		{ chat_id: '5', source_key: 'dissolved', membership: 'dissolved', miss_count: 4 },
+		{ chat_id: '6', source_key: 'fine', membership: 'member', miss_count: 0 },
+		{ chat_id: '7', membership: 'left', miss_count: 9 },
+	]), ['gone', 'dissolved']);
+	assert.deepEqual(routesToRemove([]), []);
+});
+
+test('leaving a group removes its route after one more confirmed check and keeps what the route was', async () => {
+	const ledger = fakeLedger();
+	let clock = NOW;
+	const removed = [];
+	const logs = [];
+	let answer = { member: false };
+	const sync = createGroupSync({
+		ledger, now: () => clock, sleep: async () => {}, directoryIntervalMs: 300_000, log: (line) => logs.push(line), toRow: () => null,
+		removeRoute: async (key) => { removed.push(key); return { key, tag: 'diaoyan', chat_name: '调研纪要', target_chat_ids: ['oc_target'] }; },
+		bridge: {
+			joined: async () => ({ groups: [], bound: removed.length ? [] : [{ chat_id: '7001', source_key: 'relay_dy', chat_name: '调研纪要' }] }),
+			membership: async () => ({ chats: { 7001: answer } }), page: async () => ({ messages: [] }),
+		},
+	});
+	await sync.tick();                    // 1st negative
+	clock += 300_000; await sync.tick();  // 2nd: marked left, route still there
+	assert.equal(ledger.states.get('7001').membership, 'left');
+	assert.deepEqual(removed, []);
+	answer = { member: null };            // an unknown answer does not move it closer to removal
+	clock += 300_000; await sync.tick();
+	assert.deepEqual(removed, []);
+	answer = { member: false };
+	clock += 300_000; await sync.tick();  // 3rd negative: removed
+	assert.deepEqual(removed, ['relay_dy']);
+	const state = ledger.states.get('7001');
+	assert.deepEqual(state.removed_route, { key: 'relay_dy', tag: 'diaoyan', chat_name: '调研纪要', target_chat_ids: ['oc_target'] });
+	assert.equal(state.route_removed_at.getTime(), clock);
+	assert.ok(logs.some((line) => /已自动清理退群路由 source_key=relay_dy tag=diaoyan/.test(line)));
+	assert.equal(sync.status().bound_chats, 0);
+	clock += 300_000; await sync.tick();
+	assert.deepEqual(removed, ['relay_dy']); // gone from the bound list: not removed twice
+	// shown on the dashboard for a while, and offered again if the account comes back
+	assert.deepEqual(removedRoutes([state], clock).map((item) => [item.chat_name, item.tag, item.target_chat_ids]), [['调研纪要', 'diaoyan', ['oc_target']]]);
+	assert.deepEqual(removedRoutes([state], clock + 30 * 86_400_000), []);
+	assert.equal(describeGroups({ now: clock, groups: [{ chat_id: '7001', name: '调研纪要' }], states: [{ ...state, seeded: true }] })[0].is_new, true);
+});
+
+test('a group that comes back before the route is removed keeps its route; without a remover nothing is removed', async () => {
+	const ledger = fakeLedger();
+	let clock = NOW;
+	const removed = [];
+	let answer = { member: false };
+	const bridge = { joined: async () => ({ groups: [], bound: [{ chat_id: '7001', source_key: 'relay_x' }] }), membership: async () => ({ chats: { 7001: answer } }), page: async () => ({ messages: [] }) };
+	const sync = createGroupSync({ ledger, now: () => clock, sleep: async () => {}, directoryIntervalMs: 300_000, toRow: () => null, removeRoute: async (key) => { removed.push(key); return { key }; }, bridge });
+	await sync.tick(); clock += 300_000; await sync.tick();
+	answer = { member: true, first_position: 1, last_position: 0 };
+	clock += 300_000; await sync.tick();
+	answer = { member: false };
+	clock += 300_000; await sync.tick(); clock += 300_000; await sync.tick();
+	assert.deepEqual(removed, []); // the count started over when the account was back
+	const passive = createGroupSync({ ledger: fakeLedger(), now: () => clock, sleep: async () => {}, directoryIntervalMs: 0, toRow: () => null, bridge });
+	for (let pass = 0; pass < 5; pass += 1) await passive.tick();
+	assert.deepEqual(removed, []);
 });

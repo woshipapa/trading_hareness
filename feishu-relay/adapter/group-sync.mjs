@@ -4,6 +4,9 @@
 // through the bridge and the state lives in the ledger; both are passed in.
 
 export const LEFT_AFTER_MISSES = 2;
+// A route is removed one confirmed check after its group was marked as left:
+// three negative answers in a row, about ten minutes apart in total.
+export const REMOVE_AFTER_MISSES = 3;
 export const NEW_GROUP_WINDOW_MS = 14 * 24 * 3600_000;
 
 /** Membership after one check.
@@ -20,6 +23,29 @@ export function membershipTransition(previous, report, now) {
 	if (misses < LEFT_AFTER_MISSES) return { membership: before.membership, miss_count: misses, left_at: before.left_at, changed: null };
 	const membership = report.dissolved ? 'dissolved' : 'left';
 	return { membership, miss_count: misses, left_at: before.left_at ?? now, changed: before.membership === 'member' ? membership : null };
+}
+
+/** The routes to remove: those all of whose groups the account is confirmed to be out of.
+ *
+ * `items` are the bound chats with their membership after this check.  A
+ * route fed by several groups goes only when every one of them is gone, and
+ * an unknown answer never counts (it leaves the miss count where it was). */
+export function routesToRemove(items) {
+	const byKey = new Map();
+	for (const item of items) {
+		if (!item?.source_key) continue;
+		if (!byKey.has(item.source_key)) byKey.set(item.source_key, []);
+		byKey.get(item.source_key).push(item);
+	}
+	return [...byKey].filter(([, chats]) => chats.every((chat) => chat.membership !== 'member' && Number(chat.miss_count ?? 0) >= REMOVE_AFTER_MISSES)).map(([key]) => key);
+}
+
+/** Routes removed because the account left their group, most recent first, for the dashboard. */
+export function removedRoutes(states, now = Date.now(), windowMs = NEW_GROUP_WINDOW_MS) {
+	return states.filter((state) => state.route_removed_at && now - new Date(state.route_removed_at).getTime() < windowMs)
+		.map((state) => ({ chat_id: String(state.chat_id), chat_name: state.removed_route?.chat_name || state.chat_name || '', tag: state.removed_route?.tag ?? null,
+			target_chat_ids: state.removed_route?.target_chat_ids ?? [], membership: state.membership, left_at: state.left_at ?? null, removed_at: state.route_removed_at }))
+		.sort((a, b) => new Date(b.removed_at).getTime() - new Date(a.removed_at).getTime());
 }
 
 /** The next positions to read for a chat, or null when its stored history is up to date. */
@@ -66,14 +92,15 @@ export function describeGroups({ groups = [], bound = [], states = [], routes = 
 			source_key: sourceKey, route_tag: route?.tag ?? null, route_known: Boolean(route),
 			membership: sourceKey ? state?.membership ?? 'member' : group.in_directory ? 'member' : 'left',
 			left_at: state?.left_at ?? null,
-			is_new: Boolean(!sourceKey && group.in_directory && state && state.seeded === false && firstSeen !== null && now - firstSeen < NEW_GROUP_WINDOW_MS),
+			// Newly joined, or back in a group whose route was removed when the account left it.
+			is_new: Boolean(!sourceKey && group.in_directory && state && (state.route_removed_at || (state.seeded === false && firstSeen !== null && now - firstSeen < NEW_GROUP_WINDOW_MS))),
 			first_seen_at: state?.first_seen_at ?? null,
 			history: sourceKey ? historyProgress(state) : null,
 		};
 	}).sort((a, b) => Number(b.is_new) - Number(a.is_new) || a.name.localeCompare(b.name, 'zh') || a.chat_id.localeCompare(b.chat_id));
 }
 
-export function createGroupSync({ ledger, bridge, toRow, log = () => {}, now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+export function createGroupSync({ ledger, bridge, toRow, removeRoute = null, log = () => {}, now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 	directoryIntervalMs = 5 * 60_000, pagesPerTick = 6, pageDelayMs = 400 }) {
 	let directoryAt = 0;
 	let running = false;
@@ -87,6 +114,7 @@ export function createGroupSync({ ledger, bridge, toRow, log = () => {}, now = D
 		await ledger.recordJoinedGroups(groups);
 		const reports = bound.length ? (await bridge.membership(bound.map((item) => String(item.chat_id))))?.chats ?? {} : {};
 		const states = new Map((await ledger.groupChatStates()).map((state) => [String(state.chat_id), state]));
+		const checked = [];
 		for (const item of bound) {
 			const chatId = String(item.chat_id);
 			const report = reports[chatId];
@@ -99,10 +127,25 @@ export function createGroupSync({ ledger, bridge, toRow, log = () => {}, now = D
 				if (report.name) patch.chat_name = report.name;
 			} else if (!previous?.chat_name && item.chat_name) patch.chat_name = item.chat_name;
 			await ledger.saveGroupChatState(chatId, patch);
+			checked.push({ chat_id: chatId, source_key: item.source_key, membership: next.membership, miss_count: next.miss_count });
 			if (next.changed) log(`群成员身份变化 chat_id=${chatId} name=${report?.name || item.chat_name || ''} ${next.changed}`);
 		}
+		// A route whose group the account is confirmed to be out of is removed,
+		// with what it was kept on the chat's row so it can be set up again.
+		const removedKeys = new Set();
+		for (const sourceKey of removeRoute ? routesToRemove(checked) : []) {
+			try {
+				const removed = await removeRoute(sourceKey);
+				if (!removed) continue;
+				removedKeys.add(sourceKey);
+				for (const chat of checked.filter((item) => item.source_key === sourceKey)) await ledger.saveGroupChatState(chat.chat_id, { removed_route: removed, route_removed_at: new Date(now()) });
+				log(`已自动清理退群路由 source_key=${sourceKey} tag=${removed.tag ?? ''} chat_name=${removed.chat_name ?? ''} targets=${(removed.target_chat_ids ?? []).join(',')}`);
+			} catch (error) {
+				log(`自动清理退群路由失败 source_key=${sourceKey}：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 		runtime.groups = groups;
-		runtime.bound = bound;
+		runtime.bound = bound.filter((item) => !removedKeys.has(item.source_key));
 		runtime.last_directory_at = new Date(now()).toISOString();
 	}
 
