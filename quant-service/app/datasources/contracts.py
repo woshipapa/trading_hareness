@@ -85,7 +85,9 @@ class BindingSpec:
     #: fields).  ``scripts/tdx-promote.py check`` reads every row of both sides, joins them on the key and compares the
     #: field on every common row: it agrees when each is within ``rel_tol`` / ``abs_tol`` (the ``math.isclose``
     #: tolerances; one that is missing counts as 0) and the common rows are at least ``min_coverage`` (default 0.95)
-    #: of this binding's rows.  An empty mapping means the binding is promoted without a cross-source comparison.
+    #: of this binding's rows.  ``reference_span`` limits coverage to the reference's first and last key and excludes
+    #: bars whose minute has not closed by the earlier probe finish.  An empty mapping means the binding is promoted
+    #: without a cross-source comparison.
     agreement: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 

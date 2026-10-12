@@ -42,6 +42,8 @@ MINUTES = {"reference": "tencent_free", "reference_adapter": TENCENT_MINUTES, "r
            "key": ["symbol", "bar_time"]}
 BARS = Binding("tdx_mac", "bars.minute", 70, UNSUPPORTED, spec=BindingSpec(
     agreement={"close": {**MINUTES, "rel_tol": 0.005}, "volume": {**MINUTES, "abs_tol": 100}}))
+SPAN_BARS = Binding("tdx_mac", "bars.minute", 70, UNSUPPORTED, spec=BindingSpec(
+    agreement={"close": {**MINUTES, "reference_span": True, "rel_tol": 0.005}}))
 TENCENT = Binding("tencent_free", "bars.minute", 50, LIVE_VERIFIED, adapter="app/intraday_minute_capture_actions.py")
 SYMBOLS = [f"{number:06d}.SZ" for number in range(20)]
 OWN_ROWS = [{"symbol": symbol, "price": 10.0, "vol": 3} for symbol in SYMBOLS]                  # volume in lots
@@ -105,6 +107,111 @@ def fake_ssh(root, body):
 
 
 class CheckTests(unittest.TestCase):
+    def test_both_tdx_minute_bindings_compare_inside_the_reference_span(self):
+        minute_bindings = [item for item in BINDINGS
+                           if item.source in {"tdx_public", "tdx_mac"} and item.capability == "bars.minute"]
+
+        self.assertEqual({item.source for item in minute_bindings}, {"tdx_public", "tdx_mac"})
+        self.assertTrue(all(entry["reference_span"] is True
+                            for item in minute_bindings for entry in item.spec.agreement.values()))
+
+    def test_reference_span_ignores_binding_rows_from_an_older_session(self):
+        own = [
+            {"symbol": "000001.SZ", "bar_time": "2026-10-09T09:31:00+08:00", "close": 9.0},
+            {"symbol": "000001.SZ", "bar_time": "2026-10-09T09:32:00+08:00", "close": 9.1},
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:31:00+08:00", "close": 10.0},
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:32:00+08:00", "close": 10.1},
+        ]
+        reference = [
+            {"ts_code": "000001.SZ", "time": "0931", "close": 10.0, "volume_lot": 1, "amount": 1, "is_complete": True},
+            {"ts_code": "000001.SZ", "time": "0932", "close": 10.1, "volume_lot": 1, "amount": 1, "is_complete": True},
+        ]
+        result = run_check("owner", {
+            "tdx_mac": record("tdx_mac", own, capability="bars.minute"),
+            TENCENT_MINUTES: record("tencent_free", reference, capability="bars.minute"),
+        }, bindings=(SPAN_BARS, TENCENT), source="tdx_mac", capability="bars.minute",
+           params={"symbol": "000001.SZ", "count": 4})
+        comparison = result.evidence[0]["comparison"]["close"]
+        self.assertTrue(comparison["agree"], comparison)
+        self.assertEqual((comparison["left_rows"], comparison["right_rows"], comparison["matched"]), (2, 2, 2))
+        self.assertEqual(comparison["reference_span"], {
+            "first_key": ["000001.SZ", "2026-10-12T09:31:00+08:00"],
+            "last_key": ["000001.SZ", "2026-10-12T09:32:00+08:00"],
+            "binding_rows": 2,
+            "reference_rows": 2,
+        })
+
+    def test_reference_span_fails_when_the_reference_is_missing_a_bar_inside_the_span(self):
+        own = [
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:31:00+08:00", "close": 10.0},
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:32:00+08:00", "close": 10.1},
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:33:00+08:00", "close": 10.2},
+        ]
+        reference = [
+            {"ts_code": "000001.SZ", "time": "0931", "close": 10.0, "volume_lot": 1, "amount": 1, "is_complete": True},
+            {"ts_code": "000001.SZ", "time": "0933", "close": 10.2, "volume_lot": 1, "amount": 1, "is_complete": True},
+        ]
+        result = run_check("owner", {
+            "tdx_mac": record("tdx_mac", own, capability="bars.minute"),
+            TENCENT_MINUTES: record("tencent_free", reference, capability="bars.minute"),
+        }, bindings=(SPAN_BARS, TENCENT), source="tdx_mac", capability="bars.minute",
+           params={"symbol": "000001.SZ", "count": 3})
+        comparison = result.evidence[0]["comparison"]["close"]
+        self.assertFalse(comparison["agree"])
+        self.assertEqual((comparison["left_rows"], comparison["matched"], comparison["coverage"]), (3, 2, 2 / 3))
+
+    def test_reference_span_fails_when_the_binding_is_missing_a_bar_inside_the_span(self):
+        own = [
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:31:00+08:00", "close": 10.0},
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:33:00+08:00", "close": 10.2},
+        ]
+        reference = [
+            {"ts_code": "000001.SZ", "time": "0931", "close": 10.0, "volume_lot": 1, "amount": 1, "is_complete": True},
+            {"ts_code": "000001.SZ", "time": "0932", "close": 10.1, "volume_lot": 1, "amount": 1, "is_complete": True},
+            {"ts_code": "000001.SZ", "time": "0933", "close": 10.2, "volume_lot": 1, "amount": 1, "is_complete": True},
+        ]
+        result = run_check("owner", {
+            "tdx_mac": record("tdx_mac", own, capability="bars.minute"),
+            TENCENT_MINUTES: record("tencent_free", reference, capability="bars.minute"),
+        }, bindings=(SPAN_BARS, TENCENT), source="tdx_mac", capability="bars.minute",
+           params={"symbol": "000001.SZ", "count": 3})
+        comparison = result.evidence[0]["comparison"]["close"]
+        self.assertFalse(comparison["agree"])
+        self.assertEqual((comparison["matched"], comparison["only_right"], comparison["reference_coverage"]), (2, 1, 2 / 3))
+        self.assertIn("reference's 3", comparison["why"])
+
+    def test_forming_minute_is_excluded_at_the_earlier_probe_finish(self):
+        finished = ("2026-10-12T01:40:00+00:00", "2026-10-12T01:40:30+00:00")
+        own = [
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:39:00+08:00", "close": 10.0},
+            {"symbol": "000001.SZ", "bar_time": "2026-10-12T09:40:00+08:00", "close": 999.0},
+        ]
+        reference = [
+            {"ts_code": "000001.SZ", "time": "0939", "close": 10.0, "volume_lot": 1, "amount": 1, "is_complete": True},
+            {"ts_code": "000001.SZ", "time": "0940", "close": 10.0, "volume_lot": 1, "amount": 1, "is_complete": True},
+        ]
+        result = run_check("owner", {
+            "tdx_mac": record("tdx_mac", own, times=finished, capability="bars.minute"),
+            TENCENT_MINUTES: record("tencent_free", reference, times=(finished[0], "2026-10-12T01:40:45+00:00"), capability="bars.minute"),
+        }, bindings=(SPAN_BARS, TENCENT), source="tdx_mac", capability="bars.minute",
+           params={"symbol": "000001.SZ", "count": 2})
+        comparison = result.evidence[0]["comparison"]["close"]
+        self.assertTrue(comparison["agree"], comparison)
+        self.assertEqual((comparison["left_rows"], comparison["right_rows"], comparison["matched"]), (1, 1, 1))
+
+    def test_agreement_without_reference_span_keeps_binding_coverage_rule(self):
+        own = [{"symbol": "000001.SZ", "bar_time": f"2026-10-12T09:3{minute}:00+08:00", "close": 10.0}
+               for minute in range(1, 4)]
+        reference = [{"ts_code": "000001.SZ", "time": "0931", "close": 10.0, "volume_lot": 1, "amount": 1, "is_complete": True}]
+        result = run_check("owner", {
+            "tdx_mac": record("tdx_mac", own, capability="bars.minute"),
+            TENCENT_MINUTES: record("tencent_free", reference, capability="bars.minute"),
+        }, bindings=(BARS, TENCENT), source="tdx_mac", capability="bars.minute",
+           params={"symbol": "000001.SZ", "count": 3})
+        comparison = result.evidence[0]["comparison"]["close"]
+        self.assertFalse(comparison["agree"])
+        self.assertEqual(comparison["coverage"], 1 / 3)
+
     def test_an_agreeing_owner_probe_inside_a_session_passes_every_gate(self):
         result = run_check("owner", answers())
         self.assertRegex(result.names[0], r"^tdx_promote_quote\.watch_snapshot_tdx_public_2026-10-12_owner_[0-9a-f]{8}\.json$")
