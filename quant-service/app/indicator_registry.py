@@ -49,6 +49,10 @@ INDICATORS: Final[tuple[Indicator, ...]] = (
               POST_CLOSE,
               "决策 0013：涨停、跌停（反向）、封板率、上涨比、昨日涨停溢价、连板晋级率、最高连板、量能比，"
               "各按前 250 日分位换成 0–100 后取平均，至少 5 项"),
+    Indicator("market.limit_up_risk", "涨停大亏风险（研究分数）", "market", "session", "score / percentile",
+              ("longhuvip limit-performance lists", "canonical_bars_daily / daily_trade_limits"),
+              "raw_market_observations: local_derived/limit_up_risk_daily", "/api/v1/market/limit-up-risk/daily",
+              POST_CLOSE, "固定 loss5 系数；仅研究用途，不产生操作效果"),
     Indicator("market.temperature_intraday", "分时情绪温度（5 分钟，午休断开）", "market", "minute", "0-100",
               ("market.minute_documents", "stock.limit_prices", "market.temperature 的日线历史"),
               "raw_market_observations: local_derived/market_temperature_intraday（盘后存整日）",

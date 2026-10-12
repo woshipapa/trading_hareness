@@ -7,6 +7,8 @@ from math import fsum
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from .datasources.http import ashare_symbol
+
 VERSION = "limit-up-risk-v1"
 COEFFICIENTS_FILE_SHA256 = "29f01efb6a1f78372f49227bff83267617262af89db7e4c28e7a07c9a5692408"
 # SHA-256: state/research/divergence_study_20261012/seal/fitted_coefs.json
@@ -24,12 +26,7 @@ COEFFICIENTS = {
 CN_TZ = ZoneInfo("Asia/Shanghai")
 
 
-def symbol_for_code(code: Any) -> str:
-    code = str(code).zfill(6)
-    return f"{code}.SH" if code.startswith(("5", "6")) else f"{code}.SZ"
-
-
-def _average_ranks(values: list[float]) -> list[float]:
+def _ranks(values: list[float]) -> list[float]:
     ordered = sorted(enumerate(values), key=lambda item: item[1])
     ranks = [0.0] * len(values)
     index = 0
@@ -39,22 +36,7 @@ def _average_ranks(values: list[float]) -> list[float]:
             end += 1
         rank = (index + 1 + end) / 2
         for position, _value in ordered[index:end]:
-            ranks[position] = rank / len(values) - 0.5
-        index = end
-    return ranks
-
-
-def _percentiles(values: list[float]) -> list[float]:
-    ordered = sorted(enumerate(values), key=lambda item: item[1])
-    ranks = [0.0] * len(values)
-    index = 0
-    while index < len(ordered):
-        end = index + 1
-        while end < len(ordered) and ordered[end][1] == ordered[index][1]:
-            end += 1
-        rank = (index + 1 + end) / 2
-        for position, _value in ordered[index:end]:
-            ranks[position] = rank / len(values) * 100
+            ranks[position] = rank / len(values)
         index = end
     return ranks
 
@@ -69,12 +51,7 @@ def _seal_time(epoch: Any) -> datetime:
     return datetime.fromtimestamp(float(epoch), timezone.utc).astimezone(CN_TZ)
 
 
-def _limit_up(code: str, bar: Mapping[str, Any], limits: Mapping[str, Any]) -> float:
-    limit = limits.get(symbol_for_code(code))
-    if isinstance(limit, (tuple, list)):
-        limit = limit[0]
-    if limit:
-        return float(limit)
+def _limit_up(code: str, bar: Mapping[str, Any]) -> float:
     stored = bar.get("limit_up")
     if stored:
         return float(stored)
@@ -83,9 +60,7 @@ def _limit_up(code: str, bar: Mapping[str, Any], limits: Mapping[str, Any]) -> f
 
 def score_day(
     lists: Mapping[str, list[list[Any]]], bars: Mapping[str, Mapping[str, Any]],
-    limits: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    limits = limits or {}
     coverage = {key: 0 for key in (
         "malformed", "excluded_code", "duplicate", "missing_bar", "limit_ratio", "not_at_limit", "insufficient_history",
     )}
@@ -97,10 +72,10 @@ def score_day(
                 coverage["malformed"] += 1
                 continue
             code = str(row[0]).zfill(6)
-            if code.startswith(("4", "8")):
+            symbol = ashare_symbol(code)
+            if symbol is None or symbol.endswith(".BJ"):
                 coverage["excluded_code"] += 1
                 continue
-            symbol = symbol_for_code(code)
             if symbol in seen:
                 coverage["duplicate"] += 1
                 continue
@@ -109,7 +84,7 @@ def score_day(
             if bar is None:
                 coverage["missing_bar"] += 1
                 continue
-            limit_up = _limit_up(code, bar, limits)
+            limit_up = _limit_up(code, bar)
             if round(limit_up / float(bar["pre_close"]) - 1, 2) < 0.08:
                 coverage["limit_ratio"] += 1
                 continue
@@ -138,7 +113,7 @@ def score_day(
     if not candidates:
         return {"rows": [], "coverage": coverage, "ranks_reliable": False}
     fields = ("vr", "flow", "intraday", "gap", "seal_ratio", "seal_minutes", "boards", "float_cap")
-    ranks = {field: _average_ranks([item[field] for item in candidates]) for field in fields}
+    ranks = {field: [rank - 0.5 for rank in _ranks([item[field] for item in candidates])] for field in fields}
     opened_mean = fsum(item["opened"] for item in candidates) / len(candidates)
     scores: list[float] = []
     for index, item in enumerate(candidates):
@@ -155,11 +130,23 @@ def score_day(
         )
         item["risk"] = risk
         scores.append(risk)
-    for item, rank in zip(candidates, _percentiles(scores)):
-        item["risk_rank"] = rank
+    for item, rank in zip(candidates, _ranks(scores)):
+        item["risk_rank"] = rank * 100
     return {"rows": candidates, "coverage": coverage, "ranks_reliable": len(candidates) >= 20}
 
 
-compute = score_day
+def fifth_comparison(rows: list[Mapping[str, Any]], next_day_returns: Mapping[str, float]) -> dict[str, Any] | None:
+    outcomes = [(row, float(next_day_returns[row["symbol"]])) for row in rows if row["symbol"] in next_day_returns]
+    if len(outcomes) < 20:
+        return None
+    outcomes.sort(key=lambda item: item[0]["risk"])
+    fifth = len(outcomes) // 5
 
-__all__ = ["COEFFICIENTS", "COEFFICIENTS_FILE_SHA256", "VERSION", "compute", "score_day", "symbol_for_code"]
+    def summary(group: list[tuple[Mapping[str, Any], float]]) -> dict[str, float]:
+        returns = [item[1] for item in group]
+        return {"big_loss_rate": sum(value <= -0.05 for value in returns) / len(returns),
+                "mean_next_day_return": sum(returns) / len(returns)}
+
+    return {"lowest": summary(outcomes[:fifth]), "highest": summary(outcomes[-fifth:])}
+
+__all__ = ["COEFFICIENTS", "COEFFICIENTS_FILE_SHA256", "VERSION", "fifth_comparison", "score_day"]

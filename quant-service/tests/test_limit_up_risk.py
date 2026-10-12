@@ -5,8 +5,9 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from app.limit_up_risk import score_day
-from app.limit_up_risk_repository import read_lists
+from app.limit_up_risk import fifth_comparison, score_day
+from app.limit_up_risk_repository import read_inputs, read_lists
+from app.routers.market_radar_reads import build_market_radar_router
 
 
 FIXTURE = json.loads(Path("tests/fixtures/limit_up_risk_20260918.json").read_text(encoding="utf-8"))
@@ -18,7 +19,7 @@ class LimitUpRiskTests(unittest.TestCase):
         expected = {row["symbol"]: row for row in FIXTURE["expected"]}
         self.assertEqual(len(actual["rows"]), 76)
         self.assertEqual(actual["coverage"]["malformed"], 2)
-        self.assertEqual(actual["coverage"]["missing_bar"], 1)
+        self.assertEqual(actual["coverage"]["excluded_code"], 1)
         self.assertEqual(actual["coverage"]["insufficient_history"], 1)
         for row in actual["rows"]:
             for key, value in expected[row["symbol"]].items():
@@ -51,6 +52,38 @@ class LimitUpRiskTests(unittest.TestCase):
         lists, source = read_lists(Connection(), date(2026, 9, 18))
         self.assertEqual(source, "history")
         self.assertEqual(lists["pid:1"], [["history"]])
+
+    def test_fifth_comparison_skips_thin_days_and_handles_missing_next_session(self):
+        rows = [{"symbol": f"000{i:03d}.SZ", "risk": float(i)} for i in range(20)]
+        comparison = fifth_comparison(rows, {row["symbol"]: (-0.06 if i == 0 else 0.01) for i, row in enumerate(rows)})
+        self.assertEqual(comparison["lowest"]["big_loss_rate"], 0.25)
+        self.assertIsNone(fifth_comparison(rows[:19], {}))
+        self.assertIsNone(fifth_comparison(rows, {}))
+
+    def test_repository_bar_sql_has_unit_filter_limit_resolution_and_bounded_history(self):
+        statements = []
+
+        class Result:
+            def fetchall(self):
+                return []
+
+        class Connection:
+            def execute(self, sql, _params):
+                statements.append(sql)
+                return Result()
+
+        read_inputs(Connection(), date(2026, 9, 18))
+        joined = "\n".join(statements)
+        self.assertIn("amount / (b.volume * b.close / 10.0)", joined)
+        self.assertIn("NOT coalesce(b.is_suspended, false)", joined)
+        self.assertIn("b.pre_close > 0 AND b.open > 0", joined)
+        self.assertIn("coalesce(nullif(b.limit_up, 0), limits.limit_up)", joined)
+        self.assertIn("interval '90 days'", joined)
+
+    def test_market_radar_router_exposes_daily_and_track_routes(self):
+        paths = {route.path for route in build_market_radar_router(object(), lambda *_args, **_kwargs: None).routes}
+        self.assertIn("/api/v1/market/limit-up-risk/daily", paths)
+        self.assertIn("/api/v1/market/limit-up-risk/track", paths)
 
 
 if __name__ == "__main__":

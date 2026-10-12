@@ -19,6 +19,13 @@ def _status(key: str, reading: dict | None) -> dict:
 
 
 class TemperatureHealthTests(unittest.TestCase):
+    def test_limit_up_risk_requires_the_current_version(self):
+        full = {"rows": [{"symbol": "000001.SZ"}], "version": health.LIMIT_UP_RISK_VERSION}
+        self.assertEqual(_status("market.limit_up_risk", full)["status"], "ok")
+        self.assertEqual(_status("market.limit_up_risk", None)["status"], "missing")
+        old = _status("market.limit_up_risk", {"rows": [], "version": "old"})
+        self.assertEqual(old["status"], "warn")
+
     def test_a_full_reading_is_eligible_and_a_thin_one_warns(self):
         full = {"temperature": 72.6, "scores": dict.fromkeys("abcdefgh", 50.0), "version": health.TEMPERATURE_VERSION}
         self.assertTrue(_status("market.temperature", full)["decision_eligible"])
