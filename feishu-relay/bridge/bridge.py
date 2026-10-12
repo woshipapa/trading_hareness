@@ -53,6 +53,8 @@ from qr_login_service import QrLoginService
 
 LOG = logging.getLogger("larkagentx-bridge")
 MAX_BODY_BYTES = 64 * 1024
+# How often an event the adapter keeps refusing is asked about again.
+RECALL_RECHECK_SECONDS = 600
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
 MAX_FORENSIC_FRAME_BYTES = 2 * 1024 * 1024
 MAX_FORENSIC_FILES = 8
@@ -323,6 +325,15 @@ class RawFrameCapture:
 			LOG.warning("raw frame capture failed: %s", error)
 
 
+def message_recalled(value: dict[str, Any]) -> bool:
+	"""Whether a raw history message was recalled after it was sent.
+
+	The gateway keeps the position and the ids of a recalled message, sets
+	its status to DELETED (2) and empties its content.
+	"""
+	return bool(value.get("isRemoved")) or str(value.get("status", "")).strip().upper() in {"2", "DELETED"}
+
+
 class RecoveringLarkClient(LarkClient):
 	"""Keep the upstream WebSocket client, but expose malformed-frame events.
 
@@ -376,6 +387,16 @@ class RecoveringLarkClient(LarkClient):
 		response = self.api("messages.PullMessagesByPositionsRequest", {"chatId": str(chat_id), "positions": [int(p) for p in positions]})
 		return (response or {}).get("messages") or {}
 
+	def recalled(self, chat_id: str, position: int) -> bool | None:
+		"""Whether the message at this position was recalled; None when the gateway does not return it."""
+		for key, value in self._pull_raw(chat_id, [int(position)]).items():
+			try:
+				if int(value.get("position") or key) == int(position):
+					return message_recalled(value)
+			except (TypeError, ValueError):
+				continue
+		return None
+
 	def feed_page(self, feed: str, cursor: int | None) -> dict[str, Any]:
 		"""One page of the account's conversation list ("INBOX" or "DONE")."""
 		data: dict[str, Any] = {"type": feed, "pullType": "REFRESH" if cursor is None else "LOAD_MORE", "count": FEED_PAGE_SIZE}
@@ -411,7 +432,8 @@ class RecoveringLarkClient(LarkClient):
 		whose JSON sits in a newer field comes back with no content.  The
 		live path already recovers it from the raw bytes; history must too, or
 		a card re-read after a disconnect is relayed as an empty placeholder.
-		The returned shape is upstream's, field for field.
+		The returned shape is upstream's, field for field, plus
+		``_larkagentx_recalled`` on a message that was recalled.
 		"""
 		out = []
 		for pos_key, value in sorted(self._pull_raw(chat_id, list(positions)).items(), key=lambda item: int(item[0])):
@@ -444,6 +466,8 @@ class RecoveringLarkClient(LarkClient):
 				"cid": value.get("cid") or "", "position": value.get("position") or int(pos_key),
 				"create_time": value.get("createTime"), "content": summary, "content_data": data,
 			}
+			if message_recalled(value):
+				message["_larkagentx_recalled"] = True
 			out.append(message)
 			if save_storage is not None:
 				try:
@@ -1082,6 +1106,7 @@ class Bridge:
 		self.last_spool_replay_at = None
 		self.last_spool_replay_error = None
 		self._spool_active: set[str] = set()
+		self._recall_checked: dict[str, float] = {}
 		self.mapping_check_at = None
 		self.mapping_check_error = None
 		# Do not delay WebSocket startup on gateway probes. Mapping validation is
@@ -2358,11 +2383,49 @@ class Bridge:
 						await asyncio.sleep(attempt)
 			raise last_error or RuntimeError("inbound delivery failed")
 		except Exception as error:
+			if await self._drop_if_recalled(event_id, payload, error):
+				return {"status": "filtered", "chat_id": chat_id, "message_id": message_id, "filter_reason": "recalled"}
 			await asyncio.to_thread(self.event_spool.mark_failed, event_id, str(error), retry_after=min(300, 10 * max(1, self.retry_count)))
 			self.failed_count += 1
 			stats["failed_count"] += 1
 			LOG.error("inbound delivery failed message_id=%s: %s", message_id, error)
 			return {"status": "failed", "chat_id": chat_id, "message_id": message_id, "error": str(error)[:240]}
+
+	async def _drop_if_recalled(self, event_id: str, payload: dict[str, Any], error: Exception) -> bool:
+		"""Close the event of a recalled message instead of retrying it.
+
+		A recalled message has no content left, so the adapter refuses it every
+		time.  The gateway is asked only when the adapter refused the payload
+		itself (HTTP 400); a network failure says nothing about the message.
+		"""
+		if "bridge HTTP 400" not in str(error):
+			return False
+		recalled = payload.get("_larkagentx_recalled") is True
+		if not recalled:
+			chat_id, position = str(payload.get("chat_id", "")).strip(), payload.get("position")
+			client = getattr(self, "client", None)
+			if client is None or not chat_id.isdigit() or not str(position or "").isdigit():
+				return False
+			checked = getattr(self, "_recall_checked", None)
+			if checked is None:
+				checked = self._recall_checked = {}
+			now = time.monotonic()
+			if now - checked.get(event_id, -RECALL_RECHECK_SECONDS) < RECALL_RECHECK_SECONDS:
+				return False
+			checked[event_id] = now
+			try:
+				recalled = await asyncio.to_thread(client.recalled, chat_id, int(position)) is True
+			except Exception as check_error:
+				LOG.warning("撤回状态查询失败 chat_id=%s position=%s：%s", chat_id, position, check_error)
+				return False
+		if not recalled:
+			return False
+		if not await asyncio.to_thread(functools.partial(self.event_spool.mark_ignored, event_id, reason="recalled")):
+			return False
+		getattr(self, "_recall_checked", {}).pop(event_id, None)
+		self.ignored_count += 1
+		LOG.info("消息已被撤回，不再重试 chat_id=%s position=%s message_id=%s", payload.get("chat_id"), payload.get("position"), payload.get("msg_id"))
+		return True
 
 	async def replay_spool_once(self) -> int:
 		"""Replay queued/expired events; adapter-side ledger remains idempotent."""
@@ -2401,6 +2464,8 @@ class Bridge:
 				replayed += 1
 				self.spool_replay_count += 1
 			except Exception as error:
+				if await self._drop_if_recalled(event_id, event.get("payload") or {}, error):
+					continue
 				self.spool_replay_error_count += 1
 				self.last_spool_replay_error = str(error)[:240]
 				await asyncio.to_thread(self.event_spool.mark_failed, event_id, str(error), retry_after=30)

@@ -59,6 +59,76 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 			),
 		)
 
+	def test_a_recalled_message_is_recognised_in_the_raw_history_answer(self):
+		self.assertTrue(bridge.message_recalled({"status": 2, "position": 490}))
+		self.assertTrue(bridge.message_recalled({"status": "DELETED"}))
+		self.assertTrue(bridge.message_recalled({"status": 1, "isRemoved": True}))
+		self.assertFalse(bridge.message_recalled({"status": 1, "isNoTraceRemoved": False}))
+		self.assertFalse(bridge.message_recalled({"status": 3}))
+		self.assertFalse(bridge.message_recalled({}))
+
+	def test_the_client_reports_recall_by_position(self):
+		client = object.__new__(bridge.RecoveringLarkClient)
+		client.api = Mock(return_value={"messages": {"490": {"position": 490, "status": 2}, "491": {"position": 491, "status": 1}}})
+		self.assertIs(client.recalled("7667839423698029860", 490), True)
+		self.assertIs(client.recalled("7667839423698029860", 491), False)
+		self.assertIsNone(client.recalled("7667839423698029860", 492))
+
+	def _replaying_bridge(self, event, *, recalled):
+		instance = object.__new__(bridge.Bridge)
+		instance.event_spool = Mock()
+		instance.event_spool.due.return_value = [event]
+		instance.event_spool.claim.return_value = "claimed"
+		instance.event_spool.mark_ignored.return_value = True
+		instance._spool_active = set()
+		instance.ignored_count = 0
+		instance.spool_replay_count = 0
+		instance.spool_replay_error_count = 0
+		instance.last_spool_replay_error = None
+		instance.token = "t"
+		instance.ingress_url_for = Mock(return_value="http://127.0.0.1:18300/internal/larkagentx/group-relay")
+		instance.client = Mock()
+		instance.client.recalled.return_value = recalled
+		return instance
+
+	def test_a_recalled_message_the_adapter_refuses_is_closed_not_retried(self):
+		event = {"event_id": "larkagentx:7667839423698029860:m-490", "payload": {"chat_id": "7667839423698029860", "position": 490, "msg_id": "m-490", "msg_type_name": "TEXT", "content": ""}}
+		instance = self._replaying_bridge(event, recalled=True)
+		refused = RuntimeError('bridge HTTP 400: {"status":"error","message":"LarkAgentX 实时转发消息缺少文本内容"}')
+		with patch.object(bridge, "post_json", side_effect=refused):
+			asyncio.run(instance.replay_spool_once())
+		instance.client.recalled.assert_called_once_with("7667839423698029860", 490)
+		instance.event_spool.mark_ignored.assert_called_once_with(event["event_id"], reason="recalled")
+		instance.event_spool.mark_failed.assert_not_called()
+		self.assertEqual((instance.ignored_count, instance.spool_replay_error_count), (1, 0))
+
+	def test_a_refused_message_that_still_exists_keeps_retrying_and_is_asked_about_rarely(self):
+		event = {"event_id": "larkagentx:7667839423698029860:m-491", "payload": {"chat_id": "7667839423698029860", "position": 491, "msg_id": "m-491", "msg_type_name": "TEXT", "content": ""}}
+		instance = self._replaying_bridge(event, recalled=False)
+		refused = RuntimeError('bridge HTTP 400: {"status":"error","message":"LarkAgentX 实时转发消息缺少文本内容"}')
+		with patch.object(bridge, "post_json", side_effect=refused):
+			asyncio.run(instance.replay_spool_once())
+			asyncio.run(instance.replay_spool_once())
+		instance.client.recalled.assert_called_once()
+		instance.event_spool.mark_ignored.assert_not_called()
+		self.assertEqual(instance.event_spool.mark_failed.call_count, 2)
+
+	def test_an_adapter_outage_does_not_ask_the_gateway_about_recall(self):
+		event = {"event_id": "larkagentx:7667839423698029860:m-492", "payload": {"chat_id": "7667839423698029860", "position": 492, "msg_id": "m-492"}}
+		instance = self._replaying_bridge(event, recalled=True)
+		with patch.object(bridge, "post_json", side_effect=RuntimeError("bridge network error: connection refused")):
+			asyncio.run(instance.replay_spool_once())
+		instance.client.recalled.assert_not_called()
+		instance.event_spool.mark_failed.assert_called_once()
+
+	def test_a_history_re_read_marked_recalled_needs_no_gateway_call(self):
+		event = {"event_id": "larkagentx:7667839423698029860:m-493", "payload": {"chat_id": "7667839423698029860", "position": 493, "msg_id": "m-493", "_larkagentx_recalled": True}}
+		instance = self._replaying_bridge(event, recalled=None)
+		with patch.object(bridge, "post_json", side_effect=RuntimeError("bridge HTTP 400: {}")):
+			asyncio.run(instance.replay_spool_once())
+		instance.client.recalled.assert_not_called()
+		instance.event_spool.mark_ignored.assert_called_once_with(event["event_id"], reason="recalled")
+
 	def test_command_lane_uses_direct_adapter_ingress(self):
 		instance = object.__new__(bridge.Bridge)
 		instance.ingress_url = "http://127.0.0.1:18300/internal/larkagentx/group-relay"
