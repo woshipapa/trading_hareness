@@ -16,7 +16,7 @@ from .licensed_stock_api import UpstreamStockApiError
 from .market_event_capture import normalize_fuyao_auction
 from .market_session_repository import market_observation_session
 from .public_market_repository import persist_timed_observations
-from .public_provider_rate_limits import PublicProviderRateLimited, acquire_public_provider_slot
+from .public_provider_rate_limits import PublicProviderRateLimited
 from .runtime_executors import ExecutorSaturatedError
 
 AUCTION_PROVIDER = "fuyao_ths"
@@ -30,15 +30,18 @@ DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
 SESSION_GATE_TIMEOUT_SECONDS = 10
 PERSIST_TIMEOUT_SECONDS = 60
 FUYAO_REQUEST_TIMEOUT_SECONDS = 4
-TDX_SLOT_MAX_WAIT_SECONDS = 3
 
 
 def _database_busy(error: BaseException) -> dict[str, Any]:
     return {"status": "database_busy", "error": str(error) or type(error).__name__}
 
 
-def _all_final(rows: list[dict[str, Any]], pool: list[str]) -> bool:
-    return len(rows) >= len(pool) and all(str(row.get("data_status") or "") == "final" for row in rows)
+def _all_final(events: list[dict[str, Any]], pool: list[str]) -> bool:
+    final_symbols = {
+        event["ts_code"] for event in events
+        if str(event["raw"].get("data_status") or "") == "final"
+    }
+    return set(pool) <= final_symbols
 
 
 def _stock_id(symbol: str) -> str:
@@ -56,7 +59,6 @@ class AuctionPoolCaptureDependencies:
     read_pool: Callable[[Any, date], list[str]]
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
-    acquire_tdx_slot: Callable[..., Awaitable[None]] = acquire_public_provider_slot
     session_gate: Callable[[Any, datetime], tuple[bool, str]] = market_observation_session
 
 
@@ -72,6 +74,7 @@ class AuctionPoolCaptureRuntime:
 
     async def _capture_tick(self, scheduled_at: datetime, pool: list[str]) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         status = "stored"
         for offset in range(0, len(pool), 100):
             symbols = pool[offset:offset + 100]
@@ -79,13 +82,15 @@ class AuctionPoolCaptureRuntime:
                 payload = await asyncio.wait_for(self.deps.fetch_fuyao(
                     "a_share_auction_snapshot", {"thscodes": ",".join(symbols)}, slot_wait_seconds=2,
                 ), timeout=FUYAO_REQUEST_TIMEOUT_SECONDS)
-                rows.extend(event["raw"] for event in normalize_fuyao_auction(payload, scheduled_at))
+                normalized = normalize_fuyao_auction(payload, scheduled_at)
+                events.extend(normalized)
+                rows.extend(event["raw"] for event in normalized)
             except FuyaoProviderError as error:
                 status = "rate_limited" if isinstance(error.__cause__, PublicProviderRateLimited) else "failed"
                 return await self._store_tick(scheduled_at, pool, rows, status, str(error))
             except asyncio.TimeoutError as error:
                 return await self._store_tick(scheduled_at, pool, rows, "failed", str(error) or "Fuyao request timed out")
-        status = "final" if _all_final(rows, pool) else status
+        status = "final" if _all_final(events, pool) else status
         return await self._store_tick(scheduled_at, pool, rows, status, None)
 
     async def _store_tick(
@@ -105,11 +110,14 @@ class AuctionPoolCaptureRuntime:
         return {"status": status, "stored": int(stored), "final": status == "final", "rows": len(rows)}
 
     async def _capture_curves(self, session_date: date, pool: list[str]) -> dict[str, int]:
-        counts = {"stored": 0, "rate_limited": 0, "failed": 0}
+        counts = {"stored": 0, "failed": 0}
         effective_at = datetime.combine(session_date, time(9, 26), tzinfo=CN_TZ).isoformat()
+        next_call = self.deps.now().astimezone(CN_TZ)
         for symbol in pool:
+            now = self.deps.now().astimezone(CN_TZ)
+            if now < next_call:
+                await self.deps.sleep((next_call - now).total_seconds())
             try:
-                await self.deps.acquire_tdx_slot(CURVE_PROVIDER, max_wait_seconds=TDX_SLOT_MAX_WAIT_SECONDS)
                 curve = await self.deps.fetch_curve(symbol=symbol)
                 payload = getattr(curve, "rows", curve)
                 await self._persist(CURVE_PROVIDER, CURVE_CAPABILITY, {
@@ -118,10 +126,9 @@ class AuctionPoolCaptureRuntime:
                     "available_at": self.deps.now().astimezone(timezone.utc).isoformat(),
                 })
                 counts["stored"] += 1
-            except PublicProviderRateLimited:
-                counts["rate_limited"] += 1
             except (TdxProtocolError, OSError, ValueError, ExecutorSaturatedError, TimeoutError):
                 counts["failed"] += 1
+            next_call = max(next_call, self.deps.now().astimezone(CN_TZ)) + timedelta(seconds=1)
         return counts
 
     async def _capture_bids(self, session_date: date, pool: list[str]) -> dict[str, int]:

@@ -77,14 +77,11 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
             persisted.append((provider, capability, rows))
             return len(rows)
 
-        async def acquire_tdx_slot(_provider, *, max_wait_seconds):
-            return None
-
         deps = AuctionPoolCaptureDependencies(
             fetch_fuyao=fetch_fuyao, fetch_curve=fetch_curve, call_longhu=call_longhu,
             run_database=run_database, database=object(), storage_allowed=storage_allowed,
             read_pool=read_pool, now=lambda: clock.current, sleep=clock.sleep,
-            session_gate=session_gate, acquire_tdx_slot=acquire_tdx_slot,
+            session_gate=session_gate,
         )
         return AuctionPoolCaptureRuntime(deps), clock, persisted, fuyao_calls, curve_calls, bid_calls
 
@@ -147,6 +144,33 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
         self.assertIn(CURVE_CAPABILITY, [capability for _provider, capability, _rows in persisted])
         self.assertIn(BID_CAPABILITY, [capability for _provider, capability, _rows in persisted])
         self.assertGreaterEqual(clock.current.time(), time(9, 30))
+
+    def test_duplicate_final_row_does_not_hide_a_missing_pool_symbol(self):
+        async def fetch(_symbols, _slot_wait_seconds):
+            return {"data_status": "final", "item": [
+                {"thscode": "000001.SZ"}, {"thscode": "000001.SZ"}, {"thscode": "600000.SH"},
+            ]}
+
+        runtime, _clock, _persisted, calls, _curves, _bids = self.dependencies(
+            pool=["000001.SZ", "000002.SZ"], fetch=fetch,
+        )
+        ticks = (datetime.combine(DAY, time(9, 15, 5), tzinfo=CN),
+                 datetime.combine(DAY, time(9, 15, 10), tzinfo=CN))
+        with patch("app.auction_pool_runtime.auction_timetable", return_value=ticks):
+            result = asyncio.run(runtime.capture_session())
+        self.assertEqual(result["scheduled"], 2)
+        self.assertEqual(len(calls), 2)
+
+    def test_curve_pass_is_locally_paced_without_the_provider_limiter(self):
+        runtime, clock, _persisted, _fuyao, curves, _bids = self.dependencies(
+            pool=["000001.SZ", "000002.SZ"],
+        )
+        with patch("app.public_provider_rate_limits.acquire_public_provider_slot", new=AsyncMock()) as limiter:
+            result = asyncio.run(runtime._capture_curves(DAY, ["000001.SZ", "000002.SZ"]))
+        self.assertEqual(result, {"stored": 2, "failed": 0})
+        self.assertEqual(curves, ["000001.SZ", "000002.SZ"])
+        self.assertEqual(clock.sleeps, [1])
+        limiter.assert_not_awaited()
 
     def test_outer_loop_retries_database_busy_and_uses_post_session_clock(self):
         runtime, clock, _persisted, _fuyao, _curves, _bids = self.dependencies()
