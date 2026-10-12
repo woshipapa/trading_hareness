@@ -143,6 +143,42 @@ class MarketHistoryBackfillTests(unittest.TestCase):
         self.assertEqual(result["stored"], 5)
         self.assertEqual(len(database.inserts), 10)
 
+    def test_live_limit_performance_empty_revision_does_not_replace_list(self):
+        database = FakeDatabase()
+        state = {"empty_pid": None}
+
+        async def fetch(request):
+            pid = request["params"]["PidType"]
+            if pid == state["empty_pid"]:
+                rows = []
+            else:
+                rows = [[pid]]
+            return {"pages": [{"payload": {"info": [rows] if rows else [], "errcode": "0"}}]}
+
+        asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
+        ))
+        state["empty_pid"] = "1"
+        result = asyncio.run(append_limit_performance(
+            date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
+        ))
+        self.assertEqual(result["stored"], 0)
+        pid_one = [params for params in database.inserts if params[2] == "pid:1"]
+        self.assertEqual(len(pid_one), 1)
+        self.assertEqual(pid_one[0][7].obj["rows"], [["1"]])
+
+    def test_live_limit_performance_vendor_error_stores_nothing(self):
+        database = FakeDatabase()
+
+        async def fetch(_request):
+            return {"pages": [{"payload": {"info": [], "errcode": "1020"}}]}
+
+        with self.assertRaisesRegex(RuntimeError, "errcode=1020"):
+            asyncio.run(append_limit_performance(
+                date(2026, 9, 18), fetch, database=database, run_database=run_database, now=AFTER_CLOSE,
+            ))
+        self.assertEqual(database.inserts, [])
+
     def test_live_limit_performance_skips_non_session_dates(self):
         database = FakeDatabase(calendar_open=False)
         calls = 0

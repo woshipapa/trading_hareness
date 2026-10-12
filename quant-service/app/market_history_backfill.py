@@ -114,6 +114,8 @@ def longhu_limit_performance_live(call: Callable[[dict[str, Any]], Awaitable[Any
             payload = _payload(await call({"target": "longhu_quote", "params": {
                 "Order": "0", "st": "1000", "a": "DailyLimitPerformance", "c": "HomeDingPan", "PhoneOSNew": "1",
                 "VerSion": "5.7.0.12", "Index": "0", "PidType": pid, "apiv": "w31", "Type": "4"}}))
+            if payload.get("errcode") not in (None, "", 0, "0"):
+                raise RuntimeError(f"Longhu DailyLimitPerformance returned errcode={payload.get('errcode')}")
             lists[f"pid:{pid}"] = (_info_rows(payload), {
                 "errcode": payload.get("errcode"), "pid_type": pid, "target": "longhu_quote",
             })
@@ -150,7 +152,8 @@ async def append_limit_performance(
         with database.transaction() as connection:
             for item in items:
                 rows, meta = lists.get(item.list_key, ([], {}))
-                written += int(store(connection, item, day, rows, meta))
+                if rows:
+                    written += int(store(connection, item, day, rows, meta))
         return written
 
     written = await run_database(persist, timeout_seconds=120)

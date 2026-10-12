@@ -25,8 +25,10 @@ class LimitUpRiskTests(unittest.TestCase):
         self.assertEqual(len(actual_symbols), len(FIXTURE["expected"]))
         self.assertEqual(set(actual_symbols), set(expected))
         self.assertEqual(actual["coverage"]["malformed"], 2)
-        self.assertEqual(actual["coverage"]["excluded_code"], 1)
-        self.assertEqual(actual["coverage"]["insufficient_history"], 1)
+        self.assertEqual(actual["coverage"], {
+            "malformed": 2, "excluded_code": 1, "duplicate": 0, "missing_bar": 0,
+            "limit_ratio": 0, "not_at_limit": 0, "insufficient_history": 1,
+        })
         actual_by_symbol = {row["symbol"]: row for row in actual["rows"]}
         for symbol, expected_row in expected.items():
             for key, value in expected_row.items():
@@ -106,6 +108,8 @@ class LimitUpRiskTests(unittest.TestCase):
         self.assertIn("amount / (b.volume * b.close / 10.0)", joined)
         self.assertIn("NOT coalesce(b.is_suspended, false)", joined)
         self.assertIn("b.pre_close > 0 AND b.open > 0", joined)
+        self.assertIn("b.close > 0", joined)
+        self.assertIn("AND close > 0", joined)
         self.assertIn("coalesce(nullif(b.limit_up, 0), limits.limit_up)", joined)
         self.assertIn("trading_date BETWEEN %s AND %s", joined)
         self.assertIn("DISTINCT ON (symbol)", joined)

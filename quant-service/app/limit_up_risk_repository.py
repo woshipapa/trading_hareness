@@ -68,7 +68,7 @@ def read_inputs(connection: Any, day: date) -> dict[str, Any]:
                       ORDER BY available_at DESC LIMIT 1
                  ) limits ON true
                 WHERE b.trading_date=%s AND b.symbol=ANY(%s)
-                  AND NOT coalesce(b.is_suspended, false) AND b.pre_close > 0 AND b.open > 0""",
+                  AND NOT coalesce(b.is_suspended, false) AND b.pre_close > 0 AND b.open > 0 AND b.close > 0""",
             (UNIT_RATIO, day, symbols),
         ).fetchall():
         bars[str(row["symbol"])] = {**dict(row), "prior_amounts": []}
@@ -81,6 +81,7 @@ def read_inputs(connection: Any, day: date) -> dict[str, Any]:
                    FROM quant.canonical_bars_daily
                   WHERE symbol=ANY(%s) AND trading_date BETWEEN %s AND %s
                     AND NOT coalesce(is_suspended, false) AND pre_close > 0 AND open > 0
+                    AND close > 0
              ) recent WHERE position<=20 ORDER BY symbol,position""",
         (UNIT_RATIO, symbols, day - timedelta(days=90), day - timedelta(days=1)),
     ).fetchall()
