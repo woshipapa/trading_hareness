@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.indicator_health import indicator_health, indicator_status
@@ -180,6 +181,14 @@ class SessionHealthTests(unittest.TestCase):
         day = indicator_health(_Connection(), DAY, at(10, 31), ["market.radar", "nope"])
         self.assertEqual(day["unknown_keys"], ["nope"])
         self.assertEqual(len(day["indicators"]), 1)
+
+    def test_auction_desk_is_pending_before_due_and_fails_when_missing_after_due(self):
+        self.assertEqual(indicator_status(_Connection(), "market.auction_open_desk", DAY, at(9, 26))["status"], "pending")
+        self.assertEqual(indicator_status(_Connection(), "market.auction_open_desk", DAY, at(9, 28))["status"], "fail")
+
+    def test_auction_desk_accepts_current_version_after_due(self):
+        with patch("app.indicator_health._stored_reading", return_value={"version": "auction-desk-v1", "rows": []}):
+            self.assertEqual(indicator_status(_Connection(), "market.auction_open_desk", DAY, at(9, 28))["status"], "ok")
 
 
 class LimitDetailHealthTests(unittest.TestCase):

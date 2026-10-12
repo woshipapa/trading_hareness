@@ -20,6 +20,7 @@
 | [0014](0014-feishu-relay-release-independent-of-owner-windows.md) | feishu-relay 的发布不受 owner 发布时间窗口限制 | 生效 |
 | [0015](0015-tdx-may-be-decision-evidence.md) | 通达信数据可以作为决策证据，并接入生产采集 | 生效 |
 | [0016](0016-limit-up-risk-score.md) | 涨停股次日大面风险分：只作研究展示 | 生效 |
+| [0017](0017-auction-open-desk.md) | 竞价采集与 09:25 处置表：只作研究展示 | 生效 |
 
 格式：
 

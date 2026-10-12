@@ -14,6 +14,8 @@ from ..indicator_registry import registry
 from ..limit_detail_read_model import limit_detail_day
 from ..limit_up_risk_runtime import daily_series as limit_up_risk_daily_series
 from ..limit_up_risk_runtime import track as limit_up_risk_track
+from ..auction_pool_runtime import daily_series as auction_open_desk_daily_series
+from ..auction_pool_runtime import track as auction_open_desk_track
 from ..market_radar_runtime import radar_day
 from ..market_temperature_intraday import read as temperature_intraday_read
 from ..market_temperature_runtime import daily_series as temperature_daily_series
@@ -110,6 +112,14 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
     @router.get("/api/v1/market/limit-up-risk/track")
     async def limit_up_risk_track_route(days: int = Query(250, ge=1, le=500)) -> dict[str, Any]:
         return await run_database_blocking(limit_up_risk_track, database, days, timeout_seconds=120)
+
+    @router.get("/api/v1/market/auction-desk/daily")
+    async def auction_open_desk_daily(trade_date: date | None = Query(None, alias="date")) -> dict[str, Any]:
+        return await run_database_blocking(auction_open_desk_daily_series, database, trade_date, timeout_seconds=30)
+
+    @router.get("/api/v1/market/auction-desk/track")
+    async def auction_open_desk_track_route(days: int = Query(120, ge=1, le=500)) -> dict[str, Any]:
+        return await run_database_blocking(auction_open_desk_track, database, days, timeout_seconds=120)
 
     @router.get("/api/v1/datasources/board")
     async def datasources_board_route() -> dict[str, Any]:

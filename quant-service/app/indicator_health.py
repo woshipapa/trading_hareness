@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from . import derived_daily_readings
 from .broad_etf_flow import FLOW_CAPABILITY as ETF_FLOW_CAPABILITY, MIN_CODES as ETF_MIN_CODES
-from .indicator_registry import BY_KEY, INTRADAY_MINUTE, PREVIOUS_SESSION, SESSION_OPEN
+from .indicator_registry import AUCTION_OPEN, BY_KEY, INTRADAY_MINUTE, PREVIOUS_SESSION, SESSION_OPEN
 from .limit_detail_read_model import limit_detail_day
 from .market_radar_runtime import latest_main_net, latest_point
 from .market_temperature import VERSION as TEMPERATURE_VERSION
@@ -48,6 +48,7 @@ MAX_MAIN_NET_SHARE = 0.25
 #: The close pipeline's indicators are due by this time on the session.
 POST_CLOSE_DUE = time(17, 30)
 MINUTE_DUE = time(9, 26)
+AUCTION_OPEN_DUE = time(9, 27)
 #: The session's limit prices are written by the first 小杰 scan after the open.
 SESSION_OPEN_DUE = time(9, 35)
 CONTINUOUS = ((time(9, 31), time(11, 30)), (time(13, 1), time(15, 0)))
@@ -81,7 +82,8 @@ def _due(trade_date: date, now: datetime, availability: str) -> bool:
         return True
     if local.date() < trade_date:
         return False
-    due = {INTRADAY_MINUTE: MINUTE_DUE, SESSION_OPEN: SESSION_OPEN_DUE}.get(availability, POST_CLOSE_DUE)
+    due = {INTRADAY_MINUTE: MINUTE_DUE, AUCTION_OPEN: AUCTION_OPEN_DUE,
+           SESSION_OPEN: SESSION_OPEN_DUE}.get(availability, POST_CLOSE_DUE)
     return local.time() >= due
 
 
@@ -277,6 +279,25 @@ def limit_up_risk_checks(connection: Any, trade_date: date, _now: datetime) -> l
             _check("version", OK, LIMIT_UP_RISK_VERSION, LIMIT_UP_RISK_VERSION)]
 
 
+def auction_open_desk_checks(connection: Any, trade_date: date, now: datetime) -> list[dict[str, Any]]:
+    local = now.astimezone(CN_TZ)
+    if local.date() != trade_date or local.time() < AUCTION_OPEN_DUE or local.weekday() >= 5:
+        return [_check("due", PENDING, None, "09:27", "开盘桌尚未到应判断时点")]
+    calendar = connection.execute(
+        "SELECT is_open FROM quant.market_trade_calendar WHERE exchange='SSE' AND calendar_date=%s",
+        (trade_date,),
+    ).fetchone()
+    if calendar and not calendar["is_open"]:
+        return [_check("due", PENDING, None, "open session", "闭市日不判断当日开盘桌")]
+    reading = _stored_reading(connection, "auction_open_desk_daily", trade_date)
+    if reading is None:
+        return [_check("present", FAIL, None, "stored", "当日集合竞价开盘桌未落库")]
+    from .auction_open_desk import VERSION
+    return [_check("present", OK, len(reading.get("rows") or []), "stored"),
+            _check("version", OK if reading.get("version") == VERSION else FAIL,
+                   reading.get("version"), VERSION)]
+
+
 def broad_etf_flow_checks(connection: Any, trade_date: date, _now: datetime) -> list[dict[str, Any]]:
     reading = _stored_reading(connection, ETF_FLOW_CAPABILITY, trade_date)
     if reading is None or reading.get("ratio") is None:
@@ -365,6 +386,7 @@ CHECKS: dict[str, Callable[[Any, date, datetime], list[dict[str, Any]]]] = {
     "market.minute_documents": minute_document_checks, "market.temperature": temperature_checks,
     "market.broad_etf_flow": broad_etf_flow_checks, "market.timing": timing_checks,
     "market.limit_up_risk": limit_up_risk_checks,
+    "market.auction_open_desk": auction_open_desk_checks,
     **{key: _session_checks(key) for key in ("board.concept_strength", "board.concept_flow", "board.industry_flow",
                                              "stock.money_flow", "stock.limit_prices", "strategy.ledger", "events.lhb")},
 }
@@ -406,4 +428,4 @@ def indicator_health(connection: Any, trade_date: date, now: datetime, keys: lis
     }
 
 
-__all__ = ["CHECKS", "DERIVED", "indicator_health", "indicator_status", "limit_up_risk_checks"]
+__all__ = ["CHECKS", "DERIVED", "auction_open_desk_checks", "indicator_health", "indicator_status", "limit_up_risk_checks"]

@@ -72,7 +72,10 @@ def validate_capability_query(capability: str, params: dict[str, Any]) -> str:
     return path
 
 
-async def fetch_envelope(capability: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+async def fetch_envelope(
+    capability: str, params: dict[str, Any] | None = None, *,
+    slot_wait_seconds: float = FUYAO_SLOT_MAX_WAIT_SECONDS,
+) -> dict[str, Any]:
     """Call one allowlisted route and retain the official diagnostic envelope."""
     key = _api_key()
     if not key:
@@ -81,7 +84,7 @@ async def fetch_envelope(capability: str, params: dict[str, Any] | None = None) 
     path = validate_capability_query(capability, safe_params)
     last_transport_error: Exception | None = None
     try:
-        await acquire_public_provider_slot(FUYAO_PROVIDER_KEY, max_wait_seconds=FUYAO_SLOT_MAX_WAIT_SECONDS)
+        await acquire_public_provider_slot(FUYAO_PROVIDER_KEY, max_wait_seconds=slot_wait_seconds)
     except PublicProviderRateLimited as error:
         raise FuyaoProviderError(str(error)) from error
     async with provider_http_client(FUYAO_PROVIDER_KEY, "") as client:
@@ -134,9 +137,12 @@ async def fetch_envelope(capability: str, params: dict[str, Any] | None = None) 
     )
 
 
-async def fetch(capability: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+async def fetch(
+    capability: str, params: dict[str, Any] | None = None, *,
+    slot_wait_seconds: float = FUYAO_SLOT_MAX_WAIT_SECONDS,
+) -> dict[str, Any]:
     """Compatibility data-only view over :func:`fetch_envelope`."""
-    return dict((await fetch_envelope(capability, params))["data"])
+    return dict((await fetch_envelope(capability, params, slot_wait_seconds=slot_wait_seconds))["data"])
 
 
 def _number(value: Any) -> float | None:
