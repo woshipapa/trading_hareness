@@ -15,11 +15,13 @@
 （`fuyao_ths` / `a_share_minute_cross_section`，`symbol` 为空）。逐只行
 （`a_share_prices_snapshot`）只由显式的兼容模式继续写入。
 
-**写进去之后读回来的只有三处：**
+**写进去之后读回来的地方（2026-10-12 逐处核对，见 `docs/archive/2026-10-12-level1-snapshot-readers.md`）：**
 
 - 最新全 A 快照接口：只要最近一分钟；
 - 战法卡片：按股票取当日最新和 09:25 的值；
-- 雷达回放：计划中。
+- 分时情绪温度：当日的分钟文档；
+- 盘后分钟面板导出（`minute_cross_section_export`）：一天的全部文档；
+- 指标自检 `market.minute_documents`：只数文档的存在、间隔和体积。
 
 逐只行的归档、分层和历史回放仍按旧 capability 工作；分钟文档 capability
 尚未加入 tiering 或 overflow archive allowlist，当前留在热表。
@@ -47,8 +49,8 @@
    - 估计每行 0.3–0.6 MB（未压缩的 JSONB），TOAST 压缩后 0.2–0.3 MB。每交易日约 240 行、约 90 MB，约为现在的 1/20–1/30；这些文档暂时留在热表。
    - **不需要 DDL**：沿用现有的 `(capability, symbol, effective_at)` 索引。文档 capability 尚未列入冷热分层和溢出归档，新增 retention allowlist 是后续工作；owner 库目前处在对方的 `20261008_0118` 上，我们新增迁移前必须先拿到它的源文件（见附录 C 2026-10-09 记录）。
 2. **读侧只走一个仓库模块 `minute_cross_section`。**
-   - 它提供四个函数：`latest(day)`、`at_or_before(minute)`、`first_between(09:25, 09:30)`、`panel(day, fields)`。
-   - 最新快照接口、战法卡片、雷达回放、研究面板都从这里取。
+   - 读取函数：`latest(day)`、`latest_async()`、`first_between(start, end)`、`day_documents(day)`、`recent()`（进程内存），以及把文档还原成行的 `rows_of`、`rows_for`。
+   - 最新快照接口、战法卡片、分时情绪温度、盘后分钟面板导出都从这里取。
    - 2026-10-09 之前的日子回退读旧的逐只行。
 3. **最新截面走内存。** 采集进程保留最近一分钟的截面，最新快照接口优先从内存返回，数据库只用于冷启动和兜底。
 4. **冷数据按天导出。**
