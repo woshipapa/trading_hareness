@@ -40,7 +40,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -216,13 +216,37 @@ def agrees(left: Any, right: Any, rel_tol: float, abs_tol: float) -> bool:
     return gap[0] <= abs_tol or gap[1] <= rel_tol
 
 
+def _closed_minute(key: tuple, entry: Mapping[str, Any], finished_utc: datetime) -> bool:
+    bar_time = datetime.fromisoformat(key[entry["key"].index("bar_time")])
+    return bar_time.replace(second=0, microsecond=0) + timedelta(minutes=1) <= finished_utc
+
+
+def _scope_rows(entry: Mapping[str, Any], left: Mapping[tuple, dict[str, Any]],
+                right: Mapping[tuple, dict[str, Any]], finished_utc: datetime) -> tuple[
+                    Mapping[tuple, dict[str, Any]], Mapping[tuple, dict[str, Any]], dict[str, Any] | None]:
+    if not entry.get("reference_span"):
+        return left, right, None
+    if "bar_time" in entry["key"]:
+        left = {key: row for key, row in left.items() if _closed_minute(key, entry, finished_utc)}
+        right = {key: row for key, row in right.items() if _closed_minute(key, entry, finished_utc)}
+    if not right:
+        return {}, {}, {"first_key": None, "last_key": None, "binding_rows": 0, "reference_rows": 0}
+    first_key, last_key = min(right), max(right)
+    scoped_left = {key: row for key, row in left.items() if first_key <= key <= last_key}
+    return scoped_left, right, {"first_key": list(first_key), "last_key": list(last_key),
+                                "binding_rows": len(scoped_left), "reference_rows": len(right)}
+
+
 def compare_field(name: str, entry: Mapping[str, Any], left: Mapping[tuple, dict[str, Any]],
-                  right: Mapping[tuple, dict[str, Any]], unusable: str) -> dict[str, Any]:
+                  right: Mapping[tuple, dict[str, Any]], unusable: str,
+                  reference_span: dict[str, Any] | None = None) -> dict[str, Any]:
     """One field over the rows both sides have; ``why`` is empty when the field agrees."""
     rel_tol, abs_tol = entry.get("rel_tol", 0.0), entry.get("abs_tol", 0.0)
     min_coverage = entry.get("min_coverage", MIN_COVERAGE)
     summary = {"reference": entry["reference"], "key": list(entry["key"]), "rel_tol": rel_tol, "abs_tol": abs_tol,
                "min_coverage": min_coverage}
+    if reference_span is not None:
+        summary["reference_span"] = reference_span
     if unusable:
         return {**summary, "agree": False, "why": unusable}
     common = [key for key in left if key in right]
@@ -259,7 +283,11 @@ def compare(source: str, agreement: Mapping[str, Mapping[str, Any]], bindings: M
         theirs, their_why = reading(bindings[reference], probes[adapter or reference], projection)
         left, left_why = keyed(mine, entry["key"], source)
         right, right_why = keyed(theirs, entry["key"], reference)
-        result[name] = compare_field(name, entry, left, right, mine_why or their_why or left_why or right_why)
+        finished_utc = min(datetime.fromisoformat(probes[source]["finished_utc"]),
+                           datetime.fromisoformat(probes[adapter or reference]["finished_utc"]))
+        left, right, reference_span = _scope_rows(entry, left, right, finished_utc)
+        result[name] = compare_field(name, entry, left, right,
+                                     mine_why or their_why or left_why or right_why, reference_span)
     return result
 
 

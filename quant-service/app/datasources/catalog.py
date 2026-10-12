@@ -297,7 +297,7 @@ _TDX_POOL_NOTE = (
 # (scripts/data/tdx_f7_1m_volume_2026-10-10_mac.json: 238 of 240 minutes equal after lots * 100, the others being the
 # opening-auction minute and a denormal near zero, so a check of minute bars asks for a window after the first minute).
 _TENCENT_MINUTES = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_intraday_minutes",
-                    "reference_params": {"symbol": "symbol"}, "key": ["symbol", "bar_time"]}
+                    "reference_params": {"symbol": "symbol"}, "key": ["symbol", "bar_time"], "reference_span": True}
 _TENCENT_QUOTES = {"reference": "tencent_free", "reference_adapter": "app/free_market_providers.py:tencent_order_book_quotes",
                    "reference_params": {"symbols": "symbols"}, "key": ["symbol"]}
 _TENCENT_LIMITS = {"reference": "tencent_free", "reference_adapter": "app/longhu_vendor_source.py:tencent_quotes_blocking",
@@ -1035,7 +1035,7 @@ def evidence_locations(capability: str) -> list[dict[str, Any]]:
 #: The keys of an agreement entry (``contracts.BindingSpec.agreement``), and the row identities its ``key`` may use besides
 #: the capability's own canonical fields.
 AGREEMENT_KEYS: Final = frozenset({"reference", "reference_adapter", "reference_params", "reference_fixed", "key", "rel_tol",
-                                   "abs_tol", "min_coverage"})
+                                   "abs_tol", "min_coverage", "reference_span"})
 AGREEMENT_IDENTITY: Final = frozenset({"symbol", "trade_date"})
 
 
