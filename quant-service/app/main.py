@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from time import monotonic
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Awaitable, Callable, Literal, Mapping
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -442,6 +442,7 @@ from .edge_evidence_transfer import (
     prune_change_journal as prune_edge_change_journal,
 )
 from .market_session_repository import (
+    market_observation_session_async as read_blocking_market_observation_session,
     realtime_market_session as read_realtime_market_session,
     sse_calendar_open as read_sse_calendar_open,
     sse_calendar_status as read_sse_calendar_status,
@@ -825,6 +826,9 @@ def local_research_storage_governance(database: Database = db) -> dict[str, Any]
 _research_storage_admission = ResearchStorageAdmission(
     status_fn=local_research_storage_governance, run_database=run_database_blocking,
 )
+_tdx_shadow_storage_admission = ResearchStorageAdmission(
+    status_fn=local_research_storage_governance, run_database=run_tdx_shadow_blocking,
+)
 
 
 async def nonessential_high_frequency_capture_allowed() -> tuple[bool, dict[str, Any]]:
@@ -835,6 +839,10 @@ async def nonessential_high_frequency_capture_allowed() -> tuple[bool, dict[str,
     outcomes and durable delivery keep running even at the stop watermark.
     """
     return await _research_storage_admission.optional_high_frequency_allowed()
+
+
+async def tdx_shadow_storage_allowed() -> tuple[bool, dict[str, Any]]:
+    return await _tdx_shadow_storage_admission.optional_high_frequency_allowed()
 
 
 async def exempt_intraday_evidence_capture_allowed() -> tuple[bool, dict[str, Any]]:
@@ -3146,10 +3154,11 @@ market_radar = MarketRadarRuntime(MarketRadarDependencies(
 
 tdx_shadow_runtime = TdxShadowSnapshotRuntime(TdxShadowSnapshotDependencies(
     fetch_snapshot=fetch_tdx_all_a_snapshot,
-    session_open=lambda now: market_observation_session_async(now=now),
+    session_open=lambda now: market_observation_session_async(now=now, database_runner=run_tdx_shadow_blocking),
     run_database=run_tdx_shadow_blocking,
     database=db,
     recent_reference=minute_cross_section.recent,
+    storage_allowed=tdx_shadow_storage_allowed,
 ))
 
 
@@ -3606,7 +3615,11 @@ async def realtime_market_session_async(api_name: str | None = None, now: dateti
     return await read_async_realtime_market_session(async_db, api_name, now)
 
 
-async def market_observation_session_async(now: datetime | None = None) -> tuple[bool, str]:
+async def market_observation_session_async(
+    now: datetime | None = None, *, database_runner: Callable[..., Awaitable[Any]] | None = None,
+) -> tuple[bool, str]:
+    if database_runner is not None:
+        return await read_blocking_market_observation_session(db, now, database_runner=database_runner)
     return await read_async_market_observation_session(async_db, now)
 
 

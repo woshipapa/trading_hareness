@@ -14,6 +14,7 @@ from app.tdx_shadow_snapshot_runtime import (
     TdxShadowSnapshotDependencies,
     TdxShadowSnapshotRuntime,
     day_summary,
+    persist_shadow_capture,
 )
 
 
@@ -35,14 +36,19 @@ def evidence():
 
 class TdxShadowCaptureTests(unittest.TestCase):
     def dependencies(self, *, fetch=None, session=True, recent=(NOW - timedelta(seconds=2), [FUYAO_ROW]),
-                     acquire=None, run_database=None, persisted=None):
+                     acquire=None, run_database=None, persisted=None, storage=True):
         calls = []
 
         async def fetch_snapshot():
             return await (fetch or (lambda: asyncio.sleep(0, result=evidence())))()
 
         async def session_open(_now):
+            if isinstance(session, BaseException):
+                raise session
             return session
+
+        async def storage_allowed():
+            return storage, {"allow_nonessential_high_frequency": storage}
 
         async def acquire_slot(_provider, *, max_wait_seconds):
             if acquire:
@@ -62,7 +68,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
         deps = TdxShadowSnapshotDependencies(
             fetch_snapshot=fetch_snapshot, session_open=session_open, run_database=run_db,
             database=object(), recent_reference=lambda _now: recent,
-            acquire_slot=acquire_slot, persist_capture=persist_capture,
+            acquire_slot=acquire_slot, persist_capture=persist_capture, storage_allowed=storage_allowed,
         )
         return TdxShadowSnapshotRuntime(deps), calls
 
@@ -85,6 +91,24 @@ class TdxShadowCaptureTests(unittest.TestCase):
         runtime, calls = self.dependencies(session=False, fetch=lambda: (_ for _ in ()).throw(AssertionError()))
         result = asyncio.run(runtime.capture(NOW))
         self.assertEqual(result["status"], "outside_session")
+        self.assertEqual(calls, [])
+
+    def test_session_database_busy_does_not_read(self):
+        runtime, calls = self.dependencies(
+            session=ExecutorSaturatedError("tdx shadow calendar busy"),
+            fetch=lambda: (_ for _ in ()).throw(AssertionError()),
+        )
+        result = asyncio.run(runtime.capture(NOW))
+        self.assertEqual(result["status"], "database_busy")
+        self.assertEqual(calls, [])
+
+    def test_storage_pause_does_not_read(self):
+        runtime, calls = self.dependencies(
+            storage=False,
+            fetch=lambda: (_ for _ in ()).throw(AssertionError()),
+        )
+        result = asyncio.run(runtime.capture(NOW))
+        self.assertEqual(result["status"], "storage_paused")
         self.assertEqual(calls, [])
 
     def test_rate_limit_refusal_is_reported(self):
@@ -149,6 +173,47 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(timed_out["status"], "timeout")
         self.assertEqual(calls, ["fetch"])
 
+    def test_cancelled_read_consumes_late_error_and_keeps_busy_slot(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+        loop_errors = []
+
+        async def fetch():
+            calls.append("fetch")
+            started.set()
+            await release.wait()
+            raise RuntimeError("late tdx failure")
+
+        runtime, _ = self.dependencies(fetch=fetch)
+
+        async def scenario():
+            loop = asyncio.get_running_loop()
+            loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+            capture = asyncio.create_task(runtime.capture(NOW))
+            await started.wait()
+            capture.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await capture
+            busy = await runtime.capture(NOW)
+            release.set()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            finished = await runtime.capture(NOW)
+            return busy, finished
+
+        busy, finished = asyncio.run(scenario())
+        self.assertEqual(busy["status"], "busy")
+        self.assertEqual(finished["status"], "failed")
+        self.assertEqual(loop_errors, [])
+        self.assertEqual(calls, ["fetch", "fetch"])
+
+    def test_comparison_failure_propagates_after_document_write(self):
+        with patch("app.tdx_shadow_snapshot_runtime.persist_document", return_value={"rows": 1}), \
+             patch("app.tdx_shadow_snapshot_runtime.persist_timed_observations", side_effect=RuntimeError("comparison down")):
+            with self.assertRaisesRegex(RuntimeError, "comparison down"):
+                persist_shadow_capture(object(), NOW, [], {}, {"status": "compared"})
+
 
 class TdxShadowSummaryTests(unittest.TestCase):
     def test_indicator_health_document_check_does_not_read_shadow_documents(self):
@@ -167,7 +232,9 @@ class TdxShadowSummaryTests(unittest.TestCase):
         self.assertTrue(all("fuyao_ths" in sql and "a_share_minute_cross_section" in sql for sql, _ in calls))
 
     def test_summary_reads_only_shadow_streams_and_aggregates_comparisons(self):
-        docs = [{"effective_at": NOW, "normalized": {"rows": 2}}]
+        docs = [{"effective_at": NOW, "normalized": {"rows": 2}},
+                {"effective_at": NOW + timedelta(minutes=1), "normalized": {"rows": 2}},
+                {"effective_at": NOW + timedelta(minutes=2), "normalized": {"rows": 2}}]
         comparisons = [{
             "effective_at": NOW, "normalized": {
                 "status": "compared", "comparison": {
@@ -200,7 +267,8 @@ class TdxShadowSummaryTests(unittest.TestCase):
                 return Tx()
 
         result = day_summary(Database(), date(2026, 10, 12))
-        self.assertEqual(result["stored_minutes"], 1)
+        self.assertEqual(result["stored_minutes"], 3)
+        self.assertEqual(result["documents_without_comparison"], 1)
         self.assertEqual(result["minutes_compared"], 1)
         self.assertEqual(result["no_reference_minutes"], 1)
         self.assertEqual(result["largest_price_gap"]["symbol"], "000001.SZ")

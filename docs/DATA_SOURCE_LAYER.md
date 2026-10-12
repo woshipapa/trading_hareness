@@ -282,7 +282,8 @@ Longhu 量能标签在目录中保持 `rule_usable_flow=False`。
 ## 6. 调度与部署
 
 盘中 shadow loop 与 `all_a_level1_snapshot` 同属 `intraday_edge` runtime profile，只在 owner 的 quant-research 服务运行；研究 profile 的 `quant-research-scheduler`、standalone 的 research profile 和其他 profile 都不会启动它。它有独立的一 worker、零队列数据库执行边界，避免 shadow 写入占住 level1 的共享执行器；TDX 读超时后任务仍占用自己的读槽位，下一分钟在任务结束前只报告 `busy`。
-按扶摇分钟文档的实测大小，shadow 文档每天约增加 90 MB，和扶摇文档一样留在 hot 表；保留策略等 phase B 决定后再跟进，不在本阶段新增 tiering 或归档。
+按扶摇分钟文档的实测大小，shadow 文档每天约增加 90 MB，和扶摇文档一样留在 hot 表，并计入 hot-storage budget；当可选高频采集不被 storage admission 允许时，shadow loop 自行暂停。保留策略等 phase B 决定后再跟进，不在本阶段新增 tiering 或归档。
+`public_provider_rate_limits` 中声明的 `tdx_public` 每分钟上限只约束 shadow loop 自己的调用；datasource research 读取和 collectors 仍直接调用 `tdx_protocol.call()`，不经过这个 limiter。因而 shadow snapshot 可以同时与另一条 TDX 读取在各自连接上运行。
 
 | 任务（租约键 `background_loop:<label>`） | 归属 profile | 内容 |
 |---|---|---|

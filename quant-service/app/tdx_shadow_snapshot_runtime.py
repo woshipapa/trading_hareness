@@ -65,14 +65,11 @@ def persist_shadow_capture(database: Any, observed_at: datetime, rows: list[dict
         database, observed_at, rows, metadata,
         provider=SHADOW_PROVIDER, capability=SHADOW_CAPABILITY,
     )
-    try:
-        comparison_stored = persist_timed_observations(
-            database, AGREEMENT_PROVIDER, AGREEMENT_CAPABILITY,
-            [{**dict(comparison_row), "effective_at": observed_at.isoformat(),
-              "available_at": datetime.now(timezone.utc).isoformat()}],
-        )
-    except Exception as error:  # noqa: BLE001 - the document remains useful when its derived row fails
-        return {"document": document, "comparison": {"status": "failed", "error": safe_error_detail(str(error), 200)}}
+    comparison_stored = persist_timed_observations(
+        database, AGREEMENT_PROVIDER, AGREEMENT_CAPABILITY,
+        [{**dict(comparison_row), "effective_at": observed_at.isoformat(),
+          "available_at": datetime.now(timezone.utc).isoformat()}],
+    )
     return {"document": document, "comparison": {"status": "stored", "rows": comparison_stored}}
 
 
@@ -83,6 +80,7 @@ class TdxShadowSnapshotDependencies:
     run_database: Callable[..., Awaitable[Any]]
     database: Any
     recent_reference: Callable[[datetime], tuple[datetime, list[dict[str, Any]]] | None]
+    storage_allowed: Callable[[], Awaitable[tuple[bool, dict[str, Any]]]]
     acquire_slot: Callable[..., Awaitable[None]] = acquire_public_provider_slot
     persist_capture: Callable[[Any, datetime, list[dict[str, Any]], Mapping[str, Any], Mapping[str, Any]], dict[str, Any]] = persist_shadow_capture
 
@@ -103,25 +101,37 @@ class TdxShadowSnapshotRuntime:
 
     async def capture(self, observed_at: datetime | None = None) -> dict[str, Any]:
         observed = observed_at or datetime.now(timezone.utc)
-        session_result = await self.deps.session_open(observed)
+        try:
+            session_result = await self.deps.session_open(observed)
+        except ExecutorSaturatedError as error:
+            return {"status": "database_busy", "error": str(error), "stored": 0}
         active = bool(session_result[0]) if isinstance(session_result, tuple) else bool(session_result)
         if not active:
+            if isinstance(session_result, tuple) and "capacity unavailable" in session_result[1]:
+                return {"status": "database_busy", "error": session_result[1], "stored": 0}
             return {"status": "outside_session", "stored": 0}
         if self._read_task is not None:
             if not self._read_task.done():
                 return {"status": "busy", "stored": 0}
             self._read_task = None
         try:
+            allowed, storage = await self.deps.storage_allowed()
+        except ExecutorSaturatedError as error:
+            return {"status": "database_busy", "error": str(error), "stored": 0}
+        if not allowed:
+            return {"status": "storage_paused", "storage": storage, "stored": 0}
+        try:
             await self.deps.acquire_slot(SHADOW_PROVIDER, max_wait_seconds=0)
         except PublicProviderRateLimited as error:
             return {"status": "rate_limited", "error": str(error), "stored": 0}
         task = asyncio.create_task(self.deps.fetch_snapshot(), name="tdx-shadow-read")
         self._read_task = task
+        task.add_done_callback(self._consume_late_exception)
         try:
-            result = await asyncio.wait_for(asyncio.shield(task), timeout=TDX_READ_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
-            task.add_done_callback(self._consume_late_exception)
-            return {"status": "timeout", "stored": 0}
+            done, _ = await asyncio.wait({task}, timeout=TDX_READ_TIMEOUT_SECONDS)
+            if not done:
+                return {"status": "timeout", "stored": 0}
+            result = task.result()
         except Exception as error:  # noqa: BLE001 - capture outcome is bounded and secret-free
             self._read_task = None
             return {"status": "failed", "error": safe_error_detail(str(error), 300), "stored": 0}
