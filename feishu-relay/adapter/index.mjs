@@ -363,11 +363,26 @@ const historyRowFromBridge = (payload) => historyRow(payload, { normalize: norma
 const groupSync = createGroupSync({
 	ledger, toRow: historyRowFromBridge, log: (line) => console.log(line),
 	bridge: {
-		joined: () => bridgePostJson('/chats/joined', { refresh: true }, 60_000),
+		joined: () => joinedGroupsWithRoutes(true),
 		membership: (chatIds) => bridgePostJson('/chats/membership', { chat_ids: chatIds }, 60_000),
 		page: (chatId, start, end) => bridgePostJson('/history/page', { chat_id: chatId, start, end }, 60_000),
 	},
 });
+// The bridge knows the bindings it saved; the routes declared in this
+// adapter's environment are known only here.  Both are bound groups, and only
+// a group whose route still exists counts.
+async function joinedGroupsWithRoutes(refresh) {
+	const [joined, byKey, routes] = await Promise.all([bridgePostJson('/chats/joined', { refresh: Boolean(refresh) }, 60_000), numericChatIdsByRoute(), ledger.relayRoutes()]);
+	const routeByKey = new Map(routes.map((route) => [route.key, route]));
+	const bound = new Map();
+	for (const item of joined?.bound ?? []) if (routeByKey.has(item.source_key)) bound.set(String(item.chat_id), item);
+	for (const [sourceKey, chatIds] of byKey) {
+		if (!routeByKey.has(sourceKey)) continue;
+		for (const chatId of chatIds) if (!bound.has(chatId)) bound.set(chatId, { chat_id: chatId, source_key: sourceKey, chat_name: routeByKey.get(sourceKey).chatName ?? '' });
+	}
+	return { groups: joined?.groups ?? [], bound: [...bound.values()] };
+}
+
 async function runGroupSync() {
 	if (!larkAgentXIngressToken) return;
 	// One writer keeps the stored state; a second adapter on the same database only reads it.
@@ -2277,7 +2292,7 @@ async function createRelayRoute(payload) {
 async function refuseGroupBoundElsewhere(websocketChatId, ownKey) {
 	const chatId = String(websocketChatId ?? '').trim();
 	if (!chatId) return;
-	const joined = await bridgePostJson('/chats/joined', {}, 60_000).catch(() => null);
+	const joined = await joinedGroupsWithRoutes(false).catch(() => null);
 	const holder = (joined?.bound ?? []).find((item) => String(item.chat_id) === chatId && item.source_key !== ownKey);
 	if (!holder) return;
 	const route = (await ledger.relayRoutes()).find((item) => item.key === holder.source_key);
@@ -2457,7 +2472,7 @@ const dashboard = createServer((request, response) => {
 		void (async () => {
 			let live = null;
 			let error = null;
-			try { live = await bridgePostJson('/chats/joined', { refresh: url.searchParams.get('refresh') === '1' }, 60_000); }
+			try { live = await joinedGroupsWithRoutes(url.searchParams.get('refresh') === '1'); }
 			catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
 			if (live?.groups) await ledger.recordJoinedGroups(live.groups).catch(() => {});
 			const [states, routes] = await Promise.all([ledger.groupChatStates(), ledger.relayRoutes()]);
