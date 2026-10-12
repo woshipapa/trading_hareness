@@ -242,7 +242,7 @@ API），官方 OAuth 应用只做精确补读与兜底。
 - **群目录**：bridge `POST /chats/joined` 读账号的会话列表（`feed.PullFeedCardsRequest`，INBOX 与 DONE 两个列表都读），返回已加入的群和每个群绑定的路由。adapter `GET /api/group-relay/chats` 给前端用；第一次读到的目录是基线，之后才出现的群标为“新加入”（14 天内、未绑定）。
 - **建立映射**：前端从群目录里选源群，保存时带上数字 ID（`websocket_chat_id`），bridge 按 ID 直接绑定并核对群名，不再依赖 OAuth 按群名搜索。同一个群只能绑定一条路由，保存前就会拒绝。目标群从已配置 webhook 的目标里选；新增目标群仍需先在服务器上配置它的 webhook（凭据）。
 - **成员身份**：bridge `POST /chats/membership` 用 `chats.PullChatsRoleRequest` 判断，非 MEMBER 时再用 `chats.CheckChattersInChatRequest` 确认；确认调用失败记为“未知”，不会记成退群。adapter 每 5 分钟核对一次所有已绑定的群，连续两次否定才标记 `left` / `dissolved`，重新入群后自动恢复。状态在 `feishu_group_chat_state`。
-- **退群自动清理**（2026-10-12）：标记 `left` / `dissolved` 之后再确认一次（共连续三次否定，约 10 分钟），adapter 自动删除这条路由并解除 WebSocket 绑定；由多个群供给的路由要全部退群才删。路由原来的标签和目标群记在 `feishu_group_chat_state.removed_route`，监听页会提示最近 14 天清理过的路由。已转发的消息和历史副本不删。删除（无论手动还是自动）会留下 `removed:<source_key>` 标记，配置里声明的路由不会在下次启动时被重新建出来。重新入群后该群按“新加入”提示。
+- **退群自动停用**（2026-10-12）：标记 `left` / `dissolved` 之后再确认一次（共连续三次否定，约 10 分钟），adapter 自动把这条路由归档：停用、解除 WebSocket 绑定，但路由保留（`feishu_group_relay_routes.archived_at / archived_reason / archived_chat_ids`）。监听页仍列出它，状态为“已退群”，照常可以导出资料包。由多个群供给的路由要全部退群才归档。归档路由的群仍在每 5 分钟的核对里：账号重新入群后，路由自动恢复并按原来的群 ID 重新绑定。手动把归档路由改回启用也会取消归档。手动删除才是真删，会留下 `removed:<source_key>` 标记，配置里声明的路由不会在下次启动时被重新建出来。
 - **历史副本**：每个已绑定且仍在群里的群，后台按 position 从头读到尾（每 30 秒最多 6 页、每页 50 个 position，剩余最少的群先读），写入 `feishu_group_history_messages`，之后随新消息增量跟进。完整导出在读不到群（已退群）时改用这份副本；已退群且没有副本时只导出已转发的消息，并在 transcript 里写明。
 - **限制**：副本只存消息内容和图片密钥，不存图片文件本身；退群后图片能否再下载没有验证过。编辑和撤回不会回写副本。
 

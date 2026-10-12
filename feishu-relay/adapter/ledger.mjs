@@ -3,6 +3,15 @@ import { Pool } from 'pg';
 // A config-declared route is materialized on every start, unless it was
 // removed (by the operator, or because the account left its group): a removed
 // route leaves a marker, and the marker keeps it from coming back.
+const RELAY_ROUTE_COLUMNS = 'source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids,archived_at,archived_reason,archived_chat_ids,created_at,updated_at';
+export function relayRouteFromRow(row) {
+	return {
+		key: row.source_key, chatId: row.chat_id, chatName: row.chat_name, tag: row.route_tag, targetChatIds: Array.isArray(row.target_chat_ids) ? row.target_chat_ids : [], enabled: row.enabled !== false,
+		archivedAt: row.archived_at ?? null, archivedReason: row.archived_at ? row.archived_reason ?? 'left' : null, archivedChatIds: Array.isArray(row.archived_chat_ids) ? row.archived_chat_ids.map(String) : [],
+		created_at: row.created_at, updated_at: row.updated_at,
+	};
+}
+
 export const removedRouteMarker = (sourceKey) => `removed:${sourceKey}`;
 export function relayRouteSeedSql() {
 	return `INSERT INTO feishu_group_relay_routes(source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids)
@@ -130,6 +139,9 @@ export function createLedger(connectionString) {
 				ALTER TABLE feishu_group_relay_messages ADD COLUMN IF NOT EXISTS source_deleted boolean NOT NULL DEFAULT false;
 				ALTER TABLE feishu_group_relay_messages ADD COLUMN IF NOT EXISTS reconciled_at timestamptz;
 				ALTER TABLE feishu_group_relay_routes ADD COLUMN IF NOT EXISTS target_chat_ids jsonb NOT NULL DEFAULT '[]'::jsonb;
+				ALTER TABLE feishu_group_relay_routes ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+				ALTER TABLE feishu_group_relay_routes ADD COLUMN IF NOT EXISTS archived_reason text;
+				ALTER TABLE feishu_group_relay_routes ADD COLUMN IF NOT EXISTS archived_chat_ids jsonb NOT NULL DEFAULT '[]'::jsonb;
 				ALTER TABLE feishu_group_relay_messages ADD COLUMN IF NOT EXISTS target_chat_ids jsonb NOT NULL DEFAULT '[]'::jsonb;
 			ALTER TABLE feishu_group_relay_messages ADD COLUMN IF NOT EXISTS intelligence jsonb NOT NULL DEFAULT '{}'::jsonb;
 			ALTER TABLE feishu_summary_listener_state ADD COLUMN IF NOT EXISTS last_source_create_time bigint;
@@ -292,19 +304,31 @@ export function createLedger(connectionString) {
 			return this.relayRoutes();
 		},
 		async relayRoutes() {
-			const { rows } = await pool.query(`SELECT source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids,created_at,updated_at FROM feishu_group_relay_routes ORDER BY created_at,source_key`);
-			return rows.map((row) => ({ key: row.source_key, chatId: row.chat_id, chatName: row.chat_name, tag: row.route_tag, targetChatIds: Array.isArray(row.target_chat_ids) ? row.target_chat_ids : [], enabled: row.enabled !== false, created_at: row.created_at, updated_at: row.updated_at }));
+			const { rows } = await pool.query(`SELECT ${RELAY_ROUTE_COLUMNS} FROM feishu_group_relay_routes ORDER BY created_at,source_key`);
+			return rows.map(relayRouteFromRow);
 		},
 		async createRelayRoute({ sourceKey, chatId, chatName, tag, targetChatIds = [], enabled = true }) {
-			const { rows } = await pool.query(`INSERT INTO feishu_group_relay_routes(source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids) VALUES($1,$2,$3,$4,$5,$6) RETURNING source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids,created_at,updated_at`, [sourceKey, chatId, chatName, tag, enabled, JSON.stringify(targetChatIds)]);
-			const row = rows[0];
-			return { key: row.source_key, chatId: row.chat_id, chatName: row.chat_name, tag: row.route_tag, targetChatIds: row.target_chat_ids, enabled: row.enabled !== false, created_at: row.created_at, updated_at: row.updated_at };
+			const { rows } = await pool.query(`INSERT INTO feishu_group_relay_routes(source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids) VALUES($1,$2,$3,$4,$5,$6) RETURNING ${RELAY_ROUTE_COLUMNS}`, [sourceKey, chatId, chatName, tag, enabled, JSON.stringify(targetChatIds)]);
+			return relayRouteFromRow(rows[0]);
 		},
+		// Enabling a route by hand also takes it out of the archive.
 		async updateRelayRoute(sourceKey, { chatId, chatName, tag, targetChatIds = [], enabled }) {
-			const { rows } = await pool.query(`UPDATE feishu_group_relay_routes SET chat_id=$2,chat_name=$3,route_tag=$4,enabled=$5,target_chat_ids=$6,updated_at=now() WHERE source_key=$1 RETURNING source_key,chat_id,chat_name,route_tag,enabled,target_chat_ids,created_at,updated_at`, [sourceKey, chatId, chatName, tag, enabled, JSON.stringify(targetChatIds)]);
-			if (!rows[0]) return null;
-			const row = rows[0];
-			return { key: row.source_key, chatId: row.chat_id, chatName: row.chat_name, tag: row.route_tag, targetChatIds: row.target_chat_ids, enabled: row.enabled !== false, created_at: row.created_at, updated_at: row.updated_at };
+			const { rows } = await pool.query(`UPDATE feishu_group_relay_routes SET chat_id=$2,chat_name=$3,route_tag=$4,enabled=$5,target_chat_ids=$6,
+				archived_at=CASE WHEN $5 THEN NULL ELSE archived_at END,archived_reason=CASE WHEN $5 THEN NULL ELSE archived_reason END,updated_at=now()
+				WHERE source_key=$1 RETURNING ${RELAY_ROUTE_COLUMNS}`, [sourceKey, chatId, chatName, tag, enabled, JSON.stringify(targetChatIds)]);
+			return rows[0] ? relayRouteFromRow(rows[0]) : null;
+		},
+		// The account left the route's group: the route stops (disabled) but stays,
+		// marked with why and with the group ids it had, so its messages can still be exported.
+		async archiveRelayRoute(sourceKey, { reason = 'left', chatIds = [] } = {}) {
+			const { rows } = await pool.query(`UPDATE feishu_group_relay_routes SET enabled=false,archived_at=now(),archived_reason=$2,archived_chat_ids=$3,updated_at=now()
+				WHERE source_key=$1 AND archived_at IS NULL RETURNING ${RELAY_ROUTE_COLUMNS}`, [sourceKey, reason, JSON.stringify(chatIds.map(String))]);
+			return rows[0] ? relayRouteFromRow(rows[0]) : null;
+		},
+		async restoreRelayRoute(sourceKey) {
+			const { rows } = await pool.query(`UPDATE feishu_group_relay_routes SET enabled=true,archived_at=NULL,archived_reason=NULL,updated_at=now()
+				WHERE source_key=$1 AND archived_at IS NOT NULL RETURNING ${RELAY_ROUTE_COLUMNS}`, [sourceKey]);
+			return rows[0] ? relayRouteFromRow(rows[0]) : null;
 		},
 		async deleteRelayRoute(sourceKey) {
 			const { rowCount } = await pool.query('DELETE FROM feishu_group_relay_routes WHERE source_key=$1', [sourceKey]);

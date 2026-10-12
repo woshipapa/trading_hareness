@@ -25,13 +25,13 @@ export type GroupMembership = 'member' | 'left' | 'dissolved';
 export type JoinedGroup = {
   chat_id: string; name: string; member_count: number | null; in_directory: boolean;
   source_key: string | null; route_tag: string | null; membership: GroupMembership; left_at: string | null;
+  /** The group belongs to a route that was archived when the account left it; the route resumes by itself. */
+  route_archived?: boolean;
   is_new: boolean; first_seen_at: string | null; history: GroupHistoryProgress | null;
 };
-export type RemovedRoute = { chat_id: string; chat_name: string; tag: string | null; target_chat_ids: string[]; membership: GroupMembership; left_at: string | null; removed_at: string };
 export type JoinedGroupsResponse = {
   observed_at: string; live: boolean; error: string | null; groups: JoinedGroup[];
-  /** Routes removed automatically because the account left their group (recent ones). */
-  removed_routes?: RemovedRoute[];
+
   sync: { last_tick_at: string | null; last_directory_at: string | null; last_error: string | null; joined_groups: number; bound_chats: number };
 };
 

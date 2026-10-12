@@ -10,7 +10,7 @@ import { createLedger } from './ledger.mjs';
 import { releaseMetadata } from './release-metadata.mjs';
 import { endWritable, writeChunk } from './stream-write.mjs';
 import { singleFlight } from './single-flight.mjs';
-import { createGroupSync, describeGroups, historyProgress, removedRoutes } from './group-sync.mjs';
+import { createGroupSync, describeGroups, historyProgress } from './group-sync.mjs';
 import { createGroupRelay, decryptLarkAgentXImage } from './group-relay.mjs';
 import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, historyFallback, historyRow, historySourceNote, mergeHistoryRows, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
 import { createWeChatGroupRelay } from './wechat-group-relay.mjs';
@@ -363,9 +363,21 @@ const historyRowFromBridge = (payload) => historyRow(payload, { normalize: norma
 const groupSync = createGroupSync({
 	ledger, toRow: historyRowFromBridge, log: (line) => console.log(line),
 	// The account left the group: nothing can arrive on this route any more.
-	removeRoute: async (sourceKey) => {
-		const route = await removeRelayRoute(sourceKey);
-		return route ? { key: route.key, tag: route.tag, chat_name: route.chatName, target_chat_ids: route.targetChatIds ?? [], source_chat_id: route.chatId ?? '' } : null;
+	// The route stops and its WebSocket binding goes, but it stays listed as
+	// left, so what it relayed can still be exported.
+	archiveRoute: async (sourceKey, { reason, chatIds }) => {
+		const route = await ledger.archiveRelayRoute(sourceKey, { reason, chatIds });
+		if (!route) return null;
+		await routeBinder.unbind(sourceKey);
+		return { key: route.key, tag: route.tag, chat_name: route.chatName };
+	},
+	// The account is back in the group: the route resumes on the same group.
+	restoreRoute: async (sourceKey, chatId) => {
+		const route = await ledger.restoreRelayRoute(sourceKey);
+		if (!route) return null;
+		const binding = await routeBinder.bind(route, { websocketChatId: chatId });
+		console.log(`退群路由已恢复 source_key=${sourceKey} binding=${binding.status}${binding.message ? ` ${binding.message}` : ''}`);
+		return { key: route.key };
 	},
 	bridge: {
 		joined: () => joinedGroupsWithRoutes(true),
@@ -387,14 +399,18 @@ async function removeRelayRoute(sourceKey) {
 // a group whose route still exists counts.
 async function joinedGroupsWithRoutes(refresh) {
 	const [joined, byKey, routes] = await Promise.all([bridgePostJson('/chats/joined', { refresh: Boolean(refresh) }, 60_000), numericChatIdsByRoute(), ledger.relayRoutes()]);
-	const routeByKey = new Map(routes.map((route) => [route.key, route]));
+	// An archived route (its group was left) is not bound; its groups are
+	// reported separately, so they are still checked and the route can resume.
+	const routeByKey = new Map(routes.filter((route) => !route.archivedAt).map((route) => [route.key, route]));
 	const bound = new Map();
 	for (const item of joined?.bound ?? []) if (routeByKey.has(item.source_key)) bound.set(String(item.chat_id), item);
 	for (const [sourceKey, chatIds] of byKey) {
 		if (!routeByKey.has(sourceKey)) continue;
 		for (const chatId of chatIds) if (!bound.has(chatId)) bound.set(chatId, { chat_id: chatId, source_key: sourceKey, chat_name: routeByKey.get(sourceKey).chatName ?? '' });
 	}
-	return { groups: joined?.groups ?? [], bound: [...bound.values()] };
+	const archived = routes.filter((route) => route.archivedAt).flatMap((route) => route.archivedChatIds.filter((chatId) => /^\d+$/.test(chatId) && !bound.has(chatId))
+		.map((chatId) => ({ chat_id: chatId, source_key: route.key, chat_name: route.chatName ?? '' })));
+	return { groups: joined?.groups ?? [], bound: [...bound.values()], archived };
 }
 
 async function runGroupSync() {
@@ -1615,11 +1631,14 @@ async function groupRelayDashboardStatus() {
 		const resolvedErrorAt = persisted?.latest_failure_at ?? ingestionRecord?.latest_failure_at ?? null;
 		const transport = websocketChatIds.length ? 'larkagentx_websocket' : groupRelayConfig.enabled ? 'oauth_poll' : larkAgentXDynamicRouteDiscoveryEnabled ? 'pending_websocket_discovery' : 'disabled';
 		// What the membership check and the history reader know about this route's group.
-		const chatStates = websocketChatIds.map((chatId) => chatStateById.get(chatId)).filter(Boolean);
-		const goneState = chatStates.length && chatStates.every((item) => item.membership !== 'member') ? chatStates[0] : null;
+		// An archived route has no binding any more; its groups are the ones it had when it was archived.
+		const chatStates = (source.archivedAt ? source.archivedChatIds : websocketChatIds).map((chatId) => chatStateById.get(chatId)).filter(Boolean);
+		const goneState = source.archivedAt ? { membership: source.archivedReason ?? 'left', left_at: chatStates[0]?.left_at ?? source.archivedAt }
+			: chatStates.length && chatStates.every((item) => item.membership !== 'member') ? chatStates[0] : null;
 		const historyState = chatStates.find((item) => item.membership === 'member') ?? chatStates[0] ?? null;
 		let state = 'healthy';
-		if (source.enabled === false || transport === 'disabled') state = 'disabled';
+		if (source.archivedAt) state = goneState.membership;
+		else if (source.enabled === false || transport === 'disabled') state = 'disabled';
 		else if (goneState) state = goneState.membership;
 		else if (transport === 'pending_websocket_discovery') state = 'starting';
 		else if (transport === 'larkagentx_websocket') {
@@ -1635,6 +1654,7 @@ async function groupRelayDashboardStatus() {
 		return {
 			key: source.key, tag: source.tag, chat_name: source.chatName, source_chat_id: source.chatId ?? null, target_chat_ids: source.targetChatIds ?? [], enabled: source.enabled !== false,
 			membership: goneState ? goneState.membership : chatStates.length ? 'member' : null, left_at: asIsoString(goneState?.left_at),
+			archived: Boolean(source.archivedAt), archived_at: asIsoString(source.archivedAt),
 			membership_checked_at: asIsoString(historyState?.checked_at), history: historyState ? historyProgress(historyState) : null,
 			transport, websocket_chat_ids: websocketChatIds, websocket_observed_count: websocketObservedCount, websocket_forwarded_count: websocketForwardedCount,
 			websocket_failed_count: websocketFailedCount, websocket_last_observed_at: websocketLastObservedAt, websocket_last_forwarded_at: websocketLastForwardedAt,
@@ -1669,7 +1689,7 @@ async function groupRelayDashboardStatus() {
 		: 'healthy';
 	const activeSources = sources.filter((source) => source.enabled && source.transport !== 'disabled');
 	const overall = activeSources.length > 0 && activeSources.every((source) => source.state === 'healthy') ? 'healthy'
-		: sources.some((source) => ['error', 'unavailable', 'delayed', 'degraded', 'not_configured', 'not_authorized', 'left', 'dissolved'].includes(source.state)) ? 'degraded'
+		: sources.some((source) => ['error', 'unavailable', 'delayed', 'degraded', 'not_configured', 'not_authorized'].includes(source.state) || (source.enabled && ['left', 'dissolved'].includes(source.state))) ? 'degraded'
 		: 'starting';
 	const realtimeSummaryHealthy = larkagentx.status === 'healthy' && larkagentx.websocket?.state === 'connected' && larkagentx.summary_ingress_configured;
 	const itouguHealthy = itougu.status === 'healthy';
@@ -2040,7 +2060,10 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 		const routes = await ledger.relayRoutes();
 		route = routes.find((item) => item.key === sourceKey);
 		if (!route) { fail(404, '源群不存在'); return; }
-		chatIds = resolveRouteChatIds({ route, routes, numericIdsByKey: await numericChatIdsByRoute(), seenUnderKey: await ledger.relayChatIdsBySourceKey(route.key) });
+		const numericIdsByKey = await numericChatIdsByRoute();
+		// An archived route keeps the group ids it had, so its group's stored history is still found.
+		for (const item of routes) if (item.archivedAt && item.archivedChatIds.length) numericIdsByKey.set(item.key, [...new Set([...(numericIdsByKey.get(item.key) ?? []), ...item.archivedChatIds])]);
+		chatIds = resolveRouteChatIds({ route, routes, numericIdsByKey, seenUnderKey: await ledger.relayChatIdsBySourceKey(route.key) });
 		rows = await ledger.relayMessagesByChatIdsWindow(chatIds, range.fromMs, range.toMs, MAX_BUNDLE_MESSAGES + 1);
 	} catch (error) {
 		fail(503, `读取转发账本失败：${error instanceof Error ? error.message : String(error)}`);
@@ -2207,7 +2230,7 @@ async function handleLarkAgentXQr(request, response, action) {
 }
 
 function publicRelayRoute(route) {
-	return { key: route.key, chat_name: route.chatName, tag: route.tag, target_chat_ids: route.targetChatIds ?? [], enabled: route.enabled !== false, created_at: asIsoString(route.created_at), updated_at: asIsoString(route.updated_at) };
+	return { key: route.key, chat_name: route.chatName, tag: route.tag, target_chat_ids: route.targetChatIds ?? [], enabled: route.enabled !== false, archived: Boolean(route.archivedAt), archived_reason: route.archivedReason ?? null, created_at: asIsoString(route.created_at), updated_at: asIsoString(route.updated_at) };
 }
 
 function relayRouteTag(value) {
@@ -2307,7 +2330,7 @@ async function refuseGroupBoundElsewhere(websocketChatId, ownKey) {
 	const chatId = String(websocketChatId ?? '').trim();
 	if (!chatId) return;
 	const joined = await joinedGroupsWithRoutes(false).catch(() => null);
-	const holder = (joined?.bound ?? []).find((item) => String(item.chat_id) === chatId && item.source_key !== ownKey);
+	const holder = [...(joined?.bound ?? []), ...(joined?.archived ?? [])].find((item) => String(item.chat_id) === chatId && item.source_key !== ownKey);
 	if (!holder) return;
 	const route = (await ledger.relayRoutes()).find((item) => item.key === holder.source_key);
 	throw new Error(`该群已经绑定到路由 #${route?.tag ?? holder.source_key}（${route?.chatName ?? holder.chat_name ?? ''}），不能重复绑定`);
@@ -2494,8 +2517,7 @@ const dashboard = createServer((request, response) => {
 			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({
 				observed_at: new Date().toISOString(), live: Boolean(live), error,
-				groups: describeGroups({ groups: directory.groups ?? [], bound: directory.bound ?? [], states, routes }),
-				removed_routes: removedRoutes(states),
+				groups: describeGroups({ groups: directory.groups ?? [], bound: directory.bound ?? [], archived: directory.archived ?? [], states, routes }),
 				sync: groupSync.status(),
 			}));
 		})().catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGroupSync, describeGroups, historyProgress, membershipTransition, nextHistoryPage, removedRoutes, routesToRemove } from './group-sync.mjs';
+import { createGroupSync, describeGroups, historyProgress, membershipTransition, nextHistoryPage, routesToArchive } from './group-sync.mjs';
 
 const NOW = Date.parse('2026-10-12T07:00:00Z');
 
@@ -178,8 +178,8 @@ test('the group with the least left to read is read first', async () => {
 	assert.equal(ledger.states.get('7002').history_status, 'complete');
 });
 
-test('a route is removed only when the account is confirmed out of every group that feeds it', () => {
-	assert.deepEqual(routesToRemove([
+test('a route is archived only when the account is confirmed out of every group that feeds it', () => {
+	assert.deepEqual(routesToArchive([
 		{ chat_id: '1', source_key: 'gone', membership: 'left', miss_count: 3 },
 		{ chat_id: '2', source_key: 'just_marked', membership: 'left', miss_count: 2 },
 		{ chat_id: '3', source_key: 'two_groups', membership: 'left', miss_count: 9 },
@@ -188,60 +188,74 @@ test('a route is removed only when the account is confirmed out of every group t
 		{ chat_id: '6', source_key: 'fine', membership: 'member', miss_count: 0 },
 		{ chat_id: '7', membership: 'left', miss_count: 9 },
 	]), ['gone', 'dissolved']);
-	assert.deepEqual(routesToRemove([]), []);
+	assert.deepEqual(routesToArchive([]), []);
 });
 
-test('leaving a group removes its route after one more confirmed check and keeps what the route was', async () => {
+test('leaving a group archives its route after one more confirmed check; coming back restores it', async () => {
 	const ledger = fakeLedger();
 	let clock = NOW;
-	const removed = [];
+	const archivedRoutes = new Map();
+	const calls = [];
 	const logs = [];
 	let answer = { member: false };
 	const sync = createGroupSync({
 		ledger, now: () => clock, sleep: async () => {}, directoryIntervalMs: 300_000, log: (line) => logs.push(line), toRow: () => null,
-		removeRoute: async (key) => { removed.push(key); return { key, tag: 'diaoyan', chat_name: '调研纪要', target_chat_ids: ['oc_target'] }; },
+		archiveRoute: async (key, detail) => { calls.push(['archive', key, detail]); archivedRoutes.set(key, detail.chatIds); return { key, tag: 'diaoyan', chat_name: '调研纪要' }; },
+		restoreRoute: async (key, chatId) => { calls.push(['restore', key, chatId]); archivedRoutes.delete(key); return { key }; },
 		bridge: {
-			joined: async () => ({ groups: [], bound: removed.length ? [] : [{ chat_id: '7001', source_key: 'relay_dy', chat_name: '调研纪要' }] }),
+			joined: async () => archivedRoutes.has('relay_dy')
+				? { groups: [], bound: [], archived: [{ chat_id: '7001', source_key: 'relay_dy', chat_name: '调研纪要' }] }
+				: { groups: [], bound: [{ chat_id: '7001', source_key: 'relay_dy', chat_name: '调研纪要' }], archived: [] },
 			membership: async () => ({ chats: { 7001: answer } }), page: async () => ({ messages: [] }),
 		},
 	});
 	await sync.tick();                    // 1st negative
-	clock += 300_000; await sync.tick();  // 2nd: marked left, route still there
+	clock += 300_000; await sync.tick();  // 2nd: marked left, route still running
 	assert.equal(ledger.states.get('7001').membership, 'left');
-	assert.deepEqual(removed, []);
-	answer = { member: null };            // an unknown answer does not move it closer to removal
+	assert.deepEqual(calls, []);
+	answer = { member: null };            // an unknown answer does not move it closer
 	clock += 300_000; await sync.tick();
-	assert.deepEqual(removed, []);
+	assert.deepEqual(calls, []);
 	answer = { member: false };
-	clock += 300_000; await sync.tick();  // 3rd negative: removed
-	assert.deepEqual(removed, ['relay_dy']);
-	const state = ledger.states.get('7001');
-	assert.deepEqual(state.removed_route, { key: 'relay_dy', tag: 'diaoyan', chat_name: '调研纪要', target_chat_ids: ['oc_target'] });
-	assert.equal(state.route_removed_at.getTime(), clock);
-	assert.ok(logs.some((line) => /已自动清理退群路由 source_key=relay_dy tag=diaoyan/.test(line)));
+	clock += 300_000; await sync.tick();  // 3rd negative: archived, with the group ids it had
+	assert.deepEqual(calls, [['archive', 'relay_dy', { reason: 'left', chatIds: ['7001'] }]]);
+	assert.ok(logs.some((line) => /已自动停用退群路由 source_key=relay_dy tag=diaoyan/.test(line)));
 	assert.equal(sync.status().bound_chats, 0);
 	clock += 300_000; await sync.tick();
-	assert.deepEqual(removed, ['relay_dy']); // gone from the bound list: not removed twice
-	// shown on the dashboard for a while, and offered again if the account comes back
-	assert.deepEqual(removedRoutes([state], clock).map((item) => [item.chat_name, item.tag, item.target_chat_ids]), [['调研纪要', 'diaoyan', ['oc_target']]]);
-	assert.deepEqual(removedRoutes([state], clock + 30 * 86_400_000), []);
-	assert.equal(describeGroups({ now: clock, groups: [{ chat_id: '7001', name: '调研纪要' }], states: [{ ...state, seeded: true }] })[0].is_new, true);
+	assert.equal(calls.length, 1);        // still out: nothing more happens, and it is not archived twice
+	assert.equal(ledger.states.get('7001').membership, 'left');
+	answer = { member: true, first_position: 1, last_position: 40 };
+	clock += 300_000; await sync.tick();  // back in the group: the route resumes
+	assert.deepEqual(calls.at(-1), ['restore', 'relay_dy', '7001']);
+	assert.deepEqual([ledger.states.get('7001').membership, ledger.states.get('7001').miss_count, ledger.states.get('7001').left_at], ['member', 0, null]);
+	assert.ok(logs.some((line) => /自动恢复路由 source_key=relay_dy/.test(line)));
+	assert.equal(sync.status().bound_chats, 1);
 });
 
-test('a group that comes back before the route is removed keeps its route; without a remover nothing is removed', async () => {
+test('a group that comes back before the route is archived keeps its route; without the callbacks nothing is archived', async () => {
 	const ledger = fakeLedger();
 	let clock = NOW;
-	const removed = [];
+	const archived = [];
 	let answer = { member: false };
 	const bridge = { joined: async () => ({ groups: [], bound: [{ chat_id: '7001', source_key: 'relay_x' }] }), membership: async () => ({ chats: { 7001: answer } }), page: async () => ({ messages: [] }) };
-	const sync = createGroupSync({ ledger, now: () => clock, sleep: async () => {}, directoryIntervalMs: 300_000, toRow: () => null, removeRoute: async (key) => { removed.push(key); return { key }; }, bridge });
+	const sync = createGroupSync({ ledger, now: () => clock, sleep: async () => {}, directoryIntervalMs: 300_000, toRow: () => null, archiveRoute: async (key) => { archived.push(key); return { key }; }, bridge });
 	await sync.tick(); clock += 300_000; await sync.tick();
 	answer = { member: true, first_position: 1, last_position: 0 };
 	clock += 300_000; await sync.tick();
 	answer = { member: false };
 	clock += 300_000; await sync.tick(); clock += 300_000; await sync.tick();
-	assert.deepEqual(removed, []); // the count started over when the account was back
+	assert.deepEqual(archived, []); // the count started over when the account was back
 	const passive = createGroupSync({ ledger: fakeLedger(), now: () => clock, sleep: async () => {}, directoryIntervalMs: 0, toRow: () => null, bridge });
 	for (let pass = 0; pass < 5; pass += 1) await passive.tick();
-	assert.deepEqual(removed, []);
+	assert.deepEqual(archived, []);
+});
+
+test('the group of an archived route is not offered for a second route', () => {
+	const groups = describeGroups({
+		now: NOW, groups: [{ chat_id: '7001', name: '调研纪要' }, { chat_id: '7002', name: '别的群' }],
+		archived: [{ chat_id: '7001', source_key: 'relay_dy' }, { chat_id: '7009', source_key: 'relay_old' }],
+		states: [{ chat_id: '7001', seeded: true, membership: 'left' }], routes: [{ key: 'relay_dy', tag: 'diaoyan' }],
+	});
+	// back in the directory, still tied to its archived route; a gone group of an archived route is not listed here at all
+	assert.deepEqual(groups.map((group) => [group.name, group.source_key, group.route_tag, group.route_archived, group.is_new]), [['别的群', null, null, false, false], ['调研纪要', 'relay_dy', 'diaoyan', true, false]]);
 });
