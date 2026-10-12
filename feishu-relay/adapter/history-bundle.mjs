@@ -458,3 +458,23 @@ export function mergeHistoryRows(ledgerRows, historyRows) {
 	merged.sort((a, b) => Number(a.source_create_time) - Number(b.source_create_time) || String(a.source_message_id).localeCompare(String(b.source_message_id)));
 	return { rows: merged, from_history_only: added, from_ledger: ledger.length };
 }
+
+/** Where the history in a "full" export comes from when the group cannot be read live.
+ *
+ * `gone` means the account is no longer in the group.  A stored copy is used
+ * when there is one.  Without one, a group the account has left is exported
+ * from the relay ledger alone, and the export says so, because nothing more
+ * can ever be read; any other failure is an error, so a passing bridge outage
+ * does not quietly produce a smaller export. */
+export function historyFallback({ gone, storedCount, relayedCount }) {
+	if (storedCount > 0) return 'stored';
+	if (gone && relayedCount > 0) return 'relayed_only';
+	return 'fail';
+}
+
+export function historySourceNote({ source, origin = 'live', reason = '', historyOnly = 0, total = 0 }) {
+	if (source !== 'full') return '来源：仅已转发的消息（未转发的和监听之前的消息不在内）';
+	if (origin === 'relayed_only') return `来源：仅已转发的消息（${reason || '群历史读不到'}，也没有保存过该群的历史，所以未转发的消息不在内）`;
+	const from = origin === 'stored' ? `已保存的群历史（当前无法从飞书读取：${reason || '原因未知'}）` : '从飞书读取的群完整历史';
+	return `来源：${from}，并合并已转发记录（其中 ${historyOnly} 条只存在于群历史，${Math.max(0, total - historyOnly)} 条来自转发账本）`;
+}

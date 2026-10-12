@@ -235,6 +235,16 @@ API），官方 OAuth 应用只做精确补读与兜底。
 并输出每个上传相关请求的方法、路径、头名、body 大小与 protobuf 字段树。拿到后再写
 `larkx` 侧的 `upload_image()` 并用测试群验证。
 
+### 5.3 群目录、成员身份与历史副本的自动维护（2026-10-12，已上线）
+
+目标：新增源群、识别退群、读取群历史都不需要人去服务器上操作，前端点选即可。
+
+- **群目录**：bridge `POST /chats/joined` 读账号的会话列表（`feed.PullFeedCardsRequest`，INBOX 与 DONE 两个列表都读），返回已加入的群和每个群绑定的路由。adapter `GET /api/group-relay/chats` 给前端用；第一次读到的目录是基线，之后才出现的群标为“新加入”（14 天内、未绑定）。
+- **建立映射**：前端从群目录里选源群，保存时带上数字 ID（`websocket_chat_id`），bridge 按 ID 直接绑定并核对群名，不再依赖 OAuth 按群名搜索。同一个群只能绑定一条路由，保存前就会拒绝。目标群从已配置 webhook 的目标里选；新增目标群仍需先在服务器上配置它的 webhook（凭据）。
+- **成员身份**：bridge `POST /chats/membership` 用 `chats.PullChatsRoleRequest` 判断，非 MEMBER 时再用 `chats.CheckChattersInChatRequest` 确认；确认调用失败记为“未知”，不会记成退群。adapter 每 5 分钟核对一次所有已绑定的群，连续两次否定才标记 `left` / `dissolved`，重新入群后自动恢复。状态在 `feishu_group_chat_state`。
+- **历史副本**：每个已绑定且仍在群里的群，后台按 position 从头读到尾（每 30 秒最多 6 页、每页 50 个 position，剩余最少的群先读），写入 `feishu_group_history_messages`，之后随新消息增量跟进。完整导出在读不到群（已退群）时改用这份副本；已退群且没有副本时只导出已转发的消息，并在 transcript 里写明。
+- **限制**：副本只存消息内容和图片密钥，不存图片文件本身；退群后图片能否再下载没有验证过。编辑和撤回不会回写副本。
+
 ## 6. 可观测与前端整合
 
 - 面板补齐 bridge 新字段：`auth` 块、`ws_notify_cmds/count/last`、尾部巡检覆盖

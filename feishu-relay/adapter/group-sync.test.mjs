@@ -161,3 +161,19 @@ test('an unreachable bridge is reported and changes no stored state', async () =
 	assert.equal(sync.status().last_error, 'bridge HTTP 503');
 	assert.deepEqual(ledger.states.get('7001'), { chat_id: '7001', membership: 'member', miss_count: 0 });
 });
+
+test('the group with the least left to read is read first', async () => {
+	const ledger = fakeLedger();
+	const pages = [];
+	const sync = createGroupSync({
+		ledger, now: () => NOW, sleep: async () => {}, pagesPerTick: 3, toRow: (payload) => ({ source_message_id: String(payload.msg_id), position: payload.position, source_create_time: 1, message: {} }),
+		bridge: {
+			joined: async () => ({ groups: [{ chat_id: '7001', name: 'A 大群' }, { chat_id: '7002', name: 'B 新绑定的小群' }], bound: [{ chat_id: '7001', source_key: 'a' }, { chat_id: '7002', source_key: 'b' }] }),
+			membership: async () => ({ chats: { 7001: { member: true, first_position: 1, last_position: 5000 }, 7002: { member: true, first_position: 1, last_position: 80 } } }),
+			page: async (chatId, start, end) => { pages.push([chatId, start, end]); return { messages: [{ msg_id: `${chatId}-${start}`, position: start }] }; },
+		},
+	});
+	await sync.tick();
+	assert.deepEqual(pages, [['7002', 1, 50], ['7002', 51, 80], ['7001', 1, 50]]);
+	assert.equal(ledger.states.get('7002').history_status, 'complete');
+});

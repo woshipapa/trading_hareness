@@ -77,6 +77,8 @@ export type BundlePreview = {
   chat_name: string; from: string; to: string; filename: string; chat_ids: string[];
   messages: number; images: number; first_message_at: string | null; last_message_at: string | null;
   source: BundleSource; relayed_messages: number; history_positions: number | null;
+  /** Where a full export's history comes from: read live, a stored copy, or (group left, nothing stored) the relay ledger alone. */
+  history_origin?: 'live' | 'stored' | 'relayed_only'; history_reason?: string | null;
 };
 
 // 'full' reads the group's own history from Feishu and lays the relay ledger

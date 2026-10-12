@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { crc32, inflateRawSync } from 'node:zlib';
 import {
-	beijingClock, beijingDate, bundleBaseName, bundleEntries, bundleEntry, bundleRange, cardNeedsImageLookup, createZipWriter, historyRow, mergeHistoryRows, renderJsonl, renderTranscript, unnamedSendersByChat,
+	beijingClock, beijingDate, bundleBaseName, bundleEntries, bundleEntry, bundleRange, cardNeedsImageLookup, createZipWriter, historyFallback, historyRow, historySourceNote, mergeHistoryRows, renderJsonl, renderTranscript, unnamedSendersByChat,
 	resolveRouteChatIds, sniffImageExtension, writeHistoryBundle,
 } from './history-bundle.mjs';
 
@@ -335,4 +335,20 @@ test('a message the ledger recorded under both id forms appears once, as its off
 	assert.deepEqual(merged.rows.map((row) => row.source_message_id), ['om_y1', '902']);
 	assert.equal(merged.from_ledger, 2);
 	assert.equal(merged.from_history_only, 0);
+});
+
+test('a group that cannot be read live falls back on its stored copy, then on the ledger only if the account has left', () => {
+	assert.equal(historyFallback({ gone: true, storedCount: 120, relayedCount: 40 }), 'stored');
+	assert.equal(historyFallback({ gone: false, storedCount: 120, relayedCount: 0 }), 'stored');
+	assert.equal(historyFallback({ gone: true, storedCount: 0, relayedCount: 40 }), 'relayed_only');
+	// a passing outage must not quietly produce a smaller export
+	assert.equal(historyFallback({ gone: false, storedCount: 0, relayedCount: 40 }), 'fail');
+	assert.equal(historyFallback({ gone: true, storedCount: 0, relayedCount: 0 }), 'fail');
+});
+
+test('the note says which history an export was built from', () => {
+	assert.equal(historySourceNote({ source: 'relayed' }), '来源：仅已转发的消息（未转发的和监听之前的消息不在内）');
+	assert.equal(historySourceNote({ source: 'full', historyOnly: 101, total: 181 }), '来源：从飞书读取的群完整历史，并合并已转发记录（其中 101 条只存在于群历史，80 条来自转发账本）');
+	assert.match(historySourceNote({ source: 'full', origin: 'stored', reason: '账号已不在该群', historyOnly: 5, total: 9 }), /^来源：已保存的群历史（当前无法从飞书读取：账号已不在该群），并合并已转发记录（其中 5 条只存在于群历史，4 条来自转发账本）$/);
+	assert.match(historySourceNote({ source: 'full', origin: 'relayed_only', reason: '账号已不在该群' }), /仅已转发的消息（账号已不在该群，也没有保存过该群的历史/);
 });

@@ -12,7 +12,7 @@ import { endWritable, writeChunk } from './stream-write.mjs';
 import { singleFlight } from './single-flight.mjs';
 import { createGroupSync, describeGroups, historyProgress } from './group-sync.mjs';
 import { createGroupRelay, decryptLarkAgentXImage } from './group-relay.mjs';
-import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, historyRow, mergeHistoryRows, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
+import { bundleBaseName, bundleEntries, bundleRange, cardNeedsImageLookup, entryImageCount, historyFallback, historyRow, historySourceNote, mergeHistoryRows, resolveRouteChatIds, unnamedSendersByChat, writeHistoryBundle } from './history-bundle.mjs';
 import { createWeChatGroupRelay } from './wechat-group-relay.mjs';
 import { createSummaryListener } from './summary-listener.mjs';
 import { createFeishuUserOauth } from './feishu-user-oauth.mjs';
@@ -2042,11 +2042,13 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 	rows = mergeHistoryRows(rows, []).rows;
 	const relayedCount = rows.length;
 	let historyOrigin = 'live';
+	let historyReason = '';
 	if (source === 'full') {
+		// A group the account has left cannot be read any more; its stored copy can.
+		const states = (await ledger.groupChatStates().catch(() => [])).filter((state) => chatIds.includes(String(state.chat_id)));
+		const gone = states.length > 0 && states.every((state) => state.membership !== 'member');
 		try {
-			// A group the account has left cannot be read any more; its stored copy can.
-			const states = (await ledger.groupChatStates().catch(() => [])).filter((state) => chatIds.includes(String(state.chat_id)));
-			if (states.length && states.every((state) => state.membership !== 'member')) throw new Error('账号已不在该群');
+			if (gone) throw new Error('账号已不在该群');
 			const located = await locateGroupHistory(chatIds, range);
 			historyPositions = located.reduce((total, item) => total + item.count, 0);
 			// The preview only needs the size of the range; reading every page is for the real export.
@@ -2057,11 +2059,11 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 				if (rows.length > MAX_BUNDLE_MESSAGES) { fail(400, `该时间范围内消息超过 ${MAX_BUNDLE_MESSAGES} 条，请缩小范围后分段导出`); return; }
 			}
 		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
+			historyReason = error instanceof Error ? error.message : String(error);
 			const stored = await ledger.groupHistoryRows(chatIds, range.fromMs, range.toMs, MAX_BUNDLE_MESSAGES + 1).catch(() => []);
+			historyOrigin = historyFallback({ gone, storedCount: stored.length, relayedCount: rows.length });
 			// Fail rather than quietly export less than was asked for.
-			if (!stored.length) { fail(502, `读取群历史失败：${reason}，也没有已保存的群历史。可以改选“仅已转发”导出。`); return; }
-			historyOrigin = `stored:${reason}`;
+			if (historyOrigin === 'fail') { fail(502, `读取群历史失败：${historyReason}，也没有已保存的群历史。可以改选“仅已转发”导出。`); return; }
 			historyPositions = stored.length;
 			const merged = mergeHistoryRows(rows, stored);
 			rows = merged.rows;
@@ -2078,7 +2080,7 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 		response.end(JSON.stringify({
 			chat_name: route.chatName, from: range.from, to: range.to, filename: `${base}.zip`, chat_ids: chatIds,
-			source, relayed_messages: relayedCount, history_positions: historyPositions, history_origin: historyOrigin.startsWith('stored') ? 'stored' : 'live',
+			source, relayed_messages: relayedCount, history_positions: historyPositions, history_origin: historyOrigin, history_reason: historyReason || null,
 			messages: entries.length, images: entries.reduce((total, entry) => total + entryImageCount(entry), 0),
 			first_message_at: entries.length ? new Date(entries[0].time_ms).toISOString() : null,
 			last_message_at: entries.length ? new Date(entries.at(-1).time_ms).toISOString() : null,
@@ -2096,9 +2098,7 @@ async function handleRouteHistoryBundle(request, response, url, sourceKey) {
 		const summary = await writeHistoryBundle({
 			title: route.chatName, from: range.from, to: range.to, rows, fetchImage: fetchBundleImage,
 			cardImages: context.cardImages, senderNames: context.senderNames,
-			note: source === 'full'
-				? `来源：${historyOrigin.startsWith('stored') ? `已保存的群历史（当前无法从飞书读取：${historyOrigin.slice(7)}）` : '从飞书读取的群完整历史'}，并合并已转发记录（其中 ${historyOnly} 条只存在于群历史，${rows.length - historyOnly} 条来自转发账本）`
-				: '来源：仅已转发的消息（未转发的和监听之前的消息不在内）',
+			note: historySourceNote({ source, origin: historyOrigin, reason: historyReason, historyOnly, total: rows.length }),
 			write: (chunk) => writeChunk(response, chunk),
 		});
 		console.log(`历史资料包已导出 mode=${source} history_only=${historyOnly} source=${route.key} range=${range.from}..${range.to} messages=${summary.messages} images=${summary.images} failed_images=${summary.failed_images} bytes=${summary.bytes}`);

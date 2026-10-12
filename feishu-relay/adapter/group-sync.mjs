@@ -109,7 +109,11 @@ export function createGroupSync({ ledger, bridge, toRow, log = () => {}, now = D
 	async function syncHistory({ retryFailed }) {
 		const boundIds = new Set(runtime.bound.map((item) => String(item.chat_id)));
 		let budget = pagesPerTick;
-		for (const state of await ledger.groupChatStates()) {
+		// Least left to read goes first, so a newly bound small group is complete
+		// in one pass instead of waiting behind a large one.
+		const remaining = (state) => { const page = nextHistoryPage(state); return page ? Number(state.history_last_position) - page.start + 1 : 0; };
+		const states = (await ledger.groupChatStates()).sort((a, b) => remaining(a) - remaining(b));
+		for (const state of states) {
 			if (budget <= 0) break;
 			const chatId = String(state.chat_id);
 			if (!boundIds.has(chatId) || state.membership !== 'member') continue;

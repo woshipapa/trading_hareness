@@ -73,7 +73,9 @@ const dashboard = useFeishuDashboardWorkspace();
     <el-alert v-if="dashboard.bundleError" :title="dashboard.bundleError" type="error" :closable="false" show-icon />
     <el-descriptions v-else-if="dashboard.bundlePreview" :column="1" border size="small">
       <el-descriptions-item label="文件名">{{ dashboard.bundlePreview.filename }}</el-descriptions-item>
-      <el-descriptions-item v-if="dashboard.bundlePreview.source === 'full'" label="群历史">约 {{ dashboard.bundlePreview.history_positions ?? 0 }} 条（按消息位置估算，实际数量以导出为准）</el-descriptions-item>
+      <el-descriptions-item v-if="dashboard.bundlePreview.source === 'full' && dashboard.bundlePreview.history_origin === 'relayed_only'" label="群历史">读不到（{{ dashboard.bundlePreview.history_reason }}），也没有保存过，只能导出已转发的消息</el-descriptions-item>
+      <el-descriptions-item v-else-if="dashboard.bundlePreview.source === 'full' && dashboard.bundlePreview.history_origin === 'stored'" label="群历史">已保存的副本 {{ dashboard.bundlePreview.history_positions ?? 0 }} 条（{{ dashboard.bundlePreview.history_reason }}）</el-descriptions-item>
+      <el-descriptions-item v-else-if="dashboard.bundlePreview.source === 'full'" label="群历史">约 {{ dashboard.bundlePreview.history_positions ?? 0 }} 条（按消息位置估算，实际数量以导出为准）</el-descriptions-item>
       <el-descriptions-item :label="dashboard.bundlePreview.source === 'full' ? '其中已转发' : '消息'">{{ dashboard.bundlePreview.messages }} 条</el-descriptions-item>
       <el-descriptions-item :label="dashboard.bundlePreview.source === 'full' ? '已转发部分的图片' : '图片'">{{ dashboard.bundlePreview.images }} 张</el-descriptions-item>
       <el-descriptions-item v-if="dashboard.bundlePreview.first_message_at" label="实际覆盖">{{ dashboard.dateText(dashboard.bundlePreview.first_message_at) }} 至 {{ dashboard.dateText(dashboard.bundlePreview.last_message_at) }}</el-descriptions-item>
