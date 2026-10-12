@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from math import fsum
+from statistics import mean, stdev
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
@@ -149,4 +150,24 @@ def fifth_comparison(rows: list[Mapping[str, Any]], next_day_returns: Mapping[st
 
     return {"lowest": summary(outcomes[:fifth]), "highest": summary(outcomes[-fifth:])}
 
-__all__ = ["COEFFICIENTS", "COEFFICIENTS_FILE_SHA256", "VERSION", "fifth_comparison", "score_day"]
+
+def recent_status(summaries: list[Mapping[str, Any]], limit: int = 120) -> dict[str, Any]:
+    recent = summaries[-limit:]
+    differences = [float(item["highest"]["big_loss_rate"]) - float(item["lowest"]["big_loss_rate"])
+                   for item in recent]
+    lowest = mean(float(item["lowest"]["big_loss_rate"]) for item in recent) if recent else None
+    highest = mean(float(item["highest"]["big_loss_rate"]) for item in recent) if recent else None
+    difference_points = (highest - lowest) * 100 if lowest is not None and highest is not None else None
+    t_value = None
+    if len(differences) >= 2:
+        spread = stdev(differences)
+        # Zero-variance daily differences do not occur in real data; no finite t-value is reported.
+        t_value = mean(differences) / (spread / len(differences) ** 0.5) if spread else None
+    status = "insufficient_history" if len(recent) < 60 else (
+        "working" if difference_points >= 3 and t_value is not None and t_value >= 2 else "not_working_recently"
+    )
+    return {"sessions": len(recent), "lowest_big_loss_rate": lowest, "highest_big_loss_rate": highest,
+            "difference_points": difference_points, "t_value": t_value, "status": status}
+
+
+__all__ = ["COEFFICIENTS", "COEFFICIENTS_FILE_SHA256", "VERSION", "fifth_comparison", "recent_status", "score_day"]
