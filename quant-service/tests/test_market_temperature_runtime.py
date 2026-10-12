@@ -146,6 +146,18 @@ class StoredSeriesTests(unittest.TestCase):
         self.assertEqual([item["trade_date"] for item in series["readings"]], [end.isoformat()])
         self.assertEqual(series["stale_versions"], 1)
 
+    def test_the_index_change_of_a_reading_comes_from_the_session_before_it_whatever_its_version(self) -> None:
+        end = date(2099, 3, 10)
+        before, cold = _reading(end - timedelta(days=1), 45.0), _reading(end, 18.0, "冰点")
+        before.update({"version": "market-temperature-v1", "index_close": 100.0})
+        cold["index_close"] = 90.0
+        flows = [{"trade_date": end.isoformat(), "ratio": 1.6}]
+        with mock.patch.object(runtime.derived_daily_readings, "newest", side_effect=[[before, cold], flows, []]):
+            series = runtime.daily_series(object(), days=10, end=end)
+        reading = series["readings"][0]
+        self.assertEqual(reading["index_change_pct"], -10.0)
+        self.assertEqual(reading["marker"]["label"], "逆势放量")
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

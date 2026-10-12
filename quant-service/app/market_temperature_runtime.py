@@ -98,17 +98,18 @@ def daily_series(connection: Any, *, days: int = 120, end: date | None = None) -
     # About 242 sessions a year: 7/5 calendar days per session left 250 days at 240 sessions (2026-10-10).
     first = last - timedelta(days=days * 3 // 2 + 20)
     stored = derived_daily_readings.newest(connection, CAPABILITY, first, last)
-    stale_versions = sum(item.get("version") != VERSION for item in stored)
-    readings = [item for item in stored if item.get("version") == VERSION]
     flows = {item["trade_date"]: item for item in derived_daily_readings.newest(
         connection, broad_etf_flow.FLOW_CAPABILITY, first, last)}
     timing = {item["trade_date"]: item for item in derived_daily_readings.newest(
         connection, market_timing.CAPABILITY, first, last)}
-    previous_close = None
-    for reading in readings:
+    readings, previous_close = [], None
+    for reading in stored:
         close = reading.get("index_close")
         change = (close / previous_close - 1) * 100 if close and previous_close else None
         previous_close = close or previous_close
+        if reading.get("version") != VERSION:   # its close still dates the next session's change
+            continue
+        readings.append(reading)
         flow = flows.get(reading["trade_date"])
         ratio = flow.get("ratio") if flow else None
         reading.update({
@@ -121,7 +122,7 @@ def daily_series(connection: Any, *, days: int = 120, end: date | None = None) -
         })
     return {
         "version": VERSION, "readings": readings[-days:],
-        "stale_versions": stale_versions,
+        "stale_versions": len(stored) - len(readings),
         "thresholds": {"freezing": FREEZING, "boiling": BOILING, "cold_ceiling": COLD_CEILING,
                        "etf_surge_ratio": broad_etf_flow.SURGE_RATIO},
         "components": [{"key": item.key, "label": item.label, "direction": item.direction} for item in COMPONENTS],
