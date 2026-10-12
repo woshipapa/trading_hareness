@@ -549,3 +549,36 @@ export function createRouteBinder({ baseUrl, token, fetchImpl = fetch }) {
 		},
 	};
 }
+
+/** Pick the relay route for one inbound WebSocket message.
+ *
+ * Three sources can name it: the static env map (hand-written), what earlier
+ * messages taught the adapter, and the route the bridge declares from a
+ * binding it verified by group name.  The env map used to win outright, so a
+ * route renamed in the dashboard left a stale entry that sent a group's
+ * messages to the wrong route and then failed them all as a mismatch
+ * (observed 2026-10-11, 小杰交流).  A declared route that agrees with the
+ * ledger on both the group's oc_ id and its name is the better evidence;
+ * anything less keeps the configured route and the fail-closed check. */
+export function resolveLarkAgentXSource({ chatId, configuredKey = '', declaredRoute = null, routes = [] }) {
+	const declaredKey = String(declaredRoute?.source_key ?? '').trim();
+	const declaredOcId = String(declaredRoute?.source_chat_id ?? '').trim();
+	const declaredName = String(declaredRoute?.chat_name ?? '').trim();
+	const byKey = (key) => routes.find((route) => route.key === key) ?? null;
+	let sourceKey = configuredKey || declaredKey;
+	let staleConfiguredKey = null;
+	if (configuredKey && declaredKey && configuredKey !== declaredKey) {
+		const declared = byKey(declaredKey);
+		const verified = Boolean(declared && declaredName && declared.chatName === declaredName
+			&& declaredOcId && String(declared.chatId ?? '') === declaredOcId);
+		if (verified) {
+			sourceKey = declaredKey;
+			staleConfiguredKey = configuredKey;
+		}
+	}
+	if (!sourceKey) throw new Error(`未配置 LarkAgentX 源群：${chatId || 'unknown'}`);
+	const source = byKey(sourceKey);
+	if (!source) throw new Error(`未找到实时源路由：${sourceKey}`);
+	if (declaredRoute && source.chatId && declaredOcId !== String(source.chatId)) throw new Error(`LarkAgentX 动态源群映射不匹配：${sourceKey}`);
+	return { sourceKey, source, staleConfiguredKey };
+}

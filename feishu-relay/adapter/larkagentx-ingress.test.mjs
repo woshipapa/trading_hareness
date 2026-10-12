@@ -386,3 +386,44 @@ test('bridge-rendered links are filtered again at the adapter boundary', () => {
 	const anchors = JSON.parse(relay.body.content).zh_cn.content.flat().filter((node) => node.tag === 'a');
 	assert.deepEqual(anchors.map((node) => node.href), ['https://example.com/ok']);
 });
+
+import { resolveLarkAgentXSource } from './larkagentx-ingress.mjs';
+
+const ROUTES = [
+	{ key: 'relay_old', chatName: '小杰夜报B', chatId: 'oc_new', enabled: true },
+	{ key: 'relay_new', chatName: '小杰交流', chatId: 'oc_talk', enabled: true },
+	{ key: 'xiaojie', chatName: '小杰夜报～', chatId: '', enabled: true },
+];
+
+test('a verified bridge binding overrides a stale static route instead of failing the message', () => {
+	// Observed 2026-10-11: the env still mapped 小杰交流 to the route that had been renamed to 小杰夜报B.
+	const resolved = resolveLarkAgentXSource({
+		chatId: '7678195174698191820', configuredKey: 'relay_old', routes: ROUTES,
+		declaredRoute: { source_key: 'relay_new', chat_name: '小杰交流', source_chat_id: 'oc_talk' },
+	});
+	assert.equal(resolved.sourceKey, 'relay_new');
+	assert.equal(resolved.source.chatName, '小杰交流');
+	assert.equal(resolved.staleConfiguredKey, 'relay_old');
+});
+
+test('an unverified declaration never overrides the configured route and still fails closed', () => {
+	for (const declaredRoute of [
+		{ source_key: 'relay_new', chat_name: '别的群', source_chat_id: 'oc_talk' },
+		{ source_key: 'relay_new', chat_name: '小杰交流', source_chat_id: 'oc_other' },
+		{ source_key: 'relay_new', chat_name: '小杰交流', source_chat_id: '' },
+		{ source_key: 'relay_missing', chat_name: '小杰交流', source_chat_id: 'oc_talk' },
+	]) {
+		assert.throws(() => resolveLarkAgentXSource({ chatId: '1', configuredKey: 'relay_old', routes: ROUTES, declaredRoute }), /动态源群映射不匹配/);
+	}
+});
+
+test('agreeing, static-only and declared-only inputs resolve as before', () => {
+	const agree = resolveLarkAgentXSource({ chatId: '1', configuredKey: 'relay_new', routes: ROUTES, declaredRoute: { source_key: 'relay_new', chat_name: '小杰交流', source_chat_id: 'oc_talk' } });
+	assert.deepEqual([agree.sourceKey, agree.staleConfiguredKey], ['relay_new', null]);
+	assert.equal(resolveLarkAgentXSource({ chatId: '1', configuredKey: 'xiaojie', routes: ROUTES }).sourceKey, 'xiaojie');
+	assert.equal(resolveLarkAgentXSource({ chatId: '1', routes: ROUTES, declaredRoute: { source_key: 'relay_new', chat_name: '小杰交流', source_chat_id: 'oc_talk' } }).sourceKey, 'relay_new');
+	// a route without a resolved oc_ id accepts the bridge's declaration, as it always did
+	assert.equal(resolveLarkAgentXSource({ chatId: '1', configuredKey: 'xiaojie', routes: ROUTES, declaredRoute: { source_key: 'xiaojie', chat_name: '小杰夜报～', source_chat_id: '' } }).sourceKey, 'xiaojie');
+	assert.throws(() => resolveLarkAgentXSource({ chatId: '9', routes: ROUTES }), /未配置 LarkAgentX 源群/);
+	assert.throws(() => resolveLarkAgentXSource({ chatId: '9', configuredKey: 'gone', routes: ROUTES }), /未找到实时源路由/);
+});

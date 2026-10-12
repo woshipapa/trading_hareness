@@ -30,7 +30,7 @@ import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { parseXhsCommand } from './xhs-command.mjs';
 import { matchResearchRoute } from './research-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
-import { createRouteBinder, hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
+import { createRouteBinder, resolveLarkAgentXSource, hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import { resolveFrontendAssetPath } from './frontend-assets.mjs';
@@ -82,7 +82,11 @@ const larkAgentXGroupRelayRoutes = new Map(
 		.filter(([sourceKey, chatId]) => sourceKey && chatId),
 );
 const larkAgentXDynamicGroupRelayRoutes = new Map();
+// Chats whose LARKX_GROUP_RELAY_ROUTES entry a verified bridge binding has
+// contradicted; the learned route replaces it until the env is corrected.
+const larkAgentXStaleStaticChats = new Set();
 function larkAgentXSourceKeyForChat(chatId) {
+	if (larkAgentXStaleStaticChats.has(chatId)) return larkAgentXDynamicGroupRelayRoutes.get(chatId);
 	return larkAgentXGroupRelayRoutes.get(chatId) ?? larkAgentXDynamicGroupRelayRoutes.get(chatId);
 }
 const feishuAlertReceiveIdType = String(process.env.FEISHU_ALERT_RECEIVE_ID_TYPE ?? 'chat_id').trim();
@@ -1265,12 +1269,14 @@ async function handleLarkAgentXGroupRelayInbound(request, response) {
 		const chatId = String(input?.chat_id ?? '').trim();
 		const dynamicRoute = input?._larkagentx_route && typeof input._larkagentx_route === 'object' ? input._larkagentx_route : null;
 		const declaredSourceKey = String(dynamicRoute?.source_key ?? '').trim();
-		const sourceKey = larkAgentXSourceKeyForChat(chatId) ?? declaredSourceKey;
-		if (!sourceKey) throw new Error(`未配置 LarkAgentX 源群：${chatId || 'unknown'}`);
-		const source = (await ledger.relayRoutes()).find((route) => route.key === sourceKey);
-		if (!source) throw new Error(`未找到实时源路由：${sourceKey}`);
-		if (dynamicRoute && source.chatId && String(dynamicRoute.source_chat_id ?? '').trim() !== String(source.chatId)) throw new Error(`LarkAgentX 动态源群映射不匹配：${sourceKey}`);
-		if (declaredSourceKey && !larkAgentXGroupRelayRoutes.has(chatId)) larkAgentXDynamicGroupRelayRoutes.set(chatId, sourceKey);
+		const { sourceKey, source, staleConfiguredKey } = resolveLarkAgentXSource({
+			chatId, configuredKey: larkAgentXSourceKeyForChat(chatId) ?? '', declaredRoute: dynamicRoute, routes: await ledger.relayRoutes(),
+		});
+		if (staleConfiguredKey) {
+			if (!larkAgentXStaleStaticChats.has(chatId)) console.warn(`LARKX_GROUP_RELAY_ROUTES 中 ${chatId}=${staleConfiguredKey} 已过期，按 bridge 校验过的绑定改用 ${sourceKey}；请修正该 env 条目`);
+			larkAgentXStaleStaticChats.add(chatId);
+			larkAgentXDynamicGroupRelayRoutes.set(chatId, sourceKey);
+		} else if (declaredSourceKey && !larkAgentXGroupRelayRoutes.has(chatId)) larkAgentXDynamicGroupRelayRoutes.set(chatId, sourceKey);
 		if (source.enabled === false) {
 			response.writeHead(202, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ status: 'filtered', reason: '实时源路由已停用', source_key: sourceKey, chat_id: chatId }));
