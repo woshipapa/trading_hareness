@@ -1,0 +1,2558 @@
+{
+  "coverage": {
+    "all_eight_values": 248,
+    "daily_first": "2025-09-19",
+    "daily_last": "2026-10-09",
+    "daily_n": 250,
+    "missing_components": {
+      "2026-08-28": [
+        "premium",
+        "promotion"
+      ],
+      "2026-09-01": [
+        "premium",
+        "promotion"
+      ]
+    },
+    "pca_complete_scores_n": 248
+  },
+  "distribution": {
+    "at_or_above_80": 8,
+    "at_or_below_20": 21,
+    "bands": {
+      "中性": 95,
+      "冰点": 21,
+      "冷": 71,
+      "沸点": 8,
+      "热": 55
+    },
+    "between_20_and_80": 221,
+    "cold_spells": {
+      "lengths": [
+        1,
+        1,
+        1,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "max_days": 2,
+      "mean_days": 1.1053,
+      "spells": 19
+    },
+    "hot_spells": {
+      "lengths": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "max_days": 1,
+      "mean_days": 1,
+      "spells": 8
+    },
+    "n": 250
+  },
+  "forward_temperature": {
+    "1": {
+      "bands": {
+        "中性": {
+          "max": 2.6948,
+          "mean": -0.012,
+          "min": -2.4028,
+          "n": 95
+        },
+        "冰点": {
+          "max": 1.7936,
+          "mean": 0.4093,
+          "min": -2.4818,
+          "n": 21
+        },
+        "冷": {
+          "max": 1.7832,
+          "mean": -0.1606,
+          "min": -3.6333,
+          "n": 71
+        },
+        "沸点": {
+          "max": 0.9172,
+          "mean": -0.3165,
+          "min": -1.0874,
+          "n": 8
+        },
+        "热": {
+          "max": 1.4975,
+          "mean": 0.136,
+          "min": -2.0314,
+          "n": 54
+        }
+      },
+      "quintiles": {
+        "0": {
+          "max": 1.7936,
+          "mean": 0.0863,
+          "min": -3.046,
+          "n": 50
+        },
+        "1": {
+          "max": 1.7832,
+          "mean": -0.1407,
+          "min": -3.6333,
+          "n": 50
+        },
+        "2": {
+          "max": 1.3751,
+          "mean": -0.1144,
+          "min": -2.4028,
+          "n": 50
+        },
+        "3": {
+          "max": 2.6948,
+          "mean": 0.2052,
+          "min": -1.4325,
+          "n": 50
+        },
+        "4": {
+          "max": 1.4975,
+          "mean": -0.0196,
+          "min": -2.0314,
+          "n": 49
+        }
+      }
+    },
+    "3": {
+      "bands": {
+        "中性": {
+          "max": 2.9899,
+          "mean": -0.1594,
+          "min": -6.1458,
+          "n": 94
+        },
+        "冰点": {
+          "max": 2.7332,
+          "mean": 0.589,
+          "min": -1.7822,
+          "n": 21
+        },
+        "冷": {
+          "max": 2.7655,
+          "mean": -0.1338,
+          "min": -4.0272,
+          "n": 70
+        },
+        "沸点": {
+          "max": 1.4984,
+          "mean": 0.1383,
+          "min": -2.2258,
+          "n": 8
+        },
+        "热": {
+          "max": 3.0809,
+          "mean": 0.2471,
+          "min": -2.6173,
+          "n": 54
+        }
+      },
+      "quintiles": {
+        "0": {
+          "max": 2.7655,
+          "mean": 0.5439,
+          "min": -2.6945,
+          "n": 50
+        },
+        "1": {
+          "max": 1.9878,
+          "mean": -0.3885,
+          "min": -4.0272,
+          "n": 49
+        },
+        "2": {
+          "max": 2.9899,
+          "mean": -0.1341,
+          "min": -6.1458,
+          "n": 49
+        },
+        "3": {
+          "max": 2.4693,
+          "mean": 0.0093,
+          "min": -5.1165,
+          "n": 50
+        },
+        "4": {
+          "max": 3.0809,
+          "mean": 0.0084,
+          "min": -2.6173,
+          "n": 49
+        }
+      }
+    },
+    "5": {
+      "bands": {
+        "中性": {
+          "max": 4.1193,
+          "mean": 0.0425,
+          "min": -5.8059,
+          "n": 93
+        },
+        "冰点": {
+          "max": 2.8793,
+          "mean": 0.735,
+          "min": -3.0026,
+          "n": 20
+        },
+        "冷": {
+          "max": 3.4635,
+          "mean": -0.2248,
+          "min": -6.6467,
+          "n": 70
+        },
+        "沸点": {
+          "max": 1.6112,
+          "mean": 0.0333,
+          "min": -2.4432,
+          "n": 8
+        },
+        "热": {
+          "max": 3.5261,
+          "mean": -0.0104,
+          "min": -3.4424,
+          "n": 54
+        }
+      },
+      "quintiles": {
+        "0": {
+          "max": 2.8793,
+          "mean": 0.509,
+          "min": -3.1657,
+          "n": 49
+        },
+        "1": {
+          "max": 3.4635,
+          "mean": -0.5862,
+          "min": -6.6467,
+          "n": 49
+        },
+        "2": {
+          "max": 3.8194,
+          "mean": 0.1476,
+          "min": -3.2278,
+          "n": 49
+        },
+        "3": {
+          "max": 4.1193,
+          "mean": 0.3457,
+          "min": -3.8993,
+          "n": 49
+        },
+        "4": {
+          "max": 3.5261,
+          "mean": -0.3626,
+          "min": -3.4424,
+          "n": 49
+        }
+      }
+    }
+  },
+  "intraday": {
+    "days": [
+      {
+        "daily_temperature": 65.9,
+        "gaps": {
+          "09:35": -10.1,
+          "10:30": -14.8,
+          "11:30": null,
+          "14:00": -8.8,
+          "last": -2.6
+        },
+        "samples": 45,
+        "trade_date": "2026-09-18"
+      },
+      {
+        "daily_temperature": 78.4,
+        "gaps": {
+          "09:35": null,
+          "10:30": -14.9,
+          "11:30": null,
+          "14:00": -5.1,
+          "last": 0.2
+        },
+        "samples": 44,
+        "trade_date": "2026-09-21"
+      },
+      {
+        "daily_temperature": 57.7,
+        "gaps": {
+          "09:35": -9.5,
+          "10:30": -0.6,
+          "11:30": null,
+          "14:00": -6.5,
+          "last": 0.5
+        },
+        "samples": 47,
+        "trade_date": "2026-09-22"
+      },
+      {
+        "daily_temperature": 26.8,
+        "gaps": {
+          "09:35": 7.2,
+          "10:30": -1.6,
+          "11:30": null,
+          "14:00": -1.3,
+          "last": 1.3
+        },
+        "samples": 48,
+        "trade_date": "2026-09-23"
+      },
+      {
+        "daily_temperature": 36.0,
+        "gaps": {
+          "09:35": 5.9,
+          "10:30": 6.8,
+          "11:30": null,
+          "14:00": -4.5,
+          "last": 0.5
+        },
+        "samples": 48,
+        "trade_date": "2026-09-24"
+      },
+      {
+        "daily_temperature": 16.1,
+        "gaps": {
+          "09:35": 4.2,
+          "10:30": -1.9,
+          "11:30": null,
+          "14:00": -2.1,
+          "last": -0.9
+        },
+        "samples": 48,
+        "trade_date": "2026-09-28"
+      },
+      {
+        "daily_temperature": 58.0,
+        "gaps": {
+          "09:35": -6.7,
+          "10:30": -3.9,
+          "11:30": null,
+          "14:00": 0.2,
+          "last": 0.8
+        },
+        "samples": 47,
+        "trade_date": "2026-09-29"
+      },
+      {
+        "daily_temperature": 49.0,
+        "gaps": {
+          "09:35": null,
+          "10:30": null,
+          "11:30": null,
+          "14:00": null,
+          "last": null
+        },
+        "samples": 0,
+        "trade_date": "2026-09-30"
+      },
+      {
+        "daily_temperature": 33.2,
+        "gaps": {
+          "09:35": null,
+          "10:30": null,
+          "11:30": null,
+          "14:00": -6.0,
+          "last": -2.5
+        },
+        "samples": 33,
+        "trade_date": "2026-10-08"
+      },
+      {
+        "daily_temperature": 72.6,
+        "gaps": {
+          "09:35": null,
+          "10:30": -37.9,
+          "11:30": null,
+          "14:00": -21.1,
+          "last": -1.4
+        },
+        "samples": 32,
+        "trade_date": "2026-10-09"
+      }
+    ],
+    "summary": {
+      "09:35": {
+        "max": 7.2,
+        "mean": -1.5,
+        "min": -10.1,
+        "n": 6
+      },
+      "10:30": {
+        "max": 6.8,
+        "mean": -8.6,
+        "min": -37.9,
+        "n": 8
+      },
+      "11:30": {
+        "max": null,
+        "mean": null,
+        "min": null,
+        "n": 0
+      },
+      "14:00": {
+        "max": 0.2,
+        "mean": -6.1333,
+        "min": -21.1,
+        "n": 9
+      },
+      "last": {
+        "max": 1.3,
+        "mean": -0.4556,
+        "min": -2.6,
+        "n": 9
+      }
+    }
+  },
+  "method": {
+    "forward": "close-to-close percent change at 1/3/5 subsequent returned trading rows; quintiles sorted by current value",
+    "intraday_gap": "intraday temperature minus same-date daily temperature; missing requested samples omitted from that time's mean",
+    "pca": "standardized eight score columns, listwise complete rows, correlation-matrix PCA",
+    "self_exclusive": "prior values only, last 250 available values, same tie rank and direction; rows require >=60 prior values and >=5 components",
+    "spearman": "pairwise complete score rows; average ranks for ties"
+  },
+  "most_deviant_components": {
+    "forward": {
+      "max_streak": {
+        "1": {
+          "bands": {
+            "中性": {
+              "max": 1.6548,
+              "mean": 0.1944,
+              "min": -1.6142,
+              "n": 42
+            },
+            "冰点": {
+              "max": 1.7936,
+              "mean": -0.0225,
+              "min": -2.4818,
+              "n": 72
+            },
+            "冷": {
+              "max": 1.4145,
+              "mean": -0.0384,
+              "min": -3.046,
+              "n": 52
+            },
+            "沸点": {
+              "max": 1.0887,
+              "mean": -0.0772,
+              "min": -2.4462,
+              "n": 38
+            },
+            "热": {
+              "max": 2.6948,
+              "mean": -0.0166,
+              "min": -3.6333,
+              "n": 45
+            }
+          },
+          "quintiles": {
+            "0": {
+              "max": 1.7936,
+              "mean": -0.0306,
+              "min": -2.4818,
+              "n": 50
+            },
+            "1": {
+              "max": 1.7753,
+              "mean": 0.0583,
+              "min": -2.4028,
+              "n": 50
+            },
+            "2": {
+              "max": 1.4975,
+              "mean": 0.0124,
+              "min": -3.046,
+              "n": 50
+            },
+            "3": {
+              "max": 2.6948,
+              "mean": 0.0209,
+              "min": -3.6333,
+              "n": 50
+            },
+            "4": {
+              "max": 1.7832,
+              "mean": -0.0445,
+              "min": -2.4462,
+              "n": 49
+            }
+          }
+        },
+        "3": {
+          "bands": {
+            "中性": {
+              "max": 2.9463,
+              "mean": 0.2828,
+              "min": -3.2517,
+              "n": 42
+            },
+            "冰点": {
+              "max": 2.6305,
+              "mean": -0.272,
+              "min": -5.1165,
+              "n": 72
+            },
+            "冷": {
+              "max": 2.7655,
+              "mean": 0.2368,
+              "min": -1.9237,
+              "n": 52
+            },
+            "沸点": {
+              "max": 2.9899,
+              "mean": 0.0885,
+              "min": -2.7865,
+              "n": 37
+            },
+            "热": {
+              "max": 3.0809,
+              "mean": -0.123,
+              "min": -6.1458,
+              "n": 44
+            }
+          },
+          "quintiles": {
+            "0": {
+              "max": 2.6305,
+              "mean": -0.0501,
+              "min": -1.918,
+              "n": 50
+            },
+            "1": {
+              "max": 2.7655,
+              "mean": -0.0649,
+              "min": -5.1165,
+              "n": 50
+            },
+            "2": {
+              "max": 2.9463,
+              "mean": 0.1832,
+              "min": -2.2928,
+              "n": 50
+            },
+            "3": {
+              "max": 3.0809,
+              "mean": -0.0391,
+              "min": -6.1458,
+              "n": 49
+            },
+            "4": {
+              "max": 2.9899,
+              "mean": 0.0204,
+              "min": -3.1267,
+              "n": 48
+            }
+          }
+        },
+        "5": {
+          "bands": {
+            "中性": {
+              "max": 4.1193,
+              "mean": 0.2657,
+              "min": -4.1637,
+              "n": 41
+            },
+            "冰点": {
+              "max": 3.264,
+              "mean": -0.179,
+              "min": -5.8059,
+              "n": 72
+            },
+            "冷": {
+              "max": 3.4435,
+              "mean": -0.0731,
+              "min": -6.6467,
+              "n": 51
+            },
+            "沸点": {
+              "max": 3.0387,
+              "mean": 0.1938,
+              "min": -2.4432,
+              "n": 37
+            },
+            "热": {
+              "max": 3.5078,
+              "mean": 0.0267,
+              "min": -3.8195,
+              "n": 44
+            }
+          },
+          "quintiles": {
+            "0": {
+              "max": 3.264,
+              "mean": 0.0485,
+              "min": -5.8059,
+              "n": 50
+            },
+            "1": {
+              "max": 3.4435,
+              "mean": -0.1432,
+              "min": -6.6467,
+              "n": 50
+            },
+            "2": {
+              "max": 3.8194,
+              "mean": 0.0145,
+              "min": -4.1637,
+              "n": 49
+            },
+            "3": {
+              "max": 4.1193,
+              "mean": -0.0378,
+              "min": -3.8993,
+              "n": 48
+            },
+            "4": {
+              "max": 3.0387,
+              "mean": 0.1763,
+              "min": -2.9319,
+              "n": 48
+            }
+          }
+        }
+      },
+      "turnover_ratio": {
+        "1": {
+          "bands": {
+            "中性": {
+              "max": 1.7832,
+              "mean": -0.103,
+              "min": -2.4028,
+              "n": 59
+            },
+            "冰点": {
+              "max": 2.6948,
+              "mean": 0.0644,
+              "min": -3.046,
+              "n": 63
+            },
+            "冷": {
+              "max": 1.469,
+              "mean": -0.0326,
+              "min": -3.6333,
+              "n": 47
+            },
+            "沸点": {
+              "max": 1.4975,
+              "mean": -0.0315,
+              "min": -1.5238,
+              "n": 34
+            },
+            "热": {
+              "max": 1.7753,
+              "mean": 0.1193,
+              "min": -2.2576,
+              "n": 46
+            }
+          },
+          "quintiles": {
+            "0": {
+              "max": 2.6948,
+              "mean": 0.0828,
+              "min": -3.046,
+              "n": 50
+            },
+            "1": {
+              "max": 1.7936,
+              "mean": -0.0477,
+              "min": -3.6333,
+              "n": 50
+            },
+            "2": {
+              "max": 1.1887,
+              "mean": -0.0854,
+              "min": -2.4028,
+              "n": 50
+            },
+            "3": {
+              "max": 1.7832,
+              "mean": 0.1469,
+              "min": -2.0612,
+              "n": 49
+            },
+            "4": {
+              "max": 1.4975,
+              "mean": -0.0764,
+              "min": -2.2576,
+              "n": 50
+            }
+          }
+        },
+        "3": {
+          "bands": {
+            "中性": {
+              "max": 1.9878,
+              "mean": -0.2967,
+              "min": -3.2639,
+              "n": 59
+            },
+            "冰点": {
+              "max": 2.7332,
+              "mean": 0.2074,
+              "min": -6.1458,
+              "n": 62
+            },
+            "冷": {
+              "max": 3.0809,
+              "mean": -0.0879,
+              "min": -3.1267,
+              "n": 46
+            },
+            "沸点": {
+              "max": 2.9899,
+              "mean": 0.154,
+              "min": -3.2517,
+              "n": 34
+            },
+            "热": {
+              "max": 2.9463,
+              "mean": 0.1289,
+              "min": -2.1704,
+              "n": 46
+            }
+          },
+          "quintiles": {
+            "0": {
+              "max": 2.7332,
+              "mean": 0.4761,
+              "min": -5.1165,
+              "n": 49
+            },
+            "1": {
+              "max": 3.0809,
+              "mean": -0.161,
+              "min": -6.1458,
+              "n": 50
+            },
+            "2": {
+              "max": 1.7403,
+              "mean": -0.5043,
+              "min": -3.2639,
+              "n": 49
+            },
+            "3": {
+              "max": 2.9463,
+              "mean": 0.0471,
+              "min": -2.2258,
+              "n": 49
+            },
+            "4": {
+              "max": 2.9899,
+              "mean": 0.1918,
+              "min": -3.2517,
+              "n": 50
+            }
+          }
+        },
+        "5": {
+          "bands": {
+            "中性": {
+              "max": 2.8848,
+              "mean": -0.5612,
+              "min": -6.6467,
+              "n": 59
+            },
+            "冰点": {
+              "max": 4.1193,
+              "mean": 0.5074,
+              "min": -3.2278,
+              "n": 61
+            },
+            "冷": {
+              "max": 3.4635,
+              "mean": -0.0954,
+              "min": -4.1637,
+              "n": 45
+            },
+            "沸点": {
+              "max": 3.5261,
+              "mean": 0.1007,
+              "min": -2.7818,
+              "n": 34
+            },
+            "热": {
+              "max": 3.8194,
+              "mean": 0.1228,
+              "min": -3.4424,
+              "n": 46
+            }
+          },
+          "quintiles": {
+            "0": {
+              "max": 4.1193,
+              "mean": 0.8277,
+              "min": -3.0026,
+              "n": 48
+            },
+            "1": {
+              "max": 3.4635,
+              "mean": -0.0984,
+              "min": -4.1637,
+              "n": 50
+            },
+            "2": {
+              "max": 2.8124,
+              "mean": -0.6287,
+              "min": -6.6467,
+              "n": 48
+            },
+            "3": {
+              "max": 3.8194,
+              "mean": -0.0912,
+              "min": -5.8059,
+              "n": 49
+            },
+            "4": {
+              "max": 3.5261,
+              "mean": 0.0492,
+              "min": -3.4424,
+              "n": 50
+            }
+          }
+        }
+      }
+    },
+    "mean_abs_score_temperature": {
+      "limit_down": 21.3754,
+      "limit_up": 16.8004,
+      "max_streak": 21.5496,
+      "premium": 14.6677,
+      "promotion": 17.6968,
+      "seal_rate": 20.0165,
+      "turnover_ratio": 21.8661,
+      "up_ratio": 16.8742
+    },
+    "selected": [
+      "turnover_ratio",
+      "max_streak"
+    ]
+  },
+  "redundancy": {
+    "eigenvalues": [
+      3.301372,
+      1.32227,
+      0.947867,
+      0.814172,
+      0.650874,
+      0.458443,
+      0.295629,
+      0.209373
+    ],
+    "first_two_variance_share": 0.577955,
+    "pca_n": 248,
+    "spearman": {
+      "limit_down": {
+        "limit_down": {
+          "n": 250,
+          "rho": 1.0
+        },
+        "max_streak": {
+          "n": 250,
+          "rho": 0.0857
+        },
+        "premium": {
+          "n": 248,
+          "rho": 0.3974
+        },
+        "promotion": {
+          "n": 248,
+          "rho": 0.2158
+        },
+        "seal_rate": {
+          "n": 250,
+          "rho": 0.2669
+        },
+        "turnover_ratio": {
+          "n": 250,
+          "rho": -0.0924
+        },
+        "up_ratio": {
+          "n": 250,
+          "rho": 0.508
+        }
+      },
+      "limit_up": {
+        "limit_down": {
+          "n": 250,
+          "rho": 0.1775
+        },
+        "limit_up": {
+          "n": 250,
+          "rho": 1.0
+        },
+        "max_streak": {
+          "n": 250,
+          "rho": 0.1678
+        },
+        "premium": {
+          "n": 248,
+          "rho": 0.5923
+        },
+        "promotion": {
+          "n": 248,
+          "rho": 0.3862
+        },
+        "seal_rate": {
+          "n": 250,
+          "rho": 0.5192
+        },
+        "turnover_ratio": {
+          "n": 250,
+          "rho": 0.3536
+        },
+        "up_ratio": {
+          "n": 250,
+          "rho": 0.6376
+        }
+      },
+      "max_streak": {
+        "max_streak": {
+          "n": 250,
+          "rho": 1.0
+        },
+        "turnover_ratio": {
+          "n": 250,
+          "rho": 0.197
+        }
+      },
+      "premium": {
+        "max_streak": {
+          "n": 248,
+          "rho": 0.245
+        },
+        "premium": {
+          "n": 248,
+          "rho": 1.0
+        },
+        "promotion": {
+          "n": 248,
+          "rho": 0.6238
+        },
+        "turnover_ratio": {
+          "n": 248,
+          "rho": 0.2407
+        }
+      },
+      "promotion": {
+        "max_streak": {
+          "n": 248,
+          "rho": 0.3325
+        },
+        "promotion": {
+          "n": 248,
+          "rho": 1.0
+        },
+        "turnover_ratio": {
+          "n": 248,
+          "rho": 0.1469
+        }
+      },
+      "seal_rate": {
+        "max_streak": {
+          "n": 250,
+          "rho": 0.0517
+        },
+        "premium": {
+          "n": 248,
+          "rho": 0.4494
+        },
+        "promotion": {
+          "n": 248,
+          "rho": 0.34
+        },
+        "seal_rate": {
+          "n": 250,
+          "rho": 1.0
+        },
+        "turnover_ratio": {
+          "n": 250,
+          "rho": -0.0486
+        },
+        "up_ratio": {
+          "n": 250,
+          "rho": 0.4735
+        }
+      },
+      "turnover_ratio": {
+        "turnover_ratio": {
+          "n": 250,
+          "rho": 1.0
+        }
+      },
+      "up_ratio": {
+        "max_streak": {
+          "n": 250,
+          "rho": 0.085
+        },
+        "premium": {
+          "n": 248,
+          "rho": 0.4935
+        },
+        "promotion": {
+          "n": 248,
+          "rho": 0.2787
+        },
+        "turnover_ratio": {
+          "n": 250,
+          "rho": 0.0344
+        },
+        "up_ratio": {
+          "n": 250,
+          "rho": 1.0
+        }
+      }
+    }
+  },
+  "self_exclusive": {
+    "band_changes": 11,
+    "comparisons": [
+      {
+        "delta": 8.1,
+        "prior_only": 74.3,
+        "prior_only_band": "热",
+        "stored": 66.2,
+        "stored_band": "热",
+        "trade_date": "2025-12-22"
+      },
+      {
+        "delta": 4.0,
+        "prior_only": 50.2,
+        "prior_only_band": "中性",
+        "stored": 46.2,
+        "stored_band": "中性",
+        "trade_date": "2025-12-23"
+      },
+      {
+        "delta": 6.8,
+        "prior_only": 82.1,
+        "prior_only_band": "沸点",
+        "stored": 75.3,
+        "stored_band": "热",
+        "trade_date": "2025-12-24"
+      },
+      {
+        "delta": 4.9,
+        "prior_only": 89.5,
+        "prior_only_band": "沸点",
+        "stored": 84.6,
+        "stored_band": "沸点",
+        "trade_date": "2025-12-25"
+      },
+      {
+        "delta": 5.0,
+        "prior_only": 77.0,
+        "prior_only_band": "热",
+        "stored": 72.0,
+        "stored_band": "热",
+        "trade_date": "2025-12-26"
+      },
+      {
+        "delta": 3.4,
+        "prior_only": 59.9,
+        "prior_only_band": "中性",
+        "stored": 56.5,
+        "stored_band": "中性",
+        "trade_date": "2025-12-29"
+      },
+      {
+        "delta": 1.2,
+        "prior_only": 47.5,
+        "prior_only_band": "中性",
+        "stored": 46.3,
+        "stored_band": "中性",
+        "trade_date": "2025-12-30"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 46.4,
+        "prior_only_band": "中性",
+        "stored": 45.3,
+        "stored_band": "中性",
+        "trade_date": "2025-12-31"
+      },
+      {
+        "delta": 2.5,
+        "prior_only": 74.8,
+        "prior_only_band": "热",
+        "stored": 72.3,
+        "stored_band": "热",
+        "trade_date": "2026-01-05"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 92.1,
+        "prior_only_band": "沸点",
+        "stored": 92.0,
+        "stored_band": "沸点",
+        "trade_date": "2026-01-06"
+      },
+      {
+        "delta": 1.3,
+        "prior_only": 62.5,
+        "prior_only_band": "热",
+        "stored": 61.2,
+        "stored_band": "热",
+        "trade_date": "2026-01-07"
+      },
+      {
+        "delta": 1.7,
+        "prior_only": 86.3,
+        "prior_only_band": "沸点",
+        "stored": 84.6,
+        "stored_band": "沸点",
+        "trade_date": "2026-01-08"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 75.8,
+        "prior_only_band": "热",
+        "stored": 75.8,
+        "stored_band": "热",
+        "trade_date": "2026-01-09"
+      },
+      {
+        "delta": 0.2,
+        "prior_only": 90.2,
+        "prior_only_band": "沸点",
+        "stored": 90.0,
+        "stored_band": "沸点",
+        "trade_date": "2026-01-12"
+      },
+      {
+        "delta": -2.0,
+        "prior_only": 36.7,
+        "prior_only_band": "冷",
+        "stored": 38.7,
+        "stored_band": "冷",
+        "trade_date": "2026-01-13"
+      },
+      {
+        "delta": -0.4,
+        "prior_only": 63.5,
+        "prior_only_band": "热",
+        "stored": 63.9,
+        "stored_band": "热",
+        "trade_date": "2026-01-14"
+      },
+      {
+        "delta": 0.2,
+        "prior_only": 27.1,
+        "prior_only_band": "冷",
+        "stored": 26.9,
+        "stored_band": "冷",
+        "trade_date": "2026-01-15"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 25.3,
+        "prior_only_band": "冷",
+        "stored": 25.2,
+        "stored_band": "冷",
+        "trade_date": "2026-01-16"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 60.0,
+        "prior_only_band": "热",
+        "stored": 59.6,
+        "stored_band": "中性",
+        "trade_date": "2026-01-19"
+      },
+      {
+        "delta": 1.2,
+        "prior_only": 45.3,
+        "prior_only_band": "中性",
+        "stored": 44.1,
+        "stored_band": "中性",
+        "trade_date": "2026-01-20"
+      },
+      {
+        "delta": 2.0,
+        "prior_only": 59.5,
+        "prior_only_band": "中性",
+        "stored": 57.5,
+        "stored_band": "中性",
+        "trade_date": "2026-01-21"
+      },
+      {
+        "delta": 3.2,
+        "prior_only": 77.0,
+        "prior_only_band": "热",
+        "stored": 73.8,
+        "stored_band": "热",
+        "trade_date": "2026-01-22"
+      },
+      {
+        "delta": 1.6,
+        "prior_only": 80.9,
+        "prior_only_band": "沸点",
+        "stored": 79.3,
+        "stored_band": "热",
+        "trade_date": "2026-01-23"
+      },
+      {
+        "delta": -0.8,
+        "prior_only": 27.1,
+        "prior_only_band": "冷",
+        "stored": 27.9,
+        "stored_band": "冷",
+        "trade_date": "2026-01-26"
+      },
+      {
+        "delta": -0.3,
+        "prior_only": 41.7,
+        "prior_only_band": "中性",
+        "stored": 42.0,
+        "stored_band": "中性",
+        "trade_date": "2026-01-27"
+      },
+      {
+        "delta": -0.6,
+        "prior_only": 43.8,
+        "prior_only_band": "中性",
+        "stored": 44.4,
+        "stored_band": "中性",
+        "trade_date": "2026-01-28"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 49.3,
+        "prior_only_band": "中性",
+        "stored": 49.3,
+        "stored_band": "中性",
+        "trade_date": "2026-01-29"
+      },
+      {
+        "delta": -0.5,
+        "prior_only": 17.5,
+        "prior_only_band": "冰点",
+        "stored": 18.0,
+        "stored_band": "冰点",
+        "trade_date": "2026-01-30"
+      },
+      {
+        "delta": -1.0,
+        "prior_only": 9.6,
+        "prior_only_band": "冰点",
+        "stored": 10.6,
+        "stored_band": "冰点",
+        "trade_date": "2026-02-02"
+      },
+      {
+        "delta": 1.6,
+        "prior_only": 61.5,
+        "prior_only_band": "热",
+        "stored": 59.9,
+        "stored_band": "中性",
+        "trade_date": "2026-02-03"
+      },
+      {
+        "delta": 1.7,
+        "prior_only": 44.2,
+        "prior_only_band": "中性",
+        "stored": 42.5,
+        "stored_band": "中性",
+        "trade_date": "2026-02-04"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 21.6,
+        "prior_only_band": "冷",
+        "stored": 21.5,
+        "stored_band": "冷",
+        "trade_date": "2026-02-05"
+      },
+      {
+        "delta": 0.9,
+        "prior_only": 32.5,
+        "prior_only_band": "冷",
+        "stored": 31.6,
+        "stored_band": "冷",
+        "trade_date": "2026-02-06"
+      },
+      {
+        "delta": 1.9,
+        "prior_only": 71.4,
+        "prior_only_band": "热",
+        "stored": 69.5,
+        "stored_band": "热",
+        "trade_date": "2026-02-09"
+      },
+      {
+        "delta": 1.8,
+        "prior_only": 44.5,
+        "prior_only_band": "中性",
+        "stored": 42.7,
+        "stored_band": "中性",
+        "trade_date": "2026-02-10"
+      },
+      {
+        "delta": 0.7,
+        "prior_only": 32.9,
+        "prior_only_band": "冷",
+        "stored": 32.2,
+        "stored_band": "冷",
+        "trade_date": "2026-02-11"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 50.0,
+        "prior_only_band": "中性",
+        "stored": 49.6,
+        "stored_band": "中性",
+        "trade_date": "2026-02-12"
+      },
+      {
+        "delta": -0.4,
+        "prior_only": 27.5,
+        "prior_only_band": "冷",
+        "stored": 27.9,
+        "stored_band": "冷",
+        "trade_date": "2026-02-13"
+      },
+      {
+        "delta": 1.6,
+        "prior_only": 53.1,
+        "prior_only_band": "中性",
+        "stored": 51.5,
+        "stored_band": "中性",
+        "trade_date": "2026-02-24"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 66.0,
+        "prior_only_band": "热",
+        "stored": 65.5,
+        "stored_band": "热",
+        "trade_date": "2026-02-25"
+      },
+      {
+        "delta": 1.9,
+        "prior_only": 56.6,
+        "prior_only_band": "中性",
+        "stored": 54.7,
+        "stored_band": "中性",
+        "trade_date": "2026-02-26"
+      },
+      {
+        "delta": -0.2,
+        "prior_only": 67.3,
+        "prior_only_band": "热",
+        "stored": 67.5,
+        "stored_band": "热",
+        "trade_date": "2026-02-27"
+      },
+      {
+        "delta": 2.0,
+        "prior_only": 53.9,
+        "prior_only_band": "中性",
+        "stored": 51.9,
+        "stored_band": "中性",
+        "trade_date": "2026-03-02"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 50.9,
+        "prior_only_band": "中性",
+        "stored": 50.5,
+        "stored_band": "中性",
+        "trade_date": "2026-03-03"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 15.2,
+        "prior_only_band": "冰点",
+        "stored": 15.1,
+        "stored_band": "冰点",
+        "trade_date": "2026-03-04"
+      },
+      {
+        "delta": -0.4,
+        "prior_only": 53.1,
+        "prior_only_band": "中性",
+        "stored": 53.5,
+        "stored_band": "中性",
+        "trade_date": "2026-03-05"
+      },
+      {
+        "delta": 2.0,
+        "prior_only": 50.8,
+        "prior_only_band": "中性",
+        "stored": 48.8,
+        "stored_band": "中性",
+        "trade_date": "2026-03-06"
+      },
+      {
+        "delta": 1.3,
+        "prior_only": 27.6,
+        "prior_only_band": "冷",
+        "stored": 26.3,
+        "stored_band": "冷",
+        "trade_date": "2026-03-09"
+      },
+      {
+        "delta": 0.9,
+        "prior_only": 55.7,
+        "prior_only_band": "中性",
+        "stored": 54.8,
+        "stored_band": "中性",
+        "trade_date": "2026-03-10"
+      },
+      {
+        "delta": 0.6,
+        "prior_only": 48.6,
+        "prior_only_band": "中性",
+        "stored": 48.0,
+        "stored_band": "中性",
+        "trade_date": "2026-03-11"
+      },
+      {
+        "delta": 2.2,
+        "prior_only": 45.5,
+        "prior_only_band": "中性",
+        "stored": 43.3,
+        "stored_band": "中性",
+        "trade_date": "2026-03-12"
+      },
+      {
+        "delta": 1.5,
+        "prior_only": 35.0,
+        "prior_only_band": "冷",
+        "stored": 33.5,
+        "stored_band": "冷",
+        "trade_date": "2026-03-13"
+      },
+      {
+        "delta": 1.0,
+        "prior_only": 37.1,
+        "prior_only_band": "冷",
+        "stored": 36.1,
+        "stored_band": "冷",
+        "trade_date": "2026-03-16"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 38.4,
+        "prior_only_band": "冷",
+        "stored": 38.0,
+        "stored_band": "冷",
+        "trade_date": "2026-03-17"
+      },
+      {
+        "delta": 0.9,
+        "prior_only": 48.6,
+        "prior_only_band": "中性",
+        "stored": 47.7,
+        "stored_band": "中性",
+        "trade_date": "2026-03-18"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 29.9,
+        "prior_only_band": "冷",
+        "stored": 29.8,
+        "stored_band": "冷",
+        "trade_date": "2026-03-19"
+      },
+      {
+        "delta": -0.3,
+        "prior_only": 30.5,
+        "prior_only_band": "冷",
+        "stored": 30.8,
+        "stored_band": "冷",
+        "trade_date": "2026-03-20"
+      },
+      {
+        "delta": -0.2,
+        "prior_only": 31.1,
+        "prior_only_band": "冷",
+        "stored": 31.3,
+        "stored_band": "冷",
+        "trade_date": "2026-03-23"
+      },
+      {
+        "delta": 1.3,
+        "prior_only": 74.5,
+        "prior_only_band": "热",
+        "stored": 73.2,
+        "stored_band": "热",
+        "trade_date": "2026-03-24"
+      },
+      {
+        "delta": 1.4,
+        "prior_only": 81.6,
+        "prior_only_band": "沸点",
+        "stored": 80.2,
+        "stored_band": "沸点",
+        "trade_date": "2026-03-25"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 17.6,
+        "prior_only_band": "冰点",
+        "stored": 17.5,
+        "stored_band": "冰点",
+        "trade_date": "2026-03-26"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 66.1,
+        "prior_only_band": "热",
+        "stored": 65.0,
+        "stored_band": "热",
+        "trade_date": "2026-03-27"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 43.4,
+        "prior_only_band": "中性",
+        "stored": 43.3,
+        "stored_band": "中性",
+        "trade_date": "2026-03-30"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 18.5,
+        "prior_only_band": "冰点",
+        "stored": 18.4,
+        "stored_band": "冰点",
+        "trade_date": "2026-03-31"
+      },
+      {
+        "delta": 1.0,
+        "prior_only": 31.1,
+        "prior_only_band": "冷",
+        "stored": 30.1,
+        "stored_band": "冷",
+        "trade_date": "2026-04-01"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 14.8,
+        "prior_only_band": "冰点",
+        "stored": 14.5,
+        "stored_band": "冰点",
+        "trade_date": "2026-04-02"
+      },
+      {
+        "delta": -0.5,
+        "prior_only": 19.7,
+        "prior_only_band": "冰点",
+        "stored": 20.2,
+        "stored_band": "冷",
+        "trade_date": "2026-04-03"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 50.8,
+        "prior_only_band": "中性",
+        "stored": 50.4,
+        "stored_band": "中性",
+        "trade_date": "2026-04-07"
+      },
+      {
+        "delta": 2.5,
+        "prior_only": 64.4,
+        "prior_only_band": "热",
+        "stored": 61.9,
+        "stored_band": "热",
+        "trade_date": "2026-04-08"
+      },
+      {
+        "delta": 2.2,
+        "prior_only": 39.2,
+        "prior_only_band": "冷",
+        "stored": 37.0,
+        "stored_band": "冷",
+        "trade_date": "2026-04-09"
+      },
+      {
+        "delta": 3.0,
+        "prior_only": 54.2,
+        "prior_only_band": "中性",
+        "stored": 51.2,
+        "stored_band": "中性",
+        "trade_date": "2026-04-10"
+      },
+      {
+        "delta": 3.5,
+        "prior_only": 65.7,
+        "prior_only_band": "热",
+        "stored": 62.2,
+        "stored_band": "热",
+        "trade_date": "2026-04-13"
+      },
+      {
+        "delta": 2.4,
+        "prior_only": 64.8,
+        "prior_only_band": "热",
+        "stored": 62.4,
+        "stored_band": "热",
+        "trade_date": "2026-04-14"
+      },
+      {
+        "delta": 2.0,
+        "prior_only": 42.4,
+        "prior_only_band": "中性",
+        "stored": 40.4,
+        "stored_band": "中性",
+        "trade_date": "2026-04-15"
+      },
+      {
+        "delta": 1.9,
+        "prior_only": 65.1,
+        "prior_only_band": "热",
+        "stored": 63.2,
+        "stored_band": "热",
+        "trade_date": "2026-04-16"
+      },
+      {
+        "delta": 2.0,
+        "prior_only": 62.5,
+        "prior_only_band": "热",
+        "stored": 60.5,
+        "stored_band": "热",
+        "trade_date": "2026-04-17"
+      },
+      {
+        "delta": 1.8,
+        "prior_only": 67.0,
+        "prior_only_band": "热",
+        "stored": 65.2,
+        "stored_band": "热",
+        "trade_date": "2026-04-20"
+      },
+      {
+        "delta": 2.5,
+        "prior_only": 38.7,
+        "prior_only_band": "冷",
+        "stored": 36.2,
+        "stored_band": "冷",
+        "trade_date": "2026-04-21"
+      },
+      {
+        "delta": 2.5,
+        "prior_only": 46.8,
+        "prior_only_band": "中性",
+        "stored": 44.3,
+        "stored_band": "中性",
+        "trade_date": "2026-04-22"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 34.8,
+        "prior_only_band": "冷",
+        "stored": 34.3,
+        "stored_band": "冷",
+        "trade_date": "2026-04-23"
+      },
+      {
+        "delta": 1.5,
+        "prior_only": 31.6,
+        "prior_only_band": "冷",
+        "stored": 30.1,
+        "stored_band": "冷",
+        "trade_date": "2026-04-24"
+      },
+      {
+        "delta": 1.0,
+        "prior_only": 45.3,
+        "prior_only_band": "中性",
+        "stored": 44.3,
+        "stored_band": "中性",
+        "trade_date": "2026-04-27"
+      },
+      {
+        "delta": 2.1,
+        "prior_only": 50.9,
+        "prior_only_band": "中性",
+        "stored": 48.8,
+        "stored_band": "中性",
+        "trade_date": "2026-04-28"
+      },
+      {
+        "delta": 1.7,
+        "prior_only": 63.6,
+        "prior_only_band": "热",
+        "stored": 61.9,
+        "stored_band": "热",
+        "trade_date": "2026-04-29"
+      },
+      {
+        "delta": 2.0,
+        "prior_only": 63.4,
+        "prior_only_band": "热",
+        "stored": 61.4,
+        "stored_band": "热",
+        "trade_date": "2026-04-30"
+      },
+      {
+        "delta": 0.7,
+        "prior_only": 77.2,
+        "prior_only_band": "热",
+        "stored": 76.5,
+        "stored_band": "热",
+        "trade_date": "2026-05-06"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 74.5,
+        "prior_only_band": "热",
+        "stored": 74.2,
+        "stored_band": "热",
+        "trade_date": "2026-05-07"
+      },
+      {
+        "delta": 1.7,
+        "prior_only": 68.1,
+        "prior_only_band": "热",
+        "stored": 66.4,
+        "stored_band": "热",
+        "trade_date": "2026-05-08"
+      },
+      {
+        "delta": 1.4,
+        "prior_only": 70.9,
+        "prior_only_band": "热",
+        "stored": 69.5,
+        "stored_band": "热",
+        "trade_date": "2026-05-11"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 59.8,
+        "prior_only_band": "中性",
+        "stored": 58.7,
+        "stored_band": "中性",
+        "trade_date": "2026-05-12"
+      },
+      {
+        "delta": 2.2,
+        "prior_only": 80.7,
+        "prior_only_band": "沸点",
+        "stored": 78.5,
+        "stored_band": "热",
+        "trade_date": "2026-05-13"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 38.9,
+        "prior_only_band": "冷",
+        "stored": 38.8,
+        "stored_band": "冷",
+        "trade_date": "2026-05-14"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 36.3,
+        "prior_only_band": "冷",
+        "stored": 35.9,
+        "stored_band": "冷",
+        "trade_date": "2026-05-15"
+      },
+      {
+        "delta": 1.0,
+        "prior_only": 42.8,
+        "prior_only_band": "中性",
+        "stored": 41.8,
+        "stored_band": "中性",
+        "trade_date": "2026-05-18"
+      },
+      {
+        "delta": 2.6,
+        "prior_only": 69.8,
+        "prior_only_band": "热",
+        "stored": 67.2,
+        "stored_band": "热",
+        "trade_date": "2026-05-19"
+      },
+      {
+        "delta": 0.6,
+        "prior_only": 30.8,
+        "prior_only_band": "冷",
+        "stored": 30.2,
+        "stored_band": "冷",
+        "trade_date": "2026-05-20"
+      },
+      {
+        "delta": 0.2,
+        "prior_only": 20.1,
+        "prior_only_band": "冷",
+        "stored": 19.9,
+        "stored_band": "冰点",
+        "trade_date": "2026-05-21"
+      },
+      {
+        "delta": 3.1,
+        "prior_only": 64.9,
+        "prior_only_band": "热",
+        "stored": 61.8,
+        "stored_band": "热",
+        "trade_date": "2026-05-22"
+      },
+      {
+        "delta": 2.8,
+        "prior_only": 55.6,
+        "prior_only_band": "中性",
+        "stored": 52.8,
+        "stored_band": "中性",
+        "trade_date": "2026-05-25"
+      },
+      {
+        "delta": 1.3,
+        "prior_only": 30.6,
+        "prior_only_band": "冷",
+        "stored": 29.3,
+        "stored_band": "冷",
+        "trade_date": "2026-05-26"
+      },
+      {
+        "delta": 1.7,
+        "prior_only": 29.1,
+        "prior_only_band": "冷",
+        "stored": 27.4,
+        "stored_band": "冷",
+        "trade_date": "2026-05-27"
+      },
+      {
+        "delta": 3.1,
+        "prior_only": 53.2,
+        "prior_only_band": "中性",
+        "stored": 50.1,
+        "stored_band": "中性",
+        "trade_date": "2026-05-28"
+      },
+      {
+        "delta": 0.6,
+        "prior_only": 22.9,
+        "prior_only_band": "冷",
+        "stored": 22.3,
+        "stored_band": "冷",
+        "trade_date": "2026-05-29"
+      },
+      {
+        "delta": 1.7,
+        "prior_only": 65.8,
+        "prior_only_band": "热",
+        "stored": 64.1,
+        "stored_band": "热",
+        "trade_date": "2026-06-01"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 44.1,
+        "prior_only_band": "中性",
+        "stored": 43.0,
+        "stored_band": "中性",
+        "trade_date": "2026-06-02"
+      },
+      {
+        "delta": 1.6,
+        "prior_only": 41.3,
+        "prior_only_band": "中性",
+        "stored": 39.7,
+        "stored_band": "冷",
+        "trade_date": "2026-06-03"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 34.1,
+        "prior_only_band": "冷",
+        "stored": 33.0,
+        "stored_band": "冷",
+        "trade_date": "2026-06-04"
+      },
+      {
+        "delta": 1.3,
+        "prior_only": 33.4,
+        "prior_only_band": "冷",
+        "stored": 32.1,
+        "stored_band": "冷",
+        "trade_date": "2026-06-05"
+      },
+      {
+        "delta": 0.9,
+        "prior_only": 33.5,
+        "prior_only_band": "冷",
+        "stored": 32.6,
+        "stored_band": "冷",
+        "trade_date": "2026-06-08"
+      },
+      {
+        "delta": 2.5,
+        "prior_only": 49.4,
+        "prior_only_band": "中性",
+        "stored": 46.9,
+        "stored_band": "中性",
+        "trade_date": "2026-06-09"
+      },
+      {
+        "delta": 0.6,
+        "prior_only": 26.0,
+        "prior_only_band": "冷",
+        "stored": 25.4,
+        "stored_band": "冷",
+        "trade_date": "2026-06-10"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 19.9,
+        "prior_only_band": "冰点",
+        "stored": 19.4,
+        "stored_band": "冰点",
+        "trade_date": "2026-06-11"
+      },
+      {
+        "delta": 2.1,
+        "prior_only": 42.4,
+        "prior_only_band": "中性",
+        "stored": 40.3,
+        "stored_band": "中性",
+        "trade_date": "2026-06-12"
+      },
+      {
+        "delta": 3.0,
+        "prior_only": 57.0,
+        "prior_only_band": "中性",
+        "stored": 54.0,
+        "stored_band": "中性",
+        "trade_date": "2026-06-15"
+      },
+      {
+        "delta": 3.2,
+        "prior_only": 65.6,
+        "prior_only_band": "热",
+        "stored": 62.4,
+        "stored_band": "热",
+        "trade_date": "2026-06-16"
+      },
+      {
+        "delta": 2.7,
+        "prior_only": 50.1,
+        "prior_only_band": "中性",
+        "stored": 47.4,
+        "stored_band": "中性",
+        "trade_date": "2026-06-17"
+      },
+      {
+        "delta": 1.6,
+        "prior_only": 36.8,
+        "prior_only_band": "冷",
+        "stored": 35.2,
+        "stored_band": "冷",
+        "trade_date": "2026-06-18"
+      },
+      {
+        "delta": 1.4,
+        "prior_only": 71.4,
+        "prior_only_band": "热",
+        "stored": 70.0,
+        "stored_band": "热",
+        "trade_date": "2026-06-22"
+      },
+      {
+        "delta": 0.8,
+        "prior_only": 43.6,
+        "prior_only_band": "中性",
+        "stored": 42.8,
+        "stored_band": "中性",
+        "trade_date": "2026-06-23"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 36.8,
+        "prior_only_band": "冷",
+        "stored": 35.7,
+        "stored_band": "冷",
+        "trade_date": "2026-06-24"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 44.4,
+        "prior_only_band": "中性",
+        "stored": 43.9,
+        "stored_band": "中性",
+        "trade_date": "2026-06-25"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 28.1,
+        "prior_only_band": "冷",
+        "stored": 28.1,
+        "stored_band": "冷",
+        "trade_date": "2026-06-26"
+      },
+      {
+        "delta": 1.5,
+        "prior_only": 48.7,
+        "prior_only_band": "中性",
+        "stored": 47.2,
+        "stored_band": "中性",
+        "trade_date": "2026-06-29"
+      },
+      {
+        "delta": 2.5,
+        "prior_only": 68.6,
+        "prior_only_band": "热",
+        "stored": 66.1,
+        "stored_band": "热",
+        "trade_date": "2026-06-30"
+      },
+      {
+        "delta": 2.4,
+        "prior_only": 74.1,
+        "prior_only_band": "热",
+        "stored": 71.7,
+        "stored_band": "热",
+        "trade_date": "2026-07-01"
+      },
+      {
+        "delta": 1.9,
+        "prior_only": 52.5,
+        "prior_only_band": "中性",
+        "stored": 50.6,
+        "stored_band": "中性",
+        "trade_date": "2026-07-02"
+      },
+      {
+        "delta": 1.8,
+        "prior_only": 57.6,
+        "prior_only_band": "中性",
+        "stored": 55.8,
+        "stored_band": "中性",
+        "trade_date": "2026-07-03"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 24.1,
+        "prior_only_band": "冷",
+        "stored": 23.8,
+        "stored_band": "冷",
+        "trade_date": "2026-07-06"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 7.8,
+        "prior_only_band": "冰点",
+        "stored": 7.7,
+        "stored_band": "冰点",
+        "trade_date": "2026-07-07"
+      },
+      {
+        "delta": 0.8,
+        "prior_only": 40.6,
+        "prior_only_band": "中性",
+        "stored": 39.8,
+        "stored_band": "冷",
+        "trade_date": "2026-07-08"
+      },
+      {
+        "delta": 1.8,
+        "prior_only": 43.3,
+        "prior_only_band": "中性",
+        "stored": 41.5,
+        "stored_band": "中性",
+        "trade_date": "2026-07-09"
+      },
+      {
+        "delta": 1.3,
+        "prior_only": 41.3,
+        "prior_only_band": "中性",
+        "stored": 40.0,
+        "stored_band": "中性",
+        "trade_date": "2026-07-10"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 8.2,
+        "prior_only_band": "冰点",
+        "stored": 7.8,
+        "stored_band": "冰点",
+        "trade_date": "2026-07-13"
+      },
+      {
+        "delta": 1.2,
+        "prior_only": 57.7,
+        "prior_only_band": "中性",
+        "stored": 56.5,
+        "stored_band": "中性",
+        "trade_date": "2026-07-14"
+      },
+      {
+        "delta": 0.8,
+        "prior_only": 33.4,
+        "prior_only_band": "冷",
+        "stored": 32.6,
+        "stored_band": "冷",
+        "trade_date": "2026-07-15"
+      },
+      {
+        "delta": 1.3,
+        "prior_only": 28.1,
+        "prior_only_band": "冷",
+        "stored": 26.8,
+        "stored_band": "冷",
+        "trade_date": "2026-07-16"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 18.6,
+        "prior_only_band": "冰点",
+        "stored": 18.2,
+        "stored_band": "冰点",
+        "trade_date": "2026-07-17"
+      },
+      {
+        "delta": 0.8,
+        "prior_only": 14.0,
+        "prior_only_band": "冰点",
+        "stored": 13.2,
+        "stored_band": "冰点",
+        "trade_date": "2026-07-20"
+      },
+      {
+        "delta": 1.8,
+        "prior_only": 48.1,
+        "prior_only_band": "中性",
+        "stored": 46.3,
+        "stored_band": "中性",
+        "trade_date": "2026-07-21"
+      },
+      {
+        "delta": 1.9,
+        "prior_only": 26.8,
+        "prior_only_band": "冷",
+        "stored": 24.9,
+        "stored_band": "冷",
+        "trade_date": "2026-07-22"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 75.8,
+        "prior_only_band": "热",
+        "stored": 75.8,
+        "stored_band": "热",
+        "trade_date": "2026-07-23"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 17.7,
+        "prior_only_band": "冰点",
+        "stored": 16.6,
+        "stored_band": "冰点",
+        "trade_date": "2026-07-24"
+      },
+      {
+        "delta": 1.0,
+        "prior_only": 68.0,
+        "prior_only_band": "热",
+        "stored": 67.0,
+        "stored_band": "热",
+        "trade_date": "2026-07-27"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 34.1,
+        "prior_only_band": "冷",
+        "stored": 33.8,
+        "stored_band": "冷",
+        "trade_date": "2026-07-28"
+      },
+      {
+        "delta": 1.3,
+        "prior_only": 55.6,
+        "prior_only_band": "中性",
+        "stored": 54.3,
+        "stored_band": "中性",
+        "trade_date": "2026-07-29"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 27.6,
+        "prior_only_band": "冷",
+        "stored": 27.1,
+        "stored_band": "冷",
+        "trade_date": "2026-07-30"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 58.6,
+        "prior_only_band": "中性",
+        "stored": 58.1,
+        "stored_band": "中性",
+        "trade_date": "2026-07-31"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 53.1,
+        "prior_only_band": "中性",
+        "stored": 52.7,
+        "stored_band": "中性",
+        "trade_date": "2026-08-03"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 77.6,
+        "prior_only_band": "热",
+        "stored": 77.2,
+        "stored_band": "热",
+        "trade_date": "2026-08-04"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 73.5,
+        "prior_only_band": "热",
+        "stored": 73.2,
+        "stored_band": "热",
+        "trade_date": "2026-08-05"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 60.4,
+        "prior_only_band": "热",
+        "stored": 59.9,
+        "stored_band": "中性",
+        "trade_date": "2026-08-06"
+      },
+      {
+        "delta": 0.8,
+        "prior_only": 45.0,
+        "prior_only_band": "中性",
+        "stored": 44.2,
+        "stored_band": "中性",
+        "trade_date": "2026-08-07"
+      },
+      {
+        "delta": 1.4,
+        "prior_only": 66.4,
+        "prior_only_band": "热",
+        "stored": 65.0,
+        "stored_band": "热",
+        "trade_date": "2026-08-10"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 37.6,
+        "prior_only_band": "冷",
+        "stored": 37.1,
+        "stored_band": "冷",
+        "trade_date": "2026-08-11"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 82.4,
+        "prior_only_band": "沸点",
+        "stored": 82.3,
+        "stored_band": "沸点",
+        "trade_date": "2026-08-12"
+      },
+      {
+        "delta": 0.5,
+        "prior_only": 40.5,
+        "prior_only_band": "中性",
+        "stored": 40.0,
+        "stored_band": "中性",
+        "trade_date": "2026-08-13"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 32.0,
+        "prior_only_band": "冷",
+        "stored": 30.9,
+        "stored_band": "冷",
+        "trade_date": "2026-08-14"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 72.0,
+        "prior_only_band": "热",
+        "stored": 71.6,
+        "stored_band": "热",
+        "trade_date": "2026-08-17"
+      },
+      {
+        "delta": 1.1,
+        "prior_only": 45.6,
+        "prior_only_band": "中性",
+        "stored": 44.5,
+        "stored_band": "中性",
+        "trade_date": "2026-08-18"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 15.8,
+        "prior_only_band": "冰点",
+        "stored": 15.7,
+        "stored_band": "冰点",
+        "trade_date": "2026-08-19"
+      },
+      {
+        "delta": 0.6,
+        "prior_only": 33.9,
+        "prior_only_band": "冷",
+        "stored": 33.3,
+        "stored_band": "冷",
+        "trade_date": "2026-08-20"
+      },
+      {
+        "delta": 0.6,
+        "prior_only": 29.8,
+        "prior_only_band": "冷",
+        "stored": 29.2,
+        "stored_band": "冷",
+        "trade_date": "2026-08-21"
+      },
+      {
+        "delta": 0.6,
+        "prior_only": 25.4,
+        "prior_only_band": "冷",
+        "stored": 24.8,
+        "stored_band": "冷",
+        "trade_date": "2026-08-24"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 43.7,
+        "prior_only_band": "中性",
+        "stored": 43.6,
+        "stored_band": "中性",
+        "trade_date": "2026-08-25"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 44.2,
+        "prior_only_band": "中性",
+        "stored": 43.9,
+        "stored_band": "中性",
+        "trade_date": "2026-08-26"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 55.1,
+        "prior_only_band": "中性",
+        "stored": 54.8,
+        "stored_band": "中性",
+        "trade_date": "2026-08-28"
+      },
+      {
+        "delta": -0.1,
+        "prior_only": 32.5,
+        "prior_only_band": "冷",
+        "stored": 32.6,
+        "stored_band": "冷",
+        "trade_date": "2026-08-31"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 58.8,
+        "prior_only_band": "中性",
+        "stored": 58.8,
+        "stored_band": "中性",
+        "trade_date": "2026-09-01"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 27.1,
+        "prior_only_band": "冷",
+        "stored": 26.8,
+        "stored_band": "冷",
+        "trade_date": "2026-09-02"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 20.3,
+        "prior_only_band": "冷",
+        "stored": 19.9,
+        "stored_band": "冰点",
+        "trade_date": "2026-09-03"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 26.5,
+        "prior_only_band": "冷",
+        "stored": 26.1,
+        "stored_band": "冷",
+        "trade_date": "2026-09-04"
+      },
+      {
+        "delta": -0.1,
+        "prior_only": 68.5,
+        "prior_only_band": "热",
+        "stored": 68.6,
+        "stored_band": "热",
+        "trade_date": "2026-09-07"
+      },
+      {
+        "delta": -0.1,
+        "prior_only": 51.5,
+        "prior_only_band": "中性",
+        "stored": 51.6,
+        "stored_band": "中性",
+        "trade_date": "2026-09-08"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 34.8,
+        "prior_only_band": "冷",
+        "stored": 34.4,
+        "stored_band": "冷",
+        "trade_date": "2026-09-09"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 19.4,
+        "prior_only_band": "冰点",
+        "stored": 19.3,
+        "stored_band": "冰点",
+        "trade_date": "2026-09-10"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 25.7,
+        "prior_only_band": "冷",
+        "stored": 25.7,
+        "stored_band": "冷",
+        "trade_date": "2026-09-11"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 42.6,
+        "prior_only_band": "中性",
+        "stored": 42.5,
+        "stored_band": "中性",
+        "trade_date": "2026-09-14"
+      },
+      {
+        "delta": 0.1,
+        "prior_only": 14.7,
+        "prior_only_band": "冰点",
+        "stored": 14.6,
+        "stored_band": "冰点",
+        "trade_date": "2026-09-15"
+      },
+      {
+        "delta": -0.1,
+        "prior_only": 80.1,
+        "prior_only_band": "沸点",
+        "stored": 80.2,
+        "stored_band": "沸点",
+        "trade_date": "2026-09-16"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 37.4,
+        "prior_only_band": "冷",
+        "stored": 37.4,
+        "stored_band": "冷",
+        "trade_date": "2026-09-17"
+      },
+      {
+        "delta": 0.2,
+        "prior_only": 66.1,
+        "prior_only_band": "热",
+        "stored": 65.9,
+        "stored_band": "热",
+        "trade_date": "2026-09-18"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 78.4,
+        "prior_only_band": "热",
+        "stored": 78.4,
+        "stored_band": "热",
+        "trade_date": "2026-09-21"
+      },
+      {
+        "delta": 0.4,
+        "prior_only": 58.1,
+        "prior_only_band": "中性",
+        "stored": 57.7,
+        "stored_band": "中性",
+        "trade_date": "2026-09-22"
+      },
+      {
+        "delta": 0.2,
+        "prior_only": 27.0,
+        "prior_only_band": "冷",
+        "stored": 26.8,
+        "stored_band": "冷",
+        "trade_date": "2026-09-23"
+      },
+      {
+        "delta": 0.2,
+        "prior_only": 36.2,
+        "prior_only_band": "冷",
+        "stored": 36.0,
+        "stored_band": "冷",
+        "trade_date": "2026-09-24"
+      },
+      {
+        "delta": -0.1,
+        "prior_only": 16.0,
+        "prior_only_band": "冰点",
+        "stored": 16.1,
+        "stored_band": "冰点",
+        "trade_date": "2026-09-28"
+      },
+      {
+        "delta": 0.2,
+        "prior_only": 58.2,
+        "prior_only_band": "中性",
+        "stored": 58.0,
+        "stored_band": "中性",
+        "trade_date": "2026-09-29"
+      },
+      {
+        "delta": 0.3,
+        "prior_only": 49.3,
+        "prior_only_band": "中性",
+        "stored": 49.0,
+        "stored_band": "中性",
+        "trade_date": "2026-09-30"
+      },
+      {
+        "delta": 0.0,
+        "prior_only": 33.2,
+        "prior_only_band": "冷",
+        "stored": 33.2,
+        "stored_band": "冷",
+        "trade_date": "2026-10-08"
+      },
+      {
+        "delta": 0.2,
+        "prior_only": 72.8,
+        "prior_only_band": "热",
+        "stored": 72.6,
+        "stored_band": "热",
+        "trade_date": "2026-10-09"
+      }
+    ],
+    "mean_abs_difference": 1.1495,
+    "mean_difference": 1.0642,
+    "n": 190
+  }
+}
