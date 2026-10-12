@@ -33,7 +33,7 @@ _BANNER_RES = (
 )
 _CONTROL_RE = re.compile(r"[\u0000-\u0008\u000b-\u001f\u007f-\u009f�]")
 # The private Feishu image CDN URL must never reach a relay or a model prompt.
-_LARK_CDN_RE = re.compile(r"https?://s1-imfile\.feishucdn\.com/\S+", re.IGNORECASE)
+_LARK_CDN_RE = re.compile(r"https?://s\d+-imfile\.feishucdn\.com/\S+", re.IGNORECASE)
 # A node pushed out of view with a large negative margin is an anti-scrape
 # decoy (observed margin "0px 0px -24px -99px"); real layout never hides a line.
 _DECOY_MARGIN_PX = -12
@@ -220,6 +220,11 @@ def message_text(payload: dict[str, Any]) -> str:
         return "[图片]" if images else clean_text(payload.get("content"))
     if msg_type == "IMAGE":
         return "[图片]"
+    # The bridge renders TEXT/POST from the element tree with links in place;
+    # the upstream ``content`` summary silently drops every anchor.
+    rich = payload.get("_larkagentx_rich_text")
+    if isinstance(rich, dict) and isinstance(rich.get("text"), str) and rich["text"].strip():
+        return clean_text(rich["text"])
     return clean_text(payload.get("content"))
 
 

@@ -317,3 +317,72 @@ test('a refused or unreachable bind is reported without throwing', async () => {
 	assert.equal((await offline.bind({ key: 'k', chatName: 'A' })).status, 'unavailable');
 	assert.equal((await createRouteBinder({ baseUrl: '', token: '' }).bind({ key: 'k', chatName: 'A' })).status, 'unavailable');
 });
+
+// Shapes observed 2026-10-11/12 from the anqiang groups.  content_data is what
+// the adapter really receives: protobuf property bytes already decoded as text.
+const BAIDU = 'https://pan.baidu.com/s/1-g1gEqFhrgNlFejflFZAwA?pwd=q7sx';
+const STICKER = 'https://s3-imfile.feishucdn.com/static-resource/v1/v3_00160_00f38314~?image_size=noop&format=image&sticker_format=.webp';
+const anchorProperty = (url, long = false) => (long
+	? `\n�\u0001${url}\u0012�\u0001${url}\u001a�\u0001${url} \u0000`
+	: `\n8${url}\u00128${url}\u001a8${url} \u0000`);
+const textWithLink = {
+	msg_id: '7695418070096939996', msg_type_name: 'TEXT', chat_id: '7667839423698029860', from_id: '7471672673018593282', create_time: 1791729142,
+	content: '通过网盘分享的文件：2026.10.11 安强内部vip.mp4\n链接:  提取码: q7sx',
+	content_data: { text: '', richText: { anchorIds: ['a-1'], elementIds: ['t', 'nl', 'a-0', 'a-1', 'a-2'], elements: { dictionary: {
+		'a-0': { tag: 1, property: '\n\b链接: ' }, 'a-1': { tag: 6, property: anchorProperty(BAIDU) }, 'a-2': { tag: 1, property: '\n\u0010 提取码: q7sx' },
+		t: { tag: 1, property: '\n<通过网盘分享的文件：2026.10.11 安强内部vip.mp4' }, nl: { tag: 1, property: '\n\u0001\n' },
+	} } } },
+};
+
+test('a TEXT message keeps the link the upstream summary dropped, where it was typed', () => {
+	const relay = normalizeLarkAgentXRelayMessage({
+		...textWithLink,
+		_larkagentx_rich_text: { text: `通过网盘分享的文件：2026.10.11 安强内部vip.mp4\n链接: ${BAIDU} 提取码: q7sx`, links: [BAIDU] },
+	});
+	assert.equal(relay.msg_type, 'text');
+	assert.equal(JSON.parse(relay.body.content).text, `通过网盘分享的文件：2026.10.11 安强内部vip.mp4\n链接: ${BAIDU} 提取码: q7sx`);
+});
+
+test('a TEXT message without the bridge rendering still relays its summary unchanged', () => {
+	const relay = normalizeLarkAgentXRelayMessage(textWithLink);
+	assert.equal(JSON.parse(relay.body.content).text, '通过网盘分享的文件：2026.10.11 安强内部vip.mp4\n链接:  提取码: q7sx');
+});
+
+const postWithLinks = {
+	msg_id: '7695573360809348361', msg_type_name: 'POST', chat_id: '7661209668907207659', from_id: '7679773622105296093', create_time: 1791765299,
+	content: '[富文本] \n通过百度网盘分享的文件：10.11 安强…\n链接:\n提取码:w12g \n复制这段内容打开「百度网盘APP 即可获取」',
+	content_data: { isNotified: false, richText: { anchorIds: ['s', 'b'], elementIds: ['p1', 'p2'], elements: { dictionary: {
+		s: { tag: 6, property: anchorProperty(STICKER, true) },
+		b: { tag: 6, property: `\n/https://pan.baidu.com/s/1Skefd7vwcGD5xBESLj_gJw\u0012/https://pan.baidu.com/s/1Skefd7vwcGD5xBESLj_gJw` },
+		p1: { tag: 3, property: '', childIds: ['s'] }, p2: { tag: 3, property: '', childIds: ['b'] },
+	} } } },
+};
+
+test('a POST places its link inline and never relays a private-CDN sticker as a link', () => {
+	const relay = normalizeLarkAgentXRelayMessage({
+		...postWithLinks,
+		_larkagentx_rich_text: {
+			text: '通过百度网盘分享的文件：10.11 安强…\n链接:https://pan.baidu.com/s/1Skefd7vwcGD5xBESLj_gJw\n提取码:w12g\n复制这段内容打开「百度网盘APP 即可获取」',
+			links: ['https://pan.baidu.com/s/1Skefd7vwcGD5xBESLj_gJw'],
+		},
+	});
+	const rows = JSON.parse(relay.body.content).zh_cn.content;
+	assert.deepEqual(rows[1], [{ tag: 'text', text: '链接:' }, { tag: 'a', href: 'https://pan.baidu.com/s/1Skefd7vwcGD5xBESLj_gJw', text: 'https://pan.baidu.com/s/1Skefd7vwcGD5xBESLj_gJw' }]);
+	assert.equal(rows.length, 4);
+	assert.doesNotMatch(relay.body.content, /feishucdn|\\u0012|�/);
+});
+
+test('without the bridge rendering, legacy URL extraction stops at protobuf control bytes', () => {
+	const relay = normalizeLarkAgentXRelayMessage(postWithLinks);
+	const anchors = JSON.parse(relay.body.content).zh_cn.content.flat().filter((node) => node.tag === 'a');
+	assert.deepEqual(anchors, [{ tag: 'a', href: 'https://pan.baidu.com/s/1Skefd7vwcGD5xBESLj_gJw', text: 'https://pan.baidu.com/s/1Skefd7vwcGD5xBESLj_gJw' }]);
+});
+
+test('bridge-rendered links are filtered again at the adapter boundary', () => {
+	const relay = normalizeLarkAgentXRelayMessage({
+		...postWithLinks,
+		_larkagentx_rich_text: { text: '看这里', links: [STICKER, 'javascript:alert(1)', 'https://example.com/ok'] },
+	});
+	const anchors = JSON.parse(relay.body.content).zh_cn.content.flat().filter((node) => node.tag === 'a');
+	assert.deepEqual(anchors.map((node) => node.href), ['https://example.com/ok']);
+});

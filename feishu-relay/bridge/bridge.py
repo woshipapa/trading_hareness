@@ -40,6 +40,7 @@ from history_archive import HistoryArchive
 from send_gate import SendConflict, SendGate, SendRateLimited
 from repair_scope import repair_allowed
 from group_lookup import GroupLookupError, unique_group_id
+from rich_text_render import render_rich_text
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
@@ -2032,6 +2033,19 @@ class Bridge:
 			embedded = embedded_image_resources(message)
 			if embedded:
 				payload["_larkagentx_images"] = embedded
+		# The upstream summary drops anchor elements, so a typed link vanishes
+		# from TEXT/POST content.  Render the element tree from the raw property
+		# bytes here; after json_safe() they are no longer decodable.
+		if self.last_observed_message_type in {"TEXT", "POST"}:
+			content_data = message.get("content_data")
+			rich_text = content_data.get("richText") if isinstance(content_data, dict) else None
+			try:
+				rendered = render_rich_text(rich_text)
+			except Exception as error:  # never let a rendering bug drop the message
+				LOG.warning("rich text render failed message_id=%s: %s", message_id, error)
+				rendered = {"text": "", "links": []}
+			if rendered["text"]:
+				payload["_larkagentx_rich_text"] = rendered
 		payload["source_label"] = os.environ.get("LARKX_SOURCE_LABEL", "LarkAgentX 个人会话")
 		event_id = f"larkagentx:{chat_id}:{message_id}"
 		self.history_archive.append(event_id, payload)

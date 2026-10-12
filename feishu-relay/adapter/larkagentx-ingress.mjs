@@ -12,8 +12,12 @@ const DIRECT_RELAY_TYPES = new Set(['TEXT', 'SYSTEM', 'POST']);
 // lossy: anchor URLs may only survive in content_data, while an image CDN URL
 // can be rendered beside the human text.  Keep external links, but never
 // expose the private Feishu resource URL in a relay message.
-const URL_RE = /https?:\/\/[^\s<>'"\u3000<>「」『』（）()\[\]{}]+/giu;
-const LARK_IMAGE_CDN_RE = /^https?:\/\/s1-imfile\.feishucdn\.com\/static-resource\//iu;
+// content_data still holds protobuf bytes decoded as text, where one anchor is
+// "\n8<url>\u0012<len><url>\u001a<len><url>": a URL must end at a control or
+// replacement character or the three copies fuse into one bogus link.
+const URL_RE = /https?:\/\/[^\s<>'"\u0000-\u001f\u007f-\u009f\ufffd\u3000<>「」『』（）()\[\]{}]+/giu;
+// Stickers and inline images live on any shard of the private CDN (s1, s3, ...).
+const LARK_IMAGE_CDN_RE = /^https?:\/\/s\d+-imfile\.feishucdn\.com\//iu;
 
 // The client-upgrade banner matcher lives in card-content.mjs so this
 // degradation check and cardText can never drift apart.
@@ -55,7 +59,29 @@ function removeRepeatedPost(text) {
 	return repeated ? repeated[1].trim() : normalized;
 }
 
+// The bridge renders TEXT/POST from the element tree before the protobuf bytes
+// are lost, with each link where it was typed.  Prefer it to the upstream
+// summary, which drops every anchor.
+function larkAgentXRichText(input) {
+	const rich = input?._larkagentx_rich_text;
+	if (!rich || typeof rich !== 'object' || typeof rich.text !== 'string') return null;
+	const text = rich.text.trim();
+	if (!text) return null;
+	const links = (Array.isArray(rich.links) ? rich.links : [])
+		.map((value) => String(value ?? '').trim())
+		.filter((url) => /^https?:\/\//iu.test(url) && !LARK_IMAGE_CDN_RE.test(url));
+	return { text, links: [...new Set(links)] };
+}
+
+function postLinks(input) {
+	return larkAgentXRichText(input)?.links ?? urlsFromValue(input?.content_data);
+}
+
 function portablePostText(input) {
+	const rich = larkAgentXRichText(input);
+	if (rich) {
+		return removeRepeatedPost(stripRelayNoise(rich.text).replace(/\[(?:post|image|card|interactive|富文本|图片|卡片)\]/giu, '').trim());
+	}
 	const candidates = [input?.content, input?.content_data?.richText?.innerText, input?.content_data?.rich_text?.innerText];
 	const text = candidates.map((value) => stripRelayNoise(value)
 		.replace(/\[(?:post|image|card|interactive|富文本|图片|卡片)\]/giu, '')
@@ -382,7 +408,7 @@ export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) 
 		};
 	}
 	if (upstreamType === 'POST') {
-		const links = urlsFromValue(input?.content_data);
+		const links = postLinks(input);
 		const portableText = portablePostText(input);
 		const images = Array.isArray(input?._larkagentx_images) ? input._larkagentx_images : [];
 		if (!portableText && !links.length && !images.length) throw new Error('LarkAgentX 实时转发 POST 缺少文本内容');
@@ -399,9 +425,10 @@ export function normalizeLarkAgentXRelayMessage(input, { now = Date.now } = {}) 
 		};
 	}
 	if (!DIRECT_RELAY_TYPES.has(upstreamType)) throw new Error(`LarkAgentX 类型 ${upstreamType} 需要通过官方消息接口补读`);
-	if (!content) throw new Error('LarkAgentX 实时转发消息缺少文本内容');
+	const text = (upstreamType === 'TEXT' ? larkAgentXRichText(input)?.text : '') || content;
+	if (!text) throw new Error('LarkAgentX 实时转发消息缺少文本内容');
 	const msgType = upstreamType === 'SYSTEM' ? 'system' : 'text';
-	const displayText = upstreamType === 'TEXT' ? content : `[${upstreamType.toLowerCase()}]\n${content}`;
+	const displayText = upstreamType === 'TEXT' ? text : `[${upstreamType.toLowerCase()}]\n${text}`;
 	return {
 		message_id: messageId,
 		msg_type: msgType,
@@ -417,7 +444,7 @@ export function normalizeLarkAgentXMessage(input, { now = Date.now } = {}) {
 	const messageId = requiredString(input.msg_id ?? input.message_id, 'message_id', 128);
 	const chatId = requiredString(input.chat_id, 'chat_id', 128);
 	const senderId = requiredString(input.from_id ?? input.sender_id, 'sender_id', 128);
-	const content = String(input.content ?? '').trim();
+	const content = larkAgentXRichText(input)?.text || String(input.content ?? '').trim();
 	if (!content) throw new Error('LarkAgentX 消息没有可转发的文本内容');
 	const eventId = String(input.event_id ?? `larkagentx:${messageId}`).trim().slice(0, 200);
 	const createTime = Number(input.create_time);
