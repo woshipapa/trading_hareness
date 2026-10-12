@@ -1563,13 +1563,15 @@ class Bridge:
 	def _private_repair_allowed(self, chat_id: str) -> bool:
 		return repair_allowed(
 			chat_id, websocket_chat_ids=self.websocket_chat_ids,
-			configured_chat_ids=self.private_gap_repair_chat_ids, dynamic_chat_ids=getattr(self, "dynamic_routes", {}),
+			configured_chat_ids=self.private_gap_repair_chat_ids,
+			dynamic_chat_ids=set(getattr(self, "dynamic_routes", {})) | set(getattr(self, "summary_chat_ids", ())),
 		)
 
 	def _private_tail_repair_allowed(self, chat_id: str) -> bool:
 		return (
 			self._private_repair_allowed(chat_id)
-			and (not self.private_tail_repair_chat_ids or chat_id in self.private_tail_repair_chat_ids or chat_id in getattr(self, "dynamic_routes", {}))
+			and (not self.private_tail_repair_chat_ids or chat_id in self.private_tail_repair_chat_ids or chat_id in getattr(self, "dynamic_routes", {})
+			     or chat_id in getattr(self, "summary_chat_ids", ()))
 		)
 
 	def _private_repair_chunks(self, start: int, end: int) -> list[tuple[int, int]]:
@@ -2025,7 +2027,11 @@ class Bridge:
 				self._schedule_private_gap(chat_id, gap)
 		except Exception as error:
 			LOG.warning("记录 LarkAgentX position 失败 chat_id=%s：%s", chat_id, error)
-		if str(message.get("from_id", "")) == str(self.auth.user_id):
+		# The account's own message in a source group is an echo and would loop a
+		# relay.  In the summary group it is content: the operator's hand-typed
+		# "#tag ..." goes to ingestion like any relayed message, and that lane
+		# never posts back.
+		if str(message.get("from_id", "")) == str(self.auth.user_id) and chat_id not in getattr(self, "summary_chat_ids", ()):
 			stats["self_message_count"] += 1
 			self.self_message_count += 1
 			return {"status": "filtered", "chat_id": chat_id, "message_id": str(message.get("msg_id", ""))}
@@ -2077,6 +2083,12 @@ class Bridge:
 				LOG.warning("rich text render failed message_id=%s: %s", message_id, error)
 				rendered = {"text": "", "links": []}
 			if rendered["text"]:
+				# A POST's title sits beside the element tree, not in it.
+				title = content_data.get("title") if isinstance(content_data, dict) else None
+				if isinstance(title, (bytes, bytearray)):
+					title = bytes(title).decode("utf-8", errors="replace")
+				if isinstance(title, str) and title.strip():
+					rendered["title"] = title.strip()[:500]
 				payload["_larkagentx_rich_text"] = rendered
 		if correction:
 			# Operator-requested re-read after a decoding fix: the adapter resends

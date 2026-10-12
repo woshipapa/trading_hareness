@@ -443,3 +443,43 @@ test('a relayed card keeps its real image keys beside the card JSON, and a banne
 	const noKeys = normalizeLarkAgentXRelayMessage({ ...base, _larkagentx_images: [{ image_id: 'img_v3_card_1', key_hex: '[redacted]', iv_hex: '' }], content_data: { jsonCard: JSON.stringify(card) } });
 	assert.equal(noKeys.larkagentx_images, undefined);
 });
+
+import { isSummaryChat } from './larkagentx-ingress.mjs';
+
+test('the summary lane accepts the configured oc_ id or a numeric id the bridge lists, and nothing else', () => {
+	const configuredChatId = 'oc_523b7e9e29854acba64272a948cb8eda';
+	const bridgeSummaryChatIds = [configuredChatId, '7669744189332065542'];
+	assert.equal(isSummaryChat({ chatId: configuredChatId, configuredChatId, bridgeSummaryChatIds: [] }), true);
+	assert.equal(isSummaryChat({ chatId: '7669744189332065542', configuredChatId, bridgeSummaryChatIds }), true);
+	// a source group, an unknown numeric id, an unreachable bridge, a non-numeric stranger
+	assert.equal(isSummaryChat({ chatId: '7661209668907207659', configuredChatId, bridgeSummaryChatIds }), false);
+	assert.equal(isSummaryChat({ chatId: '7669744189332065542', configuredChatId, bridgeSummaryChatIds: [] }), false);
+	assert.equal(isSummaryChat({ chatId: 'oc_other', configuredChatId, bridgeSummaryChatIds: ['oc_other'] }), false);
+	assert.equal(isSummaryChat({ chatId: '', configuredChatId, bridgeSummaryChatIds }), false);
+});
+
+test('a POST keeps its title, which is not part of the rendered element tree', () => {
+	const base = { msg_id: '1', msg_type_name: 'POST', chat_id: '7661209668907207659', from_id: '7001', create_time: 1791765299, content: '[富文本] 午评\n正文第一行', content_data: {} };
+	const titled = normalizeLarkAgentXRelayMessage({ ...base, _larkagentx_rich_text: { text: '正文第一行\n链接 https://example.com/x', links: ['https://example.com/x'], title: '午评' } });
+	assert.deepEqual(JSON.parse(titled.body.content).zh_cn.content.map((row) => row.map((node) => node.text).join('')), ['午评', '正文第一行', '链接 https://example.com/x']);
+	// no duplicate when the body already opens with the title, and no change without one
+	const repeated = normalizeLarkAgentXRelayMessage({ ...base, _larkagentx_rich_text: { text: '午评\n正文', links: [], title: '午评' } });
+	assert.deepEqual(JSON.parse(repeated.body.content).zh_cn.content.map((row) => row[0].text), ['午评', '正文']);
+	const untitled = normalizeLarkAgentXRelayMessage({ ...base, _larkagentx_rich_text: { text: '正文', links: [] } });
+	assert.deepEqual(JSON.parse(untitled.body.content).zh_cn.content.map((row) => row[0].text), ['正文']);
+});
+
+test('a summary-group message read over the WebSocket is ingestible: tag, forwarding time and picture keys survive', () => {
+	const KEY = 'ab'.repeat(32), IV = 'cd'.repeat(12);
+	const text = normalizeLarkAgentXSummaryMessage({ msg_id: '9001', msg_type_name: 'TEXT', chat_id: '7669744189332065542', from_id: 'bot', create_time: 1791765299,
+		content: '#jinli 2026-10-12 13:51:02\n核心还是看回踩', _larkagentx_rich_text: { text: '#jinli 2026-10-12 13:51:02\n核心还是看回踩', links: [] } });
+	assert.equal(text.source, 'larkagentx-summary');
+	assert.equal(text.message.chat_id, '7669744189332065542');
+	assert.equal(JSON.parse(text.message.content).text, '#jinli 2026-10-12 13:51:02\n核心还是看回踩');
+	const card = { schema: '2.0', body: { elements: [{ tag: 'div', property: { text: { tag: 'plain_text', property: { content: '#cat 2026-10-12 13:51:02\n图文卡片' } } } }, { tag: 'img', property: { imageID: '5' } }] } };
+	const withPicture = normalizeLarkAgentXSummaryMessage({ msg_id: '9002', msg_type_name: 'CARD', chat_id: '7669744189332065542', from_id: 'bot', create_time: 1791765299, content: '[卡片]',
+		_larkagentx_images: [{ image_id: 'img_v3_card', key_hex: KEY, iv_hex: IV, source_id: '5' }],
+		content_data: { jsonCard: JSON.stringify(card), richtext: { imageIds: ['5'], elements: { dictionary: { 1: { tag: 1, property: '图文卡片' }, 5: { tag: 2, property: 'x' } } } } } });
+	assert.equal(withPicture.message.message_type, 'interactive');
+	assert.deepEqual(withPicture.message.larkagentx_images, [{ image_id: 'img_v3_card', key_hex: KEY, iv_hex: IV }]);
+});

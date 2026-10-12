@@ -70,7 +70,8 @@ function larkAgentXRichText(input) {
 	const links = (Array.isArray(rich.links) ? rich.links : [])
 		.map((value) => String(value ?? '').trim())
 		.filter((url) => /^https?:\/\//iu.test(url) && !LARK_IMAGE_CDN_RE.test(url));
-	return { text, links: [...new Set(links)] };
+	const title = typeof rich.title === 'string' ? rich.title.trim() : '';
+	return { text, links: [...new Set(links)], title };
 }
 
 function postLinks(input) {
@@ -80,7 +81,9 @@ function postLinks(input) {
 function portablePostText(input) {
 	const rich = larkAgentXRichText(input);
 	if (rich) {
-		return removeRepeatedPost(stripRelayNoise(rich.text).replace(/\[(?:post|image|card|interactive|富文本|图片|卡片)\]/giu, '').trim());
+		const body = removeRepeatedPost(stripRelayNoise(rich.text).replace(/\[(?:post|image|card|interactive|富文本|图片|卡片)\]/giu, '').trim());
+		// The title is not in the element tree the body was rendered from.
+		return rich.title && !body.startsWith(rich.title) ? `${rich.title}\n${body}`.trim() : body;
 	}
 	const candidates = [input?.content, input?.content_data?.richText?.innerText, input?.content_data?.rich_text?.innerText];
 	const text = candidates.map((value) => stripRelayNoise(value)
@@ -493,6 +496,8 @@ export function normalizeLarkAgentXSummaryMessage(input, { now = Date.now } = {}
 			chat_type: String(input.chat_type_name ?? input.chat_type ?? 'group').toLowerCase(),
 			message_type: relay.msg_type,
 			content: relay.body.content,
+			// A relayed card names its pictures by element number; the real keys ride beside it.
+			...(Array.isArray(relay.larkagentx_images) && relay.larkagentx_images.length ? { larkagentx_images: relay.larkagentx_images } : {}),
 			create_time: createTime,
 			update_time: relay.update_time ?? input.update_time ?? null,
 			deleted: false,
@@ -587,4 +592,17 @@ export function resolveLarkAgentXSource({ chatId, configuredKey = '', declaredRo
 	if (!source) throw new Error(`未找到实时源路由：${sourceKey}`);
 	if (declaredRoute && source.chatId && declaredOcId !== String(source.chatId)) throw new Error(`LarkAgentX 动态源群映射不匹配：${sourceKey}`);
 	return { sourceKey, source, staleConfiguredKey };
+}
+
+/** Is this the summary group?  The adapter is configured with the group's
+ * oc_ id, the WebSocket only ever carries its numeric id, and nothing maps one
+ * to the other.  So a numeric id is accepted when the bridge itself lists it
+ * as a summary chat (LARKX_SUMMARY_CHAT_IDS, read from the bridge's health,
+ * not from the message).  Anything else is refused: a source group must never
+ * reach ingestion through this lane. */
+export function isSummaryChat({ chatId, configuredChatId, bridgeSummaryChatIds = [] }) {
+	const id = String(chatId ?? '').trim();
+	if (!id) return false;
+	if (id === String(configuredChatId ?? '').trim()) return true;
+	return /^\d+$/.test(id) && bridgeSummaryChatIds.map((value) => String(value ?? '').trim()).includes(id);
 }

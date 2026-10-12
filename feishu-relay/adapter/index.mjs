@@ -31,7 +31,7 @@ import { parsePaperFeedback } from './paper-feedback-command.mjs';
 import { parseXhsCommand } from './xhs-command.mjs';
 import { matchResearchRoute } from './research-routes.mjs';
 import { splitUtf8Text } from './media-chunks.mjs';
-import { createRouteBinder, resolveLarkAgentXSource, hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
+import { createRouteBinder, isSummaryChat, resolveLarkAgentXSource, hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import { resolveFrontendAssetPath } from './frontend-assets.mjs';
@@ -577,7 +577,15 @@ function extractMessagePayload(message) {
 	if (message?.message_type === 'post') return extractPostPayload(content);
 	// A relayed card (and any card read with card_msg_content_type=
 	// user_card_content) carries its route tag as the first line of its text.
-	if (message?.message_type === 'interactive') return cardPayload(content);
+	if (message?.message_type === 'interactive') {
+		const card = cardPayload(content);
+		// Through the WebSocket a card's pictures arrive as keys beside the card,
+		// not as portable image keys inside it.
+		const beside = (Array.isArray(message.larkagentx_images) ? message.larkagentx_images : [])
+			.filter((resource) => resource?.image_id && !card.resources.some((existing) => existing.key === resource.image_id))
+			.map((resource) => ({ key: resource.image_id, resource_type: 'image', larkagentx_resource: resource }));
+		return beside.length ? { ...card, resources: [...card.resources, ...beside] } : card;
+	}
 	const resources = [];
 	if (content.image_key) resources.push({ key: content.image_key, resource_type: 'image', ...(content.larkagentx_resource ? { larkagentx_resource: content.larkagentx_resource } : {}) });
 	if (content.file_key) resources.push({ key: content.file_key, resource_type: 'file' });
@@ -755,7 +763,8 @@ async function downloadMedia(data, messageResourceApi = null) {
 				const query = new URLSearchParams({ image_id: String(descriptor.image_id ?? resource.key), key_hex: String(descriptor.key_hex ?? ''), iv_hex: String(descriptor.iv_hex ?? '') });
 				const bridgeResponse = await fetch(`${larkAgentXResourceUrl}?${query.toString()}`, { headers: { 'x-larkagentx-token': larkAgentXIngressToken } });
 				if (!bridgeResponse.ok) throw new Error(`LarkAgentX 图片资源读取失败（HTTP ${bridgeResponse.status}）`);
-				const bytes = Buffer.from(await bridgeResponse.arrayBuffer());
+				// The bridge serves the stored (AES-GCM encrypted) payload; decryption is the adapter's job.
+				const bytes = decryptLarkAgentXImage(Buffer.from(await bridgeResponse.arrayBuffer()), descriptor);
 				response = { headers: { 'content-type': bridgeResponse.headers.get('content-type') ?? 'application/octet-stream' }, getReadableStream: () => Readable.from(bytes) };
 			} else if (messageResourceApi) {
 				response = await messageResourceApi.messageResourceGet({ messageId: message.message_id, fileKey: resource.key, type: resource.resource_type });
@@ -1216,6 +1225,18 @@ async function handleLarkAgentXInbound(request, response) {
 	}
 }
 
+// The bridge's own list of summary chats, cached briefly.  An unreachable
+// bridge yields an empty list, so a numeric id is refused and the bridge
+// retries the event from its spool.
+let bridgeSummaryCache = { at: 0, ids: [] };
+async function bridgeSummaryChatIds() {
+	if (Date.now() - bridgeSummaryCache.at < 60_000) return bridgeSummaryCache.ids;
+	const status = await larkAgentXDashboardStatus().catch(() => null);
+	const ids = Array.isArray(status?.summary_chat_ids) ? status.summary_chat_ids.map((value) => String(value)) : [];
+	if (status?.status !== 'unavailable') bridgeSummaryCache = { at: Date.now(), ids };
+	return ids;
+}
+
 async function handleLarkAgentXSummaryInbound(request, response) {
 	if (!larkAgentXIngressToken || request.headers['x-larkagentx-token'] !== larkAgentXIngressToken) {
 		response.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -1224,7 +1245,7 @@ async function handleLarkAgentXSummaryInbound(request, response) {
 	}
 	try {
 		const input = await readJsonBody(request, 64 * 1024);
-		if (String(input?.chat_id ?? '').trim() !== summaryListenerConfig.chatId) throw new Error('LarkAgentX 汇总群 chat_id 不匹配');
+		if (!isSummaryChat({ chatId: input?.chat_id, configuredChatId: summaryListenerConfig.chatId, bridgeSummaryChatIds: await bridgeSummaryChatIds() })) throw new Error('LarkAgentX 汇总群 chat_id 不匹配');
 		const data = normalizeLarkAgentXSummaryMessage(input);
 		addEvent(data);
 		updateEvent(data.event_id, { n8n_status: 'LarkAgentX 汇总群消息转发中' });

@@ -154,6 +154,54 @@ class LarkAgentXDeliveryTests(unittest.TestCase):
 		instance.event_spool.record_filtered.assert_called_once()
 		instance.history_archive.append.assert_called_once()
 
+	def _summary_instance(self, *, summary_chat_ids):
+		instance = object.__new__(bridge.Bridge)
+		instance.websocket_state = "connected"
+		instance.websocket_chat_ids = {"7661209668907207659", "7669744189332065542"}
+		instance.summary_chat_ids = set(summary_chat_ids)
+		instance.dynamic_routes = {}
+		instance.static_source_keys_by_chat = {}
+		instance.route_bindings = {}
+		instance.anqiang_source_keys = set()
+		instance.anqiang_chat_ids = set()
+		instance.anqiang_block_keywords = set()
+		instance.chat_stats = {}
+		instance.auth = Mock(user_id="7000")
+		instance.event_spool = Mock()
+		instance.event_spool.record_position.return_value = None
+		instance.event_spool.enqueue.return_value = "queued"
+		instance.event_spool.claim.return_value = "claimed"
+		instance.history_archive = Mock()
+		instance.observed_count = instance.self_message_count = instance.failed_count = instance.forwarded_count = instance.retry_count = 0
+		instance.last_observed_chat_id = instance.last_observed_message_type = ""
+		instance.ingress_url = "http://adapter/inbound"
+		instance.summary_ingress_url = "http://adapter/summary"
+		instance.command_ingress_url = "http://adapter/command"
+		instance.token = "t"
+		return instance
+
+	def test_own_message_is_an_echo_in_a_source_group_but_content_in_the_summary_group(self):
+		instance = self._summary_instance(summary_chat_ids={"oc_summary", "7669744189332065542"})
+		own = {"msg_id": "m-own", "from_id": "7000", "msg_type_name": "TEXT", "content": "#liwei 手工补充", "position": 5}
+		with patch.object(bridge, "post_json", return_value={"status": "accepted"}) as post:
+			echoed = asyncio.run(instance.on_message({**own, "chat_id": "7661209668907207659"}))
+			self.assertEqual(echoed["status"], "filtered")
+			post.assert_not_called()
+			asyncio.run(instance.on_message({**own, "msg_id": "m-own-2", "chat_id": "7669744189332065542"}))
+			post.assert_called_once()
+			self.assertEqual(post.call_args.args[0], "http://adapter/summary")
+		self.assertEqual(instance.self_message_count, 1)
+
+	def test_a_post_title_travels_with_the_rendered_text(self):
+		instance = self._summary_instance(summary_chat_ids=set())
+		node = b"\n\x06\xe6\xad\xa3\xe6\x96\x87"  # TextProperty{content: "正文"}
+		message = {"msg_id": "m-post", "chat_id": "7661209668907207659", "from_id": "8000", "msg_type_name": "POST", "content": "[富文本] 午评\n正文", "position": 6,
+		           "content_data": {"title": "午评", "richText": {"elementIds": ["p"], "elements": {"dictionary": {"p": {"tag": 3, "property": b"", "childIds": ["t"]}, "t": {"tag": 1, "property": node}}}}}}
+		with patch.object(bridge, "post_json", return_value={"status": "accepted"}) as post:
+			asyncio.run(instance.on_message(message))
+		sent = post.call_args.args[2]
+		self.assertEqual(sent["_larkagentx_rich_text"], {"text": "正文", "links": [], "title": "午评"})
+
 	def test_private_tail_repair_starts_after_recovered_cursor(self):
 		instance = object.__new__(bridge.Bridge)
 		instance.client = Mock()  # logged in; the tail pull is skipped when client is None
