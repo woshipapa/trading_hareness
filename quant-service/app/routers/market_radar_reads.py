@@ -101,7 +101,7 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
         return await run_database_blocking(read, timeout_seconds=120)
 
     @router.get("/api/v1/market/limit-up-risk/daily")
-    async def limit_up_risk_daily(trade_date: date | None = None) -> dict[str, Any]:
+    async def limit_up_risk_daily(trade_date: date | None = Query(None, alias="date")) -> dict[str, Any]:
         def read() -> dict[str, Any]:
             with database.transaction() as connection:
                 return limit_up_risk_daily_series(connection, trade_date)

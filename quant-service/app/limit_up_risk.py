@@ -161,9 +161,10 @@ def recent_status(summaries: list[Mapping[str, Any]], limit: int = 120) -> dict[
     t_value = None
     if len(differences) >= 2:
         spread = stdev(differences)
-        t_value = mean(differences) / (spread / len(differences) ** 0.5) if spread else (999.0 if mean(differences) > 0 else 0.0)
+        # Zero-variance daily differences do not occur in real data; no finite t-value is reported.
+        t_value = mean(differences) / (spread / len(differences) ** 0.5) if spread else None
     status = "insufficient_history" if len(recent) < 60 else (
-        "working" if difference_points >= 3 and t_value >= 2 else "not_working_recently"
+        "working" if difference_points >= 3 and t_value is not None and t_value >= 2 else "not_working_recently"
     )
     return {"sessions": len(recent), "lowest_big_loss_rate": lowest, "highest_big_loss_rate": highest,
             "difference_points": difference_points, "t_value": t_value, "status": status}

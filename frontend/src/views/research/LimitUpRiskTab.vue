@@ -16,7 +16,7 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 async function loadDaily(day?: string) {
-  daily.value = await getJson<LimitUpRiskDaily>(`/api/research/market/limit-up-risk/daily${day ? `?trade_date=${encodeURIComponent(day)}` : ''}`);
+  daily.value = await getJson<LimitUpRiskDaily>(`/api/research/market/limit-up-risk/daily${day ? `?date=${encodeURIComponent(day)}` : ''}`);
   if (!day && daily.value.reading) tradeDate.value = daily.value.reading.trade_date;
 }
 
@@ -29,7 +29,15 @@ async function load() {
 }
 
 onMounted(() => { void load(); });
-watch(tradeDate, (day) => { if (daily.value?.reading?.trade_date !== day) void loadDaily(day); });
+watch(tradeDate, (day) => {
+  if (daily.value?.reading?.trade_date === day) return;
+  daily.value = null;
+  error.value = null;
+  void loadDaily(day).catch((cause) => {
+    daily.value = null;
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  });
+});
 
 const reading = computed<LimitUpRiskReading | null>(() => daily.value?.reading ?? null);
 const rows = computed(() => sortedRows(reading.value));
@@ -65,7 +73,7 @@ const statusLabel = computed(() => recent.value?.status === 'working' ? '近期�
     <el-empty v-else description="该日期没有落库的风险分" class="gap" />
 
     <el-card shadow="never" class="gap">
-      <template #header>上线以来的次日大面表现（20 日平滑）</template>
+      <template #header>最近 250 个交易日的次日大面表现（20 日平滑）</template>
       <v-chart v-if="chart && track?.days.length" :option="chart" autoresize class="chart" />
       <el-empty v-else description="还没有足够的表现记录" />
     </el-card>
@@ -75,7 +83,7 @@ const statusLabel = computed(() => recent.value?.status === 'working' ? '近期�
       <span>最低风险五分之一 {{ percent(recent.lowest_big_loss_rate) }}</span>
       <span>最高风险五分之一 {{ percent(recent.highest_big_loss_rate) }}</span>
       <span>差 {{ recent.difference_points?.toFixed(1) ?? '-' }} 个百分点</span>
-      <span>日聚类 t={{ recent.t_value?.toFixed(2) ?? '-' }}</span>
+      <span>日聚类 t={{ recent.t_value?.toFixed(2) ?? '—' }}</span>
     </el-card>
   </section>
 </template>

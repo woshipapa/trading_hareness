@@ -92,7 +92,7 @@ class LimitUpRiskTests(unittest.TestCase):
         self.assertIsNone(fifth_comparison(rows, {}))
 
     def test_recent_status_working_and_not_working(self):
-        working = [{"lowest": {"big_loss_rate": 0.08}, "highest": {"big_loss_rate": 0.13}} for _ in range(60)]
+        working = [{"lowest": {"big_loss_rate": 0.08}, "highest": {"big_loss_rate": 0.13 + index % 3 * 0.005}} for index in range(60)]
         self.assertEqual(recent_status(working)["status"], "working")
         not_working = [{"lowest": {"big_loss_rate": 0.10}, "highest": {"big_loss_rate": 0.11}} for _ in range(60)]
         self.assertEqual(recent_status(not_working)["status"], "not_working_recently")
@@ -100,6 +100,10 @@ class LimitUpRiskTests(unittest.TestCase):
     def test_recent_status_requires_sixty_sessions(self):
         summaries = [{"lowest": {"big_loss_rate": 0.08}, "highest": {"big_loss_rate": 0.13}} for _ in range(59)]
         self.assertEqual(recent_status(summaries)["status"], "insufficient_history")
+
+    def test_recent_status_hides_zero_variance_t_value(self):
+        summaries = [{"lowest": {"big_loss_rate": 0.08}, "highest": {"big_loss_rate": 0.13}} for _ in range(60)]
+        self.assertIsNone(recent_status(summaries)["t_value"])
 
     def test_repository_bar_sql_has_unit_filter_limit_resolution_and_bounded_history(self):
         statements = []
@@ -130,10 +134,16 @@ class LimitUpRiskTests(unittest.TestCase):
             def __init__(self, rows): self.rows = rows
             def fetchall(self): return self.rows
         class Connection:
-            def __init__(self): self.statements = []
-            def execute(self, sql, _params):
-                self.statements.append(sql)
-                return Result([{"calendar_date": date(2026, 9, 17), "next_day": date(2026, 9, 18)}] if "market_trade_calendar" in sql else [])
+            def __init__(self): self.statements = []; self.params = []
+            def execute(self, sql, params):
+                self.statements.append(sql); self.params.append(params)
+                if "market_trade_calendar" in sql:
+                    return Result([{"calendar_date": date(2026, 9, 17), "next_day": date(2026, 9, 18)}])
+                if "canonical_bars_daily" in sql:
+                    symbols, dates = params
+                    return Result([{"symbol": symbol, "trading_date": day, "close": 100.0}
+                                   for symbol, day in zip(symbols, dates)])
+                return Result([])
         class Database:
             def __init__(self, connection): self.connection = connection
             def transaction(self):
@@ -143,12 +153,34 @@ class LimitUpRiskTests(unittest.TestCase):
                     def __exit__(self, *_args): return False
                 return Tx(self.connection)
         connection = Connection()
-        reading = {"trade_date": "2026-09-17", "version": "limit-up-risk-v1", "rows": [{"symbol": "000001.SZ", "risk": 1}]}
+        rows = [{"symbol": f"{index:06d}.SZ", "risk": index} for index in range(1, 21)]
+        reading = {"trade_date": "2026-09-17", "version": "limit-up-risk-v1", "rows": rows}
         with mock.patch.object(limit_up_risk_runtime.derived_daily_readings, "newest", return_value=[reading]):
-            limit_up_risk_runtime.track(Database(connection), 3)
+            result = limit_up_risk_runtime.track(Database(connection), 3)
         close_sql = next(sql for sql in connection.statements if "canonical_bars_daily" in sql)
         self.assertIn("JOIN unnest", close_sql)
         self.assertNotIn("BETWEEN", close_sql)
+        symbols, dates = connection.params[-1]
+        expected_pairs = [(row["symbol"], day) for row in rows for day in (date(2026, 9, 17), date(2026, 9, 18))]
+        self.assertEqual(list(zip(symbols, dates)), expected_pairs)
+        self.assertEqual(result["days"], [{"trade_date": "2026-09-17",
+                                           "lowest": {"big_loss_rate": 0.0, "mean_next_day_return": 0.0},
+                                           "highest": {"big_loss_rate": 0.0, "mean_next_day_return": 0.0}}])
+
+    def test_track_empty_calendar_keeps_recent_shape(self):
+        from app import limit_up_risk_runtime
+        class Result:
+            def fetchall(self): return []
+        class Connection:
+            def execute(self, _sql, _params): return Result()
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self): return Connection()
+                    def __exit__(self, *_args): return False
+                return Tx()
+        result = limit_up_risk_runtime.track(Database(), 3)
+        self.assertEqual(result["recent"]["status"], "insufficient_history")
 
     def test_market_radar_router_exposes_daily_and_track_routes(self):
         paths = {route.path for route in build_market_radar_router(object(), lambda *_args, **_kwargs: None).routes}
@@ -169,16 +201,14 @@ class LimitUpRiskTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(build_market_radar_router(Database(), run_database))
         client = TestClient(app)
-        with mock.patch("app.routers.market_radar_reads.limit_up_risk_daily_series", side_effect=[
-            {"version": "limit-up-risk-v1", "reading": None, "stale_versions": 0,
-             "research_only": True, "live_effect": "none"},
-            {"version": "limit-up-risk-v1", "reading": {"trade_date": "2026-09-18"}, "stale_versions": 0,
-             "research_only": True, "live_effect": "none"},
-        ]), mock.patch("app.routers.market_radar_reads.limit_up_risk_track", return_value={
+        def daily_series(_connection, requested_date):
+            return {"version": "limit-up-risk-v1", "reading": {"trade_date": requested_date.isoformat()} if requested_date else {"trade_date": "2026-09-19"},
+                    "stale_versions": 0, "research_only": True, "live_effect": "none"}
+        with mock.patch("app.routers.market_radar_reads.limit_up_risk_daily_series", side_effect=daily_series), mock.patch("app.routers.market_radar_reads.limit_up_risk_track", return_value={
             "version": "limit-up-risk-v1", "days": [], "stale_versions": 1,
             "research_only": True, "live_effect": "none",
         }):
-            self.assertIsNone(client.get("/api/v1/market/limit-up-risk/daily").json()["reading"])
+            self.assertEqual(client.get("/api/v1/market/limit-up-risk/daily").json()["reading"]["trade_date"], "2026-09-19")
             self.assertEqual(client.get("/api/v1/market/limit-up-risk/daily?date=2026-09-18").json()["reading"]["trade_date"], "2026-09-18")
             self.assertEqual(client.get("/api/v1/market/limit-up-risk/track?days=3").json()["stale_versions"], 1)
 

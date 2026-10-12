@@ -63,7 +63,8 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
         ).fetchall()
         sessions = list(reversed(sessions))
         if not sessions:
-            return {"version": VERSION, "days": [], "stale_versions": 0, "research_only": True, "live_effect": "none"}
+            return {"version": VERSION, "days": [], "recent": recent_status([]), "stale_versions": 0,
+                    "research_only": True, "live_effect": "none"}
         readings = derived_daily_readings.newest(
             connection, CAPABILITY, sessions[0]["calendar_date"], sessions[-1]["calendar_date"],
         )
