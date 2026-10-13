@@ -366,9 +366,9 @@ class TdxShadowSummaryTests(unittest.TestCase):
         self.assertTrue(all("fuyao_ths" in sql and "a_share_minute_cross_section" in sql for sql, _ in calls))
 
     def test_summary_reads_only_shadow_streams_and_aggregates_comparisons(self):
-        docs = [{"effective_at": NOW, "normalized": {"rows": 2}},
-                {"effective_at": NOW + timedelta(minutes=1), "normalized": {"rows": 2}},
-                {"effective_at": NOW + timedelta(minutes=2), "normalized": {"rows": 2}}]
+        docs = [{"effective_at": NOW, "rows": 2},
+                {"effective_at": NOW + timedelta(minutes=1), "rows": 4},
+                {"effective_at": NOW + timedelta(minutes=2), "rows": 3}]
         comparisons = [{
             "effective_at": NOW, "normalized": {
                 "status": "compared", "comparison": {
@@ -378,14 +378,21 @@ class TdxShadowSummaryTests(unittest.TestCase):
                     "turnover": {"median_ratio": 0.99, "within_1_pct": 0.7},
                     "seconds_apart": 2.0,
                 },
+                "data_seconds_apart": 10.0, "same_continuous_segment": True,
             },
         }, {
             "effective_at": NOW + timedelta(minutes=1),
             "normalized": {"status": "no_reference"},
         }]
 
+        connections = []
+
         class Connection:
+            def __init__(self):
+                self.sql = []
+
             def execute(self, sql, params=()):
+                self.sql.append(sql)
                 if "a_share_minute_cross_section_shadow" in sql:
                     return SimpleNamespace(fetchall=lambda: docs)
                 return SimpleNamespace(fetchall=lambda: comparisons)
@@ -394,7 +401,9 @@ class TdxShadowSummaryTests(unittest.TestCase):
             def transaction(self):
                 class Tx:
                     def __enter__(self):
-                        return Connection()
+                        self.connection = Connection()
+                        connections.append(self.connection)
+                        return self.connection
 
                     def __exit__(self, *_args):
                         return False
@@ -402,9 +411,22 @@ class TdxShadowSummaryTests(unittest.TestCase):
 
         result = day_summary(Database(), date(2026, 10, 12))
         self.assertEqual(result["stored_minutes"], 3)
+        self.assertEqual(result["expected_minutes"], 255)
+        self.assertEqual(result["minutes_without_document"], 252)
+        self.assertEqual(result["lowest_rows_per_document"], 2)
+        self.assertEqual(result["median_rows_per_document"], 3.0)
         self.assertEqual(result["documents_without_comparison"], 1)
         self.assertEqual(result["minutes_compared"], 1)
         self.assertEqual(result["no_reference_minutes"], 1)
+        self.assertEqual(result["status_counts"], {"compared": 1, "incomplete": 0, "no_reference": 1})
+        self.assertEqual(result["judged_minutes"], 1)
+        self.assertEqual(result["judged_minutes_agree"], 1)
+        self.assertEqual(result["judged_agreement_share"], 1.0)
+        self.assertEqual(result["not_judged_minutes"], 1)
+        self.assertEqual(result["rows_without_data_times"], 1)
+        self.assertFalse(result["session_passes"])
+        self.assertEqual(result["gap_group_medians"]["10_15"]["minutes"], 1)
+        self.assertNotIn("normalized", connections[0].sql[1])
         self.assertEqual(result["largest_price_gap"]["symbol"], "000001.SZ")
         self.assertEqual(result["worst_price_within_one_tick"], 1.0)
         self.assertEqual(result["median_volume_ratio"], 1.01)

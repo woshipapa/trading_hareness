@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from .all_a_snapshot_sources import compare, project_tdx_snapshot_rows, tdx_snapshot_completeness
 from .datasources.contracts import CapabilityEvidence
+from .datasources.catalog import SESSION_AGREEMENT_RULES
 from .error_detail import safe_error_detail
 from .intraday_clock import continuous_auction_bounds
 from .market_session_repository import market_observation_session
@@ -37,6 +38,11 @@ DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
 REFERENCE_MAX_AGE_SECONDS = 90.0
 SUMMARY_STATEMENT_TIMEOUT_SECONDS = 10.0
 CN_TZ = ZoneInfo("Asia/Shanghai")
+SESSION_RULE = SESSION_AGREEMENT_RULES[(SHADOW_PROVIDER, "quote.all_a_snapshot")]
+DATA_GAP_GROUPS = (
+    (5, "under_5"), (10, "5_10"), (15, "10_15"), (20, "15_20"),
+    (30, "20_30"), (45, "30_45"), (60, "45_60"), (float("inf"), "60_and_more"),
+)
 
 
 def _database_busy(error: BaseException) -> dict[str, Any]:
@@ -250,7 +256,11 @@ def _payload(value: Any) -> dict[str, Any]:
 
 
 def _session_minutes(trade_date: date) -> int:
-    return 0 if trade_date.weekday() >= 5 else 257
+    return 0 if trade_date.weekday() >= 5 else 255
+
+
+def _data_gap_group(seconds: float) -> str:
+    return next(label for limit, label in DATA_GAP_GROUPS if seconds < limit)
 
 
 def day_summary(database: Any, trade_date: date, *, statement_timeout_seconds: float = SUMMARY_STATEMENT_TIMEOUT_SECONDS) -> dict[str, Any]:
@@ -259,7 +269,7 @@ def day_summary(database: Any, trade_date: date, *, statement_timeout_seconds: f
     with database.transaction() as connection:
         connection.execute(f"SET LOCAL statement_timeout = '{int(statement_timeout_seconds * 1000)}ms'")
         documents = connection.execute(
-            """SELECT effective_at,normalized FROM quant.raw_market_observations
+            """SELECT effective_at,(payload->>'rows')::int AS rows FROM quant.raw_market_observations
                WHERE provider_key='tdx_public' AND capability='a_share_minute_cross_section_shadow'
                  AND symbol IS NULL AND effective_at>=%s AND effective_at<%s ORDER BY effective_at""",
             (start, end),
@@ -273,6 +283,41 @@ def day_summary(database: Any, trade_date: date, *, statement_timeout_seconds: f
     comparison_payloads = [_payload(row["normalized"]) for row in comparisons]
     compared = [item for item in comparison_payloads if item.get("status") == "compared"]
     metrics = [item["comparison"] for item in compared]
+    status_counts = {status: sum(item.get("status") == status for item in comparison_payloads)
+                     for status in ("compared", "incomplete", "no_reference")}
+    judged = [item for item in compared
+              if item.get("data_seconds_apart") is not None
+              and item.get("data_seconds_apart") <= SESSION_RULE["max_data_gap_seconds"]
+              and item.get("same_continuous_segment") is True]
+    agreeing = [item for item in judged
+                if item["comparison"]["price"].get("within_0_5_pct") is not None
+                and item["comparison"]["price"]["within_0_5_pct"] >= SESSION_RULE["min_price_within_0_5_pct"]]
+    judged_agreement_share = len(agreeing) / len(judged) if judged else None
+    gap_groups: dict[str, list[dict[str, Any]]] = {}
+    for item in compared:
+        seconds = item.get("data_seconds_apart")
+        if seconds is not None:
+            gap_groups.setdefault(_data_gap_group(float(seconds)), []).append(item)
+
+    def group_medians(items: list[dict[str, Any]]) -> dict[str, Any]:
+        group_metrics = [item["comparison"] for item in items]
+        return {
+            "minutes": len(items),
+            "median_data_seconds_apart": median_or_none([float(item["data_seconds_apart"]) for item in items]),
+            "median_price_within_0_5_pct": median_or_none(metric_values_from(group_metrics, ("price", "within_0_5_pct"))),
+            "median_volume_ratio": median_or_none(metric_values_from(group_metrics, ("volume", "median_ratio"))),
+            "median_turnover_ratio": median_or_none(metric_values_from(group_metrics, ("turnover", "median_ratio"))),
+        }
+
+    def metric_values_from(values: list[dict[str, Any]], path: tuple[str, ...]) -> list[float]:
+        result = []
+        for item in values:
+            value: Any = item
+            for key in path:
+                value = value[key]
+            if value is not None:
+                result.append(float(value))
+        return result
     gaps = [
         {"relative_gap": item["price"]["largest_relative_gap"],
          "symbol": item["price"]["largest_relative_gap_symbol"]}
@@ -299,10 +344,25 @@ def day_summary(database: Any, trade_date: date, *, statement_timeout_seconds: f
         "trade_date": trade_date.isoformat(),
         "shadow_documents": len(documents),
         "stored_minutes": len(documents),
+        "expected_minutes": _session_minutes(trade_date),
         "session_minutes": _session_minutes(trade_date),
+        "minutes_without_document": max(0, _session_minutes(trade_date) - len(documents)),
+        "lowest_rows_per_document": min((int(row["rows"]) for row in documents), default=None),
+        "median_rows_per_document": median_or_none([float(row["rows"]) for row in documents]),
         "documents_without_comparison": max(0, len(documents) - len(comparison_payloads)),
         "minutes_compared": len(compared),
         "no_reference_minutes": sum(item.get("status") == "no_reference" for item in comparison_payloads),
+        "status_counts": status_counts,
+        "incomplete_minutes": status_counts["incomplete"],
+        "not_judged_minutes": len(comparison_payloads) - len(judged),
+        "rows_without_data_times": sum(item.get("data_seconds_apart") is None for item in comparison_payloads),
+        "judged_minutes": len(judged),
+        "judged_minutes_agree": len(agreeing),
+        "judged_agreement_share": judged_agreement_share,
+        "session_passes": len(judged) >= SESSION_RULE["min_judged_minutes"] and
+        judged_agreement_share is not None and judged_agreement_share >= SESSION_RULE["min_agreement_share"],
+        "agreement_rule": dict(SESSION_RULE),
+        "gap_group_medians": {label: group_medians(gap_groups[label]) for _limit, label in DATA_GAP_GROUPS if label in gap_groups},
         "largest_price_gap": max(gaps, key=lambda item: item["relative_gap"], default=None),
         "median_price_within_one_tick": median_or_none(metric_values(("price", "within_one_tick"))),
         "worst_price_within_one_tick": min_or_none(metric_values(("price", "within_one_tick"))),

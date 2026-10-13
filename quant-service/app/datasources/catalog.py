@@ -804,6 +804,17 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "datetime": "datetime", "open": "open", "high": "high", "low": "low", "close": "close", "volume_raw": "volume_raw", "amount": "amount", "open_interest": "open_interest", "settlement": "settlement"}, time_semantics="effective=K 线交易日（期货夜盘归下一交易日）; available=采集时刻")),
 )
 
+
+SESSION_AGREEMENT_RULES: Final[dict[tuple[str, str], dict[str, float | int]]] = {
+    ("tdx_public", "quote.all_a_snapshot"): {
+        "max_data_gap_seconds": 15,
+        "min_price_within_0_5_pct": 0.95,
+        "min_judged_minutes": 30,
+        "min_agreement_share": 0.95,
+        "min_sessions": 5,
+    },
+}
+
 # The 120 bindings that existed without a structured BindingSpec at the P0 baseline (ca209a81), written
 # out so the list cannot grow by itself: a binding without a spec must be in it, and an entry whose binding
 # is gone must be deleted from it. It may only shrink, as bindings receive verified specs (P2-P6).
@@ -1181,7 +1192,7 @@ def catalog_document() -> dict[str, Any]:
 __all__ = [
     "BINDINGS", "CAPABILITIES", "CATALOG_VERSION", "EXCHANGE_TIMESTAMPED_QUOTE_LABELS", "HEALTH_CAPABILITY_ALIASES", "NON_SECTOR_GROUPS",
     "NON_SECTOR_LABEL_PATTERN", "RULE_USABLE_FLOW_LABELS",
-    "SOURCES", "SOURCE_LABELS", "TAXONOMIES", "bindings_for", "capabilities_of", "catalog_document",
+    "SESSION_AGREEMENT_RULES", "SOURCES", "SOURCE_LABELS", "TAXONOMIES", "bindings_for", "capabilities_of", "catalog_document",
     "evidence_locations", "health_capability", "primary_source", "primary_store_value", "store_values", "taxonomies_for",
     "validate_catalog",
 ]
