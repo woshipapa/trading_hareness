@@ -125,6 +125,8 @@
   members、membership 因十分钟内有 Codex 活动被脚本拒绝，留待下次；集成分支和它的工作区保留，后续修补还要用。
 - 2026-10-13 21:40 开销（`codex-trace.py --usage`，各线程累计，含各自的评审者）：八个工作区合计输入 9828 万 token（其中缓存 9291 万、新输入 538 万），输出 44.4 万，推理 18.4 万；
   方案审查线程 01a1342e 另计输入 712 万（缓存 650 万、新输入 62 万）、输出 4.2 万、推理 2.9 万。
+- 2026-10-13 22:05 用户：「全部推送」。`git push origin main`：`147e589b..fd0727e3`，推送后本地与 origin/main 一致（97 个提交，含别的会话在 main 上的提交）。
+  集成分支和两个还没回收的 `codex/relay-auto-*` 分支没有推送（内容都已在 main 里）。
 
 ## Waiting on the user
 
@@ -187,7 +189,7 @@
 
 ## Resume here
 
-七项功能全部上线：edge 中继是 `hotfix-20261013T133421Z-b311b53e2193-21767`（main b311b53e；main 之后的 0413948f 只改了 `WEB_GATEWAY.md`，未推送）。
+七项功能全部上线：edge 中继是 `hotfix-20261013T133421Z-b311b53e2193-21767`（main b311b53e；main 之后的 0413948f 只改了 `WEB_GATEWAY.md`；main 已于 2026-10-13 22:05 由本会话按用户的话推送到 origin）。
 先跑 `bash scripts/release-sync-status.sh --skip-owner --edge-source-sha b311b53e` 确认线上仍是这一版。
 还开着的：用户试用后的反馈（Waiting on the user）；线上没验到的四件事（Open questions）；待办 B046–B049（后续修补）；
 工作区 `n8n-relay-auto-members`、`n8n-relay-auto-membership` 和集成分支 `integration/relay-auto`（工作区 `n8n-relay-auto-int`）还没回收——
