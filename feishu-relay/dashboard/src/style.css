@@ -20,6 +20,7 @@ body { margin: 0; min-width: 320px; background: #f4f6f9; }
 .section-gap { margin: 14px 0; }.full-width { width: 100%; }.event-filter { width: 130px; }.mono textarea { font-family: "SFMono-Regular", Consolas, monospace; }
 .upload-icon { margin-bottom: 10px; font-size: 30px; color: #4d7fe6; }.el-timeline { padding-left: 5px; }.el-timeline .el-card { margin-bottom: 0; }.el-table { --el-table-header-bg-color: #f7f9fc; --el-table-row-hover-bg-color: #f4f9f8; }
 .realtime-refresh-time { display: block; margin-top: 4px; color: #738198; font-size: 11px; font-weight: 400; }
+.el-table .target-row-selected > td { background: #e4f4ef !important; }
 .group-relay-status-panel { border-color: #cfe3dc; background: linear-gradient(180deg, #fbfefd 0%, #f7fbfa 100%); }
 .group-relay-age { display: block; margin-top: 3px; color: #738198; font-size: 11px; line-height: 1.2; }
 .workbench-source { margin-top: 4px; color: #738198; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
