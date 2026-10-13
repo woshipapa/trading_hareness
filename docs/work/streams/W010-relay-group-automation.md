@@ -5,9 +5,9 @@
 - goal: 在转发看板里完成建同步群、管理目标群成员、源头撤回后同步撤回、降级告警加急、粘贴邀请链接入群，以及把现有目标群纳入看板管理
 - plan: docs/work/plans/relay-group-automation.md
 - branch: integration/relay-auto
-- head: 6b31c254
-- release: none
-- next: 收齐并行调用的结果。先处理 base：评审者的意见用线程 01a13455 修掉 → base 后端和 `relay-auto-base-ui` 都合进集成分支 → 集成分支上跑全部验收 → 合进 main、热更新 edge（“目标群”栏目上线）。再逐条功能线：在其工作区 `git merge integration/relay-auto`，复跑验收、edge 上跑 bridge 套件，用它自己的线程续派看板一步，双重评审，合进集成分支 → main → 热更新
+- head: 10d5f55b
+- release: edge 中继 `hotfix-20261013T100002Z-10d5f55bf233-24792`（base：接缝、R、“目标群”栏目）
+- next: 收齐五条功能线的看板一步（create、members、urgent、recall、membership；join 已返回 ae4f174f，评审者已派）。每条线：复跑验收（含看板）→ Codex 评审者（只读，新线程）→ 修 → edge 上跑 bridge 套件 → `--no-ff` 合进集成分支 → 集成分支全验收 → 合进 main → 热更新 → 线上核对 → 告诉用户可以试什么。顺序 join → create → members → membership → urgent → recall
 - updated: 2026-10-13
 
 ## Requirements
@@ -33,8 +33,8 @@
 
 - [x] 0 用户同意方案；方案落盘；Codex 方案审查三轮，12 条全部采纳，r4 — 399e0fc5
 - [x] 1 线上探测 P0-1 至 P0-7 与 `WEB_GATEWAY.md` — 集成分支 6b31c254；输出在 `docs/work/probes/2026-10-13-relay-auto-p0*.out.txt`（P0-8 在 base 合并后做）
-- [ ] 2 base 线：第一步 bridge 完成（`codex/relay-auto-base` e81059b0；本机 `python3 -m unittest discover -s feishu-relay/bridge -p 'test_*.py' -q` → Ran 178 tests, OK (skipped=70)；
-  edge 上 `bash feishu-relay/scripts/edge/test-bridge-on-edge.sh` → Ran 178 tests, OK）；第二步 adapter、第三步看板未做
+- [x] 2 base 线 — 后端 `codex/relay-auto-base` ae1bb9d6、看板 `codex/relay-auto-base-ui` ed33aac1，合进集成分支 0e20e6f0，合进 main 10d5f55b；
+  集成分支上 adapter 289 项、看板 10 项、构建通过，edge 上 bridge 套件 179 项通过；发布 `hotfix-20261013T100002Z-10d5f55bf233-24792`，状态脚本 ALL CHECKS PASSED
 - [ ] 3 六条功能线（join、create、members、urgent、recall，以及 members 之后的 membership）
 - [ ] 4 合并、发布、线上验收
 
@@ -89,6 +89,15 @@
   启动期间如果有告警先触发会不会碰到未初始化。base 后端的评审者（Codex，只读）已派。
 - 2026-10-13 19:25 按用户“全部并行”的要求，从 bb228919 另建七个工作区并同时派出（见 Running）。join、create 两条的 bridge+adapter 已返回，
   各自报告 adapter 292 / 297 项通过、bridge 本机 183 项（70 跳过）；本会话还没复跑。
+- 2026-10-13 19:45 base 后端的评审（Codex，只读，线程 01a13496）结论 WARNING，三条都核实成立并已修（ae1bb9d6）：[codex] 没配令牌时内部路由放行空令牌头；
+  [codex] 路径参数里畸形的百分号编码会在请求回调里抛未捕获异常；[codex] 飞书未知的拒绝文字原样透出，可能带出地址。[claude] 的疑问（`notifyOps` 是否会早于 `urgentAlerts` 初始化）
+  经核对不成立：三个调用点都在第 608 行注册的健康检查定时器里，晚于第 413 行。
+- 2026-10-13 20:00 base 合并并发布：集成分支 0e20e6f0 → main 10d5f55b → `hotfix-20261013T100002Z-10d5f55bf233-24792`（本会话执行）。线上核对：`/targets` 页面 200、构建里有“目标群”“识别现有目标群”；
+  `POST /api/group-relay/target-groups/resolve` 用 22.5 秒把 4 个环境变量目标群和自测群都对上了群名、数字群 ID、机器人、群主（响应和日志里没有 webhook 地址）；10 条启用路由 healthy。
+  一个缺口：启动时的自动识别因 bridge 还没起来失败了（日志“目标群识别失败：fetch failed”），之后不会重试；这次已手动触发并入表，表里有行后不再受影响。要不要加重试，留作后续。
+- 2026-10-13 20:00 六条功能线的后端全部返回，各工作区合入集成分支后本会话复跑：join 292、create 297、members 291、urgent 294、recall 294、membership 299 项 adapter 测试通过，
+  bridge 本机都通过（70 项跳过）。提交：join 46619efb、create 8410d72d、members 3d956d98、urgent 6ec46a63、recall 685a957e、membership 69269ceb。
+  membership 的实现比方案多了一项：设置里有 `exempt_user_ids`（不提醒名单，例如群主本人），因为成员列表里分不出谁是本账号。
 
 ## Waiting on the user
 
@@ -115,12 +124,15 @@
 - [x] 2026-10-13 19:05 base 第 2b 步 → 19:30 返回（bb228919），见 Log。原说明：Codex 实现者在做 base 线第 2b 步（线程 01a13455，cwd 是 base 工作区）：2a 的三条修正，加 `adapter/index.mjs` 和
   `adapter/group-relay.mjs` 的接线及测试。结束标志：调用返回、工作区干净。之后：复跑验收、读 diff（重点看 `index.mjs`、`group-relay.mjs` 只动了报告里列的地方），
   再派第三步（看板：`targets` 栏目、`TargetGroupsView`、`TargetRegistryPanel`、其余面板空壳、`JoinByLinkPanel` 的位置）。
-- [ ] 2026-10-13 19:25 起并行的 Codex 调用（都挂在会话 eac0e1fc 上；工作区都在 `/Users/papa/codebase/.codex-wt/n8n-<slug>`，都从 base 分支的 bb228919 起步，
+- [x] 2026-10-13 19:25 起并行的七个调用 → 20:00 前全部返回（各线后端的提交见 Log）。原说明：并行的 Codex 调用（都挂在会话 eac0e1fc 上；工作区都在 `/Users/papa/codebase/.codex-wt/n8n-<slug>`，都从 base 分支的 bb228919 起步，
   处置 merge、目标集成分支；每个只做 bridge 和 adapter 两步，看板那一步等 base 的看板合并后再续派）：
   `relay-auto-base-ui`（base 的看板一步）；`relay-auto-join`（线程 01a1348b，已返回 46619efb）；`relay-auto-create`（线程 01a1348d，已返回 8410d72d）；
   `relay-auto-members`；`relay-auto-urgent`；`relay-auto-recall`；`relay-auto-membership`（只有 adapter）。另有 base 后端的评审者（只读，cwd 是 base 工作区）。
   没返回的线程编号用 `python3 ~/codebase/agent-skills/own/codex-flow/scripts/codex-trace.py --list` 按 cwd 找。
   结束标志：各调用返回、各工作区 `git status --short` 为空。之后：见 `next`。
+- [ ] 2026-10-13 20:05 六条功能线的看板一步并行在跑（各用自己的实现线程续派；工作区都已合入集成分支 0e20e6f0）：
+  join 01a1348b（已返回 ae4f174f，评审者已派，cwd 是 join 工作区）、create 01a1348d、members 01a1348e、urgent 01a13490、recall 01a13492、membership 01a13494。
+  结束标志：各调用返回、工作区干净。之后：见 `next`。都挂在会话 eac0e1fc 上；接手者按各工作区的提交和 `git status` 判断做到哪。
 
 ## Due
 

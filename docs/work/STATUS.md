@@ -14,7 +14,7 @@
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 取数在 18:35 自己暂停（日志末行 PAUSED）；盘后流程结束后（10 月 13 日 20:30 以后，或次日非交易时段）重跑同一条命令续取余下的 ETF 并补上失败的 7 天：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（要限时就加 `--until=HH:MM`）。五个指数的文件齐了（各约 749 行）就可以按登记派第 1 步：照 `codex-flow` 建 harvest 工作区 `v-reversal-study`，提示词指向 `docs/work/plans/intraday-v-reversal-study.md` | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | building | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 交回派工 5（升级工具认 `min_share`、`--decision-eligible`、五份当日汇总的门槛；发布分类规则里登记 `scripts/tdx-promote.py`），在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate` 跑验收（发布路径测试、`pytest scripts -q`、分类器的 node 测试）并读 diff，然后送 Codex 评审者（只读）做双评审；通过后 `--no-ff` 合并进 main、回收工作区，再开 `tdx-live-snapshot-fallback` 分支派工 6 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
-| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | 收齐并行调用的结果。先处理 base：评审者的意见用线程 01a13455 修掉 → base 后端和 `relay-auto-base-ui` 都合进集成分支 → 集成分支上跑全部验收 → 合进 main、热更新 edge（“目标群”栏目上线）。再逐条功能线：在其工作区 `git merge integration/relay-auto`，复跑验收、edge 上跑 bridge 套件，用它自己的线程续派看板一步，双重评审，合进集成分支 → main → 热更新 | 2026-10-13 |
+| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | 收齐五条功能线的看板一步（create、members、urgent、recall、membership；join 已返回 ae4f174f，评审者已派）。每条线：复跑验收（含看板）→ Codex 评审者（只读，新线程）→ 修 → edge 上跑 bridge 套件 → `--no-ff` 合进集成分支 → 集成分支全验收 → 合进 main → 热更新 → 线上核对 → 告诉用户可以试什么。顺序 join → create → members → membership → urgent → recall | 2026-10-13 |
 
 ## 等用户处理
 
@@ -34,7 +34,7 @@
 - W007 2026-10-13 17:30 取数脚本在跑（主会话的后台命令）：11 个代码顺序取，每次请求后停 0.3 秒，带 `--until=18:35`，到点自己停并在日志里写 PAUSED（避开 18:45 开始的盘后流程）。日志 `state/research/vshape_20261013/data/fetch.log`，数据 `<代码>.jsonl`。结束标志：日志末行 FINISHED 或 PAUSED；ABORT 是连续 20 次请求失败。挂在主会话 93ba6e1d 上；主会话结束它就停，重跑同一条命令即续取。
 - W008 2026-10-13 17:57 Codex 实现者在做派工 5（B3 的工具部分和分类规则），线程 01a1349e-01a9-7172-9d3f-d63b744c9bcb，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate`，分支 `codex/tdx-promote-gate`。结束标志：分支在 4889ff76 之后有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上，判断死活和续派的办法同 W006 的 Resume here。
 - W006 2026-10-13 18:18 Codex 实现者在做第 9 步的修正第 1 部分（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 2673fd39 之后有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上；主会话结束它就停，判断死活和续派的办法见 Resume here。
-- W010 2026-10-13 19:25 起并行的 Codex 调用（都挂在会话 eac0e1fc 上；工作区都在 `/Users/papa/codebase/.codex-wt/n8n-<slug>`，都从 base 分支的 bb228919 起步，
+- W010 2026-10-13 20:05 六条功能线的看板一步并行在跑（各用自己的实现线程续派；工作区都已合入集成分支 0e20e6f0）：
 
 ## 待办清单
 
