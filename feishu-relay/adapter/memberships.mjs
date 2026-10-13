@@ -147,7 +147,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		await sync(chatId);
 		const today = shanghaiDate(now());
 		const claimAt = now();
-		const candidateSql = `target_chat_id=$1 AND expires_on <= $2 AND left_at IS NULL AND reminded_on IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3 - interval '10 minutes') AND NOT EXISTS (SELECT 1 FROM ${SETTINGS_TABLE} s WHERE s.target_chat_id=${MEMBERSHIP_TABLE}.target_chat_id AND ${MEMBERSHIP_TABLE}.user_id = ANY (SELECT jsonb_array_elements_text(s.exempt_user_ids)))`;
+		const candidateSql = `target_chat_id=$1 AND expires_on <= $2 AND left_at IS NULL AND reminded_on IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3::timestamptz - interval '10 minutes') AND NOT EXISTS (SELECT 1 FROM ${SETTINGS_TABLE} s WHERE s.target_chat_id=${MEMBERSHIP_TABLE}.target_chat_id AND ${MEMBERSHIP_TABLE}.user_id = ANY (SELECT jsonb_array_elements_text(s.exempt_user_ids)))`;
 		if (dryRun) {
 			const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE ${candidateSql} ORDER BY user_id`, [String(chatId), today, claimAt]);
 			return publicRows(result.rows.map(memberRow), config, today);
@@ -160,7 +160,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 			const text = `${batch.map((row) => `<at user_id="${String(row.user_id)}">${escapedName(row.display_name)}</at>`).join('')} ${config.remind_text}`;
 			try {
 				await webhookTargets.sendText(String(chatId), text);
-				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET reminded_on=$3,remind_claimed_at=NULL,updated_at=$3 WHERE target_chat_id=$1 AND user_id = ANY($2) AND remind_claimed_at=$4`, [String(chatId), ids, today, claimAt]);
+				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET reminded_on=$3,remind_claimed_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id = ANY($2) AND remind_claimed_at=$4`, [String(chatId), ids, today, claimAt]);
 			} catch (error) {
 				console.error(`会员到期提醒发送失败 target=${chatId}：${error instanceof Error ? error.message : String(error)}`);
 				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL,updated_at=$3 WHERE target_chat_id=$1 AND user_id = ANY($2) AND remind_claimed_at=$4`, [String(chatId), ids, claimAt, claimAt]);
@@ -213,7 +213,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		await sync(chatId);
 		const today = shanghaiDate(now());
 		const claimAt = now();
-		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2 AND expires_on <= $4 AND left_at IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3 - interval '10 minutes') RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), String(userId), claimAt, today]);
+		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2 AND expires_on <= $4 AND left_at IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3::timestamptz - interval '10 minutes') RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), String(userId), claimAt, today]);
 		if (!result.rows[0]) throw new Error('会员未到期、已离群或正在提醒中');
 		const row = memberRow(result.rows[0]);
 		if (config.exempt_user_ids.includes(String(userId))) {
@@ -223,7 +223,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		const text = `<at user_id="${String(row.user_id)}">${escapedName(row.display_name)}</at> ${config.remind_text}`;
 		try {
 			await webhookTargets.sendText(String(chatId), text);
-			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET reminded_on=$3,remind_claimed_at=NULL,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2 AND remind_claimed_at=$4`, [String(chatId), String(userId), today, claimAt]);
+			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET reminded_on=$3,remind_claimed_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id=$2 AND remind_claimed_at=$4`, [String(chatId), String(userId), today, claimAt]);
 		} catch (error) {
 			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL WHERE target_chat_id=$1 AND user_id=$2 AND remind_claimed_at=$3`, [String(chatId), String(userId), claimAt]);
 			throw error;
