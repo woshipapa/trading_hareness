@@ -14,7 +14,7 @@
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 等 owner 恢复、B031 查明原因、用户同意取数（见 Waiting on the user）后，在非交易时段跑 `/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（一条命令顺序取 11 个代码，带参数就不存雷达；可断点续取），另用 `curl` 把全天雷达存成 `state/research/vshape_20261013/radar/radar_2026-10-13.full.json`（13:27 那份 `radar_2026-10-13.json` 是早先输出的依据，留着）；`fetch.log` 出现 FINISHED 后核对 11 个文件各约 750 行，写研究登记，派 Codex | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | reviewing | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 实现者交回评审第 1 轮的修正（主源快照没有数据时间时不再抛错），跑验收，让评审者（线程 01a1347c-75b3-7ae3-b0b2-4f75037170b7）复审这一个提交；通过后把分支 `--no-ff` 合并进 main、回收工作区，再从 main 建 `tdx-promote-gate` 工作区派工 4 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
-| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | base 线第 2b 步返回后：在 base 工作区里复跑验收命令、读 `git diff integration/relay-auto...HEAD -- feishu-relay/adapter/index.mjs feishu-relay/adapter/group-relay.mjs`，通过后用线程 01a13455 派第三步（看板）；三步都完成后做双重评审（Codex 评审者用新线程、只读），在 edge 上跑 bridge 套件，合进集成分支，再合进 main 并热更新 edge（用户已要求做完一项上线一项） | 2026-10-13 |
+| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | 收齐并行调用的结果。先处理 base：评审者的意见用线程 01a13455 修掉 → base 后端和 `relay-auto-base-ui` 都合进集成分支 → 集成分支上跑全部验收 → 合进 main、热更新 edge（“目标群”栏目上线）。再逐条功能线：在其工作区 `git merge integration/relay-auto`，复跑验收、edge 上跑 bridge 套件，用它自己的线程续派看板一步，双重评审，合进集成分支 → main → 热更新 | 2026-10-13 |
 
 ## 等用户处理
 
@@ -36,7 +36,7 @@
 
 - W006 2026-10-13 17:26 Codex 实现者在做第 9 步（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 7f70c6c9 之后有两个提交且 `git status --short` 为空。之后：复跑验收；看总结计时；勾掉 Steps；派第 10 步。
 - W008 2026-10-13 17:26 Codex 评审者在复审 64444a3e 并给出整个分支能否合并的结论（评审者线程 01a1347c-75b3-7ae3-b0b2-4f75037170b7）。结束标志：它交回 APPROVED / WARNING / BLOCKED。之后：APPROVED 就把 `codex/tdx-shadow-measure` 用 `--no-ff` 合并进 main（用户 2026-10-13 的话已当作评审通过后合并的同意，见 Requirements），回收工作区，建 `tdx-promote-gate` 派工 4；否则再回派，最多三轮。
-- W010 2026-10-13 19:05 Codex 实现者在做 base 线第 2b 步（线程 01a13455，cwd 是 base 工作区）：2a 的三条修正，加 `adapter/index.mjs` 和
+- W010 2026-10-13 19:25 起并行的 Codex 调用（都挂在会话 eac0e1fc 上；工作区都在 `/Users/papa/codebase/.codex-wt/n8n-<slug>`，都从 base 分支的 bb228919 起步，
 
 ## 待办清单
 

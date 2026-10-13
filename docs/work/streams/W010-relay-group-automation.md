@@ -7,7 +7,7 @@
 - branch: integration/relay-auto
 - head: 6b31c254
 - release: none
-- next: base 线第 2b 步返回后：在 base 工作区里复跑验收命令、读 `git diff integration/relay-auto...HEAD -- feishu-relay/adapter/index.mjs feishu-relay/adapter/group-relay.mjs`，通过后用线程 01a13455 派第三步（看板）；三步都完成后做双重评审（Codex 评审者用新线程、只读），在 edge 上跑 bridge 套件，合进集成分支，再合进 main 并热更新 edge（用户已要求做完一项上线一项）
+- next: 收齐并行调用的结果。先处理 base：评审者的意见用线程 01a13455 修掉 → base 后端和 `relay-auto-base-ui` 都合进集成分支 → 集成分支上跑全部验收 → 合进 main、热更新 edge（“目标群”栏目上线）。再逐条功能线：在其工作区 `git merge integration/relay-auto`，复跑验收、edge 上跑 bridge 套件，用它自己的线程续派看板一步，双重评审，合进集成分支 → main → 热更新
 - updated: 2026-10-13
 
 ## Requirements
@@ -17,8 +17,10 @@
 - 2026-10-13 看过三轮审查后的改动、探测结果和六个工作区的处置之后，用户：「开始分发工作执行」
 - 2026-10-13 base 线第一步在执行时，用户新增要求：「因为我的很多转发目标群里，不同会员购买的日期和时间不同，我希望可以自动化这个流程，每次新加一个会员，加的时候可以登记为开始日期，或者手动修改，然后以及持有的期限比如1个月，3个月，然后每天会自动审查，如果到期了，可以在对应目标群里，由webhook at这些用户通知他们到期了联系群主续费。」这在方案 r4 的“不做”里（成员到期）之外新增一项功能：会员期限登记与到期提醒（不是自动移除）。
 - 2026-10-13 我说明到期提醒按“至少一次”做（极少数情况下同一人会被多提醒一次，但不漏）之后，用户：「可以多提醒」
-- 2026-10-13 用户：「当前已经完成的功能你记得可以hotfix上线edge，让我前端自己实验一下」。这改变了方案里“五条都合完才合进 main 并发布”的安排：
+- 2026-10-13 用户：「当前已经完成的功能你记得可以hotfix上线edge，让我前端自己实验一下」。（下一条见后）这改变了方案里“五条都合完才合进 main 并发布”的安排：
   每条线评审通过、合进集成分支并在集成分支上验收通过后，就把集成分支合进 main、热更新 edge，并告诉用户新上线了什么可以试。
+- 2026-10-13 用户：「能并行的任务全部并行啊，给codex最高权限」。Codex 实现者本来就是 `danger-full-access`、不询问；“不接触线上”仍是提示里的规则，没有放开。
+  这改变了“base 合并后才拉功能线”的安排：功能线的 bridge 和 adapter 两步不依赖 base 的看板，改为立即从 base 分支的提交点并行开工。
 
 ## Plan
 
@@ -81,6 +83,12 @@
 - 2026-10-13 19:00 base 线第 2a 步返回（4b5ddb97）：本会话复跑 adapter 286 项通过、bridge 本机 179 项（70 项跳过）。读 diff 的三条意见随 2b 交回：
   [claude] `resolve()` 先清空表再插入，漏扫一次就会丢行；[claude] `list()` 给已不存在的目标群造了一行；[claude] 监听者失败会让写入失败。
   另：`readJsonBody` 默认上限 18 MiB，接线时给功能路由包一层 64 KiB。2a 的开销并在线程 01a13455 的累计里。
+- 2026-10-13 19:30 base 第 2b 步返回（bb228919）。本会话复跑：adapter 289 项通过；edge 上 bridge 套件 179 项通过。`index.mjs` 的改动与报告一致：
+  功能模块的创建、建表、`start()`、路由分发（在跨站检查之后、其他分支之前）、状态里的 `webhook_targets`、目标群增删后的 `resolve` / `forget`、`notifyOps` 末尾的加急调用；
+  group relay 等三个对象的创建整体挪到了功能模块之后（因为要传送达记录的两个函数）。待评审确认的一点：`notifyOps` 用到的 `urgentAlerts` 定义在它后面，
+  启动期间如果有告警先触发会不会碰到未初始化。base 后端的评审者（Codex，只读）已派。
+- 2026-10-13 19:25 按用户“全部并行”的要求，从 bb228919 另建七个工作区并同时派出（见 Running）。join、create 两条的 bridge+adapter 已返回，
+  各自报告 adapter 292 / 297 项通过、bridge 本机 183 项（70 跳过）；本会话还没复跑。
 
 ## Waiting on the user
 
@@ -104,9 +112,15 @@
   （`ledger.query`、`feature-routes.mjs`、`target-registry.mjs`、六个空壳、`webhookTargets.sendText`、两个 Dockerfile、测试），不碰 `index.mjs` 和 `group-relay.mjs`；
   (2) E 的审查第二轮（审查线程 01a1342e，只读）。结束标志：各自的调用返回。之后：对 (1) 复跑验收、读 diff，再续派 2b（`index.mjs`、`group-relay.mjs` 接线）和第三步（看板）；
   对 (2) 裁决并改方案。两个调用都挂在会话 eac0e1fc 上。
-- [ ] 2026-10-13 19:05 Codex 实现者在做 base 线第 2b 步（线程 01a13455，cwd 是 base 工作区）：2a 的三条修正，加 `adapter/index.mjs` 和
+- [x] 2026-10-13 19:05 base 第 2b 步 → 19:30 返回（bb228919），见 Log。原说明：Codex 实现者在做 base 线第 2b 步（线程 01a13455，cwd 是 base 工作区）：2a 的三条修正，加 `adapter/index.mjs` 和
   `adapter/group-relay.mjs` 的接线及测试。结束标志：调用返回、工作区干净。之后：复跑验收、读 diff（重点看 `index.mjs`、`group-relay.mjs` 只动了报告里列的地方），
   再派第三步（看板：`targets` 栏目、`TargetGroupsView`、`TargetRegistryPanel`、其余面板空壳、`JoinByLinkPanel` 的位置）。
+- [ ] 2026-10-13 19:25 起并行的 Codex 调用（都挂在会话 eac0e1fc 上；工作区都在 `/Users/papa/codebase/.codex-wt/n8n-<slug>`，都从 base 分支的 bb228919 起步，
+  处置 merge、目标集成分支；每个只做 bridge 和 adapter 两步，看板那一步等 base 的看板合并后再续派）：
+  `relay-auto-base-ui`（base 的看板一步）；`relay-auto-join`（线程 01a1348b，已返回 46619efb）；`relay-auto-create`（线程 01a1348d，已返回 8410d72d）；
+  `relay-auto-members`；`relay-auto-urgent`；`relay-auto-recall`；`relay-auto-membership`（只有 adapter）。另有 base 后端的评审者（只读，cwd 是 base 工作区）。
+  没返回的线程编号用 `python3 ~/codebase/agent-skills/own/codex-flow/scripts/codex-trace.py --list` 按 cwd 找。
+  结束标志：各调用返回、各工作区 `git status --short` 为空。之后：见 `next`。
 
 ## Due
 
