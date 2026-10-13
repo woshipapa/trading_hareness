@@ -21,7 +21,7 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 from app.datasources.catalog import BINDINGS  # noqa: E402
-from app.datasources.contracts import LIVE_VERIFIED, UNSUPPORTED, Binding, BindingSpec  # noqa: E402
+from app.datasources.contracts import DECLARED, LIVE_VERIFIED, UNSUPPORTED, Binding, BindingSpec  # noqa: E402
 
 CAPABILITY = "quote.watch_snapshot"
 SETTINGS = {"LONGHU_SSH_HOST": "synthetic-host", "LONGHU_SSH_PORT": "22", "LONGHU_SSH_USER": "synthetic-user",
@@ -272,6 +272,23 @@ class CheckTests(unittest.TestCase):
         self.assertAlmostEqual(price["max_abs_dev"], 0.1)
         self.assertAlmostEqual(price["max_rel_dev"], 0.1 / 10.1)
 
+    def test_min_share_allows_mismatches_until_the_requested_common_row_share(self):
+        entry = {"reference": "tencent_free", "key": KEY, "rel_tol": 0.001, "min_share": 0.95}
+        binding = Binding("tdx_public", CAPABILITY, 70, UNSUPPORTED,
+                          spec=BindingSpec(agreement={"price": entry}))
+        reference = [{**row, "price": 10.1} if row["symbol"] == SYMBOLS[-1] else row for row in REFERENCE_ROWS]
+        result = run_check("owner", answers(tencent_free=record("tencent_free", reference)),
+                           bindings=(binding, REFERENCE))
+        price = result.evidence[0]["comparison"]["price"]
+        self.assertTrue(price["agree"], price)
+        self.assertEqual((price["matched"], price["mismatched"], price["share"]), (19, 1, 0.95))
+
+    def test_min_share_defaults_to_every_common_row(self):
+        reference = [{**row, "price": 10.1} if row["symbol"] == SYMBOLS[-1] else row for row in REFERENCE_ROWS]
+        price = evidence_of(tencent_free=record("tencent_free", reference))["comparison"]["price"]
+        self.assertFalse(price["agree"])
+        self.assertEqual(price["share"], 0.95)
+
     def test_the_common_rows_must_cover_the_share_the_entry_asks_for(self):
         def agree(missing, binding=OWN):
             reference = record("tencent_free", REFERENCE_ROWS[:len(REFERENCE_ROWS) - missing])
@@ -474,19 +491,31 @@ def evidence_file(root, name, source, capability, **passes):
     return path
 
 
-def run_apply(root, *paths):
+def run_apply(root, *paths, options=()):
     out = io.StringIO()
     with mock.patch.multiple(MODULE, ROOT=root, CATALOG=root / "catalog.py"), contextlib.redirect_stdout(out):
-        MODULE.main(["apply", *map(str, paths)])
+        MODULE.main(["apply", *map(str, paths), *options])
     return out.getvalue()
 
 
 @contextlib.contextmanager
-def scratch_repository():
+def scratch_repository(text=CATALOG_TEXT):
     with tempfile.TemporaryDirectory() as scratch:
         root = Path(scratch).resolve()
-        (root / "catalog.py").write_text(CATALOG_TEXT, encoding="utf-8")
+        (root / "catalog.py").write_text(text, encoding="utf-8")
         yield root
+
+
+SESSION_RULE = {"max_data_gap_seconds": 15, "min_price_within_0_5_pct": 0.95,
+                "min_judged_minutes": 30, "min_agreement_share": 0.95, "min_sessions": 5}
+
+
+def session_file(root, name, trade_date, *, passes=True, rule=SESSION_RULE):
+    path = root / "summaries" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"trade_date": trade_date, "session_passes": passes, "agreement_rule": rule}),
+                    encoding="utf-8")
+    return path
 
 
 class ApplyTests(unittest.TestCase):
@@ -518,6 +547,44 @@ class ApplyTests(unittest.TestCase):
             promoted = (root / "catalog.py").read_text(encoding="utf-8")
         self.assertIn("Promote tdx_public quote.watch_snapshot from UNSUPPORTED to DECLARED", printed)
         self.assertIn('_bind("tdx_public", "quote.watch_snapshot", 70, DECLARED, None),', promoted)
+
+    def test_decision_eligible_is_refused_before_the_live_verified_step(self):
+        with scratch_repository() as root:
+            evidence = evidence_file(root, "first.json", "tdx_public", "quote.all_a_snapshot", intraday=False)
+            with self.assertRaisesRegex(SystemExit, "only valid for the DECLARED -> LIVE_VERIFIED step"):
+                run_apply(root, evidence, options=("--decision-eligible", "decision-0015"))
+            self.assertEqual((root / "catalog.py").read_text(encoding="utf-8"), CATALOG_TEXT)
+
+    def test_live_verified_and_decision_eligibility_need_five_matching_passing_summaries(self):
+        declared = CATALOG_TEXT.replace(
+            '_bind("tdx_public", "quote.all_a_snapshot", 80, UNSUPPORTED, None,',
+            '_bind("tdx_public", "quote.all_a_snapshot", 80, DECLARED, None,', 1)
+        with mock.patch.object(MODULE, "SESSION_AGREEMENT_RULES", {("tdx_public", "quote.all_a_snapshot"): SESSION_RULE}):
+            with scratch_repository(declared) as root:
+                evidence = evidence_file(root, "live.json", "tdx_public", "quote.all_a_snapshot")
+                four = [session_file(root, f"day-{day}.json", f"2026-10-{day:02d}") for day in range(1, 5)]
+                with self.assertRaisesRegex(SystemExit, "need at least 5 session summaries"):
+                    run_apply(root, evidence, options=("--decision-eligible", "decision-0015",
+                                                        *sum((["--session-summary", str(path)] for path in four), [])))
+
+                passing = four + [session_file(root, "day-05.json", "2026-10-05")]
+                failed = passing[:-1] + [session_file(root, "failed.json", "2026-10-06", passes=False)]
+                with self.assertRaisesRegex(SystemExit, "session_passes is not true"):
+                    run_apply(root, evidence, options=("--session-summary", str(failed[-1]),
+                                                        *sum((["--session-summary", str(path)] for path in failed[:-1]), [])))
+
+                mismatched = passing[:-1] + [session_file(root, "wrong-rule.json", "2026-10-06",
+                                                           rule={**SESSION_RULE, "min_sessions": 4})]
+                with self.assertRaisesRegex(SystemExit, "agreement_rule does not match"):
+                    run_apply(root, evidence, options=tuple(sum((["--session-summary", str(path)] for path in mismatched), [])))
+
+                printed = run_apply(root, evidence, options=("--decision-eligible", "decision-0015",
+                                                              *sum((["--session-summary", str(path)] for path in passing), [])))
+                promoted = (root / "catalog.py").read_text(encoding="utf-8")
+                self.assertIn('_bind("tdx_public", "quote.all_a_snapshot", 80, LIVE_VERIFIED, None,', promoted)
+                self.assertIn("decision_eligible=True", promoted)
+                self.assertIn("decision record decision-0015", printed)
+                self.assertIn("Session summaries:", printed)
 
     def test_the_status_column_is_found_after_multibyte_text_on_its_line(self):
         with scratch_repository() as root:

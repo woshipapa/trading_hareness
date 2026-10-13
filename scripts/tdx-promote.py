@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "quant-service"))
-from app.datasources.catalog import bindings_for  # noqa: E402
+from app.datasources.catalog import SESSION_AGREEMENT_RULES, bindings_for  # noqa: E402
 from app.datasources.contracts import BINDING_STATES, UNSUPPORTED, Binding, reference_keywords  # noqa: E402
 from app.datasources.resolver import _normalise_rows  # noqa: E402
 
@@ -243,8 +243,9 @@ def compare_field(name: str, entry: Mapping[str, Any], left: Mapping[tuple, dict
     """One field over the rows both sides have; ``why`` is empty when the field agrees."""
     rel_tol, abs_tol = entry.get("rel_tol", 0.0), entry.get("abs_tol", 0.0)
     min_coverage = entry.get("min_coverage", MIN_COVERAGE)
+    min_share = entry.get("min_share", 1.0)
     summary = {"reference": entry["reference"], "key": list(entry["key"]), "rel_tol": rel_tol, "abs_tol": abs_tol,
-               "min_coverage": min_coverage}
+               "min_coverage": min_coverage, "min_share": min_share}
     if reference_span is not None:
         summary["reference_span"] = reference_span
     if unusable:
@@ -263,14 +264,16 @@ def compare_field(name: str, entry: Mapping[str, Any], left: Mapping[tuple, dict
         reasons.append(f"the common rows are {coverage:.3f} of the binding's {len(left)}, below {min_coverage}")
     if reference_span is not None and right and reference_coverage < min_coverage:
         reasons.append(f"the common rows are {reference_coverage:.3f} of the reference's {len(right)}, below {min_coverage}")
-    if wrong:
-        reasons.append(f"{len(wrong)} of {len(common)} common rows are outside the tolerance")
+    share = (len(common) - len(wrong)) / len(common) if common else 0.0
+    if common and share < min_share:
+        reasons.append(f"the rows within tolerance are {share:.3f} of {len(common)} common rows, below {min_share}")
     why = "; ".join(reasons)
     result = {**summary, "left_rows": len(left), "right_rows": len(right), "matched": len(common) - len(wrong),
             "mismatched": len(wrong), "only_left": len(left) - len(common), "only_right": len(right) - len(common),
             "coverage": coverage, "max_abs_dev": widest[0][0] if widest else None,
             "max_rel_dev": max((gap[1] for gap, _ in measured), default=None),
             "worst_key": list(widest[1]) if widest else None,
+            "share": share,
             "examples": [{"key": list(key), "left": one, "right": other} for key, one, other in wrong[:EXAMPLES]],
             "agree": not why, "why": why}
     if reference_span is not None:
@@ -383,6 +386,37 @@ def replace_token(text: str, token: ast.expr, new: str) -> str:
     return "\n".join(lines)
 
 
+def enable_decision_eligibility(text: str, call: ast.Call) -> str:
+    existing = next((keyword.value for keyword in call.keywords if keyword.arg == "decision_eligible"), None)
+    if existing is not None:
+        return replace_token(text, existing, "True")
+    lines = text.split("\n")
+    line = lines[call.end_lineno - 1].encode("utf-8")
+    close = call.end_col_offset - 1
+    lines[call.end_lineno - 1] = (line[:close] + b", decision_eligible=True" + line[close:]).decode("utf-8")
+    return "\n".join(lines)
+
+
+def session_summaries(paths: list[Path], rule: Mapping[str, Any]) -> list[tuple[Path, bytes, dict[str, Any]]]:
+    if len(paths) < rule["min_sessions"]:
+        sys.exit(f"need at least {rule['min_sessions']} session summaries, got {len(paths)}")
+    result = []
+    trade_dates = set()
+    for path in paths:
+        raw = path.read_bytes()
+        summary = json.loads(raw)
+        trade_date = summary.get("trade_date")
+        if not trade_date or trade_date in trade_dates:
+            sys.exit(f"{path}: session summaries must have distinct trade dates")
+        if summary.get("session_passes") is not True:
+            sys.exit(f"{path}: session_passes is not true")
+        if summary.get("agreement_rule") != dict(rule):
+            sys.exit(f"{path}: agreement_rule does not match the catalog rule")
+        trade_dates.add(trade_date)
+        result.append((path, raw, summary))
+    return result
+
+
 def run_apply(args: argparse.Namespace) -> int:
     paths = [path.resolve().relative_to(ROOT) for path in args.evidence]
     raws = [(ROOT / path).read_bytes() for path in paths]
@@ -399,13 +433,32 @@ def run_apply(args: argparse.Namespace) -> int:
     if token.id not in STEPS:
         sys.exit(f"{source} {capability} is {token.id}: only UNSUPPORTED and DECLARED bindings are promoted")
     new, gates = STEPS[token.id]
+    decision_reference = args.decision_eligible
+    if decision_reference and token.id != "DECLARED":
+        sys.exit("--decision-eligible is only valid for the DECLARED -> LIVE_VERIFIED step")
+    rule = SESSION_AGREEMENT_RULES.get((source, capability))
+    summaries = []
+    if token.id == "DECLARED" and rule:
+        summary_paths = [path.resolve().relative_to(ROOT) for path in args.session_summary]
+        summaries = [(path.relative_to(ROOT), raw, summary)
+                     for path, raw, summary in session_summaries([ROOT / path for path in summary_paths], rule)]
     failed = [f"{path}: {gate} failed ({document['verdicts'][gate]['detail']})"
               for path, document in zip(paths, documents) for gate in gates if not document["verdicts"][gate]["pass"]]
     if failed:
         sys.exit(f"{source} {capability} stays {token.id}:\n" + "\n".join(failed))
-    CATALOG.write_text(replace_token(text, token, new), encoding="utf-8")
+    text = replace_token(text, token, new)
+    if decision_reference:
+        text = enable_decision_eligibility(text, bind_call(text, source, capability))
+    CATALOG.write_text(text, encoding="utf-8")
     message = [f"Promote {source} {capability} from {token.id} to {new}", "",
                f"Every evidence file below passed {', '.join(gates)}. decision_eligible is not touched.", ""]
+    if decision_reference:
+        message[2] = f"decision_eligible=True by decision record {decision_reference}."
+        message.append("")
+    if summaries:
+        message += ["Session summaries:"]
+        message += [f"- {path} (sha256 {hashlib.sha256(raw).hexdigest()})" for path, raw, _summary in summaries]
+        message.append("")
     for path, raw, document in zip(paths, raws, documents):
         message += [f"- {path} (sha256 {hashlib.sha256(raw).hexdigest()})",
                     *(f"  {gate}: {document['verdicts'][gate]['detail']}" for gate in gates)]
@@ -423,6 +476,9 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--egress", choices=("mac", "owner"), required=True)
     apply = commands.add_parser("apply", help="move the binding's status one step on evidence files")
     apply.add_argument("evidence", nargs="+", type=Path)
+    apply.add_argument("--decision-eligible", help="decision record authorizing eligibility on the live-verified step")
+    apply.add_argument("--session-summary", action="append", type=Path, default=[],
+                       help="passing TDX shadow session summary; repeat for the catalog's minimum")
     args = parser.parse_args(argv)
     return run_check(args) if args.command == "check" else run_apply(args)
 

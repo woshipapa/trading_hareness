@@ -89,6 +89,15 @@ for (const skipped of ['scripts/teacher_cycle.py', 'scripts/teacher_review_daily
 git('reset', '-q', '--hard', edgeOnly);
 console.log('the workstation teacher cycle is not owner runtime');
 
+const tdxPromotion = commit(['scripts/tdx-promote.py', 'scripts/test_tdx_promote.py'], 'tdx promotion tool');
+result = dryRun(tdxPromotion, edgeOnly);
+assert.equal(result.status, 0, result.stderr);
+for (const skipped of ['scripts/tdx-promote.py', 'scripts/test_tdx_promote.py']) {
+	assert.ok(result.stdout.includes(`\n${skipped}\n`), `${skipped} should be listed as skipped`);
+}
+git('reset', '-q', '--hard', edgeOnly);
+console.log('the TDX promotion tool is workstation-only and its test follows the existing test rule');
+
 // Anything the image or the release checkout depends on needs a full release.
 for (const path of ['quant-service/migrations/versions/x.py', 'quant-service/requirements.txt',
 	'quant-service/Dockerfile.peer', 'deploy/shared-peer/compose.yaml', 'scripts/peer-session-guard.sh']) {
