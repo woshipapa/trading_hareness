@@ -543,7 +543,8 @@
 - who: agent
 - needs: none
 - found: 2026-10-13
-- updated: 2026-10-13
+- note: 2026-10-14 00:38 取数已做：11 个文件都有了 10 月 13 日那一行（见 W013 的 Log）。还没做：重跑五个脚本、把这一天补进报告。重跑前先确认两份输入也含 10 月 13 日：日线面板 `state/research/shortterm_tactics_20261013/data/daily_panel.parquet` 和温度导出 `state/research/vshape_20261013/owner/temperature_daily.json`；缺的话先补，否则这一天的行只有分钟线算出的部分。
+- updated: 2026-10-14
 
 ## Closed
 

@@ -16,7 +16,6 @@
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在编辑框里改了备注名并保存后，核对飞书里的备注名和会员表（这是经线上 bridge 接口的第一次写入）；其余见 Open questions 和待办 B056 的 (2)、(4)。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
 | [W011](streams/W011-peer-evening-stages.md) | 每晚该跑的阶段由我们这一侧自己触发 | merged | Claude Code 会话 93ba6e1d（主会话），2026-10-13 | 等用户执行发布（见 Waiting on the user）。发布后立即只读核对：owner 库里 10 月 13 日的五个 `peer_` 回执都是 completed（榜单和风险分当晚手工补过，应直接完成）；当天的情绪温度、宽基 ETF、金银指读数存在；前一交易日（10 月 12 日）的两个回执也是 completed；调度容器日志里没有“left open”那一行；发布前后调度进程内存相差不超过约 50 MB。然后在 10 月 14 日 16:50 核对第一次真正的当晚自动运行，并把 16:20 左右的风险分读数与 19:00 之后的重算对比 | 2026-10-13 |
 | [W012](streams/W012-owner-hot-releases.md) | owner 只用一套镜像，其余改动全部热部署 | reviewing | Claude Code 会话 93ba6e1d（主会话），2026-10-14 | A 段在独立评审里（只读 Claude 子代理，报告写到会话草稿目录的 `review_classifier.md`）。返回后逐条核实、修正、复跑 `python -m pytest scripts -q` 和 `node scripts/shared-peer/deploy-code-only.test.mjs`，然后把 main 合进分支再 `--no-ff` 合回 main 并推送，回收工作区。合并后第一次真实使用：用 `scripts/release plan <sha>` 看一次本来会被判成全量发布的改动（例如只改了工作站脚本的提交）现在的结论。B 段（目录发布）等 A 段用过一阵再排。 | 2026-10-14 |
-| [W013](streams/W013-licensed-batch-fetch.md) | 授权接口的批量取数：一个工具、一条并发规矩 | merged | Claude Code 会话 93ba6e1d（主会话），2026-10-13 | 第一次真实使用：10 月 14 日非交易时段用它补取 10 月 13 日当天 11 个代码的分钟线（BACKLOG B055；11 次请求，同时验证“最近的空结果不落盘”这条在真实接口上成立），看日志里的速率行和输出文件各多一行，通过后把本记录改成 `closed` | 2026-10-13 |
 
 ## 已结束、暂停或放弃
 
@@ -24,3 +23,4 @@
 |---|---|---|---|---|---|
 | [W005](streams/W005-short-term-tactics-research.md) | 短线战法调研（五路调研、老师复盘稿对账、组合战法 v0） | closed | none | none | 2026-10-13 |
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | closed | none | 没有了：研究做完，报告在 `docs/archive/2026-10-13-v-reversal-study.md`。留下的三件事在 BACKLOG：B053（把两个时期方向一致的八个条件登记进战法试验台做盘中条件）、B054（“多数股票守住而权重创新低”换一种事件定义再检验）、B055（10 月 13 日当天的分钟线次日补取） | 2026-10-13 |
+| [W013](streams/W013-licensed-batch-fetch.md) | 授权接口的批量取数：一个工具、一条并发规矩 | closed | Claude Code 会话 93ba6e1d（主会话），2026-10-14 | 无。以后批量读授权接口都用 `scripts/licensed_minute_history_fetch.py`；规矩在 `AGENTS.md` “Time and data rules” 和 `docs/work/README.md`。 | 2026-10-14 |

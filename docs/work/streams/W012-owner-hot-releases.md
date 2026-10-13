@@ -37,21 +37,21 @@
 - 2026-10-13 23:17 审计第 1 轮 11 条，主会话逐条看过，全部接受（方案文件末尾有清单）。改动最大的三处：(1) 不认识的路径不再默认发到主机上，仍然拒绝，但拒绝的理由是“请给它加一条分类规则”而不是“去做全量发布”，“目录”一类改成明确的名单——仓库里有不该上主机的被跟踪文件（`config/secrets/set-local-secret.sh`、`scripts/data/` 下的证据文件）；(2) 回滚时把发布写过的环境变量也恢复，并用 `docker inspect` 证明容器挂的是新目录；(3) 迁移检查除了“库已到目标版本”，还要确认发布后的 compose 不会让 peer 自己执行建表。派工顺序也调了：先写切换脚本和检查脚本，再让分类的新种类和所有使用方一起落地；整个分支只合并一次。隧道镜像单列一类，任何发布都拒绝（现有流程本来也不会重建它们）。
 
 - 2026-10-13 23:30 审计第 2 轮 11 条的要点：在主机上执行的脚本名单还不全（`configure-peer-self-tunnel.sh`、`export-peer-data.sh`、`verify-complete-stock-api.py`）；systemd 单元改了文件并不会生效，回滚也不恢复已安装的单元；解析 compose 需要 `yaml`，发布工具用的 `python3` 没有；`migrations` 目录里还有别的文件；wheelhouse 和基础镜像没有摘要可比；隧道镜像与镜像两类有重叠要定先后；SSH 断开后主机会停在半途，要有远端的事务日志和可重入的恢复；锁 1800 秒不续期可能不够；“渲染后的配置”在工作站一侧没有来源；`database_bootstrap.py` 不读那两个开关，说它被开关关住是错的；`schema-gate.sh` 也要脚本目录规则。主会话的判断：这些大多成立，而且都集中在“目录发布”这一步上，所以把这一步后移（见 next）。
-- 2026-10-14 03:00 A 段由主会话写完（用户 10 月 13 日夜：“codex当前推进太慢了，全部交给你来处理现在，全部推进”）。做法和数字：
+- 2026-10-14 00:37 A 段由主会话写完（用户 10 月 13 日夜：“codex当前推进太慢了，全部交给你来处理现在，全部推进”）。做法和数字：
   - 改之前用旧规则把全仓库每个文件分了一遍类：354 个落到“全量发布”，其中约 170 个是 `scripts/` 下的脚本、54 个是 `scripts/data/` 的证据文件、14 个是已停用的 edge 运行时、12 个是 n8n 工作流。改之后：`runtime` 579、`migration` 117、`skip` 1503、`full` 23、`image` 3、`unclassified` 0。
   - 逐个文件比了新旧分类：全量→跳过 211 个（上面那几组，加本机的 compose、LaunchAgent、网关配置、对方 Windows 工作站的 ps1、仓库元数据）；全量→迁移 116；全量→镜像 3；`alembic.ini` 由运行时改成迁移。
   - 脚本的种类不再靠规则里一条条列，而是读 `scripts/CATALOG.md` 的“Runs on”：`47owner` 开头的归主机目录树，其余跳过，目录里没有的脚本归“未分类”。与方案第 2 版的明细表不同，原因：目录本来就要求每个脚本登记在哪台机器上跑。新测试把主机 systemd 单元 `ExecStart` 指到的脚本与目录对了一遍，发现目录把 `backfill-full-market-daily.sh` 登记成工作站（主机的 `peer-daily-backfill.service` 在跑它），已改成 `47owner`。
   - `scripts/fill-longhu-sector-membership.py`（目录登记为“quant container”）归跳过：它是人工用 `docker cp` 从主机目录拷进容器执行的工具，改了它不值得为此构建镜像；要用新版本时从工作站拷过去。
   - 迁移：纯代码发布本来就把整个 `quant-service/migrations` 放进覆盖层（我们这一侧从不自己执行迁移），缺的只是“对方的库是否已到本次发布的 head”这道检查。把全量发布里的那段闸门原样搬成 `schema-gate.sh`，两条发布路径共用；全量发布的 16 个测试不改就通过。
   - 没做（留给 B 段）：compose、systemd 单元、主机脚本的不构建发布；构建前的内存检查；决策记录。
-- 2026-10-14 03:00 评审：另起一个只读的 Claude 子代理（opus）独立评审提交 a3783f22，重点是“有没有主机或镜像实际在用的路径被判成了跳过”。结果返回后记在这里。
+- 2026-10-14 00:37 评审：另起一个只读的 Claude 子代理（opus）独立评审提交 a3783f22，重点是“有没有主机或镜像实际在用的路径被判成了跳过”。结果返回后记在这里。
 
 ## Waiting on the user
 
 ## Running
 
 - [x] 2026-10-13 23:17 Codex 方案审计第 2 轮在跑（线程 01a135b0-5382-74e2-b25b-a52af7b9ead2，只读）。结束标志：它交回 SOUND 或编号的异议。之后见 next。挂在主会话 93ba6e1d 上。 → 11 条（2026-10-13 23:30）
-- [ ] 2026-10-14 03:00 A 段独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告：会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_classifier.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。新会话接手而文件不在时重新起一个评审，范围是 `git -C /Users/papa/codebase/.codex-wt/n8n-owner-hot-a show a3783f22`。
+- [ ] 2026-10-14 00:37 A 段独立评审（只读 Claude 子代理，挂在主会话 93ba6e1d 上；主会话结束它就停）。报告：会话草稿目录 `/private/tmp/claude-501/-Users-papa-codebase-n8n/93ba6e1d-d513-4b99-8ce8-0ca62ebc19e1/scratchpad/review_classifier.md`（会话结束后可能不在）。结束标志：主会话收到完成通知。新会话接手而文件不在时重新起一个评审，范围是 `git -C /Users/papa/codebase/.codex-wt/n8n-owner-hot-a show a3783f22`。
 
 ## Due
 

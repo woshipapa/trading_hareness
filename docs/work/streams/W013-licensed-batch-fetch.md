@@ -1,13 +1,14 @@
 # W013 授权接口的批量取数：一个工具、一条并发规矩
 
-- state: merged
-- holder: Claude Code 会话 93ba6e1d（主会话），2026-10-13
+- state: closed
+- holder: Claude Code 会话 93ba6e1d（主会话），2026-10-14
 - goal: 以后从本机批量读授权接口都走同一个工具，默认按 2026-10-13 量出来的并发跑，上游会拒绝的设置工具自己拒绝，交易时段不跑；规矩写在 agent 会读到的地方
 - plan: docs/work/plans/licensed-batch-fetch.md
 - branch: main
 - head: 45e2fca5
-- next: 第一次真实使用：10 月 14 日非交易时段用它补取 10 月 13 日当天 11 个代码的分钟线（BACKLOG B055；11 次请求，同时验证“最近的空结果不落盘”这条在真实接口上成立），看日志里的速率行和输出文件各多一行，通过后把本记录改成 `closed`
-- updated: 2026-10-13
+- release: none（只在本机运行的工具，没有发布单元）
+- next: 无。以后批量读授权接口都用 `scripts/licensed_minute_history_fetch.py`；规矩在 `AGENTS.md` “Time and data rules” 和 `docs/work/README.md`。
+- updated: 2026-10-14
 
 ## Requirements
 
@@ -28,6 +29,7 @@
 ## Log
 
 - 2026-10-13 23:09 开线并派工。测量过程和数字见 W007 的 Log 与 FACTS F027。发布分类规则要加一条（新脚本登记为工作站工具，否则它会把下一次 owner 发布判成全量）；W008 时这类改动先问过用户，这次用户的话是“把代码和规范改一下”，主会话当作同意，并在汇报里明说。
+- 2026-10-14 00:38 第一次真实使用（BACKLOG B055 的取数部分）：取 2026-10-13 一天、11 个代码，目标 owner 读通道 `http://127.0.0.1:15682`（隧道在，`/health` 报告 `owner-code-20261013-05`），非交易时段。日志 `state/research/vshape_20261013/data/fetch.log` 最后一行 `00:38:41 FINISHED 11 calls (159915 510050 510300 510500 512100 588000 SH000001 SH000300 SH000852 SZ399001 SZ399006)`；11 个文件各多一行（上证指数 242 个点，300ETF 241 个点）。只有 11 次调用，没到每 200 次才打的速率行。没验证到的一条：“最近三个交易日的空结果不落盘”在真实接口上没有碰到（这次都有数据），仍只由测试保证。工作区 `licensed-batch-fetch` 已回收（`finishworktree.sh --apply`）。本线没有发布：工具只在本机运行。记录关闭。
 
 ## Waiting on the user
 
