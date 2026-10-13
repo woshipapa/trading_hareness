@@ -145,7 +145,7 @@ class PeerCloseDependencies:
     call_longhu: Callable[[dict[str, Any]], Awaitable[Any]] | None = None
     refresh_broad_etf_flow: Callable[[date], Awaitable[Any]] | None = None
     refresh_market_timing: Callable[[date], Awaitable[Any]] | None = None
-    #: The tactic trial ledger's evening run (decision 0022): readings, settlement, summary.
+    #: The tactic trial ledger's evening run (decision 0023): readings, settlement, summary.
     tactic_trials: Callable[[date], Awaitable[Any]] | None = None
 
 

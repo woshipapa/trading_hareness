@@ -3170,14 +3170,14 @@ async def peer_close_research_loop() -> None:
         call_longhu=(lambda request: shared_stock_api_call(request)) if longhu_vendor_configured() else None,
         refresh_broad_etf_flow=lambda day: refresh_broad_etf_flow(db, day, run_database=run_database_blocking),
         refresh_market_timing=lambda day: refresh_market_timing(db, day, run_database=run_database_blocking),
-        # Decision 0022: the tactic trial ledger's evening run. Its inputs are the two stages before it.
+        # Decision 0023: the tactic trial ledger's evening run. Its inputs are the two stages before it.
         tactic_trials=(lambda day: run_database_blocking(tactic_trial_evening, db, day, timeout_seconds=590))
         if longhu_vendor_configured() else None,
     ))
 
 
 async def tactic_auction_loop() -> None:
-    """The tactic trial ledger's auction reading, from the 09:25 table the auction capture stores (decision 0022)."""
+    """The tactic trial ledger's auction reading, from the 09:25 table the auction capture stores (decision 0023)."""
     from .tactic_trial_runtime import TacticAuctionDependencies, run_tactic_auction_loop
     await run_tactic_auction_loop(TacticAuctionDependencies(
         database=db, run_database=run_database_blocking, session_open=sse_calendar_open_async,

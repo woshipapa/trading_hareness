@@ -1,4 +1,4 @@
-"""Tactics and conditions are evidence observations, not strategies (decision 0022).
+"""Tactics and conditions are evidence observations, not strategies (decision 0023).
 
 Nothing checks import direction inside the service, so this pins it: the trial modules read no strategy registry,
 no strategy contract carries a tactic key, and only the trial modules, their read routes and the composition root import them.

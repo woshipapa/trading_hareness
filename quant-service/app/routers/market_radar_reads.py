@@ -133,7 +133,7 @@ def build_market_radar_router(database: Any, run_database_blocking: Callable[...
 
     @router.get("/api/v1/market/tactic-trials/board")
     async def tactic_trials_board(trade_date: date | None = Query(None, alias="date")) -> dict[str, Any]:
-        """Decision 0022: the 09:25 board of the tactic trial ledger (research-only evidence)."""
+        """Decision 0023: the 09:25 board of the tactic trial ledger (research-only evidence)."""
         return await run_database_blocking(_connected(tactic_trial_board, trade_date), timeout_seconds=30)
 
     @router.get("/api/v1/market/tactic-trials/summary")
