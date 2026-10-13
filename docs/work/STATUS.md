@@ -36,7 +36,7 @@
 
 - W006 2026-10-13 15:48 Codex 实现者在做第 7 步（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 e813f371 之后有提交且 `git status --short` 为空。之后：复跑验收；读 `tactic_trials.py` 里每日总结的文字模板；勾掉 Steps；派第 8 步。
 - W008 2026-10-13 16:08 Codex 实现者在做派工 2（P2 和 P3），同一线程 01a13426-d823-78b1-9f68-2907eb221981，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-shadow-measure`。结束标志：分支在 b11e97e9 之后有两个提交且 `git status --short` 为空。之后：跑验收、读 diff（门槛的比值、分母、缺数据时不放行是否与方案一致；比对行的新字段名）、勾掉 Steps，派工 3（P4）。挂在主会话 93ba6e1d 上，判断死活和续派的办法同 W006 的 Resume here。
-- W010 2026-10-13 17:45 Codex 实现者在做 base 线第一步（cwd `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`）。结束标志：MCP 调用返回，
+- W010 2026-10-13 18:05 Codex 审查方案 r5 里功能 E 那一节（审查线程 01a1342e，只读）。结束标志：返回 `SOUND` 或问题清单。之后：裁决、改方案，
 
 ## 待办清单
 

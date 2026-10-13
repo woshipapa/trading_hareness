@@ -28,8 +28,9 @@
 
 - [x] 0 用户同意方案；方案落盘；Codex 方案审查三轮，12 条全部采纳，r4 — 399e0fc5
 - [x] 1 线上探测 P0-1 至 P0-7 与 `WEB_GATEWAY.md` — 集成分支 6b31c254；输出在 `docs/work/probes/2026-10-13-relay-auto-p0*.out.txt`（P0-8 在 base 合并后做）
-- [ ] 2 base 线
-- [ ] 3 五条功能线
+- [ ] 2 base 线：第一步 bridge 完成（`codex/relay-auto-base` e81059b0；本机 `python3 -m unittest discover -s feishu-relay/bridge -p 'test_*.py' -q` → Ran 178 tests, OK (skipped=70)；
+  edge 上 `bash feishu-relay/scripts/edge/test-bridge-on-edge.sh` → Ran 178 tests, OK）；第二步 adapter、第三步看板未做
+- [ ] 3 六条功能线（join、create、members、urgent、recall，以及 members 之后的 membership）
 - [ ] 4 合并、发布、线上验收
 
 ## Log
@@ -61,6 +62,13 @@
   至此 P0-1 至 P0-7 全部通过，方案里没有因探测失败要拿掉的功能；P0-8 按方案在 base 合并后做。
 - 2026-10-13 17:45 用户确认派工。建集成分支和它的工作区，提交 `WEB_GATEWAY.md`（6b31c254）；建 base 工作区并快进到集成分支；
   派 base 线第一步给 Codex（`danger-full-access`，`gpt-5.6-sol` high）。
+- 2026-10-13 18:00 探测 P0-9：自测群里用 webhook 以成员列表的数字 ID @ 中继账号自己，文字和富文本都成功（`docs/work/probes/2026-10-13-relay-auto-p0-9.out.txt`）。
+  据此把“会员期限与到期提醒”作为功能 E 加进方案 r5（新线 `relay-auto-membership`，排在 members 之后），并在 `WEB_GATEWAY.md` 里补了 @ 的写法（集成分支 10097a5a）。
+  E 这一节交 Codex 审查（同一审查线程）。
+- 2026-10-13 18:10 base 线第一步返回（线程 01a13455，三个提交到 e81059b0）。本会话复跑验收通过，edge 上完整套件 178 项通过。读 diff 的两条意见，随第二步一起交回：
+  [claude] `target_registry.resolve` 在 bridge 未登录时会因 `bridge.client` 为空报属性错误，应像现有处理函数那样明确报“尚未登录”；
+  [claude] `resolve_groups` 对 `GetWebhookBotInfo` 的回答做了两层防御式判断，接口总是回 `{code, msg, data}`，应简化。
+  旁路 `tap` 接在 `on_message` 的最前面，补读和更正重放的消息也会经过它（D 要按消息编号去重）。
 
 ## Waiting on the user
 
@@ -75,9 +83,11 @@
 ## Running
 
 - [x] 2026-10-13 16:20 Codex 方案审查（线程 01a1342e）→ 17:20 三轮结束，共 12 条意见全部采纳，方案 r4；结果记在 Plan 一节和方案末尾。原说明：  之后：逐条裁决，改方案或写明不采纳的理由，再审一轮（最多 3 轮）。该调用挂在会话 eac0e1fc 上，会话结束它就停；接手者重新发起审查即可。
-- [ ] 2026-10-13 17:45 Codex 实现者在做 base 线第一步（cwd `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`）。结束标志：MCP 调用返回，
+- [x] 2026-10-13 17:45 base 线第一步 → 18:10 返回，结果见 Log。原说明：Codex 实现者在做 base 线第一步（cwd `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`）。结束标志：MCP 调用返回，
   分支 `codex/relay-auto-base` 在 6b31c254 之后有新提交且工作区 `git status --short` 为空。之后：见 `next`。该调用挂在会话 eac0e1fc 上，
   会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从没做完的地方接着派（方案和 `WEB_GATEWAY.md` 都在工作区里）。
+- [ ] 2026-10-13 18:05 Codex 审查方案 r5 里功能 E 那一节（审查线程 01a1342e，只读）。结束标志：返回 `SOUND` 或问题清单。之后：裁决、改方案，
+  把 r5 的方案文件带进集成分支和 base 工作区，再用线程 01a13455 续派 base 第二步（adapter 接缝、R，以及 E 的三处接缝和上面两条意见）。
 
 ## Due
 
