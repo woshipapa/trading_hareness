@@ -7,7 +7,7 @@
 - branch: integration/relay-auto
 - head: 6b31c254
 - release: none
-- next: base 线第一步（bridge 接缝和 R 的 bridge 部分）返回后：在工作区里自己跑验收命令和 `bash feishu-relay/scripts/edge/test-bridge-on-edge.sh`，读 `git diff integration/relay-auto...HEAD`，通过后用同一线程续派第二步（adapter 接缝和 R），再第三步（看板）
+- next: base 线第 2a 步返回后：在 base 工作区里复跑验收命令、读 `git diff integration/relay-auto...HEAD`，通过后用线程 01a13455 续派 2b（`adapter/index.mjs` 和 `adapter/group-relay.mjs` 的接线及其测试），再派第三步（看板）；三步都完成后做双重评审，合进集成分支
 - updated: 2026-10-13
 
 ## Requirements
@@ -19,7 +19,7 @@
 
 ## Plan
 
-`docs/work/plans/relay-group-automation.md`，现为 r4。批准：用户 2026-10-13「同意了，我是trust的」（针对方案要点、六个工作区的处置和派工前的线上探测）。
+`docs/work/plans/relay-group-automation.md`，现为 r6（r5 加功能 E，r6 采纳 E 审查第一轮的 5 条）。批准：用户 2026-10-13「同意了，我是trust的」（针对方案要点、六个工作区的处置和派工前的线上探测）。
 方案审查第一轮（Codex，只读，线程 01a1342e，`gpt-5.6-sol` high）：7 条意见（3 条 high、4 条 medium），全部采纳，改成 r2，逐条处理写在方案末尾的“审查记录”。
 第二轮 4 条（1 条 high、3 条 medium）、第三轮 1 条（medium），同样全部采纳（r3、r4）；没有不采纳的意见。第三轮那一条的改动没有再送审（最多三轮）。
 按 codex-flow，审查后的改动要再给用户看一次才派工。
@@ -86,8 +86,12 @@
 - [x] 2026-10-13 17:45 base 线第一步 → 18:10 返回，结果见 Log。原说明：Codex 实现者在做 base 线第一步（cwd `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`）。结束标志：MCP 调用返回，
   分支 `codex/relay-auto-base` 在 6b31c254 之后有新提交且工作区 `git status --short` 为空。之后：见 `next`。该调用挂在会话 eac0e1fc 上，
   会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从没做完的地方接着派（方案和 `WEB_GATEWAY.md` 都在工作区里）。
-- [ ] 2026-10-13 18:05 Codex 审查方案 r5 里功能 E 那一节（审查线程 01a1342e，只读）。结束标志：返回 `SOUND` 或问题清单。之后：裁决、改方案，
+- [x] 2026-10-13 18:05 E 的审查第一轮 → 18:25 返回 5 条（1 条 high、4 条 medium），全部采纳，方案 r6（7fd… 见 git log 的 `notes: W010 plan r6`）。原说明：Codex 审查方案 r5 里功能 E 那一节（审查线程 01a1342e，只读）。结束标志：返回 `SOUND` 或问题清单。之后：裁决、改方案，
   把 r5 的方案文件带进集成分支和 base 工作区，再用线程 01a13455 续派 base 第二步（adapter 接缝、R，以及 E 的三处接缝和上面两条意见）。
+- [ ] 2026-10-13 18:30 两个 Codex 调用在跑：(1) base 线第 2a 步（实现线程 01a13455，cwd 是 base 工作区）：第一步的两条修正加 adapter 的模块
+  （`ledger.query`、`feature-routes.mjs`、`target-registry.mjs`、六个空壳、`webhookTargets.sendText`、两个 Dockerfile、测试），不碰 `index.mjs` 和 `group-relay.mjs`；
+  (2) E 的审查第二轮（审查线程 01a1342e，只读）。结束标志：各自的调用返回。之后：对 (1) 复跑验收、读 diff，再续派 2b（`index.mjs`、`group-relay.mjs` 接线）和第三步（看板）；
+  对 (2) 裁决并改方案。两个调用都挂在会话 eac0e1fc 上。
 
 ## Due
 
