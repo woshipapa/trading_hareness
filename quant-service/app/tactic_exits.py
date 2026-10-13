@@ -157,18 +157,18 @@ def _below_ma5(context: ExitContext) -> Callable[[int, PricedBar], ExitDecision 
 
 
 EXITS = (
-    Exit("open", "次日开盘", "baseline", _open),
-    Exit("close", "次日收盘", "baseline", _close),
-    Exit("tp3", "止盈3%", "practice", _target("0.03")),
-    Exit("tp5", "止盈5%", "practice", _target("0.05")),
-    Exit("tp8", "止盈8%", "practice", _target("0.08")),
-    Exit("sl3", "止损3%", "practice", _stop),
-    Exit("tp5_sl3_stop_first", "止盈5止损3止损优先", "practice", _bracket(True)),
-    Exit("tp5_sl3_target_first", "止盈5止损3止盈优先", "practice", _bracket(False)),
-    Exit("hold_while_sealed", "封板继续持有", "teacher:R51", _hold_while_sealed),
-    Exit("gap_rule", "高开规则", "study", _gap_rule),
-    Exit("must_rise", "只涨不跌", "teacher:R47", _must_rise),
-    Exit("below_ma5", "跌破五日均线", "teacher:R47/R48", _below_ma5),
+    Exit("open", "开盘卖", "baseline", _open),
+    Exit("close", "收盘卖", "baseline", _close),
+    Exit("tp3", "冲高3%止盈，否则收盘卖", "practice", _target("0.03")),
+    Exit("tp5", "冲高5%止盈，否则收盘卖", "practice", _target("0.05")),
+    Exit("tp8", "冲高8%止盈，否则收盘卖", "practice", _target("0.08")),
+    Exit("sl3", "跌3%止损，否则收盘卖", "practice", _stop),
+    Exit("tp5_sl3_stop_first", "止盈5%加止损3%（同日都触及按先止损）", "practice", _bracket(True)),
+    Exit("tp5_sl3_target_first", "止盈5%加止损3%（同日都触及按先止盈）", "practice", _bracket(False)),
+    Exit("hold_while_sealed", "封住续拿，不封当日收盘卖", "teacher:R51", _hold_while_sealed),
+    Exit("gap_rule", "按跳空处置（一字拿，高开5%以上未封开盘卖，其余收盘卖，封住续拿）", "study", _gap_rule),
+    Exit("must_rise", "买后不涨就走，不创收盘新高就走", "teacher:R47", _must_rise),
+    Exit("below_ma5", "跌破5日线次日开盘卖", "teacher:R47/R48", _below_ma5),
 )
 
 
