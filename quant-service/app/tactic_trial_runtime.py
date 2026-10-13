@@ -156,6 +156,7 @@ def refresh_auction(database: Any, trade_date: date, *, apply: bool = True) -> d
             row["reference_close"] = (previous_by_symbol.get(desk_row["symbol"]) or {}).get("close")
             rows.append(row)
         evaluated = evaluate_conditions(rows, {"flags": [], "unknown": []}, "auction")
+        evaluated["day"]["prev"] = (previous_reading or {}).get("day")
         reading = _research({"trade_date": trade_date.isoformat(), "slot": "auction", "version": VERSION,
             "decided_at": datetime.now(CN_TZ).isoformat(), "day": evaluated["day"], "rows": evaluated["rows"],
             "complete": True, "source": "auction_open_desk_daily"})
@@ -234,14 +235,18 @@ def _year_report(readings: Sequence[Mapping[str, Any]], limit_symbols: Mapping[s
     report: dict[str, dict[str, int]] = {}
     for reading in readings:
         year = str(reading["trade_date"])[:4]
-        item = report.setdefault(year, {"days": 0, "rows": 0, "disagreements": 0, "raw": 0})
+        item = report.setdefault(year, {"days": 0, "rows": 0, "observations": 0, "disagreements": 0, "raw": 0})
         item["days"] += 1
+        item["observations"] += reading.get("bar_membership_observations", 0)
+        item["disagreements"] += reading.get("bar_membership_disagreements", 0)
         for row in reading.get("rows", []):
             item["rows"] += 1
-            item["disagreements"] += row.get("bar_seal_disagreement", 0)
+            if "bar_membership_observations" not in reading:
+                item["observations"] += 1
+                item["disagreements"] += row.get("bar_seal_disagreement", 0)
             item["raw"] += row.get("history_basis") == "unadjusted_missing_adj_factor"
     return {year: {"days_built": value["days"], "rows": value["rows"],
-                   "disagreement_share": value["disagreements"] / value["rows"] if value["rows"] else None,
+                   "disagreement_share": value["disagreements"] / value["observations"] if value["observations"] else None,
                    "raw_basis_share": value["raw"] / value["rows"] if value["rows"] else None}
             for year, value in report.items()}
 
@@ -291,6 +296,19 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
                         preloaded_previous=[prior for prior in built if prior["slot"] == "close"
                                             and prior["trade_date"] < day.isoformat()][-3:],
                     )
+                listed = {str(row[0]) for values in item["lists"].values() for row in values
+                          if isinstance(row, list) and row}
+                observed = 0
+                disagreements = 0
+                for symbol in listed:
+                    bar = day_bars.get(symbol)
+                    if bar is None or bar.get("close") is None or bar.get("limit_up") in (None, 0):
+                        continue
+                    observed += 1
+                    if float(bar["close"]) < float(bar["limit_up"]) * (1 - 1e-6):
+                        disagreements += 1
+                reading["bar_membership_observations"] = observed
+                reading["bar_membership_disagreements"] = disagreements
                 built.append(reading)
                 documents.append(reading)
         else:
@@ -324,6 +342,7 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
                 for row in rows:
                     row["reference_close"] = (bars_by_day.get(day.isoformat(), {}).get(row["symbol"]) or {}).get("pre_close")
                 evaluated = evaluate_conditions(rows, {"flags": [], "unknown": []}, "auction")
+                evaluated["day"]["prev"] = (previous or {}).get("day")
                 reading = _research({"trade_date": day.isoformat(), "slot": "auction", "version": VERSION,
                     "decided_at": session_close(day).isoformat(), "day": evaluated["day"], "rows": evaluated["rows"],
                     "complete": True, "replayed": True, "source": "bars+auction_list"})
@@ -340,6 +359,29 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
         for documents in chunk_documents:
             if documents:
                 derived_daily_readings.store(database, capability, documents)
+    symbol_days = [(row["symbol"], date.fromisoformat(reading["trade_date"]))
+                   for reading in built for row in reading.get("rows", [])]
+    exit_bars = _read(database, tactic_trial_repository.read_exit_bars, symbol_days)
+    bars_by_key: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
+    for bar in exit_bars:
+        bars_by_key.setdefault((str(bar["symbol"]), bar["pick_day"]), []).append(bar)
+    settled_documents = []
+    for reading in built:
+        pick_day = date.fromisoformat(reading["trade_date"])
+        rows = []
+        complete = True
+        for row in reading.get("rows", []):
+            outcome = evaluate_pick(row["symbol"], slot, bars_by_key.get((row["symbol"], pick_day), []),
+                                    row.get("reference_close"), row.get("prior_closes", ()))
+            complete = complete and _settled_complete(outcome)
+            rows.append({"symbol": row["symbol"], "name": row.get("name"), "outcomes": outcome})
+        settled_documents.append(_research({"trade_date": reading["trade_date"], "slot": slot,
+            "version": VERSION, "rows": rows, "complete": complete, "replayed": True}))
+    if apply:
+        for offset in range(0, len(settled_documents), tactic_trial_repository.CHUNK_SESSIONS):
+            chunk = settled_documents[offset:offset + tactic_trial_repository.CHUNK_SESSIONS]
+            if chunk:
+                derived_daily_readings.store(database, SETTLED_CAPABILITY, chunk)
     return _research({"status": "completed", "slot": slot, "start": start.isoformat(), "end": end.isoformat(),
                       "years": report, "days": len(built), "rows": sum(len(item.get("rows", [])) for item in built), "replayed": True})
 

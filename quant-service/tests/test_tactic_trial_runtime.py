@@ -60,11 +60,12 @@ class TacticTrialRuntimeTests(unittest.TestCase):
 
     def test_replay_refuses_a_year_over_the_disagreement_limit(self):
         database = Database()
-        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=[date(2026, 1, 2)]), \
-             mock.patch.object(runtime.tactic_trial_repository, "read_limit_lists", return_value={"days": []}), \
-             mock.patch.object(runtime.tactic_trial_repository, "read_capability", return_value=[]):
+        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=[]), \
+             mock.patch.object(runtime, "_year_report", return_value={"2026": {"days_built": 1, "rows": 1, "disagreement_share": 0.01, "raw_basis_share": 0.0}}), \
+             mock.patch.object(runtime.derived_daily_readings, "store") as store:
             result = runtime.replay(database, "close", date(2026, 1, 1), date(2026, 1, 3), apply=True)
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["status"], "refused")
+        store.assert_not_called()
 
 
 if __name__ == "__main__":
