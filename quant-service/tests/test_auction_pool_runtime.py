@@ -229,5 +229,43 @@ class AuctionPoolRuntimeTests(unittest.TestCase):
         self.assertEqual(clock.sleeps[-1], 23 * 3600 + 44 * 60)
 
 
+class AuctionTrackCalendarTest(unittest.TestCase):
+    def test_track_counts_sessions_back_from_today(self):
+        from app import auction_pool_runtime
+
+        class Connection:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params):
+                self.calls.append((sql, params))
+                return self
+
+            def fetchall(self):
+                return []
+
+        class Database:
+            def __init__(self):
+                self.connection = Connection()
+
+            def transaction(self):
+                database = self
+
+                class Tx:
+                    def __enter__(self):
+                        return database.connection
+
+                    def __exit__(self, *_args):
+                        return False
+
+                return Tx()
+
+        database = Database()
+        self.assertEqual(auction_pool_runtime.track(database, 5)["days"], [])
+        sql, params = database.connection.calls[0]
+        self.assertIn("calendar_date <= %s", sql)
+        self.assertEqual(params, (datetime.now(CN).date(), 5))
+
+
 if __name__ == "__main__":
     unittest.main()

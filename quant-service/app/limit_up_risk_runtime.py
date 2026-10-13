@@ -57,7 +57,8 @@ def track(database: Any, days: int = 250) -> dict[str, Any]:
                         WHERE next_day.exchange='SSE' AND next_day.is_open
                           AND next_day.calendar_date>calendar.calendar_date) AS next_day
                  FROM quant.market_trade_calendar calendar
-                WHERE exchange='SSE' AND is_open ORDER BY calendar_date DESC LIMIT %s""", (days,),
+                WHERE exchange='SSE' AND is_open AND calendar_date <= %s
+                ORDER BY calendar_date DESC LIMIT %s""", (datetime.now(CN_TZ).date(), days),
         ).fetchall()
         sessions = list(reversed(sessions))
         if not sessions:

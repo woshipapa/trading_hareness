@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -159,6 +159,10 @@ class LimitUpRiskTests(unittest.TestCase):
             result = limit_up_risk_runtime.track(Database(connection), 3)
         close_sql = next(sql for sql in connection.statements if "canonical_bars_daily" in sql)
         self.assertIn("JOIN unnest", close_sql)
+        # The calendar holds the rest of the year: the newest sessions are counted back from today.
+        calendar_index = next(i for i, sql in enumerate(connection.statements) if "LIMIT %s" in sql)
+        self.assertIn("calendar_date <= %s", connection.statements[calendar_index])
+        self.assertEqual(connection.params[calendar_index], (datetime.now(limit_up_risk_runtime.CN_TZ).date(), 3))
         self.assertNotIn("BETWEEN", close_sql)
         symbols, dates = connection.params[-1]
         expected_pairs = [(row["symbol"], day) for row in rows for day in (date(2026, 9, 17), date(2026, 9, 18))]

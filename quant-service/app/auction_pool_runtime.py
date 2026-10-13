@@ -280,7 +280,8 @@ def track(database: Any, days: int = 120) -> dict[str, Any]:
     with database.transaction() as connection:
         sessions = list(reversed(connection.execute(
             """SELECT calendar_date FROM quant.market_trade_calendar
-                 WHERE exchange='SSE' AND is_open ORDER BY calendar_date DESC LIMIT %s""", (days,)).fetchall()))
+                 WHERE exchange='SSE' AND is_open AND calendar_date <= %s
+                 ORDER BY calendar_date DESC LIMIT %s""", (datetime.now(CN_TZ).date(), days)).fetchall()))
         if not sessions:
             return {"version": VERSION, "days": [], "stale_versions": 0, "research_only": True, "live_effect": "none"}
         readings = derived_daily_readings.newest(connection, TABLE_CAPABILITY, sessions[0]["calendar_date"], sessions[-1]["calendar_date"])
