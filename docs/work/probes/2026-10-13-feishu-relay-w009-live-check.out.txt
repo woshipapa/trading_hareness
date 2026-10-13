@@ -1,0 +1,45 @@
+# W009 发布后的线上核对，2026-10-13 14:03–14:08（上海时间）
+# 目标：edge adapter，经本机隧道 http://127.0.0.1:18300；状态脚本经 SSH 读 edge。全部只读或被拒绝的请求，没有写入。
+
+## bash scripts/release-sync-status.sh --skip-owner --edge-source-sha ea3d5865   （退出码 0）
+edge  adapter /health              ok                                                                PASS    ok
+edge  adapter git_sha              ea3d5865b40e1df151bd92e07a30aace48920030                          PASS    ea3d5865b40e
+edge  adapter release              hotfix-hotfix-20261013T060210Z-ea3d5865b40e-16279                 PASS    hotfix source-overlay
+edge  adapter runtime_source       source-overlay                                                    PASS    source-overlay
+edge  runtime.env image            not required                                                      PASS    not required for source-overlay
+edge  runtime.env overlay          true                                                              PASS    true
+edge  larkagentx bridge            ok                                                                PASS    ok
+edge  bridge release               hotfix-20261013T060210Z-ea3d5865b40e-16279                        PASS    source-overlay from ea3d5865b40e
+ALL CHECKS PASSED
+
+## GET /api/group-relay/status 里新增的两段（14:04）
+overall healthy | bridge healthy connected | listen 24 | release hotfix-20261013T060210Z-ea3d5865b40e-16279
+source_tags [('anqiang', 'file', True), ('jinli', 'file', True), ('liuzi', 'file', True), ('liwei', 'file', True), ('quanneng', 'file', True), ('sanshu', 'file', True), ('xiaojie', 'file', True), ('xiaolan', 'file', True)]
+webhook_targets [('…90ff0c', None, 'anqiang', 'env', True), ('…cb8eda', None, '汇总', 'env', True), ('…839b6f', None, 'liuzi', 'env', True), ('…439131', None, 'liwei', 'env', True)]
+RCCS小杰夜报 路由 healthy member ['7677224794462358807'] 历史 complete 763 / 763
+启用的路由 [('anqiang', 'healthy'), ('liwei', 'healthy'), ('cat', 'healthy'), ('anqiang', 'healthy'), ('xiaojie', 'healthy'), ('sanshu', 'healthy'), ('jinli', 'healthy'), ('liuzi', 'healthy'), ('quanneng', 'healthy'), ('xiaojie', 'healthy')]
+
+## GET /api/group-relay/targets
+n = 4 | 字段 ['chat_id', 'created_at', 'keyword', 'name', 'origin', 'usable', 'verified_at', 'websocket_chat_id'] | 响应里含 hook/ 字样: False
+
+## 被拒绝的写请求（都不入库，也不向任何群发消息）
+POST /targets  webhook_url=https://example.com/open-apis/bot/v2/hook/abcdefgh12345678
+  -> 400 webhook 地址必须是飞书自定义机器人的地址：https://open.feishu.cn/open-apis/bot/v2/hook/…
+POST /targets  webhook_url=https://open.feishu.cn/open-apis/bot/v2/hook/00000000-0000-0000-0000-000000000000   （飞书不认识的机器人）
+  -> 400 测试消息没有发出去：webhook 地址无效，机器人可能已被删除
+DELETE /targets/oc_523b…cb8eda   （环境变量配置的汇总群）
+  -> 400 这个目标群由服务器环境变量配置，不能在看板里删除
+DELETE /targets/wh_ffffffffffffffffffffffff
+  -> 404 目标群不存在
+PUT /routes/relay_80c1e7637c0c4eeab11f4e97e97b3a27  {tag: xiaojie, ingest: false, 其余字段照原值}
+  -> 400 标签 #xiaojie 由仓库登记表声明，不能在看板里关闭
+  路由前后都是 updated_at=2026-10-13T05:33:54.018Z tag=xiaojie enabled=True targets=1
+之后 GET /targets 仍是 4 个，来源全是 env。
+
+## 看板构建（GET /monitor 引用的 /assets/index-8GblLvhm.js 里各字符串出现次数）
+新增目标群 -> 2
+发测试消息并保存 -> 1
+这个标签的消息进入下游研究数据 -> 1
+需要先在服务器上配置它的 webhook -> 0
+
+## 没有在线上做的：真的建一条新标签的路由、真的加一个新目标群（要用户在飞书里建机器人）。

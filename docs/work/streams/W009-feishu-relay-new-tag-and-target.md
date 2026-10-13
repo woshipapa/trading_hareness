@@ -1,13 +1,13 @@
 # W009 飞书转发：全新标签和全新目标群也只在前端操作
 
-- state: building
+- state: released
 - holder: Claude Code 会话 eac0e1fc，2026-10-13
 - goal: 在转发看板里新增源群时，用一个从没用过的标签、或转发到一个从没配置过的目标群，都不需要改仓库文件、改服务器配置或发版
 - plan: none
 - branch: main
-- head: 85c81967
-- release: none
-- next: 写 `feishu-relay/adapter/source-tags.mjs` 和 `webhook-targets.mjs` 及其测试，接进 `index.mjs` 的路由创建和三个目标群接口
+- head: ea3d5865
+- release: edge 中继 `hotfix-20261013T060210Z-ea3d5865b40e-16279`
+- next: 用户第一次在看板里用新标签建源群、或新增一个目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源并且该路由 healthy；通过后把状态改成 `verified`
 - updated: 2026-10-13
 
 ## Requirements
@@ -37,10 +37,12 @@
 
 ## Steps
 
-- [ ] 1 标签登记：`source-tags.mjs`、ledger 方法、路由创建接入、测试
-- [ ] 2 目标群：`webhook-targets.mjs`、表、三个接口、测试
-- [ ] 3 看板：表单、目标群对话框、目标群表
-- [ ] 4 提交、edge 热更新、线上核对
+- [x] 1 标签登记：`source-tags.mjs`、ledger 方法、路由创建接入、测试 — ea3d5865 — `node --test feishu-relay/adapter/*.test.mjs` → tests 275, pass 275, fail 0
+- [x] 2 目标群：`webhook-targets.mjs`、表、三个接口、测试 — ea3d5865 — 同上（其中 `webhook-targets.test.mjs` 7 项、`source-tags.test.mjs` 6 项）
+- [x] 3 看板：表单、目标群对话框、目标群表 — ea3d5865 — `cd feishu-relay/dashboard && npm run typecheck && npm test -- --run && npm run build` → Tests 6 passed，构建成功
+- [x] 4 提交、edge 热更新、线上核对 — `bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply`（本会话执行，14:02）→ `overlay hotfix activated`；
+  `scripts/release-sync-status.sh --skip-owner --edge-source-sha ea3d5865` → ALL CHECKS PASSED。发布表已加一行。
+  与方案不同：线上没有真的登记一个新标签、也没有真的加一个目标群，只核对了加载、读取和五种拒绝情形（原因见 Log）。
 
 ## Log
 
@@ -49,7 +51,21 @@
   `xiaojie` 标签早已登记、目标群是现成的汇总群。
 - 2026-10-13 13:55 读代码后的结论：标签登记只差“运行时写库并更新内存表”；目标群投递读的是两张 `Map`，运行时加一项就生效。
 
+- 2026-10-13 14:00 提交前的检查：bridge `python3 -m unittest discover -s feishu-relay/bridge` 165 项通过（70 项本机跳过）；
+  `verify_component_boundaries.py --check` 通过，改动只落在 feishu-relay；`pytest scripts` 357 通过，另有 1 项失败与本线无关：
+  `test_runtime_hosts` 报 supervisor 任务 `s2-gateway-tunnel` 没有归类，来自别的会话未提交的 `scripts/svc_supervisor.py`。
+- 2026-10-13 14:02 发布。两个 Dockerfile 的 COPY 清单加了两个新模块（守卫测试要求），热更新脚本只在依赖变化时才拒绝，所以仍走源码覆盖。
+- 2026-10-13 14:08 线上核对（输出见 Evidence）：adapter 和 bridge 的 release 都是新编号，WebSocket 14:03:59 重连，10 条启用路由 healthy，
+  刚导入的 RCCS 群仍绑定、历史 763/763。新接口：非飞书地址 400、飞书不认识的机器人地址 400（这一条真的向飞书发了请求并被拒）、
+  删环境变量目标群 400、删不存在的目标群 404、从看板关登记表声明的标签 400 且路由没被改动。
+  没做的两件：建一条新标签的路由会在生产库留下路由、绑定和历史副本，不为验证去造；加目标群需要一个真的机器人地址，要用户在飞书里建。
+  这两条路径的写库语句各自在线上跑过（标签登记和启动时写登记表是同一个函数；目标群表启动时已建并读过），没跑过的是接口到模块的那一段接线。
+- 2026-10-13 14:08 adapter 日志里看到两条“百度网盘研究快照轮询失败：量化服务归档读取返回无效 JSON（HTTP 200）”，与本线改动的模块无关，没有处理。
+
 ## Waiting on the user
+
+- [ ] 2026-10-13 要转发到一个全新的目标群时：先在飞书里打开该群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人，安全设置选“自定义关键词”，
+  再到看板「新增目标群」里填 webhook 地址和关键词。为什么等：飞书没有创建自定义机器人的接口（见 Plan 的“不做”）。之后：本会话或接手者按 `next` 核对。
 
 ## Running
 
@@ -59,7 +75,9 @@
 
 - 本机 `/private/tmp/claude-501/-Users-papa-codebase-n8n/eac0e1fc-0e56-4ad6-b497-353bd69ffb47/scratchpad/`（不在版本库里）：
   `gr_routes.json`、`gr_chats.json`、`gr_status.json`（2026-10-13 13:38 经 `127.0.0.1:18300` 读 edge 的三个接口）；
-  `hist_check.mjs`、`missing_check.mjs`（在 edge 的 adapter 容器里只读核对历史副本的脚本）。
+  `hist_check.mjs`、`missing_check.mjs`（在 edge 的 adapter 容器里只读核对历史副本的脚本）；`hotfix_ea3d5865.log`（热更新脚本的完整输出）。
+- `docs/work/probes/2026-10-13-feishu-relay-w009-live-check.out.txt`：发布后的状态脚本输出、新接口的读取和五种拒绝情形、看板构建里的新文字。
+- 决定：`docs/decisions/0019-feishu-relay-dashboard-registrations.md`。
 
 ## Open questions
 
@@ -69,5 +87,8 @@
 
 ## Resume here
 
-刚开工，代码还没写。先看 `git status --short feishu-relay`：有改动就从 Steps 里第一个没勾的接着做。主检出里有别的会话
-没提交的文件（`config/secrets/*`、`scripts/svc_supervisor.py` 等），不要碰，提交时按路径加自己的文件。
+代码已提交（ea3d5865，未推送）并发布到 edge，线上核对通过；还差一次真实使用的确认（见 `next`）。
+先跑 `bash scripts/release-sync-status.sh --skip-owner --edge-source-sha ea3d5865` 确认 edge 中继仍是这一版。
+注意：(1) 线上没有真的登记过新标签、加过新目标群，第一次真实使用就是验收；(2) 新标签登记后消息会建成中继库里的下游任务，
+但下游提交那条 n8n 链路本来就停着，用户说过先不管，不要顺手去修；(3) 看板配置的目标群编号是 `wh_` 开头，只能发文字、富文本和卡片；
+(4) 主检出里有别的会话没提交的文件（`config/secrets/*`、`scripts/svc_supervisor.py` 等），不要碰。

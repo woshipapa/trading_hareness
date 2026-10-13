@@ -13,11 +13,12 @@
 | [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 等 Codex 交回“条件表的四处修正＋第 5 步”，在工作区复跑发布路径测试、核对条件的 claim 表和 `settle` 的原有测试没被改动，通过后派第 5a、5b 步（卖出规则） | 2026-10-13 |
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | proposed | Claude Code 会话 93ba6e1d，2026-10-13 | 10 月 13 日 15:10 收盘后取指数和宽基 ETF 的历史分钟线（约 4,500 次请求），存下当天全天的雷达序列，然后写研究登记并派给 Codex 研究任务 | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | planned | 主会话 93ba6e1d 派出的接手 agent（只做到“方案审完、待批准”），2026-10-13 | 用 10 月 13 日首个影子交易日的实测更新方案（四个前置修复、完整性门槛、盘中一致性容差的取值），交 Codex 审查，然后请用户批准 | 2026-10-13 |
-| [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | building | Claude Code 会话 eac0e1fc，2026-10-13 | 写 `feishu-relay/adapter/source-tags.mjs` 和 `webhook-targets.mjs` 及其测试，接进 `index.mjs` 的路由创建和三个目标群接口 | 2026-10-13 |
+| [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源并且该路由 healthy；通过后把状态改成 `verified` | 2026-10-13 |
 
 ## 等用户处理
 
 - W004 2026-10-13 请看一下控制台“盘面雷达与战法”页签的新图，配色、数字口径、点的密度是否还要调。为什么等：这是按用户的参考图做的，是否“看得懂”只有用户能判断。之后：没有意见就关闭本记录。
+- W009 2026-10-13 要转发到一个全新的目标群时：先在飞书里打开该群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人，安全设置选“自定义关键词”，
 
 ## 到点要做
 
