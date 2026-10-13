@@ -5,9 +5,9 @@
 - goal: 在转发看板里新增源群时，用一个从没用过的标签、或转发到一个从没配置过的目标群，都不需要改仓库文件、改服务器配置或发版
 - plan: none
 - branch: main
-- head: ea3d5865
-- release: edge 中继 `hotfix-20261013T060210Z-ea3d5865b40e-16279`
-- next: 用户第一次在看板里用新标签建源群、或新增一个目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源并且该路由 healthy；通过后把状态改成 `verified`
+- head: 49b44b1d
+- release: edge 中继 `hotfix-20261013T070041Z-49b44b1da5e4-5527`
+- next: 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified`
 - updated: 2026-10-13
 
 ## Requirements
@@ -15,6 +15,8 @@
 - 2026-10-12 「希望你把这个全部变成自动化的。我们前端只需要操作就可以了」（群目录、退群识别、历史回读已在 10-12 上线，见 Log 第一条）
 - 2026-10-11 关于新源群的标签是否进入下游研究数据：「默认是要加入的」
 - 2026-10-13 我说明“全新的标签要登记进 source-registry 并发一次 edge 热更新、全新的目标群要先在服务器上配 webhook 密钥”之后，用户：「全新的这些你也要搞成可以自动化的，这些我都允许了。」
+- 2026-10-13 我说明“在飞书群里建自定义机器人这一步没有自动化（没有公开接口，私有协议的写接口有账号风险）”之后，用户：「可以看看我们当前的larkagentx和websocket是否具备添加webhook通过前端的接口能力，这个是信任安全的，可以使用」。这改变了 Plan 里“不做”的那一条：先查清楚有没有这个能力。
+- 2026-10-13 查到网页端接口之后，用户：「这里可以试试让larkagentx去模拟试出类似的接口」。
 
 ## Plan
 
@@ -31,9 +33,13 @@
 3. **看板。** 源群表单加“进入下游研究数据”勾选项和“新增目标群”入口；目标群表显示群名、来源，前端建的可以删除。
 4. edge 热更新发布，用线上接口核对：建一个新标签的路由后 `/api/config` 里出现该标签；新增一个目标群后它出现在下拉里。
 
-不做：自动在飞书群里创建自定义机器人。飞书开放平台没有这个接口；bridge 用的私有协议里只有读取群机器人的消息
+**2026-10-13 下午改为要做（见 Requirements 后两条和决定 0020）。** 以下是上午的判断，留作记录：不做：自动在飞书群里创建自定义机器人。飞书开放平台没有这个接口；bridge 用的私有协议里只有读取群机器人的消息
 （`PullChatBots` 等，2026-10-13 在 edge 的 `/opt/larkagentx/source` 里查过），没有创建。用个人账号调未公开的写接口有
 封号风险。所以“在飞书群里加一个自定义机器人、复制它的地址”这一步仍由用户在飞书里做，其余都在看板里完成。
+
+5. **（下午新增）目标群的机器人由中继自己建。** bridge 新增 `chat_bots.py` 和 `/chat-bots/ensure`、`/chat-bots/remove`：用账号自己的会话调
+   网页端的 `open-apis/chatbot/api` 接口，在群里确保有一个名为“转发机器人”的自定义机器人并设好关键词，把 webhook 交回 adapter；
+   只沿用、修改、删除“同名且由本账号创建”的机器人。看板「新增目标群」默认自动模式，手动填写保留。
 
 ## Steps
 
@@ -43,6 +49,11 @@
 - [x] 4 提交、edge 热更新、线上核对 — `bash feishu-relay/scripts/edge/hotfix-feishu-relay-edge.sh --apply`（本会话执行，14:02）→ `overlay hotfix activated`；
   `scripts/release-sync-status.sh --skip-owner --edge-source-sha ea3d5865` → ALL CHECKS PASSED。发布表已加一行。
   与方案不同：线上没有真的登记一个新标签、也没有真的加一个目标群，只核对了加载、读取和五种拒绝情形（原因见 Log）。
+- [x] 5 查证并试验网页端的群机器人接口 — 输出 `docs/work/probes/2026-10-13-feishu-chat-bot-trial.out.txt`：创建、设关键词、不带关键词被拒（19024）、带关键词成功、删除，群恢复原样
+- [x] 6 bridge 规则与接口、adapter 自动模式、看板 — 49b44b1d — `node --test feishu-relay/adapter/*.test.mjs` → tests 279, pass 279；
+  `bash feishu-relay/scripts/edge/test-bridge-on-edge.sh` → Ran 174 tests, OK；看板 `npm test -- --run` → Tests 7 passed
+- [x] 7 发布并用真实链路验收 — `hotfix-feishu-relay-edge.sh --apply`（本会话执行，15:00）；经 adapter 接口在运维通知群自动建机器人并登记为目标群、
+  重复调用沿用、删除时机器人一并移除；`release-sync-status.sh --skip-owner --edge-source-sha 49b44b1d` → ALL CHECKS PASSED
 
 ## Log
 
@@ -61,11 +72,17 @@
   没做的两件：建一条新标签的路由会在生产库留下路由、绑定和历史副本，不为验证去造；加目标群需要一个真的机器人地址，要用户在飞书里建。
   这两条路径的写库语句各自在线上跑过（标签登记和启动时写登记表是同一个函数；目标群表启动时已建并读过），没跑过的是接口到模块的那一段接线。
 - 2026-10-13 14:08 adapter 日志里看到两条“百度网盘研究快照轮询失败：量化服务归档读取返回无效 JSON（HTTP 200）”，与本线改动的模块无关，没有处理。
+- 2026-10-13 14:20 用户要求查 LarkAgentX 有没有加 webhook 的能力。命令表 2202 条里没有创建群机器人的命令。浏览器扩展没连上，改为静态分析：
+  用中继会话取网页端入口页的脚本地址，从公开 CDN 下载 `openplatform` 模块，找到 `GroupBotModal` 调的一组 HTTP 接口（只凭会话 cookie）。
+- 2026-10-13 14:40 只读探测通过后，在运维通知群（3 人）做了一次创建到删除的完整试验，成功，群恢复原样。
+  correction：上午记录和对用户说的“私有协议里只有读取、没有创建，这一步没法自动化”不成立；创建走的是网页端的 HTTP 接口，不在私有协议命令表里。
+- 2026-10-13 14:40 探测时有一次把已有机器人的签名密钥字段打印进了本会话的终端输出（该机器人没有启用签名校验）；没有写进任何文件，之后的脚本都隐藏这个字段。
+- 2026-10-13 15:00 发布 49b44b1d。15:02 经 adapter 接口验收（输出见 Evidence 第三项的第 5 节）；adapter 和 bridge 日志里没有 webhook 地址。
+  真实的目标群还没有人加过；验收用的目标群和机器人已删。
 
 ## Waiting on the user
 
-- [ ] 2026-10-13 要转发到一个全新的目标群时：先在飞书里打开该群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人，安全设置选“自定义关键词”，
-  再到看板「新增目标群」里填 webhook 地址和关键词。为什么等：飞书没有创建自定义机器人的接口（见 Plan 的“不做”）。之后：本会话或接手者按 `next` 核对。
+- [x] 2026-10-13 要转发到一个全新的目标群时先在飞书里建机器人 → 不再需要：15:00 起看板「新增目标群」选群即可，机器人由中继自己建（2026-10-13）。账号不在的群仍要手动填 webhook。
 
 ## Running
 
@@ -77,7 +94,9 @@
   `gr_routes.json`、`gr_chats.json`、`gr_status.json`（2026-10-13 13:38 经 `127.0.0.1:18300` 读 edge 的三个接口）；
   `hist_check.mjs`、`missing_check.mjs`（在 edge 的 adapter 容器里只读核对历史副本的脚本）；`hotfix_ea3d5865.log`（热更新脚本的完整输出）。
 - `docs/work/probes/2026-10-13-feishu-relay-w009-live-check.out.txt`：发布后的状态脚本输出、新接口的读取和五种拒绝情形、看板构建里的新文字。
-- 决定：`docs/decisions/0019-feishu-relay-dashboard-registrations.md`。
+- 决定：`docs/decisions/0019-feishu-relay-dashboard-registrations.md`、`docs/decisions/0020-feishu-relay-creates-target-bots.md`。
+- `docs/work/probes/2026-10-13-feishu-chat-bot-trial.py` → `.out.txt`：命令表里的机器人命令、网页端接口的出处、只读探测、手工试验、发布后的验收。
+- 本机 scratchpad 的 `feishu_web/`（下载的网页端脚本，约 11 MB，不在版本库里）和 `hotfix_bots.log`（第二次热更新的完整输出）。
 
 ## Open questions
 
@@ -87,8 +106,10 @@
 
 ## Resume here
 
-代码已提交（ea3d5865，未推送）并发布到 edge，线上核对通过；还差一次真实使用的确认（见 `next`）。
-先跑 `bash scripts/release-sync-status.sh --skip-owner --edge-source-sha ea3d5865` 确认 edge 中继仍是这一版。
-注意：(1) 线上没有真的登记过新标签、加过新目标群，第一次真实使用就是验收；(2) 新标签登记后消息会建成中继库里的下游任务，
-但下游提交那条 n8n 链路本来就停着，用户说过先不管，不要顺手去修；(3) 看板配置的目标群编号是 `wh_` 开头，只能发文字、富文本和卡片；
-(4) 主检出里有别的会话没提交的文件（`config/secrets/*`、`scripts/svc_supervisor.py` 等），不要碰。
+两次提交 ea3d5865、49b44b1d（都未推送）已发布到 edge，线上跑的是 `hotfix-20261013T070041Z-49b44b1da5e4-5527`。新标签自动登记、
+目标群机器人自动创建都已上线；后者用真实链路验收过，前者还没有真实使用（见 `next`）。
+先跑 `bash scripts/release-sync-status.sh --skip-owner --edge-source-sha 49b44b1d` 确认 edge 中继仍是这一版。
+注意：(1) 建机器人用的是飞书网页端自己的接口，不是公开接口，网页端改版后可能失效，失效时看板的手动填写仍可用；
+(2) 只有名为“转发机器人”且由本账号创建的机器人会被沿用、修改或删除，别动这条规则；(3) webhook 地址和机器人的签名密钥不要打印、不要写进文件；
+(4) 新标签登记后消息会建成中继库里的下游任务，但下游提交那条 n8n 链路本来就停着，用户说过先不管；
+(5) 主检出里有别的会话没提交的文件（`config/secrets/*`、`scripts/svc_supervisor.py` 等），不要碰。
