@@ -5,7 +5,6 @@ from __future__ import annotations
 import collections
 import hashlib
 import json
-import math
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Any, Callable, Iterable, Mapping
@@ -129,10 +128,6 @@ def completion_status(outcomes: Mapping[str, Iterable[Any]], *, limits_pending: 
                       factor_pending: Iterable[Any] = (), other_pending: Iterable[Any] = ()) -> str:
     leftovers = any(outcomes.get(name) for name in ("adjusted_later", "unverified", "invalid", "failed"))
     return "partial" if leftovers or list(limits_pending) or list(factor_pending) or list(other_pending) else "completed"
-
-
-def request_timeout_seconds(count: int) -> int:
-    return min(480, max(30, 30 + math.ceil(count / 6)))
 
 
 def _read_state(db: Any, day: date) -> dict[str, Any]:
@@ -273,7 +268,7 @@ async def complete(trade_date: date, *, db: Any, run_public_blocking: Callable[.
         try:
             quotes, health = await run_public_blocking(
                 fetch_classified, source, request_symbols, trade_date, workers=6,
-                timeout_seconds=request_timeout_seconds(len(request_symbols)),
+                deadline_seconds=240, timeout_seconds=300,
             )
         except Exception as error:
             result = finish("failed", reason=_error_detail(error), missing_bar_count=len(missing),

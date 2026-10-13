@@ -70,15 +70,11 @@ class DailyCloseRulesTests(unittest.TestCase):
         self.assertEqual(result["pending"], {"000002.SZ": "factor_changes_across_session",
                                              "000003.SZ": "ex_rights_on_session"})
 
-    def test_vendor_timeout_scales_and_is_capped(self):
-        self.assertLess(completion.request_timeout_seconds(1), completion.request_timeout_seconds(600))
-        self.assertEqual(completion.request_timeout_seconds(10_000), 480)
-
-
 class DailyCloseCompletionTests(unittest.TestCase):
     def run_completion(self, *, state, db=None, quotes=(), outcomes=None, errors=None, markers=None,
                        ratios=None, factors=(), source_error=None, vendor_error=None,
-                       persistence_error=None, reject=(), during_vendor=None, agreement=None):
+                       persistence_error=None, reject=(), during_vendor=None, agreement=None,
+                       persist_rows_override=None):
         db = db or CompletionDb({row["symbol"]: row for row in state["bars"]})
         calls = {"vendor": [], "persist": []}
         health = {"outcomes": {**OUTCOMES, **(outcomes or {})}, "errors": errors or {},
@@ -114,6 +110,7 @@ class DailyCloseCompletionTests(unittest.TestCase):
                 raise vendor_error
             return list(quotes), health
 
+        persist_rows = persist_rows_override or persist_rows
         patches = [
             patch.object(completion, "_read_state", return_value=state),
             patch.object(completion, "_day_bars", side_effect=day_bars),
@@ -256,6 +253,81 @@ class DailyCloseCompletionTests(unittest.TestCase):
             state={"roster": ["000001.SZ"], "bars": [bad]}, outcomes={"not_traded": ["000001.SZ"]},
         )
         self.assertEqual(calls["vendor"][0]["symbols"], ["000001.SZ"])
+
+    def test_nonpositive_factor_is_replaced(self):
+        existing = bar("000001.SZ", adj_factor=0)
+        factors = [{"symbol": "000001.SZ", "prev_date": DAY, "prev_factor": 1, "next_factor": None}]
+        result, db, _calls = self.run_completion(
+            state={"roster": ["000001.SZ"], "bars": [existing]},
+            quotes=[quote("000001.SZ")], outcomes={"filled": ["000001.SZ"]}, factors=factors,
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(db.bars["000001.SZ"]["adj_factor"], "1")
+
+    def test_limit_agreement_samples_only_preexisting_limits(self):
+        state = {"roster": ["000001.SZ", "000002.SZ"], "bars": [bar("000002.SZ")]}
+        seen = []
+
+        def agreement(rows):
+            rows = list(rows)
+            seen.extend(row["symbol"] for row in rows if row.get("limit_up") is not None)
+            return 1.0
+
+        with patch.object(completion, "limit_rule_agreement", side_effect=agreement):
+            self.run_completion(state=state, quotes=[quote("000001.SZ")], outcomes={"filled": ["000001.SZ"]},
+                                ratios={"000001.SZ": [0.10], "000002.SZ": [0.10]})
+        self.assertEqual(seen, ["000002.SZ"])
+
+    def test_persistence_failure_rolls_back_and_receipt_uses_new_transaction(self):
+        class TransactionalDb(CompletionDb):
+            def __init__(self):
+                super().__init__({})
+                self.commits = 0
+                self.rollbacks = 0
+                self.receipt_transactions = 0
+                self.in_write = False
+
+            @contextmanager
+            def transaction(self):
+                snapshot = dict(self.bars)
+                write = not self.in_write
+                self.in_write = True
+                try:
+                    yield self
+                except Exception:
+                    self.bars = snapshot
+                    self.rollbacks += 1
+                    raise
+                else:
+                    self.commits += 1
+                    if write and self.commits > 1:
+                        self.receipt_transactions += 1
+                finally:
+                    self.in_write = False
+
+        db = TransactionalDb()
+        state = {"roster": ["000001.SZ"], "bars": []}
+        failed_once = {"value": False}
+
+        def persist_rows(_connection, api, _key, rows, _provider, _available):
+            rows = list(rows)
+            if api == "daily":
+                db.bars[rows[0]["ts_code"]] = {"symbol": rows[0]["ts_code"], **rows[0], "limit_up": None,
+                                                "limit_down": None, "adj_factor": None, "is_suspended": False,
+                                                "quality_status": "fresh"}
+            elif api == "stk_limit" and not failed_once["value"]:
+                failed_once["value"] = True
+                raise RuntimeError("normalizer failed")
+            return len(rows)
+
+        result, _db, _calls = self.run_completion(
+            state=state, db=db, quotes=[quote("000001.SZ")], outcomes={"filled": ["000001.SZ"]},
+            ratios={"000001.SZ": [0.10]}, agreement=1.0, persist_rows_override=persist_rows,
+        )
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(db.bars, {})
+        self.assertGreaterEqual(db.rollbacks, 1)
+        self.assertTrue(any("fetch_runs" in statement for statement, _params in db.statements))
 
 
 if __name__ == "__main__":

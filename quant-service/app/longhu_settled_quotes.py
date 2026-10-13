@@ -1,7 +1,8 @@
 """Date-addressed licensed OHLC. Live quotes cannot repair historical days."""
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import date
 from math import isfinite
+from time import monotonic
 
 
 def number(value):
@@ -58,7 +59,7 @@ def fetch(source, symbols, day, *, workers=8):
                    'physical_page_limit':300,'no_live_quote_substitution':True}
 
 
-def fetch_classified(source, symbols, day, *, workers=6):
+def fetch_classified(source, symbols, day, *, workers=6, deadline_seconds=240):
     """Fetch dated bars and retain the evidence needed to explain every gap."""
     unique = list(dict.fromkeys(symbols))
     target = day.strftime('%Y%m%d')
@@ -95,9 +96,41 @@ def fetch_classified(source, symbols, day, *, workers=6):
             return symbol, 'failed', None, False, f'{type(error).__name__}: {error}'
 
     results = []
-    with ThreadPoolExecutor(max_workers=max(1, min(workers, 6))) as pool:
-        for result in pool.map(guarded, unique):
-            results.append(result)
+    pool = ThreadPoolExecutor(max_workers=max(1, min(workers, 6)))
+    active = {}
+    pending = iter(unique)
+    deadline = monotonic() + deadline_seconds
+
+    def submit_next() -> bool:
+        if monotonic() >= deadline:
+            return False
+        try:
+            symbol = next(pending)
+        except StopIteration:
+            return False
+        active[pool.submit(guarded, symbol)] = symbol
+        return True
+
+    while len(active) < max(1, min(workers, 6)) and submit_next():
+        pass
+    while active:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            break
+        done, _ = wait(active, timeout=remaining, return_when=FIRST_COMPLETED)
+        if not done:
+            break
+        for task in done:
+            active.pop(task)
+            results.append(task.result())
+        while len(active) < max(1, min(workers, 6)) and submit_next():
+            pass
+    reached = {symbol for symbol, _outcome, _quote, _marker, _error in results}
+    deadline_failures = [symbol for symbol in unique if symbol not in reached]
+    for task in active:
+        task.cancel()
+    pool.shutdown(wait=False, cancel_futures=True)
+    results.extend((symbol, 'failed', None, False, 'deadline') for symbol in deadline_failures)
     outcomes = {name: sorted(symbol for symbol, outcome, _quote, _marker, _error in results if outcome == name)
                 for name in ('filled', 'not_traded', 'adjusted_later', 'unverified', 'invalid', 'failed')}
     quotes = [quote for _symbol, outcome, quote, _marker, _error in results if outcome == 'filled']
