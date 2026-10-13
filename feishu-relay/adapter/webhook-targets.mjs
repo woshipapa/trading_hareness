@@ -126,12 +126,13 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, bots 
 		return wsId;
 	}
 
-	// One address serves one target; the address is tried before it is kept.
-	async function store({ id, chatName, word, url, wsId, botId = null, managed = false }) {
+	// One address serves one target; the address is tried before it is kept, unless it was read from the group's own
+	// bot a moment ago (`verified`), which proves more than a test message does and puts nothing in the group.
+	async function store({ id, chatName, word, url, wsId, botId = null, managed = false, verified = false }) {
 		for (const [otherId, otherUrl] of webhooks) {
 			if (otherUrl === url && otherId !== id) throw new Error(`这个 webhook 已经配置给目标群 ${stored.get(otherId)?.name ?? otherId}`);
 		}
-		await sendTest(url, `${word} 转发目标群已接入（看板发出的测试消息）`);
+		if (!verified) await sendTest(url, `${word} 转发目标群已接入（看板发出的测试消息）`);
 		const row = await ledger.saveWebhookTarget({ chatId: id || newId(), chatName, webhookCiphertext: encrypt(url, key), keyword: word, websocketChatId: wsId || null, botId, managed, verifiedAt: now() });
 		apply(row, url);
 		return publicTarget(row.chat_id);
@@ -169,6 +170,21 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, bots 
 		const bot = await bots.ensure({ chatId: wsId, keyword: word });
 		const url = parseWebhookUrl(bot?.webhook);
 		return { ...(await store({ id: targetOfGroup(wsId), chatName, word, url, wsId, botId: String(bot.bot_id ?? '') || null, managed: true })), bot_created: bot.created === true };
+	}
+
+	// The group already has a custom bot that someone made by hand (a listener posts through it, say). The account's
+	// own session reads its address from the group, so nothing is typed and no test message is sent. The bot keeps its
+	// settings, and it is not removed with the target (`managed` stays false).
+	async function addExisting({ name, websocketChatId, botId }) {
+		if (!bots?.adopt) throw new Error('这台服务没有接上 LarkAgentX，不能读取群里已有的机器人');
+		const chatName = checkedName(name);
+		const wsId = checkedGroupId(websocketChatId);
+		if (!wsId) throw new Error('需要从已加入的群里选目标群');
+		const bot = await bots.adopt({ chatId: wsId, botId: String(botId ?? '').trim() });
+		const url = parseWebhookUrl(bot?.webhook);
+		const word = String(bot?.key_words?.[0] ?? '').trim();
+		const target = await store({ id: targetOfGroup(wsId), chatName, word, url, wsId, botId: String(bot.bot_id ?? '') || null, managed: false, verified: true });
+		return { ...target, bot_name: String(bot.name ?? '') };
 	}
 
 	// A target still used by a live route is not removed: its messages would have nowhere to go.
@@ -209,5 +225,5 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, bots 
 		return [...webhooks].map(([chat_id, url]) => ({ chat_id, webhook_hash: createHash('sha256').update(url, 'utf8').digest('hex') }));
 	}
 
-	return { load, add, addManaged, remove, list, sendText, webhookHashes, has: (chatId) => webhooks.has(String(chatId ?? '')) };
+	return { load, add, addManaged, addExisting, remove, list, sendText, webhookHashes, has: (chatId) => webhooks.has(String(chatId ?? '')) };
 }

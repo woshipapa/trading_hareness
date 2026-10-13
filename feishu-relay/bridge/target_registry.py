@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from chat_bots import custom_bots
+from chat_bots import adopt_custom_bot, custom_bots, existing_custom_bots
 from chat_directory import pull_joined_groups
-from group_admin import require_client
+from group_admin import require_client, require_owner
 
 
 def _webhook_hash(info: dict[str, Any], requested: set[str]) -> str | None:
@@ -60,4 +60,26 @@ def resolve(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 	                                  chatbot_api=client.chatbot_api, user_id=str(bridge.auth.user_id), requested=requested)}
 
 
-ROUTES = {"/targets/resolve": resolve}
+def _owned_chat(bridge, payload: dict[str, Any]):
+	"""The client and the id of a group the account owns; anyone else's group is refused."""
+	chat_id = str(payload.get("chat_id") or "").strip()
+	if not chat_id.isdigit():
+		raise ValueError("chat_id 必须是数字")
+	client = require_client(bridge)
+	require_owner(client.chat_infos([chat_id]).get(chat_id), str(bridge.auth.user_id))
+	return client, chat_id
+
+
+def list_bots(bridge, payload: dict[str, Any]) -> dict[str, Any]:
+	"""The custom bots already in a group the account owns, without their addresses."""
+	client, chat_id = _owned_chat(bridge, payload)
+	return {"chat_id": chat_id, "bots": existing_custom_bots(chat_id=chat_id, pull_chat_bots=client.chat_bots, call=client.chatbot_api)}
+
+
+def adopt_bot(bridge, payload: dict[str, Any]) -> dict[str, Any]:
+	"""Hand the adapter one existing bot of a group the account owns, address included, to send through."""
+	client, chat_id = _owned_chat(bridge, payload)
+	return adopt_custom_bot(chat_id=chat_id, bot_id=str(payload.get("bot_id") or ""), pull_chat_bots=client.chat_bots, call=client.chatbot_api)
+
+
+ROUTES = {"/targets/resolve": resolve, "/chat-bots/list": list_bots, "/chat-bots/adopt": adopt_bot}

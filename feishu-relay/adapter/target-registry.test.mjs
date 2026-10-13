@@ -143,3 +143,24 @@ test('start resolves until the owned groups are known, trying again after a fail
 	await new Promise((resolve) => setTimeout(resolve, 30));
 	assert.equal(calls.length, settled);
 });
+
+test('an owned group lists its existing bots and takes one as its relay bot; a group that is a target already does not', async () => {
+	const ledger = fakeLedger();
+	const webhooks = fakeWebhooks();
+	const calls = [];
+	const bridgePost = async (route, body) => { calls.push([route, body]); return route === '/targets/resolve' ? { groups: [OWNED] } : { chat_id: body.chat_id, bots: [{ bot_id: '41', name: 'dragon', key_words: [], usable: true, reason: null }] }; };
+	const base = webhooks.list;
+	const added = [];
+	webhooks.addExisting = async (input) => { added.push(input); webhooks.list = () => [...base(), { chat_id: 'wh_new', name: input.name, keyword: '', origin: 'dashboard', usable: true, managed: false, websocket_chat_id: input.websocketChatId, verified_at: null, created_at: null }]; return { chat_id: 'wh_new', bot_name: 'dragon' }; };
+	const registry = createTargetRegistry({ ledger, bridgePost, webhookTargets: webhooks, now: () => NOW });
+	await registry.resolve();
+	assert.deepEqual(await registry.existingBots(OWNED.chat_id), [{ bot_id: '41', name: 'dragon', key_words: [], usable: true, reason: null }]);
+	assert.deepEqual(calls.at(-1), ['/chat-bots/list', { chat_id: OWNED.chat_id }]);
+	const target = await registry.useBot(OWNED.chat_id, '41');
+	assert.deepEqual(added, [{ name: '擒龙群', websocketChatId: OWNED.chat_id, botId: '41' }]);
+	assert.deepEqual([target.chat_id, target.name, target.origin, target.usable, target.owned, target.bot_id, target.bot_name], ['wh_new', '擒龙群', 'dashboard', true, true, '41', 'dragon']);
+	assert.deepEqual((await registry.groups()).map((row) => row.chat_id), ['oc_env', 'wh_new']);
+	await assert.rejects(() => registry.existingBots('oc_env'), /已经是转发目标/);
+	await assert.rejects(() => registry.useBot('wh_new', '41'), /已经是转发目标/);
+	await assert.rejects(() => registry.useBot('7600000000000000009', '41'), /群不存在/);
+});

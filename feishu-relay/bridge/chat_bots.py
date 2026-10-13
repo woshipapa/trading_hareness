@@ -121,6 +121,62 @@ def ensure_custom_bot(*, chat_id: str, keyword: str, user_id: str, pull_chat_bot
 	return {"chat_id": chat_id, "bot_id": bot_id, "name": str(info.get("name") or name), "keyword": keyword, "webhook": webhook, "created": created}
 
 
+def _unusable(info: dict[str, Any]) -> str | None:
+	"""Why the relay cannot send through a custom bot as it is set up, or None when it can."""
+	if not info or info.get("no_permission"):
+		return "账号读不到这个机器人的设置"
+	if not info.get("enable", True):
+		return "这个机器人已停用"
+	if info.get("signature_status"):
+		return "这个机器人开了签名校验，中继不带签名发送"
+	if not WEBHOOK_PATTERN.fullmatch(str(info.get("webhook") or "")):
+		return "这个机器人没有可用的 webhook 地址"
+	return None
+
+
+def existing_custom_bots(*, chat_id: str, pull_chat_bots: Pull, call: Call) -> list[dict[str, Any]]:
+	"""A group's custom bots as a page can show them: name, keywords, and whether the relay could send through each.
+
+	No address is returned.  Nothing is changed.
+	"""
+	chat_id = str(chat_id).strip()
+	if not chat_id.isdigit():
+		raise ValueError("chat_id 必须是数字")
+	found = []
+	for bot in custom_bots(pull_chat_bots(chat_id)):
+		answer = call("GetWebhookBotInfo", {"bot_id": bot["bot_id"], "i18n": LOCALE})
+		info = (answer.get("data") or {}) if isinstance(answer, dict) and answer.get("code") == 0 else {}
+		reason = _unusable(info)
+		found.append({
+			"bot_id": bot["bot_id"], "name": str(info.get("name") or bot["name"]),
+			"key_words": [str(word) for word in info.get("key_words") or [] if str(word).strip()],
+			"usable": reason is None, "reason": reason,
+		})
+	return found
+
+
+def adopt_custom_bot(*, chat_id: str, bot_id: str, pull_chat_bots: Pull, call: Call) -> dict[str, Any]:
+	"""Read a custom bot that is already in a group, so that the relay can send through it.
+
+	The bot stays as its maker set it up: nothing about it is changed, and the
+	relay never removes it.  A bot that checks a signature is refused, because
+	the relay sends without one.
+	"""
+	chat_id, bot_id = str(chat_id).strip(), str(bot_id).strip()
+	if not chat_id.isdigit() or not bot_id.isdigit():
+		raise ValueError("chat_id 和 bot_id 必须是数字")
+	if bot_id not in {bot["bot_id"] for bot in custom_bots(pull_chat_bots(chat_id))}:
+		raise ChatBotError("这个群里没有这个自定义机器人")
+	info = _checked("读取机器人", call("GetWebhookBotInfo", {"bot_id": bot_id, "i18n": LOCALE}))
+	reason = _unusable(info)
+	if reason:
+		raise ChatBotError(reason)
+	return {
+		"chat_id": chat_id, "bot_id": bot_id, "name": str(info.get("name") or ""),
+		"key_words": [str(word) for word in info.get("key_words") or [] if str(word).strip()], "webhook": str(info["webhook"]),
+	}
+
+
 def remove_custom_bot(*, chat_id: str, bot_id: str, user_id: str, pull_chat_bots: Pull, call: Call, name: str = DEFAULT_BOT_NAME) -> dict[str, Any]:
 	"""Remove the relay's own bot from a group; a bot it did not make is left alone."""
 	chat_id, bot_id = str(chat_id).strip(), str(bot_id).strip()

@@ -35,6 +35,11 @@ function fakeBots({ hook = HOOK, fail = null, removeFails = false } = {}) {
 	const made = new Map();
 	return {
 		calls, made,
+		async adopt({ chatId, botId }) {
+			calls.push(['adopt', chatId, botId]);
+			if (fail) throw new Error(fail);
+			return { chat_id: chatId, bot_id: botId, name: 'dragon', key_words: botId === '42' ? ['尾盘掘金'] : [], webhook: hook };
+		},
 		async ensure({ chatId, keyword }) {
 			calls.push(['ensure', chatId, keyword]);
 			if (fail) throw new Error(fail);
@@ -257,4 +262,43 @@ test('a relay-made target survives a restart with its bot remembered', async () 
 	assert.equal(second.targets.list().find((item) => item.chat_id === target.chat_id).managed, true);
 	assert.deepEqual(await second.targets.remove(target.chat_id), { removed: true, bot_removed: true });
 	assert.deepEqual(bots.calls, [['remove', '7690000000000000001', '7695935537441710']]);
+});
+
+test('a bot the group already has is used as it is: no test message, no keyword invented, and it is never removed', async () => {
+	const bots = fakeBots();
+	const { ledger, calls, webhooks, keywords, targets } = setup({ bots });
+
+	const target = await targets.addExisting({ name: '擒龙内参更新群1', websocketChatId: '7680753363566234587', botId: '41' });
+
+	assert.deepEqual(bots.calls, [['adopt', '7680753363566234587', '41']]);
+	assert.equal(calls.length, 0);
+	assert.equal(target.managed, false);
+	assert.equal(target.usable, true);
+	assert.equal(target.bot_name, 'dragon');
+	assert.equal(target.websocket_chat_id, '7680753363566234587');
+	assert.equal(webhooks.get(target.chat_id), HOOK);
+	assert.equal(keywords.get(target.chat_id), '');
+	assert.ok(!JSON.stringify(target).includes('hook/'));
+	assert.equal(ledger.table.get(target.chat_id).managed, false);
+
+	// A reminder goes out through it, with no keyword in front because the bot asks for none.
+	await targets.sendText(target.chat_id, '到期提醒');
+	assert.equal(calls.at(-1).body.content.text, '到期提醒');
+
+	// Removing the target leaves the bot in its group.
+	const removed = await targets.remove(target.chat_id);
+	assert.equal(removed.bot_removed, null);
+	assert.equal(bots.calls.some(([name]) => name === 'remove'), false);
+});
+
+test('a bot with a keyword keeps it, and the bridge must be there to read the bot', async () => {
+	const { keywords, targets, calls } = setup({ bots: fakeBots() });
+	const target = await targets.addExisting({ name: '尾盘掘金内参更新1', websocketChatId: '7680804412993850568', botId: '42' });
+	assert.equal(keywords.get(target.chat_id), '尾盘掘金');
+	await targets.sendText(target.chat_id, '到期提醒');
+	assert.equal(calls.at(-1).body.content.text, '尾盘掘金 到期提醒');
+	const refused = setup({ bots: fakeBots({ fail: '这个机器人开了签名校验，中继不带签名发送' }) });
+	await assert.rejects(() => refused.targets.addExisting({ name: '群', websocketChatId: '7680804412993850568', botId: '42' }), /签名校验/);
+	assert.equal(refused.ledger.table.size, 0);
+	await assert.rejects(() => setup().targets.addExisting({ name: '群', websocketChatId: '7680804412993850568', botId: '42' }), /没有接上 LarkAgentX/);
 });
