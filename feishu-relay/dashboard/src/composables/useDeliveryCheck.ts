@@ -9,9 +9,11 @@ export function useDeliveryCheck(selectedTarget: Ref<TargetRegistryRow | null>) 
   const deliveries = ref<DeliveryRow[]>([]);
   const loading = ref(false);
   const error = ref('');
+  let requestVersion = 0;
 
   async function load() {
     const target = selectedTarget.value;
+    const version = ++requestVersion;
     if (!target) {
       counts.value = emptyCounts();
       deliveries.value = [];
@@ -20,14 +22,17 @@ export function useDeliveryCheck(selectedTarget: Ref<TargetRegistryRow | null>) 
     }
     loading.value = true;
     error.value = '';
+    const chatId = target.chat_id;
     try {
-      const result = await deliveryApi.list(target.chat_id);
+      const result = await deliveryApi.list(chatId);
+      if (version !== requestVersion || selectedTarget.value?.chat_id !== chatId) return;
       counts.value = result.counts;
       deliveries.value = result.deliveries;
     } catch (cause) {
+      if (version !== requestVersion || selectedTarget.value?.chat_id !== chatId) return;
       error.value = cause instanceof Error ? cause.message : String(cause);
     } finally {
-      loading.value = false;
+      if (version === requestVersion) loading.value = false;
     }
   }
 

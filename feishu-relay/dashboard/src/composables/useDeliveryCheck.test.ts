@@ -52,4 +52,28 @@ describe('useDeliveryCheck', () => {
     expect(check.deliveries.value).toBe(previous);
     expect(check.error.value).toBe('网关不可用');
   });
+
+  it('ignores a late answer from a target that is no longer selected', async () => {
+    let resolveA: ((response: Response) => void) | undefined;
+    let resolveB: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn((path: string) => new Promise<Response>((resolve) => {
+      if (path.endsWith('/wh_a/deliveries')) resolveA = resolve;
+      else resolveB = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const selected = ref<TargetRegistryRow | null>(null);
+    const check = useDeliveryCheck(selected);
+    selected.value = { chat_id: 'wh_a', name: '甲群', keyword: null, origin: 'dashboard', usable: true };
+    await nextTick();
+    selected.value = { chat_id: 'wh_b', name: '乙群', keyword: null, origin: 'dashboard', usable: true };
+    await nextTick();
+
+    resolveB?.(jsonResponse({ counts: { matched: 2, unmatched: 0, recalled: 0, recall_failed: 0 }, deliveries: [{ ...result.deliveries[0], target_chat_id: 'wh_b' }] }));
+    await vi.waitFor(() => expect(check.deliveries.value[0]?.target_chat_id).toBe('wh_b'));
+    resolveA?.(jsonResponse(result));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(check.deliveries.value[0]?.target_chat_id).toBe('wh_b');
+    expect(check.counts.value.matched).toBe(2);
+  });
 });

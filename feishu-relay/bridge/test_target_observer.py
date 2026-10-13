@@ -1,4 +1,3 @@
-import json
 import threading
 import time
 import unittest
@@ -68,6 +67,26 @@ class TargetObserverTest(unittest.TestCase):
 		self.assertEqual(observe(bridge, {"chats": [{"chat_id": "7001", "bot_ids": ["bot-1"]}]}), {"status": "ok", "observed": 1})
 		self.assertEqual(observe(bridge, {"chats": []}), {"status": "ok", "observed": 0})
 		self.assertEqual(bridge._target_observer_chats, {})
+
+	def test_tap_drops_when_the_bounded_observation_queue_is_full(self):
+		bridge = FakeBridge()
+		observe(bridge, {"chats": [{"chat_id": "7001", "bot_ids": ["bot-1"]}]})
+		started = threading.Event()
+		release = threading.Event()
+
+		def blocked_post(_bridge, _payload):
+			started.set()
+			release.wait(1)
+
+		message = {"msg_id": "om_1", "from_id": "bot-1", "content": "正文"}
+		with patch("target_observer._post_observed", blocked_post), patch("target_observer.OBSERVATION_QUEUE_SIZE", 1):
+			tap(bridge, "7001", message)
+			self.assertTrue(started.wait(1))
+			tap(bridge, "7001", {**message, "msg_id": "om_2"})
+			tap(bridge, "7001", {**message, "msg_id": "om_3"})
+			self.assertEqual(bridge._target_observer_dropped, 1)
+			release.set()
+			bridge._target_observer_queue.join()
 
 	def test_non_owner_cannot_recall(self):
 		bridge = FakeBridge(owner="another-owner")

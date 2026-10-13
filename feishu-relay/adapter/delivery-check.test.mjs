@@ -42,12 +42,12 @@ class FakeLedger {
 }
 
 function registry(targets) {
-	let listener = null;
+	const listeners = new Set();
 	return {
 		list: async () => targets,
 		get: async (chatId) => targets.find((target) => target.chat_id === String(chatId)) ?? null,
-		onChange(callback) { listener = callback; },
-		changed: () => listener(),
+		onChange(callback) { listeners.add(callback); return () => listeners.delete(callback); },
+		changed: async () => { for (const listener of listeners) await listener(); },
 	};
 }
 
@@ -70,28 +70,35 @@ test('records only checked webhook forms', async () => {
 test('one fingerprint match is written, while zero or two matches are not', async () => {
 	const one = setup();
 	await one.feature.recordWebhookDelivery({ messageId: 'source-one', targetChatId: 'wh_one', msgType: 'text', content: { text: '正 文\n自测' } });
-	assert.deepEqual(await one.observed({ body: { chat_id: '7001', message_id: 'target-one', text: '自测 正文' } }), { status: 'ok', matched: true });
+	assert.deepEqual(await one.observed({ body: { chat_id: '7001', message_id: 'target-one', msg_type: 'text', text: '自测 正文' } }), { status: 'ok', matched: true });
 	assert.equal(one.ledger.rows[0].target_message_id, 'target-one');
 
 	const zero = setup();
 	await zero.feature.recordWebhookDelivery({ messageId: 'source-zero', targetChatId: 'wh_one', msgType: 'text', content: { text: '别的正文\n自测' } });
-	assert.equal((await zero.observed({ body: { chat_id: '7001', message_id: 'target-zero', text: '自测 正文' } })).matched, false);
+	assert.equal((await zero.observed({ body: { chat_id: '7001', message_id: 'target-zero', msg_type: 'text', text: '自测 正文' } })).matched, false);
 	assert.equal(zero.ledger.rows[0].target_message_id, null);
 
 	const two = setup();
 	await two.feature.recordWebhookDelivery({ messageId: 'source-a', targetChatId: 'wh_one', msgType: 'text', content: { text: '正文\n自测' } });
 	await two.feature.recordWebhookDelivery({ messageId: 'source-b', targetChatId: 'wh_one', msgType: 'text', content: { text: '自测 正文' } });
-	assert.equal((await two.observed({ body: { chat_id: '7001', message_id: 'target-two', text: '正文 自测' } })).matched, false);
+	assert.equal((await two.observed({ body: { chat_id: '7001', message_id: 'target-two', msg_type: 'text', text: '正文 自测' } })).matched, false);
 	assert.deepEqual(two.ledger.rows.map((row) => row.target_message_id), [null, null]);
 });
 
 test('a replayed target message id changes nothing', async () => {
 	const harness = setup();
 	await harness.feature.recordWebhookDelivery({ messageId: 'source-one', targetChatId: 'wh_one', msgType: 'text', content: { text: '正文 自测' } });
-	await harness.observed({ body: { chat_id: '7001', message_id: 'target-one', text: '正文 自测' } });
+	await harness.observed({ body: { chat_id: '7001', message_id: 'target-one', msg_type: 'text', text: '正文 自测' } });
 	await harness.feature.recordWebhookDelivery({ messageId: 'source-two', targetChatId: 'wh_one', msgType: 'text', content: { text: '正文 自测' } });
-	assert.equal((await harness.observed({ body: { chat_id: '7001', message_id: 'target-one', text: '正文 自测' } })).matched, false);
+	assert.equal((await harness.observed({ body: { chat_id: '7001', message_id: 'target-one', msg_type: 'text', text: '正文 自测' } })).matched, false);
 	assert.equal(harness.ledger.rows[1].target_message_id, null);
+});
+
+test('a non-text observation never matches a text delivery', async () => {
+	const harness = setup();
+	await harness.feature.recordWebhookDelivery({ messageId: 'source-one', targetChatId: 'wh_one', msgType: 'text', content: { text: '正文 自测' } });
+	assert.deepEqual(await harness.observed({ body: { chat_id: '7001', message_id: 'target-card', msg_type: 'post', text: '正文 自测' } }), { status: 'ok', matched: false });
+	assert.equal(harness.ledger.rows[0].target_message_id, null);
 });
 
 test('source recall touches only matched owned targets and never retries a failure', async () => {
@@ -129,19 +136,25 @@ test('start sends the observed list again on registry changes and bridge failure
 		{ chat_id: 'no-bot', websocket_chat_id: '7002', bot_id: null },
 		{ chat_id: 'official', websocket_chat_id: 'oc_group', bot_id: 'bot-2' },
 	], async (...args) => { calls.push(args); });
-	await harness.feature.start();
+	const stop = await harness.feature.start();
+	const secondStart = await harness.feature.start();
+	assert.strictEqual(secondStart, stop);
 	await harness.targetRegistry.changed();
 	assert.deepEqual(calls.map((call) => call.slice(0, 2)), [
 		['/targets/observe', { chats: [{ chat_id: '7001', bot_ids: ['bot-1'] }] }],
 		['/targets/observe', { chats: [{ chat_id: '7001', bot_ids: ['bot-1'] }] }],
 	]);
+	stop();
+	await harness.targetRegistry.changed();
+	assert.equal(calls.length, 2);
 
 	const original = console.error;
 	console.error = () => {};
 	try {
 		const failed = setup(undefined, async () => { throw new Error('bridge unavailable'); });
-		await assert.doesNotReject(() => failed.feature.start());
+		const stopFailed = await failed.feature.start();
 		await assert.doesNotReject(() => failed.targetRegistry.changed());
+		stopFailed();
 	} finally {
 		console.error = original;
 	}

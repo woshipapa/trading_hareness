@@ -35,6 +35,7 @@ export function createDeliveryCheck({ ledger, bridgePost, targetRegistry, now = 
 	}
 
 	async function observed(body) {
+		if (String(body.msg_type ?? '').toLowerCase() !== 'text') return { status: 'ok', matched: false };
 		const messageId = String(body.message_id);
 		const replay = await ledger.query(`SELECT delivery_id FROM ${DELIVERY_TABLE} WHERE target_message_id=$1 LIMIT 1`, [messageId]);
 		if (replay.rows.length) return { status: 'ok', matched: false };
@@ -79,11 +80,24 @@ export function createDeliveryCheck({ ledger, bridgePost, targetRegistry, now = 
 		}
 	}
 
+	let started = false;
+	let stopCurrent = null;
 	async function start() {
-		targetRegistry.onChange(sendObservedList);
+		if (started) return stopCurrent ?? (() => {});
+		started = true;
+		const unsubscribe = targetRegistry.onChange(sendObservedList) ?? (() => {});
 		await sendObservedList();
 		const timer = setInterval(sendObservedList, 60_000);
 		timer.unref?.();
+		const stop = () => {
+			if (!started) return;
+			started = false;
+			stopCurrent = null;
+			clearInterval(timer);
+			unsubscribe();
+		};
+		stopCurrent = stop;
+		return stop;
 	}
 
 	async function deliveries(chatId) {
