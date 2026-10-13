@@ -26,6 +26,7 @@ function fakeLedger({ members = [], settings = null } = {}) {
 			}
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET display_name')) { const row = rows.find((item) => item.user_id === params[1]); Object.assign(row, { display_name: params[2], left_at: null, updated_at: params[3] }); return { rows: [] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET left_at')) { const row = rows.find((item) => item.user_id === params[1]); Object.assign(row, { left_at: params[2], updated_at: params[2] }); return { rows: [] }; }
+			if (sql.startsWith('DELETE FROM feishu_group_relay_memberships')) { const index = rows.findIndex((row) => row.target_chat_id === String(params[0]) && row.user_id === String(params[1])); if (index >= 0) rows.splice(index, 1); return { rows: [] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET started_on')) { const row = rows.find((item) => item.user_id === params[1]); if (!row) return { rows: [] }; Object.assign(row, { started_on: params[2], term_months: params[3], expires_on: params[4], note: params[5], reminded_on: null, remind_claimed_at: null, updated_at: params[6] }); return { rows: [clone(row)] }; }
 			if (sql.startsWith('WITH updated_member AS')) { const row = rows.find((item) => item.user_id === params[1]); if (!row) return { rows: [] }; Object.assign(row, { started_on: params[2], term_months: params[3], expires_on: params[4], note: params[5], reminded_on: null, remind_claimed_at: null, updated_at: params[6] }); config.exempt_user_ids = JSON.parse(params[7]); return { rows: [clone(row)] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET remind_claimed_at=$3')) {
@@ -48,7 +49,7 @@ function fakeLedger({ members = [], settings = null } = {}) {
 function setup(options = {}) {
 	const ledger = fakeLedger(options);
 	const sent = [];
-	const members = options.bridgeMembers ?? [{ user_id: 'u1', name: '张<三"', joined_at: Math.floor(date('2026-01-31').getTime() / 1000) }];
+	const members = options.bridgeMembers ?? [{ user_id: 'u1', name: '张<三"', joined_at: Math.floor(date('2026-01-31').getTime() / 1000), is_bot: false, is_self: false }];
 	const bridgePost = options.bridgePost ?? (async () => ({ status: 'ok', chat_id: WS, members }));
 	const targetRegistry = { get: async () => ({ chat_id: CHAT, websocket_chat_id: WS, owned: true }), list: async () => [{ chat_id: CHAT }] };
 	const webhookTargets = { sendText: async (chatId, text) => { sent.push({ chatId, text }); if (options.sendError) throw new Error(options.sendError); } };
@@ -78,6 +79,34 @@ test('sync rejects malformed bridge answers before changing stored membership ro
 	const malformed = createMemberships({ ledger, bridgePost: async () => ({ status: 'error' }), targetRegistry: { get: async () => ({ websocket_chat_id: WS, owned: true }) }, webhookTargets: { sendText: async () => {} }, now: () => date('2026-03-01') });
 	await assert.rejects(() => malformed.sync(CHAT), /成员列表响应格式无效/);
 	assert.equal(ledger.rows[0].left_at, null);
+});
+
+test('sync excludes bots and the relay account from membership rows', async () => {
+	const { feature, ledger } = setup({ bridgeMembers: [
+		{ user_id: 'u1', name: '会员', joined_at: 1, is_bot: false, is_self: false },
+		{ user_id: 'bot-1', name: '机器人', joined_at: 1, is_bot: true, is_self: false },
+		{ user_id: 'self-1', name: '中继账号', joined_at: 1, is_bot: false, is_self: true },
+	] });
+	await feature.sync(CHAT);
+	assert.deepEqual(ledger.rows.map((row) => row.user_id), ['u1']);
+});
+
+test('sync removes legacy rows for bots and the relay account', async () => {
+	const { feature, ledger } = setup({ members: [
+		{ user_id: 'bot-1', display_name: '机器人', started_on: '2026-01-01', term_months: 1, expires_on: '2026-02-01', reminded_on: null, remind_claimed_at: null, left_at: null },
+		{ user_id: 'self-1', display_name: '中继账号', started_on: '2026-01-01', term_months: 1, expires_on: '2026-02-01', reminded_on: null, remind_claimed_at: null, left_at: null },
+	], bridgeMembers: [
+		{ user_id: 'bot-1', name: '机器人', joined_at: 1, is_bot: true, is_self: false },
+		{ user_id: 'self-1', name: '中继账号', joined_at: 1, is_bot: false, is_self: true },
+	] });
+	await feature.sync(CHAT);
+	assert.equal(ledger.rows.length, 0);
+});
+
+test('sync rejects a bridge answer without bot or self flags before changing rows', async () => {
+	const { feature, ledger } = setup({ bridgeMembers: [{ user_id: 'u1', name: '会员', joined_at: 1 }] });
+	await assert.rejects(() => feature.sync(CHAT), /成员列表响应格式无效/);
+	assert.equal(ledger.rows.length, 0);
 });
 
 test('editing a member recomputes expiry and clears its reminder', async () => {
@@ -123,14 +152,14 @@ test('failed batches are retried, successful batches are not', async () => {
 	await setupResult.feature.review(CHAT);
 	assert.equal(setupResult.sent.length, 1);
 	setupResult.setNow('2026-03-02');
-	setupResult.feature = createMemberships({ ledger: setupResult.ledger, bridgePost: async () => ({ status: 'ok', members: [{ user_id: 'u1', name: 'A', joined_at: 1 }] }), targetRegistry: { get: async () => ({ websocket_chat_id: WS, owned: true }), list: async () => [{ chat_id: CHAT }] }, webhookTargets: { sendText: async () => { setupResult.sent.push('retry'); } }, now: () => date('2026-03-02') });
+	setupResult.feature = createMemberships({ ledger: setupResult.ledger, bridgePost: async () => ({ status: 'ok', members: [{ user_id: 'u1', name: 'A', joined_at: 1, is_bot: false, is_self: false }] }), targetRegistry: { get: async () => ({ websocket_chat_id: WS, owned: true }), list: async () => [{ chat_id: CHAT }] }, webhookTargets: { sendText: async () => { setupResult.sent.push('retry'); } }, now: () => date('2026-03-02') });
 	await setupResult.feature.review(CHAT);
 	assert.equal(setupResult.sent.length, 2);
 });
 
 test('more than 20 members are sent in several batches', async () => {
 	const members = Array.from({ length: 21 }, (_, index) => ({ user_id: `u${index}`, display_name: `会员${index}`, started_on: '2026-01-01', term_months: 1, expires_on: '2026-02-01', reminded_on: null, remind_claimed_at: null, left_at: null }));
-	const { feature, sent } = setup({ members, bridgeMembers: members.map((row) => ({ user_id: row.user_id, name: row.display_name, joined_at: 1 })) });
+	const { feature, sent } = setup({ members, bridgeMembers: members.map((row) => ({ user_id: row.user_id, name: row.display_name, joined_at: 1, is_bot: false, is_self: false })) });
 	await feature.review(CHAT);
 	assert.equal(sent.length, 2);
 });

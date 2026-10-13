@@ -175,7 +175,7 @@ async function remind(row: MembershipRow) {
         </el-space>
       </el-form-item>
       <el-form-item label="备注"><el-input v-model="editForm.note" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
-      <el-form-item label="不提醒（例如群主本人）"><el-switch v-model="editForm.exempt" active-text="不提醒" inactive-text="提醒" /></el-form-item>
+      <el-form-item label="不提醒（例如管理员或免费成员）"><el-switch v-model="editForm.exempt" active-text="不提醒" inactive-text="提醒" /></el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="editDialog = false">取消</el-button>

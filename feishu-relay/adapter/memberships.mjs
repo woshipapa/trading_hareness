@@ -102,10 +102,12 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		const found = await target(chatId);
 		const config = await settings(chatId);
 		const response = await bridgePost('/chat-members/list', { chat_id: found.websocket_chat_id }, 30_000);
-		if (response?.status !== 'ok' || !Array.isArray(response.members)) throw new Error('成员列表响应格式无效');
-		const members = response.members;
+		if (response?.status !== 'ok' || !Array.isArray(response.members) || response.members.some((member) => !member || typeof member.is_bot !== 'boolean' || typeof member.is_self !== 'boolean')) throw new Error('成员列表响应格式无效');
+		const members = response.members.filter((member) => !member.is_bot && !member.is_self);
+		const excludedIds = response.members.filter((member) => member.is_bot || member.is_self).map((member) => String(member.user_id));
 		const ids = new Set(members.map((member) => String(member.user_id)));
 		const current = await rows(chatId);
+		for (const userId of excludedIds) await ledger.query(`DELETE FROM ${MEMBERSHIP_TABLE} WHERE target_chat_id=$1 AND user_id=$2`, [String(chatId), userId]);
 		for (const member of members) {
 			const userId = String(member.user_id);
 			const existing = current.find((row) => String(row.user_id) === userId);
@@ -117,7 +119,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 				await ledger.query(`INSERT INTO ${MEMBERSHIP_TABLE} (target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT(target_chat_id,user_id) DO NOTHING`, [String(chatId), userId, String(member.name ?? ''), startedOn, config.default_term_months, expiry, null, now()]);
 			}
 		}
-		for (const row of current) if (!ids.has(String(row.user_id)) && !row.left_at) {
+		for (const row of current) if (!excludedIds.includes(String(row.user_id)) && !ids.has(String(row.user_id)) && !row.left_at) {
 			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET left_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2`, [String(chatId), String(row.user_id), now()]);
 		}
 		return rows(chatId);
