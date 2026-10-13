@@ -13,7 +13,9 @@ import pandas as pd
 CN = timezone(timedelta(hours=8))
 ROOT = Path("/Users/papa/codebase/n8n")
 OUT = ROOT / "state/research/vshape_20261013/data"
-CODES = tuple(sys.argv[1:]) or ("SH000001", "SZ399001", "SZ399006", "SH000852", "510300", "512100")
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--until=")]
+UNTIL = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--until=")), None)   # HH:MM Asia/Shanghai: stop cleanly then
+CODES = tuple(ARGS) or ("SH000001", "SZ399001", "SZ399006", "SH000852", "510300", "512100")
 KEY = re.search(r"^QUANT_SHARED_READ_API_KEY=(.*)$", (ROOT / "deploy/shared-peer/.env").read_text(), re.M).group(1).strip().strip('"')
 
 
@@ -36,7 +38,7 @@ start = datetime.now(CN).replace(hour=15, minute=10, second=0, microsecond=0)
 if datetime.now(CN) < start:
     log(f"waiting for {start:%H:%M}")
     time.sleep((start - datetime.now(CN)).total_seconds())
-if not sys.argv[1:]:
+if not ARGS:
     with urllib.request.urlopen("http://127.0.0.1:18300/api/research/market/radar?trade_date=2026-10-13", timeout=120) as response:
         (OUT.parent / "radar" / "radar_2026-10-13.json").write_bytes(response.read())
     log("saved the full-day radar")
@@ -52,6 +54,9 @@ for code in CODES:
         for day in days:
             if day in done:
                 continue
+            if UNTIL and datetime.now(CN).strftime("%H:%M") >= UNTIL:
+                log(f"PAUSED at {UNTIL} after {calls} calls; {code} at {day}. Run the same command again to continue")
+                sys.exit(0)
             try:
                 payload = call(code, day)
                 failures = 0
@@ -77,6 +82,6 @@ for code in CODES:
                     break
             if calls % 200 == 0:
                 log(f"{calls} calls; {code} at {day}")
-            time.sleep(0.12)
+            time.sleep(0.3)
     log(f"{code} finished")
 log(f"FINISHED {calls} calls ({' '.join(CODES)})")
