@@ -11,7 +11,7 @@
 | [W003](streams/W003-daily-close-completion.md) | 日线收盘补全 | released | Claude Code 会话 93ba6e1d，2026-10-13 | 10 月 13 日 18:45 之后核对该阶段的第一次自动运行（见 Due），通过后改成 `verified` | 2026-10-13 |
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
 | [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 等 Codex 交回“卖出规则改名＋第 6 步”（`tactic_trials.py` 上半：战法、组合逻辑、选股、格内当日结果），复跑发布路径测试，核对二十个组合的定义与方案的表一致，通过后派第 7 步（战绩、标签、两两组合、每日总结） | 2026-10-13 |
-| [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 两轮取数都跑完后（`state/research/vshape_20261013/data/fetch.log` 里有两条 FINISHED），核对 11 个代码各自的天数，按 Plan 一节的研究设计写研究登记（数据说明加协议），建 harvest 工作区派给 Codex 研究任务 | 2026-10-13 |
+| [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 等 owner 恢复且 B030 查明原因后，重跑第一轮：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 510300 512100`（带代码参数就不存雷达），全天雷达另用 `curl` 存到本机 `state/research/vshape_20261013/radar/radar_2026-10-13.json`；第一轮日志出现 FINISHED 后第二轮自动开始（若排队命令已随主会话结束，按 Running 里的命令手工跑）；两轮都完成后核对 11 个代码的天数，写研究登记，派 Codex | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | planned | 主会话 93ba6e1d 派出的接手 agent（只做到“方案审完、待批准”），2026-10-13 | 用 10 月 13 日首个影子交易日的实测更新方案（四个前置修复、完整性门槛、盘中一致性容差的取值），交 Codex 审查，然后请用户批准 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 
@@ -29,13 +29,12 @@
 ## 正在运行
 
 - W008 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。
-- W007 2026-10-13 14:57 后台脚本 `docs/work/probes/2026-10-13-index-minute-fetch.py` 在取数：15:10 起先存当天全天雷达，再取 `SH000001`、`SZ399001`、`SZ399006`、`SH000852`、510300、512100 自 2023-09-01 起每个交易日的分钟线，约 4,500 次只读请求。输出和日志在本机 `state/research/vshape_20261013/data/`（`<代码>.jsonl`、`fetch.log`）。结束标志：日志末行 `FINISHED <次数> calls`；出现 `ABORT` 是连续 20 次请求失败。可断点续取：重跑同一脚本会跳过已有的日子。脚本挂在主会话上，主会话结束它就停，重跑即可。之后：数每个文件的行数（应接近 750），再做 Steps 的“研究登记与派工”。
 - W006 2026-10-13 14:58 Codex 实现者在做“卖出规则改名＋第 6 步”（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 0ddc86b3 之后有两个提交且 `git status --short` 为空。之后：复跑验收；核对 `TACTICS` 二十个组合的定义；勾掉 Steps；派第 7 步。该任务挂在主会话上，主会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从最后一个完成的步骤接着派。
 - W007 2026-10-13 15:12 第二轮取数已排队（后台命令等第一轮日志出现 FINISHED 后自动开始；出现 ABORT 则不启动）：`510050`、`510500`、`159915`、`588000`、`SH000300`，约 3,750 次只读请求，同一脚本带代码参数，输出同目录。结束标志：日志里第二条 `FINISHED`。挂在主会话上；主会话结束后重跑 `python -I docs/work/probes/2026-10-13-index-minute-fetch.py 510050 510500 159915 588000 SH000300` 即可续取。
 
 ## 待办清单
 
-open 19, ready 9, done 1, dropped 1
+open 19, ready 9, doing 1, done 1, dropped 1
 
 可以开工或等用户处理的:
 
