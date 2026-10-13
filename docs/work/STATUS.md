@@ -40,7 +40,7 @@
 
 ## 待办清单
 
-open 19, ready 9, doing 1, done 2, dropped 1
+open 19, ready 10, doing 1, done 2, dropped 1
 
 在做的、可以开工的、等用户处理的:
 
@@ -52,5 +52,6 @@ open 19, ready 9, doing 1, done 2, dropped 1
 - B011 (ready) 回看接口日历上界的修复待发布
 - B019 (ready) 老师复盘包导入时竞价金额的单位校验
 - B031 (doing) owner 主机 2026-10-13 收盘后不响应
+- B033 (ready) 通达信并行快照和比对行没有列入冷热分层
 - B023 (ready) 全市场分钟快照 09:16 才开始
 - B024 (ready) 竞价处置表缺的那 1 只没查明

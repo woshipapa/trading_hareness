@@ -83,3 +83,4 @@ agent 把命令备好，用户执行，记录里记下结果：
 - 视图由哪个会话生成都一样，会包含别的会话还没提交的记录状态，这是正常的。
 - 主检出里有几样没入库、也不属于这些工作线的东西，不要动也不要提交：`undefined/`（两张图）、`config/secrets/set-local-secret.sh`、`scripts/data/tdx_promote_*.json`、`scripts/test_teacher_review_daily_peer_source.py`，以及 `git status` 里别的会话改过的文件。
 - `scripts/release status` 是只读的，但会连接两台主机；主机有故障时不要拿它反复试。
+- 数据库不在 47.110.79.189 上。那台是中转服务器，只跑容器和隧道；PostgreSQL 在 owner 的 Windows 工作站上（热数据 F: 盘、冷数据 G: 盘），经反向 SSH 和 `db-tunnel` 访问，所以每条语句往返约 52 毫秒。拓扑见 `docs/SHARED_PEER_RUNTIME.md`，磁盘预算见 `docs/OWNER_DATABASE_STORAGE.md`。在容器里跑的探针，内存花在中转服务器上，数据从工作站经隧道拉过来。
