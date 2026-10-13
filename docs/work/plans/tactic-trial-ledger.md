@@ -52,7 +52,7 @@ Research evidence only, `live_effect: none`.
 
 Tactics and conditions are **evidence observations**, not strategies: no `StrategyContract`, no row in
 `quant.strategy_promotion_registry`, no row in `quant.strategy_daily_candidates`, no weight. Decision 0006 keeps
-applying to strategies; decision 0019 (last step) records this classification and the rule that no strategy,
+applying to strategies; decision 0021 (last step; 0019 and 0020 were taken by another workstream on 2026-10-13) records this classification and the rule that no strategy,
 decision, alert or order path may read the trial readings. No existing guard checks import direction inside the
 service, so a new static-import test under `quant-service/tests` pins it: the five trial modules
 (`tactic_conditions`, `tactic_exits`, `tactic_trials`, `tactic_trial_repository`, `tactic_trial_runtime`) import
@@ -277,7 +277,7 @@ For the evening of T, from the days settled that evening:
 - `tactic_trials_summary_daily` (T): the daily summary (records, the day's cases, the kept pairs). The routes read
   this, never the whole history.
 - Size: about 100 rows a day and slot, some tens of KB per reading, the summary under 200 KB. The four
-  capabilities stay in the hot tier (no entry in `storage_tiering_policy`); decision 0019 records it.
+  capabilities stay in the hot tier (no entry in `storage_tiering_policy`); decision 0021 records it.
 
 ### When it runs
 
@@ -483,7 +483,7 @@ outcome or "return" (the tactic's own entry and sell rule).
     never appears, database busy).
 12. Runtime reads `board`, `summary`, `cases`; the three routes and their tests; relay entries; `generated.ts`.
 13. `frontend/src/research/tactic-trials.ts` with tests, `TacticTrialsTab.vue`, `App.vue`.
-14. `docs/decisions/0019-tactic-trial-ledger.md`; the full acceptance run.
+14. `docs/decisions/0021-tactic-trial-ledger.md` (take the next free number if 0021 is gone); the full acceptance run.
 
 After release: replay the close slot over the stored history on the owner (a write on the owner: run by the user).
 

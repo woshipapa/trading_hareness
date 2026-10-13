@@ -4,7 +4,7 @@
 - holder: Claude Code 会话 93ba6e1d，2026-10-13
 - goal: 研究盘中“到底、放量、资金进场”的 V 形反转能否从我们的数据里实时识别、真假 V 怎么区分、反转后哪类股票领先，并把成立的部分做成研究用的提示
 - plan: none
-- next: 等 owner 恢复且 B031 查明原因后，重跑第一轮：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 510300 512100`（带代码参数就不存雷达），全天雷达另用 `curl` 存到本机 `state/research/vshape_20261013/radar/radar_2026-10-13.json`；第一轮日志出现 FINISHED 后第二轮自动开始（若排队命令已随主会话结束，按 Running 里的命令手工跑）；两轮都完成后核对 11 个代码的天数，写研究登记，派 Codex
+- next: 等 owner 恢复、B031 查明原因、用户同意取数（见 Waiting on the user）后，在非交易时段跑 `/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（一条命令顺序取 11 个代码，带参数就不存雷达；可断点续取），另用 `curl` 把全天雷达存成 `state/research/vshape_20261013/radar/radar_2026-10-13.full.json`（13:27 那份 `radar_2026-10-13.json` 是早先输出的依据，留着）；`fetch.log` 出现 FINISHED 后核对 11 个文件各约 750 行，写研究登记，派 Codex
 - updated: 2026-10-13
 
 ## Requirements
@@ -41,7 +41,7 @@
 - [x] 当天观察并存档 — `docs/work/probes/2026-10-13-vshape-today.py` 与 `.out.txt`
 - [x] 探明授权接口的历史分钟线能取指数和 ETF，每分钟有价格、均价、成交量 — `docs/work/probes/2026-10-13-index-minute-probe.*`
 - [x] 当天个股层面的第一眼 — `docs/work/probes/2026-10-13-today-stock-level.py` 与 `.out.txt`（数据：`2026-10-13-today-snapshots.py` 从 owner 只读取的 14 个关键分钟的全市场快照，本机 `state/research/vshape_20261013/data/today_snapshots.json`）
-- [ ] 取历史分钟线；存当天全天雷达（脚本在跑）
+- [ ] 取历史分钟线；存当天全天雷达（没取到：15:10 owner 不响应，见 Log 15:18；恢复后按 `next` 重跑）
 - [ ] 研究登记与派工
 - [ ] 复核与结论
 - [ ] 提示功能的方案
@@ -71,9 +71,11 @@
 
 ## Waiting on the user
 
+- [ ] 2026-10-13 owner 恢复后，是否同意跑指数和宽基 ETF 的历史分钟线取数：11 个代码、2023-09-01 起每个交易日、共约 8,250 次只读请求，经授权数据网关，非交易时段跑。为什么等：超过 5,000 次的批量读取按 README 要用户明确同意；此前两次只是告知（“不同意请说”），用户没有反对，并在之后要求把假设放到历史上验证，但没有明确说同意。之后：按 `next` 取数。
+
 ## Running
 
-- [ ] 2026-10-13 15:12 第二轮取数已排队（后台命令等第一轮日志出现 FINISHED 后自动开始；出现 ABORT 则不启动）：`510050`、`510500`、`159915`、`588000`、`SH000300`，约 3,750 次只读请求，同一脚本带代码参数，输出同目录。结束标志：日志里第二条 `FINISHED`。挂在主会话上；主会话结束后重跑 `python -I docs/work/probes/2026-10-13-index-minute-fetch.py 510050 510500 159915 588000 SH000300` 即可续取。
+- [x] 2026-10-13 15:12 第二轮取数排队 → 15:28 排队的后台命令已手工停掉，没有任何取数进程在跑（2026-10-13）；恢复后按 `next` 用一条命令顺序取全部 11 个代码
 - [x] 2026-10-13 14:57 第一轮取数 → 15:10 因 owner 不响应退出，没有取到数据（2026-10-13）；恢复后重跑见 next。原说明：15:10 起先存当天全天雷达，再取 `SH000001`、`SZ399001`、`SZ399006`、`SH000852`、510300、512100 自 2023-09-01 起每个交易日的分钟线，约 4,500 次只读请求。输出和日志在本机 `state/research/vshape_20261013/data/`（`<代码>.jsonl`、`fetch.log`）。结束标志：日志末行 `FINISHED <次数> calls`；出现 `ABORT` 是连续 20 次请求失败。可断点续取：重跑同一脚本会跳过已有的日子。脚本挂在主会话上，主会话结束它就停，重跑即可。之后：数每个文件的行数（应接近 750），再做 Steps 的“研究登记与派工”。
 
 ## Due
@@ -94,11 +96,11 @@
 
 ## Resume here
 
-交接：用户 2026-10-13 15:20 说明之后会换新会话接着推进。新会话直接把 `holder` 改成自己。挂在旧会话（93ba6e1d）上的后台任务（Codex 派工、子 agent、后台脚本）会随旧会话结束，按下面的办法从文件状态接着做。
+交接：用户 2026-10-13 15:20 说明之后会换新会话接着推进，但写这段时旧会话（93ba6e1d）还在工作。新会话先判断旧会话是否还在（`docs/work/README.md` “持有者”一节的办法）：还在就先问用户；不在了就把 `holder` 改成自己，挂在旧会话上的后台任务（Codex 派工、子 agent、后台脚本）也已随它结束，按下面的办法从文件状态接着做。
 
 现状：当天的观察、个股层面的第一眼、假设 3 在三年日线上的检验都做了（见 Log 和 `docs/work/probes/2026-10-13-*`）。研究设计按用户的要求扩成了四类因素加组合（见 Plan）。分钟线一条都还没取到：15:10 owner 主机不响应，取数脚本第一步就退出了。
 
-第一件事：看 BACKLOG B031，owner 没恢复或原因没查明就不要取数。恢复后按 `next` 里的命令重跑第一轮，再跑第二轮（命令在 Running 里）；每个代码的文件 `state/research/vshape_20261013/data/<代码>.jsonl` 应有约 750 行，`fetch.log` 里各有一条 FINISHED。
+第一件事：看 BACKLOG B031，owner 没恢复或原因没查明就不要取数。恢复且用户同意后按 `next` 的一条命令取全部 11 个代码；每个代码的文件 `state/research/vshape_20261013/data/<代码>.jsonl` 应有约 750 行（上市晚的 ETF 会少），`fetch.log` 末尾有一条 FINISHED。现在没有任何取数进程或排队命令在跑。
 
 取完后：按 Plan 的研究设计写一份研究登记（数据说明、变量定义、信号时刻、结果口径、三档深度阈值、2026-07-01 以来单列），放本机 `state/research/vshape_20261013/README.md`，照 `codex-flow` 建 harvest 工作区派一个 Codex 研究任务，报告进 `docs/archive/`。写法可参照本机 `state/research/shortterm_tactics_20261013/README.md`，但门槛按用户说的不必设得很严。
 

@@ -46,6 +46,7 @@
 - [x] 5 `t1_settlement`：`price_window`、`walk_exit`、`sale_blocked`、`opens_at_up_limit`、`closes_at_up_limit`，`settle` 改用它们 — 9f17026a — 同上；原有结算测试只改了一行 import
 - [x] 5a `tactic_exits.py` 上：两种身份、单日卖出规则、状态结果、空间指标 — 2d7bacc0 — 发布路径测试 → `Ran 3060 tests in 36.507s OK (skipped=2)`（5a、5b 一起，主会话复跑）
 - [x] 5b `tactic_exits.py` 下：多日卖出规则、未决、十日上限 — 0ddc86b3 — 同上；多日规则逐条对过方案的表。`walk_exit` 加了“规则可返回固定成交价”（挂单止盈止损用），原有结算测试没有改动
+- [ ] 5c 卖出规则的中文名修正 — d9ac5999 已提交，主会话没验收（与第 6 步一起验；`head` 仍写验收过的 0ddc86b3）
 - [ ] 6 `tactic_trials.py` 上：战法类型、组合的三值逻辑、选股、格内当日结果（已派，含卖出规则的中文名修正）
 - [ ] 7 `tactic_trials.py` 下：三种战绩、按天开关、标签与 q 值、两两组合、每日总结
 - [ ] 8 `tactic_trial_repository.py`：按区间读取
@@ -54,7 +55,7 @@
 - [ ] 11 竞价时段独立任务及其登记
 - [ ] 12 三个读取接口、中继条目、`generated.ts`
 - [ ] 13 控制台页签“战法试验台”
-- [ ] 14 决策记录 0019；完整验收
+- [ ] 14 决策记录（编号取 `docs/decisions/` 的下一个空号：2026-10-13 是 0021，0019 和 0020 已被 W009 用掉；方案文件已改成 0021）；完整验收
 
 ## Log
 
@@ -78,8 +79,8 @@
 
 ## Due
 
-- [ ] 2026-10-13 22:05 owner 发布窗口重开（今天 15:10–18:45 也开着，但 16 步做不完）。若 16 步、双重评审和合并都已完成：备好包装脚本交给用户执行，发布后先做历史回放的干跑。没完成就顺延到 10 月 14 日 11:30–13:00 或 15:10–18:45。本线要发三个单元：owner 纯代码（`quant-service/app/tactic_*.py` 等在纯代码白名单里）、edge 中继（`research-routes.mjs` 新增三条路由）、edge 控制台（新页签）；owner 发布要求提交已在 origin/main，所以包装脚本里先 `git push`。
-- [ ] 2026-10-14 09:26 发布后的第一个交易日：核对竞价看板读数已存、与 09:25 处置表同一批股票，页面可见。
+- [ ] 2026-10-13 22:06 owner 发布窗口重开（今天 15:10–18:45 也开着，但 16 步做不完）。若 16 步、双重评审和合并都已完成：备好包装脚本交给用户执行，发布后先做历史回放的干跑。没完成就顺延到 10 月 14 日 11:30–13:00 或 15:10–18:45。本线要发三个单元：owner 纯代码（`quant-service/app/tactic_*.py` 等在纯代码白名单里）、edge 中继（`research-routes.mjs` 新增三条路由）、edge 控制台（新页签）；owner 发布要求提交已在 origin/main，所以包装脚本里先 `git push`。
+- [ ] 2026-10-14 09:26 （10 月 13 日晚没发布的话，这条和下一条顺延到发布后的第一个交易日）发布后的第一个交易日：核对竞价看板读数已存、与 09:25 处置表同一批股票，页面可见。
 - [ ] 2026-10-14 19:00 第一份每日总结：核对生成、各战法当日结果与手算的两三条一致。
 
 ## Evidence
@@ -97,11 +98,11 @@
 
 ## Resume here
 
-交接：用户 2026-10-13 15:20 说明之后会换新会话接着推进。新会话直接把 `holder` 改成自己。挂在旧会话（93ba6e1d）上的后台任务（Codex 派工、子 agent、后台脚本）会随旧会话结束，按下面的办法从文件状态接着做。
+交接：用户 2026-10-13 15:20 说明之后会换新会话接着推进，但写这段时旧会话（93ba6e1d）还在工作。新会话先判断旧会话是否还在（`docs/work/README.md` “持有者”一节的办法）：还在就先问用户；不在了就把 `holder` 改成自己，挂在旧会话上的后台任务（Codex 派工、子 agent、后台脚本）也已随它结束，按下面的办法从文件状态接着做。
 
 现状：方案已批准，16 步里做完并验收 7 步（1 到 5b），第 6 步在 Codex 手里。主线上没有本工作线的代码，全在 `codex/tactic-trials`。
 
-第一件事：`git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials log --oneline 932f6b5c..HEAD` 和 `git status --short`。有新提交且干净，就在该目录跑验收命令，读 `git diff <记录里的 head> HEAD`，对照方案“First conditions”两张表逐个核阈值，然后勾掉 Steps 并派下一步。工作区不干净时先分清是还在写还是中断了：派工的那个会话还在（你就是它，且没收到完成通知），就是还在写，等；你是新会话，旧的派工已随旧会话结束，但为保险看 `stat -f %Sm quant-service/app/tactic_conditions.py`，十分钟内还在变就再等。确认中断后，让新的 Codex 调用“从最后一个完成的步骤继续”（它会处理没提交的改动），不要自己接着写。
+第一件事：`git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials log --oneline 932f6b5c..HEAD` 和 `git status --short`。有新提交且干净，就在该目录跑验收命令，读 `git diff <记录里的 head> HEAD`，对照方案“First conditions”两张表逐个核阈值，然后勾掉 Steps 并派下一步。工作区不干净时先分清是还在写还是中断了：派工的那个会话还在（你就是它，且没收到完成通知），就是还在写，等；你是新会话，旧的派工已随旧会话结束，但为保险看 `bash ~/codebase/agent-skills/own/codex-flow/scripts/lsworktrees.sh .` 里这个工作区是不是 ACTIVE，以及 `git status --short` 列出的文件的修改时间（`stat -f %Sm <文件>`），十分钟内还在变就再等。确认中断后，让新的 Codex 调用“从最后一个完成的步骤继续”（它会处理没提交的改动），不要自己接着写。
 
 派工方式：`codex-flow` 技能的实现者提示词，`sandbox: danger-full-access`，`cwd` 用工作区路径，方案给绝对路径；每次派一到两步，每步单独提交。
 

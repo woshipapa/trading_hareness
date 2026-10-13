@@ -31,7 +31,7 @@
 
 合计 9 条异议，9 条接受、0 条驳回，没有留给用户裁决的分歧；留给用户的是“最后一处改动未复审”这件事本身（见 Waiting on the user）。Codex 用量（线程累计，`codex-trace.py --usage --thread 01a133e8`）：输入 4,960,853（其中缓存 4,571,264，新输入 389,589），输出 33,843，推理 25,266，合计 4,994,696。
 
-方案还没有用户的批准：决策 0015 批准的是方向，「启动」批准的是启动这条线。
+批准：用户 2026-10-13 15:25 「批准开工」（见 Requirements 最后一条，包括主会话对三件事的理解和仍开着的那一问）。
 
 ## Steps
 
@@ -78,7 +78,7 @@
 
 ## Due
 
-- [ ] 2026-10-13 16:00 重跑 `docs/work/probes/2026-10-13-tdx-tolerance.py` 取 10 月 13 日全天的表，输出覆盖写到 `docs/work/probes/2026-10-13-tdx-tolerance.out.txt`（现在那份只到 14:17），把方案“The in-session agreement rule”里的表、15 个合格分钟的计数和 FACTS F016 对到新输出上；规则的取值如果因此站不住（15 秒以内出现不到 95% 的分钟），在方案和本记录里写明并告诉用户。前提：BACKLOG B031 已关闭（owner 恢复应答），并且主会话或用户说了可以再查 owner；否则不要跑。调用方式见 Evidence。脚本里的日期是写死的 10 月 13 日，数据留在库里，哪天跑都行。
+- [ ] 2026-10-13 16:00 重跑 `docs/work/probes/2026-10-13-tdx-tolerance.py` 取 10 月 13 日全天的表，输出覆盖写到 `docs/work/probes/2026-10-13-tdx-tolerance.out.txt`（现在那份只到 14:17），把方案“The in-session agreement rule”里的表、15 个合格分钟的计数和 FACTS F016 对到新输出上；规则的取值如果因此站不住（15 秒以内出现不到 95% 的分钟），在方案和本记录里写明并告诉用户。前提：BACKLOG B031 已关闭（owner 恢复应答），并且接手 W003 和 B031 的会话或用户说了可以再查 owner；否则不要跑。调用方式见 Evidence。脚本里的日期是写死的 10 月 13 日，数据留在库里，哪天跑都行。
 
 ## Evidence
 
@@ -103,12 +103,12 @@
 
 ## Resume here
 
-现状（2026-10-13 15:22）：方案第 3 版写完，Codex 审了三轮（9 条异议全部采纳，没有以 `SOUND` 收尾，最后一处改动未复审）。用户还没批准，没有写一行实现代码，没有建工作区。通达信的并行采集早已在线上，本线要做的是四个前置修复（P1–P4）和补缺链（B1–B3）。
+现状（2026-10-13 15:30）：方案第 3 版已获用户批准（「批准开工」，15:25），工作区 `codex/tdx-shadow-measure` 已建（基点 9d75b5d9），派工 1（P1）在 Codex 手里，见 Running。方案经 Codex 审了三轮（9 条异议全部采纳，没有以 `SOUND` 收尾，最后一处改动未复审，留给合并前的双重评审）。通达信的并行采集早已在线上，本线要做的是四个前置修复（P1–P4）和补缺链（B1–B3）。
 
 怎么接上：先读方案 `docs/work/plans/tdx-live-snapshot-fallback.md` 开头的“Revision note”（第 3 版改了什么、审查到哪一步），再读“Measured on 2026-10-13”（每个数字后面是哪份探针输出，探针在 `docs/work/probes/2026-10-13-tdx-*.py` / `.out.txt`，调用方式在本记录 Evidence）。
 
-第一件事：看 Waiting on the user 那一条有没有答复。批准了：在仓库根目录 `bash ~/codebase/agent-skills/own/codex-flow/scripts/mkworktree.sh . tdx-shadow-measure --disposition merge --target main`，它会建分支 `codex/tdx-shadow-measure` 并打印工作区路径；然后按方案“Dispatches”派工 1（P1），验收命令在方案“Acceptance”。没批准：按用户的意见改方案，不要动工。
+第一件事：`git -C /Users/papa/codebase/.codex-wt/n8n-tdx-shadow-measure log --oneline 9d75b5d9..HEAD` 和 `git status --short`。有提交且干净：在该目录跑方案 Acceptance 一节的命令（发布路径测试写成 `COMPOSE_ENV_FILES=/Users/papa/codebase/n8n/.env make -C quant-service test-release-path`），读 diff，勾掉 Steps 里的 P1，把交回里的线程号记进 Log，再用同一线程派工 2（P2 和 P3）。不要再跑 `mkworktree.sh`（工作区已在）。派工 5 之前先把 Waiting on the user 里那一问问清。
 
 信任本记录之前：`git diff --stat e8a7b953 HEAD -- quant-service scripts` 应为空（方案里的文件行号是按 e8a7b953 核对的，不为空就先核对被改到的那几处）；`bash ~/codebase/agent-skills/own/codex-flow/scripts/lsworktrees.sh . | grep -E "tdx-shadow-measure|tdx-promote-gate|tdx-live-snapshot-fallback"` 应无输出。
 
-陷阱：owner 主机 10 月 13 日 15:07 起不应答（BACKLOG B031），15:15 起一切 owner 查询暂停，B031 没关、主会话或用户没说可以之前不要跑任何探针（Due 那条也一样）。改 `scripts/tdx-promote.py` 会让此后每一次 owner 发布被判成全量发布，所以它单独一个派工并带分类器规则。22 个未合并的 `codex/tdx-*` 分支不要合并（BACKLOG B029）。W006 的工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials` 和 W009 的记录、主检出里未提交的 feishu-relay / scripts / config 文件都是别的会话的，不要碰。发布由用户执行。
+陷阱：owner 主机 10 月 13 日 15:07 起不应答（BACKLOG B031），15:15 起一切 owner 查询暂停，B031 没关、接手 W003 和 B031 的会话或用户没说可以之前不要跑任何探针（Due 那条也一样）。改 `scripts/tdx-promote.py` 会让此后每一次 owner 发布被判成全量发布，所以它单独一个派工并带分类器规则。22 个未合并的 `codex/tdx-*` 分支不要合并（BACKLOG B029）。W006 的工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials` 和 W009 的记录、主检出里未提交的 feishu-relay / scripts / config 文件都是别的会话的，不要碰。发布由用户执行。
