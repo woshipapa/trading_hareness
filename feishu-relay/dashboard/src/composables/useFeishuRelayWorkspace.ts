@@ -154,6 +154,10 @@ export function useFeishuRelayWorkspace() {
     // A value that is not a listed group is a typed name: looked up by name on save, as before.
     groupRelayRouteForm.value.chat_name = group ? group.name : chatId;
   }
+  async function onJoinedByLink(chatId: string) {
+    await loadJoinedGroups(true);
+    pickRouteGroup(chatId);
+  }
   const historyProgressText = (history?: GroupHistoryProgress | null) => !history || history.status === 'idle' ? '等待读取'
     : history.status === 'failed' ? `读取失败：${history.error ?? ''}`
     : history.status === 'complete' ? `已同步 ${history.messages} 条` : `同步中 ${history.percent ?? 0}%（${history.messages} 条）`;
@@ -523,7 +527,7 @@ export function useFeishuRelayWorkspace() {
   return {
     groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistorySource, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
     rebindGroupRelayRoute,
-    joinedGroups, joinedGroupsError, joinedGroupsLoading, loadJoinedGroups, refreshJoinedGroupsIfStale, newJoinedGroups, activeSources, leftSources, leftChatIds, savedHasContent, savedContentText, savedSpanText, pickableGroups, groupOptionLabel, relayTargetOptions, relayTargets, relayTargetName, tagFeedsDownstream, routeIngestLocked, routeIngestHint, targetDialog, targetSaving, targetForm, openTargetDialog, pickTargetGroup, saveRelayTarget, removeRelayTarget, pickRouteGroup, historyProgressText, historyProgressTagType,
+    joinedGroups, joinedGroupsError, joinedGroupsLoading, loadJoinedGroups, refreshJoinedGroupsIfStale, onJoinedByLink, newJoinedGroups, activeSources, leftSources, leftChatIds, savedHasContent, savedContentText, savedSpanText, pickableGroups, groupOptionLabel, relayTargetOptions, relayTargets, relayTargetName, tagFeedsDownstream, routeIngestLocked, routeIngestHint, targetDialog, targetSaving, targetForm, openTargetDialog, pickTargetGroup, saveRelayTarget, removeRelayTarget, pickRouteGroup, historyProgressText, historyProgressTagType,
     bundleDialog, bundleRoute, bundleDates, bundlePreview, bundleSource, bundleHasContent, bundleLoading, bundleError, openBundleDialog, previewBundle, downloadBundle,
     qrDialog, qrSession, qrStatusName, qrPolling, startQrLogin, stopQrPolling, authStateType, authStateText,
     oauthDialog, oauthAuthorizeUrl, oauthRedirectUri, oauthCode, oauthSubmitting, startOauthReauth, submitOauthCode, copyOauthUrl, oauthExpiryText, oauthExpiryTagType,
