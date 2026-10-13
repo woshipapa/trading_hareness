@@ -14,11 +14,12 @@
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | building | Claude Code 会话 93ba6e1d，2026-10-13 | 取数排在 10 月 13 日 22:06 自动续取（主会话的后台命令，先查新主机可用内存不低于 150 MB 和 `/health`，带 `--until=23:50`）。日志末行是 FINISHED 就核对 6 个基金文件各约 749 行、`SZ399001` 补到 749 行，然后用同一线程（01a134cc-8eb1-76f0-9aec-6bb66827ce98）派研究第 2 步：先做登记里基金文件的两项核对（第三个值是否累计均价、成交量单位），再做五类因素各自对照基准；`SZ399001` 补齐的 7 天要让它重建派生表。末行是 PAUSED 或没启动，就在非交易时段重跑 `next` 里原来的命令 | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | merged | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 两件事。(1) 准备第二次 owner 纯代码发布（从 26170231 到主线当前提交；`scripts/release plan` 判为纯代码、2 个运行时文件：目录和通达信并行采集的当日汇总），窗口是 10 月 13 日 22:05 之后或 10 月 14 日 11:30–13:00、15:10–18:45；这是迁到新服务器后的第一次发布，脚本的默认目标已是新主机（提交 4bb8c7ff），包装脚本备好后交给用户执行。(2) 从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。先做 (1) 还是先攒着和 B1、B2 一起发，问用户；明早 09:16 的核对（见 Due）不依赖这次发布 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
-| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | 收 members 线的补丁（成员列表加 `is_bot`、`is_self`，线程 01a1348e）、urgent 线的四条修正（线程 01a13490）、membership 线的五条修正（线程 01a13494）。members 补丁合并后，给 membership 线续派：合入集成分支、成员同步跳过 `is_bot` 和 `is_self`。然后 urgent、membership 依次：复跑验收 → edge 上 bridge 套件 → 合进集成分支 → main → 热更新 → 线上核对。最后做探测 P0-8、回收八个工作区、汇总 token 开销 | 2026-10-13 |
+| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户在看板上试用后按反馈改；用户第一次真实使用时核对三件没在线上看到的事：(1) 会员到期提醒真的 @ 到别的租户的成员；(2) 一条文字转发被核对上、源头撤回后目标群同步撤回；(3) 一键建同步群走通全程。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
 
 ## 等用户处理
 
 - W004 2026-10-13 请看一下控制台“盘面雷达与战法”页签的新图，配色、数字口径、点的密度是否还要调。为什么等：这是按用户的参考图做的，是否“看得懂”只有用户能判断。之后：没有意见就关闭本记录。
+- W010 2026-10-13 在看板上试用七项功能并反馈；特别是会员期限：对真实目标群第一次“同步成员”后，老成员的开始日期是各自的入群日期、期限是默认的 1 个月，
 
 ## 到点要做
 
@@ -30,12 +31,11 @@
 ## 正在运行
 
 - W006 2026-10-13 21:10 Codex 实现者在做第 9 步修正的第 2 部分（同一线程、同一工作区）。结束标志：分支在 df44f56b 之后有提交且 `git status --short` 为空。之后见 next。`codex-reply` 这次又是立刻返回上一条回复，实际在后台跑，主会话用 `docs/work/probes/2026-10-13-wait-codex.py 01a1339e` 等它。
-- W010 2026-10-13 21:10 三个 Codex 调用在跑（都挂在会话 eac0e1fc 上）：members 补丁（线程 01a1348e，工作区 `n8n-relay-auto-members`）；urgent 的四条修正（线程 01a13490）；
 - W007 2026-10-13 21:26 取数续取已排在 22:06（主会话的后台命令）。结束标志：`state/research/vshape_20261013/data/fetch.log` 末行 FINISHED / PAUSED / ABORT，或后台命令输出里的“the fetch was not resumed”。主会话结束或本机合盖它就停，重跑命令即可。
 
 ## 待办清单
 
-open 29, ready 10, waiting-user 1, done 4, dropped 1
+open 29, ready 14, waiting-user 1, done 4, dropped 1
 
 在做的、可以开工的、等用户处理的:
 
@@ -50,3 +50,7 @@ open 29, ready 10, waiting-user 1, done 4, dropped 1
 - B024 (ready) 竞价处置表缺的那 1 只没查明
 - B041 (waiting-user) owner 量化服务迁到新服务器：本机的连接、隧道和发布目标要切过去
 - B042 (ready) 我们这一侧新加的盘后阶段没有任何东西定时触发
+- B046 (ready) W010 的探测 P0-8：富文本和卡片转发读回的样子
+- B047 (ready) 目标群识别在启动时失败后不重试
+- B048 (ready) 目标群功能里查群主失败时不带飞书的原因
+- B049 (ready) W010 评审里没改的小项

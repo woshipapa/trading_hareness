@@ -419,6 +419,46 @@
 - found: 2026-10-13（`docs/work/probes/2026-10-13-high-board-rows.py` 与 `.out.txt`）
 - updated: 2026-10-13
 
+### B046 W010 的探测 P0-8：富文本和卡片转发读回的样子
+
+- state: ready
+- kind: follow-up
+- why: D（送达核对）现在只核对文字形态的转发；带图富文本和卡片显示为“不核对”，也就不会同步撤回
+- how: 在“中继自测群”里各发一条三种形态的转发，读回比对发出的最终文字，把对得上的形态加进 `adapter/delivery-check.mjs` 的那一个常量，并更新 `WEB_GATEWAY.md`
+- who: agent
+- needs: 无
+- updated: 2026-10-13
+
+### B047 目标群识别在启动时失败后不重试
+
+- state: ready
+- kind: defect
+- why: 每次发布后 adapter 先于 bridge 就绪，`targetRegistry.start()` 的第一次识别失败（日志“目标群识别失败：fetch failed”）且不再重试；表里已有行时不受影响，表空时要人点“识别现有目标群”
+- how: `adapter/target-registry.mjs` 的 `start()` 失败后隔一段时间再试，直到成功一次；带测试
+- who: agent
+- needs: 无
+- updated: 2026-10-13
+
+### B048 目标群功能里查群主失败时不带飞书的原因
+
+- state: ready
+- kind: defect
+- why: `bridge.client.chat_infos()` 把失败的回答变成空字典，`require_owner` 于是报“只有群主可以执行此操作”，看不出是飞书拒绝了查询（评审在 create、members 两条线都提到）
+- how: 在 `bridge/group_admin.py` 加一个经 `require_client(...).api('chats.PullChatsByIdsRequest')` 取群信息的函数，各功能模块改用它；带测试
+- who: agent
+- needs: 无
+- updated: 2026-10-13
+
+### B049 W010 评审里没改的小项
+
+- state: ready
+- kind: follow-up
+- why: create 线两处测试覆盖不足（中途失败后不应继续后面的步骤；重新生成邀请链接按钮的显示条件）；`group_admin._FeatureClient.api` 按关键字参数传请求时取不到要隐藏的令牌（现在所有调用都是位置参数）
+- how: 补测试；把取请求字典的那一行改成同时看位置参数和 `data` 关键字
+- who: agent
+- needs: 无
+- updated: 2026-10-13
+
 ## Closed
 
 ### B031 owner 主机 2026-10-13 收盘后不响应
