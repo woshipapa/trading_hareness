@@ -424,6 +424,10 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 			// for a destination that opted out of edit/recall sync for quota.
 			return `${WEBHOOK_SENT_PREFIX}${targetChatId}:${Date.now()}`;
 		}
+		// A target known only by its webhook has no chat id the message API accepts.
+		if (/^wh_/.test(String(targetChatId))) {
+			throw new Error(webhookUrl ? `目标群只配置了 webhook，不能发送 ${msgType} 类型的消息` : '目标群的 webhook 已被删除，请在看板里重新配置或从源群里去掉它');
+		}
 		const result = await larkClient.im.v1.message.create({
 			params: { receive_id_type: 'chat_id' },
 			data: { receive_id: targetChatId, msg_type: msgType, content: JSON.stringify(content), uuid: deterministicUuid(messageId, component, targetChatId) },

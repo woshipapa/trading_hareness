@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
-import { groupRelayApi, type BundlePreview, type BundleSource, type ExportBookmark, type GroupHistoryProgress, type GroupMembership, type JoinedGroup, type ExportFormat, type WebsocketBinding } from '../api/group-relay';
+import { groupRelayApi, type BundlePreview, type BundleSource, type ExportBookmark, type GroupHistoryProgress, type GroupMembership, type JoinedGroup, type ExportFormat, type SourceTagStatus, type WebhookTarget, type WebsocketBinding } from '../api/group-relay';
 import { feishuWorkbenchApi } from '../api/feishu-workbench';
 
 type OAuthScopeAudit = { required_scopes?: string[]; granted_scopes?: string[]; missing_scopes?: string[]; verified?: boolean | null };
@@ -18,8 +18,9 @@ type LarkAgentXChatStats = { allowlisted?: boolean; observed_count?: number; sel
 type LarkAgentXStatus = { status?: string; observed_at?: string; release?: string | null; metrics_persisted?: boolean; metrics_source?: string | null; websocket?: { state?: string; attempt_count?: number; last_attempt_at?: string | null }; listen_chat_count?: number; listen_chat_ids?: string[]; websocket_chat_ids?: string[]; summary_chat_ids?: string[]; summary_ingress_configured?: boolean; gap_repair_enabled?: boolean; private_gap_repair_enabled?: boolean; private_gap_repair_on_start?: boolean; private_repair_count?: number; private_repair_message_count?: number; private_repair_failed_count?: number; dynamic_route_discovery?: boolean; route_catalog_count?: number; route_catalog_last_refresh_at?: string | null; route_catalog_error?: string | null; dynamic_routes?: Record<string, { source_key?: string; chat_name?: string; source_chat_id?: string }>; persisted_route_bindings?: Record<string, { source_key?: string; chat_id?: string; chat_name?: string; source_chat_id?: string }>; mapping_check_at?: string | null; mapping_check_error?: string | null; observed_count?: number; forwarded_count?: number; failed_count?: number; filtered_count?: number; ignored_count?: number; ignored_by_chat?: Record<string, { ignored_count?: number; last_position?: number | null }>; position_stats?: Record<string, { missing_position_count?: number; recovered_position_count?: number; unresolved_position_count?: number; last_gap_start?: number | null; last_gap_end?: number | null }>; position_summary?: { missing_position_count?: number; recovered_position_count?: number; unresolved_position_count?: number; gap_event_count?: number; out_of_order_count?: number }; decode_error_count?: number; decode_fallback_count?: number; unknown_field_count?: number; partial_frame_count?: number; retry_count?: number; last_observed_chat_id?: string | null; last_observed_message_type?: string | null; event_spool?: { queued?: number; processing?: number; pending?: number; failed?: number; delivered?: number }; auth?: { state?: string; logged_in?: boolean; has_credentials?: boolean; user_id?: string | null; credential_age_hours?: number | null; last_error?: string | null; probe_ok?: boolean | null; probe_at?: string | null; probe_error?: string | null }; ws_notify_cmds?: number[]; ws_notify_count?: number; last_ws_notify?: { cmd?: number; chat_id?: string; message_id?: string } | null; private_tail_repair_chat_ids?: string[]; chat_validation?: Record<string, LarkAgentXChatValidation>; chat_stats?: Record<string, LarkAgentXChatStats> };
 type ItouguProductTarget = { business_product_id?: string; name?: string; target_chat_ids?: string[]; article_target_chat_ids?: string[] };
 type ItouguStatus = { status?: string; state?: string; service?: string; observed_at?: string; updated_at?: string | null; started_at?: string | null; heartbeat_age_seconds?: number | null; stale_after_seconds?: number; message?: string | null; last_poll_started_at?: string | null; last_poll_completed_at?: string | null; last_success_at?: string | null; last_error?: string | null; last_trigger?: string | null; manual_refresh_count?: number; consecutive_error_count?: number; poll_count?: number; failure_count?: number; sent_count?: number; interval_seconds?: number; off_hours_interval_seconds?: number; midday_interval_seconds?: number; trading_hours_only?: boolean; current_window?: string | null; next_poll_in_seconds?: number; products?: { business_product_id?: string; name?: string }[]; product_targets?: ItouguProductTarget[]; target_chat_ids?: string[]; article_target_chat_ids?: string[]; webhook_config?: WebhookConfigStatus & { keyword_chat_ids?: string[] } };
-type GroupRelayStatus = { status?: string; observed_at?: string; enabled?: boolean; interval_seconds?: number; stale_after_seconds?: number; user_oauth_configured?: boolean; user_oauth_scope_audit?: OAuthScopeAudit | null; user_oauth_refresh_expires_at?: string | null; user_oauth_access_expires_at?: string | null; target_configured?: boolean; delivery_verified?: boolean; last_tick_started_at?: string | null; last_tick_completed_at?: string | null; last_tick_error?: string | null; writer?: RelayWriterStatus; delivery_outbox?: DeliveryOutboxStatus; webhook_config?: WebhookConfigStatus; larkagentx?: LarkAgentXStatus; itougu?: ItouguStatus; sources?: GroupRelaySourceStatus[]; summary_listener?: SummaryListenerStatus };
-type GroupRelayRouteForm = { key: string; chat_name: string; chat_id: string; websocket_chat_id: string; tag: string; target_chat_ids: string[]; target_chat_names_text: string; enabled: boolean };
+type GroupRelayStatus = { status?: string; observed_at?: string; enabled?: boolean; interval_seconds?: number; stale_after_seconds?: number; user_oauth_configured?: boolean; user_oauth_scope_audit?: OAuthScopeAudit | null; user_oauth_refresh_expires_at?: string | null; user_oauth_access_expires_at?: string | null; target_configured?: boolean; delivery_verified?: boolean; last_tick_started_at?: string | null; last_tick_completed_at?: string | null; last_tick_error?: string | null; writer?: RelayWriterStatus; delivery_outbox?: DeliveryOutboxStatus; webhook_config?: WebhookConfigStatus; webhook_targets?: WebhookTarget[]; source_tags?: SourceTagStatus[]; larkagentx?: LarkAgentXStatus; itougu?: ItouguStatus; sources?: GroupRelaySourceStatus[]; summary_listener?: SummaryListenerStatus };
+type GroupRelayRouteForm = { key: string; chat_name: string; chat_id: string; websocket_chat_id: string; tag: string; target_chat_ids: string[]; target_chat_names_text: string; enabled: boolean; ingest: boolean };
+type RelayTargetForm = { chat_id: string; websocket_chat_id: string; name: string; webhook_url: string; keyword: string };
 type FeishuCapability = { key: string; label: string; category: string; enabled: boolean; configured: boolean; resource_configured?: boolean; implementation_ready?: boolean; authorization_subject?: 'user' | 'tenant'; authorization_status?: 'verified' | 'missing' | 'unknown' | 'awaiting_verification' | 'not_required'; missing_user_scopes?: string[]; missing_tenant_scopes?: string[]; requires: string[]; note: string };
 type FeishuEventSubscription = { event_type: string; label: string; required_for: string; handler_registered: boolean; state: 'received' | 'awaiting_callback'; received_count?: number; last_received_at?: string | null };
 type FeishuApplicationInspection = { status?: 'not_checked' | 'verified' | 'missing_inspection_scope' | 'error'; checked_at?: string | null; scopes?: string[]; app_status?: number | null; target_chat?: { status?: 'not_checked' | 'not_configured' | 'verified' | 'error'; message?: string }; message?: string };
@@ -27,7 +28,9 @@ type FeishuWorkbenchStatus = { target_configured?: boolean; public_h5_url?: stri
 type FeishuWorkbenchMessage = { source_message_id: string; route_tag: string; source_chat_name?: string | null; message?: { msg_type?: string; body?: { content?: string } }; status: string; workflow_state?: string; workflow_note?: string | null; source_deleted?: boolean; source_create_time?: number; forwarded_at?: string | null; updated_at?: string | null; action_card_message_id?: string | null };
 type WorkbenchIntegrationKind = 'documents' | 'wiki-documents' | 'base-records' | 'calendar-events' | 'approvals';
 
-const defaultRouteForm = (): GroupRelayRouteForm => ({ key: '', chat_name: '', chat_id: '', websocket_chat_id: '', tag: '', target_chat_ids: [], target_chat_names_text: '', enabled: true });
+const defaultRouteForm = (): GroupRelayRouteForm => ({ key: '', chat_name: '', chat_id: '', websocket_chat_id: '', tag: '', target_chat_ids: [], target_chat_names_text: '', enabled: true, ingest: true });
+const defaultTargetForm = (): RelayTargetForm => ({ chat_id: '', websocket_chat_id: '', name: '', webhook_url: '', keyword: '' });
+const normalizeTag = (tag: string) => tag.trim().replace(/^#/, '').toLowerCase();
 
 export function useFeishuRelayWorkspace() {
   const groupRelayStatus = ref<GroupRelayStatus>({ sources: [] });
@@ -45,6 +48,9 @@ export function useFeishuRelayWorkspace() {
   const larkHistoryExporting = ref('');
   const exportBookmarks = ref<Record<string, ExportBookmark>>({});
   const groupRelayRouteForm = ref<GroupRelayRouteForm>(defaultRouteForm());
+  const targetDialog = ref(false);
+  const targetSaving = ref(false);
+  const targetForm = ref<RelayTargetForm>(defaultTargetForm());
   const feishuWorkbench = ref<FeishuWorkbenchStatus>({ capabilities: [] });
   const feishuWorkbenchMessages = ref<FeishuWorkbenchMessage[]>([]);
   const feishuWorkbenchLoading = ref(false);
@@ -122,8 +128,25 @@ export function useFeishuRelayWorkspace() {
     ? `${beijingDayOf(source.saved.first_message_at)} 至 ${beijingDayOf(source.saved.last_message_at)}` : '';
   const pickableGroups = computed(() => joinedGroups.value.filter((group) => group.in_directory));
   const groupOptionLabel = (group: JoinedGroup) => `${group.name || group.chat_id}${group.is_new ? '（新加入）' : ''}${group.route_archived ? `（已退群的路由 #${group.route_tag ?? '?'}，会自动恢复）` : group.source_key ? `（已绑定 #${group.route_tag ?? '?'}）` : ''}`;
-  // Target groups are the ones a webhook is configured for; adding one needs its webhook secret on the server.
-  const relayTargetOptions = computed(() => (groupRelayStatus.value.webhook_config?.keyword_entries ?? []).map((entry) => ({ value: entry.chat_id, label: `${entry.keyword}（…${entry.chat_id.slice(-6)}）` })));
+  // Target groups are the ones a webhook is configured for, on the server or from this page.
+  const relayTargets = computed<WebhookTarget[]>(() => groupRelayStatus.value.webhook_targets
+    ?? (groupRelayStatus.value.webhook_config?.keyword_entries ?? []).map((entry) => ({ chat_id: entry.chat_id, name: null, keyword: entry.keyword, origin: 'env' as const, usable: true })));
+  const relayTargetLabel = (target: WebhookTarget) => `${target.name ?? target.keyword ?? '未命名'}（${target.name && target.keyword ? `${target.keyword} · ` : ''}…${target.chat_id.slice(-6)}）`;
+  const relayTargetOptions = computed(() => relayTargets.value.filter((target) => target.usable).map((target) => ({ value: target.chat_id, label: relayTargetLabel(target) })));
+  // A target entered on this page has a name; one configured on the server is known by its chat id only.
+  const relayTargetName = (chatId: string) => relayTargets.value.find((item) => item.chat_id === chatId)?.name ?? chatId;
+  // Whether a tag's messages reach downstream research data. A tag the registry file declares always does and cannot be changed here.
+  const sourceTag = (tag: string) => groupRelayStatus.value.source_tags?.find((item) => item.tag === normalizeTag(tag));
+  const tagFeedsDownstream = (tag: string) => { const status = sourceTag(tag); return Boolean(status?.registered && status.enabled); };
+  const routeIngestLocked = computed(() => sourceTag(groupRelayRouteForm.value.tag)?.origin === 'file');
+  const routeIngestHint = computed(() => {
+    const tag = normalizeTag(groupRelayRouteForm.value.tag);
+    if (!tag) return '';
+    const status = sourceTag(tag);
+    if (status?.origin === 'file') return `#${tag} 已在登记表里，消息会进入下游研究数据。`;
+    if (!groupRelayRouteForm.value.ingest) return status?.registered && status.enabled ? `取消后，所有 #${tag} 的源群都不再进入下游研究数据，只转发到目标群。` : '只转发到目标群，不进入下游研究数据。';
+    return status?.registered ? `#${tag} 已登记，消息会进入下游研究数据。` : `#${tag} 是新标签，保存时自动登记，不需要发版。`;
+  });
   function pickRouteGroup(chatId: string) {
     const group = joinedGroups.value.find((item) => item.chat_id === chatId);
     groupRelayRouteForm.value.websocket_chat_id = group ? group.chat_id : '';
@@ -380,15 +403,41 @@ export function useFeishuRelayWorkspace() {
     catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
     finally { feishuWorkbenchAction.value = ''; }
   }
+  function openTargetDialog(target?: WebhookTarget) {
+    targetForm.value = target?.chat_id ? { chat_id: target.chat_id, websocket_chat_id: target.websocket_chat_id ?? '', name: target.name ?? '', webhook_url: '', keyword: target.keyword ?? '' } : defaultTargetForm();
+    targetDialog.value = true; void loadJoinedGroups();
+  }
+  function pickTargetGroup(chatId: string) {
+    const group = joinedGroups.value.find((item) => item.chat_id === chatId);
+    targetForm.value.websocket_chat_id = group ? group.chat_id : '';
+    targetForm.value.name = group ? group.name : chatId;
+  }
+  async function saveRelayTarget() {
+    const form = targetForm.value; targetSaving.value = true;
+    try {
+      const { target } = await groupRelayApi.addTarget({ chat_id: form.chat_id || undefined, websocket_chat_id: form.websocket_chat_id || undefined, name: form.name.trim(), webhook_url: form.webhook_url.trim(), keyword: form.keyword.trim() });
+      // The address is not kept in the page once it is saved.
+      targetDialog.value = false; targetForm.value = defaultTargetForm();
+      ElMessage.success(`目标群「${target.name ?? target.chat_id}」已配置，测试消息已发到群里`);
+      await loadGroupRelayStatus();
+      if (groupRelayRouteDialog.value && !groupRelayRouteForm.value.target_chat_ids.includes(target.chat_id)) groupRelayRouteForm.value.target_chat_ids.push(target.chat_id);
+    } catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
+    finally { targetSaving.value = false; }
+  }
+  async function removeRelayTarget(target: WebhookTarget) {
+    try { await ElMessageBox.confirm(`删除目标群「${target.name ?? target.chat_id}」的 webhook 配置？删除后不能再转发到它。`, '删除目标群', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }); } catch { return; }
+    try { await groupRelayApi.removeTarget(target.chat_id); ElMessage.success('目标群已删除'); await loadGroupRelayStatus(); }
+    catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
+  }
   function openCreateGroupRelayRoute(group?: JoinedGroup) {
     groupRelayRouteForm.value = { ...defaultRouteForm(), ...(group?.chat_id ? { chat_name: group.name, websocket_chat_id: group.chat_id } : {}) };
     groupRelayRouteDialog.value = true; void loadJoinedGroups(true);
   }
-  function openEditGroupRelayRoute(route: GroupRelaySourceStatus) { groupRelayRouteForm.value = { key: route.key, chat_name: route.chat_name, chat_id: '', websocket_chat_id: '', tag: route.tag, target_chat_ids: [...(route.target_chat_ids ?? [])], target_chat_names_text: '', enabled: route.enabled !== false }; groupRelayRouteDialog.value = true; void loadJoinedGroups(); }
+  function openEditGroupRelayRoute(route: GroupRelaySourceStatus) { groupRelayRouteForm.value = { key: route.key, chat_name: route.chat_name, chat_id: '', websocket_chat_id: '', tag: route.tag, target_chat_ids: [...(route.target_chat_ids ?? [])], target_chat_names_text: '', enabled: route.enabled !== false, ingest: tagFeedsDownstream(route.tag) }; groupRelayRouteDialog.value = true; void loadJoinedGroups(); }
   async function saveGroupRelayRoute() {
     const form = groupRelayRouteForm.value; groupRelayRouteSaving.value = true;
     try {
-      const saved = await groupRelayApi.upsertRoute<{ route: GroupRelaySourceStatus; websocket_binding?: WebsocketBinding }>(form.key, { chat_name: form.chat_name, chat_id: form.chat_id || undefined, websocket_chat_id: form.websocket_chat_id || undefined, tag: form.tag, target_chat_ids: form.target_chat_ids.map((value) => value.trim()).filter(Boolean), target_chat_names: form.target_chat_names_text.split(',').map((value) => value.trim()).filter(Boolean), enabled: form.enabled });
+      const saved = await groupRelayApi.upsertRoute<{ route: GroupRelaySourceStatus; websocket_binding?: WebsocketBinding }>(form.key, { chat_name: form.chat_name, chat_id: form.chat_id || undefined, websocket_chat_id: form.websocket_chat_id || undefined, tag: form.tag, target_chat_ids: form.target_chat_ids.map((value) => value.trim()).filter(Boolean), target_chat_names: form.target_chat_names_text.split(',').map((value) => value.trim()).filter(Boolean), enabled: form.enabled, ingest: routeIngestLocked.value ? true : form.ingest });
       groupRelayRouteDialog.value = false; reportWebsocketBinding(saved.websocket_binding, form.key ? '源群配置已更新' : '源群已注册，开始在后台读取该群历史'); await loadGroupRelayStatus(); void loadJoinedGroups(true);
     } catch (error) { ElMessage.error(error instanceof Error ? error.message : String(error)); }
     finally { groupRelayRouteSaving.value = false; }
@@ -464,7 +513,7 @@ export function useFeishuRelayWorkspace() {
   return {
     groupRelayStatus, groupRelayLoading, groupRelayError, groupRelayRouteDialog, groupRelayRouteSaving, groupRelayRouteForm, itouguRefreshing, larkHistoryDays, larkHistoryFormat, larkHistorySource, larkHistoryExporting, exportBookmarks, loadExportBookmarks, bookmarkFor, formatBookmarkRange,
     rebindGroupRelayRoute,
-    joinedGroups, joinedGroupsError, joinedGroupsLoading, loadJoinedGroups, refreshJoinedGroupsIfStale, newJoinedGroups, activeSources, leftSources, leftChatIds, savedHasContent, savedContentText, savedSpanText, pickableGroups, groupOptionLabel, relayTargetOptions, pickRouteGroup, historyProgressText, historyProgressTagType,
+    joinedGroups, joinedGroupsError, joinedGroupsLoading, loadJoinedGroups, refreshJoinedGroupsIfStale, newJoinedGroups, activeSources, leftSources, leftChatIds, savedHasContent, savedContentText, savedSpanText, pickableGroups, groupOptionLabel, relayTargetOptions, relayTargets, relayTargetName, tagFeedsDownstream, routeIngestLocked, routeIngestHint, targetDialog, targetSaving, targetForm, openTargetDialog, pickTargetGroup, saveRelayTarget, removeRelayTarget, pickRouteGroup, historyProgressText, historyProgressTagType,
     bundleDialog, bundleRoute, bundleDates, bundlePreview, bundleSource, bundleHasContent, bundleLoading, bundleError, openBundleDialog, previewBundle, downloadBundle,
     qrDialog, qrSession, qrStatusName, qrPolling, startQrLogin, stopQrPolling, authStateType, authStateText,
     oauthDialog, oauthAuthorizeUrl, oauthRedirectUri, oauthCode, oauthSubmitting, startOauthReauth, submitOauthCode, copyOauthUrl, oauthExpiryText, oauthExpiryTagType,

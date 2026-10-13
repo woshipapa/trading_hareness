@@ -74,6 +74,15 @@ export function ingestionStatusBySourceSql() {
 
 export function createLedger(connectionString) {
 	const pool = new Pool(connectionString ? { connectionString, max: 4, idleTimeoutMillis: 30_000 } : { max: 4, idleTimeoutMillis: 30_000 });
+	// One registered source tag: its topic, its publisher and its profile row.
+	async function saveSourceProfile(route, defaultTopicKey = 'general') {
+		const topicKey = route.topic_key ?? defaultTopicKey;
+		await pool.query('INSERT INTO ingestion_topics(topic_key,label) VALUES($1,$2) ON CONFLICT(topic_key) DO NOTHING', [topicKey, topicKey]);
+		await pool.query('INSERT INTO ingestion_publishers(publisher_key,label) VALUES($1,$2) ON CONFLICT(publisher_key) DO NOTHING', [route.publisher_key, route.label ?? route.publisher_key]);
+		await pool.query(`INSERT INTO ingestion_source_profiles(source_tag,topic_key,publisher_key,analyst_id,label,enabled,config) VALUES($1,$2,$3,$4,$5,$6,$7)
+			ON CONFLICT(source_tag) DO UPDATE SET topic_key=EXCLUDED.topic_key,publisher_key=EXCLUDED.publisher_key,analyst_id=EXCLUDED.analyst_id,label=EXCLUDED.label,enabled=EXCLUDED.enabled,config=EXCLUDED.config,updated_at=now()`,
+			[String(route.tag).toLowerCase(), topicKey, route.publisher_key, route.remote_analyst_id, route.label ?? route.tag, route.enabled !== false, route]);
+	}
 	return {
 		async init(registry) {
 			await pool.query(`
@@ -101,6 +110,7 @@ export function createLedger(connectionString) {
 			-- export falls back on once the account is no longer in the group.
 			CREATE TABLE IF NOT EXISTS feishu_group_history_messages (source_chat_id text NOT NULL, source_message_id text NOT NULL, position bigint, source_create_time bigint NOT NULL, message jsonb NOT NULL, fetched_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (source_chat_id, source_message_id));
 			CREATE INDEX IF NOT EXISTS feishu_group_history_messages_time_idx ON feishu_group_history_messages(source_chat_id, source_create_time);
+			CREATE TABLE IF NOT EXISTS feishu_group_relay_webhook_targets (chat_id text PRIMARY KEY, chat_name text NOT NULL, webhook_ciphertext text NOT NULL, keyword text NOT NULL, websocket_chat_id text, verified_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 			ALTER TABLE feishu_group_chat_state ADD COLUMN IF NOT EXISTS removed_route jsonb;
 			ALTER TABLE feishu_group_chat_state ADD COLUMN IF NOT EXISTS route_removed_at timestamptz;
 			CREATE TABLE IF NOT EXISTS feishu_summary_listener_state (listener_key text PRIMARY KEY, chat_id text NOT NULL, cursor_create_time bigint NOT NULL, last_source_create_time bigint, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
@@ -150,13 +160,7 @@ export function createLedger(connectionString) {
 			ALTER TABLE paper_kb_deliveries ADD COLUMN IF NOT EXISTS downstream_status text NOT NULL DEFAULT 'not_applicable';
 				CREATE INDEX IF NOT EXISTS ingestion_assets_sha256_idx ON ingestion_assets(content_sha256);
 			`);
-			for (const route of registry.routes ?? []) {
-				await pool.query('INSERT INTO ingestion_topics(topic_key,label) VALUES($1,$2) ON CONFLICT(topic_key) DO NOTHING', [route.topic_key ?? registry.default_topic_key ?? 'general', route.topic_key ?? registry.default_topic_key ?? 'general']);
-				await pool.query('INSERT INTO ingestion_publishers(publisher_key,label) VALUES($1,$2) ON CONFLICT(publisher_key) DO NOTHING', [route.publisher_key, route.label ?? route.publisher_key]);
-				await pool.query(`INSERT INTO ingestion_source_profiles(source_tag,topic_key,publisher_key,analyst_id,label,enabled,config) VALUES($1,$2,$3,$4,$5,$6,$7)
-					ON CONFLICT(source_tag) DO UPDATE SET topic_key=EXCLUDED.topic_key,publisher_key=EXCLUDED.publisher_key,analyst_id=EXCLUDED.analyst_id,label=EXCLUDED.label,enabled=EXCLUDED.enabled,config=EXCLUDED.config,updated_at=now()`,
-					[String(route.tag).toLowerCase(), route.topic_key ?? registry.default_topic_key ?? 'general', route.publisher_key, route.remote_analyst_id, route.label ?? route.tag, route.enabled !== false, route]);
-			}
+			for (const route of registry.routes ?? []) await saveSourceProfile(route, registry.default_topic_key ?? 'general');
 			// Upgrade recovery: jobs that were durably accepted by the previous
 			// synchronous implementation are eligible for one outbox delivery.
 			await pool.query(`INSERT INTO ingestion_delivery_outbox(job_id,status)
@@ -175,6 +179,27 @@ export function createLedger(connectionString) {
 			if (!messageId) return null;
 			const { rows } = await pool.query('SELECT * FROM ingestion_jobs WHERE message_id=$1', [messageId]);
 			return rows[0] ?? null;
+		},
+		// Source tags registered while running (the dashboard), next to the ones the registry file declares.
+		async sourceProfiles() {
+			const { rows } = await pool.query('SELECT source_tag,topic_key,publisher_key,analyst_id,label,enabled,config FROM ingestion_source_profiles ORDER BY source_tag');
+			return rows;
+		},
+		async saveSourceProfile(route, defaultTopicKey = 'general') { await saveSourceProfile(route, defaultTopicKey); },
+		// Target groups whose custom-bot webhook was entered in the dashboard. The address is stored encrypted.
+		async webhookTargets() {
+			const { rows } = await pool.query('SELECT chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,verified_at,created_at,updated_at FROM feishu_group_relay_webhook_targets ORDER BY created_at,chat_id');
+			return rows;
+		},
+		async saveWebhookTarget({ chatId, chatName, webhookCiphertext, keyword, websocketChatId = null, verifiedAt = null }) {
+			const { rows } = await pool.query(`INSERT INTO feishu_group_relay_webhook_targets(chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,verified_at) VALUES($1,$2,$3,$4,$5,$6)
+				ON CONFLICT(chat_id) DO UPDATE SET chat_name=EXCLUDED.chat_name,webhook_ciphertext=EXCLUDED.webhook_ciphertext,keyword=EXCLUDED.keyword,websocket_chat_id=EXCLUDED.websocket_chat_id,verified_at=EXCLUDED.verified_at,updated_at=now()
+				RETURNING chat_id,chat_name,webhook_ciphertext,keyword,websocket_chat_id,verified_at,created_at,updated_at`, [chatId, chatName, webhookCiphertext, keyword, websocketChatId, verifiedAt]);
+			return rows[0];
+		},
+		async deleteWebhookTarget(chatId) {
+			const { rowCount } = await pool.query('DELETE FROM feishu_group_relay_webhook_targets WHERE chat_id=$1', [chatId]);
+			return rowCount === 1;
 		},
 		async getFeishuUserOauthToken() { const { rows } = await pool.query("SELECT * FROM feishu_user_oauth_tokens WHERE token_key='default'"); return rows[0] ?? null; },
 		async saveFeishuUserOauthToken({ accessCiphertext, refreshCiphertext, accessExpiresAt, refreshExpiresAt, scopes }) {

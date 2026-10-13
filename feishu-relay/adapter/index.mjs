@@ -35,6 +35,8 @@ import { splitUtf8Text } from './media-chunks.mjs';
 import { createRouteBinder, isSummaryChat, resolveLarkAgentXSource, hasLarkAgentXCardPayload, isDirectLarkAgentXRelayType, larkAgentXMessageType, normalizeLarkAgentXMessage, normalizeLarkAgentXRelayMessage, normalizeLarkAgentXSummaryMessage, normalizeLarkAgentXUnsupportedMessage, larkAgentXCardIsDegraded } from './larkagentx-ingress.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
+import { createSourceTags } from './source-tags.mjs';
+import { createWebhookTargets, WEBHOOK_ONLY_TARGET_ID } from './webhook-targets.mjs';
 import { resolveFrontendAssetPath } from './frontend-assets.mjs';
 import { postWebhookWithRetry, retryDelivery, safeDeliveryError } from './paper-delivery-retry.mjs';
 import Busboy from 'busboy';
@@ -209,6 +211,9 @@ const ingestionStorageDir = process.env.INGESTION_STORAGE_DIR ?? '/var/lib/adapt
 mkdirSync(ingestionStorageDir, { recursive: true });
 const ledger = createLedger(process.env.INGESTION_DATABASE_URL || undefined);
 await ledger.init(sourceRegistry);
+// Registry tags plus the ones registered from the dashboard; `sourceRoutes` below is this map.
+const sourceTags = createSourceTags({ registry: sourceRegistry, ledger });
+await sourceTags.load();
 const baiduPanEnabled = String(process.env.BAIDU_PAN_ENABLED ?? 'false').toLowerCase() === 'true';
 const baiduPan = createBaiduPanStorage({
 	appKey: process.env.BAIDU_PAN_APP_KEY,
@@ -257,6 +262,10 @@ if (!['skip_existing', 'forward_existing'].includes(groupRelayBootstrapMode)) {
 // relays' ITOUGU_FEISHU_WEBHOOKS / WECHAT_BIZ_FEISHU_WEBHOOKS.
 const groupRelayWebhooksByChatId = parseRelayMap(process.env.FEISHU_GROUP_RELAY_WEBHOOKS);
 const groupRelayWebhookKeywordsByChatId = parseRelayMap(process.env.FEISHU_GROUP_RELAY_WEBHOOK_KEYWORDS);
+// Targets entered in the dashboard are added to the same two maps, so the relay needs no restart for them.
+const webhookTargets = createWebhookTargets({ ledger, secret: appSecret, webhooks: groupRelayWebhooksByChatId, keywords: groupRelayWebhookKeywordsByChatId });
+const webhookTargetsLoaded = await webhookTargets.load();
+if (webhookTargetsLoaded.unreadable) console.error(`有 ${webhookTargetsLoaded.unreadable} 个看板配置的目标群 webhook 无法解密，需要在看板里重新填写`);
 const groupRelayConfig = {
 	enabled: String(process.env.FEISHU_GROUP_RELAY_ENABLED ?? 'true').toLowerCase() !== 'false',
 	webhooksByChatId: groupRelayWebhooksByChatId,
@@ -586,7 +595,7 @@ setInterval(() => {
 	})();
 }, Math.max(60, Number(process.env.LARKX_HEALTH_WATCH_SECONDS ?? 60)) * 1000).unref();
 void reconcileNow().catch((error) => console.error(`启动对账失败：${error instanceof Error ? error.message : String(error)}`));
-const sourceRoutes = new Map((sourceRegistry.routes ?? []).map((route) => [String(route.tag).toLowerCase(), route]));
+const sourceRoutes = sourceTags.routes;
 const supportedMediaTypes = new Set([
 	'image/jpeg', 'image/png', 'image/webp', 'audio/mp4', 'audio/x-m4a',
 	'audio/mpeg', 'audio/wav', 'audio/x-wav', 'video/mp4', 'video/quicktime',
@@ -612,9 +621,13 @@ function routeFromMessageText(messageText) {
 	return resolveRoute(match?.[1]);
 }
 
-const relayRouteOptions = [...sourceRoutes.values()]
+// Rendered when the page is served: tags can be registered while running, and a
+// label typed in the dashboard is text, not markup.
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+const RELAY_ROUTE_OPTIONS_SLOT = '<!--relay-route-options-->';
+const relayRouteOptions = () => [...sourceRoutes.values()]
 	.filter((route) => route.enabled !== false)
-	.map((route) => `<option value="${route.tag}">#${route.tag} · ${route.label}</option>`)
+	.map((route) => `<option value="${escapeHtml(route.tag)}">#${escapeHtml(route.tag)} · ${escapeHtml(route.label)}</option>`)
 	.join('');
 
 function extractPostPayload(content) {
@@ -983,7 +996,7 @@ const relayHtml = `<!doctype html>
   :root{color-scheme:dark;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1020;color:#edf2ff}body{margin:0}main{max-width:820px;margin:0 auto;padding:36px 24px 64px}header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:26px}h1{margin:0;font-size:29px}p{color:#aab7d4;line-height:1.6}a{color:#8eb3ff}form{background:#131b31;border:1px solid #263452;border-radius:14px;padding:22px;display:grid;gap:18px}label{display:grid;gap:8px;color:#cbd7f2;font-size:14px}select,input,textarea,button{font:inherit;border-radius:9px;border:1px solid #405276;background:#0b1020;color:#edf2ff;padding:10px 12px}textarea{min-height:190px;resize:vertical;line-height:1.55}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.drop{border:1px dashed #5272ad;border-radius:10px;padding:20px;text-align:center;color:#aab7d4}.drop.drag{background:#17274a;border-color:#8eb3ff}.files{margin:0;padding-left:20px;color:#cbd7f2;font-size:14px}.files:empty{display:none}button{cursor:pointer;background:#3268c6;border:0;font-weight:700}button:disabled{opacity:.65;cursor:wait}#result{min-height:22px;color:#aab7d4}.ok{color:#82efb7}.bad{color:#ffb6c5}.hint{font-size:13px;color:#8fa0c3;margin:0}.tag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 </style></head><body><main>
 <header><div><h1>本机消息投递台</h1><p>从飞书、微信或网页复制文字；拖入或粘贴图片/音频后直接进入市场复盘工作流。</p></div><a href="/">查看处理监控</a></header>
-<form id="relay"><div class="row"><label>路由标签<select id="tag">${relayRouteOptions}</select></label><label>来源备注（可选）<input id="source" maxlength="120" placeholder="如：微信个人群 / 飞书群 A" /></label></div>
+<form id="relay"><div class="row"><label>路由标签<select id="tag">${RELAY_ROUTE_OPTIONS_SLOT}</select></label><label>来源备注（可选）<input id="source" maxlength="120" placeholder="如：微信个人群 / 飞书群 A" /></label></div>
 <div class="row"><label>指定日期（可选）<input id="date" type="date" /></label><label>指定时间（可选）<input id="time" type="time" /></label></div>
 <label>正文<textarea id="text" placeholder="粘贴消息正文。若不指定日期和时间，按本机收到内容时的北京时间记录。"></textarea><button id="fillClipboard" type="button">填入当前剪贴板文字</button></label>
 <div id="drop" class="drop" tabindex="0">拖入图片、音频或视频，或在此页面直接粘贴媒体。<br /><span class="hint">支持多文件；单个媒体受本地入口大小限制。</span><br /><input id="file" type="file" accept="image/jpeg,image/png,image/webp,audio/mp4,audio/x-m4a,audio/mpeg,audio/wav,audio/x-wav,video/mp4,video/quicktime" multiple /></div><ul id="files" class="files"></ul>
@@ -1707,6 +1720,8 @@ async function groupRelayDashboardStatus() {
 		user_oauth_scope_audit: oauth.scope_audit ?? null,
 		user_oauth_refresh_expires_at: oauth.refresh_expires_at ?? null, user_oauth_access_expires_at: oauth.access_expires_at ?? null,
 		webhook_config: webhookConfigStatus(groupRelayWebhooksByChatId, groupRelayWebhookKeywordsByChatId),
+		webhook_targets: webhookTargets.list(),
+		source_tags: sourceTags.list(),
 		larkagentx,
 		itougu,
 		delivery_verified: sources.filter((source) => source.enabled).every((source) => source.delivery_state === 'verified'),
@@ -2289,7 +2304,7 @@ async function resolveRelayRouteInput(payload, current = null) {
 	const rawTargets = payload?.target_chat_ids === undefined ? current?.targetChatIds ?? [] : payload.target_chat_ids;
 	if (!Array.isArray(rawTargets) || rawTargets.length > 8) throw new Error('目标群必须是至多 8 个 chat_id 的数组');
 	const targetChatIds = [...new Set(rawTargets.map((value) => String(value ?? '').trim()).filter(Boolean))];
-	if (targetChatIds.some((value) => !/^oc_[A-Za-z0-9]+$/.test(value))) throw new Error('目标群 chat_id 格式无效');
+	if (targetChatIds.some((value) => !/^oc_[A-Za-z0-9]+$/.test(value) && !(WEBHOOK_ONLY_TARGET_ID.test(value) && webhookTargets.has(value)))) throw new Error('目标群 chat_id 格式无效，或该目标群的 webhook 已被删除');
 	const rawTargetNames = payload?.target_chat_names === undefined ? [] : payload.target_chat_names;
 	if (!Array.isArray(rawTargetNames) || rawTargetNames.length > 8) throw new Error('目标群名称必须是至多 8 个群名的数组');
 	const targetChatNames = [...new Set(rawTargetNames.map((value) => String(value ?? '').trim()).filter(Boolean))];
@@ -2356,7 +2371,24 @@ async function resolveRelayRouteInput(payload, current = null) {
 async function createRelayRoute(payload) {
 	const route = await resolveRelayRouteInput(payload);
 	await refuseGroupBoundElsewhere(payload?.websocket_chat_id, null);
-	return ledger.createRelayRoute({ sourceKey: `relay_${randomUUID().replaceAll('-', '')}`, ...route });
+	const created = await ledger.createRelayRoute({ sourceKey: `relay_${randomUUID().replaceAll('-', '')}`, ...route });
+	await applyDownstreamChoice(created, payload, true);
+	return created;
+}
+
+// Whether the route's tag feeds downstream research data.  A new source group
+// does unless the request says otherwise (user rule of 2026-10-11); an edit
+// changes it only when the request says so.  The tag is registered here, so a
+// tag never used before needs no registry edit and no release.
+async function applyDownstreamChoice(route, payload, isNew) {
+	const choice = payload?.ingest === undefined ? (isNew ? true : null) : payload.ingest !== false;
+	if (choice === null) return;
+	if (choice) {
+		const registered = await sourceTags.register({ tag: route.tag, label: String(payload?.label ?? '').trim() || route.chatName });
+		if (registered.created) console.log(`来源标签 #${route.tag} 已登记进下游研究数据（来自看板，源群 ${route.chatName}）`);
+	} else {
+		await sourceTags.setEnabled(route.tag, false);
+	}
 }
 
 // One group feeds one route.  Checked before the route is saved, so a refusal
@@ -2385,6 +2417,8 @@ async function updateRelayRoute(sourceKey, payload) {
 	if (!current) return null;
 	const route = await resolveRelayRouteInput(payload, current);
 	await refuseGroupBoundElsewhere(payload?.websocket_chat_id, sourceKey);
+	// Before the route is saved: a refused choice must not leave a half-applied edit.
+	await applyDownstreamChoice(route, payload, false);
 	return ledger.updateRelayRoute(sourceKey, route);
 }
 
@@ -2556,6 +2590,31 @@ const dashboard = createServer((request, response) => {
 				sync: groupSync.status(),
 			}));
 		})().catch((error) => response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
+		return;
+	}
+	if (url.pathname === '/api/group-relay/targets' && request.method === 'GET') {
+		response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+		response.end(JSON.stringify({ targets: webhookTargets.list() }));
+		return;
+	}
+	if (url.pathname === '/api/group-relay/targets' && request.method === 'POST') {
+		// Saving sends one test message to the group through the webhook; a
+		// webhook that refuses it is not stored.
+		void readJsonBody(request, 16 * 1024).then(async (payload) => {
+			const target = await webhookTargets.add({ name: payload?.name, webhookUrl: payload?.webhook_url, keyword: payload?.keyword, websocketChatId: payload?.websocket_chat_id, chatId: payload?.chat_id });
+			console.log(`目标群 ${target.name}（${target.chat_id}）的 webhook 已由看板配置并通过测试`);
+			response.writeHead(201, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+			response.end(JSON.stringify({ target }));
+		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
+		return;
+	}
+	const relayTargetMatch = /^\/api\/group-relay\/targets\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
+	if (relayTargetMatch && request.method === 'DELETE') {
+		void ledger.relayRoutes().then(async (routes) => {
+			const removed = await webhookTargets.remove(relayTargetMatch[1], { routes });
+			if (!removed) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '目标群不存在' })); return; }
+			response.writeHead(204, { 'cache-control': 'no-store' }).end();
+		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
 		return;
 	}
 	if (url.pathname === '/api/group-relay/routes' && request.method === 'GET') {
@@ -2970,7 +3029,7 @@ if (url.pathname === '/health') {
 	}
 	if (url.pathname === '/relay') {
 		response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-		response.end(relayHtml);
+		response.end(relayHtml.replace(RELAY_ROUTE_OPTIONS_SLOT, relayRouteOptions));
 		return;
 	}
 	if (url.pathname === '/') {

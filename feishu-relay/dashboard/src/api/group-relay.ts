@@ -11,7 +11,22 @@ export type GroupRelayRouteInput = {
   target_chat_ids?: string[];
   target_chat_names?: string[];
   enabled: boolean;
+  /** Whether the tag's messages feed downstream research data; a tag never used before is registered on save. */
+  ingest?: boolean;
 };
+
+/** A group the relay can send to through a custom-bot webhook. The address itself is never returned. */
+export type WebhookTarget = {
+  chat_id: string; name: string | null; keyword: string | null;
+  /** 'env' is configured on the server and read-only here; 'dashboard' was entered on this page. */
+  origin: 'env' | 'dashboard';
+  /** false when the stored address can no longer be read and must be entered again. */
+  usable: boolean;
+  websocket_chat_id?: string | null; verified_at?: string | null; created_at?: string | null;
+};
+export type WebhookTargetInput = { chat_id?: string; websocket_chat_id?: string; name: string; webhook_url: string; keyword: string };
+/** Downstream registration of one source tag. */
+export type SourceTagStatus = { tag: string; registered: boolean; enabled: boolean; origin: 'file' | 'dashboard' | null; label: string | null };
 
 export type ExportFormat = 'transcript' | 'ndjson';
 
@@ -138,4 +153,7 @@ export const groupRelayApi = {
   chats: (refresh = false) => getJson<JoinedGroupsResponse>(`/api/group-relay/chats${refresh ? '?refresh=1' : ''}`),
   bindRoute: <T>(key: string) => postJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}/bind`, {}),
   removeRoute: <T>(key: string) => deleteJson<T>(`/api/group-relay/routes/${encodeURIComponent(key)}`),
+  // Saving sends one test message to the group; a webhook that refuses it is not stored.
+  addTarget: (input: WebhookTargetInput) => postJson<{ target: WebhookTarget }>('/api/group-relay/targets', input),
+  removeTarget: <T>(chatId: string) => deleteJson<T>(`/api/group-relay/targets/${encodeURIComponent(chatId)}`),
 };

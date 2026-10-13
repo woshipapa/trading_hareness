@@ -42,11 +42,15 @@ const dashboard = useFeishuDashboardWorkspace();
         </el-select>
       </el-form-item>
       <el-form-item label="转发标签" required><el-input v-model="dashboard.groupRelayRouteForm.tag" maxlength="32" placeholder="例如：quanneng"><template #prepend>#</template></el-input></el-form-item>
+      <el-form-item label="下游研究数据">
+        <el-checkbox :model-value="dashboard.routeIngestLocked ? true : dashboard.groupRelayRouteForm.ingest" :disabled="dashboard.routeIngestLocked" @change="(value: unknown) => { dashboard.groupRelayRouteForm.ingest = Boolean(value); }">这个标签的消息进入下游研究数据</el-checkbox>
+        <el-text v-if="dashboard.routeIngestHint" size="small" type="info" style="display: block; width: 100%">{{ dashboard.routeIngestHint }}</el-text>
+      </el-form-item>
       <el-form-item label="转发到的目标群">
         <el-select v-model="dashboard.groupRelayRouteForm.target_chat_ids" multiple filterable allow-create default-first-option placeholder="选择目标群（可多选）" style="width: 100%">
           <el-option v-for="target in dashboard.relayTargetOptions" :key="target.value" :value="target.value" :label="target.label" />
         </el-select>
-        <el-text size="small" type="info">列表里是已配置好 webhook 的目标群；新增一个目标群需要先在服务器上配置它的 webhook。</el-text>
+        <el-text size="small" type="info">列表里是已配置好 webhook 的目标群。要转发到一个新的群：<el-button link type="primary" @click="dashboard.openTargetDialog()">新增目标群</el-button></el-text>
       </el-form-item>
       <el-collapse class="section-gap"><el-collapse-item title="高级（一般不用填）">
         <el-form-item label="源群官方 chat_id（仅 OAuth 补读用）"><el-input v-model="dashboard.groupRelayRouteForm.chat_id" placeholder="oc_xxx" /></el-form-item>
@@ -55,6 +59,20 @@ const dashboard = useFeishuDashboardWorkspace();
       <el-form-item label="状态"><el-switch v-model="dashboard.groupRelayRouteForm.enabled" active-text="启用监听" inactive-text="停用监听" /></el-form-item>
     </el-form>
     <template #footer><el-button @click="dashboard.groupRelayRouteDialog = false">取消</el-button><el-button type="primary" :loading="dashboard.groupRelayRouteSaving" @click="dashboard.saveGroupRelayRoute">保存</el-button></template>
+  </el-dialog>
+
+  <el-dialog v-model="dashboard.targetDialog" :title="dashboard.targetForm.chat_id ? '更换目标群的 webhook' : '新增目标群'" width="560px" destroy-on-close append-to-body>
+    <el-form label-position="top" @submit.prevent="dashboard.saveRelayTarget">
+      <el-alert title="先在飞书里打开目标群：设置 → 群机器人 → 添加机器人 → 自定义机器人，安全设置选“自定义关键词”。再把机器人的 webhook 地址和关键词填到这里。保存时会向该群发一条测试消息，发不出去就不保存。" type="info" :closable="false" show-icon class="section-gap" />
+      <el-form-item label="目标群" required>
+        <el-select :model-value="dashboard.targetForm.websocket_chat_id || dashboard.targetForm.name" filterable allow-create default-first-option :loading="dashboard.joinedGroupsLoading" placeholder="选择已加入的群，或输入群名" style="width: 100%" @change="dashboard.pickTargetGroup">
+          <el-option v-for="group in dashboard.pickableGroups" :key="group.chat_id" :value="group.chat_id" :label="group.name || group.chat_id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="机器人 webhook 地址" required><el-input v-model="dashboard.targetForm.webhook_url" type="password" show-password autocomplete="off" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" /></el-form-item>
+      <el-form-item label="关键词" required><el-input v-model="dashboard.targetForm.keyword" maxlength="40" placeholder="机器人安全设置里填的自定义关键词" /></el-form-item>
+    </el-form>
+    <template #footer><el-button @click="dashboard.targetDialog = false">取消</el-button><el-button type="primary" :loading="dashboard.targetSaving" @click="dashboard.saveRelayTarget">发测试消息并保存</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="dashboard.bundleDialog" :title="`导出资料包 · ${dashboard.bundleRoute?.chat_name ?? ''}`" width="560px" destroy-on-close>
