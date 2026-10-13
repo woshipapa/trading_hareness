@@ -7,7 +7,7 @@
 - branch: integration/relay-auto
 - head: 53ccf010
 - release: edge 中继 `hotfix-20261013T145534Z-53ccf010c296-27015`（七项功能在线；会员到期提醒在这一版之前发不出去，见 Log 22:55 的更正）
-- next: 等其余模块的真实数据库检查（Running）出结果并处理；用户在看板上改完 anqiang 群剩下的 7 个会员后，按用户的意思打开或不打开每天自动审查；用户第一次真实使用时核对没在线上看到的事（Open questions）。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified`
+- next: 用户在看板上改完 anqiang 群剩下的 7 个会员后，按用户的意思打开或不打开每天自动审查；用户第一次真实使用时核对没在线上看到的事（Open questions）。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified`
 - updated: 2026-10-13
 
 ## Requirements
@@ -162,6 +162,11 @@
   这期间没有群开过自动审查，所以没有漏掉该发的提醒。真实的一次提醒（审查实际发送）仍没在线上见过，记在 Open questions。
 - 2026-10-13 23:00 其余模块（送达核对、加急、建群、登记表、成员、入群链接、webhook 目标、来源标签）的 SQL 同样只在假数据库上测过。派了一个只读的子任务，按同样的办法在临时数据库上逐条跑（见 Running）；待办 B051。
   另记待办 B052：会员期限只能填整月，表达不了“到 12 月底”；个人资料里的备注信息读不到。
+- 2026-10-13 23:05 子任务返回：其余八个模块在真实 PostgreSQL 16 上用 node-pg、真的 `ledger.mjs`（`createLedger` 加 `init`）跑，61 步全部通过，没有失败的语句
+  （`delivery-check` 12 步、`target-registry` 11、`urgent-alerts` 9、`webhook-targets` 12、`source-tags` 9、`target-groups`/`target-members`/`join-link` 合 8——后三个自己不发 SQL）。
+  本会话把六个探测脚本各重跑一遍，结果相同（`docs/work/probes/2026-10-13-adapter-pg-probe/rerun.out.txt`，61 行 ok）。“每个发 SQL 的位置都被执行到”是子任务报告里的逐行表
+  （同目录 `REPORT.md`），本会话没有逐行复核。这些模块没有 `date` 列；时间列读回是 `Date`，经 JSON 变成 ISO 串；`delivery_id` 读回是字符串，看板的类型是 `number | string`。
+  没查的：并发和加锁、真实的 bridge 和 webhook、`ledger.mjs` 的其余部分。B051 关闭。
 
 ## Waiting on the user
 
@@ -208,7 +213,7 @@
 - [x] 2026-10-13 21:10 三个调用 → 21:35 前全部完成并合并（见 Log）。原说明：三个 Codex 调用在跑（都挂在会话 eac0e1fc 上）：members 补丁（线程 01a1348e，工作区 `n8n-relay-auto-members`）；urgent 的四条修正（线程 01a13490）；
   membership 的五条修正（线程 01a13494）。Codex 的调用有时会提前返回空内容或上一轮的结果，而会话其实还在干活：以工作区的提交和 `git status` 为准，
   不要因为返回为空就重发。结束标志：各工作区有新提交且干净。之后：见 `next`。
-- [ ] 2026-10-13 23:00 只读子任务：把 `delivery-check`、`urgent-alerts`、`target-groups`、`target-registry`、`target-members`、`join-link`、`webhook-targets`、`source-tags`
+- [x] 2026-10-13 23:00 只读子任务 → 23:05 返回：61 步全部通过，没有失败的语句（见 Log）；临时数据库已删。原说明：把 `delivery-check`、`urgent-alerts`、`target-groups`、`target-registry`、`target-members`、`join-link`、`webhook-targets`、`source-tags`
   的每条 SQL 在本地临时 PostgreSQL（docker 容器 `w010-pg-scratch`，`127.0.0.1:55432`）上用 node-pg 跑一遍。输出：本机 scratchpad 的 `pg_probe/REPORT.md`（会话临时目录，结论要抄进本记录）。
   结束标志：子任务返回。之后：有失败的语句就在集成分支修、补测试、热更新；把探测脚本和结果存进 `docs/work/probes/`；`docker rm -f w010-pg-scratch`；关 B051。
   挂在会话 eac0e1fc 上，会话结束它就停：接手者按 `2026-10-13-memberships-pg-probe.mjs` 的办法自己重做。

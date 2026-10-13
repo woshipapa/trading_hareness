@@ -1,0 +1,67 @@
+ok   load (only file profile stored, no dashboard origin): 1
+ok   register new tag: {"tag":"newtag","registered":true,"enabled":true,"origin":"dashboard","label":"新标签","created":true}
+ok   register same tag again: {"tag":"newtag","registered":true,"enabled":true,"origin":"dashboard","label":"新标签","created":false}
+ok   disable dashboard tag: {"tag":"newtag","registered":true,"enabled":false,"origin":"dashboard","label":"新标签"}
+ok   register re-enables: {"tag":"newtag","registered":true,"enabled":true,"origin":"dashboard","label":"新标签","created":false}
+ok   disable again: {"tag":"newtag","registered":true,"enabled":false,"origin":"dashboard","label":"新标签"}
+ok   stored profile shape: [["filetag",true,"object",null],["newtag",false,"object","dashboard"]]
+ok   restart: load picks dashboard tag with its enabled=false: [{"tag":"filetag","registered":true,"enabled":true,"origin":"file","label":"文件标签"},{"tag":"newtag","registered":true,"enabled":false,"origin":"dashboard","label":"新标签"}]
+ok   enable after restart: {"tag":"newtag","registered":true,"enabled":true,"origin":"dashboard","label":"新标签"}
+steps=9 failed=0
+ok   load on empty table: {"loaded":0,"unreadable":0}
+ok   add (typed address, new id): {"chat_id":"wh_b066a1b14a53b6beb6f49431","name":"手填群","keyword":"转发","origin":"dashboard","usable":true,"managed":false,"websocket_chat_id":"123456789","verified_at":"2026-10-13T02:30:00.000Z","created_at":"2026-10-13T15:01:48.621Z"}
+ok   add again same group replaces (upsert path): {"chat_id":"wh_b066a1b14a53b6beb6f49431","name":"手填群改名","keyword":"转发","origin":"dashboard","usable":true,"managed":false,"websocket_chat_id":"123456789","verified_at":"2026-10-13T02:30:00.000Z","created_at":"2026-10-13T15:01:48.621Z"}
+ok   addManaged: {"chat_id":"wh_f2052371cd5115b118a7b410","name":"托管群","keyword":"转发","origin":"dashboard","usable":true,"managed":true,"websocket_chat_id":"987654321","verified_at":"2026-10-13T02:30:00.000Z","created_at":"2026-10-13T15:01:48.625Z","bot_created":true}
+ok   stored row: types observed: [{"id":"wh_b066a1b14a53b6beb6f49431","managed":false,"verified_at":[true,"2026-10-13T02:30:00.000Z"],"created_at_is_Date":true},{"id":"wh_f2052371cd5115b118a7b410","managed":true,"verified_at":[true,"2026-10-13T02:30:00.000Z"],"created_at_is_Date":true}]
+ok   load after restart (rows decrypted, verified_at as Date): {"loaded":2,"unreadable":0}
+ok   list after restart (asIso of Date): [["oc_en",null,null,false],["wh_b0","2026-10-13T02:30:00.000Z","2026-10-13T15:01:48.621Z",false],["wh_f2","2026-10-13T02:30:00.000Z","2026-10-13T15:01:48.625Z",true]]
+ok   sendText: 4
+ok   remove typed target: {"removed":true,"bot_removed":null}
+ok   remove managed target (bot removed): [{"removed":true,"bot_removed":true},[{"chatId":"987654321","botId":"bot9"}]]
+ok   remove unknown id: false
+ok   rows left: 0
+steps=12 failed=0
+ok   start on empty table -> resolve: [1,1]
+ok   stored row types: [["wh_9d",true,true,"2026-10-13T02:30:00.000Z"]]
+ok   start again (count>0, no resolve): 0
+ok   GET list route: [["wh_17","B群",null,null],["wh_9d","A群(名)","7",true]]
+ok   POST resolve route: 2
+ok   record (explicit resolved_at as string): "wh_17"
+ok   record (no resolved_at, non-string ids): 1
+ok   get: "B2"
+ok   forget: null
+ok   resolve with empty bridge answer returns list: 2
+ok   start swallows a db error (table dropped): "目标群识别失败：relation \"feishu_group_relay_target_groups\" does not exist"
+steps=11 failed=0
+ok   record delivery (src m1): 1
+ok   record delivery (src m2, other text): 1
+ok   record non-text is skipped: 1
+ok   observed: match m1 (30 s later): {"status":"ok","matched":true}
+ok   observed: replay of the same target message: {"status":"ok","matched":false}
+ok   observed: no candidate: {"status":"ok","matched":false}
+ok   observed: match m2: {"status":"ok","matched":true}
+ok   recallDeliveries m1 (success path -> UPDATE recalled_at): 1
+ok   recallDeliveries m2 (failure path -> UPDATE recall_error): 1
+ok   recallDeliveries again selects nothing: 0
+ok   deliveries route: counts + rows: {"counts":{"matched":2,"unmatched":0,"recalled":1,"recall_failed":1},"n":2,"sent_at_type":"Date","delivery_id_type":"string","recalled":[["m1",true,null],["m2",false,"recall refused"]]}
+ok   start (observe list sent): [{"chats":[{"chat_id":"111111","bot_ids":["7"]}]}]
+steps=12 failed=0
+ok   GET settings (no row -> defaults): {"enabled":false,"chat_id":"","user_id":"","name":""}
+ok   PUT settings enabled with recipient (jsonb object param): {"enabled":true,"chat_id":"555","user_id":"666","name":"值班"}
+ok   PUT settings again (ON CONFLICT update): "值班2"
+ok   PUT settings, disabled, empty recipient: false
+ok   stored jsonb type: [{"t":"object","value":{"name":"","chat_id":"","enabled":false,"user_id":""}}]
+ok   PUT enabled again, then notify: true
+ok   notify when disabled: false
+ok   test route: {"status":"ok"}
+ok   recipients route (no SQL): {"recipients":[{"chat_id":"555","user_id":"666"}]}
+steps=9 failed=0
+ok   create group (webhook-targets save + registry write): ["wh_33",true,1]
+ok   registry row stored: 1
+ok   invite for target: {"invite":{"link":"https://x/invite"}}
+ok   members list: {"status":"ok"}
+ok   members history with cursor: {"status":"ok"}
+ok   applications: {"status":"ok"}
+ok   member remove: {"status":"ok"}
+ok   join link info + join: 2
+steps=8 failed=0

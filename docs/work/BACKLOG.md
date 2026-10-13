@@ -463,7 +463,7 @@
 
 ### B051 W010 其余 adapter 模块的 SQL 没在真实 PostgreSQL 上跑过
 
-- state: doing
+- state: done
 - kind: follow-up
 - stream: W010
 - why: 会员模块的三处问题（`date` 列读成 `Date`、参数被推断成 interval、提前返回盖住报错）都是手写的假数据库测不出来的；`delivery-check`、`urgent-alerts`、`target-groups`、`target-registry`、`target-members`、`join-link`、`webhook-targets`、`source-tags` 是同一种测法
@@ -471,6 +471,7 @@
 - who: agent
 - needs: 无
 - updated: 2026-10-13
+- result: 2026-10-13 23:05 八个模块 61 步全部通过，没有要修的语句；脚本和输出在 `docs/work/probes/2026-10-13-adapter-pg-probe/`。没查并发和加锁
 
 ### B052 会员期限：指定到期日；读个人资料里的备注信息
 
