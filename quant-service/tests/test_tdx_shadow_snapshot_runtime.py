@@ -473,6 +473,7 @@ class TdxShadowSummaryTests(unittest.TestCase):
         self.assertEqual(result["judged_minutes"], 1)
         self.assertEqual(result["judged_minutes_agree"], 1)
         self.assertEqual(result["judged_agreement_share"], 1.0)
+        self.assertEqual((result["provider_key"], result["capability"]), ("tdx_public", "quote.all_a_snapshot"))
         self.assertEqual(result["not_judged_minutes"], 1)
         self.assertEqual(result["rows_without_data_times"], 1)
         self.assertFalse(result["session_passes"])
