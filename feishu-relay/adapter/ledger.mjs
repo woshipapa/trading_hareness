@@ -84,6 +84,7 @@ export function createLedger(connectionString) {
 			[String(route.tag).toLowerCase(), topicKey, route.publisher_key, route.remote_analyst_id, route.label ?? route.tag, route.enabled !== false, route]);
 	}
 	return {
+		query: (text, params) => pool.query(text, params),
 		async init(registry) {
 			await pool.query(`
 				CREATE EXTENSION IF NOT EXISTS pgcrypto;
