@@ -42,7 +42,7 @@
 ## Due
 
 - [x] 2026-10-13 15:20 先确认 owner 主机是否恢复（BACKLOG B031 写了现象和检查命令）。没恢复就提醒用户看云控制台；恢复后先读负载和内存、弄清原因，再做下面 18:45 那条。 → 17:29 已恢复（中转服务器 17:00 前后重启过，原因没有告知；见 BACKLOG B031 note6），17:41 又发布了 `owner-code-20261013-04`（2026-10-13）
-- [ ] 2026-10-13 19:30 核对该阶段第一次自动运行（盘后流程 18:45 才开始，早查只会看到“没有收据”）：读 `fetch_runs` 里能力 `daily_close_completion` 的回执（状态、各分类计数、剩下的股票和原因）；抽查补上的日线有没有涨跌停价和因子；健康检查 `data.daily_bars_complete`（`curl http://127.0.0.1:18300/api/research/indicators/health`）。阶段没跑或 `blocked`：查原因；当天缺口可用本机 `state/research/owner_repairs_20261012/` 里验证过的脚本手工补（写库由用户执行）。
+- [ ] 2026-10-13 19:30 核对该阶段第一次自动运行（盘后流程 18:45 才开始，早查只会看到“没有收据”）：读 `fetch_runs` 里能力 `daily_close_completion` 的回执（状态、各分类计数、剩下的股票和原因）；抽查补上的日线有没有涨跌停价和因子；健康检查 `data.daily_bars_complete`（`curl http://127.0.0.1:18300/api/research/indicators/health`）。阶段没跑或 `blocked`：查原因；当天缺口可用本机 `state/research/owner_repairs_20261012/` 里验证过的脚本手工补（写库由用户执行）。 2026-10-13 18:30 补充：主会话排了一条后台命令，19:30 用 `docs/work/probes/2026-10-13-post-close-stages.py` 读当晚各阶段的回执，存到 `docs/work/probes/2026-10-13-post-close-stages.1930.out.txt`（这个探针直接读 owner 读路径的 `automation/runs`，可以随时手工重跑）。18:15 那次已看到：当天 16:02 跑过一轮，其中 `adjustment_factors` 失败、没有 `daily_close_completion` 的回执；要看 18:45 这一轮。
 
 ## Evidence
 

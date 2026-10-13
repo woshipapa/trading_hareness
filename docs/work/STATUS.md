@@ -23,7 +23,7 @@
 ## 到点要做
 
 - W001 2026-10-13 19:30 核对当晚盘后自动生成的涨停榜和风险分读数（明早 09:15 的竞价池从 10 月 13 日的风险分读数取昨日涨停股）：`curl 'http://127.0.0.1:18300/api/research/market/limit-up-risk/daily'` 返回的 `reading.trade_date` 应是 2026-10-13。没有的话看盘后流程是否运行，以及 owner 主机是否正常（BACKLOG B031）。
-- W003 2026-10-13 19:30 核对该阶段第一次自动运行（盘后流程 18:45 才开始，早查只会看到“没有收据”）：读 `fetch_runs` 里能力 `daily_close_completion` 的回执（状态、各分类计数、剩下的股票和原因）；抽查补上的日线有没有涨跌停价和因子；健康检查 `data.daily_bars_complete`（`curl http://127.0.0.1:18300/api/research/indicators/health`）。阶段没跑或 `blocked`：查原因；当天缺口可用本机 `state/research/owner_repairs_20261012/` 里验证过的脚本手工补（写库由用户执行）。
+- W003 2026-10-13 19:30 核对该阶段第一次自动运行（盘后流程 18:45 才开始，早查只会看到“没有收据”）：读 `fetch_runs` 里能力 `daily_close_completion` 的回执（状态、各分类计数、剩下的股票和原因）；抽查补上的日线有没有涨跌停价和因子；健康检查 `data.daily_bars_complete`（`curl http://127.0.0.1:18300/api/research/indicators/health`）。阶段没跑或 `blocked`：查原因；当天缺口可用本机 `state/research/owner_repairs_20261012/` 里验证过的脚本手工补（写库由用户执行）。 2026-10-13 18:30 补充：主会话排了一条后台命令，19:30 用 `docs/work/probes/2026-10-13-post-close-stages.py` 读当晚各阶段的回执，存到 `docs/work/probes/2026-10-13-post-close-stages.1930.out.txt`（这个探针直接读 owner 读路径的 `automation/runs`，可以随时手工重跑）。18:15 那次已看到：当天 16:02 跑过一轮，其中 `adjustment_factors` 失败、没有 `daily_close_completion` 的回执；要看 18:45 这一轮。
 - W006 2026-10-13 22:06 owner 发布窗口重开（今天 15:10–18:45 也开着，但 16 步做不完）。若 16 步、双重评审和合并都已完成：备好包装脚本交给用户执行，发布后先做历史回放的干跑。没完成就顺延到 10 月 14 日 11:30–13:00 或 15:10–18:45。本线要发三个单元：owner 纯代码（`quant-service/app/tactic_*.py` 等在纯代码白名单里）、edge 中继（`research-routes.mjs` 新增三条路由）、edge 控制台（新页签）；owner 发布要求提交已在 origin/main，所以包装脚本里先 `git push`。
 - W008 2026-10-14 09:16 发布后第一个交易时段：核对两条采集循环按新节拍落库。只读查 owner（探针写法见 `docs/work/README.md`）：`quant.raw_market_observations` 里当天 `fuyao_ths` / `a_share_minute_cross_section` 和 `tdx_public` / `a_share_minute_cross_section_shadow` 的 `effective_at`，09:15 起每分钟各一份、秒数稳定（主源在第 50 秒之后几秒、通达信在第 52 秒之后），没有漏分钟。异常（没有文档、或漏得比原来多）立刻告诉用户：回滚命令是把 `owner-code-20261013-03` 重新发布，但 08:30–11:30 是不能发布的窗口，要用户决定是否破例。收盘后跑当日汇总看可判分钟数和是否达标，记为 5 个交易日观察的第 1 天。
 - W006 2026-10-14 09:26 （10 月 13 日晚没发布的话，这条和下一条顺延到发布后的第一个交易日）发布后的第一个交易日：核对竞价看板读数已存、与 09:25 处置表同一批股票，页面可见。
@@ -35,6 +35,7 @@
 - W006 2026-10-13 18:18 Codex 实现者在做第 9 步的修正第 1 部分（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 2673fd39 之后有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上；主会话结束它就停，判断死活和续派的办法见 Resume here。
 - W008 2026-10-13 18:24 Codex 评审者（只读）在评审 `codex/tdx-promote-gate`（`git diff 26170231...HEAD`，4 个提交、7 个文件），工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate`。结束标志：它交回 APPROVED / WARNING / BLOCKED。之后见 next。挂在主会话 93ba6e1d 上；主会话不在了就重新发起一次只读评审（提示词要点在 Log）。
 - W007 2026-10-13 18:28 Codex 在做研究第 1 步，新线程（交回时才知道线程号），harvest 工作区 `/Users/papa/codebase/.codex-wt/n8n-v-reversal-study`，分支 `codex/v-reversal-study`，基点 2703af84。产出：`docs/archive/2026-10-13-v-reversal-study/`（脚本、输出、`01-notes.md`、事件表 CSV），派生表在本机 `state/research/vshape_20261013/derived/`。结束标志：分支有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上；主会话结束它就停，判断死活的办法见 `docs/work/README.md`，续派用 `codex-reply` 接同一线程（线程号用 `codex-trace.py --list` 按工作区找）。
+- W007 2026-10-13 18:30 续取已排好（主会话的后台命令）：等到 20:30，先查一次 owner 的 `/health`，不是 200 就不启动并说明；是 200 就用同一条命令续取，带 `--until=23:30`。结束标志同上（日志末行 FINISHED / PAUSED / ABORT）。主会话结束它就没了：那时按 next 手工重跑。
 - W010 2026-10-13 20:05 六条功能线的看板一步并行在跑（各用自己的实现线程续派；工作区都已合入集成分支 0e20e6f0）：
 
 ## 待办清单
