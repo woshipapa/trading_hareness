@@ -51,13 +51,19 @@
   D 的指纹要用最终发出的文字并加一项探测 P0-8；本机跳过的 bridge 测试由 edge 套件把关；R 不筛掉非群主的目标群）。r2 交第二轮。
 - 2026-10-13 17:20 方案审查三轮结束：第二轮把 bridge 给 D 的钩子改成不影响原处理的旁路、两处记录调用不等待不外传失败、观察名单定时下发；
   第三轮把“目标群变了”的通知收进 `targetRegistry` 自己的写方法。方案 r4 已提交。等用户做派工前的确认。
+- 2026-10-13 17:32 P0-7、P0-6 试通，输出 `docs/work/probes/2026-10-13-relay-auto-p0-c.out.txt`：
+  `PutChatChatter {chatId, chatterIds}` 成功（响应键 `chat`、`chatChatterVersion`），成员列表里出现被拉的人；`DeleteChatChatter` 同样成功，人已不在。
+  发文字是命令 5（`PutMessage`），响应里读不到现成的消息编号，脚本用“读该会话最新的、发送者是本账号的消息”取到编号；
+  `PutUrgent {messageId, chatterIds, urgentType: 'APP', chatId}` 成功，响应 `{urgent: {messageId, type: 1, sendTime, fromId}, chatterIds, urgentAckIds: {<对方>: <ackId>}}`；
+  `PullUrgentsAckStatus {messageIds}` 返回 `urgentAcks[<messageId>].urgentAckList[]`，每项有 `ackId`、`toId`、`type`、`status`、`phoneStatus`。
+  至此 P0-1 至 P0-7 全部通过，方案里没有因探测失败要拿掉的功能；P0-8 按方案在 base 合并后做。
 
 ## Waiting on the user
 
 - [x] 2026-10-13 是否同意方案并允许把它写成文件、交给 Codex 审查和执行 → 「同意了，我是trust的」（2026-10-13）。原问题：其中派工前的线上探测有两项会打扰到用户本人的账号
   （一次应用内加急；一次被拉进自测群再移出）。为什么等：权限分类器把写方案文件判为需要用户确认的操作；探测会影响用户本人的账号。
   之后：方案落盘 → Codex 审查 → 再给用户看审查后的版本和每个工作区的处置，得到同意后才派工。
-- [ ] 2026-10-13 运行 `! bash docs/work/probes/2026-10-13-relay-auto-p0-c.sh`（P0-6 加急、P0-7 拉人和移除）。为什么等：这两项会通知用户本人的飞书账号，
+- [x] 2026-10-13 运行 P0-6、P0-7 的脚本 → 用户在对话里发了这条命令（前面带空格，没有被当作 shell 命令执行），本会话据此代为运行，17:32 完成，两项都通过（见 Log）。原说明：运行 `! bash docs/work/probes/2026-10-13-relay-auto-p0-c.sh`（P0-6 加急、P0-7 拉人和移除）。为什么等：这两项会通知用户本人的飞书账号，
   agent 执行被权限分类器拒绝。之后：读同目录生成的 `…-p0-c.out.txt`，把结果并进 `WEB_GATEWAY.md`；不运行的话，U（加急）和 M 里的“移除成员”
   按没试过处理——要么从方案里拿掉，要么上线后由用户第一次使用时验收。
 - [ ] 2026-10-13 看过方案审查后的改动，同意派工（codex-flow 的派工前确认）。之后：建集成分支 `integration/relay-auto`，写 `WEB_GATEWAY.md`，派 base 线。
@@ -84,9 +90,9 @@
 
 ## Resume here
 
-方案已批准并落盘（r1），线上探测 P0-1 至 P0-5 已做完并存档；还没有建集成分支，也没有派工，仓库里没有本线的代码改动。
-接手先看 Waiting on the user 的两项和 Running 的一项。P0-6、P0-7 只能由用户运行脚本，不要自己再试，也不要换别的办法绕过权限分类器。
-“中继自测群”（7696053062053530578）是留着的试验场，已是看板目标群，可以用它做以后的验收；探测 P0-1 不要再跑（会再建一个群）。
-`feishu-relay/bridge/WEB_GATEWAY.md` 还没写：内容来自 `docs/work/probes/2026-10-13-relay-auto-p0.out.txt` 和
-`docs/work/probes/2026-10-13-web-gateway-messages.out.txt`，要提交在集成分支上。
-按 codex-flow：审查后的改动给用户看过并得到同意，才能建工作区派工。
+方案 r4 已批准、审查完（三轮，12 条全部采纳）并落盘；线上探测 P0-1 至 P0-7 全部通过并存档。还没有建集成分支，也没有派工，
+仓库里没有本线的代码改动。唯一在等的是用户对“派工”的确认（Waiting on the user 里没勾的那一项）。
+得到确认后的第一步见 `next`：建 `integration/relay-auto`，把三份探测输出（`docs/work/probes/2026-10-13-relay-auto-p0.out.txt`、
+`…-p0-c.out.txt`、`…-web-gateway-messages.out.txt`）整理成 `feishu-relay/bridge/WEB_GATEWAY.md` 提交在集成分支上，再派 base 线。
+不要再跑 P0-1（会再建一个群）和 P0-c 脚本（会再打扰用户一次）。“中继自测群”（7696053062053530578）是留着的试验场，已是看板目标群。
+codex-flow 的要求照做：实现者用 `danger-full-access`，每步 15 分钟以内，双重评审，合并要用户同意，结束时回收工作区并报告 token 开销。
