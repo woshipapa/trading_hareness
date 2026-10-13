@@ -55,6 +55,17 @@ function escapedName(value) {
 	return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
+// node-pg returns a `date` column as a Date at local midnight. Read it back with the local getters, the exact
+// inverse, so the module compares and answers with calendar dates (`YYYY-MM-DD`) whatever the process time zone is.
+function dateText(value) {
+	if (!(value instanceof Date)) return value ?? null;
+	return `${String(value.getFullYear()).padStart(4, '0')}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+}
+
+function memberRow(row) {
+	return { ...row, started_on: dateText(row.started_on), expires_on: dateText(row.expires_on), reminded_on: dateText(row.reminded_on) };
+}
+
 function memberStatus(row, today, exempt) {
 	if (exempt) return '已豁免';
 	if (row.left_at) return '已离群';
@@ -81,7 +92,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 			target_chat_id: String(row.target_chat_id), enabled: row.enabled === true,
 			default_term_months: Number(row.default_term_months), remind_text: String(row.remind_text),
 			exempt_user_ids: Array.isArray(row.exempt_user_ids) ? row.exempt_user_ids.map(String) : [],
-			last_review_on: row.last_review_on ?? null,
+			last_review_on: dateText(row.last_review_on),
 		};
 	}
 
@@ -95,7 +106,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 
 	async function rows(chatId) {
 		const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE target_chat_id=$1 ORDER BY started_on,user_id`, [String(chatId)]);
-		return result.rows;
+		return result.rows.map(memberRow);
 	}
 
 	async function sync(chatId) {
@@ -133,17 +144,16 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 	async function review(chatId, { dryRun = false } = {}) {
 		await target(chatId);
 		const config = await settings(chatId);
-		if (!config.enabled) return [];
 		await sync(chatId);
 		const today = shanghaiDate(now());
 		const claimAt = now();
 		const candidateSql = `target_chat_id=$1 AND expires_on <= $2 AND left_at IS NULL AND reminded_on IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3 - interval '10 minutes') AND NOT EXISTS (SELECT 1 FROM ${SETTINGS_TABLE} s WHERE s.target_chat_id=${MEMBERSHIP_TABLE}.target_chat_id AND ${MEMBERSHIP_TABLE}.user_id = ANY (SELECT jsonb_array_elements_text(s.exempt_user_ids)))`;
 		if (dryRun) {
 			const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE ${candidateSql} ORDER BY user_id`, [String(chatId), today, claimAt]);
-			return publicRows(result.rows, config, today);
+			return publicRows(result.rows.map(memberRow), config, today);
 		}
 		const claimed = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE ${candidateSql} RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), today, claimAt]);
-		const members = claimed.rows;
+		const members = claimed.rows.map(memberRow);
 		for (let offset = 0; offset < members.length; offset += 20) {
 			const batch = members.slice(offset, offset + 20);
 			const ids = batch.map((row) => String(row.user_id));
@@ -172,11 +182,11 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		if (exemptIds) {
 			const result = await ledger.query(`WITH updated_member AS (UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at), updated_settings AS (UPDATE ${SETTINGS_TABLE} SET exempt_user_ids=$8::jsonb WHERE target_chat_id=$1 AND EXISTS (SELECT 1 FROM updated_member) RETURNING target_chat_id) SELECT updated_member.* FROM updated_member JOIN updated_settings USING (target_chat_id)`, [String(chatId), String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now(), JSON.stringify([...exemptIds])]);
 			if (!result.rows[0]) throw new Error('会员不存在，请先同步成员');
-			return result.rows[0];
+			return memberRow(result.rows[0]);
 		}
 		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now()]);
 		if (!result.rows[0]) throw new Error('会员不存在，请先同步成员');
-		return result.rows[0];
+		return memberRow(result.rows[0]);
 	}
 
 	function exemptIds(value) {
@@ -205,7 +215,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		const claimAt = now();
 		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2 AND expires_on <= $4 AND left_at IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3 - interval '10 minutes') RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), String(userId), claimAt, today]);
 		if (!result.rows[0]) throw new Error('会员未到期、已离群或正在提醒中');
-		const row = result.rows[0];
+		const row = memberRow(result.rows[0]);
 		if (config.exempt_user_ids.includes(String(userId))) {
 			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL WHERE target_chat_id=$1 AND user_id=$2`, [String(chatId), String(userId)]);
 			throw new Error('该会员已豁免提醒');
@@ -236,7 +246,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 			if (hour < 9) return;
 			for (const item of targets) {
 				const setting = enabled.get(String(item.chat_id));
-				if (!setting || setting.last_review_on === today) continue;
+				if (!setting || dateText(setting.last_review_on) === today) continue;
 				if ((retryAfter.get(String(item.chat_id))?.getTime() ?? 0) > current.getTime()) continue;
 				try {
 					await review(item.chat_id);
