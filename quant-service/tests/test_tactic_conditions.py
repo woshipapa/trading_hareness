@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, timedelta
 
-from app.tactic_conditions import build_day_context, build_trial_row, history_features
+from app.tactic_conditions import CONDITIONS, build_auction_row, build_day_context, build_trial_row, evaluate_conditions, history_features
 
 
 class TacticConditionsTests(unittest.TestCase):
@@ -77,6 +77,73 @@ class TacticConditionsTests(unittest.TestCase):
             "limit_up_count": 3, "boards_3plus_count": 2, "market_turnover": 2.1e12,
             "market_turnover_median60": 1.9e12, "prev_top_board_sealed_again": False,
         })
+
+    def test_condition_registry_and_close_evaluation(self):
+        close = {
+            "symbol": "000001.SZ", "sector": "Theme", "theme_count": 10, "boards": 3,
+            "first_seal_time": "15:00:00", "seal_money": 10_000_000, "vr": 3,
+            "turnover_vs_max250": 1, "sealed_from_open": False, "reopened": True,
+            "runup_20": 0.4, "turnover": 10_000_000_000, "close_vs_high60": 0.1,
+            "main_net": -1, "risk_rank": 80, "cost_share_below_close": 0.95,
+            "cost_share_0_30_above": 0.3,
+        }
+        other = {**close, "symbol": "000002.SZ", "boards": 1, "first_seal_time": "15:30:00"}
+        evaluated = evaluate_conditions([close, other], {
+            "boards_3plus_count": 6, "limit_up_count": 21, "market_turnover": 2.1e12,
+            "market_turnover_median60": 2.0e12, "prev_top_board_sealed_again": False,
+        }, "close")
+        flags = set(evaluated["rows"][0]["flags"])
+        self.assertIn("theme_big", flags)
+        self.assertIn("theme_leader_earliest", flags)
+        self.assertIn("theme_leader_top_board", flags)
+        self.assertIn("market_top_board", flags)
+        self.assertIn("seal_late", flags)
+        self.assertIn("reopened", flags)
+        self.assertEqual(set(evaluated["day"]["flags"]), {"env_ladder_ok", "env_turnover_2p1", "env_turnover_above_median60", "env_top_board_failed"})
+        self.assertEqual({condition.key for condition in CONDITIONS}, {
+            "theme_big", "theme_7plus", "theme_lone", "theme_leader_earliest", "theme_leader_top_board",
+            "market_top_board", "board_2_3", "board_4plus", "board_6plus", "seal_small", "seal_large",
+            "volume_heavy", "volume_shrunk", "amount_record_250", "seal_late", "seal_early",
+            "sealed_from_open", "reopened", "runup_40", "turnover_10bn", "above_high60", "main_net_out",
+            "risk_top_fifth", "catch_up_first_board", "cost_above_band", "cost_overhead_heavy",
+            "env_ladder_ok", "env_turnover_2p1", "env_turnover_above_median60", "env_top_board_failed",
+            "opens_at_limit", "gap_down_2", "gap_up_5_not_sealed", "gap_3_to_8", "gap_0_to_5",
+            "auction_amount_top5", "auction_burst", "board_gap_below_typical",
+        })
+
+        unknown = {**close, "theme_count": None, "vr": None, "first_seal_time": None}
+        unknown_result = evaluate_conditions([unknown], {
+            "boards_3plus_count": None, "limit_up_count": None, "market_turnover": None,
+            "market_turnover_median60": None, "prev_top_board_sealed_again": None,
+        }, "close")
+        self.assertIn("theme_big", unknown_result["rows"][0]["unknown"])
+        self.assertIn("volume_heavy", unknown_result["rows"][0]["unknown"])
+        self.assertIn("env_ladder_ok", unknown_result["day"]["unknown"])
+
+    def test_auction_builder_and_prev_condition_evaluation(self):
+        previous = {"complete": True, "flags": ["theme_big"], "unknown": ["seal_small"], "turnover": 1_000_000}
+        pool = [
+            {"symbol": "000001.SZ", "name": "A", "open": 10.6, "gap": 0.06, "opens_at_limit": False,
+             "bucket": "5-8", "risk_rank": 80, "boards": 2, "sealed_from_open": False,
+             "amount": 500_000, "volume": 10, "unmatched": 2},
+            {"symbol": "000002.SZ", "amount": 100_000},
+            {"symbol": "000003.SZ", "amount": None},
+        ]
+        row = build_auction_row(pool[0], pool, previous)
+        evaluated = evaluate_conditions([row], {}, "auction")["rows"][0]
+        self.assertEqual(row["gap_bucket"], "5-8")
+        self.assertEqual(row["board_bucket"], "2")
+        self.assertEqual(row["auction_amount_rank"], 1)
+        self.assertIn("gap_up_5_not_sealed", evaluated["flags"])
+        self.assertIn("auction_amount_top5", evaluated["flags"])
+        self.assertIn("prev.theme_big", evaluated["flags"])
+        self.assertIn("prev.seal_small", evaluated["unknown"])
+        self.assertNotIn("prev.theme_7plus", evaluated["flags"])
+
+        missing = build_auction_row({**pool[0], "amount": None}, pool, None)
+        missing_result = evaluate_conditions([missing], {}, "auction")["rows"][0]
+        self.assertIn("auction_amount_top5", missing_result["unknown"])
+        self.assertIn("prev.theme_big", missing_result["unknown"])
 
 
 if __name__ == "__main__":

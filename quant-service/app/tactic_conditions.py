@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from math import pow
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .limit_up_risk import _seal_minutes, _seal_time
 
@@ -11,6 +12,20 @@ HISTORY_FIELDS = (
     "vr", "turnover_vs_max250", "runup_20", "close_vs_high60",
     "cost_share_below_close", "cost_share_0_30_above",
 )
+ConditionTest = Callable[[Mapping[str, Any]], bool | None]
+
+
+@dataclass(frozen=True)
+class Condition:
+    key: str
+    name: str
+    slot: str
+    level: str
+    test: ConditionTest
+    source: str
+    claim: int
+    claim_outcome: int
+    history: Mapping[str, str]
 
 
 def _price(row: Mapping[str, Any], field: str, adjusted: bool) -> float:
@@ -119,4 +134,221 @@ def build_day_context(
     }
 
 
-__all__ = ["HISTORY_FIELDS", "build_day_context", "build_trial_row", "history_features"]
+def _value(row: Mapping[str, Any], key: str) -> Any:
+    return row.get(key)
+
+
+def _compare(row: Mapping[str, Any], key: str, predicate: Callable[[float], bool]) -> bool | None:
+    value = _value(row, key)
+    return None if value is None else predicate(float(value))
+
+
+def _seal_seconds(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        hours, minutes, seconds = (float(part) for part in value.split(":"))
+        return hours * 3600 + minutes * 60 + seconds
+    return _seal_time(value).hour * 3600 + _seal_time(value).minute * 60 + _seal_time(value).second
+
+
+def _seal_before(row: Mapping[str, Any], hour: int, minute: int = 0) -> bool | None:
+    seal = _seal_seconds(_value(row, "first_seal_time"))
+    return None if seal is None else seal < hour * 3600 + minute * 60
+
+
+def _seal_at_or_after(row: Mapping[str, Any], hour: int, minute: int = 0) -> bool | None:
+    seal = _seal_seconds(_value(row, "first_seal_time"))
+    return None if seal is None else seal >= hour * 3600 + minute * 60
+
+
+def _history(status: str, text: str) -> dict[str, str]:
+    return {"status": status, "text": text}
+
+
+def _condition(
+    key: str, name: str, slot: str, level: str, test: ConditionTest, source: str, claim: int, status: str, text: str,
+) -> Condition:
+    return Condition(key, name, slot, level, test, source, claim, claim, _history(status, text))
+
+
+def _bool_field(key: str, expected: bool) -> ConditionTest:
+    def test(row: Mapping[str, Any]) -> bool | None:
+        value = _value(row, key)
+        return None if value is None else bool(value) is expected
+    return test
+
+
+def _gap_and(row: Mapping[str, Any], predicate: Callable[[float], bool]) -> bool | None:
+    return _compare(row, "gap", predicate)
+
+
+def _prev_turnover(row: Mapping[str, Any]) -> float | None:
+    previous = row.get("prev")
+    return None if previous is None else previous.get("turnover")
+
+
+def _close_conditions() -> tuple[Condition, ...]:
+    return (
+        _condition("theme_big", "大题材", "close", "stock", lambda r: _compare(r, "theme_count", lambda v: v >= 10), "teacher:R06", 1, "holds", "题材数量支持"),
+        _condition("theme_7plus", "七只以上题材", "close", "stock", lambda r: _compare(r, "theme_count", lambda v: v >= 7), "study", 1, "holds", "题材数量支持"),
+        _condition("theme_lone", "小题材", "close", "stock", lambda r: _compare(r, "theme_count", lambda v: v <= 3), "teacher:R06/R07", 1, "holds", "收益比较支持"),
+        _condition("theme_leader_earliest", "题材最早封板", "close", "stock", lambda r: r.get("_theme_leader_earliest"), "teacher:R01/R21", 1, "holds", "持有者比较支持"),
+        _condition("theme_leader_top_board", "题材最高板", "close", "stock", lambda r: r.get("_theme_leader_top_board"), "teacher:R01", 1, "holds", "部分比较支持"),
+        _condition("market_top_board", "市场最高板", "close", "stock", lambda r: r.get("_market_top_board"), "teacher:R11", 1, "holds", "持有者比较支持"),
+        _condition("board_2_3", "二至三板", "close", "stock", lambda r: _compare(r, "boards", lambda v: 2 <= v <= 3), "teacher:R11", 1, "mixed", "板数比较混合"),
+        _condition("board_4plus", "四板以上", "close", "stock", lambda r: _compare(r, "boards", lambda v: v >= 4), "teacher:R11", 1, "mixed", "板数比较混合"),
+        _condition("board_6plus", "六板以上", "close", "stock", lambda r: _compare(r, "boards", lambda v: v >= 6), "teacher:R11", 1, "mixed", "板数比较混合"),
+        _condition("seal_small", "封单小", "close", "stock", lambda r: _compare(r, "seal_money", lambda v: v < 20_000_000), "teacher:R20", 1, "holds", "封单比较支持"),
+        _condition("seal_large", "封单大", "close", "stock", lambda r: _compare(r, "seal_money", lambda v: v >= 300_000_000), "teacher:R20", 1, "mixed", "封单比较混合"),
+        _condition("volume_heavy", "放量", "close", "stock", lambda r: _compare(r, "vr", lambda v: v >= 3), "teacher:R15/R27", 1, "holds", "成交量比较支持"),
+        _condition("volume_shrunk", "缩量", "close", "stock", lambda r: _compare(r, "vr", lambda v: v < 1), "teacher:R19", 1, "mixed", "成交量比较混合"),
+        _condition("amount_record_250", "成交额创纪录", "close", "stock", lambda r: _compare(r, "turnover_vs_max250", lambda v: v >= 1), "teacher:R34", -1, "against", "次日收益相反"),
+        _condition("seal_late", "晚封板", "close", "stock", lambda r: _seal_at_or_after(r, 14, 30), "teacher:R21", 1, "holds", "封板时间比较支持"),
+        _condition("seal_early", "早封板", "close", "stock", lambda r: (
+            None if _seal_before(r, 10) is None or r.get("sealed_from_open") is None
+            else _seal_before(r, 10) and not r["sealed_from_open"]
+        ), "teacher:R21", 1, "untested", "尚无样本结论"),
+        _condition("sealed_from_open", "竞价封板", "close", "stock", _bool_field("sealed_from_open", True), "teacher:R17", 1, "holds", "竞价封板比较支持"),
+        _condition("reopened", "开板回封", "close", "stock", _bool_field("reopened", True), "teacher:R18/R22", -1, "against", "比较结果相反"),
+        _condition("runup_40", "二十日涨幅高", "close", "stock", lambda r: _compare(r, "runup_20", lambda v: v >= 0.40), "teacher:R49", 1, "holds", "大亏损比较支持"),
+        _condition("turnover_10bn", "成交额百亿", "close", "stock", lambda r: _compare(r, "turnover", lambda v: v >= 10_000_000_000), "teacher:R36", 1, "mixed", "成交额比较混合"),
+        _condition("above_high60", "突破六十日高", "close", "stock", lambda r: _compare(r, "close_vs_high60", lambda v: v > 0), "teacher:R31", 1, "mixed", "比较结果混合"),
+        _condition("main_net_out", "主力净流出", "close", "stock", lambda r: _compare(r, "main_net", lambda v: v < 0), "study", 1, "holds", "比较结果支持"),
+        _condition("risk_top_fifth", "风险前五分之一", "close", "stock", lambda r: _compare(r, "risk_rank", lambda v: v >= 80), "study", 1, "holds", "风险分层支持"),
+        _condition("catch_up_first_board", "题材补涨首板", "close", "stock", lambda r: r.get("_catch_up_first_board"), "practice", 1, "mixed", "比较结果混合"),
+        _condition("cost_above_band", "成本带上方", "close", "stock", lambda r: _compare(r, "cost_share_below_close", lambda v: v >= 0.95), "practice (筹码)", 1, "mixed", "成本代理比较混合"),
+        _condition("cost_overhead_heavy", "成本上方密集", "close", "stock", lambda r: _compare(r, "cost_share_0_30_above", lambda v: v >= 0.30), "practice (筹码)", 1, "mixed", "成本代理比较混合"),
+    )
+
+
+def _day_conditions() -> tuple[Condition, ...]:
+    return (
+        _condition("env_ladder_ok", "梯队环境", "close", "day", lambda r: (
+            None if r.get("boards_3plus_count") is None or r.get("limit_up_count") is None
+            else r["boards_3plus_count"] > 5 and r["limit_up_count"] > 20
+        ), "teacher:R13", -1, "against", "环境条件比较相反"),
+        _condition("env_turnover_2p1", "市场成交额高", "close", "day", lambda r: _compare(r, "market_turnover", lambda v: v >= 2.1e12), "teacher:R38", -1, "against", "环境条件比较相反"),
+        _condition("env_turnover_above_median60", "成交额高于六十日中位数", "close", "day", lambda r: (
+            None if r.get("market_turnover") is None or r.get("market_turnover_median60") is None
+            else r["market_turnover"] > r["market_turnover_median60"]
+        ), "study", 1, "untested", "尚无样本结论"),
+        _condition("env_top_board_failed", "最高板未回封", "close", "day", lambda r: _bool_field("prev_top_board_sealed_again", False)(r), "study", 1, "mixed", "环境比较混合"),
+    )
+
+
+def _auction_conditions() -> tuple[Condition, ...]:
+    return (
+        _condition("opens_at_limit", "竞价涨停开", "auction", "stock", _bool_field("opens_at_limit", True), "teacher:R17", 1, "holds", "竞价比较支持"),
+        _condition("gap_down_2", "低开二点", "auction", "stock", lambda r: _gap_and(r, lambda v: v < -0.02), "study", 1, "holds", "低开比较支持"),
+        _condition("gap_up_5_not_sealed", "高开五点未封", "auction", "stock", lambda r: (
+            None if _value(r, "opens_at_limit") is None or _value(r, "gap") is None
+            else r["gap"] >= 0.05 and not r["opens_at_limit"]
+        ), "teacher:R23", 1, "holds", "高开比较支持"),
+        _condition("gap_3_to_8", "高开三至八点", "auction", "stock", lambda r: _gap_and(r, lambda v: 0.03 <= v < 0.08), "teacher:R23", -1, "against", "买入收益相反"),
+        _condition("gap_0_to_5", "平开至高开五点", "auction", "stock", lambda r: _gap_and(r, lambda v: 0 <= v < 0.05), "study", 1, "untested", "尚无样本结论"),
+        _condition("auction_amount_top5", "竞价金额前五", "auction", "stock", lambda r: _compare(r, "auction_amount_rank", lambda v: v <= 5), "study", 1, "mixed", "竞价比较混合"),
+        _condition("auction_burst", "竞价放大", "auction", "stock", lambda r: (
+            None if _value(r, "amount") is None or _prev_turnover(r) is None
+            else r["amount"] >= 0.217 * _prev_turnover(r)
+        ), "practice", 1, "mixed", "竞价比较混合"),
+        _condition("board_gap_below_typical", "板数对应低开", "auction", "stock", lambda r: (
+            None if any(_value(r, key) is None for key in ("boards", "gap", "opens_at_limit"))
+            else r["boards"] >= 2 and not r["opens_at_limit"] and r["gap"] < (0.0543 if r["boards"] == 2 else 0.0860)
+        ), "study", 1, "mixed", "竞价比较混合"),
+    )
+
+
+CONDITIONS = _close_conditions() + _day_conditions() + _auction_conditions()
+
+
+def build_auction_row(
+    row: Mapping[str, Any], pool: Sequence[Mapping[str, Any]], previous_close: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    amount = row.get("amount")
+    ranked = sorted(
+        (item for item in pool if item.get("amount") is not None),
+        key=lambda item: (-float(item["amount"]), str(item["symbol"])),
+    )
+    rank = next((index for index, item in enumerate(ranked, 1) if item["symbol"] == row["symbol"]), None)
+    boards = row.get("boards")
+    return {
+        "symbol": row["symbol"], "name": row.get("name"), "open": row.get("open"), "gap": row.get("gap"),
+        "opens_at_limit": row.get("opens_at_limit"), "gap_bucket": row.get("bucket"),
+        "risk_rank": row.get("risk_rank"), "boards": boards,
+        "board_bucket": _board_bucket(float(boards)) if boards is not None else None,
+        "sealed_from_open": row.get("sealed_from_open"), "amount": amount, "volume": row.get("volume"),
+        "unmatched": row.get("unmatched"), "auction_amount_rank": rank if amount is not None else None,
+        "prev": previous_close,
+    }
+
+
+def _derived_close(row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> dict[str, bool | None]:
+    sector = row.get("sector")
+    theme = [item for item in rows if item.get("sector") == sector]
+    if sector is None or any(item.get("boards") is None or item.get("first_seal_time") is None for item in theme):
+        leader_earliest = leader_top = catch_up = None
+    elif len(theme) < 2:
+        leader_earliest = leader_top = catch_up = None
+    else:
+        earliest = min(theme, key=lambda item: (_seal_seconds(item.get("first_seal_time")), -float(item["boards"]), item["symbol"]))
+        top = min(theme, key=lambda item: (-float(item["boards"]), _seal_seconds(item.get("first_seal_time")), item["symbol"]))
+        leader_earliest = row["symbol"] == earliest["symbol"]
+        leader_top = row["symbol"] == top["symbol"]
+        catch_up = float(row["boards"]) == 1 and float(top["boards"]) >= 3
+    market_top = None if not rows else (
+        None if any(item.get("boards") is None for item in rows) else float(row["boards"]) == max(float(item["boards"]) for item in rows) and float(row["boards"]) >= 3
+    )
+    return {
+        "_theme_leader_earliest": leader_earliest, "_theme_leader_top_board": leader_top,
+        "_market_top_board": market_top, "_catch_up_first_board": catch_up,
+    }
+
+
+def _condition_value(condition: Condition, row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> bool | None:
+    return condition.test({**row, **_derived_close(row, rows)})
+
+
+def evaluate_conditions(
+    rows: Sequence[Mapping[str, Any]], day_context: Mapping[str, Any], slot: str,
+) -> dict[str, Any]:
+    stock_conditions = tuple(condition for condition in CONDITIONS if condition.level == "stock" and condition.slot == slot)
+    day_conditions = tuple(condition for condition in CONDITIONS if condition.level == "day" and condition.slot == slot)
+    evaluated_rows = []
+    for source in rows:
+        row = dict(source)
+        flags: list[str] = []
+        unknown: list[str] = []
+        for condition in stock_conditions:
+            value = _condition_value(condition, row, rows)
+            if value is True:
+                flags.append(condition.key)
+            elif value is None:
+                unknown.append(condition.key)
+        if slot == "auction":
+            previous = row.get("prev")
+            for condition in _close_conditions():
+                key = f"prev.{condition.key}"
+                if previous is None or not previous.get("complete", True):
+                    unknown.append(key)
+                elif condition.key in previous.get("flags", []):
+                    flags.append(key)
+                elif condition.key in previous.get("unknown", []):
+                    unknown.append(key)
+        row["flags"], row["unknown"] = flags, unknown
+        evaluated_rows.append(row)
+    day_flags: list[str] = []
+    day_unknown: list[str] = []
+    for condition in day_conditions:
+        value = condition.test(day_context)
+        if value is True:
+            day_flags.append(condition.key)
+        elif value is None:
+            day_unknown.append(condition.key)
+    return {"rows": evaluated_rows, "day": {"flags": day_flags, "unknown": day_unknown}}
+
+
+__all__ = [
+    "CONDITIONS", "Condition", "HISTORY_FIELDS", "build_auction_row", "build_day_context", "build_trial_row",
+    "evaluate_conditions", "history_features",
+]
