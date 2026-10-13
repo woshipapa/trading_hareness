@@ -259,7 +259,28 @@ def _auction_conditions() -> tuple[Condition, ...]:
     )
 
 
-CONDITIONS = _close_conditions() + _day_conditions() + _auction_conditions()
+def _role_condition(key: str, name: str, test_key: str, source: str, claim: int, status: str, text: str) -> Condition:
+    return _condition(key, name, "close", "stock", lambda row: row.get(test_key), source, claim, status, text)
+
+
+def _ladder_conditions() -> tuple[Condition, ...]:
+    return (
+        _role_condition("tier_first", "同梯队最早", "_tier_first", "teacher:R12", 1, "holds", "梯队比较支持"),
+        _role_condition("front_row", "前排卡位", "_front_row", "teacher:R03", 1, "holds", "位置比较支持"),
+        _role_condition("kawei_leader", "卡位龙头", "_kawei_leader", "teacher:R03", 1, "holds", "位置比较支持"),
+        _role_condition("leader_switch", "龙头切换", "_leader_switch", "practice", 1, "mixed", "比较结果混合"),
+        _role_condition("assist", "助攻", "_assist", "teacher:R07/R21", 1, "mixed", "比较结果混合"),
+        _role_condition("back_row", "后排", "_back_row", "teacher:R07", -1, "holds", "弱势比较支持"),
+        _role_condition("sole_high_board", "独苗高标", "_sole_high_board", "practice", -1, "against", "没有差异"),
+        _role_condition("ladder_full", "梯队完整", "_ladder_full", "practice", 1, "mixed", "比较结果混合"),
+        _role_condition("weak_to_strong", "弱转强", "_weak_to_strong", "practice", -1, "against", "比较结果相反"),
+        _role_condition("divergence_to_consensus", "分歧转一致", "_divergence_to_consensus", "teacher:R17/R18", 1, "holds", "持有者比较支持"),
+        _role_condition("consensus_to_divergence", "一致转分歧", "_consensus_to_divergence", "teacher:R17/R18", -1, "holds", "风险比较支持"),
+        _role_condition("rebound_board", "反包", "_rebound_board", "teacher:R14", -1, "holds", "大亏损比较支持"),
+    )
+
+
+CONDITIONS = _close_conditions() + _day_conditions() + _auction_conditions() + _ladder_conditions()
 
 
 def build_auction_row(
@@ -305,22 +326,127 @@ def _derived_close(row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) ->
     }
 
 
-def _condition_value(condition: Condition, row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> bool | None:
-    return condition.test({**row, **_derived_close(row, rows)})
+def _condition_value(
+    condition: Condition, row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], role_values: Mapping[str, Any] | None = None,
+) -> bool | None:
+    return condition.test({**row, **_derived_close(row, rows), **(role_values or {})})
+
+
+def _complete_rows(reading: Mapping[str, Any] | None) -> list[Mapping[str, Any]] | None:
+    return None if reading is None or not reading["complete"] else list(reading["rows"])
+
+
+def _row_for(rows: Sequence[Mapping[str, Any]], symbol: str) -> Mapping[str, Any] | None:
+    return next((row for row in rows if row["symbol"] == symbol), None)
+
+
+def _theme_leader(rows: Sequence[Mapping[str, Any]], sector: Any) -> Mapping[str, Any] | None:
+    theme = [row for row in rows if row.get("sector") == sector]
+    if len(theme) < 2:
+        return None
+    return min(theme, key=lambda row: (-float(row["boards"]), _seal_seconds(row["first_seal_time"]), row["symbol"]))
+
+
+def _role_values(row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], previous: Sequence[Mapping[str, Any] | None]) -> dict[str, bool | None]:
+    sector = row.get("sector")
+    theme = [item for item in rows if item.get("sector") == sector]
+    tier = [item for item in rows if item.get("boards") == row.get("boards")]
+    leader = _theme_leader(rows, sector)
+    seal = _seal_seconds(row.get("first_seal_time"))
+    values: dict[str, bool | None] = {}
+    values["_tier_first"] = (
+        None if row.get("boards") is None or seal is None else
+        len(tier) >= 3 and float(row["boards"]) >= 2 and row["symbol"] == min(tier, key=lambda item: (_seal_seconds(item["first_seal_time"]), item["symbol"]))["symbol"]
+    )
+    if leader is None or seal is None:
+        values["_front_row"] = values["_assist"] = values["_back_row"] = None
+    else:
+        leader_seal = _seal_seconds(leader["first_seal_time"])
+        values["_front_row"] = float(row["boards"]) < float(leader["boards"]) and seal < leader_seal
+        values["_back_row"] = float(row["boards"]) < float(leader["boards"]) and seal > leader_seal
+        values["_assist"] = float(row["boards"]) == 1 and float(leader["boards"]) >= 2 and 0 <= seal - leader_seal <= 1800
+    values["_sole_high_board"] = None if row.get("boards") is None else float(row["boards"]) >= 3 and len(tier) == 1
+    buckets = {1 if float(item["boards"]) == 1 else 2 if float(item["boards"]) == 2 else 3 for item in theme}
+    values["_ladder_full"] = None if not theme else buckets == {1, 2, 3}
+    prior_rows = _complete_rows(previous[0]) if previous else None
+    prior = None if prior_rows is None else _row_for(prior_rows, row["symbol"])
+    prior_leader = None if prior_rows is None else _theme_leader(prior_rows, sector)
+    if prior_rows is None or prior_leader is None:
+        values["_kawei_leader"] = values["_leader_switch"] = None
+    else:
+        today_leader_seal = None if leader is None else _seal_seconds(leader["first_seal_time"])
+        prior_leader_today = _row_for(rows, prior_leader["symbol"])
+        values["_kawei_leader"] = (
+            None if today_leader_seal is None or prior_leader_today is None else
+            row["symbol"] != prior_leader["symbol"] and seal < _seal_seconds(prior_leader_today["first_seal_time"])
+        )
+        values["_leader_switch"] = (
+            row["symbol"] == (leader or {}).get("symbol") and prior_leader_today is None and len(theme) >= 2
+        )
+    if prior is None:
+        values["_weak_to_strong"] = values["_divergence_to_consensus"] = values["_consensus_to_divergence"] = None
+    else:
+        weak = (
+            _seal_at_or_after(prior, 13) is True or bool(prior.get("reopened")) or
+            (prior.get("seal_money") is not None and float(prior["seal_money"]) < 20_000_000)
+        )
+        values["_weak_to_strong"] = None if seal is None or row.get("boards") is None else float(row["boards"]) >= 2 and weak and seal <= 9 * 3600 + 45 * 60
+        values["_divergence_to_consensus"] = None if row.get("one_word") is None else (bool(prior.get("reopened")) or (prior.get("vr") is not None and float(prior["vr"]) >= 2)) and bool(row["one_word"])
+        values["_consensus_to_divergence"] = None if row.get("one_word") is None or prior.get("one_word") is None else bool(prior["one_word"]) and not bool(row["one_word"])
+    values["_rebound_board"] = _rebound_value(row, previous)
+    return values
+
+
+def _rebound_value(row: Mapping[str, Any], previous: Sequence[Mapping[str, Any] | None]) -> bool | None:
+    if row.get("boards") is None:
+        return None
+    candidates: list[bool] = []
+    unknown = False
+    for lag in (2, 3):
+        index = lag - 1
+        history = _complete_rows(previous[index]) if len(previous) > index else None
+        if history is None:
+            unknown = True
+            continue
+        before = _row_for(history, row["symbol"])
+        if before is None or float(before["boards"]) < 2:
+            candidates.append(False)
+            continue
+        absent = all(_row_for(_complete_rows(previous[offset]) or [], row["symbol"]) is None for offset in range(index))
+        candidates.append(float(row["boards"]) == 1 and absent)
+    return True if any(candidates) else None if unknown else False
+
+
+def evaluate_ladder_roles(
+    rows: Sequence[Mapping[str, Any]], previous: Sequence[Mapping[str, Any] | None],
+) -> list[dict[str, Any]]:
+    roles = {row["symbol"]: _role_values(row, rows, previous) for row in rows}
+    result = []
+    role_keys = tuple(condition.key for condition in _ladder_conditions())
+    for row in rows:
+        values = roles[row["symbol"]]
+        result.append({
+            **row,
+            "flags": [key for key in role_keys if values[f"_{key}"] is True],
+            "unknown": [key for key in role_keys if values[f"_{key}"] is None],
+        })
+    return result
 
 
 def evaluate_conditions(
     rows: Sequence[Mapping[str, Any]], day_context: Mapping[str, Any], slot: str,
+    previous: Sequence[Mapping[str, Any] | None] = (),
 ) -> dict[str, Any]:
     stock_conditions = tuple(condition for condition in CONDITIONS if condition.level == "stock" and condition.slot == slot)
     day_conditions = tuple(condition for condition in CONDITIONS if condition.level == "day" and condition.slot == slot)
     evaluated_rows = []
     for source in rows:
         row = dict(source)
+        role_values = _role_values(row, rows, previous) if slot == "close" else {}
         flags: list[str] = []
         unknown: list[str] = []
         for condition in stock_conditions:
-            value = _condition_value(condition, row, rows)
+            value = _condition_value(condition, row, rows, role_values)
             if value is True:
                 flags.append(condition.key)
             elif value is None:

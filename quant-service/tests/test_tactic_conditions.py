@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 from datetime import date, timedelta
 
-from app.tactic_conditions import CONDITIONS, build_auction_row, build_day_context, build_trial_row, evaluate_conditions, history_features
+from app.tactic_conditions import (
+    CONDITIONS, build_auction_row, build_day_context, build_trial_row, evaluate_conditions, evaluate_ladder_roles,
+    history_features,
+)
 
 
 class TacticConditionsTests(unittest.TestCase):
@@ -109,6 +112,9 @@ class TacticConditionsTests(unittest.TestCase):
             "env_ladder_ok", "env_turnover_2p1", "env_turnover_above_median60", "env_top_board_failed",
             "opens_at_limit", "gap_down_2", "gap_up_5_not_sealed", "gap_3_to_8", "gap_0_to_5",
             "auction_amount_top5", "auction_burst", "board_gap_below_typical",
+            "tier_first", "front_row", "kawei_leader", "leader_switch", "assist", "back_row",
+            "sole_high_board", "ladder_full", "weak_to_strong", "divergence_to_consensus",
+            "consensus_to_divergence", "rebound_board",
         })
 
         unknown = {**close, "theme_count": None, "vr": None, "first_seal_time": None}
@@ -144,6 +150,49 @@ class TacticConditionsTests(unittest.TestCase):
         missing_result = evaluate_conditions([missing], {}, "auction")["rows"][0]
         self.assertIn("auction_amount_top5", missing_result["unknown"])
         self.assertIn("prev.theme_big", missing_result["unknown"])
+
+    def test_ladder_roles_on_two_themes_over_four_sessions(self):
+        def row(symbol, sector, boards, seal, **values):
+            return {"symbol": symbol, "sector": sector, "boards": boards, "first_seal_time": seal,
+                    "one_word": False, "reopened": False, "vr": 1.0, "seal_money": 50_000_000, **values}
+
+        today = [
+            row("A1", "A", 3, "09:30:00", one_word=True), row("A2", "A", 2, "08:30:00"),
+            row("A3", "A", 1, "09:45:00", one_word=True), row("A4", "A", 1, "10:00:00"),
+            row("B2", "B", 2, "08:00:00"), row("B3", "B", 2, "09:15:00"), row("B4", "B", 1, "10:30:00"),
+        ]
+        yesterday = [
+            row("A1", "A", 3, "14:00:00"), row("A2", "A", 2, "13:30:00", reopened=True),
+            row("A3", "A", 1, "10:00:00", reopened=True, vr=2.0), row("A4", "A", 1, "10:30:00", one_word=True),
+            row("B1", "B", 3, "09:00:00"), row("B0", "B", 1, "10:00:00"),
+        ]
+        two_back = [row("B4", "B", 2, "09:00:00")]
+        readings = [
+            {"trade_date": "2026-10-12", "complete": True, "rows": yesterday},
+            {"trade_date": "2026-10-09", "complete": True, "rows": two_back},
+            None,
+        ]
+
+        evaluated = evaluate_ladder_roles(today, readings)
+        by_symbol = {item["symbol"]: set(item["flags"]) for item in evaluated}
+        self.assertIn("tier_first", by_symbol["B2"])
+        self.assertIn("front_row", by_symbol["A2"])
+        self.assertIn("kawei_leader", by_symbol["A2"])
+        self.assertIn("leader_switch", by_symbol["B2"])
+        self.assertIn("assist", by_symbol["A3"])
+        self.assertIn("back_row", by_symbol["A4"])
+        self.assertIn("sole_high_board", by_symbol["A1"])
+        self.assertIn("ladder_full", by_symbol["A1"])
+        self.assertIn("weak_to_strong", by_symbol["A2"])
+        self.assertIn("divergence_to_consensus", by_symbol["A3"])
+        self.assertIn("consensus_to_divergence", by_symbol["A4"])
+        self.assertIn("rebound_board", by_symbol["B4"])
+        self.assertNotIn("back_row", by_symbol["A2"])
+
+        unknown = evaluate_ladder_roles(today, [None, {"complete": True, "rows": two_back}, None])
+        unknown_by_symbol = {item["symbol"]: set(item["unknown"]) for item in unknown}
+        self.assertIn("kawei_leader", unknown_by_symbol["A2"])
+        self.assertIn("weak_to_strong", unknown_by_symbol["A2"])
 
 
 if __name__ == "__main__":
