@@ -44,19 +44,39 @@ PEER_HOST = os.environ.get("PEER_SSH_HOST", "stockpeer@47.110.79.189")
 PEER_PORT = os.environ.get("PEER_SSH_PORT", "3535")
 PEER_KEY = os.path.expanduser(os.environ.get("PEER_SSH_KEY", "~/.ssh/stockpeer_ed25519"))
 PEER_CONTAINER = os.environ.get("PEER_API_CONTAINER", "trading-hareness-peer-quant-research-1")
-PEER_APP_DIR = os.environ.get("PEER_APP_DIR", "/app/hotfix/current")
+# Where the peer container serves its source from depends on the last release: a
+# code-only release runs the overlay, a full release bakes the source into the image
+# and leaves the overlay empty.  Pinning the overlay path made every ops call exit 127
+# after a full release, so the path is resolved in the container on each call, with the
+# rule its entrypoint uses.  Set PEER_APP_DIR only to force one directory.
+PEER_APP_DIR = os.environ.get("PEER_APP_DIR", "")
+PEER_OVERLAY_DIR = "/app/hotfix/current"
+PEER_IMAGE_DIR = "/app"
 CN = timezone(timedelta(hours=8))
 REQUIRED_HARNESS_FILES = ("transcript_large.srt", "provenance.json", "state.json")
 
 
-def peer_ops(command: list[str], stdin: bytes | None = None, timeout: int = 2400) -> dict:
-    """Run one ops command in the peer API container and return its JSON."""
-    for token in [PEER_CONTAINER, PEER_APP_DIR, *command]:
+def peer_source_script(overlay: str = PEER_OVERLAY_DIR, image: str = PEER_IMAGE_DIR) -> str:
+    """Shell that runs the ops module from the source the container is serving."""
+    return (f'd={overlay}; [ -f "$d/app/main.py" ] || d={image}; '
+            'cd "$d" && PYTHONPATH="$d" exec python -m app.teacher_review_ops "$@"')
+
+
+def peer_remote_command(command: list[str]) -> str:
+    """The line the peer host runs for one ops command."""
+    forced = [PEER_APP_DIR] if PEER_APP_DIR else []
+    for token in [PEER_CONTAINER, *forced, *command]:
         if not re.fullmatch(r"[A-Za-z0-9_./:=-]+", token):
             raise SystemExit(f"refusing unsafe token: {token!r}")
-    remote = ("export XDG_RUNTIME_DIR=/run/user/$(id -u); export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/docker.sock; "
-              f"docker exec -i -w {PEER_APP_DIR} -e PYTHONPATH={PEER_APP_DIR} -e QUANT_BACKGROUND_TASKS_ENABLED=false "
-              f"{PEER_CONTAINER} python -m app.teacher_review_ops {' '.join(command)}")
+    script = peer_source_script(PEER_APP_DIR, PEER_APP_DIR) if PEER_APP_DIR else peer_source_script()
+    return ("export XDG_RUNTIME_DIR=/run/user/$(id -u); export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/docker.sock; "
+            f"docker exec -i -e QUANT_BACKGROUND_TASKS_ENABLED=false {PEER_CONTAINER} "
+            f"sh -c '{script}' sh {' '.join(command)}")
+
+
+def peer_ops(command: list[str], stdin: bytes | None = None, timeout: int = 2400) -> dict:
+    """Run one ops command in the peer API container and return its JSON."""
+    remote = peer_remote_command(command)
     completed = subprocess.run(
         ["ssh", "-i", PEER_KEY, "-p", PEER_PORT, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", PEER_HOST, remote],
         input=stdin, capture_output=True, timeout=timeout)
