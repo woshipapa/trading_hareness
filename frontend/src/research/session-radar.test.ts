@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  auctionRows, displayRows, failingChecks, fieldHealthText, pctText, radarHeadline, radarOption, radarRows,
+  auctionRows, bandCounts, breadthText, displayRows, failingChecks, fieldHealthText, pctText, radarHeadline, radarOption, radarRows,
   radarTooltip, stars, tone, yi, type RadarDay,
 } from './session-radar';
 
@@ -44,6 +44,17 @@ const CHART_DAY: RadarDay = {
   ],
 };
 
+const MARKER_DAY: RadarDay = {
+  trade_date: '2026-10-08',
+  points: [
+    { observed_at: '2026-10-08T09:15:00+08:00', phase: 'auction_cancellable', auction: { up: { 2: 20 }, down: { 2: 10 }, priced: 5300 } },
+    { observed_at: '2026-10-08T09:26:00+08:00', phase: 'auction_matched', pool: cell(1e11), bands: { 2: bands(1e10, 2e10, 1e11) } },
+    { observed_at: '2026-10-08T09:27:00+08:00', phase: 'continuous', pool: cell(1.1e11), bands: { 2: bands(1.1e10, 2.2e10, 1.1e11) } },
+    { observed_at: '2026-10-08T09:31:00+08:00', phase: 'continuous', pool: cell(1.2e11), bands: { 2: bands(1.2e10, 2.4e10, 1.2e11) } },
+  ],
+  main_net: [],
+};
+
 describe('session radar', () => {
   it('keeps the counted bands and pool values in the row projection', () => {
     const rows = radarRows(DAY, '2', 'all');
@@ -72,7 +83,7 @@ describe('session radar', () => {
   it('builds the headline from the last two displayed points and the 09:25 match', () => {
     expect(radarHeadline(radarRows(CHART_DAY, '2', 'all'))).toEqual({
       cumDown: 2.8e10, cumUp: 1.4e10, downDelta: 2e9, upDelta: 1e9,
-      auctionDown: 2e10, auctionUp: 1e10,
+      auctionDown: 2e10, auctionUp: 1e10, mainNet: -5.46e9,
     });
   });
 
@@ -94,8 +105,30 @@ describe('session radar', () => {
     };
     expect(option.series.map((series) => series.name)).toEqual(['主动卖（累计）', '主动买（累计）', '中间带', '主力净额']);
     expect(option.series[0].data.slice(0, 2)).toEqual([null, null]);
-    expect(option.series[0].markLine?.data.map((marker) => marker.xAxis)).toEqual(['09:25', '09:30']);
+    expect(option.series[0].markLine?.data.map((marker) => marker.xAxis)).toEqual(['09:25']);
     expect(option.series[3]).toMatchObject({ type: 'line', yAxisIndex: 1, lineStyle: { type: 'dashed' } });
+  });
+
+  it('anchors markers to displayed match and post-09:30 categories', () => {
+    const option = radarOption(radarRows(MARKER_DAY, '2', 'all'), '±2%') as { series: { markLine?: { data: { xAxis: string; label: { formatter: string } }[] } }[] };
+    expect(option.series[0].markLine?.data).toEqual([
+      { xAxis: '09:26', label: { formatter: '9:25 定格', color: '#188038' }, lineStyle: { color: '#188038', type: 'dashed' } },
+      { xAxis: '09:31', label: { formatter: '9:30', color: '#666' }, lineStyle: { color: '#999', type: 'dashed' } },
+    ]);
+    const stopped: RadarDay = { ...MARKER_DAY, points: MARKER_DAY.points.filter((point) => point.observed_at < '2026-10-08T09:23:00+08:00') };
+    const stoppedOption = radarOption(radarRows(stopped, '2', 'all'), '±2%') as { series: { markLine?: { data: unknown[] } }[] };
+    expect(stoppedOption.series[0].markLine?.data).toEqual([]);
+  });
+
+  it('retains the counts and breadth summaries', () => {
+    const limitDay: RadarDay = { trade_date: '2026-10-08', main_net: [], points: [{
+      observed_at: '2026-10-08T14:00:00+08:00', phase: 'continuous', pool: cell(1e10, 5000),
+      breadth: { up: 1075, down: 4369, flat: 120 },
+      bands: { limit: { cum_up: cell(5e9, 43), cum_down: cell(1e9, 13), middle: cell(4e9, 4944),
+                        now_up: cell(4e9, 27), now_down: cell(8e8, 16), now_middle: cell(5.2e9, 4957) } } }] };
+    const rows = radarRows(limitDay, 'limit', 'all');
+    expect(bandCounts(rows, 'limit')).toBe('涨停 27（曾 43，炸板 16）· 跌停 16（曾 13）');
+    expect(breadthText(rows)).toBe('上涨 1075 · 下跌 4369 · 平 120');
   });
 
   it('names the checks that withhold an indicator', () => {

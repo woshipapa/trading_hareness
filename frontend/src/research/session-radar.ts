@@ -117,6 +117,22 @@ export function auctionRows(day: RadarDay | null | undefined): AuctionRow[] {
   }));
 }
 
+/** Stocks on each side now, ever on each side, and - for the limit band - those that broke. */
+export function bandCounts(rows: RadarRow[], band: string): string {
+  const last = rows[rows.length - 1];
+  if (!last) return '';
+  const { cumUp, cumDown, nowUp, nowDown } = last.counts;
+  if (band === 'limit') {
+    return `涨停 ${nowUp}（曾 ${cumUp}，炸板 ${Math.max(0, (cumUp ?? 0) - (nowUp ?? 0))}）· 跌停 ${nowDown}（曾 ${cumDown}）`;
+  }
+  return `在上方 ${nowUp}/曾 ${cumUp} · 在下方 ${nowDown}/曾 ${cumDown}`;
+}
+
+export function breadthText(rows: RadarRow[]): string {
+  const breadth = rows[rows.length - 1]?.breadth;
+  return breadth ? `上涨 ${breadth.up} · 下跌 ${breadth.down} · 平 ${breadth.flat}` : '';
+}
+
 const UP = '#d93026';
 const DOWN = '#188038';
 const AMBER = '#b7791f';
@@ -140,7 +156,7 @@ export function displayRows(rows: RadarRow[]): RadarRow[] {
 
 export type RadarHeadline = {
   cumDown: number | null; cumUp: number | null; downDelta: number | null; upDelta: number | null;
-  auctionDown: number | null; auctionUp: number | null;
+  auctionDown: number | null; auctionUp: number | null; mainNet: number | null;
 };
 
 export function radarHeadline(rows: RadarRow[]): RadarHeadline {
@@ -154,6 +170,7 @@ export function radarHeadline(rows: RadarRow[]): RadarHeadline {
     downDelta: delta(latest?.cumDown ?? null, previous?.cumDown ?? null),
     upDelta: delta(latest?.cumUp ?? null, previous?.cumUp ?? null),
     auctionDown: auction?.cumDown ?? null, auctionUp: auction?.cumUp ?? null,
+    mainNet: [...rows].reverse().find((row) => row.mainNet !== null)?.mainNet ?? null,
   };
 }
 
@@ -179,6 +196,12 @@ export function radarOption(rows: RadarRow[], bandLabel: string): Record<string,
     lineStyle: { color, width: dashed ? 1 : 2, type: dashed ? 'dashed' : 'solid' }, itemStyle: { color },
   });
   const byTime = new Map(displayed.map((row) => [row.time, row]));
+  const match = displayed.find((row) => row.phase === 'auction_matched');
+  const afterOpen = displayed.find((row) => row.time >= '09:30');
+  const markerData = [
+    match && { xAxis: match.time, label: { formatter: '9:25 定格', color: DOWN }, lineStyle: { color: DOWN, type: 'dashed' } },
+    afterOpen && { xAxis: afterOpen.time, label: { formatter: '9:30', color: '#666' }, lineStyle: { color: '#999', type: 'dashed' } },
+  ].filter(Boolean);
   return {
     animation: false,
     tooltip: {
@@ -198,10 +221,7 @@ export function radarOption(rows: RadarRow[], bandLabel: string): Record<string,
     dataZoom: [{ type: 'inside' }],
     series: [
       { ...line('主动卖（累计）', displayed.map((row) => row.cumDown), DOWN), markLine: {
-        silent: true, symbol: 'none', data: [
-          { xAxis: '09:25', label: { formatter: '9:25 定格', color: DOWN }, lineStyle: { color: DOWN, type: 'dashed' } },
-          { xAxis: '09:30', label: { formatter: '9:30', color: '#666' }, lineStyle: { color: '#999', type: 'dashed' } },
-        ],
+        silent: true, symbol: 'none', data: markerData,
       } },
       line('主动买（累计）', displayed.map((row) => row.cumUp), UP),
       line('中间带', displayed.map((row) => row.middle), '#8a8f98'),
