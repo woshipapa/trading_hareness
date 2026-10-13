@@ -2505,8 +2505,9 @@ const dashboard = createServer((request, response) => {
 		response.end(JSON.stringify({ status: 'forbidden', reason: crossSite }));
 		return;
 	}
-	if (featureRoutes.matches(request.method, url.pathname)) {
-		void featureRoutes(request, response);
+	const featureRoute = featureRoutes.lookup(request.method, url.pathname);
+	if (featureRoute) {
+		void featureRoutes(request, response, featureRoute);
 		return;
 	}
 	const research = matchResearchRoute(request.method, url.pathname);
