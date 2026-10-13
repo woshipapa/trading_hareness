@@ -1,6 +1,6 @@
 import { deleteJson, getJson, postJson } from './http';
 
-export type TargetMember = { user_id: string; name: string; joined_at: number };
+export type TargetMember = { user_id: string; name: string; joined_at: number; is_bot: boolean; is_self: boolean };
 export type TargetMembersResponse = { status: 'ok'; chat_id: string; members: TargetMember[] };
 
 export type TargetMemberHistoryRow = {

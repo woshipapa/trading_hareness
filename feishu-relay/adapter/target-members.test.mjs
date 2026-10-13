@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createTargetMembers } from './target-members.mjs';
 
-function setup(target) {
+function setup(target, answer = { status: 'ok' }) {
 	const calls = [];
 	const feature = createTargetMembers({
 		targetRegistry: { get: async () => target },
-		bridgePost: async (...args) => { calls.push(args); return { status: 'ok' }; },
+		bridgePost: async (...args) => { calls.push(args); return answer; },
 	});
 	return { calls, routes: feature.routes };
 }
@@ -36,8 +36,9 @@ test('application and member ids must be plain decimal ids before bridge calls',
 });
 
 test('member routes map target ids to bridge paths and payloads', async () => {
-	const { calls, routes } = setup({ websocket_chat_id: '7001', owned: true });
-	await routes[0].handle({ params: { chatId: 'target' } });
+	const { calls, routes } = setup({ websocket_chat_id: '7001', owned: true }, { status: 'ok', members: [{ user_id: '200', name: '机器人', joined_at: 1, is_bot: true, is_self: false }] });
+	const members = await routes[0].handle({ params: { chatId: 'target' } });
+	assert.deepEqual(members.members[0], { user_id: '200', name: '机器人', joined_at: 1, is_bot: true, is_self: false });
 	await routes[1].handle({ params: { chatId: 'target' }, query: new URLSearchParams('cursor=9') });
 	await routes[2].handle({ params: { chatId: 'target' } });
 	await routes[3].handle({ params: { chatId: 'target', id: '55' }, body: { agree: true } });
