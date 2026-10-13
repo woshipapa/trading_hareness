@@ -123,7 +123,7 @@ async function remind(row: MembershipRow) {
     <div v-if="!memberships.target.value" class="membership-empty">在上面的表里选一个目标群</div>
     <div v-else-if="!memberships.eligible.value" class="membership-empty">会员期限管理需要本账号是群主，且目标群已有数字群 ID</div>
     <template v-else>
-      <el-alert v-if="memberships.error" :title="memberships.error" type="error" :closable="false" show-icon class="section-gap" />
+      <el-alert v-if="memberships.error.value" :title="memberships.error.value" type="error" :closable="false" show-icon class="section-gap" />
       <el-form :model="settingsForm" label-position="top" class="membership-settings section-gap">
         <el-form-item label="每天自动审查">
           <el-switch v-model="settingsForm.enabled" active-text="开启" inactive-text="关闭" />
@@ -144,7 +144,7 @@ async function remind(row: MembershipRow) {
         </el-form-item>
       </el-form>
 
-      <el-table :data="memberships.sortedMembers" row-key="user_id" v-loading="memberships.loading" class="section-gap" empty-text="暂无成员">
+      <el-table :data="memberships.sortedMembers.value" row-key="user_id" v-loading="memberships.loading.value" class="section-gap" empty-text="暂无成员">
         <el-table-column prop="display_name" label="成员" min-width="150" />
         <el-table-column prop="started_on" label="开始日期" width="125" />
         <el-table-column label="期限" width="100"><template #default="{ row }">{{ row.term_months }} 个月</template></el-table-column>
