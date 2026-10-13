@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from statistics import median
 from typing import Any, Mapping, Sequence
 
-from . import derived_daily_readings, tactic_trial_repository
+from . import derived_daily_readings, limit_up_risk_repository, tactic_trial_repository
 from .derived_daily_readings import CN_TZ, session_close
 from .limit_up_risk import decode_limit_rows
 from .tactic_conditions import (
@@ -36,7 +36,7 @@ def _read(database: Any, function: Any, *args: Any) -> Any:
         return function(connection, *args)
 
 
-def _reading_version(readings: Sequence[Mapping[str, Any]], day: date, capability: str) -> Mapping[str, Any] | None:
+def _reading_version(readings: Sequence[Mapping[str, Any]], day: date) -> Mapping[str, Any] | None:
     for reading in reversed(readings):
         if reading.get("trade_date") == day.isoformat() and reading.get("version") == VERSION:
             return reading
@@ -48,91 +48,72 @@ def _prior_sessions(connection: Any, day: date, count: int = 3) -> list[date]:
     return sessions[-count:]
 
 
+def _previous_readings(connection: Any, day: date) -> list[Mapping[str, Any] | None]:
+    sessions = _prior_sessions(connection, day)
+    if not sessions:
+        return []
+    readings = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, sessions[0], sessions[-1])
+    by_day = {reading["trade_date"]: reading for reading in readings}
+    return [by_day.get(session.isoformat()) for session in reversed(sessions)]
+
+
 def _market_context(turnover: Sequence[Mapping[str, Any]], day: date) -> tuple[Any, Any]:
-    values = [row.get("market_turnover") for row in turnover if row.get("market_turnover") is not None]
     current = next((row.get("market_turnover") for row in turnover if row.get("trading_date") == day), None)
     prior = [row.get("market_turnover") for row in turnover if row.get("trading_date") < day and row.get("market_turnover") is not None][-60:]
     return current, (median(prior) if prior else None)
 
 
-def _close_rows(
-    trade_date: date, lists: Mapping[str, Sequence[Sequence[Any]]], bars: Mapping[str, Mapping[str, Any]],
-    risk: Mapping[str, Any], windows: Mapping[tuple[str, date], Sequence[Mapping[str, Any]]],
-) -> list[dict[str, Any]]:
+def _build_close_reading(
+    trade_date: date, lists: Mapping[str, Sequence[Sequence[Any]]], risk: Mapping[str, Any],
+    bars: Mapping[str, Mapping[str, Any]], windows: Mapping[tuple[str, date], Sequence[Mapping[str, Any]]],
+    turnover: Sequence[Mapping[str, Any]], previous: Sequence[Mapping[str, Any] | None],
+    *, replayed: bool = False,
+) -> dict[str, Any]:
     decoded = decode_limit_rows({key: list(value) for key, value in lists.items()}, dict(bars))
     risk_by_symbol = {row["symbol"]: row for row in risk.get("rows", [])}
     rows = []
     for decoded_row in decoded["rows"]:
         window = list(windows.get((decoded_row["symbol"], trade_date), ()))
-        features = history_features(window) if window else {"vr": None, "turnover_vs_max250": None, "runup_20": None,
-            "close_vs_high60": None, "cost_share_below_close": None, "cost_share_0_30_above": None, "history_basis": "unadjusted_missing_adj_factor"}
+        features = history_features(window)
         row = build_trial_row(decoded_row, features, risk_by_symbol.get(decoded_row["symbol"], {}), decoded["rows"])
         row["reference_close"] = decoded_row["bar"].get("close")
         row["history_basis"] = features.get("history_basis")
-        row["bar_seal_disagreement"] = 0
         rows.append(row)
-    return rows
-
-
-def _close_reading(
-    connection: Any, trade_date: date, lists: Mapping[str, Sequence[Sequence[Any]]], risk: Mapping[str, Any],
-    *, replayed: bool = False, preloaded_bars: Mapping[str, Mapping[str, Any]] | None = None,
-    preloaded_windows: Mapping[tuple[str, date], Sequence[Mapping[str, Any]]] | None = None,
-    preloaded_turnover: Sequence[Mapping[str, Any]] | None = None,
-    preloaded_previous: Sequence[Mapping[str, Any]] | None = None,
-) -> dict[str, Any]:
-    symbols = []
-    for values in lists.values():
-        for row in values:
-            if isinstance(row, list) and row:
-                symbols.append(str(row[0]))
-    bars = dict(preloaded_bars) if preloaded_bars is not None else {
-        str(row["symbol"]): row for row in tactic_trial_repository.read_day_bars(connection, trade_date, trade_date, symbols)
-    }
-    windows_rows = []
-    if preloaded_windows is None:
-        windows_rows = tactic_trial_repository.read_history_windows(
-            connection, trade_date - timedelta(days=400), trade_date, [(symbol, trade_date) for symbol in symbols],
-        )
-    windows: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
-    if preloaded_windows is not None:
-        windows = {key: list(value) for key, value in preloaded_windows.items() if key[1] == trade_date}
-    else:
-        for row in windows_rows:
-            windows.setdefault((str(row["symbol"]), trade_date), []).append(dict(row))
-    rows = _close_rows(trade_date, lists, bars, risk, windows)
-    turnover = list(preloaded_turnover) if preloaded_turnover is not None else tactic_trial_repository.read_market_turnover(connection, trade_date - timedelta(days=120), trade_date)
     market_turnover, market_median = _market_context(turnover, trade_date)
-    if preloaded_previous is not None:
-        previous_readings = list(preloaded_previous)
-    else:
-        previous = _prior_sessions(connection, trade_date)
-        previous_readings = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, previous[0] if previous else trade_date, previous[-1] if previous else trade_date)
-    yesterday = previous_readings[-1] if previous_readings else None
+    yesterday = previous[0] if previous and previous[0] and previous[0].get("complete") else None
     yesterday_rows = (yesterday or {}).get("rows", [])
     top = max(yesterday_rows, key=lambda row: float(row.get("boards", 0)), default=None)
     prev_top = None if top is None else any(row["symbol"] == top["symbol"] for row in rows)
     context = build_day_context(rows, market_turnover, market_median, prev_top)
-    evaluated = evaluate_conditions(rows, context, "close", previous_readings[-3:])
+    evaluated = evaluate_conditions(rows, context, "close", previous)
     return _research({
         "trade_date": trade_date.isoformat(), "slot": "close", "version": VERSION,
         "decided_at": session_close(trade_date).isoformat(), "day": evaluated["day"],
-        "rows": evaluated["rows"], "complete": True, "replayed": replayed,
+        "rows": evaluated["rows"], "coverage": decoded["coverage"], "complete": True, "replayed": replayed,
     })
 
 
 def refresh_close(database: Any, trade_date: date, *, apply: bool = True) -> dict[str, Any]:
     with database.transaction() as connection:
         existing = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, trade_date, trade_date)
-        if _reading_version(existing, trade_date, CLOSE_CAPABILITY):
-            return _research({"status": "already_stored", "trade_date": trade_date.isoformat(), "rows": len(existing[-1].get("rows", [])), "stored": 0, "reading": existing[-1]})
+        stored_reading = _reading_version(existing, trade_date)
+        if stored_reading:
+            return _research({"status": "already_stored", "trade_date": trade_date.isoformat(), "rows": len(stored_reading.get("rows", [])), "stored": 0})
         list_reading = tactic_trial_repository.read_limit_lists(connection, trade_date, trade_date)
         risk = tactic_trial_repository.read_capability(connection, RISK_CAPABILITY, trade_date, trade_date)
         day_lists = next((item for item in list_reading["days"] if item["trade_date"] == trade_date), None)
         risk_reading = risk[-1] if risk else None
         if day_lists is None or risk_reading is None:
             return _research({"status": "blocked", "trade_date": trade_date.isoformat(), "stored": 0})
-        reading = _close_reading(connection, trade_date, day_lists["lists"], risk_reading)
+        requested_symbols = limit_up_risk_repository.symbols(day_lists["lists"])
+        bars = {str(row["symbol"]): row for row in tactic_trial_repository.read_day_bars(connection, trade_date, trade_date, requested_symbols)}
+        history = tactic_trial_repository.read_history_windows(connection, [(symbol, trade_date) for symbol in requested_symbols])
+        windows: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
+        for row in history:
+            windows.setdefault((str(row["symbol"]), trade_date), []).append(row)
+        turnover = tactic_trial_repository.read_market_turnover(connection, trade_date - timedelta(days=120), trade_date)
+        previous = _previous_readings(connection, trade_date)
+        reading = _build_close_reading(trade_date, day_lists["lists"], risk_reading, bars, windows, turnover, previous)
     stored = derived_daily_readings.store(database, CLOSE_CAPABILITY, [reading]) if apply else {"stored": 0, "unchanged": 0}
     return _research({"status": "completed", "trade_date": trade_date.isoformat(), "rows": len(reading["rows"]), **stored})
 
@@ -140,7 +121,7 @@ def refresh_close(database: Any, trade_date: date, *, apply: bool = True) -> dic
 def refresh_auction(database: Any, trade_date: date, *, apply: bool = True) -> dict[str, Any]:
     with database.transaction() as connection:
         existing = tactic_trial_repository.read_capability(connection, AUCTION_CAPABILITY, trade_date, trade_date)
-        if _reading_version(existing, trade_date, AUCTION_CAPABILITY):
+        if _reading_version(existing, trade_date):
             return _research({"status": "already_stored", "trade_date": trade_date.isoformat(), "stored": 0})
         desk = tactic_trial_repository.read_capability(connection, DESK_CAPABILITY, trade_date, trade_date)
         if not desk:
@@ -167,9 +148,24 @@ def refresh_auction(database: Any, trade_date: date, *, apply: bool = True) -> d
 def _settled_complete(result: Mapping[str, Any]) -> bool:
     for entries in result.get("entries", {}).values():
         for item in entries.values():
-            if item.get("status") not in {"settled", "no_trade", "missing_bar"}:
+            if item.get("status") not in {"settled", "no_trade"}:
                 return False
     return True
+
+
+def _settle_reading(reading: Mapping[str, Any], bars_by_symbol: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, Any]:
+    pick_day = date.fromisoformat(reading["trade_date"])
+    settled_rows = []
+    complete = True
+    for row in reading.get("rows", []):
+        bars = bars_by_symbol.get(row["symbol"], ())
+        prior_closes = [bar["close"] for bar in bars if bar["trading_date"] < pick_day and bar.get("close") is not None]
+        path = [bar for bar in bars if bar["trading_date"] >= pick_day]
+        outcome = evaluate_pick(row["symbol"], reading["slot"], path, row.get("reference_close"), prior_closes)
+        complete = complete and _settled_complete(outcome)
+        settled_rows.append({"symbol": row["symbol"], "name": row.get("name"), "outcomes": outcome})
+    return _research({"trade_date": reading["trade_date"], "slot": reading["slot"], "version": VERSION,
+        "rows": settled_rows, "complete": complete})
 
 
 def settle(database: Any, as_of: date, *, apply: bool = True) -> dict[str, Any]:
@@ -183,22 +179,13 @@ def settle(database: Any, as_of: date, *, apply: bool = True) -> dict[str, Any]:
                    if not settled_by_key.get((reading.get("trade_date"), reading.get("slot")), {}).get("complete")]
         symbol_days = [(row["symbol"], date.fromisoformat(reading["trade_date"])) for reading in pending for row in reading.get("rows", [])]
         bars = tactic_trial_repository.read_exit_bars(connection, symbol_days)
-    by_symbol_day: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
+    bars_by_key: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
     for bar in bars:
-        by_symbol_day.setdefault((bar["symbol"], bar["pick_day"]), []).append(bar)
+        bars_by_key.setdefault((str(bar["symbol"]), bar["pick_day"]), []).append(bar)
     written = []
     for reading in pending:
         pick_day = date.fromisoformat(reading["trade_date"])
-        slot = reading["slot"]
-        settled_rows = []
-        complete = True
-        for row in reading.get("rows", []):
-            path = by_symbol_day.get((row["symbol"], pick_day), [])
-            outcome = evaluate_pick(row["symbol"], slot, path, row.get("reference_close"), row.get("prior_closes", ()))
-            complete = complete and _settled_complete(outcome)
-            settled_rows.append({"symbol": row["symbol"], "name": row.get("name"), "outcomes": outcome})
-        document = _research({"trade_date": reading["trade_date"], "slot": slot, "version": VERSION,
-            "rows": settled_rows, "complete": complete})
+        document = _settle_reading(reading, {row["symbol"]: bars_by_key.get((row["symbol"], pick_day), []) for row in reading.get("rows", [])})
         if apply:
             written.append(derived_daily_readings.store(database, SETTLED_CAPABILITY, [document]))
     return _research({"status": "completed", "as_of": as_of.isoformat(), "days": [{"trade_date": item["trade_date"], "complete": item["complete"]} for item in pending], "stored": written})
@@ -231,22 +218,19 @@ def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, An
     return _research({"status": "completed", "trade_date": as_of.isoformat(), **stored, "summary": summary})
 
 
-def _year_report(readings: Sequence[Mapping[str, Any]], limit_symbols: Mapping[str, set[str]]) -> dict[str, Any]:
+def _year_report(readings: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     report: dict[str, dict[str, int]] = {}
     for reading in readings:
         year = str(reading["trade_date"])[:4]
-        item = report.setdefault(year, {"days": 0, "rows": 0, "observations": 0, "disagreements": 0, "raw": 0})
+        item = report.setdefault(year, {"days": 0, "rows": 0, "not_at_limit": 0, "raw": 0})
         item["days"] += 1
-        item["observations"] += reading.get("bar_membership_observations", 0)
-        item["disagreements"] += reading.get("bar_membership_disagreements", 0)
+        item["not_at_limit"] += reading.get("coverage", {}).get("not_at_limit", 0)
         for row in reading.get("rows", []):
             item["rows"] += 1
-            if "bar_membership_observations" not in reading:
-                item["observations"] += 1
-                item["disagreements"] += row.get("bar_seal_disagreement", 0)
             item["raw"] += row.get("history_basis") == "unadjusted_missing_adj_factor"
     return {year: {"days_built": value["days"], "rows": value["rows"],
-                   "disagreement_share": value["disagreements"] / value["observations"] if value["observations"] else None,
+                   "disagreement_share": value["not_at_limit"] / (value["rows"] + value["not_at_limit"])
+                   if value["rows"] + value["not_at_limit"] else None,
                    "raw_basis_share": value["raw"] / value["rows"] if value["rows"] else None}
             for year, value in report.items()}
 
@@ -259,56 +243,54 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
               for index in range(0, len(sessions), tactic_trial_repository.CHUNK_SESSIONS)]
     built: list[Mapping[str, Any]] = []
     chunk_documents: list[list[Mapping[str, Any]]] = []
+    prior_sessions: list[date] = []
+    prior_by_day: dict[str, Mapping[str, Any] | None] = {}
+    if sessions:
+        with database.transaction() as connection:
+            prior_sessions = tactic_trial_repository.read_open_sessions(connection, sessions[0] - timedelta(days=30), sessions[0] - timedelta(days=1))[-3:]
+            if prior_sessions:
+                prior_readings = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, prior_sessions[0], prior_sessions[-1])
+                prior_by_day = {reading["trade_date"]: reading for reading in prior_readings}
+    session_history: dict[str, Mapping[str, Any] | None] = {day.isoformat(): prior_by_day.get(day.isoformat()) for day in prior_sessions}
+    all_sessions = prior_sessions + sessions
     for chunk in chunks:
         first, last = chunk[0], chunk[-1]
-        with database.transaction() as connection:
-            existing = tactic_trial_repository.read_capability(
-                connection, CLOSE_CAPABILITY if slot == "close" else AUCTION_CAPABILITY, first, last,
-            )
-            tactic_trial_repository.read_capability(connection, SETTLED_CAPABILITY, first, last)
         if slot == "close":
             lists = _read(database, tactic_trial_repository.read_limit_lists, first, last)
             risk_rows = _read(database, tactic_trial_repository.read_capability, RISK_CAPABILITY, first, last)
             risk = {str(item["trade_date"]): item for item in risk_rows}
-            symbols = [str(row[0]) for item in lists["days"] for values in item["lists"].values()
-                       for row in values if isinstance(row, list) and row]
-            if symbols:
+            lists_by_day = {item["trade_date"]: item for item in lists["days"]}
+            symbols_by_day = {day: limit_up_risk_repository.symbols(item["lists"])
+                              for day, item in lists_by_day.items()}
+            symbol_days = [(symbol, day) for day, day_symbols in symbols_by_day.items() for symbol in day_symbols]
+            symbols = sorted({symbol for symbol, _day in symbol_days})
+            if symbol_days:
                 with database.transaction() as connection:
                     bar_rows = tactic_trial_repository.read_day_bars(connection, first, last, symbols)
-                    window_rows = tactic_trial_repository.read_history_windows(
-                        connection, first - timedelta(days=400), last,
-                        [(symbol, day) for day in chunk for symbol in symbols],
-                    )
+                    window_rows = tactic_trial_repository.read_history_windows(connection, symbol_days)
                     turnover = tactic_trial_repository.read_market_turnover(connection, first - timedelta(days=120), last)
             else:
                 bar_rows, window_rows, turnover = [], [], []
             windows: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
             for row in window_rows:
                 windows.setdefault((str(row["symbol"]), row["pick_day"]), []).append(row)
+            bars_by_day: dict[date, dict[str, Mapping[str, Any]]] = {}
+            for row in bar_rows:
+                bars_by_day.setdefault(row["trading_date"], {})[str(row["symbol"])] = row
             documents = []
-            for item in lists["days"]:
-                day = item["trade_date"]
-                day_bars = {str(row["symbol"]): row for row in bar_rows if row["trading_date"] == day}
-                with database.transaction() as connection:
-                    reading = _close_reading(
-                        connection, day, item["lists"], risk.get(day.isoformat(), {}), replayed=True,
-                        preloaded_bars=day_bars, preloaded_windows=windows, preloaded_turnover=turnover,
-                        preloaded_previous=[prior for prior in built if prior["slot"] == "close"
-                                            and prior["trade_date"] < day.isoformat()][-3:],
-                    )
-                listed = {str(row[0]) for values in item["lists"].values() for row in values
-                          if isinstance(row, list) and row}
-                observed = 0
-                disagreements = 0
-                for symbol in listed:
-                    bar = day_bars.get(symbol)
-                    if bar is None or bar.get("close") is None or bar.get("limit_up") in (None, 0):
-                        continue
-                    observed += 1
-                    if float(bar["close"]) < float(bar["limit_up"]) * (1 - 1e-6):
-                        disagreements += 1
-                reading["bar_membership_observations"] = observed
-                reading["bar_membership_disagreements"] = disagreements
+            for day in chunk:
+                position = all_sessions.index(day)
+                previous_dates = list(reversed(all_sessions[max(0, position - 3):position]))
+                previous = [session_history.get(previous_day.isoformat()) for previous_day in previous_dates]
+                item = lists_by_day.get(day)
+                if item is None:
+                    session_history[day.isoformat()] = None
+                    continue
+                reading = _build_close_reading(
+                    day, item["lists"], risk.get(day.isoformat(), {}), bars_by_day.get(day, {}), windows,
+                    turnover, previous, replayed=True,
+                )
+                session_history[day.isoformat()] = reading
                 built.append(reading)
                 documents.append(reading)
         else:
@@ -349,7 +331,7 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
                 built.append(reading)
                 documents.append(reading)
         chunk_documents.append(documents)
-    report = _year_report(built, {})
+    report = _year_report(built)
     refused = next((year for year, value in report.items()
                     if value["disagreement_share"] is not None and value["disagreement_share"] > REPLAY_DISAGREEMENT_LIMIT), None)
     if apply and refused is not None:
@@ -359,24 +341,20 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
         for documents in chunk_documents:
             if documents:
                 derived_daily_readings.store(database, capability, documents)
-    symbol_days = [(row["symbol"], date.fromisoformat(reading["trade_date"]))
-                   for reading in built for row in reading.get("rows", [])]
-    exit_bars = _read(database, tactic_trial_repository.read_exit_bars, symbol_days)
-    bars_by_key: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
-    for bar in exit_bars:
-        bars_by_key.setdefault((str(bar["symbol"]), bar["pick_day"]), []).append(bar)
     settled_documents = []
-    for reading in built:
-        pick_day = date.fromisoformat(reading["trade_date"])
-        rows = []
-        complete = True
-        for row in reading.get("rows", []):
-            outcome = evaluate_pick(row["symbol"], slot, bars_by_key.get((row["symbol"], pick_day), []),
-                                    row.get("reference_close"), row.get("prior_closes", ()))
-            complete = complete and _settled_complete(outcome)
-            rows.append({"symbol": row["symbol"], "name": row.get("name"), "outcomes": outcome})
-        settled_documents.append(_research({"trade_date": reading["trade_date"], "slot": slot,
-            "version": VERSION, "rows": rows, "complete": complete, "replayed": True}))
+    for documents in chunk_documents:
+        symbol_days = [(row["symbol"], date.fromisoformat(reading["trade_date"]))
+                       for reading in documents for row in reading.get("rows", [])]
+        exit_bars = _read(database, tactic_trial_repository.read_exit_bars, symbol_days)
+        bars_by_key: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
+        for bar in exit_bars:
+            bars_by_key.setdefault((str(bar["symbol"]), bar["pick_day"]), []).append(bar)
+        for reading in documents:
+            pick_day = date.fromisoformat(reading["trade_date"])
+            settled_documents.append({**_settle_reading(
+                reading, {row["symbol"]: bars_by_key.get((row["symbol"], pick_day), [])
+                          for row in reading.get("rows", [])},
+            ), "replayed": True})
     if apply:
         for offset in range(0, len(settled_documents), tactic_trial_repository.CHUNK_SESSIONS):
             chunk = settled_documents[offset:offset + tactic_trial_repository.CHUNK_SESSIONS]
