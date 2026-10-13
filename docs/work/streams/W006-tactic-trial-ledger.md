@@ -5,8 +5,8 @@
 - goal: 把每条短线规则登记成条件、组合成战法并配卖出规则，每天收盘和 09:25 在当天样本上试，自动出每日总结和竞价看板，全部只作研究证据
 - plan: docs/work/plans/tactic-trial-ledger.md
 - branch: codex/tactic-trials
-- head: 15687791
-- next: 等 Codex 交回“条件表的四处修正＋第 5 步”，在工作区复跑发布路径测试、核对条件的 claim 表和 `settle` 的原有测试没被改动，通过后派第 5a、5b 步（卖出规则）
+- head: 9f17026a
+- next: 等 Codex 交回第 5a、5b 步（`tactic_exits.py`），在工作区复跑发布路径测试，读卖出规则的实现和它报告的“方案留了选择的地方”，通过后派第 6、7 步（战法、战绩、每日总结）
 - updated: 2026-10-13
 
 ## Requirements
@@ -41,11 +41,11 @@
 - [x] 2 历史特征、样本行和当天环境的构造（`tactic_conditions.py`）— 0304f176 — 同上
 - [x] 2' 两处修正：缺复权因子时按 `settle` 的口径退回未复权并标注；`gap` 从日线算、`vr` 移入历史特征 — e1aa10d3 — 发布路径测试 → `Ran 3045 tests in 37.708s OK (skipped=2)`（2'、3、4 一起，主会话复跑）
 - [x] 3 基础条件与竞价行、判定结果 `flags` / `unknown` — 45bf5504 — 同上；阈值逐条对过方案的表，一致
-- [ ] 3' 条件表的四处修正（见 Log 13:58，已派）
+- [x] 3' 条件表的四处修正 — 219e73b0 — 发布路径测试 → `Ran 3051 tests in 34.751s OK (skipped=2)`（主会话复跑）；50 个条件的 `claim_outcome` 和 `claim` 逐个检查合法
 - [x] 4 连板梯队角色 12 个条件 — 15687791 — 同上
-- [ ] 5 `t1_settlement`：共用的逐日推进、`sale_blocked`、`opens_at_up_limit`、`closes_at_up_limit`，`settle` 改用它们且原测试不动（已派）
-- [ ] 5a `tactic_exits.py` 上：两种身份、单日卖出规则、状态结果、空间指标
-- [ ] 5b `tactic_exits.py` 下：多日卖出规则、未决、十日上限
+- [x] 5 `t1_settlement`：`price_window`、`walk_exit`、`sale_blocked`、`opens_at_up_limit`、`closes_at_up_limit`，`settle` 改用它们 — 9f17026a — 同上；原有结算测试只改了一行 import
+- [ ] 5a `tactic_exits.py` 上：两种身份、单日卖出规则、状态结果、空间指标（已派）
+- [ ] 5b `tactic_exits.py` 下：多日卖出规则、未决、十日上限（已派）
 - [ ] 6 `tactic_trials.py` 上：战法类型、组合的三值逻辑、选股、格内当日结果
 - [ ] 7 `tactic_trials.py` 下：三种战绩、按天开关、标签与 q 值、两两组合、每日总结
 - [ ] 8 `tactic_trial_repository.py`：按区间读取
@@ -70,7 +70,8 @@
 ## Running
 
 - [x] 2026-10-13 13:20 Codex 实现者做“两处修正＋第 3、4 步” → 13:55 交回，三个提交，已验收（2026-10-13）
-- [ ] 2026-10-13 13:58 Codex 实现者在做“条件表四处修正（第 3' 步）＋第 5 步”（同一线程，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 15687791 之后有两个提交且 `git status --short` 为空。之后：复跑验收；核对 `git diff 15687791 HEAD -- quant-service/tests/` 里没有改动已有的结算测试；勾掉 Steps；派第 5a、5b 步。该任务挂在主会话上，主会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从最后一个完成的步骤接着派。
+- [x] 2026-10-13 13:58 Codex 实现者做“条件表四处修正（第 3' 步）＋第 5 步” → 14:08 交回，两个提交，已验收（2026-10-13）
+- [ ] 2026-10-13 14:10 Codex 实现者在做第 5a、5b 步（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 9f17026a 之后有两个提交且 `git status --short` 为空。之后：复跑验收；读 `tactic_exits.py` 的规则实现对照方案的卖出规则表；勾掉 Steps；派第 6、7 步。该任务挂在主会话上，主会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从最后一个完成的步骤接着派。
 
 ## Due
 
@@ -93,7 +94,7 @@
 
 ## Resume here
 
-现状：方案已批准，16 步里做完并验收 4 步（1、2、3、4），第 3' 和第 5 步在 Codex 手里。主线上没有本工作线的代码，全在 `codex/tactic-trials`。
+现状：方案已批准，16 步里做完并验收 5 步（1 到 5），第 5a、5b 步在 Codex 手里。主线上没有本工作线的代码，全在 `codex/tactic-trials`。
 
 第一件事：`git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials log --oneline 932f6b5c..HEAD` 和 `git status --short`。有新提交且干净，就在该目录跑验收命令，读 `git diff <记录里的 head> HEAD`，对照方案“First conditions”两张表逐个核阈值，然后勾掉 Steps 并派下一步。工作区不干净时先分清是还在写还是中断了：派工的那个会话还在（你就是它，且没收到完成通知），就是还在写，等；你是新会话，旧的派工已随旧会话结束，但为保险看 `stat -f %Sm quant-service/app/tactic_conditions.py`，十分钟内还在变就再等。确认中断后，让新的 Codex 调用“从最后一个完成的步骤继续”（它会处理没提交的改动），不要自己接着写。
 
