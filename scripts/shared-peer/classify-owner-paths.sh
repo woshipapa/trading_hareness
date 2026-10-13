@@ -78,6 +78,9 @@ while IFS= read -r path; do
     # The promotion evidence tool also runs only on the operator workstation.
     scripts/tdx-promote.py)
       printf 'skip\t%s\n' "$path" ;;
+    # Licensed minute history is a workstation-only, read-only batch tool.
+    scripts/licensed_minute_history_fetch.py)
+      printf 'skip\t%s\n' "$path" ;;
     # Release tooling that runs on the operator workstation, the Windows owner
     # workstation or the edge - never inside the owner peer runtime.
     # CI and contract checks run on the workstation and in CI, never in the owner runtime.

@@ -114,7 +114,7 @@
 | `reconcile-stale-n8n-executions.sh` | platform | workstation | Mark executions stranded by an n8n runner/broker restart as crashed without |
 | `split-remote-archive-sync-workflows.mjs` | quant-research | workstation | Kept as a compatibility validation step for operators/scripts that still |
 
-## research data (62)
+## research data (63)
 
 | Script | Owner | Runs on | Purpose |
 | --- | --- | --- | --- |
@@ -129,6 +129,7 @@
 | `import-adjusted-research-bars.py` | quant-research | workstation | Import the latest stock-brain qfq research panel into PostgreSQL. |
 | `import-stock-brain-database.py` | quant-research | workstation | Snapshot and migrate durable stock-brain SQLite data into PostgreSQL. |
 | `import-stock-brain-portfolio.py` | quant-research | workstation | Dry-run or publish the latest verified stock-brain CITIC snapshot. |
+| `licensed_minute_history_fetch.py` | quant-research | workstation | Fetch licensed minute history in bounded, resumable batches from the workstation. |
 | `marketdata/archive_and_prune.py` | quant-research | workstation (some on the edge) | Archive old evidence to the cold tier, then prune it from PostgreSQL. |
 | `marketdata/archive_raw_records.py` | quant-research | workstation (some on the edge) | Archive tushare_raw_records to the cold tier, partitioned by api_name and year. |
 | `marketdata/backup_pg_to_pan.sh` | quant-research | workstation (some on the edge) | Encrypted off-site backup of the research database to Baidu Pan. |
