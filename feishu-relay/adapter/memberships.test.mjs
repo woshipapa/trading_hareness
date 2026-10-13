@@ -67,6 +67,9 @@ test('sync registers a new member on the Shanghai join date with the default ter
 	await feature.sync(CHAT);
 	assert.equal(ledger.rows[0].started_on, '2026-01-31');
 	assert.equal(ledger.rows[0].expires_on, '2026-04-30');
+	const syncRoute = feature.routes.find((route) => route.path.endsWith('/memberships/sync'));
+	const response = await syncRoute.handle({ params: { chatId: CHAT } });
+	assert.equal(response.members[0].user_id, 'u1');
 });
 
 test('editing a member recomputes expiry and clears its reminder', async () => {

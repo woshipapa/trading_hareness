@@ -242,8 +242,9 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 	const routes = [
 		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/memberships', handle: async ({ params }) => { const found = await target(params.chatId); const config = await settings(params.chatId); return { members: publicRows(await rows(params.chatId), config), today: shanghaiDate(now()), target_chat_id: found.chat_id }; } },
 		{ method: 'PUT', path: '/api/group-relay/target-groups/:chatId/memberships/:userId', handle: async ({ params, body }) => ({ member: await updateMember(params.chatId, params.userId, body) }) },
-		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/membership-settings', handle: async ({ params }) => ({ settings: await settings(params.chatId) }) },
+		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/membership-settings', handle: async ({ params }) => { await target(params.chatId); return { settings: await settings(params.chatId) }; } },
 		{ method: 'PUT', path: '/api/group-relay/target-groups/:chatId/membership-settings', handle: async ({ params, body }) => ({ settings: await updateSettings(params.chatId, body) }) },
+		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/memberships/sync', handle: async ({ params }) => { await target(params.chatId); const config = await settings(params.chatId); return { members: publicRows(await sync(params.chatId), config), today: shanghaiDate(now()) }; } },
 		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/memberships/review', handle: async ({ params, body }) => ({ members: await review(params.chatId, { dryRun: body?.dry_run === true }), dry_run: body?.dry_run === true }) },
 		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/memberships/:userId/remind', handle: async ({ params }) => ({ member: await remind(params.chatId, params.userId) }) },
 	];
