@@ -1553,7 +1553,7 @@ async def daily_close_completion(trade_date: date) -> dict[str, Any]:
     return await complete_daily_close(
         trade_date, db=db, run_public_blocking=run_akshare_blocking,
         run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
-        read_source_factory=longhu_full_market_source_factory(), now=datetime.now(timezone.utc),
+        read_source_factory=lambda: longhu_full_market_source_factory()(), now=datetime.now(timezone.utc),
     )
 
 

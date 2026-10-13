@@ -83,15 +83,19 @@ class DailyBarsCompletionHealthTests(unittest.TestCase):
         self.assertEqual(status["status"], "fail")
 
     def test_partial_receipt_fails_with_leftover_detail(self):
-        receipt = {"status": "partial", "metadata": {"failed": ["000001.SZ"], "limits_pending": {"000002.SZ": "no_previous_close"}}}
+        receipt = {"status": "partial", "metadata": {"outcomes": {"filled": ["000003.SZ"],
+                         "not_traded": ["000004.SZ"], "failed": ["000001.SZ"]}}}
         status = indicator_status(self._connection(receipt), "data.daily_bars_complete", DAY, at(18, 46))
         self.assertEqual(status["status"], "fail")
-        self.assertIn("limits_pending=1", status["checks"][0]["detail"])
+        self.assertIn("failed=1", status["checks"][0]["detail"])
+        self.assertIn("filled=1", status["checks"][0]["detail"])
 
     def test_completed_receipt_is_eligible(self):
-        receipt = {"status": "completed", "metadata": {}}
+        receipt = {"status": "completed", "metadata": {"missing": ["000004.SZ"],
+                                                   "outcomes": {"not_traded": ["000004.SZ"]}}}
         status = indicator_status(self._connection(receipt), "data.daily_bars_complete", DAY, at(18, 46))
         self.assertEqual(status["status"], "ok")
+        self.assertIn("not_traded=1", status["checks"][0]["detail"])
 
     def test_closed_day_is_not_judged(self):
         status = indicator_status(self._connection(is_open=False), "data.daily_bars_complete", DAY, at(19, 0))

@@ -340,13 +340,17 @@ def daily_bars_complete_checks(connection: Any, trade_date: date, now: datetime)
         return [_check("receipt", FAIL, None, "completed", "没有 daily_close_completion 收据")]
     metadata = receipt.get("metadata") or {}
     leftovers = []
-    for key in ("missing", "bar_rejected", "unusable_existing", "limits_pending", "factor_pending"):
-        value = metadata.get(key) or []
+    outcomes = metadata.get("outcomes") or {}
+    for key in ("adjusted_later", "unverified", "invalid", "failed",
+                "bar_rejected", "unusable_existing", "limits_pending", "factor_pending"):
+        value = outcomes.get(key, []) if key in outcomes else metadata.get(key) or []
         if isinstance(value, dict):
             value = list(value)
         if value:
             leftovers.append(f"{key}={len(value)}:{','.join(map(str, value[:5]))}")
-    detail = "；".join(leftovers) or "无遗留名单"
+    info = ";".join(f"{key}={len(outcomes.get(key) or [])}" for key in ("filled", "not_traded")
+                    if outcomes.get(key))
+    detail = "；".join(([info] if info else []) + leftovers) or "无遗留名单"
     status = receipt["status"]
     return [_check("receipt", OK if status == "completed" else FAIL, status, "completed", detail)]
 

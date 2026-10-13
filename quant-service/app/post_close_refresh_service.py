@@ -223,8 +223,8 @@ async def run_post_close_refresh(request: Any, dependencies: PostCloseRefreshDep
         return await dependencies.append_limit_performance(trade_date)
 
     async def daily_close_completion_stage() -> dict[str, Any]:
-        if dependencies.daily_close_completion is None:
-            return {"status": "blocked", "reason": "daily close completion is not wired"}
+        if dependencies.daily_close_completion is None or not longhu_mode:
+            return {"status": "skipped", "reason": "Longhu daily close completion is disabled", "research_only": True}
         return await dependencies.daily_close_completion(trade_date)
 
     async def limit_ladder_stage() -> dict[str, Any]:
