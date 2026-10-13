@@ -33,8 +33,8 @@
 
 ## 正在运行
 
-- W007 2026-10-13 21:26 取数续取已排在 22:06（主会话的后台命令）。结束标志：`state/research/vshape_20261013/data/fetch.log` 末行 FINISHED / PAUSED / ABORT，或后台命令输出里的“the fetch was not resumed”。主会话结束或本机合盖它就停，重跑命令即可。
 - W011 2026-10-13 22:20 Codex 方案审计在跑（只读，新线程）。结束标志：它交回 SOUND 或编号的异议。之后见 next。挂在主会话 93ba6e1d 上。
+- W007 2026-10-13 22:31 取数在跑（主会话的后台命令）。结束标志：`state/research/vshape_20261013/data/fetch.log` 末行 FINISHED / PAUSED / ABORT。主会话结束或本机合盖它就停，重跑 next 里的命令即可。
 
 ## 待办清单
 
