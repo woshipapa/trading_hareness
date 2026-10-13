@@ -1,10 +1,34 @@
+import json
+import math
 import unittest
+from datetime import date, timedelta
 from decimal import Decimal
 
-from app.tactic_trials import TACTICS, Tactic, day_result, evaluate_tactic
+from app.research_trials import bh_q_values
+from app.tactic_trials import (
+    TACTICS, Tactic, build_daily_summary, build_pairs, build_records, build_sell_points,
+    build_switch_records, day_result, evaluate_tactic,
+)
 
 
 class TacticTrialTests(unittest.TestCase):
+    def _day(self, day, *, slot="close", true=True, two_rows=True, day_flag=None):
+        rows = [
+            {"symbol": "P", "name": "Pick", "boards": 2, "board_bucket": "2", "gap_bucket": "0-5",
+             "flags": ["pick", "a", "b"] if true else [], "unknown": []},
+        ]
+        if two_rows:
+            rows.append({"symbol": "C", "name": "Compare", "boards": 2, "board_bucket": "2", "gap_bucket": "0-5", "flags": [], "unknown": []})
+        outcomes = {}
+        for row in rows:
+            value = Decimal("0.10") if row["symbol"] == "P" else Decimal("0.00")
+            outcomes[row["symbol"]] = {
+                "entries": {"held": {"close": {"raw_return": value, "net_return": value, "status": "settled"}}},
+                "seal": row["symbol"] == "P", "big_loss": False, "open_to_close": Decimal("0.01"),
+                "s1_high": Decimal("0.10"), "s3_high": Decimal("0.20"), "s1_low": Decimal("-0.02"),
+            }
+        return {"trade_date": day, "slot": slot, "day": {"flags": [day_flag] if day_flag else [], "unknown": []}, "rows": rows, "outcomes": outcomes}
+
     def test_three_valued_all_none_and_at_least(self):
         all_tactic = Tactic("all", "", "close", "hold", "", all_of=("a", "b"))
         none_tactic = Tactic("none", "", "close", "hold", "", none_of=("a", "b"))
@@ -82,6 +106,66 @@ class TacticTrialTests(unittest.TestCase):
         self.assertEqual(next(t for t in TACTICS if t.key == "teacher_auction_entry").exit, "must_rise")
         self.assertEqual(next(t for t in TACTICS if t.key == "amount_top5_big_theme").cell, ("board_bucket", "gap_bucket"))
         self.assertEqual(next(t for t in TACTICS if t.key == "only.market_top_board").primary, "seal")
+
+    def test_records_split_label_and_q_value(self):
+        tactic = Tactic("trial", "试验", "close", "hold", "", all_of=("pick",), cell=("board_bucket",), entry="held", exit="close", primary="held:close", registered_on=date(2026, 10, 13))
+        days = [self._day((date(2026, 10, 10) + timedelta(days=index)).isoformat()) for index in range(2)]
+        days.extend(self._day((date(2026, 10, 13) + timedelta(days=index)).isoformat()) for index in range(21))
+        records = build_records(days, (tactic,))
+        item = records["trial"]
+        self.assertEqual(item["outcomes"]["held:close"]["replay"]["in_sample"], True)
+        self.assertEqual(item["outcomes"]["held:close"]["replay"]["days_with_picks"], 2)
+        self.assertEqual(item["outcomes"]["held:close"]["forward"]["picks"], 21)
+        self.assertEqual(item["label"], "collecting")
+
+        days.extend(self._day((date(2026, 11, 3) + timedelta(days=index)).isoformat()) for index in range(39))
+        for index, day in enumerate(days[2:], 1):
+            value = Decimal("0.10") + Decimal(index) / Decimal("1000")
+            day["outcomes"]["P"]["entries"]["held"]["close"]["raw_return"] = value
+            day["outcomes"]["P"]["entries"]["held"]["close"]["net_return"] = value
+        records = build_records(days, (tactic,))
+        forward = records["trial"]["outcomes"]["held:close"]["forward"]
+        self.assertEqual(records["trial"]["label"], "supports")
+        expected_q = bh_q_values({"trial": math.erfc(abs(forward["t"]) / math.sqrt(2))})["trial"]
+        self.assertAlmostEqual(records["trial"]["q"], expected_q)
+
+    def test_switch_records_and_pair_minimum(self):
+        days = []
+        for index in range(20):
+            day = self._day((date(2026, 1, 1) + timedelta(days=index)).isoformat(), day_flag="env_ladder_ok" if index < 10 else None)
+            if index >= 10:
+                value = Decimal("-0.10") - Decimal(index - 10) / Decimal("1000")
+                day["outcomes"]["P"]["entries"]["held"]["close"]["raw_return"] = value
+                day["outcomes"]["P"]["entries"]["held"]["close"]["net_return"] = value
+            else:
+                value = Decimal("0.10") + Decimal(index) / Decimal("1000")
+                day["outcomes"]["P"]["entries"]["held"]["close"]["raw_return"] = value
+                day["outcomes"]["P"]["entries"]["held"]["close"]["net_return"] = value
+            days.append(day)
+        switches = build_switch_records(days)
+        self.assertEqual(switches["env_ladder_ok"]["true_days"], 10)
+        self.assertEqual(switches["env_ladder_ok"]["false_days"], 10)
+        self.assertIsNotNone(switches["env_ladder_ok"]["t"])
+        self.assertIsNone(build_switch_records(days[:5])["env_ladder_ok"]["t"])
+
+        pair_days = []
+        for index in range(20):
+            day = self._day((date(2026, 2, 1) + timedelta(days=index)).isoformat())
+            day["rows"][0]["flags"] = ["theme_big", "theme_7plus"]
+            pair_days.append(day)
+        pairs = build_pairs(pair_days)["close"]
+        self.assertGreaterEqual(pairs["pairs_reaching_minimum"], 1)
+        self.assertGreater(pairs["pairs_examined"], pairs["pairs_reaching_minimum"])
+        self.assertTrue(pairs["mined"])
+
+    def test_summary_lines_label_changes_sell_points_and_json(self):
+        days = [self._day("2026-10-13"), self._day("2026-10-13", slot="auction")]
+        summary = build_daily_summary(days)
+        self.assertEqual(summary["lines"][0], "日：收盘样本2行，竞价样本2行；收盘日条件无数据，竞价日条件无数据；封板率close/2 +50.00%/+50.00%、auction/2 +50.00%/+50.00%")
+        self.assertEqual(summary["lines"][2], "案例：封板2，大面0")
+        self.assertEqual(build_daily_summary(days, {"records": {"leader_hold": {"label": "against"}}})["label_changes"][0]["key"], "leader_hold")
+        self.assertIn("cumulative", summary["sell_points"]["close"])
+        json.dumps(summary)
 
 
 if __name__ == "__main__":
