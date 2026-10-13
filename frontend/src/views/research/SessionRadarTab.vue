@@ -4,10 +4,9 @@ import { Refresh } from '@element-plus/icons-vue';
 import VChart from 'vue-echarts';
 import { getJson } from '../../api/http';
 import {
-  BAND_LABELS, GATE_LABELS, HEALTH_LABELS, HEALTH_TYPES, PHASE_LABELS, SEGMENT_LABELS, auctionRows, bandCounts, boardText,
-  breadthText, failingChecks, fieldHealthText, lineRankText,
-  pctText, radarLegend,
-  radarOption, radarRows, shanghaiTime, shanghaiToday, stars, tone, yi,
+  BAND_LABELS, GATE_LABELS, HEALTH_LABELS, HEALTH_TYPES, SEGMENT_LABELS, auctionRows, boardText,
+  failingChecks, fieldHealthText, lineRankText,
+  pctText, radarHeadline, radarOption, radarRows, shanghaiTime, shanghaiToday, stars, tone, yi,
   type CardPick, type IndicatorHealth, type LimitDetailDay, type RadarDay, type StrategyCardsDay,
 } from '../../research/session-radar';
 
@@ -75,21 +74,20 @@ async function autoRefresh_() {
 }
 
 const rows = computed(() => radarRows(radar.value, band.value, segment.value));
-const legend = computed(() => radarLegend(rows.value));
+const headline = computed(() => radarHeadline(rows.value));
 const option = computed(() => radarOption(rows.value, BAND_LABELS[band.value] ?? band.value));
 const auction = computed(() => auctionRows(radar.value));
 const bands = computed(() => {
   const point = radar.value?.points?.find((item) => item.bands);
   return Object.keys(point?.bands ?? { 2: null, 5: null });
 });
-const latestFlow = computed(() => radar.value?.main_net?.[radar.value.main_net.length - 1]);
-const lastPhase = computed(() => {
-  const points = radar.value?.points ?? [];
-  const phase = points[points.length - 1]?.phase;
-  return phase ? PHASE_LABELS[phase] ?? phase : '-';
-});
 const gate = computed(() => cards.value?.direction_gate);
 const gateType = computed(() => ({ up: 'danger', down: 'success', mixed: 'warning' } as Record<string, string>)[gate.value?.label ?? ''] ?? 'info');
+const bandMeaning = computed(() => (BAND_LABELS[band.value] ?? band.value).replace(/^±/, ''));
+
+function deltaText(value: number | null): string {
+  return value === null ? '-' : `${value >= 0 ? '+' : ''}${yi(value)}`;
+}
 
 function ticketRow({ row }: { row: CardPick }): string {
   return row.ticket ? 'ticket-row' : '';
@@ -132,17 +130,21 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
       </div>
     </template>
     <el-alert v-if="errors.radar" :title="`雷达读取失败：${errors.radar}`" type="error" :closable="false" show-icon />
-    <div class="radar-legend">
-      <span class="tone-down">曾≤-{{ BAND_LABELS[band] }} {{ legend.cumDown ?? '-' }}</span>
-      <span class="tone-up">曾≥+{{ BAND_LABELS[band] }} {{ legend.cumUp ?? '-' }}</span>
-      <span>中间带 {{ legend.middle ?? '-' }}</span>
-      <span>全池 {{ legend.pool ?? '-' }}</span>
-      <span :class="`tone-${tone(latestFlow?.main_net)}`">主力净额 {{ yi(latestFlow?.main_net) }}</span>
-      <el-text type="info" size="small">此刻在上方 {{ legend.nowUp ?? '-' }} / 下方 {{ legend.nowDown ?? '-' }} · {{ legend.time ?? '-' }} · {{ lastPhase }}</el-text>
+    <div class="radar-title-row">
+      <strong>主动买/卖·主力净额</strong>
+      <el-text type="info" size="small">2 分钟一点 · 9:25 为竞价撮合 · 主动卖 = 当日曾跌超 {{ bandMeaning }} 的股票成交额 · 主动买 = 当日曾涨超 {{ bandMeaning }} 的股票成交额</el-text>
     </div>
-    <div class="radar-counts"><el-text size="small">{{ bandCounts(rows, band) }}</el-text><el-text size="small" type="info">{{ breadthText(rows) }}</el-text></div>
-    <el-text v-if="latestFlow" type="info" size="small">主力净额来源：{{ latestFlow.upstream ?? latestFlow.source ?? '-' }}（{{ latestFlow.boards }} 个行业板块，{{ shanghaiTime(latestFlow.observed_at) }}）；分板块视图不拆分主力净额。</el-text>
-    <v-chart v-if="rows.length" :option="option" autoresize class="radar-chart" />
+    <div v-if="rows.length" class="radar-visual">
+      <div class="radar-headline">
+        <div class="radar-headline-main">
+          <span class="tone-down">卖 {{ yi(headline.cumDown) }}</span>
+          <span class="tone-up">买 {{ yi(headline.cumUp) }}</span>
+        </div>
+        <el-text type="info" size="small">近 2 分钟 卖 {{ deltaText(headline.downDelta) }} · 买 {{ deltaText(headline.upDelta) }}</el-text>
+        <el-text v-if="headline.auctionUp !== null && headline.auctionDown !== null" type="info" size="small">竞买 {{ yi(headline.auctionUp) }} · 竞砸 {{ yi(headline.auctionDown) }}</el-text>
+      </div>
+      <v-chart :option="option" autoresize class="radar-chart" />
+    </div>
     <el-empty v-else description="该日尚无雷达点（竞价撮合前只统计虚拟价分布）" :image-size="56" />
     <el-table v-if="auction.length" :data="auction" size="small" max-height="220" class="section-gap">
       <el-table-column prop="time" label="竞价时刻" width="90" />
@@ -298,12 +300,19 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 </template>
 
 <style scoped>
-.radar-legend { display: flex; flex-wrap: wrap; gap: 16px; align-items: baseline; margin: 6px 0; font-weight: 600; }
-.radar-chart { height: 380px; width: 100%; }
-.radar-counts { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 4px; }
+.radar-title-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin: 8px 0 12px; }
+.radar-title-row strong { font-size: 18px; }
+.radar-visual { display: grid; grid-template-columns: minmax(180px, 230px) minmax(0, 1fr); align-items: center; }
+.radar-headline { display: flex; flex-direction: column; gap: 6px; }
+.radar-headline-main { display: flex; flex-direction: column; gap: 4px; font-size: 28px; font-weight: 700; line-height: 1.2; }
+.radar-chart { height: 380px; width: 100%; min-width: 0; }
 .tone-up { color: #d93026; }
 .tone-down { color: #188038; }
 .card-return { font-size: 22px; font-weight: 700; }
 .event-stars { color: #e6a23c; letter-spacing: 1px; }
 .strategy-card :deep(.ticket-row) { background: #fff4f2; }
+@media (max-width: 720px) {
+  .radar-visual { grid-template-columns: 1fr; }
+  .radar-headline-main { flex-direction: row; gap: 24px; }
+}
 </style>
