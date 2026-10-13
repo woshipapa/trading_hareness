@@ -48,7 +48,7 @@ describe('useMemberships', () => {
     await vi.waitFor(() => expect(memberships.loading.value).toBe(false));
     expect(await memberships.sync()).toBe(true);
     expect(await memberships.saveSettings({ enabled: true, default_term_months: 3, remind_text: '请续费' })).toBe(true);
-    expect(await memberships.saveMember('u1', { started_on: '2026-01-01', term_months: 3, note: null, exempt: true })).toBe(true);
+    expect(await memberships.saveMember('u1', { started_on: '2026-01-01', term_months: 3, expires_on: null, note: null, exempt: true })).toBe(true);
     expect(await memberships.preview()).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([url, init]) => url.endsWith('/memberships/sync') && init?.method === 'POST')).toBe(true);
     expect(fetchMock.mock.calls.some(([url, init]) => url.endsWith('/membership-settings') && init?.method === 'PUT' && JSON.parse(String(init.body)).default_term_months === 3)).toBe(true);
@@ -81,7 +81,7 @@ describe('useMemberships', () => {
     const selected = ref<TargetRegistryRow | null>(target());
     const memberships = useMemberships(selected);
     await vi.waitFor(() => expect(memberships.loading.value).toBe(false));
-    expect(await memberships.saveMember('u1', { started_on: '2026-01-01', term_months: 2, note: null, exempt: false })).toBe(false);
+    expect(await memberships.saveMember('u1', { started_on: '2026-01-01', term_months: 2, expires_on: null, note: null, exempt: false })).toBe(false);
     expect(memberships.error.value).toBe('会员已被其他人修改');
     expect(memberships.members.value[0]?.display_name).toBe('服务器版本');
   });

@@ -3,6 +3,7 @@ const SETTINGS_TABLE = 'feishu_group_relay_membership_settings';
 const DEFAULT_TERM_MONTHS = 1;
 const DEFAULT_REMIND_TEXT = '会员已到期，请联系群主续费';
 const SHANGHAI = 'Asia/Shanghai';
+const MEMBER_COLUMNS = 'target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at,alias,expiry_fixed';
 
 function shanghaiDate(value) {
 	const parts = new Intl.DateTimeFormat('en-US', { timeZone: SHANGHAI, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value instanceof Date ? value : new Date(value));
@@ -63,7 +64,81 @@ function dateText(value) {
 }
 
 function memberRow(row) {
-	return { ...row, started_on: dateText(row.started_on), expires_on: dateText(row.expires_on), reminded_on: dateText(row.reminded_on) };
+	return { ...row, started_on: dateText(row.started_on), expires_on: dateText(row.expires_on), reminded_on: dateText(row.reminded_on), alias: row.alias ?? '', expiry_fixed: row.expiry_fixed === true };
+}
+
+const NUMERALS = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+const count = (text) => NUMERALS[text] ?? Number(text);
+const MONTHS_AHEAD = /^\s*(?:(半年)|(一年|1年)|((?:[一1]个?)?季度?)|([一二两三四五六七八九十]|1[0-2]|[1-9])\s*(?:个月|个|月)|([一二两三四五六])(?![\u4e00-\u9fff]))/;
+const WEEKS_AHEAD = /^\s*([一二两三]|[1-3])\s*周/;
+const MONTHS_BEHIND = /(?:(半年)|(一年|1年)|((?:[一1]个?)?季度?)|([一二两三四五六七八九十])\s*(?:个月|个|月))\s*$/;
+
+function monthsOf(match) {
+	if (!match) return 0;
+	if (match[1]) return 6;
+	if (match[2]) return 12;
+	if (match[3]) return match[3].includes('季') ? 3 : 0;
+	return count(match[4] ?? match[5]);
+}
+
+// The date a run of digits stands for when someone writes month and day without padding (94, 108, 1012): the reading
+// that falls nearest to today, in last year, this year or the next.
+function nearestDate(digits, today) {
+	const readings = digits.length === 2 ? [[digits[0], digits[1]]] : digits.length === 3 ? [[digits[0], digits.slice(1)], [digits.slice(0, 2), digits[2]]] : [[digits.slice(0, 2), digits.slice(2)]];
+	const base = new Date(`${today}T00:00:00Z`).getTime();
+	let best = null;
+	for (const [monthText, dayText] of readings) {
+		const month = Number(monthText);
+		const day = Number(dayText);
+		for (const year of [-1, 0, 1].map((shift) => Number(today.slice(0, 4)) + shift)) {
+			const date = new Date(Date.UTC(year, month - 1, day));
+			if (month < 1 || month > 12 || day < 1 || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) continue;
+			const distance = Math.abs(date.getTime() - base);
+			if (!best || distance < best.distance) best = { distance, date: date.toISOString().slice(0, 10) };
+		}
+	}
+	return best?.date ?? null;
+}
+
+// What an alias such as "阿明 108三个月" or "到12月底" says about a membership: a start date, a term, an expiry date.
+// The alias is free text and may carry several products' dates, so these are offers for a person to pick from, never
+// applied by themselves. A two-digit number counts as a date only with a term beside it.
+export function aliasSuggestions(alias, today) {
+	const text = String(alias ?? '');
+	const found = [];
+	const offer = (item) => { if (!found.some((other) => other.label === item.label)) found.push(item); };
+	const short = (date) => date.slice(5);
+	let dated = false;
+	let used = 0;
+	for (const match of text.matchAll(/到?\s*(1[0-2]|[1-9])\s*月底|(?<![0-9A-Za-z])(\d{2,4})(?![0-9A-Za-z月])/g)) {
+		if (match[1]) {
+			const month = Number(match[1]);
+			const ends = [-1, 0, 1].map((shift) => new Date(Date.UTC(Number(today.slice(0, 4)) + shift, month, 0)).toISOString().slice(0, 10));
+			const expiresOn = ends.reduce((best, date) => (Math.abs(new Date(date) - new Date(today)) < Math.abs(new Date(best) - new Date(today)) ? date : best));
+			offer({ started_on: null, term_months: null, expires_on: expiresOn, label: `到 ${short(expiresOn)}` });
+			continue;
+		}
+		const startedOn = nearestDate(match[2], today);
+		if (!startedOn) continue;
+		const end = match.index + match[0].length;
+		const after = text.slice(end);
+		const ahead = monthsOf(MONTHS_AHEAD.exec(after)) ? MONTHS_AHEAD.exec(after) : null;
+		// A term written before the date ("三个月826") counts only if an earlier date has not taken it already.
+		const months = monthsOf(ahead) || monthsOf(MONTHS_BEHIND.exec(text.slice(used, match.index)));
+		const weekMatch = WEEKS_AHEAD.exec(ahead ? after.slice(ahead[0].length) : after);
+		const weeks = count(weekMatch?.[1] ?? 0);
+		if (match[2].length === 2 && !months && !weeks) continue;
+		used = end + (ahead?.[0].length ?? 0) + (weekMatch?.[0].length ?? 0);
+		dated = true;
+		const expiresOn = weeks ? addDays(months ? addMonths(startedOn, months) : startedOn, weeks * 7) : null;
+		const term = months && weeks ? ` ${months} 个月加 ${weeks} 周（到 ${short(expiresOn)}）` : months ? ` ${months} 个月` : weeks ? ` ${weeks} 周（到 ${short(expiresOn)}）` : '';
+		offer({ started_on: startedOn, term_months: months || null, expires_on: expiresOn, label: `${short(startedOn)} 起${term}` });
+	}
+	if (!dated) {
+		const months = monthsOf(/(?:(半年)|(一年|1年)|((?:[一1]个?)?季度)|([一二两三四五六七八九十])\s*个月)/.exec(text));
+		if (months) offer({ started_on: null, term_months: months, expires_on: null, label: `${months} 个月` });
+	}
+	return found;
 }
 
 function memberStatus(row, today, exempt) {
@@ -77,6 +152,10 @@ function memberStatus(row, today, exempt) {
 export function createMemberships({ ledger, bridgePost, targetRegistry, webhookTargets, now = () => new Date() }) {
 	const schema = [
 		`CREATE TABLE IF NOT EXISTS ${MEMBERSHIP_TABLE} (target_chat_id text NOT NULL, user_id text NOT NULL, display_name text NOT NULL, started_on date NOT NULL, term_months integer NOT NULL, expires_on date NOT NULL, note text, reminded_on date, remind_claimed_at timestamptz, left_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (target_chat_id, user_id))`,
+		// `alias` is the name the account gave the member in Feishu, as of the last sync. `expiry_fixed` marks an expiry date
+		// that was typed instead of counted from the term (a term to the end of a month, holidays added on).
+		`ALTER TABLE ${MEMBERSHIP_TABLE} ADD COLUMN IF NOT EXISTS alias text`,
+		`ALTER TABLE ${MEMBERSHIP_TABLE} ADD COLUMN IF NOT EXISTS expiry_fixed boolean NOT NULL DEFAULT false`,
 		`CREATE TABLE IF NOT EXISTS ${SETTINGS_TABLE} (target_chat_id text PRIMARY KEY, enabled boolean NOT NULL, default_term_months integer NOT NULL, remind_text text NOT NULL, exempt_user_ids jsonb NOT NULL DEFAULT '[]'::jsonb, last_review_on date)`,
 	];
 
@@ -124,7 +203,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 	}
 
 	async function rows(key) {
-		const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE target_chat_id=$1 ORDER BY started_on,user_id`, [key]);
+		const result = await ledger.query(`SELECT ${MEMBER_COLUMNS} FROM ${MEMBERSHIP_TABLE} WHERE target_chat_id=$1 ORDER BY started_on,user_id`, [key]);
 		return result.rows.map(memberRow);
 	}
 
@@ -144,9 +223,9 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 			const startedOn = existing?.started_on ?? shanghaiDate(new Date(Number(member.joined_at) * 1000));
 			const expiry = existing?.expires_on ?? addMonths(startedOn, config.default_term_months);
 			if (existing) {
-				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET display_name=$3,left_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id=$2`, [key, userId, String(member.name ?? ''), now()]);
+				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET display_name=$3,alias=$5,left_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id=$2`, [key, userId, String(member.name ?? ''), now(), String(member.alias ?? '')]);
 			} else {
-				await ledger.query(`INSERT INTO ${MEMBERSHIP_TABLE} (target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT(target_chat_id,user_id) DO NOTHING`, [key, userId, String(member.name ?? ''), startedOn, config.default_term_months, expiry, null, now()]);
+				await ledger.query(`INSERT INTO ${MEMBERSHIP_TABLE} (target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,created_at,updated_at,alias) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9) ON CONFLICT(target_chat_id,user_id) DO NOTHING`, [key, userId, String(member.name ?? ''), startedOn, config.default_term_months, expiry, null, now(), String(member.alias ?? '')]);
 			}
 		}
 		for (const row of current) if (!excludedIds.includes(String(row.user_id)) && !ids.has(String(row.user_id)) && !row.left_at) {
@@ -157,7 +236,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 
 	function publicRows(items, config, today = shanghaiDate(now())) {
 		const exempt = new Set(config.exempt_user_ids);
-		return items.map((row) => ({ ...row, status: memberStatus(row, today, exempt.has(String(row.user_id))) }));
+		return items.map((row) => ({ ...row, status: memberStatus(row, today, exempt.has(String(row.user_id))), suggestions: aliasSuggestions(row.alias, today) }));
 	}
 
 	async function review(chatId, { dryRun = false } = {}) {
@@ -170,10 +249,10 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		const claimAt = now();
 		const candidateSql = `target_chat_id=$1 AND expires_on <= $2 AND left_at IS NULL AND reminded_on IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3::timestamptz - interval '10 minutes') AND NOT EXISTS (SELECT 1 FROM ${SETTINGS_TABLE} s WHERE s.target_chat_id=${MEMBERSHIP_TABLE}.target_chat_id AND ${MEMBERSHIP_TABLE}.user_id = ANY (SELECT jsonb_array_elements_text(s.exempt_user_ids)))`;
 		if (dryRun) {
-			const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE ${candidateSql} ORDER BY user_id`, [key, today, claimAt]);
+			const result = await ledger.query(`SELECT ${MEMBER_COLUMNS} FROM ${MEMBERSHIP_TABLE} WHERE ${candidateSql} ORDER BY user_id`, [key, today, claimAt]);
 			return publicRows(result.rows.map(memberRow), config, today);
 		}
-		const claimed = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE ${candidateSql} RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [key, today, claimAt]);
+		const claimed = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE ${candidateSql} RETURNING ${MEMBER_COLUMNS}`, [key, today, claimAt]);
 		const members = claimed.rows.map(memberRow);
 		for (let offset = 0; offset < members.length; offset += 20) {
 			const batch = members.slice(offset, offset + 20);
@@ -194,6 +273,10 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		const { key } = await target(chatId);
 		const startedOn = parseDate(body?.started_on);
 		const termMonths = validTerm(body?.term_months);
+		// An expiry date that is typed wins over the term; without one the expiry is the start plus the term.
+		const fixed = body?.expires_on != null && body.expires_on !== '';
+		const expiresOn = fixed ? parseDate(body.expires_on, '到期日必须是 YYYY-MM-DD') : addMonths(startedOn, termMonths);
+		if (expiresOn < startedOn) throw new Error('到期日不能早于开始日期');
 		const note = body?.note == null ? null : String(body.note);
 		if (body?.exempt !== undefined && typeof body.exempt !== 'boolean') throw new Error('exempt 必须是布尔值');
 		const config = body?.exempt === undefined ? null : await settings(key);
@@ -201,11 +284,11 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		if (exemptIds && body.exempt) exemptIds.add(String(userId));
 		if (exemptIds && !body.exempt) exemptIds.delete(String(userId));
 		if (exemptIds) {
-			const result = await ledger.query(`WITH updated_member AS (UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at), updated_settings AS (UPDATE ${SETTINGS_TABLE} SET exempt_user_ids=$8::jsonb WHERE target_chat_id=$1 AND EXISTS (SELECT 1 FROM updated_member) RETURNING target_chat_id) SELECT updated_member.* FROM updated_member JOIN updated_settings USING (target_chat_id)`, [key, String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now(), JSON.stringify([...exemptIds])]);
+			const result = await ledger.query(`WITH updated_member AS (UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7,expiry_fixed=$9 WHERE target_chat_id=$1 AND user_id=$2 RETURNING ${MEMBER_COLUMNS}), updated_settings AS (UPDATE ${SETTINGS_TABLE} SET exempt_user_ids=$8::jsonb WHERE target_chat_id=$1 AND EXISTS (SELECT 1 FROM updated_member) RETURNING target_chat_id) SELECT updated_member.* FROM updated_member JOIN updated_settings USING (target_chat_id)`, [key, String(userId), startedOn, termMonths, expiresOn, note, now(), JSON.stringify([...exemptIds]), fixed]);
 			if (!result.rows[0]) throw new Error('会员不存在，请先同步成员');
 			return memberRow(result.rows[0]);
 		}
-		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [key, String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now()]);
+		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7,expiry_fixed=$8 WHERE target_chat_id=$1 AND user_id=$2 RETURNING ${MEMBER_COLUMNS}`, [key, String(userId), startedOn, termMonths, expiresOn, note, now(), fixed]);
 		if (!result.rows[0]) throw new Error('会员不存在，请先同步成员');
 		return memberRow(result.rows[0]);
 	}
@@ -238,7 +321,7 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		await sync(chatId);
 		const today = shanghaiDate(now());
 		const claimAt = now();
-		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2 AND expires_on <= $4 AND left_at IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3::timestamptz - interval '10 minutes') RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [key, String(userId), claimAt, today]);
+		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2 AND expires_on <= $4 AND left_at IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3::timestamptz - interval '10 minutes') RETURNING ${MEMBER_COLUMNS}`, [key, String(userId), claimAt, today]);
 		if (!result.rows[0]) throw new Error('会员未到期、已离群或正在提醒中');
 		const row = memberRow(result.rows[0]);
 		if (config.exempt_user_ids.includes(String(userId))) {
