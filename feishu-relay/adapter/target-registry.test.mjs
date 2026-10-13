@@ -10,9 +10,9 @@ function fakeLedger(initial = []) {
 	return {
 		table,
 		async query(sql, params = []) {
-			if (sql.startsWith('SELECT count')) return { rows: [{ count: table.size }] };
+			if (sql.startsWith('SELECT count')) return { rows: [{ count: [...table.values()].filter((row) => row.chat_id === row.websocket_chat_id).length }] };
 			if (sql.startsWith('SELECT chat_id')) return { rows: [...table.values()] };
-			if (sql.startsWith('DELETE FROM') && !params.length) { table.clear(); return { rows: [] }; }
+			if (sql.startsWith('DELETE FROM') && sql.includes('chat_id = websocket_chat_id')) { for (const row of [...table.values()]) if (row.chat_id === row.websocket_chat_id && !params[0].includes(row.chat_id)) table.delete(row.chat_id); return { rows: [] }; }
 			if (sql.startsWith('DELETE FROM')) { table.delete(String(params[0])); return { rows: [] }; }
 			if (sql.startsWith('INSERT')) {
 				const [chat_id, websocket_chat_id, chat_name, bot_id, bot_name, owned, resolved_at] = params;
@@ -67,10 +67,14 @@ test('a failing listener is isolated from registry writes', async () => {
 	await assert.doesNotReject(() => registry.resolve());
 });
 
-test('start resolves only an empty table and bridge failures are non-fatal', async () => {
-	const populated = setup({ initial: [{ chat_id: 'oc_env', websocket_chat_id: '7', chat_name: '群', bot_id: 'b', bot_name: '机器人', owned: true, resolved_at: NOW }] });
+test('start resolves only while no owned group is known and bridge failures are non-fatal', async () => {
+	const targetRow = { chat_id: 'oc_env', websocket_chat_id: '7', chat_name: '群', bot_id: 'b', bot_name: '机器人', owned: true, resolved_at: NOW };
+	const populated = setup({ initial: [targetRow, { chat_id: '7', websocket_chat_id: '7', chat_name: '群', bot_id: null, bot_name: null, owned: true, resolved_at: NOW }] });
 	await populated.registry.start();
 	assert.equal(populated.calls.length, 0);
+	const targetsOnly = setup({ initial: [targetRow] });
+	await targetsOnly.registry.start();
+	assert.equal(targetsOnly.calls.length, 1);
 	const empty = setup();
 	empty.calls.push = Array.prototype.push;
 	await empty.registry.start();
@@ -84,4 +88,58 @@ test('start resolves only an empty table and bridge failures are non-fatal', asy
 	} finally {
 		console.error = original;
 	}
+});
+
+const OWNED = { chat_id: '7680000000000000002', name: '擒龙群', owned: true, bots: [] };
+const TARGET_GROUP = { chat_id: '7690000000000000001', name: '目标群', owned: true, bots: [{ bot_id: 'bot-1', name: '转发机器人', webhook_hash: HASH }] };
+
+test('groups lists the targets, then every other group the account owns, and get finds both', async () => {
+	const { registry } = setup({ bridgeAnswer: { groups: [OWNED, TARGET_GROUP, { chat_id: '7680000000000000003', name: '别人的群', owned: false, bots: [] }] } });
+	const groups = await registry.resolve();
+	assert.deepEqual(groups.map((row) => [row.chat_id, row.name, row.origin, row.usable, row.owned]), [
+		['oc_env', '目标群', 'env', true, true],
+		['7680000000000000002', '擒龙群', 'owned', false, true],
+	]);
+	assert.deepEqual((await registry.list()).map((row) => row.chat_id), ['oc_env']);
+	assert.equal((await registry.get('7680000000000000002')).websocket_chat_id, '7680000000000000002');
+	assert.equal(await registry.get('7690000000000000001'), null);
+	assert.equal(await registry.get('7680000000000000003'), null);
+});
+
+test('a group the account no longer owns leaves the list at the next resolve', async () => {
+	const answer = { groups: [OWNED, TARGET_GROUP] };
+	const { registry } = setup({ bridgeAnswer: answer });
+	await registry.resolve();
+	answer.groups = [TARGET_GROUP];
+	assert.deepEqual((await registry.resolve()).map((row) => row.chat_id), ['oc_env']);
+});
+
+test('a target added to an owned group takes the place of the group row and inherits its owner before the next resolve', async () => {
+	const ledger = fakeLedger();
+	const webhooks = fakeWebhooks();
+	const registry = createTargetRegistry({ ledger, bridgePost: async () => ({ groups: [OWNED] }), webhookTargets: webhooks, now: () => NOW });
+	await registry.resolve();
+	const base = webhooks.list;
+	webhooks.list = () => [...base(), { chat_id: 'wh_new', name: '擒龙群', keyword: '提醒', origin: 'dashboard', usable: true, managed: true, websocket_chat_id: OWNED.chat_id, verified_at: null, created_at: null }];
+	const groups = await registry.groups();
+	assert.deepEqual(groups.map((row) => row.chat_id), ['oc_env', 'wh_new']);
+	assert.equal(groups[1].owned, true);
+});
+
+test('start resolves until the owned groups are known, trying again after a failure', async () => {
+	let fail = true;
+	const calls = [];
+	const registry = createTargetRegistry({ ledger: fakeLedger(), bridgePost: async (...args) => { calls.push(args); if (fail) throw new Error('bridge down'); return { groups: [OWNED] }; }, webhookTargets: fakeWebhooks(), now: () => NOW });
+	const original = console.error;
+	console.error = () => {};
+	try {
+		await registry.start({ retryMs: 5, retries: 20 });
+		assert.equal(calls.length, 1);
+		fail = false;
+		await new Promise((resolve) => setTimeout(resolve, 40));
+	} finally { console.error = original; }
+	assert.equal((await registry.groups()).some((row) => row.origin === 'owned'), true);
+	const settled = calls.length;
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	assert.equal(calls.length, settled);
 });
