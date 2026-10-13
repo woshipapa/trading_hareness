@@ -4,7 +4,7 @@
 - holder: Claude Code 会话 93ba6e1d，2026-10-13
 - goal: 研究盘中“到底、放量、资金进场”的 V 形反转能否从我们的数据里实时识别、真假 V 怎么区分、反转后哪类股票领先，并把成立的部分做成研究用的提示
 - plan: none
-- next: 等 owner 恢复且 B030 查明原因后，重跑第一轮：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 510300 512100`（带代码参数就不存雷达），全天雷达另用 `curl` 存到本机 `state/research/vshape_20261013/radar/radar_2026-10-13.json`；第一轮日志出现 FINISHED 后第二轮自动开始（若排队命令已随主会话结束，按 Running 里的命令手工跑）；两轮都完成后核对 11 个代码的天数，写研究登记，派 Codex
+- next: 等 owner 恢复且 B031 查明原因后，重跑第一轮：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 510300 512100`（带代码参数就不存雷达），全天雷达另用 `curl` 存到本机 `state/research/vshape_20261013/radar/radar_2026-10-13.json`；第一轮日志出现 FINISHED 后第二轮自动开始（若排队命令已随主会话结束，按 Running 里的命令手工跑）；两轮都完成后核对 11 个代码的天数，写研究登记，派 Codex
 - updated: 2026-10-13
 
 ## Requirements
@@ -67,7 +67,7 @@
   - 日内跌得最深的五分之一从低点到收盘多涨 0.87%（t 2.3），但次日开盘少 0.32%（t −2.6）：隔夜回吐。
   - 由此，问题的重心移到假设 1 和 2：中位数个股跌到 −2% 以下时只有约五分之一的日子走成 V，盘中用什么能把它和单边下跌日分开。这要分钟数据。
 
-- 2026-10-13 15:18 取数没有开始：第一轮脚本 15:10 存全天雷达时中继返回 503，脚本就此退出，一次授权接口都没调。原因是 owner 主机不响应（见 BACKLOG B030）。第二轮的排队命令还在等日志里的 FINISHED，不会自己启动。owner 恢复并查明原因之前不要重跑。
+- 2026-10-13 15:18 取数没有开始：第一轮脚本 15:10 存全天雷达时中继返回 503，脚本就此退出，一次授权接口都没调。原因是 owner 主机不响应（见 BACKLOG B031）。第二轮的排队命令还在等日志里的 FINISHED，不会自己启动。owner 恢复并查明原因之前不要重跑。
 
 ## Waiting on the user
 

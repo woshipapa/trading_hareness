@@ -216,7 +216,7 @@
 - needs: 用户同意
 - updated: 2026-10-13
 
-### B030 owner 主机 2026-10-13 收盘后不响应
+### B031 owner 主机 2026-10-13 收盘后不响应
 
 - state: doing
 - kind: defect
