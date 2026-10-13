@@ -26,9 +26,10 @@ export type RadarDay = {
   trade_date: string; points: RadarPoint[]; main_net: MainNetPoint[]; definitions?: Record<string, string>;
 };
 export type RadarRow = {
-  time: string; observedAt: string; cumUp: number; cumDown: number; middle: number; pool: number;
-  nowUp: number; nowDown: number; mainNet: number | null;
-  counts: { cumUp: number; cumDown: number; nowUp: number; nowDown: number }; breadth: Breadth | null;
+  time: string; observedAt: string; phase: string; cumUp: number | null; cumDown: number | null; middle: number | null; pool: number | null;
+  nowUp: number | null; nowDown: number | null; mainNet: number | null;
+  counts: { cumUp: number | null; cumDown: number | null; nowUp: number | null; nowDown: number | null }; breadth: Breadth | null;
+  auction?: { up: number | null; down: number | null; priced: number };
 };
 
 export const SEGMENT_LABELS: Record<string, string> = {
@@ -83,18 +84,24 @@ export function radarRows(day: RadarDay | null | undefined, band: string, segmen
   const rows: RadarRow[] = [];
   for (const point of day.points ?? []) {
     const cells = cellsOf(point, band, segment);
-    if (!cells) continue;
+    if (!cells && !point.auction) continue;
     rows.push({
-      time: shanghaiTime(point.observed_at), observedAt: point.observed_at,
-      cumUp: cells.bands.cum_up.turnover, cumDown: cells.bands.cum_down.turnover, middle: cells.bands.middle.turnover,
-      pool: cells.pool.turnover, nowUp: cells.bands.now_up.turnover, nowDown: cells.bands.now_down.turnover,
+      time: shanghaiTime(point.observed_at), observedAt: point.observed_at, phase: point.phase,
+      cumUp: cells?.bands.cum_up.turnover ?? null, cumDown: cells?.bands.cum_down.turnover ?? null,
+      middle: cells?.bands.middle.turnover ?? null, pool: cells?.pool.turnover ?? null,
+      nowUp: cells?.bands.now_up.turnover ?? null, nowDown: cells?.bands.now_down.turnover ?? null,
       // The board flow is market-wide; it is not split by segment.
-      mainNet: segment === 'all' ? mainNetAsOf(flows, point.observed_at) : null,
+      mainNet: cells && segment === 'all' ? mainNetAsOf(flows, point.observed_at) : null,
       counts: {
-        cumUp: cells.bands.cum_up.count, cumDown: cells.bands.cum_down.count,
-        nowUp: cells.bands.now_up.count, nowDown: cells.bands.now_down.count,
+        cumUp: cells?.bands.cum_up.count ?? null, cumDown: cells?.bands.cum_down.count ?? null,
+        nowUp: cells?.bands.now_up.count ?? null, nowDown: cells?.bands.now_down.count ?? null,
       },
-      breadth: cells.breadth,
+      breadth: cells?.breadth ?? null,
+      auction: point.auction ? {
+        up: point.auction.up[band] ?? null,
+        down: point.auction.down[band] ?? null,
+        priced: point.auction.priced,
+      } : undefined,
     });
   }
   return rows;
@@ -116,7 +123,7 @@ export function bandCounts(rows: RadarRow[], band: string): string {
   if (!last) return '';
   const { cumUp, cumDown, nowUp, nowDown } = last.counts;
   if (band === 'limit') {
-    return `涨停 ${nowUp}（曾 ${cumUp}，炸板 ${Math.max(0, cumUp - nowUp)}）· 跌停 ${nowDown}（曾 ${cumDown}）`;
+    return `涨停 ${nowUp}（曾 ${cumUp}，炸板 ${Math.max(0, (cumUp ?? 0) - (nowUp ?? 0))}）· 跌停 ${nowDown}（曾 ${cumDown}）`;
   }
   return `在上方 ${nowUp}/曾 ${cumUp} · 在下方 ${nowDown}/曾 ${cumDown}`;
 }
@@ -126,46 +133,102 @@ export function breadthText(rows: RadarRow[]): string {
   return breadth ? `上涨 ${breadth.up} · 下跌 ${breadth.down} · 平 ${breadth.flat}` : '';
 }
 
-export function radarLegend(rows: RadarRow[]): Record<string, string> {
-  const last = rows[rows.length - 1];
-  if (!last) return {};
+const UP = '#d93026';
+const DOWN = '#188038';
+const AMBER = '#b7791f';
+
+export function displayRows(rows: RadarRow[]): RadarRow[] {
+  const sorted = rows.filter((row) => row.time >= '09:15').slice().sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt));
+  const buckets = new Map<number, RadarRow>();
+  for (const row of sorted) {
+    const [hour, minute] = row.time.split(':').map(Number);
+    const bucket = Math.floor((hour * 60 + minute - (9 * 60 + 15)) / 2);
+    buckets.set(bucket, row);
+  }
+  const kept = [...buckets.values()];
+  const match = sorted.find((row) => row.phase === 'auction_matched' || row.time === '09:25');
+  const newest = sorted[sorted.length - 1];
+  for (const row of [match, newest]) {
+    if (row && !kept.some((item) => item.observedAt === row.observedAt)) kept.push(row);
+  }
+  return kept.sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt));
+}
+
+export type RadarHeadline = {
+  cumDown: number | null; cumUp: number | null; downDelta: number | null; upDelta: number | null;
+  auctionDown: number | null; auctionUp: number | null; mainNet: number | null;
+};
+
+export function radarHeadline(rows: RadarRow[]): RadarHeadline {
+  const displayed = displayRows(rows);
+  const latest = displayed[displayed.length - 1];
+  const previous = displayed[displayed.length - 2];
+  const delta = (current: number | null, prior: number | null) => current === null || prior === null ? null : current - prior;
+  const auction = rows.find((row) => row.phase === 'auction_matched' || row.time === '09:25');
   return {
-    cumDown: yi(last.cumDown), cumUp: yi(last.cumUp), middle: yi(last.middle), pool: yi(last.pool),
-    nowUp: yi(last.nowUp), nowDown: yi(last.nowDown), mainNet: yi(last.mainNet), time: last.time,
+    cumDown: latest?.cumDown ?? null, cumUp: latest?.cumUp ?? null,
+    downDelta: delta(latest?.cumDown ?? null, previous?.cumDown ?? null),
+    upDelta: delta(latest?.cumUp ?? null, previous?.cumUp ?? null),
+    auctionDown: auction?.cumDown ?? null, auctionUp: auction?.cumUp ?? null,
+    mainNet: [...rows].reverse().find((row) => row.mainNet !== null)?.mainNet ?? null,
   };
 }
 
-const UP = '#d93026';
-const DOWN = '#188038';
+export function radarTooltip(row: RadarRow, bandLabel: string): string[] {
+  const lines = [row.time];
+  if (row.cumDown === null) {
+    const auction = row.auction;
+    return [...lines, `竞价虚拟价：高于 +${bandLabel.replace(/^±/, '')} ${auction?.up ?? '-'} 只 · 低于 -${bandLabel.replace(/^±/, '')} ${auction?.down ?? '-'} 只（已有价格 ${auction?.priced ?? '-'} 只）`];
+  }
+  lines.push(`主动卖 ${yi(row.cumDown)}（即时 ${yi(row.nowDown)}）`);
+  lines.push(`主动买 ${yi(row.cumUp)}（即时 ${yi(row.nowUp)}）`);
+  lines.push(`中间带（${bandLabel} 内） ${yi(row.middle)}`);
+  lines.push(`全池总额 ${yi(row.pool)}`);
+  lines.push(`主力净额 ${yi(row.mainNet)}`);
+  lines.push(`卖/买 = 当日曾触及 ${bandLabel} 的股票累计成交额（只进不出）；即时 = 此刻仍在 ${bandLabel} 之外`);
+  return lines;
+}
 
 export function radarOption(rows: RadarRow[], bandLabel: string): Record<string, unknown> {
+  const displayed = displayRows(rows);
   const line = (name: string, values: (number | null)[], color: string, dashed = false) => ({
-    name, type: 'line', showSymbol: false, smooth: false, data: values.map((v) => (v === null ? null : +(v / YI).toFixed(2))),
+    name, type: 'line', showSymbol: true, symbolSize: 4, smooth: false, data: values.map((v) => (v === null ? null : +(v / YI).toFixed(2))),
     lineStyle: { color, width: dashed ? 1 : 2, type: dashed ? 'dashed' : 'solid' }, itemStyle: { color },
   });
+  const byTime = new Map(displayed.map((row) => [row.time, row]));
+  const match = displayed.find((row) => row.phase === 'auction_matched');
+  const afterOpen = displayed.find((row) => row.time >= '09:30');
+  const markerData = [
+    match && { xAxis: match.time, label: { formatter: '9:25 定格', color: DOWN }, lineStyle: { color: DOWN, type: 'dashed' } },
+    afterOpen && { xAxis: afterOpen.time, label: { formatter: '9:30', color: '#666' }, lineStyle: { color: '#999', type: 'dashed' } },
+  ].filter(Boolean);
   return {
     animation: false,
-    tooltip: { trigger: 'axis', valueFormatter: (value: number) => (value === null || value === undefined ? '-' : `${value}亿`) },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: Array<{ axisValue: string }>) => {
+        const row = byTime.get(params[0]?.axisValue ?? '');
+        return row ? radarTooltip(row, bandLabel).join('<br/>') : '';
+      },
+    },
     legend: { top: 0 },
-    grid: { left: 56, right: 56, top: 36, bottom: 40 },
-    xAxis: { type: 'category', data: rows.map((row) => row.time) },
+    grid: { left: 56, right: 64, top: 36, bottom: 40 },
+    xAxis: { type: 'category', data: displayed.map((row) => row.time) },
     yAxis: [
       { type: 'value', name: '成交额(亿)', scale: true },
       { type: 'value', name: '主力净额(亿)', scale: true, splitLine: { show: false } },
     ],
     dataZoom: [{ type: 'inside' }],
     series: [
-      line(`曾≥+${bandLabel}累计`, rows.map((row) => row.cumUp), UP),
-      line(`曾≤-${bandLabel}累计`, rows.map((row) => row.cumDown), DOWN),
-      line('中间带', rows.map((row) => row.middle), '#8a8f98'),
-      line('全池', rows.map((row) => row.pool), '#5470c6', true),
-      line('此刻在上方', rows.map((row) => row.nowUp), UP, true),
-      line('此刻在下方', rows.map((row) => row.nowDown), DOWN, true),
+      { ...line('主动卖（累计）', displayed.map((row) => row.cumDown), DOWN), markLine: {
+        silent: true, symbol: 'none', data: markerData,
+      } },
+      line('主动买（累计）', displayed.map((row) => row.cumUp), UP),
+      line('中间带', displayed.map((row) => row.middle), '#8a8f98'),
       {
-        name: '主力净额', type: 'bar', yAxisIndex: 1, barMaxWidth: 6,
-        data: rows.map((row) => (row.mainNet === null ? null : {
-          value: +(row.mainNet / YI).toFixed(2), itemStyle: { color: row.mainNet >= 0 ? UP : DOWN },
-        })),
+        name: '主力净额', type: 'line', yAxisIndex: 1, showSymbol: false,
+        data: displayed.map((row) => row.mainNet === null ? null : +(row.mainNet / YI).toFixed(2)),
+        lineStyle: { color: AMBER, width: 2, type: 'dashed' }, itemStyle: { color: AMBER },
       },
     ],
   };
