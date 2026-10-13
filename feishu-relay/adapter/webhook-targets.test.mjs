@@ -107,6 +107,9 @@ test('sendText prefixes the target keyword, preserves mentions, and reports refu
 	await assert.rejects(() => targets.sendText('oc_missing', 'text'), /目标群不存在/);
 	const refused = setup({ answer: { code: 19024, msg: 'refused' } });
 	await assert.rejects(() => refused.targets.sendText('oc_env', 'text'), /关键词和机器人安全设置里的不一致/);
+	const unknown = setup({ answer: { code: 99999, msg: '拒绝 https://open.feishu.cn/open-apis/bot/v2/hook/leaked' } });
+	await assert.rejects(() => unknown.targets.add({ name: '新群', webhookUrl: HOOK, keyword: '词' }), (error) => error.message.includes('[已隐藏地址]') && !error.message.includes('https://'));
+	await assert.rejects(() => unknown.targets.sendText('oc_env', 'text'), (error) => error.message.includes('[已隐藏地址]') && !error.message.includes('https://'));
 });
 
 test('only a Feishu custom-bot address is accepted, and nothing is called for another', async () => {

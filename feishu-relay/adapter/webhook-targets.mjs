@@ -26,6 +26,10 @@ const REFUSALS = new Map([
 	[19024, '关键词和机器人安全设置里的不一致'],
 ]);
 
+function sanitizeRefusalMessage(value) {
+	return String(value ?? '').replace(/(?:(?:https?|ftp):\/\/|www\.|open\.(?:feishu\.cn|larksuite\.com)\/)[^\s<>"']+/gi, '[已隐藏地址]');
+}
+
 function deriveKey(secret) {
 	return createHash('sha256').update(`feishu-relay-webhook-target:${secret}`).digest();
 }
@@ -102,7 +106,8 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, bots 
 		catch { throw new Error(`${label}没有发出去：连不上飞书，请稍后再试`); }
 		const result = await response.json().catch(() => ({}));
 		if (response.ok && (!result?.code || result.code === 0)) return;
-		throw new Error(`${label}没有发出去：${REFUSALS.get(Number(result?.code)) ?? result?.msg ?? `HTTP ${response.status}`}`);
+		const reason = REFUSALS.get(Number(result?.code)) ?? (sanitizeRefusalMessage(result?.msg) || `HTTP ${response.status}`);
+		throw new Error(`${label}没有发出去：${reason}`);
 	}
 
 	async function sendTest(url, text) {

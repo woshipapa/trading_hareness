@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { DataAnalysis, Document, Operation, Promotion, Refresh, UploadFilled } from '@element-plus/icons-vue';
+import { DataAnalysis, Document, Operation, Promotion, Refresh, Setting, UploadFilled } from '@element-plus/icons-vue';
 import GroupRelayMonitorView from './views/GroupRelayMonitorView.vue';
+import TargetGroupsView from './views/TargetGroupsView.vue';
+import JoinByLinkPanel from './components/targets/JoinByLinkPanel.vue';
 import FeishuWorkbenchView from './views/FeishuWorkbenchView.vue';
 import ManualRelayView from './views/ManualRelayView.vue';
 import SendView from './views/SendView.vue';
@@ -18,15 +20,17 @@ const dashboard = useFeishuDashboardWorkspace();
         <el-menu-item index="workbench"><el-icon><Document /></el-icon><span>飞书工作台</span></el-menu-item>
         <el-menu-item index="relay"><el-icon><UploadFilled /></el-icon><span>手动投递</span></el-menu-item>
         <el-menu-item index="send"><el-icon><Promotion /></el-icon><span>发送</span></el-menu-item>
+        <el-menu-item index="targets"><el-icon><Setting /></el-icon><span>目标群</span></el-menu-item>
       </el-menu>
       <div class="side-state"><el-tag :type="dashboard.connected ? 'success' : 'warning'" effect="plain">{{ dashboard.connected ? '事件流已连接' : '事件流重连中' }}</el-tag></div>
     </el-aside>
     <el-container>
-      <el-header class="topbar"><div><h1>{{ dashboard.activeSection === 'monitor' ? '群监听状态' : dashboard.activeSection === 'workbench' ? '飞书工作台' : dashboard.activeSection === 'send' ? '发送' : '手动投递' }}</h1><span>{{ dashboard.activeSection === 'monitor' ? 'LarkAgentX WebSocket、webhook 和 Itougu 状态' : dashboard.activeSection === 'workbench' ? '汇总群协作闭环、能力与授权状态' : dashboard.activeSection === 'send' ? '个人会话统一发送:限速、幂等、可审计' : '通过适配器提交人工消息和媒体' }}</span></div><el-button :icon="Refresh" :loading="dashboard.activeSection === 'monitor' ? dashboard.groupRelayLoading : dashboard.feishuWorkbenchLoading" @click="dashboard.activeSection === 'monitor' ? dashboard.loadGroupRelayStatus() : dashboard.loadFeishuWorkbench()">刷新数据</el-button></el-header>
+      <el-header class="topbar"><div><h1>{{ dashboard.activeSection === 'monitor' ? '群监听状态' : dashboard.activeSection === 'workbench' ? '飞书工作台' : dashboard.activeSection === 'send' ? '发送' : dashboard.activeSection === 'targets' ? '目标群' : '手动投递' }}</h1><span>{{ dashboard.activeSection === 'monitor' ? 'LarkAgentX WebSocket、webhook 和 Itougu 状态' : dashboard.activeSection === 'workbench' ? '汇总群协作闭环、能力与授权状态' : dashboard.activeSection === 'send' ? '个人会话统一发送:限速、幂等、可审计' : dashboard.activeSection === 'targets' ? '目标群登记、成员与投递管理' : '通过适配器提交人工消息和媒体' }}</span></div><el-button :icon="Refresh" :loading="dashboard.activeSection === 'monitor' ? dashboard.groupRelayLoading : dashboard.feishuWorkbenchLoading" @click="dashboard.loadActiveSection">刷新数据</el-button></el-header>
       <el-main class="content">
         <GroupRelayMonitorView v-if="dashboard.activeSection === 'monitor'" />
         <FeishuWorkbenchView v-else-if="dashboard.activeSection === 'workbench'" />
         <SendView v-else-if="dashboard.activeSection === 'send'" />
+        <TargetGroupsView v-else-if="dashboard.activeSection === 'targets'" />
         <ManualRelayView v-else />
       </el-main>
     </el-container>
@@ -36,6 +40,7 @@ const dashboard = useFeishuDashboardWorkspace();
     <el-form label-position="top" @submit.prevent="dashboard.saveGroupRelayRoute">
       <el-alert title="从本账号已加入的群里选源群，保存后立即开始监听，并在后台读取该群的全部历史。" type="info" :closable="false" show-icon class="section-gap" />
       <el-alert v-if="dashboard.joinedGroupsError" :title="`群列表暂时读不到：${dashboard.joinedGroupsError}。仍可直接输入群名保存。`" type="warning" :closable="false" show-icon class="section-gap" />
+      <JoinByLinkPanel @joined="dashboard.onJoinedByLink" />
       <el-form-item label="源群" required>
         <el-select :model-value="dashboard.groupRelayRouteForm.websocket_chat_id || dashboard.groupRelayRouteForm.chat_name" filterable allow-create default-first-option :loading="dashboard.joinedGroupsLoading" placeholder="选择已加入的群，或输入群名" style="width: 100%" @change="dashboard.pickRouteGroup">
           <el-option v-for="group in dashboard.pickableGroups" :key="group.chat_id" :value="group.chat_id" :label="dashboard.groupOptionLabel(group)" :disabled="Boolean(group.source_key) && group.source_key !== dashboard.groupRelayRouteForm.key" />
