@@ -130,6 +130,7 @@ RULES: list[tuple[str, str, str, str]] = [
     ("refresh-tdx-hosts.sh", "research data", "quant-research", "workstation"),
     ("tdx_probe_failures.py", "research data", "quant-research", "workstation"),
     ("tdx-promote.py", "research data", "quant-research", "workstation"),
+    ("licensed_minute_history_fetch.py", "research data", "quant-research", "workstation"),
 ]
 GROUP_ORDER = ["release", "owner runtime", "owner Windows", "workstation services", "teacher review", "local n8n",
                "research data", "CI and checks", "forwarders", "retired"]
