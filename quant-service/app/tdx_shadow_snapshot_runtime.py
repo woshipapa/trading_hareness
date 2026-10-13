@@ -75,9 +75,16 @@ def _comparison_row(observed_at: datetime, tdx_rows: list[dict[str, Any]],
             "data_seconds_apart": None, "same_continuous_segment": False, "comparison": None,
         }
     reference_at, reference_rows = reference
-    reference_data_at = reference_at - timedelta(
-        seconds=float(reference_rows[0]["snapshot_metadata"]["age_seconds"]),
-    )
+    seconds_apart = abs((observed_at - reference_at).total_seconds())
+    comparison = compare(reference_rows, tdx_rows, seconds_apart)
+    age_seconds = reference_rows[0]["snapshot_metadata"].get("age_seconds")
+    if age_seconds is None:
+        return {
+            **row, "status": "incomplete" if not completeness["complete"] else "compared",
+            "reference_observed_at": reference_at.isoformat(), "reference_data_at": None,
+            "data_seconds_apart": None, "same_continuous_segment": False, "comparison": comparison,
+        }
+    reference_data_at = reference_at - timedelta(seconds=float(age_seconds))
     data_seconds_apart = abs((shadow_data_at - reference_data_at).total_seconds())
     shadow_bounds = continuous_auction_bounds(shadow_data_at)
     reference_bounds = continuous_auction_bounds(reference_data_at)
@@ -88,7 +95,6 @@ def _comparison_row(observed_at: datetime, tdx_rows: list[dict[str, Any]],
             "reference_data_at": reference_data_at.isoformat(), "data_seconds_apart": data_seconds_apart,
             "same_continuous_segment": same_continuous_segment, "comparison": None,
         }
-    seconds_apart = abs((observed_at - reference_at).total_seconds())
     return {
         **row,
         "status": "compared",
@@ -96,7 +102,7 @@ def _comparison_row(observed_at: datetime, tdx_rows: list[dict[str, Any]],
         "reference_data_at": reference_data_at.isoformat(),
         "data_seconds_apart": data_seconds_apart,
         "same_continuous_segment": same_continuous_segment,
-        "comparison": compare(reference_rows, tdx_rows, seconds_apart),
+        "comparison": comparison,
     }
 
 

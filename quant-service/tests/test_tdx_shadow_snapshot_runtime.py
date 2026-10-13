@@ -327,6 +327,45 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertTrue(result["same_continuous_segment"])
         self.assertEqual(result["comparison"]["seconds_apart"], 18.0)
 
+    def test_reference_without_age_stores_capture_comparison_without_judging_it(self):
+        persisted = []
+        reference = (NOW - timedelta(seconds=2), [{**FUYAO_ROW, "snapshot_metadata": {"age_seconds": None}}])
+        runtime, _ = self.dependencies(recent=reference, persisted=persisted)
+
+        result = asyncio.run(runtime.capture(NOW))
+
+        comparison = persisted[0][4]
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(persisted[0][2][0]["price_source"], "tdx_public_all_a_snapshot")
+        self.assertEqual(comparison["status"], "compared")
+        self.assertIsNone(comparison["reference_data_at"])
+        self.assertIsNone(comparison["data_seconds_apart"])
+        self.assertFalse(comparison["same_continuous_segment"])
+        self.assertEqual(comparison["comparison"]["seconds_apart"], 2.0)
+
+        docs = [{"effective_at": NOW, "rows": len(persisted[0][2])}]
+        comparisons = [{"effective_at": NOW, "normalized": comparison}]
+
+        class Connection:
+            def execute(self, sql, params=()):
+                if "a_share_minute_cross_section_shadow" in sql:
+                    return SimpleNamespace(fetchall=lambda: docs)
+                return SimpleNamespace(fetchall=lambda: comparisons)
+
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self):
+                        return Connection()
+
+                    def __exit__(self, *_args):
+                        return False
+                return Tx()
+
+        summary = day_summary(Database(), NOW.date())
+        self.assertEqual(summary["judged_minutes"], 0)
+        self.assertEqual(summary["rows_without_data_times"], 1)
+
     def test_data_times_across_open_or_before_continuous_session_are_not_same_segment(self):
         from app.all_a_snapshot_sources import project_tdx_snapshot_rows
         from app.tdx_shadow_snapshot_runtime import _comparison_row
