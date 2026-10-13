@@ -37,6 +37,12 @@ delays analysis visibility without stopping remote collection or losing retained
 evidence. Any older edge-journal or local-writer path is historical recovery
 material, not the current production writer.
 
+The full post-close refresh (`post_close_refresh_service`) is scheduled on the
+owner's own service only. What the peer needs every evening is started by the
+peer's own loop, `peer_close_research`, behind `peer_`-prefixed receipts that
+close only when the day's product is stored (decision 0021); adding a stage to
+the stage table alone schedules nothing on the peer.
+
 Both profiles run the same committed source revision. The distinction is
 runtime configuration and ownership, not a long-lived server branch: releases
 publish a Git SHA and image/source provenance through the loopback health
