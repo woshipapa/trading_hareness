@@ -53,6 +53,8 @@ class LicensedMinuteHistoryFetchTests(unittest.TestCase):
                 if day == "20261009":
                     time.sleep(0.02)
                 returned.append(day)
+                if code == "BBB" and day == "20261012":
+                    return {"trend": [], "errcode": 1020}
                 return {"trend": [["09:31", day, 1, 2, 0]], "errcode": 0}
 
             MODULE.fetch(["AAA", "BBB"], ["20261009", "20261012"], out, workers=2, call=call, calendar=calendar,
@@ -64,6 +66,10 @@ class LicensedMinuteHistoryFetchTests(unittest.TestCase):
             self.assertEqual([row["day"] for row in rows], ["20261009", "20261012"])
             rows = [json.loads(line) for line in (out / "BBB.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertEqual([row["day"] for row in rows], ["20261009", "20261012"])
+            before = len(asked)
+            MODULE.fetch(["AAA", "BBB"], ["20261009", "20261012"], out, workers=2, call=call, calendar=calendar,
+                         allow_session=True)
+            self.assertEqual(len(asked), before)
 
     def test_port_5681_is_refused(self):
         with self.assertRaisesRegex(ValueError, "local service"):

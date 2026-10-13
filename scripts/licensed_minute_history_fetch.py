@@ -204,7 +204,7 @@ def fetch(codes: list[str], days: list[str], out: Path, *, workers: int, call: C
                             next_index += 1
                         continue
                     failures = 0
-                    if status == "data":
+                    if status in ("data", "no data"):
                         handle.write(json.dumps(_record(day, payload), ensure_ascii=False) + "\n")
                         handle.flush()
                     if calls - mark_calls >= 200:
