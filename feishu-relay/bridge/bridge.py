@@ -46,10 +46,13 @@ from export_support import NameCache, card_images_by_message
 from history_range import HistoryRangeError, PAGE_SIZE, locate_positions
 from chat_directory import FEED_PAGE_SIZE, membership_report, pull_joined_groups
 from chat_bots import PULL_CHAT_BOTS_CMD, PULL_CHAT_CANDIDATE_BOTS_CMD, ChatBotError, ensure_custom_bot, remove_custom_bot
+from feature_routes import FEATURE_ROUTES
+from group_admin import GroupAdminError
 from history_render import render_transcript
 from owner_lock import OwnerLock, profile_storage_paths
 from source_filter import DEFAULT_ANQIANG_BLOCK_KEYWORDS, matched_source_keyword, parse_csv
 from qr_login_service import QrLoginService
+import target_observer
 
 
 LOG = logging.getLogger("larkagentx-bridge")
@@ -942,8 +945,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
 					return
 				self.send_json(200, self.bridge.qr_login.poll(session_id))
 				return
+			if self.path in FEATURE_ROUTES:
+				self.send_json(200, FEATURE_ROUTES[self.path](self.bridge, payload))
+				return
 			self.send_json(404, {"status": "not_found"})
-		except (GroupLookupError, HistoryRangeError, ChatBotError) as error:
+		except (GroupLookupError, HistoryRangeError, ChatBotError, GroupAdminError) as error:
 			LOG.warning("request refused path=%s: %s", self.path, error)
 			self.send_json(422, {"status": "unresolved", "message": str(error)[:240]})
 		except SendRateLimited as error:
@@ -2281,6 +2287,11 @@ class Bridge:
 		# decoded event is proof that the WebSocket session is receiving data.
 		self.websocket_state = "connected"
 		chat_id = str(message.get("chat_id", ""))
+		try:
+			target_observer.tap(self, chat_id, message)
+		except Exception as error:
+			# The observer is a side channel; its failure must not alter message handling.
+			LOG.warning("target observer tap failed chat_id=%s: %s", chat_id, error)
 		paper_command_lane = getattr(self, "paper_command_lane_enabled", False) and is_paper_command_message(message)
 		xhs_command_lane = (
 			getattr(self, "xhs_command_lane_enabled", False)
