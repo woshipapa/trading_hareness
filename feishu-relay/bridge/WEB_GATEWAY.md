@@ -15,11 +15,16 @@ so import nothing from larkx at module top level).
 - The request is a dict in the message's own field names (camelCase). Enum fields take the enum name as a
   string (`"GROUP"`, `"ONLY_ADMIN"`, `"JOIN_CHAT"`, `"APP"`). An int64 field accepts an int or a numeric string.
 - When the response has a payload, the call returns it as a dict; enum fields come back as numbers.
-- When the response has no payload, the call returns the envelope instead:
-  - success with an empty body: `{'payloadType': 1, 'cmd': 1, 'cid': '<id>'}`;
-  - failure: `payloadType` is not 1 and the reason is the text in `sid`, for example
-    `{'sid': 'you are already in target chat:7696053062053530578', 'payloadType': 4012, 'cmd': 3, 'cid': '…'}`.
-  A caller therefore tells a failure by `'sid' in result and result.get('payloadType') != 1`.
+- A command that succeeds with nothing to say returns the envelope instead of a payload:
+  `{'payloadType': 1, 'cmd': 1, 'cid': '<id>'}`.
+- A refused command is answered with **HTTP 400** and a failure envelope in the body: `payloadType` is not 1 and
+  the reason is the text in `sid`, for example
+  `{'sid': 'you are already in target chat:7696053062053530578', 'payloadType': 4012, 'cmd': 3, 'cid': '…'}`.
+  The client's `_gateway_post` calls `raise_for_status()`, so `bridge.client.api(...)` raises `requests.HTTPError`
+  and the envelope is never returned. (The first version of this file said the envelope comes back as the return
+  value: that was true only of the probe, which posted without `raise_for_status()`. Seen on the live system on
+  2026-10-13.) Feature handlers therefore take the client from `group_admin.require_client(bridge)`: its
+  `.api(...)` turns that error into a `GroupAdminError` carrying Feishu's reason.
 - A chat object in a response has, among others: `id`, `name`, `type` (2 = group), `ownerId`, `isCrossTenant`,
   `userCount` (people), `memberCount` (people and bots), `postType`, `lastMessagePosition`, `isDissolved`.
   `bridge.client.chat_infos([chat_id])` returns the same object by chat id.
@@ -58,6 +63,13 @@ any other message (the bridge counted it as ignored for a chat it does not liste
 it has `type` TEXT, `fromId` equal to the bot's `bot_id` (the id `bridge.client.chat_bots` lists), and its text.
 The text of a relayed post or card as read back has not been compared with what was sent; see probe P0-8 in
 the plan before relying on it.
+
+## The member list contains bots
+
+`chats.PullChatChattersV2Request` lists a group's bots among its members (seen 2026-10-13: the account and the
+relay's custom bot), with nothing in the answer to tell them apart. `bridge.client.chat_bots(chat_id)` lists the
+bots (`botCollection[].bots`, custom and app bots alike); the members handler marks each member with `is_bot`
+and `is_self`.
 
 ## Mentioning a member through a custom bot's webhook
 
