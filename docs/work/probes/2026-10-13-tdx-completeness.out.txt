@@ -1,0 +1,83 @@
+probe ran at 2026-10-13 14:00:31 Asia/Shanghai
+[rows per document, by phase]
+  fuyao_ths call auction 09:15-09:25: documents 9  rows min 4940  median 5331  max 5444
+  fuyao_ths 09:25-09:30: documents 5  rows min 5504  median 5504  max 5504
+  fuyao_ths continuous: documents 173  rows min 5548  median 5560  max 5560
+  tdx_public call auction 09:15-09:25: documents 10  rows min 0  median 0.0  max 0
+  tdx_public 09:25-09:30: documents 4  rows min 5480  median 5480.0  max 5480
+  tdx_public continuous: documents 169  rows min 5535  median 5560  max 5560
+[every TDX document with fewer than 5,000 rows, and the agreement row of that minute]
+  09:15:20 tdx rows 0  main rows None  in both None  only main None  only tdx None  gap None  status no_reference
+  09:16:23 tdx rows 0  main rows 4940  in both 0  only main 4940  only tdx 0  gap 3.681347  status compared
+  09:17:26 tdx rows 0  main rows 5162  in both 0  only main 5162  only tdx 0  gap 4.168683  status compared
+  09:18:30 tdx rows 0  main rows 5251  in both 0  only main 5251  only tdx 0  gap 3.389855  status compared
+  09:19:33 tdx rows 0  main rows 5283  in both 0  only main 5283  only tdx 0  gap 3.060005  status compared
+  09:20:36 tdx rows 0  main rows 5331  in both 0  only main 5331  only tdx 0  gap 2.274127  status compared
+  09:21:39 tdx rows 0  main rows 5354  in both 0  only main 5354  only tdx 0  gap 4.217965  status compared
+  09:22:42 tdx rows 0  main rows 5386  in both 0  only main 5386  only tdx 0  gap 5.873755  status compared
+  09:23:45 tdx rows 0  main rows 5395  in both 0  only main 5395  only tdx 0  gap 7.892642  status compared
+  09:24:48 tdx rows 0  main rows 5444  in both 0  only main 5444  only tdx 0  gap 9.359147  status compared
+[agreement rows with fewer than 5,000 symbols in both]
+  09:16:23 in both 0  only main 4940  only tdx 0  tdx rows 0  main rows 4940  gap 3.7
+  09:17:26 in both 0  only main 5162  only tdx 0  tdx rows 0  main rows 5162  gap 4.2
+  09:18:30 in both 0  only main 5251  only tdx 0  tdx rows 0  main rows 5251  gap 3.4
+  09:19:33 in both 0  only main 5283  only tdx 0  tdx rows 0  main rows 5283  gap 3.1
+  09:20:36 in both 0  only main 5331  only tdx 0  tdx rows 0  main rows 5331  gap 2.3
+  09:21:39 in both 0  only main 5354  only tdx 0  tdx rows 0  main rows 5354  gap 4.2
+  09:22:42 in both 0  only main 5386  only tdx 0  tdx rows 0  main rows 5386  gap 5.9
+  09:23:45 in both 0  only main 5395  only tdx 0  tdx rows 0  main rows 5395  gap 7.9
+  09:24:48 in both 0  only main 5444  only tdx 0  tdx rows 0  main rows 5444  gap 9.4
+[TDX document metadata]
+  183 documents: {"available_at": "str", "capability": "a_share_minute_cross_section_shadow", "live_effect": "none", "provider": "tdx_public", "research_only": true, "source": "tdx_public_all_a_snapshot", "warnings": "list"}
+  documents with warnings: 183
+    09:15:20 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:16:23 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:17:26 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:18:30 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:19:33 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:20:36 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:21:39 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:22:42 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:23:45 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:24:48 rows 0 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"]
+    09:25:52 rows 5480 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=99"]
+    09:26:54 rows 5480 ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=99"]
+  metadata of the 09:15:20 document (0 rows): {"source": "tdx_public_all_a_snapshot", "provider": "tdx_public", "warnings": ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"], "capability": "a_share_minute_cross_section_shadow", "live_effect": "none", "available_at": "2026-10-13 01:15:22.689893+00:00", "research_only": true}
+  metadata of the 09:16:23 document (0 rows): {"source": "tdx_public_all_a_snapshot", "provider": "tdx_public", "warnings": ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"], "capability": "a_share_minute_cross_section_shadow", "live_effect": "none", "available_at": "2026-10-13 01:16:25.773296+00:00", "research_only": true}
+  metadata of the 09:17:26 document (0 rows): {"source": "tdx_public_all_a_snapshot", "provider": "tdx_public", "warnings": ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"], "capability": "a_share_minute_cross_section_shadow", "live_effect": "none", "available_at": "2026-10-13 01:17:29.413505+00:00", "research_only": true}
+  metadata of the 09:23:45 document (0 rows): {"source": "tdx_public_all_a_snapshot", "provider": "tdx_public", "warnings": ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"], "capability": "a_share_minute_cross_section_shadow", "live_effect": "none", "available_at": "2026-10-13 01:23:48.207614+00:00", "research_only": true}
+  metadata of the 09:24:48 document (0 rows): {"source": "tdx_public_all_a_snapshot", "provider": "tdx_public", "warnings": ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=5579"], "capability": "a_share_minute_cross_section_shadow", "live_effect": "none", "available_at": "2026-10-13 01:24:51.550032+00:00", "research_only": true}
+  metadata of the 14:00:22 document (5560 rows): {"source": "tdx_public_all_a_snapshot", "provider": "tdx_public", "warnings": ["tdx_host=115.238.56.198:7709/login_one", "no_trade_rows=19"], "capability": "a_share_minute_cross_section_shadow", "live_effect": "none", "available_at": "2026-10-13 06:00:25.753931+00:00", "research_only": true}
+[main-source document metadata: is the stored snapshot a cached one?]
+  status counts: {'fresh': 38, 'cached': 149} | age_seconds: median 12.057 max 29.998 | over 5 s: 131 of 187
+  keys: ['age_seconds', 'cross_sectional', 'freshness_reason', 'matched_rows', 'max_age_seconds', 'scope', 'semantics', 'source', 'status', 'total', 'ttl_seconds', 'upstream_observed_at', 'upstream_timestamp_ms']
+  last: {"scope": "all_a_cross_section", "total": 5580, "source": "fuyao_ths_all_a_snapshot", "status": "cached", "semantics": "all_a_price_volume_turnover_snapshot_no_main_flow", "age_seconds": 13.62, "ttl_seconds": 30.0, "matched_rows": 5560, "cross_sectional": true, "max_age_seconds": 45.0, "freshness_reason": "within_slo", "upstream_observed_at": "2026-10-13T05:59:29+00:00", "upstream_timestamp_ms": 1791871169000}
+[agreement over complete snapshots in continuous trading (both documents >= 5,000 rows), by capture gap]
+  compared rows 182 | complete and in continuous trading 169 | no_reference 1
+  gap under 5 s: n 15 | within 0.5%: median 0.9863 p10 0.9581 min 0.8547 | within 0.1%: median 0.5995 p10 0.4460 min 0.2739 | within one tick: median 0.5806 p10 0.4511 min 0.3099 | volume within 1%: median 0.9619 p10 0.7369 min 0.3799 | largest price gap max 0.0403
+  gap 5-10 s: n 16 | within 0.5%: median 0.9890 p10 0.9516 min 0.8982 | within 0.1%: median 0.6638 p10 0.3730 min 0.3035 | within one tick: median 0.6162 p10 0.3984 min 0.3501 | volume within 1%: median 0.9781 p10 0.7696 min 0.7586 | largest price gap max 0.0421
+  gap 10-15 s: n 12 | within 0.5%: median 0.9867 p10 0.9603 min 0.8793 | within 0.1%: median 0.6248 p10 0.4926 min 0.2835 | within one tick: median 0.5854 p10 0.4924 min 0.3317 | volume within 1%: median 0.9522 p10 0.8453 min 0.7633 | largest price gap max 0.0757
+  gap 15-30 s: n 49 | within 0.5%: median 0.9721 p10 0.8381 min 0.5981 | within 0.1%: median 0.5178 p10 0.2522 min 0.1617 | within one tick: median 0.5052 p10 0.2932 min 0.1950 | volume within 1%: median 0.9227 p10 0.0165 min 0.0023 | largest price gap max 0.1041
+  gap 30-60 s: n 73 | within 0.5%: median 0.9653 p10 0.8415 min 0.5689 | within 0.1%: median 0.4349 p10 0.2351 min 0.1112 | within one tick: median 0.4441 p10 0.2827 min 0.1371 | volume within 1%: median 0.8378 p10 0.0340 min 0.0129 | largest price gap max 0.1081
+  gap 60 s and more: n 4 | within 0.5%: median 0.6707 p10 0.3480 min 0.3480 | within 0.1%: median 0.2391 p10 0.0820 min 0.0820 | within one tick: median 0.2621 p10 0.1099 min 0.1099 | volume within 1%: median 0.5656 p10 0.1004 min 0.1004 | largest price gap max 0.0461
+  gap under 10 s: n 31 | within 0.5%: median 0.9885 p10 0.9581 min 0.8547 | within 0.1%: median 0.6475 p10 0.4460 min 0.2739 | within one tick: median 0.6077 p10 0.4511 min 0.3099 | volume within 1%: median 0.9743 p10 0.7696 min 0.3799 | largest price gap max 0.0421
+  gap under 15 s: n 43 | within 0.5%: median 0.9878 p10 0.9581 min 0.8547 | within 0.1%: median 0.6299 p10 0.4460 min 0.2739 | within one tick: median 0.5919 p10 0.4511 min 0.3099 | volume within 1%: median 0.9629 p10 0.7696 min 0.3799 | largest price gap max 0.0757
+  all: n 169 | within 0.5%: median 0.9728 p10 0.8460 min 0.3480 | within 0.1%: median 0.5346 p10 0.2522 min 0.0820 | within one tick: median 0.5108 p10 0.2932 min 0.1099 | volume within 1%: median 0.8971 p10 0.0444 min 0.0023 | largest price gap max 0.1081
+  gap under 10 s, 09:30-09:45: n 0
+  gap under 10 s, 09:45-11:30: n 22 | within 0.5%: median 0.9848 p10 0.9581 min 0.8982 | within 0.1%: median 0.6036 p10 0.4460 min 0.3035 | within one tick: median 0.5829 p10 0.4511 min 0.3501 | volume within 1%: median 0.9582 p10 0.7696 min 0.7369 | largest price gap max 0.0388
+  gap under 10 s, 13:00 on: n 9 | within 0.5%: median 0.9903 p10 0.8547 min 0.8547 | within 0.1%: median 0.6835 p10 0.2739 min 0.2739 | within one tick: median 0.6246 p10 0.3099 min 0.3099 | volume within 1%: median 0.9804 p10 0.3799 min 0.3799 | largest price gap max 0.0421
+  rows with gap under 10 s and within 0.5% below 0.97: [('09:58:51', 0.2, 0.9694), ('10:02:03', 2.5, 0.9581), ('10:04:09', 5.6, 0.9696), ('10:05:12', 7.7, 0.9516), ('10:06:16', 9.9, 0.8982), ('13:00:19', 0.1, 0.8547)]
+  symbols: in both min 5502 max 5560 | only main max 2 | only tdx max 33
+[the largest single-symbol price gaps of the day, continuous trading]
+  09:54:35 002549.SZ gap 0.1081  seconds apart 56.4  reference 2026-10-13T01:53:39.420724+00:00
+  09:30:03 000609.SZ gap 0.1041  seconds apart 18.1  reference 2026-10-13T01:29:45.605546+00:00
+  09:33:14 301660.SZ gap 0.0951  seconds apart 21.5  reference 2026-10-13T01:32:53.112495+00:00
+  09:31:08 301660.SZ gap 0.0893  seconds apart 17.7  reference 2026-10-13T01:30:50.278144+00:00
+  10:33:56 600202.SH gap 0.0838  seconds apart 54.8  reference 2026-10-13T02:33:02.092862+00:00
+  09:34:18 301660.SZ gap 0.0798  seconds apart 21.2  reference 2026-10-13T01:33:57.209910+00:00
+  09:36:28 603616.SH gap 0.0761  seconds apart 27.0  reference 2026-10-13T01:36:01.027658+00:00
+  10:51:01 301010.SZ gap 0.0757  seconds apart 14.5  reference 2026-10-13T02:50:46.821513+00:00
+  09:32:11 002184.SZ gap 0.0713  seconds apart 19.7  reference 2026-10-13T01:31:51.535911+00:00
+  09:53:30 002549.SZ gap 0.0675  seconds apart 52.7  reference 2026-10-13T01:52:37.608963+00:00
+  09:50:15 300107.SZ gap 0.0659  seconds apart 51.9  reference 2026-10-13T01:49:24.112195+00:00
+  10:09:30 000530.SZ gap 0.0631  seconds apart 17.7  reference 2026-10-13T02:09:12.747979+00:00

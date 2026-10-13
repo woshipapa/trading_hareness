@@ -7,6 +7,19 @@ All analyst scoring, regression, calibration, pattern mining and recommendations
 are evidence-only until an explicit promotion record says otherwise. Never add a
 provider response directly to a live threshold or order path.
 
+## Working notes (read first)
+
+The state of ongoing work lives in `docs/work/`, kept under the `dev-notes` skill so that a new agent can
+continue without the previous conversation.
+
+- At session start read `docs/work/STATUS.md` (generated; never edit it), then the record of the line you were
+  asked about under `docs/work/streams/`. `docs/work/README.md` holds this project's specifics: the commands, the
+  dates (the notes use Asia/Shanghai; this machine's clock and `git log` are US Pacific), what only the user runs.
+- Load the `dev-notes` skill before starting, planning, dispatching, merging, releasing or closing a line of
+  work, when the user changes a requirement or asks to record something, and at wrap-up or hand-off.
+- New work, follow-ups and data to backfill get an id in a record or in `docs/work/BACKLOG.md`; a fact about the
+  live systems goes into `docs/work/FACTS.md` with its date and its probe. A sentence in the chat is not a record.
+
 ## Change map
 
 - `quant-service/app/routers/`: HTTP boundary and request validation.
@@ -36,6 +49,14 @@ provider response directly to a live threshold or order path.
 - Fail closed on missing bars, stale providers, incomplete sector mappings and
   insufficient samples. Do not invent Top10s, prices or regression coefficients.
 - Keep author replay outcomes separate from strategy-available outcomes.
+- Batch reads of the licensed interface (thousands of read calls, such as minute
+  history) go through `scripts/licensed_minute_history_fetch.py` or keep to its
+  limits: 6 requests in flight by default, never more than 8, not between 09:00
+  and 15:10 Asia/Shanghai on a session. Measured 2026-10-13: the path tops out
+  near 7.4 calls a second at 8 in flight, gains nothing beyond and is refused by
+  the owner's gateway at 16 (`docs/work/FACTS.md` F027). More than 5,000 calls
+  still need the user's explicit consent. Do not raise the service's own worker
+  settings for a batch: the ceiling is not there.
 
 ## Agent workflow
 
@@ -66,8 +87,9 @@ provider response directly to a live threshold or order path.
    `scripts/CATALOG.md` says what every script is for, which component owns it
    and which host runs it; a new script needs a rule in
    `scripts/generate_scripts_catalog.py`, then regenerate the catalog.
-9. Syncing or releasing to the two 47 hosts (edge `47.114.113.152`, owner
-   `47.110.79.189`) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
+9. Syncing or releasing to the two hosts (edge `47.114.113.152`; the owner quant
+   service on `118.178.133.37`, SSH port 22, since 2026-10-13: the old owner host
+   `47.110.79.189:3535` no longer runs it and must not be restored) follows `docs/RELEASE_SYNC_47.md` step by step. Start and end
    with the read-only `scripts/release-sync-status.sh`. The edge relay and owner
    quant service are independent release units: use `--edge-source-sha` and
    `--owner-source-sha` when their runtime SHAs differ; never force one SHA into

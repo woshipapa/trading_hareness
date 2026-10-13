@@ -11,6 +11,13 @@ CN_TZ = ZoneInfo("Asia/Shanghai")
 INTRADAY_WATCHLIST_MAX_SYMBOLS = 40
 
 
+def seconds_until_slot(now_epoch: float, interval_seconds: int, offset_seconds: int) -> float:
+    """Return the wait to the next wall-clock slot, including an exact slot's next round."""
+    interval = max(10, min(300, int(interval_seconds)))
+    elapsed = (float(now_epoch) - int(offset_seconds)) % interval
+    return float(interval - elapsed if elapsed else interval)
+
+
 def intraday_watchlist_max_symbols() -> int:
     """Return the configured live-watch capacity without weakening the batch caps.
 

@@ -1,0 +1,54 @@
+probe ran at 2026-10-13 14:02:20 Asia/Shanghai
+[000609.SZ] 09:27-09:37, ordered by each document's data time
+  main stored 09:27:42 data 09:27:17 (cache cached age 21.176 s) | price 7.97  pct -9.94  volume 116100.0  turnover 925317.0  open 7.97 high 7.97 low 7.97 prev 8.85
+  tdx  stored 09:27:57 data 09:27:59 (read returned) | price 7.97  pct -9.94  volume 116100  turnover 925317.0  open 7.97 high 7.97 low 7.97 prev 8.85
+  main stored 09:28:44 data 09:28:36 (cache cached age 5.943 s) | price 7.97  pct -9.94  volume 116100.0  turnover 925317.0  open 7.97 high 7.97 low 7.97 prev 8.85
+  tdx  stored 09:29:00 data 09:29:03 (read returned) | price 7.97  pct -9.94  volume 116100  turnover 925317.0  open 7.97 high 7.97 low 7.97 prev 8.85
+  main stored 09:29:45 data 09:29:43 (cache fresh age 0.0 s) | price 7.97  pct -9.94  volume 116100.0  turnover 925317.0  open 7.97 high 7.97 low 7.97 prev 8.85
+  tdx  stored 09:30:03 data 09:30:07 (read returned) | price 8.8  pct -0.56  volume 237300  turnover 1990767.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  main stored 09:30:50 data 09:30:28 (cache cached age 20.109 s) | price 8.8  pct -0.56  volume 398900.0  turnover 3410248.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  tdx  stored 09:31:08 data 09:31:10 (read returned) | price 8.65  pct -2.26  volume 435900  turnover 3733221.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  main stored 09:31:51 data 09:31:35 (cache cached age 13.716 s) | price 8.66  pct -2.15  volume 441200.0  turnover 3779119.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  tdx  stored 09:32:11 data 09:32:13 (read returned) | price 8.56  pct -3.28  volume 541100  turnover 4638500.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  main stored 09:32:53 data 09:32:41 (cache cached age 10.281 s) | price 8.57  pct -3.16  volume 577400.0  turnover 4949690.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  tdx  stored 09:33:14 data 09:33:17 (read returned) | price 8.61  pct -2.71  volume 609300  turnover 5224124.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  main stored 09:33:57 data 09:33:49 (cache cached age 6.407 s) | price 8.63  pct -2.49  volume 627600.0  turnover 5381772.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  tdx  stored 09:34:18 data 09:34:20 (read returned) | price 8.64  pct -2.37  volume 662400  turnover 5682323.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  main stored 09:34:59 data 09:34:51 (cache cached age 3.218 s) | price 8.62  pct -2.6  volume 669100.0  turnover 5740168.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  tdx  stored 09:35:21 data 09:35:24 (read returned) | price 8.58  pct -3.05  volume 749400  turnover 6431306.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  main stored 09:36:01 data 09:35:29 (cache cached age 28.978 s) | price 8.56  pct -3.28  volume 794900.0  turnover 6821504.0  open 7.97 high 8.84 low 7.97 prev 8.85
+  tdx  stored 09:36:28 data 09:36:31 (read returned) | price 8.5  pct -3.95  volume 887200  turnover 7610087.0  open 7.97 high 8.84 low 7.97 prev 8.85
+[301660.SZ] 09:27-09:37, ordered by each document's data time
+  main stored 09:27:42 data 09:27:17 (cache cached age 21.176 s) | price 45.0  pct 274.69  volume 5535300.0  turnover 249088500.0  open 45 high 45 low 45 prev 12.01
+  tdx  stored 09:27:57 data 09:27:59 (read returned) | price 45.0  pct 274.69  volume 5535300  turnover 249088496.0  open 45.0 high 45.0 low 45.0 prev 12.01
+  main stored 09:28:44 data 09:28:36 (cache cached age 5.943 s) | price 45.0  pct 274.69  volume 5535300.0  turnover 249088500.0  open 45 high 45 low 45 prev 12.01
+  tdx  stored 09:29:00 data 09:29:03 (read returned) | price 45.0  pct 274.69  volume 5535300  turnover 249088496.0  open 45.0 high 45.0 low 45.0 prev 12.01
+  main stored 09:29:45 data 09:29:43 (cache fresh age 0.0 s) | price 45.0  pct 274.69  volume 5535300.0  turnover 249088500.0  open 45 high 45 low 45 prev 12.01
+  tdx  stored 09:30:03 data 09:30:07 (read returned) | price 43.23  pct 259.95  volume 6227000  turnover 279438656.0  open 45.0 high 45.0 low 43.1 prev 12.01
+  main stored 09:30:50 data 09:30:28 (cache cached age 20.109 s) | price 42.8  pct 256.37  volume 7655600.0  turnover 340847010.0  open 45 high 45 low 42.68 prev 12.01
+  tdx  stored 09:31:08 data 09:31:10 (read returned) | price 38.98  pct 224.56  volume 16124800  turnover 685578176.0  open 45.0 high 45.0 low 38.98 prev 12.01
+  main stored 09:31:51 data 09:31:35 (cache cached age 13.716 s) | price 38.98  pct 224.56  volume 16124871.0  turnover 685578190.0  open 45 high 45 low 38.98 prev 12.01
+  tdx  stored 09:32:11 data 09:32:13 (read returned) | price 40.6  pct 238.05  volume 28438500  turnover 1163949824.0  open 45.0 high 45.0 low 38.0 prev 12.01
+  main stored 09:32:53 data 09:32:41 (cache cached age 10.281 s) | price 40.91  pct 240.63  volume 28728414.0  turnover 1175757860.0  open 45 high 45 low 38 prev 12.01
+  tdx  stored 09:33:14 data 09:33:17 (read returned) | price 44.8  pct 273.02  volume 35027900  turnover 1446565760.0  open 45.0 high 45.0 low 38.0 prev 12.01
+  main stored 09:33:57 data 09:33:49 (cache cached age 6.407 s) | price 44.88  pct 273.69  volume 38398246.0  turnover 1597813000.0  open 45 high 45 low 38 prev 12.01
+  tdx  stored 09:34:18 data 09:34:20 (read returned) | price 41.3  pct 243.88  volume 40487200  turnover 1688522240.0  open 45.0 high 45.0 low 38.0 prev 12.01
+  main stored 09:34:59 data 09:34:51 (cache cached age 3.218 s) | price 40.92  pct 240.72  volume 40800229.0  turnover 1701376500.0  open 45 high 45 low 38 prev 12.01
+  tdx  stored 09:35:21 data 09:35:24 (read returned) | price 41.68  pct 247.04  volume 44866300  turnover 1866499072.0  open 45.0 high 45.0 low 38.0 prev 12.01
+  main stored 09:36:01 data 09:35:29 (cache cached age 28.978 s) | price 41.74  pct 247.54  volume 44999863.0  turnover 1872064500.0  open 45 high 45 low 38 prev 12.01
+  tdx  stored 09:36:28 data 09:36:31 (read returned) | price 42.97  pct 257.79  volume 48021100  turnover 1999949312.0  open 45.0 high 45.0 low 38.0 prev 12.01
+[002549.SZ] 09:51-09:58, ordered by each document's data time
+  tdx  stored 09:51:19 data 09:51:21 (read returned) | price 12.51  pct -3.4  volume 19934500  turnover 251474448.0  open 12.62 high 12.88 low 12.38 prev 12.95
+  main stored 09:51:34 data 09:51:32 (cache fresh age 0.0 s) | price 12.54  pct -3.17  volume 19972079.0  turnover 251944010.0  open 12.62 high 12.88 low 12.38 prev 12.95
+  main stored 09:52:37 data 09:52:09 (cache cached age 25.336 s) | price 12.6  pct -2.7  volume 20200479.0  turnover 254814200.0  open 12.62 high 12.88 low 12.38 prev 12.95
+  tdx  stored 09:52:22 data 09:52:25 (read returned) | price 12.61  pct -2.63  volume 20345100  turnover 256636688.0  open 12.62 high 12.88 low 12.38 prev 12.95
+  main stored 09:53:39 data 09:53:17 (cache cached age 18.743 s) | price 12.86  pct -0.69  volume 20932761.0  turnover 264112550.0  open 12.62 high 12.88 low 12.38 prev 12.95
+  tdx  stored 09:53:30 data 09:53:33 (read returned) | price 13.45  pct 3.86  volume 21795400  turnover 275403232.0  open 12.62 high 13.45 low 12.38 prev 12.95
+  main stored 09:54:41 data 09:54:23 (cache cached age 13.787 s) | price 14.25  pct 10.04  volume 29597955.0  turnover 384435640.0  open 12.62 high 14.25 low 12.38 prev 12.95
+  tdx  stored 09:54:35 data 09:54:38 (read returned) | price 14.25  pct 10.04  volume 31044200  turnover 405045408.0  open 12.62 high 14.25 low 12.38 prev 12.95
+  main stored 09:55:43 data 09:55:29 (cache cached age 10.167 s) | price 14.25  pct 10.04  volume 33869008.0  turnover 445298150.0  open 12.62 high 14.25 low 12.38 prev 12.95
+  tdx  stored 09:55:39 data 09:55:41 (read returned) | price 14.25  pct 10.04  volume 34397100  turnover 452823584.0  open 12.62 high 14.25 low 12.38 prev 12.95
+  main stored 09:56:45 data 09:56:41 (cache fresh age 0.0 s) | price 14.25  pct 10.04  volume 35964308.0  turnover 475156170.0  open 12.62 high 14.25 low 12.38 prev 12.95
+  tdx  stored 09:56:42 data 09:56:45 (read returned) | price 14.25  pct 10.04  volume 36019100  turnover 475937056.0  open 12.62 high 14.25 low 12.38 prev 12.95
+  main stored 09:57:48 data 09:57:21 (cache cached age 23.551 s) | price 14.25  pct 10.04  volume 36635408.0  turnover 484719350.0  open 12.62 high 14.25 low 12.38 prev 12.95
+  tdx  stored 09:57:46 data 09:57:48 (read returned) | price 14.25  pct 10.04  volume 37131000  turnover 491781632.0  open 12.62 high 14.25 low 12.38 prev 12.95

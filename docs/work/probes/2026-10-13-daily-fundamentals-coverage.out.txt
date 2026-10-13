@@ -1,0 +1,23 @@
+now (database): 2026-10-13 21:25:50.737816
+  2026-09-22 bars  5558 with fundamentals  5172 (stored before the next day  5172) written 2026-09-22 16:01:37.075034 .. 2026-09-22 16:01:37.075034
+  2026-09-23 bars  5557 with fundamentals  5147 (stored before the next day  5147) written 2026-09-23 16:31:42.689751 .. 2026-09-23 16:31:42.689751
+  2026-09-24 bars  5560 with fundamentals  5164 (stored before the next day  5164) written 2026-09-24 16:01:37.771274 .. 2026-09-24 16:01:37.771274
+  2026-09-28 bars 10655 with fundamentals 10651 (stored before the next day 10651) written 2026-09-28 16:01:51.373301 .. 2026-09-28 18:40:52.210475
+  2026-09-29 bars 10804 with fundamentals 10800 (stored before the next day 10800) written 2026-09-29 15:14:00.790595 .. 2026-09-29 16:50:48.551339
+  2026-09-30 bars  5567 with fundamentals  5241 (stored before the next day     0) written 2026-10-08 10:56:00.078886 .. 2026-10-08 10:56:00.078886
+  2026-10-08 bars 10688 with fundamentals 10684 (stored before the next day 10684) written 2026-10-08 16:01:37.831458 .. 2026-10-08 19:23:18.463425
+  2026-10-09 bars  5561 with fundamentals  5416 (stored before the next day  5100) written 2026-10-09 16:01:46.308754 .. 2026-10-10 11:43:44.394116
+  2026-10-12 bars  5565 with fundamentals  5171 (stored before the next day  5171) written 2026-10-12 16:02:17.447877 .. 2026-10-12 16:02:17.447877
+  2026-10-13 bars  5564 with fundamentals  5138 (stored before the next day  5138) written 2026-10-13 16:01:43.638337 .. 2026-10-13 16:01:43.638337
+  without fundamentals on 2026-10-13: BJ 920xxx 321
+  without fundamentals on 2026-10-13: SZ 300xxx 21
+  without fundamentals on 2026-10-13: SZ 002xxx 21
+  without fundamentals on 2026-10-13: SH 600xxx 12
+  without fundamentals on 2026-10-13: SZ 000xxx 11
+  without fundamentals on 2026-10-13: SH 603xxx 10
+  without fundamentals on 2026-10-13: SZ 301xxx 8
+  without fundamentals on 2026-10-13: SH 688xxx 7
+  without fundamentals on 2026-10-13: SH 605xxx 5
+  without fundamentals on 2026-10-13: SZ 003xxx 3
+  without fundamentals on 2026-10-13: SZ 399xxx 2
+  without fundamentals on 2026-10-13: SZ 001xxx 2

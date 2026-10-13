@@ -1,0 +1,295 @@
+## im.v1.CreateChatRequest  cmd 2008 -> im.v1.CreateChatResponse
+  (descriptor not available: AttributeError)
+## chats.PutChatRequest  cmd 13 -> chats.PutChatResponse
+  enum Type{UNKNOWN=0,P2P=1,GROUP=2,TOPIC_GROUP=3} type
+  repeated string userIds
+  string groupName
+  string groupDesc
+  bool isPublic
+  repeated string chatterIds
+  string organizationId
+  string fromChatId
+  repeated string initMessageIds
+  string iconKey
+  map<string,enum> docPerms
+  bool isCrossTenant
+  bool isPublicV2
+  enum ChatMode{UNKNOWN_CHAT_MODE=0,DEFAULT=1,THREAD=2,THREAD_V2=3} chatMode
+  map<string,DocPair> docPerms2
+  string cid
+  AvatarMeta avatarMeta
+    enum Type{UNKNOWN=0,RANDOM=1,WORDS=2,UPLOAD=3,COLLAGE=4} type
+    int32 color
+    string text
+    int32 borderColor
+    int32 backgroundColor
+    int32 centerColor
+    int32 startColor
+    int32 endColor
+    enum AvatarStyleType{UNKNOWN_STYLE=0,FILL=1,BORDER=2} styleType
+    repeated CollageData collageData
+    RichText richText
+  CreateP2PChatSource createP2pChatSource
+    int64 senderId
+    enum ContactSource{UNKNOWN_SOURCE=0,LINK=1,CHAT=2,CALENDAR=3,DOCS=4,VC=5,EMAIL=6,NAME_CARD=7,SEARCH_PHONE=8,SEARCH_EMAIL=9,SEARCH_CONTACT=10,CCM_FOLDER=11} sourceType
+    string sourceId
+    string sourceName
+    string senderIdV2
+    string subSourceType
+  repeated PickEntities pickEntities
+    enum PickType{UNKNOWN=0,USER=1,CHAT=2,DEPT=3} pickType
+    repeated string pickIds
+  repeated PickEntities reversePickEntities
+    enum PickType{UNKNOWN=0,USER=1,CHAT=2,DEPT=3} pickType
+    repeated string pickIds
+  string chatTemplateId
+  bool grantDocViaUrlPreview
+  bool isPrivateMode
+  enum PutChatSource{UNKNOWN_SOURCE=0,TO_LINK_PAGE=1} source
+  repeated ChatPageContext toLinkPages
+    string targetUrl
+  -> response:
+    Chat chat
+    FeedCard feedCard
+      string id
+      enum Type{UNKNOWN_TYPE=0,CHAT=1,MAIL=2,DOC=3,THREAD=4,BOX=5,OPENAPP=6,TOPIC=7,APP_CHAT=8,SUBSCRIPTION=10,MSG_THREAD=11,MY_AI=12} type
+      int64 updateTime
+      int64 updateTimeMs
+      bool isDelayed
+      int64 parentCardId
+      int64 rankTime
+      enum FeedType{UNKNOWN_TYPE=0,INBOX=1,DONE=2} feedType
+      enum Status{UNKNOWN_STATUS=0,NORMAL=1,PENDING_DELETE=2,DELETED=3,COOLING_OFF=4} status
+      bool isHide
+      FeedLastUnreadTime lastUnreadTime
+      FeedCardField feedCardField
+      string imprId
+    ChatPageLinkResult pageLinkResult
+      bool success
+      string errorMsg
+## chats.PatchGroupChatRequest  cmd 72 -> chats.PatchGroupChatResponse
+  int64 chatId
+  string name
+  string iconData
+  string description
+  string announcement
+  int64 ownerId
+  int32 memberCount
+  bool isArchive
+  bool isPublic
+  bool isInner
+  int64 organizationId
+  bool isGroupCompanies
+  int64 groupCompaniesId
+  bool offEditInfo
+  string iconKey
+  ChatEntitySetting entitySetting
+  repeated enum Field{UNKNOWN=0,ADD_MEMBER_PERMISSION_SETTING=1,AT_ALL_PERMISSION_SETTING=2,JOIN_MESSAGE_VISIBLE_SETTING=3,QUIT_MESSAGE_VISIBLE_SETTING=4,SHARE_CARD_PERMISSION_SETTING=5,ADD_MEMBER_APPLY_SETTING=6,THREAD_ANONYMOUS_SETTING=7,MESSAGE_VISIBILITY_SETTING=8,ALLOW_ANONYMOUS_SETTING=9,CREATE_URGENT_SETTING=10,CREATE_VIDEO_CONFERENCE_SETTING=11} updateEntitySettingFields
+  bool isDissolved
+  bool isPublicV2
+  AvatarMeta avatarMeta
+    enum Type{UNKNOWN=0,RANDOM=1,WORDS=2,UPLOAD=3,COLLAGE=4} type
+    int32 color
+    string text
+    int32 borderColor
+    int32 backgroundColor
+    int32 centerColor
+    int32 startColor
+    int32 endColor
+    enum AvatarStyleType{UNKNOWN_STYLE=0,FILL=1,BORDER=2} styleType
+    repeated CollageData collageData
+    RichText richText
+  GeneralChatSetting generalSetting
+    RestrictedModePermissionSetting restrictedModePermissionSetting
+    enum DefDisplaySetting{UNKNOWN_DEF_DISPLAY_SETTING=0,INPUT_BOX=1,CHAT_MENU=2} defDisplaySetting
+  repeated enum Field{UNKNOWN=0,RESTRICTED_MODE_PERMISSION_SETTING=1,FORWARD_PERMISSION_SETTING=2,COPY_PERMISSION_SETTING=3,DOWNLOAD_PERMISSION_SETTING=4,SCREENSHOT_PERNISSION_SETTING=5,DEF_DISPLAY_SETTING=6,ON_TIME_DEL_MSG_SETTING_STATUS=7,ON_TIME_DEL_MSG_SETTING_ALIVE_TIME=8,WHITE_LIST_SETTING_LEVEL=9,WHITE_LIST_SETTING_USERS=10} updateGeneralSettingFields
+  bool isFrozen
+  repeated enum UpdateFields{UPDATEFIELDS_UNSPECIFIED=0,NAME=1,ICON_KEY=2,DESCRIPTION=3,ANNOUNCEMENT=4,OWNER_ID=5,MEMBER_COUNT=6,IS_ARCHIVE=7,IS_PUBLIC=8,IS_INNER=9,ORGANIZATION_ID=10,IS_GROUP_COMPANIES=11} updateFields
+  -> response:
+    Chat chat
+## chats.PatchChatPostUserRequest  cmd 254 -> chats.PatchChatPostUserResponse
+  string chatId
+  enum ChatPostType{UNKNOWN_POST_TYPE=0,ANYONE=1,ONLY_ADMIN=2,WHITE_LIST=3} postType
+  repeated string toAddUserIds
+  repeated string toDelUserIds
+  -> response:
+    (no fields)
+## chats.PatchChatSettingRequest  cmd 60 -> chats.PatchChatSettingResponse
+  string chatId
+  ChatSetting chatSetting
+    bool isRemind
+    int64 updateTime
+    enum Enum{UNKNOWN=0,RECENT_LEFT=1,NEWEST_UNREAD=2} checkMessagePosition
+    bool isAutoTranslate
+    bool isHiddenNickname
+    int64 isAutoTranslateVersion
+    int64 anonymousUserId
+    bool isMuteAtAll
+    TypingTranslateEntity typingTranslate
+    ChatNameTranslateEntity chatNameTranslate
+  repeated enum Field{UNKNOWN=0,IS_REMIND=1,UPDATE_TIME=2,CHECK_MESSAGE_POSITION=3,IS_AUTO_TRANSLATE=4,IS_HIDDEN_NICKNAME=5,IS_MUTE_AT_ALL=6,TYPING_TRANSLATE=7,ENABLE_USE_TRANSLATE_ORIGINAL=8,CAN_AUTO_OPEN_V1=9,CAN_AUTO_OPEN_V3=10,CHAT_NAME_TRANSLATE=11} updateChatSettingField
+  bool isLicenseAuth
+  int64 authTranslateGlobalSwitchVersion
+  bool authTranslateGlobalSwitch
+  -> response:
+    string chatId
+    ChatSetting chatSetting
+      bool isRemind
+      int64 updateTime
+      enum Enum{UNKNOWN=0,RECENT_LEFT=1,NEWEST_UNREAD=2} checkMessagePosition
+      bool isAutoTranslate
+      bool isHiddenNickname
+      int64 isAutoTranslateVersion
+      int64 anonymousUserId
+      bool isMuteAtAll
+      TypingTranslateEntity typingTranslate
+      ChatNameTranslateEntity chatNameTranslate
+## chats.PatchAddChatChatterApplyRequest  cmd 259 -> chats.PatchAddChatChatterApplyResponse
+  string chatId
+  bool showBanner
+  string inviteeId
+  enum ApplyStatus{APPLY_STATUS_UNKNOWN=0,APPROVED=1,REFUSED=2,PROCESSING=3} status
+  PreProcessInfo prePrecessInfo
+    AuthChattersInfo authChatterInfo
+    repeated enum PreProcessInfoField{PREPROCESSINFOFIELD_UNSPECIFIED=0,AuthChattersInfoField=1,GetFriendshipInfoField=2} validFields
+    GetFriendshipInfo getFriendshipInfo
+  -> response:
+    (no fields)
+## chats.PullChatLinkTokenRequest  cmd 5055 -> chats.PullChatLinkTokenResponse
+  string chatId
+  int32 expiredDay
+  string appName
+  bool isUnlimited
+  enum ChatShareTargetScene{CHATSHARETARGETSCENE_UNSPECIFIED=0,UNKNOWN_SCENE=1,SCENE_BITABLE=2} targetScene
+  -> response:
+    string token
+    int64 expireTime
+    string sharedUrl
+    string kouLing
+    bool isUnlimited
+## chats.PullChatQRCodeTokenRequest  cmd 5020 -> chats.PullChatQRCodeTokenResponse
+  string chatId
+  int32 expiredDay
+  bool isUnlimited
+  -> response:
+    string token
+    int64 expireTime
+    string sharedUrl
+    bool isUnlimited
+## chats.PutChatChatterRequest  cmd 47 -> chats.PutChatChatterResponse
+  string chatId
+  repeated string chatterIds
+  bool isInviteAtChatters
+  repeated PickEntities pickEntities
+    enum PickType{UNKNOWN=0,USER=1,CHAT=2,DEPT=3} pickType
+    repeated string pickIds
+  repeated PickEntities reversePickEntities
+    enum PickType{UNKNOWN=0,USER=1,CHAT=2,DEPT=3} pickType
+    repeated string pickIds
+  enum PutChatChatterSource{SourceUnknown=0,SourceChatTemplate=10,SourceChatLinkedPage=11} source
+  ChatPageContext fromPage
+    string targetUrl
+  int64 lastVisibleMessageId
+  map<int64,bytes> thriftChatters
+  int64 baseLastVisibleMessageId
+  PreProcessInfo prePrecessInfo
+    AuthChattersInfo authChatterInfo
+    repeated enum PreProcessInfoField{PREPROCESSINFOFIELD_UNSPECIFIED=0,AuthChattersInfoField=1,GetFriendshipInfoField=2} validFields
+    GetFriendshipInfo getFriendshipInfo
+  map<int64,bytes> thriftInsensitiveChatters
+  -> response:
+    Chat chat
+    map<int64,int64> realToAnonymousUserIds
+    int64 chatChatterVersion
+    int64 syncCursor
+## chats.DeleteChatChatterRequest  cmd 45 -> chats.DeleteChatChatterResponse
+  string chatId
+  repeated string chatterIds
+  string newOwnerId
+  DeleteChatChatterOption option
+    bool withdraw
+  repeated PickEntities pickEntities
+    enum PickType{UNKNOWN=0,USER=1,CHAT=2,DEPT=3} pickType
+    repeated string pickIds
+  -> response:
+    Chat chat
+    int64 chatChatterVersion
+    int64 syncCursor
+## chats.PullChatChattersV2Request  cmd 5950 -> chats.PullChatChattersV2Response
+  int64 chatId
+  int64 cursor
+  int32 limit
+  -> response:
+    map<int64,int64> chatterJoinTimeSec
+    map<int64,GroupChatterMeta> chatterMetas
+    map<int64,int64> chatterWeights
+    int64 nextCursor
+    int64 chatChatterVersion
+    int64 expireDurationSec
+    int64 syncCursor
+## chats.PullChatJoinLeaveHistoryRequest  cmd 5029 -> chats.PullChatJoinLeaveHistoryResponse
+  int64 chatId
+  int64 cursor
+  int32 count
+  -> response:
+    repeated ChatJoinLeaveHistory chatterHistory
+      string id
+      enum Action{UNKNOWN_ACTION=0,JOIN=1,LEAVE=2} action
+      enum EventType{UNKNOWN_TYPE=0,DEL_SELF=1,DEL_ADMIN=2,INV_MESSAGE_CARD=10,INV_QR_CODE=11,INV_CHATTER=12,INV_DOC=13,INV_SEARCH=14,INV_SELF=15,INV_P2P_CHAT=16,INV_GROUP_CHAT=17,INV_LINK=18} event
+      string chatterId
+      string chatId
+      int64 createTime
+      HistoryExtra extra
+      enum ChatterType{UNKNOWN_CHATTER=0,USER=1,BOT=2,AI=3} chatterType
+    bool hasMore
+    string nextCursor
+## chats.PullChatApplicationsRequest  cmd 5002 -> chats.PullChatApplicationsResponse
+  int64 cursor
+  int32 count
+  enum ChatApplicationType{UNKNOWN_TYPE=0,FRIEND=1,JOIN_CHAT=2} type
+  bool isDescOrder
+  string chatId
+  int64 originalVersion
+  -> response:
+    repeated ChatApplication applications
+      int64 id
+      enum ChatApplicationType{UNKNOWN_TYPE=0,FRIEND=1,JOIN_CHAT=2} type
+      string chatId
+      ContactSummary contactSummary
+      int64 applyTime
+      int64 processedTime
+      enum ApplicationStatus{UNKNOWN_STATUS=0,PENDING=1,AGREED=2,REFUSED=3,DELETED=4,EXPIRED=5} status
+      bool isRead
+      string extraMessage
+    bool hasMore
+    int64 originalVersion
+    int64 currentVersion
+## chats.ProcessChatApplicationRequest  cmd 5004 -> chats.ProcessChatApplicationResponse
+  int64 id
+  enum ApplicationStatus{UNKNOWN_STATUS=0,PENDING=1,AGREED=2,REFUSED=3,DELETED=4,EXPIRED=5} status
+  string userId
+  bool authSync
+  -> response:
+    (no fields)
+## chats.PutChatterViaLinkRequest  cmd 5056 -> chats.PutChatterViaLinkResponse
+  string token
+  -> response:
+    Chat chat
+## chats.PullChatLinkInfoRequest  cmd 5057 -> chats.PullChatLinkInfoResponse
+  string token
+  -> response:
+    bool alreadyInChat
+    Chat chat
+    Chatter ownerChatter
+    bool isInviterCanAddMember
+    Chatter inviterChatter
+    string expireTime
+    bool isUnlimited
+## im.v1.RecallGroupMessageRequest  cmd 1053 -> im.v1.RecallGroupMessageResponse
+  (descriptor not available: AttributeError)
+## im.v1.RecallMessageRequest  cmd 2079 -> im.v1.RecallMessageResponse
+  (descriptor not available: AttributeError)
+## im.v1.CreateUrgentRequest  cmd 2040 -> im.v1.CreateUrgentResponse
+  (descriptor not available: AttributeError)
+## im.v1.GetUrgentsAckStatusRequest  cmd 2043 -> im.v1.GetUrgentsAckStatusResponse
+  (descriptor not available: AttributeError)

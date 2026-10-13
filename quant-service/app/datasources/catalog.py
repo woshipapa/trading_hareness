@@ -306,6 +306,8 @@ _TENCENT_INDEX_DAILY = {"reference": "tencent_free", "reference_adapter": "app/f
                         "reference_params": {"symbol": "symbol"},
                         "reference_fixed": {"start": "20260101", "end": "20261231"},
                         "key": ["symbol", "trade_date"]}
+_FUYAO_ALL_A_SNAPSHOT = {"reference": "fuyao_ths", "reference_adapter": "app/fuyao_provider.py:all_a_snapshot_rows",
+                         "key": ["symbol"]}
 
 BINDINGS: Final[tuple[Binding, ...]] = (
     # quote.all_a_snapshot
@@ -323,7 +325,10 @@ BINDINGS: Final[tuple[Binding, ...]] = (
                            field_map={"price": "price", "pct_change": "pct_change", "volume_lots": "volume", "amount": "turnover"},
                            unit_factors={"volume": 100}, paging={"kind": "offset", "page_size": 80}, max_batch=80,
                            time_semantics="server_time_raw=TDX quote server time; available=collection time",
-                           handshake_profile="login_one")),
+                           handshake_profile="login_one",
+                           agreement={"price": {**_FUYAO_ALL_A_SNAPSHOT, "rel_tol": 0.005, "min_share": 0.95},
+                                      "volume": {**_FUYAO_ALL_A_SNAPSHOT, "rel_tol": 0.01, "min_share": 0.85},
+                                      "turnover": {**_FUYAO_ALL_A_SNAPSHOT, "rel_tol": 0.01, "min_share": 0.85}})),
     _bind("tdx_public", "quote.index_overview", 80, DECLARED, None,
           "app/datasources/sources/tdx_legacy_misc.py:fetch_index_overview",
           notes="0x051d；涨跌家数与 0x054b 排序宽度口径不同（δ2 D4）；OHLC 为指数点数非元；coverage=None 待 I1（分母未知）；R1 echo check 已实现（δ1 R1）；成交量单位未经实测，保留为 volume_raw",
@@ -804,6 +809,17 @@ BINDINGS: Final[tuple[Binding, ...]] = (
           spec=BindingSpec(params={"symbol": "(market_id, code)"}, field_map={"market_id": "market_id", "code": "code", "datetime": "datetime", "open": "open", "high": "high", "low": "low", "close": "close", "volume_raw": "volume_raw", "amount": "amount", "open_interest": "open_interest", "settlement": "settlement"}, time_semantics="effective=K 线交易日（期货夜盘归下一交易日）; available=采集时刻")),
 )
 
+
+SESSION_AGREEMENT_RULES: Final[dict[tuple[str, str], dict[str, float | int]]] = {
+    ("tdx_public", "quote.all_a_snapshot"): {
+        "max_data_gap_seconds": 15,
+        "min_price_within_0_5_pct": 0.95,
+        "min_judged_minutes": 30,
+        "min_agreement_share": 0.95,
+        "min_sessions": 5,
+    },
+}
+
 # The 120 bindings that existed without a structured BindingSpec at the P0 baseline (ca209a81), written
 # out so the list cannot grow by itself: a binding without a spec must be in it, and an entry whose binding
 # is gone must be deleted from it. It may only shrink, as bindings receive verified specs (P2-P6).
@@ -1035,7 +1051,7 @@ def evidence_locations(capability: str) -> list[dict[str, Any]]:
 #: The keys of an agreement entry (``contracts.BindingSpec.agreement``), and the row identities its ``key`` may use besides
 #: the capability's own canonical fields.
 AGREEMENT_KEYS: Final = frozenset({"reference", "reference_adapter", "reference_params", "reference_fixed", "key", "rel_tol",
-                                   "abs_tol", "min_coverage", "reference_span"})
+                                   "abs_tol", "min_coverage", "min_share", "reference_span"})
 AGREEMENT_IDENTITY: Final = frozenset({"symbol", "trade_date"})
 
 
@@ -1068,6 +1084,9 @@ def _agreement_problems(item: Binding, names: set[str]) -> list[str]:
         coverage = entry.get("min_coverage", 1)
         if not (_is_number(coverage) and 0 < coverage <= 1):
             problems.append(f"{where}: min_coverage must be a number above 0 and at most 1, got {coverage!r}")
+        min_share = entry.get("min_share", 1)
+        if not (_is_number(min_share) and 0 < min_share <= 1):
+            problems.append(f"{where}: min_share must be a number above 0 and at most 1, got {min_share!r}")
         key = entry.get("key")
         if not (isinstance(key, (list, tuple)) and key and set(key) <= names | AGREEMENT_IDENTITY):
             problems.append(f"{where}: key must list canonical fields (or symbol, trade_date), got {key!r}")
@@ -1181,7 +1200,7 @@ def catalog_document() -> dict[str, Any]:
 __all__ = [
     "BINDINGS", "CAPABILITIES", "CATALOG_VERSION", "EXCHANGE_TIMESTAMPED_QUOTE_LABELS", "HEALTH_CAPABILITY_ALIASES", "NON_SECTOR_GROUPS",
     "NON_SECTOR_LABEL_PATTERN", "RULE_USABLE_FLOW_LABELS",
-    "SOURCES", "SOURCE_LABELS", "TAXONOMIES", "bindings_for", "capabilities_of", "catalog_document",
+    "SESSION_AGREEMENT_RULES", "SOURCES", "SOURCE_LABELS", "TAXONOMIES", "bindings_for", "capabilities_of", "catalog_document",
     "evidence_locations", "health_capability", "primary_source", "primary_store_value", "store_values", "taxonomies_for",
     "validate_catalog",
 ]

@@ -625,11 +625,12 @@ class MacBindingSpecTests(unittest.TestCase):
             self.assertEqual(set(parameters), set(binding.spec.params), capability)
             self.assertTrue(all(item.kind is inspect.Parameter.KEYWORD_ONLY for item in parameters.values()), capability)
 
-    def test_all_mac_bindings_are_specified_and_never_decision_eligible(self):
+    def test_all_mac_bindings_are_specified_and_follow_decision_eligibility_rule(self):
         self.assertEqual({item.capability for item in BINDINGS if item.source == "tdx_mac"}, set(self.ADAPTERS))
         for capability in self.ADAPTERS:
             binding = mac_binding(capability)
             self.assertIn(binding.status, {UNSUPPORTED, DECLARED, LIVE_VERIFIED}, capability)
+            self.assertTrue(not binding.decision_eligible or binding.status == LIVE_VERIFIED, capability)
             self.assertFalse(binding.decision_eligible, capability)
             self.assertEqual(binding.spec.handshake_profile, "mac", capability)
 
@@ -747,6 +748,7 @@ class MacBarAdapterTests(unittest.TestCase):
     def test_the_minute_binding_documents_its_receive_time_availability(self):
         binding = mac_binding("bars.minute")
         self.assertIn(binding.status, {UNSUPPORTED, DECLARED, LIVE_VERIFIED})
+        self.assertTrue(not binding.decision_eligible or binding.status == LIVE_VERIFIED)
         self.assertFalse(binding.decision_eligible)
         self.assertIn("source_available_at", binding.notes)
         self.assertEqual(binding.spec.time_semantics,

@@ -1,0 +1,33 @@
+observed 2026-10-13 20:40:22 CST | receipts returned 100 | trade date 2026-10-13
+  16:02:07    0s completed  stale_fetch_runs                   {"status": "completed"}
+  16:02:07    0s completed  analyst_text                       {"status": "completed"}
+  16:02:07    0s completed  all_a_universe                     {"status": "completed"}
+  16:02:07    0s completed  full_market_daily                  {"status": "completed"}
+  16:02:08    0s completed  core_daily_controls                {"status": "completed"}
+  16:02:08 10706s completed  adjustment_factors                 {"status": "completed", "reason": "adjustment factors are repaired on their own lane; this stage never gates the pipeline"}
+  16:02:19    1s completed  index_context                      {"status": "completed"}
+  16:02:19    0s completed  close_market_snapshot              {"status": "completed"}
+  16:02:20    0s completed  akshare_supplements                {"status": "completed", "reason": "optional AkShare probe is outside the Longhu authoritative close path"}
+  16:02:20    0s completed  ths_industry_flow                  {"status": "completed", "reason": null}
+  16:02:20    0s completed  ths_concept_flow_and_limit_strength {"status": "completed", "reason": "Longhu close supplies exact THS industry membership and flow, not concept flow"}
+  16:02:20    7s completed  market_flow_features               {"status": "completed"}
+  16:02:27    0s completed  limit_ladder                       {"status": "completed"}
+  16:02:27    6s completed  limit_lift_pattern_mining          {"status": "completed"}
+  16:02:33    0s completed  cninfo_announcements               {"status": "completed"}
+  16:02:33    0s completed  board_review                       {"status": "completed", "reason": null}
+  16:02:33    0s completed  close_strategy_decision            {"status": "completed", "reason": "legacy provider-coupled close decision is superseded by the persisted post-close strategy stage"}
+  16:02:33    0s completed  close_review                       {"status": "completed"}
+  16:02:33   77s completed  analyst_outcomes                   {"status": "completed"}
+  16:03:51    0s completed  analyst_intraday_outcomes          {"status": "completed"}
+  16:03:51    0s completed  analyst_scorecards                 {"status": "completed"}
+  16:03:51    0s completed  analyst_expert_research            {"status": "completed"}
+  16:03:51    0s completed  post_close_strategy                {"status": "completed", "reason": "Longhu production uses the persisted nine-lane scan after market refresh"}
+  16:03:51    0s completed  user_tracking_research             {"status": "completed"}
+  16:03:51    0s completed  watchlist_main_wave                {"status": "completed"}
+  16:03:52 15975s blocked    research_snapshot                  {"status": "blocked"}
+  17:04:13   18s completed  teacher_review_roll                {"status": "completed"}
+  17:04:30    4s completed  teacher_outcome_review             {"status": "completed"}
+  17:04:34    8s completed  watch_daily_review                 {"status": "completed"}
+  17:04:42    7s completed  xiaojie_outcomes                   {"status": "completed"}
+  17:04:50    0s completed  daily_digest                       {"status": "completed"}
+stages with a receipt for 2026-10-13: 31

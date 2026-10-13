@@ -1,0 +1,7 @@
+DISPATCH1 lines-bars-events; fund files intentionally not opened
+minute_lines rows=180509 sessions=749 columns=24
+bars rows=113848 frequencies=[np.int64(5), np.int64(15), np.int64(30), np.int64(60)] lines=['avg', 'sh_price']
+depth_events rows=302 by_depth={-0.03: 37, -0.02: 99, -0.015: 166}
+rebound_events rows=630 by_depth_size={(-0.03, 0.005): 59, (-0.03, 0.008): 42, (-0.02, 0.005): 123, (-0.02, 0.008): 86, (-0.015, 0.005): 193, (-0.015, 0.008): 127}
+outcome_columns=out_avg_to_close,out_avg_to_next_close,out_avg_to_next_open,out_entry_next,out_fall_high_to_close,out_fall_high_to_next_open,out_held_no_new_low,out_later_high_minute,out_new_low_before_close,out_rise_to_later_high
+bar_columns_last_minute=source_last_minute; indicators and divergence use only closed bars ending at source_last_minute

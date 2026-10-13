@@ -65,7 +65,7 @@ def build_owner(local: dict) -> str:
         "",
         "# ── SSH 隧道 ──",
         f"PEER_SSH_HOST={get(local, 'LONGHU_SSH_HOST')}",
-        f"PEER_SSH_PORT={get(local, 'LONGHU_SSH_PORT', '3535')}",
+        f"PEER_SSH_PORT={get(local, 'LONGHU_SSH_PORT', '22')}",
         f"PEER_SSH_USER={get(local, 'LONGHU_SSH_USER', 'stockpeer')}",
         f"PEER_SSH_KEY_PATH=/home/stockpeer/.ssh/peer_tunnel_ed25519",
         f"PEER_KNOWN_HOSTS_PATH=/home/stockpeer/.ssh/known_hosts",

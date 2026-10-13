@@ -39,7 +39,7 @@ function run({ edge, owner, edgeSourceSha = '', ownerSourceSha = '' }) {
 	const fakeSsh = join(dir, 'ssh');
 	writeFileSync(fakeSsh, `#!/usr/bin/env bash
 cat > /dev/null
-case " $* " in *" -p 3535 "*) cat "${dir}/owner.out" ;; *) cat "${dir}/edge.out" ;; esac
+case " $* " in *" stockpeer@"*) cat "${dir}/owner.out" ;; *) cat "${dir}/edge.out" ;; esac
 `);
 	chmodSync(fakeSsh, 0o755);
 	const args = ['scripts/release-sync-status.sh', '--sha', sha];

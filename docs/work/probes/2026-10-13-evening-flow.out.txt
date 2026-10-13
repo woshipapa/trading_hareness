@@ -1,0 +1,57 @@
+now (database): 2026-10-13 20:47:12.058918
+stage receipts for 2026-10-13: 31; updated after 18:30:
+  20:30:06 completed  stale_fetch_runs                   started 16:02:07
+  20:30:06 completed  analyst_text                       started 16:02:07
+  20:30:06 completed  all_a_universe                     started 16:02:07
+  20:30:06 completed  full_market_daily                  started 16:02:07
+  20:30:06 completed  core_daily_controls                started 16:02:08
+  20:30:06 completed  adjustment_factors                 started 16:02:08 adjustment factors are repaired on their own lane; this stage never gates the pipeline
+  20:30:06 completed  index_context                      started 16:02:19
+  20:30:06 completed  close_market_snapshot              started 16:02:19
+  20:30:06 completed  akshare_supplements                started 16:02:20 optional AkShare probe is outside the Longhu authoritative close path
+  20:30:06 completed  ths_industry_flow                  started 16:02:20
+  20:30:06 completed  ths_concept_flow_and_limit_strength started 16:02:20 Longhu close supplies exact THS industry membership and flow, not concept flow
+  20:30:06 completed  market_flow_features               started 16:02:20
+  20:30:06 completed  limit_ladder                       started 16:02:27
+  20:30:06 completed  limit_lift_pattern_mining          started 16:02:27
+  20:30:06 completed  cninfo_announcements               started 16:02:33
+  20:30:06 completed  board_review                       started 16:02:33
+  20:30:06 completed  close_strategy_decision            started 16:02:33 legacy provider-coupled close decision is superseded by the persisted post-close strategy
+  20:30:06 completed  close_review                       started 16:02:33
+  20:30:06 completed  analyst_outcomes                   started 16:02:33
+  20:30:06 completed  analyst_intraday_outcomes          started 16:03:51
+  20:30:06 completed  analyst_scorecards                 started 16:03:51
+  20:30:06 completed  analyst_expert_research            started 16:03:51
+  20:30:06 completed  post_close_strategy                started 16:03:51 Longhu production uses the persisted nine-lane scan after market refresh
+  20:30:06 completed  user_tracking_research             started 16:03:51
+  20:30:06 completed  watchlist_main_wave                started 16:03:51
+  20:30:06 blocked    research_snapshot                  started 16:03:52
+  20:42:29 completed  teacher_review_roll                started 17:04:13
+  20:42:29 completed  teacher_outcome_review             started 17:04:30
+  20:42:29 completed  watch_daily_review                 started 17:04:34
+  20:42:30 completed  xiaojie_outcomes                   started 17:04:42
+  20:42:30 completed  daily_digest                       started 17:04:50
+stages not completed: ['research_snapshot=blocked']
+fetch_runs daily_close_completion partial 18:55:10 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "000021.SZ", "000068.SZ", "000426.SZ", "000541.SZ", "000628.SZ", "000685.SZ", "000705.SZ", "000715.SZ", "000753.SZ", "000875.SZ", "000906.SZ", "001225.SZ", "001356.SZ", "001381.SZ", "002031.SZ", "002052.SZ",
+fetch_runs daily_close_completion partial 19:00:51 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:06:01 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:11:09 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:16:17 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:21:26 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:26:34 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:31:42 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:36:50 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:41:58 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:47:09 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:52:21 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 19:57:32 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:02:42 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:07:51 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:13:01 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:18:10 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:23:19 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:28:30 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:33:41 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:38:53 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+fetch_runs daily_close_completion partial 20:44:03 {"errors": {}, "missing": ["000004.SZ", "000016.SZ", "001381.SZ", "002388.SZ", "002717.SZ", "002731.SZ", "002813.SZ", "002860.SZ", "300344.SZ", "300379.SZ", "300773.SZ", "301314.SZ", "301569.SZ", "301660.SZ", "301718.SZ", "600225.SH", "600293.SH", "600825.SH",
+daily bars of the day: {'bars': 5564, 'with_factor': 5560, 'with_limits': 5560}

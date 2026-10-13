@@ -1,0 +1,26 @@
+import { freshLedger, stepper, mod } from './lib.mjs';
+const { createWebhookTargets } = await mod('webhook-targets.mjs');
+const { ledger, pool } = await freshLedger('probe_wh');
+const S = stepper();
+const fetchCalls = [];
+const fetchImpl = async (url, init) => { fetchCalls.push(1); return { ok: true, status: 200, json: async () => ({ code: 0 }) }; };   // no network
+let removedBots = [];
+const bots = { ensure: async ({ chatId }) => ({ webhook: 'https://open.feishu.cn/open-apis/bot/v2/hook/abcdef1234567890', bot_id: 'bot9', created: true }), remove: async (x) => { removedBots.push(x); return { status: 'removed' }; } };
+const build = () => createWebhookTargets({ ledger, secret: 'probe-secret', webhooks: new Map([['oc_env', 'https://open.feishu.cn/open-apis/bot/v2/hook/envenvenv123']]), keywords: new Map(), bots, fetchImpl, now: () => new Date('2026-10-13T02:30:00Z') });
+let wt = build();
+const url1 = 'https://open.feishu.cn/open-apis/bot/v2/hook/handtyped000001';
+await S.step('load on empty table', async () => wt.load());
+await S.step('add (typed address, new id)', async () => wt.add({ name: '手填群', webhookUrl: url1, keyword: '转发', websocketChatId: '123456789' }));
+const id1 = wt.list().find((t) => t.name === '手填群')?.chat_id;
+await S.step('add again same group replaces (upsert path)', async () => wt.add({ name: '手填群改名', webhookUrl: url1.replace('01', '02'), keyword: '转发', websocketChatId: '123456789' }));
+await S.step('addManaged', async () => wt.addManaged({ name: '托管群', websocketChatId: '987654321', keyword: '' }));
+await S.step('stored row: types observed', async () => { const r = (await pool.query('SELECT * FROM feishu_group_relay_webhook_targets ORDER BY chat_id')).rows; return r.map((x) => ({ id: x.chat_id, managed: x.managed, verified_at: [x.verified_at instanceof Date, x.verified_at?.toISOString()], created_at_is_Date: x.created_at instanceof Date })); });
+wt = build();
+await S.step('load after restart (rows decrypted, verified_at as Date)', async () => wt.load());
+await S.step('list after restart (asIso of Date)', async () => wt.list().map((t) => [t.chat_id.slice(0, 5), t.verified_at, t.created_at, t.managed]));
+await S.step('sendText', async () => { await wt.sendText(id1, 'hi'); return fetchCalls.length; });
+await S.step('remove typed target', async () => wt.remove(id1));
+await S.step('remove managed target (bot removed)', async () => { const id = wt.list().find((t) => t.managed)?.chat_id; return [await wt.remove(id), removedBots]; });
+await S.step('remove unknown id', async () => wt.remove('oc_nope'));
+await S.step('rows left', async () => (await pool.query('SELECT count(*)::int c FROM feishu_group_relay_webhook_targets')).rows[0].c);
+S.done(); process.exit(S.failed ? 1 : 0);

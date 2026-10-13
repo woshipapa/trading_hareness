@@ -6,7 +6,7 @@ import { createGroupRelay } from './group-relay.mjs';
 import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { normalizeLarkAgentXRelayMessage } from './larkagentx-ingress.mjs';
 
-function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null, webhookKeywordsByChatId = null, larkAgentXResourceUrl = '', larkAgentXToken = '', messageList = null, initialSourceStates = null, relayTimestamp = null } = {}) {
+function createHarness(messages, { imageResponse = { image_key: 'img_target' }, imageError = null, targetChatIds = [], failTargetChatId = null, retryFailed = false, canWrite = null, sources = null, messageListDelayMs = 0, sourceConcurrency = 3, resourceErrorKeys = [], outboundCard = false, failUpdateMessageId = null, logger = null, webhooksByChatId = null, webhookKeywordsByChatId = null, larkAgentXResourceUrl = '', larkAgentXToken = '', messageList = null, initialSourceStates = null, relayTimestamp = null, recordWebhookDelivery = null, recallDeliveries = null } = {}) {
 	const saved = new Map();
 	const sourceStates = new Map(Object.entries(initialSourceStates ?? {}));
 	const sent = [];
@@ -99,6 +99,7 @@ function createHarness(messages, { imageResponse = { image_key: 'img_target' }, 
 			webhookKeywordsByChatId: webhookKeywordsByChatId ? new Map(Object.entries(webhookKeywordsByChatId)) : undefined,
 			larkAgentXResourceUrl, larkAgentXToken,
 		},
+		recordWebhookDelivery, recallDeliveries,
 	});
 	return { relay, sent, updated, patched, saved, listCalls, sourceStates, resourceCalls };
 }
@@ -777,6 +778,33 @@ test('a webhook target receives its configured keyword without changing other ta
 			assert.equal(webhookCalls[0].body.content.text, '#anqiang\n正文\n汇总');
 		},
 	);
+});
+
+test('a failing webhook delivery recorder does not fail the sent relay and receives final content', async () => {
+	await withFetchMock(
+		() => ({ ok: true, json: async () => ({ code: 0 }) }),
+		async () => {
+			const recorded = [];
+			const message = { message_id: 'om_webhook_record', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '正文' }) } };
+			const { relay, saved } = createHarness([], {
+				webhooksByChatId: { oc_summary: 'https://x/hook' }, webhookKeywordsByChatId: { oc_summary: '汇总' },
+				recordWebhookDelivery: (value) => { recorded.push(value); throw new Error('ledger unavailable'); },
+			});
+			assert.equal((await relay.processInbound(message, { key: 'anqiang', tag: 'anqiang', resolvedChatId: 'oc_source', targetChatId: 'oc_summary', targetChatIds: ['oc_summary'] })).status, 'sent');
+			assert.equal(saved.get(message.message_id).status, 'sent');
+			assert.deepEqual(recorded, [{ messageId: message.message_id, targetChatId: 'oc_summary', msgType: 'text', content: { text: '#anqiang\n正文\n汇总' } }]);
+		},
+	);
+});
+
+test('source recall notifies the delivery checker after the relay row is updated', async () => {
+	const recalled = [];
+	const message = { message_id: 'om_webhook_recall', msg_type: 'text', create_time: String(Date.now()), body: { content: JSON.stringify({ text: '正文' }) } };
+	const harness = createHarness([message], { recallDeliveries: (sourceMessageId) => recalled.push(sourceMessageId) });
+	await harness.relay.tick();
+	message.deleted = true;
+	await harness.relay.tick();
+	assert.deepEqual(recalled, [message.message_id]);
 });
 
 test('a webhook-only interactive card keeps source image keys without tenant upload', async () => {

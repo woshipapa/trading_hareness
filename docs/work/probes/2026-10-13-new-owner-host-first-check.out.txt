@@ -1,0 +1,22 @@
+The new owner quant server (118.178.133.37, SSH port 22, user stockpeer), first read-only check from the Mac,
+2026-10-13 20:33 CST. Transcribed from the session's tool output.
+
+--- 20:32 CST: ssh-keyscan -t ed25519 -p 22 118.178.133.37 | ssh-keygen -lf -
+scanned fingerprint: SHA256:JSgjaKCz873b9Na6b+DF6DBv1Ni+cToO0gY9O9bhZA8
+MATCHES the fingerprint in the owner's note; the key was then added to ~/.ssh/known_hosts
+
+--- 20:33:40 CST: ssh (StrictHostKeyChecking=yes, the saved collaborator key) stockpeer@118.178.133.37:
+    id -un; date; uptime; free -m; df -h /; docker ps; curl 127.0.0.1:15682/health; curl 127.0.0.1:15683/health
+user: stockpeer
+2026-10-13 20:33:40 CST
+ 20:33:40 up  2:38,  6 users,  load average: 0.19, 0.17, 0.12
+mem MB total 894 used 626 available 267
+swap MB total 2047 used 410
+disk / size 30G used 6.7G avail 22G
+trading-hareness-peer-quant-research-1 | Up 2 hours (healthy)
+trading-hareness-peer-quant-research-scheduler-1 | Up 2 hours (healthy)
+trading-hareness-peer-db-tunnel-1 | Up 2 hours (healthy)
+trading-hareness-peer-db-batch-tunnel-1 | Up 2 hours (healthy)
+15682 /health: {"status":"ok","service":"quant-research","database_pool":{"open":true,"min_size":1,"max_size":12,"pool_size":2,"available":2,"waiting":0,"transactions":{"slow_threshold_seconds":5.0,"observed_sites":15,"slow_total":0,...
+15683 /health: {"status":"ok","service":"quant-research","database_pool":{"open":true,...,"transactions":{"slow_threshold_seconds":5.0,"observed_sites":30,"slow_total":2,"slowest_sites":[{"site":"app.daily_c... (cut at 260 characters)
+Not read yet: the release label and git sha in the health payload (they are past the cut), the post-close stage receipts.

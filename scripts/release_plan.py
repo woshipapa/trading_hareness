@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CLASSIFY = ROOT / "scripts" / "shared-peer" / "classify-owner-paths.sh"
 WINDOW = ROOT / "scripts" / "release_window.py"
 LINEAGE = ROOT / "quant-service" / "scripts" / "migration_lineage.py"
-OWNER = (os.environ.get("OWNER_PEER_HOST", "stockpeer@47.110.79.189"), os.environ.get("OWNER_PEER_PORT", "3535"),
+OWNER = (os.environ.get("OWNER_PEER_HOST", "stockpeer@118.178.133.37"), os.environ.get("OWNER_PEER_PORT", "22"),
          os.environ.get("OWNER_PEER_SSH_KEY", str(Path.home() / ".ssh" / "stockpeer_ed25519")))
 EDGE = (os.environ.get("RELAY_EDGE_HOST", "root@47.114.113.152"), "22",
         os.environ.get("RELAY_EDGE_SSH_KEY", str(Path.home() / ".ssh" / "feishu_relay_edge_ed25519")))

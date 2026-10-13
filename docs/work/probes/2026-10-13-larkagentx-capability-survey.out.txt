@@ -1,0 +1,37 @@
+# LarkAgentX 还能做什么：命令表盘点和两项只读探测，2026-10-13 15:30（上海时间）
+# 来源：edge 上 /opt/larkagentx/source/larkx/proto/cmd_map.json（从飞书网页端提取的 2202 条命令，按请求名分组）；
+# 网页端功能模块清单（index.64f5072c.js 内嵌，见 2026-10-13-feishu-chat-bot-trial.out.txt 第 2 节）；
+# 只读探测用中继自己的会话；库查询在 edge 的 adapter 容器里只读执行。
+# 注意：除标了“已试”的，其余只确认了命令存在，没有调用过。
+
+## 命令表里与本系统有关的命令（按用途）
+建群、改群设置    im.v1.CreateChat, chats.PutChat, chats.PatchGroupChat, chats.PatchChatSetting, chats.PatchChatPostUser（谁能发言）,
+                  chats.PatchChatAdminUsers, chats.PatchChatShareStatus, chats.PatchAddChatChatterApply（入群审批开关）
+成员增删          chats.PutChatChatter / im.v1.AddChatChatters, chats.DeleteChatChatter / im.v1.DeleteChatChatters
+入群              chats.PutChatterViaLink, chats.PutChatterViaQRCode, chats.PutChatterViaShare, im.v1.SendChatApplication
+邀请链接、二维码  chats.PullChatLinkToken, chats.PullChatLinkInfo, chats.PullChatQRCodeToken, chats.PullChatQRCodeInfo
+入群申请          chats.PullChatApplications, chats.ProcessChatApplication, chats.PushChatApplications
+成员、进退群记录  chats.PullChatChattersV2（已试）, chats.PullChatJoinLeaveHistory（已试）
+公告、置顶、标签页 chat_pin.CreateAnnouncementChatPin / CreateMessageChatPin / CreateUrlChatPin, chats.PatchChatTopNotice, chats.CreateChatTab, pin.PutPin
+加急              im.v1.CreateUrgent, im.v1.GetUrgentsAckStatus, im.v1.GetUnackUrgents
+撤回、编辑、转发  im.v1.RecallMessage, im.v1.RecallGroupMessage（群主撤回群内消息）, im.v1.EditMessage, im.v1.Transmit, im.v1.MergeForwardMessages
+已读              messages.PullMessageReadState, messages.PullMessageReadUsers
+文件              media.v1.DownloadFile, media.v1.GetFileMeta
+语音转文字        im.v1.GetAudioMessageRecognition, recognition.PutAudioMessageRecognition
+云文档            docs.PullDocByURLs, docs.PullDocs, space.doc.v1.CreateDoc
+搜索              search.v2.UniversalSearch, search.v1.IntegrationSearch
+群机器人          网关 13100 / 13101 和 open-apis/chatbot/api/*（已试，已上线，见决定 0020）
+各包的命令数      im 265, todo 183, feed 137, chats 122, ai_knowledge 107, messages 81, mails 72, contact 67, calendar 系约 150
+
+## 只读探测 1：账号在四个目标群里的身份（chats.PullChatsByIds、PullChatJoinLeaveHistory、PullChatChattersV2）
+分析师发送汇总群   群主是本账号: True   成员 1    跨租户: False   进退群记录首页 1 条
+liwei外部同步群    群主是本账号: True   成员 13   跨租户: True    进退群记录首页 20 条（一页上限）
+liuzi外部同步群    群主是本账号: True   成员 4    跨租户: True    进退群记录首页 8 条
+anqiang分享群1     群主是本账号: True   成员 23   跨租户: True    进退群记录首页 20 条（一页上限）
+（成员数来自群信息里的计数字段，不含机器人；与看板群目录里的 member_count 口径不同）
+
+## 只读探测 2：中继库里的数据说明哪些能力有用
+群历史副本 feishu_group_history_messages 共 10,960 条：text 4,184（12 个群）、post 4,130（11 个群）、image 2,646（10 个群）
+文字里的占位标记：[卡片…] 79、[文件…] 31、[file] 1、[media] 1、[video] 1、[share_user] 1；没有语音，没有合并转发
+带飞书文档链接（docx/docs/wiki/sheets/base/file/minutes）的消息：3 条
+已转发消息 feishu_group_relay_messages 共 8,225 条，其中源头后来撤回的（source_deleted）79 条

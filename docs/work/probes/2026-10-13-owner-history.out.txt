@@ -1,0 +1,34 @@
+[bars by year]
+  2023 days 93 rows 492798 per_day 5299 adj% 48.5 limit% 91.4 2023-08-15 2023-12-29
+  2024 days 242 rows 1295345 per_day 5353 adj% 99.9 limit% 99.9 2024-01-02 2024-12-31
+  2025 days 243 rows 1314807 per_day 5411 adj% 99.9 limit% 99.9 2025-01-02 2025-12-31
+  2026 days 190 rows 1016332 per_day 5349 adj% 99.6 limit% 98.5 2026-01-05 2026-10-12
+[calendar] {'first': datetime.date(2023, 1, 1), 'last': datetime.date(2026, 12, 31), 'open_since_202309': 750}
+[trade limits] {'first': datetime.date(2026, 9, 1), 'last': datetime.date(2026, 10, 13), 'days': 25}
+[raw observations size] {'n': 15877216, 'size': '39 GB'}
+[capabilities]
+  longhuvip auction_bid_daily 2026-10-13 2026-10-13 days 1 rows 78
+  tdx_public auction_curve_daily 2026-10-13 2026-10-13 days 1 rows 78
+  local_derived auction_open_desk_daily 2026-10-13 2026-10-13 days 1 rows 1
+  fuyao_ths auction_pool_snapshot 2026-10-13 2026-10-13 days 1 rows 62
+  longhuvip_history limit_performance_history 2023-09-01 2026-10-09 days 748 rows 3740
+  longhuvip limit_performance_live 2026-10-12 2026-10-12 days 1 rows 5
+  local_derived limit_up_risk_daily 2023-09-11 2026-10-12 days 743 rows 743
+  longhuvip_history morning_bidding_history 2023-09-01 2026-09-18 days 739 rows 739
+[tables with minute/intraday/tick/flow data]
+  stock_money_flow_daily 4043991 3141 MB
+  canonical_bars_daily 4099604 2386 MB
+  intraday_strategy_scans 115 1808 MB
+  intraday_rule_input_snapshots 168404 1030 MB
+  intraday_quote_observations 299653 733 MB
+  intraday_signal_events 28670 441 MB
+  research_adjusted_bars_daily 655769 368 MB
+  ten_day_leader_rotation_intraday_observations 29760 186 MB
+  market_bars_daily 416305 146 MB
+  intraday_scan_rejections 228371 129 MB
+  intraday_signal_outcomes_history 56245 85 MB
+  intraday_minute_sessions 87917 83 MB
+  intraday_board_reports 1141 72 MB
+  intraday_board_flow_snapshots 3100 50 MB
+  sector_flow_daily_outcomes 99276 47 MB
+  intraday_scan_runs 8353 46 MB

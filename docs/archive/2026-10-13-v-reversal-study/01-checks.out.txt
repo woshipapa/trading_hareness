@@ -1,0 +1,19 @@
+CHECKS dispatch=1; fund files intentionally not opened
+sessions SH000001 n=749 range=2023-09-01..2026-10-12 minutes_min=241 minutes_max=241 duplicate_minutes=748
+duplicate_detail SH000001 labels=09:45:748 value_disagree=0 volume_diff_sessions=0 kept=first
+sessions SZ399001 n=749 range=2023-09-01..2026-10-12 minutes_min=241 minutes_max=241 duplicate_minutes=748
+duplicate_detail SZ399001 labels=09:45:748 value_disagree=0 volume_diff_sessions=0 kept=first
+sessions SZ399006 n=749 range=2023-09-01..2026-10-12 minutes_min=241 minutes_max=241 duplicate_minutes=748
+duplicate_detail SZ399006 labels=09:45:748 value_disagree=0 volume_diff_sessions=0 kept=first
+sessions SH000852 n=749 range=2023-09-01..2026-10-12 minutes_min=240 minutes_max=241 duplicate_minutes=0
+sessions SH000300 n=749 range=2023-09-01..2026-10-12 minutes_min=240 minutes_max=241 duplicate_minutes=749
+duplicate_detail SH000300 labels=09:45:749 value_disagree=0 volume_diff_sessions=0 kept=first
+SZ399001 missing_vs_SH000001
+avg_close_vs_daily_panel n=749 corr=0.996841 mae=0.000281
+avg_two_day_compound_vs_panel n=748 corr=0.997049 mae=0.000472
+event_example day=2026-07-09 depth=-1.50% entry=10:49 e=-0.016280 c=0.006121 next_day=2026-07-10 o1=-0.001260 c1=0.007987 out_avg_to_next_close=0.030941
+avg_vs_radar_advancers n=208 sessions=2 corr=0.960326
+daily_definition_deep_low n=193 sessions=762 threshold=-2.00%
+avg_depth_entry depth=-1.50% sessions=166 base_daily_193_difference=-27
+avg_depth_entry depth=-2.00% sessions=99 base_daily_193_difference=-94
+avg_depth_entry depth=-3.00% sessions=37 base_daily_193_difference=-156

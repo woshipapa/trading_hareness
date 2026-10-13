@@ -4,6 +4,15 @@
 - LarkAgentX bridge source and tests live in `bridge/`.
 - Edge deployment and rollback scripts live in `scripts/edge/`.
 - Source labels live in `feishu-relay/config/source-registry.json`; do not put credentials in it.
+- That file is not the whole list. A tag first used when a source group is added in the dashboard is registered
+  at run time in `ingestion_source_profiles` (`adapter/source-tags.mjs`); the file wins for a tag it declares. A
+  target group's custom-bot webhook entered in the dashboard is stored encrypted in
+  `feishu_group_relay_webhook_targets` (`adapter/webhook-targets.mjs`) and never returned or logged. Neither needs a
+  release. See `docs/decisions/0019-feishu-relay-dashboard-registrations.md`.
+- A target group picked in the dashboard without a webhook address gets its bot from the bridge
+  (`bridge/chat_bots.py`): the account's own session creates a custom bot named 转发机器人 through the web client's
+  `open-apis/chatbot/api` calls. Only a bot with that name made by this account is ever reused, changed or removed.
+  These are the web client's interfaces, not published ones. See `docs/decisions/0020-feishu-relay-creates-target-bots.md`.
 - Keep Feishu OAuth, Cookie, webhook URL, app secret and supervisor state outside git.
 - A WebSocket receipt is at-least-once; preserve the adapter ledger and message-level idempotency.
 - Run `node --test feishu-relay/adapter/*.test.mjs` and the bridge unittest suite after relay changes.

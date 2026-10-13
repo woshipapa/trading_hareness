@@ -1,0 +1,170 @@
+DISPATCH1 deep-low description; fund files intentionally not opened
+description_definition=deep when avg day low <= depth; turned when close_avg-low_avg >= 2 percentage points
+depth=-1.50% sessions=166 turned=20 share=0.120482
+depth=-2.00% sessions=99 turned=15 share=0.151515
+depth=-3.00% sessions=37 turned=6 share=0.162162
+by_year
+ year  sessions  turned_sessions  turn_share median_low_minute  median_low  median_rise  depth
+ 2023         9                1    0.111111             14:39   -0.016705     0.002407 -0.015
+ 2024        73                9    0.123288             14:33   -0.021766     0.002693 -0.015
+ 2025        36                5    0.138889             13:46   -0.022550     0.008590 -0.015
+ 2026        48                5    0.104167             13:47   -0.023274     0.005444 -0.015
+ 2023         1                0    0.000000             14:46   -0.027933     0.003952 -0.020
+ 2024        41                5    0.121951             14:30   -0.029992     0.002332 -0.020
+ 2025        24                5    0.208333             14:21   -0.026401     0.010055 -0.020
+ 2026        33                5    0.151515             13:53   -0.025138     0.005331 -0.020
+ 2024        20                3    0.150000             14:44   -0.043381     0.001527 -0.030
+ 2025         8                2    0.250000             14:21   -0.035475     0.012647 -0.030
+ 2026         9                1    0.111111             14:34   -0.042189     0.005557 -0.030
+since_2026-07-01 depth_events=36 rebound_events=98
+2026-07-07
+  depth -1.50% at 10:10; out_close=-0.011416; out_next_open=-0.011196; out_next_close=-0.025489; out_new_low=True
+  depth -2.00% at 10:32; out_close=-0.006720; out_next_open=-0.006499; out_next_close=-0.020860; out_new_low=True
+2026-07-08
+  depth -1.50% at 10:15; out_close=-0.000051; out_next_open=-0.000411; out_next_close=0.006070; out_new_low=False
+  rebound 0.50% at 10:30; held=True; out_close=-0.005761; out_next_open=-0.006119; out_next_close=0.000325; out_new_low=False
+  rebound 0.80% at 11:14; held=True; out_close=-0.007749; out_next_open=-0.008107; out_next_close=-0.001676; out_new_low=False
+2026-07-09
+  depth -1.50% at 10:49; out_close=0.022771; out_next_open=0.021483; out_next_close=0.030941; out_new_low=True
+  depth -2.00% at 11:21; out_close=0.027416; out_next_open=0.026122; out_next_close=0.035623; out_new_low=False
+  rebound 0.50% at 13:01; held=True; out_close=0.021143; out_next_open=0.019857; out_next_close=0.029299; out_new_low=False
+  rebound 0.50% at 13:01; held=True; out_close=0.021143; out_next_open=0.019857; out_next_close=0.029299; out_new_low=False
+  rebound 0.80% at 13:10; held=True; out_close=0.017062; out_next_open=0.015781; out_next_close=0.025186; out_new_low=False
+  rebound 0.80% at 13:10; held=True; out_close=0.017062; out_next_open=0.015781; out_next_close=0.025186; out_new_low=False
+2026-07-13
+  depth -1.50% at 09:41; out_close=-0.023504; out_next_open=-0.024034; out_next_close=-0.008885; out_new_low=True
+  depth -2.00% at 09:56; out_close=-0.018679; out_next_open=-0.019211; out_next_close=-0.003987; out_new_low=True
+  depth -3.00% at 11:05; out_close=-0.009855; out_next_open=-0.010392; out_next_close=0.004969; out_new_low=True
+  rebound 0.50% at 13:34; held=False; out_close=-0.009637; out_next_open=-0.010174; out_next_close=0.005190; out_new_low=True
+  rebound 0.50% at 13:34; held=False; out_close=-0.009637; out_next_open=-0.010174; out_next_close=0.005190; out_new_low=True
+  rebound 0.50% at 13:34; held=False; out_close=-0.009637; out_next_open=-0.010174; out_next_close=0.005190; out_new_low=True
+  rebound 0.80% at 13:35; held=False; out_close=-0.010283; out_next_open=-0.010820; out_next_close=0.004534; out_new_low=True
+  rebound 0.80% at 13:35; held=False; out_close=-0.010283; out_next_open=-0.010820; out_next_close=0.004534; out_new_low=True
+  rebound 0.80% at 13:35; held=False; out_close=-0.010283; out_next_open=-0.010820; out_next_close=0.004534; out_new_low=True
+  rebound 0.50% at 14:47; held=True; out_close=-0.004337; out_next_open=-0.004877; out_next_close=0.010569; out_new_low=False
+  rebound 0.50% at 14:47; held=True; out_close=-0.004337; out_next_open=-0.004877; out_next_close=0.010569; out_new_low=False
+  rebound 0.50% at 14:47; held=True; out_close=-0.004337; out_next_open=-0.004877; out_next_close=0.010569; out_new_low=False
+2026-07-17
+  depth -1.50% at 09:49; out_close=-0.034111; out_next_open=-0.028468; out_next_close=-0.056474; out_new_low=True
+  rebound 0.50% at 09:52; held=False; out_close=-0.036668; out_next_open=-0.031040; out_next_close=-0.058972; out_new_low=True
+  depth -2.00% at 10:31; out_close=-0.025611; out_next_open=-0.019918; out_next_close=-0.048171; out_new_low=True
+  rebound 0.50% at 11:01; held=False; out_close=-0.027936; out_next_open=-0.022257; out_next_close=-0.050443; out_new_low=True
+  rebound 0.50% at 11:01; held=False; out_close=-0.027936; out_next_open=-0.022257; out_next_close=-0.050443; out_new_low=True
+  rebound 0.80% at 11:02; held=False; out_close=-0.029189; out_next_open=-0.023517; out_next_close=-0.051667; out_new_low=True
+  rebound 0.80% at 11:02; held=False; out_close=-0.029189; out_next_open=-0.023517; out_next_close=-0.051667; out_new_low=True
+  depth -3.00% at 13:02; out_close=-0.016133; out_next_open=-0.010385; out_next_close=-0.038912; out_new_low=True
+  rebound 0.50% at 13:50; held=True; out_close=-0.002025; out_next_open=0.003805; out_next_close=-0.025132; out_new_low=False
+  rebound 0.50% at 13:50; held=True; out_close=-0.002025; out_next_open=0.003805; out_next_close=-0.025132; out_new_low=False
+  rebound 0.50% at 13:50; held=True; out_close=-0.002025; out_next_open=0.003805; out_next_close=-0.025132; out_new_low=False
+  rebound 0.80% at 13:58; held=True; out_close=-0.006935; out_next_open=-0.001133; out_next_close=-0.029927; out_new_low=False
+  rebound 0.80% at 13:58; held=True; out_close=-0.006935; out_next_open=-0.001133; out_next_close=-0.029927; out_new_low=False
+  rebound 0.80% at 13:58; held=True; out_close=-0.006935; out_next_open=-0.001133; out_next_close=-0.029927; out_new_low=False
+2026-07-20
+  depth -1.50% at 13:27; out_close=-0.009189; out_next_open=-0.009360; out_next_close=0.004815; out_new_low=True
+  depth -2.00% at 13:34; out_close=-0.002599; out_next_open=-0.002771; out_next_close=0.011499; out_new_low=True
+  depth -3.00% at 13:47; out_close=0.005155; out_next_open=0.004982; out_next_close=0.019362; out_new_low=True
+  rebound 0.50% at 13:49; held=False; out_close=0.002706; out_next_open=0.002534; out_next_close=0.016879; out_new_low=True
+  rebound 0.80% at 13:49; held=False; out_close=0.002706; out_next_open=0.002534; out_next_close=0.016879; out_new_low=True
+  rebound 0.50% at 13:49; held=False; out_close=0.002706; out_next_open=0.002534; out_next_close=0.016879; out_new_low=True
+  rebound 0.80% at 13:49; held=False; out_close=0.002706; out_next_open=0.002534; out_next_close=0.016879; out_new_low=True
+  rebound 0.50% at 13:49; held=False; out_close=0.002706; out_next_open=0.002534; out_next_close=0.016879; out_new_low=True
+  rebound 0.80% at 13:49; held=False; out_close=0.002706; out_next_open=0.002534; out_next_close=0.016879; out_new_low=True
+  rebound 0.50% at 14:03; held=False; out_close=0.001863; out_next_open=0.001691; out_next_close=0.016024; out_new_low=True
+  rebound 0.50% at 14:03; held=False; out_close=0.001863; out_next_open=0.001691; out_next_close=0.016024; out_new_low=True
+  rebound 0.50% at 14:03; held=False; out_close=0.001863; out_next_open=0.001691; out_next_close=0.016024; out_new_low=True
+  rebound 0.80% at 14:04; held=False; out_close=0.000349; out_next_open=0.000176; out_next_close=0.014488; out_new_low=True
+  rebound 0.80% at 14:04; held=False; out_close=0.000349; out_next_open=0.000176; out_next_close=0.014488; out_new_low=True
+  rebound 0.80% at 14:04; held=False; out_close=0.000349; out_next_open=0.000176; out_next_close=0.014488; out_new_low=True
+  rebound 0.50% at 14:43; held=True; out_close=0.007151; out_next_open=0.006978; out_next_close=0.021386; out_new_low=False
+  rebound 0.50% at 14:43; held=True; out_close=0.007151; out_next_open=0.006978; out_next_close=0.021386; out_new_low=False
+  rebound 0.50% at 14:43; held=True; out_close=0.007151; out_next_open=0.006978; out_next_close=0.021386; out_new_low=False
+  rebound 0.80% at 14:45; held=True; out_close=0.004267; out_next_open=0.004095; out_next_close=0.018462; out_new_low=False
+  rebound 0.80% at 14:45; held=True; out_close=0.004267; out_next_open=0.004095; out_next_close=0.018462; out_new_low=False
+  rebound 0.80% at 14:45; held=True; out_close=0.004267; out_next_open=0.004095; out_next_close=0.018462; out_new_low=False
+2026-07-21
+  depth -1.50% at 09:51; out_close=0.030478; out_next_open=0.023188; out_next_close=0.021071; out_new_low=True
+  depth -2.00% at 09:56; out_close=0.041101; out_next_open=0.033736; out_next_close=0.031598; out_new_low=True
+  depth -3.00% at 09:59; out_close=0.042219; out_next_open=0.034846; out_next_close=0.032705; out_new_low=True
+  rebound 0.50% at 10:07; held=False; out_close=0.051059; out_next_open=0.043624; out_next_close=0.041464; out_new_low=True
+  rebound 0.50% at 10:07; held=False; out_close=0.051059; out_next_open=0.043624; out_next_close=0.041464; out_new_low=True
+  rebound 0.50% at 10:07; held=False; out_close=0.051059; out_next_open=0.043624; out_next_close=0.041464; out_new_low=True
+  rebound 0.50% at 10:13; held=True; out_close=0.049100; out_next_open=0.041678; out_next_close=0.039523; out_new_low=False
+  rebound 0.50% at 10:13; held=True; out_close=0.049100; out_next_open=0.041678; out_next_close=0.039523; out_new_low=False
+  rebound 0.50% at 10:13; held=True; out_close=0.049100; out_next_open=0.041678; out_next_close=0.039523; out_new_low=False
+  rebound 0.80% at 10:14; held=True; out_close=0.051555; out_next_open=0.044116; out_next_close=0.041956; out_new_low=False
+  rebound 0.80% at 10:14; held=True; out_close=0.051555; out_next_open=0.044116; out_next_close=0.041956; out_new_low=False
+  rebound 0.80% at 10:14; held=True; out_close=0.051555; out_next_open=0.044116; out_next_close=0.041956; out_new_low=False
+2026-07-24
+  depth -1.50% at 10:19; out_close=-0.010326; out_next_open=-0.012675; out_next_close=0.019667; out_new_low=True
+  depth -2.00% at 10:39; out_close=-0.004339; out_next_open=-0.006702; out_next_close=0.025835; out_new_low=True
+  rebound 0.50% at 13:03; held=False; out_close=-0.006783; out_next_open=-0.009140; out_next_close=0.023318; out_new_low=True
+  rebound 0.50% at 13:03; held=False; out_close=-0.006783; out_next_open=-0.009140; out_next_close=0.023318; out_new_low=True
+  rebound 0.80% at 13:09; held=False; out_close=-0.010447; out_next_open=-0.012795; out_next_close=0.019542; out_new_low=True
+  rebound 0.80% at 13:09; held=False; out_close=-0.010447; out_next_open=-0.012795; out_next_close=0.019542; out_new_low=True
+2026-07-30
+  depth -1.50% at 11:22; out_close=-0.003199; out_next_open=0.009667; out_next_close=0.022256; out_new_low=True
+  depth -2.00% at 13:04; out_close=0.001362; out_next_open=0.014287; out_next_close=0.026933; out_new_low=True
+  rebound 0.50% at 13:08; held=False; out_close=-0.004089; out_next_open=0.008767; out_next_close=0.021344; out_new_low=True
+  rebound 0.50% at 13:08; held=False; out_close=-0.004089; out_next_open=0.008767; out_next_close=0.021344; out_new_low=True
+  rebound 0.50% at 13:23; held=True; out_close=-0.002904; out_next_open=0.009967; out_next_close=0.022559; out_new_low=False
+  rebound 0.50% at 13:23; held=True; out_close=-0.002904; out_next_open=0.009967; out_next_close=0.022559; out_new_low=False
+  rebound 0.80% at 13:25; held=True; out_close=-0.004261; out_next_open=0.008592; out_next_close=0.021167; out_new_low=False
+  rebound 0.80% at 13:25; held=True; out_close=-0.004261; out_next_open=0.008592; out_next_close=0.021167; out_new_low=False
+2026-08-19
+  depth -1.50% at 09:40; out_close=-0.024746; out_next_open=-0.016039; out_next_close=-0.011093; out_new_low=True
+  depth -2.00% at 09:52; out_close=-0.019824; out_next_open=-0.011074; out_next_close=-0.006102; out_new_low=True
+  depth -3.00% at 10:19; out_close=-0.011319; out_next_open=-0.002492; out_next_close=0.002522; out_new_low=True
+  rebound 0.50% at 10:23; held=False; out_close=-0.016512; out_next_open=-0.007731; out_next_close=-0.002743; out_new_low=True
+  rebound 0.50% at 10:23; held=False; out_close=-0.016512; out_next_open=-0.007731; out_next_close=-0.002743; out_new_low=True
+  rebound 0.50% at 10:23; held=False; out_close=-0.016512; out_next_open=-0.007731; out_next_close=-0.002743; out_new_low=True
+  rebound 0.50% at 13:24; held=False; out_close=-0.009832; out_next_open=-0.000992; out_next_close=0.004030; out_new_low=True
+  rebound 0.50% at 13:24; held=False; out_close=-0.009832; out_next_open=-0.000992; out_next_close=0.004030; out_new_low=True
+  rebound 0.50% at 13:24; held=False; out_close=-0.009832; out_next_open=-0.000992; out_next_close=0.004030; out_new_low=True
+2026-08-21
+  depth -1.50% at 09:38; out_close=0.017293; out_next_open=0.017962; out_next_close=0.005775; out_new_low=True
+  rebound 0.50% at 09:44; held=True; out_close=0.008525; out_next_open=0.009188; out_next_close=-0.002893; out_new_low=False
+  rebound 0.80% at 09:45; held=True; out_close=0.005119; out_next_open=0.005779; out_next_close=-0.006262; out_new_low=False
+2026-08-24
+  depth -1.50% at 10:44; out_close=0.004372; out_next_open=-0.001831; out_next_close=0.019345; out_new_low=True
+  depth -2.00% at 13:49; out_close=0.009819; out_next_open=0.003582; out_next_close=0.024873; out_new_low=True
+  rebound 0.50% at 14:12; held=True; out_close=0.005899; out_next_open=-0.000313; out_next_close=0.020896; out_new_low=False
+  rebound 0.50% at 14:12; held=True; out_close=0.005899; out_next_open=-0.000313; out_next_close=0.020896; out_new_low=False
+  rebound 0.80% at 14:49; held=True; out_close=0.001387; out_next_open=-0.004797; out_next_close=0.016316; out_new_low=False
+  rebound 0.80% at 14:49; held=True; out_close=0.001387; out_next_open=-0.004797; out_next_close=0.016316; out_new_low=False
+2026-09-11
+  depth -1.50% at 09:36; out_close=-0.002410; out_next_open=-0.006389; out_next_close=0.003016; out_new_low=True
+  depth -2.00% at 09:45; out_close=0.001469; out_next_open=-0.002526; out_next_close=0.006916; out_new_low=True
+  depth -3.00% at 10:31; out_close=0.010780; out_next_open=0.006748; out_next_close=0.016278; out_new_low=True
+  rebound 0.50% at 13:16; held=True; out_close=0.008156; out_next_open=0.004134; out_next_close=0.013640; out_new_low=False
+  rebound 0.50% at 13:16; held=True; out_close=0.008156; out_next_open=0.004134; out_next_close=0.013640; out_new_low=False
+  rebound 0.50% at 13:16; held=True; out_close=0.008156; out_next_open=0.004134; out_next_close=0.013640; out_new_low=False
+  rebound 0.80% at 13:32; held=True; out_close=0.004257; out_next_open=0.000251; out_next_close=0.009719; out_new_low=False
+  rebound 0.80% at 13:32; held=True; out_close=0.004257; out_next_open=0.000251; out_next_close=0.009719; out_new_low=False
+  rebound 0.80% at 13:32; held=True; out_close=0.004257; out_next_open=0.000251; out_next_close=0.009719; out_new_low=False
+2026-09-28
+  depth -1.50% at 09:50; out_close=-0.006452; out_next_open=-0.008719; out_next_close=0.000726; out_new_low=True
+  depth -2.00% at 10:21; out_close=-0.002155; out_next_open=-0.004432; out_next_close=0.005054; out_new_low=True
+  rebound 0.50% at 11:06; held=False; out_close=0.000003; out_next_open=-0.002279; out_next_close=0.007228; out_new_low=True
+  rebound 0.50% at 11:06; held=False; out_close=0.000003; out_next_open=-0.002279; out_next_close=0.007228; out_new_low=True
+  rebound 0.50% at 14:05; held=True; out_close=0.000183; out_next_open=-0.002099; out_next_close=0.007409; out_new_low=False
+  rebound 0.50% at 14:05; held=True; out_close=0.000183; out_next_open=-0.002099; out_next_close=0.007409; out_new_low=False
+  rebound 0.80% at 14:12; held=True; out_close=-0.003218; out_next_open=-0.005492; out_next_close=0.003984; out_new_low=False
+  rebound 0.80% at 14:12; held=True; out_close=-0.003218; out_next_open=-0.005492; out_next_close=0.003984; out_new_low=False
+2026-10-08
+  depth -1.50% at 14:24; out_close=0.005694; out_next_open=0.003673; out_next_close=0.010722; out_new_low=True
+  rebound 0.50% at 14:56; held=True; out_close=0.000361; out_next_open=-0.001650; out_next_close=0.005362; out_new_low=False
+2026-10-09
+  depth -1.50% at 10:00; out_close=0.020771; out_next_open=0.019390; out_next_close=0.004610; out_new_low=True
+  depth -2.00% at 10:11; out_close=0.026724; out_next_open=0.025335; out_next_close=0.010468; out_new_low=True
+  rebound 0.50% at 10:45; held=False; out_close=0.027540; out_next_open=0.026149; out_next_close=0.011271; out_new_low=True
+  rebound 0.50% at 10:45; held=False; out_close=0.027540; out_next_open=0.026149; out_next_close=0.011271; out_new_low=True
+  rebound 0.80% at 10:50; held=False; out_close=0.024304; out_next_open=0.022918; out_next_close=0.008086; out_new_low=True
+  rebound 0.80% at 10:50; held=False; out_close=0.024304; out_next_open=0.022918; out_next_close=0.008086; out_new_low=True
+  rebound 0.50% at 11:22; held=True; out_close=0.030818; out_next_open=0.029423; out_next_close=0.014497; out_new_low=False
+  rebound 0.50% at 11:22; held=True; out_close=0.030818; out_next_open=0.029423; out_next_close=0.014497; out_new_low=False
+  rebound 0.80% at 13:01; held=True; out_close=0.022817; out_next_open=0.021432; out_next_close=0.006623; out_new_low=False
+  rebound 0.80% at 13:01; held=True; out_close=0.022817; out_next_open=0.021432; out_next_close=0.006623; out_new_low=False
+2026-10-12
+  depth -1.50% at 10:04; out_close=-0.000245; out_next_open=nan; out_next_close=nan; out_new_low=True
+  rebound 0.50% at 10:20; held=False; out_close=-0.007731; out_next_open=nan; out_next_close=nan; out_new_low=True
+  rebound 0.80% at 10:23; held=False; out_close=-0.010068; out_next_open=nan; out_next_close=nan; out_new_low=True

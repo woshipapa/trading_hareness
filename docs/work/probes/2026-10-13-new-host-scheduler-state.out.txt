@@ -1,0 +1,25 @@
+The scheduler container on the new owner server (118.178.133.37), read-only, 2026-10-13 20:44-20:55 CST.
+Transcribed from the session's tool output (docker logs and the scheduler's /health on 15683, over SSH).
+
+--- docker logs, last 150 minutes (times UTC; add 8 hours)
+first line: 2026-10-13T10:35:11Z reported owner peer contract; peer SQL may start        (18:35:11 CST: the scheduler started here)
+most frequent messages: 588 x GET /health 200; 88 x "server terminated abnormally before or while processing the request";
+  85 x "error connecting in 'pool-N': connection failed ... server closed the connection";
+  207 x "<loop> lease acquire failed; retrying: the pool 'pool-2' has already 64 requests waiting"
+  the pool-waiting errors: first 10:40:04Z, last 10:42:04Z (18:40-18:42 CST); none after
+  10:38:48Z-10:38:59Z: every background loop "lease renew failed; treating lease as lost: couldn't get a connection after 10.00 sec"
+slow database transaction site=app.daily_close_completion:persist seconds=83.2 statements=1317   at 10:56:48Z (18:56:48 CST)
+slow database transaction site=app.daily_close_completion:persist seconds=5.4 statements=6       at 11:47:17Z (19:47:17 CST)
+
+--- 15683 /health, 20:52 CST
+build.release = owner-code-20261013-04; build.git_sha = build.running_git_sha = 261702310f06138bd2113d8dee838139b636230c
+owner_deploy.release_id = 20260920T194536-bc69bee85233-clean
+runtime_tasks.post_close_refresh = {"active_count": 0, "oldest_started_at": null}; runtime_leases.post_close_refresh.active = false
+runtime_loops (all "running", lease heartbeats current): all_board_member_backfill, async_pool_watchdog, daily_strategy_summary,
+  peer_close_research, post_close_public_archive, post_close_strategy, storage_tiering_mover, strategy_review,
+  ten_day_leader_rotation, ths_member_backfill
+daily_control_plane: {"state": "blocked", "trade_date": "2026-10-13", "daily_rows": 5560, "expected_daily_rows": 5580,
+  "minimum_required_rows": 5301, "coverage_ratio": 0.9964, "fundamental_rows": 5138, "adjustment_rows": 5560, "limit_rows": 5560,
+  "reason": "latest canonical equity daily bars are missing same-date daily fundamentals 5138/5560"}
+resources: state healthy; disk free 22.7 GB of 31.3 GB; process rss 165,912,576 bytes
+main service (15682) database pool at 20:47: pool_size 2, available 2, waiting 0, max_size 12

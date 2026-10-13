@@ -1,0 +1,24 @@
+rule group minus the rest of the same day and board bucket, %, development | hold-out
+R34 amount >= largest of prior 250 sessions  n= 6492  ret1  -1.67 t= -8.4 |  -1.67 t= -4.4  ;  seal_next -12.68 t=-11.5 | -11.40 t= -5.2  ;  big_loss  +9.66 t= +9.5 |  +9.99 t= +4.7  ;  o2o_buy  +0.73 t= +2.9 |  -0.05 t= -0.1
+R34 amount < half of that largest            n=21540  ret1  +0.32 t= +2.0 |  -0.16 t= -0.7  ;  seal_next  +1.61 t= +1.6 |  -1.73 t= -1.0  ;  big_loss  -5.40 t= -6.6 |  -3.49 t= -2.9  ;  o2o_buy  -0.12 t= -0.5 |  +0.02 t= +0.1
+R19 shrunk-volume board (vr<1, boards>=2)    n=  606  ret1  +1.47 t= +3.2 |  -0.13 t= -0.3  ;  seal_next  +6.40 t= +2.0 |  -7.36 t= -2.1  ;  big_loss  -8.73 t= -3.6 |  -2.19 t= -0.8  ;  o2o_buy  +0.01 t= +0.0 |  -0.83 t= -1.2
+R15/R27 heavy-volume board (vr>=3)           n=15346  ret1  -2.08 t=-13.9 |  -1.36 t= -5.2  ;  seal_next -12.28 t=-14.0 |  -9.78 t= -5.8  ;  big_loss  +9.80 t=+11.8 |  +5.31 t= +4.0  ;  o2o_buy  +0.54 t= +2.5 |  +0.56 t= +1.7
+R06 theme with >=10 limit-ups                n=13107  ret1  +1.35 t= +6.5 |  +1.31 t= +4.1  ;  seal_next  +5.68 t= +4.9 |  +4.41 t= +2.2  ;  big_loss  -5.06 t= -4.7 |  -5.43 t= -3.3  ;  o2o_buy  -0.71 t= -2.6 |  -0.32 t= -0.8
+R06 theme with 1-3 limit-ups                 n=18478  ret1  -1.25 t= -7.4 |  -0.58 t= -2.0  ;  seal_next  -4.33 t= -4.4 |  -1.41 t= -0.8  ;  big_loss  +5.53 t= +6.4 |  +2.28 t= +1.4  ;  o2o_buy  +0.05 t= +0.2 |  +0.37 t= +1.1
+R49 run-up of 20 sessions >= 40%             n=10630  ret1  -0.08 t= -0.4 |  +0.26 t= +0.9  ;  seal_next  -2.45 t= -2.0 |  -2.06 t= -1.1  ;  big_loss  +7.53 t= +6.7 |  +4.35 t= +2.8  ;  o2o_buy  +0.63 t= +2.1 |  +0.09 t= +0.3
+R20 closing seal below 20 million            n= 7585  ret1  -2.67 t=-15.9 |  -1.34 t= -4.8  ;  seal_next -11.35 t=-11.5 |  -8.30 t= -5.4  ;  big_loss +11.10 t=+11.2 |  +3.76 t= +2.3  ;  o2o_buy  +0.90 t= +4.1 |  +0.68 t= +2.3
+R20 closing seal above 300 million           n=  958  ret1  +0.82 t= +2.1 |  +0.44 t= +1.1  ;  seal_next  +3.84 t= +1.5 |  -1.92 t= -0.8  ;  big_loss  -0.08 t= -0.0 |  -3.75 t= -1.8  ;  o2o_buy  -0.62 t= -1.3 |  -0.30 t= -0.6
+R21 first seal 09:30-09:45                   n=12966  ret1  -0.55 t= -3.6 |  -0.68 t= -2.6  ;  seal_next  -3.57 t= -3.9 |  -4.29 t= -2.6  ;  big_loss  +2.21 t= +2.6 |  -0.47 t= -0.4  ;  o2o_buy  -0.46 t= -2.2 |  -0.21 t= -0.7
+R21 first seal after 14:30                   n= 2194  ret1  -1.39 t= -5.9 |  -1.47 t= -4.0  ;  seal_next  -5.94 t= -4.3 |  -9.27 t= -4.8  ;  big_loss  +7.00 t= +5.1 |  +5.83 t= +2.4  ;  o2o_buy  +0.36 t= +1.4 |  +0.01 t= +0.0
+R36 turnover >= 10 billion                   n=  250  ret1  -0.87 t= -1.4 |  -0.86 t= -1.7  ;  seal_next -10.85 t= -3.2 | -11.19 t= -5.0  ;  big_loss  -3.26 t= -1.1 |  +1.59 t= +0.5  ;  o2o_buy  +1.02 t= +1.3 |  +0.00 t= +0.0
+R11 second or third board                    n= 8731  ret1  +0.88 t= +7.0 |  +1.39 t= +6.6  ;  seal_next +19.81 t=+24.1 | +17.56 t=+12.9  ;  big_loss +10.49 t=+15.4 |  +1.69 t= +1.7  ;  o2o_buy  -0.96 t= -5.0 |  -0.25 t= -1.0
+R11 sixth board or higher                    n=  608  ret1  +1.40 t= +3.1 |  +3.23 t= +3.2  ;  seal_next +31.50 t=+12.5 | +36.44 t= +5.3  ;  big_loss +14.43 t= +6.2 |  +4.93 t= +1.0  ;  o2o_buy  -1.11 t= -1.5 |  +1.55 t= +0.9
+
+day switches: next-day outcome of the day's consecutive-board stocks, on-days minus off-days, %
+R13 more than 5 stocks with 3+ boards and more than 20 limit-ups
+    ret1: +0.06 t=+0.2 (249/316d) | +0.53 t=+1.0 (31/142d)  ;  seal_next: +1.21 t=+0.8 (249/316d) | +1.66 t=+0.5 (30/141d)  ;  big_loss: +0.04 t=+0.0 (249/316d) | +2.78 t=+0.9 (31/142d)  ;  o2o_buy: -0.39 t=-0.9 (249/316d) | -0.29 t=-0.3 (31/141d)
+R38 market turnover >= 2.1 trillion
+    ret1: -0.32 t=-1.0 (123/442d) | -0.37 t=-0.4 (160/13d)  ;  seal_next: -4.37 t=-2.4 (123/442d) | -5.41 t=-0.8 (158/13d)  ;  big_loss: -1.06 t=-0.6 (123/442d) | -3.37 t=-0.7 (160/13d)  ;  o2o_buy: -0.76 t=-1.4 (123/442d) | -0.36 t=-0.3 (159/13d)
+R38 market turnover < 1.7 trillion
+    ret1: -0.21 t=-0.8 (258/307d) | +2.67 t=+nan (2/171d)  ;  seal_next: -1.32 t=-0.9 (258/307d) | +17.80 t=+nan (2/169d)  ;  big_loss: +2.22 t=+1.5 (258/307d) | -15.60 t=+nan (2/171d)  ;  o2o_buy: +0.07 t=+0.2 (258/307d) | +3.30 t=+nan (2/170d)
+market turnover quantiles (trillion): [1.19, 1.89, 2.93] ; days >=2.1: 287 ; days R13 on: 280 of 739

@@ -1,0 +1,13 @@
+[whole-market minute documents today, by provider and capability]
+  fuyao_ths a_share_minute_cross_section docs 166 09:16:19 .. 13:37:59
+  tdx_public a_share_minute_cross_section_shadow docs 162 09:15:20 .. 13:38:05
+[agreement] rows 162 compared 161 no_reference 1
+  comparison keys: ['only_in_fuyao', 'only_in_tdx', 'pct_change', 'price', 'seconds_apart', 'symbols_in_both', 'turnover', 'volume']
+  price keys: ['largest_relative_gap', 'largest_relative_gap_symbol', 'within_0_1_pct', 'within_0_5_pct', 'within_one_tick']
+  within one tick: median 0.5050  min 0.1099  max 1.0000  n 152
+  within 0.1%: median 0.5136  min 0.0820  max 1.0000  n 152
+  within 0.5%: median 0.9704  min 0.3480  max 1.0000  n 152
+  volume ratio median: median 1.0036  min 1.0000  max 2.5513  n 152
+  turnover ratio median: median 1.0037  min 1.0000  max 2.5496  n 152
+  seconds apart: median 25.8099  min 0.0891  max 61.2975  n 161
+  last comparison: {"only_in_tdx": [], "only_in_fuyao": [], "seconds_apart": 5.536268, "symbols_in_both": 5560}

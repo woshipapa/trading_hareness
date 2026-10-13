@@ -1,0 +1,18 @@
+ok   sync: ["u1 2026-08-01→2026-09-01","u2 2026-10-01→2026-11-01"]
+ok   list: ["u1 2026-08-01→2026-09-01 已到期","u2 2026-10-01→2026-11-01 正常"]
+ok   save member: ["2026-10-08","2027-01-08"]
+ok   save member with exempt flag: ["2026-10-08","2027-01-08"]
+ok   settings off: [false,null]
+FAIL preview (switch off): operator does not exist: timestamp with time zone < interval
+ok   nothing sent by the preview: 0
+FAIL review: operator does not exist: timestamp with time zone < interval
+ok   sent by the review: []
+FAIL review again reminds nobody: operator does not exist: timestamp with time zone < interval
+FAIL remind one member again: operator does not exist: timestamp with time zone < interval
+ok   stored after reminders: [["u1",null,null,"2026-10-13 02:30:00+00"],["u2",null,null,"2026-10-13 02:30:00+00"]]
+ok   settings on: true
+会员审查失败 target=oc_probe：operator does not exist: timestamp with time zone < interval
+ok   scheduler: first tick of the day reviews: {"member_list_reads":1,"last_review_on":null}
+ok   scheduler: second tick the same day does nothing: {"member_list_reads":0}
+ok   a member who left is marked: [["u1",false],["u2",true]]
+4 STEP(S) FAILED

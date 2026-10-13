@@ -5,7 +5,19 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from app.intraday_schedule import INTRADAY_WATCHLIST_MAX_SYMBOLS, intraday_watchlist_capacity, intraday_watchlist_max_symbols
+from app.intraday_schedule import (
+    INTRADAY_WATCHLIST_MAX_SYMBOLS,
+    intraday_watchlist_capacity,
+    intraday_watchlist_max_symbols,
+    seconds_until_slot,
+)
+
+
+class IntradayScheduleSlotTests(unittest.TestCase):
+    def test_waits_for_the_next_slot_before_on_and_after_it(self) -> None:
+        self.assertEqual(seconds_until_slot(49, 60, 50), 1)
+        self.assertEqual(seconds_until_slot(50, 60, 50), 60)
+        self.assertEqual(seconds_until_slot(50.5, 60, 50), 59.5)
 
 
 class IntradayScheduleCapacityTests(unittest.TestCase):

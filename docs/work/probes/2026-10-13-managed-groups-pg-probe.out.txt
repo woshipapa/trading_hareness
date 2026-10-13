@@ -1,0 +1,21 @@
+ok   before: rows keyed by the target id: ["oc_env×2"]
+ok   start resolves once and lists owned groups: ["oc_env 已有目标群 env usable=true owned=true","7680000000000000002 擒龙群 owned usable=false owned=true"]
+ok   targets only (what forwarding sees): ["oc_env"]
+ok   old target: members read back with the dates typed by hand: ["a1 2026-08-23→2026-11-23 正常","a2 2026-09-01→2026-10-01 已到期"]
+ok   old target: rows and settings now keyed by the group id: [["7690000000000000001×2"],["7690000000000000001 false null"]]
+ok   owned group: sync: ["q1 2026-08-01→2026-09-01","q2 2026-10-05→2026-11-05"]
+ok   owned group: save a member: ["2026-09-01","2026-10-01"]
+ok   owned group: preview works without a bot: ["q1 2026-09-01→2026-10-01 已到期"]
+ok   owned group: review refused without a bot: refused — 这个群还没有可用的机器人，发不了提醒：先在群列表里给它建机器人
+ok   owned group: remind refused without a bot: refused — 这个群还没有可用的机器人，发不了提醒：先在群列表里给它建机器人
+ok   owned group: daily switch refused without a bot: refused — 这个群还没有可用的机器人，发不了提醒：先在群列表里给它建机器人
+ok   owned group: other settings saved: 3
+ok   after a bot is added: one row for the group, under the new target id: ["oc_env 已有目标群 env usable=true owned=true","wh_new 擒龙群 dashboard usable=true owned=true"]
+ok   after a bot is added: the same members, nothing moved: [["q1 2026-09-01→2026-10-01 已到期","q2 2026-10-05→2026-11-05 正常"],["7680000000000000002×2","7690000000000000001×2"]]
+ok   after a bot is added: daily switch on for both groups: [true,true]
+ok   scheduler reviews both groups: {"sent":["oc_env: <at user_id=\"a2\">乙</at> 会员已到期，请联系群主续费","wh_new: <at user_id=\"q1\">丙</at> 会员已到期，请联系群主续费"],"settings":["7680000000000000002 true 2026-10-13","7690000000000000001 true 2026-10-13"]}
+ok   scheduler does nothing more the same day: 0
+ok   a group no longer owned leaves the list: ["oc_env 已有目标群 env usable=true owned=true"]
+ok   no joined group at all: only the configured targets remain: ["oc_env 已有目标群 env usable=true owned=true"]
+ok   membership rows are kept either way: ["7680000000000000002×2","7690000000000000001×2"]
+ALL STEPS PASSED

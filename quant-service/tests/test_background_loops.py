@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import unittest
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -14,6 +15,7 @@ from app import storage_tiering_mover as mover_module
 from app.level1_snapshot_runtime import Level1CaptureDependencies, level1_capture
 from app.peer_close_research import PeerCloseDependencies, peer_stages, run_peer_close_loop
 from app.storage_tiering_mover import run_mover_loop
+from app.tdx_shadow_snapshot_runtime import run_tdx_shadow_snapshot_loop
 
 
 class Stop(Exception):
@@ -27,6 +29,16 @@ def stop_after(rounds: int, delays: list[float]):
             raise Stop
 
     return sleep
+
+
+class WallClock:
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    async def sleep(self, delay: float) -> None:
+        self.value += delay
+        if getattr(self, "stop_after", None) == len(getattr(self, "starts", [])):
+            raise Stop
 
 
 async def run_inline(action, *args, **_kwargs):
@@ -110,6 +122,29 @@ class PeerCloseLoopTests(unittest.TestCase):
         self.assertEqual({day for _, day in calls}, {date(2026, 10, 9)})
         self.assertEqual(delays, [600])
 
+    def test_the_daily_products_follow_the_teacher_stages_and_yesterday_is_repaired_last(self):
+        calls = []
+        deps = dataclasses.replace(peer_deps(now=datetime(2026, 10, 9, 8, 30, tzinfo=timezone.utc), calls=calls),
+                                   call_longhu=object())
+
+        def products(_deps):
+            def stage(name):
+                async def run(day: date):
+                    calls.append((name, day))
+                    return {"status": "completed"}
+                return run
+            return {name: stage(name) for name in
+                    ("peer_limit_performance_lists", "peer_limit_up_risk", "peer_market_temperature")}
+
+        with patch.object(peer, "daily_bars_ready", return_value=True), patch.object(peer, "_product_stages", products):
+            with self.assertRaises(Stop):
+                asyncio.run(run_peer_close_loop(deps))
+        today, yesterday = date(2026, 10, 9), date(2026, 10, 8)
+        self.assertEqual(calls, [
+            ("roll", today), ("outcome", today), ("watch", today), ("xiaojie", today), ("digest", today),
+            ("peer_limit_performance_lists", today), ("peer_limit_up_risk", today), ("peer_market_temperature", today),
+            ("peer_limit_performance_lists", yesterday), ("peer_limit_up_risk", yesterday)])
+
     def test_nothing_runs_until_the_bars_have_landed(self):
         calls = []
         deps = peer_deps(now=datetime(2026, 10, 9, 8, 30, tzinfo=timezone.utc), calls=calls)
@@ -180,6 +215,65 @@ class Level1CaptureTests(unittest.TestCase):
         with patch.object(level1, "run_level1_snapshot_loop", fake_loop):
             asyncio.run(level1.run_level1_capture_service(level1_deps(fetch=None, health=[])))
         self.assertEqual(seen["interval_seconds"], 60)
+
+    def test_capture_starts_on_second_50_for_40_rounds(self):
+        clock = WallClock(1_000_010)
+        starts = []
+        clock.starts = starts
+        clock.stop_after = 40
+
+        async def capture():
+            starts.append(clock.value)
+            clock.value += 1.8
+            return {"status": "completed"}
+
+        with self.assertRaises(Stop):
+            asyncio.run(level1.run_level1_snapshot_loop(
+                interval_seconds=60, capture=capture, clock=lambda: clock.value, sleep=clock.sleep,
+            ))
+        self.assertEqual(len(starts), 40)
+        self.assertTrue(all(round(start % 60, 3) == 50 for start in starts))
+
+    def test_capture_overrun_skips_the_next_slot(self):
+        clock = WallClock(1_000_010)
+        starts = []
+        clock.starts = starts
+        clock.stop_after = 2
+        logs = []
+
+        async def capture():
+            starts.append(clock.value)
+            clock.value += 61
+            return {"status": "completed"}
+
+        with self.assertRaises(Stop):
+            asyncio.run(level1.run_level1_snapshot_loop(
+                interval_seconds=60, capture=capture, clock=lambda: clock.value, sleep=clock.sleep,
+                log=logs.append,
+            ))
+        self.assertEqual([round(start % 60) for start in starts], [50, 50])
+        self.assertIn("skipped", " ".join(logs))
+
+
+class TdxShadowLoopTests(unittest.TestCase):
+    def test_capture_starts_on_second_52_for_40_rounds(self):
+        clock = WallClock(1_000_010)
+        starts = []
+        clock.starts = starts
+        clock.stop_after = 40
+
+        class Runtime:
+            async def capture(self):
+                starts.append(clock.value)
+                clock.value += 3.5
+                return {"status": "completed"}
+
+        with self.assertRaises(Stop):
+            asyncio.run(run_tdx_shadow_snapshot_loop(
+                Runtime(), interval_seconds=60, clock=lambda: clock.value, sleep=clock.sleep,
+            ))
+        self.assertEqual(len(starts), 40)
+        self.assertTrue(all(round(start % 60, 3) == 52 for start in starts))
 
 
 if __name__ == "__main__":  # pragma: no cover

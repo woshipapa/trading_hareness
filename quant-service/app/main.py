@@ -3165,6 +3165,10 @@ async def peer_close_research_loop() -> None:
         settle_xiaojie=lambda day: settle_xiaojie_recent_sessions(day),
         daily_digest=lambda day: run_daily_research_digest(day, _teacher_review_dependencies()),
         record_stage=record_stage_with_receipt, safe_error=safe_error_detail,
+        # Decision 0021: the daily products the stage table holds but nothing starts on the peer.
+        call_longhu=(lambda request: shared_stock_api_call(request)) if longhu_vendor_configured() else None,
+        refresh_broad_etf_flow=lambda day: refresh_broad_etf_flow(db, day, run_database=run_database_blocking),
+        refresh_market_timing=lambda day: refresh_market_timing(db, day, run_database=run_database_blocking),
     ))
 
 
@@ -3177,12 +3181,21 @@ market_radar = MarketRadarRuntime(MarketRadarDependencies(
     run_database=lambda *args, **kwargs: run_database_blocking(*args, **kwargs), database=db,
     persist_timed_observations=lambda *args: persist_timed_observations(*args)))
 
+
+async def tdx_shadow_roster_total() -> int | None:
+    def read() -> int | None:
+        with db.transaction() as connection:
+            return minute_cross_section.latest_main_total(connection)
+
+    return await run_tdx_shadow_blocking(read, timeout_seconds=10)
+
 tdx_shadow_runtime = TdxShadowSnapshotRuntime(TdxShadowSnapshotDependencies(
     fetch_snapshot=fetch_tdx_all_a_snapshot,
     run_database=run_tdx_shadow_blocking,
     database=db,
     recent_reference=minute_cross_section.recent,
     storage_allowed=tdx_shadow_storage_allowed,
+    roster_total=tdx_shadow_roster_total,
 ))
 
 auction_pool_runtime = AuctionPoolCaptureRuntime(AuctionPoolCaptureDependencies(

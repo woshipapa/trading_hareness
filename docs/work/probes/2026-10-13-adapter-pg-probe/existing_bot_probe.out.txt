@@ -1,0 +1,15 @@
+ok   owned group listed, no bot: ["7680753363566234587 擒龙群 owned usable=false bot=null"]
+ok   members synced before any bot: [["q1","2026-09-01"]]
+ok   bots already in the group: [{"bot_id":"41","name":"dragon","key_words":[],"usable":true,"reason":null}]
+ok   take the existing bot: [["wh_… 擒龙群 dashboard usable=true bot=dragon"],"owned=true","managed=false"]
+ok   nothing was posted in the group: 0
+ok   stored row: [{"chat_name":"擒龙群","keyword":"","websocket_chat_id":"7680753363566234587","bot_id":"41","managed":false,"encrypted":true}]
+ok   the list shows one row for the group: ["wh_… 擒龙群 dashboard usable=true bot=dragon"]
+ok   the same members under the new row: [["q1","已到期"]]
+ok   daily switch can be turned on now: true
+ok   reminder goes out through the bot, no keyword in front: ["<at user_id=\"q1\">丙</at> 会员已到期，请联系群主续费"]
+ok   after a restart the target and its address are still there: [{"loaded":1,"unreadable":0},"重启后"]
+ok   taking a bot for a group that is a target already is refused: "这个群已经是转发目标，已有可用的机器人"
+ok   removing the target leaves the bot alone: [{"removed":true,"bot_removed":null},0]
+ok   the group is back to managed-only, members kept: [["7680753363566234587 擒龙群 owned usable=false bot=null"],1]
+steps=14 failed=0

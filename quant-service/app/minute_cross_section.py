@@ -235,6 +235,18 @@ def latest(connection: Any, day: date | None = None) -> tuple[datetime, dict[str
         (CAPABILITY, PROVIDER_KEY, start, end)).fetchone())
 
 
+def latest_main_total(connection: Any) -> int | None:
+    row = connection.execute(
+        """SELECT (payload->'metadata'->>'total')::int AS total
+             FROM quant.raw_market_observations
+            WHERE capability=%s AND symbol IS NULL AND provider_key=%s
+              AND payload->'metadata'->>'total' IS NOT NULL
+            ORDER BY effective_at DESC LIMIT 1""",
+        (CAPABILITY, PROVIDER_KEY),
+    ).fetchone()
+    return int(row["total"]) if row else None
+
+
 def first_between(connection: Any, start: datetime, end: datetime) -> tuple[datetime, dict[str, Any]] | None:
     return _document(connection.execute(
         _DOCUMENT_SQL.format(where=" AND effective_at>=%s AND effective_at<%s", order="ASC"),
@@ -286,6 +298,6 @@ def latest_level1_items(observed_at: datetime, rows: Sequence[Mapping[str, Any]]
 
 __all__ = [
     "CAPABILITY", "LEGACY_CAPABILITY", "SCHEMA", "STORAGE_MODES", "build_document", "day_documents", "first_between",
-    "latest", "latest_async", "latest_level1_items", "persist_document", "recent", "remember", "rows_for", "rows_of",
+    "latest", "latest_async", "latest_level1_items", "latest_main_total", "persist_document", "recent", "remember", "rows_for", "rows_of",
     "storage_mode", "symbol_index",
 ]

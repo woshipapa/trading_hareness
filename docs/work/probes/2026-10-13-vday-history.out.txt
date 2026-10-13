@@ -1,0 +1,31 @@
+sessions 762; deep-low days (median stock's low <= -2%): 193; V days (and median low-to-close >= +2%): 43; one-sided (low-to-close < 1%): 94
+V days by year: {2023: 1, 2024: 18, 2025: 8, 2026: 16} | since 2026-07-01: 6 of 68 sessions
+
+V days since 2026-07-01 (median low, low-to-close, day, next day's median):
+  07-09  low -2.86%  low-to-close +3.18%  day -0.15%  up 46%  next open -0.14%  next close +1.17%
+  07-20  low -3.90%  low-to-close +2.14%  day -1.92%  up 33%  next open +0.00%  next close +0.53%
+  07-21  low -4.86%  low-to-close +5.33%  day +0.53%  up 55%  next open -0.65%  next close -1.27%
+  08-07  low -2.13%  low-to-close +2.50%  day +0.11%  up 51%  next open +0.00%  next close +1.34%
+  08-21  low -2.26%  low-to-close +2.19%  day -0.05%  up 46%  next open +0.00%  next close -1.20%
+  10-09  low -3.31%  low-to-close +4.22%  day +0.51%  up 58%  next open -0.08%  next close -1.67%
+
+[A] the day after, median stock (day means; all | since 2026-07)
+  after a V day                next open -0.19% (t -2.1, 43d) | -0.15% (t -1.4, 6d) ; next close -0.28% (t -0.7, 43d) | -0.19% (t -0.3, 6d)
+  after a one-sided down day   next open -0.00% (t -0.0, 93d) | +0.01% (t +0.1, 7d) ; next close +0.08% (t +0.4, 93d) | +0.08% (t +0.1, 7d)
+  after any other day          next open -0.05% (t -1.9, 625d) | -0.05% (t -0.7, 54d) ; next close -0.17% (t -2.7, 625d) | -0.02% (t -0.1, 54d)
+
+[B] on V days: the fifth with the worst prior 5-day return minus the best fifth (day means; all V days | since 2026-07)
+  own low to the close         +0.42% (t +1.0, 42d) | +2.52% (t +1.0, 6d)
+  the V day itself             -0.78% (t -1.6, 42d) | -0.14% (t -0.1, 6d)
+  close to next open           +0.28% (t +2.0, 42d) | +0.20% (t +0.7, 6d)
+  close to next close          -0.02% (t -0.0, 42d) | +0.47% (t +0.3, 6d)
+  next open to the open after  -0.07% (t -0.1, 41d) | +0.73% (t +0.5, 5d)
+[C] on V days: the fifth that fell deepest intraday minus the shallowest fifth
+  own low to the close         +0.87% (t +2.3, 42d) | +2.36% (t +1.2, 6d)
+  close to next open           -0.32% (t -2.6, 42d) | -0.25% (t -1.2, 6d)
+  close to next close          -0.44% (t -0.9, 42d) | +0.16% (t +0.1, 6d)
+  next open to the open after  -0.16% (t -0.3, 41d) | +0.71% (t +0.8, 5d)
+[D] on V days, absolute, by prior 5-day fifth (worst .. best): close to next close, day means
+  all V days:   -0.16%  -0.05%  +0.04%  +0.09%  -0.14%
+  since 2026-07: +0.08%  +0.20%  +0.22%  -0.09%  -0.39%
+[E] the same worst-minus-best spread of close to next close on all other days: +0.08% (t +1.8, 712d) | -0.01% (t -0.0, 60d)

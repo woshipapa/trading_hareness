@@ -349,7 +349,7 @@ function uploadErrorMessage(resource, error) {
 	return `${resource}失败${code}：${detail}`;
 }
 
-export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = null, config, canWrite = null, logger = console, now = Date.now }) {
+export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = null, config, canWrite = null, logger = console, now = Date.now, recordWebhookDelivery = null, recallDeliveries = null }) {
 	let running = false;
 	const sourceConcurrency = Math.max(1, Math.min(8, Number(config.sourceConcurrency) || 3));
 	let lastUnavailableLogAt = 0;
@@ -418,11 +418,20 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				: webhookMsgType === 'text' && msgType === 'interactive'
 					? { text: cardText(content) || '[interactive] 卡片未提供可转发文字内容。' }
 					: content;
-			await postViaWebhook(webhookUrl, webhookMsgType, webhookContentWithKeyword(webhookMsgType, webhookContent, webhookKeyword));
+			const finalWebhookContent = webhookContentWithKeyword(webhookMsgType, webhookContent, webhookKeyword);
+			await postViaWebhook(webhookUrl, webhookMsgType, finalWebhookContent);
+			if (recordWebhookDelivery) {
+				// Delivery recording is a side channel; failure must not turn a sent webhook into a retry.
+				void (async () => recordWebhookDelivery({ messageId, targetChatId, msgType: webhookMsgType, content: finalWebhookContent }))().catch((error) => logger.warn(`webhook 送达记录失败：${error instanceof Error ? error.message : String(error)}`));
+			}
 			// No uuid/idempotency on this path (webhooks take no such field): a
 			// retried send after a timed-out response can duplicate. Acceptable
 			// for a destination that opted out of edit/recall sync for quota.
 			return `${WEBHOOK_SENT_PREFIX}${targetChatId}:${Date.now()}`;
+		}
+		// A target known only by its webhook has no chat id the message API accepts.
+		if (/^wh_/.test(String(targetChatId))) {
+			throw new Error(webhookUrl ? `目标群只配置了 webhook，不能发送 ${msgType} 类型的消息` : '目标群的 webhook 已被删除，请在看板里重新配置或从源群里去掉它');
 		}
 		const result = await larkClient.im.v1.message.create({
 			params: { receive_id_type: 'chat_id' },
@@ -1003,6 +1012,10 @@ export function createGroupRelay({ larkClient, sourceApi, ledger, workbench = nu
 				if (message.deleted) {
 					if (existing && !existing.source_deleted) {
 						const changed = await ledger.updateRelaySourceMessage(message.message_id, { message, sourceUpdateTime, sourceDeleted: true });
+						if (recallDeliveries) {
+							// Recall synchronization is a side channel; failure must not break the poll loop.
+							void (async () => recallDeliveries(message.message_id))().catch((error) => logger.warn(`目标群撤回同步失败：${error instanceof Error ? error.message : String(error)}`));
+						}
 						await workbench?.syncSourceChange(changed, { deleted: true });
 					} else if (!existing) await ledger.skipRelayMessage(record);
 					continue;

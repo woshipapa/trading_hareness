@@ -29,16 +29,18 @@ TDX_ROW = {
 FUYAO_ROW = {
     "symbol": "000001.SZ", "price": 11.73, "pct_change": 1.2079,
     "volume": 10000, "turnover": 117300.0,
+    "snapshot_metadata": {"age_seconds": 20.0},
 }
 
 
 def evidence():
-    return CapabilityEvidence(rows=[TDX_ROW], warnings=("tdx_host=test",))
+    return CapabilityEvidence(rows=[TDX_ROW] * 5301, warnings=("tdx_host=test",),
+                              available_at_max=NOW + timedelta(seconds=3))
 
 
 class TdxShadowCaptureTests(unittest.TestCase):
     def dependencies(self, *, fetch=None, session=True, recent=(NOW - timedelta(seconds=2), [FUYAO_ROW]),
-                     acquire=None, run_database=None, persisted=None, storage=True):
+                     acquire=None, run_database=None, persisted=None, storage=True, roster_total=None):
         calls = []
 
         async def fetch_snapshot():
@@ -69,6 +71,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
             fetch_snapshot=fetch_snapshot, session_gate=session_gate, run_database=run_db,
             database=object(), recent_reference=lambda _now: recent,
             acquire_slot=acquire_slot, persist_capture=persist_capture, storage_allowed=storage_allowed,
+            roster_total=roster_total or (lambda: asyncio.sleep(0, result=5580)),
         )
         return TdxShadowSnapshotRuntime(deps), calls
 
@@ -86,6 +89,40 @@ class TdxShadowCaptureTests(unittest.TestCase):
         self.assertEqual(persisted[0][4]["status"], "compared")
         self.assertEqual(persisted[0][4]["provider_key"], AGREEMENT_PROVIDER)
         self.assertEqual(persisted[0][4]["capability"], AGREEMENT_CAPABILITY)
+        self.assertTrue(persisted[0][3]["completeness"]["complete"])
+        self.assertTrue(persisted[0][4]["completeness"]["complete"])
+        self.assertEqual(persisted[0][4]["shadow_data_at"], (NOW + timedelta(seconds=3)).isoformat())
+
+    def test_empty_snapshot_is_stored_as_incomplete(self):
+        persisted = []
+
+        async def empty():
+            return CapabilityEvidence(rows=[], warnings=("no_trade_rows=5579",), available_at_max=NOW)
+
+        runtime, _ = self.dependencies(fetch=empty, persisted=persisted)
+        result = asyncio.run(runtime.capture(NOW))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(persisted[0][2], [])
+        self.assertFalse(persisted[0][3]["completeness"]["complete"])
+        self.assertEqual(persisted[0][4]["status"], "incomplete")
+        self.assertIsNone(persisted[0][4]["comparison"])
+
+    def test_roster_is_read_once_per_trade_date_and_none_is_not_remembered(self):
+        totals = iter((None, 5580))
+        calls = []
+
+        async def roster_total():
+            calls.append("read")
+            return next(totals)
+
+        runtime, _ = self.dependencies(roster_total=roster_total)
+        first = asyncio.run(runtime.capture(NOW))
+        second = asyncio.run(runtime.capture(NOW + timedelta(minutes=1)))
+        third = asyncio.run(runtime.capture(NOW + timedelta(minutes=2)))
+
+        self.assertEqual([first["status"], second["status"], third["status"]], ["completed"] * 3)
+        self.assertEqual(calls, ["read", "read"])
 
     def test_outside_session_does_not_read_or_write(self):
         runtime, calls = self.dependencies(session=False, fetch=lambda: (_ for _ in ()).throw(AssertionError()))
@@ -176,6 +213,7 @@ class TdxShadowCaptureTests(unittest.TestCase):
             fetch_snapshot=lambda: asyncio.sleep(0, result=evidence()), run_database=run_tdx_shadow_blocking,
             database=OpenCalendar(), recent_reference=lambda _now: None, storage_allowed=allowed,
             acquire_slot=no_wait, persist_capture=persist_capture,
+            roster_total=lambda: asyncio.sleep(0, result=5580),
         ))
         in_session = datetime(2026, 10, 12, 2, 0, tzinfo=timezone.utc)  # Monday 10:00 in Shanghai
         result = asyncio.run(runtime.capture(in_session))
@@ -259,6 +297,108 @@ class TdxShadowCaptureTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "comparison down"):
                 persist_shadow_capture(object(), NOW, [], {}, {"status": "compared"})
 
+    def test_main_roster_query_reads_payload_without_normalized(self):
+        from app.minute_cross_section import latest_main_total
+
+        calls = []
+
+        class Connection:
+            def execute(self, sql, params):
+                calls.append((sql, params))
+                return SimpleNamespace(fetchone=lambda: {"total": 5580})
+
+        self.assertEqual(latest_main_total(Connection()), 5580)
+        self.assertNotIn("normalized", calls[0][0])
+        self.assertIn("payload", calls[0][0])
+
+    def test_data_gap_uses_shadow_available_time_and_reference_cache_age(self):
+        from app.all_a_snapshot_sources import project_tdx_snapshot_rows
+        from app.tdx_shadow_snapshot_runtime import _comparison_row
+
+        observed = datetime(2026, 10, 12, 2, 0, tzinfo=timezone.utc)
+        reference_at = observed - timedelta(seconds=18)
+        result = _comparison_row(
+            observed, project_tdx_snapshot_rows([TDX_ROW], observed), (reference_at, [FUYAO_ROW]),
+            {"complete": True}, observed + timedelta(seconds=3),
+        )
+
+        self.assertEqual(result["data_seconds_apart"], 41.0)
+        self.assertEqual(result["reference_data_at"], (observed - timedelta(seconds=38)).isoformat())
+        self.assertTrue(result["same_continuous_segment"])
+        self.assertEqual(result["comparison"]["seconds_apart"], 18.0)
+
+    def test_reference_without_age_stores_capture_comparison_without_judging_it(self):
+        persisted = []
+        reference = (NOW - timedelta(seconds=2), [{**FUYAO_ROW, "snapshot_metadata": {"age_seconds": None}}])
+        runtime, _ = self.dependencies(recent=reference, persisted=persisted)
+
+        result = asyncio.run(runtime.capture(NOW))
+
+        comparison = persisted[0][4]
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(persisted[0][2][0]["price_source"], "tdx_public_all_a_snapshot")
+        self.assertEqual(comparison["status"], "compared")
+        self.assertIsNone(comparison["reference_data_at"])
+        self.assertIsNone(comparison["data_seconds_apart"])
+        self.assertFalse(comparison["same_continuous_segment"])
+        self.assertEqual(comparison["comparison"]["seconds_apart"], 2.0)
+
+        docs = [{"effective_at": NOW, "rows": len(persisted[0][2])}]
+        comparisons = [{"effective_at": NOW, "normalized": comparison}]
+
+        class Connection:
+            def execute(self, sql, params=()):
+                if "a_share_minute_cross_section_shadow" in sql:
+                    return SimpleNamespace(fetchall=lambda: docs)
+                return SimpleNamespace(fetchall=lambda: comparisons)
+
+        class Database:
+            def transaction(self):
+                class Tx:
+                    def __enter__(self):
+                        return Connection()
+
+                    def __exit__(self, *_args):
+                        return False
+                return Tx()
+
+        summary = day_summary(Database(), NOW.date())
+        self.assertEqual(summary["judged_minutes"], 0)
+        self.assertEqual(summary["rows_without_data_times"], 1)
+
+        incomplete_persisted = []
+
+        async def empty_snapshot():
+            return CapabilityEvidence(rows=[], warnings=("no_trade_rows=5579",), available_at_max=NOW)
+
+        incomplete_runtime, _ = self.dependencies(
+            fetch=empty_snapshot, recent=reference, persisted=incomplete_persisted,
+        )
+        asyncio.run(incomplete_runtime.capture(NOW))
+        self.assertEqual(incomplete_persisted[0][4]["status"], "incomplete")
+        self.assertIsNone(incomplete_persisted[0][4]["comparison"])
+
+    def test_data_times_across_open_or_before_continuous_session_are_not_same_segment(self):
+        from app.all_a_snapshot_sources import project_tdx_snapshot_rows
+        from app.tdx_shadow_snapshot_runtime import _comparison_row
+
+        reference = datetime(2026, 10, 12, 1, 29, 50, tzinfo=timezone.utc)
+        shadow = datetime(2026, 10, 12, 1, 30, 3, tzinfo=timezone.utc)
+        result = _comparison_row(
+            shadow, project_tdx_snapshot_rows([TDX_ROW], shadow),
+            (reference, [{**FUYAO_ROW, "snapshot_metadata": {"age_seconds": 0}}]),
+            {"complete": True}, shadow,
+        )
+        self.assertFalse(result["same_continuous_segment"])
+
+        before_open = datetime(2026, 10, 12, 1, 29, 0, tzinfo=timezone.utc)
+        result = _comparison_row(
+            before_open, project_tdx_snapshot_rows([TDX_ROW], before_open),
+            (before_open - timedelta(seconds=2), [{**FUYAO_ROW, "snapshot_metadata": {"age_seconds": 0}}]),
+            {"complete": True}, before_open,
+        )
+        self.assertFalse(result["same_continuous_segment"])
+
 
 class TdxShadowSummaryTests(unittest.TestCase):
     def test_indicator_health_document_check_does_not_read_shadow_documents(self):
@@ -277,9 +417,9 @@ class TdxShadowSummaryTests(unittest.TestCase):
         self.assertTrue(all("fuyao_ths" in sql and "a_share_minute_cross_section" in sql for sql, _ in calls))
 
     def test_summary_reads_only_shadow_streams_and_aggregates_comparisons(self):
-        docs = [{"effective_at": NOW, "normalized": {"rows": 2}},
-                {"effective_at": NOW + timedelta(minutes=1), "normalized": {"rows": 2}},
-                {"effective_at": NOW + timedelta(minutes=2), "normalized": {"rows": 2}}]
+        docs = [{"effective_at": NOW, "rows": 2},
+                {"effective_at": NOW + timedelta(minutes=1), "rows": 4},
+                {"effective_at": NOW + timedelta(minutes=2), "rows": 3}]
         comparisons = [{
             "effective_at": NOW, "normalized": {
                 "status": "compared", "comparison": {
@@ -289,14 +429,21 @@ class TdxShadowSummaryTests(unittest.TestCase):
                     "turnover": {"median_ratio": 0.99, "within_1_pct": 0.7},
                     "seconds_apart": 2.0,
                 },
+                "data_seconds_apart": 10.0, "same_continuous_segment": True,
             },
         }, {
             "effective_at": NOW + timedelta(minutes=1),
             "normalized": {"status": "no_reference"},
         }]
 
+        connections = []
+
         class Connection:
+            def __init__(self):
+                self.sql = []
+
             def execute(self, sql, params=()):
+                self.sql.append(sql)
                 if "a_share_minute_cross_section_shadow" in sql:
                     return SimpleNamespace(fetchall=lambda: docs)
                 return SimpleNamespace(fetchall=lambda: comparisons)
@@ -305,7 +452,9 @@ class TdxShadowSummaryTests(unittest.TestCase):
             def transaction(self):
                 class Tx:
                     def __enter__(self):
-                        return Connection()
+                        self.connection = Connection()
+                        connections.append(self.connection)
+                        return self.connection
 
                     def __exit__(self, *_args):
                         return False
@@ -313,9 +462,23 @@ class TdxShadowSummaryTests(unittest.TestCase):
 
         result = day_summary(Database(), date(2026, 10, 12))
         self.assertEqual(result["stored_minutes"], 3)
+        self.assertEqual(result["expected_minutes"], 255)
+        self.assertEqual(result["minutes_without_document"], 252)
+        self.assertEqual(result["lowest_rows_per_document"], 2)
+        self.assertEqual(result["median_rows_per_document"], 3.0)
         self.assertEqual(result["documents_without_comparison"], 1)
         self.assertEqual(result["minutes_compared"], 1)
         self.assertEqual(result["no_reference_minutes"], 1)
+        self.assertEqual(result["status_counts"], {"compared": 1, "incomplete": 0, "no_reference": 1})
+        self.assertEqual(result["judged_minutes"], 1)
+        self.assertEqual(result["judged_minutes_agree"], 1)
+        self.assertEqual(result["judged_agreement_share"], 1.0)
+        self.assertEqual((result["provider_key"], result["capability"]), ("tdx_public", "quote.all_a_snapshot"))
+        self.assertEqual(result["not_judged_minutes"], 1)
+        self.assertEqual(result["rows_without_data_times"], 1)
+        self.assertFalse(result["session_passes"])
+        self.assertEqual(result["gap_group_medians"]["10_15"]["minutes"], 1)
+        self.assertNotIn("normalized", connections[0].sql[1])
         self.assertEqual(result["largest_price_gap"]["symbol"], "000001.SZ")
         self.assertEqual(result["worst_price_within_one_tick"], 1.0)
         self.assertEqual(result["median_volume_ratio"], 1.01)

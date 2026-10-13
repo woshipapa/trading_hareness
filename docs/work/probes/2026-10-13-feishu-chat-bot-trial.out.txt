@@ -1,0 +1,60 @@
+# 飞书群自定义机器人：网页端接口的查证、手工试验和发布后的验收，2026-10-13（上海时间）
+# 全程用 edge 上中继自己的 LarkAgentX 会话。webhook 地址和签名密钥在所有输出里都已隐藏。
+
+## 1 LarkAgentX 的命令表（/opt/larkagentx/source/larkx/proto/cmd_map.json，2202 条）里与机器人有关的命令
+38 bots.PullBotsRequest / 2038 contact.v1.GetBotsRequest / 5042 chatters.PutBotUserConfigRequest /
+2555 im.v1.GetAutoMuteChatBotConfigRequest / 7006、40141 PullBotMenu —— 全是读取或个人设置，没有创建群机器人的命令。
+lark_all_pb2 里另有 bots.PullChatBotsRequest{chatId} 和 bots.PullChatCandidateBotsRequest{chatId} 两个消息定义，但命令表没有它们的编号。
+
+## 2 飞书网页端怎么加自定义机器人（静态分析公开 CDN 上的网页端脚本，文件只下载不执行）
+入口页（用中继会话 GET https://open-dev.feishu.cn/next/messenger，只取脚本地址）引用
+  https://sf1-scmcdn-cn.feishucdn.com/obj/feishu-static/ee/web-client-next/p/static/js/index.64f5072c.js
+其中内嵌各功能模块的清单；openplatform 模块有 GroupBotModal、BotCardModal、BotAvatarEditModal 等 8 个扩展。
+  /contents/openplatform/GroupBotModal/cc862389.js 里的接口（主机取“OPEN”域名，即 open.feishu.cn）：
+    POST /open-apis/chatbot/api/CreateWebhookBot      {name, avatar_key, avatar_type, description, bot_type_id, chat_id, user_id, i18n}
+    POST /open-apis/chatbot/api/GetWebhookBotInfo     {bot_id, i18n}
+    POST /open-apis/chatbot/api/UpdateWebhookBotInfo  {avatar_key, avatar_type, name, description, enable, check_mender, signature_status, allow_ips, key_words, bot_id, i18n}
+    POST /open-apis/chatbot/api/DeleteBotResource     {chat_id, bot_id, i18n}
+    另有 GetSignature、fetch_bot_add_conf、fetch_bot_conf_resource、SetBotAddConf、UpdateAppBotInfo
+  请求助手 te()：fetch(url, {credentials: "include"})，没有另加令牌头；发出前把键名从驼峰转成下划线。
+  index.64f5072c.js 的命令枚举里：PULL_CHAT_BOTS:13100，PULL_CHAT_CANDIDATE_BOTS:13101。
+
+## 3 只读探测（edge，中继会话）
+PullChatBots(分析师发送汇总群) -> http 200，packet status 0；botCollection type 1（自定义机器人）有“汇总bot”，type 2（应用机器人）有“papa-bot”；maxBotNum 15
+PullChatCandidateBots -> functionalBots 1 个：id 6511584912533250048，“自定义机器人 / Custom Bot”，默认头像 key 587900163a9b2394c18c
+GetWebhookBotInfo(汇总bot) -> http 200 code 0；data 的键：allow_ips, avatar_key, avatar_type, bot_id, bot_inviter_display_name, bot_type, check_mender, description,
+  direction, enable, inviter_id, inviter_name, isInvitorTenant, key_words, name, no_permission, show_check_mender, signature, signature_status, type_name, version, webhook
+  key_words ["汇总"]，signature_status false，allow_ips []，enable true，webhook 是 https://open.feishu.cn/open-apis/bot/v2/hook/****
+请求头：origin 用 https://open-dev.feishu.cn、不带 origin、content-type 用 application/json 三种都是 code 0；不带 cookie -> http 400 code 99991641 "session is invalid"
+
+## 4 手工试验（脚本 2026-10-13-feishu-chat-bot-trial.py，运维通知群 7694513051067796759，关键词“转发试验”）
+bots before {'7693945756772355298': ('运维信息通知', 1), '7669739687912721643': ('papa-bot', 2)}
+CreateWebhookBot: http 200 code 0 -> bot_id 7695935537441721312
+after create: key_words [], allow_ips [], signature_status false, enable true, type_name custom, webhook <hidden, 81 chars>
+UpdateWebhookBotInfo: http 200 code 0
+after update: key_words ["转发试验"], webhook <hidden, 81 chars>；地址形如飞书自定义机器人地址：True
+send without keyword: http 200 code 19024 msg 'Key Words Not Found'
+send with keyword: http 200 code 0 msg 'success'
+DeleteBotResource: http 200 code 0
+bots after {'7693945756772355298': ('运维信息通知', 1), '7669739687912721643': ('papa-bot', 2)} | trial bot still listed: False
+
+## 5 发布后的验收（edge 中继 hotfix-20261013T070041Z-49b44b1da5e4-5527，经 127.0.0.1:18300 调 adapter，15:02）
+POST /api/group-relay/targets {name: 运维通知群, websocket_chat_id: 7694513051067796759, keyword: 转发验收}   （不给 webhook 地址）
+  -> {"target": {"chat_id": "wh_3df2045fcbb721912468c2e7", "name": "运维通知群", "keyword": "转发验收", "origin": "dashboard", "usable": true, "managed": true, "websocket_chat_id": "7694513051067796759", "verified_at": "2026-10-13T07:02:53.889Z", "created_at": "2026-10-13T07:02:53.895Z", "bot_created": true}}
+  响应里含 hook/ 字样: False
+同一请求再发一次 -> 同一个 chat_id wh_3df2045fcbb721912468c2e7，bot_created false（沿用已有的转发机器人）
+GET /api/group-relay/targets -> 5 个，其中看板来源 1 个：('运维通知群', '转发验收', 'dashboard', managed True, usable True)；响应里含 hook/ 字样: False
+DELETE /api/group-relay/targets/wh_3df2045fcbb721912468c2e7 -> {"status": "removed", "bot_removed": true}
+GET /api/group-relay/targets -> 4 个，来源全是 env
+PullChatBots(运维通知群) -> [('运维信息通知', 1), ('papa-bot', 2)]   （转发机器人已不在）
+bridge 日志（journalctl -u larkagentx-group-relay.service）：
+  15:02:53 群 7694513051067796759 的转发机器人已创建 bot_id=7695975124192971999
+  15:02:54 群 7694513051067796759 的转发机器人已存在 bot_id=7695975124192971999
+  15:02:56 群 7694513051067796759 的转发机器人 bot_id=7695975124192971999：removed
+adapter 和 bridge 日志里含 bot/v2/hook/ 地址的行数：0 和 0
+在 edge 上跑完整的 bridge 测试：bash feishu-relay/scripts/edge/test-bridge-on-edge.sh -> Ran 174 tests, OK（无跳过）
+bash scripts/release-sync-status.sh --skip-owner --edge-source-sha 49b44b1d   （退出码 0）
+edge  adapter git_sha              49b44b1da5e443abe9d52806aff26dd8ad185974                          PASS    49b44b1da5e4
+edge  adapter release              hotfix-hotfix-20261013T070041Z-49b44b1da5e4-5527                  PASS    hotfix source-overlay
+edge  bridge release               hotfix-20261013T070041Z-49b44b1da5e4-5527                         PASS    source-overlay from 49b44b1da5e4
+ALL CHECKS PASSED

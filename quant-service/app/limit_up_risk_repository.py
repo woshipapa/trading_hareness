@@ -33,6 +33,11 @@ def _observations(connection: Any, provider: str, capability: str, day: date) ->
     return result
 
 
+def live_lists_stored(connection: Any, day: date) -> bool:
+    """Whether the evening capture of the day's live lists is stored (an empty list has no document)."""
+    return any(_observations(connection, "longhuvip", "limit_performance_live", day).values())
+
+
 def read_lists(connection: Any, day: date) -> tuple[dict[str, list[list[Any]]], str]:
     history = _observations(connection, "longhuvip_history", "limit_performance_history", day)
     if any(history.get(key) for key in LIST_KEYS):
