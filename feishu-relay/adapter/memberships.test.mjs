@@ -27,6 +27,7 @@ function fakeLedger({ members = [], settings = null } = {}) {
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET display_name')) { const row = rows.find((item) => item.user_id === params[1]); Object.assign(row, { display_name: params[2], left_at: null, updated_at: params[3] }); return { rows: [] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET left_at')) { const row = rows.find((item) => item.user_id === params[1]); Object.assign(row, { left_at: params[2], updated_at: params[2] }); return { rows: [] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET started_on')) { const row = rows.find((item) => item.user_id === params[1]); if (!row) return { rows: [] }; Object.assign(row, { started_on: params[2], term_months: params[3], expires_on: params[4], note: params[5], reminded_on: null, remind_claimed_at: null, updated_at: params[6] }); return { rows: [clone(row)] }; }
+			if (sql.startsWith('WITH updated_member AS')) { const row = rows.find((item) => item.user_id === params[1]); if (!row) return { rows: [] }; Object.assign(row, { started_on: params[2], term_months: params[3], expires_on: params[4], note: params[5], reminded_on: null, remind_claimed_at: null, updated_at: params[6] }); config.exempt_user_ids = JSON.parse(params[7]); return { rows: [clone(row)] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_memberships SET remind_claimed_at=$3')) {
 				const [chatId, second, third, fourth] = params;
 				const manual = sql.includes('user_id=$2');
@@ -48,7 +49,7 @@ function setup(options = {}) {
 	const ledger = fakeLedger(options);
 	const sent = [];
 	const members = options.bridgeMembers ?? [{ user_id: 'u1', name: '张<三"', joined_at: Math.floor(date('2026-01-31').getTime() / 1000) }];
-	const bridgePost = async () => ({ status: 'ok', chat_id: WS, members });
+	const bridgePost = options.bridgePost ?? (async () => ({ status: 'ok', chat_id: WS, members }));
 	const targetRegistry = { get: async () => ({ chat_id: CHAT, websocket_chat_id: WS, owned: true }), list: async () => [{ chat_id: CHAT }] };
 	const webhookTargets = { sendText: async (chatId, text) => { sent.push({ chatId, text }); if (options.sendError) throw new Error(options.sendError); } };
 	let current = options.now ?? date('2026-03-01');
@@ -72,11 +73,26 @@ test('sync registers a new member on the Shanghai join date with the default ter
 	assert.equal(response.members[0].user_id, 'u1');
 });
 
+test('sync rejects malformed bridge answers before changing stored membership rows', async () => {
+	const { feature, ledger } = setup({ members: [{ user_id: 'u1', display_name: 'A', started_on: '2026-01-01', term_months: 1, expires_on: '2026-02-01', reminded_on: null, remind_claimed_at: null, left_at: null }] });
+	const malformed = createMemberships({ ledger, bridgePost: async () => ({ status: 'error' }), targetRegistry: { get: async () => ({ websocket_chat_id: WS, owned: true }) }, webhookTargets: { sendText: async () => {} }, now: () => date('2026-03-01') });
+	await assert.rejects(() => malformed.sync(CHAT), /成员列表响应格式无效/);
+	assert.equal(ledger.rows[0].left_at, null);
+});
+
 test('editing a member recomputes expiry and clears its reminder', async () => {
 	const { feature, ledger } = setup({ members: [{ user_id: 'u1', display_name: 'A', started_on: '2026-01-01', term_months: 1, expires_on: '2026-02-01', reminded_on: '2026-02-02', remind_claimed_at: null, left_at: null }] });
 	const updated = await feature.updateMember(CHAT, 'u1', { started_on: '2026-01-31', term_months: 1, note: '续费' });
 	assert.equal(updated.expires_on, '2026-02-28');
 	assert.equal(updated.reminded_on, null);
+});
+
+test('editing a member can atomically update its exemption setting', async () => {
+	const { feature, ledger } = setup({ members: [{ user_id: 'u1', display_name: 'A', started_on: '2026-01-01', term_months: 1, expires_on: '2026-02-01', reminded_on: null, remind_claimed_at: null, left_at: null }] });
+	await feature.updateMember(CHAT, 'u1', { started_on: '2026-01-01', term_months: 2, note: null, exempt: true });
+	assert.deepEqual(ledger.config.exempt_user_ids, ['u1']);
+	assert.equal(ledger.rows[0].term_months, 2);
+	await assert.rejects(() => feature.updateMember(CHAT, 'u1', { started_on: 'bad', term_months: 0, note: null, exempt: 'yes' }), /日期必须是/);
 });
 
 test('review only claims expired, present, unreminded, non-exempt members and escapes names', async () => {
@@ -96,6 +112,7 @@ test('review only claims expired, present, unreminded, non-exempt members and es
 });
 
 test('two concurrent reviews claim a member once', async () => {
+	// The fake ledger enforces the claim predicate; the real check is done against the live database after release.
 	const { feature, sent } = setup({ members: [{ user_id: 'u1', display_name: 'A', started_on: '2026-01-01', term_months: 1, expires_on: '2026-02-01', reminded_on: null, remind_claimed_at: null, left_at: null }] });
 	await Promise.all([feature.review(CHAT), feature.review(CHAT)]);
 	assert.equal(sent.length, 1);
@@ -106,7 +123,7 @@ test('failed batches are retried, successful batches are not', async () => {
 	await setupResult.feature.review(CHAT);
 	assert.equal(setupResult.sent.length, 1);
 	setupResult.setNow('2026-03-02');
-	setupResult.feature = createMemberships({ ledger: setupResult.ledger, bridgePost: async () => ({ members: [{ user_id: 'u1', name: 'A', joined_at: 1 }] }), targetRegistry: { get: async () => ({ websocket_chat_id: WS, owned: true }), list: async () => [{ chat_id: CHAT }] }, webhookTargets: { sendText: async () => { setupResult.sent.push('retry'); } }, now: () => date('2026-03-02') });
+	setupResult.feature = createMemberships({ ledger: setupResult.ledger, bridgePost: async () => ({ status: 'ok', members: [{ user_id: 'u1', name: 'A', joined_at: 1 }] }), targetRegistry: { get: async () => ({ websocket_chat_id: WS, owned: true }), list: async () => [{ chat_id: CHAT }] }, webhookTargets: { sendText: async () => { setupResult.sent.push('retry'); } }, now: () => date('2026-03-02') });
 	await setupResult.feature.review(CHAT);
 	assert.equal(setupResult.sent.length, 2);
 });
@@ -131,6 +148,20 @@ test('disabled targets are not reviewed and scheduler observes Shanghai time and
 	await after.feature.tick();
 	assert.equal(after.sent.length, 1);
 	assert.equal(after.ledger.config.last_review_on, '2026-03-01');
+});
+
+test('scheduler throttles a failed target review for one hour without losing the day', async () => {
+	let calls = 0;
+	const state = setup({
+		now: date('2026-03-01T01:00:00Z'),
+		bridgePost: async () => { calls += 1; if (calls === 1) throw new Error('bridge down'); return { status: 'ok', members: [] }; },
+	});
+	await state.feature.tick();
+	await state.feature.tick();
+	assert.equal(calls, 1);
+	state.setNow('2026-03-01T02:00:00Z');
+	await state.feature.tick();
+	assert.equal(calls, 2);
 });
 
 test('manual remind refuses an active, departed, or freshly claimed member', async () => {

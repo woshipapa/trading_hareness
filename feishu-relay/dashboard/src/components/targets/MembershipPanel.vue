@@ -18,7 +18,6 @@ const editError = ref('');
 const editing = ref<MembershipRow | null>(null);
 const editForm = reactive({ started_on: '', term_months: 1, note: '', exempt: false });
 
-const targetName = computed(() => memberships.target.value?.name || memberships.target.value?.chat_id || '目标群');
 const ready = computed(() => Boolean(memberships.target.value) && memberships.eligible.value);
 
 function copySettings() {
@@ -180,7 +179,7 @@ async function remind(row: MembershipRow) {
     </el-form>
     <template #footer>
       <el-button @click="editDialog = false">取消</el-button>
-      <el-button type="primary" :loading="action === 'save-member' || action === 'save-exempt'" @click="saveEdit">保存</el-button>
+      <el-button type="primary" :loading="action === 'save-member'" @click="saveEdit">保存</el-button>
     </template>
   </el-dialog>
 </template>

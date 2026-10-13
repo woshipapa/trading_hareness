@@ -33,18 +33,15 @@ describe('useMemberships', () => {
   });
 
   it('runs sync, saves settings, edits exemption, and previews through the typed endpoints', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response({ members: [member()], today: '2026-03-01' }))
-      .mockResolvedValueOnce(response({ settings }))
-      .mockResolvedValueOnce(response({ members: [member()], today: '2026-03-01' }))
-      .mockResolvedValueOnce(response({ members: [member({ display_name: '更新后' })], today: '2026-03-01' }))
-      .mockResolvedValueOnce(response({ settings: { ...settings, default_term_months: 3 } }))
-      .mockResolvedValueOnce(response({ settings: { ...settings, default_term_months: 3 } }))
-      .mockResolvedValueOnce(response({ member: member({ display_name: '更新后' }) }))
-      .mockResolvedValueOnce(response({ settings: { ...settings, default_term_months: 3, exempt_user_ids: ['u1'] } }))
-      .mockResolvedValueOnce(response({ members: [member({ display_name: '更新后' })], today: '2026-03-01' }))
-      .mockResolvedValueOnce(response({ settings: { ...settings, exempt_user_ids: ['u1'] } }))
-      .mockResolvedValueOnce(response({ members: [member()], dry_run: true }));
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/memberships/sync')) return response({ members: [member()], today: '2026-03-01' });
+      if (url.endsWith('/membership-settings') && (init?.method ?? 'GET') === 'GET') return response({ settings });
+      if (url.endsWith('/membership-settings') && init?.method === 'PUT') return response({ settings: { ...settings, default_term_months: 3, exempt_user_ids: ['u1'] } });
+      if (url.endsWith('/memberships/review')) return response({ members: [member()], dry_run: true });
+      if (url.endsWith('/memberships/u1') && init?.method === 'PUT') return response({ member: member({ display_name: '更新后' }) });
+      if (url.endsWith('/memberships') && (init?.method ?? 'GET') === 'GET') return response({ members: [member({ display_name: '更新后' })], today: '2026-03-01' });
+      return response({ members: [member()], today: '2026-03-01' });
+    });
     vi.stubGlobal('fetch', fetchMock);
     const selected = ref<TargetRegistryRow | null>(target());
     const memberships = useMemberships(selected);
@@ -70,6 +67,23 @@ describe('useMemberships', () => {
     expect(memberships.error.value).toBe('群主权限不足');
     expect(memberships.settings.value).toEqual(settings);
     expect(memberships.members.value).toHaveLength(1);
+  });
+
+  it('reloads stored member data after a refused edit while preserving the server message', async () => {
+    const serverMember = member({ display_name: '服务器版本' });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ members: [member()], today: '2026-03-01' }))
+      .mockResolvedValueOnce(response({ settings }))
+      .mockResolvedValueOnce(response({ message: '会员已被其他人修改' }, 400))
+      .mockResolvedValueOnce(response({ members: [serverMember], today: '2026-03-01' }))
+      .mockResolvedValueOnce(response({ settings }));
+    vi.stubGlobal('fetch', fetchMock);
+    const selected = ref<TargetRegistryRow | null>(target());
+    const memberships = useMemberships(selected);
+    await vi.waitFor(() => expect(memberships.loading.value).toBe(false));
+    expect(await memberships.saveMember('u1', { started_on: '2026-01-01', term_months: 2, note: null, exempt: false })).toBe(false);
+    expect(memberships.error.value).toBe('会员已被其他人修改');
+    expect(memberships.members.value[0]?.display_name).toBe('服务器版本');
   });
 
   it('clears the panel state for an unowned or non-numeric target', async () => {

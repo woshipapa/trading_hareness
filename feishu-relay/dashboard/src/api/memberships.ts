@@ -39,6 +39,6 @@ export const membershipsApi = {
   sync: (chatId: string) => postJson<MembershipResponse>(path(chatId, '/sync'), {}),
   review: (chatId: string, dryRun: boolean) => postJson<MembershipResponse & { dry_run: boolean }>(path(chatId, '/review'), { dry_run: dryRun }),
   updateSettings: (chatId: string, body: { enabled: boolean; default_term_months: number; remind_text: string; exempt_user_ids: string[] }) => putJson<SettingsResponse>(settingsPath(chatId), body),
-  updateMember: (chatId: string, userId: string, body: { started_on: string; term_months: number; note: string | null }) => putJson<{ member: MembershipRow }>(`${path(chatId, '')}/${encodeURIComponent(userId)}`, body),
+  updateMember: (chatId: string, userId: string, body: { started_on: string; term_months: number; note: string | null; exempt: boolean }) => putJson<{ member: MembershipRow }>(`${path(chatId, '')}/${encodeURIComponent(userId)}`, body),
   remind: (chatId: string, userId: string) => postJson<{ member: MembershipRow }>(`${path(chatId, '')}/${encodeURIComponent(userId)}/remind`, {}),
 };

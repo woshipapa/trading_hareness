@@ -102,7 +102,8 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		const found = await target(chatId);
 		const config = await settings(chatId);
 		const response = await bridgePost('/chat-members/list', { chat_id: found.websocket_chat_id }, 30_000);
-		const members = response.members ?? [];
+		if (response?.status !== 'ok' || !Array.isArray(response.members)) throw new Error('成员列表响应格式无效');
+		const members = response.members;
 		const ids = new Set(members.map((member) => String(member.user_id)));
 		const current = await rows(chatId);
 		for (const member of members) {
@@ -161,6 +162,16 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		const startedOn = parseDate(body?.started_on);
 		const termMonths = validTerm(body?.term_months);
 		const note = body?.note == null ? null : String(body.note);
+		if (body?.exempt !== undefined && typeof body.exempt !== 'boolean') throw new Error('exempt 必须是布尔值');
+		const config = body?.exempt === undefined ? null : await settings(chatId);
+		const exemptIds = config ? new Set(config.exempt_user_ids) : null;
+		if (exemptIds && body.exempt) exemptIds.add(String(userId));
+		if (exemptIds && !body.exempt) exemptIds.delete(String(userId));
+		if (exemptIds) {
+			const result = await ledger.query(`WITH updated_member AS (UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at), updated_settings AS (UPDATE ${SETTINGS_TABLE} SET exempt_user_ids=$8::jsonb WHERE target_chat_id=$1 AND EXISTS (SELECT 1 FROM updated_member) RETURNING target_chat_id) SELECT updated_member.* FROM updated_member JOIN updated_settings USING (target_chat_id)`, [String(chatId), String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now(), JSON.stringify([...exemptIds])]);
+			if (!result.rows[0]) throw new Error('会员不存在，请先同步成员');
+			return result.rows[0];
+		}
 		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now()]);
 		if (!result.rows[0]) throw new Error('会员不存在，请先同步成员');
 		return result.rows[0];
@@ -209,11 +220,14 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 	}
 
 	let running = false;
+	// Failed target reviews are retried in memory no more than once an hour; a successful review still records the day.
+	const retryAfter = new Map();
 	async function tick() {
 		if (running) return;
 		running = true;
 		try {
-			const today = shanghaiDate(now());
+			const current = now();
+			const today = shanghaiDate(current);
 			const [targets, configured] = await Promise.all([targetRegistry.list(), ledger.query(`SELECT target_chat_id,enabled,last_review_on FROM ${SETTINGS_TABLE} WHERE enabled=true`)]);
 			const enabled = new Map(configured.rows.map((row) => [String(row.target_chat_id), row]));
 			const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: SHANGHAI, hour: 'numeric', hour12: false }).format(now()));
@@ -221,10 +235,13 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 			for (const item of targets) {
 				const setting = enabled.get(String(item.chat_id));
 				if (!setting || setting.last_review_on === today) continue;
+				if ((retryAfter.get(String(item.chat_id))?.getTime() ?? 0) > current.getTime()) continue;
 				try {
 					await review(item.chat_id);
 					await ledger.query(`UPDATE ${SETTINGS_TABLE} SET last_review_on=$2 WHERE target_chat_id=$1`, [String(item.chat_id), today]);
+					retryAfter.delete(String(item.chat_id));
 				} catch (error) {
+					retryAfter.set(String(item.chat_id), new Date(current.getTime() + 60 * 60_000));
 					console.error(`会员审查失败 target=${item.chat_id}：${error instanceof Error ? error.message : String(error)}`);
 				}
 			}

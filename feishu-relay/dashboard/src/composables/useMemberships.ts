@@ -104,12 +104,13 @@ export function useMemberships(selectedTarget: Ref<TargetRegistryRow | null>) {
   async function saveMember(userId: string, value: MembershipEdit) {
     if (!target.value || !eligible.value || !settings.value) return false;
     const chatId = target.value.chat_id;
-    const member = await run('save-member', () => membershipsApi.updateMember(chatId, userId, { started_on: value.started_on, term_months: value.term_months, note: value.note }));
-    if (!member) return false;
-    const exemptIds = new Set(settings.value.exempt_user_ids);
-    if (value.exempt) exemptIds.add(userId); else exemptIds.delete(userId);
-    const setting = await run('save-exempt', () => membershipsApi.updateSettings(chatId, { enabled: settings.value!.enabled, default_term_months: settings.value!.default_term_months, remind_text: settings.value!.remind_text, exempt_user_ids: [...exemptIds] }));
-    if (!setting) return false;
+    const member = await run('save-member', () => membershipsApi.updateMember(chatId, userId, { started_on: value.started_on, term_months: value.term_months, note: value.note, exempt: value.exempt }));
+    if (!member) {
+      const failure = error.value;
+      await load();
+      error.value = failure;
+      return false;
+    }
     await load();
     return true;
   }
