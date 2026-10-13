@@ -15,10 +15,11 @@ const roster = [
 	{ user_id: 'a3', name: '丙', alias: '', joined_at: day('2026-10-01'), is_bot: false, is_self: false },
 ];
 const sent = [];
+const written = [];
 const group = { chat_id: 'wh_probe', websocket_chat_id: GROUP, owned: true, usable: true };
 const feature = createMemberships({
 	ledger: { query: (sql, params) => pool.query(sql, params) },
-	bridgePost: async () => ({ status: 'ok', chat_id: GROUP, members: roster }),
+	bridgePost: async (route, body) => { if (route === '/users/alias') { written.push(body); roster.find((member) => member.user_id === body.user_id).alias = body.alias; return { status: 'ok', ...body }; } return { status: 'ok', chat_id: GROUP, members: roster }; },
 	targetRegistry: { get: async () => group, groups: async () => [group] },
 	webhookTargets: { sendText: async (chatId, text) => { sent.push(text); } },
 	now: () => new Date('2026-10-13T02:30:00Z'),
@@ -43,6 +44,10 @@ await step('saving without one counts from the term again', async () => { const 
 await step('an expiry before the start is refused', async () => { try { await feature.updateMember('wh_probe', 'a2', { started_on: '2026-09-18', term_months: 3, expires_on: '2026-09-01', note: null }); return 'not refused'; } catch (error) { return error.message; } });
 await step('a typed expiry in the past is reviewed like any other', async () => { await feature.updateMember('wh_probe', 'a3', { started_on: '2026-10-01', term_months: 1, expires_on: '2026-10-08', note: null }); return (await feature.review('wh_probe', { dryRun: true })).map((row) => [row.user_id, row.expires_on, row.status]); });
 await step('the alias changes with Feishu at the next sync, the dates do not', async () => { roster[0].alias = '阿明 1123三个月'; return (await feature.sync('wh_probe')).filter((row) => row.user_id === 'a1').map((row) => [row.alias, row.started_on, row.expires_on, row.note]); });
+await pool.query(`INSERT INTO feishu_group_relay_memberships (target_chat_id,user_id,display_name,started_on,term_months,expires_on,alias) VALUES ('another-group','a1','甲','2026-09-01',1,'2026-10-01','阿明 1123三个月')`);
+await step('a renewal saved with a rewritten alias writes it to Feishu and to the person\'s rows in every group', async () => { const row = await feature.updateMember('wh_probe', 'a1', { started_on: '2026-11-23', term_months: 3, note: '续费', alias: '阿明 1123三个月·续' }); return [row.alias, row.started_on, row.expires_on, written, (await pool.query(`SELECT target_chat_id, alias FROM feishu_group_relay_memberships WHERE user_id='a1' ORDER BY 1`)).rows.map((item) => item.alias)]; });
+await step('an unchanged alias is not written again', async () => { const before = written.length; await feature.updateMember('wh_probe', 'a1', { started_on: '2026-11-23', term_months: 3, note: '续费', alias: '阿明 1123三个月·续' }); return written.length - before; });
+await step('the offers carry where they were read', async () => (await list()).filter((row) => row.user_id === 'a2').map((row) => row.suggestions.map((item) => [item.label, row.alias.slice(...item.span)])));
 console.log(failed ? `${failed} STEP(S) FAILED` : 'ALL STEPS PASSED');
 await pool.end();
 process.exit(failed ? 1 : 0);

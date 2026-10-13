@@ -9,4 +9,7 @@ ok   saving without one counts from the term again: ["2026-12-18",false]
 ok   an expiry before the start is refused: "到期日不能早于开始日期"
 ok   a typed expiry in the past is reviewed like any other: [["a3","2026-10-08","已到期"]]
 ok   the alias changes with Feishu at the next sync, the dates do not: [["阿明 1123三个月","2026-08-23","2026-11-23","手填"]]
+ok   a renewal saved with a rewritten alias writes it to Feishu and to the person's rows in every group: ["阿明 1123三个月·续","2026-11-23","2027-02-23",[{"user_id":"a1","alias":"阿明 1123三个月·续"}],["阿明 1123三个月·续","阿明 1123三个月·续"]]
+ok   an unchanged alias is not written again: 0
+ok   the offers carry where they were read: [[["到 12-31","到12月底"],["09-18 起","918"]]]
 ALL STEPS PASSED
