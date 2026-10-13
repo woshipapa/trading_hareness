@@ -26,7 +26,7 @@ class FakeClient:
 
 	def chatbot_api(self, name, body):
 		self.webhook_calls.append((name, body))
-		return {"code": 0, "data": {"name": "转发机器人", "key_words": ["自测"], "webhook": HOOK}}
+		return {"code": 0, "msg": "", "data": {"name": "转发机器人", "key_words": ["自测"], "webhook": HOOK}}
 
 
 class FakeBridge:
