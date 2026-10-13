@@ -1,12 +1,13 @@
 # W008 通达信补主行情快照的缺口并作备用
 
-- state: merged
+- state: released
 - holder: Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13
 - goal: 主数据源（同花顺）某一分钟缺了或出错时，用通达信的全市场快照补上并带来源标记；不把通达信变成主数据源
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
 - branch: main
-- head: c30dd28d
-- next: 两件事。(1) 准备第二次 owner 纯代码发布（从 26170231 到主线当前提交；`scripts/release plan` 判为纯代码、2 个运行时文件：目录和通达信并行采集的当日汇总），窗口是 10 月 13 日 22:05 之后或 10 月 14 日 11:30–13:00、15:10–18:45；这是迁到新服务器后的第一次发布，脚本的默认目标已是新主机（提交 4bb8c7ff），包装脚本备好后交给用户执行。(2) 从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。先做 (1) 还是先攒着和 B1、B2 一起发，问用户；明早 09:16 的核对（见 Due）不依赖这次发布
+- head: e8cb8dbf
+- release: owner-code-20261013-05
+- next: 10 月 14 日 09:16 核对新服务器上两条采集循环按新节拍落库（见 Due）；然后从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。当日汇总从 10 月 14 日起才有可判的分钟：收盘后跑一次并把输出存到 `docs/work/probes/`，记为五个交易日观察的第 1 天
 - updated: 2026-10-13
 
 ## Requirements
@@ -88,6 +89,8 @@
 - 2026-10-13 20:30 评审第 1 轮（Codex 评审者，只读）：WARNING。(1) 高：五份当日汇总的门槛没有把汇总和被升级的绑定对上，汇总里也不写自己量的是哪个数据源和能力，别的绑定的汇总只要规则相同就能通过（主会话核实：`scripts/tdx-promote.py` 的 `session_summaries` 只查三项）；修法：当日汇总写上 `provider_key`、`capability`，工具核对。(2) 中：不带 `min_share` 时失败原因的措辞变了，方案要求默认行为不变；修法：原句保留，只在 `min_share` 小于 1 时补一句占比。加上主会话的两条：带 `--decision-eligible` 时提交说明要保留“通过了哪些门槛”那句；汇总路径只解析一次。评审者另确认：按字节偏移改目录源码对现有 148 个 `_bind` 调用都得到合法 Python，分类规则的位置和测试没有问题。四条 20:30 发回实现者。
 
 - 2026-10-13 21:14 第二个分支合并：评审两轮（四条发现都已修），合并提交 c30dd28d（9 个文件，+196 −20），分支末端 ee89a50e 上主会话复跑 3050 项测试通过。合并后用主线自己的分类器看 26170231 到当前提交：2 个运行时文件、其余跳过，也就是纯代码发布（`scripts/tdx-promote.py` 不再触发全量）。工作区回收被脚本拒绝一次（十分钟内还有 Codex 会话活动），稍后重试：`bash ~/codebase/agent-skills/own/codex-flow/scripts/finishworktree.sh /Users/papa/codebase/n8n tdx-promote-gate --apply`。
+
+- 2026-10-13 22:40 第二次发布：用户 22:38 执行 `bash ~/codebase/n8n/state/rel05.sh --apply`，`owner-code-20261013-05`（源 e8cb8dbf）在新服务器生效，纯代码、2 个运行时文件。核对：`release-sync-status.sh` ALL CHECKS PASSED（`docs/work/probes/2026-10-13-release-status-05.out.txt`）；两个容器实际导入的是 `owner-code-20261013-05`，目录里有 `min_share`；发布后主机可用内存 323 MB。已记入 `docs/RELEASE_SYNC_47.md`。发布前出过一个岔子：改默认地址的提交动了两个被分类规则判为全量的手工脚本，发布计划变成全量，已撤回那两处（e8cb8dbf），由此开了 W012。
 
 ## Waiting on the user
 
