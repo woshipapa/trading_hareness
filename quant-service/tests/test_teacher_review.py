@@ -612,6 +612,7 @@ class CompositionTests(unittest.TestCase):
         self.assertIsInstance(dependencies, service.TeacherReviewDependencies)
         self.assertIsNone(dependencies.hydrate_history)
         post_close = main._post_close_refresh_dependencies()
+        self.assertIsNotNone(post_close.daily_close_completion)
         self.assertIsNotNone(post_close.teacher_review_roll)
         self.assertIsNotNone(post_close.xiaojie_outcomes)          # 小杰 settlement is scheduled after the close
         from app.post_close_refresh_service import POST_CLOSE_STAGE_DEPENDENCIES, POST_CLOSE_STAGE_ORDER

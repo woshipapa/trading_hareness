@@ -61,6 +61,7 @@ class DailyControlReconciliationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [date(2026, 9, 28)])
         self.assertEqual(result["provider_sync"]["providers"]["daily_basic"], "tushare_super_get")
         self.assertEqual(result["source_plan"], DEFAULT_SOURCE_PLAN)
+        self.assertEqual(DEFAULT_SOURCE_PLAN["daily_bars"]["fallback"], "longhu_dated_kline_per_symbol")
 
     async def test_reconcile_stays_blocked_when_provider_remains_partial(self):
         coverage = normalize_coverage({

@@ -60,6 +60,7 @@ from .database import AsyncDatabase, Database
 from .daily_control_plane import EQUITY_DAILY_CONTROL_STATUS_SQL, status_payload as daily_control_plane_status_payload
 from .daily_control_reconciliation import read_coverage as read_daily_control_coverage
 from .daily_control_reconciliation import reconcile as reconcile_daily_control_coverage
+from .daily_close_completion import complete as complete_daily_close
 from .owner_factor_repository import read_persisted_factor_controls, read_persisted_factor_window
 from .owner_daily_control_repository import read_persisted_control_rows
 from .async_provider_circuit_repository import open_capabilities as read_async_open_provider_capabilities
@@ -1536,10 +1537,23 @@ async def reconcile_daily_controls(trade_date: date) -> dict[str, Any]:
     async def read(day: date) -> dict[str, Any]:
         return await run_database_blocking(_read_daily_control_coverage, day, timeout_seconds=30)
 
+    async def sync(day: date) -> dict[str, Any]:
+        completion = await daily_close_completion(day)
+        controls = await sync_full_market_daily_controls(day)
+        return {"completion": completion, "controls": controls}
+
     return await reconcile_daily_control_coverage(
         trade_date,
         read=read,
-        sync=sync_full_market_daily_controls,
+        sync=sync,
+    )
+
+
+async def daily_close_completion(trade_date: date) -> dict[str, Any]:
+    return await complete_daily_close(
+        trade_date, db=db, run_public_blocking=run_akshare_blocking,
+        run_database_blocking=run_database_blocking, persist_rows=persist_tushare_rows,
+        read_source_factory=lambda: longhu_full_market_source_factory()(), now=datetime.now(timezone.utc),
     )
 
 
@@ -3776,8 +3790,8 @@ def teacher_review_enabled() -> bool:
 
 
 async def teacher_review_repair_daily(trade_date: date) -> dict[str, Any]:
-    """Data-plane repair of one session: daily bars (Longhu full market first), then controls."""
-    bars = await sync_full_market_daily(FullMarketDailySyncRequest(trade_date=trade_date))
+    """Data-plane repair of one session: dated bars first, then controls."""
+    bars = await daily_close_completion(trade_date)
     controls = await sync_full_market_daily_controls(trade_date)
     return {"bars": {key: bars.get(key) for key in ("status", "provider", "stored", "rows") if key in bars},
             "controls": {key: controls.get(key) for key in ("status", "stored", "reason") if key in controls}}
@@ -3887,6 +3901,7 @@ def _post_close_refresh_dependencies() -> PostCloseRefreshDependencies:
         append_limit_performance=lambda trade_date: append_limit_performance_isolated(
             trade_date, shared_stock_api_call,
             database=db, run_database=run_database_blocking, now=datetime.now(timezone.utc)),
+        daily_close_completion=daily_close_completion,
     )
 
 

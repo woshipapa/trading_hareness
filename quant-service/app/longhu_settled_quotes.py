@@ -1,7 +1,8 @@
 """Date-addressed licensed OHLC. Live quotes cannot repair historical days."""
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import date
 from math import isfinite
+from time import monotonic
 
 
 def number(value):
@@ -56,3 +57,89 @@ def fetch(source, symbols, day, *, workers=8):
     return quotes,{'provider':'longhuvip:GetKLineDay_W14','trade_date':str(day),'requested':len(unique),
                    'received':len(quotes),'failed':len(errors),'errors':dict(list(errors.items())[:30]),
                    'physical_page_limit':300,'no_live_quote_substitution':True}
+
+
+def fetch_classified(source, symbols, day, *, workers=6, deadline_seconds=240):
+    """Fetch dated bars and retain the evidence needed to explain every gap."""
+    unique = list(dict.fromkeys(symbols))
+    target = day.strftime('%Y%m%d')
+
+    def one(symbol):
+        envelope = source.raw_call({'target': 'longhu_history', 'path': '/w1/api/index.php',
+            'params': {'a': 'GetKLineDay_W14', 'c': 'StockLineData', 'apiv': 'w40',
+                       'StockID': symbol.split('.')[0], 'Type': 'd', 'Is_FS': '0',
+                       'st': min(300, max(20, (date.today() - day).days + 10)), 'Index': 0}})
+        for page in envelope.get('pages', []):
+            payload = page.get('payload') or {}
+            dates = payload.get('x') or []
+            keys = [str(value).replace('-', '') for value in dates]
+            if target not in keys:
+                continue
+            index = keys.index(target)
+            cq = payload.get('CQ')
+            if cq is None or len(cq) != len(keys):
+                return symbol, 'unverified', None, False, None
+            ex_rights_on_day = bool(str(cq[index]).strip())
+            if any(str(value).strip() for value in cq[index + 1:]):
+                return symbol, 'adjusted_later', None, ex_rights_on_day, None
+            quote = normalized_quote(symbol, day, payload)
+            if quote is None:
+                return symbol, 'invalid', None, ex_rights_on_day, None
+            quote['ex_rights_on_day'] = ex_rights_on_day
+            return symbol, 'filled', quote, ex_rights_on_day, None
+        return symbol, 'not_traded', None, False, None
+
+    def guarded(symbol):
+        try:
+            return one(symbol)
+        except Exception as error:
+            return symbol, 'failed', None, False, f'{type(error).__name__}: {error}'
+
+    results = []
+    pool = ThreadPoolExecutor(max_workers=max(1, min(workers, 6)))
+    active = {}
+    pending = iter(unique)
+    deadline = monotonic() + deadline_seconds
+
+    def submit_next() -> bool:
+        if monotonic() >= deadline:
+            return False
+        try:
+            symbol = next(pending)
+        except StopIteration:
+            return False
+        active[pool.submit(guarded, symbol)] = symbol
+        return True
+
+    while len(active) < max(1, min(workers, 6)) and submit_next():
+        pass
+    while active:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            break
+        done, _ = wait(active, timeout=remaining, return_when=FIRST_COMPLETED)
+        if not done:
+            break
+        for task in done:
+            active.pop(task)
+            results.append(task.result())
+        while len(active) < max(1, min(workers, 6)) and submit_next():
+            pass
+    reached = {symbol for symbol, _outcome, _quote, _marker, _error in results}
+    deadline_failures = [symbol for symbol in unique if symbol not in reached]
+    for task in active:
+        task.cancel()
+    pool.shutdown(wait=False, cancel_futures=True)
+    results.extend((symbol, 'failed', None, False, 'deadline') for symbol in deadline_failures)
+    outcomes = {name: sorted(symbol for symbol, outcome, _quote, _marker, _error in results if outcome == name)
+                for name in ('filled', 'not_traded', 'adjusted_later', 'unverified', 'invalid', 'failed')}
+    quotes = [quote for _symbol, outcome, quote, _marker, _error in results if outcome == 'filled']
+    return quotes, {
+        'provider': 'longhuvip:GetKLineDay_W14', 'trade_date': str(day),
+        'requested': len(unique), 'received': len(quotes), 'outcomes': outcomes,
+        'classified': {symbol: outcome for symbol, outcome, _quote, _marker, _error in results},
+        'errors': dict(list((symbol, error) for symbol, outcome, _quote, _marker, error in results
+                            if outcome == 'failed')[:30]),
+        'ex_rights_on_day': {symbol: marker for symbol, outcome, _quote, marker, _error in results
+                             if outcome == 'filled'},
+    }

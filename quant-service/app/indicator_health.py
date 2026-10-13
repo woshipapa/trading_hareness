@@ -47,6 +47,7 @@ MIN_POOL, WARN_POOL = 4500, 3000
 MAX_MAIN_NET_SHARE = 0.25
 #: The close pipeline's indicators are due by this time on the session.
 POST_CLOSE_DUE = time(17, 30)
+DAILY_BARS_COMPLETE_DUE = time(18, 45)
 MINUTE_DUE = time(9, 26)
 AUCTION_OPEN_DUE = time(9, 27)
 #: The session's limit prices are written by the first 小杰 scan after the open.
@@ -319,6 +320,41 @@ def timing_checks(connection: Any, trade_date: date, _now: datetime) -> list[dic
                    "腾讯是整段备用源")]
 
 
+def daily_bars_complete_checks(connection: Any, trade_date: date, now: datetime) -> list[dict[str, Any]]:
+    local = now.astimezone(CN_TZ)
+    if local.date() < trade_date or (local.date() == trade_date and local.time() < DAILY_BARS_COMPLETE_DUE):
+        return [_check("due", PENDING, None, "18:45", "18:45 前不判断盘后补齐")]
+    if trade_date.weekday() >= 5:
+        return [_check("due", PENDING, None, "open session", "闭市日不判断盘后补齐")]
+    calendar = connection.execute(
+        "SELECT is_open FROM quant.market_trade_calendar WHERE exchange='SSE' AND calendar_date=%s",
+        (trade_date,),
+    ).fetchone()
+    if calendar and not calendar["is_open"]:
+        return [_check("due", PENDING, None, "open session", "闭市日不判断盘后补齐")]
+    receipt = connection.execute(
+        """SELECT status,metadata FROM quant.fetch_runs
+             WHERE capability='daily_close_completion' AND trade_date=%s
+             ORDER BY created_at DESC LIMIT 1""", (trade_date,)).fetchone()
+    if not receipt:
+        return [_check("receipt", FAIL, None, "completed", "没有 daily_close_completion 收据")]
+    metadata = receipt.get("metadata") or {}
+    leftovers = []
+    outcomes = metadata.get("outcomes") or {}
+    for key in ("adjusted_later", "unverified", "invalid", "failed",
+                "bar_rejected", "unusable_existing", "limits_pending", "factor_pending"):
+        value = outcomes.get(key, []) if key in outcomes else metadata.get(key) or []
+        if isinstance(value, dict):
+            value = list(value)
+        if value:
+            leftovers.append(f"{key}={len(value)}:{','.join(map(str, value[:5]))}")
+    info = ";".join(f"{key}={len(outcomes.get(key) or [])}" for key in ("filled", "not_traded")
+                    if outcomes.get(key))
+    detail = "；".join(([info] if info else []) + leftovers) or "无遗留名单"
+    status = receipt["status"]
+    return [_check("receipt", OK if status == "completed" else FAIL, status, "completed", detail)]
+
+
 def _count_check(connection: Any, sql: str, params: tuple[Any, ...], ok_at: int, warn_at: int, detail: str) -> list[dict[str, Any]]:
     value = int(_one(connection, sql, params).get("n") or 0)
     if not value:
@@ -387,6 +423,7 @@ CHECKS: dict[str, Callable[[Any, date, datetime], list[dict[str, Any]]]] = {
     "market.broad_etf_flow": broad_etf_flow_checks, "market.timing": timing_checks,
     "market.limit_up_risk": limit_up_risk_checks,
     "market.auction_open_desk": auction_open_desk_checks,
+    "data.daily_bars_complete": daily_bars_complete_checks,
     **{key: _session_checks(key) for key in ("board.concept_strength", "board.concept_flow", "board.industry_flow",
                                              "stock.money_flow", "stock.limit_prices", "strategy.ledger", "events.lhb")},
 }
@@ -407,7 +444,7 @@ def indicator_status(connection: Any, key: str, trade_date: date, now: datetime)
     else:
         checks = CHECKS[key](connection, trade_date, now)
         statuses = {check["status"] for check in checks}
-        status = FAIL if FAIL in statuses else MISSING if MISSING in statuses else WARN if WARN in statuses else OK
+        status = FAIL if FAIL in statuses else MISSING if MISSING in statuses else PENDING if PENDING in statuses else WARN if WARN in statuses else OK
     return {"key": key, "label": indicator.label, "availability": indicator.availability, "status": status,
             "decision_eligible": status == OK, "checks": checks}
 
