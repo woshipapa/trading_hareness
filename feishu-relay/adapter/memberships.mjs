@@ -80,11 +80,30 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		`CREATE TABLE IF NOT EXISTS ${SETTINGS_TABLE} (target_chat_id text PRIMARY KEY, enabled boolean NOT NULL, default_term_months integer NOT NULL, remind_text text NOT NULL, exempt_user_ids jsonb NOT NULL DEFAULT '[]'::jsonb, last_review_on date)`,
 	];
 
+	// Membership rows belong to the group, so they are keyed by the group's numeric id and stay with it when a relay bot
+	// is added to the group or removed. Rows written before 2026-10-14 were keyed by the target id; a group's rows are
+	// moved the first time the group is used after a start.
+	const adopted = new Set();
+	async function adopt(found) {
+		const key = targetId(found.websocket_chat_id);
+		if (found.chat_id !== key && !adopted.has(found.chat_id)) {
+			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} m SET target_chat_id=$2 WHERE m.target_chat_id=$1 AND NOT EXISTS (SELECT 1 FROM ${MEMBERSHIP_TABLE} x WHERE x.target_chat_id=$2 AND x.user_id=m.user_id)`, [found.chat_id, key]);
+			await ledger.query(`UPDATE ${SETTINGS_TABLE} s SET target_chat_id=$2 WHERE s.target_chat_id=$1 AND NOT EXISTS (SELECT 1 FROM ${SETTINGS_TABLE} x WHERE x.target_chat_id=$2)`, [found.chat_id, key]);
+			adopted.add(found.chat_id);
+		}
+		return key;
+	}
+
 	async function target(chatId) {
 		const found = await targetRegistry.get(String(chatId));
 		if (!found) throw new Error('目标群不存在');
 		if (!found.owned) throw new Error('目标群群主不是本账号，不能管理会员');
-		return { ...found, websocket_chat_id: targetId(found.websocket_chat_id) };
+		return { ...found, key: await adopt(found) };
+	}
+
+	// A group the account owns can be managed before it has a bot, but a reminder is sent by the group's bot.
+	function sendable(found) {
+		if (found.usable !== true) throw new Error('这个群还没有可用的机器人，发不了提醒：先在群列表里给它建机器人');
 	}
 
 	function settingsRow(row) {
@@ -96,44 +115,44 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		};
 	}
 
-	async function settings(chatId) {
-		const result = await ledger.query(`SELECT target_chat_id,enabled,default_term_months,remind_text,exempt_user_ids,last_review_on FROM ${SETTINGS_TABLE} WHERE target_chat_id=$1`, [String(chatId)]);
+	async function settings(key) {
+		const result = await ledger.query(`SELECT target_chat_id,enabled,default_term_months,remind_text,exempt_user_ids,last_review_on FROM ${SETTINGS_TABLE} WHERE target_chat_id=$1`, [key]);
 		if (result.rows[0]) return settingsRow(result.rows[0]);
-		const defaults = { target_chat_id: String(chatId), enabled: false, default_term_months: DEFAULT_TERM_MONTHS, remind_text: DEFAULT_REMIND_TEXT, exempt_user_ids: [], last_review_on: null };
+		const defaults = { target_chat_id: key, enabled: false, default_term_months: DEFAULT_TERM_MONTHS, remind_text: DEFAULT_REMIND_TEXT, exempt_user_ids: [], last_review_on: null };
 		await ledger.query(`INSERT INTO ${SETTINGS_TABLE} (target_chat_id,enabled,default_term_months,remind_text,exempt_user_ids) VALUES ($1,$2,$3,$4,$5)`, [defaults.target_chat_id, false, DEFAULT_TERM_MONTHS, DEFAULT_REMIND_TEXT, JSON.stringify([])]);
 		return defaults;
 	}
 
-	async function rows(chatId) {
-		const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE target_chat_id=$1 ORDER BY started_on,user_id`, [String(chatId)]);
+	async function rows(key) {
+		const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE target_chat_id=$1 ORDER BY started_on,user_id`, [key]);
 		return result.rows.map(memberRow);
 	}
 
 	async function sync(chatId) {
-		const found = await target(chatId);
-		const config = await settings(chatId);
-		const response = await bridgePost('/chat-members/list', { chat_id: found.websocket_chat_id }, 30_000);
+		const { key } = await target(chatId);
+		const config = await settings(key);
+		const response = await bridgePost('/chat-members/list', { chat_id: key }, 30_000);
 		if (response?.status !== 'ok' || !Array.isArray(response.members) || response.members.some((member) => !member || typeof member.is_bot !== 'boolean' || typeof member.is_self !== 'boolean')) throw new Error('成员列表响应格式无效');
 		const members = response.members.filter((member) => !member.is_bot && !member.is_self);
 		const excludedIds = response.members.filter((member) => member.is_bot || member.is_self).map((member) => String(member.user_id));
 		const ids = new Set(members.map((member) => String(member.user_id)));
-		const current = await rows(chatId);
-		for (const userId of excludedIds) await ledger.query(`DELETE FROM ${MEMBERSHIP_TABLE} WHERE target_chat_id=$1 AND user_id=$2`, [String(chatId), userId]);
+		const current = await rows(key);
+		for (const userId of excludedIds) await ledger.query(`DELETE FROM ${MEMBERSHIP_TABLE} WHERE target_chat_id=$1 AND user_id=$2`, [key, userId]);
 		for (const member of members) {
 			const userId = String(member.user_id);
 			const existing = current.find((row) => String(row.user_id) === userId);
 			const startedOn = existing?.started_on ?? shanghaiDate(new Date(Number(member.joined_at) * 1000));
 			const expiry = existing?.expires_on ?? addMonths(startedOn, config.default_term_months);
 			if (existing) {
-				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET display_name=$3,left_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id=$2`, [String(chatId), userId, String(member.name ?? ''), now()]);
+				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET display_name=$3,left_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id=$2`, [key, userId, String(member.name ?? ''), now()]);
 			} else {
-				await ledger.query(`INSERT INTO ${MEMBERSHIP_TABLE} (target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT(target_chat_id,user_id) DO NOTHING`, [String(chatId), userId, String(member.name ?? ''), startedOn, config.default_term_months, expiry, null, now()]);
+				await ledger.query(`INSERT INTO ${MEMBERSHIP_TABLE} (target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT(target_chat_id,user_id) DO NOTHING`, [key, userId, String(member.name ?? ''), startedOn, config.default_term_months, expiry, null, now()]);
 			}
 		}
 		for (const row of current) if (!excludedIds.includes(String(row.user_id)) && !ids.has(String(row.user_id)) && !row.left_at) {
-			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET left_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2`, [String(chatId), String(row.user_id), now()]);
+			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET left_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2`, [key, String(row.user_id), now()]);
 		}
-		return rows(chatId);
+		return rows(key);
 	}
 
 	function publicRows(items, config, today = shanghaiDate(now())) {
@@ -142,49 +161,51 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 	}
 
 	async function review(chatId, { dryRun = false } = {}) {
-		await target(chatId);
-		const config = await settings(chatId);
+		const found = await target(chatId);
+		const { key } = found;
+		if (!dryRun) sendable(found);
+		const config = await settings(key);
 		await sync(chatId);
 		const today = shanghaiDate(now());
 		const claimAt = now();
 		const candidateSql = `target_chat_id=$1 AND expires_on <= $2 AND left_at IS NULL AND reminded_on IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3::timestamptz - interval '10 minutes') AND NOT EXISTS (SELECT 1 FROM ${SETTINGS_TABLE} s WHERE s.target_chat_id=${MEMBERSHIP_TABLE}.target_chat_id AND ${MEMBERSHIP_TABLE}.user_id = ANY (SELECT jsonb_array_elements_text(s.exempt_user_ids)))`;
 		if (dryRun) {
-			const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE ${candidateSql} ORDER BY user_id`, [String(chatId), today, claimAt]);
+			const result = await ledger.query(`SELECT target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at FROM ${MEMBERSHIP_TABLE} WHERE ${candidateSql} ORDER BY user_id`, [key, today, claimAt]);
 			return publicRows(result.rows.map(memberRow), config, today);
 		}
-		const claimed = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE ${candidateSql} RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), today, claimAt]);
+		const claimed = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE ${candidateSql} RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [key, today, claimAt]);
 		const members = claimed.rows.map(memberRow);
 		for (let offset = 0; offset < members.length; offset += 20) {
 			const batch = members.slice(offset, offset + 20);
 			const ids = batch.map((row) => String(row.user_id));
 			const text = `${batch.map((row) => `<at user_id="${String(row.user_id)}">${escapedName(row.display_name)}</at>`).join('')} ${config.remind_text}`;
 			try {
-				await webhookTargets.sendText(String(chatId), text);
-				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET reminded_on=$3,remind_claimed_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id = ANY($2) AND remind_claimed_at=$4`, [String(chatId), ids, today, claimAt]);
+				await webhookTargets.sendText(found.chat_id, text);
+				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET reminded_on=$3,remind_claimed_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id = ANY($2) AND remind_claimed_at=$4`, [key, ids, today, claimAt]);
 			} catch (error) {
 				console.error(`会员到期提醒发送失败 target=${chatId}：${error instanceof Error ? error.message : String(error)}`);
-				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL,updated_at=$3 WHERE target_chat_id=$1 AND user_id = ANY($2) AND remind_claimed_at=$4`, [String(chatId), ids, claimAt, claimAt]);
+				await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL,updated_at=$3 WHERE target_chat_id=$1 AND user_id = ANY($2) AND remind_claimed_at=$4`, [key, ids, claimAt, claimAt]);
 			}
 		}
 		return publicRows(members, config, today);
 	}
 
 	async function updateMember(chatId, userId, body) {
-		await target(chatId);
+		const { key } = await target(chatId);
 		const startedOn = parseDate(body?.started_on);
 		const termMonths = validTerm(body?.term_months);
 		const note = body?.note == null ? null : String(body.note);
 		if (body?.exempt !== undefined && typeof body.exempt !== 'boolean') throw new Error('exempt 必须是布尔值');
-		const config = body?.exempt === undefined ? null : await settings(chatId);
+		const config = body?.exempt === undefined ? null : await settings(key);
 		const exemptIds = config ? new Set(config.exempt_user_ids) : null;
 		if (exemptIds && body.exempt) exemptIds.add(String(userId));
 		if (exemptIds && !body.exempt) exemptIds.delete(String(userId));
 		if (exemptIds) {
-			const result = await ledger.query(`WITH updated_member AS (UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at), updated_settings AS (UPDATE ${SETTINGS_TABLE} SET exempt_user_ids=$8::jsonb WHERE target_chat_id=$1 AND EXISTS (SELECT 1 FROM updated_member) RETURNING target_chat_id) SELECT updated_member.* FROM updated_member JOIN updated_settings USING (target_chat_id)`, [String(chatId), String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now(), JSON.stringify([...exemptIds])]);
+			const result = await ledger.query(`WITH updated_member AS (UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at), updated_settings AS (UPDATE ${SETTINGS_TABLE} SET exempt_user_ids=$8::jsonb WHERE target_chat_id=$1 AND EXISTS (SELECT 1 FROM updated_member) RETURNING target_chat_id) SELECT updated_member.* FROM updated_member JOIN updated_settings USING (target_chat_id)`, [key, String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now(), JSON.stringify([...exemptIds])]);
 			if (!result.rows[0]) throw new Error('会员不存在，请先同步成员');
 			return memberRow(result.rows[0]);
 		}
-		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now()]);
+		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET started_on=$3,term_months=$4,expires_on=$5,note=$6,reminded_on=NULL,remind_claimed_at=NULL,updated_at=$7 WHERE target_chat_id=$1 AND user_id=$2 RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [key, String(userId), startedOn, termMonths, addMonths(startedOn, termMonths), note, now()]);
 		if (!result.rows[0]) throw new Error('会员不存在，请先同步成员');
 		return memberRow(result.rows[0]);
 	}
@@ -196,36 +217,40 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 	}
 
 	async function updateSettings(chatId, body) {
-		await target(chatId);
-		const current = await settings(chatId);
+		const found = await target(chatId);
+		const { key } = found;
+		const current = await settings(key);
 		const enabled = body?.enabled == null ? current.enabled : body.enabled;
 		if (typeof enabled !== 'boolean') throw new Error('enabled 必须是布尔值');
+		if (enabled && !current.enabled) sendable(found);
 		const term = body?.default_term_months == null ? current.default_term_months : validTerm(body.default_term_months, '默认期限');
 		const text = body?.remind_text == null ? current.remind_text : validText(body.remind_text, '提醒文字');
 		const ids = body?.exempt_user_ids == null ? current.exempt_user_ids : exemptIds(body.exempt_user_ids);
-		const result = await ledger.query(`INSERT INTO ${SETTINGS_TABLE} (target_chat_id,enabled,default_term_months,remind_text,exempt_user_ids,last_review_on) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(target_chat_id) DO UPDATE SET enabled=EXCLUDED.enabled,default_term_months=EXCLUDED.default_term_months,remind_text=EXCLUDED.remind_text,exempt_user_ids=EXCLUDED.exempt_user_ids RETURNING target_chat_id,enabled,default_term_months,remind_text,exempt_user_ids,last_review_on`, [String(chatId), enabled, term, text, JSON.stringify(ids), current.last_review_on]);
-		return settingsRow(result.rows[0] ?? { target_chat_id: chatId, enabled, default_term_months: term, remind_text: text, exempt_user_ids: ids, last_review_on: current.last_review_on });
+		const result = await ledger.query(`INSERT INTO ${SETTINGS_TABLE} (target_chat_id,enabled,default_term_months,remind_text,exempt_user_ids,last_review_on) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(target_chat_id) DO UPDATE SET enabled=EXCLUDED.enabled,default_term_months=EXCLUDED.default_term_months,remind_text=EXCLUDED.remind_text,exempt_user_ids=EXCLUDED.exempt_user_ids RETURNING target_chat_id,enabled,default_term_months,remind_text,exempt_user_ids,last_review_on`, [key, enabled, term, text, JSON.stringify(ids), current.last_review_on]);
+		return settingsRow(result.rows[0] ?? { target_chat_id: key, enabled, default_term_months: term, remind_text: text, exempt_user_ids: ids, last_review_on: current.last_review_on });
 	}
 
 	async function remind(chatId, userId) {
-		await target(chatId);
-		const config = await settings(chatId);
+		const found = await target(chatId);
+		const { key } = found;
+		sendable(found);
+		const config = await settings(key);
 		await sync(chatId);
 		const today = shanghaiDate(now());
 		const claimAt = now();
-		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2 AND expires_on <= $4 AND left_at IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3::timestamptz - interval '10 minutes') RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [String(chatId), String(userId), claimAt, today]);
+		const result = await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=$3,updated_at=$3 WHERE target_chat_id=$1 AND user_id=$2 AND expires_on <= $4 AND left_at IS NULL AND (remind_claimed_at IS NULL OR remind_claimed_at < $3::timestamptz - interval '10 minutes') RETURNING target_chat_id,user_id,display_name,started_on,term_months,expires_on,note,reminded_on,remind_claimed_at,left_at,created_at,updated_at`, [key, String(userId), claimAt, today]);
 		if (!result.rows[0]) throw new Error('会员未到期、已离群或正在提醒中');
 		const row = memberRow(result.rows[0]);
 		if (config.exempt_user_ids.includes(String(userId))) {
-			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL WHERE target_chat_id=$1 AND user_id=$2`, [String(chatId), String(userId)]);
+			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL WHERE target_chat_id=$1 AND user_id=$2`, [key, String(userId)]);
 			throw new Error('该会员已豁免提醒');
 		}
 		const text = `<at user_id="${String(row.user_id)}">${escapedName(row.display_name)}</at> ${config.remind_text}`;
 		try {
-			await webhookTargets.sendText(String(chatId), text);
-			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET reminded_on=$3,remind_claimed_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id=$2 AND remind_claimed_at=$4`, [String(chatId), String(userId), today, claimAt]);
+			await webhookTargets.sendText(found.chat_id, text);
+			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET reminded_on=$3,remind_claimed_at=NULL,updated_at=$4 WHERE target_chat_id=$1 AND user_id=$2 AND remind_claimed_at=$4`, [key, String(userId), today, claimAt]);
 		} catch (error) {
-			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL WHERE target_chat_id=$1 AND user_id=$2 AND remind_claimed_at=$3`, [String(chatId), String(userId), claimAt]);
+			await ledger.query(`UPDATE ${MEMBERSHIP_TABLE} SET remind_claimed_at=NULL WHERE target_chat_id=$1 AND user_id=$2 AND remind_claimed_at=$3`, [key, String(userId), claimAt]);
 			throw error;
 		}
 		return row;
@@ -240,20 +265,24 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 		try {
 			const current = now();
 			const today = shanghaiDate(current);
-			const [targets, configured] = await Promise.all([targetRegistry.list(), ledger.query(`SELECT target_chat_id,enabled,last_review_on FROM ${SETTINGS_TABLE} WHERE enabled=true`)]);
-			const enabled = new Map(configured.rows.map((row) => [String(row.target_chat_id), row]));
 			const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: SHANGHAI, hour: 'numeric', hour12: false }).format(now()));
 			if (hour < 9) return;
-			for (const item of targets) {
-				const setting = enabled.get(String(item.chat_id));
+			const managed = (await targetRegistry.groups()).filter((item) => item.owned === true && /^\d+$/.test(String(item.websocket_chat_id ?? '')));
+			const keys = new Map();
+			for (const item of managed) keys.set(item.chat_id, await adopt(item));
+			const configured = await ledger.query(`SELECT target_chat_id,enabled,last_review_on FROM ${SETTINGS_TABLE} WHERE enabled=true`);
+			const enabled = new Map(configured.rows.map((row) => [String(row.target_chat_id), row]));
+			for (const item of managed) {
+				const key = keys.get(item.chat_id);
+				const setting = enabled.get(key);
 				if (!setting || dateText(setting.last_review_on) === today) continue;
-				if ((retryAfter.get(String(item.chat_id))?.getTime() ?? 0) > current.getTime()) continue;
+				if ((retryAfter.get(key)?.getTime() ?? 0) > current.getTime()) continue;
 				try {
 					await review(item.chat_id);
-					await ledger.query(`UPDATE ${SETTINGS_TABLE} SET last_review_on=$2 WHERE target_chat_id=$1`, [String(item.chat_id), today]);
-					retryAfter.delete(String(item.chat_id));
+					await ledger.query(`UPDATE ${SETTINGS_TABLE} SET last_review_on=$2 WHERE target_chat_id=$1`, [key, today]);
+					retryAfter.delete(key);
 				} catch (error) {
-					retryAfter.set(String(item.chat_id), new Date(current.getTime() + 60 * 60_000));
+					retryAfter.set(key, new Date(current.getTime() + 60 * 60_000));
 					console.error(`会员审查失败 target=${item.chat_id}：${error instanceof Error ? error.message : String(error)}`);
 				}
 			}
@@ -269,11 +298,11 @@ export function createMemberships({ ledger, bridgePost, targetRegistry, webhookT
 	}
 
 	const routes = [
-		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/memberships', handle: async ({ params }) => { const found = await target(params.chatId); const config = await settings(params.chatId); return { members: publicRows(await rows(params.chatId), config), today: shanghaiDate(now()), target_chat_id: found.chat_id }; } },
+		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/memberships', handle: async ({ params }) => { const found = await target(params.chatId); const config = await settings(found.key); return { members: publicRows(await rows(found.key), config), today: shanghaiDate(now()), target_chat_id: found.chat_id }; } },
 		{ method: 'PUT', path: '/api/group-relay/target-groups/:chatId/memberships/:userId', handle: async ({ params, body }) => ({ member: await updateMember(params.chatId, params.userId, body) }) },
-		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/membership-settings', handle: async ({ params }) => { await target(params.chatId); return { settings: await settings(params.chatId) }; } },
+		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/membership-settings', handle: async ({ params }) => { const found = await target(params.chatId); return { settings: await settings(found.key) }; } },
 		{ method: 'PUT', path: '/api/group-relay/target-groups/:chatId/membership-settings', handle: async ({ params, body }) => ({ settings: await updateSettings(params.chatId, body) }) },
-		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/memberships/sync', handle: async ({ params }) => { await target(params.chatId); const config = await settings(params.chatId); return { members: publicRows(await sync(params.chatId), config), today: shanghaiDate(now()) }; } },
+		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/memberships/sync', handle: async ({ params }) => { const found = await target(params.chatId); const config = await settings(found.key); return { members: publicRows(await sync(params.chatId), config), today: shanghaiDate(now()) }; } },
 		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/memberships/review', handle: async ({ params, body }) => ({ members: await review(params.chatId, { dryRun: body?.dry_run === true }), dry_run: body?.dry_run === true }) },
 		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/memberships/:userId/remind', handle: async ({ params }) => ({ member: await remind(params.chatId, params.userId) }) },
 	];

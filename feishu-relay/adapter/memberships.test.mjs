@@ -18,7 +18,9 @@ function fakeLedger({ members = [], settings = null } = {}) {
 		rows,
 		config,
 		async query(sql, params = []) {
-			if (sql.startsWith('SELECT target_chat_id,enabled,last_review_on')) return config.enabled ? { rows: [{ target_chat_id: CHAT, enabled: true, last_review_on: pgDate(config.last_review_on) }] } : { rows: [] };
+			if (sql.startsWith('UPDATE feishu_group_relay_memberships m SET target_chat_id')) { for (const row of rows) if (row.target_chat_id === params[0]) row.target_chat_id = params[1]; return { rows: [] }; }
+			if (sql.startsWith('UPDATE feishu_group_relay_membership_settings s SET target_chat_id')) { if (config.target_chat_id === params[0]) config.target_chat_id = params[1]; return { rows: [] }; }
+			if (sql.startsWith('SELECT target_chat_id,enabled,last_review_on')) return config.enabled ? { rows: [{ target_chat_id: config.target_chat_id, enabled: true, last_review_on: pgDate(config.last_review_on) }] } : { rows: [] };
 			if (sql.startsWith('SELECT target_chat_id,enabled,default_term_months')) return { rows: [settingsClone(config)] };
 			if (sql.startsWith('INSERT INTO feishu_group_relay_membership_settings')) { Object.assign(config, { target_chat_id: params[0], enabled: params[1], default_term_months: params[2], remind_text: params[3], exempt_user_ids: JSON.parse(params[4]), last_review_on: params[5] ?? config.last_review_on }); return { rows: [settingsClone(config)] }; }
 			if (sql.startsWith('UPDATE feishu_group_relay_membership_settings')) { config.last_review_on = params[1]; return { rows: [] }; }
@@ -54,7 +56,8 @@ function setup(options = {}) {
 	const sent = [];
 	const members = options.bridgeMembers ?? [{ user_id: 'u1', name: '张<三"', joined_at: Math.floor(date('2026-01-31').getTime() / 1000), is_bot: false, is_self: false }];
 	const bridgePost = options.bridgePost ?? (async () => ({ status: 'ok', chat_id: WS, members }));
-	const targetRegistry = { get: async () => ({ chat_id: CHAT, websocket_chat_id: WS, owned: true }), list: async () => [{ chat_id: CHAT }] };
+	const group = { chat_id: CHAT, websocket_chat_id: WS, owned: true, usable: options.usable ?? true };
+	const targetRegistry = { get: async () => group, groups: async () => [group] };
 	const webhookTargets = { sendText: async (chatId, text) => { sent.push({ chatId, text }); if (options.sendError) throw new Error(options.sendError); } };
 	let current = options.now ?? date('2026-03-01');
 	const feature = createMemberships({ ledger, bridgePost, targetRegistry, webhookTargets, now: () => current });
@@ -79,7 +82,7 @@ test('sync registers a new member on the Shanghai join date with the default ter
 
 test('sync rejects malformed bridge answers before changing stored membership rows', async () => {
 	const { feature, ledger } = setup({ members: [{ user_id: 'u1', display_name: 'A', started_on: '2026-01-01', term_months: 1, expires_on: '2026-02-01', reminded_on: null, remind_claimed_at: null, left_at: null }] });
-	const malformed = createMemberships({ ledger, bridgePost: async () => ({ status: 'error' }), targetRegistry: { get: async () => ({ websocket_chat_id: WS, owned: true }) }, webhookTargets: { sendText: async () => {} }, now: () => date('2026-03-01') });
+	const malformed = createMemberships({ ledger, bridgePost: async () => ({ status: 'error' }), targetRegistry: { get: async () => ({ chat_id: CHAT, websocket_chat_id: WS, owned: true, usable: true }) }, webhookTargets: { sendText: async () => {} }, now: () => date('2026-03-01') });
 	await assert.rejects(() => malformed.sync(CHAT), /成员列表响应格式无效/);
 	assert.equal(ledger.rows[0].left_at, null);
 });
@@ -155,7 +158,7 @@ test('failed batches are retried, successful batches are not', async () => {
 	await setupResult.feature.review(CHAT);
 	assert.equal(setupResult.sent.length, 1);
 	setupResult.setNow('2026-03-02');
-	setupResult.feature = createMemberships({ ledger: setupResult.ledger, bridgePost: async () => ({ status: 'ok', members: [{ user_id: 'u1', name: 'A', joined_at: 1, is_bot: false, is_self: false }] }), targetRegistry: { get: async () => ({ websocket_chat_id: WS, owned: true }), list: async () => [{ chat_id: CHAT }] }, webhookTargets: { sendText: async () => { setupResult.sent.push('retry'); } }, now: () => date('2026-03-02') });
+	setupResult.feature = createMemberships({ ledger: setupResult.ledger, bridgePost: async () => ({ status: 'ok', members: [{ user_id: 'u1', name: 'A', joined_at: 1, is_bot: false, is_self: false }] }), targetRegistry: { get: async () => ({ chat_id: CHAT, websocket_chat_id: WS, owned: true, usable: true }) }, webhookTargets: { sendText: async () => { setupResult.sent.push('retry'); } }, now: () => date('2026-03-02') });
 	await setupResult.feature.review(CHAT);
 	assert.equal(setupResult.sent.length, 2);
 });
@@ -236,5 +239,30 @@ test('the preview and a review the user asks for do not depend on the daily swit
 test('a target already reviewed today is not reviewed again by the scheduler', async () => {
 	const { feature, sent } = setup({ settings: { ...off, enabled: true, last_review_on: '2026-03-01' }, members: [expired] });
 	await feature.tick();
+	assert.equal(sent.length, 0);
+});
+
+test('rows keyed by the target id are moved to the group id on first use, and the reminder still goes to the target', async () => {
+	const { feature, ledger, sent } = setup({ members: [expired] });
+	assert.equal(ledger.rows[0].target_chat_id, CHAT);
+	const list = feature.routes.find((route) => route.method === 'GET' && route.path.endsWith('/memberships'));
+	const body = await list.handle({ params: { chatId: CHAT } });
+	assert.deepEqual(body.members.map((row) => row.user_id), ['u1']);
+	assert.equal(body.target_chat_id, CHAT);
+	assert.equal(ledger.rows[0].target_chat_id, WS);
+	assert.equal(ledger.config.target_chat_id, WS);
+	await feature.review(CHAT);
+	assert.deepEqual(sent.map((item) => item.chatId), [CHAT]);
+});
+
+test('a group without a bot can be listed, edited and previewed, but not reviewed, reminded or switched on', async () => {
+	const { feature, sent } = setup({ usable: false, settings: { ...off }, members: [expired] });
+	assert.deepEqual((await feature.review(CHAT, { dryRun: true })).map((row) => row.user_id), ['u1']);
+	const saved = await feature.updateMember(CHAT, 'u1', { started_on: '2026-01-31', term_months: 1, note: null });
+	assert.equal(saved.expires_on, '2026-02-28');
+	await assert.rejects(() => feature.review(CHAT), /还没有可用的机器人/);
+	await assert.rejects(() => feature.remind(CHAT, 'u1'), /还没有可用的机器人/);
+	await assert.rejects(() => feature.updateSettings(CHAT, { enabled: true }), /还没有可用的机器人/);
+	assert.equal((await feature.updateSettings(CHAT, { default_term_months: 3 })).default_term_months, 3);
 	assert.equal(sent.length, 0);
 });

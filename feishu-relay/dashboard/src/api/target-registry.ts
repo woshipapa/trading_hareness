@@ -4,7 +4,8 @@ export type TargetRegistryRow = {
   chat_id: string;
   name: string | null;
   keyword: string | null;
-  origin: 'env' | 'dashboard';
+  /** 'env' and 'dashboard' are relay targets; 'owned' is a group the account owns that has no relay bot yet. */
+  origin: 'env' | 'dashboard' | 'owned';
   usable: boolean;
   managed?: boolean;
   websocket_chat_id?: string | null;
