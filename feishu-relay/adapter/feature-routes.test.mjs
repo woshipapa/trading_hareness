@@ -29,6 +29,9 @@ test('dispatches string and regexp routes with params and query', async () => {
 	assert.deepEqual(JSON.parse(postResponse.body), { item: 'one', body: { value: 3 } });
 	assert.equal(dispatch.matches('POST', '/items/two'), true);
 	assert.equal(dispatch.matches('GET', '/missing'), false);
+	const malformed = '/plain/%E0%A4%A';
+	assert.equal(dispatch.matches('GET', malformed), false);
+	assert.equal(await dispatch({ method: 'GET', url: malformed, headers: {} }, response()), false);
 });
 
 test('internal routes require the injected bridge token', async () => {
@@ -39,6 +42,10 @@ test('internal routes require the injected bridge token', async () => {
 	const accepted = response();
 	await dispatch({ method: 'GET', url: '/internal', headers: { 'x-larkagentx-token': 'secret' } }, accepted);
 	assert.equal(accepted.status, 200);
+	const unset = createFeatureRoutes({ routes: [{ method: 'GET', path: '/internal', internal: true, handle: async () => ({ ok: true }) }], readJsonBody: async () => ({}), token: '' });
+	const unsetResponse = response();
+	assert.equal(await unset({ method: 'GET', url: '/internal', headers: { 'x-larkagentx-token': '' } }, unsetResponse), true);
+	assert.equal(unsetResponse.status, 403);
 });
 
 test('handler errors become 400 and unmatched requests are reported unhandled', async () => {
