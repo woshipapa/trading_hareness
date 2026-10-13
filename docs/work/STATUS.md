@@ -12,7 +12,7 @@
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
 | [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 等 Codex 交回第 7 步（`tactic_trials.py` 下半：三种战绩、标签与 q 值、按天开关、卖点表、两两组合、每日总结及其文字），在工作区复跑发布路径测试，读每日总结的文字模板，通过后派第 8 步（`tactic_trial_repository.py`：按区间读取） | 2026-10-13 |
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 等 owner 恢复、B031 查明原因、用户同意取数（见 Waiting on the user）后，在非交易时段跑 `/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（一条命令顺序取 11 个代码，带参数就不存雷达；可断点续取），另用 `curl` 把全天雷达存成 `state/research/vshape_20261013/radar/radar_2026-10-13.full.json`（13:27 那份 `radar_2026-10-13.json` 是早先输出的依据，留着）；`fetch.log` 出现 FINISHED 后核对 11 个文件各约 750 行，写研究登记，派 Codex | 2026-10-13 |
-| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | building | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 交回派工 1（方案的 P1：两条采集循环固定在每分钟的某一秒启动），在工作区跑方案 Acceptance 一节的命令并读 diff，通过后用同一线程派工 2（P2 和 P3） | 2026-10-13 |
+| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | building | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 交回派工 2（方案的 P2 完整性门槛和 P3 按数据时间比对），在工作区跑方案 Acceptance 的命令并读 diff，通过后用同一线程派工 3（P4：当日汇总不读正文并报告当天是否达标） | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | approved | Claude Code 会话 eac0e1fc，2026-10-13 | 用户确认派工后：从 main 建集成分支 `integration/relay-auto`，把 `docs/work/probes/2026-10-13-relay-auto-p0.out.txt` 和 `…-web-gateway-messages.out.txt` 整理成 `feishu-relay/bridge/WEB_GATEWAY.md` 提交在集成分支上，然后 `mkworktree.sh . relay-auto-base --disposition merge --target integration/relay-auto` 并派 base 线的第一步（bridge 接缝） | 2026-10-13 |
 
@@ -36,8 +36,8 @@
 
 ## 正在运行
 
-- W008 2026-10-13 15:27 Codex 实现者在做派工 1（方案的 P1），工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-shadow-measure`，分支 `codex/tdx-shadow-measure`，基点 9d75b5d9；这是一个新的 Codex 线程（线程号在它交回时才知道，交回后记进 Log）。结束标志：分支在 9d75b5d9 之后有提交且 `git status --short` 为空。之后：在工作区跑方案 Acceptance 一节的命令、读 diff、在 Steps 里勾掉 P1，再派工 2（P2 和 P3）。它挂在主会话 93ba6e1d 上，主会话结束它就停：新会话先看分支和工作区；工作区不干净且文件十分钟内没再变，就是中断了，用新的 Codex 调用“按方案从派工 1 没做完的地方继续”，不要自己写。
 - W006 2026-10-13 15:48 Codex 实现者在做第 7 步（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 e813f371 之后有提交且 `git status --short` 为空。之后：复跑验收；读 `tactic_trials.py` 里每日总结的文字模板；勾掉 Steps；派第 8 步。
+- W008 2026-10-13 16:08 Codex 实现者在做派工 2（P2 和 P3），同一线程 01a13426-d823-78b1-9f68-2907eb221981，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-shadow-measure`。结束标志：分支在 b11e97e9 之后有两个提交且 `git status --short` 为空。之后：跑验收、读 diff（门槛的比值、分母、缺数据时不放行是否与方案一致；比对行的新字段名）、勾掉 Steps，派工 3（P4）。挂在主会话 93ba6e1d 上，判断死活和续派的办法同 W006 的 Resume here。
 
 ## 待办清单
 
