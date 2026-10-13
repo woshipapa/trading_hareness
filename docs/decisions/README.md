@@ -25,6 +25,7 @@
 | [0019](0019-feishu-relay-dashboard-registrations.md) | 飞书转发：看板登记的来源标签和目标群 webhook 存在中继自己的库里 | 生效（第 6 条被 0020 取代） |
 | [0020](0020-feishu-relay-creates-target-bots.md) | 飞书转发：用账号自己的会话在目标群里创建自定义机器人 | 生效 |
 | [0021](0021-peer-evening-stages.md) | 我们这一侧每晚要的产出，由我们自己的晚间循环启动（回执只在产出存在时关闭） | 生效 |
+| [0022](0022-feishu-relay-uses-existing-group-bots.md) | 飞书转发：可以借用群里已有的自定义机器人发消息，但不改它、不删它 | 生效 |
 
 格式：
 
