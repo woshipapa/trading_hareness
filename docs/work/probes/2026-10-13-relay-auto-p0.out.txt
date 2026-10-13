@@ -1,0 +1,46 @@
+# W010 第 0 步：线上探测 P0-1 至 P0-5 的结果，2026-10-13 15:36–15:40（上海时间）
+# 用 edge 上中继自己的 LarkAgentX 会话。脚本：2026-10-13-relay-auto-p0-a.py（建群、发言权限、邀请链接、入群申请）、
+# 2026-10-13-relay-auto-p0-b.py（读群和消息、群主撤回）。邀请链接的 token 没有打印。
+# 字段清单见 2026-10-13-web-gateway-messages.out.txt（由同名 .py 从 edge 上 larkx 的生成代码里读出）。
+# P0-6（加急）和 P0-7（拉人、移除）没有做：执行命令被 Claude Code 自动模式的权限分类器拒绝，等用户决定。
+
+## 网关响应的外层（larkx.proto.proto_pb2.Packet，去掉 payload）
+成功：{'payloadType': 1, 'cmd': 1, 'cid': '<请求的 cid>'}，payload 按响应消息解析。
+失败：payloadType 不是 1，错误文字在 sid 里，payload 为空。实测一例：
+  {'sid': 'you are already in target chat:7696053062053530578', 'payloadType': 4012, 'cmd': 3, 'cid': '…'}
+
+## P0-1 建群  chats.PutChatRequest（13）
+请求 {type: 'GROUP', groupName: '中继自测群', groupDesc: '转发中继的接口试验场，可忽略', isCrossTenant: true, cid: <uuid hex>}
+响应键 ['chat', 'feedCard']；chat = {id: '7696053062053530578', name: '中继自测群', type: 2, ownerId: <本账号>, isCrossTenant: True,
+  userCount: 1, memberCount: 1, chatMode: 1, postType: 1, allowPost: True, isDissolved: False, lastMessagePosition: 1}
+只有本账号一个成员也能建。这个群留着当试验场。
+
+## P0-2 只许群主发言  chats.PatchChatPostUserRequest（254）
+请求 {chatId, postType: 'ONLY_ADMIN'}，成功，响应体为空。
+紧接着读 chats.PullChatsByIdsRequest 仍是 postType 1（读到的是旧值）；约两分钟后再读是 postType 2。群里多一条系统消息（type=317）。
+ChatPostType：ANYONE=1，ONLY_ADMIN=2，WHITE_LIST=3。
+在 ONLY_ADMIN 下，经 adapter 的 POST /api/group-relay/targets 给这个群自动建转发机器人并发测试消息：成功
+  （target wh_4c9095abdb79bb9ab648e8db，managed true，bot_created true，关键词“自测”）。即：只许群主发言不挡机器人。
+
+## P0-3 邀请链接
+chats.PullChatLinkTokenRequest（5055）{chatId, expiredDay: 7} → token 长 36；
+  sharedUrl = https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=<token>（唯一的查询参数是 link_token）；
+  kouLing 长 163；expireTime 是秒级时间戳（7 天后）；isUnlimited False。
+chats.PullChatLinkInfoRequest（5057）{token} → 响应键 ['alreadyInChat', 'chat', 'expireTime']；alreadyInChat True；chat 同上；
+  本账号已在群里时没有 ownerChatter / inviterChatter。
+chats.PutChatterViaLinkRequest（5056）{token}，账号已在群里 → 失败外层 payloadType 4012，sid 'you are already in target chat:<chat_id>'。
+  账号不在群里时的成功响应没有试到（需要一个本账号不在的群的链接）。
+
+## P0-4 入群申请  chats.PullChatApplicationsRequest（5002）
+请求 {type: 'JOIN_CHAT', count: 20, isDescOrder: true, chatId}，对 liwei外部同步群 和 anqiang分享群1 都成功，响应体为空（当前没有申请）。
+有申请时每行的形态没有试到；chats.ProcessChatApplicationRequest（5004）没有试。
+
+## P0-5 群主撤回机器人的消息  messages.DeleteGroupMessageRequest（78）
+撤回前读 messages.PullMessagesByPositionsRequest {chatId, positions}：
+  pos 1 SYSTEM fromId 1（type=268 external group）；pos 2 SYSTEM（type=317，发言权限变更）；pos 3 SYSTEM（type=7，机器人进群）；
+  pos 4 id 7696053449107966950 type TEXT fromId 7695989460307250362（就是转发机器人的 bot_id），content 223 字节，
+    文字“自测 转发目标群已接入（看板发出的测试消息）”，status 1，fromType 1。
+请求 {id: '7696053449107966950'} 之后再读：pos 4 的 status 2，content 0 字节，removerId = 本账号，removerType 1。
+  即：群主可以撤回机器人发的消息；撤回后的标志是 status == 2 且内容为空。
+bridge 对这个没监听的群的统计（/api/group-relay/status 的 larkagentx.ignored_by_chat）：ignored_count 5，last_message_id 就是机器人那条，
+  last_reason not_allowlisted_or_dynamic_binding_failed。即：账号所在的群里机器人发的消息会经 WebSocket 推到 bridge。
