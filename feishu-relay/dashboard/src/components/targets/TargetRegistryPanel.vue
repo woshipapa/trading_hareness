@@ -20,10 +20,10 @@ onMounted(() => { void registry.load(); });
 <template>
   <el-card shadow="never" class="section-gap">
     <template #header>
-      <div class="card-header"><span>目标群登记</span><el-button type="primary" :loading="registry.resolving" @click="registry.resolve">识别现有目标群</el-button></div>
+      <div class="card-header"><span>目标群登记</span><el-button type="primary" :loading="registry.resolving.value" @click="registry.resolve">识别现有目标群</el-button></div>
     </template>
-    <el-alert v-if="registry.error" :title="registry.error" type="error" :closable="false" show-icon class="section-gap" />
-    <el-table :data="registry.targets" :loading="registry.loading" row-key="chat_id" :row-class-name="rowClassName" @row-click="selectTarget">
+    <el-alert v-if="registry.error.value" :title="registry.error.value" type="error" :closable="false" show-icon class="section-gap" />
+    <el-table v-loading="registry.loading.value" :data="registry.targets.value" row-key="chat_id" :row-class-name="rowClassName" @row-click="selectTarget">
       <el-table-column prop="name" label="群名" min-width="190"><template #default="{ row }">{{ row.name || row.chat_id }}</template></el-table-column>
       <el-table-column prop="keyword" label="关键词" min-width="140"><template #default="{ row }">{{ row.keyword || '-' }}</template></el-table-column>
       <el-table-column label="来源" width="110"><template #default="{ row }">{{ originText(row.origin) }}</template></el-table-column>
