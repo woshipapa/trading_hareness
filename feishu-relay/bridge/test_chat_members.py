@@ -88,6 +88,25 @@ class ChatMembersTest(unittest.TestCase):
 			"status": "ok", "chat_id": "7001", "applications": [{"id": 5, "status": 1, "apply_time": 456, "message": "请加入", "contact_summary": {"name": "申请人"}}],
 		})
 
+	def test_absent_protobuf_defaults_are_returned_as_empty_or_unknown(self):
+		client = Client(pages=[
+			{},
+			{"chatterHistory": [{"chatterId": "200"}]},
+			{},
+		])
+		bridge = Bridge(client)
+		self.assertEqual(ROUTES["/chat-members/list"](bridge, {"chat_id": "7001"}), {
+			"status": "ok", "chat_id": "7001", "members": [],
+		})
+		self.assertEqual(ROUTES["/chat-members/history"](bridge, {"chat_id": "7001"}), {
+			"status": "ok", "chat_id": "7001", "rows": [{
+				"user_id": "200", "name": "用户200", "action": "unknown", "event": None, "chatter_type": None, "at": None,
+			}], "next_cursor": None,
+		})
+		self.assertEqual(ROUTES["/chat-members/applications"](bridge, {"chat_id": "7001"}), {
+			"status": "ok", "chat_id": "7001", "applications": [],
+		})
+
 	def test_gateway_failure_surfaces_sid_and_account_cannot_be_removed(self):
 		client = Client(pages=[{"sid": "拒绝原因", "payloadType": 4012}])
 		with self.assertRaisesRegex(GroupAdminError, "拒绝原因"):

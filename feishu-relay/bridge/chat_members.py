@@ -69,7 +69,7 @@ def history(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 		rows.append({
 			"user_id": user_id,
 			"name": names.get(user_id, ""),
-			"action": {1: "join", 2: "leave"}[int(item.get("action") or 0)],
+			"action": {1: "join", 2: "leave"}.get(int(item.get("action") or 0), "unknown"),
 			"event": item.get("event"),
 			"chatter_type": item.get("chatterType"),
 			"at": item.get("createTime"),

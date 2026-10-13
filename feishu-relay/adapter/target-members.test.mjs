@@ -14,9 +14,25 @@ function setup(target) {
 test('an unknown, id-less, or unowned target is refused before bridge calls', async () => {
 	for (const target of [null, { owned: true }, { websocket_chat_id: '7001', owned: false }]) {
 		const { calls, routes } = setup(target);
-		await assert.rejects(() => routes[0].handle({ params: { chatId: 'target' } }), /目标群/);
+		const requests = [
+			{ params: { chatId: 'target' } },
+			{ params: { chatId: 'target' }, query: new URLSearchParams() },
+			{ params: { chatId: 'target' } },
+			{ params: { chatId: 'target', id: '55' }, body: { agree: true } },
+			{ params: { chatId: 'target', userId: '200' } },
+		];
+		for (const [index, request] of requests.entries()) {
+			await assert.rejects(() => routes[index].handle(request), /目标群/);
+		}
 		assert.deepEqual(calls, []);
 	}
+});
+
+test('application and member ids must be plain decimal ids before bridge calls', async () => {
+	const { calls, routes } = setup({ websocket_chat_id: '7001', owned: true });
+	await assert.rejects(() => routes[3].handle({ params: { chatId: 'target', id: 'foo/bar' }, body: { agree: true } }), /入群申请编号必须是纯数字/);
+	await assert.rejects(() => routes[4].handle({ params: { chatId: 'target', userId: 'foo/bar' } }), /成员编号必须是纯数字/);
+	assert.deepEqual(calls, []);
 });
 
 test('member routes map target ids to bridge paths and payloads', async () => {

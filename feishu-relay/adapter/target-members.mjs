@@ -7,6 +7,12 @@ function targetFor(targetRegistry, chatId) {
 	});
 }
 
+function decimalId(value, label) {
+	const id = String(value ?? '');
+	if (!/^\d+$/.test(id)) throw new Error(`${label}必须是纯数字`);
+	return id;
+}
+
 export function createTargetMembers({ bridgePost, targetRegistry }) {
 	async function readChat(params) {
 		const { websocketChatId } = await targetFor(targetRegistry, params.chatId);
@@ -22,8 +28,8 @@ export function createTargetMembers({ bridgePost, targetRegistry }) {
 			return bridgePost('/chat-members/history', payload, 60_000);
 		} },
 		{ method: 'GET', path: '/api/group-relay/target-groups/:chatId/applications', handle: async ({ params }) => bridgePost('/chat-members/applications', { chat_id: await readChat(params) }, 60_000) },
-		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/applications/:id', handle: async ({ params, body }) => bridgePost('/chat-members/applications/decide', { chat_id: await readChat(params), id: params.id, agree: body?.agree === true }, 60_000) },
-		{ method: 'DELETE', path: '/api/group-relay/target-groups/:chatId/members/:userId', handle: async ({ params }) => bridgePost('/chat-members/remove', { chat_id: await readChat(params), user_id: params.userId }, 60_000) },
+		{ method: 'POST', path: '/api/group-relay/target-groups/:chatId/applications/:id', handle: async ({ params, body }) => bridgePost('/chat-members/applications/decide', { chat_id: await readChat(params), id: decimalId(params.id, '入群申请编号'), agree: body?.agree === true }, 60_000) },
+		{ method: 'DELETE', path: '/api/group-relay/target-groups/:chatId/members/:userId', handle: async ({ params }) => bridgePost('/chat-members/remove', { chat_id: await readChat(params), user_id: decimalId(params.userId, '成员编号') }, 60_000) },
 	];
 
 	return { schema: [], routes };
