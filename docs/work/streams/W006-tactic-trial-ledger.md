@@ -5,8 +5,8 @@
 - goal: 把每条短线规则登记成条件、组合成战法并配卖出规则，每天收盘和 09:25 在当天样本上试，自动出每日总结和竞价看板，全部只作研究证据
 - plan: docs/work/plans/tactic-trial-ledger.md
 - branch: codex/tactic-trials
-- head: 0304f176
-- next: 等 Codex 交回“两处修正＋第 3、4 步”，在工作区复跑发布路径测试并读 diff，通过后派第 5 步（t1_settlement 的公共函数）
+- head: 15687791
+- next: 等 Codex 交回“条件表的四处修正＋第 5 步”，在工作区复跑发布路径测试、核对条件的 claim 表和 `settle` 的原有测试没被改动，通过后派第 5a、5b 步（卖出规则）
 - updated: 2026-10-13
 
 ## Requirements
@@ -39,10 +39,11 @@
 
 - [x] 1 涨停榜解码器从 `score_day` 抽出，风险分读数不变 — 61c8fd98 — 发布路径测试 → `Ran 3042 tests in 38.001s OK (skipped=2)`（两步一起，主会话复跑）
 - [x] 2 历史特征、样本行和当天环境的构造（`tactic_conditions.py`）— 0304f176 — 同上
-- [ ] 2' 两处修正：缺复权因子时按 `settle` 的口径退回未复权并标注；`gap` 从日线算、`vr` 移入历史特征 — e1aa10d3 已提交，主会话还没验收（与第 3、4 步一起验）
-- [ ] 3 基础条件与竞价行、判定结果 `flags` / `unknown`（已派）
-- [ ] 4 连板梯队角色 12 个条件（已派）
-- [ ] 5 `t1_settlement`：共用的逐日推进、`sale_blocked`、`opens_at_up_limit`、`closes_at_up_limit`，`settle` 改用它们且原测试不动
+- [x] 2' 两处修正：缺复权因子时按 `settle` 的口径退回未复权并标注；`gap` 从日线算、`vr` 移入历史特征 — e1aa10d3 — 发布路径测试 → `Ran 3045 tests in 37.708s OK (skipped=2)`（2'、3、4 一起，主会话复跑）
+- [x] 3 基础条件与竞价行、判定结果 `flags` / `unknown` — 45bf5504 — 同上；阈值逐条对过方案的表，一致
+- [ ] 3' 条件表的四处修正（见 Log 13:58，已派）
+- [x] 4 连板梯队角色 12 个条件 — 15687791 — 同上
+- [ ] 5 `t1_settlement`：共用的逐日推进、`sale_blocked`、`opens_at_up_limit`、`closes_at_up_limit`，`settle` 改用它们且原测试不动（已派）
 - [ ] 5a `tactic_exits.py` 上：两种身份、单日卖出规则、状态结果、空间指标
 - [ ] 5b `tactic_exits.py` 下：多日卖出规则、未决、十日上限
 - [ ] 6 `tactic_trials.py` 上：战法类型、组合的三值逻辑、选股、格内当日结果
@@ -61,13 +62,15 @@
 - 2026-10-13 correction: 此前给用户的各表只用“次日收盘”和“次日开盘买、再下一个开盘卖”算收益。用户指出口径不全后复算：卖法能把结果挪动 0.5–1 个点；“开盘买入不为正”用的恰是最差的卖法，较好的卖法下不加条件约打平。更正写在 `docs/archive/2026-10-13-st-combined-tactics-v0.md` “三之三”，方案加了卖出规则层。
 - 2026-10-13 12:55 建工作区，基点 932f6b5c；派第 1、2 步给 Codex（实现者线程 01a1339e-3f02-7072-ba13-2d122b927799）。
 - 2026-10-13 13:15 第 1、2 步交回，主会话复跑通过。读代码发现两处要修（缺复权因子会抛错；`vr`、`gap` 依赖风险分行），连同第 3、4 步一起回派到同一线程。
+- 2026-10-13 13:58 第 2'、3、4 步交回，复跑通过。读条件表发现四处：`claim_outcome` 被填成了 claim 的整数（方案的表没给每个条件的 claim 和对应结果，是方案的缺口，这次在派工里补了全表）；没有题材标签的行被当成同一个题材；“卡位昨日龙头”“龙头切换”少了“昨日龙头至少 2 板”，且龙头今天没封时应为否而不是未知；“反包”在中间某天读数缺失时会误判为真。连同第 5 步回派到同一线程。
 - 2026-10-13 生产库历史实测，结论进 FACTS F001–F007；回放要注意的三点写进方案“When it runs”末尾（竞价时段可用日线加历史竞价榜回放；开头几个月窗口不全；逐年核对封板判定与涨停榜名单）。
 
 ## Waiting on the user
 
 ## Running
 
-- [ ] 2026-10-13 13:20 Codex 实现者在做“两处修正＋第 3、4 步”（线程见 Log，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 0304f176 之后有三个提交（修正、第 3 步、第 4 步；修正 e1aa10d3 已有）且 `git status --short` 为空。之后：复跑验收、读 diff、勾掉 Steps、派第 5 步。该任务挂在主会话上，主会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从最后一个完成的步骤接着派。
+- [x] 2026-10-13 13:20 Codex 实现者做“两处修正＋第 3、4 步” → 13:55 交回，三个提交，已验收（2026-10-13）
+- [ ] 2026-10-13 13:58 Codex 实现者在做“条件表四处修正（第 3' 步）＋第 5 步”（同一线程，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 15687791 之后有两个提交且 `git status --short` 为空。之后：复跑验收；核对 `git diff 15687791 HEAD -- quant-service/tests/` 里没有改动已有的结算测试；勾掉 Steps；派第 5a、5b 步。该任务挂在主会话上，主会话结束它就停：接手者先看分支和工作区，再用新的 Codex 调用从最后一个完成的步骤接着派。
 
 ## Due
 
@@ -90,9 +93,9 @@
 
 ## Resume here
 
-现状：方案已批准，16 步里做完并验收 2 步，第 2'、3、4 步在 Codex 手里。主线上没有本工作线的代码，全在 `codex/tactic-trials`。
+现状：方案已批准，16 步里做完并验收 4 步（1、2、3、4），第 3' 和第 5 步在 Codex 手里。主线上没有本工作线的代码，全在 `codex/tactic-trials`。
 
-第一件事：`git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials log --oneline 932f6b5c..HEAD` 和 `git status --short`。有新提交且干净，就在该目录跑验收命令，读 `git diff 0304f176 HEAD`，对照方案“First conditions”两张表逐个核阈值，然后勾掉 Steps 并派下一步。工作区不干净时先分清是还在写还是中断了：派工的那个会话还在（你就是它，且没收到完成通知），就是还在写，等；你是新会话，旧的派工已随旧会话结束，但为保险看 `stat -f %Sm quant-service/app/tactic_conditions.py`，十分钟内还在变就再等。确认中断后，让新的 Codex 调用“从最后一个完成的步骤继续”（它会处理没提交的改动），不要自己接着写。
+第一件事：`git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials log --oneline 932f6b5c..HEAD` 和 `git status --short`。有新提交且干净，就在该目录跑验收命令，读 `git diff <记录里的 head> HEAD`，对照方案“First conditions”两张表逐个核阈值，然后勾掉 Steps 并派下一步。工作区不干净时先分清是还在写还是中断了：派工的那个会话还在（你就是它，且没收到完成通知），就是还在写，等；你是新会话，旧的派工已随旧会话结束，但为保险看 `stat -f %Sm quant-service/app/tactic_conditions.py`，十分钟内还在变就再等。确认中断后，让新的 Codex 调用“从最后一个完成的步骤继续”（它会处理没提交的改动），不要自己接着写。
 
 派工方式：`codex-flow` 技能的实现者提示词，`sandbox: danger-full-access`，`cwd` 用工作区路径，方案给绝对路径；每次派一到两步，每步单独提交。
 
