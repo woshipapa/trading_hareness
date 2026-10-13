@@ -156,6 +156,8 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("abs_tol must be a number that is not negative", problems(abs_tol="1"))
         self.assertIn("min_coverage must be a number above 0 and at most 1", problems(min_coverage=0))
         self.assertIn("min_coverage must be a number above 0 and at most 1", problems(min_coverage=1.5))
+        self.assertIn("min_share must be a number above 0 and at most 1", problems(min_share=0))
+        self.assertIn("min_share must be a number above 0 and at most 1", problems(min_share=1.5))
         self.assertIn("reference_span must be a boolean", problems(reference_span="false"))
         self.assertIn("reference_span must be a boolean", problems(reference_span=0))
         self.assertIn("key must list canonical fields", problems(key=[]))
@@ -191,9 +193,14 @@ class CatalogTests(unittest.TestCase):
         for binding in (snapshot, overview):
             self.assertIn(binding.status, PROMOTION_PATH)
             self.assertIsNotNone(binding.spec)
-            self.assertFalse(binding.decision_eligible)
+            self.assertTrue(not binding.decision_eligible or binding.status == LIVE_VERIFIED)
+        self.assertFalse(snapshot.decision_eligible)
+        self.assertFalse(overview.decision_eligible)
         self.assertEqual(snapshot.spec.max_batch, 80)
         self.assertEqual(snapshot.spec.unit_factors["volume"], 100)
+        self.assertEqual(snapshot.spec.agreement["price"]["min_share"], 0.95)
+        self.assertEqual(snapshot.spec.agreement["volume"]["min_share"], 0.85)
+        self.assertEqual(snapshot.spec.agreement["turnover"]["min_share"], 0.85)
         self.assertIn("排序宽度", overview.notes)
 
     def test_microstructure_bindings_are_specified_and_raw_auction_is_explicit(self):
@@ -202,12 +209,14 @@ class CatalogTests(unittest.TestCase):
         bindings = [item for item in BINDINGS if item.capability in keys]
         self.assertEqual({item.capability for item in bindings}, keys)
         self.assertLessEqual({item.status for item in bindings}, PROMOTION_PATH)
-        self.assertTrue(all(item.spec is not None and not item.decision_eligible for item in bindings))
+        self.assertTrue(all(item.spec is not None and (not item.decision_eligible or item.status == LIVE_VERIFIED)
+                            for item in bindings))
         auction = CAPABILITIES["microstructure.auction_curve"]
         self.assertEqual(auction.schema.names, ("time", "price", "matched_raw", "unmatched_raw", "unmatched_side"))
         legacy_minute = next(item for item in BINDINGS
                              if item.source == "tdx_public" and item.capability == "bars.minute")
         self.assertIn(legacy_minute.status, PROMOTION_PATH)
+        self.assertTrue(not legacy_minute.decision_eligible or legacy_minute.status == LIVE_VERIFIED)
         self.assertFalse(legacy_minute.decision_eligible)
 
 
