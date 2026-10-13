@@ -1,0 +1,24 @@
+probe ran at 2026-10-13 13:59:57 Asia/Shanghai
+[fuyao_ths a_share_minute_cross_section] documents 187  (this query, no body: 0.06 s)
+  stored size of normalized: total 68.6 MB  median 379 KB  max 386 KB (compressed, as stored)
+  first 09:16:19 last 13:59:46 | second of the minute: first 19 last of morning 03 first of afternoon 19 last 46
+  seconds between consecutive captures (same half-day), n 185: min 61.0  p10 61.3  median 61.78  p90 64.3  max 72.2
+  distribution: {'under 60': 0, '60-62': 118, '62-64': 45, '64-66': 17, '66-70': 4, '70-90': 1, '90 and more': 0}
+  intervals of 90 s and more (a cycle that stored nothing): []
+  seconds from capture start (effective_at) to the insert (available_at): median 0.59  p90 1.76  max 4.48
+  minutes without a document, of 195 expected (09:15-11:30, 13:00-13:59 exclusive): 9
+    straddled by one ordinary cycle (drift): 7 [('09:35', '09:34:59', '09:36:01'), ('10:01', '10:00:54', '10:02:01'), ('10:31', '10:30:58', '10:32:00'), ('10:59', '10:58:59', '11:00:01'), ('11:27', '11:26:58', '11:28:00'), ('13:13', '13:12:57', '13:14:00'), ('13:38', '13:37:59', '13:39:00')]
+    other (a failed cycle, or the edge of the session): 2 [('09:15', None, '09:16:19'), ('11:30', '11:29:03', '13:00:19')]
+  rows per document: min 4940 median 5560 max 5560
+[tdx_public a_share_minute_cross_section_shadow] documents 182  (this query, no body: 0.05 s)
+  stored size of normalized: total 47.7 MB  median 279 KB  max 282 KB (compressed, as stored)
+  first 09:15:20 last 13:59:20 | second of the minute: first 20 last of morning 53 first of afternoon 19 last 20
+  seconds between consecutive captures (same half-day), n 180: min 62.6  p10 63.0  median 63.48  p90 66.3  max 82.5
+  distribution: {'under 60': 0, '60-62': 0, '62-64': 130, '64-66': 30, '66-70': 17, '70-90': 3, '90 and more': 0}
+  intervals of 90 s and more (a cycle that stored nothing): []
+  seconds from capture start (effective_at) to the insert (available_at): median 2.98  p90 4.16  max 9.87
+  minutes without a document, of 195 expected (09:15-11:30, 13:00-13:59 exclusive): 14
+    straddled by one ordinary cycle (drift): 12 [('09:28', '09:27:57', '09:29:00'), ('09:45', '09:44:58', '09:46:01'), ('10:01', '10:00:57', '10:02:03'), ('10:17', '10:16:57', '10:18:00'), ('10:34', '10:33:56', '10:35:00'), ('10:50', '10:49:57', '10:51:01'), ('11:04', '11:03:56', '11:05:00'), ('11:18', '11:17:59', '11:19:04'), ('13:07', '13:06:57', '13:08:00'), ('13:24', '13:23:58', '13:25:02'), ('13:36', '13:35:58', '13:37:02'), ('13:52', '13:51:56', '13:53:00')]
+    other (a failed cycle, or the edge of the session): 2 [('11:29', '11:28:53', '13:00:19'), ('11:30', '11:28:53', '13:00:19')]
+  rows per document: min 0 median 5560.0 max 5560
+[agreement rows] 182 rows, stored 324 KB in total (query 0.03 s)
