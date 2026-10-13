@@ -433,13 +433,14 @@
 
 ### B047 目标群识别在启动时失败后不重试
 
-- state: ready
+- state: done
 - kind: defect
 - why: 每次发布后 adapter 先于 bridge 就绪，`targetRegistry.start()` 的第一次识别失败（日志“目标群识别失败：fetch failed”）且不再重试；表里已有行时不受影响，表空时要人点“识别现有目标群”
 - how: `adapter/target-registry.mjs` 的 `start()` 失败后隔一段时间再试，直到成功一次；带测试
 - who: agent
 - needs: 无
 - updated: 2026-10-13
+- result: 2026-10-13 23:28 随 a4680889 上线（集成分支 0046d707）：失败后每分钟重试，最多 30 次；有测试。发布后的那次启动识别在线上没有等到它自己成功，是手动触发的
 
 ### B048 目标群功能里查群主失败时不带飞书的原因
 
