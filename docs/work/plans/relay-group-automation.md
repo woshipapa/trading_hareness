@@ -1,6 +1,6 @@
 # 飞书中继：目标群管理、撤回同步、加急告警、链接入群（relay-group-automation）
 
-- 版本：r5，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3、r4 分别采纳了 Codex 方案审查三轮的 7 条、4 条、1 条意见（见文末“审查记录”）。r5 应用户 2026-10-13 的新要求加了功能 E（会员期限与到期提醒）。
+- 版本：r6，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3、r4 分别采纳了 Codex 方案审查三轮的 7 条、4 条、1 条意见（见文末“审查记录”）。r5 应用户 2026-10-13 的新要求加了功能 E（会员期限与到期提醒）。
 - 组件：只动 `feishu-relay/`（发布单元 edge-relay）。不碰 quant-service、frontend、scripts、config/secrets、docs/work。
 - 出处：待办 B030；用户 2026-10-13「可以这些全部推进，请你写好完整计划给codex-flow去执行推进。不同worktree最后merge」，
   看过方案要点后「同意了，我是trust的」。
@@ -71,6 +71,7 @@ critical/high 后，集成分支 `--no-ff` 合进 main（要用户同意），�
 | P0-6 | 账号给用户本人的账号发一条文字并应用内加急，查回执 | `urgent.PutUrgentRequest`（30000）、`PullUrgentsAckStatusRequest`（30005） | 用户的飞书会收到一次加急提醒 |
 | P0-7 | 把用户本人的账号拉进自测群再移除 | `chats.PutChatChatterRequest`（47）、`DeleteChatChatterRequest`（45） | 用户会收到一次入群和被移出的通知 |
 | P0-8 | 让中继往自测群各转发一条文字、带图富文本、卡片，记下“发出去的最终文字”和“从群里读回的文字” | 现有转发通道 + `PullMessagesByPositions` | 自测群里三条消息 |
+| P0-9 | 机器人的 webhook 用成员列表里的数字 ID @ 群成员（文字和富文本两种形态），读回看是否真的 @ 到 | webhook + `PullMessagesByPositions` | 自测群里两条消息，被 @ 的是中继账号自己 |
 
 P0-1 至 P0-7 已于 2026-10-13 试通（`docs/work/probes/2026-10-13-relay-auto-p0.out.txt`、`…-p0-c.out.txt`）；P0-8 在 base 合并后做。
 P0-9（webhook 用成员列表里的数字 ID @ 群成员，文字和富文本两种形态）也已试通（`docs/work/probes/2026-10-13-relay-auto-p0-9.out.txt`），
@@ -118,8 +119,11 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   重试会把同一条消息再发一遍；撤回失败也不能打断轮询。这是本方案里另一处有意的吞异常，注释里写明原因。
 - 分发函数把处理函数抛出的异常一律回 400 并带上原因；bridge 回的 422、429 经 `bridgePostJson` 变成带原因的异常，同样回 400。
 - 两个 Dockerfile（`adapter/Dockerfile`、`deploy/edge/Dockerfile.adapter`）的 COPY 清单一次加齐八个新文件（含 E 的 `memberships.mjs` 空壳）。
-- `adapter/webhook-targets.mjs` 加一个方法 `sendText(chatId, text)`：用该目标群的 webhook 发一条文字（关键词由调用方写进文字里），
-  地址仍不出这个模块。E 用它发到期提醒；它是 base 线的改动，功能线不碰这个文件。
+- `adapter/webhook-targets.mjs` 加一个方法 `sendText(chatId, text)`：用该目标群的 webhook 发一条文字，**由它在文字前面加上该目标群的
+  关键词**（调用方不管关键词），飞书拒绝时抛出带原因的错误（沿用模块里测试消息的那套判断）；地址仍不出这个模块。
+  E 用它发到期提醒；它是 base 线的改动，功能线不碰这个文件。
+- 每个功能模块的 `createXxx(deps)` 收到同一组依赖：`{ ledger, bridgePost, targetRegistry, webhookTargets, now }`，其中 `bridgePost`
+  就是 `index.mjs` 里的 `bridgePostJson(pathname, payload, timeoutMs)`。功能线要用的都在这里面，不需要再改 `index.mjs`。
 
 **看板**
 - 新增一级栏目 `targets`（“目标群”）：`App.vue` 的菜单、标题、视图切换；`useFeishuDashboardWorkspace.ts` 里四处：
@@ -202,9 +206,13 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
     重新进群的清掉 `left_at`、保留原有日期。本账号自己不建行（成员列表里没有机器人）。
   - 到期日 = 开始日期加 `term_months` 个日历月（月底对齐：1 月 31 日加 1 个月是 2 月最后一天）。改开始日期、期限或备注时重算到期日并清空
     `reminded_on`（续费就是改这两项）。
-  - `review(chatId, { dryRun })`：先 `sync`，再取 `expires_on <= 今天`、`left_at` 为空、`reminded_on` 为空的成员；每条消息最多 @ 20 人，
-    文字是 `<关键词> <at user_id="成员ID">名字</at>… <提醒文字>`，用 `webhookTargets.sendText` 发；发成功才把这些人的 `reminded_on` 写成今天，
-    发失败不写，下次审查再试。`dryRun` 只返回名单不发。每人只提醒一次，除非续费后再次到期，或在看板上点“再提醒一次”。
+  - `review(chatId, { dryRun })`：先 `sync`，再处理 `expires_on <= 今天`、`left_at` 为空、`reminded_on` 为空的成员。`dryRun` 只返回名单不发。
+    **先认领后发送**：用一条 `UPDATE … SET reminded_on = 今天 WHERE … reminded_on IS NULL RETURNING` 取出这批人——并发的两次审查
+    （定时的和手动的，或两个 adapter 实例）只有一次能认领到同一个人；然后每条消息最多 @ 20 人，文字是
+    `<at user_id="成员ID">名字</at>… <提醒文字>`，用 `webhookTargets.sendText` 发（关键词由它加）；某一条发失败，就把那一条里的人的
+    `reminded_on` 改回空，下次审查再试。每人只提醒一次，除非续费后再次到期。
+  - “再提醒一次”（`POST …/memberships/:userId/remind`）：只对已到期且还在群里的成员有效，不看 `reminded_on`，发成功后把它写成今天；其他情况回 400。
+  - `term_months` 只接受 1 到 120 的整数，`started_on` 只接受 `YYYY-MM-DD`，否则回 400。日期一律是上海日期。
   - `start()`：每分钟看一次时间，上海时间 09:00 之后且某个启用的目标群 `last_review_on` 不是今天，就对它 `review` 并写 `last_review_on`
     （adapter 在 09:00 时没在运行的话，启动后补做当天这一次）。
   - 路由：`GET /api/group-relay/target-groups/:chatId/memberships`（每行带状态：正常、7 天内到期、已到期、已离群）；
@@ -214,7 +222,10 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 - 看板 `MembershipPanel`：选中目标群的开关、默认期限、提醒文字；成员表（成员、开始日期、期限、到期日、状态、上次提醒、备注）可编辑
   （期限给 1、3、6、12 个月的快捷项，也可填别的月数）；按钮“同步成员”“预览今天要提醒谁”“立即审查”“再提醒一次”。
 - 测试至少覆盖：月底和闰年的到期日；新成员按入群日和默认期限登记；改期限后清空已提醒；审查只取到期、在群、未提醒的；
-  发送失败不写 `reminded_on`；超过 20 人分成多条；未启用的群不审查；09:00 之前不审查、当天审查过不再审查。
+  两次审查并发时同一个人只发一次；发送失败的那一条改回未提醒、别的条不受影响；超过 20 人分成多条；未启用的群不审查；
+  09:00 之前不审查、当天审查过不再审查、09:00 之后才启动时补做一次；“再提醒一次”对未到期或已离群的成员回 400；
+  `term_months` 为 0、负数、小数时回 400。base 线里 `sendText` 的测试：带关键词的目标群发出的文字以关键词开头且保留 `<at …>` 标签，
+  飞书拒绝时抛错。E 的验收命令与其他线相同（`node --test feishu-relay/adapter/*.test.mjs` 等），其中必须有 `memberships.test.mjs`。
 - 没验证的：被 @ 的成员属于别的租户时 @ 是否生效（对外的同步群成员都是这种）。第一次真实提醒就是验收；@ 不生效时消息里仍有名字。
 
 ## U：加急告警
@@ -317,3 +328,10 @@ Claude 在评审时另跑：`bash feishu-relay/scripts/edge/test-bridge-on-edge.
 
 r5（2026-10-13）加了功能 E 和它在 base 线里的三处接缝（`memberships.mjs` 空壳、`MembershipPanel` 空壳、`webhookTargets.sendText`）。
 E 这一节另做审查，结论记在这里。
+
+E 这一节的审查（同一线程，2026-10-13）第一轮 5 条，全部采纳（r6）：
+1. high：`sendText` 没说关键词从哪来 → 由 `sendText` 自己加。
+2. medium：E 要用的 bridge 调用没有传进功能模块 → 所有功能模块收到同一组依赖，含 `bridgePost`。
+3. medium：定时审查和手动审查会重复提醒 → 先用一条 UPDATE 认领，再发送，失败回退。
+4. medium：P0 表里没有 P0-9 → 补上（已试通）。
+5. medium：E 的测试缺并发、补做、手动提醒、期限校验 → 补进测试清单。
