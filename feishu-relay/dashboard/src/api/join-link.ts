@@ -4,9 +4,10 @@ export type JoinLinkInfo = {
   status: 'ok';
   chat_id: string;
   name: string;
-  member_count: number;
+  owner_name: string | null;
+  member_count: number | null;
   already_in_chat: boolean;
-  expire_time: number;
+  expire_time: number | null;
 };
 
 export type JoinLinkResult = {

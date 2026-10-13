@@ -36,8 +36,9 @@ function chooseGroup() {
       <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="join-by-link-gap" />
       <el-descriptions v-if="info" :column="2" border size="small" class="join-by-link-gap">
         <el-descriptions-item label="群名">{{ info.name }}</el-descriptions-item>
-        <el-descriptions-item label="人数">{{ info.member_count }} 人</el-descriptions-item>
-        <el-descriptions-item label="链接到期">{{ formatExpireTime(info.expire_time) }}</el-descriptions-item>
+        <el-descriptions-item v-if="info.owner_name !== null" label="群主">{{ info.owner_name }}</el-descriptions-item>
+        <el-descriptions-item label="人数">{{ info.member_count == null ? '未知' : `${info.member_count} 人` }}</el-descriptions-item>
+        <el-descriptions-item label="链接到期">{{ info.expire_time == null ? '未知' : formatExpireTime(info.expire_time) }}</el-descriptions-item>
         <el-descriptions-item label="入群状态">
           <el-tag :type="info.already_in_chat ? 'success' : 'warning'" size="small">
             {{ info.already_in_chat ? '已在群内' : '尚未加入' }}

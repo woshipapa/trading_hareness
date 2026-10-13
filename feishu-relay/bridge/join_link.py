@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from group_admin import checked, require_client
+from group_admin import GroupAdminError, checked, require_client
 
 
 INVITE_HOST = "applink.feishu.cn"
 INVITE_PATH = "/client/chat/chatter/add_by_link"
 TOKEN_LENGTH = 36
+REDACTED_TOKEN = "[已隐藏]"
 
 
 def _token(link: Any) -> str:
@@ -30,22 +31,33 @@ def _chat_result(chat: dict[str, Any]) -> dict[str, Any]:
 	return {"chat_id": str(chat["id"]), "name": str(chat["name"])}
 
 
+def _checked(result: dict[str, Any], token: str) -> dict[str, Any]:
+	try:
+		return checked(result)
+	except GroupAdminError as error:
+		raise GroupAdminError(str(error).replace(token, REDACTED_TOKEN)) from error
+
+
 def link_info(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 	token = _token(payload.get("link"))
-	result = require_client(bridge).api("chats.PullChatLinkInfoRequest", {"token": token})
-	chat = result["chat"]
+	result = _checked(require_client(bridge).api("chats.PullChatLinkInfoRequest", {"token": token}), token)
+	chat = result.get("chat")
+	if not chat:
+		raise ValueError("邀请链接无效或已过期")
+	owner_chatter = result.get("ownerChatter") or {}
 	return {
 		"status": "ok",
 		**_chat_result(chat),
-		"member_count": int(chat["userCount"]),
-		"already_in_chat": bool(result["alreadyInChat"]),
-		"expire_time": result["expireTime"],
+		"owner_name": owner_chatter.get("name") if "name" in owner_chatter else None,
+		"member_count": int(chat["userCount"]) if chat.get("userCount") is not None else None,
+		"already_in_chat": bool(result.get("alreadyInChat", False)),
+		"expire_time": result.get("expireTime"),
 	}
 
 
 def join_by_link(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 	token = _token(payload.get("link"))
-	result = checked(require_client(bridge).api("chats.PutChatterViaLinkRequest", {"token": token}))
+	result = _checked(require_client(bridge).api("chats.PutChatterViaLinkRequest", {"token": token}), token)
 	chat = result["chat"]
 	# Successful joins were not observed; rely only on the declared {chat} response.
 	bridge._joined_groups_cache = None
