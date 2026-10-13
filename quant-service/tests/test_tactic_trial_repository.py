@@ -3,7 +3,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from app.tactic_trial_repository import (
-    read_auction_lists, read_capabilities, read_day_bars, read_exit_bars,
+    read_auction_lists, read_day_bars, read_exit_bars,
     read_history_windows, read_limit_lists, read_market_turnover, read_next_sessions,
     read_open_sessions,
 )
@@ -46,15 +46,6 @@ class TacticTrialRepositoryTests(unittest.TestCase):
                 self.assertRegex(sql, r"(?i)(between|effective_at\s*>=|trading_date\s+between|trading_date>%|trading_date<=|pick_day-)")
         calendar = [params for sql, params in connection.calls if "market_trade_calendar" in sql]
         self.assertTrue(any(len(params) >= 3 for params in calendar))
-
-    def test_capabilities_are_one_range_read_each(self):
-        connection = Connection()
-        result = read_capabilities(connection, date(2026, 1, 1), date(2026, 3, 1))
-        self.assertEqual(set(result), {
-            "tactic_trials_close_daily", "tactic_trials_auction_daily", "tactic_trials_settled_daily",
-            "tactic_trials_summary_daily", "limit_up_risk_daily", "auction_open_desk_daily",
-        })
-        self.assertEqual(len(connection.calls), 6)
 
     def test_auction_rows_keep_order_and_amount_position(self):
         connection = Connection()

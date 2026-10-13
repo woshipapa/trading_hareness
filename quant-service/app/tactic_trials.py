@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from array import array
+from collections import deque
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -267,24 +269,45 @@ def _cached_days(days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic]) -
     return cached
 
 
-def _record(values: Sequence[Mapping[str, Any]], outcome: str, *, in_sample: bool = False) -> dict[str, Any]:
-    pick_days = [item for item in values if item["result"]["counts"]["picks"] > 0]
-    picked = [item["result"]["outcomes"][outcome] for item in pick_days if item["result"]["outcomes"][outcome]["pick_mean"] is not None]
-    differences = [item["result"]["outcomes"][outcome]["difference"] for item in values if item["result"]["outcomes"][outcome]["difference"] is not None]
-    pick_count = sum(item["result"]["counts"]["picks"] for item in values)
-    daily_mean = mean(float(item["pick_mean"]) for item in picked) if picked else None
-    daily_difference = mean(float(value) for value in differences) if differences else None
-    t_value = None
-    if len(differences) >= 3:
-        deviation = stdev(float(value) for value in differences)
-        t_value = None if deviation == 0 else daily_difference / (deviation / sqrt(len(differences)))
-    return _json({
-        "days_with_picks": len(pick_days), "picks": pick_count,
-        "mean_daily_picks_mean": daily_mean, "mean_daily_difference": daily_difference,
-        "t": t_value,
-        "positive_share": (sum(float(value) > 0 for value in differences) / len(differences)) if differences else None,
-        "in_sample": in_sample,
-    })
+def _record_outcomes(tactic: Tactic) -> tuple[str, ...]:
+    """The outcomes a tactic's records are kept for: every one for a combination, three for a single condition."""
+    if tactic.key.startswith("only."):
+        return tuple(dict.fromkeys((tactic.primary, f"{tactic.entry}:{tactic.exit}", f"{tactic.entry}:close")))
+    return _outcome_keys()
+
+
+class _Series:
+    """One tactic, one outcome, one period: what its record needs, without the days themselves."""
+
+    def __init__(self) -> None:
+        self.days_with_picks = 0
+        self.picks = 0
+        self.pick_means = array("d")
+        self.differences = array("d")
+
+    def add(self, picks: int, pick_mean: Any, difference: Any) -> None:
+        self.picks += picks
+        if picks > 0:
+            self.days_with_picks += 1
+            if pick_mean is not None:
+                self.pick_means.append(float(pick_mean))
+        if difference is not None:
+            self.differences.append(float(difference))
+
+    def record(self, *, in_sample: bool = False) -> dict[str, Any]:
+        differences = list(self.differences)
+        daily_difference = mean(differences) if differences else None
+        t_value = None
+        if len(differences) >= 3:
+            deviation = stdev(differences)
+            t_value = None if deviation == 0 else daily_difference / (deviation / sqrt(len(differences)))
+        return {
+            "days_with_picks": self.days_with_picks, "picks": self.picks,
+            "mean_daily_picks_mean": mean(self.pick_means) if self.pick_means else None,
+            "mean_daily_difference": daily_difference, "t": t_value,
+            "positive_share": (sum(value > 0 for value in differences) / len(differences)) if differences else None,
+            "in_sample": in_sample,
+        }
 
 
 def _label(record: Mapping[str, Any], expects: int) -> str:
@@ -297,173 +320,255 @@ def _label(record: Mapping[str, Any], expects: int) -> str:
     return "supports" if directed >= 2 else "against" if directed <= -2 else "undecided"
 
 
-def _records_from_cache(cached: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic]) -> dict[str, Any]:
-    records: dict[str, Any] = {}
-    for tactic in tactics:
-        relevant = [item for item in cached if tactic.key in item["results"]]
-        replay = [{**item, "result": item["results"][tactic.key]} for item in relevant if item["date"] < tactic.registered_on]
-        forward = [{**item, "result": item["results"][tactic.key]} for item in relevant if item["date"] >= tactic.registered_on]
-        recent = forward[-60:]
-        outcomes = (
-            set(relevant[0]["results"][tactic.key]["outcomes"]) if relevant and not tactic.key.startswith("only.")
-            else set(_outcome_keys()) if not tactic.key.startswith("only.")
-            else {tactic.primary, f"{tactic.entry}:{tactic.exit}", f"{tactic.entry}:close"}
-        )
-        records[tactic.key] = {
-            "name": tactic.name, "slot": tactic.slot, "primary": tactic.primary, "expects": tactic.expects,
-            "outcomes": {
-                outcome: {
-                    "replay": _record(replay, outcome, in_sample=True),
-                    "forward": _record(forward, outcome), "recent": _record(recent, outcome),
-                } for outcome in sorted(outcomes)
-            },
-        }
-    p_values: dict[str, float | None] = {}
-    for tactic in tactics:
-        forward = records[tactic.key]["outcomes"][tactic.primary]["forward"]
-        if _label(forward, tactic.expects) == "collecting" or forward["t"] is None:
-            p_values[tactic.key] = None
+def _sell_cell(values: Sequence[Any]) -> dict[str, Any]:
+    valid = [_number(value) for value in values if value is not None]
+    return {"sum": sum(valid, Decimal(0)), "count": len(valid), "missing": len(values) - len(valid)}
+
+
+def _sell_sums(rows: Sequence[tuple[Mapping[str, Any], Mapping[str, Any]]]) -> dict[str, Any]:
+    return {
+        "rows": len(rows),
+        "returns": {entry: {exit_.key: _sell_cell([_outcome_value(outcome, f"{entry}:{exit_.key}")[0] for _row, outcome in rows])
+                            for exit_ in EXITS} for entry in ("held", "buy_open")},
+        "room": {key: _sell_cell([outcome.get(key) for _row, outcome in rows]) for key in ("s1_high", "s3_high", "s1_low")},
+    }
+
+
+def _sell_scope_sums(day: Mapping[str, Any]) -> dict[str, Any]:
+    rows = [(row, day.get("outcomes", {}).get(row["symbol"], {})) for row in day["rows"]]
+
+    def by(field: str) -> dict[str, Any]:
+        buckets = sorted({row.get(field) for row, _outcome in rows}, key=lambda value: str(value))
+        return {str(bucket): _sell_sums([(row, outcome) for row, outcome in rows if row.get(field) == bucket]) for bucket in buckets}
+
+    result = {"all": _sell_sums(rows), "board_bucket": by("board_bucket")}
+    if day["slot"] == "auction":
+        result["gap_bucket"] = by("gap_bucket")
+    return result
+
+
+def _add_sell(total: dict[str, Any], part: Mapping[str, Any]) -> dict[str, Any]:
+    """Add one day's sell sums (a group, or a mapping of groups) into the running total."""
+    for key, value in part.items():
+        if key in ("sum", "count", "missing", "rows"):
+            total[key] = total.get(key, 0) + (_number(value) if key == "sum" else value)
         else:
-            # The normal approximation is sufficient for this descriptive research label.
-            p_values[tactic.key] = erfc(abs(float(forward["t"])) / sqrt(2))
-    q_values = bh_q_values(p_values)
+            _add_sell(total.setdefault(key, {}), value)
+    return total
+
+
+def _sell_means(sums: Mapping[str, Any]) -> dict[str, Any]:
+    """Turn sums into the means the summary shows."""
+    if "sum" in sums:
+        return {"mean": sums["sum"] / sums["count"] if sums["count"] else None, "count": sums["count"], "missing": sums["missing"]}
+    return {key: value if key == "rows" else _sell_means(value) for key, value in sums.items()}
+
+
+def _seal_counts(day: Mapping[str, Any]) -> dict[str, list[int]]:
+    counts: dict[str, list[int]] = {}
+    for row in day["rows"]:
+        value = day.get("outcomes", {}).get(row["symbol"], {}).get("seal")
+        if value is not None:
+            cell = counts.setdefault(str(row.get("board_bucket")), [0, 0])
+            cell[0] += bool(value)
+            cell[1] += 1
+    return counts
+
+
+def day_digest(day: Mapping[str, Any], tactics: Sequence[Tactic] = TACTICS) -> dict[str, Any]:
+    """What the records, the switch table, the sell points and the sealing rates need from one settled day.
+
+    A few tens of kilobytes instead of the day's rows and every outcome of every row: the evening summary folds
+    these one by one, so its memory does not grow with the history.
+    """
+    slot, rows, outcomes = day["slot"], day["rows"], day.get("outcomes", {})
+    results = {}
     for tactic in tactics:
-        primary = records[tactic.key]["outcomes"][tactic.primary]["forward"]
-        records[tactic.key]["label"] = _label(primary, tactic.expects)
-        records[tactic.key]["q"] = q_values[tactic.key]
-    return _json(records)
+        if tactic.slot != slot:
+            continue
+        result = day_result(tactic, rows, day.get("day", {}), outcomes)
+        results[tactic.key] = {"picks": result["counts"]["picks"], "outcomes": {
+            key: [result["outcomes"][key]["pick_mean"], result["outcomes"][key]["difference"]] for key in _record_outcomes(tactic)}}
+    digest = {"trade_date": _date(day["trade_date"]), "slot": slot, "rows": len(rows), "tactics": results,
+              "sell": _sell_scope_sums(day), "seal": _seal_counts(day)}
+    if slot == "close":
+        digest["switch"] = {
+            "daily": _mean([_outcome_value(outcomes.get(row["symbol"], {}), "held:close")[0] for row in rows]),
+            "flags": list(day.get("day", {}).get("flags", ())), "unknown": list(day.get("day", {}).get("unknown", ())),
+        }
+    return _json(digest)
+
+
+class History:
+    """The settled days folded one digest at a time, oldest first."""
+
+    def __init__(self, tactics: Sequence[Tactic] = TACTICS) -> None:
+        self.tactics = tuple(tactics)
+        self._series = {(tactic.key, outcome, period): _Series()
+                        for tactic in self.tactics for outcome in _record_outcomes(tactic) for period in ("replay", "forward")}
+        self._recent: dict[str, deque] = {tactic.key: deque(maxlen=60) for tactic in self.tactics}
+        self._switch: dict[str, list[tuple[bool, float]]] = {
+            condition.key: [] for condition in CONDITIONS if condition.level == "day" and condition.slot == "close"}
+        self.sell: dict[str, dict[str, Any]] = {"close": {}, "auction": {}}
+        self.seal: dict[str, dict[str, list[int]]] = {"close": {}, "auction": {}}
+        self.rows = {"close": 0, "auction": 0}
+
+    def add(self, digest: Mapping[str, Any]) -> None:
+        slot, day = digest["slot"], _date(digest["trade_date"])
+        self.rows[slot] += digest["rows"]
+        for tactic in self.tactics:
+            result = digest["tactics"].get(tactic.key)
+            if result is None:
+                continue
+            forward = day >= tactic.registered_on
+            for outcome, (pick_mean, difference) in result["outcomes"].items():
+                self._series[tactic.key, outcome, "forward" if forward else "replay"].add(result["picks"], pick_mean, difference)
+            if forward:
+                self._recent[tactic.key].append(result)
+        _add_sell(self.sell[slot], digest["sell"])
+        for bucket, (sealed, count) in digest["seal"].items():
+            cell = self.seal[slot].setdefault(bucket, [0, 0])
+            cell[0] += sealed
+            cell[1] += count
+        switch = digest.get("switch")
+        if switch is not None and switch["daily"] is not None:
+            for key, samples in self._switch.items():
+                if key in switch["flags"]:
+                    samples.append((True, float(switch["daily"])))
+                elif key not in switch["unknown"]:
+                    samples.append((False, float(switch["daily"])))
+
+    def records(self) -> dict[str, Any]:
+        records: dict[str, Any] = {}
+        for tactic in self.tactics:
+            outcomes = {}
+            for outcome in sorted(_record_outcomes(tactic)):
+                recent = _Series()
+                for result in self._recent[tactic.key]:
+                    recent.add(result["picks"], *result["outcomes"][outcome])
+                outcomes[outcome] = {
+                    "replay": self._series[tactic.key, outcome, "replay"].record(in_sample=True),
+                    "forward": self._series[tactic.key, outcome, "forward"].record(), "recent": recent.record(),
+                }
+            records[tactic.key] = {"name": tactic.name, "slot": tactic.slot, "primary": tactic.primary,
+                                   "expects": tactic.expects, "outcomes": outcomes}
+        p_values: dict[str, float | None] = {}
+        for tactic in self.tactics:
+            forward = records[tactic.key]["outcomes"][tactic.primary]["forward"]
+            if _label(forward, tactic.expects) == "collecting" or forward["t"] is None:
+                p_values[tactic.key] = None
+            else:
+                # The normal approximation is sufficient for this descriptive research label.
+                p_values[tactic.key] = erfc(abs(float(forward["t"])) / sqrt(2))
+        q_values = bh_q_values(p_values)
+        for tactic in self.tactics:
+            primary = records[tactic.key]["outcomes"][tactic.primary]["forward"]
+            records[tactic.key]["label"] = _label(primary, tactic.expects)
+            records[tactic.key]["q"] = q_values[tactic.key]
+        return _json(records)
+
+    def switch_records(self) -> dict[str, Any]:
+        result = {}
+        for key, samples in self._switch.items():
+            true_values = [value for state, value in samples if state]
+            false_values = [value for state, value in samples if not state]
+            difference = t_value = None
+            if len(true_values) >= 3 and len(false_values) >= 3:
+                difference = mean(true_values) - mean(false_values)
+                true_variance = sum((value - mean(true_values)) ** 2 for value in true_values) / (len(true_values) - 1)
+                false_variance = sum((value - mean(false_values)) ** 2 for value in false_values) / (len(false_values) - 1)
+                denominator = sqrt(true_variance / len(true_values) + false_variance / len(false_values))
+                t_value = None if denominator == 0 else difference / denominator
+            result[key] = _json({
+                "true_days": len(true_values), "false_days": len(false_values),
+                "true_mean": _mean(true_values), "false_mean": _mean(false_values),
+                "difference": difference, "t": t_value,
+            })
+        return result
+
+    def exit_tables(self, slot: str) -> dict[str, Any]:
+        result = {}
+        for tactic in self.tactics[:20]:
+            if tactic.slot != slot:
+                continue
+            exits = {}
+            for exit_ in EXITS:
+                values = [value for period in ("replay", "forward")
+                          for value in self._series[tactic.key, f"{tactic.entry}:{exit_.key}", period].pick_means]
+                exits[exit_.key] = _json({"key": exit_.key, "mean": _mean(values), "days": len(values)})
+            result[tactic.key] = _exit_choices(tactic, exits)
+        return result
+
+    def seal_rates(self, slot: str) -> dict[str, Any]:
+        return {bucket: {"day_rate": None, "cumulative_rate": sealed / count if count else None, "count": count}
+                for bucket, (sealed, count) in self.seal[slot].items()}
+
+    def sell_scope(self, slot: str) -> dict[str, Any]:
+        sums = self.sell[slot] or _sell_scope_sums({"slot": slot, "rows": []})
+        return _sell_means(sums)
+
+
+def history_of(days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic] = TACTICS) -> History:
+    history = History(tactics)
+    for day in days:
+        history.add(day_digest(day, tactics))
+    return history
 
 
 def build_records(days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic] = TACTICS) -> dict[str, Any]:
     """Build replay, forward and recent records from settled pick days."""
-    return _records_from_cache(_cached_days(days, tactics), tactics)
+    return history_of(days, tactics).records()
 
 
 def build_switch_records(days: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Compare the close-slot held/close outcome on True and False day conditions."""
-    conditions = tuple(condition for condition in CONDITIONS if condition.level == "day" and condition.slot == "close")
-    samples: dict[str, list[tuple[bool, float]]] = {condition.key: [] for condition in conditions}
-    for day in days:
-        if day["slot"] != "close":
-            continue
-        values = [
-            _outcome_value(day.get("outcomes", {}).get(row["symbol"], {}), "held:close")[0]
-            for row in day["rows"]
-        ]
-        daily = _mean(values)
-        if daily is None:
-            continue
-        flags, unknown = day.get("day", {}).get("flags", ()), day.get("day", {}).get("unknown", ())
-        for condition in conditions:
-            if condition.key in flags:
-                samples[condition.key].append((True, float(daily)))
-            elif condition.key not in unknown:
-                samples[condition.key].append((False, float(daily)))
-    result = {}
-    for condition in conditions:
-        true_values = [value for state, value in samples[condition.key] if state]
-        false_values = [value for state, value in samples[condition.key] if not state]
-        difference = t_value = None
-        if len(true_values) >= 3 and len(false_values) >= 3:
-            difference = mean(true_values) - mean(false_values)
-            true_variance = sum((value - mean(true_values)) ** 2 for value in true_values) / (len(true_values) - 1)
-            false_variance = sum((value - mean(false_values)) ** 2 for value in false_values) / (len(false_values) - 1)
-            denominator = sqrt(true_variance / len(true_values) + false_variance / len(false_values))
-            t_value = None if denominator == 0 else difference / denominator
-        result[condition.key] = _json({
-            "true_days": len(true_values), "false_days": len(false_values),
-            "true_mean": _mean(true_values), "false_mean": _mean(false_values),
-            "difference": difference, "t": t_value,
-        })
-    return result
+    return history_of(days).switch_records()
 
 
-def _value_record(values: Sequence[Any]) -> dict[str, Any]:
-    valid = [value for value in values if value is not None]
-    return _json({"mean": _mean(valid), "count": len(valid), "missing": len(values) - len(valid)})
-
-
-def _sell_group(rows: Sequence[tuple[Mapping[str, Any], Mapping[str, Any]]]) -> dict[str, Any]:
-    returns = {}
-    for entry in ("held", "buy_open"):
-        returns[entry] = {}
-        for exit_ in EXITS:
-            returns[entry][exit_.key] = _value_record([
-                _outcome_value(outcome, f"{entry}:{exit_.key}")[0] for _row, outcome in rows
-            ])
-    room = {
-        key: _value_record([outcome.get(key) for _row, outcome in rows])
-        for key in ("s1_high", "s3_high", "s1_low")
+def _exit_choices(tactic: Tactic, exits: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    available = [item for item in exits.values() if item["mean"] is not None]
+    return {
+        "entry": tactic.entry, "own": exits[tactic.exit], "close": exits["close"],
+        "best": max(available, key=lambda item: item["mean"]) if available else None,
+        "worst": min(available, key=lambda item: item["mean"]) if available else None,
     }
-    return {"rows": len(rows), "returns": returns, "room": room}
 
 
-def _sell_scope(days: Sequence[Mapping[str, Any]], slot: str) -> dict[str, Any]:
-    rows = [
-        (row, day.get("outcomes", {}).get(row["symbol"], {}))
-        for day in days if day["slot"] == slot for row in day["rows"]
-    ]
-    board_buckets = sorted({row.get("board_bucket") for row, _outcome in rows}, key=lambda value: str(value))
-    result = {
-        "all": _sell_group(rows),
-        "board_bucket": {
-            str(bucket): _sell_group([(row, outcome) for row, outcome in rows if row.get("board_bucket") == bucket])
-            for bucket in board_buckets
-        },
-    }
-    if slot == "auction":
-        gap_buckets = sorted({row.get("gap_bucket") for row, _outcome in rows}, key=lambda value: str(value))
-        result["gap_bucket"] = {
-            str(bucket): _sell_group([(row, outcome) for row, outcome in rows if row.get("gap_bucket") == bucket])
-            for bucket in gap_buckets
-        }
-    return result
-
-
-def _exit_choice(key: str, values: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    daily = [item["pick_mean"] for item in values if item["pick_mean"] is not None]
-    return _json({"key": key, "mean": _mean(daily), "days": len(daily)})
-
-
-def _exit_tables(cached: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic], slot: str) -> dict[str, Any]:
+def _day_exit_tables(cached: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic], slot: str) -> dict[str, Any]:
+    """The exit table of the latest day alone."""
     result = {}
     for tactic in tactics[:20]:
         if tactic.slot != slot:
             continue
         relevant = [item["results"][tactic.key] for item in cached if tactic.key in item["results"]]
-        exits = {
-            exit_.key: _exit_choice(exit_.key, [item["outcomes"][f"{tactic.entry}:{exit_.key}"] for item in relevant])
-            for exit_ in EXITS
-        }
-        available = [item for item in exits.values() if item["mean"] is not None]
-        result[tactic.key] = {
-            "entry": tactic.entry, "own": exits[tactic.exit], "close": exits["close"],
-            "best": max(available, key=lambda item: item["mean"]) if available else None,
-            "worst": min(available, key=lambda item: item["mean"]) if available else None,
-        }
+        exits = {}
+        for exit_ in EXITS:
+            daily = [item["outcomes"][f"{tactic.entry}:{exit_.key}"]["pick_mean"] for item in relevant]
+            daily = [value for value in daily if value is not None]
+            exits[exit_.key] = _json({"key": exit_.key, "mean": _mean(daily), "days": len(daily)})
+        result[tactic.key] = _exit_choices(tactic, exits)
     return result
 
 
-def build_sell_points(
-    days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic] = TACTICS,
-    cached: Sequence[Mapping[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Aggregate exit returns and room for the latest day and all supplied days."""
-    cache = list(cached) if cached is not None else _cached_days(days, tactics)
+def _sell_points(history: History, latest: Sequence[Mapping[str, Any]], latest_cache: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     result = {}
     for slot in ("close", "auction"):
-        slot_days = [day for day in days if day["slot"] == slot]
-        latest = slot_days[-1:] if slot_days else []
-        latest_date = _date(latest[0]["trade_date"]) if latest else None
-        latest_cache = [item for item in cache if item["source"]["slot"] == slot and item["date"] == latest_date]
+        day = next((item for item in latest if item["slot"] == slot), None)
         result[slot] = {
-            "day": _sell_scope(latest, slot), "cumulative": _sell_scope(slot_days, slot),
+            "day": _sell_means(_sell_scope_sums(day if day is not None else {"slot": slot, "rows": []})),
+            "cumulative": history.sell_scope(slot),
             "exit_tables": {
-                "day": _exit_tables(latest_cache, tactics, slot),
-                "cumulative": _exit_tables(cache, tactics, slot),
+                "day": _day_exit_tables([item for item in latest_cache if item["source"]["slot"] == slot], history.tactics, slot),
+                "cumulative": history.exit_tables(slot),
             },
         }
     return _json(result)
+
+
+def build_sell_points(days: Sequence[Mapping[str, Any]], tactics: Sequence[Tactic] = TACTICS) -> dict[str, Any]:
+    """Aggregate exit returns and room for the latest day and all supplied days."""
+    latest = _latest_days(days)
+    return _sell_points(history_of(days, tactics), latest, _cached_days(latest, tactics))
 
 
 def _pair_condition_keys(slot: str) -> tuple[str, ...]:
@@ -477,69 +582,83 @@ def _pair_condition_keys(slot: str) -> tuple[str, ...]:
     return own + previous
 
 
+def day_pairs(day: Mapping[str, Any]) -> dict[str, Any]:
+    """One settled day's pairs of stock conditions that some stock met together: picks, their mean, the difference."""
+    slot = day["slot"]
+    keys = _pair_condition_keys(slot)
+    outcome_key = "held:close" if slot == "close" else "buy_open:close"
+    cells: dict[tuple[tuple[str, str], str], dict[str, list[Decimal | None]]] = {}
+    for row in day["rows"]:
+        valid = [key for key in keys if _condition_value(key, row, {}) is not None]
+        value = _outcome_value(day.get("outcomes", {}).get(row["symbol"], {}), outcome_key)[0]
+        for first_index, first in enumerate(valid):
+            for second in valid[first_index + 1:]:
+                bucket = cells.setdefault(((first, second), str(row.get("board_bucket"))), {"pick": [], "comparison": []})
+                target = bucket["pick"] if first in row.get("flags", ()) and second in row.get("flags", ()) else bucket["comparison"]
+                target.append(None if value is None else _number(value))
+    states: dict[tuple[str, str], dict[str, Any]] = {}
+    for (pair, _cell), bucket in cells.items():
+        if not bucket["pick"]:
+            continue
+        state = states.setdefault(pair, {"picks": 0, "pick_values": [], "differences": []})
+        state["picks"] += len(bucket["pick"])
+        state["pick_values"].extend(bucket["pick"])
+        comparison = _mean(bucket["comparison"])
+        if comparison is not None:
+            state["differences"].extend(value - comparison for value in bucket["pick"] if value is not None)
+    return _json({"trade_date": _date(day["trade_date"]), "slot": slot, "pairs": {
+        "|".join(pair): [state["picks"], _mean(state["pick_values"]), _mean(state["differences"])]
+        for pair, state in states.items()}})
+
+
+class PairHistory:
+    """The mined pairs over the days folded in, oldest first."""
+
+    def __init__(self) -> None:
+        self._pairs: dict[str, dict[str, dict[str, Any]]] = {"close": {}, "auction": {}}
+
+    def add(self, digest: Mapping[str, Any]) -> None:
+        for key, (picks, pick_mean, difference) in digest["pairs"].items():
+            state = self._pairs[digest["slot"]].setdefault(key, {"days": 0, "picks": 0, "pick_means": array("d"), "differences": array("d")})
+            state["days"] += 1
+            state["picks"] += picks
+            if pick_mean is not None:
+                state["pick_means"].append(pick_mean)
+            if difference is not None:
+                state["differences"].append(difference)
+
+    def result(self) -> dict[str, Any]:
+        result = {}
+        for slot, states in self._pairs.items():
+            pairs = []
+            for key, state in states.items():
+                differences = list(state["differences"])
+                t_value = None
+                if len(differences) >= 3:
+                    deviation = stdev(differences)
+                    t_value = None if deviation == 0 else mean(differences) / (deviation / sqrt(len(differences)))
+                pairs.append({"conditions": key.split("|"), **_json({
+                    "days_with_picks": state["days"], "picks": state["picks"],
+                    "mean_daily_picks_mean": _mean(list(state["pick_means"])),
+                    "mean_daily_difference": _mean(differences), "t": t_value,
+                    "positive_share": sum(value > 0 for value in differences) / len(differences) if differences else None,
+                })})
+            keys = len(_pair_condition_keys(slot))
+            eligible = [pair for pair in pairs if pair["days_with_picks"] >= 20]
+            ranked = sorted((pair for pair in eligible if pair["t"] is not None), key=lambda pair: pair["t"])
+            result[slot] = {
+                "mined": True, "pairs_examined": keys * (keys - 1) // 2, "pairs_reaching_minimum": len(eligible),
+                "highest": list(reversed(ranked[-15:])), "lowest": ranked[:15],
+            }
+        return result
+
+
 def build_pairs(days: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Mine condition pairs as descriptive evidence for each slot."""
-    result = {}
-    for slot in ("close", "auction"):
-        keys = _pair_condition_keys(slot)
-        pair_days: dict[tuple[str, str], list[dict[str, Any]]] = {
-            (first, second): []
-            for first_index, first in enumerate(keys) for second in keys[first_index + 1:]
-        }
-        outcome_key = "held:close" if slot == "close" else "buy_open:close"
-        for day in days:
-            if day["slot"] != slot:
-                continue
-            cells: dict[tuple[str, str], dict[str, list[Decimal]]] = {}
-            for row in day["rows"]:
-                valid = [key for key in keys if _condition_value(key, row, {}) is not None]
-                value = _outcome_value(day.get("outcomes", {}).get(row["symbol"], {}), outcome_key)[0]
-                for first_index, first in enumerate(valid):
-                    for second in valid[first_index + 1:]:
-                        pair = (first, second)
-                        cell_key = (pair, str(row.get("board_bucket")))
-                        bucket = cells.setdefault(cell_key, {"pick": [], "comparison": []})
-                        target = bucket["pick"] if first in row.get("flags", ()) and second in row.get("flags", ()) else bucket["comparison"]
-                        if value is not None:
-                            target.append(_number(value))
-                        else:
-                            target.append(None)
-            day_pairs: dict[tuple[str, str], dict[str, Any]] = {}
-            for (pair, _cell), bucket in cells.items():
-                if not bucket["pick"]:
-                    continue
-                state = day_pairs.setdefault(pair, {"picks": 0, "pick_values": [], "differences": []})
-                state["picks"] += len(bucket["pick"])
-                state["pick_values"].extend(bucket["pick"])
-                comparison = _mean(bucket["comparison"])
-                if comparison is not None:
-                    state["differences"].extend(value - comparison for value in bucket["pick"] if value is not None)
-            for pair, state in day_pairs.items():
-                pair_days[pair].append({
-                    "picks": state["picks"], "pick_mean": _mean(state["pick_values"]),
-                    "difference": _mean(state["differences"]),
-                })
-        pairs = []
-        for pair, daily in pair_days.items():
-            differences = [float(item["difference"]) for item in daily if item["difference"] is not None]
-            t_value = None
-            if len(differences) >= 3:
-                deviation = stdev(differences)
-                t_value = None if deviation == 0 else mean(differences) / (deviation / sqrt(len(differences)))
-            pairs.append({"conditions": list(pair), **_json({
-                "days_with_picks": len(daily), "picks": sum(item["picks"] for item in daily),
-                "mean_daily_picks_mean": _mean([item["pick_mean"] for item in daily]),
-                "mean_daily_difference": _mean([item["difference"] for item in daily]),
-                "t": t_value,
-                "positive_share": sum(value > 0 for value in differences) / len(differences) if differences else None,
-            })})
-        eligible = [pair for pair in pairs if pair["days_with_picks"] >= 20]
-        ranked = sorted((pair for pair in eligible if pair["t"] is not None), key=lambda pair: pair["t"])
-        result[slot] = {
-            "mined": True, "pairs_examined": len(pairs), "pairs_reaching_minimum": len(eligible),
-            "highest": list(reversed(ranked[-15:])), "lowest": ranked[:15],
-        }
-    return result
+    history = PairHistory()
+    for day in days:
+        history.add(day_pairs(day))
+    return history.result()
 
 
 def _latest_days(days: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -549,27 +668,12 @@ def _latest_days(days: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     return list(latest.values())
 
 
-def _seal_rates(days: Sequence[Mapping[str, Any]], slot: str) -> dict[str, Any]:
-    groups: dict[str, list[bool]] = {}
-    for day in days:
-        if day["slot"] != slot:
-            continue
-        for row in day["rows"]:
-            value = day.get("outcomes", {}).get(row["symbol"], {}).get("seal")
-            if value is not None:
-                groups.setdefault(str(row.get("board_bucket")), []).append(bool(value))
-    return {
-        bucket: {"day_rate": None, "cumulative_rate": sum(values) / len(values) if values else None, "count": len(values)}
-        for bucket, values in groups.items()
-    }
-
-
-def _day_item(days: Sequence[Mapping[str, Any]], latest: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _day_item(history: History, latest: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     sizes = {
         slot: {
             "days": len([day for day in latest if day["slot"] == slot]),
             "rows": sum(len(day["rows"]) for day in latest if day["slot"] == slot),
-            "cumulative_rows": sum(len(day["rows"]) for day in days if day["slot"] == slot),
+            "cumulative_rows": history.rows[slot],
         }
         for slot in ("close", "auction")
     }
@@ -580,15 +684,14 @@ def _day_item(days: Sequence[Mapping[str, Any]], latest: Sequence[Mapping[str, A
     }
     rates = {}
     for slot in ("close", "auction"):
-        current = _seal_rates([day for day in latest if day["slot"] == slot], slot)
-        cumulative = _seal_rates(days, slot)
+        current = next((_seal_counts(day) for day in latest if day["slot"] == slot), {})
         rates[slot] = {
             bucket: {
-                "day_rate": current.get(bucket, {}).get("cumulative_rate"),
+                "day_rate": current[bucket][0] / current[bucket][1] if bucket in current else None,
                 "cumulative_rate": value["cumulative_rate"],
-                "day_count": current.get(bucket, {}).get("count", 0), "count": value["count"],
+                "day_count": current[bucket][1] if bucket in current else 0, "count": value["count"],
             }
-            for bucket, value in cumulative.items()
+            for bucket, value in history.seal_rates(slot).items()
         }
     condition_names = {condition.key: condition.name for condition in CONDITIONS if condition.level == "day"}
     return {
@@ -821,42 +924,52 @@ def summary_line_pairs(pairs: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-def build_daily_summary(
-    days: Sequence[Mapping[str, Any]], previous_summary: Mapping[str, Any] | None = None,
-    tactics: Sequence[Tactic] = TACTICS,
-) -> dict[str, Any]:
-    """Build the bounded JSON summary for the latest settled evening."""
-    latest = _latest_days(days)
-    cached = _cached_days(days, tactics)
-    records = _records_from_cache(cached, tactics)
-    switches = build_switch_records(days)
+def daily_summary(history: History, pairs: PairHistory, latest: Sequence[Mapping[str, Any]],
+                  previous_summary: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The bounded JSON summary of an evening: the folded history, and the latest settled day of each slot in full."""
+    tactics = history.tactics
+    cached = _cached_days(latest, tactics)
+    records = history.records()
+    switches = history.switch_records()
     previous_records = {} if previous_summary is None else previous_summary.get("records", {})
     changes = [] if previous_summary is None else [
         {"key": tactic.key, "previous": previous_records.get(tactic.key, {}).get("label"), "current": records[tactic.key]["label"]}
         for tactic in tactics if previous_records.get(tactic.key, {}).get("label") != records[tactic.key]["label"]
     ]
     tactic_items = [_tactic_item(latest, tactic, cached) for tactic in tactics[:20]]
-    day_item = _day_item(days, latest)
+    day_item = _day_item(history, latest)
     cases = _cases(latest)
     condition_items = _condition_day_items(latest, cached)
-    sell_points = build_sell_points(days, tactics, cached)
-    pairs = build_pairs(days)
+    sell_points = _sell_points(history, latest, cached)
+    mined = pairs.result()
     lines = [
         *summary_line_day(day_item), *summary_line_tactics(tactic_items), *summary_line_cases(cases),
         *summary_line_conditions(condition_items), *summary_line_records(records, changes),
-        *summary_line_sell_points(sell_points), *summary_line_pairs(pairs),
+        *summary_line_sell_points(sell_points), *summary_line_pairs(mined),
     ]
     return _json({
         "trade_date": max((_date(day["trade_date"]) for day in latest), default=None),
         "day": day_item, "tactics": tactic_items, "cases": cases, "conditions": condition_items,
-        "records": _summary_records(records), "switch_records": switches, "label_changes": changes, "sell_points": sell_points, "pairs": pairs,
+        "records": _summary_records(records), "switch_records": switches, "label_changes": changes, "sell_points": sell_points, "pairs": mined,
         "lines": lines,
     })
 
 
+def build_daily_summary(
+    days: Sequence[Mapping[str, Any]], previous_summary: Mapping[str, Any] | None = None,
+    tactics: Sequence[Tactic] = TACTICS,
+) -> dict[str, Any]:
+    """The summary from full settled days, oldest first (the reference the folded path is tested against)."""
+    pairs = PairHistory()
+    for day in days:
+        pairs.add(day_pairs(day))
+    return daily_summary(history_of(days, tactics), pairs, _latest_days(days), previous_summary)
+
+
 __all__ = [
-    "REGISTERED_ON", "STATE_OUTCOMES", "TACTICS", "Tactic", "build_daily_summary", "build_pairs",
-    "build_records", "build_sell_points", "build_switch_records", "day_result", "evaluate_tactic",
+    "History", "PairHistory", "REGISTERED_ON", "STATE_OUTCOMES", "TACTICS", "Tactic", "build_daily_summary",
+    "build_pairs", "build_records", "build_sell_points", "build_switch_records", "daily_summary", "day_digest",
+    "day_pairs", "day_result", "evaluate_tactic", "history_of",
     "summary_line_cases", "summary_line_conditions", "summary_line_day", "summary_line_pairs",
     "summary_line_records", "summary_line_sell_points", "summary_line_tactics",
 ]

@@ -17,12 +17,18 @@ from .tactic_conditions import (
 from .tactic_exits import evaluate_pick
 from .t1_settlement import SettlementBar, opens_at_up_limit
 from .auction_open_desk import gap_bucket
-from .tactic_trials import build_daily_summary
+from .tactic_trials import History, PairHistory, daily_summary, day_digest, day_pairs
 
 VERSION = "tactic-trials-v1"
 CLOSE_CAPABILITY = "tactic_trials_close_daily"
 AUCTION_CAPABILITY = "tactic_trials_auction_daily"
-SETTLED_CAPABILITY = "tactic_trials_settled_daily"
+# One document a session and capability is what the store keeps (`derived_daily_readings.newest`), so everything
+# that exists per slot has a capability per slot.
+READING_CAPABILITY = {"close": CLOSE_CAPABILITY, "auction": AUCTION_CAPABILITY}
+SETTLED_CAPABILITY = {"close": "tactic_trials_settled_close_daily", "auction": "tactic_trials_settled_auction_daily"}
+DIGEST_CAPABILITY = {"close": "tactic_trials_digest_close_daily", "auction": "tactic_trials_digest_auction_daily"}
+PAIRS_CAPABILITY = {"close": "tactic_trials_pairs_close_daily", "auction": "tactic_trials_pairs_auction_daily"}
+PAIR_SESSIONS = 250   # the mined pairs look at this many sessions back: their day digests are the large ones
 SUMMARY_CAPABILITY = "tactic_trials_summary_daily"
 RISK_CAPABILITY = "limit_up_risk_daily"
 DESK_CAPABILITY = "auction_open_desk_daily"
@@ -185,15 +191,36 @@ def _settle_reading(reading: Mapping[str, Any], bars_by_symbol: Mapping[str, Seq
         "rows": settled_rows, "complete": complete})
 
 
+def _settled_day(reading: Mapping[str, Any], settled: Mapping[str, Any]) -> dict[str, Any]:
+    """A reading with the outcomes of its rows: the shape the pure summary functions take."""
+    return {**reading, "outcomes": {row["symbol"]: row["outcomes"] for row in settled["rows"]}}
+
+
+def _derived_documents(reading: Mapping[str, Any], settled: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The day digest and the day's pairs: what the evening summary folds instead of the rows."""
+    day = _settled_day(reading, settled)
+    return (_research({**day_digest(day), "version": VERSION, "complete": settled["complete"]}),
+            _research({**day_pairs(day), "version": VERSION}))
+
+
+def _store_settled(database: Any, slot: str, readings: Sequence[Mapping[str, Any]], settled: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    derived = [_derived_documents(reading, document) for reading, document in zip(readings, settled)]
+    stored = derived_daily_readings.store(database, SETTLED_CAPABILITY[slot], list(settled))
+    derived_daily_readings.store(database, DIGEST_CAPABILITY[slot], [digest for digest, _pairs in derived])
+    derived_daily_readings.store(database, PAIRS_CAPABILITY[slot], [pairs for _digest, pairs in derived])
+    return stored
+
+
 def settle(database: Any, as_of: date, *, apply: bool = True) -> dict[str, Any]:
     with database.transaction() as connection:
         sessions = tactic_trial_repository.read_open_sessions(connection, as_of - timedelta(days=30), as_of)[-12:]
-        close_readings = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, sessions[0] if sessions else as_of, as_of)
-        auction_readings = tactic_trial_repository.read_capability(connection, AUCTION_CAPABILITY, sessions[0] if sessions else as_of, as_of)
-        settled = tactic_trial_repository.read_capability(connection, SETTLED_CAPABILITY, sessions[0] if sessions else as_of, as_of)
-        settled_by_key = {(item.get("trade_date"), item.get("slot")): item for item in settled}
-        pending = [reading for reading in close_readings + auction_readings
-                   if not settled_by_key.get((reading.get("trade_date"), reading.get("slot")), {}).get("complete")]
+        first = sessions[0] if sessions else as_of
+        pending: list[Mapping[str, Any]] = []
+        for slot in ("close", "auction"):
+            complete = {item["trade_date"] for item in tactic_trial_repository.read_capability(
+                connection, SETTLED_CAPABILITY[slot], first, as_of) if item.get("complete")}
+            pending += [reading for reading in tactic_trial_repository.read_capability(connection, READING_CAPABILITY[slot], first, as_of)
+                        if reading["trade_date"] not in complete]
         symbol_days = [(row["symbol"], date.fromisoformat(reading["trade_date"])) for reading in pending for row in reading.get("rows", [])]
         bars = tactic_trial_repository.read_exit_bars(connection, symbol_days)
     bars_by_key: dict[tuple[str, date], list[Mapping[str, Any]]] = {}
@@ -206,33 +233,38 @@ def settle(database: Any, as_of: date, *, apply: bool = True) -> dict[str, Any]:
         document = _settle_reading(reading, {row["symbol"]: bars_by_key.get((row["symbol"], pick_day), []) for row in reading.get("rows", [])})
         documents.append(document)
         if apply:
-            written.append(derived_daily_readings.store(database, SETTLED_CAPABILITY, [document]))
-    return _research({"status": "completed", "as_of": as_of.isoformat(), "days": [{"trade_date": item["trade_date"], "complete": item["complete"]} for item in documents], "stored": written})
-
-
-def _settled_days(close: Sequence[Mapping[str, Any]], auction: Sequence[Mapping[str, Any]], settled: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    source = {(item["trade_date"], item["slot"]): item for item in close + auction}
-    result = []
-    for item in settled:
-        base = source.get((item["trade_date"], item["slot"]))
-        if base is None:
-            continue
-        outcomes = {row["symbol"]: row["outcomes"] for row in item.get("rows", [])}
-        result.append({**base, "outcomes": outcomes})
-    return sorted(result, key=lambda item: (item["trade_date"], item["slot"]))
+            written.append(_store_settled(database, reading["slot"], [reading], [document]))
+    return _research({"status": "completed", "as_of": as_of.isoformat(),
+                      "days": [{"trade_date": item["trade_date"], "slot": item["slot"], "complete": item["complete"]} for item in documents],
+                      "stored": written})
 
 
 def summarise(database: Any, as_of: date, *, apply: bool = True) -> dict[str, Any]:
+    """Fold the stored day digests chunk by chunk; only the latest settled day of each slot is read in full."""
+    history, pairs = History(), PairHistory()
+    sessions = _read(database, tactic_trial_repository.read_open_sessions, as_of - timedelta(days=1200), as_of)
+    pair_first = sessions[-PAIR_SESSIONS] if len(sessions) > PAIR_SESSIONS else sessions[0] if sessions else as_of
+    for offset in range(0, len(sessions), tactic_trial_repository.CHUNK_SESSIONS):
+        chunk = sessions[offset:offset + tactic_trial_repository.CHUNK_SESSIONS]
+        with database.transaction() as connection:
+            for slot in ("close", "auction"):
+                for digest in tactic_trial_repository.read_capability(connection, DIGEST_CAPABILITY[slot], chunk[0], chunk[-1]):
+                    history.add(digest)
+                if chunk[-1] >= pair_first:
+                    for item in tactic_trial_repository.read_capability(connection, PAIRS_CAPABILITY[slot], max(chunk[0], pair_first), chunk[-1]):
+                        pairs.add(item)
+    latest = []
     with database.transaction() as connection:
-        first = as_of - timedelta(days=1200)
-        close = tactic_trial_repository.read_capability(connection, CLOSE_CAPABILITY, first, as_of)
-        auction = tactic_trial_repository.read_capability(connection, AUCTION_CAPABILITY, first, as_of)
-        settled = tactic_trial_repository.read_capability(connection, SETTLED_CAPABILITY, first, as_of)
-        days = _settled_days(close, auction, settled)
-        previous_rows = derived_daily_readings.newest(connection, SUMMARY_CAPABILITY, first, as_of - timedelta(days=1))
-        previous_summary = previous_rows[-1] if previous_rows else None
-    summary = build_daily_summary(days, previous_summary)
-    summary = _research({**summary, "trade_date": as_of.isoformat(), "version": VERSION})
+        recent_first = sessions[-12] if len(sessions) >= 12 else sessions[0] if sessions else as_of
+        for slot in ("close", "auction"):
+            settled = tactic_trial_repository.read_capability(connection, SETTLED_CAPABILITY[slot], recent_first, as_of)
+            if settled:
+                day = date.fromisoformat(settled[-1]["trade_date"])
+                reading = tactic_trial_repository.read_capability(connection, READING_CAPABILITY[slot], day, day)[-1]
+                latest.append(_settled_day(reading, settled[-1]))
+        previous_rows = derived_daily_readings.newest(connection, SUMMARY_CAPABILITY, as_of - timedelta(days=15), as_of - timedelta(days=1))
+    summary = daily_summary(history, pairs, latest, previous_rows[-1] if previous_rows else None)
+    summary = _research({**summary, "trade_date": as_of.isoformat(), "version": VERSION, "pair_sessions": PAIR_SESSIONS})
     stored = derived_daily_readings.store(database, SUMMARY_CAPABILITY, [summary]) if apply else {"stored": 0, "unchanged": 0}
     return _research({"status": "completed", "trade_date": as_of.isoformat(), **stored,
                       "summary": {"records": len(summary["records"]), "lines": len(summary["lines"]),
@@ -385,9 +417,8 @@ def replay(database: Any, slot: str, start: date, end: date, *, apply: bool = Fa
             return _research({"status": "refused", "reason": "limit_membership_disagreement", "year": refused,
                               "stored_chunks": chunk_index, "years": _report_view(report)})
         if apply and documents:
-            capability = CLOSE_CAPABILITY if slot == "close" else AUCTION_CAPABILITY
-            derived_daily_readings.store(database, capability, documents)
-            derived_daily_readings.store(database, SETTLED_CAPABILITY, settled_documents)
+            derived_daily_readings.store(database, READING_CAPABILITY[slot], documents)
+            _store_settled(database, slot, documents, settled_documents)
     return _research({"status": "completed", "slot": slot, "start": start.isoformat(), "end": end.isoformat(),
                       "years": _report_view(report), "days": sum(value["days"] for value in report.values()),
                       "rows": sum(value["rows"] for value in report.values()), "replayed": True})

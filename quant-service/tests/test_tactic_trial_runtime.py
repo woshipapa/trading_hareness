@@ -224,14 +224,18 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         def capability(_connection, capability, _first, _last):
             if capability == runtime.CLOSE_CAPABILITY:
                 return [] if state and state[-1]["complete"] else [reading]
-            if capability == runtime.SETTLED_CAPABILITY:
+            if capability == runtime.SETTLED_CAPABILITY["close"]:
                 return list(state)
             return []
 
         bars = [{"symbol": "000001.SZ", "pick_day": pick_day, "trading_date": pick_day, "close": 10},
                 {"symbol": "000001.SZ", "pick_day": pick_day, "trading_date": next_day, "close": 11}]
-        def store(_database, _capability, documents):
-            state[:] = documents
+        stored_under = []
+
+        def store(_database, capability, documents):
+            stored_under.append(capability)
+            if capability == runtime.SETTLED_CAPABILITY["close"]:
+                state[:] = documents
             return {"stored": 1, "unchanged": 0}
 
         with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", side_effect=[[pick_day], [pick_day, next_day]]), \
@@ -244,19 +248,38 @@ class TacticTrialRuntimeTests(unittest.TestCase):
         self.assertFalse(first["days"][0]["complete"])
         self.assertTrue(second["days"][0]["complete"])
         self.assertEqual(evaluate.call_args_list[1].args[2], bars)
+        self.assertEqual(stored_under[:3], [runtime.SETTLED_CAPABILITY["close"], runtime.DIGEST_CAPABILITY["close"],
+                                            runtime.PAIRS_CAPABILITY["close"]],
+                         "each settled day is stored with its digest and its pairs, under the slot's own capabilities")
 
-    def test_summarise_makes_three_range_readings(self):
-        database = Database()
-        calls = []
-        def readings(connection, capability, first, last):
-            calls.append(capability)
+    def test_summarise_folds_digests_in_chunks_and_reads_only_the_latest_day_in_full(self):
+        sessions = [date(2026, 1, 1) + timedelta(days=offset) for offset in range(130)]
+        last = sessions[-1]
+        reads = []
+
+        def readings(_connection, capability, first, end):
+            reads.append((capability, first, end))
+            if capability == runtime.SETTLED_CAPABILITY["close"]:
+                return [{"trade_date": last.isoformat(), "slot": "close", "complete": True, "rows": []}]
+            if capability == runtime.CLOSE_CAPABILITY:
+                return [{"trade_date": last.isoformat(), "slot": "close", "rows": [], "day": {}}]
             return []
-        with mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=readings), \
-             mock.patch.object(runtime.derived_daily_readings, "newest", return_value=[]), \
-             mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 1, "unchanged": 0}):
-            result = runtime.summarise(database, date(2026, 10, 13))
-        self.assertEqual(calls, [runtime.CLOSE_CAPABILITY, runtime.AUCTION_CAPABILITY, runtime.SETTLED_CAPABILITY])
+
+        with mock.patch.object(runtime.tactic_trial_repository, "read_open_sessions", return_value=sessions), \
+             mock.patch.object(runtime.tactic_trial_repository, "read_capability", side_effect=readings), \
+             mock.patch.object(runtime.derived_daily_readings, "newest", return_value=[]) as newest, \
+             mock.patch.object(runtime.derived_daily_readings, "store", return_value={"stored": 1, "unchanged": 0}) as store:
+            result = runtime.summarise(Database(), last)
+        digest_reads = [item for item in reads if item[0] in runtime.DIGEST_CAPABILITY.values()]
+        self.assertEqual(len(digest_reads), 2 * 3, "130 sessions are three chunks of at most 60, for two slots")
+        self.assertTrue(all((end - first).days < 60 for _capability, first, end in digest_reads))
+        self.assertEqual([item for item in reads if item[0] == runtime.CLOSE_CAPABILITY], [(runtime.CLOSE_CAPABILITY, last, last)],
+                         "the readings are read for the latest settled day only, never as history")
+        self.assertFalse([item for item in reads if item[0] == runtime.AUCTION_CAPABILITY])
+        self.assertLessEqual((last - newest.call_args.args[2]).days, 15, "the previous summary is looked for in the last days only")
+        self.assertEqual(store.call_args.args[1], runtime.SUMMARY_CAPABILITY)
         self.assertEqual(result["status"], "completed")
+
 
 if __name__ == "__main__":
     unittest.main()

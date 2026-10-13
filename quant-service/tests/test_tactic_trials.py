@@ -6,8 +6,8 @@ from decimal import Decimal
 
 from app.research_trials import bh_q_values
 from app.tactic_trials import (
-    TACTICS, Tactic, build_daily_summary, build_pairs, build_records, build_sell_points,
-    build_switch_records, day_result, evaluate_tactic,
+    TACTICS, History, PairHistory, Tactic, build_daily_summary, build_pairs, build_records, build_sell_points,
+    build_switch_records, daily_summary, day_digest, day_pairs, day_result, evaluate_tactic,
 )
 
 
@@ -177,6 +177,23 @@ class TacticTrialTests(unittest.TestCase):
         self.assertIn("cumulative", summary["sell_points"]["close"])
         json.dumps(summary)
 
+    def test_the_summary_folded_from_stored_digests_equals_the_one_from_the_full_days(self):
+        """What the evening job does (digests read back from JSON, one by one) against the reference on full days."""
+        days = []
+        for index in range(30):
+            day = self._day((date(2026, 9, 20) + timedelta(days=index)).isoformat(), day_flag="env_ladder_ok" if index % 3 else None)
+            day["rows"][0]["flags"] = ["theme_big", "theme_7plus", "pick"]
+            value = Decimal("0.03") - Decimal(index) / Decimal("700")
+            day["outcomes"]["P"]["entries"]["held"]["close"].update(raw_return=value, net_return=value)
+            days.append(day)
+            days.append(self._day(day["trade_date"], slot="auction"))
+        history, pairs = History(), PairHistory()
+        for day in days:
+            history.add(json.loads(json.dumps(day_digest(day))))
+            pairs.add(json.loads(json.dumps(day_pairs(day))))
+        folded = daily_summary(history, pairs, days[-2:], {"records": {}})
+        self.assertEqual(json.loads(json.dumps(folded)), json.loads(json.dumps(build_daily_summary(days, {"records": {}}))))
+        self.assertLess(len(json.dumps(day_digest(days[0]))), 60_000, "a day digest stays small")
 
 if __name__ == "__main__":
     unittest.main()

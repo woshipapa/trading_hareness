@@ -13,12 +13,6 @@ from .derived_daily_readings import newest, session_close
 CN_TZ = ZoneInfo("Asia/Shanghai")
 CHUNK_SESSIONS = 60
 LIST_KEYS = tuple(f"pid:{pid}" for pid in "12345")
-READING_CAPABILITIES = (
-    "tactic_trials_close_daily", "tactic_trials_auction_daily", "tactic_trials_settled_daily",
-    "tactic_trials_summary_daily", "limit_up_risk_daily", "auction_open_desk_daily",
-)
-
-
 def _body(value: Any) -> dict[str, Any]:
     return json.loads(value) if isinstance(value, str) else dict(value)
 
@@ -108,10 +102,6 @@ def read_capability(connection: Any, capability: str, start: date, end: date) ->
     return newest(connection, capability, start, end)
 
 
-def read_capabilities(connection: Any, start: date, end: date) -> dict[str, list[dict[str, Any]]]:
-    return {capability: read_capability(connection, capability, start, end) for capability in READING_CAPABILITIES}
-
-
 def read_auction_lists(connection: Any, start: date, end: date) -> list[dict[str, Any]]:
     rows = connection.execute(
         """SELECT effective_at,symbol,payload FROM quant.raw_market_observations
@@ -156,7 +146,7 @@ def read_next_sessions(connection: Any, day: date, count: int) -> list[date]:
 
 
 __all__ = [
-    "CHUNK_SESSIONS", "READING_CAPABILITIES", "read_auction_lists", "read_capabilities", "read_capability",
+    "CHUNK_SESSIONS", "read_auction_lists", "read_capability",
     "read_day_bars", "read_exit_bars", "read_history_windows", "read_limit_lists", "read_market_turnover",
     "read_next_sessions", "read_open_sessions",
 ]
