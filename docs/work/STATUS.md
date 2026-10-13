@@ -14,11 +14,13 @@
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 等 owner 恢复且 B031 查明原因后，重跑第一轮：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 510300 512100`（带代码参数就不存雷达），全天雷达另用 `curl` 存到本机 `state/research/vshape_20261013/radar/radar_2026-10-13.json`；第一轮日志出现 FINISHED 后第二轮自动开始（若排队命令已随主会话结束，按 Running 里的命令手工跑）；两轮都完成后核对 11 个代码的天数，写研究登记，派 Codex | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | building | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 交回派工 1（方案的 P1：两条采集循环固定在每分钟的某一秒启动），在工作区跑方案 Acceptance 一节的命令并读 diff，通过后用同一线程派工 2（P2 和 P3） | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
+| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | proposed | Claude Code 会话 eac0e1fc，2026-10-13 | 等用户看过方案并同意后，把方案写成 `docs/work/plans/relay-group-automation.md`，交 Codex 做方案审查，再按 codex-flow 进入派工前的确认 | 2026-10-13 |
 
 ## 等用户处理
 
 - W004 2026-10-13 请看一下控制台“盘面雷达与战法”页签的新图，配色、数字口径、点的密度是否还要调。为什么等：这是按用户的参考图做的，是否“看得懂”只有用户能判断。之后：没有意见就关闭本记录。
 - W008 2026-10-13 是否同意在发布分类器里把 `scripts/tdx-promote.py` 列为“只在工作站运行”的工具（改的是 `scripts/shared-peer/classify-owner-paths.sh` 的规则）？为什么等：这是发布安全规则的改动，方案要求用户明确同意。同意：派工 5 带上这条规则，两次发布都是纯代码发布。不同意：派工 4–5 的分支等派工 6–10 的分支一起合并，发布 B 走全量发布。派工 5 开始前需要答案；派工 1–4 不受影响。
+- W010 2026-10-13 是否同意方案并允许把它写成文件、交给 Codex 审查和执行；其中派工前的线上探测有两项会打扰到用户本人的账号
 
 ## 到点要做
 
@@ -38,7 +40,7 @@
 
 ## 待办清单
 
-open 20, ready 9, doing 1, done 1, dropped 1
+open 19, ready 9, doing 1, done 2, dropped 1
 
 可以开工或等用户处理的:
 
