@@ -1,10 +1,10 @@
 # W008 通达信补主行情快照的缺口并作备用
 
-- state: planned
-- holder: Claude Code 会话 93ba6e1d（主会话；它派出的接手 agent 只做到“方案审完、待批准”，已于 2026-10-13 15:25 交回，批准前没有别的 agent 在做这条线），2026-10-13
+- state: approved
+- holder: Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13
 - goal: 主数据源（同花顺）某一分钟缺了或出错时，用通达信的全市场快照补上并带来源标记；不把通达信变成主数据源
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
-- next: 主会话把 Waiting on the user 里的批准问题交给用户；得到批准后按 `codex-flow` 第 4 步建工作区 `tdx-shadow-measure`（disposition merge，target main）并派工 1（方案的 P1）
+- next: 等 Codex 交回派工 1（方案的 P1：两条采集循环固定在每分钟的某一秒启动），在工作区跑方案 Acceptance 一节的命令并读 diff，通过后用同一线程派工 2（P2 和 P3）
 - updated: 2026-10-13
 
 ## Requirements
@@ -12,6 +12,7 @@
 - 2026-10-12 决策记录 0015：通达信数据可以作为决策证据，并接入生产采集（操作者决定；原话没有存在记录里）。
 - 2026-10-13 「以及当前tdx采集的如何，是否可以合入一起加强main链路」
 - 2026-10-13 「启动」（答复主会话的建议：按现有方案的三步推进、前面加四个前置修复、由新的 agent 凭笔记接手。这句话批准的是启动这条线，方案第 3 版审完后还要再请用户批准才动工）
+- 2026-10-13 15:26 「批准开工」（答复主会话转述的批准问题。批准的是方案第 3 版并开工。三件要一并回答的事用户没有逐条回答，主会话的理解：(2) 升级前看 5 个交易日，按方案；(3) 最后一轮审查后改的那一处按现在的写法开工，由合并前的双重评审覆盖；(1) 发布分类器里给 `scripts/tdx-promote.py` 加规则是改发布安全规则，方案写明要用户明确说“同意”，这句话不算，派工 5 之前再问）
 
 ## Plan
 
@@ -64,7 +65,8 @@
 
 ## Waiting on the user
 
-- [ ] 2026-10-13 批准 W008 方案第 3 版（`docs/work/plans/tdx-live-snapshot-fallback.md`）并开工吗？为什么等：动工前要用户批准（`codex-flow` 第 3 步），而且里面有三件只有用户能定的事。请一并回答：(1) 是否同意在发布分类器里给 `scripts/tdx-promote.py` 加“只在工作站运行”的规则（同意：两次发布都是纯代码发布；不同意：派工 4–5 的分支要等派工 6–10 的分支一起合并，发布 B 走全量发布）；(2) 升级前要看几个交易日，方案取 5 个（写进目录常量 `min_sessions`，由工具把关），可以改；(3) 最后一轮审查后改的那一处（名册取主源已存文档的上游总数，读不到就不补）没有再审：按现在的写法开工，还是先让 Codex 加审一轮。执行：Codex `gpt-5.6-sol` / high；三个工作区依次是 `tdx-shadow-measure`、`tdx-promote-gate`、`tdx-live-snapshot-fallback`，都是 disposition merge、target main，路径由 `mkworktree.sh` 给出（应在 `/Users/papa/codebase/.codex-wt/` 下）。之后：建第一个工作区，派工 1。
+- [x] 2026-10-13 批准 W008 方案第 3 版（`docs/work/plans/tdx-live-snapshot-fallback.md`）并开工吗？为什么等：动工前要用户批准（`codex-flow` 第 3 步），而且里面有三件只有用户能定的事。请一并回答：(1) 是否同意在发布分类器里给 `scripts/tdx-promote.py` 加“只在工作站运行”的规则（同意：两次发布都是纯代码发布；不同意：派工 4–5 的分支要等派工 6–10 的分支一起合并，发布 B 走全量发布）；(2) 升级前要看几个交易日，方案取 5 个（写进目录常量 `min_sessions`，由工具把关），可以改；(3) 最后一轮审查后改的那一处（名册取主源已存文档的上游总数，读不到就不补）没有再审：按现在的写法开工，还是先让 Codex 加审一轮。执行：Codex `gpt-5.6-sol` / high；三个工作区依次是 `tdx-shadow-measure`、`tdx-promote-gate`、`tdx-live-snapshot-fallback`，都是 disposition merge、target main，路径由 `mkworktree.sh` 给出（应在 `/Users/papa/codebase/.codex-wt/` 下）。之后：建第一个工作区，派工 1。 → 「批准开工」（2026-10-13 15:26）；(1) 未明确回答，另列一条
+- [ ] 2026-10-13 是否同意在发布分类器里把 `scripts/tdx-promote.py` 列为“只在工作站运行”的工具（改的是 `scripts/shared-peer/classify-owner-paths.sh` 的规则）？为什么等：这是发布安全规则的改动，方案要求用户明确同意。同意：派工 5 带上这条规则，两次发布都是纯代码发布。不同意：派工 4–5 的分支等派工 6–10 的分支一起合并，发布 B 走全量发布。派工 5 开始前需要答案；派工 1–4 不受影响。
 
 ## Running
 
