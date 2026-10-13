@@ -100,6 +100,18 @@ test('a webhook that refuses the test message is not stored', async () => {
 	assert.equal(offlineLedger.table.size, 0);
 });
 
+test('sendText prefixes the target keyword, preserves mentions, and reports refusals without the address', async () => {
+	const { calls, targets } = setup();
+	await targets.sendText('oc_env', '<at user_id="ou_member">成员</at> 到期');
+	assert.equal(calls.at(-1).body.content.text, '汇总 <at user_id="ou_member">成员</at> 到期');
+	await assert.rejects(() => targets.sendText('oc_missing', 'text'), /目标群不存在/);
+	const refused = setup({ answer: { code: 19024, msg: 'refused' } });
+	await assert.rejects(() => refused.targets.sendText('oc_env', 'text'), /关键词和机器人安全设置里的不一致/);
+	const unknown = setup({ answer: { code: 99999, msg: '拒绝 https://open.feishu.cn/open-apis/bot/v2/hook/leaked' } });
+	await assert.rejects(() => unknown.targets.add({ name: '新群', webhookUrl: HOOK, keyword: '词' }), (error) => error.message.includes('[已隐藏地址]') && !error.message.includes('https://'));
+	await assert.rejects(() => unknown.targets.sendText('oc_env', 'text'), (error) => error.message.includes('[已隐藏地址]') && !error.message.includes('https://'));
+});
+
 test('only a Feishu custom-bot address is accepted, and nothing is called for another', async () => {
 	for (const bad of ['http://open.feishu.cn/open-apis/bot/v2/hook/11111111-2222', 'https://example.com/open-apis/bot/v2/hook/11111111-2222', 'https://open.feishu.cn/open-apis/bot/v2/hook/', `${HOOK}?x=1`, 'https://open.feishu.cn:8443/open-apis/bot/v2/hook/11111111-2222', 'https://user:pw@open.feishu.cn/open-apis/bot/v2/hook/11111111-2222', '不是网址']) {
 		assert.throws(() => parseWebhookUrl(bad), /webhook 地址/, bad);

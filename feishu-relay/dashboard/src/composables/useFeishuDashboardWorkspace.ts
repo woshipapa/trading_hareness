@@ -14,7 +14,7 @@ type EventItem = {
   n8n_error?: string | null;
 };
 
-type DashboardSection = 'monitor' | 'workbench' | 'relay' | 'send';
+type DashboardSection = 'monitor' | 'workbench' | 'relay' | 'send' | 'targets';
 
 export function useFeishuDashboardWorkspace() {
   const mobileMediaQuery = window.matchMedia('(max-width: 760px)');
@@ -83,7 +83,7 @@ export function useFeishuDashboardWorkspace() {
   }
 
   function selectActiveSection(section: string) {
-    if (!['monitor', 'workbench', 'relay', 'send'].includes(section)) return;
+    if (!['monitor', 'workbench', 'relay', 'send', 'targets'].includes(section)) return;
     activeSection.value = section as DashboardSection;
     localStorage.setItem('feishu-relay-active-section', section);
     window.history.replaceState({}, '', section === 'monitor' ? '/monitor' : `/${section}`);
@@ -97,6 +97,7 @@ export function useFeishuDashboardWorkspace() {
       return feishuRelayWorkspace.loadGroupRelayStatus();
     }
     if (activeSection.value === 'workbench') return feishuRelayWorkspace.loadFeishuWorkbench();
+    if (activeSection.value === 'targets') return Promise.resolve();
     return Promise.resolve();
   }
 
@@ -144,7 +145,7 @@ export function useFeishuDashboardWorkspace() {
   const dashboardBindings = {
     activeSection, routes, events, connected, eventFilter, visibleEvents, mobileLayout,
     relayTag, relaySource, relayText, relayFiles, relayDate, relayTime, relayState, relayProgress, relayXhr,
-    selectActiveSection, loadGroupRelayStatus: feishuRelayWorkspace.loadGroupRelayStatus,
+    selectActiveSection, loadActiveSection, loadGroupRelayStatus: feishuRelayWorkspace.loadGroupRelayStatus,
     loadFeishuWorkbench: feishuRelayWorkspace.loadFeishuWorkbench,
     addFiles, submitRelay, dateText, ageText,
   };
@@ -174,6 +175,7 @@ function initialSection(path: string): DashboardSection {
   if (path === '/workbench') return 'workbench';
   if (path === '/relay') return 'relay';
   if (path === '/send') return 'send';
+  if (path === '/targets') return 'targets';
   const persisted = localStorage.getItem('feishu-relay-active-section');
-  return persisted === 'workbench' || persisted === 'relay' || persisted === 'send' || persisted === 'monitor' ? persisted : 'monitor';
+  return persisted === 'workbench' || persisted === 'relay' || persisted === 'send' || persisted === 'targets' || persisted === 'monitor' ? persisted : 'monitor';
 }

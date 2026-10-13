@@ -26,6 +26,10 @@ const REFUSALS = new Map([
 	[19024, '关键词和机器人安全设置里的不一致'],
 ]);
 
+function sanitizeRefusalMessage(value) {
+	return String(value ?? '').replace(/(?:(?:https?|ftp):\/\/|www\.|open\.(?:feishu\.cn|larksuite\.com)\/)[^\s<>"']+/gi, '[已隐藏地址]');
+}
+
 function deriveKey(secret) {
 	return createHash('sha256').update(`feishu-relay-webhook-target:${secret}`).digest();
 }
@@ -95,14 +99,19 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, bots 
 		return { loaded: stored.size, unreadable: unreadable.size };
 	}
 
-	async function sendTest(url, text) {
+	async function sendWebhook(url, text, label) {
 		let response;
 		// The address is in the request, so a transport error is reported without its details.
 		try { response = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ msg_type: 'text', content: { text } }), signal: AbortSignal.timeout(15_000) }); }
-		catch { throw new Error('测试消息没有发出去：连不上飞书，请稍后再试'); }
+		catch { throw new Error(`${label}没有发出去：连不上飞书，请稍后再试`); }
 		const result = await response.json().catch(() => ({}));
 		if (response.ok && (!result?.code || result.code === 0)) return;
-		throw new Error(`测试消息没有发出去：${REFUSALS.get(Number(result?.code)) ?? result?.msg ?? `HTTP ${response.status}`}`);
+		const reason = REFUSALS.get(Number(result?.code)) ?? (sanitizeRefusalMessage(result?.msg) || `HTTP ${response.status}`);
+		throw new Error(`${label}没有发出去：${reason}`);
+	}
+
+	async function sendTest(url, text) {
+		return sendWebhook(url, text, '测试消息');
 	}
 
 	function checkedName(name) {
@@ -188,5 +197,17 @@ export function createWebhookTargets({ ledger, secret, webhooks, keywords, bots 
 		return [...new Set([...webhooks.keys(), ...unreadable.keys()])].sort().map(publicTarget);
 	}
 
-	return { load, add, addManaged, remove, list, has: (chatId) => webhooks.has(String(chatId ?? '')) };
+	async function sendText(chatId, text) {
+		const id = String(chatId ?? '').trim();
+		const url = webhooks.get(id);
+		if (!url) throw new Error('目标群不存在或 webhook 不可用');
+		const keyword = String(keywords.get(id) ?? '').trim();
+		await sendWebhook(url, keyword ? `${keyword} ${String(text ?? '')}` : String(text ?? ''), '消息');
+	}
+
+	function webhookHashes() {
+		return [...webhooks].map(([chat_id, url]) => ({ chat_id, webhook_hash: createHash('sha256').update(url, 'utf8').digest('hex') }));
+	}
+
+	return { load, add, addManaged, remove, list, sendText, webhookHashes, has: (chatId) => webhooks.has(String(chatId ?? '')) };
 }
