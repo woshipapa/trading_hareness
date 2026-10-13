@@ -4,8 +4,8 @@
 - holder: Claude Code 会话 eac0e1fc，2026-10-13
 - goal: 在转发看板里完成建同步群、管理目标群成员、源头撤回后同步撤回、降级告警加急、粘贴邀请链接入群，以及把现有目标群纳入看板管理
 - plan: docs/work/plans/relay-group-automation.md
-- branch: 集成分支 `integration/relay-auto`（工作区 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-int`）；base 线 `codex/relay-auto-base`（工作区 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`，处置 merge，目标集成分支）
-- head: 集成分支 6b31c254（main 49a6c2f7 加一份 `feishu-relay/bridge/WEB_GATEWAY.md`）
+- branch: integration/relay-auto
+- head: 6b31c254
 - release: none
 - next: base 线第一步（bridge 接缝和 R 的 bridge 部分）返回后：在工作区里自己跑验收命令和 `bash feishu-relay/scripts/edge/test-bridge-on-edge.sh`，读 `git diff integration/relay-auto...HEAD`，通过后用同一线程续派第二步（adapter 接缝和 R），再第三步（看板）
 - updated: 2026-10-13
@@ -96,6 +96,8 @@
 
 ## Resume here
 
+集成分支 `integration/relay-auto` 的工作区在 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-int`；base 线是分支 `codex/relay-auto-base`，
+工作区 `/Users/papa/codebase/.codex-wt/n8n-relay-auto-base`（处置 merge，目标集成分支）。
 已开始派工。集成分支 `integration/relay-auto`（6b31c254）有自己的工作区，用来提交、合并和跑验收；base 线的工作区已建，
 第一步（bridge）在 Codex 手里（见 Running）。base 线还有第二步（adapter）和第三步（看板），三步都做完、双重评审通过后合进集成分支，
 再做探测 P0-8，然后从集成分支拉五条功能线并行派。
