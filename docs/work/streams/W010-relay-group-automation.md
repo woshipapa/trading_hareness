@@ -7,7 +7,7 @@
 - branch: none
 - head: 9d75b5d9
 - release: none
-- next: 读 Codex 方案审查的结论并逐条裁决（改方案或写明不采纳的理由）；同时做线上探测 P0-1 至 P0-7，把结果写成 `feishu-relay/bridge/WEB_GATEWAY.md`；然后把审查后的改动给用户看，得到同意后建集成分支、派 base 线
+- next: 用户确认派工后：从 main 建集成分支 `integration/relay-auto`，把 `docs/work/probes/2026-10-13-relay-auto-p0.out.txt` 和 `…-web-gateway-messages.out.txt` 整理成 `feishu-relay/bridge/WEB_GATEWAY.md` 提交在集成分支上，然后 `mkworktree.sh . relay-auto-base --disposition merge --target integration/relay-auto` 并派 base 线的第一步（bridge 接缝）
 - updated: 2026-10-13
 
 ## Requirements
@@ -17,9 +17,10 @@
 
 ## Plan
 
-`docs/work/plans/relay-group-automation.md`，现为 r2。批准：用户 2026-10-13「同意了，我是trust的」（针对方案要点、六个工作区的处置和派工前的线上探测）。
+`docs/work/plans/relay-group-automation.md`，现为 r4。批准：用户 2026-10-13「同意了，我是trust的」（针对方案要点、六个工作区的处置和派工前的线上探测）。
 方案审查第一轮（Codex，只读，线程 01a1342e，`gpt-5.6-sol` high）：7 条意见（3 条 high、4 条 medium），全部采纳，改成 r2，逐条处理写在方案末尾的“审查记录”。
-第二轮在进行中。按 codex-flow，审查后的改动要再给用户看一次才派工。
+第二轮 4 条（1 条 high、3 条 medium）、第三轮 1 条（medium），同样全部采纳（r3、r4）；没有不采纳的意见。第三轮那一条的改动没有再送审（最多三轮）。
+按 codex-flow，审查后的改动要再给用户看一次才派工。
 
 ## Steps
 
@@ -48,6 +49,8 @@
   把这两项写成用户自己运行的脚本 `docs/work/probes/2026-10-13-relay-auto-p0-c.sh`。
 - 2026-10-13 16:45 方案审查第一轮返回 7 条，全部采纳（主要是：U、D 需要的调用点改由 base 预先接好，功能线不再碰共享文件；U 不能走 `Bridge.send()`；
   D 的指纹要用最终发出的文字并加一项探测 P0-8；本机跳过的 bridge 测试由 edge 套件把关；R 不筛掉非群主的目标群）。r2 交第二轮。
+- 2026-10-13 17:20 方案审查三轮结束：第二轮把 bridge 给 D 的钩子改成不影响原处理的旁路、两处记录调用不等待不外传失败、观察名单定时下发；
+  第三轮把“目标群变了”的通知收进 `targetRegistry` 自己的写方法。方案 r4 已提交。等用户做派工前的确认。
 
 ## Waiting on the user
 
@@ -61,8 +64,7 @@
 
 ## Running
 
-- [ ] 2026-10-13 16:20 Codex 方案审查（MCP 调用，线程 01a1342e，cwd 是主检出，只读），16:47 起是第二轮。结束标志：调用返回 `SOUND` 或一份编号的问题清单。
-  之后：逐条裁决，改方案或写明不采纳的理由，再审一轮（最多 3 轮）。该调用挂在会话 eac0e1fc 上，会话结束它就停；接手者重新发起审查即可。
+- [x] 2026-10-13 16:20 Codex 方案审查（线程 01a1342e）→ 17:20 三轮结束，共 12 条意见全部采纳，方案 r4；结果记在 Plan 一节和方案末尾。原说明：  之后：逐条裁决，改方案或写明不采纳的理由，再审一轮（最多 3 轮）。该调用挂在会话 eac0e1fc 上，会话结束它就停；接手者重新发起审查即可。
 
 ## Due
 

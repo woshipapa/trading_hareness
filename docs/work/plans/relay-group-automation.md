@@ -1,6 +1,6 @@
 # 飞书中继：目标群管理、撤回同步、加急告警、链接入群（relay-group-automation）
 
-- 版本：r3，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3 分别采纳了 Codex 方案审查第一轮的 7 条和第二轮的 4 条意见（见文末“审查记录”）。
+- 版本：r4，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3、r4 分别采纳了 Codex 方案审查三轮的 7 条、4 条、1 条意见（见文末“审查记录”）。
 - 组件：只动 `feishu-relay/`（发布单元 edge-relay）。不碰 quant-service、frontend、scripts、config/secrets、docs/work。
 - 出处：待办 B030；用户 2026-10-13「可以这些全部推进，请你写好完整计划给codex-flow去执行推进。不同worktree最后merge」，
   看过方案要点后「同意了，我是trust的」。
@@ -102,8 +102,9 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   回调里、现有的 `/internal/larkagentx/*` 和 `/api/group-relay/targets` 分支之前调用分发函数。
   `Route` 可带 `internal: true`：分发函数先按现有内部入口的做法校验 `x-larkagentx-token`。
   执行完 `schema` 后，对有 `start()` 的功能对象调用一次 `start()`（D 用它定时把观察名单发给 bridge）。
-  `targetRegistry` 提供 `onChange(listener)`：`resolve()` 写表后、以及 `/api/group-relay/targets` 新增和删除目标群的两个处理分支
-  （`index.mjs`，base 改）成功后通知监听者。
+  `targetRegistry` 提供 `onChange(listener)`，由它**自己的写方法**通知监听者：`resolve()` 写表后、`record(target)`（登记或更新一行）、
+  `forget(chatId)`（删一行）。`/api/group-relay/targets` 新增和删除目标群的两个处理分支（`index.mjs`，base 改）成功后分别调用
+  `record` 和 `forget`；C 建好同步群后也调用 `record`。这样任何途径加减目标群都会通知到，功能线不需要碰 `index.mjs`。
 - 给 U 和 D 预先接好的三处调用（空壳里是什么都不做的函数，功能线只改自己的模块）：
   `notifyOps`（第 109 行）在原有的发运维群之后 `await urgentAlerts.notify(key, text)`；
   创建 group relay 时把 `deliveryCheck.recordWebhookDelivery` 和 `deliveryCheck.recallDeliveries` 传进去；
@@ -273,3 +274,7 @@ Claude 在评审时另跑：`bash feishu-relay/scripts/edge/test-bridge-on-edge.
 2. medium：钩子的位置晚于 XHS 分支 → 调用点提到处理的最前面；没有 `from_id` 的消息本来就对不上机器人。
 3. medium：记录发送失败会让已成功的 webhook 被当成失败而重发 → 两处调用不等待、不外传失败。
 4. medium：没有把观察名单发给 bridge 的时机 → `start()` 定时发、`targetRegistry.onChange` 变化时发，都由 base 接好。
+
+第三轮（同一线程，最后一轮）1 条，采纳：
+1. medium：C 新建的目标群不经过那两个分支，观察名单不会立即更新 → 通知改由 `targetRegistry` 自己的写方法发出（`record` / `forget` / `resolve`）。
+   这一条改动没有再送审（审查最多三轮）。
