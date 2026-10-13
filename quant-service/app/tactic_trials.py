@@ -583,10 +583,19 @@ def _day_item(days: Sequence[Mapping[str, Any]], latest: Sequence[Mapping[str, A
         current = _seal_rates([day for day in latest if day["slot"] == slot], slot)
         cumulative = _seal_rates(days, slot)
         rates[slot] = {
-            bucket: {"day_rate": current.get(bucket, {}).get("cumulative_rate"), "cumulative_rate": value["cumulative_rate"], "count": value["count"]}
+            bucket: {
+                "day_rate": current.get(bucket, {}).get("cumulative_rate"),
+                "cumulative_rate": value["cumulative_rate"],
+                "day_count": current.get(bucket, {}).get("count", 0), "count": value["count"],
+            }
             for bucket, value in cumulative.items()
         }
-    return {"sample_sizes": sizes, "day_conditions": conditions, "sealing_again": rates}
+    condition_names = {condition.key: condition.name for condition in CONDITIONS if condition.level == "day"}
+    return {
+        "sample_sizes": sizes, "day_conditions": {
+            slot: [condition_names[key] for key in keys] for slot, keys in conditions.items()
+        }, "sealing_again": rates,
+    }
 
 
 def _tactic_picks(day: Mapping[str, Any], tactic: Tactic) -> list[dict[str, Any]]:
@@ -605,8 +614,10 @@ def _tactic_item(latest: Sequence[Mapping[str, Any]], tactic: Tactic, cached: Se
     day = next((item for item in latest if item["slot"] == tactic.slot), None)
     result = next((item["results"][tactic.key] for item in cached if item["source"] is day and tactic.key in item["results"]), None)
     return {
-        "key": tactic.key, "name": tactic.name, "slot": tactic.slot,
+        "key": tactic.key, "name": tactic.name, "slot": tactic.slot, "side": tactic.side,
+        "primary": tactic.primary,
         "picks": [] if day is None else _tactic_picks(day, tactic),
+        "pick_mean": None if result is None else result["outcomes"][tactic.primary]["pick_mean"],
         "difference": None if result is None else result["outcomes"][tactic.primary]["difference"],
     }
 
@@ -618,12 +629,15 @@ def _condition_day_items(latest: Sequence[Mapping[str, Any]], cached: Sequence[M
             continue
         day = next((item for item in latest if item["slot"] == condition.slot), None)
         if day is None:
-            items.append({"key": condition.key, "name": condition.name, "difference": None, "pick_mean": None, "expects": condition.claim})
+            items.append({"key": condition.key, "name": condition.name, "picks": 0, "difference": None, "pick_mean": None, "comparison_mean": None, "expects": condition.claim})
             continue
         tactic = next(item for item in TACTICS if item.key == f"only.{condition.key}")
         result = next(item["results"][tactic.key] for item in cached if item["source"] is day)
         outcome = result["outcomes"][condition.claim_outcome]
-        items.append({"key": condition.key, "name": condition.name, "difference": outcome["difference"], "pick_mean": outcome["pick_mean"], "expects": condition.claim})
+        items.append({
+            "key": condition.key, "name": condition.name, "difference": outcome["difference"],
+            "picks": result["counts"]["picks"], "pick_mean": outcome["pick_mean"], "comparison_mean": outcome["comparison_mean"], "expects": condition.claim,
+        })
     return sorted(items, key=lambda item: (item["difference"] is None, -(item["difference"] or 0)))
 
 
@@ -640,13 +654,16 @@ def _summary_records(records: Mapping[str, Any]) -> dict[str, Any]:
 
 def _cases(latest: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     result = {"seal_again": [], "big_loss": []}
+    names = {condition.key: condition.name for condition in CONDITIONS}
     for day in latest:
         for row in day["rows"]:
             outcome = day.get("outcomes", {}).get(row["symbol"], {})
-            if outcome.get("seal") is True and len(result["seal_again"]) < 30:
-                result["seal_again"].append({"symbol": row["symbol"], "name": row.get("name"), "slot": day["slot"], "flags": list(row.get("flags", ()))})
-            if outcome.get("big_loss") is True and len(result["big_loss"]) < 30:
-                result["big_loss"].append({"symbol": row["symbol"], "name": row.get("name"), "slot": day["slot"], "flags": list(row.get("flags", ()))})
+            case = {"symbol": row["symbol"], "name": row.get("name"), "boards": row.get("boards"), "slot": day["slot"],
+                    "flags": list(row.get("flags", ())), "conditions": [names.get(key, key) for key in row.get("flags", ())][:5]}
+            if outcome.get("seal") is True and len(result["seal_again"]) < 10:
+                result["seal_again"].append(case)
+            if outcome.get("big_loss") is True and len(result["big_loss"]) < 10:
+                result["big_loss"].append(case)
     return result
 
 
@@ -658,40 +675,150 @@ def _fmt_count(value: Any) -> str:
     return "无数据" if value is None else str(int(value))
 
 
-def summary_line_day(item: Mapping[str, Any]) -> str:
-    rates = []
+def _fmt_number(value: Any) -> str:
+    return "无数据" if value is None else f"{float(value):+.2f}"
+
+
+_SLOT_NAMES = {"close": "收盘", "auction": "竞价"}
+_SIDE_NAMES = {"focus": "关注", "avoid": "回避", "hold": "持有参考"}
+_BUCKET_NAMES = {"1": "一板", "2": "二板", "3+": "三板以上"}
+_ENTRY_NAMES = {"held": "已持有", "buy_open": "开盘买入"}
+_LABEL_NAMES = {"collecting": "样本不足", "supports": "支持", "against": "相反", "undecided": "未定"}
+
+
+def _bucket_name(value: Any) -> str:
+    return _BUCKET_NAMES.get(str(value), str(value))
+
+
+def _condition_names() -> dict[str, str]:
+    return {condition.key: condition.name for condition in CONDITIONS}
+
+
+def _outcome_name(outcome: str) -> str:
+    if outcome == "seal":
+        return "再封板率"
+    if outcome == "big_loss":
+        return "大面率"
+    if outcome == "open_to_close":
+        return "开盘到收盘"
+    entry, exit_key = outcome.split(":", 1)
+    exit_name = next(exit_.name for exit_ in EXITS if exit_.key == exit_key)
+    return f"{_ENTRY_NAMES[entry]}·{exit_name}"
+
+
+def summary_line_day(item: Mapping[str, Any]) -> list[str]:
+    lines = ["一、当日"]
     for slot in ("close", "auction"):
-        for bucket, value in item["sealing_again"].get(slot, {}).items():
-            rates.append(f"{slot}/{bucket} {_fmt_pct(value['day_rate'])}/{_fmt_pct(value['cumulative_rate'])}")
-    return "日：收盘样本{}行，竞价样本{}行；收盘日条件{}，竞价日条件{}".format(
-        _fmt_count(item["sample_sizes"]["close"]["rows"]), _fmt_count(item["sample_sizes"]["auction"]["rows"]),
-        ",".join(item["day_conditions"].get("close", [])) or "无数据", ",".join(item["day_conditions"].get("auction", [])) or "无数据",
-    ) + "；封板率" + ("、".join(rates) or "无数据")
+        sample = item["sample_sizes"][slot]
+        lines.append(f"{_SLOT_NAMES[slot]}：{_fmt_count(sample['rows'])}行（累计{_fmt_count(sample['cumulative_rows'])}行）")
+        rates = item["sealing_again"].get(slot, {})
+        for bucket in sorted(rates, key=lambda value: (str(value) != "1", str(value))):
+            value = rates[bucket]
+            lines.append(f"{_SLOT_NAMES[slot]} {_bucket_name(bucket)}：{_fmt_count(value['day_count'])}只，再封板率 {_fmt_pct(value['day_rate'])}；累计 {_fmt_pct(value['cumulative_rate'])}")
+        conditions = item["day_conditions"].get(slot, [])
+        lines.append(f"{_SLOT_NAMES[slot]}日条件：{'、'.join(conditions) if conditions else '无数据'}")
+    return lines
 
 
-def summary_line_tactics(items: Sequence[Mapping[str, Any]]) -> str:
-    return "战术：{}个，选中{}行".format(len(items), sum(len(item["picks"]) for item in items))
+def summary_line_tactics(items: Sequence[Mapping[str, Any]]) -> list[str]:
+    lines = ["二、战法"]
+    empty = []
+    for item in items:
+        if not item["picks"]:
+            empty.append(item["name"])
+            continue
+        picks = "、".join(f"{pick.get('name') or pick['symbol']}（{_fmt_count(pick.get('boards'))}板）" for pick in item["picks"])
+        lines.append(f"{item['name']}（{_SLOT_NAMES[item['slot']]}，{_SIDE_NAMES[item['side']]}）：{picks}；{_outcome_name(item['primary'])} {_fmt_pct(item['pick_mean'])}，差值 {_fmt_pct(item['difference'])}")
+    lines.append(f"未选中：{'、'.join(empty) if empty else '无数据'}")
+    return lines
 
 
-def summary_line_cases(cases: Mapping[str, Sequence[Mapping[str, Any]]]) -> str:
-    return "案例：封板{}，大面{}".format(len(cases["seal_again"]), len(cases["big_loss"]))
+def summary_line_cases(cases: Mapping[str, Sequence[Mapping[str, Any]]]) -> list[str]:
+    lines = ["三、案例"]
+    for key, title in (("seal_again", "再封板"), ("big_loss", "大面")):
+        lines.append(f"{title}：")
+        lines.extend(f"{case.get('name') or case['symbol']}（{_fmt_count(case.get('boards'))}板）：{'、'.join(case.get('conditions') or ['无数据'])}" for case in cases[key])
+        if not cases[key]:
+            lines.append("无数据")
+    return lines
 
 
-def summary_line_conditions(items: Sequence[Mapping[str, Any]]) -> str:
-    top = items[0] if items else {"difference": None}
-    return "条件：{}个，首项差值{}".format(len(items), _fmt_pct(top["difference"]))
+def summary_line_conditions(items: Sequence[Mapping[str, Any]]) -> list[str]:
+    lines = ["四、当日条件"]
+    selected = list(items[:5]) + list(items[-5:])
+    for item in selected:
+        claim = "符合主张" if item["difference"] is not None and item["difference"] * item["expects"] > 0 else "背离主张" if item["difference"] is not None else "无数据"
+        lines.append(f"{item['name']}：{_fmt_count(item['picks'])}选，选中均值 {_fmt_pct(item['pick_mean'])}，其余均值 {_fmt_pct(item['comparison_mean'])}，差值 {_fmt_pct(item['difference'])}，{claim}")
+    return lines
 
 
-def summary_line_records(records: Mapping[str, Any], changes: Sequence[Mapping[str, Any]]) -> str:
-    return "记录：{}个，标签变化{}个".format(len(records), len(changes))
+def summary_line_records(records: Mapping[str, Any], changes: Sequence[Mapping[str, Any]]) -> list[str]:
+    lines = ["五、战绩"]
+    combinations = {tactic.key for tactic in TACTICS[:20]}
+    for key, value in records.items():
+        if key not in combinations:
+            continue
+        forward = value["outcomes"][value["primary"]]["forward"]
+        lines.append(f"{value['name']}：前向{_fmt_count(forward['days_with_picks'])}日，{_fmt_count(forward['picks'])}选，差值 {_fmt_pct(forward['mean_daily_difference'])}，t {_fmt_number(forward['t'])}，{_LABEL_NAMES[value['label']]}，q {_fmt_pct(value['q'])}")
+    for key, value in records.items():
+        if key not in combinations:
+            continue
+        replay = value["outcomes"][value["primary"]]["replay"]
+        lines.append(f"{value['name']}（样本内）：{_fmt_count(replay['days_with_picks'])}日，{_fmt_count(replay['picks'])}选，差值 {_fmt_pct(replay['mean_daily_difference'])}，t {_fmt_number(replay['t'])}")
+    tactic_names = {tactic.key: tactic.name for tactic in TACTICS}
+    lines.extend(
+        f"{tactic_names[change['key']]}：由 {_LABEL_NAMES.get(change['previous'], '无数据')} 变为 {_LABEL_NAMES[change['current']]}"
+        for change in changes
+    )
+    return lines
 
 
-def summary_line_sell_points(points: Mapping[str, Any]) -> str:
-    return "卖点：收盘{}组，竞价{}组".format(len(points["close"]["cumulative"]["board_bucket"]), len(points["auction"]["cumulative"]["board_bucket"]))
+def _sell_lines(scope: Mapping[str, Any], slot: str, prefix: str) -> list[str]:
+    values = []
+    for entry, exits in scope["day"]["all"]["returns"].items():
+        for exit_key, day_value in exits.items():
+            cumulative = scope["cumulative"]["all"]["returns"][entry][exit_key]["mean"]
+            values.append((cumulative, entry, exit_key, day_value["mean"], scope["day"]["all"]["room"]["s1_high"]["mean"]))
+    lines = []
+    for _cumulative, entry, exit_key, day_value, room in sorted(values, key=lambda item: (item[0] is None, -(item[0] or 0))):
+        rule_name = next(exit_.name for exit_ in EXITS if exit_.key == exit_key)
+        lines.append(f"{prefix}{_ENTRY_NAMES[entry]}·{rule_name}：当日 {_fmt_pct(day_value)}，累计 {_fmt_pct(_cumulative)}，首日高点 {_fmt_pct(room)}")
+    return lines
 
 
-def summary_line_pairs(pairs: Mapping[str, Any]) -> str:
-    return "配对：收盘检验{}，竞价检验{}".format(pairs["close"]["pairs_examined"], pairs["auction"]["pairs_examined"])
+def summary_line_sell_points(points: Mapping[str, Any]) -> list[str]:
+    lines = ["六、卖点"]
+    for slot in ("close", "auction"):
+        lines.append(f"{_SLOT_NAMES[slot]}：")
+        lines.extend(_sell_lines(points[slot], slot, ""))
+        for bucket, group in points[slot]["cumulative"]["board_bucket"].items():
+            choices = [
+                (value["mean"], entry, exit_key)
+                for entry, exits in group["returns"].items() for exit_key, value in exits.items()
+                if value["mean"] is not None
+            ]
+            best = max(choices) if choices else None
+            worst = min(choices) if choices else None
+            render = lambda choice: "无数据" if choice is None else f"{_ENTRY_NAMES[choice[1]]}·{next(exit_.name for exit_ in EXITS if exit_.key == choice[2])} {_fmt_pct(choice[0])}"
+            lines.append(f"{_SLOT_NAMES[slot]} {_bucket_name(bucket)}：最佳 {render(best)}；最差 {render(worst)}")
+        tactic_names = {tactic.key: tactic.name for tactic in TACTICS[:20]}
+        for key, table in points[slot]["exit_tables"]["cumulative"].items():
+            render = lambda item: "无数据" if item is None else f"{next(exit_.name for exit_ in EXITS if exit_.key == item['key'])} {_fmt_pct(item['mean'])}"
+            lines.append(f"{tactic_names[key]}：本战法 {render(table['own'])}；最佳 {render(table['best'])}；最差 {render(table['worst'])}")
+    return lines
+
+
+def summary_line_pairs(pairs: Mapping[str, Any]) -> list[str]:
+    names = _condition_names()
+    lines = ["七、两两组合"]
+    for slot in ("close", "auction"):
+        lines.append(f"{_SLOT_NAMES[slot]}：")
+        selected = pairs[slot]["highest"][:5] + pairs[slot]["lowest"][:5]
+        for pair in selected:
+            first, second = (names.get(key.replace("prev.", ""), key) for key in pair["conditions"])
+            lines.append(f"{first} + {second}：{_fmt_count(pair['days_with_picks'])}日，{_fmt_count(pair['picks'])}选，差值 {_fmt_pct(pair['mean_daily_difference'])}，t {_fmt_number(pair['t'])}")
+        lines.append(f"已挖掘，检验{_fmt_count(pairs[slot]['pairs_examined'])}对，达到门槛{_fmt_count(pairs[slot]['pairs_reaching_minimum'])}对")
+    return lines
 
 
 def build_daily_summary(
@@ -715,9 +842,9 @@ def build_daily_summary(
     sell_points = build_sell_points(days, tactics, cached)
     pairs = build_pairs(days)
     lines = [
-        summary_line_day(day_item), summary_line_tactics(tactic_items), summary_line_cases(cases),
-        summary_line_conditions(condition_items), summary_line_records(records, changes),
-        summary_line_sell_points(sell_points), summary_line_pairs(pairs),
+        *summary_line_day(day_item), *summary_line_tactics(tactic_items), *summary_line_cases(cases),
+        *summary_line_conditions(condition_items), *summary_line_records(records, changes),
+        *summary_line_sell_points(sell_points), *summary_line_pairs(pairs),
     ]
     return _json({
         "trade_date": max((_date(day["trade_date"]) for day in latest), default=None),

@@ -161,8 +161,18 @@ class TacticTrialTests(unittest.TestCase):
     def test_summary_lines_label_changes_sell_points_and_json(self):
         days = [self._day("2026-10-13"), self._day("2026-10-13", slot="auction")]
         summary = build_daily_summary(days)
-        self.assertEqual(summary["lines"][0], "日：收盘样本2行，竞价样本2行；收盘日条件无数据，竞价日条件无数据；封板率close/2 +50.00%/+50.00%、auction/2 +50.00%/+50.00%")
-        self.assertEqual(summary["lines"][2], "案例：封板2，大面0")
+        self.assertEqual(summary["lines"][0:8], [
+            "一、当日", "收盘：2行（累计2行）", "收盘 二板：2只，再封板率 +50.00%；累计 +50.00%",
+            "收盘日条件：无数据", "竞价：2行（累计2行）", "竞价 二板：2只，再封板率 +50.00%；累计 +50.00%",
+            "竞价日条件：无数据", "二、战法",
+        ])
+        self.assertEqual(summary["lines"][7:9], [
+            "二、战法",
+            "未选中：龙头持有、二三板接力、远端放量清除、缩量加速、梯队环境接力、最高板断板后、弱板两项、梯队竞速胜者、卡位持有、助攻不接力、低位补涨、一字后首次打开、反包风险、卡位高开、梯队胜者温和高开、龙头温和高开、老师竞价入场、强题材竞价前五、弱板高开、弱板低开修复",
+        ])
+        self.assertEqual(summary["lines"][67:70], [
+            "六、卖点", "收盘：", "已持有·收盘卖：当日 +5.00%，累计 +5.00%，首日高点 +10.00%",
+        ])
         self.assertEqual(build_daily_summary(days, {"records": {"leader_hold": {"label": "against"}}})["label_changes"][0]["key"], "leader_hold")
         self.assertIn("cumulative", summary["sell_points"]["close"])
         json.dumps(summary)
