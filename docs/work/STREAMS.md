@@ -14,7 +14,7 @@
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 等 owner 恢复、B031 查明原因、用户同意取数（见 Waiting on the user）后，在非交易时段跑 `/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（一条命令顺序取 11 个代码，带参数就不存雷达；可断点续取），另用 `curl` 把全天雷达存成 `state/research/vshape_20261013/radar/radar_2026-10-13.full.json`（13:27 那份 `radar_2026-10-13.json` 是早先输出的依据，留着）；`fetch.log` 出现 FINISHED 后核对 11 个文件各约 750 行，写研究登记，派 Codex | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | building | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 交回派工 1（方案的 P1：两条采集循环固定在每分钟的某一秒启动），在工作区跑方案 Acceptance 一节的命令并读 diff，通过后用同一线程派工 2（P2 和 P3） | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
-| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | proposed | Claude Code 会话 eac0e1fc，2026-10-13 | 等用户看过方案并同意后，把方案写成 `docs/work/plans/relay-group-automation.md`，交 Codex 做方案审查，再按 codex-flow 进入派工前的确认 | 2026-10-13 |
+| [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | approved | Claude Code 会话 eac0e1fc，2026-10-13 | 读 Codex 方案审查的结论并逐条裁决（改方案或写明不采纳的理由）；同时做线上探测 P0-1 至 P0-7，把结果写成 `feishu-relay/bridge/WEB_GATEWAY.md`；然后把审查后的改动给用户看，得到同意后建集成分支、派 base 线 | 2026-10-13 |
 
 ## 已结束、暂停或放弃
 
