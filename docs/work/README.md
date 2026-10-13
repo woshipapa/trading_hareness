@@ -83,7 +83,7 @@ agent 把命令备好，用户执行，记录里记下结果：
 - 视图由哪个会话生成都一样，会包含别的会话还没提交的记录状态，这是正常的。
 - 主检出里有几样没入库、也不属于这些工作线的东西，不要动也不要提交：`undefined/`（两张图）、`config/secrets/set-local-secret.sh`、`scripts/data/tdx_promote_*.json`、`scripts/test_teacher_review_daily_peer_source.py`，以及 `git status` 里别的会话改过的文件。
 - `scripts/release status` 是只读的，但会连接两台主机；主机有故障时不要拿它反复试。
-- 数据库不在 47.110.79.189 上。那台是中转服务器，只跑容器和隧道；PostgreSQL 在 owner 的 Windows 工作站上（热数据 F: 盘、冷数据 G: 盘），经反向 SSH 和 `db-tunnel` 访问，所以每条语句往返约 52 毫秒。拓扑见 `docs/SHARED_PEER_RUNTIME.md`，磁盘预算见 `docs/OWNER_DATABASE_STORAGE.md`。在容器里跑的探针，内存花在中转服务器上，数据从工作站经隧道拉过来。
-- 2026-10-13 起量化 owner 换了服务器（118.178.133.37，SSH 22）。旧主机 47.110.79.189:3535 上的量化容器已停用，不要恢复。本机切换的进度在 BACKLOG B041；它完成之前，凡是读 owner、发布 owner 的事都做不了，仓库里发布脚本的默认地址也还是旧的。新主机只有 1 GB 内存：在容器里跑的探针只查计数和时间，不读文档正文；不在上面构建镜像。
+- 数据库不在量化服务器上（2026-10-13 之前是 47.110.79.189，之后是 118.178.133.37）。那台是中转服务器，只跑容器和隧道；PostgreSQL 在 owner 的 Windows 工作站上（热数据 F: 盘、冷数据 G: 盘），经反向 SSH 和 `db-tunnel` 访问，所以每条语句往返约 52 毫秒。拓扑见 `docs/SHARED_PEER_RUNTIME.md`，磁盘预算见 `docs/OWNER_DATABASE_STORAGE.md`。在容器里跑的探针，内存花在中转服务器上，数据从工作站经隧道拉过来。
+- 2026-10-13 起量化 owner 换了服务器（118.178.133.37，SSH 22）。旧主机 47.110.79.189:3535 上的量化容器已停用，不要恢复、不要解除那边 Docker 的屏蔽。本机的 `.env.local`、owner 隧道和发布脚本的默认地址都已改到新服务器（提交 4bb8c7ff；BACKLOG B041 记着还没做完的：edge 主机上的隧道、`scripts/teacher_review_daily.py` 里的默认地址、文档）。新主机内存只有 894 MB：在容器里跑的探针只查计数和时间，不读文档正文；不在上面构建镜像；会加载整个服务的命令行工具先看 `free -m`。
 - 这台 Mac 合上盖子就休眠：挂在会话上的 Codex 调用、后台命令、SSH 隧道全部中断（2026-10-13 18:34–20:19 发生过）。醒来后先看 `logs/svc-supervisor.log` 里隧道是否重连、各工作区 `git status` 和最后一个提交，再用 `codex-reply` 接原线程续派（线程号：`python3 ~/codebase/agent-skills/own/codex-flow/scripts/codex-trace.py --list`）。续派的调用可能立刻返回空内容而线程其实在跑：用 `docs/work/probes/2026-10-13-wait-codex.py <线程号前缀>` 等它结束或卡住。
 - 往盘后阶段表（`POST_CLOSE_STAGE_ORDER`）里加一个阶段，并不会让它每晚运行：那张表只在对方自己的服务上定时跑，而那边的代码是 2026-09-20 的；我们这一侧每晚自己只跑 `peer_close_research` 的五个阶段（BACKLOG B042）。说一个阶段“每晚自动产出”之前，先在 owner 库里看到它连续两晚不靠人手出现的回执或读数。
