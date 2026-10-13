@@ -267,7 +267,10 @@ def compare_field(name: str, entry: Mapping[str, Any], left: Mapping[tuple, dict
     if reference_span is not None and right and reference_coverage < min_coverage:
         reasons.append(f"the common rows are {reference_coverage:.3f} of the reference's {len(right)}, below {min_coverage}")
     share = (len(common) - len(wrong)) / len(common) if common else 0.0
-    if common and share < min_share:
+    share_below = wrong and min_share < 1 and len(common) - len(wrong) < min_share * len(common)
+    if wrong and (min_share >= 1 or share_below):
+        reasons.append(f"{len(wrong)} of {len(common)} common rows are outside the tolerance")
+    if share_below:
         reasons.append(f"the rows within tolerance are {share:.3f} of {len(common)} common rows, below {min_share}")
     why = "; ".join(reasons)
     result = {**summary, "left_rows": len(left), "right_rows": len(right), "matched": len(common) - len(wrong),
@@ -399,7 +402,8 @@ def enable_decision_eligibility(text: str, call: ast.Call) -> str:
     return "\n".join(lines)
 
 
-def session_summaries(paths: list[Path], rule: Mapping[str, Any]) -> list[tuple[Path, bytes, dict[str, Any]]]:
+def session_summaries(paths: list[Path], rule: Mapping[str, Any], provider_key: str,
+                     capability: str) -> list[tuple[Path, bytes, dict[str, Any]]]:
     if len(paths) < rule["min_sessions"]:
         sys.exit(f"need at least {rule['min_sessions']} session summaries, got {len(paths)}")
     result = []
@@ -414,6 +418,8 @@ def session_summaries(paths: list[Path], rule: Mapping[str, Any]) -> list[tuple[
             sys.exit(f"{path}: session_passes is not true")
         if summary.get("agreement_rule") != dict(rule):
             sys.exit(f"{path}: agreement_rule does not match the catalog rule")
+        if (summary.get("provider_key"), summary.get("capability")) != (provider_key, capability):
+            sys.exit(f"{path}: summary binding does not match {provider_key} {capability}")
         trade_dates.add(trade_date)
         result.append((path, raw, summary))
     return result
@@ -441,9 +447,9 @@ def run_apply(args: argparse.Namespace) -> int:
     rule = SESSION_AGREEMENT_RULES.get((source, capability))
     summaries = []
     if token.id == "DECLARED" and rule:
-        summary_paths = [path.resolve().relative_to(ROOT) for path in args.session_summary]
+        summary_paths = [path.resolve() for path in args.session_summary]
         summaries = [(path.relative_to(ROOT), raw, summary)
-                     for path, raw, summary in session_summaries([ROOT / path for path in summary_paths], rule)]
+                     for path, raw, summary in session_summaries(summary_paths, rule, source, capability)]
     failed = [f"{path}: {gate} failed ({document['verdicts'][gate]['detail']})"
               for path, document in zip(paths, documents) for gate in gates if not document["verdicts"][gate]["pass"]]
     if failed:
@@ -453,10 +459,9 @@ def run_apply(args: argparse.Namespace) -> int:
         text = enable_decision_eligibility(text, bind_call(text, source, capability))
     CATALOG.write_text(text, encoding="utf-8")
     message = [f"Promote {source} {capability} from {token.id} to {new}", "",
-               f"Every evidence file below passed {', '.join(gates)}. decision_eligible is not touched.", ""]
+               f"Every evidence file below passed {', '.join(gates)}.", "decision_eligible is not touched.", ""]
     if decision_reference:
-        message[2] = f"decision_eligible=True by decision record {decision_reference}."
-        message.append("")
+        message[3] = f"decision_eligible=True by decision record {decision_reference}."
     if summaries:
         message += ["Session summaries:"]
         message += [f"- {path} (sha256 {hashlib.sha256(raw).hexdigest()})" for path, raw, _summary in summaries]

@@ -38,7 +38,8 @@ DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
 REFERENCE_MAX_AGE_SECONDS = 90.0
 SUMMARY_STATEMENT_TIMEOUT_SECONDS = 10.0
 CN_TZ = ZoneInfo("Asia/Shanghai")
-SESSION_RULE = SESSION_AGREEMENT_RULES[(SHADOW_PROVIDER, "quote.all_a_snapshot")]
+SESSION_RULE_KEY = (SHADOW_PROVIDER, "quote.all_a_snapshot")
+SESSION_RULE = SESSION_AGREEMENT_RULES[SESSION_RULE_KEY]
 DATA_GAP_GROUPS = (
     (5, "under_5"), (10, "5_10"), (15, "10_15"), (20, "15_20"),
     (30, "20_30"), (45, "30_45"), (60, "45_60"), (float("inf"), "60_and_more"),
@@ -359,6 +360,8 @@ def day_summary(database: Any, trade_date: date, *, statement_timeout_seconds: f
 
     return {
         "trade_date": trade_date.isoformat(),
+        "provider_key": SESSION_RULE_KEY[0],
+        "capability": SESSION_RULE_KEY[1],
         "shadow_documents": len(documents),
         "stored_minutes": len(documents),
         "expected_minutes": _session_minutes(trade_date),

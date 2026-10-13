@@ -268,6 +268,7 @@ class CheckTests(unittest.TestCase):
         self.assertEqual({name: price[name] for name in ("left_rows", "right_rows", "matched", "mismatched", "only_left", "only_right")},
                          {"left_rows": 20, "right_rows": 20, "matched": 18, "mismatched": 1, "only_left": 1, "only_right": 1})
         self.assertEqual((price["coverage"], price["worst_key"], price["agree"]), (0.95, [SYMBOLS[-1]], False))
+        self.assertEqual(price["why"], "1 of 19 common rows are outside the tolerance")
         self.assertEqual(price["examples"], [{"key": [SYMBOLS[-1]], "left": 10.0, "right": 10.1}])
         self.assertAlmostEqual(price["max_abs_dev"], 0.1)
         self.assertAlmostEqual(price["max_rel_dev"], 0.1 / 10.1)
@@ -513,7 +514,8 @@ SESSION_RULE = {"max_data_gap_seconds": 15, "min_price_within_0_5_pct": 0.95,
 def session_file(root, name, trade_date, *, passes=True, rule=SESSION_RULE):
     path = root / "summaries" / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"trade_date": trade_date, "session_passes": passes, "agreement_rule": rule}),
+    path.write_text(json.dumps({"trade_date": trade_date, "session_passes": passes, "agreement_rule": rule,
+                                "provider_key": "tdx_public", "capability": "quote.all_a_snapshot"}),
                     encoding="utf-8")
     return path
 
@@ -578,11 +580,20 @@ class ApplyTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "agreement_rule does not match"):
                     run_apply(root, evidence, options=tuple(sum((["--session-summary", str(path)] for path in mismatched), [])))
 
+                wrong_binding = passing[:-1] + [session_file(root, "wrong-binding.json", "2026-10-06")]
+                wrong_binding[-1].write_text(json.dumps({"trade_date": "2026-10-06", "session_passes": True,
+                                                          "agreement_rule": SESSION_RULE, "provider_key": "tdx_mac",
+                                                          "capability": "quote.all_a_snapshot"}), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "does not match tdx_public quote.all_a_snapshot"):
+                    run_apply(root, evidence, options=tuple(sum((["--session-summary", str(path)] for path in wrong_binding), [])))
+                self.assertEqual((root / "catalog.py").read_text(encoding="utf-8"), declared)
+
                 printed = run_apply(root, evidence, options=("--decision-eligible", "decision-0015",
                                                               *sum((["--session-summary", str(path)] for path in passing), [])))
                 promoted = (root / "catalog.py").read_text(encoding="utf-8")
                 self.assertIn('_bind("tdx_public", "quote.all_a_snapshot", 80, LIVE_VERIFIED, None,', promoted)
                 self.assertIn("decision_eligible=True", promoted)
+                self.assertIn("Every evidence file below passed owner_egress, agreement, intraday.", printed)
                 self.assertIn("decision record decision-0015", printed)
                 self.assertIn("Session summaries:", printed)
 
