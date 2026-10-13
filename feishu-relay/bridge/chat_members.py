@@ -30,6 +30,15 @@ def _names(bridge, chat_id: str, user_ids: list[str]) -> dict[str, str]:
 	return bridge.name_cache.resolve(chat_id, user_ids, bridge.client.get_user_name)
 
 
+def _bot_ids(client, chat_id: str) -> set[str]:
+	response = client.chat_bots(chat_id)
+	return {
+		str(bot.get("id") or key)
+		for collection in (response.get("botCollection") or [])
+		for key, bot in (collection.get("bots") or {}).items()
+	}
+
+
 def list_members(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 	chat_id = _chat_id(payload)
 	client = _owned(bridge, chat_id)
@@ -48,8 +57,16 @@ def list_members(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 		cursor = next_cursor
 	user_ids = list(joined)
 	names = _names(bridge, chat_id, user_ids)
+	bot_ids = _bot_ids(client, chat_id)
+	self_id = str(bridge.auth.user_id)
 	return {"status": "ok", "chat_id": chat_id, "members": [
-		{"user_id": user_id, "name": names.get(user_id, ""), "joined_at": int(joined_at)}
+		{
+			"user_id": user_id,
+			"name": names.get(user_id, ""),
+			"joined_at": int(joined_at),
+			"is_bot": user_id in bot_ids,
+			"is_self": user_id == self_id,
+		}
 		for user_id, joined_at in joined.items()
 	]}
 
@@ -115,6 +132,8 @@ def remove_member(bridge, payload: dict[str, Any]) -> dict[str, Any]:
 	user_id = str(payload.get("user_id", "")).strip()
 	if user_id == str(bridge.auth.user_id):
 		raise GroupAdminError("不能移除本账号")
+	if user_id in _bot_ids(client, chat_id):
+		raise GroupAdminError("不能移除机器人，请在飞书机器人设置中移除，或删除对应目标群")
 	checked(client.api("chats.DeleteChatChatterRequest", {
 		"chatId": chat_id, "chatterIds": [user_id],
 	}))
