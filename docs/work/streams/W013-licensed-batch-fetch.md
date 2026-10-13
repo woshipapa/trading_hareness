@@ -1,10 +1,12 @@
 # W013 授权接口的批量取数：一个工具、一条并发规矩
 
-- state: approved
+- state: merged
 - holder: Claude Code 会话 93ba6e1d（主会话），2026-10-13
 - goal: 以后从本机批量读授权接口都走同一个工具，默认按 2026-10-13 量出来的并发跑，上游会拒绝的设置工具自己拒绝，交易时段不跑；规矩写在 agent 会读到的地方
 - plan: docs/work/plans/licensed-batch-fetch.md
-- next: Codex 的实现还在收尾（工作区里文件都已写出、测试在跑）；它交回就由主会话跑验收并读 diff，直接合并（用户让主会话接手，不再等 Codex 的评审）。它若卡住不回，主会话在工作区里接着做完：缺的只可能是测试和提交
+- branch: main
+- head: 45e2fca5
+- next: 第一次真实使用：10 月 14 日非交易时段用它补取 10 月 13 日当天 11 个代码的分钟线（BACKLOG B055；11 次请求，同时验证“最近的空结果不落盘”这条在真实接口上成立），看日志里的速率行和输出文件各多一行，通过后把本记录改成 `closed`
 - updated: 2026-10-13
 
 ## Requirements
@@ -19,9 +21,9 @@
 
 ## Steps
 
-- [ ] 工具、测试、发布分类规则（登记为工作站工具）、脚本目录的规则 — 一次派工
-- [ ] 规矩写进 `docs/work/README.md` 和本机的记忆笔记（2026-10-13 23:12 已写）；`AGENTS.md` 的那一条在工具合并时一起提交（它要指向工具的路径）
-- [ ] 评审、合并
+- [x] 工具、测试、发布分类规则、脚本目录的规则 — Codex 实现 6ba9f13a、ee079d06；主会话改了两处 d0053ca0（最近三个交易日的“无数据”不落盘，否则当晚取不到的当天会被永久记成空；循环里三处重复的补位和两处重复的中止合成一处）；`pytest scripts -q` → `1 failed, 365 passed`（失败的是 B035），node 测试通过，脚本目录检查通过
+- [x] 规矩写进 `docs/work/README.md`、本机记忆笔记和 `AGENTS.md`（“Time and data rules”一条，随工具合并）
+- [x] 合并 — 45e2fca5。评审是主会话读代码并改了两处；没有第二个评审者
 
 ## Log
 
@@ -31,7 +33,7 @@
 
 ## Running
 
-- [ ] 2026-10-13 23:09 Codex 实现者在写工具和测试（新线程，工作区 `/Users/papa/codebase/.codex-wt/n8n-licensed-batch-fetch`）。结束标志：分支有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上。
+- [x] 2026-10-13 23:09 Codex 实现者在写工具和测试（新线程，工作区 `/Users/papa/codebase/.codex-wt/n8n-licensed-batch-fetch`）。结束标志：分支有提交且 `git status --short` 为空。之后见 next。挂在主会话 93ba6e1d 上。 → 交回 ee079d06（2026-10-13 23:41）
 
 ## Due
 
