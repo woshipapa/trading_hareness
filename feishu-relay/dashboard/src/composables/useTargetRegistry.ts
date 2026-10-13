@@ -1,11 +1,12 @@
 import { ref } from 'vue';
 import { targetRegistryApi, type TargetRegistryRow } from '../api/target-registry';
 
+const targets = ref<TargetRegistryRow[]>([]);
+const loading = ref(false);
+const error = ref('');
+const resolving = ref(false);
+
 export function useTargetRegistry() {
-  const targets = ref<TargetRegistryRow[]>([]);
-  const loading = ref(false);
-  const error = ref('');
-  const resolving = ref(false);
 
   async function load() {
     loading.value = true;

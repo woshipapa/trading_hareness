@@ -40,4 +40,14 @@ describe('useTargetRegistry', () => {
     expect(registry.targets.value).toEqual([{ chat_id: 'oc_1', name: '一号群', keyword: '转发', origin: 'env', usable: true }]);
     expect(registry.error.value).toBe('网关不可用');
   });
+
+  it('shares the registry list between callers', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({ targets: [{ chat_id: 'oc_shared', name: '共享群', keyword: null, origin: 'env', usable: true }] })));
+    const first = useTargetRegistry();
+    const second = useTargetRegistry();
+
+    await first.load();
+
+    expect(second.targets.value).toEqual([{ chat_id: 'oc_shared', name: '共享群', keyword: null, origin: 'env', usable: true }]);
+  });
 });
