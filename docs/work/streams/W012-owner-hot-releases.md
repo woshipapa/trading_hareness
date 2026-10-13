@@ -5,7 +5,7 @@
 - goal: owner 的量化服务只保留一个镜像，只有镜像自己的输入变了（依赖、Dockerfile）才重建；其余改动，包括现在要走“全量发布”的 compose、在主机上执行的脚本、迁移文件和分类规则不认识的路径，都在现有镜像上不构建地发布
 - plan: docs/work/plans/owner-hot-releases.md
 - branch: codex/owner-hot-a
-- head: 3288e1ed
+- head: da300c04
 - next: A 段在独立评审里（只读 Claude 子代理，报告写到会话草稿目录的 `review_classifier.md`）。返回后逐条核实、修正、复跑 `python -m pytest scripts -q` 和 `node scripts/shared-peer/deploy-code-only.test.mjs`，然后把 main 合进分支再 `--no-ff` 合回 main 并推送，回收工作区。合并后第一次真实使用：用 `scripts/release plan <sha>` 看一次本来会被判成全量发布的改动（例如只改了工作站脚本的提交）现在的结论。B 段（目录发布）等 A 段用过一阵再排。
 - updated: 2026-10-14
 
@@ -45,6 +45,7 @@
   - 迁移：纯代码发布本来就把整个 `quant-service/migrations` 放进覆盖层（我们这一侧从不自己执行迁移），缺的只是“对方的库是否已到本次发布的 head”这道检查。把全量发布里的那段闸门原样搬成 `schema-gate.sh`，两条发布路径共用；全量发布的 16 个测试不改就通过。
   - 没做（留给 B 段）：compose、systemd 单元、主机脚本的不构建发布；构建前的内存检查；决策记录。
 - 2026-10-14 00:37 评审：另起一个只读的 Claude 子代理（opus）独立评审提交 a3783f22，重点是“有没有主机或镜像实际在用的路径被判成了跳过”。结果返回后记在这里。
+- 2026-10-14 00:41 同一分支上加了一个提交（da300c04）：B041 的遗留，把文档里仍指向旧 owner 地址的操作命令改到新服务器（发布流程、读接口说明、股票数据接口说明、老师复盘说明、运维页；搭建那一节保留原命令并加注），`scripts/sync-xiaojie-message-features.sh` 的默认地址改成新服务器（它在目录里登记为工作站脚本，新规则下是跳过；10 月 13 日撤回这处改动只是因为旧规则把它判成全量发布）。`python -m pytest scripts -q` → `1 failed, 371 passed, 3 skipped`（B035）。
 
 ## Waiting on the user
 

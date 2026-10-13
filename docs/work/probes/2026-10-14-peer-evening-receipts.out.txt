@@ -1,0 +1,28 @@
+# 2026-10-14 00:45 Asia/Shanghai; owner host 118.178.133.37, scheduler container; after release owner-code-20261013-06 (00:43)
+               total        used        free      shared  buff/cache   available
+Mem:             894         557          93           1         385         336
+Swap:           2047         448        1599
+trading-hareness-peer-quant-research-scheduler-1 26.77MiB / 894.6MiB
+trading-hareness-peer-quant-research-1 173.3MiB / 894.6MiB
+now (database): 2026-10-14 00:45:43.091692
+receipts of the peer loop's stages, sessions 2026-10-12 and 2026-10-13:
+  2026-10-12 peer_limit_performance_lists   completed  started 10-14 00:44:35 completed 10-14 00:44:36 {'status': 'completed'}
+  2026-10-12 peer_limit_up_risk             completed  started 10-14 00:44:36 completed 10-14 00:44:37 {'status': 'completed', 'trade_date': '2026-10-12'}
+  2026-10-13 peer_limit_performance_lists   completed  started 10-14 00:43:55 completed 10-14 00:43:56 {'status': 'completed'}
+  2026-10-13 peer_limit_up_risk             completed  started 10-14 00:43:56 completed 10-14 00:43:57 {'status': 'completed', 'trade_date': '2026-10-13'}
+  2026-10-13 peer_market_temperature        completed  started 10-14 00:43:57 completed 10-14 00:44:22 {'reason': None, 'status': 'completed', 'trade_date': '2026-10-13'}
+  2026-10-13 peer_broad_etf_flow            completed  started 10-14 00:44:22 completed 10-14 00:44:34 {'reason': None, 'status': 'completed', 'trade_date': '2026-10-13'}
+  2026-10-13 peer_market_timing             completed  started 10-14 00:44:34 completed 10-14 00:44:35 {'reason': None, 'status': 'completed', 'trade_date': '2026-10-13'}
+stored readings, sessions 2026-10-12 and 2026-10-13:
+  broad_etf_daily                2026-10-12 fuyao_ths            documents  12 newest 10-14 00:44:33
+  broad_etf_daily                2026-10-13 fuyao_ths            documents  12 newest 10-14 00:44:33
+  broad_etf_flow_daily           2026-10-12 local_derived        documents   1 newest 10-14 00:44:33
+  broad_etf_flow_daily           2026-10-13 local_derived        documents   1 newest 10-14 00:44:33
+  limit_performance_live         2026-10-12 longhuvip            documents   5 newest 10-12 22:28:06
+  limit_performance_live         2026-10-13 longhuvip            documents   5 newest 10-13 21:20:37
+  limit_up_risk_daily            2026-10-12 local_derived        documents   2 newest 10-14 00:44:36
+  limit_up_risk_daily            2026-10-13 local_derived        documents   1 newest 10-13 21:20:37
+  market_temperature_daily       2026-10-12 local_derived        documents   1 newest 10-14 00:44:21
+  market_temperature_daily       2026-10-13 local_derived        documents   1 newest 10-14 00:44:21
+  market_timing_daily            2026-10-12 local_derived        documents   1 newest 10-14 00:44:34
+  market_timing_daily            2026-10-13 local_derived        documents   1 newest 10-14 00:44:34
