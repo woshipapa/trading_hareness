@@ -75,6 +75,44 @@ class TacticExitTests(unittest.TestCase):
         self.assertEqual(result["s1_low"], D("9") / D("10") - 1)
         self.assertEqual(result["s3_high"], result["s1_high"])
 
+    def test_hold_gap_and_must_rise_rules_walk_multiple_sessions(self):
+        bars = path(
+            {"open": 10, "close": 10}, {"open": 10, "close": 11},
+            {"open": 11, "close": 10.5}, {"open": 10.5, "close": 10.2},
+        )
+        result = evaluate_pick("600000.SH", "close", bars, D("10"))
+
+        self.assertEqual(result["entries"]["held"]["hold_while_sealed"]["exit_index"], 2)
+        self.assertEqual(result["entries"]["held"]["must_rise"]["exit_index"], 2)
+        self.assertEqual(result["entries"]["held"]["gap_rule"]["exit_index"], 2)
+
+    def test_below_ma5_sells_at_the_open_after_a_below_average_close(self):
+        bars = path(
+            {"open": 10, "close": 10}, {"open": 10, "close": 9},
+            {"open": 9.2, "close": 9.5}, {"open": 9.5, "close": 9.6},
+        )
+        result = evaluate_pick("600000.SH", "close", bars, D("10"), [D("10")] * 4)
+
+        below = result["entries"]["held"]["below_ma5"]
+        self.assertEqual(below["field"], "open")
+        self.assertEqual(below["exit_index"], 2)
+
+    def test_multi_session_rule_rolls_a_blocked_close_and_can_remain_unresolved(self):
+        blocked = path(
+            {"open": 10, "close": 10}, {"open": 9, "close": 9}, {"open": 9.5, "close": 9.5},
+        )
+        rolled = evaluate_pick("600000.SH", "close", blocked, D("10"))
+        self.assertEqual(rolled["entries"]["held"]["hold_while_sealed"]["exit_index"], 2)
+        unresolved = evaluate_pick("600000.SH", "close", path({"open": 10, "close": 10}, {"open": 10.5, "close": 10.5}), D("10"))
+        self.assertEqual(unresolved["entries"]["held"]["must_rise"]["status"], "not_resolved")
+
+    def test_open_position_is_closed_at_s10(self):
+        bars = path({"open": 10, "close": 10}, *({"open": 10 + index, "close": 11 + index} for index in range(11)))
+        result = evaluate_pick("600000.SH", "close", bars, D("10"))
+
+        self.assertEqual(result["entries"]["held"]["must_rise"]["exit_index"], 10)
+        self.assertEqual(result["entries"]["held"]["must_rise"]["field"], "close")
+
 
 if __name__ == "__main__":
     unittest.main()

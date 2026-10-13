@@ -102,6 +102,60 @@ def _bracket(stop_first: bool) -> ExitFunction:
     return build
 
 
+def _hold_while_sealed(context: ExitContext) -> Callable[[int, PricedBar], ExitDecision | None]:
+    def rule(_index: int, bar: PricedBar) -> ExitDecision | None:
+        sealed = closes_at_up_limit(context.symbol, bar)
+        return None if sealed is None or sealed else "close"
+    return rule
+
+
+def _gap_rule(context: ExitContext) -> Callable[[int, PricedBar], ExitDecision | None]:
+    def rule(index: int, bar: PricedBar) -> ExitDecision | None:
+        sealed = closes_at_up_limit(context.symbol, bar)
+        if sealed is None:
+            return None
+        if index == 0:
+            opened_limit = opens_at_up_limit(context.symbol, bar)
+            gap = None if bar.open is None or bar.pre_close is None or bar.pre_close <= 0 else bar.open / bar.pre_close - 1
+            if opened_limit is None or gap is None:
+                return None
+            if opened_limit or gap < Decimal("0.05"):
+                return None if sealed else "close"
+            return "open"
+        return None if sealed else "close"
+    return rule
+
+
+def _must_rise(context: ExitContext) -> Callable[[int, PricedBar], ExitDecision | None]:
+    highest = context.entry_price
+    def rule(_index: int, bar: PricedBar) -> ExitDecision | None:
+        nonlocal highest
+        if bar.close is None:
+            return None
+        if bar.close <= highest:
+            return "close"
+        highest = bar.close
+        return None
+    return rule
+
+
+def _below_ma5(context: ExitContext) -> Callable[[int, PricedBar], ExitDecision | None]:
+    closes = list(context.prior_closes)
+    pending = False
+    def rule(_index: int, bar: PricedBar) -> ExitDecision | None:
+        nonlocal pending
+        if pending:
+            pending = False
+            return "open"
+        if bar.close is None:
+            return None
+        if len(closes) >= 4 and bar.close < sum(closes[-4:] + [bar.close], Decimal(0)) / 5:
+            pending = True
+        closes.append(bar.close)
+        return None
+    return rule
+
+
 EXITS = (
     Exit("open", "次日开盘", "baseline", _open),
     Exit("close", "次日收盘", "baseline", _close),
@@ -111,7 +165,17 @@ EXITS = (
     Exit("sl3", "止损3%", "practice", _stop),
     Exit("tp5_sl3_stop_first", "止盈5止损3止损优先", "practice", _bracket(True)),
     Exit("tp5_sl3_target_first", "止盈5止损3止盈优先", "practice", _bracket(False)),
+    Exit("hold_while_sealed", "封板继续持有", "teacher:R51", _hold_while_sealed),
+    Exit("gap_rule", "高开规则", "study", _gap_rule),
+    Exit("must_rise", "只涨不跌", "teacher:R47", _must_rise),
+    Exit("below_ma5", "跌破五日均线", "teacher:R47/R48", _below_ma5),
 )
+
+
+def _capped(rule: Callable[[int, PricedBar], ExitDecision | None]) -> Callable[[int, PricedBar], ExitDecision | None]:
+    def capped(index: int, bar: PricedBar) -> ExitDecision | None:
+        return "close" if index >= MAX_SELL_SESSIONS - 1 else rule(index, bar)
+    return capped
 
 
 def _result(status: str, basis: str, *, reason: str | None = None, raw: Decimal | None = None,
@@ -189,7 +253,7 @@ def evaluate_pick(
         ))
         path = PriceWindow(window.bars[start:], window.basis)
         for exit_ in EXITS:
-            rule = exit_.rule(context)
+            rule = _capped(exit_.rule(context))
             walked = walk_exit(path, symbol=symbol, rule=rule)
             outcomes[entry][exit_.key] = _return_result(
                 walked, base=base, basis=window.basis, cost=Decimal(0) if entry == "held" else ROUND_TRIP_COST,
