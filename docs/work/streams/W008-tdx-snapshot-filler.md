@@ -6,7 +6,7 @@
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
 - branch: codex/tdx-shadow-measure
 - head: ceae8a1a
-- next: 等只读的 Codex 评审者交回对 `codex/tdx-shadow-measure`（P1–P4）的评审，把它的发现和主会话读 diff 的发现合并，核实后回派修正（最多三轮）；通过后把分支 `--no-ff` 合并进 main、回收工作区，再从 main 建 `tdx-promote-gate` 工作区派工 4
+- next: 等 Codex 实现者交回评审第 1 轮的修正（主源快照没有数据时间时不再抛错），跑验收，让评审者（线程 01a1347c-75b3-7ae3-b0b2-4f75037170b7）复审这一个提交；通过后把分支 `--no-ff` 合并进 main、回收工作区，再从 main 建 `tdx-promote-gate` 工作区派工 4
 - updated: 2026-10-13
 
 ## Requirements
@@ -72,6 +72,8 @@
 
 - 2026-10-13 17:02 派工 3（P4）交回并验收：当日汇总不再读快照正文，报告当天判定的分钟数、一致的分钟数和是否达标；规则的数字放在 `datasources/catalog.py` 的 `SESSION_AGREEMENT_RULES`（方案 P4 写明的位置）。`codex/tdx-shadow-measure` 四步做完，12 个文件、435 行新增，进入双重评审。
 
+- 2026-10-13 17:17 双重评审第 1 轮。主会话读 diff：采集节拍、门槛的比值和分母、目录里的规则常量与方案一致，没有发现问题。Codex 评审者：WARNING，1 条高优先级，其余确认与 P1–P4 一致、目录改动在 P4 范围内。发现 [codex，已对代码核实]：`tdx_shadow_snapshot_runtime.py:78-80` 假定主源快照的 `age_seconds` 一定是数字，而主源在上游时间戳缺失或无效时给 None（`fuyao_provider.py:170-177`），这时 `float(None)` 抛错，当分钟的通达信快照和比对行都存不下来。已回派修正：没有数据时间就照常存、记为“未判定”。
+
 ## Waiting on the user
 
 - [x] 2026-10-13 批准 W008 方案第 3 版（`docs/work/plans/tdx-live-snapshot-fallback.md`）并开工吗？为什么等：动工前要用户批准（`codex-flow` 第 3 步），而且里面有三件只有用户能定的事。请一并回答：(1) 是否同意在发布分类器里给 `scripts/tdx-promote.py` 加“只在工作站运行”的规则（同意：两次发布都是纯代码发布；不同意：派工 4–5 的分支要等派工 6–10 的分支一起合并，发布 B 走全量发布）；(2) 升级前要看几个交易日，方案取 5 个（写进目录常量 `min_sessions`，由工具把关），可以改；(3) 最后一轮审查后改的那一处（名册取主源已存文档的上游总数，读不到就不补）没有再审：按现在的写法开工，还是先让 Codex 加审一轮。执行：Codex `gpt-5.6-sol` / high；三个工作区依次是 `tdx-shadow-measure`、`tdx-promote-gate`、`tdx-live-snapshot-fallback`，都是 disposition merge、target main，路径由 `mkworktree.sh` 给出（应在 `/Users/papa/codebase/.codex-wt/` 下）。之后：建第一个工作区，派工 1。 → 「批准开工」（2026-10-13 15:25）；(1) 未明确回答，另列一条
@@ -82,7 +84,8 @@
 - [x] 2026-10-13 15:27 Codex 实现者做派工 1（P1） → 交回并验收（2026-10-13 16:08），提交 b11e97e9，线程 01a13426-d823-78b1-9f68-2907eb221981
 - [x] 2026-10-13 派工 2（P2 和 P3） → 交回并验收（2026-10-13 16:46），提交 b1a5ac7b、3252f8dd
 - [x] 2026-10-13 派工 3（P4） → 交回并验收（2026-10-13 17:02），提交 ceae8a1a；发布路径测试 `Ran 3049 tests in 37.882s OK (skipped=2)`（主会话复跑）
-- [ ] 2026-10-13 17:02 只读的 Codex 评审者在评审整个分支（`git diff 9d75b5d9...HEAD`，新线程，交回时才知道线程号）。结束标志：它交回 APPROVED / WARNING / BLOCKED 和发现列表。之后：按 `codex-flow` 第 5、6 步合并两边的发现并回派修正。挂在主会话 93ba6e1d 上；主会话结束后由接手者重新起一个只读评审者（提示词见 `~/codebase/agent-skills/own/codex-flow/references/prompts.md` 的 reviewer 一段）。
+- [x] 2026-10-13 只读的 Codex 评审者评审整个分支 → 17:17 交回 WARNING，一条高优先级发现（2026-10-13），线程 01a1347c-75b3-7ae3-b0b2-4f75037170b7
+- [ ] 2026-10-13 17:17 Codex 实现者在修评审第 1 轮的发现（实现者线程 01a13426-d823-78b1-9f68-2907eb221981，工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-shadow-measure`）。结束标志：分支在 ceae8a1a 之后有一个提交且 `git status --short` 为空。之后：跑验收；用评审者线程复审；最多三轮。挂在主会话 93ba6e1d 上。
 
 - [x] 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。 → 2026-10-13 15:25 做完交回：方案第 3 版、三轮审查、待批准的问题都在本记录里；没做成的只有收盘后重跑容差探针（见 Due）。
 
