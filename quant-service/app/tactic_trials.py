@@ -611,6 +611,12 @@ def day_pairs(day: Mapping[str, Any]) -> dict[str, Any]:
         for pair, state in states.items()}})
 
 
+def _pair_condition_name(key: str) -> str:
+    """A condition's name in a pair; one read from the session before (``prev.``) says so."""
+    names = {condition.key: condition.name for condition in CONDITIONS}
+    return f"昨日{names.get(key[5:], key[5:])}" if key.startswith("prev.") else names.get(key, key)
+
+
 class PairHistory:
     """The mined pairs over the days folded in, oldest first."""
 
@@ -637,7 +643,7 @@ class PairHistory:
                 if len(differences) >= 3:
                     deviation = stdev(differences)
                     t_value = None if deviation == 0 else mean(differences) / (deviation / sqrt(len(differences)))
-                pairs.append({"conditions": key.split("|"), **_json({
+                pairs.append({"conditions": key.split("|"), "names": [_pair_condition_name(item) for item in key.split("|")], **_json({
                     "days_with_picks": state["days"], "picks": state["picks"],
                     "mean_daily_picks_mean": _mean(list(state["pick_means"])),
                     "mean_daily_difference": _mean(differences), "t": t_value,
@@ -725,6 +731,39 @@ def _tactic_item(latest: Sequence[Mapping[str, Any]], tactic: Tactic, cached: Se
     }
 
 
+BOARD_FIELDS = ("symbol", "name", "sector", "boards", "gap", "opens_at_limit", "amount", "auction_amount_rank",
+                "risk_rank", "first_seal_time", "seal_money")
+
+
+def day_board(day: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """A reading's stocks by side, each with the registered combinations of that side that picked it."""
+    names = {condition.key: condition.name for condition in CONDITIONS}
+    board: dict[str, list[dict[str, Any]]] = {"focus": [], "hold": [], "avoid": []}
+    for row in day["rows"]:
+        picked = [tactic for tactic in _COMBINATIONS
+                  if tactic.slot == day["slot"] and evaluate_tactic(tactic, row, day.get("day", {})) is True]
+        for side, items in board.items():
+            keys = [tactic.key for tactic in picked if tactic.side == side]
+            if keys:
+                items.append({**{field: row.get(field) for field in BOARD_FIELDS}, "tactics": keys,
+                              "conditions": [names.get(key, key) for key in row.get("flags", ())]})
+    return _json(board)
+
+
+def tactic_day(day: Mapping[str, Any], tactic: Tactic) -> dict[str, Any]:
+    """One day of one tactic: its picks with their primary outcome, their mean and the difference to the rest."""
+    result = day_result(tactic, day["rows"], day.get("day", {}), day.get("outcomes", {}), (tactic.primary,))
+    return _json({"trade_date": _date(day["trade_date"]), "picks": _tactic_picks(day, tactic), "counts": result["counts"],
+                  **{key: result["primary"][key] for key in ("pick_mean", "comparison_mean", "difference")}})
+
+
+def tactic_card(tactic: Tactic) -> dict[str, Any]:
+    return {"key": tactic.key, "name": tactic.name, "slot": tactic.slot, "side": tactic.side, "source": tactic.source,
+            "entry": tactic.entry, "exit": tactic.exit, "primary": tactic.primary,
+            "primary_name": _outcome_name(tactic.primary), "expects": tactic.expects,
+            "registered_on": tactic.registered_on.isoformat(), "combination": tactic in _COMBINATIONS}
+
+
 def _condition_day_items(latest: Sequence[Mapping[str, Any]], cached: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     items = []
     for condition in CONDITIONS:
@@ -748,6 +787,7 @@ def _summary_records(records: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: {
             "name": value["name"], "slot": value["slot"], "primary": value["primary"],
+            "primary_name": _outcome_name(value["primary"]),
             "expects": value["expects"], "records": value["outcomes"][value["primary"]],
             "label": value["label"], "q": value["q"],
         }
@@ -791,10 +831,6 @@ _LABEL_NAMES = {"collecting": "样本不足", "supports": "支持", "against": "
 
 def _bucket_name(value: Any) -> str:
     return _BUCKET_NAMES.get(str(value), str(value))
-
-
-def _condition_names() -> dict[str, str]:
-    return {condition.key: condition.name for condition in CONDITIONS}
 
 
 def _outcome_name(outcome: str) -> str:
@@ -912,13 +948,12 @@ def summary_line_sell_points(points: Mapping[str, Any]) -> list[str]:
 
 
 def summary_line_pairs(pairs: Mapping[str, Any]) -> list[str]:
-    names = _condition_names()
     lines = ["七、两两组合"]
     for slot in ("close", "auction"):
         lines.append(f"{_SLOT_NAMES[slot]}：")
         selected = pairs[slot]["highest"][:5] + pairs[slot]["lowest"][:5]
         for pair in selected:
-            first, second = (names.get(key.replace("prev.", ""), key) for key in pair["conditions"])
+            first, second = pair["names"]
             lines.append(f"{first} + {second}：{_fmt_count(pair['days_with_picks'])}日，{_fmt_count(pair['picks'])}选，差值 {_fmt_pct(pair['mean_daily_difference'])}，t {_fmt_number(pair['t'])}")
         lines.append(f"已挖掘，检验{_fmt_count(pairs[slot]['pairs_examined'])}对，达到门槛{_fmt_count(pairs[slot]['pairs_reaching_minimum'])}对")
     return lines
@@ -969,7 +1004,7 @@ def build_daily_summary(
 __all__ = [
     "History", "PairHistory", "REGISTERED_ON", "STATE_OUTCOMES", "TACTICS", "Tactic", "build_daily_summary",
     "build_pairs", "build_records", "build_sell_points", "build_switch_records", "daily_summary", "day_digest",
-    "day_pairs", "day_result", "evaluate_tactic", "history_of",
+    "day_board", "day_pairs", "day_result", "evaluate_tactic", "history_of", "tactic_card", "tactic_day",
     "summary_line_cases", "summary_line_conditions", "summary_line_day", "summary_line_pairs",
     "summary_line_records", "summary_line_sell_points", "summary_line_tactics",
 ]

@@ -21,7 +21,9 @@ from .tactic_conditions import (
 from .tactic_exits import evaluate_pick
 from .t1_settlement import SettlementBar, opens_at_up_limit
 from .auction_open_desk import gap_bucket
-from .tactic_trials import History, PairHistory, daily_summary, day_digest, day_pairs
+from .tactic_trials import (
+    TACTICS, History, PairHistory, Tactic, daily_summary, day_board, day_digest, day_pairs, tactic_card, tactic_day,
+)
 
 VERSION = "tactic-trials-v1"
 CLOSE_CAPABILITY = "tactic_trials_close_daily"
@@ -292,6 +294,61 @@ def evening(database: Any, trade_date: date) -> dict[str, Any]:
                       "auction": auction["status"], "settled": settled["days"], "summary": summary["summary"]})
 
 
+def _newest(connection: Any, capability: str, day: date | None, end: date | None = None) -> dict[str, Any] | None:
+    """A day's stored reading of the current version; without a day, the newest of the last two weeks."""
+    end = end or day or datetime.now(CN_TZ).date()
+    stored = tactic_trial_repository.read_capability(connection, capability, day or end - timedelta(days=14), end)
+    valid = [reading for reading in stored if reading.get("version") == VERSION]
+    return valid[-1] if valid else None
+
+
+def read_summary(connection: Any, day: date | None = None) -> dict[str, Any]:
+    return _research({"version": VERSION, "reading": _newest(connection, SUMMARY_CAPABILITY, day)})
+
+
+def read_board(connection: Any, day: date | None = None) -> dict[str, Any]:
+    """The 09:25 board: the auction picks by side, the close picks of the session before, each tactic's label.
+
+    The labels are those of the newest summary before the board's day: what was known when the board was built.
+    """
+    auction = _newest(connection, AUCTION_CAPABILITY, day)
+    board_day = date.fromisoformat(auction["trade_date"]) if auction else day or datetime.now(CN_TZ).date()
+    previous = _prior_sessions(connection, board_day, 1)
+    close = _newest(connection, CLOSE_CAPABILITY, previous[0]) if previous else None
+    summary = _newest(connection, SUMMARY_CAPABILITY, None, board_day - timedelta(days=1))
+    records = summary["records"] if summary else {}
+    return _research({
+        "version": VERSION, "trade_date": board_day.isoformat(),
+        "auction": None if auction is None else {"decided_at": auction["decided_at"], "source": auction.get("source"),
+                                                 "rows": len(auction["rows"]), **day_board(auction)},
+        "close": None if close is None else {"trade_date": close["trade_date"], "rows": len(close["rows"]), **day_board(close)},
+        "labels_as_of": summary["trade_date"] if summary else None,
+        "tactics": [{**tactic_card(tactic), "label": records.get(tactic.key, {}).get("label"), "q": records.get(tactic.key, {}).get("q")}
+                    for tactic in TACTICS if tactic_card(tactic)["combination"]],
+    })
+
+
+def tactic_by_key(key: str) -> Tactic | None:
+    return next((tactic for tactic in TACTICS if tactic.key == key), None)
+
+
+def read_cases(connection: Any, tactic: Tactic, days: int = 10) -> dict[str, Any]:
+    """A tactic's pick days among the last ``days`` sessions, newest first; a day not settled yet has no outcomes."""
+    today = datetime.now(CN_TZ).date()
+    sessions = tactic_trial_repository.read_open_sessions(connection, today - timedelta(days=days * 2 + 14), today)[-days:]
+    if not sessions:
+        return _research({"version": VERSION, "tactic": tactic_card(tactic), "sessions": 0, "days": []})
+    settled = {item["trade_date"]: item for item in tactic_trial_repository.read_capability(
+        connection, SETTLED_CAPABILITY[tactic.slot], sessions[0], sessions[-1])}
+    result = []
+    for reading in tactic_trial_repository.read_capability(connection, READING_CAPABILITY[tactic.slot], sessions[0], sessions[-1]):
+        outcomes = settled.get(reading["trade_date"])
+        item = tactic_day({**reading, "outcomes": {row["symbol"]: row["outcomes"] for row in outcomes["rows"]} if outcomes else {}}, tactic)
+        if item["picks"]:
+            result.append({**item, "settled": bool(outcomes and outcomes.get("complete"))})
+    return _research({"version": VERSION, "tactic": tactic_card(tactic), "sessions": len(sessions), "days": result[::-1]})
+
+
 DATABASE_UNAVAILABLE = (ExecutorSaturatedError, TimeoutError)
 AUCTION_FROM, AUCTION_UNTIL = time(9, 25, 5), time(9, 45)
 
@@ -511,6 +568,6 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "TacticAuctionDependencies", "auction_reading", "evening", "refresh_auction", "refresh_close", "replay",
-    "run_tactic_auction_loop", "settle", "summarise",
+    "TacticAuctionDependencies", "auction_reading", "evening", "read_board", "read_cases", "read_summary",
+    "refresh_auction", "refresh_close", "replay", "run_tactic_auction_loop", "settle", "summarise", "tactic_by_key",
 ]
