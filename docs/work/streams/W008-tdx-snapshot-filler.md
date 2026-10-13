@@ -1,12 +1,12 @@
 # W008 通达信补主行情快照的缺口并作备用
 
-- state: reviewing
+- state: building
 - holder: Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13
 - goal: 主数据源（同花顺）某一分钟缺了或出错时，用通达信的全市场快照补上并带来源标记；不把通达信变成主数据源
 - plan: docs/work/plans/tdx-live-snapshot-fallback.md
-- branch: codex/tdx-shadow-measure
-- head: 02991577
-- next: 等 Codex 评审者交回第 3 轮（最后一轮）的结论（评审者线程 01a1347c-75b3-7ae3-b0b2-4f75037170b7）；APPROVED 就把 `codex/tdx-shadow-measure` 用 `--no-ff` 合并进 main、回收工作区，再从 main 建 `tdx-promote-gate` 工作区派工 4；仍有问题就把状态交给用户，不再回派（三轮已满）
+- branch: codex/tdx-promote-gate
+- head: 26170231
+- next: 等 Codex 交回派工 4（B3 的目录部分：一致性按“占比达标”判定），在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate` 跑验收并读 diff；派工 5 之前先向用户问清发布分类器那一问（见 Waiting on the user）；第一个分支的发布脚本已备好，等用户执行
 - updated: 2026-10-13
 
 ## Requirements
@@ -76,7 +76,11 @@
 
 - 2026-10-13 17:33 reality: owner 一侧 17:00 前后恢复（中转服务器重启过，容器 17:04 起健康；用户说“对方已经修好了”）。容差探针全天重跑完成，见 Due。评审第 2 轮的发现已修，送第 3 轮。
 
+- 2026-10-13 17:37 第一个分支合并：评审三轮（主会话读 diff 无发现；Codex 评审者两条高优先级发现都已修），合并提交 26170231（12 个文件，+504 −26），发布路径测试 3050 项通过（主会话在分支末端复跑）。合并的同意见 Requirements 里用户 17:1x 的话。工作区回收被脚本拒绝一次（十分钟内还有 Codex 会话活动），稍后重试：`bash ~/codebase/agent-skills/own/codex-flow/scripts/finishworktree.sh /Users/papa/codebase/n8n tdx-shadow-measure --apply`。`scripts/release plan 26170231` 的结论：owner 纯代码覆盖（10 个运行时文件），edge 没有要发的。Codex 用量：实现者线程 1,433 万（其中缓存 1,358 万）、评审者线程 304 万。发布脚本和干净的发布检出（`/Users/papa/codebase/.codex-wt/n8n-release-26170231`）已备好。
+
 ## Waiting on the user
+
+- [ ] 2026-10-13 17:37 执行第一个分支的发布：`! bash /Users/papa/codebase/n8n/state/research/owner_repairs_20261012/release_26170231.sh --apply`（先推送 main，再做 owner 纯代码发布 `owner-code-20261013-04`，从 29f3ffdf 到 26170231，10 个运行时文件）。为什么等：owner 发布和推送只能用户做。可发的时段：18:45 之前，或 22:05 之后，或次日 11:30–13:00、15:10–18:45。发布内容：两条采集循环的节拍、通达信完整性门槛、按数据时间比对、当日汇总，以及回看接口的修复（B011）。要知道的风险：改了主行情采集循环，它只在交易时段运行，第一次真实运行是下一个交易日 09:15，那时处在不能发布的窗口；agent 会在 09:16–09:20 核对两条采集都按第 50、52 秒落库，异常就立即告诉用户回滚到 `owner-code-20261013-03`。之后：agent 跑 `scripts/release-sync-status.sh`、做方案 “Verification after release” 一节的检查、把发布记进 `docs/RELEASE_SYNC_47.md`，从这次发布起累计 5 个交易日的达标观察。
 
 - [x] 2026-10-13 批准 W008 方案第 3 版（`docs/work/plans/tdx-live-snapshot-fallback.md`）并开工吗？为什么等：动工前要用户批准（`codex-flow` 第 3 步），而且里面有三件只有用户能定的事。请一并回答：(1) 是否同意在发布分类器里给 `scripts/tdx-promote.py` 加“只在工作站运行”的规则（同意：两次发布都是纯代码发布；不同意：派工 4–5 的分支要等派工 6–10 的分支一起合并，发布 B 走全量发布）；(2) 升级前要看几个交易日，方案取 5 个（写进目录常量 `min_sessions`，由工具把关），可以改；(3) 最后一轮审查后改的那一处（名册取主源已存文档的上游总数，读不到就不补）没有再审：按现在的写法开工，还是先让 Codex 加审一轮。执行：Codex `gpt-5.6-sol` / high；三个工作区依次是 `tdx-shadow-measure`、`tdx-promote-gate`、`tdx-live-snapshot-fallback`，都是 disposition merge、target main，路径由 `mkworktree.sh` 给出（应在 `/Users/papa/codebase/.codex-wt/` 下）。之后：建第一个工作区，派工 1。 → 「批准开工」（2026-10-13 15:25）；(1) 未明确回答，另列一条
 - [ ] 2026-10-13 是否同意在发布分类器里把 `scripts/tdx-promote.py` 列为“只在工作站运行”的工具（改的是 `scripts/shared-peer/classify-owner-paths.sh` 的规则）？为什么等：这是发布安全规则的改动，方案要求用户明确同意。同意：派工 5 带上这条规则，两次发布都是纯代码发布。不同意：派工 4–5 的分支等派工 6–10 的分支一起合并，发布 B 走全量发布。派工 5 开始前需要答案；派工 1–4 不受影响。
@@ -89,7 +93,8 @@
 - [x] 2026-10-13 只读的 Codex 评审者评审整个分支 → 17:17 交回 WARNING，一条高优先级发现（2026-10-13），线程 01a1347c-75b3-7ae3-b0b2-4f75037170b7
 - [x] 2026-10-13 Codex 实现者修评审第 1 轮的发现 → 交回（2026-10-13 17:26），提交 64444a3e，发布路径测试 3050 项通过（主会话复跑）
 - [x] 2026-10-13 评审第 2 轮 → WARNING：缺数据时间的分支在快照不完整时仍带了比对结果（已核实）；实现者修正为先判完整性、不完整一律不比对，提交 02991577，发布路径测试 3050 项通过（2026-10-13 17:33）
-- [ ] 2026-10-13 17:33 Codex 评审者在做第 3 轮复审（同一评审者线程）。结束标志：它交回 APPROVED / WARNING / BLOCKED。之后见 next。挂在主会话 93ba6e1d 上。
+- [x] 2026-10-13 评审第 3 轮 → APPROVED，没有新发现（2026-10-13 17:37）
+- [ ] 2026-10-13 17:37 Codex 实现者在做派工 4（B3 的目录部分），新的 Codex 线程（交回时才知道线程号），工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate`，分支 `codex/tdx-promote-gate`，基点 26170231。结束标志：分支在 26170231 之后有提交且 `git status --short` 为空。之后：跑验收、读 diff、勾掉 Steps；派工 5 要先有用户对分类器规则的答复。挂在主会话 93ba6e1d 上，判断死活和续派的办法同 W006 的 Resume here。
 
 - [x] 2026-10-13 13:50 主会话派出的接手 agent 在做：查清四个前置问题（只读）、把方案改到第 3 版、送 Codex 审查（最多三轮）、更新本记录并提交。结束标志：它交回最终方案和待用户批准的问题，本记录的 Plan 一节写了各轮审查结果。之后：主会话把方案转给用户请批准。该 agent 挂在主会话上，主会话结束它就停：接手者看本记录的 Log 和方案文件的修订说明，从没做完的那一步继续。 → 2026-10-13 15:25 做完交回：方案第 3 版、三轮审查、待批准的问题都在本记录里；没做成的只有收盘后重跑容差探针（见 Due）。
 

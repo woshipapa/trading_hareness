@@ -12,7 +12,7 @@
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
 | [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 等 Codex 交回第 9 步（`tactic_trial_runtime.py`：收盘和竞价的刷新、结算、每日总结、区间回放、命令行、给接口用的读取函数；分两个提交），复跑发布路径测试，看它报告的总结计时（760 天、每天 100 行），通过后派第 10 步（盘后阶段接线和边界测试） | 2026-10-13 |
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | planned | Claude Code 会话 93ba6e1d，2026-10-13 | 看 `state/research/vshape_20261013/data/fetch.log`：末行是 FINISHED 就核对 11 个文件各约 750 行（上市晚的 ETF 少），然后写研究登记、派 Codex；末行是 PAUSED 就在盘后流程结束后（10 月 13 日 20:30 以后，或次日非交易时段）重跑同一条命令续取：`/Users/papa/.venvs/svc/bin/python -I docs/work/probes/2026-10-13-index-minute-fetch.py SH000001 SZ399001 SZ399006 SH000852 SH000300 510300 512100 510050 510500 159915 588000`（要限时就加 `--until=HH:MM`） | 2026-10-13 |
-| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | reviewing | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 评审者交回第 3 轮（最后一轮）的结论（评审者线程 01a1347c-75b3-7ae3-b0b2-4f75037170b7）；APPROVED 就把 `codex/tdx-shadow-measure` 用 `--no-ff` 合并进 main、回收工作区，再从 main 建 `tdx-promote-gate` 工作区派工 4；仍有问题就把状态交给用户，不再回派（三轮已满） | 2026-10-13 |
+| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | building | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 等 Codex 交回派工 4（B3 的目录部分：一致性按“占比达标”判定），在工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate` 跑验收并读 diff；派工 5 之前先向用户问清发布分类器那一问（见 Waiting on the user）；第一个分支的发布脚本已备好，等用户执行 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | building | Claude Code 会话 eac0e1fc，2026-10-13 | 收齐并行调用的结果。先处理 base：评审者的意见用线程 01a13455 修掉 → base 后端和 `relay-auto-base-ui` 都合进集成分支 → 集成分支上跑全部验收 → 合进 main、热更新 edge（“目标群”栏目上线）。再逐条功能线：在其工作区 `git merge integration/relay-auto`，复跑验收、edge 上跑 bridge 套件，用它自己的线程续派看板一步，双重评审，合进集成分支 → main → 热更新 | 2026-10-13 |
 
@@ -20,6 +20,7 @@
 
 - W004 2026-10-13 请看一下控制台“盘面雷达与战法”页签的新图，配色、数字口径、点的密度是否还要调。为什么等：这是按用户的参考图做的，是否“看得懂”只有用户能判断。之后：没有意见就关闭本记录。
 - W008 2026-10-13 是否同意在发布分类器里把 `scripts/tdx-promote.py` 列为“只在工作站运行”的工具（改的是 `scripts/shared-peer/classify-owner-paths.sh` 的规则）？为什么等：这是发布安全规则的改动，方案要求用户明确同意。同意：派工 5 带上这条规则，两次发布都是纯代码发布。不同意：派工 4–5 的分支等派工 6–10 的分支一起合并，发布 B 走全量发布。派工 5 开始前需要答案；派工 1–4 不受影响。
+- W008 2026-10-13 17:37 执行第一个分支的发布：`! bash /Users/papa/codebase/n8n/state/research/owner_repairs_20261012/release_26170231.sh --apply`（先推送 main，再做 owner 纯代码发布 `owner-code-20261013-04`，从 29f3ffdf 到 26170231，10 个运行时文件）。为什么等：owner 发布和推送只能用户做。可发的时段：18:45 之前，或 22:05 之后，或次日 11:30–13:00、15:10–18:45。发布内容：两条采集循环的节拍、通达信完整性门槛、按数据时间比对、当日汇总，以及回看接口的修复（B011）。要知道的风险：改了主行情采集循环，它只在交易时段运行，第一次真实运行是下一个交易日 09:15，那时处在不能发布的窗口；agent 会在 09:16–09:20 核对两条采集都按第 50、52 秒落库，异常就立即告诉用户回滚到 `owner-code-20261013-03`。之后：agent 跑 `scripts/release-sync-status.sh`、做方案 “Verification after release” 一节的检查、把发布记进 `docs/RELEASE_SYNC_47.md`，从这次发布起累计 5 个交易日的达标观察。
 
 ## 到点要做
 
@@ -34,7 +35,7 @@
 
 - W006 2026-10-13 17:26 Codex 实现者在做第 9 步（同一线程 01a1339e-3f02-7072-ba13-2d122b927799，工作区 `/Users/papa/codebase/.codex-wt/n8n-tactic-trials`）。结束标志：分支在 7f70c6c9 之后有两个提交且 `git status --short` 为空。之后：复跑验收；看总结计时；勾掉 Steps；派第 10 步。
 - W007 2026-10-13 17:30 取数脚本在跑（主会话的后台命令）：11 个代码顺序取，每次请求后停 0.3 秒，带 `--until=18:35`，到点自己停并在日志里写 PAUSED（避开 18:45 开始的盘后流程）。日志 `state/research/vshape_20261013/data/fetch.log`，数据 `<代码>.jsonl`。结束标志：日志末行 FINISHED 或 PAUSED；ABORT 是连续 20 次请求失败。挂在主会话 93ba6e1d 上；主会话结束它就停，重跑同一条命令即续取。
-- W008 2026-10-13 17:33 Codex 评审者在做第 3 轮复审（同一评审者线程）。结束标志：它交回 APPROVED / WARNING / BLOCKED。之后见 next。挂在主会话 93ba6e1d 上。
+- W008 2026-10-13 17:37 Codex 实现者在做派工 4（B3 的目录部分），新的 Codex 线程（交回时才知道线程号），工作区 `/Users/papa/codebase/.codex-wt/n8n-tdx-promote-gate`，分支 `codex/tdx-promote-gate`，基点 26170231。结束标志：分支在 26170231 之后有提交且 `git status --short` 为空。之后：跑验收、读 diff、勾掉 Steps；派工 5 要先有用户对分类器规则的答复。挂在主会话 93ba6e1d 上，判断死活和续派的办法同 W006 的 Resume here。
 - W010 2026-10-13 19:25 起并行的 Codex 调用（都挂在会话 eac0e1fc 上；工作区都在 `/Users/papa/codebase/.codex-wt/n8n-<slug>`，都从 base 分支的 bb228919 起步，
 
 ## 待办清单
