@@ -11,7 +11,7 @@
 | [W003](streams/W003-daily-close-completion.md) | 日线收盘补全 | released | Claude Code 会话 93ba6e1d，2026-10-13 | 把剩下的两件事定下来再改状态：(1) 28 只一直“缺日线”的股票（6 只北交所，其余多半停牌）应归到“未交易”，否则这个阶段永远是 partial；(2) 控制面现在卡在每日指标 5,138/5,560 上，对账循环每 5 分钟调一次补全，后 21 次都是空跑（BACKLOG B043）。先只读查清每日指标的缺口是不是常态，再写修正方案 | 2026-10-13 |
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
 | [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 主会话先读第 2 部分的 diff（`git -C /Users/papa/codebase/.codex-wt/n8n-tactic-trials diff df44f56b 13b81e76`：竞价回放的样本、回放按分块、删掉的三个读取函数）并复跑发布路径测试，然后改方案（第 8 版），两处：(a) 每晚的总结不能把全部历史读进内存：量出来 760 天 × 100 行时 `summarise` 用 136 秒、内存峰值 1.21 GB，而 owner 主机总共 894 MB；改成每个选股日结算完成时存一份紧凑的“当日结果”（每个战法当天的入选数、对照均值、差值，和条件两两组合的计数），总结只读这些小文档；(b) 每晚的运行并入 peer 自己的晚间循环（W011 先把榜单和风险分放进去，本线的阶段排在它们后面），不走盘后阶段表。方案给用户过目后再派工 | 2026-10-13 |
-| [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | building | Claude Code 会话 93ba6e1d，2026-10-13 | 取数排在 10 月 13 日 22:06 自动续取（主会话的后台命令，先查新主机可用内存不低于 150 MB 和 `/health`，带 `--until=23:50`）。日志末行是 FINISHED 就核对 6 个基金文件各约 749 行、`SZ399001` 补到 749 行，然后用同一线程（01a134cc-8eb1-76f0-9aec-6bb66827ce98）派研究第 2 步：先做登记里基金文件的两项核对（第三个值是否累计均价、成交量单位），再做五类因素各自对照基准；`SZ399001` 补齐的 7 天要让它重建派生表。末行是 PAUSED 或没启动，就在非交易时段重跑 `next` 里原来的命令 | 2026-10-13 |
+| [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | building | Claude Code 会话 93ba6e1d，2026-10-13 | 11 个分钟线文件都齐了（各 749 行，`SZ399001` 缺的 7 天已补）。用同一线程（01a134cc-8eb1-76f0-9aec-6bb66827ce98）派研究第 2 步：先让它重建派生表（`SZ399001` 多了 7 天，等权线的样本从 742 天变 749 天，第 1 步的核对数字要随之更新），做登记里基金文件的两项核对（第三个值是否累计均价、成交量单位），再做五类因素各自对照基准。10 月 13 日当天的分钟线历史接口还没有（22:50 仍返回无数据），次日再取一次：同一条取数命令，带 `--workers=6` | 2026-10-13 |
 | [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | released | Claude Code 会话 93ba6e1d（主会话，派工与验收），2026-10-13 | 10 月 14 日 09:16 核对新服务器上两条采集循环按新节拍落库（见 Due）；然后从 main 建 `tdx-live-snapshot-fallback` 工作区派工 6（B1 的读取链）。当日汇总从 10 月 14 日起才有可判的分钟：收盘后跑一次并把输出存到 `docs/work/probes/`，记为五个交易日观察的第 1 天 | 2026-10-13 |
 | [W009](streams/W009-feishu-relay-new-tag-and-target.md) | 飞书转发：全新标签和全新目标群也只在前端操作 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 用户第一次在看板里用新标签建源群、或新增一个真实的目标群之后，读 `curl -s http://127.0.0.1:18300/api/group-relay/status` 的 `source_tags` 和 `webhook_targets`，确认多出一行 `dashboard` 来源、该路由 healthy、目标群里收到了转发；通过后把状态改成 `verified` | 2026-10-13 |
 | [W010](streams/W010-relay-group-automation.md) | 飞书中继：目标群管理、撤回同步、加急告警、链接入群 | released | Claude Code 会话 eac0e1fc，2026-10-13 | 等其余模块的真实数据库检查（Running）出结果并处理；用户在看板上改完 anqiang 群剩下的 7 个会员后，按用户的意思打开或不打开每天自动审查；用户第一次真实使用时核对没在线上看到的事（Open questions）。之后回收剩下的两个工作区和集成分支，做探测 P0-8，状态改 `verified` | 2026-10-13 |
@@ -36,7 +36,6 @@
 ## 正在运行
 
 - W011 2026-10-13 22:20 Codex 方案审计在跑（只读，新线程）。结束标志：它交回 SOUND 或编号的异议。之后见 next。挂在主会话 93ba6e1d 上。
-- W007 2026-10-13 22:31 取数在跑（主会话的后台命令）。结束标志：`state/research/vshape_20261013/data/fetch.log` 末行 FINISHED / PAUSED / ABORT。主会话结束或本机合盖它就停，重跑 next 里的命令即可。
 - W010 2026-10-13 23:00 只读子任务：把 `delivery-check`、`urgent-alerts`、`target-groups`、`target-registry`、`target-members`、`join-link`、`webhook-targets`、`source-tags`
 
 ## 待办清单

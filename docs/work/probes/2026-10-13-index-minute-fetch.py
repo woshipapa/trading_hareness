@@ -6,6 +6,7 @@ launched earlier. Resumable: a (code, day) already in the output file is skipped
 Output and log: state/research/vshape_20261013/data/ (machine-local, not tracked).
 """
 import json, re, sys, time, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pandas as pd
@@ -13,8 +14,10 @@ import pandas as pd
 CN = timezone(timedelta(hours=8))
 ROOT = Path("/Users/papa/codebase/n8n")
 OUT = ROOT / "state/research/vshape_20261013/data"
-ARGS = [a for a in sys.argv[1:] if not a.startswith("--until=")]
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 UNTIL = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--until=")), None)   # HH:MM Asia/Shanghai: stop cleanly then
+PAUSE = float(next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--pause=")), "0.1"))   # seconds a worker rests after a call
+WORKERS = int(next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--workers=")), "1"))   # parallel requests
 CODES = tuple(ARGS) or ("SH000001", "SZ399001", "SZ399006", "SH000852", "510300", "512100")
 KEY = re.search(r"^QUANT_SHARED_READ_API_KEY=(.*)$", (ROOT / "deploy/shared-peer/.env").read_text(), re.M).group(1).strip().strip('"')
 
@@ -46,42 +49,69 @@ panel = pd.read_parquet(ROOT / "state/research/shortterm_tactics_20261013/data/d
 days = sorted({pd.Timestamp(day).strftime("%Y%m%d") for day in panel["trading_date"].unique() if pd.Timestamp(day) >= pd.Timestamp("2023-09-01")} | {"20261013"})
 log(f"{len(days)} sessions, {len(CODES)} codes")
 calls = failures = 0
-for code in CODES:
-    path = OUT / f"{code}.jsonl"
-    done = {json.loads(line)["day"] for line in path.open(encoding="utf-8")} if path.exists() else set()
-    seen_data, empty_run = bool(done), 0
-    with path.open("a", encoding="utf-8") as handle:
-        for day in days:
-            if day in done:
-                continue
-            if UNTIL and datetime.now(CN).strftime("%H:%M") >= UNTIL:
-                log(f"PAUSED at {UNTIL} after {calls} calls; {code} at {day}. Run the same command again to continue")
-                sys.exit(0)
-            try:
-                payload = call(code, day)
+mark, mark_calls, durations = time.time(), 0, []
+
+
+def fetch_one(code, day):
+    """One request and how long it took; a failure comes back as the exception, so results keep the order of the days."""
+    started = time.time()
+    try:
+        payload = call(code, day)
+    except Exception as error:  # the network boundary of a long batch: count, say, go on
+        return error, time.time() - started
+    # 1020 is the interface's "no data for this day"; any other error code is the upstream refusing (a rate limit shows here).
+    if not payload.get("trend") and str(payload.get("errcode") or "0") not in ("0", "1020"):
+        return RuntimeError(f"upstream errcode {payload.get('errcode')} {str(payload.get('errmsg'))[:40]}"), time.time() - started
+    seconds = time.time() - started
+    time.sleep(PAUSE)
+    return payload, seconds
+
+
+def stop(futures, text, code):
+    for future in futures:
+        future.cancel()
+    log(text)
+    sys.exit(code)
+
+
+with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+    for code in CODES:
+        path = OUT / f"{code}.jsonl"
+        done = {json.loads(line)["day"] for line in path.open(encoding="utf-8")} if path.exists() else set()
+        pending = [day for day in days if day not in done]
+        seen_data, empty_run = bool(done), 0
+        futures = [pool.submit(fetch_one, code, day) for day in pending]
+        with path.open("a", encoding="utf-8") as handle:
+            for day, future in zip(pending, futures):
+                if UNTIL and datetime.now(CN).strftime("%H:%M") >= UNTIL:
+                    stop(futures, f"PAUSED at {UNTIL} after {calls} calls; {code} at {day}. Run the same command again to continue", 0)
+                payload, seconds = future.result()
+                durations.append(seconds)
+                if isinstance(payload, Exception):
+                    failures += 1
+                    log(f"{code} {day} request failed: {type(payload).__name__} {str(payload)[:80]}")
+                    if failures >= 20:
+                        stop(futures, "ABORT: 20 consecutive failed requests", 2)
+                    continue
                 failures = 0
-            except Exception as error:  # the network boundary of a long batch: count, say, go on
-                failures += 1
-                log(f"{code} {day} request failed: {type(error).__name__} {str(error)[:80]}")
-                if failures >= 20:
-                    log("ABORT: 20 consecutive failed requests")
-                    sys.exit(2)
-                time.sleep(2)
-                continue
-            calls += 1
-            trend = payload.get("trend") or []
-            if trend:
-                seen_data, empty_run = True, 0
-                handle.write(json.dumps({"day": day, "preclose": payload.get("preclose_px"), "open": payload.get("begin_px"), "high": payload.get("hprice"),
-                                         "low": payload.get("lprice"), "total_turnover": payload.get("total_turnover"), "trend": trend}, ensure_ascii=False) + "\n")
-                handle.flush()
-            elif seen_data:
-                empty_run += 1
-                if empty_run >= 20:
-                    log(f"{code}: 20 consecutive sessions without data after {day}; stopping this code")
-                    break
-            if calls % 200 == 0:
-                log(f"{calls} calls; {code} at {day}")
-            time.sleep(0.3)
-    log(f"{code} finished")
+                calls += 1
+                trend = payload.get("trend") or []
+                if trend:
+                    seen_data, empty_run = True, 0
+                    handle.write(json.dumps({"day": day, "preclose": payload.get("preclose_px"), "open": payload.get("begin_px"), "high": payload.get("hprice"),
+                                             "low": payload.get("lprice"), "total_turnover": payload.get("total_turnover"), "trend": trend}, ensure_ascii=False) + "\n")
+                    handle.flush()
+                elif seen_data:
+                    empty_run += 1
+                    if empty_run >= 20:
+                        for pending_future in futures:
+                            pending_future.cancel()
+                        log(f"{code}: 20 consecutive sessions without data after {day}; stopping this code")
+                        break
+                if calls - mark_calls >= 200:
+                    ordered = sorted(durations)
+                    log(f"{calls} calls; {code} at {day}; {(calls - mark_calls) / (time.time() - mark):.1f} calls/s with {WORKERS} worker(s); "
+                        f"seconds per call median {ordered[len(ordered) // 2]:.2f} p90 {ordered[int(len(ordered) * 0.9)]:.2f}")
+                    mark, mark_calls, durations = time.time(), calls, []
+        log(f"{code} finished")
 log(f"FINISHED {calls} calls ({' '.join(CODES)})")

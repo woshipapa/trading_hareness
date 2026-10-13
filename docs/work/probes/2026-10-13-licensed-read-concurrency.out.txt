@@ -1,0 +1,7 @@
+asked at 22:57:34 | source SharedLonghuReadSource | calls per level 240
+threads  4:   5.3 calls/s | seconds per call median 0.71 p90 0.91 max 2.14 | without data or failed: 0 []
+threads  8:   7.3 calls/s | seconds per call median 1.06 p90 1.19 max 1.68 | without data or failed: 0 []
+threads 12:   7.4 calls/s | seconds per call median 1.59 p90 1.69 max 2.19 | without data or failed: 0 []
+threads 16:  56.5 calls/s | seconds per call median 0.06 p90 1.38 max 1.70 | without data or failed: 208 ['HTTPError']
+stopping: the upstream refused or failed at this level
+host mem MB available after: 283
