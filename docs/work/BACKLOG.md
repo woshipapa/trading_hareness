@@ -195,14 +195,15 @@
 - needs: 无
 - updated: 2026-10-13
 
-### B020 通达信这条线的现状要对账
+
+### B029 22 个通达信探索分支的归档
 
 - state: open
 - kind: reconcile
-- why: 11 份方案（`.claude/plan/tdx-*.md`）没有状态；并行快照 `tdx-shadow-snapshot` 已合并（75febdde）并随 `owner-full-20261012-20` 发布，10 月 13 日上午采到 19 份、比对 18 份；但盘中晋级检查与日汇总、B 阶段的备用切换没做；`git worktree list` 里约有 45 个 `codex/tdx-*` 工作区，其中 `codex/tdx-q-*` 等一批标着未合并（目标 `codex/tdx-integration`）；2026-10-13 的对账结果见 W008
-- how: 读这些方案和 `lsworktrees.sh` 的输出，每个分支定去留（合并、收成果、归档），把还要做的写成条目
-- who: agent 对账；去留由用户定
-- needs: 无
+- why: 41 个 `codex/tdx-*` 分支里 22 个没有合并；它们是 10 月 9–10 日的探索分支，模块和报告已收进主线，方案写明不整支合并；留着会让人误以为还有东西没合
+- how: 逐个用 `finishworktree.sh <仓库> <名字> --archive --apply`（打归档标签并打包后删除工作区和分支）；`claude/tdx-p0-followup`（1 个提交，P0 评审修复）先看是否已被后来的提交覆盖
+- who: 去留由用户定；agent 执行
+- needs: 用户同意
 - updated: 2026-10-13
 
 ### B021 控制台提速方案的现状要对账
@@ -230,7 +231,7 @@
 - state: ready
 - kind: defect
 - why: 竞价开始于 09:15，分钟快照第一份在 09:16 前后，漏掉开头
-- how: 查调度起点
+- how: 查调度起点；通达信的并行快照 09:15:20 就有第一份（F011），W008 的补缺做完后这一分钟可以由它补
 - who: agent
 - needs: 无
 - updated: 2026-10-13
@@ -276,6 +277,17 @@
 - updated: 2026-10-13
 
 ## Closed
+
+### B020 通达信这条线的现状要对账
+
+- state: done
+- kind: reconcile
+- why: 11 份方案没有状态，几十个 `codex/tdx-*` 分支去留不明
+- how: 读方案、目录、代码、发布记录和分支
+- who: agent
+- needs: 无
+- result: 2026-10-13 对账完成，报告 `docs/archive/2026-10-13-tdx-reconcile.md`；要接着做的事立为 W008，分支的去留是 B029
+- updated: 2026-10-13
 
 ### B028 连板竞价复盘的方案草稿
 

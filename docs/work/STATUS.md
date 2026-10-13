@@ -12,6 +12,7 @@
 | [W004](streams/W004-radar-chart-redesign.md) | 盘面雷达“主动买/卖·主力净额”图重画 | verified | none | 用户看过页面、没有要调的地方就关闭；有反馈就按反馈改 | 2026-10-13 |
 | [W006](streams/W006-tactic-trial-ledger.md) | 战法试验台（条件登记、组合成战法、卖出规则、每日总结） | building | Claude Code 会话 93ba6e1d（主会话，负责验收与派工），2026-10-13 | 等 Codex 交回“两处修正＋第 3、4 步”，在工作区复跑发布路径测试并读 diff，通过后派第 5 步（t1_settlement 的公共函数） | 2026-10-13 |
 | [W007](streams/W007-intraday-v-reversal.md) | 盘中止跌放量（V 形反转）的识别 | proposed | Claude Code 会话 93ba6e1d，2026-10-13 | 10 月 13 日 15:10 收盘后取指数和宽基 ETF 的历史分钟线（约 4,500 次请求），存下当天全天的雷达序列，然后写研究登记并派给 Codex 研究任务 | 2026-10-13 |
+| [W008](streams/W008-tdx-snapshot-filler.md) | 通达信补主行情快照的缺口并作备用 | planned | none | 用 10 月 13 日首个影子交易日的实测更新方案（四个前置修复、完整性门槛、盘中一致性容差的取值），交 Codex 审查，然后请用户批准 | 2026-10-13 |
 
 ## 等用户处理
 
@@ -31,7 +32,7 @@
 
 ## 待办清单
 
-open 18, ready 9, dropped 1
+open 18, ready 9, done 1, dropped 1
 
 可以开工或等用户处理的:
 
