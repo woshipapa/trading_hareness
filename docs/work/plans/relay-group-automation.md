@@ -1,6 +1,6 @@
 # 飞书中继：目标群管理、撤回同步、加急告警、链接入群（relay-group-automation）
 
-- 版本：r4，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3、r4 分别采纳了 Codex 方案审查三轮的 7 条、4 条、1 条意见（见文末“审查记录”）。
+- 版本：r5，2026-10-13，基于 main `9d75b5d9`；工作线 W010。r2、r3、r4 分别采纳了 Codex 方案审查三轮的 7 条、4 条、1 条意见（见文末“审查记录”）。r5 应用户 2026-10-13 的新要求加了功能 E（会员期限与到期提醒）。
 - 组件：只动 `feishu-relay/`（发布单元 edge-relay）。不碰 quant-service、frontend、scripts、config/secrets、docs/work。
 - 出处：待办 B030；用户 2026-10-13「可以这些全部推进，请你写好完整计划给codex-flow去执行推进。不同worktree最后merge」，
   看过方案要点后「同意了，我是trust的」。
@@ -18,6 +18,7 @@
 | D | 撤回同步与送达核对 | 每个目标群“已核对 / 未核对 / 已撤回”的计数；源头撤回后目标群里的那条也被撤回 |
 | U | 加急告警 | 选一个接收人，中继降级类告警除发运维群外，再由账号发给接收人并应用内加急 |
 | J | 粘贴邀请链接入群 | 新增源群时贴链接 → 预览群名和群主 → 确认加入 → 回到原有的建路由流程 |
+| E | 会员期限与到期提醒 | 每个目标群的成员有开始日期和期限；每天自动审查，到期的由群里的转发机器人 @ 本人提醒联系群主续费 |
 
 ## 约束（每条线都适用）
 
@@ -43,9 +44,10 @@
 | 2 并行 | `relay-auto-members` | M | base、P0-4/7 |
 | 2 并行 | `relay-auto-urgent` | U | base、P0-6 |
 | 2 并行 | `relay-auto-recall` | D | base、P0-5 |
+| 3 | `relay-auto-membership` | E | base、M 已合并、P0-9 |
 
 base 合进集成分支后，其余五条从集成分支拉出并行做，各自只改自己的文件（见“接缝”），按 join → create → members →
-urgent → recall 的顺序 `--no-ff` 合回集成分支，每合一条在集成分支上跑一遍全部验收命令。
+urgent → recall 的顺序 `--no-ff` 合回集成分支（E 在 members 合并后才从集成分支拉出，最后合），每合一条在集成分支上跑一遍全部验收命令。
 base 之后，任何功能线都**不再修改**这些共享文件：`bridge/bridge.py`、`bridge/feature_routes.py`、`bridge/group_admin.py`、
 `adapter/index.mjs`、`adapter/group-relay.mjs`、`adapter/ledger.mjs`、`adapter/feature-routes.mjs`、`adapter/frontend-assets.mjs`、
 两个 Dockerfile、`dashboard/src/App.vue`、`dashboard/src/views/TargetGroupsView.vue`、`dashboard/src/composables/useFeishuDashboardWorkspace.ts`。
@@ -70,7 +72,9 @@ critical/high 后，集成分支 `--no-ff` 合进 main（要用户同意），�
 | P0-7 | 把用户本人的账号拉进自测群再移除 | `chats.PutChatChatterRequest`（47）、`DeleteChatChatterRequest`（45） | 用户会收到一次入群和被移出的通知 |
 | P0-8 | 让中继往自测群各转发一条文字、带图富文本、卡片，记下“发出去的最终文字”和“从群里读回的文字” | 现有转发通道 + `PullMessagesByPositions` | 自测群里三条消息 |
 
-P0-1 至 P0-5 已于 2026-10-13 试通（`docs/work/probes/2026-10-13-relay-auto-p0.out.txt`）。P0-6、P0-7 由用户运行脚本；P0-8 在 base 合并后做。
+P0-1 至 P0-7 已于 2026-10-13 试通（`docs/work/probes/2026-10-13-relay-auto-p0.out.txt`、`…-p0-c.out.txt`）；P0-8 在 base 合并后做。
+P0-9（webhook 用成员列表里的数字 ID @ 群成员，文字和富文本两种形态）也已试通（`docs/work/probes/2026-10-13-relay-auto-p0-9.out.txt`），
+被 @ 的是本租户的账号；别的租户的成员没试。
 
 ## 接缝（base 线先做，之后各线互不碰对方的文件）
 
@@ -113,15 +117,17 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   这两处调用都**不等待、不让失败外传**（`Promise` 链末尾 `catch` 记日志）：webhook 没有幂等，记录失败如果让 `sendMessage` 报错，
   重试会把同一条消息再发一遍；撤回失败也不能打断轮询。这是本方案里另一处有意的吞异常，注释里写明原因。
 - 分发函数把处理函数抛出的异常一律回 400 并带上原因；bridge 回的 422、429 经 `bridgePostJson` 变成带原因的异常，同样回 400。
-- 两个 Dockerfile（`adapter/Dockerfile`、`deploy/edge/Dockerfile.adapter`）的 COPY 清单一次加齐七个新文件。
+- 两个 Dockerfile（`adapter/Dockerfile`、`deploy/edge/Dockerfile.adapter`）的 COPY 清单一次加齐八个新文件（含 E 的 `memberships.mjs` 空壳）。
+- `adapter/webhook-targets.mjs` 加一个方法 `sendText(chatId, text)`：用该目标群的 webhook 发一条文字（关键词由调用方写进文字里），
+  地址仍不出这个模块。E 用它发到期提醒；它是 base 线的改动，功能线不碰这个文件。
 
 **看板**
 - 新增一级栏目 `targets`（“目标群”）：`App.vue` 的菜单、标题、视图切换；`useFeishuDashboardWorkspace.ts` 里四处：
   `DashboardSection` 类型、`selectActiveSection` 的白名单（第 86 行）、`loadActiveSection` 的分支（第 93–99 行）、
   `initialSection` 认的路径和本地存储值（第 173–177 行，否则 `/targets` 刷新后回到监听页）；
   `adapter/frontend-assets.mjs` 的 `FEISHU_ROUTES` 加 `/targets`。
-- `views/TargetGroupsView.vue` 依次放五个面板组件，每个面板有自己的 SFC、组合函数和 API 模块，base 只实现第一个，其余是空壳：
-  `TargetRegistryPanel`（R）、`TargetGroupCreatePanel`（C）、`TargetMembersPanel`（M）、`DeliveryPanel`（D）、`UrgentAlertsPanel`（U）。
+- `views/TargetGroupsView.vue` 依次放六个面板组件，每个面板有自己的 SFC、组合函数和 API 模块，base 只实现第一个，其余是空壳：
+  `TargetRegistryPanel`（R）、`TargetGroupCreatePanel`（C）、`TargetMembersPanel`（M）、`MembershipPanel`（E）、`DeliveryPanel`（D）、`UrgentAlertsPanel`（U）。
   `JoinByLinkPanel`（J）放进 `App.vue` 的新增源群对话框，位置在“源群”表单项上方，base 接好。
 - 面板之间共用“当前选中的目标群”：`TargetGroupsView` 用 `provide` 给出 `selectedTarget`（一个 ref），R 面板的表格行点击设置它。
 
@@ -180,6 +186,36 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
   `POST …/applications/:id {agree}`，`DELETE …/members/:userId`。`:chatId` 是目标群编号，经 `targetRegistry.get` 换成数字群 ID；
   没有数字群 ID 或 `owned` 为假的目标群回 400 并说明原因。
 - 看板 `TargetMembersPanel`：对选中的目标群显示三个页签（成员、进退群记录、入群申请）；移除和拒绝前用 `ElMessageBox.confirm`。
+
+## E：会员期限与到期提醒（`relay-auto-membership`，M 合并后做）
+
+用户的要求：目标群里各会员的购买日期不同；新会员进群时登记开始日期（可手动改）和期限（1 个月、3 个月等）；每天自动审查，
+到期的由群里的 webhook @ 本人，提醒联系群主续费。不自动移除。
+
+- bridge：不新增模块，成员和入群时间取自 M 的 `POST /chat-members/list`。
+- adapter `memberships.mjs`：
+  - 表 `feishu_group_relay_memberships(target_chat_id text, user_id text, display_name text not null, started_on date not null,
+    term_months integer not null, expires_on date not null, note text, reminded_on date, left_at timestamptz, created_at, updated_at,
+    primary key (target_chat_id, user_id))` 和 `feishu_group_relay_membership_settings(target_chat_id text primary key,
+    enabled boolean not null, default_term_months integer not null, remind_text text not null, last_review_on date)`。
+  - `sync(chatId)`：向 bridge 取成员；新成员建一行，开始日期是入群那天（上海日期），期限取该群的默认期限；已不在群里的写 `left_at`；
+    重新进群的清掉 `left_at`、保留原有日期。本账号自己不建行（成员列表里没有机器人）。
+  - 到期日 = 开始日期加 `term_months` 个日历月（月底对齐：1 月 31 日加 1 个月是 2 月最后一天）。改开始日期、期限或备注时重算到期日并清空
+    `reminded_on`（续费就是改这两项）。
+  - `review(chatId, { dryRun })`：先 `sync`，再取 `expires_on <= 今天`、`left_at` 为空、`reminded_on` 为空的成员；每条消息最多 @ 20 人，
+    文字是 `<关键词> <at user_id="成员ID">名字</at>… <提醒文字>`，用 `webhookTargets.sendText` 发；发成功才把这些人的 `reminded_on` 写成今天，
+    发失败不写，下次审查再试。`dryRun` 只返回名单不发。每人只提醒一次，除非续费后再次到期，或在看板上点“再提醒一次”。
+  - `start()`：每分钟看一次时间，上海时间 09:00 之后且某个启用的目标群 `last_review_on` 不是今天，就对它 `review` 并写 `last_review_on`
+    （adapter 在 09:00 时没在运行的话，启动后补做当天这一次）。
+  - 路由：`GET /api/group-relay/target-groups/:chatId/memberships`（每行带状态：正常、7 天内到期、已到期、已离群）；
+    `PUT …/memberships/:userId {started_on, term_months, note}`；`GET/PUT …/membership-settings {enabled, default_term_months, remind_text}`；
+    `POST …/memberships/review {dry_run}`；`POST …/memberships/:userId/remind`。目标群没有数字群 ID 或群主不是本账号时回 400。
+  - 默认设置：未启用；默认期限 1 个月；提醒文字“会员已到期，请联系群主续费”。
+- 看板 `MembershipPanel`：选中目标群的开关、默认期限、提醒文字；成员表（成员、开始日期、期限、到期日、状态、上次提醒、备注）可编辑
+  （期限给 1、3、6、12 个月的快捷项，也可填别的月数）；按钮“同步成员”“预览今天要提醒谁”“立即审查”“再提醒一次”。
+- 测试至少覆盖：月底和闰年的到期日；新成员按入群日和默认期限登记；改期限后清空已提醒；审查只取到期、在群、未提醒的；
+  发送失败不写 `reminded_on`；超过 20 人分成多条；未启用的群不审查；09:00 之前不审查、当天审查过不再审查。
+- 没验证的：被 @ 的成员属于别的租户时 @ 是否生效（对外的同步群成员都是这种）。第一次真实提醒就是验收；@ 不生效时消息里仍有名字。
 
 ## U：加急告警
 
@@ -255,7 +291,7 @@ Claude 在评审时另跑：`bash feishu-relay/scripts/edge/test-bridge-on-edge.
 
 ## 不做
 
-入群申请的自动通过规则、成员到期自动移除、二维码图片的生成与识别、短信和电话加急、webhook 目标群的编辑同步、
+入群申请的自动通过规则、成员到期自动移除（E 只提醒）、到期前的预提醒、二维码图片的生成与识别、短信和电话加急、webhook 目标群的编辑同步、
 往源群写任何东西、解散群、同名群防重复创建、把旧的“Webhook 目标与关键词”表迁走、环境变量配置的退役。
 
 ## 审查记录
@@ -278,3 +314,6 @@ Claude 在评审时另跑：`bash feishu-relay/scripts/edge/test-bridge-on-edge.
 第三轮（同一线程，最后一轮）1 条，采纳：
 1. medium：C 新建的目标群不经过那两个分支，观察名单不会立即更新 → 通知改由 `targetRegistry` 自己的写方法发出（`record` / `forget` / `resolve`）。
    这一条改动没有再送审（审查最多三轮）。
+
+r5（2026-10-13）加了功能 E 和它在 base 线里的三处接缝（`memberships.mjs` 空壳、`MembershipPanel` 空壳、`webhookTargets.sendText`）。
+E 这一节另做审查，结论记在这里。

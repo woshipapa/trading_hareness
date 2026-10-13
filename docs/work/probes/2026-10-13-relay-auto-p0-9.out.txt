@@ -1,0 +1,10 @@
+# W010 探测 P0-9：自定义机器人的 webhook 能不能用成员列表里的数字 ID @ 群成员，2026-10-13 17:55（上海时间）
+# 脚本 2026-10-13-relay-auto-p0-9.py；只涉及“中继自测群”和中继账号自己（被 @ 的是账号本人）。webhook 地址只在内存里用，没有打印。
+bot found True | keyword 自测
+send text, numeric id -> http 200 code 0 msg success      内容：{msg_type: text, content: {text: '自测 到期提醒试验A <at user_id="<数字ID>">会员</at> 请忽略'}}
+send post, numeric id -> http 200 code 0 msg success      内容：post 的一行里放 {tag: 'at', user_id: '<数字ID>'}
+读回（messages.PullMessagesByPositionsRequest）：
+ pos 7 TEXT，发送者是机器人；摘要“自测 到期提醒试验A [@] 请忽略”；消息的 atUserIdList = [7551451231416434716]（就是被 @ 的账号）；
+       文字被服务器改写成 <at user_id="7551451231416434716">@用户731118</at>（显示名由服务器填，发送时写的“会员”被换掉）
+ pos 8 POST，发送者是机器人；摘要“[富文本] 自测 到期提醒试验B [@] 请忽略”；atUserIdList 同上；文字里同样是 @用户731118
+结论：文字和富文本两种形态都能用成员列表里的数字 ID @ 到人。没试的：被 @ 的是别的租户的成员（外部群成员）；一条消息里 @ 很多人时的上限。
