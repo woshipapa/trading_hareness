@@ -186,7 +186,8 @@ base 线建好下面的空壳和接线；空壳是给并行工作区留的位置
 ## M：目标群成员管理
 
 - bridge `chat_members.py`（全部先 `require_owner`）：`POST /chat-members/list {chat_id}` → `PullChatChattersV2` 翻页取全，
-  名字用已有的 `self.name_cache.resolve(chat_id, user_ids, self.client.get_user_name)`，返回 `[{user_id, name, joined_at}]`；
+  名字用已有的 `self.name_cache.resolve(chat_id, user_ids, self.client.get_user_name)`，返回
+  `{status: 'ok', chat_id, members: [{user_id, name, joined_at}]}`（`joined_at` 是秒级时间戳；本账号自己也在列表里；E 也用这个接口）；
   `POST /chat-members/history {chat_id, cursor}` → `PullChatJoinLeaveHistory`，返回 `[{user_id, name, action, event, at}]` 和下一页游标；
   `POST /chat-members/applications {chat_id}` → `PullChatApplications`（`type: JOIN_CHAT`）；
   `POST /chat-members/applications/decide {id, agree}` → `ProcessChatApplication`；
