@@ -37,6 +37,14 @@ import { readLarkAgentXBackfill } from './larkagentx-backfill.mjs';
 import { parseRelayMap, webhookConfigStatus } from './webhook-config.mjs';
 import { createSourceTags } from './source-tags.mjs';
 import { createWebhookTargets, WEBHOOK_ONLY_TARGET_ID } from './webhook-targets.mjs';
+import { createFeatureRoutes } from './feature-routes.mjs';
+import { createTargetRegistry } from './target-registry.mjs';
+import { createJoinLink } from './join-link.mjs';
+import { createTargetGroups } from './target-groups.mjs';
+import { createTargetMembers } from './target-members.mjs';
+import { createMemberships } from './memberships.mjs';
+import { createUrgentAlerts } from './urgent-alerts.mjs';
+import { createDeliveryCheck } from './delivery-check.mjs';
 import { resolveFrontendAssetPath } from './frontend-assets.mjs';
 import { postWebhookWithRetry, retryDelivery, safeDeliveryError } from './paper-delivery-retry.mjs';
 import Busboy from 'busboy';
@@ -112,17 +120,20 @@ async function notifyOps(key, text) {
 	if (now - last < opsAlertDebounceMs) return false;
 	opsAlertLastSent.set(key, now);
 	console.warn(`[ops-alert ${key}] ${text}`);
-	if (!opsAlertReceiveId) return false;
-	try {
-		await larkClient.im.v1.message.create({
-			params: { receive_id_type: feishuAlertReceiveIdType },
-			data: { receive_id: opsAlertReceiveId, msg_type: 'text', content: JSON.stringify({ text: `[relay 运维] ${text}` }) },
-		});
-		return true;
-	} catch (error) {
-		console.error(`ops 告警投递失败 key=${key}：${error instanceof Error ? error.message : String(error)}`);
-		return false;
+	let sent = false;
+	if (opsAlertReceiveId) {
+		try {
+			await larkClient.im.v1.message.create({
+				params: { receive_id_type: feishuAlertReceiveIdType },
+				data: { receive_id: opsAlertReceiveId, msg_type: 'text', content: JSON.stringify({ text: `[relay 运维] ${text}` }) },
+			});
+			sent = true;
+		} catch (error) {
+			console.error(`ops 告警投递失败 key=${key}：${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
+	await urgentAlerts.notify(key, text);
+	return sent;
 }
 
 const dashboardPort = Number(process.env.DASHBOARD_PORT ?? 3000);
@@ -360,19 +371,6 @@ const feishuWorkbench = createFeishuWorkbench({
 	},
 	baiduPan,
 });
-const groupRelay = createGroupRelay({
-	larkClient, sourceApi: feishuUserOauth.sourceApi, ledger, workbench: feishuWorkbench,
-	config: { ...groupRelayConfig, sourcesProvider: () => ledger.relayRoutes() }, canWrite: relayWriterFence,
-});
-const wechatGroupRelay = wechatGroupRelayConfig.enabled && wechatGroupRelayConfig.targetChatId
-	? createWeChatGroupRelay({ larkClient, ledger, config: wechatGroupRelayConfig })
-	: null;
-const summaryListener = createSummaryListener({
-	sourceApi: feishuUserOauth.sourceApi, ledger, processMessage: processSummaryGroupMessage,
-	config: summaryListenerConfig, canWrite: relayWriterFence,
-});
-setInterval(() => { void groupRelay.tick(); }, groupRelayIntervalSeconds * 1000).unref();
-void groupRelay.tick();
 // Keeps the joined-group directory, each bound group's membership and a stored
 // copy of its history current.  Read-only towards Feishu; a few gateway pages
 // per pass, so a newly bound group is read in the background, not in a burst.
@@ -402,6 +400,39 @@ const groupSync = createGroupSync({
 		page: (chatId, start, end) => bridgePostJson('/history/page', { chat_id: chatId, start, end }, 60_000),
 	},
 });
+const featureDeps = {
+	ledger, bridgePost: bridgePostJson, targetRegistry: null, webhookTargets,
+	refreshGroups: () => groupSync.requestRefresh(), now: () => new Date(),
+};
+const targetRegistry = createTargetRegistry(featureDeps);
+featureDeps.targetRegistry = targetRegistry;
+const joinLink = createJoinLink(featureDeps);
+const targetGroups = createTargetGroups(featureDeps);
+const targetMembers = createTargetMembers(featureDeps);
+const memberships = createMemberships(featureDeps);
+const urgentAlerts = createUrgentAlerts(featureDeps);
+const deliveryCheck = createDeliveryCheck(featureDeps);
+const featureModules = [targetRegistry, joinLink, targetGroups, targetMembers, memberships, urgentAlerts, deliveryCheck];
+for (const feature of featureModules) for (const statement of feature.schema ?? []) await ledger.query(statement);
+for (const [index, feature] of featureModules.entries()) {
+	if (!feature.start) continue;
+	void (async () => feature.start())().catch((error) => console.error(`中继功能 ${index} 启动失败：${error instanceof Error ? error.message : String(error)}`));
+}
+const featureRoutes = createFeatureRoutes({ routes: featureModules, readJsonBody: (request) => readJsonBody(request, 64 * 1024), token: larkAgentXIngressToken });
+const groupRelay = createGroupRelay({
+	larkClient, sourceApi: feishuUserOauth.sourceApi, ledger, workbench: feishuWorkbench,
+	config: { ...groupRelayConfig, sourcesProvider: () => ledger.relayRoutes() }, canWrite: relayWriterFence,
+	recordWebhookDelivery: deliveryCheck.recordWebhookDelivery, recallDeliveries: deliveryCheck.recallDeliveries,
+});
+const wechatGroupRelay = wechatGroupRelayConfig.enabled && wechatGroupRelayConfig.targetChatId
+	? createWeChatGroupRelay({ larkClient, ledger, config: wechatGroupRelayConfig })
+	: null;
+const summaryListener = createSummaryListener({
+	sourceApi: feishuUserOauth.sourceApi, ledger, processMessage: processSummaryGroupMessage,
+	config: summaryListenerConfig, canWrite: relayWriterFence,
+});
+setInterval(() => { void groupRelay.tick(); }, groupRelayIntervalSeconds * 1000).unref();
+void groupRelay.tick();
 // Remove a route and its WebSocket binding.  The relayed messages and the
 // stored history of its group stay in the database.
 async function removeRelayRoute(sourceKey) {
@@ -1728,7 +1759,7 @@ async function groupRelayDashboardStatus() {
 		user_oauth_scope_audit: oauth.scope_audit ?? null,
 		user_oauth_refresh_expires_at: oauth.refresh_expires_at ?? null, user_oauth_access_expires_at: oauth.access_expires_at ?? null,
 		webhook_config: webhookConfigStatus(groupRelayWebhooksByChatId, groupRelayWebhookKeywordsByChatId),
-		webhook_targets: webhookTargets.list(),
+		webhook_targets: await targetRegistry.list(),
 		source_tags: sourceTags.list(),
 		larkagentx,
 		itougu,
@@ -2474,6 +2505,10 @@ const dashboard = createServer((request, response) => {
 		response.end(JSON.stringify({ status: 'forbidden', reason: crossSite }));
 		return;
 	}
+	if (featureRoutes.matches(request.method, url.pathname)) {
+		void featureRoutes(request, response);
+		return;
+	}
 	const research = matchResearchRoute(request.method, url.pathname);
 	if (research) {
 		const proxied = research.kind === 'read'
@@ -2615,6 +2650,7 @@ const dashboard = createServer((request, response) => {
 				? await webhookTargets.add({ name: payload?.name, webhookUrl: typed, keyword: payload?.keyword, websocketChatId: payload?.websocket_chat_id, chatId: payload?.chat_id })
 				: await webhookTargets.addManaged({ name: payload?.name, websocketChatId: payload?.websocket_chat_id, keyword: payload?.keyword });
 			console.log(`目标群 ${target.name}（${target.chat_id}）的 webhook 已由看板配置并通过测试${typed ? '' : target.bot_created ? '；机器人为自动创建' : '；沿用已有的转发机器人'}`);
+			void targetRegistry.resolve().catch((error) => console.error(`目标群识别失败：${error instanceof Error ? error.message : String(error)}`));
 			response.writeHead(201, { 'content-type': 'application/json', 'cache-control': 'no-store' });
 			response.end(JSON.stringify({ target }));
 		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
@@ -2625,6 +2661,7 @@ const dashboard = createServer((request, response) => {
 		void ledger.relayRoutes().then(async (routes) => {
 			const removed = await webhookTargets.remove(relayTargetMatch[1], { routes });
 			if (!removed) { response.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: '目标群不存在' })); return; }
+			await targetRegistry.forget(relayTargetMatch[1]);
 			response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify({ status: 'removed', bot_removed: removed.bot_removed }));
 		}).catch((error) => response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : String(error) })));
 		return;
